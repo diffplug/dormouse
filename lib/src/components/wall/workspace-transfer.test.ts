@@ -27,7 +27,7 @@ vi.mock('../../lib/helper-terminal', () => ({
   forgetHelper: (parentId: string) => void forgotten.push(parentId),
 }));
 
-const SESSION: PersistedSession = { version: 3, panes: [{ id: 'pane-a', title: 'a', cwd: '/tmp', untouched: false, alert: null }] };
+const SESSION: PersistedSession = { version: 4, panes: [{ id: 'pane-a', title: 'a', cwd: '/tmp', untouched: false, alert: null }] };
 
 beforeEach(() => {
   resetWorkspaceUi();

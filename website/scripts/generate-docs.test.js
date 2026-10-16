@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   REPO_BLOB_BASE,
   SECURITY_AUDIENCES,
+  SECURITY_PAGE_AUDIENCES,
   SITE_ORIGIN,
   SITE_ROUTES,
   applyDelta,
@@ -248,10 +249,21 @@ describe('security spec', () => {
     for (const a of audiences) expect(data.security.audiences[a].guarantees.rows.length).toBeGreaterThan(0);
   });
 
-  it('renders its own page as one audience, every other block untouched', () => {
-    const own = data.security.audiences.security;
+  it('renders its own page as its audience and remote control’s, in spec order, every other block untouched', () => {
+    expect(SECURITY_PAGE_AUDIENCES).toEqual(['security', 'self-host']);
     const swapped = data.security.pageBlocks.filter((b, i) => b !== data.security.blocks[i]);
-    expect(swapped).toEqual([own.guarantees, own.notDefended, own.knownGaps]);
+    expect(swapped).toHaveLength(3);
+    const whole = (b) => data.security.blocks[data.security.pageBlocks.indexOf(b)];
+    for (const [block, key, entries] of [
+      [swapped[0], 'guarantees', 'rows'],
+      [swapped[1], 'notDefended', 'items'],
+      [swapped[2], 'knownGaps', 'items'],
+    ]) {
+      const shown = SECURITY_PAGE_AUDIENCES.flatMap((a) => data.security.audiences[a][key][entries]).map((e) => JSON.stringify(e));
+      const rendered = block[entries].map((e) => JSON.stringify(e));
+      expect(new Set(rendered)).toEqual(new Set(shown));
+      expect(rendered).toEqual(whole(block)[entries].map((e) => JSON.stringify(e)).filter((e) => shown.includes(e)));
+    }
     expect(data.security.pageBlocks).toHaveLength(data.security.blocks.length);
   });
 

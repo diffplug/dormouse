@@ -9,13 +9,14 @@ import { TerminalPanel } from './TerminalPanel';
 import { TerminalContext } from './TerminalContext';
 import * as terminalRegistry from '../../lib/terminal-registry';
 import * as helpers from '../../lib/helper-terminal';
-import { TerminalContextContext } from './wall-context';
+import { TerminalContextContext, WorkspaceActiveContext } from './wall-context';
 import { ensureResizeObserver, PortalAnchoredButton } from './wall-test-utils';
 import { setMouseReporting, removeMouseSelectionState } from '../../lib/mouse-selection';
 import { setPlatform } from '../../lib/platform';
 import { FakePtyAdapter } from '../../lib/platform/fake-adapter';
 import { rememberBrowserProvider } from './BrowserProviderSwitch';
 import { cfg } from '../../cfg';
+import { cwdFromOsc633, cwdFromOsc7, cwdFromOsc9_9 } from '../../lib/terminal-state';
 
 vi.mock('../TerminalPane', () => ({ TerminalPane: () => <textarea aria-label="Fake terminal input" /> }));
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -29,9 +30,9 @@ beforeEach(() => {
   previousAnimate = cfg.layout.animate;
   setPlatform(new FakePtyAdapter()); ensureResizeObserver();
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
-  props = { title: 'pnpm dev', surfaceRef: 'surface:3', cwd: '~/repo', titleSources: [{ source: 'OSC 2', value: 'pnpm dev', note: 'Used' }], scan: { status: 'loaded', entries: [port(5173)] },
+  props = { title: 'pnpm dev', surfaceId: 'surface:3', cwd: '~/repo', titleSources: [{ source: 'OSC 2', value: 'pnpm dev', note: 'Used' }], scan: { status: 'loaded', entries: [port(5173)] },
     watchRule: 'pnpm', watching: false, todo: false, status: 'completed', command: 'git status', explorerLabel: 'Reveal in Finder', canExplore: true, browserProviders: ['agent-browser', 'playwright'], canIframe: true,
-    onClose: vi.fn(), onCopyRef: vi.fn(), onCopyPath: vi.fn(), onExplore: vi.fn(), onWatch: vi.fn(), onTodo: vi.fn(), onPort: vi.fn(), onModify: vi.fn(async () => {}), onReset: vi.fn(async () => {}), onPromote: vi.fn(async () => {}),
+    onClose: vi.fn(), onCopyId: vi.fn(), onCopyPath: vi.fn(), onExplore: vi.fn(), onWatch: vi.fn(), onTodo: vi.fn(), onPort: vi.fn(), onModify: vi.fn(async () => {}), onReset: vi.fn(async () => {}), onPromote: vi.fn(async () => {}),
     children: <div data-helper-terminal="helper"><textarea aria-label="Helper input" /></div> };
 });
 afterEach(() => { act(() => root.unmount()); container.remove(); removeMouseSelectionState('parent'); cfg.layout.animate = previousAnimate; vi.useRealTimers(); });
@@ -137,7 +138,7 @@ it('moves trailing actions into the dropdown on resize and dispatches hidden act
   } finally { client.mockRestore(); offset.mockRestore(); vi.unstubAllGlobals(); }
 });
 
-it('drops the title explanation label, then compacts the Surface ref, as the header narrows', () => {
+it('drops the title explanation label, then compacts the Surface id, as the header narrows', () => {
   let width = 320;
   const observers = new Set<() => void>();
   vi.stubGlobal('ResizeObserver', class {
@@ -390,6 +391,27 @@ it('offers the rule covering the running script, else that script\'s own key', a
   }
 });
 
+it('never offers Explore for a share or device path, however the terminal reported it', async () => {
+  const open = vi.spyOn(helpers, 'openHelper').mockResolvedValue({ id: 'helper', parentId: 'unc-row', command: '', status: 'off' });
+  const unavailable = () => container.querySelector('[aria-label="Directory unavailable on this host"]');
+  try {
+    for (const [cwd, explorable] of [
+      [cwdFromOsc7('file:///home/me/repo'), true],
+      [cwdFromOsc7('file:////host/share/repo'), false],
+      [cwdFromOsc9_9('\\\\host\\share'), false],
+      [cwdFromOsc633('/\\host\\share'), false],
+      [cwdFromOsc9_9('\\\\?\\C:\\repo'), false],
+    ] as const) {
+      terminalRegistry.applyTerminalSemanticEvents('unc-row', [{ type: 'cwd', cwd: cwd! }]);
+      await act(async () => root.render(<TerminalContext id="unc-row" />));
+      expect(unavailable() === null, cwd!.path).toBe(explorable);
+    }
+  } finally {
+    open.mockRestore();
+    terminalRegistry.removeTerminalPaneState('unc-row');
+  }
+});
+
 it('shows a running Tool command that spans lines on one', () => {
   props = { ...props, terminalRole: 'tool', status: 'running', command: 'cd web\npnpm dev' };
   render();
@@ -510,3 +532,22 @@ it.each(['composing', 'WebKit ending'])('leaves detail Escape and Tab to the IME
   act(() => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
   expect(container.querySelector('[role="dialog"]')).toBeNull();
 });
+
+it('pauses its helper while its Workspace is out of view, and resumes when it returns', async () => {
+  const open = vi.spyOn(helpers, 'openHelper').mockResolvedValue({ id: 'helper', parentId: 'hidden-source', command: '', status: 'off' });
+  const visible = vi.spyOn(helpers, 'setHelperVisible');
+  const show = (active: boolean) => act(async () => root.render(<WorkspaceActiveContext.Provider value={active}><TerminalContext id="hidden-source" /></WorkspaceActiveContext.Provider>));
+  try {
+    await show(true);
+    expect(visible.mock.calls.at(-1)).toEqual(['hidden-source', true]);
+    await show(false);
+    expect(visible.mock.calls.at(-1)).toEqual(['hidden-source', false]);
+    await show(true);
+    expect(visible.mock.calls.at(-1)).toEqual(['hidden-source', true]);
+  } finally {
+    await act(async () => root.render(<></>));
+    open.mockRestore();
+    visible.mockRestore();
+  }
+});
+

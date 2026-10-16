@@ -1,13 +1,18 @@
 import { setWorkspaceMoveError } from '../lib/workspace-ui-store';
 import { useEffect } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
+import { workspaceIdFor } from 'dor/protocol';
+import { expect } from 'storybook/test';
+import { flushSync } from 'react-dom';
+import { cfg } from '../cfg';
+import { renameWorkspace } from '../lib/workspace-store';
 import { WorkspaceStrip } from '../components/WorkspaceStrip';
 import { registerWallHandle, stubWallHandle } from '../components/wall/wall-handles';
 import { requireElement, waitForPrimedState } from './settle-terminals';
 
 /** Workspace ids by position, so `parameters.primedWorkspaces` and the story's
  *  membership and stub handle all name the same ones. */
-const ws = (index: number) => `story-ws-${index + 1}`;
+const ws = (index: number) => workspaceIdFor(index + 1);
 
 /** `pinned` lists positions to pin; list them last, as the store keeps them
  *  (`docs/specs/layout.md` → "Workspace tabs"). */
@@ -82,19 +87,19 @@ export const Indicators: Story = {
   args: { todoLabels: { 0: 'vim notes.md', 1: 'claude', 2: 'pnpm dev' } },
   parameters: {
     primedWorkspaces: primed(['Builds', 'Agents', 'Workspace 3'], 2, {
-      0: ['builds-a', 'builds-b'],
-      1: ['agents-a'],
-      2: ['visible-a'],
+      0: ['surface:1', 'surface:2'],
+      1: ['surface:3'],
+      2: ['surface:4'],
     }),
     // Applied two frames after mount by the preview decorator, which clears
     // Activity for every session-less id first.
     primedSessionState: {
       byId: {
-        'builds-a': { status: 'ALERT_RINGING' },
-        'builds-b': { todo: true },
-        'agents-a': { todo: true },
+        'surface:1': { status: 'ALERT_RINGING' },
+        'surface:2': { todo: true },
+        'surface:3': { todo: true },
         // The visible Workspace owes attention too: its TODO pill, no inset.
-        'visible-a': { status: 'ALERT_RINGING', todo: true },
+        'surface:4': { status: 'ALERT_RINGING', todo: true },
       },
     },
   },
@@ -116,6 +121,45 @@ export const Overflow: Story = {
   args: { width: 420 },
   parameters: {
     primedWorkspaces: primed(['Workspace 1', 'Deploys', 'Agents', 'Builds', 'Docs', 'Scratch'], 3),
+  },
+};
+
+/** Real flex layout: jsdom's mocked tab rects cannot detect an animated width
+ *  being shrunk a second time before it reaches its measured endpoint. */
+export const OverflowWidthTween: Story = {
+  args: { width: 250 },
+  parameters: { primedWorkspaces: primed(['Alpha', 'Bravo', 'Charlie'], 0) },
+  play: async ({ canvasElement }) => {
+    const tab = await requireElement<HTMLElement>(`[data-workspace-tab="${ws(1)}"]`, 'Bravo tab');
+    const animate = cfg.layout.animate;
+    const animations: Animation[] = [];
+    try {
+      // Snapshot runs normally disable motion; this story checks its geometry
+      // at exact times, then finishes it before the screenshot.
+      cfg.layout.animate = true;
+      const before = tab.getBoundingClientRect().width;
+      flushSync(() => renameWorkspace(ws(1), 'Bravo has a very long title'));
+      animations.push(...canvasElement.getAnimations({ subtree: true }));
+      const widthTween = animations.find((animation) => animation.effect instanceof KeyframeEffect
+        && animation.effect.target === tab
+        && animation.effect.getKeyframes().some((frame) => frame.width !== undefined));
+      expect(widthTween).toBeDefined();
+      widthTween!.pause();
+      widthTween!.currentTime = 0;
+      expect(tab.getBoundingClientRect().width).toBeCloseTo(before, 1);
+
+      const duration = Number(widthTween!.effect!.getComputedTiming().duration);
+      widthTween!.currentTime = duration - 0.001;
+      const lastFrame = tab.getBoundingClientRect().width;
+      widthTween!.finish();
+      const settled = tab.getBoundingClientRect().width;
+      expect(settled).toBeGreaterThan(before);
+      expect(lastFrame).toBeCloseTo(settled, 1);
+      expect(getComputedStyle(tab).flexShrink).toBe('1');
+    } finally {
+      animations.forEach((animation) => animation.cancel());
+      cfg.layout.animate = animate;
+    }
   },
 };
 
@@ -144,7 +188,7 @@ export const MoveRefused: Story = {
   },
 };
 
-/** Pinned right: after `+`, with a pin where `×` would be, never closeable
+/** Pinned right: after `+`, with no `×`, never closeable
  *  alone (`docs/specs/layout.md` → "Workspace tabs"). */
 export const Pinned: Story = {
   parameters: { primedWorkspaces: primed(['Agents', 'Build', 'Notes', 'Docs'], 2, undefined, [2, 3]) },

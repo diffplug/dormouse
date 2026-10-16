@@ -68,11 +68,16 @@ export function armCommandExit(manager: AlertManager, id: string, commandLine = 
   leave(manager);
 }
 
-/** Two output bursts across the busy-candidate gap: NOTHING_TO_SHOW -> BUSY. */
-export function driveToBusy(manager: AlertManager, id: string): void {
+/** Two output bursts across the busy-candidate gap: NOTHING_TO_SHOW -> MIGHT_BE_BUSY. */
+export function driveToCandidate(manager: AlertManager, id: string): void {
   manager.onData(id);
   vi.advanceTimersByTime(1_600);
   manager.onData(id);
+}
+
+/** A candidate, then the output that confirms it: NOTHING_TO_SHOW -> BUSY. */
+export function driveToBusy(manager: AlertManager, id: string): void {
+  driveToCandidate(manager, id);
   manager.onData(id);
 }
 

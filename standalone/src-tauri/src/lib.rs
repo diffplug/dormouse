@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Map as JsonMap, Value as JsonValue};
+mod ids;
 mod log_tail;
 mod panic_policy;
 mod quit_state;
@@ -18,6 +19,7 @@ use routing::{Route, RouteView};
 use std::{
     collections::{HashMap, HashSet},
     env,
+    ffi::OsString,
     fs::{create_dir_all, File, OpenOptions},
     io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
@@ -144,16 +146,61 @@ struct WindowState {
     /// the process lifetime: a save dispatched before `Destroyed` can still
     /// reach the disk lock after it, and labels are never reused in a process.
     closing: Mutex<HashSet<String>>,
-    /// The next `ws-<n>`, seeded above every live and saved label at setup.
-    next_ws: AtomicU64,
     /// Every window's Workspaces under their stable refs (§Workspace registry).
     registry: Mutex<workspaces::Registry>,
-    /// The next `workspace-<n>`, seeded above every id on disk at setup and
-    /// handed out in blocks so a webview can mint synchronously.
-    next_workspace: AtomicU64,
+    /// The next window label, Workspace id, and Surface id (§Workspace
+    /// registry). Only ever held briefly: a report raising a counter runs on
+    /// the main thread.
+    ids: Mutex<ids::Counters>,
+    /// Where the counters persist, and whether a reservation may write there.
+    /// Held across a reservation and its write, so no caller takes a number
+    /// before the file covers it, and writes land in reservation order.
+    ids_file: Mutex<IdsFile>,
     /// Windows closed with everything reopenable, newest first
     /// (docs/specs/reopen.md). Memory only: a quit forgets them.
     closed_windows: Mutex<Vec<ClosedWindow>>,
+}
+
+/// Where the id counters persist, and what a reservation may do with the
+/// file (§Workspace registry). Only an `Adopted` file lets a reservation hand
+/// out `workspace:` and `surface:` numbers; window labels, which have no
+/// opaque fallback, are handed out whatever the file's state.
+#[derive(Debug, Default)]
+enum IdsFile {
+    /// No state root, or not seeded yet: nothing persists.
+    #[default]
+    Absent,
+    /// A read failed for a reason other than the file's absence: the next
+    /// reservation reads it again.
+    Unread(PathBuf),
+    /// Adopted, or absent on disk: every reservation writes here.
+    Adopted(PathBuf),
+    /// Another version wrote it (`ids::LoadError`): never overwritten.
+    OtherVersion,
+}
+
+/// Read the counters' file at `path` into `counters`, logging what keeps it
+/// from being adopted.
+fn adopt_ids_file(path: PathBuf, counters: &Mutex<ids::Counters>) -> IdsFile {
+    let contents = match std::fs::read_to_string(&path) {
+        Ok(contents) => contents,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return IdsFile::Adopted(path),
+        Err(e) => {
+            append_log(format!("[ids] read {}: {e}; handing out no Workspace or Surface ids until it reads", path.display()));
+            return IdsFile::Unread(path);
+        }
+    };
+    match guard(counters).load(&contents) {
+        Ok(()) => IdsFile::Adopted(path),
+        Err(e @ ids::LoadError::OtherVersion(_)) => {
+            append_log(format!("[ids] WARNING: {e}; handing out no Workspace or Surface ids, and leaving it alone"));
+            IdsFile::OtherVersion
+        }
+        Err(e) => {
+            append_log(format!("[ids] WARNING: {e}; overwriting it from the disk scan"));
+            IdsFile::Adopted(path)
+        }
+    }
 }
 
 /// What Reopen rebuilds a closed window from: the snapshot its webview built
@@ -191,6 +238,63 @@ impl RoutingState {
 }
 
 impl WindowState {
+    /// One block per `(kind, count, above)`: `count` numbers of `kind`, all
+    /// above `above`, never handed out by this run or an earlier one
+    /// (§Workspace registry). Writes and fsyncs `ids.json` once per call, so
+    /// every caller must be off the main thread. A Workspace or Surface block
+    /// is empty unless that write landed (`docs/specs/transport.md` →
+    /// "Surface ids"); the counters stay raised, which only skips numbers.
+    fn reserve_blocks(&self, asks: &[(ids::Kind, u64, u64)]) -> Vec<std::ops::Range<u64>> {
+        let mut file = guard(&self.ids_file);
+        if let IdsFile::Unread(path) = &*file {
+            *file = adopt_ids_file(path.clone(), &self.ids);
+        }
+        let path = match &*file {
+            IdsFile::Adopted(path) => Some(path),
+            IdsFile::Absent | IdsFile::Unread(_) | IdsFile::OtherVersion => None,
+        };
+        let labels_only = |kind: ids::Kind| kind == ids::Kind::Window;
+        let (blocks, contents) = {
+            let mut counters = guard(&self.ids);
+            let blocks: Vec<_> = asks
+                .iter()
+                .map(|&(kind, count, above)| if path.is_some() || labels_only(kind) { counters.reserve(kind, count, above) } else { 0..0 })
+                .collect();
+            (blocks, counters.file())
+        };
+        let persisted = path.is_some_and(|path| match write_file_atomically(path, &contents) {
+            Ok(()) => true,
+            Err(e) => {
+                append_log(format!("[ids] {e}; handing out no Workspace or Surface ids"));
+                false
+            }
+        });
+        blocks.into_iter().zip(asks).map(|(block, &(kind, ..))| if persisted || labels_only(kind) { block } else { 0..0 }).collect()
+    }
+
+    /// One block, as `reserve_blocks` hands it out.
+    fn reserve_ids(&self, kind: ids::Kind, count: u64, above: u64) -> std::ops::Range<u64> {
+        self.reserve_blocks(&[(kind, count, above)]).remove(0)
+    }
+
+    /// One block, spelled as ids.
+    fn reserve_id_strings(&self, kind: ids::Kind, count: u64, above: u64) -> Vec<String> {
+        self.reserve_ids(kind, count, above).map(|n| kind.id(n)).collect()
+    }
+
+    /// Boot: persist the counters at `path`, and raise each above both the
+    /// numbers a previous run left there and every id it left on disk.
+    fn seed_ids(&self, path: PathBuf, saved: &SavedWindows) {
+        let mut file = guard(&self.ids_file);
+        {
+            let mut counters = guard(&self.ids);
+            counters.seed(ids::Kind::Window, saved.next_ws);
+            counters.seed(ids::Kind::Workspace, saved.next_workspace);
+            counters.seed(ids::Kind::Surface, saved.next_surface);
+        }
+        *file = adopt_ids_file(path, &self.ids);
+    }
+
     fn owned_by(&self, label: &str) -> Vec<String> {
         guard(&self.routing).owned_by(label)
     }
@@ -886,6 +990,10 @@ fn pty_reap_message(ids: &[String]) -> String {
 
 const LOG_FILE_ENV: &str = "DORMOUSE_LOG_FILE";
 
+/// The Windows log directory's `Dormouse Terminal` in Linux's lowercase form,
+/// as the Relay's `Dormouse Relay` logs go to `dormouse-relay` there.
+const LINUX_LOG_DIR_NAME: &str = "dormouse-terminal";
+
 fn log_timestamp() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -893,24 +1001,93 @@ fn log_timestamp() -> u64 {
         .unwrap_or_default()
 }
 
-fn default_log_path() -> PathBuf {
+struct LogLocation {
+    path: PathBuf,
+    /// The directory is Dormouse's own, so it is created and kept owner-only;
+    /// an override's or the OS's directory is left as it is.
+    own_dir: bool,
+}
+
+/// Linux's per-user log directory: `$XDG_STATE_HOME`, else `~/.local/state`,
+/// each used only when absolute (the XDG rule). `None` when neither is usable.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn linux_log_dir(xdg_state_home: Option<OsString>, home: Option<OsString>) -> Option<PathBuf> {
+    let absolute = |value: Option<OsString>| value.map(PathBuf::from).filter(|path| path.is_absolute());
+    absolute(xdg_state_home)
+        .or_else(|| absolute(home).map(|home| home.join(".local").join("state")))
+        .map(|dir| dir.join(LINUX_LOG_DIR_NAME))
+}
+
+fn default_log_location() -> LogLocation {
     if let Some(path) = env::var_os(LOG_FILE_ENV) {
-        return PathBuf::from(path);
+        return LogLocation { path: PathBuf::from(path), own_dir: false };
     }
 
     #[cfg(target_os = "windows")]
     if let Some(local_app_data) = env::var_os("LOCALAPPDATA") {
-        return PathBuf::from(local_app_data)
-            .join("Dormouse Terminal")
-            .join("dormouse.log");
+        return LogLocation {
+            path: PathBuf::from(local_app_data)
+                .join("Dormouse Terminal")
+                .join("dormouse.log"),
+            own_dir: false,
+        };
     }
 
-    env::temp_dir().join("dormouse.log")
+    // Not Linux's `/tmp`, which is shared, unless neither variable is usable;
+    // `open_log` still refuses a planted name there.
+    #[cfg(target_os = "linux")]
+    if let Some(dir) = linux_log_dir(env::var_os("XDG_STATE_HOME"), env::var_os("HOME")) {
+        return LogLocation { path: dir.join("dormouse.log"), own_dir: true };
+    }
+
+    // macOS's `$TMPDIR` is per-user and `0700`; Linux's is `/tmp`.
+    LogLocation { path: env::temp_dir().join("dormouse.log"), own_dir: false }
+}
+
+fn log_location() -> &'static LogLocation {
+    static LOCATION: OnceLock<LogLocation> = OnceLock::new();
+    LOCATION.get_or_init(default_log_location)
 }
 
 fn log_path() -> &'static Path {
-    static PATH: OnceLock<PathBuf> = OnceLock::new();
-    PATH.get_or_init(default_log_path)
+    &log_location().path
+}
+
+/// Create the log's directory; one that is Dormouse's own is also tightened to
+/// owner-only, and `false` (log nothing) when that fails.
+fn prepare_log_dir(path: &Path, own_dir: bool) -> bool {
+    let Some(dir) = path.parent() else { return true };
+    if !own_dir {
+        let _ = create_dir_all(dir);
+        return true;
+    }
+    let mut builder = std::fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+    builder.create(dir).is_ok() && restrict_to_owner(dir, 0o700).is_ok()
+}
+
+/// Open a log handle owner-only. On unix it never follows a symlink at `path`,
+/// and it refuses a file another account owns, which it cannot `fchmod`.
+fn open_log(path: &Path, options: &mut OpenOptions) -> std::io::Result<File> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        let file = options.mode(0o600).custom_flags(libc::O_NOFOLLOW).open(path)?;
+        // An existing file keeps its mode through `open`; this tightens it.
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+        Ok(file)
+    }
+    #[cfg(not(unix))]
+    {
+        let file = options.open(path)?;
+        restrict_to_owner(path, 0o600).map_err(std::io::Error::other)?;
+        Ok(file)
+    }
 }
 
 // `append_log` runs per stdout/stderr line from the sidecar; reopening
@@ -919,14 +1096,11 @@ fn log_path() -> &'static Path {
 fn log_file() -> Option<&'static Mutex<File>> {
     static FILE: OnceLock<Option<Mutex<File>>> = OnceLock::new();
     FILE.get_or_init(|| {
-        let path = log_path();
-        if let Some(parent) = path.parent() {
-            let _ = create_dir_all(parent);
+        let location = log_location();
+        if !prepare_log_dir(&location.path, location.own_dir) {
+            return None;
         }
-        OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
+        open_log(&location.path, OpenOptions::new().create(true).append(true))
             .ok()
             .map(Mutex::new)
     })
@@ -934,20 +1108,17 @@ fn log_file() -> Option<&'static Mutex<File>> {
 }
 
 fn init_log() {
-    let path = log_path();
-    if let Some(parent) = path.parent() {
-        let _ = create_dir_all(parent);
+    let location = log_location();
+    let path = location.path.as_path();
+    if !prepare_log_dir(path, location.own_dir) {
+        return;
     }
     // Keep the last run's log beside it, so a hang or forced restart leaves its
-    // evidence; a missing log (first launch) is fine.
+    // evidence; a missing log (first launch) is fine. `rename` moves a symlink
+    // itself, never its target.
     let _ = std::fs::rename(path, path.with_extension("previous.log"));
 
-    if let Ok(mut file) = OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(path)
-    {
+    if let Ok(mut file) = open_log(path, OpenOptions::new().create(true).write(true).truncate(true)) {
         let _ = writeln!(
             file,
             "[{}] Dormouse log started at {}",
@@ -1134,15 +1305,24 @@ fn pty_write(
     data: String,
     paced: Option<bool>,
     user_input: Option<bool>,
+    launch: Option<bool>,
 ) {
-    send_to_sidecar(&state, pty_input_message(&id, &data, paced, user_input));
+    send_to_sidecar(&state, pty_input_message(&id, &data, paced, user_input, launch));
 }
 
 /// One `pty:input` line. **Human input carries `userInput` on the write itself**,
 /// never a separate alert command racing it: the sidecar acknowledges it and
 /// opens the echo window before the bytes reach the PTY (docs/specs/alert.md
-/// → Engagement). Each flag is present only when true.
-fn pty_input_message(id: &str, data: &str, paced: Option<bool>, user_input: Option<bool>) -> String {
+/// → Engagement). `launch` rides it the same way, arming the PTY's OSC 367
+/// `open` latch before the shell can report the run (docs/specs/dor-tool.md →
+/// OSC 367). Each flag is present only when true.
+fn pty_input_message(
+    id: &str,
+    data: &str,
+    paced: Option<bool>,
+    user_input: Option<bool>,
+    launch: Option<bool>,
+) -> String {
     #[derive(Serialize)]
     #[serde(rename_all = "camelCase")]
     struct PtyInput<'a> {
@@ -1152,10 +1332,18 @@ fn pty_input_message(id: &str, data: &str, paced: Option<bool>, user_input: Opti
         paced: bool,
         #[serde(skip_serializing_if = "std::ops::Not::not")]
         user_input: bool,
+        #[serde(skip_serializing_if = "std::ops::Not::not")]
+        launch: bool,
     }
     sidecar_line(
         "pty:input",
-        PtyInput { id, data, paced: paced == Some(true), user_input: user_input == Some(true) },
+        PtyInput {
+            id,
+            data,
+            paced: paced == Some(true),
+            user_input: user_input == Some(true),
+            launch: launch == Some(true),
+        },
     )
 }
 
@@ -1764,9 +1952,9 @@ fn restart_hung_webviews(app: &AppHandle, labels: &[String]) {
     let watchdog = app.state::<UiWatchdog>();
     for (pid, labels) in by_pid {
         let sample_path = dir.as_ref().and_then(|dir| {
-            create_dir_all(dir).ok()?;
             let path = dir.join(format!("{}-{pid}.sample.txt", log_timestamp()));
-            macos::sample(pid, &path).then(|| path.display().to_string())
+            write_owner_only_with(&path, restrict_to_owner, |path| macos::sample(pid, path))
+                .then(|| path.display().to_string())
         });
         let killed = macos::kill(pid);
         append_log(format!(
@@ -2026,6 +2214,27 @@ fn write_file_atomically(path: &Path, contents: &str) -> Result<(), String> {
     write_file_with_permissions(path, contents, restrict_to_owner)
 }
 
+/// Owner-only for a state-root file a child process writes, which cannot go
+/// through `write_file_atomically`: the macOS hang sample. The directory is
+/// restricted before `write` runs, and a file a failed `write` or restrict
+/// leaves behind is removed.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn write_owner_only_with(
+    path: &Path,
+    restrict: impl Fn(&Path, u32) -> Result<(), String>,
+    write: impl FnOnce(&Path) -> bool,
+) -> bool {
+    if ensure_parent_with(path, &restrict).is_err() {
+        return false;
+    }
+    // A failed or timed-out `sample` can leave a partial file at the umask.
+    if !write(path) || restrict(path, 0o600).is_err() {
+        let _ = std::fs::remove_file(path);
+        return false;
+    }
+    true
+}
+
 /// `write_file_atomically` with the permission step injected, so a test can
 /// fail either tightening and check that no bytes were written.
 fn write_file_with_permissions(
@@ -2107,12 +2316,12 @@ const SESSION_TEMP_SUFFIX: &str = ".json.tmp";
 /// Delete every orphaned temp write in the sessions directory, at boot.
 ///
 /// The writer removes its own temp on every error path, so what remains here is
-/// the legacy and hard-crash migration: a kill between the temp write and the
-/// rename leaves a file `load_session` cannot see and nothing else will ever
-/// overwrite — and a snapshot written before Dormouse stopped storing
-/// transcripts carries one. Deleting is the point: those bytes have to leave the
-/// disk (docs/specs/transport.md -> "Retiring the transcripts already on disk").
-/// Never touches a live snapshot; the window that owns one rewrites it itself.
+/// a hard crash's: a kill between the temp write and the rename leaves a file
+/// `load_session` cannot see and nothing else will ever overwrite, and one an
+/// older build left may carry a transcript. Deleting is the point: those bytes
+/// have to leave the disk (docs/specs/transport.md -> "Retiring the transcripts
+/// already on disk"). Never touches a snapshot: `discard_other_formats` deletes
+/// one of another format, and the window that owns a current one rewrites it.
 fn sweep_orphan_session_temps(dir: &Path) -> Result<(), String> {
     let suffix = SESSION_TEMP_SUFFIX;
     let entries = match std::fs::read_dir(dir) {
@@ -2194,8 +2403,9 @@ fn scrub_legacy_session_transcripts(dir: &Path) -> Vec<String> {
     errors
 }
 
-/// Active snapshots retain their normal webview rewrite. Only debug builds have
-/// an abandoned root requiring targeted migration; never delete its layouts.
+/// Sweeps orphaned temps in each root; `discard_other_formats` and each window
+/// own the active root's snapshots. Only debug builds have an abandoned root
+/// requiring targeted migration; never delete its layouts.
 fn sweep_session_roots(app_data: &Path) -> Vec<String> {
     let root = state_root_from(app_data.to_path_buf());
     let mut errors = Vec::new();
@@ -2374,6 +2584,52 @@ fn read_geometry(dir: &Path, label: &str) -> Option<WindowGeometry> {
     serde_json::from_str(&raw).ok()
 }
 
+/// A saved box made safe to reopen: never smaller than `min`, and re-centered
+/// on the first of `monitors` (the primary) unless at least a `min`-sized patch
+/// of it lies on one of them — a display unplugged since the save would
+/// otherwise reopen the window where nobody can see it. An empty `monitors`
+/// means the platform could not say, so the position is kept.
+fn fit_geometry(saved: WindowGeometry, min: (f64, f64), monitors: &[WindowGeometry]) -> WindowGeometry {
+    let mut fit = WindowGeometry {
+        width: saved.width.max(min.0),
+        height: saved.height.max(min.1),
+        ..saved
+    };
+    let overlap = |m: &WindowGeometry| {
+        let w = (fit.x + fit.width).min(m.x + m.width) - fit.x.max(m.x);
+        let h = (fit.y + fit.height).min(m.y + m.height) - fit.y.max(m.y);
+        w >= min.0 && h >= min.1
+    };
+    if let Some(primary) = monitors.first().filter(|_| !monitors.iter().any(overlap)) {
+        fit.x = primary.x + ((primary.width - fit.width) / 2.0).max(0.0);
+        fit.y = primary.y + ((primary.height - fit.height) / 2.0).max(0.0);
+    }
+    fit
+}
+
+/// Every connected display in logical coordinates, the primary first.
+fn monitor_rects(app: &AppHandle) -> Vec<WindowGeometry> {
+    let primary = app.primary_monitor().ok().flatten();
+    let mut monitors = app.available_monitors().unwrap_or_default();
+    if let Some(primary) = &primary {
+        if let Some(at) = monitors.iter().position(|m| m.position() == primary.position()) {
+            monitors.swap(0, at);
+        }
+    }
+    monitors
+        .iter()
+        .map(|m| {
+            let scale = m.scale_factor();
+            WindowGeometry {
+                x: f64::from(m.position().x) / scale,
+                y: f64::from(m.position().y) / scale,
+                width: f64::from(m.size().width) / scale,
+                height: f64::from(m.size().height) / scale,
+            }
+        })
+        .collect()
+}
+
 /// Seed the cache from the platform. Once per window, at creation: from there
 /// the `Moved` / `Resized` payloads carry the new box themselves.
 fn seed_geometry(app: &AppHandle, label: &str) {
@@ -2474,8 +2730,15 @@ fn session_file_names(dir: &Path) -> Vec<String> {
 /// order `restorable_labels` produced (`main` first). The cap is a ceiling on
 /// how many windows one launch may open; the excess stays on disk untouched.
 fn restore_windows(app: &AppHandle, dir: &Path, labels: &[String]) {
+    let first = app.config().app.windows.first();
+    let min = (
+        first.and_then(|w| w.min_width).unwrap_or(0.0),
+        first.and_then(|w| w.min_height).unwrap_or(0.0),
+    );
+    let monitors = monitor_rects(app);
+    let saved_box = |label: &str| read_geometry(dir, label).map(|saved| fit_geometry(saved, min, &monitors));
     if let Some(window) = app.get_webview_window(routing::MAIN_LABEL) {
-        if let Some(geometry) = read_geometry(dir, routing::MAIN_LABEL) {
+        if let Some(geometry) = saved_box(routing::MAIN_LABEL) {
             let _ = window.set_position(tauri::LogicalPosition::new(geometry.x, geometry.y));
             let _ = window.set_size(tauri::LogicalSize::new(geometry.width, geometry.height));
         }
@@ -2491,7 +2754,7 @@ fn restore_windows(app: &AppHandle, dir: &Path, labels: &[String]) {
         }
         // An unreadable snapshot still opens its window: the webview boots
         // fresh, which is a window the user can use rather than one they lost.
-        if let Err(err) = build_window(app, label, read_geometry(dir, label)) {
+        if let Err(err) = build_window(app, label, saved_box(label)) {
             append_log(format!("[window] {err}"));
             continue;
         }
@@ -2562,13 +2825,10 @@ fn build_window(
     Ok(())
 }
 
-/// The label a new window takes: `ws-<n>` above every live and saved one.
+/// The label a new window takes: `ws-<n>`, never used by this run or an
+/// earlier one (§Windows).
 fn next_window_label(windows: &WindowState) -> String {
-    format!(
-        "{}{}",
-        routing::WS_LABEL_PREFIX,
-        windows.next_ws.fetch_add(1, Ordering::SeqCst)
-    )
+    ids::Kind::Window.id(windows.reserve_ids(ids::Kind::Window, 1, 0).start)
 }
 
 fn payload_terminal_ids(payload: &JsonValue) -> Vec<String> {
@@ -2702,6 +2962,11 @@ fn record_workspace_id(record: &JsonValue) -> Option<&str> {
     record.get("workspaceId").and_then(JsonValue::as_str)
 }
 
+/// The `PersistedSession` of the Workspace a record carries.
+fn record_session(record: &JsonValue) -> Option<&JsonValue> {
+    record.get("workspace")?.get("session")
+}
+
 /// Append one arrival's record, replacing and returning any earlier record of
 /// the same id.
 fn record_arrival_on_disk(dir: &Path, arrival: &routing::Arrival) -> Result<Option<JsonValue>, String> {
@@ -2760,7 +3025,7 @@ fn snapshot_with_workspace(
         return Err("arrival record names no workspace.id".to_string());
     };
     let mut snapshot = snapshot.unwrap_or_else(
-        || serde_json::json!({ "version": 1, "workspaces": [], "activeWorkspaceId": id }),
+        || serde_json::json!({ "version": WINDOW_VERSION, "workspaces": [], "activeWorkspaceId": id }),
     );
     let workspaces = snapshot
         .get_mut("workspaces")
@@ -2788,6 +3053,55 @@ fn read_snapshot_from(dir: &Path, label: &str) -> Result<Option<JsonValue>, Stri
                 .map_err(|e| format!("unreadable snapshot for {label}: {e}"))
         })
         .transpose()
+}
+
+/// A snapshot's `version`, read without building the rest of it: `Ok(None)`
+/// when there is none, `Null` when it is JSON naming no version.
+fn read_snapshot_version_from(dir: &Path, label: &str) -> Result<Option<JsonValue>, String> {
+    #[derive(Deserialize)]
+    struct Versioned {
+        #[serde(default)]
+        version: JsonValue,
+    }
+    let Some(contents) = read_session_from(dir, label)? else { return Ok(None) };
+    let unreadable = |e: serde_json::Error| format!("unreadable snapshot for {label}: {e}");
+    // Only an object has a `version`; any other JSON names none.
+    if !contents.trim_start().starts_with('{') {
+        return serde_json::from_str::<serde::de::IgnoredAny>(&contents).map(|_| Some(JsonValue::Null)).map_err(unreadable);
+    }
+    serde_json::from_str::<Versioned>(&contents).map(|snapshot| Some(snapshot.version)).map_err(unreadable)
+}
+
+/// The `PersistedWindow.version` and its Workspaces' `PersistedSession.version`
+/// this build writes, and the only ones it keeps (docs/specs/transport.md ->
+/// "Persisted session types"). `standalone/scripts/persisted-format.json` pins
+/// them against the webview's.
+const WINDOW_VERSION: u64 = 2;
+const SESSION_VERSION: u64 = 4;
+
+/// Boot, before the arrival merge: delete every snapshot of another format,
+/// with its temp and geometry like a closed window, and every journal record
+/// whose Workspace session is of another format — a fresh start, never a
+/// migration. What it discarded, as `(snapshots, records)`.
+fn discard_other_formats(dir: &Path) -> Result<(usize, usize), String> {
+    let _disk = guard(&ARRIVAL_DISK_LOCK);
+    let mut snapshots = 0;
+    for label in routing::restorable_labels(session_file_names(dir)) {
+        // An unparseable snapshot is its window's to overwrite, as before.
+        let Ok(Some(version)) = read_snapshot_version_from(dir, &label) else { continue };
+        if version != WINDOW_VERSION {
+            remove_session_from(dir, &label)?;
+            snapshots += 1;
+        }
+    }
+    // An unreadable journal is `restore_arrivals`' to drop.
+    let Ok(mut records) = read_arrivals_from(dir) else { return Ok((snapshots, 0)) };
+    let before = records.len();
+    records.retain(|record| record_session(record).is_some_and(|session| session["version"] == SESSION_VERSION));
+    if records.len() != before {
+        write_arrivals_to(dir, &records)?;
+    }
+    Ok((snapshots, before - records.len()))
 }
 
 /// Every record still on disk at boot is a crash's leftover, so the Workspace
@@ -3322,6 +3636,8 @@ struct SavedWindows {
     next_ws: u64,
     /// Above every Workspace id a snapshot or retained journal record names.
     next_workspace: u64,
+    /// Above every Surface id a snapshot or retained journal record names.
+    next_surface: u64,
 }
 
 /// Read after `restore_arrivals` rewrote the journal: a record it retained is a
@@ -3334,33 +3650,56 @@ fn saved_windows(dir: &Path) -> SavedWindows {
     let endpoints = records.iter().flat_map(|record| {
         ["from", "to"].into_iter().filter_map(move |field| record.get(field).and_then(JsonValue::as_str))
     });
-    let next_ws = routing::seed_next_ws(labels.iter().map(String::as_str).chain(endpoints));
-    let snapshot_ids = names
+    let next_ws = ids::seed_next(ids::Kind::Window, labels.iter().map(String::as_str).chain(endpoints));
+    let snapshots: Vec<JsonValue> = names
         .iter()
         .filter_map(|name| name.strip_suffix(".json"))
-        .filter_map(|label| read_session_from(dir, label).ok().flatten())
-        .filter_map(|contents| serde_json::from_str::<JsonValue>(&contents).ok())
-        .flat_map(|snapshot| workspaces::snapshot_ids(&snapshot));
+        .filter_map(|label| read_snapshot_from(dir, label).ok().flatten())
+        .collect();
+    let snapshot_ids = snapshots.iter().flat_map(workspaces::snapshot_ids);
     let journal_ids = records.iter().filter_map(record_workspace_id).map(str::to_owned);
-    let next_workspace = workspaces::seed_next(snapshot_ids.chain(journal_ids));
-    SavedWindows { labels, next_ws, next_workspace }
+    let next_workspace = ids::seed_next(ids::Kind::Workspace, snapshot_ids.chain(journal_ids));
+    let snapshot_surfaces = snapshots.iter().flat_map(ids::snapshot_surface_ids);
+    let journal_surfaces = records
+        .iter()
+        .filter_map(record_session)
+        .flat_map(ids::session_surface_ids);
+    let next_surface = ids::seed_next(ids::Kind::Surface, snapshot_surfaces.chain(journal_surfaces));
+    SavedWindows { labels, next_ws, next_workspace, next_surface }
 }
 
 /// Hand a webview a block of ids to mint from. Ids come only from this
 /// counter, so a ref is stable for the life of the Workspace and unique
 /// across windows; an unused reservation is a gap in the numbering, nothing
 /// more (§Workspace registry).
-#[tauri::command]
+#[tauri::command(async)]
 fn workspace_reserve_ids(windows: tauri::State<'_, WindowState>, count: u64) -> Vec<String> {
-    let count = count.clamp(1, 64);
-    // Setup seeds this above every id on disk, but skips that when
-    // `sessions_dir` fails; `workspace-1` is the bare Wall's own and
-    // `workspace:0` names nothing (§Workspace registry).
-    windows.next_workspace.fetch_max(2, Ordering::SeqCst);
-    let first = windows.next_workspace.fetch_add(count, Ordering::SeqCst);
-    (first..first + count)
-        .map(|n| format!("workspace-{n}"))
-        .collect()
+    windows.reserve_id_strings(ids::Kind::Workspace, count, 0)
+}
+
+/// Hand a webview a block of Surface ids to mint from, every number above
+/// `floor` — the highest `surface:<n>` that webview restored — and never
+/// handed out before by any window of this run or an earlier one
+/// (§Workspace registry).
+#[tauri::command(async)]
+fn surface_reserve_ids(windows: tauri::State<'_, WindowState>, count: u64, floor: Option<u64>) -> Vec<String> {
+    windows.reserve_id_strings(ids::Kind::Surface, count, floor.unwrap_or(0))
+}
+
+/// A webview's first Workspace and Surface blocks at boot, as
+/// `workspace_reserve_ids` and `surface_reserve_ids` hand them out, with one
+/// write of the counters for both.
+#[derive(Serialize)]
+struct BootIds {
+    workspaces: Vec<String>,
+    surfaces: Vec<String>,
+}
+
+#[tauri::command(async)]
+fn boot_reserve_ids(windows: tauri::State<'_, WindowState>, workspaces: u64, surfaces: u64, floor: Option<u64>) -> BootIds {
+    let ask = [(ids::Kind::Workspace, workspaces, 0), (ids::Kind::Surface, surfaces, floor.unwrap_or(0))];
+    let mut ids = windows.reserve_blocks(&ask).into_iter().zip(ask).map(|(block, (kind, ..))| block.map(|n| kind.id(n)).collect());
+    BootIds { workspaces: ids.next().unwrap_or_default(), surfaces: ids.next().unwrap_or_default() }
 }
 
 /// A window's Workspace list, as it stands. Broadcast to every window when it
@@ -3374,8 +3713,8 @@ fn workspace_report(
 ) {
     // A reported id above the counter (a snapshot restored from a newer
     // build, say) must never be minted again.
-    let above = workspaces::seed_next(entries.iter().map(|entry| entry.id.as_str()));
-    windows.next_workspace.fetch_max(above, Ordering::SeqCst);
+    let above = ids::seed_next(ids::Kind::Workspace, entries.iter().map(|entry| entry.id.as_str()));
+    guard(&windows.ids).seed(ids::Kind::Workspace, above);
     let changed = workspaces::report(&mut guard(&windows.registry), window.label(), entries);
     if changed {
         broadcast_registry(&app, &windows);
@@ -3404,8 +3743,10 @@ fn take_arrivals(window: tauri::Window, windows: tauri::State<'_, WindowState>) 
     routing::arrival_payloads(&guard(&windows.arrivals), window.label())
 }
 
-/// A closing window whose close asked nothing leaves its snapshot here, built
-/// with fresh ids, for Reopen (docs/specs/reopen.md); its geometry is the cached box.
+/// A closing window whose close asked nothing leaves its snapshot here, for
+/// Reopen (docs/specs/reopen.md); its geometry is the cached box. The snapshot
+/// keeps the closed window's ids, marked `reopened`: the window that boots from
+/// it remaps them.
 #[tauri::command]
 fn push_closed_window(
     window: tauri::Window,
@@ -4461,9 +4802,19 @@ pub fn run() {
 
             // Reopen every window the last run left behind (§Windows). `main` is
             // already up from the config; the rest are cloned from it.
-            match sessions_dir(app.handle()) {
-                Ok(dir) => {
-                    // First: a Workspace in flight at the last exit is in no
+            match state_root(app.handle()) {
+                Ok(root) => {
+                    let dir = root.join("sessions");
+                    // First, another build's snapshots and records go, so
+                    // nothing below restores or merges them (§Persistence).
+                    match discard_other_formats(&dir) {
+                        Ok((0, 0)) => {}
+                        Ok((snapshots, records)) => append_log(format!(
+                            "[session] discarded {snapshots} snapshot(s) and {records} arrival record(s) from another version"
+                        )),
+                        Err(e) => append_log(format!("[session] {e}")),
+                    }
+                    // Then: a Workspace in flight at the last exit is in no
                     // snapshot until this puts it in its target's, and a
                     // tear-out target's file must exist before the enumeration
                     // below (§Arrival queue).
@@ -4474,11 +4825,11 @@ pub fn run() {
                     // new tear-out never claims a failed recovery's window, and
                     // a fresh id never collides with one about to be restored.
                     let saved = saved_windows(&dir);
-                    let windows = app.state::<WindowState>();
-                    windows.next_ws.store(saved.next_ws, Ordering::SeqCst);
-                    windows.next_workspace.store(saved.next_workspace, Ordering::SeqCst);
+                    app.state::<WindowState>().seed_ids(root.join(ids::FILE), &saved);
                     restore_windows(app.handle(), &dir, &saved.labels);
                 }
+                // Nothing persists the counters: window labels come from memory,
+                // and Workspace and Surface ids fall back to opaque ones.
                 Err(e) => append_log(format!("[window] {e}")),
             }
             if let Some(state) = app.try_state::<WindowState>() {
@@ -4534,6 +4885,8 @@ pub fn run() {
             take_arrivals,
             transfer_workspace_content,
             workspace_reserve_ids,
+            surface_reserve_ids,
+            boot_reserve_ids,
             workspace_report,
             workspace_registry,
             remove_window_session,
@@ -4595,14 +4948,15 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        arrivals_path, find_node_binary, forget_arrival_on_disk,
+        arrivals_path, discard_other_formats, find_node_binary, forget_arrival_on_disk, geometry_path,
         open_ports_many_timeout, read_arrivals_from,
-        read_session_from, record_arrival_on_disk,
+        read_session_from, record_arrival_on_disk, record_workspace_id,
         resolve_dor_cli_paths, resolve_sidecar_path, restore_arrivals, session_file_name,
         session_file_names, state_root_from, strip_windows_verbatim_prefix,
         sweep_orphan_session_temps, temp_write_path,
         write_session_to, JsonValue, OPEN_PORT_TIMEOUT_MS,
         OPEN_PORT_TIMEOUT_PER_ID_MS, OPEN_PORT_ROUND_TRIP_MARGIN_MS, SESSION_TEMP_SUFFIX,
+        SESSION_VERSION, WINDOW_VERSION,
     };
     use super::routing;
     use super::guard;
@@ -4610,7 +4964,6 @@ mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::Ordering;
-    use std::sync::Mutex;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     /// A Window-wide port listing is budgeted for its batch: both of the
@@ -4638,6 +4991,43 @@ mod tests {
             assert_eq!(later.label, "ws-2");
             assert_eq!(later.background_throttling, Some(BackgroundThrottlingPolicy::Disabled));
         }
+    }
+
+    /// docs/specs/standalone.md -> "Boot and geometry": no window may be
+    /// resized, tiled, or restored down to nothing.
+    #[test]
+    fn every_window_has_a_minimum_size() {
+        use tauri::utils::config::Config;
+        let conf: Config = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let first = conf.app.windows.first().unwrap();
+        let later = super::window_config(first, "ws-2", None);
+        for window in [first, &later] {
+            assert!(window.min_width.is_some_and(|w| w >= 100.0));
+            assert!(window.min_height.is_some_and(|h| h >= 100.0));
+        }
+    }
+
+    #[test]
+    fn a_restored_box_is_floored_and_kept_on_a_connected_display() {
+        use super::{fit_geometry, WindowGeometry as G};
+        let g = |x, y, width, height| G { x, y, width, height };
+        let min = (100.0, 100.0);
+        let primary = g(0.0, 0.0, 1440.0, 900.0);
+        let above = g(-443.0, -1080.0, 1920.0, 1080.0);
+        let monitors = [primary, above];
+        // A zero-thickness save comes back at the minimum, in place.
+        assert_eq!(fit_geometry(g(0.0, 0.0, 720.0, 0.0), min, &monitors), g(0.0, 0.0, 720.0, 100.0));
+        // A box on a secondary display stays there.
+        let on_above = g(-443.0, -1049.0, 961.0, 1050.0);
+        assert_eq!(fit_geometry(on_above, min, &monitors), on_above);
+        // A box mostly off the edge stays while a minimum-size patch shows.
+        let peeking = g(1340.0, 800.0, 800.0, 600.0);
+        assert_eq!(fit_geometry(peeking, min, &monitors), peeking);
+        // Less than that, or a display unplugged since: centered on the primary.
+        assert_eq!(fit_geometry(g(1360.0, 0.0, 800.0, 600.0), min, &monitors), g(320.0, 150.0, 800.0, 600.0));
+        assert_eq!(fit_geometry(on_above, min, &[primary]), g(239.5, 0.0, 961.0, 1050.0));
+        // No monitor list means no opinion on the position.
+        assert_eq!(fit_geometry(on_above, min, &[]), on_above);
     }
 
     // RAII guard so a failing assert doesn't leak the temp dir.
@@ -4712,7 +5102,7 @@ mod tests {
     // --- Pending arrivals on disk (§Arrival queue) ---------------------------
 
     fn workspace_json(id: &str, name: &str) -> JsonValue {
-        serde_json::json!({ "id": id, "name": name, "session": { "version": 3, "panes": [] } })
+        serde_json::json!({ "id": id, "name": name, "session": { "version": SESSION_VERSION, "panes": [] } })
     }
 
     fn arrival_of(id: &str, from: &str, to: &str) -> routing::Arrival {
@@ -4731,7 +5121,7 @@ mod tests {
     fn snapshot_json(entries: &[(&str, &str)], active: &str) -> String {
         let workspaces: Vec<JsonValue> =
             entries.iter().map(|(id, name)| workspace_json(id, name)).collect();
-        serde_json::json!({ "version": 1, "workspaces": workspaces, "activeWorkspaceId": active })
+        serde_json::json!({ "version": WINDOW_VERSION, "workspaces": workspaces, "activeWorkspaceId": active })
             .to_string()
     }
 
@@ -4750,16 +5140,16 @@ mod tests {
         let dir = TempDir::new("arrivals-round-trip");
         // Nothing in flight is no file at all, and forgetting is then a no-op.
         assert!(read_arrivals_from(dir.path()).unwrap().is_empty());
-        forget_arrival_on_disk(dir.path(), "workspace-7").unwrap();
+        forget_arrival_on_disk(dir.path(), "workspace:7").unwrap();
         assert!(!arrivals_path(dir.path()).exists());
 
-        record_arrival_on_disk(dir.path(), &arrival_of("workspace-7", "main", "ws-2")).unwrap();
-        record_arrival_on_disk(dir.path(), &arrival_of("workspace-8", "main", "ws-3")).unwrap();
+        record_arrival_on_disk(dir.path(), &arrival_of("workspace:7", "main", "ws-2")).unwrap();
+        record_arrival_on_disk(dir.path(), &arrival_of("workspace:8", "main", "ws-3")).unwrap();
         // Recording the same id again replaces rather than duplicates.
-        record_arrival_on_disk(dir.path(), &arrival_of("workspace-7", "main", "ws-2")).unwrap();
+        record_arrival_on_disk(dir.path(), &arrival_of("workspace:7", "main", "ws-2")).unwrap();
         let records = read_arrivals_from(dir.path()).unwrap();
         assert_eq!(records.len(), 2);
-        assert_eq!(records[1]["workspaceId"], "workspace-7");
+        assert_eq!(records[1]["workspaceId"], "workspace:7");
         assert_eq!(records[1]["from"], "main");
         assert_eq!(records[1]["to"], "ws-2");
         assert_eq!(records[1]["workspace"]["name"], "Moved");
@@ -4772,12 +5162,12 @@ mod tests {
             Vec::<String>::new()
         );
 
-        forget_arrival_on_disk(dir.path(), "workspace-7").unwrap();
+        forget_arrival_on_disk(dir.path(), "workspace:7").unwrap();
         let records = read_arrivals_from(dir.path()).unwrap();
         assert_eq!(records.len(), 1);
-        assert_eq!(records[0]["workspaceId"], "workspace-8");
+        assert_eq!(records[0]["workspaceId"], "workspace:8");
         // Forgetting the last record removes the file.
-        forget_arrival_on_disk(dir.path(), "workspace-8").unwrap();
+        forget_arrival_on_disk(dir.path(), "workspace:8").unwrap();
         assert!(!arrivals_path(dir.path()).exists());
     }
 
@@ -4787,18 +5177,18 @@ mod tests {
         write_session_to(
             dir.path(),
             "main",
-            &snapshot_json(&[("workspace-2", "A"), ("workspace-7", "Stale")], "workspace-2"),
+            &snapshot_json(&[("workspace:2", "A"), ("workspace:7", "Stale")], "workspace:2"),
         )
         .unwrap();
-        record_arrival_on_disk(dir.path(), &arrival_of("workspace-7", "ws-3", "main")).unwrap();
+        record_arrival_on_disk(dir.path(), &arrival_of("workspace:7", "ws-3", "main")).unwrap();
 
         restore_arrivals(dir.path()).unwrap();
 
         // Appended, or here replaced by id: the target keeps what it had and
         // its own active Workspace.
         let main = read_snapshot(dir.path(), "main").unwrap();
-        assert_eq!(snapshot_ids(&main), vec!["workspace-2", "workspace-7"]);
-        assert_eq!(main["activeWorkspaceId"], "workspace-2");
+        assert_eq!(snapshot_ids(&main), vec!["workspace:2", "workspace:7"]);
+        assert_eq!(main["activeWorkspaceId"], "workspace:2");
         assert_eq!(main["workspaces"][1]["name"], "Moved");
         // A source that never had a snapshot gets none.
         assert!(read_session_from(dir.path(), "ws-3").unwrap().is_none());
@@ -4807,15 +5197,15 @@ mod tests {
     #[test]
     fn a_leftover_arrival_boots_into_a_tear_out_targets_new_snapshot() {
         let dir = TempDir::new("arrivals-tear-out-target");
-        record_arrival_on_disk(dir.path(), &arrival_of("workspace-7", "main", "ws-2")).unwrap();
+        record_arrival_on_disk(dir.path(), &arrival_of("workspace:7", "main", "ws-2")).unwrap();
         assert!(read_session_from(dir.path(), "ws-2").unwrap().is_none());
 
         restore_arrivals(dir.path()).unwrap();
 
         let ws2 = read_snapshot(dir.path(), "ws-2").unwrap();
-        assert_eq!(snapshot_ids(&ws2), vec!["workspace-7"]);
-        assert_eq!(ws2["activeWorkspaceId"], "workspace-7");
-        assert_eq!(ws2["version"], 1);
+        assert_eq!(snapshot_ids(&ws2), vec!["workspace:7"]);
+        assert_eq!(ws2["activeWorkspaceId"], "workspace:7");
+        assert_eq!(ws2["version"], WINDOW_VERSION);
         // The window the merge created is one the boot enumeration reopens.
         assert_eq!(routing::restorable_labels(session_file_names(dir.path())), vec!["ws-2"]);
     }
@@ -4827,22 +5217,22 @@ mod tests {
         write_session_to(
             dir.path(),
             "ws-3",
-            &snapshot_json(&[("workspace-7", "Docs"), ("workspace-8", "Keep")], "workspace-7"),
+            &snapshot_json(&[("workspace:7", "Docs"), ("workspace:8", "Keep")], "workspace:7"),
         )
         .unwrap();
         // A source whose only Workspace left is a closed window.
-        write_session_to(dir.path(), "ws-4", &snapshot_json(&[("workspace-9", "Only")], "workspace-9"))
+        write_session_to(dir.path(), "ws-4", &snapshot_json(&[("workspace:9", "Only")], "workspace:9"))
             .unwrap();
-        record_arrival_on_disk(dir.path(), &arrival_of("workspace-7", "ws-3", "main")).unwrap();
-        record_arrival_on_disk(dir.path(), &arrival_of("workspace-9", "ws-4", "main")).unwrap();
+        record_arrival_on_disk(dir.path(), &arrival_of("workspace:7", "ws-3", "main")).unwrap();
+        record_arrival_on_disk(dir.path(), &arrival_of("workspace:9", "ws-4", "main")).unwrap();
 
         restore_arrivals(dir.path()).unwrap();
 
         let ws3 = read_snapshot(dir.path(), "ws-3").unwrap();
-        assert_eq!(snapshot_ids(&ws3), vec!["workspace-8"]);
+        assert_eq!(snapshot_ids(&ws3), vec!["workspace:8"]);
         assert!(read_session_from(dir.path(), "ws-4").unwrap().is_none());
         let main = read_snapshot(dir.path(), "main").unwrap();
-        assert_eq!(snapshot_ids(&main), vec!["workspace-7", "workspace-9"]);
+        assert_eq!(snapshot_ids(&main), vec!["workspace:7", "workspace:9"]);
         // Each id is now in exactly one snapshot.
         assert_eq!(
             routing::restorable_labels(session_file_names(dir.path())),
@@ -4862,7 +5252,7 @@ mod tests {
         windows.begin_transfer(&ids, "main", "ws-2");
         guard(&windows.routing).mark_transfer("t1", 42);
         windows.forget_pty("t3");
-        let mut arrival = arrival_of("workspace-7", "main", "ws-2");
+        let mut arrival = arrival_of("workspace:7", "main", "ws-2");
         arrival.terminal_ids = ids.to_vec();
         guard(&windows.arrivals).push(arrival);
 
@@ -4955,12 +5345,16 @@ mod tests {
     #[test]
     fn user_input_rides_the_write_it_describes() {
         assert_eq!(
-            parse_line(&super::pty_input_message("t1", "y", None, Some(true))),
+            parse_line(&super::pty_input_message("t1", "y", None, Some(true), None)),
             serde_json::json!({ "event": "pty:input", "data": { "id": "t1", "data": "y", "userInput": true } })
         );
         assert_eq!(
-            parse_line(&super::pty_input_message("t1", "\x1b[I", Some(true), Some(false))),
+            parse_line(&super::pty_input_message("t1", "\x1b[I", Some(true), Some(false), Some(false))),
             serde_json::json!({ "event": "pty:input", "data": { "id": "t1", "data": "\x1b[I", "paced": true } })
+        );
+        assert_eq!(
+            parse_line(&super::pty_input_message("t1", "view\r", None, None, Some(true))),
+            serde_json::json!({ "event": "pty:input", "data": { "id": "t1", "data": "view\r", "launch": true } })
         );
     }
 
@@ -5068,14 +5462,14 @@ mod tests {
     #[test]
     fn adoption_keeps_the_journal_until_both_snapshots_are_durable() {
         let dir = TempDir::new("arrival-commit");
-        write_session_to(dir.path(), "main", &snapshot_json(&[("workspace-7", "Moved")], "workspace-7")).unwrap();
-        record_arrival_on_disk(dir.path(), &arrival_of("workspace-7", "main", "ws-2")).unwrap();
-        super::mark_arrival_adopted_on_disk(dir.path(), "workspace-7").unwrap();
+        write_session_to(dir.path(), "main", &snapshot_json(&[("workspace:7", "Moved")], "workspace:7")).unwrap();
+        record_arrival_on_disk(dir.path(), &arrival_of("workspace:7", "main", "ws-2")).unwrap();
+        super::mark_arrival_adopted_on_disk(dir.path(), "workspace:7").unwrap();
         assert_eq!(read_arrivals_from(dir.path()).unwrap().len(), 1);
-        write_session_to(dir.path(), "ws-2", &snapshot_json(&[("workspace-7", "Moved")], "workspace-7")).unwrap();
+        write_session_to(dir.path(), "ws-2", &snapshot_json(&[("workspace:7", "Moved")], "workspace:7")).unwrap();
         super::retire_saved_arrivals(dir.path()).unwrap();
         assert_eq!(read_arrivals_from(dir.path()).unwrap().len(), 1);
-        write_session_to(dir.path(), "main", &snapshot_json(&[], "workspace-1")).unwrap();
+        write_session_to(dir.path(), "main", &snapshot_json(&[], "workspace:1")).unwrap();
         super::retire_saved_arrivals(dir.path()).unwrap();
         assert!(!arrivals_path(dir.path()).exists());
     }
@@ -5083,25 +5477,25 @@ mod tests {
     #[test]
     fn a_hand_back_is_recovered_in_the_source_before_its_next_flush() {
         let dir = TempDir::new("arrival-handback");
-        let arrival = arrival_of("workspace-7", "main", "ws-2");
+        let arrival = arrival_of("workspace:7", "main", "ws-2");
         record_arrival_on_disk(dir.path(), &arrival).unwrap();
         super::return_arrival_on_disk(dir.path(), &arrival).unwrap();
         assert_eq!(read_arrivals_from(dir.path()).unwrap()[0]["to"], "main");
         restore_arrivals(dir.path()).unwrap();
-        assert_eq!(snapshot_ids(&read_snapshot(dir.path(), "main").unwrap()), vec!["workspace-7"]);
+        assert_eq!(snapshot_ids(&read_snapshot(dir.path(), "main").unwrap()), vec!["workspace:7"]);
         assert!(read_session_from(dir.path(), "ws-2").unwrap().is_none());
     }
 
     #[test]
     fn closing_an_adopted_target_never_resurrects_either_copy() {
         let dir = TempDir::new("arrival-target-close");
-        write_session_to(dir.path(), "main", &snapshot_json(&[("workspace-7", "Stale"), ("workspace-8", "Keep")], "workspace-8")).unwrap();
-        record_arrival_on_disk(dir.path(), &arrival_of("workspace-7", "main", "ws-2")).unwrap();
-        super::mark_arrival_adopted_on_disk(dir.path(), "workspace-7").unwrap();
+        write_session_to(dir.path(), "main", &snapshot_json(&[("workspace:7", "Stale"), ("workspace:8", "Keep")], "workspace:8")).unwrap();
+        record_arrival_on_disk(dir.path(), &arrival_of("workspace:7", "main", "ws-2")).unwrap();
+        super::mark_arrival_adopted_on_disk(dir.path(), "workspace:7").unwrap();
         super::close_window_snapshot(dir.path(), "ws-2").unwrap();
         restore_arrivals(dir.path()).unwrap();
         assert!(read_session_from(dir.path(), "ws-2").unwrap().is_none());
-        assert_eq!(snapshot_ids(&read_snapshot(dir.path(), "main").unwrap()), vec!["workspace-8"]);
+        assert_eq!(snapshot_ids(&read_snapshot(dir.path(), "main").unwrap()), vec!["workspace:8"]);
         assert!(!arrivals_path(dir.path()).exists());
     }
 
@@ -5122,7 +5516,7 @@ mod tests {
     fn a_failed_arrival_journal_refuses_the_move_with_nothing_changed() {
         let dir = TempDir::new("arrival-journal-first");
         let windows = super::WindowState::default();
-        let mut arrival = arrival_of("workspace-7", "main", "ws-2");
+        let mut arrival = arrival_of("workspace:7", "main", "ws-2");
         arrival.terminal_ids = vec!["pane-a".to_string()];
         windows.mint("pane-a", "main");
         // A directory where the journal belongs fails its read on every platform.
@@ -5137,7 +5531,7 @@ mod tests {
         assert_eq!(guard(&windows.arrivals).len(), 1);
         // A refusal after the write puts back the record it replaced, and
         // never withdraws a newer drop's record.
-        let mut later = arrival_of("workspace-7", "ws-2", "ws-3");
+        let mut later = arrival_of("workspace:7", "ws-2", "ws-3");
         let previous = record_arrival_on_disk(dir.path(), &later).unwrap();
         super::withdraw_arrival_on_disk(dir.path(), &arrival, None).unwrap();
         assert_eq!(read_arrivals_from(dir.path()).unwrap()[0]["to"], "ws-3");
@@ -5165,7 +5559,7 @@ mod tests {
         close.clear("ws-2");
         assert!(admitted(&arrivals, &machine, &close, &closing, "main", "ws-2"));
         // A close queued behind another transfer, or a snapshot already removed.
-        arrivals.push(arrival_of("workspace-7", "ws-2", "ws-3"));
+        arrivals.push(arrival_of("workspace:7", "ws-2", "ws-3"));
         arrivals.defer_close("ws-2");
         assert!(!admitted(&arrivals, &machine, &close, &closing, "main", "ws-2"));
         arrivals.forget_deferred_close("ws-2");
@@ -5221,9 +5615,9 @@ mod tests {
     #[test]
     fn a_settled_recovery_preserves_the_targets_newer_snapshot() {
         let dir = TempDir::new("arrival-newer-target");
-        record_arrival_on_disk(dir.path(), &arrival_of("workspace-7", "main", "ws-2")).unwrap();
-        super::mark_arrival_adopted_on_disk(dir.path(), "workspace-7").unwrap();
-        write_session_to(dir.path(), "ws-2", &snapshot_json(&[("workspace-7", "Renamed after adoption")], "workspace-7")).unwrap();
+        record_arrival_on_disk(dir.path(), &arrival_of("workspace:7", "main", "ws-2")).unwrap();
+        super::mark_arrival_adopted_on_disk(dir.path(), "workspace:7").unwrap();
+        write_session_to(dir.path(), "ws-2", &snapshot_json(&[("workspace:7", "Renamed after adoption")], "workspace:7")).unwrap();
         restore_arrivals(dir.path()).unwrap();
         assert_eq!(read_snapshot(dir.path(), "ws-2").unwrap()["workspaces"][0]["name"], "Renamed after adoption");
     }
@@ -5231,10 +5625,10 @@ mod tests {
     #[test]
     fn a_failed_source_write_rolls_back_the_target_and_retries() {
         let dir = TempDir::new("arrival-source-write");
-        write_session_to(dir.path(), "main", &snapshot_json(&[("workspace-7", "Moved"), ("workspace-8", "Keep")], "workspace-8")).unwrap();
-        let before = snapshot_json(&[("workspace-9", "Target")], "workspace-9");
+        write_session_to(dir.path(), "main", &snapshot_json(&[("workspace:7", "Moved"), ("workspace:8", "Keep")], "workspace:8")).unwrap();
+        let before = snapshot_json(&[("workspace:9", "Target")], "workspace:9");
         write_session_to(dir.path(), "ws-2", &before).unwrap();
-        record_arrival_on_disk(dir.path(), &arrival_of("workspace-7", "main", "ws-2")).unwrap();
+        record_arrival_on_disk(dir.path(), &arrival_of("workspace:7", "main", "ws-2")).unwrap();
         let blocked = temp_write_path(&dir.path().join(session_file_name("main")));
         fs::create_dir(&blocked).unwrap();
         restore_arrivals(dir.path()).unwrap();
@@ -5243,13 +5637,13 @@ mod tests {
         fs::remove_dir(blocked).unwrap();
         restore_arrivals(dir.path()).unwrap();
         assert!(!arrivals_path(dir.path()).exists());
-        assert_eq!(snapshot_ids(&read_snapshot(dir.path(), "main").unwrap()), vec!["workspace-8"]);
+        assert_eq!(snapshot_ids(&read_snapshot(dir.path(), "main").unwrap()), vec!["workspace:8"]);
     }
 
     #[test]
     fn an_unreadable_source_retains_the_record_without_changing_the_target() {
         let dir = TempDir::new("arrival-retry");
-        record_arrival_on_disk(dir.path(), &arrival_of("workspace-7", "main", "ws-2")).unwrap();
+        record_arrival_on_disk(dir.path(), &arrival_of("workspace:7", "main", "ws-2")).unwrap();
         write_session_to(dir.path(), "main", "broken json").unwrap();
         restore_arrivals(dir.path()).unwrap();
         assert!(read_session_from(dir.path(), "ws-2").unwrap().is_none());
@@ -5257,16 +5651,16 @@ mod tests {
         // The only readable durable copy is still the journal; reservations
         // must not reuse its id before a later boot can complete recovery.
         assert_eq!(super::saved_windows(dir.path()).next_workspace, 8);
-        write_session_to(dir.path(), "main", &snapshot_json(&[("workspace-7", "Moved")], "workspace-7")).unwrap();
+        write_session_to(dir.path(), "main", &snapshot_json(&[("workspace:7", "Moved")], "workspace:7")).unwrap();
         restore_arrivals(dir.path()).unwrap();
         assert!(!arrivals_path(dir.path()).exists());
-        assert_eq!(snapshot_ids(&read_snapshot(dir.path(), "ws-2").unwrap()), vec!["workspace-7"]);
+        assert_eq!(snapshot_ids(&read_snapshot(dir.path(), "ws-2").unwrap()), vec!["workspace:7"]);
     }
 
     #[test]
     fn a_retained_arrival_reserves_both_window_labels_without_opening_them() {
         let dir = TempDir::new("arrival-label-reservation");
-        record_arrival_on_disk(dir.path(), &arrival_of("workspace-7", "ws-40", "ws-50")).unwrap();
+        record_arrival_on_disk(dir.path(), &arrival_of("workspace:7", "ws-40", "ws-50")).unwrap();
         // Fail recovery before either endpoint has a readable snapshot.
         fs::create_dir(dir.path().join("ws-40.json")).unwrap();
         restore_arrivals(dir.path()).unwrap();
@@ -5275,22 +5669,210 @@ mod tests {
         assert!(read_session_from(dir.path(), "ws-50").unwrap().is_none());
     }
 
+    // --- Id counters (§Workspace registry) -----------------------------------
+
+    /// What setup does with a state root: seed from `ids.json` and the
+    /// snapshots and journal under `sessions/`.
+    fn boot_ids(root: &Path) -> super::WindowState {
+        let windows = super::WindowState::default();
+        windows.seed_ids(root.join(super::ids::FILE), &super::saved_windows(&root.join("sessions")));
+        windows
+    }
+
+    #[test]
+    fn a_reservation_is_on_disk_before_it_returns_and_a_relaunch_resumes_just_past_it() {
+        let root = TempDir::new("ids-persist");
+        let windows = boot_ids(root.path());
+        windows.reserve_ids(super::ids::Kind::Surface, 8, 0);
+        let block = windows.reserve_ids(super::ids::Kind::Surface, 8, 0);
+        assert_eq!(block, 9..17);
+        let file: JsonValue = serde_json::from_str(&fs::read_to_string(root.path().join("ids.json")).unwrap()).unwrap();
+        assert_eq!(file["surface"].as_u64(), Some(block.end));
+        // A crash now, with nothing else on disk: the relaunch starts just
+        // above, wasting no numbers.
+        assert_eq!(boot_ids(root.path()).reserve_ids(super::ids::Kind::Surface, 1, 0).start, block.end);
+    }
+
+    #[test]
+    fn a_boot_reservation_persists_every_block_it_hands_out() {
+        let root = TempDir::new("ids-boot");
+        let windows = boot_ids(root.path());
+        let blocks = windows.reserve_blocks(&[(super::ids::Kind::Workspace, 4, 0), (super::ids::Kind::Surface, 8, 40)]);
+        assert_eq!(blocks, vec![2..6, 41..49]);
+        let file: JsonValue = serde_json::from_str(&fs::read_to_string(root.path().join("ids.json")).unwrap()).unwrap();
+        assert_eq!((file["workspace"].as_u64(), file["surface"].as_u64()), (Some(6), Some(49)));
+    }
+
+    #[test]
+    fn a_reservation_it_cannot_persist_hands_out_no_workspace_or_surface_ids() {
+        use super::ids::Kind;
+        let root = TempDir::new("ids-write-fails");
+        let windows = boot_ids(root.path());
+        assert_eq!(windows.reserve_ids(Kind::Surface, 2, 0), 1..3);
+        // The temp file the write goes through cannot be created.
+        fs::create_dir(root.path().join("ids.json.tmp")).unwrap();
+        assert!(windows.reserve_id_strings(Kind::Surface, 8, 0).is_empty());
+        assert!(windows.reserve_id_strings(Kind::Workspace, 4, 0).is_empty());
+        // A window still needs its label, which has no opaque fallback.
+        assert_eq!(super::next_window_label(&windows), "ws-1");
+        fs::remove_dir(root.path().join("ids.json.tmp")).unwrap();
+        // The failed reservations only skipped numbers.
+        assert_eq!(windows.reserve_ids(Kind::Surface, 1, 0), 11..12);
+    }
+
+    #[test]
+    fn another_versions_file_is_never_overwritten_nor_handed_out_past() {
+        use super::ids::Kind;
+        let root = TempDir::new("ids-other-version");
+        let theirs = r#"{"version":2,"surface":900,"workspace":90,"window":9}"#;
+        fs::write(root.path().join("ids.json"), theirs).unwrap();
+        let windows = boot_ids(root.path());
+        assert!(windows.reserve_id_strings(Kind::Surface, 8, 0).is_empty());
+        let boot = boot_reserve_ids_on(&windows);
+        assert!(boot.0.is_empty() && boot.1.is_empty());
+        assert_eq!(super::next_window_label(&windows), "ws-1");
+        assert_eq!(fs::read_to_string(root.path().join("ids.json")).unwrap(), theirs);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_file_it_cannot_read_hands_out_nothing_until_it_reads() {
+        use super::ids::Kind;
+        use std::os::unix::fs::PermissionsExt;
+        let root = TempDir::new("ids-unread");
+        let file = root.path().join("ids.json");
+        let ours = r#"{"version":1,"surface":500,"workspace":40,"window":9}"#;
+        fs::write(&file, ours).unwrap();
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o000)).unwrap();
+        let windows = boot_ids(root.path());
+        assert!(windows.reserve_id_strings(Kind::Surface, 8, 0).is_empty());
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(fs::read_to_string(&file).unwrap(), ours);
+        assert_eq!(windows.reserve_ids(Kind::Surface, 1, 0), 500..501);
+    }
+
+    #[test]
+    fn a_file_it_cannot_parse_is_overwritten_from_the_disk_scan() {
+        use super::ids::Kind;
+        let root = TempDir::new("ids-corrupt");
+        fs::write(root.path().join("ids.json"), "{not json").unwrap();
+        let windows = boot_ids(root.path());
+        assert_eq!(windows.reserve_ids(Kind::Surface, 2, 0), 1..3);
+        let file: JsonValue = serde_json::from_str(&fs::read_to_string(root.path().join("ids.json")).unwrap()).unwrap();
+        assert_eq!((file["version"].as_u64(), file["surface"].as_u64()), (Some(1), Some(3)));
+    }
+
+    /// `boot_reserve_ids`'s two blocks, as ids.
+    fn boot_reserve_ids_on(windows: &super::WindowState) -> (Vec<String>, Vec<String>) {
+        use super::ids::Kind;
+        let blocks = windows.reserve_blocks(&[(Kind::Workspace, 4, 0), (Kind::Surface, 8, 0)]);
+        let spell = |kind: Kind, block: &std::ops::Range<u64>| block.clone().map(|n| kind.id(n)).collect::<Vec<_>>();
+        (spell(Kind::Workspace, &blocks[0]), spell(Kind::Surface, &blocks[1]))
+    }
+
+    #[test]
+    fn a_relaunch_never_reuses_a_closed_workspace_number() {
+        let root = TempDir::new("ids-workspace-relaunch");
+        let sessions = root.path().join("sessions");
+        let windows = boot_ids(root.path());
+        let ids = (0..8).map(|_| windows.reserve_ids(super::ids::Kind::Workspace, 1, 0).start).collect::<Vec<_>>();
+        assert_eq!(ids, (2..10).collect::<Vec<_>>());
+        // workspace:6 through workspace:9 closed; only workspace:5 is saved.
+        write_session_to(&sessions, "main", &snapshot_json(&[("workspace:5", "Kept")], "workspace:5")).unwrap();
+        assert_eq!(super::saved_windows(&sessions).next_workspace, 6);
+        assert_eq!(boot_ids(root.path()).reserve_ids(super::ids::Kind::Workspace, 1, 0).start, 10);
+    }
+
+    #[test]
+    fn a_relaunch_never_reuses_a_closed_window_label() {
+        let root = TempDir::new("ids-window-relaunch");
+        let sessions = root.path().join("sessions");
+        let windows = boot_ids(root.path());
+        let labels = (0..4).map(|_| super::next_window_label(&windows)).collect::<Vec<_>>();
+        assert_eq!(labels, ["ws-1", "ws-2", "ws-3", "ws-4"]);
+        // ws-4 closed, taking its snapshot with it; ws-2 is still saved.
+        write_session_to(&sessions, "ws-2", &snapshot_json(&[("workspace:2", "Kept")], "workspace:2")).unwrap();
+        assert_eq!(super::saved_windows(&sessions).next_ws, 3);
+        assert_eq!(super::next_window_label(&boot_ids(root.path())), "ws-5");
+    }
+
+    #[test]
+    fn boot_seeding_never_lowers_a_counter_a_window_already_raised() {
+        let root = TempDir::new("ids-seed-max");
+        let windows = super::WindowState::default();
+        // A report of workspace:31 can land before the disk scan seeds.
+        super::guard(&windows.ids).seed(super::ids::Kind::Workspace, 32);
+        windows.seed_ids(root.path().join("ids.json"), &super::saved_windows(&root.path().join("sessions")));
+        assert_eq!(windows.reserve_ids(super::ids::Kind::Workspace, 1, 0).start, 32);
+    }
+
+    #[test]
+    fn the_surface_seed_covers_panes_and_doors_in_snapshots_and_the_journal() {
+        let dir = TempDir::new("ids-surface-seed");
+        let snapshot = serde_json::json!({ "version": WINDOW_VERSION, "activeWorkspaceId": "workspace:2", "workspaces": [{
+            "id": "workspace:2", "name": "Saved",
+            "session": { "version": SESSION_VERSION, "panes": [{ "id": "surface:3" }], "doors": [{ "id": "surface:9" }] }
+        }] });
+        write_session_to(dir.path(), "main", &snapshot.to_string()).unwrap();
+        assert_eq!(super::saved_windows(dir.path()).next_surface, 10);
+        // A retained record: its Workspace is in no snapshot yet.
+        let mut arrival = arrival_of("workspace:7", "main", "ws-2");
+        arrival.payload["workspace"]["session"]["panes"] = serde_json::json!([{ "id": "surface:12" }]);
+        record_arrival_on_disk(dir.path(), &arrival).unwrap();
+        assert_eq!(super::saved_windows(dir.path()).next_surface, 13);
+    }
+
     #[test]
     fn the_arrivals_file_is_gone_after_the_boot_merge() {
         let dir = TempDir::new("arrivals-gone");
-        record_arrival_on_disk(dir.path(), &arrival_of("workspace-7", "main", "ws-2")).unwrap();
+        record_arrival_on_disk(dir.path(), &arrival_of("workspace:7", "main", "ws-2")).unwrap();
         assert!(arrivals_path(dir.path()).exists());
 
         restore_arrivals(dir.path()).unwrap();
         assert!(!arrivals_path(dir.path()).exists());
         // Idempotent: a second boot has nothing to merge and changes nothing.
         restore_arrivals(dir.path()).unwrap();
-        assert_eq!(snapshot_ids(&read_snapshot(dir.path(), "ws-2").unwrap()), vec!["workspace-7"]);
+        assert_eq!(snapshot_ids(&read_snapshot(dir.path(), "ws-2").unwrap()), vec!["workspace:7"]);
 
         // An unreadable file is dropped rather than replayed on every launch.
         fs::write(arrivals_path(dir.path()), "{not json").unwrap();
         assert!(restore_arrivals(dir.path()).is_err());
         assert!(!arrivals_path(dir.path()).exists());
+    }
+
+    #[test]
+    fn the_persisted_format_matches_the_webviews() {
+        let pinned: JsonValue = serde_json::from_str(include_str!("../../scripts/persisted-format.json")).unwrap();
+        assert_eq!(pinned, serde_json::json!({ "window": WINDOW_VERSION, "session": SESSION_VERSION }));
+    }
+
+    #[test]
+    fn boot_discards_another_formats_snapshots_and_journal_records() {
+        let dir = TempDir::new("discard-other-formats");
+        let old = serde_json::json!({ "version": 1, "activeWorkspaceId": "w", "workspaces": [
+            { "id": "w", "name": "Old", "session": { "version": 3, "panes": [] } }
+        ] });
+        write_session_to(dir.path(), "ws-2", &old.to_string()).unwrap();
+        fs::write(dir.path().join("ws-2.json.tmp"), b"old").unwrap();
+        fs::write(geometry_path(dir.path(), "ws-2"), b"{}").unwrap();
+        write_session_to(dir.path(), "main", &snapshot_json(&[("workspace:2", "Kept")], "workspace:2")).unwrap();
+        fs::write(geometry_path(dir.path(), "main"), b"{}").unwrap();
+        record_arrival_on_disk(dir.path(), &arrival_of("workspace:7", "main", "ws-3")).unwrap();
+        let mut stale = arrival_of("workspace:8", "main", "ws-4");
+        stale.payload["workspace"]["session"]["version"] = serde_json::json!(3);
+        record_arrival_on_disk(dir.path(), &stale).unwrap();
+
+        assert_eq!(discard_other_formats(dir.path()).unwrap(), (1, 1));
+
+        assert!(read_session_from(dir.path(), "ws-2").unwrap().is_none());
+        assert!(!dir.path().join("ws-2.json.tmp").exists());
+        assert!(!geometry_path(dir.path(), "ws-2").exists());
+        assert_eq!(snapshot_ids(&read_snapshot(dir.path(), "main").unwrap()), vec!["workspace:2"]);
+        assert!(geometry_path(dir.path(), "main").exists());
+        let records = read_arrivals_from(dir.path()).unwrap();
+        assert_eq!(records.iter().filter_map(record_workspace_id).collect::<Vec<_>>(), vec!["workspace:7"]);
+        // Nothing of another format is left, so a second boot changes nothing.
+        assert_eq!(discard_other_formats(dir.path()).unwrap(), (0, 0));
     }
 
     /// The Windows half of `restrict_to_owner`: after it runs, the DACL must be
@@ -5699,6 +6281,172 @@ mod tests {
             // leaves the boot sweep anything to find.
             assert!(!dir.path().join("main.json.tmp").exists());
         }
+    }
+
+    #[test]
+    fn a_child_written_state_file_is_never_written_into_an_unrestricted_directory() {
+        let dir = TempDir::new("hang-sample-permission-failure");
+        let path = dir.path().join("hangs").join("sample.txt");
+        let mut ran = false;
+        let restrict_dir_fails = |_: &Path, mode: u32| if mode == 0o700 { Err("denied".to_owned()) } else { Ok(()) };
+        assert!(!super::write_owner_only_with(&path, restrict_dir_fails, |_| { ran = true; true }));
+        assert!(!ran);
+        // A file that cannot be restricted is removed rather than kept.
+        let restrict_file_fails = |path: &Path, mode: u32| if mode == 0o600 { Err("denied".to_owned()) } else { super::restrict_to_owner(path, mode) };
+        assert!(!super::write_owner_only_with(&path, restrict_file_fails, |path| fs::write(path, "sample").is_ok()));
+        assert!(!path.exists());
+        // So is whatever a failed writer left behind.
+        assert!(!super::write_owner_only_with(&path, super::restrict_to_owner, |path| { fs::write(path, "partial").unwrap(); false }));
+        assert!(!path.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_child_written_state_file_is_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = TempDir::new("hang-sample-permissions");
+        let hangs = dir.path().join("hangs");
+        fs::create_dir(&hangs).unwrap();
+        fs::set_permissions(&hangs, fs::Permissions::from_mode(0o755)).unwrap();
+        let path = hangs.join("sample.txt");
+        let written = super::write_owner_only_with(&path, super::restrict_to_owner, |path| {
+            fs::write(path, "sample").unwrap();
+            fs::set_permissions(path, fs::Permissions::from_mode(0o644)).is_ok()
+        });
+        assert!(written);
+        assert_eq!(fs::metadata(&hangs).unwrap().permissions().mode() & 0o777, 0o700);
+        assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+    }
+
+    /// docs/specs/security-local.md -> "Persisted state".
+    #[test]
+    fn the_hang_sample_is_written_owner_only() {
+        let src = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
+        let body = src.split("fn restart_hung_webviews(").nth(1).unwrap().split("\n}").next().unwrap();
+        assert!(body.contains("write_owner_only_with(&path, restrict_to_owner,"));
+        assert!(!body.contains("create_dir_all("));
+    }
+
+    /// Linux keeps the log in a per-user state directory whenever it has one
+    /// (docs/specs/standalone.md -> "Logging"). Unix paths, so unix only.
+    #[cfg(unix)]
+    #[test]
+    fn linux_log_dir_is_per_user_state() {
+        use std::ffi::OsString;
+        let some = |value: &str| Some(OsString::from(value));
+        assert_eq!(
+            super::linux_log_dir(some("/xdg/state"), some("/home/me")),
+            Some(PathBuf::from("/xdg/state/dormouse-terminal"))
+        );
+        // A relative XDG value is ignored, as the XDG spec requires.
+        assert_eq!(
+            super::linux_log_dir(some("relative"), some("/home/me")),
+            Some(PathBuf::from("/home/me/.local/state/dormouse-terminal"))
+        );
+        assert_eq!(
+            super::linux_log_dir(None, some("/home/me")),
+            Some(PathBuf::from("/home/me/.local/state/dormouse-terminal"))
+        );
+        assert_eq!(super::linux_log_dir(None, some("relative")), None);
+        assert_eq!(super::linux_log_dir(None, None), None);
+    }
+
+    /// The Linux default is wired to that directory, not the temp directory.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_default_log_location_is_not_the_temp_directory() {
+        if std::env::var_os(super::LOG_FILE_ENV).is_some() {
+            return;
+        }
+        let location = super::default_log_location();
+        let dir = super::linux_log_dir(std::env::var_os("XDG_STATE_HOME"), std::env::var_os("HOME"))
+            .expect("HOME is set under cargo test");
+        assert_eq!(location.path, dir.join("dormouse.log"));
+        assert!(location.own_dir);
+    }
+
+    /// Windows has no mode, so the log gets the owner-only DACL instead of
+    /// whatever its directory hands down.
+    #[cfg(windows)]
+    #[test]
+    fn log_open_protects_the_dacl_on_windows() {
+        use std::os::windows::ffi::OsStrExt;
+        use windows::core::PCWSTR;
+        use windows::Win32::Foundation::{LocalFree, ERROR_SUCCESS, HLOCAL};
+        use windows::Win32::Security::Authorization::{GetNamedSecurityInfoW, SE_FILE_OBJECT};
+        use windows::Win32::Security::{
+            GetSecurityDescriptorControl, ACL, DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
+            SE_DACL_PROTECTED,
+        };
+
+        let dir = TempDir::new("log-acl");
+        let path = dir.path().join("dormouse.log");
+        super::open_log(&path, fs::OpenOptions::new().create(true).append(true)).unwrap();
+
+        let wide: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+        unsafe {
+            let mut dacl: *mut ACL = std::ptr::null_mut();
+            let mut sd = PSECURITY_DESCRIPTOR::default();
+            let rc = GetNamedSecurityInfoW(
+                PCWSTR(wide.as_ptr()),
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION,
+                None,
+                None,
+                Some(&mut dacl),
+                None,
+                &mut sd,
+            );
+            assert_eq!(rc, ERROR_SUCCESS, "GetNamedSecurityInfoW failed");
+            let mut control: u16 = 0;
+            let mut revision = 0u32;
+            GetSecurityDescriptorControl(sd, &mut control, &mut revision)
+                .expect("GetSecurityDescriptorControl failed");
+            let _ = LocalFree(Some(HLOCAL(sd.0)));
+            assert!(control & SE_DACL_PROTECTED.0 != 0, "the log inherits its DACL");
+        }
+    }
+
+    /// The log's own directory is owner-only, and so is the file, whether new
+    /// or left loose by an earlier run (docs/specs/security-local.md ->
+    /// "Persisted state").
+    #[cfg(unix)]
+    #[test]
+    fn log_file_and_its_own_directory_are_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        let root = TempDir::new("log-owner-only");
+        let dir = root.path().join("state");
+        fs::create_dir(&dir).unwrap();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
+        let path = dir.join("dormouse.log");
+        assert!(super::prepare_log_dir(&path, true));
+        assert_eq!(mode(&dir), 0o700);
+
+        fs::write(&path, b"old").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o666)).unwrap();
+        super::open_log(&path, fs::OpenOptions::new().create(true).append(true)).unwrap();
+        assert_eq!(mode(&path), 0o600);
+
+        let fresh = dir.join("fresh.log");
+        super::open_log(&fresh, fs::OpenOptions::new().create(true).write(true).truncate(true)).unwrap();
+        assert_eq!(mode(&fresh), 0o600);
+    }
+
+    /// A symlink planted at the log's name is refused by both opens, so neither
+    /// truncates nor appends to whatever it points at.
+    #[cfg(unix)]
+    #[test]
+    fn log_open_refuses_a_planted_symlink() {
+        let root = TempDir::new("log-symlink");
+        let victim = root.path().join("victim");
+        fs::write(&victim, b"keep").unwrap();
+        let path = root.path().join("dormouse.log");
+        std::os::unix::fs::symlink(&victim, &path).unwrap();
+
+        assert!(super::open_log(&path, fs::OpenOptions::new().create(true).write(true).truncate(true)).is_err());
+        assert!(super::open_log(&path, fs::OpenOptions::new().create(true).append(true)).is_err());
+        assert_eq!(fs::read(&victim).unwrap(), b"keep");
     }
 
     #[cfg(unix)]

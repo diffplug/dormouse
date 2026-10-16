@@ -115,9 +115,9 @@ export function ManagedVoiceSection() {
       <div className="text-sm text-foreground">Managed voice</div>
       <p className={HINT}>
         Only the spoken pane label and voice id are sent to voice.dormouse.sh,
-        which has ElevenLabs speak it; ElevenLabs' copy is usually deleted within
-        seconds, always within minutes. If it cannot answer, the alarm uses your
-        system voice.
+        which has ElevenLabs speak it. ElevenLabs keeps a copy until Dormouse
+        deletes it, usually within minutes, though no limit is guaranteed. If
+        voice.dormouse.sh cannot answer, the alarm uses your system voice.
       </p>
       {status && (
         <>

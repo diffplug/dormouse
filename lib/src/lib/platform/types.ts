@@ -89,6 +89,31 @@ export function openPortRequestTimeoutMs(count: number, hops = 1): number {
 }
 
 
+/**
+ * How long the VS Code extension host lets one Surface id reservation wait —
+ * queued behind its other webviews' and for the cross-window lock together,
+ * counted from its arrival — before answering it with no ids
+ * (`vscode-ext/src/surface-ids.ts`). Far above a live holder's few-ms hold.
+ */
+export const SURFACE_ID_RESERVE_WAIT_MS = 3_000;
+
+/**
+ * The most Surface or Workspace ids one reservation hands out; a host clamps a
+ * larger ask to it, and the page asks again for the rest. The VS Code extension
+ * host and the browser dev harness read this; Rust keeps its twin, `MAX_BLOCK`
+ * in `standalone/src-tauri/src/ids.rs`.
+ */
+export const ID_RESERVE_MAX_BLOCK = 64;
+
+/**
+ * The webview's deadline for that answer. The host answers within the wait
+ * plus one durable write (the reservation's own, or the one ahead of it still
+ * in flight when the wait runs out); this leaves that write 5 s, so only a
+ * pathological fsync makes the webview mint `surface:<uuid>` while the host
+ * persists a block nobody uses.
+ */
+export const SURFACE_ID_RESERVE_TIMEOUT_MS = SURFACE_ID_RESERVE_WAIT_MS + 5_000;
+
 export type AlertStateDetail = { id: string } & AlertState;
 
 export type { IframeProxyResult };
@@ -137,7 +162,7 @@ export interface BurrowLink {
  * is the common case, so the two never cost twice the bytes over a transport
  * (`docs/specs/transport.md`). The same pair crosses every host seam and the
  * remote wire — `ProcessedPtyChunk` in
- * `lib/src/remote/burrow/burrow-surface-provider.ts`, `TerminalDataEvent` in
+ * `lib/src/lib/processed-pty-stream.ts`, `TerminalDataEvent` in
  * `remote-lib-common/src/remote/wire.ts` — under the same omitted/present rule.
  */
 export interface PtyDataDetail {
@@ -176,6 +201,10 @@ export interface WritePtyOptions {
   /** A human typed, pasted, or dropped this: the host acknowledges it with
    *  input before writing (`docs/specs/alert.md` -> Engagement). */
   userInput?: true;
+  /** Dormouse itself is typing a command line to run: the host admits OSC 367
+   *  `open` from that run alone (`docs/specs/dor-tool.md` -> OSC 367). Never
+   *  set for anything a user, `dor send`, or a remote Client types. */
+  launch?: true;
 }
 
 export interface PlatformAdapter {
@@ -226,6 +255,14 @@ export interface PlatformAdapter {
    * there, so the Settings dialog hides its Shell row (docs/specs/vscode.md).
    */
   hostOwnsShells?: boolean;
+
+  /**
+   * Whether the Theme picker offers installing a theme from OpenVSX, which
+   * fetches open-vsx.org outside the network policy. Absent reads as `false`;
+   * only the fake adapter (the website playground, Storybook) sets it
+   * (docs/specs/theme.md -> "Where the user picks a theme").
+   */
+  offersThemeStore?: boolean;
 
   /**
    * Whether Settings offers Labs (`docs/specs/reopen.md` → "Labs: No-confirm

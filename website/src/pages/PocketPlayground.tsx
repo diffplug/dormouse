@@ -16,7 +16,7 @@ function MobilePocketPlaygroundPage() {
     <main className="fixed inset-0 bg-[var(--color-app-bg)] text-[var(--color-app-fg)]">
       <PocketTerminalExperience interactive fillViewport />
       <div className="absolute right-2 bottom-3 z-30 rounded border border-[var(--vscode-panel-border)] bg-[var(--vscode-editorWidget-background)]/95 px-1.5 py-1 text-[var(--vscode-editor-foreground)] shadow-lg">
-        <ThemePicker variant="compact" />
+        <ThemePicker variant="compact" offerStore />
       </div>
     </main>
   );
@@ -31,7 +31,7 @@ function DesktopPocketPlaygroundPage() {
       <SiteHeader
         activePath="/pocket"
         style={STATIC_PAGE_HEADER_STYLE}
-        controls={<ThemePicker variant="compact" />}
+        controls={<ThemePicker variant="compact" offerStore />}
       />
       <main className="mx-auto grid min-h-screen max-w-6xl items-center gap-10 px-4 pb-10 pt-24 md:grid-cols-[minmax(0,1fr)_minmax(320px,390px)] md:px-8 md:pt-28">
         <section className="max-w-2xl">
@@ -41,7 +41,7 @@ function DesktopPocketPlaygroundPage() {
           <p className="mb-6 font-display text-lg text-[var(--color-caramel)]">
             Come back on mobile{" "}
             <ShareUrlButton path={POCKET_PLAYGROUND_PATH} title="Dormouse Pocket" />{" "}
-            to try it out! (WIP)
+            to try it out!
           </p>
           <p className="mb-4 text-lg leading-relaxed opacity-70">
             Take a terminal session to your phone and go for a stroll. Dormouse buzzes
@@ -50,12 +50,12 @@ function DesktopPocketPlaygroundPage() {
           <p className="mb-4 text-lg leading-relaxed opacity-70">
             Run your own Relay, or{" "}
             <a href={`${sitePath("/hosted")}#remote-control`} className={SITE_LINK_CLASS}>
-              join the list for Dormouse Hosted
-            </a>, where I’ll operate it for you. Your terminal still runs on your awake,
-            online computer; Hosted removes the server setup and maintenance.
+              let me run one for you with Dormouse Hosted
+            </a>. Your terminal still runs on your awake, online computer; Hosted removes
+            the server setup and maintenance.
           </p>
           <NotifySignupForm
-            buttonLabel="Join the devlog for Pocket + Hosted updates"
+            buttonLabel="Join the devlog for Pocket + Hosted news"
             announcement="Dormouse Pocket and Hosted"
           />
         </section>

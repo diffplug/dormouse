@@ -1,14 +1,14 @@
 # Terminal Mouse and Clipboard Behavior Specification
 
 > - See `docs/specs/glossary.md` for Session / Pane vocabulary. This spec uses it for the pane-level scoping of mouse regime, override state, and selection.
-> - Owns terminal selection, copy, paste, link activation, and mouse override across platforms; for a Tool, only while its terminal is forward. Header placement: `docs/specs/layout.md`; sequence registry: `docs/specs/terminal-escapes.md`.
+> - Owns terminal selection, copy, paste, link activation, and mouse override across platforms; for a Tool, only while its terminal is forward. Sequence registry: `docs/specs/terminal-escapes.md`.
 > - Sections are numbered for cross-spec reference (`§8.6` etc.); the numbers are stable, so append rather than renumber.
 
 ---
 
 ## 1. The Mouse Icon (Header Indicator)
 
-**Visibility.** The **Mouse icon** marks an inside program requesting mouse reporting (§6.1); the **No-Mouse icon** takes the same slot while an override is active.
+**The header's Mouse icon is the only desktop way into an override** (§2): it shows while the inside program requests mouse reporting (§6.1), and the No-Mouse icon takes its slot while one is active.
 
 Source of truth: `TerminalPaneHeader` in `lib/src/components/wall/TerminalPaneHeader.tsx`.
 
@@ -40,11 +40,11 @@ It ends on the **next mouse-up inside the terminal content area** paired with a 
 
 - **Counts:** a plain primary click (down/up that never crossed the drag threshold) or a completed drag.
 - **Does not count:** a non-primary click, whose context menu the override swallows anyway; clicks on the No-Mouse icon or the banner buttons; and an orphan mouse-up from a drag that started outside the terminal. Pinned by `lib/src/lib/terminal-mouse-router.test.ts`.
-- **On end** — or on **Cancel** — reporting is restored and the banner dismissed. **Must cancel a pending banner action when its temporary override ends**, never reactivating it later. **No timeout:** absent any mouse action the override stays indefinitely.
+- **On end** — or on **Cancel** — reporting is restored. **Must cancel a pending banner action when its temporary override ends**, never reactivating it later. **No timeout:** absent any mouse action the override stays indefinitely.
 
-**Sticky override** (`permanent`): banner dismissed, No-Mouse icon kept, mouse and wheel still going to the terminal.
+**Sticky override** (`permanent`): mouse and wheel still going to the terminal.
 
-**Auto-clear on reporting off.** **Either override clears when the inside program stops requesting mouse reporting** (it exits, or DECRSTs `?9l`/`?1000l`/`?1002l`/`?1003l`); icon and banner go with it. A **dead** session's replay ends in the `REPLAY_MODE_RESET` tail that DECRSTs mouse tracking (`docs/specs/transport.md` -> "Replay-time mode-reset tail (Dormouse-emitted)"), so a mode latched by a dead TUI cannot block selection in the restored pane.
+**Auto-clear on reporting off.** **Either override clears when the inside program stops requesting mouse reporting** (it exits, or DECRSTs `?9l`/`?1000l`/`?1002l`/`?1003l`). A **dead** session's replay ends in the `REPLAY_MODE_RESET` tail that DECRSTs mouse tracking (`docs/specs/transport.md` -> "Replay-time mode-reset tail (Dormouse-emitted)"), so a mode latched by a dead TUI cannot block selection in the restored pane.
 
 Source of truth: `setOverride` / `setMouseReporting` in `lib/src/lib/mouse-selection.ts`; `MouseOverrideBanner` in `lib/src/components/wall/MouseOverrideBanner.tsx`, pinned by `lib/src/components/wall/mouse-chrome.test.tsx`.
 
@@ -69,10 +69,6 @@ Source of truth: `lib/src/lib/terminal-mouse-router.ts`.
 - **Block (rectangular):** hold **Alt** (Option on macOS) during the drag.
 - **The shape updates live as Alt is pressed and released mid-drag**, including while the mouse is stationary.
 - Touch has no Alt key, so block mode is armed by **starting the drag with a double-tap** on a previous touch that *ended as a tap*. **Must retain that block shape for the whole drag**, including hardware-keyboard events. Pinned by `lib/src/lib/terminal-mouse-router.test.ts`.
-
-### 3.3 Selection Hint Text
-
-A hint beside an in-progress selection names its keys for the whole drag; §5.2 adds the extension line. Strings and placement live in `lib/src/components/SelectionOverlay.tsx`.
 
 ### 3.4 Selection Follows Content
 
@@ -107,8 +103,7 @@ Source of truth: `lib/src/components/wall/keyboard/handle-mouse-selection-keys.t
 A primary mouse drag that reaches the inside program (§6.1) is **shadowed**: its events reach the program untouched, and on release the cells it crossed become a linewise selection the program owns.
 
 - **Must never consume, delay, or reorder a shadowed drag's events**; only a press that crosses the drag threshold counts, so a program click shadows nothing.
-- It draws no outline, only a copy-chord hint: the program paints its own highlight.
-- **The copy chord opens the copy editor over it** (§4), outline included. Any input the program receives drops the shadow (§4.5), as does the program ending mouse reporting.
+- **The copy chord opens the copy editor over it** (§4). Any input the program receives drops the shadow (§4.5), as does the program ending mouse reporting.
 - Touch never shadows; a touch drag over a reporting program takes §6.1's rows.
 
 Source of truth: `finishProgramDrag` in `lib/src/lib/terminal-mouse-router.ts`, pinned by `lib/src/lib/terminal-mouse-router.test.ts`.
@@ -153,7 +148,7 @@ Source of truth: `autoBreak` in `lib/src/lib/copy-text.ts`.
 | Scope | Covers |
 |---|---|
 | **As selected** | The drag (opens here). |
-| **Whole words** | Each edge grown over its token, across any row break Auto deletes; an edge on a blank grows nothing. Named **Full URL** or **Full path** when the §5.1 detector classifies a grown edge token so. |
+| **Whole words** | Each edge grown over its token, across any row break Auto deletes; an edge on a blank grows nothing. |
 | **Paragraph** | The lines between blank lines, frame-only lines, and box sides (`│ ┃ ║`) at column zero; an edge on a boundary never crosses it. |
 
 Source of truth: `computeScopes` in `lib/src/lib/copy-text.ts`.
@@ -169,26 +164,27 @@ Source of truth: `computeScopes` in `lib/src/lib/copy-text.ts`.
 | `Enter` | Copy, as the chord does. |
 | `Esc` | Close and cancel the selection. |
 
-**Every key but the copy chord is the editor's in passthrough only**; command mode keeps its own. Any other key goes to the terminal, which closes the editor (§4.5). **Intercept Ctrl+C only while the editor is open or a shadowed drag waits for it** (§3.8); otherwise it reaches the inside program (SIGINT for shells, app-defined for TUIs). A selection a TUI makes from the keyboard (vim visual mode, less search highlight) is neither, and does not change that routing. Touch shows no key hints.
+**Every key but the copy chord is the editor's in passthrough only**; command mode keeps its own. Any other key goes to the terminal, which closes the editor (§4.5). **Intercept Ctrl+C only while the editor is open or a shadowed drag waits for it** (§3.8); otherwise it reaches the inside program (SIGINT for shells, app-defined for TUIs). A selection a TUI makes from the keyboard (vim visual mode, less search highlight) is neither, and does not change that routing.
 
 Source of truth: `handleMouseSelectionKeys` in `lib/src/components/wall/keyboard/handle-mouse-selection-keys.ts`; the transitions in `lib/src/lib/copy-editor.ts`, pinned by `lib/src/lib/copy-editor.test.ts`.
 
 ### 4.4 Preview and Marks
 
-Every break is a mark that a click cycles keep → space → none, flagging the active format as edited; a scope or format change, or a nudge, discards those edits.
+Every break is a mark that a click cycles keep → space → none; a scope or format change, or a nudge, discards those edits.
 
 ### 4.5 Placement and Dismissal
 
 - **Must render into `document.body` at `COPY_EDITOR_Z_INDEX`**: above the selection ring, below every `MODAL_LAYERS` value (rationale).
-- **Must re-place on every selection or scope change; never keep a spot that covers the selection while another fits.** Above and below may cover neighboring panes. The ranking lives at `placeCopyEditor` (rationale).
+- **Must re-place on every selection or scope change; never keep a spot that covers the selection while another fits.** The ranking lives at `placeCopyEditor` (rationale).
 - **Must follow its pane at most once a frame** (`docs/specs/layout.md` → "Position tracking").
 - **Never show while its Wall travels**, its pane hidden, or another pane zoomed over it.
 - **Never take focus**; only an actual scrollbar press keeps its default (rationale). Presses inside it count as inside its pane (`anchoredTarget`); its `mousedown` and `contextmenu` never reach the pane.
 - **Esc**, a click outside the editor, a content change or a resize it cannot follow (§3.4), a confirmed copy, or **any input the terminal receives** — typing, a paste, Pocket's input bar — dismisses it and cancels the selection. Source of truth: `writeUserInput` in `lib/src/lib/terminal-lifecycle.ts`, pinned by `lib/src/lib/terminal-lifecycle.selection.test.ts`.
-- **Must confirm only after a successful clipboard write, and only for the selection copied**; the selection then clears, however it moved meanwhile (rationale). Canceling clears the confirmation immediately.
+- **Must confirm only after a successful clipboard write, and only for the selection copied**; the selection then clears, however it moved meanwhile (rationale).
 - **Must leave empty copies idle without writing.** **Must say a failed write failed**, keeping the selection for a retry. Without the Clipboard API, or refused by it, the write first falls back to `execCommand('copy')` (rationale).
+- **Must open the clipboard-failure report when a write fails both ways**, unless its caller opts out. **Its details never carry the copied text**; they go to the tracking issue the report links.
 
-Source of truth: `CopyEditor` in `lib/src/components/CopyEditor.tsx` (placement, motion, touch slop); `copySelection` in `lib/src/lib/copy-selection.ts`; `writeTextToClipboard` in `lib/src/lib/clipboard.ts`, pinned by `lib/src/lib/clipboard-write.test.ts`.
+Source of truth: `CopyEditor` in `lib/src/components/CopyEditor.tsx` (placement, motion, touch slop); `copySelection` in `lib/src/lib/copy-selection.ts`; `writeTextToClipboard` in `lib/src/lib/clipboard.ts`, pinned by `lib/src/lib/clipboard-write.test.ts`; `ClipboardFailureGlobal` in `lib/src/components/ClipboardFailureDialog.tsx`.
 
 ### 4.6 The Program's Own Copy (OSC 52)
 
@@ -197,7 +193,7 @@ An `OSC 52` clipboard write from the inside program is never the clipboard. It b
 1. The owner's parser decodes the base64 as UTF-8, turns `\r\n` and `\r` into `\n`, and removes every other control character but tab. **Must drop, never truncate, a payload over `CLIPBOARD_OFFER_LIMIT` base64 characters** (rationale); a `?` read is never answered, and an empty or malformed write offers nothing. The sequence is consumed either way.
 2. The host sends it to the owning renderer as `terminal:clipboardOffer` (`docs/specs/transport.md` -> "Message protocol"); replay offers nothing (`docs/specs/terminal-escapes.md` -> "`pty:data` strip semantics").
 3. **Must accept an offer only into a pane whose selection the program owns** (§3.8), shadowed or open in the editor, the latest replacing any earlier; it goes with that selection.
-4. The editor then offers a fifth format, **From \<program\>** (the running command as WATCHING keys it, `docs/specs/alert.md`, else `program`), last in `f` order. **It has no scope**: choosing it returns to As selected, and `e` does nothing while it shows. Its marks still flip, and a nudge returns to Auto. **Never write an offer to the clipboard except as that format, chosen and copied by the user.**
+4. The editor then offers a fifth format, **From \<program\>**, last in `f` order. **It has no scope**: choosing it returns to As selected, and `e` does nothing while it shows. Its marks still flip, and a nudge returns to Auto. **Never write an offer to the clipboard except as that format, chosen and copied by the user.**
 
 Source of truth: `parseOsc52` and `CLIPBOARD_OFFER_LIMIT` in `lib/src/lib/terminal-protocol.ts`, pinned by `lib/src/lib/terminal-protocol.test.ts`; `offerProgramCopy` in `lib/src/lib/mouse-selection.ts`, pinned by `lib/src/lib/mouse-selection.test.ts`; `editorFormats` in `lib/src/lib/copy-editor.ts`.
 
@@ -205,7 +201,7 @@ Source of truth: `parseOsc52` and `CLIPBOARD_OFFER_LIMIT` in `lib/src/lib/termin
 
 ## 5. Smart Extension (URL / Path Detection)
 
-**Must re-examine the URL/path token under the cursor on every drag update, never reusing an answer for an unchanged cell.** Offer **e** to extend over it, alongside Alt (§3.2–§3.3).
+**Must re-examine the URL/path token under the cursor on every drag update, never reusing an answer for an unchanged cell.**
 
 ### 5.1 Detection
 
@@ -215,13 +211,9 @@ A token is whitespace-delimited and **runs on across soft wraps**. Trailing char
 
 `PATTERNS` in `lib/src/lib/smart-token.ts` holds the detected shapes in priority order, error locations (`<path>:line[:col]`) ahead of the generic path patterns. The generic patterns require an anchor (`~/`, `/`, `./`, `../`, or a drive letter), so a bare relative path like `src/foo.ts` qualifies only in its error-location form.
 
-### 5.2 Mid-Drag Hint
-
-The hint gains a line naming the detected kind, URL or path, live while the drag is over a qualifying token, and none otherwise.
-
 ### 5.3 Extension Action
 
-- **e** during a drag, while the hint is visible, extends the selection over the full detected token: the anchor is preserved, the far end moves to the token boundary away from it. The drag then continues normally — movement updates the selection from the new boundary, Alt still toggles block shape.
+- **e** during a drag over a qualifying token extends the selection over the full detected token: the anchor is preserved, the far end moves to the token boundary away from it. The drag then continues normally — movement updates the selection from the new boundary, Alt still toggles block shape.
 - **e** with no qualifying token is consumed (per §3.6) but extends nothing; once the drag has ended, `e` is the editor's expand instead (§4.3). Release finalizes whatever boundaries the drag, extensions included, produced.
 - **Only this single extension step is offered mid-drag**, and no "open URL" action (§9.1); the editor's scopes are the wider steps (§4.2).
 - **Must preserve extension on keys that leave the shape unchanged.** Pinned by `lib/src/lib/terminal-mouse-router.test.ts`.
@@ -249,9 +241,9 @@ Source of truth: `terminalOwnsEvent` in `lib/src/lib/terminal-mouse-router.ts`.
 
 ## 7. Rendering Notes
 
-**Must keep selection and hint updates from rerendering pane headers or override banners** (rationale). Outlines and hints draw above the cell grid from xterm's measured cell geometry, remeasured on every render tick.
+**Must keep selection updates and `SelectionOverlay`'s drag hint from rerendering pane headers or override banners** (rationale).
 
-Source of truth: `TerminalPaneHeader` in `lib/src/components/wall/TerminalPaneHeader.tsx` and `MouseOverrideBanner` in `lib/src/components/wall/MouseOverrideBanner.tsx`, pinned by `lib/src/components/wall/mouse-chrome.test.tsx`; `SelectionOverlay` in `lib/src/components/SelectionOverlay.tsx`.
+Source of truth: `TerminalPaneHeader` in `lib/src/components/wall/TerminalPaneHeader.tsx` and `MouseOverrideBanner` in `lib/src/components/wall/MouseOverrideBanner.tsx`, pinned by `lib/src/components/wall/mouse-chrome.test.tsx`.
 
 ---
 
@@ -279,7 +271,7 @@ Source of truth: `lib/src/components/wall/keyboard/chords.ts`.
 
 When the inside program has opted in via `\e[?2004h`, the PTY gets `\e[200~`, the clipboard content, then `\e[201~`; otherwise the content is written unwrapped. The mode is read at paste time.
 
-**Must defang every bracketed payload:** replace each `\e` with visible U+241B before wrapping, or an embedded `\e[201~` closes the boundary and later newlines submit. This covers file-path pastes (§8.6 tiers 1 and 3), which share the writer. **Never filter the unbracketed branch:** with no paste boundary, filtering only corrupts deliberate escape sequences. Both branches are pinned by `lib/src/lib/clipboard.test.ts`.
+**Must defang every bracketed payload:** replace each `\e` with visible U+241B before wrapping, or an embedded `\e[201~` closes the boundary and later newlines submit. **Never filter the unbracketed branch:** with no paste boundary, filtering only corrupts deliberate escape sequences. Both branches are pinned by `lib/src/lib/clipboard.test.ts`.
 
 Source of truth: `defangPasteEscapes` in `lib/src/lib/clipboard.ts`.
 
@@ -297,9 +289,11 @@ One shared Node module, `standalone/sidecar/clipboard-ops.js`, serves both hosts
 
 **The standalone/Tauri build on Windows reads the Win32 clipboard directly in Rust**, dropping the subprocess, with the same temp-file cleanup for an image. Non-Windows Tauri stays on the sidecar path.
 
+**Must refuse the whole file-reference paste or drop (tiers 1 and 3, and §8.7) when any path carries a C0, DEL, or C1 character** (`hasShellInputControls`), bracketed or not, and show a notice on the pane (rationale).
+
 **Path escaping (tiers 1 and 3, and §8.7). Quote a pasted path for the Session's launch shell** — never for the host platform, never for the app-global shell selected for future terminals (rationale). Each terminal captures its `shellKind` at spawn, kept across a live reconnect (`docs/specs/transport.md` -> "Reconnection protocol") and a cold restore. **Only a missing registry entry falls back** — to the app-global selected shell, then the platform (`cmd` on Windows, posix elsewhere). Classification uses the same `shellCommandKind` `dor` uses to quote commands (`docs/specs/dor-cli.md`). **Must share `quotePowerShellArg` with `dor` for literal PowerShell arguments; never use cmd quoting for PowerShell** (rationale). The posix/cmd escaping rules and their parser limitations live at `shellEscapePath`.
 
-Source of truth: `lib/src/lib/clipboard.ts` (Session-kind selection), `lib/src/lib/shell-escape.ts` (dispatch + posix/cmd rules, pinned by `lib/src/lib/shell-escape.test.ts`), `dor/src/commands/shell-quote.ts` (`shellCommandKind`, `quotePowerShellArg`), `standalone/src-tauri/src/clipboard_win.rs` (Win32 read).
+Source of truth: `lib/src/lib/clipboard.ts` (Session-kind selection, control refusal), `lib/src/lib/shell-escape.ts` (dispatch + posix/cmd rules, pinned by `lib/src/lib/shell-escape.test.ts`), `dor/src/commands/shell-quote.ts` (`shellCommandKind`, `quotePowerShellArg`), `standalone/src-tauri/src/clipboard_win.rs` (Win32 read).
 
 ### 8.7 Drag-to-Paste
 
@@ -328,7 +322,7 @@ Source of truth: `handleEditableClipboard` in `lib/src/components/wall/keyboard/
 
 ## Terminal context input
 
-**Must give application-captured right-click to the terminal program**, retaining header right-click as the context entry point. Do not add a Shift-right-click override gesture.
+**Must give application-captured right-click to the terminal program.** Do not add a Shift-right-click override gesture.
 
 **Must route clipboard chords and selection operations to the focused helper**, while leaving its Escape, Tab, arrows, and digits with xterm. Which of those disarm autorun follows `docs/specs/terminal-context.md` → "Helper lifecycle".
 
@@ -346,11 +340,12 @@ Neither `params` nor the URI is parsed at the PTY boundary.
 
 | State | Target | Dialog |
 |---|---|---|
-| **Openable** | any absolute URI with a scheme — `http:`, `https:`, `mailto:`, `file:`, custom app schemes such as `vscode:` | cancel plus an open action |
+| **Openable** | `http:`, `https:`, `mailto:`, and `file:` | cancel plus an open action |
+| **Other app** | any other absolute URI, such as `vscode:` or `tel:` | titled with the scheme as another app, warning that whichever app handles it gets the link; cancel plus an open action |
 | **Deceptive** | display text URL-shaped (a full URL or a bare domain) but resolving to a different host than the target; one that merely *differs* — a human phrase, a same-host sibling URL — is **plain**, not deceptive, and stays openable | **No open action at all**: close and copy only, the copy button taking initial focus so a reflexive Enter cannot open anything |
-| **Blocked** | malformed URIs, control-character-bearing targets, browser-executable or opaque pseudo-schemes (`javascript:`, `data:`, `blob:`, `about:`) | **Never silently dropped**: the dialog opens with the reason, close the only action |
+| **Blocked** | malformed URIs, targets carrying a control, bidi, or zero-width character (`hasControlOrFormatCharacters`), browser-executable or opaque pseudo-schemes (`javascript:`, `vbscript:`, `data:`, `blob:`, `about:`), Windows handlers refused outright (`docs/specs/security-local.md` -> "Terminal output") | **Never silently dropped**: the dialog opens with the reason, close the only action |
 
-**Cancel/close is the safe default; long targets must wrap and scroll without truncation.** **The confirmation host must reject deceptive verdicts even if its callback runs.** **Every external-URL adapter must revalidate through `normalizeExternalUri` before opening** (VS Code before `vscode.env.openExternal`) — consent does not replace validation.
+**Cancel/close is the safe default; long targets must wrap and scroll without truncation.** **Must show the target, display text, and any error with those characters escaped** (`printableExact`), so the text read is the text there. **The confirmation host must reject deceptive verdicts even if its callback runs.** **Every external-URL adapter must revalidate through `normalizeExternalUri` before opening** (VS Code before `vscode.env.openExternal`) — consent does not replace validation.
 
 `docs/specs/dor-tool.md` → "Terminal links" owns confirmed file opening and viewer selection.
 

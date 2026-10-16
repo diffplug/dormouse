@@ -10,8 +10,6 @@
 
 ## Browser Chrome
 
-**Why the robot is independent of presentation.** Agent visibility is the important capability boundary: an in-pane screencast and an iframe share the same human geometry, while only the screencast is available to an agent. A separate presentation glyph then distinguishes pane-sized, fixed, and popped-out views without weakening that first signal.
-
 **What the scheme ladder decides.** A typed `host:port` chooses `http://`, which the iframe proxy supports for remote and loopback targets alike. A bare remote host chooses `https://`; entering it in an iframe reports the unsupported scheme and requires an explicit render swap to agent-browser.
 
 ## Pane Context Menu Connect
@@ -87,6 +85,8 @@
 **Why `url` is a commit edge, apart from `tabs`.** Measured against agent-browser 0.31.1 (2026-09): on `open`, the stream sends `tabs` (about:blank), then `url` naming the target at navigation commit, and refreshes `tabs` only when the CLI command completes — after `load`. During a slow load the tab list still named the previous page, so a pop-out issued then relaunched the page before the one being loaded.
 
 **Whose limitation the CSS-resolution provisional frame is.** Chromium's `Page.startScreencast` captures in DIP and exposes no DPR knob, so the stream is CSS-resolution whatever the client asks for — upstream Chromium, not something agent-browser chose or could fix.
+
+**Why a stream frame is cropped to the viewport.** Chrome's window is never narrower than 500 CSS px, so a phone viewport is emulated at the left of a 500-wide window, and `Page.startScreencast` captures the window: its root background filled the rest, a dark bar beside the page that also made the canvas change shape on each provisional paint (reported 2026-10-09). Measured with headless Chrome 150 at a 390×844 viewport (2026-10-10): Playwright's frame was 500×757 at CSS resolution, its metadata the same 500×757, the page on the left 390 columns; agent-browser 0.31.1's daemon fit the same window into the viewport, a 390×658 frame (scale 0.78) whose metadata named the viewport, 390×844. Both frames fell short of the viewport's height, so the rows below them keep the last paint. Chromium's bundled headless shell drew the viewport alone. So Playwright's host sends its metadata width as the window's and the measured viewport as the frame's size, and agent-browser's, which has no measure of the window, sends the viewport's width raised to Chrome's 500. The webview, given both, needs no provider's geometry.
 
 **Why settle, then sharpen.** An animated page drove the crisp loop at up to ~5.5 device-resolution captures a second per pane (~120 ms each, paced at 1.5× that), each a spawn or CDP call, an encode, 100-700 KB over IPC and a decode, while the stream frames of the same motion were received and thrown away (static reading, 2026-09-23). Detail lost on moving content is not seen; the one capture once it rests is. The cost is that moving content is CSS-resolution on HiDPI until it stops — and a page that never stops (a looping spinner, a video) stays at stream resolution for as long as it moves, where it once got a sharp capture every ~180 ms. Measured with Playwright's Chromium (2026-10-03): an animation's first ~500 ms took six captures, the rest only stream paints, and one capture landed ~220 ms after its last frame.
 

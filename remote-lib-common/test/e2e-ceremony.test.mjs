@@ -14,15 +14,19 @@ import assert from 'node:assert/strict';
 
 import {
   CEREMONY_FIELD_LIMIT,
+  CHALLENGE_BYTE_LENGTH,
   NoiseTransportSession,
   ONE_TIME_DENIAL_CODES,
   ONE_TIME_DEVICE_LABELS,
   ONE_TIME_UNKNOWN_DEVICE_LABEL,
   PAIRING_CODE_LENGTH,
+  PRESENCE_WINDOW,
   SESSION_END_V1,
   createNoiseInitiator,
   createNoiseResponder,
+  decodeConnectionMessage2,
   e2eConnectionPrologue,
+  encodeConnectionMessage2,
   generateNoiseKeyPair,
   hashPasskeyPublicKey,
   isConnectionOutcomeV1,
@@ -400,13 +404,46 @@ test('isPairingOutcomeV1 takes the success shape or one of six fixed denials', (
   }
 });
 
-test('isConnectionRequestV1 is the presence proof and nothing else', async () => {
+test('isConnectionRequestV1 is a presence proof or the window, and nothing else', async () => {
   const presence = await proofFor(connectionBinding());
   assert.equal(isConnectionRequestV1({ presence }), true);
+  assert.equal(isConnectionRequestV1({ presence: PRESENCE_WINDOW }), true);
   assert.equal(isConnectionRequestV1({ presence, extra: 1 }), true);
   assert.equal(isConnectionRequestV1({}), false);
   assert.equal(isConnectionRequestV1(null), false);
   assert.equal(isConnectionRequestV1({ presence: { ...presence, assertion: null } }), false);
+  for (const near of ['Window', 'none', '', true, { window: true }]) {
+    assert.equal(isConnectionRequestV1({ presence: near }), false, JSON.stringify(near));
+  }
+});
+
+// --- Connection message 2 -------------------------------------------------
+
+test('message 2 is the challenge then one offer byte, always the same length', () => {
+  const challenge = globalThis.crypto.getRandomValues(new Uint8Array(CHALLENGE_BYTE_LENGTH));
+  const none = encodeConnectionMessage2(challenge, 'none');
+  const offered = encodeConnectionMessage2(challenge, PRESENCE_WINDOW);
+  assert.equal(none.length, CHALLENGE_BYTE_LENGTH + 1);
+  assert.equal(offered.length, none.length);
+  assert.deepEqual(none.subarray(0, CHALLENGE_BYTE_LENGTH), challenge);
+  assert.deepEqual([none[CHALLENGE_BYTE_LENGTH], offered[CHALLENGE_BYTE_LENGTH]], [0x00, 0x01]);
+  assert.equal(decodeConnectionMessage2(none), 'none');
+  assert.equal(decodeConnectionMessage2(offered), PRESENCE_WINDOW);
+  assert.throws(() => encodeConnectionMessage2(challenge.subarray(1), 'none'));
+});
+
+test('a bare challenge is a Burrow that offers no window, and an unknown offer is none', () => {
+  // Version skew either way is harmless: the Client binds whatever payload it
+  // received, so a proof always verifies against the Burrow that wrote it.
+  assert.equal(decodeConnectionMessage2(new Uint8Array(CHALLENGE_BYTE_LENGTH)), 'none');
+  const unknown = new Uint8Array(CHALLENGE_BYTE_LENGTH + 1);
+  for (const byte of [0x02, 0x81, 0xff]) {
+    unknown[CHALLENGE_BYTE_LENGTH] = byte;
+    assert.equal(decodeConnectionMessage2(unknown), 'none', String(byte));
+  }
+  for (const length of [0, CHALLENGE_BYTE_LENGTH - 1, CHALLENGE_BYTE_LENGTH + 2]) {
+    assert.equal(decodeConnectionMessage2(new Uint8Array(length)), null, String(length));
+  }
 });
 
 test('isConnectionOutcomeV1 takes a labelled success or one of five fixed denials', () => {
@@ -578,6 +615,12 @@ test('a pairing approval and every pairing denial are the same size on the wire'
   ]) {
     assert.equal(burrow.sendControl({ ok: false, code }).length, success.length, code);
   }
+});
+
+test('a window request is the same size on the wire as a proof', async () => {
+  const burrow = await established();
+  const proof = burrow.sendControl({ presence: await proofFor(connectionBinding()) });
+  assert.equal(burrow.sendControl({ presence: PRESENCE_WINDOW }).length, proof.length);
 });
 
 test('a connection success and every connection denial are the same size on the wire', async () => {

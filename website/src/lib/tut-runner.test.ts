@@ -1,18 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 import { FakePtyAdapter } from "dormouse-lib/lib/platform/fake-adapter";
-import * as alertSettings from "dormouse-lib/lib/alert-settings";
-import type { AlertStateDetail } from "dormouse-lib/lib/platform/types";
 import {
   DESKTOP_SECTIONS as SECTIONS,
   POCKET_TUTORIAL_PROFILE,
   type ItemId,
   type TutorialProfile,
 } from "./tut-items";
-import { BUSY_DEMO_INTERVAL_MS, GESTURE_BACKGROUND_TICK_MS, STARFIELD_HEIGHT, TutRunner } from "./tut-runner";
+import { GESTURE_BACKGROUND_TICK_MS, STARFIELD_HEIGHT, TutRunner } from "./tut-runner";
 import { TutorialState } from "./tutorial-state";
 import { BOLD, RESET, fg } from "dormouse-lib/lib/ansi";
 
-type TutRunnerOptions = ConstructorParameters<typeof TutRunner>[0];
 
 const WHEEL_UP = "\x1b[<64;2;2M";
 const WHEEL_DOWN = "\x1b[<65;2;2M";
@@ -42,9 +39,6 @@ function mountRunner(
     onNotifyPocket?: () => void;
     pocketTouchMode?: "gestures" | "selection" | "cursor";
     profile?: TutorialProfile;
-    getInactivityTimeoutMs?: () => number;
-    onTriggerBusyDemo?: TutRunnerOptions["onTriggerBusyDemo"];
-    onTriggerCommandExitDemo?: TutRunnerOptions["onTriggerCommandExitDemo"];
   } = {},
 ) {
   const adapter = new FakePtyAdapter();
@@ -73,9 +67,6 @@ function mountRunner(
     onOpenGithub: options.onOpenGithub,
     onOpenPocket: options.onOpenPocket,
     onNotifyPocket: options.onNotifyPocket,
-    getInactivityTimeoutMs: options.getInactivityTimeoutMs,
-    onTriggerBusyDemo: options.onTriggerBusyDemo,
-    onTriggerCommandExitDemo: options.onTriggerCommandExitDemo,
     getPocketTouchMode: () => pocketTouchMode,
     subscribeToPocketTouchMode: (listener) => {
       pocketTouchModeListeners.add(listener);
@@ -201,80 +192,6 @@ describe("TutRunner snapshots", () => {
     runner.handleGestureInput("right");
     expect(state.isComplete("gn-arrows")).toBe(false);
     dispose();
-  });
-
-  it.each([1_000, 60_000])("uses the configured %i ms timeout for demo timers and countdowns", (inactivityTimeoutMs) => {
-    vi.useFakeTimers();
-    // Semantic timestamps are monotonic across parsers, so later cases must
-    // not move their wall clock behind the preceding case’s simulated exit.
-    vi.setSystemTime(2_000_000_000_000 + inactivityTimeoutMs * 1_000);
-    const settings = { ...alertSettings.DEFAULT_ALERT_SETTINGS, inactivityTimeoutMs };
-    const events: AlertStateDetail[] = [];
-    const demoId = "demo-target";
-    let currentTimeoutMs = alertSettings.DEFAULT_ALERT_SETTINGS.inactivityTimeoutMs;
-    let durationMs = 0;
-    let commandMs = 0;
-    let busyDemoLaunches = 0;
-    let finishTimer: ReturnType<typeof setTimeout> | undefined;
-    let cancelPump: (() => void) | undefined;
-    const { adapter, sendKeys, lastFrame, dispose } = mountRunner([], {
-      getInactivityTimeoutMs: () => currentTimeoutMs,
-      onTriggerBusyDemo: (duration, commandDuration) => {
-        durationMs = duration;
-        commandMs = commandDuration;
-        busyDemoLaunches += 1;
-        adapter.sendOutput(demoId, "\x1b]633;E;longtask\x07\x1b]633;C\x07");
-        cancelPump = adapter.pumpActivity(demoId, duration, BUSY_DEMO_INTERVAL_MS);
-        finishTimer = setTimeout(() => adapter.sendOutput(demoId, "\x1b]633;D;0\x07"), commandDuration);
-      },
-      onTriggerCommandExitDemo: (duration) => {
-        durationMs = duration;
-        adapter.sendOutput(demoId, "\x1b]633;E;slowbuild\x07\x1b]633;C\x07");
-        // The user clicks into the demo pane, then back to the tutorial.
-        adapter.alertEngagement({ present: true, focusId: demoId });
-        adapter.alertEngagement({ present: true, focusId: "test-pane" });
-        finishTimer = setTimeout(() => adapter.sendOutput(demoId, "\x1b]633;D;0\x07"), duration);
-      },
-    });
-    try {
-      adapter.setScenario(demoId, { name: "none", chunks: [] });
-      adapter.spawnPty(demoId);
-      currentTimeoutMs = inactivityTimeoutMs;
-      adapter.alertPublishSettings(settings, { seed: false });
-      adapter.onAlertState((event) => { if (event.id === demoId) events.push(event); });
-      sendKeys(sectionRow("alert") + ENTER + "x");
-      expect(durationMs).toBeGreaterThan(inactivityTimeoutMs);
-      expect(lastFrame()).toContain(`${Math.ceil(durationMs / 1000)}\x1b[0m seconds`);
-      vi.advanceTimersByTime(durationMs - 1);
-      expect(events.some((event) => event.notification?.source === "COMMAND_EXIT")).toBe(false);
-      vi.advanceTimersByTime(1);
-      expect(events.some((event) => event.notification?.source === "COMMAND_EXIT")).toBe(true);
-
-      adapter.alertDismiss(demoId);
-      adapter.alertSetCommandWatched("longtask", true);
-      events.length = 0;
-      sendKeys("s");
-      // `s` counts down its fake command, which outlives the pump so WATCHING's
-      // silence chain has something to ring against.
-      expect(commandMs).toBeGreaterThan(durationMs);
-      expect(lastFrame()).toContain(`${Math.ceil(commandMs / 1000)}\x1b[0m seconds`);
-      // The runner's guard covers the whole command, so a replay anywhere
-      // inside it is ignored (the page cancels across runner instances).
-      vi.advanceTimersByTime(durationMs + 1);
-      sendKeys("s");
-      expect(busyDemoLaunches).toBe(1);
-      vi.advanceTimersByTime(commandMs - durationMs + 7_000);
-      expect(events.some((event) => event.status === "BUSY")).toBe(true);
-      expect(events.some((event) => event.status === "ALERT_RINGING")).toBe(true);
-      sendKeys("s");
-      expect(busyDemoLaunches).toBe(2);
-    } finally {
-      clearTimeout(finishTimer);
-      cancelPump?.();
-      dispose();
-      adapter.reset();
-      vi.useRealTimers();
-    }
   });
 
   it("ignores unsupported terminal keys without navigating back or corrupting reset input", () => {

@@ -3,7 +3,6 @@ import type {
   CliResult,
   ControlClient,
   DorCommandContext,
-  IdFormat,
   ParseResult,
 } from './types.js';
 import { errorLine } from './terminal-text.js';
@@ -40,15 +39,6 @@ export function parseNonNegativeInt(input: string, flag: string): number {
 }
 
 
-export function isIdFormat(value: string): value is IdFormat {
-  return value === 'refs' || value === 'ids' || value === 'both';
-}
-
-export function parseIdFormat(value: string): IdFormat {
-  if (isIdFormat(value)) return value;
-  throw new SyntaxError(`invalid --id-format '${value}'`);
-}
-
 export interface PreDelimiterArgSpec {
   /** Flags taking no value. */
   readonly booleans: ReadonlySet<string>;
@@ -69,6 +59,12 @@ export function scanPreDelimiterArgs(head: readonly string[], spec: PreDelimiter
   for (let index = 0; index < head.length; index += 1) {
     const arg = head[index];
     if (spec.booleans.has(arg)) continue;
+    // stricli also takes `--flag=value`.
+    const equals = arg.indexOf('=');
+    if (arg.startsWith('--') && equals > 0 && spec.valued.has(arg.slice(0, equals))) {
+      if (equals === arg.length - 1) return { ok: false, message: `${arg.slice(0, equals)} requires a value` };
+      continue;
+    }
     if (spec.valued.has(arg)) {
       const value = head[index + 1];
       if (!value || value.startsWith('-')) return { ok: false, message: `${arg} requires a value` };
@@ -126,17 +122,6 @@ export function workspaceParam(workspace: string | undefined): { workspace?: str
   return workspace === undefined ? {} : { workspace };
 }
 
-export function renderHandle(handle: { ref: string; id: string }, idFormat: IdFormat): string {
-  switch (idFormat) {
-    case 'refs':
-      return handle.ref;
-    case 'ids':
-      return handle.id;
-    case 'both':
-      return `${handle.ref} ${handle.id}`;
-  }
-}
-
 export function writeStdout(context: DorCommandContext, stdout: string): void {
   context.process.stdout.write(stdout);
 }
@@ -162,7 +147,6 @@ export function msysToWindowsCwd(pwd: string, platform: string): string {
 // travel in the request. Prefer the shell's PWD (injectable, matches what the
 // user sees) and fall back to the process cwd. resolvePath canonicalizes both the
 // default and a relative/absolute path into one absolute path the host can key on.
-// Shared by `ensure`, `split`, `list`, `tool`, `open`, and `skill`.
 export function callerWorkingDirectory(flag: string | undefined, { env, host }: CliOptions): string {
   const base = msysToWindowsCwd(env?.PWD ?? host.cwd(), host.platform);
   return host.resolvePath(base, flag ?? '.');

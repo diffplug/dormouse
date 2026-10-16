@@ -63,26 +63,21 @@ exports[`TutRunner snapshots > renders the alert section with all items incomple
   [1mAlerts and attention[0m  [2m0/8 complete[0m
   [2m[36mEsc[39m to go back[0m
 
-   [33m●[0m  [1mAlert me whenever [36mlongtask[39m runs[0m
-        [3mPress [36ms[39m to start a fake [36mlongtask[39m, then right-click that pane's header[0m
-        [3m(or select it and press [36ma[39m) and turn on "watch longtask". Alerts belong[0m
-        [3mto the command, not the tab.[0m
-   [2m·[0m  The rule covers every pane running that command
-   [2m·[0m  It rings when the command goes quiet
-   [2m·[0m  Dismissing a ringing alert leaves a TODO behind
-   [2m·[0m  Type anything inside the pane to clear the TODO
-   [2m·[0m  Add a TODO by hand
-   [2m·[0m  A program can ring on its own
-   [2m·[0m  A command that finished while you were away
+   [33m●[0m  [1mRun [36magent[39m, then come back here[0m
+        [3mSplit off a new pane (the split button in any pane header, or [36m|[39m in[0m
+        [3mcommand mode), run [36magent[39m in it, then click back into this pane. When it[0m
+        [3mneeds you, its pane rings: no setup, the program asked. Dormouse waits[0m
+        [3mfor its screen to settle first.[0m
+   [2m·[0m  Look at it
+   [2m·[0m  Answer it
+   [2m·[0m  Stay and watch
+   [2m·[0m  Run [36mbuild[39m, then come back here
+   [2m·[0m  An agent that never asks
+   [2m·[0m  Mark a pane for later
+   [2m·[0m  Hear it out loud
 
-  [2mThree different things can make a pane ring: a rule you set on a command name,[0m
-  [2ma notification the program sends, and a command finishing while you were[0m
-  [2melsewhere. None of them ring while you are looking at the pane — they wait[0m
-  [2muntil you go idle.[0m
-
-  [2mPress [36ms[39m to start a fake [36mlongtask[39m.[0m
-  [2mPress [36mn[39m for a program that rings on its own.[0m
-  [2mPress [36mx[39m to start a fake [36mslowbuild[39m.[0m
+  [2mA pane rings when it needs you and you are not looking at it. Look, and it[0m
+  [2mbecomes a TODO; deal with it, and it is gone.[0m
 "
 `;
 

@@ -1,16 +1,18 @@
 import type { Context, ExecutionContext, Hono } from "hono";
+import { openAuthRead, ownPageRead } from "./account-gate";
 import type { AccountEnv } from "./bindings";
 import { accountRules } from "./headers";
 import { relayAccountRoutes, type RelayAccountHost } from "./relay-account";
 import { relayRoom } from "./relay-room-contract";
+import { termsRoutes } from "./terms";
 import { voiceTokenRoutes } from "./voice";
 import { workerApp } from "./worker-app";
 
 /**
  * The account Worker (`hosted.dormouse.sh`): auth, providers, readiness,
- * voice-token minting, the Relay's account routes, and the frontend. The
- * production and preview entries differ only in `fetchAuth`'s mail and in
- * `bindings`.
+ * terms acceptance, voice-token minting, the Relay's account routes, and the
+ * frontend. The production and preview entries differ only in `fetchAuth`'s
+ * mail and in `bindings`.
  */
 export function accountApp(
   fetchAuth: (
@@ -29,17 +31,25 @@ export function accountApp(
     routes(app) {
       configure?.(app);
       app.all("/api/auth/*", (c) =>
-        fetchAuth(c.req.raw, c.env, c.executionCtx),
+        c.req.method !== "POST" &&
+        !openAuthRead(c.req.path) &&
+        !ownPageRead(c.req.raw, c.env.APP_ORIGIN)
+          ? c.json({ message: "Invalid origin." }, 403)
+          : fetchAuth(c.req.raw, c.env, c.executionCtx),
       );
-      app.get("/api/providers", (c) =>
-        fetchAuth(c.req.raw, c.env, c.executionCtx),
-      );
+      // The provider list needs no login, so it never carries one.
+      app.get("/api/providers", (c) => {
+        const headers = new Headers(c.req.raw.headers);
+        headers.delete("cookie");
+        return fetchAuth(new Request(c.req.raw, { headers }), c.env, c.executionCtx);
+      });
       const host = (c: Context<{ Bindings: AccountEnv }>): RelayAccountHost => ({
         databaseUrl: c.env.HYPERDRIVE.connectionString,
         auth: (request) => fetchAuth(request, c.env, c.executionCtx),
         approveLimit: c.env.RELAY_APPROVE_LIMIT,
         closeBurrow: (userId, burrowId) => relayRoom(c.env.RELAY_ROOM, userId).closeBurrow(burrowId),
       });
+      termsRoutes(app, host);
       voiceTokenRoutes(app, host);
       relayAccountRoutes(app, host);
     },

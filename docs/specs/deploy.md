@@ -44,6 +44,16 @@ Human-driven, in order:
 
 Source of truth: `scripts/bump-version.sh`; `on.push.tags` in `.github/workflows/release.yml`.
 
+## Build stamp
+
+Every webview bundle (Standalone, VS Code, the website) carries a stamp: the latest `CHANGELOG.md` version, the short commit, the commits past that version's tag (unknown where the tag is absent), whether the tree was dirty, whether the build is official, and the host it was built for; `dor` carries the first three. Settings → About and `dor version` show the same build tag.
+
+- **An official build is one `.github/workflows/release.yml` built in `diffplug/dormouse` from tag `vX.Y.Z`, at that tag's commit, from a clean tree**; every other build is unofficial, whatever its dev or release mode.
+- **A release run whose stamp is not official must fail the build** (rationale).
+- **Never let the stamp decide trust, updates, or features**: its inputs are environment variables any build can set, and provenance is Stage 2's attestation check.
+
+Source of truth: `computeBuildStamp` in `scripts/build-stamp.mjs`; `readBuildStamp` in `lib/src/lib/build-info.ts`.
+
 ## Two-stage pipeline
 
 **Must apply production OS and updater signatures locally** — Windows OS signing uses a physical PIV key, macOS a local Developer ID certificate.
@@ -93,7 +103,7 @@ Those three, and the `Tag operations` ruleset behind `v*`, are GitHub repository
 
 ## Stage 2: Local script
 
-**Never mutate `release-signed/downloads/`.** `all` and `resume` rebuild `release-signed/work/`; `sign-mac` and `sign-win` refresh only their platform, and `notarize` preserves the signed Mac copy. `--help` lists subcommands.
+**Never mutate `release-signed/downloads/`.** `all` and `resume` rebuild `release-signed/work/`; `sign-mac` and `sign-win` refresh only their platform, and `notarize` preserves the signed Mac copy.
 
 **Must require completed OS-signing/notarization stages before updater signing, and completed updater signing before release upload.** Re-running an earlier stage invalidates dependent bundles and completion markers. **Must reject a cached-version mismatch in resume subcommands without deleting work**; `all X.Y.Z` starts a different version. Release commands accept stable `X.Y.Z` versions only.
 
@@ -162,7 +172,7 @@ Config lives in [tauri.conf.json](../../standalone/src-tauri/tauri.conf.json) (`
 
 `sign_updates` writes it after signing to `website/public/standalone-latest.json`, served via Cloudflare Pages from `dormouse.sh/standalone-latest.json` (the `plugins.updater.endpoints` entry) — giving request analytics on every update check.
 
-Shape: `version`, `notes` (a link to the GitHub release tag, not the changelog body), `pub_date`, and a `platforms` map keyed `darwin-aarch64` / `windows-x86_64` / `linux-x86_64`, each with `url` and `signature` (that bundle's `.sig`, verbatim). **The script fails rather than emit a platform with an empty signature.**
+Shape: `version`, `notes`, `pub_date`, and a `platforms` map keyed `darwin-aarch64` / `windows-x86_64` / `linux-x86_64`, each with `url` and `signature` (that bundle's `.sig`, verbatim). **The script fails rather than emit a platform with an empty signature.**
 
 Manifest URLs carry the version in the *path* (`/v0.1.0/`) while the *filenames* stay stable. **The homepage's download buttons read their URLs from this same committed manifest**, so a release is only downloadable once step 6 has deployed it (`website/src/pages/Home.tsx`).
 
@@ -172,9 +182,21 @@ Source of truth: `sign_updates` in `scripts/sign-and-deploy.sh`; `plugins.update
 
 One `CHANGELOG.md` at the repo root covers standalone and VSCode changes, tagged with the artifact emoji from its header. **Must retain `## [X.Y.Z]` headings**: `create_release` matches that version literally and extracts through the next level-two heading or EOF for the GitHub Release body.
 
-The website changelog page imports `website/src/data/changelog.json`, but **`CHANGELOG.md` is the source of truth and the JSON is gitignored — never commit it**. The website's `prebuild`, `predev`, and `pretest` scripts regenerate it; run `website/scripts/generate-changelog.js` by hand only to preview a manual edit.
+The website changelog page imports `website/src/data/changelog.json`, but **`CHANGELOG.md` is the source of truth and the JSON is gitignored — never commit it**.
 
-Source of truth: `create_release` in `scripts/sign-and-deploy.sh`; `website/scripts/generate-changelog.js`; lifecycle scripts in `website/package.json`.
+Source of truth: `create_release` in `scripts/sign-and-deploy.sh`; `website/scripts/generate-changelog.js`.
+
+### Blyg changelog
+
+**Must host `https://blyg.dormouse.sh/` with the checksum-pinned, unmodified Blygger Studio Worker.** Its Cloudflare D1 database and R2 bucket hold content; Git records deployment configuration and the upstream release checksum. Operator setup, updates and token renewal are in `deploy/blyg/README.md`.
+
+**Must publish only stable, public GitHub releases with a matching `CHANGELOG.md` entry**, oldest first when backfilling. `.github/workflows/blyg-publish.yml` runs on release publication, changelog changes on `main`, and manual dispatch; publisher code and changelog come from reviewed `main`. Versions without a public GitHub release remain unpublished. Studio records the Blyg publication time; the entry text retains the original release date.
+
+**Must retain one Studio item per release, pin every published revision, and leave unchanged content at its existing revision.** A correction uses the same item. An interrupted run resumes its matching draft or completes the current pin; conflicting drafts, duplicate release identities and withdrawn items require operator resolution. **Never edit release text in Studio**; change `CHANGELOG.md` and synchronize it. Avoid simultaneous manual and automated publication; Actions serializes its runs.
+
+**Must receive Webmentions independently of the publisher.** Studio owns verification and moderation. A publishing-token expiry stops synchronization without affecting the public site or receiver. Credential placement follows `docs/specs/security-ci.md` -> "Automated Maintainer (tend)".
+
+Source of truth: `syncPublications` in `scripts/publish-blyg.mjs`; `.github/workflows/blyg-publish.yml`; `deploy/blyg/wrangler.jsonc`.
 
 ## Environment / secrets
 

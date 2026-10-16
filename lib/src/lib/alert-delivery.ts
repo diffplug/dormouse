@@ -45,7 +45,7 @@ export function startAlertDelivery(): () => void {
  */
 function publishAlertSessions(send: (sessions: Record<string, AlertSessionInfo>) => void): () => void {
   let sent = new Map<string, AlertSessionInfo>();
-  /** The snapshots the last pass read; the same four mean nothing changed. */
+  /** The snapshots the last pass read; the same five mean nothing changed. */
   let inputs: readonly unknown[] = [];
   /** Sessions whose label may have changed since that pass; `null` for all. */
   let stale: Set<string> | null = null;

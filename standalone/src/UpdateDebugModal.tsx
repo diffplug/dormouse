@@ -14,6 +14,11 @@ interface UpdateDebugModalProps {
   body: string | null;
 }
 
+/**
+ * Search before reporting: an update failure is environment-specific, so it is
+ * likely already filed; the report carries the log tail, the only evidence
+ * that survives the installer's exit.
+ */
 export function UpdateDebugModal({ onClose, failure, body }: UpdateDebugModalProps) {
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const [copied, setCopied] = useState(false);

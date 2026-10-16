@@ -55,15 +55,18 @@ export const COPY_FLASH_PATH_CLASS = 'fill-header-active-bg/25';
 /** How a Copy button says what its copy did. */
 export const COPY_OUTCOME_LABEL: Record<CopyOutcome, string> = { copied: 'Copied', failed: 'Couldn’t copy' };
 
-/** A preview slot's label in its Pane header and Door, italic as an editor's
- *  preview tab is (`docs/specs/layout.md` → "Pane header"). */
+/** A preview slot's label in its Pane header and Door: italic alone, as an
+ *  editor's preview tab is. A Preview pill beside it repeated the mark at a
+ *  pill's width in every header (product decision, 2026-09-28). */
 export const PREVIEW_LABEL_CLASS = 'italic';
 
-/** The `max-w-` / `h-` bounds of `DOOR_TAB_CLASS`, for the host code that has to
- *  reason about a tab's size without a rendered element (the cross-window tab
- *  drag). Tailwind needs the arbitrary values spelled literally above, so these
- *  two are a mirror — keep them in sync. */
+/** The `max-w-` / `h-` / `min-w-` bounds of `DOOR_TAB_CLASS`, for code that has
+ *  to reason about a tab's size without a rendered element (the cross-window
+ *  tab drag) or replaces one bound (a Workspace tab's floor). Tailwind needs the
+ *  arbitrary values spelled literally above, so these are a mirror — keep them
+ *  in sync. */
 export const DOOR_TAB_MAX_WIDTH_PX = 220;
+export const DOOR_TAB_MIN_WIDTH_PX = 68;
 export const DOOR_TAB_HEIGHT_PX = 24;
 
 /** The surface an alarm inset is drawn on, which is what picks its token: each
@@ -84,6 +87,22 @@ export const ALERT_RING_INSET_BY_GROUND: Record<AlertRingGround, string> = {
 // against the Wall, and the rest recede into the app ground. Keep them
 // together so a palette change can't move one endpoint without the other.
 export const TAB_WALL_JOIN_GRADIENT = 'linear-gradient(to bottom, var(--color-header-active-bg), var(--color-app-bg))';
+
+/** The title bar a Workspace strip rests in: the standalone AppBar and the
+ *  website playground's. The Wall begins a `PANE_GUTTER_PX` join band below. */
+export const APP_BAR_HEIGHT_PX = 30;
+
+/** The join band under a title bar, over the Wall's top gutter. The bar must
+ *  be its positioned ancestor. */
+export function TabWallJoin() {
+  return (
+    <div
+      aria-hidden="true"
+      className="pointer-events-none absolute inset-x-0 top-full z-10"
+      style={{ height: PANE_GUTTER_PX, backgroundImage: TAB_WALL_JOIN_GRADIENT }}
+    />
+  );
+}
 
 // The inactive tab's fade, starting at 70% of the 24px tab — just below the
 // label's baseline — and ending at 70% app background, i.e. a 30/70 sRGB mix

@@ -74,7 +74,7 @@ export function SelectionOverlay({ terminalId }: Props) {
   // Drag-down anchors by `top` (top edge aligned with where we want the
   // near-selection edge); drag-up anchors by `bottom` so the near-selection
   // edge lines up regardless of element height. Shown only while the user is
-  // dragging (spec §3.3), or over a shadowed drag.
+  // dragging, or over a shadowed drag.
   let hint: { left: number; top?: number; bottom?: number } | null = null;
   if (selection.dragging || shadowed) {
     const endViewportRow = selection.endRow - dims.viewportY;

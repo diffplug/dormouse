@@ -15,7 +15,7 @@ import { isPathRefusal, type PathRefusal } from './direct/path-refusal';
 export const NETWORK_LEVELS = ['nothing', 'local', 'anywhere', 'relay'] as const;
 
 /**
- * `relay` is the UI's "My Relay only". `anywhere` lets a one-time link reach
+ * `relay` is the UI's "Anywhere, through ‹host›". `anywhere` lets a one-time link reach
  * any network, through Cloudflare STUN (`docs/specs/remote-network.md` ->
  * "Anywhere").
  */
@@ -80,8 +80,8 @@ export function levelsFor(mode: RelayMode): NetworkLevel[] {
  * Whether `level` runs the persistent Burrow — the relay socket and everything
  * that needs it: every level but `nothing`. **`nothing` holds an enrollment
  * without running it** (`docs/specs/remote-network.md` → "Policy"); each other
- * level has its path rule for a paired phone's session — My Relay only and
- * Anywhere may relay it, Local networks holds it to the direct path.
+ * level has its path rule for a paired phone's session — `relay` and
+ * `anywhere` may relay it, Local networks holds it to the direct path.
  */
 export function runsBurrow(level: NetworkLevel): boolean {
   return level !== 'nothing';

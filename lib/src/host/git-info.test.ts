@@ -68,6 +68,14 @@ describe('gitInfo', () => {
     expect(await gitInfo([plain, missing, 'myrepo'])).toEqual({ [plain]: null, [missing]: null, myrepo: null });
   });
 
+  it('never touches a share or device path', async () => {
+    // POSIX reads `//x` as `/x`, so only the refusal keeps this from answering.
+    const share = `/${join(root, 'myrepo')}`;
+    spawned.length = 0;
+    expect(await gitInfo([share])).toEqual({ [share]: null });
+    expect(spawned).toEqual([]);
+  });
+
   it('hands git the canonical path, never the symlink it was given', async () => {
     const link = join(root, 'link-to-src');
     symlinkSync(join(root, 'myrepo/src'), link);

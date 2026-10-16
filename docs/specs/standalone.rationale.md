@@ -57,6 +57,12 @@ In a real build the same day, with the xterm textarea focused and typed into, a 
 
 **Why no window is throttled in the background.** The alert host moved into the sidecar (§Alerts), but a due spoken alarm still plays in the renderer of the window showing its Session (`docs/specs/alert.md` → Spoken alarms), on that window's timers and Web Speech engine. Tauri's default leaves WebKit's policy in force: a minimized or hidden window's timers are throttled and the view may be suspended after roughly five minutes, pausing everything until it is visible again (tauri-utils 2.9.3, `BackgroundThrottlingPolicy`). That delayed the speech for exactly the window a spoken alarm exists to reach — the one the user minimized. The policy cannot be set per state, so every window pays a hidden window's timer cost for it (2026-09).
 
+## Workspace registry
+
+**Why a persisted high-water mark, not the disk scan alone.** The scan sees only what is still saved: closing the highest-numbered Workspace or window deletes it from disk, so the next launch minted its number again, and a `dor` handle an agent cached named a stranger. The mark is the end of the last block handed out, written on every reservation. A hi/lo ceiling a slack past it (1024 Surfaces, 64 Workspaces, 16 windows) was tried first to keep the fsync off most creates, and dropped (2026-10): since the handle is the number, every relaunch jumped `surface:` ids by about 1024. Each reservation is a webview's small pool refill, at the pace of user creates and off the main thread, so a write per reservation is affordable. A window label alone still comes from memory when the write fails: a window cannot open without one, and a later launch may then reuse only a closed window's label.
+
+**Why `ids.json` sits in the state root, not `sessions/`.** `sessions/` is enumerated as window snapshots and swept at boot, and a per-window close removes what it owns there; the counters belong to no window.
+
 ## Routing
 
 Rust routes rather than the webview filtering, because a webview cannot be trusted to drop another window's bytes: it would still have received them, and `pty:data` is the hot path.
@@ -78,6 +84,8 @@ Tauri removes a label from `webview_windows()` only when the window is actually 
 `tauri-plugin-window-state` would have been a second store answering "which windows exist", a new Cargo *and* npm dependency riding the disclosure regeneration and the cooldown, and it still would not have done the boot enumeration — which is already Rust's job, beside the snapshots it reads.
 
 The cap is a ceiling on one launch, not a limit on how many windows may exist: the excess snapshots stay on disk untouched, so raising the cap restores them.
+
+The minimum exists because macOS edge tiling could leave a window with no minimum zero-thick, and the restore floor because that box was then saved and reopened just as thin (2026-10). The overlap test catches a box saved on a display unplugged since, which would otherwise reopen where nobody can see it.
 
 ## Transfer
 

@@ -19,6 +19,7 @@ import {
 } from '../terminal-state-store';
 import { themeColorProvider } from '../terminal-theme';
 import { applyLiveToolEvents } from '../tool-events';
+import { ToolLaunchLatch } from '../tool-launch-latch';
 import { offerProgramCopy } from '../mouse-selection';
 
 /** This renderer is its host's one realm. */
@@ -69,6 +70,8 @@ export class FakePtyAdapter implements PlatformAdapter {
   private scenarioMap = new Map<string, FakeScenario>();
   private inputHandlers = new Map<string, (data: string) => void>();
   private protocolParsers = new Map<string, TerminalProtocolParser>();
+  /** Each PTY generation's OSC 367 `open` latch, as a host's owner stream keeps it. */
+  private launchLatches = new Map<string, ToolLaunchLatch>();
   private openPortsMap = new Map<string, OpenPort[]>();
   /**
    * The alerts' host role, in process: the renderer's verbs reach it through
@@ -100,6 +103,8 @@ export class FakePtyAdapter implements PlatformAdapter {
   hostOwnsTheme?: boolean;
   hostOwnsShells?: boolean;
   hostOwnsUpdates?: boolean;
+  /** The website, which runs on this adapter, may reach open-vsx.org. */
+  offersThemeStore?: boolean = true;
 
   // Same reason, one layer up: a fake platform has no Burrow service behind it, so
   // this stays undefined and the Settings dialog's Network topic renders
@@ -181,6 +186,7 @@ export class FakePtyAdapter implements PlatformAdapter {
     this.spawnHandlers.clear();
     this.inputHandlers.clear();
     this.protocolParsers.clear();
+    this.launchLatches.clear();
     this.openPortsMap.clear();
     // What this realm parked settles `cancelled`, as a disposing adapter's does.
     this.alerts.dispose();
@@ -202,6 +208,7 @@ export class FakePtyAdapter implements PlatformAdapter {
     }
     this.terminals.add(id);
     this.protocolParsers.set(id, new TerminalProtocolParser(themeColorProvider));
+    this.launchLatches.set(id, new ToolLaunchLatch());
     this.terminalSizes.set(id, {
       cols: options?.cols ?? DEFAULT_PTY_SIZE.cols,
       rows: options?.rows ?? DEFAULT_PTY_SIZE.rows,
@@ -282,6 +289,7 @@ export class FakePtyAdapter implements PlatformAdapter {
   writePty(id: string, data: string, options?: WritePtyOptions): void {
     if (options?.userInput) this.alertManager.acknowledge(id, { input: true });
     if (!this.terminals.has(id)) return;
+    if (options?.launch) this.launchLatch(id).arm(data);
     // Only echo if no scenario is actively playing
     if (this.activeTimers.has(id)) return;
     // Route to custom input handler if set
@@ -316,6 +324,7 @@ export class FakePtyAdapter implements PlatformAdapter {
     this.terminalSizes.delete(id);
     this.inputHandlers.delete(id);
     this.protocolParsers.delete(id);
+    this.launchLatches.delete(id);
     this.openPortsMap.delete(id);
     // The Session is over, so its alert state goes with it.
     this.alertManager.remove(id);
@@ -442,42 +451,6 @@ export class FakePtyAdapter implements PlatformAdapter {
     this.emitPtyData(id, data, options);
   }
 
-  /**
-   * Drive the alert-manager's activity monitor for a fixed duration with
-   * no data output — useful for animating a fake "task running" state on
-   * a pane while the visual feedback lives elsewhere. Calls
-   * `alertManager.onData(id)` immediately, then again every `intervalMs`
-   * until `durationMs` elapses, after which silence resumes and the Session
-   * transitions naturally to MIGHT_NEED_ATTENTION → ALERT_RINGING.
-   * Returns a dispose handle that cancels remaining ticks.
-   */
-  pumpActivity(id: string, durationMs: number, intervalMs = 1000): () => void {
-    if (!this.terminals.has(id)) return () => {};
-    let cancelled = false;
-    let interval: ReturnType<typeof setInterval> | null = null;
-    let stop: ReturnType<typeof setTimeout> | null = null;
-    const cancel = () => {
-      if (cancelled) return;
-      cancelled = true;
-      if (interval !== null) clearInterval(interval);
-      if (stop !== null) clearTimeout(stop);
-    };
-    this.alertManager.onData(id);
-    const tick = () => {
-      if (cancelled) return;
-      // Pty may have been killed mid-duration. Stop pumping rather than
-      // feeding the activity monitor for a terminal that no longer exists.
-      if (!this.terminals.has(id)) {
-        cancel();
-        return;
-      }
-      this.alertManager.onData(id);
-    };
-    interval = setInterval(tick, intervalMs);
-    stop = setTimeout(cancel, durationMs);
-    return cancel;
-  }
-
   private playScenario(id: string, scenario: FakeScenario): void {
     const timers: ReturnType<typeof setTimeout>[] = [];
     this.activeTimers.set(id, timers);
@@ -520,10 +493,19 @@ export class FakePtyAdapter implements PlatformAdapter {
     return parser;
   }
 
+  private launchLatch(id: string): ToolLaunchLatch {
+    let latch = this.launchLatches.get(id);
+    if (!latch) {
+      latch = new ToolLaunchLatch();
+      this.launchLatches.set(id, latch);
+    }
+    return latch;
+  }
+
   private emitPtyData(id: string, data: string, options: { skipActivity?: boolean } = {}): void {
     const parsed = this.getProtocolParser(id).process(data);
     // The Tool stores are this renderer's own.
-    applyLiveToolEvents(id, parsed.events);
+    applyLiveToolEvents(id, this.launchLatch(id).admit(parsed.events));
     applyTerminalSemanticEvents(id, applyTerminalEvents(this.alertManager, id, parsed.events));
     const inputHandler = this.inputHandlers.get(id);
     for (const response of collectTerminalProtocolResponses(parsed.events)) {

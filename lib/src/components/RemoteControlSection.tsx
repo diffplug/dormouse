@@ -1028,7 +1028,7 @@ export function HeldEnrollment({ relayOrigin }: { relayOrigin: string }) {
     <div className="mt-1.5 text-sm leading-relaxed">
       <div className="text-muted">
         Enrolled with <span className="font-mono break-all text-foreground">{relayOrigin}</span>, which
-        nothing reaches while Network is set to Nothing. Paired phones stay paired.
+        nothing reaches while Network is set to Nowhere. Paired phones stay paired.
       </div>
       {error ? <div className="mt-1.5 text-error">{error}</div> : null}
       <div className="mt-2 flex flex-wrap items-center gap-2">

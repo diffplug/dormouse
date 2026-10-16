@@ -13,4 +13,9 @@
 /docs/dor/ /dor/ 301
 /docs/compatible-agents /compatible-agents/ 301
 /docs/compatible-agents/ /compatible-agents/ 301
+# The price is a section of the Hosted page, never a page of its own; 301
+# because that will not change. Spelled with the trailing slash the host
+# serves, so /pricing costs one hop rather than two (checkPricingRedirect).
+/pricing /hosted/ 301
+/pricing/ /hosted/ 301
 /changelog/after/* /__spa-fallback 200

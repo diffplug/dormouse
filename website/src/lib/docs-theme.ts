@@ -3,8 +3,7 @@
  *
  * The docs render long-form prose, so unlike the rest of the site they are not
  * locked to the brand's black — a reader picks what they can read. The
- * homepage keeps its own palette (docs/specs/website-docs.md -> Reference page
- * chrome).
+ * homepage keeps its own palette.
  */
 import { loadJson, saveJson } from "dormouse-lib/lib/local-json-store";
 

@@ -403,7 +403,7 @@ describe('MobileTerminalUi session list', () => {
       .querySelector('[data-alert-ring-inset]')
       ?.getAttribute('data-alert-ring-inset') ?? null;
 
-  /** The row is the alarm's only carrier now (`docs/specs/alert.md` -> Pane Header). */
+  /** A ringing row wears the alarm inset, as the header bar does. */
   it('wears the alarm inset only on a ringing row, on its own ground', () => {
     const container = renderSessions([
       { id: 'a', title: 'ringing-active', active: true, status: 'ALERT_RINGING', episode: EPISODE },

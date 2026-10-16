@@ -1739,16 +1739,22 @@ test('getListeningPortsForPids (darwin) keeps the live pids when lsof exits non-
   assert.deepEqual(ports.map((p) => [p.pid, p.port]), [[4242, 3000]]);
 });
 
+// Windows helpers run by their absolute System32 path, never a bare name that
+// Windows would look up in the working directory first.
+const WINDOWS_ENV = { SystemRoot: 'D:\\Win' };
+const POWERSHELL = 'D:\\Win\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
+const NETSTAT = 'D:\\Win\\System32\\netstat.exe';
+
 test('getListeningPortsForPids (win32) prefers Get-NetTCPConnection', async () => {
   const execFile = (cmd, args) => {
-    assert.equal(cmd, 'powershell.exe');
+    assert.equal(cmd, POWERSHELL);
     const script = args[args.length - 1];
     if (script.includes('Get-NetTCPConnection')) {
       return JSON.stringify([{ LocalAddress: '0.0.0.0', LocalPort: 3000, OwningProcess: 4242 }]);
     }
     throw new Error(`unexpected script: ${script}`);
   };
-  const ports = await getListeningPortsForPids([4242], { platform: 'win32', execFile }, new Map([[4242, 'node.exe']]));
+  const ports = await getListeningPortsForPids([4242], { platform: 'win32', env: WINDOWS_ENV, execFile }, new Map([[4242, 'node.exe']]));
   assert.deepEqual(ports, [
     { protocol: 'tcp', family: 'IPv4', address: '0.0.0.0', port: 3000, pid: 4242, processName: 'node.exe' },
   ]);
@@ -1756,15 +1762,15 @@ test('getListeningPortsForPids (win32) prefers Get-NetTCPConnection', async () =
 
 test('getListeningPortsForPids (win32) falls back to netstat when the cmdlet fails', async () => {
   const execFile = (cmd, args) => {
-    if (cmd === 'powershell.exe') {
+    if (cmd === POWERSHELL) {
       throw new Error('Get-NetTCPConnection: not recognized');
     }
-    if (cmd === 'netstat') {
+    if (cmd === NETSTAT) {
       return '  TCP    0.0.0.0:3000   0.0.0.0:0   LISTENING   4242\n';
     }
     throw new Error('unexpected');
   };
-  const ports = await getListeningPortsForPids([4242], { platform: 'win32', execFile });
+  const ports = await getListeningPortsForPids([4242], { platform: 'win32', env: WINDOWS_ENV, execFile });
   assert.deepEqual(ports, [
     { protocol: 'tcp', family: 'IPv4', address: '0.0.0.0', port: 3000, pid: 4242, processName: undefined },
   ]);
@@ -1786,11 +1792,11 @@ test('Windows port subprocesses share the socket budget, including netstat fallb
       now += 1000;
       throw new Error('cmdlet failed');
     }
-    assert.equal(cmd, 'netstat');
+    assert.equal(cmd, NETSTAT);
     now += 500;
     return '  TCP    0.0.0.0:3000   0.0.0.0:0   LISTENING   4242\n';
   };
-  const result = await getOpenPortsForPids([4242], { platform: 'win32', execFile, now: () => now });
+  const result = await getOpenPortsForPids([4242], { platform: 'win32', env: WINDOWS_ENV, execFile, now: () => now });
   const budget = openPortScanTimeoutMs(1);
   assert.deepEqual(timeouts, [OPEN_PORT_TIMEOUT_MS, budget, budget - 1000]);
   assert.equal(now, OPEN_PORT_TIMEOUT_MS + 1500);
@@ -1806,9 +1812,9 @@ test('Windows does not start netstat after the socket deadline expires', async (
     throw new Error('timed out');
   };
   assert.deepEqual(await getListeningPortsForPids([4242], {
-    platform: 'win32', execFile, now: () => now, scanTimeoutMs: 3100,
+    platform: 'win32', env: WINDOWS_ENV, execFile, now: () => now, scanTimeoutMs: 3100,
   }), []);
-  assert.deepEqual(commands, ['powershell.exe']);
+  assert.deepEqual(commands, [POWERSHELL]);
   assert.equal(now, 3100);
 });
 
@@ -2185,7 +2191,7 @@ test('a chunk emitted just before list([id]) appears in the replay exactly once'
   assert.equal(replay.data.data, 'before\r\nmid-transfer');
   // Exactly once: the chunk is in the replay, and it was emitted as `data`
   // exactly once — the host drops that copy, so the pane never renders it twice.
-  assert.equal(replay.data.data.split('mid-transfer').length - 1, 1);
+  assert.equal(events.filter((entry) => entry.event === 'data' && entry.data.data === 'mid-transfer').length, 1);
 });
 
 // A transfer's split point: everything a reader consumed before it saw the
@@ -2313,3 +2319,35 @@ test('a generation replaced under its id never reports its exit; a killed one do
   pty.listeners.get('a').exit({ exitCode: 3 });
   assert.deepEqual(events.filter((e) => e.event === 'exit').map((e) => e.data.exitCode), [3]);
 });
+
+// A spawn over a live generation (a cold restore after a silent host) must not
+// stream two shells into one Session, nor leak the one it displaced.
+test('PTY owner streams only the current generation and stops the one a spawn displaced', () => {
+  const sent = [];
+  const generations = [];
+  const mgr = create((type, msg) => sent.push([type, msg]), {
+    spawn() {
+      const generation = { number: generations.length + 1, onData: null, kills: [] };
+      generations.push(generation);
+      return {
+        pid: generation.number,
+        onData(handler) { generation.onData = handler; },
+        onExit() {},
+        resize() {},
+        write() {},
+        kill(signal) { generation.kills.push(signal); },
+      };
+    },
+  }, { platform: 'darwin' });
+  mgr.spawn('pane-1');
+  mgr.spawn('pane-1');
+  generations[0].onData('old shell');
+  generations[1].onData('new shell');
+  assert.deepEqual(sent.filter(([type]) => type === 'data').map(([, msg]) => msg.data), ['new shell']);
+  // `kill()` with no argument is node-pty's SIGHUP; an interactive bash ignores
+  // SIGTERM, so a graceful stop would leave the unreachable shell running.
+  assert.deepEqual(generations[0].kills, [undefined]);
+  assert.deepEqual(generations[1].kills, []);
+  mgr.killAll();
+});
+

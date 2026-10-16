@@ -53,7 +53,7 @@ export default function SelfHostDocs() {
     <DocsLayout
       activePath="/self-host"
       title="How to self-host"
-      intro={<HostingRequirementNotice mode="self-hosted" />}
+      intro={<HostingRequirementNotice />}
       toc={SELF_HOST_TOC}
     >
       <AnchoredHeading id="security-model">Security model</AnchoredHeading>

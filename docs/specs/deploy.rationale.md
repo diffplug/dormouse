@@ -6,9 +6,13 @@
 
 Source audit, 2026-10: the bump invokes Cargo directly after editing version files. The native build refuses an ambient Node version that differs from the workspace pin; the script does not arrange that pin on PATH.
 
+## Build stamp
+
+A release run fails rather than ship unofficial because the label is permanent: an official build mislabelled "Development build" would say so in every user's About for its whole life, while a failed Stage 1 costs one re-tag. The likeliest causes are a CHANGELOG heading that does not match the tag and a build step that leaves files in the tree. The workflow is identified by `GITHUB_WORKFLOW_REF`, which names the repository, the workflow file, and the tag in one default variable, so a fork's or `ci.yml`'s build is unofficial without a second check.
+
 ## Stage 1: CI workflow
 
-**Why `release-attest` is its own environment, with no secrets and no reviewer.** A required reviewer would stall every release on manual approval at its first jobs, and build jobs have no business seeing credentials. Neither existing `v*` environment fits: `vscode-extension-publish` requires reviewers; `security-audit` holds `AUDIT_PAT` and `CLAUDE_CODE_OAUTH_TOKEN`.
+**Why `release-attest` is its own environment, with no secrets and no reviewer.** A required reviewer would stall every release on manual approval at its first jobs, and build jobs have no business seeing credentials. Neither existing `v*` environment fits: `vscode-extension-publish` requires reviewers; `security-audit` holds `AUDIT_PAT`, `CLAUDE_CODE_OAUTH_TOKEN`, and `EMBARGO_TOKEN`.
 
 **Why a dropped dotfile fails the release instead of degrading it.** The dotfiles are the ZDOTDIR files under `standalone/sidecar/shell-integration/zsh/`: `.zshenv`, `.zshrc`, `.zprofile`. `artifact-manifest.sha256` is generated from the runner's disk *before* upload, so a dotfile `actions/upload-artifact` silently omitted is still listed in the manifest, and Stage 2's hash verification fails on an artifact CI reported green.
 

@@ -102,7 +102,7 @@ That makes it a self-host build, which contacts nothing of Dormouse's on its own
 
 ## 3. Enroll the laptop
 
-**Settings → Network**, at the bottom of the app-global Settings dialog (the sliders icon at the far right of the baseboard). A new install opens nothing on its own — Network starts at **Nothing** — so first choose **My Relay only**, which lets this laptop reach the Relay it was built for and nothing else:
+**Settings → Network**, at the bottom of the app-global Settings dialog (the sliders icon at the far right of the baseboard). A new install opens nothing on its own — Network starts at **Nowhere** — so first choose **Anywhere, through** your Relay's host, which lets this laptop reach the Relay it was built for and nothing else:
 
 <Canvas of={Network.SelfHostNothing} />
 
@@ -110,7 +110,7 @@ The Phones section below it then holds the remote-control choices. Because the R
 
 <Canvas of={RemoteControl.OfferAvailable} />
 
-> The other button, **One-time connection**, is disabled in a self-host build like this one: its links are made at `relay.dormouse.sh`. In a stock build, under **Local networks** or **Anywhere**, it needs none of this walkthrough — no Relay, no enrollment, no passkey, no pairing. It shows a link good for one phone, for one session, confirmed with the same two digits and saving nothing; `docs/specs/one-time.md` owns it.
+> The other button, **One-time connection**, is disabled in a self-host build like this one: its links are made at `relay.dormouse.sh`. In a stock build, under **Local networks only** or **Anywhere**, it needs none of this walkthrough — no Relay, no enrollment, no passkey, no pairing. It shows a link good for one phone, for one session, confirmed with the same two digits and saving nothing; `docs/specs/one-time.md` owns it.
 
 The installer left a `run/enroll-offer.json` next to its state — this install's origin plus a one-time token the Relay redeems in place of the setup password — and the Burrow reads that same file from the well-known path for the platform. It lasts for 24 hours or until the first Burrow enrolls, whichever comes first. Press **Enroll** and the machine is connected.
 
@@ -175,7 +175,7 @@ Either way, that one action creates the account's first passkey (or signs in wit
 
 - A **per-Burrow key** is minted and held in memory until the laptop approves, then written to IndexedDB. Storage and the encrypted fallback's security tradeoff follow `docs/specs/remote-security-model.md` → Client statics. It identifies this browser for this laptop; another laptop gets another key.
 - **The code is spent either way.** A phone with no passkey redeems it to register one; a phone that already has one retires it at `POST /api/setup/retire`, so a photograph of the laptop's screen cannot register a passkey afterwards. A refusal stops the run — a dead code is one the laptop would refuse too.
-- The session token that lets the phone open a relay socket is issued. Presence itself is proved again inside the pairing channel, over a challenge derived from that handshake, so signing in buys routing rather than authorization.
+- The session token that lets the phone open a relay socket is issued, by the registration itself on a first run, so creating the passkey also signs in. Presence itself is proved again inside the pairing channel, over a challenge derived from that handshake, so signing in buys routing rather than authorization.
 
 A browser that cannot do X25519 at all never gets here: Pocket probes for it before any of the above and shows a fixed upgrade requirement instead. Runtimes are gated, not degraded.
 
@@ -244,18 +244,20 @@ Pairing is once. Connecting is every session, and it re-proves everything:
 ```text
 phone                        relay                        burrow
   |-- e2e init (Noise msg 1) -->|-- e2e init {clientId} ------>|  against the key
-  |<-- e2e response ------------|<-- msg 2 = 32-byte challenge |  the phone pinned
-  |   ONE biometric prompt,     |                              |
-  |   over a challenge derived  |                              |
-  |   from this handshake       |                              |
-  |-- e2e transport (proof) --->|-- e2e transport ------------>|  challenge consumed,
-  |<-- outcome (encrypted) -----|<-- outcome -----------------|  proof + ACL checked
+  |<-- e2e response ------------|<-- msg 2 = challenge + offer |  the phone pinned
+  |   no window offered: ONE    |                              |
+  |   biometric prompt, over a  |                              |
+  |   challenge derived from    |                              |
+  |   this handshake            |                              |
+  |-- e2e transport (proof or   |                              |
+  |   'window') --------------->|-- e2e transport ------------>|  challenge consumed,
+  |<-- outcome (encrypted) -----|<-- outcome -----------------|  presence + ACL checked
   |====== protocol-v1 inside the same Noise session ==========>|
 ```
 
-A connection succeeds only if the handshake completes against the Burrow key this phone pinned at pairing, the passkey proves fresh presence over a challenge derived from *this* handshake, and one ACL record holds all four of the account, the passkey credential, that key's hash, and the Client key the handshake authenticated. The Burrow decides alone, and its denial says only `pairing-required` — which half missed is its own business.
+A connection succeeds only if the handshake completes against the Burrow key this phone pinned at pairing, the Burrow holds fresh presence for *this* connection, and one ACL record holds all four of the account, the passkey credential, that key's hash, and the Client key the handshake authenticated. Fresh presence is a passkey proof over a challenge derived from *this* handshake — or, when the Burrow offers it, its own presence window: memory of a proof it verified itself, for this same passkey and Client key, within the last few minutes of use. The Relay can neither open nor extend one. The Burrow decides alone, and its denial says only `pairing-required` — which half missed is its own business.
 
-One handshake feeds the whole thing, so it costs the user a single Face ID prompt.
+So the connect that follows a pairing costs no prompt at all — the pairing's proof opened the window — and neither does coming back to a phone you put down a minute ago. A connection outside the window costs a single Face ID prompt, and one handshake feeds the whole thing.
 
 A successful pairing continues straight into all of this, so the approval you just gave on the laptop lands the phone in a terminal rather than back on the Burrows list. Later sessions start here instead, at that row's **Connect** — and if the laptop has forgotten this browser in the meantime (an ACL reset, a hand-edited record), the denial says so and the row goes back to offering **Pair again**.
 

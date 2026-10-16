@@ -101,7 +101,7 @@ An update is a short restart: Burrow and Pocket WebSockets disconnect and reconn
 - **The service is registered and running, declares the run-at-load and restart-on-exit of the [Mechanism map](#mechanism-map), and carries no credential** — a definition it cannot read at all fails rather than passes, and `verify` searches it and the `run-relay` wrapper for every credential name the installer knows. Plus what only the live system shows: macOS, loaded in `gui/$UID` with a plist that lints; Windows, task `Running`, no execution time limit, restarts on failure, unelevated, unstopped by battery or idle, `bin\run-relay.ps1` still carrying the supervision loop; Linux, unit known to the user manager, `enabled`, passing `systemd-analyze --user verify`.
 - **Loopback `/api/hello` responds, the Pocket app is served, and the process holding the port belongs to the current release** ([Invariants](#invariants) → "A 200 does not say who answered"); Linux additionally requires `systemctl --user is-active`.
 - **Port 3100 is bound only to `127.0.0.1`**, and the plaintext port is unreachable on the laptop's Tailscale IP.
-- **`tailscale serve` proxies `/` to `127.0.0.1:3100` at the origin recorded in `config/relay.env`.** A failure prints the `manage serve` command that re-applies it.
+- **`tailscale serve` proxies `/` to `127.0.0.1:3100` on the `:443` listener of the origin recorded in `config/relay.env`.** A failure prints the `manage serve` command that re-applies it.
 - **`config/`, `state/`, `run/`, `config/relay.env` and an unspent offer are owner-only** (`docs/specs/security-remote.md` → "Credentials at rest"); a spent offer is gone, and `verify` says so rather than failing.
 - **The current release pointer resolves to a release with `RELEASE` metadata**, and neither the service definition nor the `run-relay` wrapper refers to the source checkout. An absent previous-release pointer warns (a first install); one naming the same release as `current`, or a release no longer on disk, fails.
 
@@ -213,7 +213,7 @@ The Relay has no account, no passkey, and no enrolled Burrow. Same sequence as `
 
 1. **The setup password.** Needed only if the step-2 offer card is gone or the Burrow is elsewhere: have the user run `manage show-password` in their own terminal, which warns before printing. Never ask for the value, and never print it into the conversation.
 
-2. **The Burrow.** On this same machine, launch the build made with `DORMOUSE_RELAY_ORIGIN` (Prerequisites), open **Settings → Network** (the baseboard's Settings button), and choose **My Relay only**: a new install's default refuses enrollment (`docs/specs/remote-network.md` → "Policy"). While the offer is unspent, its card enrolls in one click; "Enroll with the setup password…" covers a spent offer or a Burrow on another machine (`docs/specs/relay.md` → "Remote control, in the Settings dialog"). Enrollment persists, so later launches connect on their own; the section then shows the Relay and its connection.
+2. **The Burrow.** On this same machine, launch the build made with `DORMOUSE_RELAY_ORIGIN` (Prerequisites), open **Settings → Network** (the baseboard's Settings button), and choose **Anywhere, through** your Relay's host: a new install's default, **Nowhere**, refuses enrollment (`docs/specs/remote-network.md` → "Policy"). While the offer is unspent, its card enrolls in one click; "Enroll with the setup password…" covers a spent offer or a Burrow on another machine (`docs/specs/relay.md` → "Remote control, in the Settings dialog"). Enrollment persists, so later launches connect on their own; the section then shows the Relay and its connection.
 
    A Burrow that offers only "Enroll with hosted.dormouse.sh" is a stock build, not a Relay problem.
 
@@ -321,7 +321,6 @@ Service and install root are in the table at the top of this file; logs and serv
 | Stopping it | `launchctl bootout` takes the process tree | ends only the `powershell.exe`; before every start the installer and `manage` reap its children by install-root image path and command line, never image name | `systemctl --user stop` takes the whole cgroup |
 | `current`/`previous` | symlinks, swapped with `rename(2)` on the link path | `current.txt`/`previous.txt` naming a release id, swapped with `rename(2)` on the file | symlinks, swapped with `rename(2)` on the link path |
 | `0700` / `0600` | modes under `umask 077`; `verify` checks mode and owner | an owner-only DACL; `verify` also checks owner SID | modes under `umask 077`; `verify` checks mode and owner |
-| Entry | `/bin/bash bin/run-relay` | `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File bin\run-relay.ps1`, at an absolute interpreter path | `ExecStart=/bin/bash "<root>/bin/run-relay"` |
 
 ### Invariants
 
@@ -346,4 +345,4 @@ Each fails silently unless encoded in every installer it names; single-platform 
 
 **`uninstall` must leave `manage` behind**, so `purge` stays reachable for `config/` and `state/`. **`purge` deletes `run/` along with `state/` and `config/`**, and once uninstalled prints the one command removing the install root and, on macOS and Linux, the log directory outside it. Source of truth: `cmd_uninstall` / `cmd_purge` in `deploy/local/install-linux.sh` and `deploy/local/install-macos.sh`; `Invoke-Uninstall` / `Invoke-Purge` in `deploy/local/install-windows.ps1`.
 
-Two test-only hooks, each refused unless `DORMOUSE_INSTALL_TEST=1`: `DORMOUSE_INSTALL_ROOT` puts the whole install under a throwaway path, and — Linux only — `DORMOUSE_INSTALL_ORIGIN` supplies the origin so Tailscale is never consulted. `.github/workflows/ci.yml` pins the Linux install/update path in a temp root. Test mode stops before systemd and Serve; macOS and Windows have no runtime CI coverage, so `deploy-lint` checks all three installers textually.
+Two test-only hooks, each refused unless `DORMOUSE_INSTALL_TEST=1`: `DORMOUSE_INSTALL_ROOT` puts the whole install under a throwaway path, and — Linux only — `DORMOUSE_INSTALL_ORIGIN` supplies the origin so Tailscale is never consulted. Test mode leaves the service manager and Serve untouched on all three.

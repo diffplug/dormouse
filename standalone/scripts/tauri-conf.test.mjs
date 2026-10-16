@@ -46,6 +46,14 @@ test('media-src grants Blob URLs and nothing remote', () => {
   assert.deepEqual(mediaSrc, ['media-src', "'self'", 'blob:']);
 });
 
+// None of these falls back to default-src. No form in the webview submits, no
+// `<base>` is wanted, and nothing frames the app; Tauri sends this policy as a
+// response header, where `frame-ancestors` applies.
+test('the directives without a default-src fallback admit nothing', () => {
+  const directives = new Map(csp.split(';').map((part) => part.trim().split(/\s+/)).map(([name, ...sources]) => [name, sources]));
+  for (const name of ['base-uri', 'form-action', 'frame-ancestors']) assert.deepEqual(directives.get(name), ["'none'"], name);
+});
+
 test('localhost stays allowed for dev and the loopback proxies', () => {
   assert.ok(csp.includes('http://localhost:*') && csp.includes('ws://localhost:*'));
   assert.ok(csp.startsWith("default-src 'self'"));

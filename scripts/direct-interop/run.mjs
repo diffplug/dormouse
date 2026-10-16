@@ -88,8 +88,9 @@ const blackhole = process.argv.includes('--stun-blackhole');
 /** Whether the page is the one-time page Hosted serves; see question 5. */
 const stunPage = blackhole || process.argv.includes('--stun');
 /**
- * The policy the addon's Burrow runs under, which `directPeeringFor` reads: My
- * Relay only's unrestricted Burrow by default, as Pocket meets it.
+ * The policy the addon's Burrow runs under, which `directPeeringFor` reads:
+ * "Anywhere, through your Relay"'s unrestricted Burrow by default, as Pocket
+ * meets it.
  */
 const level = allowed ? 'local' : stunPage ? 'anywhere' : 'relay';
 const networkPolicy = { level, allowed: allowed ?? [], autoUpdate: false };
@@ -212,10 +213,10 @@ const describeSdp = (sdp, times = []) => {
 };
 /** One end of the addon's selected pair, raw. */
 const pairEnd = (end) => end && { type: end.type, address: end.address, candidate: end.candidate };
-/** The addon's selected pair, as its ICE agent reports it now. */
+/** The addon's selected pair, as its ICE agent reports it now: the native read `DirectPeer` takes. */
 const addonPair = () => {
   try {
-    const raw = connection.sctp?.transport?.iceTransport?.getSelectedCandidatePair?.();
+    const raw = connection.selectedCandidatePair?.();
     return raw ? { local: pairEnd(raw.local), remote: pairEnd(raw.remote) } : null;
   } catch (error) {
     return { error: String(error) };

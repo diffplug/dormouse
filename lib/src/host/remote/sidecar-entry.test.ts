@@ -25,6 +25,13 @@ import { REPORT } from '../../lib/alert-manager-test-utils';
 import { createAlertClient } from '../alert-client';
 import type { AlertStateDetail } from '../../lib/platform/types';
 import { DEFAULT_MANAGED_VOICE_ID } from '../../lib/platform/managed-voice-types';
+import { openSequence } from 'dor-tools-lib/osc';
+
+// A stock Hosted build: the test runner bakes no define, which reads as self-host.
+vi.mock('../relay-origin', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../relay-origin')>();
+  return { ...actual, bakedRelay: () => ({ origin: actual.DEFAULT_RELAY_ORIGIN, mode: 'hosted' }) };
+});
 
 const HOLD: SurfaceHold = { holder: 'session-a', label: 'iPhone', lease: '1', serviceId: 'service-1' };
 
@@ -782,6 +789,24 @@ describe('the sidecar host', () => {
       { op: 'write', args: ['pty-1', '\x1b[I', { paced: true }], state: { status: 'ALERT_RINGING', todo: false } },
       { op: 'write', args: ['pty-1', 'y', undefined], state: { status: 'WATCHING_DISABLED', todo: false } },
     ]);
+  });
+
+  it('forwards an OSC 367 open only from the run a launch write started', () => {
+    const opens = () => out.filter((line) => line.event === 'terminal:toolEvents')
+      .flatMap((line) => (line.data as { events: { kind: string; open?: { path: string } }[] }).events)
+      .flatMap((event) => event.kind === 'toolOpen' ? [event.open!.path] : []);
+    const open = (path: string) => openSequence({ path });
+    const start = '\x1b]633;E;view /a\x07\x1b]633;C\x07';
+    host.onPtyEvent('data', { id: 'pty-1', data: start });
+    host.onPtyEvent('data', { id: 'pty-1', data: open('/forged') });
+    // Typed by a user: never a launch.
+    host.handleCommand('pty:input', { id: 'pty-1', data: 'view /a\r', userInput: true });
+    host.onPtyEvent('data', { id: 'pty-1', data: `\x1b]633;D;0\x07${start}${open('/typed')}` });
+    host.handleCommand('pty:input', { id: 'pty-1', data: 'view /a\r', launch: true });
+    expect(calls.at(-1)).toMatchObject({ op: 'write', args: ['pty-1', 'view /a\r', undefined] });
+    host.onPtyEvent('data', { id: 'pty-1', data: `\x1b]633;D;0\x07${start}${open('/launched')}` });
+    host.onPtyEvent('data', { id: 'pty-1', data: `\x1b]633;D;0\x07${start}${open('/after')}` });
+    expect(opens()).toEqual(['/launched']);
   });
 
   it('opens the resize grace before the PTY resizes', () => {

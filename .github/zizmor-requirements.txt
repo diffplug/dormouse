@@ -1,0 +1,8 @@
+# zizmor for `.github/workflows/ci.yml`'s `Workflow lint` job, outside the
+# lockfile: pinned exactly and by hash, bumped by hand to a release past the
+# cooldown (docs/specs/security-supply-chain.md -> "Cooldown and alerts").
+# Hashes: manylinux x86_64 (CI), macOS arm64 and x86_64 (local runs).
+zizmor==1.30.1 \
+    --hash=sha256:eee12266b793cb87ad4a7e3af2e72404f8a63e3de5eb099b80bf7b1cfd232a8e \
+    --hash=sha256:f9eb092f089e35fa9fb3b70aeec0a19eca7dacf2ab161f1d50b18351895f085c \
+    --hash=sha256:17fda74e15fe41a6aa354ea4cf71fc7ff3cd025cda6584bb6d7466b3f1d00fe6

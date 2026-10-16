@@ -90,6 +90,7 @@ test('raw -s bypasses workspace addressing', async () => {
   await runCli(['playwright', '-s=raw-session', 'goto', ':8080'], options);
   assert.equal(calls.some(c => c[0] === 'resolve'), false);
   assert.deepEqual(calls[0].slice(2), [['--session=raw-session', 'goto', 'http://localhost:8080/'], caller]);
+  assert.equal(calls.at(-1)[0], 'surface');
   assert.equal(calls.at(-1)[1].key, undefined);
 });
 test('surface addressing resolves GUI-created sessions and rejects missing sessions', async () => {

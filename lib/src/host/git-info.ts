@@ -4,13 +4,15 @@
  * sidecar as `git-info.cjs`.
  *
  * Only `rev-parse` and `config --get` run, and `HEAD` is read directly: nothing
- * reads the index, so a repository's `core.fsmonitor` never executes. A repository's
- * `.git/config` is still read, the risk `git-upstream.ts` already accepts.
+ * reads the index, and `runGit` disables `core.fsmonitor` regardless. A
+ * repository's `.git/config` is still read, the risk `git-upstream.ts` already
+ * accepts.
  */
 import { readFile, realpath, stat } from 'node:fs/promises';
 import { basename, isAbsolute, join, resolve } from 'node:path';
 import type { GitDirInfo, GitInfoResult } from '../lib/platform/git-types';
 import { settleAllWithin } from '../lib/settle-within';
+import { isUncOrDevicePath } from 'dor-lib-common';
 import { runGit } from './git-cli';
 
 /** Lookups still running at this deadline (a hung network mount) are left out
@@ -41,11 +43,11 @@ function checkoutName(commonDir: string): string {
   return base === '.git' ? basename(resolve(commonDir, '..')) : base.replace(/\.git$/, '');
 }
 
-/** The canonical path of an existing absolute directory, else null
- *  (`docs/specs/security-local.md` → "Terminal context directory actions"):
- *  these paths originate as terminal-reported cwds. */
+/** The canonical path of an existing absolute directory, never a share's,
+ *  else null (`docs/specs/security-local.md` → "Terminal context directory
+ *  actions"): these paths originate as terminal-reported cwds. */
 async function canonicalDirectory(path: string): Promise<string | null> {
-  if (!isAbsolute(path) || path.includes('\0')) return null;
+  if (!isAbsolute(path) || isUncOrDevicePath(path) || path.includes('\0')) return null;
   try {
     const canonical = await realpath(path);
     return (await stat(canonical)).isDirectory() ? canonical : null;

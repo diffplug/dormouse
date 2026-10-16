@@ -108,13 +108,13 @@ Every quit trigger is driven through the webview quit orchestrator (§Quit flow)
 
 Source of truth: `standalone/src/AppBar.tsx`.
 
-The AppBar is the draggable titlebar: the Workspace strip across its width, its pinned group flush against the right end, then the window controls on Windows and Linux (macOS draws native traffic lights). **Must make the strip's space before its pinned group the window-drag region, never a tab or button.** **Never put a shell picker here**: the shell is the Settings dialog's Shell row (`lib/src/components/ShellPicker.tsx`; what a changed pick spawns: `docs/specs/layout.md` -> "Session lifecycle and terminal registry"); the theme picker's placement is `docs/specs/theme.md` → "Where the user picks a theme". The strip is `docs/specs/layout.md` → Workspace tabs; its indicators `docs/specs/alert.md` → Workspace union.
+The AppBar is the draggable titlebar. **Must make the strip's space before its pinned group the window-drag region, never a tab or button.** The strip is `docs/specs/layout.md` → Workspace tabs; its indicators `docs/specs/alert.md` → Workspace union.
 
 ### Application menu
 
 Source of truth: the `.menu(...)` builder in `standalone/src-tauri/src/lib.rs`.
 
-The app replaces Tauri's default menu with macOS-only App, File, and Edit submenus and a Window submenu; File holds Reopen Closed (`docs/specs/reopen.md` → "Reopen verb"). **Must keep the macOS fullscreen item**: it and its Ctrl+Cmd+F are the only exit from native fullscreen when AppKit does not reveal the traffic lights.
+The app replaces Tauri's default menu; its Reopen Closed item is `docs/specs/reopen.md` → "Reopen verb". **Must keep the macOS fullscreen item**: it and its Ctrl+Cmd+F are the only exit from native fullscreen when AppKit does not reveal the traffic lights.
 
 - **Must keep the Edit submenu on macOS**, Tool iframes' only clipboard path (rationale).
 - **Must cancel the keydown of any chord the page handles**, so the menu item skips it (rationale): `docs/specs/mouse-and-clipboard.md` §3.9, §8.2, §8.9.
@@ -130,7 +130,7 @@ Source of truth: `install` in `standalone/src-tauri/src/macos_siri_affordance.rs
 
 **Several windows, each with several Workspaces, over one sidecar** (`docs/specs/glossary.md`). The sidecar has no window concept, so **Rust owns the map from PTY to window** and every stdout line passes through it.
 
-**The label is the window's persistence identity**: `main` for the first window (fixed in `tauri.conf.json`), `ws-<n>` for every later one, numbered above every live label, every `sessions/ws-*.json` on disk, and every retained arrival-journal endpoint, so a new window cannot claim a saved or pending identity. Journal-only labels reserve numbers without opening windows.
+**The label is the window's persistence identity**: `main` for the first window (fixed in `tauri.conf.json`), `ws-<n>` for every later one, never reused (§Workspace registry). Journal-only labels reserve numbers without opening windows.
 
 **Every new window is cloned from `app.windows[0]`**, so its window settings and CSP carry across with no second copy.
 
@@ -142,13 +142,14 @@ Source of truth: `install` in `standalone/src-tauri/src/macos_siri_affordance.rs
 
 **Rust holds the union of every window's Workspaces**, since each webview's store (`lib/src/lib/workspace-store.ts`) sees only its own. Each window reports its list on every change, and the union is broadcast as `dormouse://workspaces` with a monotonic `revision`; a webview drops a snapshot behind the one it holds.
 
-- **Must mint numbered ids only in Rust**, `workspace-<n>` off one counter, handed to a webview in blocks (`workspace_reserve_ids`) so a create mints synchronously. The ref `workspace:<n>` is the id's number, so it never renumbers and never collides across windows.
-- **Must allow boot and creation when reservation fails**, using opaque UUID ids, and **retain those ids and refs for their lifetime**, even after reservation recovers (`docs/specs/dor-cli.md` → "Handle Model").
-- **Must seed the counter above every id named by a snapshot, a retained arrival-journal record, or a window's report**, and never below 2: `workspace-1` is a bare Wall's only Workspace.
+- **Must mint numbered ids only in Rust**, `workspace:<n>` off one counter, handed to a webview in blocks (`workspace_reserve_ids`; at boot `boot_reserve_ids`, the Surface block in the same write) so a create mints synchronously; an id never renumbers and never collides across windows. Window labels and Surface ids (`surface_reserve_ids`; `docs/specs/transport.md` → "Surface ids") come off app-wide counters of their own.
+- **Must persist the Workspace and window counters as the Surface counter persists** (`docs/specs/transport.md` → "Surface ids"), all three high-water marks in `<state root>/ids.json`. **Must hand out a window label even when the write fails**, from memory (rationale).
+- **Must allow boot and Workspace creation when reservation fails**, using `workspace:<uuid>` ids, and **retain those ids for their lifetime**, even after reservation recovers (`docs/specs/dor-cli.md` → "Handle Model").
+- **Must seed every counter at boot without ever lowering it**, above its persisted mark and every id a snapshot or retained arrival-journal record names; a window's report raises the Workspace counter too. **Never mint `workspace:1`**: it is a bare Wall's only Workspace.
 - **A `dor` request naming a Workspace or Window routes to the window holding it** (§Routing). A target the registry cannot place — one no window reports, or a name two windows carry — falls through to the caller's window, which refuses a name duplicated there and otherwise resolves its own. **A target routes as a number only when it reads as `NUMERIC_WORKSPACE_REF`** (`dor/src/protocol.ts`); `007` and `0` are names.
-- **Must keep numbered and opaque refs consistent across Rust, the webview, and the browser harness**: `standalone/scripts/workspace-ref-cases.json` holds the shared cases.
+- **Must read an id's number identically in Rust and `dor/src/protocol.ts`**, which the webview and browser harness use: `dor/test/id-cases.json` holds the shared cases.
 
-Source of truth: `standalone/src-tauri/src/workspaces.rs`; `installWorkspaceRegistry` in `standalone/src/workspace-registry.ts`.
+Source of truth: `standalone/src-tauri/src/workspaces.rs`; `standalone/src-tauri/src/ids.rs`; `installWorkspaceRegistry` in `standalone/src/workspace-registry.ts`.
 
 ### Routing
 
@@ -178,11 +179,13 @@ Source of truth: `route` in `standalone/src-tauri/src/routing.rs`; `dispatch_sid
 
 ### Boot and geometry
 
-**Boot reopens every window `sessions/` names**, `main` first then each `ws-<n>` in numeric order, capped at `MAX_RESTORED_WINDOWS` with the excess logged and left on disk (rationale). **An unreadable snapshot still opens its window**, booting fresh. **`main` is focused last**, so it comes up in front; **a session naming no `main` relaunches with a fresh, empty one**.
+**Boot reopens every window `sessions/` names**, `main` first then each `ws-<n>` in numeric order, capped at `MAX_RESTORED_WINDOWS` with the excess logged and left on disk (rationale). **An unreadable snapshot still opens its window**, booting fresh. **A session naming no `main` relaunches with a fresh, empty one**.
 
 **Geometry is a sibling of the snapshot**, `sessions/<label>.geometry.json`, written through the same atomic writer, debounced, and re-applied at boot. No `tauri-plugin-window-state` (rationale).
 
-Source of truth: `note_geometry` / `restore_windows` in `standalone/src-tauri/src/lib.rs`.
+**Every window has a minimum size**, set in `standalone/src-tauri/tauri.conf.json` and cloned to every later window. **A restored box is raised to it and re-centered on the primary display unless a minimum-size patch is visible** (rationale).
+
+Source of truth: `note_geometry` / `restore_windows` / `fit_geometry` in `standalone/src-tauri/src/lib.rs`.
 
 ### What a window's `Destroyed` settles
 
@@ -234,7 +237,7 @@ Source of truth: `prepareWorkspaceTransfer` in `lib/src/components/wall/workspac
 
 ### Tear-out
 
-**A tear-out opens the window positioned so the dragged tab lands under the cursor**, at the source window's size. Its first flush writes `sessions/ws-<n>.json`; everything else is the transfer above.
+A tear-out's first flush writes `sessions/ws-<n>.json`; everything else is the transfer above.
 
 ### Arrival queue
 
@@ -286,19 +289,17 @@ Source of truth: `Arrival` in `standalone/src-tauri/src/routing.rs`; `begin_arri
 
 **A pointer captured on a strip tab keeps delivering `pointermove` and `pointerup` outside the window**, so the gesture stays the webview's and Rust is only asked which window is under the cursor (`window_at_cursor`; rationale). **The release transfers there, or tears out when the cursor is over no window or over this window outside its own strip.**
 
-**Among windows containing the cursor the most recently focused wins** — the OS exposes no z-order. **The target decides the drop index, and its caret shows that slot** (`docs/specs/layout.md` → "Workspace tabs").
+**Among windows containing the cursor the most recently focused wins** — the OS exposes no z-order. **The target decides the drop index** (`docs/specs/layout.md` → "Workspace tabs").
 
 Source of truth: `window_at` in `standalone/src-tauri/src/routing.rs`; `standalone/src/workspace-drag.ts`.
 
 ## Persistence
 
-**One `PersistedWindow` per window, every Workspace in it**, restored on the next launch (`docs/specs/transport.md` → "The governing rule"). The Window collector's writer is `TauriAdapter.saveWindowState`; `getWindowState` is the boot reader. Collector and cwd probes: `docs/specs/transport.md` → "Persisted session types". Source of truth: `windowStateSlot` in `standalone/src/window-recovery.ts`.
+**One `PersistedWindow` per window, every Workspace in it**, restored on the next launch (`docs/specs/transport.md` → "The governing rule"). The Window collector's writer is `TauriAdapter.saveWindowState`; `getWindowState` is the boot reader. Collector and cwd probes: `docs/specs/transport.md` → "Persisted session types".
 
 **Boot restores per Workspace off one live-PTY list.** Reload and relaunch are the same path: nothing wires `shutdown()` to `beforeunload`, so a reload's PTYs partition by saved pane id, while a relaunch's list is empty and every Workspace cold-restores at its saved cwds. **A live PTY no saved Workspace names goes to the active Workspace**, except a helper, which goes to the Workspace holding its source.
 
-Source of truth: `restoreWindowOrFresh` in `standalone/src/window-restore.ts`.
-
-**Nothing is deleted at boot but orphaned session temp files and what the arrival merge settles** (`docs/specs/transport.md` → "Retiring the transcripts already on disk").
+**Nothing is deleted at boot but orphaned session temp files, what the arrival merge settles, and another format's state** (`docs/specs/transport.md` → "Retiring the transcripts already on disk"). **Before the arrival merge, boot must delete each snapshot of another `PersistedWindow.version`, with its temp and geometry, and each arrival record holding another `PersistedSession.version`** (`docs/specs/transport.md` → "Persisted session types").
 
 **Never back the session blob with WebKit `localStorage`** — a WAL that grows without bound (rationale). The blob rides the `SessionKeyValueStore` seam over the Rust-backed `standalone/src/tauri-session-store.ts`. Theme selection still persists on `localStorage` (`docs/specs/theme.md`).
 
@@ -307,15 +308,15 @@ Source of truth: `restoreWindowOrFresh` in `standalone/src/window-restore.ts`.
 - **The label is sanitized** so it cannot escape the directory.
 - **Temp-then-rename**, the temp file fsynced first and, on unix, the directory after, best-effort (rationale). **The writer removes its own temp file on every error path**, so only a crash leaves one.
 - **Window identity is implicit**: each command keys by the invoking window's label, so the frontend stays window-agnostic.
-- Only §Per-window close and the boot merge (§Arrival queue) delete a snapshot.
+- Only §Per-window close, the boot merge (§Arrival queue), and the discard above delete a snapshot.
 
-**Must use `<app_data_dir>/dev` as the debug state root and `<app_data_dir>` for release builds** (rationale), and **keep Burrow state directly under the identifier's `app_data_dir`**. **Rust passes the sidecar its two directories by environment**, each created owner-only first and empty when it could not be: `DORMOUSE_STATE_DIR` (the Burrow store, `app_data_dir`) and `DORMOUSE_RECOVERY_DIR` (the state root, so a dev run's record cannot reach the installed app). The browser-dev harness sets both to its per-run temp directory. Source of truth: `state_root_from` / `prepare_owner_only_dir` in `standalone/src-tauri/src/lib.rs`.
+**Must use `<app_data_dir>/dev` as the debug state root and `<app_data_dir>` for release builds** (rationale), and **keep Burrow state directly under the identifier's `app_data_dir`**. **Rust passes the sidecar its two directories by environment**, each created owner-only first and empty when it could not be: `DORMOUSE_STATE_DIR` (the Burrow store, `app_data_dir`) and `DORMOUSE_RECOVERY_DIR` (the state root, so a dev run's record cannot reach the installed app). The browser-dev harness sets both to its per-run temp directory.
 
 **The session store is owner-only before any bytes are written** (`docs/specs/security-local.md` -> "Persisted state"; rationale). **Must abort a snapshot save if either permission change fails**, preserving the previous snapshot. **Must withhold a state directory whose restriction fails**, logging a `WARNING` naming the path; the Burrow store and recovery record then stay in memory.
 
 **Must await the store pipeline before exiting**, under the quit timeout (§Quit flow; rationale): `drainSessionSaves` resolves when it goes idle, a rejected write included. Drain is a completion barrier, not a guarantee of successful persistence.
 
-Source of truth: `TauriSessionStore` in `standalone/src/tauri-session-store.ts`.
+Source of truth: `windowStateSlot` in `standalone/src/window-recovery.ts`; `restoreWindowOrFresh` in `standalone/src/window-restore.ts`; `TauriSessionStore` in `standalone/src/tauri-session-store.ts`; `discard_other_formats` / `state_root_from` / `prepare_owner_only_dir` in `standalone/src-tauri/src/lib.rs`.
 
 ### Agent recovery
 
@@ -352,7 +353,7 @@ Every trigger funnels into `request_quit(app)`:
 | `RunEvent::ExitRequested` | a window-level exit request | `api.prevent_exit()` unless approved and cleared by the cleanup gate (§What a window's `Destroyed` settles); its `code` is ignored |
 | the app menu's Quit item | the menu and its `Cmd+Q` | a **custom** `MenuItem`, never `PredefinedMenuItem::quit` (macOS; rationale) |
 | `applicationShouldTerminate:` | the Dock's Quit, `osascript`, logout, restart | spliced onto tao's live delegate class at `Ready`, holding it (`NSTerminateLater`) and starting the flow; after approval, `NSTerminateNow` once the cleanup gate clears (macOS; rationale) |
-| the `quit_restart` command | the update notice's "Restart now", `dor app restart` | `request_quit` with the restart intent (§Restart) |
+| the `quit_restart` command | the update notice (`docs/specs/auto-update.md`), `dor app restart` | `request_quit` with the restart intent (§Restart) |
 
 **Never refuse an OS terminate**; that aborts the whole logout (rationale). **Must answer a held terminate on every exit and on `quit_cancel`**, or the app hangs.
 
@@ -418,7 +419,15 @@ The `WindowEvent::DragDrop` handler emits the dropped paths as `dormouse://files
 
 ## Logging
 
-Windows release builds use the GUI subsystem, so nothing streams to a launching terminal. Rust appends sidecar stderr, malformed stdout, and its own diagnostics to `%LOCALAPPDATA%\Dormouse Terminal\dormouse.log` on Windows, `$TMPDIR/dormouse.log` elsewhere, overridable via `DORMOUSE_LOG_FILE`. Startup keeps the previous run's log as `dormouse.previous.log`.
+Windows release builds use the GUI subsystem, so nothing streams to a launching terminal. Rust appends sidecar stderr, malformed stdout, and its own diagnostics to `dormouse.log`, overridable via `DORMOUSE_LOG_FILE`:
+
+| Platform | Directory |
+|---|---|
+| Windows | `%LOCALAPPDATA%\Dormouse Terminal` |
+| Linux | `$XDG_STATE_HOME/dormouse-terminal`, else `~/.local/state/dormouse-terminal`; `/tmp` only when neither is an absolute path |
+| macOS | `$TMPDIR` |
+
+Startup keeps the previous run's log as `dormouse.previous.log`. The log is owner-only (`docs/specs/security-local.md` -> "Persisted state").
 
 Source of truth: `init_log` / `read_update_log` in `standalone/src-tauri/src/lib.rs`.
 
@@ -451,7 +460,7 @@ Source of truth: `standalone/package.json`, `standalone/src-tauri/tauri.conf.jso
 - **The sidecar bundle and the webview bake `DORMOUSE_RELAY_ORIGIN`** (`docs/specs/relay.md` → "Relay origin"); the webview CSP has no relay sources (`standalone/scripts/tauri-conf.test.mjs`).
 - **A self-host `tauri build` overlays no updater endpoint and no updater artifacts**, so the binary cannot reach `dormouse.sh` and needs no signing key. Pinned by `standalone/scripts/dev-standalone.test.mjs`.
 - The bundle ships the whole sidecar via the `../sidecar/**/*` resources glob, including node-pty's prebuilds + bundled ConPTY and the shell-integration scripts (`docs/specs/theme.md` -> "OSC color queries on Windows require the bundled ConPTY", `docs/specs/terminal-state.md` -> "Shell-integration injection").
-- **Must start native dev with Vite on an OS-assigned loopback port** (`DORMOUSE_BROWSER_DEV_VITE_PORT` may pin it) **and key the Tauri identifier to the canonical worktree path**, so parallel worktrees and the installed app never share a port or app data. The default log is `<worktree>/standalone/src-tauri/target/dormouse-dev.log`.
+- **Must start native dev with Vite on an OS-assigned loopback port** (`DORMOUSE_BROWSER_DEV_VITE_PORT` may pin it) **and key the Tauri identifier to the canonical worktree path**, so parallel worktrees and the installed app never share a port or app data.
 - **Never stop another process to free a port**: an occupied pinned port fails, and Windows pre-dev cleanup touches only sidecars executing from this worktree's default debug directory, never a listener by port.
 - **May point a dev build at a local `pnpm dev:hosted`** — the origin it prints, with `DORMOUSE_RELAY_IS_HOSTED=1` — to speak managed voice through it; it answers no other `Host` (`docs/specs/security-local.md` -> "Persisted state").
 
@@ -467,7 +476,7 @@ The bridge is a transport shim over the same sidecar protocol, not a second PTY 
 
 **The bridge is authenticated**: its gates are `docs/specs/security-local.md` -> "Loopback Listeners". The token is per-run, attached by `BrowserSidecarHost.url()` alone, and **never the `dor` control-API `controlToken`** (rationale); **the CORS origin is never `*`** (rationale). **A CORS preflight is the one carve-out**: `OPTIONS` answers `204` with the CORS headers before the token check.
 
-The harness **may omit** native-only desktop chrome but **must preserve** every `PlatformAdapter` contract the app uses, the sidecar's alerts included (stamped with the one label it simulates, `main`), so a rule that holds only across the host boundary is exercised. **`BrowserSidecarHost.init()` resolves on the SSE stream being open**, so a seed cannot precede the stream that carries its reply; after a reconnect the adapter sends `sync`. It **must mirror** standalone's Session-persistence answer — one `PersistedWindow` per window in `localStorage`, and the same agent-recovery claim against a per-run temp state directory — and never captures (§Agent recovery). **Tauri APIs must not be required at static module-evaluation time** when `VITE_DORMOUSE_BROWSER_DEV_HOST` is set.
+The harness **may omit** native-only desktop chrome but **must preserve** every `PlatformAdapter` contract the app uses, the sidecar's alerts included (stamped with the one label it simulates, `main`), so a rule that holds only across the host boundary is exercised. **`BrowserSidecarHost.init()` resolves on the SSE stream being open**, so a seed cannot precede the stream that carries its reply; after a reconnect the adapter sends `sync`. It **must mirror** standalone's Session-persistence answer — one `PersistedWindow` per window in `localStorage`, its id counters persisted per worktree (`docs/specs/transport.md` → "Surface ids"), and the same agent-recovery claim against a per-run temp state directory — and never captures (§Agent recovery). **Tauri APIs must not be required at static module-evaluation time** when `VITE_DORMOUSE_BROWSER_DEV_HOST` is set.
 
 Source of truth: `standalone/scripts/dev-agent-browser.mjs`; `standalone/src/browser-sidecar-adapter.ts`.
 

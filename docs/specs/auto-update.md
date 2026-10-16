@@ -33,13 +33,9 @@ Only `main` checks, so only it can hold a download, which lives in its webview's
 
 ## Update notice in the Baseboard
 
-Update status is a text notice in the Baseboard's `notice` slot (`docs/specs/layout.md`), one per updater state (`UpdateBannerState`). "Install when I quit" is the approval; "Changelog" opens `https://dormouse.sh/changelog/after/<getVersion()>`. **"Restart now" must call `quit_restart`** (`docs/specs/standalone.md` → "Restart"): the quit installs on its way out, then relaunches. A refusal turns a still-shown `downloaded` into `restart-refused`, carrying the host's reason and never "Restart now", since the refusal holds until relaunch; the update stays pending.
+Update status is a text notice in the Baseboard's `notice` slot (`docs/specs/layout.md`), one per updater state (`UpdateBannerState`). The `available` notice carries the approval; a notice's changelog link opens `https://dormouse.sh/changelog/after/<getVersion()>`. **"Restart now" must call `quit_restart`** (`docs/specs/standalone.md` → "Restart"): the quit installs on its way out, then relaunches. A refusal turns a still-shown `downloaded` into `restart-refused`, carrying the host's reason and never "Restart now", since the refusal holds until relaunch; the update stays pending.
 
 **Must let every state be dismissed, and never cancel an approved download or install by it**; dismissing an unapproved `available` approves nothing, and Check now may offer it again.
-
-### Debug report on failure
-
-The failure notice opens `UpdateDebugModal`, which snapshots the failure so a later state change cannot alter it, and offers a seeded GitHub issue search and a copyable report carrying the log tail (rationale). A failed log read is embedded as a placeholder, never aborting the report.
 
 ### Threading
 
@@ -51,7 +47,7 @@ The failure notice opens `UpdateDebugModal`, which snapshots the failure so a la
 
 | Platform | Install step |
 |----------|--------------|
-| Windows | Awaits `kill_sidecar_now`, then `install()` starts the NSIS installer in passive mode (progress bar, no interaction) and exits the process itself, before `quit_proceed` is reached |
+| Windows | Awaits `kill_sidecar_now`, then `install()` starts the NSIS installer in passive mode and exits the process itself, before `quit_proceed` is reached |
 | macOS | `install()` replaces the `.app` bundle in place |
 | Linux | `install()` replaces the AppImage in place |
 
@@ -76,7 +72,6 @@ The failure notice opens `UpdateDebugModal`, which snapshots the failure so a la
 |------|------|
 | [`standalone/src/updater.ts`](../../standalone/src/updater.ts) | The updater: check, reminder, approval, download, quit-time install, markers, the `updates` port |
 | [`standalone/src/UpdateBanner.tsx`](../../standalone/src/UpdateBanner.tsx) | Each state's notice copy and actions |
-| [`standalone/src/UpdateDebugModal.tsx`](../../standalone/src/UpdateDebugModal.tsx) | Failure modal |
 
 ## Configuration
 

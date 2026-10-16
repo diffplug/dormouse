@@ -44,6 +44,7 @@ import type { ShellEntry } from '../src/lib/shell-defaults';
 import { getWorkspacesSnapshot, resetWorkspaces, setWorkspaces, type WorkspaceMeta } from '../src/lib/workspace-store';
 import { resetWorkspaceSurfaces, setWorkspaceSurfaces } from '../src/lib/workspace-surfaces';
 import { resetWorkspaceUi } from '../src/lib/workspace-ui-store';
+import { resetSurfaceIdPool } from '../src/lib/surface-ids';
 
 /** `parameters.primedWorkspaces`: the Window a Workspace story renders. */
 interface PrimedWorkspaces {
@@ -338,6 +339,11 @@ const preview: Preview = {
       // names it instead of an update check.
       platform.hostOwnsUpdates = context.parameters?.hostOwnsUpdates === true || undefined;
 
+      // The build stamp Settings → About reads — a global here, since
+      // Storybook's bundle is built without the stamp's define
+      // (`readBuildStamp` in lib/src/lib/build-info.ts). Absent reads as unstamped.
+      (globalThis as { __DORMOUSE_BUILD__?: unknown }).__DORMOUSE_BUILD__ = context.parameters?.buildStamp;
+
       // The updater's port, which only Standalone's main window has: a story
       // about Settings → Network's update checks names the last successful
       // check (`null` for none), and every other story has no updater.
@@ -494,6 +500,8 @@ const preview: Preview = {
           }
           platform.clearDefaultScenario();
           disposeAllSessions();
+          // Nor its Surface numbers: each story mints from `surface:1`, past its fixtures.
+          resetSurfaceIdPool();
           // A story must not leak its Workspaces into the next one.
           resetWorkspaces();
           resetWorkspaceSurfaces();

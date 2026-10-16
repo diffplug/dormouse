@@ -10,7 +10,7 @@ Dormouse can owe the user attention in three ways. Each is a source of the Sessi
 
 | Source | Rings when | Detail |
 |---|---|---|
-| `watching` (WATCHING Track) | a watched command's output went busy, then quiet | `WATCHING`: `<watch key> went quiet` |
+| `watching` (WATCHING Track) | a watched command's output went busy, then quiet | `WATCHING`, titled with the watch key |
 | `report` (Terminal reports) | the PTY emitted `BEL`, `OSC 9`, `OSC 99`, or `OSC 777`, or ended an `OSC 9;4` cycle | the sanitized report |
 | `exit` (Command-exit Track) | a seen command exited | `COMMAND_EXIT` |
 
@@ -26,21 +26,21 @@ Only `watching` requires WATCHING.
 
 Public `status` is a projection — first match wins:
 
-1. `ALERT_RINGING` if the ring is active and not paused; consumers use `isAlertPaused` in `lib/src/lib/alert-episode.ts`.
+1. `ALERT_RINGING` if the ring is active and not deferred; consumers use `isAlertDeferred` in `lib/src/lib/alert-episode.ts`.
 2. `OSC_NOTIF_BUSY` if a progress cycle is active.
 3. The output/silence detector's own state if WATCHING is on. **Never reorder 3 and 4** (rationale).
 4. `COMMAND_EXIT_ARMED` if command-exit alerting is armed.
 5. Otherwise `WATCHING_DISABLED`.
 
-**Must identify each unresolved summons with an `episode` id and start time**, retained through animation pauses (Completion events). Opening the ring creates it; clearing ends it. A source joining an active ring joins its episode and never starts another delivery episode. **Never persist episodes.**
+**Must identify each unresolved summons with an `episode` id and start time**, retained while deferred (Completion events). Opening the ring creates it; clearing ends it. A source joining an active ring joins its episode and never starts another delivery episode. **Never persist episodes.**
 
-`awaited` sits beside `status`: true while at least one `dor await` is parked on the Session (Await). It is derived from live waiters and never persisted.
+`awaited` sits beside `status`: true while at least one `dor await` is parked on the Session (Await).
 
 **Persist only** `todo` and the sanitized `notification` (plus `status` for diagnostics):
 
-- **Must persist an unacknowledged ring, paused or visible, as the TODO a look would leave**, with its detail.
+- **Must persist an unacknowledged ring, deferred or visible, as a TODO** with its detail.
 - Every spawn starts the id's alert state over; a cold restore carries those two on the pane's spawn (`SpawnPtyOptions.alert`), seeded before the PTY spawns, and a live resume keeps the host's. **Never recreate a ring, a progress cycle, or a command-exit arm on restore.**
-- **Must read a notification this build cannot validate as none, keeping the pane**, and **never write a source outside `STRICT_READER_NOTIFICATION_SOURCES`** until no strict pre-tolerant build reads the file (rationale).
+- **Must read a notification this build cannot validate as none, keeping the pane** (rationale).
 - **Never persist WATCHING per Session**: it is re-derived from the rule set at the next command start. Replay filtering in `docs/specs/terminal-escapes.md` keeps old terminal output from firing notification side effects again.
 
 **Must retain host Activity before xterm initialization and clear it on Session disposal.**
@@ -81,33 +81,87 @@ Source of truth: `setViewer` / `acknowledge` in `lib/src/lib/alert-manager.ts`; 
 
 ## Completion events
 
-**Must dispatch every completion as a `CompletionEvent` before any suppression runs** — a detector settle, a command finish, a direct notification, and the end of a protocol progress cycle (completion or error) (rationale).
+**Must dispatch every completion as a `CompletionEvent` before any suppression runs** — a detector settle, a command finish, a direct notification, and the end of a protocol progress cycle (completion or error) (rationale). Each then takes the first exit that applies:
 
-Claimants get first refusal per Session in registration order; the first to return `true` claims the event and the rest are not offered it. **A claimed event must never ring, set TODO, or store an `ActivityNotification`** — it stops before the ring rules, where the echo window, holding, and the command-exit seen check live.
+```mermaid
+flowchart TD
+  C["completion"] --> H{"helper?"}
+  H -- yes --> X["nothing"]
+  H -- no --> A{"a claimant takes it?"}
+  A -- yes --> W["the await resolves"]
+  A -- no --> E{"inside the echo window?"}
+  E -- yes --> X
+  E -- no --> R{"may ring? settle if WATCHING, finish if seen, report always"}
+  R -- no --> X
+  R -- yes --> G{"engaged?"}
+  G -- yes --> HD["held: TODO now"]
+  G -- no --> K{"report, no ring, acknowledged, no output since?"}
+  K -- yes --> T["TODO"]
+  K -- no --> RG["open or join the ring"]
+```
 
-**Must hold, never ring, a completion that would ring an engaged Session**, whatever its source — engagement alone decides: the hold keeps the sources it would raise and the richest detail (Clearing And TODO), repeated holds merging, never public. Holding leaves a progress cycle alone.
+Claimants get first refusal per Session in registration order; the first to claim the event ends the offer. **A claimed event must never ring, set TODO, or store an `ActivityNotification`.**
 
-- A deferred report that comes due while engaged is held too; escalation rechecks recent output.
-- **Presence lapsing `idle` with focus unchanged must ring what was held**, each source by its unengaged path.
-- Any other end drops it — a user verb (Clearing And TODO), focus moving away, the viewer leaving, seeding, removal, or teardown (rationale).
-- Rule removal withdraws a held `watching` source as it withdraws a ringing one (WATCHING Track).
+A `completion` passed the gates above. Confirmed work is `BUSY` or `MIGHT_NEED_ATTENTION`; a reset is a command boundary or an answered `watching` source (WATCHING Track). The ring, hold, and TODO are separate latches: a pane can ring while a newer completion is held.
 
-With `deferAlertsUntilQuiet` enabled:
+```mermaid
+stateDiagram-v2
+  state "One Session: every region runs at once" as Session {
+    state "Output detector" as Detector {
+      [*] --> NOTHING_TO_SHOW
+      NOTHING_TO_SHOW --> MIGHT_BE_BUSY: output across the candidate gap
+      MIGHT_BE_BUSY --> NOTHING_TO_SHOW: unconfirmed, or reset
+      MIGHT_BE_BUSY --> BUSY: more output
+      BUSY --> MIGHT_NEED_ATTENTION: silence
+      MIGHT_NEED_ATTENTION --> BUSY: output
+      MIGHT_NEED_ATTENTION --> NOTHING_TO_SHOW: more silence emits settle, or reset
+      BUSY --> NOTHING_TO_SHOW: reset
+    }
+    --
+    state "Foreground command" as Command {
+      [*] --> NoCommand
+      NoCommand --> Unseen: start, not engaged
+      NoCommand --> Seen: start, engaged
+      Unseen --> Seen: engaged or acknowledged
+      Unseen --> NoCommand: finish, never rings
+      Seen --> NoCommand: finish, emits exit
+    }
+    --
+    state "Ring" as Ring {
+      [*] --> NoRing
+      NoRing --> Showing: completion, not engaged
+      NoRing --> Deferred: same, during confirmed work
+      Showing --> Deferred: work confirmed, no exit source
+      Deferred --> Showing: confirmed work ends
+      Deferred --> NoRing: due while engaged, never shown, becomes a hold
+      Showing --> NoRing: verb, or last source withdrawn
+      Deferred --> NoRing: input, a verb once shown, or last source withdrawn
+    }
+    --
+    state "Hold" as Hold {
+      [*] --> NoHold
+      NoHold --> Held: completion, engaged
+      Held --> NoHold: viewer idle, sources go to the ring
+      Held --> NoHold: focus moves, viewer leaves, or a verb
+    }
+    --
+    state "TODO" as Todo {
+      [*] --> Off
+      Off --> On: look at a ring, a hold, a receipt, or t
+      On --> Off: typing, the pill, or t
+    }
+  }
+```
 
-- **Must defer an eligible terminal notification until the detector's quiet deadline after the last accepted output** (`quietAt`), including unconfirmed activity and WATCHING off. Idle panes ring immediately (rationale).
-- **Must derive pauses from recent output, never store them**, keeping the unresolved ring's sources, detail, episode, TODO, and pending alarm deadlines. Quiet restores it without confirmed BUSY; publishing a pause arms its wake.
-- **Never defer a command-finish ring or pause one carrying an `exit` source**; a pending terminal notification joins it immediately. A held exit does not release an existing pause.
-- **Must defer after claimants and ring eligibility, never redispatch the historical `CompletionEvent`** (rationale). A claimed new settle answers a retained `watching` source, never an earlier report.
-- **Must keep initial pending intent live-only and bounded** to one notification, chosen by richness (Clearing And TODO). Accepted output moves the quiet deadline; command-boundary detector resets preserve it.
-- **Never cap a deferral or pause** (rationale).
-- **Must cancel pending delivery on acknowledgement, a dismissal that clears a ring, TODO changes, removal, seeding, or teardown.** A dismiss without a ring leaves initial deferral alone. Disabling the setting releases pending notifications immediately.
+- **A hold must set TODO at once**, its detail by richness (Clearing And TODO), repeated holds merging; it leaves a progress cycle alone. Rung on idle, each held source takes its unengaged path, the acknowledged check included. A forgotten hold keeps its TODO (rationale); rule removal withdraws a held `watching` source as a ringing one.
+- **With `deferAlertsUntilQuiet` enabled, a ring must be deferred exactly while the detector has confirmed work, WATCHING or not, derived and never stored**: it keeps its sources, detail, episode, and alarm deadlines (rationale). **A ring deferred since it opened must stay a fresh completion until it shows**: only input clears it, and coming due while engaged makes it a hold (rationale). **Never defer a ring carrying an `exit` source**, whatever joined it. **Never cap a deferral** (rationale); disabling the setting shows every deferred ring at once.
 
 Two ordering rules:
 
 - **Must clear the progress cycle before dispatch**, so a completion or error ends the cycle whether or not the event is claimed and `OSC_NOTIF_BUSY` falls back either way.
 - **Must dispatch a command finish for every watch that existed**, including the unseen and engaged ones the ring rule then discards or holds.
 
-Source of truth: `dispatchCompletion` / `holdOrDeliver` / `deferOrDeliverNotification` in `lib/src/lib/alert-manager.ts`; `quietAt` in `lib/src/lib/quiesce-detector.ts`. Pinned by `lib/src/lib/alert-engagement.test.ts`.
+Source of truth: `dispatchCompletion` / `holdOrDeliver` / `isDeferred` in `lib/src/lib/alert-manager.ts`; `isConfirmedBusy` in `lib/src/lib/quiesce-detector.ts`. Pinned by `lib/src/lib/alert-engagement.test.ts`.
 
 ## Await
 
@@ -181,7 +235,6 @@ sequenceDiagram
 - **The host must answer exactly one `alert:awaitResult` per await, to the realm that parked it**, a cancel included. **Must ignore an `awaitId` already parked in that realm**; a malformed `id` or `until` is answered `cancelled`.
 - **A realm that ends — a disposed or recreated webview, a reloaded or closed window — must have everything it parked cancelled and answered by the host, synchronously** (rationale); a disposing adapter settles its own.
 - The fake adapter runs the same host in process. The Pocket phone adapter has no `dor` and protocol-v1 carries no await, so it settles every request `cancelled` at once.
-- An await survives a Workspace transfer: the manager never moves (Live Workspace transfer).
 
 **A PTY exit or Session removal must resolve every waiter still parked as `died`**, after command-finish dispatch gets first chance to resolve normally. Manager disposal resolves every waiter as `cancelled`.
 
@@ -191,7 +244,11 @@ Source of truth: `awaitCompletion` in `lib/src/lib/alert-manager.ts`; `AlertComm
 
 **Must key WATCHING by the foreground command's watch key** (Rules, below). A Session is watched exactly while a rule covers that key; edits reach every matching Session. **Never add per-Session enable or mute** (rationale).
 
-The output/silence detector is always on. Every Session runs one `QuiesceDetector` for its whole lifetime, fed by every output chunk outside the echo window and reset at every command boundary. It never latches and knows nothing about engagement or rules; the rule set decides only whether its state is publicly visible and whether a settle — a busy Session that stayed quiet — may ring.
+The output/silence detector is always on. Every Session runs one `QuiesceDetector` for its whole lifetime, fed by every output chunk outside the echo window and reset at every command boundary. It never latches and knows nothing about engagement or rules; the rule set decides only whether its state is publicly visible and whether a settle may ring.
+
+**Must use the detector as the single output-activity signal for status, inferred completion, and alert deferral**; its states are the Output detector region in Completion events. A single accepted output chunk leaves a quiet detector quiet, and only confirmed work can settle.
+
+**Must expose quiet to completion consumers before dispatching a settle**, and dispatch before publishing the quiet transition. Completion events owns its routing to awaits and rings; Public State owns the display projection; Completion events owns deferral.
 
 **A retired id must stay retired.** A host removes the alert entry in the same turn as its kill, ahead of any output still in flight. **Never let raw output or resizes revive a retired id**; a semantic or protocol event may (rationale).
 
@@ -209,16 +266,16 @@ Limitation: WATCHING needs the shell to report its command line — `OSC 633 ; E
 
 Meaningful output excludes resize redraw noise during `T_RESIZE_DEBOUNCE`, a grace the host opens before it resizes the PTY, a Client's resize included; theme changes, remounts, DOM reparenting, selection, and focus changes are not output. Invariants:
 
-- **Must preserve an owed `watching` source when output resumes**; Completion events owns animation pauses (rationale).
+- **Must preserve an owed `watching` source when output resumes**; Completion events owns deferral (rationale).
 - **Never reset the detector for engagement alone**; settles must reach awaits.
 - **Must reset to `NOTHING_TO_SHOW` when a user verb or an await clears a ring with a `watching` source**, preventing its output tail from settling again; resumed work and rule removal leave it running.
-- **New WATCHING summons must be caused by a fresh settle**, never rerender, theme change, remount, minimize, or reattach; Completion events owns resuming a paused summons.
+- **New WATCHING summons must be caused by a fresh settle**, never rerender, theme change, remount, minimize, or reattach; Completion events owns showing a deferred summons.
 
 Source of truth: `commandWatchKey` / `watchRuleFor` in `lib/src/lib/terminal-state.ts`; `QuiesceDetector` in `lib/src/lib/quiesce-detector.ts`; `onSettled` in `lib/src/lib/alert-manager.ts`; multi-renderer coordinator `lib/src/lib/watched-command-host.ts`.
 
 ## Terminal reports
 
-Terminal notifications are independent of WATCHING and follow the deferral policy in Completion events. A report raises the ring's `report` source (Clearing And TODO).
+Terminal notifications are independent of WATCHING; a report raises the ring's `report` source (Completion events).
 
 **Must apply a parse batch's reports and command boundaries in stream order, timestamping its semantic events once** for both the `AlertManager` and the terminal-state store, at the host's parse site in both hosts.
 
@@ -248,7 +305,7 @@ Source of truth: grammars, parsing, sanitization limits, and `applyTerminalEvent
 
 Command-exit alerting consumes normalized semantic command events from `docs/specs/terminal-state.md` (`OSC 133`, `OSC 633`, or equivalent) and **must not parse raw OSC itself**.
 
-- A command start creates `commandExitWatch` for the current foreground command, marked seen when the Session is engaged at its start, becomes engaged, or is acknowledged while it runs.
+- A command start creates `commandExitWatch`; its seen lifecycle is the Foreground command region in Completion events.
 - **Must derive armed, never store it**: a seen command running while the Session is not engaged — public `COMMAND_EXIT_ARMED`, published on every engagement edge.
 - When the same command finishes — a prompt boundary with no finish event counts, with no exit code — or the PTY exits before a finish event, it rings only if it was seen. **Never gate the ring on how long the command ran** (rationale).
 - The `exit` source carries the `COMMAND_EXIT` notification: the summarized command and its exit code.
@@ -258,22 +315,20 @@ Source of truth: `dispatchCompletion` in `lib/src/lib/alert-manager.ts`; `resolv
 
 ## Clearing And TODO
 
-`todo` is a boolean reminder. **A ring must never set it**: a look at a ring without typing turns it into a TODO carrying the ring's detail, and dealing with it — typing, the pill — clears it (rationale). `notification` is the unresolved ring's detail, paused or visible, else the TODO's.
+`todo` is a boolean reminder. **A ring must never set it**: a look at a ring without typing turns it into a TODO carrying the ring's detail, a completion the user was already looking at is one at once (Completion events), and dealing with it — typing, the pill — clears it (rationale). `notification` is the unresolved ring's detail, deferred or visible, else the TODO's.
 
-Detail follows one richness order: a text report (`OSC 9`, `OSC 99`, `OSC 777`) > `COMMAND_EXIT` > `OSC 9;4` > `WATCHING` > `BEL`. A new ring shows its own detail; a source joining an active ring, a deferred notification, and an acknowledged receipt each replace the detail only at an equal or higher rank (rationale).
+Detail follows one richness order: a text report (`OSC 9`, `OSC 99`, `OSC 777`) > `COMMAND_EXIT` > `OSC 9;4` > `WATCHING` > `BEL`. A new ring shows its own detail; a source joining an active ring, a hold, and an acknowledged receipt each replace the detail only at an equal or higher rank (rationale).
 
 | Verb | Effect |
 |---|---|
-| acknowledge without input (Engagement) | clears the ring, leaving `todo` on with its detail |
-| acknowledge with input — any keystroke, paste, or drop — or clear TODO (pill click) | clears the ring; `todo` off, notification dropped, even if already off |
-| dismiss (`a`, Pane Header) | clears the ring, leaving `todo` on with its detail; with nothing ringing: no change, no notify, a deferred notification kept |
+| acknowledge without input (Engagement), or dismiss (`a`, Pane Header) | clears the ring, leaving `todo` on with its detail; with nothing ringing or held, no change |
+| acknowledge with input — any keystroke, paste, or drop — or clear TODO (pill click) | clears the ring; `todo` off, notification dropped, even if already off (rationale) |
 | toggle TODO (`t`) | clears the ring; `todo` flips, on keeping the ring's detail, off dropping the notification |
 | an await consumes a source (Await) | withdraws that source |
 | a rule stops covering the `watching` key | withdraws `watching` |
 
-- **The user verbs acknowledge; a withdrawal must never acknowledge.** Each verb also drops whatever was held or deferred, except a dismiss with nothing ringing, and a dropped hold or deferral leaves no TODO. A ring a withdrawal empties goes with its detail, leaving `todo` and its notification as they stood.
-- **Any keystroke into the pane must clear TODO** (rationale).
-- **Never summon twice for an acknowledged state.** After a user verb clears a ring or drops a held completion, a report arriving before any output opens no ring: it sets `todo`, updates the notification, and publishes. Settles and exits ring as usual, and opening a ring or starting a command forgets the acknowledgement (rationale).
+- **The user verbs acknowledge; a withdrawal must never acknowledge.** Each verb clears the ring (one that never showed only on input, Completion events) and drops a hold; a withdrawal leaves `todo` and its notification as they stood.
+- **Never summon twice for an acknowledged state.** After a user verb clears a ring or drops a hold, a report before any output only updates the TODO (Completion events); opening a ring or starting a command forgets the acknowledgement (rationale).
 - Command-mode `Enter` that only enters passthrough does not clear TODO.
 - Removing a WATCHING rule clears neither a progress cycle nor a command-exit arm.
 - Destroying the Session clears all alert, TODO, notification, held, progress, and command-exit state.
@@ -305,9 +360,22 @@ Application alarm defaults live beside the WATCHING rule set, edited in Settings
 
 **The host must decide when to deliver, in `createAlertHost` beside the manager** (rationale):
 
-- **Must deliver at most once per sink per episode**, due at the episode's start plus the Session's delay. Pauses retain unsent deadlines and consumed sinks; resuming sends overdue alarms without restarting the delay. A source joining delivers nothing; clearing consumes pending work.
-- **Must defer paused alarms until quiet; otherwise recheck at the deadline and consume a deadline that fails, never retrying it**: speech only while the Session is not engaged (Engagement); push only while no viewer is present (VS Code's window as a viewer: `docs/specs/vscode.md` -> "Workspaces"; rationale).
-- **Disabling must consume pending work immediately; enabling must never replay an episode**, one that began disabled included. Delay edits never move a deadline; speech reads the current voice at engine admission.
+Each sink, per episode:
+
+```mermaid
+stateDiagram-v2
+  direction LR
+  [*] --> Armed: episode opens, sink on
+  Armed --> Disarmed: ring deferred
+  Disarmed --> Armed: ring shows, same deadline
+  Armed --> Sent: due, not blocked
+  Armed --> Consumed: due but blocked
+  Armed --> Consumed: sink off, or ring cleared
+  Disarmed --> Consumed: sink off, or ring cleared
+```
+
+- **Must deliver at most once per sink per episode**, due at the episode's start plus the Session's delay, never retried; a source joining delivers nothing. Blocked: speech while the Session is engaged (Engagement); push while any viewer is present (VS Code's window as a viewer: `docs/specs/vscode.md` -> "Workspaces"; rationale).
+- **Enabling must never replay an episode**, one that began disabled included. Delay edits never move a deadline; speech reads the current voice at engine admission.
 - **Each realm must publish every Session it shows** — Pane label and Workspace overrides — as one `sessions` op, label changes throttled (rationale).
 - **A publication must overwrite each Session it names, whichever realm published it last, and never drop one the manager holds state for**; one its realm omits with none is forgotten (rationale). The host keeps each Session's entry until the Session is removed, through its realm's end and a respawn under its id; an unpublished Session uses the defaults.
 
@@ -316,7 +384,7 @@ Application alarm defaults live beside the WATCHING rule set, edited in Settings
 | Contract | Speech | Push |
 |---|---|---|
 | Performed by | The realm showing the Session, sent `alert:speak`; with none it is not spoken, and a missing backend is a silent no-op. | The host's own Burrow (Push notifications), only while enrolled, whether or not a realm still shows the Session. |
-| Payload | Pane label via `toSpokenText`; fallback `terminal`. | The label the realm last published, via `toPushText`, plus a fixed body; fallback `terminal`. |
+| Payload | Pane label via `toSpokenText`. | The label the realm last published, via `toPushText`, plus a fixed body. |
 | Delivery identity | The episode the host named, rechecked at engine admission, plus native attempt identity; renderer-local `speaking` / `spoken`. | HTTP push tagged by Session id, so a newer ring replaces the prior notification. |
 | After delivery | Clearing the ring cuts off speech. | Never recalled — another push would only replace one stale notice with another. |
 | Failure | A refused or unavailable engine produces no marker. | Warn on non-2xx, partial, or zero delivery; never retry stale alarms. |
@@ -330,10 +398,10 @@ Source of truth: `normalizeAlertSettings` in `lib/src/lib/alert-settings-model.t
 - **Must sanitize the label before it reaches the engine** (`toSpokenText`; security, not tidiness — rationale): all Unicode punctuation, symbols, and `Other` characters (including controls, bidi controls, and zero-width formats) become spaces, except apostrophes, which are elided so contractions survive; letters, numbers, and their combining marks from every script remain. Whitespace collapses, the result is capped in code points, and an empty result falls back to `terminal`.
 - **Delivery state must follow actual engine callbacks, not queue admission**: `start` publishes `speaking`; `end`, or `error` after a real start, publishes `spoken`; an utterance that never starts publishes neither. **Must check delivery identity before accepting `start` or completion**, including after cancellation, timeout, or teardown.
 - **Never assume in the settle path that the callback arrives after `speak()` returns** — an engine may dispatch `start` then `end`/`error` synchronously inside `speechSynthesis.speak()`, so handlers register before dispatch (rationale). A dispatch the engine refuses outright settles too.
-- **Clearing or pausing the ring mid-sentence must cut the utterance off** — silence the engine, not merely un-render the overlay. "Mid-sentence" is the sink's own record that an utterance started, never the rendered `speaking` state.
-- **Must retain paused, unstarted speech, preparation included, without blocking other Sessions** (rationale). Never replay speech that started.
+- **Clearing or deferring the ring mid-sentence must cut the utterance off** — silence the engine, not merely un-render the overlay. "Mid-sentence" is the sink's own record that an utterance started, never the rendered `speaking` state.
+- **Must retain deferred, unstarted speech, preparation included, without blocking other Sessions** (rationale). Never replay speech that started.
 - **Must remove a resolved or disabled pending job before engine admission**, never cutting another pane's current utterance; one utterance plays at a time per renderer (`SpeechQueue`).
-- `speaking` / `spoken` remains only while the originating episode is unresolved, a pause retaining `spoken`: any action that resolves the ring (Clearing And TODO) clears it, killing the Session included, while visibility, hover, and command-mode selection do not. **Never persist it or send it to the host**, so restore/reconnect cannot recreate it.
+- `speaking` / `spoken` remains only while the originating episode is unresolved, a deferral retaining `spoken`: any action that resolves the ring (Clearing And TODO) clears it, killing the Session included, while visibility, hover, and command-mode selection do not. **Never persist it or send it to the host**, so restore/reconnect cannot recreate it.
 
 Source of truth: `toSpokenText` / `startAlertSpeech` in `lib/src/lib/alert-speech.ts`; `SpeechQueue` in `lib/src/lib/speech-queue.ts`; `redactHighEntropyTokens` in `lib/src/lib/redact-high-entropy.ts`.
 
@@ -365,13 +433,13 @@ Source of truth: `push` in `lib/src/host/remote/service.ts`; `pushAlert` in `vsc
 
 ### Settings dialog
 
-Opened by the baseboard's Settings button. Its Activity and Notifications topics are this spec's; Network's content is `docs/specs/remote-network.md` -> "Settings → Network".
+The Settings dialog's Notifications topic is this spec's; Network's content is `docs/specs/remote-network.md` -> "Settings → Network", and About's is `docs/specs/deploy.md` -> "Build stamp".
 
 - **Must show only application-wide settings**, excluding Workspace overrides.
 - A baseboard alarm button toggles only its own setting, as an override for that Workspace; components without a Workspace scope edit application defaults. **Must open a separate Workspace alert dialog from either button's right-click or focused `Shift+F10`/`ContextMenu`**, only with a Workspace scope, preserving per-field inheritance and reset-all.
 - The watched-command list removes rules and cannot add one — creating a rule stays the terminal context of a Pane running the command. It is the only place a rule set on a since-closed Pane can be removed.
 - **The push group's device line must name every device a push would reach**, and otherwise say why there is none.
-- **The Managed voice group must never show the token**, and states what is sent to Hosted, and how long ElevenLabs keeps it, before one is saved. It is hidden without `managedVoice`, which a self-host build's adapter omits, and hidden unless the port offers setup (`offerSetup`, a dev build's adapter) or a token is already configured, managed voice being an admin-only test slice; wherever it shows, the speech row names managed voice instead of linking the `/hosted` preview ([website-docs.md](./website-docs.md) -> `/hosted` preview).
+- **The Managed voice group must never show the token**, and states what is sent to Hosted, and how long ElevenLabs keeps it, before one is saved. It is hidden without `managedVoice`, which a self-host build's adapter omits, and hidden unless the port offers setup (`offerSetup`, a dev build's adapter) or a token is already configured, managed voice being an admin-only test slice; wherever it shows, the speech row names managed voice instead of linking the `/hosted` preview ([website-docs.md](./website-docs.md) -> `/hosted`).
 - Each sink carries a test control, usable while the sink is off: the test sound goes through the shared speech queue and selected voice, reporting admission or an unavailable backend, never Session delivery state; the test push takes the real Burrow→ACL→Relay path and distinguishes no targets, zero, partial, and full delivery, hidden without a Burrow service.
 
 Source of truth: `SettingsDialog` in `lib/src/components/SettingsDialog.tsx`; `WorkspaceAlarmSettingsDialog` in `lib/src/components/WorkspaceAlarmSettings.tsx`; `Baseboard` in `lib/src/components/Baseboard.tsx`.
@@ -393,29 +461,26 @@ Source of truth: `SettingsDialog` in `lib/src/components/SettingsDialog.tsx`; `W
 
 **Must project every Workspace, active or not.** The Activity store spans the whole Window, so what scopes it to one Workspace is the membership each mounted Wall publishes — panes ∪ doors, on every layout commit.
 
-**Must retain TODO and attention by stable Surface ID across a Workspace move and republish membership on both sides**, without replaying notifications on remount. GUI focus acknowledges without input; CLI movement alone does not acknowledge.
+**Must retain TODO and attention by Surface id across a Workspace move and republish membership on both sides**, without replaying notifications on remount. GUI focus acknowledges without input; CLI movement alone does not acknowledge.
 
 Source of truth: `computeWorkspaceUnion` in `lib/src/lib/workspace-union.ts`; `setWorkspaceSurfaces` in `lib/src/lib/workspace-surfaces.ts`.
 
 Where it surfaces is host-specific:
 
 - VS Code reflects the terminal portion onto native chrome — `docs/specs/vscode.md`, which also owns why browser-surface TODO stays webview-local.
-- Standalone shows terminal rings/TODOs on panes and doors, and a browser Surface's `todo` on its own door. **Every Workspace tab, the visible one included, must carry its union's TODO pill** (rationale). **Only a hidden Workspace's tab may wear the alarm inset while ringing**, the visible one's panes already ringing. Whenever a tab shows either, `count` joins its accessible name (`WorkspaceStrip` in `lib/src/components/WorkspaceStrip.tsx`).
+- Standalone: **Only a hidden Workspace's tab may wear the alarm inset while ringing**, the visible one's panes already ringing. Whenever a tab shows its TODO pill or alarm inset, `count` joins its accessible name (`WorkspaceStrip` in `lib/src/components/WorkspaceStrip.tsx`).
 
 ## UI Contract
 
 ### Pane Header
 
-A terminal's or Tool's header, on either face, shows a fixed-text `TODO` pill when `todo === true`, a hover/focus notification preview when TODO has `notification`, and the terminal context opened by right-click or by `a`. **Never tint a ringing Session's header**: the Pane overlay already outlines it.
-
 - **`a` on the selected Pane in command mode must dismiss a ringing Session and open the terminal context, whatever the status; it never edits a WATCHING rule.**
-- **Must offer user additions to WATCHING only in the terminal context** ("Watch all `<key>` commands"), whenever a foreground command has a watch key — naming the bare runner rule instead when one already covers the running script — and removals there or in Settings. Removing a rule drops it for every Session running that command.
-- Right-click always opens the context. Pressing `t` toggles TODO.
-- The mobile composition dismisses by acknowledgement alone — a tap, leaving a TODO, or a keystroke, clearing it — and wears its ring as the alarm inset, never an icon (`docs/specs/mobile-terminal-ui.md`). In Pocket only the keystroke reaches the host, as a Client's write (Engagement); a Client cannot dismiss yet (`docs/specs/remote-api.md` → Future).
+- **Must offer user additions to WATCHING only in the terminal context**, whenever a foreground command has a watch key — naming the bare runner rule instead when one already covers the running script — and removals there or in Settings. Removing a rule drops it for every Session running that command.
+- The mobile composition dismisses by acknowledgement alone — a tap, leaving a TODO, or a keystroke, clearing it (`docs/specs/mobile-terminal-ui.md`). In Pocket only the keystroke reaches the host, as a Client's write (Engagement); a Client cannot dismiss yet (`docs/specs/remote-api.md` → Future).
 
 **Must keep context alert controls scoped to the source**, with TODO, running-command WATCHING, and notification detail. **Must suppress helper alerting until promotion, including after exit**: no completion dispatch (await, ring, TODO, speech, push), protocol report, acknowledgement, or TODO control, and only the default state published. A helper still tracks its command and feeds its detector, so one promoted mid-command is WATCHING what it runs; promotion publishes that state and never replays a suppressed event (rationale).
 
-**Never put notification text inside the TODO pill**, which always reads `TODO`; it belongs in preview and detail surfaces. Clicking the pill clears TODO. **A Workspace tab's TODO pill must never clear a TODO** (it acknowledges without input: Engagement); the Surface it enters plays the landing spotlight on its header's pill, a Door's once reattached.
+Clicking a Pane header's TODO pill clears TODO. **A Workspace tab's TODO pill must never clear a TODO** (it acknowledges without input: Engagement).
 
 **Must wear the alarm treatment on every ringing terminal Pane**, labelled only once the speech sink acts. Its look and motion — one arrival burst per episode, never replayed by a remount — live at `AlertRingIndicator` and `useAlertRingBurst`; its layering: `docs/specs/layout.md` → Alarm overlay.
 
@@ -423,7 +488,7 @@ Source of truth: `TerminalContext` in `lib/src/components/wall/TerminalContext.t
 
 ### Door
 
-A Door is display-only for alert state, with no Door-specific alert menu. It shows the TODO pill while `todo`, the alarm inset while ringing, and the speech state while one is set — `SPEAKING` displacing the TODO pill for its utterance, `SPOKEN` sitting beside it until the ring clears. Its look: `Door` in `lib/src/components/Door.tsx`.
+A Door is display-only for alert state. It shows the TODO pill while `todo`, the alarm inset while ringing, and the speech state while one is set — `SPEAKING` displacing the TODO pill for its utterance, `SPOKEN` sitting beside it until the ring clears. Its look: `Door` in `lib/src/components/Door.tsx`.
 
 ## Text And Security
 

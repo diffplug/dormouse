@@ -5,6 +5,9 @@ import { realpathSync } from "node:fs";
 import { providerAuthorizationOrigins } from "../server/providers.js";
 import { oneTimeSmoke } from "./one-time-smoke.mjs";
 
+/** What the account's page sends with a login read (`docs/specs/security-hosted.md` -> "Origin boundary"). */
+const OWN_PAGE = { headers: { "sec-fetch-site": "same-origin" } };
+
 /** @param {{ text: string }} email */
 export const codeFrom = (email) => email.text.match(/\b\d{8}\b/)?.[0];
 
@@ -119,7 +122,12 @@ export async function smoke(
   assert.equal(start.status, 200, "Auth must issue a CSRF challenge");
   assert.match(start.headers.get("cache-control"), /no-store/);
   const state = await start.json();
-  assert.equal(await (await request("/api/auth/get-session")).json(), null);
+  assert.equal(await (await request("/api/auth/get-session", OWN_PAGE)).json(), null);
+  assert.equal(
+    (await request("/api/auth/get-session")).status,
+    403,
+    "Only the account's own page may read a login",
+  );
   // The packed adapter emits its own fixed provider order, not the configured
   // one, so compare the enabled set rather than the sequence.
   const providers = await (await request("/api/providers")).json();
@@ -272,11 +280,11 @@ async function emailLoginSmoke(request, origin) {
     200,
     "Email code verification",
   );
-  const signedIn = await (await browser("/api/auth/get-session")).json();
+  const signedIn = await (await browser("/api/auth/get-session", OWN_PAGE)).json();
   assert.equal(signedIn?.user.email, email);
   assert.equal((await post("/api/auth/sign-out", {})).status, 200);
   assert.equal(
-    await (await browser("/api/auth/get-session")).json(),
+    await (await browser("/api/auth/get-session", OWN_PAGE)).json(),
     null,
     "Logout must clear the session",
   );

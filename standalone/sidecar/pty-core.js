@@ -3,6 +3,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFile, spawn } = require('node:child_process');
 const { createPortScanner } = require('./port-scanner');
+const { windowsPowerShellPath, windowsSystemPath } = require('./windows-system');
 
 function safeResolve(resolver) {
   try {
@@ -15,11 +16,7 @@ function safeResolve(resolver) {
 
 function resolveDefaultShell(platform = process.platform, env = process.env) {
   if (platform === 'win32') {
-    return (
-      env.ComSpec ||
-      env.COMSPEC ||
-      path.win32.join(env.SystemRoot || env.SYSTEMROOT || 'C:\\Windows', 'System32', 'cmd.exe')
-    );
+    return env.ComSpec || env.COMSPEC || windowsSystemPath(env, 'System32', 'cmd.exe');
   }
   return env.SHELL || '/bin/sh';
 }
@@ -435,17 +432,16 @@ function fileExists(filePath, fsModule = fs) {
 async function detectWindowsShells(runtime = {}) {
   const env = runtime.env || process.env;
   const fsModule = runtime.fsModule || fs;
-  const systemRoot = env.SystemRoot || env.SYSTEMROOT || 'C:\\Windows';
   const shells = [];
 
   // Windows PowerShell (built-in)
-  const winPowerShell = path.win32.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+  const winPowerShell = windowsPowerShellPath(env);
   if (fileExists(winPowerShell, fsModule)) {
     shells.push({ name: 'Windows PowerShell', path: winPowerShell, args: [] });
   }
 
   // Command Prompt
-  const cmdPath = env.ComSpec || env.COMSPEC || path.win32.join(systemRoot, 'System32', 'cmd.exe');
+  const cmdPath = resolveDefaultShell('win32', env);
   if (fileExists(cmdPath, fsModule)) {
     shells.push({ name: 'Command Prompt', path: cmdPath, args: [] });
   }
@@ -479,10 +475,10 @@ async function detectWindowsShells(runtime = {}) {
   // the sidecar is itself spawned CREATE_NO_WINDOW, and a console child without
   // that flag stalls on Windows console allocation — the actual reason the old
   // wsl.exe call timed out.
-  const wslExe = path.win32.join(systemRoot, 'System32', 'wsl.exe');
+  const wslExe = windowsSystemPath(env, 'System32', 'wsl.exe');
   if (fileExists(wslExe, fsModule)) {
     try {
-      const regExe = path.win32.join(systemRoot, 'System32', 'reg.exe');
+      const regExe = windowsSystemPath(env, 'System32', 'reg.exe');
       const raw = await runText(
         runtime,
         regExe,
@@ -1072,7 +1068,7 @@ function parseNetstatListening(output, pidSet) {
 module.exports.parseNetstatListening = parseNetstatListening;
 
 function runPowerShell(script, runtime, timeout = OPEN_PORT_TIMEOUT_MS) {
-  return runText(runtime, 'powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { timeout });
+  return runText(runtime, windowsPowerShellPath(runtime.env || process.env), ['-NoProfile', '-NonInteractive', '-Command', script], { timeout });
 }
 
 /** Run a `... | ConvertTo-Json` script and return its rows as an array. */
@@ -1099,7 +1095,8 @@ async function windowsListeningPorts(pids, runtime = {}, names) {
     ports = parseNetTcpConnections(json, pidSet);
   } catch {
     try {
-      ports = parseNetstatListening(await runText(runtime, 'netstat', ['-ano', '-p', 'TCP'], { timeout: remaining() }), pidSet);
+      const netstat = windowsSystemPath(runtime.env || process.env, 'System32', 'netstat.exe');
+      ports = parseNetstatListening(await runText(runtime, netstat, ['-ano', '-p', 'TCP'], { timeout: remaining() }), pidSet);
     } catch { return []; }
   }
   // Names come from the process-table read; a failed read leaves ports unnamed.
@@ -1118,7 +1115,7 @@ async function getListeningPortsForPids(pids, runtime = {}, names) {
 
 module.exports.getListeningPortsForPids = getListeningPortsForPids;
 
-/** De-duplicated by (family, address, port) and sorted by port — the shape a
+/** De-duplicated by (family, address, port) and sorted by port, then address — the shape a
  *  caller reads a Surface's ports in. */
 function dedupeListeningPorts(ports) {
   const seen = new Map();
@@ -1179,7 +1176,8 @@ function openNativeDirectory(nativePath, done, runtime = {}) {
     if (nativePath.includes(',')) return done(new Error('Explorer cannot open a path containing a comma'));
     // Explorer is a shell UI: acknowledge process launch, not its lifetime or
     // exit status. Keep OS-level launch errors visible to the caller.
-    const child = (runtime.spawn || spawn)('explorer.exe', [nativePath], { windowsHide: true, stdio: 'ignore' });
+    const explorer = windowsSystemPath(runtime.env || process.env, 'explorer.exe');
+    const child = (runtime.spawn || spawn)(explorer, [nativePath], { windowsHide: true, stdio: 'ignore' });
     let settled = false;
     const finish = error => { if (!settled) { settled = true; done(error); } };
     child.once('error', finish);
@@ -1395,19 +1393,35 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
 
     cancelRepaint(id);
     cancelInput(id);
+    // A spawn over a live generation — a cold restore that believed a host
+    // silent through both list asks (`collectLivePtys`) — leaves the old shell
+    // unreachable: nothing can write to it, and its output and exit no longer
+    // speak for the id. Stop it rather than leak it — with node-pty's default
+    // SIGHUP, not the graceful SIGTERM: an interactive bash ignores SIGTERM, and
+    // no later kill can reach a PTY that is no longer in `ptys`.
+    const displaced = ptys.get(id);
     ptys.set(id, p);
+    if (displaced) {
+      console.error(`[pty-core] spawn replaced a live PTY under ${id}; stopping the old one`);
+      try { stopPty(displaced); } catch (error) { console.error(`[pty-core] stopping the displaced PTY under ${id} failed:`, error.message); }
+    }
     const session = { chunks: [], chars: 0, received: 0, shell: config.shell };
     sessions.set(id, session);
     ptyShells.set(id, config.shell);
 
     p.onData((data) => {
+      // A generation replaced under the id never speaks for it, as its exit
+      // does not: its late output would interleave into the Session that
+      // replaced it. Output after its own exit still flows (ConPTY flushes late).
+      const current = ptys.get(id);
+      if (current && current !== p) return;
       // Appended BEFORE the send, and synchronously. Two consumers depend on
       // that order: the replay a reconnecting webview reads, and a Workspace
       // transfer, whose host suppresses this id's output the instant it
       // reassigns ownership and then asks for `list([id])` — so the chunk it
       // suppressed has to already be in the buffer the replay is built from,
       // exactly once (docs/specs/transport.md -> "Transferring a Workspace").
-      if (replay && ptys.get(id) === p) {
+      if (replay && current === p) {
         session.chunks.push(data);
         session.chars += data.length;
         session.received += data.length;
@@ -1649,7 +1663,9 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
         } else helpers.delete(request.id);
         onHelper(request.id, helpers.has(request.id));
       } else if (request.op === 'openDirectory') {
-        if (typeof request.path !== 'string' || !path.isAbsolute(request.path) || request.path.includes('\0') || !directoryExists(request.path)) throw new Error('Directory is unavailable');
+        // A share or device path (`isUncOrDevicePath` in dor-lib-common) is
+        // refused before the existence check, which alone would reach its host.
+        if (typeof request.path !== 'string' || !path.isAbsolute(request.path) || /^[\\/]{2}/.test(request.path) || request.path.includes('\0') || !directoryExists(request.path)) throw new Error('Directory is unavailable');
         const nativePath = fs.realpathSync(request.path);
         // Absolute canonical path is one argument; no shell interprets OSC text.
         openNativeDirectory(nativePath, (error) => {

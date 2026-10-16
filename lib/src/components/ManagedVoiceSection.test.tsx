@@ -99,7 +99,7 @@ describe('ManagedVoiceSection', () => {
     const adapter = Object.assign(new FakePtyAdapter(), { managedVoice: makePort() });
     await render(adapter);
     expect(text()).toContain('Only the spoken pane label and voice id are sent to voice.dormouse.sh');
-    expect(text()).toContain("ElevenLabs' copy is usually deleted within seconds");
+    expect(text()).toContain('ElevenLabs keeps a copy until Dormouse deletes it, usually within minutes, though no limit is guaranteed.');
 
     await act(async () => type(input('password'), TOKEN));
     await act(async () => button('Use managed voice').click());
@@ -142,8 +142,8 @@ describe('ManagedVoiceSection', () => {
 
 describe('the spoken-alarm copy', () => {
   it.each([
-    ['no port', undefined, 'Managed ElevenLabs voice is coming soon.'],
-    ['a public build with no token', false, 'Managed ElevenLabs voice is coming soon.'],
+    ['no port', undefined, 'Get managed ElevenLabs voices.'],
+    ['a public build with no token', false, 'Get managed ElevenLabs voices.'],
     ['a port that offers setup', true, 'Uses managed voice while a voice token is saved'],
   ])('with %s', async (_label, offerSetup, copy) => {
     const adapter = new FakePtyAdapter();

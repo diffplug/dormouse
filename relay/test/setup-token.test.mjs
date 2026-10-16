@@ -22,7 +22,7 @@ import {
   UNAUTHORIZED_ERROR,
 } from 'remote-lib-common';
 
-import { AccountStore } from '../dist/state.js';
+import { AccountStore, BurrowStore } from '../dist/state.js';
 import { SetupTokenIssuer } from '../dist/setup-token.js';
 import { FakeBurrow } from '../../remote-lib-common/test/harness/fake-burrow.mjs';
 import {
@@ -135,7 +135,7 @@ test('the minted token carries the shared TTL', async () => {
   assert.equal(expiresAt, clock.now() + SETUP_TOKEN_TTL_MS);
 });
 
-test('a failed Burrow-state read restores a consumed setup token', async () => {
+test('a failed Burrow-state read restores a claimed setup token', async () => {
   const { app, stateDir, token } = await appWithToken();
   const path = join(stateDir, 'burrows.json');
   const original = await readFile(path, 'utf8');
@@ -155,7 +155,8 @@ test('a scanned token registers a passkey without the setup password', async () 
     label: 'iPhone Safari',
   });
   assert.equal(finished.status, 200);
-  assert.deepEqual(await finished.json(), {
+  const { accountId, credentialId } = await finished.json();
+  assert.deepEqual({ accountId, credentialId }, {
     accountId: 'owner',
     credentialId: authenticator.credentialId,
   });
@@ -192,7 +193,7 @@ test('a failed finish restores the token, unspent', async () => {
   const began = await begin(app, { setupToken: token });
   const { challenge } = await began.json();
 
-  // `finish` consumes up front, so a rejection past that point has to put the
+  // `finish` claims up front, so a rejection past that point has to put the
   // token back: an ordinary bad attempt must not cost the user the QR.
   const rejected = await post(app, API_ROUTES.setupFinish, {
     setupToken: token,
@@ -413,6 +414,78 @@ test('retiring requires a session, and a revoked minter kills the token there to
   assert.deepEqual(await revoked.json(), REFUSED);
 });
 
+/**
+ * Suspend the next `burrows.json` membership check — the first await after a
+ * setup gate claims its token — until `release`; later checks run through.
+ */
+function holdNextBurrowCheck() {
+  const has = BurrowStore.prototype.has;
+  let reached;
+  let release;
+  const arrived = new Promise((resolve) => (reached = resolve));
+  const released = new Promise((resolve) => (release = resolve));
+  let held = false;
+  BurrowStore.prototype.has = async function hooked(...args) {
+    if (!held) {
+      held = true;
+      reached();
+      await released;
+    }
+    return has.apply(this, args);
+  };
+  return { arrived, release, unhook: () => (BurrowStore.prototype.has = has) };
+}
+
+test('a retire wins over a finish still in flight: its failure cannot restore the token', async () => {
+  const { app, token } = await appWithToken();
+  const { sessionToken } = await ownerSession(app);
+  const { challenge } = await (await begin(app, { setupToken: token })).json();
+  const hold = holdNextBurrowCheck();
+  try {
+    // A finish that will fail its checks, suspended while it holds the token.
+    const authenticator = await newAuthenticator();
+    const failing = post(app, API_ROUTES.setupFinish, {
+      setupToken: token,
+      credentialId: authenticator.credentialId,
+      publicKey: authenticator.publicKey,
+      clientDataJSON: registrationClientData({ challenge, origin: 'http://evil.example' }),
+      label: 'x',
+    });
+    await hold.arrived;
+    // The owner's intent is unambiguous, so the in-flight claim does not refuse it.
+    assert.equal((await retire(app, sessionToken, { setupToken: token })).status, 204);
+    hold.release();
+    assert.equal((await failing).status, 400);
+  } finally {
+    hold.unhook();
+  }
+  // The failed finish put nothing back.
+  const began = await begin(app, { setupToken: token });
+  assert.equal(began.status, 401);
+  assert.deepEqual(await began.json(), REFUSED);
+  assert.equal((await registerWithToken(app, token)).status, 401);
+});
+
+test('a retire wins over a valid finish still in flight: it registers nothing', async () => {
+  const { app, stateDir, token } = await appWithToken();
+  const { sessionToken } = await ownerSession(app);
+  const before = (await readAccount(stateDir)).passkeys.length;
+  const { challenge } = await (await begin(app, { setupToken: token })).json();
+  const hold = holdNextBurrowCheck();
+  try {
+    const pending = finish(app, await newAuthenticator(), { setupToken: token }, { challenge });
+    await hold.arrived;
+    assert.equal((await retire(app, sessionToken, { setupToken: token })).status, 204);
+    hold.release();
+    const refused = await pending;
+    assert.equal(refused.status, 401);
+    assert.deepEqual(await refused.json(), REFUSED);
+  } finally {
+    hold.unhook();
+  }
+  assert.equal((await readAccount(stateDir)).passkeys.length, before);
+});
+
 // --- SetupTokenIssuer directly: expiry, single use, and the cap -------------
 
 test('the issuer answers the minting burrow, once, and only while fresh', () => {
@@ -423,24 +496,28 @@ test('the issuer answers the minting burrow, once, and only while fresh', () => 
   const entry = { burrowId: 'burrow-1', expiresAt };
   assert.deepEqual(issuer.peek(token), entry);
   assert.deepEqual(issuer.peek(token), entry); // peek does not spend
-  assert.deepEqual(issuer.consume(token), entry);
-  assert.equal(issuer.consume(token), null);
+  assert.deepEqual(issuer.claim(token), entry);
+  assert.equal(issuer.claim(token), null);
+  assert.equal(issuer.peek(token), null, 'a claimed token is not scannable');
+  issuer.settle(token);
+  assert.equal(issuer.retire(token), null);
   assert.equal(issuer.peek('never-minted'), null);
 
   const later = issuer.issue('burrow-2');
   clock.advance(SETUP_TOKEN_TTL_MS);
   assert.equal(issuer.peek(later.token), null);
-  assert.equal(issuer.consume(later.token), null);
+  assert.equal(issuer.claim(later.token), null);
+  assert.equal(issuer.retire(later.token), null);
 });
 
-test('restore puts a consumed token back on its original expiry', () => {
+test('restore puts a claimed token back on its original expiry', () => {
   const clock = makeClock();
   const issuer = new SetupTokenIssuer({ now: clock.now });
 
   const { token, expiresAt } = issuer.issue('burrow-1');
-  const entry = issuer.consume(token);
+  issuer.claim(token);
   clock.advance(SETUP_TOKEN_TTL_MS / 2);
-  issuer.restore(token, entry);
+  issuer.restore(token);
   // Redeemable again, but not for a moment longer than it started with: a
   // failed attempt must not be a way to extend the shoulder-surf window.
   assert.deepEqual(issuer.peek(token), { burrowId: 'burrow-1', expiresAt });
@@ -449,27 +526,48 @@ test('restore puts a consumed token back on its original expiry', () => {
 
   // A token that died while the route was failing stays dead.
   const late = issuer.issue('burrow-1');
-  const lateEntry = issuer.consume(late.token);
+  issuer.claim(late.token);
   clock.advance(SETUP_TOKEN_TTL_MS);
-  issuer.restore(late.token, lateEntry);
+  issuer.restore(late.token);
   assert.equal(issuer.peek(late.token), null);
 });
 
-test('restore stays within the Burrow cap after a concurrent mint fills the slot', () => {
+test('a retire kills a claimed token: it can neither commit nor be restored', () => {
+  const issuer = new SetupTokenIssuer({ now: makeClock().now });
+
+  const { token, expiresAt } = issuer.issue('burrow-1');
+  issuer.claim(token);
+  assert.deepEqual(issuer.retire(token), { burrowId: 'burrow-1', expiresAt });
+  assert.equal(issuer.commit(token), false);
+  issuer.restore(token);
+  assert.equal(issuer.peek(token), null);
+  assert.equal(issuer.pendingCount, 0);
+
+  // Past the registration write it is spent already: the retire answers it
+  // dead, and a write that then fails restores nothing either.
+  const committed = issuer.issue('burrow-1').token;
+  issuer.claim(committed);
+  assert.equal(issuer.commit(committed), true);
+  assert.equal(issuer.retire(committed), null);
+  issuer.restore(committed);
+  assert.equal(issuer.peek(committed), null);
+});
+
+test('a claimed token counts toward the Burrow cap, and one the cap evicted stays dead', () => {
   const clock = makeClock();
   const issuer = new SetupTokenIssuer({ now: clock.now });
   const issued = Array.from({ length: MAX_TOKENS_PER_BURROW }, () => issuer.issue('burrow-1'));
 
-  const spent = issuer.consume(issued[0].token);
+  issuer.claim(issued[0].token);
   const replacement = issuer.issue('burrow-1');
   assert.equal(issuer.pendingCount, MAX_TOKENS_PER_BURROW);
-
-  // Validation failed after the mint used the apparent vacancy. The failed
-  // finish gets its token back, but cannot grow this Burrow to nine entries.
-  issuer.restore(issued[0].token, spent);
+  // The mint evicted the oldest, claimed or not; the finish holding it cannot
+  // register with it or put it back.
+  assert.equal(issuer.commit(issued[0].token), false);
+  issuer.restore(issued[0].token);
   assert.equal(issuer.pendingCount, MAX_TOKENS_PER_BURROW);
-  assert.deepEqual(issuer.peek(issued[0].token), spent);
-  assert.equal(issuer.peek(issued[1].token), null);
+  assert.equal(issuer.peek(issued[0].token), null);
+  assert.notEqual(issuer.peek(issued[1].token), null);
   assert.notEqual(issuer.peek(replacement.token), null);
 });
 

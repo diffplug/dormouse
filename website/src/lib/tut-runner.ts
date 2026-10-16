@@ -12,7 +12,6 @@ import {
   RESET,
   fg,
 } from "dormouse-lib/lib/ansi";
-import { cfg } from "dormouse-lib/cfg";
 import type { FakePtyAdapter } from "dormouse-lib/lib/platform/fake-adapter";
 import type { MobileGestureInputId } from "dormouse-lib/lib/mobile-gesture-menu";
 import { parseColorRgb } from "dormouse-lib/lib/css-color";
@@ -25,33 +24,12 @@ import {
 } from "./tut-items";
 import type { TutorialState } from "./tutorial-state";
 
-/** Snapshot each launch: both the countdown and the fake command use this
- *  duration. The floor keeps a shortened inactivity setting from ending output
- *  before the WATCHING detector can confirm BUSY. */
-function getDemoDurationMs(inactivityTimeoutMs: number): number {
-  return Math.max(
-    inactivityTimeoutMs,
-    cfg.alert.busyCandidateGap + cfg.alert.busyConfirmGap,
-  ) + 250;
-}
-
-/** Must stay below `busyCandidateGap` to form one activity burst. */
-export const BUSY_DEMO_INTERVAL_MS = Math.floor(cfg.alert.busyCandidateGap / 2);
-
-/** Must outlive WATCHING's silence chain or exit disposes its monitor early. */
-function getWatchCommandDurationMs(busyDurationMs: number): number {
-  return busyDurationMs + cfg.alert.mightNeedAttention + cfg.alert.needsAttentionConfirm + 2_000;
-}
-
 // Replace `` `KEY` `` markers with a cyan span. Uses default-foreground
 // (39m) to close the span so the highlight composes cleanly with
 // surrounding bold/italic/dim — only the color is touched.
 function highlightKeys(line: string): string {
   return line.replace(/`([^`]+)`/g, `${fg(36)}$1${FG_DEFAULT}`);
 }
-
-const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-const SPINNER_INTERVAL_MS = 100;
 
 /** Static "your turn" pointer for the active section item — deliberately not
  *  animated, so the checklist doesn't compete for attention with the alarm the
@@ -210,14 +188,6 @@ interface TutRunnerOptions {
   state: TutorialState;
   profile?: TutorialProfile;
   onExit: () => void;
-  /** Injected by the loaded desktop runtime to keep platform imports out of hydration. */
-  getInactivityTimeoutMs?: () => number;
-  /** Called when the user presses `s` inside the Alert section. */
-  onTriggerBusyDemo?: (durationMs: number, commandMs: number) => void;
-  /** Called when the user presses `n` inside the Alert section. */
-  onTriggerNotifyDemo?: () => void;
-  /** Called when the user presses `x` inside the Alert section. */
-  onTriggerCommandExitDemo?: (durationMs: number) => void;
   /** Called when the user presses `p` inside the Copy paste section. */
   onTogglePlaceToPaste?: () => void;
   /** Called when the user presses `Enter` on the GitHub star prompt. */
@@ -245,10 +215,6 @@ export class TutRunner implements InteractiveProgram {
   private state: TutorialState;
   private profile: TutorialProfile;
   private onExit: () => void;
-  private getInactivityTimeoutMs: () => number;
-  private onTriggerBusyDemo?: (durationMs: number, commandMs: number) => void;
-  private onTriggerNotifyDemo?: () => void;
-  private onTriggerCommandExitDemo?: (durationMs: number) => void;
   private onTogglePlaceToPaste?: () => void;
   private onOpenGithub?: () => void;
   private onOpenPocket?: () => void;
@@ -263,21 +229,12 @@ export class TutRunner implements InteractiveProgram {
   private sectionId: string | null = null;
   private resetBuffer = "";
   private resetMismatch = false;
-  private spinnerFrame = 0;
-  private spinnerTimer: ReturnType<typeof setInterval> | null = null;
   private flappyTimer: ReturnType<typeof setInterval> | null = null;
   private flappy: FlappyGameState | null = null;
   private stateUnsub: (() => void) | null = null;
   private pocketTouchModeUnsub: (() => void) | null = null;
   private resizeUnsub: (() => void) | null = null;
   private themeUnsub: (() => void) | null = null;
-  private busyDemoStart: number | null = null;
-  private busyDemoDurationMs = 0;
-  /** How long the fake `longtask` runs — the countdown and the re-press guard.
-   *  Longer than the pump, which stops so the pane can go silent and ring. */
-  private busyDemoCommandMs = 0;
-  private commandExitDemoStart: number | null = null;
-  private commandExitDemoDurationMs = 0;
   private disposed = false;
   private gestureScrollDirections = new Set<number>();
   private gestureArrows = new Set<MobileGestureInputId>();
@@ -294,10 +251,6 @@ export class TutRunner implements InteractiveProgram {
     this.state = options.state;
     this.profile = options.profile ?? DESKTOP_TUTORIAL_PROFILE;
     this.onExit = options.onExit;
-    this.getInactivityTimeoutMs = options.getInactivityTimeoutMs ?? (() => cfg.alert.inactivityTimeout);
-    this.onTriggerBusyDemo = options.onTriggerBusyDemo;
-    this.onTriggerNotifyDemo = options.onTriggerNotifyDemo;
-    this.onTriggerCommandExitDemo = options.onTriggerCommandExitDemo;
     this.onTogglePlaceToPaste = options.onTogglePlaceToPaste;
     this.onOpenGithub = options.onOpenGithub;
     this.onOpenPocket = options.onOpenPocket;
@@ -317,23 +270,6 @@ export class TutRunner implements InteractiveProgram {
       if (d.id === this.terminalId) this.render();
     });
     this.render();
-  }
-
-  private startSpinnerTicks(): void {
-    if (this.spinnerTimer) return;
-    this.spinnerTimer = setInterval(() => {
-      this.spinnerFrame = (this.spinnerFrame + 1) % SPINNER_FRAMES.length;
-      this.render();
-      if (!this.busyDemoInProgress() && !this.commandExitDemoInProgress()) {
-        this.stopSpinnerTicks();
-      }
-    }, SPINNER_INTERVAL_MS);
-  }
-
-  private stopSpinnerTicks(): void {
-    if (!this.spinnerTimer) return;
-    clearInterval(this.spinnerTimer);
-    this.spinnerTimer = null;
   }
 
   private startFlappyTicks(): void {
@@ -568,26 +504,6 @@ export class TutRunner implements InteractiveProgram {
         this.handleEscape();
         return;
       }
-      if (this.screen === "section" && this.sectionId === "alert") {
-        if (ch === "s" || ch === "S") {
-          // Ignore presses while the demo is still running — otherwise each
-          // press starts a fresh pumpActivity interval that stacks on top of
-          // the previous one until they all expire.
-          if (!this.busyDemoInProgress()) this.startBusyDemo();
-          i += 1;
-          continue;
-        }
-        if (ch === "n" || ch === "N") {
-          this.onTriggerNotifyDemo?.();
-          i += 1;
-          continue;
-        }
-        if (ch === "x" || ch === "X") {
-          if (!this.commandExitDemoInProgress()) this.startCommandExitDemo();
-          i += 1;
-          continue;
-        }
-      }
       if (
         this.screen === "section" &&
         this.sectionId === "copy" &&
@@ -691,15 +607,6 @@ export class TutRunner implements InteractiveProgram {
       if (!section) return;
       this.sectionId = section.id;
       this.screen = "section";
-      // Resume the spinner if we're entering Alert while a demo started
-      // earlier is still running. Otherwise the countdown line would
-      // render with a frozen spinner glyph (timer was stopped on Esc out).
-      if (
-        section.id === "alert" &&
-        (this.busyDemoInProgress() || this.commandExitDemoInProgress())
-      ) {
-        this.startSpinnerTicks();
-      }
       this.render();
       return;
     }
@@ -722,11 +629,6 @@ export class TutRunner implements InteractiveProgram {
 
   private handleEscape(): void {
     if (this.screen === "section") {
-      // The spinner only animates the Alert section's "fake task running"
-      // line, so it has nothing to draw outside that section — stop it
-      // here rather than letting it re-render the menu every 100ms until
-      // the demo's natural duration elapses.
-      this.stopSpinnerTicks();
       this.sectionId = null;
       this.screen = "menu";
       this.render();
@@ -752,35 +654,6 @@ export class TutRunner implements InteractiveProgram {
   private exit(): void {
     if (this.disposed) return;
     this.cleanup(true);
-  }
-
-  /** Spans the whole fake command, not just the countdown, so a replay anywhere
-   *  inside it is ignored. Per instance — the page cancels across runners. */
-  private busyDemoInProgress(): boolean {
-    if (this.busyDemoStart === null) return false;
-    return Date.now() - this.busyDemoStart < this.busyDemoCommandMs;
-  }
-
-  private startBusyDemo(): void {
-    this.busyDemoStart = Date.now();
-    this.busyDemoDurationMs = getDemoDurationMs(this.getInactivityTimeoutMs());
-    this.busyDemoCommandMs = getWatchCommandDurationMs(this.busyDemoDurationMs);
-    this.onTriggerBusyDemo?.(this.busyDemoDurationMs, this.busyDemoCommandMs);
-    this.startSpinnerTicks();
-    this.render();
-  }
-
-  private commandExitDemoInProgress(): boolean {
-    if (this.commandExitDemoStart === null) return false;
-    return Date.now() - this.commandExitDemoStart < this.commandExitDemoDurationMs;
-  }
-
-  private startCommandExitDemo(): void {
-    this.commandExitDemoStart = Date.now();
-    this.commandExitDemoDurationMs = getDemoDurationMs(this.getInactivityTimeoutMs());
-    this.onTriggerCommandExitDemo?.(this.commandExitDemoDurationMs);
-    this.startSpinnerTicks();
-    this.render();
   }
 
   // --- Render ---
@@ -1105,11 +978,6 @@ export class TutRunner implements InteractiveProgram {
       }
     }
 
-    if (section.id === "alert") {
-      lines.push("");
-      lines.push(...this.renderBusyDemoLines());
-    }
-
     if (done === total) {
       lines.push("");
       lines.push(
@@ -1132,36 +1000,6 @@ export class TutRunner implements InteractiveProgram {
       `   ${fg(33)}${ACTIVE_ITEM_GLYPH}${RESET}  ${BOLD}Tap "Select" to enable drag-to-copy${RESET}`,
       `        ${ITALIC}Current touch mode is \`${mode === "cursor" ? "Mouse" : "Gestures"}\`.${RESET}`,
     ];
-  }
-
-  private renderBusyDemoLines(): string[] {
-    return [
-      // Counts down the fake command, not the pump: `longtask` keeps running
-      // after `tut-boxed` goes quiet, which is the whole point of the demo.
-      this.renderDemoLine("s", "longtask", "Fake task", this.busyDemoStart, this.busyDemoCommandMs),
-      `  ${DIM}Press \`n\` for a program that rings on its own.${RESET}`,
-      this.renderDemoLine("x", "slowbuild", "Slow build", this.commandExitDemoStart, this.commandExitDemoDurationMs),
-    ];
-  }
-
-  /** One "press KEY / running… / done" status line for an alert demo. */
-  private renderDemoLine(
-    key: string,
-    command: string,
-    label: string,
-    startedAt: number | null,
-    durationMs: number,
-  ): string {
-    if (startedAt === null) {
-      return `  ${DIM}Press \`${key}\` to start a fake \`${command}\`.${RESET}`;
-    }
-    const elapsed = Date.now() - startedAt;
-    if (elapsed < durationMs) {
-      const spinner = SPINNER_FRAMES[this.spinnerFrame];
-      const secsLeft = Math.max(1, Math.ceil((durationMs - elapsed) / 1_000));
-      return `  ${fg(33)}${spinner}${RESET} ${label} finishes in ${BOLD}${secsLeft}${RESET} seconds.`;
-    }
-    return `  ${fg(32)}✓${RESET} ${label} finished. ${DIM}Press \`${key}\` for another.${RESET}`;
   }
 
   private renderItem(item: Item, index: number, activeIndex: number): string[] {
@@ -1230,12 +1068,9 @@ export class TutRunner implements InteractiveProgram {
   private cleanup(notifyExit: boolean): void {
     if (this.disposed) return;
     this.disposed = true;
-    this.stopSpinnerTicks();
     this.syncGestureScreen();
     this.stopFlappyTicks();
     this.flappy = null;
-    this.busyDemoStart = null;
-    this.commandExitDemoStart = null;
     this.stateUnsub?.();
     this.stateUnsub = null;
     this.pocketTouchModeUnsub?.();

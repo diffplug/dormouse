@@ -93,8 +93,9 @@ async function stream(req: IncomingMessage, res: ServerResponse, resource: Resou
 }
 
 /** One Tool process owns one file grant and its file descriptors. Restarting
- * creates a fresh capability; only the file argument is persisted by Dormouse. */
-/** `formatOf` is the handler's (`BuiltinHandler.format`): `builtin:code`'s
+ * creates a fresh capability; only the file argument is persisted by Dormouse.
+ *
+ * `formatOf` is the handler's (`BuiltinHandler.format`): `builtin:code`'s
  * serves every textual format as source. */
 export async function startFileViewer(input: string, { onDirty = () => {}, formatOf = fileViewerFormat }: { onDirty?: (dirty: boolean) => void; formatOf?: (path: string) => FileFormat | null } = {}): Promise<{ port: number; path: string; target: string; editable: boolean; close(): Promise<void> }> {
   const target = await realpath(input);

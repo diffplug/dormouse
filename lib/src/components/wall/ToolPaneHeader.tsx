@@ -59,7 +59,7 @@ function ToolBrowserHeader({ id, title, params, switching }: PaneProps & { switc
   const context = useContext(TerminalContextContext);
   const isActiveHeader = mode === 'passthrough' && selectedId === id && windowFocused;
   // The Tool's Session rings and keeps TODOs while its browser shows, so the
-  // pill rides this face too (`docs/specs/layout.md` -> Pane header).
+  // pill rides this face too (`docs/specs/dor-tool.md` -> The tool capability set).
   const activity = useSyncExternalStore(subscribeToActivity, getActivitySnapshot).get(id) ?? DEFAULT_ACTIVITY_STATE;
   const userTitle = useSyncExternalStore(subscribeToTerminalPaneState, () => getTerminalPaneStateSnapshot().get(id)?.titleCandidates.user?.title ?? null);
   const name = toolSemanticName(params, userTitle) ?? title ?? id;

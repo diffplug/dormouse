@@ -11,14 +11,13 @@
  * (`docs/specs/terminal-escapes.md` → "Parsing location").
  */
 
-import type { ProcessedPtyStream } from '../../lib/processed-pty-stream';
 import type { AlertManager, AlertState } from '../../lib/alert-manager';
 import { parseTerminalColors, type TerminalColorProvider, type TerminalColors } from '../../lib/terminal-protocol';
 import { createAlertHost, type AlertRealm } from '../alert-host';
 import type { AlertEvents } from '../alert-protocol';
 import { bakedRelay } from '../relay-origin';
 import { createManagedVoiceHost } from '../managed-voice-host';
-import { alertedPty, createOwnerPtyStream } from '../owner-pty';
+import { alertedPty, createOwnerPtyStream, type OwnerPtyStream } from '../owner-pty';
 import type {
   BurrowSurfaceProvider,
   PtySink,
@@ -72,6 +71,9 @@ export interface SidecarSurfaceBridge {
   onPtyEvent(event: string, data: unknown): void;
   /** A `pty:spawn` command: the id now names a new PTY generation. */
   onPtySpawn(id: unknown): void;
+  /** A `pty:input` of `typed` the webview marked `launch`: arms that
+   *  generation's `ToolLaunchLatch`, before the bytes reach the shell. */
+  onPtyLaunch(id: string, typed: string): void;
   /**
    * A `pty:themeColors` push. The sidecar has no DOM, so the webview reports its
    * resolved terminal theme for OSC 10/11/12; anything malformed is ignored.
@@ -152,7 +154,7 @@ export function createSidecarSurfaceBridge(
      * must never be mixed with another's. It outlives every attachment because
      * the webview is a consumer too.
      */
-    parsed: ProcessedPtyStream;
+    parsed: OwnerPtyStream;
     /** Each attached sink, holding the unsubscribe from its own subscription. */
     sinks: Map<PtySink, () => void>;
   }
@@ -358,6 +360,10 @@ export function createSidecarSurfaceBridge(
       for (const sink of stream.sinks.keys()) sink.onExit(exitCode);
     },
 
+    onPtyLaunch(id, typed) {
+      ownerStream(id).parsed.armLaunch(typed);
+    },
+
     onPtySpawn(id) {
       // A reused id is a new generation: the parser must not carry the last
       // one's half-read sequence into its first bytes, and the new PTY has not
@@ -542,6 +548,7 @@ export function createSidecarHost(options: SidecarHostOptions): SidecarHost {
           return true;
         }
         case 'pty:input':
+          if (detail.launch === true && isString(id) && isString(detail.data)) bridge.onPtyLaunch(id, detail.data);
           pty.write(id as string, detail.data as string, {
             paced: detail.paced === true,
             userInput: detail.userInput === true,

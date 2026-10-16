@@ -57,6 +57,9 @@ const PUBLIC_MARKDOWN = [GUIDE, ROOT_README, ...Object.keys(SITE_ROUTES)];
 const DOCS_ENTRYPOINT_PATH = '/docs';
 /** The `linkedFrom` source naming {@link HOMEPAGE}, as `docs-pages.ts` spells it. */
 const HOMEPAGE_SOURCE = 'homepage';
+/** The path that sells the one paid service, and the page it is a section of. */
+const PRICING_PATH = '/pricing';
+const HOSTED_PATH = '/hosted';
 const SPEC = 'docs/specs/website-docs.md';
 const REDIRECTS = 'website/public/_redirects';
 const ROOT_ROUTE = 'website/src/root.tsx';
@@ -447,6 +450,37 @@ function checkDocsEntrypoint() {
 }
 
 /**
+ * `/pricing` is a redirect, not a page.
+ *
+ * The tool is free and open source, so the price belongs to the one optional
+ * service that has one, and splitting it into a page of its own would put a
+ * second, staler set of numbers on the site (docs/specs/pricing.md -> The
+ * Hosted page). A 301 because that is not a judgement call we expect to
+ * revisit, unlike `/docs`.
+ */
+function checkPricingRedirect() {
+  if (DOCS_PAGES.some((page) => page.path === PRICING_PATH)) {
+    fail(`docs-pages.ts: ${PRICING_PATH} is a page; it must stay a redirect to ${HOSTED_PATH}`);
+  }
+  const rule = readRepoFile(REDIRECTS)
+    .split('\n')
+    .find((line) => new RegExp(`^${PRICING_PATH}\\s`).test(line));
+  if (!rule) {
+    fail(`${REDIRECTS}: no ${PRICING_PATH} rule; the price would 404`);
+    return;
+  }
+  const [, to, status] = rule.trim().split(/\s+/);
+  // The served form, so the reader pays one hop rather than two
+  // (`sitePath` in website/src/lib/site-meta.ts).
+  if (to !== `${HOSTED_PATH}/`) {
+    fail(`${REDIRECTS}: ${PRICING_PATH} goes to ${to}, not ${HOSTED_PATH}/`);
+  }
+  if (status !== '301') {
+    fail(`${REDIRECTS}: ${PRICING_PATH} must redirect with 301, not ${status ?? '(none)'}`);
+  }
+}
+
+/**
  * No page is served under `/docs`: the prefix survives only as the entrypoint
  * and as legacy 301s (docs/specs/website-docs.md -> Reference page chrome), so
  * a registry path or homepage href there is a page added back under it.
@@ -604,6 +638,7 @@ const checks = [
   checkPageHeadTags,
   checkSiteOrigin,
   checkDocsEntrypoint,
+  checkPricingRedirect,
   checkRoutesToReferences,
   checkNoDocsPrefixPages,
   checkGenerated,

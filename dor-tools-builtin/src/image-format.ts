@@ -20,7 +20,7 @@ export const EDIT_ROUTE = 'edit/';
 export const IMAGE_SAVE_ROUTE = 'image-save/';
 export const IMAGES_ROUTE = 'images/';
 // An image the Markdown editor shows can be opened directly; it never runs as a document there.
-export const IMAGE_CSP = "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:";
+export const IMAGE_CSP = "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'";
 
 /** `b[start, end)` as Latin-1 text. */
 export const ascii = (b: Uint8Array, start: number, end: number): string => String.fromCharCode(...b.subarray(start, end));

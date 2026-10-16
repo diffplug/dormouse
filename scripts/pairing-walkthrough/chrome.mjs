@@ -1,6 +1,6 @@
 /**
  * The Pocket side's own Chrome, launched by the harness rather than by
- * `agent-browser` (`scripts/pairing-walkthrough/README.md` → The Pocket browser).
+ * `agent-browser` (`scripts/pairing-walkthrough/README.md` → State isolation).
  *
  * `agent-browser --args` *can* carry launch flags (probed on 0.31.1), so the
  * fake camera does not by itself require this. What does: the harness wants the
@@ -119,20 +119,6 @@ export function resolveChrome() {
 }
 
 /**
- * Launch an isolated Chrome for the Pocket side and wait for its DevTools port.
- *
- * **A profile of its own, under the run directory.** The Pocket side is a
- * different device from the Burrow's browser in every way that matters here — its
- * own passkeys, its own IndexedDB, its own service worker — so sharing a
- * profile with anything would make a second run start half-paired.
- *
- * The fake camera is two flags plus a file: `--use-fake-ui-for-media-stream`
- * auto-accepts the permission prompt (headless has no one to click it), and
- * `--use-file-for-fake-video-capture` replaces the synthetic rolling pattern
- * with the Y4M the QR step wrote. Chrome opens that file at `getUserMedia`
- * time, not at launch, so it may be rewritten right up to the scan.
- */
-/**
  * The port Chrome wrote for `--remote-debugging-port=0`, or `null` while it has
  * yet to write one. Chrome creates this file only once its DevTools socket is
  * listening, so its absence is the normal early state rather than an error —
@@ -150,6 +136,20 @@ function readActivePort(activePortFile) {
   return Number.isInteger(port) && port >= 1 && port <= 65535 ? port : null;
 }
 
+/**
+ * Launch an isolated Chrome for the Pocket side and wait for its DevTools port.
+ *
+ * **A profile of its own, under the run directory.** The Pocket side is a
+ * different device from the Burrow's browser in every way that matters here — its
+ * own passkeys, its own IndexedDB, its own service worker — so sharing a
+ * profile with anything would make a second run start half-paired.
+ *
+ * The fake camera is two flags plus a file: `--use-fake-ui-for-media-stream`
+ * auto-accepts the permission prompt (headless has no one to click it), and
+ * `--use-file-for-fake-video-capture` replaces the synthetic rolling pattern
+ * with the Y4M the QR step wrote. Chrome opens that file at `getUserMedia`
+ * time, not at launch, so it may be rewritten right up to the scan.
+ */
 export async function launchChrome({
   binary,
   userDataDir,

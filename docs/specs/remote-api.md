@@ -113,7 +113,7 @@ Reserved: a `capabilities` field on the client hello (what the client can render
 
 **Must list registered terminal Surfaces, excluding helper Sessions.** A Tool remains listed through its terminal even while showing its browser capability. `directory.watch` subscribes without attaching; `DirectoryEntry` / `DirectorySnapshot` own the payload. Thumbnails are staged ([Future](#future)).
 
-**Must list every Workspace's terminals, hidden ones included; `workspace` names an entry's Workspace only where its `ref` is unique across the Burrow's Windows** (standalone; VS Code sends none; rationale). **Entries arrive in each Window's strip order** (rationale); `active` marks the Workspace that Window shows. **A Client must list entries without `workspace` as before.**
+**Must list every Workspace's terminals, hidden ones included; `workspace` names an entry's Workspace only where its `ref`, the Workspace id, is unique across the Burrow's Windows** (standalone; VS Code sends none; rationale). **Entries arrive in each Window's strip order** (rationale); `active` marks the Workspace that Window shows. **A Client must list entries without `workspace` as before.**
 
 Reserved: `workspace.ref` and `name` are `WindowSnapshot.workspaces[]` keys ([Future](#future), The Window).
 
@@ -169,11 +169,11 @@ Source of truth: `resize` in `standalone/sidecar/pty-core.js`, shared by both ho
 
 * **Only the current attachment is writable.** A `terminal.write` / `terminal.resize` for a detached surface — or a background one listed in the directory but not attached by this session — is rejected, reaching neither the PTY nor its size.
 * **The attachment is pinned to a terminal, not a registry slot** — bound to the terminal resolved at `surface.attach`, so a Burrow-side pane swap leaves the stream and both input methods on the same PTY, never re-resolving `surfaceId`.
-* **Exit drops the attachment.** The Burrow emits `terminal.closed` and *then* drops it, so a later write/resize is rejected ("surface is not attached") rather than reaching the disposed terminal.
+* **Exit drops the attachment.** The Burrow emits `terminal.closed` and *then* drops it, so a later write/resize is rejected rather than reaching the disposed terminal.
 * **A late resolution never becomes an attachment.** Disposing the Viewer, and any newer `surface.attach`, invalidate an in-flight resolution; a handle arriving afterwards is ignored without subscribing or replacing the current attachment. (rationale)
 * **Every attach is answered** — a superseded one with an error, never left pending, since the Client holds the request and its event subscription open until answered. Sole exception: a disposed session has no transport to answer on.
 * **Must acknowledge only a size the owner reports applied.** Missing resize answers, rejected resolution or resize, and synchronous attach-start failures are protocol errors contained inside the session.
-* **Subscription and liveness are atomic: a PTY that died while `resolveSurface` was in flight must still be observed.** Every production provider replays the recorded exit before the subscription is usable — a VS Code peer by acknowledging its `subscribe` on the same ordered socket *after* any replay. The attach is then answered `surface closed while attaching` and the buffered `terminal.closed` dropped, never flushed.
+* **Subscription and liveness are atomic: a PTY that died while `resolveSurface` was in flight must still be observed.** Every production provider replays the recorded exit before the subscription is usable — a VS Code peer by acknowledging its `subscribe` on the same ordered socket *after* any replay. The attach is then answered with an error and the buffered `terminal.closed` dropped, never flushed.
 
 Source of truth: `RemoteApiSession` in `lib/src/remote/burrow/remote-api.ts`, pinned by `lib/src/remote/burrow/remote-api.test.ts`; the peer `subscribe` / `subscribed` frames in `vscode-ext/src/peer-link.ts`.
 
@@ -182,7 +182,7 @@ Source of truth: `RemoteApiSession` in `lib/src/remote/burrow/remote-api.ts`, pi
 A terminal has one size, and **the most recent remote size writer holds it**: an attach with dimensions and `terminal.resize` both resize through the owning xterm under a `SurfaceHold` — an opaque per-session holder id, its label, and a per-attachment lease — which the owning webview records, with the size, before the size moves. **A pane keeps one hold per holder**, the newest writer's last; another viewer's release leaves the rest. **A held pane stands at its newest hold's size**: when that hold goes first, the pane takes the size the holder now newest last set (rationale).
 
 - **Never re-fit a held pane locally** — box resize, layout settle, remount, focus, or keystroke (rationale).
-- **Must show the strip on a held pane, and only there** ([layout.md](./layout.md) → "Pane body"): the newest holder's label — the ACL record's, bounded again by `boundedPairingLabel`, or the one-time device label — as text, with `+N` for the other holders.
+- **Must show the strip on a held pane, and only there** ([layout.md](./layout.md) → "Pane body"): the newest holder's label — the ACL record's, bounded again by `boundedPairingLabel`, or the one-time device label — as text.
 - **Take back ends every session holding the pane**, never resizes a phone: one `takeBack { holder }` per hold runs the end that session's runtime supplied — End for a one-time connection, goodbye and dispose for a Pocket session, which stays paired (rationale). **The pane then clears each hold it asked about whatever the answer.**
 - **Must release on every end of an attachment** — detach, a newer attach, exit, a failed or superseded attach, disposal. **An attach whose resolve answered nothing or failed releases at every owner** (`releaseSurface`), since an owner answering past `ASK_BUDGET_MS` holds the pane anyway. **A release clears only its holder's hold, and only while its lease is still that hold's; the owner re-fits once no hold remains.**
 - **Must answer `release` with nothing and ignore an unknown op**; an attach whose hold is malformed sizes without holding.

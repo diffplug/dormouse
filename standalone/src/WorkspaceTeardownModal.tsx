@@ -1,7 +1,7 @@
 import { useCallback, useRef, useSyncExternalStore } from 'react';
 // Standalone reaches into the lib source directly (same relative form as the
 // sibling UpdateDebugModal.tsx). The terminal registry comes in via the
-// `dormouse-lib` alias, matching quit.ts.
+// `dormouse-lib` alias, matching quit-confirm-store.ts.
 import { ModalFrame } from '../../lib/src/components/design';
 import { WorkspaceKillConfirm } from '../../lib/src/components/WorkspaceKillConfirm';
 import { subscribeToTerminalPaneState } from 'dormouse-lib/lib/terminal-registry';
@@ -40,7 +40,7 @@ export function WorkspaceTeardownModalHost() {
   );
 }
 
-// Exported for Storybook (WorkspaceTeardownModal.stories.tsx), which renders the
+// Exported for Storybook (lib/src/stories/WorkspaceTeardownModal.stories.tsx), which renders the
 // presentational modal directly — same split as ExternalLinkModal's stories.
 export function WorkspaceTeardownModal({
   confirming,

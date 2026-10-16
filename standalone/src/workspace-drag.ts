@@ -28,8 +28,8 @@ import { DOOR_TAB_HEIGHT_PX, DOOR_TAB_MAX_WIDTH_PX } from "dormouse-lib/componen
 /** The cursor probe is an IPC round trip; a pointermove is per frame. */
 const HIT_TEST_THROTTLE_MS = 60;
 /** How far the pointer must travel inside the target before its caret is worth
- *  redrawing. A tab is `DOOR_TAB_MAX_WIDTH_PX` at most, so this cannot skip a
- *  whole slot. */
+ *  redrawing. A squeezed tab keeps at least `TAB_NAME_PADDING_PX` (20px) past
+ *  its name (`WorkspaceStrip.tsx`), so this cannot skip a whole slot. */
 const HOVER_BUCKET_PX = 12;
 
 /** Where the cursor is, in the hit window's own logical client space. */
@@ -216,7 +216,7 @@ function moveOutOfWindow(id: WorkspaceId, destination: () => Promise<CursorHit |
     // The one thing a move cannot carry is a plain iframe's document, Doored
     // ones included; it reopens at its saved URL. The user says so first, with
     // the same typed letter a kill takes (docs/specs/layout.md → Workspaces).
-    const iframes = getWallHandle(id)?.iframeSurfaceRefs() ?? [];
+    const iframes = getWallHandle(id)?.iframeSurfaceIds() ?? [];
     if (iframes.length > 0) {
       requestConfirmation({
         id,

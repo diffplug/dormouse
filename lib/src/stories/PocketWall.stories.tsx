@@ -19,8 +19,8 @@ const b64 = (text: string) => toBase64Url(utf8Encode(text));
 // One-terminal directory snapshot (id = surfaceId, as the registry binds panes).
 const SINGLE_SESSION: DirectoryEntry[] = [
   {
-    paneRef: 'pane-1',
-    surfaceId: 'pane-1',
+    paneRef: 'surface:1',
+    surfaceId: 'surface:1',
     type: 'terminal',
     title: 'zsh',
     focused: true,
@@ -62,11 +62,11 @@ const NOTES = { ref: 'workspace:5', name: 'notes' };
 // Burrow order (strip order) puts `dormouse` first; the picker lifts the
 // Workspace the desktop shows (`website`) above it.
 const WORKSPACE_SESSIONS: DirectoryEntry[] = [
-  workspaceTerminal('pane-1', 'claude', '~/projects/dormouse', DORMOUSE, { hasTODO: true }),
-  workspaceTerminal('pane-2', 'pnpm test', '~/projects/dormouse/lib', DORMOUSE, { activity: 'running', ringing: true }),
-  workspaceTerminal('pane-3', 'vite', '~/projects/dormouse/website', SITE, { activity: 'running' }),
-  workspaceTerminal('pane-4', 'zsh', '~/projects/dormouse/website', SITE),
-  workspaceTerminal('pane-5', 'zsh', '~/notes', NOTES),
+  workspaceTerminal('surface:1', 'claude', '~/projects/dormouse', DORMOUSE, { hasTODO: true }),
+  workspaceTerminal('surface:2', 'pnpm test', '~/projects/dormouse/lib', DORMOUSE, { activity: 'running', ringing: true }),
+  workspaceTerminal('surface:3', 'vite', '~/projects/dormouse/website', SITE, { activity: 'running' }),
+  workspaceTerminal('surface:4', 'zsh', '~/projects/dormouse/website', SITE),
+  workspaceTerminal('surface:5', 'zsh', '~/notes', NOTES),
 ];
 
 // Streamed once the wall attaches the pane — stands in for the Burrow's repaint.
@@ -174,7 +174,7 @@ export const ConnectedShellKimbieDark: Story = {
 export const WorkspaceSessions: Story = {
   args: { snapshot: WORKSPACE_SESSIONS },
   play: async ({ canvasElement }) => {
-    await waitFor(() => expect(getTerminalInstance('pane-3')?.buffer.active.cursorY).toBeGreaterThan(0));
+    await waitFor(() => expect(getTerminalInstance('surface:3')?.buffer.active.cursorY).toBeGreaterThan(0));
     const canvas = within(canvasElement);
     await userEvent.click(canvas.getByRole('button', { name: 'Sessions input mode' }));
     const headings = canvas.getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent);

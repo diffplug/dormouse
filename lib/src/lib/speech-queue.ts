@@ -7,7 +7,7 @@ export interface SpeechJob {
   voice?: () => string | null;
   eligible: () => boolean;
   /** A still-owed job waits without blocking other Sessions. */
-  paused?: () => boolean;
+  deferred?: () => boolean;
   onStart?: () => void;
   onFinish?: (started: boolean) => void;
 }
@@ -33,7 +33,7 @@ interface Attempt {
  *
  * Bounded in both directions, because a wedged or callback-less engine must not
  * retain later alerts: at most {@link MAX_PENDING} pending jobs admitted (one
- * more while a paused, unstarted attempt returns to the queue), and at most
+ * more while a deferred, unstarted attempt returns to the queue), and at most
  * {@link SPEECH_ENGINE_TIMEOUT_MS} per engine attempt, after which the attempt
  * is cancelled and the queue advances. Callback identity is revoked before any
  * cancel, so a detached late callback cannot settle the attempt that replaced
@@ -63,7 +63,7 @@ export class SpeechQueue {
     if (!this.active && this.pending.length === 0) return;
     if (this.pending.length) this.pending = this.pending.filter(job => job.eligible());
     if (this.active && !this.active.job.eligible()) this.finish(this.active, true);
-    if (this.active?.job.paused?.()) this.pause(this.active);
+    if (this.active?.job.deferred?.()) this.requeue(this.active);
     this.pump();
   }
 
@@ -83,7 +83,7 @@ export class SpeechQueue {
     this.pump();
   }
 
-  private pause(attempt: Attempt): void {
+  private requeue(attempt: Attempt): void {
     // Preparation is not delivery. Retain a job that never actually started,
     // past the bound if the queue filled meanwhile, and revoke the old engine
     // attempt before cancellation can call back.
@@ -91,12 +91,12 @@ export class SpeechQueue {
     this.finish(attempt, true);
   }
 
-  /** Drop resolved jobs on the way to the first that is not paused. */
+  /** Drop resolved jobs on the way to the first that is not deferred. */
   private takeNext(): SpeechJob | undefined {
     for (let i = 0; i < this.pending.length;) {
       const job = this.pending[i];
       if (!job.eligible()) { this.pending.splice(i, 1); continue; }
-      if (job.paused?.()) { i++; continue; }
+      if (job.deferred?.()) { i++; continue; }
       this.pending.splice(i, 1);
       return job;
     }
@@ -120,7 +120,7 @@ export class SpeechQueue {
             onStart: () => {
               if (this.active !== attempt || attempt.started) return;
               if (!job.eligible()) { this.finish(attempt, true); return; }
-              if (job.paused?.()) { this.pause(attempt); return; }
+              if (job.deferred?.()) { this.requeue(attempt); return; }
               attempt.started = true;
               job.onStart?.();
             },
