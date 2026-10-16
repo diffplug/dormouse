@@ -29,6 +29,8 @@ The command is dependency-free and advisory. Its thresholds intentionally favor 
    - `RATIONALE` — move durable evidence or rejected alternatives under the paired heading.
    - `MATRIX` — merge parallel cases into one table, precedence ladder, or flow.
    - `CANONICAL` — let generated help, a type, constant, registry, or test own an exact shape.
+   - `COMMENT` — a constraint the code must keep, stated only in a rationale entry, moves to a comment at its code (AGENTS.md -> "Keying"); the entry may stay as its evidence.
+   - `ORPHAN` — delete a rationale entry whose rule the spec no longer states, or whose code is gone.
 
    A `PRESENTATION` hit — a size, duration, or ratio in a spec's prose or tables — is `CUT` to the code that carries it unless a peer, another deploy, or an older build must agree with it (AGENTS.md -> "What stays").
 
