@@ -50,9 +50,10 @@ const IFRAME_ALLOW = 'autoplay; clipboard-write; fullscreen';
 // from the start is working, not lost.
 const SHIM_REPORT_TIMEOUT_MS = 1000;
 const SHIM_REPORT_LEAD_MS = 250;
-// A frame is hidden until its first document loads, so the pane's themed
-// background shows instead of the frame's white canvas; one whose load never
-// fires shows after this (docs/specs/dor-browser.md → "Iframe Renderer").
+// A frame is transparent until its first document loads, so the pane's themed
+// background shows instead of the frame's white canvas: transparent, not
+// hidden, so it still lays out and loads. One whose load never fires shows
+// after this.
 const FIRST_PAINT_FALLBACK_MS = 1000;
 
 type Resolution =

@@ -8,10 +8,6 @@
 
 **Why no stream port is a param.** It is ephemeral, and a persisted one was always wrong after a restart (static reading, 2026-09): the Playwright port is the host's own in-process viewer server, so every restored Playwright pane failed three connects (immediate, +2 s, +4 s) and read "ended" after ~6 s; an agent-browser one after a reboot named nothing, and the stale-port recovery that followed asked `stream status`, which starts a daemon at `about:blank` — the pane showed a blank page while its header still named the real one. As an unpersisted param it still needed seven scrubs across four files, and the params diff could not see the same port handed over twice (review, 2026-09).
 
-## Browser Chrome
-
-**What the scheme ladder decides.** A typed `host:port` chooses `http://`, which the iframe proxy supports for remote and loopback targets alike. A bare remote host chooses `https://`; entering it in an iframe reports the unsupported scheme and requires an explicit render swap to agent-browser.
-
 ## Pane Context Menu Connect
 
 **Why activation moves focus at all.** A repeat activation on an already-connected port only re-navigates to the current URL; without the reveal, the click has no visible feedback.
@@ -60,7 +56,7 @@
 
 **What parking is worth.** Lath leaves stay mounted, so a background window would otherwise retain every pane's ~20Hz stream and its crisp captures. The ~1s debounce rides through transient visibility flips and StrictMode remounts without rebuilding the connection.
 
-**Why a paste is text, not keys.** agent-browser's stream takes only key and mouse events, so a paste once went from the webview as a key down and up per character. Sent to the Playwright host, whose input queue closes the viewer (1008) at 256 queued messages, any paste over about 128 characters arriving as one burst truncated and dropped the pane into a 2 s reconnect (static reading, 2026-09). The host now expands a paste into key pairs only where the daemon takes them, and the 8192-character chunk keeps a message under the 64 KiB socket cap even when every character JSON-escapes to six bytes.
+**Why a paste is text, not keys.** agent-browser's stream takes only key and mouse events, so a paste once went from the webview as a key down and up per character. Sent to the Playwright host, whose input queue closes the viewer (1008) at 256 queued messages, any paste over about 128 characters arriving as one burst truncated and dropped the pane into a 2 s reconnect (static reading, 2026-09).
 
 **Why the connection is dropped at relaunch start rather than left to fail.** The host closes the browser and kills the daemon, so the old socket's close is certain. Left connected, its three reconnect failures flagged the pane "ended" about three seconds into a pop-in that a slow page could hold open for 25s.
 
@@ -86,11 +82,11 @@
 
 **Whose limitation the CSS-resolution provisional frame is.** Chromium's `Page.startScreencast` captures in DIP and exposes no DPR knob, so the stream is CSS-resolution whatever the client asks for — upstream Chromium, not something agent-browser chose or could fix.
 
-**Why a stream frame is cropped to the viewport.** Chrome's window is never narrower than 500 CSS px, so a phone viewport is emulated at the left of a 500-wide window, and `Page.startScreencast` captures the window: its root background filled the rest, a dark bar beside the page that also made the canvas change shape on each provisional paint (reported 2026-10-09). Measured with headless Chrome 150 at a 390×844 viewport (2026-10-10): Playwright's frame was 500×757 at CSS resolution, its metadata the same 500×757, the page on the left 390 columns; agent-browser 0.31.1's daemon fit the same window into the viewport, a 390×658 frame (scale 0.78) whose metadata named the viewport, 390×844. Both frames fell short of the viewport's height, so the rows below them keep the last paint. Chromium's bundled headless shell drew the viewport alone. So Playwright's host sends its metadata width as the window's and the measured viewport as the frame's size, and agent-browser's, which has no measure of the window, sends the viewport's width raised to Chrome's 500. The webview, given both, needs no provider's geometry.
+**Why a stream frame is cropped to the viewport.** Chrome's window is never narrower than 500 CSS px, so a phone viewport is emulated at the left of a 500-wide window, and `Page.startScreencast` captures the window: its root background filled the rest, a dark bar beside the page that also made the canvas change shape on each provisional paint (reported 2026-10-09). Measured with headless Chrome 150 at a 390×844 viewport (2026-10-10): Playwright's frame was 500×757 at CSS resolution, its metadata the same 500×757, the page on the left 390 columns; agent-browser 0.31.1's daemon fit the same window into the viewport, a 390×658 frame (scale 0.78) whose metadata named the viewport, 390×844. Both frames fell short of the viewport's height, so the rows below them keep the last paint. Chromium's bundled headless shell drew the viewport alone. The webview, given both, needs no provider's geometry.
 
 **Why settle, then sharpen.** An animated page drove the crisp loop at up to ~5.5 device-resolution captures a second per pane (~120 ms each, paced at 1.5× that), each a spawn or CDP call, an encode, 100-700 KB over IPC and a decode, while the stream frames of the same motion were received and thrown away (static reading, 2026-09-23). Detail lost on moving content is not seen; the one capture once it rests is. The cost is that moving content is CSS-resolution on HiDPI until it stops — and a page that never stops (a looping spinner, a video) stays at stream resolution for as long as it moves, where it once got a sharp capture every ~180 ms. Measured with Playwright's Chromium (2026-10-03): an animation's first ~500 ms took six captures, the rest only stream paints, and one capture landed ~220 ms after its last frame.
 
-**Why one budget for every pane, and its slot timeout.** Nothing bounded captures across panes: k animated panes meant ~5.5k a second. The budget was deferred until every capture had a bound, because Playwright's CDP capture into a wedged page never answered and would have held a slot forever; it now fails at 30 s like agent-browser's CLI capture, and a slot frees after 10 s so other panes go on meanwhile. A capture still running is joined by the next ask for its browser, so freeing a slot never piles a second capture on a queue blocked behind a page load.
+**Why one budget for every pane, and its slot timeout.** Nothing bounded captures across panes: k animated panes meant ~5.5k a second. The budget was deferred until every capture had a bound, because Playwright's CDP capture into a wedged page never answered and would have held a slot forever; it now fails at 30 s like agent-browser's CLI capture, and a slot frees after 10 s so other panes go on meanwhile.
 
 **Why a headed window's page is followed over CDP.** The daemon's stream lists the headed window's tabs, but refreshes them only when a CLI command completes, so a navigation made in the window itself never reached the header. The webview once followed it by holding a browser-level CDP socket from `get cdp-url`, which granted it `Runtime.evaluate` in any target and `file://` navigation (review of the browser stack, 2026-09); the same observer now runs in the host.
 
@@ -113,8 +109,6 @@
 **Why the stale state files need the replaced pid.** SIGTERM leaves the dead daemon's `.pid` and `.stream` files in place for the new daemon to overwrite. A port read from the stale file is probed against nothing — unless some other process has since taken it — so the launch also waits for a pid other than the one it killed before it trusts the stream file.
 
 **Why nothing may query the daemon during the close/reopen gap.** With the old daemon dead and the new one not yet up, a `stream status` or tab query spawns a *competing* daemon at `about:blank` — agent-browser's CLI starts one on demand — and the relaunch then races two daemons for the same session.
-
-A post-open blank-tab sweep can become such a query when a later relaunch, explicit Surface close, or host shutdown starts before the earlier page finishes loading, so the host invalidates the sweep before any close can release that pending launch.
 
 ## Browser Host
 
@@ -179,8 +173,6 @@ The built-in local-file viewer supplies its own content boundary and permits the
 **Why the HTML path keeps the body's own encoding.** Each was reproduced against the proxy (2026-09-23): relabelling every HTML response `charset=utf-8` overrode both the upstream header and any `<meta charset>`, so a Shift_JIS or windows-1252 page mis-decoded; an upstream that compresses without being asked had the shim prepended to its gzip bytes with `content-encoding: gzip` kept, and the frame failed with `ERR_CONTENT_DECODING_FAILED`; and a valid document with neither `</head>` nor `<body>` got the shim before `<!doctype html>`, switching it to quirks mode. Deleting `Accept-Encoding` on every request sent a remote upstream's scripts and styles uncompressed, typically 3-5x the bytes.
 
 **Why a grant gets its own origin instead of a path token.** A dedicated origin keeps root-relative resources and client-side routers working with no body URL rewriting; a path token would have to survive every link, redirect and `fetch` the page makes.
-
-**Why a frame is transparent until its first load.** An iframe paints its `bg-white` before its document arrives, so a new frame flashed white in a dark theme for as long as its server took to answer (observed on preview slot switches, 2026-09-28). Opacity leaves the frame laid out and loading, and no shim or uninstrumented-document check reads visibility. The 1s fallback shows a document whose `load` never fires.
 
 ## Iframe Proxy Leases
 
