@@ -113,8 +113,6 @@ Source of truth: `ThemePicker` in `lib/src/components/ThemePicker.tsx`; `setDefa
 
 ## Storybook simulation
 
-**Must scan `standalone/src` in `lib/.storybook/preview.css`** for host utilities.
-
 `lib/.storybook/themes.ts` builds the switcher's color maps from `bundled.json` and **must run them through `completeThemeVars()` and `flattenSelectionAlpha()`** so isolated stories see the materialized `--vscode-*` set the app sees; the preview writes them to both `html` and `body` and publishes the dynamic palette through `computeDynamicPalette()`.
 
 **Must name `DejaVu Sans` before generic `monospace` as the symbol fallback in visual snapshots in both browsers, and install `fonts-dejavu-core` in the Argos job** (rationale).
@@ -125,6 +123,6 @@ Source of truth: `applyStorybookTheme` in `lib/.storybook/preview.ts`.
 
 The Theme Debugger serves VSCode, standalone, and the website playground. **Must capture DOM-visible state through `ThemeDiagnosticSnapshot` without mutating theme storage or terminal colors.** Terminal colors are the visible CSS variables, including missing values, rather than an initialized xterm instance's palette. The copied report uses the same snapshot. **A real VSCode webview shows only the inferred theme kind**, since the host supplies CSS variables. In VS Code it traces only host-exposed `--vscode-*` variables and materialized fallbacks, **never raw built-in VS Code theme files**.
 
-Every host with a picker reaches it as `Debug current theme` in the `ThemePicker` menu. VSCode has no picker and opens it through the `dormouse.debugTheme` command and the `dormouse:openThemeDebugger` extension-to-webview message.
+VSCode has no picker and opens it through the `dormouse.debugTheme` command and the `dormouse:openThemeDebugger` extension-to-webview message.
 
 Source of truth: `captureThemeDiagnostics()` / `ThemeDiagnosticSnapshot` in `lib/src/lib/themes/diagnostics.ts`.
