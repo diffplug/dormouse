@@ -77,6 +77,14 @@ test('a draw is dealt across the domains, whatever their share of the pool', () 
   assert.notDeepEqual(shuffle(pool, '1').map((s) => s.id), shuffle(pool, '2').map((s) => s.id));
 });
 
+// A partial round would weight the domains it reached over the rest.
+test('a canary draws whole rounds, no more than the smallest domain holds', () => {
+  const count = Number(canary.match(/^ {6}CANARY_SEEDS: "(\d+)"$/m)?.[1]);
+  assert.ok(count > 0 && count % CANARY_DOMAINS.length === 0, `CANARY_SEEDS ${count} is not whole rounds of ${CANARY_DOMAINS.length}`);
+  const pool = readPool(repo);
+  for (const d of CANARY_DOMAINS) assert.ok(pool.filter((s) => s.domain === d).length >= count / CANARY_DOMAINS.length, `${d} cannot fill every round`);
+});
+
 // --- Fixtures ---------------------------------------------------------------
 
 const seedPatch = (header, file, from, to) => `${header}

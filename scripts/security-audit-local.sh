@@ -137,7 +137,7 @@ run_github_state() {
 # domains, then scored. `CANARY_KEY` picks the seeds;
 # the same key and pool seed the same way.
 run_canary() {
-  local count="${1:-6}" tree stash domain
+  local count="${1:-8}" tree stash domain
   tree=$(mktemp -d)
   stash=$(mktemp -d)
   git archive HEAD | tar -x -C "$tree"

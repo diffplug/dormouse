@@ -659,9 +659,9 @@ jobs:
     environment:
       name: security-audit
     env:
-      # Dealt round-robin across the three code domains; each keeps at least
-      # three seeds in the pool, so raise that floor before this count.
-      CANARY_SEEDS: "6"
+      # Two rounds dealt across the four code domains; each keeps at least
+      # three seeds in the pool, so raise that floor before a third round.
+      CANARY_SEEDS: "8"
       CANARY_FRAGMENTS: audit-supply-chain.md audit-remote.md audit-local.md audit-hosted.md
     steps:
       - name: Refuse any ref but main
