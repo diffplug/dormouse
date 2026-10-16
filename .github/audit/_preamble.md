@@ -2,7 +2,7 @@
 
 Read `docs/specs/security.md` first: it states the guarantees, what is not defended, and the known gaps, and names the spec each domain audits. Your scope is exactly the spec files listed under **Scope** in your own file — ignore every other spec's `FAIL IF` lines; another agent owns them. `docs/specs/security-audit.md` is the contract this run executes.
 
-For each `FAIL IF` in your scope, run the mechanical check (`gh api`, grep, file read, or a script) and record PASS or FAIL with concrete evidence: file path and line number, API response excerpt, or command output. A `FAIL IF` bullet may assert several properties in one sentence; **each clause gets its own verdict and its own evidence**. Never satisfy a bullet in bulk. A `FAIL IF` that ends `(rationale)` has its evidence in the paired `<spec>.rationale.md` under the same heading; read it when the rule alone is not enough to judge.
+For each `FAIL IF` in your scope, run the mechanical check (`gh api`, grep, file read, or a script) and record PASS or FAIL with concrete evidence: file path and line number, API response excerpt, or command output. A `FAIL IF` bullet may assert several properties in one sentence; **each clause gets its own verdict and its own evidence**. Never satisfy a bullet in bulk. A `FAIL IF` that ends `(rationale)` has its evidence in the paired `<spec>.rationale.md` under the same heading; read it when the rule alone is not enough to judge. A rationale explains a rule and never narrows it: nothing in it exempts what the rule names.
 
 Report what you can prove. Use `UNVERIFIABLE` only for a check you could not determine — a transient network error, or an area you ran out of room to reach — and say which it was. It is never a substitute for a check you could have run.
 

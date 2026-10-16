@@ -1,0 +1,111 @@
+Domain: remote
+Class: a pairing whose ACL write failed stays authorized in memory
+Expect: lib/src/remote/burrow/burrow-runtime.ts
+Source: reverses part of #571 (an approved pairing went live in the Burrow's ACL before its durable write succeeded, and stayed live when the write failed)
+
+diff --git a/lib/src/remote/burrow/burrow-runtime.test.ts b/lib/src/remote/burrow/burrow-runtime.test.ts
+index 8c3b0a269..cf1863ff2 100644
+--- a/lib/src/remote/burrow/burrow-runtime.test.ts
++++ b/lib/src/remote/burrow/burrow-runtime.test.ts
+@@ -302,52 +302,6 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
+     expect(dismissed).toEqual(['c1']);
+   });
+ 
+-  it('publishes an approval only after its durable write succeeds', async () => {
+-    const write = Promise.withResolvers<void>();
+-    const saveAcl = vi.fn(() => write.promise);
+-    makeBurrow(undefined, { saveAcl });
+-    const { invitation, session, code } = await requestPairing('c1', await newAuthenticator());
+-    const framesBefore = socket.sent.length;
+-    const pending = approvals[0]!;
+-    const completed = pending.approve(code);
+-    await settle();
+-    expect(saveAcl).toHaveBeenCalledOnce();
+-    expect(burrow.activeRecords).toEqual([]);
+-    expect(socket.sent).toHaveLength(framesBefore);
+-    // Consent is spent while saving too: duplicate approval or denial cannot
+-    // start a second write or announce an outcome that contradicts this one.
+-    pending.approve(code);
+-    pending.deny();
+-    expect(socket.sent).toHaveLength(framesBefore);
+-    write.resolve();
+-    await completed;
+-    expect(burrow.activeRecords).toHaveLength(1);
+-    expect(await outcome(session, 'pairing', invitation.inviteId)).toMatchObject({ ok: true });
+-    expect(saveAcl).toHaveBeenCalledOnce();
+-  });
+-
+-  it('denies a failed save without authorizing in memory, then accepts a later approval', async () => {
+-    const saveAcl = vi.fn<NonNullable<BurrowOptions['saveAcl']>>()
+-      .mockRejectedValueOnce(new Error('disk full'))
+-      .mockResolvedValue(undefined);
+-    makeBurrow(undefined, { saveAcl });
+-    const authenticator = await newAuthenticator();
+-    const failed = await requestPairing('c1', authenticator);
+-    await approvals[0]!.approve(failed.code);
+-    expect(await outcome(failed.session, 'pairing', failed.invitation.inviteId)).toEqual({
+-      ok: false, code: 'burrow-error',
+-    });
+-    expect(burrow.activeRecords).toEqual([]);
+-    expect(await attemptConnection('c1', failed.clientStatic, authenticator)).toEqual({
+-      ok: false, code: 'pairing-required',
+-    });
+-    const next = await requestPairing('c2', authenticator);
+-    await approvals.at(-1)!.approve(next.code);
+-    expect(await outcome(next.session, 'pairing', next.invitation.inviteId)).toMatchObject({ ok: true });
+-    expect(burrow.activeRecords).toHaveLength(1);
+-    expect(saveAcl.mock.calls[1]![1]).toHaveLength(1);
+-  });
+-
+   it('serializes concurrent approval snapshots so neither record is lost', async () => {
+     const write = Promise.withResolvers<void>();
+     const saveAcl = vi.fn<NonNullable<BurrowOptions['saveAcl']>>()
+@@ -369,24 +323,6 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
+     expect(await outcome(second.session, 'pairing', second.invitation.inviteId)).toMatchObject({ ok: true });
+   });
+ 
+-  it('preserves the existing pairing when saving its replacement fails', async () => {
+-    const saveAcl = vi.fn<NonNullable<BurrowOptions['saveAcl']>>()
+-      .mockResolvedValueOnce(undefined)
+-      .mockRejectedValueOnce(new Error('disk full'));
+-    makeBurrow(undefined, { saveAcl });
+-    const authenticator = await newAuthenticator();
+-    const first = await requestPairing('c1', authenticator);
+-    await approvals[0]!.approve(first.code);
+-    const original = burrow.activeRecords;
+-    const replacement = await requestPairing('c2', authenticator, { clientStatic: first.clientStatic });
+-    await approvals[1]!.approve(replacement.code);
+-    expect(await outcome(replacement.session, 'pairing', replacement.invitation.inviteId)).toEqual({
+-      ok: false, code: 'burrow-error',
+-    });
+-    expect(burrow.activeRecords).toEqual(original);
+-    expect(await attemptConnection('c1', first.clientStatic, authenticator)).toMatchObject({ ok: true });
+-  });
+-
+   it('does not announce denial if expiry races a write already approved locally', async () => {
+     const write = Promise.withResolvers<void>();
+     makeBurrow(undefined, { saveAcl: () => write.promise });
+diff --git a/lib/src/remote/burrow/burrow-runtime.ts b/lib/src/remote/burrow/burrow-runtime.ts
+index 50f2c18df..489e5d5b9 100644
+--- a/lib/src/remote/burrow/burrow-runtime.ts
++++ b/lib/src/remote/burrow/burrow-runtime.ts
+@@ -1331,8 +1331,7 @@ export class BurrowRuntime {
+     }
+     const approval = pending.approval;
+     // Serialize snapshot creation as well as persistence: overlapping approvals
+-    // must not overwrite each other, and a failed save must not grant access in
+-    // memory or revoke an existing pairing. Only the committed copy is live.
++    // must not overwrite each other.
+     return this.#saveApproval(async () => {
+       if (this.#clients.get(clientId)?.pairing !== pending) return;
+       if (pending.expiresAt <= this.#now()) {
+@@ -1357,8 +1356,8 @@ export class BurrowRuntime {
+           label: approval.label,
+         });
+         pending.committing = true;
+-        await this.#saveAcl(this.#enrollment.burrowId, next.records());
+         this.#acl = next;
++        await this.#saveAcl(this.#enrollment.burrowId, next.records());
+         // Only once the record is live, so the connect that follows pairing
+         // needs no second prompt; a window for an older record of this static
+         // is replaced. A UV raise during the write cannot cancel local consent,

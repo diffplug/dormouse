@@ -27,6 +27,11 @@ const env = {
 };
 const result = (value, extra = {}) =>
   Response.json({ success: true, result: value, ...extra });
+/** A signed-out `get-session`, as the account answers it: only to its own page. */
+const signedOutRead = (init) =>
+  init?.headers?.["sec-fetch-site"] === "same-origin"
+    ? Response.json(null)
+    : Response.json({ message: "Invalid origin." }, { status: 403 });
 
 test("each preview configuration isolates its origin and excludes production bindings", async () => {
   const bases = await readConfigs();
@@ -325,7 +330,7 @@ test("deployment smoke compares enabled providers as a set, not a sequence", asy
   // Every request the production smoke makes before its first POST; the POST
   // throws so a rejection distinguishes "passed the provider check" from
   // "failed it".
-  const fetcher = (providers) => async (url) => {
+  const fetcher = (providers) => async (url, init) => {
     const { pathname } = new URL(url);
     if (pathname === "/api/health")
       return Response.json({ ok: true, revision: env.BUILD_SHA });
@@ -340,7 +345,7 @@ test("deployment smoke compares enabled providers as a set, not a sequence", asy
           },
         },
       );
-    if (pathname === "/api/auth/get-session") return Response.json(null);
+    if (pathname === "/api/auth/get-session") return signedOutRead(init);
     if (pathname === "/api/providers") return Response.json(providers);
     if (pathname === "/api/ready") return new Response(null, { status: 200 });
     throw new Error(`past-providers:${pathname}`);
@@ -438,7 +443,7 @@ test("the smoke runs its parts concurrently, retries each alone, and checks read
           },
         },
       );
-    if (pathname === "/api/auth/get-session") return Response.json(null);
+    if (pathname === "/api/auth/get-session") return signedOutRead(init);
     if (pathname === "/api/providers") return Response.json([]);
     if (init.method === "POST") return new Response(null, { status: 403 });
     if (pathname === "/login")

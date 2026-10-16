@@ -1,7 +1,9 @@
 // Rules: docs/specs/hosted.md -> "Identity and login". Delete at launch,
 // with its use in ./worker.ts.
 import type { ExecutionContext } from "hono";
+import { getPath } from "hono/utils/url";
 import { queryDatabase } from "pgstencil/postgres";
+import { openAuthRead, ownPageRead } from "./account-gate";
 import { ADMIN_EMAIL } from "./admin";
 import type { AccountEnv } from "./bindings";
 
@@ -28,14 +30,18 @@ const listed = (email: unknown) =>
 /**
  * Wraps the Better Auth handler so only {@link SIGN_IN_ALLOWLIST} can hold a
  * login: a request naming any other email is refused before it can send a
- * code or create an account, and on a GET a login whose user is not a
- * verified listed email — a provider sign-in, or one made before the gate —
- * has every one of its user's logins deleted before the handler answers it
- * as signed out. Every read of a login is a GET: the frontend's
- * `get-session`, each cookie route's lookup (`./account-gate.ts`), and a
- * provider callback. The auth writes that take a login only end it or start
- * a callback, so they are left to the handler's Origin and CSRF refusals,
- * which must come before any database read.
+ * code or create an account, and every read carrying a login (any method but
+ * POST) but a provider callback or the CSRF challenge ({@link openAuthRead})
+ * has it looked up first: a login whose user is not a verified listed email
+ * (a provider sign-in, or one made before the gate) has every one of its
+ * user's logins deleted before the handler answers, so it acts as signed
+ * out. A read the account's own page did not make ({@link ownPageRead}) is
+ * refused before the lookup, so no route reaches it ungated. Every use of a
+ * login starts with such a read: the frontend's, or a cookie route's lookup
+ * (`./account-gate.ts`). The auth writes that take a login only end it or
+ * start a callback, so they are left to the handler's Origin and CSRF
+ * refusals, which must come before any database read; a connection an
+ * unlisted login starts still leaves it unable to act.
  */
 export function prelaunchAuth(fetchAuth: FetchAuth): FetchAuth {
   return async (request, env, ctx) => {
@@ -53,7 +59,10 @@ export function prelaunchAuth(fetchAuth: FetchAuth): FetchAuth {
         return Response.json({ message: PRELAUNCH_REFUSAL }, { status: 403 });
     }
     const cookie = request.headers.get("cookie");
-    if (cookie && request.method === "GET") {
+    // The path as the handler's router decodes it, so `%63srf` is `csrf`.
+    if (cookie && request.method !== "POST" && !openAuthRead(getPath(request))) {
+      if (!ownPageRead(request, new URL(request.url).origin))
+        return Response.json({ message: "Invalid origin." }, { status: 403 });
       const headers = new Headers({ cookie });
       const ip = request.headers.get("cf-connecting-ip");
       if (ip) headers.set("cf-connecting-ip", ip);

@@ -283,7 +283,8 @@ async function fixture(
     await context.close();
     throw error;
   }
-  function browser() {
+  /** A browser at `ip`: one address per browser keeps auth's per-address limits apart. */
+  function browser(ip = "203.0.113.10") {
     const jar = new Map<string, string>();
     let csrf = "";
     async function request(
@@ -299,7 +300,9 @@ async function fixture(
         redirect: "manual",
         headers: {
           cookie: [...jar].map(([k, v]) => `${k}=${v}`).join("; "),
-          "cf-connecting-ip": "203.0.113.10",
+          "cf-connecting-ip": ip,
+          // A fetch by the account's own page, unless `init` says otherwise.
+          "sec-fetch-site": "same-origin",
           ...init.headers,
         },
       });
@@ -330,9 +333,7 @@ async function fixture(
       });
     };
     const session = async () =>
-      (
-        await request("/api/auth/get-session")
-      ).json() as Promise<Session | null>;
+      (await request("/api/auth/get-session")).json() as Promise<Session | null>;
     const email = async (address: string) => {
       expect(
         (
@@ -591,6 +592,22 @@ test("same-site requests fail, the sibling Workers' included; production exclude
   for (const sameSite of SAME_SITE)
     expect((await account.fetch(sameSite + "/api/auth/csrf")).status, sameSite).toBe(421);
   await browser.email(SIGN_IN_ALLOWLIST[1]);
+  // A same-site page carries the login cookie to the login reads; only the
+  // account's own page may make them, and a refusal leaves the login alone.
+  for (const sameSite of SAME_SITE)
+    for (const path of ["/api/auth/get-session", "/api/auth/list-accounts"])
+      expect(
+        (
+          await browser.request(path, {
+            headers: { origin: sameSite, "sec-fetch-site": "same-site" },
+          })
+        ).status,
+        `${sameSite} ${path}`,
+      ).toBe(403);
+  // An email-code login connects no provider.
+  const accounts = await browser.request("/api/auth/list-accounts");
+  expect(accounts.status).toBe(200);
+  expect(await accounts.json()).toEqual([]);
   expect(
     Math.abs(
       Date.parse((await browser.session())!.session.createdAt) - Date.now(),
@@ -647,14 +664,31 @@ test("pre-launch, production signs in only the allowlist's verified emails", asy
       (await browser.request("/api/voice/tokens")).status,
     ).toBe(401);
   }
-  expect(
-    await queryDatabase(
+  const unlisted = () =>
+    queryDatabase(
       f.database.url,
       `SELECT 1 FROM "session" s JOIN "user" u ON u.id = s."userId"
         WHERE NOT (u."emailVerified" AND u.email = ANY($1))`,
       [SIGN_IN_ALLOWLIST],
-    ),
-  ).toHaveLength(0);
+    );
+  // Every read the page could make takes the lookup first, not only the two
+  // the adapter serves today.
+  for (const [n, path] of ["/api/auth/list-sessions", "/api/auth/account-info"].entries()) {
+    const browser = f.browser(`203.0.113.${20 + n}`);
+    await browser.oauth("github", { email: "stranger@example.test" });
+    expect(await unlisted(), path).not.toHaveLength(0);
+    await browser.request(path);
+    expect(await unlisted(), path).toHaveLength(0);
+  }
+  // A connection an unlisted login starts (a POST, never looked up) completes
+  // on the open callback, attaching an identity its starter controls to its
+  // own unlisted account, and still leaves it signed out and unable to act.
+  const linking = f.browser("203.0.113.30");
+  await linking.oauth("github", { email: "stranger@example.test" });
+  await linking.oauth("github", { email: "second@example.test", subject: "67890" }, true);
+  expect(await linking.session()).toBeNull();
+  expect((await linking.request("/api/voice/tokens")).status).toBe(401);
+  expect(await unlisted()).toHaveLength(0);
 });
 
 test("the relay and voice are ready only while their own roles hold the grants their lookups need", async ({
