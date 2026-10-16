@@ -11,7 +11,7 @@ The runtime dependency surface is kept small: a dependency is added only when ne
 **Every dependency Dormouse *puts on a user's machine* is listed at [dormouse.sh/supply-chain](https://dormouse.sh/supply-chain).** The test is narrower than "everything a user runs" (rationale). Three inventories:
 
 - every npm dependency, direct and transitive, by section: Terminal, Built-in Tools, Relay
-- every cargo dependency, direct listed separately from transitive
+- every cargo dependency, direct and transitive
 - the Node.js runtime bundled as a Tauri sidecar in the standalone app
 
 Every workspace is classified from its shipping route: a product root or runtime edge if Dormouse writes its files onto a user's disk, an exclusion only if it installs no artifact. The root and exclusion arrays document those routes beside their entries; the audit derives shipping independently from the builds.
@@ -45,7 +45,6 @@ Source of truth: `productSections` / `productDependencyFilters` / `excludedWorks
 - **Its version is pinned exactly in the root `package.json` under `devEngines.runtime.version`**, and the build is the authority.
 - **The supply-chain page reads the same pin**, so the disclosed version provably equals the runtime users receive (rationale).
 - **The pin is deliberate and manual** — no automated ecosystem tracks it; workflows that do not bundle the runtime may track the same pinned major.
-- Locally, pnpm honours `devEngines` (`onFail: "download"`) so scripts run under the pinned Node; CI drives `actions/setup-node` from the same field through `node-version-file: package.json` (rationale).
 
 The Windows runtime's PE Subsystem field is patched from console (3) to GUI (2) (`docs/specs/standalone.md -> "Windows node subsystem"`; rationale).
 
