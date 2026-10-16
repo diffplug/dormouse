@@ -35,7 +35,7 @@ Every Pane header ends with the pane-action group: zoom/unzoom, minimize, kill.
 
 The label is the `DerivedHeader` (`docs/specs/terminal-state.md`). Click renames, except on a preview slot, whose label is drag area; right-click — or `>` in command mode — opens the terminal context.
 
-Source of truth: `TerminalPaneHeader` in `lib/src/components/wall/TerminalPaneHeader.tsx`; `SurfacePaneHeader` in `lib/src/components/wall/SurfacePaneHeader.tsx`; `ToolPaneHeader` in `lib/src/components/wall/ToolPaneHeader.tsx`; `usePreviewKeep` in `lib/src/components/wall/preview-keep.ts`; `useHeldWhile` in `lib/src/components/wall/preview-transition.ts`.
+Source of truth: `TerminalPaneHeader` in `lib/src/components/wall/TerminalPaneHeader.tsx`; `SurfacePaneHeader` in `lib/src/components/wall/SurfacePaneHeader.tsx`; `ToolPaneHeader` in `lib/src/components/wall/ToolPaneHeader.tsx`.
 
 #### Header context menu
 
@@ -51,7 +51,7 @@ Source of truth: `TerminalPaneHeader` in `lib/src/components/wall/TerminalPaneHe
 
 **Must promote by adopting the helper Session into a new split beside the source**, preserving identity and focusing it. Helper lifetime and source closure: `docs/specs/terminal-context.md`.
 
-Source of truth: `TerminalContextOverlay` in `lib/src/components/wall/TerminalContextOverlay.tsx`; `placeTerminalContext` in `lib/src/components/wall/terminal-context-placement.ts`.
+Source of truth: `TerminalContextOverlay` in `lib/src/components/wall/TerminalContextOverlay.tsx`.
 
 ### Pane body
 
@@ -71,7 +71,7 @@ Source of truth: `AlertRingIndicator` in `lib/src/components/wall/AlertRingIndic
 
 ### Pane header responsive sizing
 
-**Must measure each header's own border-box width, never the viewport, retaining its tier at zero width** (rationale). Each terminal tier boundary is the width at which the next-lowest-priority element would start eating the group's padding (rationale).
+**Must measure each header's own border-box width, never the viewport, retaining its tier at zero width** (rationale).
 
 **Must yield the pane-action group last, and zoom last within it** (to the popover where there is one), since zooming restores everything the header dropped. Narrowing, each header drops:
 
@@ -102,9 +102,9 @@ A minimized session becomes a door, showing its label plus the alert badge clust
 
 ### Baseboard responsive sizing
 
-- **Never give Doors the width of the right cluster's fixed controls** (page count, notice, one-time indicator, the three buttons), **and never measure the overflow arrow into that reserved width**, since its presence is an output of the fit.
+- **Never give Doors the width of the right cluster's fixed controls** (page count, notice, one-time indicator, the three buttons).
 - **Must always show at least one Door**, even if it overflows; past that, Doors fit while room remains for an overflow arrow. A scrolled baseboard shows `← N more` and/or `N more →`; clicking one reveals one Door in that direction. One Door too long to fit between both arrows keeps both.
-- **An arrow hiding a ringing or TODO Door must say so**, visibly and in its accessible name. **Every arrow must reserve the width of the TODO one**, so the fit never depends on which Doors an arrow hides.
+- **An arrow hiding a ringing or TODO Door must say so**, visibly and in its accessible name.
 - **Must reveal the selected Door when selection or membership changes**, without overriding manual overflow scrolling.
 
 Source of truth: `lib/src/components/Baseboard.tsx`.
@@ -123,7 +123,7 @@ Source of truth: `lib/src/components/Baseboard.tsx`.
 - **Never close a pinned Workspace alone**: it shows no `×`, middle-click and `x` / `k` do nothing, and the close verb refuses it, Labs pending kill included (`dor`: `docs/specs/dor-cli.md` → dor workspace). Its Window's close still closes it.
 - **Must open the tab menu on right-click, or `Shift+F10` / `ContextMenu` on a focused tab**: Rename, Use automatic name (user-set names), Pin right / Unpin, Copy id, Move to new window (hosts that tear out, with the tear-out's consents), Close. **It holds the chrome keyboard lease and never opens over a rename or pending confirmation, or for a closing or transferring Workspace; any of those starting dismisses it. A right press or Control-click must never start a reorder.**
 
-Source of truth: `WorkspaceStrip` in `lib/src/components/WorkspaceStrip.tsx`; `WorkspaceTabMenu` in `lib/src/components/WorkspaceTabMenu.tsx`; `setWorkspacePinned` in `lib/src/lib/workspace-store.ts`; `nextTodoMember` in `lib/src/lib/workspace-union.ts`.
+Source of truth: `WorkspaceStrip` in `lib/src/components/WorkspaceStrip.tsx`; `setWorkspacePinned` in `lib/src/lib/workspace-store.ts`; `nextTodoMember` in `lib/src/lib/workspace-union.ts`.
 
 ### Workspace names
 
@@ -133,13 +133,13 @@ A Workspace's name is auto, derived from its terminals, until a user renames it;
 - Any vote inside a git repository wins: the name is the most common `<repo> @ <branch>`, and directories outside a repository are ignored. `<repo>` is origin's repository name, else the main checkout's folder, so every worktree shares it; a detached HEAD shows a short hash.
 - Otherwise the most common directory, counted by `cwdIdentity` and shown by basename: `~` for local home, a remote one with its host.
 - A tie keeps the current name when it is among the tied, else takes the earliest member's (Lath leaf order, then Doors).
-- **Must hold the current name for a never-answered path until three consecutive unanswered lookups** (rationale), then vote "no repository"; `Workspace N` until a terminal reports a directory.
+- **Must hold the current name for a never-answered path through a bounded run of unanswered lookups** (rationale), then vote "no repository"; `Workspace N` until a terminal reports a directory.
 - **Never ask git about a remote cwd.** **Must re-ask after a command finishes** (rationale). A host without `gitInfo` names by directory.
-- **Never treat a path absent from a `gitInfo` answer, or any path of a rejected request, as "no repository"**: it is unanswered. **A host failure must reject**, never answer `{}`. An unanswered path keeps its last answer, else holds the name, and is re-asked after a delay doubling per miss.
+- **Never treat a path absent from a `gitInfo` answer, or any path of a rejected request, as "no repository"**: it is unanswered. **A host failure must reject**, never answer `{}`. An unanswered path keeps its last answer, else holds the name, and is re-asked later.
 - **Never submit an untouched rename editor**: opening it must not pin an auto-name, even one that changed while it was open.
 - **Must run only `rev-parse` and `config --get`, reading `HEAD` directly**, so `core.fsmonitor` never runs; a lookup past its deadline is left out of the answer.
 
-Source of truth: `deriveWorkspaceAutoName` in `lib/src/lib/workspace-autoname.ts`; `installWorkspaceAutoNaming` in `lib/src/lib/workspace-autoname-controller.ts`; `gitInfo` in `lib/src/host/git-info.ts`.
+Source of truth: `installWorkspaceAutoNaming` in `lib/src/lib/workspace-autoname-controller.ts`; `gitInfo` in `lib/src/host/git-info.ts`.
 
 ### Workspace motion
 
@@ -147,7 +147,6 @@ A Workspace expands from its tab on activation, creation, and arrival; its layou
 
 - **Must keep the outgoing Workspace visible and inert beneath the incoming Workspace during a switch**, then hide it and detach its terminal elements when its fade finishes ([Workspace lifecycle](#workspace-lifecycle)).
 - **Must collapse a closing Workspace before disposing its Surfaces or removing its tab**, then expand the successor; a refusal restores an active Workspace. Transfer sequencing: `docs/specs/standalone.md` → Transfer.
-- **Must settle departures even when backgrounded frames stop.**
 
 Source of truth: `createWorkspaceMotion` in `lib/src/components/workspace-motion.ts`.
 
@@ -155,7 +154,7 @@ Source of truth: `createWorkspaceMotion` in `lib/src/components/workspace-motion
 
 - **Must move a Pane or Door on release over another Workspace tab**, inserting beside the destination's last selected live pane. **Never activate on hover.** A header or Door press owns a pane drag; a tab press owns reorder and cross-Window tear-out. A drop on a strip gap, the source tab, or a disabled target moves nothing; Escape and pointer cancellation change nothing.
 - **Must offer `+` and New workspace only when the source has more than one Surface**, counting Panes and Doors; create a receiving Wall with only the moved Surface. Otherwise disable both, and refuse CLI `--new`.
-- **Must offer Move to workspace in terminal and Tool context**, using the same coordinator as dragging. **Never add a browser context menu. Never add a command-mode move binding.** Browser Surfaces move by dragging or CLI.
+- **Must offer Move to workspace in terminal and Tool context.** **Never add a browser context menu. Never add a command-mode move binding.** Browser Surfaces move by dragging or CLI.
 - **Must retain stable Surface identity and Session state while remounting in the destination Wall**: terminals keep their registry instance, browser automation reconnects, and a retained helper follows its source. **Never close a departing Session.** A moved preview slot is pinned.
 - **Must confirm plain iframe and serving iframe Tool moves before creating a destination or changing membership**, with the typed-letter Workspace confirmation ([Workspace lifecycle](#workspace-lifecycle)): the Surface reopens at its last-known saved URL, possibly losing page state. Doors remain minimized while waiting. CLI consent: `docs/specs/dor-cli.md` → dor move.
 - **Must refuse dirty Tools, pending Tool approval, browser startup, closing Surfaces/Workspaces and helper promotion**, rechecking after consent and asynchronous preparation. Iframe consent never bypasses a dirty or pending refusal.
@@ -173,7 +172,7 @@ VS Code mounts a bare Wall with no Workspace id, which behaves exactly as a sing
 - **A hidden Wall's terminals must hold no element and no GL context**: the outgoing fade's completion unmounts every terminal element, exactly as minimize does ([Renderer](#renderer)); activation mounts and fits through the [Animations](#animations) gate, so an unchanged grid sends no PTY resize. Browser Surfaces keep their live documents (rationale).
 - **A hidden Wall must consume no window input**: every listener that dispatches, forwards, or `preventDefault`s window input is gated on `active`. **Only the active Wall may render the modal hosts and the overlays that trap keys** — the kill confirmation and a terminal's copy editor (rationale); a staged prompt survives the switch and is answered only where the user can see it.
 - Exactly one Wall answers a `dor` request (`docs/specs/dor-cli.md` → "Handle Model"). Every Wall registers a handle, a bare one under `DEFAULT_WORKSPACE_ID`.
-- **Never unmount a Wall before its Surfaces are disposed** — `closeAll` waits for the kill fade to commit, bounded by the engine's exit duration (`docs/specs/glossary.md` → "Invariants" I4). **Must refuse at the deadline rather than report clean**, and the walk re-reads membership until nothing is left, so a Surface born behind it is closed too.
+- **Never unmount a Wall before its Surfaces are disposed**, a Surface born during the close included (`docs/specs/glossary.md` → "Invariants" I4). **Must refuse when a kill fade outlasts the engine's exit duration rather than report clean.**
 - **A closing Workspace must take no new Surfaces**: while `closeAll` walks, this Wall answers every Surface-creating `dor` verb with an error, rechecked after any host round trip the verb makes before creating (`CREATING_CONTROL_METHODS` in `lib/src/components/wall/use-dor-control.ts`).
 - **Must reject duplicate Workspace IDs before mutating the model.**
 - **Must retain mode and selection across switches unless the [activation gesture](#workspace-tabs) changes them.**
@@ -272,7 +271,7 @@ Source of truth: `requestKill` in `lib/src/components/Wall.tsx`; `wireXtermHandl
 
 ## Selection overlay
 
-One ring marks the one active pane or Door: a solid stroke in passthrough, marching ants in command mode, centered on the midline of the `PANE_GUTTER_PX` gap between panes (rationale).
+One ring marks the one active pane or Door: a solid stroke in passthrough, marching ants in command mode.
 
 - **Must march for as long as command mode lasts in a focused window** (rationale), pausing only during Workspace title editing, under reduced motion, or under `cfg.marchingAnts.paused`; an unfocused window pauses it. **Never restart or retime the march for travel.**
 - Under `WorkspaceWindow` the ring renders into `document.body`, outside the Workspace's transform and stacking context. **Every modal must render into `document.body` too, at a `MODAL_LAYERS` value above the ring's**, or the ring crosses it — by value, never insertion order.
@@ -289,7 +288,7 @@ Source of truth: `lib/src/lib/rect-tween.ts`; `lib/src/lib/ring-geometry.ts`.
 
 #### Directional motion smear
 
-**Must smear each travelling edge by its own perpendicular analytic velocity**, with no smear when settled, under reduced motion, or around a source/helper union, **separate from the crisp, unbroken outline** (rationale). **Must compute dash length from the rendered path's geometry**, never a DOM path measurement (rationale). **Never use an SVG `feGaussianBlur` here** (rationale).
+**Must smear each travelling edge by its own perpendicular analytic velocity**, with no smear when settled, under reduced motion, or around a source/helper union, **separate from the crisp, unbroken outline** (rationale). **Never use an SVG `feGaussianBlur` here** (rationale).
 
 Source of truth: `writeSmear` in `lib/src/components/wall/WorkspaceSelectionOverlay.tsx`.
 
@@ -319,7 +318,7 @@ Source of truth: `WallNav` in `lib/src/components/wall/keyboard/types.ts`; `hand
 
 ### Minimize (`m`/`d`, the header button, or a drag onto the baseboard)
 
-Minimizing detaches the leaf into a Door with its restore token (`docs/specs/tiling-engine.md` → "Restore tokens") and moves selection to the new door in command mode; a drag onto the baseboard takes the same path. **Never dispose on minimize**: the Session stays in the registry. Minimizing the *last* pane also triggers the [Auto-spawn refill](#auto-spawn-refill). A Door carries no metadata copy, and a minimized browser or Tool Surface parks: `docs/specs/tiling-engine.md` → "Parked leaves".
+Minimizing detaches the leaf into a Door with its restore token (`docs/specs/tiling-engine.md` → "Restore tokens") and moves selection to the new door in command mode. **Never dispose on minimize**: the Session stays in the registry. Minimizing the *last* pane also triggers the [Auto-spawn refill](#auto-spawn-refill). A Door carries no metadata copy, and a minimized browser or Tool Surface parks: `docs/specs/tiling-engine.md` → "Parked leaves".
 
 ### Reattach (click door, `Enter`/`m`/`d` on door, or drag out)
 
@@ -345,7 +344,7 @@ Source of truth: `usePaneRename` in `lib/src/components/wall/use-pane-rename.tsx
 
 | Op | Behavior |
 |---|---|
-| Create `getOrCreateTerminal` | Creates xterm.js and a PTY; reuses an existing entry. The WebGL addon is not loaded here ([Renderer](#renderer)). |
+| Create `getOrCreateTerminal` | Creates xterm.js and a PTY; reuses an existing entry. |
 | Resume `resumeTerminal` | Creates the xterm entry and writes replay data, spawning no PTY. Webview recreated over retained Live or Exited PTYs (Link: Severed → Resuming → Live). |
 | Restore `restoreTerminal` | Creates the xterm entry and spawns a new PTY with the saved cwd; replays no transcript (`docs/specs/transport.md` → "What is persisted"). Cold start (Link: Cold → Live). |
 | mount / unmount | Reparents or removes the persistent DOM element. The Registry entry survives, and neither fits the terminal — the caller owns fitting ([Animations](#animations)). |
@@ -382,12 +381,12 @@ Source of truth: `IMAGE_ADDON_OPTIONS` in `lib/src/lib/terminal-lifecycle.ts`; `
 
 ### Session persistence
 
-**Must coalesce scheduled saves into one timer without restarting it on later commits.** The snapshot stores its layout in the native Lath format (`docs/specs/tiling-engine.md` → "Persistence"); `docs/specs/transport.md` → "Persistence policy" lists what is persisted. **Derived command/app labels on minimized doors are display-only** — never persisted as user-pinned titles.
+The snapshot stores its layout in the native Lath format (`docs/specs/tiling-engine.md` → "Persistence"); `docs/specs/transport.md` → "Persistence policy" lists what is persisted. **Derived command/app labels on minimized doors are display-only** — never persisted as user-pinned titles.
 
 Three save triggers, in ascending urgency:
 
 - Any Lath store commit schedules the save.
-- Content changes with no Lath commit — PTY output, activity/TODO, pane title/command state, minimized-door changes — only mark the session dirty; a heartbeat persists only when dirty, so an idle app stops writing.
+- Content changes with no Lath commit only mark the session dirty; a heartbeat persists only when dirty, so an idle app stops writing.
 - PTY exit, `onRequestSessionFlush`, `pagehide`, unmount, and extension shutdown requests flush immediately and unconditionally — the net for any dirty-trigger gap (a program calling `chdir()` emits no event, so its persisted CWD may go stale until the next output — accepted).
 
 **A save must clear dirty only up to the generation it captured before serializing**, so a change arriving mid-save leaves the session dirty for the next heartbeat; a fresh Wall starts dirty, so the first heartbeat after boot persists. Source of truth: `createSessionDirtyTracker` in `lib/src/lib/session-dirty.ts`.
@@ -424,7 +423,7 @@ Renderer Activity storage: `docs/specs/alert.md` → Public State.
 
 ## Animations
 
-All pane motion belongs to the Lath animator (`docs/specs/tiling-engine.md` → "Animation"). **Never resize terminals to intermediate animation or sash-preview dimensions.** Fit after the final geometry is painted, including a sash commit at its last preview size; canceled sash drags preserve the original grid, and same-size reattachment sends no PTY resize. Outside layout motion, container resizes are debounced (rationale).
+All pane motion belongs to the Lath animator (`docs/specs/tiling-engine.md` → "Animation"). **Never resize terminals to intermediate animation or sash-preview dimensions.** Fit after the final geometry is painted, including a sash commit at its last preview size; canceled sash drags preserve the original grid, and same-size reattachment sends no PTY resize (rationale).
 
 Source of truth: `TerminalResizeContext` in `lib/src/components/wall/wall-context.tsx`.
 
@@ -442,9 +441,9 @@ Enter motion: `docs/specs/tiling-engine.md` → "Animation".
 
 Every kill gesture runs the animator's two-phase exit (`docs/specs/tiling-engine.md` → "Animation").
 
-**Must move selection at removal time only when the killed pane is still the selected pane** — to a survivor, or to `null` and then auto-spawn when the last pane goes. The check is re-read live at removal, so a background kill leaves selection untouched and a selection move during the fade is honored both ways (rationale).
+**Must move selection at removal time only when the killed pane is still the selected pane** — to a survivor, or to `null` and then auto-spawn when the last pane goes. A background kill leaves selection untouched and a selection move during the fade is honored both ways (rationale).
 
-A doored Surface has no visible pane to fade: its kill closes any agent-browser session, forgets the leaf, disposes the Session, and drops the Door. Source of truth: `killPaneImmediately` in `lib/src/components/Wall.tsx`.
+A doored Surface has no visible pane to fade, so its kill disposes it at once. Source of truth: `killPaneImmediately` in `lib/src/components/Wall.tsx`.
 
 ### Auto-spawn refill
 
