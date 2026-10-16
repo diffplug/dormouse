@@ -99,7 +99,6 @@ import { RelayHub } from './relay.js';
 import type { ClientConn, BurrowConn } from './relay.js';
 import { secretEquals } from './secrets.js';
 import { SetupTokenIssuer } from './setup-token.js';
-import type { SetupTokenEntry } from './setup-token.js';
 import {
   AccountStore,
   DuplicateCredentialError,
@@ -533,20 +532,14 @@ export function createApp(config: AppConfig): CreatedApp {
     return { token: null };
   }
 
-  /** A setup token the `finish` route has spent, kept so a failure can put it back. */
-  interface SpentSetupToken {
-    readonly token: string;
-    readonly entry: SetupTokenEntry;
-  }
-
   /**
    * Read a JSON body and resolve its setup token — the one credential these
-   * routes take. `gate` is what separates them: `begin` peeks, while `finish`
-   * CONSUMES up front — that delete is what makes a token single-use under
-   * concurrency, so its caller must restore the entry on every failure after
-   * this point (see the route).
+   * routes take. `gate` is what separates them: `begin` peeks; `finish` CLAIMS
+   * up front — that is what makes a token single-use under concurrency, so the
+   * route must end the claim (`settle` or `restore`) on every path past this
+   * gate; `retire` kills it, claimed or not.
    *
-   * Either gate also re-checks that the minting Burrow is still enrolled, since a
+   * Every gate also re-checks that the minting Burrow is still enrolled, since a
    * revoked Burrow's outstanding tokens must die with it rather than stay
    * redeemable for the rest of their TTL. Absent, mistyped, unknown, expired,
    * spent and revoked-minter are one 401: none of them may tell a caller
@@ -554,24 +547,27 @@ export function createApp(config: AppConfig): CreatedApp {
    */
   async function readSetupGated<T extends { setupToken?: unknown }>(
     c: Context<AppEnv>,
-    gate: 'peek' | 'consume',
-  ): Promise<{ body: T; spent: SpentSetupToken | null } | Response> {
+    gate: 'peek' | 'claim' | 'retire',
+  ): Promise<{ body: T; token: string } | Response> {
     const invalid = () => c.json({ error: SETUP_TOKEN_INVALID_ERROR }, 401);
     const body = await readJson<T>(c);
     const token: unknown = body?.setupToken;
     if (typeof token !== 'string') return invalid();
-    const entry = gate === 'consume' ? setupTokens.consume(token) : setupTokens.peek(token);
+    const entry = setupTokens[gate](token);
     if (!entry) return invalid();
+    let enrolled: boolean;
     try {
-      // A revoked minter's token is dead, not unlucky.
-      if (!(await burrowStore.has(entry.burrowId))) return invalid();
+      enrolled = await burrowStore.has(entry.burrowId);
     } catch (error) {
-      // An unreadable file does not establish revocation. The finish route's
-      // restoration finally has not started yet, so this gate owns recovery.
-      if (gate === 'consume') setupTokens.restore(token, entry);
+      // An unreadable file does not establish revocation, so a claim goes back.
+      // A retired token stays dead: the owner asked for that whatever we read.
+      if (gate === 'claim') setupTokens.restore(token);
       throw error;
     }
-    return { body: body as T, spent: gate === 'consume' ? { token, entry } : null };
+    // A revoked minter's token is dead, not unlucky: a claim is left unended,
+    // which nothing can redeem, restore, or retire into a 204.
+    if (!enrolled) return invalid();
+    return { body: body as T, token };
   }
 
   const app = new Hono<AppEnv>();
@@ -671,14 +667,15 @@ export function createApp(config: AppConfig): CreatedApp {
   });
 
   app.post(API_ROUTES.setupFinish, async (c) => {
-    // The token is spent at the gate, before any of the checks below run: that
-    // delete is what makes it single-use under concurrency, so of two finishes
+    // The token is claimed at the gate, before any of the checks below run:
+    // that is what makes it single-use under concurrency, so of two finishes
     // racing one token only one can ever reach `appendPasskey`. The cost is
     // that every failure below has to put it back — an ordinary rejected
-    // attempt must leave the QR scannable — which the `finally` does.
-    const gated = await readSetupGated<SetupFinishRequest>(c, 'consume');
+    // attempt must leave the QR scannable — which the `finally` does, unless a
+    // retire killed it meanwhile.
+    const gated = await readSetupGated<SetupFinishRequest>(c, 'claim');
     if (gated instanceof Response) return gated;
-    const { body, spent } = gated;
+    const { body, token } = gated;
     let registered = false;
     try {
       // The checks both Relays run, in their order (`checkRegistration`).
@@ -688,6 +685,11 @@ export function createApp(config: AppConfig): CreatedApp {
       });
       if (!checked.ok) return c.json({ error: checked.error }, checked.status);
       const { credentialId, publicKey, label } = checked;
+      // A retire that landed while the checks above awaited wins: the owner
+      // asked that this code register nothing.
+      if (!setupTokens.commit(token)) {
+        return c.json({ error: SETUP_TOKEN_INVALID_ERROR }, 401);
+      }
       try {
         await accounts.appendPasskey({ credentialId, publicKey, label });
       } catch (err) {
@@ -702,8 +704,8 @@ export function createApp(config: AppConfig): CreatedApp {
       const res: SetupFinishResponse = { ...mintSession(), credentialId };
       return c.json(res);
     } finally {
-      // Its original expiry rides along, so a retry never buys extra time.
-      if (spent && !registered) setupTokens.restore(spent.token, spent.entry);
+      if (registered) setupTokens.settle(token);
+      else setupTokens.restore(token);
     }
   });
 
@@ -946,9 +948,9 @@ export function createApp(config: AppConfig): CreatedApp {
    */
   app.post(API_ROUTES.setupRetire, requireSession, async (c) => {
     // The same gate `finish` runs, so the two cannot drift on what a spendable
-    // token is. The spent entry is dropped rather than kept: retiring it is the
-    // outcome the caller wanted, so there is no failure left to restore it for.
-    const gated = await readSetupGated<SetupRetireRequest>(c, 'consume');
+    // token is. A token a finish is still validating dies too, and that
+    // finish can neither register with it nor restore it.
+    const gated = await readSetupGated<SetupRetireRequest>(c, 'retire');
     if (gated instanceof Response) return gated;
     return c.body(null, 204);
   });
