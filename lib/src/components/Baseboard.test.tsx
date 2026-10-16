@@ -199,9 +199,9 @@ describe('Baseboard settings controls', () => {
     ['push', 'pushEnabled', "Send push notification if not attended", 'Delay before push:'],
   ] as const)('toggles only %s and previews its stored setting without taking the keyboard', (sink, field, label, delay) => {
     vi.useFakeTimers();
-    const setDialogKeyboardActive = vi.fn();
+    const keyboardActive = { current: false };
     act(() => root.render(
-      <DialogKeyboardContext.Provider value={setDialogKeyboardActive}>
+      <DialogKeyboardContext.Provider value={createDialogKeyboardCoordinator(keyboardActive)}>
         <Baseboard items={[]} onReattach={() => {}} />
       </DialogKeyboardContext.Provider>,
     ));
@@ -218,7 +218,7 @@ describe('Baseboard settings controls', () => {
     expect(getAlertSettings()).toEqual({ ...DEFAULT_ALERT_SETTINGS, [field]: true });
     expect(button.getAttribute('aria-pressed')).toBe('true');
     expect(document.activeElement).toBe(terminalInput);
-    expect(setDialogKeyboardActive).not.toHaveBeenCalledWith(true);
+    expect(keyboardActive.current).toBe(false);
     expect(document.querySelector('[role="dialog"]')).toBeNull();
     const preview = document.querySelector('[role="status"]');
     expect(preview?.textContent).toContain(label);
