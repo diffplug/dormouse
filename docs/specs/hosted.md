@@ -35,11 +35,11 @@ Source of truth: `WORKERS` in `hosted/scripts/workers.mjs`; `workerApp` in `host
 
 **Must identify accounts by immutable user ID, never email.** Provider-only accounts keep their identity when a provider subsequently supplies email. Exceptions: `ADMIN_EMAIL` ("Managed voice") and `SIGN_IN_ALLOWLIST` (below).
 
-**Must sign in only `SIGN_IN_ALLOWLIST`'s verified emails, in production, until launch.** A request naming another email is refused before a code is sent or an account created; on a GET, which every read of a login is, a login whose user is not a listed verified email has all its user's logins deleted before the auth handler answers. Signed out, the frontend shows its pre-launch notice instead of the sign-in form unless the URL carries `?signin` or a failed callback's `?error`, or the account lookup failed. The test entry runs without the gate; previews and local development keep it off. Ends at launch (Future item 4).
+**Must sign in only `SIGN_IN_ALLOWLIST`'s verified emails, in production, until launch.** A request naming another email is refused before a code is sent or an account created; on any read but a provider callback or the CSRF challenge, a login whose user is not a listed verified email has all its user's logins deleted before the auth handler answers. Signed out, the frontend shows its pre-launch notice instead of the sign-in form unless the URL carries `?signin` or a failed callback's `?error`, or the account lookup failed. The test entry runs without the gate; previews and local development keep it off. Ends at launch (Future item 4).
 
 **Must enable providers explicitly in `OAUTH_PROVIDERS`.** The allowed set is GitHub, Google, Microsoft, and Apple. Missing paired credentials or unknown names fail closed; unused credentials enable nothing. Email uses Postmark in production and local capture in development.
 
-**Must discard provider tokens after identity verification and omit login tokens from browser JSON.** Cookies and upstream identity verification follow the packed adapter.
+**Must discard provider tokens after identity verification and omit login tokens from browser JSON.** Cookies and upstream identity verification follow the packed adapter. Cookie reads: `docs/specs/security-hosted.md` -> "Origin boundary".
 
 Source of truth: `hosted/server/providers.js`; `authPolicy` / `providerBindings` in `hosted/server/policy.ts`; `prelaunchAuth` in `hosted/server/prelaunch.ts`.
 
@@ -71,7 +71,7 @@ An admin-only test slice: Dormouse desktop exchanges a pasted voice token for El
 
 | Route | Credential | Success |
 |---|---|---|
-| `GET /api/voice/tokens` | login cookie | 200 `{ tokens }` |
+| `GET /api/voice/tokens` | login cookie, same-origin fetch | 200 `{ tokens }` |
 | `POST /api/voice/tokens` | login cookie, exact `Origin` | 201 `{ id, token, createdAt }` |
 | `DELETE /api/voice/tokens/:id` | login cookie, exact `Origin` | 204; 404 for another account's or an unknown ID |
 | `POST /api/voice/speak` | `Authorization: Bearer dmv_…`, JSON `{ text, voiceId }` | 200 `audio/mpeg`, `Cache-Control: no-store` |
@@ -208,7 +208,7 @@ Begin answers another origin, or none, with the self-host 409 `ORIGIN_MISMATCH_E
 | Route (account) | Credential | Success |
 |---|---|---|
 | `POST /api/relay/enrollments/approve` | login cookie, exact `Origin`, JSON `{ userCode }` | 204 |
-| `GET /api/relay/burrows` | login cookie | 200 `{ burrows }` |
+| `GET /api/relay/burrows` | login cookie, same-origin fetch | 200 `{ burrows }` |
 | `DELETE /api/relay/burrows/:burrowId` | login cookie, exact `Origin` | 204; 404 for another account's or an unknown ID |
 
 Errors are the managed-voice cookie routes' ("Managed voice"), except that 403 for any account but the admin carries `NOT_ENTITLED_ERROR`.
