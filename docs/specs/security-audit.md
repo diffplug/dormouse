@@ -6,7 +6,7 @@
 
 ## Schedule and gate
 
-`.github/workflows/security-audit.yaml` audits `docs/specs/security.md` and the specs it names: nightly at `04:21 UTC`, on `workflow_dispatch`, and on the release tag, dispatched by `.github/workflows/release.yml` whose `publish-vscode` job `needs:` it — so no release ships without a passing audit. Dispatched, not `uses:`-called — see `docs/specs/security-ci.md` -> "GitHub Actions Policies".
+`.github/workflows/security-audit.yaml` audits `docs/specs/security.md` and the specs it names: nightly, on `workflow_dispatch`, and on the release tag, dispatched by `.github/workflows/release.yml` whose `publish-vscode` job `needs:` it — so no release ships without a passing audit. Dispatched, not `uses:`-called — see `docs/specs/security-ci.md` -> "GitHub Actions Policies".
 
 `FAIL IF` lines are grouped by the operation that answers them, one bullet asserting several properties when a single call establishes all of them; a qualitative pass looks for holes the specs do not cover. **On any `FAIL IF` violation or BLOCKER-severity finding the audit fails** ([Outcomes and reporting](#outcomes-and-reporting)).
 
@@ -91,10 +91,9 @@ Source of truth: `.github/audit/orchestrator.md`; the fragment contract in `.git
 
 **A domain owes one result per `FAIL IF` rule in the specs its `**Scope` claims**, numbered by position under its heading, so a skipped section is a missing rule. A rule pinned to `scripts/github-state-check.mjs` alone is owed by `audit-github-state.md` instead, which owes every rule that pin names, no `QUALITATIVE` line, and no evidence lines on its findings. A verdict line or `audit-status.txt` that disagrees with the computed verdict is reported as an anomaly; a pessimistic one holds at INCONCLUSIVE, never raising to `FAIL`.
 
-- **A title moves upward only.** An append retitles an open issue for `FAIL` alone, so an inconclusive run cannot relabel one already carrying findings.
 - **The private report is what did not pass**: computed verdicts, anomalies, non-`PASS` results, missing rules, malformed lines, and merged findings. `PASS` lines and the orchestrator's `audit-report.md` stay in the encrypted artifact.
 - **The private report is split, never truncated**, by `scripts/clamp-issue-body.mjs` into the issue body and its comments, under a bounded part count; a helper failure files it as one part (rationale).
-- **The `audit-transcript` artifact uploads during postprocessing**, 14-day retention; runner timeout or cancellation can prevent upload, and a missing artifact receives no download link (rationale).
+- **The `audit-transcript` artifact uploads during postprocessing**; runner timeout or cancellation can prevent upload, and a missing artifact receives no download link (rationale).
 - **A `FAIL IF` names only a condition an audit run can read**: the readable half is audited, and the rest is staged under `## Future` only while it is unbuilt, otherwise stated beside the rule. `AUDIT_PAT`-readable GitHub state stays audited (rationale).
 
 - **FAIL IF** the `Redact secrets from agent output` step is removed, stops covering any sink later archived or filed (`audit-report.md`, every `AUDIT_FRAGMENTS` fragment, and the transcript), or stops failing closed by deleting those files when the redactor itself throws (rationale). Pinned by `scripts/security-audit.test.mjs`.
