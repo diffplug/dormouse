@@ -5,6 +5,7 @@ import { clsx } from 'clsx';
 import { TERMINAL_BOTTOM_RADIUS_CLASS } from '../design';
 import { isEditableTarget } from '../../lib/dom';
 import { isMacSelectAll } from '../../lib/select-all';
+import type { BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
 import type { RenderMode } from './agent-browser-screen';
 import { tabDisplayTitle } from './browser-url';
 import { resolveRenderMode } from './browser-surface';
@@ -41,6 +42,10 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
   const actions = useContext(WallActionsContext);
   const actionsRef = useRef(actions);
   actionsRef.current = actions;
+  const swapRenderMode = (mode: RenderMode, viewport?: BrowserViewportSetting) => {
+    if (viewport) actionsRef.current.onSwapRenderMode(id, mode, viewport);
+    else actionsRef.current.onSwapRenderMode(id, mode);
+  };
   const paneWrite = useContext(PaneWriteContext);
   const mode = useContext(ModeContext);
   const selectedId = useContext(SelectedIdContext);
@@ -126,12 +131,11 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
       viewport,
       updateParameters: (next) => paneWrite.updateParams(id, next),
       setTitle: (nextTitle) => paneWrite.setTitle(id, nextTitle),
-      requestRenderSwap: (mode = 'iframe', viewport) => {
+      requestRenderSwap: (mode = 'iframe', swapViewport) => {
         // The iframe renderer is single-frame: only the active tab survives.
         // Warn + require a typed confirm when other tabs would be closed.
-        if (controller.snapshot().tabs.length >= 2) setPendingRenderSwap(mode);
-        else if (viewport) actionsRef.current.onSwapRenderMode(id, mode, viewport);
-        else actionsRef.current.onSwapRenderMode(id, mode);
+        if (controller.snapshot().tabs.length >= 2) setPendingRenderSwap({ mode, viewport: swapViewport });
+        else swapRenderMode(mode, swapViewport);
       },
       launchFailed: (error) => actionsRef.current.onBrowserLaunchFailed?.(id, error),
     });
@@ -152,7 +156,7 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
 
   // Crossing to the single-frame iframe renderer closes all but the active tab;
   // when others are open the swap is gated behind a typed confirm (overlay below).
-  const [pendingRenderSwap, setPendingRenderSwap] = useState<RenderMode | null>(null);
+  const [pendingRenderSwap, setPendingRenderSwap] = useState<{ mode: RenderMode; viewport?: BrowserViewportSetting } | null>(null);
   const swapConfirmRef = useRef<HTMLDivElement>(null);
 
   // --- input forwarding (stream-native input_* messages) ---
@@ -457,7 +461,7 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
               e.stopPropagation();
               if (e.key === 'c' || e.key === 'C') {
                 setPendingRenderSwap(null);
-                actions.onSwapRenderMode(id, pendingRenderSwap!);
+                swapRenderMode(pendingRenderSwap!.mode, pendingRenderSwap!.viewport);
               } else if (e.key === 'Escape') {
                 setPendingRenderSwap(null);
               }

@@ -70,15 +70,17 @@ describe("quit-confirm store", () => {
     expect(getQuitConfirmPhase()).toBe("quitting");
   });
 
-  it("ignores a redundant open while a dialog is already up", () => {
+  it("refuses a redundant open while a dialog is already up, cancelling its context", () => {
     const first = makeCtx();
     const second = makeCtx();
     openQuitConfirm(first);
     openQuitConfirm(second);
+    expect(second.cancel).toHaveBeenCalledTimes(1);
 
     confirmQuit();
-    // The decision reaches the first request's context, not the ignored one.
+    // The decision reaches the first request's context, not the refused one.
     expect(first.confirm).toHaveBeenCalledTimes(1);
+    expect(first.cancel).not.toHaveBeenCalled();
     expect(second.confirm).not.toHaveBeenCalled();
   });
 

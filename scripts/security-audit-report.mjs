@@ -426,6 +426,15 @@ export function dedupFindings(entries) {
   }).sort((a, b) => SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity]);
 }
 
+/**
+ * A ledger issue body's first line: the finding's key, severity, and its spec
+ * and heading or its file, as JSON in an HTML comment. `Read the findings
+ * ledger` reads it back from the start of the body alone, and
+ * `scripts/security-audit-public-body.mjs` validates every field before a
+ * disclosure names it. No `--` survives, so the comment cannot end early.
+ */
+export const ledgerMeta = (meta) => `<!-- audit-ledger ${JSON.stringify(meta).replace(/--/g, '-\\u002d')} -->`;
+
 /** A ledger key: stable across runs, so line drift does not open a second issue for one finding. */
 export const ledgerKey = (...parts) => createHash('sha256').update(parts.join('\0')).digest('hex').slice(0, 12);
 /** A failed rule's key: its spec, heading, and number, never the clause letter a domain chose. */
@@ -458,7 +467,7 @@ function compose({ fragments, root = '.', fileStatus, runUrl, transcriptUrl = ''
       const key = failKey(r.spec, r.heading, r.rule);
       const line = `Reported by \`${fragment}\`:\n\n${r.line}\n`;
       if (ledger.has(key)) ledger.get(key).body += `\n${line}`;
-      else ledger.set(key, { key, severity: 'FAIL', title: `FAIL: ${ruleId(r.spec, r.heading, r.rule)}`, body: line });
+      else ledger.set(key, { key, severity: 'FAIL', title: `FAIL: ${ruleId(r.spec, r.heading, r.rule)}`, body: line, meta: { spec: r.spec, heading: r.heading } });
     }
   }
   for (const m of merged.filter((x) => x.severity !== 'INFO')) {
@@ -466,12 +475,12 @@ function compose({ fragments, root = '.', fileStatus, runUrl, transcriptUrl = ''
     const f = m.finding;
     if (ledger.has(key)) { ledger.get(key).body += `\n---\n\n${f.block.join('\n')}\n`; continue; }
     ledger.set(key, { key, severity: m.severity, title: `${m.severity}: ${f.path}:${f.line} ${f.cause} — ${f.summary}`,
-      body: `Reported by ${m.fragments.map((x) => `\`${x}\``).join(', ')}:\n\n${f.block.join('\n')}\n` });
+      body: `Reported by ${m.fragments.map((x) => `\`${x}\``).join(', ')}:\n\n${f.block.join('\n')}\n`, meta: { file: normPath(f.path) } });
   }
   const note = `First filed from [this run](${runUrl}) at commit \`${commit}\`. The audit never closes this issue: close it when the fix lands, citing the PR.`;
   for (const e of ledger.values()) {
     e.title = clip(`[audit-finding ${e.key}] ${e.title}`, 240);
-    e.body = clampIssueBody(`${e.body}\n${note}\n`, 'The rest is in the run\'s encrypted `audit-transcript` artifact.');
+    e.body = clampIssueBody(`${ledgerMeta({ key: e.key, severity: e.severity, ...e.meta })}\n\n${e.body}\n${note}\n`, 'The rest is in the run\'s encrypted `audit-transcript` artifact.');
   }
 
   const lines = [];

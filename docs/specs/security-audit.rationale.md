@@ -114,7 +114,7 @@ Duplicates came from delegation: each delegate a domain improvised ran its own q
 
 ## Embargo
 
-Issue #1027 (2026-10) carried a BLOCKER with a working `calc` command-injection payload in the public `security-audit-failure` body, and every run's `audit-transcript` artifact — the merged report, the four fragments, and the Claude transcript — was downloadable by anyone for 14 days. Both contradicted `docs/specs/security.md` telling a reporter never to open a public issue. The security-audit sweep review of 2026-10-07 moved the detail to a private tracker and the artifact to ciphertext.
+Issue #1027 (2026-10) carried a BLOCKER with a working `calc` command-injection payload in the public failure issue's body, and every run's `audit-transcript` artifact — the merged report, the four fragments, and the Claude transcript — was downloadable by anyone for 14 days. Both contradicted `docs/specs/security.md` telling a reporter never to open a public issue. The security-audit sweep review of 2026-10-07 moved the detail to a private tracker and the artifact to ciphertext.
 
 The public body is built from what a domain cannot phrase. A domain writes its own check lines, so a heading-shaped string in one is still agent text; only a heading the checked-out spec already publishes is safe to repeat, and the builder looks each one up rather than trusting the line's shape. Verdicts publish as an enum, never as the verdict line, because the verdict line is agent text, which once carried an explanation after `VERDICT: FAIL`.
 
@@ -123,6 +123,8 @@ The public body is built from what a domain cannot phrase. A domain writes its o
 The token's step also writes `gh` a fresh config directory, so no leftover configuration decides where the token goes.
 
 `age` comes from the Ubuntu archive the runner image already trusts, as in `.github/workflows/hosted-production.yml`'s backup step; no new trust root and no pinned binary to bump. The recipient lives in a checked-in file so a key rotation is a one-line diff under `.github/audit/`, which `workflow-audit.yaml` watches.
+
+**Why one status issue (maintainer decision, 2026-10-11).** Once the detail moved to the private tracker, a user could no longer see that the nightly audit ran, or what it had found: a per-failure issue appeared only on bad nights and said nothing on good ones, and the ledger was invisible. A single pinned issue rewritten every run shows the latest outcome whatever it is, and notifies subscribers only when something changes.
 
 The tracker's visibility is checked against `github.com` rather than the REST API: anonymous API calls share a 60-an-hour limit per runner address, and a rate-limited 403 would read as `UNVERIFIABLE` and hold the release gate.
 
@@ -143,9 +145,23 @@ Hand-filed issues carry `manual-…` keys that no run mints, and their titles ci
 
 A PASS that names the finding with a `path:line` is a mechanical stand-in for having looked: it cannot prove the reasoning, but a domain that never read the checklist cannot produce it. Only failures that cite a rule are checked this way; a finding citing no rule is re-verified in the qualitative pass, which no line can hold to a particular finding.
 
-A PASS still exits zero while ledger findings are open: the gate holds a release on what the current tree fails, and the ledger holds what a human has not yet triaged. Only predecessors' issues hold the public issue open, so a PASS's own new WARNINGs do not keep a failure issue alive by themselves.
+A PASS still exits zero while ledger findings are open: the gate holds a release on what the current tree fails, and the ledger holds what a human has not yet triaged. The status issue lists them anyway, so a PASS is never published as all clear while one is open — the 2026-07-10 and 2026-10-06 closes said exactly that.
 
-The step lists the tracker with `--limit 1000`, and the public step does the same: the default of 30 left an older open failure issue unreconciled.
+The steps list the tracker with `--limit 1000`: the default of 30 once left an older open failure issue unreconciled.
+
+`File embargoed findings` comments on a ledger issue only with its fixed `Seen again` sentence because its token is a maintainer's own: the ledger issues and comments the workflow writes carry an admin's login and the `MEMBER` association, so what marks a public summary as a human's is that the workflow never writes one.
+
+## Disclosure
+
+**Why disclose at all, and why 7 days (maintainer decision, 2026-10-11).** A user should be able to see what the audit found once telling them is safe. Fix PRs are public anyway and describe their fixes plainly, so a fixed finding's PR is its plain description. An embargo with no end would let a finding nobody fixes stay secret forever; 7 days bounds that, for WARNINGs and failed checks as much as BLOCKERs.
+
+**Why metadata only.** A ledger issue carries evidence and a reproduction written by a model, which is the payload issue #1027 published. A disclosure names the key, severity, dates, reason, and where — each validated against the checked-out tree, as the status issue validates headings — so nothing an agent phrased crosses. A path that no longer exists is withheld rather than trusted.
+
+**Why a human-only summary, and only from a comment.** The free text a reader wants is a maintainer's to write. The ledger issue's body is the workflow's, model text included, and posted under the same maintainer login, so a `## Public summary` heading there could be a domain's; a comment is a person's, because the workflow comments nothing but its fixed `Seen again` line.
+
+**Why an unpinned status issue is only a WARNING (2026-10-11).** Pinning makes the issue easy to find and changes nothing it says; failing on it would hold VS Code releases on a display setting, for instance after an unpin to make room under GitHub's limit of three pins. The WARNING still reaches the ledger and the status issue's counts, so an unpin is seen.
+
+**Why the disclosure's title is the idempotence key.** Labeling the ledger issue would need a fourth step holding `EMBARGO_TOKEN`; a fixed-form title on the public issue is found with the workflow token, and a re-run that finds it publishes nothing. The title carries the ledger issue's number beside its key because a fixed finding that recurs is filed again under the same key, and keyed alone it would never be disclosed again. A hand-filed key is a maintainer's slug, which names the finding, so the status issue withholds it until disclosure.
 
 ## Environment and `AUDIT_PAT`
 
@@ -165,11 +181,13 @@ gh secret set AUDIT_PAT --env security-audit --repo diffplug/dormouse --body 'gi
 
 **Why measure recall (2026-10-07).** Run 37710148950 reported two failed checks and two WARNINGs; run 37713086378, on the same code, reported none of the four. Earlier, a real webview bug was found in 3 of 20 runs. A PASS says nothing about what a run would have caught; a canary turns that into a number per run.
 
-**Why a seed deletes the pins that would catch it.** A regression on `main` has passed CI, so a seed whose test still fails measures whether a domain runs a test, not whether it reads code. A seed that reclassifies an `OUTBOUND_SITES` entry or narrows a lint models the commit that silenced it.
+**Why a seed deletes the pins that would catch it.** A regression on `main` has passed CI, so a seed whose test still fails measures whether a domain runs a test, not whether it reads code. A seed that reclassifies an `OUTBOUND_SITES` entry or narrows a lint models the commit that silenced it. A value `scripts/supply-chain-config.test.mjs` reads is the exception: the domain is told to run that test as its evidence, so a cooldown or pin seed would measure the test, and the supply-chain seeds break clauses no script answers instead.
 
 **Why the history is replaced.** A commit on top of the audited one leaves `git diff HEAD~1`, the remote-tracking ref, and the reflog each listing the seeds. The seeds applied sit in `$RUNNER_TEMP`, which an agent that goes looking can still read; the measurement assumes it does not.
 
 **Why only the code domains.** `ci-and-secrets` reads repository settings, which a checkout cannot seed, and `scripts/github-state-check.mjs` answers them deterministically, with planted-violation tests of its own.
+
+**Why a draw is dealt across the domains (2026-10-11).** Canary run 37720586893 drew six seeds from a pool of thirteen, twelve of them application-security, and all six it drew were, so hosted's and supply-chain's recall went unmeasured. A uniform draw of six from twelve, three, and three still leaves supply-chain out about one run in four; dealt round-robin, each domain gets two, so the caught-over-seeded figure now weights the domains equally rather than by pool size.
 
 **Why a seed may name its severity (2026-10-07).** Canary run 37720586893 scored `recovery-created-at-nan` missed: the domain found the NaN age skipping `readAndClearRecord`'s max-age gate and rated it INFO hardening, which it is, because `normalizeResumeCommand` rebuilds the command at the typing boundary. The seed's expectation was wrong, not the domain. A seed whose real severity is below WARNING says so in its header, with the reason beside it, rather than the scorer counting every INFO and with it every near-miss.
 

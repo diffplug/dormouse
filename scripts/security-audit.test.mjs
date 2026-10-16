@@ -4,7 +4,8 @@ import { copyFileSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSy
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { BODY_LIMIT } from './clamp-issue-body.mjs';
-import { OPEN_FINDINGS, SENTINEL, domains, failKey, fragmentManifest, ledgerKey, owedIds as owedRuleIds, specRules } from './security-audit-report.mjs';
+import { OPEN_FINDINGS, SENTINEL, domains, failKey, fragmentManifest, ledgerKey, ledgerMeta, owedIds as owedRuleIds, specRules } from './security-audit-report.mjs';
+import { disclosureReason, parseLedger, planDisclosures, statusBody } from './security-audit-public-body.mjs';
 import { FRAGMENT } from './github-state-check.mjs';
 import { decide } from './security-audit-plan.mjs';
 import { repoRoot, tempDir, workflowRunBlock } from './lint-kit.mjs';
@@ -24,8 +25,9 @@ const runBlock = (name) => workflowRunBlock(workflow, name);
 function stepText(name) {
   const start = workflow.indexOf(`      - name: ${name}\n`);
   assert.ok(start >= 0, `missing workflow step: ${name}`);
-  const end = workflow.indexOf('\n      - ', start + 1);
-  return workflow.slice(start, end < 0 ? undefined : end);
+  // The next step, or the next job's first line.
+  const end = workflow.slice(start + 1).search(/\n(?:      - |  \S)/);
+  return workflow.slice(start, end < 0 ? undefined : start + 1 + end);
 }
 
 // Every sink the encrypted archive takes, as its loop names them. The
@@ -112,26 +114,72 @@ function stub(dir, name, source) {
 }
 
 /**
- * A `gh` that records each call with the token it was handed and the body it
- * posted. A public `issue list` finds open issue 23 unless `GH_NO_PUBLIC_ISSUE`
- * is set; the embargo repository's lists the rows of `GH_LEDGER_OPEN`. A
- * create in the embargo repository answers with its URL; every embargo call
- * fails when `GH_FAIL_EMBARGO` is set.
+ * A `gh` over a fake GitHub kept in `gh-state.json`: the public repository's
+ * issues, the embargo repository's, and the merged PRs `api` answers for. It
+ * records each call with the token it was handed and the body it posted, and
+ * runs every `--jq` filter through the system `jq`, so the shipped filters are
+ * the ones tested. Unless a test seeds the state, the embargo repository holds
+ * the open rows of `GH_LEDGER_OPEN` (`<number> <title>`) and the public one
+ * nothing. Every embargo call fails when `GH_FAIL_EMBARGO` is set.
  */
-function stubGh(dir) {
+function stubGh(dir, seed) {
+  if (seed) writeFileSync(join(dir, 'gh-state.json'), JSON.stringify({ public: [], embargo: [], pulls: {}, ...seed }));
   stub(dir, 'gh', `
     const fs = require('node:fs');
+    const { execFileSync } = require('node:child_process');
     const args = process.argv.slice(2);
-    const bodyAt = args.indexOf('--body-file');
-    const body = bodyAt === -1 ? (args.includes('--body') ? args[args.indexOf('--body') + 1] : null) : fs.readFileSync(args[bodyAt + 1], 'utf8');
+    const opt = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : null);
+    const body = opt('--body-file') !== null ? fs.readFileSync(opt('--body-file'), 'utf8') : opt('--body');
     const embargo = args.includes(${JSON.stringify(EMBARGO_REPO)}) || (args[2] ?? '').includes(${JSON.stringify(EMBARGO_REPO)});
     fs.appendFileSync('gh-calls.jsonl', JSON.stringify({ args, token: process.env.GH_TOKEN, body, embargo }) + '\\n');
     if (embargo && process.env.GH_FAIL_EMBARGO) process.exit(1);
-    if (args[0] === 'issue' && args[1] === 'list') {
-      if (embargo) process.stdout.write(process.env.GH_LEDGER_OPEN ?? '');
-      else if (!process.env.GH_NO_PUBLIC_ISSUE) process.stdout.write('23\\n');
+    const now = new Date().toISOString().replace(/\\.\\d+Z$/, 'Z');
+    const state = fs.existsSync('gh-state.json') ? JSON.parse(fs.readFileSync('gh-state.json', 'utf8')) : {
+      public: [], pulls: {},
+      embargo: (process.env.GH_LEDGER_OPEN ?? '').split('\\n').filter(Boolean).map((row) => ({
+        number: Number(row.slice(0, row.indexOf(' '))), title: row.slice(row.indexOf(' ') + 1), body: '', labels: [],
+        state: 'OPEN', stateReason: '', createdAt: new Date(Date.now() - 86_400_000).toISOString().replace(/\\.\\d+Z$/, 'Z'), closedAt: null, comments: [] })),
+    };
+    const save = () => fs.writeFileSync('gh-state.json', JSON.stringify(state));
+    const repo = embargo ? ${JSON.stringify(EMBARGO_REPO)} : 'fixture/repo';
+    const issues = state[embargo ? 'embargo' : 'public'];
+    const target = () => issues.find((i) => i.number === Number(String(args[2]).match(/(\\d+)$/)[1]));
+    const comment = (issue, text) => issue.comments.push({ author: { login: 'fixture-token-owner' }, authorAssociation: 'MEMBER', body: text });
+    const [command, sub] = args;
+    if (command === 'issue' && sub === 'list') {
+      const want = { open: 'OPEN', closed: 'CLOSED' }[opt('--state') ?? 'open'];
+      const label = opt('--label');
+      const fields = opt('--json').split(',');
+      const listed = issues.filter((i) => (!want || i.state === want) && (!label || i.labels.includes(label)))
+        .map((i) => Object.fromEntries(fields.map((f) => [f, i[f]])));
+      const jq = opt('--jq');
+      process.stdout.write(jq === null ? JSON.stringify(listed) : execFileSync('jq', ['-r', jq], { input: JSON.stringify(listed), encoding: 'utf8' }));
+    } else if (command === 'issue' && sub === 'create') {
+      const number = Math.max(embargo ? 0 : 1000, ...issues.map((i) => i.number)) + 1;
+      issues.push({ number, title: opt('--title'), body, labels: opt('--label') ? [opt('--label')] : [], state: 'OPEN', stateReason: '', createdAt: now, closedAt: null, comments: [] });
+      save();
+      process.stdout.write('https://github.com/' + repo + '/issues/' + number + '\\n');
+    } else if (command === 'issue' && sub === 'comment') {
+      comment(target(), body);
+      save();
+    } else if (command === 'issue' && sub === 'edit') {
+      const issue = target();
+      if (opt('--title') !== null) issue.title = opt('--title');
+      if (body !== null) issue.body = body;
+      save();
+    } else if (command === 'issue' && sub === 'close') {
+      const issue = target();
+      Object.assign(issue, { state: 'CLOSED', stateReason: opt('--reason') === 'not planned' ? 'NOT_PLANNED' : 'COMPLETED', closedAt: now });
+      if (opt('--comment') !== null) comment(issue, opt('--comment'));
+      save();
+    } else if (command === 'api') {
+      const pr = args[1].match(/^repos\\/([^/]+\\/[^/]+)\\/pulls\\/(\\d+)$/);
+      if (pr) {
+        const merged = (state.pulls ?? {})[pr[2]];
+        if (!merged) process.exit(1);
+        process.stdout.write(JSON.stringify({ number: Number(pr[2]), merged_at: merged.merged ? '2026-10-02T00:00:00Z' : null, base: { repo: { full_name: merged.repo ?? pr[1] } } }));
+      }
     }
-    if (embargo && args[1] === 'create') process.stdout.write('https://github.com/${EMBARGO_REPO}/issues/7\\n');
   `);
 }
 
@@ -139,18 +187,35 @@ const ghCalls = (dir) => (existsSync(join(dir, 'gh-calls.jsonl'))
   ? readFileSync(join(dir, 'gh-calls.jsonl'), 'utf8').trim().split('\n').map(JSON.parse)
   : []);
 
+/** A day as the status issue prints it, `days` from now; the fake GitHub files seeded ledger rows yesterday. */
+const DAY = 86_400_000;
+const dayFromNow = (days) => new Date(Date.now() + days * DAY).toISOString().slice(0, 10);
+const SEEDED_ROW = `${dayFromNow(-1)} | ${dayFromNow(6)} |`;
+
+/** The fake GitHub as the run left it. */
+const ghState = (dir) => JSON.parse(readFileSync(join(dir, 'gh-state.json'), 'utf8'));
+/** The public issues a label marks. */
+const publicIssues = (dir, label) => (existsSync(join(dir, 'gh-state.json')) ? ghState(dir).public.filter((i) => i.labels.includes(label)) : []);
+/** The status issue's body as the run left it. */
+function statusIssueBody(dir) {
+  const [status, ...more] = publicIssues(dir, 'security-audit-status');
+  assert.ok(status && more.length === 0, 'expected exactly one status issue');
+  return status.body;
+}
+
 /** `NAME: ${{ steps.<id>.outputs.<key> }}` entries of a step's `env:`, so the plumbing between steps is the shipped one. */
 const outputEnv = (name) => [...stepText(name).matchAll(/^          (\w+): \$\{\{ steps\.(\w+)\.outputs\.(\w+) \}\}$/gm)]
   .map(([, variable, step, key]) => ({ variable, step, key }));
 
 /**
- * Run the open-findings list and the three reporting steps as the runner
+ * Run the open-findings list and the four reporting steps as the runner
  * would: the list (before the agent, whose fragments are already written),
- * compose, the embargo filing, then the public step, each handed the outputs
- * its `env:` names.
+ * compose, the embargo filing, the ledger read, then the public step, each
+ * handed the outputs its `env:` names. `plan` stands in for the plan step's
+ * outputs.
  */
-function runReporting(dir, env, { embargoToken = 'fixture-embargo-token', listToken = embargoToken, embargoEnv = {} } = {}) {
-  const outputs = {};
+function runReporting(dir, env, { embargoToken = 'fixture-embargo-token', listToken = embargoToken, readToken = embargoToken, embargoEnv = {}, plan = {} } = {}) {
+  const outputs = { plan };
   const run = (id, name, extra) => {
     const file = join(dir, `github-output-${id}`);
     writeFileSync(file, '');
@@ -162,13 +227,14 @@ function runReporting(dir, env, { embargoToken = 'fixture-embargo-token', listTo
     return result;
   };
   // Every run reads the ledger, a PASS included.
-  assert.match(stepText('File embargoed findings'), /^        if: always\(\)$/m);
+  for (const name of ['File embargoed findings', 'Read the findings ledger']) assert.match(stepText(name), /^        if: always\(\)$/m);
   const listed = run('findings', 'List open findings', { GH_TOKEN: listToken, EMBARGO_REPO, ...embargoEnv });
   const composed = run('compose', 'Compose the audit report', {});
   assert.equal(composed.status, 0, composed.stderr);
   const embargoed = run('embargo', 'File embargoed findings', { GH_TOKEN: embargoToken, EMBARGO_REPO, ...embargoEnv });
-  const surfaced = run('surface', 'Surface result, file or close issue', embargoEnv);
-  return { listed, composed, embargoed, surfaced, outputs };
+  const read = run('ledger', 'Read the findings ledger', { GH_TOKEN: readToken, EMBARGO_REPO, ...embargoEnv });
+  const published = run('publish', 'Publish the audit status', embargoEnv);
+  return { listed, composed, embargoed, read, published, outputs };
 }
 
 /** The embargo calls that file the per-run report: not the ledger's list, issues, or comments. */
@@ -291,16 +357,23 @@ for (const scenario of cases) {
       written.push(text);
       writeFileSync(join(dir, fragments[i]), text);
     });
-    const { surfaced, outputs } = runReporting(dir, env);
+    const { published, outputs } = runReporting(dir, env);
     assert.equal(outputs.compose.status, scenario.expected === 'INCONCLUSIVE' ? 'MISSING' : scenario.expected);
-    assert.equal(surfaced.status, scenario.expected === 'PASS' ? 0 : 1, surfaced.stderr);
+    assert.equal(published.status, scenario.expected === 'PASS' ? 0 : 1, published.stderr);
     const calls = ghCalls(dir);
-    assert.equal(calls.some(({ args, embargo }) => !embargo && args[0] === 'issue' && args[1] === 'close'), scenario.expected === 'PASS');
     // Nothing ever closes a ledger issue.
     assert.ok(!calls.some(({ args, embargo }) => embargo && args[1] === 'close'));
+    // Every run, whatever its outcome, writes the one status issue and nothing
+    // else in public: no comment with no earlier outcome to change from.
+    const publicBody = statusIssueBody(dir);
+    const publicWrites = calls.filter(({ embargo, args }) => !embargo && args[0] === 'issue' && args[1] !== 'list');
+    assert.deepEqual(publicWrites.map(({ args }) => args[1]), ['create']);
+    assert.ok(publicWrites.every(({ token }) => token === 'fixture-workflow-token'));
+    assert.match(publicBody, { PASS: /^\*\*PASS\*\* — no check failed, and no finding is open\.$/m, FAIL: /^\*\*FAIL\*\* — the audit failed\.$/m, INCONCLUSIVE: /^\*\*INCONCLUSIVE\*\* — the audit reached no usable verdict\.$/m }[scenario.expected]);
+    assert.ok(publicBody.startsWith(`<!-- security-audit-status outcome=${scenario.expected} -->`), publicBody);
     if (scenario.expected === 'PASS') {
-      // A clean pass files nothing, in either tracker.
-      assert.ok(!calls.some(({ args }) => args[0] === 'issue' && (args[1] === 'create' || args[1] === 'comment')));
+      // A clean pass files nothing in the private tracker.
+      assert.ok(!calls.some(({ embargo, args }) => embargo && args[0] === 'issue' && (args[1] === 'create' || args[1] === 'comment')));
       return;
     }
     const body = readFileSync(join(dir, 'audit-private.md'), 'utf8');
@@ -311,12 +384,7 @@ for (const scenario of cases) {
     const filed = reportCalls(calls);
     assert.deepEqual(filed.map(({ body: posted }) => posted), parts);
     assert.ok(filed.every(({ token }) => token === 'fixture-embargo-token'));
-    // The public issue carries none of what a domain wrote beyond its verdict.
-    const published = calls.filter(({ embargo, body: posted }) => !embargo && posted !== null);
-    assert.equal(published.length, 1);
-    assert.ok(published.every(({ token }) => token === 'fixture-workflow-token'));
-    const publicBody = published[0].body;
-    assert.match(publicBody, scenario.expected === 'FAIL' ? /^Audit failed/ : /^Audit reached no usable verdict/);
+    // The status issue carries none of what a domain wrote beyond its verdict.
     assert.ok(!publicBody.includes('Fixture report'));
     for (const text of written) {
       for (const line of text.split('\n').filter((l) => l.length > 6 && !/^VERDICT: (PASS|INCONCLUSIVE|FAIL)$/.test(l) && l !== SENTINEL)) {
@@ -337,13 +405,14 @@ test('an INFO off the grammar is an anomaly that leaves a PASS and files nothing
   writeFileSync(join(dir, 'audit-status.txt'), 'PASS');
   const loose = '- INFO: pnpm-lock.yaml:1340 — only non-registry resolution is the pinned tarball';
   fragments.forEach((f) => writeFileSync(join(dir, f), fragmentText(f, f === SUPPLY ? { lines: [loose, '- INFO: `docs/x.md:1` `drift` — in the grammar'] } : {})));
-  const { surfaced, outputs } = runReporting(dir, env);
+  const { published, outputs } = runReporting(dir, env);
   assert.equal(outputs.compose.status, 'PASS');
-  assert.equal(surfaced.status, 0, surfaced.stderr);
+  assert.equal(published.status, 0, published.stderr);
   const body = readFileSync(join(dir, 'audit-private.md'), 'utf8');
   assert.ok(body.includes(`- \`${SUPPLY}\`: an \`INFO\` line off the grammar, which changes no verdict: ${loose}\n`), body);
   assert.equal(readFileSync(join(dir, 'audit-ledger/index.tsv'), 'utf8'), '');
   assert.ok(!ghCalls(dir).some(({ embargo, args }) => embargo && args[1] !== 'list'), JSON.stringify(ghCalls(dir)));
+  assert.ok(!statusIssueBody(dir).includes('pinned tarball'));
 });
 
 // The private issue carries what did not pass; the PASS ledger stays in the
@@ -373,9 +442,9 @@ test('duplicate findings merge in the private report and the ledger', (t) => {
       : i === 1 ? finding('WARNING', 'deploy/local/install-windows.ps1:86', 'Install-Service', 'third')
         : i === 3 ? finding('WARNING', 'deploy/local/install-windows.ps1:140', 'Install-Service', 'far away') : [],
   })));
-  const { outputs, surfaced } = runReporting(dir, env);
+  const { outputs, published } = runReporting(dir, env);
   assert.equal(outputs.compose.status, 'PASS');
-  assert.equal(surfaced.status, 0, surfaced.stderr);
+  assert.equal(published.status, 0, published.stderr);
   const body = readFileSync(join(dir, 'audit-private.md'), 'utf8');
   assert.ok(body.includes('_4 reported, 2 after merging duplicates'), body);
   const created = ghCalls(dir).filter(({ embargo, args }) => embargo && args[1] === 'create');
@@ -395,10 +464,9 @@ test('the ledger opens a new finding and comments on one already open', (t) => {
     ? { stated: 'FAIL', results: { [failId]: `- FAIL: ${failId} — c: violated` }, lines: finding('BLOCKER', 'lib/a.ts:10', 'runIt', 'new one') }
     : {})));
   const known = failKeyOf(failId);
-  const { surfaced, outputs } = runReporting(dir, env, { embargoEnv: { GH_LEDGER_OPEN: `41 [audit-finding ${known}] FAIL: old\n42 [audit-finding 0123456789ab] WARNING: other\n` } });
-  assert.equal(surfaced.status, 1);
+  const { published, outputs } = runReporting(dir, env, { embargoEnv: { GH_LEDGER_OPEN: `41 [audit-finding ${known}] FAIL: old\n42 [audit-finding 0123456789ab] WARNING: other\n` } });
+  assert.equal(published.status, 1);
   assert.equal(outputs.embargo.result, 'filed');
-  assert.equal(outputs.embargo.open_findings, '2');
   const embargoCalls = ghCalls(dir).filter(({ embargo }) => embargo);
   const comment = embargoCalls.find(({ args }) => args[1] === 'comment' && args[2] === '41');
   assert.ok(comment, JSON.stringify(embargoCalls));
@@ -407,55 +475,52 @@ test('the ledger opens a new finding and comments on one already open', (t) => {
   assert.equal(ledgerCreates.length, 1);
   assert.ok(ledgerCreates[0].body.includes('- BLOCKER: `lib/a.ts:10` `runIt` — new one'));
   assert.ok(!embargoCalls.some(({ args }) => args[1] === 'close' || args[1] === 'edit'));
-  // The public body counts what is still open privately, and says nothing else of it.
-  const publicBody = ghCalls(dir).find(({ embargo, body }) => !embargo && body !== null).body;
-  assert.ok(publicBody.includes('2 findings from earlier runs are still open in the private ledger.'), publicBody);
-  assert.ok(!publicBody.includes('new one') && !publicBody.includes('runIt'));
+  // The status issue lists what is open privately, this run's new one
+  // included, by key, severity, and date, and says nothing else of it.
+  const publicBody = statusIssueBody(dir);
+  assert.ok(publicBody.includes('3 findings are open in the private ledger.'), publicBody);
+  assert.ok(publicBody.includes(`| \`${known}\` | FAIL | failed check | ${SEEDED_ROW}`), publicBody);
+  assert.ok(!publicBody.includes('new one') && !publicBody.includes('runIt') && !publicBody.includes('old'), publicBody);
 });
 
-// A later PASS closed the issue on 2026-07-14 and 2026-10-06 while the
-// findings behind it were unfixed. While the ledger holds one an earlier run
-// opened, a PASS says so on the public issue instead of closing it.
-test('a PASS does not close the public issue while a ledger issue is open', (t) => {
+// A later PASS closed the failure issue on 2026-07-14 and 2026-10-06 while the
+// findings behind it were unfixed. While the ledger holds one, a PASS still
+// exits zero, but the status issue lists it rather than reading as all clear.
+test('a PASS is not published as all clear while a ledger issue is open', (t) => {
   const { dir, env } = fixture(t);
   stubGh(dir);
   writeFileSync(join(dir, 'audit-status.txt'), 'PASS');
   fragments.forEach((f) => writeFileSync(join(dir, f), fragmentText(f)));
-  const { surfaced } = runReporting(dir, env, { embargoEnv: { GH_LEDGER_OPEN: '41 [audit-finding 0123456789ab] BLOCKER: old\n' } });
-  assert.equal(surfaced.status, 0, surfaced.stderr);
-  const pub = ghCalls(dir).filter(({ embargo }) => !embargo);
-  assert.ok(!pub.some(({ args }) => args[1] === 'close'));
-  const comment = pub.find(({ args }) => args[1] === 'comment' && args[2] === '23');
-  assert.match(comment.body, /^PASS this run at .*; 1 finding\(s\) from earlier runs are still under private review/);
-  assert.ok(!comment.body.includes('0123456789ab'));
+  const { published } = runReporting(dir, env, { embargoEnv: { GH_LEDGER_OPEN: '41 [audit-finding 0123456789ab] BLOCKER: old\n' } });
+  assert.equal(published.status, 0, published.stderr);
+  const body = statusIssueBody(dir);
+  assert.match(body, /^\*\*PASS\*\* — no check failed this run, but 1 finding is still open \(below\)\.$/m);
+  assert.ok(!body.includes('no finding is open'), body);
+  assert.ok(body.includes(`| \`0123456789ab\` | BLOCKER | finding | ${SEEDED_ROW}`), body);
 });
 
-// The domains were handed the open findings, so they could pass; the ledger
-// read that decides whether to close went missing afterwards.
-test('a PASS whose ledger cannot be read closes nothing and fails', (t) => {
-  const { dir, env } = fixture(t);
-  stubGh(dir);
-  writeFileSync(join(dir, 'audit-status.txt'), 'PASS');
-  fragments.forEach((f) => writeFileSync(join(dir, f), fragmentText(f)));
-  const { embargoed, surfaced, outputs } = runReporting(dir, env, { listToken: 'fixture-embargo-token', embargoToken: '' });
-  assert.equal(outputs.compose.status, 'PASS');
-  assert.equal(embargoed.status, 1);
-  assert.equal(outputs.embargo.result, 'missing-token');
-  assert.equal(surfaced.status, 1);
-  assert.match(surfaced.stdout, /::error::/);
-  assert.ok(!ghCalls(dir).some(({ args }) => args[1] === 'close'));
-});
-
-test('a PASS with an empty ledger closes the public issue', (t) => {
-  const { dir, env } = fixture(t);
-  stubGh(dir);
-  writeFileSync(join(dir, 'audit-status.txt'), 'PASS');
-  fragments.forEach((f) => writeFileSync(join(dir, f), fragmentText(f)));
-  const { surfaced } = runReporting(dir, env);
-  assert.equal(surfaced.status, 0, surfaced.stderr);
-  const close = ghCalls(dir).find(({ args }) => args[1] === 'close');
-  assert.deepEqual(close.args.slice(0, 3), ['issue', 'close', '23']);
-});
+// The domains were handed the open findings, so they could pass; the filing or
+// the ledger read the status issue lists went missing afterwards.
+for (const [name, options, result] of [
+  ['no findings filed', { embargoToken: '', listToken: 'fixture-embargo-token', readToken: 'fixture-embargo-token' }, 'missing-token'],
+  ['an unread ledger', { readToken: '' }, 'filed'],
+]) {
+  test(`a PASS with ${name} fails and is not all clear`, (t) => {
+    const { dir, env } = fixture(t);
+    stubGh(dir);
+    writeFileSync(join(dir, 'audit-status.txt'), 'PASS');
+    fragments.forEach((f) => writeFileSync(join(dir, f), fragmentText(f)));
+    const { published, outputs } = runReporting(dir, env, options);
+    assert.equal(outputs.compose.status, 'PASS');
+    assert.equal(outputs.embargo.result, result);
+    assert.equal(published.status, 1);
+    assert.match(published.stdout, /::error::/);
+    const body = statusIssueBody(dir);
+    assert.ok(!body.includes('no finding is open'), body);
+    if (options.readToken === '') assert.match(body, /^\*\*PASS\*\*, but the private findings ledger could not be read/m);
+    else assert.match(body, /^\*\*PASS\*\*, but the private filing failed[^\n]*\n[\s\S]*\*\*The private filing failed: `EMBARGO_TOKEN` is not set\.\*\*/m);
+  });
+}
 
 // A WARNING does not fail the run, and is not lost with it either.
 test('a passing run files its WARNINGs in the ledger and nothing else', (t) => {
@@ -463,14 +528,15 @@ test('a passing run files its WARNINGs in the ledger and nothing else', (t) => {
   stubGh(dir);
   writeFileSync(join(dir, 'audit-status.txt'), 'PASS');
   fragments.forEach((f, i) => writeFileSync(join(dir, f), fragmentText(f, i === 2 ? { lines: finding('WARNING', 'lib/b.ts:5', 'paste', 'a paste submits a command') } : {})));
-  const { surfaced, outputs } = runReporting(dir, env);
+  const { published, outputs } = runReporting(dir, env);
   assert.equal(outputs.compose.status, 'PASS');
-  assert.equal(surfaced.status, 0, surfaced.stderr);
+  assert.equal(published.status, 0, published.stderr);
   const embargoCalls = ghCalls(dir).filter(({ embargo, args }) => embargo && args[1] !== 'list');
   assert.equal(embargoCalls.length, 1);
   assert.ok(embargoCalls[0].args[embargoCalls[0].args.indexOf('--title') + 1].startsWith('[audit-finding '));
-  // Opened by this run, so it does not hold the public issue open.
-  assert.ok(ghCalls(dir).some(({ args }) => args[1] === 'close'));
+  // Listed on the status issue like any open finding, and nothing is disclosed yet.
+  assert.ok(statusIssueBody(dir).includes('1 finding is open in the private ledger.'));
+  assert.deepEqual(publicIssues(dir, 'security-audit-finding'), []);
 });
 
 // --- Re-verifying the open ledger findings ---
@@ -559,17 +625,17 @@ test('ledger keys ignore the clause letter and a finding\'s wording', (t) => {
 });
 
 // Hand-filed ledger issues carry keys no run mints; they still count as open,
-// so a PASS that re-verified them comments rather than closing the public issue.
+// so a PASS that re-verified them still lists them on the status issue.
 test('a hand-filed ledger key still counts as an open finding', (t) => {
-  const { dir, outputs, surfaced } = runOverOpen(t, MANUAL_OPEN,
+  const { dir, outputs, published } = runOverOpen(t, MANUAL_OPEN,
     { results: { [CI_POLICIES[0]]: `- PASS: ${CI_POLICIES[0]} — c: holds; [audit-finding manual-example-gate] no longer holds: \`lib/src/x.ts:3\`` } });
   assert.equal(outputs.compose.status, 'PASS');
-  assert.equal(outputs.embargo.open_findings, '1');
-  assert.equal(surfaced.status, 0, surfaced.stderr);
+  assert.equal(published.status, 0, published.stderr);
   assert.equal(readFileSync(join(dir, OPEN_FINDINGS), 'utf8'), MANUAL_OPEN.slice(3));
-  const pub = ghCalls(dir).filter(({ embargo }) => !embargo);
-  assert.ok(!pub.some(({ args }) => args[1] === 'close'));
-  assert.ok(pub.some(({ args, body }) => args[1] === 'comment' && /^PASS this run at .*; 1 finding\(s\) from earlier runs/.test(body)));
+  // Listed, its name withheld until it is disclosed.
+  const body = statusIssueBody(dir);
+  assert.ok(body.includes(`| hand-filed | FAIL | failed check | ${SEEDED_ROW}`), body);
+  assert.ok(!body.includes('manual-example-gate'), body);
 });
 
 // The builder failing must not turn into a verdict.
@@ -579,10 +645,16 @@ test('a report builder that throws reports INCONCLUSIVE', (t) => {
   writeFileSync(join(dir, 'audit-status.txt'), 'PASS');
   fragments.forEach((f) => writeFileSync(join(dir, f), fragmentText(f)));
   writeFileSync(join(dir, 'scripts/security-audit-report.mjs'), 'throw new Error("boom");\n');
-  const { outputs, surfaced } = runReporting(dir, env);
+  stubGh(dir, { public: [{ number: 5, title: 'Security audit status', body: 'earlier status', labels: ['security-audit-status'], state: 'OPEN', comments: [] }] });
+  const { outputs, published } = runReporting(dir, env);
   assert.equal(outputs.compose.status, 'MISSING');
-  assert.equal(surfaced.status, 1);
-  assert.ok(!ghCalls(dir).some(({ args }) => args[1] === 'close'));
+  assert.equal(published.status, 1);
+  // The status builder shares the module, so it throws too: a fixed sentence
+  // on the status issue, never a body built some other way.
+  assert.match(published.stdout, /::error::The status builder failed/);
+  const [issue] = ghState(dir).public;
+  assert.match(issue.comments.at(-1).body, /^The audit run at \S+ could not publish its status, so the body above is stale\. \[Run\]\(https:\/\/github\.com\/fixture\/repo\/actions\/runs\/123\)$/);
+  assert.equal(issue.body, 'earlier status');
 });
 
 // The manifest is what makes a skipped section visible, so it must be derived
@@ -699,10 +771,10 @@ for (const [name, state, expected, row] of [
     for (const f of fragments) writeFileSync(join(dir, f), fragmentText(f));
     if (state === null) rmSync(join(dir, STATE_FRAGMENT));
     else writeFileSync(join(dir, STATE_FRAGMENT), state);
-    const { surfaced, outputs } = runReporting(dir, env);
-    assert.equal(surfaced.status, 1);
+    const { published, outputs } = runReporting(dir, env);
+    assert.equal(published.status, 1);
     assert.equal(outputs.compose.status, expected === 'FAIL' ? 'FAIL' : 'MISSING');
-    const publicBody = ghCalls(dir).find(({ embargo, body }) => !embargo && body !== null).body;
+    const publicBody = statusIssueBody(dir);
     assert.ok(publicBody.includes(row), publicBody);
     if (state) {
       assert.ok(publicBody.includes('- `docs/specs/security-ci.md` -> "VS Code Extension Releases"'), publicBody);
@@ -717,7 +789,7 @@ for (const [name, state, expected, row] of [
 // fragment's verdict.
 const SKIP_FRAGMENTS = '${{ steps.plan.outputs.fragments || env.AUDIT_FRAGMENTS }}';
 test('a skipped run narrows the reporting steps to the deterministic fragment', () => {
-  for (const name of ['Compose the audit report', 'Surface result, file or close issue']) {
+  for (const name of ['Compose the audit report', 'Publish the audit status']) {
     assert.ok(stepText(name).includes(`          AUDIT_FRAGMENTS: ${SKIP_FRAGMENTS}\n`), name);
   }
   assert.match(stepText('Audit against the security specs'), /^        if: steps\.plan\.outputs\.skip != 'true'$/m);
@@ -730,13 +802,14 @@ for (const [name, state, expected] of [['passes on a passing check', null, 'PASS
     writeFileSync(join(dir, 'audit-status.txt'), 'PASS\n');
     writeFileSync(join(dir, 'audit-report.md'), '# Security audit\n\nThe domains were skipped.\n');
     if (state) writeFileSync(join(dir, STATE_FRAGMENT), state);
-    const { surfaced, outputs } = runReporting(dir, { ...env, AUDIT_FRAGMENTS: STATE_FRAGMENT });
+    const { published, outputs } = runReporting(dir, { ...env, AUDIT_FRAGMENTS: STATE_FRAGMENT },
+      { plan: { skip: 'true', full_run_at: '2026-10-05T12:00:00.000Z' } });
     assert.equal(outputs.compose.status, expected);
-    assert.equal(surfaced.status, expected === 'PASS' ? 0 : 1, surfaced.stderr);
-    if (expected === 'FAIL') {
-      const publicBody = ghCalls(dir).find(({ embargo, body }) => !embargo && body !== null).body;
-      assert.ok(!publicBody.includes('audit-supply-chain.md'), publicBody);
-    }
+    assert.equal(published.status, expected === 'PASS' ? 0 : 1, published.stderr);
+    const publicBody = statusIssueBody(dir);
+    assert.ok(!publicBody.includes('audit-supply-chain.md'), publicBody);
+    // The status issue says the domains were skipped, and when they last ran.
+    assert.ok(publicBody.includes('The audit domains were skipped: the commit and GitHub settings are unchanged since a passing run. They last ran in full at 2026-10-05T12:00:00.000Z;'), publicBody);
   });
 }
 
@@ -817,7 +890,7 @@ test('the plan step skips on recorded state, writes the stand-in report, and rec
 // their text may reach the public body, and all of it must reach the private
 // issue.
 const EXPLOIT = '$(printf calc-injected-7f3a)';
-test('the public issue carries counts and verified section names, never finding text', (t) => {
+test('the status issue carries counts and verified section names, never finding text', (t) => {
   const { dir, env } = fixture(t);
   stubGh(dir);
   writeFileSync(join(dir, 'audit-status.txt'), 'FAIL');
@@ -833,11 +906,11 @@ test('the public issue carries counts and verified section names, never finding 
       `- INFO: off the grammar, quoting ${EXPLOIT}`,
     ],
   })));
-  const { surfaced } = runReporting(dir, env);
-  assert.equal(surfaced.status, 1, surfaced.stderr);
+  const { published } = runReporting(dir, env);
+  assert.equal(published.status, 1, published.stderr);
   const calls = ghCalls(dir);
-  const publicBody = calls.find(({ embargo, body }) => !embargo && body !== null).body;
-  assert.ok(!publicBody.includes('calc-injected-7f3a'), publicBody);
+  const publicBody = statusIssueBody(dir);
+  assert.ok(!calls.some(({ embargo, body }) => !embargo && body?.includes('calc-injected-7f3a')));
   assert.ok(publicBody.includes(`| \`${fragments[1]}\` | FAIL | 2 | 0 | 2 | 1 | 0 |`), publicBody);
   // Every domain has its own row, the two that split application security included.
   for (const { fragment } of domains(repo)) assert.ok(publicBody.includes(`| \`${fragment}\` | `), fragment);
@@ -845,7 +918,7 @@ test('the public issue carries counts and verified section names, never finding 
   assert.ok(publicBody.includes('- `docs/specs/security-audit.md` -> "Environment and `AUDIT_PAT`"'), publicBody);
   assert.ok(publicBody.includes('1 failed check named no section heading'), publicBody);
   assert.ok(publicBody.includes(COMMIT), publicBody);
-  assert.match(publicBody, /triaged privately until fixed/);
+  assert.match(publicBody, /Finding detail stays private until the finding is fixed, or 7 days after it is filed/);
   const privately = calls.filter(({ embargo }) => embargo).map(({ body }) => body).join('');
   assert.ok(privately.includes(`- BLOCKER: \`lib/a.ts:3\` \`run\` — the reporter runs ${EXPLOIT}`), privately);
   assert.ok(privately.includes(`- **WARNING** — ${EXPLOIT} again`), privately);
@@ -882,35 +955,34 @@ for (const [name, options, result, publicNote] of [
     writeFileSync(join(dir, 'audit-status.txt'), 'FAIL');
     writeFileSync(join(dir, 'audit-report.md'), `# Security audit\n${EXPLOIT}\n`);
     fragments.forEach((f, i) => writeFileSync(join(dir, f), fragmentText(f, i ? {} : { stated: 'FAIL', lines: finding('BLOCKER', 'lib/a.ts:3', 'run', EXPLOIT) })));
-    const { embargoed, surfaced, outputs } = runReporting(dir, env, options);
+    const { embargoed, published, outputs } = runReporting(dir, env, options);
     assert.equal(embargoed.status, 1);
     assert.match(embargoed.stdout, /::error::/);
     assert.equal(outputs.embargo.result, result);
     assert.ok(!`${embargoed.stdout}${embargoed.stderr}`.includes('calc-injected-7f3a'));
     if (result === 'missing-token') assert.equal(ghCalls(dir).filter(({ embargo }) => embargo).length, 0);
-    // The public issue is still filed, says the private filing failed, and
+    // The status issue is still written, says the private filing failed, and
     // carries no more than it would have anyway.
-    assert.equal(surfaced.status, 1);
-    const published = ghCalls(dir).filter(({ embargo, body }) => !embargo && body !== null);
-    assert.equal(published.length, 1);
-    assert.ok(published[0].body.includes(publicNote), published[0].body);
-    assert.ok(!published[0].body.includes('calc-injected-7f3a'), published[0].body);
+    assert.equal(published.status, 1);
+    const body = statusIssueBody(dir);
+    assert.ok(body.includes(publicNote), body);
+    assert.ok(!ghCalls(dir).some(({ embargo, body: posted }) => !embargo && posted?.includes('calc-injected-7f3a')));
   });
 }
 
 // The agent must never hold `EMBARGO_TOKEN`: it is named only in the `env:`
-// of the two steps that list and file the ledger, neither is the agent's, and
-// no job- or workflow-level `env:`, `$GITHUB_ENV` write, or whole-secrets
-// expression reaches it elsewhere.
-const HOLDERS = ['List open findings', 'File embargoed findings'];
-test('EMBARGO_TOKEN is in the env of the list and embargo steps alone', () => {
+// of the three steps that list, file, and read the ledger, none is the
+// agent's, and no job- or workflow-level `env:`, `$GITHUB_ENV` write, or
+// whole-secrets expression reaches it elsewhere.
+const HOLDERS = ['List open findings', 'File embargoed findings', 'Read the findings ledger'];
+test('EMBARGO_TOKEN is in the env of the ledger steps alone', () => {
   const uses = workflow.split('\n').filter((line) => /secrets\s*\.\s*EMBARGO_TOKEN|secrets\s*\[/.test(line));
   assert.deepEqual(uses, HOLDERS.map(() => '          GH_TOKEN: ${{ secrets.EMBARGO_TOKEN }}'));
   for (const holder of HOLDERS) {
     const env = stepText(holder).match(/^        env:\n((?:          .*\n)+)/m)[1];
     assert.ok(env.includes(uses[0]), `the token is not in ${holder}'s env`);
   }
-  assert.ok(!stepText('Audit against the security specs').includes('EMBARGO'));
+  for (const name of ['Audit against the security specs', 'Publish the audit status']) assert.ok(!stepText(name).includes('EMBARGO_TOKEN'), name);
   assert.doesNotMatch(workflow, /toJSON\(\s*secrets\s*\)|secrets: inherit/);
   assert.doesNotMatch(workflow, /GITHUB_ENV/);
 });
@@ -926,6 +998,264 @@ for (const holder of HOLDERS) {
     assert.doesNotMatch(code, /(?:^|[\s;|&(`]|\$\()(?:date|mktemp|mkdir|rm|mv|cp|tee|sed|awk|grep|head|tail|wc|cat|cut|tr|jq|curl|wget|python3?|env|xargs|find|sort)\b(?!-)/m);
   });
 }
+
+// --- Disclosure: what the ledger read keeps, and what becomes public when ---
+
+const iso = (ms) => new Date(ms).toISOString().replace(/\.\d+Z$/, 'Z');
+const maintainer = (body, authorAssociation = 'MEMBER') => ({ author: { login: 'a-maintainer' }, authorAssociation, body });
+/** A ledger issue as the embargo tracker holds it: its title and body carry text that must never cross. */
+function ledgerIssue(number, { key, severity = 'WARNING', meta, state = 'OPEN', stateReason = state === 'CLOSED' ? 'COMPLETED' : '', ageDays = 1, comments = [] }) {
+  return { number, title: `[audit-finding ${key}] ${severity}: lib/a.ts:3 run — title detail ${EXPLOIT}`,
+    body: `${meta ? `${ledgerMeta({ key, severity, ...meta })}\n\n` : ''}Reported by \`audit-application.md\`:\n\n- ${severity}: body detail ${EXPLOIT}\n\n## Public summary\nfrom the body ${EXPLOIT}\n`,
+    labels: [], state, stateReason, createdAt: iso(Date.now() - ageDays * DAY), closedAt: state === 'CLOSED' ? iso(Date.now()) : null,
+    comments: [{ author: { login: 'a-maintainer' }, authorAssociation: 'MEMBER', body: 'Seen again as WARNING in [run 9](https://github.com/x/y/actions/runs/9) at `abcdef0`.' }, ...comments] };
+}
+
+/** Run the ledger read alone over a seeded tracker; returns the result and the parsed snapshot. */
+function readLedger(t, embargo) {
+  const { dir, env } = fixture(t);
+  stubGh(dir, { embargo });
+  const before = new Set(readdirSync(dir));
+  const result = spawnSync('bash', ['-c', runBlock('Read the findings ledger')], { cwd: dir, encoding: 'utf8',
+    env: { ...env, GH_TOKEN: 'fixture-embargo-token', EMBARGO_REPO, GITHUB_OUTPUT: join(dir, 'github-output') } });
+  const added = readdirSync(dir).filter((f) => !before.has(f) && f !== 'gh-calls.jsonl' && f !== 'gh-state.json');
+  const path = join(dir, 'audit-ledger-snapshot.jsonl');
+  return { dir, result, added, text: existsSync(path) ? readFileSync(path, 'utf8') : null };
+}
+
+// The ledger read is the embargo's filter: of each ledger issue it keeps the
+// state, dates, key and severity, the body's opening metadata line, and from
+// maintainers' comments only a `Fixed in` PR and a `## Public summary`. The
+// title's and body's text, the workflow's `Seen again` lines, a summary in the
+// body, and a summary from anyone but a maintainer stay in the tracker.
+test('the ledger read keeps metadata, citations, and maintainer summaries, never ledger text', (t) => {
+  const { result, added, text } = readLedger(t, [
+    ledgerIssue(7, { key: 'aaaaaaaaaaaa', meta: { file: 'lib/a.ts' }, state: 'CLOSED', comments: [
+      maintainer('Fixed in #12 (merged).'),
+      maintainer('Fixed by https://github.com/fixture/repo/pull/13'),
+      maintainer('## Public summary\nA paste could submit a command.'),
+      maintainer(`## Public summary\nfrom a stranger ${EXPLOIT}`, 'NONE'),
+      maintainer('Fixed in #99', 'CONTRIBUTOR'),
+      maintainer(`Reopened: Fixed in #55 was incomplete ${EXPLOIT}`)] }),
+    ledgerIssue(8, { key: 'manual-hand-filed', severity: 'FAIL' }),
+    { ...ledgerIssue(9, { key: 'bbbbbbbbbbbb' }), title: '[security-audit] FAIL on 2026-10-08 at abcdef0' },
+  ]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(added, ['audit-ledger-snapshot.jsonl']);
+  assert.equal(`${result.stdout}${result.stderr}`, 'Read 2 ledger issue(s).\n');
+  assert.ok(!text.includes('calc-injected-7f3a') && !text.includes('detail') && !text.includes('Seen again'), text);
+  const [fixed, manual] = text.trim().split('\n').map(JSON.parse);
+  assert.deepEqual(fixed.title, { key: 'aaaaaaaaaaaa', severity: 'WARNING' });
+  assert.deepEqual(fixed.meta, { key: 'aaaaaaaaaaaa', severity: 'WARNING', spec: null, heading: null, file: 'lib/a.ts' });
+  assert.deepEqual(fixed.fixed, [{ repo: null, pr: '12' }, { repo: 'fixture/repo', pr: '13' }]);
+  assert.equal(fixed.summary, 'A paste could submit a command.');
+  assert.deepEqual([fixed.state, fixed.stateReason], ['CLOSED', 'COMPLETED']);
+  // No metadata line, no citation, no summary: key, severity, and dates alone.
+  assert.deepEqual([manual.title, manual.meta, manual.fixed, manual.summary], [{ key: 'manual-hand-filed', severity: 'FAIL' }, null, [], null]);
+  assert.deepEqual(parseLedger(text).map((e) => e.key), ['aaaaaaaaaaaa', 'manual-hand-filed']);
+});
+
+// The metadata line must open the body: one an agent wrote further down, in
+// the finding text compose copies in, is not read.
+test('only the metadata line that opens a ledger body is read', (t) => {
+  const forged = ledgerIssue(7, { key: 'aaaaaaaaaaaa' });
+  forged.body = `Reported by x:\n\n${ledgerMeta({ key: 'aaaaaaaaaaaa', severity: 'WARNING', file: 'scripts/security-audit-report.mjs' })}\n`;
+  const { text } = readLedger(t, [forged]);
+  assert.equal(JSON.parse(text).meta, null);
+});
+
+test('the ledger read without its token reads nothing and writes no snapshot', (t) => {
+  const { dir, env } = fixture(t);
+  stubGh(dir, { embargo: [ledgerIssue(7, { key: 'aaaaaaaaaaaa' })] });
+  const result = spawnSync('bash', ['-c', runBlock('Read the findings ledger')], { cwd: dir, encoding: 'utf8',
+    env: { ...env, GH_TOKEN: '', EMBARGO_REPO, GITHUB_OUTPUT: join(dir, 'github-output') } });
+  assert.equal(result.status, 1);
+  assert.ok(!existsSync(join(dir, 'audit-ledger-snapshot.jsonl')));
+  assert.equal(ghCalls(dir).length, 0);
+});
+
+// Compose writes the metadata line first, and the read's filter reads it
+// back whole, a heading carrying `-->` included.
+test('a filed ledger issue opens with metadata the ledger read reads back', (t) => {
+  const { dir, env } = fixture(t);
+  stubGh(dir);
+  writeFileSync(join(dir, 'audit-status.txt'), 'FAIL');
+  const id = firstId(CI);
+  const [, spec, heading] = id.match(/^`([^`]+)` -> "([^"]+)"/);
+  fragments.forEach((f, i) => writeFileSync(join(dir, f), fragmentText(f, i === 1
+    ? { stated: 'FAIL', results: { [id]: `- FAIL: ${id} — c: violated` }, lines: finding('WARNING', './lib/src/b.ts:5', 'paste', 'a paste submits') }
+    : {})));
+  runReporting(dir, env);
+  const filed = ghState(dir).embargo.filter((i) => i.title.startsWith('[audit-finding '));
+  assert.equal(filed.length, 2);
+  for (const issue of filed) assert.match(issue.body, /^<!-- audit-ledger \{[^\n]*\} -->\n\n/);
+  const metas = readFileSync(join(dir, 'audit-ledger-snapshot.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l).meta)
+    .sort((a, b) => a.severity.localeCompare(b.severity));
+  assert.deepEqual(metas, [
+    { key: failKeyOf(id), severity: 'FAIL', spec, heading, file: null },
+    { key: ledgerKey('finding', 'lib/src/b.ts', 'paste'), severity: 'WARNING', spec: null, heading: null, file: 'lib/src/b.ts' }]);
+  assert.equal(ledgerMeta({ heading: 'a --> b' }), '<!-- audit-ledger {"heading":"a -\\u002d> b"} -->');
+});
+
+// The deadline is exactly seven days from the ledger issue's opening.
+test('an open finding is due exactly seven days after it was filed', () => {
+  const entry = { state: 'OPEN', createdAt: '2026-10-01T04:21:00Z' };
+  assert.equal(disclosureReason(entry, new Date('2026-10-08T04:20:59.999Z')), null);
+  assert.deepEqual(disclosureReason(entry, new Date('2026-10-08T04:21:00Z')), { kind: 'deadline' });
+  assert.deepEqual(disclosureReason({ ...entry, state: 'CLOSED', stateReason: 'NOT_PLANNED' }, new Date('2026-10-01T05:00:00Z')), { kind: 'dismissed' });
+  assert.deepEqual(disclosureReason({ ...entry, state: 'CLOSED', stateReason: 'COMPLETED' }, new Date('2026-10-01T05:00:00Z'), 12), { kind: 'fixed', pr: 12 });
+  assert.deepEqual(disclosureReason({ ...entry, state: 'CLOSED', stateReason: 'COMPLETED' }, new Date('2026-10-01T05:00:00Z'), null), { kind: 'closed' });
+});
+
+/** A passing run over a seeded tracker; pass the `{ dir, env }` it returns to run again over what it left. */
+function passOver(t, seed, again = null) {
+  const { dir, env } = again ?? fixture(t);
+  if (!again) stubGh(dir, seed);
+  writeFileSync(join(dir, 'audit-status.txt'), 'PASS');
+  fragments.forEach((f) => writeFileSync(join(dir, f), fragmentText(f)));
+  return { dir, env, ...runReporting(dir, env) };
+}
+const disclosures = (dir) => publicIssues(dir, 'security-audit-finding');
+const statusComments = (dir) => publicIssues(dir, 'security-audit-status')[0].comments.map((c) => c.body);
+const DISCLOSURE_SEED = () => ({
+  pulls: { 77: { merged: true }, 78: { merged: false } },
+  embargo: [
+    ledgerIssue(1, { key: 'aaaaaaaaaaaa', meta: { file: 'scripts/security-audit-report.mjs' }, state: 'CLOSED',
+      comments: [maintainer('Fixed in #77'), maintainer('## Public summary\nA paste could submit a command.')] }),
+    ledgerIssue(2, { key: 'bbbbbbbbbbbb', meta: { file: 'lib/gone.ts' }, state: 'CLOSED', comments: [maintainer('Fixed in #78')] }),
+    ledgerIssue(3, { key: 'cccccccccccc', state: 'CLOSED', stateReason: 'NOT_PLANNED' }),
+    ledgerIssue(4, { key: 'dddddddddddd', severity: 'FAIL', meta: { spec: 'docs/specs/security-audit.md', heading: 'Embargo' }, ageDays: 7.01 }),
+    ledgerIssue(5, { key: 'eeeeeeeeeeee', severity: 'BLOCKER', ageDays: 6.99 }),
+    ledgerIssue(6, { key: 'ffffffffffff', state: 'CLOSED', comments: [maintainer('Fixed in someone/else#77')] }),
+    ledgerIssue(7, { key: '777777777777', severity: 'FAIL', meta: { spec: 'docs/specs/security-audit.md', heading: `Run ${EXPLOIT}` }, state: 'CLOSED' }),
+    ledgerIssue(8, { key: '888888888888', meta: { file: 'scripts/../scripts/security-audit-report.mjs' }, state: 'CLOSED' }),
+  ],
+});
+
+// A closed ledger issue is public at once and a stale open one after seven
+// days; each gets one issue built from validated fields and a maintainer's
+// summary, never from the ledger's own text.
+test('disclosure publishes fixed, dismissed, and overdue findings from validated fields alone', (t) => {
+  const { dir, published } = passOver(t, DISCLOSURE_SEED());
+  assert.equal(published.status, 0, published.stderr);
+  const byKey = Object.fromEntries(disclosures(dir).map((i) => [i.title.match(/^\[audit-disclosure ([^/\]]+)\/\d+\]/)[1], i]));
+  assert.deepEqual(Object.keys(byKey).sort(), ['777777777777', '888888888888', 'aaaaaaaaaaaa', 'bbbbbbbbbbbb', 'cccccccccccc', 'dddddddddddd', 'ffffffffffff']);
+  // A heading the checked-out spec lacks, or a path that climbs, is withheld.
+  assert.ok(byKey['777777777777'].body.includes('| Where | withheld: the cited spec section is not in the checked-out specs |'), byKey['777777777777'].body);
+  assert.ok(byKey['888888888888'].body.includes('| Where | path withheld'), byKey['888888888888'].body);
+  const all = { ...byKey };
+  delete byKey['777777777777'];
+  delete byKey['888888888888'];
+  assert.deepEqual(Object.values(byKey).map((i) => i.title).sort(), [
+    '[audit-disclosure aaaaaaaaaaaa/1] WARNING finding', '[audit-disclosure bbbbbbbbbbbb/2] WARNING finding',
+    '[audit-disclosure cccccccccccc/3] WARNING finding', '[audit-disclosure dddddddddddd/4] FAIL failed check', '[audit-disclosure ffffffffffff/6] WARNING finding']);
+  const { aaaaaaaaaaaa: fixed, bbbbbbbbbbbb: uncited, cccccccccccc: dismissed, dddddddddddd: overdue } = byKey;
+  assert.deepEqual([fixed.state, fixed.stateReason, uncited.state, dismissed.stateReason, overdue.state], ['CLOSED', 'COMPLETED', 'CLOSED', 'NOT_PLANNED', 'OPEN']);
+  assert.ok(fixed.body.includes('| Why disclosed | fixed in [#77](https://github.com/fixture/repo/pull/77) |'), fixed.body);
+  assert.ok(fixed.body.includes('| Where | `scripts/security-audit-report.mjs` |'), fixed.body);
+  assert.ok(fixed.body.includes('### Public summary\n\n_Written by a maintainer._\n\nA paste could submit a command.\n'), fixed.body);
+  // An unmerged PR is no fix; a file the tree lacks is withheld.
+  assert.ok(uncited.body.includes('| Why disclosed | closed, no fix PR cited |'), uncited.body);
+  assert.ok(uncited.body.includes('| Where | path withheld'), uncited.body);
+  // Another repository's PR is no fix either, and no metadata names no place.
+  assert.ok(byKey.ffffffffffff.body.includes('| Why disclosed | closed, no fix PR cited |'), byKey.ffffffffffff.body);
+  assert.ok(dismissed.body.includes('| Why disclosed | dismissed: closed as not planned |'), dismissed.body);
+  assert.ok(dismissed.body.includes('| Where | not recorded'), dismissed.body);
+  assert.ok(overdue.body.includes('| Why disclosed | 7 days after it was filed, not yet fixed |'), overdue.body);
+  assert.ok(overdue.body.includes('| Where | `docs/specs/security-audit.md` -> "Embargo" |'), overdue.body);
+  for (const issue of ghState(dir).public) {
+    for (const text of [issue.title, issue.body, ...issue.comments.map((c) => c.body)]) {
+      assert.ok(!text.includes('calc-injected-7f3a') && !text.includes('title detail') && !text.includes('body detail') && !text.includes('from the body'), text);
+    }
+  }
+  // The status issue lists the one still embargoed, links the disclosed, and
+  // says once per disclosure that it happened.
+  const body = statusIssueBody(dir);
+  assert.ok(body.includes(`| \`eeeeeeeeeeee\` | BLOCKER | finding | ${dayFromNow(-6.99)} | ${dayFromNow(0.01)} |`), body);
+  assert.ok(body.includes(`| \`dddddddddddd\` | FAIL | failed check | ${dayFromNow(-7.01)} | disclosed: #${overdue.number} |`), body);
+  assert.ok(body.includes(`- #${overdue.number} — \`dddddddddddd\`, FAIL failed check, disclosed ${dayFromNow(0)}, not yet fixed`), body);
+  assert.deepEqual(statusComments(dir).sort(), Object.entries(all).map(([key, i]) => `Disclosed: #${i.number}, \`${key}\` (${i.title.split('] ')[1]}).`).sort());
+});
+
+// Re-running publishes nothing twice, and a deadline disclosure is closed,
+// with its fix, by the first run that sees its ledger issue closed.
+test('disclosure is idempotent and closes a deadline disclosure once fixed', (t) => {
+  const { dir, env } = passOver(t, DISCLOSURE_SEED());
+  const first = { issues: disclosures(dir).length, comments: statusComments(dir).length };
+  const calls = ghCalls(dir).length;
+  passOver(t, null, { dir, env });
+  assert.deepEqual({ issues: disclosures(dir).length, comments: statusComments(dir).length }, first);
+  // The second run's only public write is the status issue's body.
+  const writes = ghCalls(dir).slice(calls).filter(({ embargo, args }) => !embargo && args[0] === 'issue' && args[1] !== 'list');
+  assert.deepEqual(writes.map(({ args }) => args.slice(1, 3)), [['edit', String(publicIssues(dir, 'security-audit-status')[0].number)]]);
+  const state = ghState(dir);
+  Object.assign(state.embargo.find((i) => i.number === 4), { state: 'CLOSED', stateReason: 'COMPLETED', closedAt: iso(Date.now()) })
+    .comments.push(maintainer('Fixed by fixture/repo#77'));
+  writeFileSync(join(dir, 'gh-state.json'), JSON.stringify(state));
+  const third = passOver(t, null, { dir, env });
+  assert.equal(third.published.status, 0, `${third.published.stdout}${third.published.stderr}`);
+  const overdue = disclosures(dir).find((i) => i.title.startsWith('[audit-disclosure dddddddddddd/4]'));
+  assert.equal(overdue.state, 'CLOSED');
+  assert.ok(overdue.body.includes('| Why disclosed | fixed in [#77]'), overdue.body);
+  assert.deepEqual({ issues: disclosures(dir).length, comments: statusComments(dir).length }, first);
+});
+
+// Subscribers hear of a change, not of every night.
+test('the status issue is commented on only when the outcome changes', (t) => {
+  const { dir, env } = fixture(t);
+  stubGh(dir, { public: [{ number: 5, title: 'Security audit status', body: '<!-- security-audit-status outcome=PASS -->\nolder', labels: ['security-audit-status'], state: 'OPEN', comments: [] }] });
+  const run = (status) => {
+    writeFileSync(join(dir, 'audit-status.txt'), status);
+    fragments.forEach((f, i) => writeFileSync(join(dir, f), fragmentText(f, i || status === 'PASS' ? {} : { stated: 'FAIL', results: { [firstId(f)]: `- FAIL: ${firstId(f)} — c: violated` } })));
+    runReporting(dir, env);
+    return ghState(dir).public[0];
+  };
+  assert.equal(run('PASS').comments.length, 0);
+  const failed = run('FAIL');
+  assert.match(failed.comments.at(-1).body, /^The audit's outcome changed from PASS to FAIL at /);
+  assert.equal(run('FAIL').comments.length, 1);
+  // The FAIL filed a ledger finding this PASS never re-verifies, so it is inconclusive.
+  assert.match(run('PASS').comments.at(-1).body, /^The audit's outcome changed from FAIL to INCONCLUSIVE at /);
+  assert.equal(ghState(dir).public.length, 1);
+});
+
+// A fixed finding that recurs is filed again under its key, as a second ledger
+// issue: it is disclosed on its own clock, under its own issue, and the status
+// issue never points it at the earlier disclosure.
+test('a finding that recurs after its fix is disclosed again, as its own issue', () => {
+  const now = new Date('2026-10-20T00:00:00Z');
+  const entry = (number, state, createdAt) => ({ number, state, stateReason: state === 'CLOSED' ? 'COMPLETED' : '', createdAt, closedAt: null,
+    key: 'aaaaaaaaaaaa', severity: 'WARNING', meta: null, fixed: [], summary: null });
+  const fixed = entry(3, 'CLOSED', '2026-10-01T00:00:00Z');
+  const recurred = entry(9, 'OPEN', '2026-10-12T00:00:00Z');
+  const both = planDisclosures({ ledger: [recurred, fixed], archive: new Map(), now, repo: 'fixture/repo', verify: () => false });
+  assert.deepEqual(both.map((a) => a.title).sort(), ['[audit-disclosure aaaaaaaaaaaa/3] WARNING finding', '[audit-disclosure aaaaaaaaaaaa/9] WARNING finding']);
+  const archive = new Map([['aaaaaaaaaaaa/3', { number: 40, key: 'aaaaaaaaaaaa', severity: 'WARNING', state: 'CLOSED', createdAt: '2026-10-02T00:00:00Z' }]]);
+  const [again] = planDisclosures({ ledger: [recurred, fixed], archive, now, repo: 'fixture/repo', verify: () => false });
+  assert.deepEqual([again.type, again.title], ['create', '[audit-disclosure aaaaaaaaaaaa/9] WARNING finding']);
+  const body = statusBody({ status: 'PASS', fileStatus: 'PASS', date: '2026-10-13T00:00Z', runUrl: 'https://github.com/fixture/repo/actions/runs/1',
+    commit: COMMIT, repo: 'fixture/repo', fragments: {}, embargoResult: 'filed', ledger: [recurred, fixed], archive, now: new Date('2026-10-13T00:00:00Z'), root: repo });
+  assert.ok(body.includes('| `aaaaaaaaaaaa` | WARNING | finding | 2026-10-12 | 2026-10-19 |'), body);
+});
+
+// The builders' contract, apart from the steps: a hand-filed key is withheld
+// until disclosed, a summary is only ever the snapshot's, and a cited PR
+// counts only when the API says it merged here.
+test('the status builder withholds a hand-filed key and plans no disclosure for an unverified PR', () => {
+  const now = new Date('2026-10-11T04:21:00Z');
+  const ledger = [{ number: 1, state: 'CLOSED', stateReason: 'COMPLETED', createdAt: '2026-10-10T00:00:00Z', closedAt: null,
+    key: 'manual-osc-gate', severity: 'FAIL', meta: null, fixed: [{ repo: null, pr: 5 }], summary: null },
+  { number: 2, state: 'OPEN', stateReason: '', createdAt: '2026-10-10T00:00:00Z', closedAt: null,
+    key: 'manual-paste-gate', severity: 'WARNING', meta: null, fixed: [], summary: null }];
+  const verified = [];
+  const [action] = planDisclosures({ ledger, archive: new Map(), now, repo: 'fixture/repo', verify: (pr) => { verified.push(pr); return false; } });
+  assert.deepEqual(verified, [5]);
+  assert.ok(action.body.includes('| Why disclosed | closed, no fix PR cited |'));
+  const body = statusBody({ status: 'PASS', fileStatus: 'PASS', date: '2026-10-11T04:21Z', runUrl: 'https://github.com/fixture/repo/actions/runs/1',
+    commit: COMMIT, repo: 'fixture/repo', fragments: {}, embargoResult: 'filed', ledger, archive: new Map(), now, root: repo });
+  assert.ok(body.includes('| hand-filed | WARNING | finding | 2026-10-10 | 2026-10-17 |'), body);
+  assert.ok(!body.includes('manual-paste-gate'), body);
+});
 
 // The titles are embargoed detail: the list step hands them to the agent in
 // one file and logs their count, and only after the plan step decides the run
@@ -1383,7 +1713,7 @@ test('AUDIT_FRAGMENTS names every domain\'s fragment', () => {
 // "Outcomes and reporting" and "Embargo": every step after the agent runs
 // whatever the agent did, and the PAT is verified before the agent starts.
 test('the redaction, archive, and reporting steps run on every outcome, after the PAT check', () => {
-  for (const name of ['Redact secrets from agent output', 'Encrypt the audit transcript', 'Compose the audit report', 'Surface result, file or close issue']) {
+  for (const name of ['Redact secrets from agent output', 'Encrypt the audit transcript', 'Compose the audit report', 'Read the findings ledger', 'Publish the audit status']) {
     assert.match(stepText(name), /^        if: always\(\)$/m, name);
   }
   const order = ['Verify AUDIT_PAT is provisioned', 'Check GitHub state', 'Audit against the security specs', 'Redact secrets from agent output']

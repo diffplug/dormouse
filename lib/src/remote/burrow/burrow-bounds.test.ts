@@ -198,7 +198,6 @@ describe('BurrowRuntime bounds', () => {
     return created;
   }
 
-  /** The connection ceremony through to its outcome, whatever that outcome is. */
   /** Connect with a fresh proof, or — with `window` — by riding the presence window. */
   async function connectClient(
     clientId: string,
@@ -658,7 +657,7 @@ describe('BurrowRuntime bounds', () => {
 
   it('spends nothing on a transport frame naming no session, and destroys none', async () => {
     await establish('c1');
-    const other = await establish('c2');
+    await establish('c2');
     crypto.reset();
 
     sendE2eFrame(socket, {
