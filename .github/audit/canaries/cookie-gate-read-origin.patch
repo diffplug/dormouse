@@ -1,75 +1,45 @@
 Domain: hosted
-Rule: `docs/specs/security-hosted.md` -> "Origin boundary" #2 — a cookie route admits any presented `Origin` but its own exactly
+Rule: `docs/specs/security-hosted.md` -> "Origin boundary" #2 — a sibling's `same-site` are refused
 Expect: hosted/server/account-gate.ts
-Source: reverses #904 (the cookie gate checked `Origin` only on state-changing methods, so a read presenting a sibling origin passed)
+Source: reverses part of #1104 (the cookie read gate admitted a sibling page's `same-site` read that presents no `Origin`)
 
 diff --git a/hosted/server/account-gate.ts b/hosted/server/account-gate.ts
-index e3392fdfa..4bdfb307b 100644
+index 8c7c5aa89..dc5d94aab 100644
 --- a/hosted/server/account-gate.ts
 +++ b/hosted/server/account-gate.ts
-@@ -29,12 +29,11 @@ export interface AccountLogin {
- }
+@@ -19,16 +19,18 @@ export const accountQuery = <Row extends Record<string, unknown>>(
+ ) => queryDatabase<Row>(host.databaseUrl, text, values);
  
  /**
-- * The account Worker's cookie routes' gate: a presented `Origin` is exactly
-- * this origin, and a state-changing request must present one — same-site
-- * pages, the relay and voice origins among them, share the login cookie —
-- * then the Better Auth handler's `get-session` answers the login (401
-- * without one), and only the verified admin passes (`refuse` answers anyone
-- * else). Sets `login`.
-+ * The account Worker's cookie routes' gate: a state-changing request carries
-+ * exactly this origin — same-site pages, the relay and voice origins among
-+ * them, share the login cookie — then the Better Auth handler's `get-session`
-+ * answers the login (401 without one), and only the verified admin passes
-+ * (`refuse` answers anyone else). Sets `login`.
+- * Whether the account's own page made this read: the browser says
+- * `Sec-Fetch-Site: same-origin`, and an `Origin`, if presented, is exactly
+- * `origin`. A sibling's page, a navigation, and a request without Fetch
++ * Whether this site's pages made this read: the browser says
++ * `Sec-Fetch-Site: same-origin` or `same-site` — the relay and voice pages
++ * share the login cookie — and an `Origin`, if presented, is exactly
++ * `origin`. Another site's page, a typed URL, and a request without Fetch
+  * Metadata all fail. {@link cookieAdmin}'s in-process login lookup vouches
+  * for a request its gate admitted by carrying the header itself.
   */
- export function cookieAdmin(
-   host: (c: Context) => AccountHost,
-@@ -56,10 +55,9 @@ function cookieGate(
- ): MiddlewareHandler<{ Variables: { login: AccountLogin } }> {
-   return async (c, next) => {
-     const origin = new URL(c.req.url).origin;
--    const presented = c.req.header("origin");
--    // A read may omit `Origin`; nothing may present a foreign one.
-+    // A read changes nothing, so only a state-changing request is held to it.
-     const safe = c.req.method === "GET" || c.req.method === "HEAD";
--    if (presented === undefined ? !safe : presented !== origin)
-+    if (!safe && c.req.header("origin") !== origin)
-       return c.json({ message: "Invalid origin." }, 403);
-     const headers = new Headers();
-     for (const name of ["cookie", "cf-connecting-ip"]) {
+ export function ownPageRead(request: Request, origin: string): boolean {
+   const presented = request.headers.get("origin");
++  const site = request.headers.get("sec-fetch-site");
+   return (
+-    request.headers.get("sec-fetch-site") === "same-origin" &&
++    (site === "same-origin" || site === "same-site") &&
+     (presented === null || presented === origin)
+   );
+ }
 diff --git a/hosted/server/tests/boundary.test.ts b/hosted/server/tests/boundary.test.ts
-index f1b7472dc..4c31c7f46 100644
+index df2554cb6..cf3b8c36a 100644
 --- a/hosted/server/tests/boundary.test.ts
 +++ b/hosted/server/tests/boundary.test.ts
-@@ -561,30 +561,6 @@ test("an auth write carrying the login cookie needs the account's own Origin and
-   expect(outbound).toEqual([]);
+@@ -749,7 +749,7 @@ test("the cookie gate refuses a foreign Origin on every method, and a read the a
+     // Only a read may omit `Origin`, and only a read needs Fetch Metadata.
+     expect((await send(own)).status, method).toBe(read ? 204 : 403);
+     expect((await send({ origin })).status, method).toBe(read ? 403 : 204);
+-    for (const site of ["same-site", "none", "cross-site"])
++    for (const site of ["none", "cross-site"])
+       expect((await send({ "sec-fetch-site": site })).status, `${method} ${site}`).toBe(403);
+   }
  });
- 
--test("the cookie gate refuses a presented foreign Origin on every method", async () => {
--  const origin = "https://account.example.test";
--  const app = new Hono();
--  const gate = cookieAdmin(
--    () => ({
--      databaseUrl: "postgres://user:pass@127.0.0.1:9/none",
--      auth: async () =>
--        Response.json({ user: { id: "admin", email: ADMIN_EMAIL, emailVerified: true }, session: {} }),
--    }),
--    () => new Response(null, { status: 403 }),
--  );
--  app.on(["GET", "HEAD", "POST"], "/gated", gate, (c) => c.body(null, 204));
--  const sibling = "https://relay.example.test";
--  for (const method of ["GET", "HEAD", "POST"]) {
--    const send = (headers: Record<string, string>) =>
--      app.request(`${origin}/gated`, { method, headers });
--    expect((await send({ origin: sibling })).status, method).toBe(403);
--    expect((await send({ origin: "null" })).status, method).toBe(403);
--    expect((await send({ origin })).status, method).toBe(204);
--    // Only a read may omit `Origin`.
--    expect((await send({})).status, method).toBe(method === "POST" ? 403 : 204);
--  }
--});
--
- test("the cookie gate needs no login creation time; approval reads it and fails closed", async () => {
-   // `get-session` as the packed adapter answers it, `createdAt` as given.
-   const host = (createdAt?: unknown) => () => ({
