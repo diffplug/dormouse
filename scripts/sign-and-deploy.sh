@@ -593,12 +593,13 @@ sign_macos_app() {
         || error "Signing identity not found: $MACOS_IDENTITY"
 
     # Sign all nested binaries first (node sidecar, node-pty prebuilds, etc.)
-    # --deep doesn't reliably reach into Resources subdirectories
+    # --deep doesn't reliably reach into Resources subdirectories. Every Mach-O,
+    # whatever its name, takes our team's signature: the sidecar has no
+    # disable-library-validation, so it loads only code signed by its own team.
     log "Signing nested binaries..."
     [[ -f "$MACOS_NODE_ENTITLEMENTS" ]] || error "Node entitlements not found: $MACOS_NODE_ENTITLEMENTS"
 
-    find "$app_path/Contents/MacOS" "$app_path/Contents/Resources" -type f \
-        \( -perm -111 -o -name "*.node" -o -name "*.dylib" -o -name "spawn-helper" \) | while read -r binary; do
+    find "$app_path/Contents/MacOS" "$app_path/Contents/Resources" -type f | while read -r binary; do
         # Executable launch scripts are sealed as bundle resources. Their
         # standalone signatures live in extended attributes, lost in the tar.
         case "$(file -b "$binary")" in
