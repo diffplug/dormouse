@@ -163,6 +163,10 @@ const OUTBOUND_SITES = {
     class: 'user:link-click',
     reason: 'Opens a link in the system browser after the user confirms it in the external-link modal.',
   },
+  'lib/src/components/AboutSettings.tsx': {
+    class: 'user:link-click',
+    reason: 'Settings → About\'s changelog, source, license, security, and download links, opened only when the user clicks one.',
+  },
   'lib/src/components/RemoteControlSection.tsx': {
     class: 'user:link-click',
     reason: 'The self-host guide link, opened only when the user clicks it.',
@@ -287,6 +291,10 @@ const REMOTE_LITERALS = {
   'standalone/src/updater.ts': {
     hosts: ['github.com', 'dormouse.sh'],
     reason: 'The issue search and changelog links openUrl opens on a click; the update endpoint itself is in tauri.conf.json.',
+  },
+  'lib/src/components/AboutSettings.tsx': {
+    hosts: ['dormouse.sh', 'github.com'],
+    reason: 'Settings → About\'s links.',
   },
   'lib/src/components/RemoteControlSection.tsx': {
     hosts: ['dormouse.sh'],

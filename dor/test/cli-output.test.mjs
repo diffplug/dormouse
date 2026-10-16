@@ -649,6 +649,12 @@ test('--version and -v alias the version command', async () => {
   }
 });
 
+test('version names an unknown count past the tag rather than reading it as zero', async () => {
+  const versionMetadata = { version: '0.12.0', commit: '6e86b3ba', commitsSinceVersion: null };
+  assert.equal((await runCli(['version'], { versionMetadata })).stdout, 'dor 0.12.0 [6e86b3ba] (0.12.0+?)\n');
+  assert.equal(JSON.parse((await runCli(['version', '--json'], { versionMetadata })).stdout).build, '0.12.0+?');
+});
+
 test('skill prints the bundled markdown verbatim', async () => {
   const result = await runCli(['skill']);
   assert.equal(result.exitCode, 0);

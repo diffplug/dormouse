@@ -3,6 +3,7 @@ import { reactRouter } from "@react-router/dev/vite";
 import tailwindcss from "@tailwindcss/vite";
 import fs from "node:fs";
 import path from "node:path";
+import { buildStampVitePlugin } from "../scripts/build-stamp.mjs";
 
 /**
  * Applies `public/_redirects` in dev, the way the host does in production.
@@ -47,6 +48,8 @@ export default defineConfig(({ mode }) => ({
     mode === "test" ? null : reactRouter(),
     tailwindcss(),
     redirectsInDev(),
+    // Settings → About names the playground's build.
+    buildStampVitePlugin({ host: "playground" }),
   ],
   resolve: {
     alias: {
