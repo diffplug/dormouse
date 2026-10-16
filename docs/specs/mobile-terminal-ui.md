@@ -59,7 +59,7 @@ Source of truth: `EDGE_SCROLL_WIDTH_PX`, `EDGE_SCROLL_LINE_PX`, and `EdgeScrollM
 
 ## Gesture mode
 
-Drag distance from the rose center decides everything, in the order `RADIUS_FADE_START` < `RADIUS_HIGHLIGHT` < `RADIUS_SELECT`: root groups fade by alignment with the drag only past the first, the second previews the closest compass direction, and crossing the third (the drawn circle) selects it. **Reduced-motion users see the menu's opening animation (labels and select circle appearing) at its final state immediately.**
+Touching the pane content away from either edge opens the radial menu (the rose), offset from the touch so the thumb never covers it. Drag distance from its center decides everything, in the order `RADIUS_FADE_START` < `RADIUS_HIGHLIGHT` < `RADIUS_SELECT`: root groups fade by alignment with the drag only past the first, the second previews the closest compass direction, and crossing the third (the drawn circle) selects it. **Reduced-motion users see the menu's opening animation (labels and select circle appearing) at its final state immediately.**
 
 Source of truth: the `RADIUS_*` constants in `lib/src/lib/mobile-gesture-menu.ts`; `MobileGestureRadialMenu` in `lib/src/components/MobileGestureRadialMenu.tsx`.
 
