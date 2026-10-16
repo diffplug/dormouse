@@ -28,13 +28,13 @@
 
 ## Design system and theming
 
-**Why the theme is restored in `main.tsx` rather than by the Wall.** Pocket has no VS Code host handing it tokens, and boots into auth screens long before any Wall exists, so without a boot-time restore the first paint would be unthemed. The same call syncs what no in-app host needs: root `color-scheme` drives native form controls and scrollbars, `<meta name="theme-color">` tints the browser's own address bar.
+**Why the theme is restored in `main.tsx` rather than by the Wall.** Pocket has no VS Code host handing it tokens, and boots into auth screens long before any Wall exists, so without a boot-time restore the first paint would be unthemed.
 
 ## Installable web app
 
 **iOS display support.** WebKit documents both `standalone` and `fullscreen` display modes for Home Screen web apps; Pocket uses standalone. [WebKit's iOS Web Push guidance](https://webkit.org/blog/13878/web-push-for-web-apps-on-ios-and-ipados/) (verified 2026-09).
 
-**Why a non-classic worker fails the build rather than a test.** A module-syntax worker installs on nothing, and push is the one feature no desktop path exercises — a regression would ship silently and surface only as a phone that stopped receiving notifications. The same reasoning puts `build:pocket` inside the root `pnpm build`: the assertion's own fixtures prove the assertion works, not that a real bundler output passes it. `emptyOutDir: false` on the worker config keeps the app build's clean from wiping the `sw.js` emitted beside it; `dev:pocket` re-bundles that config per request so the dev server serves what production would emit.
+**Why a non-classic worker fails the build rather than a test.** A module-syntax worker installs on nothing, and push is the one feature no desktop path exercises — a regression would ship silently and surface only as a phone that stopped receiving notifications. The same reasoning puts `build:pocket` inside the root `pnpm build`: the assertion's own fixtures prove the assertion works, not that a real bundler output passes it.
 
 **Why the worker caches nothing.** Pocket is useless without a live relay connection, so an offline cache buys no working screens. It would also fight `registerPocketServing`, whose per-request `index.html` re-read exists precisely because rebuilds swap in new hashed assets. With no cache to migrate, `skipWaiting` + `clients.claim` are free.
 
@@ -64,15 +64,13 @@
 
 ## What Pocket stores
 
-Repeated scans measured the same browser compatibility while delaying each attempt; a page-local successful promise shares that work without persisting an assumption across app restarts. Actual writes can still fail after any probe, so store failures invalidate the cache. Separate-key probing cannot select a production format and now remains only in the diagnostic tool.
+Separate-key probing cannot select a production format and now remains only in the diagnostic tool.
 
 Burrow listing and push-subscription queries formerly decrypted every stored key despite using metadata alone. Besides duplicate work, this prevented listing/removing a record with a damaged envelope. Summary reads omit the private-key field without interpreting it.
 
 A connection-record read failure can be transient database unavailability or an undecodable key, not evidence of Burrow revocation. The fixed error points to retry or the existing Scan a setup code action. That action preserves the pin and requires fresh approval, while marking every read failure as pairing required would conflate local availability with an authenticated denial.
 
 The operator confirmed successful production pairing on the affected iPhone on September 11, 2026 after installing the encrypted fallback. No Android hardware was tested in this investigation; the retained harness measures the device on which it runs rather than selecting behavior from a user-agent string.
-
-The encrypted representation keeps a per-key AES key beside its ciphertext in the same record, so a committed record is sufficient for a fresh page or worker. Runtime keys have a weakly held encrypted representation; reads restore that association, preventing an authorization-only update from trying the broken native X25519 serialization again. Neither database version nor store layout changes; v4 native records remain readable without migration. The security tradeoff and device restart evidence are in remote-security-model, Client statics.
 
 The iOS 26.6.1 pairing failure reported in September 2026 occurred after local approval, at the IndexedDB write. WebKit evaluates the inline key path on a deserialized clone, so a failed embedded-key clone can look like a missing `burrowId`. WebKit bug 312279 reports X25519 key storage returning null. Generation and agreement alone do not test persistence; reopening and using the stored key detects silent readback failure as well as a rejected write.
 
