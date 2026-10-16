@@ -30,7 +30,8 @@ import {
 
 function ConnectedUpdateBanner() {
   const state = useUpdateState();
-  // Snapshotted when the modal opens, so a later updater state cannot change the report under the reader.
+  // Snapshotted when the modal opens, so a later updater state cannot change
+  // the report under the reader.
   const [snapshot, setSnapshot] = useState<{ version: string; error?: string } | null>(null);
   const [body, setBody] = useState<string | null>(null);
 
