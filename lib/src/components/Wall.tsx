@@ -779,7 +779,7 @@ export function Wall({
 
   /** Enter terminal mode for the given panel. This only moves focus there: the
    *  human gestures acknowledge at their own handlers, and spawns, reveals, and
-   *  embeds focusing themselves never do (`docs/specs/alert.md` -> Engagement). */
+   *  embeds focusing themselves never do. */
   const enterTerminalMode = useCallback((id: string) => {
     selectPane(id);
     modeRef.current = 'passthrough';

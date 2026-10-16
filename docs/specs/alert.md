@@ -70,7 +70,6 @@ A Session is engaged while some present viewer focuses it.
 | a Pane body or header click, zoom or unzoom, the dev-server chip, a Workspace tab's TODO pill on the member it enters, entering passthrough by keyboard, a Door click or `Enter`, a mobile tap | without input |
 | a terminal reply, a mouse-only report chunk, `d` reattach, a spawn, split, or promotion, a `dor` reveal, an embed focusing itself, DOM focus alone | nothing |
 
-- **Must acknowledge at each gesture's handler, never in the passthrough entry the silent paths share.**
 - **Never treat terminal replies or mouse-only report chunks as keyboard input** (rationale).
 - **Must write all human-originated PTY input through `writeUserInput`**, the mobile input bar's included: it carries `userInput`, and the host acknowledges it with input before the bytes reach the PTY, in the one message (rationale).
 - **A remote Client's write must acknowledge the same way unless it holds only mouse reports**, the Burrow having dropped a mirror's terminal replies (rationale).
@@ -100,7 +99,7 @@ flowchart TD
   K -- no --> RG["open or join the ring"]
 ```
 
-Claimants get first refusal per Session in registration order; the first to claim the event ends the offer. **A claimed event must never ring, set TODO, or store an `ActivityNotification`.**
+**A claimed event must never ring, set TODO, or store an `ActivityNotification`.**
 
 A `completion` passed the gates above. Confirmed work is `BUSY` or `MIGHT_NEED_ATTENTION`; a reset is a command boundary or an answered `watching` source (WATCHING Track). The ring, hold, and TODO are separate latches: a pane can ring while a newer completion is held.
 
@@ -155,13 +154,10 @@ stateDiagram-v2
 
 - **A hold must set TODO at once**, its detail by richness (Clearing And TODO), repeated holds merging; it leaves a progress cycle alone. Rung on idle, each held source takes its unengaged path, the acknowledged check included. A forgotten hold keeps its TODO (rationale); rule removal withdraws a held `watching` source as a ringing one.
 - **With `deferAlertsUntilQuiet` enabled, a ring must be deferred exactly while the detector has confirmed work, WATCHING or not, derived and never stored**: it keeps its sources, detail, episode, and alarm deadlines (rationale). **A ring deferred since it opened must stay a fresh completion until it shows**: only input clears it, and coming due while engaged makes it a hold (rationale). **Never defer a ring carrying an `exit` source**, whatever joined it. **Never cap a deferral** (rationale); disabling the setting shows every deferred ring at once.
-
-Two ordering rules:
-
-- **Must clear the progress cycle before dispatch**, so a completion or error ends the cycle whether or not the event is claimed and `OSC_NOTIF_BUSY` falls back either way.
+- **A progress completion or error must end the cycle whether or not the event is claimed**, so `OSC_NOTIF_BUSY` falls back either way.
 - **Must dispatch a command finish for every watch that existed**, including the unseen and engaged ones the ring rule then discards or holds.
 
-Source of truth: `dispatchCompletion` / `holdOrDeliver` / `isDeferred` in `lib/src/lib/alert-manager.ts`; `isConfirmedBusy` in `lib/src/lib/quiesce-detector.ts`. Pinned by `lib/src/lib/alert-engagement.test.ts`.
+Source of truth: `dispatchCompletion` / `isDeferred` in `lib/src/lib/alert-manager.ts`. Pinned by `lib/src/lib/alert-engagement.test.ts`.
 
 ## Await
 
@@ -244,18 +240,16 @@ Source of truth: `awaitCompletion` in `lib/src/lib/alert-manager.ts`; `AlertComm
 
 **Must key WATCHING by the foreground command's watch key** (Rules, below). A Session is watched exactly while a rule covers that key; edits reach every matching Session. **Never add per-Session enable or mute** (rationale).
 
-The output/silence detector is always on. Every Session runs one `QuiesceDetector` for its whole lifetime, fed by every output chunk outside the echo window and reset at every command boundary. It never latches and knows nothing about engagement or rules; the rule set decides only whether its state is publicly visible and whether a settle may ring.
+The output/silence detector is always on, one per Session for its whole lifetime; the rule set decides only whether its state is publicly visible and whether a settle may ring.
 
 **Must use the detector as the single output-activity signal for status, inferred completion, and alert deferral**; its states are the Output detector region in Completion events. A single accepted output chunk leaves a quiet detector quiet, and only confirmed work can settle.
-
-**Must expose quiet to completion consumers before dispatching a settle**, and dispatch before publishing the quiet transition. Completion events owns its routing to awaits and rings; Public State owns the display projection; Completion events owns deferral.
 
 **A retired id must stay retired.** A host removes the alert entry in the same turn as its kill, ahead of any output still in flight. **Never let raw output or resizes revive a retired id**; a semantic or protocol event may (rationale).
 
 Rules:
 
 - **Must derive the key only from the shell-reported raw command line through `commandWatchKey`**, never the display title or keystroke fallback; its lexical grammar belongs to that function. Where bash's `E` falls back to the line's first simple command, that command keys (`docs/specs/terminal-state.md` → Shell-integration injection; rationale).
-- A rule covers a key it equals, and a bare runner rule covers every `<runner> <script>` key of that runner (rationale). `watchRuleFor` is the one matcher, for WATCHING, rule-removal silencing, and the terminal context's row.
+- A rule covers a key it equals, and a bare runner rule covers every `<runner> <script>` key of that runner (rationale). `watchRuleFor` is the one matcher.
 - **Every command boundary must reset the detector** — `commandStart`, `commandFinish`, `promptStart`, `promptEnd`, and PTY exit — even without a command watch.
 - **Editing the rule set must re-derive WATCHING across every live Session immediately**, never restarting the detector (rationale).
 - A WATCHING ring outlives the command that raised it: watching switches off when the watched command exits, and the ring's `watching` source keeps the originating key.
@@ -284,7 +278,7 @@ Sequence syntax lives in `docs/specs/terminal-escapes.md`; what each means here:
 - Standalone `BEL` — stripped from visible output and creates `TERMINAL_BELL_NOTIFICATION`. **Must drop the generic bells only beside a text-bearing notification in the same parse batch, never for a progress event** (rationale). Multiple bells in one batch collapse to one notification.
 - `OSC 9` — the message becomes the body, title null. Empty sanitized messages are ignored. It also feeds title-candidate derivation (`docs/specs/terminal-state.md`), with no alert effect. A number, alone or before `;`, is a ConEmu subcommand (`9;12`, a bare `9;9`) yielding neither notification nor title — except `9;4` below and `9;9;<cwd>` (`docs/specs/terminal-state.md`).
 - `OSC 777` — only the `notify` subcommand is supported; unsupported subcommands and empty sanitized notifications are ignored.
-- `OSC 99` (kitty) — chunked notifications keyed by `i`; completion rings once if the sanitized title or body is nonempty. Management payloads (`p=?`, `p=close`, `p=alive`) contribute no content. Incomplete chunk state is capped and expired.
+- `OSC 99` (kitty) — chunked notifications keyed by `i`; completion rings once if the sanitized title or body is nonempty. Management payloads (`p=?`, `p=close`, `p=alive`) contribute no content.
 - `OSC 9;4` progress — progress only: no title, body, urgency, id, app name, or action fields. **A cycle must stay an independent sub-state: it never touches the ring, and the ring never touches it** (rationale).
 
   | Input | Behavior |
@@ -337,7 +331,7 @@ Source of truth: `raiseRing` / `withdrawRingSource` / `clearRingForUser` / `ring
 
 ## Live Workspace transfer
 
-**A Session's alert state must never move**: the host's one manager and its delivery scheduler hold it (`docs/specs/standalone.md` → Alerts), and a transfer moves only where its `alert:state` and `alert:speak` are routed — the source until the mark, then the target, whose collection is answered with every listed Session's state (rationale).
+**A Session's alert state must never move**: the host's one manager and its delivery scheduler hold it (`docs/specs/standalone.md` → Alerts), and a transfer moves only where its `alert:state` and `alert:speak` are routed — the source until the mark, then the target, whose collection is answered with every listed Session's state.
 
 - **Never spawn or kill over a departure, a refused arrival, or a hand-back**: a spawn starts the host's entry over and a kill or reap removes it, and releasing a Session is neither.
 - **Never feed a replay to the manager**, whose host parse already did.
@@ -396,8 +390,7 @@ Source of truth: `normalizeAlertSettings` in `lib/src/lib/alert-settings-model.t
 
 - **Must replace high-entropy ASCII tokens with `REDACTED` locally before punctuation cleanup and truncation**, preserving `=` separators (rationale) — a heuristic, never a guarantee. Pinned by `lib/src/lib/redact-high-entropy.test.ts`.
 - **Must sanitize the label before it reaches the engine** (`toSpokenText`; security, not tidiness — rationale): all Unicode punctuation, symbols, and `Other` characters (including controls, bidi controls, and zero-width formats) become spaces, except apostrophes, which are elided so contractions survive; letters, numbers, and their combining marks from every script remain. Whitespace collapses, the result is capped in code points, and an empty result falls back to `terminal`.
-- **Delivery state must follow actual engine callbacks, not queue admission**: `start` publishes `speaking`; `end`, or `error` after a real start, publishes `spoken`; an utterance that never starts publishes neither. **Must check delivery identity before accepting `start` or completion**, including after cancellation, timeout, or teardown.
-- **Never assume in the settle path that the callback arrives after `speak()` returns** — an engine may dispatch `start` then `end`/`error` synchronously inside `speechSynthesis.speak()`, so handlers register before dispatch (rationale). A dispatch the engine refuses outright settles too.
+- **Delivery state must follow actual engine callbacks, not queue admission**: `start` publishes `speaking`; `end`, or `error` after a real start, publishes `spoken`; an utterance that never starts publishes neither.
 - **Clearing or deferring the ring mid-sentence must cut the utterance off** — silence the engine, not merely un-render the overlay. "Mid-sentence" is the sink's own record that an utterance started, never the rendered `speaking` state.
 - **Must retain deferred, unstarted speech, preparation included, without blocking other Sessions** (rationale). Never replay speech that started.
 - **Must remove a resolved or disabled pending job before engine admission**, never cutting another pane's current utterance; one utterance plays at a time per renderer (`SpeechQueue`).
@@ -425,11 +418,10 @@ Source of truth: `withFallback` in `lib/src/lib/speech-engine.ts`; `createManage
 - **Must sanitize the label with `toPushText` at send time, in the Burrow, never by `toSpokenText`'s rule** (rationale). It keeps angle brackets and instead strips control characters and the Unicode bidi and zero-width format characters (including the Arabic letter mark); the cap counts code points, so a cut never ships half a surrogate pair. `toPushText` is only this sink's limit and fallback over `boundedPushText` in `remote-lib-common/src/security/push.ts`.
 - **The Burrow must bound, then seal; the worker re-bounds at the render sink.** Title, body, and tag are sealed to each recipient's own Client static and the Relay forwards ciphertext, so the second pass runs in `lib/src/remote/pocket-app/sw.ts`, which imports the same `boundedPushText` rather than mirroring it (`docs/specs/remote-security-model.md` -> Push sealing).
 - **The Burrow must name its targets; the Relay rejects a send that does not.** Targets are the Burrow's newest active ACL records in approval order, read at send time so a revocation during the delay takes effect, and the Relay intersects them with its own subscriptions (rationale).
-- One sealed envelope per recipient — a Client static is not a group key — so a send names each `deliveryId` beside the ciphertext only that phone can open, **clamped to `MAX_PUSH_QUERY_DELIVERY_IDS`** because the route refuses the whole POST past it. The Burrow does not ask which devices are subscribed first (rationale).
-- The settings dialog re-reads the device list when it opens; the transient preview never refreshes. **Must preview the same bounded target set a send selects**, joined with the Relay's subscriptions and the Burrow's ACL labels.
-- **A disarmed enrolled gate must invalidate every in-flight refresh and clear the list**, so nothing already on the wire can repopulate the dialog with phones there is no longer anything to push to.
+- One sealed envelope per recipient — a Client static is not a group key — so a send names each `deliveryId` beside the ciphertext only that phone can open, **clamped to `MAX_PUSH_QUERY_DELIVERY_IDS`** because the route refuses the whole POST past it.
+- **Must preview the same bounded target set a send selects**, joined with the Relay's subscriptions and the Burrow's ACL labels.
 
-Source of truth: `push` in `lib/src/host/remote/service.ts`; `pushAlert` in `vscode-ext/src/burrow.ts`; `sendPush` / `pushTargets` / `toPushText` in `lib/src/remote/burrow/push-delivery.ts`; `lib/src/lib/push-devices.ts`.
+Source of truth: `push` in `lib/src/host/remote/service.ts`; `sendPush` / `pushTargets` / `toPushText` in `lib/src/remote/burrow/push-delivery.ts`; `lib/src/lib/push-devices.ts`.
 
 ### Settings dialog
 
@@ -484,7 +476,7 @@ Clicking a Pane header's TODO pill clears TODO. **A Workspace tab's TODO pill mu
 
 **Must wear the alarm treatment on every ringing terminal Pane**, labelled only once the speech sink acts. Its look and motion — one arrival burst per episode, never replayed by a remount — live at `AlertRingIndicator` and `useAlertRingBurst`; its layering: `docs/specs/layout.md` → Alarm overlay.
 
-Source of truth: `TerminalContext` in `lib/src/components/wall/TerminalContext.tsx`; `setHelper` in `lib/src/lib/alert-manager.ts`, which every host calls at helper spawn and promotion; `lib/src/components/TodoPillBody.tsx`; `spotlightTodo` in `lib/src/lib/todo-spotlight.ts`; `AlertRingIndicator` in `lib/src/components/wall/AlertRingIndicator.tsx`; `useAlertRingBurst` in `lib/src/components/alert-ring.tsx`.
+Source of truth: `TerminalContext` in `lib/src/components/wall/TerminalContext.tsx`; `setHelper` in `lib/src/lib/alert-manager.ts`; `lib/src/components/TodoPillBody.tsx`; `AlertRingIndicator` in `lib/src/components/wall/AlertRingIndicator.tsx`; `useAlertRingBurst` in `lib/src/components/alert-ring.tsx`.
 
 ### Door
 
@@ -495,7 +487,7 @@ A Door is display-only for alert state. It shows the TODO pill while `todo`, the
 Notification text is untrusted terminal output.
 
 - **Must treat all text as plain text**: never interpret ANSI, OSC, HTML, Markdown, URLs, paths, or emoji shortcodes as markup.
-- **Must sanitize at protocol-parse time** (`sanitizeText` in `lib/src/lib/terminal-protocol.ts`), bounded and control-stripped like every retained value (`docs/specs/terminal-state.md` → "Supported OSC Inputs"); every notification stored from a live PTY has been through that pass, generated `WATCHING` and progress titles included via the sanitized command line. `normalizeActivityNotification` in `lib/src/lib/alert-manager.ts` is only a shape check on top — known `source`, string-or-null fields, trimmed, at least one non-empty — so the cold-restore path (`seed`) re-accepts a persisted blob without re-applying the cap or the control strip (rationale).
+- **Must sanitize at protocol-parse time** (`sanitizeText` in `lib/src/lib/terminal-protocol.ts`), bounded and control-stripped like every retained value (`docs/specs/terminal-state.md` → "Supported OSC Inputs"); every notification stored from a live PTY has been through that pass, generated `WATCHING` and progress titles included via the sanitized command line. `normalizeActivityNotification` in `lib/src/lib/alert-manager.ts` is only a shape check on top, so the cold-restore path (`seed`) re-accepts a persisted blob without re-applying the cap or the control strip (rationale).
 - Keep only one `ActivityNotification` rather than unbounded history, and cap/expire incomplete OSC 99 parser state.
 - **Never** execute commands, open URLs, copy to clipboard, read files, focus outside Dormouse, or render protocol-supplied icons/buttons/actions.
 - Wherever notification text appears in visible UI or accessible labels, it is plain text, and layout must tolerate long text, CJK, RTL, combining marks, and emoji without pushing fixed controls out of bounds. Sanitized terminal-supplied `OSC 0` / `OSC 2` / `OSC 9` text also participates in normal Pane-label derivation, and that label may reach the opt-in speech and push channels — each after its own second pass, since the two fail in different ways (`toSpokenText` under Spoken alarms, `toPushText` under Push notifications).

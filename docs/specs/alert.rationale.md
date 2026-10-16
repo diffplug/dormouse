@@ -118,7 +118,7 @@
 
 **Why TODO waits for acknowledgement.** Every ring set TODO as it opened (audit, 2026-09-23), so the pill sat beside an alarm nobody had seen yet, and ringing and TODO said the same thing twice. The model is two steps (product decision, 2026-09-24): the ring summons; a look without typing turns it into a TODO, "seen, still owed"; dealing with it clears that. Before the audit, WATCHING rings made TODO only when attended while report and exit rings made it at once, so every verb diverged by source; one rule for every source keeps them identical. A restart writes an unacknowledged ring as a TODO, so an unseen alarm is not lost. With no TODO of its own to take back, a withdrawal needs no record of what the ring found.
 
-**Why detail goes by richness.** The last writer used to win, with one special case keeping a report's text over an exit: an `OSC 9` reading `Build finished: 3 warnings` followed by a bell in the next PTY read showed `Terminal bell`, and `make; printf '\a'` showed `Terminal bell` over `make exited 2` (audit, 2026-09-23). One order covers every pair; equal ranks still take the newer text. A notification deferred behind animation used to be replaced by whatever came next, so the same bell in the next read replaced the message it followed; the deferral now keeps the richer of the two.
+**Why detail goes by richness.** The last writer used to win, with one special case keeping a report's text over an exit: an `OSC 9` reading `Build finished: 3 warnings` followed by a bell in the next PTY read showed `Terminal bell`, and `make; printf '\a'` showed `Terminal bell` over `make exited 2` (audit, 2026-09-23). One order covers every pair; equal ranks still take the newer text.
 
 **Why an acknowledged state is not summoned again.** Claude Code sends an idle notification about a minute after a turn ends unless it saw input (captured from Claude Code 2.1, 2026-09-23). A user who acknowledged the WATCHING ring with a click, `a`, or a Door was summoned a second time, in a second episode, for the same completion. Output since the acknowledgement is the evidence that something new happened; settles and command exits are fresh by construction, so only reports are held to it. A command start is evidence too: a new command's echo falls in the echo window, so one silent until its report produced no output, and its report only updated TODO (2026-09-23).
 
@@ -138,6 +138,8 @@
 
 **Why presence gates delivery.** The watcher rechecked only the episode and the setting, so a push went out while the user typed in the next pane, and speech named the pane they were reading (audit, 2026-09-23). Speech is heard in the room, so it only has to spare the pane being looked at; a push reaches a phone, so it waits until the user has left every viewer.
 
+**Why delivery identity guards `start` as well as completion.** Guarding only completion leaves a stale `start` free to replace the active utterance's token. Queue-admission identity also covers old rings, collateral redispatch, and evicted callbacks after teardown; it retains one token per ringing Session without retaining each engine utterance.
+
 ## Spoken alarms
 
 **Why deferred preparation is retained.** Host admission is not playback: Web Speech can queue an utterance and managed voice can prepare audio before the start callback. Treating a deferral as cancellation lost an unsent alarm. An unstarted attempt returns to the pending queue, while revoking its callbacks prevents an old answer from starting or finishing the resumed job; a job that already started is not replayed (product decision, 2026-10-01).
@@ -154,23 +156,17 @@
 
 **Why the label is sanitized before it reaches the engine.** WebKit silently drops an utterance containing angle brackets **and leaves the synthesizer wedged**, so every later utterance is dropped until the page reloads. Pane labels carry chrome like `<idle>`, and terminal-supplied titles reach speech, so any program could permanently disable spoken alarms for the session by putting a `<` in its title. Substituting spaces rather than deleting also keeps adjacent words separate and prevents formatting markers such as `*` from being announced.
 
-**Why the settle path cannot assume an async callback.** Chrome dispatches `start` and then `error` with `not-allowed` *synchronously* inside `speechSynthesis.speak()` when speech is invoked without a user gesture — exactly this call site, since an alarm fires on a timer while the user is away. Reading a variable the caller assigns after `speak()` returns would drop the settle and pin the Session at `speaking` for the rest of the ring.
-
-Guarding only completion leaves a stale `start` free to replace the active utterance's token. Queue-admission identity also covers old rings, collateral redispatch, and evicted callbacks after teardown; it retains one token per ringing Session without retaining each engine utterance.
-
 ## Managed voice
 
 **Why the token stays in the host.** A renderer runs terminal-supplied text beside framed pages; a bearer credential there is one script injection away from leaving the machine. The sidecar keeps it with the Burrow's credential (`docs/specs/security-local.rationale.md` → "Persisted state") and makes the request without the webview's CSP granting any remote `connect-src`. The cost is one IPC round trip per managed utterance, its audio returning as base64.
 
-**Why fallback stops once audio starts.** Falling back after managed audio began would repeat a half-heard label in a second voice, and the Session would publish `speaking` twice for one delivery. A failure before `playing` has produced no sound, so speaking the same text through Web Speech still delivers the alarm once. Audio refused by the webview's autoplay policy lands on the fallback path; Web Speech may refuse the same gesture-less call (Spoken alarms, the synchronous `not-allowed` case), in which case the attempt ends unstarted.
+**Why fallback stops once audio starts.** Falling back after managed audio began would repeat a half-heard label in a second voice, and the Session would publish `speaking` twice for one delivery. A failure before `playing` has produced no sound, so speaking the same text through Web Speech still delivers the alarm once. Audio refused by the webview's autoplay policy lands on the fallback path; Web Speech may refuse the same gesture-less call (Chrome's synchronous `not-allowed`, commented at `webSpeechEngine` in `lib/src/lib/speech-engine.ts`), in which case the attempt ends unstarted.
 
 ## Push notifications
 
 **Why `toPushText` is not `toSpokenText`.** The angle-bracket rule exists only because WebKit's synthesizer wedges on them (Spoken alarms); an OS notification has no such failure, and instead has bidi and zero-width formatting that can visually reorder or hide text.
 
 **Why the Burrow, not the Relay, chooses recipients.** A revoked Client keeps its subscription row on the Relay, nothing propagating a revocation today (`docs/specs/remote-security-model.md` → Future), so a Relay picking recipients from its own rows would keep pushing Pane labels to a de-authorized phone.
-
-**Why the Burrow does not ask which devices are subscribed first.** The Relay intersects the Burrow's targets with its own subscriptions regardless, so the target set is identical either way; asking first would cost the alarm a second round trip.
 
 ## Pane Header
 
@@ -179,10 +175,6 @@ Guarding only completion leaves a stale `start` free to replace the active utter
 ## Text And Security
 
 **Why the cold-restore path is not re-sanitized.** Reaching it requires a corrupted or hand-edited session store, and the text is rendered as plain text everywhere, so the residual exposure is layout — a very long or control-bearing string in a preview — rather than markup.
-
-## Live Workspace transfer
-
-Nothing moves because the manager and the delivery scheduler left the standalone windows for the host process (`docs/specs/transport.rationale.md` → "Message protocol"; Alarm settings).
 
 ## Workspace union
 

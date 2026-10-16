@@ -52,7 +52,9 @@ export const webSpeechEngine: SpeechEngine = {
       utterance.voice = synth.getVoices?.().find(candidate => candidate.voiceURI === input.voice) ?? null;
     }
     let started = false;
-    // `docs/specs/alert.md` -> "Spoken alarms": registered before dispatch.
+    // Registered before dispatch: an engine may call back synchronously inside
+    // `speak()`, as Chrome does with `start` then `error` for a call without a
+    // user gesture, which every alarm is.
     utterance.onstart = () => { started = true; callbacks.onStart(); };
     utterance.onend = utterance.onerror = () => (started ? callbacks.onEnd() : callbacks.onFail());
     return {
