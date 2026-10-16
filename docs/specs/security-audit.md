@@ -41,7 +41,7 @@ The CI audit fans out to per-domain subagents, each owning a disjoint share of t
 
 `AUDIT_PAT` is a step-level `env:` on the one job, so every subagent inherits it, and only the prompt tells `remote`, `local`, and `hosted` not to use it (`docs/specs/security.md` -> "Known gaps"); `## Future` -> Credential separation stages the fix.
 
-CI and the local runner share the prompts and their scopes in `.github/audit/` (rationale). The local runner uses the operator's `gh` authentication when no `AUDIT_PAT` is supplied; inaccessible local checks are inconclusive.
+CI and the local runner share the prompts and their scopes in `.github/audit/` (rationale).
 
 **The qualitative scopes are stated by subtraction, so adding a directory cannot orphan it** (rationale). `local` takes the remainder of every other domain's claims, worked out from `ls -A` rather than from a list. **Dotfile directories are named explicitly wherever they land**, and **the subtraction is recursive**: where a domain claims a subdirectory rather than a whole tree, the rest of that tree belongs to `local`.
 
@@ -59,7 +59,6 @@ Source of truth: the `**Scope` and `## Qualitative pass` sections of each domain
 
 **Subagents launch in the background**, so an agent that ends its turn to await a completion notification is finished: an orchestrator ends the whole run, a delegating domain ships what it has (rationale). `.github/audit/orchestrator.md` and `.github/audit/_preamble.md` own the procedure; these are the invariants the workflow depends on:
 
-- The job's timeout stays above the orchestrator's wait deadline (rationale).
 - **Each domain appends to its own fragment as it determines each result**, and the fragments upload with the transcript, so an orchestrator that dies mid-merge still ships what the domains found.
 - **A fragment opens `VERDICT: INCONCLUSIVE` and closes with the literal `<!-- END OF REPORT -->`**, its verdict rewritten once at the end. **The sentinel, not existence, is what a reader treats as finished** (rationale).
 
@@ -92,7 +91,7 @@ Source of truth: `.github/audit/orchestrator.md`; the fragment contract in `.git
 **A domain owes one result per `FAIL IF` rule in the specs its `**Scope` claims**, numbered by position under its heading, so a skipped section is a missing rule. A rule pinned to `scripts/github-state-check.mjs` alone is owed by `audit-github-state.md` instead, which owes every rule that pin names, no `QUALITATIVE` line, and no evidence lines on its findings. A verdict line or `audit-status.txt` that disagrees with the computed verdict is reported as an anomaly; a pessimistic one holds at INCONCLUSIVE, never raising to `FAIL`.
 
 - **The private report is what did not pass**: computed verdicts, anomalies, non-`PASS` results, missing rules, malformed lines, and merged findings. `PASS` lines and the orchestrator's `audit-report.md` stay in the encrypted artifact.
-- **The private report is split, never truncated**, by `scripts/clamp-issue-body.mjs` into the issue body and its comments, under a bounded part count; a helper failure files it as one part (rationale).
+- **The private report is split, never truncated**, by `scripts/clamp-issue-body.mjs` into the issue body and its comments, under a bounded part count (rationale).
 - **The `audit-transcript` artifact uploads during postprocessing**; runner timeout or cancellation can prevent upload, and a missing artifact receives no download link (rationale).
 - **A `FAIL IF` names only a condition an audit run can read**: the readable half is audited, and the rest is staged under `## Future` only while it is unbuilt, otherwise stated beside the rule. `AUDIT_PAT`-readable GitHub state stays audited (rationale).
 
@@ -103,7 +102,7 @@ Source of truth: `.github/audit/orchestrator.md`; the fragment contract in `.git
 
 The reporting step's known gaps are `docs/specs/security.md` -> "Known gaps" (rationale).
 
-Source of truth: `Compose the audit report` and `Publish the audit status` in `.github/workflows/security-audit.yaml`; `scripts/security-audit-report.mjs`; reporting, redaction, and local-runner regressions in `scripts/security-audit.test.mjs`.
+Source of truth: `Compose the audit report` and `Publish the audit status` in `.github/workflows/security-audit.yaml`; `scripts/security-audit-report.mjs`.
 
 ## Findings
 
@@ -133,6 +132,8 @@ Source of truth: `.github/audit/_preamble.md`; `dedupFindings` in `scripts/secur
 | `Check GitHub state` job log | the GitHub-state verdict, its clause and WARNING counts, and the hash |
 | `List open findings` and `Read the findings ledger` job logs | how many ledger issues they read |
 
+`EMBARGO_TOKEN` is a fine-grained PAT with Issues: write on `diffplug/dormouse-embargo` alone, minted on an admin's account.
+
 - **FAIL IF** a public issue can carry finding text: a status or disclosure title, body, or comment is posted from anything but `scripts/security-audit-public-body.mjs` and the step's fixed failure sentence, or that builder emits anything but fixed text, counts, dates, validated run metadata, fragment names, ledger keys and severities, headings it found in the checked-out spec, files it found in the checked-out tree, PR numbers the API reports merged, and a maintainer's public summary. A failed check naming no such heading, in the line form `.github/audit/_preamble.md` fixes, is counted, never quoted (rationale).
 - **FAIL IF** `secrets.EMBARGO_TOKEN` is referenced anywhere but the `env:` of `List open findings`, `File embargoed findings`, and `Read the findings ledger`, a workflow or job `env:` or a `$GITHUB_ENV` write could carry it to another step, any of them runs anything but `gh` and shell builtins, `List open findings` writes a title anywhere but `audit-open-findings.txt`, or `Read the findings ledger` writes anywhere but `audit-ledger-snapshot.jsonl` or keeps a title past its key and severity, a body past its opening metadata line, or a comment past a maintainer's `Fixed in` PR number or public summary (rationale). Pinned by `scripts/security-audit.test.mjs`.
 - **FAIL IF** a non-PASS run whose private filing failed or was skipped can succeed, or its status issue omits that the filing failed; or a PASS run files anything in the private tracker but ledger issues, or `scripts/security-audit-local.sh` files anything.
@@ -141,7 +142,7 @@ Source of truth: `.github/audit/_preamble.md`; `dedupFindings` in `scripts/secur
 
 That the agent shares its job with these steps is `docs/specs/security.md` -> "Known gaps".
 
-Source of truth: `List open findings`, `Encrypt the audit transcript`, `File embargoed findings`, `Read the findings ledger`, and `Publish the audit status` in `.github/workflows/security-audit.yaml`; `scripts/security-audit-public-body.mjs`; embargo regressions in `scripts/security-audit.test.mjs`.
+Source of truth: `.github/workflows/security-audit.yaml`; `scripts/security-audit-public-body.mjs`.
 
 ### Findings ledger
 
@@ -194,7 +195,7 @@ Source of truth: `Verify AUDIT_PAT is provisioned` in `.github/workflows/securit
 
 **A `workflow_dispatch` with `canary: true` measures the audit's recall instead of auditing** (rationale). Its `canary` job runs on `main` alone, and the `audit` job not at all:
 
-1. `seed` applies `CANARY_SEEDS` seeds from `.github/audit/canaries/`, in an order the run id fixes, dealt round-robin across the code domains, skipping one that does not apply over those before it; then it deletes the pool and replaces the history with one root commit, so nothing in the checkout tells a seed from the code around it (rationale).
+1. `seed` applies `CANARY_SEEDS` seeds from `.github/audit/canaries/`, dealt round-robin across the code domains; then it deletes the pool and replaces the history with one root commit, so nothing in the checkout tells a seed from the code around it (rationale).
 2. The audit's agent runs the code domains over that checkout: `supply-chain`, `remote`, `local`, and `hosted`, handed an empty open-findings list. `ci-and-secrets` reads live GitHub state, which a checkout cannot seed, and the ledger is never read.
 3. `score` counts a seed caught only when a `FAIL` result, or a finding at or above the seed's catch severity, cites one of its `Expect:` files and, for a seed naming a `FAIL IF`, that rule: the result's rule id, or the finding's spec and heading.
 
