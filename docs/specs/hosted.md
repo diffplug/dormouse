@@ -45,13 +45,15 @@ Source of truth: `hosted/server/providers.js`; `authPolicy` / `providerBindings`
 
 ## Interface
 
+**Must bundle the website's shared favicon into the account frontend**, served from the account origin.
+
 **Must link the account footer to the public Hosted privacy policy and terms.**
 
 **Must show configured sign-in methods only.** Login tokens never enter browser storage, and only public identity fields render, without provider images or external assets.
 
 **Must render on Dormouse product theme tokens**, the OS light/dark preference choosing bundled Light Visual Studio or Kimbie Dark, loading no marketing styles, fonts, or analytics.
 
-Source of truth: `App` in `hosted/src/App.tsx`; `restoreTheme` in `hosted/src/main.tsx`.
+Source of truth: `hosted/index.html`; `App` in `hosted/src/App.tsx`; `restoreTheme` in `hosted/src/main.tsx`.
 
 ## Terms acceptance
 
