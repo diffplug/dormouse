@@ -712,7 +712,8 @@ export interface Command {
 export interface VersionMetadata {
   version: string;
   commit: string;
-  commitsSinceVersion: number;
+  /** `null` where the version tag could not be resolved (a shallow clone). */
+  commitsSinceVersion: number | null;
 }
 
 export interface HelpPatch {

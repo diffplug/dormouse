@@ -431,12 +431,46 @@ describe('AgentBrowserPanel render mode controller', () => {
     });
 
     // A single-tab (here zero-tab) session has nothing to lose, so the swap is
-    // issued immediately; the ≥2-tab confirm gate is exercised only in the GUI.
+    // issued immediately; the ≥2-tab confirm gate is the next test.
     await act(async () => {
       getAgentBrowserScreenController('ab-panel')?.actions.setRenderMode?.('iframe');
     });
 
     expect(onSwapRenderMode).toHaveBeenCalledWith('ab-panel', 'iframe');
+  });
+
+  it('carries the chosen viewport through the multi-tab confirm gate', async () => {
+    const onSwapRenderMode = vi.fn();
+    await act(async () => {
+      root.render(
+        <WallActionsContext.Provider value={stubActions({ onSwapRenderMode })}>
+          <AgentBrowserPanel {...paneProps('ab-panel', { surfaceType: 'browser', session: 'browser-session', stream: 1111 })} />
+        </WallActionsContext.Provider>,
+      );
+    });
+    await act(async () => {
+      WebSocketMock.instances.at(-1)?.emitMessage(JSON.stringify({
+        type: 'tabs',
+        tabs: [
+          { tabId: 't1', title: 'Dormouse', url: 'https://dormouse.sh/', active: true },
+          { tabId: 't2', title: 'GitHub', url: 'https://github.com/diffplug/dormouse', active: false },
+        ],
+      }));
+    });
+
+    const viewport = { mode: 'fixed', width: 800, height: 600 } as const;
+    await act(async () => {
+      getAgentBrowserScreenController('ab-panel')?.actions.setRenderMode?.('playwright-screencast', { viewport });
+    });
+    expect(onSwapRenderMode).not.toHaveBeenCalled();
+
+    const gate = [...container.querySelectorAll<HTMLElement>('[tabindex="-1"]')]
+      .find((el) => el.textContent?.startsWith('Switching browser providers'));
+    expect(gate).toBeDefined();
+    await act(async () => {
+      gate!.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'c' }));
+    });
+    expect(onSwapRenderMode).toHaveBeenCalledExactlyOnceWith('ab-panel', 'playwright-screencast', viewport);
   });
 });
 

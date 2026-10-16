@@ -203,7 +203,7 @@ const MAX_REAUTH_NONCE_SESSIONS = 32;
  */
 export const MAX_PENDING_CHALLENGES = 64;
 /**
- * How often {@link CreatedApp.sweepRevokedBurrows} should be run. `index.ts` owns
+ * How often {@link CreatedApp.sweepRevokedBurrows} should be run. `start.ts` owns
  * the timer — `createApp` starts no background work of its own.
  *
  * A minute is chosen against what revocation is: a person editing a file after

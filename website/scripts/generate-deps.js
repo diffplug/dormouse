@@ -509,6 +509,8 @@ const cargoMissingAuthor = {
   "indexmap": "The indexmap contributors",
   "jni-macros": "jni team",
   "pin-project-lite": "Taiki Endo",
+  // 1.0.152 dropped `authors`; these are the ones 1.0.151 declared.
+  "serde_json": "Erick Tryzelaar, David Tolnay",
   "wasip2": "The Bytecode Alliance",
   "webpki-root-certs": "The rustls contributors",
   "webview2-com": "Bill Avery",
