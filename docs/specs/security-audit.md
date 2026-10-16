@@ -1,6 +1,6 @@
 # Security Audit
 
-> - Owns how the security specs are audited: the schedule and the release gate, the deterministic checks and the skip they allow, the four domains and their prompts, the orchestration contract, the three outcomes, the reporting steps, the embargo on finding detail and its disclosure, the environment that holds `AUDIT_PAT`, and the canary that measures recall.
+> - Owns how the security specs are audited: the schedule and the release gate, the deterministic checks and the skip they allow, the domains and their prompts, the orchestration contract, the three outcomes, the reporting steps, the embargo on finding detail and its disclosure, the environment that holds `AUDIT_PAT`, and the canary that measures recall.
 > - Defers what is audited to `docs/specs/security.md` and the specs it names, and each agent's procedure to its prompt in `.github/audit/`.
 > - Read `docs/specs/security.md` first.
 
@@ -27,7 +27,7 @@ Source of truth: `judge` in `scripts/github-state-check.mjs`; `Check GitHub stat
 
 ## Skipping an unchanged audit
 
-**A `schedule` run skips the four domains when nothing they read changed**: the last completed run on `main` succeeded, its `audit-state` artifact records this commit and this GitHub-state hash, and the full audit it descends from is under seven days old (rationale). The skipped run still runs the deterministic checks, writes an `audit-report.md` saying it skipped, and reports only `audit-github-state.md`.
+**A `schedule` run skips the domains when nothing they read changed**: the last completed run on `main` succeeded, its `audit-state` artifact records this commit and this GitHub-state hash, and the full audit it descends from is under seven days old (rationale). The skipped run still runs the deterministic checks, writes an `audit-report.md` saying it skipped, and reports only `audit-github-state.md`.
 
 - **FAIL IF** a `workflow_dispatch` run — the release gate's included — can skip, a run skips after a run that did not succeed or with a changed commit or hash, or a skipped run reports `PASS` over a GitHub-state fragment that did not pass. Pinned by `scripts/security-audit.test.mjs`.
 
@@ -35,22 +35,22 @@ Source of truth: `decide` in `scripts/security-audit-plan.mjs`.
 
 ## Domains
 
-The CI audit fans out to four subagents, each owning a disjoint share of the tree; a domain may read outside its share — `application-security` runs the repo's own lints — but owns nothing there (rationale).
+The CI audit fans out to per-domain subagents, each owning a disjoint share of the tree; a domain may read outside its share — `remote` and `local` run the repo's own lints — but owns nothing there (rationale).
 
 **Ownership is by file: every `docs/specs/security*.md` spec, its `.rationale.md` aside, is in exactly one domain's scope**, declared as backticked repo paths in the bullet list under the `**Scope` line of its domain file in `.github/audit/`, and enforced by `scripts/spec-lint.mjs`; `docs/specs/security.md` -> "How the guarantees are checked" tabulates the assignment.
 
-`AUDIT_PAT` is a step-level `env:` on the one job, so every subagent inherits it, and only the prompt tells `application-security` and `hosted` not to use it (`docs/specs/security.md` -> "Known gaps"); `## Future` -> Credential separation stages the fix.
+`AUDIT_PAT` is a step-level `env:` on the one job, so every subagent inherits it, and only the prompt tells `remote`, `local`, and `hosted` not to use it (`docs/specs/security.md` -> "Known gaps"); `## Future` -> Credential separation stages the fix.
 
 CI and the local runner share the prompts and their scopes in `.github/audit/` (rationale). The local runner uses the operator's `gh` authentication when no `AUDIT_PAT` is supplied; inaccessible local checks are inconclusive.
 
-**The qualitative scopes are stated by subtraction, so adding a directory cannot orphan it** (rationale). `application-security` takes the remainder, worked out from `ls -A` rather than from a list. **Dotfile directories are named explicitly wherever they land**, and **the subtraction is recursive**: where a domain claims a subdirectory rather than a whole tree, the rest of that tree belongs to `application-security`.
+**The qualitative scopes are stated by subtraction, so adding a directory cannot orphan it** (rationale). `local` takes the remainder of every other domain's claims, worked out from `ls -A` rather than from a list. **Dotfile directories are named explicitly wherever they land**, and **the subtraction is recursive**: where a domain claims a subdirectory rather than a whole tree, the rest of that tree belongs to `local`.
 
 - **FAIL IF** a `docs/specs/security*.md` spec (not a `.rationale.md`) is in no domain's scope, or in two, or a scope names a file that does not exist (rationale).
 - **FAIL IF** `.github/audit/orchestrator.md` lets the orchestrator audit anything itself (rationale).
-- **FAIL IF** the audit stops fanning out to a dedicated `application-security` subagent scoped to `docs/specs/security-local.md` and `docs/specs/security-remote.md`, or to a dedicated `hosted` subagent scoped to `docs/specs/security-hosted.md`, or either scope is merged back into a context that also carries another domain (rationale).
-- **FAIL IF** `application-security` or `hosted` does not run on Opus and the mechanical domains on Sonnet, the stronger model on the code-reading domains, in **both** `.github/workflows/security-audit.yaml`'s `claude_args` — its `--model` sets the floor and its `--agents` raises those two domains — and `scripts/security-audit-local.sh` (rationale). Pinned by `scripts/security-audit.test.mjs`.
+- **FAIL IF** the audit stops fanning out to a dedicated `remote` subagent scoped to `docs/specs/security-remote.md`, a dedicated `local` subagent scoped to `docs/specs/security-local.md`, or a dedicated `hosted` subagent scoped to `docs/specs/security-hosted.md`, or any of those scopes is merged back into a context that also carries another domain (rationale).
+- **FAIL IF** `remote`, `local`, or `hosted` does not run on Opus and the mechanical domains on Sonnet, the stronger model on the code-reading domains, in **both** `.github/workflows/security-audit.yaml`'s `claude_args` — its `--model` sets the floor and its `--agents` raises those three domains — and `scripts/security-audit-local.sh` (rationale). Pinned by `scripts/security-audit.test.mjs`.
 - **FAIL IF** `.github/audit/` is missing a prompt file the workflow names, or `scripts/security-audit-local.sh` stops running the audit from those same files (rationale), or exits zero after a failed process, a missing or unfinished fragment, or any verdict other than exact `VERDICT: PASS`. Pinned by `scripts/security-audit.test.mjs`.
-- **FAIL IF** the union of the subagents' qualitative scopes does not cover every top-level path in the repository (rationale).
+- **FAIL IF** the union of the subagents' qualitative scopes does not cover every top-level path in the repository: the catch-all's remainder stops subtracting every other domain's prompt, or a second domain claims the remainder (rationale). Pinned by `scripts/security-audit.test.mjs`.
 - **FAIL IF** `.github/audit/` or `.vscode/` is outside **any** consumer of `.github/workflows/workflow-audit.yaml`'s diff window — the commit list, `own_changes`, `is_clean_merge`, and both content classifiers' refusals, whose half is *derived* from the single `WINDOW` array. The security specs are deliberately *not* watched there (rationale).
 
 Source of truth: the `**Scope` and `## Qualitative pass` sections of each domain prompt in `.github/audit/`; `claude_args` in `.github/workflows/security-audit.yaml`; `run_domain` in `scripts/security-audit-local.sh`.
@@ -196,7 +196,7 @@ Source of truth: `Verify AUDIT_PAT is provisioned` in `.github/workflows/securit
 **A `workflow_dispatch` with `canary: true` measures the audit's recall instead of auditing** (rationale). Its `canary` job runs on `main` alone, and the `audit` job not at all:
 
 1. `seed` applies `CANARY_SEEDS` seeds from `.github/audit/canaries/`, in an order the run id fixes, dealt round-robin across the code domains, skipping one that does not apply over those before it; then it deletes the pool and replaces the history with one root commit, so nothing in the checkout tells a seed from the code around it (rationale).
-2. The audit's agent runs the code domains over that checkout: `supply-chain`, `application-security`, and `hosted`, handed an empty open-findings list. `ci-and-secrets` reads live GitHub state, which a checkout cannot seed, and the ledger is never read.
+2. The audit's agent runs the code domains over that checkout: `supply-chain`, `remote`, `local`, and `hosted`, handed an empty open-findings list. `ci-and-secrets` reads live GitHub state, which a checkout cannot seed, and the ledger is never read.
 3. `score` counts a seed caught only when a `FAIL` result, or a finding at or above the seed's catch severity, cites one of its `Expect:` files and, for a seed naming a `FAIL IF`, that rule: the result's rule id, or the finding's spec and heading.
 
 - **A seed re-introduces a vulnerability already fixed on `main`, or a synthetic one, and deletes the test and lint cases that would fail on it**, so the seeded tree passes CI as a regression on `main` has (rationale). Its header is factual and names no finding under embargo.
@@ -220,7 +220,7 @@ Source of truth: `seed` and `score` in `scripts/security-audit-canary.mjs`; the 
 
 ### Credential separation
 
-A second job outside the `security-audit` environment, running the domains that need no PAT and passing their fragments back as artifacts, would leave `application-security` and `hosted` unable to hold `AUDIT_PAT` at all. The fragments would cross as ciphertext, and `File embargoed findings` would move to a job no agent ran on, holding the key to read them.
+A second job outside the `security-audit` environment, running the domains that need no PAT and passing their fragments back as artifacts, would leave `remote`, `local`, and `hosted` unable to hold `AUDIT_PAT` at all. The fragments would cross as ciphertext, and `File embargoed findings` would move to a job no agent ran on, holding the key to read them.
 
 ### Published recall
 

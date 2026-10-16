@@ -52,7 +52,7 @@ A PASS is a claim, and needs evidence as much as a FAIL does. **That the control
 
 ### Open findings
 
-`audit-open-findings.txt` lists the open ledger issues, one title per line: `[audit-finding <key>] <summary>`. A failure's summary cites its rule — `FAIL: <spec> -> "<heading>" #<n>`, or, for one filed by hand, `FAIL <spec file> <heading>:`; a BLOCKER's or WARNING's names its file and root cause, or what was filed by hand. **Read it before your first check, and re-verify each finding as you reach the rule it cites**; one citing no rule, in your qualitative pass. Its titles are embargoed like your fragment, so quote them nowhere else.
+`audit-open-findings.txt` lists the open ledger issues, one title per line: `[audit-finding <key>] <summary>`. A failure's summary cites its rule — `FAIL: <spec> -> "<heading>" #<n>`, or, for one filed by hand, `FAIL <spec file> <heading>:`; a BLOCKER's or WARNING's names its file and root cause, or what was filed by hand. **Read it before your first check, and re-verify each finding as you reach the rule it cites**; one citing no rule, in your qualitative pass when its file is in your domain's share. Its titles are embargoed like your fragment, so quote them nowhere else.
 
 - **Never write PASS on a rule an open failure cites without saying why it no longer holds.** On a PASS line for that rule — for a citation of a heading alone, any rule under it — write `[audit-finding <key>]` and then the `path:line` that shows it. The reporting step makes your domain INCONCLUSIVE for a cited finding no PASS line names that way.
 - **A finding that still holds is reported again**: a `FAIL` on its rule, or a finding with the same file and root cause, so the ledger counts it as seen rather than opening another.

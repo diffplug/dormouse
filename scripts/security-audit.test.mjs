@@ -4,7 +4,7 @@ import { copyFileSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSy
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { BODY_LIMIT } from './clamp-issue-body.mjs';
-import { OPEN_FINDINGS, SENTINEL, domains, failKey, fragmentManifest, ledgerKey, ledgerMeta, owedIds as owedRuleIds } from './security-audit-report.mjs';
+import { OPEN_FINDINGS, SENTINEL, domains, failKey, fragmentManifest, ledgerKey, ledgerMeta, owedIds as owedRuleIds, specRules } from './security-audit-report.mjs';
 import { disclosureReason, parseLedger, planDisclosures, statusBody } from './security-audit-public-body.mjs';
 import { FRAGMENT } from './github-state-check.mjs';
 import { decide } from './security-audit-plan.mjs';
@@ -14,7 +14,7 @@ const repo = repoRoot;
 const workflow = readFileSync(join(repo, '.github/workflows/security-audit.yaml'), 'utf8');
 const allFragments = workflow.match(/^\s+AUDIT_FRAGMENTS: (.+)$/m)[1].split(/\s+/);
 // The deterministic GitHub-state check's fragment rides the same list; the
-// rest are the four domains the orchestrator waits for and merges.
+// rest are the domains the orchestrator waits for and merges.
 const STATE_FRAGMENT = FRAGMENT;
 const fragments = allFragments.filter((f) => f !== STATE_FRAGMENT);
 
@@ -247,63 +247,65 @@ const privateParts = (dir) => readdirSync(dir).filter((f) => /^audit-private-par
 
 // Each scenario writes `frags[i]` (options for `fragmentText`, null for none,
 // or a string written raw) and the orchestrator's `status`.
-const [SUPPLY, CI, APP, HOSTED] = fragments;
+const [SUPPLY, CI, REMOTE, LOCAL, HOSTED] = fragments;
 const allPass = () => fragments.map(() => ({}));
+/** Every fragment passes but those named: `{ [fragment]: options }`. */
+const only = (byFragment) => fragments.map((f) => (f in byFragment ? byFragment[f] : {}));
 const cases = [
   { name: 'all checks pass', status: 'PASS\n', frags: allPass(), expected: 'PASS' },
   { name: 'missing merged verdict', frags: allPass(), expected: 'INCONCLUSIVE', publicRows: ['The orchestrator wrote no verdict.'] },
   { name: 'embedded whitespace is not PASS', status: 'P A\nSS\n', frags: allPass(), expected: 'INCONCLUSIVE' },
-  { name: 'PASS prefix with a suffix is unreadable', status: 'PASS', frags: [{ stated: 'PASS but unfinished' }, {}, {}, {}], expected: 'INCONCLUSIVE',
+  { name: 'PASS prefix with a suffix is unreadable', status: 'PASS', frags: only({ [SUPPLY]: { stated: 'PASS but unfinished' } }), expected: 'INCONCLUSIVE',
     notes: ["A domain's verdict could not be read"] },
-  { name: 'missing fragment', status: 'PASS', frags: [null, {}, {}, {}], expected: 'INCONCLUSIVE', notes: ['left no report'] },
+  { name: 'missing fragment', status: 'PASS', frags: only({ [SUPPLY]: null }), expected: 'INCONCLUSIVE', notes: ['left no report'] },
   // Only the exact line is a verdict: `VERDICT: FAIL` with anything after it is
   // unreadable, and may be a mangled claim, so the headline says to look.
-  { name: 'a VERDICT: FAIL with a suffix is unreadable', status: 'PASS', frags: [{}, { stated: 'FAIL — credential leaked' }, {}, {}], expected: 'INCONCLUSIVE',
+  { name: 'a VERDICT: FAIL with a suffix is unreadable', status: 'PASS', frags: only({ [CI]: { stated: 'FAIL — credential leaked' } }), expected: 'INCONCLUSIVE',
     notes: ["A domain's verdict could not be read", 'A domain claimed more than its result lines record'] },
   { name: 'unverifiable checks override merged PASS', status: 'PASS',
-    frags: [{ stated: 'INCONCLUSIVE', results: { [firstId(SUPPLY)]: `- UNVERIFIABLE: ${firstId(SUPPLY)} — the clause: network error` } }, {}, {}, {}],
+    frags: only({ [SUPPLY]: { stated: 'INCONCLUSIVE', results: { [firstId(SUPPLY)]: `- UNVERIFIABLE: ${firstId(SUPPLY)} — the clause: network error` } } }),
     expected: 'INCONCLUSIVE', notes: ['- UNVERIFIABLE: `docs/specs/security-supply-chain.md`'] },
   { name: 'dissent overrides missing merged verdict',
-    frags: [{ stated: 'FAIL', results: { [firstId(SUPPLY)]: `- FAIL: ${firstId(SUPPLY)} — the clause: violated` } }, {}, {}, {}], expected: 'FAIL' },
+    frags: only({ [SUPPLY]: { stated: 'FAIL', results: { [firstId(SUPPLY)]: `- FAIL: ${firstId(SUPPLY)} — the clause: violated` } } }), expected: 'FAIL' },
   { name: 'FAIL with explanation overrides merged PASS', status: 'PASS',
-    frags: [{ stated: 'FAIL — credential leaked', results: { [firstId(SUPPLY)]: `- FAIL: ${firstId(SUPPLY)} — the clause: violated` } }, {}, {}, {}], expected: 'FAIL',
+    frags: only({ [SUPPLY]: { stated: 'FAIL — credential leaked', results: { [firstId(SUPPLY)]: `- FAIL: ${firstId(SUPPLY)} — the clause: violated` } } }), expected: 'FAIL',
     notes: ["A domain's lines record a failure"] },
   // 2026-10-07: a fragment opened `VERDICT: PASS` over its own `UNVERIFIABLE`
   // line, and the line was believed. The computed verdict decides, and the
   // disagreement is reported.
   { name: 'a computed INCONCLUSIVE overrides a contradicting VERDICT: PASS', status: 'PASS',
-    frags: [{}, {}, {}, { results: { [firstId(HOSTED)]: `- UNVERIFIABLE: ${firstId(HOSTED)}.b — the clause: not reached` } }],
+    frags: only({ [HOSTED]: { results: { [firstId(HOSTED)]: `- UNVERIFIABLE: ${firstId(HOSTED)}.b — the clause: not reached` } } }),
     expected: 'INCONCLUSIVE', notes: ['### Anomalies', `\`${HOSTED}\`: its first line says \`VERDICT: PASS\`, its lines compute INCONCLUSIVE`, '`audit-status.txt` says `PASS`'],
     publicRows: [`| \`${HOSTED}\` | INCONCLUSIVE |`, "1 domain's own verdict line disagreed"] },
   { name: 'a computed FAIL overrides a contradicting VERDICT: PASS', status: 'PASS',
-    frags: [{}, { results: { [firstId(CI)]: `- FAIL: ${firstId(CI)} — the clause: violated` } }, {}, {}],
+    frags: only({ [CI]: { results: { [firstId(CI)]: `- FAIL: ${firstId(CI)} — the clause: violated` } } }),
     expected: 'FAIL', notes: [`\`${CI}\`: its first line says \`VERDICT: PASS\`, its lines compute FAIL`], publicRows: [`| \`${CI}\` | FAIL | 1 |`] },
   // Taken at its word, a `FAIL` line with no failing result under it would file
   // a security finding nobody can find; overruled, it would pass a domain that
   // doubted itself. It is held at INCONCLUSIVE and reported.
   { name: 'a VERDICT: FAIL with no failing line is not believed either way', status: 'FAIL',
-    frags: [{}, {}, { stated: 'FAIL' }, {}], expected: 'INCONCLUSIVE',
-    notes: [`\`${APP}\`: its first line says \`VERDICT: FAIL\`, its lines compute PASS`, '`audit-status.txt` says `FAIL`, the domains\' lines compute INCONCLUSIVE', 'A domain claimed more than its result lines record'] },
-  // `audit-status.txt` is a conclusion like any other: a FAIL over four
+    frags: only({ [LOCAL]: { stated: 'FAIL' } }), expected: 'INCONCLUSIVE',
+    notes: [`\`${LOCAL}\`: its first line says \`VERDICT: FAIL\`, its lines compute PASS`, '`audit-status.txt` says `FAIL`, the domains\' lines compute INCONCLUSIVE', 'A domain claimed more than its result lines record'] },
+  // `audit-status.txt` is a conclusion like any other: a FAIL over
   // passing domains is an anomaly, not a finding.
   { name: 'an orchestrator FAIL over passing domains is not believed', status: 'FAIL', frags: allPass(), expected: 'INCONCLUSIVE',
     notes: ['`audit-status.txt` says `FAIL`, the domains\' lines compute PASS'] },
   // A domain more cautious than its lines claimed less, not more: no hint of
   // a hidden finding in the headline.
   { name: 'a cautious VERDICT: INCONCLUSIVE over passing lines is not a claimed finding', status: 'PASS',
-    frags: [{}, {}, { stated: 'INCONCLUSIVE' }, {}], expected: 'INCONCLUSIVE', notes: ['This is not a security finding'] },
+    frags: only({ [LOCAL]: { stated: 'INCONCLUSIVE' } }), expected: 'INCONCLUSIVE', notes: ['This is not a security finding'] },
   // Whole sections were skipped silently: every rule the specs carry is owed a line.
   { name: 'a skipped section is INCONCLUSIVE', status: 'PASS',
-    frags: [{}, {}, {}, { drop: ['`docs/specs/security-hosted.md` -> "Origin boundary"'] }], expected: 'INCONCLUSIVE',
+    frags: only({ [HOSTED]: { drop: ['`docs/specs/security-hosted.md` -> "Origin boundary"'] } }), expected: 'INCONCLUSIVE',
     notes: ['### Rules with no result line', `- \`${HOSTED}\`: \`docs/specs/security-hosted.md\` -> "Origin boundary" #6`],
     publicRows: [`| \`${HOSTED}\` | INCONCLUSIVE | 0 | 6 | 0 |`] },
   // #797: a `FAIL —` line the lift expected as `FAIL:` was lost. Off the
   // grammar, a line is malformed, and a malformed line cannot pass.
   { name: 'a malformed result line is INCONCLUSIVE', status: 'PASS',
-    frags: [{ lines: ['- FAIL — `docs/specs/security-supply-chain.md` -> "Disclosure" #1: violated'] }, {}, {}, {}], expected: 'INCONCLUSIVE',
+    frags: only({ [SUPPLY]: { lines: ['- FAIL — `docs/specs/security-supply-chain.md` -> "Disclosure" #1: violated'] } }), expected: 'INCONCLUSIVE',
     notes: ['### Malformed lines', '- FAIL — `docs/specs/security-supply-chain.md`'], publicRows: [`| \`${SUPPLY}\` | INCONCLUSIVE | 0 | 0 | 1 |`] },
   { name: 'a bold result line is malformed', status: 'PASS',
-    frags: [{ lines: ['- **FAIL IF** something holds: PASS.'] }, {}, {}, {}], expected: 'INCONCLUSIVE', notes: ['### Malformed lines'] },
+    frags: only({ [SUPPLY]: { lines: ['- **FAIL IF** something holds: PASS.'] } }), expected: 'INCONCLUSIVE', notes: ['### Malformed lines'] },
   // Only an INFO is let off the grammar (below): a BLOCKER or WARNING written
   // off it may be a failure the lines no longer carry, and so may a line that
   // cannot be told for an INFO by its exact prefix.
@@ -314,33 +316,33 @@ const cases = [
     'INFO: pnpm-lock.yaml:1340 — a tarball from outside the registry',
     '- INFO: BLOCKER — a tarball from outside the registry',
   ].map((line) => ({ name: `a line off the grammar is INCONCLUSIVE: ${line}`, status: 'PASS',
-    frags: [{ lines: [line] }, {}, {}, {}], expected: 'INCONCLUSIVE', notes: ['### Malformed lines', line] })),
+    frags: only({ [SUPPLY]: { lines: [line] } }), expected: 'INCONCLUSIVE', notes: ['### Malformed lines', line] })),
   { name: 'a skipped clause is INCONCLUSIVE', status: 'PASS',
-    frags: [{ results: { [firstId(SUPPLY)]: `- PASS: ${firstId(SUPPLY)}.a — one: ok\n- PASS: ${firstId(SUPPLY)}.c — three: ok` } }, {}, {}, {}],
+    frags: only({ [SUPPLY]: { results: { [firstId(SUPPLY)]: `- PASS: ${firstId(SUPPLY)}.a — one: ok\n- PASS: ${firstId(SUPPLY)}.c — three: ok` } } }),
     expected: 'INCONCLUSIVE', notes: [`- \`${SUPPLY}\`: ${firstId(SUPPLY)}.b`] },
   { name: 'a result naming a rule nobody owes is INCONCLUSIVE', status: 'PASS',
-    frags: [{ lines: ['- PASS: `docs/specs/security-supply-chain.md` -> "Disclosure" #99 — the clause: ok'] }, {}, {}, {}], expected: 'INCONCLUSIVE',
+    frags: only({ [SUPPLY]: { lines: ['- PASS: `docs/specs/security-supply-chain.md` -> "Disclosure" #99 — the clause: ok'] } }), expected: 'INCONCLUSIVE',
     notes: ['names no rule this domain owes'] },
-  { name: 'no qualitative pass is INCONCLUSIVE', status: 'PASS', frags: [{}, {}, { qualitative: 0 }, {}], expected: 'INCONCLUSIVE',
+  { name: 'no qualitative pass is INCONCLUSIVE', status: 'PASS', frags: only({ [LOCAL]: { qualitative: 0 } }), expected: 'INCONCLUSIVE',
     notes: ['it recorded no finished qualitative pass'] },
   { name: 'a BLOCKER fails the run', status: 'PASS',
-    frags: [{}, {}, { stated: 'FAIL', lines: finding('BLOCKER', 'deploy/local/install-windows.ps1:88', 'Install-Service', 'a file name reaches Invoke-Expression') }, {}],
-    expected: 'FAIL', publicRows: [`| \`${APP}\` | FAIL | 0 | 0 | 0 | 1 | 0 |`] },
+    frags: only({ [REMOTE]: { stated: 'FAIL', lines: finding('BLOCKER', 'deploy/local/install-windows.ps1:88', 'Install-Service', 'a file name reaches Invoke-Expression') } }),
+    expected: 'FAIL', publicRows: [`| \`${REMOTE}\` | FAIL | 0 | 0 | 0 | 1 | 0 |`] },
   { name: 'a BLOCKER without its evidence still fails, and is malformed', status: 'PASS',
-    frags: [{}, {}, { stated: 'FAIL', lines: ['- BLOCKER: `lib/x.ts:4` `run` — something'] }, {}],
+    frags: only({ [LOCAL]: { stated: 'FAIL', lines: ['- BLOCKER: `lib/x.ts:4` `run` — something'] } }),
     expected: 'FAIL', notes: ['BLOCKER without its Code, Path, Reproduction evidence'] },
   // A domain cut off between rewriting its verdict line and writing its
   // sentinel reads as a clean PASS on line 1.
-  { name: 'PASS without a sentinel is a cut-off domain', status: 'PASS', frags: [{}, {}, { sentinel: false }, {}], expected: 'INCONCLUSIVE', notes: ['cut off mid-report'],
-    publicRows: [`| \`${APP}\` | INCONCLUSIVE, cut off |`] },
+  { name: 'PASS without a sentinel is a cut-off domain', status: 'PASS', frags: only({ [LOCAL]: { sentinel: false } }), expected: 'INCONCLUSIVE', notes: ['cut off mid-report'],
+    publicRows: [`| \`${LOCAL}\` | INCONCLUSIVE, cut off |`] },
   { name: 'a cut-off FAIL is still a finding', status: 'PASS',
-    frags: [{}, {}, { stated: 'FAIL', sentinel: false, results: { [firstId(APP)]: `- FAIL: ${firstId(APP)} — the clause: violated` } }, {}],
+    frags: only({ [LOCAL]: { stated: 'FAIL', sentinel: false, results: { [firstId(LOCAL)]: `- FAIL: ${firstId(LOCAL)} — the clause: violated` } } }),
     expected: 'FAIL', notes: ["A domain's lines record a failure", 'cut off mid-report'] },
   { name: 'a trailing blank line still ends a report', status: 'PASS', frags: fragments.map(() => ({ trailingBlank: true })), expected: 'PASS' },
   { name: 'FAIL records every incomplete condition', status: 'FAIL',
-    frags: [null, 'garbled\n', { stated: 'INCONCLUSIVE', results: { [firstId(APP)]: `- UNVERIFIABLE: ${firstId(APP)} — c: e` } }, { stated: 'FAIL', results: { [firstId(HOSTED)]: `- FAIL: ${firstId(HOSTED)} — c: e` } }],
+    frags: only({ [SUPPLY]: null, [CI]: 'garbled\n', [LOCAL]: { stated: 'INCONCLUSIVE', results: { [firstId(LOCAL)]: `- UNVERIFIABLE: ${firstId(LOCAL)} — c: e` } }, [HOSTED]: { stated: 'FAIL', results: { [firstId(HOSTED)]: `- FAIL: ${firstId(HOSTED)} — c: e` } } }),
     expected: 'FAIL', notes: ['left no report', 'could not be read', 'could not determine every check', 'record a failure'],
-    publicRows: [`| \`${SUPPLY}\` | no report |`, `| \`${CI}\` | INCONCLUSIVE, cut off |`, `| \`${APP}\` | INCONCLUSIVE |`, `| \`${HOSTED}\` | FAIL |`] },
+    publicRows: [`| \`${SUPPLY}\` | no report |`, `| \`${CI}\` | INCONCLUSIVE, cut off |`, `| \`${LOCAL}\` | INCONCLUSIVE |`, `| \`${HOSTED}\` | FAIL |`] },
 ];
 for (const scenario of cases) {
   test(`reporting: ${scenario.name}`, (t) => {
@@ -690,6 +692,26 @@ test('the manifest fails closed on a fragment or spec nobody can resolve', (t) =
   assert.throws(() => fragmentManifest(dir, SUPPLY), /does not exist/);
 });
 
+// "Domains": section by section, every `FAIL IF` in a security spec on disk is
+// answered by exactly one domain, or, pinned to the deterministic check alone,
+// by that check and none. A section two domains claim gets two verdicts; one
+// no domain claims gets none.
+test('every security spec FAIL IF section is claimed by exactly one domain', () => {
+  const owners = new Map();
+  for (const { domain, fragment } of domains(repo)) {
+    for (const key of fragmentManifest(repo, fragment).keys()) owners.set(key, [...(owners.get(key) ?? []), domain]);
+  }
+  const state = fragmentManifest(repo, STATE_FRAGMENT);
+  const sections = new Set(readdirSync(join(repo, 'docs/specs')).filter((f) => /^security[a-z-]*\.md$/.test(f))
+    .flatMap((f) => specRules(repo, `docs/specs/${f}`).map((r) => `${r.spec}\0${r.heading}`)));
+  assert.ok(sections.size > 0);
+  for (const key of sections) {
+    const by = owners.get(key) ?? [];
+    assert.ok(by.length === 1 || (by.length === 0 && state.has(key)), `${key.replace('\0', ' -> ')}: claimed by ${by.join(' and ') || 'no domain'}`);
+  }
+  assert.deepEqual([...owners.keys()].filter((key) => !sections.has(key)), []);
+});
+
 // The work streams replace a domain's own partition, so between them they hold
 // every heading the manifest owes, each exactly once.
 test('each domain\'s work streams cover every owed heading once', () => {
@@ -778,7 +800,7 @@ for (const [name, state, expected] of [['passes on a passing check', null, 'PASS
     const { dir, env } = fixture(t);
     stubGh(dir);
     writeFileSync(join(dir, 'audit-status.txt'), 'PASS\n');
-    writeFileSync(join(dir, 'audit-report.md'), '# Security audit\n\nThe four domains were skipped.\n');
+    writeFileSync(join(dir, 'audit-report.md'), '# Security audit\n\nThe domains were skipped.\n');
     if (state) writeFileSync(join(dir, STATE_FRAGMENT), state);
     const { published, outputs } = runReporting(dir, { ...env, AUDIT_FRAGMENTS: STATE_FRAGMENT },
       { plan: { skip: 'true', full_run_at: '2026-10-05T12:00:00.000Z' } });
@@ -787,7 +809,7 @@ for (const [name, state, expected] of [['passes on a passing check', null, 'PASS
     const publicBody = statusIssueBody(dir);
     assert.ok(!publicBody.includes('audit-supply-chain.md'), publicBody);
     // The status issue says the domains were skipped, and when they last ran.
-    assert.ok(publicBody.includes('The four audit domains were skipped: the commit and GitHub settings are unchanged since a passing run. They last ran in full at 2026-10-05T12:00:00.000Z;'), publicBody);
+    assert.ok(publicBody.includes('The audit domains were skipped: the commit and GitHub settings are unchanged since a passing run. They last ran in full at 2026-10-05T12:00:00.000Z;'), publicBody);
   });
 }
 
@@ -843,7 +865,7 @@ test('the plan step skips on recorded state, writes the stand-in report, and rec
   assert.match(readFileSync(output, 'utf8'), /^skip=true$/m);
   assert.match(readFileSync(output, 'utf8'), new RegExp(`^fragments=${STATE_FRAGMENT}$`, 'm'));
   assert.equal(readFileSync(join(dir, 'audit-status.txt'), 'utf8'), 'PASS\n');
-  assert.match(readFileSync(join(dir, 'audit-report.md'), 'utf8'), /four domains were skipped: .*run 41/);
+  assert.match(readFileSync(join(dir, 'audit-report.md'), 'utf8'), /The domains were skipped: .*run 41/);
   const state = JSON.parse(readFileSync(join(dir, 'audit-state/audit-state.json'), 'utf8'));
   assert.deepEqual(state, { commit: COMMIT, state_hash: HASH, full_run_at: recorded.full_run_at, mode: 'skipped', run_id: '123' });
   // The run under way is never its own reference.
@@ -890,6 +912,9 @@ test('the status issue carries counts and verified section names, never finding 
   const publicBody = statusIssueBody(dir);
   assert.ok(!calls.some(({ embargo, body }) => !embargo && body?.includes('calc-injected-7f3a')));
   assert.ok(publicBody.includes(`| \`${fragments[1]}\` | FAIL | 2 | 0 | 2 | 1 | 0 |`), publicBody);
+  // Every domain has its own row, the two that split application security included.
+  for (const { fragment } of domains(repo)) assert.ok(publicBody.includes(`| \`${fragment}\` | `), fragment);
+  for (const fragment of ['audit-remote.md', 'audit-local.md']) assert.ok(publicBody.includes(`| \`${fragment}\` | PASS | 0 | 0 | 0 | 0 | 0 |`), publicBody);
   assert.ok(publicBody.includes('- `docs/specs/security-audit.md` -> "Environment and `AUDIT_PAT`"'), publicBody);
   assert.ok(publicBody.includes('1 failed check named no section heading'), publicBody);
   assert.ok(publicBody.includes(COMMIT), publicBody);
@@ -1328,7 +1353,7 @@ test('a failed encryption leaves nothing to upload and fails the step', (t) => {
 /** The local runner, the prompt files it reads, and the stand-in check, in a fixture tree. */
 function localRunnerFixture(dir) {
   copyFileSync(join(repo, 'scripts/security-audit-local.sh'), join(dir, 'scripts/security-audit-local.sh'));
-  for (const name of ['_preamble', 'orchestrator', 'supply-chain', 'ci-and-secrets', 'application-security', 'hosted']) {
+  for (const name of ['_preamble', 'orchestrator', 'supply-chain', 'ci-and-secrets', 'remote', 'local', 'hosted']) {
     copyFileSync(join(repo, `.github/audit/${name}.md`), join(dir, `.github/audit/${name}.md`));
   }
   fakeStateCheck(dir);
@@ -1381,7 +1406,7 @@ for (const [verdict, cliExit, expected, sentinel = true, stateVerdict = 'PASS', 
 
 // One domain at a time: the deterministic check runs ahead of the two domains
 // that read its fragment, alone on request, and not before the others.
-for (const [arg, runsState, runsDomain] of [['github-state', true, false], ['ci-and-secrets', true, true], ['supply-chain', true, true], ['hosted', false, true]]) {
+for (const [arg, runsState, runsDomain] of [['github-state', true, false], ['ci-and-secrets', true, true], ['supply-chain', true, true], ['remote', false, true], ['local', false, true], ['hosted', false, true]]) {
   test(`local runner: \`${arg}\` ${runsState ? 'runs' : 'skips'} the GitHub-state check`, (t) => {
     const { dir, env } = fixture(t);
     rmSync(join(dir, STATE_FRAGMENT));
@@ -1449,7 +1474,7 @@ test('the preamble forbids a delegating domain from waiting by ending its turn',
 // `DEADLINE` break going missing.
 test('the delegate wait bounds itself by its caller\'s deadline', (t) => {
   const block = promptShellBlock(readFileSync(join(repo, '.github/audit/_preamble.md'), 'utf8'), 'delegate-deadline-')
-    .replace('<your fragment>', 'audit-application.md')
+    .replace('<your fragment>', 'audit-local.md')
     .replace("<every delegated stream's .done file exists>", '[ -f delegates-done ]');
   const runDelegateWait = (caller, done) => {
     const dir = tempDir(t, 'dormouse-audit-delegate-');
@@ -1458,7 +1483,7 @@ test('the delegate wait bounds itself by its caller\'s deadline', (t) => {
     const r = spawnSync('bash', ['-c', block], { cwd: dir, encoding: 'utf8', env: { ...process.env, RUNNER_TEMP: dir }, timeout: 10_000 });
     assert.equal(r.status, 0, r.stderr);
     return { answer: r.stdout.trim().split('\n').at(-1),
-      persisted: Number(readFileSync(join(dir, 'delegate-deadline-audit-application.md'), 'utf8')) };
+      persisted: Number(readFileSync(join(dir, 'delegate-deadline-audit-local.md'), 'utf8')) };
   };
   const now = Math.floor(Date.now() / 1000);
   // The caller's own bound, three minutes early — not the domain's own clock.
@@ -1485,8 +1510,8 @@ for (const [name, body, expected] of [
 ]) {
   test(`orchestrator wait predicate: ${name}`, (t) => {
     const dir = tempDir(t, 'dormouse-audit-wait-');
-    if (body !== null) writeFileSync(join(dir, 'audit-application.md'), body);
-    const result = spawnSync('bash', ['-c', `${finishedFn}\nfinished audit-application.md && echo YES || echo NO`],
+    if (body !== null) writeFileSync(join(dir, 'audit-local.md'), body);
+    const result = spawnSync('bash', ['-c', `${finishedFn}\nfinished audit-local.md && echo YES || echo NO`],
       { cwd: dir, encoding: 'utf8' });
     assert.equal(result.stdout.trim(), expected ? 'YES' : 'NO', result.stderr);
   });
@@ -1569,6 +1594,7 @@ test('merge distinguishes finished, cut-off, and absent domains', (t) => {
   // exact `tail -n1` this finished domain is published under the cut-off caveat.
   writeFileSync(join(dir, 'audit-supply-chain.md'), `VERDICT: PASS\nsupply evidence\n\n${SENTINEL}\n\n`);
   writeFileSync(join(dir, 'audit-ci-secrets.md'), 'VERDICT: INCONCLUSIVE\nci evidence\n');
+  writeFileSync(join(dir, 'audit-local.md'), `VERDICT: PASS\nlocal evidence\n${SENTINEL}\n`);
   writeFileSync(join(dir, 'audit-hosted.md'), `VERDICT: PASS\nhosted evidence\n${SENTINEL}\n`);
   const result = spawnSync('bash', ['-c', merge], { cwd: dir, encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
@@ -1581,10 +1607,28 @@ test('merge distinguishes finished, cut-off, and absent domains', (t) => {
   assert.match(report, /## CI and secrets\n\n_Incomplete —[^\n]*\nVERDICT: INCONCLUSIVE\nci evidence/);
   assert.equal(report.match(/_Incomplete —/g).length, 1);
   // A domain that never wrote anything is neither.
-  assert.match(report, /## Application security\n\n_No report —/);
-  // The fourth domain is emitted too — a heading dropped from `emit` would
+  assert.match(report, /## Remote control\n\n_No report —/);
+  // The domains after it are emitted too — a heading dropped from `emit` would
   // silently publish a report missing a domain that did report.
+  assert.match(report, /## Local application\n\nVERDICT: PASS\nlocal evidence/);
   assert.match(report, /## Hosted accounts\n\nVERDICT: PASS\nhosted evidence/);
+});
+
+// "Orchestration": the orchestrator reads a verdict from, and merges, each
+// domain prompt's fragment; that `AUDIT_FRAGMENTS` names each and the wait
+// holds for each is pinned above. A domain missing from either is a report
+// nobody publishes.
+test('every domain\'s fragment is expected and merged', (t) => {
+  const verdicts = promptShellBlock(orchestrator, 'security-audit-report.mjs check').match(/^for f in (.+); do$/m)[1].split(' ');
+  const dir = tempDir(t, 'dormouse-audit-merge-');
+  for (const { fragment } of domains(repo)) writeFileSync(join(dir, fragment), `VERDICT: PASS\n${fragment} evidence\n${SENTINEL}\n`);
+  assert.equal(spawnSync('bash', ['-c', merge], { cwd: dir }).status, 0);
+  const report = readFileSync(join(dir, 'audit-report.md'), 'utf8');
+  for (const { fragment } of domains(repo)) {
+    assert.ok(verdicts.includes(fragment), `${fragment}: no verdict read`);
+    assert.ok(report.includes(`\n\nVERDICT: PASS\n${fragment} evidence\n`), `${fragment}: not merged`);
+  }
+  assert.equal(report.match(/^## /gm).length, domains(repo).length);
 });
 
 // --- docs/specs/security-audit.md's textual rules about the workflow and prompts ---
@@ -1592,7 +1636,7 @@ test('merge distinguishes finished, cut-off, and absent domains', (t) => {
 const release = readFileSync(join(repo, '.github/workflows/release.yml'), 'utf8');
 const local = readFileSync(join(repo, 'scripts/security-audit-local.sh'), 'utf8');
 const agents = JSON.parse(stepText('Audit against the security specs').match(/--agents '(.+)'$/m)[1]);
-const DOMAINS = ['supply-chain', 'ci-and-secrets', 'application-security', 'hosted'];
+const DOMAINS = ['supply-chain', 'ci-and-secrets', 'remote', 'local', 'hosted'];
 
 // "Schedule and gate": nightly and on dispatch, and three separate things make
 // it the release gate — the dispatch, the failing watch, and the `needs:` edge.
@@ -1614,16 +1658,37 @@ test('the model split holds in CI and locally, over the same prompt files', () =
   assert.match(stepText('Audit against the security specs'), /^            --model sonnet$/m);
   assert.deepEqual(Object.keys(agents).sort(), [...DOMAINS].sort());
   for (const domain of DOMAINS) {
-    assert.equal(agents[domain].model, ['application-security', 'hosted'].includes(domain) ? 'opus' : undefined, domain);
+    assert.equal(agents[domain].model, ['remote', 'local', 'hosted'].includes(domain) ? 'opus' : undefined, domain);
     assert.ok(agents[domain].prompt.includes(`\`.github/audit/${domain}.md\``), domain);
   }
   for (const file of [...JSON.stringify(agents).matchAll(/\.github\/audit\/([\w-]+\.md)/g)].map((m) => m[1]).concat('orchestrator.md')) {
     assert.ok(existsSync(join(repo, '.github/audit', file)), file);
   }
   assert.match(local, /^  local model_args="--model sonnet"$/m);
-  assert.match(local, /^  case "\$domain" in application-security\|hosted\) model_args="--model opus" ;; esac$/m);
-  assert.match(local, /^for f in _preamble orchestrator supply-chain ci-and-secrets application-security hosted; do$/m);
+  assert.match(local, /^  case "\$domain" in remote\|local\|hosted\) model_args="--model opus" ;; esac$/m);
+  assert.match(local, /^for f in _preamble orchestrator supply-chain ci-and-secrets remote local hosted; do$/m);
   assert.match(local, /cat "\$AUDIT_DIR\/_preamble\.md"; echo; cat "\$AUDIT_DIR\/\$domain\.md"/);
+});
+
+// "Domains": `docs/specs/security.md` -> "How the guarantees are checked"
+// tabulates each domain with the specs its scope claims.
+test('security.md tabulates every domain with its specs', () => {
+  const table = readFileSync(join(repo, 'docs/specs/security.md'), 'utf8');
+  const rows = Object.fromEntries([...table.matchAll(/^\| `([\w-]+)` \| (.+?) \|/gm)].map(([, domain, specs]) =>
+    [domain, [...specs.matchAll(/\]\(\.\/([\w.-]+\.md)\)|this spec/g)].map((m) => `docs/specs/${m[1] ?? 'security.md'}`).sort()]));
+  assert.deepEqual(rows, Object.fromEntries(domains(repo).map((d) => [d.domain, [...d.specs].sort()])));
+});
+
+// "Domains": every path is some domain's because one domain takes the
+// remainder of every other's claims — the top-level coverage rule.
+test('one domain takes the remainder of every other domain\'s claims', () => {
+  const prompt = (domain) => readFileSync(join(repo, `.github/audit/${domain}.md`), 'utf8');
+  const catchAll = domains(repo).filter(({ domain }) => /^You are also the \*\*catch-all\*\* domain/m.test(prompt(domain)));
+  assert.deepEqual(catchAll.map((d) => d.domain), ['local']);
+  const remainder = prompt('local').match(/^You are also the \*\*catch-all\*\* domain.*$/m)[0];
+  for (const { domain } of domains(repo).filter((d) => d.domain !== 'local')) {
+    assert.ok(remainder.includes(`\`${domain}.md\``), `the remainder does not subtract ${domain}`);
+  }
 });
 
 // "Orchestration": the job outlives the orchestrator's persisted deadline, and

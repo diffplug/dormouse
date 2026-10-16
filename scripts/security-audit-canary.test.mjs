@@ -64,17 +64,25 @@ test('the whole pool applies, one seed over another', (t) => {
 // across the domains, so one that has a seed is never left unmeasured.
 test('a draw is dealt across the domains, whatever their share of the pool', () => {
   const seeds = (domain, n) => Array.from({ length: n }, (_, i) => ({ id: `${domain}-${i}`, domain }));
-  const pool = [...seeds('application-security', 12), ...seeds('hosted', 3), ...seeds('supply-chain', 3)];
+  const pool = [...seeds('local', 10), ...seeds('remote', 2), ...seeds('hosted', 3), ...seeds('supply-chain', 3)];
   for (const key of ['1', '37720586893', 'k']) {
     const order = shuffle(pool, key);
     assert.deepEqual(order.map((s) => s.id).sort(), pool.map((s) => s.id).sort());
-    // The first six are two rounds of all three domains.
-    const first = order.slice(0, 6).map((s) => s.domain);
-    assert.deepEqual(first.slice(3), first.slice(0, 3), key);
+    // The first eight are two rounds of all four domains, the smallest included.
+    const first = order.slice(0, 8).map((s) => s.domain);
+    assert.deepEqual(first.slice(4), first.slice(0, 4), key);
     assert.deepEqual(new Set(first), new Set(CANARY_DOMAINS), key);
     assert.deepEqual(shuffle(pool, key), order);
   }
   assert.notDeepEqual(shuffle(pool, '1').map((s) => s.id), shuffle(pool, '2').map((s) => s.id));
+});
+
+// A partial round would weight the domains it reached over the rest.
+test('a canary draws whole rounds, no more than the smallest domain holds', () => {
+  const count = Number(canary.match(/^ {6}CANARY_SEEDS: "(\d+)"$/m)?.[1]);
+  assert.ok(count > 0 && count % CANARY_DOMAINS.length === 0, `CANARY_SEEDS ${count} is not whole rounds of ${CANARY_DOMAINS.length}`);
+  const pool = readPool(repo);
+  for (const d of CANARY_DOMAINS) assert.ok(pool.filter((s) => s.domain === d).length >= count / CANARY_DOMAINS.length, `${d} cannot fill every round`);
 });
 
 // --- Fixtures ---------------------------------------------------------------
@@ -90,8 +98,8 @@ diff --git a/${file} b/${file}
 `;
 const POOL = {
   // Two seeds on one line: whichever is drawn first, the other cannot apply.
-  'gate-a': seedPatch('Domain: application-security\nRule: `docs/specs/security-local.md` -> "Terminal output" #9 — x\nExpect: src/gate.ts\nSource: fixture', 'src/gate.ts', 'check();', 'skip();'),
-  'gate-b': seedPatch('Domain: application-security\nClass: fixture\nExpect: src/gate.ts\nSource: fixture', 'src/gate.ts', 'check();', 'never();'),
+  'gate-a': seedPatch('Domain: local\nRule: `docs/specs/security-local.md` -> "Terminal output" #9 — x\nExpect: src/gate.ts\nSource: fixture', 'src/gate.ts', 'check();', 'skip();'),
+  'gate-b': seedPatch('Domain: local\nClass: fixture\nExpect: src/gate.ts\nSource: fixture', 'src/gate.ts', 'check();', 'never();'),
   room: seedPatch('Domain: hosted\nClass: fixture\nExpect: src/room.ts\nSource: fixture', 'src/room.ts', 'forward();', 'store();'),
 };
 
@@ -174,7 +182,8 @@ test('the canary job seeds, hides the seeds, and scores, filing and pushing noth
   assert.equal(readFileSync(join(dir, 'audit-ci-secrets.md'), 'utf8').trim().split('\n').at(-1), SENTINEL);
 
   const gate = seeds.find((s) => s.id.startsWith('gate-'));
-  writeFileSync(join(dir, fragmentOf['application-security']), fragment(gate.rule ? [FAIL_GATE] : warning('WARNING', 'src/gate.ts:1')));
+  writeFileSync(join(dir, fragmentOf.local), fragment(gate.rule ? [FAIL_GATE] : warning('WARNING', 'src/gate.ts:1')));
+  writeFileSync(join(dir, fragmentOf.remote), fragment([]));
   writeFileSync(join(dir, fragmentOf.hosted), fragment(warning('INFO', 'src/room.ts:1')));
   const scored = spawnSync('bash', ['-c', canaryBlock('Score the canary')], { cwd: dir, env, encoding: 'utf8' });
   assert.equal(scored.status, 0, scored.stderr);
@@ -198,16 +207,16 @@ const seedOf = (id, domain, expect, rule = null, severity = 'WARNING') => ({ id,
 
 test('a seed is caught only by a FAIL or a BLOCKER or WARNING citing its file, and its rule when it has one', () => {
   const seeds = [
-    seedOf('rule-by-fail', 'application-security', ['src/a.ts'], RULE),
-    seedOf('rule-by-warning', 'application-security', ['src/b.ts'], RULE),
-    seedOf('rule-wrong-rule', 'application-security', ['src/c.ts'], RULE),
-    seedOf('rule-by-root-cause', 'application-security', ['src/g.ts'], RULE),
+    seedOf('rule-by-fail', 'local', ['src/a.ts'], RULE),
+    seedOf('rule-by-warning', 'local', ['src/b.ts'], RULE),
+    seedOf('rule-wrong-rule', 'local', ['src/c.ts'], RULE),
+    seedOf('rule-by-root-cause', 'local', ['src/g.ts'], RULE),
     seedOf('class-by-blocker', 'hosted', ['src/d.ts']),
     seedOf('class-by-info', 'hosted', ['src/e.ts']),
     seedOf('class-uncited', 'supply-chain', ['src/f.ts']),
   ];
   const card = score(seeds, {
-    [fragmentOf['application-security']]: fragment([
+    [fragmentOf.local]: fragment([
       '- FAIL: `docs/specs/security-local.md` -> "Terminal output" #9.b — clause: src/a.ts:3',
       ...warning('WARNING', 'src/b.ts:4', ' (`docs/specs/security-local.md` -> "Terminal output")'),
       '- FAIL: `docs/specs/security-local.md` -> "Terminal output" #8 — clause: src/c.ts:5',
@@ -223,13 +232,14 @@ test('a seed is caught only by a FAIL or a BLOCKER or WARNING citing its file, a
   assert.deepEqual([card.seeded, card.caught], [7, 4]);
   assert.deepEqual(card.domains, {
     'supply-chain': { seeded: 1, caught: 0 },
-    'application-security': { seeded: 4, caught: 3 },
+    remote: { seeded: 0, caught: 0 },
+    local: { seeded: 4, caught: 3 },
     hosted: { seeded: 2, caught: 1 },
   });
   // The one line citing no file a seed touched.
   assert.equal(card.unseeded, 1);
   assert.deepEqual(card.unfinished, [fragmentOf['supply-chain']]);
-  assert.match(card.seeds[0].by[0], /^audit-application\.md: - FAIL: /);
+  assert.match(card.seeds[0].by[0], /^audit-local\.md: - FAIL: /);
 });
 
 // Run 37720586893 found `recovery-created-at-nan` and rated it INFO, which it
@@ -246,7 +256,7 @@ test('a seed\'s Severity sets the least finding severity that catches it', () =>
     seedOf('warning-by-info', 'hosted', ['src/b.ts']),
     seedOf('blocker-by-warning', 'hosted', ['src/c.ts'], null, 'BLOCKER'),
     seedOf('blocker-by-blocker', 'hosted', ['src/d.ts'], null, 'BLOCKER'),
-    seedOf('rule-by-fail', 'application-security', ['src/e.ts'], RULE, 'BLOCKER'),
+    seedOf('rule-by-fail', 'local', ['src/e.ts'], RULE, 'BLOCKER'),
   ];
   const card = score(seeds, {
     [fragmentOf.hosted]: fragment([
@@ -257,7 +267,7 @@ test('a seed\'s Severity sets the least finding severity that catches it', () =>
       // Off the grammar, as the audit lets an INFO be.
       '- INFO: src/g.ts:1 — hardening',
     ]),
-    [fragmentOf['application-security']]: fragment(['- FAIL: `docs/specs/security-local.md` -> "Terminal output" #9 — clause: src/e.ts:1']),
+    [fragmentOf.local]: fragment(['- FAIL: `docs/specs/security-local.md` -> "Terminal output" #9 — clause: src/e.ts:1']),
   });
   assert.deepEqual(card.seeds.filter((r) => r.caught).map((r) => r.id), ['info-by-info', 'info-by-loose-info', 'blocker-by-blocker', 'rule-by-fail']);
   assert.deepEqual(Object.keys(publicRecord(card)).sort(), ['caught', 'run_url', 'seeded', 'unfinished']);
@@ -336,6 +346,14 @@ test('a canary runs alone, on main alone, with no credential to file or push', (
   t.diagnostic(`canary job checked: ${canary.split('\n').length} lines`);
 });
 
+// Every code domain is measured: each but `ci-and-secrets`, which reads live
+// GitHub state, is a canary domain the job tells its orchestrator to spawn.
+test('a canary runs every code domain', () => {
+  assert.deepEqual([...CANARY_DOMAINS].sort(), domains(repo).map((d) => d.domain).filter((d) => d !== 'ci-and-secrets').sort());
+  const prompt = canary.match(/^ {10}prompt: \|\n((?: {12}.*\n|\n)+)/m)[1];
+  for (const domain of CANARY_DOMAINS) assert.ok(prompt.includes(`\`${domain}\``), domain);
+});
+
 test('the release gate never waits on a canary', () => {
   const title = workflow.match(/^run-name: \$\{\{ inputs\.canary && '([^']+)' \|\| 'security-audit' \}\}$/m)[1];
   const prefix = release.match(/startswith\(\\"([^\\"]+)\\"\) \| not/)[1];
@@ -352,7 +370,7 @@ test('the release gate never waits on a canary', () => {
 
 // --- The local runner -------------------------------------------------------
 
-test('the local canary seeds a copy, runs the three code domains, scores, and files nothing', (t) => {
+test('the local canary seeds a copy, runs the code domains, scores, and files nothing', (t) => {
   const { base, dir, bin, env } = checkout(t);
   stub(bin, 'pnpm', '');
   // Every domain reports `room` as the hosted domain would; nothing else.

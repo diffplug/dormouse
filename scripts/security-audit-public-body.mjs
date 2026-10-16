@@ -290,7 +290,7 @@ export function statusBody({ status, fileStatus, date, runUrl, commit, repo, fra
   }
   lines.push('', `Run at ${date} · [run](${runUrl}) · audited commit [\`${commit.slice(0, 7)}\`](https://github.com/${repo}/commit/${commit})`);
   if (skipped === 'true') {
-    lines.push('', `The four audit domains were skipped: the commit and GitHub settings are unchanged since a passing run. ${ISO.test(fullRunAt) ? `They last ran in full at ${fullRunAt}` : 'When they last ran in full is unknown'}; the GitHub-settings check runs every night.`);
+    lines.push('', `The audit domains were skipped: the commit and GitHub settings are unchanged since a passing run. ${ISO.test(fullRunAt) ? `They last ran in full at ${fullRunAt}` : 'When they last ran in full is unknown'}; the GitHub-settings check runs every night.`);
   }
   lines.push('', ...runSection({ fragments, root }));
   if (fileStatus === 'MISSING' && status !== 'PASS') lines.push('', 'The orchestrator wrote no verdict.');

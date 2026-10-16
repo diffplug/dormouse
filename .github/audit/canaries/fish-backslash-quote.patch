@@ -1,4 +1,4 @@
-Domain: application-security
+Domain: local
 Class: a crafted argument escapes a shell quoting helper
 Expect: dor/src/commands/shell-quote.ts
 Source: reverses #1033 (fish reads \' and \\ as escapes inside single quotes)

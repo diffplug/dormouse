@@ -11,14 +11,14 @@
 # repo or the ci-and-secrets domain will report FAILs that are really 403s.
 #
 # Usage:
-#   scripts/security-audit-local.sh            # the deterministic checks, then all four domains
-#   scripts/security-audit-local.sh application-security   # one domain
+#   scripts/security-audit-local.sh            # the deterministic checks, then every domain
+#   scripts/security-audit-local.sh remote                  # one domain
 #   scripts/security-audit-local.sh github-state            # the deterministic checks alone
 #   scripts/security-audit-local.sh canary [count]          # recall on seeded vulnerabilities
 #
 # `canary` measures rather than audits (docs/specs/security-audit.md -> "Canary
 # recall"): it copies the committed tree to a temporary directory, seeds it from
-# `.github/audit/canaries/` as CI does, runs the three code domains there, and
+# `.github/audit/canaries/` as CI does, runs the code domains there, and
 # scores their fragments. Your checkout is never touched, and nothing is filed.
 #
 # The deterministic GitHub-state check (`scripts/github-state-check.mjs`) runs
@@ -46,7 +46,7 @@ if ! command -v claude >/dev/null 2>&1; then
   exit 1
 fi
 
-for f in _preamble orchestrator supply-chain ci-and-secrets application-security hosted; do
+for f in _preamble orchestrator supply-chain ci-and-secrets remote local hosted; do
   [ -f "$AUDIT_DIR/$f.md" ] || { echo "error: missing $AUDIT_DIR/$f.md" >&2; exit 1; }
 done
 
@@ -58,13 +58,14 @@ run_domain() {
   case "$domain" in
     supply-chain) out=audit-supply-chain.md ;;
     ci-and-secrets) out=audit-ci-secrets.md ;;
-    application-security) out=audit-application.md ;;
+    remote) out=audit-remote.md ;;
+    local) out=audit-local.md ;;
     hosted) out=audit-hosted.md ;;
-    *) echo "error: unknown domain '$domain' (supply-chain|ci-and-secrets|application-security|hosted)" >&2; return 64 ;;
+    *) echo "error: unknown domain '$domain' (supply-chain|ci-and-secrets|remote|local|hosted)" >&2; return 64 ;;
   esac
   # Same model split as CI (`.github/workflows/security-audit.yaml` ->
-  # `--agents`): the two mechanical domains run on the default, and the two
-  # code-reading domains — application-security and hosted — run on Opus.
+  # `--agents`): the two mechanical domains run on the default, and the
+  # code-reading domains — remote, local, and hosted — run on Opus.
   # Local and CI must agree here, or the domains where the model matters most
   # are the ones they disagree about.
   # BOTH sides are pinned, not just the strong one. Leaving the mechanical
@@ -79,7 +80,7 @@ run_domain() {
   # an EMPTY array is an unbound-variable error under `set -u`. These are fixed
   # literals with no whitespace, so the unquoted expansion below is safe.
   local model_args="--model sonnet"
-  case "$domain" in application-security|hosted) model_args="--model opus" ;; esac
+  case "$domain" in remote|local|hosted) model_args="--model opus" ;; esac
 
   echo "==> $domain -> $out${model_args:+ ($model_args)}"
   rm -f "$out"
@@ -132,11 +133,11 @@ run_github_state() {
   node scripts/security-audit-report.mjs check audit-github-state.md >&2
 }
 
-# The canary, in a copy of the committed tree: seeded, audited by the three code
+# The canary, in a copy of the committed tree: seeded, audited by the code
 # domains, then scored. `CANARY_KEY` picks the seeds;
 # the same key and pool seed the same way.
 run_canary() {
-  local count="${1:-6}" tree stash domain
+  local count="${1:-8}" tree stash domain
   tree=$(mktemp -d)
   stash=$(mktemp -d)
   git archive HEAD | tar -x -C "$tree"
@@ -164,13 +165,13 @@ if [ $# -gt 0 ]; then
   exit "$status"
 fi
 
-# All four, sequentially rather than fanned out. CI parallelises because it is
+# Every domain, sequentially rather than fanned out. CI parallelises because it is
 # paying wall-clock for a nightly; locally, serial output is readable and a
 # each domain's failure is recorded while the remaining domains still run.
 status=0
 run_github_state || status=1
 write_open_findings
-for domain in supply-chain ci-and-secrets application-security hosted; do
+for domain in supply-chain ci-and-secrets remote local hosted; do
   run_domain "$domain" || status=1
 done
 

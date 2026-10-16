@@ -42,7 +42,7 @@ jobs:
       actions: read
       issues: write
     env:
-      # The four per-domain fragment filenames, then the deterministic
+      # The per-domain fragment filenames, then the deterministic
       # GitHub-state check's, in one place. They are
       # named by the redactor's argv, its fail-closed `rm -f`, the
       # encrypted archive, the reporting step's guard loop, and the public
@@ -51,7 +51,7 @@ jobs:
       # stops being redacted but keeps being published. Every use
       # word-splits this deliberately, so the names must stay
       # space-separated and shell-safe.
-      AUDIT_FRAGMENTS: audit-supply-chain.md audit-ci-secrets.md audit-application.md audit-hosted.md audit-github-state.md
+      AUDIT_FRAGMENTS: audit-supply-chain.md audit-ci-secrets.md audit-remote.md audit-local.md audit-hosted.md audit-github-state.md
     # Must stay well above the orchestrator's own wait deadline in
     # `.github/audit/orchestrator.md` (32 minutes, counted from the first
     # time its wait loop runs — i.e. after checkout, setup-node, the
@@ -185,7 +185,7 @@ jobs:
           # calls with `GH_TOKEN=$AUDIT_PAT`.
           AUDIT_PAT: ${{ secrets.AUDIT_PAT }}
           # Process-wide: this raises the cap on every Bash call in the
-          # session, the four domain subagents' as well as the
+          # session, the domain subagents' as well as the
           # orchestrator's. What it is for is the orchestrator's wait loop,
           # which breaks itself at 540s so a capped call still prints
           # `STILL WAITING`; at the two-minute default that call is
@@ -193,8 +193,8 @@ jobs:
           # on — the run 34581574869 failure. The prompt asks for
           # `timeout: 600000` per call, and this makes forgetting it
           # harmless rather than fatal. The wider scope is accepted, not
-          # incidental: a domain's own long commands (`application-security`
-          # re-runs vitest and the repo lints) stop being backgrounded
+          # incidental: a domain's own long commands (`local` and `remote`
+          # re-run vitest and the repo lints) stop being backgrounded
           # mid-run, and the cost is that a subagent that blocks with no
           # self-break loses ten minutes rather than two.
           BASH_DEFAULT_TIMEOUT_MS: "600000"
@@ -227,14 +227,14 @@ jobs:
           # release gate for $5 and no verdict.
           #
           # The cause was ending the turn, not delegating. `Task` is
-          # therefore allowed on purpose — the audit fans out to four
+          # therefore allowed on purpose — the audit fans out to
           # scoped domain agents — and the orchestrator prompt carries
           # the rule that makes it safe: block in a Bash `until` loop on
           # the fragment files, never end the turn to wait. `Workflow`
           # stays denied because nothing here should be spawning one.
-          # Two of the four domains are mechanical — run a generator, read
+          # Two of the domains are mechanical — run a generator, read
           # `gh api`, compare a pin — and the session default (Sonnet)
-          # does them well. `application-security` and `hosted` are the
+          # does them well. `remote`, `local`, and `hosted` are the
           # ones that read code adversarially, and their findings have
           # been the ones that needed real reasoning: tracing a
           # relay-minted `clientId` to a keystroke-injection path, or
@@ -251,7 +251,7 @@ jobs:
             --model sonnet
             --allowed-tools "Read,Write,Edit,Bash,Grep,Glob,Task,Agent"
             --disallowed-tools "Workflow"
-            --agents '{"supply-chain":{"description":"Audits docs/specs/security-supply-chain.md.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/supply-chain.md`, and follow them exactly."},"ci-and-secrets":{"description":"Audits docs/specs/security.md, docs/specs/security-ci.md, and docs/specs/security-audit.md.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/ci-and-secrets.md`, and follow them exactly."},"application-security":{"description":"Audits docs/specs/security-local.md and docs/specs/security-remote.md, and sweeps the rest of the product code.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/application-security.md`, and follow them exactly.","model":"opus"},"hosted":{"description":"Audits docs/specs/security-hosted.md: Hosted accounts and the pgstencil provenance link.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/hosted.md`, and follow them exactly.","model":"opus"}}'
+            --agents '{"supply-chain":{"description":"Audits docs/specs/security-supply-chain.md.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/supply-chain.md`, and follow them exactly."},"ci-and-secrets":{"description":"Audits docs/specs/security.md, docs/specs/security-ci.md, and docs/specs/security-audit.md.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/ci-and-secrets.md`, and follow them exactly."},"remote":{"description":"Audits docs/specs/security-remote.md: remote control.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/remote.md`, and follow them exactly.","model":"opus"},"local":{"description":"Audits docs/specs/security-local.md and the desktop shells, and sweeps the rest of the product code.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/local.md`, and follow them exactly.","model":"opus"},"hosted":{"description":"Audits docs/specs/security-hosted.md: Hosted accounts and the pgstencil provenance link.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/hosted.md`, and follow them exactly.","model":"opus"}}'
           # The prompts live in `.github/audit/`, not inline here: they
           # are long enough to need real diffs in review, they must be
           # runnable locally against the same text CI uses
@@ -304,7 +304,7 @@ jobs:
           # Every sink the encrypted archive or the private issue carries
           # has to be in the argument list, and the fail-closed `rm -f` has
           # to delete the same set — docs/specs/security-audit.md names
-          # `audit-report.md`, the four per-domain fragments, and the
+          # `audit-report.md`, the per-domain fragments, and the
           # transcript. The fragments are
           # agent output like any other: a subagent that shells out and
           # prints an environment lands the value in its own fragment,
@@ -659,10 +659,10 @@ jobs:
     environment:
       name: security-audit
     env:
-      # Dealt round-robin across the three code domains; each keeps at least
-      # three seeds in the pool, so raise that floor before this count.
-      CANARY_SEEDS: "6"
-      CANARY_FRAGMENTS: audit-supply-chain.md audit-application.md audit-hosted.md
+      # Two rounds dealt across the four code domains; each keeps at least
+      # three seeds in the pool, so raise that floor before a third round.
+      CANARY_SEEDS: "8"
+      CANARY_FRAGMENTS: audit-supply-chain.md audit-remote.md audit-local.md audit-hosted.md
     steps:
       - name: Refuse any ref but main
         run: |
@@ -715,13 +715,13 @@ jobs:
             --model sonnet
             --allowed-tools "Read,Write,Edit,Bash,Grep,Glob,Task,Agent"
             --disallowed-tools "Workflow"
-            --agents '{"supply-chain":{"description":"Audits docs/specs/security-supply-chain.md.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/supply-chain.md`, and follow them exactly."},"application-security":{"description":"Audits docs/specs/security-local.md and docs/specs/security-remote.md, and sweeps the rest of the product code.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/application-security.md`, and follow them exactly.","model":"opus"},"hosted":{"description":"Audits docs/specs/security-hosted.md: Hosted accounts and the pgstencil provenance link.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/hosted.md`, and follow them exactly.","model":"opus"}}'
+            --agents '{"supply-chain":{"description":"Audits docs/specs/security-supply-chain.md.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/supply-chain.md`, and follow them exactly."},"remote":{"description":"Audits docs/specs/security-remote.md: remote control.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/remote.md`, and follow them exactly.","model":"opus"},"local":{"description":"Audits docs/specs/security-local.md and the desktop shells, and sweeps the rest of the product code.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/local.md`, and follow them exactly.","model":"opus"},"hosted":{"description":"Audits docs/specs/security-hosted.md: Hosted accounts and the pgstencil provenance link.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/hosted.md`, and follow them exactly.","model":"opus"}}'
           prompt: |
             You are the orchestrator of this repository's security audit.
 
             Read `.github/audit/orchestrator.md` and follow it exactly, with one
-            change: this run audits three domains. Spawn only `supply-chain`,
-            `application-security`, and `hosted`. `audit-ci-secrets.md` is
+            change: this run audits the code domains. Spawn only `supply-chain`,
+            `remote`, `local`, and `hosted`. `audit-ci-secrets.md` is
             already written and finished, so do not spawn `ci-and-secrets`.
 
       # As the audit job's redactor: every sink the archive carries, deleted

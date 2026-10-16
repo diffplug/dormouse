@@ -1,4 +1,4 @@
-Domain: application-security
+Domain: local
 Rule: `docs/specs/security-local.md` -> "Network policy" #1 — with no default to the global `WebSocket` or `fetch`
 Expect: lib/src/remote/burrow/burrow-fetch.ts scripts/outbound-lint.mjs
 Source: reverses #1040 (burrowFetch fell back to the global fetch), with the lint entry reclassified so it stays green
