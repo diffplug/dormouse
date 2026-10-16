@@ -8,7 +8,7 @@ Why `dormouse-lib` has to be named a root rather than left as a workspace edge: 
 
 Why external binaries cannot be disclosed: Dormouse is a terminal, so it spawns the user's shell, and `dor agent-browser` forwards to an `agent-browser` CLI the user installs themselves and that is resolved off `PATH`. Those are the user's software, not ours, and disclosing them is neither possible nor meaningful.
 
-Where the snapshots come from: they are generated from the lockfiles and reviewed as part of release work. The `pnpm install --frozen-lockfile` precondition matters because a stale `node_modules` makes the regeneration check pass locally on a tree that would fail in CI.
+Where the snapshots come from: all three are generated from inputs committed beside them — the npm table from the pnpm lockfile and the bundled-theme records, the cargo table from `cargo metadata` over the standalone crate, the runtime row from `devEngines.runtime.version` — so each goes stale in the PR that changes its input, and CI fails that PR, not a later release. No snapshot is left to release work. The `pnpm install --frozen-lockfile` precondition matters because a stale `node_modules` makes the regeneration check pass locally on a tree that would fail in CI.
 
 Why CI, and not the nightly audit, gates the regenerated snapshots: until the gate existed the nightly audit was the only thing that ever ran the generator, and two production bumps (`ws`, `hono`) shipped undisclosed before it caught them. A nightly finding of a stale disclosure means it already merged; the CI gate is what keeps it from merging.
 
