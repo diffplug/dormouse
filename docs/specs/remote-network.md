@@ -94,13 +94,13 @@ The Settings dialog's Network topic (`docs/specs/alert.md` -> "Settings dialog")
 
 - **Renders nothing without a Burrow service**, which holds the policy.
 - **Never keep a draft**: every change sends a whole policy through `setNetworkPolicy`, and the panel renders the store's mirror of the answer; a refusal shows where the change was made. **Must make each change from the service's latest answer, one at a time** (`changeNetworkPolicy`).
-- **Offer the service's `levels`, in its order.** **Each choice's sentence must be true of its level**: over which networks a phone reaches the terminals, and what still leaves from any network.
+- **Offer the service's `levels`.** **Each choice's sentence must be true of its level**: over which networks a phone reaches the terminals, and what still leaves from any network.
 - **Choosing Local networks with nothing allowed must first allow every prefix of this machine's `lan` interfaces**, never a `vpn` or `virtual` one; the panel fills them, not the service (rationale). **Any other choice must keep `allowed`.**
 - **The connection list states only what is built** (rationale): `connectionsFor` lists every connection the level, this build, and the Burrow's standing open on their own, and nothing else; under `nothing`, none. **An empty list must say that terminals, browser panes, and agents still reach what they open, those Dormouse restores at launch included.**
 - **Allowed networks**, under `local`: one switch per interface. **Must list every allowed range no switch reading On covers**, with Remove; **switching one off keeps a range another switch reading On needs**. A held path refusal shows here, with Dismiss.
 - **Phones**: under any level but `nothing`, the Remote control choices (`docs/specs/relay.md` -> "Remote control, in the Settings dialog"); under `nothing`, the levels that allow a phone, and Disconnect for a held enrollment, which is local.
 - **Updates**: a self-host build says it never updates itself, and a host with `hostOwnsUpdates` (VS Code) names the Marketplace. Any other build offers the automatic-check switch, absent under `nothing`, and **only with the platform's `updates` port** (`docs/specs/auto-update.md` -> "Threading") the last successful check and Check now.
-- **Under `nothing`, Notifications' push and managed-voice lines say they are off because of the level**, each linking to this topic. **The Baseboard holds the policy store for the window's life**, so its settings preview reads the level on its first frame; the Network panel re-reads on mount, and **a failed re-read never replaces a policy already read**.
+- **The Baseboard holds the policy store for the window's life**, so its settings preview reads the level on its first frame; the Network panel re-reads on mount, and **a failed re-read never replaces a policy already read**.
 
 Source of truth: `NetworkSettings` and `connectionsFor` in `lib/src/components/NetworkSettings.tsx`; `lib/src/remote/burrow/network-policy-store.ts`.
 
