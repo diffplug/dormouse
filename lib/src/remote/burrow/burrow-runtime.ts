@@ -876,6 +876,11 @@ export class BurrowRuntime {
     }
     this.#ws = ws;
     let opened = false;
+    // Every listener, not only `close`, drops a socket this runtime no longer
+    // owns: `ws` still delivers a message queued before the close (loopback
+    // experiment, 2026-09), and a frame's epoch is read when it drains, so a
+    // retired socket's late `init` would recreate pending state after `stop()`
+    // and its late `client-gone` would dispose a replacement's client.
     ws.addEventListener('open', () => {
       if (this.#ws !== ws) return;
       opened = true;
