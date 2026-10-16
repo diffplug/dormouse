@@ -11,7 +11,7 @@ const DECAY = -Math.log(0.998);
 const VELOCITY_WINDOW_MS = 100;
 const RELEASE_PAUSE_MS = 80;
 const MIN_VELOCITY = 0.05; // CSS px/ms (also the stopping speed)
-const MAX_VELOCITY = 3;
+const MAX_VELOCITY = 3; // CSS px/ms; bounds the wheel reports a coast sends a remote TUI
 
 /** Pixel motion shared by drag and coast; xterm consumes whole lines while
  * fractional-line travel survives release. Estimate velocity over the last

@@ -16,12 +16,6 @@
 
 The edge gesture routes to either terminal history or a mouse-reporting TUI, neither of which is a browser scroll container. Its coast therefore approximates native scrolling rather than delegating to an overflow element. The exponential decay uses iOS's normal 0.998 rate, documented by [React Native](https://reactnative.dev/docs/scrollview#decelerationrate) (consulted 2026-09). Elapsed-time integration avoids refresh-rate-dependent travel. Recent directional samples avoid stale speed after reversals; release time includes a brief pause, while a longer hold suppresses the coast. Whole terminal lines preclude native subpixel motion and rubber-band bounce; the launch cap bounds wheel reports to a remote TUI.
 
-## Selection stages
-
-**Why the option origin ratchets outward.** A drag that overshoots the group-selection radius usually keeps going in the opening direction. Without the ratchet the user drags back through that whole overshoot before a move in another direction registers, which reads as the menu ignoring them.
-
-**Why the compass stays collapsed during a brisk push.** Expanding the moment the group is chosen flickers the labels between collapsed and exploded for the length of the overshoot. `OPTION_EXPAND_RELEASE` is the per-move outward distance below which the drag counts as settling rather than still pushing out, so the expansion happens once, after it settles.
-
 ## Input mode selector
 
 **Why the Type focus is synchronous.** Mobile browsers open the native keyboard only for a focus call made while the user gesture is still on the stack; one deferred to `requestAnimationFrame` or a timer may be refused as not user-initiated, so the tap appears to do nothing.
@@ -30,4 +24,4 @@ The edge gesture routes to either terminal history or a mouse-reporting TUI, nei
 
 ## Keyboard focus invariant
 
-**Why one blur is not enough.** `Wall` can restore xterm focus in a `requestAnimationFrame` after the touch, undoing a single synchronous blur a frame later. Repeating across a rAF and staggered timers covers that window; cancelling pending retries on unmount keeps one from firing into a torn-down DOM, which is also what test teardown looks like.
+**Why one blur is not enough.** `Wall` can restore xterm focus in a `requestAnimationFrame` after the touch, undoing a single synchronous blur a frame later. Repeating across a rAF and staggered timers covers that window.
