@@ -146,7 +146,7 @@ An enrolled Burrow mints a setup token over its own authenticated channel; the a
 **`parsePairingInvitationUrl` answers the complete invitation or `null`** — never a partial parse, never an error a caller can distinguish. Two of its checks are this spec's: the URL is **HTTPS, or plain HTTP on exactly `localhost`, `127.0.0.1`, or `[::1]`** (rationale), and its origin **equals the running app's exactly** — the only thing keeping a code from bootstrapping another deployment's Pocket.
 
 - **`/api/burrow/enroll` counts its credential by presence, not type** (rationale); a setup route without a live token is the same 401 as one with a dead one.
-- **`begin` peeks; `finish` consumes before validating the registration**, so of two overlapping finishes one registers. A failure past that restores the token on its original expiry; a confirmed revocation leaves it spent. `retire` consumes and registers nothing.
+- **`begin` peeks; `finish` claims before validating the registration**, so of two overlapping finishes one registers. A failure past that restores the token on its original expiry; a confirmed revocation leaves it spent. **`retire` kills a token a `finish` still holds**, and that `finish` then registers nothing and restores nothing.
 - **Both gates re-read `burrows.json`**, so a revoked Burrow's tokens die with it.
 - **TTL is `DEFAULT_PAIRING_TTL_MS`**, the invitation's; the Burrow bounds its invitation map at `MAX_TOKENS_PER_BURROW` (Guardrails).
 
