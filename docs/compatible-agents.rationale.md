@@ -8,8 +8,6 @@
 
 **Why every live PTY is interrupted.** Gating on "is this pane running an agent" would need per-pane foreground-command knowledge the host does not have, and every one of these processes is killed seconds later regardless.
 
-**Why the clocks start at the ack.** The fallback and silence windows are statements about the agent, not about the round trip; measuring from step entry folds the interrupt's own latency into the window and shortens it by an amount that varies with load.
-
 **Why the ask gate keys on an English UI string.** Claude's `Press Ctrl-C again`, Cursor's `Press Ctrl+C again` (supplied macOS exit excerpt, Cursor 2026.09.23-86fc751) and Copilot's `ctrl+c again to exit` could change. That failure loses recovery for that shutdown, where a mistimed second press destroys Codex's hint every time.
 
 **Why a third press, and only on an ask** (Claude 2.1.288, Copilot 1.0.88, Antigravity 1.2.13, Pi 1.0.0, macOS, 2026-10-03). Mid-turn, the first `^C` only cancels the turn: Claude prints `Interrupted`, asks `Press Ctrl-C again to exit` after the second press and prints its hint about 12 ms after the third; Copilot asks `ctrl+c again to exit` after the second; Antigravity likewise. With two presses, all three lost the conversation in a live restart and a 12-agent harness run. A third press is reserved for a pane that asks after its latest press and has then gone quiet, so a program that never asks still gets at most two presses, and an exit that repeats its ask above its hint (Cursor) is not cut off mid-print; counting only output after that press keeps a slow exit from seeing the previous press's ask.
@@ -18,11 +16,9 @@
 
 **Two settle-on-quiet heuristics died on the same fact.** Codex says nothing for ~250 ms and then prints its entire shutdown at once, so a poll that treats silence as completion exits before codex has spoken; both attempts to settle early on quiet lost the hint that way. Polling to the ceiling instead costs nothing, the record being written the moment each command is found.
 
-**Why the capture widens every pane first** (Copilot 1.0.88, macOS, 2026-10-03). Copilot lays its exit summary out for the pane and hard-wraps the `Resume` line below about 74 columns, so in a 40-column split the hint read `copilot --resume=ab5`, the rest of the id two lines down. Minimized panes and unshown Workspaces were also 2 columns wide (fixed separately), where Copilot printed no hint at all. Resizing to 250x50 before the first press makes every agent lay its hint out on one line; the PTYs die right after the capture. The marks wait at least 80 ms after the resize, and up to 200 ms while output is still arriving, because a full-screen program answers it by redrawing what it shows, which can include an old hint; a redraw that starts later still lands in the scan. A resize that throws (a PTY exiting at that moment) is logged and skipped.
+**Why the capture widens every pane first** (Copilot 1.0.88, macOS, 2026-10-03). Copilot lays its exit summary out for the pane and hard-wraps the `Resume` line below about 74 columns, so in a 40-column split the hint read `copilot --resume=ab5`, the rest of the id two lines down. Minimized panes and unshown Workspaces were also 2 columns wide (fixed separately), where Copilot printed no hint at all. Resizing to 250x50 before the first press makes every agent lay its hint out on one line; the PTYs die right after the capture.
 
 **Why widening the scan is not a free optimisation.** Scanning the whole buffer let a stale hint or an old launch echo win. The narrow scan also fails in the safe direction: buffer eviction can only discard fresh output, never promote stale output as fresh.
-
-**Where a missing hint comes from.** A Dormouse launched from inside a Claude Code session inherits `CLAUDE_CODE_CHILD_SESSION`, which disables transcript saving in claude, so it legitimately prints nothing to record.
 
 **The timing measurements** (real pty, codex, 2026-08). Codex is the constraining case because its `^C` is consumed by the input line first:
 
