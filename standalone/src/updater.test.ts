@@ -974,6 +974,7 @@ describe('updater', () => {
 
     it('openUrl revalidates every URL it launches, as an adapter does', async () => {
       openUrl('javascript:alert(1)', 'test');
+      openUrl('ms-msdt:x', 'test');
       await vi.advanceTimersByTimeAsync(0);
       expect(mocks.shellOpen).not.toHaveBeenCalled();
     });

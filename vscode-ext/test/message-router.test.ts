@@ -36,6 +36,17 @@ vi.mock('../src/iframe-proxy-host', () => ({
   releaseIframeProxyLease: iframeProxy.release,
 }));
 
+/** What the router hands VS Code's external opener. */
+const opened = vi.hoisted(() => [] as string[]);
+vi.mock('vscode', async (importOriginal) => {
+  const stub = await importOriginal<typeof import('./vscode-stub')>();
+  return {
+    ...stub,
+    Uri: { ...stub.Uri, parse: (value: string) => ({ value }) },
+    env: { openExternal: async (uri: { value: string }) => { opened.push(uri.value); return true; } },
+  };
+});
+
 vi.mock('../src/peer-link', () => ({
   configurePeerLink: (deps: PeerLinkDeps) => {
     wiring.peer = deps;
@@ -206,6 +217,22 @@ it('forwards an OSC 367 open only from the run a launch write started', () => {
     ptys.callbacks!.onData('tool-open', `${run}${open('/after')}`);
     expect(owner.posted.flatMap(message => message.type === 'terminal:toolEvents' ? message.events : [])
       .flatMap(event => event.kind === 'toolOpen' ? [event.open.path] : [])).toEqual(['/launched']);
+  } finally {
+    attached.dispose();
+  }
+});
+
+// The webview's confirmation is consent, not validation: the extension host
+// refuses what `normalizeExternalUri` refuses (docs/specs/security-local.md).
+it('revalidates an external open in the extension host, refusing the schemes the dialog refuses', () => {
+  const webview = fakeWebview();
+  const attached = router.attachRouter(webview.channel, {});
+  opened.length = 0;
+  try {
+    for (const uri of ['ms-msdt:x', 'search-ms:query=x', 'javascript:alert(1)', 'vscode://file/x.ts', 'https://example.com/']) {
+      webview.send({ type: 'dormouse:openExternal', uri });
+    }
+    expect(opened).toEqual(['vscode://file/x.ts', 'https://example.com/']);
   } finally {
     attached.dispose();
   }
