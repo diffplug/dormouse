@@ -16,11 +16,9 @@
 - **Must retain exited output**, offer Reset, and avoid automatic restart loops.
 - **Must pause status and process-inspection polling while the context is hidden**, its Workspace out of view included, invalidating cached idle results. Reopening publishes current terminal status; source closure inspects work on demand.
 
-**Must carry one status line per helper state**, offering Reset in place of Modify only for user-touched or exited helpers.
+**Must make Reset an explicit discard**, confirmed first; under Labs it asks nothing and the old helper becomes a pending kill (`docs/specs/reopen.md` → "Labs: No-confirm delayed kill"), which the host stops counting as the source's one helper until a restore re-owns it. Cancellation changes nothing; confirmation disposes the old helper and launches a fresh one using the source's current directory and current global setting. Stale timers cannot write to the replacement.
 
-**Must make Reset an explicit discard**, confirming loss of scrollback, unfinished input, running programs, and unsaved edits; under Labs it asks nothing and the old helper becomes a pending kill (`docs/specs/reopen.md` → "Labs: No-confirm delayed kill"), which the host stops counting as the source's one helper until a restore re-owns it. Cancellation changes nothing; confirmation disposes the old helper and launches a fresh one using the source's current directory and current global setting. Stale timers cannot write to the replacement.
-
-Source of truth: `openHelper` / `helperHasWork` / `disposeHelper` / `closeHelperParent` in `lib/src/lib/helper-terminal.ts`; `markSessionTouched` / `parkElement` in `lib/src/lib/terminal-lifecycle.ts`; `HELPER_STATUS` — the state, its status line, and whether it offers Reset — in `lib/src/components/wall/TerminalContextView.tsx`. Tests: `lib/src/lib/helper-terminal.test.ts`.
+Source of truth: `openHelper` / `helperHasWork` / `disposeHelper` / `closeHelperParent` in `lib/src/lib/helper-terminal.ts`; `markSessionTouched` / `parkElement` in `lib/src/lib/terminal-lifecycle.ts`. Tests: `lib/src/lib/helper-terminal.test.ts`.
 
 ## Promotion and source closure
 
@@ -42,21 +40,17 @@ Source of truth: `beginPromotion` / `cancelPromotion` / `finishPromotion` / `hel
 
 **Must accept only a single command line of at most 4096 characters**, excluding CR, LF, and NUL. The host persists only this preference in `~/.dormouse/helper-terminal.json`, using atomic replacement with private file permissions. All desktop renderers read that shared preference through the host; the fake adapter keeps a deterministic in-memory setting.
 
-**Must enforce command validity at the host.** A rejected edit keeps the prior preference and displays the error in Modify.
+**Must enforce command validity at the host.** A rejected edit keeps the prior preference.
 
 Source of truth: `context` in `standalone/sidecar/pty-core.js`; `terminalContext` in `lib/src/lib/platform/fake-adapter.ts`; `TerminalContextRequest` in `lib/src/lib/terminal-context-types.ts`.
 
 ## Presentation coverage
 
-**Must share the context presentation between the live menu and its state gallery.**
-
 **Must make diagnostic text drag-selectable**, including detail-dialog errors, without focusing the helper. Copy routing follows `docs/specs/mouse-and-clipboard.md` → "Terminal context input".
 
-**Must suppress xterm's auto-revealed scrollbar in visual snapshots**, while retaining terminal scrolling and layout.
+Port action overflow follows `docs/specs/layout.md` → "Header context menu".
 
-**Must name the panel's terminal, Tool or helper, at every width.** **Must fit every control inside the panel at its minimum width, label included.** Port action overflow follows `docs/specs/layout.md` → "Header context menu". The gallery's play check measures each button against the panel and against its own box.
-
-Source of truth: `TerminalContextView` in `lib/src/components/wall/TerminalContextView.tsx`; `lib/src/stories/TerminalContext.stories.tsx` supplies sample output; `lib/src/stories/Wall.stories.tsx` exercises the live helper. `lib/src/stories/HelperPlacement.stories.tsx` checks rendered placement and real xterm input/focus retention; the gallery checks narrow controls and always-visible details. `visualSnapshot` in `lib/.storybook/preview.ts` suppresses scrollbar paint. Tests: `lib/src/lib/platform/fake-adapter-helper.test.ts`.
+Source of truth: `TerminalContextView` in `lib/src/components/wall/TerminalContextView.tsx`; `lib/src/stories/Wall.stories.tsx` exercises the live helper. `lib/src/stories/HelperPlacement.stories.tsx` checks rendered placement and real xterm input/focus retention. Tests: `lib/src/lib/platform/fake-adapter-helper.test.ts`.
 
 The Window-host workspace picker follows `docs/specs/layout.md` → Moving Surfaces between Workspaces.
 
