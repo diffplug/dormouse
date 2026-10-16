@@ -230,8 +230,8 @@ export default function DocsLayout({
   }, [navOpen]);
 
   const { current, prev, next } = docsRailPosition(activePath);
-  // Three of five pages name themselves exactly as the rail does; the two that
-  // differ pass their own, so the rail label stays the one owner of the rest.
+  // A page that names itself differently from the rail passes its own title;
+  // the rail label stays the one owner of the rest.
   const heading = title ?? current?.label ?? "";
 
   return (

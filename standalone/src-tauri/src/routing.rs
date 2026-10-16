@@ -25,7 +25,7 @@ pub const AWAITING_REPLAY_MAX: Duration = Duration::from_secs(5);
 /// target's own collection times out at 3 s and a torn-out window boots in
 /// well under this; past it the target webview is wedged, and its shells
 /// would otherwise stay silent in the source forever.
-/// Must remain below `CLOSE_WORKSPACE_TIMEOUT_MS` in `dor/src/control-client.ts`,
+/// Must remain below `CLOSE_WORKSPACE_TIMEOUT_MS` in `dor/src/control-methods.ts`,
 /// so a hand-back reaches the CLI before its transport deadline.
 pub const ARRIVAL_MAX: Duration = Duration::from_secs(20);
 

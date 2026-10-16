@@ -3,9 +3,9 @@
  *
  * A `TocEntry` is a link to an anchor on the page it belongs to, so every id
  * the rail names must be an id that page actually renders — nested entries
- * included. The seven pages produce their entries four different ways (a
- * Markdown generator, a JSON changelog, a hand-written section list), which is
- * exactly why the check belongs here once rather than in each page's own test.
+ * included. The pages produce their entries different ways (a Markdown
+ * generator, a JSON changelog, a hand-written section list), which is exactly
+ * why the check belongs here once rather than in each page's own test.
  */
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter, Route, Routes } from "react-router";

@@ -3,10 +3,9 @@
  * (docs/specs/relay.md -> "Routing"): one Noise IK ceremony between a fake Client
  * and a fake Burrow, with both statics injected by the test.
  *
- * What it proves, in the order the scope asks for it
- * (docs/specs/remote-security-model.md -> `## Future` -> **Scope:
- * e2e-client-burrow**, stage 3): prologue and transcript binding, directional
- * cipher states, counters, framing, and tamper rejection. Its routing half —
+ * What it proves (docs/specs/remote-security-model.md -> "Noise suite"):
+ * prologue and transcript binding, directional cipher states, counters,
+ * framing, and tamper rejection. Its routing half —
  * teardown, relay opacity, the binding, and the relay's own bounds — is the
  * cases every Relay passes (`remote-lib-common/test/harness/relay-parity.mjs`),
  * registered at the end. The framing in isolation is
