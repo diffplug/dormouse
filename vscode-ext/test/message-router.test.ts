@@ -7,7 +7,7 @@
  */
 
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 
 import type { ExtensionMessage, WebviewMessage } from '../src/message-types';
 import type { AlertCommand } from '../../lib/src/host/alert-protocol';
@@ -15,6 +15,7 @@ import type { PeerLinkDeps } from '../src/peer-link';
 import type { BurrowDeps } from '../src/burrow';
 import type { WebviewChannel } from '../src/webview-messaging';
 import { openSequence } from 'dor-tools-lib/osc';
+import { removeDir, tempStorageDir } from './helpers';
 
 /** What `message-router.ts` hands the two modules it configures at load. */
 const wiring = vi.hoisted(() => ({
@@ -74,6 +75,7 @@ vi.mock('../src/pty-manager', async (importOriginal) => ({
   },
   spawn: (id: string) => { ptys.buffered.set(id, { alive: true }); },
   getBufferedPtys: () => new Map(ptys.buffered),
+  ptyIds: () => ptys.buffered.keys(),
   getCwd: async (id: string) => {
     ptys.cwdAsked.push(id);
     await ptys.cwdWait;
@@ -234,6 +236,36 @@ it('revalidates an external open in the extension host, refusing the schemes the
   } finally {
     attached.dispose();
   }
+});
+
+/** Activation's counter, in a throwaway `globalStorageUri`. */
+async function activateSurfaceIds(): Promise<void> {
+  const storage = await tempStorageDir();
+  onTestFinished(() => removeDir(storage));
+  (await import('../src/surface-ids')).initSurfaceIds(storage);
+}
+
+it('answers a Surface id reservation from the install counter, by request id', async () => {
+  await activateSurfaceIds();
+  const webview = fakeWebview();
+  const disposable = router.attachRouter(webview.channel, {});
+  try {
+    webview.send({ type: 'surface:reserveIds', count: 2, floor: 41, requestId: 'req-7' });
+    await vi.waitFor(() => expect(webview.posted).toContainEqual({ type: 'surface:reservedIds', ids: ['surface:42', 'surface:43'], requestId: 'req-7' }));
+  } finally { disposable.dispose(); }
+});
+
+it('reserves above every Surface PTY this extension host holds, whatever floor the asking panel restored', async () => {
+  await activateSurfaceIds();
+  const sibling = fakeWebview();
+  const asking = fakeWebview();
+  const disposables = [router.attachRouter(sibling.channel, {}), router.attachRouter(asking.channel, {})];
+  try {
+    sibling.send({ type: 'pty:spawn', id: 'surface:90', options: { cwd: '/repo' } });
+    sibling.send({ type: 'pty:spawn', id: 'surface-uuid', options: { cwd: '/repo' } });
+    asking.send({ type: 'surface:reserveIds', count: 1, floor: 5, requestId: 'req-8' });
+    await vi.waitFor(() => expect(asking.posted).toContainEqual({ type: 'surface:reservedIds', ids: ['surface:91'], requestId: 'req-8' }));
+  } finally { for (const disposable of disposables) disposable.dispose(); }
 });
 
 // The colour cache answers OSC 10/11/12 from the last whole theme push, exactly
@@ -800,12 +832,12 @@ it('holds a webview\'s iframe leases under its router, and ends them with it', (
   const disposable = router.attachRouter(webview.channel);
   const otherDisposable = router.attachRouter(other.channel);
   try {
-    webview.send({ type: 'iframe:createProxyUrl', url: 'http://localhost:5173/', embedderOrigins: [], lease: 'surface-1#a', requestId: 'r1' });
-    other.send({ type: 'iframe:createProxyUrl', url: 'http://localhost:5173/', embedderOrigins: [], lease: 'surface-1#a', requestId: 'r2' });
+    webview.send({ type: 'iframe:createProxyUrl', url: 'http://localhost:5173/', embedderOrigins: [], lease: 'surface:1#a', requestId: 'r1' });
+    other.send({ type: 'iframe:createProxyUrl', url: 'http://localhost:5173/', embedderOrigins: [], lease: 'surface:1#a', requestId: 'r2' });
     const [owner, otherOwner] = iframeProxy.create.mock.calls.map(([, , lease]) => (lease as { owner: string; id: string }).owner);
     expect(owner).not.toBe(otherOwner);
-    webview.send({ type: 'iframe:releaseProxy', lease: 'surface-1#a' });
-    expect(iframeProxy.release).toHaveBeenLastCalledWith(owner, 'surface-1#a');
+    webview.send({ type: 'iframe:releaseProxy', lease: 'surface:1#a' });
+    expect(iframeProxy.release).toHaveBeenLastCalledWith(owner, 'surface:1#a');
     webview.send({ type: 'dormouse:init' });
     expect(iframeProxy.release).toHaveBeenLastCalledWith(owner);
     iframeProxy.release.mockClear();

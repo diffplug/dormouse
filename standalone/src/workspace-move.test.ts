@@ -110,7 +110,7 @@ function payload(overrides: Partial<WorkspaceTransferPayload> = {}): WorkspaceTr
       name: "Deploys",
       nameIsAuto: false,
       session: {
-        version: 3,
+        version: 4,
         panes: [{ id: "pane-a", title: "a", cwd: "/tmp", untouched: false, alert: null }],
       },
     },
@@ -938,8 +938,8 @@ describe("a torn-out window's boot", () => {
     const platform = fakePlatform();
     arrivals = [payload()];
     (platform as unknown as { getWindowState: () => unknown }).getWindowState = () => ({
-      version: 1,
-      workspaces: [{ id: "saved", name: "Saved", session: { version: 3, panes: [] } }],
+      version: 2,
+      workspaces: [{ id: "saved", name: "Saved", session: { version: 4, panes: [] } }],
       activeWorkspaceId: "saved",
     });
 

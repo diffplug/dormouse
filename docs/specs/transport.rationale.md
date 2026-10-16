@@ -70,6 +70,10 @@ Release-without-kill is a separate verb rather than a flag on the closure path b
 
 **The per-store tax.** Each app-global store relayed webview↔host this way costs one `PlatformAdapter` push method, an on/off listener pair, two `AlertCommand` ops and an event, and a host coordinator with its own subscribe/unsubscribe. Two are worth paying that twice for the directness; at a third, the keyed channel + key→normalizer registry is cheaper than another copy of the plumbing.
 
+## Surface ids
+
+**Why an unparseable counter file is overwritten, but an unreadable or other-version one is not.** Every write is atomic, so a file this version cannot parse comes only from outside damage; refusing it would leave every launch on opaque ids until someone deleted the file by hand, while overwriting it from the host's disk scan (standalone) or its own counter and the webview's floor (VS Code) risks reusing only numbers no restored Surface holds. A read that fails (a Windows virus scanner's `EBUSY`) is usually transient, and another version's file may hold a mark this build cannot read; overwriting either could lower the mark under numbers already handed out (decided 2026-10-11).
+
 ## Persisted session types
 
 **Why the collector debounces on top of each Wall's own debounce.** Each Wall coalesces its own record; the second stage coalesces *across* Walls, so one window-wide event (a store change, a theme push, a burst of output in two Workspaces) becomes one host write rather than one per Workspace.
@@ -78,9 +82,9 @@ Release-without-kill is a separate verb rather than a flag on the closure path b
 
 ## Retiring the transcripts already on disk
 
-**The legacy blobs are real, not hypothetical.** Every pre-upgrade installation had a transcript-bearing snapshot in `workspaceState` or the standalone file store, so the drop-on-read in `readPersistedSession` and the orphan-temp sweep are live migration paths, not dead defensive code.
+**The legacy blobs are real, not hypothetical.** Every pre-upgrade installation had a transcript-bearing snapshot in `workspaceState` or the standalone file store. Each is of a format this build discards, so the boot and activation deletes, a panel's first save over its blob, and the orphan-temp sweep are what take its bytes off the disk.
 
-**Why standalone stopped deleting its snapshot at boot.** Deleting was right only while nothing read the store: once the app restores its windows, an unconditional boot delete is a data-loss bug, not a migration. What the delete uniquely covered — a `.json.tmp` no reader can see and no writer will ever overwrite — is exactly what the sweep still covers, and nothing else. Older debug snapshots outside the new subtree no longer enter the frontend read-and-save migration. Deleting them would also remove layouts that may belong to an installed build, so debug startup scrubs only the obsolete pane scrollback fields atomically and preserves other state.
+**Why standalone stopped deleting every snapshot at boot.** Deleting was right only while nothing read the store: once the app restores its windows, an unconditional boot delete is a data-loss bug, not a migration; the boot delete that remains takes only another format's. What the unconditional delete uniquely covered — a `.json.tmp` no reader can see and no writer will ever overwrite — is exactly what the sweep still covers. Older debug snapshots sit outside the new subtree, and deleting them would remove layouts that may belong to an installed build, so debug startup scrubs only the obsolete pane scrollback fields atomically and preserves other state.
 
 ## The governing rule
 

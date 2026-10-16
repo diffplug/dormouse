@@ -69,7 +69,7 @@ describe('restoreSession', () => {
     // The command comes from the host's boot payload, keyed by pane id — never
     // from the persisted pane, which no longer carries one.
     const saved: PersistedSession = {
-      version: 3,
+      version: 4,
       panes: [
         { id: 'pane-a', title: 'A', cwd: null, untouched: false },
         { id: 'pane-b', title: 'B', cwd: null, untouched: false },
@@ -90,7 +90,7 @@ describe('restoreSession', () => {
 
   it('resumes nothing when the host captured nothing', () => {
     const saved: PersistedSession = {
-      version: 3,
+      version: 4,
       panes: [{ id: 'pane-a', title: 'A', cwd: null, untouched: false }],
     };
 
@@ -104,7 +104,7 @@ describe('restoreSession', () => {
 
   it('never replays a transcript — restore carries no scrollback at all', () => {
     const saved: PersistedSession = {
-      version: 3,
+      version: 4,
       panes: [{ id: 'pane-a', title: 'A', cwd: null, untouched: false }],
     };
 
@@ -116,7 +116,7 @@ describe('restoreSession', () => {
 
   it('restores no terminal, and so no resume, for a browser surface', () => {
     const saved: PersistedSession = {
-      version: 3,
+      version: 4,
       panes: [
         // Routing keys off surface kind, so a captured command for a browser pane
         // is simply never reached.
@@ -135,9 +135,9 @@ describe('restoreSession', () => {
       args: ['-NoLogo'],
     });
     const saved: PersistedSession = {
-      version: 3,
+      version: 4,
       panes: [
-        { id: 'pane-a', title: 'Pane A', cwd: 'C:\\repo' },
+        { id: 'pane-a', title: 'Pane A', cwd: 'C:\\repo', untouched: false },
       ],
     };
 
@@ -155,7 +155,7 @@ describe('restoreSession', () => {
 
   it('seeds restored untouched state', () => {
     const saved: PersistedSession = {
-      version: 3,
+      version: 4,
       panes: [
         { id: 'pane-a', title: 'Pane A', cwd: null, untouched: true },
       ],
@@ -170,7 +170,7 @@ describe('restoreSession', () => {
 
   it('does not spawn a terminal for a browser surface, but keeps it in paneIds', () => {
     const saved: PersistedSession = {
-      version: 3,
+      version: 4,
       lathLayout: {
         version: 1,
         tree: { root: { kind: 'split', dir: 'row', children: [
@@ -198,7 +198,7 @@ describe('restoreSession', () => {
 
   it('respawns a restored tool command with integration gating', () => {
     const saved: PersistedSession = {
-      version: 3,
+      version: 4,
       panes: [{
         id: 'pane-tool',
         title: 'storybook',
@@ -227,7 +227,7 @@ describe('restoreSession', () => {
     const argv = ['program path', "it's.txt"];
     for (const placement of ['layout', 'fallback', 'door']) {
       const saved: PersistedSession = {
-        version: 3,
+        version: 4,
         panes: [{ id: 'tool', title: 'Viewer', cwd: '/repo', untouched: false, surfaceType: 'tool', command: oldCommand,
           tool: { render: 'iframe', port: 'announced', argv } }],
         ...(placement === 'layout' ? { lathLayout: {
@@ -248,12 +248,12 @@ describe('restoreSession', () => {
   it('retains literal shell commands when the selected restore shell changes', () => {
     terminalRegistryMocks.getDefaultShellOpts.mockReturnValue({ shell: 'pwsh.exe' });
     const command = 'echo "$HOME" | cat';
-    restoreSession(createPlatform({ version: 3, panes: [{ id: 'tool', title: 'Literal', cwd: '/repo', untouched: false, surfaceType: 'tool', command }] }));
+    restoreSession(createPlatform({ version: 4, panes: [{ id: 'tool', title: 'Literal', cwd: '/repo', untouched: false, surfaceType: 'tool', command }] }));
     expect(terminalRegistryMocks.restoreTerminal).toHaveBeenCalledWith('tool', expect.objectContaining({ command, shell: 'pwsh.exe' }));
   });
 
   it.each(['\t', '\n', '\r', '\x1b'])('rejects control-bearing saved Tool argv before any terminal is restored (%j)', control => {
-    const saved: PersistedSession = { version: 3, panes: [{ id: 'tool', title: 'Unsafe', cwd: '/repo', untouched: false, surfaceType: 'tool', command: 'safe fallback',
+    const saved: PersistedSession = { version: 4, panes: [{ id: 'tool', title: 'Unsafe', cwd: '/repo', untouched: false, surfaceType: 'tool', command: 'safe fallback',
       tool: { render: 'iframe', port: 'announced', argv: ['program', `file${control}command`] } }] };
     expect(restoreSession(createPlatform(saved))).toBeNull();
     expect(restoreSession(createPlatform(null), { savedSession: saved })).toBeNull();
@@ -267,7 +267,7 @@ describe('restoreSession', () => {
   }])('omits visible browsers from terminal fallback for an unusable layout: %j', (lathLayout) => {
     const doors = [{ id: 'door-web', title: 'Browser door', component: 'browser', params: { renderMode: 'iframe', url: 'http://localhost:5173' } }];
     const result = restoreSession(createPlatform({
-      version: 3,
+      version: 4,
       lathLayout,
       doors,
       panes: [
@@ -289,7 +289,7 @@ describe('restoreSession', () => {
       leafMeta: { 'pane-a': { component: 'terminal', tabComponent: 'terminal', title: 'A' } },
     };
     const saved: PersistedSession = {
-      version: 3,
+      version: 4,
       lathLayout,
       panes: [
         { id: 'pane-a', title: 'A', cwd: null, untouched: false },
@@ -301,55 +301,9 @@ describe('restoreSession', () => {
     expect(result?.lathLayout).toEqual(lathLayout);
   });
 
-  it('restores workspace-scoped dor surface refs and the next-ref counter', () => {
-    const saved: PersistedSession = {
-      version: 3,
-      surfaceRefs: { 'pane-a': 'surface:1', 'closed-pane': 'surface:2' },
-      surfaceRefsNext: 9,
-      panes: [
-        { id: 'pane-a', title: 'A', cwd: null, untouched: false },
-      ],
-    };
-
-    const result = restoreSession(createPlatform(saved));
-
-    expect(result?.surfaceRefs).toEqual({ 'pane-a': 'surface:1', 'closed-pane': 'surface:2' });
-    expect(result?.surfaceRefsNext).toBe(9);
-  });
-
-  it('discards a malformed next-ref counter without rejecting the session', () => {
-    const saved = {
-      version: 3,
-      surfaceRefs: { 'pane-a': 'surface:1' },
-      surfaceRefsNext: 0,
-      panes: [
-        { id: 'pane-a', title: 'A', cwd: null, untouched: false },
-      ],
-    } as unknown as PersistedSession;
-
-    const result = restoreSession(createPlatform(saved));
-
-    expect(result?.surfaceRefs).toEqual({ 'pane-a': 'surface:1' });
-    expect(result?.surfaceRefsNext).toBeUndefined();
-  });
-
-  it('discards malformed dor surface refs without rejecting the session', () => {
-    const saved = {
-      version: 3,
-      surfaceRefs: { 'pane-a': 'pane:1', 'pane-b': 'surface:2' },
-      panes: [
-        { id: 'pane-a', title: 'A', cwd: null, untouched: false },
-      ],
-    } as unknown as PersistedSession;
-
-    const result = restoreSession(createPlatform(saved));
-
-    expect(result?.surfaceRefs).toEqual({ 'pane-b': 'surface:2' });
-  });
-
   it('restores browser surface TODO from the persisted alert during cold restore', () => {
     const saved: PersistedSession = {
-      version: 3,
+      version: 4,
       panes: [
         {
           id: 'pane-web',
@@ -380,7 +334,7 @@ describe('restoreSession', () => {
 
 
 it('recovers Tool metadata from pane rows when its layout is unusable', () => {
-  const restored = restoreSession(createPlatform({ version: 3, panes: [
+  const restored = restoreSession(createPlatform({ version: 4, panes: [
     { id: 'tool', title: 'Storybook', cwd: '/repo', untouched: false, surfaceType: 'tool', command: 'pnpm storybook', tool: { render: 'iframe', port: 'auto', name: 'storybook', key: ['storybook', '/repo'] } },
     { id: 'web', title: 'Web', cwd: null, untouched: false, surfaceType: 'browser' },
   ] }));
@@ -392,13 +346,13 @@ it('recovers Tool metadata from pane rows when its layout is unusable', () => {
 it.each(['absent', 'corrupt'] as const)('preserves multiple Tool kinds through engine hydration with %s geometry', geometry => {
   vi.clearAllMocks();
   const restored = restoreSession(createPlatform({
-    version: 3,
+    version: 4,
     lathLayout: geometry === 'corrupt' ? { version: 1, tree: { root: {} }, leafMeta: {} } : undefined,
     panes: [
-      { id: 'tool-a', title: 'A', cwd: '/repo', surfaceType: 'tool', command: 'pnpm storybook', tool: { render: 'iframe', port: 'auto' } },
-      { id: 'shell', title: 'Shell', cwd: '/repo' },
-      { id: 'tool-b', title: 'B', cwd: '/repo', surfaceType: 'tool', command: 'pnpm dev', tool: { render: 'agent-browser-screencast', port: 'announced' } },
-      { id: 'web', title: 'Web', cwd: null, surfaceType: 'browser' },
+      { id: 'tool-a', title: 'A', cwd: '/repo', untouched: false, surfaceType: 'tool', command: 'pnpm storybook', tool: { render: 'iframe', port: 'auto' } },
+      { id: 'shell', title: 'Shell', cwd: '/repo', untouched: false },
+      { id: 'tool-b', title: 'B', cwd: '/repo', untouched: false, surfaceType: 'tool', command: 'pnpm dev', tool: { render: 'agent-browser-screencast', port: 'announced' } },
+      { id: 'web', title: 'Web', cwd: null, untouched: false, surfaceType: 'browser' },
     ],
   }));
   expect(restored?.paneIds).toEqual(['tool-a', 'shell', 'tool-b']);
@@ -414,7 +368,7 @@ it.each(['absent', 'corrupt'] as const)('preserves multiple Tool kinds through e
 });
 
 it('restores the preview slot mark and open target from pane rows when its layout is unusable', () => {
-  const restored = restoreSession(createPlatform({ version: 3, panes: [
+  const restored = restoreSession(createPlatform({ version: 4, panes: [
     { id: 'slot', title: 'viewer', cwd: '/repo', untouched: false, surfaceType: 'tool', command: 'view /repo/a.md',
       tool: { render: 'iframe', port: 'announced', name: 'viewer', argv: ['view', '/repo/a.md'], preview: true, target: '/repo/a.md' } },
   ] }));
@@ -426,7 +380,7 @@ it.each([
   ['a non-string target', { target: 7 }],
   ['a false mark', { preview: false }],
 ])('rejects a saved Tool row with %s before any terminal is restored', (_case, fields) => {
-  const saved = { version: 3, panes: [{ id: 'slot', title: 'viewer', cwd: '/repo', untouched: false, surfaceType: 'tool', command: 'view',
+  const saved = { version: 4, panes: [{ id: 'slot', title: 'viewer', cwd: '/repo', untouched: false, surfaceType: 'tool', command: 'view',
     tool: { render: 'iframe', port: 'announced', ...fields } }] } as unknown as PersistedSession;
   expect(restoreSession(createPlatform(saved))).toBeNull();
   expect(terminalRegistryMocks.restoreTerminal).not.toHaveBeenCalled();
@@ -445,7 +399,7 @@ describe('restoreSession alert seeding', () => {
 
   it('spawns a terminal pane with its persisted TODO and leaves browser panes to the todo restore', () => {
     const saved: PersistedSession = {
-      version: 3,
+      version: 4,
       panes: [
         { id: 'shell', title: 'Shell', cwd: '/tmp', untouched: false, alert },
         { id: 'quiet', title: 'Quiet', cwd: '/tmp', untouched: false },
@@ -463,7 +417,7 @@ describe('restoreSession alert seeding', () => {
 
   it('keeps a pane whose notification this build cannot read, seeding its TODO without the detail', () => {
     const saved = {
-      version: 3,
+      version: 4,
       panes: [
         {
           id: 'newer',
@@ -482,11 +436,11 @@ describe('restoreSession alert seeding', () => {
 
   it('restores the record it is handed with the commands it is handed', () => {
     const given: PersistedSession = {
-      version: 3,
+      version: 4,
       panes: [{ id: 'given', title: 'Given', cwd: '/w', untouched: false }],
     };
     const platform = createPlatform(
-      { version: 3, panes: [{ id: 'slot', title: 'Slot', cwd: null, untouched: false }] },
+      { version: 4, panes: [{ id: 'slot', title: 'Slot', cwd: null, untouched: false }] },
       { given: 'claude --resume xyz' },
     );
 

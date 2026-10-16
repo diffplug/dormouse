@@ -43,6 +43,15 @@ peerDependencyRules:
     # node-ws release widens the range; `relay/test/*.test.mjs` covers the relay
     # sockets that would break first.
     "@hono/node-ws>@hono/node-server": ^2.0.0
+    # Storybook 11.0.0-alpha.5 narrowed its optional `typescript` peer to
+    # `^5.9.0 || ^6.0.0`, because only its TypeScript-API docgen engines read
+    # it and TypeScript 7 (our compiler) ships no classic compiler API. Neither
+    # Storybook config selects those engines, so stories and argTypes still
+    # come from the default react-docgen. Only the new component-manifest
+    # docgen server, which switches on whenever `typescript` resolves, meets
+    # the missing API. Drop this when Storybook's range includes 7.
+    "@storybook/react>typescript": ^7.0.0
+    "@storybook/react-vite>typescript": ^7.0.0
 minimumReleaseAge: 1440
 minimumReleaseAgeExclude:
   - pgstencil

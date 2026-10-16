@@ -143,7 +143,7 @@ Source of truth: `LathHost` in `lib/src/components/wall/LathHost.tsx`.
 - A retarget mid-flight starts every leaf from its current interpolated frame, so motion is interruptible. Hand-placed geometry (sash commits, container resizes) snaps.
 - **Must derive add/insert hints from the opposite placement edge, and reattach hints from the opposite token edge.**
 - **Must prefer a parked leaf's held rect over an explicit enter hint, and an explicit hint over a derived one** (rationale).
-- **Exit is two-phase**: `markDying` fades the leaf in place with its DOM still mounted, then `store.removeLeaf` commits before `disposeSession` and survivors tween into the space. **Must forget the surface ref only after the removal** (rationale). A second kill of a dying leaf is a no-op, and a dying leaf takes no pointer input.
+- **Exit is two-phase**: `markDying` fades the leaf in place with its DOM still mounted, then `store.removeLeaf` commits before `disposeSession` and survivors tween into the space. A second kill of a dying leaf is a no-op, and a dying leaf takes no pointer input.
 - Reduced motion is the same code path with zero duration (`motionIsInstant()`). **There is no CSS entrance/exit path.** **Must re-assert the current frames after every React commit while unsettled** (rationale).
 
 Source of truth: `createAnimator` in `lib/src/lib/lath/animator.ts`; the animator ownership in `lib/src/components/wall/lath-wall-engine.ts`.

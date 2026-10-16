@@ -4,7 +4,7 @@ Invocation: `dor ensure --help`
 
 ```text
 USAGE
-  dor ensure [--json] [--minimize] [--restart] [--surface id|ref] [--cwd path] [--workspace ref] -- <command>...
+  dor ensure [--json] [--minimize] [--restart] [--surface handle] [--cwd path] [--workspace ref] -- <command>...
   dor ensure --help
 
 Ensures one surface in the current workspace is running the given command at the given path. If it's already running, no-op. If it isn't, then it creates a split and runs the command.
@@ -35,8 +35,7 @@ Text output:
 JSON output:
   {
     "status": "created",
-    "surface_id": "pane-def",
-    "surface_ref": "surface:3",
+    "surface_id": "surface:3",
     "command": "npm run dev",
     "cwd": "/Users/me/projects/site",
     "minimized": false

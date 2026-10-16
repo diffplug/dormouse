@@ -7,8 +7,8 @@ import {
   type VisibleVarOrigin,
   type VscodeThemeVarTraceOrigin,
 } from '../lib/themes';
+import { CopyButton } from './CopyButton';
 import { NativeModalDialog } from './design';
-import { writeTextToClipboard } from '../lib/clipboard';
 
 export const OPEN_THEME_DEBUGGER_EVENT = 'dormouse:openThemeDebugger';
 
@@ -183,7 +183,6 @@ function DynamicPicks({ snapshot }: { snapshot: ThemeDiagnosticSnapshot }) {
 /** Mount only while open (`NativeModalDialog`); each open captures a fresh snapshot. */
 export function ThemeDebuggerDialog({ onClose }: { onClose: () => void }) {
   const [snapshot, setSnapshot] = useState(captureThemeDiagnostics);
-  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     const refresh = () => setSnapshot(captureThemeDiagnostics());
@@ -192,16 +191,6 @@ export function ThemeDebuggerDialog({ onClose }: { onClose: () => void }) {
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style'] });
     return () => observer.disconnect();
   }, []);
-
-  useEffect(() => {
-    if (!copied) return;
-    const timeout = setTimeout(() => setCopied(false), 1400);
-    return () => clearTimeout(timeout);
-  }, [copied]);
-
-  const copyReport = async () => {
-    if (await writeTextToClipboard(snapshot.report)) setCopied(true);
-  };
 
   return (
     <NativeModalDialog
@@ -218,14 +207,12 @@ export function ThemeDebuggerDialog({ onClose }: { onClose: () => void }) {
                 : `VSCode host theme - ${snapshot.themeKind}`}
             </p>
           </div>
-          <button
-            type="button"
-            onClick={copyReport}
+          <CopyButton
+            text={() => snapshot.report}
+            label="Copy report"
+            icon={<ClipboardTextIcon size={14} weight="bold" />}
             className="flex h-7 items-center gap-1.5 rounded px-2 text-sm text-app-fg transition-colors hover:bg-surface-raised disabled:opacity-50"
-          >
-            <ClipboardTextIcon size={14} weight="bold" />
-            {copied ? 'Copied' : 'Copy report'}
-          </button>
+          />
           <button
             type="button"
             onClick={onClose}

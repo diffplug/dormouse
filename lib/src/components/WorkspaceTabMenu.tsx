@@ -8,10 +8,10 @@ import { nameWorkspace, pinWorkspace, requestWorkspaceClose, requestWorkspaceRen
 import { stepFocus } from './focus-step';
 import { writeTextToClipboard } from '../lib/clipboard';
 import { closeWorkspaceMenu, type WorkspaceMenu } from '../lib/workspace-ui-store';
-import { workspaceRefFor, type WorkspaceMeta } from '../lib/workspace-store';
+import { type WorkspaceMeta } from '../lib/workspace-store';
 import type { WorkspaceId } from '../lib/session-types';
 
-/** Fixed for the anchor's start/end flip; a long ref truncates. */
+/** Fixed for the anchor's start/end flip; a long id truncates. */
 const MENU_WIDTH_PX = 224;
 
 interface MenuItem {
@@ -70,7 +70,7 @@ export function WorkspaceTabMenu({
     { key: 'rename', label: 'Rename', restoresFocus: false, run: () => requestWorkspaceRename(id) },
     ...(workspace.nameIsAuto ? [] : [{ key: 'auto-name', label: 'Use automatic name', run: () => { nameWorkspace(id, null); } }]),
     { key: 'pin', label: pinned ? 'Unpin' : 'Pin right', run: () => { pinWorkspace(id, !pinned); } },
-    { key: 'copy-ref', label: 'Copy ref', hint: workspaceRefFor(id), run: () => { void writeTextToClipboard(workspaceRefFor(id)); } },
+    { key: 'copy-id', label: 'Copy id', hint: id, run: () => { void writeTextToClipboard(id); } },
     ...(onMoveToNewWindow ? [{ key: 'new-window', label: 'Move to new window', run: () => onMoveToNewWindow(id) }] : []),
     {
       key: 'close',

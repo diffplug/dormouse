@@ -2,8 +2,7 @@ exitCode: 0
 stdout:
 {
   "status": "created",
-  "workspace_id": "workspace-9f3a",
-  "workspace_ref": "workspace:3",
+  "workspace_id": "workspace:3",
   "name": "Workspace 3"
 }
 

@@ -429,7 +429,7 @@ describe('connecting, end to end', () => {
     await harness.client.connect(harness.burrowId);
 
     const chunks: TerminalDataEvent[] = [];
-    await harness.client.attach('surface-1', 80, 24, { onData: (event) => chunks.push(event) });
+    await harness.client.attach('surface:1', 80, 24, { onData: (event) => chunks.push(event) });
 
     // The pair travels whole: splitting it here is what left Pocket feeding
     // image base64 to the prompt heuristic (docs/specs/remote-api.md).
@@ -959,8 +959,8 @@ describe('the direct path, end to end', () => {
 
     expect(await run.harness.client.hello()).toMatchObject({ protocolVersion: 1 });
     await run.harness.client.watchDirectory(() => {});
-    await run.harness.client.attach('surface-1', 80, 24, { onData: (e) => chunks.push(e) });
-    await run.harness.client.write('surface-1', 'ls\n');
+    await run.harness.client.attach('surface:1', 80, 24, { onData: (e) => chunks.push(e) });
+    await run.harness.client.write('surface:1', 'ls\n');
 
     // The relay carried none of it, in either direction.
     expect(run.clientFrames()).toHaveLength(clientBefore);
@@ -1092,7 +1092,7 @@ describe('the direct path, end to end', () => {
     run.network.offererChannel!.close();
 
     // Over one Noise message, so the transport chunks it into two ciphertexts.
-    await expect(run.harness.client.write('surface-1', 'x'.repeat(70_000))).rejects.toThrow();
+    await expect(run.harness.client.write('surface:1', 'x'.repeat(70_000))).rejects.toThrow();
 
     expect(gone).toHaveBeenCalledOnce();
     expect(run.harness.client.connectedBurrowId).toBeNull();
@@ -1189,7 +1189,7 @@ describe('the direct path, end to end', () => {
 
     const order: string[] = [];
     const first = run.harness.client.hello().then(() => order.push('first'));
-    const second = run.harness.client.write('surface-1', 'ls').then(() => order.push('second'));
+    const second = run.harness.client.write('surface:1', 'ls').then(() => order.push('second'));
     await settle();
     expect(order).toEqual([]);
 

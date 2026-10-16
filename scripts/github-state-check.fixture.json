@@ -985,6 +985,36 @@
     "total_count": 0,
     "variables": []
    }
+  },
+  "graphql": {
+   "status": 200,
+   "body": {
+    "data": {
+     "repository": {
+      "issues": {
+       "nodes": [
+        {
+         "number": 1200
+        }
+       ]
+      },
+      "pinnedIssues": {
+       "nodes": [
+        {
+         "issue": {
+          "number": 151
+         }
+        },
+        {
+         "issue": {
+          "number": 1200
+         }
+        }
+       ]
+      }
+     }
+    }
+   }
   }
  }
 }
