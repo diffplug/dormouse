@@ -772,8 +772,9 @@ async function getDescendantPids(rootPid, runtime = {}) {
 }
 
 /** Every `[pid, ppid]` pair on this platform — `[pid, ppid, name]` on Windows,
- *  where the same query names each process — or null when the scan fails or
- *  the platform is unknown. */
+ *  where the same query names each process (one query instead of two: ~0.3 s
+ *  per scan on Windows, 2026-10-02) — or null when the scan fails or the
+ *  platform is unknown. */
 async function readProcessTable(runtime) {
   const platform = runtime.platform || process.platform;
   const fsModule = runtime.fsModule || fs;
