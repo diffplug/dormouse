@@ -38,7 +38,7 @@ Public `status` is a projection — first match wins:
 
 **Persist only** `todo` and the sanitized `notification` (plus `status` for diagnostics):
 
-- **Must persist an unacknowledged ring, deferred or visible, as the TODO a look would leave**, with its detail.
+- **Must persist an unacknowledged ring, deferred or visible, as a TODO** with its detail.
 - Every spawn starts the id's alert state over; a cold restore carries those two on the pane's spawn (`SpawnPtyOptions.alert`), seeded before the PTY spawns, and a live resume keeps the host's. **Never recreate a ring, a progress cycle, or a command-exit arm on restore.**
 - **Must read a notification this build cannot validate as none, keeping the pane** (rationale).
 - **Never persist WATCHING per Session**: it is re-derived from the rule set at the next command start. Replay filtering in `docs/specs/terminal-escapes.md` keeps old terminal output from firing notification side effects again.
@@ -135,7 +135,7 @@ stateDiagram-v2
       Deferred --> Showing: confirmed work ends
       Deferred --> NoRing: due while engaged, never shown, becomes a hold
       Showing --> NoRing: verb, or last source withdrawn
-      Deferred --> NoRing: verb, or last source withdrawn
+      Deferred --> NoRing: input, a verb once shown, or last source withdrawn
     }
     --
     state "Hold" as Hold {
@@ -154,7 +154,7 @@ stateDiagram-v2
 ```
 
 - **A hold must set TODO at once**, its detail by richness (Clearing And TODO), repeated holds merging; it leaves a progress cycle alone. Rung on idle, each held source takes its unengaged path, the acknowledged check included. A forgotten hold keeps its TODO (rationale); rule removal withdraws a held `watching` source as a ringing one.
-- **With `deferAlertsUntilQuiet` enabled, a ring must be deferred exactly while the detector has confirmed work, WATCHING or not, derived and never stored**: it keeps its sources, detail, episode, and alarm deadlines (rationale). **A never-shown ring that comes due while engaged must become a hold** (rationale). **Never defer a ring carrying an `exit` source**, whatever joined it. **Never cap a deferral** (rationale); disabling the setting shows every deferred ring at once.
+- **With `deferAlertsUntilQuiet` enabled, a ring must be deferred exactly while the detector has confirmed work, WATCHING or not, derived and never stored**: it keeps its sources, detail, episode, and alarm deadlines (rationale). **A ring deferred since it opened must stay a fresh completion until it shows**: only input clears it, and coming due while engaged makes it a hold (rationale). **Never defer a ring carrying an `exit` source**, whatever joined it. **Never cap a deferral** (rationale); disabling the setting shows every deferred ring at once.
 
 Two ordering rules:
 
@@ -321,15 +321,13 @@ Detail follows one richness order: a text report (`OSC 9`, `OSC 99`, `OSC 777`) 
 
 | Verb | Effect |
 |---|---|
-| acknowledge without input (Engagement) | clears the ring, leaving `todo` on with its detail |
-| acknowledge with input — any keystroke, paste, or drop — or clear TODO (pill click) | clears the ring; `todo` off, notification dropped, even if already off |
-| dismiss (`a`, Pane Header) | clears the ring, leaving `todo` on with its detail; with nothing ringing or held: no change, no notify |
+| acknowledge without input (Engagement), or dismiss (`a`, Pane Header) | clears the ring, leaving `todo` on with its detail; with nothing ringing or held, no change |
+| acknowledge with input — any keystroke, paste, or drop — or clear TODO (pill click) | clears the ring; `todo` off, notification dropped, even if already off (rationale) |
 | toggle TODO (`t`) | clears the ring; `todo` flips, on keeping the ring's detail, off dropping the notification |
 | an await consumes a source (Await) | withdraws that source |
 | a rule stops covering the `watching` key | withdraws `watching` |
 
-- **The user verbs acknowledge; a withdrawal must never acknowledge.** Each verb clears a deferred ring as a visible one and drops a hold; a withdrawal leaves `todo` and its notification as they stood.
-- **Any keystroke into the pane must clear TODO** (rationale).
+- **The user verbs acknowledge; a withdrawal must never acknowledge.** Each verb clears the ring (one that never showed only on input, Completion events) and drops a hold; a withdrawal leaves `todo` and its notification as they stood.
 - **Never summon twice for an acknowledged state.** After a user verb clears a ring or drops a hold, a report before any output only updates the TODO (Completion events); opening a ring or starting a command forgets the acknowledgement (rationale).
 - Command-mode `Enter` that only enters passthrough does not clear TODO.
 - Removing a WATCHING rule clears neither a progress cycle nor a command-exit arm.

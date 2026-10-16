@@ -134,7 +134,8 @@ interface Ring extends SourceSet {
   detail: ActivityNotification;
   /** Published as `ALERT_RINGING` at least once — set only by
    *  `reconcileRing`, so false means deferred at every publish since it
-   *  opened. Until then, coming due on an engaged Session makes it a hold. */
+   *  opened. Until then it has summoned no one: only input clears it
+   *  (`clearRingForUser`), and coming due on an engaged Session makes it a hold. */
   shown: boolean;
 }
 
@@ -996,14 +997,17 @@ export class AlertManager {
   }
 
   /**
-   * A user verb stops the summons: the whole ring goes, deferred or not, with
-   * whatever was held. TODO is the caller's to decide, from the ring returned.
-   * Only clearing a ring or a hold records an acknowledgement.
+   * A user verb stops the summons: the ring goes with whatever was held. A
+   * ring still deferred and never shown has summoned no one, so only `input`
+   * answers it; every other verb leaves it to come due. TODO is the caller's
+   * to decide, from the ring returned. Only clearing a ring or a hold records
+   * an acknowledgement.
    */
-  private clearRingForUser(entry: AlertEntry): Ring | null {
-    const { ring, held } = entry;
+  private clearRingForUser(entry: AlertEntry, input = false): Ring | null {
+    const ring = input || entry.ring?.shown || !this.isDeferred(entry) ? entry.ring : null;
+    const { held } = entry;
     if (ring === null && held === null) return null;
-    entry.ring = null;
+    if (ring !== null) entry.ring = null;
     entry.held = null;
     entry.ackedQuiet = true;
     if (ring?.watching || held?.watching) this.answeredWatching(entry);
@@ -1085,11 +1089,11 @@ export class AlertManager {
   }
 
   /**
-   * A human interacted with the Session. Both kinds clear the ring, deferred
-   * or not, and whatever it held, and mark the running command seen; without `input` a
-   * cleared ring becomes a TODO, while `input` — keys, a paste, a drop,
-   * acknowledged as the host writes them — turns TODO off and opens the echo
-   * window, a helper's included, since its detector runs. Never creates an
+   * A human interacted with the Session. Both kinds clear the ring
+   * (`clearRingForUser`) and whatever it held, and mark the running command
+   * seen; without `input` a cleared ring becomes a TODO, while `input` — keys,
+   * a paste, a drop, acknowledged as the host writes them — turns TODO off and
+   * opens the echo window, a helper's included, since its detector runs. Never creates an
    * entry: an id with none — a browser Surface — has nothing to clear.
    */
   acknowledge(id: string, { input }: { input: boolean }): void {
@@ -1099,6 +1103,7 @@ export class AlertManager {
     if (this.helpers.has(id)) return;
     this.markSeen(entry);
     if (input) {
+      this.clearRingForUser(entry, true);
       this.setTodoForUser(id, entry, false);
       return;
     }
