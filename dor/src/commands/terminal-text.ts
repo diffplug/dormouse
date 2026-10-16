@@ -50,26 +50,28 @@ export function renderToolResponse(response: ToolSurfaceResponse, json: boolean)
     return renderPrintableJson({
       status: response.status,
       surface_id: response.surfaceId,
-      surface_ref: response.surfaceRef,
       command: response.command,
       cwd: response.cwd,
       minimized: response.minimized,
       key: response.key,
     });
   }
-  return `${printableExact(`${response.status} ${response.surfaceRef}  ${JSON.stringify(response.command)}`)}\n`;
+  return `${printableExact(`${response.status} ${response.surfaceId}  ${JSON.stringify(response.command)}`)}\n`;
 }
 
 // The prerelease-style build tag: `<version>+<N>` when the build carries commits
-// past the version tag, else just `<version>`.
-function buildTag(metadata: VersionMetadata): string {
+// past the version tag, `<version>+?` when the count is unknown, else just
+// `<version>`. Settings → About shows the same tag.
+export function buildTag(metadata: VersionMetadata): string {
+  if (metadata.commitsSinceVersion === null) return `${metadata.version}+?`;
   return metadata.commitsSinceVersion > 0
     ? `${metadata.version}+${metadata.commitsSinceVersion}`
     : metadata.version;
 }
 
 export function renderVersion(metadata: VersionMetadata): string {
-  const suffix = metadata.commitsSinceVersion > 0 ? ` (${buildTag(metadata)})` : '';
+  const tag = buildTag(metadata);
+  const suffix = tag === metadata.version ? '' : ` (${tag})`;
   return `dor ${metadata.version} [${metadata.commit}]${suffix}\n`;
 }
 

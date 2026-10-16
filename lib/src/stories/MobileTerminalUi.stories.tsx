@@ -46,7 +46,7 @@ const meta: Meta<typeof MobileTerminalUi> = {
 export default meta;
 type Story = StoryObj<typeof MobileTerminalUi>;
 
-const POCKET_WALL_PANE = 'storybook-pocket-wall';
+const POCKET_WALL_PANE = 'surface:1';
 const POCKET_WALL_SESSIONS: MobileWallSession[] = [{ id: POCKET_WALL_PANE, title: 'ascii-splash' }];
 
 const POCKET_WALL_SCENARIO: FakeScenario = {

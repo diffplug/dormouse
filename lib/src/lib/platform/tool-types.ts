@@ -25,8 +25,8 @@ export type ToolKeyScope = 'user' | 'builtin';
 export const isToolKeyScope = (value: unknown): value is ToolKeyScope => value === 'user' || value === 'builtin';
 
 /** Where a tool's browser renders once it serves. `iframe` frames the page;
- *  `agent-browser-screencast` drives a real browser, which is what makes a tool
- *  agent-drivable via `dor agent-browser --surface` (`docs/specs/dor-tool.md`). The repo
+ *  `agent-browser-screencast` and `playwright-screencast` drive a real browser,
+ *  which is what makes a tool agent-drivable (`docs/specs/dor-tool.md`). The repo
  *  declares it rather than the tool: which renderer suits a tool is a Dormouse-
  *  side judgement, not something the tool knows about itself. The only render
  *  modes a Tool Surface ever takes, so the Display modal and the Wall's swap

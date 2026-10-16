@@ -5,7 +5,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, symli
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
-import { tempDir, workflowRunBlock } from './lint-kit.mjs';
+import { repoRoot, tempDir, workflowRunBlock } from './lint-kit.mjs';
 import { restoreExecutables, verifyInventory } from './release-artifact.mjs';
 
 const script = fileURLToPath(new URL('./sign-and-deploy.sh', import.meta.url));
@@ -308,10 +308,42 @@ test('CI records original executable paths, including app files and dotfiles, in
   succeeds(spawnSync('shasum', ['-a', '256', '-c', 'artifact-manifest.sha256'], { cwd: standalone, encoding: 'utf8' }));
 });
 
-// The Node sidecar's hardened-runtime exceptions reach it alone
-// (docs/specs/security-ci.md -> "Desktop Releases").
-test('only the Node sidecar is signed with the macOS entitlements', () => {
-  const source = readFileSync(script, 'utf8');
-  assert.equal(source.match(/--entitlements\b/g)?.length, 1);
-  assert.match(source, /if \[\[ "\$binary" == "\$app_path\/Contents\/MacOS\/node" \]\]; then\n(?:[^\n]*\\\n)*?\s*--entitlements "\$MACOS_NODE_ENTITLEMENTS"/);
+// Every bundled Mach-O is re-signed under our team, so the sidecar loads its
+// addons without `disable-library-validation`, and the hardened-runtime
+// exceptions reach the Node sidecar alone (docs/specs/security-ci.md ->
+// "Desktop Releases").
+test('macOS signing: the team identity on every Mach-O, the entitlements on node alone', t => {
+  const root = fixture(t);
+  const app = 'Dormouse Terminal.app';
+  const modules = `${app}/Contents/Resources/_up_/sidecar/node_modules`;
+  const node = `${app}/Contents/MacOS/node`;
+  // [path, Mach-O, executable]. `node` stands in for Node: the load checks after signing run it.
+  const files = [
+    [node, true, true],
+    [`${app}/Contents/MacOS/dormouse`, true, true],
+    [`${modules}/node-pty/prebuilds/darwin-arm64/pty.node`, true, false],
+    [`${modules}/node-pty/prebuilds/darwin-arm64/spawn-helper`, true, true],
+    [`${modules}/node-pty/prebuilds/darwin-x64/pty.node`, true, false],
+    [`${modules}/@node-datachannel/darwin-arm64/node_datachannel.node`, true, false],
+    [`${modules}/node-pty/prebuilds/linux-x64/pty.node`, false, false],
+    [`${modules}/node-pty/prebuilds/win32-x64/conpty.node`, false, false],
+    [`${app}/Contents/Resources/_up_/sidecar/dor/bin/dor`, false, true],
+  ];
+  for (const [path, machO, executable] of files) {
+    put(root, path, `#!/bin/sh\n${machO ? '# MACHO\n' : ''}`);
+    if (executable) chmodSync(join(root, path), 0o755);
+  }
+  succeeds(shell(root, `
+security() { echo "$MACOS_IDENTITY"; }
+file() { if grep -q MACHO "$2"; then echo 'Mach-O 64-bit bundle arm64'; else echo data; fi; }
+codesign() { printf '%s\\t' "$@" >> "$REPO_ROOT/codesign-calls"; echo >> "$REPO_ROOT/codesign-calls"; }
+sign_macos_app "$REPO_ROOT/${app}" aarch64`));
+  const calls = readFileSync(join(root, 'codesign-calls'), 'utf8').trim().split('\n').map(line => line.replace(/\t$/, '').split('\t'));
+  const team = ['--force', '--sign', 'Developer ID Application: DiffPlug LLC (LXW8WAGWYX)', '--options', 'runtime'];
+  const plist = join(repoRoot, 'standalone/src-tauri/entitlements-macos-node.plist');
+  const signs = calls.filter(call => call[0] === '--force');
+  assert.deepEqual(signs.slice(0, -1).sort(), files.filter(([, machO]) => machO).map(([path]) =>
+    [...team, ...(path === node ? ['--entitlements', plist] : []), '--timestamp', join(root, path)]).sort());
+  assert.deepEqual(signs.at(-1), [...team, '--timestamp', join(root, app)]);
+  assert.equal(readFileSync(script, 'utf8').match(/--entitlements\b/g)?.length, 1);
 });

@@ -49,7 +49,7 @@ async function ran(args: string[]) {
 
 describe("playground dor open", () => {
   it("sends the real CLI's surface.tool request and prints its answer", async () => {
-    const requests = answerControl({ status: "takeover", surfaceRef: "surface:1", command: "dor __view-file /x" });
+    const requests = answerControl({ status: "takeover", surfaceId: "surface:1", command: "dor __view-file /x" });
     expect(await ran(["o", "--preview", "README.md"])).toEqual({ exitCode: 0, text: 'takeover surface:1  "dor __view-file /x"\r\n' });
     expect(requests).toMatchObject([{
       surfaceId: "t", method: "surface.tool",
@@ -82,7 +82,7 @@ describe("playground dor's other commands", () => {
   });
 
   it("runs the real CLI's commands over the page", async () => {
-    const requests = answerControl({ status: "created", surfaceId: "s3", surfaceRef: "surface:3", direction: "right", minimized: false, command: "ls" });
+    const requests = answerControl({ status: "created", surfaceId: "surface:3", direction: "right", minimized: false, command: "ls" });
     const { exitCode, text } = await ran(["split", "--right", "--", "ls"]);
     expect(requests).toMatchObject([{ surfaceId: "t", method: "surface.split", params: { direction: "right", command: ["ls"] } }]);
     expect({ exitCode, text }).toMatchObject({ exitCode: 0, text: expect.stringContaining("surface:3") });

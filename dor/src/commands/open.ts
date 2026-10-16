@@ -42,7 +42,7 @@ Placement follows dor tool: typed alone at a prompt in a visible, integrated pla
         json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
         minimize: { kind: 'boolean', brief: 'Create the surface minimized.', optional: true, withNegated: false },
         fresh: { kind: 'boolean', brief: 'Open another instance even when the Tool has a key.', optional: true, withNegated: false },
-        surface: { kind: 'parsed', parse: stringParser, brief: 'Surface to split when creating.', optional: true, placeholder: 'id|ref' },
+        surface: { kind: 'parsed', parse: stringParser, brief: 'Surface to split when creating.', optional: true, placeholder: 'handle' },
         workspace: workspaceFlag,
         cwd: { kind: 'parsed', parse: stringParser, brief: 'Directory for resolving the path.', optional: true, placeholder: 'path' },
         tool: { kind: 'parsed', parse: stringParser, brief: 'Use a user Tool, builtin:file, builtin:code, or builtin:folder.', optional: true, placeholder: 'name' },

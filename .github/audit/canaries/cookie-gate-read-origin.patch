@@ -1,0 +1,75 @@
+Domain: hosted
+Rule: `docs/specs/security-hosted.md` -> "Origin boundary" #2 — a cookie route admits any presented `Origin` but its own exactly
+Expect: hosted/server/account-gate.ts
+Source: reverses #904 (the cookie gate checked `Origin` only on state-changing methods, so a read presenting a sibling origin passed)
+
+diff --git a/hosted/server/account-gate.ts b/hosted/server/account-gate.ts
+index e3392fdfa..4bdfb307b 100644
+--- a/hosted/server/account-gate.ts
++++ b/hosted/server/account-gate.ts
+@@ -29,12 +29,11 @@ export interface AccountLogin {
+ }
+ 
+ /**
+- * The account Worker's cookie routes' gate: a presented `Origin` is exactly
+- * this origin, and a state-changing request must present one — same-site
+- * pages, the relay and voice origins among them, share the login cookie —
+- * then the Better Auth handler's `get-session` answers the login (401
+- * without one), and only the verified admin passes (`refuse` answers anyone
+- * else). Sets `login`.
++ * The account Worker's cookie routes' gate: a state-changing request carries
++ * exactly this origin — same-site pages, the relay and voice origins among
++ * them, share the login cookie — then the Better Auth handler's `get-session`
++ * answers the login (401 without one), and only the verified admin passes
++ * (`refuse` answers anyone else). Sets `login`.
+  */
+ export function cookieAdmin(
+   host: (c: Context) => AccountHost,
+@@ -56,10 +55,9 @@ function cookieGate(
+ ): MiddlewareHandler<{ Variables: { login: AccountLogin } }> {
+   return async (c, next) => {
+     const origin = new URL(c.req.url).origin;
+-    const presented = c.req.header("origin");
+-    // A read may omit `Origin`; nothing may present a foreign one.
++    // A read changes nothing, so only a state-changing request is held to it.
+     const safe = c.req.method === "GET" || c.req.method === "HEAD";
+-    if (presented === undefined ? !safe : presented !== origin)
++    if (!safe && c.req.header("origin") !== origin)
+       return c.json({ message: "Invalid origin." }, 403);
+     const headers = new Headers();
+     for (const name of ["cookie", "cf-connecting-ip"]) {
+diff --git a/hosted/server/tests/boundary.test.ts b/hosted/server/tests/boundary.test.ts
+index f1b7472dc..4c31c7f46 100644
+--- a/hosted/server/tests/boundary.test.ts
++++ b/hosted/server/tests/boundary.test.ts
+@@ -561,30 +561,6 @@ test("an auth write carrying the login cookie needs the account's own Origin and
+   expect(outbound).toEqual([]);
+ });
+ 
+-test("the cookie gate refuses a presented foreign Origin on every method", async () => {
+-  const origin = "https://account.example.test";
+-  const app = new Hono();
+-  const gate = cookieAdmin(
+-    () => ({
+-      databaseUrl: "postgres://user:pass@127.0.0.1:9/none",
+-      auth: async () =>
+-        Response.json({ user: { id: "admin", email: ADMIN_EMAIL, emailVerified: true }, session: {} }),
+-    }),
+-    () => new Response(null, { status: 403 }),
+-  );
+-  app.on(["GET", "HEAD", "POST"], "/gated", gate, (c) => c.body(null, 204));
+-  const sibling = "https://relay.example.test";
+-  for (const method of ["GET", "HEAD", "POST"]) {
+-    const send = (headers: Record<string, string>) =>
+-      app.request(`${origin}/gated`, { method, headers });
+-    expect((await send({ origin: sibling })).status, method).toBe(403);
+-    expect((await send({ origin: "null" })).status, method).toBe(403);
+-    expect((await send({ origin })).status, method).toBe(204);
+-    // Only a read may omit `Origin`.
+-    expect((await send({})).status, method).toBe(method === "POST" ? 403 : 204);
+-  }
+-});
+-
+ test("the cookie gate needs no login creation time; approval reads it and fails closed", async () => {
+   // `get-session` as the packed adapter answers it, `createdAt` as given.
+   const host = (createdAt?: unknown) => () => ({

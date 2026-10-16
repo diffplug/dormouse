@@ -1,0 +1,24 @@
+{
+  "numbered": [
+    { "suffix": "7", "number": 7 },
+    { "suffix": "007", "number": 7 },
+    { "suffix": "0", "number": 0 },
+    { "suffix": "9007199254740991", "number": 9007199254740991 },
+    { "suffix": "9007199254740992", "number": null },
+    { "suffix": "18446744073709551616", "number": null },
+    { "suffix": "+7", "number": null },
+    { "suffix": "-1", "number": null },
+    { "suffix": "1e3", "number": null },
+    { "suffix": "1.5", "number": null },
+    { "suffix": "0x10", "number": null },
+    { "suffix": " 7", "number": null },
+    { "suffix": "7 ", "number": null },
+    { "suffix": "١", "number": null },
+    { "suffix": "７", "number": null },
+    { "suffix": "", "number": null },
+    { "suffix": "0b9c", "number": null },
+    { "suffix": "1b4e28ba-2fa1-11d2-883f-0016d3cca427", "number": null },
+    { "suffix": "abc12345-3", "number": null }
+  ],
+  "unnumbered": ["7", "surface-7", "workspace-7", "ws-7", "pane:7", "Surface:7", "WORKSPACE:7", " surface:7", " workspace:7"]
+}

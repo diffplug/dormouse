@@ -15,8 +15,10 @@ describe('dorWorkspaceRefusal', () => {
 
   it('refuses a Workspace this webview does not have', () => {
     expect(dorWorkspaceRefusal('surface.split', { workspace: 'workspace:2' }))
-      .toMatch(/each Workspace in its own webview.*no workspace 'workspace:2'/);
+      .toMatch(/each Workspace in its own webview.*no workspace 'workspace:2': this webview is workspace:1/);
     expect(dorWorkspaceRefusal('surface.split', { workspace: 'build' })).not.toBeNull();
+    // The retired spelling of this webview's own id names nothing.
+    expect(dorWorkspaceRefusal('surface.split', { workspace: 'workspace-1' })).not.toBeNull();
     // Whatever crossed the socket, not a validated string.
     expect(dorWorkspaceRefusal('surface.split', { workspace: 2 })).not.toBeNull();
   });

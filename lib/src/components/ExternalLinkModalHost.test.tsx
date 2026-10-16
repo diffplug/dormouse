@@ -43,8 +43,7 @@ afterEach(() => {
 
 it('offers no open action for deceptive text, focuses copy, and rejects even a stale confirmation callback', () => {
   act(() => requestExternalLinkConfirmation('https://evil.example/', 'https://trusted.example/'));
-  const buttons = [...document.body.querySelectorAll('button')];
-  expect(buttons.some((button) => button.textContent?.startsWith('Open '))).toBe(false);
+  expect(hasOpenButton()).toBe(false);
   expect(document.activeElement?.textContent).toBe('Copy deceptive URL to clipboard');
   act(() => mocks.confirm());
   expect(mocks.open).not.toHaveBeenCalled();
@@ -59,6 +58,44 @@ it('opens an ordinary URL only after the user confirms', () => {
   expect(mocks.open).toHaveBeenCalledWith('https://trusted.example/');
 });
 
+it('names the scheme of a link that opens another app, starts on Cancel, and opens only on an explicit confirm', () => {
+  act(() => requestExternalLinkConfirmation('vscode://file/repo/src/App.tsx:4', 'open in editor'));
+  const title = document.getElementById('external-link-modal-title')!;
+  expect(title.textContent).toBe('This link opens another app: vscode: — open in editor');
+  expect(document.body.textContent).toContain('registered for vscode: links');
+  expect(document.activeElement?.textContent).toBe('Cancel');
+  act(() => (document.activeElement as HTMLButtonElement).click());
+  expect(mocks.open).not.toHaveBeenCalled();
+  act(() => requestExternalLinkConfirmation('vscode://file/repo/src/App.tsx:4', 'open in editor'));
+  act(() => button('Open vscode://').click());
+  expect(mocks.open).toHaveBeenCalledWith('vscode://file/repo/src/App.tsx:4');
+});
+
+it('shows an other-app link\'s own text only when it is a plain label, never the URL again', () => {
+  const title = () => document.getElementById('external-link-modal-title')!.textContent;
+  act(() => requestExternalLinkConfirmation('vscode://file/repo/README.md', 'Open README'));
+  expect(title()).toBe('This link opens another app: vscode: — Open README');
+  act(() => clearExternalLinkConfirmation());
+  act(() => requestExternalLinkConfirmation('vscode://file/repo/README.md', 'vscode://file/repo/README.md'));
+  expect(title()).toBe('This link opens another app: vscode:');
+});
+
+it('keeps the plain dialog for http, https, and mailto', () => {
+  for (const uri of ['http://trusted.example/', 'https://trusted.example/', 'mailto:team@trusted.example']) {
+    act(() => requestExternalLinkConfirmation(uri));
+    expect(document.getElementById('external-link-modal-title')!.textContent).toBe('Confirm open');
+    act(() => clearExternalLinkConfirmation());
+  }
+});
+
+it('refuses a Windows handler that runs code from a link, with no open action even if confirmed', () => {
+  act(() => requestExternalLinkConfirmation('ms-msdt:x'));
+  expect(hasOpenButton()).toBe(false);
+  expect(document.body.textContent).toContain('ms-msdt: links can run code on this computer');
+  act(() => mocks.confirm());
+  expect(mocks.open).not.toHaveBeenCalled();
+});
+
 it('rejects confirmation of a blocked URI', () => {
   act(() => requestExternalLinkConfirmation('javascript:alert(1)'));
   act(() => mocks.confirm());
@@ -67,7 +104,7 @@ it('rejects confirmation of a blocked URI', () => {
 
 it('blocks a URL carrying a format character and shows its title and URL with every hidden character escaped', () => {
   act(() => requestExternalLinkConfirmation('https://trusted.example/\u202ecod.exe', 'see \u200bthe report'));
-  expect([...document.body.querySelectorAll('button')].some((button) => button.textContent?.startsWith('Open '))).toBe(false);
+  expect(hasOpenButton()).toBe(false);
   expect(document.body.textContent).toContain('https://trusted.example/\\u202ecod.exe');
   expect(document.body.textContent).not.toMatch(/[\u200b\u202e]/);
   act(() => mocks.confirm());
@@ -84,6 +121,7 @@ const viewers = { handlers: [
   { tool: 'builtin:code', description: 'Source code', reason: 'built-in' },
 ], config: '/home/me/.config/dormouse/dormouse.yml' };
 const button = (text: string) => [...document.body.querySelectorAll('button')].find(button => button.textContent === text)!;
+const hasOpenButton = () => [...document.body.querySelectorAll('button')].some(button => button.textContent?.startsWith('Open '));
 const alertText = () => document.body.querySelector('[role="alert"]')?.textContent;
 const answer = async (request: Request, result: DorControlResult) => { await act(async () => request.respond(result)); };
 const requestFile = async (lookup: DorControlResult = { ok: true, result: viewers }) => {

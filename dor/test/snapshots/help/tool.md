@@ -4,8 +4,8 @@ Invocation: `dor tool --help`
 
 ```text
 USAGE
-  dor tool [--global] [--json] [--minimize] [--fresh] [--surface id|ref] [--cwd path] [--workspace ref] <name> [args...]
-  dor tool [--json] [--minimize] [--surface id|ref] [--cwd path] [--workspace ref] -- <command>...
+  dor tool [--global] [--json] [--minimize] [--fresh] [--surface handle] [--cwd path] [--workspace ref] <name> [args...]
+  dor tool [--json] [--minimize] [--surface handle] [--cwd path] [--workspace ref] -- <command>...
   dor tool --list [--global] [--cwd path] [--json]
   dor tool --help
 
@@ -40,8 +40,7 @@ Text output:
 JSON output:
   {
     "status": "created",
-    "surface_id": "pane-def",
-    "surface_ref": "surface:3",
+    "surface_id": "surface:3",
     "command": "pnpm storybook",
     "cwd": "/Users/me/projects/site",
     "minimized": false,

@@ -19,7 +19,7 @@ import { recordToolDirty, resetToolDirty } from '../lib/tool-dirty-store';
 import { resetTodoSpotlight, spotlightTodo } from '../lib/todo-spotlight';
 import { requireElement, settleTerminalContext, TODO_SPOTLIGHT_HELD_CLASS, waitForCondition, waitForPrimedState } from './settle-terminals';
 
-const SESSION_ID = 'tab-story';
+const SESSION_ID = 'surface:1';
 
 const noopActions: WallActions = {
   onKill: () => {},
@@ -35,7 +35,6 @@ const noopActions: WallActions = {
   onFinishRename: () => ({ accepted: true }),
   onCancelRename: () => {},
   onSwapRenderMode: () => {},
-  resolveSurfaceRef: (id) => id,
   onResolveToolApproval: () => {},
 };
 
@@ -258,7 +257,7 @@ async function openTodoNotificationPreview() {
       clientY: rect.top + rect.height / 2,
     }));
     await wait(50);
-    if (document.querySelector(`#todo-notification-preview-${SESSION_ID}`)) return;
+    if (document.getElementById(`todo-notification-preview-${SESSION_ID}`)) return;
   }
   throw new Error('TODO notification preview never rendered');
 }

@@ -287,7 +287,7 @@ export class TauriAdapter implements PlatformAdapter {
       invoke: (cmd, args) => rawInvoke(cmd, args),
       onSnapshot: (handler) =>
         listenToWindow<WorkspaceRegistrySnapshot>("dormouse://workspaces", (event) => handler(event.payload)),
-    }));
+    }, this.windowSlot.read()));
   }
 
   // Seed the session cache from the Rust file store before restore reads it

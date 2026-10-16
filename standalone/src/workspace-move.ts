@@ -37,7 +37,7 @@ import {
 } from "dormouse-lib/lib/workspace-store";
 import type { PlatformAdapter, PtyInfo, PtyReplayDetail } from "dormouse-lib/lib/platform/types";
 import type { TerminalGrid } from "dormouse-lib/lib/terminal-transfer";
-import { metaFromRecord, workspaceRecord, type WorkspaceId } from "dormouse-lib/lib/session-types";
+import { metaFromRecord, PERSISTED_WINDOW_VERSION, workspaceRecord, type WorkspaceId } from "dormouse-lib/lib/session-types";
 import { installWindowPersistence } from "./window-restore";
 import { listenToWindow } from "./window-label";
 import { workspaceDropTarget } from "./workspace-tabs";
@@ -604,7 +604,7 @@ export async function bootFromTearOut(platform: PlatformAdapter): Promise<WallBo
   // Nothing on disk yet: this window's first aggregator flush writes its
   // snapshot, and from there it is an ordinary restorable window. After the
   // plan, so a refused arrival leaves no half-installed Window behind.
-  installWindowPersistence(platform, { version: 1, workspaces: [workspaceRecord(first.workspace, session)], activeWorkspaceId: id });
+  installWindowPersistence(platform, { version: PERSISTED_WINDOW_VERSION, workspaces: [workspaceRecord(first.workspace, session)], activeWorkspaceId: id });
   publishWorkspaceSession(id, session);
   adopting.delete(id);
   // A second Workspace dropped on this window between the tear-out and this
