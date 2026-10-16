@@ -51,6 +51,16 @@ Human-driven, in order:
 
 Source of truth: `scripts/bump-version.sh`; `on.push.tags` in `.github/workflows/release.yml`.
 
+## Build stamp
+
+Every webview bundle (Standalone, VS Code, the website) carries a stamp: the latest `CHANGELOG.md` version, the short commit, the commits past that version's tag (unknown where the tag is absent), whether the tree was dirty, whether the build is official, and the host it was built for; `dor` carries the first three. Settings → About and `dor version` show the same build tag, About naming a self-host build (`docs/specs/relay.md` -> "Relay origin") ahead of official or not.
+
+- **An official build is one `.github/workflows/release.yml` built in `diffplug/dormouse` from tag `vX.Y.Z`, at that tag's commit, from a clean tree**; every other build is unofficial, whatever its dev or release mode.
+- **A release run whose stamp is not official must fail the build** (rationale).
+- **Never let the stamp decide trust, updates, or features**: its inputs are environment variables any build can set, and provenance is Stage 2's attestation check.
+
+Source of truth: `computeBuildStamp` in `scripts/build-stamp.mjs`; `readBuildStamp` in `lib/src/lib/build-info.ts`.
+
 ## Two-stage pipeline
 
 **Must apply production OS and updater signatures locally** — Windows OS signing uses a physical PIV key, macOS a local Developer ID certificate.

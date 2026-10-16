@@ -6,6 +6,7 @@
 import { runCli } from "dor/cli-core";
 import { fail } from "dor/commands/shared";
 import type { CliHost, CliResult, ControlClient, PickerTerminal } from "dor/commands/types";
+import { readBuildStamp } from "dormouse-lib/lib/build-info";
 import changelog from "../../data/changelog.json";
 import SKILL_MARKDOWN from "../../../../dor/skill.md?raw";
 import { HOME, normalizePath, type VirtualFs } from "./vfs";
@@ -35,8 +36,8 @@ function playgroundHost(fs: VirtualFs): CliHost {
     runBrowserCli: async (provider) => fail(`dor ${provider} is ${UNSUPPORTED}`),
     // The playground serves `dor __view-*` itself (`dor.ts`).
     loadBuiltinViewers: () => unsupported("the built-in Tools' runtime"),
-    // The latest released Dormouse, which is what the site serves.
-    versionMetadata: { version: changelog.releases[0]?.version ?? "unknown", commit: "playground", commitsSinceVersion: 0 },
+    // The build Settings → About names; unstamped (tests), the latest release.
+    versionMetadata: readBuildStamp() ?? { version: changelog.releases[0]?.version ?? "unknown", commit: "playground", commitsSinceVersion: 0 },
     skillMarkdown: SKILL_MARKDOWN,
   };
 }

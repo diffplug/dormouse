@@ -338,6 +338,11 @@ const preview: Preview = {
       // names it instead of an update check.
       platform.hostOwnsUpdates = context.parameters?.hostOwnsUpdates === true || undefined;
 
+      // The build stamp Settings → About reads — a global here, since
+      // Storybook's bundle is built without the stamp's define
+      // (`readBuildStamp` in lib/src/lib/build-info.ts). Absent reads as unstamped.
+      (globalThis as { __DORMOUSE_BUILD__?: unknown }).__DORMOUSE_BUILD__ = context.parameters?.buildStamp;
+
       // The updater's port, which only Standalone's main window has: a story
       // about Settings → Network's update checks names the last successful
       // check (`null` for none), and every other story has no updater.

@@ -5,7 +5,9 @@ import type { DormouseTheme } from '../lib/themes';
 import { OVERLAY_MAX_HEIGHT_VAR } from '../components/design';
 import { SettingsDialog, SETTINGS_SCROLL_MS, TOPIC_GAP_PX } from '../components/SettingsDialog';
 import { WorkspaceIdContext } from '../components/wall/wall-context';
-import { enrolledStatus, UNENROLLED_STATUS } from '../host/remote/test-burrow-link';
+import { enrolledStatus, SELF_HOST_UNENROLLED_STATUS, UNENROLLED_STATUS } from '../host/remote/test-burrow-link';
+import type { BuildStamp } from '../lib/build-info';
+import type { BurrowConsoleStatus } from '../host/remote/service-protocol';
 import { networkPolicyResult, nothingPolicy } from '../remote/network-policy';
 
 /** The dialog renders into `document.body`, outside `canvasElement`
@@ -38,6 +40,14 @@ type Body = ReturnType<typeof dialog>;
 
 function contentsButton(body: Body, name: string) {
   return within(body.getByRole('navigation', { name: 'Settings topics' })).getByRole('button', { name });
+}
+
+/** Notifications, scrolled on to its animation watcher, which sits below speech and push. */
+async function showWatcher({ canvasElement }: { canvasElement: HTMLElement }) {
+  await selectTopic('Notifications')({ canvasElement });
+  const watcher = canvasElement.ownerDocument.body.querySelector<HTMLElement>('[data-setting="watcher"]')!;
+  const content = watcher.closest<HTMLElement>('#settings-content')!;
+  content.scrollTo({ top: content.scrollTop + watcher.getBoundingClientRect().top - content.getBoundingClientRect().top - TOPIC_GAP_PX, behavior: 'instant' });
 }
 
 function selectTopic(name: string) {
@@ -92,7 +102,7 @@ export const Default: Story = {
 
 /** The mockup's case: rules accumulated, defaults otherwise. */
 export const WithRules: Story = {
-  play: selectTopic('Activity'),
+  play: showWatcher,
   parameters: {
     primedWatchedCommands: ['claude', 'codex'],
     primedAlertSettings: {},
@@ -106,7 +116,7 @@ export const DeferralDisabled: Story = {
     primedAlertSettings: { deferAlertsUntilQuiet: false },
   },
   play: async ({ canvasElement }) => {
-    await selectTopic('Activity')({ canvasElement });
+    await showWatcher({ canvasElement });
     await dialog(canvasElement).findByRole('switch', {
       name: 'Defer alerts until animation stops off',
     });
@@ -197,7 +207,7 @@ export const CustomTimings: Story = {
  * dialog.
  */
 export const ManyRules: Story = {
-  play: selectTopic('Activity'),
+  play: showWatcher,
   parameters: {
     primedWatchedCommands: [
       'cargo',
@@ -266,7 +276,7 @@ export const ThemeMenuOpenWithInstalledThemes: Story = {
 
 /**
  * VS Code owns the theme; without a shell choice, General is omitted and
- * Activity becomes the first topic.
+ * Notifications becomes the first topic.
  */
 export const HostOwnsTheme: Story = {
   parameters: {
@@ -404,9 +414,10 @@ export const NotificationsUnderNothing: Story = {
   },
 };
 
-export const Activity: Story = {
+/** No rules yet: the watcher explains how one is made. */
+export const WatcherEmpty: Story = {
   ...Default,
-  play: selectTopic('Activity'),
+  play: showWatcher,
 };
 
 export const Notifications: Story = {
@@ -435,7 +446,7 @@ export const SearchAcrossTopics: Story = {
   play: async ({ canvasElement }) => {
     const body = dialog(canvasElement);
     fireEvent.change(body.getByRole('searchbox'), { target: { value: 'terminal' } });
-    await expect(body.getByRole('region', { name: 'Activity' })).toBeVisible();
+    await expect(body.getByRole('region', { name: 'Notifications' })).toBeVisible();
     await expect(body.queryByRole('button', { name: /^Theme:/ })).not.toBeInTheDocument();
   },
 };
@@ -521,7 +532,7 @@ export const ScrollFollowsContents: Story = {
   ...WithRules,
   play: async ({ canvasElement }) => {
     const body = dialog(canvasElement);
-    await userEvent.unhover(await hoverTopic(body, 'Activity'));
+    await userEvent.unhover(await hoverTopic(body, 'General'));
     const section = body.getByRole('region', { name: 'Notifications' });
     const content = section.parentElement!;
     // Manual input cancels any remaining topic-animation frame. A bare
@@ -530,7 +541,7 @@ export const ScrollFollowsContents: Story = {
     content.scrollTo({ top: content.scrollHeight, behavior: 'smooth' });
     await waitFor(() => {
       expect(Math.abs(content.scrollHeight - content.clientHeight - content.scrollTop)).toBeLessThan(2);
-      expect(contentsButton(body, 'Notifications')).toHaveAttribute('aria-current', 'location');
+      expect(contentsButton(body, 'About')).toHaveAttribute('aria-current', 'location');
     });
   },
 };
@@ -539,15 +550,84 @@ export const HoverSettingsOverridesScroll: Story = {
   ...WithRules,
   play: async ({ canvasElement }) => {
     const body = dialog(canvasElement);
-    const heading = body.getByRole('heading', { name: 'Activity' });
-    const content = body.getByRole('region', { name: 'Activity' }).parentElement!;
+    const heading = body.getByRole('heading', { name: 'Notifications' });
+    const content = body.getByRole('region', { name: 'Notifications' }).parentElement!;
     const scrollTop = content.scrollTop;
     await expect(contentsButton(body, 'General')).toHaveAttribute('aria-current', 'location');
     await userEvent.hover(heading);
-    await expect(contentsButton(body, 'Activity')).toHaveAttribute('aria-current', 'location');
+    await expect(contentsButton(body, 'Notifications')).toHaveAttribute('aria-current', 'location');
     await expect(content.scrollTop).toBe(scrollTop);
     await userEvent.unhover(heading);
     await expect(contentsButton(body, 'General')).toHaveAttribute('aria-current', 'location');
     await userEvent.hover(heading);
+  },
+};
+
+const OFFICIAL_STAMP: BuildStamp = { version: '1.2.0', commit: '4c1e09ab', commitsSinceVersion: 0, dirty: false, official: true, host: 'standalone' };
+const DEVELOPMENT_STAMP: BuildStamp = { version: '1.2.0', commit: 'd080b4f5', commitsSinceVersion: 14, dirty: false, official: false, host: 'standalone' };
+
+/** About's stories: Standalone with an unenrolled Hosted Burrow, unless a story says otherwise. */
+function aboutParameters(buildStamp: BuildStamp | undefined, status: BurrowConsoleStatus | null = UNENROLLED_STATUS) {
+  return { buildStamp, ...(status ? { primedBurrow: { status } } : {}) };
+}
+
+/** Opens About, the last topic, and checks the install kind it names. */
+function aboutShows(kind: RegExp) {
+  return async ({ canvasElement }: { canvasElement: HTMLElement }) => {
+    await selectTopic('About')({ canvasElement });
+    const about = dialog(canvasElement).getByRole('region', { name: 'About' });
+    await waitFor(() => expect(about).toHaveTextContent(kind));
+  };
+}
+
+/**
+ * Settings → About (`docs/specs/deploy.md` → "Build stamp") for what CI's
+ * release workflow shipped: source links point at the tag.
+ */
+export const AboutOfficial: Story = {
+  parameters: aboutParameters(OFFICIAL_STAMP),
+  play: aboutShows(/Official release/),
+};
+
+export const AboutOfficialVsCode: Story = {
+  parameters: aboutParameters({ ...OFFICIAL_STAMP, host: 'vscode' }),
+  play: aboutShows(/Official release · 4c1e09ab · VS Code extension/),
+};
+
+/** A local build — `pnpm dogfood:standalone`, `dev:standalone` — carries the commits past its tag. */
+export const AboutDevelopment: Story = {
+  parameters: aboutParameters(DEVELOPMENT_STAMP),
+  play: aboutShows(/Dormouse version 1\.2\.0\+14Development build/),
+};
+
+export const AboutDevelopmentDirty: Story = {
+  parameters: aboutParameters({ ...DEVELOPMENT_STAMP, dirty: true }),
+  play: aboutShows(/with uncommitted changes/),
+};
+
+/** A shallow clone, where the version tag was not there to count from. */
+export const AboutDevelopmentUnknownCount: Story = {
+  parameters: aboutParameters({ ...DEVELOPMENT_STAMP, commitsSinceVersion: null }),
+  play: aboutShows(/Dormouse version 1\.2\.0\+\?/),
+};
+
+/** Self-host outranks official or not: it names the one Relay this build reaches. */
+export const AboutSelfHost: Story = {
+  parameters: aboutParameters(DEVELOPMENT_STAMP, SELF_HOST_UNENROLLED_STATUS),
+  play: aboutShows(/Self-host build/),
+};
+
+/** A bundle built without the stamp — Storybook's own. */
+export const AboutUnstamped: Story = {
+  parameters: aboutParameters(undefined),
+  play: aboutShows(/Dormouse, version unknown/),
+};
+
+/** The website's desktop playground: no Burrow, so no Network topic, and a download link. */
+export const AboutPlayground: Story = {
+  parameters: aboutParameters({ ...DEVELOPMENT_STAMP, host: 'playground' }, null),
+  play: async ({ canvasElement }) => {
+    await aboutShows(/Web playground/)({ canvasElement });
+    await expect(dialog(canvasElement).getByRole('button', { name: 'Download Dormouse' })).toBeVisible();
   },
 };
