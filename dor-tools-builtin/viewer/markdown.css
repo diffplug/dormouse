@@ -70,8 +70,6 @@ body .mdxeditor-toolbar button{padding:2px}
 .prose th,.prose td{border:1px solid var(--baseBorder);padding:2px 8px;vertical-align:top}
 .prose th{background:var(--baseBgSubtle);font-weight:600}
 .prose img{max-width:100%}
-/* An image the document gives no size shows at the width its file records (image-size.ts). */
-.prose .md-default-size img{width:var(--default-width)}
 /* A block image, so its wrapper, and the frame inset in it, hug it with no line gap below. */
 .prose [data-editor-block-type=image] img{display:block}
 /* A selected image: our frame and corner handles (image-resize.tsx), in place of MDXEditor's outline. */

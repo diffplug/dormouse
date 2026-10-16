@@ -1,14 +1,15 @@
-/** The width the Markdown editor shows an image at when its document gives it
- * no size: its upright pixel width over the scale its header records
- * (docs/specs/dor-tools-builtin.md -> Markdown editor). Read from the head of
- * the file, without decoding it. Browser-safe. */
+/** The sizes the Markdown editor writes into its document for an image
+ * (docs/specs/dor-tools-builtin.md -> Markdown editor): a pasted one's width,
+ * its upright pixel width over the scale its header records, read from the
+ * head of the file without decoding it; and a stated size kept at its scale
+ * when the image editor resizes the image. Browser-safe. */
 import { exifFields, jpegSegments, jpegSize, pngChunks, pngSize } from './image-editability.js';
 import { ascii } from './image-format.js';
 
 /** How much of a file's head `defaultDisplayWidth` reads: a PNG's `pHYs` and
  * `eXIf` precede its image data, and a screenshot's header is a few KiB; a
- * JPEG whose frame header sits behind more EXIF or ICC than this shows pixel
- * for pixel. */
+ * JPEG whose frame header sits behind more EXIF or ICC than this is pasted
+ * unsized. */
 export const RESOLUTION_HEAD = 1 << 16;
 
 /** The pixel density an image file records, for its pixels upright: pixels
@@ -86,10 +87,23 @@ export function displayScale(dpi: number | null): number {
   return mac === 2 || mac === 3 ? mac : Math.max(windows, 1);
 }
 
-/** The CSS width an image whose file starts with `head` shows at when its
- * document gives no size; null when it shows pixel for pixel. */
+/** The CSS width, in whole pixels, a document gives an image whose file
+ * starts with `head` as it is pasted; null when it shows pixel for pixel. */
 export function defaultDisplayWidth(head: Uint8Array): number | null {
   const found = imageResolution(head);
   const scale = found ? displayScale(dpiAcross(found.resolution)) : 1;
-  return found && scale > 1 ? found.width / scale : null;
+  return found && scale > 1 ? Math.round(found.width / scale) : null;
+}
+
+/** A width and height a document gives an image, in CSS pixels, or
+ * `'inherit'` for one it leaves out (MDXEditor's image node). */
+export interface StatedSize { width: number | 'inherit'; height: number | 'inherit' }
+
+/** `size` once its image goes from `from` pixels to `to`, at the scale it
+ * showed at: each stated length by its own axis, in whole pixels, at least
+ * one; a length left out stays out. */
+export function rescaledSize(size: StatedSize, from: { width: number; height: number }, to: { width: number; height: number }): StatedSize {
+  const scale = (length: number | 'inherit', was: number, now: number) =>
+    length === 'inherit' ? length : Math.max(1, Math.round(length * now / was));
+  return { width: scale(size.width, from.width, to.width), height: scale(size.height, from.height, to.height) };
 }

@@ -48,14 +48,14 @@ Source of truth: `saveText` / `StorePath` in `dor-tools-builtin/src/editor-route
 - **Must keep HTML comments verbatim and save with one final newline, the file's majority bullet and thematic-break marker, and unpadded tables**; the rest follows MDXEditor's serialization. Its normalization of loaded text is not an edit (rationale).
 - **Never let document HTML reach the live DOM outside an allowlist** of tags and attributes, `href` limited to `http(s):`, `mailto:`, fragments, and scheme-less paths; saving keeps every original attribute, escaped, and HTML images serialize in an inert document. Mermaid runs with `securityLevel: 'strict'` (rationale).
 - **Must serve images on request from regular image-format files at or under the document's canonical directory**, by realpath, under a `sandbox` CSP. Nothing else loads, external URLs included.
-- **Must show an image the document leaves unsized at its pixel width over the scale its header records**, never past the column or into the document.
+- **Never show an image at a size the document does not state**: unsized, it shows pixel for pixel, never past the column. A pasted or dropped PNG or JPEG whose header records a scale goes in at its pixel width over that scale (rationale).
 - **Must save a corner drag of a selected image as a width**, and a height only if the document had one; the image dialog sets and clears both, as an unsaved edit.
 - **Must write a pasted or dropped PNG, JPEG, GIF, or WebP beside the document as a new `image-YYYYMMDD-HHMMSS[-N].<ext>`**, signature-checked, within the paste bound, never replacing a file; its reference is an unsaved edit.
 - **Must rename a listed image on disk at once**, to an image name in its own directory not starting with `.`, never replacing another file (case-only renames allowed); rewritten references are an unsaved edit.
-- **Must edit only a PNG or JPEG at or under the document's canonical directory whose spelled path is its realpath**, in the [Image editor](#image-editor) over the document, else view-only with why. Its save leaves the source unchanged and reloads every display; closing it unsaved asks first.
+- **Must edit only a PNG or JPEG at or under the document's canonical directory whose spelled path is its realpath**, in the [Image editor](#image-editor) over the document, else view-only with why. Its save reloads every display and, when it changes the pixel size, rescales each width and height the document states for that image by its own axis, as an unsaved edit; closing it unsaved asks first.
 - **Must report the Tool dirty while the document or open image is unsaved**; Cmd/Ctrl+S saves the one in front, and the close-prompt save writes both.
 
-Source of truth: `dor-tools-builtin/viewer/markdown.tsx`; `safeCreateDOM` in `dor-tools-builtin/viewer/markdown-safety.ts`; `useDefaultWidth` in `dor-tools-builtin/viewer/image-size.ts`; `editorRoutes` in `dor-tools-builtin/src/editor-routes.ts`; `PASTE_BOUND` in `dor-tools-builtin/src/image-format.ts`; `dor-tools-builtin/src/markdown-images.ts`. Tests: `dor-tools-builtin/test/markdown-editor.test.mjs`.
+Source of truth: `dor-tools-builtin/viewer/markdown.tsx`; `safeCreateDOM` in `dor-tools-builtin/viewer/markdown-safety.ts`; `defaultDisplayWidth` / `rescaledSize` in `dor-tools-builtin/src/image-resolution.ts`; `editorRoutes` in `dor-tools-builtin/src/editor-routes.ts`; `PASTE_BOUND` in `dor-tools-builtin/src/image-format.ts`; `dor-tools-builtin/src/markdown-images.ts`. Tests: `dor-tools-builtin/test/markdown-editor.test.mjs`.
 
 ## Image editor
 

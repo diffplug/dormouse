@@ -33,8 +33,8 @@ export const imageUrl = (src: string, saved: SavedImages) => {
   return `${IMAGES_ROUTE}${pathRoute(path)}${version ? `?v=${encodeURIComponent(version)}` : ''}`;
 };
 
-/** The document's image nodes; call within a read or update. */
-function $imageNodes(): ImageNode[] {
+/** The document's image nodes, outside table cells; call within a read or update. */
+export function $imageNodes(): ImageNode[] {
   const found: ImageNode[] = [];
   const visit = (node: LexicalNode) => {
     if ($isImageNode(node)) found.push(node);

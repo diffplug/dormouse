@@ -1,11 +1,11 @@
-import { createRef, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentType, type FC } from 'react';
+import { createRef, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentType, type FC } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createPortal, flushSync } from 'react-dom';
-import { $getNodeByKey, getNearestEditorFromDOMNode, type LexicalEditor } from 'lexical';
+import { $getNodeByKey, COMMAND_PRIORITY_HIGH, getNearestEditorFromDOMNode, type LexicalCommand, type LexicalEditor } from 'lexical';
 import { syntaxHighlighting } from '@codemirror/language';
 import { classHighlighter } from '@lezer/highlight';
 import {
-  $isImageNode, editImageToolbarComponent$, iconComponentFor$, ImageNode, imagePreviewHandler$, useCellValue,
+  $isImageNode, createActiveEditorSubscription$, editImageToolbarComponent$, iconComponentFor$, ImageNode, imagePreviewHandler$, INSERT_IMAGE_COMMAND, useCellValue,
   BlockTypeSelect, BoldItalicUnderlineToggles, codeBlockPlugin, codeMirrorPlugin, CodeToggle, CreateLink, diffSourcePlugin,
   DiffSourceToggleWrapper, frontmatterPlugin, headingsPlugin, imagePlugin, InsertCodeBlock, InsertTable, InsertThematicBreak,
   linkDialogPlugin, linkPlugin, listsPlugin, ListsToggle, markdownShortcutPlugin, MDXEditor, quotePlugin, realmPlugin,
@@ -13,10 +13,9 @@ import {
 } from '@mdxeditor/editor';
 import '@mdxeditor/editor/style.css';
 import { checked, documentPage, loadingState, stateLabel, textSource, type DocumentState } from './document-session';
-import { editableImage, imageSources, imageUrl, ImagesPanel, localImagePath, type SavedImages } from './images-panel';
-import { ImageOverlay } from './image-overlay';
+import { $imageNodes, editableImage, imageSources, imageUrl, ImagesPanel, localImagePath, type SavedImages } from './images-panel';
+import { ImageOverlay, type Resize } from './image-overlay';
 import { ImageResizeHandles } from './image-resize';
-import { defaultWidth, forgetImageWidths, useDefaultWidth } from './image-size';
 import { commentsPlugin } from './markdown-comments';
 import { markdownSafetyPlugin } from './markdown-safety';
 import { pageTheme, subscribeTheme } from './page-theme';
@@ -24,7 +23,14 @@ import { mermaidDescriptor } from './mermaid-block';
 import { SaveButton } from './save-button';
 import { Signal } from './signal';
 import { installTooltips } from './tooltip';
+import { defaultDisplayWidth, RESOLUTION_HEAD, rescaledSize } from '../src/image-resolution';
 import './markdown.css';
+
+declare module '@mdxeditor/editor' {
+  /** The command a paste or drop inserts an image node by, with the source
+   * `imageUploadHandler` answered. Exported, but left out of the package's types. */
+  export const INSERT_IMAGE_COMMAND: LexicalCommand<CreateImageNodeParameters>;
+}
 
 // Page state outside React, replaced whole on each change: the session reports
 // into it, the editor's image nodes feed it, and components subscribe.
@@ -50,7 +56,6 @@ const session = page.open<string>({
   holds: mark => editorRef.current?.getMarkdown() === mark,
   async apply(text) {
     // A reload mounts a fresh editor: its own normalization is then not an edit, and undo starts over.
-    forgetImageWidths();
     flushSync(() => root.render(<Page key={++loads} markdown={text.replace(/\r\n?/g, '\n')} />));
     await new Promise(resolve => setTimeout(resolve));
   },
@@ -68,26 +73,25 @@ function editablePath(editor: LexicalEditor, key: string): string | null {
 /** Opens a PNG or JPEG under the document's folder in the image editor overlay. */
 const editImage = (path: string) => update({ editing: path });
 
-/** The URL whose head sizes an image: a PNG or JPEG under the document's folder may record its scale. */
-const sizedUrl = (src: string) => editableImage(localImagePath(src)) ? imageUrl(src, store.saved) : null;
+/** The URL an image node loads. */
+const previewUrl = async (src: string) => imageUrl(src, store.saved);
 
-/** How long a PNG or JPEG under the document's folder waits for its default
- * width, in ms; one read later applies when it arrives (`useDefaultWidth`). */
-const SIZE_WAIT = 300;
-
-/** An image's URL, given once its default width is known, or `SIZE_WAIT`
- * passes, so it first shows at that width. */
-async function previewUrl(src: string) {
-  const sized = sizedUrl(src);
-  if (sized) await Promise.race([defaultWidth(sized), new Promise(resolve => setTimeout(resolve, SIZE_WAIT))]);
-  return imageUrl(src, store.saved);
-}
-
-/** After an image save: every display of it loads the new file, and the document's source stays as it is. */
-function refreshImage(path: string, version: string) {
+/** After an image save: every display of it loads the new file. When the
+ * save resized it, each reference that states a size keeps its scale, as an
+ * edit; the rest of the document's source stays as it is. */
+function refreshImage(path: string, version: string, resize: Resize | null) {
   update({ saved: { ...store.saved, [path]: version } });
-  // A new handler makes each image node resolve its URL again, and size itself by it.
+  // A new handler makes each image node resolve its URL again.
   realm?.pub(imagePreviewHandler$, (src: string) => previewUrl(src));
+  if (resize) store.editor?.update(() => {
+    for (const node of $imageNodes()) {
+      if (localImagePath(node.getSrc()) !== path) continue;
+      const size = { width: node.getWidth(), height: node.getHeight() };
+      if (size.width === 'inherit' && size.height === 'inherit') continue;
+      const next = rescaledSize(size, resize.from, resize.to);
+      node.setWidthAndHeight(next.width, next.height);
+    }
+  });
 }
 
 /** MDXEditor's own image toolbar (delete, settings), which it does not export; read before `imagePlugin` replaces it. */
@@ -96,18 +100,14 @@ type ImageChromeProps = { nodeKey: string; imageSource: string; initialImagePath
 
 /** What we draw beside each image MDXEditor renders, in place of its image
  * toolbar: the resize handles, Edit and double-click to open it in the image
- * editor, then MDXEditor's own buttons; and its default width while the
- * document leaves it unsized. All of it through the image's own editor: the
- * root's, or a table cell's. */
+ * editor, then MDXEditor's own buttons. All of it through the image's own
+ * editor: the root's, or a table cell's. */
 function ImageChrome(props: ImageChromeProps) {
   const iconFor = useCellValue(iconComponentFor$);
   const ref = useRef<HTMLDivElement>(null);
   const [editor, setEditor] = useState<LexicalEditor | null>(null);
-  // Before the image paints, so its default width applies to its first frame.
-  useLayoutEffect(() => setEditor(getNearestEditorFromDOMNode(ref.current)), []);
+  useEffect(() => setEditor(getNearestEditorFromDOMNode(ref.current)), []);
   const path = editor && editablePath(editor, props.nodeKey);
-  // Its preview URL (`previewUrl`) is the one whose head sizes it.
-  useDefaultWidth(ref, path && typeof props.width !== 'number' && typeof props.height !== 'number' ? props.imageSource : null);
   useEffect(() => {
     const wrapper = ref.current?.parentElement;
     if (!wrapper || !path) return;
@@ -130,11 +130,22 @@ function ImageChrome(props: ImageChromeProps) {
   );
 }
 
+/** The width each uploaded image's node is inserted at, by the source
+ * `upload` answered, until its insertion takes it. */
+const uploadedWidths = new Map<string, number>();
+
 const capture = realmPlugin({
   init(r) {
     realm = r;
     const toolbar = r.getValue(editImageToolbarComponent$) as ComponentType<ImageChromeProps>;
     if (toolbar !== ImageChrome) DefaultImageToolbar = toolbar;
+    // Ahead of MDXEditor's own handler, which creates the node from the payload,
+    // so the width comes in the update that inserts it, and one undo removes both.
+    r.pub(createActiveEditorSubscription$, editor => editor.registerCommand(INSERT_IMAGE_COMMAND, payload => {
+      const width = uploadedWidths.get(payload.src);
+      if (width !== undefined) { uploadedWidths.delete(payload.src); payload.width ??= width; }
+      return false;
+    }, COMMAND_PRIORITY_HIGH));
   },
   postInit(r) {
     const editor = r.getValue(rootEditor$);
@@ -146,11 +157,19 @@ const capture = realmPlugin({
   },
 });
 
-/** Sends a pasted or dropped image's bytes; the server names the new file. */
+/** Sends a pasted or dropped image's bytes; the server names the new file.
+ * A PNG or JPEG whose header records a scale is inserted at the width it
+ * gives, so the document shows it at that size everywhere. */
 async function upload(file: File): Promise<string> {
   try {
-    const response = await checked(await fetch('image', { method: 'POST', headers: { 'Content-Type': file.type }, body: file }));
-    return (await response.json()).name;
+    const [response, head] = await Promise.all([
+      fetch('image', { method: 'POST', headers: { 'Content-Type': file.type }, body: file }).then(checked),
+      file.slice(0, RESOLUTION_HEAD).arrayBuffer(),
+    ]);
+    const name: string = (await response.json()).name;
+    const width = defaultDisplayWidth(new Uint8Array(head));
+    if (width !== null) uploadedWidths.set(name, width);
+    return name;
   } catch (reason) { session.fail(reason); throw reason; }
 }
 

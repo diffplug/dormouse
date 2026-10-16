@@ -6,10 +6,21 @@ import { confirmDiscard, loadingState, type DocumentPage, type DocumentState, ty
 import { editorDocument, ImageDocument, type ImageEditorHandle } from './image/editor';
 import { Icon } from './image/icons';
 import { imageSource, type ImageLoad } from './image/io';
+import { jpegSize, pngSize } from '../src/image-editability';
 import { EDIT_ROUTE, IMAGE_SAVE_ROUTE, IMAGES_ROUTE } from '../src/image-format';
 import { pathRoute } from './images-panel';
 import { SaveButton } from './save-button';
 import { Signal } from './signal';
+import type { Size } from './tip-layout';
+
+/** How a save changed an image's upright pixel size. */
+export interface Resize { from: Size; to: Size }
+
+/** The pixel size of a PNG or JPEG the editor saved, upright as it writes them. */
+async function savedSize(blob: Blob): Promise<Size | null> {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  return pngSize(bytes) ?? jpegSize(bytes);
+}
 
 /** The image document's state, outside the overlay's React state: its Save
  * re-renders alone, not the editor. */
@@ -23,8 +34,8 @@ export function ImageOverlay({ path, page, onSaved, onClose }: {
   /** The image, as `localImagePath` spells it. */
   path: string;
   page: DocumentPage;
-  /** After the file on disk changes, with its new revision. */
-  onSaved(path: string, version: string): void;
+  /** After the file on disk changes, with its new revision, and how its pixel size changed, if it did. */
+  onSaved(path: string, version: string, resize: Resize | null): void;
   onClose(): void;
 }) {
   const name = path.slice(path.lastIndexOf('/') + 1);
@@ -35,15 +46,23 @@ export function ImageOverlay({ path, page, onSaved, onClose }: {
   const editor = useRef<ImageEditorHandle>(null);
   const confirm = useRef<HTMLDialogElement>(null);
   const doc = useRef<OpenDocument>(null);
+  /** The pixel size of the file on disk, as last loaded or saved here. */
+  const size = useRef<Size | null>(null);
 
   useEffect(() => {
     const route = pathRoute(path), source = imageSource(EDIT_ROUTE + route, IMAGE_SAVE_ROUTE + route, name);
-    const show = (load: ImageLoad) => setShown(was => ({ load, key: (was?.key ?? 0) + 1 }));
+    const show = (load: ImageLoad) => {
+      size.current = 'edit' in load ? { width: load.edit.raster.width, height: load.edit.raster.height } : null;
+      setShown(was => ({ load, key: (was?.key ?? 0) + 1 }));
+    };
     const opened = page.open(editorDocument(editor, show), { report: state => saveState.set(state), fail: setError }, {
       ...source,
       async save(blob, version) {
-        const saved = await source.save(blob, version);
-        onSaved(path, saved.version);
+        const [saved, to] = await Promise.all([source.save(blob, version), savedSize(blob)]);
+        const from = size.current;
+        size.current = to;
+        const resized = from && to && (from.width !== to.width || from.height !== to.height);
+        onSaved(path, saved.version, resized ? { from, to } : null);
         return saved;
       },
     });
