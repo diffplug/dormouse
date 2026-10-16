@@ -64,14 +64,14 @@ Drags use pointer events only, never HTML5 DnD, so they are drivable from CDP. O
 
 `hitTest` returns the one drop a point would commit: its target, its preview rect, and its scope. The scope model:
 
-- A leaf's center yields `swap` (internal drags only, never with itself); its inner edge bands drop beside the leaf. A point in a gap attributes to the nearest leaf, so boundaries have no dead zones.
+- A leaf's center yields `swap` (internal drags only, never with itself); its inner edge bands drop beside the leaf.
 - **A slide along an edge widens the scope** to the smallest one spanning anchor to pointer: the leaf, a contiguous range of an ancestor's children laid along the line, or a whole ancestor sharing the line. Equal spans resolve to the innermost (rationale); leaving the line drops the anchor.
 - **Must anchor a slide only where the pointer pauses on an edge drop**, never on the dragged pane's own rejected edge, so sweeping a header along the header row drops beside one pane at a time (rationale).
 - **Every drop's preview rect is the exact rect it would commit** — a speculative op plus `layout`, never a heuristic zone. Rejected ops and beside-itself no-ops yield no drop.
 
-A pane drag starts on a leaf's header past the drag threshold, primary button only, off its controls, and **never while zoomed or during a sash drag**. The press has already run the header's click path, so a drag begins from passthrough on that pane (rationale). Drops surface as proposals the Wall commits: drag start moves selection onto the dragged pane, a candidate drop `move`s it, and a release below the wall minimizes it with its token. Escape, pointer cancellation, window blur, or a release on nothing cancels, and a Door stays. **Must delegate Workspace-strip pane drops to `docs/specs/layout.md` → Moving Surfaces between Workspaces** before local hit-testing.
+A pane drag starts on a leaf's header, and **never while zoomed or during a sash drag**. The press has already run the header's click path, so a drag begins from passthrough on that pane (rationale). Drops surface as proposals the Wall commits: drag start moves selection onto the dragged pane, a candidate drop `move`s it, and a release below the wall minimizes it with its token. Escape, pointer cancellation, window blur, or a release on nothing cancels, and a Door stays. **Must delegate Workspace-strip pane drops to `docs/specs/layout.md` → Moving Surfaces between Workspaces** before local hit-testing.
 
-A Door drag-out runs the same machinery as an external drag (no swap candidates; the chip stays in the baseboard meanwhile). Its drop inserts the Surface at the hit-tested position — **the token is not consulted, because the user chose the position**.
+A Door drag-out runs the same machinery as an external drag (no swap candidates). Its drop inserts the Surface at the hit-tested position — **the token is not consulted, because the user chose the position**.
 
 Source of truth: `createDragController` in `lib/src/components/wall/lath-drag-controller.ts`; `hitTest` in `lib/src/lib/lath/hit-test.ts`.
 
@@ -140,7 +140,7 @@ Source of truth: `LathHost` in `lib/src/components/wall/LathHost.tsx`.
 
 - Layers are discrete, never interpolated; adapters map `LATH_LAYER_TILED`, `LATH_LAYER_DYING`, and `LATH_LAYER_ELEVATED` to renderer z-order.
 - **A caller needing a rate must read `slope(t)` off the `Easing` `cubicBezier` returns (`LATH_EASING` for house motion)**, never differences of successive samples (rationale; [layout.md → Ring travel](layout.md#ring-travel) is the cautionary case).
-- A retarget mid-flight starts every leaf from its current interpolated frame, so motion is interruptible. Hand-placed geometry (sash commits, container resizes) snaps.
+- A retarget mid-flight starts every leaf from its current interpolated frame, so motion is interruptible.
 - **Must derive add/insert hints from the opposite placement edge, and reattach hints from the opposite token edge.**
 - **Must prefer a parked leaf's held rect over an explicit enter hint, and an explicit hint over a derived one** (rationale).
 - **Exit is two-phase**: `markDying` fades the leaf in place with its DOM still mounted, then `store.removeLeaf` commits before `disposeSession` and survivors tween into the space. A second kill of a dying leaf is a no-op, and a dying leaf takes no pointer input.
