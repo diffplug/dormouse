@@ -375,6 +375,12 @@ export function beginMobileGesture(
   };
 }
 
+/**
+ * Where the rose draws: offset toward the pane's center on each axis, away from
+ * the thumb that pressed, so it opens over visible area (a lower-right press
+ * opens up and left). Clamped inside the pane; an axis no longer than twice
+ * `MOBILE_GESTURE_DISPLAY_MARGIN` centers instead.
+ */
 export function displayOriginAwayFromThumb(
   origin: MobileGesturePoint,
   bounds: MobileGestureBounds,
