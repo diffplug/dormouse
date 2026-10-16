@@ -7,11 +7,9 @@
 
 ## The Hosted page
 
-**`/hosted` is canonical, titled "Dormouse Hosted"; `/pricing` 301-redirects to it.** The header nav and the rail label do not change: the tool is free and open source, and Hosted is the optional service with a price, so pricing is a section of the Hosted page, never a page of its own.
+**`/hosted` is canonical; `/pricing` 301-redirects to it.** The tool is free and open source, and Hosted is the optional service with a price, so pricing is a section of the Hosted page, never a page of its own.
 
-**Settings is the front door.** The spoken-alarm row's managed-voice link and the playground tutorial land on `/hosted#voice`, and the plan cards sit within one screen of that anchor. `#remote-control` and `#voice` keep resolving as section ids.
-
-**Content, in order:** the plan cards, directly under the title and anchored `#pricing`; what a member gets, as prose; "Self-hosting stays free"; and a short FAQ — refunds and cancellation, the founding lock, who appears in the founders row, what happens if Hosted shuts down, and that team pricing goes by email to `support@dormouse.sh`.
+**Settings is the front door.** The spoken-alarm row's managed-voice link and the playground tutorial land on `/hosted#voice`. `#pricing` (the plan cards, which each JSON-LD `Offer` url names), `#remote-control`, and `#voice` keep resolving as section ids.
 
 **Prices, inclusions, and the FAQ are prerendered text**, and the page emits `Product` / `Offer` JSON-LD carrying one `Offer` per paid plan at its current price, so an assistant fetching the page can quote it. **Offers stay `PreOrder` while checkout is unbuilt.**
 
@@ -21,17 +19,9 @@
 
 ### Plan cards
 
-Three cards — Free, Hosted, Founding — side by side from `md` up, stacked in that order below. Each names what it includes as a ticked list, and each paid card carries a 30-day refund beneath its buy button.
+Each paid card carries a 30-day refund beneath its buy button.
 
-| Card | Above the price | Price line | Includes | Action |
-|---|---|---|---|---|
-| Free | the terminal's licence | $0, no account, no card | Pocket over a self-hosted Relay, spoken alarms in the system voice, no network request unless a Relay is chosen | Download |
-| Hosted | Monthly / Yearly toggle | the toggled price | the managed Relay, managed voices, one account for every machine | Get Hosted |
-| Founding | the lock | founding price, list struck beside it | everything in Hosted, the badge and the founders row | Become a founder |
-
-- **Mark the Hosted card with the accent border, never a surface of its own**, which would be a tint no docs token is derived against.
-- **The toggle defaults to Monthly**, the prerendered state; switching swaps the price, the billing line, and the buy target in place.
-- **A buy button opens the unbuilt-checkout notice** — the plan's name, that nothing was charged and no seat taken, and the devlog. **Never render a buy button that silently does nothing.**
+- **A buy button opens the unbuilt-checkout notice.** **Never render a buy button that silently does nothing.**
 
 ### The founding card's live half
 
@@ -40,7 +30,7 @@ Seats left in the open cohort and the founders row load after hydration from one
 - **Count seats on the server** from the billing provider behind a cache of at most 60 seconds, never on the client and never stored. **Never show a count for a closed cohort.**
 - **Show a founder only if they opted in at checkout**; the box starts unticked and the account can untick it. Every other founder counts toward the `+N` that ends the row, as does everyone past the row's cap.
 - **Must serve avatars from this origin, never the OAuth provider**, so loading the page tells no provider about the reader. The client draws an initial for any avatar that is not a same-origin path, or that fails to load.
-- **The page prerenders without the endpoint**: the seats line is reserved and the row absent; an unreachable endpoint, a non-2xx, or a malformed field drops only that field, never an error. **A cohort closing raises the price at the next deploy.**
+- **The page prerenders without the endpoint**: an unreachable endpoint, a non-2xx, or a malformed field drops only that field, never an error. **A cohort closing raises the price at the next deploy.**
 
 **Every existing link keeps working unchanged**: the `linkedFrom` obligations, the root README, `vscode-ext/README.md`, the Settings dialog's voice link, and the hosting notice all already point at `/hosted`. `docs/specs/website-docs.md` -> "Reference page chrome" owns the mechanics.
 

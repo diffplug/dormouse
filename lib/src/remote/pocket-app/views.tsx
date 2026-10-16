@@ -170,7 +170,10 @@ export function transportTitle({ path, cause }: TransportView): string {
   return cause ? `${title} ${TRANSPORT_RELAY_CAUSES[cause]}` : title;
 }
 
-/** The wall header's path indicator: its label, with {@link transportTitle} as the hover text. */
+/**
+ * The wall header's path indicator: its label, with {@link transportTitle} as
+ * the hover text. No status colour: relayed is the ordinary case, not a fault.
+ */
 export function TransportIndicator({ transport }: { transport: TransportView }): React.ReactElement {
   return (
     <span className={PK.headerNote} title={transportTitle(transport)}>

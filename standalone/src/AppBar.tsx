@@ -178,9 +178,11 @@ export function AppBar() {
       </div>
       <DropCaret />
 
-      {/* Theme and shell selection live in the Settings dialog at the
-          bottom-right of the window (docs/specs/layout.md -> Baseboard,
-          docs/specs/standalone.md), so the titlebar carries only the
+      {/* Never put a theme or shell picker in the titlebar: both live in the
+          Settings dialog, opened from the Baseboard at the bottom-right of the
+          window (docs/specs/layout.md -> Baseboard; docs/specs/theme.md ->
+          "Where the user picks a theme"; the Shell row is
+          lib/src/components/ShellPicker.tsx), so the titlebar carries only the
           native-style window controls on Windows/Linux. */}
       {!IS_MAC && <WinControls />}
       {/* Reserve the gradient's own band above the Wall's focus-ring gutter. */}

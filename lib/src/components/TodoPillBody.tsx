@@ -6,9 +6,10 @@ import { animationClockStyle } from './alert-ring';
 
 const FLOURISH_MS = 500;
 
-/** The TODO pill's body, for a pill shell (`todo-pill-shell`). A grid-stacked
- *  <letters, check>, so the pill width stays stable across steady/flourishing
- *  states — the CSS drives the animation. */
+/** The TODO pill's body, for a pill shell (`todo-pill-shell`): always the
+ *  fixed word `TODO`, never notification text, which belongs in the preview and
+ *  detail surfaces. A grid-stacked <letters, check>, so the pill width stays
+ *  stable across steady/flourishing states — the CSS drives the animation. */
 export const TODO_PILL_BODY: ReactNode = (
   <span className="todo-pill-stack">
     <span className="todo-pill-stack__letters">TODO</span>

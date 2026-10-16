@@ -37,9 +37,9 @@ Source of truth: `lib/src/lib/reopen-stack.ts`; `reopenSurface` in `lib/src/comp
 
 ## Reopen verb
 
-**Reopen** takes the newest record across this Window's stack and the host's closed windows ([Workspaces and windows](#workspaces-and-windows)). A gesture brings what it reopened into view; an empty stack does nothing and says so briefly.
+**Reopen** takes the newest record across this Window's stack and the host's closed windows ([Workspaces and windows](#workspaces-and-windows)). A gesture brings what it reopened into view; an empty stack does nothing.
 
-- **Must bind `⌘⇧T` as a native menu item (File → "Reopen Closed") on macOS**, so it fires in passthrough with no interception in the window keydown dispatcher.
+- **Must bind `⌘⇧T` as a native menu item on macOS**, so it fires in passthrough with no interception in the window keydown dispatcher.
 - **Must bind command-mode `u` on every platform**, whatever is selected. **Never bind `Ctrl+Shift+T` on Windows or Linux**: in legacy encoding it reaches programs as `Ctrl+T` (readline, fzf, emacs).
 - **Must answer `dor reopen` (`window.reopen`) in the Window**, focus-neutral, refusing an empty stack (`docs/specs/dor-cli.md` → "dor reopen").
 
@@ -56,7 +56,7 @@ Source of truth: `closeWorkspaceWithSurfaces` in `lib/src/components/wall/worksp
 
 ## Labs: No-confirm delayed kill
 
-**Settings offers a Labs topic on Standalone only**, holding one toggle, **No-confirm delayed kill**, off by default and app-wide: every window reads one stored value and follows another window's change. With it on, a gesture close that would confirm becomes a **pending kill** instead: the Surface leaves the layout at once while its process lives until a countdown finalizes it.
+**Settings offers a Labs topic on Standalone only**, holding the toggle **No-confirm delayed kill**, off by default and app-wide: every window reads one stored value and follows another window's change. With it on, a gesture close that would confirm becomes a **pending kill** instead: the Surface leaves the layout at once while its process lives until a countdown finalizes it.
 
 | Confirmation | With the toggle on |
 |---|---|
@@ -71,11 +71,9 @@ Source of truth: `closeWorkspaceWithSurfaces` in `lib/src/components/wall/worksp
 | `dor` command closes | Unchanged: immediate |
 
 - **Must detach a pending Surface the way minimize does** (keep the token, park its page, keep the PTY Live) without creating a Door. **A pending Workspace leaves the strip** — a successor activates, or a fresh replacement if it was the last — **while its Wall stays mounted and inactive**.
-- **Must finalize through the kill path** when the countdown completes or the user finalizes the entry early; a pending Workspace closes every member, and comes back if a helper's work refuses.
+- **Must finalize through the kill path** when the countdown completes or the user finalizes it early from `PendingKillOverlay`; a pending Workspace closes every member, and comes back if a helper's work refuses.
 - **Restoring a pending kill reattaches the same Surface or Workspace**, id and process intact, at its slot; it is not a rebuild. One that cannot come back now (a helper whose parent closed or whose replacement holds work) stays pending, its countdown untouched. Reopen takes the newest entry across pending kills and reopen records ([Reopen verb](#reopen-verb)), passing over one that cannot come back.
 - **Must silence alerts from pending Sessions and omit them from `dor` listings and Clients**; a `dor` request naming one by id, made by one, or reaching a pending Workspace's Wall fails as a pending kill.
 - **Must count pending running work in the quit and window-close gates, then finalize every pending kill as either tears down.** A Workspace leaving for another window or closing finalizes its own. Nothing pending is persisted, so none survives a restart.
-
-**The overlay** stacks pending kills in the window's bottom-right corner, above the Baseboard, newest on top. Each entry shows the Surface's title and kind, a bar filling toward the kill, restore on click, and kill now. **A countdown holds while the pointer rests on its entry**; past a few entries the rest collapse to a `+N` row. (rationale)
 
 Source of truth: `lib/src/lib/pending-kills.ts`; `pendKillRef` in `lib/src/components/Wall.tsx`; `pendWorkspace` in `lib/src/components/wall/workspace-lifecycle.ts`; `resetHelper` in `lib/src/lib/helper-terminal.ts`; `lib/src/components/PendingKillOverlay.tsx`; `lib/src/lib/labs-settings.ts`.

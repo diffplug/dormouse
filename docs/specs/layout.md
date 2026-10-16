@@ -17,7 +17,7 @@ Lath holds the geometry; the Wall holds selection (`selectedId` / `selectedType`
 
 ## Content
 
-Each pane is one leaf in Lath's split tree, never re-parented (`docs/specs/tiling-engine.md` → "The HTML adapter (LathHost)"), holding one Surface. **The `PANE_GUTTER_PX` gap is the only visual separator between panes**; the host paints the app background, so gutters and rounded corner cutouts match host chrome (tokens: `docs/specs/theme.md`).
+Each pane is one leaf in Lath's split tree, never re-parented (`docs/specs/tiling-engine.md` → "The HTML adapter (LathHost)"), holding one Surface.
 
 Pane drag scopes: `docs/specs/tiling-engine.md` → "Hierarchical drag and drop". The Wall commits the op and owns selection after it: a center drop lands exactly where `Cmd/Ctrl+Arrow` would ([Spatial navigation](#spatial-navigation)). Source of truth: `onProposeMove` in `lib/src/components/Wall.tsx`.
 
@@ -25,13 +25,13 @@ Pane drag scopes: `docs/specs/tiling-engine.md` → "Hierarchical drag and drop"
 
 **Must keep a Tool's unsaved-change dot visible in its Pane header and minimized Door**, across header widths and faces (`docs/specs/dor-tool.md` → Unsaved changes): in a Pane it rides in Kill, else at the right edge where the tier or the rename editor hides Kill.
 
-**Must mark the Workspace's preview slot with an italic label alone in its Pane header and Door**, naming it Preview in the label's tooltip and the Door's accessible name (rationale). **Must keep the slot on a double-click of its Pane header whose first press lands in the header itself, off its controls** (every button, and an open rename; rationale). **Must offer Keep open in its terminal context too**, beside the Tool status and only while it is the slot. Slot semantics: `docs/specs/dor-tool.md` → Preview slot.
+**Must mark the Workspace's preview slot in its Pane header and Door**, naming it Preview in the label's tooltip and the Door's accessible name. **Must keep the slot on a double-click of its Pane header whose first press lands in the header itself, off its controls** (every button, and an open rename; rationale). **Must offer Keep open in its terminal context too**, only while it is the slot. Slot semantics: `docs/specs/dor-tool.md` → Preview slot.
 
 **Must hold the slot's header while a switch holds its ghost** (`docs/specs/dor-tool.md` → Switching the slot): the ghost's face and Display glyph stay until the new view is ready. A terminal face's label keeps its name until the retarget, then shows the Tool's name (`docs/specs/dor-tool.md` → Naming); derivation resumes once ready. A serving Tool's name, read from its params, needs no hold (rationale).
 
-**Never give a Tool navigation, an address, or a dev-server chip** (rationale). **Must keep every Tool header control inside the header's palette**, Terminal Context included. A serving Tool's header, left to right: Display (`docs/specs/dor-browser.md` → Browser Chrome); Terminal Context; Break (`docs/specs/dor-tool.md` → Run end), except at the tiny tier; its name (`docs/specs/dor-tool.md` → Naming), renamed as a terminal label is; its TODO pill (`docs/specs/alert.md` → Pane Header); flexible gap; split buttons (full only); the pane-action group. A port conflict's terminal header leads with Terminal Context and Break; the terminal face, which shows that terminal, leads with Break alone, which pending approval lacks.
+**Never give a Tool navigation, an address, or a dev-server chip** (rationale).
 
-A terminal header, left to right: derived label; TODO pill (compact+); flexible gap; mouse-reporting override icon (compact+, only while the inside program requests mouse reporting); split left/right, split top/bottom (full only); then the pane-action group: zoom/unzoom, minimize, kill.
+Every Pane header ends with the pane-action group: zoom/unzoom, minimize, kill.
 
 The label is the `DerivedHeader` (`docs/specs/terminal-state.md`). Click renames, except on a preview slot, whose label is drag area; right-click — or `>` in command mode — opens the terminal context.
 
@@ -41,7 +41,7 @@ Source of truth: `TerminalPaneHeader` in `lib/src/components/wall/TerminalPaneHe
 
 **Must open the terminal context from terminal header, body, and command-mode `a` and `>` entry points.** Browser-only Surfaces and Doors have no context. A Tool's context displays its primary terminal (`docs/specs/terminal-context.md` → Tool context); application mouse ownership: `docs/specs/mouse-and-clipboard.md` → Terminal context input.
 
-**Must render one context per Wall in a stable Wall-level overlay**, anchored to the invoking source and following its painted bounds without resizing panes or remounting the helper. An outside pointer press or explicit close dismisses it; its copy editors count as inside. **Must recede every other pane while it is open**, leaving their input unchanged.
+**Must render one context per Wall in a stable Wall-level overlay**, anchored to the invoking source and following its painted bounds without resizing panes or remounting the helper. An outside pointer press or explicit close dismisses it; its copy editors count as inside.
 
 **Must choose placement on opening and retain its side while usable. Never reposition in response to terminal output.** It goes beside the source where a usable candidate fits, else over the source's half opposite its visible terminal cursor; minimized panes do not count, and zoom uses single-pane placement. **Must remember a manual side choice per source for the mounted Wall's lifetime**, never on disk; an unavailable choice falls back automatically.
 
@@ -59,7 +59,7 @@ Source of truth: `TerminalContextOverlay` in `lib/src/components/wall/TerminalCo
 
 **Must share scroll-safe pane messages across iframe status, Tool approval, and port conflicts**, keeping all controls reachable in small panes.
 
-**Must pin a held pane's strip to the body's bottom-right corner, never in the header**, truncating its label rather than wrapping. Hold semantics: `docs/specs/remote-api.md` → "Size authority: last-attach-wins".
+**Must pin a held pane's strip to the body's bottom-right corner, never in the header**. Hold semantics: `docs/specs/remote-api.md` → "Size authority: last-attach-wins".
 
 Source of truth: `lib/src/components/TerminalPane.tsx`; `PaneMessage` in `lib/src/components/design.tsx`; `SizeHoldStrip` in `lib/src/components/wall/SizeHoldStrip.tsx`.
 
@@ -71,7 +71,7 @@ Source of truth: `AlertRingIndicator` in `lib/src/components/wall/AlertRingIndic
 
 ### Pane header responsive sizing
 
-**Must measure each header's own border-box width, never the viewport, retaining its tier at zero width** (rationale). Each terminal boundary below compact is the width at which the next-lowest-priority element would start eating the group's padding; the boundaries live in the tier functions beside each header (rationale).
+**Must measure each header's own border-box width, never the viewport, retaining its tier at zero width** (rationale). Each terminal tier boundary is the width at which the next-lowest-priority element would start eating the group's padding (rationale).
 
 **Must yield the pane-action group last, and zoom last within it** (to the popover where there is one), since zooming restores everything the header dropped. Narrowing, each header drops:
 
@@ -83,15 +83,15 @@ Source of truth: `AlertRingIndicator` in `lib/src/components/wall/AlertRingIndic
 
 A port conflict's terminal header adds its Terminal Context button to each terminal boundary.
 
-**Must keep the popover keyboard reachable** (focus enters on open, Tab stays inside, Escape returns it to the trigger) **and dismiss it on resize** — returning focus to the trigger when a focused minimize or kill moves into it — and, without restoring focus, when its Surface is hidden; it reclamps on content resize, and controls dismiss only after acting. Keys and connection labels truncate before controls, and a connection label only once the URL has given up all its width.
+**Must keep the popover keyboard reachable** (focus enters on open, Tab stays inside, Escape returns it to the trigger) **and dismiss it on resize** — returning focus to the trigger when a focused minimize or kill moves into it — and, without restoring focus, when its Surface is hidden; it reclamps on content resize, and controls dismiss only after acting. Keys and connection labels truncate before controls.
 
 Source of truth: `useHeaderTier` in `lib/src/components/wall/use-header-tier.ts`; `terminalHeaderTier` in `lib/src/components/wall/TerminalPaneHeader.tsx`.
 
 ## Baseboard
 
-**Must group the right-hand controls**, in order: the `N more →` overflow arrow, the live-minimized-pages count (`docs/specs/dor-browser.md` → "Resource Policy"), the host-supplied `notice` slot, the one-time connection indicator (`docs/specs/one-time.md` -> "Laptop UI"), then the always-present spoken-alarm, push, and Settings buttons. The two status buttons toggle their alarm settings; Settings opens `docs/specs/alert.md` → Settings dialog. With no Doors and room for it, the baseboard shows the command-mode gesture hint.
+**Must group the right-hand controls**, in order: the `N more →` overflow arrow, the live-minimized-pages count (`docs/specs/dor-browser.md` → "Resource Policy"), the host-supplied `notice` slot, the one-time connection indicator (`docs/specs/one-time.md` -> "Laptop UI"), then the always-present spoken-alarm, push, and Settings buttons.
 
-A minimized session becomes a door, showing its label plus the alert badge cluster (`docs/specs/alert.md` → Door); both speech states also name themselves in the Door's `title` and accessible name. **A Door's label is header-derived only for a terminal-backed Surface** (`hasTerminal`); any other keeps its stored title, and a browser Door adds the display glyphs from `docs/specs/dor-browser.md` → "Browser Chrome".
+A minimized session becomes a door, showing its label plus the alert badge cluster (`docs/specs/alert.md` → Door); both speech states also name themselves in the Door's `title` and accessible name. **A Door's label is header-derived only for a terminal-backed Surface** (`hasTerminal`); any other keeps its stored title.
 
 ### Door interaction
 
@@ -103,7 +103,7 @@ A minimized session becomes a door, showing its label plus the alert badge clust
 ### Baseboard responsive sizing
 
 - **Never give Doors the width of the right cluster's fixed controls** (page count, notice, one-time indicator, the three buttons), **and never measure the overflow arrow into that reserved width**, since its presence is an output of the fit.
-- **Must always show at least one Door**, even if it overflows; past that, Doors fit while room remains for an overflow arrow. A scrolled baseboard shows `← N more` and/or `N more →`; clicking one reveals one Door in that direction. One Door too long to fit between both arrows keeps both and truncates its title.
+- **Must always show at least one Door**, even if it overflows; past that, Doors fit while room remains for an overflow arrow. A scrolled baseboard shows `← N more` and/or `N more →`; clicking one reveals one Door in that direction. One Door too long to fit between both arrows keeps both.
 - **An arrow hiding a ringing or TODO Door must say so**, visibly and in its accessible name. **Every arrow must reserve the width of the TODO one**, so the fit never depends on which Doors an arrow hides.
 - **Must reveal the selected Door when selection or membership changes**, without overriding manual overflow scrolling.
 
@@ -113,15 +113,15 @@ Source of truth: `lib/src/components/Baseboard.tsx`.
 
 ### Workspace tabs
 
-- **Must show `×` only on the active tab**, outside rename. Middle-click may close an inactive tab.
+- Middle-click may close an inactive tab.
 - **Must activate inactive tabs in command mode on click; clicking the active tab renames without changing mode.**
-- **Must make a tab's TODO pill (`docs/specs/alert.md` → Workspace union) its own button, beside the tab's and never inside it.** Its click activates the Workspace and enters the next member with a TODO after the current selection — panes in tree pre-order, then Doors in baseboard order — wrapping. It enters that member as a click on it would, unlike the tab's click: passthrough, reattaching a Door (rationale). With no TODO left it only activates in command mode, never renaming. Its tooltip names the Surface a click enters as its header or Door shows it; that Surface plays the landing spotlight (`docs/specs/alert.md` → Pane Header).
+- **Must make a tab's TODO pill (`docs/specs/alert.md` → Workspace union) its own button, beside the tab's and never inside it.** Its click activates the Workspace and enters the next member with a TODO after the current selection — panes in tree pre-order, then Doors in baseboard order — wrapping. It enters that member as a click on it would, unlike the tab's click: passthrough, reattaching a Door (rationale). With no TODO left it only activates in command mode, never renaming. Its tooltip names the Surface a click enters as its header or Door shows it; that Surface plays the landing spotlight (`spotlightTodo` in `lib/src/lib/todo-spotlight.ts`).
 - **Must enter the Workspace `+` creates in passthrough, keyboard focus included, after mount, unless the user has switched away.** Deactivation restores a Wall's chrome selection to its last live pane. External removal of the highlighted Workspace selects a live pane.
 - **Must route command-mode `x` / `k` on a highlighted Workspace tab through the tab's `×` close action**, including inactive tabs.
 - **Must reveal a Workspace in command mode before a user close or its confirmation.** Successful user closure selects the next Workspace tab in command mode (previous at the end). Command closures stay focus-neutral.
 - **Must order the strip unpinned tabs, `+` (then any host control), empty space, then the pinned group flush against the strip's right end, the store's list partitioned to match**: a new Workspace ends the unpinned group; pinning moves a tab to the pinned group's left edge, unpinning to just left of `+`. **A reorder (drag, `dor workspace move --index`, an arrival's slot) must clamp within its group. Never scroll the pinned group out of view**; the empty space between belongs to the host, never to the strip's drag or drop targets. A pin survives restore, Transfer, tear-out, and window Reopen (`docs/specs/transport.md` → Persisted session types).
 - **Never close a pinned Workspace alone**: it shows no `×`, middle-click and `x` / `k` do nothing, and the close verb refuses it, Labs pending kill included (`dor`: `docs/specs/dor-cli.md` → dor workspace). Its Window's close still closes it.
-- **Must open the tab menu on right-click, or `Shift+F10` / `ContextMenu` on a focused tab, under the tab, left edges aligned, or right edges where it would overflow**: Rename, Use automatic name (user-set names), Pin right / Unpin, Copy id, Move to new window (hosts that tear out, with the tear-out's consents), Close. **It holds the chrome keyboard lease and never opens over a rename or pending confirmation, or for a closing or transferring Workspace; any of those starting dismisses it. A right press or Control-click must never start a reorder.**
+- **Must open the tab menu on right-click, or `Shift+F10` / `ContextMenu` on a focused tab**: Rename, Use automatic name (user-set names), Pin right / Unpin, Copy id, Move to new window (hosts that tear out, with the tear-out's consents), Close. **It holds the chrome keyboard lease and never opens over a rename or pending confirmation, or for a closing or transferring Workspace; any of those starting dismisses it. A right press or Control-click must never start a reorder.**
 
 Source of truth: `WorkspaceStrip` in `lib/src/components/WorkspaceStrip.tsx`; `WorkspaceTabMenu` in `lib/src/components/WorkspaceTabMenu.tsx`; `setWorkspacePinned` in `lib/src/lib/workspace-store.ts`; `nextTodoMember` in `lib/src/lib/workspace-union.ts`.
 
@@ -262,7 +262,7 @@ A split from an existing pane (`|`/`%`/`-`/`"` or the header split buttons) spaw
 
 Dirty Tool close consent: `docs/specs/dor-tool.md` → Closing unsaved Tools.
 
-`x`/`k` (or the kill button, which first leaves passthrough) shows a pane-centered confirmation with a random lowercase letter; typing it confirms the kill. **Never draw `x`, `k`, or Reopen's `u` as that letter**, so neither a double-tap nor a reopen accepts it. Which closes skip it: `docs/specs/reopen.md` → "The rule"; under Labs one that would show it becomes a pending kill instead (`docs/specs/reopen.md` → "Labs: No-confirm delayed kill"). `Escape`, the cancel button, and clicking another panel cancel; any other key dismisses it.
+`x`/`k` (or the kill button, which first leaves passthrough) shows a confirmation with a random lowercase letter; typing it confirms the kill. **Never draw `x`, `k`, or Reopen's `u` as that letter**, so neither a double-tap nor a reopen accepts it. Which closes skip it: `docs/specs/reopen.md` → "The rule"; under Labs one that would show it becomes a pending kill instead (`docs/specs/reopen.md` → "Labs: No-confirm delayed kill"). `Escape`, the cancel button, and clicking another panel cancel; any other key dismisses it.
 
 **Must return keyboard selection to the next surviving Door after killing a revealed Door**, falling back to previous Doors, then a pane only if no Doors remain. Apply this to confirmed and unasked kills only while the revealed pane, or the Door, is still selected in command mode; cancellation, refusal, or navigating away discards the return target.
 
@@ -272,11 +272,9 @@ Source of truth: `requestKill` in `lib/src/components/Wall.tsx`; `wireXtermHandl
 
 ## Selection overlay
 
-**Must outline the union of the invoking source Pane and its open helper**, following their outer contour without an internal seam or enclosing unused neighboring space, and restore the source-only ring on close.
+One ring marks the one active pane or Door: a solid stroke in passthrough, marching ants in command mode, centered on the midline of the `PANE_GUTTER_PX` gap between panes (rationale).
 
-One ring marks the one active pane or Door: a solid stroke in passthrough, marching ants in command mode, centered on the gutter's midline (rationale).
-
-- **Must march for as long as command mode lasts in a focused window** (rationale), pausing only during Workspace title editing, under reduced motion, or under `cfg.marchingAnts.paused`; an unfocused window pauses and desaturates it. **Never restart or retime the march for travel.**
+- **Must march for as long as command mode lasts in a focused window** (rationale), pausing only during Workspace title editing, under reduced motion, or under `cfg.marchingAnts.paused`; an unfocused window pauses it. **Never restart or retime the march for travel.**
 - Under `WorkspaceWindow` the ring renders into `document.body`, outside the Workspace's transform and stacking context. **Every modal must render into `document.body` too, at a `MODAL_LAYERS` value above the ring's**, or the ring crosses it — by value, never insertion order.
 
 Source of truth: `WorkspaceSelectionOverlay` in `lib/src/components/wall/WorkspaceSelectionOverlay.tsx`.
@@ -335,7 +333,7 @@ Reattach applies the token's restore policy (`docs/specs/tiling-engine.md` → "
 
 Triggered by `,` in command mode or by clicking the session name in the pane header. **Must consume `,` without starting a rename on a Door or browser Surface.** Only a terminal or Tool pane, on every face, mounts the title editor.
 
-The editor (`InlineEditInput`, shared with the browser URL editor) confirms on `Enter` or blur and cancels on `Escape`; whichever lands first settles the edit. **Must seed each rename from the current label and preserve the user's draft and selection across header re-renders** (rationale). Clipboard chords follow `docs/specs/mouse-and-clipboard.md` §8.9.
+The editor confirms on `Enter` or blur and cancels on `Escape`; whichever lands first settles the edit. **Must seed each rename from the current label and preserve the user's draft and selection across header re-renders** (rationale). Clipboard chords follow `docs/specs/mouse-and-clipboard.md` §8.9.
 
 Submitted values are rejected when empty or when they fail the `setTerminalUserTitle` validation that also guards title seeding (`docs/specs/terminal-state.md` → Supported OSC Inputs); `<unnamed>` is allowed as a user pin. On rejection the input still closes — it is not a blocking dialog — and a transient warning names the offending value.
 
@@ -438,7 +436,7 @@ Only the owner's header shows Unzoom, and only the owner's control toggles zoom 
 
 ### Spawn (new pane reveal)
 
-Enter motion: `docs/specs/tiling-engine.md` → "Animation". Shell-selection replacement shows a transient notice over the resulting pane; its reuse after a Surface move: `docs/specs/dor-cli.md` -> "Handle Model".
+Enter motion: `docs/specs/tiling-engine.md` → "Animation".
 
 ### Kill (two-phase fade + tween reclaim)
 

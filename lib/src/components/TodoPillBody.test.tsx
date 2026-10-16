@@ -36,7 +36,7 @@ function spotlightIn(id: string): HTMLElement | null {
   return container.querySelector<HTMLElement>(`[data-pill="${id}"] [data-todo-spotlight]`);
 }
 
-/** docs/specs/alert.md -> Pane Header: the landing spotlight. */
+/** The landing spotlight, raised by `spotlightTodo` in lib/src/lib/todo-spotlight.ts. */
 describe('TodoSpotlight', () => {
   it('plays on the Surface the latest signal names only, and replays on a repeat', () => {
     act(() => root.render(<Pills ids={['a', 'b']} />));

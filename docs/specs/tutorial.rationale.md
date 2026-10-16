@@ -2,10 +2,6 @@
 
 > Informative companion to [tutorial.md](tutorial.md): the evidence behind its rules, keyed by that spec's headings (AGENTS.md → "What, not why"). Nothing here is normative.
 
-## Profiles
-
-**Why Make it yours is both first and auto-opened.** One mouse action — change the theme — completable before any keyboard vocabulary has been introduced, so the opening ask needs no menu screen ahead of it.
-
 ## Architecture
 
 **How the split credit beats the mode change.** `addSplitPanel` fires the `split` `WallEvent` synchronously, while the split's automatic passthrough transition emits `modeChange` from a later effect; the detector therefore sees the split before the transition that would disqualify it.
@@ -46,4 +42,4 @@
 
 **What `sendOutput` is for.** It is the playground shells' output path: bytes go through the real parser, so the alert programs' `OSC 633` and `OSC 9` reach the Activity layer as a real PTY's would.
 
-**Why the theme subscription backs the opening ask.** Picking a theme needs no command-mode vocabulary ([Profiles](#profiles)); the picker remains operable through ordinary keyboard focus. Comparing consecutive theme ids also keeps the achievement repeatable after progress is reset.
+**Why a theme change is a tutorial item.** Picking a theme needs no command-mode vocabulary; the picker remains operable through ordinary keyboard focus. Comparing consecutive theme ids also keeps the achievement repeatable after progress is reset.

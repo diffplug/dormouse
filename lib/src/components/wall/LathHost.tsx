@@ -224,7 +224,7 @@ const LathLeaf = memo(function LathLeaf({
   /** Parked: mounted but out of the tree, holding its last rect so the guest's
    *  viewport survives (docs/specs/tiling-engine.md → "Parked leaves"). */
   parked: boolean;
-  /** Another pane's terminal context is open (docs/specs/layout.md → "Header context menu"). */
+  /** Another pane's terminal context is open (DESIGN.md → "Terminal Context Teeth"). */
   receded: boolean;
   registerEl: (el: HTMLDivElement | null) => void;
   /** Header-press → maybe a pane drag (threshold-gated in the drag controller). Stable. */

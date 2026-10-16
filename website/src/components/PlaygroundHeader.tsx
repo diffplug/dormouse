@@ -3,7 +3,7 @@ import { NAV_LINKS_OFF_PLAYGROUND } from "../lib/site-nav";
 
 /**
  * The desktop playground's header, drawn as the app's title bar (the standalone
- * AppBar) rather than the marketing site's (`docs/specs/tutorial.md`).
+ * AppBar) rather than the marketing site's.
  */
 export default function PlaygroundHeader({ tabs }: {
   /** `PlaygroundTabs`, once the playground's modules have loaded. */

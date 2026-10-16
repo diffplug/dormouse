@@ -438,7 +438,7 @@ describe('WorkspaceWindow', () => {
     }
   });
 
-  /** docs/specs/alert.md -> Pane Header: where a tab pill's click lands, that
+  /** Where a tab pill's click lands, that
    *  Surface's header pill says so — a Door's once the click reattached it. */
   it('spotlights the header pill a tab TODO pill enters, reattaching a Door, replaying a repeat, never clearing a TODO', async () => {
     const first = getActiveWorkspaceId();

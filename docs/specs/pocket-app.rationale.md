@@ -32,7 +32,7 @@
 
 ## Installable web app
 
-**iOS icon and display support.** WebKit documents manifest icon support since iOS 15.4, with `apple-touch-icon` taking precedence, and both `standalone` and `fullscreen` display modes. Pocket retains its existing assets and standalone mode. [WebKit's iOS Web Push guidance](https://webkit.org/blog/13878/web-push-for-web-apps-on-ios-and-ipados/) (verified 2026-09).
+**iOS display support.** WebKit documents both `standalone` and `fullscreen` display modes for Home Screen web apps; Pocket uses standalone. [WebKit's iOS Web Push guidance](https://webkit.org/blog/13878/web-push-for-web-apps-on-ios-and-ipados/) (verified 2026-09).
 
 **Why a non-classic worker fails the build rather than a test.** A module-syntax worker installs on nothing, and push is the one feature no desktop path exercises — a regression would ship silently and surface only as a phone that stopped receiving notifications. The same reasoning puts `build:pocket` inside the root `pnpm build`: the assertion's own fixtures prove the assertion works, not that a real bundler output passes it. `emptyOutDir: false` on the worker config keeps the app build's clean from wiping the `sw.js` emitted beside it; `dev:pocket` re-bundles that config per request so the dev server serves what production would emit.
 

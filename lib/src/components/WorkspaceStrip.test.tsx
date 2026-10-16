@@ -322,7 +322,7 @@ describe('WorkspaceStrip', () => {
     expect(pill.filter((token) => /^(hover|active|focus-visible):(p[xytrbl]?|m[xytrbl]?|text|font)-/.test(token))).toEqual([]);
   });
 
-  /** docs/specs/alert.md -> Pane Header: the landing spotlight is raised on the
+  /** The landing spotlight is raised on the
    *  Surface the click entered, and a repeat is a new signal. */
   it('spotlights the Surface the pill lands on, again on a repeat click', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;

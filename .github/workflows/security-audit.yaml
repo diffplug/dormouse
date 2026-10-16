@@ -6,6 +6,11 @@ name: security-audit
 # rather than calling this workflow with `uses:` because a tag `push`
 # would propagate as event_name `push`, which claude-code-action rejects.
 
+# The schedule runs about 21h after workflow-audit.yaml's "13 7 * * *": Check
+# GitHub state judges that run's age against `liveness` in
+# .github/audit/expected-github-state.json (fail past 48h, INFO past 27h), so
+# one skipped run reports INFO without failing only while this offset stays
+# between about 3h and 24h. Move both crons together.
 on:
   schedule:
     - cron: "21 4 * * *"

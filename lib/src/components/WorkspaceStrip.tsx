@@ -192,7 +192,8 @@ export function WorkspaceStrip({
   );
 
   // One union per tab, computed in the loop it is rendered in: every tab shows
-  // its TODO pill, the visible one included.
+  // its TODO pill, the visible one included, so selecting a Workspace never
+  // makes its pill appear or vanish.
   const unionsRef = useRef(new Map<WorkspaceId, WorkspaceUnion>());
   // Closed Workspaces leave the strip and must leave this cache with them, or a
   // long session accumulates one entry per Workspace it ever had.

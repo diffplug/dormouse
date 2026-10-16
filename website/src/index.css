@@ -100,7 +100,7 @@ html body {
 
 /* Reference pages follow the reader's picked theme instead of the site's
    black; the rest of the site is unaffected because only DocsLayout adds the
-   class (docs/specs/website-docs.md -> Reference page chrome).
+   class.
 
    `applyTheme` writes --vscode-* onto body.style, so the remap has to live on
    body too — html cannot read a custom property set on its child. That leaves

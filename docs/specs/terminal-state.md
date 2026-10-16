@@ -54,8 +54,8 @@ Titles:
 
 - `OSC 0` / `OSC 2` → `title` sourced `osc0` / `osc2`.
 - **Only the OSC 9 *message* form feeds the title channel** (`osc9`, which may override the header); the *progress* form `OSC 9 ; 4` contributes no candidate.
-- **`OSC 99` / `OSC 777 ; notify` candidates (`osc99`, `osc777`) are diagnostics only** — the header context menu's title-candidates table, never a header override.
-- `user` — pinned via the inline rename UI (`setTerminalUserTitle`). **Always wins** over every other candidate. **Titles starting with `<idle>` are rejected as reserved**.
+- **`OSC 99` / `OSC 777 ; notify` candidates (`osc99`, `osc777`) are diagnostics only**, never a header override.
+- `user` — pinned by `setTerminalUserTitle`. **Always wins** over every other candidate. **Titles starting with `<idle>` are rejected as reserved**.
 
 **A programmatic interactive launch writing directly to the platform PTY must emit `commandLine` + `commandStart(source: "user_input")` synchronously before the write**, through `seedLaunchedCommand` — it bypasses xterm's keystroke fallback; an integrated shell's later boundaries stay authoritative.
 
@@ -145,7 +145,7 @@ Header priority — first match wins:
    - `currentCommand.displayCommand`.
 3. After a command has finished (`currentCommand` null and `lastCommand` set): `<idle> ${LAST_TITLE}`, `LAST_TITLE` applying the same priority to `lastCommand` with the in-run title taken from `lastCommand.finalTerminalTitle` **so a post-finish title event cannot overwrite it**.
 
-   On a non-zero exit a trailing fail glyph is appended — `<idle> ${LAST_TITLE} ✗` — and `lastCommandFailed` set. **"Failed" requires a real non-zero `exitCode`**: the keystroke fallback never records one, so it shows no glyph either way. **The glyph rides in `primary`** and is the header's only failure signal. (rationale)
+   On a non-zero exit a trailing fail glyph is appended to `<idle> ${LAST_TITLE}` and `lastCommandFailed` set. **"Failed" requires a real non-zero `exitCode`**: the keystroke fallback never records one, so it shows no glyph either way. **The glyph rides in `primary`.** (rationale)
 4. Otherwise (no running command and no last command): `<idle>`.
 
 **Must filter app-sent title overrides.** A bare interpreter name or executable path (`zsh`, `C:\WINDOWS\system32\cmd.exe`) is discarded; cmd.exe's `<path>\cmd.exe - <command>` form is reduced to the `<command>` half; titles carrying arguments or prose (`lazygit: dormouse`, `README.md - VIM`) are kept. (rationale)
@@ -163,7 +163,6 @@ Source of truth: `deriveHeader` / `deriveSurfaceLabel` / `resolveDisplayPrimary`
 ## Grouping
 
 - **Directory group keys use `cwdIdentity(cwd)`** (`scheme|host|pathKind|path`), so remote hosts and Windows/POSIX path kinds stay distinct. Directory mode keys on `cwdAtStart ?? cwd`; command mode on the running command's `displayCommand`, else the idle label.
-- **Windows UNC display labels keep `\\server\share\` as the path root** and do not repeat the server/share in the trailing path segments.
 - **`prompt` and `editing` collapse into one `idle` bucket**; **`finished` stays distinct** so a recently-completed pane can be filtered separately though its header label carries the same `<idle>` prefix.
 
 Source of truth: `groupTerminalPanes` / `TerminalGroupingMode` / `cwdIdentity` / `statusBucket` in `lib/src/lib/terminal-state.ts`.

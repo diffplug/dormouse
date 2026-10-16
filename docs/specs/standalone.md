@@ -108,13 +108,13 @@ Every quit trigger is driven through the webview quit orchestrator (§Quit flow)
 
 Source of truth: `standalone/src/AppBar.tsx`.
 
-The AppBar is the draggable titlebar: the Workspace strip across its width, its pinned group flush against the right end, then the window controls on Windows and Linux (macOS draws native traffic lights). **Must make the strip's space before its pinned group the window-drag region, never a tab or button.** **Never put a shell picker here**: the shell is the Settings dialog's Shell row (`lib/src/components/ShellPicker.tsx`; what a changed pick spawns: `docs/specs/layout.md` -> "Session lifecycle and terminal registry"); the theme picker's placement is `docs/specs/theme.md` → "Where the user picks a theme". The strip is `docs/specs/layout.md` → Workspace tabs; its indicators `docs/specs/alert.md` → Workspace union.
+The AppBar is the draggable titlebar. **Must make the strip's space before its pinned group the window-drag region, never a tab or button.** The strip is `docs/specs/layout.md` → Workspace tabs; its indicators `docs/specs/alert.md` → Workspace union.
 
 ### Application menu
 
 Source of truth: the `.menu(...)` builder in `standalone/src-tauri/src/lib.rs`.
 
-The app replaces Tauri's default menu with macOS-only App, File, and Edit submenus and a Window submenu; File holds Reopen Closed (`docs/specs/reopen.md` → "Reopen verb"). **Must keep the macOS fullscreen item**: it and its Ctrl+Cmd+F are the only exit from native fullscreen when AppKit does not reveal the traffic lights.
+The app replaces Tauri's default menu; its Reopen Closed item is `docs/specs/reopen.md` → "Reopen verb". **Must keep the macOS fullscreen item**: it and its Ctrl+Cmd+F are the only exit from native fullscreen when AppKit does not reveal the traffic lights.
 
 - **Must keep the Edit submenu on macOS**, Tool iframes' only clipboard path (rationale).
 - **Must cancel the keydown of any chord the page handles**, so the menu item skips it (rationale): `docs/specs/mouse-and-clipboard.md` §3.9, §8.2, §8.9.
@@ -179,7 +179,7 @@ Source of truth: `route` in `standalone/src-tauri/src/routing.rs`; `dispatch_sid
 
 ### Boot and geometry
 
-**Boot reopens every window `sessions/` names**, `main` first then each `ws-<n>` in numeric order, capped at `MAX_RESTORED_WINDOWS` with the excess logged and left on disk (rationale). **An unreadable snapshot still opens its window**, booting fresh. **`main` is focused last**, so it comes up in front; **a session naming no `main` relaunches with a fresh, empty one**.
+**Boot reopens every window `sessions/` names**, `main` first then each `ws-<n>` in numeric order, capped at `MAX_RESTORED_WINDOWS` with the excess logged and left on disk (rationale). **An unreadable snapshot still opens its window**, booting fresh. **A session naming no `main` relaunches with a fresh, empty one**.
 
 **Geometry is a sibling of the snapshot**, `sessions/<label>.geometry.json`, written through the same atomic writer, debounced, and re-applied at boot. No `tauri-plugin-window-state` (rationale).
 
@@ -237,7 +237,7 @@ Source of truth: `prepareWorkspaceTransfer` in `lib/src/components/wall/workspac
 
 ### Tear-out
 
-**A tear-out opens the window positioned so the dragged tab lands under the cursor**, at the source window's size. Its first flush writes `sessions/ws-<n>.json`; everything else is the transfer above.
+A tear-out's first flush writes `sessions/ws-<n>.json`; everything else is the transfer above.
 
 ### Arrival queue
 
@@ -289,7 +289,7 @@ Source of truth: `Arrival` in `standalone/src-tauri/src/routing.rs`; `begin_arri
 
 **A pointer captured on a strip tab keeps delivering `pointermove` and `pointerup` outside the window**, so the gesture stays the webview's and Rust is only asked which window is under the cursor (`window_at_cursor`; rationale). **The release transfers there, or tears out when the cursor is over no window or over this window outside its own strip.**
 
-**Among windows containing the cursor the most recently focused wins** — the OS exposes no z-order. **The target decides the drop index, and its caret shows that slot** (`docs/specs/layout.md` → "Workspace tabs").
+**Among windows containing the cursor the most recently focused wins** — the OS exposes no z-order. **The target decides the drop index** (`docs/specs/layout.md` → "Workspace tabs").
 
 Source of truth: `window_at` in `standalone/src-tauri/src/routing.rs`; `standalone/src/workspace-drag.ts`.
 
@@ -353,7 +353,7 @@ Every trigger funnels into `request_quit(app)`:
 | `RunEvent::ExitRequested` | a window-level exit request | `api.prevent_exit()` unless approved and cleared by the cleanup gate (§What a window's `Destroyed` settles); its `code` is ignored |
 | the app menu's Quit item | the menu and its `Cmd+Q` | a **custom** `MenuItem`, never `PredefinedMenuItem::quit` (macOS; rationale) |
 | `applicationShouldTerminate:` | the Dock's Quit, `osascript`, logout, restart | spliced onto tao's live delegate class at `Ready`, holding it (`NSTerminateLater`) and starting the flow; after approval, `NSTerminateNow` once the cleanup gate clears (macOS; rationale) |
-| the `quit_restart` command | the update notice's "Restart now", `dor app restart` | `request_quit` with the restart intent (§Restart) |
+| the `quit_restart` command | the update notice (`docs/specs/auto-update.md`), `dor app restart` | `request_quit` with the restart intent (§Restart) |
 
 **Never refuse an OS terminate**; that aborts the whole logout (rationale). **Must answer a held terminate on every exit and on `quit_cancel`**, or the app hangs.
 
@@ -460,7 +460,7 @@ Source of truth: `standalone/package.json`, `standalone/src-tauri/tauri.conf.jso
 - **The sidecar bundle and the webview bake `DORMOUSE_RELAY_ORIGIN`** (`docs/specs/relay.md` → "Relay origin"); the webview CSP has no relay sources (`standalone/scripts/tauri-conf.test.mjs`).
 - **A self-host `tauri build` overlays no updater endpoint and no updater artifacts**, so the binary cannot reach `dormouse.sh` and needs no signing key. Pinned by `standalone/scripts/dev-standalone.test.mjs`.
 - The bundle ships the whole sidecar via the `../sidecar/**/*` resources glob, including node-pty's prebuilds + bundled ConPTY and the shell-integration scripts (`docs/specs/theme.md` -> "OSC color queries on Windows require the bundled ConPTY", `docs/specs/terminal-state.md` -> "Shell-integration injection").
-- **Must start native dev with Vite on an OS-assigned loopback port** (`DORMOUSE_BROWSER_DEV_VITE_PORT` may pin it) **and key the Tauri identifier to the canonical worktree path**, so parallel worktrees and the installed app never share a port or app data. The default log is `<worktree>/standalone/src-tauri/target/dormouse-dev.log`.
+- **Must start native dev with Vite on an OS-assigned loopback port** (`DORMOUSE_BROWSER_DEV_VITE_PORT` may pin it) **and key the Tauri identifier to the canonical worktree path**, so parallel worktrees and the installed app never share a port or app data.
 - **Never stop another process to free a port**: an occupied pinned port fails, and Windows pre-dev cleanup touches only sidecars executing from this worktree's default debug directory, never a listener by port.
 - **May point a dev build at a local `pnpm dev:hosted`** — the origin it prints, with `DORMOUSE_RELAY_IS_HOSTED=1` — to speak managed voice through it; it answers no other `Host` (`docs/specs/security-local.md` -> "Persisted state").
 

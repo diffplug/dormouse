@@ -2178,6 +2178,10 @@ rem directly.
   # ---------------------------------------------------------- scheduled task --
 
   function Register-DormouseTask {
+    # -NoProfile -NonInteractive: the task runs no user PowerShell profile, and
+    # a prompt fails instead of waiting; `/bin/bash <script>` on the other two
+    # is already non-interactive and reads no rc file. -WindowStyle Hidden keeps
+    # this Interactive-logon task's console off the desktop.
     $argline = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "{0}"' -f (Join-Path $BIN_DIR 'run-relay.ps1')
     $action = New-ScheduledTaskAction -Execute $POWERSHELL_EXE -Argument $argline -WorkingDirectory $INSTALL_ROOT
     $trigger = New-ScheduledTaskTrigger -AtLogOn -User $USER_ID

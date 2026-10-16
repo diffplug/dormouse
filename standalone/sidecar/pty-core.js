@@ -1115,7 +1115,7 @@ async function getListeningPortsForPids(pids, runtime = {}, names) {
 
 module.exports.getListeningPortsForPids = getListeningPortsForPids;
 
-/** De-duplicated by (family, address, port) and sorted by port — the shape a
+/** De-duplicated by (family, address, port) and sorted by port, then address — the shape a
  *  caller reads a Surface's ports in. */
 function dedupeListeningPorts(ports) {
   const seen = new Map();

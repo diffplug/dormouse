@@ -117,6 +117,7 @@ function notificationOptions(notification: PocketNotification): NotificationOpti
     body: notification.body,
     // `renotify` is left at its default, so replacing does not buzz again.
     tag: notification.tag,
+    // Renaming lib/pocket/public/icon-192.png silently breaks these outside iOS.
     icon: '/icon-192.png',
     badge: '/icon-192.png',
   };

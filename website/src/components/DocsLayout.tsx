@@ -153,7 +153,7 @@ export default function DocsLayout({
   children: ReactNode;
 }) {
   // These pages are long-form reading, so they follow the reader's theme
-  // rather than the site's black (docs/specs/website-docs.md).
+  // rather than the site's black.
   useRestoredTheme(DOCS_THEME_ID);
   useEffect(() => {
     document.body.classList.add(THEMED_BODY_CLASS);

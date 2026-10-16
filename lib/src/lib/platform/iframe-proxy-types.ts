@@ -17,8 +17,10 @@
  * a Node tsconfig (and vice-versa).
  */
 /** Why a host with the iframe proxy refuses an `https://` page — the one
- *  wording the proxy, the panel, the Display modal and `surface.iframe` share.
- *  Every refusal names `dor agent-browser open <url>` as the remedy. */
+ *  wording the proxy, the panel, the Display modal, a render swap and
+ *  `surface.iframe` share. The `surface.iframe` refusal and the panel's error
+ *  name `dor agent-browser open <url>` as the remedy; the Display modal shows
+ *  the bare wording, and a render swap only warns in the console. */
 export const IFRAME_HTTP_ONLY = 'the embedded view frames http:// pages only';
 
 export type IframeProxyResult =

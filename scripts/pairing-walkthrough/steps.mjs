@@ -84,9 +84,9 @@ const PAIRING_CODE_REGION = '[role="status"][aria-label="Pairing code"]';
 /**
  * The Burrow's pairing modal, by the id its own title carries.
  *
- * **Not by its copy, and not by "the dialog with a numeric field".** Every
- * string on it is normative and under review
- * (`docs/specs/remote-security-model.md` → Pairing), and the Settings dialog
+ * **Not by its copy, and not by "the dialog with a numeric field".** Its
+ * wording may change (`docs/specs/remote-security-model.md` → Pairing fixes
+ * only what its warning says), and the Settings dialog
  * standing behind it holds numeric inputs of its own — so the one anchor that is
  * neither is `ModalFrame`'s `aria-labelledby`
  * (`lib/src/remote/burrow/RemotePairingModal.tsx`).

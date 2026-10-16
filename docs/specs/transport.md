@@ -137,7 +137,7 @@ Source of truth: the message schema in `vscode-ext/src/message-types.ts` (`Webvi
 | --- | --- | --- |
 | Webview → host | `dormouse:openExternal` | Open a user-confirmed external URI from an OSC 8 hyperlink; revalidation: `docs/specs/mouse-and-clipboard.md` -> "OSC 8 hyperlinks". |
 | Webview → host | `pty:getOpenPorts` | TCP listening ports of a PTY's shell **and all of its descendant subprocesses**, answered with `pty:openPorts`. |
-| Host → webview | `pty:openPorts` | De-duplicated by `(family, address, port)`, sorted by port then address; empty when the PTY is gone or enumeration fails. |
+| Host → webview | `pty:openPorts` | De-duplicated by `(family, address, port)`; empty when the PTY is gone or enumeration fails. |
 | Webview → host | `pty:getOpenPortsMany` | `ids`, answered by `pty:openPortsMany` from one scan. |
 | Host → webview | `pty:openPortsMany` | `[]` for an id with no live PTY. |
 | Host → webview | `pty:data` | PTY output after state-driving supported OSCs are parsed/stripped; `OSC 8` and ImageAddon's inline-image `OSC 1337` forms are preserved for xterm.js, routed only to the owning router. |
@@ -199,7 +199,7 @@ Carriers: the `boot_reserve_ids` and `surface_reserve_ids` invokes (standalone);
 
 - **A Workspace with neither a published nor a boot-seeded session is dropped rather than written empty**, so a mid-boot snapshot cannot blank a restored Workspace.
 - **A Workspace's save compares against its own previous record** — seeded from disk until its Wall publishes — never the Window's active one, or a dead PTY's retained cwd and alert would come from the wrong Workspace.
-- **Reordering, renaming, pinning, or switching the active Workspace writes too.** **Always write `nameIsAuto`**. **Write `pinned` only when true**, in every record a Window builds.
+- **Reordering, renaming, pinning, or switching the active Workspace writes too.** **Always write `nameIsAuto`**.
 - **Must publish both Workspace records in one synchronous step with a Surface move's ownership change**, unprobed and behind one Window write (`pagehide` included), fencing saves collected before or during the change and retaining a departed Session's previous cwd/alert in the destination.
 - **VS Code does not use the collector** — each webview persists one bare `PersistedSession`, its single Workspace, through its own per-surface state API (`docs/specs/vscode.md`).
 

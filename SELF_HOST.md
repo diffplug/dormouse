@@ -321,7 +321,6 @@ Service and install root are in the table at the top of this file; logs and serv
 | Stopping it | `launchctl bootout` takes the process tree | ends only the `powershell.exe`; before every start the installer and `manage` reap its children by install-root image path and command line, never image name | `systemctl --user stop` takes the whole cgroup |
 | `current`/`previous` | symlinks, swapped with `rename(2)` on the link path | `current.txt`/`previous.txt` naming a release id, swapped with `rename(2)` on the file | symlinks, swapped with `rename(2)` on the link path |
 | `0700` / `0600` | modes under `umask 077`; `verify` checks mode and owner | an owner-only DACL; `verify` also checks owner SID | modes under `umask 077`; `verify` checks mode and owner |
-| Entry | `/bin/bash bin/run-relay` | `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File bin\run-relay.ps1`, at an absolute interpreter path | `ExecStart=/bin/bash "<root>/bin/run-relay"` |
 
 ### Invariants
 
@@ -346,4 +345,4 @@ Each fails silently unless encoded in every installer it names; single-platform 
 
 **`uninstall` must leave `manage` behind**, so `purge` stays reachable for `config/` and `state/`. **`purge` deletes `run/` along with `state/` and `config/`**, and once uninstalled prints the one command removing the install root and, on macOS and Linux, the log directory outside it. Source of truth: `cmd_uninstall` / `cmd_purge` in `deploy/local/install-linux.sh` and `deploy/local/install-macos.sh`; `Invoke-Uninstall` / `Invoke-Purge` in `deploy/local/install-windows.ps1`.
 
-Two test-only hooks, each refused unless `DORMOUSE_INSTALL_TEST=1`: `DORMOUSE_INSTALL_ROOT` puts the whole install under a throwaway path, and — Linux only — `DORMOUSE_INSTALL_ORIGIN` supplies the origin so Tailscale is never consulted. `.github/workflows/ci.yml` pins the Linux install/update path in a temp root. Test mode stops before systemd and Serve; macOS and Windows have no runtime CI coverage, so `deploy-lint` checks all three installers textually.
+Two test-only hooks, each refused unless `DORMOUSE_INSTALL_TEST=1`: `DORMOUSE_INSTALL_ROOT` puts the whole install under a throwaway path, and — Linux only — `DORMOUSE_INSTALL_ORIGIN` supplies the origin so Tailscale is never consulted. Test mode leaves the service manager and Serve untouched on all three.

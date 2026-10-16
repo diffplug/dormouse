@@ -409,7 +409,7 @@ export const PreviewSlot: Story = {
 };
 
 /** A Workspace tab's TODO pill entered this pane: its header pill takes the
- *  landing spotlight (`docs/specs/alert.md` -> Pane Header), held at its peak. */
+ *  landing spotlight (`TodoSpotlight`), held at its peak. */
 export const TodoLandingSpotlight: Story = {
   parameters: primedPane({ status: 'WATCHING_DISABLED', todo: true }),
   decorators: [(Story) => <div className={TODO_SPOTLIGHT_HELD_CLASS}><Story /></div>],

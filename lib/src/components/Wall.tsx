@@ -1352,7 +1352,9 @@ export function Wall({
     [buildDorSurfacesInternal],
   );
   const buildDorSurfaceList = useCallback(
-    // buildDorSurfacesInternal already returns a fresh array, so sort it in place.
+    // dor list rows sort by id number (creation order), not Lath layout order, so a swap,
+    // minimize, or reattach never reorders them. buildDorSurfacesInternal already returns a
+    // fresh array, so sort it in place.
     (): DorSurface[] => buildDorSurfacesInternal(true).sort((a, b) => compareSurfaceIds(a.id, b.id)),
     [buildDorSurfacesInternal],
   );

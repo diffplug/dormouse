@@ -4,7 +4,7 @@
 > - Owns the selfhost Relay server (`relay/`), the wire it routes, and the desktop Burrow service that enrolls with it: the Relay origin a build bakes, `BurrowService` and its store, enrollment, the relay socket, Settings → Remote control, and running and installing the Relay. `docs/specs/hosted.md` owns the Hosted Relay; host plumbing is `docs/specs/standalone.md` -> "Burrow service" and `docs/specs/vscode.md` -> "Burrow: a service in the extension host".
 > - Read `docs/specs/remote-security-model.md` first — it owns the trust model this one deploys and what the Burrow decides and proves; `docs/specs/remote-api.md` owns what flows after authorization, `docs/specs/pocket-app.md` the Pocket app this Relay serves.
 
-The Relay is one Node process (Hono). No database. Every security primitive lives in `remote-lib-common`.
+The Relay is one Node process. No database. Every security primitive lives in `remote-lib-common`.
 
 ## Guardrails
 
@@ -172,7 +172,7 @@ Source of truth: `relay/src/push-endpoint.ts`; `relay/src/push.ts`, including `a
 
 ## Routing
 
-The Relay routes JSON envelopes between Client and Burrow sockets (`@hono/node-ws`). **`clientId` is a Relay-assigned secret** stamped onto every Burrow-bound frame so the Burrow can address replies, and never sent to a Client.
+The Relay routes JSON envelopes between Client and Burrow sockets. **`clientId` is a Relay-assigned secret** stamped onto every Burrow-bound frame so the Burrow can address replies, and never sent to a Client.
 
 **The `e2e` envelope is the whole surface.** Four `t: 'e2e'` frames: Client→Relay, Relay→Burrow with `clientId` stamped, Burrow→Relay, Relay→Client with `burrowId` stamped from the socket. A Burrow handles exactly these, `client-gone`, and `policy`, ignoring anything else; any other Client frame type is answered with an `error` and reaches no Burrow.
 
@@ -301,7 +301,6 @@ Source of truth: `resolveRelayOrigin` and `assertRelayOriginBaked` in `scripts/r
 - **A 200 that is not an enrollment fails the exchange**, naming the bad field (rationale).
 - **Burrow→Relay requests time out at `BURROW_REQUEST_TIMEOUT_MS`, under the webview's own 15 s command budget** (rationale); a route the Relay may legitimately hold open longer (push delivery) passes its own.
 - **The store goes first**: the save is awaited before any running Burrow is stopped (rationale), and **`clearEnrollment` awaits the delete before anything else**. Replacing a running Burrow emits a `status` event with `enrolled: false` between the two, since the webview's gate is edge-triggered.
-- **`suggestedLabel` names the app beside the hostname**: standalone and the extension are two Burrows on one machine, and Pocket lists them as two rows.
 
 **Hosted enrollment** (a Hosted build; the protocol is `docs/specs/hosted.md` -> "Burrow enrollment"): `beginHostedEnrollment` posts at the baked origin and the service polls on its own. Refused on an enrolled machine.
 
@@ -343,7 +342,6 @@ The **Remote control** choices are **One-time connection** (`docs/specs/one-time
 - **The setup password is passed through, never held**, and cleared on success.
 - **"Set up a phone" mints only when its panel opens**, replaces its code before `expiresAt` while open, and **reports which decision ended the code** (`docs/specs/remote-security-model.md` -> "Pairing"; rationale).
 - **A Hosted `removed` offers Enroll again**, which clears the enrollment and then begins a device-code enrollment.
-- **The Hosted enroll view opens `verificationUrl` with `openExternal` only on a click.**
 - **Status is re-read, not patched**: the service's `status` event carries only `{ enrolled, serving, serviceId }`, so every event triggers a full `status` command, and the dialog re-reads on open since another window may have enrolled. **The connection is polled only while something is subscribed** (rationale).
 
 **Never expose pairing confirmation or one-time commands on `window.dormouseBurrow`**; its enrollment methods are the scripting seam.

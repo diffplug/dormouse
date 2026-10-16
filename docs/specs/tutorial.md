@@ -13,7 +13,7 @@ Device routes (`website/src/routes.ts`):
 
 ## Profiles
 
-`DESKTOP_TUTORIAL_PROFILE` and `POCKET_TUTORIAL_PROFILE` open inside their `initialSectionId`; desktop's is Make it yours, a single change-the-theme item (rationale). Pocket's Copy paste is desktop's minus `cp-override` ([Pocket Copy paste specifics](#pocket-copy-paste-specifics)).
+`DESKTOP_TUTORIAL_PROFILE` and `POCKET_TUTORIAL_PROFILE` open inside their `initialSectionId`. Pocket's Copy paste is desktop's minus `cp-override` ([Pocket Copy paste specifics](#pocket-copy-paste-specifics)).
 
 **Item ids are stable** — they are the localStorage payload entries ([Storage](#storage)).
 
@@ -32,10 +32,10 @@ Source of truth: `TutRunner` in `website/src/lib/tut-runner.ts`; `TutDetector` i
 
 ## Layout
 
-- **The desktop page must restore its own theme** with `useRestoredTheme(WEBSITE_DEFAULT_THEME_ID)` (`website/src/lib/website-theme.ts`), which declares the host fallback the Settings picker re-resolves through; `PlaygroundHeader` has no theme picker (rationale).
-- `/playground/desktop` runs `WorkspaceWindow`, its strip in an app-style title bar (`FakePtyAdapter`, `initialMode="passthrough"`), from one fresh Workspace. **Must seed its three-pane L-shape as an explicit Lath snapshot** — `restoredLathLayout` from `DESKTOP_PLAYGROUND_LAYOUT` — never the synchronous `initialPaneIds` path (rationale); `website/src/lib/playground-desktop-layout.test.ts` pins it. `DESKTOP_PANES` in the same file owns each seed's id, command, and title; **`tut-boxed` is the Auto-copy + `cp-override` target** (rationale). **Titles are seeded as pending shell opts** (`setPendingShellOpts(id, { title })`) before the Wall mounts, and a user-pin outranks the engine fallback (`docs/specs/terminal-state.md` → "Header Derivation").
+- **The desktop page must restore its own theme** with `useRestoredTheme(WEBSITE_DEFAULT_THEME_ID)` (`website/src/lib/website-theme.ts`), which declares the host fallback the Settings picker re-resolves through (rationale).
+- `/playground/desktop` runs `WorkspaceWindow` (`FakePtyAdapter`, `initialMode="passthrough"`) from one fresh Workspace. **Must seed its three-pane L-shape as an explicit Lath snapshot** — `restoredLathLayout` from `DESKTOP_PLAYGROUND_LAYOUT` — never the synchronous `initialPaneIds` path (rationale); `website/src/lib/playground-desktop-layout.test.ts` pins it. `DESKTOP_PANES` in the same file owns each seed's id, command, and title; **`tut-boxed` is the Auto-copy + `cp-override` target** (rationale). **Titles are seeded as pending shell opts** (`setPendingShellOpts(id, { title })`) before the Wall mounts, and a user-pin outranks the engine fallback (`docs/specs/terminal-state.md` → "Header Derivation").
 
-Every visible pane gets a `TutorialShell` via `PlaygroundShellRegistry`. **`ensureShell` must stay idempotent** — `paneAdded` covers every pane that becomes visible, and `FakePtyAdapter.onPtySpawn` covers the seed panes again, auto-launching each seed's command exactly once (rationale). The page's `startProgram` knows `tutorial` (`TutRunner`), `ascii-splash`/`splash`, `changelog`, `agent` and `build` ([Fake shell behavior](#fake-shell-behavior)), and `dor` ([Playground filesystem](#playground-filesystem)).
+Every visible pane gets a `TutorialShell` via `PlaygroundShellRegistry`. **`ensureShell` must stay idempotent** — `paneAdded` covers every pane that becomes visible, and `FakePtyAdapter.onPtySpawn` covers the seed panes again, auto-launching each seed's command exactly once (rationale).
 
 `/playground/pocket` runs `MobileWall` with **`pocket-tut`** (active, `TutRunner` on `POCKET_TUTORIAL_PROFILE`) and **`pocket-changelog`** (`ChangelogRunner`), and starts a `TutDetector` over the same shared stores. **Must credit Pocket gesture items only on the active tutorial Session's Gesture navigation screen**, through `MobileTerminalUi.onGestureScroll` and `onGestureInput`.
 
@@ -45,23 +45,23 @@ Source of truth: `PlaygroundDesktop` in `website/src/pages/PlaygroundDesktop.tsx
 
 **Must credit both edge-scroll directions (`gn-scroll`), then all four arrows (`gn-arrows`), then Enter, then Escape, each only once its predecessor is complete**; an arrow sent before scrolling completes does not count. **Must clear partial direction counts on tutorial reset.** Keyboard input and native wheels never grant gesture credit.
 
-**Must capture the mouse only on this screen**, where vertical wheels scroll its starfield, and **must stop animation and release capture on leaving or disposal.** Reduced motion disables idle animation, retaining scroll movement.
+**Must capture the mouse only on this screen**, and **must stop animation and release capture on leaving or disposal.** Reduced motion disables idle animation, retaining scroll movement.
 
 Source of truth: `TutRunner` and `GestureStarfield` in `website/src/lib/tut-runner.ts`; `GESTURE_NAVIGATION_SECTION` in `website/src/lib/tut-items.ts`.
 
 ## Menu and navigation behavior
 
-**Must consume unsupported CSI/SS3 key sequences without treating their prefix as Esc**; arrows accept CSI and application-mode SS3. Pinned by `website/src/lib/tut-runner.test.ts`. **`Reset progress` requires the user type `reset`**, then clears storage ([Storage](#storage)) and returns to the profile's initial screen.
+**Must consume unsupported CSI/SS3 key sequences without treating their prefix as Esc**; arrows accept CSI and application-mode SS3. Pinned by `website/src/lib/tut-runner.test.ts`.
 
-Extras: `Starred on GitHub` (persisted separately), FlappyTerm, `Reset progress` — **none of the three ever counts toward a section's progress**. FlappyTerm stays locked until every section checklist item is complete.
+Extras: `Starred on GitHub` (persisted separately), FlappyTerm, `Reset progress` — **none of the three ever counts toward a section's progress**.
 
 ### Runner-local intercepts
 
-**`TutRunner` intercepts `p` while Copy paste is open; it is not a real Dormouse shortcut.** It toggles the **Place To Paste** scratch modal (`website/src/components/PlaceToPaste.tsx`). Desktop only.
+**`TutRunner` intercepts `p` to toggle `PlaceToPaste` while Copy paste is open; it is not a real Dormouse shortcut.** Desktop only.
 
 ### Pocket Copy paste specifics
 
-Pocket reuses `cp-select` / `cp-raw` / `cp-rewrap` but drops `cp-override`: Select mode auto-overrides mouse capture for every Pocket session whose TUI captures the mouse (`docs/specs/mobile-terminal-ui.md` → "Touch mode selector"), so it never asks the user to click the cursor icon. A live prompt above the checklist reflects the touch mode, neither stored nor counted.
+Pocket reuses `cp-select` / `cp-raw` / `cp-rewrap` but drops `cp-override`: Select mode auto-overrides mouse capture for every Pocket session whose TUI captures the mouse (`docs/specs/mobile-terminal-ui.md` → "Touch mode selector"), so it never asks the user to click the cursor icon. A live prompt reflects the touch mode, neither stored nor counted.
 
 ## Fake shell behavior
 
@@ -69,9 +69,9 @@ Pocket reuses `cp-select` / `cp-raw` / `cp-rewrap` but drops `cp-override`: Sele
 
 * **Shell integration must be reported for every command it runs** — `OSC 633 ; A/B` around the prompt, `633 ; E` + `633 ; C` on launch, `633 ; D` on exit. WATCHING is keyed on the running command's name (`docs/specs/alert.md`), and the OSCs also keep `docs/specs/terminal-state.md`'s keystroke fallback from engaging here (rationale).
 * **The Alerts section's programs, which both pages run, must ring for their own reasons, never through a tutorial hook**: `agent` works one turn, then asks with an `OSC 9`; `agent --quiet` sends nothing and rings only through the default `agent` WATCHING rule (`DEFAULT_WATCHED_COMMANDS`); `build` exits after its run. **`build` must stay unwatched**, so its exit, not WATCHING, raises the ring (rationale). Source of truth: `startAlertProgram` in `website/src/lib/alert-programs.ts`.
-* **While a program runs, every input byte goes to it** — `\x03` included, which the runners treat as quit — as do bytes left in the chunk after the Enter that launched it. On exit the terminal returns to the prompt instead of restarting the program. At the prompt, `\x03` abandons the line for a new prompt and runs nothing. Tab completes the last word: a command name, and on the desktop `dor`'s verb or a snapshot path.
+* **While a program runs, every input byte goes to it** — `\x03` included, which the runners treat as quit — as do bytes left in the chunk after the Enter that launched it. On exit the terminal returns to the prompt instead of restarting the program. At the prompt, `\x03` abandons the line for a new prompt and runs nothing.
 
-**The only commands are the ones `startProgram` knows** ([Layout](#layout)) and the desktop's `cd`, `ls`, and `pwd`; anything else prints an "Unknown command" line and exits `127`.
+**The only commands are the ones `startProgram` knows** and the desktop's `cd`, `ls`, and `pwd`; anything else prints an "Unknown command" line and exits `127`.
 
 ## Playground filesystem
 
@@ -136,4 +136,4 @@ Source of truth: `WallEvent` in `lib/src/components/wall/wall-types.ts`, emitted
 Two `tut-boxed` scenarios close the playground's `docs/specs/mouse-and-clipboard.md` coverage gaps, needing no section change:
 
 1. **`SCENARIO_BRACKETED_PASTE_TUI`** — closes [§8.5](mouse-and-clipboard.md#85-bracketed-paste). Emits `\x1b[?2004h` and an idle ANSI-framed view.
-2. **`SCENARIO_SMART_TOKENS`** — closes the [§3.3](mouse-and-clipboard.md#33-selection-hint-text) hint and [§5.1–§5.3](mouse-and-clipboard.md#51-detection). Prints one of each shape from `lib/src/lib/smart-token.ts`'s `PATTERNS`.
+2. **`SCENARIO_SMART_TOKENS`** — closes [§5.1–§5.3](mouse-and-clipboard.md#51-detection). Prints one of each shape from `lib/src/lib/smart-token.ts`'s `PATTERNS`.

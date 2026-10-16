@@ -26,7 +26,7 @@ Source of truth: `attachRouter` in `vscode-ext/src/message-router.ts`, pinned by
 
 ## Workspaces
 
-**One webview is one Workspace.** The bottom-panel `WebviewView` ("Dormouse") is the default Workspace; each `dormouse.open` editor-tab `WebviewPanel` is an independent Workspace. VS Code — not Dormouse — owns their tabs, creation, and closing, so **Dormouse adds no create/rename/close affordances here**: the webview mounts a bare `<Wall>` (`docs/specs/layout.md` → Workspaces). A Workspace's Surfaces are the terminal Sessions its router's `ownedPtyIds` hold plus the browser Surfaces rendered in it.
+**One webview is one Workspace.** The bottom-panel `WebviewView` is the default Workspace; each `dormouse.open` editor-tab `WebviewPanel` is an independent Workspace. VS Code — not Dormouse — owns their tabs, creation, and closing, so **Dormouse adds no create/rename/close affordances here**: the webview mounts a bare `<Wall>` (`docs/specs/layout.md` → Workspaces). A Workspace's Surfaces are the terminal Sessions its router's `ownedPtyIds` hold plus the browser Surfaces rendered in it.
 
 **The extension host refuses every Workspace-spanning `dor` request** — the container verbs, `dor list --workspaces` / `--all`, and any `--workspace` but this webview's own — before routing it, since no webview can answer for its siblings (`docs/specs/dor-cli.md` → "dor workspace"). **Its own Workspace is accepted by its id `workspace:1` *and* by name** (`DEFAULT_WORKSPACE_NAME`), so either, read out of `dor list`, can be handed straight back. Source of truth: `dorWorkspaceRefusal` in `vscode-ext/src/dor-workspace-guard.ts`.
 
@@ -34,8 +34,8 @@ Source of truth: `attachRouter` in `vscode-ext/src/message-router.ts`, pinned by
 
 Each webview's union (`ringing` / `todo`) is computed over its router's `ownedPtyIds`, so **VS Code chrome reflects terminal Session ring + TODO only** — a browser Surface's TODO stays webview-local, `alert:state` being keyed by PTY-backed Session ids ([Future](#future)).
 
-- **Editor tab (`WebviewPanel`):** the title carries the status as plain text; `panel.iconPath` stays the Dormouse mascot.
-- **Panel view (`WebviewView`):** a presence **badge**, ring-vs-TODO in the tooltip. **Never use `view.title`** — a single-view bottom-panel container shows only its static title (rationale). `view.description` stays the shell name.
+- **Editor tab (`WebviewPanel`):** the title carries the status.
+- **Panel view (`WebviewView`):** a presence **badge**. **Never use `view.title`** — a single-view bottom-panel container shows only its static title (rationale).
 
 Source of truth: `notifyUnion` in `vscode-ext/src/message-router.ts`; `vscode-ext/src/workspace-chrome.ts`.
 

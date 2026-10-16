@@ -55,8 +55,6 @@ Source of truth: `scripts/stage-dor-cli.mjs`, `dor/bin/dor`, `dor/bin/dor.cmd`, 
 
 **An optional `timeoutMs` must kill the child and resolve `{ ok: false }` with `SPAWN_TIMEOUT_CODE`** (`ETIMEDOUT`), without waiting for the kill. **On Windows it must end the whole tree**, since a `.cmd` shim's child is `cmd.exe` and the real CLI is its descendant.
 
-**The `dor` and `dormouse-lib` prebuilds must build `dor-lib-common` first**: its `exports` point at built `dist`, so its `.d.ts` files are otherwise missing when either typechecks.
-
 Source of truth: `dor-lib-common/src/spawn.ts`, `dor-lib-common/src/resolve-binary.ts`.
 
 ## Host Plumbing
@@ -92,13 +90,13 @@ sequenceDiagram
 
 ### Standalone
 
-`standalone/package.json`'s `stage` step (before `build` and `tauri`, not bare `vite` dev) runs `stage:dor-cli`. Rust starts the Node sidecar with `DORMOUSE_HOST`, `DORMOUSE_NODE`, `DORMOUSE_CLI_BIN`, `DORMOUSE_CLI_JS`, and `DORMOUSE_CONTROL_TOKEN`; the shared PTY core then prepends `DORMOUSE_CLI_BIN` and sets `DORMOUSE_SURFACE_ID` per PTY. **Rust must not set `DORMOUSE_CONTROL_SOCKET`:** the sidecar picks the path itself and restores both control variables to the env `pty-core` merges into every shell only once the socket is bound, holding stdin commands until then so no PTY spawns with the channel's fate undecided.
+Rust starts the Node sidecar with `DORMOUSE_HOST`, `DORMOUSE_NODE`, `DORMOUSE_CLI_BIN`, `DORMOUSE_CLI_JS`, and `DORMOUSE_CONTROL_TOKEN`; the shared PTY core then prepends `DORMOUSE_CLI_BIN` and sets `DORMOUSE_SURFACE_ID` per PTY. **Rust must not set `DORMOUSE_CONTROL_SOCKET`:** the sidecar picks the path itself and restores both control variables to the env `pty-core` merges into every shell only once the socket is bound, holding stdin commands until then so no PTY spawns with the channel's fate undecided.
 
 Routing precedence, the refusal for a Surface no window owns, and a cancel following its own request belong to `docs/specs/standalone.md` -> "Routing"; a target the registry cannot place, to `docs/specs/standalone.md` -> "Workspace registry".
 
 ### VS Code
 
-`vscode-ext/package.json` runs `pnpm stage:dor-cli` before bundling the extension host and `pty-host.js`. The extension host computes the staged paths under `context.extensionPath/dor-cli`, forks `pty-host.js`, and sends the same dor env on each PTY spawn. **`getDorRuntimeEnv` must omit both control variables:** the token reaches `pty-host.js` through the fork env alone, and the host folds it with a bound socket path onto each spawn's env itself. Its `ready` message is held until the channel settles, so no spawn can race the bind.
+The extension host computes the staged paths under `context.extensionPath/dor-cli`, forks `pty-host.js`, and sends the same dor env on each PTY spawn. **`getDorRuntimeEnv` must omit both control variables:** the token reaches `pty-host.js` through the fork env alone, and the host folds it with a bound socket path onto each spawn's env itself. Its `ready` message is held until the channel settles, so no spawn can race the bind.
 
 One extension host can hold multiple Dormouse webviews, so the request carries `DORMOUSE_SURFACE_ID` and `message-router.ts` routes it to the webview that owns that surface. **A named surface no active webview owns must fail** rather than fall back to a sibling; a request with no surface id goes to the first active router.
 
@@ -161,7 +159,7 @@ Source of truth: `dor/src/commands/shared.ts`, `parseWorkspaceRef` and `parseSur
 
 Implemented commands call private `surface.*` control methods, **enumerated once in `dor/src/protocol.ts` (`SURFACE_CONTROL_METHODS`, with `WORKSPACE_CONTROL_METHODS`, `APP_CONTROL_METHODS`, and `WINDOW_CONTROL_METHODS` beside it)** so the emitting client and the dispatching webview cannot drift.
 
-`surface.list` joins one Workspace's Surfaces — visible panes **plus minimized (doored)** ones, each tagged `view` — with terminal state and activity snapshots, and reports the answering Workspace's id and Window's `window:<label>`. **Its `scope: 'all'` spans every Workspace of the Window**, tagging each row with its Workspace; **one Workspace that cannot answer fails the whole listing** — including one whose Wall never registers, after the routing retry ([Handle Model](#handle-model)) — since a missing Workspace reads as one holding nothing. **Only the active Workspace's selection is `focused`** in such a listing. **`dor list` rows sort by id number** (creation order), independent of Lath layout order.
+`surface.list` joins one Workspace's Surfaces — visible panes **plus minimized (doored)** ones, each tagged `view` — with terminal state and activity snapshots, and reports the answering Workspace's id and Window's `window:<label>`. **Its `scope: 'all'` spans every Workspace of the Window**, tagging each row with its Workspace; **one Workspace that cannot answer fails the whole listing** — including one whose Wall never registers, after the routing retry ([Handle Model](#handle-model)) — since a missing Workspace reads as one holding nothing. **Only the active Workspace's selection is `focused`** in such a listing.
 
 **Port enumeration is opt-in** (`dor list --ports` / `--port`): the host scans each terminal Surface's process tree (`docs/specs/dor-browser.md` → Dev-Server Chip). **One listing costs one scan** (`PlatformAdapter.getOpenPortsMany`), and **a `--all` listing never forwards `includePorts` to a Wall**, scanning once for every Workspace's terminals instead. A remote paired session reports none, and any error degrades to an empty list rather than failing the call. Source of truth: `attachSurfacePorts` in `lib/src/components/wall/surface-ports.ts`, `getOpenPortsForPids` in `standalone/sidecar/pty-core.js`.
 
@@ -281,8 +279,8 @@ Agents **discover the target Surface with `dor list` (filtered), then act on it 
 
 `dor/skill.md` is the agent skill, teaching a coding agent inside a Dormouse terminal to drive it through `dor`. Distribution splits into content and bootstrap:
 
-- **Content ships with the CLI.** `scripts/generate-dor-skill.mjs` (prebuild) inlines the markdown into the bundle, so `dor skill` prints text version-locked to the CLI that staged it. **The skill body must carry no environment detection:** if `dor skill` ran, `dor` is available. **Its connection troubleshooting must distinguish sandbox socket denial from stale caller context**, directing agents to sandbox approval or a fresh caller environment, never socket discovery or authentication bypass.
-- **Bootstrap is a loud stub that barely drifts.** `dor skill --install` writes a marker-delimited block (`<!-- dor-skill:begin` … `dor-skill:end -->`) into the project's agent instructions file, resolved against the invoking shell's PWD. It holds the detection rule plus two mandatory directives (rationale): never background a long-running process (use `dor ensure`), never use a native browser tool (use `dor agent-browser`). **Nothing else may join them**, and **`dor/skill.md` must lead with the same two** (rationale). **Committing the block is the point** — the env guard keeps it inert for collaborators without Dormouse. **A begin marker without a well-ordered end marker fails** rather than guessing; output names the bare file, never an absolute path.
+- **Content ships with the CLI.** The bundle inlines the markdown, so `dor skill` prints text version-locked to the CLI that staged it. **The skill body must carry no environment detection:** if `dor skill` ran, `dor` is available. **Its connection troubleshooting must distinguish sandbox socket denial from stale caller context**, directing agents to sandbox approval or a fresh caller environment, never socket discovery or authentication bypass.
+- **Bootstrap is a loud stub that barely drifts.** `dor skill --install` writes a marker-delimited block (`<!-- dor-skill:begin` … `dor-skill:end -->`) into the project's agent instructions file, resolved against the invoking shell's PWD. It holds the detection rule plus two mandatory directives (rationale): never background a long-running process (use `dor ensure`), never use a native browser tool (use `dor agent-browser`). **Nothing else may join them**, and **`dor/skill.md` must lead with the same two** (rationale). **Committing the block is the point** — the env guard keeps it inert for collaborators without Dormouse. **A begin marker without a well-ordered end marker fails** rather than guessing.
 
 Source of truth: `dor/src/commands/skill.ts`, whose printed text is pinned byte-identical to `dor/skill.md` by `dor/test/cli-output.test.mjs`.
 

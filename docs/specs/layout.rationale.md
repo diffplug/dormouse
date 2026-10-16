@@ -4,11 +4,9 @@
 
 ## Pane header
 
-Italics alone mark a VS Code preview tab, and a double-click on that tab keeps it; the slot mirrors both. A Preview pill beside the italic label repeated the mark and cost a pill's width in every header from compact width up, and header width is the scarcest space Dormouse has (product decision, 2026-09-28).
-
 The keep is judged by the burst's first press, so a double-click inside a rename opened earlier still selects a word. A preview's label opens no rename because the double-click's first click would open the field under the second.
 
-Tools carry no navigation, address, or dev-server chip (Ned, 2026-09-29): a Tool is named for what it is, and a page it serves is not somewhere to navigate from, so that chrome stays with plain browser Surfaces. Its Terminal Context button had sat beside the header, outside its palette, and showed a different background.
+Tools carry no navigation, address, or dev-server chip (Ned, 2026-09-29): a Tool is named for what it is, and a page it serves is not somewhere to navigate from, so that chrome stays with plain browser Surfaces.
 
 A serving preview's header changed size on every switch while its name was the dev-server chip (standalone, 2026-09-29): the chip names a pane only once the Window's port scan resolves the page's loopback port (600 ms of debounce, then a scan at idle), which landed after the switch's hold had ended, so the address widened to the whole `localhost:<port>/<path>` and shrank back. A name from params changes once, with the retarget, so nothing needs holding.
 

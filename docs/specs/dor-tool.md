@@ -124,7 +124,7 @@ A Tool is designated for one run of its command, not for the life of its Surface
 
 **Must keep the designation while the host replaces a run**: an in-place restart (idle keyed match, `dor ensure --restart`, approval match), a preview retarget with its kept or restored retypes ([Preview slot](#preview-slot)), and a reap's stop until rehydrate ([Reaping](#reaping)). One host hold, set before the host's interrupt and released once the successor run starts or the host gives up, both exempts the end here and silences its command-exit alert (`docs/specs/alert.md` → Command-exit Track). A replacement the host gives up on ends the run; so does a rehydrate's failed run (Error tier).
 
-**Must offer Break on a Tool's Pane header, beside its Terminal Context control, behind the kill confirmation's typed letter** (`docs/specs/layout.md` → Kill confirmation), since nothing rejoins what it splits; Kill stays Kill (`docs/specs/reopen.md`; rationale). Break releases the designation without ending the run: the Surface becomes a plain terminal still running the command, and a serving page reopens, reloaded at the URL on screen, in a new ordinary browser Surface split beside it and focused, with browser chrome and every renderer its host offers (`docs/specs/dor-browser.md`). A Tool not serving breaks into the terminal alone; pending approval offers no Break. A dirty Tool asks Save / Discard / Cancel first ([Closing unsaved Tools](#closing-unsaved-tools)); a preview slot's mark goes with the Tool, so the next preview opens a new slot.
+**Must offer Break on a Tool's Pane header behind the kill confirmation's typed letter** (`docs/specs/layout.md` → Kill confirmation), since nothing rejoins what it splits; Kill stays Kill (`docs/specs/reopen.md`; rationale). Break releases the designation without ending the run: the Surface becomes a plain terminal still running the command, and a serving page reopens, reloaded at the URL on screen, in a new ordinary browser Surface split beside it and focused, with browser chrome and every renderer its host offers (`docs/specs/dor-browser.md`). A Tool not serving breaks into the terminal alone; pending approval offers no Break. A dirty Tool asks Save / Discard / Cancel first ([Closing unsaved Tools](#closing-unsaved-tools)); a preview slot's mark goes with the Tool, so the next preview opens a new slot.
 
 Source of truth: `useToolRunEnd` in `lib/src/components/wall/use-tool-run-end.ts`; `holdForHostInterrupt` in `lib/src/lib/tool-run-hold.ts`; `onBreakTool` in `lib/src/components/Wall.tsx`.
 
@@ -164,8 +164,6 @@ Source of truth: `useToolReaper` in `lib/src/components/wall/use-tool-reaper.ts`
 2. Its target's name, as the built-in viewers title it (`docs/specs/dor-tools-builtin.md` → File viewer), previewed or pinned.
 3. Its Tool name, then each dedupe-key element that adds to it, space-separated: an absolute path by its last component, an element that shows as the name skipped.
 4. An anonymous Tool's command.
-
-The terminal face and the Door keep the derived terminal label, which carries command status, except where a switch's hold names the retargeted Tool (`docs/specs/layout.md` → Pane header).
 
 Source of truth: `toolSemanticName` in `lib/src/components/wall/tool-name.ts`.
 
@@ -231,7 +229,7 @@ Source of truth: `BUILTIN_HANDLERS` in `dor-tools-builtin/src/file-viewer-format
 **Must open a fuzzy file picker for `dor open` with no path when stdin and stdout are TTYs**, else fail asking for a path. The chosen file opens as `dor open <file>` with the invocation's flags; a cancel prints nothing and exits 1.
 
 - **Must list the files under the resolved CWD as git does in a work tree** — tracked and untracked, less ignored and deleted. Outside one, a walk lists each work tree it reaches likewise and skips dot-entries, `node_modules`, and the macOS home `Library`.
-- **Must offer the highlighted file's `tool.openHandlers` answer in order**: what [Opening local files](#opening-local-files) selects, then later matching rules' `tool` and `preview`, then each built-in supporting it — each once, with what it runs and the rule or built-in that offers it.
+- **Must offer the highlighted file's `tool.openHandlers` answer in order**: what [Opening local files](#opening-local-files) selects, then later matching rules' `tool` and `preview`, then each built-in offered for it (`offered` in `BUILTIN_HANDLERS`, `dor-tools-builtin/src/file-viewer-format.ts`) — each once, with what it runs and the rule or built-in that offers it.
 - **Must preserve the query and selected file across terminal resizes.**
 
 Source of truth: `runFilePicker` in `dor/src/commands/open-picker.ts`; `listOpenHandlers` in `lib/src/host/tool-open.ts`.
