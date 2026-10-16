@@ -46,8 +46,8 @@ test('createApp refuses a setup password outside the canonical 32-byte hex shape
 });
 
 test('GET / serves the stub landing page when the Pocket app is not built', async () => {
-  // freshApp configures no `pocketDir`, so this is always the stub (slice 5
-  // serves the real Pocket build here when `pocketDir` points at one).
+  // freshApp configures no `pocketDir`, so this is always the stub (the real
+  // Pocket build is served here when `pocketDir` points at one).
   const { app } = await freshApp();
   const res = await app.request('/');
   assert.equal(res.status, 200);

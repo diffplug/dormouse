@@ -55,7 +55,7 @@ const NATIVE_DIRECT = SIDECAR_RUNTIME_DEPS.flatMap((name) => [name, `${name}/*`]
 // entry and the build would go green on a `burrow.cjs` that cannot load it.
 if (!SIDECAR_RUNTIME_DEPS.includes('node-datachannel')) {
   throw new Error(
-    'sidecar: package.json no longer declares "node-datachannel" under "dependencies" — it would ' +
+    'sidecar: package.json no longer declares "node-datachannel" — it would ' +
       'be inlined into burrow.cjs, and nothing before the first direct-offer on a real machine ' +
       'would notice.',
   );
