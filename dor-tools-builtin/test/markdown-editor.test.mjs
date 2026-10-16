@@ -109,6 +109,25 @@ test('pasted images become new files beside the document, checked against their 
   assert.equal((await paste(notes, 'image/png', PNG)).status, 404);
 });
 
+test('a paste answers the width the page inserts its image at, read past any amount of header', async () => {
+  const viewer = await start();
+  const answer = async (type, bytes) => JSON.parse((await paste(viewer, type, bytes)).body);
+  assert.equal((await answer('image/png', PNG)).width, null, 'pixel for pixel');
+  // A 144 dpi (2x) JPEG 1200 pixels wide, its frame header behind 128 KiB of ICC.
+  const segment = (marker, data) => Buffer.concat([Buffer.from([0xff, marker, (data.length + 2) >> 8, (data.length + 2) & 0xff]), data]);
+  const icc = segment(0xe2, Buffer.alloc(0xffff - 2));
+  const jpeg = Buffer.concat([
+    Buffer.from([0xff, 0xd8]),
+    segment(0xe0, Buffer.from([...Buffer.from('JFIF\0'), 1, 1, 1, 0, 144, 0, 144, 0, 0])),
+    icc, icc,
+    segment(0xc0, Buffer.from([8, 800 >> 8, 800 & 0xff, 1200 >> 8, 1200 & 0xff, 1, 1, 0x11, 0])),
+    Buffer.from([0xff, 0xda]),
+  ]);
+  const { name, width } = await answer('image/jpeg', jpeg);
+  assert.match(name, /\.jpg$/);
+  assert.equal(width, 600);
+});
+
 test('a paste never replaces an existing file', async () => {
   const now = new Date(2026, 9, 2, 13, 4, 5);
   await writeFile(join(docs, 'image-20261002-130405.png'), 'existing');

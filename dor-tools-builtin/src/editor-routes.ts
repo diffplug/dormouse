@@ -5,6 +5,7 @@
 import { editorPage, imagePage, markdownPage } from './editor-page.js';
 import { editableImageType, type FileFormat } from './file-viewer-format.js';
 import { imageEditability, type Editability } from './image-editability.js';
+import { defaultDisplayWidth } from './image-resolution.js';
 import {
   checkImageSave, EDIT_ROUTE, IMAGE_BOUND, IMAGE_CSP, IMAGE_SAVE_ROUTE, IMAGES_ROUTE, isImage, PASTE_ATTEMPTS, PASTE_BOUND,
   PASTE_EXHAUSTED_MESSAGE, pastedImageExtension, pastedImageName, type SizeBound, VERSION_HEADER,
@@ -189,8 +190,10 @@ export function editorRoutes({ kind, file, name, store, onDirty }: {
     const { route } = request;
     if (request.method === 'POST') {
       if (kind === 'markdown' && route === 'image') {
+        // With the width the page inserts it at, read from the whole file, as a
+        // JPEG's frame header may sit behind any amount of EXIF or ICC.
         const bytes = await request.body(PASTE_BOUND);
-        return json({ name: await pasteImage(store, request.contentType, bytes) });
+        return json({ name: await pasteImage(store, request.contentType, bytes), width: defaultDisplayWidth(bytes) });
       }
       if (kind === 'markdown' && route === 'rename') {
         const data = await jsonBody(request, 64 * 1024);

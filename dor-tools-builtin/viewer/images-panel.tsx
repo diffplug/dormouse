@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { $getRoot, $isElementNode, type LexicalEditor, type LexicalNode } from 'lexical';
-import { $isImageNode, type ImageNode } from '@mdxeditor/editor';
+import { $getRoot, $isElementNode, getNearestEditorFromDOMNode, type LexicalEditor, type LexicalNode } from 'lexical';
+import { $isImageNode, $isTableNode, NESTED_EDITOR_UPDATED_COMMAND, type ImageNode, type TableNode } from '@mdxeditor/editor';
 import { editableImageType } from '../src/file-viewer-format';
 import { IMAGES_ROUTE } from '../src/image-format';
 import { message, request } from './document-session';
@@ -33,20 +33,53 @@ export const imageUrl = (src: string, saved: SavedImages) => {
   return `${IMAGES_ROUTE}${pathRoute(path)}${version ? `?v=${encodeURIComponent(version)}` : ''}`;
 };
 
-/** The document's image nodes, outside table cells; call within a read or update. */
-export function $imageNodes(): ImageNode[] {
-  const found: ImageNode[] = [];
+/** The editors MDXEditor nests in `element`, an editor's root or a table's:
+ * one per table cell. */
+const nestedEditors = (element: HTMLElement | null): LexicalEditor[] =>
+  Array.from(element?.querySelectorAll('[data-lexical-editor]') ?? []).flatMap(cell => {
+    const editor = getNearestEditorFromDOMNode(cell);
+    return editor?.getRootElement() === cell ? [editor] : [];
+  });
+
+/** The image and table nodes of the editor whose state is being read or
+ * updated, in order; an image in a table is in its cell's own editor. */
+function $imagesAndTables(): (ImageNode | TableNode)[] {
+  const found: (ImageNode | TableNode)[] = [];
   const visit = (node: LexicalNode) => {
-    if ($isImageNode(node)) found.push(node);
+    if ($isImageNode(node) || $isTableNode(node)) found.push(node);
     else if ($isElementNode(node)) node.getChildren().forEach(visit);
   };
   visit($getRoot());
   return found;
 }
 
-/** The distinct image sources in the document, in order. */
-export const imageSources = (editor: LexicalEditor) =>
-  [...new Set(editor.getEditorState().read(() => $imageNodes().map(node => node.getSrc())))];
+/** Applies `change`, which says whether it changed the node, to every image
+ * node of the document `root` edits, its table cells' included. A cell that
+ * changed hands its contents to its table at once, as it does when it loses
+ * focus, so the document's Markdown has the change. */
+export function updateImages(root: LexicalEditor, change: (node: ImageNode) => boolean): void {
+  for (const editor of [root, ...nestedEditors(root.getRootElement())]) {
+    let changed = false;
+    editor.update(() => {
+      for (const node of $imagesAndTables()) if ($isImageNode(node)) changed = change(node) || changed;
+    }, { discrete: true });
+    if (changed && editor !== root) editor.dispatchCommand(NESTED_EDITOR_UPDATED_COMMAND, undefined);
+  }
+}
+
+/** The distinct image sources in the document `root` edits, its table cells'
+ * included, in order. */
+export function imageSources(root: LexicalEditor): string[] {
+  const found = new Set<string>();
+  const read = (editor: LexicalEditor) => editor.getEditorState().read(() => {
+    for (const node of $imagesAndTables()) {
+      if ($isImageNode(node)) found.add(node.getSrc());
+      else nestedEditors(editor.getElementByKey(node.getKey())).forEach(read);
+    }
+  });
+  read(root);
+  return [...found];
+}
 
 /** `src` with its file name replaced, keeping its folder and spelling style. */
 function renamedSource(src: string, name: string): string {
@@ -68,7 +101,11 @@ function ImageRow({ src, editor, saved, onEdit }: { src: string; editor: Lexical
     try {
       await request('rename', { from: path, to: folder + next });
       const replacement = renamedSource(src, next);
-      editor.update(() => { for (const node of $imageNodes()) if (node.getSrc() === src) node.setSrc(replacement); });
+      updateImages(editor, node => {
+        if (node.getSrc() !== src) return false;
+        node.setSrc(replacement);
+        return true;
+      });
       setState({});
     } catch (error) { setState({ error: message(error) }); }
   }

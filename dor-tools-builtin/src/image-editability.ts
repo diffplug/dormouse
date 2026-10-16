@@ -75,8 +75,11 @@ export function pngChunks(bytes: Uint8Array): PngChunk[] {
   return list;
 }
 
+/** An image's size in its own pixels. */
+export interface PixelSize { width: number; height: number }
+
 /** The size a PNG's IHDR declares; null without one. */
-export function pngSize(b: Uint8Array): { width: number; height: number } | null {
+export function pngSize(b: Uint8Array): PixelSize | null {
   if (!isPng(b) || b.length < 24 || ascii(b, 12, 16) !== 'IHDR') return null;
   const view = new DataView(b.buffer, b.byteOffset, b.byteLength);
   return { width: view.getUint32(16), height: view.getUint32(20) };
@@ -105,7 +108,7 @@ export function jpegSegments(bytes: Uint8Array): { list: JpegSegment[]; scan: nu
 
 /** The frame size a JPEG's SOF header declares; null when `bytes` hold none
  * (or it leaves its height to a later DNL marker). */
-export function jpegSize(bytes: Uint8Array): { width: number; height: number } | null {
+export function jpegSize(bytes: Uint8Array): PixelSize | null {
   // SOF0–SOF15, less DHT (C4), JPG (C8), and DAC (CC).
   const sof = jpegSegments(bytes).list.find(s => s.marker >= 0xc0 && s.marker <= 0xcf && s.marker !== 0xc4 && s.marker !== 0xc8 && s.marker !== 0xcc);
   if (!sof || sof.end - sof.start < 9) return null;

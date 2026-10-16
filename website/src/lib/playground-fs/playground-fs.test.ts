@@ -189,9 +189,9 @@ describe("PlaygroundViewers", () => {
     const viewer = open("__view-file", [README]);
     const first = await viewer.handle(upload("image", PNG, "image/png"));
     const second = await viewer.handle(upload("image", JPEG, "Image/JPEG; charset=x"));
-    expect(JSON.parse(await text(first))).toEqual({ name: "image-20261003-140509.png" });
-    expect(JSON.parse(await text(second))).toEqual({ name: "image-20261003-140509.jpg" });
-    expect(JSON.parse(await text(await viewer.handle(upload("image", PNG, "image/png"))))).toEqual({ name: "image-20261003-140509-2.png" });
+    expect(JSON.parse(await text(first))).toEqual({ name: "image-20261003-140509.png", width: null });
+    expect(JSON.parse(await text(second))).toEqual({ name: "image-20261003-140509.jpg", width: null });
+    expect(JSON.parse(await text(await viewer.handle(upload("image", PNG, "image/png"))))).toEqual({ name: "image-20261003-140509-2.png", width: null });
     expect(pastes).toHaveBeenCalledTimes(3);
     expect(fs.bytes(`${PLAYGROUND_CWD}/image-20261003-140509.png`)).toEqual(PNG);
     expect(fs.list(PLAYGROUND_CWD)!.map((entry) => entry.name)).toContain("image-20261003-140509-2.png");
@@ -332,7 +332,7 @@ describe("the window side of the viewer relay", () => {
       try { return await answer; } finally { port1.close(); port2.close(); }
     };
     try {
-      expect(JSON.parse(await text(await ask(upload("image", PNG, "image/png"))))).toEqual({ name: "image-20261003-140509.png" });
+      expect(JSON.parse(await text(await ask(upload("image", PNG, "image/png"))))).toEqual({ name: "image-20261003-140509.png", width: null });
       const shown = await ask(get("images/image-20261003-140509.png"));
       expect(shown!.body).toBeInstanceOf(Blob);
       expect(await bytes(shown)).toEqual(PNG);

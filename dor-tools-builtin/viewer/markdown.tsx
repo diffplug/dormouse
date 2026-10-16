@@ -13,7 +13,7 @@ import {
 } from '@mdxeditor/editor';
 import '@mdxeditor/editor/style.css';
 import { checked, documentPage, loadingState, stateLabel, textSource, type DocumentState } from './document-session';
-import { $imageNodes, editableImage, imageSources, imageUrl, ImagesPanel, localImagePath, type SavedImages } from './images-panel';
+import { editableImage, imageSources, imageUrl, ImagesPanel, localImagePath, updateImages, type SavedImages } from './images-panel';
 import { ImageOverlay, type Resize } from './image-overlay';
 import { ImageResizeHandles } from './image-resize';
 import { commentsPlugin } from './markdown-comments';
@@ -23,7 +23,7 @@ import { mermaidDescriptor } from './mermaid-block';
 import { SaveButton } from './save-button';
 import { Signal } from './signal';
 import { installTooltips } from './tooltip';
-import { defaultDisplayWidth, RESOLUTION_HEAD, rescaledSize } from '../src/image-resolution';
+import { rescaledSize } from '../src/image-resolution';
 import './markdown.css';
 
 declare module '@mdxeditor/editor' {
@@ -56,6 +56,7 @@ const session = page.open<string>({
   holds: mark => editorRef.current?.getMarkdown() === mark,
   async apply(text) {
     // A reload mounts a fresh editor: its own normalization is then not an edit, and undo starts over.
+    uploadedWidths.clear();
     flushSync(() => root.render(<Page key={++loads} markdown={text.replace(/\r\n?/g, '\n')} />));
     await new Promise(resolve => setTimeout(resolve));
   },
@@ -73,24 +74,31 @@ function editablePath(editor: LexicalEditor, key: string): string | null {
 /** Opens a PNG or JPEG under the document's folder in the image editor overlay. */
 const editImage = (path: string) => update({ editing: path });
 
-/** The URL an image node loads. */
-const previewUrl = async (src: string) => imageUrl(src, store.saved);
-
 /** After an image save: every display of it loads the new file. When the
  * save resized it, each reference that states a size keeps its scale, as an
  * edit; the rest of the document's source stays as it is. */
 function refreshImage(path: string, version: string, resize: Resize | null) {
   update({ saved: { ...store.saved, [path]: version } });
   // A new handler makes each image node resolve its URL again.
-  realm?.pub(imagePreviewHandler$, (src: string) => previewUrl(src));
-  if (resize) store.editor?.update(() => {
-    for (const node of $imageNodes()) {
-      if (localImagePath(node.getSrc()) !== path) continue;
-      const size = { width: node.getWidth(), height: node.getHeight() };
-      if (size.width === 'inherit' && size.height === 'inherit') continue;
-      const next = rescaledSize(size, resize.from, resize.to);
-      node.setWidthAndHeight(next.width, next.height);
-    }
+  realm?.pub(imagePreviewHandler$, async (src: string) => imageUrl(src, store.saved));
+  if (resize && store.editor) updateImages(store.editor, node => {
+    const size = { width: node.getWidth(), height: node.getHeight() };
+    if (localImagePath(node.getSrc()) !== path || (size.width === 'inherit' && size.height === 'inherit')) return false;
+    const next = rescaledSize(size, resize.from, resize.to);
+    node.setWidthAndHeight(next.width, next.height);
+    return true;
+  });
+}
+
+let listing = false;
+/** Lists the document's images again, once for however many changes call
+ * this in a task. */
+function refreshImages() {
+  if (listing) return;
+  listing = true;
+  queueMicrotask(() => {
+    listing = false;
+    if (store.editor) update({ images: imageSources(store.editor) });
   });
 }
 
@@ -108,6 +116,13 @@ function ImageChrome(props: ImageChromeProps) {
   const [editor, setEditor] = useState<LexicalEditor | null>(null);
   useEffect(() => setEditor(getNearestEditorFromDOMNode(ref.current)), []);
   const path = editor && editablePath(editor, props.nodeKey);
+  // The images list follows the root editor's own image nodes; a table cell's,
+  // whose editor comes and goes with its table, it follows from here.
+  useEffect(() => {
+    if (!editor || editor === store.editor) return;
+    refreshImages();
+    return refreshImages;
+  }, [editor, props.imageSource]);
   useEffect(() => {
     const wrapper = ref.current?.parentElement;
     if (!wrapper || !path) return;
@@ -150,24 +165,19 @@ const capture = realmPlugin({
   postInit(r) {
     const editor = r.getValue(rootEditor$);
     if (!editor) return;
-    const refresh = () => update({ images: imageSources(editor), editor });
     // Only image nodes change the list, so typing does not walk the document.
-    editor.registerMutationListener(ImageNode, refresh, { skipInitialization: true });
-    refresh();
+    editor.registerMutationListener(ImageNode, refreshImages, { skipInitialization: true });
+    update({ editor, images: imageSources(editor) });
   },
 });
 
-/** Sends a pasted or dropped image's bytes; the server names the new file.
- * A PNG or JPEG whose header records a scale is inserted at the width it
- * gives, so the document shows it at that size everywhere. */
+/** Sends a pasted or dropped image's bytes; the server names the new file,
+ * and gives the width a PNG or JPEG whose header records a scale is inserted
+ * at, so the document shows it at that size everywhere. */
 async function upload(file: File): Promise<string> {
   try {
-    const [response, head] = await Promise.all([
-      fetch('image', { method: 'POST', headers: { 'Content-Type': file.type }, body: file }).then(checked),
-      file.slice(0, RESOLUTION_HEAD).arrayBuffer(),
-    ]);
-    const name: string = (await response.json()).name;
-    const width = defaultDisplayWidth(new Uint8Array(head));
+    const response = await checked(await fetch('image', { method: 'POST', headers: { 'Content-Type': file.type }, body: file }));
+    const { name, width }: { name: string; width: number | null } = await response.json();
     if (width !== null) uploadedWidths.set(name, width);
     return name;
   } catch (reason) { session.fail(reason); throw reason; }
@@ -208,7 +218,7 @@ const plugins = [
   headingsPlugin(), listsPlugin(), quotePlugin(), thematicBreakPlugin(), linkPlugin(), linkDialogPlugin(),
   // Unpadded tables: padding to aligned columns rewrites every row of a table when one cell changes.
   tablePlugin({ tablePipeAlign: false }), frontmatterPlugin(), markdownShortcutPlugin(),
-  imagePlugin({ imageUploadHandler: upload, imagePreviewHandler: previewUrl, disableImageResize: true, allowSetImageDimensions: true, EditImageToolbar: ImageChrome as FC }),
+  imagePlugin({ imageUploadHandler: upload, imagePreviewHandler: async src => imageUrl(src, store.saved), disableImageResize: true, allowSetImageDimensions: true, EditImageToolbar: ImageChrome as FC }),
   codeBlockPlugin({ defaultCodeBlockLanguage: '', codeBlockEditorDescriptors: [mermaidDescriptor] }),
   codeMirrorPlugin({ codeBlockLanguages: {
     '': 'Plain text', sh: 'Shell', bash: 'Bash', js: 'JavaScript', jsx: 'JSX', ts: 'TypeScript', tsx: 'TSX', json: 'JSON',
