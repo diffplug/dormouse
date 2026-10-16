@@ -52,6 +52,7 @@ function watchHelper(helper: HelperTerminal, launchCwd?: string): void {
   let inspecting = false;
   helper.timer = setInterval(() => {
     const entry = registry.get(helper.id);
+    // A replaced helper's poll stops here, never writing to its replacement.
     if (!entry || helpers.get(helper.parentId) !== helper) { clearInterval(helper.timer); return; }
     let status = helper.status;
     if (entry.exited) status = 'exited';
@@ -205,6 +206,7 @@ function parentIsOpen(parentId: string): boolean {
 }
 
 export async function openHelper(parentId: string): Promise<HelperTerminal> {
+  // Concurrent openings share one creation, so a source never gets two helpers.
   const inFlight = pending.get(parentId);
   if (inFlight) return inFlight;
   const operation = (async () => {
