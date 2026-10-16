@@ -15,7 +15,7 @@ sequenceDiagram
   Note over L: oneTimeOpen: opening, mints the one-use keypair
   L->>H: Burrow route
   H->>L: OneTimeRoomFrame
-  Note over L: waiting, shows the link as QR and text
+  Note over L: waiting, shows the link
   Note over P: takes and erases the fragment, waits for the Connect tap
   Note over P: connectOnce: mints a static, writes message 1
   P->>H: client route
@@ -142,7 +142,7 @@ Source of truth: `oneTimeRoutes` in `hosted/server/one-time.ts`; `OneTimeRoom` i
 
 ## Phone page
 
-The relay Worker serves the phone's half at `ONE_TIME_PAGE_PATH` (`/connect/`): `OneTimeApp` on Pocket's screens, chrome, and mobile wall, refusing a browser without X25519 or `RTCPeerConnection`.
+The relay Worker serves the phone's half at `ONE_TIME_PAGE_PATH` (`/connect/`): `OneTimeApp`, refusing a browser without X25519 or `RTCPeerConnection`.
 
 - **Must take the fragment and erase it with `history.replaceState` before the first render**, parsed or not, and reload on `hashchange` (rationale).
 - **Never open a socket before the Connect tap**: the tap builds the client and runs `connectOnce`, so a link-preview crawler spends nothing.
@@ -162,7 +162,7 @@ Source of truth: `OneTimeApp` in `lib/src/remote/one-time-app/OneTimeApp.tsx`; `
 
 ## Dev loop
 
-**`dor tool one-time` (root `pnpm dev:one-time`) runs the rendezvous and page on loopback, without Postgres**: the relay Worker under `wrangler dev --local` on `127.0.0.1`, at `PORT` or a fixed default, since a Burrow build bakes the origin in. Its config sets `APP_ORIGIN` to `http://localhost:<port>`, keeps the relay config's Durable Object, migration, and rate limits, and carries no route or production secret. It prints the dev Burrow build variables (`DORMOUSE_RELAY_ORIGIN`, `DORMOUSE_RELAY_IS_HOSTED=1`; `docs/specs/relay.md` -> "Relay origin").
+**`dor tool one-time` runs the rendezvous and page on loopback, without Postgres**: the relay Worker under `wrangler dev --local` on `127.0.0.1`, at `PORT` or a fixed default, since a Burrow build bakes the origin in. Its config sets `APP_ORIGIN` to `http://localhost:<port>`, keeps the relay config's Durable Object, migration, and rate limits, and carries no route or production secret. It prints the dev Burrow build variables (`DORMOUSE_RELAY_ORIGIN`, `DORMOUSE_RELAY_IS_HOSTED=1`; `docs/specs/relay.md` -> "Relay origin").
 
 Source of truth: `hosted/scripts/dev-one-time.mjs`.
 
@@ -189,7 +189,7 @@ Source of truth: `BurrowService` in `lib/src/host/remote/service.ts`; `lib/src/h
 
 ## Laptop UI
 
-**`OneTimeConnection` sits in the Remote control choices of Settings → Network's Phones section, enrolled or not** (`docs/specs/remote-network.md` -> "Settings → Network"); `OneTimeIndicator` sits in the Baseboard's right cluster (`docs/specs/layout.md` -> "Baseboard").
+**`OneTimeConnection` sits in the Remote control choices of Settings → Network's Phones section, enrolled or not** (`docs/specs/remote-network.md` -> "Settings → Network"); `OneTimeIndicator` sits in the Baseboard (`docs/specs/layout.md` -> "Baseboard").
 
 - **The panel renders the service's state and owns only its busy and error.** **Closing Settings changes nothing**: the link keeps waiting.
 - **Never open a link on a timer**: only New link replaces one (rationale).
