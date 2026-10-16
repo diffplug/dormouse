@@ -229,7 +229,7 @@ Source of truth: `BUILTIN_HANDLERS` in `dor-tools-builtin/src/file-viewer-format
 **Must open a fuzzy file picker for `dor open` with no path when stdin and stdout are TTYs**, else fail asking for a path. The chosen file opens as `dor open <file>` with the invocation's flags; a cancel prints nothing and exits 1.
 
 - **Must list the files under the resolved CWD as git does in a work tree** — tracked and untracked, less ignored and deleted. Outside one, a walk lists each work tree it reaches likewise and skips dot-entries, `node_modules`, and the macOS home `Library`.
-- **Must offer the highlighted file's `tool.openHandlers` answer in order**: what [Opening local files](#opening-local-files) selects, then later matching rules' `tool` and `preview`, then each built-in supporting it — each once, with what it runs and the rule or built-in that offers it.
+- **Must offer the highlighted file's `tool.openHandlers` answer in order**: what [Opening local files](#opening-local-files) selects, then later matching rules' `tool` and `preview`, then each built-in offered for it — each once, with what it runs and the rule or built-in that offers it.
 - **Must preserve the query and selected file across terminal resizes.**
 
 Source of truth: `runFilePicker` in `dor/src/commands/open-picker.ts`; `listOpenHandlers` in `lib/src/host/tool-open.ts`.
