@@ -91,8 +91,8 @@ function holdOf(value: unknown): SurfaceHold | null {
  *
  * `resolve` is the read-only ownership probe that lets a multi-window Burrow pick
  * one duplicate claimant before mutating it. `attach` and `resize` are the same
- * operation — attach-is-the-resize
- * (docs/specs/remote-api.md) — and both go through the live xterm rather than
+ * operation (docs/specs/remote-api.md → "Size authority: last-attach-wins")
+ * — and both go through the live xterm rather than
  * the PTY directly, so the owning pane's own view stays consistent with the
  * size the phone asked for; each records its hold first, with that size, so the
  * pane stops fitting itself before the size moves. `release` clears the hold it

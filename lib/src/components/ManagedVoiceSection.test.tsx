@@ -74,7 +74,7 @@ describe('ManagedVoiceSection', () => {
   it('states what leaves the machine, then signs in with the suggested name, no paste field', async () => {
     const { command } = await render({ status: UNENROLLED_STATUS }, makeStubManagedVoicePort(false));
     expect(text()).toContain(MANAGED_VOICE_DISCLOSURE);
-    expect(text()).toContain('no deletion time is guaranteed');
+    expect(text()).toContain('though no limit is guaranteed');
     expect(container.querySelector('input')).toBeNull();
 
     await act(async () => button(SIGN_IN_LABEL)!.click());

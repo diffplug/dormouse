@@ -2,8 +2,7 @@
  * One runner for every browser provider's `dor` passthrough (`dor agent-browser`,
  * `dor playwright`): identity flags, the host's binding, open-target resolution, the
  * executable, the forwarded run, and the Surface it binds — each provider a
- * `BrowserCliDescriptor` of what genuinely differs (docs/specs/dor-cli.md →
- * "Browser Surface Addressing").
+ * `BrowserCliDescriptor` of what genuinely differs.
  */
 import {
   BROWSER_PROVIDERS,
@@ -567,7 +566,7 @@ async function runEmbedSize(provider: BrowserAutomationProvider, flags: Resolved
   try {
     const result = await client.browserViewport(request);
     if (parsed.value.json) return { exitCode: 0, stdout: `${JSON.stringify({
-      surface_id: result.surfaceId, surface_ref: result.surfaceRef, provider: result.provider,
+      surface_id: result.surfaceId, provider: result.provider,
       render_mode: result.renderMode, requested: result.requested, actual: result.actual, ready: result.ready,
     })}\n`, stderr: '' };
     const setting = result.requested.mode === 'pane-sync'
@@ -576,7 +575,7 @@ async function runEmbedSize(provider: BrowserAutomationProvider, flags: Resolved
     const actual = result.actual
       ? `${result.actual.width} × ${result.actual.height} CSS px @ ${result.actual.dpr} DPR`
       : 'unavailable';
-    return { exitCode: 0, stdout: `${result.surfaceRef} ${provider} ${result.renderMode}: ${setting} (${result.ready ? 'ready' : 'not ready'}; actual ${actual})\n`, stderr: '' };
+    return { exitCode: 0, stdout: `${result.surfaceId} ${provider} ${result.renderMode}: ${setting} (${result.ready ? 'ready' : 'not ready'}; actual ${actual})\n`, stderr: '' };
   } catch (error) {
     return fail(errorMessage(error));
   }

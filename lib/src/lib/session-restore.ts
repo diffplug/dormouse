@@ -3,7 +3,7 @@ import { type LathPersistedLayout, type LeafMeta, isLathPersistedLayout } from '
 import type { PlatformAdapter } from './platform/types';
 import { PLATFORM_STRING } from './platform';
 import { buildShellCommandForKind, shellCommandKind } from 'dor/commands/shell-quote';
-import { carrySurfaceRefs, readPersistedSession, type PersistedDoor, type PersistedPane, type PersistedSession, type PersistedSurfaceRefs } from './session-types';
+import { readPersistedSession, type PersistedDoor, type PersistedPane, type PersistedSession } from './session-types';
 import { createReapedTerminal, getDefaultShellOpts, restoreBrowserSurfaceTodo, restoreTerminal, setTerminalActivity } from './terminal-registry';
 import { markToolReaped } from './tool-reap-store';
 
@@ -26,11 +26,6 @@ export interface RestoredSession {
   /** The session's persisted Lath layout, when present. */
   lathLayout?: LathPersistedLayout;
   doors: PersistedDoor[];
-  /** Workspace-scoped stable `dor` Surface refs restored with the session. */
-  surfaceRefs?: PersistedSurfaceRefs;
-  /** The Workspace's next `surface:N` counter, restored so a killed ref's number
-   *  is never handed out again. */
-  surfaceRefsNext?: number;
 }
 
 /** The persisted Lath layout a session carries, or undefined when absent/unusable
@@ -169,6 +164,5 @@ export function restoreSession(platform: PlatformAdapter, sources: RestoreSource
     paneIds: visiblePanes.filter((pane) => lathLayout ? !!lathLayout.leafMeta[pane.id] : pane.surfaceType !== 'browser').map((pane) => pane.id),
     lathLayout,
     doors,
-    ...carrySurfaceRefs(saved),
   };
 }

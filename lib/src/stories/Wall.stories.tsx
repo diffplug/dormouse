@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react';
+import { surfaceIdFor } from 'dor/protocol';
 import { Wall } from '../components/Wall';
 import {
   flattenScenario,
@@ -128,12 +129,12 @@ export const WithDoors: Story = {
 
 export const AlertRingingDoor: Story = {
   args: {
-    initialPaneIds: ['wall-alert-ringing-door'],
+    initialPaneIds: ['surface:1'],
   },
   parameters: {
     fakePty: { scenario: flattenScenario(SCENARIO_SHELL_PROMPT) },
     ...withPrimedActivity({
-      'wall-alert-ringing-door': {
+      'surface:1': {
         status: 'ALERT_RINGING',
         todo: false,
       },
@@ -148,12 +149,12 @@ export const AlertRingingDoor: Story = {
 
 export const AlertModalOpen: Story = {
   args: {
-    initialPaneIds: ['wall-alert-modal'],
+    initialPaneIds: ['surface:1'],
   },
   parameters: {
     fakePty: { scenario: flattenScenario(SCENARIO_SHELL_PROMPT) },
     ...withPrimedActivity({
-      'wall-alert-modal': {
+      'surface:1': {
         status: 'ALERT_RINGING',
         todo: false,
       },
@@ -169,12 +170,12 @@ export const AlertModalOpen: Story = {
 
 export const MinimizedRingingSession: Story = {
   args: {
-    initialPaneIds: ['wall-minimized-ringing'],
+    initialPaneIds: ['surface:1'],
   },
   parameters: {
     fakePty: { scenario: flattenScenario(SCENARIO_SHELL_PROMPT) },
     ...withPrimedActivity({
-      'wall-minimized-ringing': {
+      'surface:1': {
         status: 'ALERT_RINGING',
         todo: true,
       },
@@ -189,20 +190,20 @@ export const MinimizedRingingSession: Story = {
 
 export const MultipleRingingSessions: Story = {
   args: {
-    initialPaneIds: ['wall-ringing-one', 'wall-ringing-todo', 'wall-alert-enabled-idle'],
+    initialPaneIds: ['surface:1', 'surface:2', 'surface:3'],
   },
   parameters: {
     fakePty: { scenario: flattenScenario(SCENARIO_SHELL_PROMPT) },
     ...withPrimedActivity({
-      'wall-ringing-one': {
+      'surface:1': {
         status: 'ALERT_RINGING',
         todo: false,
       },
-      'wall-ringing-todo': {
+      'surface:2': {
         status: 'ALERT_RINGING',
         todo: true,
       },
-      'wall-alert-enabled-idle': {
+      'surface:3': {
         status: 'NOTHING_TO_SHOW',
         todo: false,
       },
@@ -212,18 +213,19 @@ export const MultipleRingingSessions: Story = {
 
 /** Real context and helper lifecycle, backed by the deterministic demo shell. */
 export const TerminalContext: Story = {
-  args: { initialPaneIds: ['context-live'], initialMode: 'passthrough' },
+  args: { initialPaneIds: ['surface:1'], initialMode: 'passthrough' },
   parameters: { fakePty: { scenario: SCENARIO_SHELL_PROMPT } },
   play: async () => {
     await settleTerminals();
-    const header = await requireElement('[data-pane-header-for="context-live"]', 'terminal header');
+    const header = await requireElement('[data-pane-header-for="surface:1"]', 'terminal header');
     header.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }));
     await settleTerminalContext();
   },
 };
 
 /** Same-direction splits remain one weighted row, independent of creation order. */
-function flatRowArgs(ids: string[]) {
+function flatRowArgs(count: number) {
+  const ids = Array.from({ length: count }, (_, i) => surfaceIdFor(i + 1));
   return {
     initialPaneIds: ids,
     restoredLathLayout: {
@@ -235,7 +237,7 @@ function flatRowArgs(ids: string[]) {
 }
 
 export const ThreePaneSplits: Story = {
-  args: flatRowArgs(['split-a', 'split-b', 'split-c']),
+  args: flatRowArgs(3),
   parameters: {
     fakePty: { scenario: flattenScenario(SCENARIO_SHELL_PROMPT) },
     docs: { description: { story: 'Drag a header to a pane edge, pause, then slide along the edge to widen the drop from one pane to the whole row. Every two-plus-one arrangement is available from this flat three-pane row.' } },
@@ -243,16 +245,16 @@ export const ThreePaneSplits: Story = {
 };
 
 export const ContiguousGroupDrop: Story = {
-  args: flatRowArgs(['group-a', 'group-b', 'group-c', 'group-d']),
+  args: flatRowArgs(4),
   parameters: {
     fakePty: { scenario: flattenScenario(SCENARIO_SHELL_PROMPT) },
     docs: { description: { story: 'The dashed outline shows the chosen group; the solid area is the exact drop destination. Pause on an edge, then slide along it to widen or narrow the group.' } },
   },
   play: async () => {
     await settleTerminals();
-    const source = await requireElement<HTMLElement>('[data-lath-leaf="group-d"] .lath-leaf-header', 'drag source');
-    const target = await requireElement<HTMLElement>('[data-lath-leaf="group-b"]', 'drag target');
-    const neighbor = await requireElement<HTMLElement>('[data-lath-leaf="group-c"]', 'slide target');
+    const source = await requireElement<HTMLElement>('[data-lath-leaf="surface:4"] .lath-leaf-header', 'drag source');
+    const target = await requireElement<HTMLElement>('[data-lath-leaf="surface:2"]', 'drag target');
+    const neighbor = await requireElement<HTMLElement>('[data-lath-leaf="surface:3"]', 'slide target');
     const from = source.getBoundingClientRect();
     const to = target.getBoundingClientRect();
     const across = neighbor.getBoundingClientRect();

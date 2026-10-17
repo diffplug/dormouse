@@ -1,0 +1,21 @@
+Domain: supply-chain
+Rule: `docs/specs/security-supply-chain.md` -> "Bundled runtime" #2 — fails the build unless it matches
+Expect: standalone/src-tauri/build.rs
+Source: synthetic; the bundled runtime's version check compares the major alone, so the disclosed version no longer provably equals the one shipped
+
+diff --git a/standalone/src-tauri/build.rs b/standalone/src-tauri/build.rs
+index 611873325..5fd314d87 100644
+--- a/standalone/src-tauri/build.rs
++++ b/standalone/src-tauri/build.rs
+@@ -213,7 +213,10 @@ fn verify_node_version(
+         .trim()
+         .trim_start_matches('v')
+         .to_owned();
+-    if actual != pinned {
++    // A newer minor or patch of the pinned major runs the sidecar's native
++    // addons unchanged, so only the major has to agree with the pin.
++    let major = |version: &str| version.split('.').next().unwrap_or_default().to_owned();
++    if major(&actual) != major(pinned) {
+         return Err(format!(
+             "bundled Node.js {actual} does not match the package.json devEngines.runtime.version \
+              pin {pinned}. Run scripts via pnpm so devEngines (onFail: \"download\") provisions \

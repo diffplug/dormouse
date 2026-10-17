@@ -27,6 +27,11 @@ const env = {
 };
 const result = (value, extra = {}) =>
   Response.json({ success: true, result: value, ...extra });
+/** A signed-out `get-session`, as the account answers it: only to its own page. */
+const signedOutRead = (init) =>
+  init?.headers?.["sec-fetch-site"] === "same-origin"
+    ? Response.json(null)
+    : Response.json({ message: "Invalid origin." }, { status: 403 });
 
 test("each preview configuration isolates its origin and excludes production bindings", async () => {
   const bases = await readConfigs();
@@ -187,6 +192,14 @@ test("Hyperdrive uses a direct URL and decodes credentials without logging them"
     /direct/,
   );
   assert.throws(() => hyperdriveOrigin("https://example.com"));
+  // A connection parameter that would move pg_dump, the migrations, or the
+  // client off the authority this compares is refused, never ignored.
+  for (const key of ["host", "hostaddr", "port", "dbname", "user", "password", "service"])
+    assert.throws(
+      () => hyperdriveOrigin(`postgres://test:pw@ep-test.neon.tech/neondb?sslmode=require&${key}=other`),
+      new RegExp(`DATABASE_URL must not set ${key}`),
+      key,
+    );
 });
 
 test("Cloudflare errors omit provider bodies, and missing deletions are idempotent", async () => {
@@ -317,7 +330,7 @@ test("deployment smoke compares enabled providers as a set, not a sequence", asy
   // Every request the production smoke makes before its first POST; the POST
   // throws so a rejection distinguishes "passed the provider check" from
   // "failed it".
-  const fetcher = (providers) => async (url) => {
+  const fetcher = (providers) => async (url, init) => {
     const { pathname } = new URL(url);
     if (pathname === "/api/health")
       return Response.json({ ok: true, revision: env.BUILD_SHA });
@@ -332,7 +345,7 @@ test("deployment smoke compares enabled providers as a set, not a sequence", asy
           },
         },
       );
-    if (pathname === "/api/auth/get-session") return Response.json(null);
+    if (pathname === "/api/auth/get-session") return signedOutRead(init);
     if (pathname === "/api/providers") return Response.json(providers);
     if (pathname === "/api/ready") return new Response(null, { status: 200 });
     throw new Error(`past-providers:${pathname}`);
@@ -386,7 +399,7 @@ test("deployment smoke rejects malformed health before making any auth requests"
   assert.equal(requests, 1);
 });
 
-test("the smoke runs its parts concurrently, retries each alone, and checks the push config and rendezvous after the relay's revision alone", async () => {
+test("the smoke runs its parts concurrently, retries each alone, and checks readiness, the push config, and the rendezvous after the relay's revision alone", async () => {
   const origins = {
     account: "https://account.example.test",
     relay: "https://relay.example.test",
@@ -397,6 +410,8 @@ test("the smoke runs its parts concurrently, retries each alone, and checks the 
   let pushKey = `B${"A".repeat(86)}`;
   // How many more health checks each origin fails before it is healthy.
   const unhealthy = {};
+  // Origins whose role lacks a grant their readiness needs.
+  const unready = new Set();
   // Every request the production smoke makes, answered as a healthy account would.
   const fetcher = async (url, init = {}) => {
     const { origin, pathname } = new URL(url);
@@ -413,8 +428,11 @@ test("the smoke runs its parts concurrently, retries each alone, and checks the 
       events.push("push");
       return Response.json({ applicationServerKey: pushKey });
     }
+    if (pathname === "/api/ready") {
+      events.push(`${origin} ready`);
+      return Response.json({ ok: !unready.has(origin) }, { status: unready.has(origin) ? 503 : 200 });
+    }
     assert.equal(origin, origins.account);
-    if (pathname === "/api/ready") return new Response(null, { status: 200 });
     if (pathname === "/api/auth/csrf")
       return Response.json(
         { csrf: "csrf-token" },
@@ -425,7 +443,7 @@ test("the smoke runs its parts concurrently, retries each alone, and checks the 
           },
         },
       );
-    if (pathname === "/api/auth/get-session") return Response.json(null);
+    if (pathname === "/api/auth/get-session") return signedOutRead(init);
     if (pathname === "/api/providers") return Response.json([]);
     if (init.method === "POST") return new Response(null, { status: 403 });
     if (pathname === "/login")
@@ -452,8 +470,23 @@ test("the smoke runs its parts concurrently, retries each alone, and checks the 
   assert.equal(count(`${origins.relay} health`), 2);
   assert.equal(count("one-time"), 1);
   assert.equal(count("push"), 1);
-  assert.ok(events.indexOf("push") > events.lastIndexOf(`${origins.relay} health`));
+  for (const origin of Object.values(origins)) assert.equal(count(`${origin} ready`), 1, origin);
+  assert.ok(events.indexOf(`${origins.relay} ready`) > events.lastIndexOf(`${origins.relay} health`));
+  assert.ok(events.indexOf("push") > events.indexOf(`${origins.relay} ready`));
+  assert.ok(events.indexOf(`${origins.voice} ready`) > events.indexOf(`${origins.voice} health`));
   assert.equal(events.at(-1), "one-time");
+
+  // A relay or voice whose role lacks a grant fails the smoke; the relay's
+  // push and rendezvous never run on it.
+  for (const origin of [origins.relay, origins.voice]) {
+    events.length = 0;
+    unready.add(origin);
+    await assert.rejects(smokeAll(origins, env.BUILD_SHA, { fetcher, oneTime }), {
+      message: new RegExp(`^${RegExp.escape(origin)} must reach Postgres through its Hyperdrive`),
+    });
+    unready.delete(origin);
+    assert.equal(count("one-time"), origin === origins.relay ? 0 : 1, origin);
+  }
 
   // A relay with push off — a VAPID secret missing, or a pair that does not
   // match — fails the smoke: preflight can read only the secrets' names.

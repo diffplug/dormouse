@@ -109,7 +109,6 @@ JSON output:
   {
     "status": "sent",
     "surface_id": "...",
-    "surface_ref": "surface:3",
     "input_count": 1
   }
 
@@ -296,11 +295,10 @@ function renderSendResponse(response: SendSurfaceResponse, json: boolean): strin
     return renderJson({
       status: response.status,
       surface_id: response.surfaceId,
-      surface_ref: response.surfaceRef,
       input_count: response.inputCount,
     });
   }
 
   const noun = response.inputCount === 1 ? 'input' : 'inputs';
-  return `${response.status} ${response.surfaceRef}  [${response.inputCount} ${noun}]\n`;
+  return `${response.status} ${response.surfaceId}  [${response.inputCount} ${noun}]\n`;
 }

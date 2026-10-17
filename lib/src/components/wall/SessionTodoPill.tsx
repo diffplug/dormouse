@@ -10,7 +10,7 @@ const TODO_PREVIEW_GAP = 6;
 const TODO_PREVIEW_MARGIN = 8;
 
 /**
- * A Session's TODO pill (`docs/specs/alert.md` -> Pane Header), on every Pane
+ * A Session's TODO pill, on every Pane
  * header whose Surface has a Session: a terminal's, and a serving Tool's.
  * `shown` is the header tier's say; the pill still flourishes away on its own.
  */

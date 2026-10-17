@@ -1,7 +1,8 @@
 import { getPendingKills } from './pending-kills';
 import { normalizeAlertDeliveryOverrides, sameAlertDeliveryOverrides, type AlertDeliveryOverrides } from './alert-delivery-model';
-import { parseWorkspaceRef } from 'dor/protocol';
-import { DEFAULT_WORKSPACE_ID, DEFAULT_WORKSPACE_NAME, isDefaultWorkspaceName, type WorkspaceId } from './session-types';
+import { parseWorkspaceRef, workspaceIdFor } from 'dor/protocol';
+import { DEFAULT_WORKSPACE_ID, DEFAULT_WORKSPACE_NAME, type WorkspaceId } from './session-types';
+import { createIdPool } from './id-pool';
 
 /**
  * In-memory model of the Window's Workspaces: the ordered list, which one is
@@ -17,6 +18,9 @@ export interface WorkspaceMeta {
   /** The name is derived (`docs/specs/layout.md` → "Workspace names") rather than
    *  one a user set. */
   nameIsAuto: boolean;
+  /** Pinned right: in the strip's right-hand group and never closed alone
+   *  (`docs/specs/layout.md` → "Workspace tabs"). Absent when unpinned. */
+  pinned?: true;
 }
 
 export interface WorkspacesState {
@@ -65,87 +69,95 @@ export function getWorkspace(id: WorkspaceId): WorkspaceMeta | undefined {
   return state.workspaces.find((workspace) => workspace.id === id);
 }
 
-let workspaceSequence = 0;
-
-/** Ids the host reserved for this Window to mint from (`docs/specs/standalone.md`
- *  → "Workspace registry"): `workspace-<n>` off one counter, so a ref is stable
- *  and unique across windows. Refilled in the background; below the low-water
- *  mark a burst of creates still finds one. */
-const idPool: WorkspaceId[] = [];
-// A block this size, refilled this early, keeps a burst of creates ahead of
-// the reservation round-trip; an exhausted pool uses an opaque UUID ref.
-const ID_POOL_SIZE = 32;
-const ID_POOL_LOW = 8;
-let reserveIds: ((count: number) => Promise<WorkspaceId[]>) | null = null;
-let refilling: Promise<void> | null = null;
-/** Whether a host that mints ids is installed. Only then does a `workspace-<n>`
- *  id read as minted: a bare Wall's `DEFAULT_WORKSPACE_ID` is `workspace-1`,
- *  which beside VS Code's random ids would otherwise make one store both. */
-let registryInstalled = false;
-
-function refillIdPool(): Promise<void> {
-  if (!reserveIds || refilling) return refilling ?? Promise.resolve();
-  const reserve = reserveIds;
-  const pending = reserve(ID_POOL_SIZE)
-    .then((ids) => { if (reserveIds === reserve) idPool.push(...ids); })
-    .catch((error: unknown) => {
-      console.error('[workspace-store] the host did not reserve Workspace ids; using opaque ids until it does', error);
-    })
-    .finally(() => { if (refilling === pending) refilling = null; });
-  refilling = pending;
-  return pending;
+/** Whether the Workspace is pinned right; an unknown one is not. */
+export function isWorkspacePinned(id: WorkspaceId): boolean {
+  return !!getWorkspace(id)?.pinned;
 }
 
-/** Give this Window a host that mints ids. Resolves once the first block is
- *  in hand, so a create that follows never falls back to a random id. */
-export function installWorkspaceIdPool(reserve: (count: number) => Promise<WorkspaceId[]>): Promise<void> {
-  reserveIds = reserve;
-  refilling = null;
-  registryInstalled = true;
-  idPool.length = 0;
-  return refillIdPool();
+/** Ids the host reserved for this Window to mint from (`docs/specs/standalone.md`
+ *  → "Workspace registry"): `workspace:<n>` off one counter, so an id is unique
+ *  across windows. With no host (VS Code, the playground, tests) the page counts
+ *  on its own, after the bare Wall's `DEFAULT_WORKSPACE_ID`, `workspace:1`. */
+export const WORKSPACE_ID_POOL_SIZE = 4;
+// Small, so a launch burns at most 4 numbers (see `createIdPool`): Workspaces
+// are created one gesture or `dor` call at a time, and a refill once 2 are gone
+// is one host round trip of a few ms, so a quick run of creates stays ahead of
+// it rather than taking opaque ids for life. A window's Reopen reserves
+// through `workspaceIdMinter`.
+const idPool = createIdPool({
+  size: WORKSPACE_ID_POOL_SIZE,
+  low: 3,
+  label: 'workspace-store',
+  idFor: workspaceIdFor,
+  localStart: 1,
+  inUse: hasWorkspace,
+  // The page's counter is never seeded: it steps over restored ids.
+  logSkips: false,
+});
+
+/** Give this Window a host that mints ids, starting from `first` when the
+ *  caller already asked for a {@link WORKSPACE_ID_POOL_SIZE} block. Resolves
+ *  once the first block is in hand, so a create that follows falls back to an
+ *  opaque id only when the host hands out none (its counter file can't be
+ *  read or written). */
+export function installWorkspaceIdPool(
+  reserve: (count: number) => Promise<WorkspaceId[]>,
+  first?: Promise<WorkspaceId[]>,
+): Promise<void> {
+  return idPool.install(reserve, first);
 }
 
 /** Forget the installed pool, back to a host with no registry (tests). */
 export function resetWorkspaceIdPool(): void {
-  reserveIds = null;
-  refilling = null;
-  registryInstalled = false;
-  idPool.length = 0;
+  idPool.reset();
 }
 
-/** Prefer a Rust-reserved number; a failed reservation must not prevent boot
- *  from installing persistence. Opaque UUIDs have stable refs too. */
+/** Prefer a host-reserved number; a failed reservation must not prevent boot
+ *  from installing persistence, so it falls back to an opaque id. */
 export function generateWorkspaceId(): WorkspaceId {
-  const reserved = idPool.shift();
-  if (idPool.length < ID_POOL_LOW) void refillIdPool();
-  if (reserved !== undefined) return reserved;
-  if (registryInstalled) return `workspace-${crypto.randomUUID()}`;
-  return `workspace-${Math.random().toString(36).slice(2, 10)}-${++workspaceSequence}`;
+  return idPool.mint();
 }
 
-/** The registry number of a `workspace-<n>` id; a random or bare id has none. */
-export function workspaceRefNumber(id: WorkspaceId): number | null {
-  const match = /^workspace-(\d+)$/.exec(id);
-  return match ? Number(match[1]) : null;
+/** A synchronous minter for `count` Workspaces created at once, with every id
+ *  in hand once it resolves, so a burst larger than the pool still mints
+ *  numbered ids. */
+export function workspaceIdMinter(count: number): Promise<() => WorkspaceId> {
+  return idPool.minter(count);
 }
 
-/** Positions exist only on hosts without an application-wide registry; every
- *  other host's {@link workspaceRefFor} is unique across its Windows. */
-export function refsArePositional(): boolean {
-  return !registryInstalled;
+/** Whether this Window's Workspace ids are unique across every Window of its
+ *  host. Without a registry each Window numbers its own (VS Code's webviews,
+ *  each a `workspace:1`). */
+export function workspaceIdsSpanWindows(): boolean {
+  return idPool.installed;
 }
 
 /** "Workspace N", one past the highest existing `Workspace <n>` name. */
 function nextDefaultName(): string {
   let max = 0;
   for (const ws of state.workspaces) {
-    if (isDefaultWorkspaceName(ws.name)) max = Math.max(max, Number(ws.name.slice('Workspace '.length)));
+    const assigned = /^Workspace (\d+)$/.exec(ws.name);
+    if (assigned) max = Math.max(max, Number(assigned[1]));
   }
   return `Workspace ${max + 1}`;
 }
 
-/** Replace the whole model (used on restore to load the persisted Window). */
+/** The index where the pinned group starts: the list's length when none is
+ *  pinned. The list is always partitioned, unpinned first, so this is also one
+ *  past the unpinned group's end, and where the strip's `+` sits. */
+export function pinnedBoundary(workspaces: readonly WorkspaceMeta[] = state.workspaces): number {
+  const first = workspaces.findIndex((ws) => ws.pinned);
+  return first === -1 ? workspaces.length : first;
+}
+
+/** Unpinned Workspaces, then pinned ones, each group keeping its order. */
+function partitionPinned(workspaces: WorkspaceMeta[]): WorkspaceMeta[] {
+  const pinned = workspaces.filter((ws) => ws.pinned);
+  return pinned.length === 0 ? workspaces : [...workspaces.filter((ws) => !ws.pinned), ...pinned];
+}
+
+/** Replace the whole model (used on restore to load the persisted Window). A
+ *  list out of partition is stably partitioned, unpinned first. */
 export function setWorkspaces(next: WorkspacesState): void {
   // Reject duplicate identities before notifying listeners.
   const ids = new Set(next.workspaces.map((workspace) => workspace.id));
@@ -157,7 +169,7 @@ export function setWorkspaces(next: WorkspacesState): void {
   const activeId = next.workspaces.some((ws) => ws.id === next.activeId)
     ? next.activeId
     : next.workspaces[0].id;
-  emit({ workspaces: [...next.workspaces], activeId });
+  emit({ workspaces: partitionPinned([...next.workspaces]), activeId });
 }
 
 export function setActiveWorkspace(id: WorkspaceId): void {
@@ -179,7 +191,12 @@ function freshWorkspaceId(): WorkspaceId {
   return id;
 }
 
-export function createWorkspace(opts?: { id?: WorkspaceId; name?: string; nameIsAuto?: boolean; activate?: boolean; alertDelivery?: AlertDeliveryOverrides }): WorkspaceMeta {
+/**
+ * Add a Workspace where its group meets the other: an unpinned one at the end of
+ * the unpinned group, just left of `+`; a pinned one (an arrival from another
+ * Window) at the left edge of the pinned group.
+ */
+export function createWorkspace(opts?: { id?: WorkspaceId; name?: string; nameIsAuto?: boolean; pinned?: boolean; activate?: boolean; alertDelivery?: AlertDeliveryOverrides }): WorkspaceMeta {
   if (opts?.id !== undefined && state.workspaces.some((workspace) => workspace.id === opts.id)) {
     throw new Error(`Duplicate Workspace id: ${opts.id}`);
   }
@@ -188,10 +205,13 @@ export function createWorkspace(opts?: { id?: WorkspaceId; name?: string; nameIs
     id,
     name: opts?.name ?? nextDefaultName(),
     nameIsAuto: opts?.name === undefined || opts.nameIsAuto === true,
+    ...(opts?.pinned ? { pinned: true as const } : {}),
     ...(opts?.alertDelivery ? { alertDelivery: normalizeAlertDeliveryOverrides(opts.alertDelivery) } : {}),
   };
   const activeId = opts?.activate === false ? state.activeId : meta.id;
-  emit({ workspaces: [...state.workspaces, meta], activeId });
+  const workspaces = [...state.workspaces];
+  workspaces.splice(pinnedBoundary(workspaces), 0, meta);
+  emit({ workspaces, activeId });
   return meta;
 }
 
@@ -236,18 +256,38 @@ export function closeWorkspace(id: WorkspaceId): boolean {
 }
 
 /**
- * Move a Workspace to `toIndex` (clamped into range), keeping every other
- * Workspace's relative order. Returns whether the list changed. Refs are
- * stable, so a reorder renames nothing (`docs/specs/dor-cli.md` → "Handle Model").
+ * Move a Workspace to `toIndex`, clamped into its own group (unpinned or
+ * pinned), keeping every other Workspace's relative order: a reorder never pins
+ * or unpins. Returns whether the list changed. Refs are stable, so a reorder
+ * renames nothing (`docs/specs/dor-cli.md` → "Handle Model").
  */
 export function moveWorkspace(id: WorkspaceId, toIndex: number): boolean {
   const from = state.workspaces.findIndex((ws) => ws.id === id);
   if (from === -1) return false;
-  const to = Math.max(0, Math.min(state.workspaces.length - 1, Math.trunc(toIndex)));
+  const boundary = pinnedBoundary(state.workspaces);
+  const [min, max] = state.workspaces[from].pinned
+    ? [boundary, state.workspaces.length - 1]
+    : [0, boundary - 1];
+  const to = Math.max(min, Math.min(max, Math.trunc(toIndex)));
   if (from === to) return false;
   const workspaces = [...state.workspaces];
   const [moved] = workspaces.splice(from, 1);
   workspaces.splice(to, 0, moved);
+  emit({ ...state, workspaces });
+  return true;
+}
+
+/**
+ * Pin a Workspace right, or unpin it. Pinning puts it at the left edge of the
+ * pinned group; unpinning puts it at the end of the unpinned group, just left of
+ * `+` (`docs/specs/layout.md` → "Workspace tabs"). Returns whether it changed.
+ */
+export function setWorkspacePinned(id: WorkspaceId, pinned: boolean): boolean {
+  const current = getWorkspace(id);
+  if (!current || !!current.pinned === pinned) return false;
+  const { pinned: _old, ...unpinned } = current;
+  const workspaces = state.workspaces.filter((ws) => ws.id !== id);
+  workspaces.splice(pinnedBoundary(workspaces), 0, pinned ? { ...unpinned, pinned: true as const } : unpinned);
   emit({ ...state, workspaces });
   return true;
 }
@@ -278,66 +318,33 @@ export function isWindowRef(ref: string): boolean {
   return trimmed === windowRef || `window:${trimmed}` === windowRef;
 }
 
-/** Registry refs are stable numbers or opaque ids, independent of names and
- *  strip order. Hosts without a registry retain positional refs. */
-export function workspaceRefFor(id: WorkspaceId): string {
-  if (refsArePositional()) {
-    const index = state.workspaces.findIndex((ws) => ws.id === id);
-    return `workspace:${index === -1 ? 1 : index + 1}`;
-  }
-  const number = workspaceRefNumber(id);
-  if (number !== null) return `workspace:${number}`;
-  return `workspace:${id}`;
-}
-
-/** A Workspace a target named: its identity, plus its ref as resolved. */
-export interface ResolvedWorkspace extends WorkspaceMeta {
-  ref: string;
-}
-
-/** What a `workspace:<n|name>` target named, or why it named nothing. */
+/** A Workspace a target named. */
 export type WorkspaceRefResolution =
-  | ({ ok: true } & ResolvedWorkspace)
+  | ({ ok: true } & WorkspaceMeta)
   | { ok: false; message: string };
 
 /**
- * The Workspace a numeric `workspace:<n>` names. On a registry host the number
- * is the Workspace's own minted id, stable across reorders and moves between
- * Windows — the documented behavior. The 1-based strip-position reading is the
- * fallback for the one host with no registry, VS Code, where each Workspace is a
- * separate webview and there is no application-wide numbering to be stable
- * against; the branch disappears if VS Code ever gets one
- * (`docs/specs/dor-cli.md` → "Handle Model").
+ * Resolve a `workspace:<n|name>` target (`docs/specs/dor-cli.md` → "Handle
+ * Model"): the exact id it names, else an unambiguous name; a number is never
+ * a name.
  */
-function workspaceByNumber(number: number): WorkspaceMeta | undefined {
-  return refsArePositional()
-    ? state.workspaces[number - 1]
-    : state.workspaces.find((ws) => workspaceRefNumber(ws.id) === number);
-}
-
-/** Resolve the host's canonical ref first, then an unambiguous name. */
 export function resolveWorkspaceRef(ref: string): WorkspaceRefResolution {
-  const { target, number, name } = parseWorkspaceRef(ref);
-  const found = (meta: WorkspaceMeta): WorkspaceRefResolution =>
-    ({ ok: true, ...meta, ref: workspaceRefFor(meta.id) });
-  if (number !== null) {
-    const match = workspaceByNumber(number);
-    if (match) return found(match);
-  } else if (name) {
-    const byId = registryInstalled && state.workspaces.find((ws) => ws.id === name);
-    if (byId) return found(byId);
+  const { target, id, name } = parseWorkspaceRef(ref);
+  const byId = state.workspaces.find((ws) => ws.id === id);
+  if (byId) return { ok: true, ...byId };
+  if (name) {
     const matches = state.workspaces.filter((workspace) => workspace.name === name);
-    if (matches.length === 1) return found(matches[0]);
+    if (matches.length === 1) return { ok: true, ...matches[0] };
     if (matches.length > 1) {
       const candidates = matches
-        .map((workspace) => `${workspaceRefFor(workspace.id)} ${JSON.stringify(workspace.name)}`)
+        .map((workspace) => `${workspace.id} ${JSON.stringify(workspace.name)}`)
         .join(', ');
       return { ok: false, message: `workspace target '${target}' matched multiple Workspaces: ${candidates}` };
     }
   }
   // Off the strip on its way to a kill (`docs/specs/reopen.md`).
   const pending = getPendingKills().find(kill => kill.kind === 'workspace'
-    && (number !== null ? workspaceRefNumber(kill.id) === number : kill.id === name || kill.title === name));
+    && (kill.id === id || (name !== '' && kill.title === name)));
   if (pending) return { ok: false, message: `workspace '${target}' is a pending kill` };
   return { ok: false, message: `unknown workspace target '${target}'` };
 }

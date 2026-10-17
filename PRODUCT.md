@@ -14,7 +14,7 @@ Dormouse should feel like focused efficiency that cares about beginners and onbo
 
 ### Aesthetic Direction
 
-**Primary constraint: Feel native inside VSCode.** The current Catppuccin Mocha design is throwaway — built to get things running. The first design priority is making Dormouse feel completely native within VSCode, respecting whatever theme the user has chosen. This means:
+**Primary constraint: Feel native inside VSCode.** The first design priority is making Dormouse feel completely native within VSCode, respecting whatever theme the user has chosen. This means:
 - Use VSCode's CSS variables and theme tokens, not hardcoded colors
 - Match VSCode's spacing, typography, and interaction patterns
 - Light mode and dark mode support from the start (inherited from user's VSCode theme)

@@ -1,6 +1,18 @@
-const BLOCKED_EXTERNAL_URI_PROTOCOLS = new Set(['javascript:', 'data:', 'blob:', 'about:']);
-/** C0, DEL, and C1 controls. */
-const CONTROL_CHARACTER_RE = /[\x00-\x1f\x7f-\x9f]/;
+import { CONTROL_OR_FORMAT_TEXT, hasControlOrFormatCharacters, hasShellInputControls } from 'dor/commands/shell-quote';
+
+/** The schemes the plain confirmation opens; `file:` has its own path
+ *  (`docs/specs/dor-tool.md` -> "Terminal links"). Any other scheme hands the
+ *  link to whatever app registered it, so its dialog names that scheme. */
+const STANDARD_SCHEMES = new Set(['http:', 'https:', 'mailto:', 'file:']);
+/** Never opened, consent notwithstanding: browser-executable or opaque
+ *  pseudo-schemes. */
+const PSEUDO_SCHEMES = new Set(['javascript:', 'vbscript:', 'data:', 'blob:', 'about:']);
+/** Never opened either: Windows handlers with a public record of running code
+ *  from one link, which no terminal workflow needs
+ *  (docs/specs/security-local.md -> "Terminal output"). */
+const REFUSED_APP_SCHEMES = new Set([
+  'ms-msdt:', 'search-ms:', 'search:', 'ms-officecmd:', 'ms-appinstaller:', 'ms-its:', 'its:', 'mk:', 'hcp:',
+]);
 /** One DNS label, the source both host-shape patterns below are built from. */
 const DNS_LABEL = '[a-z0-9](?:[a-z0-9-]*[a-z0-9])?';
 
@@ -13,6 +25,8 @@ export type ExternalUriDecision =
     uri: string;
     scheme: string;
     displayUri: string;
+    /** Not `http`, `https`, `mailto`, or `file`: the OS hands it to another app. */
+    otherApp: boolean;
   }
   | {
     status: 'blocked';
@@ -28,15 +42,20 @@ export function inspectExternalUri(input: string): ExternalUriDecision {
     return blocked(input, trimmed, null, 'No URL was provided.');
   }
 
-  if (CONTROL_CHARACTER_RE.test(trimmed)) {
-    return blocked(input, trimmed, null, 'The URL contains control characters.');
+  // Format characters too: the dialog would show a URL other than the one
+  // that opens.
+  if (hasControlOrFormatCharacters(trimmed)) {
+    return blocked(input, trimmed, null, `The URL contains ${CONTROL_OR_FORMAT_TEXT}.`);
   }
 
   try {
     const uri = new URL(trimmed);
     const scheme = uri.protocol.slice(0, -1);
-    if (BLOCKED_EXTERNAL_URI_PROTOCOLS.has(uri.protocol)) {
+    if (PSEUDO_SCHEMES.has(uri.protocol)) {
       return blocked(input, trimmed, scheme, `${scheme}: URLs cannot be opened from terminal output.`);
+    }
+    if (REFUSED_APP_SCHEMES.has(uri.protocol)) {
+      return blocked(input, trimmed, scheme, `${scheme}: links can run code on this computer, so Dormouse never opens them.`);
     }
     return {
       status: 'openable',
@@ -44,12 +63,15 @@ export function inspectExternalUri(input: string): ExternalUriDecision {
       uri: uri.href,
       scheme,
       displayUri: trimmed,
+      otherApp: !STANDARD_SCHEMES.has(uri.protocol),
     };
   } catch {
     return blocked(input, trimmed, null, 'The URL is not valid.');
   }
 }
 
+/** The URI a host may launch, or null for one it must refuse. Every host
+ *  revalidates through this before opening, consent notwithstanding. */
 export function normalizeExternalUri(input: string): string | null {
   const decision = inspectExternalUri(input);
   return decision.status === 'openable' ? decision.uri : null;
@@ -100,7 +122,7 @@ export function localFileLinkPreviewPath(uri: string, displayText: string): stri
   const link = decodeFileLink(uri);
   if (!link || (link.host !== '' && !PLAIN_HOSTNAME_RE.test(link.host))) return null;
   const { path } = link;
-  if (CONTROL_CHARACTER_RE.test(path)) return null;
+  if (hasShellInputControls(path)) return null;
   const names = (text: string) => text !== '' && (path === text || path.endsWith(`/${text}`));
   const text = displayText.trim();
   return names(text) || names(text.replace(LS_CLASSIFIER_RE, '')) ? path : null;

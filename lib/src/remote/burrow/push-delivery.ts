@@ -31,8 +31,7 @@ import {
 } from 'remote-lib-common';
 import type { PushSendSummary } from '../../host/remote/service-protocol';
 import type { PushDevice } from '../../lib/push-devices';
-import type { BurrowEnrollment } from './enrollment';
-import { burrowFetch } from './burrow-fetch';
+import { burrowFetch, type BurrowFetchOptions } from './burrow-fetch';
 
 /**
  * Longest label we put in a notification title. Every OS truncates well before
@@ -84,9 +83,8 @@ export function toPushText(label: string): string {
   return boundedPushText(label, { limit: PUSH_TITLE_LIMIT, fallback: 'terminal' });
 }
 
-/** A `BurrowFetchOptions` (`burrow-fetch.ts`) plus the authority on who is reached. */
-export interface AlertPushDeps {
-  readonly enrollment: Pick<BurrowEnrollment, 'relayUrl' | 'burrowToken'>;
+/** A `BurrowFetchOptions`'s Relay and guarded fetch, plus the authority on who is reached. */
+export interface AlertPushDeps extends Pick<BurrowFetchOptions, 'enrollment' | 'fetch'> {
   /** The Burrow's active ACL records — the authority on who may be reached. */
   readonly activeRecords: () => readonly BurrowAclRecord[];
   /**
@@ -98,8 +96,6 @@ export interface AlertPushDeps {
     clientStaticPublicKey: string,
     plaintext: Uint8Array,
   ) => Promise<SealedPushV1 | null>;
-  /** Injectable for tests. */
-  readonly fetch?: typeof globalThis.fetch;
 }
 
 /**
@@ -117,9 +113,9 @@ function pushTargets(records: readonly BurrowAclRecord[]): readonly BurrowAclRec
  * active in the Burrow's ACL, joined by `deliveryId` to the ACL's human labels.
  *
  * Only the Burrow can do this join — it holds the records that mint delivery ids,
- * and the Relay never learns a label
- * (`docs/specs/remote-security-model.md`). The send path does not need it, and
- * deliberately does not pay for it; see {@link sendPush}.
+ * and the Relay never learns a label. The send path does not need it: the
+ * Relay intersects a send's targets with its subscriptions anyway, so asking
+ * first would only cost the alarm a round trip; see {@link sendPush}.
  *
  * **The delivery id is the join key and stops here.** It is a bearer capability
  * for that Client's push rows, the caller is the webview realm, and the dialog

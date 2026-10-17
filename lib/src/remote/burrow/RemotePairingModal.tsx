@@ -70,7 +70,7 @@ export function RemotePairingModal({
       <h2 id="remote-pairing-title" className="mb-1 text-base font-bold text-foreground">
         {copy.title}
       </h2>
-      {/* The exact copy the spec fixes. It has to name the failure mode — a
+      {/* The spec requires this copy to name the failure mode — a
           request that shows no code — because that is the only signal a user
           gets when something other than the phone in their hand is asking. */}
       <p className="mb-3 text-sm leading-relaxed text-muted">

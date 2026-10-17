@@ -2,19 +2,21 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { TerminalContextView, type TerminalContextViewProps } from './TerminalContextView';
+import { contextTeeth, teethCount, TerminalContextView, type TerminalContextViewProps } from './TerminalContextView';
+import { TERMINAL_CONTEXT_TEETH_PX } from '../design';
 import { TerminalPaneHeader } from './TerminalPaneHeader';
 import { TerminalPanel } from './TerminalPanel';
 import { TerminalContext } from './TerminalContext';
 import * as terminalRegistry from '../../lib/terminal-registry';
 import * as helpers from '../../lib/helper-terminal';
-import { TerminalContextContext } from './wall-context';
+import { TerminalContextContext, WorkspaceActiveContext } from './wall-context';
 import { ensureResizeObserver, PortalAnchoredButton } from './wall-test-utils';
 import { setMouseReporting, removeMouseSelectionState } from '../../lib/mouse-selection';
 import { setPlatform } from '../../lib/platform';
 import { FakePtyAdapter } from '../../lib/platform/fake-adapter';
 import { rememberBrowserProvider } from './BrowserProviderSwitch';
 import { cfg } from '../../cfg';
+import { cwdFromOsc633, cwdFromOsc7, cwdFromOsc9_9 } from '../../lib/terminal-state';
 
 vi.mock('../TerminalPane', () => ({ TerminalPane: () => <textarea aria-label="Fake terminal input" /> }));
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -28,9 +30,9 @@ beforeEach(() => {
   previousAnimate = cfg.layout.animate;
   setPlatform(new FakePtyAdapter()); ensureResizeObserver();
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
-  props = { title: 'pnpm dev', surfaceRef: 'surface:3', cwd: '~/repo', titleSources: [{ source: 'OSC 2', value: 'pnpm dev', note: 'Used' }], scan: { status: 'loaded', entries: [port(5173)] },
+  props = { title: 'pnpm dev', surfaceId: 'surface:3', cwd: '~/repo', titleSources: [{ source: 'OSC 2', value: 'pnpm dev', note: 'Used' }], scan: { status: 'loaded', entries: [port(5173)] },
     watchRule: 'pnpm', watching: false, todo: false, status: 'completed', command: 'git status', explorerLabel: 'Reveal in Finder', canExplore: true, browserProviders: ['agent-browser', 'playwright'], canIframe: true,
-    onClose: vi.fn(), onCopyRef: vi.fn(), onCopyPath: vi.fn(), onExplore: vi.fn(), onWatch: vi.fn(), onTodo: vi.fn(), onPort: vi.fn(), onModify: vi.fn(async () => {}), onReset: vi.fn(async () => {}), onPromote: vi.fn(async () => {}),
+    onClose: vi.fn(), onCopyId: vi.fn(), onCopyPath: vi.fn(), onExplore: vi.fn(), onWatch: vi.fn(), onTodo: vi.fn(), onPort: vi.fn(), onModify: vi.fn(async () => {}), onReset: vi.fn(async () => {}), onPromote: vi.fn(async () => {}),
     children: <div data-helper-terminal="helper"><textarea aria-label="Helper input" /></div> };
 });
 afterEach(() => { act(() => root.unmount()); container.remove(); removeMouseSelectionState('parent'); cfg.layout.animate = previousAnimate; vi.useRealTimers(); });
@@ -136,7 +138,7 @@ it('moves trailing actions into the dropdown on resize and dispatches hidden act
   } finally { client.mockRestore(); offset.mockRestore(); vi.unstubAllGlobals(); }
 });
 
-it('keeps Explain icon-only and compacts the Surface ref as the title row narrows', () => {
+it('drops the title explanation label, then compacts the Surface id, as the header narrows', () => {
   let width = 320;
   const observers = new Set<() => void>();
   vi.stubGlobal('ResizeObserver', class {
@@ -144,22 +146,22 @@ it('keeps Explain icon-only and compacts the Surface ref as the title row narrow
     observe() {} disconnect() {} unobserve() {}
   });
   const client = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function(this: HTMLElement) { return this.hasAttribute('data-context-title') ? width : 0; });
-  // Ten pixels a character, twenty an icon, 8ch as eighty: title 80, Explain 20, ref 110, close 20.
+  // Ten pixels a character, twenty an icon: ref 110, explanation 130 or 20 bare, close 20.
   const offset = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function(this: HTMLElement) {
-    return (this.textContent?.length ?? 0) * 10 + this.querySelectorAll('svg').length * 20 + (this.classList.contains('w-[8ch]') ? 80 : 0);
+    return (this.textContent?.length ?? 0) * 10 + this.querySelectorAll('svg').length * 20;
   });
   const resize = (next: number) => act(() => { width = next; observers.forEach(notify => notify()); });
   try {
     render();
-    expect(button('Explain this title').textContent).toBe('');
-    expect(button('Copy surface:3').textContent).toBe('surface:3');
-    resize(260);
-    expect(button('Explain this title').textContent).toBe('');
+    expect(button('Explain this title').textContent).toBe('debug title');
     expect(button('Copy surface:3').textContent).toBe('surface:3');
     resize(200);
+    expect(button('Explain this title').textContent).toBe('');
+    expect(button('Copy surface:3').textContent).toBe('surface:3');
+    resize(140);
     expect(button('Copy surface:3').textContent).toBe('');
     resize(320);
-    expect(button('Explain this title').textContent).toBe('');
+    expect(button('Explain this title').textContent).toBe('debug title');
     expect(button('Copy surface:3').textContent).toBe('surface:3');
   } finally { client.mockRestore(); offset.mockRestore(); vi.unstubAllGlobals(); }
 });
@@ -173,10 +175,10 @@ it('re-fits the title row when its helper placement buttons change', () => {
     disconnect() { for (const callbacks of observed.values()) callbacks.delete(this.callback); }
     unobserve() {}
   });
-  const client = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function(this: HTMLElement) { return this.hasAttribute('data-context-title') ? 260 : 0; });
+  const client = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function(this: HTMLElement) { return this.hasAttribute('data-context-title') ? 170 : 0; });
   // As above; each placement side and the close add a twenty-pixel icon to the actions group.
   const offset = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function(this: HTMLElement) {
-    return (this.textContent?.length ?? 0) * 10 + this.querySelectorAll('svg').length * 20 + (this.classList.contains('w-[8ch]') ? 80 : 0);
+    return (this.textContent?.length ?? 0) * 10 + this.querySelectorAll('svg').length * 20;
   });
   try {
     props.placement = { side: 'bottom', available: ['bottom'], onChange: vi.fn() };
@@ -210,7 +212,7 @@ it('drops the explorer label, and its busy text, before truncating the directory
     await click('Reveal in Finder');
     expect(button('Reveal in Finder').getAttribute('aria-busy')).toBe('true');
     expect(button('Reveal in Finder').textContent).toBe('');
-    resize(300);
+    resize(400);
     expect(button('Reveal in Finder').textContent).toContain('reveal in Finder');
   } finally { client.mockRestore(); offset.mockRestore(); vi.unstubAllGlobals(); }
 });
@@ -389,6 +391,27 @@ it('offers the rule covering the running script, else that script\'s own key', a
   }
 });
 
+it('never offers Explore for a share or device path, however the terminal reported it', async () => {
+  const open = vi.spyOn(helpers, 'openHelper').mockResolvedValue({ id: 'helper', parentId: 'unc-row', command: '', status: 'off' });
+  const unavailable = () => container.querySelector('[aria-label="Directory unavailable on this host"]');
+  try {
+    for (const [cwd, explorable] of [
+      [cwdFromOsc7('file:///home/me/repo'), true],
+      [cwdFromOsc7('file:////host/share/repo'), false],
+      [cwdFromOsc9_9('\\\\host\\share'), false],
+      [cwdFromOsc633('/\\host\\share'), false],
+      [cwdFromOsc9_9('\\\\?\\C:\\repo'), false],
+    ] as const) {
+      terminalRegistry.applyTerminalSemanticEvents('unc-row', [{ type: 'cwd', cwd: cwd! }]);
+      await act(async () => root.render(<TerminalContext id="unc-row" />));
+      expect(unavailable() === null, cwd!.path).toBe(explorable);
+    }
+  } finally {
+    open.mockRestore();
+    terminalRegistry.removeTerminalPaneState('unc-row');
+  }
+});
+
 it('shows a running Tool command that spans lines on one', () => {
   props = { ...props, terminalRole: 'tool', status: 'running', command: 'cd web\npnpm dev' };
   render();
@@ -437,13 +460,42 @@ it('offers Keep open only for a preview slot, as a focusable button that keeps f
   expect(props.onClose).toHaveBeenCalledOnce();
 });
 
+it('cuts 90° teeth corner to corner along the edge facing the source', () => {
+  expect(teethCount(200)).toBe(200 / (2 * TERMINAL_CONTEXT_TEETH_PX));
+  const { clip, path, viewBox } = contextTeeth('left', 4);
+  // In a strip one tooth deep and one unit per tooth: valleys at the depth, tips at the edge, half a tooth apart.
+  expect(viewBox).toBe(`0 0 ${TERMINAL_CONTEXT_TEETH_PX} 4`);
+  const D = TERMINAL_CONTEXT_TEETH_PX;
+  expect(path).toBe(`M${D},0 L0,0.5 L${D},1 L0,1.5 L${D},2 L0,2.5 L${D},3 L0,3.5 L${D},4`);
+  // The clip keeps the halo past the other three sides, never past the tips.
+  expect(clip).toContain('calc(100% + 16px) calc(0% - 16px)');
+  expect(clip).toContain('0px 87.5%');
+  expect(clip).not.toMatch(/(^|[(,]\s*)-\d/);
+  expect(contextTeeth('bottom', 1).path).toBe(`M0,0 L0.5,${D} L1,0`);
+  expect(contextTeeth('bottom', 1).clip).toContain(`50% calc(100% - 0px)`);
+});
+
+it('faces its teeth toward the source and carries the terminal ground into them', () => {
+  props.placement = { side: 'right', available: ['right'], onChange: vi.fn() };
+  render();
+  const context = container.querySelector<HTMLElement>('[data-terminal-context]')!;
+  expect(context.dataset.contextTeeth).toBe('left');
+  const ground = container.querySelector<HTMLElement>('[aria-label="Helper terminal status"]')!.parentElement!;
+  expect(ground.style.borderLeft).toBe(`${TERMINAL_CONTEXT_TEETH_PX}px solid transparent`);
+  expect(ground.style.borderRight).toBe('');
+  props.placement = undefined;
+  render();
+  expect(context.dataset.contextTeeth).toBeUndefined();
+  expect(ground.style.borderLeft).toBe('');
+});
+
 it('always shows context details alongside the helper', () => {
   render();
   expect(button('Terminal context details')).toBeNull();
   expect(button('Open in system browser')).not.toBeNull();
   expect(button('Explain this title')).not.toBeNull();
   expect(button('Copy absolute path')).not.toBeNull();
-  expect(container.textContent).toContain('Alerts');
+  expect(container.querySelector('[role="switch"][aria-label^="TODO"]')).not.toBeNull();
   expect(container.querySelector('textarea')).not.toBeNull();
 });
 
@@ -480,3 +532,22 @@ it.each(['composing', 'WebKit ending'])('leaves detail Escape and Tab to the IME
   act(() => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
   expect(container.querySelector('[role="dialog"]')).toBeNull();
 });
+
+it('pauses its helper while its Workspace is out of view, and resumes when it returns', async () => {
+  const open = vi.spyOn(helpers, 'openHelper').mockResolvedValue({ id: 'helper', parentId: 'hidden-source', command: '', status: 'off' });
+  const visible = vi.spyOn(helpers, 'setHelperVisible');
+  const show = (active: boolean) => act(async () => root.render(<WorkspaceActiveContext.Provider value={active}><TerminalContext id="hidden-source" /></WorkspaceActiveContext.Provider>));
+  try {
+    await show(true);
+    expect(visible.mock.calls.at(-1)).toEqual(['hidden-source', true]);
+    await show(false);
+    expect(visible.mock.calls.at(-1)).toEqual(['hidden-source', false]);
+    await show(true);
+    expect(visible.mock.calls.at(-1)).toEqual(['hidden-source', true]);
+  } finally {
+    await act(async () => root.render(<></>));
+    open.mockRestore();
+    visible.mockRestore();
+  }
+});
+

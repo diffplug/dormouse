@@ -45,8 +45,12 @@ test('oversized enrollment bodies spend admission before they are read', async (
   }
   assert.equal((await send()).status, 429);
 
-  // An OPTIONS probe is not a credential attempt and spends nothing.
+  // An OPTIONS probe is not a credential attempt and spends nothing: with one
+  // token left, it would otherwise turn the POST after it into a 429.
   const fresh = await freshApp({ now: clock.now });
+  for (let i = 0; i < BURROW_ENROLL_ATTEMPT_BURST - 1; i += 1) {
+    assert.equal((await post(fresh.app, API_ROUTES.burrowEnroll, {})).status, 400);
+  }
   assert.equal(
     (
       await fresh.app.request(API_ROUTES.burrowEnroll, {

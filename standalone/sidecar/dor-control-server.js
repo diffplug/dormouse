@@ -25,7 +25,7 @@ function proveToken(token, domain, nonce) {
 // so hash both sides to fixed-length digests (side-stepping timingSafeEqual's
 // length-mismatch throw, which would itself leak the length) and compare those.
 // Mirrors the SHA-256 + timingSafeEqual pattern the selfhost server uses in
-// relay/src/state.ts.
+// relay/src/secrets.ts.
 function proofMatches(provided, expected) {
   if (typeof provided !== 'string') return false;
   const a = crypto.createHash('sha256').update(provided).digest();
@@ -253,8 +253,8 @@ function createDorControlServer({ socketPath, socketDir, token, send, getHelperP
     return true;
   }
 
-  // A malformed request is answered with an error and never forwarded; the
-  // connection stays open for the client's next line.
+  // A malformed request is answered with an error and never forwarded. Like
+  // every response, the answer ends its connection; the server keeps serving.
   function handleRequest(socket, line) {
     let request;
     try {

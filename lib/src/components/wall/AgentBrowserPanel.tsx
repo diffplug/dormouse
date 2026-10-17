@@ -5,6 +5,7 @@ import { clsx } from 'clsx';
 import { TERMINAL_BOTTOM_RADIUS_CLASS } from '../design';
 import { isEditableTarget } from '../../lib/dom';
 import { isMacSelectAll } from '../../lib/select-all';
+import type { BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
 import type { RenderMode } from './agent-browser-screen';
 import { tabDisplayTitle } from './browser-url';
 import { resolveRenderMode } from './browser-surface';
@@ -41,6 +42,10 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
   const actions = useContext(WallActionsContext);
   const actionsRef = useRef(actions);
   actionsRef.current = actions;
+  const swapRenderMode = (mode: RenderMode, viewport?: BrowserViewportSetting) => {
+    if (viewport) actionsRef.current.onSwapRenderMode(id, mode, viewport);
+    else actionsRef.current.onSwapRenderMode(id, mode);
+  };
   const paneWrite = useContext(PaneWriteContext);
   const mode = useContext(ModeContext);
   const selectedId = useContext(SelectedIdContext);
@@ -57,19 +62,18 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
   const syncEngaged = params?.syncEngaged;
   const cwd = params?.cwd;
   // poppedOut is derived from the canonical renderMode the shell passes; fall
-  // back to resolving it from params for a direct mount (tests) / legacy blob.
+  // back to resolving it from params for a direct mount (tests).
   const seededMode = renderModeProp ?? resolveRenderMode(params);
   const provider = surfaceProvider(seededMode);
   const cli = BROWSER_PROVIDER_GUI[provider].cli;
 
   // The surface-scoped controller: get-or-create, keyed by surface id. Survives
   // this component's unmount (minimize, layout churn, StrictMode). Keyed by
-  // provider too: a minimized pane keeps this view mounted while its Wall
-  // restores a failed cross-provider swap in place, and the restored provider
-  // needs its own. One released under this view is replaced when params next
-  // change (`generation`), never on the release itself: a kill releases it as
-  // the pane starts to fade, where re-acquiring would leave a live controller
-  // behind for a dead Surface.
+  // provider too: a cross-provider render swap keeps the Surface id and this
+  // view mounted, and the new provider needs its own. One released under this
+  // view is replaced when params next change (`generation`), never on the
+  // release itself: a kill releases it as the pane starts to fade, where
+  // re-acquiring would leave a live controller behind for a dead Surface.
   const [generation, setGeneration] = useState(0);
   const controller = useMemo(
     () => acquireAgentBrowserSurfaceController(id, { ...params, renderMode: seededMode }),
@@ -126,12 +130,11 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
       viewport,
       updateParameters: (next) => paneWrite.updateParams(id, next),
       setTitle: (nextTitle) => paneWrite.setTitle(id, nextTitle),
-      requestRenderSwap: (mode = 'iframe', viewport) => {
+      requestRenderSwap: (mode = 'iframe', swapViewport) => {
         // The iframe renderer is single-frame: only the active tab survives.
         // Warn + require a typed confirm when other tabs would be closed.
-        if (controller.snapshot().tabs.length >= 2) setPendingRenderSwap(mode);
-        else if (viewport) actionsRef.current.onSwapRenderMode(id, mode, viewport);
-        else actionsRef.current.onSwapRenderMode(id, mode);
+        if (controller.snapshot().tabs.length >= 2) setPendingRenderSwap({ mode, viewport: swapViewport });
+        else swapRenderMode(mode, swapViewport);
       },
       launchFailed: (error) => actionsRef.current.onBrowserLaunchFailed?.(id, error),
     });
@@ -152,7 +155,7 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
 
   // Crossing to the single-frame iframe renderer closes all but the active tab;
   // when others are open the swap is gated behind a typed confirm (overlay below).
-  const [pendingRenderSwap, setPendingRenderSwap] = useState<RenderMode | null>(null);
+  const [pendingRenderSwap, setPendingRenderSwap] = useState<{ mode: RenderMode; viewport?: BrowserViewportSetting } | null>(null);
   const swapConfirmRef = useRef<HTMLDivElement>(null);
 
   // --- input forwarding (stream-native input_* messages) ---
@@ -350,7 +353,7 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
     if (phase === 'relaunching') return 'Relaunching browser…';
     // Addressed to this pane: a bare `dor agent-browser open` drives the caller's default
     // key, which for a keyed or GUI-launched pane is some other browser.
-    const command = `${cli} --surface ${actions.resolveSurfaceRef(id)} open <url>`;
+    const command = `${cli} --surface ${id} open <url>`;
     // A pane whose launch never named a session has no browser to drive yet.
     if (phase === 'ended' && error) {
       return session
@@ -457,7 +460,7 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
               e.stopPropagation();
               if (e.key === 'c' || e.key === 'C') {
                 setPendingRenderSwap(null);
-                actions.onSwapRenderMode(id, pendingRenderSwap!);
+                swapRenderMode(pendingRenderSwap!.mode, pendingRenderSwap!.viewport);
               } else if (e.key === 'Escape') {
                 setPendingRenderSwap(null);
               }

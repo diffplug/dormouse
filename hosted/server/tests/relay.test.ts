@@ -355,8 +355,12 @@ test("setup, sign-in, and a presence proof end to end, scoped to the account tha
   const token = await f.setupToken(laptop.token);
   const registered = await f.register(phone, token);
   expect(registered.status).toBe(200);
+  const { sessionToken: setupSession, expiresAt: setupExpiry, ...identity } = registered.json!;
   // The account's immutable id where the self-host Relay answers 'owner'.
-  expect(registered.json).toEqual({ accountId: owner, credentialId: phone.credentialId });
+  expect(identity).toEqual({ accountId: owner, credentialId: phone.credentialId });
+  // Creating the passkey signed in: the finish's session reads the account.
+  expect(Math.abs(setupExpiry - (Date.now() + 12 * 3600_000))).toBeLessThan(60_000);
+  expect((await f.call("GET", API_ROUTES.burrows, { bearer: setupSession })).status).toBe(200);
   expect(await f.sql(`SELECT "userId", label FROM dormouse_relay_passkeys`)).toEqual([
     { userId: owner, label: "Phone" },
   ]);
@@ -403,9 +407,9 @@ test("setup, sign-in, and a presence proof end to end, scoped to the account tha
 
   // Every bearer secret is at rest only as its SHA-256.
   const fresh = await f.setupToken(laptop.token);
-  expect(await f.sql(`SELECT "tokenHash" FROM dormouse_relay_sessions`)).toEqual([
-    { tokenHash: digest(sessionToken) },
-  ]);
+  expect(await f.sql(`SELECT "tokenHash" FROM dormouse_relay_sessions ORDER BY "tokenHash"`)).toEqual(
+    [digest(setupSession), digest(sessionToken)].sort().map((tokenHash) => ({ tokenHash })),
+  );
   expect(await f.sql(`SELECT "tokenHash" FROM dormouse_relay_setup_tokens`)).toEqual([
     { tokenHash: digest(fresh) },
   ]);
@@ -478,12 +482,16 @@ test("a refused finish puts the token back on its own expiry; a removed Burrow's
     });
     expect(response).toMatchObject({ status: 400, json: { error } });
   }
+  const sessions = () => f.sql(`SELECT count(*)::int AS n FROM dormouse_relay_sessions`);
+  // A refused finish signs nobody in.
+  expect(await sessions()).toEqual([{ n: 0 }]);
   expect((await f.register(phone, token)).status).toBe(200);
   // The same credential cannot be registered twice.
   expect(await f.register(phone, await f.setupToken(laptop.token))).toMatchObject({
     status: 409,
     json: { error: "credential already registered" },
   });
+  expect(await sessions()).toEqual([{ n: 1 }]);
 
   const pending = await f.setupToken(laptop.token);
   await f.call("POST", API_ROUTES.setupBegin, { body: { setupToken: pending } });
@@ -744,7 +752,7 @@ test("every table a caller grows is capped by whoever grows it, and expired rows
   }).toEqual(live);
 });
 
-test("restoring a setup token that has since expired never evicts a live one", async ({
+test("restoring hands back only a claim still held, on its original expiry", async ({
   onTestFinished,
 }) => {
   const f = await fixture();
@@ -752,52 +760,68 @@ test("restoring a setup token that has since expired never evicts a live one", a
   const owner = await f.account(ADMIN_EMAIL);
   const laptop = await f.burrow(owner);
   const live: string[] = [];
-  for (let i = 0; i < MAX_TOKENS_PER_BURROW; i++) live.push(digest(await f.setupToken(laptop.token)));
-  const hashes = async () =>
-    (await f.sql<{ tokenHash: string }>(`SELECT "tokenHash" FROM dormouse_relay_setup_tokens`))
-      .map((row) => row.tokenHash)
-      .sort();
-  const restore = (token: string, expiresAt: Date) =>
-    withClient(f.url, (db) =>
-      restoreSetupToken(db, token, { burrowId: laptop.burrowId, userId: owner, expiresAt }),
+  for (let i = 0; i < MAX_TOKENS_PER_BURROW; i++) live.push(await f.setupToken(laptop.token));
+  const rows = () =>
+    f.sql<{ tokenHash: string; claimed: boolean; expiresAt: Date }>(
+      `SELECT "tokenHash", claimed, "expiresAt" FROM dormouse_relay_setup_tokens ORDER BY "tokenHash"`,
     );
-  await restore(randomSecret(), new Date(Date.now() - 1000));
-  expect(await hashes()).toEqual([...live].sort());
-  // A live one is restored within the cap: the Burrow's oldest makes room.
-  const back = randomSecret();
-  await restore(back, new Date(Date.now() + 60_000));
-  const after = await hashes();
-  expect(after).toHaveLength(MAX_TOKENS_PER_BURROW);
-  expect(after).toContain(digest(back));
+  const before = await rows();
+  const restore = (token: string) => withClient(f.url, (db) => restoreSetupToken(db, token));
+
+  // A claim goes back as it was, never on a fresh expiry.
+  await f.sql(`UPDATE dormouse_relay_setup_tokens SET claimed = true WHERE "tokenHash" = $1`, [
+    digest(live[0]),
+  ]);
+  await restore(live[0]);
+  expect(await rows()).toEqual(before);
+  // A token that is gone — retired, evicted, or swept — is never re-inserted,
+  // so it can neither come back nor cost the Burrow a live one.
+  await restore(randomSecret());
+  expect(await rows()).toEqual(before);
 });
 
-test("a setup token that expires while its restore waits on the lock is not restored", async ({
+test("a retire wins over a finish still in flight: it registers nothing, and nothing restores the code", async ({
   onTestFinished,
 }) => {
   const f = await fixture();
   onTestFinished(f.close);
   const owner = await f.account(ADMIN_EMAIL);
   const laptop = await f.burrow(owner);
-  const live: string[] = [];
-  for (let i = 0; i < MAX_TOKENS_PER_BURROW; i++) live.push(digest(await f.setupToken(laptop.token)));
-  const expiresAt = new Date(Date.now() + 1000);
-  // Another write holds the Burrow's token lock across the restored token's expiry.
+  const registered = await f.register(await newAuthenticator(), await f.setupToken(laptop.token));
+  const { sessionToken } = registered.json!;
+  const token = await f.setupToken(laptop.token);
+  const begun = await f.call("POST", API_ROUTES.setupBegin, { body: { setupToken: token } });
+  const claimed = async () =>
+    (
+      await f.sql<{ claimed: boolean }>(
+        `SELECT claimed FROM dormouse_relay_setup_tokens WHERE "tokenHash" = $1`,
+        [digest(token)],
+      )
+    )[0]?.claimed === true;
+  // Another write holds the account's passkey lock, so the finish waits there
+  // holding its claim — the window a slow check would leave open.
   await withClient(f.url, async (holder) => {
     await holder.query("BEGIN");
     await holder.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
-      `dormouse-relay:dormouse_relay_setup_tokens:${laptop.burrowId}`,
+      `dormouse-relay:passkeys:${owner}`,
     ]);
-    const restoring = withClient(f.url, (db) =>
-      restoreSetupToken(db, randomSecret(), { burrowId: laptop.burrowId, userId: owner, expiresAt }),
+    const pending = f.finish(await newAuthenticator(), token, begun.json!.challenge);
+    while (!(await claimed())) await new Promise((resolve) => setTimeout(resolve, 20));
+    // A claimed code is not scannable meanwhile, as a spent one is not.
+    expect((await f.call("POST", API_ROUTES.setupBegin, { body: { setupToken: token } })).status).toBe(
+      401,
     );
-    await new Promise((resolve) => setTimeout(resolve, expiresAt.getTime() - Date.now() + 500));
+    expect(
+      (await f.call("POST", API_ROUTES.setupRetire, { bearer: sessionToken, body: { setupToken: token } }))
+        .status,
+    ).toBe(204);
     await holder.query("COMMIT");
-    await restoring;
+    expect(await pending).toMatchObject({ status: 401, json: { error: SETUP_TOKEN_INVALID_ERROR } });
   });
-  const hashes = (await f.sql<{ tokenHash: string }>(`SELECT "tokenHash" FROM dormouse_relay_setup_tokens`))
-    .map((row) => row.tokenHash)
-    .sort();
-  expect(hashes).toEqual([...live].sort());
+  expect(await f.sql(`SELECT count(*)::int AS n FROM dormouse_relay_passkeys`)).toEqual([{ n: 1 }]);
+  expect((await f.call("POST", API_ROUTES.setupBegin, { body: { setupToken: token } })).json).toEqual({
+    error: SETUP_TOKEN_INVALID_ERROR,
+  });
 });
 
 test("a de-entitled account signs in to nothing, and its sessions answer as expired", async ({
@@ -808,8 +832,10 @@ test("a de-entitled account signs in to nothing, and its sessions answer as expi
   const owner = await f.account(ADMIN_EMAIL);
   const laptop = await f.burrow(owner);
   const phone = await newAuthenticator();
-  expect((await f.register(phone, await f.setupToken(laptop.token))).status).toBe(200);
-  const { sessionToken } = await f.session(phone);
+  // The session registering the passkey minted, de-entitled like any other.
+  const registered = await f.register(phone, await f.setupToken(laptop.token));
+  expect(registered.status).toBe(200);
+  const { sessionToken } = registered.json!;
   const binding = f.pairing(laptop.burrowId, phone);
   const begun = await f.call("POST", API_ROUTES.reauthBegin, { bearer: sessionToken, body: { binding } });
   const assertion = await phone.assert({ challenge: begun.json!.challenge, origin });
@@ -837,7 +863,7 @@ test("a de-entitled account signs in to nothing, and its sessions answer as expi
     expect((await f.call(method, path, { bearer: sessionToken, body })).status, path).toBe(status);
 });
 
-test("every unauthenticated route that reaches Postgres is rate limited per address", async ({
+test("every unauthenticated route that reads or writes a row is rate limited per address", async ({
   onTestFinished,
 }) => {
   const f = await fixture();

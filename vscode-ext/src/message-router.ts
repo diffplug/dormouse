@@ -1,14 +1,14 @@
 import * as vscode from 'vscode';
 import * as ptyManager from './pty-manager';
 import { createAlertHost, type AlertRealm } from '../../lib/src/host/alert-host';
-import { alertedPty, createOwnerPtyStream } from '../../lib/src/host/owner-pty';
+import { alertedPty, createOwnerPtyStream, type OwnerPtyStream } from '../../lib/src/host/owner-pty';
 import {
   parseTerminalColors,
   type TerminalColorProvider,
   type TerminalColors,
   type TerminalProtocolEvent,
 } from '../../lib/src/lib/terminal-protocol';
-import type { ProcessedPtyChunk, ProcessedPtyStream } from '../../lib/src/lib/processed-pty-stream';
+import type { ProcessedPtyChunk } from '../../lib/src/lib/processed-pty-stream';
 import { normalizeExternalUri } from '../../lib/src/lib/external-links';
 import { VSCODE_WORKBENCH_COMMANDS } from '../../lib/src/lib/vscode-keybindings';
 import { computeWorkspaceUnion, type WorkspaceUnion } from '../../lib/src/lib/workspace-union';
@@ -20,6 +20,8 @@ import { dorWorkspaceRefusal } from './dor-workspace-guard';
 import { runBrowserRequest } from './agent-browser-host';
 import { createIframeProxyUrl, releaseIframeProxyLease } from './iframe-proxy-host';
 import { toolControl } from './tool-host';
+import { reserveSurfaceIds } from './surface-ids';
+import { maxSurfaceIdNumber } from 'dor/protocol';
 import type { ToolHostRequest } from '../../lib/src/lib/platform/types';
 import { ASK_BUDGET_MS } from '../../lib/src/host/remote/service-protocol';
 import { configurePeerLink, remoteNotifyPeerChange } from './peer-link';
@@ -205,7 +207,7 @@ const alertedPtys = alertedPty(alertManager, ptyManager);
  * projections reach every consumer (`docs/specs/terminal-escapes.md` → "Parsing
  * location").
  */
-const ownerPtyStreams = new Map<string, ProcessedPtyStream>();
+const ownerPtyStreams = new Map<string, OwnerPtyStream>();
 
 // The extension-host parser has no DOM, so webviews push their resolved terminal
 // theme colors (see VSCodeAdapter.pushThemeColors). Cached here and read lazily
@@ -295,7 +297,7 @@ ptyManager.onDorControlCancel((cancel) => {
   broadcastToWebviews({ type: 'dor:controlCancel', requestId: cancel.requestId });
 });
 
-function getOwnerPtyStream(id: string): ProcessedPtyStream {
+function getOwnerPtyStream(id: string): OwnerPtyStream {
   let stream = ownerPtyStreams.get(id);
   if (!stream) {
     stream = createOwnerPtyStream(id, {
@@ -590,6 +592,8 @@ export function attachRouter(
         break;
       }
       case 'pty:input':
+        // Armed before the bytes reach the shell that will report the run.
+        if (msg.launch === true) getOwnerPtyStream(msg.id).armLaunch(msg.data);
         alertedPtys.write(msg.id, msg.data, { paced: msg.paced, userInput: msg.userInput === true });
         break;
       case 'pty:resize':
@@ -622,6 +626,13 @@ export function attachRouter(
           post({
             type: 'pty:shells', shells, requestId: msg.requestId,
           } satisfies ExtensionMessage);
+        });
+        break;
+      case 'surface:reserveIds':
+        // Above every PTY this extension host holds, too: a sibling panel's
+        // restored Surfaces are here before that panel reserves with its floor.
+        void reserveSurfaceIds(msg.count, Math.max(msg.floor, maxSurfaceIdNumber(ptyManager.ptyIds()))).then((ids) => {
+          post({ type: 'surface:reservedIds', ids, requestId: msg.requestId } satisfies ExtensionMessage);
         });
         break;
       case 'clipboard:readFiles':

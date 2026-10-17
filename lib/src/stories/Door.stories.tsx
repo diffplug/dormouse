@@ -69,5 +69,5 @@ export const DirtyTool: Story = {
   args: { title: 'Editor', toolDirty: true, speechState: 'spoken', status: 'ALERT_RINGING' },
 };
 
-/** The Workspace's preview slot minimized: an italic label (`docs/specs/layout.md` -> Pane header). */
+/** The Workspace's preview slot minimized: its label marked as the slot (`docs/specs/layout.md` -> Pane header), italic per `PREVIEW_LABEL_CLASS`. */
 export const PreviewSlot: Story = { args: { title: 'README.md', preview: true } };

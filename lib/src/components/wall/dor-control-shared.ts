@@ -33,8 +33,8 @@ export const ROUTE_RETRIES = 5;
 
 /** What a Workspace whose Wall is still registering answers with, rather than
  *  being treated as a Workspace this Window does not have. */
-export function mountingRefusal(ref: string): string {
-  return `workspace '${ref}' is still mounting`;
+export function mountingRefusal(id: string): string {
+  return `workspace '${id}' is still mounting`;
 }
 
 /**

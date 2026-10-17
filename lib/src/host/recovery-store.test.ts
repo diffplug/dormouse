@@ -116,6 +116,23 @@ describe('recovery store', () => {
       expect(fs.existsSync(file())).toBe(false);
     });
 
+    it('discards a record whose createdAt is not a number', () => {
+      // `Date.now() - '2026-10-07'` is NaN, which the age bound never rejects.
+      write({ createdAt: '2026-10-07', commands: { a: 'claude --continue' } });
+      const store = createRecoveryStore(dir, { log });
+      expect(store.take(['a'])).toEqual({});
+      expect(fs.existsSync(file())).toBe(false);
+    });
+
+    it('discards a record whose createdAt is not finite', () => {
+      // JSON has no Infinity literal, but an out-of-range number parses to one,
+      // whose age is -Infinity.
+      fs.writeFileSync(file(), '{"createdAt":1e999,"commands":{"a":"claude --continue"}}', 'utf8');
+      const store = createRecoveryStore(dir, { log });
+      expect(store.take(['a'])).toEqual({});
+      expect(fs.existsSync(file())).toBe(false);
+    });
+
     it('drops a non-string entry rather than handing it on', () => {
       write({ createdAt: Date.now(), commands: { a: 'claude --continue', b: { evil: true } } });
       const store = createRecoveryStore(dir, { log });

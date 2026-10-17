@@ -9,12 +9,18 @@
  * (docs/compatible-agents.md -> "Cold restore").
  */
 
-import {
-  loadWindowState,
-  saveWindowState,
-  type SessionKeyValueStore,
-} from "dormouse-lib/lib/window-persistence";
-import { windowPaneIds, type PersistedWindow } from "dormouse-lib/lib/session-types";
+import { readPersistedWindow, windowPaneIds, type PersistedWindow } from "dormouse-lib/lib/session-types";
+
+/**
+ * A single synchronous key/value slot the host persists natively, holding the
+ * stored `PersistedWindow` as JSON (`docs/specs/transport.md` → "Persisted
+ * session"). `localStorage` (browser-dev sidecar) and the Rust-backed
+ * `TauriSessionStore` both satisfy it (`docs/specs/standalone.md` §Persistence).
+ */
+export interface SessionKeyValueStore {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+}
 
 export interface WindowStateSlot {
   /** The stored Window. Parsed once — the store behind it is a boot-seeded
@@ -25,8 +31,8 @@ export interface WindowStateSlot {
 
 /**
  * The Window slot over `store`. Both halves degrade rather than throw: an
- * unreadable blob is a fresh start, and a failed write is one lost save, never a
- * failed boot or a failed quit.
+ * unreadable blob, or one another build wrote, is a fresh start, and a failed
+ * write is one lost save, never a failed boot or a failed quit.
  */
 export function windowStateSlot(
   store: SessionKeyValueStore,
@@ -40,7 +46,7 @@ export function windowStateSlot(
       if (!known) {
         known = true;
         try {
-          current = loadWindowState(store, key);
+          current = readPersistedWindow(store.getItem(key));
         } catch {
           current = null;
         }
@@ -51,7 +57,7 @@ export function windowStateSlot(
       known = true;
       current = snapshot;
       try {
-        saveWindowState(store, key, snapshot);
+        store.setItem(key, JSON.stringify(snapshot));
       } catch {
         console.error(`[${logPrefix}] Failed to save session state`);
       }

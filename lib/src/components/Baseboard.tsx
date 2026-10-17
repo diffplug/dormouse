@@ -174,7 +174,7 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
   const workspaceSettingsHint = workspaceId ? '. Right-click for workspace alert settings.' : '';
 
   // Held for the window's life, so the settings preview reads the level on its
-  // first frame (docs/specs/remote-network.md -> "Settings → Network").
+  // first frame.
   useEffect(() => subscribeToNetworkPolicy(() => {}), []);
 
   useLayoutEffect(() => {

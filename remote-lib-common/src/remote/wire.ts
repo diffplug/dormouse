@@ -237,8 +237,14 @@ export type SetupFinishRequest = SetupCredential & {
   label: string;
 };
 export interface SetupFinishResponse {
+  /**
+   * A session minted off the registration, so creating the passkey also signs
+   * in: the same token and expiry `SigninFinishResponse` carries.
+   */
+  sessionToken: string;
   accountId: string;
   credentialId: string;
+  expiresAt: number;
 }
 
 export interface SigninBeginResponse {

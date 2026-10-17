@@ -6,10 +6,6 @@
 
 **Why the three pairs are the list colors.** The chrome anchors on VSCode's file-tree colors, authored to read clearly in the sidebar host area the chrome sits in. What the accent looks like is the theme's business: Kimbie Dark renders it caramel.
 
-## Dynamic picks
-
-**Why the alarm tint is flat black or white.** Luminance contrast dominates visibility: a plain black/white pick against the surface beats rotating the theme's alarm hue, which can land arbitrarily close to the background it has to shout over.
-
 ## Runtime model
 
 **Why selection backgrounds are flattened.** VSCode renders the file-tree selection as an overlay on `sideBar.background`, so authors pick an alpha they never see as a fill. Selenized Dark's `list.activeSelectionBackground` is `#0096f588`: raw on the AppBar it lets whatever sits behind the surface bleed through, while compositing over `sideBar.background` reproduces what the author saw.
@@ -38,20 +34,10 @@
 
 **Why VS Code gets no picker.** VS Code supplies `--vscode-*` from its own active theme, so its built-in theme UI is the only control that can change what Dormouse renders there.
 
-**Why `/playground/pocket` keeps the `compact` picker.** Those two mounts render a mobile prototype: no baseboard, so no Settings dialog to put the picker in. The dialog trigger keeps its label so it reads as the same control as the row it stands in for; `compact` stands alone and needs only the swatch.
+**Why `/playground/pocket` keeps the `compact` picker.** Those two mounts render a mobile prototype: no baseboard, so no Settings dialog to put the picker in.
 
-**Why the picker reconciles storage after hydration.** The server cannot read installed themes or the stored active id. Reading them during the first client render made its label and swatch differ from the prerendered markup; React reported the mismatch and kept the stale server attributes even while the body showed the stored theme.
-
-**Why the host fallback is module state.** Uninstalling the active theme is reachable from two depths — the picker row's `X` and the store dialog's `Remove` — and a prop-held fallback goes missing on one, dropping to the first bundled theme instead of the host's. `setDefaultThemeId()` is the same module-state shape as `lib/src/lib/shell-defaults.ts`.
-
-**Why `useRestoredTheme()` latches the fallback ahead of any child render.** On the desktop Pocket page the header's picker mounts before the component that calls the hook, so a latch deferred to an effect would let the picker re-resolve against no fallback at all.
+**Why the host fallback is module state.** Uninstalling the active theme is reachable from two depths — the picker row's `X` and the store dialog's `Remove` — and a prop-held fallback goes missing on one, dropping to the first bundled theme instead of the host's.
 
 **Why the colour tokens are their own file.** The website compiles the library from source, so its Tailwind root has to scan `lib/src` or none of the library's utilities are emitted there — which is how the picker once lost its width, cap, and stacking on the docs pages, silently and with no build error. Scanning alone was not enough: the colour utilities resolve against an `@theme` the website did not declare, so the picker, the OpenVSX store, and the theme debugger each rendered with no surface, border, or text colour, and the picker carried a private inline stylesheet to compensate. Importing the whole of `theme.css` was not an option either — its `@theme` retunes `--text-xs`/`--text-sm` for a dense terminal UI, which would shrink type across the marketing site. Splitting the colour half out lets a host take the tokens without the app, and the inline stylesheet was deleted.
 
-**Why `compact` anchors absolutely.** Chromium offsets a fixed descendant of the docs' sticky mobile bar by that containing block; the dialog variants need fixed positioning to escape the dialog's `overflow-y-auto` surface, which would clip an absolute menu, while the compact mounts sit in no such scroller. Anchoring absolutely leaves the menu unmeasured; the trigger is still measured for side selection and the height cap.
-
-**Why the swatch previews chrome instead of repeating the terminal background.** The row already supplies the terminal foreground/background. The active header fill and runtime focus-ring pick show the chrome's two accent roles. Quiet Light uses green header fills and a purple focus border, so a background circle plus a focus dot hid the green. Resolving and flattening the candidate first also avoids showing translucent selection fills at an opacity the app never uses — which is also why the preview shares `applyTheme`'s `resolveThemeVars` rather than resolving on its own: a preview that skipped the selection flatten would show a candidate at an alpha the app never paints, and nothing would catch the divergence. The swatch remains circular while its enclosing entry takes the Settings controls' 4px corners: a 16px circle inset 8px from an entry edge shares no corner with it, so the concentric derivation has nothing to match, and the entry keeps the radius every other Settings control has.
-
-## Storybook simulation
-
-In Linux Chromium 153 (measured 2026-09), upgrading Vitest 4.1.11 to 5.0.2 changed the implicit fallback for `❯` from DejaVu Sans (10.90625px at 13px) to DejaVu Sans Mono (7.828125px). The computed font stack was unchanged. Storybook 11 with Vitest 4 retained the baseline glyph; Vitest 5 with the same Vite version reproduced the change. Argos reported 25 Chromium changes across terminal-context prompts and mobile gesture labels; WebKit stayed clean. Naming the same fallback in both snapshot browsers restores all 295 Chromium baseline images and intentionally changes 27 WebKit images. Sharing symbol shapes and metrics across browsers is preferable to preserving different implicit fallbacks. Application and interactive Storybook fonts remain native.
+**Why the preview shares `applyTheme`'s `resolveThemeVars`.** A preview that resolved on its own could skip the selection flatten and show a candidate's translucent selection fills at an alpha the app never paints, and nothing would catch the divergence. The swatch remains circular while its enclosing entry takes the Settings controls' 4px corners: a 16px circle inset 8px from an entry edge shares no corner with it, so the concentric derivation has nothing to match, and the entry keeps the radius every other Settings control has.

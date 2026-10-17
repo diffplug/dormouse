@@ -1,0 +1,50 @@
+Domain: hosted
+Rule: `docs/specs/security-hosted.md` -> "Relay boundary" #4 — or removal reaches another account's Burrow
+Expect: hosted/server/relay-account.ts
+Source: synthetic; the Burrow removal deletes by Burrow id alone, without the signed-in account's scope
+
+diff --git a/hosted/server/relay-account.ts b/hosted/server/relay-account.ts
+index a9edb7dca..e16ee916e 100644
+--- a/hosted/server/relay-account.ts
++++ b/hosted/server/relay-account.ts
+@@ -99,8 +99,8 @@ export function relayAccountRoutes(app: Hono<any>, host: (c: Context) => RelayAc
+       (
+         await accountQuery(
+           host(c),
+-          `DELETE FROM dormouse_relay_burrows WHERE "burrowId" = $1 AND "userId" = $2 RETURNING 1`,
+-          [burrowId, userId],
++          `DELETE FROM dormouse_relay_burrows WHERE "burrowId" = $1 RETURNING 1`,
++          [burrowId],
+         )
+       ).length > 0;
+     if (!removed) return c.json({ message: "Computer not found." }, 404);
+diff --git a/hosted/server/tests/workers.test.ts b/hosted/server/tests/workers.test.ts
+index 634c8df1f..7d733cc16 100644
+--- a/hosted/server/tests/workers.test.ts
++++ b/hosted/server/tests/workers.test.ts
+@@ -1111,15 +1111,8 @@ test("enrollment: only a recent admin login from this origin approves, and the B
+   const socket = await f.burrowSocket(burrowToken);
+   expect(socket.status).toBe(101);
+ 
+-  // Remove: this origin only; another account's Burrow is not found.
++  // Remove: this origin only.
+   expect((await admin.remove(burrowId, ORIGINS.relay)).status).toBe(403);
+-  const foreign = "BBBBBBBBBBBBBBBBBBBBBB";
+-  await queryDatabase(
+-    f.database.url,
+-    `INSERT INTO dormouse_relay_burrows ("burrowId", "userId", "tokenHash") VALUES ($1, $2, 'x')`,
+-    [foreign, (await other.session())!.user.id],
+-  );
+-  expect((await admin.remove(foreign)).status).toBe(404);
+   expect(socket.socket!.closedWith()).toBeUndefined();
+   expect((await admin.remove(burrowId)).status).toBe(204);
+   // Its live relay socket closes as revoked, pushed from the account Worker.
+@@ -1133,7 +1126,7 @@ test("enrollment: only a recent admin login from this origin approves, and the B
+   expect(await admin.computers()).toEqual({ burrows: [] });
+   expect(
+     await queryDatabase(f.database.url, `SELECT "burrowId" FROM dormouse_relay_burrows ORDER BY "burrowId"`),
+-  ).toEqual([{ burrowId: foreign }]);
++  ).toEqual([]);
+   expect((await admin.remove(burrowId)).status).toBe(404);
+ 
+   // A redeemed approval is approved again only once it has expired, and then unredeemed.

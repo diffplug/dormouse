@@ -1,0 +1,63 @@
+Domain: hosted
+Rule: `docs/specs/security-hosted.md` -> "Rendezvous boundary" #1 — parses, decodes, stores, or logs a forwarded frame
+Expect: hosted/server/one-time-room.ts
+Source: synthetic; the room keeps a Burrow frame for a phone that joins late
+
+diff --git a/hosted/server/one-time-room.ts b/hosted/server/one-time-room.ts
+index bffcc9483..50f581d1d 100644
+--- a/hosted/server/one-time-room.ts
++++ b/hosted/server/one-time-room.ts
+@@ -46,6 +46,8 @@ interface RoomState {
+  */
+ export class OneTimeRoom {
+   readonly #ctx: DurableObjectState;
++  /** The Burrow's newest frame before a phone joined, delivered on the join. */
++  #held: string | undefined;
+ 
+   constructor(ctx: DurableObjectState, _env: unknown) {
+     this.#ctx = ctx;
+@@ -110,6 +112,8 @@ export class OneTimeRoom {
+     const { 0: client, 1: server } = new WebSocketPair();
+     burrow.serializeAttachment({ ...state, joined: true } satisfies RoomState);
+     this.#ctx.acceptWebSocket(server, ["client"]);
++    if (this.#held !== undefined) server.send(this.#held);
++    this.#held = undefined;
+     return new Response(null, { status: 101, webSocket: client });
+   }
+ 
+@@ -131,8 +135,11 @@ export class OneTimeRoom {
+       );
+     burrow.serializeAttachment({ ...state, forwarded } satisfies RoomState);
+     const [role] = this.#ctx.getTags(ws) as Role[];
+-    // Before a phone joins the Burrow has no one to address; its frame is dropped.
+-    this.#socket(role === "burrow" ? "client" : "burrow")?.send(message);
++    const peer = this.#socket(role === "burrow" ? "client" : "burrow");
++    // Before a phone joins the Burrow has no one to address; its newest frame
++    // waits for the join.
++    if (peer) peer.send(message);
++    else this.#held = message;
+   }
+ 
+   // Also the reply to the leaving end's close frame: `#end` closes it too.
+diff --git a/hosted/server/tests/one-time.test.ts b/hosted/server/tests/one-time.test.ts
+index 602350478..64065b465 100644
+--- a/hosted/server/tests/one-time.test.ts
++++ b/hosted/server/tests/one-time.test.ts
+@@ -273,7 +273,7 @@ test("the message cap counts both directions and closes both ends", async () =>
+   expect(phone.received).toEqual([]);
+ });
+ 
+-test("a Burrow's frames before any phone are dropped but counted", async () => {
++test("a Burrow's frames before any phone are counted, and the newest waits for it", async () => {
+   const { burrow, frame } = await mint();
+   for (let i = 0; i < MAX_ONE_TIME_FORWARDED; i++) burrow.send(`early ${i}`);
+   await settle();
+@@ -281,7 +281,7 @@ test("a Burrow's frames before any phone are dropped but counted", async () => {
+   phone.send("one too many");
+   expect(await burrow.closed).toEqual(violation);
+   expect(await phone.closed).toEqual(violation);
+-  expect(phone.received).toEqual([]);
++  expect(phone.received).toEqual([`early ${MAX_ONE_TIME_FORWARDED - 1}`]);
+ });
+ 
+ test("a second phone is refused as taken, and the first keeps its room", async () => {

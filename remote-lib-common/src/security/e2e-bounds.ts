@@ -47,3 +47,18 @@ export const E2E_INIT_BURST = 8;
 
 /** One token back per second: the sustained rate that burst decays to. */
 export const E2E_INIT_REFILL_INTERVAL_MS = 1_000;
+
+/**
+ * How long a presence window stays open after the Client static it is keyed on
+ * was last active (`docs/specs/remote-security-model.md` -> Presence window).
+ * Longer than {@link ESTABLISHED_E2E_IDLE_TIMEOUT_MS}, so a phone the idle reap
+ * ended for being backgrounded comes back without a prompt.
+ */
+export const PRESENCE_WINDOW_IDLE_MS = 300_000;
+
+/**
+ * The longest a presence window lives after the proof that opened it, however
+ * active its Client stays. No longer than the relay session a Client needs to
+ * reach the Burrow at all.
+ */
+export const PRESENCE_WINDOW_MAX_MS = 12 * 60 * 60 * 1000;

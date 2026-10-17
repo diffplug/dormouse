@@ -3,14 +3,15 @@
  *
  * A `TocEntry` is a link to an anchor on the page it belongs to, so every id
  * the rail names must be an id that page actually renders — nested entries
- * included. The seven pages produce their entries four different ways (a
- * Markdown generator, a JSON changelog, a hand-written section list), which is
- * exactly why the check belongs here once rather than in each page's own test.
+ * included. The pages produce their entries different ways (a Markdown
+ * generator, a JSON changelog, a hand-written section list), which is exactly
+ * why the check belongs here once rather than in each page's own test.
  */
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { describe, expect, it } from "vitest";
 import { DOCS_PAGES, type TocEntry } from "./docs-pages";
+import { PRELAUNCH_NOTICE } from "../components/SiteHeader";
 
 import Changelog, { changelogToc } from "../pages/Changelog";
 import changelog from "../data/changelog.json";
@@ -18,6 +19,7 @@ import SupplyChain, { SUPPLY_CHAIN_TOC } from "../pages/SupplyChain";
 import SecurityDocs from "../pages/SecurityDocs";
 import SelfHostDocs, { SELF_HOST_TOC } from "../pages/SelfHostDocs";
 import Hosted, { HOSTED_TOC } from "../pages/Hosted";
+import Comparison, { COMPARISON_TOC } from "../pages/Comparison";
 import AgentSkillDocs from "../pages/AgentSkillDocs";
 import DorDocs from "../pages/DorDocs";
 import CompatibleAgentsDocs from "../pages/CompatibleAgentsDocs";
@@ -33,6 +35,7 @@ const PAGES: Record<string, { element: React.ReactElement; toc: TocEntry[] }> = 
   "/supply-chain": { element: <SupplyChain />, toc: SUPPLY_CHAIN_TOC },
   "/self-host": { element: <SelfHostDocs />, toc: SELF_HOST_TOC },
   "/hosted": { element: <Hosted />, toc: HOSTED_TOC },
+  "/comparison": { element: <Comparison />, toc: COMPARISON_TOC },
   "/agent-skill": { element: <AgentSkillDocs />, toc: skill.toc },
   "/dor": { element: <DorDocs />, toc: cli.toc },
   "/compatible-agents": { element: <CompatibleAgentsDocs />, toc: agents.toc },
@@ -67,6 +70,13 @@ describe("every page in the rail", () => {
     });
   }
 
+  it("asks for word of mouth only while Hosted rolls out", () => {
+    for (const [path, { element }] of Object.entries(PAGES)) {
+      const markup = renderToStaticMarkup(<MemoryRouter>{element}</MemoryRouter>);
+      expect(markup, path).toContain(PRELAUNCH_NOTICE);
+    }
+  });
+
   it("discloses Hosted's metadata and its pending review in the managed Relay section", () => {
     const markup = renderToStaticMarkup(<MemoryRouter><Hosted /></MemoryRouter>);
     const relay = markup.slice(markup.indexOf('id="remote-control"'));
@@ -84,8 +94,9 @@ describe("every page in the rail", () => {
     );
 
     expect(selfHostMarkup).toContain("Dormouse is just a terminal — it needs no server or hosting.");
-    expect(selfHostMarkup).toContain("They require a Relay to");
-    expect(selfHostMarkup).toContain("Dormouse’s remote features make no network requests");
+    expect(selfHostMarkup).toContain("A new install opens no connection on its own until you choose");
+    expect(selfHostMarkup).toContain("Push and a paired phone need a Relay");
+    expect(selfHostMarkup).toContain("A one-time connection needs none");
     expect(selfHostMarkup.indexOf("Dormouse is just a terminal —"))
       .toBeLessThan(selfHostMarkup.indexOf('id="security-model"'));
     expect(selfHostMarkup).toContain("See Dormouse Hosted");

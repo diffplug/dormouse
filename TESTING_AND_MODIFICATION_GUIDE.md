@@ -70,10 +70,13 @@ Per package, from the worktree root:
 (cd standalone/sidecar && node --test)
 (cd dor && node --test)                                        # help snapshots
 (cd vscode-ext && npx vitest run)
+(cd website && pnpm test)                                      # tsc --noEmit, then vitest: the website's only typecheck
 pnpm lint:specs && node scripts/xterm-lint.mjs                  # fast inner loop
 pnpm test                                                      # full CI test gate
 cargo test                                                     # see §2
 ```
+
+Helper placement snapshots: defer the fake helper's first prompt until its terminal is mounted and fitted. Drain queued xterm writes before capture and assert one autorun echo, both complete prompts, and a viewport at the bottom. Output emitted at the initial wide grid can lose the current prompt line when xterm shrinks; waiting afterward cannot repair it. `lib/src/stories/HelperPlacement.stories.tsx` owns the gate and `lib/src/lib/platform/fake-adapter-helper.test.ts` covers deferred startup and narrow wrapping.
 
 Help snapshots: after changing any `dor` help text, rebuild and refresh with `cd dor && pnpm build && UPDATE_SNAPSHOTS=1 node --test`, then run `node --test` again and commit `dor/test/snapshots/`.
 
@@ -85,7 +88,7 @@ Tests that pin the stack's non-obvious rules, by concern:
 | Composition, switching, close race | `lib/src/components/WorkspaceWindow.test.tsx`, `Wall.test.tsx` |
 | Strip | `lib/src/components/WorkspaceStrip.test.tsx`, `workspace-strip-drag.test.ts` |
 | Quit / close arbitration and shared confirmation | `standalone/src/quit.test.ts`, `teardown-arbiter.test.ts`, `window-close.test.ts`, `WorkspaceTeardownModal.test.ts`, `lib/src/components/WorkspaceStrip.test.tsx`; Rust `quit_state` |
-| Routing table, arrivals, marking, held events | Rust `routing::tests` |
+| Routing table, arrivals, marking, replay suppression | Rust `routing::tests` |
 | Transfer, content, tear-out boot | `standalone/src/workspace-move.test.ts` |
 | Cross-window drag and iframe gate | `standalone/src/workspace-drag.test.ts` |
 | Registry, stable refs | Rust `workspaces::tests`, `standalone/src/workspace-registry.test.ts`, `lib/src/lib/workspace-store.test.ts` |
@@ -149,14 +152,14 @@ Each row names the code and the spec section that must change with it. Spec lint
 | Shared Workspace kill confirmation and iframe move gate | `lib/src/components/WorkspaceKillConfirm.tsx` ("Confirm kill workspace"), `lib/src/components/WorkspaceStrip.tsx` (`confirmation`), `standalone/src/WorkspaceTeardownModal.tsx` (window close / app quit), `lib/src/lib/workspace-ui-store.ts` | `layout.md` → Workspaces; `standalone.md` → Quit protocol |
 | Command-mode Workspace keys (`1`–`9`, `Enter`, `,`, `x`/`k` on a tab) | `lib/src/components/wall/keyboard/handle-workspace-shortcuts.ts` | `layout.md` → Keyboard shortcuts (command mode), `shortcuts.md` |
 | Composition, active/hidden Wall, input gating | `lib/src/components/WorkspaceWindow.tsx`, `Wall.tsx` (`WorkspaceActiveContext`) | `layout.md` → Workspaces |
-| Hidden-Workspace terminal minimize | `lib/src/components/TerminalPane.tsx` mount effect (gated on `workspaceActive`), `lib/src/lib/terminal-lifecycle.ts` (`mountElement`/`unmountElement`), `terminal-webgl.ts` | `layout.md` → Workspaces, Renderer; `layout.rationale.md` → Workspaces |
-| Workspace store, ids, refs | `lib/src/lib/workspace-store.ts` (`installWorkspaceIdPool`, `workspaceRefFor`, `resolveWorkspaceRef`) | `dor-cli.md` → Handle Model; `standalone.md` → Workspace registry |
-| Registry (Rust) | `standalone/src-tauri/src/workspaces.rs`; commands `workspace_reserve_ids` / `workspace_report` / `workspace_registry` in `lib.rs`; `standalone/src/workspace-registry.ts` (`useWorkspaceRegistry` for UI that needs other windows' Workspaces) | `standalone.md` → Workspace registry |
+| Hidden-Workspace terminal minimize | `lib/src/components/TerminalPane.tsx` mount effect (gated on `workspaceVisible`, which falls back to `workspaceActive`), `lib/src/lib/terminal-lifecycle.ts` (`mountElement`/`unmountElement`), `terminal-webgl.ts` | `layout.md` → Workspaces, Renderer; `layout.rationale.md` → Workspaces |
+| Workspace store and ids | `lib/src/lib/workspace-store.ts` (`installWorkspaceIdPool`, `resolveWorkspaceRef`) | `dor-cli.md` → Handle Model; `standalone.md` → Workspace registry |
+| Registry (Rust) | `standalone/src-tauri/src/workspaces.rs`; commands `boot_reserve_ids` / `workspace_reserve_ids` / `workspace_report` / `workspace_registry` in `lib.rs`; `standalone/src/workspace-registry.ts` (`useWorkspaceRegistry` for UI that needs other windows' Workspaces) | `standalone.md` → Workspace registry |
 | Sidecar event routing | `standalone/src-tauri/src/routing.rs` (`route`, pure) and `dispatch_sidecar_event` in `lib.rs` | `standalone.md` → Routing (the table) |
 | Transfer protocol | Source and target halves in `standalone/src/workspace-move.ts`; lib half in `lib/src/components/wall/workspace-transfer.ts` (`prepareWorkspaceTransfer`, `captureTransferContent`); Rust `begin_arrival` / `transfer_workspace_content` / `adopt_ready` / `adopt_done` / `hand_back_arrival` in `lib.rs`, `Arrival` in `routing.rs` | `standalone.md` → Transfer, Tear-out, Arrival queue; `transport.md` → Transferring a Workspace |
 | Marks and since-mark replay | `mark` / `list` in `standalone/sidecar/pty-core.js`; `pty:marked` routing and bookkeeping in `routing.rs` / `lib.rs`; `serializeTerminal` / `flushTerminal` in `terminal-lifecycle.ts` | `transport.md` → Transferring a Workspace; `standalone.rationale.md` → Arrival queue |
 | Crash durability of a transfer | `record_arrival_on_disk` / `forget_arrival_on_disk` / `restore_arrivals` in `standalone/src-tauri/src/lib.rs` (`sessions/arrivals.json`, merged at boot) | `standalone.md` → Arrival queue |
-| Arrival deadline, held events, hand-back replay | `ARRIVAL_MAX`, `expire_arrival`, `hold_event` / `lift_suppression`, `hand_back_ids` in `standalone/src-tauri/src/routing.rs`; `spawn_arrival_watchdog`, `hand_back_arrival` in `standalone/src-tauri/src/lib.rs`; `acceptHandBackReplay` in `standalone/src/workspace-move.ts` | `standalone.md` → Arrival queue, Routing |
+| Arrival deadline, replay suppression, hand-back replay | `ARRIVAL_MAX`, `expire_arrival`, `sweep_awaiting`, `hand_back_ids` in `standalone/src-tauri/src/routing.rs`; `begin_transfer` / `clear_suppression`, `spawn_arrival_watchdog`, `hand_back_arrival` in `standalone/src-tauri/src/lib.rs`; `acceptHandBackReplay` in `standalone/src/workspace-move.ts` | `standalone.md` → Arrival queue, Routing |
 | Cross-window drag | `standalone/src/workspace-drag.ts` (release gate in `onDropOnOtherWindow`), `window_at_cursor` in Rust | `standalone.md` → Dragging a Workspace between windows |
 | Quit and per-window close | `standalone/src/quit.ts`, `teardown-flow.ts`, `window-close.ts`; Rust `quit_state.rs`, `macos_terminate.rs` | `standalone.md` → Quit flow, Per-window close |
 | Persistence and restore | `lib/src/lib/window-session-aggregator.ts`, `standalone/src/window-restore.ts`, Rust `save_session` etc. | `standalone.md` → Persistence; `transport.md` |
@@ -166,7 +169,7 @@ Each row names the code and the spec section that must change with it. Spec lint
 
 ## 7. Rules that bite
 
-- **Every Tauri `listen` must be `listenToWindow`** (`standalone/src/window-label.ts`). A bare `listen` receives every window's traffic; `scripts/window-listeners.test.mjs` fails the build otherwise. Broadcasts (`app.emit`) still reach scoped listeners.
+- **Every Tauri `listen` must be `listenToWindow`** (`standalone/src/window-label.ts`). A bare `listen` receives every window's traffic; `standalone/scripts/window-listeners.test.mjs` fails the build otherwise. Broadcasts (`app.emit`) still reach scoped listeners.
 - Workspace id allocation and reservation-failure fallback follow `docs/specs/standalone.md` → Workspace registry; use `createWorkspace()`.
 - Session release boundaries follow `docs/specs/transport.md` → Transferring a Workspace and the `releaseSession` comment in `lib/src/lib/terminal-lifecycle.ts`.
 - **`take_arrivals` does not consume**, and an arrival without content is not drainable. If you change the transfer sequence, keep: source invokes → Rust marks → source serializes → `transfer_workspace_content` → target nudged/built.
