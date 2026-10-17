@@ -88,7 +88,8 @@ test('builtin:code is an alternative only where it differs from builtin:file', (
   assert.deepEqual(['a.md', 'a.html', 'a.svg', 'a.ts', 'a.png', 'a.pdf'].map(code.offered), [true, true, true, false, false, false]);
   assert.equal(code.format('a.png'), null);
   assert.deepEqual(['a.md', 'a.ts', 'a.html', 'a.png', 'a.mp4'].map(builtinHandler('tool', 'builtin:file').describe),
-    ['Markdown editor', 'code editor', 'HTML preview', 'image viewer', 'media player']);
+    ['Markdown editor', 'code editor', 'HTML preview', 'image viewer and editor', 'media player']);
+  assert.equal(builtinHandler('tool', 'builtin:file').describe('a.gif'), 'image viewer');
 });
 
 test('known formats override source-name heuristics, PDFs never preview, and prototype keys are not formats', () => {
@@ -253,4 +254,105 @@ test('editor saves atomically while its retained raw grant still reads the origi
   const raw = await get(viewer, viewer.path.replace(/view$/, 'file/save.ts'));
   assert.equal(raw.status, 200);
   assert.equal(raw.body, 'original');
+});
+
+const PNG = Buffer.from('89504e470d0a1a0a0000000d4948445200000001000000010802000000907753de', 'hex');
+const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10]);
+async function postBytes(viewer, route, bytes, type, origin = `http://127.0.0.1:${viewer.port}`) {
+  return new Promise((resolve, reject) => {
+    const req = request({ host: '127.0.0.1', port: viewer.port, path: viewer.path.replace(/view$/, route), method: 'POST',
+      headers: { 'Content-Type': type, ...(origin ? { Origin: origin } : {}) } }, res => {
+      const chunks = []; res.on('data', chunk => chunks.push(chunk));
+      res.on('end', () => resolve({ status: res.statusCode, body: Buffer.concat(chunks).toString() }));
+    });
+    req.on('error', reject); req.end(bytes);
+  });
+}
+
+test('a PNG or JPEG opens in the image editor, which saves its bytes over the file at their revision', async () => {
+  const states = [];
+  await writeFile(join(root, 'shot.png'), PNG);
+  const viewer = await startFileViewer(join(root, 'shot.png'), { onDirty: dirty => states.push(dirty) });
+  viewers.push(viewer);
+  // An editor reports its own state, so the entry does not report it clean.
+  assert.equal(viewer.editable, true);
+  const page = await get(viewer);
+  assert.equal(page.headers['content-type'], 'text/html; charset=utf-8');
+  assert.match(page.body, /<div id="root">.*assets\/image\.js/s);
+  assert.match(page.body, /assets\/image\.css/);
+  assert.match(page.headers['content-security-policy'], /frame-src 'none'/);
+  const source = await new Promise((resolve, reject) => request({ host: '127.0.0.1', port: viewer.port, path: viewer.path.replace(/view$/, 'source') }, res => {
+    const chunks = []; res.on('data', chunk => chunks.push(chunk));
+    res.on('end', () => resolve({ headers: res.headers, body: Buffer.concat(chunks) }));
+  }).on('error', reject).end());
+  assert.equal(source.headers['content-type'], 'image/png');
+  assert.ok(source.body.equals(PNG));
+  const version = source.headers['x-dor-version'];
+  const edited = Buffer.concat([PNG, Buffer.from('edited')]);
+  for (const origin of ['', 'null', 'https://elsewhere.test']) assert.equal((await postBytes(viewer, `save?version=${version}`, edited, 'image/png', origin)).status, 403);
+  assert.equal((await postBytes(viewer, 'save', edited, 'image/png')).status, 400);
+  assert.equal((await postBytes(viewer, `save?version=${version}`, JPEG, 'image/png')).status, 415);
+  assert.equal((await postBytes(viewer, `save?version=${version}`, edited, 'image/jpeg')).status, 415);
+  const saved = await postBytes(viewer, `save?version=${version}`, edited, 'image/png');
+  assert.equal(saved.status, 200, saved.body);
+  assert.ok((await readFile(join(root, 'shot.png'))).equals(edited));
+  assert.equal((await get(viewer, viewer.path.replace(/view$/, 'source'))).headers['x-dor-version'], JSON.parse(saved.body).version);
+  assert.equal((await postBytes(viewer, `save?version=${version}`, edited, 'image/png')).status, 409);
+  assert.equal((await post(viewer, 'state', { dirty: true })).status, 200);
+  assert.deepEqual(states, [true]);
+  // The raw resource keeps its grant on the bytes it opened.
+  const raw = await get(viewer, viewer.path.replace(/view$/, 'file/shot.png'));
+  assert.equal(raw.headers['content-type'], 'image/png');
+  assert.equal(raw.body, PNG.toString());
+  const photo = await start('photo.jpg', JPEG);
+  assert.equal(photo.editable, true);
+  assert.equal((await postBytes(photo, `save?version=${(await get(photo, photo.path.replace(/view$/, 'source'))).headers['x-dor-version']}`, PNG, 'image/jpeg')).status, 415);
+});
+
+test('other image formats stay view-only', async () => {
+  for (const name of ['anim.gif', 'photo.webp', 'pic.avif', 'favicon.ico', 'icon.svg']) {
+    const viewer = await start(name, 'image');
+    assert.equal(viewer.editable, false, name);
+    assert.match(viewer.path, /\/file\/[^/]+$/);
+    assert.equal((await get(viewer)).body, 'image');
+    const post = await postBytes({ ...viewer, path: viewer.path.replace(/file\/[^/]+$/, 'view') }, 'save?version=x', PNG, 'image/png');
+    assert.equal(post.status, 403, name);
+  }
+});
+
+test('a PNG or JPEG past the image bound opens view-only, streamed whole, and one at the bound in the editor', async () => {
+  const BOUND = 32 * 1024 * 1024;
+  const atBound = await start('at-bound.png', Buffer.concat([PNG, Buffer.alloc(BOUND - PNG.length)]));
+  assert.equal(atBound.editable, true);
+  assert.match(atBound.path, /\/view$/);
+  assert.equal((await get(atBound, atBound.path.replace(/view$/, 'source'))).status, 200);
+  for (const [name, signature] of [['big.png', PNG], ['big.jpg', JPEG]]) {
+    const viewer = await start(name, Buffer.concat([signature, Buffer.alloc(BOUND + 1 - signature.length)]));
+    // Not editable is what the `dor __view-file` entry reports clean as it starts.
+    assert.equal(viewer.editable, false, name);
+    assert.match(viewer.path, new RegExp(`/file/${name.replace('.', '\\.')}$`));
+    const head = await get(viewer, viewer.path, {}, 'HEAD');
+    assert.equal(head.status, 200, name);
+    assert.equal(head.headers['content-length'], String(BOUND + 1));
+    const view = { ...viewer, path: viewer.path.replace(/file\/[^/]+$/, 'view') };
+    assert.equal((await get(view)).status, 404, name);
+    assert.equal((await postBytes(view, 'save?version=x', PNG, 'image/png')).status, 403, name);
+  }
+});
+
+test('a PNG or JPEG whose header declares more pixels than the editor takes opens view-only, streamed', async () => {
+  const png = Buffer.from(PNG);
+  png.writeUInt32BE(9000, 16);
+  png.writeUInt32BE(9000, 20);
+  // A JPEG's frame header may sit behind other segments.
+  const app1 = Buffer.alloc(4 + 60000);
+  app1.set([0xff, 0xe1, 60002 >> 8, 60002 & 255]);
+  const sof = Buffer.from([0xff, 0xc0, 0, 11, 8, 9000 >> 8, 9000 & 255, 9000 >> 8, 9000 & 255, 1, 1, 0x11, 0]);
+  const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8]), app1, sof, Buffer.from([0xff, 0xd9])]);
+  for (const [name, bytes] of [['wide.png', png], ['wide.jpg', jpeg]]) {
+    const viewer = await start(name, bytes);
+    assert.equal(viewer.editable, false, name);
+    assert.match(viewer.path, new RegExp(`/file/${name.replace('.', '\\.')}$`));
+    assert.equal((await get(viewer, viewer.path, {}, 'HEAD')).headers['content-length'], String(bytes.length), name);
+  }
 });

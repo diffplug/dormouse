@@ -26,7 +26,7 @@ Device routes (`website/src/routes.ts`):
 - **Must credit a keyboard split from its `split` event alone, whatever the mode**, and tell the user to re-enter command mode for the following navigation item.
 - **Must credit `kb-arrows` only on command-mode selection of a distinct pane**; an arrow or click counts, a swap's resulting focus does not.
 - **Must credit an alert ring only on a transition into `ALERT_RINGING`, by the source its detail names**, so a ring already standing when first seen credits nothing.
-- **Must credit the `dor open` section from the command lines the shells report**, never from a hook in the playground `dor` or its viewers.
+- **Must credit the `dor open` section from the command lines the shells report, and `op-paste` from the playground filesystem's paste report**, never from a hook in the playground `dor` or lib.
 
 Source of truth: `TutRunner` in `website/src/lib/tut-runner.ts`; `TutDetector` in `website/src/lib/tut-detector.ts`; `TutorialState` in `website/src/lib/tutorial-state.ts`; profiles in `website/src/lib/tut-items.ts`.
 
@@ -75,16 +75,17 @@ Pocket reuses `cp-select` / `cp-raw` / `cp-rewrap` but drops `cp-override`: Sele
 
 ## Playground filesystem
 
-The desktop shells share one read-only filesystem: the tracked files of `dor-tools-lib/`, inlined at build time and mounted at `/home/demo/dor-tools-lib`, every shell's starting directory. Beside it sits the playground's own user config at `~/.config/dormouse/dormouse.yml`, **inert**: shown, never read for rules. `website/src/lib/playground-fs/playground-fs.test.ts` pins the snapshot to `git ls-files dor-tools-lib` and the config to a warning-free user Tool file.
+The desktop shells share one filesystem, a snapshot of the tracked files of `dor-tools-lib/`, inlined at build time and mounted at `/home/demo/dor-tools-lib`, every shell's starting directory. Beside it sits the playground's own user config at `~/.config/dormouse/dormouse.yml`, **inert**: shown, never read for rules. `website/src/lib/playground-fs/playground-fs.test.ts` pins the snapshot to `git ls-files dor-tools-lib` and the config to a warning-free user Tool file.
 
-- **Must report the shell's directory with every prompt (`OSC 633 ; P ; Cwd=`)**: take-over and launch matching compare it (`docs/specs/dor-tool.md` → Take-over). `cd`, `ls`, and `pwd` are the filesystem builtins; nothing writes.
+- **Must report the shell's directory with every prompt (`OSC 633 ; P ; Cwd=`)**: take-over and launch matching compare it (`docs/specs/dor-tool.md` → Take-over). `cd`, `ls`, and `pwd` are the filesystem builtins; only the viewers write.
+- **Must never write the snapshot; keep each window's writes, text or bytes, in an in-memory copy-on-write overlay every reader sees, persisting none** (rationale). A whiteout hides a renamed stock file.
 - **Must print each spawned non-helper terminal's first prompt from `PlaygroundShellRegistry`**; no scenario plays on the desktop, and a split Tool waits on that prompt's integration (rationale).
 - **Must name `/bin/fake` as the default shell**, so a Windows visitor's Tool commands quote as posix rather than being refused as `cmd` (rationale).
 - **The playground `dor` must run the real CLI (`runCli` in `dor/src/cli-core.ts`) over a playground `CliHost` and a `ControlClient` that sends each request to the Wall; what needs Node must fail `UNSUPPORTED IN PLAYGROUND`.** It serves the `__view-*` entries itself. `FakePtyAdapter.toolControl` answers `open` and `open-handlers` from the snapshot as a host with no user `dormouse.yml` does.
 - **A `__view-*` entry must report its port before announcing it, and withdraw it on exit.**
-- **Must serve the real viewer pages and CSPs on the Node viewers' routes, answered from the snapshot**; `save`, and a Markdown viewer's `image` and `rename`, answer `403`. The editors are unchanged, so edits stay in the page.
-- **`createIframeProxyUrl` must map only a `localhost` URL under `/playground-fs/` to the page's own origin**, refusing others (`scheme`). The viewer pages carry the shim from `instrumentHtml`, so theme and the save channel connect as behind a proxy, and are same-origin with the Wall: first-party pages over a fixed snapshot.
-- **The `/playground-fs/` service worker must stay stateless**, relaying each viewer request as below (rationale). It registers when the first viewer starts; without one, `__view-*` exits `1`.
+- **Must serve the real viewer pages, CSPs, and contracts on the Node viewers' routes** (`docs/specs/dor-tools-builtin.md`); PNG and JPEG open in the image editor, and other non-text formats are refused.
+- **`createIframeProxyUrl` must map only a `localhost` URL under `/playground-fs/` to the page's own origin**, refusing others (`scheme`). The viewer pages carry the shim from `instrumentHtml`, so theme and the save channel connect as behind a proxy, and are same-origin with the Wall: first-party pages over the window's own files.
+- **The `/playground-fs/` service worker must stay stateless**, relaying each viewer request as below, bodies as Blobs (rationale). It registers when the first viewer starts; without one, `__view-*` exits `1`.
 
 ```mermaid
 sequenceDiagram
@@ -96,12 +97,12 @@ sequenceDiagram
     SW-->>F: the static /builtin-viewer/ build
   else any other route
     SW->>P: playground-fs-request, to every window
-    P-->>SW: the window holding the token answers from the snapshot
+    P-->>SW: the window holding the token answers from its filesystem
     SW-->>F: that answer, or 404 when none answers in time
   end
 ```
 
-Source of truth: `installPlaygroundFs` in `website/src/lib/playground-fs/index.ts`; `TutorialShell` in `website/src/lib/tutorial-shell.ts`; `website/public/playground-fs/sw.js`; `website/scripts/build-builtin-viewer.js`.
+Source of truth: `installPlaygroundFs` in `website/src/lib/playground-fs/index.ts`; `editorRoutes` in `dor-tools-builtin/src/editor-routes.ts`; `TutorialShell` in `website/src/lib/tutorial-shell.ts`; `website/public/playground-fs/sw.js`; `website/scripts/build-builtin-viewer.js`.
 
 ## Storage
 

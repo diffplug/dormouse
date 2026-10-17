@@ -368,7 +368,7 @@ export interface PlatformAdapter {
   // decision a human made in Dormouse's own chrome. Both need a filesystem, so
   // this is absent on hosts with none (the web demo), where `dor tool <name>`
   // reports that the host cannot read a tool file; the desktop playground
-  // answers `open` from its read-only snapshot. `dor tool -- <command>`
+  // answers `open` from its in-memory filesystem. `dor tool -- <command>`
   // needs none of it and works everywhere.
   toolControl?(request: ToolHostRequest): Promise<ToolControlResult>;
   /** This host stops idle Tools and restarts them with `SpawnPtyOptions.dehydrate`

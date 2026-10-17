@@ -18,6 +18,8 @@
 
 **Why `/bin/fake` is the default shell.** With no shell named, `shellCommandKind` reads a Windows platform string as `cmd`, which refuses every split Tool and quotes for `cmd` (measured 2026-10).
 
+**Why the overlay lives in memory only.** Ned chose a writable playground (2026-10-03) so pasting a screenshot and saving work as on a real machine, and the `op-paste` step can show the image editor. Keeping writes out of storage means no second storage contract beside [Storage](tutorial.md#storage), no quota, and no reconciling a stale overlay with a newer snapshot after a release; a refresh is the reset.
+
 **Why a service worker.** A built-in viewer is a server its page reaches by relative `fetch`; a browser page has no loopback listener, and a `srcdoc` or `blob:` frame breaks the pages' relative URLs and the Monaco worker, which would mean patching the editors. Scoping a worker to `/playground-fs/` serves the unchanged pages at real http(s) URLs. It keeps no token map because an idle worker is stopped and restarted at will; asking the windows costs one `MessageChannel` round trip per request.
 
 ## Fake shell behavior

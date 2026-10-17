@@ -240,6 +240,10 @@ const OUTBOUND_SITES = {
     class: 'loopback',
     reason: 'The Markdown editor posts a pasted image to the relative `image` route on its own loopback viewer.',
   },
+  'dor-tools-builtin/viewer/image/io.ts': {
+    class: 'loopback',
+    reason: 'The image editor loads and saves its image through relative routes on the loopback viewer that served it.',
+  },
   // --- local-ipc ---
   'dor/src/control-client.ts': {
     class: 'local-ipc',

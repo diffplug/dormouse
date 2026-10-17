@@ -22,11 +22,14 @@ self.addEventListener('fetch', (event) => {
 async function relay(request, token, rawRoute, search) {
   let route;
   try { route = decodeURIComponent(rawRoute); } catch { return new Response('', { status: 400 }); }
+  // A body (an image paste or save) crosses as a Blob, which every window
+  // receives by reference; only the one that answers reads its bytes.
   const [body, windows] = await Promise.all([
-    request.method === 'POST' ? request.text() : '',
+    request.method === 'POST' ? request.blob() : new Blob(),
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }),
   ]);
-  const message = { type: 'playground-fs-request', token, method: request.method, route, search, body };
+  const contentType = request.headers.get('Content-Type') ?? '';
+  const message = { type: 'playground-fs-request', token, method: request.method, route, search, contentType, body };
   const channels = [];
   const asks = windows.filter((client) => client.frameType === 'top-level').map((client) => new Promise((resolve, reject) => {
     const channel = new MessageChannel();
