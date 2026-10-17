@@ -1,0 +1,66 @@
+{
+  "asOf": "2026-10-17",
+  "windowDays": 90,
+  "runsUrl": "https://github.com/diffplug/dormouse/actions/workflows/security-audit.yaml?query=branch%3Amain",
+  "seeded": 60,
+  "caught": 45,
+  "runs": [
+    {
+      "date": "2026-10-17",
+      "url": "https://github.com/diffplug/dormouse/actions/runs/38998152990",
+      "seeded": 8,
+      "caught": 8,
+      "unfinished": 0
+    },
+    {
+      "date": "2026-10-17",
+      "url": "https://github.com/diffplug/dormouse/actions/runs/38985761859",
+      "seeded": 8,
+      "caught": 7,
+      "unfinished": 0
+    },
+    {
+      "date": "2026-10-16",
+      "url": "https://github.com/diffplug/dormouse/actions/runs/38982560206",
+      "seeded": 8,
+      "caught": 7,
+      "unfinished": 0
+    },
+    {
+      "date": "2026-10-16",
+      "url": "https://github.com/diffplug/dormouse/actions/runs/38979349532",
+      "seeded": 8,
+      "caught": 5,
+      "unfinished": 0
+    },
+    {
+      "date": "2026-10-16",
+      "url": "https://github.com/diffplug/dormouse/actions/runs/38964536590",
+      "seeded": 8,
+      "caught": 5,
+      "unfinished": 0
+    },
+    {
+      "date": "2026-10-16",
+      "url": "https://github.com/diffplug/dormouse/actions/runs/38958719196",
+      "seeded": 8,
+      "caught": 6,
+      "unfinished": 0
+    },
+    {
+      "date": "2026-10-11",
+      "url": "https://github.com/diffplug/dormouse/actions/runs/38154893086",
+      "seeded": 6,
+      "caught": 3,
+      "unfinished": 0
+    },
+    {
+      "date": "2026-10-08",
+      "url": "https://github.com/diffplug/dormouse/actions/runs/37720586893",
+      "seeded": 6,
+      "caught": 4,
+      "unfinished": 0
+    }
+  ],
+  "unrecorded": []
+}
