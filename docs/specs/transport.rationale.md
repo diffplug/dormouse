@@ -54,7 +54,7 @@ The retry is the same argument applied to the plain boot: the arrival path refus
 
 ## Replay-time mode-reset tail (Dormouse-emitted)
 
-**Why a reset tail at all.** Saved scrollback can end mid-TUI with private modes still latched — mouse tracking, the alt-screen, a hidden cursor, application cursor keys. Replaying it verbatim re-applies those DECSETs with no process alive to ever DECRST them, leaving a restored pane unable to select text, showing an alt-screen frame nothing will ever repaint, or with no visible cursor at its new shell's prompt.
+**Why a reset tail at all.** Saved scrollback can end mid-TUI with private modes still latched — mouse tracking, the alt-screen, a hidden cursor, application cursor keys. Replaying it verbatim re-applies those DECSETs with no process alive to ever DECRST them, leaving a restored pane unable to select text, showing an alt-screen frame nothing will ever repaint, or with no visible cursor at its new shell's prompt. A live exit used to skip the tail, so a crashed TUI's pane kept its frozen frame and its mouse tracking until a reload replayed it dead and reset it: the same Session looked different before and after the reload (decided 2026-10-16). The cost is the crashed program's last alt-screen frame, which the next reload discarded anyway.
 
 ## Transferring a Workspace
 
