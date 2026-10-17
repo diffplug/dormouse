@@ -11,7 +11,6 @@ import {
   ENROLL_PAGE_PATH,
   MALFORMED_ASSERTION_ERROR,
   MALFORMED_BINDING_ERROR,
-  MAX_ENROLLED_BURROWS,
   MAX_PENDING_REAUTH_NONCES_PER_SESSION,
   MAX_PUSH_SEND_BODY_BYTES,
   MAX_REQUEST_BODY_BYTES,
@@ -74,6 +73,12 @@ import {
   type OwnerRow,
 } from "./relay-auth";
 
+/**
+ * Computers one account may enroll: an abuse ceiling, not a plan limit — a
+ * member has no device limit (docs/specs/pricing.md -> "Checkout and
+ * entitlement"). The self-host Relay keeps `MAX_ENROLLED_BURROWS`.
+ */
+export const MAX_BURROWS_PER_ACCOUNT = 1000;
 /** Passkeys one account may hold; a full account is refused, never evicted (rationale). */
 export const MAX_PASSKEYS_PER_ACCOUNT = 32;
 /** Live sign-in sessions one account may hold, its own oldest evicted (rationale). */
@@ -537,7 +542,7 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
           [owner.userId],
         );
         // A full account keeps the approval, so a poll after a removal enrolls.
-        if (enrolled >= MAX_ENROLLED_BURROWS) return "full";
+        if (enrolled >= MAX_BURROWS_PER_ACCOUNT) return "full";
         // Single-use: the approval is marked redeemed in the statement that
         // enrolls its Burrow, owned by exactly its approver, and mints its
         // voice token, so two polls cannot mint two; the marked row stays
@@ -574,7 +579,7 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
         const where = c.env.ACCOUNT_ORIGIN;
         return c.json(
           {
-            error: `this account already has ${MAX_ENROLLED_BURROWS} computers enrolled; remove one ${
+            error: `this account already has ${MAX_BURROWS_PER_ACCOUNT} computers enrolled; remove one ${
               where ? `at ${where}/account` : "from your account"
             } first`,
           },

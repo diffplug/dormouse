@@ -534,8 +534,8 @@ export default function Hosted() {
           Dormouse Pocket puts your terminals on your phone. It needs a Relay to connect
           the two, and Hosted runs it for you: enrollment of your own computers, sealed
           push notifications, and Pocket without a tailnet. Your terminals still run on
-          your own awake, online computer. An account can enroll up to 32 copies of
-          Dormouse, with no per-device charge; standalone and VS Code count separately.
+          your own awake, online computer. Enroll every computer you use: there is no
+          device limit and no per-device charge.
         </p>
         <p className={`leading-relaxed ${MUTED_TEXT_CLASS}`}>
           Terminal traffic is end-to-end encrypted between your computer and your phone,

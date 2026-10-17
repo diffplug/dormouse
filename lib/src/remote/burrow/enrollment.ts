@@ -397,7 +397,7 @@ export async function pollHostedEnrollment(
     if (response.status === 403 && refusedError(detail) === NOT_ENTITLED_ERROR) {
       return { status: 'refused', reason: 'not-entitled' };
     }
-    // The poll's only 409: the account holds `MAX_ENROLLED_BURROWS` already.
+    // The poll's only 409: the account is at Hosted's abuse ceiling of computers.
     if (response.status === 409) return { status: 'refused', reason: 'account-full' };
     return { status: 'failed', message: refusalMessage(response.status, detail, relayOrigin) };
   }

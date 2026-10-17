@@ -6,7 +6,6 @@ import { createTestContext } from "pgstencil/testing";
 import { queryDatabase, withClient } from "pgstencil/postgres";
 import {
   API_ROUTES,
-  MAX_ENROLLED_BURROWS,
   MAX_PENDING_REAUTH_NONCES_PER_SESSION,
   MAX_PUSH_QUERY_DELIVERY_IDS,
   MAX_PUSH_SUBSCRIPTIONS_PER_ACCOUNT,
@@ -40,6 +39,7 @@ import { migrations } from "../migrations";
 import { ENROLLMENT_TTL_MS } from "../policy-constants";
 import {
   ENROLLMENT_POLL_INTERVAL_S,
+  MAX_BURROWS_PER_ACCOUNT,
   MAX_PASSKEYS_PER_ACCOUNT,
   MAX_SESSIONS_PER_ACCOUNT,
   MAX_SETUP_CHALLENGES_PER_BURROW,
@@ -1039,16 +1039,19 @@ test("an enrollment expires, is refused past its approver's entitlement, and wai
   await f.sql(`UPDATE "user" SET "emailVerified" = true WHERE id = $1`, [owner]);
 
   // A full account names the page that removes one, and keeps the approval.
-  const enrolled = [];
-  for (let i = 0; i < MAX_ENROLLED_BURROWS; i++) enrolled.push(await f.burrow(owner));
+  await f.sql(
+    `INSERT INTO dormouse_relay_burrows ("burrowId", "userId", "tokenHash")
+    SELECT 'full' || lpad(n::text, 18, '0'), $1, 'hash-' || n FROM generate_series(1, $2::int) n`,
+    [owner, MAX_BURROWS_PER_ACCOUNT],
+  );
   expect(await f.poll(begun.deviceCode)).toMatchObject({
     status: 409,
     json: {
-      error: `this account already has ${MAX_ENROLLED_BURROWS} computers enrolled; remove one at ${ORIGINS.account}/account first`,
+      error: `this account already has ${MAX_BURROWS_PER_ACCOUNT} computers enrolled; remove one at ${ORIGINS.account}/account first`,
     },
   });
   // A removed Burrow makes room.
-  await f.sql(`DELETE FROM dormouse_relay_burrows WHERE "burrowId" = $1`, [enrolled[0].burrowId]);
+  await f.sql(`DELETE FROM dormouse_relay_burrows WHERE "burrowId" = 'full' || lpad('1', 18, '0')`, []);
   expect((await f.poll(begun.deviceCode)).json).toMatchObject({ status: "enrolled" });
   // Full again, a poll whose answer was lost still learns it was redeemed,
   // and so does one past its approver's entitlement.
