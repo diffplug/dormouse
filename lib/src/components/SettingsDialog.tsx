@@ -227,9 +227,12 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     setTopic(current.dataset.settingsTopic as TopicId);
   }, []);
 
+  // `data-topic-scrolling` marks the scroller while a topic animation owns it,
+  // so a story can wait for its final frame rather than guess at it.
   const cancelScroll = useCallback(() => {
     if (scrollFrame.current !== null) cancelAnimationFrame(scrollFrame.current);
     scrollFrame.current = null;
+    delete contentRef.current?.dataset.topicScrolling;
   }, []);
 
   const scrollToTopic = useCallback((id: TopicId | null) => {
@@ -249,8 +252,10 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
       const progress = Math.min((now - started) / SETTINGS_SCROLL_MS, 1);
       const eased = (1 - Math.cos(Math.PI * progress)) / 2;
       content.scrollTo({ top: from + (to - from) * eased, behavior: 'instant' });
-      scrollFrame.current = progress < 1 ? requestAnimationFrame(step) : null;
+      if (progress < 1) scrollFrame.current = requestAnimationFrame(step);
+      else cancelScroll();
     };
+    content.dataset.topicScrolling = '';
     scrollFrame.current = requestAnimationFrame(step);
   }, [cancelScroll]);
 
