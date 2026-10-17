@@ -227,6 +227,16 @@ const FOREIGN_TERMINAL_IDENTITY = {
   STY: '4242.pts-0.host',
   COLORFGBG: '15;0',
   CURSOR_TRACE_ID: 'abc123',
+  // A Claude Code session the host was launched from (Claude Code 2.1.302).
+  CLAUDECODE: '1',
+  CLAUDE_PID: '4242',
+  CLAUDE_CODE_ENTRYPOINT: 'cli',
+  CLAUDE_CODE_EXECPATH: '/opt/claude/bin/claude',
+  CLAUDE_CODE_SESSION_ID: '00000000-0000-0000-0000-000000000000',
+  CLAUDE_CODE_CHILD_SESSION: '1',
+  CLAUDE_CODE_SESSION_ATTENDED: '1',
+  CLAUDE_CODE_MESSAGING_SOCKET: '/tmp/claude-messaging.sock',
+  CLAUDE_CODE_MESSAGING_TOKEN: 'secret',
 };
 
 test('resolveSpawnConfig strips another terminal\'s inherited identity', () => {
@@ -241,6 +251,7 @@ test('resolveSpawnConfig strips another terminal\'s inherited identity', () => {
         VSCODE_PID: '4242',
         TERMINAL: 'kitty',
         MY_TMUX_SETTING: 'kept',
+        CLAUDE_CODE_USE_BEDROCK: '1',
       },
       osModule: { homedir: () => '/Users/tester', tmpdir: () => '/tmp' },
     },
@@ -255,6 +266,8 @@ test('resolveSpawnConfig strips another terminal\'s inherited identity', () => {
   assert.equal(config.env.VSCODE_PID, '4242');
   assert.equal(config.env.TERMINAL, 'kitty');
   assert.equal(config.env.MY_TMUX_SETTING, 'kept');
+  // A Claude Code setting, not a session marker.
+  assert.equal(config.env.CLAUDE_CODE_USE_BEDROCK, '1');
   assert.equal(config.env.PATH, '/usr/bin');
 });
 

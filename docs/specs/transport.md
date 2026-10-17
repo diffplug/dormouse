@@ -71,7 +71,7 @@ Source of truth: `pacedInputSegments` and `write` in `standalone/sidecar/pty-cor
 
 **Must advertise the lowest iTerm2 version that unlocks every version-gated behavior Dormouse supports, and never a version adding sequences that programs would then send and Dormouse mishandles** (rationale). **Never advertise** feature-specific support before the behavior exists.
 
-**Must strip another terminal's identity from the inherited environment before setting Dormouse's** — its session, version, and multiplexer variables (rationale).
+**Must strip another terminal's identity from the inherited environment before setting Dormouse's** — its session, version, and multiplexer variables, and a launching Claude Code session's markers (rationale).
 
 Source of truth: `ITERM2_COMPAT_VERSION` in `standalone/sidecar/pty-core.js` and `lib/src/lib/terminal-protocol.ts`, pinned together by `lib/src/lib/mirrored-constants.test.ts`; `FOREIGN_TERMINAL_ENV` in `standalone/sidecar/pty-core.js`.
 
