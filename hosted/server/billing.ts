@@ -107,9 +107,9 @@ export async function foundingSold(billing: Billing<Plan>, setup: BillingSetup) 
 
 /**
  * Runs `action` with a `Billing` over `databaseUrl` for the account origin
- * `origin`, closing its connections after. No trial; Stripe Managed Payments
- * is the merchant of record; founding checkout offers the open cohort's Price
- * and refuses once founding has closed.
+ * `origin`, closing its connections after. No trial; DiffPlug is the merchant
+ * of record on Stripe Billing, never Managed Payments; founding checkout offers
+ * the open cohort's Price and refuses once founding has closed.
  */
 export async function withBilling<T>(
   setup: BillingSetup,
@@ -142,7 +142,7 @@ export async function withBilling<T>(
           },
         },
         trialDays: 0,
-        managedPayments: true,
+        managedPayments: false,
         webhookSecret: setup.webhookSecret,
         live: setup.live,
         origin,

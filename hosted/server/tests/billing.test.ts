@@ -268,9 +268,10 @@ test("checkout to webhook to entitlement: voice and the Relay admit a member, an
   const sent = f.dev.requests.find((r) => r.path === "/v1/checkout/sessions")!.body;
   expect(sent).toMatchObject({
     "line_items[0][price]": "price_dev_monthly",
-    "managed_payments[enabled]": "true",
     success_url: expect.stringMatching(new RegExp(`^${origin}/billing\\?checkout=`)),
   });
+  // DiffPlug is the merchant of record: Stripe Billing, not Managed Payments.
+  expect(sent["managed_payments[enabled]"]).toBeUndefined();
   // No trial: the first payment is taken at checkout.
   expect(sent["subscription_data[trial_period_days]"]).toBeUndefined();
 

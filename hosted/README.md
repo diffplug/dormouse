@@ -206,20 +206,20 @@ Configure the sender and enable each ready provider in `OAUTH_PROVIDERS` in `wra
 
 ### Billing
 
-Billing stays off until all five Stripe bindings are set; `docs/specs/hosted.md` -> "Billing" owns what each route does. Turning it on is paid activation, which `docs/specs/security-remote.md` -> "Cloud-hosted mode" gates on its review. In the Stripe account, with Managed Payments enabled:
+Billing stays off until all five Stripe bindings are set; `docs/specs/hosted.md` -> "Billing" owns what each route does. Turning it on is paid activation, which `docs/specs/security-remote.md` -> "Cloud-hosted mode" gates on its review. DiffPlug is the merchant of record on Stripe Billing, not Managed Payments, so verify tax setup first (`docs/specs/pricing.md` -> "Paid-launch requirements"). In the Stripe account:
 
 1. Create one product, Dormouse Hosted, and its recurring USD Prices: $10 monthly, $100 yearly, and one yearly Price per `FOUNDING_LADDER` step in `website/src/lib/hosted-pricing.ts` ($50, $60, $70, $80, $90). No trial on any of them.
-2. Configure the customer portal for payment-method updates, invoices, and cancellation at period end, restricted to these Prices; leave plan switching off. Set failed-payment retries to cancel the subscription after 30 days, which is the founding lock's grace (`docs/specs/pricing.md` -> "Renewal, cancellation, refund").
+2. Configure the customer portal for payment-method updates, invoices, and cancellation at period end, restricted to these Prices; leave plan switching off. Set failed-payment retries to cancel the subscription after 30 days: the entitlement admits a `past_due` subscription for that long (`PAYMENT_GRACE_DAYS` in `hosted/server/entitlement.ts`).
 3. Add the webhook endpoint `https://hosted.dormouse.sh/api/billing/webhook` at the installed SDK's `STRIPE_API_VERSION`, sending `customer.subscription.*`, `checkout.session.*`, and `invoice.*`.
 4. Put the Price ids in `wrangler.jsonc` `vars`, reviewed in a PR: `STRIPE_PRICE_MONTHLY`, `STRIPE_PRICE_YEARLY`, and `STRIPE_PRICES_FOUNDING` (comma-separated, cohort order). A ladder of any other length leaves billing answering 503.
-5. Load the two secrets on the account Worker, a restricted key if Managed Payments accepts one:
+5. Load the two secrets on the account Worker, a restricted key if Checkout and the portal accept one:
 
 ```sh
 pnpm exec wrangler secret put STRIPE_SECRET_KEY
 pnpm exec wrangler secret put STRIPE_WEBHOOK_SECRET
 ```
 
-Refund from the Stripe dashboard and **cancel the subscription immediately** in the same visit: a refund alone neither ends access nor returns a founding seat. Confirm checkout, the webhook, and the portal once in a Stripe sandbox with test keys before live keys; StripeDev records but does not model Managed Payments. Watch for failed webhook events (`pgstencil_billing.events` rows with `failed`) and failed account cron invocations.
+Refund requests arrive at support@dormouse.sh. Refund from the Stripe dashboard and **cancel the subscription immediately** in the same visit: a refund alone neither ends access nor returns a founding seat. Confirm checkout, the webhook, and the portal once in a Stripe sandbox with test keys before live keys. Watch for failed webhook events (`pgstencil_billing.events` rows with `failed`) and failed account cron invocations.
 
 ## Release
 
