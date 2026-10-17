@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   assertWorkspaceCoverage,
   getDependencyNames,
-  isExternalPlatformBuild,
+  externalPlatformSiblings,
   linkedPeerPackageJsonPath,
   missingDependency,
 } from './dependency-workspaces.js';
@@ -127,12 +127,36 @@ describe('a peer pnpm linked for one instance', () => {
   });
 });
 
-describe('an installed optional dependency', () => {
-  it('is withheld only when an external package declares a platform build', () => {
-    const prebuild = { name: '@typescript/typescript-darwin-arm64', os: ['darwin'], cpu: ['arm64'] };
-    expect(isExternalPlatformBuild({ optional: true, isWorkspace: false }, prebuild)).toBe(true);
-    expect(isExternalPlatformBuild({ optional: true, isWorkspace: true }, prebuild)).toBe(false);
-    expect(isExternalPlatformBuild({ optional: false, isWorkspace: false }, prebuild)).toBe(false);
-    expect(isExternalPlatformBuild({ optional: true, isWorkspace: false }, { name: 'supports-color' })).toBe(false);
+// docs/specs/security-supply-chain.md -> "Disclosure": which build installs
+// depends on the machine, so the family is disclosed whichever one did.
+describe('an installed platform build an external package declares', () => {
+  const typescript = {
+    name: 'typescript',
+    optionalDependencies: {
+      '@typescript/typescript-darwin-arm64': '7.0.2',
+      '@typescript/typescript-linux-x64': '7.0.2',
+      '@typescript/typescript-win32-x64': '7.0.2',
+      '@typescript/typescript-legacy': '6.0.0',
+    },
+  };
+  const edge = { pkg: typescript, optional: true, isWorkspace: false };
+  const build = (name) => ({ name, os: ['any'] });
+  const none = new Set();
+
+  it('brings every sibling at its version, whichever one this machine installed', () => {
+    expect(externalPlatformSiblings(edge, build('@typescript/typescript-darwin-arm64'), none))
+      .toEqual(['@typescript/typescript-linux-x64', '@typescript/typescript-win32-x64']);
+    expect(externalPlatformSiblings(edge, build('@typescript/typescript-linux-x64'), none))
+      .toEqual(['@typescript/typescript-darwin-arm64', '@typescript/typescript-win32-x64']);
+    expect(externalPlatformSiblings(edge, { name: '@typescript/typescript-linux-x64', libc: ['glibc'] }, none))
+      .toEqual(['@typescript/typescript-darwin-arm64', '@typescript/typescript-win32-x64']);
+  });
+
+  it('brings nothing for a portable package, a required or workspace edge, or a family a product root names', () => {
+    const name = '@typescript/typescript-darwin-arm64';
+    expect(externalPlatformSiblings(edge, { name }, none)).toEqual([]);
+    expect(externalPlatformSiblings({ ...edge, optional: false }, build(name), none)).toEqual([]);
+    expect(externalPlatformSiblings({ ...edge, isWorkspace: true }, build(name), none)).toEqual([]);
+    expect(externalPlatformSiblings(edge, build(name), new Set([name]))).toEqual([]);
   });
 });

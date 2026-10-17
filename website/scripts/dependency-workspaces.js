@@ -92,13 +92,32 @@ export function missingDependency({ optional, peer, isWorkspace, isProductRoot }
 }
 
 /**
- * Whether an installed package is a platform build an external package declares
- * optionally, which is never disclosed: which one installs depends on the machine
- * that generates the disclosure (`typescript` pulls in
- * `@typescript/typescript-darwin-arm64` on one, `-linux-x64` on another), and
- * every build this project ships names its platform packages from a product
- * root, as `missingDependency` describes.
+ * The names declared beside `packageName` in the same `optionalDependencies`
+ * block at the same exact version string. A prebuilt family is published in
+ * lockstep from one repository under one pinned version, so any of these
+ * describes an absent one exactly — which is also what keeps this disclosure
+ * identical on every machine that generates it.
  */
-export function isExternalPlatformBuild({ optional, isWorkspace }, manifest) {
-  return optional && !isWorkspace && Boolean(manifest.os || manifest.cpu || manifest.libc);
+export function optionalSiblingsAtSameVersion(pkg, packageName) {
+  const optionalDependencies = pkg.optionalDependencies ?? {};
+  const version = optionalDependencies[packageName];
+  return Object.keys(optionalDependencies).filter(
+    (name) => name !== packageName && optionalDependencies[name] === version,
+  );
+}
+
+/**
+ * The siblings to describe from an installed platform build (a manifest naming
+ * an `os`, `cpu`, or `libc`) that an external package declares optionally. Which
+ * one installs depends on the generating machine — `typescript` brings
+ * `@typescript/typescript-darwin-arm64` on one and `-linux-x64` on another — and
+ * it ships wherever a copied `node_modules` does, so the whole family is
+ * disclosed. A family a product root declares is left to that root, which
+ * names only the builds this project ships.
+ */
+export function externalPlatformSiblings({ pkg, optional, isWorkspace }, manifest, productRootOptionals) {
+  if (!optional || isWorkspace) return [];
+  if (!(manifest.os || manifest.cpu || manifest.libc)) return [];
+  if (productRootOptionals.has(manifest.name)) return [];
+  return optionalSiblingsAtSameVersion(pkg, manifest.name);
 }

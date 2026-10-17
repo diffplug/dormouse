@@ -1930,6 +1930,186 @@
       ]
     },
     {
+      "name": "@typescript/typescript-aix-ppc64",
+      "license": "Apache-2.0",
+      "author": "Microsoft Corp.",
+      "homepage": "https://www.typescriptlang.org/",
+      "versions": [
+        "7.0.2"
+      ]
+    },
+    {
+      "name": "@typescript/typescript-darwin-arm64",
+      "license": "Apache-2.0",
+      "author": "Microsoft Corp.",
+      "homepage": "https://www.typescriptlang.org/",
+      "versions": [
+        "7.0.2"
+      ]
+    },
+    {
+      "name": "@typescript/typescript-darwin-x64",
+      "license": "Apache-2.0",
+      "author": "Microsoft Corp.",
+      "homepage": "https://www.typescriptlang.org/",
+      "versions": [
+        "7.0.2"
+      ]
+    },
+    {
+      "name": "@typescript/typescript-freebsd-arm64",
+      "license": "Apache-2.0",
+      "author": "Microsoft Corp.",
+      "homepage": "https://www.typescriptlang.org/",
+      "versions": [
+        "7.0.2"
+      ]
+    },
+    {
+      "name": "@typescript/typescript-freebsd-x64",
+      "license": "Apache-2.0",
+      "author": "Microsoft Corp.",
+      "homepage": "https://www.typescriptlang.org/",
+      "versions": [
+        "7.0.2"
+      ]
+    },
+    {
+      "name": "@typescript/typescript-linux-arm",
+      "license": "Apache-2.0",
+      "author": "Microsoft Corp.",
+      "homepage": "https://www.typescriptlang.org/",
+      "versions": [
+        "7.0.2"
+      ]
+    },
+    {
+      "name": "@typescript/typescript-linux-arm64",
+      "license": "Apache-2.0",
+      "author": "Microsoft Corp.",
+      "homepage": "https://www.typescriptlang.org/",
+      "versions": [
+        "7.0.2"
+      ]
+    },
+    {
+      "name": "@typescript/typescript-linux-loong64",
+      "license": "Apache-2.0",
+      "author": "Microsoft Corp.",
+      "homepage": "https://www.typescriptlang.org/",
+      "versions": [
+        "7.0.2"
+      ]
+    },
+    {
+      "name": "@typescript/typescript-linux-mips64el",
+      "license": "Apache-2.0",
+      "author": "Microsoft Corp.",
+      "homepage": "https://www.typescriptlang.org/",
+      "versions": [
+        "7.0.2"
+      ]
+    },
+    {
+      "name": "@typescript/typescript-linux-ppc64",
+      "license": "Apache-2.0",
+      "author": "Microsoft Corp.",
+      "homepage": "https://www.typescriptlang.org/",
+      "versions": [
+        "7.0.2"
+      ]
+    },
+    {
+      "name": "@typescript/typescript-linux-riscv64",
+      "license": "Apache-2.0",
+      "author": "Microsoft Corp.",
+      "homepage": "https://www.typescriptlang.org/",
+      "versions": [
+        "7.0.2"
+      ]
+    },
+    {
+      "name": "@typescript/typescript-linux-s390x",
+      "license": "Apache-2.0",
+      "author": "Microsoft Corp.",
+      "homepage": "https://www.typescriptlang.org/",
+      "versions": [
+        "7.0.2"
+      ]
+    },
+    {
+      "name": "@typescript/typescript-linux-x64",
+      "license": "Apache-2.0",
+      "author": "Microsoft Corp.",
+      "homepage": "https://www.typescriptlang.org/",
+      "versions": [
+        "7.0.2"
+      ]
+    },
+    {
+      "name": "@typescript/typescript-netbsd-arm64",
+      "license": "Apache-2.0",
+      "author": "Microsoft Corp.",
+      "homepage": "https://www.typescriptlang.org/",
+      "versions": [
+        "7.0.2"
+      ]
+    },
+    {
+      "name": "@typescript/typescript-netbsd-x64",
+      "license": "Apache-2.0",
+      "author": "Microsoft Corp.",
+      "homepage": "https://www.typescriptlang.org/",
+      "versions": [
+        "7.0.2"
+      ]
+    },
+    {
+      "name": "@typescript/typescript-openbsd-arm64",
+      "license": "Apache-2.0",
+      "author": "Microsoft Corp.",
+      "homepage": "https://www.typescriptlang.org/",
+      "versions": [
+        "7.0.2"
+      ]
+    },
+    {
+      "name": "@typescript/typescript-openbsd-x64",
+      "license": "Apache-2.0",
+      "author": "Microsoft Corp.",
+      "homepage": "https://www.typescriptlang.org/",
+      "versions": [
+        "7.0.2"
+      ]
+    },
+    {
+      "name": "@typescript/typescript-sunos-x64",
+      "license": "Apache-2.0",
+      "author": "Microsoft Corp.",
+      "homepage": "https://www.typescriptlang.org/",
+      "versions": [
+        "7.0.2"
+      ]
+    },
+    {
+      "name": "@typescript/typescript-win32-arm64",
+      "license": "Apache-2.0",
+      "author": "Microsoft Corp.",
+      "homepage": "https://www.typescriptlang.org/",
+      "versions": [
+        "7.0.2"
+      ]
+    },
+    {
+      "name": "@typescript/typescript-win32-x64",
+      "license": "Apache-2.0",
+      "author": "Microsoft Corp.",
+      "homepage": "https://www.typescriptlang.org/",
+      "versions": [
+        "7.0.2"
+      ]
+    },
+    {
       "name": "@upsetjs/venn.js",
       "license": "MIT",
       "author": "Ben Frederickson",
