@@ -1,13 +1,12 @@
 // Rules: docs/specs/hosted.md -> "Burrow enrollment".
 import type { Context, Hono } from "hono";
-import { bodyLimit } from "hono/body-limit";
 import {
   NOT_ENTITLED_ERROR,
   isE2eId,
   normalizeEnrollUserCode,
   readJson,
 } from "remote-lib-common";
-import { accountQuery, cookieEntitled, type AccountHost } from "./account-gate";
+import { accountQuery, cookieEntitled, jsonBodyLimit, type AccountHost } from "./account-gate";
 import { ENROLLMENT_TTL_MS, LOGIN_FRESH_AGE_MS, RECENT_LOGIN_WINDOW } from "./policy-constants";
 
 /** What one request's account deployment provides to the Relay's account routes. */
@@ -32,10 +31,7 @@ export const ALREADY_APPROVED = "That code is already approved.";
 export function relayAccountRoutes(app: Hono<any>, host: (c: Context) => RelayAccountHost) {
   const gate = cookieEntitled(host, (c) => c.json({ message: NOT_ENTITLED_ERROR }, 403));
 
-  const small = bodyLimit({
-    maxSize: 1024,
-    onError: (c) => c.json({ message: "Request too large." }, 413),
-  });
+  const small = jsonBodyLimit(1024);
 
   app.post("/api/relay/enrollments/approve", small, gate, async (c) => {
     const login = c.get("login");

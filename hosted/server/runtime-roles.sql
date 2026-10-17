@@ -60,8 +60,12 @@ $$;
 
 GRANT USAGE ON SCHEMA public TO dormouse_relay, dormouse_voice;
 
--- Both: the entitlement check reads the owner's address and its verification.
+-- Both: the entitlement (hosted/server/entitlement.ts) reads the owner's
+-- address and its verification, and the owner's subscriptions.
 GRANT SELECT (id, email, "emailVerified") ON "user" TO dormouse_relay, dormouse_voice;
+GRANT USAGE ON SCHEMA pgstencil_billing TO dormouse_relay, dormouse_voice;
+GRANT SELECT (owner_id, status, period_end, trial_end)
+  ON pgstencil_billing.subscriptions TO dormouse_relay, dormouse_voice;
 
 -- The relay Worker, its Cron sweep, and its RelayRoom's RelayRows.
 GRANT SELECT, INSERT ON dormouse_relay_burrows TO dormouse_relay;

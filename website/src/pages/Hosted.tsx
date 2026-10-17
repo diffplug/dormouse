@@ -40,12 +40,14 @@ import {
   type Founders,
 } from "../lib/hosted-cohorts";
 import {
+  CHECKOUT_OPEN,
   FOUNDING_COHORT_SIZE,
   HOSTED_MONTHLY,
   HOSTED_YEARLY,
   LIST_ANNUAL,
   LIST_MONTHLY,
   YEARLY_SAVING,
+  checkoutUrl,
   foundingTier,
   pricingJsonLd,
   type Tier,
@@ -158,11 +160,20 @@ function Price({ tier }: { tier: Pick<Tier, "price" | "per" | "listPrice"> }) {
   );
 }
 
+/** What a buy button does: open the unbuilt-checkout notice, or null to link to checkout. */
+type OnBuy = ((tier: Tier) => void) | null;
+
 /**
  * "Buy" plus what it buys on the label a screen reader reads, since it hears
  * the buttons out of their cards.
  */
-function BuyButton({ tier, label, onBuy }: { tier: Tier; label: string; onBuy: (tier: Tier) => void }) {
+function BuyButton({ tier, label, onBuy }: { tier: Tier; label: string; onBuy: OnBuy }) {
+  if (!onBuy)
+    return (
+      <a href={checkoutUrl(tier)} aria-label={`Buy ${tier.name}`} className={CARD_ACTION_CLASS}>
+        {label}
+      </a>
+    );
   return (
     <button
       type="button"
@@ -304,7 +315,7 @@ function FreeCard() {
   );
 }
 
-function HostedCard({ onBuy }: { onBuy: (tier: Tier) => void }) {
+function HostedCard({ onBuy }: { onBuy: OnBuy }) {
   // Monthly is the prerendered default: it is the reference price every other
   // number on the page is read against.
   const [yearly, setYearly] = useState(false);
@@ -337,7 +348,7 @@ function HostedCard({ onBuy }: { onBuy: (tier: Tier) => void }) {
   );
 }
 
-function FoundingCard({ cohort, onBuy }: { cohort: Cohort; onBuy: (tier: Tier) => void }) {
+function FoundingCard({ cohort, onBuy }: { cohort: Cohort; onBuy: OnBuy }) {
   const tier = foundingTier();
   return (
     <PlanCard
@@ -356,7 +367,7 @@ function FoundingCard({ cohort, onBuy }: { cohort: Cohort; onBuy: (tier: Tier) =
       <Includes
         items={[
           "Everything in Hosted",
-          "A founding badge and an optional avatar here",
+          "A founding badge and, if you choose, your name here",
         ]}
       />
     </PlanCard>
@@ -445,7 +456,7 @@ function FaqEntry({ question, children }: { question: string; children: React.Re
   );
 }
 
-export default function Hosted() {
+export default function Hosted({ checkoutOpen = CHECKOUT_OPEN }: { checkoutOpen?: boolean }) {
   const [cohort, setCohort] = useState<Cohort>({ seatsLeft: null, founders: null });
   const [checkoutTodo, setCheckoutTodo] = useState<Tier | null>(null);
   const closeTodo = useCallback(() => setCheckoutTodo(null), []);
@@ -466,7 +477,7 @@ export default function Hosted() {
           page can quote them without running the counters. */}
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: pricingJsonLd(canonicalUrl(PAGE_PATH)) }}
+        dangerouslySetInnerHTML={{ __html: pricingJsonLd(canonicalUrl(PAGE_PATH), checkoutOpen) }}
       />
 
       {/* The cards open the page: no heading of their own, but `#pricing`
@@ -476,8 +487,8 @@ export default function Hosted() {
             in the same order on a phone. */}
         <div className="grid gap-4 md:grid-cols-3">
           <FreeCard />
-          <HostedCard onBuy={setCheckoutTodo} />
-          <FoundingCard cohort={cohort} onBuy={setCheckoutTodo} />
+          <HostedCard onBuy={checkoutOpen ? null : setCheckoutTodo} />
+          <FoundingCard cohort={cohort} onBuy={checkoutOpen ? null : setCheckoutTodo} />
         </div>
 
         <p className={`mt-5 text-sm ${MUTED_TEXT_CLASS}`}>
@@ -602,8 +613,10 @@ export default function Hosted() {
         <AnchoredHeading id="faq" spacing="mt-0 mb-6">Questions</AnchoredHeading>
         <div className="grid gap-5">
           <FaqEntry question="Refunds and cancellation?">
-            Ask within 30 days of your first Hosted payment or any yearly renewal for
-            a full refund. Monthly renewals are outside that voluntary guarantee.
+            Email{" "}
+            <a href={`mailto:${SUPPORT_EMAIL}`} className={LINK_CLASS}>{SUPPORT_EMAIL}</a>{" "}
+            within 30 days of your first Hosted payment or any yearly renewal for a full
+            refund. Monthly renewals are outside that voluntary guarantee.
             All plans auto-renew; cancel any time to stop renewal and keep access through
             the paid period. A full refund ends access. Legal rights still apply; see the{" "}
             <a href={sitePath("/terms") + "#cancellation"} className={LINK_CLASS}>refund terms</a>.
@@ -611,7 +624,7 @@ export default function Hosted() {
           <FaqEntry question="What exactly does a founding price lock?">
             Your base yearly price in US dollars, for as long as the subscription stays
             active; taxes may change. A failed renewal gives you 30 days to restore
-            payment and keep the price, but paid features pause until payment succeeds.
+            payment and keep the price, and Hosted keeps working meanwhile.
             A failure caused by us or a billing-provider migration does not forfeit the
             lock. A lapsed founder re-subscribes at list. Founding badges are
             cosmetic — in the app and on the credits page, never a capability.

@@ -2,6 +2,7 @@ import { createRoot } from "react-dom/client";
 import { applyTheme } from "../../lib/src/lib/themes/apply";
 import { getBundledThemes } from "../../lib/src/lib/themes/store";
 import { App } from "./App";
+import { takeCheckout, takeReturn } from "./checkout";
 import { takeEnrollment } from "./enrollment";
 import "./style.css";
 
@@ -18,6 +19,8 @@ restoreTheme();
 preference.addEventListener("change", restoreTheme);
 // Taken before anything renders; a later fragment change on `/enroll` is App's.
 const enrollment = takeEnrollment();
+const checkout = takeCheckout();
+const returned = takeReturn();
 createRoot(document.getElementById("root")!).render(
-  <App enrollment={enrollment} />,
+  <App enrollment={enrollment} checkout={checkout} returned={returned} />,
 );

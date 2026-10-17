@@ -4,11 +4,11 @@ Expect: hosted/server/account-gate.ts
 Source: reverses part of #1104 (the cookie read gate admitted a sibling page's `same-site` read that presents no `Origin`)
 
 diff --git a/hosted/server/account-gate.ts b/hosted/server/account-gate.ts
-index 8c7c5aa89..dc5d94aab 100644
+index 6d7b22afc..b56738da6 100644
 --- a/hosted/server/account-gate.ts
 +++ b/hosted/server/account-gate.ts
-@@ -19,16 +19,18 @@ export const accountQuery = <Row extends Record<string, unknown>>(
- ) => queryDatabase<Row>(host.databaseUrl, text, values);
+@@ -24,16 +24,18 @@ export const jsonBodyLimit = (maxSize: number) =>
+   bodyLimit({ maxSize, onError: (c) => c.json({ message: "Request too large." }, 413) });
  
  /**
 - * Whether the account's own page made this read: the browser says
@@ -31,10 +31,10 @@ index 8c7c5aa89..dc5d94aab 100644
    );
  }
 diff --git a/hosted/server/tests/boundary.test.ts b/hosted/server/tests/boundary.test.ts
-index df2554cb6..cf3b8c36a 100644
+index 92ecb941e..e803de35f 100644
 --- a/hosted/server/tests/boundary.test.ts
 +++ b/hosted/server/tests/boundary.test.ts
-@@ -749,7 +749,7 @@ test("the cookie gate refuses a foreign Origin on every method, and a read the a
+@@ -804,7 +804,7 @@ test("the cookie gate refuses a foreign Origin on every method, and a read the a
      // Only a read may omit `Origin`, and only a read needs Fetch Metadata.
      expect((await send(own)).status, method).toBe(read ? 204 : 403);
      expect((await send({ origin })).status, method).toBe(read ? 403 : 204);
