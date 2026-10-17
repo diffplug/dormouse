@@ -1,4 +1,4 @@
-import { CARD_CLASS, CARD_MUTED_TEXT_CLASS, LINK_CLASS } from "./docs-tokens";
+import { CARD_CLASS, CARD_MUTED_TEXT_CLASS, LINK_CLASS, MUTED_TEXT_CLASS } from "./docs-tokens";
 
 /** `website/src/data/canary-recall.json`, as website/scripts/generate-canary-recall.js writes it. */
 export type CanaryRecallSnapshot = {
@@ -11,107 +11,163 @@ export type CanaryRecallSnapshot = {
   unrecorded: { at: string; url: string }[];
 };
 
-/** One canary run on the graph. `percent` is null when the run has no counts to plot. */
-export type RecallPoint = {
-  url: string;
-  at: string;
-  /** "Oct 16": the x axis's form, which no count label ("7 of 8") can be mistaken for. */
-  day: string;
+/** One run inside a week. `seeded` and `caught` are null for a run that left no record. */
+export type RecallRun = { url: string; at: string; seeded: number | null; caught: number | null; unfinished: number };
+
+/**
+ * One week of the window: Monday 00:00 UTC through Sunday, so the weekly
+ * Sunday 06:21 UTC canary closes its week. `percent` is null when no run that
+ * week has counts, which the graph draws as a gap.
+ */
+export type RecallWeek = {
+  /** `YYYY-MM-DD` of the week's Monday, in UTC. */
+  start: string;
+  runs: RecallRun[];
+  seeded: number;
+  caught: number;
   percent: number | null;
-  /** The label beside the point, in words. */
-  label: string;
-  /** What a screen reader and the hover tooltip say. */
-  description: string;
+  /** Runs that week with a domain that left no finished report. */
   unfinished: number;
+  /** Runs that week that left no record, and so add nothing to its counts. */
+  unrecorded: number;
 };
 
+const DAY = 86_400_000;
+const WEEK = 7 * DAY;
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-/** From the ISO string itself rather than `Date`, so the server and the browser agree whatever the zone. */
-const dayOf = (at: string) => `${MONTHS[Number(at.slice(5, 7)) - 1]} ${Number(at.slice(8, 10))}`;
 
-/** Every run in the window, oldest first: several share a day, so they are ordered by time and keyed by link. */
-export function recallPoints(snapshot: CanaryRecallSnapshot): RecallPoint[] {
-  const recorded = snapshot.runs.map((run) => {
-    const percent = run.seeded > 0 ? Math.round((run.caught / run.seeded) * 100) : null;
-    const unfinished = run.unfinished > 0
-      ? `; ${run.unfinished} domain${run.unfinished > 1 ? "s" : ""} left no finished report`
-      : "";
-    return {
-      url: run.url,
-      at: run.at,
-      day: dayOf(run.at),
-      percent,
-      label: `${run.caught} of ${run.seeded}`,
-      description: `${dayOf(run.at)}: caught ${run.caught} of ${run.seeded} seeded${percent === null ? "" : ` (${percent}%)`}${unfinished}`,
-      unfinished: run.unfinished,
-    };
-  });
-  const missing = snapshot.unrecorded.map((run) => ({
-    url: run.url,
-    at: run.at,
-    day: dayOf(run.at),
-    percent: null,
-    label: "no record",
-    description: `${dayOf(run.at)}: no record; the run scored nothing`,
-    unfinished: 0,
-  }));
-  return [...recorded, ...missing].sort((a, b) => a.at.localeCompare(b.at) || a.url.localeCompare(b.url));
+/** The UTC Monday 00:00 that starts the week holding `time` (ms). */
+function mondayOf(time: number): number {
+  const day = Math.floor(time / DAY) * DAY;
+  return day - ((new Date(day).getUTCDay() + 6) % 7) * DAY;
 }
+const isoDay = (time: number) => new Date(time).toISOString().slice(0, 10);
+/** "Oct 13", from a `YYYY-MM-DD` or ISO string, without the reader's time zone. */
+export const dayOf = (at: string) => `${MONTHS[Number(at.slice(5, 7)) - 1]} ${Number(at.slice(8, 10))}`;
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 /**
- * The x axis: one label per run of consecutive points on the same day, centred
- * under them (`center` in point slots). A label too close to the one before
- * drops to a second row rather than overlapping it.
+ * Every week the window touches, oldest first, each run bucketed by its UTC
+ * time. A week with no run stays in the list, so the x axis keeps time to
+ * scale and the line breaks there rather than dropping to zero.
  */
-export function dayLabels(points: RecallPoint[]): { day: string; center: number; row: 0 | 1 }[] {
-  const groups: { day: string; first: number; last: number }[] = [];
-  points.forEach((point, i) => {
-    const group = groups[groups.length - 1];
-    if (group && group.day === point.day) group.last = i;
-    else groups.push({ day: point.day, first: i, last: i });
-  });
-  const labels: { day: string; center: number; row: 0 | 1 }[] = [];
-  for (const { day, first, last } of groups) {
-    const center = (first + last) / 2 + 0.5;
-    const before = labels[labels.length - 1];
-    const row = before && before.row === 0 && center - before.center < 1.5 ? 1 : 0;
-    labels.push({ day, center, row });
+export function recallWeeks(snapshot: CanaryRecallSnapshot): RecallWeek[] {
+  const runs: RecallRun[] = [
+    ...snapshot.runs.map(({ url, at, seeded, caught, unfinished }) => ({ url, at, seeded, caught, unfinished })),
+    ...snapshot.unrecorded.map(({ url, at }) => ({ url, at, seeded: null, caught: null, unfinished: 0 })),
+  ].sort((a, b) => a.at.localeCompare(b.at) || a.url.localeCompare(b.url));
+  const asOf = Date.parse(`${snapshot.asOf}T00:00:00Z`);
+  const mondays = runs.map((run) => mondayOf(Date.parse(run.at)));
+  const first = Math.min(mondayOf(asOf - snapshot.windowDays * DAY), ...mondays);
+  const last = Math.max(mondayOf(asOf), ...mondays);
+  const weeks: RecallWeek[] = [];
+  for (let monday = first; monday <= last; monday += WEEK) {
+    const mine = runs.filter((_, i) => mondays[i] === monday);
+    const counted = mine.filter((run) => run.seeded !== null);
+    const seeded = counted.reduce((n, run) => n + run.seeded!, 0);
+    const caught = counted.reduce((n, run) => n + run.caught!, 0);
+    weeks.push({
+      start: isoDay(monday),
+      runs: mine,
+      seeded,
+      caught,
+      percent: seeded > 0 ? Math.round((caught / seeded) * 100) : null,
+      unfinished: mine.filter((run) => run.unfinished > 0).length,
+      unrecorded: mine.length - counted.length,
+    });
   }
-  return labels;
+  return weeks;
+}
+
+/** The label beside a week's point, in words: "15 of 16", never "15/16". */
+export function weekLabel(week: RecallWeek): string | null {
+  if (week.percent !== null) return `${week.caught} of ${week.seeded}${week.unfinished > 0 ? "*" : ""}`;
+  return week.unrecorded > 0 ? "no record" : null;
+}
+
+/** What a screen reader and the hover tooltip say about a week. */
+export function weekDescription(week: RecallWeek): string {
+  const counted = week.runs.length - week.unrecorded;
+  const parts = [
+    week.percent === null
+      ? `Week of ${dayOf(week.start)}: no counts`
+      : `Week of ${dayOf(week.start)}: caught ${week.caught} of ${week.seeded} over ${plural(counted, "run")} (${week.percent}%)`,
+  ];
+  if (week.unfinished > 0) parts.push(`${plural(week.unfinished, "run")} with a domain that left no finished report`);
+  if (week.unrecorded > 0) parts.push(`${plural(week.unrecorded, "run")} left no record`);
+  return parts.join("; ");
+}
+
+/** One run in a week's list, in words. */
+export function runLabel(run: RecallRun): string {
+  const counts = run.seeded === null ? "no record" : `${run.caught} of ${run.seeded}${run.unfinished > 0 ? "*" : ""}`;
+  return `${dayOf(run.at)}: ${counts}`;
 }
 
 /**
- * Whether each point's label sits above it: on the side away from the line
- * (above a peak, below a dip), flipped when the label before it sits on the
- * same side at nearly the same height, so neighbours' labels never meet. A run
- * with nothing plotted sits on the axis, and its label above.
+ * Whether each week's label sits above its point: on the side away from the
+ * line (above a peak, below a dip), flipped when the labelled week before it
+ * sits on the same side at nearly the same height, so labels never meet. A
+ * week with nothing plotted sits on the axis, its label above.
  */
-export function labelsAbove(points: RecallPoint[]): boolean[] {
+export function labelsAbove(weeks: RecallWeek[]): boolean[] {
   const sides: boolean[] = [];
-  points.forEach((point, i) => {
-    if (point.percent === null) return sides.push(true);
-    const near = [points[i - 1], points[i + 1]].flatMap((p) => (p && p.percent !== null ? [p.percent] : []));
-    let above = near.length === 0 || point.percent >= near.reduce((a, b) => a + b, 0) / near.length;
-    const before = points[i - 1];
-    const beforeHeight = before?.percent ?? 0;
-    if (i > 0 && sides[i - 1] === above && Math.abs(beforeHeight - point.percent) < 20) above = !above;
+  let previous: { above: boolean; height: number; index: number } | null = null;
+  weeks.forEach((week, i) => {
+    if (week.percent === null) {
+      sides.push(true);
+      if (week.unrecorded > 0) previous = { above: true, height: 0, index: i };
+      return;
+    }
+    const near = [weeks[i - 1], weeks[i + 1]].flatMap((w) => (w && w.percent !== null ? [w.percent] : []));
+    let above = near.length === 0 || week.percent >= near.reduce((a, b) => a + b, 0) / near.length;
+    if (previous && previous.index === i - 1 && previous.above === above && Math.abs(previous.height - week.percent) < 20) {
+      above = !above;
+    }
     sides.push(above);
+    previous = { above, height: week.percent, index: i };
   });
   return sides;
+}
+
+/**
+ * The x axis: the window's first week, then each week with a point. A label
+ * too close to the one before drops to a second row; past six, every other
+ * one hides on a phone, where they would not fit.
+ */
+export function weekTicks(weeks: RecallWeek[]): { start: string; index: number; row: 0 | 1; phone: boolean }[] {
+  const shown = weeks.flatMap((week, index) => (index === 0 || weekLabel(week) !== null ? [{ start: week.start, index }] : []));
+  const crowded = shown.length > 6;
+  const ticks: { start: string; index: number; row: 0 | 1; phone: boolean }[] = [];
+  shown.forEach(({ start, index }, n) => {
+    const phone = !crowded || n % 2 === 0;
+    const before = ticks[ticks.length - 1];
+    const row: 0 | 1 = before && before.row === 0 && index - before.index < 2 ? 1 : 0;
+    ticks.push({ start, index, row, phone });
+  });
+  return ticks;
 }
 
 const EXTERNAL = { target: "_blank", rel: "noopener noreferrer" } as const;
 const GRID = [100, 50, 0];
 
-/** Percent caught per run, 0–100% up the y axis, oldest to newest left to right. */
-function RecallGraph({ points }: { points: RecallPoint[] }) {
-  const n = points.length;
+/** Percent caught per UTC week, 0–100% up the y axis, oldest to newest left to right. */
+function RecallGraph({ weeks }: { weeks: RecallWeek[] }) {
+  const n = weeks.length;
   const x = (i: number) => ((i + 0.5) / n) * 100;
-  const plotted = points.flatMap((point, i) => (point.percent === null ? [] : [`${x(i)},${100 - point.percent}`]));
-  // Past ten runs a phone has no room for a word label on each point; the
-  // tooltip and the link's label still carry it.
-  const labelVisibility = n > 10 ? "hidden sm:block" : "";
-  const above = labelsAbove(points);
+  // One polyline per unbroken run of weeks with counts: a week without breaks the line.
+  const segments: string[][] = [];
+  weeks.forEach((week, i) => {
+    if (week.percent === null) return;
+    const point = `${x(i)},${100 - week.percent}`;
+    if (i > 0 && weeks[i - 1].percent !== null) segments[segments.length - 1].push(point);
+    else segments.push([point]);
+  });
+  const above = labelsAbove(weeks);
+  // Six labels fit a phone's width; past that they show from `sm` up, and the
+  // tooltip and the week's run list still carry the counts.
+  const labelled = weeks.filter((week) => weekLabel(week) !== null).length;
+  const labelVisibility = labelled > 6 ? "hidden sm:block" : "";
   return (
     <div className="mt-4 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 text-xs">
       <div aria-hidden="true" className={`relative my-6 h-36 w-9 font-mono ${CARD_MUTED_TEXT_CLASS}`}>
@@ -136,46 +192,63 @@ function RecallGraph({ points }: { points: RecallPoint[] }) {
           viewBox="0 0 100 100"
           preserveAspectRatio="none"
         >
-          <polyline
-            points={plotted.join(" ")}
-            fill="none"
-            style={{ stroke: "var(--docs-accent)" }}
-            strokeWidth={2}
-            strokeLinejoin="round"
-            vectorEffect="non-scaling-stroke"
-          />
+          {segments.map((segment) => (
+            <polyline
+              key={segment[0]}
+              points={segment.join(" ")}
+              fill="none"
+              style={{ stroke: "var(--docs-accent)" }}
+              strokeWidth={2}
+              strokeLinejoin="round"
+              vectorEffect="non-scaling-stroke"
+            />
+          ))}
         </svg>
-        <ol aria-label="Percent caught per canary run, oldest first" className="absolute inset-0">
-          {points.map((point, i) => {
-            const top = point.percent === null ? 100 : 100 - point.percent;
-            const marker = point.percent === null
+        <ol aria-label="Percent caught per week, oldest first" className="absolute inset-0">
+          {weeks.map((week, i) => {
+            const label = weekLabel(week);
+            if (label === null) return null;
+            const description = weekDescription(week);
+            const marker = week.percent === null
               ? "border-2 border-dashed border-[var(--color-text)]/50"
-              : point.unfinished > 0
+              : week.unfinished > 0
                 ? "border-2 border-[var(--docs-accent)] bg-[var(--color-bg)]"
                 : "bg-[var(--docs-accent)]";
             return (
               <li
-                key={point.url}
-                className="absolute -translate-x-1/2 -translate-y-1/2"
-                style={{ left: `${x(i)}%`, top: `${top}%` }}
+                key={week.start}
+                // An open week's runs paint over its neighbours' points.
+                className="absolute -translate-x-1/2 -translate-y-1/2 has-[details[open]]:z-20"
+                style={{ left: `${x(i)}%`, top: `${week.percent === null ? 100 : 100 - week.percent}%` }}
               >
-                <a
-                  href={point.url}
-                  {...EXTERNAL}
-                  aria-label={point.description}
-                  title={point.description}
-                  className="flex size-6 items-center justify-center rounded-full focus-visible:outline-2 focus-visible:outline-[var(--docs-accent)]"
-                >
-                  <span className={`block size-2.5 rounded-full ${marker}`} />
-                </a>
+                {/* The point opens the week's runs, each a link. */}
+                <details className="peer relative">
+                  <summary
+                    title={description}
+                    className="flex size-6 cursor-pointer list-none items-center justify-center rounded-full focus-visible:outline-2 focus-visible:outline-[var(--docs-accent)] [&::-webkit-details-marker]:hidden"
+                  >
+                    <span aria-hidden="true" className={`block size-2.5 rounded-full ${marker}`} />
+                    <span className="sr-only">{description}</span>
+                  </summary>
+                  <ul
+                    className={`absolute top-full z-10 mt-1 w-max space-y-1 rounded-lg border border-[var(--color-text)]/15 bg-[var(--color-bg)] p-2 font-mono ${MUTED_TEXT_CLASS} ${x(i) > 50 ? "right-0" : "left-0"}`}
+                  >
+                    {week.runs.map((run) => (
+                      <li key={run.url}>
+                        <a href={run.url} className={LINK_CLASS} {...EXTERNAL}>
+                          {runLabel(run)}
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
                 {/* The card's own surface, page then tint, so a grid line passes behind the words. */}
                 <span
                   aria-hidden="true"
-                  className={`${labelVisibility} pointer-events-none absolute left-1/2 -translate-x-1/2 whitespace-nowrap rounded bg-[var(--color-bg)] ${above[i] ? "bottom-full" : "top-full"}`}
+                  className={`${labelVisibility} pointer-events-none absolute left-1/2 -translate-x-1/2 whitespace-nowrap rounded bg-[var(--color-bg)] peer-open:hidden ${above[i] ? "bottom-full" : "top-full"}`}
                 >
                   <span className={`block rounded bg-[var(--color-text)]/[0.04] px-1 font-mono ${CARD_MUTED_TEXT_CLASS}`}>
-                    {point.label}
-                    {point.unfinished > 0 ? "*" : ""}
+                    {label}
                   </span>
                 </span>
               </li>
@@ -185,13 +258,13 @@ function RecallGraph({ points }: { points: RecallPoint[] }) {
       </div>
       <div />
       <div aria-hidden="true" className={`relative h-8 font-mono ${CARD_MUTED_TEXT_CLASS}`}>
-        {dayLabels(points).map(({ day, center, row }) => (
+        {weekTicks(weeks).map(({ start, index, row, phone }) => (
           <span
-            key={`${day}-${center}`}
-            className={`absolute -translate-x-1/2 whitespace-nowrap ${row ? "top-4" : "top-0"}`}
-            style={{ left: `${(center / n) * 100}%` }}
+            key={start}
+            className={`absolute -translate-x-1/2 whitespace-nowrap ${row ? "top-4" : "top-0"} ${phone ? "" : "hidden sm:inline"}`}
+            style={{ left: `${x(index)}%` }}
           >
-            {day}
+            {dayOf(start)}
           </span>
         ))}
       </div>
@@ -206,9 +279,9 @@ function RecallGraph({ points }: { points: RecallPoint[] }) {
  */
 export default function CanaryRecall({ snapshot }: { snapshot: CanaryRecallSnapshot }) {
   const { asOf, windowDays, runsUrl, seeded, caught } = snapshot;
-  const points = recallPoints(snapshot);
-  const unfinished = points.some((point) => point.unfinished > 0);
-  const missing = snapshot.unrecorded.length > 0;
+  const weeks = recallWeeks(snapshot);
+  const any = snapshot.runs.length + snapshot.unrecorded.length > 0;
+  const unfinished = snapshot.runs.some((run) => run.unfinished > 0);
   return (
     <aside aria-label="Canary recall" className={`mb-6 ${CARD_CLASS} text-[var(--color-text)]`}>
       {seeded > 0 ? (
@@ -224,17 +297,18 @@ export default function CanaryRecall({ snapshot }: { snapshot: CanaryRecallSnaps
       <p className={`mt-2 text-sm leading-relaxed ${CARD_MUTED_TEXT_CLASS}`}>
         A canary seeds known vulnerabilities into a throwaway copy of the repository and counts
         how many the audit reports. Summed over the canary runs of the {windowDays} days before{" "}
-        {asOf}.{points.length > 0 ? " Each point below is one run, and links to it." : ""}
+        {asOf}.{any ? " Each point is one week, Monday to Sunday UTC; open it for that week's runs." : ""}
       </p>
-      {points.length > 0 ? <RecallGraph points={points} /> : null}
+      {any ? <RecallGraph weeks={weeks} /> : null}
       {unfinished ? (
         <p className={`text-sm ${CARD_MUTED_TEXT_CLASS}`}>
-          * Hollow: a domain left no finished report, and its seeds count as missed.
+          * Hollow: a run that week had a domain that left no finished report, and its seeds count as missed.
         </p>
       ) : null}
-      {missing ? (
+      {snapshot.unrecorded.length > 0 ? (
         <p className={`text-sm ${CARD_MUTED_TEXT_CLASS}`}>
-          Dashed, on the axis: a run that scored nothing and left no record.
+          A run that scored nothing left no record and adds nothing to its week; a week with only such runs is a
+          dashed point on the axis.
         </p>
       ) : null}
       <p className="mt-3 text-sm">
