@@ -29,6 +29,8 @@ describe('dorWorkspaceRefusal', () => {
     for (const verb of ['new', 'rename', 'close', 'switch', 'move', 'pin']) {
       expect(dorWorkspaceRefusal(`workspace.${verb}`, {})).toMatch(new RegExp(` dor workspace ${verb} is not available`));
     }
+    // unpin shares pin's method, told apart by `pinned`.
+    expect(dorWorkspaceRefusal('workspace.pin', { pinned: false })).toMatch(/ dor workspace unpin is not available/);
   });
 
   it('names dor move, which always spans, as the command refused', () => {

@@ -27,10 +27,11 @@ function namesThisWebviewsWorkspace(workspace: unknown): boolean {
 
 /** The command a caller ran to send a Workspace-spanning request, so the
  *  refusal names what they typed: agents act on this text. */
-function spanningCommand(method: string): string {
+function spanningCommand(method: string, params: Record<string, unknown> | undefined): string {
   if (method === SURFACE_CONTROL_METHODS.move) return 'dor move';
   if (method === WORKSPACE_CONTROL_METHODS.list) return 'dor list --workspaces';
   if (method === SURFACE_CONTROL_METHODS.list) return 'dor list --all';
+  if (method === WORKSPACE_CONTROL_METHODS.pin && params?.pinned === false) return 'dor workspace unpin';
   return `dor workspace ${method.slice('workspace.'.length)}`;
 }
 
@@ -45,7 +46,7 @@ export function dorWorkspaceRefusal(method: string, params: Record<string, unkno
     return `${REFUSAL} it has no workspace '${String(workspace)}': this webview is ${DEFAULT_WORKSPACE_ID}, ${JSON.stringify(DEFAULT_WORKSPACE_NAME)}`;
   }
   if (spansWorkspaces(method, params)) {
-    return `${REFUSAL} ${spanningCommand(method)} is not available here: it spans Workspaces`;
+    return `${REFUSAL} ${spanningCommand(method, params)} is not available here: it spans Workspaces`;
   }
   return null;
 }
