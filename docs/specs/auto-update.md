@@ -13,23 +13,23 @@ On launch the updater, in order:
 2. Reads the network policy over the Burrow link and, where it allows (`docs/specs/remote-network.md` → "Updates"), calls `check()`: no update is silent, an update raises the approval prompt.
 3. Shows the reminder if due, recording `remindedAt`.
 
-**Must skip that `check()` once an update is approved**, including through Check now, and drop its result if approval lands while it runs. The reminder is re-evaluated periodically while the app runs, reading no policy and never checking, never over an undismissed notice or before the clock is set. Version-lookup, check, and download failures are logged. **Only approval starts the background `download()`**; a failed download leaves the update available, so a second approval retries, and only a successful one makes it pending.
+**Must skip that `check()` once an update is approved**, including through Check now, and drop its result if approval lands while it runs. The reminder is re-evaluated periodically while the app runs, reading no policy and never checking, never over an undismissed notice or before the clock is set. **Only approval starts the background `download()`**; a failed download leaves the update available, so a second approval retries, and only a successful one makes it pending.
 
 Check now (`checkNow()`) joins a check in flight, and shows an approved update's progress instead of checking, which would offer it for approval twice. **Must record `checkedAt` on every successful check**, automatic or asked for (§localStorage).
 
-**Never check from a self-host build** (`docs/specs/relay.md` → "Relay origin"): `startUpdateCheck()` and `checkNow()` act only when the webview's baked mode, `bakedRelayMode()`, is `hosted`.
+**Never check from a self-host build** (`docs/specs/relay.md` → "Relay origin"): the updater acts only when the webview's baked mode is `hosted`.
 
 ### Quit-time install
 
-**Never intercept quit in the updater**: install runs only when `hasPendingUpdate()` is true, after the quit orchestrator's teardown and save/drain steps (`docs/specs/standalone.md` §Quit flow; rationale). **Must install in `main`**, the window the quit walk tears down last and the only one holding `updater:default` (`capabilities/main-only.json`), so nothing another window could still be writing outlives the install.
+**Never intercept quit in the updater**: install runs only when `hasPendingUpdate()` is true, after the quit orchestrator's teardown and save/drain steps (`docs/specs/standalone.md` §Quit flow; rationale). **Must install in `main`**, the window the quit walk tears down last and the only one holding `updater:default` (`standalone/src-tauri/capabilities/main-only.json`), so nothing another window could still be writing outlives the install.
 
-Only `main` checks, so only it can hold a download, which lives in its webview's memory: closing `main` discards an approved update, which its close confirmation says (`docs/specs/standalone.md` → "Per-window close"; rationale). `installPendingUpdate()` writes the success marker (§localStorage) and, on Windows, tears down the sidecar (§Sidecar teardown on Windows) before `install()`. **Never close the window from the install**: exiting is `quit_proceed`'s job, after it returns.
+Only `main` checks, so only it can hold a download, which lives in its webview's memory: closing `main` discards an approved update, which its close confirmation says (`docs/specs/standalone.md` → "Per-window close"; rationale). **Never close the window from the install**: exiting is `quit_proceed`'s job, after it returns.
 
 **Must skip `install()` in Vite dev mode**, dropping the pending update (rationale), so install is tested from a packaged app.
 
 ## Sidecar teardown on Windows
 
-**Must await `kill_sidecar_now` before `install()` on Windows**, so NSIS can replace the sidecar's loaded node-pty modules and ConPTY children (rationale). Rust polls `try_wait` under a ~5 s cap; a timeout or wait error is logged and the install proceeds without confirmed exit. **Never use the job object's `wait()`**, whose completion message may already have been consumed (rationale). macOS and Linux replace open files and skip the step.
+**Must await `kill_sidecar_now` before `install()` on Windows**, so NSIS can replace the sidecar's loaded node-pty modules and ConPTY children (rationale). Rust polls `try_wait` under a ~5 s cap; a timeout or wait error is logged and the install proceeds without confirmed exit. **Never use the job object's `wait()`**, whose completion message may already have been consumed. macOS and Linux replace open files and skip the step.
 
 ## Update notice in the Baseboard
 
@@ -39,7 +39,7 @@ Update status is a text notice in the Baseboard's `notice` slot (`docs/specs/lay
 
 ### Threading
 
-**Never put updater knowledge in `lib/`**: every updater module is standalone-only, so the notice reaches the Baseboard as an opaque `ReactNode` slot (`baseboardNotice` → `notice`), and Settings reads the checks through the platform's optional `updates` port (`UpdatesPort`), which `main.tsx` gives `main` alone, and only in a build that checks.
+**Never put updater knowledge in `lib/`**: every updater module is standalone-only, so the notice reaches the Baseboard as an opaque `ReactNode` slot (`baseboardNotice` → `notice`), and Settings reads the checks through the platform's optional `updates` port (`UpdatesPort`), which only `main` gets, and only in a build that checks.
 
 ## Platform behavior at quit
 

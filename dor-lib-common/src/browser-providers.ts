@@ -62,8 +62,8 @@ export const DEFAULT_PLAYWRIGHT_BIN = 'playwright-cli';
  */
 
 // The Windows PATH shims npm/vfox install alongside the POSIX executable.
-// `spawnAndCapture` routes `.cmd`/`.bat` through cmd.exe (docs/specs/dor-cli.md
-// → "Spawning External Binaries"), so those spellings are legitimate targets.
+// `spawnAndCapture` routes `.cmd`/`.bat` through cmd.exe, so those spellings
+// are legitimate targets.
 const PLAYWRIGHT_FILENAME_RE = /^playwright-cli(?:\.(?:cmd|bat|exe|com|ps1))?$/i;
 const AGENT_BROWSER_FILENAME_RE = /^agent-browser(?:\.(?:cmd|bat|exe|com|ps1))?$/i;
 

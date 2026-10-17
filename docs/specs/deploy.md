@@ -38,7 +38,7 @@ Human-driven, in order:
 
 ## Versioning
 
-**Must synchronize the four version files — `lib/package.json`, `vscode-ext/package.json`, `standalone/src-tauri/Cargo.toml`, `standalone/src-tauri/tauri.conf.json` — and Cargo.lock's `dormouse` entry with `scripts/bump-version.sh`.** The bump runs Cargo directly; an ambient Node mismatch can fail after version files have changed. **Must accept only `X.Y.Z` release versions** in both bump and signing scripts.
+**Must synchronize the four version files — `lib/package.json`, `vscode-ext/package.json`, `standalone/src-tauri/Cargo.toml`, `standalone/src-tauri/tauri.conf.json` — and Cargo.lock's `dormouse` entry with `scripts/bump-version.sh`.** **Must accept only `X.Y.Z` release versions** in both bump and signing scripts.
 
 **A release is triggered by pushing one tag (`v0.1.0`)** — never separate `vscode-ext/v*` and `standalone/v*` tags, because one changelog entry covers both.
 
@@ -93,7 +93,7 @@ Source of truth: `build-standalone` / `build-vscode` in `.github/workflows/relea
 
 ### Job: `security-audit`
 
-Dispatches `security-audit.yaml` on the release tag (`gh workflow run`), polls for the run, and waits with `gh run watch --exit-status`: a failing audit fails this job, and since `publish-vscode` is gated on it, blocks the Marketplace publish. **Dispatch, never `uses:` the reusable workflow**: `anthropics/claude-code-action` rejects the `push` event a tag-triggered `workflow_call` would inherit (rationale).
+Dispatches `security-audit.yaml` on the release tag and waits for it (`docs/specs/security-audit.md` -> "Schedule and gate"): a failing audit fails this job, and since `publish-vscode` is gated on it, blocks the Marketplace publish. **Dispatch, never `uses:` the reusable workflow**: `anthropics/claude-code-action` rejects the `push` event a tag-triggered `workflow_call` would inherit (rationale).
 
 ### Job: `publish-vscode`
 
@@ -119,11 +119,9 @@ Downloaded CI artifacts must pass three checks before any signing step:
 
 **Must refuse a published release before spending a stage on it** — every command ending in a release upload checks before it downloads or signs, and the retry path stays open only while the release is a draft (rationale).
 
-**Must repoint the Tauri-generated `.nsi` at local paths before `makensis`** — it is baked with CI-runner absolutes; `rebuild_windows_installer` documents the rewrite.
+**Runs on macOS only** — it uses `codesign` / `xcrun notarytool` / `ditto`.
 
-**Runs on macOS only** — it uses `codesign` / `xcrun notarytool` / `ditto`, and its in-place `sed -i ''` edits are BSD form.
-
-Source of truth: `main` / `verify_downloaded_artifact` / `prepare_artifact` / `require_unpublished_release` in `scripts/sign-and-deploy.sh`; `verifyInventory` / `restoreExecutables` in `scripts/release-artifact.mjs`; `scripts/patch-nsis-paths.pl`. Regression tests: `scripts/sign-and-deploy.test.mjs`.
+Source of truth: `main` in `scripts/sign-and-deploy.sh`. Regression tests: `scripts/sign-and-deploy.test.mjs`.
 
 ### One-time setup
 
@@ -137,14 +135,14 @@ pnpm --dir standalone exec tauri signer generate  # creates the Tauri update sig
 
 ### Two signing layers
 
-**Must apply OS signing on macOS and Windows, and updater signing to every desktop bundle.** Linux receives the updater signature alone (rationale).
+**Must apply OS signing on macOS and Windows, and updater signing to every desktop bundle.** Linux receives the updater signature alone.
 
 | Layer | What it signs | Who verifies | Without it |
 |-------|--------------|--------------|------------|
 | OS (codesign / jsign) | Executable (`.app` / `.exe`) | OS, on launch | Gatekeeper / SmartScreen warnings |
 | Tauri updater (ed25519) | Update bundle (`.tar.gz` / `.exe` / `.AppImage`) | Running app, on update | Updater rejects the download |
 
-**Must OS-sign macOS and Windows code before packaging, then Tauri-sign every final bundle.** Embed the generated `.sig` in the website manifest and remove the sidecar signature file before upload.
+**Must OS-sign macOS and Windows code before packaging, then Tauri-sign every final bundle.**
 
 - **Never `--deep`-sign the outer macOS `.app`; sign nested code first and verify the signed sidecar loads `node-pty` and `node-datachannel/polyfill`.**
 - **Must archive macOS updates with `COPYFILE_DISABLE=1` and reject `._*` entries.**
@@ -163,7 +161,7 @@ Packaged-app log paths and `DORMOUSE_LOG_FILE` follow `docs/specs/standalone.md`
 
 ### Configuration
 
-Config lives in [tauri.conf.json](../../standalone/src-tauri/tauri.conf.json) (`bundle.createUpdaterArtifacts`, `plugins.updater.{pubkey,endpoints,windows}`); [lib.rs](../../standalone/src-tauri/src/lib.rs) registers `tauri_plugin_updater`.
+Config lives in [tauri.conf.json](../../standalone/src-tauri/tauri.conf.json) (`bundle.createUpdaterArtifacts`, `plugins.updater.{pubkey,endpoints,windows}`).
 
 - `createUpdaterArtifacts: true` selects the Tauri v2 artifact mode — Windows updates use the NSIS installer `.exe` directly, Linux the `.AppImage` directly, macOS `.app.tar.gz`, with no `.nsis.zip` or `.AppImage.tar.gz` to collect.
 - **Never set `"v1Compatible"`** unless you intend legacy `.nsis.zip` / `.AppImage.tar.gz` bundles for old Tauri v1 clients.
@@ -190,7 +188,7 @@ Source of truth: `create_release` in `scripts/sign-and-deploy.sh`; `website/scri
 
 **Must host `https://blyg.dormouse.sh/` with the checksum-pinned, unmodified Blygger Studio Worker.** Its Cloudflare D1 database and R2 bucket hold content; Git records deployment configuration and the upstream release checksum. Operator setup, updates and token renewal are in `deploy/blyg/README.md`.
 
-**Must publish only stable, public GitHub releases with a matching `CHANGELOG.md` entry**, oldest first when backfilling. `.github/workflows/blyg-publish.yml` runs on release publication, changelog changes on `main`, and manual dispatch; publisher code and changelog come from reviewed `main`. Versions without a public GitHub release remain unpublished. Studio records the Blyg publication time; the entry text retains the original release date.
+**Must publish only stable, public GitHub releases with a matching `CHANGELOG.md` entry**, oldest first when backfilling. Versions without a public GitHub release remain unpublished. Studio records the Blyg publication time; the entry text retains the original release date.
 
 **Must retain one Studio item per release, pin every published revision, and leave unchanged content at its existing revision.** A correction uses the same item. An interrupted run resumes its matching draft or completes the current pin; conflicting drafts, duplicate release identities and withdrawn items require operator resolution. **Never edit release text in Studio**; change `CHANGELOG.md` and synchronize it. Avoid simultaneous manual and automated publication; Actions serializes its runs.
 

@@ -13,5 +13,3 @@
 ## Sidecar teardown on Windows
 
 NSIS cannot overwrite node-pty's loaded `conpty.node` or `conpty.dll`; each pseudoconsole also has an `OpenConsole.exe` child in the sidecar's job object. The Rust exit handler never runs: `std::process::exit` skips `RunEvent::Exit`, and NSIS is already copying.
-
-Polling `try_wait` avoids `wait()`, which blocks forever when the reaper thread has already consumed the job object's completion-port message after an earlier sidecar crash.

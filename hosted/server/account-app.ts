@@ -53,6 +53,8 @@ export function accountApp(
       voiceTokenRoutes(app, host);
       relayAccountRoutes(app, host);
     },
+    // Every desktop since v1.2.0 opens `/account` by a hard-coded path
+    // (`ACCOUNT_PAGE_PATH`), which this SPA fallback answers.
     fallback: (app) => app.get("*", (c) => c.env.ASSETS.fetch(c.req.raw)),
   });
 }

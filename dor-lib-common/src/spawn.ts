@@ -46,8 +46,7 @@ const CLOSE_GRACE_MS = 250;
 
 /**
  * Spawn an external binary and capture its stdout/stderr — the single home for
- * the hard-won Windows recipe `dor` and the agent-browser host both need. See
- * docs/specs/dor-cli.md → "Spawning External Binaries".
+ * the hard-won Windows recipe `dor` and the agent-browser host both need.
  *
  *  - cross-spawn resolves PATHEXT and routes `.cmd`/`.bat` through cmd.exe; Node's
  *    own spawn ENOENTs on a bare name and (>=22) EINVALs on a `.cmd` by full path.

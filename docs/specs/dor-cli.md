@@ -6,7 +6,7 @@
 
 ## Bundling And PATH
 
-**`dor` must work without `npm i -g`.** Both hosts stage `dor` (`scripts/stage-dor-cli.mjs`) before build and prepend its `bin` directory to every spawned PTY's `PATH`. Staged: `bin/dor` + `bin/dor.cmd`, `dist/dor.js`, the builtin runtime tree (`docs/specs/dor-tools-builtin.md` → Packaging), and a generated `package.json` declaring `"type": "module"`, independent of parent package metadata.
+**`dor` must work without `npm i -g`.** Both hosts stage `dor` (`scripts/stage-dor-cli.mjs`) before build and prepend its `bin` directory to every spawned PTY's `PATH`.
 
 **Both launchers must set `ELECTRON_RUN_AS_NODE=1` themselves** before `exec "$DORMOUSE_NODE" "$DORMOUSE_CLI_JS"`, or under VS Code `dor` silently does nothing and **exits 0** (rationale). **Dormouse-launched terminals must rely on injected env, never on a globally installed Node**; each launcher's `PATH`-`node` fallback is for developer/manual use. **Both launchers must return the CLI's exit status** (`dor/test/launcher.test.mjs`, including `dor.cmd` on Windows).
 
@@ -33,13 +33,13 @@ The CLI also reads `DORMOUSE_AGENT_BROWSER_BIN` and `DORMOUSE_PLAYWRIGHT_BIN`, t
 
 **On Windows the `PATH` prepend must survive Git Bash / MSYS login:** the PTY core strips `ORIGINAL_PATH` from the child env on win32, so a login shell cannot rebuild a pre-prepend `PATH` from it (rationale). No-op for cmd.exe / PowerShell, which never read it.
 
-**A caller cwd must leave the MSYS drive form before it goes on the wire.** Git Bash exports `PWD` as a POSIX path (`/c/Users/…`) that win32 `path.resolve` would mangle into `C:\c\Users\…` and match no Surface; every command that resolves the caller's cwd does so through `callerWorkingDirectory`, which folds it back to a native path.
+**A caller cwd must leave the MSYS drive form before it goes on the wire.** Git Bash exports `PWD` as a POSIX path (`/c/Users/…`) that win32 `path.resolve` would mangle into `C:\c\Users\…` and match no Surface.
 
 Source of truth: `scripts/stage-dor-cli.mjs`, `dor/bin/dor`, `dor/bin/dor.cmd`, `withoutInheritedMsysOriginalPath` in `standalone/sidecar/pty-core.js`, `callerWorkingDirectory` in `dor/src/commands/shared.ts`.
 
 ## Spawning External Binaries
 
-**Every spawn of an external/user-installed binary must go through `spawnAndCapture` from `dor-lib-common`, never raw `node:child_process` `spawn`** — `dor agent-browser` driving `agent-browser`, the agent-browser host running tab/eval/screenshot commands, and anything added later. It owns the Windows recipe: cross-spawn rather than Node's own `spawn`, `windowsHide`, and resolution on `exit` with an exit-time output snapshot (rationale).
+**Every spawn of an external/user-installed binary must go through `spawnAndCapture` from `dor-lib-common`, never raw `node:child_process` `spawn`**; `spawnAndCapture` owns the Windows recipe (rationale).
 
 **Must leave Windows shim quoting to `spawnAndCapture`.** Forwarded argv can contain literal percent expressions; never interpolate them into an independently constructed shell command. (rationale)
 
@@ -142,7 +142,7 @@ flowchart TD
   C -- no --> WS{--workspace?}
   WS -- unresolved --> REF
   WS -- registered --> H[that Wall answers]
-  WS -- unregistered --> P["re-resolve next tick, refuse if still unmounted"]
+  WS -- unregistered --> P["retry, then refuse if still unmounted"]
   WS -- absent --> ST{id target held?}
   ST -- yes --> H
   ST -- no --> CA{caller or helper source held?}
@@ -157,11 +157,11 @@ Source of truth: `dor/src/commands/shared.ts`, `parseWorkspaceRef` and `parseSur
 
 ## Current Implemented Commands
 
-Implemented commands call private `surface.*` control methods, **enumerated once in `dor/src/protocol.ts` (`SURFACE_CONTROL_METHODS`, with `WORKSPACE_CONTROL_METHODS`, `APP_CONTROL_METHODS`, and `WINDOW_CONTROL_METHODS` beside it)** so the emitting client and the dispatching webview cannot drift.
+Implemented commands call private `surface.*` control methods, **enumerated once in `dor/src/protocol.ts`** so the emitting client and the dispatching webview cannot drift.
 
 `surface.list` joins one Workspace's Surfaces — visible panes **plus minimized (doored)** ones, each tagged `view` — with terminal state and activity snapshots, and reports the answering Workspace's id and Window's `window:<label>`. **Its `scope: 'all'` spans every Workspace of the Window**, tagging each row with its Workspace; **one Workspace that cannot answer fails the whole listing** — including one whose Wall never registers, after the routing retry ([Handle Model](#handle-model)) — since a missing Workspace reads as one holding nothing. **Only the active Workspace's selection is `focused`** in such a listing.
 
-**Port enumeration is opt-in** (`dor list --ports` / `--port`): the host scans each terminal Surface's process tree (`docs/specs/dor-browser.md` → Dev-Server Chip). **One listing costs one scan** (`PlatformAdapter.getOpenPortsMany`), and **a `--all` listing never forwards `includePorts` to a Wall**, scanning once for every Workspace's terminals instead. A remote paired session reports none, and any error degrades to an empty list rather than failing the call. Source of truth: `attachSurfacePorts` in `lib/src/components/wall/surface-ports.ts`, `getOpenPortsForPids` in `standalone/sidecar/pty-core.js`.
+**Port enumeration is opt-in** (`dor list --ports` / `--port`): the host scans each terminal Surface's process tree (`docs/specs/dor-browser.md` → Dev-Server Chip). **One listing costs one scan** (`PlatformAdapter.getOpenPortsMany`), `--all` included. A remote paired session reports none, and any error degrades to an empty list rather than failing the call. Source of truth: `attachSurfacePorts` in `lib/src/components/wall/surface-ports.ts`, `getOpenPortsForPids` in `standalone/sidecar/pty-core.js`.
 
 **`dor` forwards command tails as raw argv; the host quotes them** — `dor` cannot know the configured default shell, so tails after `--` travel as `command: string[]` and the host renders **one** command string, used for output, JSON responses, default `ensure` titles, and the launched command alike, picking its style with the same classifier clipboard/drop path escaping uses ([mouse-and-clipboard.md](mouse-and-clipboard.md) §8.6).
 
@@ -187,7 +187,7 @@ Source of truth: `dor/src/cli-core.ts`, `dor/src/commands/`, `buildShellCommandF
 
 **Must move one Surface within this Window through the shared move coordinator.** Interaction and refusal rules follow `docs/specs/layout.md` → Moving Surfaces between Workspaces.
 
-**Must require exactly one destination: a Workspace argument or `--new`.** Never reserve the bare name `new`; `--workspace` scopes the source. CLI moves preserve focus unless `--focus` follows the pane; if the active source disappears, activate the destination in command mode. **Must refuse iframe moves unless `--dangerously-destroy-iframe-page-state` is explicit**, without a GUI prompt. Single-Workspace hosts refuse `surface.move` through `spansWorkspaces`.
+**Must require exactly one destination: a Workspace argument or `--new`.** Never reserve the bare name `new`; `--workspace` scopes the source. CLI moves preserve focus unless `--focus` follows the pane; if the active source disappears, activate the destination in command mode. **Must refuse iframe moves unless `--dangerously-destroy-iframe-page-state` is explicit**, without a GUI prompt. Single-Workspace hosts refuse `surface.move`.
 
 Source of truth: `moveCommand` in `dor/src/commands/move.ts`; `moveSurface` in `lib/src/components/wall/surface-move.ts`.
 
@@ -244,7 +244,7 @@ Source of truth: `dor/src/commands/open-target.ts`, `resolveOpenTargetArgs` in `
 
 **Must intercept `dor-embed-size` under either browser command before native passthrough.** Identity flags select one existing bound Surface; raw `--session` must match uniquely. No selection creates or restarts a browser. A provider mismatch fails with the matching full command name; sizing mutations require a screencast.
 
-**Must query without dimensions or a preset; otherwise apply the requested sizing and await its measurement.** JSON and text report Surface identity, provider, render mode, resolved intent, readiness, and actual width, height and DPR when available. A disconnected browser reports no invented dimensions. Dimensions and preset selection are mutually exclusive; `pane-sync` rejects a DPR override. Fail invalid settings before changing size.
+**Must query without dimensions or a preset; otherwise apply the requested sizing and await its measurement.** A disconnected browser reports no invented dimensions. Dimensions and preset selection are mutually exclusive; `pane-sync` rejects a DPR override. Fail invalid settings before changing size.
 
 **Must keep a new managed browser's viewport preparation out of native stdout**; when and how it is sized is `docs/specs/dor-browser.md` → Viewport presets. Native `playwright open` still restarts its browser.
 
@@ -252,7 +252,7 @@ Source of truth: `runBrowserCli` in `dor/src/commands/browser-cli.ts`; `BrowserV
 
 ## Browser Surface Addressing
 
-**Must intercept `dor agent-browser` and `dor playwright` before stricli parses provider arguments.** One runner drives both; `BROWSER_PROVIDERS` and its descriptors own what differs: session argv, navigation verbs, nonbinding/informational controls, and execution scope.
+**Must intercept `dor agent-browser` and `dor playwright` before stricli parses provider arguments.**
 
 - **Exactly one identity flag**: `--key` (default `default`), `--session`, or `--surface`, plus `--workspace`; any two fail. Except the Dormouse-owned `dor-embed-size`, arguments are forwarded to the provider; stdout, stderr and exit status pass through.
 - **Resolution is host-side**: a `--key` or `--surface` takes one `surface.resolveBrowser { provider, key | surface, proposed? }` round trip before the binary runs, answered with a binding `{ session, cwd?, binaryPath? }` (`docs/specs/dor-browser.md` → Managed identity). `proposed` — the caller's cwd and executable — rides only a command that may bind. `--session` and an informational command ask nothing. Outside Dormouse a `--surface` fails.

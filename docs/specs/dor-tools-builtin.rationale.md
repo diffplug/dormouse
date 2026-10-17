@@ -18,7 +18,7 @@ Without a title, a viewer's header falls back to its running command, `dor __vie
 
 ## Markdown editor
 
-MDXEditor 4.3 parses `<!-- … -->` and discards it, and trims and re-serializes the whole document on export; without the comment node and style detection, saving a typical README after a one-word edit deleted its comments and rewrote every `-` bullet as `*` (measured 2026-10). Its `onChange` reports the first export after load as normalization, which is how a load stays clean.
+MDXEditor 4.3 parses `<!-- … -->` and discards it, and trims and re-serializes the whole document on export; without the comment node and style detection, saving a typical README after a one-word edit deleted its comments and rewrote every `-` bullet as `*` (measured 2026-10).
 
 Mermaid stays on 11: 12 makes its ELK layout (a 1.4 MB elkjs chunk) the default and restyles state diagrams, so diagrams would look different here than in renderers on dagre and the classic look; 12.0 was also three weeks old (2026-10).
 

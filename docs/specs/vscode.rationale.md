@@ -30,8 +30,6 @@
 
 **How a CSP failure presents, and what caught the last one** (2026-08). Remote from its cause: a blank panel, or a render error naming a chunk that is sitting on disk. Nothing reaches an extension-host log and the extension activates normally, so the only direct evidence either way is a CSP violation in the webview console (**Developer: Open Webview Developer Tools**) — which is all the code-split failure produced, `script-src-elem` violations and a blank panel. Reproducing that pre-fix document makes `webview-boot.smoketest.ts` fail on all four of its assertions with exactly those violations.
 
-**Why a fixture is not enough.** `webview-html.test.ts` can prove the transform right only for the Vite output it was handed; it cannot notice Vite emitting a shape nobody anticipated. That is the gap `webview-boot.smoketest.ts` exists to cover.
-
 **`'strict-dynamic'` could not be shown load-bearing by experiment.** With the `<meta property="csp-nonce">` in place, Vite's runtime preload helper nonces the `<link>` it injects ahead of a lazy `import()`, which populates the module map and lets the import resolve — including with `build.modulePreload` disabled (2026-08). That is an emergent interaction between a bundler's preload helper and the module map, not a policy guarantee.
 
 **Why the WebAssembly grant is `'wasm-unsafe-eval'` and not the token the error names.** Chromium reports the block as `'unsafe-eval' is not an allowed source of script`, and that token would indeed unblock it — while also re-enabling `eval`, `new Function`, and string timers for the whole document. `'wasm-unsafe-eval'` grants compilation and nothing else. It surfaced exactly where it should have, as `webview-boot.smoketest.ts` catching `CompileError: WebAssembly.instantiate() ...` on the first push of the inline-images branch (2026-09); no unit test could have, since CSP enforcement is the thing under test. An engine that does not know the token ignores it, leaving the pre-token behaviour rather than a regression.
@@ -50,7 +48,7 @@
 
 **Why the socket path is hashed.** macOS caps a unix socket path near 104 bytes, and `context.globalStorageUri.fsPath` is most of that on its own — joining a name onto it overflows.
 
-**Why the store's interface is async.** The service reads enrollment and ACL in-process, but the places that state lives — `SecretStorage`, `globalState` — are async, so `BurrowStateStore` is too. The enrollment memo exists because `SecretStorage` is a keychain round trip and both the activation probe and the service want the same answer.
+**Why the enrollment is memoized.** `SecretStorage` is a keychain round trip, and both the activation probe and the service want the same answer.
 
 **Why the memo must be dropped on any window's change.** Without it a window promoted to broker could resurrect an enrollment another window had cleared, or never see one another window had just created — `SecretStorage` is shared across all of an extension's windows.
 
@@ -61,8 +59,6 @@
 **Why `stillOurs` compares full filesystem identity.** Two windows can find the same corpse, both unlink, and the second bind silently displaces the first, leaving the loser serving a socket no client can reach; nothing on the bind path detects that. Inode alone is reused too readily to distinguish "still ours" from "replaced". And the identity has to be anchored to our own bind rather than to a first read of the path: the displacing unlink and rebind can land before that read, so both windows read the winner's socket, both find it unchanged, and both confirm — two brokers, which is what `settles two windows racing for one corpse into a broker and a client` caught intermittently (observed 2026-09-22). `listen` binds inside the call and resolves on a nextTick, so a `statSync` before the next `await` runs ahead of anything queued on this process's thread pool. The competitor is another extension host, so its unlink and rebind can still land in the microseconds between our `bind` and that `statSync`: the anchor narrows the race rather than closing it. Closing it would take an atomic create-only publish — bind a unique path, then `link()` it onto the fixed one, which fails `EEXIST` instead of displacing — a redesign of the arbitration.
 
 **What an unverified bind would cost.** During `RECLAIM_VERIFY_MS` the socket is bound but may still be given up. A command landing inside that window and told "broker" would start a service the stand-down path never tears down — two Burrows under one burrowId, and the endless relay displacement above.
-
-**Why `listen`-time errors are logged rather than thrown.** The sockets already accepted are unaffected by an accept-time failure, and a listener that has genuinely died is noticed by the windows that can no longer reach it.
 
 **Why an empty token read must be waited out.** An empty `serverToken` fails the hello check for every peer, and a broker never re-reads the token, so a window that adopted `''` would refuse the whole installation for its lifetime while every other window retried at `RETRY_MS` forever.
 
@@ -93,7 +89,3 @@ The platform packages come from a scoped `pnpm deploy` because the wider switche
 ## Build and development
 
 **Why a self-host VSIX needs no update switch of its own.** VS Code treats a VSIX install as a pinned version and leaves it out of Marketplace auto-update (microsoft/vscode#219932, fixed by #219933 in the July 2024 iteration, 1.92; the diff covers the CLI's VSIX path, `code --install-extension`, which `pnpm dogfood:vscode` takes — checked 2026-09). An extension cannot opt itself out of Marketplace updates, and a distinct extension id would collide with the Marketplace build's command, view, and keybinding contributions when both are installed, and would strand the enrollment in another id's `SecretStorage`.
-
-**Why the separate typecheck is wired into `test`.** A reference to a deleted function once reached a commit and surfaced only as a runtime throw during `deactivate()`, which — having no `try`/`catch` — skipped every teardown step behind it. `tsc` is the package's only automated check for that class of error.
-
-**Why the typecheck config carries both DOM and Node libs.** The checked program spans two runtimes — `src/` is extension-host Node code but imports webview modules from `../lib/src/` — so `vscode-ext/tsconfig.json` is looser than either runtime alone; each side is checked precisely by its own project (`lib/tsconfig.app.json` for the webview). What it reliably catches is vscode-ext's own code referring to something that no longer exists.

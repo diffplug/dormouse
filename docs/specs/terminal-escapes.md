@@ -13,7 +13,7 @@
 
 **The parser frames all five string controls — OSC, DCS, SOS, PM, APC — and models nothing outside OSC**, so DCS and APC are forwarded whole. **`BEL` terminates only OSC**; inside the others it is payload, never a bell (rationale). **CAN, SUB, or a bare `ESC` cancels any string control** — the cancelled sequence yields no semantic event, and a bare `ESC` is re-read as the start of the sequence it actually opens. **A forwarding parser must remember the kind it is resuming** (rationale). **A string control may split across PTY reads at any position** — introducer, terminator, and cancel alike.
 
-**The parser and the text filter frame through one tokenizer.** Source of truth: `STRING_CONTROL_INTRODUCER` and `stringControlEndScan` in `lib/src/lib/terminal-controls.ts`, consumed by `findStringControlEnd` in `lib/src/lib/terminal-protocol.ts`; the two are pinned against each other by `lib/src/lib/terminal-controls.test.ts`.
+**The parser and the text filter frame through one tokenizer.** Source of truth: `STRING_CONTROL_INTRODUCER` and `stringControlEndScan` in `lib/src/lib/terminal-controls.ts`; `lib/src/lib/terminal-controls.test.ts` pins the parser and the filter against each other.
 
 ## Parsing location
 
@@ -44,7 +44,7 @@ flowchart LR
 
 Two escape-aware consumers are **not** parse sites: `lib/src/lib/terminal-controls.ts` strips presentation controls and `lib/src/lib/terminal-state-store.ts` elides alternate-screen spans ([terminal-state.md](terminal-state.md)). Both read already-stripped output; neither changes what reaches xterm.js.
 
-Source of truth: `oscDispositionAt` in `lib/src/lib/terminal-protocol.ts`, `createProcessedPtyStream` in `lib/src/lib/processed-pty-stream.ts`, `createOwnerPtyStream` in `lib/src/host/owner-pty.ts`.
+Source of truth: `createOwnerPtyStream` in `lib/src/host/owner-pty.ts`; `oscDispositionAt` in `lib/src/lib/terminal-protocol.ts`.
 
 ### `pty:data` strip semantics
 
@@ -52,7 +52,7 @@ Source of truth: `oscDispositionAt` in `lib/src/lib/terminal-protocol.ts`, `crea
 
 **`textData` is the same chunk with every string-control payload removed**, for consumers reading output as text; every other control is left for `stripTerminalControls`. Tool events are OSC 367 ([dor-tool.md](dor-tool.md#osc-367)). **Notification-derived state never travels as `pty:data`.**
 
-Each chunk is also classified for the quiesce detector: **the activity monitor's `onData()` fires only when `visibleData` is non-empty**, so a chunk of nothing but notification/progress OSCs is not meaningful output, while one carrying visible output alongside them is.
+**A chunk counts as output for the quiesce detector only when its `visibleData` is non-empty**, so a chunk of nothing but notification/progress OSCs is not meaningful output, while one carrying visible output alongside them is.
 
 Replay (`pty:replay`) is the raw stream requiring re-parse: **the webview runs a one-shot parser over the buffered bytes** (`parseReplay` in `lib/src/lib/platform/replay-parse.ts`). **Historical replay must not re-fire** alerts, quiesce events, protocol notifications, or query responses — it applies the semantic and Tool events and drops the rest (rationale). **Every parser in a realm holding the theme takes `themeColorProvider`**, one-shot replay parsers included: a *declined* query stays in `visibleData` for the receiving renderer to answer, and answering is the owner's alone (rationale).
 

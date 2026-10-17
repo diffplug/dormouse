@@ -632,8 +632,7 @@ export function flushTerminal(id: string): Promise<void> {
 }
 
 /** Where a hidden helper's xterm element waits between reveals: still in the
- *  document, preserving its DOM state and scrollback
- *  (docs/specs/terminal-context.md → Helper lifecycle). */
+ *  document, preserving its DOM state and scrollback. */
 let helperParking: HTMLElement | null = null;
 
 /** Park a helper Session's element out of sight without terminating anything;

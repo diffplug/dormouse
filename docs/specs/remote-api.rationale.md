@@ -10,7 +10,7 @@
 
 **Why `ptyId` is opaque under VS Code.** Two duplicated windows can cold-restore panes holding the same PTY id. A handle that carried that id verbatim would let one window's attach be routed to the other's terminal, moving the stream and both input methods onto a PTY the Client never asked for.
 
-In September 2026, both production installations use `createAskSurfaceProvider`: resolution selects a routing key and applies the requested size, while `streamPty` separately owns the subscription. The former `SurfaceHandle.release` was a no-op in that shared constructor; a test-only release counter suggested a second resource lifetime that neither host had.
+In September 2026 the former `SurfaceHandle.release` was a no-op in `createAskSurfaceProvider`, the constructor both production installations share; a test-only release counter suggested a second resource lifetime that neither host had.
 
 ## Transport
 
@@ -44,8 +44,6 @@ In September 2026, both production installations use `createAskSurfaceProvider`:
 
 **Why snapshots rather than deltas.** A directory is dozens of entries at most, so resending the whole listing on each coalesced change costs less than the delta protocol would.
 
-**Why a collect carries a generation.** Collects overlap whenever something changes during a slow provider round trip, and they can settle in either order — so without one the stale answer lands last and blanks the picker until the next change.
-
 **Why duplicate `surfaceId`s collapse instead of both being listed.** The same cold-restore id collision as §The provider seam, one level up: two identical rows would make a picker keyed by `surfaceId` a lottery over which window an attach actually reaches.
 
 **Why `workspace` is withheld where ids are local to a Window.** Every answerer's entries meet in one listing. VS Code's webviews each call themselves `workspace:1` "Workspace 1", so naming them would file every window's terminals under one header; withheld, the Client lists them flat, as before. Standalone's ids come from one application-wide counter, so they stay distinct across its Windows.
@@ -63,8 +61,6 @@ In September 2026, both production installations use `createAskSurfaceProvider`:
 **Why this surfaced with inline images.** Duplicate replies were always possible — xterm core answers DA1, DA2, DSR/CPR, and XTVERSION — but a program asks those once at startup, before a phone is usually attached. ImageAddon's kitty handler replies `APC G i=<n>;OK ST` on *every* transmit unless the sender passes `q>=1`, so with a phone attached each image displayed on the laptop echoed a second `OK` into the shell's input a relay latency later, as visible junk on the prompt line.
 
 ## Attach is the resize
-
-In September 2026, the Viewer-local 60ms restoration timer could overwrite a later local or other-Viewer resize, because neither writer touched the first Viewer's timer. Cancelling it on detach also stranded the PTY one row below its xterm. Moving restoration to the shared PTY owner makes all size writers cancel it and lets a detached Viewer's temporary resize complete.
 
 **Why a resize is a whole screen.** `SIGWINCH` makes full-screen TUIs repaint completely and shells redraw their prompt line, so the client's first screen arrives from the live stream alone and no snapshot transfer is needed. The same-size case has to be forced because xterm sends no `SIGWINCH` for a resize to the current size, leaving the client staring at an empty screen until the next output.
 

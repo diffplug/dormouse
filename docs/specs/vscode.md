@@ -15,10 +15,8 @@ The shared frontend runs in the bottom-panel `WebviewView` and in independent ed
 - **Closing an editor-tab `WebviewPanel` kills that panel's owned PTYs** (`killOnDispose`), and VS Code discards the tab's per-panel state. **Disposing the `WebviewView` releases its router and leaves the PTYs alive** for its next router alone.
 - Each VS Code window gets its own extension host, and therefore its own pty-host child.
 - **Must cap each PTY's replay and scrollback at 1,000,000 characters**, replay clearing on first read; **a pty-host child crash reports every live PTY exited and keeps its buffer**, ignoring a replaced child's late output and exits.
-- The alert host (`docs/specs/transport.md` → "Message protocol") is module-level in `message-router.ts`, shared by every router; a router's realm is its `routerId`, ended on router disposal and on a `dormouse:init` re-init.
-- **Never let a resuming router steal another webview's PTYs**: each router's `ownedPtyIds` is enforced by the module-level `globalOwnedPtyIds`.
-- **A Session's alert state follows its PTY**: `pty:spawn` claims the id before starting its alert state over from `options.alert`, so the seeded state reaches the claiming webview, and **every kill removes the entry**. **Must reserve a closing router's PTYs until its deferred kills finish**, so another router cannot claim them during CWD work.
-- **Every webview and Client write and resize goes through `alertedPty`**, a remote Client's from either Burrow tier included (`writeClientInput`); what it does: `docs/specs/alert.md` -> "Engagement", "WATCHING Track".
+- **Never let a resuming router steal another webview's PTYs**: a PTY id is in at most one router's `ownedPtyIds`.
+- **A Session's alert state follows its PTY**: `pty:spawn` starts it over from `options.alert`, and **every kill removes the entry**.
 - **`retainContextWhenHidden` is set on both `WebviewPanel` and `WebviewView`**, so xterm.js DOM, scrollback, and PTY subscriptions survive hide/show without a resume.
 - **Workbench chords in the `lib/src/lib/vscode-keybindings.ts` allowlist are mirrored**: xterm still processes the key while the webview posts `dormouse:runWorkbenchCommand`, and `message-router.ts` revalidates it against the same set before `vscode.commands.executeCommand`.
 
@@ -51,15 +49,13 @@ The selected shell is `dormouse.selectedShellPath`, read from `workspaceState` b
 
 ## Serialization and restore
 
-A `WebviewPanelSerializer` under the `dormouse` view type restores editor panels after a restart (`onWebviewPanel:dormouse` activates the extension early enough). The shapes it round-trips are transport.md's.
+A `WebviewPanelSerializer` under the `dormouse` view type restores editor panels after a restart. The shapes it round-trips are transport.md's.
 
 **Every save path must merge current alert states through `toPersistedAlertState`** — the periodic `dormouse:saveState` and the deactivate refresh (`refreshSavedSessionStateFromPtys`) alike (`docs/specs/layout.md` → Session persistence): without it a restore reverts alert state, and live state would persist transient fields. The WebviewView saves into `workspaceState` (`dormouse.session`); each WebviewPanel through per-panel `vscode.setState()` from the frontend.
 
-**Must serialize host saves and await them after the webview's flush acknowledgement, within the existing flush deadline**, before the deactivate refresh reads the snapshot. A failed write is logged without blocking later saves.
-
 **On deactivate**, in this order, each step bounded:
 
-1. Start closing browser sessions, joined after step 2 so it overlaps the capture. **Its rejection is absorbed** — a throw out of the join would skip the flush, the refresh, and both kills.
+1. Start closing browser sessions; **a failure there never skips a later step**.
 2. Capture agent recovery commands.
 3. Flush every webview's session.
 4. Refresh saved state from the still-live PTYs (CWD).
@@ -83,11 +79,11 @@ Source of truth: `vscode-ext/src/surface-ids.ts`.
 
 ## Theme integration
 
-VS Code is the only host that supplies `--vscode-*` itself, so `lib/src/main.tsx` **must install** `installVscodeThemeVarResolver()` before React renders; the resolver, its observers, and the `dormouse.debugTheme` entry are `docs/specs/theme.md` → "Runtime model" and "Theme debugger".
+VS Code is the only host that supplies `--vscode-*` itself; the resolver that fills the rest, its observers, and the `dormouse.debugTheme` entry are `docs/specs/theme.md` → "Runtime model" and "Theme debugger".
 
 ## OSC color query answering
 
-The colour push (`dormouse:themeColors`): `docs/specs/transport.md` → "Message protocol"; `message-router.ts` caches the latest for every PTY's parser. Windows also needs `useConptyDll: true` (`docs/specs/theme.md` → "OSC color queries on Windows require the bundled ConPTY").
+The colour push (`dormouse:themeColors`): `docs/specs/transport.md` → "Message protocol". Windows also needs `useConptyDll: true` (`docs/specs/theme.md` → "OSC color queries on Windows require the bundled ConPTY").
 
 ## CSP policy
 
@@ -95,7 +91,7 @@ The policy starts from `default-src 'none'`; each grant below names what needs i
 
 **`frame-src` is loopback-only**: `dor iframe` frames its target through the transparent proxy the extension host stands up, so the only origin ever embedded is loopback on an OS-assigned port (`docs/specs/dor-browser.md`).
 
-**The webview CSP carries no relay sources.** Its loopback `ws:` entries are for the host's guarded browser viewer sockets (`docs/specs/dor-browser.md` → Viewer Socket); the Burrow holds `/ws/burrow` from the *extension host*, which no CSP fences. **That relay origin is a build-time constant, never a runtime value**, baked into `dist/extension.js` by `vscode-ext/scripts/esbuild.mjs` (`docs/specs/relay.md` → "Relay origin").
+**The webview CSP carries no relay sources.** Its loopback `ws:` entries are for the host's guarded browser viewer sockets (`docs/specs/dor-browser.md` → Viewer Socket); the Burrow holds `/ws/burrow` from the *extension host*, which no CSP fences. **That relay origin is a build-time constant, never a runtime value** (`docs/specs/relay.md` → "Relay origin").
 
 `'unsafe-inline'` for styles covers the theme variables VS Code injects inline on `body`. **Must mint a fresh per-render nonce from 24 CSPRNG bytes, never `Math.random()`**, and nonce-gate the boot globals.
 
@@ -109,8 +105,6 @@ The policy starts from `default-src 'none'`; each grant below names what needs i
 **Keep `'strict-dynamic'`** even though no experiment shows it load-bearing (rationale): it is the mechanism CSP specifies for "a script the nonce vouched for may load more".
 
 **`'wasm-unsafe-eval'` permits WebAssembly compilation and nothing else** — `eval` stays blocked. What needs it is [layout.md](layout.md#inline-graphics). (rationale)
-
-**A CSP change is proven in a real webview** (`vscode-ext/test/webview-boot.smoketest.ts`), never by string inspection (rationale).
 
 Source of truth: `getWebviewHtml` in `vscode-ext/src/webview-html.ts`, pinned by `vscode-ext/test/webview-html.test.ts` and `vscode-ext/test/webview-boot.smoketest.ts`; `assertRelayOriginBaked` in `scripts/relay-origin.mjs`, `bakedRelay` in `lib/src/host/relay-origin.ts`.
 
@@ -146,8 +140,7 @@ Source of truth: `VsCodeBurrowStateStore` in `vscode-ext/src/burrow-store.ts`, `
 - **Roles never flip downward**: no `onRole(false)` after a `true` (rationale).
 - **Contend on broker death, not on a timer**: `bind` picks exactly one; no TTL, heartbeat file, or watcher.
 - **Never unlink on the first refusal; a reclaimed bind is re-checked (`stillOurs`) before it serves** (rationale).
-- **A bind is not a role until it is believed**: every "is this window the broker" answer reads `brokerConfirmed`, so **unverified reads as unsettled** and a command landing mid-verification is held for the verdict (rationale).
-- **Errors after `listen` are logged, not thrown**, so a late server error cannot take the extension host down (rationale).
+- **A bind is not a role until it is believed**: **an unverified bind reads as unsettled**, and a command landing mid-verification is held for the verdict (rationale).
 
 **Trust.** The socket path is derived, not secret, so two layers stand between it and this installation's terminals.
 
@@ -163,23 +156,23 @@ Source of truth: `VsCodeBurrowStateStore` in `vscode-ext/src/burrow-store.ts`, `
 
 **Nothing starts until there is a Burrow to run.** Contention begins when activation finds an enrollment for the baked origin or the serving marker, when `secrets.onDidChange` reports another window wrote one, or on the first command in `CONTENTION_STARTERS` from any webview — **the only commands that may start it**; `setNetworkPolicy` is among them **so the service stays the policy's only writer**. A user who never enrolls, opens a link, or changes the policy never sees a socket. **The service runs independently of webview lifetime**: a broker window with zero Dormouse webviews still relays, contributing an empty directory.
 
-**A command that arrives mid-contention is held, not refused** (rationale): commands queue, bounded with the oldest refused on overflow, and drain when a role settles — to the service if this window brokered, over the link if not. **Each carries its own deadline, under the adapter's command timeout**, so a contention that never settles produces a reason rather than a timeout.
+**A command that arrives mid-contention is held, not refused** (rationale), until a role settles. **Each carries its own deadline, under the adapter's command timeout**, so a contention that never settles produces a reason rather than a timeout.
 
-**A window with no Burrow at all still answers the read-only commands (`idleAnswer`) exactly as an idle service would**, from builders shared with the service; the policy is read and never saved. The idle `status` reads the installer's offer file, so the one-click card renders on a machine no window has a Burrow for. **Everything else refuses with an error**, so the console hook fails fast.
+**A window with no Burrow at all still answers the read-only commands (`idleAnswer`) exactly as an idle service would**; the policy is read and never saved. The idle `status` reads the installer's offer file, so the one-click card renders on a machine no window has a Burrow for. **Everything else refuses with an error**, so the console hook fails fast.
 
 Source of truth: `vscode-ext/src/burrow.ts`, `ensurePeerNet` in `vscode-ext/src/peer-link.ts`; pinned by `vscode-ext/test/burrow.test.ts` and `vscode-ext/test/peer-link.test.ts`.
 
 **The webview bridge.** A webview reaches the service over `BurrowLink`, implemented in `vscode-adapter.ts` on three messages, each wrapping the shared client's shape in a `payload`: `burrow:command { payload: BurrowCommand }` out, `burrow:result { payload: BurrowResult }` and `burrow:event { payload }` back. **Everything else is the shared client** in `lib/src/host/remote/link-client.ts` (`docs/specs/transport.md` → Message protocol). Results are **broadcast to every webview in the window** — safe only because the shared client mints globally unique ids — and one correlation id serves both the in-window fan-out and the cross-window forward.
 
-**The relay socket.** The supported `engines.vscode` range spans the Node version that added `globalThis.WebSocket` (rationale), so the service **must be constructed with a factory** that prefers the global and falls back to the bundled `ws`. **`ws`'s optional native accelerators `bufferutil` / `utf-8-validate` are `external` and never shipped**. **The same factory opens the one-time rendezvous, which must carry no `Origin` header** — neither implementation sends one. Source of truth: `createRelaySocket` in `vscode-ext/src/burrow.ts`.
+**The relay socket.** The supported `engines.vscode` range spans the Node version that added `globalThis.WebSocket` (rationale), so the service **must be constructed with a factory** that prefers the global and falls back to the bundled `ws`. **The same factory opens the one-time rendezvous, which must carry no `Origin` header** — neither implementation sends one. Source of truth: `createRelaySocket` in `vscode-ext/src/burrow.ts`.
 
 ### The direct path
 
-**The broker's extension host answers a `direct-offer`** (`docs/specs/remote-api.md` → Transport → "Direct path") over the same lazily loaded `node-datachannel` polyfill as the sidecar, in-process (rationale), so a native crash there takes down that window's extension host. **Tear the addon down only at deactivation**: the teardown is terminal for the process, and a window that later wins the lease again still needs a factory that loads.
+**The broker's extension host answers a `direct-offer`** (`docs/specs/remote-api.md` → Transport → "Direct path") over the same lazily loaded `node-datachannel` polyfill as the sidecar, in-process (rationale), so a native crash there takes down that window's extension host.
 
-**One universal VSIX carries every platform's addon**: the build `pnpm deploy`s the extension's production closure for every os and cpu, verified against `pnpm-lock.yaml` (rationale), and stages the addon, its dependencies, and the platform packages `vscode-ext/package.json` declares under `optionalDependencies` into `dist/node_modules`. `node-pty`'s one package carries every prebuild. **Keep the addon `external` to `dist/extension.js`**, which the build asserts.
+**One universal VSIX carries every platform's addon** (rationale): the build stages the addon, its dependencies, and only the platform packages `vscode-ext/package.json` declares under `optionalDependencies` into `dist/node_modules`. `node-pty`'s one package carries every prebuild.
 
-Source of truth: `vscode-ext/scripts/stage-native-direct.mjs`; `initBurrow` in `vscode-ext/src/burrow.ts`; `createNativeDirectPeerFactory` in `lib/src/host/remote/native-direct-peer.ts`; `assertNothingInlined` in `scripts/assert-not-inlined.mjs`.
+Source of truth: `vscode-ext/scripts/stage-native-direct.mjs`; `initBurrow` in `vscode-ext/src/burrow.ts`; `createNativeDirectPeerFactory` in `lib/src/host/remote/native-direct-peer.ts`.
 
 ## Peer surfaces
 
@@ -202,9 +195,9 @@ Every webview, broker or not, installs the responder (`docs/specs/transport.md` 
 
 **Cross-window attach fans out a read-only `resolve` first and the first answer is the answer**: the mutating `attach` and every later handle resize go only to that answer's tier and peer, so duplicated cold-restored windows do not both resize; the owner resizes through its xterm (`docs/specs/remote-api.md` → "Size authority: last-attach-wins") and replies with the settled size plus the `ptyId`, and the service then streams that PTY. Release and missing answers: `docs/specs/remote-api.md` → "Attachment invariants". Take back is an ordinary command, forwarded to the broker.
 
-The service's `streamPty` subscribes to the extension host's own per-PTY parse (`docs/specs/terminal-escapes.md` → "Parsing location"). **A sink subscribes to the PTY it watches and to no other**, so an unattached terminal costs nothing and each sink gets its own mid-string hold.
+The service's `streamPty` subscribes to the extension host's own per-PTY parse (`docs/specs/terminal-escapes.md` → "Parsing location").
 
-Source of truth: `installPeerSurfaceResponder` in `lib/src/remote/burrow/peer-surfaces.ts`, wired from `lib/src/main.tsx`; `vscode-ext/src/processed-pty-streams.ts`.
+Source of truth: `installPeerSurfaceResponder` in `lib/src/remote/burrow/peer-surfaces.ts`; `vscode-ext/src/processed-pty-streams.ts`.
 
 ## Peer surfaces across windows
 
@@ -218,13 +211,11 @@ The broker window listens on the authenticated local socket and every other wind
 
 **Pairing UI events are unaddressed and broadcast to every window's webviews**, so the approval modal appears wherever the user is looking. **When a window completes the handshake the broker sends it the current `status` and `one-time` events**, which are otherwise emitted only on change.
 
-**Must bound every peer frame at 4 MiB of UTF-8 (`FrameDecoder`'s default; never lower it, since another build's windows send up to it) before parsing**, complete frames and partial tails included; an oversized frame is discarded through its newline without losing adjacent valid frames. **Socket bind errors reject startup** and are handled as an unavailable peer link, never a pending promise or an uncaught extension-host error.
+**Must bound every peer frame at 4 MiB of UTF-8 (`FrameDecoder`'s default; never lower it, since another build's windows send up to it) before parsing**, complete frames and partial tails included; an oversized frame is discarded through its newline without losing adjacent valid frames.
 
 Source of truth: `vscode-ext/src/peer-link.ts`; `vscode-ext/src/peer-link-protocol.ts`, pinned by `vscode-ext/test/peer-link-protocol.test.ts`; `askBothTiers` in `vscode-ext/src/burrow.ts`; `brokerRequest` in `vscode-ext/src/message-router.ts`.
 
 ## Build and development
-
-**The build does not typecheck**: esbuild strips types, so `tsc` runs as `pnpm typecheck`, **wired into the package's `test` script** so the root `pnpm test` covers it — the only check protecting `deactivate()`, which has no `try`/`catch` (rationale). Source of truth: `vscode-ext/package.json`.
 
 **The extension makes no update check of its own**: VS Code updates it from the Marketplace, and never auto-updates one installed from a VSIX (rationale). **`engines.vscode` must stay at `^1.92.0` or later**, the first VS Code that pins a VSIX install, so a self-host VSIX keeps the Marketplace identity and is never replaced unasked.
 

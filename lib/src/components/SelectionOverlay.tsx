@@ -121,7 +121,7 @@ export function SelectionOverlay({ terminalId }: Props) {
                 strokeDasharray="4 3"
               />
             )}
-            {/* Spec §4.5: the copied selection fills. */}
+            {/* The copied selection fills. */}
             {copied && (
               <path
                 d={pathD}

@@ -11,14 +11,14 @@
 
 | Entry point | Tool side | Host side |
 |---|---|---|
-| `osc` | `serveSequence`, `stateSequence`, `openSequence`, `dehydrateSequence`: throw on a value the host would ignore; `readDehydrated` | `parseToolAnnounce`, `parseToolState`, `parseToolOpen`, `parseToolDehydrate`, `validToolServePath` |
-| `protocol` | `readHostMessage` | `readFrameMessage` (sanitizes and bounds a save error) |
-| `frame` | `connectToolFrame` | — |
+| `osc` | an encoder per verb, throwing on a value the host would ignore; a reader for its own dehydrate payload | a parser per verb |
+| `protocol` | reads host messages | reads frame messages |
+| `frame` | the save-channel client | — |
 
-- **The host (`lib`) must reach the package through source aliases**, beside every `dor-tools-builtin/*` alias (tsconfig `paths`, Vite, Storybook, esbuild, vitest), since no host build compiles the package first.
-- **`dor-tools-builtin` consumes the built package**: the viewer process imports `osc`, and the editor pages bundle `frame`.
+- **The host (`lib`) must reach the package through source aliases**, beside every `dor-tools-builtin/*` alias, since no host build compiles the package first.
+- `dor-tools-builtin` speaks the protocol through it (`docs/specs/dor-tools-builtin.md` → Packaging).
 
-Source of truth: `dor-tools-lib/src/` (a module per entry point); `dor-tools-lib/package.json`; `dor-tools-builtin/package.json`.
+Source of truth: `dor-tools-lib/src/` (a module per entry point); `dor-tools-lib/package.json`.
 
 ## Future
 

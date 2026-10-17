@@ -104,7 +104,7 @@ The standalone host contributes no chords; `docs/specs/standalone.md` owns its n
 ## Implementation references
 
 - `lib/src/components/wall/use-wall-keyboard.ts` — the capture-phase listener; the iframe-shim leader `message` listener
-- `lib/src/components/wall/keyboard/` — one module per dispatch branch: `handle-dual-tap.ts`, `handle-editable-clipboard.ts`, `handle-mouse-selection-keys.ts`, `handle-kill-confirm.ts`, `handle-workspace-shortcuts.ts`, `handle-pane-shortcuts.ts`, `handle-pane-navigation.ts`; platform modifiers in `chords.ts`
+- `lib/src/components/wall/keyboard/` — one module per dispatch branch, platform modifiers included
 - `lib/src/components/wall/chrome-keyboard-lease.ts`, `lib/src/lib/workspace-ui-store.ts` — the strip's keyboard suppression and rename/confirmation state
 - `lib/src/lib/vscode-keybindings.ts` — the workbench mirror allowlist
 - `lib/src/lib/terminal-mouse-router.ts` — live Alt tracking during a drag

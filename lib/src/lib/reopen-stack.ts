@@ -32,6 +32,10 @@ export interface WorkspaceReopenRecord {
 
 export type ReopenRecord = SurfaceReopenRecord | WorkspaceReopenRecord;
 
+/**
+ * As many as the host keeps closed windows (`CLOSED_WINDOW_CAP` in
+ * `standalone/src-tauri/src/lib.rs`).
+ */
 const CAPACITY = 20;
 const records: ReopenRecord[] = [];
 

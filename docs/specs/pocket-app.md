@@ -66,17 +66,17 @@ flowchart TD
 * **An absent `terminal.closed` exit code maps to `-1`, not `0`** — the local path's sentinel.
 * **Exited surfaces stay in the directory** with `alive:false`, so the wall filters them out of selectable sessions and the active-pane default.
 
-**The pinned record picks a row's primary action.** The Burrows view lists the `KnownBurrowV1` records (no record, no row), stamped online from `GET /api/burrows`, offering Connect alone or **Pair again** alone. **Nothing asks the Burrow**: only an authenticated `pairing-required` outcome moves a row, dropping local authorization without discarding the pin (rationale). **Remove** tombstones the delivery id before deleting the record.
+**The pinned record picks a row's primary action.** The Burrows view lists the `KnownBurrowV1` records (no record, no row), stamped online from `GET /api/burrows`, offering Connect alone or **Pair again** alone. **Nothing asks the Burrow**: only an authenticated `pairing-required` outcome moves a row, dropping local authorization without discarding the pin (rationale).
 
 **A record of the signed-in account the Relay's list no longer names is removed**, marked only off a `GET /api/burrows` that succeeded; a listed offline Burrow, and another account's record, keep the offline row. **Must bind removal checks to the account that started the list read.** Its row reads `BURROW_REMOVED_COPY` for the deployment Pocket read (`docs/specs/remote-network.md` -> "Anywhere") and offers **Forget** alone, which is Remove. **A Connect answered `BURROW_UNAVAILABLE_MESSAGE` re-reads the list**, showing that copy instead where the Burrow is gone; a failed re-read keeps the original.
 
-Source of truth: `PlatformAdapter` in `lib/src/lib/platform/types.ts`; `App` in `lib/src/remote/pocket-app/App.tsx`; `ScanInvitation` in `lib/src/remote/pocket-app/ScanInvitation.tsx`; `takePairingHash` in `lib/src/remote/pocket-app/pair-link.ts`; `PocketClient` in `lib/src/remote/client/pocket-client.ts`; `RemotePtyAdapter` in `lib/src/remote/client/remote-adapter.ts`.
+Source of truth: `PlatformAdapter` in `lib/src/lib/platform/types.ts`; `App` in `lib/src/remote/pocket-app/App.tsx`; `takePairingHash` in `lib/src/remote/pocket-app/pair-link.ts`; `PocketClient` in `lib/src/remote/client/pocket-client.ts`; `RemotePtyAdapter` in `lib/src/remote/client/remote-adapter.ts`.
 
 ## Design system and theming
 
 **All of Pocket — the auth screens included — renders on the shared themeable design system** (`--color-*` tokens over `--vscode-*`; [theme.md](./theme.md), `DESIGN.md`), never the website's separate "homepage" system (`website/src/index.css`). **No Pocket-specific palette**: a theme change re-skins auth screens and wall together.
 
-**The theme is restored before first paint** (rationale). Restoring also syncs the document-level chrome — root `color-scheme` and the `<meta name="theme-color">` tint — from the applied theme.
+**The theme is restored before first paint** (rationale).
 
 Source of truth: `restorePocketTheme` in `lib/src/remote/pocket-app/pocket-theme.ts`; `PK` in `lib/src/remote/pocket-app/pocket-chrome.tsx`.
 
@@ -123,7 +123,7 @@ Source of truth: `getPushAvailability` / `subscribeToPushInBrowser` in `lib/src/
 
 ## What Pocket stores
 
-**Must have a successful current-page storage probe before a scan starts registration, sign-in, token retirement, or pairing**, selecting the Client static format per [remote-security-model.md](./remote-security-model.md) → Client statics. The probe is shared in flight, cached only on success and only in memory, and invalidated by any later store or key-generation failure. **Both formats failing shows a storage compatibility error without resetting pairing data**, pointing at `/diagnostics/index.html`; **it names the failed probe stage and an allowlisted exception name, never a browser exception message or key material.** (rationale)
+**Must have a successful current-page storage probe before a scan starts registration, sign-in, token retirement, or pairing**, selecting the Client static format per [remote-security-model.md](./remote-security-model.md) → Client statics. **Both formats failing shows a storage compatibility error without resetting pairing data**, pointing at `/diagnostics/index.html`; **it names the failed probe stage and an allowlisted exception name, never a browser exception message or key material.** (rationale)
 
 **Must use metadata-only summaries for listing, push registration and queries, removal, and re-pair identity checks**, so a corrupt key blocks none of them; connection and push decryption use full records. **A connection-record read failure shows fixed retry/scan text, never browser exception details, and changes no authorization**: a fresh scan keeps the Burrow pin and requires fresh approval. (rationale)
 
@@ -144,7 +144,7 @@ Source of truth: `requirePocketKeyStorage` in `lib/src/remote/client/pocket-db.t
 
 The Hosted Relay serves the same bundle by the same rules (`docs/specs/hosted.md` -> "Relay").
 
-Source of truth: `registerPocketServing` in `relay/src/app.ts`; `pocketRoutes` in `hosted/server/pocket.ts`. Both built HTML shells are checked by `assertPocketShell` in `lib/scripts/assert-pocket-worker.mjs`.
+Source of truth: `registerPocketServing` in `relay/src/app.ts`; `pocketRoutes` in `hosted/server/pocket.ts`.
 
 ### The capability harness
 
@@ -173,7 +173,7 @@ Source of truth: `ClientSessionCore` in `lib/src/remote/client/session-core.ts`;
 
 **Pocket offers a direct path once the connection outcome says `ok`**, over the browser's own `RTCPeerConnection` (ICE servers by deployment, read before every Connect and pairing: [remote-network.md](./remote-network.md) → Anywhere), and keeps the session on the relay when the browser has none or the Burrow declines ([remote-api.md](./remote-api.md) → Direct path owns the whole protocol) — **unless the outcome says `directOnly`**, where the connect answers only once the direct path carries the session ([remote-network.md](./remote-network.md) → Local networks).
 
-**Must retire the previous session — its peer, its channel, and its pending requests — immediately before the replacement's connection request goes out, and never report burrow loss for it**: the old channel's close can otherwise arrive first and fail the replacement's waiter. **Never earlier than that**: a presence proof the user dismisses, or a handshake that fails, leaves a working session untouched, and a replacement refused after the request has gone leaves none.
+**A replacing Connect leaves the current session working until its connection request goes out, and never reports burrow loss for it**: a presence proof the user dismisses, or a handshake that fails, leaves it untouched, and a replacement refused after the request has gone leaves none.
 
 **Must label the connected header with the live path, `relay` or `direct`.** **Must pass only a `DirectRelayCause` to Pocket, never runtime failure text**; `TRANSPORT_RELAY_CAUSES` owns the displayed sentences. After the switch, a channel failure ends the session (remote-api.md → Direct path): Pocket returns to the list, and reconnecting costs a fresh handshake.
 
@@ -192,9 +192,9 @@ Source of truth: `SessionExpiredError` in `lib/src/remote/client/pocket-client.t
 
 ## Deployment: same-origin, always
 
-**The Pocket app is always served same-origin with its API**: WebAuthn binds passkeys to the serving origin, and Chrome's Private Network Access rules block public-site → private-network fetches. Pocket holds itself to it by construction — an empty API base, a `wsBase` from `location.origin` — and the Relay enforces it: a registration or assertion whose `clientDataJSON.origin` is not the configured origin is rejected ([relay.md](./relay.md); rationale); the Relay emits no cross-origin grant ([security-remote.md](./security-remote.md#cross-origin-access)). **The bundle mounts at the origin root, never under a path prefix**: the manifest's `start_url`/`scope`, the worker's registration scope, and the shell's manifest/icon links are all root-absolute. The one-time page reuses Pocket's screens and wall but not this rule (`docs/specs/one-time.md` -> "Phone page").
+**The Pocket app is always served same-origin with its API**: WebAuthn binds passkeys to the serving origin, and Chrome's Private Network Access rules block public-site → private-network fetches. The Relay enforces it: a registration or assertion whose `clientDataJSON.origin` is not the configured origin is rejected ([relay.md](./relay.md); rationale); the Relay emits no cross-origin grant ([security-remote.md](./security-remote.md#cross-origin-access)). **The bundle mounts at the origin root, never under a path prefix**: the manifest's `start_url`/`scope`, the worker's registration scope, and the shell's manifest/icon links are all root-absolute. The one-time page reuses Pocket's screens and wall but not this rule (`docs/specs/one-time.md` -> "Phone page").
 
-**The origin is served with a Content-Security-Policy**, the defense in depth around the active XSS `docs/specs/security.md` -> "What is not defended" names (rationale). **Every source is the app's own origin** (`default-src 'self'`, with `frame-ancestors`, `base-uri` and `object-src` `'none'`), **loosened only by** `style-src 'unsafe-inline'`, the WebSocket origin named in `connect-src` (rationale), `data:`/`blob:` images, and `blob:` media. **`script-src` stays `'self'` plus `'wasm-unsafe-eval'` ([layout.md](./layout.md#inline-graphics)), with no nonce pipeline**: `assertPocketShell` fails `build:pocket` on any inline `<script>` body or off-origin `src`/`href` in the emitted `index.html`. (rationale)
+**The origin is served with a Content-Security-Policy**, the defense in depth around the active XSS `docs/specs/security.md` -> "What is not defended" names (rationale). **Every source is the app's own origin** (`default-src 'self'`, with `frame-ancestors`, `base-uri` and `object-src` `'none'`), **loosened only by** `style-src 'unsafe-inline'`, the WebSocket origin named in `connect-src` (rationale), `data:`/`blob:` images, and `blob:` media. **`script-src` stays `'self'` plus `'wasm-unsafe-eval'` ([layout.md](./layout.md#inline-graphics)), with no nonce pipeline**: `assertPocketShell` fails `build:pocket` on any inline `<script>` body or off-origin `src`/`href` in either emitted shell, the app's or `/diagnostics/`'s. (rationale)
 
 One lib-owned bundle, two deployments:
 

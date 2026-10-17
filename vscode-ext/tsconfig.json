@@ -1,6 +1,7 @@
 // Check-only. `tsc` never emits here — `pnpm build` bundles with esbuild — so
-// this config exists to typecheck (`pnpm typecheck`, part of `pnpm test`) and to
-// drive editor IntelliSense.
+// this config exists to typecheck (`pnpm typecheck`, part of `pnpm test` and the
+// only check on `deactivate()`, which has no `try`/`catch`, so a stale reference
+// there throws past every teardown step behind it) and to drive editor IntelliSense.
 //
 // The program deliberately spans two runtimes. `src/` is extension-host Node
 // code, but it imports shared modules from `../lib/src/`, some of which are

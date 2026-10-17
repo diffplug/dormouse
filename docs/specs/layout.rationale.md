@@ -30,8 +30,6 @@ xterm.js paints only its own rendered surface, and integer row fitting leaves a 
 
 **Why a perimeter ring rather than an inset border.** An inset border at the leaf's edge covers nothing, and a ring below the header would break the one-rounded-rectangle read that is the point of the treatment.
 
-**Why header popovers are not a factor.** Every one — pane context menu, title candidates, notification preview, rename warning — portals to `document.body` with `position: fixed`, so it renders in the root stacking context above the whole wall regardless of leaf z-indices.
-
 ## Workspaces
 
 **Why `visibility: hidden` in one grid cell rather than `display: none`.** Every Wall retains a full layout box while hidden. Reattachment avoids a grid change when dimensions remain unchanged; a resize while hidden is fitted on activation (`lib/src/components/TerminalPane.test.tsx`).
@@ -64,8 +62,6 @@ xterm.js paints only its own rendered surface, and integer row fitting leaves a 
 
 ## Selection overlay
 
-**The inflate arithmetic.** With `SELECTION_RING_INFLATE_PX` at 4, the 1px passthrough border spans [3px, 4px] from the pane edge — dead centre of the 7px gutter, on whole pixels because the gutter is odd. That is the whole reason `PANE_GUTTER_PX` is odd.
-
 **What endless marching costs, and why it is accepted.** An infinite SVG stroke animation keeps Chrome's renderer at 60 style recalculations per second. Measured in Chrome for Testing 150 (2026-09): five focused minutes added 3.77 MB of reclaimable embedder heap and used 24.33 seconds of renderer CPU; pausing only that animation held embedder heap flat (-29 KB) and used 0.017 seconds across a three-minute control. A four-cycle burst (PR #542) avoided that, but the ring then went still about 1.6s after a click activated a Workspace, and a still ring reads as the command-mode cue having gone. Command mode is transient, and a blurred window or reduced motion pauses the ants, so the cost falls only on a focused window left sitting in command mode (2026-09).
 
 ## Ring travel
@@ -83,8 +79,6 @@ xterm.js paints only its own rendered surface, and integer row fitting leaves a 
 **Per-edge speeds.** The counterexample: moving between panes flush at the top but differing in height, the top edge translates purely sideways and must stay crisp while the bottom edge moves diagonally and smears hard. A centre velocity averages those into the same wrong answer for both.
 
 **Why two layers, and why corners are separate pieces.** The ring is one closed path so the dash phase runs unbroken around the perimeter, and SVG `stroke-width` is a single scalar — so that one path cannot carry four different widths. A corner has to reach two at once, and opacity cannot vary along a stroke, so a corner can only take the mean of its two edges' (mechanism at `cornerPath`).
-
-**Closed-form dash length.** `1.6232252401402307 × r` is the arc length of the quadratic quarter-turn the path actually draws; the quarter-*circle* value `π/2` is 3% short. `SVGGeometryElement.getTotalLength()` costs a synchronous style+layout flush per frame at a cost scaling with the whole document, and is itself only an approximation (browsers flatten curves to measure) — verified in Safari to agree with the closed form to 6e-4px on a 3253px ring. Dropping it also retired the jsdom `getTotalLength` stubs, so tests assert real dash geometry.
 
 **The `feGaussianBlur` measurements.** WebKit CPU-rasterizes SVG filters every frame: measured in Safari 26.5 (2026-08) at 25.6ms/frame with 31 of 98 frames over 25ms during ring travel, versus a locked 16.7ms with zero dropped frames after the eight-piece smear replaced the filter.
 

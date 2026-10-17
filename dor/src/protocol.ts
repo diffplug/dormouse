@@ -133,9 +133,9 @@ export function isWorkspaceControlMethod(method: string): method is WorkspaceCon
 }
 
 /**
- * Whether this request reaches beyond a single Workspace: a container verb, or
- * the `scope: 'all'` listing. A host that cannot answer for more than one
- * Workspace refuses exactly these (`docs/specs/vscode.md` → "Workspaces").
+ * Whether this request reaches beyond a single Workspace: a Surface move, a
+ * container verb, or the `scope: 'all'` listing. A host that cannot answer for
+ * more than one Workspace refuses exactly these.
  */
 export function spansWorkspaces(method: string, params?: Record<string, unknown>): boolean {
   return method === SURFACE_CONTROL_METHODS.move || isWorkspaceControlMethod(method)

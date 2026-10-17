@@ -17,7 +17,6 @@ import { promises as fs } from 'fs';
 // All external spawns go through dor-lib-common's spawnAndCapture, which owns the
 // Windows recipe (cross-spawn for PATHEXT/.cmd, windowsHide, exit-vs-close). The
 // GUI host needs it even for the absolute `binaryPath` dor agent-browser resolved.
-// See docs/specs/dor-cli.md → "Spawning External Binaries".
 import {
   BROWSER_PROVIDERS,
   isDirectory,

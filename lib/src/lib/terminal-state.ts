@@ -421,7 +421,8 @@ export function isWatchKey(name: string): boolean {
 /**
  * The rule in `rules` that covers `key`, or null: the key itself, else — for a
  * `<runner> <script>` key — a bare rule on its runner, which keeps matching
- * every script of that runner.
+ * every script of that runner. The only matcher: WATCHING, rule-removal
+ * silencing, and the terminal context's row all ask here, so they agree.
  */
 export function watchRuleFor(rules: ReadonlySet<string>, key: string | null): string | null {
   if (key === null) return null;

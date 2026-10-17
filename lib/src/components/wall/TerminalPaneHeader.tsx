@@ -46,9 +46,10 @@ import {
 } from './wall-context';
 
 type TerminalHeaderTier = 'full' | 'compact' | 'minimal' | 'tiny';
-// Border-box widths, so they include the header's 8px left + 5px right padding
-// (`docs/specs/layout.rationale.md` derives each boundary). Measuring the
-// border box also tells a narrow header from a hidden one.
+// Border-box widths, so they include the header's 8px left + 5px right padding.
+// Each boundary is the width at which the next-lowest-priority element would
+// start eating the group's padding (`docs/specs/layout.rationale.md` derives
+// each). Measuring the border box also tells a narrow header from a hidden one.
 export const terminalHeaderTier = (width: number): TerminalHeaderTier =>
   width > 293 ? 'full'
     : width > 173 ? 'compact'
