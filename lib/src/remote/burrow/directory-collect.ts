@@ -17,23 +17,23 @@ import {
   resolveDisplayPrimary,
 } from '../../lib/terminal-registry';
 import { isHelperSession, registry } from '../../lib/terminal-store';
-import { getWorkspacesSnapshot, refsArePositional, workspaceRefFor } from '../../lib/workspace-store';
+import { getWorkspacesSnapshot, workspaceIdsSpanWindows } from '../../lib/workspace-store';
 import { getWorkspaceSurfacesSnapshot } from '../../lib/workspace-surfaces';
 import { pendingKillSessionIds } from '../../lib/pending-kills';
 import { buildDirectorySnapshot, type DirectoryPaneInput, type DirectoryWorkspaceInput } from './directory';
 
 /**
- * This Window's Workspaces in strip order, or none where a ref is only a strip
- * position: every Window answers the same directory, so a positional ref would
- * merge one Window's Workspace with another's (VS Code's webviews, each a
+ * This Window's Workspaces in strip order, or none where an id is unique only
+ * within its Window: every Window answers the same directory, so such an id
+ * would merge one Window's Workspace with another's (VS Code's webviews, each a
  * `workspace:1`).
  */
 function collectWorkspaces(): DirectoryWorkspaceInput[] {
-  if (refsArePositional()) return [];
+  if (!workspaceIdsSpanWindows()) return [];
   const { workspaces, activeId } = getWorkspacesSnapshot();
   const membership = getWorkspaceSurfacesSnapshot();
   return workspaces.map((workspace) => ({
-    ref: workspaceRefFor(workspace.id),
+    ref: workspace.id,
     name: workspace.name,
     active: workspace.id === activeId,
     surfaceIds: membership.get(workspace.id) ?? [],

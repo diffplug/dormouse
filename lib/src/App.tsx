@@ -2,6 +2,7 @@ import { Component, type ReactNode } from "react";
 import { Wall } from "./components/Wall";
 import { WorkspaceWindow } from "./components/WorkspaceWindow";
 import { ThemeDebuggerGlobal } from "./components/ThemeDebugger";
+import { ClipboardFailureGlobal } from "./components/ClipboardFailureDialog";
 import type { WallBootPlans, WallBootProps } from "./components/wall/wall-types";
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
@@ -34,9 +35,9 @@ export default function App({
   baseboardNotice?: ReactNode;
   dialogHost?: ReactNode;
   enableBurrow?: boolean;
-  /** Render one Wall per Workspace instead of one for the whole page. Only the
-   *  standalone host sets it; VS Code and the website playground mount a bare
-   *  Wall (docs/specs/layout.md → "Workspaces"). */
+  /** Render one Wall per Workspace instead of one for the whole page. The
+   *  standalone host sets it; VS Code mounts a bare Wall per webview
+   *  (docs/specs/layout.md → "Workspaces"). */
   multiWorkspace?: boolean;
   /** One boot record per Workspace; `multiWorkspace` only. */
   initialPlans?: WallBootPlans;
@@ -50,6 +51,7 @@ export default function App({
         : <Wall {...boot} {...shell} />}
 
       <ThemeDebuggerGlobal />
+      <ClipboardFailureGlobal />
     </ErrorBoundary>
   );
 }

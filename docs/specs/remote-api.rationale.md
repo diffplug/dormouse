@@ -10,7 +10,7 @@
 
 **Why `ptyId` is opaque under VS Code.** Two duplicated windows can cold-restore panes holding the same PTY id. A handle that carried that id verbatim would let one window's attach be routed to the other's terminal, moving the stream and both input methods onto a PTY the Client never asked for.
 
-In September 2026, both production installations use `createAskSurfaceProvider`: resolution selects a routing key and applies the requested size, while `streamPty` separately owns the subscription. The former `SurfaceHandle.release` was a no-op in that shared constructor; a test-only release counter suggested a second resource lifetime that neither host had.
+In September 2026 the former `SurfaceHandle.release` was a no-op in `createAskSurfaceProvider`, the constructor both production installations share; a test-only release counter suggested a second resource lifetime that neither host had.
 
 ## Transport
 
@@ -44,11 +44,9 @@ In September 2026, both production installations use `createAskSurfaceProvider`:
 
 **Why snapshots rather than deltas.** A directory is dozens of entries at most, so resending the whole listing on each coalesced change costs less than the delta protocol would.
 
-**Why a collect carries a generation.** Collects overlap whenever something changes during a slow provider round trip, and they can settle in either order — so without one the stale answer lands last and blanks the picker until the next change.
-
 **Why duplicate `surfaceId`s collapse instead of both being listed.** The same cold-restore id collision as §The provider seam, one level up: two identical rows would make a picker keyed by `surfaceId` a lottery over which window an attach actually reaches.
 
-**Why `workspace` is withheld where refs are strip positions.** Every answerer's entries meet in one listing. VS Code's webviews each call themselves `workspace:1` "Workspace 1", so naming them would file every window's terminals under one header; withheld, the Client lists them flat, as before. Standalone's refs come from one application-wide counter, so they stay distinct across its Windows.
+**Why `workspace` is withheld where ids are local to a Window.** Every answerer's entries meet in one listing. VS Code's webviews each call themselves `workspace:1` "Workspace 1", so naming them would file every window's terminals under one header; withheld, the Client lists them flat, as before. Standalone's ids come from one application-wide counter, so they stay distinct across its Windows.
 
 **Why entry order carries the Workspace order.** Each Window answers with entries only — the peer answer stays one `DirectoryEntry` per pane across builds (`docs/specs/vscode.md` -> "Peer surfaces") — so sending entries in strip order gives the Client the Burrow's order without a second shape on the ask bridge.
 
@@ -64,8 +62,6 @@ In September 2026, both production installations use `createAskSurfaceProvider`:
 
 ## Attach is the resize
 
-In September 2026, the Viewer-local 60ms restoration timer could overwrite a later local or other-Viewer resize, because neither writer touched the first Viewer's timer. Cancelling it on detach also stranded the PTY one row below its xterm. Moving restoration to the shared PTY owner makes all size writers cancel it and lets a detached Viewer's temporary resize complete.
-
 **Why a resize is a whole screen.** `SIGWINCH` makes full-screen TUIs repaint completely and shells redraw their prompt line, so the client's first screen arrives from the live stream alone and no snapshot transfer is needed. The same-size case has to be forced because xterm sends no `SIGWINCH` for a resize to the current size, leaving the client staring at an empty screen until the next output.
 
 ## Attachment invariants
@@ -76,7 +72,7 @@ In September 2026, the Viewer-local 60ms restoration timer could overwrite a lat
 
 **Why a held pane does not re-fit.** A one-time connection run end to end (standalone harness, phone page in Chrome, 2026-09) left the laptop pane at the phone's grid (53×28) in its top-left with the rest empty, unexplained, and still at that size after the phone left. A local refit that took the size back while the phone was attached would re-wrap every line on the phone, which is never told (`terminal.resize` is staged), so a held pane keeps the phone's grid and explains itself with the strip instead; focus and keystrokes are not taken as a request for the size for the same reason.
 
-**Why Take back ends the session.** Chosen by the product owner (2026-09) over re-sizing the phone to the laptop's grid: the phone never resizes, so there is no protocol-v1 event and no phone-side strip, and the person at the laptop — who owns every terminal — gets their pane back in one click. A Pocket session ended this way is not an unpairing; the phone reconnects with one presence prompt. With two viewers on a pane it ends both (product owner, 2026-09): Take back means the laptop has the size again, which no remaining viewer can share.
+**Why Take back ends the session.** Chosen by the product owner (2026-09) over re-sizing the phone to the laptop's grid: the phone never resizes, so there is no protocol-v1 event and no phone-side strip, and the person at the laptop — who owns every terminal — gets their pane back in one click. A Pocket session ended this way is not an unpairing; the phone reconnects, without a prompt while the Burrow's presence window is open. With two viewers on a pane it ends both (product owner, 2026-09): Take back means the laptop has the size again, which no remaining viewer can share.
 
 **Why a hold names its service instance.** A hold is released only by the session that took it, and a VS Code broker window that closes, or a sidecar that restarts, takes its sessions with it: no release ever arrives, and surviving webviews kept their strips — and their phone-sized panes — until someone clicked Take back (review, 2026-09). Only the instance that replaced it can say so, and saying "I am a different service" needs no list of what the old one held.
 

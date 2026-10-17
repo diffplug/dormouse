@@ -6,13 +6,13 @@ import { ThemePicker } from '../components/ThemePicker';
 
 /**
  * The `compact` picker: a free-floating trigger for hosts with no baseboard and
- * therefore no Settings dialog — the website's two `/playground/pocket` mounts
- * (docs/specs/theme.md -> "Where the user picks a theme"). Every host that *has*
- * a baseboard uses the `settings-dialog` variant instead, which
+ * therefore no Settings dialog — the website's `/playground/pocket` mounts and
+ * docs pages (docs/specs/theme.md -> "Where the user picks a theme"). Every host
+ * that *has* a baseboard uses the `settings-dialog` variant instead, which
  * `Modals/SettingsDialog` covers in place.
  *
- * Right-aligned with headroom below, matching both real mounts. The shared
- * anchored-menu geometry keeps the fixed panel inside the viewport.
+ * Right-aligned with headroom below, matching the `/playground/pocket` mounts.
+ * The shared anchored-menu geometry keeps the fixed panel inside the viewport.
  */
 function PickerStory({ maxHeight }: { maxHeight?: string }) {
   return (
@@ -24,7 +24,7 @@ function PickerStory({ maxHeight }: { maxHeight?: string }) {
           : undefined
       }
     >
-      <ThemePicker variant="compact" />
+      <ThemePicker variant="compact" offerStore />
     </div>
   );
 }

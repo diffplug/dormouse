@@ -45,6 +45,7 @@ export const WORKSPACE_CONTROL_METHODS = {
   close: 'workspace.close',
   switch: 'workspace.switch',
   move: 'workspace.move',
+  pin: 'workspace.pin',
 } as const;
 
 export type WorkspaceControlMethod = (typeof WORKSPACE_CONTROL_METHODS)[keyof typeof WORKSPACE_CONTROL_METHODS];
@@ -132,9 +133,9 @@ export function isWorkspaceControlMethod(method: string): method is WorkspaceCon
 }
 
 /**
- * Whether this request reaches beyond a single Workspace: a container verb, or
- * the `scope: 'all'` listing. A host that cannot answer for more than one
- * Workspace refuses exactly these (`docs/specs/vscode.md` → "Workspaces").
+ * Whether this request reaches beyond a single Workspace: a Surface move, a
+ * container verb, or the `scope: 'all'` listing. A host that cannot answer for
+ * more than one Workspace refuses exactly these.
  */
 export function spansWorkspaces(method: string, params?: Record<string, unknown>): boolean {
   return method === SURFACE_CONTROL_METHODS.move || isWorkspaceControlMethod(method)
@@ -146,24 +147,97 @@ export function spansWorkspaces(method: string, params?: Record<string, unknown>
 export interface ParsedWorkspaceRef {
   /** The target as written, trimmed — what an error message quotes back. */
   target: string;
-  /** The number the ref reads as, else null. What that number *means* is the
-   *  resolving host's business: a registry host matches it against the
-   *  Workspace's minted id, a host without one falls back to the strip
-   *  position. Named for the reading, not for either resolution. */
-  number: number | null;
+  /** The Workspace id the target names exactly, prefix restored. */
+  id: string;
   /** The Workspace name it reads as otherwise; empty when it is numeric. */
   name: string;
 }
 
+const SURFACE_PREFIX = 'surface:';
+const WORKSPACE_PREFIX = 'workspace:';
+const BARE_NUMBER = /^\d+$/;
 const NUMERIC_WORKSPACE_REF = /^[1-9]\d*$/;
 
-/** Split a `workspace:<n|name>` target into its readings. A ref that reads as a
- *  number is a number, never a name. */
+/** Split a `workspace:<n|name>` target into its readings. A target that reads
+ *  as a number is a number, never a name. */
 export function parseWorkspaceRef(ref: string): ParsedWorkspaceRef {
   const target = ref.trim();
-  const bare = (target.startsWith('workspace:') ? target.slice('workspace:'.length) : target).trim();
+  const bare = (target.startsWith(WORKSPACE_PREFIX) ? target.slice(WORKSPACE_PREFIX.length) : target).trim();
   const numeric = NUMERIC_WORKSPACE_REF.test(bare);
-  return { target, number: numeric ? Number(bare) : null, name: numeric ? '' : bare };
+  return { target, id: WORKSPACE_PREFIX + bare, name: numeric ? '' : bare };
+}
+
+/** The number in a counter-minted `<prefix><n>` id, else null: ASCII digits
+ *  alone, leading zeros allowed, up to the largest number read exactly. Rust's
+ *  `ids::Kind::number` reads the same; `dor/test/id-cases.json` holds the
+ *  cases both run. */
+function idNumber(prefix: string, id: string): number | null {
+  const digits = id.startsWith(prefix) ? id.slice(prefix.length) : '';
+  if (!BARE_NUMBER.test(digits)) return null;
+  const n = Number(digits);
+  return Number.isSafeInteger(n) ? n : null;
+}
+
+/** The Workspace id numbered `n`, or a fallback's `workspace:<uuid>`. */
+export function workspaceIdFor(n: number | string): string {
+  return WORKSPACE_PREFIX + n;
+}
+
+/** The Surface id numbered `n`, or a fallback's `surface:<uuid>` — also its
+ *  `dor` handle (`docs/specs/dor-cli.md` → "Handle Model"). */
+export function surfaceIdFor(n: number | string): string {
+  return SURFACE_PREFIX + n;
+}
+
+/** The number in a `surface:<n>` id, else null. */
+export function surfaceIdNumber(id: string): number | null {
+  return idNumber(SURFACE_PREFIX, id);
+}
+
+/** The number in a `workspace:<n>` id, else null. */
+export function workspaceIdNumber(id: string): number | null {
+  return idNumber(WORKSPACE_PREFIX, id);
+}
+
+/** The highest `surface:<n>` number among `ids`, else 0. */
+export function maxSurfaceIdNumber(ids: Iterable<string>): number {
+  let max = 0;
+  for (const id of ids) max = Math.max(max, surfaceIdNumber(id) ?? 0);
+  return max;
+}
+
+/** Creation order: numbered ids by number, then every other id, ties by id. */
+export function compareSurfaceIds(a: string, b: string): number {
+  const na = surfaceIdNumber(a);
+  const nb = surfaceIdNumber(b);
+  if (na !== nb) {
+    if (na === null) return 1;
+    if (nb === null) return -1;
+    return na - nb;
+  }
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/** What a `dor` Surface target names (`docs/specs/dor-cli.md` → "Handle
+ *  Model"). `id` names one Surface Window-wide; `invalid` names none, and
+ *  carries the refusal that says which form to use. */
+export type ParsedSurfaceTarget =
+  | { kind: 'title'; title: string }
+  | { kind: 'self' }
+  | { kind: 'focused' }
+  | { kind: 'id'; id: string }
+  | { kind: 'invalid'; message: string };
+
+/** Read a Surface target in the one grammar every host resolves: the handle is
+ *  the Surface's id. */
+export function parseSurfaceTarget(target: string): ParsedSurfaceTarget {
+  if (target.startsWith('title:')) return { kind: 'title', title: target.slice('title:'.length) };
+  if (target === 'surface:focused') return { kind: 'focused' };
+  if (target === 'surface:self') return { kind: 'self' };
+  if (target.startsWith(SURFACE_PREFIX) && target.length > SURFACE_PREFIX.length) return { kind: 'id', id: target };
+  // `3`, `pane:3`, and `surface-3` each read as an attempt at `surface:3`.
+  const n = /^(?:pane:|surface-)?(\d+)$/.exec(target)?.[1];
+  return { kind: 'invalid', message: `'${target}' is not a Surface handle; use ${SURFACE_PREFIX}${n ?? '<n>'}` };
 }
 
 /** A control request as it travels over a transport, correlated by `requestId`. */

@@ -87,7 +87,7 @@
       "author": "Tauri Apps Contributors",
       "homepage": "https://github.com/tauri-apps/tauri#readme",
       "versions": [
-        "2.11.1"
+        "2.12.3"
       ]
     },
     {
@@ -96,7 +96,7 @@
       "author": "Tauri Apps Contributors",
       "homepage": "https://github.com/tauri-apps/plugins-workspace",
       "versions": [
-        "2.3.6"
+        "2.4.1"
       ]
     },
     {
@@ -105,7 +105,7 @@
       "author": "Tauri Apps Contributors",
       "homepage": "https://github.com/tauri-apps/plugins-workspace",
       "versions": [
-        "2.12.0"
+        "2.13.3"
       ]
     },
     {
@@ -358,6 +358,15 @@
       "homepage": "https://github.com/heroui-inc/tailwind-variants",
       "versions": [
         "3.3.1"
+      ]
+    },
+    {
+      "name": "tailwindcss",
+      "license": "MIT",
+      "author": "Tailwind Labs, Inc.",
+      "homepage": "https://tailwindcss.com",
+      "versions": [
+        "4.3.3"
       ]
     },
     {
@@ -665,7 +674,7 @@
       "author": "Marijn Haverbeke",
       "homepage": "https://code.haverbeke.berlin/codemirror/language",
       "versions": [
-        "6.12.4"
+        "6.13.1"
       ]
     },
     {
@@ -720,6 +729,15 @@
       "homepage": "https://code.haverbeke.berlin/codemirror/state",
       "versions": [
         "6.7.6"
+      ]
+    },
+    {
+      "name": "@codemirror/streamparser",
+      "license": "MIT",
+      "author": "Marijn Haverbeke",
+      "homepage": "https://code.haverbeke.berlin/codemirror/streamparser",
+      "versions": [
+        "6.0.0"
       ]
     },
     {
@@ -1169,7 +1187,7 @@
       "author": "Petyo Ivanov",
       "homepage": "https://mdxeditor.dev/",
       "versions": [
-        "4.3.1"
+        "4.3.2"
       ]
     },
     {
@@ -1875,6 +1893,24 @@
       ]
     },
     {
+      "name": "@types/react",
+      "license": "MIT",
+      "author": "Asana, AssureSign, Microsoft, John Reilly, Benoit Benezech, Patricio Zavolinsky, Eric Anderson, Dovydas Navickas, Josh Rutherford, Guilherme Hübner, Ferdy Budhidharma, Johann Rakotoharisoa, Olivier Pascal, Martin Hochel, Frank Li, Jessica Franco, Saransh Kataria, Kanitkorn Sujautra, Sebastian Silbermann, Kyle Scully, Cong Zhang, Dimitri Mitropoulos, JongChan Choi, Victor Magalhães, Priyanshu Rav, Dmitry Semigradsky, Matt Pocock",
+      "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/react",
+      "versions": [
+        "19.3.0"
+      ]
+    },
+    {
+      "name": "@types/react-dom",
+      "license": "MIT",
+      "author": "Asana, AssureSign, Microsoft, MartynasZilinskas, Josh Rutherford, Jessica Franco, Sebastian Silbermann",
+      "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/react-dom",
+      "versions": [
+        "19.3.0"
+      ]
+    },
+    {
       "name": "@types/trusted-types",
       "license": "MIT",
       "author": "Jakub Vrana, Damien Engels, Emanuel Tesar, Bjarki, Sebastian Silbermann",
@@ -1891,6 +1927,186 @@
       "versions": [
         "2.0.11",
         "3.0.3"
+      ]
+    },
+    {
+      "name": "@typescript/typescript-aix-ppc64",
+      "license": "Apache-2.0",
+      "author": "Microsoft Corp.",
+      "homepage": "https://www.typescriptlang.org/",
+      "versions": [
+        "7.0.2"
+      ]
+    },
+    {
+      "name": "@typescript/typescript-darwin-arm64",
+      "license": "Apache-2.0",
+      "author": "Microsoft Corp.",
+      "homepage": "https://www.typescriptlang.org/",
+      "versions": [
+        "7.0.2"
+      ]
+    },
+    {
+      "name": "@typescript/typescript-darwin-x64",
+      "license": "Apache-2.0",
+      "author": "Microsoft Corp.",
+      "homepage": "https://www.typescriptlang.org/",
+      "versions": [
+        "7.0.2"
+      ]
+    },
+    {
+      "name": "@typescript/typescript-freebsd-arm64",
+      "license": "Apache-2.0",
+      "author": "Microsoft Corp.",
+      "homepage": "https://www.typescriptlang.org/",
+      "versions": [
+        "7.0.2"
+      ]
+    },
+    {
+      "name": "@typescript/typescript-freebsd-x64",
+      "license": "Apache-2.0",
+      "author": "Microsoft Corp.",
+      "homepage": "https://www.typescriptlang.org/",
+      "versions": [
+        "7.0.2"
+      ]
+    },
+    {
+      "name": "@typescript/typescript-linux-arm",
+      "license": "Apache-2.0",
+      "author": "Microsoft Corp.",
+      "homepage": "https://www.typescriptlang.org/",
+      "versions": [
+        "7.0.2"
+      ]
+    },
+    {
+      "name": "@typescript/typescript-linux-arm64",
+      "license": "Apache-2.0",
+      "author": "Microsoft Corp.",
+      "homepage": "https://www.typescriptlang.org/",
+      "versions": [
+        "7.0.2"
+      ]
+    },
+    {
+      "name": "@typescript/typescript-linux-loong64",
+      "license": "Apache-2.0",
+      "author": "Microsoft Corp.",
+      "homepage": "https://www.typescriptlang.org/",
+      "versions": [
+        "7.0.2"
+      ]
+    },
+    {
+      "name": "@typescript/typescript-linux-mips64el",
+      "license": "Apache-2.0",
+      "author": "Microsoft Corp.",
+      "homepage": "https://www.typescriptlang.org/",
+      "versions": [
+        "7.0.2"
+      ]
+    },
+    {
+      "name": "@typescript/typescript-linux-ppc64",
+      "license": "Apache-2.0",
+      "author": "Microsoft Corp.",
+      "homepage": "https://www.typescriptlang.org/",
+      "versions": [
+        "7.0.2"
+      ]
+    },
+    {
+      "name": "@typescript/typescript-linux-riscv64",
+      "license": "Apache-2.0",
+      "author": "Microsoft Corp.",
+      "homepage": "https://www.typescriptlang.org/",
+      "versions": [
+        "7.0.2"
+      ]
+    },
+    {
+      "name": "@typescript/typescript-linux-s390x",
+      "license": "Apache-2.0",
+      "author": "Microsoft Corp.",
+      "homepage": "https://www.typescriptlang.org/",
+      "versions": [
+        "7.0.2"
+      ]
+    },
+    {
+      "name": "@typescript/typescript-linux-x64",
+      "license": "Apache-2.0",
+      "author": "Microsoft Corp.",
+      "homepage": "https://www.typescriptlang.org/",
+      "versions": [
+        "7.0.2"
+      ]
+    },
+    {
+      "name": "@typescript/typescript-netbsd-arm64",
+      "license": "Apache-2.0",
+      "author": "Microsoft Corp.",
+      "homepage": "https://www.typescriptlang.org/",
+      "versions": [
+        "7.0.2"
+      ]
+    },
+    {
+      "name": "@typescript/typescript-netbsd-x64",
+      "license": "Apache-2.0",
+      "author": "Microsoft Corp.",
+      "homepage": "https://www.typescriptlang.org/",
+      "versions": [
+        "7.0.2"
+      ]
+    },
+    {
+      "name": "@typescript/typescript-openbsd-arm64",
+      "license": "Apache-2.0",
+      "author": "Microsoft Corp.",
+      "homepage": "https://www.typescriptlang.org/",
+      "versions": [
+        "7.0.2"
+      ]
+    },
+    {
+      "name": "@typescript/typescript-openbsd-x64",
+      "license": "Apache-2.0",
+      "author": "Microsoft Corp.",
+      "homepage": "https://www.typescriptlang.org/",
+      "versions": [
+        "7.0.2"
+      ]
+    },
+    {
+      "name": "@typescript/typescript-sunos-x64",
+      "license": "Apache-2.0",
+      "author": "Microsoft Corp.",
+      "homepage": "https://www.typescriptlang.org/",
+      "versions": [
+        "7.0.2"
+      ]
+    },
+    {
+      "name": "@typescript/typescript-win32-arm64",
+      "license": "Apache-2.0",
+      "author": "Microsoft Corp.",
+      "homepage": "https://www.typescriptlang.org/",
+      "versions": [
+        "7.0.2"
+      ]
+    },
+    {
+      "name": "@typescript/typescript-win32-x64",
+      "license": "Apache-2.0",
+      "author": "Microsoft Corp.",
+      "homepage": "https://www.typescriptlang.org/",
+      "versions": [
+        "7.0.2"
       ]
     },
     {
@@ -2046,6 +2262,15 @@
       "homepage": "https://code.haverbeke.berlin/marijn/crelt",
       "versions": [
         "1.0.7"
+      ]
+    },
+    {
+      "name": "csstype",
+      "license": "MIT",
+      "author": "Fredrik Nicol <fredrik.nicol@gmail.com>",
+      "homepage": "https://github.com/frenic/csstype",
+      "versions": [
+        "3.2.3"
       ]
     },
     {
@@ -2636,6 +2861,15 @@
       ]
     },
     {
+      "name": "isomorphic.js",
+      "license": "MIT",
+      "author": "Kevin Jahns <kevin.jahns@protonmail.com>",
+      "homepage": "https://github.com/dmonad/isomorphic.js#readme",
+      "versions": [
+        "0.2.5"
+      ]
+    },
+    {
       "name": "js-tokens",
       "license": "MIT",
       "author": "Simon Lydell",
@@ -2697,6 +2931,15 @@
       "homepage": "https://github.com/facebook/lexical",
       "versions": [
         "0.48.0"
+      ]
+    },
+    {
+      "name": "lib0",
+      "license": "MIT",
+      "author": "Kevin Jahns <kevin.jahns@protonmail.com>",
+      "homepage": "https://github.com/dmonad/lib0#readme",
+      "versions": [
+        "0.2.119"
       ]
     },
     {
@@ -3404,6 +3647,15 @@
       ]
     },
     {
+      "name": "supports-color",
+      "license": "MIT",
+      "author": "Sindre Sorhus",
+      "homepage": "https://github.com/chalk/supports-color",
+      "versions": [
+        "10.2.2"
+      ]
+    },
+    {
       "name": "tabbable",
       "license": "MIT",
       "author": "David Clark",
@@ -3437,6 +3689,15 @@
       "homepage": "https://www.typescriptlang.org/",
       "versions": [
         "2.8.1"
+      ]
+    },
+    {
+      "name": "typescript",
+      "license": "Apache-2.0",
+      "author": "Microsoft Corp.",
+      "homepage": "https://www.typescriptlang.org/",
+      "versions": [
+        "7.0.2"
       ]
     },
     {
@@ -3548,6 +3809,15 @@
       ]
     },
     {
+      "name": "yjs",
+      "license": "MIT",
+      "author": "Kevin Jahns",
+      "homepage": "https://docs.yjs.dev",
+      "versions": [
+        "13.6.33"
+      ]
+    },
+    {
       "name": "zwitch",
       "license": "MIT",
       "author": "Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)",
@@ -3564,7 +3834,7 @@
       "author": "Yusuke Wada <yusuke@kamawada.com> (https://github.com/yusukebe)",
       "homepage": "https://github.com/honojs/node-server",
       "versions": [
-        "2.1.1"
+        "2.1.4"
       ]
     },
     {
@@ -3622,12 +3892,21 @@
       ]
     },
     {
+      "name": "has-flag",
+      "license": "MIT",
+      "author": "Sindre Sorhus",
+      "homepage": "https://github.com/sindresorhus/has-flag",
+      "versions": [
+        "4.0.0"
+      ]
+    },
+    {
       "name": "hono",
       "license": "MIT",
       "author": "Yusuke Wada <yusuke@kamawada.com> (https://github.com/yusukebe)",
       "homepage": "https://hono.dev",
       "versions": [
-        "4.13.9"
+        "4.13.13"
       ]
     },
     {
@@ -3700,6 +3979,15 @@
       "homepage": "https://github.com/feross/safe-buffer",
       "versions": [
         "5.2.1"
+      ]
+    },
+    {
+      "name": "supports-color",
+      "license": "MIT",
+      "author": "Sindre Sorhus",
+      "homepage": "https://github.com/chalk/supports-color",
+      "versions": [
+        "7.2.0"
       ]
     },
     {

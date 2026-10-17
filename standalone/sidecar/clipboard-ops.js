@@ -4,6 +4,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { execFile, spawn } = require('node:child_process');
 const { promisify } = require('node:util');
+const { windowsPowerShellPath, windowsSystemPath } = require('./windows-system');
 
 const rawExecFileP = promisify(execFile);
 
@@ -11,13 +12,24 @@ const rawExecFileP = promisify(execFile);
 // console window hidden. On Windows the sidecar runs as a windowless GUI child,
 // so spawning a console subprocess without CREATE_NO_WINDOW allocates a fresh
 // console window that flickers on screen and steals focus — several per paste,
-// since doPaste reads file paths + text (+ image) concurrently. windowsHide maps
-// to CREATE_NO_WINDOW in libuv and is a harmless no-op on macOS/Linux.
+// since doPaste reads file paths and text concurrently, then the image.
+// windowsHide maps to CREATE_NO_WINDOW in libuv and is a harmless no-op on
+// macOS/Linux.
 function execFileP(cmd, args, options) {
   return rawExecFileP(cmd, args, { ...options, windowsHide: true });
 }
 
 const MAX_BUFFER = 16 * 1024 * 1024;
+
+/** Run `script` in Windows PowerShell, by its absolute path (`windowsPowerShellPath`). */
+function runPowerShell(script, runtime) {
+  const exec = runtime.exec || execFileP;
+  return exec(
+    windowsPowerShellPath(runtime.env || process.env),
+    ['-NoProfile', '-NonInteractive', '-Command', script],
+    { maxBuffer: MAX_BUFFER },
+  );
+}
 
 const MAC_FILE_PATHS_SCRIPT = [
   'use framework "AppKit"',
@@ -50,14 +62,9 @@ async function readFilePathsMac(runtime) {
 }
 
 async function readFilePathsWindows(runtime) {
-  const exec = runtime.exec || execFileP;
   const cmd = '$out = Get-Clipboard -Format FileDropList; if ($out) { $out | ForEach-Object { $_.FullName } }';
   try {
-    const { stdout } = await exec(
-      'powershell',
-      ['-NoProfile', '-NonInteractive', '-Command', cmd],
-      { maxBuffer: MAX_BUFFER },
-    );
+    const { stdout } = await runPowerShell(cmd, runtime);
     return splitNonEmptyLines(stdout);
   } catch {
     return [];
@@ -113,13 +120,8 @@ async function readTextMac(runtime) {
 }
 
 async function readTextWindows(runtime) {
-  const exec = runtime.exec || execFileP;
   try {
-    const { stdout } = await exec(
-      'powershell',
-      ['-NoProfile', '-NonInteractive', '-Command', 'Get-Clipboard -Raw'],
-      { maxBuffer: MAX_BUFFER },
-    );
+    const { stdout } = await runPowerShell('Get-Clipboard -Raw', runtime);
     // Get-Clipboard -Raw appends a trailing newline that wasn't on the clipboard.
     return stdout.replace(/\r?\n$/, '');
   } catch {
@@ -183,20 +185,22 @@ async function readImageMac(out, runtime) {
   }
 }
 
+// A PowerShell single-quoted literal: PowerShell closes one at `'` and at
+// U+2018–U+201B, so each is doubled. Mirrors `quotePowerShellArg` in
+// `dor/src/commands/shell-quote.ts`, which this plain-CJS module cannot import.
+function powerShellLiteral(value) {
+  return `'${value.replace(/['\u2018-\u201b]/g, (c) => c + c)}'`;
+}
+
 async function readImageWindows(out, runtime) {
-  const exec = runtime.exec || execFileP;
   const cmd = [
     'Add-Type -AssemblyName System.Windows.Forms;',
     'Add-Type -AssemblyName System.Drawing;',
     '$img = [System.Windows.Forms.Clipboard]::GetImage();',
-    `if ($img) { $img.Save('${out.replace(/'/g, "''")}', [System.Drawing.Imaging.ImageFormat]::Png); 'ok' } else { '' }`,
+    `if ($img) { $img.Save(${powerShellLiteral(out)}, [System.Drawing.Imaging.ImageFormat]::Png); 'ok' } else { '' }`,
   ].join(' ');
   try {
-    const { stdout } = await exec(
-      'powershell',
-      ['-NoProfile', '-NonInteractive', '-Command', cmd],
-      { maxBuffer: MAX_BUFFER },
-    );
+    const { stdout } = await runPowerShell(cmd, runtime);
     return stdout.trim() === 'ok';
   } catch {
     return false;
@@ -300,9 +304,9 @@ function writeViaStdin(cmd, args, text, runtime) {
 
 async function writeClipboardText(text, runtime = {}) {
   const platform = runtime.platform || process.platform;
-  if (platform === 'darwin') return writeViaStdin('pbcopy', [], text, runtime);
-  if (platform === 'win32') return writeViaStdin('clip', [], text, runtime);
   const env = runtime.env || process.env;
+  if (platform === 'darwin') return writeViaStdin('pbcopy', [], text, runtime);
+  if (platform === 'win32') return writeViaStdin(windowsSystemPath(env, 'System32', 'clip.exe'), [], text, runtime);
   const wayland = Boolean(env.WAYLAND_DISPLAY);
   const attempts = wayland
     ? [['wl-copy', []], ['xclip', ['-selection', 'clipboard']]]

@@ -249,7 +249,10 @@ function OptionChip({
  * NE bottom-left, SW top-right, NW bottom-right. Its secondaries are stacked
  * above/below at `GAP_CLUSTER` to the right for NE/SE and left for NW/SW.
  * `ROOT_DIAGONAL_CORNER_RADIUS` scales the diagonal gap, rather than treating
- * the root chips as exploded circular option anchors.
+ * the root chips as exploded circular option anchors. The square pack is what
+ * fits eight groups and their secondaries in a phone-width pane with room for
+ * `Backspace`; anchoring them on the exploded-option circle overlaps the long
+ * labels.
  */
 function rootOptionLayout(
   direction: MobileGestureDirection,
@@ -454,6 +457,8 @@ export function MobileGestureRadialMenu({ state }: { state: MobileGestureTrackin
       className="pointer-events-none absolute inset-0 z-20 overflow-hidden"
     >
       <svg className="absolute inset-0 h-full w-full">
+        {/* The guide runs in the offset copy, from the display origin to the
+            translated touch point — never under the thumb. */}
         <line
           x1={phaseDisplayOrigin.x}
           y1={phaseDisplayOrigin.y}

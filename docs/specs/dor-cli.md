@@ -6,7 +6,7 @@
 
 ## Bundling And PATH
 
-**`dor` must work without `npm i -g`.** Both hosts stage `dor` (`scripts/stage-dor-cli.mjs`) before build and prepend its `bin` directory to every spawned PTY's `PATH`. Staged: `bin/dor` + `bin/dor.cmd`, `dist/dor.js`, the builtin runtime tree (`docs/specs/dor-tools-builtin.md` → Packaging), and a generated `package.json` declaring `"type": "module"`, independent of parent package metadata.
+**`dor` must work without `npm i -g`.** Both hosts stage `dor` (`scripts/stage-dor-cli.mjs`) before build and prepend its `bin` directory to every spawned PTY's `PATH`.
 
 **Both launchers must set `ELECTRON_RUN_AS_NODE=1` themselves** before `exec "$DORMOUSE_NODE" "$DORMOUSE_CLI_JS"`, or under VS Code `dor` silently does nothing and **exits 0** (rationale). **Dormouse-launched terminals must rely on injected env, never on a globally installed Node**; each launcher's `PATH`-`node` fallback is for developer/manual use. **Both launchers must return the CLI's exit status** (`dor/test/launcher.test.mjs`, including `dor.cmd` on Windows).
 
@@ -33,13 +33,13 @@ The CLI also reads `DORMOUSE_AGENT_BROWSER_BIN` and `DORMOUSE_PLAYWRIGHT_BIN`, t
 
 **On Windows the `PATH` prepend must survive Git Bash / MSYS login:** the PTY core strips `ORIGINAL_PATH` from the child env on win32, so a login shell cannot rebuild a pre-prepend `PATH` from it (rationale). No-op for cmd.exe / PowerShell, which never read it.
 
-**A caller cwd must leave the MSYS drive form before it goes on the wire.** Git Bash exports `PWD` as a POSIX path (`/c/Users/…`) that win32 `path.resolve` would mangle into `C:\c\Users\…` and match no Surface; every command that resolves the caller's cwd does so through `callerWorkingDirectory`, which folds it back to a native path.
+**A caller cwd must leave the MSYS drive form before it goes on the wire.** Git Bash exports `PWD` as a POSIX path (`/c/Users/…`) that win32 `path.resolve` would mangle into `C:\c\Users\…` and match no Surface.
 
 Source of truth: `scripts/stage-dor-cli.mjs`, `dor/bin/dor`, `dor/bin/dor.cmd`, `withoutInheritedMsysOriginalPath` in `standalone/sidecar/pty-core.js`, `callerWorkingDirectory` in `dor/src/commands/shared.ts`.
 
 ## Spawning External Binaries
 
-**Every spawn of an external/user-installed binary must go through `spawnAndCapture` from `dor-lib-common`, never raw `node:child_process` `spawn`** — `dor agent-browser` driving `agent-browser`, the agent-browser host running tab/eval/screenshot commands, and anything added later. It owns the Windows recipe: cross-spawn rather than Node's own `spawn`, `windowsHide`, and resolution on `exit` with an exit-time output snapshot (rationale).
+**Every spawn of an external/user-installed binary must go through `spawnAndCapture` from `dor-lib-common`, never raw `node:child_process` `spawn`**; `spawnAndCapture` owns the Windows recipe (rationale).
 
 **Must leave Windows shim quoting to `spawnAndCapture`.** Forwarded argv can contain literal percent expressions; never interpolate them into an independently constructed shell command. (rationale)
 
@@ -54,8 +54,6 @@ Source of truth: `scripts/stage-dor-cli.mjs`, `dor/bin/dor`, `dor/bin/dor.cmd`, 
 **Must release captured stdout/stderr pipes when the result settles**, including the exit-grace fallback, without terminating descendants (rationale).
 
 **An optional `timeoutMs` must kill the child and resolve `{ ok: false }` with `SPAWN_TIMEOUT_CODE`** (`ETIMEDOUT`), without waiting for the kill. **On Windows it must end the whole tree**, since a `.cmd` shim's child is `cmd.exe` and the real CLI is its descendant.
-
-**The `dor` and `dormouse-lib` prebuilds must build `dor-lib-common` first**: its `exports` point at built `dist`, so its `.d.ts` files are otherwise missing when either typechecks.
 
 Source of truth: `dor-lib-common/src/spawn.ts`, `dor-lib-common/src/resolve-binary.ts`.
 
@@ -92,13 +90,13 @@ sequenceDiagram
 
 ### Standalone
 
-`standalone/package.json`'s `stage` step (before `build` and `tauri`, not bare `vite` dev) runs `stage:dor-cli`. Rust starts the Node sidecar with `DORMOUSE_HOST`, `DORMOUSE_NODE`, `DORMOUSE_CLI_BIN`, `DORMOUSE_CLI_JS`, and `DORMOUSE_CONTROL_TOKEN`; the shared PTY core then prepends `DORMOUSE_CLI_BIN` and sets `DORMOUSE_SURFACE_ID` per PTY. **Rust must not set `DORMOUSE_CONTROL_SOCKET`:** the sidecar picks the path itself and restores both control variables to the env `pty-core` merges into every shell only once the socket is bound, holding stdin commands until then so no PTY spawns with the channel's fate undecided.
+Rust starts the Node sidecar with `DORMOUSE_HOST`, `DORMOUSE_NODE`, `DORMOUSE_CLI_BIN`, `DORMOUSE_CLI_JS`, and `DORMOUSE_CONTROL_TOKEN`; the shared PTY core then prepends `DORMOUSE_CLI_BIN` and sets `DORMOUSE_SURFACE_ID` per PTY. **Rust must not set `DORMOUSE_CONTROL_SOCKET`:** the sidecar picks the path itself and restores both control variables to the env `pty-core` merges into every shell only once the socket is bound, holding stdin commands until then so no PTY spawns with the channel's fate undecided.
 
 Routing precedence, the refusal for a Surface no window owns, and a cancel following its own request belong to `docs/specs/standalone.md` -> "Routing"; a target the registry cannot place, to `docs/specs/standalone.md` -> "Workspace registry".
 
 ### VS Code
 
-`vscode-ext/package.json` runs `pnpm stage:dor-cli` before bundling the extension host and `pty-host.js`. The extension host computes the staged paths under `context.extensionPath/dor-cli`, forks `pty-host.js`, and sends the same dor env on each PTY spawn. **`getDorRuntimeEnv` must omit both control variables:** the token reaches `pty-host.js` through the fork env alone, and the host folds it with a bound socket path onto each spawn's env itself. Its `ready` message is held until the channel settles, so no spawn can race the bind.
+The extension host computes the staged paths under `context.extensionPath/dor-cli`, forks `pty-host.js`, and sends the same dor env on each PTY spawn. **`getDorRuntimeEnv` must omit both control variables:** the token reaches `pty-host.js` through the fork env alone, and the host folds it with a bound socket path onto each spawn's env itself. Its `ready` message is held until the channel settles, so no spawn can race the bind.
 
 One extension host can hold multiple Dormouse webviews, so the request carries `DORMOUSE_SURFACE_ID` and `message-router.ts` routes it to the webview that owns that surface. **A named surface no active webview owns must fail** rather than fall back to a sibling; a request with no surface id goes to the first active router.
 
@@ -126,28 +124,26 @@ Source of truth: `standalone/sidecar/dor-control-server.js`, `dor/src/control-cl
 
 Invariants:
 
-- A target may be `surface:N`, a stable Surface id, or `surface:<stable-id>`. `surface:focused` selects the focused Surface in the current Workspace; `surface:self` the invoking Surface from `DORMOUSE_SURFACE_ID`. An omitted target falls back to the caller, then to the focused Surface. Helper callers follow [Helper callers and targets](#helper-callers-and-targets).
-- Short refs (`surface:1`, …) are Workspace-scoped stable refs, not layout/list positions: each Workspace starts at `surface:1` and numbers Surfaces as they are created/restored. The map and its counter persist in the session snapshot (`docs/specs/transport.md` → "Persisted session types"). **Must assign a ref on creation or adoption into another Workspace** — layout churn (reorder, minimize/reattach, zoom, focus), replacing an untouched terminal with a browser Surface, and browser render-mode swaps leave it unchanged. **Killing a Surface retires its ref; a later target that names it must fail rather than silently retarget.**
-- **Must retire a moved Surface's source ref**, retaining its stable ID. **Must route a moved caller by that stable ID**: its cached `surface:N` refs now resolve in the destination and may name strangers; unscoped `ensure` searches there and may duplicate work left behind. After a successful move, the moved terminal gets one renderer-local notice of the new handles and scope (a pane notice in alternate-screen programs), never PTY input or an Activity change.
-- Surface targets also accept `title:<exact display title>`; titles drift, so automation should prefer refs. Action commands (`read`, `send`, `await`, `kill`, `dor agent-browser --surface`) resolve against listed Surfaces, **minimized ones included**; `split` and `ensure --surface` resolve their *reference* the same way, so minimized peers participate in ambiguity checks. Browser placement commands (`iframe`, browser creation) resolve against visible Surfaces. **If multiple Surfaces in the relevant scope match, the command fails and lists the matching refs.**
-- **Bare numeric targets and `pane:N` are not Surface handles.** Pane refs stay reserved for future layout-only commands.
-- Text list output defaults to refs; JSON list output always carries both refs and stable ids.
-- `workspace:<n>` selects a container and is **stable**: `n` is the number of the Workspace's registry-minted id (`docs/specs/standalone.md` → "Workspace registry"), so a strip reorder and a move between Windows rename nothing. **Must use positional refs only on hosts without a registry (VS Code).** **Must address unnumbered registry Workspaces as `workspace:<id>`, resolving exact ids before names**, so legacy snapshots, duplicate names, and numeric names cannot redirect a ref. `workspace:<name>` **resolves only when exactly one Workspace carries that name**, else the error lists the candidates. All three are accepted bare, and **a ref that reads as a number is a ref**, never a name. **A Window is `window:<label>` — its host's own name for it** (`window:main`, `window:ws-2`), and a host with one Window answers `window:1`; each accepts its own ref bare. A Surface ref alone never identifies a Workspace.
-- **One Wall answers each request**, in the figure's order below; `dor list --all` fans out to every Wall, and a **stable id** is unique Window-wide, unlike `surface:N`. **A Wall not yet registered — the active Workspace's or a resolved `--workspace`'s — answers `workspace '<ref>' is still mounting` after a bounded retry**, never the unknown-Workspace refusal nor the caller's deadline (`docs/specs/dor-browser.md` → "Managed identity"). **Every request is answered, including a container ref of the wrong type and a handler that throws** — an unanswered one blocks its caller to the deadline. A Workspace being closed refuses the Surface-creating verbs (`docs/specs/layout.md` → "Workspaces"). **Surface targets resolve within the answering Workspace**, so a `dor split` from a background Workspace lands beside its caller, and **a caller the answering Workspace does not hold is dropped by the router**, leaving that Workspace's focused Surface as the fallback rather than a failure — what gives `--workspace` a reference to place against. Cross-window duplicate ids follow `docs/specs/vscode.md` → "Peer surfaces across windows".
+- **A Surface's handle is its id, `surface:<n>`** (a fallback `surface:<uuid>`), the one spelling `DORMOUSE_SURFACE_ID`, `--json`, and text output all carry; unique across its host (`docs/specs/transport.md` → "Surface ids"). Layout churn, render swaps, helper promotion, and moves between Workspaces or Windows leave it unchanged. **An id naming a killed Surface must fail; numbers are never reused.** `surface:focused` selects the focused Surface in the current Workspace; `surface:self` the invoking Surface from `DORMOUSE_SURFACE_ID`. An omitted target falls back to the caller, then to the focused Surface. Helper callers follow [Helper callers and targets](#helper-callers-and-targets).
+- **Must route a moved caller by its id**: unscoped `ensure` searches the destination and may duplicate work left behind. After a successful move, the moved terminal gets one renderer-local notice naming its id and new Workspace (a pane notice in alternate-screen programs), never PTY input or an Activity change.
+- Surface targets also accept `title:<exact display title>`; titles drift, so automation should prefer ids. Action commands (`read`, `send`, `await`, `kill`, `dor agent-browser --surface`) resolve against listed Surfaces, **minimized ones included**; `split` and `ensure --surface` resolve their *reference* the same way, so minimized peers participate in ambiguity checks. Browser placement commands (`iframe`, browser creation) resolve against visible Surfaces. **If multiple Surfaces in the relevant scope match, the command fails and lists the matching ids.**
+- **Must refuse every other Surface target** — a bare number, `pane:N`, `surface-N`, a bare string — naming the `surface:N` form. Pane refs stay reserved for future layout-only commands.
+- **A Workspace's id is `workspace:<n>`** (a fallback `workspace:<uuid>`), the registry's number (`docs/specs/standalone.md` → "Workspace registry"), else one the page counts from `workspace:1`; a strip reorder and a move between Windows rename nothing. A container ref is that id, its number, or a name, **resolving exact ids before names**, so fallback ids, duplicate names, and numeric names cannot redirect one. `workspace:<name>` **resolves only when exactly one Workspace carries that name**, else the error lists the candidates. All three are accepted without the `workspace:` prefix, and **a ref that reads as a number is a number**, never a name. **A Window is `window:<label>` — its host's own name for it** (`window:main`, `window:ws-2`), and a host with one Window answers `window:1`; each accepts its own ref bare. A Surface id alone never identifies a Workspace.
+- **One Wall answers each request**, in the figure's order below; `dor list --all` fans out to every Wall, and **a Surface target named by id routes to the Workspace holding it**, Window-wide. **A Wall not yet registered — the active Workspace's or a resolved `--workspace`'s — answers `workspace '<id>' is still mounting` after a bounded retry**, never the unknown-Workspace refusal nor the caller's deadline (`docs/specs/dor-browser.md` → "Managed identity"). **Every request is answered, including a container ref of the wrong type and a handler that throws** — an unanswered one blocks its caller to the deadline. A Workspace being closed refuses the Surface-creating verbs (`docs/specs/layout.md` → "Workspaces"). **Every other Surface target resolves within the answering Workspace**, so a `dor split` from a background Workspace lands beside its caller, and **a caller the answering Workspace does not hold is dropped by the router**, leaving that Workspace's focused Surface as the fallback rather than a failure — what gives `--workspace` a reference to place against. Cross-window duplicate ids follow `docs/specs/vscode.md` → "Peer surfaces across windows".
 
 ```mermaid
 flowchart TD
   R[request] --> AT{app.* or tool.*?}
   AT -- yes --> WIN[the Window answers]
-  AT -- no --> BAD{helper --surface, or another --window?}
+  AT -- no --> BAD{malformed or helper --surface, or another --window?}
   BAD -- yes --> REF[refuse]
   BAD -- no --> C{workspace verb, list --all?}
   C -- yes --> WIN
   C -- no --> WS{--workspace?}
   WS -- unresolved --> REF
   WS -- registered --> H[that Wall answers]
-  WS -- unregistered --> P["re-resolve next tick, refuse if still unmounted"]
-  WS -- absent --> ST{stable-id target held?}
+  WS -- unregistered --> P["retry, then refuse if still unmounted"]
+  WS -- absent --> ST{id target held?}
   ST -- yes --> H
   ST -- no --> CA{caller or helper source held?}
   CA -- yes --> H
@@ -157,19 +153,21 @@ flowchart TD
   AC -- no --> P
 ```
 
-Source of truth: `dor/src/commands/shared.ts`, `parseWorkspaceRef` in `dor/src/protocol.ts`, `classifySurfaceTarget` in `lib/src/components/wall/use-dor-control.ts`, `resolveWorkspaceRef` in `lib/src/lib/workspace-store.ts`, and `resolveDorControlRoute` in `lib/src/components/wall/dor-control-router.ts`.
+Source of truth: `dor/src/commands/shared.ts`, `parseWorkspaceRef` and `parseSurfaceTarget` in `dor/src/protocol.ts`, `resolveWorkspaceRef` in `lib/src/lib/workspace-store.ts`, and `resolveDorControlRoute` in `lib/src/components/wall/dor-control-router.ts`.
 
 ## Current Implemented Commands
 
-Implemented commands call private `surface.*` control methods, **enumerated once in `dor/src/protocol.ts` (`SURFACE_CONTROL_METHODS`, with `WORKSPACE_CONTROL_METHODS`, `APP_CONTROL_METHODS`, and `WINDOW_CONTROL_METHODS` beside it)** so the emitting client and the dispatching webview cannot drift.
+Implemented commands call private `surface.*` control methods, **enumerated once in `dor/src/protocol.ts`** so the emitting client and the dispatching webview cannot drift.
 
-`surface.list` joins one Workspace's Surfaces — visible panes **plus minimized (doored)** ones, each tagged `view` — with terminal state and activity snapshots, and reports the answering Workspace's `workspace:<n>` and Window's `window:<label>`. **Its `scope: 'all'` spans every Workspace of the Window**, tagging each row with its Workspace; **one Workspace that cannot answer fails the whole listing** — including one whose Wall never registers, after the routing retry ([Handle Model](#handle-model)) — since a missing Workspace reads as one holding nothing. **Only the active Workspace's selection is `focused`** in such a listing. **`dor list` rows sort by the `surface:N` ref**, independent of Lath layout order.
+`surface.list` joins one Workspace's Surfaces — visible panes **plus minimized (doored)** ones, each tagged `view` — with terminal state and activity snapshots, and reports the answering Workspace's id and Window's `window:<label>`. **Its `scope: 'all'` spans every Workspace of the Window**, tagging each row with its Workspace; **one Workspace that cannot answer fails the whole listing** — including one whose Wall never registers, after the routing retry ([Handle Model](#handle-model)) — since a missing Workspace reads as one holding nothing. **Only the active Workspace's selection is `focused`** in such a listing.
 
-**Port enumeration is opt-in** (`dor list --ports` / `--port`): the host scans each terminal Surface's process tree (`docs/specs/dor-browser.md` → Dev-Server Chip). **One listing costs one scan** (`PlatformAdapter.getOpenPortsMany`), and **a `--all` listing never forwards `includePorts` to a Wall**, scanning once for every Workspace's terminals instead. A remote paired session reports none, and any error degrades to an empty list rather than failing the call. Source of truth: `attachSurfacePorts` in `lib/src/components/wall/surface-ports.ts`, `getOpenPortsForPids` in `standalone/sidecar/pty-core.js`.
+**Port enumeration is opt-in** (`dor list --ports` / `--port`): the host scans each terminal Surface's process tree (`docs/specs/dor-browser.md` → Dev-Server Chip). **One listing costs one scan** (`PlatformAdapter.getOpenPortsMany`), `--all` included. A remote paired session reports none, and any error degrades to an empty list rather than failing the call. Source of truth: `attachSurfacePorts` in `lib/src/components/wall/surface-ports.ts`, `getOpenPortsForPids` in `standalone/sidecar/pty-core.js`.
 
 **`dor` forwards command tails as raw argv; the host quotes them** — `dor` cannot know the configured default shell, so tails after `--` travel as `command: string[]` and the host renders **one** command string, used for output, JSON responses, default `ensure` titles, and the launched command alike, picking its style with the same classifier clipboard/drop path escaping uses ([mouse-and-clipboard.md](mouse-and-clipboard.md) §8.6).
 
-**Every public first-party command except the `dor agent-browser` and `dor playwright` passthrough accepts `--json`**, emitting a stable object with the same handles as its text output; single-Surface responses always carry both `surface_id` and `surface_ref`. Text output is the primary interface, for agents as much as humans. Any JSON mode under a native browser command belongs to its delegated CLI; `dor-embed-size` owns its JSON output.
+**Must quote for every parser a style covers**: `powershell` doubles each character that closes a PowerShell single-quoted string, `'` and U+2018–U+201B; `posix` steps each `'` and `\` outside its single quotes, so fish, classified `posix`, parses it too (rationale).
+
+**Every public first-party command except the `dor agent-browser` and `dor playwright` passthrough accepts `--json`**, emitting a stable object with the same handles as its text output: **one key per id** (`id`, `surface_id`, `workspace_id`), never a second spelling of it. Text output is the primary interface, for agents as much as humans. Any JSON mode under a native browser command belongs to its delegated CLI; `dor-embed-size` owns its JSON output.
 
 **A command that operates on one existing Surface takes the target as a required positional handle** (`read` / `send` / `await` / `kill`); **a command that creates or places a Surface keeps `--surface` as an optional *reference* Surface** (`split`, `ensure`, `iframe`, browser creation). So `--surface` means "place near this" everywhere except [`dor agent-browser` and `dor playwright`](#browser-surface-addressing), whose whole positional space belongs to the provider's CLI.
 
@@ -189,7 +187,7 @@ Source of truth: `dor/src/cli-core.ts`, `dor/src/commands/`, `buildShellCommandF
 
 **Must move one Surface within this Window through the shared move coordinator.** Interaction and refusal rules follow `docs/specs/layout.md` → Moving Surfaces between Workspaces.
 
-**Must require exactly one destination: a Workspace argument or `--new`.** Never reserve the bare name `new`; `--workspace` scopes the source. CLI moves preserve focus unless `--focus` follows the pane; if the active source disappears, activate the destination in command mode. **Must refuse iframe moves unless `--dangerously-destroy-iframe-page-state` is explicit**, without a GUI prompt. Single-Workspace hosts refuse `surface.move` through `spansWorkspaces`.
+**Must require exactly one destination: a Workspace argument or `--new`.** Never reserve the bare name `new`; `--workspace` scopes the source. CLI moves preserve focus unless `--focus` follows the pane; if the active source disappears, activate the destination in command mode. **Must refuse iframe moves unless `--dangerously-destroy-iframe-page-state` is explicit**, without a GUI prompt. Single-Workspace hosts refuse `surface.move`.
 
 Source of truth: `moveCommand` in `dor/src/commands/move.ts`; `moveSurface` in `lib/src/components/wall/surface-move.ts`.
 
@@ -199,7 +197,8 @@ Source of truth: `moveCommand` in `dor/src/commands/move.ts`; `moveSurface` in `
 
 - `new` **creates in the background**, never activating; an unnamed Workspace is auto-named (`docs/specs/layout.md` → "Workspace names").
 - `rename` renames the Workspace only, no Surface title (`docs/specs/layout.md` → "Workspaces"); `dor list --workspaces --json` reports `auto`.
-- `close` **refuses without a confirmation** when the Workspace's close would ask (`docs/specs/reopen.md` → "Workspaces and windows") unless `--force`, as `dor kill` does. It also refuses when another close is in flight, or when its Wall never registers (`still mounting`, after the routing retry), which would leave its Sessions running with nothing holding them. Member Surfaces close in sequence; a refusal leaves the Workspace open and the user where they were. A dirty Tool refuses even `--force` (`docs/specs/dor-tool.md` → Closing unsaved Tools).
+- `pin` / `unpin` set the pin, idempotently (`docs/specs/layout.md` → "Workspace tabs"); `dor list --workspaces` reports `pinned`.
+- `close` refuses a pinned Workspace even with `--force` (`docs/specs/layout.md` → "Workspace tabs"). It **refuses without a confirmation** when the Workspace's close would ask (`docs/specs/reopen.md` → "Workspaces and windows") unless `--force`, as `dor kill` does. It also refuses when another close is in flight, or when its Wall never registers (`still mounting`, after the routing retry), which would leave its Sessions running with nothing holding them. Member Surfaces close in sequence; a refusal leaves the Workspace open and the user where they were. A dirty Tool refuses even `--force` (`docs/specs/dor-tool.md` → Closing unsaved Tools).
 - `move` runs the same transfer the strip's drag does (`docs/specs/standalone.md` → Transfer), answers `moved` only once the target Window has adopted the Workspace, and **refuses a move between Windows while the Workspace holds a plain iframe Surface unless the flag is passed** (`docs/specs/layout.md` → Workspaces). A host with one Window reorders only.
 
 **Each verb ships as one action of one command**, not a route map: the published CLI reference renders one help page per top-level command (`docs/specs/website-docs.md` → /dor), and a nested command would have none.
@@ -245,7 +244,7 @@ Source of truth: `dor/src/commands/open-target.ts`, `resolveOpenTargetArgs` in `
 
 **Must intercept `dor-embed-size` under either browser command before native passthrough.** Identity flags select one existing bound Surface; raw `--session` must match uniquely. No selection creates or restarts a browser. A provider mismatch fails with the matching full command name; sizing mutations require a screencast.
 
-**Must query without dimensions or a preset; otherwise apply the requested sizing and await its measurement.** JSON and text report Surface identity, provider, render mode, resolved intent, readiness, and actual width, height and DPR when available. A disconnected browser reports no invented dimensions. Dimensions and preset selection are mutually exclusive; `pane-sync` rejects a DPR override. Fail invalid settings before changing size.
+**Must query without dimensions or a preset; otherwise apply the requested sizing and await its measurement.** A disconnected browser reports no invented dimensions. Dimensions and preset selection are mutually exclusive; `pane-sync` rejects a DPR override. Fail invalid settings before changing size.
 
 **Must keep a new managed browser's viewport preparation out of native stdout**; when and how it is sized is `docs/specs/dor-browser.md` → Viewport presets. Native `playwright open` still restarts its browser.
 
@@ -253,7 +252,7 @@ Source of truth: `runBrowserCli` in `dor/src/commands/browser-cli.ts`; `BrowserV
 
 ## Browser Surface Addressing
 
-**Must intercept `dor agent-browser` and `dor playwright` before stricli parses provider arguments.** One runner drives both; `BROWSER_PROVIDERS` and its descriptors own what differs: session argv, navigation verbs, nonbinding/informational controls, and execution scope.
+**Must intercept `dor agent-browser` and `dor playwright` before stricli parses provider arguments.**
 
 - **Exactly one identity flag**: `--key` (default `default`), `--session`, or `--surface`, plus `--workspace`; any two fail. Except the Dormouse-owned `dor-embed-size`, arguments are forwarded to the provider; stdout, stderr and exit status pass through.
 - **Resolution is host-side**: a `--key` or `--surface` takes one `surface.resolveBrowser { provider, key | surface, proposed? }` round trip before the binary runs, answered with a binding `{ session, cwd?, binaryPath? }` (`docs/specs/dor-browser.md` → Managed identity). `proposed` — the caller's cwd and executable — rides only a command that may bind. `--session` and an informational command ask nothing. Outside Dormouse a `--surface` fails.
@@ -274,14 +273,14 @@ Source of truth: `runBrowserCli` in `dor/src/commands/browser-cli.ts`; `BROWSER_
 
 Agents **discover the target Surface with `dor list` (filtered), then act on it with a handle-taking command.** Matching lives in `dor list` alone; `read` / `send` / `await` / `kill` **must not grow their own match syntax**, and a bare `dor kill "npm dev"` stays unsupported.
 
-**Identity follows the Surface, not a user-supplied key:** a terminal Surface is named by its `surface:N` ref or rediscovered by `--command` / `--cwd` / `--port`, and `dor ensure`'s command+cwd match is an implicit key that also lets an agent adopt a command the user started by hand. Browser join keys follow `docs/specs/dor-browser.md` → Managed identity; Tool keys follow `docs/specs/dor-tool.md` → Identity and dedupe. The worked examples are `dor/skill.md`'s "## Recipes".
+**Identity follows the Surface, not a user-supplied key:** a terminal Surface is named by its `surface:N` id or rediscovered by `--command` / `--cwd` / `--port`, and `dor ensure`'s command+cwd match is an implicit key that also lets an agent adopt a command the user started by hand. Browser join keys follow `docs/specs/dor-browser.md` → Managed identity; Tool keys follow `docs/specs/dor-tool.md` → Identity and dedupe. The worked examples are `dor/skill.md`'s "## Recipes".
 
 ## Agent Skill
 
 `dor/skill.md` is the agent skill, teaching a coding agent inside a Dormouse terminal to drive it through `dor`. Distribution splits into content and bootstrap:
 
-- **Content ships with the CLI.** `scripts/generate-dor-skill.mjs` (prebuild) inlines the markdown into the bundle, so `dor skill` prints text version-locked to the CLI that staged it. **The skill body must carry no environment detection:** if `dor skill` ran, `dor` is available. **Its connection troubleshooting must distinguish sandbox socket denial from stale caller context**, directing agents to sandbox approval or a fresh caller environment, never socket discovery or authentication bypass.
-- **Bootstrap is a loud stub that barely drifts.** `dor skill --install` writes a marker-delimited block (`<!-- dor-skill:begin` … `dor-skill:end -->`) into the project's agent instructions file, resolved against the invoking shell's PWD. It holds the detection rule plus two mandatory directives (rationale): never background a long-running process (use `dor ensure`), never use a native browser tool (use `dor agent-browser`). **Nothing else may join them**, and **`dor/skill.md` must lead with the same two** (rationale). **Committing the block is the point** — the env guard keeps it inert for collaborators without Dormouse. **A begin marker without a well-ordered end marker fails** rather than guessing; output names the bare file, never an absolute path.
+- **Content ships with the CLI.** The bundle inlines the markdown, so `dor skill` prints text version-locked to the CLI that staged it. **The skill body must carry no environment detection:** if `dor skill` ran, `dor` is available. **Its connection troubleshooting must distinguish sandbox socket denial from stale caller context**, directing agents to sandbox approval or a fresh caller environment, never socket discovery or authentication bypass.
+- **Bootstrap is a loud stub that barely drifts.** `dor skill --install` writes a marker-delimited block (`<!-- dor-skill:begin` … `dor-skill:end -->`) into the project's agent instructions file, resolved against the invoking shell's PWD. It holds the detection rule plus two mandatory directives (rationale): never background a long-running process (use `dor ensure`), never use a native browser tool (use `dor agent-browser`). **Nothing else may join them**, and **`dor/skill.md` must lead with the same two** (rationale). **Committing the block is the point** — the env guard keeps it inert for collaborators without Dormouse. **A begin marker without a well-ordered end marker fails** rather than guessing.
 
 Source of truth: `dor/src/commands/skill.ts`, whose printed text is pinned byte-identical to `dor/skill.md` by `dor/test/cli-output.test.mjs`.
 
@@ -290,7 +289,7 @@ Source of truth: `dor/src/commands/skill.ts`, whose printed text is pinned byte-
 **Must derive helper-origin metadata from the PTY host before routing across Windows**, preserving the actual caller Session id. **Never accept that metadata from a control-socket client.**
 
 - **Must route an unscoped helper-origin request through the source's Workspace.** A missing source refuses rather than falling back to the active Workspace.
-- **Must keep unpromoted helpers out of discovery, matching, and explicit targeting**, including `surface:self` and internal ids. Never substitute the source for an explicit helper target or mark the source as the caller in a listing. Promotion assigns the ordinary public Surface ref without changing Session identity.
+- **Must keep unpromoted helpers out of discovery, matching, and explicit targeting**, including `surface:self`, the helper's id, and its `surface:<n>`. Never substitute the source for an explicit helper target or mark the source as the caller in a listing. Promotion makes its id targetable without changing Session identity.
 - **Must use the source as the helper's default placement reference, never as its caller.** A helper is never the caller a Wall sees, even once promoted, so nothing marks, takes over, or retargets the source on its behalf.
 - **Never promote, take over, or replace a helper or placement reference to fulfill a helper-origin creation**, including for a request accepted before promotion; matching, keyed reuse, and preview slots still apply. A captured placement reference disappearing before creation fails.
 - **Must retain the actual helper Session as an app-restart requester**, without exempting its source from running-work checks.

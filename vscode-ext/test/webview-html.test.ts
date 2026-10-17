@@ -1,10 +1,17 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { CSP_NONCE_PLACEHOLDER } from '../src/csp-nonce-placeholder';
 import { getWebviewHtml } from '../src/webview-html';
 import { removeDir, tempStorageDir } from './helpers';
+
+// The test runner bakes no define, which reads as self-host; each test picks.
+let relayMode: 'hosted' | 'self-host' = 'hosted';
+vi.mock('../../lib/src/host/relay-origin', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../lib/src/host/relay-origin')>()),
+  bakedRelayMode: () => relayMode,
+}));
 
 /**
  * `getWebviewHtml` post-processes whatever Vite built into `media/`, so these
@@ -89,6 +96,12 @@ describe('getWebviewHtml', () => {
       `'strict-dynamic'`,
       `'wasm-unsafe-eval'`,
     ]);
+  });
+
+  it('closes the directives that do not fall back to default-src', () => {
+    const { html } = getWebviewHtml(webview, mediaPath);
+    expect(cspSources(html, 'form-action')).toEqual([`'none'`]);
+    expect(cspSources(html, 'base-uri')).toEqual([`'none'`]);
   });
 
   it('carries the real nonce on every tag Vite marked, and leaves no placeholder', () => {
@@ -203,8 +216,16 @@ describe('getWebviewHtml', () => {
     const { html } = getWebviewHtml(webview, mediaPath);
     // Blob alone: no remote media origin, so a clip only plays once the host fetched it.
     expect(cspSources(html, 'media-src')).toEqual(['blob:']);
-    // The test runner's build is Hosted (no relay define).
     expect(html).toContain('globalThis.__DORMOUSE_MANAGED_VOICE__ = true;');
+  });
+
+  it('tells a self-host build\'s webview it has no managed voice', () => {
+    relayMode = 'self-host';
+    try {
+      expect(getWebviewHtml(webview, mediaPath).html).not.toContain('__DORMOUSE_MANAGED_VOICE__ = true');
+    } finally {
+      relayMode = 'hosted';
+    }
   });
 
   it('mints a fresh nonce and message token per document', () => {

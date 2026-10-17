@@ -11,9 +11,7 @@ import { vi } from 'vitest';
  *
  * Uses `vi.stubGlobal` rather than `Object.defineProperty` so the stub is
  * restore-tracked: a test's `vi.unstubAllGlobals()` puts the environment back,
- * and it matches how the rest of the lib's tests stub this global
- * (`local-json-store.test.ts`, `feature-flags.test.ts`, `alert-settings.test.ts`,
- * `window-persistence.test.ts`, `remote/burrow/{acl,enrollment}.test.ts`).
+ * and it matches how the rest of the lib's tests stub this global.
  */
 export function installLocalStorageStub(): void {
   const values = new Map<string, string>();

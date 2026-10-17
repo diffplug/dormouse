@@ -53,7 +53,6 @@ JSON output:
   {
     "status": "killed",
     "surface_id": "...",
-    "surface_ref": "surface:3"
   }`,
     },
     parameters: {
@@ -118,9 +117,8 @@ function renderKillResponse(response: KillSurfaceResponse, json: boolean): strin
     return renderJson({
       status: response.status,
       surface_id: response.surfaceId,
-      surface_ref: response.surfaceRef,
     });
   }
 
-  return `${response.status} ${response.surfaceRef}\n`;
+  return `${response.status} ${response.surfaceId}\n`;
 }

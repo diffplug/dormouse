@@ -18,6 +18,11 @@ async function fixture(t) {
   await mkdir(path.join(standalone, 'sidecar'));
   await Promise.all(['dev-agent-browser.mjs', 'dev-host-guard.mjs', 'dev-run.mjs'].map(name =>
     copyFile(path.join(scripts, name), path.join(standalone, 'scripts', name))));
+  // The repo modules the harness imports by relative path.
+  await Promise.all(['dor/src/protocol.ts', 'lib/src/lib/platform/types.ts', 'lib/src/host/atomic-json-file.ts'].map(async file => {
+    await mkdir(path.join(root, path.dirname(file)), { recursive: true });
+    await copyFile(path.join(scripts, '../..', file), path.join(root, file));
+  }));
   await writeFile(path.join(standalone, 'sidecar/main.js'), `
     console.error('SIDECAR_AB_DIR ' + process.env.AGENT_BROWSER_SOCKET_DIR);
     const { createInterface } = require('node:readline');
@@ -178,8 +183,8 @@ test('parallel worktrees own ports, browser identities and bridges; stopping one
 
 // The harness speaks the same sidecar protocol Rust does: one fixed window
 // label stamped on every alert command, over anything the page claimed, and a
-// write's `userInput` riding the write (docs/specs/standalone.md -> "Alerts").
-test('stamps its one window on alert commands and carries userInput on the write', { timeout: 60000 }, async t => {
+// write's `userInput` and `launch` riding the write (docs/specs/standalone.md -> "Alerts").
+test('stamps its one window on alert commands and carries userInput and launch on the write', { timeout: 60000 }, async t => {
   const run = await (await fixture(t)).start().ready();
   const line = async (pattern) => JSON.parse((await run.wait(pattern))[1]);
   assert.equal((await send(run, 'alert_command', { payload: { op: 'hello', window: 'ws-9' } })).status, 200);
@@ -189,6 +194,10 @@ test('stamps its one window on alert commands and carries userInput on the write
   assert.equal((await send(run, 'pty_write', { id: 'p1', data: 'y', userInput: true })).status, 200);
   assert.deepEqual(await line(/SIDECAR_LINE (\{"event":"pty:input".*\})/), {
     event: 'pty:input', data: { id: 'p1', data: 'y', userInput: true },
+  });
+  assert.equal((await send(run, 'pty_write', { id: 'p1', data: 'view\r', launch: true })).status, 200);
+  assert.deepEqual(await line(/SIDECAR_LINE (\{"event":"pty:input".*"launch".*\})/), {
+    event: 'pty:input', data: { id: 'p1', data: 'view\r', launch: true },
   });
 });
 
@@ -231,7 +240,7 @@ test('run as a Tool, leaves the browser to the Tool instead of opening a second'
   const harness = await fixture(t);
   const run = harness.start({
     DORMOUSE_SURFACE_ID: 'outer-pane',
-    TEST_DOR_LIST: JSON.stringify({ caller_surface_ref: 'surface:4', surfaces: [] }),
+    TEST_DOR_LIST: JSON.stringify({ caller_surface_id: 'surface:4', surfaces: [] }),
   });
   await run.wait(/running; Ctrl-C to stop/);
   assert.match(run.output, /Tool surface:4 shows the app; try: dor agent-browser --surface surface:4 snapshot -i/);
@@ -273,21 +282,58 @@ test('shutdown kills an owned browser launcher that ignores SIGTERM', {
 });
 
 
-test('registry seeds reservations above restored IDs and mirrors canonical workspace refs', async t => {
+/** One bridge invoke that must succeed, answering its result. */
+async function command(run, cmd, args = {}) {
+  const response = await invoke(run, run.token, run.app, cmd, args);
+  assert.equal(response.status, 200);
+  return (await response.json()).result;
+}
+
+test('registry seeds reservations above restored IDs, reading id numbers as Rust does', async t => {
   const f = await fixture(t);
   const run = await f.start().ready();
-  async function command(cmd, args = {}) {
-    const response = await invoke(run, run.token, run.app, cmd, args);
-    assert.equal(response.status, 200);
-    return (await response.json()).result;
-  }
-  const cases = JSON.parse(await readFile(path.join(scripts, 'workspace-ref-cases.json'), 'utf8'));
-  await command('workspace_report', { entries: cases.map(({ id }) => ({ id, name: id, active: false })) });
-  const registry = await command('workspace_registry');
-  assert.deepEqual(registry.windows[0].workspaces.map(({ id, ref }) => ({ id, ref })), cases);
-  await command('workspace_report', { entries: [{ id: 'workspace-400', name: 'Restored', active: true }] });
-  assert.deepEqual(await command('workspace_reserve_ids', { count: 2 }), ['workspace-401', 'workspace-402']);
+  // The shared grammar cases, as Workspace ids, short of numbers a counter
+  // could not step past exactly.
+  const idCases = JSON.parse(await readFile(path.join(scripts, '../../dor/test/id-cases.json'), 'utf8'));
+  const cases = [
+    ...idCases.numbered.filter(({ number }) => number === null || number < 1_000)
+      .map(({ suffix, number }) => ({ id: `workspace:${suffix}`, number })),
+    ...idCases.unnumbered.map(id => ({ id, number: null })),
+  ];
+  await command(run, 'workspace_report', { entries: cases.map(({ id }) => ({ id, name: id, active: false })) });
+  const registry = await command(run, 'workspace_registry');
+  assert.deepEqual(registry.windows[0].workspaces.map(({ id }) => id), cases.map(({ id }) => id));
+  const highest = Math.max(...cases.map(({ number }) => number ?? 0));
+  assert.deepEqual(await command(run, 'workspace_reserve_ids', { count: 1 }), [`workspace:${highest + 1}`]);
+  await command(run, 'workspace_report', { entries: [{ id: 'workspace:400', name: 'Restored', active: true }] });
+  assert.deepEqual(await command(run, 'workspace_reserve_ids', { count: 2 }), ['workspace:401', 'workspace:402']);
   // Repeated/lower restored reports never wind the process counter backwards.
-  await command('workspace_report', { entries: [{ id: 'workspace-400', name: 'Restored', active: true }] });
-  assert.deepEqual(await command('workspace_reserve_ids', { count: 1 }), ['workspace-403']);
+  await command(run, 'workspace_report', { entries: [{ id: 'workspace:400', name: 'Restored', active: true }] });
+  assert.deepEqual(await command(run, 'workspace_reserve_ids', { count: 1 }), ['workspace:403']);
+  // Surface ids stay above the floor the page restored, and never wind back.
+  assert.deepEqual(await command(run, 'surface_reserve_ids', { count: 2, floor: 0 }), ['surface:1', 'surface:2']);
+  assert.deepEqual(await command(run, 'surface_reserve_ids', { count: 1, floor: 40 }), ['surface:41']);
+  assert.deepEqual(await command(run, 'surface_reserve_ids', { count: 1, floor: 3 }), ['surface:42']);
+});
+
+test('a reservation it cannot persist hands out nothing', async t => {
+  const f = await fixture(t);
+  // Nothing can be renamed over a directory.
+  await mkdir(path.join(f.root, 'node_modules/.cache/dormouse-innerdogfood/ids.json'), { recursive: true });
+  const run = await f.start().ready();
+  assert.deepEqual(await command(run, 'surface_reserve_ids', { count: 2, floor: 0 }), []);
+  assert.deepEqual(await command(run, 'boot_reserve_ids', { workspaces: 1, surfaces: 1, floor: 0 }), { workspaces: [], surfaces: [] });
+});
+
+test('a restart never re-mints an id an earlier run handed out', async t => {
+  const f = await fixture(t);
+  const first = await f.start().ready();
+  assert.deepEqual(await command(first, 'surface_reserve_ids', { count: 2, floor: 0 }), ['surface:1', 'surface:2']);
+  assert.deepEqual(await command(first, 'workspace_reserve_ids', { count: 1 }), ['workspace:2']);
+  await command(first, 'workspace_report', { entries: [{ id: 'workspace:9', name: 'Gone later', active: true }] });
+  await first.stop();
+  // The page restored nothing above surface:1: surface:2 was killed before the restart.
+  const second = await f.start().ready();
+  assert.deepEqual(await command(second, 'surface_reserve_ids', { count: 1, floor: 1 }), ['surface:3']);
+  assert.deepEqual(await command(second, 'workspace_reserve_ids', { count: 1 }), ['workspace:10']);
 });

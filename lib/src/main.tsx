@@ -28,13 +28,12 @@ initAlertStateReceiver();
 
 // Request PTY list before rendering so Wall can restore existing sessions.
 // With nothing saved (a first launch, or the fake adapter) this self-caps at
-// 500 ms; only a saved terminal pane buys the 3 s retry.
-resumeOrRestore(platform).then((result) => {
+// 500 ms; only a saved terminal pane buys the 3 s retry. `init` runs alongside:
+// VS Code's installs the Surface id pool the Wall's first pane mints from.
+Promise.all([resumeOrRestore(platform), platform.init()]).then(([result]) => {
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
       <App {...wallBootFromResult(result)} enableBurrow={isVscode} />
     </StrictMode>,
   );
 });
-
-platform.init();

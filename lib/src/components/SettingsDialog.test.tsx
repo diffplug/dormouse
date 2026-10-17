@@ -93,7 +93,7 @@ beforeEach(() => {
     return nextFrame;
   });
   vi.stubGlobal('cancelAnimationFrame', (id: number) => frames.delete(id));
-  sectionOffsets = { general: 16, activity: 116, notifications: 516, network: 916 };
+  sectionOffsets = { general: 16, notifications: 516, network: 916, about: 1316 };
   stubResizeObserver(400);
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
     const top = this.dataset.settingsTopic
@@ -128,7 +128,7 @@ describe('SettingsDialog navigation and search', () => {
     sectionOffsets.notifications += 50;
     await advanceScroll(SETTINGS_SCROLL_MS / 2);
     expect(scrollTo).toHaveBeenLastCalledWith({ top: 550, behavior: 'instant' });
-    await act(async () => byText('Activity').click());
+    await act(async () => byText('General').click());
     await advanceScroll(SETTINGS_SCROLL_MS / 2);
     await act(async () => document.getElementById('settings-content')!.dispatchEvent(new Event('wheel', { bubbles: true })));
     scrollTo.mockClear();
@@ -151,7 +151,7 @@ describe('SettingsDialog navigation and search', () => {
     await act(async () => {
       heading.dispatchEvent(new PointerEvent('pointerout', { bubbles: true, relatedTarget: document.body }));
     });
-    expect(byText('Activity').getAttribute('aria-current')).toBe('location');
+    expect(byText('General').getAttribute('aria-current')).toBe('location');
   });
 
   it('scrolls on mouse hover and click without hiding sections or reacting to touch hover', async () => {
@@ -164,9 +164,9 @@ describe('SettingsDialog navigation and search', () => {
     await advanceScroll();
     expect(scrollTo).toHaveBeenLastCalledWith({ top: 500, behavior: 'instant' });
     expect(byText('Notifications').getAttribute('aria-current')).toBe('location');
-    await act(async () => byText('Activity').click());
+    await act(async () => byText('General').click());
     await advanceScroll();
-    expect(scrollTo).toHaveBeenLastCalledWith({ top: 100, behavior: 'instant' });
+    expect(scrollTo).toHaveBeenLastCalledWith({ top: 0, behavior: 'instant' });
     expect(visible('[role="region"]')).toHaveLength(3);
   });
 
@@ -179,6 +179,15 @@ describe('SettingsDialog navigation and search', () => {
     const before = getAlertSettings().deferAlertsUntilQuiet;
     await act(async () => visible('[role="switch"]')[0].click());
     expect(getAlertSettings().deferAlertsUntilQuiet).toBe(!before);
+  });
+
+  it('ends with About, which a search for the version finds alone', async () => {
+    vi.stubGlobal('__DORMOUSE_BUILD__', { version: '1.2.0', commit: 'd080b4f5', commitsSinceVersion: 14, dirty: false, official: false, host: 'standalone' });
+    await render();
+    const nav = document.querySelector('nav[aria-label="Settings topics"]')!;
+    expect([...nav.querySelectorAll('button')].at(-1)?.textContent).toBe('About');
+    await search('version');
+    expect(visible('[data-setting]').map((node) => node.dataset.setting)).toEqual(['about']);
   });
 
   it('keeps Tab focus out of search-filtered settings', async () => {
@@ -227,9 +236,9 @@ describe('SettingsDialog under Network → Nothing', () => {
     });
     platform.managedVoice = makeStubManagedVoicePort(true);
     await render();
-    expect(text()).toContain('Push is off while Network is set to Nothing.');
+    expect(text()).toContain('Push is off while Network is set to Nowhere.');
     expect(text()).toContain(
-      'Managed voice is off while Network is set to Nothing, so alerts use your browser or system voice.',
+      'Managed voice is off while Network is set to Nowhere, so alerts use your browser or system voice.',
     );
     expect(text()).not.toContain('Connect this machine to a Dormouse Relay');
 
@@ -256,4 +265,18 @@ describe('SettingsDialog under Network → Nothing', () => {
     expect(document.querySelector<HTMLInputElement>('input[type="search"]')!.value).toBe('');
     expect(network.hidden).toBe(false);
   });
+});
+
+describe('SettingsDialog theme row', () => {
+  it.each([[true, true], [undefined, false]] as const)(
+    'offers the OpenVSX store only on a platform that does (offersThemeStore %s)',
+    async (offers, shown) => {
+      platform.offersThemeStore = offers;
+      await render();
+      const trigger = document.querySelector<HTMLButtonElement>('button[aria-label^="Theme: "]')!;
+      await act(async () => trigger.click());
+      const menu = document.querySelector('[role="menu"][aria-label="Select theme"]')!;
+      expect(menu.textContent?.includes('Install theme from OpenVSX')).toBe(shown);
+    },
+  );
 });

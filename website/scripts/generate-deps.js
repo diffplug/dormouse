@@ -4,7 +4,14 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getCargoGitRepository, getShippedCargoGraph } from "./cargo-dependencies.js";
 import { compareVersions, mergeReleases } from "./dependency-rows.js";
-import { assertWorkspaceCoverage, getDependencyNames, missingDependency } from "./dependency-workspaces.js";
+import {
+  assertWorkspaceCoverage,
+  getDependencyNames,
+  externalPlatformSiblings,
+  linkedPeerPackageJsonPath,
+  missingDependency,
+  optionalSiblingsAtSameVersion,
+} from "./dependency-workspaces.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "../..");
@@ -151,11 +158,27 @@ const externalReleases = [];
 const visitedExternalPackagePaths = new Set();
 const visitedWorkspacePackageNames = new Set();
 /**
- * Optional dependencies of a product root this machine cannot install, mapped to
- * the siblings they may be described from. See
+ * Platform builds read from no `package.json` here, keyed by name and release,
+ * each with the siblings it may be described from: a product root's optional
+ * dependency this machine cannot install, and the rest of an external
+ * package's installed platform family. See
  * docs/specs/security-supply-chain.md -> "Disclosure".
  */
 const undescribedPackages = new Map();
+/** Every product root's optional dependencies, whose families that root names. */
+const productRootOptionals = new Set(productDependencyFilters.flatMap((name) =>
+  Object.keys(workspacePackagesByName.get(name).pkg.optionalDependencies ?? {})));
+
+/**
+ * Describes `packageName` from `siblings` after the walk, from their release at
+ * `version` when given; the first section to reach it keeps it.
+ */
+function describeLater(packageName, siblings, version) {
+  const key = `${packageName}@${version ?? ""}`;
+  if (!undescribedPackages.has(key)) {
+    undescribedPackages.set(key, { packageName, section: currentSection, siblings, version });
+  }
+}
 /** Each package's `contributors` (or `authors`), the last resort for its author. */
 const listedPeople = new Map();
 
@@ -170,21 +193,6 @@ function addExternalPackage(pkg) {
     author: formatAuthor(pkg.author),
     homepage: getHomepage(pkg),
   });
-}
-
-/**
- * The names declared beside `packageName` in the same `optionalDependencies`
- * block at the same exact version string. A prebuilt family is published in
- * lockstep from one repository under one pinned version, so any of these
- * describes the absent one exactly — which is also what keeps this disclosure
- * identical on every machine that generates it.
- */
-function optionalSiblingsAtSameVersion(pkg, packageName) {
-  const optionalDependencies = pkg.optionalDependencies ?? {};
-  const version = optionalDependencies[packageName];
-  return Object.keys(optionalDependencies).filter(
-    (name) => name !== packageName && optionalDependencies[name] === version,
-  );
 }
 
 function scanWorkspacePackage(name) {
@@ -206,17 +214,14 @@ function scanDependency(fromDir, packageName, declaredBy) {
     return;
   }
 
-  const packageJsonPath = getPackageJsonPath(fromDir, packageName);
+  const packageJsonPath = declaredBy.peer
+    ? linkedPeerPackageJsonPath(fromDir, declaredBy.pkg.name, packageName, declaredBy.isWorkspace)
+    : getPackageJsonPath(fromDir, packageName);
   if (!packageJsonPath) {
     const edge = missingDependency(declaredBy);
     if (edge === 'skip') return;
-    // The first section to reach it keeps it, as `firstSectionReleases` does.
-    if (edge === 'describe' && undescribedPackages.has(packageName)) return;
     if (edge === 'describe') {
-      undescribedPackages.set(packageName, {
-        section: currentSection,
-        siblings: optionalSiblingsAtSameVersion(declaredBy.pkg, packageName),
-      });
+      describeLater(packageName, optionalSiblingsAtSameVersion(declaredBy.pkg, packageName));
       return;
     }
     throw new Error(`Could not resolve package.json for "${packageName}" from ${fromDir}`);
@@ -227,6 +232,9 @@ function scanDependency(fromDir, packageName, declaredBy) {
   visitedExternalPackagePaths.add(realPackageJsonPath);
 
   const pkg = readJson(realPackageJsonPath);
+  for (const sibling of externalPlatformSiblings(declaredBy, pkg, productRootOptionals)) {
+    describeLater(sibling, [pkg.name], pkg.version);
+  }
   addExternalPackage(pkg);
   scanDependencies(pkg, dirname(realPackageJsonPath));
 }
@@ -234,8 +242,8 @@ function scanDependency(fromDir, packageName, declaredBy) {
 function scanDependencies(pkg, fromDir) {
   const isProductRoot = sectionOfRoot.has(pkg.name);
   const isWorkspace = workspacePackagesByName.has(pkg.name);
-  for (const { name, optional } of getDependencyNames(pkg)) {
-    scanDependency(fromDir, name, { pkg, optional, isWorkspace, isProductRoot });
+  for (const { name, optional, peer } of getDependencyNames(pkg)) {
+    scanDependency(fromDir, name, { pkg, optional, peer, isWorkspace, isProductRoot });
   }
 }
 
@@ -247,8 +255,10 @@ for (const section of productSections) {
 // Grouped before the loop writes to `externalReleases`, so nothing is ever
 // described from something that was itself described rather than read.
 const readReleasesByName = Map.groupBy(externalReleases, (release) => release.name);
-for (const [packageName, { section, siblings }] of undescribedPackages) {
-  const sibling = siblings.map((name) => readReleasesByName.get(name)).find(Boolean);
+for (const { packageName, section, siblings, version } of undescribedPackages.values()) {
+  const sibling = siblings
+    .map((name) => readReleasesByName.get(name)?.filter((release) => !version || release.version === version))
+    .find((releases) => releases?.length);
   if (!sibling) {
     throw new Error(
       `"${packageName}" is not installed and neither is any sibling declared beside it at the same version, so it cannot be described`,
@@ -284,8 +294,9 @@ function normalizeLicense(license) {
 /**
  * Each `name@version` once, in the first section that reached it. pnpm installs
  * one release at several paths when peer contexts differ, so the path walk
- * alone would repeat it under a later section. A described release cannot
- * collide with a read one: it is described because it is not installed.
+ * alone would repeat it under a later section. Described releases follow every
+ * read one, so a family member that is both installed and described keeps the
+ * row it was read into.
  */
 function firstSectionReleases(releases) {
   const seen = new Set();
@@ -484,15 +495,21 @@ const cargoMissingAuthor = {
   "toml_parser": "toml-rs contributors",
   "toml_writer": "toml-rs contributors",
   "tray-icon": "Tauri Programme within The Commons Conservancy",
+  "web-time": "dAxpeDDa",
   "webkit2gtk": "Antoni Boucher, The Gtk-rs Project Developers",
   "webkit2gtk-sys": "Antoni Boucher",
   "windows": "Microsoft",
   "windows-collections": "Microsoft",
+  "windows-core": "Microsoft",
   "windows-future": "Microsoft",
   "windows-implement": "Microsoft",
   "windows-interface": "Microsoft",
+  "windows-link": "Microsoft",
   "windows-numerics": "Microsoft",
   "windows-registry": "Microsoft",
+  "windows-result": "Microsoft",
+  "windows-strings": "Microsoft",
+  "windows-threading": "Microsoft",
   "windows-version": "Microsoft",
   // No holder in the crate's files: its project or maintainer. bs58's LICENSE
   // names "The roaring-rs developers", a copy-paste from another project.
@@ -503,6 +520,8 @@ const cargoMissingAuthor = {
   "indexmap": "The indexmap contributors",
   "jni-macros": "jni team",
   "pin-project-lite": "Taiki Endo",
+  // 1.0.152 dropped `authors`; these are the ones 1.0.151 declared.
+  "serde_json": "Erick Tryzelaar, David Tolnay",
   "wasip2": "The Bytecode Alliance",
   "webpki-root-certs": "The rustls contributors",
   "webview2-com": "Bill Avery",

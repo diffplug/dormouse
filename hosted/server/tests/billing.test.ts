@@ -139,6 +139,8 @@ async function fixture({ billing = true } = {}) {
           cookie: [...jar].map(([k, v]) => `${k}=${v}`).join("; "),
           "cf-connecting-ip": "203.0.113.10",
           "content-type": "application/json",
+          // The account's own page, as the read gate requires.
+          "sec-fetch-site": "same-origin",
           ...(init.origin !== null && { origin: init.origin ?? origin }),
           ...init.headers,
         },

@@ -23,6 +23,30 @@ export const accountQuery = <Row extends Record<string, unknown>>(
 export const jsonBodyLimit = (maxSize: number) =>
   bodyLimit({ maxSize, onError: (c) => c.json({ message: "Request too large." }, 413) });
 
+/**
+ * Whether the account's own page made this read: the browser says
+ * `Sec-Fetch-Site: same-origin`, and an `Origin`, if presented, is exactly
+ * `origin`. A sibling's page, a navigation, and a request without Fetch
+ * Metadata all fail. {@link cookieEntitled}'s in-process login lookup vouches
+ * for a request its gate admitted by carrying the header itself.
+ */
+export function ownPageRead(request: Request, origin: string): boolean {
+  const presented = request.headers.get("origin");
+  return (
+    request.headers.get("sec-fetch-site") === "same-origin" &&
+    (presented === null || presented === origin)
+  );
+}
+
+/**
+ * Whether `path` is an auth request another site's page may make: a
+ * provider's callback, or the CSRF challenge. Every other auth request but a
+ * POST (whose Origin and CSRF rules the packed adapter holds) must be
+ * {@link ownPageRead}, so a read a later adapter adds is gated too.
+ */
+export const openAuthRead = (path: string) =>
+  path === "/api/auth/csrf" || path.startsWith("/api/auth/callback/");
+
 /** The login a cookie route acts for. */
 export interface AccountLogin {
   userId: string;
@@ -38,66 +62,58 @@ export interface AccountLogin {
 type Gate = MiddlewareHandler<{ Variables: { login: AccountLogin } }>;
 
 /**
- * A presented `Origin` is exactly this origin, and a state-changing request
- * must present one — same-site pages, the relay and voice origins among
- * them, share the login cookie — then the Better Auth handler's
- * `get-session` answers the login: the login, or the refusal to send.
- */
-async function login(c: Context, host: AccountHost): Promise<AccountLogin | Response> {
-  const origin = new URL(c.req.url).origin;
-  const presented = c.req.header("origin");
-  // A read may omit `Origin`; nothing may present a foreign one.
-  const safe = c.req.method === "GET" || c.req.method === "HEAD";
-  if (presented === undefined ? !safe : presented !== origin)
-    return c.json({ message: "Invalid origin." }, 403);
-  const headers = new Headers();
-  for (const name of ["cookie", "cf-connecting-ip"]) {
-    const value = c.req.header(name);
-    if (value) headers.set(name, value);
-  }
-  const response = await host.auth(
-    new Request(new URL("/api/auth/get-session", origin), { headers }),
-  );
-  if (!response.ok) throw new Error("Login lookup failed");
-  const session = (await response.json()) as {
-    user?: { id: string; email?: unknown };
-    session?: { createdAt?: unknown };
-  } | null;
-  if (!session?.user) return c.json({ message: "Sign in first." }, 401);
-  return {
-    userId: session.user.id,
-    email: typeof session.user.email === "string" ? session.user.email : null,
-    createdAt: session.session?.createdAt,
-  };
-}
-
-/**
- * The account Worker's gate for a cookie route any signed-in account may use
- * (billing): the origin and login checks, 401 without a login. Sets `login`.
- */
-export function cookieLogin(host: (c: Context) => AccountHost): Gate {
-  return async (c, next) => {
-    const result = await login(c, host(c));
-    if (result instanceof Response) return result;
-    c.set("login", result);
-    await next();
-  };
-}
-
-/**
- * The account Worker's gate for an entitled account's cookie routes: the
- * origin and login checks, then only an entitled account passes, read per
- * request (`refuse` answers anyone else). Sets `login`.
+ * The account Worker's cookie routes' gate: a read is {@link ownPageRead},
+ * and a state-changing request presents exactly this `Origin` — same-site
+ * pages, the relay and voice origins among them, share the login cookie —
+ * then the Better Auth handler's `get-session` answers the login (401
+ * without one), and only an entitled account passes, read per request
+ * (`refuse` answers anyone else). Sets `login`.
  */
 export function cookieEntitled(
   host: (c: Context) => AccountHost,
   refuse: (c: Context) => Response,
 ): Gate {
+  return cookieGate(host, refuse);
+}
+
+/** {@link cookieEntitled}'s gate for a route any signed-in account may use. */
+export function cookieLogin(
+  host: (c: Context) => AccountHost,
+): Gate {
+  return cookieGate(host);
+}
+
+function cookieGate(
+  host: (c: Context) => AccountHost,
+  refuse?: (c: Context) => Response,
+): Gate {
   return async (c, next) => {
-    const result = await login(c, host(c));
-    if (result instanceof Response) return result;
-    if (!(await entitled(host(c).databaseUrl, result.userId))) return refuse(c);
-    c.set("login", result);
+    const origin = new URL(c.req.url).origin;
+    const read = c.req.method === "GET" || c.req.method === "HEAD";
+    if (read ? !ownPageRead(c.req.raw, origin) : c.req.header("origin") !== origin)
+      return c.json({ message: "Invalid origin." }, 403);
+    // This request passed the gate above, so its lookup is the account's own
+    // read: `prelaunchAuth` refuses a login read that does not say so.
+    const headers = new Headers({ "sec-fetch-site": "same-origin" });
+    for (const name of ["cookie", "cf-connecting-ip"]) {
+      const value = c.req.header(name);
+      if (value) headers.set(name, value);
+    }
+    const response = await host(c).auth(
+      new Request(new URL("/api/auth/get-session", origin), { headers }),
+    );
+    if (!response.ok) throw new Error("Login lookup failed");
+    const session = (await response.json()) as {
+      user?: { id: string; email?: unknown };
+      session?: { createdAt?: unknown };
+    } | null;
+    if (!session?.user) return c.json({ message: "Sign in first." }, 401);
+    if (refuse && !(await entitled(host(c).databaseUrl, session.user.id))) return refuse(c);
+    c.set("login", {
+      userId: session.user.id,
+      email: typeof session.user.email === "string" ? session.user.email : null,
+      createdAt: session.session?.createdAt,
+    });
     await next();
   };
 }

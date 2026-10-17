@@ -99,7 +99,7 @@ export const BROWSER_DISPLAY_SLOT_PX = 36;
 
 /** A browser header's Display trigger: its glyph is the Surface's display
  *  identity, and a press opens the Display modal (`docs/specs/dor-browser.md`
- *  -> Browser Chrome). */
+ *  -> "Display Modal And Render Swaps"). */
 export function BrowserDisplayButton({ mode, onOpen }: { mode: BrowserDisplayMode | null; onOpen?: () => void }) {
   const label = mode ? `${BROWSER_DISPLAY_LABEL[mode]} — change display` : 'Change display';
   return (

@@ -6,25 +6,23 @@
 
 ## Helper lifecycle
 
-- **Must create at most one helper per source, lazily on first context opening.** Concurrent openings share the same pending creation. Closing the source during startup cancels creation, including while its registry entry remains for the exit animation. Helpers cannot have helpers.
+- **Must create at most one helper per source, lazily on first context opening.** Closing the source during startup cancels creation. Helpers cannot have helpers.
 - **Must start with the configured shell in the source's local directory**, using the ordinary split fallback when unavailable. Shell exports and virtual environments are not inherited. SSH integration is outside this feature.
-- **Must inject autorun only after integrated shell readiness**, accepting prompt-start and prompt-end/editing states with no current command. User input before injection cancels it. After eight seconds without readiness, show an unsupported state and never write a timeout fallback.
+- **Must inject autorun only after integrated shell readiness**, accepting prompt-start and prompt-end/editing states with no current command. User input before injection cancels it. Without readiness before a timeout, show an unsupported state and never write a timeout fallback.
 - **Must treat typing, paste, accepted drops, and application mouse input as user work**, disarming automatic refresh until Reset or Promote. Selection, copying, resize, and terminal protocol replies do not count. Returning to idle does not rearm autorun.
-- **Must refresh an untouched, completed or autorun-disabled helper on reopening only after a host idle check.** Recheck ownership and the touched flag after that asynchronous check; foreground commands, background descendants, and failed/unknown inspection preserve the helper.
-- **Must hide a retained helper without terminating its PTY**, parking its xterm element in the document. Revealing or promoting reuses the same element; cleanup from an older mount cannot detach a newer mount. Renderer resource lifetime follows `docs/specs/layout.md` → "Renderer".
+- **Must refresh an untouched, completed or autorun-disabled helper on reopening only after a host idle check.** Foreground commands, background descendants, and failed/unknown inspection preserve the helper.
+- **Must hide a retained helper without terminating its PTY**; revealing or promoting reuses the same xterm element. Renderer resource lifetime follows `docs/specs/layout.md` → "Renderer".
 - **Must keep a preserved helper's directory independent of its source**, showing both locations prominently when they differ. Unknown directory state is not evidence of a match.
 - **Must retain exited output**, offer Reset, and avoid automatic restart loops.
-- **Must pause status and process-inspection polling while the context is hidden**, invalidating cached idle results. Reopening publishes current terminal status; source closure inspects work on demand.
+- **Must pause status and process-inspection polling while the context is hidden**, its Workspace out of view included. Reopening publishes current terminal status; source closure inspects work on demand.
 
-**Must carry one status line per helper state**, offering Reset in place of Modify only for user-touched or exited helpers.
+**Must make Reset an explicit discard**, confirmed first; under Labs it asks nothing and the old helper becomes a pending kill (`docs/specs/reopen.md` → "Labs: No-confirm delayed kill"), which the host stops counting as the source's one helper until a restore re-owns it. Cancellation changes nothing; confirmation disposes the old helper and launches a fresh one using the source's current directory and current global setting.
 
-**Must make Reset an explicit discard**, confirming loss of scrollback, unfinished input, running programs, and unsaved edits; under Labs it asks nothing and the old helper becomes a pending kill (`docs/specs/reopen.md` → "Labs: No-confirm delayed kill"). Cancellation changes nothing; confirmation disposes the old helper and launches a fresh one using the source's current directory and current global setting. Stale timers cannot write to the replacement.
-
-Source of truth: `openHelper` / `helperHasWork` / `disposeHelper` / `closeHelperParent` in `lib/src/lib/helper-terminal.ts`; `markSessionTouched` / `parkElement` in `lib/src/lib/terminal-lifecycle.ts`; `HELPER_STATUS` — the state, its status line, and whether it offers Reset — in `lib/src/components/wall/TerminalContextView.tsx`. Tests: `lib/src/lib/helper-terminal.test.ts`.
+Source of truth: `openHelper` / `closeHelperParent` in `lib/src/lib/helper-terminal.ts`; `markSessionTouched` in `lib/src/lib/terminal-lifecycle.ts`. Tests: `lib/src/lib/helper-terminal.test.ts`.
 
 ## Promotion and source closure
 
-**Must promote the actual Session into a regular split beside its source**, preserving the PTY, xterm, scrollback, directory, partial input, and identity. Cancel pending autorun, close context, assign the public Surface ref, and focus the promoted terminal. Failed placement restores auxiliary host ownership. The source's next opening creates a new helper.
+**Must promote the actual Session into a regular split beside its source**, preserving the PTY, xterm, scrollback, directory, partial input, and identity. Cancel pending autorun, close context, make its Surface id targetable, and focus the promoted terminal. Failed placement restores auxiliary host ownership. The source's next opening creates a new helper.
 
 **Must reject Reset, source retirement, and duplicate Promote during ownership transfer**, including from a reopened context. A failed transfer or rollback reports its error and resumes inspection so promotion can be retried.
 
@@ -42,31 +40,23 @@ Source of truth: `beginPromotion` / `cancelPromotion` / `finishPromotion` / `hel
 
 **Must accept only a single command line of at most 4096 characters**, excluding CR, LF, and NUL. The host persists only this preference in `~/.dormouse/helper-terminal.json`, using atomic replacement with private file permissions. All desktop renderers read that shared preference through the host; the fake adapter keeps a deterministic in-memory setting.
 
-**Must enforce command validity at the host.** A rejected edit keeps the prior preference and displays the error in Modify.
+**Must enforce command validity at the host.** A rejected edit keeps the prior preference.
 
 Source of truth: `context` in `standalone/sidecar/pty-core.js`; `terminalContext` in `lib/src/lib/platform/fake-adapter.ts`; `TerminalContextRequest` in `lib/src/lib/terminal-context-types.ts`.
 
 ## Presentation coverage
 
-**Must share the context presentation between the live menu and its state gallery.**
-
 **Must make diagnostic text drag-selectable**, including detail-dialog errors, without focusing the helper. Copy routing follows `docs/specs/mouse-and-clipboard.md` → "Terminal context input".
 
-**Must drain the helper's queued xterm writes and verify a single autorun command echo before placement snapshots.**
+Port action overflow follows `docs/specs/layout.md` → "Header context menu".
 
-**Must suppress xterm's auto-revealed scrollbar in visual snapshots**, while retaining terminal scrolling and layout.
-
-**Must name the panel's terminal, Tool or helper, at every width.** **Must fit every control inside the panel at its minimum width, label included.** Port action overflow follows `docs/specs/layout.md` → "Header context menu". The gallery's play check measures each button against the panel and against its own box.
-
-Source of truth: `TerminalContextView` in `lib/src/components/wall/TerminalContextView.tsx`; `lib/src/stories/TerminalContext.stories.tsx` supplies sample output; `lib/src/stories/Wall.stories.tsx` exercises the live helper. `lib/src/stories/HelperPlacement.stories.tsx` checks rendered placement and real xterm input/focus retention; the gallery checks narrow controls and always-visible details. `visualSnapshot` in `lib/.storybook/preview.ts` suppresses scrollbar paint. Tests: `lib/src/lib/platform/fake-adapter-helper.test.ts`.
+Source of truth: `TerminalContextView` in `lib/src/components/wall/TerminalContextView.tsx`.
 
 The Window-host workspace picker follows `docs/specs/layout.md` → Moving Surfaces between Workspaces.
 
 ## Tool context
 
-**Must show a Tool's primary Session in Terminal Context instead of creating an auxiliary helper**; one whose run ended is a plain terminal with a helper (`docs/specs/dor-tool.md` → Run end). Reuse the title, directory, port, and alert presentation, showing Tool command status without helper Modify, Reset, or Promote controls; a preview slot's adds Keep open (`docs/specs/layout.md` → Pane header). Pending approval cannot open context.
-
-**Must focus the Tool terminal instance directly**, bypassing its browser Surface focus handle.
+**Must show a Tool's primary Session in Terminal Context instead of creating an auxiliary helper**; one whose run ended is a plain terminal with a helper (`docs/specs/dor-tool.md` → Run end). Reuse the title explanation, directory, port, and alert presentation, showing Tool command status without helper Modify, Reset, or Promote controls; a preview slot's adds Keep open (`docs/specs/layout.md` → Pane header). Pending approval cannot open context.
 
 **Must mount only one terminal view for the Tool at a time**, moving its retained xterm between the full pane and context without disposing the Session. Context keystrokes, including terminal clipboard chords, belong to that terminal and never reach the browser underneath. Closing context preserves both processes and browser state.
 

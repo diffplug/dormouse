@@ -1,5 +1,6 @@
 import { getPlatform } from './platform';
 import { registry } from './terminal-store';
+import { mintSurfaceId } from './surface-ids';
 import { disposeSession, getOrCreateTerminal, parkElement, setPendingShellOpts } from './terminal-lifecycle';
 import { addPendingKill } from './pending-kills';
 import { isDelayedKillEnabled } from './labs-settings';
@@ -51,6 +52,7 @@ function watchHelper(helper: HelperTerminal, launchCwd?: string): void {
   let inspecting = false;
   helper.timer = setInterval(() => {
     const entry = registry.get(helper.id);
+    // A replaced helper's poll stops here, never writing to its replacement.
     if (!entry || helpers.get(helper.parentId) !== helper) { clearInterval(helper.timer); return; }
     let status = helper.status;
     if (entry.exited) status = 'exited';
@@ -59,7 +61,7 @@ function watchHelper(helper: HelperTerminal, launchCwd?: string): void {
       if (isPaneOscDriven(helper.id) && atPrompt(helper.id)) {
         status = 'running';
         seedLaunchedCommand(helper.id, helper.command, launchCwd);
-        getPlatform().writePty(helper.id, `${helper.command}\r`);
+        getPlatform().writePty(helper.id, `${helper.command}\r`, { launch: true });
       } else if (Date.now() - started >= READINESS_TIMEOUT_MS) status = 'unsupported';
     } else if (helper.status === 'running' && atPrompt(helper.id)) status = 'completed';
     if (status !== helper.status) { helper.status = status; notifyHelpers(); }
@@ -122,7 +124,8 @@ export function disposeHelper(parentId: string): void {
 /**
  * Take the parent's helper off it without ending its Session — a Reset made a
  * pending kill (`docs/specs/reopen.md`). The caller owns the returned helper:
- * {@link reattachHelper} puts it back, `disposeSession` ends it.
+ * {@link reattachHelper} puts it back, `disposeSession` ends it. The host still
+ * counts it as the parent's one helper until {@link releaseHostHelper}.
  */
 export function detachHelper(parentId: string): HelperTerminal | undefined {
   const helper = helpers.get(parentId);
@@ -131,17 +134,36 @@ export function detachHelper(parentId: string): HelperTerminal | undefined {
   return helper;
 }
 
+/** The host owns one helper per parent and refuses a second's spawn: a
+ *  detached helper stops counting there, on the handshake promotion uses. */
+function releaseHostHelper(id: string): Promise<unknown> | undefined {
+  return getPlatform().terminalContext?.({ op: 'promote', id });
+}
+
 /** Put a detached helper back on its parent, ending the one that replaced it.
  *  False when the parent has closed, or the replacement holds anything a
- *  discard would lose: user input, a running command, a promotion. */
+ *  discard would lose: user input, a running command, a promotion. The host
+ *  hears it in order — the replacement's claim released, the old one's
+ *  restored, then the replacement killed — so its one-helper rule never sees
+ *  two owners. */
 export function reattachHelper(helper: HelperTerminal): boolean {
   const { parentId } = helper;
   if (!parentIsOpen(parentId) || !registry.has(helper.id)) return false;
   const replacement = helpers.get(parentId);
   const entry = replacement && registry.get(replacement.id);
   if (replacement && (replacement.promoting || entry?.untouched === false || getTerminalPaneState(replacement.id).currentCommand)) return false;
-  if (replacement) disposeHelper(parentId);
+  if (replacement) forgetHelper(parentId);
   installHelper(helper);
+  void (async () => {
+    try {
+      if (replacement) await releaseHostHelper(replacement.id);
+      await getPlatform().terminalContext?.({ op: 'promote', id: helper.id, restore: { parentId, command: helper.command } });
+    } catch (error) {
+      console.warn('[helper] the host refused the restored helper', error);
+    } finally {
+      if (replacement) disposeSession(replacement.id);
+    }
+  })();
   return true;
 }
 
@@ -150,23 +172,26 @@ export function reattachHelper(helper: HelperTerminal): boolean {
  * pending kill instead, which a restore puts back in place of the fresh one
  * (`docs/specs/reopen.md` → "Labs: No-confirm delayed kill").
  */
-export function resetHelper(parentId: string, parent: { workspaceId: WorkspaceId; title: string; ref: string }): void {
+export async function resetHelper(parentId: string, parent: { workspaceId: WorkspaceId; title: string }): Promise<void> {
   if (!isDelayedKillEnabled()) { disposeHelper(parentId); return; }
   const old = detachHelper(parentId);
   if (!old) return;
-  addPendingKill({ kind: 'helper', id: old.id, workspaceId: parent.workspaceId, ref: parent.ref, surfaceId: old.parentId, title: parent.title, label: 'Helper' }, {
+  addPendingKill({ kind: 'helper', id: old.id, workspaceId: parent.workspaceId, surfaceId: old.parentId, title: parent.title, label: 'Helper' }, {
     // A closed parent, or a replacement with work of its own, refuses: the old
     // helper stays pending, its countdown untouched, until it finalizes.
     restore: () => reattachHelper(old),
     finalize: () => disposeSession(old.id),
   });
+  // Before the fresh helper spawns, which the host would otherwise refuse;
+  // after the pending kill, so a failed release still finalizes the old one.
+  await releaseHostHelper(old.id);
 }
 
 /** Parents torn down while their registry entry lingers for the kill fade; a
  *  WeakSet so the mark leaves with the entry. */
 const closedParents = new WeakSet<object>();
 
-/** The parent Surface is retiring (kill, renderer swap, shell replacement):
+/** The parent Surface is retiring (kill, shell replacement):
  *  dispose its helper, and refuse an `openHelper` whose host round trip lands
  *  afterwards, which would otherwise spawn a helper PTY nothing can reach. */
 export function closeHelperParent(parentId: string): void {
@@ -181,6 +206,7 @@ function parentIsOpen(parentId: string): boolean {
 }
 
 export async function openHelper(parentId: string): Promise<HelperTerminal> {
+  // Concurrent openings share one creation, so a source never gets two helpers.
   const inFlight = pending.get(parentId);
   if (inFlight) return inFlight;
   const operation = (async () => {
@@ -204,7 +230,7 @@ export async function openHelper(parentId: string): Promise<HelperTerminal> {
     if (!platform.terminalContext) throw new Error('Helper terminals are unavailable on this host');
     const settings = await platform.terminalContext({ op: 'settings' });
     if (!parentIsOpen(parentId)) throw new Error('The parent terminal has closed');
-    const id = `helper-${crypto.randomUUID()}`;
+    const id = mintSurfaceId();
     // One cwd for the spawn and the launched command's record, so a remote parent
     // leaves the helper in the host default rather than claiming the ssh path.
     const cwd = getInheritableCwd(parentId);

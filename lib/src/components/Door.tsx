@@ -19,8 +19,8 @@ import {
 export interface DoorProps {
   doorId?: string;
   title: string;
-  /** A browser Surface's display identity (`docs/specs/dor-browser.md` -> Browser
-   *  Chrome). Door draws the glyph pair and names it, so the visible and
+  /** A browser Surface's display identity (`DESIGN.md` -> Doors). Door draws
+   *  the glyph pair and names it, so the visible and
    *  accessible meanings cannot drift apart. */
   browserDisplay?: BrowserDisplayMode;
   /** Set only for a Tool whose last report says it has unsaved changes. */
@@ -115,7 +115,7 @@ export function Door({
           {title}
         </span>
         {/* `spoken` is unbounded (it lasts until the ring clears), so it joins
-            the badge cluster instead of replacing it — see docs/specs/layout.md. */}
+            the badge cluster instead of replacing it — see docs/specs/alert.md → Door. */}
         {speaking ? (
           <span className={clsx('flex shrink-0 items-center gap-1 text-xs font-bold', ALERT_SPEECH_TRACKING_CLASS)}>
             <SpeakerHighIcon size={13} weight="fill" />

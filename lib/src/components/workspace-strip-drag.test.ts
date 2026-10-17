@@ -9,6 +9,8 @@ import { createWorkspaceStripDrag } from './workspace-strip-drag';
  */
 
 const STRIP = { left: 0, right: 400, top: 0, bottom: 24 } as DOMRect;
+/** A pinned group past the title-bar space the strip leaves after `+`. */
+const PINNED = { left: 700, right: 800, top: 0, bottom: 24 } as DOMRect;
 
 function pointer(type: string, x: number, y: number): PointerEvent {
   const event = new MouseEvent(type, { clientX: x, clientY: y, bubbles: true }) as unknown as PointerEvent;
@@ -30,7 +32,7 @@ beforeEach(() => {
   drag = createWorkspaceStripDrag({
     order: () => ['w1'],
     tabElement: () => tab,
-    stripRect: () => STRIP,
+    stripRects: () => [STRIP, PINNED],
     move: () => {},
     setDragging: () => {},
     onDragOutsideWindow: outside,
@@ -49,7 +51,7 @@ describe('crossing the strip edge', () => {
     expect(backInside).not.toHaveBeenCalled();
 
     window.dispatchEvent(pointer('pointermove', 900, 300));
-    expect(outside).toHaveBeenCalledWith({ clientX: 900, clientY: 300 });
+    expect(outside).toHaveBeenCalledWith({ clientX: 900, clientY: 300 }, 'w1');
 
     // Back over its own strip: the live reorder takes the gesture back, and a
     // caret the host lit in another window is stale from here.
@@ -63,6 +65,13 @@ describe('crossing the strip edge', () => {
     window.dispatchEvent(pointer('pointermove', 900, 300));
     window.dispatchEvent(pointer('pointermove', 160, 10));
     expect(backInside).toHaveBeenCalledTimes(2);
+  });
+
+  it('counts the pinned group as the strip, and the empty space before it as outside', () => {
+    window.dispatchEvent(pointer('pointermove', 550, 10));
+    expect(outside).toHaveBeenCalledTimes(1);
+    window.dispatchEvent(pointer('pointermove', 750, 10));
+    expect(backInside).toHaveBeenCalledTimes(1);
   });
 
   it('reports leaving even on a move that also reorders', () => {

@@ -12,14 +12,27 @@ describe('normalizeExternalUri', () => {
 
   it('rejects browser-executable or opaque pseudo schemes', () => {
     expect(normalizeExternalUri('javascript:alert(1)')).toBeNull();
+    expect(normalizeExternalUri('vbscript:msgbox(1)')).toBeNull();
     expect(normalizeExternalUri('data:text/html,hello')).toBeNull();
     expect(normalizeExternalUri('blob:https://example.com/id')).toBeNull();
     expect(normalizeExternalUri('about:blank')).toBeNull();
   });
 
+  it('refuses the Windows handlers that run code from a link, in any case', () => {
+    for (const uri of [
+      'ms-msdt:x', 'MS-MSDT:x', 'search-ms:query=x', 'search:query=x', 'ms-officecmd:x',
+      'ms-appinstaller:x', 'ms-its:x', 'its:x', 'mk:x', 'hcp://x',
+    ]) {
+      expect(normalizeExternalUri(uri), uri).toBeNull();
+      expect(inspectExternalUri(uri), uri).toMatchObject({ status: 'blocked', reason: expect.stringContaining('never opens') });
+    }
+  });
+
   it('rejects malformed or control-character-bearing input', () => {
     expect(normalizeExternalUri('not a url')).toBeNull();
     expect(normalizeExternalUri('https://example.com/\nnext')).toBeNull();
+    expect(normalizeExternalUri('https://example.com/\u202etxt.exe')).toBeNull();
+    expect(normalizeExternalUri('https://exa\u200bmple.com/')).toBeNull();
     expect(normalizeExternalUri('')).toBeNull();
   });
 
@@ -30,6 +43,29 @@ describe('normalizeExternalUri', () => {
       displayUri: 'javascript:alert(1)',
       reason: expect.stringContaining('javascript:'),
     });
+  });
+});
+
+describe('inspectExternalUri scheme tiers', () => {
+  it('opens http, https, mailto, and file without the other-app warning', () => {
+    for (const uri of ['https://example.com/', 'http://example.com/', 'mailto:a@example.com', 'file:///tmp/x.md']) {
+      expect(inspectExternalUri(uri), uri).toMatchObject({ status: 'openable', otherApp: false });
+    }
+  });
+
+  it('marks every other scheme as handing the link to another app', () => {
+    for (const [uri, scheme] of [
+      ['vscode://file/x.ts:1', 'vscode'],
+      ['tel:+15551234', 'tel'],
+      ['slack://open', 'slack'],
+      ['ms-settings:display', 'ms-settings'],
+    ]) {
+      expect(inspectExternalUri(uri), uri).toMatchObject({ status: 'openable', otherApp: true, scheme });
+    }
+  });
+
+  it('still judges an other-app link deceptive when its text names a different host', () => {
+    expect(classifyDisplayMatch('vscode://evil.example/x', 'https://github.com/diffplug')).toBe('deceptive');
   });
 });
 

@@ -2,6 +2,7 @@ import { BOLD, CLEAR_LINE, PROMPT, RESET, fg, promptFor } from 'dormouse-lib/lib
 import { shortPath } from 'dor/commands/open-picker';
 import { POSIX_ESCAPABLE } from 'dormouse-lib/lib/posix-escape';
 import { HOME, type DirEntry, type VirtualFs } from './playground-fs/vfs';
+import { ALERT_PROGRAMS } from './alert-programs';
 
 export type SendOutput = (data: string) => void;
 
@@ -63,7 +64,7 @@ const ESCAPABLE = new RegExp(POSIX_ESCAPABLE.source, 'g');
 
 /** The pages' programs (`splash` is `ascii-splash`'s alias), and with a
  * filesystem the builtins and `dor` too, sorted as a listing shows them. */
-const PROGRAMS = ['ascii-splash', 'changelog', 'tutorial'];
+const PROGRAMS = ['ascii-splash', 'changelog', 'tutorial', ...ALERT_PROGRAMS].sort();
 const FS_COMMANDS = [...PROGRAMS, 'cd', 'dor', 'ls', 'pwd'].sort();
 
 /** The longest prefix every one of `names` shares. */
@@ -94,7 +95,6 @@ export class TutorialShell {
   private startProgram: StartProgram;
   private activeProgram: InteractiveProgram | null = null;
   private promptShown = false;
-  private runningCommandLine: string | null = null;
   /** The last key was a Tab that completed nothing, so the next one lists. */
   private tabbed = false;
   /** The filesystem and working directory, when the shell has them. */
@@ -126,7 +126,6 @@ export class TutorialShell {
   dispose(): void {
     this.activeProgram?.dispose();
     this.activeProgram = null;
-    this.runningCommandLine = null;
   }
 
   /** Programmatically run a command. Used to auto-launch `tutorial` on mount. */
@@ -139,22 +138,10 @@ export class TutorialShell {
   }
 
   /**
-   * Re-announce the running program's command line. The alert tutorial
-   * temporarily reports a different command on a pane to demo a WATCHING rule
-   * (`docs/specs/tutorial.md`); this restores the truth afterwards without
-   * disturbing the program's screen. No-op at a prompt.
-   */
-  reportRunningCommand(): void {
-    if (this.runningCommandLine === null) return;
-    this.sendOutput(oscCommandLine(this.runningCommandLine) + OSC_COMMAND_START);
-  }
-
-  /**
    * Announce and start `name`. Returns false when the command is unknown, in
    * which case the caller prints its own message and closes the run out.
    */
   private launch(name: string, args: string[], commandLine: string): boolean {
-    this.runningCommandLine = commandLine;
     this.sendOutput(oscCommandLine(commandLine) + OSC_COMMAND_START);
     const program = this.startProgram(name, args, (exitCode = 0) => {
       this.activeProgram = null;
@@ -167,7 +154,6 @@ export class TutorialShell {
   }
 
   private finishCommand(exitCode: number): void {
-    this.runningCommandLine = null;
     this.sendOutput(oscCommandFinish(exitCode));
     this.showPrompt();
   }

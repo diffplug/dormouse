@@ -1,5 +1,14 @@
-import { describe, expect, it } from 'vitest';
-import { assertWorkspaceCoverage, getDependencyNames, missingDependency } from './dependency-workspaces.js';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
+import {
+  assertWorkspaceCoverage,
+  getDependencyNames,
+  externalPlatformSiblings,
+  linkedPeerPackageJsonPath,
+  missingDependency,
+} from './dependency-workspaces.js';
 
 const workspace = (name, fields = {}) => ({ pkg: { name, ...fields } });
 
@@ -43,8 +52,22 @@ describe('dependency edges', () => {
       optionalDependencies: { 'native-darwin': '2.0.0' },
       devDependencies: { builder: '3.0.0' },
     })).toEqual([
-      { name: 'runtime', optional: false },
-      { name: 'native-darwin', optional: true },
+      { name: 'runtime', optional: false, peer: false },
+      { name: 'native-darwin', optional: true, peer: false },
+    ]);
+  });
+
+  // pnpm installs these, as `debug`'s optional `supports-color` in the Relay.
+  it('includes required and optional peers, and an optional peer named only in its meta', () => {
+    expect(getDependencyNames({
+      dependencies: { runtime: '1.0.0' },
+      peerDependencies: { react: '*', 'supports-color': '*', runtime: '*' },
+      peerDependenciesMeta: { 'supports-color': { optional: true }, '@types/react': { optional: true } },
+    })).toEqual([
+      { name: 'runtime', optional: false, peer: false },
+      { name: 'react', optional: false, peer: true },
+      { name: 'supports-color', optional: true, peer: true },
+      { name: '@types/react', optional: true, peer: true },
     ]);
   });
 
@@ -61,5 +84,79 @@ describe('a dependency this machine did not install', () => {
     expect(missingDependency({ optional: true, isWorkspace: false, isProductRoot: false })).toBe('skip');
     expect(missingDependency({ optional: true, isWorkspace: true, isProductRoot: true })).toBe('describe');
     expect(missingDependency({ optional: true, isWorkspace: true, isProductRoot: false })).toBe('throw');
+  });
+
+  it('is skipped on an optional peer nothing supplied, whoever declares it', () => {
+    expect(missingDependency({ optional: true, peer: true, isWorkspace: false, isProductRoot: false })).toBe('skip');
+    expect(missingDependency({ optional: true, peer: true, isWorkspace: true, isProductRoot: true })).toBe('skip');
+    expect(missingDependency({ optional: false, peer: true, isWorkspace: false, isProductRoot: false })).toBe('throw');
+  });
+});
+
+// The layout pnpm writes: each instance of a package lives in its own
+// `.pnpm/<id>/node_modules`, beside the dependencies and peers linked for it.
+describe('a peer pnpm linked for one instance', () => {
+  let root;
+  afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+  function manifest(dir, name) {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name }));
+    return dir;
+  }
+
+  it('resolves beside the instance only, never from the hidden hoist', () => {
+    root = mkdtempSync(join(tmpdir(), 'linked-peer-'));
+    const store = join(root, 'node_modules', '.pnpm');
+    const supplied = manifest(join(store, 'debug@4.4.3_supports-color@10.2.2', 'node_modules', 'debug'), 'debug');
+    manifest(join(store, 'debug@4.4.3_supports-color@10.2.2', 'node_modules', 'supports-color'), 'supports-color');
+    const bare = manifest(join(store, 'debug@4.4.3', 'node_modules', 'debug'), 'debug');
+    manifest(join(store, 'node_modules', 'supports-color'), 'supports-color');
+    const scoped = manifest(join(store, '@radix-ui+react-slot@1.0.0_react@19.3.0', 'node_modules', '@radix-ui', 'react-slot'), '@radix-ui/react-slot');
+    manifest(join(store, '@radix-ui+react-slot@1.0.0_react@19.3.0', 'node_modules', 'react'), 'react');
+    const workspace = manifest(join(root, 'lib'), 'lib');
+    manifest(join(workspace, 'node_modules', 'react'), 'react');
+
+    expect(linkedPeerPackageJsonPath(supplied, 'debug', 'supports-color', false))
+      .toBe(join(store, 'debug@4.4.3_supports-color@10.2.2', 'node_modules', 'supports-color', 'package.json'));
+    expect(linkedPeerPackageJsonPath(bare, 'debug', 'supports-color', false)).toBeNull();
+    expect(linkedPeerPackageJsonPath(scoped, '@radix-ui/react-slot', 'react', false))
+      .toBe(join(store, '@radix-ui+react-slot@1.0.0_react@19.3.0', 'node_modules', 'react', 'package.json'));
+    expect(linkedPeerPackageJsonPath(workspace, 'lib', 'react', true))
+      .toBe(join(workspace, 'node_modules', 'react', 'package.json'));
+  });
+});
+
+// docs/specs/security-supply-chain.md -> "Disclosure": which build installs
+// depends on the machine, so the family is disclosed whichever one did.
+describe('an installed platform build an external package declares', () => {
+  const typescript = {
+    name: 'typescript',
+    optionalDependencies: {
+      '@typescript/typescript-darwin-arm64': '7.0.2',
+      '@typescript/typescript-linux-x64': '7.0.2',
+      '@typescript/typescript-win32-x64': '7.0.2',
+      '@typescript/typescript-legacy': '6.0.0',
+    },
+  };
+  const edge = { pkg: typescript, optional: true, isWorkspace: false };
+  const build = (name) => ({ name, os: ['any'] });
+  const none = new Set();
+
+  it('brings every sibling at its version, whichever one this machine installed', () => {
+    expect(externalPlatformSiblings(edge, build('@typescript/typescript-darwin-arm64'), none))
+      .toEqual(['@typescript/typescript-linux-x64', '@typescript/typescript-win32-x64']);
+    expect(externalPlatformSiblings(edge, build('@typescript/typescript-linux-x64'), none))
+      .toEqual(['@typescript/typescript-darwin-arm64', '@typescript/typescript-win32-x64']);
+    expect(externalPlatformSiblings(edge, { name: '@typescript/typescript-linux-x64', libc: ['glibc'] }, none))
+      .toEqual(['@typescript/typescript-darwin-arm64', '@typescript/typescript-win32-x64']);
+  });
+
+  it('brings nothing for a portable package, a required or workspace edge, or a family a product root names', () => {
+    const name = '@typescript/typescript-darwin-arm64';
+    expect(externalPlatformSiblings(edge, { name }, none)).toEqual([]);
+    expect(externalPlatformSiblings({ ...edge, optional: false }, build(name), none)).toEqual([]);
+    expect(externalPlatformSiblings({ ...edge, isWorkspace: true }, build(name), none)).toEqual([]);
+    expect(externalPlatformSiblings(edge, build(name), new Set([name]))).toEqual([]);
   });
 });

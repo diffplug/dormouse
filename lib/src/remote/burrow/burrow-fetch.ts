@@ -105,8 +105,11 @@ export function describingFetchFailures(fetch: typeof globalThis.fetch): typeof 
 export interface BurrowFetchOptions {
   /** Who this Burrow is to that Relay, and the bearer that proves it. */
   readonly enrollment: Pick<BurrowEnrollment, 'relayUrl' | 'burrowToken'>;
-  /** Injectable for tests. */
-  readonly fetch?: typeof globalThis.fetch;
+  /**
+   * The Burrow service's guarded fetch, with no default: the global would
+   * bypass the network policy (`docs/specs/remote-network.md` -> "Policy").
+   */
+  readonly fetch: typeof globalThis.fetch;
   readonly timeoutMs?: number;
   /** Leads the non-2xx message, which always ends in ` (<status>)`. */
   readonly errorPrefix?: string;
@@ -118,8 +121,7 @@ export interface BurrowFetchOptions {
  * endpoint whose only input is the bearer still posts, with `{}`.
  */
 function burrowRequest(options: BurrowFetchOptions, route: string, body?: unknown): Promise<Response> {
-  const doFetch = options.fetch ?? globalThis.fetch;
-  return doFetch(`${options.enrollment.relayUrl}${route}`, {
+  return options.fetch(`${options.enrollment.relayUrl}${route}`, {
     ...(body === undefined ? {} : { method: 'POST', body: JSON.stringify(body) }),
     // The service replaced a webview whose CSP checked every redirect target,
     // and a Node process re-checks nothing. Do not let the Relay's open redirect

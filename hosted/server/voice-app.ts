@@ -1,11 +1,11 @@
 import type { VoiceEnv } from "./bindings";
 import { NO_PAGE_RULES } from "./headers";
-import { elevenLabs, speakRoute, sweepOnCron } from "./voice";
+import { TOKEN_OWNER, elevenLabs, speakRoute, sweepOnCron } from "./voice";
 import { workerApp } from "./worker-app";
 
 /**
- * The voice Worker (`voice.dormouse.sh`): bearer-token speech, and the Cron
- * Trigger's ElevenLabs history sweep. No cookie, no auth, no assets.
+ * The voice Worker (`voice.dormouse.sh`): readiness, bearer-token speech, and
+ * the Cron Trigger's ElevenLabs history sweep. No cookie, no auth, no assets.
  * `sweepDelayMs` exists for the test entry; production keeps the default.
  */
 export function voiceApp(
@@ -15,6 +15,9 @@ export function voiceApp(
   return workerApp<VoiceEnv>({
     bindings,
     rules: () => NO_PAGE_RULES,
+    // Speak's token lookup, its WHERE columns included: the role's own table
+    // and the entitlement's columns.
+    ready: `${TOKEN_OWNER} WHERE t.hash IS NULL AND t."revokedAt" IS NULL LIMIT 0`,
     unavailable: "Managed voice is temporarily unavailable. Please try again.",
     routes(app) {
       speakRoute(app, (c) => {

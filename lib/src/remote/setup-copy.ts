@@ -20,8 +20,8 @@ export const SETUP_PATH = `Settings → Network → ${SETUP_BUTTON}`;
  * Pocket's one way in, named for the thing the laptop is actually showing — the
  * setup code under {@link SETUP_PATH}.
  *
- * Mirrored, deliberately unpinned, in `scripts/pairing-walkthrough/steps.mjs`,
- * which is a Node harness that cannot import this file.
+ * Mirrored in `scripts/pairing-walkthrough/steps.mjs`, a Node harness that
+ * cannot import this file; pinned by `lib/src/lib/mirrored-constants.test.ts`.
  */
 export const SCAN_LABEL = 'Scan a setup code';
 

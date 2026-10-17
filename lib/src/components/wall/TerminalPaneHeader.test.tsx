@@ -61,8 +61,8 @@ function renameInput(): HTMLInputElement {
 
 describe('TerminalPaneHeader — alert state', () => {
   /** The header is untinted whatever the Session's status: the Pane overlay's
-   *  perimeter ring is the whole treatment (`docs/specs/alert.md` -> Pane
-   *  Header), and a second tinted surface would double-report it. */
+   *  perimeter ring is the whole treatment (`docs/specs/layout.md` -> Alarm
+   *  overlay), and a second tinted surface would double-report it. */
   it('never tints for a ringing Session, and offers it no control of its own', () => {
     renderHeader(stubActions(), null);
     const quiet = container.querySelector<HTMLElement>('[data-pane-header-for="term-1"]')!.className;

@@ -142,7 +142,11 @@ describe('re-reading after a mutation', () => {
       await clearBurrowEnrollment();
       // ...then let the pre-disconnect read land. It must not win.
       releaseFirstRead!();
-      await Promise.resolve();
+      // A full macrotask, not one microtask: the stale answer reaches the
+      // generation check several microtasks after release (async `command`
+      // adopting a promise, then the store's own await), so asserting sooner
+      // passes whether or not the check exists.
+      await new Promise((resolve) => setTimeout(resolve, 0));
 
       expect(getBurrowStatusSnapshot()).toMatchObject({
         kind: 'ready',

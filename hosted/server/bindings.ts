@@ -13,6 +13,8 @@ import type { RelayRoomRpc } from "./relay-room-contract";
 export interface WorkerEnv {
   APP_ORIGIN: string;
   BUILD_SHA?: string;
+  /** Postgres, as the Worker's own role; `/api/ready` queries through it. */
+  HYPERDRIVE?: { connectionString: string };
 }
 
 interface Assets {
@@ -21,6 +23,7 @@ interface Assets {
 
 /** `hosted.dormouse.sh`: the account frontend, auth, voice-token minting, and billing. */
 export interface AccountEnv extends BetterAuthWorkerBindings, WorkerEnv, BillingEnv {
+  HYPERDRIVE: { connectionString: string };
   ASSETS: Assets;
   /** Enrollment approvals, per account. */
   RELAY_APPROVE_LIMIT: RateLimit;

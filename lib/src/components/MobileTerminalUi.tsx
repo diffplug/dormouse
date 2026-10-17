@@ -120,6 +120,11 @@ export function paneMouseOverride(
   return touchMode === 'selection' && reporting !== 'none' ? 'permanent' : 'off';
 }
 
+/**
+ * Each button shows its icon and `shortLabel`, and `KEYBOARD_MODES` its icon
+ * and `label`: a phone has no hover tooltip, so `title` alone would leave a
+ * mode unnamed.
+ */
 const TOUCH_MODES: Array<{
   id: MobileTerminalTouchMode;
   label: string;

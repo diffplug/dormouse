@@ -48,8 +48,7 @@ class FakeEventSource extends EventTarget {
 // The bridge only fans a broadcast out to streams it has already registered,
 // and the app POSTs its two alert seeds the moment `init()` resolves — replies
 // that ride the stream. So `init()` settles on the stream being *open*, never
-// on the `EventSource` merely existing (docs/specs/standalone.md ->
-// "Standalone browser-dev harness").
+// on the `EventSource` merely existing.
 describe("BrowserSidecarHost.init", () => {
   beforeEach(() => {
     FakeEventSource.instances = [];

@@ -27,7 +27,7 @@ vi.mock('../../lib/helper-terminal', () => ({
   forgetHelper: (parentId: string) => void forgotten.push(parentId),
 }));
 
-const SESSION: PersistedSession = { version: 3, panes: [{ id: 'pane-a', title: 'a', cwd: '/tmp', untouched: false, alert: null }] };
+const SESSION: PersistedSession = { version: 4, panes: [{ id: 'pane-a', title: 'a', cwd: '/tmp', untouched: false, alert: null }] };
 
 beforeEach(() => {
   resetWorkspaceUi();
@@ -79,6 +79,11 @@ describe('prepareWorkspaceTransfer', () => {
 
     expect(order).toEqual(['serialize:true']);
     expect(prepared.payload.workspace).toEqual({ id: 'ws-id', name: 'Deploys', nameIsAuto: false, session: SESSION });
+  });
+
+  it('carries a pin to the Window it lands in', async () => {
+    const prepared = await prepareWorkspaceTransfer(deps([], { naming: { name: 'Deploys', nameIsAuto: false, pinned: true } }));
+    expect(prepared.payload.workspace).toEqual({ id: 'ws-id', name: 'Deploys', nameIsAuto: false, pinned: true, session: SESSION });
   });
 
   it('touches nothing until the commit, so a refused transfer costs nothing', async () => {

@@ -7,8 +7,11 @@ function AppBarStory() {
   return <div className="bg-app-bg" style={{ width: '100%' }}><AppBar /></div>;
 }
 
-function primed(names: string[]) {
-  return { workspaces: names.map((name, index) => ({ id: `story-ws-${index + 1}`, name })) };
+/** `pinned` lists positions to pin; list them last, as the store keeps them. */
+function primed(names: string[], pinned: number[] = []) {
+  return {
+    workspaces: names.map((name, index) => ({ id: `story-ws-${index + 1}`, name, ...(pinned.includes(index) ? { pinned: true } : {}) })),
+  };
 }
 
 const meta: Meta<typeof AppBarStory> = {
@@ -28,4 +31,11 @@ export const Default: Story = {
 /** One Workspace: no close button anywhere, because the last one cannot close. */
 export const SingleWorkspace: Story = {
   parameters: { primedWorkspaces: primed(['Workspace 1']) },
+};
+
+/** Pinned right: the pinned group sits flush against the bar's right end
+ *  (before the window controls on Windows and Linux), the empty drag area
+ *  between it and `+` (`docs/specs/layout.md` → "Workspace tabs"). */
+export const PinnedRight: Story = {
+  parameters: { primedWorkspaces: primed(['Workspace 1', 'Deploys', 'Notes', 'Scratch'], [2, 3]) },
 };

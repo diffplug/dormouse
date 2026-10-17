@@ -45,7 +45,7 @@ function useMockController(args: StoryArgs): ScreenController {
       syncEngaged: args.syncEngaged,
     };
     return {
-      id: 'story',
+      id: 'surface:3',
       subscribe: () => () => {},
       snapshot: () => snapshot,
       subscribeChrome: () => () => {},

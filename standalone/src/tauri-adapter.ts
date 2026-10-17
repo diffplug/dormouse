@@ -287,7 +287,7 @@ export class TauriAdapter implements PlatformAdapter {
       invoke: (cmd, args) => rawInvoke(cmd, args),
       onSnapshot: (handler) =>
         listenToWindow<WorkspaceRegistrySnapshot>("dormouse://workspaces", (event) => handler(event.payload)),
-    }));
+    }, this.windowSlot.read()));
   }
 
   // Seed the session cache from the Rust file store before restore reads it
@@ -343,7 +343,7 @@ export class TauriAdapter implements PlatformAdapter {
   /** `userInput` rides the write itself: the sidecar acknowledges it and opens
    *  the echo window before writing (docs/specs/alert.md → Engagement). */
   writePty(id: string, data: string, options?: WritePtyOptions): void {
-    invoke("pty_write", { id, data, paced: options?.paced, userInput: options?.userInput });
+    invoke("pty_write", { id, data, paced: options?.paced, userInput: options?.userInput, launch: options?.launch });
   }
 
   resizePty(id: string, cols: number, rows: number): void {
@@ -401,7 +401,8 @@ export class TauriAdapter implements PlatformAdapter {
   }
 
   /**
-   * SIGTERM this window's PTYs and wait for their exits and final output.
+   * Gracefully stop this window's PTYs and wait for their exits and final
+   * output (`docs/specs/transport.md` -> "Graceful shutdown").
    *
    * The target set is what this window owns, and Rust alone decides it
    * (`docs/specs/standalone.md` -> "Windows"), so a sibling's terminals are not

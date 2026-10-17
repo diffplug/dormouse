@@ -38,8 +38,21 @@ export interface SetupTokenEntry {
   readonly expiresAt: number;
 }
 
+/**
+ * Where a token is in its one use. `claimed`: a `finish` has spent it and is
+ * still validating, so it may yet be restored. `committed`: that finish has
+ * reached its registration write, so the token is spent for good unless the
+ * write fails. Both stay in the map, so a retire can still reach them.
+ */
+type SetupTokenState = 'live' | 'claimed' | 'committed';
+
+interface SetupTokenSlot {
+  readonly entry: SetupTokenEntry;
+  state: SetupTokenState;
+}
+
 export class SetupTokenIssuer {
-  readonly #tokens = new Map<string, SetupTokenEntry>();
+  readonly #tokens = new Map<string, SetupTokenSlot>();
   readonly #now: () => number;
 
   constructor(options: SetupTokenIssuerOptions = {}) {
@@ -51,62 +64,97 @@ export class SetupTokenIssuer {
     this.#prune(burrowId);
     const token = toBase64Url(randomBytes(SETUP_TOKEN_BYTE_LENGTH));
     const expiresAt = this.#now() + SETUP_TOKEN_TTL_MS;
-    this.#tokens.set(token, { burrowId, expiresAt });
+    this.#tokens.set(token, { entry: { burrowId, expiresAt }, state: 'live' });
     return { token, expiresAt };
   }
 
   /**
-   * Resolve `token` WITHOUT spending it, or `null` when it is unknown or
-   * expired. `POST /api/setup/begin` checks the credential before the user has
-   * done anything, so an abandoned registration must leave the QR on the laptop
-   * screen still scannable; only `finish` calls {@link consume}.
+   * Resolve `token` WITHOUT spending it, or `null` when it is unknown, expired,
+   * or claimed. `POST /api/setup/begin` checks the credential before the user
+   * has done anything, so an abandoned registration must leave the QR on the
+   * laptop screen still scannable; only `finish` calls {@link claim}.
    */
   peek(token: string): SetupTokenEntry | null {
-    const entry = this.#tokens.get(token);
-    if (entry === undefined) return null;
-    if (this.#now() >= entry.expiresAt) {
-      // Reclaim it here too; an expired entry can never become valid again.
+    const slot = this.#live(token);
+    return slot?.state === 'live' ? slot.entry : null;
+  }
+
+  /**
+   * Spend `token` for a `finish`, answering its entry — or `null` when it is
+   * unknown, expired, or already claimed. The finish then ends the claim with
+   * exactly one of {@link settle} or {@link restore}.
+   */
+  claim(token: string): SetupTokenEntry | null {
+    // This state change IS the concurrency gate for `POST /api/setup/finish`:
+    // two finishes racing one token both reach here, and only the one that
+    // finds it live claims it, so only one can register a passkey. Never carry
+    // a burrowId peeked earlier past this point.
+    const slot = this.#live(token);
+    if (slot?.state !== 'live') return null;
+    slot.state = 'claimed';
+    return slot.entry;
+  }
+
+  /**
+   * Mark a claimed token as about to register, immediately before the write:
+   * false when a {@link retire}, the Burrow cap, or an expiry sweep killed it
+   * while the finish validated, which must then register nothing.
+   */
+  commit(token: string): boolean {
+    const slot = this.#tokens.get(token);
+    if (slot?.state !== 'claimed') return false;
+    slot.state = 'committed';
+    return true;
+  }
+
+  /** End a claim for good: the finish registered. */
+  settle(token: string): void {
+    this.#tokens.delete(token);
+  }
+
+  /**
+   * End a claim by making the token redeemable again, on its original expiry
+   * so a failed attempt cannot extend the shoulder-surf window. ONLY for the
+   * failure paths of the `finish` that claimed it. A token killed meanwhile —
+   * retired, evicted by the cap, or expired — stays dead: the claim never left
+   * the map, so there is nothing to re-insert.
+   */
+  restore(token: string): void {
+    const slot = this.#tokens.get(token);
+    if (slot === undefined) return;
+    if (this.#now() >= slot.entry.expiresAt) this.#tokens.delete(token);
+    else slot.state = 'live';
+  }
+
+  /**
+   * Kill `token` for a signed-in phone that will not register with it,
+   * answering its entry — or `null` when it was already dead or spent. A
+   * claimed token is killed too, so the finish holding it can neither register
+   * nor restore it; a committed one is spent already, and dies either way.
+   */
+  retire(token: string): SetupTokenEntry | null {
+    const slot = this.#live(token);
+    if (slot === undefined) return null;
+    this.#tokens.delete(token);
+    return slot.state === 'committed' ? null : slot.entry;
+  }
+
+  /** `token`'s slot while unexpired; an expired one is reclaimed here. */
+  #live(token: string): SetupTokenSlot | undefined {
+    const slot = this.#tokens.get(token);
+    if (slot === undefined) return undefined;
+    if (this.#now() >= slot.entry.expiresAt) {
+      // An expired entry can never become valid again.
       this.#tokens.delete(token);
-      return null;
+      return undefined;
     }
-    return entry;
-  }
-
-  /**
-   * Spend `token`, answering its entry — or `null` when it is unknown or
-   * expired. Removed either way, so it can never become valid again.
-   */
-  consume(token: string): SetupTokenEntry | null {
-    // This delete IS the concurrency gate for `POST /api/setup/finish`: two
-    // finishes racing one token both reach here, and only the one that finds
-    // the entry spends it, so only one can register a passkey. Never carry a
-    // burrowId peeked earlier past this point.
-    const entry = this.#tokens.get(token);
-    if (entry === undefined) return null;
-    this.#tokens.delete(token);
-    return this.#now() < entry.expiresAt ? entry : null;
-  }
-
-  /**
-   * Put a consumed token back, keeping its original expiry so restoring cannot
-   * extend the shoulder-surf window. ONLY for the failure paths of the route
-   * that consumed it — a `finish` that spends the token and then fails must
-   * leave the QR scannable — never as a way to re-issue or refresh one. A mint
-   * may have filled its old slot while validation awaited, so restoration
-   * reapplies the Burrow cap before inserting it.
-   */
-  restore(token: string, entry: SetupTokenEntry): void {
-    if (this.#now() >= entry.expiresAt) return;
-    this.#tokens.delete(token);
-    this.#pruneExpired();
-    this.#trimBurrow(entry.burrowId, MAX_TOKENS_PER_BURROW - 1);
-    this.#tokens.set(token, entry);
+    return slot;
   }
 
   /**
    * Drop expired tokens, then evict `burrowId`'s own oldest to leave one mint
-   * slot. Restored entries re-enter out of issue order, so age is `expiresAt`
-   * rather than Map insertion order.
+   * slot. A claimed token counts and can be evicted: the cap is a kill like
+   * any other, and the claim's restore then finds nothing.
    */
   #prune(burrowId: string): void {
     this.#pruneExpired();
@@ -115,7 +163,7 @@ export class SetupTokenIssuer {
 
   #pruneExpired(): void {
     const now = this.#now();
-    for (const [token, entry] of this.#tokens) {
+    for (const [token, { entry }] of this.#tokens) {
       if (now >= entry.expiresAt) this.#tokens.delete(token);
     }
   }
@@ -125,8 +173,8 @@ export class SetupTokenIssuer {
     // Only this Burrow's rows are candidates, so a loop of mints cannot cost
     // another Burrow the token it is currently displaying.
     const own = [...this.#tokens]
-      .filter(([, entry]) => entry.burrowId === burrowId)
-      .sort((left, right) => left[1].expiresAt - right[1].expiresAt);
+      .filter(([, { entry }]) => entry.burrowId === burrowId)
+      .sort((left, right) => left[1].entry.expiresAt - right[1].entry.expiresAt);
     for (let i = 0; i < own.length - limit; i++) {
       this.#tokens.delete(own[i]![0]);
     }

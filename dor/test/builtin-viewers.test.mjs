@@ -101,11 +101,16 @@ test('the file entry titles itself, announces its port and path, serves the stag
 // that cannot change says so itself, while an editor reports once it loads.
 test('the file entry reports a read-only view clean at once, and leaves an editor to report itself', { timeout: 10_000 }, async () => {
   const clean = '\x1b]367;state;{"v":1,"dirty":false}\x07';
-  const image = join(root, 'pixel.png');
-  await writeFile(image, Buffer.from('89504e470d0a1a0a', 'hex'));
+  const gif = join(root, 'pixel.gif');
+  await writeFile(gif, 'GIF89a');
+  // PNG and JPEG open in the image editor, unless past its 32 MiB bound.
+  const png = join(root, 'pixel.png');
+  await writeFile(png, Buffer.from('89504e470d0a1a0a', 'hex'));
+  const huge = join(root, 'huge.png');
+  await writeFile(huge, Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), Buffer.alloc(32 * 1024 * 1024 - 7)]));
   const text = join(root, 'notes.txt');
   await writeFile(text, 'notes');
-  for (const [file, reports] of [[image, true], [text, false]]) {
+  for (const [file, reports] of [[gif, true], [png, false], [huge, true], [text, false]]) {
     const { child, read } = await spawnViewer('__view-file', file);
     try {
       await new Promise(resolve => setTimeout(resolve, 50));
