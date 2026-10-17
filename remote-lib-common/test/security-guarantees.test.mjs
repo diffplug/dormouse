@@ -14,6 +14,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  PAIRING_DEVICE_LABELS,
   PRESENCE_WINDOW,
   PRESENCE_WINDOW_IDLE_MS,
   PRESENCE_WINDOW_MAX_MS,
@@ -35,13 +36,14 @@ import {
 const RP_ID = 'dormouse.dev';
 const ORIGIN = 'https://dormouse.dev';
 const ACCOUNT = 'ned@dormouse.dev';
+const POCKET_LABEL = PAIRING_DEVICE_LABELS[1];
 
 async function world() {
   const clock = new FakeClock();
   const relay = new SimRelay();
   const burrow = await SimBurrow.create({ label: 'Laptop', rpId: RP_ID, origin: ORIGIN, clock });
   const authenticator = await SimAuthenticator.create({ rpId: RP_ID });
-  const client = await SimClient.create({ label: 'iPhone Safari', origin: ORIGIN, relay });
+  const client = await SimClient.create({ label: POCKET_LABEL, origin: ORIGIN, relay });
   relay.registerPasskey(ACCOUNT, authenticator);
   return { clock, relay, burrow, authenticator, client };
 }
@@ -50,7 +52,7 @@ test('pairing then connecting succeeds end to end', async () => {
   const { burrow, authenticator, client } = await world();
   const paired = await client.pair(burrow, { accountId: ACCOUNT, authenticator });
   assert.equal(paired.ok, true);
-  assert.equal(paired.record.label, 'iPhone Safari');
+  assert.equal(paired.record.label, POCKET_LABEL);
   // The success carries the Burrow's long-term static — the Client's pin from
   // here on — its local label, and the delivery capability. None of the three
   // exists anywhere on the Relay.

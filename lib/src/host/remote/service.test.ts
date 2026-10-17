@@ -47,6 +47,8 @@ import {
   NOT_ENTITLED_ERROR,
   ONE_TIME_WS_ROUTES,
   ORIGIN_MISMATCH_ERROR,
+  PAIRING_DEVICE_LABELS,
+  PAIRING_UNKNOWN_DEVICE_LABEL,
   RELAY_BEARER_LENGTH,
   UNAUTHORIZED_ERROR,
   WS_CLOSE_BURROW_REVOKED,
@@ -126,6 +128,9 @@ const HOSTED_ORIGIN = DEFAULT_RELAY_ORIGIN;
  */
 let ENROLLMENT: BurrowEnrollment;
 
+/** The two labels Pocket pairs under, the only ones the Burrow shows or keeps. */
+const [HOME_SCREEN, BROWSER] = PAIRING_DEVICE_LABELS;
+
 beforeAll(async () => {
   const material = await mintNoiseStaticKeyPair();
   ENROLLMENT = {
@@ -144,7 +149,7 @@ beforeAll(async () => {
  * A v2 ACL record. Both E2E fields are checked for exact length on read, so a
  * fixture that spelled them loosely would be dropped rather than asserted on.
  */
-function aclRecord(seed: string, label = 'iPhone Safari'): BurrowAclRecord {
+function aclRecord(seed: string, label: string = BROWSER): BurrowAclRecord {
   const pad = (text: string): string => text.padEnd(43, 'A').slice(0, 43);
   return {
     burrowId: BURROW_ID,
@@ -1155,11 +1160,23 @@ describe('pairing queue', () => {
     // Exactly five fields cross the bridge — and the expected code is not one
     // of them, which is the whole point of typing it on this side.
     expect(Object.keys(item).sort()).toEqual(['clientId', 'kind', 'label', 'pairingId', 'requestedAt']);
-    expect(item).toMatchObject({ kind: 'pairing', clientId: 'c1', label: 'iPhone Safari' });
+    expect(item).toMatchObject({ kind: 'pairing', clientId: 'c1', label: BROWSER });
     expect(typeof item.pairingId).toBe('string');
 
     // A webview that reloaded mid-pairing seeds from the same snapshot.
     expect((await command('pairingQueue')).result).toEqual(event.queue);
+  });
+
+  it('queues and records a label Pocket does not send as the one fallback', async () => {
+    // The phone chooses the label beside the digits it asks the person to type
+    // (`docs/specs/remote-security-model.md` -> Pairing).
+    const socket = await running();
+    const { item, code } = await pair(socket, 'c1', { label: `${BROWSER} · code 58` });
+    expect(item.label).toBe(PAIRING_UNKNOWN_DEVICE_LABEL);
+
+    await command('approve', { clientId: 'c1', pairingId: item.pairingId, code });
+    await settle();
+    expect(store.acl[BURROW_ID]![0]).toMatchObject({ label: PAIRING_UNKNOWN_DEVICE_LABEL });
   });
 
   it('never mirrors the code the Burrow is going to compare against', async () => {
@@ -1183,7 +1200,7 @@ describe('pairing queue', () => {
       burrowLabel: ENROLLMENT.label,
     });
     expect(store.acl[BURROW_ID]).toHaveLength(1);
-    expect(store.acl[BURROW_ID]![0]).toMatchObject({ label: 'iPhone Safari', revokedAt: null });
+    expect(store.acl[BURROW_ID]![0]).toMatchObject({ label: BROWSER, revokedAt: null });
     expect(queueEvents().at(-1)!.queue).toEqual([]);
   });
 
@@ -1288,8 +1305,8 @@ describe('pairing queue', () => {
 
   it('rejects stale modal actions after the client replaces its pairing', async () => {
     const socket = await running();
-    const first = await pair(socket, 'c1', { label: 'iPhone Safari' });
-    const replacement = await pair(socket, 'c1', { label: 'Android Chrome', code: '55' });
+    const first = await pair(socket, 'c1', { label: BROWSER });
+    const replacement = await pair(socket, 'c1', { label: HOME_SCREEN, code: '55' });
     expect(replacement.item.pairingId).not.toBe(first.item.pairingId);
 
     // Both buttons from the still-rendered first modal are now stale. Neither
@@ -1310,7 +1327,7 @@ describe('pairing queue', () => {
       code: replacement.code,
     });
     await settle();
-    expect(store.acl[BURROW_ID]![0]).toMatchObject({ label: 'Android Chrome' });
+    expect(store.acl[BURROW_ID]![0]).toMatchObject({ label: HOME_SCREEN });
   });
 });
 
@@ -1580,7 +1597,7 @@ describe('pushDevices', () => {
     // is a bearer capability for that Client's push rows, and no route in the
     // webview realm takes one.
     expect((await command('pushDevices')).result).toEqual({
-      devices: [{ label: 'iPhone Safari' }],
+      devices: [{ label: BROWSER }],
     });
   });
 

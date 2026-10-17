@@ -78,7 +78,7 @@ export interface RemoteApiSessionContext {
   readonly send: (payload: unknown) => void;
   /**
    * Who this session is to the person at the Burrow, as plain text: the ACL
-   * record's label, bounded again with `boundedPairingLabel`, or a one-time
+   * record's label, mapped again with `knownPairingDeviceLabel`, or a one-time
    * phone's member of `ONE_TIME_DEVICE_LABELS`.
    */
   readonly label: string;

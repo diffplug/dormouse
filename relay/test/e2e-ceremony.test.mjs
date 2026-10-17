@@ -18,6 +18,7 @@ import assert from 'node:assert/strict';
 import {
   API_ROUTES,
   MAX_TOKENS_PER_BURROW,
+  PAIRING_DEVICE_LABELS,
   PRESENCE_WINDOW,
   REMOTE_METHODS,
   SELFHOST_ACCOUNT_ID,
@@ -92,7 +93,7 @@ async function ceremonyFixture({ autoApprove = false } = {}) {
      * the case is not about scanning), a sign-in session, and its own per-Burrow
      * Noise static — different Burrows, and different browsers, never share one.
      */
-    async phone({ credential, label = 'iPhone Safari' } = {}) {
+    async phone({ credential, label = PAIRING_DEVICE_LABELS[0] } = {}) {
       const authenticator = await newAuthenticator();
       const registered = await register(
         created.app,
@@ -165,7 +166,7 @@ test('a phone scans, registers off the token, pairs, and is told everything it p
     assert.equal(record.passkeyCredentialId, authenticator.credentialId);
     assert.equal(record.clientStaticPublicKey, toBase64Url(client.staticKeyPair.publicKey));
     assert.equal(record.deliveryId, paired.outcome.deliveryId);
-    assert.equal(record.label, 'iPhone Safari');
+    assert.equal(record.label, PAIRING_DEVICE_LABELS[0]);
 
     // The invitation is spent whatever the outcome: a code answered once can
     // never be reserved by a second phone.

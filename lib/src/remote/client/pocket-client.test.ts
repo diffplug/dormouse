@@ -18,6 +18,7 @@ import {
   E2E_KEEPALIVE_INTERVAL_MS,
   ESTABLISHED_E2E_IDLE_TIMEOUT_MS,
   KEEPALIVE_BODY_SIZE,
+  PAIRING_DEVICE_LABELS,
   PRESENCE_WINDOW_IDLE_MS,
   PRESENCE_WINDOW_MAX_MS,
   RELAY_BEARER_BYTE_LENGTH,
@@ -93,6 +94,9 @@ import {
   type MemoryPendingDeletions,
   type RouteHandler,
 } from './test-e2e-harness';
+
+/** What Pocket in a browser tab pairs as; the Burrow shows nothing outside the set. */
+const POCKET_LABEL = PAIRING_DEVICE_LABELS[1];
 
 // --- Fakes -----------------------------------------------------------------
 
@@ -218,7 +222,7 @@ describe('pairing, end to end', () => {
     const invitation = await harness.mintInvitation();
 
     let shown: string | null = null;
-    const pairing = harness.client.pair(invitation, 'iPhone Safari', (code) => {
+    const pairing = harness.client.pair(invitation, POCKET_LABEL, (code) => {
       shown = code;
     });
 
@@ -227,7 +231,7 @@ describe('pairing, end to end', () => {
     await waitFor(() => shown !== null, 'the code to be shown');
     expect(shown).toMatch(/^[0-9]{2}$/);
     await waitFor(() => harness.approvals.length > 0, 'the approval modal');
-    expect(harness.approvals[0]!.label).toBe('iPhone Safari');
+    expect(harness.approvals[0]!.label).toBe(POCKET_LABEL);
 
     harness.approvals[0]!.approve(shown!);
     const result = await pairing;
@@ -259,7 +263,7 @@ describe('pairing, end to end', () => {
     const harness = await makeE2eHarness();
     const invitation = await harness.mintInvitation();
     let shown: string | null = null;
-    const pairing = harness.client.pair(invitation, 'iPhone Safari', (code) => {
+    const pairing = harness.client.pair(invitation, POCKET_LABEL, (code) => {
       shown = code;
     });
     // The proof named the first account; the phone then signs in to another.
@@ -312,7 +316,7 @@ describe('pairing, end to end', () => {
     const harness = await makeE2eHarness();
     const invitation = await harness.mintInvitation();
 
-    const pairing = harness.client.pair(invitation, 'iPhone Safari');
+    const pairing = harness.client.pair(invitation, POCKET_LABEL);
     await waitFor(() => harness.approvals.length > 0, 'the approval modal');
     harness.approvals[0]!.deny();
 
@@ -369,7 +373,7 @@ describe('pairing, end to end', () => {
     const invitation = await harness.mintInvitation();
 
     let shown: string | null = null;
-    const pairing = harness.client.pair(invitation, 'iPhone Safari', (code) => {
+    const pairing = harness.client.pair(invitation, POCKET_LABEL, (code) => {
       shown = code;
     });
     await waitFor(() => harness.approvals.length > 0, 'the approval modal');
@@ -401,7 +405,7 @@ describe('pairing, end to end', () => {
     harness.relay.stop();
     clock.expire();
 
-    expect(await harness.client.pair(invitation, 'iPhone Safari')).toEqual({
+    expect(await harness.client.pair(invitation, POCKET_LABEL)).toEqual({
       ok: false,
       message: BURROW_UNAVAILABLE_MESSAGE,
     });
@@ -600,7 +604,7 @@ describe('connecting, end to end', () => {
     const gone = vi.fn();
     harness.client.setOnBurrowGone(gone);
     // The ACL record's label, as the pane this session holds names it.
-    expect(harness.sessions[0]!.label).toBe('iPhone Safari');
+    expect(harness.sessions[0]!.label).toBe(POCKET_LABEL);
 
     harness.sessions[0]!.end();
 
