@@ -300,7 +300,7 @@ export function extendSelectionToToken(id: string, token: BufferToken): void {
   notify();
 }
 
-/** How long a confirmed copy shows before the selection clears (spec §4.5):
+/** How long a confirmed copy shows before the selection clears:
  *  longer on touch, where the finger covers the button and the eye arrives late. */
 export const COPY_FLASH_MS = 700;
 export const TOUCH_COPY_FLASH_MS = 1200;

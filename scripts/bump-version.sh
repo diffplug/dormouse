@@ -57,6 +57,10 @@ done
 # Sync Cargo.lock by running cargo. `cargo check` is idempotent and updates
 # the lockfile's dormouse entry to match the bumped Cargo.toml. Without this,
 # Cargo.lock keeps the old version and ships out of sync with the binary.
+# cargo runs build.rs, which fails unless the node it bundles
+# (DORMOUSE_NODE_BINARY, else `node` on PATH) matches the root package.json's
+# devEngines pin; by then the version files above are already edited, and
+# re-running under the pinned node finishes the bump.
 echo "Syncing Cargo.lock (cargo check)…"
 ( cd standalone/src-tauri && cargo check --offline >/dev/null )
 

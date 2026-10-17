@@ -34,8 +34,6 @@ Ownership used to be by `## ` section of a single `SECURITY.md`, checked by a gr
 
 The per-domain scopes replaced a single roving "flag any other security hole you find", so anything no domain names is nobody's job. The first version silently orphaned `canopy/`, `.claude/` (itself named as a prompt-injection surface), `docs/`, the root files, and all of `website/` outside `src/data/` — which includes the Tauri updater manifest that shipped apps fetch. Naming `website/src/` and `website/scripts/` left `website/`'s build config owned by nobody, the same shape one level down; hence the subtraction, and hence `website/scripts/generate-deps.js` called out, so the generator behind the disclosed snapshot is audited and not just its `productDependencyFilters` array.
 
-`website/public/` sits with `ci-and-secrets` because the updater manifest is a release artifact rather than marketing, and `.vscode/` because `.vscode/tasks.json` can carry `"runOn": "folderOpen"`, which executes on checkout. No such task exists today; adding one should be a finding.
-
 Dotfile directories are named explicitly because a catch-all has twice been read as not covering them: `.vscode/` and `.impeccable/` (the design-token snapshot behind `DESIGN.md`) came to be owned by nobody after the first split named paths explicitly. An enumeration goes stale the moment a path is added, so the remainder clause is recursive.
 
 On the `workflow-audit.yaml` diff window: widening one consumer without the others is worse than not widening at all — `git log` matches the commit, `own_changes` returns nothing, the empty-list `continue` swallows it, and the bullet claims a coverage that does not exist. The prompts decide what gets audited and by whom, and `.vscode/tasks.json` can execute on folder open; both are changes to the security automation, which is also why `.config/tend.yaml` is in that window. The security specs are left out on purpose: that job catches code executing from a branch nobody reviewed, and a `FAIL IF` is inert until merged to `main`, which is admin-gated — the watch would add no coverage over PR review while reporting a commit on nearly every security PR.
@@ -46,7 +44,7 @@ Run 32618922852 passed all 21 mechanical checks, handed the qualitative pass to 
 
 The fix is not to stop delegating. `--allowed-tools` only auto-approves and removes nothing, which is why the tools were available in the first place; no allowlist stops an agent ending its turn.
 
-The deadline is persisted because one longer than the ten-minute Bash cap cannot fire inside a single call: a re-issued loop that recomputes it from `now` never reaches it, so the bound is written down but never binds, and only the runner's cancellation ends the wait. `RUNNER_TEMP` carries no fallback on purpose — a repo-root fallback would survive between hand-runs and hand an already-expired deadline to the next one.
+The deadline is persisted because one longer than the ten-minute Bash cap cannot fire inside a single call: a re-issued loop that recomputes it from `now` never reaches it, so the bound is written down but never binds, and only the runner's cancellation ends the wait.
 
 A call that reaches the cap is *moved to the background*, not returned: it prints nothing back, so re-issuing becomes a judgement call rather than a step. Run 34457954349 happened to re-issue a third time and its deadline fell inside that call, so it merged and published two PASS domains; run 34581574869 spent one extra call checking the fragments, which shifted the phase enough that a third wait would have been needed, ended its turn instead, and published no report at all — the same two domains' PASS fragments survived only in the artifact. A loop that ends itself under the cap turns both nights into the same printed answer.
 
@@ -67,8 +65,6 @@ The sentinel exists because the same run showed that existence is the wrong pred
 The sentinel is checked in the reporting step too, not only in the orchestrator's wait. A domain rewrites its verdict line and then writes the sentinel, so a death between those two writes leaves `VERDICT: PASS` on line 1 of a report that stopped early — the one state where every other guard is satisfied and `PASS` closes the failure issue and opens the release gate.
 
 Every reader compares the last *non-blank* line rather than `tail -n1`: a fragment ending `-->\n\n` is finished, and reading it as cut off would report the lost-report bug the sentinel exists to catch.
-
-Run 35205193090's `## Summary` also inverted the placeholder it was reading: "two of seven work streams ... had not reported" was published as "completed only two of seven planned work streams", describing five audited streams as unaudited. A summary that repeats a cut-off fragment's account of its own progress is reporting a moment, not the run.
 
 ## Outcomes and reporting
 
@@ -120,16 +116,13 @@ The public body is built from what a domain cannot phrase. A domain writes its o
 
 `EMBARGO_TOKEN` stays out of the agent's step so an accidental print, or an agent talked into filing, cannot reach the private tracker or its history. The domains still need the open findings, so `List open findings` reads them with the token before the agent starts and hands over a file, never the token. The titles are private-tracker data, and the transcript the agent reads them into is already ciphertext; the step logs only the count, because a step's log is public and its `env:` is printed there, which rules out handing the titles on as step outputs. Running no repository code in the token's step stops a modified checkout swapping the script that handles it. Neither stops an agent that subverts the runner: a hosted runner grants passwordless `sudo`, and the agent's processes and files outlive its step; that is the known gap in `docs/specs/security.md`.
 
-The token's step also writes `gh` a fresh config directory, so no leftover configuration decides where the token goes.
-
 `age` comes from the Ubuntu archive the runner image already trusts, as in `.github/workflows/hosted-production.yml`'s backup step; no new trust root and no pinned binary to bump. The recipient lives in a checked-in file so a key rotation is a one-line diff under `.github/audit/`, which `workflow-audit.yaml` watches.
 
 **Why one status issue (maintainer decision, 2026-10-11).** Once the detail moved to the private tracker, a user could no longer see that the nightly audit ran, or what it had found: a per-failure issue appeared only on bad nights and said nothing on good ones, and the ledger was invisible. A single pinned issue rewritten every run shows the latest outcome whatever it is, and notifies subscribers only when something changes.
 
 The tracker's visibility is checked against `github.com` rather than the REST API: anonymous API calls share a 60-an-hour limit per runner address, and a rate-limited 403 would read as `UNVERIFIABLE` and hold the release gate.
 
-
-Provisioning `EMBARGO_TOKEN`: a fine-grained PAT with Issues: write on `diffplug/dormouse-embargo` only, minted on an admin's account.
+Provisioning `EMBARGO_TOKEN`, for whoever has to rotate it:
 
 ```bash
 gh secret set EMBARGO_TOKEN --env security-audit --repo diffplug/dormouse --body 'github_pat_…'
@@ -139,7 +132,7 @@ gh secret set EMBARGO_TOKEN --env security-audit --repo diffplug/dormouse --body
 
 A later PASS closed issues whose findings were never fixed: the pass of 2026-07-10 closed a tend-permissions failure that was back by 07-14, and `hangs/` passed on 10-05 and 10-06 and failed on 10-07. A nondeterministic reader misses a finding on some nights, so one quiet night is not a fix. WARNINGs, which never failed a run, were not tracked anywhere once their run's issue closed.
 
-The key leaves out the line number so an edit above a finding does not open a second issue for it; the five-line window applies within one run, where lines are comparable. It leaves out the clause letter too: domains letter a rule's clauses as they read it, so the same failure lettered `.b` one night and `.c` the next opened a second issue. A finding's root cause is free text the domain writes, and its wording drifts between runs (`parseConfig()`, `parseConfig fallback`); keying on the code symbol in it, with the whole cause lowercased only where it names none, holds one finding to one key. PascalCase is not read as a symbol, and a cause written as its rule is read whole: prose spells `GitHub` and `PowerShell`, and two rules under one heading would otherwise share its first proper noun. The failure key keeps an empty part where the clause letter was, so an unlettered failure keeps the key it was minted under.
+The key leaves out the line number so an edit above a finding does not open a second issue for it; the five-line window applies within one run, where lines are comparable. It leaves out the clause letter too: domains letter a rule's clauses as they read it, so the same failure lettered `.b` one night and `.c` the next opened a second issue. A finding's root cause is free text the domain writes, and its wording drifts between runs (`parseConfig()`, `parseConfig fallback`); keying on the code symbol in it, with the whole cause lowercased only where it names none, holds one finding to one key. PascalCase is not read as a symbol, and a cause written as its rule is read whole: prose spells `GitHub` and `PowerShell`, and two rules under one heading would otherwise share its first proper noun.
 
 Hand-filed issues carry `manual-…` keys that no run mints, and their titles cite a spec and heading rather than a rule number. They still count as open and still hold a PASS to re-verification, at the heading they cite, because they were filed for exactly the findings a run had missed.
 

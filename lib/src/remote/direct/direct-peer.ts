@@ -13,6 +13,11 @@
  * The wrapper owns the two halves of one negotiation and the channel's four
  * events. It owns no policy: what a closed channel *means* depends on whether
  * the session has already switched, which is the endpoint's question.
+ *
+ * No CI job puts a browser on this seam — `direct-peer.test.ts` links two fakes
+ * and `native-direct-peer.test.ts` runs the addon against itself — so the two
+ * shipped stacks meet only in `scripts/direct-interop/run.mjs`, run by hand
+ * (`--allow` for Local networks, `--stun` for Anywhere).
  */
 
 import {

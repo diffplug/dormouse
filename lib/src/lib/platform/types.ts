@@ -259,8 +259,7 @@ export interface PlatformAdapter {
   /**
    * Whether the Theme picker offers installing a theme from OpenVSX, which
    * fetches open-vsx.org outside the network policy. Absent reads as `false`;
-   * only the fake adapter (the website playground, Storybook) sets it
-   * (docs/specs/theme.md -> "Where the user picks a theme").
+   * only the fake adapter (the website playground, Storybook) sets it.
    */
   offersThemeStore?: boolean;
 

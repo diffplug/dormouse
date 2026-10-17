@@ -6,8 +6,6 @@ Why the test is "puts on a user's machine" rather than "everything a user runs":
 
 Why `dormouse-lib` has to be named a root rather than left as a workspace edge: `vscode-ext` declares only `node-pty` and `ws`, reaching the lib through relative imports into `../lib/src/` from fifteen files, so the extension's dependency walk never arrives at it. Only `dormouse-standalone`'s edge would — which puts the disclosure of lib's entire subtree one refactor away from silently vanishing. Naming it a root is what makes that not matter.
 
-Why external binaries cannot be disclosed: Dormouse is a terminal, so it spawns the user's shell, and `dor agent-browser` forwards to an `agent-browser` CLI the user installs themselves and that is resolved off `PATH`. Those are the user's software, not ours, and disclosing them is neither possible nor meaningful.
-
 Where the snapshots come from: all three are generated from inputs committed beside them — the npm table from the pnpm lockfile and the bundled-theme records, the cargo table from `cargo metadata` over the standalone crate, the runtime row from `devEngines.runtime.version` — so each goes stale in the PR that changes its input, and CI fails that PR, not a later release. No snapshot is left to release work. The `pnpm install --frozen-lockfile` precondition matters because a stale `node_modules` makes the regeneration check pass locally on a tree that would fail in CI.
 
 Why CI, and not the nightly audit, gates the regenerated snapshots: until the gate existed the nightly audit was the only thing that ever ran the generator, and two production bumps (`ws`, `hono`) shipped undisclosed before it caught them. A nightly finding of a stale disclosure means it already merged; the CI gate is what keeps it from merging.
@@ -22,11 +20,7 @@ Why being a devDependency of the repo does not count as covered: a selfhoster's 
 
 ## Bundled runtime
 
-What the pin buys the disclosure: because the supply-chain page reads the same `devEngines.runtime.version`, the published runtime version cannot drift to whatever Node happened to be on the build machine's `PATH`.
-
 Why the Windows subsystem byte is flipped: leaving the bundled `node.exe` as a console-subsystem binary lets Windows Terminal's default-terminal handoff spawn a stray terminal window behind the app.
-
-Why the patch works for the sidecar: its explicitly piped stdio survives the subsystem change. Inherited console handles do not: `dor` therefore uses a console-subsystem copy. The platform evidence is in `docs/specs/standalone.rationale.md` → Windows node subsystem.
 
 Why alternate version declarations are excluded: in the pinned [setup-node implementation](https://github.com/actions/setup-node/blob/820762786026740c76f36085b0efc47a31fe5020/src/util.ts), `volta.node` overrides `devEngines.runtime`; `engines.node` is a lower-precedence fallback. Forbidding both keeps one version declaration, though only Volta overrides the current pin. The build's version check rejects a mismatched binary rather than silently bundling it.
 

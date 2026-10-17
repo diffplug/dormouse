@@ -562,7 +562,7 @@ function toParagraph(buf: CopyBuffer, sel: Span): Span {
 }
 
 /** Names a growth by the edge tokens that grew, as the smart-token detector
- *  classifies them (spec §5.1). */
+ *  classifies them. */
 function wordsLabel(edgeTokens: readonly string[]): string {
   const kinds = edgeTokens.map((token) => detectTokenAt(token.trim(), 0)?.kind);
   if (kinds.includes('url')) return 'Full URL';

@@ -80,7 +80,11 @@ export const MAX_SESSIONS_PER_ACCOUNT = 32;
 /** One live registration challenge per live setup token of the same Burrow (rationale). */
 export const MAX_SETUP_CHALLENGES_PER_BURROW = MAX_TOKENS_PER_BURROW;
 
-/** Seconds a Burrow waits between polls. */
+/**
+ * Seconds a Burrow waits between polls: inside
+ * `MIN_ENROLL_POLL_INTERVAL_S`–`MAX_ENROLL_POLL_INTERVAL_S`, or every shipped
+ * Burrow refuses the begin.
+ */
 export const ENROLLMENT_POLL_INTERVAL_S = 5;
 /**
  * A device code's leading bytes: its expiry, big-endian epoch seconds; the

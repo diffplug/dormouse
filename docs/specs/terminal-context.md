@@ -6,19 +6,19 @@
 
 ## Helper lifecycle
 
-- **Must create at most one helper per source, lazily on first context opening.** Concurrent openings share the same pending creation. Closing the source during startup cancels creation, including while its registry entry remains for the exit animation. Helpers cannot have helpers.
+- **Must create at most one helper per source, lazily on first context opening.** Closing the source during startup cancels creation. Helpers cannot have helpers.
 - **Must start with the configured shell in the source's local directory**, using the ordinary split fallback when unavailable. Shell exports and virtual environments are not inherited. SSH integration is outside this feature.
-- **Must inject autorun only after integrated shell readiness**, accepting prompt-start and prompt-end/editing states with no current command. User input before injection cancels it. After eight seconds without readiness, show an unsupported state and never write a timeout fallback.
+- **Must inject autorun only after integrated shell readiness**, accepting prompt-start and prompt-end/editing states with no current command. User input before injection cancels it. Without readiness before a timeout, show an unsupported state and never write a timeout fallback.
 - **Must treat typing, paste, accepted drops, and application mouse input as user work**, disarming automatic refresh until Reset or Promote. Selection, copying, resize, and terminal protocol replies do not count. Returning to idle does not rearm autorun.
-- **Must refresh an untouched, completed or autorun-disabled helper on reopening only after a host idle check.** Recheck ownership and the touched flag after that asynchronous check; foreground commands, background descendants, and failed/unknown inspection preserve the helper.
-- **Must hide a retained helper without terminating its PTY**, parking its xterm element in the document. Revealing or promoting reuses the same element; cleanup from an older mount cannot detach a newer mount. Renderer resource lifetime follows `docs/specs/layout.md` → "Renderer".
+- **Must refresh an untouched, completed or autorun-disabled helper on reopening only after a host idle check.** Foreground commands, background descendants, and failed/unknown inspection preserve the helper.
+- **Must hide a retained helper without terminating its PTY**; revealing or promoting reuses the same xterm element. Renderer resource lifetime follows `docs/specs/layout.md` → "Renderer".
 - **Must keep a preserved helper's directory independent of its source**, showing both locations prominently when they differ. Unknown directory state is not evidence of a match.
 - **Must retain exited output**, offer Reset, and avoid automatic restart loops.
-- **Must pause status and process-inspection polling while the context is hidden**, its Workspace out of view included, invalidating cached idle results. Reopening publishes current terminal status; source closure inspects work on demand.
+- **Must pause status and process-inspection polling while the context is hidden**, its Workspace out of view included. Reopening publishes current terminal status; source closure inspects work on demand.
 
-**Must make Reset an explicit discard**, confirmed first; under Labs it asks nothing and the old helper becomes a pending kill (`docs/specs/reopen.md` → "Labs: No-confirm delayed kill"), which the host stops counting as the source's one helper until a restore re-owns it. Cancellation changes nothing; confirmation disposes the old helper and launches a fresh one using the source's current directory and current global setting. Stale timers cannot write to the replacement.
+**Must make Reset an explicit discard**, confirmed first; under Labs it asks nothing and the old helper becomes a pending kill (`docs/specs/reopen.md` → "Labs: No-confirm delayed kill"), which the host stops counting as the source's one helper until a restore re-owns it. Cancellation changes nothing; confirmation disposes the old helper and launches a fresh one using the source's current directory and current global setting.
 
-Source of truth: `openHelper` / `helperHasWork` / `disposeHelper` / `closeHelperParent` in `lib/src/lib/helper-terminal.ts`; `markSessionTouched` / `parkElement` in `lib/src/lib/terminal-lifecycle.ts`. Tests: `lib/src/lib/helper-terminal.test.ts`.
+Source of truth: `openHelper` / `closeHelperParent` in `lib/src/lib/helper-terminal.ts`; `markSessionTouched` in `lib/src/lib/terminal-lifecycle.ts`. Tests: `lib/src/lib/helper-terminal.test.ts`.
 
 ## Promotion and source closure
 
@@ -50,15 +50,13 @@ Source of truth: `context` in `standalone/sidecar/pty-core.js`; `terminalContext
 
 Port action overflow follows `docs/specs/layout.md` → "Header context menu".
 
-Source of truth: `TerminalContextView` in `lib/src/components/wall/TerminalContextView.tsx`; `lib/src/stories/Wall.stories.tsx` exercises the live helper. `lib/src/stories/HelperPlacement.stories.tsx` checks rendered placement and real xterm input/focus retention. Tests: `lib/src/lib/platform/fake-adapter-helper.test.ts`.
+Source of truth: `TerminalContextView` in `lib/src/components/wall/TerminalContextView.tsx`.
 
 The Window-host workspace picker follows `docs/specs/layout.md` → Moving Surfaces between Workspaces.
 
 ## Tool context
 
 **Must show a Tool's primary Session in Terminal Context instead of creating an auxiliary helper**; one whose run ended is a plain terminal with a helper (`docs/specs/dor-tool.md` → Run end). Reuse the title explanation, directory, port, and alert presentation, showing Tool command status without helper Modify, Reset, or Promote controls; a preview slot's adds Keep open (`docs/specs/layout.md` → Pane header). Pending approval cannot open context.
-
-**Must focus the Tool terminal instance directly**, bypassing its browser Surface focus handle.
 
 **Must mount only one terminal view for the Tool at a time**, moving its retained xterm between the full pane and context without disposing the Session. Context keystrokes, including terminal clipboard chords, belong to that terminal and never reach the browser underneath. Closing context preserves both processes and browser state.
 

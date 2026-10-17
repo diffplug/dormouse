@@ -75,6 +75,7 @@ export function TerminalContext({ id, title, closing, origin, warning: openWarni
     resetAsks={!isDelayedKillEnabled()}
     onReset={async () => { await resetHelper(id, { workspaceId: source?.workspaceId ?? DEFAULT_WORKSPACE_ID, title: deriveSurfaceLabel(state, appTitleForPane, title ?? id) }); await openHelper(id); }} onPromote={() => context.promote(id)}
     onKeepPreview={preview ? () => actions.onPinPreview?.(id) : undefined}>
+    {/* The Tool's xterm itself: `focusSession` would reach its browser Surface's focus handle. */}
     {tool && <div data-context-terminal={id} className="h-full px-3 py-2" onMouseDown={() => getTerminalInstance(id)?.focus()}><TerminalPane id={id} isFocused={false} /></div>}
     {helper && <div data-helper-terminal={helper.id} className="h-full px-3 py-2" onMouseDown={() => focusSession(helper.id, true)}><TerminalPane key={helper.id} id={helper.id} isFocused={false} /></div>}
   </TerminalContextView>;

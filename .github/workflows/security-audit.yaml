@@ -167,6 +167,8 @@ jobs:
           [ ! -e "$GH_CONFIG_DIR" ] ||
             { echo "::error::A gh configuration directory already exists at the fresh path."; exit 1; }
           export GH_CONFIG_DIR GH_HOST=github.com
+          # `--limit 1000`, not `gh`'s default of 30, which once left an
+          # older open finding unreconciled.
           OPEN=$(gh issue list --repo "$EMBARGO_REPO" --state open --limit 1000 \
                    --json number,title \
                    --jq '.[] | select(.title | startswith("[audit-finding ")) | "\(.number) \(.title)"') ||
@@ -497,6 +499,8 @@ jobs:
           # title carries an `[audit-finding <key>]` prefix.
           [ -f audit-ledger/index.tsv ] ||
             fail no-report "No findings ledger was composed."
+          # `--limit 1000`, not `gh`'s default of 30, which once left an
+          # older open finding unreconciled.
           OPEN=$(gh issue list --repo "$EMBARGO_REPO" --state open --limit 1000 \
                    --json number,title \
                    --jq '.[] | select(.title | startswith("[audit-finding ")) | "\(.number) \(.title)"') ||
@@ -577,6 +581,8 @@ jobs:
           [ ! -e "$GH_CONFIG_DIR" ] ||
             { echo "::error::A gh configuration directory already exists at the fresh path."; exit 1; }
           export GH_CONFIG_DIR GH_HOST=github.com
+          # `--limit 1000`, not `gh`'s default of 30, which once left an
+          # older open finding unreconciled.
           SNAPSHOT=$(gh issue list --repo "$EMBARGO_REPO" --state all --limit 1000 \
                        --json number,title,state,stateReason,createdAt,closedAt,body,comments \
                        --jq '.[] | select(.title | startswith("[audit-finding ")) | {

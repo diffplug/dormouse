@@ -30,8 +30,6 @@ The self-host operator explicitly accepted the fallback tradeoff: same-origin ma
 
 ## Presence proofs
 
-The Encoding API is available in every targeted runtime; narrow declarations in `remote-lib-common/src/globals.d.ts` retain bare ES2022 compilation. In September 2026, comparing all 1,112,064 Unicode scalar values against the former manual codec produced identical bytes and text. Native fatal decoding additionally rejects overlong encodings and encoded surrogates; `ignoreBOM: true` preserves U+FEFF as content rather than stripping the start of a terminal chunk. See the [Encoding Standard](https://encoding.spec.whatwg.org/#interface-textdecoder).
-
 **Why an unbound `begin`, or a `finish` with no nonce, is refused outright.** Either arm answers a challenge that nothing ties to a ceremony — a signature the caller could replay into a pairing or a connection it never participated in. Refusing at the route leaves no code path that mints presence for an unspecified purpose.
 
 **Why the Burrow-side verifier never throws.** Its input is attacker-supplied plaintext, decrypted inside the process that owns every PTY, so an exception escaping it is a denial-of-service surface at best and an unhandled rejection that takes the Burrow down at worst.

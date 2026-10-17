@@ -8,7 +8,7 @@
 # listings, environment policies, `actions/permissions/workflow`). In CI those
 # go through the read-only `AUDIT_PAT`; locally they go through whatever `gh`
 # is already authenticated as, so run this as someone with admin read on the
-# repo or the ci-and-secrets domain will report FAILs that are really 403s.
+# repo, or those checks come back UNVERIFIABLE and the domain INCONCLUSIVE.
 #
 # Usage:
 #   scripts/security-audit-local.sh            # the deterministic checks, then every domain
@@ -110,6 +110,8 @@ run_domain() {
 write_open_findings() {
   local open row
   rm -f audit-open-findings.txt
+  # `--limit 1000`, not `gh`'s default of 30, which once left an older open
+  # finding unreconciled.
   if ! open=$(gh issue list --repo diffplug/dormouse-embargo --state open --limit 1000 --json number,title \
       --jq '.[] | select(.title | startswith("[audit-finding ")) | "\(.number) \(.title)"'); then
     echo "==> could not read the findings ledger; every domain will compute INCONCLUSIVE" >&2

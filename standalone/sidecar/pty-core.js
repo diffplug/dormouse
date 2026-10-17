@@ -772,8 +772,9 @@ async function getDescendantPids(rootPid, runtime = {}) {
 }
 
 /** Every `[pid, ppid]` pair on this platform — `[pid, ppid, name]` on Windows,
- *  where the same query names each process — or null when the scan fails or
- *  the platform is unknown. */
+ *  where the same query names each process (one query instead of two: ~0.3 s
+ *  per scan on Windows, 2026-10-02) — or null when the scan fails or the
+ *  platform is unknown. */
 async function readProcessTable(runtime) {
   const platform = runtime.platform || process.platform;
   const fsModule = runtime.fsModule || fs;
@@ -1290,8 +1291,10 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
   const REPLAY_CHARS = 200000;
   const ptyShells = new Map(); // id -> resolved shell executable
   // Repaint restoration belongs to the PTY owner, where every local and remote
-  // resize passes. A Viewer-local timer cannot see another display taking size
-  // authority (docs/specs/remote-api.md -> Attach is the resize).
+  // resize passes: a later resize or repaint, exit, kill, or replacement
+  // cancels it, and a Viewer's detach does not, or the PTY is left a row off
+  // its xterm. A Viewer-local timer cannot see another display taking size
+  // authority.
   const repaintTimers = new Map();
   const FORCE_REPAINT_BOUNCE_MS = 60;
 

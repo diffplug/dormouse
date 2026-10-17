@@ -29,7 +29,7 @@ A read-only `builtin:file` view reports clean as it starts (`docs/specs/dor-tool
 ## The reopen record
 
 - **Must capture at the close**: `persistableLeafMeta`, the `PersistedPane` projection with the cwd the Session last reported, the Workspace id, and a Pane's restore token or a Door's index.
-- **Must keep records in memory, per Window, newest first, capped at 20.** **Never persist them**; `docs/specs/transport.md` → "What is persisted" stands, and cold restore already covers quit.
+- **Must keep records in memory, per Window, newest first, capped.** **Never persist them**; `docs/specs/transport.md` → "What is persisted" stands, and cold restore already covers quit.
 - **Must reopen through the cold-restore per-pane path**: a Pane from its token, with the selected pane as fallback; a Door at its index. A Surface whose Workspace has closed reopens in the active Workspace.
 - **Must mint a new Surface id** (`docs/specs/dor-cli.md` → "Handle Model").
 
@@ -50,7 +50,7 @@ Source of truth: `reopenClosed` in `lib/src/components/wall/reopen.ts`; the `.me
 ## Workspaces and windows
 
 - **Workspace close records the Workspace whole, and its members push no records**; reopening it creates a new Workspace at its strip slot through cold restore, every Surface with a fresh id. **Reopenability is all-or-nothing**: one member whose own close would confirm makes the Workspace close confirm and leaves no record.
-- **Closing one window of several confirms when any of its Workspaces' closes would.** **One that asks nothing must hand the host its snapshot before removing it from disk**, under its own ids and marked `reopened`; the host keeps up to 20 in memory, since the closing webview dies. **Reopen asks the host first**: the newest window that closed after the asking Window's newest record opens in a new window, its snapshot written under a fresh label so it boots as any window restores, at its last geometry. **The window booting from a `reopened` snapshot must give every Workspace and Surface a fresh id before it restores**, and save them at once (rationale).
+- **Closing one window of several confirms when any of its Workspaces' closes would.** **One that asks nothing must hand the host its snapshot before removing it from disk**, under its own ids and marked `reopened`; the host keeps those snapshots in memory, newest first and capped, since the closing webview dies. **Reopen asks the host first**: the newest window that closed after the asking Window's newest record opens in a new window, its snapshot written under a fresh label so it boots as any window restores, at its last geometry. **The window booting from a `reopened` snapshot must give every Workspace and Surface a fresh id before it restores**, and save them at once (rationale).
 
 Source of truth: `closeWorkspaceWithSurfaces` in `lib/src/components/wall/workspace-lifecycle.ts`; `lib/src/components/wall/window-reopen.ts`; `push_closed_window` / `reopen_closed_window` in `standalone/src-tauri/src/lib.rs`.
 

@@ -21,7 +21,12 @@ export type Synthesize = (voiceId: string, text: string) => Promise<Response>;
 
 const ELEVENLABS_API = "https://api.elevenlabs.io/v1";
 
-/** `afterSpeech` receives the history sweep each successful call schedules. */
+/**
+ * `afterSpeech` receives the history sweep each successful call schedules,
+ * `sweepDelayMs` later: straight after the call ElevenLabs has not yet listed
+ * the generation, and the wait plus one pass must end inside the 30 s
+ * `waitUntil` allows after the Worker's response is sent (hosted.rationale.md).
+ */
 export function elevenLabs(
   apiKey: string,
   afterSpeech?: (pass: Promise<void>) => void,
@@ -197,6 +202,7 @@ export function speakRoute(app: Hono<any>, host: (c: Context) => SpeakHost) {
 export const CRON_SWEEP_CAP = 40;
 /** Smaller: the speak request also spends its database connection and synthesize call. */
 export const SPEECH_SWEEP_CAP = 10;
+/** Workers lets six connections await response headers at once (hosted.rationale.md). */
 const SWEEP_CONCURRENCY = 6;
 
 /** A sweep failure: statuses and counts only, never upstream text. */

@@ -20,10 +20,6 @@
 
 **Why the host names the directory instead of the sidecar deriving it.** `path.dirname(process.execPath)` was the first attempt and is wrong twice over: `standalone/scripts/dev-agent-browser.mjs` runs the sidecar under the developer's own node, so the strip would have removed the node it exists to protect, and the same module is the VS Code pty host (`vscode-ext/src/pty-host.js`), where that directory can be `/usr/bin` — dropping it from a pane's PATH would be destructive. Hence an explicit `DORMOUSE_GUI_NODE_DIR` from the side that patched the binary, and a win32-only strip.
 
-## Boot sequence
-
-**Why the peer-surface responder must follow `init()`.** Installed first, its seeding `status` command sits unanswered with no retry — nothing carries the answer back until the adapter has registered its listeners.
-
 ## Burrow service
 
 **Why one file rather than one per value.** Per-value files leave a window between two writes in which the enrollment can end up describing a different Burrow than the ACL records approved under it.
@@ -83,19 +79,15 @@ Tauri removes a label from `webview_windows()` only when the window is actually 
 
 `tauri-plugin-window-state` would have been a second store answering "which windows exist", a new Cargo *and* npm dependency riding the disclosure regeneration and the cooldown, and it still would not have done the boot enumeration — which is already Rust's job, beside the snapshots it reads.
 
-The cap is a ceiling on one launch, not a limit on how many windows may exist: the excess snapshots stay on disk untouched, so raising the cap restores them.
-
 The minimum exists because macOS edge tiling could leave a window with no minimum zero-thick, and the restore floor because that box was then saved and reopened just as thin (2026-10). The overlap test catches a box saved on a display unplugged since, which would otherwise reopen where nobody can see it.
 
-## Transfer
+## Arrival queue
 
 The `adopt_ready` hop exists because the alternative is a race with no safe side. If Rust listed and replayed as part of the transfer, the target's collector might not be armed yet and the replay would be lost; if the target armed first and asked for the whole Window, it would take every sibling's PTY. Asking for exactly the suppressed set, only once the collector exists, has neither failure.
 
 The suppression window is what makes "no duplicate, no loss" true. `pty-core` appends to its replay buffer synchronously before it emits, and Rust's single reader thread processes sidecar lines in order — so a chunk emitted between the ownership move and the replay is dropped once and present in the replay exactly once (`pty-core.test.js`, "a chunk emitted just before list([id]) appears in the replay exactly once").
 
 It fails open after 5 s rather than closed: a transfer whose `adopt_ready` never arrived would otherwise silence its panes for the rest of the session, and duplicated bytes are recoverable where a dead pane is not. That fail-open is now scoped to suppressions no arrival record claims, which is the same argument with the "never arrived" case actually detectable — an arrival that is genuinely stuck ends at `adopt_failed` or at the target's `Destroyed`, not at a timer.
-
-## Arrival queue
 
 A target whose `adopt_done` is refused already has the arrival payload needed to release its Sessions. Preparing a new transfer first re-entered Tool startup checks and could throw while ownership was already back at the source; unwinding directly also avoids sending `adopt_failed` for that retired arrival.
 
@@ -125,8 +117,6 @@ A WKWebView pointer captured on an element keeps receiving `pointermove` and `po
 
 **Why the mode is set before the bytes.** Under the bare umask the transcript-bearing blob lands `0644` in a `0755` directory any other local account can read, and tightening after the write would leave a window in which it was readable. Continuing after a permission failure would contradict the owner-only guarantee; aborting before writing preserves the previous snapshot and leaves at most an empty temp file.
 
-**Why the ACE test asserts an already-existing file.** On an upgrade the Burrow enrollment file is already there, so what tightens it is propagation onto an existing entry rather than create-time inheritance. `FileBurrowStateStore`'s own `0700`/`0600` cannot help on Windows: Node has no ACL API.
-
 **What the teardown flush lost.** The pre-Rust path flushed the session on teardown into WebKit `localStorage` and lost the final debounce/heartbeat window; awaiting the write pipeline to disk (`drainSessionSaves`) recovers it, which a last fire-and-forget save would not.
 
 **Why debug keeps a state subtree as well as the wrapper identifier.** The native dev wrapper already selects a stable per-worktree Tauri identifier, including a separate Burrow store. Raw Tauri dev bypasses that wrapper and can use the installed identifier; the subtree protects its session and recovery files without changing where that identifier’s enrollment lives. Older debug builds used the identifier root directly, so their snapshots need targeted transcript migration after the split. Deleting those snapshots could remove installed layouts for a raw-dev launch.
@@ -145,7 +135,7 @@ A WKWebView pointer captured on an element keeps receiving `pointermove` and `po
 
 Arbitrating fixed the dialog and left the vote: a quit meeting a *committed* close acked and stopped, which is the same unbounded wait reached by a different route. Voting is right because the window really is ending.
 
-**Why the walk ends on `main`, and why the grant to every window was reverted.** Widening `updater:*` to every window was meant to cover a session whose `main` was closed. It covers nothing: only `main` runs the periodic check, so only `main` can be holding a downloaded update, and a `main`-less session has none to install whichever window goes last. The grant traded a structural guarantee — the install can only happen in the window torn down last — for a case that cannot arise. What that session does need is to be told, which is the close confirmation's "this throws away the downloaded update" arm. The periodic check stays in `main` because it is a timer, not a capability, and one per window would be N checks against the endpoint.
+**Why the walk ends on `main`.** Only `main` holds the updater grant, so ending the walk there makes the install the last thing a quit does; why the grant stays in `main` is `docs/specs/auto-update.rationale.md` → Quit-time install. The periodic check stays in `main` because it is a timer, not a capability, and one per window would be N checks against the endpoint.
 
 **Why the teardown ordering survived the transcript removal.** Flush → graceful kill → flush → drain was built to capture the final scrollback of dying terminals into the persisted session. The transcripts are gone, but the shape is still what makes the *structure* correct: the first flush reads cwds while the shells are alive, and the second catches whatever changed as they died, retaining the earlier cwd for a PTY `getCwd` can no longer answer.
 
@@ -184,5 +174,3 @@ Arbitrating fixed the dialog and left the vote: a quit meeting a *committed* clo
 **Why the bridge token is not the `dor` control token.** The `dor` control-API `controlToken` is handed to every shell Dormouse spawns; the bridge's circle is smaller than "every terminal on the machine", so it mints its own per-run credential.
 
 **Why the CORS origin is never `*`.** It was `*` once: the bridge's clipboard invokes were readable cross-origin under it — a foreign page could POST an invoke and read the reply.
-
-**Agent workflows were unaffected by the gate.** The token reaches the page through the `VITE_DORMOUSE_BROWSER_DEV_HOST` env var the harness already sets, and `agent-browser` drives the Vite origin, never the bridge.

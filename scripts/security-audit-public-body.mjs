@@ -365,6 +365,7 @@ function publish(args) {
   }
   const ledgerPath = args.ledger ?? '';
   const ledger = ledgerPath && existsSync(ledgerPath) ? parseLedger(readFileSync(ledgerPath, 'utf8')) : null;
+  // Every disclosure, not `gh`'s default 30: a title missed here is published a second time.
   const archive = parseArchive(JSON.parse(gh(['issue', 'list', ...R, '--label', DISCLOSURE_LABEL, '--state', 'all', '--limit', '1000', '--json', 'number,title,state,createdAt'])));
 
   // Disclosures first, so the status body lists what this run published.

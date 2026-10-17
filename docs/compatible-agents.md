@@ -87,11 +87,11 @@ Open a **draft pull request** with the entry, fixture, documentation, and verifi
 
 ### Capture
 
-- **Must use the shared `captureAgentRecovery` machine in both hosts**, supplying live ids, a resize, an acknowledged interrupt, a monotonic received count, output since a mark, and immediate record delivery.
+- **Must use the shared `captureAgentRecovery` machine in both hosts.**
 - **Must capture before killing the target PTYs**, within the host's bounded teardown. Each host owns the target scope; interrupt every live PTY within it, regardless of recognized command, and exclude exited PTYs. (rationale)
 - **Must write one `^C` into each target PTY per interrupt call, never signal it.** The shared machine alone decides every further press. Host interrupts must settle within their timeout. (rationale)
 - **Never press a pane a third time unless it asked (`Ctrl+C again`) since its latest press, nor a fourth time.** (rationale)
-- **Never finish early on quiet or replace the retry gates with a blanket second press.** Poll until every target yields or the capture budget expires; retry timing and ask detection live in the module's comments. (rationale)
+- **Never finish early on quiet or replace the retry gates with a blanket second press.** (rationale)
 - **Must widen every target before its first press.** (rationale)
 - The scan starts at the mark taken before the first interrupt, a rule `docs/specs/security-local.md` -> "Terminal output" owns; buffer eviction may discard fresh output but never promotes stale output into the scan. (rationale)
 - **Must report each detected command immediately**, retaining earlier detections if a later target times out.
@@ -108,13 +108,13 @@ Source of truth: `captureAgentRecovery` / `RecoveryHost` in `lib/src/host/recove
 - **Must strip in boundary mode**: complete non-string ESC/CSI sequences and standalone C1 controls become newlines, except SGR and charset designators. ESC and C1 counterparts must produce the same boundary. String controls and their payloads vanish; LF, CR, and TAB remain text boundaries; other C0 controls that do not move or erase text vanish. **Must discard incomplete trailing presentation controls without creating a boundary** (rationale).
 - **Must select the rightmost well-formed match in the last 50 lines**, newest *by position* and never by pattern order, skipping a terminated id of the wrong shape (rationale).
 
-Source of truth: `CODING_AGENTS` in `lib/src/lib/coding-agents.ts`; `detectResumeCommand` / `normalizeResumeCommand` in `lib/src/lib/resume-patterns.ts`; `stripTerminalControls` in `lib/src/lib/terminal-controls.ts`; pinned by `lib/src/lib/coding-agents.test.ts`, `lib/src/lib/resume-patterns.test.ts`, and `lib/src/lib/terminal-controls.test.ts`.
+Source of truth: `detectResumeCommand` / `normalizeResumeCommand` in `lib/src/lib/resume-patterns.ts`; pinned by `lib/src/lib/coding-agents.test.ts`, `lib/src/lib/resume-patterns.test.ts`, and `lib/src/lib/terminal-controls.test.ts`.
 
 ### Recovery record
 
 - **Must keep one rebuilt invocation per Surface in a host-owned, single-use record outside the persisted Session.** The renderer save path never derives or writes it. (rationale)
 - **Must call `beginCapture` before capture can return early.** The first call per host process clears the previous record; subsequent calls merge, preserving captures from other Windows. (rationale)
-- **Must persist every detection synchronously through `createRecoveryStore`**, using `recovery.json` in the host-selected directory, a temporary file with mode `0600` on Unix, and atomic rename. Windows storage permissions follow `docs/specs/security-local.md` -> "Persisted state". A failed write must not throw through teardown. Without a directory the store is memory-only and logs that limitation once.
+- **Must persist every detection synchronously through `createRecoveryStore`**, using `recovery.json` in the host-selected directory, a temporary file with mode `0600` on Unix, and atomic rename. Windows storage permissions follow `docs/specs/security-local.md` -> "Persisted state". A failed write must not throw through teardown. Without a directory the store is memory-only.
 - **Must read and unlink the durable record on the first claim**, including on parse failure; if unlink fails, ignore it. After unlinking, discard a record whose `createdAt` is not a finite number or is older than 7 days. Within the process, each container claims only its saved pane ids, and each entry is handed out once. (rationale)
 - **Must deliver claimed commands out of band on boot through `PlatformAdapter.getRecoveryCommands()`**; adapters whose hosts capture nothing may omit it. Only cold restore consumes these commands for execution; live resume never executes them.
 
@@ -124,9 +124,9 @@ Source of truth: `createRecoveryStore` in `lib/src/host/recovery-store.ts`; `Pla
 
 - **Must automatically run a captured command on the next cold restore**, without a confirmation prompt, only while both detection validation and post-interrupt provenance hold. Weakening either requires restoring a confirmation gate. (rationale)
 - The stored invocation is revalidated with `normalizeResumeCommand` before it is typed, a rule `docs/specs/security-local.md` -> "Terminal output" owns.
-- **Must poll for the fresh shell's prompt before typing, with a best-effort write after 15 seconds if no prompt is detected.** Stop without typing if the Session disappears or exits. Command-state seeding follows `docs/specs/terminal-state.md` → Supported OSC Inputs; the passive notice follows `docs/specs/layout.md` → Agent resume on cold restore.
+- **Must wait for the fresh shell's prompt before typing, with a best-effort write after a bounded wait if no prompt is detected.** Stop without typing if the Session disappears or exits. Command-state seeding follows `docs/specs/terminal-state.md` → Supported OSC Inputs; the passive notice follows `docs/specs/layout.md` → Agent resume on cold restore.
 
-Source of truth: `restoreSession` in `lib/src/lib/session-restore.ts`; `restoreTerminal` / `typeCommandWhenPromptReady` in `lib/src/lib/terminal-lifecycle.ts`; pinned by `lib/src/lib/session-restore.test.ts` and `lib/src/lib/terminal-registry.alert.test.ts`.
+Source of truth: `restoreSession` in `lib/src/lib/session-restore.ts`; `restoreTerminal` in `lib/src/lib/terminal-lifecycle.ts`; pinned by `lib/src/lib/session-restore.test.ts` and `lib/src/lib/terminal-registry.alert.test.ts`.
 
 ## Future
 

@@ -44,9 +44,12 @@ const addEventListener = typeof window === 'undefined' ? null : window.addEventL
 const removeEventListener = typeof window === 'undefined' ? null : window.removeEventListener.bind(window);
 
 /**
- * How long a debounced save waits. One value for both levels: a Wall's own
+ * How long a scheduled save waits. One value for both levels: a Wall's own
  * record and the Window blob its publish schedules. The Window's wait is what
  * collapses N Workspaces reacting to one event into a single host write.
+ * Both timers coalesce, never restart: a request while one is pending joins
+ * it instead of pushing it back, so a steady stream of commits cannot
+ * postpone the write.
  *
  * Source of truth for the Wall's timer: `useSessionPersistence` in
  * `lib/src/components/wall/use-session-persistence.ts`.

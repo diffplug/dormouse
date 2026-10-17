@@ -1122,7 +1122,7 @@ export function useDorControl({
       // Acknowledged at once, before lookup: the slot holds what it shows as a
       // ghost. This request's retarget commits the switch; anything else ends
       // it, which is a no-op once it has committed or a newer preview has
-      // taken it over (docs/specs/dor-tool.md -> Switching the slot).
+      // taken it over.
       const slotSwitch = previewSignal ? beginPreviewSwitch(detail.surfaceId) : null;
       const settleSwitch = () => {
         if (slotSwitch) endPreviewTransition(slotSwitch.id, slotSwitch.token);

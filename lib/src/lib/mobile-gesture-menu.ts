@@ -311,7 +311,8 @@ function advanceOptionOrigin(
   const direction = MOBILE_GESTURE_DIRECTION_VECTORS[selectionDirection];
   const overshoot = (point.x - optionOrigin.x) * direction.x + (point.y - optionOrigin.y) * direction.y;
   if (overshoot <= 0) return { optionOrigin, displayOptionOrigin, advancing: false };
-  // Keep the compass collapsed only while the outward push remains brisk.
+  // Keep the compass collapsed only while the outward push remains brisk;
+  // expanding at once would flicker the labels for the length of the overshoot.
   return {
     advancing: overshoot > OPTION_EXPAND_RELEASE,
     optionOrigin: {

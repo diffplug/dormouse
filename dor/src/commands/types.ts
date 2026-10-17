@@ -657,7 +657,10 @@ export interface CliHost {
   skillMarkdown: string;
 }
 
-/** `dor-tools-builtin/runtime`: each entry starts its viewer and answers its announcement. */
+/** `dor-tools-builtin/runtime`: each entry starts its viewer and answers its
+ * announcement. The package exports that entry as types only, so a value
+ * import fails dor's build; `loadBuiltinViewers` imports the staged
+ * `builtin/runtime.js` beside `dor.js` instead. */
 export interface BuiltinViewers {
   runFileViewer(file: string, formatOf: (path: string) => FileFormat | null): Promise<string>;
   runFolderViewer(dir: string): Promise<string>;

@@ -33,7 +33,7 @@ Reserved: one plain distance field per atlas texel, in the alpha channel over wh
 
 `canopy/` is a Storybook-only workspace package, **kept independent of `dormouse-lib`** and outside the production build.
 
-**`UpstreamVsFork`'s pristine upstream `@xterm/addon-webgl` must come from the fork base commit**, its addon/core/commit triple recorded as `addon <v> == core <v> == commit <sha>` in both `canopy/src/GlTerminal.stories.tsx` and `canopy/README.md` — `scripts/xterm-lint.mjs` check 4 holds each against canopy's pins, and the two commits against each other.
+**`UpstreamVsFork`'s pristine upstream `@xterm/addon-webgl` must come from the fork base commit**, its addon/core/commit triple recorded as `addon <v> == core <v> == commit <sha>` in both `canopy/src/GlTerminal.stories.tsx` and `canopy/README.md`; `scripts/xterm-lint.mjs` holds each record to canopy's pins and the two to each other.
 
 Source of truth: `canopy/src/GlTerminal.stories.tsx`, `canopy/README.md`.
 
