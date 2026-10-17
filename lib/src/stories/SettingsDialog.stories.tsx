@@ -75,6 +75,10 @@ async function waitForTopicScroll(section: HTMLElement) {
     const clamped = Math.max(0, Math.min(desired, content.scrollHeight - content.clientHeight));
     expect(Math.abs(content.scrollTop - clamped)).toBeLessThan(2);
   }, { timeout: 2000 });
+  // Settled can still leave the animation's last frame queued, and that frame
+  // re-reads the topic's position: it would undo a play's own later scroll
+  // (`showWatcher`) on some runs and not others. Manual input cancels it.
+  fireEvent.wheel(content);
 }
 
 const meta: Meta<typeof DialogStory> = {
