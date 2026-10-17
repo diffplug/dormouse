@@ -69,7 +69,7 @@ Source of truth: `termsRoutes` in `hosted/server/terms.ts`; `TERMS_VERSION` in `
 
 **Must read the entitlement (`docs/specs/pricing.md` -> "Checkout and entitlement") on the server, per request, through one SQL predicate over the account's `"user"` row**, so a bearer and its owner's entitlement resolve in one query.
 
-- **Must entitle an account only while it holds exactly one current subscription, and that one is `active` before its period end or `trialing` before its trial end**, against the database's clock: `@pgstencil/stripe`'s `status()` access, so `past_due` is refused at once.
+- **Must entitle an account only while it holds exactly one current subscription, and that one is `active` before its period end or `trialing` before its trial end**, against the database's clock: `@pgstencil/stripe`'s `status()` access, widened to a `past_due` one until `PAYMENT_GRACE_DAYS` past its period end (`docs/specs/pricing.md` -> "Checkout and entitlement").
 - **Must entitle `ADMIN_EMAIL` as a standing comp** while it is the account's verified email, one of the exceptions to "never email" ("Identity and login"); nothing else may key on an address.
 
 Source of truth: `entitledSql` and `entitled` in `hosted/server/entitlement.ts`; `cookieEntitled` in `hosted/server/account-gate.ts`.

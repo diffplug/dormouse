@@ -122,7 +122,7 @@ function PlanLine({ summary }: { summary: BillingSummary }) {
         {PLAN_NAMES[summary.plan]}
         <span className="detail">
           {!summary.active
-            ? "A payment is due. Update your card in Manage billing."
+            ? "A payment failed. Update your card in Manage billing: Hosted keeps working for up to 30 days while the payment is retried."
             : summary.until && `${summary.renews ? "Renews" : "Ends"} ${date(summary.until)}`}
         </span>
       </span>

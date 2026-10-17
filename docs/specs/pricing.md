@@ -58,7 +58,8 @@ Built on the account Worker and off until Stripe is configured; routes, bindings
 - **Must use Stripe Billing, Stripe-hosted Checkout, and its customer portal through `@pgstencil/stripe`; DiffPlug is the seller and merchant of record**, responsible for refunds and applicable tax registration, collection, filing, and remittance. **Never receive or store full card numbers in Dormouse.** A founding lock is a per-cohort Price; every past cohort's Price keeps granting the plan.
 - **Checkout belongs to a signed-in Hosted account**, so the subscription belongs to an account from its first event. A buy link lands on the account origin's `/checkout`, which asks for sign-in first, then shows the plan and its price now before handing off to Stripe. The browser names a plan, never a Price.
 - **No trial**: the first payment is taken at checkout, and the 30-day refund is the trial.
-- **The entitlement is the account's subscription, read on the server on every voice and Relay request.** No licence, no offline verification, and no grace past what the subscription grants; a lapsed member's voices fall back to the system voice and its Burrows to `not-entitled`.
+- **The entitlement is the account's subscription, read on the server on every voice and Relay request.** No licence and no offline verification; a lapsed member's voices fall back to the system voice and its Burrows to `not-entitled`.
+- **A failed payment keeps access for 30 days while Stripe retries it**, and with it the founding lock; Stripe's retry schedule ends the subscription within those days, after which a founder re-subscribes at list.
 - **A desktop signs in from Settings by device code**, the flow Burrow enrollment already runs (`docs/specs/hosted.md` -> "Burrow enrollment"). The approval mints a desktop credential the host keeps and never hands a webview. Sign-in is the only account surface in the free client.
 - **Must license one individual, including work use, with no device limit and no per-device charge**; enrollment's abuse ceiling is far above what a person owns (`docs/specs/hosted.md` -> "Burrow enrollment"). **Must disclose material usage limits before purchase**, including managed voice's daily cap.
 - **A full refund or a finally reversed payment ends the subscription**, so the next request is refused, and a founding seat returns to its cohort. A partial refund or billing correction never ends it, and an open dispute only suspends it ("Paid-launch requirements").
@@ -70,7 +71,7 @@ Built on the account Worker and off until Stripe is configured; routes, bindings
 **Scope: hosted-sales** — what remains, in staged order:
 
 1. **Managed voice for members**: one voice per Pane.
-2. **Turning billing on**: the Stripe products, Prices, portal, and webhook, then the bindings (`docs/specs/hosted.md` -> "Billing"), then `CHECKOUT_OPEN`. The subscription admits members to the Hosted Relay (`docs/specs/hosted.md` -> "Relay"), so this is gated on the independent review `docs/specs/security-remote.md` -> "Cloud-hosted mode" requires.
+2. **Turning billing on**: the Stripe products, Prices, portal, webhook, and failed-payment retries that cancel within the grace, then the bindings (`docs/specs/hosted.md` -> "Billing"), then `CHECKOUT_OPEN`. The subscription admits members to the Hosted Relay (`docs/specs/hosted.md` -> "Relay"), so this is gated on the independent review `docs/specs/security-remote.md` -> "Cloud-hosted mode" requires.
 3. **Founder avatars** proxied onto this origin.
 4. **Renewal, cancellation, and refund** paths.
 
@@ -115,7 +116,6 @@ What is built — the endpoint, what a request carries, the disclosure, the clip
 
 - **Every plan auto-renews; cancel any time; access runs to period end.**
 - **Must offer a full refund within 30 days of the first Hosted payment or any yearly renewal**, including collected tax; monthly renewals, plan changes, and resubscriptions do not restart this voluntary first-payment guarantee. **Must preserve mandatory legal remedies.** A full refund revokes.
-- **A failed founding renewal gets 30 days of grace before the lock is lost.**
 - **A subscription is personal and non-transferable.**
 
 ### Paid-launch requirements

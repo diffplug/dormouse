@@ -622,7 +622,7 @@ export default function Hosted({ checkoutOpen = CHECKOUT_OPEN }: { checkoutOpen?
           <FaqEntry question="What exactly does a founding price lock?">
             Your base yearly price in US dollars, for as long as the subscription stays
             active; taxes may change. A failed renewal gives you 30 days to restore
-            payment and keep the price, but paid features pause until payment succeeds.
+            payment and keep the price, and Hosted keeps working meanwhile.
             A failure caused by us or a billing-provider migration does not forfeit the
             lock. A lapsed founder re-subscribes at list. Founding badges are
             cosmetic — in the app and on the credits page, never a capability.

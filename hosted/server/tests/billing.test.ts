@@ -16,6 +16,7 @@ import {
   billingRoutes,
 } from "../billing-routes";
 import { DEV_FOUNDING_PRICES, stripeDevBilling } from "../billing-dev";
+import { PAYMENT_GRACE_DAYS } from "../entitlement";
 import { migrations } from "../migrations";
 import {
   ORIGINS,
@@ -296,12 +297,20 @@ test("checkout to webhook to entitlement: voice and the Relay admit a member, an
   const { burrowToken } = enrolled.json.enrollment;
   expect((await f.burrowCall(API_ROUTES.burrowSetupToken, undefined, burrowToken)).status).toBe(200);
 
-  // A failed renewal refuses at once: no grace past what the subscription grants.
+  // A failed renewal keeps access while Stripe retries it, and the account
+  // page says a payment is due, so its owner can fix the card.
   f.dev.transition(subscription.id, "payment-failed");
   await f.deliver();
+  expect((await f.speak(token)).status).toBe(200);
+  expect(await member.summary()).toMatchObject({ plan: "monthly", active: false, entitled: true });
+  // Past the grace, it refuses even if Stripe never ended the subscription.
+  await queryDatabase(
+    f.database.url,
+    `UPDATE pgstencil_billing.subscriptions
+    SET period_end = now() - interval '${PAYMENT_GRACE_DAYS} days' - interval '1 minute'`,
+  );
   expect((await f.speak(token)).status).toBe(403);
-  // The plan stays on the account page, so its owner can fix the card.
-  expect(await member.summary()).toMatchObject({ plan: "monthly", active: false, entitled: false });
+  expect(await member.summary()).toMatchObject({ plan: "monthly", entitled: false });
   f.dev.transition(subscription.id, "renew");
   await f.deliver();
   expect((await f.speak(token)).status).toBe(200);
