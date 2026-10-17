@@ -48,6 +48,7 @@ A PASS is a claim, and needs evidence as much as a FAIL does. **That the control
 
 - **Trace the gate's input.** On a rule that names a gate or check, trace each input the gate compares back to where it is set, and say whether an attacker the rule names can set it. A comparison against a value that attacker writes is no gate.
 - **Check absence and failure.** On a rule about a configuration or policy, check what is absent as well as what is present, and judge each missing item by its actual fallback, which is not always the default the policy states. Then take the failure and default paths — a missing define, an unset environment variable, an unparseable file — and say what each does.
+- **Hold this layer to its own rule.** A rule names the code it holds, and you judge that code as if it were the last defense: a build check, a lint, an upstream gate, or any other layer that would also catch the case never passes the layer the rule names. Defense in depth holds only while each layer holds on its own.
 - **Keep every condition.** When you split a rule into clauses, every condition the rule names lands in some clause. A dropped condition makes the result malformed, however the kept clauses read.
 
 ### Open findings
@@ -67,6 +68,8 @@ Then do the qualitative pass described for your domain. Rate each finding by thi
 | `BLOCKER` | Attacker-controlled input reaches code execution, a credential, or an authorization grant, with no entry under "What is not defended" or "Known gaps". A command injection from a file name is a BLOCKER. |
 | `WARNING` | The same reach, but only after a precondition you state; or a missing defense in depth. |
 | `INFO` | Hardening, spec drift, an unreadable condition, or anything you could not confirm. |
+
+A gate that admits what it exists to refuse is a missing defense, never hardening, and that only the user sets its input is a claim to verify, not a rating: trace every writer, persisted state and webview and `dor` paths included, before you rate it below WARNING.
 
 **A BLOCKER fails the audit like a failed `FAIL IF`.** Rate by impact, not by how mechanical the finding was: a loose file mode is not a BLOCKER beside a command injection rated WARNING.
 

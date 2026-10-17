@@ -128,7 +128,7 @@ A session-gated route answers a session of an account no longer entitled with th
 - **Must cap every table a caller grows, keyed by whoever grows it**, as `docs/specs/relay.md` -> "Guardrails" does: setup tokens and setup challenges per Burrow (`MAX_TOKENS_PER_BURROW`), presence nonces per session (`MAX_PENDING_REAUTH_NONCES_PER_SESSION`), and sessions per account (`MAX_SESSIONS_PER_ACCOUNT`), each evicting its key's own oldest; passkeys per account are refused at the cap (rationale). A capped write prunes, trims, and evicts only its own key's rows.
 - **Must sweep every Relay table's expired rows from the relay's hourly Cron Trigger** (rationale); sign-in challenges, minted unauthenticated and flat, are bounded by it and the per-address limit.
 - **Must answer 429 with `Retry-After` past the per-address limit on `signin/*` (`RELAY_SIGNIN_LIMIT`) and `setup/begin`/`finish` (`RELAY_SETUP_LIMIT`)**, before the body limit and any database read: 30 a minute, a ceremony's two routes sharing one budget (rationale).
-- **Must claim a setup token in place at `finish`**, so a retire still finds it; a refused `finish` only clears its claim, so the token keeps its expiry and stays dead once retired, evicted, or swept.
+- **Must claim a setup token in place at `finish`**, so a retire still finds it; a refused `finish` clears its claim, or spends the token when its owner is not entitled, so the token keeps its expiry and stays dead once retired, evicted, or swept.
 
 **Push.** The push routes keep `docs/specs/relay.md` -> "Web Push" and its "State files" upsert rules; a send is HTTPS from the Burrow to the relay Worker, independent of terminal transport.
 
