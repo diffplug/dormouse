@@ -115,8 +115,9 @@ export interface PairingQueueItem {
   /** Immutable ceremony id, echoed by approve/deny. */
   pairingId: string;
   /**
-   * The Client's own name for itself, already bounded and stripped by the
-   * Burrow; a one-time request's is a member of `ONE_TIME_DEVICE_LABELS`.
+   * The Client's name for itself as the Burrow mapped it: a pairing's is a
+   * member of `PAIRING_DEVICE_LABELS` or `Unknown device`, a one-time
+   * request's a member of `ONE_TIME_DEVICE_LABELS`.
    */
   label: string;
   requestedAt: number;

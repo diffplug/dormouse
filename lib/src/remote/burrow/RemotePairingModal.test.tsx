@@ -17,7 +17,7 @@ let root: Root;
 let approved: string[];
 let denied: number;
 
-async function render(label = 'Ned’s iPhone', kind?: 'pairing' | 'one-time') {
+async function render(label = 'Dormouse Pocket (browser)', kind?: 'pairing' | 'one-time') {
   await act(async () => {
     root.render(
       <RemotePairingModal
@@ -80,14 +80,14 @@ describe('RemotePairingModal', () => {
     expect(text()).toContain(
       'Only authorize if your phone is showing a two-digit code. If it shows an error or no code, cancel this request.',
     );
-    expect(text()).toContain('Ned’s iPhone');
+    expect(text()).toContain('Dormouse Pocket (browser)');
   });
 
   it('tells a one-time request what it grants, and keeps the same warning', async () => {
     // A one-time connection writes nothing, so the pairing's "adds it to this
     // machine" would be false; what the person is deciding is full control
     // for as long as it lasts (docs/specs/one-time.md).
-    await render('iPhone Safari', 'one-time');
+    await render('iPhone', 'one-time');
     expect(text()).toContain('Allow a one-time connection');
     expect(text()).toContain(
       'Only authorize if your phone is showing a two-digit code. If it shows an error or no code, cancel this request.',
@@ -108,13 +108,6 @@ describe('RemotePairingModal', () => {
     expect(text()).toContain('Pair a new device');
     expect(text()).toContain('Approving adds it to this machine only.');
     expect(buttonLabelled('Confirm and authorize')).toBeTruthy();
-  });
-
-  it('says (unnamed) rather than nothing for a Client with no label', async () => {
-    // A blank row would read as a rendering failure, and the device line is
-    // half of what the user is deciding about.
-    await render('');
-    expect(text()).toContain('(unnamed)');
   });
 
   it('takes two digits and nothing else', async () => {
@@ -170,7 +163,7 @@ describe('RemotePairingModalHost', () => {
     enqueuePairingApproval({
       ...request,
       pairingId: 't1',
-      label: 'iPhone Safari',
+      label: 'iPhone',
       requestedAt: 1,
       approve: () => {},
       deny: () => {},
@@ -178,7 +171,7 @@ describe('RemotePairingModalHost', () => {
     try {
       await act(async () => root.render(<RemotePairingModalHost />));
       expect(text()).toContain('Allow a one-time connection');
-      expect(text()).toContain('iPhone Safari');
+      expect(text()).toContain('iPhone');
     } finally {
       await act(async () => resolvePairingApproval(request));
     }

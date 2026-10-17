@@ -47,8 +47,8 @@ export function RemotePairingModal({
   /** Which ceremony is asking; a pairing unless told otherwise. */
   kind?: ApprovalKind;
   /**
-   * The Client's own name for itself, already bounded by the Burrow; for a
-   * one-time request, a member of `ONE_TIME_DEVICE_LABELS` whatever the phone sent.
+   * The Client's name for itself from a closed set, whatever the phone sent:
+   * `knownPairingDeviceLabel` or `knownOneTimeDeviceLabel` mapped it.
    */
   label: string;
   onApprove: (code: string) => void;
@@ -80,7 +80,7 @@ export function RemotePairingModal({
 
       <ModalReviewBlock density="default" className="mb-4 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
         <span className="text-muted">Device</span>
-        <span className="break-words text-foreground">{label || '(unnamed)'}</span>
+        <span className="break-words text-foreground">{label}</span>
       </ModalReviewBlock>
 
       <label className="mb-4 flex items-center gap-3 text-sm text-muted">

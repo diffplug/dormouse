@@ -1,11 +1,11 @@
 /**
- * Pairing constants and the label reducer both ceremonies share.
+ * Pairing constants and the Burrow's own label bound.
  *
  * The ceremony itself is `e2e-ceremony.ts` — `PairingRequestV1`,
- * `PairingOutcomeV1`, and the presence proof — over the invitation grammar in
+ * `PairingOutcomeV1`, the presence proof, and the closed set a Client's device
+ * label must come from — over the invitation grammar in
  * `pairing-invitation.ts`. What lives here is the vocabulary neither of those
- * owns: the TTL, the pending-request cap, and the bound on an attacker-chosen
- * device label.
+ * owns: the TTL, the pending-request cap, and the bound on the Burrow's label.
  */
 import { boundedPushText } from './push.js';
 
@@ -28,23 +28,10 @@ export const DEFAULT_PAIRING_TTL_MS = 5 * 60 * 1000;
 export const MAX_PENDING_PAIRINGS = 8;
 
 /**
- * The longest label the approval modal will render, in code points. Generous
- * for a device name and far short of anything that can push the Approve/Deny
- * buttons off a laptop screen.
+ * The longest Burrow label sent to a Client, in code points: generous for a
+ * machine name.
  */
-const PAIRING_LABEL_LIMIT = 64;
-
-/**
- * A device label reduced to something safe to render in the approval
- * modal. Same rule as `boundedPushText`, and for a stronger reason: the label
- * is attacker-chosen free text, and this is the one dialog the entire ACL
- * rests on. An unbounded label can push the buttons out of view, and a bidi
- * override can make the displayed text read as something other than what it
- * is.
- */
-export function boundedPairingLabel(value: unknown): string {
-  return boundedPushText(value, { limit: PAIRING_LABEL_LIMIT, fallback: '(unnamed)' });
-}
+const BURROW_LABEL_LIMIT = 64;
 
 /**
  * The Burrow's *own* label, reduced before it goes on the wire.
@@ -53,8 +40,8 @@ export function boundedPairingLabel(value: unknown): string {
  * guards refuse any field over `CEREMONY_FIELD_LIMIT`, so an unbounded one
  * would pair on the laptop and be discarded by the phone, leaving the two
  * permanently disagreeing about whether they are paired. Empty is a legal
- * answer, unlike a device label nobody would recognize unnamed.
+ * answer.
  */
 export function boundedBurrowLabel(value: unknown): string {
-  return boundedPushText(value, { limit: PAIRING_LABEL_LIMIT, fallback: '' });
+  return boundedPushText(value, { limit: BURROW_LABEL_LIMIT, fallback: '' });
 }

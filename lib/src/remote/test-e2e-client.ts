@@ -16,6 +16,7 @@
 
 import {
   NoiseTransportSession,
+  PAIRING_DEVICE_LABELS,
   concatBytes,
   createNoiseInitiator,
   createNoiseResponder,
@@ -369,7 +370,7 @@ export async function pairThroughSocket(options: {
     id: options.invitation.inviteId,
     step: 'transport',
     ct: toBase64Url(
-      session.sendControl({ code, label: options.label ?? 'iPhone Safari', presence }),
+      session.sendControl({ code, label: options.label ?? PAIRING_DEVICE_LABELS[1], presence }),
     ),
   });
   await settleUntil(options.until);
