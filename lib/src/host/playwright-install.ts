@@ -1,5 +1,5 @@
 /** Resolve only the Playwright client belonging to a validated CLI installation. */
-import { existsSync, realpathSync, readFileSync } from 'node:fs';
+import { existsSync, realpathSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import type * as Playwright from 'playwright-core';
@@ -33,26 +33,110 @@ function findPlaywrightInstall(hint: string | undefined, configured: string | un
     // External Binaries"); an explicit path comes back verbatim, unchecked.
     const binary = resolveBinaryPath(candidate, env);
     if (binary === undefined || !existsSync(binary)) continue;
-    let dir = path.dirname(realpathSync(binary));
-    // npm symlinks, pnpm .bin shims, and Windows npm .cmd launchers.
-    for (let depth = 0; depth < 6; depth++) {
-      for (const root of [dir, path.join(dir, 'node_modules', '@playwright', 'cli'), path.join(dir, '..', '@playwright', 'cli')]) {
-        try {
-          const pkg = path.join(root, 'package.json');
-          if (JSON.parse(readFileSync(pkg, 'utf8')).name !== '@playwright/cli') continue;
-          const require = createRequire(pkg);
-          const libraryPath = path.dirname(require.resolve('playwright-core/package.json'));
-          const library = require('playwright-core') as typeof Playwright;
-          if (typeof library.chromium?.connect !== 'function') continue;
-          return { binary, libraryPath: realpathSync(libraryPath), library };
-        } catch { /* Try the next installation layout. */ }
-      }
-      const parent = path.dirname(dir);
-      if (parent === dir) break;
-      dir = parent;
-    }
+    const cliRoot = launcherPackage(realpathSync(binary));
+    if (cliRoot === undefined) continue;
+    try {
+      const require = createRequire(path.join(cliRoot, 'package.json'));
+      // Node's own lookup continues into every ancestor's node_modules, so accept
+      // only the copy that belongs to this installation.
+      const libraryPath = realpathSync(path.dirname(require.resolve('playwright-core/package.json')));
+      if (!playwrightCoreDirs(cliRoot).some(dir => samePath(dir, libraryPath))) continue;
+      const library = require('playwright-core') as typeof Playwright;
+      if (typeof library.chromium?.connect !== 'function') continue;
+      return { binary, libraryPath, library };
+    } catch { /* Try the next candidate. */ }
   }
   throw new Error(`playwright CLI installation unavailable or incompatible. Install npm i -g @playwright/cli (tested with 0.1.19), or set ${PLAYWRIGHT_BIN_ENV}.`);
+}
+
+/**
+ * The real path of the `@playwright/cli` package `launcher` (already a real
+ * path) belongs to, or undefined. Only layouts a package manager produces are
+ * accepted, and never a directory above the installation: a launcher that does
+ * not match one fails rather than searching upward.
+ */
+function launcherPackage(launcher: string): string | undefined {
+  const dir = path.dirname(launcher);
+  // The package's own bin file: an npm, yarn, or bun bin symlink (whose target
+  // may sit in a subdirectory of the package), or a linked checkout.
+  const own = binOwner(launcher) ?? (isCliPackage(dir, launcher) ? dir : undefined);
+  if (own !== undefined) return own;
+  // An npm launcher beside its node_modules (`npm i -g` on Windows), or a
+  // node_modules/.bin shim (pnpm, and npm or yarn on Windows).
+  const besides = [path.join(dir, 'node_modules', '@playwright', 'cli')];
+  if (path.basename(dir) === '.bin' && path.basename(path.dirname(dir)) === 'node_modules') {
+    besides.push(path.join(path.dirname(dir), '@playwright', 'cli'));
+  }
+  for (const root of besides) {
+    const real = realpathOrUndefined(root);
+    if (real !== undefined && isCliPackage(real)) return real;
+  }
+  // A shim naming a bin file below its own directory (`pnpm add -g`).
+  const target = shimTarget(launcher);
+  return target === undefined ? undefined : binOwner(target);
+}
+
+/** The package root when `file` is the bin of an `@playwright/cli` installed under node_modules. */
+function binOwner(file: string): string | undefined {
+  const parts = file.split(path.sep);
+  const at = parts.lastIndexOf('node_modules');
+  if (at < 0 || parts[at + 1] !== '@playwright' || parts[at + 2] !== 'cli') return undefined;
+  const root = parts.slice(0, at + 3).join(path.sep);
+  return isCliPackage(root, file) ? root : undefined;
+}
+
+/** Whether `root` holds `@playwright/cli`, and `bin` (when given) is one of its bin files. */
+function isCliPackage(root: string, bin?: string): boolean {
+  let pkg: { name?: unknown; bin?: unknown };
+  try { pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')); } catch { return false; }
+  if (pkg.name !== '@playwright/cli') return false;
+  if (bin === undefined) return true;
+  const bins = typeof pkg.bin === 'string' ? [pkg.bin] : pkg.bin && typeof pkg.bin === 'object' ? Object.values(pkg.bin) : [];
+  return bins.some(entry => typeof entry === 'string' && samePath(path.resolve(root, entry), bin));
+}
+
+// The quoted script path a pnpm, cmd-shim, or PowerShell shim runs, relative to
+// the shim's own directory.
+const SHIM_TARGET = /"(?:\$basedir|%~dp0|%dp0%)[\\/]([^"]*node_modules[^"]*)"/g;
+const MAX_SHIM_BYTES = 64 * 1024;
+
+/**
+ * The bin file a shim runs, when it names exactly one script and that script
+ * lies below the shim's own directory. The shim is the launcher itself, so
+ * reading it trusts nothing the spawn does not.
+ */
+function shimTarget(shim: string): string | undefined {
+  let text: string;
+  try {
+    if (statSync(shim).size > MAX_SHIM_BYTES) return undefined;
+    text = readFileSync(shim, 'utf8');
+  } catch { return undefined; }
+  const targets = new Set(Array.from(text.matchAll(SHIM_TARGET), match => match[1]));
+  if (targets.size !== 1) return undefined;
+  const segments = [...targets][0].split(/[\\/]/);
+  if (segments.includes('..')) return undefined;
+  return realpathOrUndefined(path.join(path.dirname(shim), ...segments));
+}
+
+/**
+ * Where an installation's `playwright-core` may live: nested in the CLI package,
+ * or beside it in the same node_modules (npm and yarn hoisting, pnpm's linked
+ * dependencies).
+ */
+function playwrightCoreDirs(cliRoot: string): string[] {
+  const dirs = [path.join(cliRoot, 'node_modules', 'playwright-core')];
+  const scope = path.dirname(cliRoot);
+  const modules = path.dirname(scope);
+  if (path.basename(scope) === '@playwright' && path.basename(modules) === 'node_modules') dirs.push(path.join(modules, 'playwright-core'));
+  return dirs.flatMap(dir => realpathOrUndefined(dir) ?? []);
+}
+
+function realpathOrUndefined(file: string): string | undefined {
+  try { return realpathSync(file); } catch { return undefined; }
+}
+
+function samePath(a: string, b: string): boolean {
+  return process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
 }
 
 export function playwrightWorkspace(cwd: string): string | undefined {
