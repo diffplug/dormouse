@@ -94,7 +94,7 @@ describe('workspace mutation verbs', () => {
     expect(getWorkspacesSnapshot().activeId).toBe(active);
   });
 
-  it('renames and switches by positional ref or name', async () => {
+  it('renames and switches by id or name', async () => {
     createWorkspace({ id: 'workspace:2', name: 'build', activate: false });
 
     const renamed = request('workspace.rename', { workspace: 'workspace:build', name: 'agents' });

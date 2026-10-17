@@ -122,7 +122,7 @@ Source of truth: `.github/audit/_preamble.md`; `dedupFindings` in `scripts/secur
 | Sink | Carries |
 |---|---|
 | Public status issue, labeled `security-audit-status` | the run's time, link, commit, and outcome; whether the domains were skipped and when they last ran; each domain's computed verdict and its failed-check, missing-rule, malformed-line, BLOCKER, and WARNING counts; each failed check's spec and heading; how many verdict lines disagreed; whether the private filing failed; each open ledger finding's severity, kind, and dates, keyed as [Disclosure](#disclosure) allows; the latest disclosures |
-| Public disclosure issue, labeled `security-audit-finding`, one per ledger key | what [Disclosure](#disclosure) lists |
+| Public disclosure issue, labeled `security-audit-finding`, one per ledger issue | what [Disclosure](#disclosure) lists |
 | Private issue in `diffplug/dormouse-embargo`, one per non-PASS run | the private report ([Outcomes and reporting](#outcomes-and-reporting)), titled with date and commit |
 | Ledger issue in `diffplug/dormouse-embargo`, one per open finding key | one failed rule, its clauses together, or one merged BLOCKER or WARNING, with its evidence |
 | `audit-open-findings.txt`, on the runner | the open ledger titles, leaving the runner only in the transcript |
