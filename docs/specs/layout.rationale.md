@@ -80,8 +80,6 @@ xterm.js paints only its own rendered surface, and integer row fitting leaves a 
 
 **Why two layers, and why corners are separate pieces.** The ring is one closed path so the dash phase runs unbroken around the perimeter, and SVG `stroke-width` is a single scalar — so that one path cannot carry four different widths. A corner has to reach two at once, and opacity cannot vary along a stroke, so a corner can only take the mean of its two edges' (mechanism at `cornerPath`).
 
-**Closed-form dash length.** `1.6232252401402307 × r` is the arc length of the quadratic quarter-turn the path actually draws; the quarter-*circle* value `π/2` is 3% short. `SVGGeometryElement.getTotalLength()` costs a synchronous style+layout flush per frame at a cost scaling with the whole document, and is itself only an approximation (browsers flatten curves to measure) — verified in Safari to agree with the closed form to 6e-4px on a 3253px ring. Dropping it also retired the jsdom `getTotalLength` stubs, so tests assert real dash geometry.
-
 **The `feGaussianBlur` measurements.** WebKit CPU-rasterizes SVG filters every frame: measured in Safari 26.5 (2026-08) at 25.6ms/frame with 31 of 98 frames over 25ms during ring travel, versus a locked 16.7ms with zero dropped frames after the eight-piece smear replaced the filter.
 
 ## Inline rename

@@ -3,7 +3,7 @@
 > - See `docs/specs/glossary.md` for Pane / Door vocabulary used in the surface hierarchy below.
 > - **Defers to `DESIGN.md`:** the named color rules (Bg-Only Chrome, Host-Theme-Only, Inset-Over-Border) and the Don'ts they carry. This spec owns the token plumbing under them.
 
-VS Code supplies `--vscode-*`; standalone, website, and Pocket use `applyTheme()` with bundled themes, the website also with installed ones — Pocket before first paint, including auth ([pocket-app.md](./pocket-app.md#design-system-and-theming) owns its browser-chrome sync). **Every shipping host runs the same consumed-token resolver** (`lib/src/lib/themes/vscode-color-resolver.ts`) before rendering.
+VS Code supplies `--vscode-*`; standalone, website, and Pocket use `applyTheme()` with bundled themes, the website also with installed ones — Pocket before first paint, including auth. **Every shipping host runs the same consumed-token resolver** (`lib/src/lib/themes/vscode-color-resolver.ts`) before rendering.
 
 ## Surface hierarchy
 

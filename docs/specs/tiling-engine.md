@@ -119,7 +119,7 @@ Source of truth: `minimizePane` in `lib/src/components/Wall.tsx`; `doorLeaf` in 
 
 `lath-wall-engine.ts` is the Wall-facing handle over the store, one per mounted Wall, never shared across Workspaces. Its readers rely on two projections: `listPanes()` is tree pre-order, so **Doored and parked leaves are not listed**, while `getMeta(id)` resolves them.
 
-Source of truth: `lib/src/components/wall/lath-wall-engine.ts`.
+Source of truth: `lib/src/components/wall/lath-wall-store.ts`; `lib/src/components/wall/lath-wall-engine.ts`.
 
 ## The HTML adapter (LathHost)
 

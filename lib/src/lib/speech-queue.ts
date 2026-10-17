@@ -118,6 +118,8 @@ export class SpeechQueue {
         try {
           attempt.handle = this.engine.prepare({ text: job.text(), voice: job.voice?.() ?? null }, {
             onStart: () => {
+              // Identity guards `start` as well as completion: a stale `start`
+              // would otherwise mark a revoked attempt's job as speaking.
               if (this.active !== attempt || attempt.started) return;
               if (!job.eligible()) { this.finish(attempt, true); return; }
               if (job.deferred?.()) { this.requeue(attempt); return; }

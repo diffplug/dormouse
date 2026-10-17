@@ -113,8 +113,7 @@ function pushTargets(records: readonly BurrowAclRecord[]): readonly BurrowAclRec
  * active in the Burrow's ACL, joined by `deliveryId` to the ACL's human labels.
  *
  * Only the Burrow can do this join — it holds the records that mint delivery ids,
- * and the Relay never learns a label
- * (`docs/specs/remote-security-model.md`). The send path does not need it: the
+ * and the Relay never learns a label. The send path does not need it: the
  * Relay intersects a send's targets with its subscriptions anyway, so asking
  * first would only cost the alarm a round trip; see {@link sendPush}.
  *

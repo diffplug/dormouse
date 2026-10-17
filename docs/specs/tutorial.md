@@ -23,7 +23,7 @@ Device routes (`website/src/routes.ts`):
 
 **Must derive progress from app events and semantic snapshots, never touch the tiling engine.**
 
-- **Must credit a keyboard split before its automatic passthrough transition**, and tell the user to re-enter command mode for the following navigation item.
+- **Must credit a keyboard split from its `split` event alone, whatever the mode**, and tell the user to re-enter command mode for the following navigation item.
 - **Must credit `kb-arrows` only on command-mode selection of a distinct pane**; an arrow or click counts, a swap's resulting focus does not.
 - **Must credit an alert ring only on a transition into `ALERT_RINGING`, by the source its detail names**, so a ring already standing when first seen credits nothing.
 - **Must credit the `dor open` section from the command lines the shells report**, never from a hook in the playground `dor` or its viewers.

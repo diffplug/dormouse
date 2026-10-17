@@ -64,8 +64,6 @@
 
 ## What Pocket stores
 
-Separate-key probing cannot select a production format and now remains only in the diagnostic tool.
-
 Burrow listing and push-subscription queries formerly decrypted every stored key despite using metadata alone. Besides duplicate work, this prevented listing/removing a record with a damaged envelope. Summary reads omit the private-key field without interpreting it.
 
 A connection-record read failure can be transient database unavailability or an undecodable key, not evidence of Burrow revocation. The fixed error points to retry or the existing Scan a setup code action. That action preserves the pin and requires fresh approval, while marking every read failure as pairing required would conflate local availability with an authenticated denial.
@@ -74,7 +72,7 @@ The operator confirmed successful production pairing on the affected iPhone on S
 
 The iOS 26.6.1 pairing failure reported in September 2026 occurred after local approval, at the IndexedDB write. WebKit evaluates the inline key path on a deserialized clone, so a failed embedded-key clone can look like a missing `burrowId`. WebKit bug 312279 reports X25519 key storage returning null. Generation and agreement alone do not test persistence; reopening and using the stored key detects silent readback failure as well as a rejected write.
 
-The phone subsequently reported `write-record / DataError` in the disposable database. Testing a separately stored key distinguishes an inline-key check failure from broken key deserialization; an explicit key can bypass the former while hiding the latter until readback. This diagnostic does not migrate records.
+The phone subsequently reported `write-record / DataError` in the disposable database. Testing a separately stored key distinguishes an inline-key check failure from broken key deserialization; an explicit key can bypass the former while hiding the latter until readback. This diagnostic does not migrate records. Separate-key probing cannot select a production format and now remains only in the diagnostic tool.
 
 **Why the Relay session may sit in `localStorage`.** Without it every cold launch, and every relaunch of an installed app iOS evicted, cost a sign-in prompt before the Burrows list. The token is authentication-plane only: it reaches the Relay's routes and sockets for at most its 12 hours, and never stands in for a presence proof at a Burrow (remote-security-model, Presence proofs). Its exposure is the Client statics' class, which already live in the same origin's storage and are the stronger capability; script running in the Pocket origin is outside the model either way. It holds the credential id because pairing names the passkey a proof is built from, which a relaunch could not otherwise recover without a prompt.
 

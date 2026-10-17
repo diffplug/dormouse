@@ -307,8 +307,7 @@ export function Wall({
    *  trivial close: input to either of its capabilities is input to the Tool
    *  (docs/specs/dor-tool.md → The tool capability set). */
   const closeKindOf = (id: string): CloseKind => closeKind(id, lath.getMeta(id)?.params);
-  /** A blank shell may be replaced in place; one that owns a helper is not blank
-   *  (docs/specs/terminal-context.md → Helper lifecycle). */
+  /** A blank shell may be replaced in place; one that owns a helper is not blank. */
   const isReplaceableShell = (id: string): boolean => closeKindOf(id) === 'trivial' && !getHelper(id);
   const restoredLathLayoutRef = useRef(restoredLathLayout);
   // One reference-counted lease per open dialog: overlapping dialogs each hold

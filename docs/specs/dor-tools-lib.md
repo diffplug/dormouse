@@ -15,7 +15,7 @@
 | `protocol` | reads host messages | reads frame messages |
 | `frame` | the save-channel client | — |
 
-- **The host (`lib`) must reach the package through source aliases**, beside every `dor-tools-builtin/*` alias since no host build compiles the package first.
+- **The host (`lib`) must reach the package through source aliases**, beside every `dor-tools-builtin/*` alias, since no host build compiles the package first.
 - `dor-tools-builtin` speaks the protocol through it (`docs/specs/dor-tools-builtin.md` → Packaging).
 
 Source of truth: `dor-tools-lib/src/` (a module per entry point); `dor-tools-lib/package.json`.

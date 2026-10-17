@@ -22,7 +22,7 @@ The SPA-fallback rule came from the fix making things briefly worse. `/changelog
 
 `/docs` redirects with a 302 rather than a 301 because its target is a judgement call expected to be revisited, and a 301 outlives it in readers' caches.
 
-Muted reference text originally used `opacity-50` through `opacity-80` over the picked foreground. On Solarized Light that reduced 5.03:1 base contrast to 2.01:1–3.40:1, including the Hosted signup disclosure. Several dark themes failed too. Code spans share one token derived against all three places their own tint can stack: the base page, a card, or a note; deriving it against the base alone measured 4.16:1 in a card and 4.24:1 in a note on the site palette.
+Muted reference text originally used `opacity-50` through `opacity-80` over the picked foreground. On Solarized Light that reduced 5.03:1 base contrast to 2.01:1–3.40:1, including the Hosted signup disclosure. Several dark themes failed too. Each surface now derives its own opaque muted token; code spans share one token derived against all three places their own tint can stack: the base page, a card, or a note; deriving it against the base alone measured 4.16:1 in a card and 4.24:1 in a note on the site palette.
 
 The signup action originally reused the corrected link color on 10% and 20% tints of itself. Those composites pulled every bundled theme below AA, so its foreground is corrected against the stronger hover tint and checked on both.
 

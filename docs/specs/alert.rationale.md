@@ -138,8 +138,6 @@
 
 **Why presence gates delivery.** The watcher rechecked only the episode and the setting, so a push went out while the user typed in the next pane, and speech named the pane they were reading (audit, 2026-09-23). Speech is heard in the room, so it only has to spare the pane being looked at; a push reaches a phone, so it waits until the user has left every viewer.
 
-**Why delivery identity guards `start` as well as completion.** Guarding only completion leaves a stale `start` free to replace the active utterance's token. Queue-admission identity also covers old rings, collateral redispatch, and evicted callbacks after teardown; it retains one token per ringing Session without retaining each engine utterance.
-
 ## Spoken alarms
 
 **Why deferred preparation is retained.** Host admission is not playback: Web Speech can queue an utterance and managed voice can prepare audio before the start callback. Treating a deferral as cancellation lost an unsent alarm. An unstarted attempt returns to the pending queue, while revoking its callbacks prevents an old answer from starting or finishing the resumed job; a job that already started is not replayed (product decision, 2026-10-01).
