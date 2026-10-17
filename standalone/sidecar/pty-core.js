@@ -3,6 +3,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFile, spawn } = require('node:child_process');
 const { createPortScanner } = require('./port-scanner');
+const { windowsPowerShellPath, windowsSystemPath } = require('./windows-system');
 
 function safeResolve(resolver) {
   try {
@@ -15,11 +16,7 @@ function safeResolve(resolver) {
 
 function resolveDefaultShell(platform = process.platform, env = process.env) {
   if (platform === 'win32') {
-    return (
-      env.ComSpec ||
-      env.COMSPEC ||
-      path.win32.join(env.SystemRoot || env.SYSTEMROOT || 'C:\\Windows', 'System32', 'cmd.exe')
-    );
+    return env.ComSpec || env.COMSPEC || windowsSystemPath(env, 'System32', 'cmd.exe');
   }
   return env.SHELL || '/bin/sh';
 }
@@ -150,6 +147,13 @@ const FOREIGN_TERMINAL_ENV = new RegExp(`^(?:${[
   'GHOSTTY_SHELL_FEATURES', 'WEZTERM_.*', 'ALACRITTY_WINDOW_ID', 'ALACRITTY_SOCKET', 'ALACRITTY_LOG',
   'TERMINAL_EMULATOR', 'TERMINATOR_UUID', 'TILIX_ID', 'TMUX', 'TMUX_PANE', 'STY', 'COLORFGBG',
   'CURSOR_TRACE_ID',
+  // A launching Claude Code session's markers: a claude in the pane would take
+  // itself for that session's child, whose transcript saving is off, and every
+  // pane program would hold its messaging token. Settings such as
+  // CLAUDE_CODE_USE_BEDROCK are not markers and pass through.
+  'CLAUDECODE', 'CLAUDE_PID', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_EXECPATH',
+  'CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_CHILD_SESSION', 'CLAUDE_CODE_SESSION_ATTENDED',
+  'CLAUDE_CODE_MESSAGING_SOCKET', 'CLAUDE_CODE_MESSAGING_TOKEN',
 ].join('|')})$`);
 const FOREIGN_TERMINAL_ENV_WIN32 = new RegExp(FOREIGN_TERMINAL_ENV.source, 'i');
 
@@ -435,17 +439,16 @@ function fileExists(filePath, fsModule = fs) {
 async function detectWindowsShells(runtime = {}) {
   const env = runtime.env || process.env;
   const fsModule = runtime.fsModule || fs;
-  const systemRoot = env.SystemRoot || env.SYSTEMROOT || 'C:\\Windows';
   const shells = [];
 
   // Windows PowerShell (built-in)
-  const winPowerShell = path.win32.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+  const winPowerShell = windowsPowerShellPath(env);
   if (fileExists(winPowerShell, fsModule)) {
     shells.push({ name: 'Windows PowerShell', path: winPowerShell, args: [] });
   }
 
   // Command Prompt
-  const cmdPath = env.ComSpec || env.COMSPEC || path.win32.join(systemRoot, 'System32', 'cmd.exe');
+  const cmdPath = resolveDefaultShell('win32', env);
   if (fileExists(cmdPath, fsModule)) {
     shells.push({ name: 'Command Prompt', path: cmdPath, args: [] });
   }
@@ -479,10 +482,10 @@ async function detectWindowsShells(runtime = {}) {
   // the sidecar is itself spawned CREATE_NO_WINDOW, and a console child without
   // that flag stalls on Windows console allocation — the actual reason the old
   // wsl.exe call timed out.
-  const wslExe = path.win32.join(systemRoot, 'System32', 'wsl.exe');
+  const wslExe = windowsSystemPath(env, 'System32', 'wsl.exe');
   if (fileExists(wslExe, fsModule)) {
     try {
-      const regExe = path.win32.join(systemRoot, 'System32', 'reg.exe');
+      const regExe = windowsSystemPath(env, 'System32', 'reg.exe');
       const raw = await runText(
         runtime,
         regExe,
@@ -776,8 +779,9 @@ async function getDescendantPids(rootPid, runtime = {}) {
 }
 
 /** Every `[pid, ppid]` pair on this platform — `[pid, ppid, name]` on Windows,
- *  where the same query names each process — or null when the scan fails or
- *  the platform is unknown. */
+ *  where the same query names each process (one query instead of two: ~0.3 s
+ *  per scan on Windows, 2026-10-02) — or null when the scan fails or the
+ *  platform is unknown. */
 async function readProcessTable(runtime) {
   const platform = runtime.platform || process.platform;
   const fsModule = runtime.fsModule || fs;
@@ -1072,7 +1076,7 @@ function parseNetstatListening(output, pidSet) {
 module.exports.parseNetstatListening = parseNetstatListening;
 
 function runPowerShell(script, runtime, timeout = OPEN_PORT_TIMEOUT_MS) {
-  return runText(runtime, 'powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { timeout });
+  return runText(runtime, windowsPowerShellPath(runtime.env || process.env), ['-NoProfile', '-NonInteractive', '-Command', script], { timeout });
 }
 
 /** Run a `... | ConvertTo-Json` script and return its rows as an array. */
@@ -1099,7 +1103,8 @@ async function windowsListeningPorts(pids, runtime = {}, names) {
     ports = parseNetTcpConnections(json, pidSet);
   } catch {
     try {
-      ports = parseNetstatListening(await runText(runtime, 'netstat', ['-ano', '-p', 'TCP'], { timeout: remaining() }), pidSet);
+      const netstat = windowsSystemPath(runtime.env || process.env, 'System32', 'netstat.exe');
+      ports = parseNetstatListening(await runText(runtime, netstat, ['-ano', '-p', 'TCP'], { timeout: remaining() }), pidSet);
     } catch { return []; }
   }
   // Names come from the process-table read; a failed read leaves ports unnamed.
@@ -1118,7 +1123,7 @@ async function getListeningPortsForPids(pids, runtime = {}, names) {
 
 module.exports.getListeningPortsForPids = getListeningPortsForPids;
 
-/** De-duplicated by (family, address, port) and sorted by port — the shape a
+/** De-duplicated by (family, address, port) and sorted by port, then address — the shape a
  *  caller reads a Surface's ports in. */
 function dedupeListeningPorts(ports) {
   const seen = new Map();
@@ -1179,7 +1184,8 @@ function openNativeDirectory(nativePath, done, runtime = {}) {
     if (nativePath.includes(',')) return done(new Error('Explorer cannot open a path containing a comma'));
     // Explorer is a shell UI: acknowledge process launch, not its lifetime or
     // exit status. Keep OS-level launch errors visible to the caller.
-    const child = (runtime.spawn || spawn)('explorer.exe', [nativePath], { windowsHide: true, stdio: 'ignore' });
+    const explorer = windowsSystemPath(runtime.env || process.env, 'explorer.exe');
+    const child = (runtime.spawn || spawn)(explorer, [nativePath], { windowsHide: true, stdio: 'ignore' });
     let settled = false;
     const finish = error => { if (!settled) { settled = true; done(error); } };
     child.once('error', finish);
@@ -1274,7 +1280,12 @@ module.exports.pacedInputSegments = pacedInputSegments;
 // `onHelper(id, isHelper)` hears every helper decision — each spawn and each
 // promotion that succeeds — so the host's alerts, which keep a helper inert,
 // read this map's answer rather than keeping their own (docs/specs/alert.md).
-module.exports.create = function create(send, ptyModule, { replay = false, sliceSince = null, onHelper = () => {}, scanPorts = createPortScanner((pids, count) => getOpenPortsForPids(pids, { budgetCount: count })) } = {}) {
+//
+// `canonicalDirectory(path)` validates a directory to open, injected for the
+// same reason: `canonicalLocalDirectory` in `lib/src/host/local-directory.ts`,
+// which `main.js` takes from `git-info.cjs` and VS Code's `pty-host.js`
+// bundles. The default opens nothing.
+module.exports.create = function create(send, ptyModule, { platform = process.platform, replay = false, sliceSince = null, onHelper = () => {}, canonicalDirectory = async () => null, scanPorts = createPortScanner((pids, count) => getOpenPortsForPids(pids, { budgetCount: count })) } = {}) {
   if (!ptyModule || typeof ptyModule.spawn !== 'function') {
     throw new TypeError('create() requires a node-pty compatible module');
   }
@@ -1292,8 +1303,10 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
   const REPLAY_CHARS = 200000;
   const ptyShells = new Map(); // id -> resolved shell executable
   // Repaint restoration belongs to the PTY owner, where every local and remote
-  // resize passes. A Viewer-local timer cannot see another display taking size
-  // authority (docs/specs/remote-api.md -> Attach is the resize).
+  // resize passes: a later resize or repaint, exit, kill, or replacement
+  // cancels it, and a Viewer's detach does not, or the PTY is left a row off
+  // its xterm. A Viewer-local timer cannot see another display taking size
+  // authority.
   const repaintTimers = new Map();
   const FORCE_REPAINT_BOUNCE_MS = 60;
 
@@ -1353,7 +1366,7 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
   }
 
   function spawn(id, options) {
-    const config = resolveSpawnConfig({ ...options, id, surfaceId: id });
+    const config = resolveSpawnConfig({ ...options, id, surfaceId: id }, { platform });
     if (options?.helper && validHelperOwner(id, options.helper)) {
       helpers.set(id, { parentId: options.helper.parentId, command: options.helper.command });
     } else if (options?.helper) {
@@ -1377,7 +1390,7 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
         // the consumer, letting our protocol parser reply from the active theme —
         // the same passthrough Windows Terminal relies on. Verified end-to-end on
         // Windows. Ignored by node-pty on non-Windows platforms.
-        useConptyDll: process.platform === 'win32',
+        useConptyDll: platform === 'win32',
       });
     } catch (err) {
       console.error(`[pty-core] spawn failed for ${id}:`, err.message);
@@ -1395,19 +1408,35 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
 
     cancelRepaint(id);
     cancelInput(id);
+    // A spawn over a live generation — a cold restore that believed a host
+    // silent through both list asks (`collectLivePtys`) — leaves the old shell
+    // unreachable: nothing can write to it, and its output and exit no longer
+    // speak for the id. Stop it rather than leak it — with node-pty's default
+    // SIGHUP, not the graceful SIGTERM: an interactive bash ignores SIGTERM, and
+    // no later kill can reach a PTY that is no longer in `ptys`.
+    const displaced = ptys.get(id);
     ptys.set(id, p);
+    if (displaced) {
+      console.error(`[pty-core] spawn replaced a live PTY under ${id}; stopping the old one`);
+      try { stopPty(displaced); } catch (error) { console.error(`[pty-core] stopping the displaced PTY under ${id} failed:`, error.message); }
+    }
     const session = { chunks: [], chars: 0, received: 0, shell: config.shell };
     sessions.set(id, session);
     ptyShells.set(id, config.shell);
 
     p.onData((data) => {
+      // A generation replaced under the id never speaks for it, as its exit
+      // does not: its late output would interleave into the Session that
+      // replaced it. Output after its own exit still flows (ConPTY flushes late).
+      const current = ptys.get(id);
+      if (current && current !== p) return;
       // Appended BEFORE the send, and synchronously. Two consumers depend on
       // that order: the replay a reconnecting webview reads, and a Workspace
       // transfer, whose host suppresses this id's output the instant it
       // reassigns ownership and then asks for `list([id])` — so the chunk it
       // suppressed has to already be in the buffer the replay is built from,
       // exactly once (docs/specs/transport.md -> "Transferring a Workspace").
-      if (replay && ptys.get(id) === p) {
+      if (replay && current === p) {
         session.chunks.push(data);
         session.chars += data.length;
         session.received += data.length;
@@ -1518,6 +1547,22 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
     return ptys.has(id);
   }
 
+  // ConPTY closes asynchronously. Calling the pinned addon's native kill twice
+  // before onExit can crash the owner, so graceful shutdown and later cleanup
+  // share a guard keyed by the PTY object (never by a reusable Session id).
+  const closingPtys = new WeakSet();
+  function stopPty(p, graceful = false) {
+    if (platform !== 'win32') {
+      if (graceful) p.kill('SIGTERM');
+      else p.kill();
+      return;
+    }
+    if (closingPtys.has(p)) return;
+    closingPtys.add(p);
+    try { p.kill(); }
+    catch (error) { closingPtys.delete(p); throw error; }
+  }
+
   function kill(id) {
     helpers.delete(id);
     sessions.delete(id);
@@ -1525,7 +1570,7 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
     cancelInput(id);
     const p = ptys.get(id);
     if (p) {
-      p.kill();
+      stopPty(p);
       ptys.delete(id);
       ptyShells.delete(id);
     }
@@ -1535,7 +1580,7 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
     for (const id of repaintTimers.keys()) cancelRepaint(id);
     for (const id of inputs.keys()) cancelInput(id);
     for (const [, p] of ptys) {
-      p.kill();
+      stopPty(p);
     }
     ptys.clear();
     ptyShells.clear();
@@ -1633,8 +1678,10 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
         } else helpers.delete(request.id);
         onHelper(request.id, helpers.has(request.id));
       } else if (request.op === 'openDirectory') {
-        if (typeof request.path !== 'string' || !path.isAbsolute(request.path) || request.path.includes('\0') || !directoryExists(request.path)) throw new Error('Directory is unavailable');
-        const nativePath = fs.realpathSync(request.path);
+        // The resolver is the only thing that touches the path: a `stat` or
+        // `realpath` here would follow a link to a share and reach its host.
+        const nativePath = await canonicalDirectory(request.path);
+        if (!nativePath) throw new Error('Directory is unavailable');
         // Absolute canonical path is one argument; no shell interprets OSC text.
         openNativeDirectory(nativePath, (error) => {
           send('context', { ...result, ...(error ? { error: error.message } : {}) });
@@ -1719,7 +1766,7 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
   }
 
   /**
-   * SIGTERM `ids` and resolve once they have exited.
+   * Stop `ids` with the platform's shutdown request and wait for their exits.
    *
    * Always an explicit set, never a blanket kill: one window of several tears
    * down alone, and killing a sibling's terminals is unrecoverable. The host
@@ -1729,12 +1776,17 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
   function gracefulKill(ids, timeout = 2000, requestId) {
     const done = () => send('gracefulKillDone', { requestId });
     const targets = (Array.isArray(ids) ? ids : []).filter((id) => ptys.has(id));
-    // Nothing live to SIGTERM, but a just-exited PTY can still deliver final
+    // Nothing live to stop, but a just-exited PTY can still deliver final
     // output shortly after onExit (notably under ConPTY). Keep the same single
     // grace tick used after the live map empties before the quit flush runs.
     if (targets.length === 0) { setTimeout(done, 50); return; }
     for (const id of targets) {
-      try { ptys.get(id).kill('SIGTERM'); } catch { /* already dead */ }
+      try {
+        // WindowsTerminal rejects signals (possibly in a deferred callback,
+        // beyond this catch). kill() closes the ConPTY; the pinned addon can
+        // terminate its shell immediately, so this is no flush guarantee.
+        stopPty(ptys.get(id), true);
+      } catch { /* already dead */ }
     }
     // Resolve early once every target has exited (onExit removes it) instead
     // of always sitting out the full timeout — but one grace tick after the last

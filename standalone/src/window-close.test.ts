@@ -106,7 +106,7 @@ describe("per-window close", () => {
   // The webview dies with the close, so the host keeps what Reopen needs
   // (docs/specs/reopen.md); read before the kill empties the Sessions.
   it("hands the host a reopenable window's snapshot before removing and killing", async () => {
-    const snapshot = { version: 1, workspaces: [], activeWorkspaceId: "w9" };
+    const snapshot = { version: 2, workspaces: [], activeWorkspaceId: "w9" };
     mocks.reopenSnapshot.mockReturnValue(snapshot);
     const order: string[] = [];
     mocks.invoke.mockImplementation(async (cmd: string) => void order.push(cmd));

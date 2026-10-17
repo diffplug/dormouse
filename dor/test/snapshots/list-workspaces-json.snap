@@ -3,18 +3,18 @@ stdout:
 {
   "workspaces": [
     {
-      "ref": "workspace:1",
-      "id": "workspace-1",
+      "id": "workspace:1",
       "name": "Workspace 1",
+      "pinned": false,
       "active": true,
       "ringing": false,
       "todo": false,
       "count": 0
     },
     {
-      "ref": "workspace:2",
-      "id": "workspace-2b1c",
+      "id": "workspace:2",
       "name": "build",
+      "pinned": true,
       "active": false,
       "ringing": true,
       "todo": true,

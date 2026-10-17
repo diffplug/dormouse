@@ -6,6 +6,7 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { useWallKeyboard } from './use-wall-keyboard';
 import type { WallKeyboardCtx } from './keyboard/types';
+import { registerProxyOrigin } from '../../lib/iframe-proxy-registry';
 
 vi.mock('./keyboard/handle-editable-clipboard', () => ({ handleEditableClipboard: () => false }));
 
@@ -69,5 +70,53 @@ describe('useWallKeyboard keyup', () => {
     press('keydown', 'x', 'KeyX');
     press('keyup', 'x', 'KeyX');
     expect(released).toEqual(['KeyC', 'KeyX']);
+  });
+});
+
+// A focused cross-origin frame keeps the keyboard, so the proxy shim posts the
+// leader chord out; any page can post the same shape, so only a live proxy
+// grant's origin may end passthrough (docs/specs/security-local.md -> "Browser
+// panes").
+describe('useWallKeyboard leader channel', () => {
+  let root: Root;
+  let ctx: WallKeyboardCtx;
+  let exitTerminalMode: ReturnType<typeof vi.fn>;
+  let unregister: () => void;
+  const PROXY = 'http://127.0.0.1:61234';
+
+  beforeEach(async () => {
+    exitTerminalMode = vi.fn();
+    ctx = { ...makeCtx(), exitTerminalMode } as unknown as WallKeyboardCtx;
+    unregister = registerProxyOrigin(PROXY);
+    function Harness() {
+      useWallKeyboard(ctx);
+      return null;
+    }
+    root = createRoot(document.createElement('div'));
+    await act(async () => root.render(createElement(Harness)));
+  });
+
+  afterEach(async () => {
+    unregister();
+    await act(async () => root.unmount());
+  });
+
+  const leader = (origin: string) =>
+    window.dispatchEvent(new MessageEvent('message', { origin, data: { __dormouse: 'leader' } }));
+
+  it('exits passthrough only for a live proxy origin', () => {
+    for (const origin of ['http://127.0.0.1:61235', 'http://localhost:61234', 'https://evil.example', window.location.origin, 'null']) {
+      leader(origin);
+    }
+    expect(exitTerminalMode).not.toHaveBeenCalled();
+
+    leader(PROXY);
+    expect(exitTerminalMode).toHaveBeenCalledOnce();
+  });
+
+  it('forgets a proxy origin once its grant is released', () => {
+    unregister();
+    leader(PROXY);
+    expect(exitTerminalMode).not.toHaveBeenCalled();
   });
 });

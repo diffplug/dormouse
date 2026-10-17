@@ -1,6 +1,5 @@
 # Your Dormouse user config. On your own machine it lives at
-# ~/.config/dormouse/dormouse.yml; in this playground it is read-only and
-# changes nothing. Both Tools below are made up, to show the shape.
+# ~/.config/dormouse/dormouse.yml; in this playground it changes nothing. Both Tools below are made up, to show the shape.
 
 tools:
   # `dor tool storybook` runs it, then frames whichever port it binds.

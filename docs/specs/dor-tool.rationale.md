@@ -116,10 +116,6 @@ An accepted takeover has already answered the CLI and promised its placement. Sw
 
 **Why the naked test is worth having at all, given `dor send`.** It answers "did a human ask for this *here*", not "is this trustworthy". The discrimination it actually makes is placement: an agent's `dor tool` runs under the agent's own command line, so the pane reports `claude` (or `bash script.sh`) and never matches — which is the whole point, since an agent's tool must not commandeer the pane the human is watching the agent in. Trust is a separate gate with a separate ceremony, and it is the one that carries the security weight.
 
-## Security
-
-Hostile text printed by the designated command can contain an announcement. The current process-tree check limits port selection to that Session's discovered listeners; browser content still executes under the existing renderer boundaries.
-
 ## Persistence and hosts
 
 A Tool may take over a PowerShell Session even while the selected default is Bash, and the selected default may change before restart. Its already-quoted command string cannot safely move between those shells. Retaining resolved argv preserves literal filenames and lets cold restore quote for its actual shell without retaining an obsolete shell executable.
@@ -132,6 +128,14 @@ A Workspace transfer carries the live browser binding separately from its durabl
 
 JSON escaping can double the source length of a valid path, so a field within its own bound can still exceed the serialized payload cap of the host. C1 OSC and ST are literal JSON characters, unlike escaped C0 controls; allowing them in a serve path inserts terminal framing into the emitted sequence.
 
+The `open` gate keys on the host's own launch (2026-10, after a security audit). It first compared the command line the shell reported (`OSC 633;E`) with the Tool's command, but that line is terminal output, the attacker's own channel. A latch only the host's write arms admits nothing output alone can claim. Alternatives considered on 2026-10-07:
+
+- A per-launch nonce in the Tool's environment, echoed in the `open` payload: spawn environment reaches every later command in that shell (as `DORMOUSE_DEHYDRATE` does, [Reaping](#reaping)), a takeover types into a shell already running, which has no PowerShell spelling for a `VAR=value` prefix, and every Tool would have to send it.
+- The PTY's foreground process: node-pty exposes neither the foreground process group nor its pid ([Reaping](#reaping)), and Windows has no equivalent.
+- Keeping the latch in the renderer's terminal state: hosts send a parse's Tool events before its semantic events, so a renderer gate sees state from before the chunk the `open` arrived in, and a webview reload rebuilds that state from replay without the launch. The PTY owner sees every boundary in stream order and outlives the webview.
+
+The reported line is still compared, as a narrowing: without it, a launch the shell swallowed would stay armed until whatever start came next, a command the user typed included. The latch fails closed: a Tool that prints a second shell-integration start (a nested integrated shell) or a prompt sequence ends its own run's opens until its next launch. One window stays: output written between the host's write and the shell's report of that start, which only a process already writing to that terminal can produce, can take the start until the shell's own report ends it.
+
 ## Closing unsaved Tools
 
 Host save request ids restart at 1 on a replacement connection. A completion that reads the current frame connection can therefore acknowledge a new request after reconnect, permitting closure before the new save finishes. The accepted host object distinguishes connection generations even when a reconnect repeats its nonce.
@@ -142,5 +146,5 @@ A retained designation outlived its purpose (2026-10-03): `dor o` took over a pl
 
 Ned chose an end on command exit over an end on the next different command (2026-10-03): an exited Tool has nothing left to present, and the host's own interrupts need one hold anyway to keep them from ringing, so the same hold exempts them here.
 
-Kill stays Kill so it keeps coordinating with the deferred-kill restore window; Break is the separate gesture. Break sits beside the Terminal Context control rather than Kill, and asks for the kill confirmation's letter, since an accidental Break has no rejoin (Ned, 2026-10-03). Break splits into parts rather than stopping the run, because what users reach for is the page's browser chrome and renderer (a Storybook renderer swap, Back), which a plain browser Surface already has; Tool headers keep no navigation ([Pane header](layout.rationale.md)).
+Kill stays Kill so it keeps coordinating with the deferred-kill restore window; Break is the separate gesture. Break asks for the kill confirmation's letter, since an accidental Break has no rejoin (Ned, 2026-10-03). Break splits into parts rather than stopping the run, because what users reach for is the page's browser chrome and renderer (a Storybook renderer swap, Back), which a plain browser Surface already has; Tool headers keep no navigation ([Pane header](layout.rationale.md)).
 

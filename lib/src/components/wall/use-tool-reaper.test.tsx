@@ -8,7 +8,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakePtyAdapter, setPlatform } from '../../lib/platform';
-import { markToolReaped, resetToolReaps } from '../../lib/tool-reap-store';
+import { isToolReaped, markToolReaped, resetToolReaps } from '../../lib/tool-reap-store';
 import { createLathWallEngine, toolLeafMeta, type LathWallEngine } from './lath-wall-engine';
 import { useToolReaper } from './use-tool-reaper';
 import type { DooredItem } from './wall-types';
@@ -17,6 +17,7 @@ const reaper = vi.hoisted(() => ({
   stopTool: vi.fn(async () => true),
   rehydrateTool: vi.fn(() => null),
   toolReapIdleMs: () => 10_000,
+  toolReapBlocker: vi.fn((id: string): string | null => (isToolReaped(id) ? 'already reaped' : null)),
 }));
 vi.mock('./tool-reaper', () => reaper);
 
@@ -126,7 +127,14 @@ describe('useToolReaper', () => {
     expect(reaper.rehydrateTool).toHaveBeenCalledWith(lath, ID);
   });
 
-  it('asks a Tool that declined to stop again next tick, not at once', async () => {
+  it('never starts a stop for a Tool that may not be stopped', () => {
+    reaper.toolReapBlocker.mockReturnValueOnce('a preview slot');
+    render([], false);
+    act(() => { vi.advanceTimersByTime(IDLE_MS); });
+    expect(reaper.stopTool).not.toHaveBeenCalled();
+  });
+
+  it('asks a Tool whose stop fell through again next tick, not at once', async () => {
     // Past a bound the stop never settles, so a regression fails here rather
     // than spinning the microtask queue forever.
     reaper.stopTool.mockImplementation(() =>

@@ -41,7 +41,7 @@ export function stripMouseReportsFromInput(data: string): string {
   return data.replace(MOUSE_REPORT_TOKENS, '');
 }
 
-// Baseline for a dead replay only; a live process still owns its modes. The
+// Baseline for a dead Session's terminal only; a live process still owns its modes. The
 // mouse-encoding resets are parser-only (`terminal.modes` does not expose them).
 // See docs/specs/transport.md §Replay-time mode-reset tail (Dormouse-emitted).
 export const REPLAY_MODE_RESET =

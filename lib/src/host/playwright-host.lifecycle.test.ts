@@ -377,7 +377,8 @@ test('frames reach the viewer as binary, decoded once, their acks paced to ~20 a
     await vi.waitFor(() => expect(handlers.has('Page.screencastFrame')).toBe(true));
     const acks = () => cdp.send.mock.calls.filter(([method]) => method === 'Page.screencastFrameAck');
     const screencastFrame = (n: number) => handlers.get('Page.screencastFrame')!({
-      data: Buffer.from([0xff, 0xd8, n]).toString('base64'), sessionId: n, metadata: { deviceWidth: 640, deviceHeight: 480 },
+      // The metadata measures the window, not the viewport.
+      data: Buffer.from([0xff, 0xd8, n]).toString('base64'), sessionId: n, metadata: { deviceWidth: 500, deviceHeight: 413 },
     });
     screencastFrame(1);
     await vi.waitFor(() => expect(acks()).toHaveLength(1));
@@ -387,7 +388,7 @@ test('frames reach the viewer as binary, decoded once, their acks paced to ~20 a
     // Chrome sends the next frame only once this one is acknowledged.
     expect(Date.now() - start).toBeGreaterThanOrEqual(40);
     await vi.waitFor(() => expect(viewer.frames.length).toBeGreaterThan(0));
-    expect(viewer.frames[0]).toMatchObject({ kind: 'provisional', size: { width: 640, height: 480 } });
+    expect(viewer.frames[0]).toMatchObject({ kind: 'provisional', size: { width: 640, height: 480 }, windowWidth: 500 });
     expect([...viewer.frames[0].jpeg]).toEqual([0xff, 0xd8, 1]);
     // A capture makes Chrome send the frame it last sent again: acknowledged,
     // never forwarded, so it pulses no capture of its own.

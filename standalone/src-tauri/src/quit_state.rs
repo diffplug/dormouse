@@ -223,6 +223,11 @@ impl QuitMachine {
         (self.seq, vec![QuitAction::RequestAll { requester: self.intent.requester.clone() }])
     }
 
+    /// No quit is under way: not voting, not walking, not approved to exit.
+    pub fn idle(&self) -> bool {
+        self.phase == QuitPhase::Idle && !self.approved
+    }
+
     pub fn intent(&self) -> &QuitIntent {
         &self.intent
     }

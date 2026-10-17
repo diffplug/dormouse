@@ -30,9 +30,10 @@ import { isLoopbackHost } from './loopback-guard';
 
 /** What a provider pushes to one viewer of a live browser. */
 export interface ViewerSink {
-  /** A screencast frame that differs from the last one: its JPEG, and the
-   *  viewport's CSS size when the provider knows it. */
-  frame(jpeg: Uint8Array, size?: { width: number; height: number }): void;
+  /** A screencast frame that differs from the last one: its JPEG, and when
+   *  the provider knows them, the viewport's CSS size and the CSS width of
+   *  the window the frame shows. */
+  frame(jpeg: Uint8Array, size?: ViewportSize, windowWidth?: number): void;
   /** A state change. */
   state(message: ViewerState): void;
   /** The browser went away on its own — its window closed, its daemon or
@@ -291,7 +292,7 @@ export class BrowserView implements ViewerSink {
 
   // --- the provider's sink ---
 
-  frame(jpeg: Uint8Array, size?: { width: number; height: number }): void {
+  frame(jpeg: Uint8Array, size?: ViewportSize, windowWidth?: number): void {
     if (this.closed || this.deps.headed) return;
     this.stats.framesIn += 1;
     if (size) this.size = size;
@@ -301,7 +302,7 @@ export class BrowserView implements ViewerSink {
     // In motion, a frame is newer than any capture already running.
     const forInput = !this.last || !this.capturable || now <= this.provisionalUntil() || this.moving(now);
     if (forInput || this.captureOverdue(now)) {
-      this.send('provisional', jpeg);
+      this.send('provisional', jpeg, windowWidth);
       if (forInput) this.provisionalGeneration += 1;
     }
     if (this.capturable) this.pulse();
@@ -361,10 +362,10 @@ export class BrowserView implements ViewerSink {
     if (this.upstream && !this.upstream.input(message)) this.close(1008, 'Input backlog exceeded');
   }
 
-  private send(kind: ViewerFrameKind, jpeg: Uint8Array): void {
+  private send(kind: ViewerFrameKind, jpeg: Uint8Array, windowWidth?: number): void {
     if (this.socket.readyState !== WebSocket.OPEN) return;
     if (kind === 'provisional' && this.socket.bufferedAmount > FRAME_BACKLOG_BYTES) return;
-    const message = encodeViewerFrame({ kind, jpeg, ...(this.size ? { size: this.size } : {}) });
+    const message = encodeViewerFrame({ kind, jpeg, ...(this.size ? { size: this.size } : {}), ...(windowWidth ? { windowWidth } : {}) });
     this.last = { kind, jpeg, message };
     this.stats[kind] += 1;
     this.transmit(message);

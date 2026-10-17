@@ -4,11 +4,11 @@
 
 ## Fork pipeline
 
-**Why the peer dependency, not the `-sdfNNN` counter, records the fork base.** Upstream restarts the beta counter on each release line (`5.6.0-beta.1..143`, then `6.1.0-beta.1..302`), so a counter alone does not say which line it came from; only the tarball's `peerDependencies['@xterm/xterm']` names a full version. Fork releases carry that field as of `0.20.0-sdf301.1`; `scripts/xterm-lint.mjs` check 1 reads it. The tag/filename check is cheaper, catching only a URL whose three parts disagree.
+**Why the peer dependency, not the `-sdfNNN` counter, records the fork base.** Upstream restarts the beta counter on each release line (`5.6.0-beta.1..143`, then `6.1.0-beta.1..302`), so a counter alone does not say which line it came from; only the tarball's `peerDependencies['@xterm/xterm']` names a full version.
 
 **Why release assets rather than a registry.** GitHub Packages requires auth even for public reads; release assets do not, so a tarball URL installs with no token in a clean checkout or in CI.
 
-**Why "latest of each" is routinely two commits.** Each addon's peer range is exactly `^<the core version published from the same commit>`, and `^6.1.0-beta.301` happily admits `6.1.0-beta.302`, so npm and pnpm say nothing about the mismatch — while the addons compile against core internals, so it is real. Equality of the peer range against the core pin is the check; `semver.satisfies` would not catch it.
+**Why "latest of each" is routinely two commits.** Each addon's peer range is exactly `^<the core version published from the same commit>`, and `^6.1.0-beta.301` happily admits `6.1.0-beta.302`, so npm and pnpm say nothing about the mismatch — while the addons compile against core internals, so it is real.
 
 ## Following upstream
 

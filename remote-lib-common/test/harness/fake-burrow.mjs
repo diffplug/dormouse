@@ -5,9 +5,12 @@
  * over the same shared primitives — invitations and the pairing IK responder,
  * `verifyPresenceProof`, the reverse two-digit confirmation, `BurrowAcl`, the
  * connection responder with its `ChallengeIssuer` payload, and the
- * four-way ACL conjunction — so a test cannot pass against behavior the real
- * Burrow lacks. Everything is in memory, so a fresh instance (reconnecting with
- * the same token) models a Burrow restart: its ACL starts empty again.
+ * four-way ACL conjunction, and the presence window a verified proof opens,
+ * offered at message 2 and redeemed as offered — so a test cannot pass against
+ * behavior the real Burrow lacks. As there, a window counts a live session's
+ * last Client message at each offer and folds it in when the session ends.
+ * Everything is in memory, so a fresh instance (reconnecting with the same
+ * token) models a Burrow restart: its ACL and windows start empty again.
  *
  * Constructor: `{ relayUrl, burrowToken, burrowId, origin, rpId, label,
  * autoApprove, requireUserVerification, noiseStaticKeyPair, directOnly, socket,
@@ -32,6 +35,8 @@ import {
   ChallengeIssuer,
   MAX_TOKENS_PER_BURROW,
   NoiseTransportSession,
+  PRESENCE_WINDOW,
+  PresenceWindows,
   REMOTE_EVENTS,
   REMOTE_METHODS,
   SESSION_END_V1,
@@ -42,6 +47,7 @@ import {
   constantTimeEqual,
   createNoiseResponder,
   e2eConnectionPrologue,
+  encodeConnectionMessage2,
   formatInvitationExpiry,
   fromBase64Url,
   generateNoiseKeyPair,
@@ -91,6 +97,8 @@ export class FakeBurrow extends EventEmitter {
     this.policy = { rpId, origin, requireUserVerification };
     this.acl = new BurrowAcl(burrowId);
     this.challenges = new ChallengeIssuer();
+    /** Client static → the presence window a verified proof opened. */
+    this.windows = new PresenceWindows();
     /** inviteId → `{ invitation, keyPair, expiresAt, state }`; the key lives only here. */
     this.invitations = new Map();
     /** clientId → `{ pairing?, connection?, established? }`, so teardown is one delete. */
@@ -235,7 +243,25 @@ export class FakeBurrow extends EventEmitter {
     const state = this.clients.get(clientId);
     if (!state) return;
     if (state.pairing) this.#retireInvitation(state.pairing.id, 'consumed');
+    this.#clearEstablished(state);
     this.clients.delete(clientId);
+  }
+
+  /** Drop a client's session, folding its last Client activity into its window. */
+  #clearEstablished(state) {
+    if (!state.established) return;
+    const { clientStaticPublicKey, lastClientActivityAt } = state.established;
+    this.windows.noteActivity(clientStaticPublicKey, lastClientActivityAt);
+    state.established = undefined;
+  }
+
+  /** The open window for a Client static, a live session's activity folded in first. */
+  #openWindow(clientStaticPublicKey) {
+    for (const { established } of this.clients.values()) {
+      if (established?.clientStaticPublicKey !== clientStaticPublicKey) continue;
+      this.windows.noteActivity(clientStaticPublicKey, established.lastClientActivityAt);
+    }
+    return this.windows.open(clientStaticPublicKey);
   }
 
   async #onE2e(frame) {
@@ -400,6 +426,7 @@ export class FakeBurrow extends EventEmitter {
       passkeyPublicKeyHash: proof.passkeyPublicKeyHash,
       // Attacker-chosen free text rendered in the one dialog the ACL rests on.
       label: boundedPairingLabel(request.label),
+      verifiedAt: Date.now(),
     };
     this.emit('pairing-request', { clientId: frame.clientId, label: pending.approval.label });
     // The person at the Burrow types what the phone displays; auto-approval types
@@ -430,6 +457,7 @@ export class FakeBurrow extends EventEmitter {
       approvedBy: 'burrow-user',
       label: pending.approval.label,
     });
+    this.windows.seed(pending.clientStaticPublicKey, record, pending.approval.verifiedAt);
     this.emit('paired', { clientId, record });
     this.#sendControl(pending, {
       ok: true,
@@ -476,8 +504,8 @@ export class FakeBurrow extends EventEmitter {
 
   /**
    * Noise message 1 against the long-term static. Message 2's payload is the
-   * fresh 32-byte challenge the presence proof must bind to, so completing the
-   * handshake proves both statics and authorizes nothing.
+   * fresh challenge the presence proof must bind to and the window offer, so
+   * completing the handshake proves both statics and authorizes nothing.
    */
   async #onConnectionInit(frame) {
     if (!this.noiseStaticKeyPair) {
@@ -498,12 +526,15 @@ export class FakeBurrow extends EventEmitter {
       });
       const payload = await handshake.readMessage(fromBase64Url(frame.ct));
       if (payload.length !== 0) throw new Error('connection message 1 carries a payload');
+      const remoteStatic = handshake.remoteStaticPublicKey;
+      if (!remoteStatic) throw new Error('IK did not authenticate a Client static');
+      const clientStaticPublicKey = toBase64Url(remoteStatic);
       // Issued only once message 1 has decrypted, as `BurrowRuntime` does: nothing
       // but its own TTL reclaims a challenge.
       const { challenge, expiresAt } = this.challenges.issue();
-      const message2 = await handshake.writeMessage(fromBase64Url(challenge));
-      const remoteStatic = handshake.remoteStaticPublicKey;
-      if (!remoteStatic) throw new Error('IK did not authenticate a Client static');
+      const offer = this.#openWindow(clientStaticPublicKey);
+      const payload2 = encodeConnectionMessage2(fromBase64Url(challenge), offer ? PRESENCE_WINDOW : 'none');
+      const message2 = await handshake.writeMessage(payload2);
       const session = new NoiseTransportSession(handshake.session);
       entry = {
         clientId: frame.clientId,
@@ -511,10 +542,13 @@ export class FakeBurrow extends EventEmitter {
         id: frame.id,
         session,
         handshakeHash: toBase64Url(session.handshakeHash),
-        clientStaticPublicKey: toBase64Url(remoteStatic),
-        burrowChallenge: challenge,
+        clientStaticPublicKey,
+        challenge,
+        boundChallenge: toBase64Url(payload2),
         expiresAt,
         message2,
+        // Binding: a redeem rides this entry and evaluates no window again.
+        offer,
       };
     } catch (error) {
       // Failures before `Split` yield only a generic outer error: there is no
@@ -580,31 +614,39 @@ export class FakeBurrow extends EventEmitter {
       this.#denyConnection(frame.clientId, pending, 'protocol-rejected', 'malformed-request');
       return;
     }
-    const request = receipt.value;
+    const { presence } = receipt.value;
     // Consumed before any other work, so a challenge can never be presented
-    // twice whatever the rest of this decision does.
-    const challengeValid = this.challenges.consume(pending.burrowChallenge);
-    const binding = {
-      kind: 'connection',
-      burrowId: this.burrowId,
-      connectionId: pending.id,
-      burrowChallenge: pending.burrowChallenge,
-      handshakeHash: pending.handshakeHash,
-      passkeyCredentialId: request.presence.binding.passkeyCredentialId,
-    };
-    const proof = await verifyPresenceProof(request.presence, binding, this.policy);
-    if (this.clients.get(frame.clientId)?.connection !== pending) return;
-    if (!challengeValid || !proof.ok) {
-      this.#denyConnection(
-        frame.clientId,
-        pending,
-        'presence-rejected',
-        challengeValid ? proof.reason : 'challenge-invalid',
-      );
-      return;
+    // twice whatever the rest of this decision does — a window ride included.
+    const challengeValid = this.challenges.consume(pending.challenge);
+    const reject = (why) => this.#denyConnection(frame.clientId, pending, 'presence-rejected', why);
+    // Who the presence speaks for: the identities the offered window was
+    // opened for, or a proof's verified ones.
+    let presented;
+    if (presence === PRESENCE_WINDOW) {
+      if (!challengeValid) return reject('challenge-invalid');
+      if (!pending.offer) return reject('no-window-offered');
+      presented = pending.offer;
+    } else {
+      const binding = {
+        kind: 'connection',
+        burrowId: this.burrowId,
+        connectionId: pending.id,
+        burrowChallenge: pending.boundChallenge,
+        handshakeHash: pending.handshakeHash,
+        passkeyCredentialId: presence.binding.passkeyCredentialId,
+      };
+      const proof = await verifyPresenceProof(presence, binding, this.policy);
+      if (this.clients.get(frame.clientId)?.connection !== pending) return;
+      if (!challengeValid) return reject('challenge-invalid');
+      if (!proof.ok) return reject(proof.reason);
+      presented = {
+        accountId: presence.accountId,
+        passkeyCredentialId: binding.passkeyCredentialId,
+        passkeyPublicKeyHash: proof.passkeyPublicKeyHash,
+      };
     }
     const authorization = this.acl.authorize({
-      passkeyCredentialId: binding.passkeyCredentialId,
+      passkeyCredentialId: presented.passkeyCredentialId,
       clientStaticPublicKey: pending.clientStaticPublicKey,
     });
     // One record must hold all four identities. Which one failed is owner-local
@@ -613,15 +655,17 @@ export class FakeBurrow extends EventEmitter {
     const miss =
       record === null
         ? authorization.reasons.join(',')
-        : record.accountId !== request.presence.accountId
+        : record.accountId !== presented.accountId
           ? 'account-mismatch'
-          : record.passkeyPublicKeyHash !== proof.passkeyPublicKeyHash
+          : record.passkeyPublicKeyHash !== presented.passkeyPublicKeyHash
             ? 'passkey-key-mismatch'
             : null;
     if (miss !== null) {
       this.#denyConnection(frame.clientId, pending, 'pairing-required', miss);
       return;
     }
+    // Only a proof opens or refreshes a window; riding one never does.
+    if (presence !== PRESENCE_WINDOW) this.windows.seed(pending.clientStaticPublicKey, record, Date.now());
     this.#promoteConnection(frame.clientId, pending, record);
   }
 
@@ -629,6 +673,9 @@ export class FakeBurrow extends EventEmitter {
   #promoteConnection(clientId, pending, record) {
     const state = this.#clientState(clientId);
     state.connection = undefined;
+    this.#clearEstablished(state);
+    // Promotion is the session's first Client activity.
+    pending.lastClientActivityAt = Date.now();
     state.established = pending;
     this.#sendControl(pending, {
       ok: true,
@@ -658,18 +705,21 @@ export class FakeBurrow extends EventEmitter {
       return;
     }
     this.emit('e2e-receive', { clientId, kind: 'connection', id: frame.id, receipt, entry: established });
-    if (receipt.kind !== 'app') return;
-    // Every frame here crossed the relay: a direct-only session ends unread.
-    if (this.directOnly) {
+    // Every frame here crossed the relay: a direct-only session ends unread,
+    // and the message that ended it is no activity.
+    if (receipt.kind === 'app' && this.directOnly) {
       this.#sendControl(established, { ...SESSION_END_V1 });
       const state = this.clients.get(clientId);
       if (state?.established === established) {
-        state.established = undefined;
+        this.#clearEstablished(state);
         this.#pruneClient(clientId);
       }
       this.emit('relayed-app', { clientId, id: frame.id });
       return;
     }
+    // Any other decrypted Client message, a keepalive included, is activity.
+    established.lastClientActivityAt = Date.now();
+    if (receipt.kind !== 'app') return;
     const send = (payload) => {
       for (const ciphertext of established.session.sendApp(utf8Encode(JSON.stringify(payload)))) {
         this.e2eSendCiphertext(established, ciphertext);

@@ -208,6 +208,11 @@ export class Ranker {
     this.schedule();
   }
 
+  /** One bounded slice now, so a frame drawn right away shows matches. */
+  seed(): void {
+    if (this.scanning) this.step(SLICE_MS);
+  }
+
   /** Ranks everything listed so far, now: Enter opens what is best. */
   flush(): void {
     this.step(Infinity);

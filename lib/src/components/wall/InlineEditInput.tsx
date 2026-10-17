@@ -1,6 +1,9 @@
 import { useCallback, useRef, useState } from 'react';
 import { isComposingKey } from '../../lib/dom';
 
+/** Past a fitted draft's last character, for the caret. */
+const CARET_ROOM_PX = 2;
+
 interface InlineEditInputProps {
   /** Seed value, read once at mount. Later changes are ignored — the field
    *  belongs to the user from the moment it opens. */
@@ -19,6 +22,11 @@ interface InlineEditInputProps {
    *  it was untouched, since the seed is read once and the caller's value may
    *  have moved since. */
   submitUntouched?: boolean;
+  /** Size the field to its draft, in `ch` — exact only in a monospace font —
+   *  rather than the browser's default 20 characters. It keeps room for the
+   *  caret past the last character: WebKit scrolls a field whose caret would
+   *  touch its edge, clipping the first letter. */
+  fitDraft?: boolean;
   [key: `data-${string}`]: string;
 }
 
@@ -44,6 +52,7 @@ export function InlineEditInput({
   onCancel,
   blurAction,
   submitUntouched = true,
+  fitDraft = false,
   ...dataAttrs
 }: InlineEditInputProps) {
   const [draft, setDraft] = useState(initialValue);
@@ -62,6 +71,7 @@ export function InlineEditInput({
     <input
       {...dataAttrs}
       className={className}
+      style={fitDraft ? { width: `calc(${Math.max(1, [...draft].length)}ch + ${CARET_ROOM_PX}px)` } : undefined}
       value={draft}
       autoFocus
       ref={selectOnMount}

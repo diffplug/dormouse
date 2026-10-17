@@ -13,6 +13,7 @@ import { TutDetector } from "../lib/tut-detector";
 import { TutRunner } from "../lib/tut-runner";
 import { POCKET_TUTORIAL_PROFILE } from "../lib/tut-items";
 import { ChangelogRunner } from "../lib/changelog-runner";
+import { startAlertProgram } from "../lib/alert-programs";
 import { useRestoredTheme } from "dormouse-lib/lib/themes";
 
 import { WEBSITE_DEFAULT_THEME_ID } from "../lib/website-theme";
@@ -169,7 +170,7 @@ export function PocketTerminalExperience({
           if (name === "changelog") {
             return new ChangelogRunner({ adapter, terminalId, onExit });
           }
-          return null;
+          return startAlertProgram(name, args, (data) => adapter.sendOutput(terminalId, data), onExit);
         },
       );
       shellRegistryRef.current = shellRegistry;

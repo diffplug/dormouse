@@ -201,10 +201,13 @@ function wirePtyEvents(id: string, terminal: Terminal): () => void {
   const handleExit = (detail: { id: string; exitCode: number }) => {
     // A reaped Tool's kill is not news (`reapTerminal`).
     if (detail.id !== id || isToolReaped(id)) return;
+    const entry = registry.get(id);
+    // Nothing owns the modes a dead program left, so the pane resets them now,
+    // as a reload's dead replay would, and the notice lands on the main screen.
+    if (entry) writeReplay(entry, REPLAY_MODE_RESET);
     terminal.write(`\r\n[Process exited with code ${detail.exitCode}]\r\n`);
     // The PTY process is dead but the pane lingers in the registry; mark it so
     // the directory reports this surface as `alive: false` to the phone.
-    const entry = registry.get(id);
     if (entry) entry.exited = true;
     // The process is gone, so any command we seeded for this pane is no longer
     // live; clear it so `dor ensure` stops matching a dead surface.
@@ -372,17 +375,17 @@ function typeCommandWhenPromptReady(id: string, command: string, requireIntegrat
     const ready = requireIntegration
       ? isPaneOscDriven(id)
       : getTerminalPaneState(id).currentCommand === null;
+    const type = () => {
+      seedLaunchedCommand(id, command);
+      getPlatform().writePty(id, `${command}\r`, { launch: true });
+    };
     if (ready) {
       clearInterval(timer);
-      seedLaunchedCommand(id, command);
-      getPlatform().writePty(id, `${command}\r`);
+      type();
     } else if ((elapsed += LAUNCH_PROMPT_POLL_MS) >= timeoutMs) {
       clearInterval(timer);
       // Best effort for split; drop for ensure (the handler kills + errors).
-      if (!requireIntegration) {
-        seedLaunchedCommand(id, command);
-        getPlatform().writePty(id, `${command}\r`);
-      }
+      if (!requireIntegration) type();
     }
   }, LAUNCH_PROMPT_POLL_MS);
 }
@@ -632,8 +635,7 @@ export function flushTerminal(id: string): Promise<void> {
 }
 
 /** Where a hidden helper's xterm element waits between reveals: still in the
- *  document, preserving its DOM state and scrollback
- *  (docs/specs/terminal-context.md → Helper lifecycle). */
+ *  document, preserving its DOM state and scrollback. */
 let helperParking: HTMLElement | null = null;
 
 /** Park a helper Session's element out of sight without terminating anything;

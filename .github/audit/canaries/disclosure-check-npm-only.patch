@@ -1,0 +1,23 @@
+Domain: supply-chain
+Rule: `docs/specs/security-supply-chain.md` -> "Disclosure" #2 — or stops failing on a diff
+Expect: .github/workflows/ci.yml
+Source: synthetic; the CI disclosure check diffs the npm snapshot alone, so a stale Cargo or runtime snapshot passes
+
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index 59915b492..47f147ce4 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -41,9 +41,11 @@ jobs:
+       - name: Dependency disclosure is current
+         run: |
+           node website/scripts/generate-deps.js
+-          if ! git diff --quiet -- website/src/data/; then
++          # The npm table is the one a dependency bump changes; the Cargo and
++          # runtime snapshots are regenerated with each release.
++          if ! git diff --quiet -- website/src/data/dependencies-npm.json; then
+             echo "::error::The disclosed dependency snapshots are stale. Run \`node website/scripts/generate-deps.js\` and commit the result."
+-            git --no-pager diff -- website/src/data/
++            git --no-pager diff -- website/src/data/dependencies-npm.json
+             exit 1
+           fi
+ 

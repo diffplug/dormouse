@@ -50,7 +50,7 @@ export function canonicalRemoteUrl(raw: string): string | null {
   // A URL with no host (`https:///x`) would collapse every remote onto one key.
   if (!url.hostname) return null;
 
-  // Userinfo is a credential, not identity: `git@github.com/x/y` and
+  // Userinfo is a credential, not identity: `git@github.com:x/y` and
   // `https://github.com/x/y` are the same remote and must share a grant.
   // Query and fragment are meaningless on a git remote and are dropped so they
   // cannot be used to mint distinct keys for one destination.

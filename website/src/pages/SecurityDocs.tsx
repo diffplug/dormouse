@@ -5,9 +5,11 @@
  * `scripts/spec-lint.mjs` and read by the nightly audit that runs against it.
  * The generator's delta withholds only the `#` title and the front matter; see
  * docs/specs/website-docs.md -> `/security` spec. The page renders
- * `pageBlocks`, so the guarantees table and the two lists carry this audience's
- * entries only — the other two are on `/self-host` and `/supply-chain`,
- * and the spec file on GitHub is where every entry appears together.
+ * `pageBlocks`, so the guarantees table and the two lists carry the local
+ * application's, the pipeline's, and remote control's entries — the
+ * supply-chain ones are on `/supply-chain`, remote control's also on
+ * `/self-host`, and the spec file on GitHub is where every entry appears
+ * together.
  */
 import { type MetaArgs } from "react-router";
 import { siteMeta, sitePath } from "../lib/site-meta";
@@ -37,8 +39,8 @@ export default function SecurityDocs() {
       <p className={`mb-8 ${NOTE_CLASS} ${NOTE_MUTED_TEXT_CLASS}`}>
         This page is the spec the audit runs against, published from the
         repository — not a summary of one. It shows the guarantees for the
-        local application and the release pipeline; remote control and
-        self-hosting are on the{" "}
+        local application, remote control, and the release pipeline; running
+        your own Relay is on the{" "}
         <a href={sitePath("/self-host")} className={LINK_CLASS}>
           self-host runbook
         </a>

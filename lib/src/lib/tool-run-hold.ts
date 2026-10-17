@@ -1,9 +1,9 @@
 /**
- * Host holds (`docs/specs/dor-tool.md` -> Run end): the host interrupting a
- * Session's run to start its successor — an in-place restart, a preview
- * retarget, a reap's stop — so that run's end is no news. One hold silences
- * the run's command-exit alert and keeps a Tool designated until a successor
- * run starts, or finishes on boot, or the host has given up.
+ * Host holds: the host interrupting a Session's run to start its successor —
+ * an in-place restart, a preview retarget, a reap's stop — so that run's end
+ * is no news. One hold silences the run's command-exit alert and keeps a Tool
+ * designated until a successor run starts, or finishes on boot, or the host
+ * has given up.
  *
  * Module scope, like the other Tool stores, so a Surface moved between Walls
  * keeps its hold.

@@ -13,6 +13,12 @@ import type { ManagedVoiceStatus } from '../../lib/src/lib/platform/managed-voic
 
 type ManagedVoiceModule = typeof import('../src/managed-voice');
 
+// A stock Hosted build: the test runner bakes no define, which reads as self-host.
+vi.mock('../../lib/src/host/relay-origin', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../lib/src/host/relay-origin')>();
+  return { ...actual, bakedRelay: () => ({ origin: actual.DEFAULT_RELAY_ORIGIN, mode: 'hosted' }) };
+});
+
 const TOKEN = `dmv_${'A'.repeat(43)}`;
 
 /** One `SecretStorage` every window shares, firing `onDidChange` in all of them. */

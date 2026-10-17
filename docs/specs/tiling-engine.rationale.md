@@ -16,10 +16,6 @@ Lath replaced dockview-react, whose broader model charged five taxes:
 
 **Dormouse already kept a shadow model.** DOM neighbor inspection, layout snapshots carrying structure signatures, and spatial navigation doing rect math over group elements — the app continuously re-derived the tree dockview owned but did not usefully share. Lath's pure `neighbors()` / `layout()` queries replaced that DOM math.
 
-## Operations
-
-**Why speculative evaluation is free.** Every op is a pure function over an immutable tree: running one and laying out the result costs no commit, no notify, no cleanup, and the discarded tree is garbage. Under an engine that mutated in place, both the per-frame sash re-layout and the preview-that-is-the-committed-rect would have needed a snapshot-and-rollback dance.
-
 ## Hierarchical drag and drop
 
 **Flexible scopes without a new tree format.** A flat row already models any number of children. The missing expression was a temporary rectangle spanning adjacent children: forcing that group into the stored tree conflicts with same-direction flattening. A child range captures the drop scope without making split history observable. Removing a pane can dissolve an old subtree into siblings; resolving the entire surviving leaf set retains the chosen rectangle.
@@ -38,28 +34,10 @@ Unbounded parking preserves unsaved iframe state; a ninth minimized browser prev
 
 **Why a parked leaf holds its rect instead of hiding cheaply.** Sizing it to zero — or `display: none` — reports a 0×0 viewport to the guest document, so the guest reflows on the way out and again on the way back; a screencast canvas and an `<iframe>`'s layout both visibly re-settle. Holding the last rect behind `visibility: hidden` skips both reflows, making reattach pixel-identical rather than merely fast.
 
-**Why the parked rect lives in the store, not the adapter.** React detaches a ref callback whenever its identity changes, and on every StrictMode commit, so adapter-local pruning keyed on `registerEl(null)` fired constantly and silently dropped every parked rect, leaving reattach on the whole-wall fallback.
-
-**Why `seed` admits by tree membership.** Hydration passes the persisted Door rows alongside the tree's leaves, so a parked id appears in `seed`'s input while deliberately absent from the tree. Admitting on that metadata would unpark it — unmounting the very DOM the park exists to preserve — at the one moment the user expects the minimized `<iframe>` to still be warm.
-
-**Why every metadata reader funnels through `lath.getMeta(id)`.** The readers spread across reattach, `dor` param lookup, kill/session teardown, `buildDorSurfaces`, `dor list`, the dev-server port scan, and the session save: a Door record with its own copy of title/params would have to be updated by all of them or go stale in one. Routing them through the single map makes "is it Doored?" a question about the tree alone.
-
-## The wall store and engine
-
-**Who reads `listPanes()`.** `buildDorSurfaces`, the kill selection tail, the session save, and the dev-server port correlation — every one of them treats the result as "the panes the user can see".
-
-**Why a zero-area geometry report is rejected instead of stored.** `autoEdge` on a 0×0 rect finds every split taller-than-wide and answers `'bottom'`, so a seed reading that geometry stacks every pane vertically. Refusing the report leaves the reader on the `!geometry` path, whose fallback is `'right'` — arbitrary rather than systematically wrong, and self-correcting on the first real measurement.
-
-## The HTML adapter (LathHost)
-
-**Why geometry is reported from the measuring layout effect.** The Wall's seed runs in a passive effect and reads the reported geometry through `addLeaf`'s `autoEdge`. Passive effects run after paint and after children's passive effects, so a passive-effect report is still one commit behind at seed time; the observed symptom was geometry stuck at the mount-time 0×0, with the vertical-stack seed described under "The wall store and engine". A layout effect runs children-first before paint, putting the real measured rect in the store on the same commit the seed reads it.
+**Why every metadata reader funnels through `lath.getMeta(id)`.** Metadata readers span several modules: a Door record with its own copy of title/params would have to be updated by every one of them or go stale in one. Routing them through the single map makes "is it Doored?" a question about the tree alone.
 
 ## Animation
 
 **Why a rate must come from `slope(t)`.** Differencing successive `framesAt` samples reports a velocity one frame stale, and nothing at all on the first frame, where there is no previous sample — exactly the frame a follower needs to start moving with the thing it follows. `Easing.slope(t)` is analytic, so it answers at `t = 0`.
 
 **Why a parked leaf's held rect outranks an explicit enter hint.** An enter hint is cosmetic — which boundary a new leaf grows from. A re-admitted parked leaf is a live document that has been laying out at the held rect the whole time it was Doored, so starting it collapsed against an edge would force the guest through the reflow the park exists to avoid.
-
-**Why the surface ref is forgotten only after the removal commits.** A fading leaf is still in `listPanes()` for the length of the exit animation, so a `dor` projection built in that window would re-mint a ref for it — an early delete would not stick, leaving projection and tree disagreeing until the next commit.
-
-**Why a no-deps layout effect re-asserts the current frames.** Animator frames are applied imperatively to the leaf divs, while React independently keeps rendering each div at its *target* geometry, so any unrelated commit mid-tween rewrites the inline styles back to the target and snaps the animation. Re-asserting after every commit costs one style write and removes the whole class of "some other state change made the tween jump."

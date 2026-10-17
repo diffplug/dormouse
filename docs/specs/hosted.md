@@ -9,21 +9,23 @@
 
 | Worker | Origin | Serves | Holds |
 |---|---|---|---|
-| `dormouse-hosted` | `https://hosted.dormouse.sh` | the account frontend, `/api/auth/*`, `/api/providers`, `/api/ready`, voice tokens, the Relay's account routes ("Burrow enrollment") | the login cookie, auth secrets, Hyperdrive, the approval rate limit, a binding to the relay's `RelayRoom` |
+| `dormouse-hosted` | `https://hosted.dormouse.sh` | the account frontend, `/api/auth/*`, `/api/providers`, voice tokens, the Relay's account routes ("Burrow enrollment") | the login cookie, auth secrets, Hyperdrive, the approval rate limit, a binding to the relay's `RelayRoom` |
 | `dormouse-relay` | `https://relay.dormouse.sh` | the Hosted Relay, its sockets, and Pocket ("Relay", "Relay sockets"), the one-time rendezvous and `/connect/` (`docs/specs/one-time.md` -> "Hosted rendezvous") | Hyperdrive, `OneTimeRoom`, `RelayRoom`, the one-time, sign-in, setup, and enrollment rate limits, `ACCOUNT_ORIGIN`, `RELAY_ENROLL_SECRET`, the VAPID pair |
 | `dormouse-voice` | `https://voice.dormouse.sh` | speak and the history sweep ("Managed voice") | `ELEVENLABS_API_KEY`, Hyperdrive |
 
-Every Worker answers `/api/health`, 404s anything else under its non-page prefixes (`/api`, and the relay's `/ws` too), `/dev/*`, or `/__test/*`, and answers a thrown request 503 under `secureHeaders`. The account falls back to its SPA assets, the relay to Pocket's. Origin and binding isolation: `docs/specs/security-hosted.md` -> "Origin boundary" (rationale).
+Every Worker answers `/api/health` and `/api/ready`, 404s anything else under its non-page prefixes (`/api`, and the relay's `/ws` too), `/dev/*`, or `/__test/*`, and answers a thrown request 503 under `secureHeaders`. `/api/ready` answers 200 once a query its role must be granted runs through its Hyperdrive, else a bare 503; it reads no row and has no rate limit. The account falls back to its SPA assets, the relay to Pocket's. Origin and binding isolation: `docs/specs/security-hosted.md` -> "Origin boundary" (rationale).
 
-**Must run committed Better Auth migrations before deploying code that needs them, never during a Worker request.** Postgres is reached through an uncached Hyperdrive binding.
+**Must keep serving `/account` on the account origin**: every desktop since v1.2.0 opens it by a hard-coded path.
 
-**Must grant `dormouse_relay` and `dormouse_voice` only what `hosted/server/runtime-roles.sql` lists, never default privileges**, so a new table needs a grant there; each reaches only its Worker's tables and the entitlement's user columns, and the relay inserts a sign-in's voice token ("Managed voice"). Both Workers still bind the account's role (`docs/specs/security.md` -> "Known gaps").
+**Must run committed Better Auth migrations before deploying code that needs them, never during a Worker request.** Postgres is reached through an uncached Hyperdrive binding, one per Worker.
+
+**Must grant `dormouse_relay` and `dormouse_voice` only what `hosted/server/runtime-roles.sql` lists, never default privileges**, so a new table needs a grant there; each reaches only its Worker's tables and the entitlement's user columns, and the relay inserts a sign-in's voice token ("Managed voice"). **Must bind each production Worker to its own Hyperdrive connecting as its role**: account `dormouse_app`, relay `dormouse_relay`, voice `dormouse_voice` (`PRODUCTION` in `hosted/scripts/production.mjs`).
 
 **Must install released core/auth packages from npm and commit their lockfile integrity hashes.** The installed packages' `dist/provenance.json` must name the same clean pgstencil commit; no runtime import depends on a sibling checkout. The auth migrations remain owned by the package; Dormouse's own tables migrate from `hosted/server/dormouse-migrations/`. **Never edit a merged migration**: a migrated database never reruns one, so append the next number (pinned by `hosted/server/tests/migrations.test.ts`).
 
 **Must declare every peer dependency of the installed packages in `hosted/package.json`**, so they share Hosted's copy and Renovate updates them.
 
-Source of truth: `WORKERS` in `hosted/scripts/workers.mjs`; `workerApp` in `hosted/server/worker-app.ts`; `hosted/server/bindings.ts`; `hosted/wrangler.jsonc`, `hosted/wrangler.relay.jsonc`, `hosted/wrangler.voice.jsonc`; `verifyPackages` in `hosted/scripts/production.mjs`; `hosted/server/runtime-roles.sql`. Pinned by `hosted/server/tests/boundary.test.ts` and `hosted/server/tests/runtime-roles.test.ts`.
+Source of truth: `WORKERS` in `hosted/scripts/workers.mjs`; `workerApp` in `hosted/server/worker-app.ts`; `verifyPackages` in `hosted/scripts/production.mjs`; `hosted/server/runtime-roles.sql`. Pinned by `hosted/server/tests/boundary.test.ts` and `hosted/server/tests/runtime-roles.test.ts`.
 
 ## Identity and login
 
@@ -33,13 +35,15 @@ Source of truth: `WORKERS` in `hosted/scripts/workers.mjs`; `workerApp` in `host
 
 **May create provider-only accounts without verified email.** Public email is null; pgstencil's internal placeholder is never a delivery address. Email-code login remains an access path to an account's canonical verified mailbox. No merge, email adoption, unlink, or account-recovery interface exists.
 
-**Must identify accounts by immutable user ID, never email.** Provider-only accounts keep their identity when a provider subsequently supplies email. Exception: `ADMIN_EMAIL` ("Entitlement").
+**Must identify accounts by immutable user ID, never email.** Provider-only accounts keep their identity when a provider subsequently supplies email. Exceptions: `ADMIN_EMAIL` ("Entitlement") and `SIGN_IN_ALLOWLIST` (below).
+
+**Must sign in only `SIGN_IN_ALLOWLIST`'s verified emails, in production, until launch.** A request naming another email is refused before a code is sent or an account created; on any read but a provider callback or the CSRF challenge, a login whose user is not a listed verified email has all its user's logins deleted before the auth handler answers. Signed out, the frontend shows its pre-launch notice instead of the sign-in form unless the URL carries `?signin` or a failed callback's `?error`, or the account lookup failed. The test entry runs without the gate; previews and local development keep it off. Ends at launch (Future item 4).
 
 **Must enable providers explicitly in `OAUTH_PROVIDERS`.** The allowed set is GitHub, Google, Microsoft, and Apple. Missing paired credentials or unknown names fail closed; unused credentials enable nothing. Email uses Postmark in production and local capture in development.
 
-**Must discard provider tokens after identity verification and omit login tokens from browser JSON.** Cookies and upstream identity verification follow the packed adapter.
+**Must discard provider tokens after identity verification and omit login tokens from browser JSON.** Cookies and upstream identity verification follow the packed adapter. Cookie reads: `docs/specs/security-hosted.md` -> "Origin boundary".
 
-Source of truth: `hosted/server/providers.js`; `authPolicy` / `providerBindings` in `hosted/server/policy.ts`.
+Source of truth: `hosted/server/providers.js`; `authPolicy` / `providerBindings` in `hosted/server/policy.ts`; `prelaunchAuth` in `hosted/server/prelaunch.ts`.
 
 ## Interface
 
@@ -47,13 +51,23 @@ Source of truth: `hosted/server/providers.js`; `authPolicy` / `providerBindings`
 
 **Must show configured sign-in methods only.** Login tokens never enter browser storage, and only public identity fields render, without provider images or external assets.
 
-**Must render on Dormouse product theme tokens**, the OS light/dark preference choosing bundled Light Visual Studio or Kimbie Dark, loading no marketing styles, fonts, or analytics.
+**Must render on Dormouse product theme tokens, loading no marketing styles, fonts, or analytics.**
 
 Source of truth: `App` in `hosted/src/App.tsx`; `restoreTheme` in `hosted/src/main.tsx`.
 
+## Terms acceptance
+
+Continuing past the sign-in notice is how an account agrees to the Hosted terms (`website/src/pages/Terms.tsx` -> "The service").
+
+- **Must show the notice beside every sign-in method**, naming `TERMS_VERSION` and linking the terms and privacy policy without leaving the page.
+- **`TERMS_VERSION` is the policy pages' revision date** and changes with every terms revision.
+- **Must record each account's first acceptance of each version**, after a sign-in that continued past the notice, current version only.
+
+Source of truth: `termsRoutes` in `hosted/server/terms.ts`; `TERMS_VERSION` in `hosted/server/policy-constants.ts`.
+
 ## Entitlement
 
-**Must read the entitlement (`docs/specs/pricing.md` -> "Checkout and entitlement") on the server, per request, through one SQL predicate over the account's `"user"` row**, so a bearer and its owner's entitlement resolve in one query. Until billing ships it admits only `ADMIN_EMAIL` while that is the account's verified email, the only exception to "never email" ("Identity and login"); nothing else may key on an address.
+**Must read the entitlement (`docs/specs/pricing.md` -> "Checkout and entitlement") on the server, per request, through one SQL predicate over the account's `"user"` row**, so a bearer and its owner's entitlement resolve in one query. Until billing ships it admits only `ADMIN_EMAIL` while that is the account's verified email, one of the exceptions to "never email" ("Identity and login"); nothing else may key on an address.
 
 Source of truth: `entitledSql` and `entitled` in `hosted/server/entitlement.ts`; `cookieEntitled` in `hosted/server/account-gate.ts`.
 
@@ -63,7 +77,7 @@ A signed-in desktop exchanges its voice token for ElevenLabs speech in a voice o
 
 | Route | Credential | Success |
 |---|---|---|
-| `GET /api/voice/tokens` | login cookie | 200 `{ tokens }` |
+| `GET /api/voice/tokens` | login cookie, same-origin fetch | 200 `{ tokens }` |
 | `POST /api/voice/tokens` | login cookie, exact `Origin` | 201 `{ id, token, createdAt }` |
 | `DELETE /api/voice/tokens/:id` | login cookie, exact `Origin` | 204; 404 for another account's or an unknown ID |
 | `POST /api/voice/speak` | `Authorization: Bearer dmv_…`, JSON `{ text, voiceId }` | 200 `audio/mpeg`, `Cache-Control: no-store` |
@@ -72,7 +86,7 @@ Errors are JSON `{ message }`. Cookie routes answer 401 without a login and 403 
 
 **Must store only a token's SHA-256.** A token is `dmv_` plus base64url of 32 random bytes, returned only by the mint response: the account's `POST`, or the poll that redeems a sign-in. Revocation is permanent.
 
-**Must mint a sign-in's token in the statement that redeems it**, owned by the approver and naming the Burrow it enrolled (`hosted/server/dormouse-migrations/005_voice_token_burrow.sql`), so removing that computer from the account deletes its token, and the Burrow cap bounds them. The relay's role may insert those columns and nothing else of voice.
+**Must mint a sign-in's token in the statement that redeems it**, owned by the approver and naming the Burrow it enrolled (`hosted/server/dormouse-migrations/007_voice_token_burrow.sql`), so removing that computer from the account deletes its token, and the Burrow cap bounds them. The relay's role may insert those columns and nothing else of voice.
 
 **Speak must answer in this order:**
 
@@ -83,11 +97,11 @@ Errors are JSON `{ message }`. Cookie routes answer 401 without a login and 403 
 5. 429 once the owner's UTC-day counter reaches 500. The atomic increment precedes the upstream call, so failed upstream attempts count.
 6. 502 when ElevenLabs throws or answers non-2xx.
 
-**Never log the text or forward an upstream body or status.** The upstream URL, model, and format (`mp3_44100_128`, so 200 characters stay under a shipped desktop's `MAX_AUDIO_BYTES`) are fixed in code; no binding or request field redirects them. `ELEVENLABS_API_KEY` is the voice Worker's secret, which production preflight requires there; the voice preview mapper never passes it.
+**Never log the text or forward an upstream body or status.** The upstream URL, model, and format (`mp3_44100_128`, so 200 characters stay under a shipped desktop's `MAX_AUDIO_BYTES`) are fixed in code; no binding or request field redirects them. `ELEVENLABS_API_KEY` is the voice Worker's secret, which production preflight requires there.
 
 **Must delete ElevenLabs speech history, which keeps each generation's text, from the production voice Worker only**: one pass shortly after each successful speak, and a Cron Trigger every 5 minutes for what that missed. No retention bound is guaranteed (rationale).
 
-- **Must use an ElevenLabs account dedicated to Dormouse voice.** A sweep deletes the whole account's history.
+- **Must use an ElevenLabs service account dedicated to Dormouse voice, with history access isolated from other workspace usage.** A sweep deletes every history item visible to its key (rationale).
 - **Never touch the database or any binding but `ELEVENLABS_API_KEY` in a sweep**, so an idle deployment lets Postgres suspend. Without the key nothing runs; development and previews never sweep.
 - **Must fail the cron invocation when its pass cannot list or any delete fails; the after-speech pass only logs** (rationale).
 
@@ -99,7 +113,7 @@ The relay Worker serves the self-host Relay's HTTP API to many accounts: the pat
 
 | Route | On Hosted |
 |---|---|
-| `POST /api/setup/begin`, `/finish` | The passkey joins the account owning the token's Burrow: `accountId` is its user ID, `existingCredentialIds` its passkeys; 409 at `MAX_PASSKEYS_PER_ACCOUNT` |
+| `POST /api/setup/begin`, `/finish` | The passkey joins the account owning the token's Burrow: `accountId` is its user ID, `existingCredentialIds` its passkeys; 409 at `MAX_PASSKEYS_PER_ACCOUNT`; `finish`'s session counts toward `MAX_SESSIONS_PER_ACCOUNT` as sign-in's does |
 | `POST /api/setup/retire` | Spends only a token one of the session's account's Burrows minted |
 | `POST /api/signin/finish` | The asserted credential's account; `accountId` is its user ID. 401 `NOT_ENTITLED_ERROR`, and no session, for an account not entitled |
 | `POST /api/reauth/begin`, `/finish` | Only the session's account's credentials and nonces |
@@ -117,22 +131,22 @@ A session-gated route answers a session of an account no longer entitled with th
 
 - **Must keep the Relay's state in Postgres** (`hosted/server/dormouse-migrations/002_relay.sql`), sessions, challenges, and nonces included, where the self-host Relay holds them in memory.
 - **Must resolve each bearer and its owner's entitlement in one query**, the socket upgrades' query-parameter token included. The entitlement: "Entitlement".
-- **Must cap every table a caller grows, keyed by whoever grows it**, as `docs/specs/relay.md` -> "Guardrails" does: setup tokens and setup challenges per Burrow (`MAX_TOKENS_PER_BURROW`), presence nonces per session (`MAX_PENDING_REAUTH_NONCES_PER_SESSION`), and sessions per account (`MAX_SESSIONS_PER_ACCOUNT`), each evicting its key's own oldest; passkeys per account are refused at the cap (rationale). A capped write runs under its key's advisory lock and prunes, trims, and evicts only that key's rows.
+- **Must cap every table a caller grows, keyed by whoever grows it**, as `docs/specs/relay.md` -> "Guardrails" does: setup tokens and setup challenges per Burrow (`MAX_TOKENS_PER_BURROW`), presence nonces per session (`MAX_PENDING_REAUTH_NONCES_PER_SESSION`), and sessions per account (`MAX_SESSIONS_PER_ACCOUNT`), each evicting its key's own oldest; passkeys per account are refused at the cap (rationale). A capped write prunes, trims, and evicts only its own key's rows.
 - **Must sweep every Relay table's expired rows from the relay's hourly Cron Trigger** (rationale); sign-in challenges, minted unauthenticated and flat, are bounded by it and the per-address limit.
 - **Must answer 429 with `Retry-After` past the per-address limit on `signin/*` (`RELAY_SIGNIN_LIMIT`) and `setup/begin`/`finish` (`RELAY_SETUP_LIMIT`)**, before the body limit and any database read: 30 a minute, a ceremony's two routes sharing one budget (rationale).
-- **Must restore a token a refused `finish` spent on its original expiry, within the Burrow's cap, and never once that expiry has passed.**
+- **Must claim a setup token in place at `finish`**, so a retire still finds it; a refused `finish` clears its claim, or spends the token when its owner is not entitled, so the token keeps its expiry and stays dead once retired, evicted, or swept.
 
 **Push.** The push routes keep `docs/specs/relay.md` -> "Web Push" and its "State files" upsert rules; a send is HTTPS from the Burrow to the relay Worker, independent of terminal transport.
 
 - **Must keep subscriptions in Postgres** (`hosted/server/dormouse-migrations/003_relay_push.sql`), keyed `(burrowId, deliveryId)`, every field bounded as self-host bounds it, deleted with their Burrow. **Must read the addresses a delivery moves off, drop rows, and prune 404/410 among the account's rows only.**
-- **Must cap subscriptions at `MAX_PUSH_SUBSCRIPTIONS_PER_BURROW` and `MAX_PUSH_SUBSCRIPTIONS_PER_ACCOUNT`** in place of self-host's file total, evicting the oldest `subscribedAt`, never the row just written, under the account's advisory lock (rationale). A subscribe racing its Burrow's removal answers 404.
-- **Must register and fetch only a known Web Push service's endpoint** (`knownPushEndpoint`) in place of the self-host DNS guard: `https:` on the default port, no credentials, at most `MAX_PUSH_ENDPOINT_LENGTH`, and host `fcm.googleapis.com` or `updates.push.services.mozilla.com`, or one under `.push.apple.com` or `.notify.windows.com` (rationale). **Never follow a redirect**: a 3xx is `failed`. A refusal's log keeps at most 1 KiB of its body, copying no chunk past it, and cancels the rest.
+- **Must cap subscriptions at `MAX_PUSH_SUBSCRIPTIONS_PER_BURROW` and `MAX_PUSH_SUBSCRIPTIONS_PER_ACCOUNT`** in place of self-host's file total, evicting the oldest `subscribedAt`, never the row just written (rationale). A subscribe racing its Burrow's removal answers 404.
+- **Must register and fetch only a known Web Push service's endpoint** (`knownPushEndpoint`) in place of the self-host DNS guard: `https:` on the default port, no credentials, at most `MAX_PUSH_ENDPOINT_LENGTH`, and host `fcm.googleapis.com` or `updates.push.services.mozilla.com`, or one under `.push.apple.com` or `.notify.windows.com` (rationale). **Never follow a redirect**: a 3xx is `failed`. A refusal's log keeps at most 1 KiB of its body.
 - **Must send through `webPushRequest`** (`remote-lib-common/src/remote/web-push.ts`), WebCrypto with no `web-push`: RFC 8291 `aes128gcm` and an RFC 8292 VAPID JWT whose `sub` is the relay's `APP_ORIGIN`, each delivery bounded by `PUSH_SEND_DEADLINE_MS`. **Never hold a Postgres connection across a push service's fetch.**
 - **Push is disabled, not half-working**: without both `RELAY_VAPID_PUBLIC_KEY` and `RELAY_VAPID_PRIVATE_KEY`, with malformed keys (including noncanonical base64url), with a private key that does not sign for its public point, or without an https, non-loopback `APP_ORIGIN` for the subject, the config route answers `null` and subscribe and send 503. The pair is a relay Worker secret; previews derive theirs ("PR previews"), and the dev loop has none.
 
-**Pocket at the root.** `build` stages `lib/dist-pocket` at the root of the relay's assets and the one-time page beside it, checking both shells. Pocket is served per `docs/specs/pocket-app.md` -> "Serving the built bundle", except that a path naming no file (no extension, outside `/diagnostics`) gets the shell in one asset fetch.
+**Pocket at the root.** Pocket is served per `docs/specs/pocket-app.md` -> "Serving the built bundle", except that a path naming no file (no extension, outside `/diagnostics`) always gets the shell.
 
-Source of truth: `relayApiRoutes` in `hosted/server/relay-api.ts`; `hosted/server/relay-auth.ts`; `relayPushRoutes` in `hosted/server/relay-push.ts`; `pocketRoutes` in `hosted/server/pocket.ts`; `stageRelay` in `hosted/scripts/stage-relay.mjs`; `hosted/wrangler.relay.jsonc`. Pinned by `remote-lib-common/test/web-push.test.mjs` (the RFC 8291 Appendix A vector).
+Source of truth: `relayApiRoutes` in `hosted/server/relay-api.ts`; `pocketRoutes` in `hosted/server/pocket.ts`; `hosted/wrangler.relay.jsonc`. Pinned by `remote-lib-common/test/web-push.test.mjs` (the RFC 8291 Appendix A vector).
 
 ## Relay sockets
 
@@ -145,15 +159,15 @@ The relay Worker serves `GET /ws/burrow` and `GET /ws/client` at the self-host p
 
 - **Must route each account's sockets through one `RelayRoom` Durable Object, named `idFromName(userId)` from the account the token resolved to**, holding all its Burrow and Client sockets. Another account's Burrow is in another object, so a cross-account binding is impossible, not refused.
 - **Must hand the object a fresh request**: the upgrade, the account, and the Burrow's id or the session's `expiresAt` as search parameters (`RELAY_ROOM_PARAMS`); never a header, token, or cookie of the caller's.
-- **Must store only the account id**, written at the object's first upgrade; a request or RPC naming another account is refused and logged with no frame content.
+- **Must store only the account id**; a request or RPC naming another account is refused and logged with no frame content.
 - **Must recheck a Burrow's row in the object before accepting its socket**, under `blockConcurrencyWhile`: enrolled, the account's, its owner entitled, else the Worker's 401 or 403, so a removal committed after the Worker's token check is refused. **Never open a database connection in the object** (rationale): it reads rows through the relay Worker's `RelayRows` entrypoint. **Must bound every row read at `RELAY_ROW_READ_TIMEOUT_MS`**: past it the upgrade answers 503 and the sweep leaves its Burrows to the next.
 - **Must accept every socket through the Hibernation API**, its routing state in the socket's attachment.
 - **Must measure a frame against `MAX_RELAY_FRAME_BYTES` before parsing it**, a text frame in UTF-8 bytes as the self-host `maxPayload` counts, closing 1009 past it; an under-cap binary frame is dropped. The Client cap is per account object.
 - **Must close, from the object's alarm, every expired Client 1008 `unauthorized`** (its Burrow told `client-gone`) **and every removed or another account's Burrow 4001 (`WS_CLOSE_BURROW_REVOKED`) and de-entitled one 4002 (`WS_CLOSE_BURROW_NOT_ENTITLED`)** (its Clients told `burrow-gone`): the alarm fires at the earliest held Client's `expiresAt` and, while a Burrow socket is held, at most `RELAY_ROOM_SWEEP_MS` (an hour) apart. It replaces the self-host expiry and revocation sweeps.
 - **Must answer `RELAY_PING` with `RELAY_PONG` as the object's auto-response**, which never wakes it, reaches no handler, and is never forwarded. **A socket whose last auto-response is older than `RELAY_IDLE_TIMEOUT_MS` is gone**, retired with 1001; a socket that never pinged is never judged. It replaces the self-host heartbeat. Two gaps are accepted: a Burrow that never pings is never judged, since every build that can enroll with Hosted pings; and at the Client cap a backgrounded Pocket, its pings paused, counts as gone once silent that long, the Burrow reaping its session at 120 s anyway.
-- **Must close a removed Burrow's socket from the account Worker's `DELETE /api/relay/burrows/:burrowId`**, through its `RELAY_ROOM` binding (`script_name` the relay) calling `closeBurrow`: 4001, its Clients `burrow-gone`. **Must answer 204 once the row is gone, even if the close fails**, logging it; the sweep closes the socket. `GET /api/burrows` reads `online` through account-scoped `onlineBurrows`. **Never expose either RPC or `RelayRows` as a public endpoint.**
+- **Must close a removed Burrow's socket from the account Worker's `DELETE /api/relay/burrows/:burrowId`**, through its `RELAY_ROOM` binding calling `closeBurrow`: 4001, its Clients `burrow-gone`. **Must answer 204 once the row is gone, even if the close fails**, logging it; the sweep closes the socket. `GET /api/burrows` reads `online` through account-scoped `onlineBurrows`. **Never expose either RPC or `RelayRows` as a public endpoint.**
 
-Source of truth: `relaySocketRoutes` in `hosted/server/relay-sockets.ts`; `hosted/server/relay-room-contract.ts`; `RelayRoom` in `hosted/server/relay-room.ts`; `RelayRows` in `hosted/server/relay-rows.ts`. Pinned by `hosted/server/tests/relay-room.test.ts`, which also runs the routing cases every Relay passes (`remote-lib-common/test/harness/relay-parity.mjs`).
+Source of truth: `relaySocketRoutes` in `hosted/server/relay-sockets.ts`; `RelayRoom` in `hosted/server/relay-room.ts`. Pinned by `hosted/server/tests/relay-room.test.ts`, which also runs the routing cases every Relay passes (`remote-lib-common/test/harness/relay-parity.mjs`).
 
 ## Burrow enrollment
 
@@ -186,9 +200,11 @@ sequenceDiagram
   end
 ```
 
-Begin answers another origin, or none, with the self-host 409 `ORIGIN_MISMATCH_ERROR`. `userCode` is `XXXX-XXXX`; `verificationUrl` is `ACCOUNT_ORIGIN/enroll#<userCode>`, absent without `ACCOUNT_ORIGIN`; `expiresAt` is `ENROLLMENT_TTL_MS` (10 minutes) out; `interval` is 5 seconds. `enrolled` carries the self-host `BurrowEnrollResponse`, `origin` the relay's `APP_ORIGIN` and `rpId` its hostname, without `requireUserVerification`, and the voice token ("Managed voice"). `redeemed` answers until the approval expires, so the Burrow can name what the account must remove. The 409 names `ACCOUNT_ORIGIN/account` at `MAX_ENROLLED_BURROWS` Burrows.
+Pre-launch, a signed-out visitor to `verificationUrl` is sent to the devlog instead of signing in, and the code is lost, unless the link carries `?signin` (`/enroll?signin#<userCode>`); "Identity and login" owns the gate.
 
-- **Never write from begin.** The device code is 32 bytes, the bearer shape: a 4-byte big-endian expiry in epoch seconds, then 28 random bytes. The user code is `enrollUserCode`: `HMAC-SHA-256(RELAY_ENROLL_SECRET, deviceCode)` read five bits at a time into `ENROLL_USER_CODE_ALPHABET`, values past it skipped (rationale).
+Begin answers another origin, or none, with the self-host 409 `ORIGIN_MISMATCH_ERROR`. `userCode` is `XXXX-XXXX`; `verificationUrl` is `ACCOUNT_ORIGIN/enroll#<userCode>`, absent without `ACCOUNT_ORIGIN`; `expiresAt` is `ENROLLMENT_TTL_MS` (10 minutes) out; `interval` is 5 seconds. `enrolled` carries the self-host `BurrowEnrollResponse`, `origin` the relay's `APP_ORIGIN` and `rpId` its hostname, without `requireUserVerification`, and the voice token ("Managed voice"). `redeemed` answers until the approval expires, so the Burrow can name what the account must remove. The 409 names `ACCOUNT_ORIGIN/account` at `MAX_BURROWS_PER_ACCOUNT` Burrows, an abuse ceiling: a member has no device limit (`docs/specs/pricing.md` -> "Checkout and entitlement").
+
+- **Never write from begin.** The device code is 32 bytes, the bearer shape: its expiry in its leading bytes, the rest random. The user code is `enrollUserCode`: `HMAC-SHA-256(RELAY_ENROLL_SECRET, deviceCode)` (rationale).
 - **Must store the approval alone** (`dormouse_relay_enrollment_approvals`): it cannot tell an issued code from any well-formed one, so it approves any; one no Burrow redeems expires (rationale).
 - **Never admit a begin or poll request carrying `Origin`** (403): only a Node Burrow calls them. Then 429 with `Retry-After` past `RELAY_ENROLL_BEGIN_LIMIT` (10 a minute per address) or `RELAY_ENROLL_POLL_LIMIT` (60), before the body limit and any database read.
 - **Must answer an expired device code from the code alone**, reading no database.
@@ -198,7 +214,7 @@ Begin answers another origin, or none, with the self-host 409 `ORIGIN_MISMATCH_E
 | Route (account) | Credential | Success |
 |---|---|---|
 | `POST /api/relay/enrollments/approve` | login cookie, exact `Origin`, JSON `{ userCode }` | 204 |
-| `GET /api/relay/burrows` | login cookie | 200 `{ burrows }` |
+| `GET /api/relay/burrows` | login cookie, same-origin fetch | 200 `{ burrows }` |
 | `DELETE /api/relay/burrows/:burrowId` | login cookie, exact `Origin` | 204; 404 for another account's or an unknown ID |
 
 Errors are the managed-voice cookie routes' ("Managed voice"), except that their 403 carries `NOT_ENTITLED_ERROR`.
@@ -206,16 +222,16 @@ Errors are the managed-voice cookie routes' ("Managed voice"), except that their
 - **Must refuse approval from a login older than `LOGIN_FRESH_AGE_MS`**, 403 `RECENT_LOGIN_REQUIRED`, failing closed when the login's `createdAt` is missing or unparsable; the voice routes require no recent login.
 - **Must count every approval attempt** against `RELAY_APPROVE_LIMIT` (10 a minute per account) before reading the body: 429 with `Retry-After` past it.
 - **Must answer a malformed code 400**, forgiving case, spaces, and dashes, and a second approval of a live code 409 `ALREADY_APPROVED`, whichever account sends it: a live approval never moves. An expired one is replaced.
-- **Must remove by deleting the Burrow's row**, its setup tokens and setup challenges cascading, so `burrowByToken` finds nothing on any relay route, **then close its live socket** ("Relay sockets").
+- **Must remove by deleting the Burrow's row**, its setup tokens and setup challenges cascading, so its token authenticates nothing on any relay route, **then close its live socket** ("Relay sockets").
 - **Must take the `/enroll` fragment before render and erase it from history, and hold the code in memory only**: through email sign-in and back, never into storage. Provider sign-in leaves the page, so the user opens the link again.
 
-Source of truth: `relayApiRoutes` in `hosted/server/relay-api.ts`; `relayAccountRoutes` in `hosted/server/relay-account.ts`; `enrollUserCode` in `remote-lib-common/src/remote/enroll-code.ts`; `takeEnrollment` in `hosted/src/enrollment.ts`; `ENROLLMENT_TTL_MS` in `hosted/server/policy-constants.ts`.
+Source of truth: `relayApiRoutes` in `hosted/server/relay-api.ts`; `relayAccountRoutes` in `hosted/server/relay-account.ts`; `takeEnrollment` in `hosted/src/enrollment.ts`.
 
 ## Development and release
 
-**Must run local development with `dor tool hosted` inside Dormouse.** Its single loopback `http://localhost:<port>` origin serves Vite and Node auth on a disposable development database, with the voice token and Relay account routes but never speak, which every Hosted build reaches only at `https://voice.dormouse.sh`. Host, Origin, and Fetch Metadata checks guard the local captured-email inbox; no production entry imports an inbox or test-control handler. `dor tool one-time` runs the relay Worker on loopback without a database, so its Relay routes answer 503 (`docs/specs/one-time.md` -> "Dev loop").
+**Must run local development with `dor tool hosted` inside Dormouse.** Its single loopback `http://localhost:<port>` origin serves Vite and Node auth on a disposable development database, with the voice token and Relay account routes but never speak, which every Hosted build reaches only at `https://voice.dormouse.sh`. Host, Origin, and Fetch Metadata checks guard the local captured-email inbox; no production entry imports an inbox or test-control handler.
 
-**Must verify the three production Worker bundles and run the consumer's integration suite before release.** Root `pnpm test` runs Hosted's deploy-script and Docker-free suites; `pnpm test:hosted` adds the suites that need Docker. Only test entries inject deterministic Better Auth. Simulated callbacks do not certify provider registrations; production acceptance requires real browser login with each enabled provider and email delivery.
+**Must verify the three production Worker bundles and run the consumer's integration suite before release.** Only test entries inject deterministic Better Auth. Simulated callbacks do not certify provider registrations; production acceptance requires real browser login with each enabled provider and email delivery.
 
 **Must keep production, test, and preview databases and credentials separate.** The development and preview entries are email-only. Production configuration and operator steps live in `hosted/README.md`.
 
@@ -225,25 +241,25 @@ Source of truth: `allowedDevRequest` in `hosted/server/dev-host-guard.ts`; `host
 
 **Must deploy only verified same-repository PR merge revisions touching Hosted or its shared build inputs.** Drafts qualify; forks receive no deployment credentials.
 
-**Must isolate each PR in three persistent workers.dev Workers (`dormouse-{hosted,relay,voice}-pr-N`), one uncached Hyperdrive all three share, and a Neon branch from an empty dedicated preview project**, all reused until close or merge deletes them. Preview configs exclude production routes, triggers, and credentials; runtime bindings cannot enable OAuth, Postmark, or ElevenLabs. **Must give each relay preview its own Durable Object namespaces, each preview preview-only rate-limit namespaces, and wire each preview to its own PR's siblings** (the account's `RELAY_ROOM`, the relay's `ACCOUNT_ORIGIN`). **Must derive every preview secret from `PREVIEW_AUTH_SECRET` and its Worker's name**, the relay's VAPID pair included, so no production key reaches a preview and subscriptions survive the PR's redeploys.
+**Must isolate each PR in three persistent workers.dev Workers (`dormouse-{hosted,relay,voice}-pr-N`), one uncached Hyperdrive all three share, and a Neon branch from an empty dedicated preview project**, all reused until close or merge deletes them. That Hyperdrive connects as the branch's owner, so no preview exercises the restricted roles; `hosted/server/tests` binds the relay and voice to them (rationale). Preview configs exclude production routes, triggers, and credentials; runtime bindings cannot enable OAuth, Postmark, or ElevenLabs. **Must give each relay preview its own Durable Object namespaces, each preview preview-only rate-limit namespaces, and wire each preview to its own PR's siblings** (the account's `RELAY_ROOM`, the relay's `ACCOUNT_ORIGIN`). **Must derive every preview secret from `PREVIEW_AUTH_SECRET` and its Worker's name**, the relay's VAPID pair included, so no production key reaches a preview and subscriptions survive the PR's redeploys.
 
 **Must run cleanup from the base branch's checkout, never the closed PR's.**
 
 **Must capture preview mail in Postgres and expose escaped text only**, on a public inbox that accepts only the preview's configured origin. No test clock is deployed. Preview data is disposable; it is not access-controlled.
 
-Source of truth: `.github/workflows/hosted-preview.yml`; `touchesHosted` in `hosted/scripts/changed.mjs`; `previewConfig` / `previewSecrets` in `hosted/scripts/preview.mjs`; `postgresInbox` in `hosted/server/preview-inbox.ts`; `hosted/server/preview-worker.ts`. Pinned by `hosted/scripts/preview.test.mjs`.
+Source of truth: `.github/workflows/hosted-preview.yml`; `previewConfig` / `previewSecrets` in `hosted/scripts/preview.mjs`; `hosted/server/preview-worker.ts`. Pinned by `hosted/scripts/preview.test.mjs`.
 
 ## Production releases
 
-**Must deploy only manually selected main revisions after Hosted tests/build and accepted clean package provenance.** `productionConfig` holds each config to its Worker's pinned name, origin, and lone custom domain, and the relay's `ACCOUNT_ORIGIN` to the account's origin; `preflight` checks uncached Hyperdrive, matching migration/runtime database identity with distinct roles, and each Worker's own secret names (the voice's is `ELEVENLABS_API_KEY`, the relay's `RELAY_ENROLL_SECRET` and its VAPID pair) — names only, as Cloudflare exposes no value. **Must back up, encrypt, decrypt, and restore-test before applying migrations**, uploading only the encrypted archive. **Must deploy relay, voice, then account, stopping at a failure**; the relay must pass its revision check, push config, and `oneTimeSmoke` before the next deploy (rationale). Production has no public candidate URL.
+**Must deploy only manually selected main revisions after Hosted tests/build and accepted clean package provenance.** `productionConfig` holds each config to its Worker's pinned name, origin, and lone custom domain, and the relay's `ACCOUNT_ORIGIN` to the account's origin; `preflight`, before the backup, checks each Worker's Hyperdrive and its own secret names (`docs/specs/security-hosted.md` -> "Deployment boundary") — names only, as Cloudflare exposes no value. **Must back up, encrypt, decrypt, and restore-test before applying migrations**, uploading only the encrypted archive. **Must deploy relay, voice, then account, stopping at a failure**; the relay must pass its revision check, `/api/ready`, push config, and `oneTimeSmoke` before the next deploy (rationale). Production has no public candidate URL.
 
-**Must only append Durable Object migrations**: a deployed tag is never edited or removed, and Cloudflare refuses a rollback across one, so each is a rollback floor. The account keeps the `v1` that created `OneTimeRoom` and appends `v2` deleting it; the relay has its own `v1` (`OneTimeRoom`) and `v2` (`RelayRoom`). A deploy restarts every room, dropping links still waiting or mid-handshake, and every relay socket, which its end reconnects; a session already on its direct path never touches Hosted. Live verification checks each Worker's revision and, once the relay's passes, requires its `/api/push/config` to answer a key and runs `oneTimeSmoke` on it, whatever the account's outcome.
+**Must only append Durable Object migrations**: a deployed tag is never edited or removed, and Cloudflare refuses a rollback across one, so each is a rollback floor. A deploy restarts every room, dropping links still waiting or mid-handshake, and every relay socket, which its end reconnects; a session already on its direct path never touches Hosted. Live verification checks all three Workers once the account has deployed.
 
-**Never replay a smoke's POST after a transport failure.** Production repeats only the relay and voice smokes, up to six times 10 s apart (rationale).
+**Never replay a smoke's POST after a transport failure.** Production repeats only the relay and voice smokes (rationale).
 
 **Must record an immutable annotated hosted/YYYY-MM-DD tag only after live verification**, naming the deployed commit and verification run and attempt; retries are idempotent and redeployments get new tags. Code rollback never reverses migrations.
 
-Source of truth: `.github/workflows/hosted-production.yml`; `hosted/scripts/production.mjs`; `deployWorkers` in `hosted/scripts/workers.mjs`; `hosted/scripts/production-backup.mjs`; `hosted/scripts/preview-smoke.mjs`; `oneTimeSmoke` in `hosted/scripts/one-time-smoke.mjs`; `recordDeployment` in `hosted/scripts/production-tag.mjs`.
+Source of truth: `.github/workflows/hosted-production.yml`; `hosted/scripts/production.mjs`.
 
 ## Future
 
@@ -251,4 +267,5 @@ Source of truth: `.github/workflows/hosted-production.yml`; `hosted/scripts/prod
 
 1. Deploy the configured providers and pass real production acceptance. pgstencil includes the Microsoft fix; personal and work/school callbacks need acceptance.
 2. Add per-browser login listing/revocation, sign-out-everywhere, and account recovery before broad paid use. Revisit the fixed 24-hour login lifetime for daily voice use.
-3. Managed voice for every member: the subscription as the entitlement in place of `ADMIN_EMAIL` (`docs/specs/pricing.md` -> "Checkout and entitlement"), per-account quotas, usage accounting, spending bounds beyond the fixed daily cap, and retiring the account page's hand-minted tokens.
+3. Managed voice for every member: the subscription as the entitlement in place of `ADMIN_EMAIL` (`docs/specs/pricing.md` -> "Checkout and entitlement"), per-account quotas, usage accounting, spending bounds beyond the fixed daily cap, retiring the account page's hand-minted tokens, and explicit text/redaction disclosure.
+4. Open sign-in: delete `hosted/server/prelaunch.ts` and the frontend's pre-launch notice.

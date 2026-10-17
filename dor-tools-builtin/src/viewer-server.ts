@@ -2,9 +2,9 @@ import { randomBytes } from 'node:crypto';
 import { constants } from 'node:fs';
 import { open, type FileHandle } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { isAbsolute, relative, sep } from 'node:path';
+import * as nodePath from 'node:path';
 import { allowsFileViewerRequest } from './file-viewer-loopback-guard.js';
-import { HttpError, viewerAnnouncement, viewerHeaders } from './viewer-http.js';
+import { HttpError, mediaType, parseJsonBody, viewerAnnouncement, viewerHeaders } from './viewer-http.js';
 
 export { HttpError, pathSegments } from './viewer-http.js';
 
@@ -12,22 +12,17 @@ const TEXT = 'text/plain; charset=utf-8';
 
 
 /** Node sends no body on a HEAD response. */
-export function reply(res: ServerResponse, status: number, body: string | Buffer = '', type = TEXT): void {
+export function reply(res: ServerResponse, status: number, body: string | Uint8Array = '', type = TEXT): void {
   res.writeHead(status, { 'Content-Type': type, 'Content-Length': Buffer.byteLength(body) });
   res.end(body);
 }
 
-/** A POST's JSON body: 415 unless typed `application/json`, 413 past `limit`
- * bytes (read to the end, buffering none past it, so the refusal is delivered),
- * 400 unparsable. */
-export async function readJsonBody(req: IncomingMessage, limit: number): Promise<unknown> {
-  if (contentType(req) !== 'application/json') throw new HttpError(415);
-  const body = await readBody(req, limit);
-  try { return JSON.parse(body.toString('utf8')); } catch { throw new HttpError(400); }
-}
+/** A POST's JSON body, as `parseJsonBody` reads it through `readBody`. */
+export const readJsonBody = (req: IncomingMessage, limit: number): Promise<unknown> =>
+  parseJsonBody(contentType(req), limit, bound => readBody(req, bound));
 
-/** A request's media type, lowercased, without parameters. */
-export const contentType = (req: IncomingMessage) => (req.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase();
+/** A request's media type, as `mediaType` gives it. */
+export const contentType = (req: IncomingMessage) => mediaType(req.headers['content-type'] ?? '');
 
 /** A request body; 413 with `tooLarge` past `limit` bytes, as `readJsonBody`. */
 export async function readBody(req: IncomingMessage, limit: number, tooLarge = ''): Promise<Buffer> {
@@ -51,10 +46,22 @@ export async function openRegularFile(path: string): Promise<FileHandle> {
   return file;
 }
 
+type PathModule = Pick<nodePath.PlatformPath, 'isAbsolute' | 'relative' | 'resolve' | 'sep'>;
+
 /** Whether the absolute `path` is `root` or under it. */
-export function isInsideRoot(root: string, path: string): boolean {
+export function isInsideRoot(root: string, path: string, { isAbsolute, relative, sep }: PathModule = nodePath): boolean {
   const rel = relative(root, path);
   return !(isAbsolute(rel) || rel === '..' || rel.startsWith(`..${sep}`));
+}
+
+/** `segments` (as `pathSegments` gives them) under the absolute `root`, as an
+ * absolute path when its spelling stays there; else null. On Windows a `:`
+ * spells a drive-relative path or an alternate data stream, so no segment
+ * holds one. Containment of what it names is decided on the realpath. */
+export function resolveInside(root: string, segments: string[], path: PathModule = nodePath): string | null {
+  if (path.sep === '\\' && segments.some(segment => segment.includes(':'))) return null;
+  const resolved = path.resolve(root, ...segments);
+  return isInsideRoot(root, resolved, path) ? resolved : null;
 }
 
 

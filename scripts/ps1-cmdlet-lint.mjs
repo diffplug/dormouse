@@ -72,9 +72,9 @@ const PROJECT_NOUNS = new Set(['Burrow', 'Burrows', 'Relay', 'Relays', 'Dormouse
  */
 const CALL = /(?:^|[|(&{;=,]|\$\(|\breturn\b)\s*([A-Z][A-Za-z]+)-([A-Z][A-Za-z0-9]*)\b/gm;
 
-export function check() {
+/** Check the installer's text — the shipped file unless a self-test passes a mutated copy. */
+export function check(text = readRepoFile(INSTALLER)) {
   const failures = [];
-  const text = readRepoFile(INSTALLER);
   const seen = new Set();
   let checked = 0;
 

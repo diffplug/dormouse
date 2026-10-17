@@ -70,8 +70,8 @@ function restoreVisualViewport(): void {
   }
 }
 
-function Harness({ side = 'below' }: { side?: 'above' | 'below' }) {
-  const { setTriggerEl, setMenuEl, menuStyle } = useAnchoredMenu(true, 300, { side });
+function Harness({ side = 'below', align = 'start' }: { side?: 'above' | 'below'; align?: 'start' | 'end' | 'auto' }) {
+  const { setTriggerEl, setMenuEl, menuStyle } = useAnchoredMenu(true, 300, { side, align });
   const triggerRef = useCallback((element: HTMLButtonElement | null) => {
     if (element) element.getBoundingClientRect = () => domRect(triggerBounds);
     setTriggerEl(element);
@@ -116,6 +116,18 @@ describe('useAnchoredMenu', () => {
     expect(menu().style.maxHeight).toContain('744px');
     expect(menu().style.top).toBe('456px');
     expect(menu().style.visibility).toBe('');
+  });
+
+  it('auto-aligns the menu\'s start with the trigger\'s while it fits, else its end', () => {
+    act(() => root.render(<Harness align="auto" />));
+    expect(menu().style.left).toBe('100px');
+
+    // 300px from 800 runs past the 988px inset edge: right edges line up.
+    triggerBounds = { top: 100, left: 800, width: 150, height: 20 };
+    act(() => root.unmount());
+    root = createRoot(container);
+    act(() => root.render(<Harness align="auto" />));
+    expect(menu().style.left).toBe('650px');
   });
 
   it('recomputes viewport-dependent geometry when the trigger rect is unchanged', () => {

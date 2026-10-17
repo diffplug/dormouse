@@ -24,10 +24,14 @@
     "APP_ORIGIN": "https://relay.dormouse.sh",
     "ACCOUNT_ORIGIN": "https://hosted.dormouse.sh"
   },
+  // Its own Hyperdrive, connecting as `dormouse_relay`; the release supplies the
+  // `RELAY_HYPERDRIVE_ID` variable. All zeros until set here (hosted/README.md ->
+  // "Provision the production boundary"), so a local deploy fails rather
+  // than bind the account's role.
   "hyperdrive": [
     {
       "binding": "HYPERDRIVE",
-      "id": "5bfbeba081b4456f9c3cf36edbb20c1d"
+      "id": "00000000000000000000000000000000"
     }
   ],
   "durable_objects": {

@@ -45,6 +45,8 @@ export class PlaygroundShellRegistry {
     return this.shells.get(id)?.cwd ?? null;
   }
 
+  /** Idempotent: a pane reaches here from `paneAdded` and from spawn hooks,
+   * often both, and must keep its one shell. */
   ensureShell(id: string): TutorialShell {
     const existing = this.shells.get(id);
     if (existing) return existing;

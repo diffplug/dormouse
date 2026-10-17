@@ -1,0 +1,45 @@
+Domain: remote
+Rule: `docs/specs/security-remote.md` -> "Trust boundary" #14 — a pairing verified before the raise is `presence-rejected` when it is approved
+Expect: lib/src/remote/burrow/burrow-runtime.ts
+Source: reverses part of #1044 (a UV raise while a pairing awaited local approval no longer voided its proof)
+
+diff --git a/lib/src/remote/burrow/burrow-runtime.test.ts b/lib/src/remote/burrow/burrow-runtime.test.ts
+index 8c3b0a269..5175bcfd9 100644
+--- a/lib/src/remote/burrow/burrow-runtime.test.ts
++++ b/lib/src/remote/burrow/burrow-runtime.test.ts
+@@ -1219,18 +1219,6 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
+     expect(await outcome(pairing.session, 'pairing', pairing.invitation.inviteId)).toEqual(presenceRejected);
+   });
+ 
+-  it('rejects a pairing whose proof a raise outdated while it awaited local approval', async () => {
+-    makeBurrow();
+-    const { invitation, clientStatic, session, code } = await requestPairing('c1', await newUnverifiedAuthenticator());
+-    expect(approvals).toHaveLength(1);
+-    socket.receive({ t: 'policy', requireUserVerification: true });
+-    await approvals[0]!.approve(code);
+-    expect(await outcome(session, 'pairing', invitation.inviteId)).toEqual(presenceRejected);
+-    expect(burrow.activeRecords).toHaveLength(0);
+-    expect(savedRecords).toHaveLength(0);
+-    expect((await openConnection('c1', clientStatic, testRoutingId())).offer).toBe('none');
+-  });
+-
+   it('commits a pairing a raise found mid-write, but opens no window on its outdated proof', async () => {
+     const write = Promise.withResolvers<void>();
+     makeBurrow(undefined, { saveAcl: () => write.promise });
+diff --git a/lib/src/remote/burrow/burrow-runtime.ts b/lib/src/remote/burrow/burrow-runtime.ts
+index 50f2c18df..459fa43d5 100644
+--- a/lib/src/remote/burrow/burrow-runtime.ts
++++ b/lib/src/remote/burrow/burrow-runtime.ts
+@@ -1339,12 +1339,6 @@ export class BurrowRuntime {
+         this.#finishPairing(clientId, 'invitation-expired');
+         return;
+       }
+-      // A UV raise while the modal waited voids the proof the approval rests on.
+-      if (this.#policy !== approval.policy) {
+-        console.warn('[burrow] pairing presence rejected: policy-raised');
+-        this.#finishPairing(clientId, 'presence-rejected');
+-        return;
+-      }
+       try {
+         const next = BurrowAcl.fromRecords(this.#acl.burrowId, this.#acl.records(), { now: this.#now });
+         const record = next.approve({

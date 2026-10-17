@@ -62,8 +62,9 @@ declare const __DORMOUSE_RELAY_MODE__: string;
  * A `define` substitutes the identifier wherever it appears in the bundle,
  * imported lib modules included, so declaring it here rather than at each entry
  * point keeps the value a literal in the bundle with no second copy of the
- * fallback to drift. The `typeof` guard is for the test runners, which have no
- * define.
+ * fallback to drift. The `typeof` guards are for the test runners, which have
+ * no define; a build that lost it fails (`assertRelayOriginBaked`, and
+ * `relayDefineVitePlugin` for the standalone webview).
  */
 export function bakedRelay(): RelayBuild {
   const origin = typeof __DORMOUSE_RELAY_ORIGIN__ === 'string'
@@ -75,10 +76,12 @@ export function bakedRelay(): RelayBuild {
 /**
  * The mode this build was compiled with; see {@link bakedRelay}. The webview
  * reads it on its own, the standalone Vite build baking the same pair.
+ *
+ * Fails closed: anything but a baked `hosted` — no define, or an unknown value —
+ * reads as `self-host`, which reaches nothing of Dormouse's in the background.
  */
 export function bakedRelayMode(): RelayMode {
-  if (typeof __DORMOUSE_RELAY_MODE__ !== 'string') return 'hosted';
-  return __DORMOUSE_RELAY_MODE__ === 'self-host' ? 'self-host' : 'hosted';
+  return typeof __DORMOUSE_RELAY_MODE__ === 'string' && __DORMOUSE_RELAY_MODE__ === 'hosted' ? 'hosted' : 'self-host';
 }
 
 /**

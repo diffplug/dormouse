@@ -5,6 +5,7 @@ import type { StripDragPoint } from "dormouse-lib/components/workspace-strip-dra
 import { currentWindowLabel } from "./window-label";
 import { tearOutWorkspace, transferWorkspaceTo } from "./workspace-move";
 import { getWallHandle } from "dormouse-lib/components/wall/wall-handles";
+import { isWorkspacePinned } from "dormouse-lib/lib/workspace-store";
 import { confirmToolEditorsClose } from "dormouse-lib/lib/tool-editor";
 import { randomKillChar } from "dormouse-lib/components/KillConfirm";
 import { cancelPendingConfirmation, requestConfirmation, setWorkspaceMoveError } from "dormouse-lib/lib/workspace-ui-store";
@@ -27,8 +28,8 @@ import { DOOR_TAB_HEIGHT_PX, DOOR_TAB_MAX_WIDTH_PX } from "dormouse-lib/componen
 /** The cursor probe is an IPC round trip; a pointermove is per frame. */
 const HIT_TEST_THROTTLE_MS = 60;
 /** How far the pointer must travel inside the target before its caret is worth
- *  redrawing. A tab is `DOOR_TAB_MAX_WIDTH_PX` at most, so this cannot skip a
- *  whole slot. */
+ *  redrawing. A squeezed tab keeps at least `TAB_NAME_PADDING_PX` (20px) past
+ *  its name (`WorkspaceStrip.tsx`), so this cannot skip a whole slot. */
 const HOVER_BUCKET_PX = 12;
 
 /** Where the cursor is, in the hit window's own logical client space. */
@@ -42,6 +43,9 @@ let probing = false;
 /** A probe was wanted while one was in flight; ask again when it lands. */
 let missed = false;
 let lastPoint: StripDragPoint | null = null;
+/** Whether the dragged Workspace is pinned: the target clamps its caret to the
+ *  group the drop lands in. */
+let draggingPinned = false;
 let hoverLabel: string | null = null;
 let hoverBucket = -1;
 /**
@@ -79,6 +83,7 @@ function hover(hit: CursorHit | null): void {
     label,
     x: hit?.x ?? 0,
     y: hit?.y ?? 0,
+    pinned: draggingPinned,
   }).catch((err) => console.error("[workspace-drag] hover_workspace_target failed", err));
 }
 
@@ -117,8 +122,9 @@ const askToProbe = throttleTrailing(() => {
   probeNow();
 }, HIT_TEST_THROTTLE_MS);
 
-/** The pointer left this window's strip mid-drag. */
-export function onDragOutsideWindow(point: StripDragPoint): void {
+/** The pointer left this window's strip mid-drag, dragging `id`. */
+export function onDragOutsideWindow(point: StripDragPoint, id: WorkspaceId): void {
+  draggingPinned = isWorkspacePinned(id);
   // A pointer that has not actually moved must not cost a round trip per
   // throttle window; a coalesced or repeated move reports the same point.
   if (lastPoint?.clientX === point.clientX && lastPoint?.clientY === point.clientY) return;
@@ -138,6 +144,7 @@ function endGesture(): void {
   generation += 1;
   lastPoint = null;
   hover(null);
+  draggingPinned = false;
 }
 
 /**
@@ -165,12 +172,30 @@ export function onDropOnOtherWindow(
   // the caret this is about to clear.
   endGesture();
   if (insideStrip) return;
+  // Probed fresh rather than reusing the throttled answer: up to
+  // HIT_TEST_THROTTLE_MS of pointer travel could otherwise choose the window.
+  moveOutOfWindow(id, probe);
+}
+
+/**
+ * The tab menu's Move to new window: the tear-out a drag released over no
+ * window makes, behind the same consents (`docs/specs/layout.md` → "Workspace
+ * tabs").
+ */
+export function moveWorkspaceToNewWindow(id: WorkspaceId): void {
+  moveOutOfWindow(id, async () => null);
+}
+
+/**
+ * Move a Workspace out of this window — into the window `destination` answers
+ * with, or a new one when it answers none or this one — once the user has
+ * settled its dirty editors and, for an iframe, typed the move's letter.
+ */
+function moveOutOfWindow(id: WorkspaceId, destination: () => Promise<CursorHit | null>): void {
   const isCurrent = cancelPendingConfirmation();
   const grab = grabOffset(id);
   void (async () => {
-    // Probed fresh rather than reusing the throttled answer: up to
-    // HIT_TEST_THROTTLE_MS of pointer travel could otherwise choose the window.
-    const hit = await probe();
+    const hit = await destination();
     if (!isCurrent()) return;
     const handle = getWallHandle(id);
     const dirtyEditors = handle?.dirtyToolIds() ?? [];
@@ -191,7 +216,7 @@ export function onDropOnOtherWindow(
     // The one thing a move cannot carry is a plain iframe's document, Doored
     // ones included; it reopens at its saved URL. The user says so first, with
     // the same typed letter a kill takes (docs/specs/layout.md → Workspaces).
-    const iframes = getWallHandle(id)?.iframeSurfaceRefs() ?? [];
+    const iframes = getWallHandle(id)?.iframeSurfaceIds() ?? [];
     if (iframes.length > 0) {
       requestConfirmation({
         id,
@@ -231,5 +256,6 @@ export function _resetWorkspaceDragForTesting(): void {
   lastPoint = null;
   hoverLabel = null;
   hoverBucket = -1;
+  draggingPinned = false;
   generation += 1;
 }

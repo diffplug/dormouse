@@ -42,10 +42,10 @@ test('register happy path writes account.json', async () => {
 
   const res = await register(app, authenticator, { label: 'iPhone Safari' });
   assert.equal(res.status, 200);
-  assert.deepEqual(await res.json(), {
-    accountId: 'owner',
-    credentialId: authenticator.credentialId,
-  });
+  const { sessionToken, expiresAt, ...rest } = await res.json();
+  assert.deepEqual(rest, { accountId: 'owner', credentialId: authenticator.credentialId });
+  assert.equal(typeof sessionToken, 'string');
+  assert.equal(typeof expiresAt, 'number');
 
   const account = await readAccount(stateDir);
   assert.equal(account.accountId, 'owner');
@@ -55,6 +55,34 @@ test('register happy path writes account.json', async () => {
   assert.equal(passkey.publicKey, authenticator.publicKey);
   assert.equal(passkey.label, 'iPhone Safari');
   assert.equal(typeof passkey.createdAt, 'number');
+});
+
+test('setup/finish signs in: its session reads /api/burrows', async () => {
+  const { app } = await freshApp();
+  const res = await register(app, await newAuthenticator());
+  const { sessionToken } = await res.json();
+
+  const burrows = await app.request(API_ROUTES.burrows, {
+    headers: { authorization: `Bearer ${sessionToken}` },
+  });
+  assert.equal(burrows.status, 200);
+});
+
+test('a refused setup/finish mints no session', async () => {
+  const { app, sessions } = await freshApp();
+  const authenticator = await newAuthenticator();
+  assert.equal((await register(app, authenticator)).status, 200);
+  let minted = 0;
+  const mint = sessions.mint.bind(sessions);
+  sessions.mint = (accountId) => {
+    minted++;
+    return mint(accountId);
+  };
+
+  const res = await register(app, authenticator);
+  assert.equal(res.status, 409);
+  assert.equal((await res.json()).sessionToken, undefined);
+  assert.equal(minted, 0);
 });
 
 test('a second passkey needs a second setup token', async () => {

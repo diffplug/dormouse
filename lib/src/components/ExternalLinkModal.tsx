@@ -1,6 +1,7 @@
 import { useRef } from 'react';
 import type { OpenHandler } from 'dor/commands/types';
-import { ProhibitIcon, WarningOctagonIcon } from '@phosphor-icons/react';
+import { printableExact } from 'dor/commands/terminal-text';
+import { ProhibitIcon, WarningIcon, WarningOctagonIcon } from '@phosphor-icons/react';
 import { writeTextToClipboard } from '../lib/clipboard';
 import type { DisplayMatchVerdict, ExternalUriDecision } from '../lib/external-links';
 import {
@@ -19,25 +20,12 @@ export interface ExternalLinkModalRequest {
   decision: ExternalUriDecision;
 }
 
-// "Open ___" button label suffix. The title is uniformly "Confirm open" and
-// doesn't vary with scheme; the button is the only place the scheme noun
-// appears, so the user sees what they're committing to next to their cursor.
-function pickOpenButtonNoun(scheme: string, uri: string): React.ReactNode {
-  switch (scheme) {
-    case 'http':
-    case 'https':
-      return 'URL';
-    case 'file':
-      return 'file';
-    case 'mailto':
-      return 'email';
-    case 'tel':
-      return 'phone app';
-    case 'sms':
-      return 'SMS app';
-    default:
-      return <code className="font-mono">{schemePrefix(scheme, uri)}</code>;
-  }
+// "Open ___" button label suffix: the scheme noun sits next to the cursor, so
+// the user sees what they're committing to. Another app's scheme is shown as is.
+const STANDARD_NOUNS: Record<string, string> = { http: 'URL', https: 'URL', file: 'file', mailto: 'email' };
+
+function pickOpenButtonNoun({ scheme, uri, otherApp }: { scheme: string; uri: string; otherApp: boolean }): React.ReactNode {
+  return otherApp ? <code className="font-mono">{schemePrefix(scheme, uri)}</code> : STANDARD_NOUNS[scheme];
 }
 
 function schemePrefix(scheme: string, uri: string): string {
@@ -69,12 +57,11 @@ export function ExternalLinkModal({
 
   const openableDecision = request.decision.status === 'openable' ? request.decision : null;
   const blockedDecision = request.decision.status === 'blocked' ? request.decision : null;
-  const displayUri = request.decision.displayUri || request.uri;
+  // Terminal text, shown exactly: a blocked URL keeps whatever got it blocked.
+  const displayUri = printableExact(request.decision.displayUri || request.uri);
   const verdict = request.verdict;
   const isDeceptive = verdict === 'deceptive';
-  const buttonNoun = openableDecision
-    ? pickOpenButtonNoun(openableDecision.scheme, openableDecision.uri)
-    : 'URL';
+  const buttonNoun = openableDecision ? pickOpenButtonNoun(openableDecision) : 'URL';
 
   const handleCopy = () => {
     void writeTextToClipboard(request.uri);
@@ -103,6 +90,8 @@ export function ExternalLinkModal({
             <DeceptiveTitle displayText={request.displayText} />
           ) : blockedDecision ? (
             <BlockedTitle reason={blockedDecision.reason} />
+          ) : openableDecision?.otherApp ? (
+            <OtherAppTitle scheme={openableDecision.scheme} displayText={verdict === 'plain' ? request.displayText.trim() : ''} />
           ) : (
             <OpenTitle verdict={verdict} displayText={request.displayText} />
           )}
@@ -118,6 +107,13 @@ export function ExternalLinkModal({
         {displayUri}
       </ModalReviewBlock>
 
+      {openableDecision?.otherApp && !isDeceptive && (
+        <p className="mt-3 text-xs text-muted">
+          Dormouse hands this link to whichever app is registered for{' '}
+          <code className="font-mono">{openableDecision.scheme}:</code> links, and cannot check what that app does
+          with it. Open it only if you trust the program that printed it.
+        </p>
+      )}
       {openableDecision && !isDeceptive && handlers.length > 0 && (
         <div className="mt-3 text-xs">
           <label className="flex items-center gap-2">
@@ -143,7 +139,7 @@ export function ExternalLinkModal({
           </p>
         </div>
       )}
-      {error && <p role="alert" className="mt-3 break-words text-xs text-error">{error}</p>}
+      {error && <p role="alert" className="mt-3 break-words text-xs text-error">{printableExact(error)}</p>}
 
       <div className="mt-4 flex justify-end gap-2 text-xs">
         {isDeceptive ? (
@@ -210,38 +206,46 @@ function OpenTitle({
   if (verdict === 'plain' && displayText.trim()) {
     return (
       <>
-        Confirm open: <span className="font-semibold">{displayText.trim()}</span>
+        Confirm open: <span className="font-semibold">{printableExact(displayText.trim())}</span>
       </>
     );
   }
   return <>Confirm open</>;
 }
 
-function DeceptiveTitle({ displayText }: { displayText: string }) {
+function IconTitle({ icon, children }: { icon: React.ReactNode; children: React.ReactNode }) {
   return (
     <span className="flex items-start gap-1.5">
-      <WarningOctagonIcon
-        size={14}
-        weight="fill"
-        className="mt-px shrink-0 text-error"
-        aria-hidden
-      />
-      <span className="leading-snug">
-        Deceptive link text was{' '}
-        <span className="font-semibold">{displayText.trim()}</span>, URL was:
-      </span>
+      {icon}
+      <span className="leading-snug">{children}</span>
     </span>
+  );
+}
+
+const TITLE_ICON = 'mt-px shrink-0 text-error';
+
+function OtherAppTitle({ scheme, displayText }: { scheme: string; displayText: string }) {
+  return (
+    <IconTitle icon={<WarningIcon size={14} weight="fill" className={TITLE_ICON} aria-hidden />}>
+      This link opens another app: <code className="font-mono font-semibold">{scheme}:</code>
+      {displayText && <> — <span className="font-semibold">{printableExact(displayText)}</span></>}
+    </IconTitle>
+  );
+}
+
+function DeceptiveTitle({ displayText }: { displayText: string }) {
+  return (
+    <IconTitle icon={<WarningOctagonIcon size={14} weight="fill" className={TITLE_ICON} aria-hidden />}>
+      Deceptive link text was{' '}
+      <span className="font-semibold">{printableExact(displayText.trim())}</span>, URL was:
+    </IconTitle>
   );
 }
 
 function BlockedTitle({ reason }: { reason: string }) {
   return (
-    <span className="flex items-start gap-1.5">
-      <ProhibitIcon size={14} weight="bold" className="mt-px shrink-0 text-error" aria-hidden />
-      <span className="leading-snug">
-        Blocked.{' '}
-        <span className="text-muted">{reason}</span>
-      </span>
-    </span>
+    <IconTitle icon={<ProhibitIcon size={14} weight="bold" className={TITLE_ICON} aria-hidden />}>
+      Blocked. <span className="text-muted">{reason}</span>
+    </IconTitle>
   );
 }

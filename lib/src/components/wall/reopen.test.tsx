@@ -17,6 +17,8 @@ import { recordToolDirty, resetToolDirty } from '../../lib/tool-dirty-store';
 import { mountWallHarness, type WallHarness } from './wall-test-utils';
 import { getWallHandle } from './wall-handles';
 import { reopenClosed } from './reopen';
+import { installSurfaceIdPool, resetSurfaceIdPool } from '../../lib/surface-ids';
+import { getWorkspaceBootPlan } from './workspace-boot-plans';
 import { _resetPendingKillsForTesting, addPendingKill, getPendingKills } from '../../lib/pending-kills';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -28,6 +30,7 @@ vi.mock('../TerminalPane', () => ({
 let harness: WallHarness;
 
 beforeEach(() => {
+  resetSurfaceIdPool();
   setPlatform(new FakePtyAdapter());
   harness = mountWallHarness();
   _resetReopenStackForTesting();
@@ -47,12 +50,12 @@ async function renderTerminalBesideBrowser(): Promise<void> {
     restoredLathLayout={{
       version: 1,
       tree: { root: { kind: 'split', dir: 'row', children: [
-        { node: { kind: 'leaf', id: 'pane-a' }, weight: 0.5 },
-        { node: { kind: 'leaf', id: 'web' }, weight: 0.5 },
+        { node: { kind: 'leaf', id: 'surface:a' }, weight: 0.5 },
+        { node: { kind: 'leaf', id: 'surface:web' }, weight: 0.5 },
       ] } },
       leafMeta: {
-        'pane-a': { component: 'terminal', tabComponent: 'terminal', title: 'shell' },
-        web: { component: 'browser', tabComponent: 'surface', title: 'docs', params: WEB_PARAMS },
+        'surface:a': { component: 'terminal', tabComponent: 'terminal', title: 'shell' },
+        'surface:web': { component: 'browser', tabComponent: 'surface', title: 'docs', params: WEB_PARAMS },
       },
     }}
     initialMode="command"
@@ -93,34 +96,32 @@ describe('the reopen stack', () => {
 });
 
 describe('Reopen', () => {
-  it('rebuilds a reopenable close where it sat, as a new Surface with a new ref', async () => {
+  it('rebuilds a reopenable close where it sat, as a new Surface with a new id', async () => {
     await renderTerminalBesideBrowser();
-    const killed = await control<{ surfaceRef: string }>(SURFACE_CONTROL_METHODS.kill, { surface: 'web', confirmation: { mode: 'dangerously' } });
+    const killed = await control<{ surfaceRef: string }>(SURFACE_CONTROL_METHODS.kill, { surface: 'surface:web', confirmation: { mode: 'dangerously' } });
     expect(killed.ok).toBe(true);
     await harness.flush();
-    expect(leafIds()).toEqual(['pane-a']);
+    expect(leafIds()).toEqual(['surface:a']);
     expect(_reopenRecordsForTesting()).toHaveLength(1);
 
     await pressU();
-    const reopened = leafIds().find(id => id !== 'pane-a')!;
-    expect(reopened).not.toBe('web');
+    const reopened = leafIds().find(id => id !== 'surface:a')!;
+    expect(reopened).toBe('surface:1');
     // Back on the right of pane-a, as it sat.
     const layout = getWallHandle(DEFAULT_WORKSPACE_ID)!.serializeNow().lathLayout as { tree: { root: unknown }; leafMeta: Record<string, { params?: unknown }> };
-    expect(layout.tree.root).toMatchObject({ kind: 'split', dir: 'row', children: [{ node: { id: 'pane-a' } }, { node: { id: reopened } }] });
+    expect(layout.tree.root).toMatchObject({ kind: 'split', dir: 'row', children: [{ node: { id: 'surface:a' } }, { node: { id: reopened } }] });
     expect(layout.leafMeta[reopened].params).toMatchObject(WEB_PARAMS);
-    const listed = await control<{ surfaces: Array<{ id: string; ref: string; url?: string }> }>(SURFACE_CONTROL_METHODS.list);
-    const surface = listed.result!.surfaces.find(s => s.id === reopened)!;
-    // surface:1 is pane-a and surface:2 the closed browser, retired for good.
-    expect(surface.ref).toBe('surface:3');
+    const listed = await control<{ surfaces: Array<{ id: string; url?: string }> }>(SURFACE_CONTROL_METHODS.list);
+    expect(listed.result!.surfaces.map(s => s.id)).toContain('surface:1');
     expect(_reopenRecordsForTesting()).toHaveLength(0);
   });
 
   it('records nothing for a close that is not reopenable', async () => {
     // pane-a has no Session yet, so it reads as touched and confirms.
     await renderTerminalBesideBrowser();
-    await control(SURFACE_CONTROL_METHODS.kill, { surface: 'pane-a', confirmation: { mode: 'dangerously' } });
+    await control(SURFACE_CONTROL_METHODS.kill, { surface: 'surface:a', confirmation: { mode: 'dangerously' } });
     await harness.flush();
-    expect(leafIds()).toEqual(['web']);
+    expect(leafIds()).toEqual(['surface:web']);
     expect(_reopenRecordsForTesting()).toHaveLength(0);
   });
 
@@ -131,33 +132,33 @@ describe('Reopen', () => {
       restoredLathLayout={{
         version: 1,
         tree: { root: { kind: 'split', dir: 'row', children: [
-          { node: { kind: 'leaf', id: 'pane-a' }, weight: 0.5 },
-          { node: { kind: 'leaf', id: 'viewer' }, weight: 0.5 },
+          { node: { kind: 'leaf', id: 'surface:a' }, weight: 0.5 },
+          { node: { kind: 'leaf', id: 'surface:viewer' }, weight: 0.5 },
         ] } },
         leafMeta: {
-          'pane-a': { component: 'terminal', tabComponent: 'terminal', title: 'shell' },
-          viewer: { component: 'tool', tabComponent: 'tool', title: 'README.md', params },
+          'surface:a': { component: 'terminal', tabComponent: 'terminal', title: 'shell' },
+          'surface:viewer': { component: 'tool', tabComponent: 'tool', title: 'README.md', params },
         },
       }}
       initialMode="command"
     />));
     await harness.flush();
     act(() => {
-      terminalRegistry.applyTerminalSemanticEvents('viewer', [{ type: 'commandLine', commandLine: params.command }, { type: 'commandStart' }]);
-      recordToolDirty('viewer', false);
+      terminalRegistry.applyTerminalSemanticEvents('surface:viewer', [{ type: 'commandLine', commandLine: params.command }, { type: 'commandStart' }]);
+      recordToolDirty('surface:viewer', false);
     });
     try {
       await act(async () => {
-        harness.container.querySelector<HTMLButtonElement>('[data-lath-leaf="viewer"] button[aria-label="Kill"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        harness.container.querySelector<HTMLButtonElement>('[data-lath-leaf="surface:viewer"] button[aria-label="Kill"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       });
       await harness.flush();
       expect(document.body.textContent).not.toContain('Confirm kill');
-      expect(leafIds()).toEqual(['pane-a']);
+      expect(leafIds()).toEqual(['surface:a']);
       await pressU();
-      const reopened = leafIds().find(id => id !== 'pane-a')!;
+      const reopened = leafIds().find(id => id !== 'surface:a')!;
       expect(restore).toHaveBeenCalledWith(reopened, expect.objectContaining({ command: params.command, requireIntegration: true }));
     } finally {
-      terminalRegistry.removeTerminalPaneState('viewer');
+      terminalRegistry.removeTerminalPaneState('surface:viewer');
       resetToolDirty();
     }
   });
@@ -165,12 +166,26 @@ describe('Reopen', () => {
   it('answers dor reopen with the reopened ref, and refuses an empty stack', async () => {
     await renderTerminalBesideBrowser();
     expect(await control(WINDOW_CONTROL_METHODS.reopen)).toEqual({ ok: false, error: 'Nothing to reopen' });
-    await control(SURFACE_CONTROL_METHODS.kill, { surface: 'web', confirmation: { mode: 'dangerously' } });
+    await control(SURFACE_CONTROL_METHODS.kill, { surface: 'surface:web', confirmation: { mode: 'dangerously' } });
     await harness.flush();
     const reopened = await control<{ kind: string; surfaceRef: string }>(WINDOW_CONTROL_METHODS.reopen);
-    expect(reopened.result).toMatchObject({ status: 'reopened', kind: 'surface', surfaceRef: 'surface:3' });
+    expect(reopened.result).toMatchObject({ status: 'reopened', kind: 'surface', surfaceId: 'surface:1' });
     await harness.flush();
     expect(leafIds()).toHaveLength(2);
+  });
+
+  it('reopens a Workspace larger than the Surface id pool under numbered ids alone', async () => {
+    vi.spyOn(terminalRegistry, 'restoreTerminal').mockImplementation(() => ({}) as ReturnType<typeof terminalRegistry.restoreTerminal>);
+    let next = 100;
+    await installSurfaceIdPool(async (count) => Array.from({ length: Math.min(count, 64) }, () => `surface:${++next}`), 0);
+    pushReopenRecord({ kind: 'workspace', closedAt: 1, index: 0, workspace: {
+      id: 'workspace:9', name: 'big', nameIsAuto: false,
+      session: { version: 4, panes: Array.from({ length: 20 }, (_, i) => ({ id: `old-${i}`, cwd: null, title: '', untouched: true })) },
+    } });
+    const reopened = await reopenClosed({ gesture: false });
+    const { initialPaneIds } = getWorkspaceBootPlan((reopened as { workspaceId: string }).workspaceId);
+    expect(initialPaneIds).toHaveLength(20);
+    expect(initialPaneIds!.every(id => /^surface:\d+$/.test(id))).toBe(true);
   });
 
   it('reopens a closed window the host holds when it closed after this Window\'s newest record', async () => {
@@ -179,7 +194,7 @@ describe('Reopen', () => {
     Object.assign(fake, { reopenClosedWindow });
     setPlatform(fake);
     await renderTerminalBesideBrowser();
-    await control(SURFACE_CONTROL_METHODS.kill, { surface: 'web', confirmation: { mode: 'dangerously' } });
+    await control(SURFACE_CONTROL_METHODS.kill, { surface: 'surface:web', confirmation: { mode: 'dangerously' } });
     await harness.flush();
     const [record] = _reopenRecordsForTesting();
     // The window closed later than the Surface did: it comes back first.
@@ -201,7 +216,7 @@ describe('Reopen', () => {
       for (let i = 0; i < 2; i++) {
         await act(async () => {
           window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
-            method: SURFACE_CONTROL_METHODS.kill, params: { surface: 'web', confirmation: { mode: 'dangerously' } }, respond: () => {},
+            method: SURFACE_CONTROL_METHODS.kill, params: { surface: 'surface:web', confirmation: { mode: 'dangerously' } }, respond: () => {},
           } }));
           for (let tick = 0; tick < 10; tick++) await Promise.resolve();
         });
@@ -219,24 +234,24 @@ describe('Reopen', () => {
     vi.spyOn(terminalRegistry, 'restoreTerminal').mockImplementation(() => ({}) as ReturnType<typeof terminalRegistry.restoreTerminal>);
     await act(async () => harness.root.render(<Wall
       restoredLathLayout={{ version: 1, tree: { root: { kind: 'split', dir: 'row', children: [
-        { node: { kind: 'leaf', id: 'pane-a' }, weight: 0.5 }, { node: { kind: 'leaf', id: 'slot' }, weight: 0.5 },
+        { node: { kind: 'leaf', id: 'surface:a' }, weight: 0.5 }, { node: { kind: 'leaf', id: 'surface:slot' }, weight: 0.5 },
       ] } }, leafMeta: {
-        'pane-a': { component: 'terminal', tabComponent: 'terminal', title: 'shell' },
-        slot: { component: 'tool', tabComponent: 'tool', title: 'a.md', params },
+        'surface:a': { component: 'terminal', tabComponent: 'terminal', title: 'shell' },
+        'surface:slot': { component: 'tool', tabComponent: 'tool', title: 'a.md', params },
       } }}
       initialMode="command"
     />));
     await harness.flush();
     act(() => {
-      terminalRegistry.applyTerminalSemanticEvents('slot', [{ type: 'commandLine', commandLine: params.command }, { type: 'commandStart' }]);
-      recordToolDirty('slot', false);
+      terminalRegistry.applyTerminalSemanticEvents('surface:slot', [{ type: 'commandLine', commandLine: params.command }, { type: 'commandStart' }]);
+      recordToolDirty('surface:slot', false);
     });
     try {
-      await control(SURFACE_CONTROL_METHODS.kill, { surface: 'slot', confirmation: { mode: 'dangerously' } });
+      await control(SURFACE_CONTROL_METHODS.kill, { surface: 'surface:slot', confirmation: { mode: 'dangerously' } });
       await harness.flush();
       expect(_reopenRecordsForTesting()[0]?.kind === 'surface' && _reopenRecordsForTesting()[0].meta.params).not.toHaveProperty('toolPreview');
     } finally {
-      terminalRegistry.removeTerminalPaneState('slot');
+      terminalRegistry.removeTerminalPaneState('surface:slot');
       resetToolDirty();
     }
   });
@@ -247,7 +262,7 @@ describe('Reopen', () => {
     setPlatform(fake);
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     await renderTerminalBesideBrowser();
-    await control(SURFACE_CONTROL_METHODS.kill, { surface: 'web', confirmation: { mode: 'dangerously' } });
+    await control(SURFACE_CONTROL_METHODS.kill, { surface: 'surface:web', confirmation: { mode: 'dangerously' } });
     await harness.flush();
     expect((await control(WINDOW_CONTROL_METHODS.reopen)).result).toMatchObject({ kind: 'surface' });
   });
@@ -265,9 +280,9 @@ describe('Reopen', () => {
 
   it('answers a restored pending helper with the parent it went back on', async () => {
     await renderTerminalBesideBrowser();
-    addPendingKill({ kind: 'helper', id: 'helper-x', workspaceId: DEFAULT_WORKSPACE_ID, ref: 'surface:1', surfaceId: 'pane-a', title: 'shell', label: 'Helper' }, { restore: () => {}, finalize: () => {} });
+    addPendingKill({ kind: 'helper', id: 'helper-x', workspaceId: DEFAULT_WORKSPACE_ID, surfaceId: 'surface:a', title: 'shell', label: 'Helper' }, { restore: () => {}, finalize: () => {} });
     try {
-      expect((await control(WINDOW_CONTROL_METHODS.reopen)).result).toEqual({ status: 'reopened', kind: 'surface', surfaceId: 'pane-a', surfaceRef: 'surface:1' });
+      expect((await control(WINDOW_CONTROL_METHODS.reopen)).result).toEqual({ status: 'reopened', kind: 'surface', surfaceId: 'surface:a' });
     } finally {
       _resetPendingKillsForTesting();
     }
@@ -275,17 +290,17 @@ describe('Reopen', () => {
 
   it('passes over a pending kill that cannot come back now, to the next one, then the record behind it', async () => {
     await renderTerminalBesideBrowser();
-    await control(SURFACE_CONTROL_METHODS.kill, { surface: 'web', confirmation: { mode: 'dangerously' } });
+    await control(SURFACE_CONTROL_METHODS.kill, { surface: 'surface:web', confirmation: { mode: 'dangerously' } });
     await harness.flush();
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 2)); });
     const older = vi.fn(() => true);
-    addPendingKill({ kind: 'helper', id: 'helper-old', workspaceId: DEFAULT_WORKSPACE_ID, ref: 'surface:1', surfaceId: 'pane-a', title: 'shell', label: 'Helper' }, { restore: older, finalize: () => {} });
+    addPendingKill({ kind: 'helper', id: 'helper-old', workspaceId: DEFAULT_WORKSPACE_ID, surfaceId: 'surface:a', title: 'shell', label: 'Helper' }, { restore: older, finalize: () => {} });
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 2)); });
-    addPendingKill({ kind: 'helper', id: 'helper-x', workspaceId: DEFAULT_WORKSPACE_ID, ref: 'surface:1', surfaceId: 'pane-a', title: 'shell', label: 'Helper' }, { restore: () => false, finalize: () => {} });
+    addPendingKill({ kind: 'helper', id: 'helper-x', workspaceId: DEFAULT_WORKSPACE_ID, surfaceId: 'surface:a', title: 'shell', label: 'Helper' }, { restore: () => false, finalize: () => {} });
     try {
-      expect((await control(WINDOW_CONTROL_METHODS.reopen)).result).toMatchObject({ kind: 'surface', surfaceId: 'pane-a' });
+      expect((await control(WINDOW_CONTROL_METHODS.reopen)).result).toMatchObject({ kind: 'surface', surfaceId: 'surface:a' });
       expect(older).toHaveBeenCalledOnce();
-      expect((await control(WINDOW_CONTROL_METHODS.reopen)).result).toMatchObject({ kind: 'surface', surfaceRef: 'surface:3' });
+      expect((await control(WINDOW_CONTROL_METHODS.reopen)).result).toMatchObject({ kind: 'surface' });
       expect(await control(WINDOW_CONTROL_METHODS.reopen)).toEqual({ ok: false, error: 'Nothing to reopen' });
       expect(getPendingKills().map(kill => kill.id)).toEqual(['helper-x']);
     } finally {
@@ -297,33 +312,33 @@ describe('Reopen', () => {
     await renderTerminalBesideBrowser();
     await pressU();
     expect(document.body.textContent).toContain('Nothing to reopen');
-    expect(leafIds()).toEqual(['pane-a', 'web']);
+    expect(leafIds()).toEqual(['surface:a', 'surface:web']);
   });
 
   it('closes a reopenable Door from the kill key as a Door, so it reopens as one', async () => {
     await renderTerminalBesideBrowser();
     // Minimizing leaves the Door selected in command mode.
-    await act(async () => { harness.container.querySelector<HTMLElement>('[data-lath-leaf="web"] [aria-label="Minimize"]')!.click(); });
+    await act(async () => { harness.container.querySelector<HTMLElement>('[data-lath-leaf="surface:web"] [aria-label="Minimize"]')!.click(); });
     await harness.flush();
     await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'x', bubbles: true, cancelable: true })); });
     await harness.flushFrame();
     await harness.flush();
     expect(harness.container.querySelector('[data-door-id]')).toBeNull();
-    expect(leafIds()).toEqual(['pane-a']);
+    expect(leafIds()).toEqual(['surface:a']);
     expect(_reopenRecordsForTesting()[0]?.placement.kind).toBe('door');
   });
 
   it('puts a reopened Door back at its slot on the Baseboard', async () => {
     await renderTerminalBesideBrowser();
-    await act(async () => { harness.container.querySelector<HTMLElement>('[data-lath-leaf="web"] [aria-label="Minimize"]')!.click(); });
+    await act(async () => { harness.container.querySelector<HTMLElement>('[data-lath-leaf="surface:web"] [aria-label="Minimize"]')!.click(); });
     await harness.flush();
-    await control(SURFACE_CONTROL_METHODS.kill, { surface: 'web', confirmation: { mode: 'dangerously' } });
+    await control(SURFACE_CONTROL_METHODS.kill, { surface: 'surface:web', confirmation: { mode: 'dangerously' } });
     await harness.flush();
     expect(harness.container.querySelector('[data-door-id]')).toBeNull();
     await pressU();
     const door = harness.container.querySelector<HTMLElement>('[data-door-id]');
     expect(door?.dataset.doorId).toBeDefined();
-    expect(door?.dataset.doorId).not.toBe('web');
-    expect(leafIds()).toEqual(['pane-a']);
+    expect(door?.dataset.doorId).not.toBe('surface:web');
+    expect(leafIds()).toEqual(['surface:a']);
   });
 });

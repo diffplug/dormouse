@@ -4,7 +4,7 @@ import { isAllowedAgentBrowserBinary, isAllowedPlaywrightBinary } from './agent-
 // `binaryPath` reaches the host from the webview realm and off the persisted
 // session blob, and the host hands it to `spawnAndCapture`. The predicate is
 // what keeps that from being an arbitrary-exec channel, so its edges are the
-// test (docs/specs/dor-browser.md → "Browser Host").
+// test (docs/specs/security-local.md → "Spawned programs").
 describe('isAllowedAgentBrowserBinary', () => {
   it('accepts the bare name and an absolute path to an agent-browser', () => {
     expect(isAllowedAgentBrowserBinary('agent-browser')).toBe(true);
@@ -13,7 +13,6 @@ describe('isAllowedAgentBrowserBinary', () => {
     // The Windows PATH shims npm/vfox install beside the POSIX executable.
     expect(isAllowedAgentBrowserBinary('C:\\Users\\me\\bin\\agent-browser.cmd')).toBe(true);
     expect(isAllowedAgentBrowserBinary('C:/Users/me/bin/AGENT-BROWSER.EXE')).toBe(true);
-    expect(isAllowedAgentBrowserBinary('\\\\share\\tools\\agent-browser.bat')).toBe(true);
   });
 
   it('accepts the operator’s own configured path verbatim', () => {
@@ -36,6 +35,14 @@ describe('isAllowedAgentBrowserBinary', () => {
       './agent-browser',
       '../../../usr/bin/agent-browser',
       '/opt/../usr/bin/agent-browser',
+      // UNC and device paths: Windows would run a file off another machine.
+      '\\\\host\\share\\agent-browser.exe',
+      '//host/share/agent-browser.exe',
+      '/\\host\\share\\agent-browser.exe',
+      '\\/host/share/agent-browser.exe',
+      '\\\\?\\UNC\\host\\share\\agent-browser.exe',
+      '\\\\?\\C:\\tools\\agent-browser.exe',
+      '\\\\.\\C:\\tools\\agent-browser.exe',
       // Control characters are how one argument becomes two.
       '/usr/local/bin/agent-browser\n/bin/sh',
       '/usr/local/bin/agent-browser\u0000',
@@ -52,6 +59,6 @@ describe('isAllowedAgentBrowserBinary', () => {
 
  it('validates Playwright executable hints independently of agent-browser', () => {
   for (const candidate of ['playwright-cli', '/opt/bin/playwright-cli', 'C:\\tools\\playwright-cli.cmd']) expect(isAllowedPlaywrightBinary(candidate)).toBe(true);
-  for (const candidate of ['agent-browser', '/bin/sh', './playwright-cli', '/opt/../playwright-cli', '/opt/playwright-cli\n']) expect(isAllowedPlaywrightBinary(candidate)).toBe(false);
+  for (const candidate of ['agent-browser', '/bin/sh', './playwright-cli', '/opt/../playwright-cli', '/opt/playwright-cli\n', '\\\\host\\share\\playwright-cli.cmd', '//host/share/playwright-cli']) expect(isAllowedPlaywrightBinary(candidate)).toBe(false);
   expect(isAllowedPlaywrightBinary('/opt/custom-wrapper', '/opt/custom-wrapper')).toBe(true);
 });

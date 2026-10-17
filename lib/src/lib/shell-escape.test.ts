@@ -1,3 +1,5 @@
+import { spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
 import { shellEscapePath, shellEscapePosix, shellEscapeWindows } from './shell-escape';
 
@@ -36,6 +38,12 @@ describe('shellEscapePosix', () => {
 
   it("single-quote-wraps with the '\\'' idiom when input mixes newlines and single quotes", () => {
     expect(shellEscapePosix("a'b\nc")).toBe("'a'\\''b\nc'");
+  });
+
+  // fish reads `\'` and `\\` as escapes inside single quotes, so a backslash
+  // must sit outside them or `'a\'` swallows the rest of the line.
+  it('steps a backslash outside the single quotes when it must quote', () => {
+    expect(shellEscapePosix('a\\\nb')).toBe("'a'\\\\'\nb'");
   });
 
   it('backslash-escapes shell metacharacters', () => {
@@ -110,6 +118,12 @@ describe('shellEscapePath shell dispatch', () => {
     expect(shellEscapePath(`it's.png`, 'powershell')).toBe(`'it''s.png'`);
   });
 
+  // PowerShell also closes a single-quoted string at U+2018–U+201B.
+  it('doubles curly single quotes for PowerShell', () => {
+    expect(shellEscapePath('x’; calc; ’.txt', 'powershell')).toBe(`'x’’; calc; ’’.txt'`);
+    expect(shellEscapePath('a‘b‚c‛d', 'powershell')).toBe(`'a‘‘b‚‚c‛‛d'`);
+  });
+
   it('leaves an inert path bare in a PowerShell Session', () => {
     expect(shellEscapePath('C:\\Users\\a.png', 'powershell')).toBe('C:\\Users\\a.png');
     expect(shellEscapePath('C:\\Users\\a b.png', 'powershell')).toBe(`'C:\\Users\\a b.png'`);
@@ -129,4 +143,27 @@ describe('shellEscapePath shell dispatch', () => {
   it('uses posix escape for a posix Session on Windows', () => {
     expect(shellEscapePath('$(calc.exe).txt', 'posix')).toBe('\\$\\(calc.exe\\).txt');
   });
+});
+
+/** The first of `candidates` this machine has, or null. */
+function findShell(...candidates: string[]): string | null {
+  return candidates.find((candidate) => existsSync(candidate)) ?? null;
+}
+
+describe('shellEscapePosix round-trips through a real shell', () => {
+  // Both forms: backslash-escaped, and single-quoted for a line break.
+  const paths = ['/tmp/a\\', "/tmp/it's", '/tmp/a b$(x)`y`', '/tmp/a\\\nb', "/tmp/x\\'\n; echo INJECTED; '", '/tmp/~*?[a]{b,c}'];
+  const shells: [string, string | null, string[]][] = [
+    ['sh', findShell('/bin/sh'), []],
+    ['fish', findShell('/opt/homebrew/bin/fish', '/usr/local/bin/fish', '/usr/bin/fish'), ['--no-config']],
+  ];
+  for (const [name, shell, flags] of shells) {
+    it.skipIf(!shell)(`parses each escaped path back in ${name}`, () => {
+      const script = 'process.stdout.write(JSON.stringify(process.argv.slice(1)))';
+      const command = [shellEscapePosix(process.execPath), '-e', `'${script}'`, '--', ...paths.map(shellEscapePosix)].join(' ');
+      const result = spawnSync(shell!, [...flags, '-c', command], { encoding: 'utf8' });
+      expect(result.stderr).toBe('');
+      expect(JSON.parse(result.stdout)).toEqual(paths);
+    });
+  }
 });
