@@ -213,7 +213,7 @@ Source of truth: `lib/src/components/wall/agent-browser-surface-controller.ts` (
 
 **Must rebuild every request field by field in `parseBrowserRequest` before a provider sees it**, the security boundary: a known provider and operation, an http(s) navigation or new-session URL, bounded dimensions, a tab id that cannot read as an option, a session name neither CLI reads as an option or a path, and bounded request ids (rationale).
 
-**Must check `binaryPath` at the spawn**, since it crosses from the webview realm (rationale): accepted are the provider's executable by file name — POSIX- or drive-absolute, never a UNC or device path (`\\host\share`, `//host`, `\\?\`, `\\.\`), or bare and resolved on `PATH` — and the host's own override variable by exact match (`DORMOUSE_AGENT_BROWSER_BIN`, `DORMOUSE_PLAYWRIGHT_BIN`). A refused path is dropped, never fatal, so the host's own candidates run. The webview applies the same predicate before sending or storing one.
+What `binaryPath` may name is `docs/specs/security-local.md` -> "Spawned programs"; the host's own override variables are `DORMOUSE_AGENT_BROWSER_BIN` and `DORMOUSE_PLAYWRIGHT_BIN`. **A refused `binaryPath` is dropped, never fatal**, so the host's own candidates run (rationale).
 
 **Must land each crisp capture a CLI writes in a fresh, randomly named file in a private per-process `mkdtemp` directory** (mode `0700` on Unix), deleted however the capture ends; the directory goes at shutdown (rationale). Windows permission limits are `docs/specs/security-local.md` -> "Browser panes".
 
@@ -232,7 +232,7 @@ Source of truth: `createAgentBrowserProvider` in `lib/src/host/agent-browser-hos
 
 ### Playwright
 
-**Must use the user's installed `@playwright/cli`**, resolved from `DORMOUSE_PLAYWRIGHT_BIN` or `PATH` (`playwright-cli` under the `binaryPath` rule); the viewer requires CLI 0.1.19's local browser-binding endpoint. GUI launches use Chromium. Native commands keep Playwright semantics: `open` restarts, `goto` navigates. **Must pin every later command to a binding's cwd and executable**, since a Playwright session lives in its CLI project scope; `--session` uses the caller's own scope, GUI Connect the source terminal's cwd, a swap without one the host's.
+**Must use the user's installed `@playwright/cli`**, resolved from `DORMOUSE_PLAYWRIGHT_BIN` or `PATH` (`playwright-cli` under the `binaryPath` gate); the viewer requires CLI 0.1.19's local browser-binding endpoint. GUI launches use Chromium. Native commands keep Playwright semantics: `open` restarts, `goto` navigates. **Must pin every later command to a binding's cwd and executable**, since a Playwright session lives in its CLI project scope; `--session` uses the caller's own scope, GUI Connect the source terminal's cwd, a swap without one the host's.
 
 **Must connect with the validated installation's own Playwright client**, accepting only a unique registry entry matching session, workspace and library, with a local pipe endpoint and Chromium engine. **Never load modules from the registry's library path.** `attach` relaunches at the page only when the registry lists no browser for the session. **Must apply a host-reported headedness before the new stream**, so sync never sizes a headed window. Native CLI tabs and the pane share the selected tab.
 

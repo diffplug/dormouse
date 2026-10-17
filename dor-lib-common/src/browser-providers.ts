@@ -39,8 +39,8 @@ export const PLAYWRIGHT_BIN_ENV = 'DORMOUSE_PLAYWRIGHT_BIN';
 export const DEFAULT_PLAYWRIGHT_BIN = 'playwright-cli';
 
 /*
- * What may be spawned as a browser provider's CLI (docs/specs/dor-browser.md →
- * "Browser Host").
+ * What may be spawned as a browser provider's CLI
+ * (docs/specs/security-local.md → "Spawned programs").
  *
  * `binaryPath` exists because the GUI host's `PATH` is often the login `PATH`
  * with no nvm/volta shims, so `dor agent-browser` / `dor playwright` resolve an absolute path in
