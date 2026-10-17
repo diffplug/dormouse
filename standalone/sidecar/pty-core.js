@@ -1273,7 +1273,12 @@ module.exports.pacedInputSegments = pacedInputSegments;
 // `onHelper(id, isHelper)` hears every helper decision — each spawn and each
 // promotion that succeeds — so the host's alerts, which keep a helper inert,
 // read this map's answer rather than keeping their own (docs/specs/alert.md).
-module.exports.create = function create(send, ptyModule, { platform = process.platform, replay = false, sliceSince = null, onHelper = () => {}, scanPorts = createPortScanner((pids, count) => getOpenPortsForPids(pids, { budgetCount: count })) } = {}) {
+//
+// `canonicalDirectory(path)` validates a directory to open, injected for the
+// same reason: `canonicalLocalDirectory` in `lib/src/host/local-directory.ts`,
+// which `main.js` takes from `git-info.cjs` and VS Code's `pty-host.js`
+// bundles. The default opens nothing.
+module.exports.create = function create(send, ptyModule, { platform = process.platform, replay = false, sliceSince = null, onHelper = () => {}, canonicalDirectory = async () => null, scanPorts = createPortScanner((pids, count) => getOpenPortsForPids(pids, { budgetCount: count })) } = {}) {
   if (!ptyModule || typeof ptyModule.spawn !== 'function') {
     throw new TypeError('create() requires a node-pty compatible module');
   }
@@ -1666,10 +1671,10 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
         } else helpers.delete(request.id);
         onHelper(request.id, helpers.has(request.id));
       } else if (request.op === 'openDirectory') {
-        // A share or device path (`isUncOrDevicePath` in dor-lib-common) is
-        // refused before the existence check, which alone would reach its host.
-        if (typeof request.path !== 'string' || !path.isAbsolute(request.path) || /^[\\/]{2}/.test(request.path) || request.path.includes('\0') || !directoryExists(request.path)) throw new Error('Directory is unavailable');
-        const nativePath = fs.realpathSync(request.path);
+        // The resolver is the only thing that touches the path: a `stat` or
+        // `realpath` here would follow a link to a share and reach its host.
+        const nativePath = await canonicalDirectory(request.path);
+        if (!nativePath) throw new Error('Directory is unavailable');
         // Absolute canonical path is one argument; no shell interprets OSC text.
         openNativeDirectory(nativePath, (error) => {
           send('context', { ...result, ...(error ? { error: error.message } : {}) });

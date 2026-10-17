@@ -154,22 +154,23 @@ test('a helper cannot own another helper or reference an absent owner', () => {
   manager.killAll();
 });
 
-test('directory opening refuses a share or device path without touching it', (t) => {
-  const stat = t.mock.method(fs, 'statSync');
+// The host's resolver (`canonicalLocalDirectory`) is the only thing that may
+// touch the path: a `stat` or `realpath` follows a link to a share.
+test('directory opening touches the path only through the host resolver', async (t) => {
+  const refuse = () => { throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); };
+  const stat = t.mock.method(fs, 'statSync', refuse);
+  const realpath = t.mock.method(fs, 'realpathSync', refuse);
+  const asked = [];
   const events = [];
-  const manager = create((event, data) => events.push({ event, data }), { spawn() { throw new Error('unexpected spawn'); } });
-  for (const path of ['//host/share', '/\\host\\share', '\\\\host\\share', '\\\\?\\C:\\repo']) {
-    manager.context({ op: 'openDirectory', id: 'parent', path }, 'directory');
-    assert.match(events.at(-1).data.error, /unavailable/, path);
+  const manager = create((event, data) => events.push({ event, data }), { spawn() { throw new Error('unexpected spawn'); } }, {
+    canonicalDirectory: async (path) => { asked.push(path); return null; },
+  });
+  const paths = [__dirname, '//host/share', '\\\\host\\share', '\\\\?\\C:\\repo', '../secret', '/tmp\0ignored', null];
+  for (const path of paths) {
+    await manager.context({ op: 'openDirectory', id: 'parent', path }, 'directory');
+    assert.match(events.at(-1).data.error, /unavailable/, String(path));
   }
+  assert.deepEqual(asked, paths);
   assert.equal(stat.mock.callCount(), 0);
-});
-
-test('directory opening rejects relative paths and malformed input', () => {
-  const events = [];
-  const manager = create((event, data) => events.push({ event, data }), { spawn() { throw new Error('unexpected spawn'); } });
-  for (const path of ['../secret', '$(echo unsafe)', '/tmp\0ignored', null]) {
-    manager.context({ op: 'openDirectory', id: 'parent', path }, 'directory');
-    assert.match(events.at(-1).data.error, /unavailable/);
-  }
+  assert.equal(realpath.mock.callCount(), 0);
 });
