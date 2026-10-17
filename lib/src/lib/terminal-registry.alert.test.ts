@@ -1386,6 +1386,16 @@ describe('resume replay mode-reset tail', () => {
     expect(exitAt).toBeGreaterThan(resetAt);
   });
 
+  it('a live PTY exit emits the reset tail before the exit line, as a dead replay does', async () => {
+    const entry = createSession('live-exit-reset');
+    fakePlatform.killPty('live-exit-reset');
+
+    await vi.waitFor(() => expect(entry.terminal.writes).toContain('\r\n[Process exited with code 0]\r\n'));
+    const resetAt = entry.terminal.writes.indexOf(REPLAY_MODE_RESET);
+    expect(resetAt).toBeGreaterThanOrEqual(0);
+    expect(entry.terminal.writes.indexOf('\r\n[Process exited with code 0]\r\n')).toBeGreaterThan(resetAt);
+  });
+
   it('resume of a LIVE session leaves modes alone (no reset tail)', () => {
     // VS Code webview reattaching to a still-running PTY: the process owns its
     // modes, so replaying its buffer must not reset them.

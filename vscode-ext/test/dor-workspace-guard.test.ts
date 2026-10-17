@@ -24,9 +24,17 @@ describe('dorWorkspaceRefusal', () => {
   });
 
   it('refuses the Workspace-spanning listing and every container verb', () => {
-    expect(dorWorkspaceRefusal('surface.list', { scope: 'all' })).toMatch(/dor list --all/);
-    for (const method of ['workspace.list', 'workspace.new', 'workspace.rename', 'workspace.close', 'workspace.switch', 'workspace.move', 'workspace.pin']) {
-      expect(dorWorkspaceRefusal(method, {})).toMatch(/dor workspace/);
+    expect(dorWorkspaceRefusal('surface.list', { scope: 'all' })).toMatch(/ dor list --all is not available/);
+    expect(dorWorkspaceRefusal('workspace.list', {})).toMatch(/ dor list --workspaces is not available/);
+    for (const verb of ['new', 'rename', 'close', 'switch', 'move', 'pin']) {
+      expect(dorWorkspaceRefusal(`workspace.${verb}`, {})).toMatch(new RegExp(` dor workspace ${verb} is not available`));
     }
+    // unpin shares pin's method, told apart by `pinned`.
+    expect(dorWorkspaceRefusal('workspace.pin', { pinned: false })).toMatch(/ dor workspace unpin is not available/);
+  });
+
+  it('names dor move, which always spans, as the command refused', () => {
+    expect(dorWorkspaceRefusal('surface.move', { surface: 'surface:3', destination: 'workspace:2' }))
+      .toMatch(/ dor move is not available here/);
   });
 });

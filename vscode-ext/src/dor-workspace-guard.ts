@@ -8,7 +8,7 @@
  * reaches a webview.
  */
 
-import { parseWorkspaceRef, spansWorkspaces } from 'dor/protocol';
+import { SURFACE_CONTROL_METHODS, WORKSPACE_CONTROL_METHODS, parseWorkspaceRef, spansWorkspaces } from 'dor/protocol';
 import { DEFAULT_WORKSPACE_ID, DEFAULT_WORKSPACE_NAME } from '../../lib/src/lib/session-types';
 
 const REFUSAL = 'Dormouse in VS Code puts each Workspace in its own webview, so';
@@ -25,6 +25,16 @@ function namesThisWebviewsWorkspace(workspace: unknown): boolean {
   return id === DEFAULT_WORKSPACE_ID || name === DEFAULT_WORKSPACE_NAME;
 }
 
+/** The command a caller ran to send a Workspace-spanning request, so the
+ *  refusal names what they typed: agents act on this text. */
+function spanningCommand(method: string, params: Record<string, unknown> | undefined): string {
+  if (method === SURFACE_CONTROL_METHODS.move) return 'dor move';
+  if (method === WORKSPACE_CONTROL_METHODS.list) return 'dor list --workspaces';
+  if (method === SURFACE_CONTROL_METHODS.list) return 'dor list --all';
+  if (method === WORKSPACE_CONTROL_METHODS.pin && params?.pinned === false) return 'dor workspace unpin';
+  return `dor workspace ${method.slice('workspace.'.length)}`;
+}
+
 /**
  * Why this request cannot be answered here, or null to let it through. Reads
  * only the wire request, so it holds for every transport that reaches the
@@ -36,7 +46,7 @@ export function dorWorkspaceRefusal(method: string, params: Record<string, unkno
     return `${REFUSAL} it has no workspace '${String(workspace)}': this webview is ${DEFAULT_WORKSPACE_ID}, ${JSON.stringify(DEFAULT_WORKSPACE_NAME)}`;
   }
   if (spansWorkspaces(method, params)) {
-    return `${REFUSAL} dor workspace, dor list --workspaces and dor list --all are not available here`;
+    return `${REFUSAL} ${spanningCommand(method, params)} is not available here: it spans Workspaces`;
   }
   return null;
 }
