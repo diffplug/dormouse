@@ -44,7 +44,7 @@ It ends on the **next mouse-up inside the terminal content area** paired with a 
 
 **Sticky override** (`permanent`): mouse and wheel still going to the terminal.
 
-**Auto-clear on reporting off.** **Either override clears when the inside program stops requesting mouse reporting** (it exits, or DECRSTs `?9l`/`?1000l`/`?1002l`/`?1003l`). A **dead** session's replay ends in the `REPLAY_MODE_RESET` tail that DECRSTs mouse tracking (`docs/specs/transport.md` -> "Replay-time mode-reset tail (Dormouse-emitted)"), so a mode latched by a dead TUI cannot block selection in the restored pane.
+**Auto-clear on reporting off.** **Either override clears when the inside program stops requesting mouse reporting** (it exits, or DECRSTs `?9l`/`?1000l`/`?1002l`/`?1003l`). A **dead** Session's terminal gets the `REPLAY_MODE_RESET` tail that DECRSTs mouse tracking (`docs/specs/transport.md` -> "Replay-time mode-reset tail (Dormouse-emitted)"), so a mode latched by a dead TUI cannot block selection in its pane.
 
 Source of truth: `setOverride` / `setMouseReporting` in `lib/src/lib/mouse-selection.ts`; `MouseOverrideBanner` in `lib/src/components/wall/MouseOverrideBanner.tsx`, pinned by `lib/src/components/wall/mouse-chrome.test.tsx`.
 
@@ -57,9 +57,9 @@ Selection is available whenever the terminal handles the mouse (§3.5, §6.1).
 ### 3.1 Initiating a Selection
 
 - **A selection edge is the cell boundary nearest the pointer**, as xterm.js's own selection reads it: the earlier edge (reading order, or column order for a block) takes the cell after its boundary, the later edge the cell before (rationale). Source of truth: `dragCells` in `lib/src/lib/drag-cells.ts`, pinned by its test.
-- **Must begin selection only once a click-and-drag crosses the drag threshold**; plain clicks shift pane focus or activate hyperlinks. **Must capture mouse presses on xterm’s screen immediately** (rationale); that capture, and the plain click it must not break, are pinned by `lib/src/lib/terminal-mouse-router.test.ts`.
+- **Must begin selection only once a click-and-drag crosses the drag threshold**; plain clicks shift pane focus or activate hyperlinks.
 - On touch or pen, a primary pointer tap-and-drag takes the same path; non-primary touch pointers are ignored.
-- **A drag whose button comes up outside the webview iframe must still finalize**, by captured `pointerup` or the window-`mousemove` backstop (rationale).
+- **A drag whose button comes up outside the webview iframe must still finalize.**
 
 Source of truth: `lib/src/lib/terminal-mouse-router.ts`.
 
@@ -75,7 +75,7 @@ Source of truth: `lib/src/lib/terminal-mouse-router.ts`.
 A selection is anchored to the characters under it, not to screen coordinates: stored in absolute buffer rows (scrollback + viewport).
 
 - **Pure scroll** — vertical translation with no character changes — carries the selection along; coordinate math only, no matching.
-- **Must cancel a finalized selection on the next xterm render when its extracted selected text changes**; repaints elsewhere are irrelevant. Retake the text snapshot when the selection is finalized or moved (§4.3). **Never add a partial-match or content-tracking heuristic** (§9.1).
+- **Must cancel a finalized selection on the next xterm render when its extracted selected text changes**; repaints elsewhere are irrelevant. **Never add a partial-match or content-tracking heuristic** (§9.1).
 - **Terminal resize** carries a finalized linewise selection Dormouse owns, in the normal buffer, through xterm's reflow (rationale). Its editor stays open in the same format and same-labeled scope, else As selected; per-break edits drop unless the width held.
   - **Must cancel if an edge's line was trimmed or its cells no longer read as the selected text** (rationale).
   - **Must cancel any other.**
@@ -184,7 +184,7 @@ Every break is a mark that a click cycles keep → space → none; a scope or fo
 - **Must leave empty copies idle without writing.** **Must say a failed write failed**, keeping the selection for a retry. Without the Clipboard API, or refused by it, the write first falls back to `execCommand('copy')` (rationale).
 - **Must open the clipboard-failure report when a write fails both ways**, unless its caller opts out. **Its details never carry the copied text**; they go to the tracking issue the report links.
 
-Source of truth: `CopyEditor` in `lib/src/components/CopyEditor.tsx` (placement, motion, touch slop); `copySelection` in `lib/src/lib/copy-selection.ts`; `writeTextToClipboard` in `lib/src/lib/clipboard.ts`, pinned by `lib/src/lib/clipboard-write.test.ts`; `ClipboardFailureGlobal` in `lib/src/components/ClipboardFailureDialog.tsx`.
+Source of truth: `CopyEditor` in `lib/src/components/CopyEditor.tsx`; `copySelection` in `lib/src/lib/copy-selection.ts`; `writeTextToClipboard` in `lib/src/lib/clipboard.ts`, pinned by `lib/src/lib/clipboard-write.test.ts`; `ClipboardFailureGlobal` in `lib/src/components/ClipboardFailureDialog.tsx`.
 
 ### 4.6 The Program's Own Copy (OSC 52)
 
@@ -208,8 +208,6 @@ Source of truth: `parseOsc52` and `CLIPBOARD_OFFER_LIMIT` in `lib/src/lib/termin
 A token is whitespace-delimited and **runs on across soft wraps**. Trailing characters unlikely to be part of it — `.`, `,`, `;`, `:`, `!`, `?`, single quotes, double quotes — are stripped from its end, along with unmatched closing brackets (`)`, `]`, `}`, `>`); matched pairs are preserved. **Strip before pattern matching, never after** (rationale).
 
 **Must map detection offsets through xterm cells**, preserving wide characters, combining marks, and multi-codepoint emoji, skipping wrap padding. Source of truth: `detectTokenInBuffer` in `lib/src/lib/smart-token.ts`, pinned by `lib/src/lib/smart-token.test.ts`.
-
-`PATTERNS` in `lib/src/lib/smart-token.ts` holds the detected shapes in priority order, error locations (`<path>:line[:col]`) ahead of the generic path patterns. The generic patterns require an anchor (`~/`, `/`, `./`, `../`, or a drive letter), so a bare relative path like `src/foo.ts` qualifies only in its error-location form.
 
 ### 5.3 Extension Action
 
@@ -283,9 +281,9 @@ Paste reads the clipboard in three tiers, preferred in order:
 2. **Plain text.** The adapter's native `readClipboardText` where it has one, else `navigator.clipboard.readText()`. **Never reverse that order** (rationale). A non-empty string goes to the PTY (bracket-wrapped, §8.5).
 3. **Raw image data.** If file references and text are empty, save image bytes to a new temp directory and paste its path as tier 1. **Must use owner-only directory and owner-read/write file modes on Unix-like systems.** Windows storage limits: `docs/specs/security-local.md` -> "Browser panes". The file and directory are removed after about five minutes while the host remains running (rationale).
 
-**Tiers 1 and 2 are read in parallel** and the file reference wins; tier 3 is sequential because it allocates a temp file. Every tier empty ⇒ silent no-op.
+Every tier empty ⇒ silent no-op.
 
-One shared Node module, `standalone/sidecar/clipboard-ops.js`, serves both hosts by shelling out to each platform's clipboard tools: the sidecar (Tauri on macOS/Linux) and the extension host (VSCode on all platforms, via the `lib/clipboard-ops.cjs` shim — tiers 1 and 3 only, so VSCode's tier 2 falls through to `navigator.clipboard.readText()`). **Every spawn must pass `windowsHide`** (CREATE_NO_WINDOW; rationale).
+`standalone/sidecar/clipboard-ops.js` reads the clipboard for both hosts' Node side by shelling out to each platform's clipboard tools. **Every spawn must pass `windowsHide`** (CREATE_NO_WINDOW; rationale).
 
 **The standalone/Tauri build on Windows reads the Win32 clipboard directly in Rust**, dropping the subprocess, with the same temp-file cleanup for an image. Non-Windows Tauri stays on the sidecar path.
 

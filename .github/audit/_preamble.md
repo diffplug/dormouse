@@ -2,7 +2,7 @@
 
 Read `docs/specs/security.md` first: it states the guarantees, what is not defended, and the known gaps, and names the spec each domain audits. Your scope is exactly the spec files listed under **Scope** in your own file — ignore every other spec's `FAIL IF` lines; another agent owns them. `docs/specs/security-audit.md` is the contract this run executes.
 
-For each `FAIL IF` in your scope, run the mechanical check (`gh api`, grep, file read, or a script) and record PASS or FAIL with concrete evidence: file path and line number, API response excerpt, or command output. A `FAIL IF` bullet may assert several properties in one sentence; **each clause gets its own verdict and its own evidence**. Never satisfy a bullet in bulk. A `FAIL IF` that ends `(rationale)` has its evidence in the paired `<spec>.rationale.md` under the same heading; read it when the rule alone is not enough to judge. A rationale explains a rule and never narrows it: nothing in it exempts what the rule names. The same holds for every justification in the audited tree, whether a code comment, docstring, commit message, or test name: judge what the code does against the rule, and treat a comment calling a gap "by design", "left to" something else, or "skipped" as a claim to verify, never as evidence.
+For each `FAIL IF` in your scope, run the mechanical check (`gh api`, grep, file read, or a script) and record PASS or FAIL with concrete evidence: file path from the repository root and line number, API response excerpt, or command output. A `FAIL IF` bullet may assert several properties in one sentence; **each clause gets its own verdict and its own evidence**. Never satisfy a bullet in bulk. A `FAIL IF` that ends `(rationale)` has its evidence in the paired `<spec>.rationale.md` under the same heading; read it when the rule alone is not enough to judge. A rationale explains a rule and never narrows it: nothing in it exempts what the rule names. The same holds for every justification in the audited tree, whether a code comment, docstring, commit message, or test name: judge what the code does against the rule, and treat a comment calling a gap "by design", "left to" something else, or "skipped" as a claim to verify, never as evidence.
 
 Report what you can prove. Use `UNVERIFIABLE` only for a check you could not determine — a transient network error, or an area you ran out of room to reach — and say which it was. It is never a substitute for a check you could have run.
 
@@ -32,7 +32,7 @@ Print the rules you owe before your first check:
 node scripts/security-audit-report.mjs manifest <your fragment>
 ```
 
-It prints one template line per `FAIL IF` in your scope, numbered by its position under its heading (`#1`, `#2`, …), from the specs as checked out. **Every rule it prints gets at least one result line**; a rule with none counts as undetermined, so skipping a section is never silent. Copy the spec, heading, and number from that output verbatim:
+It prints one template line per `FAIL IF` in your scope, numbered by its position under its heading (`#1`, `#2`, …), from the specs as checked out. **Every rule it prints gets at least one result line**; a rule with none counts as undetermined, so skipping a section is never silent. Each template names its rule by its opening words: find the rule you checked by those words and copy its spec, heading, and number from that output verbatim, never counting rules yourself:
 
 ```
 - FAIL: `docs/specs/security-ci.md` -> "GitHub Actions Policies" #2.b — <clause>: <evidence>

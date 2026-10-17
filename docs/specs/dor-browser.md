@@ -37,7 +37,7 @@ Source of truth: `BrowserPanelParams` in `lib/src/components/wall/BrowserPanel.t
 **Must open focus-neutrally**, like `dor ensure`, except a Pane Context Menu placement and `docs/specs/layout.md` corner case #6.
 
 - **Must unpark a doored pane before killing it**, so its DOM dies with the Surface.
-- **Must kill an automated pane, or swap away from its renderer, through `closeBrowserSurface`**: it closes the session through the controller (or from params when none holds it) and releases every client resource; the Surface's work in flight never outlives the close ([Browser Host](#browser-host)).
+- **Must kill an automated pane, or swap away from its renderer, through `closeBrowserSurface`**: it closes the session and releases every client resource; the Surface's work in flight never outlives the close ([Browser Host](#browser-host)).
 - **Must release a Workspace transfer's browser controllers without closing their sessions**; the destination attaches to them, or opens the same named session a launch was opening. An abandoned launch closes only a session the host minted.
 - An iframe view's proxy grant ends with its lease ([Iframe Proxy Leases](#iframe-proxy-leases)).
 
@@ -57,7 +57,7 @@ Source of truth: `lib/src/lib/surface-sight.ts`, `useSurfaceVisibility` in `lib/
 
 **Must register a screen controller from both renderers, unconditionally**: chrome is keyed by it, and render swaps are separately host-gated.
 
-**Must follow CLI scheme selection in the URL editor**, plus bare loopback → `http://` and bare remote → `https://` (`normalizeNavUrl`; rationale), and refuse any other scheme, since no renderer opens one.
+**Must follow CLI scheme selection in the URL editor**, plus bare loopback → `http://` and bare remote → `https://` (`normalizeNavUrl`), and refuse any other scheme, since no renderer opens one.
 
 Source of truth: `lib/src/components/wall/SurfacePaneHeader.tsx`, `lib/src/components/wall/browser-url.ts`.
 
@@ -82,7 +82,7 @@ Source of truth: `openContextPort` in `lib/src/components/Wall.tsx`; `prepareFor
 
 ## Display Modal And Render Swaps
 
-The Display modal, opened by the header's Display trigger (`BrowserDisplayButton`), is the GUI for render mode and screencast resolution, Resize with pane or Fixed size. **Must offer only the render modes the Surface's screen controller declares** (`renderModes`), never the host's global capabilities: both presentations of a provider its host drives (`browserProviders`), the running one's screencast even where it does not; always `iframe`; for a Tool, only its declarable renders (`docs/specs/dor-tool.md` → Declaring tools). `setRenderMode` refuses any other mode.
+The Display modal is the GUI for render mode and screencast resolution, Resize with pane or Fixed size. **Must offer only the render modes the Surface's screen controller declares** (`renderModes`), never the host's global capabilities: both presentations of a provider its host drives (`browserProviders`), the running one's screencast even where it does not; always `iframe`; for a Tool, only its declarable renders (`docs/specs/dor-tool.md` → Declaring tools). `setRenderMode` refuses any other mode.
 
 The host owns Resize with pane (rationale), answering each engagement — a choice of Resize with pane, named in every size sent — with its state: applying, synced, or off.
 
@@ -157,7 +157,7 @@ Source of truth: `sessionForKey` in `dor-lib-common/src/browser-providers.ts`, `
 
 ### Browser Connection
 
-A Surface-id-keyed controller registry owns one connection per Surface, its end of a [Viewer Socket](#viewer-socket). **Must scope the controller to the Surface, not the panel**: it survives panel unmount and keeps the daemon/session alive while parked. **Must key a view's controller by provider as well as Surface id**: a controller's provider is fixed for its life.
+A Surface-id-keyed controller registry owns one connection per Surface, its end of a [Viewer Socket](#viewer-socket). **Must scope the controller to the Surface, not the panel**: it survives panel unmount and keeps the daemon/session alive while parked.
 
 A stream is what a launch or `attach` answers for a live browser — agent-browser's daemon stream port, the host's number for a Playwright connection — and what `view` takes back. **Never ask a daemon-spawning CLI verb for a stream**: streams come from a launch or relaunch answer, a `dor` handover, or `attach`.
 
@@ -209,11 +209,11 @@ Source of truth: `lib/src/components/wall/agent-browser-surface-controller.ts` (
 - **Must serialize a browser's launches, relaunching attaches and closes per native identity**, in arrival order. A close runs after the work already running, supersedes work queued, and cancels by webview-minted `requestId` the closing Surface's own unanswered launches and attaches, so one arriving after it opens nothing (rationale).
 - **Must refuse every operation but `launch`, `attach` and `close` on a browser a launch is replacing or a close is ending**, `view` included, until it is done, whichever Surface asks.
 - **Must bound every provider call a browser's queue waits on**, and shutdown's wait on it (rationale).
-- **Must close every headed browser at shutdown**, tracked before its launch starts, so quitting orphans no window.
+- **Must close every headed browser at shutdown, one still launching included**, so quitting orphans no window.
 
 **Must rebuild every request field by field in `parseBrowserRequest` before a provider sees it**, the security boundary: a known provider and operation, an http(s) navigation or new-session URL, bounded dimensions, a tab id that cannot read as an option, a session name neither CLI reads as an option or a path, and bounded request ids (rationale).
 
-**Must check `binaryPath` at the spawn**, since it crosses from the webview realm (rationale): accepted are the provider's executable by file name — POSIX- or drive-absolute, never a UNC or device path (`\\host\share`, `//host`, `\\?\`, `\\.\`), or bare and resolved on `PATH` — and the host's own override variable by exact match (`DORMOUSE_AGENT_BROWSER_BIN`, `DORMOUSE_PLAYWRIGHT_BIN`). A refused path is dropped, never fatal, so the host's own candidates run. The webview applies the same predicate before sending or storing one.
+What `binaryPath` may name is `docs/specs/security-local.md` -> "Spawned programs"; the host's own override variables are `DORMOUSE_AGENT_BROWSER_BIN` and `DORMOUSE_PLAYWRIGHT_BIN`. **A refused `binaryPath` is dropped, never fatal**, so the host's own candidates run (rationale).
 
 **Must land each crisp capture a CLI writes in a fresh, randomly named file in a private per-process `mkdtemp` directory** (mode `0700` on Unix), deleted however the capture ends; the directory goes at shutdown (rationale). Windows permission limits are `docs/specs/security-local.md` -> "Browser panes".
 
@@ -232,7 +232,7 @@ Source of truth: `createAgentBrowserProvider` in `lib/src/host/agent-browser-hos
 
 ### Playwright
 
-**Must use the user's installed `@playwright/cli`**, resolved from `DORMOUSE_PLAYWRIGHT_BIN` or `PATH` (`playwright-cli` under the `binaryPath` rule); the viewer requires CLI 0.1.19's local browser-binding endpoint. GUI launches use Chromium. Native commands keep Playwright semantics: `open` restarts, `goto` navigates. **Must pin every later command to a binding's cwd and executable**, since a Playwright session lives in its CLI project scope; `--session` uses the caller's own scope, GUI Connect the source terminal's cwd, a swap without one the host's.
+**Must use the user's installed `@playwright/cli`**, resolved from `DORMOUSE_PLAYWRIGHT_BIN` or `PATH` (`playwright-cli` under the `binaryPath` gate); the viewer requires CLI 0.1.19's local browser-binding endpoint. GUI launches use Chromium. Native commands keep Playwright semantics: `open` restarts, `goto` navigates. **Must pin every later command to a binding's cwd and executable**, since a Playwright session lives in its CLI project scope; `--session` uses the caller's own scope, GUI Connect the source terminal's cwd, a swap without one the host's.
 
 **Must connect with the validated installation's own Playwright client**, accepting only a unique registry entry matching session, workspace and library, with a local pipe endpoint and Chromium engine. **Never load modules from the registry's library path.** `attach` relaunches at the page only when the registry lists no browser for the session. **Must apply a host-reported headedness before the new stream**, so sync never sizes a headed window. Native CLI tabs and the pane share the selected tab.
 
@@ -240,7 +240,7 @@ Source of truth: `createAgentBrowserProvider` in `lib/src/host/agent-browser-hos
 
 **Must drop a screencast frame byte-identical to the last**, still acknowledging it, and pace acknowledgements (rationale). **Must write a page's viewport only through Playwright's own `setViewportSize`**, never a CDP metrics override from the host's session (rationale).
 
-Source of truth: `createPlaywrightProvider` in `lib/src/host/playwright-host.ts`; `resolvePlaywrightInstall` in `lib/src/host/playwright-install.ts`; `followParamsHeadedness` in `lib/src/components/wall/agent-browser-surface-controller.ts`. `lib/src/host/playwright-host.test.ts` runs against a real CLI when `DORMOUSE_PLAYWRIGHT_TEST_BIN` is set.
+Source of truth: `createPlaywrightProvider` in `lib/src/host/playwright-host.ts`; `resolvePlaywrightInstall` in `lib/src/host/playwright-install.ts`; `followParamsHeadedness` in `lib/src/components/wall/agent-browser-surface-controller.ts`.
 
 ## Iframe Renderer
 

@@ -2,8 +2,7 @@
  * One runner for every browser provider's `dor` passthrough (`dor agent-browser`,
  * `dor playwright`): identity flags, the host's binding, open-target resolution, the
  * executable, the forwarded run, and the Surface it binds — each provider a
- * `BrowserCliDescriptor` of what genuinely differs (docs/specs/dor-cli.md →
- * "Browser Surface Addressing").
+ * `BrowserCliDescriptor` of what genuinely differs.
  */
 import {
   BROWSER_PROVIDERS,

@@ -71,7 +71,7 @@ Source of truth: `pacedInputSegments` and `write` in `standalone/sidecar/pty-cor
 
 **Must advertise the lowest iTerm2 version that unlocks every version-gated behavior Dormouse supports, and never a version adding sequences that programs would then send and Dormouse mishandles** (rationale). **Never advertise** feature-specific support before the behavior exists.
 
-**Must strip another terminal's identity from the inherited environment before setting Dormouse's** — its session, version, and multiplexer variables (rationale).
+**Must strip another terminal's identity from the inherited environment before setting Dormouse's** — its session, version, and multiplexer variables, and a launching Claude Code session's markers (rationale).
 
 Source of truth: `ITERM2_COMPAT_VERSION` in `standalone/sidecar/pty-core.js` and `lib/src/lib/terminal-protocol.ts`, pinned together by `lib/src/lib/mirrored-constants.test.ts`; `FOREIGN_TERMINAL_ENV` in `standalone/sidecar/pty-core.js`.
 
@@ -82,7 +82,7 @@ Source of truth: `ITERM2_COMPAT_VERSION` in `standalone/sidecar/pty-core.js` and
 3. Listed PTYs resume with their launch shells (consumer: `docs/specs/mouse-and-clipboard.md` -> "8.6 Paste Content"), saved minimized ones as Doors; an empty list cold-restores.
 4. With no answer in time, a collector given `retryTimeoutMs` asks once more (rationale), then reports `timedOut`: an arrival refuses, since its shells are still running; a boot cold-restores.
 
-**A collection finishes only on its own answer**: a host serving several windows echoes the `requestInit` token on the `pty:list` and every `pty:replay` behind it, and the collector ignores a different one (rationale). **An answer carrying no token is taken** — the hosts that echo none (VS Code, Pocket, the website) run one collector per JS realm. **A collection that timed out is not one that found no PTYs** (`LivePtys`): restoring over it starts a second set of shells. **`resumeOrRestore` and `restoreWindow` give `retryTimeoutMs` only when the saved session names a terminal pane.** Source of truth: `collectLivePtys` in `lib/src/lib/reconnect.ts`.
+**A collection finishes only on its own answer**: a host serving several windows echoes the `requestInit` token on the `pty:list` and every `pty:replay` behind it, and the collector ignores a different one (rationale). **An answer carrying no token is taken** — the hosts that echo none (VS Code, Pocket, the website) run one collector per JS realm. **A collection that timed out is not one that found no PTYs** (`LivePtys`): restoring over it starts a second set of shells. Source of truth: `collectLivePtys` in `lib/src/lib/reconnect.ts`.
 
 **Seeded titles reject the sentinels.** Saved pane and door titles come back through `setTerminalUserTitle()`, which rejects the reserved `<idle>` prefix (`docs/specs/terminal-state.md` → Supported OSC Inputs); the seed also skips `<unnamed>`, the default panel placeholder (rationale).
 
@@ -100,9 +100,9 @@ Source of truth: `lib/src/lib/terminal-report-filter.ts`, pinned by `lib/src/lib
 
 #### Replay-time mode-reset tail (Dormouse-emitted)
 
-**After a *dead* Session's scrollback replays, Dormouse writes the fixed `REPLAY_MODE_RESET` tail**, returning every mode a dead program could leave latched to its default (rationale). **Never on a live resume**, where the running process owns its modes; a cold `restoreTerminal` replays nothing to reset.
+**When a Session's process is gone and its terminal stays — a dead replay, a reap, an exit — Dormouse writes the fixed `REPLAY_MODE_RESET` tail**, returning every mode a dead program could leave latched to its default, before any exit notice (rationale). **Never on a live resume**, where the running process owns its modes; a cold `restoreTerminal` replays nothing to reset.
 
-Source of truth: `REPLAY_MODE_RESET` in `lib/src/lib/terminal-report-filter.ts`, written only by `resumeTerminal` in `lib/src/lib/terminal-lifecycle.ts`.
+Source of truth: `REPLAY_MODE_RESET` in `lib/src/lib/terminal-report-filter.ts`.
 
 #### Transferring a Workspace
 
@@ -112,7 +112,7 @@ A Workspace can move from one webview to another with its Sessions still running
 - **Split at a mark stamped in the stream, then suppress until the replay.** The host routes an id's output to the source until its `pty:marked` line — behind every `pty:data` already sent, ahead of every later one — and drops it from there until the target's replay reaches it. The source serializes its buffer at the mark as the arrival's content; the target writes it, then the since-mark replay: no duplicate or lost bytes at the seam, and the source xterm's retained screen and scrollback survive beyond the host's bounded tail (output already trimmed from xterm is not recovered). **An id the host never marked is serialized anyway and replayed whole.** Suppression fails open after a bound (rationale); the message sequence and hand-back are `docs/specs/standalone.md` → "Arrival queue".
 - **Must include retained, naturally exited buffers in explicit marked requests**, with `alive: false` and their exit code, replaying their since-mark tail; ordinary discovery stays live-only.
 - **Ask for exactly the moving ids, at their marks.** `pty:requestInit` names them, and a marked id replays only its output since the mark. **Omitted ids are not empty ids**: a computed set that came out empty is a no-op, never every PTY in the process.
-- **Must replay a transfer at its source grid and drain parsing before mounting the target Wall**, then fit the target pane. **Must preserve mouse encoding as well as tracking**, including the SGR and SGR-pixel encodings xterm's serializer omits.
+- **Must preserve mouse encoding as well as tracking across a transfer**, including the SGR and SGR-pixel encodings xterm's serializer omits.
 - What else travels: Tools `docs/specs/dor-tool.md` → Persistence and hosts, alerts `docs/specs/alert.md` → Live Workspace transfer, semantic state `docs/specs/terminal-state.md` → Core Model.
 
 Source of truth: `captureTransferContent` in `lib/src/components/wall/workspace-transfer.ts`; `releaseSession` in `lib/src/lib/terminal-lifecycle.ts`; `mark` / `list` in `standalone/sidecar/pty-core.js`.
@@ -121,13 +121,13 @@ Source of truth: `captureTransferContent` in `lib/src/components/wall/workspace-
 
 ## Message protocol
 
-Source of truth: the message schema in `vscode-ext/src/message-types.ts` (`WebviewMessage`, `ExtensionMessage`; other adapters import or mirror it), persisted-session types in `lib/src/lib/session-types.ts`, webview handlers in the adapter modules (`lib/src/lib/platform/vscode-adapter.ts`, `lib/src/lib/platform/fake-adapter.ts`), host handlers in the per-adapter message router. The schema is exhaustive there; below are only the contracts the types do not carry.
+Source of truth: the message schema in `vscode-ext/src/message-types.ts` (`WebviewMessage`, `ExtensionMessage`; other adapters import or mirror it). The schema is exhaustive there; below are only the contracts the types do not carry.
 
 **Sender authenticity is the adapter's job, not the protocol's**, and **an adapter whose transport is reachable by page content must authenticate before it branches on `type`.** Tauri uses private IPC; browser-dev: `docs/specs/standalone.md` → "Standalone browser-dev harness"; VS Code: `docs/specs/vscode.md` → "Webview message authentication".
 
 **Reaching the Burrow is one optional adapter member.** `burrow?: BurrowLink` is present exactly when a PTY-owning process sits behind the webview — standalone's sidecar, VS Code's extension host — and absent on the website. Every adapter uses the shared webview half, `lib/src/host/remote/link-client.ts`, so no host settles a command differently, and **an ask is always answered even when nothing matches**. Both ends compile against `lib/src/host/remote/service-protocol.ts`; `BurrowLink` in `lib/src/lib/platform/types.ts` owns the call shapes. **Nothing crossing this seam carries authority** (`docs/specs/remote-security-model.md`). Each host's carrier: `docs/specs/vscode.md` → "Burrow: a service in the extension host", `docs/specs/standalone.md` → "Burrow service".
 
-**Every webview installs the peer-surface responder, idempotently per link** (rationale), and the Burrow asks it what only a webview knows — a pane's name, its focus, its xterm size. **An ask collects at most one answer per webview, keyed by which webview answered, never by how many have**; `ASK_BUDGET_MS` bounds the fan-out, and whatever answered is the best available snapshot. Directory merging, attach selection, release, and late answers: `docs/specs/remote-api.md` → "Directory" and "Attachment invariants". Source of truth: `installPeerSurfaceResponder` in `lib/src/remote/burrow/peer-surfaces.ts`; `createAskSurfaceProvider` in `lib/src/host/remote/ask-surface-provider.ts`.
+**Every webview installs the peer-surface responder, idempotently per link**, and the Burrow asks it what only a webview knows — a pane's name, its focus, its xterm size. **An ask collects at most one answer per webview, keyed by which webview answered, never by how many have**; `ASK_BUDGET_MS` bounds the fan-out, and whatever answered is the best available snapshot. Directory merging, attach selection, release, and late answers: `docs/specs/remote-api.md` → "Directory" and "Attachment invariants". Source of truth: `installPeerSurfaceResponder` in `lib/src/remote/burrow/peer-surfaces.ts`; `createAskSurfaceProvider` in `lib/src/host/remote/ask-surface-provider.ts`.
 
 **Workspace union status adds no message** (`docs/specs/alert.md` → Workspace union).
 
@@ -173,8 +173,6 @@ OSC parsing and stripping for those rows: `docs/specs/terminal-escapes.md` → "
 | Host → webview | sidecar `voice:result` → invoke result | that op's answer |
 | Host → every webview | sidecar `voice:status` | the status after each saved `configure` |
 
-**Every window caches the status**: it asks `status` once its `voice:status` listener is live, and again when the harness's event stream reconnects, then takes each broadcast; **an answer never overrides a broadcast that arrived after its request**.
-
 Source of truth: `ManagedVoicePort` in `lib/src/lib/platform/managed-voice-types.ts`; `createManagedVoicePort` in `standalone/src/managed-voice-port.ts`; `createManagedVoiceHost` in `lib/src/host/managed-voice-host.ts`.
 
 ## Surface ids
@@ -195,12 +193,12 @@ Carriers: the `boot_reserve_ids` and `surface_reserve_ids` invokes (standalone);
 
 **Surface kinds in the snapshot.** Each `PersistedPane` records a `surfaceType` (`docs/specs/glossary.md`): `'terminal'` — the default, **omitted from the row** so terminal snapshots stay byte-identical — `'browser'`, or `'tool'`, whose extra `command` and `tool` fields are `docs/specs/dor-tool.md` → Persistence and hosts. **A pane lacking it reads as `'terminal'`.** A browser pane mints no PTY on restore and survives resume without one, rebuilding from the persisted layout (visible) or `PersistedDoor.params` (minimized). **Must reject a layout whose leaves differ from the visible pane set during restore or resume, and omit visible browser ids from the terminal fallback.**
 
-**Each mounted Workspace publishes its `PersistedSession` to a Window collector**, which orders them by the Workspace store and writes the whole Window through one debounced writer the host installs at boot (rationale).
+**Each mounted Workspace publishes its `PersistedSession` to a Window collector**, which orders them by the Workspace store and writes the whole Window at once.
 
 - **A Workspace with neither a published nor a boot-seeded session is dropped rather than written empty**, so a mid-boot snapshot cannot blank a restored Workspace.
 - **A Workspace's save compares against its own previous record** — seeded from disk until its Wall publishes — never the Window's active one, or a dead PTY's retained cwd and alert would come from the wrong Workspace.
 - **Reordering, renaming, pinning, or switching the active Workspace writes too.** **Always write `nameIsAuto`**.
-- **Must publish both Workspace records in one synchronous step with a Surface move's ownership change**, unprobed and behind one Window write (`pagehide` included), fencing saves collected before or during the change and retaining a departed Session's previous cwd/alert in the destination.
+- **Must publish both Workspace records with a Surface move's ownership change, behind one Window write** (`pagehide` included), never overwritten by a save collected before or during the change, and retaining a departed Session's previous cwd/alert in the destination.
 - **VS Code does not use the collector** — each webview persists one bare `PersistedSession`, its single Workspace, through its own per-surface state API (`docs/specs/vscode.md`).
 
 **The Window wrapping lives at the standalone adapter boundary, never in the shared save/restore code**, which still operates on a bare `PersistedSession` per Workspace (`docs/specs/standalone.md` → Persistence). **A Window-persisting adapter answers through `getWindowState` / `saveWindowState`, and answers nothing on the bare-Session `getState` / `saveState` pair** — its blob is a Window and every shared reader of `getState` wants a Session.
@@ -273,7 +271,7 @@ Source of truth: `openPortRequestTimeoutMs` in `lib/src/lib/platform/types.ts`; 
 
 ## Auxiliary helper metadata
 
-**Must carry helper parent identity and captured autorun command in live PTY metadata**, validating that the parent is owned and is not itself a helper. Promotion clears that association without restarting the PTY. Reconnect restores helper entries before reconciling the primary layout, excluding them from ordinary orphan-pane recovery; a missing parent recovers its helper as an ordinary Pane, and recovered helpers disable automatic refresh. Helper scrollback and editor buffers are never written to a Session snapshot.
+**Must carry helper parent identity and captured autorun command in live PTY metadata**, validating that the parent is owned and is not itself a helper. Promotion clears that association without restarting the PTY. Reconnect restores helper entries as helpers, outside the primary layout and its orphan-pane recovery; a missing parent recovers its helper as an ordinary Pane, and recovered helpers disable automatic refresh. Helper scrollback and editor buffers are never written to a Session snapshot.
 
 **Must expose terminal context operations through correlated host requests**, reporting errors and timeouts: each adapter forwards every `TerminalContextRequest` to its PTY host and answers on the same correlation. The VS Code router checks Workspace ownership for per-terminal operations and helper parent metadata. Directory opening follows `docs/specs/security-local.md` → Terminal context directory actions, and inspection failure `docs/specs/terminal-context.md` → Helper lifecycle.
 

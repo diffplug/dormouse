@@ -53,7 +53,7 @@ export interface ThemePickerProps {
   /**
    * Offer "Install theme from OpenVSX", which fetches open-vsx.org from the
    * page. Only the website passes it: no network policy governs that fetch,
-   * and Standalone's content policy blocks it (docs/specs/theme.md).
+   * and Standalone's content policy blocks it.
    */
   offerStore?: boolean;
 }

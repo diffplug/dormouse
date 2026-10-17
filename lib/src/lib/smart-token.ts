@@ -21,6 +21,9 @@ interface Pattern {
   re: RegExp;
 }
 
+// In priority order. The generic path patterns need an anchor (`~/`, `/`,
+// `./`, `../`, a drive letter), so a bare relative path like `src/foo.ts`
+// qualifies only in its error-location form.
 const PATTERNS: Pattern[] = [
   { kind: 'url', re: /^https?:\/\/\S+$/ },
   { kind: 'url', re: /^file:\/\/\S+$/ },

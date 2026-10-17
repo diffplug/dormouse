@@ -18,7 +18,7 @@
 - **A new install starts at Nothing.** **Must save the default at the service's first read, so it never flips**: `relay` where an enrollment for the baked origin exists — an upgraded self-host install — else `nothing` (rationale). A VS Code window with no service reads the default unsaved.
 - **A stored level the build does not offer, or a stored record that is not a policy — an unparseable file included — reads as `nothing`**; the first stays on disk, as an enrollment for another origin does.
 - **Until the policy is read, the service reads it as `nothing`**; a read that fails leaves the Burrow down, and `setNetworkPolicy` saves over it.
-- **Every level but `nothing` runs the persistent Burrow** on an enrollment for the baked origin (`runsBurrow`); under `nothing` it is held and reported — `enrolled`, `connection: 'stopped'`. **Must start `BurrowRuntime` on the level's `directPeeringFor`, restarting it on any change `samePaths` sees**; each session hears the goodbye as it stops.
+- **Every level but `nothing` runs the persistent Burrow** on an enrollment for the baked origin (`runsBurrow`); under `nothing` it is held and reported — `enrolled`, `connection: 'stopped'`. Each of its sessions hears the goodbye when a policy change stops or restarts it (below).
 - **`setNetworkPolicy` takes a policy only exactly**: its three keys, a level the build offers, at most 32 CIDRs, and a boolean `autoUpdate`. **Must save each CIDR in its canonical form** (`canonicalCidr`), refusing one that does not parse or repeats once canonical, and answer what it saved. **Must save before acting**: a save that fails changes nothing.
 - **Must end the live one-time link or session with `user-ended`, and rest an ended one, on a change to the level, or to the allowed networks under `local`, and start, stop, or restart the relay socket to match**; a narrowed policy never leaves an old path exempt. **The allowed networks under any other level, and `autoUpdate`, end nothing** (rationale).
 - **Every change is a `network-policy` event** carrying what `networkPolicy` answers: the policy, the build's levels, the path refusal held ("Local networks"), and this machine's interfaces with their canonical prefixes, loopback and link-local left out, each `lan`, `vpn`, or `virtual`. **A Tailscale interface — named `tailscale*`, or carrying an `fd7a:115c:a1e0::/48` address — offers a host route as its tailnet range**, `100.64.0.0/10` or `fd7a:115c:a1e0::/48`; any other host route is offered as reported (rationale).
@@ -44,7 +44,7 @@ Under `local` each runtime — a one-time link, or the persistent Burrow — is 
 - **Never trust SDP candidates, Hosted-observed addresses, or Client claims** as path evidence; only the Burrow's own ICE agent answers (rationale).
 - **A refusal is a violation**: it ends the session `network-not-allowed` (`docs/specs/one-time.md` -> "Burrow runtime"), switched or not.
 - **The check gates terminal traffic, not approval** (rationale): an off-network phone holding a link can reach the two-digit prompt and still receives no terminal byte.
-- **A paired phone's session is direct-only**, with the one-time rule (`docs/specs/one-time.md` -> "Burrow runtime"): **`BurrowRuntime` makes a session direct-only exactly where the path policy is held**, says so in its outcome (`directOnly`), and hands the flag to `EstablishedE2eSession`, which ends it unread on an application message off the Relay, on a refused path, on a given-up attempt, or not direct both ways by `DIRECT_ONLY_DEADLINE_MS` — each with the goodbye.
+- **A paired phone's session is direct-only**, with the one-time rule (`docs/specs/one-time.md` -> "Burrow runtime"): **`BurrowRuntime` makes a session direct-only exactly where the path policy is held**, and says so in its outcome (`directOnly`); the session ends unread on an application message off the Relay, on a refused path, on a given-up attempt, or not direct both ways by `DIRECT_ONLY_DEADLINE_MS` — each with the goodbye.
 - **Pocket sends no protocol-v1 on a direct-only session before both directions are direct.** A connect that never gets there ends the session with fixed copy, the path refusal's where the goodbye names the phone's address (below); **the generic copy never says to join a network**. **A Burrow ending meanwhile is that connect's failure alone**, never burrow loss.
 - **Never describe the level as proof of proximity** — a range is an address range, which another network can reuse, and a permitted peer can forward.
 - **Never enroll Hosted into a customer's tailnet** or mint per-customer hostnames.
@@ -63,7 +63,7 @@ Under `local` each runtime — a one-time link, or the persistent Burrow — is 
 - **The goodbye carries only the phone's address** (`docs/specs/remote-api.md` -> Transport), on the relay before the switch; the phone shows `networkNotAllowedMessage`, **never told the allowed networks, nor that a `reported` address is off them**; no address, or no goodbye, keeps the generic copy.
 - **The service holds the latest in memory**, from both runtimes, on `networkPolicy` until `dismissPathRefusal`, **which clears only the refusal held at its arrival**; a one-time ending carries it. The laptop shows `pathRefusalSentence`, **blaming the phone's network only for an `end: 'remote'` that is not `reported`**.
 
-Source of truth: `lib/src/host/remote/local-networks.ts`; `DirectPeer` in `lib/src/remote/direct/direct-peer.ts`; `lib/src/remote/direct/path-refusal.ts`; `EstablishedE2eSession` in `lib/src/remote/burrow/established-session.ts`; `PocketClient.connect` in `lib/src/remote/client/pocket-client.ts`. By hand against a browser, `scripts/direct-interop/run.mjs --allow` (rationale).
+Source of truth: `lib/src/host/remote/local-networks.ts`; `DirectPeer` in `lib/src/remote/direct/direct-peer.ts`; `EstablishedE2eSession` in `lib/src/remote/burrow/established-session.ts`; `PocketClient.connect` in `lib/src/remote/client/pocket-client.ts`.
 
 ## Anywhere
 
@@ -73,12 +73,12 @@ Under `anywhere` a one-time link opens with no network allowed, and its attempt 
 - **Must choose a runtime's STUN and its path policy together, from the policy it opens or starts under**, and hold both for its life: a change to either ends it ("Policy").
 - **Clients Hosted serves must always gather through Cloudflare STUN; Clients a self-host Relay serves, through none.** No policy crosses the wire, and a Client's extra candidates cannot widen Local networks, whose Burrow checks the path (rationale).
 - **One Pocket bundle serves both, choosing its factory by deployment**: Hosted's staging writes `deployment.json` beside it, and any other complete answer there (a shell, a 404) reads as self-host. **Never put the file in a Pocket build**; the staging refuses one.
-- **Pocket must never build a peer before it knows its deployment**: Connect and pairing await the read (`POCKET_DEPLOYMENT_READ_TIMEOUT_MS`); a complete answer is cached for the page, and an incomplete one (or a 5xx) fails retryably, read again next time.
+- **Pocket must never build a peer before it knows its deployment**: Connect and pairing await the read, and one that does not complete (a 5xx included) fails them retryably.
 - **A paired phone may fall back to relaying through Hosted**: under Anywhere the persistent Burrow holds no path policy, so its sessions are not direct-only.
 - **Never TURN** (direct-only: `docs/specs/one-time.md` -> "Burrow runtime"; rationale).
 - **Never proxy STUN over an HTTP or WebSocket endpoint**; only STUN on the WebRTC socket observes its mapping.
 
-Source of truth: `lib/src/remote/direct/ice-servers.ts`; `directPeeringFor` in `lib/src/host/remote/direct-peering.ts`; `lib/src/remote/client/browser-direct-peer.ts`; `lib/src/remote/pocket-app/deployment.ts`. By hand, `scripts/direct-interop/run.mjs --stun` (rationale); audited at `docs/specs/security-remote.md` -> "Direct path".
+Source of truth: `lib/src/remote/direct/ice-servers.ts`; `directPeeringFor` in `lib/src/host/remote/direct-peering.ts`; `lib/src/remote/client/browser-direct-peer.ts`; `lib/src/remote/pocket-app/deployment.ts`. Audited at `docs/specs/security-remote.md` -> "Direct path".
 
 ## Updates
 
@@ -86,7 +86,7 @@ Source of truth: `lib/src/remote/direct/ice-servers.ts`; `directPeeringFor` in `
 - **Must remind in the Baseboard once the last successful check is 7 days old, and at most once per 7 days**, automatic checks on or off (rationale). Before any check, the clock starts at the first launch. The reminder reads local timestamps and contacts nothing.
 - **Never in a self-host build or VS Code**, which have no updater.
 
-The lifecycle is `docs/specs/auto-update.md` → "How it works". Source of truth: `runUpdateCheck`, `remindIfDue`, and `checkNow` in `standalone/src/updater.ts`, pinned by `standalone/src/updater.test.ts`.
+The lifecycle is `docs/specs/auto-update.md` → "How it works". Source of truth: `standalone/src/updater.ts`.
 
 ## Settings → Network
 
@@ -100,7 +100,6 @@ The Settings dialog's Network topic (`docs/specs/alert.md` -> "Settings dialog")
 - **Allowed networks**, under `local`: one switch per interface. **Must list every allowed range no switch reading On covers**, with Remove; **switching one off keeps a range another switch reading On needs**. A held path refusal shows here, with Dismiss.
 - **Phones**: under any level but `nothing`, the Remote control choices (`docs/specs/relay.md` -> "Remote control, in the Settings dialog"); under `nothing`, the levels that allow a phone, and Disconnect for a held enrollment, which is local.
 - **Updates**: a self-host build says it never updates itself, and a host with `hostOwnsUpdates` (VS Code) names the Marketplace. Any other build offers the automatic-check switch, absent under `nothing`, and **only with the platform's `updates` port** (`docs/specs/auto-update.md` -> "Threading") the last successful check and Check now.
-- **The Baseboard holds the policy store for the window's life**, so its settings preview reads the level on its first frame; the Network panel re-reads on mount, and **a failed re-read never replaces a policy already read**.
 
 Source of truth: `NetworkSettings` and `connectionsFor` in `lib/src/components/NetworkSettings.tsx`; `lib/src/remote/burrow/network-policy-store.ts`.
 

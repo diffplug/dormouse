@@ -23,7 +23,7 @@ Device routes (`website/src/routes.ts`):
 
 **Must derive progress from app events and semantic snapshots, never touch the tiling engine.**
 
-- **Must credit a keyboard split before its automatic passthrough transition**, and tell the user to re-enter command mode for the following navigation item (rationale).
+- **Must credit a keyboard split from its `split` event alone, whatever the mode**, and tell the user to re-enter command mode for the following navigation item.
 - **Must credit `kb-arrows` only on command-mode selection of a distinct pane**; an arrow or click counts, a swap's resulting focus does not.
 - **Must credit an alert ring only on a transition into `ALERT_RINGING`, by the source its detail names**, so a ring already standing when first seen credits nothing.
 - **Must credit the `dor open` section from the command lines the shells report, and `op-paste` from the playground filesystem's paste report**, never from a hook in the playground `dor` or lib.
@@ -32,12 +32,12 @@ Source of truth: `TutRunner` in `website/src/lib/tut-runner.ts`; `TutDetector` i
 
 ## Layout
 
-- **The desktop page must restore its own theme** with `useRestoredTheme(WEBSITE_DEFAULT_THEME_ID)` (`website/src/lib/website-theme.ts`), which declares the host fallback the Settings picker re-resolves through (rationale).
-- `/playground/desktop` runs `WorkspaceWindow` (`FakePtyAdapter`, `initialMode="passthrough"`) from one fresh Workspace. **Must seed its three-pane L-shape as an explicit Lath snapshot** — `restoredLathLayout` from `DESKTOP_PLAYGROUND_LAYOUT` — never the synchronous `initialPaneIds` path (rationale); `website/src/lib/playground-desktop-layout.test.ts` pins it. `DESKTOP_PANES` in the same file owns each seed's id, command, and title; **`tut-boxed` is the Auto-copy + `cp-override` target** (rationale). **Titles are seeded as pending shell opts** (`setPendingShellOpts(id, { title })`) before the Wall mounts, and a user-pin outranks the engine fallback (`docs/specs/terminal-state.md` → "Header Derivation").
+- **The desktop page must restore its own theme** with `useRestoredTheme(WEBSITE_DEFAULT_THEME_ID)` (rationale).
+- `/playground/desktop` runs `WorkspaceWindow` (`FakePtyAdapter`, `initialMode="passthrough"`) from one fresh Workspace. **Must seed its three-pane L-shape as an explicit Lath snapshot** — `restoredLathLayout` from `DESKTOP_PLAYGROUND_LAYOUT` — never the synchronous `initialPaneIds` path (rationale); `website/src/lib/playground-desktop-layout.test.ts` pins it. `DESKTOP_PANES` in the same file owns each seed's id, command, and title; **`tut-boxed` is the Auto-copy + `cp-override` target** (rationale).
 
-Every visible pane gets a `TutorialShell` via `PlaygroundShellRegistry`. **`ensureShell` must stay idempotent** — `paneAdded` covers every pane that becomes visible, and `FakePtyAdapter.onPtySpawn` covers the seed panes again, auto-launching each seed's command exactly once (rationale).
+Every visible pane gets a `TutorialShell` via `PlaygroundShellRegistry`.
 
-`/playground/pocket` runs `MobileWall` with **`pocket-tut`** (active, `TutRunner` on `POCKET_TUTORIAL_PROFILE`) and **`pocket-changelog`** (`ChangelogRunner`), and starts a `TutDetector` over the same shared stores. **Must credit Pocket gesture items only on the active tutorial Session's Gesture navigation screen**, through `MobileTerminalUi.onGestureScroll` and `onGestureInput`.
+`/playground/pocket` runs `MobileWall` with **`pocket-tut`** (active, `TutRunner` on `POCKET_TUTORIAL_PROFILE`) and **`pocket-changelog`** (`ChangelogRunner`), and starts a `TutDetector` over the same shared stores. **Must credit Pocket gesture items only on the active tutorial Session's Gesture navigation screen**.
 
 Source of truth: `PlaygroundDesktop` in `website/src/pages/PlaygroundDesktop.tsx`; `PocketPlayground` in `website/src/pages/PocketPlayground.tsx`.
 
@@ -120,13 +120,13 @@ Source of truth: `installPlaygroundFs` in `website/src/lib/playground-fs/index.t
 
 Hooks in `dormouse-lib` / `MobileTerminalUi` that exist for tutorial observability:
 
-- **`WallEvent.kill` / `move` / `paneAdded`** — discriminants on the `WallEvent` union. `kill` fires from `killPaneImmediately`, so every kill path credits `kb-kill`. **`move` must fire from both** the Cmd/Ctrl-Arrow swap in `lib/src/components/wall/keyboard/handle-pane-shortcuts.ts` **and** the center-drop swap in `Wall.onProposeMove` (rationale). **`paneAdded` fires once per pane that becomes visible** — seed ids, splits, dor surfaces, restores, auto-spawn — with seeds announced explicitly.
+- **`WallEvent.kill` / `move` / `paneAdded`** — discriminants on the `WallEvent` union. `kill` fires on every kill path, so each credits `kb-kill`. **`move` must fire on every pane swap, keyboard or drag** (rationale). **`paneAdded` fires once per pane that becomes visible**, seeds included.
 - **`FakePtyAdapter.sendOutput`** — pushes data through the real protocol parser as if the PTY produced it (rationale). **Unlike `writePty` it is not suppressed while a scenario is playing.**
 - **`FakePtyAdapter.onPtySpawn`** — fires synchronously inside `spawnPty`, before the scenario plays, so a page attaches a shell without racing `TerminalPane`'s mount.
-- **`resolveAlertDeliveryPolicy`** (`lib/src/lib/alert-delivery-model.ts`) — the active Workspace's speech policy, the app default under its override; **must credit `al-speak` only on a turn from off to on**, seeded at `start()`, so a setting saved on an earlier visit grants nothing.
+- **`resolveAlertDeliveryPolicy`** (`lib/src/lib/alert-delivery-model.ts`) — the active Workspace's speech policy; **must credit `al-speak` only on a turn from off to on**, so a setting saved on an earlier visit grants nothing.
 - **`MobileTerminalUi.onGestureInput`** — optional, reports radial-menu input only; **must fire before the input is sent**, so the final Escape is credited before it leaves the tutorial screen. Pinned by `lib/src/components/MobileTerminalUi.test.tsx`.
 - **`MobileTerminalUi.onGestureScroll`** — optional, reports signed line counts only for edge scrolling.
-- **`subscribeToActiveTheme` / `getActiveThemeId`** (`lib/src/lib/themes/`) — the active theme, watched to credit `th-theme`. **Must seed the detector's previous theme at `start()` and compare consecutive ids**, so boot-time restore cannot grant the item and choosing the startup theme after a reset still can. Pinned by `website/src/lib/tut-detector.test.ts` (rationale).
+- **`subscribeToActiveTheme` / `getActiveThemeId`** (`lib/src/lib/themes/`) — the active theme, watched to credit `th-theme`. **Must credit `th-theme` only on a theme change after the detector starts**, so boot-time restore cannot grant the item and choosing the startup theme after a reset still can. Pinned by `website/src/lib/tut-detector.test.ts` (rationale).
 
 Source of truth: `WallEvent` in `lib/src/components/wall/wall-types.ts`, emitted from `lib/src/components/Wall.tsx`; `FakePtyAdapter` in `lib/src/lib/platform/fake-adapter.ts`; `MobileTerminalUi` in `lib/src/components/MobileTerminalUi.tsx`.
 

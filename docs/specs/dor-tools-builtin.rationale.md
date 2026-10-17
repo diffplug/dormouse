@@ -18,7 +18,7 @@ Without a title, a viewer's header falls back to its running command, `dor __vie
 
 ## Markdown editor
 
-MDXEditor 4.3 parses `<!-- … -->` and discards it, and trims and re-serializes the whole document on export; without the comment node and style detection, saving a typical README after a one-word edit deleted its comments and rewrote every `-` bullet as `*` (measured 2026-10). Its `onChange` reports the first export after load as normalization, which is how a load stays clean.
+MDXEditor 4.3 parses `<!-- … -->` and discards it, and trims and re-serializes the whole document on export; without the comment node and style detection, saving a typical README after a one-word edit deleted its comments and rewrote every `-` bullet as `*` (measured 2026-10).
 
 Image sizes live in the document because GitHub shows an `<img>` without a `width` pixel for pixel: a Retina screenshot shown here at its recorded scale but left unsized in the file came out twice as large on GitHub. Writing the width on paste, and rescaling it when the image editor crops or resizes the file, keeps the two renderings alike (2026-10).
 

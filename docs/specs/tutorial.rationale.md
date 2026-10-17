@@ -2,10 +2,6 @@
 
 > Informative companion to [tutorial.md](tutorial.md): the evidence behind its rules, keyed by that spec's headings (AGENTS.md → "What, not why"). Nothing here is normative.
 
-## Architecture
-
-**How the split credit beats the mode change.** `addSplitPanel` fires the `split` `WallEvent` synchronously, while the split's automatic passthrough transition emits `modeChange` from a later effect; the detector therefore sees the split before the transition that would disqualify it.
-
 ## Layout
 
 **Why the page restores its own theme.** Theme selection moved out of `SiteHeader` into the Wall's Settings dialog, so nothing on the page guarantees a picker ever mounts. `useRestoredTheme(WEBSITE_DEFAULT_THEME_ID)` makes the restore unconditional, and declares the host fallback the Settings picker later re-resolves through.
@@ -13,10 +9,6 @@
 **Why the desktop layout is an explicit Lath seed.** The synchronous `initialPaneIds` path creates its leaves before the later ones have measured geometry, so it cannot reliably choose alternating split axes — the L-shape comes out however the measurements land. A valid Lath snapshot fixes the shape, and with it the one vertical and one horizontal divider.
 
 **Why `tut-boxed` is the copy target.** Its wrapped detail lines exercise the copy editor's Auto format, and its TUI captures the mouse, the state `cp-override` exists to demonstrate. Pocket's `pocket-changelog` session is there for the same two reasons.
-
-**Why `ensureShell` runs from two directions.** `paneAdded` covers splits, restores, dor surfaces and the seed ids alike, but cannot auto-launch the seed commands: that has to happen at spawn, exactly once. `FakePtyAdapter.onPtySpawn` is the spawn-time hook that does, and it necessarily overlaps the seed ids `paneAdded` already announced — hence idempotence rather than a split of responsibilities.
-
-**What supplies the mouse-capturing text.** Both neighbor panes, `ascii-splash` and `changelog`.
 
 **Coverage audit, against `mouse-and-clipboard.md`'s section numbers as of 2026-09.** Exercisable: §§1–2 (mouse reporting + override), §§3.1–3.3 (drag, block shape, block hint), §§3.6–3.7 (drag keys + popup), §§4.1–4.3 (Raw / Rewrapped copy, shortcuts, dismissal; since replaced by the copy editor). Partial: §3.4 exposes change/resize cancellation but not pure scroll; §3.5 lacks enough scrollback; §8.2 writes paste chords to the fake PTY, whose shell ignores bracket markers. Missing: §§3.3 and 5 lack smart tokens and therefore `e` extension; §8.5 lacks a scenario that enables bracketed paste. Auto-scroll during a drag and right-click paste are deferred in the implementation ([§9. Future](mouse-and-clipboard.md#9-future)), not Playground gaps.
 

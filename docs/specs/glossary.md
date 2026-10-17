@@ -202,7 +202,7 @@ A user verb is an intentional action that produces a single observable change.
 | `tearOut` | `transferWorkspace` into a Window created for it. A Window whose last Workspace leaves closes itself. |
 | `reopen` | Rebuild the newest reopenable close — a Surface, Workspace, or window — from its in-memory record as a new one: new Sessions and ids (`docs/specs/reopen.md`). Never a `restore` or `reattach`. |
 
-Source of truth: `setActiveWorkspace` / `createWorkspace` / `closeWorkspace` / `renameWorkspace` / `moveWorkspace` in `lib/src/lib/workspace-store.ts`; `closeAll` in `lib/src/components/Wall.tsx`; `prepareWorkspaceTransfer` in `lib/src/components/wall/workspace-transfer.ts`.
+Source of truth: `lib/src/lib/workspace-store.ts`; `closeAll` in `lib/src/components/Wall.tsx`; `prepareWorkspaceTransfer` in `lib/src/components/wall/workspace-transfer.ts`.
 
 ### System verbs
 
@@ -244,7 +244,7 @@ Source of truth: `focusSession` / `refitSession` in `lib/src/lib/terminal-lifecy
 - I5: `kill` accepts every layer state; a successful closure ends at `View: Hidden`. Closure guards belong to `docs/specs/terminal-context.md` → Promotion and source closure and `docs/specs/dor-tool.md` → Closing unsaved Tools; per-kind effects are the [User verbs](#user-verbs) row.
 - I6: `rename` is universally valid including when `Process = Exited` and `View = Doored`.
 - I7: Every Surface sits in exactly one Pane; every Pane and its Surfaces belong to exactly one Workspace; every Workspace belongs to one Window.
-- I8: **Must preserve Process and Activity during `switchWorkspace`, without firing a fresh ring** (I3). A switch reattaches terminal elements but resumes and restores nothing, so no ring can fire (`docs/specs/layout.md` → Workspaces).
+- I8: **Must preserve Process and Activity during `switchWorkspace`, without firing a fresh ring** (I3; `docs/specs/layout.md` → Workspaces).
 - I9: A Workspace's union status is a pure projection of its members' Activity: no independent state, destroyed with the Workspace.
 - I10: **Must preserve a terminal Surface's `SessionId`** (I1). **Must keep a browser Surface's id across every render-mode swap and relaunch**, swapping its renderer in place (`docs/specs/dor-browser.md` → Display Modal And Render Swaps). Replacing an untouched shell — by a browser Surface or a host New Terminal — creates a new Surface with a new id (rationale).
 

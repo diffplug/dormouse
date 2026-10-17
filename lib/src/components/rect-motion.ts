@@ -9,7 +9,8 @@ import { motionIsInstant } from '../lib/ui-geometry';
 export interface RectMotion {
   /** Move toward `rect`: snap, showing the element, when nothing is shown or
    *  motion is instant, else ease from the displayed rect on a fresh clock. An
-   *  equal target is a no-op. */
+   *  equal target is a no-op. Not `retargetRingTween`: its old clock reaches a
+   *  target that jumped spots almost at once. */
   setTarget(rect: RingRect): void;
   /** Stop, hide the element, and forget the displayed rect, so the next target
    *  snaps. A no-op while hidden. */

@@ -13,7 +13,7 @@
 
 **Prices, inclusions, and the FAQ are prerendered text**, and the page emits `Product` / `Offer` JSON-LD carrying one `Offer` per paid plan at its current price, so an assistant fetching the page can quote it. **Offers stay `PreOrder` while checkout is unbuilt.**
 
-**Every price on the site has one owner**: the page, the structured data, and the tests read `website/src/lib/hosted-pricing.ts` rather than restating a number.
+**Every price on the site has one owner**, `website/src/lib/hosted-pricing.ts`; site code reads it rather than restating a number.
 
 **Must describe both grants as live, never upcoming.** The managed Relay section carries the one qualifier: the independent review `docs/specs/security-remote.md` -> "Cloud-hosted mode" requires.
 
@@ -32,8 +32,6 @@ Seats left in the open cohort and the founders row load after hydration from one
 - **Must serve avatars from this origin, never the OAuth provider**, so loading the page tells no provider about the reader. The client draws an initial for any avatar that is not a same-origin path, or that fails to load.
 - **The page prerenders without the endpoint**: an unreachable endpoint, a non-2xx, or a malformed field drops only that field, never an error. **A cohort closing raises the price at the next deploy.**
 
-**Every existing link keeps working unchanged**: the `linkedFrom` obligations, the root README, `vscode-ext/README.md`, the Settings dialog's voice link, and the hosting notice all already point at `/hosted`. `docs/specs/website-docs.md` -> "Reference page chrome" owns the mechanics.
-
 ### Published prices
 
 Prices in USD; DiffPlug adds or includes applicable tax by jurisdiction.
@@ -49,7 +47,7 @@ Prices in USD; DiffPlug adds or includes applicable tax by jurisdiction.
 - **The step is $10 per cohort of 100, fixed**, and the ladder's last step is the one below list — reaching list closes founding.
 - **Show the current price, the struck list price, and the seats left at that price — never the next step or how many cohorts remain.**
 
-Source of truth: `tiersOnSale`, `foundingTier`, and `pricingJsonLd` in `website/src/lib/hosted-pricing.ts`; `fetchCohort` in `website/src/lib/hosted-cohorts.ts`; `website/src/pages/Hosted.tsx`; the `/pricing` rule in `website/public/_redirects`, pinned by `checkPricingRedirect` in `scripts/public-docs-lint.mjs`. `website/src/pages/Hosted.test.tsx` pins the page contract.
+Source of truth: `Hosted` in `website/src/pages/Hosted.tsx`; the `/pricing` rule in `website/public/_redirects`, pinned by `checkPricingRedirect` in `scripts/public-docs-lint.mjs`. `website/src/pages/Hosted.test.tsx` pins the page contract.
 
 ## Future
 
@@ -106,7 +104,7 @@ What each plan grants once checkout can sell it; [Published prices](#published-p
 - **Dormouse operates the endpoint and holds the vendor key** (ElevenLabs). A request carries the desktop credential, a voice id, and the text; the response is audio.
 - **Must send only the shortened displayed label, voice id, and authentication credential in the voice request**, never the terminal screen or output stream, notification body, or Session id. **Must disclose before enabling managed voice that labels can come from program-supplied titles, command labels, or directory names and that secret filtering is heuristic**, not a guarantee of confidentiality. Connection metadata remains visible to the serving infrastructure.
 - **Cache clips by voice and text on the client** and regenerate only when the label changes; a cache hit makes no request. **Fair use is a daily request cap per member**; past it, the system voice speaks.
-- **The system voice is the fallback**, for offline, unentitled, endpoint error, or cap: same delivery rules, same cut-off on attend, never silence because the service failed. Delivery identity, queueing, and cut-off stay owned by `docs/specs/alert.md` -> "Spoken alarms".
+- **The system voice is the fallback**, for offline, unentitled, endpoint error, or cap: same delivery rules, same cut-off on attend, never silence because the service failed. Delivery identity, queueing, and cut-off stay owned by `docs/specs/alert.md` -> "Alarm settings" and "Spoken alarms".
 - **One voice per Pane.** The member default applies everywhere; a per-Pane override is persisted with the pane's settings and follows the Session through minimize and restore. Doors and headers show nothing new.
 - **Pocket speaks only in the foreground** — a web app cannot voice a background push — so the desktop is the primary voice sink. A native Pocket is out of scope here.
 

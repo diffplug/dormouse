@@ -147,6 +147,13 @@ const FOREIGN_TERMINAL_ENV = new RegExp(`^(?:${[
   'GHOSTTY_SHELL_FEATURES', 'WEZTERM_.*', 'ALACRITTY_WINDOW_ID', 'ALACRITTY_SOCKET', 'ALACRITTY_LOG',
   'TERMINAL_EMULATOR', 'TERMINATOR_UUID', 'TILIX_ID', 'TMUX', 'TMUX_PANE', 'STY', 'COLORFGBG',
   'CURSOR_TRACE_ID',
+  // A launching Claude Code session's markers: a claude in the pane would take
+  // itself for that session's child, whose transcript saving is off, and every
+  // pane program would hold its messaging token. Settings such as
+  // CLAUDE_CODE_USE_BEDROCK are not markers and pass through.
+  'CLAUDECODE', 'CLAUDE_PID', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_EXECPATH',
+  'CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_CHILD_SESSION', 'CLAUDE_CODE_SESSION_ATTENDED',
+  'CLAUDE_CODE_MESSAGING_SOCKET', 'CLAUDE_CODE_MESSAGING_TOKEN',
 ].join('|')})$`);
 const FOREIGN_TERMINAL_ENV_WIN32 = new RegExp(FOREIGN_TERMINAL_ENV.source, 'i');
 
@@ -772,8 +779,9 @@ async function getDescendantPids(rootPid, runtime = {}) {
 }
 
 /** Every `[pid, ppid]` pair on this platform — `[pid, ppid, name]` on Windows,
- *  where the same query names each process — or null when the scan fails or
- *  the platform is unknown. */
+ *  where the same query names each process (one query instead of two: ~0.3 s
+ *  per scan on Windows, 2026-10-02) — or null when the scan fails or the
+ *  platform is unknown. */
 async function readProcessTable(runtime) {
   const platform = runtime.platform || process.platform;
   const fsModule = runtime.fsModule || fs;
@@ -1272,7 +1280,12 @@ module.exports.pacedInputSegments = pacedInputSegments;
 // `onHelper(id, isHelper)` hears every helper decision — each spawn and each
 // promotion that succeeds — so the host's alerts, which keep a helper inert,
 // read this map's answer rather than keeping their own (docs/specs/alert.md).
-module.exports.create = function create(send, ptyModule, { platform = process.platform, replay = false, sliceSince = null, onHelper = () => {}, scanPorts = createPortScanner((pids, count) => getOpenPortsForPids(pids, { budgetCount: count })) } = {}) {
+//
+// `canonicalDirectory(path)` validates a directory to open, injected for the
+// same reason: `canonicalLocalDirectory` in `lib/src/host/local-directory.ts`,
+// which `main.js` takes from `git-info.cjs` and VS Code's `pty-host.js`
+// bundles. The default opens nothing.
+module.exports.create = function create(send, ptyModule, { platform = process.platform, replay = false, sliceSince = null, onHelper = () => {}, canonicalDirectory = async () => null, scanPorts = createPortScanner((pids, count) => getOpenPortsForPids(pids, { budgetCount: count })) } = {}) {
   if (!ptyModule || typeof ptyModule.spawn !== 'function') {
     throw new TypeError('create() requires a node-pty compatible module');
   }
@@ -1290,8 +1303,10 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
   const REPLAY_CHARS = 200000;
   const ptyShells = new Map(); // id -> resolved shell executable
   // Repaint restoration belongs to the PTY owner, where every local and remote
-  // resize passes. A Viewer-local timer cannot see another display taking size
-  // authority (docs/specs/remote-api.md -> Attach is the resize).
+  // resize passes: a later resize or repaint, exit, kill, or replacement
+  // cancels it, and a Viewer's detach does not, or the PTY is left a row off
+  // its xterm. A Viewer-local timer cannot see another display taking size
+  // authority.
   const repaintTimers = new Map();
   const FORCE_REPAINT_BOUNCE_MS = 60;
 
@@ -1663,10 +1678,10 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
         } else helpers.delete(request.id);
         onHelper(request.id, helpers.has(request.id));
       } else if (request.op === 'openDirectory') {
-        // A share or device path (`isUncOrDevicePath` in dor-lib-common) is
-        // refused before the existence check, which alone would reach its host.
-        if (typeof request.path !== 'string' || !path.isAbsolute(request.path) || /^[\\/]{2}/.test(request.path) || request.path.includes('\0') || !directoryExists(request.path)) throw new Error('Directory is unavailable');
-        const nativePath = fs.realpathSync(request.path);
+        // The resolver is the only thing that touches the path: a `stat` or
+        // `realpath` here would follow a link to a share and reach its host.
+        const nativePath = await canonicalDirectory(request.path);
+        if (!nativePath) throw new Error('Directory is unavailable');
         // Absolute canonical path is one argument; no shell interprets OSC text.
         openNativeDirectory(nativePath, (error) => {
           send('context', { ...result, ...(error ? { error: error.message } : {}) });

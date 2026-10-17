@@ -1,5 +1,7 @@
 import { realpath } from 'node:fs/promises';
 import { basename, relative, sep } from 'node:path';
+// Bundled: the `engines.vscode` floor's extension host runs Node 20.14, which
+// predates `path.matchesGlob`.
 import picomatch from 'picomatch';
 import type { OpenHandler, OpenHandlersRequest, OpenHandlersResponse } from 'dor/commands/types';
 import type { ToolLookupResult } from '../lib/platform/tool-types';
@@ -73,6 +75,8 @@ function describeHandler(tool: string, target: string, file: ToolFile | null): s
 async function matchingOpenRules(
   rules: readonly OpenRule[], cwd: string, target: string, directory: boolean,
 ): Promise<OpenRule[]> {
+  // Canonical like the target: a logical CWD under a symlink would put `../`
+  // hops into every relative path, and slash patterns would miss files in it.
   const relativeBase = await realpath(cwd).catch(() => cwd);
   const suffix = directory ? FOLDER_MATCH_SUFFIX : '';
   const relativePath = relative(relativeBase, target).split(sep).join('/') + suffix;

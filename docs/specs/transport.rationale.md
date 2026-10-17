@@ -6,7 +6,7 @@
 
 With node-pty 1.2.0-beta.15 on Windows (measured 2026-10-06), `kill('SIGTERM')` throws, including from a deferred callback if the terminal is not ready. The swallowed synchronous error left shutdown waiting out its deadline without stopping anything (#984). Argument-less `kill()` closes the bundled ConPTY; the native addon also calls `TerminateProcess` on the shell. A console-handler probe did not save its close marker, so this path is not a history-flush guarantee. Agent recovery already captures before this stage.
 
-A second close before `onExit` crashed the Node process in the native test. The shared close guard uses the PTY object so a new process under a reused Session id remains stoppable. Native tests cover ready, not-yet-ready, and overlapping cleanup; fake tests cover output delivered after exit.
+A second close before `onExit` crashed the Node process in the native test.
 
 ## PTY buffering
 
@@ -34,7 +34,7 @@ Measured on macOS 27 with Claude Code 2.1.274 and Codex 0.154.0, 2026-09 (issue 
 
 **Why 3.6.6, and not newer.** Tools gate features on the version, not just the name: Claude Code 2.1.281 turns on `OSC 9;4` progress only at iTerm2 3.6.6 or later (its version check, read from the binary, 2026-09-23). Recorded the same day under each identity, Claude emitted no progress at 3.5.0; at 3.6.6 it ran one cycle per turn (the recorded turn, `a Claude Code turn` in `lib/src/lib/alert-engagement.test.ts`) and set DECSET 2031 at startup. iTerm2's changelogs (read 2026-09-23): 3.6.6 (released 2025-11-17) added `OSC 9;4` progress bars, DSR 996/997 with DECSET 2031 dark-mode reporting — xterm.js 6.1's `colorSchemeQuery`, on by default — and `OSC 52` in its DA reply, which Dormouse does not claim and a DA reader only misses. A newer version only invites more sequences: 3.6.7's `OSC 8` `target=` (built 2026-02-19) happens to fail inertly, the link still opening, but 3.7.0 (built 2026-06-08) adds dual-mode `SGR 38:12` colors, which programs would then send and Dormouse mishandles.
 
-**Why another terminal's identity is stripped.** A pane inherits the host's environment, and the host inherits whatever launched it. Fedora's `vte.sh` sees `VTE_VERSION` and emits an `OSC 777` notification after every command; `WT_SESSION`, `ConEmuANSI`, `TERM_FEATURES` and the Konsole and Ptyxis versions switch on cargo's `OSC 9;4` progress, so every build rang; `TMUX` / `STY` send tools to a multiplexer that is not there — Codex and Claude Code wrap their notifications in tmux's passthrough; and `CURSOR_TRACE_ID` makes Claude Code believe it runs in Cursor's terminal, which leaves it no notification channel (audit, 2026-09-23). `COLORFGBG` would contradict the background the OSC 11 answer reports.
+**Why another terminal's identity is stripped.** A pane inherits the host's environment, and the host inherits whatever launched it. Fedora's `vte.sh` sees `VTE_VERSION` and emits an `OSC 777` notification after every command; `WT_SESSION`, `ConEmuANSI`, `TERM_FEATURES` and the Konsole and Ptyxis versions switch on cargo's `OSC 9;4` progress, so every build rang; `TMUX` / `STY` send tools to a multiplexer that is not there — Codex and Claude Code wrap their notifications in tmux's passthrough; and `CURSOR_TRACE_ID` makes Claude Code believe it runs in Cursor's terminal, which leaves it no notification channel (audit, 2026-09-23). `COLORFGBG` would contradict the background the OSC 11 answer reports. A host started from inside Claude Code hands every pane that session's markers: `CLAUDE_CODE_CHILD_SESSION` turns a pane claude's transcript saving off unless `CLAUDE_CODE_FORCE_SESSION_PERSISTENCE=1`, so it prints no resume hint for shutdown capture, and `CLAUDE_CODE_MESSAGING_TOKEN` reaches every pane program (Claude Code 2.1.302, read from the binary, 2026-10-16).
 
 **Why `LC_TERMINAL` is set unconditionally.** Some shell integrations key off it rather than `TERM_PROGRAM`.
 
@@ -54,19 +54,17 @@ The retry is the same argument applied to the plain boot: the arrival path refus
 
 ## Replay-time mode-reset tail (Dormouse-emitted)
 
-**Why a reset tail at all.** Saved scrollback can end mid-TUI with private modes still latched — mouse tracking, the alt-screen, a hidden cursor, application cursor keys. Replaying it verbatim re-applies those DECSETs with no process alive to ever DECRST them, leaving a restored pane unable to select text, showing an alt-screen frame nothing will ever repaint, or with no visible cursor at its new shell's prompt.
+**Why a reset tail at all.** Saved scrollback can end mid-TUI with private modes still latched — mouse tracking, the alt-screen, a hidden cursor, application cursor keys. Replaying it verbatim re-applies those DECSETs with no process alive to ever DECRST them, leaving a restored pane unable to select text, showing an alt-screen frame nothing will ever repaint, or with no visible cursor at its new shell's prompt. A live exit used to skip the tail, so a crashed TUI's pane kept its frozen frame and its mouse tracking until a reload replayed it dead and reset it: the same Session looked different before and after the reload (decided 2026-10-16). The cost is the crashed program's last alt-screen frame, which the next reload discarded anyway.
 
 ## Transferring a Workspace
 
-The suppression is bounded and fails open because the two failures are not symmetric: duplicated bytes are a cosmetic repeat the user can scroll past, and a permanently silenced pane is a terminal they have to kill. The host's own measurements and the ordering the guarantee rests on are `docs/specs/standalone.rationale.md` → Transfer.
+The suppression is bounded and fails open because the two failures are not symmetric: duplicated bytes are a cosmetic repeat the user can scroll past, and a permanently silenced pane is a terminal they have to kill. The host's own measurements and the ordering the guarantee rests on are `docs/specs/standalone.rationale.md` → Arrival queue.
 
 Release-without-kill is a separate verb rather than a flag on the closure path because the closure path is reachable from an unmount and this must not be. The two differ in exactly one line, and that line is the whole difference between moving a Workspace and losing it.
 
 ## Message protocol
 
 **Why one alert manager per host process, beside the PTYs.** Each standalone window used to run its own `AlertManager` in its webview, fed from events the sidecar had already parsed. Three failures followed (audit, 2026-09-23): WKWebView throttles a background window's timers, so the detector, deferral and await timers of the window a completion should summon the user back to ran late; a reload started an empty manager and a live resume seeds nothing, so every ring and TODO in the window vanished; and a Workspace transfer had to snapshot ring, episode, detector deadlines and deferred notification into the transfer content. VS Code never had these, because its manager lived in the extension host beside the PTYs and the parse; moving standalone's there made the two hosts one module.
-
-**Why installing the responder is keyed by the link.** Each install adds a `status` subscription, and each arming under it adds pane-state, activity, and focus listeners with no handle left to remove them. A flag would be wrong because the platform adapter, not the module, is what owns a link.
 
 **The per-store tax.** Each app-global store relayed webview↔host this way costs one `PlatformAdapter` push method, an on/off listener pair, two `AlertCommand` ops and an event, and a host coordinator with its own subscribe/unsubscribe. Two are worth paying that twice for the directness; at a third, the keyed channel + key→normalizer registry is cheaper than another copy of the plumbing.
 
@@ -76,13 +74,11 @@ Release-without-kill is a separate verb rather than a flag on the closure path b
 
 ## Persisted session types
 
-**Why the collector debounces on top of each Wall's own debounce.** Each Wall coalesces its own record; the second stage coalesces *across* Walls, so one window-wide event (a store change, a theme push, a burst of output in two Workspaces) becomes one host write rather than one per Workspace.
-
 **What a cwd probe costs.** On macOS `getCwd` is an `lsof` subprocess in the sidecar, on every debounced save and every 30 s heartbeat; per pane, and per Workspace in a quit flush that fans out to every Wall at once, it would be N spawns on the sidecar's only event loop.
 
 ## Retiring the transcripts already on disk
 
-**The legacy blobs are real, not hypothetical.** Every pre-upgrade installation had a transcript-bearing snapshot in `workspaceState` or the standalone file store. Each is of a format this build discards, so the boot and activation deletes, a panel's first save over its blob, and the orphan-temp sweep are what take its bytes off the disk.
+**The legacy blobs are real, not hypothetical.** Every pre-upgrade installation had a transcript-bearing snapshot in `workspaceState` or the standalone file store.
 
 **Why standalone stopped deleting every snapshot at boot.** Deleting was right only while nothing read the store: once the app restores its windows, an unconditional boot delete is a data-loss bug, not a migration; the boot delete that remains takes only another format's. What the unconditional delete uniquely covered — a `.json.tmp` no reader can see and no writer will ever overwrite — is exactly what the sweep still covers. Older debug snapshots sit outside the new subtree, and deleting them would remove layouts that may belong to an installed build, so debug startup scrubs only the obsolete pane scrollback fields atomically and preserves other state.
 
@@ -93,8 +89,6 @@ Release-without-kill is a separate verb rather than a flag on the closure path b
 **What made it safe to persist again.** The two objections to the old store were both about content, not about persistence: it wrote transcripts, and it wrote them into a WKWebView `localStorage` WAL that grew without bound (`docs/specs/standalone.md` → "Persistence", rationale). Both were already fixed — no writer accepts a transcript-bearing shape, and the blob rides a Rust file store — before the rule changed.
 
 ## Port scan deadlines
-
-**Why names ride the process table.** Names and parent ids come from the same `Win32_Process` query; asking twice cost one more PowerShell launch per scan. Folding them dropped a scan of a process with a listener from ~1.21 s to ~0.93 s on Windows (2026-10-02). No separate lookup remains for a failed table read: it would repeat the query that just failed, on what is left of the socket budget.
 
 **Why coalesce without queueing.** Independent callers (a Dev-Server Chip pass, a Tool-serving tick, `dor list --ports`, the terminal context panel) can land port requests in the same tick; one scan per microtask batch keeps that to one set of subprocesses. A queue behind the in-flight scan would make a request wait for two scans, past the per-request budget the formula grants. Budgeting the batch for its smallest request keeps each caller's own deadline true.
 

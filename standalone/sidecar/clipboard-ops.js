@@ -12,8 +12,9 @@ const rawExecFileP = promisify(execFile);
 // console window hidden. On Windows the sidecar runs as a windowless GUI child,
 // so spawning a console subprocess without CREATE_NO_WINDOW allocates a fresh
 // console window that flickers on screen and steals focus — several per paste,
-// since doPaste reads file paths + text (+ image) concurrently. windowsHide maps
-// to CREATE_NO_WINDOW in libuv and is a harmless no-op on macOS/Linux.
+// since doPaste reads file paths and text concurrently, then the image.
+// windowsHide maps to CREATE_NO_WINDOW in libuv and is a harmless no-op on
+// macOS/Linux.
 function execFileP(cmd, args, options) {
   return rawExecFileP(cmd, args, { ...options, windowsHide: true });
 }

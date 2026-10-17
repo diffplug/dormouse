@@ -29,6 +29,12 @@ describe('pty-host wiring', () => {
     expect(new Set(handled)).toEqual(new Set(sent));
   });
 
+  it('hands pty-core the shared directory resolver', () => {
+    // Without it pty-core opens no context directory (pty-core.js -> canonicalDirectory).
+    expect(hostSource).toMatch(/\{\s*canonicalLocalDirectory\s*\}\s*=\s*require\('\.\.\/\.\.\/lib\/src\/host\/local-directory'\)/);
+    expect(hostSource).toMatch(/nodePty,\s*\{\s*canonicalDirectory:\s*canonicalLocalDirectory\s*\}/);
+  });
+
   it('hands the graceful kill the ids the extension host names', () => {
     // pty-core kills nothing when `ids` is missing, and still acks.
     expect(hostSource).toMatch(/case 'gracefulKill':\s*mgr\.gracefulKill\(msg\.ids,\s*msg\.timeout,\s*msg\.requestId\)/);

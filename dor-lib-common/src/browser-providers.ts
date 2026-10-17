@@ -39,8 +39,8 @@ export const PLAYWRIGHT_BIN_ENV = 'DORMOUSE_PLAYWRIGHT_BIN';
 export const DEFAULT_PLAYWRIGHT_BIN = 'playwright-cli';
 
 /*
- * What may be spawned as a browser provider's CLI (docs/specs/dor-browser.md →
- * "Browser Host").
+ * What may be spawned as a browser provider's CLI
+ * (docs/specs/security-local.md → "Spawned programs").
  *
  * `binaryPath` exists because the GUI host's `PATH` is often the login `PATH`
  * with no nvm/volta shims, so `dor agent-browser` / `dor playwright` resolve an absolute path in
@@ -62,8 +62,8 @@ export const DEFAULT_PLAYWRIGHT_BIN = 'playwright-cli';
  */
 
 // The Windows PATH shims npm/vfox install alongside the POSIX executable.
-// `spawnAndCapture` routes `.cmd`/`.bat` through cmd.exe (docs/specs/dor-cli.md
-// → "Spawning External Binaries"), so those spellings are legitimate targets.
+// `spawnAndCapture` routes `.cmd`/`.bat` through cmd.exe, so those spellings
+// are legitimate targets.
 const PLAYWRIGHT_FILENAME_RE = /^playwright-cli(?:\.(?:cmd|bat|exe|com|ps1))?$/i;
 const AGENT_BROWSER_FILENAME_RE = /^agent-browser(?:\.(?:cmd|bat|exe|com|ps1))?$/i;
 

@@ -109,7 +109,11 @@ export const MAX_PENDING_CONNECTION_HANDSHAKES = 8;
 
 /** Waiting relay work, before any asynchronous ceremony or crypto admission. */
 export const MAX_QUEUED_RELAY_FRAMES = 128;
-/** UTF-16 code units of the received JSON, including fields the guard ignores. */
+/**
+ * UTF-16 code units of the received JSON, including fields the guard ignores.
+ * Holds one `MAX_APP_MESSAGE_LENGTH` message (`noise-transport.ts`), fragmented
+ * and base64-encoded, so a legitimate message never trips the overflow close.
+ */
 export const MAX_QUEUED_RELAY_FRAME_CHARS = 4 * 1024 * 1024;
 
 /**
@@ -876,6 +880,11 @@ export class BurrowRuntime {
     }
     this.#ws = ws;
     let opened = false;
+    // Every listener, not only `close`, drops a socket this runtime no longer
+    // owns: `ws` still delivers a message queued before the close (loopback
+    // experiment, 2026-09), and a frame's epoch is read when it drains, so a
+    // retired socket's late `init` would recreate pending state after `stop()`
+    // and its late `client-gone` would dispose a replacement's client.
     ws.addEventListener('open', () => {
       if (this.#ws !== ws) return;
       opened = true;
