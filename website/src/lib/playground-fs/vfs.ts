@@ -1,6 +1,8 @@
 /**
- * The desktop playground's read-only filesystem (docs/specs/tutorial.md ->
- * Playground filesystem): a fixed tree of text files, POSIX paths only.
+ * The desktop playground's filesystem (docs/specs/tutorial.md -> Playground
+ * filesystem): a copy-on-write overlay over a stock tree, POSIX paths only.
+ * The stock tree is built once and never written; each `VirtualFs` keeps its
+ * own writes in memory, so a page refresh drops them.
  */
 
 import { byDisplayOrder } from "dor-tools-builtin/folder-viewer-page";
@@ -12,8 +14,17 @@ export const USER_CONFIG = `${HOME}/.config/dormouse/dormouse.yml`;
 
 export type EntryKind = "dir" | "file";
 export interface DirEntry { name: string; kind: EntryKind }
+/** A file's contents: text, or bytes for a binary file such as a pasted image. */
+export type FileData = string | Uint8Array;
 
-type FsNode = { kind: "dir"; children: Map<string, FsNode> } | { kind: "file"; text: string };
+type Dir = { kind: "dir"; children: Map<string, FsNode> };
+type FsNode = Dir | { kind: "file"; data: FileData };
+
+/** `data` as bytes: text encodes as UTF-8, and stored bytes are returned as they are. */
+export const bytesOf = (data: FileData): Uint8Array => typeof data === "string" ? new TextEncoder().encode(data) : data;
+
+/** An overlay entry hiding a stock file renamed away. */
+const WHITEOUT = Symbol("whiteout");
 
 /** `path` with `.`, `..`, and repeated slashes resolved; `..` stops at `/`. */
 export function normalizePath(path: string): string {
@@ -26,22 +37,25 @@ export function normalizePath(path: string): string {
   return `/${parts.join("/")}`;
 }
 
-export class VirtualFs {
-  private readonly root: FsNode = { kind: "dir", children: new Map() };
+/** The directory holding the normalized `path`. */
+export const parentOf = (path: string) => path.slice(0, path.lastIndexOf("/")) || "/";
+const nameOf = (path: string) => path.slice(path.lastIndexOf("/") + 1);
 
-  /** `files` maps an absolute path to its text; parent directories are implied. */
-  constructor(files: Record<string, string>) {
+/** The immutable tree every window's overlay sits on. */
+export class StockTree {
+  private readonly root: Dir = { kind: "dir", children: new Map() };
+
+  /** `files` maps an absolute path to its contents; parent directories are implied. */
+  constructor(files: Record<string, FileData>) {
     this.mkdir(HOME);
-    for (const [path, text] of Object.entries(files)) {
+    for (const [path, data] of Object.entries(files)) {
       const normalized = normalizePath(path);
-      const slash = normalized.lastIndexOf("/");
-      const parent = this.mkdir(normalized.slice(0, slash));
-      parent.children.set(normalized.slice(slash + 1), { kind: "file", text });
+      this.mkdir(parentOf(normalized)).children.set(nameOf(normalized), { kind: "file", data });
     }
   }
 
-  private mkdir(path: string): Extract<FsNode, { kind: "dir" }> {
-    let node = this.root as Extract<FsNode, { kind: "dir" }>;
+  private mkdir(path: string): Dir {
+    let node = this.root;
     for (const part of normalizePath(path).split("/").filter(Boolean)) {
       let child = node.children.get(part);
       if (!child) node.children.set(part, child = { kind: "dir", children: new Map() });
@@ -51,12 +65,24 @@ export class VirtualFs {
     return node;
   }
 
-  private node(path: string): FsNode | undefined {
+  /** The node at the normalized `path`, which callers must not mutate. */
+  node(path: string): FsNode | undefined {
     let node: FsNode | undefined = this.root;
-    for (const part of normalizePath(path).split("/").filter(Boolean)) {
+    for (const part of path.split("/").filter(Boolean)) {
       node = node?.kind === "dir" ? node.children.get(part) : undefined;
     }
     return node;
+  }
+}
+
+export class VirtualFs {
+  private readonly stock: StockTree;
+  /** Files written or renamed away since the page loaded, by normalized path. */
+  private readonly overlay = new Map<string, FileData | typeof WHITEOUT>();
+
+  /** A fresh overlay on `stock`, or on a stock tree of `files`. */
+  constructor(stock: StockTree | Record<string, FileData>) {
+    this.stock = stock instanceof StockTree ? stock : new StockTree(stock);
   }
 
   /** `input` as an absolute path: `~` and `~/…` name the home directory, a
@@ -74,20 +100,59 @@ export class VirtualFs {
   }
 
   kind(path: string): EntryKind | null {
-    return this.node(path)?.kind ?? null;
+    const normalized = normalizePath(path);
+    const written = this.overlay.get(normalized);
+    if (written !== undefined) return written === WHITEOUT ? null : "file";
+    return this.stock.node(normalized)?.kind ?? null;
   }
 
-  read(path: string): string | null {
-    const node = this.node(path);
-    return node?.kind === "file" ? node.text : null;
+  /** A file's contents as stored, or null when `path` is not a file. */
+  data(path: string): FileData | null {
+    const normalized = normalizePath(path);
+    const written = this.overlay.get(normalized);
+    if (written !== undefined) return written === WHITEOUT ? null : written;
+    const node = this.stock.node(normalized);
+    return node?.kind === "file" ? node.data : null;
+  }
+
+  /** A file's contents as bytes, or null when `path` is not a file. */
+  bytes(path: string): Uint8Array | null {
+    const data = this.data(path);
+    return data === null ? null : bytesOf(data);
+  }
+
+  /** Creates or replaces the file `path`, whose directory must exist. */
+  write(path: string, data: FileData): void {
+    const normalized = normalizePath(path);
+    if (this.kind(parentOf(normalized)) !== "dir") throw new Error(`no such directory: ${parentOf(normalized)}`);
+    if (this.kind(normalized) === "dir") throw new Error(`is a directory: ${normalized}`);
+    this.overlay.set(normalized, data);
+  }
+
+  /** Moves the file `from` to `to`, replacing any file there. */
+  rename(from: string, to: string): void {
+    const source = normalizePath(from);
+    const data = this.data(source);
+    if (data === null) throw new Error(`no such file: ${source}`);
+    if (normalizePath(to) === source) return;
+    this.write(to, data);
+    if (this.stock.node(source)) this.overlay.set(source, WHITEOUT);
+    else this.overlay.delete(source);
   }
 
   /** A directory's entries in the folder viewer's order, or null when `path` is not one. */
   list(path: string): DirEntry[] | null {
-    const node = this.node(path);
+    const dir = normalizePath(path);
+    const node = this.stock.node(dir);
     if (node?.kind !== "dir") return null;
-    return [...node.children]
-      .map(([name, child]) => ({ dir: child.kind === "dir", folded: name.toLowerCase(), entry: { name, kind: child.kind } }))
+    const kinds = new Map<string, EntryKind>([...node.children].map(([name, child]) => [name, child.kind]));
+    for (const [written, data] of this.overlay) {
+      if (written === dir || parentOf(written) !== dir) continue;
+      if (data === WHITEOUT) kinds.delete(nameOf(written));
+      else kinds.set(nameOf(written), "file");
+    }
+    return [...kinds]
+      .map(([name, kind]) => ({ dir: kind === "dir", folded: name.toLowerCase(), entry: { name, kind } }))
       .sort(byDisplayOrder)
       .map(({ entry }) => entry);
   }

@@ -8,20 +8,19 @@ Three consumers compose them: the website Pocket playground (`website/src/compon
 
 ## Core layout
 
-Top to bottom: the `MobileWall` session header and pane content, the always-visible Touch and Input selectors, then the reserve — a fixed CSS height holding app UI while the OS keyboard is hidden and occupied by the OS keyboard otherwise.
+The reserve, at the bottom, is a fixed CSS height holding app UI while the OS keyboard is hidden and occupied by the OS keyboard otherwise.
 
-**Never recompute height from `window.visualViewport`**: the reserve is a fixed CSS height and the root `h-screen` (when `fillViewport`) or `h-full`, so the terminal region does not bounce as the OS keyboard animates (rationale).
+**Never recompute height from `window.visualViewport`**, so the terminal region does not bounce as the OS keyboard animates (rationale).
 
-* Both consumers wire the session header's minimize to the Sessions reserve, not a desktop Door; Pocket suppresses kill (`showKillButton={false}`). A ring shows as the alarm inset on the header bar and on its session-list row.
-* **A tap acknowledges the active Session; a drag never does.** The press is tracked before any touch mode consumes it, and **Select mode's router consumes a touch it owns**, so it announces one that never became a drag as `TERMINAL_TAP_EVENT`. Both consumers route the input bar and gesture keys through `writeUserInput` (`docs/specs/alert.md` -> Engagement).
+* Pocket suppresses kill (`showKillButton={false}`). A ring shows as the alarm inset on the header bar and on its session-list row.
+* **A tap acknowledges the active Session; a drag never does.** **Select mode's router consumes a touch it owns**, so it announces one that never became a drag as `TERMINAL_TAP_EVENT`.
 * **Must install `useDynamicPalette` in `MobileTerminalUi`** for gesture tokens; it never mounts the desktop `Wall`.
-* `MobileTerminalUi` provides `TouchUiContext` = true, so shared selection UI omits physical-keyboard shortcut hints (`docs/specs/mouse-and-clipboard.md`).
 
 Source of truth: `withinTapSlop` in `lib/src/components/MobileTerminalUi.tsx`; `TERMINAL_TAP_EVENT` in `lib/src/lib/terminal-mouse-router.ts`. Pinned by `lib/src/components/mobile-acknowledge.test.tsx`.
 
 ## Touch mode selector
 
-The touch selector controls what a pane-content touch does. **Always visible**, and **must be self-labeling** — each mode carries both an icon and a short label (rationale).
+The touch selector controls what a pane-content touch does.
 
 | Mode (button label) | Availability | Behavior |
 | --- | --- | --- |
@@ -29,7 +28,7 @@ The touch selector controls what a pane-content touch does. **Always visible**, 
 | Text selection (`Select`) | Always | Touch, pen, and primary drags select terminal text as on desktop; a capturing pane gets mouse override. |
 | Mouse | Active TUI capturing mouse events | Touches are passed through as terminal mouse input. |
 
-Default **Gestures**. **Mouse mode falls back to Gestures when the active pane stops capturing mouse events.**
+**Mouse mode falls back to Gestures when the active pane stops capturing mouse events.**
 
 **Must recompute `paneMouseOverride` for every mounted pane from the global touch mode and that pane's own reporting state**; a switched-away pane must not retain a stale override. The consumer owns the loop.
 
@@ -54,21 +53,19 @@ Source of truth: `TOUCH_MODES`, `paneMouseOverride`, and `isPortaledTarget` in `
 
 **Must coast after a touch or pen flick**, retaining fractional-line travel; a held or stationary press, mouse drag, or pointer cancellation launches no momentum (rationale).
 
-**Must send wheel events through xterm when the Session captures the mouse**, clamping the reported coordinates inside its terminal screen. **Must otherwise scroll the terminal buffer directly**, never synthesize alternate-screen arrow keys. **Must stop momentum at a buffer boundary or missing terminal, on a new pane press, when the document becomes hidden, or on unmount.** **Must stop scrolling when interaction is disabled, the touch mode changes, or the active Session changes.**
+**Must send wheel events through xterm when the Session captures the mouse**, clamping the reported coordinates inside its terminal screen. **Must otherwise scroll the terminal buffer directly**, never synthesize alternate-screen arrow keys. **Must stop momentum at a buffer boundary, on a new pane press, or when the document becomes hidden.** **Must stop scrolling when interaction is disabled, the touch mode changes, or the active Session changes.**
 
-Source of truth: `EDGE_SCROLL_WIDTH_PX`, `EDGE_SCROLL_LINE_PX`, and `EdgeScrollMotion` / `scrollMobileTerminal` in `lib/src/lib/mobile-terminal-scroll.ts`.
+Source of truth: `EdgeScrollMotion` / `scrollMobileTerminal` in `lib/src/lib/mobile-terminal-scroll.ts`.
 
 ## Gesture mode
 
-Touching the pane content away from either edge opens a radial menu offset from the touch origin, in the opposite diagonal from the user's thumb (rationale). **The offset is clamped inside the pane**; on an axis shorter than twice the clamp margin the rose centers on that axis instead. **Never draw the guide line under the user's thumb** — only inside the visible, offset rose.
+Touching the pane content away from either edge opens the radial menu (the rose), offset from the touch so the thumb never covers it. Drag distance from its center decides everything, in the order `RADIUS_FADE_START` < `RADIUS_HIGHLIGHT` < `RADIUS_SELECT`: root groups fade by alignment with the drag only past the first, the second previews the closest compass direction, and crossing the third (the drawn circle) selects it. **Reduced-motion users see the menu's opening animation (labels and select circle appearing) at its final state immediately.**
 
-Drag distance from the rose center decides everything, in the order `RADIUS_FADE_START` < `RADIUS_HIGHLIGHT` < `RADIUS_SELECT`: root groups fade by alignment with the drag only past the first, the second previews the closest compass direction, and crossing the third (the drawn circle) selects it. **Reduced-motion users see the menu's opening animation (labels and select circle appearing) at its final state immediately.**
-
-Source of truth: `displayOriginAwayFromThumb` and the `RADIUS_*` constants in `lib/src/lib/mobile-gesture-menu.ts`; `MobileGestureRadialMenu` in `lib/src/components/MobileGestureRadialMenu.tsx`.
+Source of truth: the `RADIUS_*` constants in `lib/src/lib/mobile-gesture-menu.ts`; `MobileGestureRadialMenu` in `lib/src/components/MobileGestureRadialMenu.tsx`.
 
 ### Root layout
 
-Root labels pack as a square keypad around the select circle (rationale); each diagonal group carries three options — its primary and two secondaries.
+Each diagonal group carries three options — its primary and two secondaries.
 
 **Must confirm `⌃C` and `Paste` in an in-pane modal before running them.** **Must open a second exploded-option menu for `Quit`** instead of sending input, under the same reset-center, highlight, and select rules as normal option selection.
 
@@ -77,25 +74,21 @@ Source of truth: `MOBILE_GESTURE_GROUPS` and `MOBILE_GESTURE_QUIT_GROUP` in `lib
 ### Selection stages
 
 - **Cardinal directions are one stage**: reaching `RADIUS_SELECT` on N, S, E, or W sends the matching arrow key immediately — **never wait for touch release**.
-- **Diagonal directions are two stages**: reaching `RADIUS_SELECT` chooses the group; the compass center resets to where the drag crossed the circle, the group's options explode around it (the primary back along the opposite compass direction, the secondaries ±45° off it), and from there `RADIUS_HIGHLIGHT` previews and `RADIUS_SELECT` chooses and sends an option, again without waiting for release.
+- **Diagonal directions are two stages**: reaching `RADIUS_SELECT` chooses the group; the compass center resets to where the drag crossed the circle, the group's options explode around it, and from there `RADIUS_HIGHLIGHT` previews and `RADIUS_SELECT` chooses and sends an option, again without waiting for release.
 - **Releasing after the group selection but before choosing an option cancels the gesture.**
 
-Overshoot handling: **the option origin ratchets *outward* along the opening direction while the drag keeps pushing that way**, and **the compass stays visually collapsed while that push is brisk, latching expanded once the drag settles** (`OPTION_EXPAND_RELEASE`). (rationale)
-
-Source of truth: `advanceOptionOrigin` / `MOBILE_GESTURE_OPTION_DIRECTIONS` in `lib/src/lib/mobile-gesture-menu.ts`.
+Source of truth: `MOBILE_GESTURE_OPTION_DIRECTIONS` in `lib/src/lib/mobile-gesture-menu.ts`.
 
 ## Input mode selector
 
-The input mode selector controls what appears in the reserve area. **Always visible**, four items, self-labeling on the same rule as the touch selector.
+The input mode selector controls what appears in the reserve area.
 
 | Mode | Reserve area content |
 | --- | --- |
-| Sessions | Session rows with active, alert, and TODO state, under group labels when they name more than one group; selecting one makes it the single visible terminal. |
+| Sessions | Session rows with active, alert, and TODO state; selecting one makes it the single visible terminal. |
 | Recent | Placeholder ([Future](#future)). |
 | Type | A button focusing the hidden terminal input — the way back from a dismissed keyboard. Typed keys echo into the terminal as they happen. |
 | Draft | Placeholder ([Future](#future)). |
-
-Default input mode is **Type**.
 
 **Must focus the hidden input synchronously inside the Type selector's tap/click handler** (rationale); a follow-up effect retries as best effort. **Switching away from Type blurs the hidden input**, including consumer-controlled switches.
 
@@ -105,7 +98,6 @@ Source of truth: `KEYBOARD_MODES` in `lib/src/components/MobileTerminalUi.tsx`.
 
 Typing goes through a visually hidden `<textarea>` configured for terminal-style input.
 
-* Normal characters go to the active terminal immediately; Enter sends terminal Enter, Backspace works, and physical `Ctrl+C` sends `\x03`.
 * **Must buffer composed text until `compositionend` and leave composing keydowns to the IME**, including its editing and confirmation keys.
 * **Must handle software-keyboard Enter and Backspace through `beforeinput` when no `keydown` occurs**, including deletion from the empty hidden input.
 
@@ -113,9 +105,7 @@ Source of truth: `MobileTerminalUi` in `lib/src/components/MobileTerminalUi.tsx`
 
 ## Keyboard focus invariant
 
-**Pane-content touches must never open the native keyboard.** The pane content area may focus the terminal internally for key routing or mouse handling, but every text input the terminal surface creates — later-mounted ones included — is a non-keyboard target, blurred when the touch starts there; **that blur repeats across the window in which `Wall` can restore focus, and pending retries are cancelled on unmount** (rationale). **The only mobile UI surfaces that may open the native keyboard are the Type selector and the Type reserve area.**
-
-**Must cancel pending focus retries when pane interaction dismisses the keyboard, and pending blur retries when Type explicitly focuses it.**
+**Pane-content touches must never open the native keyboard.** The pane content area may focus the terminal internally for key routing or mouse handling, but every text input the terminal surface creates — later-mounted ones included — is a non-keyboard target, blurred when the touch starts there; **that blur repeats across the window in which `Wall` can restore focus** (rationale). **The only mobile UI surfaces that may open the native keyboard are the Type selector and the Type reserve area.**
 
 Source of truth: `MobileTerminalUi` in `lib/src/components/MobileTerminalUi.tsx` and `MobileWall` in `lib/src/components/MobileWall.tsx`; pinned by `lib/src/components/MobileTerminalUi.test.tsx` and `lib/src/components/MobileWall.test.tsx`.
 

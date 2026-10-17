@@ -55,33 +55,33 @@ const meta: Meta<typeof BaseboardStory> = {
 export default meta;
 type Story = StoryObj<typeof BaseboardStory>;
 
-const oneRingingDoorItems = [makeItem('p1', 'build-server')];
+const oneRingingDoorItems = [makeItem('surface:1', 'build-server')];
 const mixedDoorStateItems = [
-  makeItem('p1', 'dev-server'),
-  makeItem('p2', 'test-runner'),
-  makeItem('p3', 'logs'),
-  makeItem('p4', 'notarization'),
+  makeItem('surface:1', 'dev-server'),
+  makeItem('surface:2', 'test-runner'),
+  makeItem('surface:3', 'logs'),
+  makeItem('surface:4', 'notarization'),
 ];
 const overflowWithRingingDoorItems = [
-  makeItem('p1', 'frontend-dev'),
-  makeItem('p2', 'backend-api'),
-  makeItem('p3', 'database-migrations'),
-  makeItem('p4', 'test-runner'),
-  makeItem('p5', 'log-aggregator'),
-  makeItem('p6', 'build-pipeline'),
-  makeItem('p7', 'monitoring'),
-  makeItem('p8', 'linter'),
+  makeItem('surface:1', 'frontend-dev'),
+  makeItem('surface:2', 'backend-api'),
+  makeItem('surface:3', 'database-migrations'),
+  makeItem('surface:4', 'test-runner'),
+  makeItem('surface:5', 'log-aggregator'),
+  makeItem('surface:6', 'build-pipeline'),
+  makeItem('surface:7', 'monitoring'),
+  makeItem('surface:8', 'linter'),
 ];
 const extremeTitleWithBothIndicatorsItems = [
-  makeItem('p1', 'short'),
-  makeItem('p2', 'my-extremely-long-running-background-process-with-a-very-descriptive-name'),
-  makeItem('p3', 'another'),
+  makeItem('surface:1', 'short'),
+  makeItem('surface:2', 'my-extremely-long-running-background-process-with-a-very-descriptive-name'),
+  makeItem('surface:3', 'another'),
 ];
 const browserSurfaceItems: DoorChip[] = [
-  { id: 'browser-resize', kind: 'browser', title: 'localhost:5173/app', browserDisplay: 'agent-browser-resize' },
-  { id: 'browser-fixed', kind: 'browser', title: 'mobile checkout', browserDisplay: 'agent-browser-fixed' },
-  { id: 'browser-popout', kind: 'browser', title: 'docs.example.com', browserDisplay: 'agent-browser-popout' },
-  { id: 'browser-iframe', kind: 'browser', title: 'localhost:6006', browserDisplay: 'iframe' },
+  { id: 'surface:1', kind: 'browser', title: 'localhost:5173/app', browserDisplay: 'agent-browser-resize' },
+  { id: 'surface:2', kind: 'browser', title: 'mobile checkout', browserDisplay: 'agent-browser-fixed' },
+  { id: 'surface:3', kind: 'browser', title: 'docs.example.com', browserDisplay: 'agent-browser-popout' },
+  { id: 'surface:4', kind: 'browser', title: 'localhost:6006', browserDisplay: 'iframe' },
 ];
 
 /** Browser Doors keep the same capability/presentation identity as their pane
@@ -103,9 +103,9 @@ export const OneSpeakingDoor: Story = {
   },
   parameters: {
     ...withState(oneRingingDoorItems, {
-      p1: { status: 'ALERT_RINGING' },
+      'surface:1': { status: 'ALERT_RINGING' },
     }),
-    primedAlertSpeech: { p1: 'speaking' },
+    primedAlertSpeech: { 'surface:1': 'speaking' },
   },
 };
 
@@ -121,9 +121,9 @@ export const AlarmOutputsEnabled: Story = {
 export const WorkspaceAlertSettings: Story = {
   args: { items: [] },
   parameters: {
-    primedWorkspaces: { workspaces: [{ id: 'workspace-alert-story', name: 'Builds', alertDelivery: { speakEnabled: true } }] },
+    primedWorkspaces: { workspaces: [{ id: 'workspace:alert-story', name: 'Builds', alertDelivery: { speakEnabled: true } }] },
   },
-  decorators: [(Story) => <WorkspaceIdContext.Provider value="workspace-alert-story"><Story /></WorkspaceIdContext.Provider>],
+  decorators: [(Story) => <WorkspaceIdContext.Provider value="workspace:alert-story"><Story /></WorkspaceIdContext.Provider>],
   play: async ({ canvasElement }) => {
     const body = within(canvasElement.ownerDocument.body);
     fireEvent.contextMenu(body.getByRole('button', { name: 'Spoken alarms' }));
@@ -140,22 +140,22 @@ export const MixedDoorStates: Story = {
     items: mixedDoorStateItems,
   },
   parameters: withState(mixedDoorStateItems, {
-    p1: {
+    'surface:1': {
       status: 'NOTHING_TO_SHOW',
 
       todo: false,
     },
-    p2: {
+    'surface:2': {
       status: 'ALERT_RINGING',
 
       todo: false,
     },
-    p3: {
+    'surface:3': {
       status: 'WATCHING_DISABLED',
 
       todo: true,
     },
-    p4: {
+    'surface:4': {
       status: 'ALERT_RINGING',
 
       todo: true,
@@ -168,17 +168,17 @@ export const OverflowWithRingingDoor: Story = {
     items: overflowWithRingingDoorItems,
   },
   parameters: withState(overflowWithRingingDoorItems, {
-    p2: {
+    'surface:2': {
       status: 'NOTHING_TO_SHOW',
 
       todo: false,
     },
-    p5: {
+    'surface:5': {
       status: 'ALERT_RINGING',
 
       todo: false,
     },
-    p7: {
+    'surface:7': {
       status: 'WATCHING_DISABLED',
 
       todo: true,
@@ -208,7 +208,7 @@ export const OverflowWithNoticeAndSettings: Story = {
     ),
   },
   parameters: withState(overflowWithRingingDoorItems, {
-    p5: {
+    'surface:5': {
       status: 'ALERT_RINGING',
       todo: false,
     },
@@ -227,7 +227,7 @@ export const ExtremeTitleWithBothIndicators: Story = {
     items: extremeTitleWithBothIndicatorsItems,
   },
   parameters: withState(extremeTitleWithBothIndicatorsItems, {
-    p2: {
+    'surface:2': {
       status: 'ALERT_RINGING',
 
       todo: true,

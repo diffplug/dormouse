@@ -11,7 +11,7 @@ const SHOWN = 3;
 
 /**
  * The Window's pending kills, newest on top, in its bottom-right corner above
- * the Baseboard (`docs/specs/reopen.md` → "Labs: No-confirm delayed kill").
+ * the Baseboard.
  * A click restores; the pointer resting on an entry holds its countdown.
  */
 export function PendingKillOverlay() {

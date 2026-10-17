@@ -26,11 +26,18 @@ describe('Tool argv safety', () => {
       .rejects.toThrow('terminal control characters');
   });
 
-  it('rejects control-bearing argument-list configuration but preserves literal shell scripts', () => {
+  it('rejects control-bearing argument-list configuration', () => {
     const parse = (run: string | string[]) => parseToolFile(JSON.stringify({ tools: { viewer: { run } } }), { path: '/repo/dormouse.yml', dir: '/repo', scope: 'repo' });
     expect(() => parse(['viewer', 'first\nsecond'])).toThrow('terminal control characters');
     expect(() => parse(['viewer', 'a\u009b31m'])).toThrow('terminal control characters');
-    expect(parse('echo first\necho second').tools.get('viewer')?.run).toBe('echo first\necho second');
+  });
+
+  // A location, not text a repo wrote: the trust prompt shows its format
+  // characters escaped, and a Persian folder name needs U+200C.
+  it('keeps a format character an argument or a substituted path carries', async () => {
+    expect((await resolveToolInput(entry, { ...context, args: ['file\u202ename'] })).run).toEqual(['viewer', 'file\u202ename']);
+    expect((await resolveToolInput({ ...entry, run: ['viewer', '$CWD'] }, { ...context, cwd: '/\u067e\u0631\u0648\u0698\u0647\u200c\u0647\u0627' })).run)
+      .toEqual(['viewer', '/\u067e\u0631\u0648\u0698\u0647\u200c\u0647\u0627']);
   });
 
   it('rejects controls in file inputs and their resolving directory', async () => {

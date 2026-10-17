@@ -6,6 +6,7 @@ import {
   type FormEvent,
 } from "react";
 import {
+  acceptTerms,
   approveEnrollment,
   confirmCheckout,
   createVoiceToken,
@@ -36,6 +37,7 @@ import {
   BILLING_RETURN_PATH,
   LOGIN_FRESH_AGE_MS,
   RECENT_LOGIN_WINDOW,
+  TERMS_VERSION,
 } from "../server/policy-constants";
 import { takeEnrollment, type Enrollment } from "./enrollment";
 import { CheckoutView, PLAN_NAMES, PlanSection, WelcomeView } from "./Billing";
@@ -61,6 +63,39 @@ const INTROS: Record<"welcome" | "account" | "login", string> = {
   account: "Manage your plan and how you sign in.",
   login: "One account for Dormouse’s hosted services.",
 };
+
+// The terms version the sign-in notice showed when this tab continued past it,
+// kept through a provider's redirect until the account's acceptance is
+// recorded (docs/specs/hosted.md -> "Terms acceptance").
+const CONTINUED_KEY = "dormouse.terms-continued";
+function noteContinued() {
+  try {
+    sessionStorage.setItem(CONTINUED_KEY, TERMS_VERSION);
+  } catch {
+    // Storage blocked: the agreement stands, only its record is lost.
+  }
+}
+/** Records a pending acceptance; a failure leaves it for the next refresh. */
+async function recordContinued() {
+  let version: string | null = null;
+  try {
+    version = sessionStorage.getItem(CONTINUED_KEY);
+  } catch {
+    return;
+  }
+  if (!version) return;
+  await acceptTerms(version);
+  sessionStorage.removeItem(CONTINUED_KEY);
+}
+
+// Pre-launch: a signed-out visitor is sent to the devlog's email signup
+// instead of the sign-in form; `/login?signin` still opens it, as does a
+// failed provider callback's `?error`, which only a sign-in started there
+// reaches, so its message shows. Delete this, and its use below, at launch.
+const SUBSCRIBE_URL = "https://nedshed.dev/subscribe";
+const SUBSCRIBE_REDIRECT_MS = 4000;
+const SIGN_IN_PARAMS = new URLSearchParams(location.search);
+const SIGN_IN_OPEN = SIGN_IN_PARAMS.has("signin") || SIGN_IN_PARAMS.has("error");
 
 export function App({
   enrollment,
@@ -121,6 +156,7 @@ export function App({
           getBilling().catch(() => null),
         ])
       : [[], null, null, null];
+    if (current) await recordContinued().catch(() => {});
     if (generation !== refreshGeneration.current) return;
     setSession(current);
     setEnabled(providers);
@@ -165,6 +201,17 @@ export function App({
   useEffect(() => {
     if (enterCode) codeInput.current?.focus();
   }, [enterCode]);
+  // A failed lookup keeps its error and Retry on screen rather than sending
+  // a member who is signed in away during an outage.
+  const comingSoon = !loading && !session && !error && !SIGN_IN_OPEN;
+  useEffect(() => {
+    if (!comingSoon) return;
+    const timer = setTimeout(
+      () => location.assign(SUBSCRIBE_URL),
+      SUBSCRIBE_REDIRECT_MS,
+    );
+    return () => clearTimeout(timer);
+  }, [comingSoon]);
   useEffect(() => {
     // A link opened in the tab already on `/enroll` changes only the fragment:
     // take its code as the first load did, without reloading. Elsewhere a
@@ -217,6 +264,7 @@ export function App({
       return;
     }
     void act("verify", async () => {
+      noteContinued();
       await post("sign-in/email-otp", { email: email.trim(), otp: code });
       setCode("");
       setEnterCode(false);
@@ -333,9 +381,11 @@ export function App({
         </a>
       </header>
       <main>
-        <h1>{TITLES[page]}</h1>
+        <h1>{comingSoon ? "Coming soon" : TITLES[page]}</h1>
         <p className="intro">
-          {page === "enroll"
+          {comingSoon
+            ? "Check out the devlog at nedshed.dev."
+            : page === "enroll"
             ? !enrolling!.code
               ? "This link cannot be approved."
               : session
@@ -349,6 +399,10 @@ export function App({
         </p>
         {loading ? (
           <p role="status">Checking your account…</p>
+        ) : comingSoon ? (
+          <a className="primary button-link" href={SUBSCRIBE_URL}>
+            Subscribe at nedshed.dev
+          </a>
         ) : (
           <>
             {error && (
@@ -575,7 +629,8 @@ export function App({
                     <h2 id="computers">Computers</h2>
                     <p className="help">
                       Computers signed in to this account speak with managed
-                      voice and reach your phones through the Hosted Relay.
+                      voice. A phone reaches one through the Hosted Relay only
+                      once paired by two digits typed at that computer.
                     </p>
                     {computers.length === 0 && (
                       <p className="help">
@@ -726,7 +781,10 @@ export function App({
                         key={provider}
                         disabled={!!busy}
                         onClick={() =>
-                          void act(provider, () => social(provider, false))
+                          void act(provider, () => {
+                            noteContinued();
+                            return social(provider, false);
+                          })
                         }
                       >
                         {busy === provider
@@ -736,6 +794,25 @@ export function App({
                     ))}
                   </section>
                 )}
+                <p className="help">
+                  By continuing, you agree to the{" "}
+                  <a
+                    href="https://dormouse.sh/terms/"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Terms
+                  </a>{" "}
+                  (version {TERMS_VERSION}) and acknowledge the{" "}
+                  <a
+                    href="https://dormouse.sh/privacy/"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Privacy policy
+                  </a>
+                  .
+                </p>
                 {enrolling && enabled.length > 0 ? (
                   <p className="help">
                     Signing in with a provider leaves this page. Afterwards,
@@ -763,7 +840,7 @@ export function App({
         </a>
         <a href="https://dormouse.sh/privacy/" rel="noreferrer">Privacy ↗</a>
         <a href="https://dormouse.sh/terms/" rel="noreferrer">Terms ↗</a>
-        <span>Optional services. Your terminal stays yours.</span>
+        <span>Optional services. Your terminals run on your own computer.</span>
       </footer>
     </div>
   );

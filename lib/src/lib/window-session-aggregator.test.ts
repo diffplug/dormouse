@@ -23,11 +23,12 @@ import {
   renameWorkspace,
   resetWorkspaces,
   setActiveWorkspace,
+  setWorkspacePinned,
   getWorkspacesSnapshot,
 } from './workspace-store';
 
 function session(paneId: string): PersistedSession {
-  return { version: 3, panes: [{ id: paneId, title: paneId, cwd: null, untouched: true, alert: null }], doors: [] };
+  return { version: 4, panes: [{ id: paneId, title: paneId, cwd: null, untouched: true, alert: null }], doors: [] };
 }
 
 /** Run the debounce out and let the writer's own promise settle. */
@@ -53,7 +54,7 @@ describe('window session aggregator', () => {
     publishWorkspaceSession(second, session('b'));
 
     expect(getWindowSnapshot()).toMatchObject({
-      version: 1,
+      version: 2,
       activeWorkspaceId: second,
       workspaces: [{ id: first }, { id: second, name: 'Second' }],
     });
@@ -98,7 +99,7 @@ describe('window session aggregator', () => {
 
   it('forgets a Workspace session, seeded or published', () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
-    seedWindowSession({ version: 1, workspaces: [{ id: first, name: 'One', session: session('seed') }], activeWorkspaceId: first });
+    seedWindowSession({ version: 2, workspaces: [{ id: first, name: 'One', session: session('seed') }], activeWorkspaceId: first });
     publishWorkspaceSession(first, session('a'));
     forgetWorkspaceSession(first);
     expect(getWindowSnapshot().workspaces).toEqual([]);
@@ -111,7 +112,7 @@ describe('window session aggregator', () => {
     it('answers for a Workspace whose Wall has not published yet', () => {
       const second = createWorkspace({ id: 'ws-2', name: 'Second' }).id;
       const seeded: PersistedWindow = {
-        version: 1,
+        version: 2,
         workspaces: [
           { id: first(), name: 'One', session: session('a-seed') },
           { id: second, name: 'Second', session: session('b-seed') },
@@ -133,7 +134,7 @@ describe('window session aggregator', () => {
     });
 
     it('replaces the previous seed, and null clears it', () => {
-      seedWindowSession({ version: 1, workspaces: [{ id: first(), name: 'One', session: session('old') }], activeWorkspaceId: first() });
+      seedWindowSession({ version: 2, workspaces: [{ id: first(), name: 'One', session: session('old') }], activeWorkspaceId: first() });
       seedWindowSession(null);
       expect(previousWorkspaceSession(first())).toBeNull();
       expect(getWindowSnapshot().workspaces).toEqual([]);
@@ -202,6 +203,23 @@ describe('window session aggregator', () => {
       expect(write.mock.calls.at(-1)?.[0].activeWorkspaceId).toBe(second);
     });
 
+    it('writes a pin change, carrying `pinned` only on a pinned Workspace', async () => {
+      const write = vi.fn();
+      const first = getWorkspacesSnapshot().workspaces[0].id;
+      const second = createWorkspace({ name: 'Second' }).id;
+      publishWorkspaceSession(first, session('a'));
+      publishWorkspaceSession(second, session('b'));
+      installWindowSessionWriter(write);
+
+      setWorkspacePinned(first, true);
+      await settle();
+      expect(write).toHaveBeenCalledTimes(1);
+      const [written] = write.mock.calls[0];
+      expect(written.workspaces.map((ws: { id: string }) => ws.id)).toEqual([second, first]);
+      expect(written.workspaces[0]).not.toHaveProperty('pinned');
+      expect(written.workspaces[1].pinned).toBe(true);
+    });
+
     it('never names an active Workspace the blob does not contain', async () => {
       // Creating a Workspace makes it active immediately; its Wall's first save
       // is a debounce (or a heartbeat) away. A crash inside that window used to
@@ -215,7 +233,7 @@ describe('window session aggregator', () => {
       expect(snapshot.activeWorkspaceId).toBe(second);
       expect(snapshot.workspaces.map((ws) => ws.id)).toContain(second);
       // Empty, but valid — it round-trips as a Workspace whose Wall starts fresh.
-      expect(snapshot.workspaces.at(-1)?.session).toEqual({ version: 3, panes: [] });
+      expect(snapshot.workspaces.at(-1)?.session).toEqual({ version: 4, panes: [] });
 
       await settle();
       expect(write.mock.calls.at(-1)?.[0].activeWorkspaceId).toBe(second);
@@ -285,7 +303,7 @@ it.each([false, true])('publishes several records behind one write (unloading: %
     window.dispatchEvent(new Event('pagehide'));
     write.mockClear();
   }
-  publishWorkspaceSessions([[first, { version: 3, panes: [] }], [second, { version: 3, panes: [...session('other').panes, ...session('moving').panes] }]]);
+  publishWorkspaceSessions([[first, { version: 4, panes: [] }], [second, { version: 4, panes: [...session('other').panes, ...session('moving').panes] }]]);
   // An unloading Window writes on every publish, synchronously; one publish is one write.
   if (!unloading) await flushWindowSession();
   expect(write).toHaveBeenCalledTimes(1);

@@ -15,6 +15,7 @@ vi.mock("@tauri-apps/plugin-shell", () => ({
 }));
 
 import { invoke as rawInvoke } from "@tauri-apps/api/core";
+import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { listen } from "@tauri-apps/api/event";
 import type { AlertStateDetail } from "dormouse-lib/lib/platform/types";
 import { getTerminalPaneState } from "dormouse-lib/lib/terminal-state-store";
@@ -126,6 +127,20 @@ describe("TauriAdapter browser requests", () => {
   });
 });
 
+describe("TauriAdapter external links", () => {
+  it("revalidates every URI before the shell opens it, refusing the schemes the dialog refuses", () => {
+    const adapter = new TauriAdapter();
+    vi.mocked(shellOpen).mockClear();
+    adapter.openExternal("ms-msdt:x");
+    adapter.openExternal("search-ms:query=x");
+    adapter.openExternal("javascript:alert(1)");
+    expect(shellOpen).not.toHaveBeenCalled();
+    adapter.openExternal("vscode://file/x.ts");
+    adapter.openExternal("https://example.com/");
+    expect(vi.mocked(shellOpen).mock.calls).toEqual([["vscode://file/x.ts"], ["https://example.com/"]]);
+  });
+});
+
 describe("TauriAdapter port probing", () => {
   it("sends one pty_get_open_ports_many for a whole listing, and fails soft", async () => {
     // `dor list --ports` across Workspaces asks once for every terminal: the
@@ -156,9 +171,9 @@ describe("TauriAdapter port probing", () => {
 // docs/specs/transport.md -> "The governing rule": standalone restores window
 // state, so nothing is deleted at boot and the record is claimed once.
 describe("TauriAdapter window persistence", () => {
-  const session = { version: 3 as const, panes: [{ id: "pane-a", title: "A", cwd: "/a", untouched: false }] };
+  const session = { version: 4 as const, panes: [{ id: "pane-a", title: "A", cwd: "/a", untouched: false }] };
   const windowBlob = {
-    version: 1 as const,
+    version: 2 as const,
     workspaces: [{ id: "ws-1", name: "One", nameIsAuto: false, session }],
     activeWorkspaceId: "ws-1",
   };
@@ -185,10 +200,12 @@ describe("TauriAdapter window persistence", () => {
     adapter.shutdown();
   });
 
-  it("wraps a pre-Window blob as the one Workspace", async () => {
-    const { adapter } = await booted((cmd) => (cmd === "load_session" ? JSON.stringify(session) : undefined));
-    expect(adapter.getWindowState()?.workspaces.map((ws) => ws.session)).toEqual([session]);
+  it("starts fresh on a blob an older build wrote", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    const { adapter } = await booted((cmd) => (cmd === "load_session" ? JSON.stringify({ ...session, version: 3 }) : undefined));
+    expect(adapter.getWindowState()).toBeNull();
     adapter.shutdown();
+    info.mockRestore();
   });
 
   it("claims the recovery commands for every saved pane, before restore reads them", async () => {

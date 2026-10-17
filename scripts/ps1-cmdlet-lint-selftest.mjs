@@ -5,15 +5,14 @@
  *
  * Each planted defect is a real shape: a rename eating the noun half of a
  * cmdlet name, one eating the verb half, and ones eating a name the anchor can
- * only reach from a single call position. The installer is copied, mutated, and
- * restored; the lint must go red on each and green again after.
+ * only reach from a single call position. Each is checked as text in memory,
+ * never written to the installer; the lint must go red on each.
  */
 
-import { copyFileSync, readFileSync, writeFileSync, rmSync, realpathSync } from 'node:fs';
-import { join } from 'node:path';
+import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-import { repoRoot } from './lint-kit.mjs';
+import { readRepoFile } from './lint-kit.mjs';
 import { check, INSTALLER } from './ps1-cmdlet-lint.mjs';
 
 /**
@@ -56,43 +55,33 @@ const DEFECTS = [
 
 export function run() {
   const failures = [];
-  const path = join(repoRoot, INSTALLER);
-  const backup = `${path}.selftest-backup`;
-  copyFileSync(path, backup);
-  const original = readFileSync(path, 'utf8');
+  const original = readRepoFile(INSTALLER);
 
-  try {
-    if (check().failures.length > 0) {
-      failures.push('the installer is already failing the lint, so no mutation proves anything');
-      return { failures, checked: 0 };
+  if (check(original).failures.length > 0) {
+    failures.push('the installer is already failing the lint, so no mutation proves anything');
+    return { failures, checked: 0 };
+  }
+
+  for (const defect of DEFECTS) {
+    const mutated = defect.mutate(original);
+    if (mutated === original) {
+      failures.push(`${defect.name}: the mutation changed nothing — it no longer plants a defect`);
+      continue;
     }
-
-    for (const defect of DEFECTS) {
-      const mutated = defect.mutate(original);
-      if (mutated === original) {
-        failures.push(`${defect.name}: the mutation changed nothing — it no longer plants a defect`);
+    if (defect.onlyIn) {
+      const all = original.match(defect.token)?.length ?? 0;
+      const anchored = original.match(defect.onlyIn)?.length ?? 0;
+      if (all !== anchored) {
+        failures.push(
+          `${defect.name}: ${all - anchored} of ${all} occurrences sit somewhere else now, ` +
+            'so this case no longer proves the position it names — re-point it',
+        );
         continue;
       }
-      if (defect.onlyIn) {
-        const all = original.match(defect.token)?.length ?? 0;
-        const anchored = original.match(defect.onlyIn)?.length ?? 0;
-        if (all !== anchored) {
-          failures.push(
-            `${defect.name}: ${all - anchored} of ${all} occurrences sit somewhere else now, ` +
-              'so this case no longer proves the position it names — re-point it',
-          );
-          continue;
-        }
-      }
-      writeFileSync(path, mutated);
-      if (check().failures.length === 0) {
-        failures.push(`${defect.name}: the lint stayed green`);
-      }
-      writeFileSync(path, original);
     }
-  } finally {
-    copyFileSync(backup, path);
-    rmSync(backup, { force: true });
+    if (check(mutated).failures.length === 0) {
+      failures.push(`${defect.name}: the lint stayed green`);
+    }
   }
 
   return { failures, checked: DEFECTS.length };

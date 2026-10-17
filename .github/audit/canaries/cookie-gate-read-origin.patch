@@ -1,0 +1,45 @@
+Domain: hosted
+Rule: `docs/specs/security-hosted.md` -> "Origin boundary" #2 — a sibling's `same-site` are refused
+Expect: hosted/server/account-gate.ts
+Source: reverses part of #1104 (the cookie read gate admitted a sibling page's `same-site` read that presents no `Origin`)
+
+diff --git a/hosted/server/account-gate.ts b/hosted/server/account-gate.ts
+index 6d7b22afc..b56738da6 100644
+--- a/hosted/server/account-gate.ts
++++ b/hosted/server/account-gate.ts
+@@ -24,16 +24,18 @@ export const jsonBodyLimit = (maxSize: number) =>
+   bodyLimit({ maxSize, onError: (c) => c.json({ message: "Request too large." }, 413) });
+ 
+ /**
+- * Whether the account's own page made this read: the browser says
+- * `Sec-Fetch-Site: same-origin`, and an `Origin`, if presented, is exactly
+- * `origin`. A sibling's page, a navigation, and a request without Fetch
++ * Whether this site's pages made this read: the browser says
++ * `Sec-Fetch-Site: same-origin` or `same-site` — the relay and voice pages
++ * share the login cookie — and an `Origin`, if presented, is exactly
++ * `origin`. Another site's page, a typed URL, and a request without Fetch
+  * Metadata all fail. {@link cookieEntitled}'s in-process login lookup vouches
+  * for a request its gate admitted by carrying the header itself.
+  */
+ export function ownPageRead(request: Request, origin: string): boolean {
+   const presented = request.headers.get("origin");
++  const site = request.headers.get("sec-fetch-site");
+   return (
+-    request.headers.get("sec-fetch-site") === "same-origin" &&
++    (site === "same-origin" || site === "same-site") &&
+     (presented === null || presented === origin)
+   );
+ }
+diff --git a/hosted/server/tests/boundary.test.ts b/hosted/server/tests/boundary.test.ts
+index 92ecb941e..e803de35f 100644
+--- a/hosted/server/tests/boundary.test.ts
++++ b/hosted/server/tests/boundary.test.ts
+@@ -804,7 +804,7 @@ test("the cookie gate refuses a foreign Origin on every method, and a read the a
+     // Only a read may omit `Origin`, and only a read needs Fetch Metadata.
+     expect((await send(own)).status, method).toBe(read ? 204 : 403);
+     expect((await send({ origin })).status, method).toBe(read ? 403 : 204);
+-    for (const site of ["same-site", "none", "cross-site"])
++    for (const site of ["none", "cross-site"])
+       expect((await send({ "sec-fetch-site": site })).status, `${method} ${site}`).toBe(403);
+   }
+ });

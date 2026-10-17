@@ -39,15 +39,15 @@ it('places from painted frames without rerendering the helper or snapping back o
     act(() => input.focus());
     input.value = 'unfinished command';
     const renders = rendered.mock.calls.length;
-    expect(host.style.left).toBe('484px');
+    expect(host.style.left).toBe('490px');
     let published: ReturnType<ContextPlacer> = null;
     act(() => { published = paint({ ...source, width: 550 }); });
     expect(published).toEqual({ sourceId: 'source', element: host, side: 'right' });
-    expect(host.style.left).toBe('534px');
+    expect(host.style.left).toBe('540px');
     expect(host.style.width).toBe('550px');
     expect(rendered).toHaveBeenCalledTimes(renders);
     render('New source title');
-    expect(host.style.left).toBe('534px');
+    expect(host.style.left).toBe('540px');
     expect(host.style.width).toBe('550px');
     expect(container.querySelector('[data-test-context]')).toBe(helper);
     expect(input.value).toBe('unfinished command');

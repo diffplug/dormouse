@@ -18,6 +18,7 @@ export function touchesHosted(paths) {
         "pnpm-workspace.yaml",
         "lib/package.json",
         "lib/scripts/assert-pocket-worker.mjs",
+        "website/public/favicon.svg",
       ].includes(path),
   );
 }

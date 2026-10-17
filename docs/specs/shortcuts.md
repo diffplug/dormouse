@@ -31,13 +31,13 @@ A focused cross-origin iframe surface swallows the gesture; the proxy shim detec
 
 ## Workspaces (command mode)
 
-Standalone only — a bare Wall (VS Code, the website playground) leaves these keys unbound.
+Standalone and the desktop playground — a bare Wall (VS Code) leaves these keys unbound.
 
 | Key | Action | Description |
 |-----|--------|-------------|
 | `1`–`9` | Select by position | The nth Workspace in strip order; out of range is a consumed no-op. |
 | `,` | Rename selected item | Edit the highlighted Workspace tab, without activating it. |
-| `k` or `x` | Close Workspace | Close the highlighted tab through its `×` action, including its confirmation. |
+| `k` or `x` | Close Workspace | Close the highlighted tab through its `×` action, including its confirmation (pinned: `docs/specs/layout.md` → Workspace tabs). |
 | `Enter` (Workspace tab) | Activate / focus | An inactive tab activates in command mode; an active tab enters its terminal in passthrough. |
 | `Enter` (`+`) | New Workspace | Creates and focuses its terminal in passthrough after mount. |
 
@@ -46,7 +46,7 @@ Standalone only — a bare Wall (VS Code, the website playground) leaves these k
 | Key | Action | Description |
 |-----|--------|-------------|
 | `↑` / `↓` / `←` / `→` | Move selection | Navigate panes and doors; opposite directions backtrack between panes. Down with no pane below selects the first door; Up from a door selects the last pane. Up from a top-edge pane highlights the active Workspace tab. |
-| `←` / `→` (Workspace strip) | Highlight tab / `+` | Traverse without activation, stopping at either end. Down returns to the originating live pane, or the first if gone. |
+| `←` / `→` (Workspace strip) | Highlight tab / `+` | Traverse in strip order (`docs/specs/layout.md` → Workspace tabs), without activation, stopping at either end. Down returns to the originating live pane, or the first if gone. |
 | `⌘`+arrows or `Ctrl`+arrows | Swap surfaces | Swap the two panes' Surfaces; the opposite chord swaps back exactly. Either modifier, every platform; consumed no-op on non-pane chrome. |
 
 ## Terminal selection & clipboard
@@ -83,6 +83,8 @@ Every key not claimed above forwards to the embedded page while a screencast pan
 | `Enter` | Confirm rename | Save the new name while renaming a pane; blur commits too. |
 | `Tab` / `Shift+Tab` | Focus cycle | Cycle popover/dialog controls. In terminal context, navigate controls into the helper; once helper xterm has focus, Tab belongs to its program. |
 | `Shift+F10` / `ContextMenu` | Workspace alert settings | On a focused baseboard alarm button (`docs/specs/alert.md` → Settings dialog). |
+| `Shift+F10` / `ContextMenu` | Workspace tab menu | On a focused Workspace tab. |
+| `↑` / `↓`, `Home` / `End` | Move in a menu | Tab menu rows; `Enter` chooses. |
 | Prompted letter | Confirm kill | Type the letter shown to confirm; other keys reaching the prompt cancel (see layout's dispatch order). |
 
 ## VS Code host
@@ -102,7 +104,7 @@ The standalone host contributes no chords; `docs/specs/standalone.md` owns its n
 ## Implementation references
 
 - `lib/src/components/wall/use-wall-keyboard.ts` — the capture-phase listener; the iframe-shim leader `message` listener
-- `lib/src/components/wall/keyboard/` — one module per dispatch branch: `handle-dual-tap.ts`, `handle-editable-clipboard.ts`, `handle-mouse-selection-keys.ts`, `handle-kill-confirm.ts`, `handle-workspace-shortcuts.ts`, `handle-pane-shortcuts.ts`, `handle-pane-navigation.ts`; platform modifiers in `chords.ts`
+- `lib/src/components/wall/keyboard/` — one module per dispatch branch, platform modifiers included
 - `lib/src/components/wall/chrome-keyboard-lease.ts`, `lib/src/lib/workspace-ui-store.ts` — the strip's keyboard suppression and rename/confirmation state
 - `lib/src/lib/vscode-keybindings.ts` — the workbench mirror allowlist
 - `lib/src/lib/terminal-mouse-router.ts` — live Alt tracking during a drag

@@ -1,4 +1,5 @@
-import { BellIcon, FlaskIcon, GearIcon, GlobeIcon, MagnifyingGlassIcon, PulseIcon } from '@phosphor-icons/react';
+import { BellIcon, FlaskIcon, GearIcon, GlobeIcon, InfoIcon, MagnifyingGlassIcon } from '@phosphor-icons/react';
+import { AboutSettings } from './AboutSettings';
 import { SecondsField, SwitchRow } from './AlarmSettingsControls';
 import { ScrollFades } from './ScrollFades';
 import type { AlertSink } from '../lib/alert-delivery-model';
@@ -91,10 +92,10 @@ function describePushTargets(push: PushDevicesState, remoteControlBelow: boolean
 
 const TOPICS = [
   { id: 'general', label: 'General', icon: GearIcon, groups: ['theme', 'shell'] },
-  { id: 'activity', label: 'Activity', icon: PulseIcon, groups: ['watcher', 'inactivity'] },
-  { id: 'notifications', label: 'Notifications', icon: BellIcon, groups: ['speech', 'push'] },
+  { id: 'notifications', label: 'Notifications', icon: BellIcon, groups: ['speech', 'push', 'watcher', 'inactivity'] },
   { id: 'network', label: 'Network', icon: GlobeIcon, groups: ['network', 'phones', 'updates'] },
   { id: 'labs', label: 'Labs', icon: FlaskIcon, groups: ['delayedKill'] },
+  { id: 'about', label: 'About', icon: InfoIcon, groups: ['about'] },
 ] as const;
 export type TopicId = typeof TOPICS[number]['id'];
 type GroupId = typeof TOPICS[number]['groups'][number];
@@ -221,9 +222,12 @@ export function SettingsDialog({ onClose, initialTopic }: { onClose: () => void;
     setTopic(current.dataset.settingsTopic as TopicId);
   }, []);
 
+  // `data-topic-scrolling` marks the scroller while a topic animation owns it,
+  // so a story can wait for its final frame rather than guess at it.
   const cancelScroll = useCallback(() => {
     if (scrollFrame.current !== null) cancelAnimationFrame(scrollFrame.current);
     scrollFrame.current = null;
+    delete contentRef.current?.dataset.topicScrolling;
   }, []);
   /** The topic opened at, held in view for a moment while the sections above it load. */
   const settling = useRef<{ id: TopicId; until: number } | null>(null);
@@ -249,8 +253,10 @@ export function SettingsDialog({ onClose, initialTopic }: { onClose: () => void;
       const progress = Math.min((now - started) / SETTINGS_SCROLL_MS, 1);
       const eased = (1 - Math.cos(Math.PI * progress)) / 2;
       content.scrollTo({ top: from + (to - from) * eased, behavior: 'instant' });
-      scrollFrame.current = progress < 1 ? requestAnimationFrame(step) : null;
+      if (progress < 1) scrollFrame.current = requestAnimationFrame(step);
+      else cancelScroll();
     };
+    content.dataset.topicScrolling = '';
     scrollFrame.current = requestAnimationFrame(step);
   }, [cancelScroll]);
 
@@ -403,6 +409,7 @@ export function SettingsDialog({ onClose, initialTopic }: { onClose: () => void;
                     <span>Theme:</span>
                     <ThemePicker
                       variant="settings-dialog"
+                      offerStore={getPlatform().offersThemeStore === true}
                       open={openMenu === 'theme'}
                       onOpenChange={onThemeOpenChange}
                     />
@@ -420,8 +427,15 @@ export function SettingsDialog({ onClose, initialTopic }: { onClose: () => void;
                 )}
               </div>
             </TopicSection>
-            <TopicSection id="activity" hidden={!visible('activity')}>
-              <section data-setting="watcher" hidden={!matches('watcher')} className="mt-4">
+            <TopicSection id="notifications" hidden={!visible('notifications')}>
+              {(matches('speech') || matches('push')) && <h3 className="mt-4 text-sm font-semibold text-foreground">Application defaults</h3>}
+              <div data-setting="speech" hidden={!matches('speech')}>
+                <AlarmSettingsSection sink="speech" onShowNetwork={showNetwork} />
+              </div>
+              <div data-setting="push" hidden={!matches('push')}>
+                <AlarmSettingsSection sink="push" onShowNetwork={showNetwork} />
+              </div>
+              <section data-setting="watcher" hidden={!matches('watcher')} className={SETTINGS_SECTION}>
                 <div className="text-sm text-foreground">
                   Animation watcher enabled for commands that start with:
                 </div>
@@ -442,7 +456,7 @@ export function SettingsDialog({ onClose, initialTopic }: { onClose: () => void;
                     onChange={(deferAlertsUntilQuiet) => updateAlertSettings({ deferAlertsUntilQuiet })}
                   />
                   <div className={`${UNDER_SWITCH_INDENT} mt-1 text-sm leading-relaxed text-muted`}>
-                    Terminal notifications wait until five seconds after the last output.
+                    Terminal notifications wait while a program is busy, until its output settles.
                     If output resumes, the alert pauses until quiet without losing it or
                     repeating alarms already sent. Command exits alert immediately.
                   </div>
@@ -458,15 +472,6 @@ export function SettingsDialog({ onClose, initialTopic }: { onClose: () => void;
                   User has walked away after this much inactivity.
                 </div>
               </section>
-            </TopicSection>
-            <TopicSection id="notifications" hidden={!visible('notifications')}>
-              {(matches('speech') || matches('push')) && <h3 className="mt-4 text-sm font-semibold text-foreground">Application defaults</h3>}
-              <div data-setting="speech" hidden={!matches('speech')}>
-                <AlarmSettingsSection sink="speech" onShowNetwork={showNetwork} />
-              </div>
-              <div data-setting="push" hidden={!matches('push')}>
-                <AlarmSettingsSection sink="push" onShowNetwork={showNetwork} />
-              </div>
             </TopicSection>
             {/* Network stays below push, whose `no-burrow` copy says "below". */}
             <TopicSection id="network" hidden={!visible('network')}>
@@ -491,6 +496,11 @@ export function SettingsDialog({ onClose, initialTopic }: { onClose: () => void;
                 </section>
               </TopicSection>
             )}
+            <TopicSection id="about" hidden={!visible('about')}>
+              <section data-setting="about" hidden={!matches('about')}>
+                <AboutSettings />
+              </section>
+            </TopicSection>
           </div>
           <ScrollFades above={above} below={below} />
         </div>
@@ -540,7 +550,7 @@ export function AlarmSettingsSection({ sink, preview = false, onShowNetwork }: {
           'Uses your browser or system voice.'
         ) : networkOff ? (
           <>
-            Managed voice is off while <NetworkTopicLink onShow={onShowNetwork} /> is set to Nothing,
+            Managed voice is off while <NetworkTopicLink onShow={onShowNetwork} /> is set to Nowhere,
             so alerts use your browser or system voice.
           </>
         ) : (
@@ -565,7 +575,7 @@ export function AlarmSettingsSection({ sink, preview = false, onShowNetwork }: {
       action={preview ? null : <PushTestButton />}
     >
       {networkOff ? (
-        <>Push is off while <NetworkTopicLink onShow={onShowNetwork} /> is set to Nothing.</>
+        <>Push is off while <NetworkTopicLink onShow={onShowNetwork} /> is set to Nowhere.</>
       ) : (
         preview ? <PreviewPushTargets push={push} /> : <PushTargets push={push} hasBurrowService={hasBurrowService} />
       )}

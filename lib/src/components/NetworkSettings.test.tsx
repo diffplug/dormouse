@@ -55,7 +55,7 @@ function facts(over: Partial<NetworkFacts> = {}): NetworkFacts {
   return { policy: LOCAL, status: UNENROLLED_STATUS, managedVoice: false, updater: false, ...over };
 }
 
-/** A self-host build under My Relay only, enrolled with `pairedClients` phones. */
+/** A self-host build under `relay`, enrolled with `pairedClients` phones. */
 const relayFacts = (pairedClients = 0) =>
   ({ policy: RELAY_ON, status: enrolledStatus({ pairedClients }) }) satisfies Partial<NetworkFacts>;
 
@@ -156,7 +156,7 @@ describe('connectionsFor', () => {
     expect(destinations({ policy: ANYWHERE, status: { ...enrolled, pairedClients: 0 } })).not.toContain(push.to);
   });
 
-  it('lists the Relay always, once enrolled, and the phone directly, under My Relay only', () => {
+  it('lists the Relay always, once enrolled, and the phone directly, under `relay`', () => {
     expect(connectionsFor(facts(relayFacts())).map((row) => [row.to, row.when])).toEqual([
       ['ned-mac.tail9c2f1.ts.net', 'Always'],
       ['Your phone, directly', 'While connected'],
@@ -172,7 +172,7 @@ describe('connectionsFor', () => {
         connectionsFor(facts({ status: { ...UNENROLLED_STATUS, enrolled: true, pairedClients: 1, connection } })),
         connection,
       ).toEqual(connectionsFor(facts()));
-      // Self-host under My Relay only: nothing reaches this computer at all.
+      // Self-host under `relay`: nothing reaches this computer at all.
       expect(connectionsFor(facts({ ...relayFacts(1), status: enrolledStatus({ pairedClients: 1, connection }) }))).toEqual([]);
     }
     // A socket merely down is still the standing connection.
@@ -391,9 +391,9 @@ describe('Settings → Network', () => {
     await render();
     const radios = [...container.querySelectorAll('[role="radio"]')].map((radio) => radio.textContent);
     expect(radios).toEqual([
-      'NothingDormouse opens no connections on its own, and phones can’t reach it.',
-      'Local networksPhones connect only over networks you choose.',
-      'AnywherePhones connect directly from any network.',
+      'NowhereDormouse opens no connections on its own, and phones can’t reach it.',
+      'Local networks onlyPhones reach your terminals only over networks you choose. Phone and spoken alerts send a pane’s name from any network.',
+      'AnywherePhones reach your terminals from any network, directly when they can, otherwise relayed through Hosted.',
     ]);
   });
 
@@ -410,8 +410,8 @@ describe('Settings → Network', () => {
   it('chooses Local networks from the Phones hint, allowing the LAN interfaces', async () => {
     link({ status: UNENROLLED_STATUS, network: networkPolicyResult(nothingPolicy(), 'hosted', INTERFACES) });
     await render();
-    expect(text()).toContain('Choose Local networks or Anywhere to connect a phone.');
-    await act(async () => button('Local networks').click());
+    expect(text()).toContain('Choose Local networks only or Anywhere to connect a phone.');
+    await act(async () => button('Local networks only').click());
     expect(command).toHaveBeenCalledWith('setNetworkPolicy', {
       policy: { level: 'local', allowed: [LAN, 'fd00:1::/64', '10.1.0.0/16'], autoUpdate: false },
     });
@@ -469,7 +469,7 @@ describe('Settings → Network', () => {
       link({ status: UNENROLLED_STATUS, network: networkPolicyResult(nothingPolicy(), 'hosted', INTERFACES) });
       const release = holdSets();
       await render();
-      const [local, nothing] = [radio('Local networks'), radio('Nothing')];
+      const [local, nothing] = [radio('Local networks only'), radio('Nowhere')];
       await act(async () => {
         local.click();
         nothing.click();
@@ -477,7 +477,7 @@ describe('Settings → Network', () => {
       await release();
       await release();
       expect(sentPolicies().map((policy) => policy.level)).toEqual(['local', 'nothing']);
-      expect(radio('Nothing').getAttribute('aria-checked')).toBe('true');
+      expect(radio('Nowhere').getAttribute('aria-checked')).toBe('true');
     });
   });
 

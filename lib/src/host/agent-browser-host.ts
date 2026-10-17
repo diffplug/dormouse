@@ -17,7 +17,6 @@ import { promises as fs } from 'fs';
 // All external spawns go through dor-lib-common's spawnAndCapture, which owns the
 // Windows recipe (cross-spawn for PATHEXT/.cmd, windowsHide, exit-vs-close). The
 // GUI host needs it even for the absolute `binaryPath` dor agent-browser resolved.
-// See docs/specs/dor-cli.md → "Spawning External Binaries".
 import {
   BROWSER_PROVIDERS,
   isDirectory,
@@ -121,6 +120,11 @@ function frameSize(metadata: { deviceWidth?: unknown; deviceHeight?: unknown } |
   const height = metadata?.deviceHeight;
   return typeof width === 'number' && width > 0 && typeof height === 'number' && height > 0 ? { width, height } : undefined;
 }
+
+/** Chrome draws no window narrower than this, in CSS pixels: a narrower
+ *  viewport is emulated at the left of a window this wide, which the daemon's
+ *  frames show (docs/specs/dor-browser.md → "Viewer Socket"; rationale). */
+const CHROME_MIN_WINDOW_WIDTH = 500;
 
 // A frame's bulk is base64, whose alphabet has no `"` or `:`: these mark a
 // control message large enough to pass for a frame.
@@ -604,7 +608,7 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
         if (headed || lastFrame?.equals(data)) return;
         lastFrame = data;
         const size = frameSize(message.metadata);
-        sink.frame(Buffer.from(message.data, 'base64'), size);
+        sink.frame(Buffer.from(message.data, 'base64'), size, size && Math.max(size.width, CHROME_MIN_WINDOW_WIDTH));
         // The daemon's frames follow its `set viewport` exactly, ordered with
         // rendering: the viewport sync-to-pane judges by (rationale).
         if (size) sink.viewport(size, performance.now());

@@ -11,7 +11,6 @@ import type {
 import {
   callerWorkingDirectory,
   errorMessage,
-  printable,
   renderPrintableJson,
   requireControlClient,
   scanPreDelimiterArgs,
@@ -21,7 +20,7 @@ import {
   writeStderr,
   writeStdout,
 } from './shared.js';
-import { renderToolResponse } from './terminal-text.js';
+import { printableExact, renderToolResponse } from './terminal-text.js';
 
 interface ToolFlags {
   readonly list?: boolean;
@@ -90,15 +89,15 @@ export const toolCommand: Command = {
     {
       scope: 'root',
       findReplace: [
-        '  dor tool [--global] [--json] [--minimize] [--fresh] [--surface id|ref] [--workspace ref] [--cwd path]<TO-EOL>',
-        '  dor tool [--global] [--json] [--minimize] [--fresh] [--surface id|ref] [--cwd path] [--workspace ref] <name> [args...]\n  dor tool [--json] [--minimize] [--surface id|ref] [--cwd path] [--workspace ref] -- <command>...\n  dor tool --list [--global] [--cwd path] [--json]\n',
+        '  dor tool [--global] [--json] [--minimize] [--fresh] [--surface handle] [--workspace ref] [--cwd path]<TO-EOL>',
+        '  dor tool [--global] [--json] [--minimize] [--fresh] [--surface handle] [--cwd path] [--workspace ref] <name> [args...]\n  dor tool [--json] [--minimize] [--surface handle] [--cwd path] [--workspace ref] -- <command>...\n  dor tool --list [--global] [--cwd path] [--json]\n',
       ],
     },
     {
       scope: 'command-usage',
       findReplace: [
-        '  dor tool [--global] [--json] [--minimize] [--fresh] [--surface id|ref] [--workspace ref] [--cwd path]<TO-EOL>',
-        '  dor tool [--global] [--json] [--minimize] [--fresh] [--surface id|ref] [--cwd path] [--workspace ref] <name> [args...]\n  dor tool [--json] [--minimize] [--surface id|ref] [--cwd path] [--workspace ref] -- <command>...\n  dor tool --list [--global] [--cwd path] [--json]\n',
+        '  dor tool [--global] [--json] [--minimize] [--fresh] [--surface handle] [--workspace ref] [--cwd path]<TO-EOL>',
+        '  dor tool [--global] [--json] [--minimize] [--fresh] [--surface handle] [--cwd path] [--workspace ref] <name> [args...]\n  dor tool [--json] [--minimize] [--surface handle] [--cwd path] [--workspace ref] -- <command>...\n  dor tool --list [--global] [--cwd path] [--json]\n',
       ],
     },
     {
@@ -119,7 +118,7 @@ A tool has an identity if and only if its dormouse.yml entry gave it one, via pr
 
 A project dormouse.yml is repo-controlled and its entries execute, so it is inert until you approve it in Dormouse itself. For an unapproved repo the surface is created and reports "pending": its pane shows what would run and waits for you to allow the upstream, allow just this folder, or close it. Nothing from the repo runs until you choose, and declining records nothing.
 
-Approving an upstream covers every worktree and clone of that repo. Approving a folder covers that checkout only, which is what you want for a branch you have not read.
+Approving an upstream covers any folder whose git config names that upstream, every worktree and clone of the repo included. Approving a folder covers that checkout only, which is what you want for a branch you have not read.
 
 Where the tool lands: typed alone at a prompt in a visible, integrated plain terminal whose directory is the tool's, it takes over that pane — no split, same surface, same scrollback — and reports "takeover". Anything else — an agent's invocation, a compound line, a pane with a helper, --minimize, --surface, --cwd elsewhere — splits without taking focus and prints the new surface's handle. The pane remains a Tool after its command exits: another invocation from that prompt splits unless it matches a keyed Tool; the same keyed Tool reruns in place. The handle prints before the command starts, since dor has to exit before its own shell is free to run it.
 
@@ -140,8 +139,7 @@ Text output:
 JSON output:
   {
     "status": "created",
-    "surface_id": "pane-def",
-    "surface_ref": "surface:3",
+    "surface_id": "surface:3",
     "command": "pnpm storybook",
     "cwd": "/Users/me/projects/site",
     "minimized": false,
@@ -171,7 +169,7 @@ JSON output:
         json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
         minimize: { kind: 'boolean', brief: 'Create the surface minimized.', optional: true, withNegated: false },
         fresh: { kind: 'boolean', brief: 'Ignore a declared key and always create.', optional: true, withNegated: false },
-        surface: { kind: 'parsed', parse: stringParser, brief: 'Surface to split when creating.', optional: true, placeholder: 'id|ref' },
+        surface: { kind: 'parsed', parse: stringParser, brief: 'Surface to split when creating.', optional: true, placeholder: 'handle' },
         workspace: workspaceFlag,
         cwd: { kind: 'parsed', parse: stringParser, brief: 'Working directory for the tool file and the command.', optional: true, placeholder: 'path' },
         list: { kind: 'boolean', brief: 'List the declared Tools instead of running one.', optional: true, withNegated: false },
@@ -221,12 +219,12 @@ export async function dispatchToolSurface(
   try {
     const response = await client.toolSurface(request);
     // Lint output is advisory and must not pollute a `--json` parse.
-    for (const warning of response.warnings ?? []) writeStderr(context, `${printable(warning)}\n`);
+    for (const warning of response.warnings ?? []) writeStderr(context, `${printableExact(warning)}\n`);
     writeStdout(context, renderToolResponse(response, json));
     return undefined;
   } catch (error) {
     // Host errors can echo paths and repo text.
-    return new Error(printable(errorMessage(error)));
+    return new Error(printableExact(errorMessage(error)));
   }
 }
 
@@ -237,34 +235,34 @@ async function listTools(context: DorCommandContext, flags: ToolFlags): Promise<
   try {
     const listing = await client.toolList({ cwd: callerWorkingDirectory(flags.cwd, context.options), global: flags.global === true });
     const { warnings, ...shown } = listing;
-    for (const warning of warnings) writeStderr(context, `${printable(warning)}\n`);
+    for (const warning of warnings) writeStderr(context, `${printableExact(warning)}\n`);
     writeStdout(context, flags.json === true ? renderPrintableJson(shown) : renderToolList(listing, flags.global === true));
     return undefined;
   } catch (error) {
-    return new Error(printable(errorMessage(error)));
+    return new Error(printableExact(errorMessage(error)));
   }
 }
 
 /** Grouped by file, each Tool's description indented beneath it. Every field is
- *  repo text bound for a terminal, so each passes `printable`. `--global` never
+ *  repo text bound for a terminal, so each passes `printableExact`. `--global` never
  *  looked for a project, so it reports none. */
 function renderToolList(listing: ToolListResponse, global: boolean): string {
   const lines: string[] = [];
-  if (listing.project) lines.push(`project  ${printable(listing.project.path)}  [${listing.project.approved ? 'approved' : 'not approved'}]`);
+  if (listing.project) lines.push(`project  ${printableExact(listing.project.path)}  [${listing.project.approved ? 'approved' : 'not approved'}]`);
   else if (!global) lines.push('project  [no dormouse.yml found]');
   const tool = (entry: ToolListResponse['tools'][number]) => {
     lines.push(`  ${[
-      printable(entry.name),
-      printable(JSON.stringify(entry.run)),
+      printableExact(entry.name),
+      printableExact(JSON.stringify(entry.run)),
       `[${entry.render}]`,
       `[port ${entry.port}]`,
       ...(entry.keyed ? ['[keyed]'] : []),
       ...(entry.shadowed ? ['[shadowed]'] : []),
     ].join('  ')}`);
-    for (const line of entry.description?.split('\n') ?? []) lines.push(line ? `      ${printable(line)}` : '');
+    for (const line of entry.description?.split('\n') ?? []) lines.push(line ? `      ${printableExact(line)}` : '');
   };
   listing.tools.filter(entry => entry.scope === 'project').forEach(tool);
-  lines.push(`user  ${printable(listing.user.path)}${listing.user.found ? '' : '  [not found]'}`);
+  lines.push(`user  ${printableExact(listing.user.path)}${listing.user.found ? '' : '  [not found]'}`);
   listing.tools.filter(entry => entry.scope === 'user').forEach(tool);
   return `${lines.join('\n')}\n`;
 }

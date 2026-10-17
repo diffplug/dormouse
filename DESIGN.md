@@ -143,7 +143,7 @@ This system has no "primary" accent in the brand sense. The closest analogue is 
 Every literal color the Host-Theme-Only Rule below permits, in full. Each is here because the surface it paints is not read as part of the theme; a literal anywhere else is a bug.
 - **Window Close Hover** (`#b92a1b`): native OS close-button hover on Windows/Linux chrome buttons; matches the platform convention across themes.
 - **Setup QR** (`#ffffff` ground, `#000000` modules, in `lib/src/components/QrCode.tsx`): a phone camera reads this control, not a person. Scanners expect dark-on-light and many refuse an inverted code, and no theme token promises either the polarity or the contrast ratio in both light and dark.
-- **Terminal last resort** (`#1e1e1e` background, `#cccccc` foreground, in `lib/src/lib/terminal-theme.ts`): xterm.js needs two readable colors to render at all, and `pnpm dev:lib` runs with no resolver and no applied theme (`docs/specs/theme.md` front matter). The rest of the terminal palette carries no literal — an unset key is omitted and xterm uses its own default, except the cursor, which derives from the resolved foreground.
+- **Terminal last resort** (`#1e1e1e` background, `#cccccc` foreground, in `lib/src/lib/terminal-theme.ts`): xterm.js needs two readable colors to render at all, and `pnpm dev:lib` runs with no resolver and no applied theme. The rest of the terminal palette carries no literal — an unset key is omitted and xterm uses its own default, except the cursor, which derives from the resolved foreground.
 
 ### Named Rules
 **The Host-Theme-Only Rule.** Never write a hex value or `oklch()` literal into `theme-colors.css`, `theme.css`, or a component. Never use `var(..., fallback)` chains. Every color must resolve through `--vscode-*` or one of the body-published runtime picks (`--color-door-*`, `--color-focus-ring`, `--color-alarm-vs-*`). The only exceptions are the ones rostered under Fixed Exceptions above, and adding one means adding it there.
@@ -197,7 +197,7 @@ Doors are the pane-header indicators on the baseboard. The most signature compon
 - **Surface:** `bg-door-bg` + `text-door-fg`. These resolve at runtime via `computeDynamicPalette()` and may match either the inactive-header palette or the terminal palette, whichever has stronger separation from `app-bg`.
 - **Dimensions:** `h-6` (24px), `min-w-[68px]`, `max-w-[220px]`; the button pads `px-2.5` (10px), with `gap-2` between its glyph, title, and badges.
 - **Type:** `text-sm font-medium font-mono`.
-- **Content:** leading browser-display icon cluster on a browser Surface (`size={12}` each, `gap-0.5` — a wide robot plus the presentation glyph, or the presentation glyph alone for `iframe`; named in the Door's accessible name, `docs/specs/dor-browser.md` → Browser Chrome); truncated title; optional TODO pill (`text-xs font-semibold tracking-[0.08em]`, success-tinted when flourishing).
+- **Content:** leading browser-display icon cluster on a browser Surface (`size={12}` each, `gap-0.5` — a wide robot plus the presentation glyph, or the presentation glyph alone for `iframe`; named in the Door's accessible name); truncated title; optional TODO pill (`text-xs font-semibold tracking-[0.08em]`, success-tinted when flourishing).
 - **Alarm:** one 2px inset overlay (`--color-alarm-vs-door`) draws the edge for both the unlabelled ring, where it flashes once on arrival, and `SPOKEN`, which persists until the ring clears and adds a speaker icon *beside* the TODO pill instead of evicting it. `SPEAKING` instead inverts and pulses the whole Door and takes the badge slot for its speaker-plus-label, for one utterance. Both speech states carry a speaker icon (shape, not color); all three name the state in the accessible name. The row inventory is `alertRingRow` in `lib/src/components/alert-ring.tsx`; the overlay's layering is `docs/specs/layout.md` → Alarm overlay.
 - **Hover/Focus:** no decorative hover on the door itself; the focus state is conveyed by the parent pane's selection ring, not by a per-door treatment. The door is a labelled `role="group"` wrapper with one button that reattaches.
 
@@ -267,6 +267,9 @@ When selection moves between panes/doors, the focus ring **glides** to the new t
 
 #### Copy Editor Travel
 The copy editor's moves and resizes ease on the focus ring's duration and curve (`FOCUS_MOTION_MS`, `rect-tween.ts` driven by `rect-motion.ts`, which owns when it snaps instead).
+
+#### Terminal Context Teeth
+The terminal context reads as torn from its source. The edge facing the source is cut corner to corner into 90° teeth, `TERMINAL_CONTEXT_TEETH_PX` deep and twice that wide, and that depth is the panel's whole overlap with the source. Each row carries its own background into the teeth beside it, so the cut is the content's edge rather than a border; that side has square corners and no halo, while the other three keep the elevated pane's. The helper bar sits in the terminal background between hairlines, labelling the helper terminal rather than adding a second header. While the context is open, every other pane recedes under a scrim of the app ground and the selection ring wraps source and panel together. Source of truth: `contextTeeth` in `lib/src/components/wall/TerminalContextView.tsx`.
 
 ## 6. Do's and Don'ts
 

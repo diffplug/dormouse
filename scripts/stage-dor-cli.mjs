@@ -19,6 +19,9 @@ export async function stageDorCli(targetPath) {
   await mkdir(targetRoot, { recursive: true });
   await cp(resolve(sourceRoot, 'bin'), resolve(targetRoot, 'bin'), { recursive: true });
   await cp(resolve(sourceRoot, 'dist'), resolve(targetRoot, 'dist'), { recursive: true });
+  // The staged tree carries its own package.json: it lands inside a host's
+  // package (vscode-ext, standalone/sidecar) that declares no `type`, whose
+  // metadata would otherwise have Node load the ESM `dist/dor.js` as CommonJS.
   await writeFile(
     resolve(targetRoot, 'package.json'),
     `${JSON.stringify({

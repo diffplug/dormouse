@@ -1,5 +1,6 @@
 import type { WorkspaceId } from "dormouse-lib/lib/session-types";
-import { workspaceTabElement, workspaceTabElements } from "dormouse-lib/components/workspace-tab-elements";
+import { workspaceStripElement, workspaceTabElement, workspaceTabElements } from "dormouse-lib/components/workspace-tab-elements";
+import { pinnedBoundary } from "dormouse-lib/lib/workspace-store";
 
 /**
  * One scan of this window's Workspace strip, shared by everything that has to
@@ -15,20 +16,35 @@ export interface WorkspaceDropTarget {
   /** The index a drop takes. Undefined appends, which is also what a drop past
    *  the last tab means. */
   index: number | undefined;
-  /** The box the caret draws against — the tab at `index`, or the last one when
-   *  appending. Null when the strip has no tabs at all. */
+  /** The box the caret draws against: the tab the drop goes before, else the
+   *  one it goes after, else — the arriving Workspace's group being empty —
+   *  the strip, at its start or (pinned) its right end. Null with no strip. */
   rect: DOMRect | null;
+  /** Which edge of `rect` the caret takes. */
+  edge: "left" | "right";
 }
 
-/** Where a drop at viewport `x` lands in this window's strip. */
-export function workspaceDropTarget(x: number): WorkspaceDropTarget {
+/**
+ * Where a drop at viewport `x` lands in this window's strip, clamped into the
+ * arriving Workspace's own group as the store clamps the drop itself
+ * (`docs/specs/layout.md` → "Workspace tabs"): an unpinned arrival never lands
+ * among pinned tabs, nor a pinned one among unpinned tabs.
+ */
+export function workspaceDropTarget(x: number, pinned?: boolean): WorkspaceDropTarget {
+  // The tabs render in store order, so the store's boundary splits them too.
   const elements = workspaceTabElements();
-  for (const [index, tab] of elements.entries()) {
+  const boundary = Math.min(pinnedBoundary(), elements.length);
+  const [low, high] = pinned ? [boundary, elements.length] : [0, boundary];
+  let index = elements.findIndex((tab) => {
     const rect = tab.getBoundingClientRect();
-    if (x < rect.left + rect.width / 2) return { index, rect };
-  }
-  const last = elements[elements.length - 1];
-  return { index: undefined, rect: last ? last.getBoundingClientRect() : null };
+    return x < rect.left + rect.width / 2;
+  });
+  if (index === -1) index = elements.length;
+  index = Math.max(low, Math.min(high, index));
+  const at = index === elements.length ? undefined : index;
+  if (index < high) return { index: at, rect: elements[index].getBoundingClientRect(), edge: "left" };
+  if (high > low) return { index: at, rect: elements[high - 1].getBoundingClientRect(), edge: "right" };
+  return { index: at, rect: workspaceStripElement()?.getBoundingClientRect() ?? null, edge: pinned ? "right" : "left" };
 }
 
 /** One Workspace's tab box, or null when it is not rendered. */

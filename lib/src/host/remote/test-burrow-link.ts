@@ -148,7 +148,7 @@ export function oneTimeWaiting(
 
 /** The one Wi-Fi the fixtures' Local networks allows. */
 export const LAN = '192.168.1.0/24';
-/** A self-host build's network on: My Relay only. */
+/** A self-host build's network on: `relay`. */
 export const RELAY_ON: NetworkPolicy = { level: 'relay', allowed: [], autoUpdate: false };
 /** A Hosted build's network on: Local networks over {@link LAN}. */
 export const LOCAL_ON: NetworkPolicy = { level: 'local', allowed: [LAN], autoUpdate: false };

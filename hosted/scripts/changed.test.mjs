@@ -10,6 +10,7 @@ test("Hosted and shared inputs trigger previews; unrelated application changes d
     "hosted/wrangler.relay.jsonc",
     "hosted/wrangler.voice.jsonc",
     "pnpm-lock.yaml",
+    "website/public/favicon.svg",
     ".github/workflows/hosted-preview.yml",
     "lib/src/theme-colors.css",
     "lib/src/lib/themes/bundled.json",

@@ -10,7 +10,8 @@
  * (`docs/specs/relay.md` → E2E framing).
  */
 
-import { isBoundedString } from './bytes.js';
+import { concatBytes, isBoundedString } from './bytes.js';
+import { CHALLENGE_BYTE_LENGTH } from './challenge.js';
 import { PATH_ADDRESS_SOURCES, isIpLiteral, type PathAddressSource } from './direct-path.js';
 import {
   hashPasskeyPublicKey,
@@ -268,14 +269,53 @@ export function isPairingOutcomeV1(value: unknown): value is PairingOutcomeV1 {
 // ---------------------------------------------------------------------------
 // Connection
 
-/** The first Client→Burrow control message of a connection ceremony. */
+/**
+ * What a connection request carries in place of a proof to ride the Burrow's
+ * presence window (`docs/specs/remote-security-model.md` -> Presence window).
+ */
+export const PRESENCE_WINDOW = 'window' as const;
+
+/** What message 2 tells the Client it may send: a proof, or the window. */
+export type ConnectionOffer = 'none' | typeof PRESENCE_WINDOW;
+
+/** The offer byte after the challenge; an unknown one reads as `none`. */
+const OFFER_BYTES: Readonly<Record<ConnectionOffer, number>> = { none: 0x00, [PRESENCE_WINDOW]: 0x01 };
+
+/**
+ * Connection message 2's payload: the Burrow's single-use challenge, then one
+ * offer byte. Always {@link CHALLENGE_BYTE_LENGTH} + 1 bytes, so the offer is
+ * not a length. The Client binds the **whole** payload as `burrowChallenge`.
+ */
+export function encodeConnectionMessage2(challenge: Uint8Array, offer: ConnectionOffer): Uint8Array {
+  if (challenge.length !== CHALLENGE_BYTE_LENGTH) throw new Error('a Burrow challenge is 32 bytes');
+  return concatBytes(challenge, Uint8Array.of(OFFER_BYTES[offer]));
+}
+
+/**
+ * The offer in a connection message 2 payload, or `null` for one of no
+ * length a Burrow writes. A bare challenge is a Burrow that predates windows,
+ * and offers none; an offer byte this Client does not know offers none too —
+ * a proof over the whole payload still verifies.
+ */
+export function decodeConnectionMessage2(payload: Uint8Array): ConnectionOffer | null {
+  if (payload.length === CHALLENGE_BYTE_LENGTH) return 'none';
+  if (payload.length !== CHALLENGE_BYTE_LENGTH + 1) return null;
+  return payload[CHALLENGE_BYTE_LENGTH] === OFFER_BYTES[PRESENCE_WINDOW] ? PRESENCE_WINDOW : 'none';
+}
+
+/**
+ * The first Client→Burrow control message of a connection ceremony: a fresh
+ * proof, or {@link PRESENCE_WINDOW} to redeem an open window. One required key
+ * either way, padded to the same size on the wire.
+ */
 export interface ConnectionRequestV1 {
-  readonly presence: PresenceProofV1;
+  readonly presence: PresenceProofV1 | typeof PRESENCE_WINDOW;
 }
 
 export function isConnectionRequestV1(value: unknown): value is ConnectionRequestV1 {
   if (!value || typeof value !== 'object') return false;
-  return isPresenceProofV1((value as Record<string, unknown>).presence);
+  const presence = (value as Record<string, unknown>).presence;
+  return presence === PRESENCE_WINDOW || isPresenceProofV1(presence);
 }
 
 /**

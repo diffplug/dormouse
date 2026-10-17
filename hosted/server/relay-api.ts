@@ -11,7 +11,6 @@ import {
   ENROLL_PAGE_PATH,
   MALFORMED_ASSERTION_ERROR,
   MALFORMED_BINDING_ERROR,
-  MAX_ENROLLED_BURROWS,
   MAX_PENDING_REAUTH_NONCES_PER_SESSION,
   MAX_PUSH_SEND_BODY_BYTES,
   MAX_REQUEST_BODY_BYTES,
@@ -75,6 +74,12 @@ import {
   type OwnerRow,
 } from "./relay-auth";
 
+/**
+ * Computers one account may enroll: an abuse ceiling, not a plan limit — a
+ * member has no device limit (docs/specs/pricing.md -> "Checkout and
+ * entitlement"). The self-host Relay keeps `MAX_ENROLLED_BURROWS`.
+ */
+export const MAX_BURROWS_PER_ACCOUNT = 1000;
 /** Passkeys one account may hold; a full account is refused, never evicted (rationale). */
 export const MAX_PASSKEYS_PER_ACCOUNT = 32;
 /** Live sign-in sessions one account may hold, its own oldest evicted (rationale). */
@@ -82,7 +87,11 @@ export const MAX_SESSIONS_PER_ACCOUNT = 32;
 /** One live registration challenge per live setup token of the same Burrow (rationale). */
 export const MAX_SETUP_CHALLENGES_PER_BURROW = MAX_TOKENS_PER_BURROW;
 
-/** Seconds a Burrow waits between polls. */
+/**
+ * Seconds a Burrow waits between polls: inside
+ * `MIN_ENROLL_POLL_INTERVAL_S`–`MAX_ENROLL_POLL_INTERVAL_S`, or every shipped
+ * Burrow refuses the begin.
+ */
 export const ENROLLMENT_POLL_INTERVAL_S = 5;
 /**
  * A device code's leading bytes: its expiry, big-endian epoch seconds; the
@@ -207,7 +216,7 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
         FROM dormouse_relay_setup_tokens t
         JOIN dormouse_relay_burrows b ON b."burrowId" = t."burrowId"
         JOIN "user" u ON u.id = b."userId"
-        WHERE t."tokenHash" = $1 AND t."expiresAt" > now()`,
+        WHERE t."tokenHash" = $1 AND t."expiresAt" > now() AND NOT t.claimed`,
         [digest(token)],
       );
       if (!minter || !ownerOf(minter).entitled) return invalidSetup(c);
@@ -234,9 +243,10 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
     const token = setupTokenOf(body);
     if (!token) return invalidSetup(c);
     return database(c, async (db) => {
-      // Spent here, before any check below: of two finishes racing one token
-      // only one can register. Every later failure puts it back.
-      const spent = await consumeSetupToken(db, token);
+      // Claimed here, before any check below: of two finishes racing one token
+      // only one can register. Every later failure puts it back, unless a
+      // retire killed it meanwhile.
+      const spent = await claimSetupToken(db, token);
       if (!spent) return invalidSetup(c);
       let registered = false;
       try {
@@ -248,6 +258,16 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
         if (!checked.ok) return c.json({ error: checked.error }, checked.status);
         const { credentialId, publicKey, label } = checked;
         const outcome = await locked(db, `passkeys:${spent.userId}`, async () => {
+          // The claim, locked until this transaction ends: a retire that landed
+          // while the checks above awaited wins, and one landing now waits and
+          // then finds the token spent or back in this finish's hands.
+          const {
+            rows: [held],
+          } = await db.query(
+            `SELECT 1 FROM dormouse_relay_setup_tokens WHERE "tokenHash" = $1 AND claimed FOR UPDATE`,
+            [digest(token)],
+          );
+          if (!held) return "retired";
           const {
             rows: [{ count }],
           } = await db.query<{ count: number }>(
@@ -260,8 +280,13 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
             VALUES ($1, $2, $3, $4) ON CONFLICT ("credentialId") DO NOTHING`,
             [credentialId, spent.userId, publicKey, label],
           );
-          return inserted.rowCount ? "registered" : "duplicate";
+          if (!inserted.rowCount) return "duplicate";
+          await db.query(`DELETE FROM dormouse_relay_setup_tokens WHERE "tokenHash" = $1`, [
+            digest(token),
+          ]);
+          return "registered";
         });
+        if (outcome === "retired") return invalidSetup(c);
         if (outcome === "duplicate") return c.json({ error: DUPLICATE_CREDENTIAL_ERROR }, 409);
         if (outcome === "full")
           return c.json(
@@ -269,19 +294,26 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
             409,
           );
         registered = true;
-        const res: SetupFinishResponse = { accountId: spent.userId, credentialId };
+        // Registering signs in too; `claimSetupToken` refused an owner not
+        // entitled, so no session is minted for one.
+        const res: SetupFinishResponse = {
+          ...(await mintSession(db, spent.userId)),
+          accountId: spent.userId,
+          credentialId,
+        };
         return c.json(res);
       } finally {
-        if (!registered) await restoreSetupToken(db, token, spent);
+        if (!registered) await restoreSetupToken(db, token);
       }
     });
   });
 
-  // A signed-in phone spends a scanned code it will not register with. Only a
-  // code one of the session's own Burrows minted can be spent.
+  // A signed-in phone spends a scanned code it will not register with, claimed
+  // by a finish or not. Only a code one of the session's own Burrows minted can
+  // be spent.
   app.post(API_ROUTES.setupRetire, requireSession, async (c) => {
     const token = setupTokenOf(await readJson(c));
-    const spent = token && (await consumeSetupToken(c.var.db, token, c.var.session.userId));
+    const spent = token && (await retireSetupToken(c.var.db, token, c.var.session.userId));
     return spent ? c.body(null, 204) : invalidSetup(c);
   });
 
@@ -323,21 +355,12 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
       const { userId, entitled, publicKey } = verdict.passkey;
       // A session is never minted for an account that is not entitled.
       if (!entitled) return c.json({ error: NOT_ENTITLED_ERROR }, 401);
-      const sessionToken = randomBase64Url(RELAY_BEARER_BYTE_LENGTH);
-      const expiresAt = await admit(
-        db,
-        SESSIONS,
-        userId,
-        { tokenHash: digest(sessionToken), userId },
-        RELAY_SESSION_TTL_MS,
-      );
-      recordMetric(c, c.env.HYPERDRIVE.connectionString, "pocket.signin");
       const res: SigninFinishResponse = {
-        sessionToken,
+        ...(await mintSession(db, userId)),
         accountId: userId,
-        expiresAt: expiresAt!,
         passkeyPublicKey: publicKey,
       };
+      recordMetric(c, c.env.HYPERDRIVE.connectionString, "pocket.signin");
       return c.json(res);
     }),
   );
@@ -521,7 +544,7 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
           [owner.userId],
         );
         // A full account keeps the approval, so a poll after a removal enrolls.
-        if (enrolled >= MAX_ENROLLED_BURROWS) return "full";
+        if (enrolled >= MAX_BURROWS_PER_ACCOUNT) return "full";
         // Single-use: the approval is marked redeemed in the statement that
         // enrolls its Burrow, owned by exactly its approver, and mints its
         // voice token, so two polls cannot mint two; the marked row stays
@@ -558,7 +581,7 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
         const where = c.env.ACCOUNT_ORIGIN;
         return c.json(
           {
-            error: `this account already has ${MAX_ENROLLED_BURROWS} computers enrolled; remove one ${
+            error: `this account already has ${MAX_BURROWS_PER_ACCOUNT} computers enrolled; remove one ${
               where ? `at ${where}/account` : "from your account"
             } first`,
           },
@@ -587,55 +610,72 @@ export async function sweepExpired(db: Client) {
     await db.query(`DELETE FROM ${table} WHERE "expiresAt" <= now()`);
 }
 
-/** A spent setup token: what restoring it, and registering against it, needs. */
+/** A claimed setup token: what registering against it needs. */
 interface SpentSetupToken {
   burrowId: string;
   userId: string;
-  expiresAt: Date;
 }
 
 /**
- * Spends `token` in one statement, so of two racing redeemers only one wins,
- * and answers it only while live and its owner entitled
- * — and, given `userId`, only a token one of that account's Burrows minted. A
- * token of another account is never touched.
+ * Claims `token` for a `finish` in one statement, so of two racing redeemers
+ * only one wins, and answers it only while live and its owner entitled; a
+ * claimed token of an owner not entitled is spent. The finish then deletes it
+ * on registering or clears the claim with {@link restoreSetupToken}.
  */
-async function consumeSetupToken(
-  db: Client,
-  token: string,
-  userId: string | null = null,
-): Promise<SpentSetupToken | null> {
+async function claimSetupToken(db: Client, token: string): Promise<SpentSetupToken | null> {
   const {
     rows: [spent],
-  } = await db.query<SpentSetupToken & OwnerRow & { live: boolean }>(
+  } = await db.query<SpentSetupToken & OwnerRow>(
+    `WITH claimed AS (
+      UPDATE dormouse_relay_setup_tokens t SET claimed = true
+      FROM dormouse_relay_burrows b
+      WHERE t."tokenHash" = $1 AND NOT t.claimed AND t."expiresAt" > now()
+        AND b."burrowId" = t."burrowId"
+      RETURNING t."burrowId", b."userId"
+    )
+    SELECT s."burrowId", s."userId", ${OWNER_COLUMNS}
+    FROM claimed s JOIN "user" u ON u.id = s."userId"`,
+    [digest(token)],
+  );
+  if (!spent) return null;
+  if (!ownerOf(spent).entitled) {
+    await db.query(`DELETE FROM dormouse_relay_setup_tokens WHERE "tokenHash" = $1`, [digest(token)]);
+    return null;
+  }
+  return { burrowId: spent.burrowId, userId: spent.userId };
+}
+
+/**
+ * Hands a token a refused `finish` claimed back, on its original expiry, so a
+ * retry never buys time. A token killed meanwhile — retired, evicted by its
+ * Burrow's cap, or swept — has no row left, so it stays dead.
+ */
+export async function restoreSetupToken(db: Client, token: string) {
+  await db.query(
+    `UPDATE dormouse_relay_setup_tokens SET claimed = false WHERE "tokenHash" = $1 AND claimed`,
+    [digest(token)],
+  );
+}
+
+/**
+ * Spends `token` in one statement for a signed-in phone, claimed or not, but
+ * only a live token one of `userId`'s Burrows minted, its owner entitled; a
+ * token of another account is never touched.
+ */
+async function retireSetupToken(db: Client, token: string, userId: string): Promise<boolean> {
+  const {
+    rows: [spent],
+  } = await db.query<OwnerRow & { live: boolean }>(
     `WITH spent AS (
       DELETE FROM dormouse_relay_setup_tokens t USING dormouse_relay_burrows b
-      WHERE t."tokenHash" = $1 AND b."burrowId" = t."burrowId"
-        AND ($2::text IS NULL OR b."userId" = $2)
-      RETURNING t."burrowId", t."expiresAt", b."userId"
+      WHERE t."tokenHash" = $1 AND b."burrowId" = t."burrowId" AND b."userId" = $2
+      RETURNING t."expiresAt", b."userId"
     )
-    SELECT s."burrowId", s."expiresAt", s."userId", s."expiresAt" > now() AS live, ${OWNER_COLUMNS}
+    SELECT s."expiresAt" > now() AS live, ${OWNER_COLUMNS}
     FROM spent s JOIN "user" u ON u.id = s."userId"`,
     [digest(token), userId],
   );
-  if (!spent?.live || !ownerOf(spent).entitled) return null;
-  return { burrowId: spent.burrowId, userId: spent.userId, expiresAt: spent.expiresAt };
-}
-
-/**
- * Puts a token `finish` spent back on its original expiry, so a retry never
- * buys time, within its Burrow's cap: a mint may have filled the slot. A token
- * already dead is never restored, so it never evicts a live one.
- */
-export async function restoreSetupToken(db: Client, token: string, spent: SpentSetupToken) {
-  if (spent.expiresAt.getTime() <= Date.now()) return;
-  await admit(
-    db,
-    SETUP_TOKENS,
-    spent.burrowId,
-    { tokenHash: digest(token), burrowId: spent.burrowId },
-    spent.expiresAt,
-  );
+  return spent?.live === true && ownerOf(spent).entitled;
 }
 
 /** Spends a challenge in one statement; true only if it was live. A sign-in challenge names no Burrow. */
@@ -690,6 +730,19 @@ export async function admit(
     );
     return rows[0]?.expiresAt;
   });
+}
+
+/** A fresh session for `userId`, within its account's cap. */
+async function mintSession(db: Client, userId: string) {
+  const sessionToken = randomBase64Url(RELAY_BEARER_BYTE_LENGTH);
+  const expiresAt = await admit(
+    db,
+    SESSIONS,
+    userId,
+    { tokenHash: digest(sessionToken), userId },
+    RELAY_SESSION_TTL_MS,
+  );
+  return { sessionToken, expiresAt: expiresAt! };
 }
 
 /** A setup token of the minted shape from a request body, or null. */

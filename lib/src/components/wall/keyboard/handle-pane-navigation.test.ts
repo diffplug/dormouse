@@ -46,6 +46,18 @@ describe('workspace row navigation', () => {
     expect(history.current).toBeNull();
   });
 
+  it('traverses unpinned tabs, then +, then the pinned group, stopping at either end', () => {
+    setWorkspaces({ workspaces: [{ id: 'ws-a', name: 'App', nameIsAuto: false }, { id: 'ws-p', name: 'Notes', nameIsAuto: false, pinned: true }, { id: 'ws-b', name: 'Build', nameIsAuto: false }], activeId: 'ws-a' });
+    const ctx = context();
+    const press = (key: string) => handlePaneNavigation(new KeyboardEvent('keydown', { key }), ctx, { current: null });
+    press('ArrowUp');
+    const seen = [ctx.selectedIdRef.current];
+    for (let i = 0; i < 4; i++) { press('ArrowRight'); seen.push(ctx.selectedIdRef.current); }
+    expect(seen).toEqual(['ws-a', 'ws-b', '+', 'ws-p', 'ws-p']);
+    press('ArrowLeft');
+    expect(ctx.selectedTypeRef.current).toBe('workspace-new');
+  });
+
   it('prefers a pane above, and leaves bare-Wall navigation unchanged', () => {
     const ctx = context();
     vi.mocked(ctx.nav.findInDirection).mockReturnValue('pane-a');

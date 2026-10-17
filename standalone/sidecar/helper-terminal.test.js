@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
+const fs = require('node:fs');
 const { create, getDescendantPids, openNativeDirectory } = require('./pty-core');
 
 test('Windows folder opening completes on launch and still reports spawn errors', () => {
@@ -10,8 +11,10 @@ test('Windows folder opening completes on launch and still reports spawn errors'
   const results = [];
   openNativeDirectory('C:\\Users\\Me\\My Project', error => results.push(error), {
     platform: 'win32',
+    env: { SystemRoot: 'D:\\Win' },
     spawn(exe, args, options) {
-      assert.equal(exe, 'explorer.exe');
+      // Absolute: Windows looks a bare name up in the working directory first.
+      assert.equal(exe, 'D:\\Win\\explorer.exe');
       assert.deepEqual(args, ['C:\\Users\\Me\\My Project']);
       assert.equal(options.stdio, 'ignore');
       return child;
@@ -151,11 +154,23 @@ test('a helper cannot own another helper or reference an absent owner', () => {
   manager.killAll();
 });
 
-test('directory opening rejects relative paths and malformed input', () => {
+// The host's resolver (`canonicalLocalDirectory`) is the only thing that may
+// touch the path: a `stat` or `realpath` follows a link to a share.
+test('directory opening touches the path only through the host resolver', async (t) => {
+  const refuse = () => { throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); };
+  const stat = t.mock.method(fs, 'statSync', refuse);
+  const realpath = t.mock.method(fs, 'realpathSync', refuse);
+  const asked = [];
   const events = [];
-  const manager = create((event, data) => events.push({ event, data }), { spawn() { throw new Error('unexpected spawn'); } });
-  for (const path of ['../secret', '$(echo unsafe)', '/tmp\0ignored', null]) {
-    manager.context({ op: 'openDirectory', id: 'parent', path }, 'directory');
-    assert.match(events.at(-1).data.error, /unavailable/);
+  const manager = create((event, data) => events.push({ event, data }), { spawn() { throw new Error('unexpected spawn'); } }, {
+    canonicalDirectory: async (path) => { asked.push(path); return null; },
+  });
+  const paths = [__dirname, '//host/share', '\\\\host\\share', '\\\\?\\C:\\repo', '../secret', '/tmp\0ignored', null];
+  for (const path of paths) {
+    await manager.context({ op: 'openDirectory', id: 'parent', path }, 'directory');
+    assert.match(events.at(-1).data.error, /unavailable/, String(path));
   }
+  assert.deepEqual(asked, paths);
+  assert.equal(stat.mock.callCount(), 0);
+  assert.equal(realpath.mock.callCount(), 0);
 });

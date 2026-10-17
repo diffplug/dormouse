@@ -497,6 +497,7 @@ class PromptAltScreenFilter {
           this.state = 'ground';
         }
       } else if (this.state === 'escape' && code === 0x63 /* c */) {
+        // RIS (`ESC c`) resets to the normal buffer.
         this.inAlt = false;
         this.state = 'ground';
         if (runStart >= 0) { output += input.slice(runStart, cursor); runStart = -1; }

@@ -3,7 +3,7 @@
  * from undici's `cause`, never a bare `fetch failed` and never the whole URL.
  */
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   API_ROUTES,
@@ -12,7 +12,7 @@ import {
   UNKNOWN_BURROW_TOKEN_ERROR,
 } from 'remote-lib-common';
 
-import { describeFetchFailure, describingFetchFailures, probeBurrowStanding } from './burrow-fetch';
+import { burrowFetch, describeFetchFailure, describingFetchFailures, probeBurrowStanding } from './burrow-fetch';
 
 const URL_WITH_PATH = 'https://relay.dormouse.sh/api/burrow/enroll/begin?x=1';
 
@@ -121,5 +121,21 @@ describe('probeBurrowStanding', () => {
       throw new TypeError('fetch failed');
     }) as unknown as typeof globalThis.fetch;
     await expect(probeBurrowStanding({ enrollment, fetch })).rejects.toThrow('fetch failed');
+  });
+});
+
+describe('burrowFetch transport', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  // The fetch is the Burrow service's policy-guarded one
+  // (`docs/specs/remote-network.md` -> "Policy"); a caller that omits it fails,
+  // never reaching the network around the guard.
+  it('has no default fetch to fall back on', async () => {
+    const globalFetch = vi.fn(async () => new Response('{}'));
+    vi.stubGlobal('fetch', globalFetch);
+    const options = { enrollment: { relayUrl: 'https://relay.example', burrowToken: 'tok' } };
+    await expect(burrowFetch(options as unknown as Parameters<typeof burrowFetch>[0], API_ROUTES.pushDevices)).rejects.toThrow();
+    await expect(probeBurrowStanding(options as unknown as Parameters<typeof probeBurrowStanding>[0])).rejects.toThrow();
+    expect(globalFetch).not.toHaveBeenCalled();
   });
 });

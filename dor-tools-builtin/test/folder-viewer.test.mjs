@@ -14,7 +14,7 @@ import { folderViewerPage } from '../dist/folder-viewer-page.js';
 
 const posixOnly = { skip: process.platform === 'win32' ? 'POSIX file names and symlinks' : false };
 const hasGit = spawnSync('git', ['--version']).status === 0;
-const CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'";
+const CSP = "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'";
 
 let base;
 let root;
@@ -289,9 +289,10 @@ async function runPage(names, { listings = null, saved = null } = {}) {
   }
   const elements = { tree: new Element(), show: new Element(), status: new Element(), refresh: new Element(), collapse: new Element() };
   const items = [];
+  const created = [];
   const document = {
     getElementById: id => elements[id],
-    createElement: tag => { const element = new Element(); if (tag === 'li') items.push(element); return element; },
+    createElement: tag => { const element = new Element(); created.push(element); if (tag === 'li') items.push(element); return element; },
   };
   const answer = body => ({ ok: true, text: async () => JSON.stringify(body) });
   const posts = [];
@@ -309,11 +310,12 @@ async function runPage(names, { listings = null, saved = null } = {}) {
       ? new Promise((resolve, reject) => posts.push({ sent: `${url} ${JSON.parse(init.body).path}`, ok: () => resolve(answer({ ok: true, status: 'created' })), fail: () => reject(new Error('lost')) }))
       : Promise.resolve(answer({ entries: listing(url), truncated: false }));
   };
-  runInNewContext(/<script>([\s\S]*)<\/script>/.exec(folderViewerPage(root))[1], { document, fetch, setTimeout, clearTimeout });
+  // The page's own inline script; the tooltip's loads from `assets/`.
+  runInNewContext(/<script>([\s\S]*?)<\/script>/.exec(folderViewerPage(root))[1], { document, fetch, setTimeout, clearTimeout });
   await settle();
   const tree = elements.tree.handlers;
   return {
-    items, elements, states,
+    items, created, elements, states,
     posts, sent: () => posts.map(post => post.sent),
     click: (name, detail = 1) => tree.click({ target: items[names.indexOf(name)], detail }),
     dblclick: name => tree.dblclick({ target: items[names.indexOf(name)] }),
@@ -321,6 +323,30 @@ async function runPage(names, { listings = null, saved = null } = {}) {
   };
 }
 const settle = () => new Promise(resolve => setImmediate(resolve));
+
+test('the page shows the other pages\' tooltips, which it serves beside it, never a native title', async () => {
+  const page = folderViewerPage(root);
+  assert.match(page, /<link rel="stylesheet" href="assets\/tooltip\.css">/);
+  assert.match(page, /<script src="assets\/tooltip\.js"><\/script><\/body>/);
+  assert.doesNotMatch(page, /\stitle=|\.title\s*=/);
+  const viewer = await start();
+  for (const [name, type] of [['tooltip.js', /javascript/], ['tooltip.css', /^text\/css/]]) {
+    const asset = await call(viewer, `${viewer.path}assets/${name}`);
+    assert.equal(asset.status, 200, name);
+    assert.match(asset.headers['content-type'], type);
+    assert.equal(asset.headers['content-security-policy'], CSP);
+  }
+  assert.match((await call(viewer, `${viewer.path}assets/tooltip.js`)).body, /dor-tip/);
+  // Only what the build shipped, never a file of the folder.
+  await files({ 'a.js': 'a' });
+  for (const name of ['a.js', 'folder-viewer.js']) assert.equal((await call(viewer, `${viewer.path}assets/${name}`)).status, 404, name);
+  assert.match(page, /id="refresh"[^>]* data-tip="Refresh"/);
+  // A name or path is shown verbatim, never read as a hint's [k] shortcuts.
+  assert.match(page, /id="root" data-tip-text="/);
+  const { created } = await runPage(['report [draft].md']);
+  assert.deepEqual(created.map(element => element.attributes['data-tip-text']).filter(Boolean), ['report [draft].md']);
+  assert.ok(!created.some(element => 'data-tip' in element.attributes));
+});
 
 test('the page sends an activate only once every select in flight has settled', async () => {
   const page = await runPage(['a.txt', 'b.txt']);

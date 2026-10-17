@@ -286,7 +286,7 @@ describe('terminal-registry alert behavior', () => {
 
     createSession(id);
     expect(getActivity(id)).toEqual(activity);
-    // A ring no one has looked at persists as the TODO a look would leave.
+    // A ring no one has looked at persists as a TODO.
     expect(getLivePersistedAlertState(id)).toMatchObject({ status: 'ALERT_RINGING', todo: true });
 
     unmountElement(id);
@@ -481,6 +481,7 @@ describe('terminal-registry alert behavior', () => {
     const id = 'restored-tool-command';
     const received: string[] = [];
     fakePlatform.setInputHandler(id, (data) => received.push(data));
+    const write = vi.spyOn(fakePlatform, 'writePty');
 
     restoreTerminal(id, { command: 'pnpm storybook', requireIntegration: true });
     expect(getTerminalPaneState(id).currentCommand?.rawCommandLine).toBe('pnpm storybook');
@@ -489,6 +490,9 @@ describe('terminal-registry alert behavior', () => {
     applyTerminalSemanticEvents(id, [{ type: 'promptStart' }]);
     await vi.advanceTimersByTimeAsync(200);
     expect(received).toEqual(['pnpm storybook\r']);
+    // The host's own launch: the one run whose OSC 367 `open` it admits.
+    expect(write).toHaveBeenCalledWith(id, 'pnpm storybook\r', { launch: true });
+    write.mockRestore();
   });
 
   it.each(['restore', 'split'])('seeds the actual %s launch after a non-integrated shell prompt', async (launch) => {
@@ -617,7 +621,7 @@ describe('terminal-registry alert behavior', () => {
     expect(getActivity(id)).toMatchObject({ status: 'BUSY' });
   });
 
-  it('Story 4: completion while still engaged does not ring', () => {
+  it('Story 4: completion while still engaged does not ring, but leaves a TODO', () => {
     const id = 'story-4';
     createSession(id);
     enableAlert(id);
@@ -629,7 +633,7 @@ describe('terminal-registry alert behavior', () => {
 
     expect(getActivity(id)).toMatchObject({
       status: 'NOTHING_TO_SHOW',
-      todo: false,
+      todo: true,
     });
   });
 
@@ -757,7 +761,7 @@ describe('terminal-registry alert behavior', () => {
     });
   });
 
-  it('Story 9: new output pauses an owed ring until quiet or acknowledgement', () => {
+  it('Story 9: confirmed output defers an owed ring, but an isolated prompt or a candidate does not', () => {
     const id = 'story-9';
     createSession(id);
     enableAlert(id);
@@ -765,7 +769,12 @@ describe('terminal-registry alert behavior', () => {
     driveToRingingNeedsAttention(id);
     const episode = getActivity(id).episode;
     emitOutput(id, 'shell prompt');
-    expect(getActivity(id)).toMatchObject({ status: 'NOTHING_TO_SHOW', episode });
+    expect(getActivity(id)).toMatchObject({ status: 'ALERT_RINGING', episode });
+    advance(1_600);
+    emitOutput(id, 'continued output');
+    expect(getActivity(id)).toMatchObject({ status: 'ALERT_RINGING', episode });
+    emitOutput(id, 'confirmed output');
+    expect(getActivity(id)).toMatchObject({ status: 'BUSY', episode });
     advance(5_000);
     expect(getActivity(id)).toMatchObject({ status: 'ALERT_RINGING', episode });
 
@@ -940,7 +949,7 @@ describe('terminal-registry alert behavior', () => {
       entry.terminal.emitInput(input);
       // Written as it came, and not as user input.
       expect(write.mock.calls).toEqual([[id, input]]);
-      // The fake PTY echoes the reply as output. It may pause presentation,
+      // The fake PTY echoes the reply as output. It may defer presentation,
       // but must never acknowledge or discard the owed episode.
       expect(getActivity(id)).toMatchObject({ episode, todo: false });
       advance(5_000);
@@ -1375,6 +1384,16 @@ describe('resume replay mode-reset tail', () => {
     const exitAt = entry.terminal.writes.indexOf('\r\n[Process exited with code 7]\r\n');
     expect(resetAt).toBeGreaterThanOrEqual(0);
     expect(exitAt).toBeGreaterThan(resetAt);
+  });
+
+  it('a live PTY exit emits the reset tail before the exit line, as a dead replay does', async () => {
+    const entry = createSession('live-exit-reset');
+    fakePlatform.killPty('live-exit-reset');
+
+    await vi.waitFor(() => expect(entry.terminal.writes).toContain('\r\n[Process exited with code 0]\r\n'));
+    const resetAt = entry.terminal.writes.indexOf(REPLAY_MODE_RESET);
+    expect(resetAt).toBeGreaterThanOrEqual(0);
+    expect(entry.terminal.writes.indexOf('\r\n[Process exited with code 0]\r\n')).toBeGreaterThan(resetAt);
   });
 
   it('resume of a LIVE session leaves modes alone (no reset tail)', () => {

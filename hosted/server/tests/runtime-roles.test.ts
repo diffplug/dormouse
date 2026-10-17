@@ -88,6 +88,7 @@ const EXPECTED: Record<Worker, string[]> = {
     "dormouse_relay_push_subscriptions.vapidPublicKey: UPDATE",
     "dormouse_relay_push_subscriptions: DELETE, INSERT, SELECT",
     "dormouse_relay_sessions: DELETE, INSERT, SELECT",
+    "dormouse_relay_setup_tokens.claimed: UPDATE",
     "dormouse_relay_setup_tokens: DELETE, INSERT, SELECT",
     "dormouse_voice_tokens.burrowId: INSERT",
     "dormouse_voice_tokens.hash: INSERT",

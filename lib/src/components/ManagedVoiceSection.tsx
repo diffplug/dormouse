@@ -30,9 +30,8 @@ const REFUSAL: Record<Exclude<ManagedVoiceConfigResult, { ok: true }>['reason'],
 /** What leaves this computer, said before the first request (`docs/specs/pricing.md` -> "Managed voice"). */
 export const MANAGED_VOICE_DISCLOSURE =
   'Only the spoken pane label and the voice you choose are sent to voice.dormouse.sh, which has ElevenLabs ' +
-  'speak it. Dormouse asks ElevenLabs to delete its copy shortly after each alarm and sweeps every five ' +
-  'minutes for any it missed; no deletion time is guaranteed. If Hosted cannot answer, the alarm uses your ' +
-  'system voice.';
+  'speak it. ElevenLabs keeps a copy until Dormouse deletes it, usually within minutes, though no limit is ' +
+  'guaranteed. If voice.dormouse.sh cannot answer, the alarm uses your system voice.';
 
 /** What a member whose plan lapsed reads, where the relay socket or speak said so. */
 export const NO_PLAN_COPY = 'Your account has no Hosted plan, so alarms use your system voice.';
@@ -100,7 +99,7 @@ export function ManagedVoiceSection({ onShowNetwork }: { onShowNetwork?: () => v
           {networkOff ? (
             <p className={HINT}>
               Signing in reaches Dormouse Hosted, which nothing does while <NetworkTopicLink onShow={onShowNetwork} />{' '}
-              is set to Nothing. Choose Local networks or Anywhere there to sign in.
+              is set to Nowhere. Choose Local networks or Anywhere there to sign in.
             </p>
           ) : (
             <HostedEnrollView

@@ -7,13 +7,15 @@
  */
 
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 
 import type { ExtensionMessage, WebviewMessage } from '../src/message-types';
 import type { AlertCommand } from '../../lib/src/host/alert-protocol';
 import type { PeerLinkDeps } from '../src/peer-link';
 import type { BurrowDeps } from '../src/burrow';
 import type { WebviewChannel } from '../src/webview-messaging';
+import { openSequence } from 'dor-tools-lib/osc';
+import { removeDir, tempStorageDir } from './helpers';
 
 /** What `message-router.ts` hands the two modules it configures at load. */
 const wiring = vi.hoisted(() => ({
@@ -33,6 +35,17 @@ vi.mock('../src/iframe-proxy-host', () => ({
   createIframeProxyUrl: iframeProxy.create,
   releaseIframeProxyLease: iframeProxy.release,
 }));
+
+/** What the router hands VS Code's external opener. */
+const opened = vi.hoisted(() => [] as string[]);
+vi.mock('vscode', async (importOriginal) => {
+  const stub = await importOriginal<typeof import('./vscode-stub')>();
+  return {
+    ...stub,
+    Uri: { ...stub.Uri, parse: (value: string) => ({ value }) },
+    env: { openExternal: async (uri: { value: string }) => { opened.push(uri.value); return true; } },
+  };
+});
 
 vi.mock('../src/peer-link', () => ({
   configurePeerLink: (deps: PeerLinkDeps) => {
@@ -62,6 +75,7 @@ vi.mock('../src/pty-manager', async (importOriginal) => ({
   },
   spawn: (id: string) => { ptys.buffered.set(id, { alive: true }); },
   getBufferedPtys: () => new Map(ptys.buffered),
+  ptyIds: () => ptys.buffered.keys(),
   getCwd: async (id: string) => {
     ptys.cwdAsked.push(id);
     await ptys.cwdWait;
@@ -195,6 +209,73 @@ it('forwards a parse\'s Tool events in stream order only to the PTY owner', () =
     first.dispose();
     second.dispose();
   }
+});
+
+// An OSC 367 `open` reaches the renderer only from the run a webview's launch
+// write started there (docs/specs/dor-tool.md -> OSC 367).
+it('forwards an OSC 367 open only from the run a launch write started', () => {
+  const owner = fakeWebview();
+  const attached = router.attachRouter(owner.channel, {});
+  const open = (path: string) => openSequence({ path });
+  const run = '\x1b]633;D;0\x07\x1b]633;E;view /a\x07\x1b]633;C\x07';
+  try {
+    owner.send({ type: 'dormouse:init' });
+    owner.send({ type: 'pty:spawn', id: 'tool-open', options: { cwd: '/repo' } });
+    ptys.callbacks!.onData('tool-open', `${run}${open('/forged')}`);
+    owner.send({ type: 'pty:input', id: 'tool-open', data: 'view /a\r', launch: true });
+    ptys.callbacks!.onData('tool-open', `${run}${open('/launched')}`);
+    ptys.callbacks!.onData('tool-open', `${run}${open('/after')}`);
+    expect(owner.posted.flatMap(message => message.type === 'terminal:toolEvents' ? message.events : [])
+      .flatMap(event => event.kind === 'toolOpen' ? [event.open.path] : [])).toEqual(['/launched']);
+  } finally {
+    attached.dispose();
+  }
+});
+
+// The webview's confirmation is consent, not validation: the extension host
+// refuses what `normalizeExternalUri` refuses (docs/specs/security-local.md).
+it('revalidates an external open in the extension host, refusing the schemes the dialog refuses', () => {
+  const webview = fakeWebview();
+  const attached = router.attachRouter(webview.channel, {});
+  opened.length = 0;
+  try {
+    for (const uri of ['ms-msdt:x', 'search-ms:query=x', 'javascript:alert(1)', 'vscode://file/x.ts', 'https://example.com/']) {
+      webview.send({ type: 'dormouse:openExternal', uri });
+    }
+    expect(opened).toEqual(['vscode://file/x.ts', 'https://example.com/']);
+  } finally {
+    attached.dispose();
+  }
+});
+
+/** Activation's counter, in a throwaway `globalStorageUri`. */
+async function activateSurfaceIds(): Promise<void> {
+  const storage = await tempStorageDir();
+  onTestFinished(() => removeDir(storage));
+  (await import('../src/surface-ids')).initSurfaceIds(storage);
+}
+
+it('answers a Surface id reservation from the install counter, by request id', async () => {
+  await activateSurfaceIds();
+  const webview = fakeWebview();
+  const disposable = router.attachRouter(webview.channel, {});
+  try {
+    webview.send({ type: 'surface:reserveIds', count: 2, floor: 41, requestId: 'req-7' });
+    await vi.waitFor(() => expect(webview.posted).toContainEqual({ type: 'surface:reservedIds', ids: ['surface:42', 'surface:43'], requestId: 'req-7' }));
+  } finally { disposable.dispose(); }
+});
+
+it('reserves above every Surface PTY this extension host holds, whatever floor the asking panel restored', async () => {
+  await activateSurfaceIds();
+  const sibling = fakeWebview();
+  const asking = fakeWebview();
+  const disposables = [router.attachRouter(sibling.channel, {}), router.attachRouter(asking.channel, {})];
+  try {
+    sibling.send({ type: 'pty:spawn', id: 'surface:90', options: { cwd: '/repo' } });
+    sibling.send({ type: 'pty:spawn', id: 'surface-uuid', options: { cwd: '/repo' } });
+    asking.send({ type: 'surface:reserveIds', count: 1, floor: 5, requestId: 'req-8' });
+    await vi.waitFor(() => expect(asking.posted).toContainEqual({ type: 'surface:reservedIds', ids: ['surface:91'], requestId: 'req-8' }));
+  } finally { for (const disposable of disposables) disposable.dispose(); }
 });
 
 // The colour cache answers OSC 10/11/12 from the last whole theme push, exactly
@@ -603,10 +684,10 @@ describe('alarm delivery', () => {
       ptys.callbacks!.onData('pty-1', 'output');
       moveWindow({ focused: true });
       ptys.callbacks!.onData('pty-1', REPORT);
-      vi.advanceTimersByTime(1_000);
+      // One isolated chunk is not confirmed work, so nothing defers the ring.
+      vi.advanceTimersByTime(999);
       expect(wiring.pushes).toEqual([]);
-      // Recent output defers the ring; its alarm delay starts after quiet.
-      vi.advanceTimersByTime(5_000);
+      vi.advanceTimersByTime(1);
       expect(wiring.pushes).toEqual([['pty-1', 'terminal']]);
     } finally {
       disposable.dispose();
@@ -761,12 +842,12 @@ it('holds a webview\'s iframe leases under its router, and ends them with it', (
   const disposable = router.attachRouter(webview.channel);
   const otherDisposable = router.attachRouter(other.channel);
   try {
-    webview.send({ type: 'iframe:createProxyUrl', url: 'http://localhost:5173/', embedderOrigins: [], lease: 'surface-1#a', requestId: 'r1' });
-    other.send({ type: 'iframe:createProxyUrl', url: 'http://localhost:5173/', embedderOrigins: [], lease: 'surface-1#a', requestId: 'r2' });
+    webview.send({ type: 'iframe:createProxyUrl', url: 'http://localhost:5173/', embedderOrigins: [], lease: 'surface:1#a', requestId: 'r1' });
+    other.send({ type: 'iframe:createProxyUrl', url: 'http://localhost:5173/', embedderOrigins: [], lease: 'surface:1#a', requestId: 'r2' });
     const [owner, otherOwner] = iframeProxy.create.mock.calls.map(([, , lease]) => (lease as { owner: string; id: string }).owner);
     expect(owner).not.toBe(otherOwner);
-    webview.send({ type: 'iframe:releaseProxy', lease: 'surface-1#a' });
-    expect(iframeProxy.release).toHaveBeenLastCalledWith(owner, 'surface-1#a');
+    webview.send({ type: 'iframe:releaseProxy', lease: 'surface:1#a' });
+    expect(iframeProxy.release).toHaveBeenLastCalledWith(owner, 'surface:1#a');
     webview.send({ type: 'dormouse:init' });
     expect(iframeProxy.release).toHaveBeenLastCalledWith(owner);
     iframeProxy.release.mockClear();

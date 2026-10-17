@@ -147,20 +147,24 @@ export interface ViewerFrame {
   jpeg: Uint8Array;
   /** The viewport's CSS size, when the host knows it. */
   size?: { width: number; height: number };
+  /** The CSS width a provisional frame spans, when the host knows it: the
+   *  browser's window, the viewport at its top left. */
+  windowWidth?: number;
 }
 
 /** A frame travels as one binary message: this header, then the JPEG. Byte 0
- *  is the kind, bytes 4-11 the viewport's CSS width and height (u32 LE, 0 when
- *  unknown). */
-export const VIEWER_FRAME_HEADER_BYTES = 12;
+ *  is the kind, bytes 4-11 the viewport's CSS width and height, bytes 12-15
+ *  the window's CSS width (u32 LE, 0 when unknown). */
+export const VIEWER_FRAME_HEADER_BYTES = 16;
 const FRAME_KIND_CODE: Record<ViewerFrameKind, number> = { provisional: 1, crisp: 2 };
 
-export function encodeViewerFrame({ kind, jpeg, size }: ViewerFrame): Uint8Array {
+export function encodeViewerFrame({ kind, jpeg, size, windowWidth }: ViewerFrame): Uint8Array {
   const message = new Uint8Array(VIEWER_FRAME_HEADER_BYTES + jpeg.byteLength);
   const header = new DataView(message.buffer);
   header.setUint8(0, FRAME_KIND_CODE[kind]);
   header.setUint32(4, size?.width ?? 0, true);
   header.setUint32(8, size?.height ?? 0, true);
+  header.setUint32(12, windowWidth ?? 0, true);
   message.set(jpeg, VIEWER_FRAME_HEADER_BYTES);
   return message;
 }
@@ -175,10 +179,12 @@ export function decodeViewerFrame(message: ArrayBuffer): ViewerFrame | null {
   if (!kind) return null;
   const width = header.getUint32(4, true);
   const height = header.getUint32(8, true);
+  const windowWidth = header.getUint32(12, true);
   return {
     kind,
     jpeg: new Uint8Array(message, VIEWER_FRAME_HEADER_BYTES),
     ...(width > 0 && height > 0 ? { size: { width, height } } : {}),
+    ...(windowWidth > 0 ? { windowWidth } : {}),
   };
 }
 

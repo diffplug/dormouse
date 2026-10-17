@@ -3,7 +3,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
-import { mkdtempSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
 import { AGENT_BROWSER_SOCKET_DIR_ENV, sessionForKey } from 'dor-lib-common/browser-providers';
 // cross-spawn, not node:child_process: this script spawns `dor` and
 // `agent-browser`, which are `.cmd` shims on Windows that a bare-name spawn
@@ -17,6 +17,10 @@ import { corsHeaders, isAuthorized } from './dev-host-guard.mjs';
 // Worktree identity and the Vite server this harness shares with the native
 // dev runner (`dev-standalone.mjs`).
 import { repoRoot, standaloneDir, startDevVite, worktreeId } from './dev-run.mjs';
+// The id grammar and the block cap the real hosts use, type-stripped by Node.
+import { surfaceIdFor, workspaceIdFor, workspaceIdNumber } from '../../dor/src/protocol.ts';
+import { ID_RESERVE_MAX_BLOCK } from '../../lib/src/lib/platform/types.ts';
+import { writeJsonAtomic } from '../../lib/src/host/atomic-json-file.ts';
 
 const sidecarDir = path.join(standaloneDir, 'sidecar');
 const sidecarScript = path.join(sidecarDir, 'main.js');
@@ -52,7 +56,7 @@ const stateDir = path.join(os.tmpdir(), `dormouse-${process.pid}-browser-state`)
 // The inner app's own agent-browser daemons. It names managed sessions
 // `dormouse.<workspace>.<key>` exactly as the installed app does, and every
 // agent-browser shares one socket directory by default, so without this the
-// inner app's workspace-1 `default` browser is the installed app's. Under the
+// inner app's workspace:1 `default` browser is the installed app's. Under the
 // short `/tmp`, not macOS's long `os.tmpdir()`: socket paths cap near 104 bytes.
 const agentBrowserDir = mkdtempSync(path.join(process.platform === 'win32' ? os.tmpdir() : '/tmp', 'dab-'));
 
@@ -111,9 +115,10 @@ const HARNESS_WINDOW = 'main';
 
 const fireAndForget = {
   pty_spawn: ({ id, options }) => writeSidecar('pty:spawn', { id, options }),
-  // `userInput` rides the write, as `pty_write` in src-tauri/src/lib.rs carries it.
-  pty_write: ({ id, data, paced, userInput }) =>
-    writeSidecar('pty:input', { id, data, paced, ...(userInput === true ? { userInput: true } : {}) }),
+  // `userInput` and `launch` ride the write, as `pty_write` in src-tauri/src/lib.rs carries them.
+  pty_write: ({ id, data, paced, userInput, launch }) => writeSidecar('pty:input', {
+    id, data, paced, ...(userInput === true ? { userInput: true } : {}), ...(launch === true ? { launch: true } : {}),
+  }),
   pty_resize: ({ id, cols, rows }) => writeSidecar('pty:resize', { id, cols, rows }),
   pty_theme_colors: ({ colors }) => writeSidecar('pty:themeColors', colors),
   pty_kill: ({ id }) => writeSidecar('pty:kill', { id }),
@@ -165,19 +170,22 @@ const invokeMap = {
   take_recovery_commands: ({ paneIds }) =>
     requestSidecar('recovery:take', { paneIds }, 'recovery:commands', (data) => data.commands ?? {}),
   // The Workspace registry (docs/specs/standalone.md -> "Workspace registry"):
-  // one id counter and one window, since the harness simulates no second one.
-  workspace_reserve_ids: ({ count }) => {
-    const n = Math.max(1, Math.min(64, Number(count) || 1));
-    const first = nextWorkspaceId;
-    nextWorkspaceId += n;
-    return Array.from({ length: n }, (_, i) => `workspace-${first + i}`);
-  },
-  workspace_report: ({ entries }) => {
+  // one id counter per kind and one window, since the harness simulates no
+  // second one.
+  workspace_reserve_ids: ({ count }) => reserve('workspace', count),
+  // Surface ids (docs/specs/transport.md -> "Surface ids"): never at or below
+  // the floor the page restored, which outlives this process in localStorage.
+  surface_reserve_ids: ({ count, floor }) => reserve('surface', count, floor),
+  boot_reserve_ids: async ({ workspaces, surfaces, floor }) =>
+    ({ workspaces: await reserve('workspace', workspaces), surfaces: await reserve('surface', surfaces, floor) }),
+  workspace_report: async ({ entries }) => {
     // Restored browser state survives this process; mirror Rust's report seed.
+    const seeded = ids.workspace;
     for (const entry of entries ?? []) {
-      const minted = refNumber(entry?.id ?? '');
-      if (minted !== undefined) nextWorkspaceId = Math.max(nextWorkspaceId, minted + 1);
+      const minted = workspaceIdNumber(String(entry?.id ?? ''));
+      if (minted !== null) ids.workspace = Math.max(ids.workspace, minted + 1);
     }
+    if (ids.workspace !== seeded) await saveIds().catch((error) => console.error(`[ids] ${error}`));
     const next = JSON.stringify(entries ?? []);
     if (next === registryEntries) return null;
     registryEntries = next;
@@ -188,18 +196,51 @@ const invokeMap = {
   workspace_registry: () => registrySnapshot(),
 };
 
-let nextWorkspaceId = 2;
+// The next Workspace and Surface numbers, persisted before any is handed out as
+// Rust's `ids.json` is, so a restart never re-mints a killed Surface's number.
+// Per worktree, the lifetime of the harness browser's localStorage, where the
+// page keeps its session.
+const idsFile = path.join(repoRoot, 'node_modules', '.cache', 'dormouse-innerdogfood', 'ids.json');
+const ids = loadIds();
+function loadIds() {
+  mkdirSync(path.dirname(idsFile), { recursive: true });
+  try {
+    const { workspace, surface } = JSON.parse(readFileSync(idsFile, 'utf8'));
+    if (Number.isSafeInteger(workspace) && Number.isSafeInteger(surface)) return { workspace: Math.max(2, workspace), surface: Math.max(1, surface) };
+  } catch {
+    // None yet, or unreadable: start over, as a fresh state root does.
+  }
+  return { workspace: 2, surface: 1 };
+}
+/** Writes queue behind one another, each taking the counters as they stand
+ *  when it starts, so the file never moves back. */
+let saving = Promise.resolve();
+function saveIds() {
+  const saved = saving.then(() => writeJsonAtomic(path.dirname(idsFile), idsFile, { ...ids }, { durable: true }));
+  saving = saved.catch(() => {});
+  return saved;
+}
+/** `count` ids of `kind` (clamped as the hosts clamp), each above `floor`,
+ *  persisted before any is handed out: none when the write fails, as the
+ *  hosts answer. */
+async function reserve(kind, count, floor = 0) {
+  const n = Math.max(1, Math.min(ID_RESERVE_MAX_BLOCK, Number(count) || 1));
+  const first = Math.max(ids[kind], (Number(floor) || 0) + 1);
+  ids[kind] = first + n;
+  try {
+    await saveIds();
+  } catch (error) {
+    console.error(`[ids] ${error}; handing out no ids`);
+    return [];
+  }
+  const idFor = kind === 'surface' ? surfaceIdFor : workspaceIdFor;
+  return Array.from({ length: n }, (_, i) => idFor(first + i));
+}
 let registryEntries = '[]';
 let registryRevision = 0;
-/** A minted id's counter number, else undefined; mirrors `ref_number` in standalone/src-tauri/src/workspaces.rs. */
-function refNumber(id) {
-  const minted = /^workspace-(\d+)$/.exec(id);
-  return minted ? Number(minted[1]) : undefined;
-}
 function registrySnapshot() {
   const workspaces = JSON.parse(registryEntries).map((entry) => ({
     id: entry.id,
-    ref: `workspace:${refNumber(entry.id) ?? entry.id}`,
     name: entry.name,
     active: Boolean(entry.active),
   }));
@@ -387,12 +428,12 @@ async function openAgentBrowser() {
 }
 
 /**
- * The caller's ref when this harness runs as a Dor Tool, else undefined. The
+ * The caller's id when this harness runs as a Dor Tool, else undefined. The
  * Tool frames the announced port in its own pane (docs/specs/dor-tool.md ->
  * Serving), so a keyed browser opened on top would split off a second copy of
  * the app. `--kind tool` leaves the caller in the list only when it is a Tool.
  */
-async function callerToolRef() {
+async function callerToolId() {
   if (!insideDormouse || process.env.DORMOUSE_BROWSER_DEV_AB_SESSION) return undefined;
   const list = spawn('dor', ['list', '--kind', 'tool', '--json'], { cwd: repoRoot, stdio: ['ignore', 'pipe', 'ignore'] });
   let stdout = '';
@@ -403,7 +444,7 @@ async function callerToolRef() {
   });
   if (code !== 0) return undefined;
   try {
-    return JSON.parse(stdout).caller_surface_ref ?? undefined;
+    return JSON.parse(stdout).caller_surface_id ?? undefined;
   } catch {
     return undefined;
   }
@@ -451,8 +492,8 @@ try {
   process.stdout.write(
     `\u001b]367;serve;${JSON.stringify({ port: vitePort, name: 'Dormouse dev', v: 1 })}\u001b\\`,
   );
-  const toolRef = await callerToolRef();
-  if (toolRef) log(`Tool ${toolRef} shows the app; try: dor agent-browser --surface ${toolRef} snapshot -i`);
+  const toolId = await callerToolId();
+  if (toolId) log(`Tool ${toolId} shows the app; try: dor agent-browser --surface ${toolId} snapshot -i`);
   else await openAgentBrowser();
   log('running; Ctrl-C to stop');
 } catch (err) {

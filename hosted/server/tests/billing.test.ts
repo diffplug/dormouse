@@ -17,7 +17,7 @@ import {
 } from "../billing-routes";
 import { DEV_FOUNDING_PRICES, stripeDevBilling } from "../billing-dev";
 import { ADMIN_METRICS_PATH } from "../metric-labels";
-import { ADMIN_EMAIL } from "../entitlement";
+import { ADMIN_EMAIL, PAYMENT_GRACE_DAYS } from "../entitlement";
 import { NEW_ACCOUNT_MS } from "../account-gate";
 import { VOICE_DAILY_CAP } from "../voice";
 import { migrations } from "../migrations";
@@ -143,6 +143,8 @@ async function fixture({ billing = true } = {}) {
           cookie: [...jar].map(([k, v]) => `${k}=${v}`).join("; "),
           "cf-connecting-ip": "203.0.113.10",
           "content-type": "application/json",
+          // The account's own page, as the read gate requires.
+          "sec-fetch-site": "same-origin",
           ...(init.origin !== null && { origin: init.origin ?? origin }),
           ...init.headers,
         },
@@ -269,9 +271,10 @@ test("checkout to webhook to entitlement: voice and the Relay admit a member, an
   const sent = f.dev.requests.find((r) => r.path === "/v1/checkout/sessions")!.body;
   expect(sent).toMatchObject({
     "line_items[0][price]": "price_dev_monthly",
-    "managed_payments[enabled]": "true",
     success_url: expect.stringMatching(new RegExp(`^${origin}/billing\\?checkout=`)),
   });
+  // DiffPlug is the merchant of record: Stripe Billing, not Managed Payments.
+  expect(sent["managed_payments[enabled]"]).toBeUndefined();
   // No trial: the first payment is taken at checkout.
   expect(sent["subscription_data[trial_period_days]"]).toBeUndefined();
 
@@ -298,12 +301,20 @@ test("checkout to webhook to entitlement: voice and the Relay admit a member, an
   const { burrowToken } = enrolled.json.enrollment;
   expect((await f.burrowCall(API_ROUTES.burrowSetupToken, undefined, burrowToken)).status).toBe(200);
 
-  // A failed renewal refuses at once: no grace past what the subscription grants.
+  // A failed renewal keeps access while Stripe retries it, and the account
+  // page says a payment is due, so its owner can fix the card.
   f.dev.transition(subscription.id, "payment-failed");
   await f.deliver();
+  expect((await f.speak(token)).status).toBe(200);
+  expect(await member.summary()).toMatchObject({ plan: "monthly", active: false, entitled: true });
+  // Past the grace, it refuses even if Stripe never ended the subscription.
+  await queryDatabase(
+    f.database.url,
+    `UPDATE pgstencil_billing.subscriptions
+    SET period_end = now() - interval '${PAYMENT_GRACE_DAYS} days' - interval '1 minute'`,
+  );
   expect((await f.speak(token)).status).toBe(403);
-  // The plan stays on the account page, so its owner can fix the card.
-  expect(await member.summary()).toMatchObject({ plan: "monthly", active: false, entitled: false });
+  expect(await member.summary()).toMatchObject({ plan: "monthly", entitled: false });
   f.dev.transition(subscription.id, "renew");
   await f.deliver();
   expect((await f.speak(token)).status).toBe(200);

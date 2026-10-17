@@ -117,7 +117,9 @@ export class ChangelogRunner implements InteractiveProgram {
           i += mouse[0].length;
           continue;
         }
-        const csi = tail.match(/^\x1b\[(\d*)([A-Z~])/);
+        // Modifiers ride as a trailing parameter (`\x1b[1;2A` is Shift+Up);
+        // only the first parameter selects the key.
+        const csi = tail.match(/^\x1b\[(\d*)(?:;\d*)*([A-Z~])/);
         if (csi) {
           this.handleCsi(csi[1], csi[2]);
           i += csi[0].length;
