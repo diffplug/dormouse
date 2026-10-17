@@ -27,6 +27,7 @@ import {
   toBase64Url,
   verifyPresenceProof,
   type PresenceBinding,
+  MAX_BURROWS_PER_ACCOUNT,
 } from "remote-lib-common";
 import {
   SimAuthenticator,
@@ -39,7 +40,6 @@ import { migrations } from "../migrations";
 import { ENROLLMENT_TTL_MS } from "../policy-constants";
 import {
   ENROLLMENT_POLL_INTERVAL_S,
-  MAX_BURROWS_PER_ACCOUNT,
   MAX_PASSKEYS_PER_ACCOUNT,
   MAX_SESSIONS_PER_ACCOUNT,
   MAX_SETUP_CHALLENGES_PER_BURROW,

@@ -9,7 +9,7 @@
 
 **`/hosted` is canonical; `/pricing` 301-redirects to it.** The tool is free and open source, and Hosted is the optional service with a price, so pricing is a section of the Hosted page, never a page of its own.
 
-**Settings is the front door.** Its sign-in, in Notifications' managed voice and Network's Remote control, starts membership on the desktop; the playground tutorial lands on `/hosted#voice`, and the plan cards sit within one screen of that anchor. An account with no plan is linked to `#pricing` from Settings and from the baseboard alarm buttons' offers (`docs/specs/alert.md` -> "Settings dialog"). `#pricing` (the plan cards, which each JSON-LD `Offer` url names), `#remote-control`, and `#voice` keep resolving as section ids.
+**Settings is the front door.** Its sign-in, in Notifications' managed voice and Network's Remote control, starts membership on the desktop; the Pocket playground's tutorial lands on `/hosted#remote-control`, below the plan cards. An account with no plan is linked to `#pricing` from Settings, from the baseboard alarm buttons' offers (`docs/specs/alert.md` -> "Settings dialog"), and from the account page, in place of approving a computer. `#pricing` (the plan cards, which each JSON-LD `Offer` url names), `#remote-control`, and `#voice` keep resolving as section ids.
 
 **Prices, inclusions, and the FAQ are prerendered text**, and the page emits `Product` / `Offer` JSON-LD carrying one `Offer` per paid plan at its current price, so an assistant fetching the page can quote it. **Offers are `PreOrder` until `CHECKOUT_OPEN`, then `InStock`.**
 

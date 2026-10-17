@@ -1,7 +1,6 @@
 import type { AlertSink } from './alert-delivery-model';
 import { managedVoicePort, membershipOf, type HostedMembership } from './hosted-membership';
 import { loadJson, saveJson } from './local-json-store';
-import { getNetworkPolicySnapshot, policyOf, type NetworkPolicyStoreState } from '../remote/burrow/network-policy-store';
 import { readBurrowStatusOnce } from '../remote/burrow/burrow-status-store';
 
 /**
@@ -13,6 +12,10 @@ import { readBurrowStatusOnce } from '../remote/burrow/burrow-status-store';
  * - `plans-voice` / `plans-push`: signed in with no plan, pointed at the plans;
  * - `set-up-phone`: push has no Burrow enrolled in a build without Hosted
  *   mode, pointed at Settings → Network.
+ *
+ * The network policy does not gate it: the line is a link that makes no
+ * request, and Nothing is most machines' install default rather than a
+ * choice. Settings, where a signed-out line leads, explains the policy.
  */
 export type AlarmUpsell = 'sign-in-voice' | 'sign-in-push' | 'plans-voice' | 'plans-push' | 'set-up-phone';
 
@@ -21,11 +24,6 @@ export interface AlarmUpsellFacts {
   membership: HostedMembership;
   /** This build can play managed voice: its adapter has a `managedVoice` port. */
   managedVoice: boolean;
-  /**
-   * The network policy is Nothing, which sends no push and asks for no voice,
-   * or a Burrow service has not said yet which policy it is.
-   */
-  networkOff: boolean;
   /**
    * Whether this computer's Burrow is enrolled with a Relay, as its service
    * answers; `null` without a service (the website) or an answer.
@@ -36,7 +34,7 @@ export interface AlarmUpsellFacts {
 /** Which offer a sink earns, before the daily limit. */
 export function chooseAlarmUpsell(facts: AlarmUpsellFacts): AlarmUpsell | null {
   const { sink, membership } = facts;
-  if (facts.networkOff || membership === 'member') return null;
+  if (membership === 'member') return null;
   if (sink === 'speech') {
     if (!facts.managedVoice) return null;
     return membership === 'signed-out' ? 'sign-in-voice' : membership === 'no-plan' ? 'plans-voice' : null;
@@ -61,13 +59,6 @@ export function alarmUpsellShownToday(now: number = Date.now()): boolean {
   return last > 0 && now >= last && now - last < DAY_MS;
 }
 
-/** Nothing, or not answered yet by a Burrow service that will answer. */
-export function networkOffOrUnknown(network: NetworkPolicyStoreState): boolean {
-  if (network.kind === 'unsupported') return false;
-  const policy = policyOf(network);
-  return policy === null || policy.level === 'nothing';
-}
-
 /**
  * The line a toggle that turned `sink` on earns, if today's has not shown and
  * its preview is `stillShown` once decided, recording that it showed. The
@@ -80,8 +71,7 @@ export async function takeAlarmUpsell(
   now: number = Date.now(),
 ): Promise<AlarmUpsell | null> {
   const port = managedVoicePort();
-  const networkOff = networkOffOrUnknown(getNetworkPolicySnapshot());
-  if (networkOff || (sink === 'speech' && !port) || alarmUpsellShownToday(now)) return null;
+  if ((sink === 'speech' && !port) || alarmUpsellShownToday(now)) return null;
   // Bounded: an answer later than the preview's life is no use to it.
   const status = await Promise.race([
     readBurrowStatusOnce(),
@@ -91,7 +81,6 @@ export async function takeAlarmUpsell(
     sink,
     membership: membershipOf(status, port?.status() ?? null),
     managedVoice: port !== undefined,
-    networkOff,
     enrolled: status?.enrolled ?? null,
   });
   if (!upsell || !stillShown()) return null;

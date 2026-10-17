@@ -32,7 +32,7 @@ import { clearTerminalActivity, setTerminalActivity } from '../lib/session-activ
 import { createAlertEpisode } from '../lib/alert-episode';
 import { enrolledStatus, makeStubBurrowLink, SELF_HOST_UNENROLLED_STATUS, UNENROLLED_STATUS } from '../host/remote/test-burrow-link';
 import { makeStubManagedVoicePort } from '../lib/platform/test-ports';
-import { networkPolicyResult, nothingPolicy } from '../remote/network-policy';
+import { networkPolicyResult, nothingPolicy, type NetworkPolicyResult } from '../remote/network-policy';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -429,12 +429,17 @@ describe('Baseboard alarm upsell', () => {
    * A build whose Burrow service answers `status` — a Hosted one not signed in
    * by default — with a managed-voice port unless `voice` is false.
    */
-  async function renderWithPlatform({ status = UNENROLLED_STATUS, voice = true, notEntitled = false } = {}) {
+  async function renderWithPlatform({
+    status = UNENROLLED_STATUS,
+    voice = true,
+    notEntitled = false,
+    network = undefined as NetworkPolicyResult | undefined,
+  } = {}) {
     const platform = await import('../lib/platform');
     const adapter = {
       alertPublishSettings: vi.fn(),
       openExternal,
-      burrow: makeStubBurrowLink({ status }),
+      burrow: makeStubBurrowLink({ status, network }),
       managedVoice: voice ? makeStubManagedVoicePort(status.enrolled, notEntitled) : undefined,
     } as unknown as ReturnType<typeof platform.getPlatform>;
     vi.spyOn(platform, 'getPlatform').mockReturnValue(adapter);
@@ -545,6 +550,15 @@ describe('Baseboard alarm upsell', () => {
     await toggle('push');
     expect(line()?.dataset.alarmUpsell).toBe('sign-in-push');
     act(() => line()!.click());
+    expect(settingsOpen()).toBe(true);
+  });
+
+  it.each(['speech', 'push'] as const)('offers %s sign-in under Nothing, leading to Settings and no request', async (sink) => {
+    await renderWithPlatform({ network: networkPolicyResult(nothingPolicy(), 'hosted', []) });
+    await toggle(sink);
+    expect(line()?.dataset.alarmUpsell).toBe(sink === 'speech' ? 'sign-in-voice' : 'sign-in-push');
+    act(() => line()!.click());
+    expect(openExternal).not.toHaveBeenCalled();
     expect(settingsOpen()).toBe(true);
   });
 

@@ -13,6 +13,7 @@ import {
   ENROLL_PAGE_PATH,
   MAX_ENROLL_POLL_INTERVAL_S,
   MAX_PENDING_PAIRINGS,
+  computerName,
   deriveNoiseStaticPublicKey,
   formatPairingInvitationUrl,
   isSetupTokenResponse,
@@ -934,7 +935,7 @@ export class BurrowService {
   #refuseEnrolled(): void {
     if (this.#enrollment) {
       throw new Error(
-        `This computer is already enrolled as Burrow ${this.#enrollment.burrowId}. Disconnect it to enroll again.`,
+        `This computer is already enrolled as ${computerName(this.#enrollment.burrowId)}. Disconnect it to enroll again.`,
       );
     }
   }
@@ -1054,7 +1055,7 @@ export class BurrowService {
       this.#emitStatus();
     }
     const stranded =
-      `Your account holds Burrow ${enrollment.burrowId}, which this computer could not keep; ` +
+      `Your account holds ${computerName(enrollment.burrowId)}, which this computer could not keep; ` +
       `remove it at ${new URL(run.verificationUrl).origin}${ACCOUNT_PAGE_PATH}.`;
     let saved = false;
     try {
@@ -1062,7 +1063,7 @@ export class BurrowService {
         if (this.#disposed) throw new Error('Dormouse closed before it could save the enrollment.');
         if (this.#enrollment) {
           throw new Error(
-            `This computer was already enrolled as Burrow ${this.#enrollment.burrowId} when another code was approved.`,
+            `This computer was already enrolled as ${computerName(this.#enrollment.burrowId)} when another code was approved.`,
           );
         }
         try {

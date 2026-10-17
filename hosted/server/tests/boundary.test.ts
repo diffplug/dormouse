@@ -152,7 +152,6 @@ const SERVED: Record<Name, [string, string][]> = {
     ["GET", "/api/auth/csrf"],
     ["GET", "/api/providers"],
     ["GET", "/api/voice/tokens"],
-    ["POST", "/api/voice/tokens"],
     ...ACCOUNT_RELAY,
     ...ACCOUNT_BILLING,
     ["GET", "/login"],
