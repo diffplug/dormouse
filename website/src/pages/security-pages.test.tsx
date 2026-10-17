@@ -97,6 +97,17 @@ describe("security-adjacent documentation", () => {
   });
 });
 
+// docs/specs/security-audit.md -> "Canary recall": the audit's measured recall
+// leads the section that describes the audit.
+it("/security shows the canary recall under how the guarantees are checked", () => {
+  const main = renderMain(<SecurityDocs />);
+  const heading = main.indexOf('id="how-the-guarantees-are-checked"');
+  const recall = main.indexOf('aria-label="Canary recall"');
+  expect(heading).toBeGreaterThan(0);
+  expect(recall).toBeGreaterThan(heading);
+  expect(main.indexOf("<h2", heading)).toBeGreaterThan(recall);
+});
+
 describe("audience pages", () => {
   const audiences = security.audiences as Record<
     string,

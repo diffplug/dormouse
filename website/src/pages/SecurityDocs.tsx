@@ -14,6 +14,8 @@
 import { type MetaArgs } from "react-router";
 import { siteMeta, sitePath } from "../lib/site-meta";
 import security from "../data/docs.security.json";
+import canaryRecall from "../data/canary-recall.json";
+import CanaryRecall from "../components/CanaryRecall";
 import DocsLayout from "../components/DocsLayout";
 import { LINK_CLASS, NOTE_CLASS, NOTE_MUTED_TEXT_CLASS } from "../components/docs-tokens";
 import MarkdownDocument, { type BlockNode } from "../components/MarkdownDocument";
@@ -27,6 +29,8 @@ export function meta({ location }: MetaArgs) {
 }
 
 const SPECS_URL = "https://github.com/diffplug/dormouse/tree/main/docs/specs";
+/** The heading the canary recall follows. */
+const CHECKED_ID = "how-the-guarantees-are-checked";
 
 export default function SecurityDocs() {
   return (
@@ -55,7 +59,14 @@ export default function SecurityDocs() {
         .
       </p>
 
-      <MarkdownDocument blocks={security.pageBlocks as BlockNode[]} />
+      <MarkdownDocument
+        blocks={security.pageBlocks as BlockNode[]}
+        // The committed recall snapshot leads the section on the audit that
+        // the canary measures (docs/specs/website-docs.md -> `/security` spec).
+        renderAfterHeading={(heading) =>
+          heading.id === CHECKED_ID ? <CanaryRecall snapshot={canaryRecall} /> : null
+        }
+      />
     </DocsLayout>
   );
 }
