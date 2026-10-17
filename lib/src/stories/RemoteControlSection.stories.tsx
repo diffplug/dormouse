@@ -114,7 +114,7 @@ export const HostedPersistentRelay: Story = {
   },
   play: async ({ canvasElement }) => {
     await openPersistent(canvasElement);
-    await within(canvasElement).findByRole('button', { name: 'Enroll with hosted.dormouse.sh' });
+    await within(canvasElement).findByRole('button', { name: 'Sign in to Dormouse Hosted' });
   },
 };
 
@@ -181,7 +181,7 @@ export const HostedEnrollRedeeming: Story = {
     primedBurrow: { status: { ...UNENROLLED_STATUS, hostedEnrollment: { status: 'redeeming' } } },
     docs: { story: { height: '420px' } },
   },
-  play: settled('Approved. Enrolling this computer…'),
+  play: settled('Approved. Signing this computer in…'),
 };
 
 /**

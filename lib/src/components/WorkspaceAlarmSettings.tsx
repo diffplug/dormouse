@@ -2,11 +2,10 @@ import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useWorkspaceAlertPolicy } from './wall/use-workspace-alert-policy';
 import { getWorkspace, setWorkspaceAlertDelivery, subscribeToWorkspaces } from '../lib/workspace-store';
 import type { AlertDeliveryOverrides } from '../lib/alert-delivery-model';
-import { ELEVATED_PANE_SHADOW, MODAL_OVERLAY_INSET, OVERLAY_MAX_HEIGHT, ModalCloseButton, ModalFrame, modalActionButton } from './design';
+import { ELEVATED_PANE_SHADOW, MODAL_OVERLAY_INSET, OVERLAY_MAX_HEIGHT, ModalCloseButton, ModalFrame, SELECT_CLASS, modalActionButton } from './design';
 import { SecondsField, SwitchRow } from './AlarmSettingsControls';
 import { SpeakTestButton } from './AlarmTestButtons';
 
-const SELECT = 'min-w-0 rounded border border-input-border bg-input-bg p-1 text-sm text-foreground';
 /** Option-value prefix for an engine voice URI, beside `inherit` and `system`. */
 const VOICE = 'voice:';
 
@@ -64,7 +63,7 @@ export function WorkspaceAlarmSettings() {
           <div key={sink} className="mt-3 flex flex-col gap-2">
             <label className="flex items-center gap-2">
               {label}
-              <select aria-label={`${label} for this workspace`} className={SELECT}
+              <select aria-label={`${label} for this workspace`} className={SELECT_CLASS}
                 value={overrides[enabledKey] === undefined ? 'inherit' : String(overrides[enabledKey])}
                 onChange={(event) => change(enabledKey, event.target.value === 'inherit' ? undefined : event.target.value === 'true')}>
                 <option value="inherit">Default ({defaults[enabledKey] ? 'on' : 'off'})</option>
@@ -79,7 +78,7 @@ export function WorkspaceAlarmSettings() {
       })}
       <label className="mt-3 flex flex-col gap-1">
         Voice for this workspace
-        <select aria-label="Voice for this workspace" className={SELECT}
+        <select aria-label="Voice for this workspace" className={SELECT_CLASS}
           value={overrides.speakVoice === undefined ? 'inherit' : overrides.speakVoice === null ? 'system' : `${VOICE}${overrides.speakVoice}`}
           onChange={(event) => change('speakVoice', event.target.value === 'inherit' ? undefined
             : event.target.value === 'system' ? null : event.target.value.slice(VOICE.length))}>

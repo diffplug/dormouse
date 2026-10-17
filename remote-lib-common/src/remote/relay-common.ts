@@ -129,14 +129,14 @@ export const MAX_PENDING_REAUTH_NONCES_PER_SESSION = 8;
 export const SETUP_TOKEN_TTL_MS = DEFAULT_PAIRING_TTL_MS;
 
 /**
- * How many Burrows one account may have enrolled, on either Relay.
+ * How many Burrows the self-host Relay may have enrolled. Hosted has no device
+ * limit; its abuse ceiling is `MAX_BURROWS_PER_ACCOUNT` in
+ * `hosted/server/relay-api.ts`.
  *
- * Enrollment is credential-gated, so this is not a flood defense. On the
- * self-host Relay it bounds a file that is otherwise append-only and is
- * re-read, re-parsed and compared row by row on every burrow-gated request and
- * every `/ws/burrow` upgrade; on Hosted it bounds what one account's approvals
- * can grow. Far above the machines a person owns; revocation (self-host) or
- * removal (Hosted) is what makes room.
+ * Enrollment is credential-gated, so this is not a flood defense: it bounds a
+ * file that is otherwise append-only and is re-read, re-parsed and compared
+ * row by row on every burrow-gated request and every `/ws/burrow` upgrade. Far
+ * above the machines a person owns; revocation is what makes room.
  */
 export const MAX_ENROLLED_BURROWS = 32;
 

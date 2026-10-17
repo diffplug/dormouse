@@ -506,7 +506,8 @@ describe('Hosted device-code enrollment', () => {
 
     it('posts the device code alone, and maps an enrolled answer through the enrollment guard', async () => {
       const enrollment = { burrowId: BURROW_ID, burrowToken: 'tok', origin: RELAY, rpId: 'relay.dormouse.sh' };
-      const fetchMock = json(200, { status: 'enrolled', enrollment });
+      const voiceToken = `dmv_${'V'.repeat(43)}`;
+      const fetchMock = json(200, { status: 'enrolled', enrollment, voiceToken });
 
       const answer = await poll(fetchMock);
 
@@ -517,7 +518,11 @@ describe('Hosted device-code enrollment', () => {
       expect(answer).toEqual({
         status: 'enrolled',
         enrollment: { relayUrl: RELAY, ...enrollment, label: 'My Laptop', ...noiseStatic },
+        voiceToken,
       });
+      // A token of the wrong shape, or none, still enrolls: the approval is spent.
+      expect(await poll(json(200, { status: 'enrolled', enrollment, voiceToken: 'sk-nope' })))
+        .toMatchObject({ status: 'enrolled', voiceToken: null });
       expect(isEnrollment((answer as { enrollment: unknown }).enrollment)).toBe(true);
       // A redemption the guard refuses fails, naming the field.
       expect(await poll(json(200, { status: 'enrolled', enrollment: { ...enrollment, burrowId: 'short' } })))

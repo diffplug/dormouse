@@ -2776,6 +2776,49 @@ describe('Hosted enrollment', () => {
     expect(pollRequests()).toHaveLength(2);
   });
 
+  it('hands the voice token a redemption carries to managed voice, and sign-out clears it', async () => {
+    const voiceToken = `dmv_${'V'.repeat(43)}`;
+    const voice = { save: vi.fn(async (_token: string) => {}), clear: vi.fn(async () => {}) };
+    hosted(undefined, { voiceCredential: voice });
+    await service.start();
+    // Start found no enrollment, so it cleared what no sign-in holds.
+    voice.clear.mockClear();
+    await command('beginHostedEnrollment', { label: 'Work laptop' });
+    const answer = enrolledAnswer();
+    polls.push({ ...answer, body: { ...answer.body, voiceToken } });
+    await nextPoll();
+    await drain(() => voice.save.mock.calls.length > 0);
+
+    expect(voice.save.mock.calls).toEqual([[voiceToken]]);
+    // In-process only: no webview hears it.
+    expect(JSON.stringify(sent)).not.toContain(voiceToken);
+    expect(store.enrollment).not.toHaveProperty('voiceToken');
+
+    await command('clearEnrollment');
+    expect(voice.clear).toHaveBeenCalledOnce();
+    expect(store.enrollment).toBeNull();
+  });
+
+  it('clears a voice token held with no enrollment at start', async () => {
+    const voice = { save: vi.fn(async (_token: string) => {}), clear: vi.fn(async () => {}) };
+    hosted(undefined, { voiceCredential: voice });
+    await service.start();
+    expect(voice.clear).toHaveBeenCalledOnce();
+  });
+
+  it('enrolls without managed voice when the answer carries no token of its shape', async () => {
+    const voice = { save: vi.fn(async (_token: string) => {}), clear: vi.fn(async () => {}) };
+    hosted(undefined, { voiceCredential: voice });
+    await service.start();
+    await command('beginHostedEnrollment', { label: 'Work laptop' });
+    const answer = enrolledAnswer();
+    polls.push({ ...answer, body: { ...answer.body, voiceToken: 'sk-nope' } });
+    await nextPoll();
+    await drain(() => store.enrollment !== null);
+    expect(store.enrollment).toMatchObject({ burrowId: BURROW_ID });
+    expect(voice.save).not.toHaveBeenCalled();
+  });
+
   it('is refused in a self-host build, and under Nothing, before any request', async () => {
     createService({ network: RELAY_ON }, { fetch: hostedFetch() });
     expect((await command('beginHostedEnrollment', { label: 'x' })).error).toContain('setup password');
