@@ -6,7 +6,8 @@
  * for the line grammar the domains write.
  *
  *   node scripts/security-audit-report.mjs manifest <fragment>
- *     The result lines that domain owes: one per `FAIL IF` rule in its specs.
+ *     The result lines that domain owes: one per `FAIL IF` rule in its specs,
+ *     each naming its rule's opening words.
  *   node scripts/security-audit-report.mjs check <fragment>
  *     The local runner's verdict on one fragment; exit 0 only on PASS.
  *   node scripts/security-audit-report.mjs compose --run-url <url> [--transcript-url <url>] --outputs <file>
@@ -226,6 +227,27 @@ function closeFinding(parsed, finding, evidence) {
 
 /** A rule's id in the result-line grammar: `` `spec` -> "heading" #n[.c] ``. */
 export const ruleId = (spec, heading, n, clause) => `\`${spec}\` -> "${heading}" #${n}${clause ? `.${clause}` : ''}`;
+
+/** A rule's text without its `FAIL IF` marker or emphasis, as one line. */
+const ruleWords = (text) => text.replace(FAIL_IF_RE, '').replace(/^\*\*\s*/, '').replaceAll('**', '').split(/\s+/).filter(Boolean);
+
+/**
+ * The manifest's template lines, each naming its rule by the opening words
+ * that tell it from every other rule under its heading, so a domain copies a
+ * rule's number rather than counting to it.
+ */
+export function manifestLines(root, fragment) {
+  return [...fragmentManifest(root, fragment)].flatMap(([key, numbers]) => {
+    const [spec, heading] = key.split('\0');
+    const words = specRules(root, spec).filter((r) => r.heading === heading).map((r) => ruleWords(r.text));
+    let k = 8;
+    while (k < Math.max(...words.map((w) => w.length)) && new Set(words.map((w) => w.slice(0, k).join(' '))).size < words.length) k++;
+    return numbers.map((n) => {
+      const w = words[n - 1];
+      return `- PASS: ${ruleId(spec, heading, n)} — <clause of the rule opening "${w.slice(0, k).join(' ')}${w.length > k ? ' …' : ''}">: <evidence>`;
+    });
+  });
+}
 
 /** Every rule id a manifest owes, in order. */
 export const owedIds = (owed) => [...owed].flatMap(([key, numbers]) => {
@@ -587,7 +609,7 @@ function main(argv) {
     else args._ = rest[i];
   }
   if (command === 'manifest') {
-    for (const id of owedIds(fragmentManifest('.', args._))) console.log(`- PASS: ${id} — <clause>: <evidence>`);
+    for (const line of manifestLines('.', args._)) console.log(line);
     return;
   }
   if (command === 'check') {

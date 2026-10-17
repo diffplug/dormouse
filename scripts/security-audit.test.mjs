@@ -4,7 +4,7 @@ import { copyFileSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSy
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { BODY_LIMIT } from './clamp-issue-body.mjs';
-import { OPEN_FINDINGS, SENTINEL, domains, failKey, fragmentManifest, ledgerKey, ledgerMeta, owedIds as owedRuleIds, specRules } from './security-audit-report.mjs';
+import { OPEN_FINDINGS, SENTINEL, domains, failKey, fragmentManifest, ledgerKey, manifestLines, ledgerMeta, owedIds as owedRuleIds, specRules } from './security-audit-report.mjs';
 import { disclosureReason, parseLedger, planDisclosures, statusBody } from './security-audit-public-body.mjs';
 import { FRAGMENT } from './github-state-check.mjs';
 import { decide } from './security-audit-plan.mjs';
@@ -680,6 +680,32 @@ test('every FAIL IF rule is owed by its domain, its deterministic check, or both
   assert.ok(state.has(VSCODE_RULE) && !ci.has(VSCODE_RULE));
   const gate = owedIds(STATE_FRAGMENT).find((id) => id.includes('"Schedule and gate"'));
   assert.ok(gate && ci.has(gate));
+});
+
+// A domain that counts its way to a rule number can land on a neighbour: run
+// 38982560206's remote domain swapped "Trust boundary" #14 and #15. So each
+// template names its rule by opening words no sibling under its heading shares.
+test('the manifest names every owed rule by opening words its siblings do not share', () => {
+  for (const fragment of allFragments) {
+    const ids = owedIds(fragment);
+    const lines = manifestLines(repo, fragment);
+    assert.equal(lines.length, ids.length, fragment);
+    const openings = new Map();
+    ids.forEach((id, i) => {
+      const m = lines[i].match(/^- PASS: (.+) — <clause of the rule opening "(.+?)(?: …)?">: <evidence>$/);
+      assert.ok(m, lines[i]);
+      assert.equal(m[1], id);
+      const [, spec, heading, n] = id.match(/^`(.+)` -> "(.+)" #(\d+)$/);
+      const rule = specRules(repo, spec).filter((r) => r.heading === heading)[Number(n) - 1];
+      const words = rule.text.replace(/^\s*(?:[-*]\s+)?\*\*FAIL IF\*\*\s*/, '').replaceAll('**', '').split(/\s+/).join(' ');
+      assert.ok(words.startsWith(m[2]), `${id}: "${m[2]}"`);
+      const key = `${spec}\0${heading}`;
+      assert.ok(!openings.get(key)?.has(m[2]), `${id} shares its opening with a sibling`);
+      openings.set(key, (openings.get(key) ?? new Set()).add(m[2]));
+    });
+  }
+  const cli = spawnSync(process.execPath, [join(repo, 'scripts/security-audit-report.mjs'), 'manifest', REMOTE], { cwd: repo, encoding: 'utf8' });
+  assert.equal(cli.stdout, `${manifestLines(repo, REMOTE).join('\n')}\n`);
 });
 
 // An empty manifest would let any fragment pass, so a fragment no domain
