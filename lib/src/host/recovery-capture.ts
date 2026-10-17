@@ -310,11 +310,6 @@ export async function captureAgentRecovery(
   // is the one piece of this that can be logged forever: dumping the actual tail
   // would write terminal output into a log file, which is precisely the
   // disclosure this whole scope exists to remove.
-  //
-  // A Dormouse launched from inside a Claude Code session inherits
-  // CLAUDE_CODE_CHILD_SESSION, which turns claude's transcript saving off unless
-  // CLAUDE_CODE_FORCE_SESSION_PERSISTENCE=1 (Claude Code 2.1.302), so such a
-  // pane can legitimately print no hint.
   for (const id of pending()) {
     const after = host.receivedChars(id) - (startMark.get(id) ?? 0);
     log.info(`[recovery]   no hint from ${id}: +${after} bytes since interrupt, asked=${asked.has(id)}, presses=${presses.get(id)}`);

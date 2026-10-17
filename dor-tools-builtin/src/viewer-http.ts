@@ -13,6 +13,17 @@ export class HttpError extends Error {
   constructor(readonly status: number, message = '') { super(message); }
 }
 
+/** A `Content-Type` header's media type, lowercased, without parameters. */
+export const mediaType = (header: string): string => header.split(';')[0].trim().toLowerCase();
+
+/** A POST's JSON body: 415 unless its media `type` is `application/json`, 413
+ * past `limit` bytes (as `read` refuses them), 400 unparsable. */
+export async function parseJsonBody(type: string, limit: number, read: (limit: number) => Promise<Uint8Array>): Promise<unknown> {
+  if (type !== 'application/json') throw new HttpError(415);
+  const bytes = await read(limit);
+  try { return JSON.parse(new TextDecoder('utf-8', { ignoreBOM: true }).decode(bytes)); } catch { throw new HttpError(400); }
+}
+
 /** The headers every viewer response carries, under its page's `csp`. */
 export function viewerHeaders(csp: string): Record<string, string> {
   return {

@@ -20,6 +20,8 @@ Without a title, a viewer's header falls back to its running command, `dor __vie
 
 MDXEditor 4.3 parses `<!-- … -->` and discards it, and trims and re-serializes the whole document on export; without the comment node and style detection, saving a typical README after a one-word edit deleted its comments and rewrote every `-` bullet as `*` (measured 2026-10).
 
+Image sizes live in the document because GitHub shows an `<img>` without a `width` pixel for pixel: a Retina screenshot shown here at its recorded scale but left unsized in the file came out twice as large on GitHub. Writing the width on paste, and rescaling it when the image editor crops or resizes the file, keeps the two renderings alike (2026-10).
+
 Mermaid stays on 11: 12 makes its ELK layout (a 1.4 MB elkjs chunk) the default and restyles state diagrams, so diagrams would look different here than in renderers on dagre and the classic look; 12.0 was also three weeks old (2026-10).
 
 The page keeps `'unsafe-inline'` scripts because the host injects its iframe shim inline (`docs/specs/theme.md` → Tool iframe themes), so the CSP alone does not stop inline event handlers. MDXEditor's stock `GenericHTMLNode` copies every document attribute onto a live element, and its image export builds an `<img>` with the document's attributes in the live document, where a `srcset` loads and fires `onerror`; both ran document script in Chromium (2026-10) with the page's save and paste routes in reach.

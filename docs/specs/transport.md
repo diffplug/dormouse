@@ -71,7 +71,7 @@ Source of truth: `pacedInputSegments` and `write` in `standalone/sidecar/pty-cor
 
 **Must advertise the lowest iTerm2 version that unlocks every version-gated behavior Dormouse supports, and never a version adding sequences that programs would then send and Dormouse mishandles** (rationale). **Never advertise** feature-specific support before the behavior exists.
 
-**Must strip another terminal's identity from the inherited environment before setting Dormouse's** — its session, version, and multiplexer variables (rationale).
+**Must strip another terminal's identity from the inherited environment before setting Dormouse's** — its session, version, and multiplexer variables, and a launching Claude Code session's markers (rationale).
 
 Source of truth: `ITERM2_COMPAT_VERSION` in `standalone/sidecar/pty-core.js` and `lib/src/lib/terminal-protocol.ts`, pinned together by `lib/src/lib/mirrored-constants.test.ts`; `FOREIGN_TERMINAL_ENV` in `standalone/sidecar/pty-core.js`.
 
@@ -100,7 +100,7 @@ Source of truth: `lib/src/lib/terminal-report-filter.ts`, pinned by `lib/src/lib
 
 #### Replay-time mode-reset tail (Dormouse-emitted)
 
-**After a *dead* Session's scrollback replays, Dormouse writes the fixed `REPLAY_MODE_RESET` tail**, returning every mode a dead program could leave latched to its default (rationale). **Never on a live resume**, where the running process owns its modes; a cold `restoreTerminal` replays nothing to reset.
+**When a Session's process is gone and its terminal stays — a dead replay, a reap, an exit — Dormouse writes the fixed `REPLAY_MODE_RESET` tail**, returning every mode a dead program could leave latched to its default, before any exit notice (rationale). **Never on a live resume**, where the running process owns its modes; a cold `restoreTerminal` replays nothing to reset.
 
 Source of truth: `REPLAY_MODE_RESET` in `lib/src/lib/terminal-report-filter.ts`.
 

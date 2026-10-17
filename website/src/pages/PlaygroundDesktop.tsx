@@ -133,6 +133,7 @@ function PlaygroundDesktopExperience() {
         mouseStore: mouseSelection,
         themeStore: themes,
         commandStore: registry,
+        pasteStore: fsHost,
         // The active Workspace's policy, the app default under its override,
         // so either switch credits `al-speak`.
         speechStore: {

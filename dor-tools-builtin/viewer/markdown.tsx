@@ -1,75 +1,187 @@
-import { createRef, useMemo, useSyncExternalStore } from 'react';
+import { createRef, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentType, type FC } from 'react';
 import { createRoot } from 'react-dom/client';
-import { flushSync } from 'react-dom';
-import type { LexicalEditor } from 'lexical';
+import { createPortal, flushSync } from 'react-dom';
+import { $getNodeByKey, COMMAND_PRIORITY_HIGH, getNearestEditorFromDOMNode, type LexicalCommand, type LexicalEditor } from 'lexical';
 import { syntaxHighlighting } from '@codemirror/language';
 import { classHighlighter } from '@lezer/highlight';
 import {
-  ImageNode,
+  $isImageNode, createActiveEditorSubscription$, editImageToolbarComponent$, iconComponentFor$, ImageNode, imagePreviewHandler$, INSERT_IMAGE_COMMAND, useCellValue,
   BlockTypeSelect, BoldItalicUnderlineToggles, codeBlockPlugin, codeMirrorPlugin, CodeToggle, CreateLink, diffSourcePlugin,
   DiffSourceToggleWrapper, frontmatterPlugin, headingsPlugin, imagePlugin, InsertCodeBlock, InsertTable, InsertThematicBreak,
   linkDialogPlugin, linkPlugin, listsPlugin, ListsToggle, markdownShortcutPlugin, MDXEditor, quotePlugin, realmPlugin,
-  rootEditor$, Separator, viewMode$, tablePlugin, thematicBreakPlugin, toolbarPlugin, UndoRedo, type MDXEditorMethods, type Realm,
+  rootEditor$, Separator, viewMode$, tablePlugin, thematicBreakPlugin, toolbarPlugin, UndoRedo, type MDXEditorMethods, type MDXEditorProps, type Realm,
 } from '@mdxeditor/editor';
 import '@mdxeditor/editor/style.css';
-import { documentSession, stateLabel, type DocumentState } from './document-session';
-import { imageSources, imageUrl, ImagesPanel } from './images-panel';
+import { checked, documentPage, loadingState, stateLabel, textSource, type DocumentState } from './document-session';
+import { editableImage, handOffImageEdits, imageSources, imageUrl, ImagesPanel, localImagePath, updateImages, type SavedImages } from './images-panel';
+import { ImageOverlay, type Resize } from './image-overlay';
+import { ImageResizeHandles } from './image-resize';
 import { commentsPlugin } from './markdown-comments';
 import { markdownSafetyPlugin } from './markdown-safety';
 import { pageTheme, subscribeTheme } from './page-theme';
 import { mermaidDescriptor } from './mermaid-block';
+import { SaveButton } from './save-button';
+import { Signal } from './signal';
+import { installTooltips } from './tooltip';
+import { rescaledSize } from '../src/image-resolution';
 import './markdown.css';
+
+declare module '@mdxeditor/editor' {
+  /** The command a paste or drop inserts an image node by, with the source
+   * `imageUploadHandler` answered. Exported, but left out of the package's types. */
+  export const INSERT_IMAGE_COMMAND: LexicalCommand<CreateImageNodeParameters>;
+}
 
 // Page state outside React, replaced whole on each change: the session reports
 // into it, the editor's image nodes feed it, and components subscribe.
-let store: { doc: DocumentState; error: string | null; images: string[]; panel: boolean; editor: LexicalEditor | null } =
-  { doc: { loaded: false, dirty: false, saving: false }, error: null, images: [], panel: false, editor: null };
-const listeners = new Set<() => void>();
-const update = (change: Partial<typeof store>) => { store = { ...store, ...change }; for (const listener of listeners) listener(); };
-const subscribe = (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; };
-const usePage = () => useSyncExternalStore(subscribe, () => store);
+// `editing` is the image open in the editor overlay; `saved` holds the
+// revision of each image saved from it.
+let store: { doc: DocumentState; error: string | null; images: string[]; panel: boolean; editor: LexicalEditor | null; editing: string | null; saved: SavedImages } =
+  { doc: loadingState, error: null, images: [], panel: false, editor: null, editing: null, saved: {} };
+const changes = new Signal();
+const update = (change: Partial<typeof store>) => { store = { ...store, ...change }; changes.emit(); };
+const usePage = () => useSyncExternalStore(changes.subscribe, () => store);
 const editorRef = createRef<MDXEditorMethods>();
 let realm: Realm | undefined;
 let loads = 0;
 
+const page = documentPage();
 // The editor trims the document; saves end it with one newline, and the server
 // restores the file's line endings.
-const session = documentSession<string>({
+const session = page.open<string>({
   snapshot() {
     const markdown = editorRef.current!.getMarkdown();
-    return { text: markdown ? `${markdown}\n` : '', mark: markdown };
+    return { content: markdown ? `${markdown}\n` : '', mark: markdown };
   },
   holds: mark => editorRef.current?.getMarkdown() === mark,
   async apply(text) {
     // A reload mounts a fresh editor: its own normalization is then not an edit, and undo starts over.
+    uploadedWidths.clear();
     flushSync(() => root.render(<Page key={++loads} markdown={text.replace(/\r\n?/g, '\n')} />));
     await new Promise(resolve => setTimeout(resolve));
   },
 }, {
-  report(doc) {
-    if (doc.loaded !== store.doc.loaded || doc.dirty !== store.doc.dirty || doc.saving !== store.doc.saving) update({ doc });
-  },
+  report(doc) { update({ doc }); },
   fail(error) { update({ error }); },
-});
+}, textSource);
+
+/** The document's source for the image node `key`, when the image editor can open it. */
+function editablePath(editor: LexicalEditor, key: string): string | null {
+  const path = editor.getEditorState().read(() => { const node = $getNodeByKey(key); return $isImageNode(node) ? localImagePath(node.getSrc()) : null; });
+  return editableImage(path) ? path : null;
+}
+
+/** Opens a PNG or JPEG under the document's folder in the image editor overlay. */
+const editImage = (path: string) => update({ editing: path });
+
+/** After an image save: every display of it loads the new file. When the
+ * save resized it, each reference that states a size keeps its scale, as an
+ * edit; the rest of the document's source stays as it is. It lands before the
+ * image's save resolves (`updateImages`), so the close-prompt save,
+ * which writes the image first, then writes the rescaled document. */
+function refreshImage(path: string, version: string, resize: Resize | null) {
+  update({ saved: { ...store.saved, [path]: version } });
+  // A new handler makes each image node resolve its URL again.
+  realm?.pub(imagePreviewHandler$, async (src: string) => imageUrl(src, store.saved));
+  if (resize && store.editor) updateImages(store.editor, node => {
+    const size = { width: node.getWidth(), height: node.getHeight() };
+    if (localImagePath(node.getSrc()) !== path || (size.width === 'inherit' && size.height === 'inherit')) return;
+    const next = rescaledSize(size, resize.from, resize.to);
+    node.setWidthAndHeight(next.width, next.height);
+  });
+}
+
+let listing = false;
+/** Lists the document's images again, once for however many changes call
+ * this in a task. */
+function refreshImages() {
+  if (listing) return;
+  listing = true;
+  queueMicrotask(() => {
+    listing = false;
+    if (store.editor) update({ images: imageSources(store.editor) });
+  });
+}
+
+/** MDXEditor's own image toolbar (delete, settings), which it does not export; read before `imagePlugin` replaces it. */
+let DefaultImageToolbar: ComponentType<ImageChromeProps> = () => null;
+type ImageChromeProps = { nodeKey: string; imageSource: string; initialImagePath: string | null; title: string; alt: string; width?: number | 'inherit'; height?: number | 'inherit' };
+
+/** What we draw beside each image MDXEditor renders, in place of its image
+ * toolbar: the resize handles, Edit and double-click to open it in the image
+ * editor, then MDXEditor's own buttons. All of it through the image's own
+ * editor: the root's, or a table cell's. */
+function ImageChrome(props: ImageChromeProps) {
+  const iconFor = useCellValue(iconComponentFor$);
+  const ref = useRef<HTMLDivElement>(null);
+  const [editor, setEditor] = useState<LexicalEditor | null>(null);
+  useEffect(() => setEditor(getNearestEditorFromDOMNode(ref.current)), []);
+  const path = editor && editablePath(editor, props.nodeKey);
+  // The images list follows the root editor's own image nodes; a table cell's,
+  // whose editor comes and goes with its table, it follows from here.
+  useEffect(() => {
+    if (!editor || editor === store.editor) return;
+    refreshImages();
+    return refreshImages;
+  }, [editor, props.imageSource]);
+  useEffect(() => editor && editor !== store.editor ? handOffImageEdits(editor, props.nodeKey) : undefined, [editor, props.nodeKey]);
+  useEffect(() => {
+    const wrapper = ref.current?.parentElement;
+    if (!wrapper || !path) return;
+    const open = (event: MouseEvent) => {
+      if (!(event.target instanceof HTMLImageElement)) return;
+      event.preventDefault();
+      editImage(path);
+    };
+    wrapper.addEventListener('dblclick', open);
+    return () => wrapper.removeEventListener('dblclick', open);
+  }, [path]);
+  return (
+    <>
+      <ImageResizeHandles editor={editor} nodeKey={props.nodeKey} keepHeight={typeof props.height === 'number'} />
+      <div ref={ref} className="md-image-toolbar">
+        {path && <button type="button" className="md-image-edit" data-tip="Open in the image editor [double-click]" onClick={() => editImage(path)}>{iconFor('edit')}</button>}
+        <DefaultImageToolbar {...props} />
+      </div>
+    </>
+  );
+}
+
+/** The width each uploaded image's node is inserted at, by the source
+ * `upload` answered, until its insertion takes it. */
+const uploadedWidths = new Map<string, number>();
 
 const capture = realmPlugin({
-  init(r) { realm = r; },
+  init(r) {
+    realm = r;
+    const toolbar = r.getValue(editImageToolbarComponent$) as ComponentType<ImageChromeProps>;
+    if (toolbar !== ImageChrome) DefaultImageToolbar = toolbar;
+    // Ahead of MDXEditor's own handler, which creates the node from the payload,
+    // so the width comes in the update that inserts it, and one undo removes both.
+    r.pub(createActiveEditorSubscription$, editor => editor.registerCommand(INSERT_IMAGE_COMMAND, payload => {
+      const width = uploadedWidths.get(payload.src);
+      if (width !== undefined) { uploadedWidths.delete(payload.src); payload.width ??= width; }
+      return false;
+    }, COMMAND_PRIORITY_HIGH));
+  },
   postInit(r) {
     const editor = r.getValue(rootEditor$);
     if (!editor) return;
-    const refresh = () => update({ images: imageSources(editor), editor });
     // Only image nodes change the list, so typing does not walk the document.
-    editor.registerMutationListener(ImageNode, refresh, { skipInitialization: true });
-    refresh();
+    editor.registerMutationListener(ImageNode, refreshImages, { skipInitialization: true });
+    update({ editor, images: imageSources(editor) });
   },
 });
 
-/** Sends a pasted or dropped image's bytes; the server names the new file. */
+/** Sends a pasted or dropped image's bytes; the server names the new file,
+ * and gives the width a PNG or JPEG whose header records a scale is inserted
+ * at, so the document shows it at that size everywhere. */
 async function upload(file: File): Promise<string> {
   try {
-    const response = await fetch('image', { method: 'POST', headers: { 'Content-Type': file.type }, body: file });
-    if (!response.ok) throw new Error(await response.text() || `Request failed (${response.status})`);
-    return (await response.json()).name;
+    const response = await checked(await fetch('image', { method: 'POST', headers: { 'Content-Type': file.type }, body: file }));
+    const { name, width }: { name: string; width: number | null } = await response.json();
+    if (width !== null) uploadedWidths.set(name, width);
+    return name;
   } catch (reason) { session.fail(reason); throw reason; }
 }
 
@@ -78,9 +190,9 @@ function Controls() {
   return (
     <div className="controls">
       <span className="state" role="status">{stateLabel(doc)}</span>
-      <button type="button" aria-pressed={panel} title="List and rename this document's images" onClick={() => update({ panel: !panel })}>Images{images.length ? ` (${images.length})` : ''}</button>
-      <button type="button" title="Reload from disk" onClick={() => void session.reload()}>Reload</button>
-      <button type="button" className="save" disabled={!doc.loaded || !doc.dirty || doc.saving} title="Save [Cmd/Ctrl+S]" onClick={() => void session.save()}>Save</button>
+      <button type="button" aria-pressed={panel} data-tip="List and rename this document's images" onClick={() => update({ panel: !panel })}>Images{images.length ? ` (${images.length})` : ''}</button>
+      <button type="button" data-tip="Reload from disk" onClick={() => void session.reload()}>Reload</button>
+      <SaveButton className="save" state={doc} onSave={() => void session.save()} />
     </div>
   );
 }
@@ -101,12 +213,14 @@ function Toolbar() {
 // Stable `tok-*` classes on code tokens, colored per theme in markdown.css.
 const tokenClasses = [syntaxHighlighting(classHighlighter)];
 
+// `imagePlugin` types `EditImageToolbar` without the props it passes.
+// `capture()` comes before `imagePlugin()`, so it reads MDXEditor's own image toolbar first.
 const plugins = [
   capture(), markdownSafetyPlugin(), commentsPlugin(),
   headingsPlugin(), listsPlugin(), quotePlugin(), thematicBreakPlugin(), linkPlugin(), linkDialogPlugin(),
   // Unpadded tables: padding to aligned columns rewrites every row of a table when one cell changes.
   tablePlugin({ tablePipeAlign: false }), frontmatterPlugin(), markdownShortcutPlugin(),
-  imagePlugin({ imageUploadHandler: upload, imagePreviewHandler: async src => imageUrl(src), disableImageResize: true }),
+  imagePlugin({ imageUploadHandler: upload, imagePreviewHandler: async src => imageUrl(src, store.saved), disableImageResize: true, allowSetImageDimensions: true, EditImageToolbar: ImageChrome as FC }),
   codeBlockPlugin({ defaultCodeBlockLanguage: '', codeBlockEditorDescriptors: [mermaidDescriptor] }),
   codeMirrorPlugin({ codeBlockLanguages: {
     '': 'Plain text', sh: 'Shell', bash: 'Bash', js: 'JavaScript', jsx: 'JSX', ts: 'TypeScript', tsx: 'TSX', json: 'JSON',
@@ -126,34 +240,53 @@ function markdownStyle(markdown: string) {
   return { bullet, rule: count(/^\*{3,}[ \t]*$/gm) > count(/^-{3,}[ \t]*$/gm) ? '*' as const : '-' as const };
 }
 
-function Page({ markdown }: { markdown: string }) {
+// The editor's own reformatting of loaded text is not an edit.
+const onEditorChange: MDXEditorProps['onChange'] = (_, normalize) => { if (normalize) session.rebase(); else session.changed(); };
+const onEditorError: MDXEditorProps['onError'] = ({ error: reason }) => {
+  realm?.pub(viewMode$, 'source');
+  session.fail(`Showing source: the rich editor cannot parse this file (${reason}).`);
+};
+const closeImage = () => { update({ editing: null }); editorRef.current?.focus(); };
+
+/** The rich editor; it follows only the theme, so page state changes leave it be. */
+function Editor({ markdown }: { markdown: string }) {
   const theme = useSyncExternalStore(subscribeTheme, pageTheme);
-  const { error, images, panel, editor } = usePage();
   const style = useMemo(() => markdownStyle(markdown), [markdown]);
   return (
+    <MDXEditor ref={editorRef} markdown={markdown} plugins={plugins} toMarkdownOptions={style}
+      className={theme.dark ? 'dark-theme' : 'light-theme'} contentEditableClassName="prose" spellCheck
+      onChange={onEditorChange} onError={onEditorError} />
+  );
+}
+
+function ErrorBanner() {
+  const { error } = usePage();
+  return error ? <div className="error" role="alert">{error}</div> : null;
+}
+
+/** The images panel, hung in the editor's content box: under the toolbar
+ * however it wraps, and under an error. */
+function Panel({ editor }: { editor: LexicalEditor }) {
+  const { images, saved } = usePage();
+  const content = editor.getRootElement()?.closest('.mdxeditor-diff-source-wrapper');
+  return content ? createPortal(<ImagesPanel editor={editor} sources={images} saved={saved} onEdit={editImage} />, content) : null;
+}
+
+/** The images panel and the image editor overlay, above the editor. */
+function Overlays() {
+  const { panel, editor, editing } = usePage();
+  return (
     <>
-      {error && <div className="error" role="alert">{error}</div>}
-      <MDXEditor
-        ref={editorRef}
-        markdown={markdown}
-        plugins={plugins}
-        toMarkdownOptions={style}
-        className={theme.dark ? 'dark-theme' : 'light-theme'}
-        contentEditableClassName="prose"
-        spellCheck
-        onChange={(_, normalize) => {
-          // The editor's own reformatting of loaded text is not an edit.
-          if (normalize) session.rebase(); else session.changed();
-        }}
-        onError={({ error: reason }) => {
-          realm?.pub(viewMode$, 'source');
-          session.fail(`Showing source: the rich editor cannot parse this file (${reason}).`);
-        }}
-      />
-      {panel && editor && <ImagesPanel editor={editor} sources={images} />}
+      {panel && editor && <Panel editor={editor} />}
+      {editing && <ImageOverlay key={editing} path={editing} page={page} onSaved={refreshImage} onClose={closeImage} />}
     </>
   );
 }
 
+function Page({ markdown }: { markdown: string }) {
+  return <><ErrorBanner /><Editor markdown={markdown} /><Overlays /></>;
+}
+
+installTooltips();
 const root = createRoot(document.getElementById('root')!);
 void session.load();

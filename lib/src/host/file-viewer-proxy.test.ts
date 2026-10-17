@@ -81,7 +81,7 @@ it.each(['readme.txt', 'readme.md'])('retains the policy and separates source da
 it.each([
   ['image.svg', '<svg xmlns="http://www.w3.org/2000/svg"/>', 'image/svg+xml'],
   ['sound.wav', 'RIFF example bytes', 'audio/wav'],
-  ['readme.png', 'image bytes', 'image/png'],
+  ['readme.gif', 'image bytes', 'image/gif'],
   ['video.mp4', 'video bytes', 'video/mp4'],
 ])('retains CSP, bytes, HEAD, and ranges for %s through the proxy', async (name, bytes, mime) => {
   const url = await frame(name, bytes);

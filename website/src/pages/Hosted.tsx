@@ -43,6 +43,8 @@ import {
   FOUNDING_COHORT_SIZE,
   HOSTED_MONTHLY,
   HOSTED_YEARLY,
+  LIST_ANNUAL,
+  LIST_MONTHLY,
   YEARLY_SAVING,
   foundingTier,
   pricingJsonLd,
@@ -63,7 +65,7 @@ export function meta({ location }: MetaArgs) {
     title: "Dormouse Hosted",
     description:
       "The terminal is free. Dormouse Hosted adds a managed Relay for Pocket and managed voices "
-      + "for spoken alarms — from $10 a month, with founding prices while they last.",
+      + `for spoken alarms — from $${LIST_MONTHLY} a month, with founding prices while they last.`,
   });
 }
 
@@ -479,8 +481,8 @@ export default function Hosted() {
         </div>
 
         <p className={`mt-5 text-sm ${MUTED_TEXT_CLASS}`}>
-          The founding price rises as each cohort of 100 sells out, and founding closes for
-          good at the $100 list price. Whatever you paid stays locked. For team and enterprise
+          The founding price rises as each cohort of {FOUNDING_COHORT_SIZE} sells out, and founding
+          closes for good at the ${LIST_ANNUAL} list price. Whatever you paid stays locked. For team and enterprise
           plans, email <a href={`mailto:${SUPPORT_EMAIL}`} className={LINK_CLASS}>{SUPPORT_EMAIL}</a>.
         </p>
       </section>

@@ -147,6 +147,13 @@ const FOREIGN_TERMINAL_ENV = new RegExp(`^(?:${[
   'GHOSTTY_SHELL_FEATURES', 'WEZTERM_.*', 'ALACRITTY_WINDOW_ID', 'ALACRITTY_SOCKET', 'ALACRITTY_LOG',
   'TERMINAL_EMULATOR', 'TERMINATOR_UUID', 'TILIX_ID', 'TMUX', 'TMUX_PANE', 'STY', 'COLORFGBG',
   'CURSOR_TRACE_ID',
+  // A launching Claude Code session's markers: a claude in the pane would take
+  // itself for that session's child, whose transcript saving is off, and every
+  // pane program would hold its messaging token. Settings such as
+  // CLAUDE_CODE_USE_BEDROCK are not markers and pass through.
+  'CLAUDECODE', 'CLAUDE_PID', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_EXECPATH',
+  'CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_CHILD_SESSION', 'CLAUDE_CODE_SESSION_ATTENDED',
+  'CLAUDE_CODE_MESSAGING_SOCKET', 'CLAUDE_CODE_MESSAGING_TOKEN',
 ].join('|')})$`);
 const FOREIGN_TERMINAL_ENV_WIN32 = new RegExp(FOREIGN_TERMINAL_ENV.source, 'i');
 

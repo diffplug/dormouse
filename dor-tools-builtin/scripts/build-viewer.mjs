@@ -8,8 +8,9 @@ const absWorkingDir = fileURLToPath(new URL('../', import.meta.url));
 // these assets from a checkout where dor-tools-lib has no dist yet.
 const alias = { 'dor-tools-lib': fileURLToPath(new URL('../../dor-tools-lib/src', import.meta.url)) };
 
-/** Bundles the Monaco and Markdown pages' assets into `outdir`, which
- * `viewerAsset` serves by name; the website playground builds its own copy. */
+/** Bundles the Monaco, Markdown, and image pages' assets, and the folder
+ * viewer's tooltip, into `outdir`, which `viewerAsset` serves by name; the
+ * website playground builds its own copy. */
 export async function buildViewerAssets(outdir) {
   // Chunk names carry content hashes; a stale one would still be served.
   await rm(outdir, { recursive: true, force: true });
@@ -28,6 +29,21 @@ export async function buildViewerAssets(outdir) {
       target: 'es2022', minify: true, jsx: 'automatic', chunkNames: 'markdown-[hash]',
       loader: { '.ttf': 'file', '.woff': 'file', '.woff2': 'file' }, assetNames: 'markdown-[name]-[hash]',
       define: { 'process.env.NODE_ENV': '"production"' },
+    }),
+    // The image editor: `image.js` and `image.css`, no chunks, and its PNG
+    // encoder's worker, `image.worker.js`.
+    build({
+      absWorkingDir,
+      entryPoints: { image: 'viewer/image/main.tsx', 'image.worker': 'viewer/image/png-worker.ts' },
+      outdir, bundle: true, format: 'esm', platform: 'browser', alias,
+      target: 'es2022', minify: true, jsx: 'automatic',
+      define: { 'process.env.NODE_ENV': '"production"' },
+    }),
+    // The folder viewer's tooltip, a classic script: `tooltip.js` and `tooltip.css`.
+    build({
+      absWorkingDir,
+      entryPoints: { tooltip: 'viewer/tooltip-page.ts' },
+      outdir, bundle: true, format: 'iife', platform: 'browser', target: 'es2022', minify: true,
     }),
   ]);
 }

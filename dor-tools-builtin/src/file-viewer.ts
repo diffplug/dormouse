@@ -2,26 +2,35 @@ import { realpath, type FileHandle } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { basename, dirname, relative, resolve, sep } from 'node:path';
 import { stateSequence } from 'dor-tools-lib/osc';
-import { fileViewerFormat, type FileFormat } from './file-viewer-format.js';
-import { announceViewer, contentType, HttpError, isInsideRoot, openRegularFile, pathSegments, readBody, readJsonBody, reply, startCapabilityViewer } from './viewer-server.js';
-import { EDITOR_CSP, editorPage, markdownPage } from './editor-page.js';
-import { IMAGE_LIMIT, openImage, renameImage, writePastedImage } from './markdown-images.js';
-import { readEditableFile, readUpTo, saveEditableFile, TEXT_LIMIT } from './editable-file.js';
+import { editableImageType, fileViewerFormat, type FileFormat } from './file-viewer-format.js';
+import { announceViewer, contentType, HttpError, isInsideRoot, openRegularFile, pathSegments, readBody, reply, startCapabilityViewer } from './viewer-server.js';
+import { EDITOR_CSP } from './editor-page.js';
+import { editorKind, editorRoutes, imagesRoute, storePath, TEXT_BOUND } from './editor-routes.js';
+import { openImage } from './markdown-images.js';
+import { readUpTo } from './editable-file.js';
+import { editorStore } from './editor-store.js';
 import { viewerAsset } from './viewer-assets.js';
+import { IMAGE_CSP } from './image-format.js';
+import { EDITABILITY_HEAD, imageEditability } from './image-editability.js';
 
 const ASSET_LIMIT = 256;
 const CHUNK = 64 * 1024;
 const CSP = "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self'; font-src 'self'; connect-src 'self'; frame-src 'self'; object-src 'self'; base-uri 'self'; form-action 'none'";
-// An image the Markdown editor shows can be opened directly; it never runs as a document there.
-const IMAGE_CSP = "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'";
 type Resource = { file: FileHandle; mime: string };
 /** A bound on the grant itself: fatal even when reached through an optional asset. */
 class ViewerLimitError extends Error {}
 
 async function textSize(file: FileHandle): Promise<number> {
   const { size } = await file.stat();
-  if (size > TEXT_LIMIT) throw new ViewerLimitError('text preview exceeds 8 MiB; configure a Tool for this file');
+  if (size > TEXT_BOUND.limit) throw new ViewerLimitError('text preview exceeds 8 MiB; configure a Tool for this file');
   return size;
+}
+
+/** The first `EDITABILITY_HEAD` bytes of `file`, which is `size` long. */
+async function head(file: FileHandle, size: number): Promise<Uint8Array> {
+  const bytes = Buffer.allocUnsafe(Math.min(size, EDITABILITY_HEAD));
+  const { bytesRead } = await file.read(bytes, 0, bytes.length, 0);
+  return bytes.subarray(0, bytesRead);
 }
 
 async function readText(file: FileHandle): Promise<string> {
@@ -135,69 +144,42 @@ export async function startFileViewer(input: string, { onDirty = () => {}, forma
   try {
     const main = await register(target, true);
     if (!main) throw new Error('not a supported regular file');
-    if (format.text) await textSize(main.file); // fail oversized text before announcing
-    let saving = false;
-    const viewer = await startCapabilityViewer({ csp: format.text ? EDITOR_CSP : CSP, post: format.text, chunked: true, unavailable: 'File preview unavailable', release: closeFiles,
+    // Fails oversized text before announcing; a PNG or JPEG the editor leaves
+    // view-only streams (docs/specs/dor-tools-builtin.md -> Image editor).
+    const size = format.text ? await textSize(main.file) : (await main.file.stat()).size;
+    const kind = editorKind(format, editableImageType(target) ? imageEditability(size, await head(main.file, size)) : null);
+    const editable = !!kind;
+    const editor = kind && editorRoutes({ kind, file: storePath(target), name: basename(target), store: editorStore(root), onDirty });
+    const viewer = await startCapabilityViewer({ csp: editable ? EDITOR_CSP : CSP, post: editable, chunked: true, unavailable: 'File preview unavailable', release: closeFiles,
       route: async (req, res, prefix) => {
         let route: string;
-        try { route = decodeURIComponent(new URL(req.url!, 'http://localhost').pathname.slice(prefix.length)); }
+        const url = new URL(req.url!, 'http://localhost');
+        try { route = decodeURIComponent(url.pathname.slice(prefix.length)); }
         catch { throw new HttpError(400); }
         if (!pathSegments(route)) throw new HttpError(403);
-        if (req.method === 'POST') {
-          if (format.markdown && route === 'image') {
-            // The image's own bytes, typed by Content-Type.
-            const bytes = await readBody(req, IMAGE_LIMIT, 'Pasted images are limited to 32 MiB.');
-            reply(res, 200, JSON.stringify({ name: await writePastedImage(root, contentType(req), bytes) }), 'application/json');
-            return;
-          }
-          if (format.markdown && route === 'rename') {
-            const data = await readJsonBody(req, 64 * 1024) as { from?: unknown; to?: unknown } | null;
-            if (typeof data?.from !== 'string' || typeof data?.to !== 'string') throw new HttpError(400);
-            await renameImage(root, data.from, data.to);
-            reply(res, 200, '{}', 'application/json');
-            return;
-          }
-          if (!format.text || (route !== 'save' && route !== 'state')) throw new HttpError(404);
-          // JSON escapes a byte as at most six (`\u00XX`).
-          const data = await readJsonBody(req, TEXT_LIMIT * 6 + 1024) as { dirty?: unknown; text?: unknown; version?: unknown } | null;
-          if (route === 'state') {
-            if (typeof data?.dirty !== 'boolean') throw new HttpError(400);
-            onDirty(data.dirty);
-            reply(res, 200, '{}', 'application/json');
-            return;
-          }
-          if (typeof data?.text !== 'string' || typeof data?.version !== 'string') throw new HttpError(400);
-          if (saving) throw new HttpError(409, 'Another save is in progress.');
-          saving = true;
-          try { reply(res, 200, JSON.stringify(await saveEditableFile(target, data.text, data.version)), 'application/json'); }
-          finally { saving = false; }
+        const answer = await editor?.({ method: req.method!, route, query: url.searchParams, contentType: contentType(req), body: bound => readBody(req, bound.limit, bound.message) });
+        if (answer) {
+          for (const [name, value] of Object.entries(answer.headers ?? {})) res.setHeader(name, value);
+          reply(res, 200, answer.body, answer.type);
           return;
         }
-        if (format.text && route.startsWith('assets/')) {
+        if (editable && route.startsWith('assets/')) {
           const asset = await viewerAsset(route.slice('assets/'.length));
           reply(res, 200, asset.bytes, asset.mime);
           return;
         }
-        if (format.text && route === 'source') {
-          const { text, version } = await readEditableFile(target);
-          reply(res, 200, JSON.stringify({ text, version, name: basename(target) }), 'application/json');
-          return;
-        }
-        if (route === 'view' && format.text) {
-          reply(res, 200, (format.markdown ? markdownPage : editorPage)(basename(target)), 'text/html; charset=utf-8');
-          return;
-        }
         const resource = resources.get(route);
         if (resource) { await stream(req, res, resource); return; }
-        if (!format.markdown || !route.startsWith('images/')) throw new HttpError(404);
-        const image = await openImage(root, route.slice('images/'.length));
+        const segments = imagesRoute(kind, route);
+        if (!segments) throw new HttpError(404);
+        const image = await openImage(root, segments);
         try {
           res.setHeader('Content-Security-Policy', IMAGE_CSP);
           await stream(req, res, image);
         } finally { await image.file.close(); }
       },
     });
-    return { port: viewer.port, path: `${viewer.prefix}${format.text ? 'view' : `file/${encodeURIComponent(basename(target))}`}`, target, editable: format.text, close: viewer.close };
+    return { port: viewer.port, path: `${viewer.prefix}${editable ? 'view' : `file/${encodeURIComponent(basename(target))}`}`, target, editable, close: viewer.close };
   } catch (error) { await closeFiles(); throw error; }
 }
 

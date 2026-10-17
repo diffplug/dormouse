@@ -21,6 +21,7 @@ const KEYBOARD_ITEM_IDS = [
 const DOR_OPEN_ITEM_IDS = [
   "op-config",
   "op-markdown",
+  "op-paste",
   "op-folder",
   "op-preview",
   "op-pick",
@@ -216,7 +217,12 @@ export const DESKTOP_SECTIONS: readonly Section[] = [
       {
         id: 'op-markdown',
         title: 'Open `README.md`',
-        hint: 'Run `dor open README.md`; Markdown opens in the Markdown editor. This playground cannot save.',
+        hint: 'Run `dor open README.md`; Markdown opens in the Markdown editor.',
+      },
+      {
+        id: 'op-paste',
+        title: 'Paste a screenshot into `README.md`',
+        hint: 'Copy a screenshot, click into the open `README.md`, and press `Cmd/Ctrl + V`. Double-click the image, or click the pencil on its toolbar, to mark it up. Changes here last until you refresh.',
       },
       {
         id: 'op-folder',

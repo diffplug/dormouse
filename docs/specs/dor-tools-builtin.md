@@ -1,13 +1,13 @@
 # Built-in Tools
 
 > - See `docs/specs/glossary.md` for Surface / Session / Pane vocabulary.
-> - Owns the built-in Tools — `builtin:file` (the local-file viewer and its text and Markdown editors), `builtin:code` (the source editor), and `builtin:folder` — and their runtime package launched through `dor`. `dor open` dispatch, the Preview slot, OSC 367, and close consent belong to `docs/specs/dor-tool.md`; the listeners' audited rules to `docs/specs/security-local.md` → Local-file viewer.
+> - Owns the built-in Tools — `builtin:file` (the local-file viewer and its text, Markdown, and image editors), `builtin:code` (the source editor), and `builtin:folder` — and their runtime package launched through `dor`. `dor open` dispatch, the Preview slot, OSC 367, and close consent belong to `docs/specs/dor-tool.md`; the listeners' audited rules to `docs/specs/security-local.md` → Local-file viewer.
 
 ## Packaging
 
 - **Must bundle the viewers and their runtime dependencies into `dist/runtime.js` in `dor-tools-builtin`**, without workspace or installed-package resolution at runtime.
 - **Must stage the runtime and its adjacent `viewer` assets together under `dor/dist/builtin`**. Both hosts copy that tree with the CLI.
-- **Must keep `file-viewer-format` and the page builders (`editor-page`, `folder-viewer-page`, `error-viewer-page`) with their CSPs and `viewer-http` free of Node runtime dependencies**: lib's renderer and host modules import the first, the website playground serves the pages (`docs/specs/tutorial.md` → Playground filesystem), and every build of lib source maps `dor-tools-builtin/*` to this package's `src`, as it maps `dor/*`. `dor-tools-builtin/test/browser-shared.test.mjs` bundles them for a browser.
+- **Must keep `file-viewer-format`, the page builders (`editor-page`, `folder-viewer-page`, `error-viewer-page`) with their CSPs, and `editor-routes` with its imports free of Node runtime dependencies**: lib's renderer and host modules import the first, the website playground serves the pages and answers the editor routes (`docs/specs/tutorial.md` → Playground filesystem), and every build of lib source maps `dor-tools-builtin/*` to this package's `src`, as it maps `dor/*`. `dor-tools-builtin/test/browser-shared.test.mjs` bundles them for a browser.
 - **Must load the runtime only for valid `__view-*` invocations, in the launcher's process**; other CLI commands never load the viewer implementation.
 - **Must speak the Tool protocol through `dor-tools-lib`** (`docs/specs/dor-tools-lib.md`).
 
@@ -23,7 +23,7 @@ Source of truth: `dor-tools-builtin/scripts/build.mjs`; `dor/scripts/stage-built
 
 **Must require a user Tool for PDFs**, including files named `README.pdf`. (rationale)
 
-**Must retain media/HTML grant descriptors until the Tool exits.** Refresh reads those files again; replacements and dependency-graph changes require restarting. Text editing follows [Editing files](#editing-files). **Must report a view that cannot be edited clean as it starts**, so closing it asks nothing (`docs/specs/reopen.md` → "Reopenable kinds"). Cold restore creates a fresh URL capability; Workspace movement keeps the live binding.
+**Must retain media/HTML grant descriptors until the Tool exits.** Refresh reads those files again; replacements and dependency-graph changes require restarting. Editing follows [Editing files](#editing-files) and [Image editor](#image-editor). **Must report a view it cannot edit clean as it starts**, so closing it asks nothing (`docs/specs/reopen.md` → "Reopenable kinds"). Cold restore creates a fresh URL capability; Workspace movement keeps the live binding.
 
 Source of truth: `runFileViewer` in `dor-tools-builtin/src/file-viewer.ts`; `fileViewerFormat` in `dor-tools-builtin/src/file-viewer-format.ts`. Tests: `dor-tools-builtin/test/file-viewer.test.mjs`.
 
@@ -37,7 +37,7 @@ Source of truth: `runFileViewer` in `dor-tools-builtin/src/file-viewer.ts`; `fil
 
 **Must report dirty state immediately to the containing iframe and in order through OSC 367** (`docs/specs/dor-tool.md` → Unsaved changes), and answer the host's iframe save channel (`docs/specs/dor-tool.md` → Closing unsaved Tools).
 
-Source of truth: `saveEditableFile` in `dor-tools-builtin/src/editable-file.ts`; `dor-tools-builtin/viewer/editor.ts`. Tests: `dor-tools-builtin/test/atomic-save.test.mjs`.
+Source of truth: `saveText` / `StorePath` in `dor-tools-builtin/src/editor-routes.ts`; `replaceEditable` in `dor-tools-builtin/src/editable-file.ts`; `dor-tools-builtin/viewer/editor.ts`. Tests: `dor-tools-builtin/test/atomic-save.test.mjs`.
 
 ## Markdown editor
 
@@ -47,10 +47,23 @@ Source of truth: `saveEditableFile` in `dor-tools-builtin/src/editable-file.ts`;
 - **Must keep HTML comments verbatim and save with one final newline, the file's majority bullet and thematic-break marker, and unpadded tables**; the rest follows MDXEditor's serialization. Its normalization of loaded text is not an edit (rationale).
 - **Never let document HTML reach the live DOM outside an allowlist** of tags and attributes, `href` limited to `http(s):`, `mailto:`, fragments, and scheme-less paths; saving keeps every original attribute, escaped, and HTML images serialize in an inert document. Mermaid diagrams are the one other path, under mermaid's own sanitizer (`docs/specs/security-local.md` → "Local-file viewer"; rationale).
 - **Must serve images on request from regular image-format files at or under the document's canonical directory**, by realpath, under a `sandbox` CSP. Nothing else loads, external URLs included.
+- **Never show an image at a size the document does not state**: unsized, it shows pixel for pixel, within the column. A pasted or dropped PNG or JPEG with a recorded scale goes in at its pixel width over that scale (rationale).
 - **Must write a pasted or dropped PNG, JPEG, GIF, or WebP beside the document as a new file**, signature-checked, at most 32 MiB, never replacing a file; its reference is an unsaved edit.
 - **Must rename a listed image on disk at once**, to an image name in its own directory not starting with `.`, never replacing another file (case-only renames allowed); rewritten references are an unsaved edit.
+- **Must edit a PNG or JPEG in the [Image editor](#image-editor) over the document** where the grant may replace it (`docs/specs/security-local.md` → "Local-file viewer"); a save that changes its pixel size rescales each width and height the document states for it, per axis, as an unsaved edit.
+- **Must report the Tool dirty while the document or open image is unsaved**, and the close-prompt save writes both.
 
-Source of truth: `dor-tools-builtin/viewer/markdown.tsx`; `safeCreateDOM` in `dor-tools-builtin/viewer/markdown-safety.ts`; `dor-tools-builtin/src/markdown-images.ts`. Tests: `dor-tools-builtin/test/markdown-editor.test.mjs`.
+Source of truth: `dor-tools-builtin/viewer/markdown.tsx`; `safeCreateDOM` in `dor-tools-builtin/viewer/markdown-safety.ts`; `editorRoutes` in `dor-tools-builtin/src/editor-routes.ts`; `dor-tools-builtin/src/markdown-images.ts`. Tests: `dor-tools-builtin/test/markdown-editor.test.mjs`.
+
+## Image editor
+
+`builtin:file` edits PNG and JPEG, alone or over a [Markdown document](#markdown-editor).
+
+- **Must leave a PNG or JPEG past 32 MiB or 2²⁶ pixels, or an animated, HDR, or narrow-range PNG, view-only**, judged from its header before decoding.
+- **Must save the submitted bytes unchanged, within 32 MiB**, under the revision, identity, permission, and replacement rules of [Editing files](#editing-files).
+- **Must re-encode untouched PNG pixels exactly**, at 8 bits per channel, keeping the recorded resolution and the source's color metadata except a non-RGB ICC profile: verbatim in its own format, across formats only an RGB profile, converted. EXIF is dropped, pixels written upright.
+
+Source of truth: `editorRoutes` in `dor-tools-builtin/src/editor-routes.ts`; `imageEditability` in `dor-tools-builtin/src/image-editability.ts`; `decodeImage` / `encodeImage` in `dor-tools-builtin/viewer/image/io.ts`. Tests: `dor-tools-builtin/test/image-codec.test.mjs`.
 
 ## Code editor
 
