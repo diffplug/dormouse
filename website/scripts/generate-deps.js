@@ -158,10 +158,11 @@ const externalReleases = [];
 const visitedExternalPackagePaths = new Set();
 const visitedWorkspacePackageNames = new Set();
 /**
- * Platform builds read from no `package.json` here, mapped to the siblings they
- * may be described from: a product root's optional dependency this machine
- * cannot install, and the rest of an external package's installed platform
- * family. See docs/specs/security-supply-chain.md -> "Disclosure".
+ * Platform builds read from no `package.json` here, keyed by name and release,
+ * each with the siblings it may be described from: a product root's optional
+ * dependency this machine cannot install, and the rest of an external
+ * package's installed platform family. See
+ * docs/specs/security-supply-chain.md -> "Disclosure".
  */
 const undescribedPackages = new Map();
 /** Every product root's optional dependencies, whose families that root names. */
@@ -173,8 +174,9 @@ const productRootOptionals = new Set(productDependencyFilters.flatMap((name) =>
  * `version` when given; the first section to reach it keeps it.
  */
 function describeLater(packageName, siblings, version) {
-  if (!undescribedPackages.has(packageName)) {
-    undescribedPackages.set(packageName, { section: currentSection, siblings, version });
+  const key = `${packageName}@${version ?? ""}`;
+  if (!undescribedPackages.has(key)) {
+    undescribedPackages.set(key, { packageName, section: currentSection, siblings, version });
   }
 }
 /** Each package's `contributors` (or `authors`), the last resort for its author. */
@@ -253,7 +255,7 @@ for (const section of productSections) {
 // Grouped before the loop writes to `externalReleases`, so nothing is ever
 // described from something that was itself described rather than read.
 const readReleasesByName = Map.groupBy(externalReleases, (release) => release.name);
-for (const [packageName, { section, siblings, version }] of undescribedPackages) {
+for (const { packageName, section, siblings, version } of undescribedPackages.values()) {
   const sibling = siblings
     .map((name) => readReleasesByName.get(name)?.filter((release) => !version || release.version === version))
     .find((releases) => releases?.length);
