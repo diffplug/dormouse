@@ -146,7 +146,7 @@ struct WindowState {
     /// the process lifetime: a save dispatched before `Destroyed` can still
     /// reach the disk lock after it, and labels are never reused in a process.
     closing: Mutex<HashSet<String>>,
-    /// Every window's Workspaces under their stable refs (§Workspace registry).
+    /// Every window's Workspaces under their ids (§Workspace registry).
     registry: Mutex<workspaces::Registry>,
     /// The next window label, Workspace id, and Surface id (§Workspace
     /// registry). Only ever held briefly: a report raising a counter runs on
@@ -203,8 +203,8 @@ fn adopt_ids_file(path: PathBuf, counters: &Mutex<ids::Counters>) -> IdsFile {
     }
 }
 
-/// What Reopen rebuilds a closed window from: the snapshot its webview built
-/// with fresh ids, and where it sat.
+/// What Reopen rebuilds a closed window from: the snapshot its webview left,
+/// under its own ids and marked `reopened`, and where it sat.
 #[derive(Debug, Clone, PartialEq)]
 struct ClosedWindow {
     snapshot: String,

@@ -1416,7 +1416,7 @@ export function useDorControl({
 
         /**
          * Run the resolved Tool in the preview slot in place: interrupt it, then
-         * type the new command at its prompt, keeping its Session id, ref, and
+         * type the new command at its prompt, keeping its Session id and
          * terminal (docs/specs/dor-tool.md -> Preview slot). `adopted` re-runs
          * the slot's own Tool. A newer preview supersedes a preview during the
          * interrupt; an open pins the slot. Answers the request, except when
