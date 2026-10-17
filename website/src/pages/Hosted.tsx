@@ -613,8 +613,10 @@ export default function Hosted({ checkoutOpen = CHECKOUT_OPEN }: { checkoutOpen?
         <AnchoredHeading id="faq" spacing="mt-0 mb-6">Questions</AnchoredHeading>
         <div className="grid gap-5">
           <FaqEntry question="Refunds and cancellation?">
-            Ask within 30 days of your first Hosted payment or any yearly renewal for
-            a full refund. Monthly renewals are outside that voluntary guarantee.
+            Email{" "}
+            <a href={`mailto:${SUPPORT_EMAIL}`} className={LINK_CLASS}>{SUPPORT_EMAIL}</a>{" "}
+            within 30 days of your first Hosted payment or any yearly renewal for a full
+            refund. Monthly renewals are outside that voluntary guarantee.
             All plans auto-renew; cancel any time to stop renewal and keep access through
             the paid period. A full refund ends access. Legal rights still apply; see the{" "}
             <a href={sitePath("/terms") + "#cancellation"} className={LINK_CLASS}>refund terms</a>.
