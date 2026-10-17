@@ -68,17 +68,12 @@ async function hoverTopic(body: Body, name: string) {
 
 async function waitForTopicScroll(section: HTMLElement) {
   const content = section.parentElement!;
-  // Rounded scrollTop can look settled just before the final animation frame.
-  await new Promise((resolve) => setTimeout(resolve, SETTINGS_SCROLL_MS));
-  await waitFor(() => {
-    const desired = content.scrollTop + section.getBoundingClientRect().top - content.getBoundingClientRect().top - TOPIC_GAP_PX;
-    const clamped = Math.max(0, Math.min(desired, content.scrollHeight - content.clientHeight));
-    expect(Math.abs(content.scrollTop - clamped)).toBeLessThan(2);
-  }, { timeout: 2000 });
-  // Settled can still leave the animation's last frame queued, and that frame
-  // re-reads the topic's position: it would undo a play's own later scroll
-  // (`showWatcher`) on some runs and not others. Manual input cancels it.
-  fireEvent.wheel(content);
+  // Wait for the animation's own final frame: a scrollTop near the topic is
+  // not done, and stopping there lands up to a pixel short on some runs.
+  await waitFor(() => expect(content).not.toHaveAttribute('data-topic-scrolling'), { timeout: SETTINGS_SCROLL_MS + 2000 });
+  const desired = content.scrollTop + section.getBoundingClientRect().top - content.getBoundingClientRect().top - TOPIC_GAP_PX;
+  const clamped = Math.max(0, Math.min(desired, content.scrollHeight - content.clientHeight));
+  await expect(Math.abs(content.scrollTop - clamped)).toBeLessThan(1);
 }
 
 const meta: Meta<typeof DialogStory> = {
