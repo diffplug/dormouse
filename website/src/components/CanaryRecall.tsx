@@ -47,8 +47,10 @@ export const dayOf = (at: string) => `${MONTHS[Number(at.slice(5, 7)) - 1]} ${Nu
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 /**
- * Every week the window touches, oldest first, each run bucketed by its UTC
- * time. A week with no run stays in the list, so the x axis keeps time to
+ * The weeks from the first one holding a run in the window through the as-of
+ * week, oldest first, each run bucketed by its UTC time. Weeks before the
+ * first run predate the canary rather than miss it, so they are left off; a
+ * week with no run after it stays in the list, so the x axis keeps time to
  * scale and the line breaks there rather than dropping to zero.
  */
 export function recallWeeks(snapshot: CanaryRecallSnapshot): RecallWeek[] {
@@ -58,7 +60,7 @@ export function recallWeeks(snapshot: CanaryRecallSnapshot): RecallWeek[] {
   ].sort((a, b) => a.at.localeCompare(b.at) || a.url.localeCompare(b.url));
   const asOf = Date.parse(`${snapshot.asOf}T00:00:00Z`);
   const mondays = runs.map((run) => mondayOf(Date.parse(run.at)));
-  const first = Math.min(mondayOf(asOf - snapshot.windowDays * DAY), ...mondays);
+  const first = mondays.length > 0 ? Math.min(...mondays) : mondayOf(asOf - snapshot.windowDays * DAY);
   const last = Math.max(mondayOf(asOf), ...mondays);
   const weeks: RecallWeek[] = [];
   for (let monday = first; monday <= last; monday += WEEK) {
@@ -131,8 +133,8 @@ export function labelsAbove(weeks: RecallWeek[]): boolean[] {
 }
 
 /**
- * The x axis: the window's first week, then each week with a point. A label
- * too close to the one before drops to a second row; past six, every other
+ * The x axis: the first week, then each week with a point. Past six weeks a
+ * label in the slot after the one before drops to a second row; past six, every other
  * one hides on a phone, where they would not fit.
  */
 export function weekTicks(weeks: RecallWeek[]): { start: string; index: number; row: 0 | 1; phone: boolean }[] {
@@ -142,7 +144,7 @@ export function weekTicks(weeks: RecallWeek[]): { start: string; index: number; 
   shown.forEach(({ start, index }, n) => {
     const phone = !crowded || n % 2 === 0;
     const before = ticks[ticks.length - 1];
-    const row: 0 | 1 = before && before.row === 0 && index - before.index < 2 ? 1 : 0;
+    const row: 0 | 1 = weeks.length > 6 && before && before.row === 0 && index - before.index < 2 ? 1 : 0;
     ticks.push({ start, index, row, phone });
   });
   return ticks;

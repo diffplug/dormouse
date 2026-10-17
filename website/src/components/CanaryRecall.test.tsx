@@ -47,18 +47,31 @@ afterEach(() => {
 });
 
 describe("recallWeeks", () => {
-  it("buckets every run by its UTC week, Monday to Sunday, across the whole window", () => {
+  it("buckets every run by its UTC week, Monday to Sunday, from the first run's week through the as-of week", () => {
     const weeks = recallWeeks(SNAPSHOT);
-    // Jul 19, 90 days before Oct 17, is in the week of Jul 13.
-    expect(weeks.map((w) => w.start)).toEqual([
-      "2026-07-13", "2026-07-20", "2026-07-27", "2026-08-03", "2026-08-10", "2026-08-17", "2026-08-24",
-      "2026-08-31", "2026-09-07", "2026-09-14", "2026-09-21", "2026-09-28", "2026-10-05", "2026-10-12",
-    ]);
+    expect(weeks.map((w) => w.start)).toEqual(["2026-09-21", "2026-09-28", "2026-10-05", "2026-10-12"]);
     const byWeek = Object.fromEntries(weeks.map((w) => [w.start, w.runs.map((r) => r.url)]));
     expect(byWeek["2026-10-05"]).toEqual([RUN(2)]);
     expect(byWeek["2026-10-12"]).toEqual([RUN(3), RUN(4), RUN(5)]);
     expect(byWeek["2026-09-28"]).toEqual([RUN(6)]);
-    expect(byWeek["2026-09-14"]).toEqual([]);
+  });
+
+  it("keeps the weeks since the last run, and reaches back to the window's first week once a run is there", () => {
+    // Two weeks without a run after Oct 12 stay on the axis as a gap.
+    const later = recallWeeks({ ...SNAPSHOT, asOf: "2026-10-30" });
+    expect(later.map((w) => [w.start, w.runs.length])).toEqual([
+      ["2026-09-21", 1], ["2026-09-28", 1], ["2026-10-05", 1], ["2026-10-12", 3], ["2026-10-19", 0], ["2026-10-26", 0],
+    ]);
+    // A run with no record counts as a run for where the axis starts.
+    const early = recallWeeks({ ...SNAPSHOT, unrecorded: [...SNAPSHOT.unrecorded, { at: "2026-09-09T12:00:00Z", url: RUN(8) }] });
+    expect(early.map((w) => w.start)).toEqual(["2026-09-07", "2026-09-14", "2026-09-21", "2026-09-28", "2026-10-05", "2026-10-12"]);
+    // Jul 19, 90 days before Oct 17, is in the week of Jul 13.
+    const full = recallWeeks({ ...SNAPSHOT, runs: [...SNAPSHOT.runs, { at: "2026-07-19T06:21:00Z", url: RUN(7), seeded: 8, caught: 8, unfinished: 0 }] });
+    expect(full.map((w) => w.start)).toEqual([
+      "2026-07-13", "2026-07-20", "2026-07-27", "2026-08-03", "2026-08-10", "2026-08-17", "2026-08-24",
+      "2026-08-31", "2026-09-07", "2026-09-14", "2026-09-21", "2026-09-28", "2026-10-05", "2026-10-12",
+    ]);
+    expect(full[9]).toMatchObject({ runs: [], percent: null });
   });
 
   it("buckets the same whatever the reader's time zone", () => {
@@ -75,7 +88,6 @@ describe("recallWeeks", () => {
     expect(week["2026-10-12"]).toMatchObject({ seeded: 16, caught: 14, percent: 88, unfinished: 1, unrecorded: 1 });
     expect(week["2026-10-05"]).toMatchObject({ seeded: 8, caught: 7, percent: 88, unfinished: 0, unrecorded: 0 });
     expect(week["2026-09-28"]).toMatchObject({ seeded: 0, caught: 0, percent: null, unrecorded: 1 });
-    expect(week["2026-09-14"]).toMatchObject({ seeded: 0, caught: 0, percent: null, unrecorded: 0 });
   });
 
   it("covers the same runs as the headline, in no more than fourteen weeks", () => {
@@ -95,7 +107,7 @@ describe("week labels", () => {
     expect(weekLabel(week["2026-10-12"])).toBe("14 of 16*");
     expect(weekLabel(week["2026-09-21"])).toBe("3 of 6");
     expect(weekLabel(week["2026-09-28"])).toBe("no record");
-    expect(weekLabel(week["2026-09-14"])).toBeNull();
+    expect(weekLabel({ ...week["2026-09-28"], runs: [], unrecorded: 0 })).toBeNull();
     expect(weekDescription(week["2026-10-12"])).toBe(
       "Week of Oct 12: caught 14 of 16 over 2 runs (88%); 1 run with a domain that left no finished report; 1 run left no record",
     );
@@ -106,16 +118,17 @@ describe("week labels", () => {
   it("sit away from the line, and flip rather than meet a close neighbour's", () => {
     const sides = labelsAbove(recallWeeks(SNAPSHOT));
     // Sep 21 alone, Sep 28 on the axis, then Oct 5 and Oct 12 level: the second flips.
-    expect(sides.slice(10)).toEqual([true, true, true, false]);
+    expect(sides).toEqual([true, true, true, false]);
   });
 
-  it("name the window's first week and each week with a point, a crowded one on a second row", () => {
-    expect(weekTicks(recallWeeks(SNAPSHOT))).toEqual([
-      { start: "2026-07-13", index: 0, row: 0, phone: true },
-      { start: "2026-09-21", index: 10, row: 0, phone: true },
-      { start: "2026-09-28", index: 11, row: 1, phone: true },
-      { start: "2026-10-05", index: 12, row: 0, phone: true },
-      { start: "2026-10-12", index: 13, row: 1, phone: true },
+  it("name each week with a point, a crowded one on a second row", () => {
+    // Four weeks leave each label its own slot's width.
+    expect(weekTicks(recallWeeks(SNAPSHOT)).map((t) => [t.start, t.index, t.row])).toEqual([
+      ["2026-09-21", 0, 0], ["2026-09-28", 1, 0], ["2026-10-05", 2, 0], ["2026-10-12", 3, 0],
+    ]);
+    const full = recallWeeks({ ...SNAPSHOT, runs: [...SNAPSHOT.runs, { at: "2026-07-19T06:21:00Z", url: RUN(7), seeded: 8, caught: 8, unfinished: 0 }] });
+    expect(weekTicks(full).map((t) => [t.start, t.index, t.row])).toEqual([
+      ["2026-07-13", 0, 0], ["2026-09-21", 10, 0], ["2026-09-28", 11, 1], ["2026-10-05", 12, 0], ["2026-10-12", 13, 1],
     ]);
   });
 });
@@ -131,7 +144,7 @@ describe("CanaryRecall", () => {
     expect(shown).toContain("Monday to Sunday UTC");
     for (const label of ["3 of 6", "no record", "7 of 8", "14 of 16*"]) expect(shown).toContain(label);
     expect(shown).not.toMatch(/\b\d+\/\d+\b/);
-    for (const tick of ["100%", "50%", "0%", "Jul 13", "Oct 12"]) expect(shown).toContain(tick);
+    for (const tick of ["100%", "50%", "0%", "Sep 21", "Oct 12"]) expect(shown).toContain(tick);
     expect(shown).toContain("Hollow: a run that week had a domain");
     expect(shown).toContain("left no record and adds nothing to its week");
     expect(html).toContain(`href="${BASE.runsUrl.replace(/&/g, "&amp;")}"`);
@@ -140,9 +153,9 @@ describe("CanaryRecall", () => {
   it("breaks the line at a week without counts, spacing weeks to time", () => {
     const html = renderToStaticMarkup(<CanaryRecall snapshot={SNAPSHOT} />);
     const lines = [...html.matchAll(/<polyline points="([^"]+)"/g)].map(([, points]) => points);
-    expect(lines).toEqual([`${slot(10, 14)},50`, `${slot(12, 14)},12 ${slot(13, 14)},12`]);
+    expect(lines).toEqual([`${slot(0, 4)},50`, `${slot(2, 4)},12 ${slot(3, 4)},12`]);
     const tops = [...html.matchAll(/style="left:([\d.]+)%;top:([\d.]+)%"/g)].map(([, left, top]) => [Number(left), Number(top)]);
-    expect(tops).toEqual([[slot(10, 14), 50], [slot(11, 14), 100], [slot(12, 14), 12], [slot(13, 14), 12]]);
+    expect(tops).toEqual([[slot(0, 4), 50], [slot(1, 4), 100], [slot(2, 4), 12], [slot(3, 4), 12]]);
   });
 
   it("opens each week's point onto a link to every run, under a description a screen reader reads", () => {
