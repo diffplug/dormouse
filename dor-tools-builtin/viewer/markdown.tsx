@@ -13,7 +13,7 @@ import {
 } from '@mdxeditor/editor';
 import '@mdxeditor/editor/style.css';
 import { checked, documentPage, loadingState, stateLabel, textSource, type DocumentState } from './document-session';
-import { editableImage, imageSources, imageUrl, ImagesPanel, localImagePath, updateImages, type SavedImages } from './images-panel';
+import { editableImage, handOffImageEdits, imageSources, imageUrl, ImagesPanel, localImagePath, updateImages, type SavedImages } from './images-panel';
 import { ImageOverlay, type Resize } from './image-overlay';
 import { ImageResizeHandles } from './image-resize';
 import { commentsPlugin } from './markdown-comments';
@@ -76,17 +76,18 @@ const editImage = (path: string) => update({ editing: path });
 
 /** After an image save: every display of it loads the new file. When the
  * save resized it, each reference that states a size keeps its scale, as an
- * edit; the rest of the document's source stays as it is. */
+ * edit; the rest of the document's source stays as it is. It lands before the
+ * image's save resolves (`updateImages`), so the close-prompt save,
+ * which writes the image first, then writes the rescaled document. */
 function refreshImage(path: string, version: string, resize: Resize | null) {
   update({ saved: { ...store.saved, [path]: version } });
   // A new handler makes each image node resolve its URL again.
   realm?.pub(imagePreviewHandler$, async (src: string) => imageUrl(src, store.saved));
   if (resize && store.editor) updateImages(store.editor, node => {
     const size = { width: node.getWidth(), height: node.getHeight() };
-    if (localImagePath(node.getSrc()) !== path || (size.width === 'inherit' && size.height === 'inherit')) return false;
+    if (localImagePath(node.getSrc()) !== path || (size.width === 'inherit' && size.height === 'inherit')) return;
     const next = rescaledSize(size, resize.from, resize.to);
     node.setWidthAndHeight(next.width, next.height);
-    return true;
   });
 }
 
@@ -123,6 +124,7 @@ function ImageChrome(props: ImageChromeProps) {
     refreshImages();
     return refreshImages;
   }, [editor, props.imageSource]);
+  useEffect(() => editor && editor !== store.editor ? handOffImageEdits(editor, props.nodeKey) : undefined, [editor, props.nodeKey]);
   useEffect(() => {
     const wrapper = ref.current?.parentElement;
     if (!wrapper || !path) return;

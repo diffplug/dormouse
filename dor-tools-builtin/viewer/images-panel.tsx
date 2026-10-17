@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { $getRoot, $isElementNode, getNearestEditorFromDOMNode, type LexicalEditor, type LexicalNode } from 'lexical';
-import { $isImageNode, $isTableNode, NESTED_EDITOR_UPDATED_COMMAND, type ImageNode, type TableNode } from '@mdxeditor/editor';
+import { $isImageNode, $isTableNode, ImageNode, NESTED_EDITOR_UPDATED_COMMAND, type TableNode } from '@mdxeditor/editor';
 import { editableImageType } from '../src/file-viewer-format';
 import { IMAGES_ROUTE } from '../src/image-format';
 import { message, request } from './document-session';
@@ -53,18 +53,26 @@ function $imagesAndTables(): (ImageNode | TableNode)[] {
   return found;
 }
 
-/** Applies `change`, which says whether it changed the node, to every image
- * node of the document `root` edits, its table cells' included. A cell that
- * changed hands its contents to its table at once, as it does when it loses
- * focus, so the document's Markdown has the change. */
-export function updateImages(root: LexicalEditor, change: (node: ImageNode) => boolean): void {
+/** Applies `change` to every image node of the document `root` edits, its
+ * table cells' included, in discrete updates: a cell's change reaches the
+ * document's Markdown before this returns (`handOffImageEdits`). */
+export function updateImages(root: LexicalEditor, change: (node: ImageNode) => void): void {
   for (const editor of [root, ...nestedEditors(root.getRootElement())]) {
-    let changed = false;
     editor.update(() => {
-      for (const node of $imagesAndTables()) if ($isImageNode(node)) changed = change(node) || changed;
+      for (const node of $imagesAndTables()) if ($isImageNode(node)) change(node);
     }, { discrete: true });
-    if (changed && editor !== root) editor.dispatchCommand(NESTED_EDITOR_UPDATED_COMMAND, undefined);
   }
+}
+
+/** Hands table cell `editor`'s contents to its table whenever its image node
+ * `key` changes or goes (a resize, a rename or rescale, MDXEditor's image
+ * dialog or delete), as the cell otherwise does only when it loses focus, so
+ * the document's Markdown has the change at once: within a discrete update's
+ * commit. Returns what stops it. */
+export function handOffImageEdits(editor: LexicalEditor, key: string): () => void {
+  return editor.registerMutationListener(ImageNode, mutations => {
+    if (mutations.has(key)) editor.dispatchCommand(NESTED_EDITOR_UPDATED_COMMAND, undefined);
+  }, { skipInitialization: true });
 }
 
 /** The distinct image sources in the document `root` edits, its table cells'
@@ -101,11 +109,7 @@ function ImageRow({ src, editor, saved, onEdit }: { src: string; editor: Lexical
     try {
       await request('rename', { from: path, to: folder + next });
       const replacement = renamedSource(src, next);
-      updateImages(editor, node => {
-        if (node.getSrc() !== src) return false;
-        node.setSrc(replacement);
-        return true;
-      });
+      updateImages(editor, node => { if (node.getSrc() === src) node.setSrc(replacement); });
       setState({});
     } catch (error) { setState({ error: message(error) }); }
   }

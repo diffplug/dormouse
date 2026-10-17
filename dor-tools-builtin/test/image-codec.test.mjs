@@ -466,6 +466,14 @@ test('only a full-range SDR cICP shows as its space; an HDR or narrow-range PNG 
   assert.match((await decodeImage(new Blob([header([9, 16, 0, 1])]))).viewOnly, /HDR/, 'the page checks again');
 });
 
+test('an animated PNG is view-only, which a save would flatten to its default image', async () => {
+  // acTL: two frames, looping forever.
+  const animated = makePng(4, 4, 8, 2, [], [chunk('acTL', [0, 0, 0, 2, 0, 0, 0, 0])]);
+  assert.match(imageEditability(animated.length, animated).viewOnly, /animated/);
+  assert.match((await decodeImage(new Blob([animated]))).viewOnly, /animated/, 'the page checks again');
+  assert.deepEqual(imageEditability(100, makePng(4, 4, 8, 2, [])), { ok: true });
+});
+
 test('the PNG worker decodes and encodes, handing its buffers back', async () => {
   const sent = [];
   globalThis.self = {};

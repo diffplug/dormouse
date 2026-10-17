@@ -844,19 +844,24 @@ export class EditorController {
         const s = this.seam;
         this.seam = null;
         if (!s || s.from === s.to) return;
-        const shift = (at: number, d: (start: number) => number) => this.doc.objects.map(o => {
-          const b = ob.bounds(o), start = s.axis === 'y' ? b.y : b.x;
-          if (start < at) return o;
-          const amount = d(start);
-          return ob.move(o, s.axis === 'x' ? amount : 0, s.axis === 'y' ? amount : 0);
-        });
         if (s.mode === 'insert') {
-          const n = s.to - s.from;
-          this.setRaster(px.insertSeam(r, s.axis, s.from, n), shift(s.from, () => n));
+          // The seam repeats the line before it (the first, at the edge), so
+          // that line stretches over the seam and everything after it moves:
+          // a redaction over it, or that the seam crosses, still covers what
+          // it hid, the copies included.
+          const n = s.to - s.from, src = Math.max(0, s.from - 1);
+          this.setRaster(px.insertSeam(r, s.axis, s.from, n), this.doc.objects.map(o => ob.remap(o, s.axis, c => c > src ? c + n : c)));
         } else {
           const a = Math.min(s.from, s.to), b = Math.max(s.from, s.to);
           if (b - a >= (s.axis === 'y' ? r.height : r.width)) return;
-          this.setRaster(px.removeSeam(r, s.axis, a, b), shift(a, start => start >= b ? a - b : a - start));
+          // What the band held is gone: an object it crosses closes up, and
+          // one wholly inside it moves to its edge.
+          const close = (c: number) => c <= a ? c : c - (Math.min(c, b) - a);
+          this.setRaster(px.removeSeam(r, s.axis, a, b), this.doc.objects.map(o => {
+            const box = ob.bounds(o), start = s.axis === 'y' ? box.y : box.x, end = start + (s.axis === 'y' ? box.height : box.width);
+            if (start >= a && end <= b) return ob.move(o, s.axis === 'x' ? a - start : 0, s.axis === 'y' ? a - start : 0);
+            return ob.remap(o, s.axis, close);
+          }));
         }
       },
       cancel: () => { this.seam = null; },

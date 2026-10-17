@@ -118,9 +118,10 @@ export function documentPage(): DocumentPage {
   const host = connectToolFrame({
     dirty: () => documents[0]?.loaded() ? toolDirty() : undefined,
     async save() {
-      // In turn: the viewer takes one save at a time.
+      // In turn, as the viewer takes one save at a time, and front first: an
+      // image save rescales the page's document before it resolves.
       let failure: { reason: unknown } | undefined;
-      for (const doc of [...documents]) {
+      for (const doc of [...documents].reverse()) {
         try { await doc.write(); } catch (reason) { failure ??= { reason }; }
       }
       if (failure) throw failure.reason;

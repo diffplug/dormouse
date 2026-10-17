@@ -178,3 +178,54 @@ test('the host hears an edit becoming pending and ending, as when Escape discard
   assert.equal(ctl.holds(saved), true);
   assert.equal(reports, 4, 'and its cancel is heard');
 });
+
+test('a seam stretches or closes up a redaction with the pixels it hid, the copies an insert makes of its edge included', () => {
+  // Each column's red channel names it, so a pixel's source is known after the seam.
+  const columns = () => {
+    const r = raster(40, 2);
+    for (let x = 0; x < 40; x++) px.fillRect(r, { x, y: 0, width: 1, height: 2 }, [x, 0, 0, 255]);
+    return r;
+  };
+  for (const [name, [hx, hw], mode, from, to] of [
+    ['an insert across it', [5, 8], 'insert', 10, 14],
+    ['an insert at its far edge', [5, 8], 'insert', 13, 17],
+    ['an insert at the image edge', [0, 8], 'insert', 0, 3],
+    ['a removal across its edge', [5, 8], 'remove', 7, 16],
+    ['a removal inside it', [5, 8], 'remove', 6, 9],
+  ]) {
+    const ctl = new EditorController(columns()), canvas = fakeCanvas();
+    ctl.attach(canvas);
+    const drag = (x0, y0, x1, y1) => {
+      for (const [type, x, y] of [['pointerdown', x0, y0], ['pointermove', x1, y1], ['pointerup', x1, y1]]) {
+        canvas.listeners[type]({ isPrimary: true, button: 0, clientX: x, clientY: y, pointerId: 1, preventDefault() {} });
+      }
+    };
+    ctl.setTool('redact');
+    drag(hx, 0, hx + hw, 2);
+    assert.deepEqual(ctl.doc.objects.map(o => [o.x, o.w]), [[hx, hw]], `${name}: the redaction is drawn`);
+    ctl.setTool('seam');
+    ctl.set('seamMode', mode);
+    drag(from, 1, to, 1);
+    const { raster: after, objects: [box] } = ctl.doc;
+    assert.notEqual(after.width, 40, `${name}: the seam applied`);
+    for (let x = 0; x < after.width; x++) {
+      const source = px.pixel(after, x, 0)[0], hid = source >= hx && source < hx + hw, covered = x >= box.x && x < box.x + box.w;
+      assert.equal(covered, hid, `${name}: column ${x}, from column ${source}, against the redaction [${box.x}, ${box.x + box.w})`);
+    }
+  }
+});
+
+test('a seam an arrow or a stroke crosses moves only the ends and points past it', () => {
+  const ctl = new EditorController(raster(40, 40)), canvas = fakeCanvas();
+  ctl.attach(canvas);
+  const drag = (...points) => points.forEach(([x, y], i) => canvas.listeners[i ? i === points.length - 1 ? 'pointerup' : 'pointermove' : 'pointerdown']({ isPrimary: true, button: 0, clientX: x, clientY: y, pointerId: 1, preventDefault() {} }));
+  ctl.setTool('arrow');
+  drag([2, 5], [30, 5], [30, 5]);
+  ctl.setTool('highlight');
+  drag([2, 20], [12, 20], [30, 20], [30, 20]);
+  ctl.setTool('seam');
+  drag([20, 0], [24, 0], [24, 0]);
+  const [arrow, stroke] = ctl.doc.objects;
+  assert.deepEqual([arrow.x1, arrow.x2], [2, 34]);
+  assert.deepEqual(stroke.points.map(p => p.x), [2, 12, 34]);
+});

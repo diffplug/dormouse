@@ -60,7 +60,7 @@ Source of truth: `dor-tools-builtin/viewer/markdown.tsx`; `safeCreateDOM` in `do
 
 `builtin:file` edits PNG and JPEG, alone or over a [Markdown document](#markdown-editor).
 
-- **Must leave a PNG or JPEG past 32 MiB or 2²⁶ pixels, or an HDR or narrow-range PNG, view-only**, judged from its header before decoding.
+- **Must leave a PNG or JPEG past 32 MiB or 2²⁶ pixels, or an animated, HDR, or narrow-range PNG, view-only**, judged from its header before decoding.
 - **Must save the submitted bytes unchanged, within 32 MiB**, under the revision, identity, permission, and replacement rules of [Editing files](#editing-files).
 - **Must re-encode untouched PNG pixels exactly**, at 8 bits per channel, keeping the recorded resolution and the source's color metadata except a non-RGB ICC profile: verbatim in its own format, across formats only an RGB profile, converted. EXIF is dropped, pixels written upright.
 

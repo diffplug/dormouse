@@ -20,8 +20,8 @@ export type Editability = { ok: true } | { viewOnly: string };
 
 /** Whether the editor opens an image of `size` bytes whose file starts with
  * `head` (its first `EDITABILITY_HEAD` bytes, or more), or why it shows it
- * view-only: past the byte or pixel bound, or a PNG whose `cICP` is HDR or
- * narrow-range. A header it cannot read counts as editable; the decoder then
+ * view-only: past the byte or pixel bound, an animated PNG, or a PNG whose
+ * `cICP` is HDR or narrow-range. A header it cannot read counts as editable; the decoder then
  * says what is wrong. */
 export function imageEditability(size: number, head: Uint8Array): Editability {
   if (size > IMAGE_BOUND.limit) return { viewOnly: `View only: this image is past the editor's ${IMAGE_BOUND.limit >> 20} MiB limit.` };
@@ -29,6 +29,8 @@ export function imageEditability(size: number, head: Uint8Array): Editability {
   if (frame && frame.width * frame.height > MAX_EDIT_PIXELS) {
     return { viewOnly: `View only: at ${frame.width} × ${frame.height} pixels, this image is past the editor's ${MAX_EDIT_PIXELS >> 20}-megapixel limit.` };
   }
+  // APNG's acTL precedes the first IDAT; a save would keep only the default image.
+  if (pngChunks(head).some(c => c.type === 'acTL')) return { viewOnly: 'View only: animated PNGs are view only.' };
   const cicp = pngCicp(head), meaning = cicp ? cicpMeaning(cicp) : null;
   if (meaning?.hdr) return { viewOnly: 'View only: HDR images are view only.' };
   // Narrow-range (video) levels would show washed out, and a swatch would paint past them.

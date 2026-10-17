@@ -256,6 +256,29 @@ export function move(shape: Shape, dx: number, dy: number): Shape {
   }
 }
 
+/** `shape` with every coordinate on `axis` passed through `f`, which must not
+ * decrease: a box's edges, an arrow's ends, and a stroke's points each land
+ * where `f` puts them, so a box stretches or shrinks with what it covers.
+ * Text and callouts keep their size and move by where their anchor lands. */
+export function remap(shape: Shape, axis: 'x' | 'y', f: (c: number) => number): Shape {
+  const along = (p: Point): Point => axis === 'x' ? { x: f(p.x), y: p.y } : { x: p.x, y: f(p.y) };
+  switch (shape.kind) {
+    case 'rect': case 'ellipse': case 'redact': {
+      const b = bounds(shape), a = along(b), z = along({ x: b.x + b.width, y: b.y + b.height });
+      return { ...shape, x: a.x, y: a.y, w: z.x - a.x, h: z.y - a.y };
+    }
+    case 'arrow': {
+      const a = along({ x: shape.x1, y: shape.y1 }), z = along({ x: shape.x2, y: shape.y2 });
+      return { ...shape, x1: a.x, y1: a.y, x2: z.x, y2: z.y };
+    }
+    case 'highlight': return { ...shape, points: shape.points.map(along) };
+    case 'text': case 'callout': {
+      const p = along(shape);
+      return move(shape, p.x - shape.x, p.y - shape.y);
+    }
+  }
+}
+
 /** Whether a just-dragged shape is too small to keep: a click, not a drag. */
 export function degenerate(shape: Shape, slop: number): boolean {
   if (shape.kind === 'highlight') return shape.points.length < 2;
