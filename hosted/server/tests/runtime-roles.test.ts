@@ -71,6 +71,8 @@ const EXPECTED: Record<Worker, string[]> = {
   relay: [
     // PUBLIC's defaults.
     "database: CONNECT, TEMPORARY",
+    "dormouse_metrics_daily.count: UPDATE",
+    "dormouse_metrics_daily: INSERT, SELECT",
     "dormouse_relay_burrows.enrolledAt: UPDATE",
     "dormouse_relay_burrows: INSERT, SELECT",
     "dormouse_relay_challenges: DELETE, INSERT, SELECT",
@@ -103,6 +105,8 @@ const EXPECTED: Record<Worker, string[]> = {
   ],
   voice: [
     "database: CONNECT, TEMPORARY",
+    "dormouse_metrics_daily.count: UPDATE",
+    "dormouse_metrics_daily: INSERT, SELECT",
     "dormouse_voice_tokens.hash: SELECT",
     "dormouse_voice_tokens.id: SELECT",
     "dormouse_voice_tokens.lastUsedAt: UPDATE",

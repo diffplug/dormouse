@@ -3,7 +3,9 @@
 import type { Context, MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { queryDatabase } from "pgstencil/postgres";
-import { entitled } from "./entitlement";
+import { entitled, isAdmin } from "./entitlement";
+import { LOGIN_METHODS } from "./metric-labels";
+import { bestEffort, countMetric } from "./metrics";
 
 /** What one request's account deployment provides to its cookie routes. */
 export interface AccountHost {
@@ -61,54 +63,50 @@ export interface AccountLogin {
 
 type Gate = MiddlewareHandler<{ Variables: { login: AccountLogin } }>;
 
+/** `get-session`'s answer, as far as Hosted reads it. */
+interface SessionAnswer {
+  user?: { id: string; email?: unknown; createdAt?: unknown };
+  session?: { createdAt?: unknown };
+}
+
+/**
+ * The Better Auth handler's `get-session` for `cookie`, from `address`; null
+ * without a login. A gate admitted the request first, so the lookup is the
+ * account's own read: `prelaunchAuth` refuses a login read that does not say so.
+ */
+async function sessionOf(host: AccountHost, origin: string, cookie?: string, address?: string) {
+  const headers = new Headers({ "sec-fetch-site": "same-origin" });
+  if (cookie) headers.set("cookie", cookie);
+  if (address) headers.set("cf-connecting-ip", address);
+  const response = await host.auth(new Request(new URL("/api/auth/get-session", origin), { headers }));
+  if (!response.ok) throw new Error("Login lookup failed");
+  return (await response.json()) as SessionAnswer | null;
+}
+
+/** Which accounts a gate admits, read per request, and its answer to anyone else. */
+interface Admission {
+  admits: (databaseUrl: string, userId: string) => Promise<boolean>;
+  refuse: (c: Context) => Response;
+}
+
 /**
  * The account Worker's cookie routes' gate: a read is {@link ownPageRead},
  * and a state-changing request presents exactly this `Origin` — same-site
  * pages, the relay and voice origins among them, share the login cookie —
  * then the Better Auth handler's `get-session` answers the login (401
- * without one), and only an entitled account passes, read per request
- * (`refuse` answers anyone else). Sets `login`.
+ * without one), and with `admission` only an account it admits passes.
+ * Sets `login`.
  */
-export function cookieEntitled(
-  host: (c: Context) => AccountHost,
-  refuse: (c: Context) => Response,
-): Gate {
-  return cookieGate(host, refuse);
-}
-
-/** {@link cookieEntitled}'s gate for a route any signed-in account may use. */
-export function cookieLogin(
-  host: (c: Context) => AccountHost,
-): Gate {
-  return cookieGate(host);
-}
-
-function cookieGate(
-  host: (c: Context) => AccountHost,
-  refuse?: (c: Context) => Response,
-): Gate {
+function cookieGate(host: (c: Context) => AccountHost, admission?: Admission): Gate {
   return async (c, next) => {
     const origin = new URL(c.req.url).origin;
     const read = c.req.method === "GET" || c.req.method === "HEAD";
     if (read ? !ownPageRead(c.req.raw, origin) : c.req.header("origin") !== origin)
       return c.json({ message: "Invalid origin." }, 403);
-    // This request passed the gate above, so its lookup is the account's own
-    // read: `prelaunchAuth` refuses a login read that does not say so.
-    const headers = new Headers({ "sec-fetch-site": "same-origin" });
-    for (const name of ["cookie", "cf-connecting-ip"]) {
-      const value = c.req.header(name);
-      if (value) headers.set(name, value);
-    }
-    const response = await host(c).auth(
-      new Request(new URL("/api/auth/get-session", origin), { headers }),
-    );
-    if (!response.ok) throw new Error("Login lookup failed");
-    const session = (await response.json()) as {
-      user?: { id: string; email?: unknown };
-      session?: { createdAt?: unknown };
-    } | null;
+    const session = await sessionOf(host(c), origin, c.req.header("cookie"), c.req.header("cf-connecting-ip"));
     if (!session?.user) return c.json({ message: "Sign in first." }, 401);
-    if (refuse && !(await entitled(host(c).databaseUrl, session.user.id))) return refuse(c);
+    if (admission && !(await admission.admits(host(c).databaseUrl, session.user.id)))
+      return admission.refuse(c);
     c.set("login", {
       userId: session.user.id,
       email: typeof session.user.email === "string" ? session.user.email : null,
@@ -116,4 +114,69 @@ function cookieGate(
     });
     await next();
   };
+}
+
+/** {@link cookieGate} for an entitled account's routes; `refuse` answers anyone else. */
+export const cookieEntitled = (host: (c: Context) => AccountHost, refuse: (c: Context) => Response) =>
+  cookieGate(host, { admits: entitled, refuse });
+
+/** {@link cookieGate} for a route any signed-in account may use (billing, terms). */
+export const cookieLogin = (host: (c: Context) => AccountHost) => cookieGate(host);
+
+/**
+ * {@link cookieGate} for the admin's routes: only the admin (`adminSql`)
+ * passes; anyone else gets the API's 404, so the route does not announce
+ * itself.
+ */
+export const cookieAdmin = (host: (c: Context) => AccountHost) =>
+  cookieGate(host, { admits: isAdmin, refuse: (c) => c.json({ message: "Not found." }, 404) });
+
+/** How soon after its account a login's session must start to count as the account's creation. */
+export const NEW_ACCOUNT_MS = 10_000;
+
+/**
+ * The method an auth response just logged in with: an OAuth callback or the
+ * emailed code that set a session cookie (as pgstencil's own
+ * `auth.login.succeeded` reads it); null for anything else, linking a
+ * provider included.
+ */
+export function loginMethod(request: Request, response: Response): string | null {
+  if (response.status >= 400) return null;
+  const path = new URL(request.url).pathname;
+  const method =
+    path === "/api/auth/sign-in/email-otp"
+      ? "email"
+      : path.startsWith("/api/auth/callback/")
+        ? path.slice("/api/auth/callback/".length)
+        : null;
+  if (!method || !LOGIN_METHODS.includes(method)) return null;
+  const session = response.headers
+    .getSetCookie()
+    .some((cookie) => cookie.includes(".session_token=") && !/max-age=0/i.test(cookie));
+  return session ? method : null;
+}
+
+/**
+ * Counts an auth response's login by method (docs/specs/hosted.md ->
+ * "Metrics") and, when its session started with its account,
+ * `account.created`: read back through `get-session` with the cookies it
+ * set, after the response.
+ */
+export function recordLogin(c: Context, host: AccountHost, request: Request, response: Response) {
+  const method = loginMethod(request, response);
+  if (!method) return;
+  const cookie = response.headers
+    .getSetCookie()
+    .map((set) => set.split(";")[0]!)
+    .join("; ");
+  bestEffort(
+    c,
+    "Login metrics",
+    (async () => {
+      await countMetric(host.databaseUrl, "login", method);
+      const read = await sessionOf(host, new URL(request.url).origin, cookie, request.headers.get("cf-connecting-ip") ?? undefined);
+      const gap = Date.parse(String(read?.session?.createdAt)) - Date.parse(String(read?.user?.createdAt));
+      if (gap >= 0 && gap < NEW_ACCOUNT_MS) await countMetric(host.databaseUrl, "account.created");
+    })(),
+  );
 }

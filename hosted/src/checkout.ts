@@ -1,16 +1,29 @@
 import { BILLING_RETURN_PATH } from "../server/policy-constants";
 import { isCheckoutPlan as isPlan, type CheckoutPlan as Plan } from "../../website/src/lib/hosted-pricing";
+import { HOSTED_REF_PARAM, isHostedRef, type HostedRef } from "../../lib/src/lib/hosted-links";
 
 // The plan a `/checkout?plan=` link asks for survives provider sign-in, which
-// leaves the page, in this tab's session storage: a plan name, nothing else.
+// leaves the page, in this tab's session storage: a plan name and the
+// allowlisted ref the link carried, nothing else.
 const KEY = "dormouse-hosted-checkout";
 
 /** How long a pending plan waits for a provider sign-in to come back. */
 const PENDING_MS = 10 * 60 * 1000;
 
-function remember(plan: Plan | null) {
+/** A pending checkout: its plan (null for a link naming none sold) and its link's allowlisted ref, counted when it starts (docs/specs/hosted.md -> "Metrics"). */
+export interface PendingCheckout {
+  plan: Plan | null;
+  ref?: CheckoutRef;
+}
+
+/** What a checkout link may carry: an allowlisted ref, or `other` for a visit that arrived with another. */
+export type CheckoutRef = HostedRef | "other";
+
+const refOf = (ref: unknown): CheckoutRef | undefined => (isHostedRef(ref) || ref === "other" ? ref : undefined);
+
+function remember(pending: PendingCheckout | null) {
   try {
-    if (plan) sessionStorage.setItem(KEY, JSON.stringify({ plan, at: Date.now() }));
+    if (pending?.plan) sessionStorage.setItem(KEY, JSON.stringify({ ...pending, at: Date.now() }));
     else sessionStorage.removeItem(KEY);
   } catch {
     // Without storage, provider sign-in returns to the account page instead.
@@ -22,19 +35,20 @@ function remember(plan: Plan | null) {
  * for a link naming no plan sold), or one a provider sign-in carried back to
  * `/account`; undefined when none is pending.
  */
-export function takeCheckout(): Plan | null | undefined {
+export function takeCheckout(): PendingCheckout | undefined {
   const { pathname, search } = location;
   if (pathname === "/checkout") {
-    const plan = new URLSearchParams(search).get("plan");
-    const sold = isPlan(plan) ? plan : null;
-    remember(sold);
-    return sold;
+    const query = new URLSearchParams(search);
+    const plan = query.get("plan");
+    const pending = { plan: isPlan(plan) ? plan : null, ref: refOf(query.get(HOSTED_REF_PARAM)) };
+    remember(pending);
+    return pending;
   }
   if (pathname !== "/account") return undefined;
   try {
-    const { plan, at } = JSON.parse(sessionStorage.getItem(KEY) ?? "{}");
+    const { plan, ref, at } = JSON.parse(sessionStorage.getItem(KEY) ?? "{}");
     remember(null);
-    return isPlan(plan) && Date.now() - at < PENDING_MS ? plan : undefined;
+    return isPlan(plan) && Date.now() - at < PENDING_MS ? { plan, ref: refOf(ref) } : undefined;
   } catch {
     return undefined;
   }

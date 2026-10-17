@@ -1,10 +1,12 @@
 import type { Context, ExecutionContext, Hono } from "hono";
+import { adminRoutes } from "./admin";
 import { billingSetup } from "./billing";
 import { COHORT_ENDPOINT } from "../../website/src/lib/hosted-cohorts";
 import { billingRoutes, reconcileDue, type BillingHost } from "./billing-routes";
-import { openAuthRead, ownPageRead } from "./account-gate";
+import { openAuthRead, ownPageRead, recordLogin } from "./account-gate";
 import type { AccountEnv } from "./bindings";
 import { accountRules } from "./headers";
+import { sweepCheckoutRefs } from "./metrics";
 import { relayAccountRoutes, type RelayAccountHost } from "./relay-account";
 import { relayRoom } from "./relay-room-contract";
 import { termsRoutes } from "./terms";
@@ -37,13 +39,6 @@ export function accountApp(
     site: { origin: SITE_ORIGIN, paths: [COHORT_ENDPOINT] },
     routes(app) {
       configure?.(app);
-      app.all("/api/auth/*", (c) =>
-        c.req.method !== "POST" &&
-        !openAuthRead(c.req.path) &&
-        !ownPageRead(c.req.raw, c.env.APP_ORIGIN)
-          ? c.json({ message: "Invalid origin." }, 403)
-          : fetchAuth(c.req.raw, c.env, c.executionCtx),
-      );
       // The provider list needs no login, so it never carries one.
       app.get("/api/providers", (c) => {
         const headers = new Headers(c.req.raw.headers);
@@ -57,15 +52,34 @@ export function accountApp(
         closeBurrow: (userId, burrowId) => relayRoom(c.env.RELAY_ROOM, userId).closeBurrow(burrowId),
         setup: () => billingSetup(c.env),
       });
+      app.all("/api/auth/*", async (c) => {
+        if (
+          c.req.method !== "POST" &&
+          !openAuthRead(c.req.path) &&
+          !ownPageRead(c.req.raw, c.env.APP_ORIGIN)
+        )
+          return c.json({ message: "Invalid origin." }, 403);
+        const response = await fetchAuth(c.req.raw, c.env, c.executionCtx);
+        recordLogin(c, host(c), c.req.raw, response);
+        return response;
+      });
       termsRoutes(app, host);
       voiceTokenRoutes(app, host);
       relayAccountRoutes(app, host);
       billingRoutes(app, host);
+      adminRoutes(app, host);
     },
     // Every desktop since v1.2.0 opens `/account` by a hard-coded path
     // (`ACCOUNT_PAGE_PATH`), which this SPA fallback answers.
     fallback: (app) => app.get("*", (c) => c.env.ASSETS.fetch(c.req.raw)),
-    scheduled: (_controller, env) =>
-      reconcileDue(billingSetup(env), env.HYPERDRIVE.connectionString, env.APP_ORIGIN),
+    scheduled: async (_controller, env) => {
+      const databaseUrl = env.HYPERDRIVE.connectionString;
+      await Promise.all([
+        sweepCheckoutRefs(databaseUrl).catch((error: Error) =>
+          console.error(`Checkout refs not swept: ${error.message}`),
+        ),
+        reconcileDue(billingSetup(env), databaseUrl, env.APP_ORIGIN),
+      ]);
+    },
   });
 }
