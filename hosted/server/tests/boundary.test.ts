@@ -13,6 +13,7 @@ import {
   pushSubscriptionDeletePath,
 } from "remote-lib-common";
 import {
+  type AccountEnv,
   accountBindings,
   accountPreviewBindings,
   relayBindings,
@@ -26,7 +27,12 @@ import {
   relayRules,
   type RulesFor,
 } from "../headers";
-import { cookieEntitled } from "../account-gate";
+import { ADMIN_EMAIL } from "../entitlement";
+import { accountApp } from "../account-app";
+import { cookieEntitled, openAuthRead } from "../account-gate";
+import { createAuthApp } from "@pgstencil/auth/better-auth";
+import { authPolicy } from "../policy";
+import { prelaunchAuth } from "../prelaunch";
 import { SITE_ORIGIN } from "../account-app";
 import { COHORT_ENDPOINT } from "../../../website/src/lib/hosted-cohorts";
 import { BILLING_WEBHOOK_PATH, CHECKOUT_CLOSED } from "../billing-routes";
@@ -198,7 +204,7 @@ test.for(NAMES)(
       `http://${new URL(ORIGINS[name]).host}`,
     ];
     for (const origin of foreign)
-      for (const [method, path] of [...SERVED[name], ["GET", "/api/health"]]) {
+      for (const [method, path] of [...SERVED[name], ["GET", "/api/health"], ["GET", "/api/ready"]]) {
         const response = await send(name, origin + path, method);
         expect(response.status, `${method} ${origin}${path}`).toBe(421);
       }
@@ -220,7 +226,6 @@ const ABSENT: Record<Name, [string, string][]> = {
     ["GET", "/api/auth/get-session"],
     ["POST", "/api/auth/sign-out"],
     ["GET", "/api/providers"],
-    ["GET", "/api/ready"],
     ["GET", "/api/voice/tokens"],
     ["POST", "/api/voice/tokens"],
     ["DELETE", "/api/voice/tokens/00000000-0000-4000-8000-000000000000"],
@@ -239,7 +244,6 @@ const ABSENT: Record<Name, [string, string][]> = {
     ["GET", "/api/auth/csrf"],
     ["GET", "/api/auth/get-session"],
     ["GET", "/api/providers"],
-    ["GET", "/api/ready"],
     ["GET", "/api/voice/tokens"],
     ["POST", "/api/voice/tokens"],
     ["GET", "/api/voice/speak"],
@@ -293,6 +297,21 @@ test("the account answers /connect/ with its own shell and policy, never the pho
       ACCOUNT_POLICY,
     );
   }
+});
+
+test("readiness without a database binding is down, saying nothing more", async () => {
+  const app = workerApp({
+    bindings: (env) => env,
+    rules: relayRules,
+    ready: "SELECT 1 LIMIT 0",
+    unavailable: "unavailable",
+    routes: () => {},
+  });
+  const response = await app.fetch(new Request(ORIGINS.relay + "/api/ready"), {
+    APP_ORIGIN: ORIGINS.relay,
+  });
+  expect(response.status).toBe(503);
+  expect(await response.json()).toEqual({ ok: false });
 });
 
 test("each Worker caches only its own hashed assets as immutable", async () => {
@@ -549,7 +568,218 @@ test("the relay bundle reads no cookie and never asks auth", () => {
   expect(readFileSync("server/account-gate.ts", "utf8")).toMatch(/["'`]cookie["'`]/);
 });
 
-test("the cookie gate refuses a presented foreign Origin on every method", async () => {
+/** Every state-changing Better Auth route the packed adapter admits. */
+const AUTH_WRITES = [
+  "/email-otp/send-verification-otp",
+  "/sign-in/email-otp",
+  "/sign-in/social",
+  "/link-social",
+  "/sign-out",
+];
+
+/** The account's CSRF cookie and the token a page sends beside it. */
+async function csrfChallenge() {
+  const issued = await send("account", ORIGINS.account + "/api/auth/csrf");
+  const { csrf } = (await issued.json()) as { csrf: string };
+  return { csrfCookie: issued.headers.get("set-cookie")!.split(";")[0]!, csrf };
+}
+
+test("an auth write carrying the login cookie needs the account's own Origin and the CSRF token", async () => {
+  // `/api/auth/*` writes go straight to the packed adapter (`accountApp`), so
+  // its gate is the one between another site and the victim's login. Each refusal
+  // comes before Better Auth runs, so none reaches the database.
+  const account = ORIGINS.account;
+  const { csrfCookie, csrf } = await csrfChallenge();
+  expect(csrfCookie).toMatch(/^__Host-pgstencil\.csrf=/);
+  const post = (path: string, headers: Record<string, string>) =>
+    workers.account.dispatchFetch(`${account}/api/auth${path}`, {
+      method: "POST",
+      redirect: "manual",
+      headers: {
+        cookie: `__Host-pgstencil.session_token=victim; ${csrfCookie}`,
+        "content-type": "application/json",
+        ...headers,
+      },
+      body: "{}",
+    });
+  const foreign = [
+    ...NAMES.filter((name) => name !== "account").map((name) => ORIGINS[name]),
+    "https://dormouse.sh",
+    "https://attacker.example",
+    "null",
+  ];
+  for (const path of AUTH_WRITES) {
+    for (const origin of foreign)
+      expect((await post(path, { origin, "x-csrf-token": csrf })).status, `${origin} ${path}`).toBe(403);
+    expect((await post(path, { "x-csrf-token": csrf })).status, `no Origin ${path}`).toBe(403);
+    expect((await post(path, { origin: account })).status, `no token ${path}`).toBe(403);
+    expect((await post(path, { origin: account, "x-csrf-token": "0".repeat(64) })).status, `wrong token ${path}`).toBe(403);
+    // A CORS-safelisted type is what a form or an unpreflighted fetch could send.
+    for (const type of ["text/plain", "application/x-www-form-urlencoded", "multipart/form-data"])
+      expect((await post(path, { origin: account, "x-csrf-token": csrf, "content-type": type })).status, `${type} ${path}`).toBe(415);
+    // A GET is no write: without Fetch Metadata, the read gate refuses it first.
+    expect((await send("account", `${account}/api/auth${path}`)).status, `GET ${path}`).toBe(403);
+  }
+  // Better Auth's other state-changing endpoints are not served at all.
+  for (const path of ["/update-user", "/delete-user", "/change-email", "/unlink-account", "/revoke-session", "/revoke-sessions", "/revoke-other-sessions", "/sign-in/email", "/sign-up/email"])
+    expect((await post(path, { origin: account, "x-csrf-token": csrf })).status, path).toBe(404);
+  expect(outbound).toEqual([]);
+});
+
+test("auth reads answer only the account's own page; writes, callbacks, and the CSRF challenge pass untouched", async () => {
+  // The packed adapter admits `get-session` and `list-accounts` whatever their
+  // `Origin`; `accountApp` refuses every auth request but a POST, a callback,
+  // or `/csrf` that the account's own page did not send, a read the adapter
+  // does not serve (yet) included. Without a database, a request the gate
+  // admits fails inside the handler (5xx).
+  const account = ORIGINS.account;
+  const cookie = "__Host-pgstencil.session_token=victim";
+  const fetch = (path: string, headers: Record<string, string>, method = "GET", body?: string) =>
+    workers.account.dispatchFetch(account + path, { method, redirect: "manual", headers, body });
+  const refused: ({ what: string } & Record<string, string>)[] = [
+    { what: "no Fetch Metadata" },
+    { what: "a typed URL", "sec-fetch-site": "none" },
+    ...NAMES.filter((name) => name !== "account").map((name) => ({
+      what: `the ${name} origin`,
+      "sec-fetch-site": "same-site",
+      origin: ORIGINS[name],
+    })),
+    { what: "an unlisted sibling", "sec-fetch-site": "same-site", origin: "https://dormouse.sh" },
+    { what: "another site", "sec-fetch-site": "cross-site", origin: "https://attacker.example" },
+    { what: "another site, navigating", "sec-fetch-site": "cross-site" },
+    // Only a non-browser can forge Fetch Metadata; it still cannot name another Origin.
+    { what: "a forged same-origin", "sec-fetch-site": "same-origin", origin: ORIGINS.relay },
+    { what: "a forged same-origin, opaque", "sec-fetch-site": "same-origin", origin: "null" },
+  ];
+  const reads = ["/api/auth/get-session", "/api/auth/list-accounts"];
+  for (const path of [...reads, "/api/auth/list-sessions"])
+    for (const { what, ...headers } of refused)
+      for (const method of ["GET", "HEAD", "DELETE"]) {
+        const response = await fetch(path, { cookie, ...headers }, method);
+        expect(response.status, `${method} ${path} from ${what}`).toBe(403);
+        if (method !== "HEAD") expect(await response.json()).toEqual({ message: "Invalid origin." });
+      }
+  for (const path of reads) {
+    // The account's own page, fetching: `Origin` absent (a GET) or exactly its own.
+    for (const origin of [undefined, account]) {
+      const headers = { cookie, "sec-fetch-site": "same-origin", ...(origin && { origin }) };
+      expect((await fetch(path, headers)).status, `${path} from ${origin}`).toBeGreaterThanOrEqual(500);
+    }
+  }
+  // Writes keep the adapter's own rules, Fetch Metadata or none; any page may
+  // start from the CSRF challenge.
+  const { csrfCookie, csrf } = await csrfChallenge();
+  const write = { cookie: `${cookie}; ${csrfCookie}`, origin: account, "x-csrf-token": csrf, "content-type": "application/json" };
+  expect((await fetch("/api/auth/sign-out", write, "POST", "{}")).status).toBeGreaterThanOrEqual(500);
+  // A provider's callback arrives from its own site, carrying the login for a
+  // connection; neither it nor the CSRF challenge nor the provider list is
+  // looked up pre-launch, which without a database would fail them (5xx).
+  const callback = await fetch("/api/auth/callback/github?code=x&state=y", { cookie, "sec-fetch-site": "cross-site" });
+  expect(callback.status).toBe(303);
+  const sibling = { cookie, "sec-fetch-site": "same-site", origin: ORIGINS.relay };
+  expect((await fetch("/api/auth/csrf", sibling)).status).toBe(200);
+  const providers = await fetch("/api/providers", sibling);
+  expect(providers.status).toBe(200);
+  expect(await providers.json()).toEqual(["github"]);
+  const apple = await fetch("/api/auth/callback/apple", {
+    "sec-fetch-site": "cross-site",
+    origin: "https://appleid.apple.com",
+    "content-type": "application/x-www-form-urlencoded",
+  }, "POST", "code=x&state=y");
+  expect(apple.status).toBeGreaterThanOrEqual(500);
+  expect(outbound).toEqual([]);
+});
+
+test("pre-launch looks a login up for every read the account's own page made, and only then", async () => {
+  const origin = "https://account.example.test";
+  const seen: string[] = [];
+  const auth = prelaunchAuth(async (request) => {
+    seen.push(new URL(request.url).pathname);
+    return Response.json(null);
+  });
+  const env = { HYPERDRIVE: { connectionString: "postgres://user:pass@127.0.0.1:9/none" } } as AccountEnv;
+  const send = (path: string, headers: Record<string, string> = {}, method = "GET") => {
+    seen.length = 0;
+    return auth(new Request(origin + path, { method, headers: { cookie: "session=victim", ...headers } }), env, {} as ExecutionContext);
+  };
+  // Any read carrying a login is refused before any lookup unless the page
+  // made it, however the path is spelled and whether or not the adapter serves it.
+  const reads = ["/api/auth/get-session", "/api/auth/list-sessions", "/api/auth/list%2Dsessions", "/api/auth/account-info", "/api/providers"];
+  for (const path of reads)
+    for (const method of ["GET", "HEAD", "DELETE"])
+      for (const headers of <Record<string, string>[]>[{}, { "sec-fetch-site": "same-site", origin: "https://relay.example.test" }, { "sec-fetch-site": "same-origin", origin: "null" }]) {
+        expect((await send(path, headers, method)).status, `${method} ${path} ${JSON.stringify(headers)}`).toBe(403);
+        expect(seen, path).toEqual([]);
+      }
+  // The page's read, or a cookie route's lookup: looked up, then answered.
+  for (const path of ["/api/auth/get-session", "/api/auth/account-info"]) {
+    expect((await send(path, { "sec-fetch-site": "same-origin" })).status).toBe(200);
+    expect(seen).toEqual(["/api/auth/get-session", path]);
+  }
+  // A provider callback, the CSRF challenge, and a write go straight through,
+  // cookie and all, with no lookup.
+  for (const [path, method] of [
+    ["/api/auth/callback/github", "GET"],
+    ["/api/auth/%63srf", "GET"],
+    ["/api/auth/callback/apple", "POST"],
+    ["/api/auth/sign-out", "POST"],
+  ]) {
+    await send(path, { "sec-fetch-site": "cross-site" }, method);
+    expect(seen, path).toEqual([path]);
+  }
+});
+
+test("every GET the installed Better Auth serves is gated and looked up pre-launch, a provider callback alone excepted", async () => {
+  const built = createAuthApp({
+    ...authPolicy,
+    databaseUrl: "postgres://user:pass@127.0.0.1:9/none",
+    origin: ORIGINS.account,
+    secret: everything.AUTH_SECRET,
+    email: { send: async () => {} } as never,
+  });
+  const endpoints = Object.values(built.auth.api as Record<string, { path?: string; options?: { method?: string | string[] } }>);
+  await built.close();
+  const gets = endpoints.flatMap(({ path, options }) =>
+    path && [options?.method].flat().includes("GET") ? ["/api/auth" + path.replace(/:\w+/g, "x")] : [],
+  );
+  // The enumeration finds the reads the adapter does not serve today.
+  expect(gets).toEqual(expect.arrayContaining(["/api/auth/get-session", "/api/auth/list-sessions", "/api/auth/account-info"]));
+  const cookie = "__Host-pgstencil.session_token=victim";
+  for (const path of gets) {
+    const read = (headers: Record<string, string>) =>
+      workers.account.dispatchFetch(ORIGINS.account + path, { redirect: "manual", headers: { cookie, ...headers } });
+    const sibling = (await read({ "sec-fetch-site": "same-site", origin: ORIGINS.relay })).status;
+    // Without a database, a looked-up login fails the request (5xx).
+    const own = (await read({ "sec-fetch-site": "same-origin" })).status;
+    if (openAuthRead(path)) {
+      expect(path).toMatch(/^\/api\/auth\/callback\//);
+      expect(sibling, path).not.toBe(403);
+      expect(own, path).toBeLessThan(500);
+    } else {
+      expect(sibling, path).toBe(403);
+      expect(own, path).toBeGreaterThanOrEqual(500);
+    }
+  }
+});
+
+test("the provider list never carries the login cookie to the auth handler", async () => {
+  const cookies: (string | null)[] = [];
+  const app = accountApp(async (request) => {
+    cookies.push(request.headers.get("cookie"));
+    return Response.json([]);
+  }, (env) => env);
+  const response = await app.fetch(
+    new Request(ORIGINS.account + "/api/providers", {
+      headers: { cookie: "session=victim", "sec-fetch-site": "same-site", origin: ORIGINS.relay },
+    }),
+    { APP_ORIGIN: ORIGINS.account } as AccountEnv,
+    {} as ExecutionContext,
+  );
+  expect(response.status).toBe(200);
+  expect(cookies).toEqual([null]);
+});
+
+test("the cookie gate refuses a foreign Origin on every method, and a read the account's page did not make", async () => {
   const origin = "https://account.example.test";
   const app = new Hono();
   const gate = cookieEntitled(
@@ -562,14 +792,19 @@ test("the cookie gate refuses a presented foreign Origin on every method", async
   );
   app.on(["GET", "HEAD", "POST"], "/gated", gate, (c) => c.body(null, 204));
   const sibling = "https://relay.example.test";
+  const own = { "sec-fetch-site": "same-origin" };
   for (const method of ["GET", "HEAD", "POST"]) {
     const send = (headers: Record<string, string>) =>
       app.request(`${origin}/gated`, { method, headers });
-    expect((await send({ origin: sibling })).status, method).toBe(403);
-    expect((await send({ origin: "null" })).status, method).toBe(403);
-    expect((await send({ origin })).status, method).toBe(204);
-    // Only a read may omit `Origin`.
-    expect((await send({})).status, method).toBe(method === "POST" ? 403 : 204);
+    const read = method !== "POST";
+    expect((await send({ ...own, origin: sibling })).status, method).toBe(403);
+    expect((await send({ ...own, origin: "null" })).status, method).toBe(403);
+    expect((await send({ ...own, origin })).status, method).toBe(204);
+    // Only a read may omit `Origin`, and only a read needs Fetch Metadata.
+    expect((await send(own)).status, method).toBe(read ? 204 : 403);
+    expect((await send({ origin })).status, method).toBe(read ? 403 : 204);
+    for (const site of ["same-site", "none", "cross-site"])
+      expect((await send({ "sec-fetch-site": site })).status, `${method} ${site}`).toBe(403);
   }
 });
 
@@ -598,7 +833,9 @@ test("the cookie gate needs no login creation time; approval reads it and fails 
     app.get("/gated", cookieEntitled(host(createdAt), () => new Response(null, { status: 403 })), (c) =>
       c.json(c.get("login").userId),
     );
-    const response = await app.request(`${origin}/gated`);
+    const response = await app.request(`${origin}/gated`, {
+      headers: { "sec-fetch-site": "same-origin" },
+    });
     expect(response.status, String(createdAt)).toBe(200);
     expect(await response.json()).toBe("admin");
   }

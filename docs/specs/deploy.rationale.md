@@ -2,13 +2,13 @@
 
 > Informative companion to [deploy.md](deploy.md): evidence and design history keyed by that spec's headings. Nothing here is normative.
 
-## Versioning
+## Build stamp
 
-Source audit, 2026-10: the bump invokes Cargo directly after editing version files. The native build refuses an ambient Node version that differs from the workspace pin; the script does not arrange that pin on PATH.
+A release run fails rather than ship unofficial because the label is permanent: an official build mislabelled "Development build" would say so in every user's About for its whole life, while a failed Stage 1 costs one re-tag. The likeliest causes are a CHANGELOG heading that does not match the tag and a build step that leaves files in the tree. The workflow is identified by `GITHUB_WORKFLOW_REF`, which names the repository, the workflow file, and the tag in one default variable, so a fork's or `ci.yml`'s build is unofficial without a second check.
 
 ## Stage 1: CI workflow
 
-**Why `release-attest` is its own environment, with no secrets and no reviewer.** A required reviewer would stall every release on manual approval at its first jobs, and build jobs have no business seeing credentials. Neither existing `v*` environment fits: `vscode-extension-publish` requires reviewers; `security-audit` holds `AUDIT_PAT` and `CLAUDE_CODE_OAUTH_TOKEN`.
+**Why `release-attest` is its own environment, with no secrets and no reviewer.** A required reviewer would stall every release on manual approval at its first jobs, and build jobs have no business seeing credentials. Neither existing `v*` environment fits: `vscode-extension-publish` requires reviewers; `security-audit` holds `AUDIT_PAT`, `CLAUDE_CODE_OAUTH_TOKEN`, and `EMBARGO_TOKEN`.
 
 **Why a dropped dotfile fails the release instead of degrading it.** The dotfiles are the ZDOTDIR files under `standalone/sidecar/shell-integration/zsh/`: `.zshenv`, `.zshrc`, `.zprofile`. `artifact-manifest.sha256` is generated from the runner's disk *before* upload, so a dotfile `actions/upload-artifact` silently omitted is still listed in the manifest, and Stage 2's hash verification fails on an artifact CI reported green.
 
@@ -27,9 +27,3 @@ The 2026-09-05 audit found that standalone resume commands reset every working a
 **Why only the retry branch changed.** `gh release create` with assets is already safe to publish into an immutable-releases repo: it creates the release as a draft, uploads every asset, publishes only once all of them succeed, and deletes the draft if one fails (`createRun` in `cli/cli` `pkg/cmd/release/create/create.go`, v2.100.0). Only the retry branch, which replaces assets on a release that may already be published, needed a guard. That branch is narrow: `cleanupDraftRelease` also runs when `gh`'s own publish step fails, so a draft survives to be retried only where the cleanup did not run — the process was killed mid-publish, the delete itself failed, or the draft was created by hand. Refusing there beats letting the API reject the upload: immutability is enforced at publication and deleting the release does not free its tag name for reuse ([immutable releases](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases)), so a version bump is the only repair either way — and the operator discovers it mid-release with signing hardware attached.
 
 **Why the setting is unverifiable from CI.** The repository-level `immutable_releases` field is admin-gated: it is absent from `GET /repos/{owner}/{repo}` for a token without admin, including on repositories where the setting is demonstrably on (`cli/cli`'s latest release reports `"immutable": true`, checked 2026-09-23). Its absence is not evidence the setting is off; the per-release `immutable` field is what a non-admin can read.
-
-## Two signing layers
-
-**What each layer actually proves.** OS signing proves the executable is from DiffPlug; Tauri signing proves the update bundle was not tampered with in transit.
-
-The October 2026 audit traced `sign_macos`, `sign_windows`, and `sign_updates`: the Linux AppImage is copied from verified CI artifacts and receives Tauri signing, with no Linux OS-signing step. The body now states that platform scope rather than requiring both layers for Linux too.

@@ -13,7 +13,7 @@ import type { BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
 import { messageOf } from '../lib/errors';
 import { CAPTURE_JPEG_QUALITY, type BrowserResult, type ViewerBrowserInput, type ViewerState } from '../lib/platform/browser-automation';
 import type { BrowserProvider, LiveBrowser } from './browser-host';
-import { measuredViewport, type ViewerSink } from './browser-viewer';
+import { measuredViewport, type ViewerSink, type ViewportSize } from './browser-viewer';
 import { resolvePlaywrightInstall, playwrightWorkspace, type PlaywrightInstall } from './playwright-install';
 
 const TAB_REFRESH_INTERVAL_MS = 750;
@@ -61,6 +61,8 @@ type Viewer = Binding & {
   subscribers: Set<Subscriber>;
   controls: Map<Page, Promise<CDPSession>>;
   page?: Page;
+  /** `page`'s viewport, as last measured or written. */
+  viewport?: ViewportSize;
   cdp?: CDPSession;
   timer?: ReturnType<typeof setTimeout>;
   disposed: boolean;
@@ -155,6 +157,7 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
         await v.cdp?.detach().catch(() => {});
         v.cdp = undefined;
         v.page = page;
+        v.viewport = page?.viewportSize() ?? undefined;
         if (page) await startFrames(v);
       }
       const tabs = await tabsOf(v);
@@ -170,7 +173,11 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
         // measure of the viewport (rationale).
         const takenAt = performance.now();
         const measured = await page.evaluate(() => ({ width: innerWidth, height: innerHeight, dpr: devicePixelRatio })).then(measuredViewport, () => undefined);
-        if (measured) for (const { sink } of v.subscribers) sink.viewport({ width: measured.viewportWidth, height: measured.viewportHeight }, takenAt);
+        if (measured) {
+          const viewport = { width: measured.viewportWidth, height: measured.viewportHeight };
+          if (v.page === page) v.viewport = viewport;
+          for (const { sink } of v.subscribers) sink.viewport(viewport, takenAt);
+        }
         const size = measured ? undefined : page.viewportSize();
         publish(v, { type: 'status', connected: true, screencasting: !v.headed, viewportWidth: size?.width, viewportHeight: size?.height, ...measured });
       }
@@ -201,9 +208,9 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
         last = event.data;
         // Decoded once, here; the viewer sockets carry it as binary.
         const jpeg = Buffer.from(event.data, 'base64');
-        const { deviceWidth: width, deviceHeight: height } = event.metadata;
-        const size = width > 0 && height > 0 ? { width, height } : undefined;
-        for (const { sink, headed } of v.subscribers) if (!headed) sink.frame(jpeg, size);
+        // The metadata measures the window the frame shows, not the viewport.
+        const windowWidth = event.metadata.deviceWidth > 0 ? event.metadata.deviceWidth : undefined;
+        for (const { sink, headed } of v.subscribers) if (!headed) sink.frame(jpeg, v.viewport, windowWidth);
       });
       await cdp.send('Page.startScreencast', { format: 'jpeg', quality: 70 });
     } catch (e) {
@@ -411,6 +418,7 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
           // ratio: a CDP metrics override from this connection would be a
           // second writer Chrome re-applies on every navigation (rationale).
           await page.setViewportSize({ width: act.width, height: act.height });
+          if (v.page === page) v.viewport = { width: act.width, height: act.height };
           // Landed: the next poll measures it, begun after (`refreshNow`).
           return { ok: true };
         }

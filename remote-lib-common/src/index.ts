@@ -1,6 +1,6 @@
 /**
- * Code shared between the frontend (`lib`) and the backend (`relay`) — the
- * Relay-side counterpart to `dor-lib-common`.
+ * Code shared between the frontend (`lib`) and the backends (`relay`, and
+ * Hosted's Workers in `hosted`).
  *
  * Keep this package runtime-agnostic: it is compiled into both a browser bundle
  * (via `lib`) and a Node process (`relay`), so it must not reach for Node or
@@ -37,6 +37,7 @@ export * from './security/push.js';
 export * from './security/push-seal.js';
 export * from './security/pairing.js';
 export * from './security/e2e-bounds.js';
+export * from './security/presence-window.js';
 export * from './security/direct-path.js';
 export * from './security/token-bucket.js';
 export * from './security/link-url.js';

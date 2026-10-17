@@ -8,7 +8,9 @@ export interface ThemeSwatchColors {
 }
 
 /** The chrome accents of an already-resolved theme (`resolveThemeVars`): the
- *  active header fill and the focus ring the runtime would pick for it. */
+ *  active header fill and the focus ring the runtime would pick for it. Not the
+ *  terminal background: the row already shows it, and on Quiet Light a
+ *  background circle plus a focus dot hid the green header fill. */
 export function getThemeSwatchColors(vars: Record<string, string>): ThemeSwatchColors {
   const palette = pickDynamicPalette(
     dynamicPaletteValuesFrom('vscodeVar', (name) => vars[name] ?? ''),

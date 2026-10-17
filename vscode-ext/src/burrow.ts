@@ -665,7 +665,8 @@ export function initBurrow(ctx: vscode.ExtensionContext): vscode.Disposable {
       // window set would outlive it. Only its own: a window that never served
       // must not clear the broker's.
       if (servingMarked) markOneTimeServing(false);
-      // After the service; only here (`docs/specs/vscode.md` → "The direct path").
+      // After the service, and only here: the teardown is terminal for this process,
+      // and a window that later wins the lease again needs a factory that loads.
       disposeNativeDirectPeers();
       askProvider = null;
       contending = false;

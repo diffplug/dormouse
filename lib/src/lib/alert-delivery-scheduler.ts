@@ -1,5 +1,5 @@
 import type { AlertManager, AlertState } from './alert-manager';
-import { isAlertPaused } from './alert-episode';
+import { isAlertDeferred } from './alert-episode';
 import {
   normalizeAlertDeliveryOverrides,
   resolveAlertDeliveryPolicy,
@@ -65,7 +65,7 @@ function disarm(delivery: Delivery): void {
 export function createAlertDeliveryScheduler(options: AlertDeliverySchedulerOptions): AlertDeliveryScheduler {
   const { manager } = options;
   let defaults = DEFAULT_ALERT_SETTINGS;
-  /** Deadlines survive pauses; a sink missing from `pending` is consumed. */
+  /** Deadlines survive deferral; a sink missing from `pending` is consumed. */
   const episodes = new Map<string, { episodeId: string; pending: Map<AlertSink, Delivery> }>();
   /** Each Session's last publication, and the realm that made it. */
   const published = new Map<string, Published>();
@@ -131,7 +131,7 @@ export function createAlertDeliveryScheduler(options: AlertDeliverySchedulerOpti
     }
     const { pending } = current;
     // Disarm without consuming, so quiet re-arms the original deadline.
-    if (isAlertPaused(state)) {
+    if (isAlertDeferred(state)) {
       pending.forEach(disarm);
       return;
     }

@@ -57,6 +57,7 @@ export const DOCS_PAGES: readonly DocsPage[] = [
   { path: "/supply-chain", module: "./pages/SupplyChain.tsx", label: "Supply chain", linkedFrom: ["homepage"] },
   { path: "/self-host", module: "./pages/SelfHostDocs.tsx", label: "How to self-host", linkedFrom: ROOT_README_AND_HOME },
   { path: "/hosted", module: "./pages/Hosted.tsx", label: "Dormouse Hosted", linkedFrom: EVERYWHERE },
+  { path: "/comparison", module: "./pages/Comparison.tsx", label: "Comparison", linkedFrom: ["homepage"] },
   { path: "/agent-skill", module: "./pages/AgentSkillDocs.tsx", label: "dor agent skill", linkedFrom: EVERYWHERE },
   { path: "/dor", module: "./pages/DorDocs.tsx", label: "dor CLI reference", linkedFrom: EVERYWHERE },
   { path: "/compatible-agents", module: "./pages/CompatibleAgentsDocs.tsx", label: "Compatible agents", linkedFrom: ["root-readme"] },

@@ -276,6 +276,14 @@ tools:
     });
   });
 
+  it('asks for trust in a folder whose name carries a format character, naming it as it is', async () => {
+    const persian = join(root, '\u067e\u0631\u0648\u0698\u0647\u200c\u0647\u0627');
+    await mkdir(persian);
+    await writeFile(join(persian, 'dormouse.yml'), YML);
+    expect(await lookupTool('storybook', persian, new MemoryToolTrustStore(), { resolveUpstream: noUpstream }))
+      .toMatchObject({ status: 'untrusted', projectRoot: persian });
+  });
+
   it('surfaces a parse error as an error rather than throwing', async () => {
     await write('tools:\n  t:\n    run: x\n    prespawn_dedupe: [$NOPE]\n');
     const result = await lookupTool('t', root, new MemoryToolTrustStore(), { resolveUpstream: noUpstream });

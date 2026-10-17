@@ -62,7 +62,7 @@ export function forgetWorkspaceBootPlan(workspaceId: WorkspaceId): void {
   plans.delete(workspaceId);
 }
 
-/** Forget every parked plan, seed included (tests). */
+/** Forget every parked plan, seed included (tests, `resetWorkspaceWindow`). */
 export function resetWorkspaceBootPlans(): void {
   plans.clear();
   seeded = false;

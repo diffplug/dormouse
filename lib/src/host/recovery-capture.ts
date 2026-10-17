@@ -5,7 +5,7 @@
  * over `vscode-ext/src/pty-manager.ts`, the Tauri sidecar over `pty-core.js`.
  * Both reach it through the same four primitives — interrupt, a monotonic
  * received count, the output since a mark, and the live id set — because that is
- * all the detection ever needed (docs/compatible-agents.md -> "Capture").
+ * all the detection ever needed.
  *
  * The gesture is always `^C` written *into* the pty, never a signal: the tty
  * line discipline delivers the SIGINT to the foreground process group, so the

@@ -470,14 +470,14 @@ describe('RemoteControlSection', () => {
   it('shows a refused begin where the button is', async () => {
     platform = {
       burrow: makeLink(async (cmd) => {
-        if (cmd === 'beginHostedEnrollment') throw new Error('Settings → Network is set to Nothing');
+        if (cmd === 'beginHostedEnrollment') throw new Error('Settings → Network is set to Nowhere');
         return NOT_ENROLLED;
       }),
     };
     await render();
     await openPersistent();
     await act(async () => buttonLabelled(SIGN_IN_LABEL)!.click());
-    expect(text()).toContain('Settings → Network is set to Nothing');
+    expect(text()).toContain('Settings → Network is set to Nowhere');
   });
 
   it('links a Hosted enrollment to the account that manages it, and a self-host one to nothing', async () => {

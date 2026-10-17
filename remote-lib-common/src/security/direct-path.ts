@@ -67,6 +67,11 @@ export const DIRECT_SRFLX_GRACE_MS = 500;
  *
  * A description longer than this is not sent: the offerer skips the attempt and
  * an answerer declines, and the session stays relayed.
+ *
+ * A Burrow's answer stays under this only because libjuice caps what it
+ * gathers — at most 14 host and two srflx candidates, ~1,932 characters at
+ * libjuice 1.7.2 (`node-datachannel` 0.33.4) — so re-check it whenever
+ * `node-datachannel` moves libjuice.
  */
 export const MAX_DIRECT_SDP_LENGTH = 2000;
 

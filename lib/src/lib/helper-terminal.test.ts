@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { registry, pendingShellOpts, type TerminalEntry } from './terminal-store';
+import { installSurfaceIdPool, resetSurfaceIdPool } from './surface-ids';
 import { applyTerminalSemanticEvents, getTerminalPaneState, resetTerminalPaneState, removeTerminalPaneState } from './terminal-state-store';
 import { beginPromotion, cancelPromotion, closeHelperParent, detachHelper, disposeHelper, resetHelper, finishPromotion, getHelper, helperHasWork, openHelper, reattachHelper, restoreHelper, setHelperVisible, subscribeHelpers } from './helper-terminal';
 
@@ -22,6 +23,18 @@ afterEach(() => { setHelperVisible('parent', false); disposeHelper('parent'); re
 const prompt = (id: string) => applyTerminalSemanticEvents(id, [{ type: 'promptStart' }, { type: 'promptEnd' }]);
 
 describe('helper lifecycle', () => {
+  it('takes a Surface id from the host pool at birth, past one already live', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await installSurfaceIdPool(async (count) => Array.from({ length: count }, (_, i) => `surface:${5 + i}`), 0);
+    try {
+      registry.set('surface:5', { untouched: true } as TerminalEntry);
+      expect((await openHelper('parent')).id).toBe('surface:6');
+    } finally {
+      resetSurfaceIdPool();
+      error.mockRestore();
+    }
+  });
+
   it('detaches a helper with its Session alive and puts it back in place of its replacement', async () => {
     const old = await openHelper('parent');
     expect(detachHelper('parent')).toBe(old);
@@ -30,7 +43,8 @@ describe('helper lifecycle', () => {
     const fresh = await openHelper('parent');
     expect(reattachHelper(old)).toBe(true);
     expect(getHelper('parent')).toBe(old);
-    expect(registry.has(fresh.id)).toBe(false);
+    // Killed once the host has the old helper back (its claim order: Labs below).
+    await vi.waitFor(() => expect(registry.has(fresh.id)).toBe(false));
   });
 
   it('resets into a pending kill under Labs, which restores the old helper in place of the fresh one', async () => {
@@ -39,13 +53,43 @@ describe('helper lifecycle', () => {
     vi.spyOn(labs, 'isDelayedKillEnabled').mockReturnValue(true);
     try {
       const old = await openHelper('parent');
-      resetHelper('parent', { workspaceId: 'ws', title: 'shell', ref: 'surface:1' });
+      await resetHelper('parent', { workspaceId: 'ws', title: 'shell' });
       expect(registry.has(old.id)).toBe(true);
       expect(pending.getPendingKills().map(kill => [kill.kind, kill.id])).toEqual([['helper', old.id]]);
+      // The host owns one helper per parent: the old one's claim goes before the fresh one spawns.
+      const promotes = () => host.terminalContext.mock.calls.map(([request]) => request).filter(request => request.op === 'promote');
+      expect(promotes()).toEqual([{ op: 'promote', id: old.id }]);
       const fresh = await openHelper('parent');
       pending.restorePendingKill(pending.pendingKillKey('helper', old.id));
       expect(getHelper('parent')).toBe(old);
-      expect(registry.has(fresh.id)).toBe(false);
+      // Released, re-owned, then killed: never two owners at the host.
+      await vi.waitFor(() => expect(registry.has(fresh.id)).toBe(false));
+      expect(promotes()).toEqual([
+        { op: 'promote', id: old.id },
+        { op: 'promote', id: fresh.id },
+        { op: 'promote', id: old.id, restore: { parentId: 'parent', command: old.command } },
+      ]);
+    } finally {
+      pending._resetPendingKillsForTesting();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('keeps a Labs Reset\'s old helper pending even when the host release fails, so it still finalizes', async () => {
+    const labs = await import('./labs-settings');
+    const pending = await import('./pending-kills');
+    vi.spyOn(labs, 'isDelayedKillEnabled').mockReturnValue(true);
+    try {
+      const old = await openHelper('parent');
+      // VS Code's request timeout: the release never answers in time.
+      host.terminalContext.mockImplementation(async (request: { op: string }) => {
+        if (request.op === 'promote') throw new Error('timed out');
+        return { home: '/home/user', command: 'git status', busy: false };
+      });
+      await expect(resetHelper('parent', { workspaceId: 'ws', title: 'shell' })).rejects.toThrow('timed out');
+      expect(pending.getPendingKills().map(kill => [kill.kind, kill.id])).toEqual([['helper', old.id]]);
+      await pending.finalizePendingKills();
+      expect(registry.has(old.id)).toBe(false);
     } finally {
       pending._resetPendingKillsForTesting();
       vi.restoreAllMocks();
@@ -58,7 +102,7 @@ describe('helper lifecycle', () => {
     vi.spyOn(labs, 'isDelayedKillEnabled').mockReturnValue(true);
     try {
       const old = await openHelper('parent');
-      resetHelper('parent', { workspaceId: 'ws', title: 'shell', ref: 'surface:1' });
+      await resetHelper('parent', { workspaceId: 'ws', title: 'shell' });
       const fresh = await openHelper('parent');
       registry.get(fresh.id)!.untouched = false;
       const [before] = pending.getPendingKills();
@@ -155,7 +199,7 @@ describe('helper lifecycle', () => {
     setHelperVisible('parent', true);
     await openHelper('parent');
     await vi.advanceTimersByTimeAsync(100);
-    expect(host.writePty).toHaveBeenCalledExactlyOnceWith(helper.id, 'git status\r');
+    expect(host.writePty).toHaveBeenCalledExactlyOnceWith(helper.id, 'git status\r', { launch: true });
   });
   it('keeps ownership stable when a reopened menu resets or promotes during promotion', async () => {
     const helper = await openHelper('parent');
@@ -193,7 +237,7 @@ describe('helper lifecycle', () => {
     expect(first).toBe(second);
     await vi.advanceTimersByTimeAsync(1000); expect(host.writePty).not.toHaveBeenCalled();
     prompt(first.id); await vi.advanceTimersByTimeAsync(100);
-    expect(host.writePty).toHaveBeenCalledExactlyOnceWith(first.id, 'git status\r');
+    expect(host.writePty).toHaveBeenCalledExactlyOnceWith(first.id, 'git status\r', { launch: true });
     prompt(first.id); await vi.advanceTimersByTimeAsync(500);
     expect(first.status).toBe('completed'); expect(host.writePty).toHaveBeenCalledTimes(1);
   });
@@ -233,7 +277,7 @@ describe('helper lifecycle', () => {
     host.terminalContext.mockResolvedValue({ command: 'echo next', busy: false });
     const next = await openHelper('parent'); prompt(old.id); prompt(next.id);
     await vi.advanceTimersByTimeAsync(100);
-    expect(host.writePty).toHaveBeenCalledExactlyOnceWith(next.id, 'echo next\r');
+    expect(host.writePty).toHaveBeenCalledExactlyOnceWith(next.id, 'echo next\r', { launch: true });
     removeTerminalPaneState(old.id);
   });
   it('missing integration never receives a timeout write and is not safe to close', async () => {

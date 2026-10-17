@@ -155,7 +155,14 @@ function readAndClearRecord(file: string, log: RecoveryLog): Record<string, stri
   }
   if (!recovery) return noCommands();
 
-  const age = Date.now() - (recovery.createdAt ?? 0);
+  // A non-numeric date gives a NaN age and an infinite one -Infinity; both
+  // pass the bound below.
+  const createdAt: unknown = recovery.createdAt;
+  if (!Number.isFinite(createdAt)) {
+    log.info(`[recovery] discarding record with createdAt ${String(createdAt)}`);
+    return noCommands();
+  }
+  const age = Date.now() - (createdAt as number);
   if (age > RECOVERY_MAX_AGE_MS) {
     log.info(`[recovery] discarding record ${Math.round(age / 86_400_000)}d old`);
     return noCommands();

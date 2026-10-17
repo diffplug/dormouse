@@ -101,9 +101,11 @@ export function SplitButtons({ surfaceId }: { surfaceId: string }) {
  *  itself and the header's 6px gap. */
 export const HEADER_CONTROL_SLOT_PX = 26;
 
-/** A Tool's Break, beside its Terminal Context button: asks, then splits the
- *  Tool into its plain terminal and a browser pane (`docs/specs/dor-tool.md` ->
- *  Run end). Kill stays Kill. */
+/** A Tool's Break, among the header's leading controls (after Terminal
+ *  Context where that shows), never in the pane-action group by Kill, so a
+ *  reach for Kill never lands on it: asks, then splits the Tool into its plain
+ *  terminal and a browser pane (`docs/specs/dor-tool.md` -> Run end). Kill
+ *  stays Kill. */
 export function BreakToolButton({ surfaceId }: { surfaceId: string }) {
   const actions = useContext(WallActionsContext);
   if (!actions.onBreakTool) return null;

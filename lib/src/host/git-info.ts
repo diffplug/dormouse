@@ -4,14 +4,20 @@
  * sidecar as `git-info.cjs`.
  *
  * Only `rev-parse` and `config --get` run, and `HEAD` is read directly: nothing
- * reads the index, so a repository's `core.fsmonitor` never executes. A repository's
- * `.git/config` is still read, the risk `git-upstream.ts` already accepts.
+ * reads the index, and `runGit` disables `core.fsmonitor` regardless. A
+ * repository's `.git/config` is still read, the risk `git-upstream.ts` already
+ * accepts.
  */
-import { readFile, realpath, stat } from 'node:fs/promises';
-import { basename, isAbsolute, join, resolve } from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { basename, join, resolve } from 'node:path';
 import type { GitDirInfo, GitInfoResult } from '../lib/platform/git-types';
 import { settleAllWithin } from '../lib/settle-within';
 import { runGit } from './git-cli';
+import { canonicalLocalDirectory } from './local-directory';
+
+// The sidecar's `pty-core` validates a context directory with the same
+// resolver, and reaches it through this bundle.
+export { canonicalLocalDirectory };
 
 /** Lookups still running at this deadline (a hung network mount) are left out
  *  of the answer, for the caller to ask again. */
@@ -41,19 +47,6 @@ function checkoutName(commonDir: string): string {
   return base === '.git' ? basename(resolve(commonDir, '..')) : base.replace(/\.git$/, '');
 }
 
-/** The canonical path of an existing absolute directory, else null
- *  (`docs/specs/security-local.md` → "Terminal context directory actions"):
- *  these paths originate as terminal-reported cwds. */
-async function canonicalDirectory(path: string): Promise<string | null> {
-  if (!isAbsolute(path) || path.includes('\0')) return null;
-  try {
-    const canonical = await realpath(path);
-    return (await stat(canonical)).isDirectory() ? canonical : null;
-  } catch {
-    return null;
-  }
-}
-
 /** `ref: refs/heads/<branch>`, or a detached commit's full hash. Read rather
  *  than asked of git: it exists even on an unborn branch, and saves a spawn. */
 async function headBranch(gitDir: string): Promise<string | null> {
@@ -64,7 +57,9 @@ async function headBranch(gitDir: string): Promise<string | null> {
 }
 
 export async function lookupGitDir(path: string): Promise<GitDirInfo | null> {
-  const dir = await canonicalDirectory(path);
+  // A terminal-reported cwd (`docs/specs/security-local.md` → "Terminal
+  // context directory actions").
+  const dir = await canonicalLocalDirectory(path);
   if (!dir) return null;
   const [dirs, remote] = await Promise.all([
     runGit(dir, ['rev-parse', '--path-format=absolute', '--git-common-dir', '--git-dir']),

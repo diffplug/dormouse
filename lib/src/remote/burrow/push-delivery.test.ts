@@ -72,7 +72,7 @@ function aclRecord(deliveryId: string, label: string): BurrowAclRecord {
 
 /**
  * A stand-in for the Burrow's seal: shape-correct, distinct per recipient, and
- * free of WebCrypto, so the cases below mint no keys. The real construction is
+ * free of WebCrypto. The real construction is
  * driven with real keys in `sealed push`.
  */
 function fakeSeal(): AlertPushDeps['seal'] {

@@ -20,13 +20,22 @@ export const adminSql = (user = "u") =>
  */
 const CURRENT = `'trialing', 'active', 'past_due', 'unpaid', 'paused', 'incomplete'`;
 
+/** How long a failed payment keeps access while Stripe retries it. */
+export const PAYMENT_GRACE_DAYS = 30;
+
 /**
  * Whether subscription row `s` grants access at `at`: `active` before its
- * period end or `trialing` before its trial end, as `status()` reads it.
+ * period end or `trialing` before its trial end, as `status()` reads it, or
+ * `past_due` — Stripe retrying a failed payment — until `PAYMENT_GRACE_DAYS`
+ * past its period end. Stripe's retry schedule must end the subscription
+ * within the grace, since a renewal that failed has already moved
+ * `period_end` a period on.
  */
 export const accessSql = (s = "s", at = "now()") =>
   `((${s}.status = 'active' AND ${s}.period_end > ${at})
-    OR (${s}.status = 'trialing' AND ${s}.trial_end > ${at}))`;
+    OR (${s}.status = 'trialing' AND ${s}.trial_end > ${at})
+    OR (${s}.status = 'past_due'
+      AND ${s}.period_end + interval '${PAYMENT_GRACE_DAYS} days' > ${at}))`;
 
 /**
  * The entitlement (docs/specs/pricing.md -> "Checkout and entitlement"): a

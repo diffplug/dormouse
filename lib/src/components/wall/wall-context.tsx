@@ -68,10 +68,9 @@ export interface WallActions {
   onStartRename: (id: string) => void;
   onFinishRename: (id: string, value: string) => SetTerminalUserTitleResult;
   onCancelRename: () => void;
-  /** Swap a surface's render backend in place, preserving the target URL
-   *  (docs/specs/dor-browser.md → "Display Modal And Render Swaps"). agent-browser ↔ iframe is a
-   *  surface-type replacement; screencast ↔ popout is handled inside the
-   *  agent-browser panel and does not route here. */
+  /** Swap a surface's render backend in place, keeping its id and target URL
+   *  (docs/specs/dor-browser.md → "Display Modal And Render Swaps"). screencast ↔
+   *  popout is handled inside the agent-browser panel and does not route here. */
   onSwapRenderMode: (id: string, mode: RenderMode, viewport?: import('dor-lib-common/browser-viewports').BrowserViewportSetting) => void;
   /** Open a URL as a new browser pane, split next to `id` — an iframe, or an
    *  agent-browser screencast for a page the iframe cannot show. The iframe
@@ -81,9 +80,6 @@ export interface WallActions {
   onOpenBrowserPane?: (id: string, url: string) => void;
   /** A browser Surface's first launch failed: apply its `launchFallback`. */
   onBrowserLaunchFailed?: (id: string, error: string) => void;
-  /** The stable `surface:N` ref for a pane/door id (minted lazily, exactly as
-   *  `dor list` assigns refs). Used by the pane context menu to show the handle. */
-  resolveSurfaceRef: (id: string) => string;
   /** Resolve a pending tool's approval: grant and start it, or close its pane
    *  (docs/specs/dor-tool.md -> Trust). */
   onResolveToolApproval: (id: string, choice: 'upstream' | 'folder' | 'decline' | 'retry') => void;
@@ -111,7 +107,6 @@ export const WallActionsContext = createContext<WallActions>({
   onCancelRename: () => {},
   onSwapRenderMode: () => {},
   onOpenBrowserPane: () => {},
-  resolveSurfaceRef: (id: string) => id,
   onResolveToolApproval: () => {},
 });
 

@@ -1,5 +1,5 @@
 import { invoke as rawInvoke } from "@tauri-apps/api/core";
-import type { SessionKeyValueStore } from "dormouse-lib/lib/window-persistence";
+import type { SessionKeyValueStore } from "./window-recovery";
 
 /** Persist the blob to the host; the default routes to the Rust `save_session`
  *  command (keyed implicitly by the invoking Tauri window). Injectable for tests. */
@@ -9,7 +9,7 @@ const invokeSave: SessionSaveFn = (value) => rawInvoke("save_session", { state: 
 
 /**
  * Standalone-native backing for the session seam (`docs/specs/standalone.md`
- * §Persistence). `window-persistence.ts` reads/writes the `PersistedWindow`
+ * §Persistence). `windowStateSlot` reads/writes the `PersistedWindow`
  * blob through a synchronous {@link SessionKeyValueStore}; on WKWebView that
  * used to be `localStorage`, whose SQLite WAL grew unbounded. This replaces it
  * with an in-memory cache seeded once at boot from the Rust file store, with

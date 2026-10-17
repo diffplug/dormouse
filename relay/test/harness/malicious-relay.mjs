@@ -4,7 +4,7 @@
  *
  * It sits where `relay/src/relay.ts` sits — the real {@link RelayHub}, wrapped
  * rather than reimplemented, so what it *routes* is the shipped behavior — and
- * adds the four things a hostile operator has: it records every frame, and it
+ * adds what a hostile operator can do: it records every frame, and it
  * may drop, reorder, duplicate, modify, or invent one on either egress leg.
  *
  * `guards: false` removes the relay's own `ct` / `id` / shape checks, which are

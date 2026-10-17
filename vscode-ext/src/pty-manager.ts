@@ -114,6 +114,11 @@ export function getBufferedPtys(): Map<string, { alive: boolean; exitCode?: numb
   return result;
 }
 
+/** Every PTY id this extension host holds, alive or exited but not killed. */
+export function ptyIds(): Iterable<string> {
+  return ptyBuffers.keys();
+}
+
 /**
  * Every PTY this extension host still has alive. An exited one stays buffered
  * until `kill()`, but can neither take a `^C` nor exit again, so no teardown
@@ -136,9 +141,9 @@ export function getPtyStatus(id: string): { alive: boolean; exitCode?: number } 
 
 /**
  * Whether this extension host holds a PTY under that id — alive or exited, but
- * not killed. Pane ids are unique within a window and nothing coordinates them
- * across windows, so this is how the peer link tells one of its own terminals
- * from a sibling window's that happens to share the id (`peer-link.ts`).
+ * not killed. Windows that cold restore duplicated hold the same ids, so this
+ * is how the peer link tells one of its own terminals from a sibling window's
+ * that happens to share the id (`peer-link.ts`).
  */
 export function hasPty(id: string): boolean {
   return ptyBuffers.has(id);
@@ -249,6 +254,10 @@ function ensureChild(extensionPath: string): ChildProcess {
   const nodePath = dorEnv.DORMOUSE_NODE;
 
   child = fork(hostScript, [], {
+    // Our own install, never the inherited cwd, which may be a workspace
+    // folder: Windows looks a bare program name up there before `PATH`
+    // (docs/specs/security-local.md -> "Spawned programs").
+    cwd: extensionPath,
     stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
     execPath: nodePath,
     execArgv: [], // clear --inspect flags inherited from VSCode debug
@@ -529,9 +538,10 @@ export function interrupt(ids: string[], timeoutMs = 400): Promise<void> {
 }
 
 /**
- * SIGTERM every PTY this extension host still has alive and wait for their exits
- * and final output. `pty-core` only ever kills an explicit set, so the ids are
- * named here: this pty-host serves one window, and every live PTY in it is ours.
+ * Gracefully stop every PTY this extension host still has alive and wait for
+ * their exits and final output (docs/specs/transport.md -> Graceful shutdown).
+ * `pty-core` only ever kills an explicit set, so the ids are named here: this
+ * pty-host serves one window, and every live PTY in it is ours.
  */
 export function gracefulKillLive(timeoutMs = 2000): Promise<void> {
   // Extra margin beyond the pty-host's own timeout.

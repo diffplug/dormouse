@@ -113,15 +113,36 @@ export function relayOriginDefine({ origin, mode }) {
  */
 export function assertRelayOriginBaked(bundlePath, { origin }) {
   const bundle = readFileSync(bundlePath, 'utf8');
-  for (const placeholder of [RELAY_ORIGIN_PLACEHOLDER, RELAY_MODE_PLACEHOLDER]) {
-    if (bundle.includes(placeholder)) {
-      throw new Error(
-        `relay origin: ${placeholder} survived into ${bundlePath} — the esbuild define did not ` +
-          'apply, and the Burrow would use the built-in default.',
-      );
-    }
-  }
+  assertNoRelayPlaceholder(bundle, bundlePath);
   if (!bundle.includes(origin)) {
     throw new Error(`relay origin: ${bundlePath} does not contain the resolved origin (${origin}).`);
   }
+}
+
+function assertNoRelayPlaceholder(code, where) {
+  for (const placeholder of [RELAY_ORIGIN_PLACEHOLDER, RELAY_MODE_PLACEHOLDER]) {
+    if (code.includes(placeholder)) {
+      throw new Error(
+        `relay origin: ${placeholder} survived into ${where} — the define did not apply, and ` +
+          'the build would run on the readers\' unbaked fallback.',
+      );
+    }
+  }
+}
+
+/**
+ * A Vite plugin failing `vite build` if the define did not reach every emitted
+ * chunk — {@link assertRelayOriginBaked} for the standalone webview, which
+ * reads only the mode (`bakedRelayMode`), so no origin is required in it.
+ */
+export function relayDefineVitePlugin() {
+  return {
+    name: 'dormouse:assert-relay-define',
+    apply: 'build',
+    generateBundle(_options, bundle) {
+      for (const chunk of Object.values(bundle)) {
+        if (chunk.type === 'chunk') assertNoRelayPlaceholder(chunk.code, chunk.fileName);
+      }
+    },
+  };
 }

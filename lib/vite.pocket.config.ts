@@ -75,7 +75,7 @@ export default defineConfig({
       // Storybook configs.
       "remote-lib-common": fileURLToPath(new URL("../remote-lib-common/src", import.meta.url)),
       // `dor-lib-common` has the same unbuilt-`dist` exports problem, reached via
-      // `Wall` → `useDorControl` → `connect-port`.
+      // `Wall` and `useDorControl`.
       "dor-lib-common": fileURLToPath(new URL("../dor-lib-common/src", import.meta.url)),
       // `dor-tools-lib` too, reached via the terminal parser's OSC 367 readers.
       "dor-tools-lib": fileURLToPath(new URL("../dor-tools-lib/src", import.meta.url)),

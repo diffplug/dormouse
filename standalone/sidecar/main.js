@@ -15,7 +15,7 @@ const { createDorControlServer } = require('./dor-control-server');
 // scripts/build-sidecar-proxy.mjs. See docs/specs/dor-browser.md.
 const { createIframeProxyUrl, releaseIframeProxyLease, retainIframeProxyOwners } = require('./iframe-proxy.cjs');
 const { createToolHost } = require('./tool-host.cjs');
-const { gitInfo } = require('./git-info.cjs');
+const { gitInfo, canonicalLocalDirectory } = require('./git-info.cjs');
 // Same pattern: lib/src/host/browser-host.ts is the single source of truth for
 // browser automation, run here exactly as the VS Code extension host runs it,
 // over the providers in lib/src/host/agent-browser-host.ts and
@@ -78,7 +78,7 @@ const mgr = create((event, data) => {
   // pty-core, so this host and the VS Code extension host read their replay
   // buffers through one implementation. Each helper decision pty-core makes
   // reaches the alerts, which keep a helper inert (docs/specs/alert.md).
-}, nodePty, { replay: true, sliceSince, onHelper: (id, helper) => host.alerts.setHelper(id, helper) });
+}, nodePty, { replay: true, sliceSince, onHelper: (id, helper) => host.alerts.setHelper(id, helper), canonicalDirectory: canonicalLocalDirectory });
 
 const host = createSidecarHost({
   send,
@@ -276,7 +276,7 @@ async function shutdown() {
     ]);
   } catch {}
   dorControl?.close();
-  host.dispose();
+  host.dispose(); // settles every outstanding Burrow ask, before the PTYs go
   mgr.killAll();
   process.exit(0);
 }

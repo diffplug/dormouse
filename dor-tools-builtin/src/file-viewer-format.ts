@@ -56,7 +56,7 @@ function describeFile(path: string): string {
   if (format.markdown) return 'Markdown editor';
   if (format.text) return 'code editor';
   if (format.mime.startsWith('text/html')) return 'HTML preview';
-  if (format.mime.startsWith('image/')) return 'image viewer';
+  if (format.mime.startsWith('image/')) return editableImageType(path) ? 'image viewer and editor' : 'image viewer';
   if (/^(audio|video)\//.test(format.mime)) return 'media player';
   return 'file viewer';
 }
@@ -100,6 +100,14 @@ export function viewerTitle(target: string): string {
 
 /** Text the rich Markdown editor opens (docs/specs/dor-tools-builtin.md -> Markdown editor). */
 const MARKDOWN = new Set(['md', 'markdown']);
+
+/** The image types the image editor re-encodes; every other image is view-only. */
+const EDITABLE_IMAGES = new Set(['image/png', 'image/jpeg']);
+/** `path`'s type when its extension names an editable image (PNG or JPEG). */
+export function editableImageType(path: string): string | undefined {
+  const mime = fileViewerFormat(path)?.mime;
+  return mime && EDITABLE_IMAGES.has(mime) ? mime : undefined;
+}
 
 export function fileViewerFormat(path: string): FileFormat | null {
   const name = path.replace(/\\/g, '/').split('/').pop()!.toLowerCase();

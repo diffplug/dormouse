@@ -9,16 +9,21 @@
  */
 
 /**
- * How many Burrows one account may have enrolled, on either Relay.
+ * How many Burrows the self-host Relay may have enrolled.
  *
- * Enrollment is credential-gated, so this is not a flood defense. On the
- * self-host Relay it bounds a file that is otherwise append-only and is
- * re-read, re-parsed and compared row by row on every burrow-gated request and
- * every `/ws/burrow` upgrade; on Hosted it bounds what one account's approvals
- * can grow. Far above the machines a person owns; revocation (self-host) or
- * removal (Hosted) is what makes room.
+ * Enrollment is credential-gated, so this is not a flood defense: it bounds a
+ * file that is otherwise append-only and is re-read, re-parsed and compared
+ * row by row on every burrow-gated request and every `/ws/burrow` upgrade. Far
+ * above the machines a person owns; revocation is what makes room.
  */
 export const MAX_ENROLLED_BURROWS = 32;
+
+/**
+ * Computers one Hosted account may enroll: an abuse ceiling, not a plan limit
+ * — a member has no device limit (`docs/specs/pricing.md` -> "Checkout and
+ * entitlement"). Removal is what makes room.
+ */
+export const MAX_BURROWS_PER_ACCOUNT = 1000;
 
 /**
  * What a Burrow is called to a person: the account page lists it so, and the

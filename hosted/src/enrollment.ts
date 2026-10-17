@@ -1,7 +1,7 @@
 import { normalizeEnrollUserCode } from "../../remote-lib-common/src/remote/enroll-code.ts";
 import {
   HOSTED_SIGN_IN_LABEL,
-  MAX_ENROLLED_BURROWS,
+  MAX_BURROWS_PER_ACCOUNT,
 } from "../../remote-lib-common/src/remote/enrolled-computers.ts";
 
 /** An enrollment link's user code, or null when the link carried none valid. */
@@ -33,7 +33,7 @@ export const ADD_A_COMPUTER = `To add a computer, open Settings in Dormouse on i
  * approval, and the computer signs in once one is removed.
  */
 export function approvedNotice(code: string, enrolled: number | null): string {
-  return (enrolled ?? 0) >= MAX_ENROLLED_BURROWS
-    ? `Approved ${code}, but this account already has ${MAX_ENROLLED_BURROWS} computers. Remove one below and Dormouse on your computer signs in on its own.`
+  return (enrolled ?? 0) >= MAX_BURROWS_PER_ACCOUNT
+    ? `Approved ${code}, but this account already has ${MAX_BURROWS_PER_ACCOUNT} computers. Remove one below and Dormouse on your computer signs in on its own.`
     : `Approved ${code}. Dormouse on your computer signs in within a few seconds.`;
 }

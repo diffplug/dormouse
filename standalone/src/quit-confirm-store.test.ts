@@ -70,15 +70,17 @@ describe("quit-confirm store", () => {
     expect(getQuitConfirmPhase()).toBe("quitting");
   });
 
-  it("ignores a redundant open while a dialog is already up", () => {
+  it("refuses a redundant open while a dialog is already up, cancelling its context", () => {
     const first = makeCtx();
     const second = makeCtx();
     openQuitConfirm(first);
     openQuitConfirm(second);
+    expect(second.cancel).toHaveBeenCalledTimes(1);
 
     confirmQuit();
-    // The decision reaches the first request's context, not the ignored one.
+    // The decision reaches the first request's context, not the refused one.
     expect(first.confirm).toHaveBeenCalledTimes(1);
+    expect(first.cancel).not.toHaveBeenCalled();
     expect(second.confirm).not.toHaveBeenCalled();
   });
 
@@ -90,7 +92,7 @@ describe("quit-confirm store", () => {
     const names = getQuitConfirmWorkspaceNames();
     expect(char).toMatch(/^[a-z]$/);
     expect(names).toContain('Second');
-    setActiveWorkspace('workspace-1');
+    setActiveWorkspace('workspace:1');
     moveWorkspace(second.id, 0);
     renameWorkspace(second.id, 'Renamed');
     expect(getQuitConfirmChar()).toBe(char);
@@ -113,14 +115,14 @@ describe("quit-confirm store", () => {
 
   it('clears competing chrome without dropping transfer guards', () => {
     const answer = vi.fn();
-    requestConfirmation({ id: 'workspace-1', char: 'a', answer });
-    setRenamingWorkspace('workspace-1');
-    setWorkspaceMoveError({ id: 'workspace-1', reason: 'Wait for the Tool browser to connect' });
-    setWorkspaceTransferPending('workspace-1', true);
+    requestConfirmation({ id: 'workspace:1', char: 'a', answer });
+    setRenamingWorkspace('workspace:1');
+    setWorkspaceMoveError({ id: 'workspace:1', reason: 'Wait for the Tool browser to connect' });
+    setWorkspaceTransferPending('workspace:1', true);
     openQuitConfirm(makeCtx());
-    expect(getWorkspaceUiSnapshot()).toEqual({ confirmation: null, renamingId: null, moveError: null });
+    expect(getWorkspaceUiSnapshot()).toEqual({ confirmation: null, renamingId: null, moveError: null, menu: null });
     expect(answer).toHaveBeenCalledExactlyOnceWith(false);
-    expect(isWorkspaceTransferPending('workspace-1')).toBe(true);
+    expect(isWorkspaceTransferPending('workspace:1')).toBe(true);
     expect(chromeKeyboardHeld()).toBe(true);
   });
 

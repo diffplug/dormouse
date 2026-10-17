@@ -5,6 +5,9 @@ import { realpathSync } from "node:fs";
 import { providerAuthorizationOrigins } from "../server/providers.js";
 import { oneTimeSmoke } from "./one-time-smoke.mjs";
 
+/** What the account's page sends with a login read (`docs/specs/security-hosted.md` -> "Origin boundary"). */
+const OWN_PAGE = { headers: { "sec-fetch-site": "same-origin" } };
+
 /** @param {{ text: string }} email */
 export const codeFrom = (email) => email.text.match(/\b\d{8}\b/)?.[0];
 
@@ -74,6 +77,16 @@ export async function healthSmoke(origin, sha, fetcher = fetch) {
 }
 
 /**
+ * A Worker reaches Postgres as its deployment binds it: its `/api/ready` runs a
+ * query only its own role's grants admit.
+ */
+export async function readySmoke(origin, fetcher = fetch) {
+  const response = await smokeRequest(fetcher, origin + "/api/ready", {});
+  await response.body?.cancel();
+  assert.equal(response.status, 200, `${origin} must reach Postgres through its Hyperdrive`);
+}
+
+/**
  * The relay answers a VAPID key from `/api/push/config`. Cloudflare exposes a
  * Worker secret's name and never its value, so preflight sees only that both
  * halves exist; a pair that does not match turns push off, and fails here.
@@ -104,16 +117,17 @@ export async function smoke(
       redirect: "manual",
       ...options,
     }, delay, sha);
-  assert.equal(
-    (await request("/api/ready")).status,
-    200,
-    "Auth schema must be reachable through Hyperdrive",
-  );
+  await readySmoke(origin, fetcher);
   const start = await request("/api/auth/csrf");
   assert.equal(start.status, 200, "Auth must issue a CSRF challenge");
   assert.match(start.headers.get("cache-control"), /no-store/);
   const state = await start.json();
-  assert.equal(await (await request("/api/auth/get-session")).json(), null);
+  assert.equal(await (await request("/api/auth/get-session", OWN_PAGE)).json(), null);
+  assert.equal(
+    (await request("/api/auth/get-session")).status,
+    403,
+    "Only the account's own page may read a login",
+  );
   // The packed adapter emits its own fixed provider order, not the configured
   // one, so compare the enabled set rather than the sequence.
   const providers = await (await request("/api/providers")).json();
@@ -151,7 +165,7 @@ export async function smoke(
   for (const path of ["/dev/emails", "/api/dev/emails"])
     assert.equal((await request(path)).status, preview ? 200 : 404, path);
   // Billing's routes want a login, whether or not the deployment sells.
-  assert.equal((await request("/api/billing")).status, 401);
+  assert.equal((await request("/api/billing", OWN_PAGE)).status, 401);
   assert.equal((await request("/__test/time")).status, 404);
   for (const provider of preview ? [] : expectedProviders) {
     const started = await request("/api/auth/sign-in/social", {
@@ -267,11 +281,11 @@ async function emailLoginSmoke(request, origin) {
     200,
     "Email code verification",
   );
-  const signedIn = await (await browser("/api/auth/get-session")).json();
+  const signedIn = await (await browser("/api/auth/get-session", OWN_PAGE)).json();
   assert.equal(signedIn?.user.email, email);
   assert.equal((await post("/api/auth/sign-out", {})).status, 200);
   assert.equal(
-    await (await browser("/api/auth/get-session")).json(),
+    await (await browser("/api/auth/get-session", OWN_PAGE)).json(),
     null,
     "Logout must clear the session",
   );
@@ -293,10 +307,18 @@ async function retrying(limit, what, check, { retryMs, wait }) {
 }
 
 /**
- * The relay's smoke: its revision, then its push config and its one-time
- * rendezvous, each retried on its own up to `attempts`, `retryMs` apart, so a
- * passed revision never runs again and neither later check runs on a relay that
- * did not pass.
+ * A relay or voice Worker's revision, then its readiness, each retried on its
+ * own up to `attempts` (`retrying`'s `retry`), so a passed check never runs
+ * again and readiness never runs on a revision that did not pass.
+ */
+async function liveSmoke(origin, sha, fetcher, attempts, retry) {
+  await retrying(attempts, origin, () => healthSmoke(origin, sha, fetcher), retry);
+  await retrying(attempts, `${origin} ready`, () => readySmoke(origin, fetcher), retry);
+}
+
+/**
+ * The relay's smoke: `liveSmoke`, then its push config and its one-time
+ * rendezvous, each retried on its own the same way.
  */
 export async function relaySmoke(
   origin,
@@ -310,15 +332,15 @@ export async function relaySmoke(
   } = {},
 ) {
   const retry = { retryMs, wait };
-  await retrying(attempts, origin, () => healthSmoke(origin, sha, fetcher), retry);
+  await liveSmoke(origin, sha, fetcher, attempts, retry);
   await retrying(attempts, `${origin} push`, () => pushConfigSmoke(origin, fetcher), retry);
   await retrying(attempts, `${origin} one-time`, () => oneTime(origin), retry);
 }
 
 /**
- * Every Worker's smoke: the account's auth boundary, the voice's revision, and
- * `relaySmoke` — never waiting on the account, so an account failure hides no
- * relay one. The three run concurrently, each retrying on its own up to its
+ * Every Worker's smoke: the account's auth boundary, the voice's `liveSmoke`,
+ * and `relaySmoke` — never waiting on the account, so an account failure hides
+ * no relay one. The three run concurrently, each retrying on its own up to its
  * `attempts` (one count for all, or `{ account, relay, voice }`), `retryMs`
  * apart. Every part settles before the smoke fails, and the failure names each
  * part that failed.
@@ -343,7 +365,7 @@ export async function smokeAll(
     retrying(limit("account"), account, () =>
       smoke(account, sha, fetcher, preview, providers), retry),
     relaySmoke(relay, sha, { fetcher, oneTime, attempts: limit("relay"), retryMs, wait }),
-    retrying(limit("voice"), voice, () => healthSmoke(voice, sha, fetcher), retry),
+    liveSmoke(voice, sha, fetcher, limit("voice"), retry),
   ]);
   const failures = results.flatMap((result) =>
     result.status === "rejected" ? [result.reason] : [],

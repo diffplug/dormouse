@@ -15,7 +15,7 @@ sequenceDiagram
   Note over L: oneTimeOpen: opening, mints the one-use keypair
   L->>H: Burrow route
   H->>L: OneTimeRoomFrame
-  Note over L: waiting, shows the link as QR and text
+  Note over L: waiting, shows the link
   Note over P: takes and erases the fragment, waits for the Connect tap
   Note over P: connectOnce: mints a static, writes message 1
   P->>H: client route
@@ -43,8 +43,8 @@ sequenceDiagram
 | `expiry` | unsigned 32-bit epoch seconds as exactly 10 decimal digits | the phone's fail-fast; the Burrow checks its own copy at the attempt |
 | `ephPub` | 32-byte X25519 public key as 43-character unpadded base64url | the one-use Burrow Noise responder key for this link |
 
-- **`ONE_TIME_LINK_MAX_LENGTH = 256`, enforced at mint before any encoder runs**, which bounds the origin at 167 characters.
-- **One parser boundary, with pairing's discipline.** `parseOneTimeLinkUrl` answers the complete link or `null`, never a partial parse: the URL around the fragment under `docs/specs/relay.md` -> "Setup tokens and the pairing QR", the path exactly `ONE_TIME_PAGE_PATH` (`/connect/`), then the field rules, the expiry, and the X25519 import last.
+- **`ONE_TIME_LINK_MAX_LENGTH = 256`, enforced at mint**, which bounds the origin (`docs/specs/relay.md` -> "Relay origin").
+- **One parser boundary.** `parseOneTimeLinkUrl` answers the complete link or `null`, never a partial parse: the URL around the fragment under `docs/specs/relay.md` -> "Setup tokens and the pairing QR", and the path exactly `ONE_TIME_PAGE_PATH` (`/connect/`).
 - **Must keep a link live through `expiry * 1000`, expiring the following millisecond** (`oneTimeLinkExpired`), and the parser refuses on that same rule.
 - The prologue contract: `docs/specs/remote-security-model.md` -> "One-time connection".
 
@@ -64,7 +64,7 @@ Source of truth: `remote-lib-common/src/security/one-time-link.ts`.
 
 `ct` is one base64url Noise message, bounded as on the relay envelope. Each end keeps its open socket alive with the relay socket's `RELAY_PING` heartbeat (`docs/specs/relay.md` -> "Routing"), whole strings never JSON, holding the room to no deadline.
 
-- **Must measure a frame's raw text against `MAX_ONE_TIME_FRAME_LENGTH` before parsing it**; both ends read the room through `parseOneTimeFrame`. A room forwards at most `MAX_ONE_TIME_FORWARDED` (32) frames, both directions together.
+- **Must measure a frame's raw text against `MAX_ONE_TIME_FRAME_LENGTH` before parsing it**; both ends read the room through `parseOneTimeFrame`. A room forwards at most `MAX_ONE_TIME_FORWARDED` frames, both directions together.
 - **Timings.** An unused link lives `ONE_TIME_LINK_TTL_MS`. The join and the confirmation finish by its expiry, and the direct path's `DIRECT_ONLY_DEADLINE_MS` after the outcome ends inside the room's hard deadline, `expiresAt + ONE_TIME_EXPIRY_GRACE_MS`. Values: `docs/specs/remote-security-model.md` -> "Burrow bounds".
 - **The ceremony's messages are padded `control` messages** on the Noise session (`docs/specs/relay.md` -> "E2E framing"): `OneTimeRequestV1 {code, label}` phone → Burrow, the page sending a `label` from `ONE_TIME_DEVICE_LABELS`, then one `OneTimeOutcomeV1` — `{ok: true, burrowLabel}`, or `{ok: false, code}` with `code` one of `ONE_TIME_DENIAL_CODES` (`user-denied`, `confirmation-mismatch`, `link-expired`, `burrow-error`).
 
@@ -85,23 +85,23 @@ Source of truth: `remote-lib-common/src/remote/one-time-wire.ts`; `parseOneTimeF
 
 ## Burrow runtime
 
-**`OneTimeRuntime` is single-use: one rendezvous socket, one one-use keypair, one phone, one guess, and at most one session.** It opens once and ends once, and nothing resumes. Its states are `OneTimeState`, its endings `OneTimeEndReason`; `unavailable` and `idle` are the service's, which a runtime never enters, and `ended`'s `refusal` is `network-not-allowed`'s alone.
+**`OneTimeRuntime` is single-use: one rendezvous socket, one one-use keypair, one phone, one guess, and at most one session.** It opens once and ends once, and nothing resumes. Its states are `OneTimeState`, its endings `OneTimeEndReason`.
 
-- **Must open the socket through the host's factory with no `Origin` header**, on the origin's Burrow route with `http` replaced by `ws`.
+- **Must open the socket through the host's factory with no `Origin` header**, on the origin's Burrow route.
 - **The first message must be one `OneTimeRoomFrame`, the keypair minted and the frame read within `ONE_TIME_OPEN_TIMEOUT_MS`**, else `unreachable`. The link's expiry is the earlier of the runtime's own `now + ONE_TIME_LINK_TTL_MS` and the room's `expiresAt`, floored to whole seconds.
 - **Must guard and count every later message** after the [length check](#wire-contract): past `MAX_ONE_TIME_FORWARDED` the runtime stops reading the room.
-- **Must reserve the link and erase its key only after message 1, message 2, and Noise Split succeed; a failed handshake leaves it live.**
+- Reserving the link: `docs/specs/remote-security-model.md` -> "One-time connection".
 - **Must spend an `E2E_INIT_BURST` `TokenBucket` token before an `init`'s WebCrypto.** The first non-keepalive transport message must be `OneTimeRequestV1`, else `burrow-error`. **Its label passes `knownOneTimeDeviceLabel` before the approval request or any state carries it**, so anything not exactly a member of `ONE_TIME_DEVICE_LABELS` is `Phone browser` (the rule: `docs/specs/remote-security-model.md` -> "One-time connection").
 - **Promotion reuses the same Noise session** in an `EstablishedE2eSession` whose `hello.burrowId` is the room id, and arms the direct deadline. A decline the Burrow sends reaches the phone before the rendezvous closes.
 - At the switch it closes the rendezvous normally (the lifecycle carve-out: `docs/specs/remote-security-model.md` -> "One-time connection"); before the switch a room close ends the connection by its code.
 - **Never let a deadline run later than the room's**: each is on the runtime's own clock. A link not yet promoted ends the first millisecond past its expiry — a claimed one telling its phone `link-expired`, which dismisses the modal — and the request and the approval each check the expiry again.
 - **`end()` releases everything and writes nothing.** **A `user-ended`, `idle`, or `network-not-allowed` ending sends the goodbye first, before the room closes** (`docs/specs/remote-api.md` → Transport), so a phone still connecting hears it over the rendezvous.
 
-Source of truth: `OneTimeRuntime` in `lib/src/remote/burrow/one-time-runtime.ts`; `directOnly`, `onDirectOnlyBroken`, and `directDeadlineAt` in `lib/src/remote/burrow/established-session.ts`.
+Source of truth: `OneTimeRuntime` in `lib/src/remote/burrow/one-time-runtime.ts`; `directOnly` in `lib/src/remote/burrow/established-session.ts`.
 
 ## Phone client
 
-**`OneTimeClient` is single-use: one `connectOnce`, one rendezvous socket, and at most one session**, on `ClientSessionCore`, direct or not at all. `connectOnce` is the phone's half of [Flow](#flow): both handshake payloads are empty, and at the switch it closes the rendezvous normally and resolves `{ok: true, burrowLabel}`; a decline, an abandoned attempt, or no switch by `DIRECT_ONLY_DEADLINE_MS` fails it.
+**`OneTimeClient` is single-use: one `connectOnce`, one rendezvous socket, and at most one session**, on `ClientSessionCore`, direct or not at all. `connectOnce` is the phone's half of [Flow](#flow): at the switch it closes the rendezvous normally and resolves `{ok: true, burrowLabel}`; a decline, an abandoned attempt, or no switch by `DIRECT_ONLY_DEADLINE_MS` fails it.
 
 - **Never open a socket outside `connectOnce`**, which runs once per client and opens none for an expired link.
 - **Must end the handshake and the confirmation at the room's hard deadline**, WebCrypto and the socket's open included; the direct path runs on the direct deadline instead.
@@ -142,14 +142,14 @@ Source of truth: `oneTimeRoutes` in `hosted/server/one-time.ts`; `OneTimeRoom` i
 
 ## Phone page
 
-The relay Worker serves the phone's half at `ONE_TIME_PAGE_PATH` (`/connect/`): `OneTimeApp` on Pocket's screens, chrome, and mobile wall, refusing a browser without X25519 or `RTCPeerConnection`.
+The relay Worker serves the phone's half at `ONE_TIME_PAGE_PATH` (`/connect/`): `OneTimeApp`, refusing a browser without X25519 or `RTCPeerConnection`.
 
 - **Must take the fragment and erase it with `history.replaceState` before the first render**, parsed or not, and reload on `hashchange` (rationale).
 - **Never open a socket before the Connect tap**: the tap builds the client and runs `connectOnce`, so a link-preview crawler spends nothing.
 - Its ICE servers: `docs/specs/remote-network.md` -> "Anywhere".
-- **Never persist anything** from the page: no storage, IndexedDB, worker, push, or cookie, though Pocket keeps its own on the same origin. `applyPocketTheme` applies Pocket's default theme without reading or writing a stored pick, for the page and its `PocketWall`. `scripts/e2e-lint.mjs` holds the page to the client's store rule.
-- **Must mount the wall only on `ok`**, through `mountRemoteWall`. End, Cancel, a reported ending, a failed mount, or a failed attachment closes the client and releases the adapter; the first ending's copy stays.
-- **The label the page sends is `oneTimeDeviceLabel`, never Pocket's `deviceLabel`**, and always a member of `ONE_TIME_DEVICE_LABELS`: `iPhone`; `iPad`, a `MacIntel` platform with more than one touch point included; `Android phone` from the platform, or from the user agent where there is no `userAgentData`; else `Phone browser` (rationale).
+- **Never persist anything** from the page: no storage, IndexedDB, worker, push, or cookie, though Pocket keeps its own on the same origin. `scripts/e2e-lint.mjs` holds the page to the client's store rule.
+- **Must mount the wall only on `ok`**; every ending closes the client and releases the adapter.
+- **The label the page sends is `oneTimeDeviceLabel`, never Pocket's `deviceLabel`**, and always a member of `ONE_TIME_DEVICE_LABELS` (rationale).
 
 **Build.** `build:one-time` in `lib/package.json` builds `lib/one-time/` into `lib/dist-one-time` under base `ONE_TIME_PAGE_PATH`, then runs `assertPocketShell --one-time`: scripts under `/connect/assets/`, links under `/connect/`, nothing inline. Hosted's `build` runs it first, and `stageRelay` empties the relay's assets directory, copies the page to `hosted/dist/relay/connect/` beside Pocket at the root, and checks the copy.
 
@@ -158,11 +158,11 @@ The relay Worker serves the phone's half at `ONE_TIME_PAGE_PATH` (`/connect/`): 
 - **An `APP_ORIGIN` that is not exactly `scheme://host[:port]` of plain host characters gets `RUNS_NOTHING_POLICY` instead**: the URL parser admits `;`, `,`, and `'` in a host.
 - **The sandbox keeps `allow-same-origin`**, and Chrome's warning about the pair stands (rationale).
 
-Source of truth: `OneTimeApp` in `lib/src/remote/one-time-app/OneTimeApp.tsx`; `stageRelay` in `hosted/scripts/stage-relay.mjs`; `oneTimePageRoutes` in `hosted/server/one-time.ts`; `relayRules` in `hosted/server/headers.ts`. `oneTimeSmoke` in `hosted/scripts/one-time-smoke.mjs` checks a deployment's page and script.
+Source of truth: `OneTimeApp` in `lib/src/remote/one-time-app/OneTimeApp.tsx`; `stageRelay` in `hosted/scripts/stage-relay.mjs`; `oneTimePageRoutes` in `hosted/server/one-time.ts`; `relayRules` in `hosted/server/headers.ts`.
 
 ## Dev loop
 
-**`dor tool one-time` (root `pnpm dev:one-time`) runs the rendezvous and page on loopback, without Postgres**: the relay Worker under `wrangler dev --local` on `127.0.0.1`, at `PORT` or a fixed default, since a Burrow build bakes the origin in. Its config sets `APP_ORIGIN` to `http://localhost:<port>`, keeps the relay config's Durable Object, migration, and rate limits, and carries no route or production secret. It prints the dev Burrow build variables (`DORMOUSE_RELAY_ORIGIN`, `DORMOUSE_RELAY_IS_HOSTED=1`; `docs/specs/relay.md` -> "Relay origin"). **Started by the Hosted dev loop, with `HOSTED_DEV_ACCOUNT_ORIGIN` and `HOSTED_DEV_DATABASE_URL` together, it adds that `ACCOUNT_ORIGIN` and a local Hyperdrive over that database**, never production's, and announces no page, the account origin being the loop's (`docs/specs/hosted.md` -> "Development and release").
+**`dor tool one-time` runs the rendezvous and page on loopback, without Postgres**, at `PORT` or a fixed default, since a Burrow build bakes the origin in. Its config carries no route or production secret. It prints the dev Burrow build variables (`DORMOUSE_RELAY_ORIGIN`, `DORMOUSE_RELAY_IS_HOSTED=1`; `docs/specs/relay.md` -> "Relay origin"). **Started by the Hosted dev loop, with `HOSTED_DEV_ACCOUNT_ORIGIN` and `HOSTED_DEV_DATABASE_URL` together, it adds that `ACCOUNT_ORIGIN` and a local Hyperdrive over that database**, never production's, and announces no page, the account origin being the loop's (`docs/specs/hosted.md` -> "Development and release").
 
 Source of truth: `hosted/scripts/dev-one-time.mjs`.
 
@@ -177,26 +177,25 @@ Source of truth: `hosted/scripts/dev-one-time.mjs`.
 | `oneTimeStatus` | the current `OneTimeState` |
 
 - **`oneTimeOpen` takes no parameters: the origin is never webview input.** It joins an open in flight, replaces a waiting, confirming, or ended connection (ending it unannounced), and is **refused while `connecting` or `connected`**, and while `unavailable`.
-- **Every state change is a `{ name: 'one-time', state }` event, and so is a service's start**, after its policy read, ahead of its enrollment read (rationale).
+- **Every state change is a `{ name: 'one-time', state }` event, and so is a service's start** (rationale).
 - **`status` and its event carry `serving`**: a running Burrow (none under Nothing), or a one-time status of `opening`, `waiting`, `confirming`, `connecting`, or `connected`; a flip emits `status`. What arms on each: `docs/specs/vscode.md` -> "Burrow: a service in the extension host".
-- **Approval carries a `kind`** (`pairing` | `one-time`) on `PendingPairing`, `PairingQueueItem`, `ApproveParams`, and `DenyParams`. The one-time request has a slot of its own — `clientId: ''`, a fresh random `pairingId` ticket, after the pairings in the snapshot — and **its answer goes straight to the runtime, never behind the lifecycle chain**. **The service reads any `kind` but `one-time` as a `pairing`**, so a malformed answer finds nothing to approve. The mirror keys by `(kind, clientId)`.
+- **Approval carries a `kind`** (`pairing` | `one-time`) on `PendingPairing`, `PairingQueueItem`, `ApproveParams`, and `DenyParams`. The one-time request has a slot of its own, `clientId: ''` with a fresh random `pairingId` ticket. **The service reads any `kind` but `one-time` as a `pairing`**, so a malformed answer finds nothing to approve.
 
 **The origin is the build's Hosted origin, which only a Hosted build has** (`docs/specs/relay.md` -> "Relay origin", whose "Accepted origins" bounds it). **Availability is decided before any socket exists**: without a Hosted origin the state is `unavailable` with reason `self-host`, and the service builds no runtime; the network policy's `nothing` makes it `unavailable` with reason `network-off`, and a policy change ends a live connection (`docs/specs/remote-network.md` -> "Policy").
 
-**Standalone** passes the baked pair from the sidecar entry, and Rust broadcasts every `burrow:event` unchanged. VS Code's bootstrap, idle answers, and serving marker are `docs/specs/vscode.md` -> "Burrow: a service in the extension host".
+**Standalone**'s Rust broadcasts every `burrow:event` unchanged to every window. VS Code's bootstrap, idle answers, and serving marker are `docs/specs/vscode.md` -> "Burrow: a service in the extension host".
 
 Source of truth: `BurrowService` in `lib/src/host/remote/service.ts`; `lib/src/host/remote/service-protocol.ts`.
 
 ## Laptop UI
 
-**`OneTimeConnection` sits in the Remote control choices of Settings → Network's Phones section, enrolled or not** (`docs/specs/remote-network.md` -> "Settings → Network"); `OneTimeIndicator` sits in the Baseboard's right cluster (`docs/specs/layout.md` -> "Baseboard").
+**`OneTimeConnection` sits in the Remote control choices of Settings → Network's Phones section, enrolled or not** (`docs/specs/remote-network.md` -> "Settings → Network"); `OneTimeIndicator` sits in the Baseboard (`docs/specs/layout.md` -> "Baseboard").
 
 - **The panel renders the service's state and owns only its busy and error.** **Closing Settings changes nothing**: the link keeps waiting.
 - **Never open a link on a timer**: only New link replaces one (rationale).
 - **Cancel and End send `oneTimeEnd`; Done sends the one that returns `ended` to `idle`. `ended {user-ended}` renders as `idle`** (rationale).
-- **End copy is fixed per reason and level**, looked up own-property only, with a fallback for a reason a newer broker knows.
+- **End copy is fixed per reason and level**, with a fallback for a reason a newer broker knows.
 - **The indicator shows only while `connecting` or `connected`**, with End (rationale).
-- **The store seeds from `oneTimeStatus` and replaces its state with every `one-time` event that passes `isOneTimeState`**; an answer an event overtook is dropped. **Never publish a failed read over a state already read, unless an End has returned since**: a window that missed the End's event must not show the phone connected.
 
 Source of truth: `OneTimeConnection` in `lib/src/components/OneTimeConnection.tsx`; `OneTimeIndicator` in `lib/src/components/OneTimeIndicator.tsx`; `lib/src/remote/burrow/one-time-store.ts`.
 

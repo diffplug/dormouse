@@ -23,3 +23,10 @@ export const ENROLLMENT_TTL_MS = 10 * 60 * 1000;
 
 /** Where Stripe returns the browser: checkout success and cancel, and the portal. */
 export const BILLING_RETURN_PATH = "/billing";
+
+// The Hosted terms version the sign-in notice names and an account accepts by
+// continuing: the revision date both policy pages print
+// (`website/src/components/HostedPolicyLayout.tsx`), which
+// `hosted/server/tests/policy.test.ts` pins this to. A new version is a new
+// acceptance row, never an edit of an old one.
+export const TERMS_VERSION = "2026-10-08";

@@ -39,10 +39,10 @@ interface RoomState {
  * One one-time link's rendezvous (`docs/specs/one-time.md` -> "Hosted
  * rendezvous"): a Burrow socket, at most one phone socket, and nothing else.
  * It forwards each text frame verbatim to the other end and never parses,
- * decodes, stores, or logs one; `scripts/e2e-lint.mjs` holds the parse half
- * textually. Every socket is accepted through the Hibernation API, so a room
- * waiting for its phone costs nothing, and the state lives in the Burrow
- * socket's attachment rather than in memory.
+ * decodes, stores, or logs one; `scripts/e2e-lint.mjs` holds that textually.
+ * Every socket is accepted through the Hibernation API, so a room waiting for
+ * its phone costs nothing, and the state lives in the Burrow socket's
+ * attachment rather than in memory.
  */
 export class OneTimeRoom {
   readonly #ctx: DurableObjectState;

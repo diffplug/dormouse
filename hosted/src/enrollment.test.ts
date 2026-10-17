@@ -1,20 +1,20 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { MAX_ENROLLED_BURROWS } from "../../remote-lib-common/src/remote/enrolled-computers.ts";
+import { MAX_BURROWS_PER_ACCOUNT } from "../../remote-lib-common/src/remote/enrolled-computers.ts";
 import { NOT_ENTITLED_ERROR } from "../../remote-lib-common/src/remote/wire.ts";
 import { NoPlanError, approveEnrollment } from "./api";
 import { approvedNotice } from "./enrollment";
 
 describe("approvedNotice", () => {
   it("says the computer signs in when the account has room", () => {
-    expect(approvedNotice("ABCD-EFGH", MAX_ENROLLED_BURROWS - 1)).toBe(
+    expect(approvedNotice("ABCD-EFGH", MAX_BURROWS_PER_ACCOUNT - 1)).toBe(
       "Approved ABCD-EFGH. Dormouse on your computer signs in within a few seconds.",
     );
     expect(approvedNotice("ABCD-EFGH", null)).toContain("signs in within a few seconds");
   });
 
   it("sends a full account to remove a computer first", () => {
-    expect(approvedNotice("ABCD-EFGH", MAX_ENROLLED_BURROWS)).toBe(
-      `Approved ABCD-EFGH, but this account already has ${MAX_ENROLLED_BURROWS} computers. Remove one below and Dormouse on your computer signs in on its own.`,
+    expect(approvedNotice("ABCD-EFGH", MAX_BURROWS_PER_ACCOUNT)).toBe(
+      `Approved ABCD-EFGH, but this account already has ${MAX_BURROWS_PER_ACCOUNT} computers. Remove one below and Dormouse on your computer signs in on its own.`,
     );
   });
 });

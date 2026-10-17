@@ -287,8 +287,8 @@ describe('the direct path over the native addon', () => {
 
       expect(await harness.client.hello()).toMatchObject({ protocolVersion: 1 });
       await harness.client.watchDirectory(() => {});
-      await harness.client.attach('surface-1', 80, 24, { onData: (e) => chunks.push(e) });
-      await harness.client.write('surface-1', 'ls\n');
+      await harness.client.attach('surface:1', 80, 24, { onData: (e) => chunks.push(e) });
+      await harness.client.write('surface:1', 'ls\n');
 
       // Requests, answers, and the burrow→client stream all crossed the channel;
       // the relay carried none of it, in either direction.
@@ -459,8 +459,10 @@ describe('the direct path over the native addon', () => {
       const run = await openBound();
       try {
         // Both ends on this machine, so both are the one allowed address: the
-        // addon reports the pair as literals, never a name.
-        const pair = run.bound.sctp?.transport?.iceTransport?.getSelectedCandidatePair?.();
+        // addon's native read, the one the policy takes, reports the pair as
+        // literals, never a name.
+        expect(run.bound.selectedCandidatePair).toBeTypeOf('function');
+        const pair = run.bound.selectedCandidatePair?.();
         expect(pair?.local?.address).toBe(EXTERNAL_V4);
         expect(pair?.remote?.address).toBe(EXTERNAL_V4);
         expect(run.lost).toEqual([]);
@@ -482,7 +484,7 @@ describe('the direct path over the native addon', () => {
         ),
       );
       try {
-        const pair = run.bound.sctp?.transport?.iceTransport?.getSelectedCandidatePair?.();
+        const pair = run.bound.selectedCandidatePair?.();
         expect(pair?.remote?.address).toBe(EXTERNAL_V4);
         expect(run.lost).toEqual([]);
       } finally {
