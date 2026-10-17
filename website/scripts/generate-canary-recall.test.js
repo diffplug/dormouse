@@ -50,15 +50,15 @@ describe('summarize', () => {
     ], { now: NOW });
     expect(snapshot).toMatchObject({ asOf: '2026-10-17', windowDays: WINDOW_DAYS, seeded: 22, caught: 15, unrecorded: [] });
     expect(snapshot.runs).toEqual([
-      { date: daysAgo(2).slice(0, 10), url: URL(3), seeded: 8, caught: 4, unfinished: 1 },
-      { date: daysAgo(30).slice(0, 10), url: URL(2), seeded: 6, caught: 3, unfinished: 0 },
-      { date: daysAgo(WINDOW_DAYS - 1).slice(0, 10), url: URL(4), seeded: 8, caught: 8, unfinished: 0 },
+      { at: daysAgo(2), url: URL(3), seeded: 8, caught: 4, unfinished: 1 },
+      { at: daysAgo(30), url: URL(2), seeded: 6, caught: 3, unfinished: 0 },
+      { at: daysAgo(WINDOW_DAYS - 1), url: URL(4), seeded: 8, caught: 8, unfinished: 0 },
     ]);
   });
 
   it('lists a run with no record apart, and never repairs a bad one', () => {
     const snapshot = summarize([{ id: 5, createdAt: daysAgo(1), record: null }], { now: NOW });
-    expect(snapshot).toMatchObject({ seeded: 0, caught: 0, runs: [], unrecorded: [{ date: daysAgo(1).slice(0, 10), url: URL(5) }] });
+    expect(snapshot).toMatchObject({ seeded: 0, caught: 0, runs: [], unrecorded: [{ at: daysAgo(1), url: URL(5) }] });
     expect(() => summarize([{ id: 6, createdAt: daysAgo(1), record: record(6, { caught: 9 }) }], { now: NOW })).toThrow(/exceeds/);
   });
 

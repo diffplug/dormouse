@@ -72,7 +72,7 @@ export function summarize(runs, { now, windowDays = WINDOW_DAYS }) {
     .filter((r) => Date.parse(r.createdAt) >= since && Date.parse(r.createdAt) <= now.getTime())
     .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt) || b.id - a.id);
   const recorded = inWindow.filter((r) => r.record !== null)
-    .map((r) => ({ date: r.createdAt.slice(0, 10), url: runUrl(r.id), ...validateRecord(r.record, r.id) }));
+    .map((r) => ({ at: r.createdAt, url: runUrl(r.id), ...validateRecord(r.record, r.id) }));
   return {
     asOf: now.toISOString().slice(0, 10),
     windowDays,
@@ -80,7 +80,7 @@ export function summarize(runs, { now, windowDays = WINDOW_DAYS }) {
     seeded: recorded.reduce((n, r) => n + r.seeded, 0),
     caught: recorded.reduce((n, r) => n + r.caught, 0),
     runs: recorded,
-    unrecorded: inWindow.filter((r) => r.record === null).map((r) => ({ date: r.createdAt.slice(0, 10), url: runUrl(r.id) })),
+    unrecorded: inWindow.filter((r) => r.record === null).map((r) => ({ at: r.createdAt, url: runUrl(r.id) })),
   };
 }
 
