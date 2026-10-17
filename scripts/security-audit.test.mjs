@@ -1667,7 +1667,8 @@ const DOMAINS = ['supply-chain', 'ci-and-secrets', 'remote', 'local', 'hosted'];
 // "Schedule and gate": nightly and on dispatch, and three separate things make
 // it the release gate — the dispatch, the failing watch, and the `needs:` edge.
 test('the audit runs nightly and on dispatch, and gates the VS Code publish', () => {
-  assert.match(workflow, /^on:\n  schedule:\n    - cron: "21 4 \* \* \*"\n  workflow_dispatch:\n/m);
+  // The weekly canary's line follows; scripts/security-audit-canary.test.mjs owns it.
+  assert.match(workflow, /^on:\n  schedule:\n    - cron: "21 4 \* \* \*"\n(?:    - cron: .+\n)*  workflow_dispatch:\n/m);
   const gate = workflowRunBlock(release, 'Dispatch security audit and gate on its result').replace(/^\s*#.*$/gm, '');
   assert.match(gate, /^set -euo pipefail$/m);
   assert.match(gate, /^workflow="security-audit\.yaml"$/m);
