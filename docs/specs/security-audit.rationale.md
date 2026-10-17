@@ -187,3 +187,13 @@ gh secret set AUDIT_PAT --env security-audit --repo diffplug/dormouse --body 'gi
 **Why the catch rule is strict.** A line citing the file but not the rule may be another finding in a file a seed touched. Counting near-misses would publish a recall a re-run could not reproduce.
 
 **Why a separate job, and a filter on the gate.** The `audit` job files issues, reads the ledger, uploads `audit-state`, and gates a release; gating each step on an input would leave each a place to get the condition wrong. A canary and a release dispatch can share a commit, so the gate also refuses a run by its title.
+
+**Why weekly (2026-10).** A dispatched canary ran only when a maintainer remembered, so the published window could empty out. A weekly run keeps it full at the cost of one audit run a week; the next nightly then audits in full, which the seven-day cap on a skip forces within the week anyway.
+
+## Published recall
+
+**Why a committed snapshot (2026-10).** Downloading an artifact needs a token even on a public repository, and dormouse.sh is built by Cloudflare Pages from `release`, not in Actions, so the site build has none to read the artifacts with. A snapshot regenerated at release beside the dependency snapshots needs none, every promotion of `release` carries a fresh figure, and the as-of date shows how fresh it is.
+
+**Why 90 days.** It is the `canary-recall` artifact's retention, so no older run has a record left to read.
+
+**Why an unfinished domain still counts.** Dropping the run, or its unfinished domain's seeds, would raise the figure by the runs where the audit did worst; a domain that ran out of time is a miss the published recall should carry.

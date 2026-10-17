@@ -23,7 +23,7 @@ Source of truth: `create_release` in `scripts/sign-and-deploy.sh`; `publish-vsco
 
 Human-driven, in order:
 
-1. **Update dependency snapshots** — run `node website/scripts/generate-deps.js`, review the diffs in `website/src/data/dependencies-{npm,cargo,runtime}.json`, commit if changed.
+1. **Update website snapshots** — run `node website/scripts/generate-deps.js` and `node website/scripts/generate-canary-recall.js` (on your `gh` login), review the diffs in `website/src/data/dependencies-{npm,cargo,runtime}.json` and `website/src/data/canary-recall.json`, commit if changed.
 2. **Draft release notes and bump version** — run `/release-notes` at the repo root ([.claude/commands/release-notes.md](../../.claude/commands/release-notes.md)), which owns the steps. Review the diff.
 3. **Commit and tag** — `git commit -am "Release vX.Y.Z"` then `git tag vX.Y.Z`.
 4. **Push** — `git push && git push origin vX.Y.Z`, which triggers CI (Stage 1).
