@@ -26,7 +26,6 @@ import type {
   PairingQueueEvent,
   PairingQueueItem,
   PushDevicesResult,
-  BurrowConsoleStatus,
 } from '../../host/remote/service-protocol';
 import { getPlatform } from '../../lib/platform';
 import type { BurrowLink } from '../../lib/platform/types';
@@ -38,8 +37,6 @@ import {
   resolvePairingApproval,
   sameRequest,
 } from './pairing-approval';
-
-export type { BurrowConsoleStatus };
 
 /** Install the `window.dormouseBurrow` console hook and connect. Idempotent. */
 export function installBurrowConsoleHook(): void {

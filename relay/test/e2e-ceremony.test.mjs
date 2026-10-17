@@ -18,6 +18,7 @@ import assert from 'node:assert/strict';
 import {
   API_ROUTES,
   MAX_TOKENS_PER_BURROW,
+  PRESENCE_WINDOW,
   REMOTE_METHODS,
   SELFHOST_ACCOUNT_ID,
   fromBase64Url,
@@ -241,6 +242,39 @@ test('a paired phone connects and speaks protocol-v1 inside the session', async 
     // decode, and the hello text never crossed in the clear.
     const view = JSON.stringify([...client.sent, ...client.frames]);
     assert.equal(view.includes(REMOTE_METHODS.hello), false);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test('the connect right after pairing rides the presence window, with no proof', async () => {
+  const fixture = await ceremonyFixture({ autoApprove: true });
+  try {
+    const invitation = await fixture.invite();
+    const { authenticator, client } = await fixture.phone({
+      credential: { setupToken: invitation.setupToken },
+    });
+    assert.equal((await client.pair({ invitation, authenticator })).ok, true);
+
+    const opened = await client.openConnection();
+    assert.equal(opened.offer, PRESENCE_WINDOW);
+    client.sendControl({ presence: PRESENCE_WINDOW });
+    const frame = await client.nextTransport();
+    assert.deepEqual(opened.session.receive(fromBase64Url(frame.ct)), {
+      kind: 'control',
+      value: { ok: true, burrowLabel: BURROW_LABEL },
+    });
+
+    // Another browser on the same account gets no offer, and asking anyway is
+    // a presence denial: the window is the paired static's alone.
+    const { client: stranger } = await fixture.phone();
+    const refused = await stranger.openConnection();
+    assert.equal(refused.offer, 'none');
+    stranger.sendControl({ presence: PRESENCE_WINDOW });
+    assert.deepEqual(refused.session.receive(fromBase64Url((await stranger.nextTransport()).ct)), {
+      kind: 'control',
+      value: { ok: false, code: 'presence-rejected' },
+    });
   } finally {
     await fixture.close();
   }

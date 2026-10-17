@@ -1,9 +1,10 @@
 import { getToolDirty, resetToolDirty } from '../tool-dirty-store';
 import { getToolAnnounce, resetToolAnnounces } from '../tool-announce-store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { openPortRequestTimeoutMs } from './types';
+import { openPortRequestTimeoutMs, SURFACE_ID_RESERVE_WAIT_MS } from './types';
 import { hostShown, setHostShown } from '../host-shown';
 import { registry, type TerminalEntry } from '../terminal-store';
+import { mintSurfaceId, resetSurfaceIdPool } from '../surface-ids';
 
 const terminalStateStoreMocks = vi.hoisted(() => ({
   applyTerminalSemanticEvents: vi.fn(),
@@ -606,6 +607,48 @@ describe('VSCodeAdapter remote host link', () => {
   });
 });
 
+
+describe('VSCodeAdapter Surface ids', () => {
+  beforeEach(stubWebviewEnv);
+  afterEach(() => { vi.unstubAllGlobals(); resetSurfaceIdPool(); });
+
+  it('init mints from the extension host, above every Surface the webview restored', async () => {
+    const saved = { version: 4, panes: [{ id: 'surface:41', cwd: null, title: 'shell', untouched: true }], doors: [{ id: 'surface:9', title: 'docs' }] };
+    vi.stubGlobal('acquireVsCodeApi', () => ({ postMessage, getState: () => saved, setState: vi.fn() }));
+    const adapter = new VSCodeAdapter();
+    const ready = adapter.init();
+    const request = postMessage.mock.calls.at(-1)![0];
+    expect(request).toMatchObject({ type: 'surface:reserveIds', count: 8, floor: 41 });
+    windowTarget.dispatchEvent(hostMessage({ type: 'surface:reservedIds', requestId: request.requestId, ids: Array.from({ length: 8 }, (_, i) => `surface:${1042 + i}`) }));
+    await ready;
+    expect(mintSurfaceId()).toBe('surface:1042');
+  });
+
+  it('waits out the extension host\'s bound on the first reservation and on every refill', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubGlobal('acquireVsCodeApi', () => ({ postMessage, getState: () => undefined, setState: vi.fn() }));
+      const adapter = new VSCodeAdapter();
+      // The host may queue a reservation behind other webviews and wait for
+      // another window's lock before it answers.
+      const answer = async (first: number) => {
+        const request = postMessage.mock.calls.at(-1)![0];
+        expect(request.type).toBe('surface:reserveIds');
+        await vi.advanceTimersByTimeAsync(SURFACE_ID_RESERVE_WAIT_MS);
+        windowTarget.dispatchEvent(hostMessage({ type: 'surface:reservedIds', requestId: request.requestId, ids: Array.from({ length: request.count }, (_, i) => `surface:${first + i}`) }));
+        await vi.advanceTimersByTimeAsync(0);
+      };
+      const ready = adapter.init();
+      await answer(1);
+      await ready;
+      expect(Array.from({ length: 7 }, () => mintSurfaceId())).toEqual(Array.from({ length: 7 }, (_, i) => `surface:${i + 1}`));
+      await answer(100);
+      expect(Array.from({ length: 3 }, () => mintSurfaceId())).toEqual(['surface:8', 'surface:100', 'surface:101']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
 
 describe('VSCodeAdapter port deadline', () => {
   beforeEach(stubWebviewEnv);

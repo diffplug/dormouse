@@ -1,7 +1,11 @@
 // Browser-safe: the website playground's dor prints with these.
+import { CONTROL_CHARACTERS, FORMAT_CHARACTERS } from './shell-quote.js';
 import type { ToolSurfaceResponse, VersionMetadata } from './types.js';
 
-const TERMINAL_CONTROLS = /[\x00-\x1f\x7f-\x9f]/g;
+const TERMINAL_CONTROLS = new RegExp(`[${CONTROL_CHARACTERS}]`, 'g');
+const CONTROL_OR_FORMAT = new RegExp(`[${CONTROL_CHARACTERS}${FORMAT_CHARACTERS}]`, 'g');
+/** What `JSON.stringify` leaves unescaped of the set above: it escapes C0. */
+const JSON_UNESCAPED = new RegExp(`[\\x7f-\\x9f${FORMAT_CHARACTERS}]`, 'g');
 export const escapeControl = (char: string) => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`;
 
 /** The one spelling of a `dor` error line, shared by every path that prints one. */
@@ -15,6 +19,13 @@ export function printable(text: string): string {
   return text.replace(TERMINAL_CONTROLS, escapeControl);
 }
 
+/** `printable` for text a person reads to decide whether to run something —
+ *  Tool configuration and the consent dialogs: format characters that reorder
+ *  or hide text become `\u` escapes too, so what shows is what is there. */
+export function printableExact(text: string): string {
+  return text.replace(CONTROL_OR_FORMAT, escapeControl);
+}
+
 /** The same controls removed rather than escaped. */
 export function stripControls(text: string): string {
   return text.replace(TERMINAL_CONTROLS, '');
@@ -24,39 +35,43 @@ export function renderJson(payload: unknown): string {
   return `${JSON.stringify(payload, null, 2)}\n`;
 }
 
-/** `renderJson` for repo text: `JSON.stringify` escapes only C0, so DEL and C1
- *  are escaped too, which leaves the parsed value unchanged. */
+/** `renderJson` for repo text: `JSON.stringify` escapes only C0, so DEL, C1,
+ *  and format characters are escaped too, which leaves the parsed value
+ *  unchanged. */
 export function renderPrintableJson(payload: unknown): string {
-  return renderJson(payload).replace(/[\x7f-\x9f]/g, escapeControl);
+  return renderJson(payload).replace(JSON_UNESCAPED, escapeControl);
 }
 
 /** What `dor tool` and `dor open` print for the host's answer. Its command and
- *  cwd come from repo config, so every output escapes C0, DEL, and C1. */
+ *  cwd come from repo config, so every output escapes controls and format
+ *  characters. */
 export function renderToolResponse(response: ToolSurfaceResponse, json: boolean): string {
   if (json) {
     return renderPrintableJson({
       status: response.status,
       surface_id: response.surfaceId,
-      surface_ref: response.surfaceRef,
       command: response.command,
       cwd: response.cwd,
       minimized: response.minimized,
       key: response.key,
     });
   }
-  return `${printable(`${response.status} ${response.surfaceRef}  ${JSON.stringify(response.command)}`)}\n`;
+  return `${printableExact(`${response.status} ${response.surfaceId}  ${JSON.stringify(response.command)}`)}\n`;
 }
 
 // The prerelease-style build tag: `<version>+<N>` when the build carries commits
-// past the version tag, else just `<version>`.
-function buildTag(metadata: VersionMetadata): string {
+// past the version tag, `<version>+?` when the count is unknown, else just
+// `<version>`. Settings → About shows the same tag.
+export function buildTag(metadata: VersionMetadata): string {
+  if (metadata.commitsSinceVersion === null) return `${metadata.version}+?`;
   return metadata.commitsSinceVersion > 0
     ? `${metadata.version}+${metadata.commitsSinceVersion}`
     : metadata.version;
 }
 
 export function renderVersion(metadata: VersionMetadata): string {
-  const suffix = metadata.commitsSinceVersion > 0 ? ` (${buildTag(metadata)})` : '';
+  const tag = buildTag(metadata);
+  const suffix = tag === metadata.version ? '' : ` (${tag})`;
   return `dor ${metadata.version} [${metadata.commit}]${suffix}\n`;
 }
 

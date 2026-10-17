@@ -174,6 +174,24 @@ tools:
     expect(() => parse('tools:\n  t:\n    run: x\n    prespawn_dedupe: [{a: 1}]\n')).toThrow(/must be strings/);
   });
 
+  // Each field the trust prompt shows or a shell receives: the text shown must
+  // be the text that runs (`docs/specs/security-local.md` -> Dor Tool configuration).
+  const HIDDEN = [
+    ['DEL', '\\x7f'], ['C0', '\\x15'], ['newline', '\\n'], ['tab', '\\t'], ['C1', '\\u009b'],
+    ['right-to-left override', '\\u202e'], ['isolate', '\\u2067'], ['right-to-left mark', '\\u200f'],
+    ['zero-width space', '\\u200b'], ['byte order mark', '\\ufeff'],
+  ];
+  it.each(HIDDEN)('refuses %s in a string run, an argument, a name, and a key', (_, escape) => {
+    expect(() => parse(`tools:\n  t:\n    run: "echo \\"${escape}hi\\""\n`)).toThrow(/run cannot contain terminal control characters or invisible formatting/);
+    expect(() => parse(`tools:\n  t:\n    run: [echo, "a${escape}b"]\n`, USER)).toThrow(/run cannot contain/);
+    expect(() => parse(`tools:\n  "t${escape}":\n    run: echo\n`)).toThrow(/tool names cannot contain/);
+    expect(() => parse(`tools:\n  t:\n    run: echo\n    prespawn_dedupe: [t, "a${escape}b"]\n`)).toThrow(/prespawn_dedupe cannot contain/);
+  });
+
+  it('keeps a string run that only YAML line folding ends with a newline', () => {
+    expect(parse('tools:\n  t:\n    run: |\n      pnpm dev\n').tools.get('t')?.run).toBe('pnpm dev');
+  });
+
   it('reports malformed YAML as a ToolFileError naming the file', () => {
     expect(() => parse('tools:\n  - [\n')).toThrow(ToolFileError);
     expect(() => parse('tools:\n  - [\n')).toThrow(/\/repo\/dormouse\.yml:/);

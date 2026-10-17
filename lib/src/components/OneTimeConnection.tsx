@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { COPY_OUTCOME_LABEL, ModalReviewBlock, modalActionButton } from './design';
+import { CopyButton } from './CopyButton';
+import { ModalReviewBlock, modalActionButton } from './design';
 import {
   FIELD_HINT,
   FIELD_LABEL,
@@ -12,8 +13,6 @@ import {
 } from './remote-control-shared';
 import { ExpiringCode } from './ScannableCode';
 import { DEFAULT_RELAY_ORIGIN } from '../host/relay-origin';
-import { writeTextToClipboard } from '../lib/clipboard';
-import type { CopyOutcome } from '../lib/mouse-selection';
 import type {
   OneTimeEndReason,
   OneTimeState,
@@ -37,9 +36,9 @@ import { phoneOnAnyNetwork } from '../remote/network-policy';
 const UNAVAILABLE_COPY: Record<OneTimeUnavailableReason, string> = {
   'self-host':
     `Not available in a self-host build: one-time links are made at ${hostOf(DEFAULT_RELAY_ORIGIN)}, ` +
-    'which this build never contacts.',
+    'which this build reaches only through a link you click.',
   'network-off':
-    'Off while Settings → Network is set to Nothing: this computer opens no connections on its own.',
+    'Off while Settings → Network is set to Nowhere: this computer opens no connections on its own.',
 };
 
 /**
@@ -96,9 +95,6 @@ function phoneWhere(anyNetwork: boolean): string {
  * counterpart of the Relay panel's `PAIRING_OUTCOME_LABEL`.
  */
 export const ONE_TIME_OUTCOME_LABEL = 'One-time connection outcome';
-
-/** How long Copy link says it did, or could not. */
-const COPY_FEEDBACK_MS = 1400;
 
 /**
  * Whether a state shows the button rather than the panel: nothing is under way,
@@ -240,7 +236,7 @@ function OneTimePanel({
       body = <WaitingLink url={state.url} expiresAt={state.expiresAt} anyNetwork={anyNetwork} onShown={reveal} />;
       actions = (
         <>
-          <CopyLinkButton url={state.url} />
+          <CopyButton text={() => state.url} label="Copy link" className={modalActionButton()} />
           {button('New link', onOpen)}
           {cancel('Cancel')}
         </>
@@ -333,22 +329,3 @@ function WaitingLink({
   );
 }
 
-function CopyLinkButton({ url }: { url: string }) {
-  const [outcome, setOutcome] = useState<CopyOutcome | null>(null);
-
-  useEffect(() => {
-    if (!outcome) return;
-    const timer = setTimeout(() => setOutcome(null), COPY_FEEDBACK_MS);
-    return () => clearTimeout(timer);
-  }, [outcome]);
-
-  return (
-    <button
-      type="button"
-      className={modalActionButton()}
-      onClick={() => void writeTextToClipboard(url).then((ok) => setOutcome(ok ? 'copied' : 'failed'))}
-    >
-      {outcome ? COPY_OUTCOME_LABEL[outcome] : 'Copy link'}
-    </button>
-  );
-}

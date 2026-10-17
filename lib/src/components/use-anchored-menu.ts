@@ -2,6 +2,7 @@ import { useEffect, useState, type CSSProperties, type RefObject } from 'react';
 import { MODAL_LAYERS, OVERLAY_MAX_HEIGHT_CSS, useMeasuredElementRect } from './design';
 import {
   clampOverlayPosition,
+  insetOverlayBounds,
   overlayViewportBounds,
   OVERLAY_VIEWPORT_MARGIN_PX,
   subscribeOverlayViewport,
@@ -13,8 +14,9 @@ const MENU_GAP_PX = 4;
 interface AnchoredMenuOptions {
   /** Which side of the trigger the menu prefers. */
   side?: 'above' | 'below';
-  /** Which of the menu's edges lines up with the trigger's matching edge. */
-  align?: 'start' | 'end';
+  /** Which of the menu's edges lines up with the trigger's matching edge.
+   *  `auto` is `start` while the menu fits to the trigger's right, else `end`. */
+  align?: 'start' | 'end' | 'auto';
   /**
    * `fixed` measures the menu and positions it in viewport coordinates;
    * `absolute` offsets it off the trigger in CSS alone.
@@ -93,6 +95,9 @@ export function useAnchoredMenu(
         viewportHeight: viewport.height,
       }
     : null;
+  const resolvedAlign = align !== 'auto'
+    ? align
+    : triggerRect && viewport && triggerRect.left + widthPx > insetOverlayBounds(viewport).right ? 'end' : 'start';
   const otherSide = side === 'above' ? 'below' : 'above';
   const resolvedSide = space && space[otherSide] > space[side] ? otherSide : side;
   // If a malformed/off-screen trigger leaves no room on either side, fixed
@@ -114,14 +119,14 @@ export function useAnchoredMenu(
     strategy === 'absolute'
       ? {
           position: 'absolute',
-          ...(align === 'end' ? { right: 0 } : { left: 0 }),
+          ...(resolvedAlign === 'end' ? { right: 0 } : { left: 0 }),
           ...(resolvedSide === 'above'
             ? { bottom: `calc(100% + ${MENU_GAP_PX}px)` }
             : { top: `calc(100% + ${MENU_GAP_PX}px)` }),
         }
       : triggerRect && menuRect && effectiveMenuHeight !== null
         ? clampOverlayPosition({
-            left: align === 'end'
+            left: resolvedAlign === 'end'
               ? triggerRect.left + triggerRect.width - widthPx
               : triggerRect.left,
             top: resolvedSide === 'above'
@@ -160,6 +165,9 @@ export function useCloseOnOutsideAndEscape(
   open: boolean,
   ref: RefObject<HTMLElement | null>,
   onClose: () => void,
+  /** What a scroll must move to close the menu, when the menu itself is
+   *  positioned away from its trigger (a portal); defaults to `ref`. */
+  anchor?: RefObject<HTMLElement | null>,
 ) {
   useEffect(() => {
     if (!open) return;
@@ -174,7 +182,7 @@ export function useCloseOnOutsideAndEscape(
       if (event.key === 'Escape') onClose();
     };
     const closeOnScroll = (event: Event) => {
-      const root = ref.current;
+      const root = (anchor ?? ref).current;
       // Only a scroller the trigger sits inside can move it. `document` is
       // itself a Node containing everything, so viewport scrolling — which the
       // DOM dispatches at the Document — satisfies this too.
@@ -190,5 +198,5 @@ export function useCloseOnOutsideAndEscape(
       window.removeEventListener('keydown', closeOnEscape);
       window.removeEventListener('scroll', closeOnScroll, true);
     };
-  }, [open, ref, onClose]);
+  }, [open, ref, onClose, anchor]);
 }

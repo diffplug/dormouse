@@ -197,7 +197,7 @@ const PRODUCTS: readonly SupplyChainProduct[] = [
     id: "builtin-tools",
     title: "Built-in Tools",
     description:
-      "The file viewer and editors behind dor open — Monaco, the Markdown editor, and Mermaid diagrams. They ship with every install, inside the dor CLI, but their code runs only when you open a file with a built-in Tool, in that Tool's frame, whose server hands out only the files you opened (and, for Markdown, images in and below the document's folder).",
+      "The file viewer and editors behind dor open — Monaco, the Markdown editor, and Mermaid diagrams. They ship with every install, inside the dor CLI, but their code runs only when you open a file or folder with a built-in Tool, in that Tool's frame, whose server hands out only what you opened: the file, the files an HTML or CSS document references in and below its folder, images in and below a Markdown document's folder, and a folder's entry names, never their contents.",
     summary: { count: npmDeps.builtinTools.length, detail: "npm packages" },
     sections: [
       {

@@ -3,6 +3,7 @@ import { reactRouter } from "@react-router/dev/vite";
 import tailwindcss from "@tailwindcss/vite";
 import fs from "node:fs";
 import path from "node:path";
+import { buildStampVitePlugin } from "../scripts/build-stamp.mjs";
 
 /**
  * Applies `public/_redirects` in dev, the way the host does in production.
@@ -47,6 +48,8 @@ export default defineConfig(({ mode }) => ({
     mode === "test" ? null : reactRouter(),
     tailwindcss(),
     redirectsInDev(),
+    // Settings → About names the playground's build.
+    buildStampVitePlugin({ host: "playground" }),
   ],
   resolve: {
     alias: {
@@ -56,9 +59,9 @@ export default defineConfig(({ mode }) => ({
       // `remote-lib-common`, whose package `exports` resolve to a `dist` this
       // build never compiles. Alias it to source, exactly like `dormouse-lib`.
       "remote-lib-common": path.resolve(import.meta.dirname, "../remote-lib-common/src"),
-      // Same story for `dor-lib-common`: `Wall` → `useDorControl` → `connect-port`
-      // imports its `./browser-providers` subpath. The directory alias covers both
-      // that subpath and the bare specifier.
+      // Same story for `dor-lib-common`: `Wall` and `useDorControl` import its
+      // `./browser-providers` and `./browser-viewports` subpaths. The directory
+      // alias covers those subpaths and the bare specifier.
       "dor-lib-common": path.resolve(import.meta.dirname, "../dor-lib-common/src"),
       // Wall also imports `dor/*` (protocol + command types); `dor` has no
       // package `exports`, and vite does not read tsconfig paths, so resolve it

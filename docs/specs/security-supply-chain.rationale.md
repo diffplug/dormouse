@@ -6,23 +6,21 @@ Why the test is "puts on a user's machine" rather than "everything a user runs":
 
 Why `dormouse-lib` has to be named a root rather than left as a workspace edge: `vscode-ext` declares only `node-pty` and `ws`, reaching the lib through relative imports into `../lib/src/` from fifteen files, so the extension's dependency walk never arrives at it. Only `dormouse-standalone`'s edge would — which puts the disclosure of lib's entire subtree one refactor away from silently vanishing. Naming it a root is what makes that not matter.
 
-Why external binaries cannot be disclosed: Dormouse is a terminal, so it spawns the user's shell, and `dor agent-browser` forwards to an `agent-browser` CLI the user installs themselves and that is resolved off `PATH`. Those are the user's software, not ours, and disclosing them is neither possible nor meaningful.
-
-Where the snapshots come from: they are generated from the lockfiles and reviewed as part of release work. The `pnpm install --frozen-lockfile` precondition matters because a stale `node_modules` makes the regeneration check pass locally on a tree that would fail in CI.
+Where the snapshots come from: all three are generated from inputs committed beside them — the npm table from the pnpm lockfile and the bundled-theme records, the cargo table from `cargo metadata` over the standalone crate, the runtime row from `devEngines.runtime.version` — so each goes stale in the PR that changes its input, and CI fails that PR, not a later release. No snapshot is left to release work. The `pnpm install --frozen-lockfile` precondition matters because a stale `node_modules` makes the regeneration check pass locally on a tree that would fail in CI.
 
 Why CI, and not the nightly audit, gates the regenerated snapshots: until the gate existed the nightly audit was the only thing that ever ran the generator, and two production bumps (`ws`, `hono`) shipped undisclosed before it caught them. A nightly finding of a stale disclosure means it already merged; the CI gate is what keeps it from merging.
 
 Why the two theme files can drift despite coming from one run of `lib/scripts/bundle-themes.mjs`: both are committed and the script needs network access, so an edit to one need not be accompanied by a re-run. Regenerating the disclosure then produces no diff, which is precisely the class the stale-snapshot gate cannot see — hence a separate test.
 
+Why peers are disclosed, and only where pnpm linked them: the walk once read only `dependencies` and `optionalDependencies`, so `supports-color`, an optional peer of `debug` that the Relay's `pnpm deploy --prod --legacy` installs, went undisclosed. A prod deploy of `dor-tools-builtin` likewise installs the optional peers `typescript`, `@types/react`, and `yjs` (measured with pnpm 12.6.0, 2026-10). Node resolution from the package directory would climb into `node_modules/.pnpm/node_modules`, where pnpm hoists whatever version some other instance used, so it would disclose a peer this instance never gets. The workspace install and a prod deploy can still pick different versions of an optional peer: the workspace links `supports-color@7.2.0` to the Relay's `debug`, the deploy `10.2.2`; both are disclosed, the latter in the Built-in Tools section that reaches it first.
+
+Why an installed platform build an external package declares brings its whole family: which build installs depends on the generating machine — the `typescript` peer brings `@typescript/typescript-darwin-arm64` on an Apple-silicon laptop and `-linux-x64` in CI — and the host's build really ships wherever a `node_modules` is copied (the sidecar) or installed (the Relay). Disclosing only the installed one would fail the snapshot gate on every machine but one; skipping it would leave a shipped package out. The family members are published in lockstep (for `typescript@7.0.2`, identical license, author, and homepage, and no dependencies; checked against the registry 2026-10), so describing them from whichever one installed gives the same snapshot everywhere. A family a product root declares is left to that root, so `node-datachannel`'s android and musl builds stay undisclosed.
+
 Why being a devDependency of the repo does not count as covered: a selfhoster's `pnpm install` would otherwise drag the whole toolchain into the disclosure.
 
 ## Bundled runtime
 
-What the pin buys the disclosure: because the supply-chain page reads the same `devEngines.runtime.version`, the published runtime version cannot drift to whatever Node happened to be on the build machine's `PATH`.
-
 Why the Windows subsystem byte is flipped: leaving the bundled `node.exe` as a console-subsystem binary lets Windows Terminal's default-terminal handoff spawn a stray terminal window behind the app.
-
-Why the patch works for the sidecar: its explicitly piped stdio survives the subsystem change. Inherited console handles do not: `dor` therefore uses a console-subsystem copy. The platform evidence is in `docs/specs/standalone.rationale.md` → Windows node subsystem.
 
 Why alternate version declarations are excluded: in the pinned [setup-node implementation](https://github.com/actions/setup-node/blob/820762786026740c76f36085b0efc47a31fe5020/src/util.ts), `volta.node` overrides `devEngines.runtime`; `engines.node` is a lower-precedence fallback. Forbidding both keeps one version declaration, though only Volta overrides the current pin. The build's version check rejects a mismatched binary rather than silently bundling it.
 
@@ -33,5 +31,7 @@ What the `minimumReleaseAge` package rules are: the Renovate equivalent of the p
 The pgstencil exception has a different gate: its release workflow stages a version only after a passing `security-audit` on the packaged commit, and a human approves the staged package with npm 2FA before it becomes public. The package carries that commit in `dist/provenance.json`; Hosted verifies matching clean commits for core and auth, and its audit checks npm-signed workflow attestations bind those bytes to that commit. The exclusion list is deliberately narrow so other dependencies retain the withdrawal window.
 
 Why the `vulnerabilityAlerts` cooldown is kept rather than dropped for speed: it guards the opposite threat from the alert itself — a compromised release that gets yanked within a day, which a reviewer reading a dependency diff cannot detect the way the ecosystem's own yank process can. Nothing here auto-merges, and the Dependabot alert already makes the vulnerability visible the moment it is published, so what the cooldown costs is a day before the remediation PR appears, not a day before anyone knows.
+
+What `skills` 1.7.0 does with the lock (read from its npm tarball, 2026-10): `experimental_install` (`runInstallFromLock`) hands each lock entry's source, with no ref when the entry has none, to the ordinary `add` path, which fetches it, installs it, and writes the hash of what it fetched back into the lock. `computedHash` is compared only by `sync`, for skills from `node_modules`, and only to skip an unchanged one. Why Renovate does not track the pin: it would need a regex manager, outside the `npm` and `cargo` cooldown rules, for one maintainer script.
 
 Why push protection covering `dormouse-bot` is the point rather than an incidental: an injected agent pasting a token into a file is exactly the shape it stops.

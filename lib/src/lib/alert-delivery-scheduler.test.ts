@@ -26,7 +26,7 @@ let delivered: Delivered[];
 const sinks = () => delivered.map((delivery) => delivery.sink);
 const episodeId = (id = PANE) => manager.getState(id).episode!.id;
 const ring = (id = PANE) => manager.notifyFromProtocol(id, REPORT);
-/** Clear the ring with a click, then ring again on fresh output. */
+/** Clear the ring with a click, then allow a fresh report after output. */
 const ringAgain = () => {
   manager.acknowledge(PANE, { input: false });
   manager.onData(PANE);
@@ -103,7 +103,8 @@ describe('the delivery scheduler', () => {
     ring();
     vi.advanceTimersByTime(SPEAK_MS / 2);
     ringAgain();
-    vi.advanceTimersByTime(SPEAK_MS - 1);
+    // `ringAgain` already spent the 5s of deferral.
+    vi.advanceTimersByTime(SPEAK_MS - 5_000 - 1);
     expect(delivered).toEqual([]);
     vi.advanceTimersByTime(1);
     expect(delivered).toEqual([{ sink: 'speech', id: PANE, episodeId: episodeId() }]);

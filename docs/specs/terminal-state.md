@@ -28,6 +28,7 @@ CWD, sourced `osc7`, `osc9_9`, `osc633` (`P ; Cwd=`), `osc1337` (`CurrentDir=`):
 
 - **OSC 7 is parsed as a `file:` URI, its host taken from the URL parser's normalized hostname, preserving raw case and the literal `localhost` spelling only.**
 - **OSC 9;9 drive-letter and UNC paths are Windows paths; every other path is `unknown`, never `posix`** (rationale).
+- **A path opening with two separators in either spelling is remote**, OSC 7's `file:////host/share` included (`isUncOrDevicePath` in `dor-lib-common/src/browser-providers.ts`).
 - **Must preserve native CWD text, including percent signs, semicolons and edge spaces; percent-decode only OSC 7 file URIs** (rationale).
 - `process` — the adapter polled the PTY's process for its working directory.
 - `manual` — seeded via `cwdFromManualPath()`. `seedTerminalManualCwd()` (session restore) writes it **only into a pane with no CWD yet**; `seedLaunchedCommand()` (known spawn directory) applies it **unconditionally** — safe only at spawn, before any OSC has reported.
@@ -53,8 +54,8 @@ Titles:
 
 - `OSC 0` / `OSC 2` → `title` sourced `osc0` / `osc2`.
 - **Only the OSC 9 *message* form feeds the title channel** (`osc9`, which may override the header); the *progress* form `OSC 9 ; 4` contributes no candidate.
-- **`OSC 99` / `OSC 777 ; notify` candidates (`osc99`, `osc777`) are diagnostics only** — the header context menu's title-candidates table, never a header override.
-- `user` — pinned via the inline rename UI (`setTerminalUserTitle`). **Always wins** over every other candidate. **Titles starting with `<idle>` are rejected as reserved**.
+- **`OSC 99` / `OSC 777 ; notify` candidates (`osc99`, `osc777`) are diagnostics only**, never a header override.
+- `user` — pinned by `setTerminalUserTitle`. **Always wins** over every other candidate. **Titles starting with `<idle>` are rejected as reserved**.
 
 **A programmatic interactive launch writing directly to the platform PTY must emit `commandLine` + `commandStart(source: "user_input")` synchronously before the write**, through `seedLaunchedCommand` — it bypasses xterm's keystroke fallback; an integrated shell's later boundaries stay authoritative.
 
@@ -112,7 +113,7 @@ For shells without OSC 133/633 integration, the command is read off the screen r
 - **The shape survives across commands and is pre-seeded from replay during resume**, including VS Code panel reopen; cold restore has no transcript to seed from. **Seeding is learn-only and fires no prompt transition.** (rationale)
 - **Must key fallback state, including learned prompt shapes, by the stable Session id** (`docs/specs/layout.md` → Session lifecycle and terminal registry).
 - **A returned prompt may synthesize the idle transition only when `currentCommand.source === "user_input"`**; prompt-looking output always refreshes the shape. (rationale)
-- **What counts as a returned prompt.** Judged over a bounded tail of `TerminalProtocolParseResult.textData`, never the raw chunk (rationale), **with alternate-screen spans (DEC modes 47/1047/1049) removed statefully before truncation, across chunk and command boundaries; RIS resets this state** (rationale). **Matching is anchored to a fixed set of prompt shapes; a custom prompt carrying neither a path/user signal (`/`, `~`, `@`, `:`) nor a recognized terminator must not match**, a false positive flipping a running command back to idle.
+- **What counts as a returned prompt.** Judged over a bounded tail of `TerminalProtocolParseResult.textData`, never the raw chunk (rationale), **with alternate-screen output removed** (rationale). **Matching is anchored to a fixed set of prompt shapes; a custom prompt carrying neither a path/user signal (`/`, `~`, `@`, `:`) nor a recognized terminator must not match**, a false positive flipping a running command back to idle.
 - **Stripping runs in boundary mode** (`docs/compatible-agents.md` → "Detection"): **a genuine trailing newline must keep reading as no prompt, a trailing boundary must not**; both directions pinned by `lib/src/lib/terminal-state-store.test.ts` (rationale).
 - **Per-pane retirement.** **The keystroke fallback and real OSC 633/133 integration are mutually exclusive per pane.** The first authentic boundary (`promptStart`/`promptEnd`/`commandFinish` always, or a `commandStart` sourced `osc633_boundaries`/`osc133_boundaries`) promotes the pane to **OSC-driven**, after which no `user_input` event is synthesized, so injected shells never double-count. **The fallback's own synthesized prompt markers must not trigger promotion.** The flag is per-pane runtime state, **never persisted**; `isPaneOscDriven()` exposes it for `dor ensure --restart` (`docs/specs/dor-cli.md`; rationale).
 
@@ -144,7 +145,7 @@ Header priority — first match wins:
    - `currentCommand.displayCommand`.
 3. After a command has finished (`currentCommand` null and `lastCommand` set): `<idle> ${LAST_TITLE}`, `LAST_TITLE` applying the same priority to `lastCommand` with the in-run title taken from `lastCommand.finalTerminalTitle` **so a post-finish title event cannot overwrite it**.
 
-   On a non-zero exit a trailing fail glyph is appended — `<idle> ${LAST_TITLE} ✗` — and `lastCommandFailed` set. **"Failed" requires a real non-zero `exitCode`**: the keystroke fallback never records one, so it shows no glyph either way. **The glyph rides in `primary`** and is the header's only failure signal. (rationale)
+   On a non-zero exit a trailing fail glyph is appended to `<idle> ${LAST_TITLE}` and `lastCommandFailed` set. **"Failed" requires a real non-zero `exitCode`**: the keystroke fallback never records one, so it shows no glyph either way. **The glyph rides in `primary`.** (rationale)
 4. Otherwise (no running command and no last command): `<idle>`.
 
 **Must filter app-sent title overrides.** A bare interpreter name or executable path (`zsh`, `C:\WINDOWS\system32\cmd.exe`) is discarded; cmd.exe's `<path>\cmd.exe - <command>` form is reduced to the `<command>` half; titles carrying arguments or prose (`lazygit: dormouse`, `README.md - VIM`) are kept. (rationale)
@@ -162,7 +163,6 @@ Source of truth: `deriveHeader` / `deriveSurfaceLabel` / `resolveDisplayPrimary`
 ## Grouping
 
 - **Directory group keys use `cwdIdentity(cwd)`** (`scheme|host|pathKind|path`), so remote hosts and Windows/POSIX path kinds stay distinct. Directory mode keys on `cwdAtStart ?? cwd`; command mode on the running command's `displayCommand`, else the idle label.
-- **Windows UNC display labels keep `\\server\share\` as the path root** and do not repeat the server/share in the trailing path segments.
 - **`prompt` and `editing` collapse into one `idle` bucket**; **`finished` stays distinct** so a recently-completed pane can be filtered separately though its header label carries the same `<idle>` prefix.
 
 Source of truth: `groupTerminalPanes` / `TerminalGroupingMode` / `cwdIdentity` / `statusBucket` in `lib/src/lib/terminal-state.ts`.

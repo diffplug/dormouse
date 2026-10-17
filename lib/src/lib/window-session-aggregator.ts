@@ -1,5 +1,5 @@
 import { getWorkspacesSnapshot, subscribeToWorkspaces } from './workspace-store';
-import type { PersistedSession, PersistedWindow, PersistedWorkspace, WorkspaceId } from './session-types';
+import { PERSISTED_SESSION_VERSION, PERSISTED_WINDOW_VERSION, workspaceRecord, type PersistedSession, type PersistedWindow, type PersistedWorkspace, type WorkspaceId } from './session-types';
 
 /**
  * Collects each Workspace's latest `PersistedSession` into one `PersistedWindow`
@@ -44,9 +44,12 @@ const addEventListener = typeof window === 'undefined' ? null : window.addEventL
 const removeEventListener = typeof window === 'undefined' ? null : window.removeEventListener.bind(window);
 
 /**
- * How long a debounced save waits. One value for both levels: a Wall's own
+ * How long a scheduled save waits. One value for both levels: a Wall's own
  * record and the Window blob its publish schedules. The Window's wait is what
  * collapses N Workspaces reacting to one event into a single host write.
+ * Both timers coalesce, never restart: a request while one is pending joins
+ * it instead of pushing it back, so a steady stream of commits cannot
+ * postpone the write.
  *
  * Source of truth for the Wall's timer: `useSessionPersistence` in
  * `lib/src/components/wall/use-session-persistence.ts`.
@@ -147,14 +150,14 @@ export function getWindowSnapshot(): PersistedWindow {
     const session = previousWorkspaceSession(workspace.id);
     if (!session) continue;
     const { alertDelivery: _old, ...saved } = session;
-    collected.push({ id: workspace.id, name: workspace.name, nameIsAuto: workspace.nameIsAuto, session: {
+    collected.push(workspaceRecord(workspace, {
       ...saved, ...(workspace.alertDelivery ? { alertDelivery: workspace.alertDelivery } : {}),
-    } });
+    }));
   }
   const activeWorkspaceId = collected.some((workspace) => workspace.id === activeId)
     ? activeId
     : collected[0]?.id ?? activeId;
-  return { version: 1, workspaces: collected, activeWorkspaceId };
+  return { version: PERSISTED_WINDOW_VERSION, workspaces: collected, activeWorkspaceId };
 }
 
 /**
@@ -203,7 +206,7 @@ function handlePageShow(): void {
  */
 function onWorkspacesChanged(): void {
   for (const workspace of getWorkspacesSnapshot().workspaces) {
-    if (!records.has(workspace.id)) records.set(workspace.id, { version: 3, panes: [] });
+    if (!records.has(workspace.id)) records.set(workspace.id, { version: PERSISTED_SESSION_VERSION, panes: [] });
   }
   scheduleWrite();
 }

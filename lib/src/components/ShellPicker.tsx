@@ -8,7 +8,7 @@ import {
   subscribeToShells,
 } from '../lib/shell-store';
 import { useAnchoredMenu, useCloseOnOutsideAndEscape } from './use-anchored-menu';
-import { themePreviewButton, PICKER_INSET_BORDER, OVERLAY_MAX_HEIGHT, PopupButtonRow } from './design';
+import { themePreviewButton, PICKER_INSET_BORDER, OVERLAY_MAX_HEIGHT, PopupButtonRow, POPUP_MENU_ITEM_CLASS } from './design';
 
 /** Menu width. A shell name is a basename, so this is generous; the clamp below
  *  needs a number, not `w-max`. */
@@ -74,7 +74,7 @@ export function ShellPicker({ open, onOpenChange, onSelect }: ShellPickerProps) 
                   type="button"
                   role="menuitemradio"
                   aria-checked={isSelected}
-                  className="flex w-full items-center gap-2 whitespace-nowrap px-3 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-foreground/10"
+                  className={POPUP_MENU_ITEM_CLASS}
                   onClick={() => {
                     onOpenChange(false);
                     onSelect();

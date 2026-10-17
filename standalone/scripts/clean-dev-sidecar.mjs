@@ -12,8 +12,10 @@ export function cleanStrayDevSidecars() {
   if (process.platform !== 'win32') return;
 
   const debugDir = join(standaloneDir, 'src-tauri', 'target', 'debug');
-  // Single-quoted PS literals; double any apostrophe in the path so it can't break out.
-  const debugDirLiteral = debugDir.replace(/'/g, "''");
+  // A single-quoted PS literal: double every character PowerShell reads as a
+  // single quote (`'` and U+2018–U+201B), as `quotePowerShellArg` in
+  // `dor/src/commands/shell-quote.ts` does, so the path can't break out.
+  const debugDirLiteral = debugDir.replace(/['\u2018-\u201b]/g, (c) => c + c);
 
   const script = `
 $ErrorActionPreference = 'SilentlyContinue'

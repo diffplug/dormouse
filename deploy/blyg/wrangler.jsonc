@@ -1,0 +1,22 @@
+{
+  "name": "blyg-dormouse-sh",
+  "account_id": "0a95e814ccf2b6a95d2dc3bea0a4a2b4",
+  "routes": [{ "pattern": "blyg.dormouse.sh", "custom_domain": true }],
+  "workers_dev": false,
+  "preview_urls": false,
+  "main": ".bundle/worker.js",
+  "no_bundle": true,
+  "compatibility_date": "2026-07-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "cache": { "enabled": false },
+  "exports": { "PublicHtml": { "type": "worker", "cache": { "enabled": true } } },
+  "vars": { "MOUNT": "" },
+  "triggers": { "crons": ["* * * * *", "*/15 * * * *", "0 0 * * *"] },
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "blyg-dormouse-sh",
+    "database_id": "bd17595e-42e2-4dd9-82b8-ea2acbf94e78",
+    "migrations_dir": ".bundle/migrations"
+  }],
+  "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "blyg-dormouse-sh-media" }]
+}

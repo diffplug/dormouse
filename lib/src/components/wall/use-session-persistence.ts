@@ -16,7 +16,7 @@ import { surfaceKindFromParams } from './browser-surface';
 import { persistableLeafMeta } from './lath-wall-engine';
 import type { LathWallEngine } from './lath-wall-engine';
 import type { DooredItem, WallSelectionKind } from './wall-types';
-import type { PersistedDoor, PersistedSession, PersistedSurfaceRefs, WorkspaceId } from '../../lib/session-types';
+import type { PersistedDoor, PersistedSession, WorkspaceId } from '../../lib/session-types';
 import type { SessionFlushRequest } from '../../lib/platform/types';
 
 export interface SessionPersistenceHandle {
@@ -42,7 +42,6 @@ export function useSessionPersistence({
   selectedTypeRef,
   activeRef,
   ownsSurface,
-  surfaceRefsForSave,
   workspaceId,
 }: {
   /** The Lath engine — the layout authority written on every commit, and the source
@@ -64,7 +63,6 @@ export function useSessionPersistence({
    *  Workspace from persisting on another's keystroke. Must be stable: the
    *  subscription effect closes over it. */
   ownsSurface: (id: string) => boolean;
-  surfaceRefsForSave?: () => { refs: PersistedSurfaceRefs; next: number };
   /** Present when this Wall belongs to a Workspace: its record then goes to the
    *  Window collector instead of the platform slot, and is compared against its
    *  own Workspace's previous record. It also hands the host's flush request to
@@ -136,25 +134,24 @@ export function useSessionPersistence({
         token: door.token,
       };
     });
-    const surfaceRefs = surfaceRefsForSave?.();
     // The Lath tree is the sole persisted layout; doors ride through with their tokens.
-    return { panes, doors, lathLayout: lath.serializeLayout(), surfaceRefs };
-  }, [lath, doorsRef, surfaceRefsForSave]);
+    return { panes, doors, lathLayout: lath.serializeLayout() };
+  }, [lath, doorsRef]);
 
   /** The same record a save would publish, handed back instead. The Workspace
    *  is leaving, so nothing here may touch this Window's aggregator. */
   const serialize = useCallback((options?: SaveOptions): Promise<PersistedSession> => {
-    const { panes, doors, lathLayout, surfaceRefs } = collect();
+    const { panes, doors, lathLayout } = collect();
     return buildPersistedSession(
-      getPlatform(), panes, doors, lathLayout, surfaceRefs?.refs, surfaceRefs?.next,
+      getPlatform(), panes, doors, lathLayout,
       sink?.previous() ?? null, saveOptions(options),
     );
   }, [collect, sink, saveOptions]);
 
   const serializeNow = useCallback((): PersistedSession => {
-    const { panes, doors, lathLayout, surfaceRefs } = collect();
+    const { panes, doors, lathLayout } = collect();
     return assemblePersistedSession(
-      panes, doors, lathLayout, surfaceRefs?.refs, surfaceRefs?.next,
+      panes, doors, lathLayout,
       sink?.previous() ?? null, null, saveOptions().alertDelivery,
     );
   }, [collect, sink, saveOptions]);
@@ -165,15 +162,15 @@ export function useSessionPersistence({
     const doors = collected.doors.filter(door => include(door.id));
     const cwds = Object.fromEntries(cwdSurfaceIds(panes, doors).map(id => [id, getInheritableCwd(id) ?? null]));
     return assemblePersistedSession(
-      panes, doors, collected.lathLayout, collected.surfaceRefs?.refs, collected.surfaceRefs?.next,
+      panes, doors, collected.lathLayout,
       sink?.previous() ?? null, cwds, saveOptions().alertDelivery,
     );
   }, [collect, sink, saveOptions]);
 
   const doSave = useCallback((options?: SaveOptions): Promise<void> => {
     if (workspaceId === undefined) {
-      const { panes, doors, lathLayout, surfaceRefs } = collect();
-      return saveSession(getPlatform(), panes, doors, lathLayout, surfaceRefs?.refs, surfaceRefs?.next, sink, saveOptions(options));
+      const { panes, doors, lathLayout } = collect();
+      return saveSession(getPlatform(), panes, doors, lathLayout, sink, saveOptions(options));
     }
     // A Surface move bumps the revision; a record collected before it is stale.
     const revision = workspaceSessionRevision(workspaceId);

@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 cd "$(dirname "$0")"
-npx skills experimental_install
+npx --yes skills@1.7.0 experimental_install
 mkdir -p .claude/commands
 shopt -s nullglob
 for skill in .agents/skills/*/; do

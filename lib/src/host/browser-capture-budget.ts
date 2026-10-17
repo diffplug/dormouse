@@ -1,9 +1,9 @@
 /**
- * The host-wide crisp-capture budget (docs/specs/dor-browser.md → "Resource
- * Policy"): every viewer socket's captures share a few slots and a rate, so k
- * panes cost what one does rather than k times it. A claim the user is
- * interacting with goes first; the rest wait their turn in arrival order —
- * each socket has at most one claim, so that is round-robin.
+ * The host-wide crisp-capture budget: every viewer socket's captures share a
+ * few slots and a rate, so k panes cost what one does rather than k times
+ * it. A claim the user is interacting with goes first; the rest wait their
+ * turn in arrival order — each socket has at most one claim, so that is
+ * round-robin.
  *
  * A capture that outlives `timeoutMs` frees its slot and answers undefined:
  * a provider whose capture never settles (a CDP call into a wedged page) must

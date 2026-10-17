@@ -47,6 +47,7 @@ const meta: Meta<typeof BurrowsView> = {
     onForget: () => {},
     onEnablePush: () => {},
     onRetryPushConfig: () => {},
+    onSignOut: () => {},
   },
   decorators: [
     (Story, context) => (

@@ -220,6 +220,15 @@ export class EstablishedE2eSession {
   }
 
   /**
+   * When this session last decrypted a Client->Burrow message, or was promoted.
+   * The same clock holds its Client's presence window open
+   * (`docs/specs/remote-security-model.md` -> Presence window).
+   */
+  get lastClientActivityAt(): number {
+    return this.#lastClientActivityAt;
+  }
+
+  /**
    * When a direct-only session must carry both directions on the direct path
    * by — `DIRECT_ONLY_DEADLINE_MS` from its promotion — for the owner's reaper
    * to end it with `'deadline'`. `null` for a session the relay may carry, and

@@ -10,7 +10,7 @@ Native path payloads are not URLs: decoding `%20` or trimming edge spaces change
 
 **What the CWD bound and control-character strip protect.** A directory name may hold any byte but `/` and NUL, and the CWD it produces is retained per Session, rendered in the pane header, and used as a grouping key — so unbounded or control-bearing text reaches the UI and a map key, not just a log line.
 
-**Why command-line source and decoded output have separate bounds.** The source caps allow encoding expansion (4× for OSC 633 or shell quoting, 12× for percent-encoded UTF-8) while bounding decoder allocation. The retained result has its own cap; post-decode sanitization removes controls introduced by decoding.
+**Why command-line source and decoded output have separate bounds.** The source caps allow encoding expansion while bounding decoder allocation. The retained result has its own cap; post-decode sanitization removes controls introduced by decoding.
 
 ## Shell-integration injection
 
@@ -51,10 +51,6 @@ Native path payloads are not URLs: decoding `%20` or trimming edge spaces change
 **Why alt-screen spans are dropped.** Fullscreen TUIs (vim, lazygit, less) render into the alt buffer, so a `$` painted there is the program's, not the user's prompt. The previous stateless scan ran after truncation: once enough output displaced the enter marker, a TUI could falsely end the command. `keeps long chunked alternate-screen output out of the prompt heuristic` in `lib/src/lib/terminal-state-store.test.ts` reproduces that failure.
 
 **Why the heuristic reads `textData` rather than filtering for itself.** The protocol parser has already framed every string control on that chunk, so a separate scanner in front of the prompt detector re-derived a classification the parser threw away — and did it per character over 100% of PTY output, which measured 5.9 ms/MB on plain text. Projecting the answer the parser already has costs nothing on the wire (the field is omitted when it would equal `data`) and leaves one classifier instead of three.
-
-**Why replay seeding still filters locally.** `pty:replay` reaches the webview as `visibleData`, which still carries the string controls the parser forwards, and it is one bounded pass during resume rather than the live stream — so a one-shot `TerminalControlStreamFilter` over a 64 KiB tail is proportionate there. The 1,024-character window is cut from its output; 64 KiB is ample runway to resync the control state.
-
-**Why prompt filtering is stateful.** The keystroke fallback reads a rolling 1,024-character output tail. A stateless control stripper removes a complete `APC G`, SIXEL DCS, or IIP OSC, but a later PTY chunk begins with bare base64 after the introducer fell out of that window. Carrying only the string-control state across reads removes the payload without changing what xterm receives.
 
 **Why boundary mode is needed, and why its trailing boundary must be trimmed.** Deleting a redraw's cursor move welds text never adjacent on screen: `building...\x1b[1;1HC:\Users\me>` reads as one line starting with `building`, which no anchored shape matches. But a boundary is not a real line break. A genuine trailing newline means nothing is painted on the current line yet — no prompt, and reading one as a prompt flips a running command back to idle. A trailing *boundary* means only that a control closed the line, which is what a prompt clearing to end-of-line after painting itself emits (`C:\Users\me>\x1b[K`); reading it as an empty last line would hide every such prompt.
 

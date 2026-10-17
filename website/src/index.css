@@ -1,4 +1,9 @@
 @import "tailwindcss";
+/* Served from dormouse.sh, not Google Fonts, so a visit makes no third-party
+   request. Regular weight only, as the Google Fonts request was; each file
+   carries unicode-range subsets, so a page fetches only the scripts it uses. */
+@import "@fontsource/ubuntu-mono/400.css";
+@import "@fontsource/ubuntu-sans-mono/400.css";
 
 /* Library components compile from source here (the `dormouse-lib` alias in
    vite.config.ts), so Tailwind must scan them or their utilities are never
@@ -23,6 +28,10 @@
   --color-surface: oklch(18% 0.015 60);
   --color-text: #dedede;
   --color-caramel: #b47624;
+  /* The pre-launch strip atop SiteHeader: a caution yellow that reads the
+     same in every docs theme, so it is not derived from one. */
+  --color-prelaunch-bg: #f2c230;
+  --color-prelaunch-fg: #1a1400;
 }
 
 /* The reference pages' accent, one definition for the four class strings in
@@ -53,6 +62,12 @@ body {
   --docs-card-text-muted: #787878;
   --docs-note-text-muted: #7b7977;
   --docs-code-text-muted: #909090;
+  /* The registry's dark terminal green, yellow, and red, corrected against the
+     site's black and the 4% card tint (`DOCS_STATUS_COLORS`); pinned by
+     `docs-accent.test.ts`. */
+  --docs-status-good: #0dbc79;
+  --docs-status-mixed: #e5e510;
+  --docs-status-bad: #d55050;
 }
 
 html {
@@ -85,7 +100,7 @@ html body {
 
 /* Reference pages follow the reader's picked theme instead of the site's
    black; the rest of the site is unaffected because only DocsLayout adds the
-   class (docs/specs/website-docs.md -> Reference page chrome).
+   class.
 
    `applyTheme` writes --vscode-* onto body.style, so the remap has to live on
    body too — html cannot read a custom property set on its child. That leaves

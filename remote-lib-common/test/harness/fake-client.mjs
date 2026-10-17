@@ -1,8 +1,7 @@
 /**
  * A headless Client (Dormouse Pocket) speaking only the `e2e` relay envelope —
- * the initiator half of the harness in
- * `docs/specs/remote-security-model.md` -> `## Future` -> **Scope:
- * e2e-client-burrow**. Deliberately `PocketClient`-free: it is a bare
+ * the initiator half of the e2e harness (`docs/specs/relay.md` -> "E2E
+ * framing"). Deliberately `PocketClient`-free: it is a bare
  * `/ws/client` socket plus the real ceremonies, so the suite tests the wire
  * rather than a production class that does not send these frames yet.
  *
@@ -31,6 +30,7 @@ import {
   WS_ROUTES,
   WS_TOKEN_PARAM,
   createNoiseInitiator,
+  decodeConnectionMessage2,
   e2eConnectionPrologue,
   fromBase64Url,
   isConnectionOutcomeV1,
@@ -330,7 +330,7 @@ export class FakeClient extends EventEmitter {
 
   // --- Connection -----------------------------------------------------------
 
-  /** IK against the pinned Burrow static; message 2 carries the Burrow challenge. */
+  /** IK against the pinned Burrow static; message 2 carries the Burrow challenge and window offer. */
   async openConnection({
     connectionId = newE2eId(),
     burrowStaticPublicKey = this.pin ?? this.burrowStaticPublicKey,
@@ -360,13 +360,15 @@ export class FakeClient extends EventEmitter {
       (f) =>
         f.t === 'e2e' && f.kind === 'connection' && f.id === connectionId && f.step === 'response',
     );
-    const burrowChallenge = await initiator.readMessage(fromBase64Url(response.ct));
+    // The whole payload is what the proof binds; its last byte is the offer.
+    const payload = await initiator.readMessage(fromBase64Url(response.ct));
     this.noise = initiator.session;
     this.session = new NoiseTransportSession(initiator.session);
     return {
       session: this.session,
       connectionId,
-      burrowChallenge: toBase64Url(burrowChallenge),
+      burrowChallenge: toBase64Url(payload),
+      offer: decodeConnectionMessage2(payload),
       handshakeHash: toBase64Url(this.session.handshakeHash),
     };
   }
