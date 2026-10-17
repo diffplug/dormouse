@@ -24,9 +24,11 @@ The dependency lists are regenerated and committed with every production depende
 
 **Cargo discloses build edges but not dev edges, and a git-patched crate at its fork.** `website/scripts/cargo-dependencies.test.js` pins both.
 
+**Must disclose a peer dependency where pnpm linked it for that instance**, beside the package in its own `.pnpm/<id>/node_modules`, never through the hidden hoist: a required peer always, an optional one only when pnpm supplied it (rationale).
+
 **An unresolvable dependency throws unless an optional-edge rule covers it.** `node-datachannel` publishes one prebuilt package per platform, and pnpm installs only the host's.
 
-- **Optional, declared by an external package: skipped.** The Tauri bundle copies `standalone/sidecar/node_modules` and the VSIX stages only the platform packages `vscode-ext/package.json` declares (`docs/specs/vscode.md` → "The direct path"), so a prebuild the addon alone declares (android, musl) reaches nobody.
+- **Optional, declared by an external package: skipped**, and so is an installed one whose manifest names an `os`, `cpu`, or `libc` (rationale). The Tauri bundle copies `standalone/sidecar/node_modules` and the VSIX stages only the platform packages `vscode-ext/package.json` declares (`docs/specs/vscode.md` → "The direct path"), so a prebuild the addon alone declares (android, musl) reaches nobody.
 - **Optional, declared by a product root: described from a sibling in the same `optionalDependencies` block at the same exact version string** — published in lockstep, so the disclosure is identical on every machine. No such sibling installed throws.
 
 **Bundled themes are disclosed outside that lockfile walk.** The themes compiled into every build (`lib/src/lib/themes/bundled.json`) come from OpenVSX extensions, not npm, so `website/scripts/generate-deps.js` appends the checked-in `lib/src/lib/themes/bundled-extensions.json` to the npm table instead. Both files are committed and can drift (rationale). `lib/src/lib/themes/bundled-extensions.test.ts` pins them, joining on the `extensionId` each disclosure record carries: a bundled theme whose extension has no record, or a record with no bundled theme left, fails. **The join is on the extension set only** — `bundled.json` carries no version or license, so nothing pins a hand-edit to those published fields.

@@ -361,6 +361,15 @@
       ]
     },
     {
+      "name": "tailwindcss",
+      "license": "MIT",
+      "author": "Tailwind Labs, Inc.",
+      "homepage": "https://tailwindcss.com",
+      "versions": [
+        "4.3.3"
+      ]
+    },
+    {
       "name": "ts-custom-error",
       "license": "MIT",
       "author": "Adrien Gibrat <adrien.gibrat@gmail.com>",
@@ -1884,6 +1893,24 @@
       ]
     },
     {
+      "name": "@types/react",
+      "license": "MIT",
+      "author": "Asana, AssureSign, Microsoft, John Reilly, Benoit Benezech, Patricio Zavolinsky, Eric Anderson, Dovydas Navickas, Josh Rutherford, Guilherme Hübner, Ferdy Budhidharma, Johann Rakotoharisoa, Olivier Pascal, Martin Hochel, Frank Li, Jessica Franco, Saransh Kataria, Kanitkorn Sujautra, Sebastian Silbermann, Kyle Scully, Cong Zhang, Dimitri Mitropoulos, JongChan Choi, Victor Magalhães, Priyanshu Rav, Dmitry Semigradsky, Matt Pocock",
+      "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/react",
+      "versions": [
+        "19.3.0"
+      ]
+    },
+    {
+      "name": "@types/react-dom",
+      "license": "MIT",
+      "author": "Asana, AssureSign, Microsoft, MartynasZilinskas, Josh Rutherford, Jessica Franco, Sebastian Silbermann",
+      "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/react-dom",
+      "versions": [
+        "19.3.0"
+      ]
+    },
+    {
       "name": "@types/trusted-types",
       "license": "MIT",
       "author": "Jakub Vrana, Damien Engels, Emanuel Tesar, Bjarki, Sebastian Silbermann",
@@ -2055,6 +2082,15 @@
       "homepage": "https://code.haverbeke.berlin/marijn/crelt",
       "versions": [
         "1.0.7"
+      ]
+    },
+    {
+      "name": "csstype",
+      "license": "MIT",
+      "author": "Fredrik Nicol <fredrik.nicol@gmail.com>",
+      "homepage": "https://github.com/frenic/csstype",
+      "versions": [
+        "3.2.3"
       ]
     },
     {
@@ -2645,6 +2681,15 @@
       ]
     },
     {
+      "name": "isomorphic.js",
+      "license": "MIT",
+      "author": "Kevin Jahns <kevin.jahns@protonmail.com>",
+      "homepage": "https://github.com/dmonad/isomorphic.js#readme",
+      "versions": [
+        "0.2.5"
+      ]
+    },
+    {
       "name": "js-tokens",
       "license": "MIT",
       "author": "Simon Lydell",
@@ -2706,6 +2751,15 @@
       "homepage": "https://github.com/facebook/lexical",
       "versions": [
         "0.48.0"
+      ]
+    },
+    {
+      "name": "lib0",
+      "license": "MIT",
+      "author": "Kevin Jahns <kevin.jahns@protonmail.com>",
+      "homepage": "https://github.com/dmonad/lib0#readme",
+      "versions": [
+        "0.2.119"
       ]
     },
     {
@@ -3413,6 +3467,15 @@
       ]
     },
     {
+      "name": "supports-color",
+      "license": "MIT",
+      "author": "Sindre Sorhus",
+      "homepage": "https://github.com/chalk/supports-color",
+      "versions": [
+        "10.2.2"
+      ]
+    },
+    {
       "name": "tabbable",
       "license": "MIT",
       "author": "David Clark",
@@ -3446,6 +3509,15 @@
       "homepage": "https://www.typescriptlang.org/",
       "versions": [
         "2.8.1"
+      ]
+    },
+    {
+      "name": "typescript",
+      "license": "Apache-2.0",
+      "author": "Microsoft Corp.",
+      "homepage": "https://www.typescriptlang.org/",
+      "versions": [
+        "7.0.2"
       ]
     },
     {
@@ -3557,6 +3629,15 @@
       ]
     },
     {
+      "name": "yjs",
+      "license": "MIT",
+      "author": "Kevin Jahns",
+      "homepage": "https://docs.yjs.dev",
+      "versions": [
+        "13.6.33"
+      ]
+    },
+    {
       "name": "zwitch",
       "license": "MIT",
       "author": "Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)",
@@ -3628,6 +3709,15 @@
       "homepage": "https://github.com/Brightspace/node-ecdsa-sig-formatter#readme",
       "versions": [
         "1.0.11"
+      ]
+    },
+    {
+      "name": "has-flag",
+      "license": "MIT",
+      "author": "Sindre Sorhus",
+      "homepage": "https://github.com/sindresorhus/has-flag",
+      "versions": [
+        "4.0.0"
       ]
     },
     {
@@ -3709,6 +3799,15 @@
       "homepage": "https://github.com/feross/safe-buffer",
       "versions": [
         "5.2.1"
+      ]
+    },
+    {
+      "name": "supports-color",
+      "license": "MIT",
+      "author": "Sindre Sorhus",
+      "homepage": "https://github.com/chalk/supports-color",
+      "versions": [
+        "7.2.0"
       ]
     },
     {

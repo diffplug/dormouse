@@ -14,6 +14,10 @@ Why CI, and not the nightly audit, gates the regenerated snapshots: until the ga
 
 Why the two theme files can drift despite coming from one run of `lib/scripts/bundle-themes.mjs`: both are committed and the script needs network access, so an edit to one need not be accompanied by a re-run. Regenerating the disclosure then produces no diff, which is precisely the class the stale-snapshot gate cannot see — hence a separate test.
 
+Why peers are disclosed, and only where pnpm linked them: the walk once read only `dependencies` and `optionalDependencies`, so `supports-color`, an optional peer of `debug` that the Relay's `pnpm deploy --prod --legacy` installs, went undisclosed. A prod deploy of `dor-tools-builtin` likewise installs the optional peers `typescript`, `@types/react`, and `yjs` (measured with pnpm 12.6.0, 2026-10). Node resolution from the package directory would climb into `node_modules/.pnpm/node_modules`, where pnpm hoists whatever version some other instance used, so it would disclose a peer this instance never gets. The workspace install and a prod deploy can still pick different versions of an optional peer: the workspace links `supports-color@7.2.0` to the Relay's `debug`, the deploy `10.2.2`; both are disclosed, the latter in the Built-in Tools section that reaches it first.
+
+Why an installed platform build an external package declares is skipped: which one installs depends on the generating machine — the `typescript` peer brings `@typescript/typescript-darwin-arm64` on an Apple-silicon laptop and `-linux-x64` in CI — so disclosing it would make the snapshot gate fail on every machine but one.
+
 Why being a devDependency of the repo does not count as covered: a selfhoster's `pnpm install` would otherwise drag the whole toolchain into the disclosure.
 
 ## Bundled runtime

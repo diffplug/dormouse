@@ -4,7 +4,13 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getCargoGitRepository, getShippedCargoGraph } from "./cargo-dependencies.js";
 import { compareVersions, mergeReleases } from "./dependency-rows.js";
-import { assertWorkspaceCoverage, getDependencyNames, missingDependency } from "./dependency-workspaces.js";
+import {
+  assertWorkspaceCoverage,
+  getDependencyNames,
+  isExternalPlatformBuild,
+  linkedPeerPackageJsonPath,
+  missingDependency,
+} from "./dependency-workspaces.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "../..");
@@ -206,7 +212,9 @@ function scanDependency(fromDir, packageName, declaredBy) {
     return;
   }
 
-  const packageJsonPath = getPackageJsonPath(fromDir, packageName);
+  const packageJsonPath = declaredBy.peer
+    ? linkedPeerPackageJsonPath(fromDir, declaredBy.pkg.name, packageName, declaredBy.isWorkspace)
+    : getPackageJsonPath(fromDir, packageName);
   if (!packageJsonPath) {
     const edge = missingDependency(declaredBy);
     if (edge === 'skip') return;
@@ -224,9 +232,10 @@ function scanDependency(fromDir, packageName, declaredBy) {
 
   const realPackageJsonPath = realpathSync(packageJsonPath);
   if (visitedExternalPackagePaths.has(realPackageJsonPath)) return;
+  const pkg = readJson(realPackageJsonPath);
+  if (isExternalPlatformBuild(declaredBy, pkg)) return;
   visitedExternalPackagePaths.add(realPackageJsonPath);
 
-  const pkg = readJson(realPackageJsonPath);
   addExternalPackage(pkg);
   scanDependencies(pkg, dirname(realPackageJsonPath));
 }
@@ -234,8 +243,8 @@ function scanDependency(fromDir, packageName, declaredBy) {
 function scanDependencies(pkg, fromDir) {
   const isProductRoot = sectionOfRoot.has(pkg.name);
   const isWorkspace = workspacePackagesByName.has(pkg.name);
-  for (const { name, optional } of getDependencyNames(pkg)) {
-    scanDependency(fromDir, name, { pkg, optional, isWorkspace, isProductRoot });
+  for (const { name, optional, peer } of getDependencyNames(pkg)) {
+    scanDependency(fromDir, name, { pkg, optional, peer, isWorkspace, isProductRoot });
   }
 }
 
