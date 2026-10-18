@@ -24,6 +24,7 @@ import type {
   TerminalInvitationState,
 } from '../remote/burrow/burrow-runtime';
 import { SCAN_LABEL, SETUP_BUTTON } from '../remote/setup-copy';
+import { HOSTED_REFS } from '../lib/hosted-links';
 import {
   cancelHostedEnrollment,
   clearBurrowEnrollment,
@@ -575,6 +576,7 @@ function UnenrolledRelay({
               enrollment={status.hostedEnrollment}
               accountOrigin={status.accountOrigin}
               suggestedLabel={status.suggestedLabel}
+              plansRef={HOSTED_REFS.settingsRemote}
             />
             {enrollAgainError ? (
               <div className="mt-2 text-sm leading-relaxed text-error">{enrollAgainError}</div>
@@ -874,7 +876,7 @@ function EnrolledView({
           account must remove, which is said here until dismissed. */}
       {hostedEnrollment?.status === 'ended' ? (
         <div>
-          <HostedEnrollmentEnded ended={hostedEnrollment} accountOrigin={accountOrigin} />
+          <HostedEnrollmentEnded ended={hostedEnrollment} accountOrigin={accountOrigin} plansRef={HOSTED_REFS.settingsRemote} />
           <button
             type="button"
             disabled={busy}

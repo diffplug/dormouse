@@ -60,6 +60,7 @@ import { ENROLLMENT_TTL_MS } from "./policy-constants";
 import { relayRoom } from "./relay-room-contract";
 import { relayPushRoutes } from "./relay-push";
 import { mintVoiceToken } from "./voice-token";
+import { recordMetric } from "./metrics";
 import {
   OWNER_COLUMNS,
   database,
@@ -359,6 +360,7 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
         accountId: userId,
         passkeyPublicKey: publicKey,
       };
+      recordMetric(c, c.env.HYPERDRIVE.connectionString, "pocket.signin");
       return c.json(res);
     }),
   );
@@ -588,6 +590,7 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
       }
       if (outcome === "expired") return answer({ status: "expired" });
       if (outcome !== "enrolled") return answer({ status: "redeemed", burrowId: outcome.redeemed });
+      recordMetric(c, c.env.HYPERDRIVE.connectionString, "burrow.enrolled");
       return answer({
         status: "enrolled",
         // The Burrow enforces `origin`/`rpId` as its ConnectionPolicy; Hosted

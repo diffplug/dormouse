@@ -17,7 +17,8 @@ import {
 import { DEFAULT_RELAY_ORIGIN } from '../host/relay-origin';
 import type { BurrowConsoleStatus } from '../host/remote/service-protocol';
 import { networkPolicyResult, nothingPolicy } from '../remote/network-policy';
-import { HOSTED_PRICING_URL, SIGN_IN_LABEL } from './HostedSignIn';
+import { SIGN_IN_LABEL } from './HostedSignIn';
+import { HOSTED_REFS, hostedPricingUrl } from '../lib/hosted-links';
 import { MANAGED_VOICE_DISCLOSURE, ManagedVoiceSection, NO_PLAN_COPY, NO_PUSH_PLAN_COPY } from './ManagedVoiceSection';
 import { AlarmSettingsSection } from './SettingsDialog';
 import { resetPushDevices, setPushDevices } from '../lib/push-devices';
@@ -119,7 +120,7 @@ describe('ManagedVoiceSection', () => {
     const openExternal = vi.fn();
     Object.assign(getPlatform(), { openExternal });
     await act(async () => button('See Hosted plans')!.click());
-    expect(openExternal).toHaveBeenCalledWith(HOSTED_PRICING_URL);
+    expect(openExternal).toHaveBeenCalledWith(hostedPricingUrl(HOSTED_REFS.settingsVoice));
   });
 
   it('asks a computer signed in before managed voice to sign in again', async () => {
