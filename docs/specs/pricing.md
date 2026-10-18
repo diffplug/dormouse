@@ -13,6 +13,8 @@
 
 **Prices, inclusions, and the FAQ are prerendered text**, and the page emits `Product` / `Offer` JSON-LD carrying one `Offer` per paid plan at its current price, so an assistant fetching the page can quote it. **Offers are `PreOrder` until `CHECKOUT_OPEN`, then `InStock`.**
 
+**Must forward the `ref` a visit arrived with, and nothing else about it**: the page takes it off the address bar after hydration, names it on the cohort read, and carries it on its checkout links only when allowlisted; no cookie, storage, or beacon. Counting and the allowlist: `docs/specs/hosted.md` -> "Metrics".
+
 **Every price on the site has one owner**, `website/src/lib/hosted-pricing.ts`; site code reads it rather than restating a number.
 
 **Must describe both grants as live, never upcoming.** The managed Relay section carries the one qualifier: the independent review `docs/specs/security-remote.md` -> "Cloud-hosted mode" requires.
@@ -49,7 +51,7 @@ Prices in USD; DiffPlug adds or includes applicable tax by jurisdiction.
 - **The step is $10 per cohort of 100, fixed**, and the ladder's last step is the one below list — reaching list closes founding.
 - **Show the current price, the struck list price, and the seats left at that price — never the next step or how many cohorts remain.**
 
-Source of truth: `Hosted` in `website/src/pages/Hosted.tsx`; `CHECKOUT_OPEN` in `website/src/lib/hosted-pricing.ts`; the `/pricing` rule in `website/public/_redirects`, pinned by `checkPricingRedirect` in `scripts/public-docs-lint.mjs`. `website/src/pages/Hosted.test.tsx` pins the page contract.
+Source of truth: `Hosted` in `website/src/pages/Hosted.tsx`; `CHECKOUT_OPEN` in `website/src/lib/hosted-pricing.ts`; `takeVisitRef` in `website/src/lib/hosted-ref.ts`; the `/pricing` rule in `website/public/_redirects`, pinned by `checkPricingRedirect` in `scripts/public-docs-lint.mjs`. `website/src/pages/Hosted.test.tsx` pins the page contract.
 
 ## Checkout and entitlement
 

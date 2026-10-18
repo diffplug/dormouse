@@ -77,6 +77,13 @@ export function billingSetup(env: BillingEnv): BillingSetup | null {
   };
 }
 
+/** The plan `price` grants under `setup`, or null for a Price it does not sell. */
+export function planOfPrice(setup: BillingSetup, price: string | undefined): Plan | null {
+  if (price === setup.monthly) return "monthly";
+  if (price === setup.yearly) return "yearly";
+  return price !== undefined && setup.founding.includes(price) ? "founding" : null;
+}
+
 /** The open cohort and its seats left; null once founding has closed. */
 export interface OpenCohort {
   /** Its index in `FOUNDING_LADDER`: how many cohorts have closed. */
