@@ -6,7 +6,7 @@
 
 ## Schedule and gate
 
-`.github/workflows/security-audit.yaml` audits `docs/specs/security.md` and the specs it names: nightly, on `workflow_dispatch`, and on the release tag, dispatched by `.github/workflows/release.yml` whose `publish-vscode` job `needs:` it — so no release ships without a passing audit. Dispatched, not `uses:`-called — see `docs/specs/security-ci.md` -> "GitHub Actions Policies".
+`.github/workflows/security-audit.yaml` audits `docs/specs/security.md` and the specs it names: nightly, on `workflow_dispatch`, and on the release tag, dispatched by `.github/workflows/release.yml` whose `publish-vscode` job `needs:` it — so no release ships without a passing audit. A second, weekly `schedule` line runs the canary instead ([Canary recall](#canary-recall)). Dispatched, not `uses:`-called — see `docs/specs/security-ci.md` -> "GitHub Actions Policies".
 
 `FAIL IF` lines are grouped by the operation that answers them, one bullet asserting several properties when a single call establishes all of them; a qualitative pass looks for holes the specs do not cover. **On any `FAIL IF` violation or BLOCKER-severity finding the audit fails** ([Outcomes and reporting](#outcomes-and-reporting)).
 
@@ -37,7 +37,7 @@ Source of truth: `decide` in `scripts/security-audit-plan.mjs`.
 
 The CI audit fans out to per-domain subagents, each owning a disjoint share of the tree; a domain may read outside its share — `remote` and `local` run the repo's own lints — but owns nothing there (rationale).
 
-**Ownership is by file: every `docs/specs/security*.md` spec, its `.rationale.md` aside, is in exactly one domain's scope**, declared as backticked repo paths in the bullet list under the `**Scope` line of its domain file in `.github/audit/`, and enforced by `scripts/spec-lint.mjs`; `docs/specs/security.md` -> "How the guarantees are checked" tabulates the assignment.
+**Ownership is by file: every `docs/specs/security*.md` spec, its `.rationale.md` aside, is in exactly one domain's scope**, declared as backticked repo paths in the bullet list under the `**Scope` line of its domain file in `.github/audit/`, and enforced by `scripts/spec-lint.mjs`; dormouse.sh/security publishes the assignment as its audit index (`docs/specs/website-docs.md` -> "`/security` spec").
 
 `AUDIT_PAT` is a step-level `env:` on the one job, so every subagent inherits it, and only the prompt tells `remote`, `local`, and `hosted` not to use it (`docs/specs/security.md` -> "Known gaps"); `## Future` -> Credential separation stages the fix.
 
@@ -193,7 +193,7 @@ Source of truth: `Verify AUDIT_PAT is provisioned` in `.github/workflows/securit
 
 ## Canary recall
 
-**A `workflow_dispatch` with `canary: true` measures the audit's recall instead of auditing** (rationale). Its `canary` job runs on `main` alone, and the `audit` job not at all:
+**A `workflow_dispatch` with `canary: true`, or the weekly `schedule` line, measures the audit's recall instead of auditing** (rationale). Its `canary` job runs on `main` alone, and the `audit` job not at all:
 
 1. `seed` applies `CANARY_SEEDS` seeds from `.github/audit/canaries/`, dealt round-robin across the code domains; then it deletes the pool and replaces the history with one root commit, so nothing in the checkout tells a seed from the code around it (rationale).
 2. The audit's agent runs the code domains over that checkout: `supply-chain`, `remote`, `local`, and `hosted`, handed an empty open-findings list. `ci-and-secrets` reads live GitHub state, which a checkout cannot seed, and the ledger is never read.
@@ -201,27 +201,31 @@ Source of truth: `Verify AUDIT_PAT is provisioned` in `.github/workflows/securit
 
 - **A seed re-introduces a vulnerability already fixed on `main`, or a synthetic one, and deletes the test and lint cases that would fail on it**, so the seeded tree passes CI as a regression on `main` has (rationale). Its header is factual and names no finding under embargo.
 - **A seed's catch severity is WARNING unless its `Severity:` header names another**, then ` — ` and why (rationale).
-- The public record is the step summary's line and the `canary-recall` artifact: seeded and caught counts, how many domains left no finished report, and the run link. Reserved: its fields are what scope **audit-canary-publication** reads; add, never rename.
+- The public record is the step summary's line and the `canary-recall` artifact: seeded and caught counts, how many domains left no finished report, and the run link. `validateRecord` in `website/scripts/generate-canary-recall.js` accepts exactly these fields; add one to both, never rename.
 - Which seeds ran, what caught them, and findings on code no seed touched stay in the `canary-transcript` artifact; a canary files them nowhere.
 - A canary run is a completed run on `main`, so the next scheduled run audits in full ([Skipping an unchanged audit](#skipping-an-unchanged-audit)).
 
 - **FAIL IF** the `canary` job can push or file: it holds any write permission, runs its agent on a token but its own read-only one, keeps the checkout's credentials, runs `gh` or `git push`, or names `AUDIT_PAT` or `EMBARGO_TOKEN`; or `scripts/security-audit-local.sh canary`, which seeds a copy of the committed tree, files anything. Pinned by `scripts/security-audit-canary.test.mjs`.
-- **FAIL IF** a canary run can gate a release or feed the skip: the `audit` job runs in it, it runs on a ref but `main`, it uploads an `audit-state` artifact, or the gate in `.github/workflows/release.yml` can select a run with the canary's title. Pinned by `scripts/security-audit-canary.test.mjs`.
+- **FAIL IF** a canary run, dispatched or weekly, can gate a release or feed the skip: the `audit` job runs in it, it runs on a ref but `main`, it uploads an `audit-state` artifact, or the gate in `.github/workflows/release.yml` can select a run with the canary's title. Pinned by `scripts/security-audit-canary.test.mjs`.
 - **FAIL IF** a canary publishes seed detail: the step summary or the `canary-recall` artifact carries anything but the counts and a validated run link, or the scorecard, the seeds applied, or a fragment leaves the runner but as age ciphertext to `.github/audit/transcript-recipient.txt`. Pinned by `scripts/security-audit-canary.test.mjs`.
 - **FAIL IF** a seed stops applying to the tree, alone or over the rest of the pool, or names a rule that moved or that its `Domain:` does not own, or a code domain has fewer than three seeds. Pinned by `scripts/security-audit-canary.test.mjs`, which `pnpm test` runs.
 
 Source of truth: `seed` and `score` in `scripts/security-audit-canary.mjs`; the `canary` job in `.github/workflows/security-audit.yaml`; `run_canary` in `scripts/security-audit-local.sh`.
 
+### Published recall
+
+dormouse.sh/security shows a rolling recall under "How the guarantees are checked": caught over seeded across the `canary-recall` artifacts of canary runs on `main` in the 30 days before its as-of date, each run linked. It is a committed snapshot, `website/src/data/canary-recall.json`, regenerated at each release (`docs/specs/deploy.md` -> "Release checklist") (rationale).
+
+- **A record out of shape fails the snapshot**, never repaired or skipped: a field but the scorer's, a count not a non-negative integer, more caught than seeded, or a link but to its own run on `diffplug/dormouse`.
+- **Every run in the window counts as its record has it** (rationale): an unfinished domain's seeds stay seeded, caught only by what it reported, and the run shows its unfinished count. A run with no `canary-recall` artifact is listed without counts.
+- The generator downloads `canary-recall` alone, never `canary-transcript`.
+
+Source of truth: `summarize` in `website/scripts/generate-canary-recall.js`; `CanaryRecall` in `website/src/components/CanaryRecall.tsx`.
+
 ## Future
 
 **Scope: audit-credential-separation** — [Credential separation](#credential-separation).
 
-**Scope: audit-canary-publication** — [Published recall](#published-recall).
-
 ### Credential separation
 
 A second job outside the `security-audit` environment, running the domains that need no PAT and passing their fragments back as artifacts, would leave `remote`, `local`, and `hosted` unable to hold `AUDIT_PAT` at all. The fragments would cross as ciphertext, and `File embargoed findings` would move to a job no agent ran on, holding the key to read them.
-
-### Published recall
-
-`docs/specs/security.md` -> "How the guarantees are checked", as published at dormouse.sh/security, would show a rolling recall: caught over seeded, summed across the `canary-recall` artifacts of the last 90 days' canary runs on `main`, each run linked, read by the website build through the public Actions API. A weekly canary on a second `schedule` line, told apart by `github.event.schedule`, would keep that window full; until then a maintainer dispatches one.

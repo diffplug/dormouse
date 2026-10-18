@@ -101,7 +101,9 @@
 import { readdirSync, existsSync, statSync, writeFileSync } from 'node:fs';
 import { join, dirname, normalize } from 'node:path';
 import { readRepoFile, repoRoot as ROOT, trackedFiles } from './lint-kit.mjs';
-import { countWords, proseLines as proseLinesOf, SOURCE_EXTENSIONS } from './spec-md.mjs';
+import {
+  AUDIT_DIR, countWords, FAIL_IF_RE, githubSlug as slug, isDomainPrompt, proseLines as proseLinesOf, scopeOf, SOURCE_EXTENSIONS,
+} from './spec-md.mjs';
 
 const SPECS_DIR = 'docs/specs';
 
@@ -168,16 +170,6 @@ const readIfExists = (rel) => (statSync(join(ROOT, rel), { throwIfNoEntry: false
 const FUTURE_TITLE_RE = /^(\d+\.\s*)?Future$/i;
 /** A bolded phrase. */
 const BOLD_RE = /\*\*([^*\n]+)\*\*/g;
-
-/** GitHub-style anchor slug for a heading title. */
-function slug(title) {
-  let t = title.trim().replace(/`/g, '');
-  t = t.replace(/\[([^\]]*)\]\([^)]*\)/g, '$1'); // unwrap md links
-  return t
-    .toLowerCase()
-    .replace(/[^\w\s-]/g, '')
-    .replace(/\s/g, '-');
-}
 
 /** Lines of a file with fenced code blocks blanked, for prose-only checks. */
 const proseLines = memo((rel) => proseLinesOf(read(rel)));
@@ -604,24 +596,16 @@ for (const spec of rationaleCheckedSpecs) {
 // Ownership is by file, declared in each domain prompt's scope block — the
 // bullet list directly under its `**Scope` line — as backticked repo paths.
 // The preamble and the orchestrator are not domains and claim nothing.
-const AUDIT_DIR = '.github/audit';
 const domainFiles = readdirSync(join(ROOT, AUDIT_DIR))
-  .filter((f) => f.endsWith('.md') && !f.startsWith('_') && f !== 'orchestrator.md')
+  .filter(isDomainPrompt)
   .map((f) => `${AUDIT_DIR}/${f}`);
 const claimants = new Map(specFiles.filter((f) => /\/security[a-z-]*\.md$/.test(f)).map((f) => [f, []]));
 if (domainFiles.length === 0) problems.push(`${AUDIT_DIR}: no domain prompt files — check 16 enforces nothing`);
 for (const rel of domainFiles) {
-  const lines = proseLines(rel);
-  const at = lines.findIndex((l) => /^\*\*Scope\b/.test(l));
-  if (at === -1) {
+  const claimed = scopeOf(proseLines(rel));
+  if (claimed === null) {
     problems.push(`${rel}: no "**Scope" line — the domain claims no spec`);
     continue;
-  }
-  let j = at + 1;
-  while (j < lines.length && lines[j].trim() === '') j++;
-  const claimed = [];
-  for (; j < lines.length && /^[-*]\s/.test(lines[j]); j++) {
-    for (const m of lines[j].matchAll(TICK_RE)) claimed.push(m[1]);
   }
   if (claimed.length === 0) problems.push(`${rel}: the bullet list under "**Scope" names no spec`);
   for (const path of claimed) {
@@ -639,7 +623,6 @@ for (const [spec, by] of claimants) {
 // any other file, so a `FAIL IF` written elsewhere is never executed. Matched
 // only where the bold LEADS the line — an inline `` `FAIL IF` `` pointer at the
 // specs that own them is the form this leaves alone.
-const FAIL_IF_RE = /^\s*(?:[-*]\s+)?\*\*FAIL IF\b/;
 for (const rel of allFiles) {
   if (claimants.has(rel)) continue;
   proseLines(rel).forEach((line, i) => {

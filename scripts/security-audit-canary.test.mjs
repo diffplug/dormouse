@@ -117,7 +117,7 @@ function checkout(t) {
   const bin = join(base, 'bin');
   const runner = join(base, 'runner');
   for (const sub of [bin, runner, ...['scripts', 'src', 'docs/specs', POOL_DIR].map((d) => join(dir, d))]) mkdirSync(sub, { recursive: true });
-  for (const f of ['security-audit-canary.mjs', 'security-audit-report.mjs', 'security-audit-local.sh', 'clamp-issue-body.mjs']) {
+  for (const f of ['security-audit-canary.mjs', 'security-audit-report.mjs', 'security-audit-local.sh', 'clamp-issue-body.mjs', 'spec-md.mjs']) {
     copyFileSync(join(repo, 'scripts', f), join(dir, 'scripts', f));
   }
   for (const e of readdirSync(join(repo, '.github/audit'), { withFileTypes: true }).filter((x) => x.isFile())) {
@@ -308,8 +308,6 @@ test('the redactor replaces the token in every file it is handed', (t) => {
 
 test('a canary runs alone, on main alone, with no credential to file or push', (t) => {
   assert.match(workflow, /^ {2}workflow_dispatch:\n {4}inputs:\n(?: {6}#.*\n)* {6}canary:\n(?: {8}.+\n)* {8}type: boolean\n {8}default: false\n/m);
-  assert.match(audit, /^ {4}if: \$\{\{ !inputs\.canary \}\}$/m);
-  assert.match(canary, /^ {4}if: \$\{\{ inputs\.canary \}\}$/m);
   // `contents: read` alone, and the agent on this job's token: with `id-token`
   // and no `github_token`, claude-code-action mints the Claude App's token.
   assert.match(canary, /^ {4}permissions:\n {6}contents: read\n {4}\S/m);
@@ -354,8 +352,46 @@ test('a canary runs every code domain', () => {
   for (const domain of CANARY_DOMAINS) assert.ok(prompt.includes(`\`${domain}\``), domain);
 });
 
+// A schedule carries no inputs, so the weekly canary is told apart by the
+// cron that fired it, spelled again in `run-name` and both jobs' `if:`. Each
+// event is evaluated as Actions would, so a literal that drifts from its cron
+// line sends the weekly run to the audit job, or to none, and fails here.
+const expression = (text, key) => {
+  const m = text.match(new RegExp(`^ *${key}: \\$\\{\\{ (.+) \\}\\}$`, 'm'));
+  assert.ok(m, `no ${key} expression`);
+  return m[1];
+};
+/** `expr` evaluated for one event: `canary` is the dispatch input, `schedule` the cron that fired. */
+function evaluate(expr, { canary = null, schedule = null }) {
+  // Only the contexts and operators these three expressions use.
+  assert.match(expr, /^(?:\s|[!()&|=]|inputs\.canary|github\.event\.schedule|'[^']*')+$/, expr);
+  const js = expr.replace(/inputs\.canary/g, 'c.canary').replace(/github\.event\.schedule/g, 'c.schedule').replace(/==/g, '===');
+  return new Function('c', `return (${js});`)({ canary, schedule });
+}
+const CANARY_TITLE = 'security-audit canary (recall measurement, not an audit)';
+const crons = [...workflow.match(/^ {2}schedule:\n((?: {4}- cron: .+\n)+)/m)[1].matchAll(/cron: "([^"]+)"/g)].map((m) => m[1]);
+const outcome = (event) => ({
+  audit: Boolean(evaluate(expression(audit, 'if'), event)),
+  canary: Boolean(evaluate(expression(canary, 'if'), event)),
+  title: evaluate(expression(workflow, 'run-name'), event),
+});
+
+test('the weekly schedule runs the canary alone, under its title; every other run audits', () => {
+  assert.equal(crons.length, 2, crons.join(' | '));
+  const [nightly, weekly] = crons;
+  assert.match(nightly, /^\d+ \d+ \* \* \*$/);
+  assert.match(weekly, /^\d+ \d+ \* \* \d$/);
+  const asCanary = { audit: false, canary: true, title: CANARY_TITLE };
+  const asAudit = { audit: true, canary: false, title: 'security-audit' };
+  assert.deepEqual(outcome({ schedule: weekly }), asCanary, 'the weekly schedule');
+  assert.deepEqual(outcome({ canary: true }), asCanary, 'a canary dispatch');
+  assert.deepEqual(outcome({ schedule: nightly }), asAudit, 'the nightly schedule');
+  // The release gate's dispatch, and a plain one: the input's default.
+  assert.deepEqual(outcome({ canary: false }), asAudit, 'a plain dispatch');
+});
+
 test('the release gate never waits on a canary', () => {
-  const title = workflow.match(/^run-name: \$\{\{ inputs\.canary && '([^']+)' \|\| 'security-audit' \}\}$/m)[1];
+  const title = outcome({ canary: true }).title;
   const prefix = release.match(/startswith\(\\"([^\\"]+)\\"\) \| not/)[1];
   assert.ok(title.startsWith(prefix) && !'security-audit'.startsWith(prefix), `${title} / ${prefix}`);
   const jq = spawnSync('jq', ['--version']);

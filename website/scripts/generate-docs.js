@@ -26,6 +26,7 @@ import { fileURLToPath } from 'node:url';
 import {
   createSlugger,
   hasScheme,
+  inlineToText,
   isProtocolRelative,
   parseMarkdown,
   slugify,
@@ -42,6 +43,7 @@ import {
   proseParagraphs,
   MalformedSnapshotError,
 } from './help-parser.js';
+import { AUDIT_DIR, FAIL_IF_RE, githubSlug, isDomainPrompt, proseLines, scopeOf } from '../../scripts/spec-md.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(__dirname, '..', '..');
@@ -654,6 +656,70 @@ export function audienceBlocks(page, audiences, names) {
   return page.blocks.map((block) => swap.get(block) ?? block);
 }
 
+/** The section whose table names the setups, and the guarantees' column that tags them. */
+const SECURITY_SETUPS_TITLE = 'Setups';
+const SECURITY_SETUP_COLUMN = 'Applies to';
+
+/**
+ * The setups each guarantee row and list bullet applies to, checked against
+ * the setup table's first column — the one copy of the vocabulary — and
+ * orthogonal to the audience split: an audience is the spec a row's links name,
+ * a setup is which reader must know the row. A row tags itself in its
+ * `Applies to` cell, a bullet with the emphasis it opens with, each a
+ * comma-separated list. An entry with no tag, an unknown or repeated one, a
+ * setup no entry uses, or a missing table fails the build, so a new entry
+ * cannot publish without saying whom it concerns.
+ */
+export function securitySetups(page) {
+  const headings = page.blocks.filter((b) => b.type === 'heading');
+  const heading = findExactlyOneHeading(headings, (h) => h.text === SECURITY_SETUPS_TITLE, SECURITY_SETUPS_TITLE);
+  const table = sectionBlocks(page.blocks, heading).find((b) => b.type === 'table');
+  if (!table) throw new Error(`/security: "${SECURITY_SETUPS_TITLE}" has no table naming the setups`);
+  const names = table.rows.map((row) => inlineToText(row[0]).trim());
+  assertDistinctSetups(names, `/security: "${SECURITY_SETUPS_TITLE}"`);
+  const used = new Set();
+  const out = { names };
+  for (const { key, title, block, entries } of securitySections(page)) {
+    const column = entries === 'rows' ? block.header.findIndex((cell) => inlineToText(cell).trim() === SECURITY_SETUP_COLUMN) : null;
+    if (column === -1) throw new Error(`/security: "${title}" has no "${SECURITY_SETUP_COLUMN}" column`);
+    out[key] = block[entries].map((entry, i) => {
+      const label = `/security: "${title}" entry ${i + 1}`;
+      const tags = setupTagsOf(entry, column, label);
+      assertDistinctSetups(tags, label);
+      const unknown = tags.filter((tag) => !names.includes(tag));
+      if (unknown.length > 0) {
+        throw new Error(`${label} names ${unknown.join(', ')}, not a setup in "${SECURITY_SETUPS_TITLE}" (${names.join(', ')})`);
+      }
+      tags.forEach((tag) => used.add(tag));
+      return tags;
+    });
+  }
+  const unused = names.filter((name) => !used.has(name));
+  if (unused.length > 0) throw new Error(`/security: no entry applies to ${unused.join(', ')}`);
+  return out;
+}
+
+/** A row's `Applies to` cell, or the emphasis a bullet opens with, split on commas. */
+function setupTagsOf(entry, column, label) {
+  let cell;
+  if (column === null) {
+    const first = entry.children[0]?.children?.[0];
+    if (first?.type !== 'em') throw new Error(`${label} opens with no *setup* tag`);
+    cell = inlineToText(first.children).replace(/\.$/, '');
+  } else {
+    cell = inlineToText(entry[column] ?? []);
+  }
+  if (cell.trim() === '') throw new Error(`${label} carries no setup tag`);
+  const tags = cell.split(',').map((tag) => tag.trim());
+  if (tags.some((tag) => tag === '')) throw new Error(`${label} carries an empty setup tag ("${cell}")`);
+  return tags;
+}
+
+function assertDistinctSetups(names, label) {
+  const repeated = [...new Set(names.filter((name, i) => names.indexOf(name) !== i))];
+  if (repeated.length > 0) throw new Error(`${label} repeats ${repeated.join(', ')}`);
+}
+
 /**
  * `/security` from docs/specs/security.md, every section of it.
  *
@@ -662,7 +728,8 @@ export function audienceBlocks(page, audiences, names) {
  * `canonicalUrl`, because the delta removes no section — the page is the spec,
  * which is the point of publishing it. `pageBlocks` is the same document with
  * the three split blocks narrowed to {@link SECURITY_PAGE_AUDIENCES}; `blocks`
- * keeps every entry.
+ * keeps every entry. `setups` is the setup table's vocabulary, every entry's
+ * tags checked against it ({@link securitySetups}).
  */
 const buildSecurity = async () => {
   const page = await buildDocument({
@@ -672,8 +739,65 @@ const buildSecurity = async () => {
     fallbackTitle: 'Security',
   });
   const audiences = securityAudiences(page);
-  return { ...page, audiences, pageBlocks: audienceBlocks(page, audiences, SECURITY_PAGE_AUDIENCES) };
+  return {
+    ...page,
+    setups: securitySetups(page).names,
+    audiences,
+    pageBlocks: audienceBlocks(page, audiences, SECURITY_PAGE_AUDIENCES),
+    auditIndex: await auditIndex(),
+  };
 };
+
+/**
+ * Each heading of a security spec, above its fold, that leads at least one
+ * `FAIL IF` line, with how many and its GitHub anchor. A check counts toward
+ * the nearest heading above it, at any depth; one above every heading has no
+ * section to be listed under, so it fails the build rather than drop out.
+ */
+export function auditedSections(text, label) {
+  const sections = [];
+  const seen = new Map();
+  let current = null;
+  for (const line of proseLines(text)) {
+    const heading = line.match(/^(#{2,6})\s+(.+?)\s*$/);
+    if (heading) {
+      if (/^(\d+\.\s*)?Future$/i.test(heading[2])) break;
+      // GitHub suffixes a repeated anchor with its count, as it renders the file.
+      const base = githubSlug(heading[2]);
+      const n = seen.get(base) ?? 0;
+      seen.set(base, n + 1);
+      const title = heading[2].replace(/`/g, '').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1');
+      current = { title, anchor: n === 0 ? base : `${base}-${n}`, checks: 0 };
+      sections.push(current);
+    } else if (FAIL_IF_RE.test(line)) {
+      if (!current) throw new Error(`${label}: a FAIL IF above its first section heading`);
+      current.checks++;
+    }
+  }
+  return sections.filter((section) => section.checks > 0);
+}
+
+/**
+ * The audit index `/security` shows (docs/specs/website-docs.md -> `/security`
+ * spec): every domain prompt in `.github/audit/`, the specs its scope claims,
+ * and each spec's audited sections, linked on GitHub.
+ */
+export async function auditIndex(root = repoRoot) {
+  const files = (await readdir(join(root, AUDIT_DIR))).filter(isDomainPrompt).sort();
+  const domains = await Promise.all(files.map(async (file) => {
+    const prompt = `${AUDIT_DIR}/${file}`;
+    const claimed = scopeOf(proseLines(await readFile(join(root, prompt), 'utf8')));
+    if (!claimed?.length) throw new Error(`${prompt}: claims no spec under a **Scope line`);
+    const specs = await Promise.all(claimed.map(async (path) => {
+      const sections = auditedSections(await readFile(join(root, path), 'utf8'), path).map(({ title, anchor, checks }) => ({
+        title, url: `${REPO_BLOB_BASE}/${path}#${anchor}`, checks,
+      }));
+      return { path, url: `${REPO_BLOB_BASE}/${path}`, checks: sections.reduce((n, s) => n + s.checks, 0), sections };
+    }));
+    return { name: file.replace(/\.md$/, ''), checks: specs.reduce((n, s) => n + s.checks, 0), specs };
+  }));
+  return { checks: domains.reduce((n, d) => n + d.checks, 0), domains };
+}
 
 /** Blocks belonging to a heading: everything up to the next heading of <= depth. */
 function sectionBlocks(blocks, heading) {

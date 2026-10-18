@@ -97,6 +97,70 @@ describe("security-adjacent documentation", () => {
   });
 });
 
+// docs/specs/website-docs.md -> `/security` spec: the two generated figures
+// close the section that describes the audit, after its own text.
+it("/security closes how the guarantees are checked with the canary recall and the audit index", () => {
+  const main = renderMain(<SecurityDocs />);
+  const heading = main.indexOf('id="how-the-guarantees-are-checked"');
+  const canary = main.indexOf("Every week, a canary audits the audit.");
+  const recall = main.indexOf('aria-label="Canary recall"');
+  const index = main.indexOf('aria-label="Audit index"');
+  expect(heading).toBeGreaterThan(0);
+  expect(canary).toBeGreaterThan(heading);
+  expect(recall).toBeGreaterThan(canary);
+  expect(index).toBeGreaterThan(recall);
+  expect(main.indexOf("<h2", heading)).toBeGreaterThan(index);
+});
+
+/** Each table in `html`: its header cells and its rows' cells, as text. */
+function tablesIn(html: string): { header: string[]; rows: string[][] }[] {
+  const text = (cell: string) => cell.replace(/<[^>]+>/g, "").trim();
+  const cells = (row: string, tag: string) =>
+    [...row.matchAll(new RegExp(`<${tag}\\b[^>]*>(.*?)</${tag}>`, "gs"))].map(([, cell]) => text(cell));
+  return [...html.matchAll(/<table\b.*?<\/table>/gs)].map(([table]) => {
+    const [head, ...body] = [...table.matchAll(/<tr\b.*?<\/tr>/gs)].map(([row]) => row);
+    return { header: cells(head, "th"), rows: body.map((row) => cells(row, "td")) };
+  });
+}
+
+// docs/specs/website-docs.md -> `/security` spec: the setup table is the
+// vocabulary every entry tags itself from, so a reader finds their setup first.
+it("/security names every setup in its setup table, ahead of the guarantees", () => {
+  const main = renderMain(<SecurityDocs />);
+  const setups = main.indexOf('id="setups"');
+  const guarantees = main.indexOf('id="guarantees"');
+  expect(setups).toBeGreaterThan(0);
+  expect(guarantees).toBeGreaterThan(setups);
+  const [table] = tablesIn(main.slice(setups, guarantees));
+  expect(table.header[0]).toBe("Setup");
+  expect(table.rows.map((row) => row[0])).toEqual(security.setups);
+});
+
+describe("setup tags", () => {
+  for (const page of PAGES) {
+    it(`${page.route} shows the setups each guarantee and bullet applies to`, () => {
+      const main = renderMain(page.element);
+      const tagged = (cell: string) => {
+        const tags = cell.replace(/\.$/, "").split(", ");
+        for (const tag of tags) expect(security.setups, cell).toContain(tag);
+      };
+      const guarantees = tablesIn(main).filter((table) => table.header.includes("Applies to"));
+      expect(guarantees).toHaveLength(1);
+      const column = guarantees[0].header.indexOf("Applies to");
+      expect(guarantees[0].rows.length).toBeGreaterThan(0);
+      for (const row of guarantees[0].rows) tagged(row[column]);
+      const audiences = security.audiences as Record<string, Record<"notDefended" | "knownGaps", { items: unknown[] }>>;
+      const bullets = page.audiences.reduce(
+        (n, name) => n + audiences[name].notDefended.items.length + audiences[name].knownGaps.items.length,
+        0,
+      );
+      const leads = [...main.matchAll(/<li\b[^>]*><p\b[^>]*><em\b[^>]*>(.*?)<\/em>/g)].map(([, lead]) => lead);
+      expect(leads).toHaveLength(bullets);
+      leads.forEach(tagged);
+    });
+  }
+});
+
 describe("audience pages", () => {
   const audiences = security.audiences as Record<
     string,
@@ -115,10 +179,14 @@ describe("audience pages", () => {
         .filter(([name]) => !(page.audiences as readonly string[]).includes(name))
         .map(([, sections]) => sections);
       // The umbrella's own paragraphs link the specs too ("Every pull request
-      // … Disclosure"); only its rows and bullets are audience-scoped.
+      // … Disclosure"), and its audit index links every audited section; only
+      // its rows and bullets are audience-scoped.
       const prose =
         page.route === "/security"
-          ? repoHrefsIn((security.pageBlocks as { type: string }[]).filter((b) => b.type === "paragraph"))
+          ? [
+              ...repoHrefsIn((security.pageBlocks as { type: string }[]).filter((b) => b.type === "paragraph")),
+              ...security.auditIndex.domains.flatMap((d) => d.specs.flatMap((s) => [s.url, ...s.sections.map((x) => x.url)])),
+            ]
           : [];
       for (const key of ["guarantees", "notDefended", "knownGaps"] as const) {
         const own = mine.flatMap((sections) => repoHrefsIn(sections[key]));
