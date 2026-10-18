@@ -22,7 +22,7 @@ import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'no
 import { spawnSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
-import { makeSelftest, readRepoFile, repoRoot } from './lint-kit.mjs';
+import { makeSelftest, readRepoFile, replaceText, repoRoot } from './lint-kit.mjs';
 import { countWords } from './spec-md.mjs';
 
 const budgets = JSON.parse(readRepoFile('scripts/spec-word-budgets.json'));
@@ -200,6 +200,29 @@ selftest.withMutation(
   },
   `check 16: a security spec claimed by two audit domains\n      planting a second claim in ${DOMAIN} stays green — spec-lint cannot see it`,
 );
+
+// Check 21's failures, each its own mutation of a security spec's rule IDs or
+// of the registry, required to report its own diagnostic: most also break a
+// second invariant, which must not be what turns them red.
+const ID_SPEC = DOMAIN.replace('.github/audit/', 'docs/specs/security-');
+const ID_REGISTRY = 'scripts/security-rule-ids.json';
+const [FIRST_ID, SECOND_ID] = [...readRepoFile(ID_SPEC).matchAll(/\*\*FAIL IF\*\* `(S\d+)` /g)].map((m) => m[1]);
+assert.ok(FIRST_ID && SECOND_ID, `check 21 needs two rule IDs in ${ID_SPEC}`);
+const { next: NEXT } = JSON.parse(readRepoFile(ID_REGISTRY));
+const registry = (value) => (path) => writeFileSync(path, `${JSON.stringify(value)}\n`);
+for (const [name, target, mutate, expected] of [
+  ['a rule with no ID', ID_SPEC, replaceText(`**FAIL IF** \`${FIRST_ID}\` `, '**FAIL IF** '), 'with no ID'],
+  ['a rule with two IDs', ID_SPEC, replaceText(`**FAIL IF** \`${FIRST_ID}\` `, `**FAIL IF** \`${FIRST_ID}\` \`S${NEXT}\` `), 'with no ID'],
+  ['an ID naming two rules', ID_SPEC, replaceText(`**FAIL IF** \`${SECOND_ID}\` `, `**FAIL IF** \`${FIRST_ID}\` `), `${FIRST_ID} also names the rule at`],
+  ['a live ID at or past next', ID_REGISTRY, registry({ next: NEXT - 1, retired: [] }), `S${NEXT - 1} is not below "next"`],
+  ['an ID below next neither live nor retired', ID_REGISTRY, registry({ next: NEXT + 1, retired: [] }), `S${NEXT} is in no security spec and not retired`],
+  ['a retired ID back in a spec', ID_REGISTRY, registry({ next: NEXT, retired: [Number(FIRST_ID.slice(1))] }), `${FIRST_ID} is retired, and a retired ID never comes back`],
+  ['an ID retired twice', ID_REGISTRY, registry({ next: NEXT + 1, retired: [NEXT, NEXT] }), `S${NEXT} is retired twice`],
+  ['a retired ID never taken', ID_REGISTRY, registry({ next: NEXT, retired: [NEXT] }), `retired S${NEXT} is not below "next"`],
+  ['a registry out of shape', ID_REGISTRY, registry({ next: String(NEXT), retired: [] }), 'must be { "next": <positive integer>'],
+]) {
+  selftest.withMutationReporting(target, mutate, expected, `check 21: ${name}\n      planting it in ${target} stays green or reports something else — spec-lint cannot see it`);
+}
 
 selftest.finish(
   'spec-lint-selftest',

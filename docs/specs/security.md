@@ -111,4 +111,4 @@ Gaps rather than accepted risks: we intend to close them.
 
 **Must report vulnerabilities privately** through GitHub's [Report a vulnerability](https://github.com/diffplug/dormouse/security/advisories/new) form, visible only to the reporter and maintainers. **Never open a public issue or email the maintainer.** Include the version or commit, deployment (self-hosted Relay, Hosted, standalone app, or VS Code extension), and shortest reproduction. Every advisory is acknowledged with intended next steps; there is no bounty or promised response time. A coordinated-release requirement is communicated in the advisory.
 
-- **FAIL IF** private vulnerability reporting is disabled on the repository (`gh api repos/diffplug/dormouse/private-vulnerability-reporting` must report `enabled: true`) (rationale). Pinned by `scripts/github-state-check.mjs`.
+- **FAIL IF** `S268` private vulnerability reporting is disabled on the repository (`gh api repos/diffplug/dormouse/private-vulnerability-reporting` must report `enabled: true`) (rationale). Pinned by `scripts/github-state-check.mjs`.

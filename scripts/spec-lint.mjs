@@ -94,6 +94,13 @@
  *      the title of an `it(` / `test(` call in a tracked test file. AGENTS.md
  *      -> "House form for rules": cite the test file, never a title, which
  *      renames silently.
+ *  21. Every `**FAIL IF**` rule check 16's specs carry above `## Future`
+ *      opens with one ID, `` `S<n>` `` right after the bold, and no ID names
+ *      two rules. scripts/security-rule-ids.json holds `next`, the ID a new
+ *      rule takes, and `retired`, the IDs of deleted rules: every ID is below
+ *      `next`, and every integer below it is live or retired, never both and
+ *      never neither. AGENTS.md -> "House form for rules": a rule keeps its ID
+ *      wherever it moves, and a retired ID never comes back.
  *
  * scripts/spec-lint-selftest.mjs plants one defect per finding check and
  * requires this lint to go red.
@@ -102,7 +109,8 @@ import { readdirSync, existsSync, statSync, writeFileSync } from 'node:fs';
 import { join, dirname, normalize } from 'node:path';
 import { readRepoFile, repoRoot as ROOT, trackedFiles } from './lint-kit.mjs';
 import {
-  AUDIT_DIR, countWords, FAIL_IF_RE, githubSlug as slug, isDomainPrompt, proseLines as proseLinesOf, scopeOf, SOURCE_EXTENSIONS,
+  AUDIT_DIR, auditedRules, countWords, FAIL_IF_RE, githubSlug as slug, isDomainPrompt, proseLines as proseLinesOf, RULE_ID, RULE_IDS_FILE, scopeOf,
+  SOURCE_EXTENSIONS,
 } from './spec-md.mjs';
 
 const SPECS_DIR = 'docs/specs';
@@ -456,6 +464,7 @@ const BARE_BASENAME_RE = new RegExp(`^[\\w.-]+\\.(?:${SOURCE_EXTENSIONS.join('|'
 const IDENT_RE = /^[A-Za-z_$][\w$]*(?:[.#][\w$]+)*(?:\(\))?$/;
 // `` `sym` / `sym2` in `path` `` — the symbols placed in a file.
 const SYMBOLS_IN_FILE_RE = /((?:`[^`\n]+`\s*(?:\/|,|and|\+)?\s*)+)\bin\s+`([^`\n]+)`/g;
+const RULE_ID_LEAD_RE = new RegExp(`(\\*\\*FAIL IF\\*\\*) \`${RULE_ID}\``);
 for (const spec of foldCheckedFiles) {
   const lines = proseLines(spec);
   lines.forEach((line, i) => {
@@ -478,7 +487,8 @@ for (const spec of foldCheckedFiles) {
 // name what is gone. A directory, or a path check 4 reports missing, is skipped.
 for (const rel of allFiles.filter((f) => !rationaleFiles.includes(f))) {
   proseLines(rel).forEach((line, i) => {
-    for (const m of line.matchAll(SYMBOLS_IN_FILE_RE)) {
+    // A rule's ID (check 21) is no symbol, though a code span runs on from it.
+    for (const m of line.replace(RULE_ID_LEAD_RE, '$1').matchAll(SYMBOLS_IN_FILE_RE)) {
       const src = checkablePath(m[2]) ? readIfExists(m[2]) : null;
       if (src === null) continue;
       for (const sym of [...m[1].matchAll(TICK_RE)].map((x) => x[1])) {
@@ -719,6 +729,58 @@ for (const spec of foldCheckedFiles) {
       }
     }
   });
+}
+
+// --- Check 21: every audited rule carries a stable ID -----------------------
+// A rule is keyed by its ID wherever the audit names it, so a rule may move or
+// be reworded without re-keying anything. IDs are global and never reused: the
+// registry holds the next one and those of deleted rules.
+const registryProblem = (why) => problems.push(`${RULE_IDS_FILE}: ${why}`);
+let registry = null;
+try {
+  registry = JSON.parse(read(RULE_IDS_FILE));
+} catch (error) {
+  registryProblem(`unreadable (${error.message}) — it must be { "next": <n>, "retired": [<n>, …] }`);
+}
+const isId = (n) => Number.isInteger(n) && n >= 1;
+if (registry && !(isId(registry.next) && Array.isArray(registry.retired) && registry.retired.every(isId))) {
+  registryProblem('must be { "next": <positive integer>, "retired": [<positive integer>, …] }');
+  registry = null;
+}
+if (registry) {
+  const { next } = registry;
+  const take = `give it \`S${next}\` and set "next" to ${next + 1} in ${RULE_IDS_FILE}`;
+  const live = new Map(); // n -> "file:line"
+  for (const rel of claimants.keys()) {
+    for (const rule of auditedRules(read(rel))) {
+      const at = `${rel}:${rule.line}`;
+      if (rule.id === null) {
+        problems.push(`${at}: a "**FAIL IF**" rule with no ID — it must open \`**FAIL IF** \\\`S<n>\\\` <rule>\` with one ID; if it is new, ${take}`);
+        continue;
+      }
+      const n = Number(rule.id.slice(1));
+      if (live.has(n)) {
+        problems.push(`${at}: ${rule.id} also names the rule at ${live.get(n)} — an ID names one rule; if this one is new, ${take}`);
+      } else {
+        live.set(n, at);
+      }
+      if (n >= next) problems.push(`${at}: ${rule.id} is not below "next" (${next}) in ${RULE_IDS_FILE} — a new rule takes "next"; ${take}`);
+    }
+  }
+  const retired = new Set();
+  for (const n of registry.retired) {
+    if (retired.has(n)) registryProblem(`S${n} is retired twice — list it once`);
+    retired.add(n);
+    if (n >= next) registryProblem(`retired S${n} is not below "next" (${next}) — only an ID once taken can be retired`);
+    if (live.has(n)) {
+      problems.push(`${live.get(n)}: S${n} is retired, and a retired ID never comes back — ${take.replace('give it', 'give this rule')}`);
+    }
+  }
+  for (let n = 1; n < next; n++) {
+    if (!live.has(n) && !retired.has(n)) {
+      registryProblem(`S${n} is in no security spec and not retired — if its rule was deleted, add ${n} to "retired"; if it moved, restore its ID`);
+    }
+  }
 }
 
 // -----------------------------------------------------------------------------
