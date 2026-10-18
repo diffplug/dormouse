@@ -64,7 +64,7 @@ export function WorkspaceTabMenu({
   const placed = menuStyle.visibility !== 'hidden';
 
   const restoreFocus = () => (menu.keyboard ? tabButton(id) : opener)?.focus({ preventScroll: true });
-  useCloseOnOutsideAndEscape(true, menuRef, closeWorkspaceMenu, anchorRef);
+  useCloseOnOutsideAndEscape(true, menuRef, closeWorkspaceMenu, { anchor: anchorRef });
 
   const items: MenuItem[] = [
     { key: 'rename', label: 'Rename', restoresFocus: false, run: () => requestWorkspaceRename(id) },
