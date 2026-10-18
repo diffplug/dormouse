@@ -12,7 +12,7 @@ import {
   useBusyAction,
 } from './remote-control-shared';
 import { ExpiringCode } from './ScannableCode';
-import { BurrowNameField, HostedEnrollView, HostedEnrollmentEnded, SIGN_IN_LABEL, accountHost, accountPage } from './HostedSignIn';
+import { BurrowNameField, HostedEnrollView, HostedEnrollmentEnded, accountHost, accountPage } from './HostedSignIn';
 import {
   relayRefuses,
   type BurrowConsoleStatus,
@@ -569,7 +569,7 @@ function UnenrolledRelay({
           />,
         ]
       : [
-          `${SIGN_IN_LABEL} with your ${accountHost(status.accountOrigin)} account, so paired phones can reconnect any time.`,
+          `Enroll this Dormouse with your ${accountHost(status.accountOrigin)} account, so paired phones can reconnect any time.`,
           <>
             <HostedEnrollView
               enrollment={status.hostedEnrollment}
