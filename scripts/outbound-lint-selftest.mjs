@@ -135,8 +135,11 @@ const STRUCTURAL = [
     'a stale REMOTE_LITERALS host',
   ],
   [
-    'lib/src/components/SettingsDialog.tsx',
-    replace("'https://dormouse.sh/hosted/#voice'", "'/hosted/#voice'"),
+    'lib/src/components/HostedSignIn.tsx',
+    replace(
+      "'https://dormouse.sh/hosted/#pricing';\n/** The Hosted page's voice section, the spoken-alarm row's link where the build has no managed voice. */\nexport const HOSTED_VOICE_URL = 'https://dormouse.sh/hosted/#voice'",
+      "'/hosted/#pricing';\nexport const HOSTED_VOICE_URL = '/hosted/#voice'",
+    ),
     'OUTBOUND_SITES entry no longer spells any form',
     'a stale OUTBOUND_SITES entry',
   ],

@@ -8,8 +8,8 @@ import {
   isRelayBearer,
   parseBearer,
 } from "remote-lib-common";
-import { isAdmin } from "./admin";
 import type { RelayEnv } from "./bindings";
+import { entitledSql } from "./entitlement";
 
 /** The slice of a `pg` client the Relay uses; `pg` ships no types here. */
 export interface Client {
@@ -38,20 +38,17 @@ export interface RelayBurrow extends Owner {
 }
 
 /**
- * The owner columns every lookup selects from `"user" u`, and the one
- * entitlement predicate over them: `isAdmin`, until billing exists.
+ * The owner column every lookup selects from `"user" u`: the entitlement,
+ * resolved in the same query as the bearer.
  */
-export const OWNER_COLUMNS = `u.email AS "ownerEmail", u."emailVerified" AS "ownerEmailVerified"`;
+export const OWNER_COLUMNS = `${entitledSql("u")} AS "ownerEntitled"`;
 
 /** A row selecting {@link OWNER_COLUMNS} beside its `userId`. */
-export type OwnerRow = { userId: string; ownerEmail: unknown; ownerEmailVerified: unknown };
+export type OwnerRow = { userId: string; ownerEntitled: unknown };
 
 /** A row carrying {@link OWNER_COLUMNS} as the {@link Owner} it names. */
 export function ownerOf(row: OwnerRow): Owner {
-  return {
-    userId: row.userId,
-    entitled: isAdmin({ email: row.ownerEmail, emailVerified: row.ownerEmailVerified }),
-  };
+  return { userId: row.userId, entitled: row.ownerEntitled === true };
 }
 
 /** The live session `token` names, its owner joined in the same query, or null. */

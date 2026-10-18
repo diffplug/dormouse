@@ -49,7 +49,7 @@ export function createManagedVoicePort(invoke: Invoke): StandaloneManagedVoicePo
   const apply = (data: unknown): void => {
     const next = data as Partial<ManagedVoiceStatus> | null;
     if (typeof next?.configured !== "boolean" || typeof next.voiceId !== "string") return;
-    status = { configured: next.configured, voiceId: next.voiceId };
+    status = { configured: next.configured, voiceId: next.voiceId, notEntitled: next.notEntitled === true };
     for (const listener of listeners) listener();
   };
   const ask = async <T>(payload: Record<string, unknown>): Promise<T> => {
@@ -60,7 +60,6 @@ export function createManagedVoicePort(invoke: Invoke): StandaloneManagedVoicePo
   };
 
   return {
-    offerSetup: import.meta.env.DEV,
     status: () => status,
     subscribe(listener) {
       listeners.add(listener);

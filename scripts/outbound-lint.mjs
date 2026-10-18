@@ -171,9 +171,9 @@ const OUTBOUND_SITES = {
     class: 'user:link-click',
     reason: 'The self-host guide link, opened only when the user clicks it.',
   },
-  'lib/src/components/SettingsDialog.tsx': {
+  'lib/src/components/HostedSignIn.tsx': {
     class: 'user:link-click',
-    reason: 'The Hosted voice page link, opened only when the user clicks it.',
+    reason: 'The Hosted plans and voice page links, opened only when the user clicks one.',
   },
   'lib/src/lib/clipboard-failure.ts': {
     class: 'user:link-click',
@@ -304,9 +304,9 @@ const REMOTE_LITERALS = {
     hosts: ['dormouse.sh'],
     reason: 'The self-host guide link.',
   },
-  'lib/src/components/SettingsDialog.tsx': {
+  'lib/src/components/HostedSignIn.tsx': {
     hosts: ['dormouse.sh'],
-    reason: 'The Hosted voice page link.',
+    reason: 'The Hosted plans and voice page links.',
   },
   'lib/src/lib/clipboard-failure.ts': {
     hosts: ['github.com'],

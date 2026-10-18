@@ -4,7 +4,7 @@ import type { ExecutionContext } from "hono";
 import { getPath } from "hono/utils/url";
 import { queryDatabase } from "pgstencil/postgres";
 import { openAuthRead, ownPageRead } from "./account-gate";
-import { ADMIN_EMAIL } from "./admin";
+import { ADMIN_EMAIL } from "./entitlement";
 import type { AccountEnv } from "./bindings";
 
 /** The only verified emails the production account Worker signs in. */
