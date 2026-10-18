@@ -9,7 +9,7 @@
 
 | Worker | Origin | Serves | Holds |
 |---|---|---|---|
-| `dormouse-hosted` | `https://hosted.dormouse.sh` | the account frontend, `/api/auth/*`, `/api/providers`, voice tokens, the Relay's account routes ("Burrow enrollment") | the login cookie, auth secrets, Hyperdrive, the approval rate limit, a binding to the relay's `RelayRoom` |
+| `dormouse-hosted` | `https://hosted.dormouse.sh` | the account frontend, `/api/auth/*`, `/api/providers`, voice tokens, the Relay's account routes ("Burrow enrollment"), billing ("Billing") | the login cookie, auth secrets, Hyperdrive, the approval rate limit, a binding to the relay's `RelayRoom`, the Stripe secrets |
 | `dormouse-relay` | `https://relay.dormouse.sh` | the Hosted Relay, its sockets, and Pocket ("Relay", "Relay sockets"), the one-time rendezvous and `/connect/` (`docs/specs/one-time.md` -> "Hosted rendezvous") | Hyperdrive, `OneTimeRoom`, `RelayRoom`, the one-time, sign-in, setup, and enrollment rate limits, `ACCOUNT_ORIGIN`, `RELAY_ENROLL_SECRET`, the VAPID pair |
 | `dormouse-voice` | `https://voice.dormouse.sh` | speak and the history sweep ("Managed voice") | `ELEVENLABS_API_KEY`, Hyperdrive |
 
@@ -19,7 +19,7 @@ Every Worker answers `/api/health` and `/api/ready`, 404s anything else under it
 
 **Must run committed Better Auth migrations before deploying code that needs them, never during a Worker request.** Postgres is reached through an uncached Hyperdrive binding, one per Worker.
 
-**Must grant `dormouse_relay` and `dormouse_voice` only what `hosted/server/runtime-roles.sql` lists, never default privileges**, so a new table needs a grant there; each reaches only its Worker's tables and the entitlement's user columns, and the relay inserts a sign-in's voice token ("Managed voice"). **Must bind each production Worker to its own Hyperdrive connecting as its role**: account `dormouse_app`, relay `dormouse_relay`, voice `dormouse_voice` (`PRODUCTION` in `hosted/scripts/production.mjs`).
+**Must grant `dormouse_relay` and `dormouse_voice` only what `hosted/server/runtime-roles.sql` lists, never default privileges**, so a new table needs a grant there; each reaches only its Worker's tables and the entitlement's user and subscription columns, and the relay inserts a sign-in's voice token ("Managed voice"). **Must bind each production Worker to its own Hyperdrive connecting as its role**: account `dormouse_app`, relay `dormouse_relay`, voice `dormouse_voice` (`PRODUCTION` in `hosted/scripts/production.mjs`).
 
 **Must install released core/auth packages from npm and commit their lockfile integrity hashes.** The installed packages' `dist/provenance.json` must name the same clean pgstencil commit; no runtime import depends on a sibling checkout. The auth migrations remain owned by the package; Dormouse's own tables migrate from `hosted/server/dormouse-migrations/`. **Never edit a merged migration**: a migrated database never reruns one, so append the next number (pinned by `hosted/server/tests/migrations.test.ts`).
 
@@ -67,13 +67,16 @@ Source of truth: `termsRoutes` in `hosted/server/terms.ts`; `TERMS_VERSION` in `
 
 ## Entitlement
 
-**Must read the entitlement (`docs/specs/pricing.md` -> "Checkout and entitlement") on the server, per request, through one SQL predicate over the account's `"user"` row**, so a bearer and its owner's entitlement resolve in one query. Until billing ships it admits only `ADMIN_EMAIL` while that is the account's verified email, one of the exceptions to "never email" ("Identity and login"); nothing else may key on an address.
+**Must read the entitlement (`docs/specs/pricing.md` -> "Checkout and entitlement") on the server, per request, through one SQL predicate over the account's `"user"` row**, so a bearer and its owner's entitlement resolve in one query.
+
+- **Must entitle an account only while it holds exactly one current subscription, and that one is `active` before its period end or `trialing` before its trial end**, against the database's clock: `@pgstencil/stripe`'s `status()` access, widened to a `past_due` one until `PAYMENT_GRACE_DAYS` past its period end (`docs/specs/pricing.md` -> "Checkout and entitlement").
+- **Must entitle `ADMIN_EMAIL` as a standing comp** while it is the account's verified email, one of the exceptions to "never email" ("Identity and login"); nothing else may key on an address.
 
 Source of truth: `entitledSql` and `entitled` in `hosted/server/entitlement.ts`; `cookieEntitled` in `hosted/server/account-gate.ts`.
 
 ## Managed voice
 
-A signed-in desktop exchanges its voice token for ElevenLabs speech in a voice of the curated set (`MANAGED_VOICES` in `remote-lib-common/src/remote/managed-voice.ts`). Signing in is the device-code enrollment ("Burrow enrollment"), whose redemption mints the token; the account Worker's token routes are the admin test path. The voice Worker serves speak.
+A signed-in desktop exchanges its voice token for ElevenLabs speech in a voice of the curated set (`MANAGED_VOICES` in `remote-lib-common/src/remote/managed-voice.ts`). Signing in is the device-code enrollment ("Burrow enrollment"), whose redemption mints the token; the account Worker's token routes mint one by hand. The voice Worker serves speak.
 
 | Route | Credential | Success |
 |---|---|---|
@@ -227,9 +230,37 @@ Errors are the managed-voice cookie routes' ("Managed voice"), except that their
 
 Source of truth: `relayApiRoutes` in `hosted/server/relay-api.ts`; `relayAccountRoutes` in `hosted/server/relay-account.ts`; `takeEnrollment` in `hosted/src/enrollment.ts`.
 
+## Billing
+
+The account Worker sells the plans `monthly`, `yearly`, and `founding` through `@pgstencil/stripe` (`docs/specs/pricing.md` -> "Checkout and entitlement").
+
+| Route | Credential | Success |
+|---|---|---|
+| `GET /api/billing` | login cookie | 200 `{ plan, active, until, renews, entitled, founder, founding }` from the synchronized rows; `plan` names a subscription Stripe still holds, `active` whether it grants access |
+| `POST /api/billing/checkout` | login cookie, exact `Origin`, JSON `{ plan }` | 200 `{ url }` of Stripe Checkout |
+| `POST /api/billing/confirm` | login cookie, exact `Origin`, JSON `{ checkout }` | 200, the `GET` body |
+| `POST /api/billing/portal` | login cookie, exact `Origin` | 200 `{ url }` of the customer portal |
+| `PUT /api/billing/founder` | login cookie, exact `Origin`, JSON `{ shown, name }` | 204; 409 for an account with no current founding subscription |
+| `PUT /api/billing/survey` | login cookie, exact `Origin`, JSON of the four answers | 204 |
+| `POST /api/billing/webhook` | `Stripe-Signature` over the raw body | 200 once `webhook()` committed |
+| `GET /api/hosted/cohorts` | none | 200 `{ cohort, seatsLeft, founders: { total, shown } }` |
+
+Errors are JSON `{ message }`; the cookie routes answer 401 without a login and need no entitlement.
+
+- **Must turn billing off, not half-working**, without all five bindings — the secrets `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET`, the vars `STRIPE_PRICE_MONTHLY`, `STRIPE_PRICE_YEARLY`, and `STRIPE_PRICES_FOUNDING` (cohort order): every billing route answers 503 `CHECKOUT_CLOSED` and the cron does nothing. **Must refuse a ladder whose length differs from `FOUNDING_LADDER`** in `website/src/lib/hosted-pricing.ts`, the one owner of prices. Previews never bill; the dev loop bills on StripeDev, which takes no card.
+- **Never take a Price, customer, owner, quantity, or return URL from a request**: checkout takes a plan name, the owner is the login, and Stripe returns to `/billing`. An account without a public email checks out with Stripe Checkout collecting one. A checkout left open for another plan is expired first.
+- **Must offer founding at the open cohort's Price**: the highest ladder step with a completed purchase, or the next once it holds `FOUNDING_COHORT_SIZE`; 409 once the ladder is full. A purchase counts unless it ended within `REFUND_DAYS` of starting, so a refund returns its seat only when the subscription is canceled at once in Stripe.
+- **Must verify the signature over the raw body before any write**, cap the body at `WEBHOOK_BODY_BYTES` (413), and answer 2xx only once `webhook()` has committed; any other failure answers 503, which Stripe retries.
+- **Must answer from the cohort endpoint only the open cohort's index and seats (both absent once founding closes), the count of founding purchases, and the chosen names of opted-in current founders**, at most `MAX_SHOWN_FOUNDERS`, cached at most `COHORT_CACHE_MS`. **Must answer `SITE_ORIGIN` (`https://dormouse.sh`) this one `GET` path and 421 every other**, through the zone route `PRODUCTION` pins.
+- **Must resync, from the account's Cron Trigger every 10 minutes, every subscription still `active` or `trialing` past its period or trial end**, so a missed renewal webhook lapses a member until the next run at most; a failed resync fails the invocation, and an account that always fails cannot hold the others back.
+- **Must serve the account pages** `/checkout?plan=` (signed in, the plan and its price now, then Stripe), Stripe's return to `/billing?checkout=` (confirmed, then the founders-row opt-in and the survey for a completed checkout), and the account page's Plan section, which keeps Manage billing for a held subscription with a payment due. **May keep a pending checkout's plan name, and nothing else, in the tab's session storage** for a provider sign-in to return to.
+- **Must keep a founder's opt-in as the name they chose to show** (`dormouse_founders`, deleted on withdrawal) and the survey as one set of answers per account (`dormouse_price_survey`), each answer whole dollars or null.
+
+Source of truth: `billingRoutes` and `reconcileDue` in `hosted/server/billing-routes.ts`; `billingSetup`, `openCohort`, and `withBilling` in `hosted/server/billing.ts`; `hosted/src/Billing.tsx` and `takeCheckout` in `hosted/src/checkout.ts`; `hosted/server/dormouse-migrations/008_billing_founders.sql`. Pinned by `hosted/server/tests/billing.test.ts`.
+
 ## Development and release
 
-**Must run local development with `dor tool hosted` inside Dormouse.** Its single loopback `http://localhost:<port>` origin serves Vite and Node auth on a disposable development database, with the voice token and Relay account routes but never speak, which every Hosted build reaches only at `https://voice.dormouse.sh`. Host, Origin, and Fetch Metadata checks guard the local captured-email inbox; no production entry imports an inbox or test-control handler.
+**Must run local development with `dor tool hosted` inside Dormouse.** Its single loopback `http://localhost:<port>` origin serves Vite and Node auth on a disposable development database, with the voice token, Relay account, and billing routes (on StripeDev) but never speak, which every Hosted build reaches only at `https://voice.dormouse.sh`. Host, Origin, and Fetch Metadata checks guard the local captured-email inbox; no production entry imports an inbox or test-control handler.
 
 **Must verify the three production Worker bundles and run the consumer's integration suite before release.** Only test entries inject deterministic Better Auth. Simulated callbacks do not certify provider registrations; production acceptance requires real browser login with each enabled provider and email delivery.
 
@@ -241,7 +272,7 @@ Source of truth: `allowedDevRequest` in `hosted/server/dev-host-guard.ts`; `host
 
 **Must deploy only verified same-repository PR merge revisions touching Hosted or its shared build inputs.** Drafts qualify; forks receive no deployment credentials.
 
-**Must isolate each PR in three persistent workers.dev Workers (`dormouse-{hosted,relay,voice}-pr-N`), one uncached Hyperdrive all three share, and a Neon branch from an empty dedicated preview project**, all reused until close or merge deletes them. That Hyperdrive connects as the branch's owner, so no preview exercises the restricted roles; `hosted/server/tests` binds the relay and voice to them (rationale). Preview configs exclude production routes, triggers, and credentials; runtime bindings cannot enable OAuth, Postmark, or ElevenLabs. **Must give each relay preview its own Durable Object namespaces, each preview preview-only rate-limit namespaces, and wire each preview to its own PR's siblings** (the account's `RELAY_ROOM`, the relay's `ACCOUNT_ORIGIN`). **Must derive every preview secret from `PREVIEW_AUTH_SECRET` and its Worker's name**, the relay's VAPID pair included, so no production key reaches a preview and subscriptions survive the PR's redeploys.
+**Must isolate each PR in three persistent workers.dev Workers (`dormouse-{hosted,relay,voice}-pr-N`), one uncached Hyperdrive all three share, and a Neon branch from an empty dedicated preview project**, all reused until close or merge deletes them. That Hyperdrive connects as the branch's owner, so no preview exercises the restricted roles; `hosted/server/tests` binds the relay and voice to them (rationale). Preview configs exclude production routes, triggers, and credentials; runtime bindings cannot enable OAuth, Postmark, ElevenLabs, or Stripe. **Must give each relay preview its own Durable Object namespaces, each preview preview-only rate-limit namespaces, and wire each preview to its own PR's siblings** (the account's `RELAY_ROOM`, the relay's `ACCOUNT_ORIGIN`). **Must derive every preview secret from `PREVIEW_AUTH_SECRET` and its Worker's name**, the relay's VAPID pair included, so no production key reaches a preview and subscriptions survive the PR's redeploys.
 
 **Must run cleanup from the base branch's checkout, never the closed PR's.**
 
@@ -251,7 +282,7 @@ Source of truth: `.github/workflows/hosted-preview.yml`; `previewConfig` / `prev
 
 ## Production releases
 
-**Must deploy only manually selected main revisions after Hosted tests/build and accepted clean package provenance.** `productionConfig` holds each config to its Worker's pinned name, origin, and lone custom domain, and the relay's `ACCOUNT_ORIGIN` to the account's origin; `preflight`, before the backup, checks each Worker's Hyperdrive and its own secret names (`docs/specs/security-hosted.md` -> "Deployment boundary") — names only, as Cloudflare exposes no value. **Must back up, encrypt, decrypt, and restore-test before applying migrations**, uploading only the encrypted archive. **Must deploy relay, voice, then account, stopping at a failure**; the relay must pass its revision check, `/api/ready`, push config, and `oneTimeSmoke` before the next deploy (rationale). Production has no public candidate URL.
+**Must deploy only manually selected main revisions after Hosted tests/build and accepted clean package provenance.** `productionConfig` holds each config to its Worker's pinned name, origin, and lone custom domain (the account also to its site route, "Billing"), and the relay's `ACCOUNT_ORIGIN` to the account's origin; `preflight`, before the backup, checks each Worker's Hyperdrive and its own secret names (`docs/specs/security-hosted.md` -> "Deployment boundary") — names only, as Cloudflare exposes no value. **Must back up, encrypt, decrypt, and restore-test before applying migrations**, uploading only the encrypted archive. **Must deploy relay, voice, then account, stopping at a failure**; the relay must pass its revision check, `/api/ready`, push config, and `oneTimeSmoke` before the next deploy (rationale). Production has no public candidate URL.
 
 **Must only append Durable Object migrations**: a deployed tag is never edited or removed, and Cloudflare refuses a rollback across one, so each is a rollback floor. A deploy restarts every room, dropping links still waiting or mid-handshake, and every relay socket, which its end reconnects; a session already on its direct path never touches Hosted. Live verification checks all three Workers once the account has deployed.
 
@@ -267,5 +298,5 @@ Source of truth: `.github/workflows/hosted-production.yml`; `hosted/scripts/prod
 
 1. Deploy the configured providers and pass real production acceptance. pgstencil includes the Microsoft fix; personal and work/school callbacks need acceptance.
 2. Add per-browser login listing/revocation, sign-out-everywhere, and account recovery before broad paid use. Revisit the fixed 24-hour login lifetime for daily voice use.
-3. Managed voice for every member: the subscription as the entitlement in place of `ADMIN_EMAIL` (`docs/specs/pricing.md` -> "Checkout and entitlement"), per-account quotas, usage accounting, spending bounds beyond the fixed daily cap, retiring the account page's hand-minted tokens, and explicit text/redaction disclosure.
+3. Managed voice for every member: per-account quotas, usage accounting, spending bounds beyond the fixed daily cap, retiring the account page's hand-minted tokens, and explicit text/redaction disclosure.
 4. Open sign-in: delete `hosted/server/prelaunch.ts` and the frontend's pre-launch notice.

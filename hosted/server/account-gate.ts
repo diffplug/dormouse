@@ -1,6 +1,7 @@
-// Rules: docs/specs/hosted.md -> "Managed voice" and "Burrow enrollment";
-// docs/specs/security-hosted.md -> "Origin boundary".
+// Rules: docs/specs/hosted.md -> "Managed voice", "Burrow enrollment", and
+// "Billing"; docs/specs/security-hosted.md -> "Origin boundary".
 import type { Context, MiddlewareHandler } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { queryDatabase } from "pgstencil/postgres";
 import { entitled } from "./entitlement";
 
@@ -17,6 +18,10 @@ export const accountQuery = <Row extends Record<string, unknown>>(
   text: string,
   values: unknown[],
 ) => queryDatabase<Row>(host.databaseUrl, text, values);
+
+/** A body limit answering the account's JSON 413. */
+export const jsonBodyLimit = (maxSize: number) =>
+  bodyLimit({ maxSize, onError: (c) => c.json({ message: "Request too large." }, 413) });
 
 /**
  * Whether the account's own page made this read: the browser says
@@ -45,12 +50,16 @@ export const openAuthRead = (path: string) =>
 /** The login a cookie route acts for. */
 export interface AccountLogin {
   userId: string;
+  /** The account's public email, null for a provider-only account. */
+  email: string | null;
   /**
    * `get-session`'s `session.createdAt`, unparsed: only a route that needs a
    * recent login reads it, and it fails closed on a value it cannot read.
    */
   createdAt: unknown;
 }
+
+type Gate = MiddlewareHandler<{ Variables: { login: AccountLogin } }>;
 
 /**
  * The account Worker's cookie routes' gate: a read is {@link ownPageRead},
@@ -63,21 +72,21 @@ export interface AccountLogin {
 export function cookieEntitled(
   host: (c: Context) => AccountHost,
   refuse: (c: Context) => Response,
-): MiddlewareHandler<{ Variables: { login: AccountLogin } }> {
+): Gate {
   return cookieGate(host, refuse);
 }
 
 /** {@link cookieEntitled}'s gate for a route any signed-in account may use. */
 export function cookieLogin(
   host: (c: Context) => AccountHost,
-): MiddlewareHandler<{ Variables: { login: AccountLogin } }> {
+): Gate {
   return cookieGate(host);
 }
 
 function cookieGate(
   host: (c: Context) => AccountHost,
   refuse?: (c: Context) => Response,
-): MiddlewareHandler<{ Variables: { login: AccountLogin } }> {
+): Gate {
   return async (c, next) => {
     const origin = new URL(c.req.url).origin;
     const read = c.req.method === "GET" || c.req.method === "HEAD";
@@ -95,13 +104,14 @@ function cookieGate(
     );
     if (!response.ok) throw new Error("Login lookup failed");
     const session = (await response.json()) as {
-      user?: { id: string };
+      user?: { id: string; email?: unknown };
       session?: { createdAt?: unknown };
     } | null;
     if (!session?.user) return c.json({ message: "Sign in first." }, 401);
     if (refuse && !(await entitled(host(c).databaseUrl, session.user.id))) return refuse(c);
     c.set("login", {
       userId: session.user.id,
+      email: typeof session.user.email === "string" ? session.user.email : null,
       createdAt: session.session?.createdAt,
     });
     await next();
