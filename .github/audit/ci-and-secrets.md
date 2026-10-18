@@ -12,7 +12,7 @@
 
 **For a `FAIL IF` marked `Pinned by` a script or test, run that script and record its result as the evidence** — `node scripts/workflow-lint.mjs`, `node --test scripts/security-audit.test.mjs`, `node --test scripts/workflow-audit.test.mjs`, `node --test scripts/sign-and-deploy.test.mjs` — one line per clause it pins, rather than re-reading the files it reads.
 
-What stays yours: every unpinned clause and judgement bullet, the qualitative pass below, and whether `.github/audit/expected-github-state.json` still encodes the rules in your scope — a value there that a spec does not justify is a FAIL under the spec section it would weaken.
+What stays yours: every unpinned clause and judgement bullet, the qualitative pass below, and whether `.github/audit/expected-github-state.json` still encodes the rules in your scope — a value there that a spec does not justify is a FAIL on the rule it would weaken.
 
 For the GitHub API calls those still need, the default `$GH_TOKEN` is a workflow `GITHUB_TOKEN` without admin scope; prefix `gh api` with `GH_TOKEN=$AUDIT_PAT` for an administration endpoint. An earlier step guarantees `$AUDIT_PAT` is present; `docs/specs/security-audit.md` states its scopes. If a prefixed call still returns 403, record FAIL with the note "PAT scope drifted from docs/specs/security-audit.md". When run by `scripts/security-audit-local.sh` without `AUDIT_PAT`, use the operator's existing `gh` authentication without a `GH_TOKEN=` override, and report an inaccessible check as `UNVERIFIABLE`; local credentials are not evidence about the CI PAT's scope. Use `gh api --paginate` for every list request.
 
