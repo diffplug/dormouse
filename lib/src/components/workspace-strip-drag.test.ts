@@ -43,6 +43,17 @@ beforeEach(() => {
 
 afterEach(() => drag.dispose());
 
+describe('iframe shield', () => {
+  it('shields iframes from the threshold until the release', () => {
+    const shielded = () => document.documentElement.hasAttribute('data-frame-shield');
+    expect(shielded()).toBe(false);
+    window.dispatchEvent(pointer('pointermove', 60, 10));
+    expect(shielded()).toBe(true);
+    window.dispatchEvent(pointer('pointerup', 900, 300));
+    expect(shielded()).toBe(false);
+  });
+});
+
 describe('crossing the strip edge', () => {
   it('reports the pointer leaving, and reports it coming back exactly once', () => {
     // Past the drag threshold, still over the strip.

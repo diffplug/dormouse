@@ -36,6 +36,16 @@ async function flushFrame() {
   });
 }
 
+/** Move focus into an `<iframe>` in a leaf, as pressing a Tool or browser pane does;
+ *  the window then fires `blur` although focus never left the page. */
+function focusFrameIn(id: string): void {
+  const frame = document.createElement('iframe');
+  document.querySelector(`[data-lath-leaf="${id}"]`)!.appendChild(frame);
+  frame.focus();
+  expect(document.activeElement).toBe(frame);
+}
+
+const shielded = () => document.documentElement.hasAttribute('data-frame-shield');
 
 /** a | b | c — an equal-weight row split, built from the shared core test builders. */
 const rowOf = (...ids: string[]): LathTree =>
@@ -334,6 +344,18 @@ describe('LathHost — sash drag', () => {
     act(() => window.dispatchEvent(new MouseEvent('pointermove', { clientX: 120, clientY: 10 })));
     act(() => window.dispatchEvent(new MouseEvent('pointerup', { clientX: 145, clientY: 10 })));
     expect(onCommitResize).toHaveBeenCalledWith([], 0, 45);
+  });
+
+  it('keeps a sash drag through focus entering a pane iframe, shielding iframes meanwhile', () => {
+    const store = seeded(rowOf('a', 'b'), [['a', leafMeta()], ['b', leafMeta()]]);
+    const { onCommitResize } = mount(store);
+    act(() => firstSash().dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientX: 100 })));
+    expect(shielded()).toBe(true);
+    focusFrameIn('b');
+    act(() => window.dispatchEvent(new Event('blur')));
+    act(() => window.dispatchEvent(new MouseEvent('pointerup', { clientX: 140 })));
+    expect(onCommitResize).toHaveBeenCalledExactlyOnceWith([], 0, 40);
+    expect(shielded()).toBe(false);
   });
 
   it('cancels on pointercancel and accepts the next sash gesture', async () => {
@@ -951,6 +973,22 @@ describe('LathHost — pane / Door drag', () => {
     expect(overlayEl()).toBeNull();
     act(() => up());
     expect(onProposeMove).not.toHaveBeenCalled();
+  });
+
+  it('keeps a pane drag through focus entering a pane iframe, shielding iframes meanwhile', async () => {
+    const store = seeded(rowOf('a', 'b'), [['a', leafMeta()], ['b', leafMeta()]]);
+    const { onProposeMove } = mountDrag(store);
+    act(() => down(header('a'), 100, 15));
+    expect(shielded()).toBe(false); // not before the threshold
+    focusFrameIn('a'); // the header press selects a Tool, focusing its body
+    act(() => window.dispatchEvent(new Event('blur')));
+    act(() => moveTo(601, 300));
+    await flushFrame();
+    expect(shielded()).toBe(true);
+    expect(overlayEl()).not.toBeNull();
+    act(() => up());
+    expect(onProposeMove).toHaveBeenCalledWith('a', { kind: 'swap', leaf: 'b' });
+    expect(shielded()).toBe(false);
   });
 
   it('cancels an external drop moved off-wall before its pending frame', async () => {
