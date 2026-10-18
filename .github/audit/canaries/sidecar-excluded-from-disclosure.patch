@@ -1,14 +1,13 @@
 Domain: supply-chain
 Rule: `docs/specs/security-supply-chain.md` -> "Disclosure" #4 — or excludes such a workspace
-Expect: website/scripts/generate-deps.js
+Expect: website/scripts/product-sections.js
 Source: synthetic; the generator classifies the sidecar workspace, which the Tauri bundle ships node_modules and all, as installing nothing
 
-diff --git a/website/scripts/generate-deps.js b/website/scripts/generate-deps.js
-index 50647e69b..de0312db7 100644
---- a/website/scripts/generate-deps.js
-+++ b/website/scripts/generate-deps.js
-@@ -16,9 +16,7 @@ const rootPackageJsonPath = resolve(repoRoot, "package.json");
- const themeExtensionsPath = resolve(repoRoot, "lib/src/lib/themes/bundled-extensions.json");
+diff --git a/website/scripts/product-sections.js b/website/scripts/product-sections.js
+index 39276db59..c8437c942 100644
+--- a/website/scripts/product-sections.js
++++ b/website/scripts/product-sections.js
+@@ -1,8 +1,6 @@
  // The workspace packages whose runtime dependency graphs a user actually runs.
  // A package belongs here if its dependencies reach a user's disk, however they
 -// get there: `dormouse-sidecar` ships as a Tauri bundle resource
@@ -18,7 +17,7 @@ index 50647e69b..de0312db7 100644
  // `web-push` in particular signs with a private key and makes outbound
  // requests. See docs/specs/security-supply-chain.md -> "Disclosure".
  //
-@@ -34,7 +32,6 @@ const productSections = [
+@@ -19,7 +17,6 @@ export const productSections = [
        "dormouse", // Installed VS Code extension (vscode-ext/package.json).
        "dormouse-standalone", // Installed standalone frontend.
        "dormouse-lib", // Compiled into both hosts; relative imports bypass the VSIX's dependency walk.
@@ -26,11 +25,11 @@ index 50647e69b..de0312db7 100644
      ],
    },
    {
-@@ -60,6 +57,7 @@ const excludedWorkspacePackages = [
+@@ -42,6 +39,7 @@ export const excludedWorkspacePackages = [
    "canopy", // Storybook-only rendering lab; no production build imports it.
    "dormouse-website", // Visitor browser code; no installed artifact.
    "dormouse-hosted", // Workers and browser code; no desktop or selfhost import.
 +  "dormouse-sidecar", // Spawned by the standalone app, which is disclosed as `dormouse-standalone`.
  ];
  
- function readJson(path) {
+ /** Each root's section ids, in walk order. */

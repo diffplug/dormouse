@@ -39,7 +39,7 @@ The dependency lists are regenerated and committed with every production depende
 - **FAIL IF** the generator stops naming `dormouse-lib` as a root independently of workspace edges (rationale), names a root or exclusion by anything but its package name, or stops rejecting, before generating disclosure, an unclassified workspace or an exclusion reachable from a product root over runtime and optional edges (development edges do not count). The rejection is pinned by `website/scripts/dependency-workspaces.test.js`; the `dormouse-lib` root is not.
 - **FAIL IF** the disclosure omits the graph of a workspace whose files reach a user's disk, or excludes such a workspace. A judgement item: derive the routes from `pnpm-workspace.yaml` and the builds — the VSIX (`vscode-ext/package.json`), the Tauri bundle and its sidecar (`standalone/src-tauri/tauri.conf.json`, `standalone/vite.config.ts`), `dor`'s bundle (`dor/package.json`), and the self-host install (`deploy/local/`) — not the generator's arrays, which it enforces but cannot justify (rationale).
 
-Source of truth: `productSections` / `excludedWorkspacePackages` in `website/scripts/generate-deps.js`; `assertWorkspaceCoverage` in `website/scripts/dependency-workspaces.js`.
+Source of truth: `productSections` / `excludedWorkspacePackages` in `website/scripts/product-sections.js`; `assertWorkspaceCoverage` in `website/scripts/dependency-workspaces.js`.
 
 ## Bundled runtime
 

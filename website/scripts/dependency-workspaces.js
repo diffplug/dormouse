@@ -1,5 +1,26 @@
-import { existsSync } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { basename, dirname, join, resolve } from 'node:path';
+
+/** Every package `pnpm-workspace.yaml` lists under `repoRoot`, with its directory and manifest. */
+export function getWorkspacePackages(repoRoot) {
+  const workspaceYaml = readFileSync(resolve(repoRoot, 'pnpm-workspace.yaml'), 'utf-8');
+  const dirs = [];
+  let inPackages = false;
+  for (const line of workspaceYaml.split(/\r?\n/)) {
+    if (/^packages:\s*$/.test(line)) {
+      inPackages = true;
+      continue;
+    }
+    if (inPackages && /^\S/.test(line)) break;
+
+    const match = inPackages ? line.match(/^\s*-\s+["']?(.+?)["']?\s*$/) : null;
+    if (match) dirs.push(match[1]);
+  }
+  return dirs.map((dir) => {
+    const absoluteDir = resolve(repoRoot, dir);
+    return { dir: absoluteDir, pkg: JSON.parse(readFileSync(resolve(absoluteDir, 'package.json'), 'utf-8')) };
+  });
+}
 
 // Coverage is checked before resolving node_modules: a newly shipped workspace
 // must not silently disappear just because no existing root depends on it.

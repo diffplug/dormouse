@@ -9,9 +9,16 @@ import {
   getDependencyNames,
   externalPlatformSiblings,
   linkedPeerPackageJsonPath,
+  getWorkspacePackages,
   missingDependency,
   optionalSiblingsAtSameVersion,
 } from "./dependency-workspaces.js";
+import {
+  entersWorkspace,
+  excludedWorkspacePackages,
+  productSections,
+  sectionsOfRoot,
+} from "./product-sections.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "../..");
@@ -21,83 +28,9 @@ const runtimeOutPath = resolve(__dirname, "../src/data/dependencies-runtime.json
 const cargoManifestPath = resolve(repoRoot, "standalone/src-tauri/Cargo.toml");
 const rootPackageJsonPath = resolve(repoRoot, "package.json");
 const themeExtensionsPath = resolve(repoRoot, "lib/src/lib/themes/bundled-extensions.json");
-// The workspace packages whose runtime dependency graphs a user actually runs.
-// A package belongs here if its dependencies reach a user's disk, however they
-// get there: `dormouse-sidecar` ships as a Tauri bundle resource
-// (`standalone/src-tauri/tauri.conf.json` -> `bundle.resources`), node_modules
-// and all, and `relay` is installed and run by a selfhoster (SELF_HOST.md) —
-// `web-push` in particular signs with a private key and makes outbound
-// requests. See docs/specs/security-supply-chain.md -> "Disclosure".
-//
-// Each section is disclosed as its own table, walked in this order: a package
-// belongs to the first section that reaches it, and a root of a later section is
-// not entered from an earlier one, so `dor` -> `dor-tools-builtin` leaves the
-// built-in Tools' graph to its own section.
-const productSections = [
-  {
-    id: "terminal",
-    roots: [
-      "dor", // Staged on every Dormouse terminal's PATH.
-      "dormouse", // Installed VS Code extension (vscode-ext/package.json).
-      "dormouse-standalone", // Installed standalone frontend.
-      "dormouse-lib", // Compiled into both hosts; relative imports bypass the VSIX's dependency walk.
-      "dormouse-sidecar", // Tauri bundle.resources includes this node_modules tree.
-    ],
-  },
-  {
-    id: "builtinTools",
-    roots: [
-      "dor-tools-builtin", // Bundled into `dor`'s runtime; its viewers load only when a built-in Tool opens a file.
-    ],
-  },
-  {
-    id: "relay",
-    roots: [
-      "relay", // Built and installed by the selfhost runbook.
-    ],
-  },
-];
 const productDependencyFilters = productSections.flatMap((section) => section.roots);
-const sectionOfRoot = new Map(
-  productSections.flatMap((section) => section.roots.map((root) => [root, section.id])),
-);
-// These packages do not install an artifact on a user's disk. Any new workspace
-// requires classification here or a runtime edge from a product root.
-const excludedWorkspacePackages = [
-  "canopy", // Storybook-only rendering lab; no production build imports it.
-  "dormouse-website", // Visitor browser code; no installed artifact.
-  "dormouse-hosted", // Workers and browser code; no desktop or selfhost import.
-];
-
 function readJson(path) {
   return JSON.parse(readFileSync(path, "utf-8"));
-}
-
-function parseWorkspacePackageDirs() {
-  const workspaceYaml = readFileSync(resolve(repoRoot, "pnpm-workspace.yaml"), "utf-8");
-  const dirs = [];
-  let inPackages = false;
-  for (const line of workspaceYaml.split(/\r?\n/)) {
-    if (/^packages:\s*$/.test(line)) {
-      inPackages = true;
-      continue;
-    }
-    if (inPackages && /^\S/.test(line)) break;
-
-    const match = inPackages ? line.match(/^\s*-\s+["']?(.+?)["']?\s*$/) : null;
-    if (match) dirs.push(match[1]);
-  }
-  return dirs;
-}
-
-function getWorkspacePackages() {
-  return parseWorkspacePackageDirs().map((dir) => {
-    const absoluteDir = resolve(repoRoot, dir);
-    return {
-      dir: absoluteDir,
-      pkg: readJson(resolve(absoluteDir, "package.json")),
-    };
-  });
 }
 
 function getPackageJsonPath(fromDir, packageName) {
@@ -145,7 +78,7 @@ function getHomepage(pkg) {
   return normalizeRepositoryUrl(pkg.repository);
 }
 
-const workspacePackages = getWorkspacePackages();
+const workspacePackages = getWorkspacePackages(repoRoot);
 assertWorkspaceCoverage(workspacePackages, productDependencyFilters, excludedWorkspacePackages);
 const workspacePackagesByName = new Map(workspacePackages.map((workspacePackage) => [
   workspacePackage.pkg.name,
@@ -198,7 +131,7 @@ function addExternalPackage(pkg) {
 function scanWorkspacePackage(name) {
   if (visitedWorkspacePackageNames.has(name)) return;
   // Another section's root: that section walks it.
-  if (sectionOfRoot.has(name) && sectionOfRoot.get(name) !== currentSection) return;
+  if (!entersWorkspace(name, currentSection)) return;
   const workspacePackage = workspacePackagesByName.get(name);
   if (!workspacePackage) {
     throw new Error(`Workspace package "${name}" was not found`);
@@ -240,7 +173,7 @@ function scanDependency(fromDir, packageName, declaredBy) {
 }
 
 function scanDependencies(pkg, fromDir) {
-  const isProductRoot = sectionOfRoot.has(pkg.name);
+  const isProductRoot = sectionsOfRoot.has(pkg.name);
   const isWorkspace = workspacePackagesByName.has(pkg.name);
   for (const { name, optional, peer } of getDependencyNames(pkg)) {
     scanDependency(fromDir, name, { pkg, optional, peer, isWorkspace, isProductRoot });
