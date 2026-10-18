@@ -4,7 +4,7 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFi
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { CANARY_DOMAINS, POOL_DIR, parseSeed, publicRecord, readPool, redact, score, shuffle, summaryLine } from './security-audit-canary.mjs';
-import { SENTINEL, domains, ruleNumber } from './security-audit-report.mjs';
+import { SENTINEL, domains, ruleIndex } from './security-audit-report.mjs';
 import { repoRoot as repo, tempDir, workflowRunBlock } from './lint-kit.mjs';
 
 // docs/specs/security-audit.md -> "Canary recall".
@@ -28,16 +28,21 @@ const realGit = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' 
 
 // --- The pool ---------------------------------------------------------------
 
-// A stale seed is one that no longer applies, or whose rule moved: either would
-// measure nothing on the night it is drawn, so `pnpm test` fails first.
-test('every canary parses, names a rule its domain owns, and applies to this tree', () => {
+// A stale seed is one that no longer applies, or whose rule was retired,
+// reworded, or moved to another domain: any would measure nothing on the night
+// it is drawn, so `pnpm test` fails first. A rule moved within its domain keeps
+// its ID, and the seed with it.
+test('every canary parses, names a live rule its domain owns, and applies to this tree', () => {
   const pool = readPool(repo);
+  const index = ruleIndex(repo);
   for (const d of CANARY_DOMAINS) assert.ok(pool.filter((s) => s.domain === d).length >= 3, `${d} has fewer than three seeds`);
   for (const s of pool) {
     if (s.rule) {
-      const owner = domains(repo).find((d) => d.specs.includes(s.rule.spec));
-      assert.equal(owner?.domain, s.domain, `${s.id}: ${s.rule.spec} is not ${s.domain}'s`);
-      assert.equal(ruleNumber(repo, s.rule.spec, s.rule.heading, s.rule.phrase), s.rule.n, `${s.id}: the rule moved`);
+      const rule = index.get(s.rule.id);
+      assert.ok(rule, `${s.id}: ${s.rule.id} names no rule in the security specs`);
+      const owner = domains(repo).find((d) => d.specs.includes(rule.spec));
+      assert.equal(owner?.domain, s.domain, `${s.id}: ${s.rule.id} is in ${rule.spec}, which is not ${s.domain}'s`);
+      assert.ok(rule.text.includes(s.rule.phrase), `${s.id}: ${s.rule.id} no longer contains ${JSON.stringify(s.rule.phrase)}`);
     }
     const run = spawnSync('git', ['apply', '--check', join(POOL_DIR, `${s.id}.patch`)], { cwd: repo, encoding: 'utf8' });
     assert.equal(run.status, 0, `${s.id} no longer applies: ${run.stderr}`);
@@ -98,7 +103,7 @@ diff --git a/${file} b/${file}
 `;
 const POOL = {
   // Two seeds on one line: whichever is drawn first, the other cannot apply.
-  'gate-a': seedPatch('Domain: local\nRule: `docs/specs/security-local.md` -> "Terminal output" #9 — x\nExpect: src/gate.ts\nSource: fixture', 'src/gate.ts', 'check();', 'skip();'),
+  'gate-a': seedPatch('Domain: local\nRule: S132 — x\nExpect: src/gate.ts\nSource: fixture', 'src/gate.ts', 'check();', 'skip();'),
   'gate-b': seedPatch('Domain: local\nClass: fixture\nExpect: src/gate.ts\nSource: fixture', 'src/gate.ts', 'check();', 'never();'),
   room: seedPatch('Domain: hosted\nClass: fixture\nExpect: src/room.ts\nSource: fixture', 'src/room.ts', 'forward();', 'store();'),
 };
@@ -153,7 +158,7 @@ const warning = (severity, location, extra = '') => [
   `- ${severity}: \`${location}\` \`cause\` — summary${extra}`,
   '  - Code: `x`', '  - Path: a → b', '  - Reproduction: c → d',
 ];
-const FAIL_GATE = '- FAIL: `docs/specs/security-local.md` -> "Terminal output" #9 — the gate: src/gate.ts:1 skips its check';
+const FAIL_GATE = '- FAIL: S132 — the gate: src/gate.ts:1 skips its check';
 
 // --- Seeding and scoring, as the workflow runs them -------------------------
 
@@ -202,13 +207,13 @@ test('the canary job seeds, hides the seeds, and scores, filing and pushing noth
 
 // --- The scorer -------------------------------------------------------------
 
-const RULE = { spec: 'docs/specs/security-local.md', heading: 'Terminal output', n: 9, phrase: 'x' };
+const RULE = { id: 'S132', phrase: 'x' };
 const seedOf = (id, domain, expect, rule = null, severity = 'WARNING') => ({ id, domain, rule, class: rule ? null : 'fixture', expect, files: expect, source: 'fixture', severity });
 
-test('a seed is caught only by a FAIL or a BLOCKER or WARNING citing its file, and its rule when it has one', () => {
+test('a seed is caught only by a FAIL or a BLOCKER or WARNING citing its file, and its rule ID when it has one', () => {
   const seeds = [
     seedOf('rule-by-fail', 'local', ['src/a.ts'], RULE),
-    seedOf('rule-by-warning', 'local', ['src/b.ts'], RULE),
+    seedOf('rule-in-summary-alone', 'local', ['src/b.ts'], RULE),
     seedOf('rule-wrong-rule', 'local', ['src/c.ts'], RULE),
     seedOf('rule-by-root-cause', 'local', ['src/g.ts'], RULE),
     seedOf('class-by-blocker', 'hosted', ['src/d.ts']),
@@ -217,23 +222,24 @@ test('a seed is caught only by a FAIL or a BLOCKER or WARNING citing its file, a
   ];
   const card = score(seeds, {
     [fragmentOf.local]: fragment([
-      '- FAIL: `docs/specs/security-local.md` -> "Terminal output" #9.b — clause: src/a.ts:3',
-      ...warning('WARNING', 'src/b.ts:4', ' (`docs/specs/security-local.md` -> "Terminal output")'),
-      '- FAIL: `docs/specs/security-local.md` -> "Terminal output" #8 — clause: src/c.ts:5',
+      '- FAIL: S132.b — clause: src/a.ts:3',
+      // A rule named in the summary, its root cause a symbol: not the rule's finding.
+      ...warning('WARNING', 'src/b.ts:4', ' (S132)'),
+      '- FAIL: S131 — clause: src/c.ts:5',
       ...warning('WARNING', 'src/c.ts:5'),
-      // The preamble's spelling of a rule as a root cause.
-      '- WARNING: `src/g.ts:2` `security-local.md "Terminal output" #9` — summary',
+      // The preamble's spelling of a rule as a root cause, a clause letter ignored.
+      '- WARNING: `src/g.ts:2` `S132.b` — summary',
       '  - Code: `x`', '  - Path: a → b', '  - Reproduction: c → d',
     ]),
     [fragmentOf.hosted]: fragment([...warning('BLOCKER', 'src/d.ts:1'), '- INFO: `src/e.ts:1` `cause` — not a catch', ...warning('WARNING', 'src/z.ts:1'), '- INFO: `src/y.ts:1` `cause` — not counted']),
     [fragmentOf['supply-chain']]: fragment(['A paragraph naming src/f.ts is prose, not a catch.'], { finished: false }),
   });
-  assert.deepEqual(card.seeds.filter((s) => s.caught).map((s) => s.id), ['rule-by-fail', 'rule-by-warning', 'rule-by-root-cause', 'class-by-blocker']);
-  assert.deepEqual([card.seeded, card.caught], [7, 4]);
+  assert.deepEqual(card.seeds.filter((s) => s.caught).map((s) => s.id), ['rule-by-fail', 'rule-by-root-cause', 'class-by-blocker']);
+  assert.deepEqual([card.seeded, card.caught], [7, 3]);
   assert.deepEqual(card.domains, {
     'supply-chain': { seeded: 1, caught: 0 },
     remote: { seeded: 0, caught: 0 },
-    local: { seeded: 4, caught: 3 },
+    local: { seeded: 4, caught: 2 },
     hosted: { seeded: 2, caught: 1 },
   });
   // The one line citing no file a seed touched.
@@ -257,6 +263,8 @@ test('a seed\'s Severity sets the least finding severity that catches it', () =>
     seedOf('blocker-by-warning', 'hosted', ['src/c.ts'], null, 'BLOCKER'),
     seedOf('blocker-by-blocker', 'hosted', ['src/d.ts'], null, 'BLOCKER'),
     seedOf('rule-by-fail', 'local', ['src/e.ts'], RULE, 'BLOCKER'),
+    seedOf('rule-by-loose-info', 'hosted', ['src/h.ts'], RULE, 'INFO'),
+    seedOf('rule-by-loose-info-wrong-rule', 'hosted', ['src/i.ts'], RULE, 'INFO'),
   ];
   const card = score(seeds, {
     [fragmentOf.hosted]: fragment([
@@ -266,10 +274,12 @@ test('a seed\'s Severity sets the least finding severity that catches it', () =>
       ...warning('BLOCKER', 'src/d.ts:1'),
       // Off the grammar, as the audit lets an INFO be.
       '- INFO: src/g.ts:1 — hardening',
+      '- INFO: src/h.ts:1 S132 — hardening',
+      '- INFO: src/i.ts:1 S1320 — hardening',
     ]),
-    [fragmentOf.local]: fragment(['- FAIL: `docs/specs/security-local.md` -> "Terminal output" #9 — clause: src/e.ts:1']),
+    [fragmentOf.local]: fragment(['- FAIL: S132 — clause: src/e.ts:1']),
   });
-  assert.deepEqual(card.seeds.filter((r) => r.caught).map((r) => r.id), ['info-by-info', 'info-by-loose-info', 'blocker-by-blocker', 'rule-by-fail']);
+  assert.deepEqual(card.seeds.filter((r) => r.caught).map((r) => r.id), ['info-by-info', 'info-by-loose-info', 'blocker-by-blocker', 'rule-by-fail', 'rule-by-loose-info']);
   assert.deepEqual(Object.keys(publicRecord(card)).sort(), ['caught', 'run_url', 'seeded', 'unfinished']);
 });
 
@@ -282,13 +292,13 @@ test('a domain with no fragment catches nothing and is unfinished', () => {
 
 test('the public record and summary carry counts and the run link alone', () => {
   const card = score([seedOf('secret-seed-id', 'hosted', ['src/secret-file.ts'], RULE)], {
-    [fragmentOf.hosted]: fragment(['- FAIL: `docs/specs/security-local.md` -> "Terminal output" #9 — clause: src/secret-file.ts:1']),
+    [fragmentOf.hosted]: fragment(['- FAIL: S132 — clause: src/secret-file.ts:1']),
   });
   const runUrl = 'https://github.com/diffplug/dormouse/actions/runs/123';
   const record = publicRecord(card, runUrl);
   assert.deepEqual(Object.keys(record).sort(), ['caught', 'run_url', 'seeded', 'unfinished']);
   const published = JSON.stringify(record) + summaryLine(record);
-  for (const detail of ['secret-seed-id', 'secret-file', 'Terminal output', 'security-local', 'hosted', 'FAIL']) {
+  for (const detail of ['secret-seed-id', 'secret-file', 'S132', 'hosted', 'FAIL']) {
     assert.ok(!published.includes(detail), detail);
   }
   assert.equal(summaryLine(record), `canary: 1/1 seeds caught ([run](${runUrl}))`);

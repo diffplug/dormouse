@@ -3,9 +3,9 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { FRAGMENT, run, SECTIONS, stateHash } from './github-state-check.mjs';
+import { FRAGMENT, RULES, run, stateHash } from './github-state-check.mjs';
 import { readRepoFile, repoRoot, tempDir } from './lint-kit.mjs';
-import { judgeFragment } from './security-audit-report.mjs';
+import { judgeFragment, ruleIndex } from './security-audit-report.mjs';
 
 // Responses recorded from the live API with the maintainer's `gh` login (URLs,
 // node ids, and variable values stripped), replayed with no network. Every
@@ -67,10 +67,21 @@ test('the reporting step reads the fragment as the script judged it', () => {
   assert.equal(judged.verdict, 'FAIL');
   assert.equal(judged.results.filter((r) => r.status === 'FAIL').length, 2);
   assert.deepEqual([judged.stray, judged.missing, judged.malformed], [[], [], []]);
-  for (const [spec, heading] of SECTIONS) {
-    const headings = readFileSync(join(repoRoot, spec), 'utf8').split('\n').map((l) => l.match(/^#{2,6}\s+(.+?)\s*$/)?.[1]);
-    assert.ok(headings.includes(heading), `${spec} has no heading "${heading}"`);
+});
+
+// The script cites each rule by ID: a rule may move to any heading or spec, but
+// one deleted, retired, reworded out from under its phrase, or no longer
+// pinned by this script must fail here, not leave a clause judged by the
+// wrong rule.
+test('every rule the script cites is live, pinned by it, and still says what it judges', () => {
+  const index = ruleIndex(repoRoot);
+  for (const [id, phrase] of RULES) {
+    const rule = index.get(id);
+    assert.ok(rule, `${id} names no rule in the security specs`);
+    assert.ok(rule.pin.includes('`scripts/github-state-check.mjs`'), `${id} is not pinned by scripts/github-state-check.mjs`);
+    assert.ok(rule.text.includes(phrase), `${id} no longer contains ${JSON.stringify(phrase)}`);
   }
+  assert.equal(new Set(RULES.map(([id]) => id)).size, RULES.length);
 });
 
 test('the fragment opens with its verdict and closes with the sentinel', () => {
