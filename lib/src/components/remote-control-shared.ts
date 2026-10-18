@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
-import { getNetworkPolicySnapshot, subscribeToNetworkPolicy } from '../remote/burrow/network-policy-store';
+import { getNetworkPolicySnapshot, policyOf, subscribeToNetworkPolicy } from '../remote/burrow/network-policy-store';
 import type { PathRefusal } from '../remote/direct/path-refusal';
 import type { NetworkPolicy } from '../remote/network-policy';
 
@@ -16,8 +16,7 @@ export const FIELD_HINT = `${FIELD_LABEL} mt-1 block`;
 
 /** The network policy, or `null` before the service answers or without one. */
 export function useNetworkPolicy(): NetworkPolicy | null {
-  const network = useSyncExternalStore(subscribeToNetworkPolicy, getNetworkPolicySnapshot);
-  return network.kind === 'ready' ? network.network.policy : null;
+  return policyOf(useSyncExternalStore(subscribeToNetworkPolicy, getNetworkPolicySnapshot));
 }
 
 /** An origin's host, as the copy names it. */
