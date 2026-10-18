@@ -26,6 +26,7 @@ import { fileURLToPath } from 'node:url';
 import {
   createSlugger,
   hasScheme,
+  inlineToText,
   isProtocolRelative,
   parseMarkdown,
   slugify,
@@ -655,6 +656,70 @@ export function audienceBlocks(page, audiences, names) {
   return page.blocks.map((block) => swap.get(block) ?? block);
 }
 
+/** The section whose table names the setups, and the guarantees' column that tags them. */
+const SECURITY_SETUPS_TITLE = 'Setups';
+const SECURITY_SETUP_COLUMN = 'Applies to';
+
+/**
+ * The setups each guarantee row and list bullet applies to, checked against
+ * the setup table's first column — the one copy of the vocabulary — and
+ * orthogonal to the audience split: an audience is the spec a row's links name,
+ * a setup is which reader must know the row. A row tags itself in its
+ * `Applies to` cell, a bullet with the emphasis it opens with, each a
+ * comma-separated list. An entry with no tag, an unknown or repeated one, a
+ * setup no entry uses, or a missing table fails the build, so a new entry
+ * cannot publish without saying whom it concerns.
+ */
+export function securitySetups(page) {
+  const headings = page.blocks.filter((b) => b.type === 'heading');
+  const heading = findExactlyOneHeading(headings, (h) => h.text === SECURITY_SETUPS_TITLE, SECURITY_SETUPS_TITLE);
+  const table = sectionBlocks(page.blocks, heading).find((b) => b.type === 'table');
+  if (!table) throw new Error(`/security: "${SECURITY_SETUPS_TITLE}" has no table naming the setups`);
+  const names = table.rows.map((row) => inlineToText(row[0]).trim());
+  assertDistinctSetups(names, `/security: "${SECURITY_SETUPS_TITLE}"`);
+  const used = new Set();
+  const out = { names };
+  for (const { key, title, block, entries } of securitySections(page)) {
+    const column = entries === 'rows' ? block.header.findIndex((cell) => inlineToText(cell).trim() === SECURITY_SETUP_COLUMN) : null;
+    if (column === -1) throw new Error(`/security: "${title}" has no "${SECURITY_SETUP_COLUMN}" column`);
+    out[key] = block[entries].map((entry, i) => {
+      const label = `/security: "${title}" entry ${i + 1}`;
+      const tags = setupTagsOf(entry, column, label);
+      assertDistinctSetups(tags, label);
+      const unknown = tags.filter((tag) => !names.includes(tag));
+      if (unknown.length > 0) {
+        throw new Error(`${label} names ${unknown.join(', ')}, not a setup in "${SECURITY_SETUPS_TITLE}" (${names.join(', ')})`);
+      }
+      tags.forEach((tag) => used.add(tag));
+      return tags;
+    });
+  }
+  const unused = names.filter((name) => !used.has(name));
+  if (unused.length > 0) throw new Error(`/security: no entry applies to ${unused.join(', ')}`);
+  return out;
+}
+
+/** A row's `Applies to` cell, or the emphasis a bullet opens with, split on commas. */
+function setupTagsOf(entry, column, label) {
+  let cell;
+  if (column === null) {
+    const first = entry.children[0]?.children?.[0];
+    if (first?.type !== 'em') throw new Error(`${label} opens with no *setup* tag`);
+    cell = inlineToText(first.children).replace(/\.$/, '');
+  } else {
+    cell = inlineToText(entry[column] ?? []);
+  }
+  if (cell.trim() === '') throw new Error(`${label} carries no setup tag`);
+  const tags = cell.split(',').map((tag) => tag.trim());
+  if (tags.some((tag) => tag === '')) throw new Error(`${label} carries an empty setup tag ("${cell}")`);
+  return tags;
+}
+
+function assertDistinctSetups(names, label) {
+  const repeated = [...new Set(names.filter((name, i) => names.indexOf(name) !== i))];
+  if (repeated.length > 0) throw new Error(`${label} repeats ${repeated.join(', ')}`);
+}
+
 /**
  * `/security` from docs/specs/security.md, every section of it.
  *
@@ -673,6 +738,7 @@ const buildSecurity = async () => {
     fallbackTitle: 'Security',
   });
   const audiences = securityAudiences(page);
+  securitySetups(page);
   return {
     ...page,
     audiences,
