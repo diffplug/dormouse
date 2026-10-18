@@ -17,8 +17,8 @@
  *
  * {@link e2eCases} drive the real ceremonies through a fixture shaped like
  * `relay/test/harness/e2e.mjs`'s `e2eFixture`: `{ burrow, client,
- * authenticator, enrollment: { burrowId }, accountId?, replacementBurrow(),
- * secondBurrow(), close() }`.
+ * authenticator, enrollment: { burrowId }, burrowStatic, clientStatic,
+ * accountId?, replacementBurrow(), secondBurrow(), close() }`.
  */
 
 import assert from 'node:assert/strict';
