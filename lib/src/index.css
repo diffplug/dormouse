@@ -97,6 +97,12 @@ body {
   pointer-events: none;
 }
 
+/* Pane, Door, and sash drags read window pointer events; a Tool or browser body's
+ * iframe would take the moves and the release as the pointer crosses it. */
+.lath-host[data-lath-dragging] iframe {
+  pointer-events: none;
+}
+
 /* --- Command mode marching-ants animation --- */
 
 @keyframes marching-ants {

@@ -27,6 +27,7 @@ import type { PaneProps } from './pane-props';
 import { type LeafMeta, LATH_LAYOUT_OPTS } from './lath-wall-store';
 import { nowMs, type LathWallEngine } from './lath-wall-engine';
 import { type DragController, type DragPreview, createDragController } from './lath-drag-controller';
+import { isRealBlur } from '../../lib/window-focus';
 import { LathDropPreview } from './LathDropPreview';
 import { TerminalPanel } from './TerminalPanel';
 import { BrowserPanel } from './BrowserPanel';
@@ -458,6 +459,9 @@ export function LathHost({
       end(true);
     };
     const onCancel = () => end(false);
+    const onBlur = () => {
+      if (isRealBlur()) end(false);
+    };
     // Paths belong to the drag-start tree. A live structural change invalidates
     // the gesture, while metadata writes remain harmless.
     const unsubscribe = store.subscribe(() => {
@@ -468,18 +472,23 @@ export function LathHost({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') end(false); // cancel: revert the preview, commit nothing
     };
+    // Shield iframes as a pane drag does: the sash's pointer capture does not keep
+    // a crossed Tool or browser body from taking the moves and the release.
+    const host = containerRef.current;
+    host?.setAttribute('data-lath-dragging', '');
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
     window.addEventListener('pointercancel', onCancel);
-    window.addEventListener('blur', onCancel);
+    window.addEventListener('blur', onBlur);
     window.addEventListener('keydown', onKey);
     return () => {
       if (rafId !== null) cancelAnimationFrame(rafId);
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('pointercancel', onCancel);
-      window.removeEventListener('blur', onCancel);
+      window.removeEventListener('blur', onBlur);
       unsubscribe();
+      host?.removeAttribute('data-lath-dragging');
       window.removeEventListener('keydown', onKey);
     };
   }, [dragging, onCommitResize, store]);

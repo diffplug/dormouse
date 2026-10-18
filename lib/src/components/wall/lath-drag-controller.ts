@@ -8,6 +8,7 @@ import type { DropTarget } from '../../lib/lath/ops';
 import { type DropCandidate, hitTest } from '../../lib/lath/hit-test';
 import { type LathWallSnapshot, LATH_LAYOUT_OPTS } from './lath-wall-store';
 import { DRAG_THRESHOLD_PX } from '../design';
+import { isRealBlur } from '../../lib/window-focus';
 
 /** Opacity applied to the dragged leaf while its drop preview floats elsewhere. */
 const DRAG_DIM = 0.6;
@@ -125,7 +126,9 @@ export function createDragController(deps: DragControllerDeps): DragController {
     window.removeEventListener('pointermove', onMove);
     window.removeEventListener('pointerup', onUp);
     window.removeEventListener('pointercancel', onCancel);
-    window.removeEventListener('blur', onCancel);
+    window.removeEventListener('blur', onBlur);
+    // The shield goes with the listeners: every end of a drag detaches.
+    deps.containerRef.current?.removeAttribute('data-lath-dragging');
     window.removeEventListener('keydown', onKey);
     if (drag && drag.rafId !== null) {
       cancelAnimationFrame(drag.rafId);
@@ -141,7 +144,7 @@ export function createDragController(deps: DragControllerDeps): DragController {
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
     window.addEventListener('pointercancel', onCancel);
-    window.addEventListener('blur', onCancel);
+    window.addEventListener('blur', onBlur);
     window.addEventListener('keydown', onKey);
   };
 
@@ -252,6 +255,8 @@ export function createDragController(deps: DragControllerDeps): DragController {
     if (!d.active) {
       if (Math.hypot(e.clientX - d.startX, e.clientY - d.startY) < DRAG_THRESHOLD_PX) return;
       d.active = true;
+      // Iframes would take the pointer's moves and release from this window.
+      deps.containerRef.current?.setAttribute('data-lath-dragging', '');
       if (!d.external) {
         deps.latestRef.current.onDragStart?.(d.id); // Wall applies its selection policy
         const el = deps.leafElsRef.current.get(d.id);
@@ -264,6 +269,11 @@ export function createDragController(deps: DragControllerDeps): DragController {
   }
 
   function onCancel(): void { finish(false); }
+
+  function onBlur(): void {
+    // Pressing a Tool or browser pane focuses its iframe, blurring the window.
+    if (isRealBlur()) finish(false);
+  }
 
   function onUp(e: PointerEvent): void {
     if (drag) { drag.lastX = e.clientX; drag.lastY = e.clientY; }

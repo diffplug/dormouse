@@ -69,7 +69,7 @@ Drags use pointer events only, never HTML5 DnD, so they are drivable from CDP. *
 - **Must anchor a slide only where the pointer pauses on an edge drop**, never on the dragged pane's own rejected edge, so sweeping a header along the header row drops beside one pane at a time (rationale).
 - **Every drop's preview rect is the exact rect it would commit** — a speculative op plus `layout`, never a heuristic zone. Rejected ops and beside-itself no-ops yield no drop.
 
-A pane drag starts on a leaf's header, and **never while zoomed or during a sash drag**. The press has already run the header's click path, so a drag begins from passthrough on that pane (rationale). Drops surface as proposals the Wall commits: drag start moves selection onto the dragged pane, a candidate drop `move`s it, and a release below the wall minimizes it with its token. Escape, pointer cancellation, window blur, or a release on nothing cancels, and a Door stays. **Must delegate Workspace-strip pane drops to `docs/specs/layout.md` → Moving Surfaces between Workspaces** before local hit-testing.
+A pane drag starts on a leaf's header, and **never while zoomed or during a sash drag**. The press has already run the header's click path, so a drag begins from passthrough on that pane (rationale). Drops surface as proposals the Wall commits: drag start moves selection onto the dragged pane, a candidate drop `move`s it, and a release below the wall minimizes it with its token. Escape, pointer cancellation, a real window blur (`docs/specs/layout.md` → Corner cases #2), or a release on nothing cancels, and a Door stays. **Must shield every `<iframe>` in the Wall from the pointer during a pane, Door, or sash drag**, so Tool and browser panes drag, take drops, and resize like terminals. **Must delegate Workspace-strip pane drops to `docs/specs/layout.md` → Moving Surfaces between Workspaces** before local hit-testing.
 
 A Door drag-out yields no swap. Its drop inserts the Surface at the hit-tested position — **the token is not consulted, because the user chose the position**.
 
@@ -127,7 +127,7 @@ An adapter owns exactly three things: mapping input into Wall coordinates, apply
 
 - **Must never re-parent, reorder, or unmount a leaf's div within one Wall** except on a remove commit, and **must render leaf divs in sorted-by-id DOM order, never tree order** — moving DOM nodes blurs the xterm inside one and reloads a moved `<iframe>`.
 - **Header, body, and whole-leaf overlay slots resolve from `leafMeta` through one component registry**, never a surface-kind branch beside it; an unregistered key renders that slot empty.
-- A sash drag streams a `resize` preview and proposes one commit on release; Escape, pointer cancellation, window blur, or a concurrent tree or zoom change cancels it.
+- A sash drag streams a `resize` preview and proposes one commit on release; Escape, pointer cancellation, a real window blur, or a concurrent tree or zoom change cancels it.
 
 Source of truth: `LathHost` in `lib/src/components/wall/LathHost.tsx`.
 
