@@ -2,7 +2,11 @@
 
 ## Disclosure
 
-Why the test is "puts on a user's machine" rather than "everything a user runs": `website` runs in a visitor's browser rather than being installed anywhere, and the supply-chain page says as much about its own React and react-router. Excluding it is what makes the narrower test the operative one, and it is a judgement worth re-making if the site ever ships something a visitor installs.
+Why the test is "puts on a user's machine, or Hosted serves or runs" rather than "everything a user runs": `website` runs in a visitor's browser rather than being installed anywhere, holds no key, and carries no session, and the supply-chain page says as much about its own React and react-router. Excluding it is what makes the narrower test the operative one, and it is a judgement worth re-making if the site ever ships something a visitor installs.
+
+Why Hosted is disclosed though none of it is installed on a computer: `relay.dormouse.sh` serves Pocket, which keeps the phone's Client statics and is one of the two endpoints `docs/specs/remote-security-model.md` -> "Trust Model" names, and its Worker routes every Hosted session and carries the one-time handshake. Hosted's code is part of a Hosted user's trust base as much as the Terminal's is.
+
+Why the Hosted section discloses more than ships: the relay and voice Worker bundles hold 17 npm packages each and the account Worker's 33 (wrangler dry-run source maps, 2026-10) — `pgstencil`, `@pgstencil/auth`, `hono`, and `pg`'s family in all three, `better-auth`'s family in the account Worker alone — while the package walk reaches 323 rows past the earlier sections, because `pgstencil` declares its test harness (`testcontainers`, `cheerio`, `turndown`, `node-pg-migrate`) as runtime dependencies and pnpm links optional peers such as `vitest` that the workspace supplies. Pocket and the one-time page bundle only packages the Terminal already lists (their source maps, the same date). A walk over the bundles' metafiles would be exact, but the disclosure gate would then need the whole Hosted build.
 
 Why `dormouse-lib` has to be named a root rather than left as a workspace edge: `vscode-ext` declares only `node-pty` and `ws`, reaching the lib through relative imports into `../lib/src/` from fifteen files, so the extension's dependency walk never arrives at it. Only `dormouse-standalone`'s edge would — which puts the disclosure of lib's entire subtree one refactor away from silently vanishing. Naming it a root is what makes that not matter.
 

@@ -286,7 +286,10 @@ deps.push(
 const missingLicense = {
   "Solarized & Selenized": "MIT",
   // Declared in the legacy `licenses` array.
+  "buildcheck": "MIT",
+  "cpu-features": "MIT",
   "format": "MIT",
+  "ssh2": "MIT",
   // Stated only in its LICENSE file.
   "khroma": "MIT",
 };
@@ -337,12 +340,51 @@ const missingAuthor = {
   "layout-base": "iVis@Bilkent",
   "uuid": "Robert Kieffer and other contributors",
   "uvu": "Luke Edwards",
+  "@balena/dockerignore": "Balena Ltd., Zeit Inc.",
+  "@better-fetch/fetch": "Bereket Engida",
+  "balanced-match": "Julian Gruber",
+  "bcrypt-pbkdf": "Niels Provos, Joyent",
+  "better-auth": "Bereket Engida",
+  "better-call": "Bereket Engida",
+  "brace-expansion": "Julian Gruber",
+  "defu": "Pooya Parsa",
+  "esbuild": "Evan Wallace",
+  "expect-type": "Misha Kaletsky",
+  "graceful-fs": "Isaac Z. Schlueter, Ben Noordhuis, and contributors",
+  "jiti": "Pooya Parsa",
+  "jsdom": "Elijah Insua",
+  "mkdirp": "James Halliday, Isaac Z. Schlueter",
+  "pathe": "Pooya Parsa, Daniel Roe",
+  "pg-cloudflare": "Brian Carlson",
+  "pg-int8": "Charmander",
+  "pg-protocol": "Brian Carlson",
+  "pgstencil": "DiffPlug",
+  "process-nextick-args": "Calvin Metcalf",
+  "readable-stream": "Node.js contributors",
+  "rolldown": "VoidZero Inc. and contributors",
+  "rou3": "Pooya Parsa",
+  "std-env": "Pooya Parsa",
+  "string_decoder": "Node.js contributors",
+  "tinybench": "Tinylibs",
+  "tinyrainbow": "Tinylibs",
+  "w3c-xmlserializer": "Sebastian Mayr",
+  // No holder in the package's files: its project or maintainer.
+  "@pkgjs/parseargs": "pkgjs contributors",
+  "lightningcss": "Devon Govett",
 };
-// Every package under these scopes names its holder only in its LICENSE.
+// Every package under these scopes, or in these platform families, names its
+// holder only in its LICENSE, or in its family's.
 const missingAuthorScopes = {
+  "@better-auth/": "Bereket Engida",
   "@chevrotain/": "Shahar Soel",
+  "@esbuild/": "Evan Wallace",
   "@lexical/": "Meta Platforms, Inc. and affiliates",
+  "@pgstencil/": "DiffPlug",
   "@radix-ui/": "WorkOS",
+  "@rolldown/binding-": "VoidZero Inc. and contributors",
+  "@rolldown/pluginutils": "rolldown/plugins contributors",
+  "@vitest/": "VoidZero Inc. and Vitest contributors",
+  "lightningcss-": "Devon Govett",
 };
 // Packages whose metadata names neither `homepage` nor `repository`, by scope.
 const missingHomepageScopes = {
