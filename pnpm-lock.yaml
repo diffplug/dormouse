@@ -332,6 +332,9 @@ importers:
       '@pgstencil/auth':
         specifier: ^0.3.0
         version: 0.3.0(hono@4.13.13)(kysely@0.29.6)(pg@8.23.1)(pgstencil@0.3.0(kysely@0.29.6)(supports-color@10.2.2))(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(vitest@5.0.3)
+      '@pgstencil/stripe':
+        specifier: ^0.3.0
+        version: 0.3.0(kysely@0.29.6)(pgstencil@0.3.0(kysely@0.29.6)(supports-color@10.2.2))(stripe@22.6.2(@types/node@24.19.2))
       hono:
         specifier: ^4.13.8
         version: 4.13.13
@@ -350,6 +353,9 @@ importers:
       remote-lib-common:
         specifier: workspace:*
         version: link:../remote-lib-common
+      stripe:
+        specifier: ^22.6.1
+        version: 22.6.2(@types/node@24.19.2)
     devDependencies:
       '@types/node':
         specifier: ^24.13.6
@@ -3174,6 +3180,14 @@ packages:
       hono: ^4.13.7
       kysely: ^0.29.5
       pgstencil: ^0.3.0
+
+  '@pgstencil/stripe@0.3.0':
+    resolution: {integrity: sha512-pz5gI+QpcOetN1ICMVMn8ilhZFe0FV1nVcrGQ0qr5OGKHbxBtvo4R1gmj7NG/6LqqDZgWOplG+d/SWp9nkrF8w==}
+    engines: {node: '>=24'}
+    peerDependencies:
+      kysely: ^0.29.5
+      pgstencil: ^0.3.0
+      stripe: ^22.6.1
 
   '@phosphor-icons/react@2.1.10':
     resolution: {integrity: sha512-vt8Tvq8GLjheAZZYa+YG/pW7HDbov8El/MANW8pOAz4eGxrwhnbfrQZq0Cp4q8zBEu8NIhHdnr+r8thnfRSNYA==}
@@ -7654,6 +7668,15 @@ packages:
     resolution: {integrity: sha512-4gB8na07fecVVkOI6Rs4e7T6NOTki5EmL7TUduTs6bu3EdnSycntVJ4re8kgZA+wx9IueI2Y11bfbgwtzuE0KQ==}
     engines: {node: '>=0.10.0'}
 
+  stripe@22.6.2:
+    resolution: {integrity: sha512-PwRE2scocvXqDKPiskMa5vRJEAEkq46W69XyUYmAwrNSLr675lQnfqLwnsndAWizwgihOWw/irLmoFRo3ez7ew==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      '@types/node': '>=18'
+    peerDependenciesMeta:
+      '@types/node':
+        optional: true
+
   structured-source@4.0.0:
     resolution: {integrity: sha512-qGzRFNJDjFieQkl/sVOI2dUjHKRyL9dAJi2gCPGJLbJHBIkyOHxjuocpIEfbLioX+qSJpvbYdT49/YCdMznKxA==}
 
@@ -10579,6 +10602,12 @@ snapshots:
       - svelte
       - vitest
       - vue
+
+  '@pgstencil/stripe@0.3.0(kysely@0.29.6)(pgstencil@0.3.0(kysely@0.29.6)(supports-color@10.2.2))(stripe@22.6.2(@types/node@24.19.2))':
+    dependencies:
+      kysely: 0.29.6
+      pgstencil: 0.3.0(kysely@0.29.6)(supports-color@10.2.2)
+      stripe: 22.6.2(@types/node@24.19.2)
 
   '@phosphor-icons/react@2.1.10(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
     dependencies:
@@ -15383,6 +15412,10 @@ snapshots:
 
   strip-json-comments@2.0.1:
     optional: true
+
+  stripe@22.6.2(@types/node@24.19.2):
+    optionalDependencies:
+      '@types/node': 24.19.2
 
   structured-source@4.0.0:
     dependencies:
