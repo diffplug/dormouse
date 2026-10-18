@@ -220,6 +220,7 @@ for (const [name, target, mutate, expected] of [
   ['an ID retired twice', ID_REGISTRY, registry({ next: NEXT + 1, retired: [NEXT, NEXT] }), `S${NEXT} is retired twice`],
   ['a retired ID never taken', ID_REGISTRY, registry({ next: NEXT, retired: [NEXT] }), `retired S${NEXT} is not below "next"`],
   ['a registry out of shape', ID_REGISTRY, registry({ next: String(NEXT), retired: [] }), 'must be { "next": <positive integer>'],
+  ['a prompt citing an ID no rule holds', DOMAIN, (path) => writeFileSync(path, `${readFileSync(path, 'utf8')}\nHold it to S${NEXT}.\n`), `cites S${NEXT}, which names no rule`],
 ]) {
   selftest.withMutationReporting(target, mutate, expected, `check 21: ${name}\n      planting it in ${target} stays green or reports something else — spec-lint cannot see it`);
 }

@@ -100,7 +100,8 @@
  *      rule takes, and `retired`, the IDs of deleted rules: every ID is below
  *      `next`, and every integer below it is live or retired, never both and
  *      never neither. AGENTS.md -> "House form for rules": a rule keeps its ID
- *      wherever it moves, and a retired ID never comes back.
+ *      wherever it moves, and a retired ID never comes back. Every `S<n>` the
+ *      prompts in .github/audit/ cite names a live rule.
  *
  * scripts/spec-lint-selftest.mjs plants one defect per finding check and
  * requires this lint to go red.
@@ -780,6 +781,19 @@ if (registry) {
     if (!live.has(n) && !retired.has(n)) {
       registryProblem(`S${n} is in no security spec and not retired — if its rule was deleted, add ${n} to "retired"; if it moved, restore its ID`);
     }
+  }
+  // The audit prompts cite rules by ID in prose; a citation of a retired or
+  // unknown ID would point a domain at nothing.
+  for (const file of readdirSync(join(ROOT, AUDIT_DIR)).filter((f) => f.endsWith('.md')).sort()) {
+    const rel = `${AUDIT_DIR}/${file}`;
+    read(rel).split('\n').forEach((text, i) => {
+      for (const [, digits] of text.matchAll(/\bS([1-9]\d*)\b/g)) {
+        const n = Number(digits);
+        if (!live.has(n)) {
+          problems.push(`${rel}:${i + 1}: cites S${n}, which ${retired.has(n) ? 'is retired' : 'names no rule'} — cite the live ID of the rule it means`);
+        }
+      }
+    });
   }
 }
 
