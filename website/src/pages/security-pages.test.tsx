@@ -97,13 +97,19 @@ describe("security-adjacent documentation", () => {
   });
 });
 
-// docs/specs/website-docs.md -> `/security` spec: the page's introduction and
-// the audit's measured recall come before the spec they introduce.
-it("/security shows the canary recall above the spec", () => {
+// docs/specs/website-docs.md -> `/security` spec: the two generated figures
+// close the section that describes the audit, after its own text.
+it("/security closes how the guarantees are checked with the canary recall and the audit index", () => {
   const main = renderMain(<SecurityDocs />);
+  const heading = main.indexOf('id="how-the-guarantees-are-checked"');
+  const canary = main.indexOf("Every week, a canary audits the audit.");
   const recall = main.indexOf('aria-label="Canary recall"');
-  expect(recall).toBeGreaterThan(0);
-  expect(main.indexOf("<h2")).toBeGreaterThan(recall);
+  const index = main.indexOf('aria-label="Audit index"');
+  expect(heading).toBeGreaterThan(0);
+  expect(canary).toBeGreaterThan(heading);
+  expect(recall).toBeGreaterThan(canary);
+  expect(index).toBeGreaterThan(recall);
+  expect(main.indexOf("<h2", heading)).toBeGreaterThan(index);
 });
 
 describe("audience pages", () => {
@@ -124,10 +130,14 @@ describe("audience pages", () => {
         .filter(([name]) => !(page.audiences as readonly string[]).includes(name))
         .map(([, sections]) => sections);
       // The umbrella's own paragraphs link the specs too ("Every pull request
-      // … Disclosure"); only its rows and bullets are audience-scoped.
+      // … Disclosure"), and its audit index links every audited section; only
+      // its rows and bullets are audience-scoped.
       const prose =
         page.route === "/security"
-          ? repoHrefsIn((security.pageBlocks as { type: string }[]).filter((b) => b.type === "paragraph"))
+          ? [
+              ...repoHrefsIn((security.pageBlocks as { type: string }[]).filter((b) => b.type === "paragraph")),
+              ...security.auditIndex.domains.flatMap((d) => d.specs.flatMap((s) => [s.url, ...s.sections.map((x) => x.url)])),
+            ]
           : [];
       for (const key of ["guarantees", "notDefended", "knownGaps"] as const) {
         const own = mine.flatMap((sections) => repoHrefsIn(sections[key]));

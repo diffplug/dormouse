@@ -2,13 +2,36 @@
 
 > - See `docs/specs/glossary.md` for Session, Pane, Surface, and remote-role vocabulary.
 > - Owns the guarantees Dormouse makes, what it does not defend, the gaps it knows about, and how all of it is checked.
-> - Defers every mechanism to the spec that owns it, and every audited check to the specs under [How the guarantees are checked](#how-the-guarantees-are-checked). Published at `https://dormouse.sh/security`; `docs/specs/website-docs.md` owns which entries each page shows.
+> - Defers every mechanism to the spec that owns it, and every audited check to the specs the audit's domains own ([Domains](./security-audit.md#domains)). Published at `https://dormouse.sh/security`; `docs/specs/website-docs.md` owns which entries each page shows.
+
+A modern terminal must have a conservative security stance. Dormouse won't even check whether an update is available unless you give it permission to check. If you opt in to Dormouse's push notifications and remote access, you can restrict their terminal traffic to networks you name, such as your VPN.
 
 Dormouse holds shells, source trees, credentials, and local files. Its **dependencies and release pipeline** determine what code reaches a machine; **remote control** admits an authorized phone as a person at the keyboard; **loopback listeners** receive requests from pages in the user's browser.
 
-**Remote control supports relay-backed sessions and direct one-time connections.** The Relay can be self-hosted; Hosted implements admin-entitled enrollment, account-scoped relay routing, and Pocket ([Hosted](./hosted.md)). **Hosted account sign-in alone grants no terminal access.** Pairing and presence remain the Burrow's decision. Hosted also serves the one-time phone page and forwards only that connection's handshake ciphertext, authorizing nothing ([Hosted rendezvous](./one-time.md#hosted-rendezvous)); its deployment pipeline and Cloudflare account are part of a one-time session's trust base.
+The high-level architecture of remote control ([Roles](./glossary.md#roles)):
 
-A self-hosted Relay runs on hardware the user owns; the default installer keeps it private to the tailnet, while the application boundary permits a public HTTPS origin ([SELF_HOST.md](../../SELF_HOST.md)). **Remote access starts only when a Burrow enrolls with a Relay or opens a one-time link**; a link admits one phone for one session.
+- **Dormouse Hosted runs the coordinating Relay at `relay.dormouse.sh`; you can [self-host](../../SELF_HOST.md) it instead**, on hardware you own. Hosted implements admin-entitled enrollment, account-scoped relay routing, and Pocket ([Hosted](./hosted.md)). The default installer keeps a self-hosted Relay private to your tailnet, while the application boundary permits a public HTTPS origin.
+- A **Burrow** is the app that runs terminal sessions and makes them available for Clients to connect to.
+  - Burrows: the Dormouse Standalone desktop terminal and the Dormouse VS Code extension.
+  - Clients: Dormouse Pocket and the one-time connection page, with more on the way.
+- **Remote access starts only when a Burrow enrolls with a Relay or opens a one-time link.** Before a Client can reach a Burrow's terminals, you approve it at the Burrow in a one-to-one pairing ceremony: you type on the Burrow the two digits the Client shows. A one-time connection takes the same approval and admits one phone for one session.
+- **Each Burrow keeps its own access control and makes every access decision itself**, trusting neither the Client nor the Relay. **Hosted account sign-in alone grants no terminal access**; pairing and presence remain the Burrow's decision.
+- **All ceremony and terminal content between Burrow and Client is end-to-end encrypted with the [Noise protocol](https://en.wikipedia.org/wiki/Noise_Protocol_Framework)**, under keys the Relay never holds; the Relay still sees account data and routing metadata ([Residual metadata](./remote-security-model.md#residual-metadata)).
+- When the network allows it, terminal traffic between Burrow and Client goes directly over WebRTC, so no server in between sees its timing or volume.
+- When the network does not allow a direct connection:
+  - If the Burrow allows **Anywhere**, a paired phone's Noise-encrypted traffic falls back to passing through the Relay, and a one-time connection fails instead. Cloudflare's public STUN server, which helps the two ends find each other, sees the phone's public address and this computer's, but carries none of the traffic.
+  - If the Burrow allows only **Local networks**, a set of networks you name, the connection fails.
+- Hosted also serves the one-time phone page and forwards only that connection's handshake ciphertext, authorizing nothing ([Hosted rendezvous](./one-time.md#hosted-rendezvous)); its deployment pipeline and Cloudflare account are part of a one-time session's trust base.
+
+## How the guarantees are checked
+
+**On every `pnpm test`**, lints turn the cheap half of these specs into build failures: `scripts/spec-lint.mjs` (the specs' own conventions and word budgets), `scripts/e2e-lint.mjs` (one Noise suite, no negotiation, no plaintext path), `scripts/deploy-lint.mjs` (every installer control, on all three platforms), `scripts/loopback-lint.mjs` (a new loopback bind references a guard, and nothing shipped binds beyond loopback), `scripts/outbound-lint.mjs` (every network primitive in shipped code is classified, and no CSP or Tauri plugin reaches past this machine), and `scripts/workflow-lint.mjs` (the workflow rules in `security-ci.md`), beside `scripts/supply-chain-config.test.mjs` (the cooldown and runtime pins); CI also runs actionlint and zizmor over every workflow. **Each carries a self-test that re-introduces the thing it forbids and requires the lint to go red**. `scripts/installer-verify-test.mjs` executes the installer helpers the lints can only read.
+
+**Every night, and before every VS Code release**, `.github/workflows/security-audit.yaml` audits the repository against these specs, split into domains that each own the specs their prompt in `.github/audit/` names ([Domains](./security-audit.md#domains)). A script judges every check GitHub's own settings answer; each domain's subagent runs every `FAIL IF` in its specs as a mechanical check with evidence, then reads its domain adversarially for what no check names; a nightly run whose commit and settings are unchanged since a passing one skips them. A failure, or a run reaching no verdict, holds the release. **Every run's result is public** in the pinned [Security audit status](https://github.com/diffplug/dormouse/issues?q=is%3Aissue+is%3Aopen+label%3Asecurity-audit-status) issue: each domain's verdict and finding counts, the failed sections' names, and each open finding's severity and date. **A finding's details stay private until it is fixed or 7 days old**, then are published under [`security-audit-finding`](https://github.com/diffplug/dormouse/issues?q=is%3Aissue+label%3Asecurity-audit-finding) with where it was and its fix. [security-audit.md](./security-audit.md) is the contract. pgstencil audits the packages Hosted consumes in its own repository.
+
+**Every week, a canary audits the audit.** It seeds already-fixed or synthetic vulnerabilities into a throwaway checkout, some beside comments that justify them, removes the tests and lints that would catch them, runs the code domains over it, and publishes only how many they caught ([Canary recall](./security-audit.md#canary-recall)).
+
+Source of truth: root scripts in `package.json`; native jobs in `.github/workflows/ci.yml`; `.github/workflows/security-audit.yaml` and its release gate in `.github/workflows/release.yml`.
 
 ## Guarantees
 
@@ -83,22 +106,6 @@ Gaps rather than accepted risks: we intend to close them.
 - **`install_skills.sh` installs agent skills unverified.** It never checks the hashes `skills-lock.json` records, and pins no commit ([Cooldown and alerts](./security-supply-chain.md#cooldown-and-alerts)).
 - **Any local process can drive agent-browser's browser.** Its Chrome's debugging port and its daemon's stream server take unauthenticated loopback connections, so another local account can run script there, read `file://` URLs, or watch it; a web page cannot, since both refuse a foreign `Origin` ([Loopback Listeners](./security-local.md#loopback-listeners)).
 - **A bundled theme's disclosed version and license are unchecked.** A test pins which theme extensions are disclosed, not what each record says ([Disclosure](./security-supply-chain.md#disclosure)).
-
-## How the guarantees are checked
-
-**On every `pnpm test`**, lints turn the cheap half of these specs into build failures: `scripts/spec-lint.mjs` (the specs' own conventions and word budgets), `scripts/e2e-lint.mjs` (one Noise suite, no negotiation, no plaintext path), `scripts/deploy-lint.mjs` (every installer control, on all three platforms), `scripts/loopback-lint.mjs` (a new loopback bind references a guard, and nothing shipped binds beyond loopback), `scripts/outbound-lint.mjs` (every network primitive in shipped code is classified, and no CSP or Tauri plugin reaches past this machine), and `scripts/workflow-lint.mjs` (the workflow rules in `security-ci.md`), beside `scripts/supply-chain-config.test.mjs` (the cooldown and runtime pins); CI also runs actionlint and zizmor over every workflow. **Each carries a self-test that re-introduces the thing it forbids and requires the lint to go red**. `scripts/installer-verify-test.mjs` executes the installer helpers the lints can only read.
-
-**Every night, and before every VS Code release**, `.github/workflows/security-audit.yaml` audits the repository against these specs. A script judges every check GitHub's own settings answer; domain subagents, each owning the specs below, run every `FAIL IF` as a mechanical check with evidence, then read their domain adversarially for what no check names; a nightly run whose commit and settings are unchanged since a passing one skips them. A failure, or a run reaching no verdict, holds the release. **Every run's result is public** in the pinned [Security audit status](https://github.com/diffplug/dormouse/issues?q=is%3Aissue+is%3Aopen+label%3Asecurity-audit-status) issue: each domain's verdict and finding counts, the failed sections' names, and each open finding's severity and date. **A finding's details stay private until it is fixed or 7 days old**, then are published under [`security-audit-finding`](https://github.com/diffplug/dormouse/issues?q=is%3Aissue+label%3Asecurity-audit-finding) with where it was and its fix. A canary, weekly and on dispatch, measures the audit instead: it seeds already-fixed or synthetic vulnerabilities into a throwaway checkout and publishes only how many the code domains caught, which the published page sums over the last 30 days. [security-audit.md](./security-audit.md) is the contract. pgstencil audits the packages Hosted consumes in its own repository.
-
-| Domain | Specs | Covers |
-| --- | --- | --- |
-| `remote` | [security-remote.md](./security-remote.md) | remote control and the self-host installers |
-| `local` | [security-local.md](./security-local.md) | local boundaries, the desktop shells, and everything no other domain claims |
-| `hosted` | [security-hosted.md](./security-hosted.md) | Hosted accounts, the one-time rendezvous, and the pgstencil provenance link |
-| `supply-chain` | [security-supply-chain.md](./security-supply-chain.md) | the dependency graph, the lockfile, the disclosure and its generator |
-| `ci-and-secrets` | [security-ci.md](./security-ci.md), [security-audit.md](./security-audit.md), this spec | GitHub Actions, the bot, releases, secrets, and the audit itself |
-
-Source of truth: root scripts in `package.json`; native jobs in `.github/workflows/ci.yml`; `.github/workflows/security-audit.yaml` and its release gate in `.github/workflows/release.yml`.
 
 ## Reporting a vulnerability
 

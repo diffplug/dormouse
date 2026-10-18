@@ -117,7 +117,7 @@ function checkout(t) {
   const bin = join(base, 'bin');
   const runner = join(base, 'runner');
   for (const sub of [bin, runner, ...['scripts', 'src', 'docs/specs', POOL_DIR].map((d) => join(dir, d))]) mkdirSync(sub, { recursive: true });
-  for (const f of ['security-audit-canary.mjs', 'security-audit-report.mjs', 'security-audit-local.sh', 'clamp-issue-body.mjs']) {
+  for (const f of ['security-audit-canary.mjs', 'security-audit-report.mjs', 'security-audit-local.sh', 'clamp-issue-body.mjs', 'spec-md.mjs']) {
     copyFileSync(join(repo, 'scripts', f), join(dir, 'scripts', f));
   }
   for (const e of readdirSync(join(repo, '.github/audit'), { withFileTypes: true }).filter((x) => x.isFile())) {

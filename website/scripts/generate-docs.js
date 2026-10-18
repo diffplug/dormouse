@@ -42,6 +42,7 @@ import {
   proseParagraphs,
   MalformedSnapshotError,
 } from './help-parser.js';
+import { AUDIT_DIR, FAIL_IF_RE, githubSlug, isDomainPrompt, proseLines, scopeOf } from '../../scripts/spec-md.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(__dirname, '..', '..');
@@ -672,8 +673,64 @@ const buildSecurity = async () => {
     fallbackTitle: 'Security',
   });
   const audiences = securityAudiences(page);
-  return { ...page, audiences, pageBlocks: audienceBlocks(page, audiences, SECURITY_PAGE_AUDIENCES) };
+  return {
+    ...page,
+    audiences,
+    pageBlocks: audienceBlocks(page, audiences, SECURITY_PAGE_AUDIENCES),
+    auditIndex: await auditIndex(),
+  };
 };
+
+/**
+ * Each heading of a security spec, above its fold, that leads at least one
+ * `FAIL IF` line, with how many and its GitHub anchor. A check counts toward
+ * the nearest heading above it, at any depth; one above every heading has no
+ * section to be listed under, so it fails the build rather than drop out.
+ */
+export function auditedSections(text, label) {
+  const sections = [];
+  const seen = new Map();
+  let current = null;
+  for (const line of proseLines(text)) {
+    const heading = line.match(/^(#{2,6})\s+(.+?)\s*$/);
+    if (heading) {
+      if (/^(\d+\.\s*)?Future$/i.test(heading[2])) break;
+      // GitHub suffixes a repeated anchor with its count, as it renders the file.
+      const base = githubSlug(heading[2]);
+      const n = seen.get(base) ?? 0;
+      seen.set(base, n + 1);
+      const title = heading[2].replace(/`/g, '').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1');
+      current = { title, anchor: n === 0 ? base : `${base}-${n}`, checks: 0 };
+      sections.push(current);
+    } else if (FAIL_IF_RE.test(line)) {
+      if (!current) throw new Error(`${label}: a FAIL IF above its first section heading`);
+      current.checks++;
+    }
+  }
+  return sections.filter((section) => section.checks > 0);
+}
+
+/**
+ * The audit index `/security` shows (docs/specs/website-docs.md -> `/security`
+ * spec): every domain prompt in `.github/audit/`, the specs its scope claims,
+ * and each spec's audited sections, linked on GitHub.
+ */
+export async function auditIndex(root = repoRoot) {
+  const files = (await readdir(join(root, AUDIT_DIR))).filter(isDomainPrompt).sort();
+  const domains = await Promise.all(files.map(async (file) => {
+    const prompt = `${AUDIT_DIR}/${file}`;
+    const claimed = scopeOf(proseLines(await readFile(join(root, prompt), 'utf8')));
+    if (!claimed?.length) throw new Error(`${prompt}: claims no spec under a **Scope line`);
+    const specs = await Promise.all(claimed.map(async (path) => {
+      const sections = auditedSections(await readFile(join(root, path), 'utf8'), path).map(({ title, anchor, checks }) => ({
+        title, url: `${REPO_BLOB_BASE}/${path}#${anchor}`, checks,
+      }));
+      return { path, url: `${REPO_BLOB_BASE}/${path}`, checks: sections.reduce((n, s) => n + s.checks, 0), sections };
+    }));
+    return { name: file.replace(/\.md$/, ''), checks: specs.reduce((n, s) => n + s.checks, 0), specs };
+  }));
+  return { checks: domains.reduce((n, d) => n + d.checks, 0), domains };
+}
 
 /** Blocks belonging to a heading: everything up to the next heading of <= depth. */
 function sectionBlocks(blocks, heading) {

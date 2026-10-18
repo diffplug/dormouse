@@ -89,7 +89,7 @@ function fixture(t) {
   mkdirSync(join(dir, 'scripts'));
   mkdirSync(join(dir, 'docs/specs'), { recursive: true });
   mkdirSync(join(dir, '.github/audit'), { recursive: true });
-  for (const script of ['clamp-issue-body.mjs', 'security-audit-public-body.mjs', 'security-audit-report.mjs']) {
+  for (const script of ['clamp-issue-body.mjs', 'security-audit-public-body.mjs', 'security-audit-report.mjs', 'spec-md.mjs']) {
     copyFileSync(join(repo, 'scripts', script), join(dir, 'scripts', script));
   }
   // The manifest is derived from these specs and the domain prompts' scopes,
@@ -1697,13 +1697,13 @@ test('the model split holds in CI and locally, over the same prompt files', () =
   assert.match(local, /cat "\$AUDIT_DIR\/_preamble\.md"; echo; cat "\$AUDIT_DIR\/\$domain\.md"/);
 });
 
-// "Domains": `docs/specs/security.md` -> "How the guarantees are checked"
-// tabulates each domain with the specs its scope claims.
-test('security.md tabulates every domain with its specs', () => {
-  const table = readFileSync(join(repo, 'docs/specs/security.md'), 'utf8');
-  const rows = Object.fromEntries([...table.matchAll(/^\| `([\w-]+)` \| (.+?) \|/gm)].map(([, domain, specs]) =>
-    [domain, [...specs.matchAll(/\]\(\.\/([\w.-]+\.md)\)|this spec/g)].map((m) => `docs/specs/${m[1] ?? 'security.md'}`).sort()]));
-  assert.deepEqual(rows, Object.fromEntries(domains(repo).map((d) => [d.domain, [...d.specs].sort()])));
+// "Domains": dormouse.sh/security publishes each domain with the specs its
+// scope claims, read from the same prompts the audit runs.
+test('the published audit index lists every domain with its specs', async () => {
+  const { auditIndex } = await import('../website/scripts/generate-docs.js');
+  const index = await auditIndex(repo);
+  const published = Object.fromEntries(index.domains.map((d) => [d.name, d.specs.map((s) => s.path).sort()]));
+  assert.deepEqual(published, Object.fromEntries(domains(repo).map((d) => [d.domain, [...d.specs].sort()])));
 });
 
 // "Domains": every path is some domain's because one domain takes the

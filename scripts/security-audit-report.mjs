@@ -25,6 +25,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync,
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { clampIssueBody } from './clamp-issue-body.mjs';
+import { isDomainPrompt, proseLines, scopeOf } from './spec-md.mjs';
 
 export const SENTINEL = '<!-- END OF REPORT -->';
 const AUDIT_DIR = '.github/audit';
@@ -72,17 +73,11 @@ export function domains(root = '.') {
 function readDomains(root) {
   const dir = join(root, AUDIT_DIR);
   const out = [];
-  for (const file of readdirSync(dir).filter((f) => f.endsWith('.md') && !f.startsWith('_') && f !== 'orchestrator.md').sort()) {
-    const lines = readFileSync(join(dir, file), 'utf8').split('\n');
+  for (const file of readdirSync(dir).filter(isDomainPrompt).sort()) {
+    const lines = proseLines(readFileSync(join(dir, file), 'utf8'));
     const fragment = lines.map((l) => l.match(/^\*\*Output file:\*\* `([\w.-]+\.md)`/)?.[1]).find(Boolean);
-    const at = lines.findIndex((l) => /^\*\*Scope\b/.test(l));
-    if (!fragment || at < 0) continue;
-    let j = at + 1;
-    while (j < lines.length && lines[j].trim() === '') j++;
-    const specs = [];
-    for (; j < lines.length && /^[-*]\s/.test(lines[j]); j++) {
-      for (const m of lines[j].matchAll(/`([^`]+)`/g)) specs.push(m[1]);
-    }
+    const specs = scopeOf(lines);
+    if (!fragment || specs === null) continue;
     out.push({ domain: file.replace(/\.md$/, ''), fragment, specs });
   }
   return out;

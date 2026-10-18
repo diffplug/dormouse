@@ -203,7 +203,7 @@ flowchart LR
   SH[SELF_HOST.md] -->|SELF_HOST_DELTA| JS[docs.selfhost.json] --> P2
 ```
 
-`/security` opens with its own introduction, written in the page component rather than the spec, and the canary recall from the committed snapshot `docs/specs/security-audit.md` -> "Published recall" owns, both above the spec's first heading.
+**Must close "How the guarantees are checked" with two generated figures, never written into the spec:** the canary recall, from the committed snapshot `docs/specs/security-audit.md` -> "Published recall" owns, and the audit index, built at generation from each domain prompt's scope list in `.github/audit/` and the `FAIL IF` lines above each scoped spec's fold, every section linked on GitHub. The page writes nothing else of its own but a note naming the spec it publishes.
 
 The spec file on GitHub is the one place every entry appears together. The three pages cross-link, and each specialized page links `/security#how-the-guarantees-are-checked`; `website/src/pages/security-pages.test.tsx` pins the entries and links.
 

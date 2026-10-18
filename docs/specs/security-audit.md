@@ -37,7 +37,7 @@ Source of truth: `decide` in `scripts/security-audit-plan.mjs`.
 
 The CI audit fans out to per-domain subagents, each owning a disjoint share of the tree; a domain may read outside its share — `remote` and `local` run the repo's own lints — but owns nothing there (rationale).
 
-**Ownership is by file: every `docs/specs/security*.md` spec, its `.rationale.md` aside, is in exactly one domain's scope**, declared as backticked repo paths in the bullet list under the `**Scope` line of its domain file in `.github/audit/`, and enforced by `scripts/spec-lint.mjs`; `docs/specs/security.md` -> "How the guarantees are checked" tabulates the assignment.
+**Ownership is by file: every `docs/specs/security*.md` spec, its `.rationale.md` aside, is in exactly one domain's scope**, declared as backticked repo paths in the bullet list under the `**Scope` line of its domain file in `.github/audit/`, and enforced by `scripts/spec-lint.mjs`; dormouse.sh/security publishes the assignment as its audit index (`docs/specs/website-docs.md` -> "`/security` spec").
 
 `AUDIT_PAT` is a step-level `env:` on the one job, so every subagent inherits it, and only the prompt tells `remote`, `local`, and `hosted` not to use it (`docs/specs/security.md` -> "Known gaps"); `## Future` -> Credential separation stages the fix.
 
@@ -214,7 +214,7 @@ Source of truth: `seed` and `score` in `scripts/security-audit-canary.mjs`; the 
 
 ### Published recall
 
-dormouse.sh/security shows a rolling recall above the security spec: caught over seeded across the `canary-recall` artifacts of canary runs on `main` in the 30 days before its as-of date, each run linked. It is a committed snapshot, `website/src/data/canary-recall.json`, regenerated at each release (`docs/specs/deploy.md` -> "Release checklist") (rationale).
+dormouse.sh/security shows a rolling recall under "How the guarantees are checked": caught over seeded across the `canary-recall` artifacts of canary runs on `main` in the 30 days before its as-of date, each run linked. It is a committed snapshot, `website/src/data/canary-recall.json`, regenerated at each release (`docs/specs/deploy.md` -> "Release checklist") (rationale).
 
 - **A record out of shape fails the snapshot**, never repaired or skipped: a field but the scorer's, a count not a non-negative integer, more caught than seeded, or a link but to its own run on `diffplug/dormouse`.
 - **Every run in the window counts as its record has it** (rationale): an unfinished domain's seeds stay seeded, caught only by what it reported, and the run shows its unfinished count. A run with no `canary-recall` artifact is listed without counts.

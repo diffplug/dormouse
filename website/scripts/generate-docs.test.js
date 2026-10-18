@@ -8,6 +8,8 @@ import {
   applyDelta,
   assertNoSiteLinks,
   assertRouteFragments,
+  auditIndex,
+  auditedSections,
   generateDocs,
   resolveRepoLinks,
   securityAudiences,
@@ -203,10 +205,10 @@ describe('security spec', () => {
 
   it('keeps every section, in order', () => {
     expect(data.security.headings.map((h) => h.id)).toEqual([
+      'how-the-guarantees-are-checked',
       'guarantees',
       'what-is-not-defended',
       'known-gaps',
-      'how-the-guarantees-are-checked',
       'reporting-a-vulnerability',
     ]);
   });
@@ -488,5 +490,59 @@ describe('same-site links', () => {
     const external = generatedHrefs().filter((href) => /^https?:\/\//i.test(href));
     expect(external.length).toBeGreaterThan(0);
     for (const href of external) expect(href).not.toContain('dormouse.sh');
+  });
+});
+
+describe('audit index', () => {
+  const SPEC = [
+    '# Spec',
+    'A `FAIL IF` pointer mid-line is no check.',
+    '## Alpha',
+    '- **FAIL IF** one.',
+    '**FAIL IF** two, leading its paragraph.',
+    '## Beta',
+    'Prose, and a `**FAIL IF**` quoted mid-line.',
+    '### `Gamma` [linked](./x.md)',
+    '```',
+    '- **FAIL IF** inside a fence.',
+    '```',
+    '- **FAIL IF** three.',
+    '## Alpha',
+    '- **FAIL IF** four, under a repeated heading.',
+    '## Future',
+    '- **FAIL IF** staged, below the fold.',
+  ].join('\n');
+
+  it('counts each FAIL IF under its nearest heading, above the fold and outside fences, with GitHub anchors', () => {
+    expect(auditedSections(SPEC, 'fixture')).toEqual([
+      { title: 'Alpha', anchor: 'alpha', checks: 2 },
+      { title: 'Gamma linked', anchor: 'gamma-linked', checks: 1 },
+      { title: 'Alpha', anchor: 'alpha-1', checks: 1 },
+    ]);
+  });
+
+  it('refuses a FAIL IF with no section above it', () => {
+    expect(() => auditedSections('# Spec\n- **FAIL IF** orphaned.\n## Alpha\n', 'fixture')).toThrow(/fixture: a FAIL IF above/);
+  });
+
+  it('lists every security spec once, under the domain whose scope claims it, linked on GitHub', async () => {
+    const index = await auditIndex();
+    expect(data.security.auditIndex).toEqual(index);
+    const { readdir } = await import('node:fs/promises');
+    const specs = (await readdir(new URL('../../docs/specs/', import.meta.url)))
+      .filter((f) => /^security[a-z-]*\.md$/.test(f) && !f.endsWith('.rationale.md'))
+      .map((f) => `docs/specs/${f}`);
+    const listed = index.domains.flatMap((d) => d.specs.map((s) => s.path));
+    expect([...listed].sort()).toEqual(specs.sort());
+    expect(index.domains.map((d) => d.name)).toEqual(['ci-and-secrets', 'hosted', 'local', 'remote', 'supply-chain']);
+    for (const domain of index.domains) {
+      expect(domain.checks).toBe(domain.specs.reduce((n, s) => n + s.checks, 0));
+      for (const spec of domain.specs) {
+        expect(spec.url).toBe(`${REPO_BLOB_BASE}/${spec.path}`);
+        expect(spec.sections.length).toBeGreaterThan(0);
+        for (const section of spec.sections) expect(section.url.startsWith(`${spec.url}#`)).toBe(true);
+      }
+    }
+    expect(index.checks).toBe(index.domains.reduce((n, d) => n + d.checks, 0));
   });
 });
