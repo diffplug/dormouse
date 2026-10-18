@@ -728,7 +728,8 @@ function assertDistinctSetups(names, label) {
  * `canonicalUrl`, because the delta removes no section — the page is the spec,
  * which is the point of publishing it. `pageBlocks` is the same document with
  * the three split blocks narrowed to {@link SECURITY_PAGE_AUDIENCES}; `blocks`
- * keeps every entry.
+ * keeps every entry. `setups` is the setup table's vocabulary, every entry's
+ * tags checked against it ({@link securitySetups}).
  */
 const buildSecurity = async () => {
   const page = await buildDocument({
@@ -738,9 +739,9 @@ const buildSecurity = async () => {
     fallbackTitle: 'Security',
   });
   const audiences = securityAudiences(page);
-  securitySetups(page);
   return {
     ...page,
+    setups: securitySetups(page).names,
     audiences,
     pageBlocks: audienceBlocks(page, audiences, SECURITY_PAGE_AUDIENCES),
     auditIndex: await auditIndex(),
