@@ -4,6 +4,7 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { computerName } from 'remote-lib-common';
 
 /**
  * The store reads `getPlatform().burrow`, so the link is the only seam the
@@ -444,13 +445,13 @@ describe('RemoteControlSection', () => {
     };
     await render();
     expect(text()).toContain(HOSTED_ENROLLMENT_ENDED_COPY['answer-lost']);
-    expect(text()).toContain('Remove Burrow T7lzkkrPT8nx4m9zf90V4h from your account');
+    expect(text()).toContain('Remove Computer T7lzkkrP from your account');
     await act(async () => buttonLabelled('Manage computers at hosted.dormouse.sh')!.click());
     expect(openExternal).toHaveBeenCalledWith('https://hosted.dormouse.sh/account');
   });
 
   it('shows an enrolled machine why a second redemption could not be kept, until dismissed', async () => {
-    const message = 'Your account holds Burrow T7lzkkrPT8nx4m9zf90V4h, which this computer could not keep.';
+    const message = 'Your account holds Computer T7lzkkrP, which this computer could not keep.';
     const link = makeLink(async () =>
       enrolled({
         relayOrigin: DEFAULT_RELAY_ORIGIN,
@@ -488,6 +489,8 @@ describe('RemoteControlSection', () => {
       openExternal,
     };
     await render();
+    // The name the account page lists it under, so the person knows which row is this one.
+    expect(text()).toContain(`where this computer is ${computerName(enrolled().burrowId!)}`);
     await act(async () => buttonLabelled('Manage computers at hosted.dormouse.sh')!.click());
     expect(openExternal).toHaveBeenCalledWith('https://hosted.dormouse.sh/account');
     await act(async () => root.unmount());

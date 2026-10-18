@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
 import type { AddressInfo } from "node:net";
@@ -70,7 +71,8 @@ const host: RelayAccountHost = {
   databaseUrl,
   auth: (request: Request) => auth.app.fetch(request),
   approveLimit: devLimit(10),
-  // No relay runs here, so no Burrow holds a socket to close.
+  // The relay runs in its own process (below), so a removed Burrow's socket
+  // is refused at its next request rather than closed here.
   closeBurrow: async () => {},
 };
 voiceTokenRoutes(app, () => host);
@@ -109,6 +111,26 @@ ready = {
 console.log(
   `Dormouse Hosted: ${origin}\nLocal email inbox: ${origin}/api/dev/emails\nEmail stays local; OAuth is disabled in this development entry.\nCheckout: ${origin}/checkout?plan=founding (StripeDev at ${stripeDev.origin}; no card, no charge)`,
 );
+// The relay Worker beside it, on this database and approving codes here, so
+// a dev Burrow build signs in by device code (docs/specs/hosted.md ->
+// "Development and release"). At RELAY_PORT, else the one-time loop's fixed
+// default, since the Burrow build bakes its origin.
+const relay = spawn(
+  process.execPath,
+  [fileURLToPath(new URL("../scripts/dev-one-time.mjs", import.meta.url))],
+  {
+    stdio: "inherit",
+    env: {
+      ...process.env,
+      PORT: process.env.RELAY_PORT ?? "",
+      HOSTED_DEV_ACCOUNT_ORIGIN: origin,
+      HOSTED_DEV_DATABASE_URL: databaseUrl,
+    },
+  },
+);
+relay.on("exit", (code) => {
+  if (code) console.error(`The relay Worker exited (${code}); device-code sign-in is off. The account still serves.`);
+});
 /** A `ratelimits` binding's stand-in: `perMinute` per key per wall-clock minute. */
 function devLimit(perMinute: number): RateLimit {
   const counts = new Map<string, number>();
@@ -128,6 +150,7 @@ function devLimit(perMinute: number): RateLimit {
 }
 for (const signal of ["SIGINT", "SIGTERM"] as const)
   process.once(signal, async () => {
+    relay.kill("SIGTERM");
     server.close();
     await vite.close();
     await auth.close();

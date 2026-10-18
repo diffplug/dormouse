@@ -7,6 +7,7 @@ import {
   foundingTier,
 } from "../../website/src/lib/hosted-pricing";
 import type { BillingSummary, Plan, SurveyAnswers } from "./api";
+import { ADD_A_COMPUTER } from "./enrollment";
 
 // The account pages billing adds (docs/specs/hosted.md -> "Billing"). Prices
 // come from the website's one owner of them; the founding step from the
@@ -26,7 +27,8 @@ function priceOf(plan: Plan, cohort: number | null): string | null {
   return step === undefined ? null : `$${step} a year, against $${LIST_ANNUAL} list`;
 }
 
-const PLANS_PAGE = "https://dormouse.sh/hosted#pricing";
+/** The plans, on the marketing site, whose buy buttons come back to `/checkout`. */
+export const PLANS_PAGE = "https://dormouse.sh/hosted#pricing";
 const date = (iso: string) => new Date(iso).toLocaleDateString();
 
 interface Shared {
@@ -255,6 +257,7 @@ export function WelcomeView({
   return (
     <>
       <PlanLine summary={summary} />
+      <p className="help">{ADD_A_COMPUTER}</p>
       {summary.plan === "founding" && (
         <section aria-labelledby="founders">
           <h2 id="founders">Founders row</h2>

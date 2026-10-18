@@ -3,19 +3,15 @@ import {
   ALARM_UPSELL_SHOWN_AT_KEY,
   chooseAlarmUpsell,
   alarmUpsellShownToday,
-  networkOffOrUnknown,
   type AlarmUpsellFacts,
 } from './alarm-upsell';
 import { installLocalStorageStub } from './test-local-storage';
 import { hostedPricingUrl, HOSTED_REFS } from './hosted-links';
-import { networkOn } from '../host/remote/test-burrow-link';
-import { networkPolicyResult, nothingPolicy } from '../remote/network-policy';
 
 const facts = (overrides: Partial<AlarmUpsellFacts>): AlarmUpsellFacts => ({
   sink: 'speech',
   membership: 'signed-out',
   managedVoice: true,
-  networkOff: false,
   enrolled: false,
   ...overrides,
 });
@@ -29,9 +25,8 @@ describe('chooseAlarmUpsell', () => {
     expect(chooseAlarmUpsell(facts({ membership: 'unavailable' }))).toBeNull();
   });
 
-  it.each(['speech', 'push'] as const)('never offers %s to a member, or under Nothing or before the policy answers', (sink) => {
+  it.each(['speech', 'push'] as const)('never offers %s to a member', (sink) => {
     expect(chooseAlarmUpsell(facts({ sink, membership: 'member' }))).toBeNull();
-    expect(chooseAlarmUpsell(facts({ sink, networkOff: true }))).toBeNull();
   });
 
   it('points push at signing in when signed out, and at the plans when the plan lapsed', () => {
@@ -78,16 +73,6 @@ describe('alarmUpsellShownToday', () => {
       removeItem: () => {},
     });
     expect(alarmUpsellShownToday(now)).toBe(false);
-  });
-});
-
-describe('networkOffOrUnknown', () => {
-  it('holds every offer until a Burrow service has answered, and under Nothing', () => {
-    expect(networkOffOrUnknown({ kind: 'unsupported' })).toBe(false);
-    expect(networkOffOrUnknown({ kind: 'loading' })).toBe(true);
-    expect(networkOffOrUnknown({ kind: 'error', message: 'x' })).toBe(true);
-    expect(networkOffOrUnknown({ kind: 'ready', network: networkOn('hosted') })).toBe(false);
-    expect(networkOffOrUnknown({ kind: 'ready', network: networkPolicyResult(nothingPolicy(), 'hosted', []) })).toBe(true);
   });
 });
 

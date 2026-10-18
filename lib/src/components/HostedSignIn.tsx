@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { HOSTED_SIGN_IN_LABEL, computerName } from 'remote-lib-common';
 import { TextInput, modalActionButton } from './design';
 import { ExternalTextLink } from './ExternalTextLink';
 import { FIELD_HINT, FIELD_LABEL, hostOf, useBusyAction, useMinutesLeft } from './remote-control-shared';
@@ -26,7 +27,7 @@ export function HostedPlansLink({ plansRef }: { plansRef: HostedRef }) {
 }
 
 /** The begin button's words, everywhere sign-in starts. */
-export const SIGN_IN_LABEL = 'Sign in to Dormouse Hosted';
+export const SIGN_IN_LABEL = HOSTED_SIGN_IN_LABEL;
 
 /** The one field the offer card and the typed form both ask for. */
 export function BurrowNameField({
@@ -82,10 +83,15 @@ export function accountPage(accountOrigin: string | null): string | null {
   return accountOrigin === null ? null : `${accountOrigin}${ACCOUNT_PAGE_PATH}`;
 }
 
+/** The clause naming this computer as the account page lists it, or nothing before it has an id. */
+export function listedAs(burrowId: string | null): string {
+  return burrowId ? `, where this computer is ${computerName(burrowId)}` : '';
+}
+
 /** What a lost answer asks of the person: the Burrow it enrolled, named where the service knows it. */
 export function answerLostRemoval(burrowId: string | undefined): string {
   return burrowId
-    ? `Remove Burrow ${burrowId} from your account, then sign in again.`
+    ? `Remove ${computerName(burrowId)} from your account, then sign in again.`
     : 'Remove the computer it added from your account, then sign in again.';
 }
 
