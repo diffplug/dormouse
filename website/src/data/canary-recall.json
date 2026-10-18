@@ -1,6 +1,6 @@
 {
-  "asOf": "2026-10-17",
-  "windowDays": 90,
+  "asOf": "2026-10-18",
+  "windowDays": 30,
   "runsUrl": "https://github.com/diffplug/dormouse/actions/workflows/security-audit.yaml?query=branch%3Amain",
   "seeded": 60,
   "caught": 45,

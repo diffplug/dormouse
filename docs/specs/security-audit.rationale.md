@@ -194,6 +194,6 @@ gh secret set AUDIT_PAT --env security-audit --repo diffplug/dormouse --body 'gi
 
 **Why a committed snapshot (2026-10).** Downloading an artifact needs a token even on a public repository, and dormouse.sh is built by Cloudflare Pages from `release`, not in Actions, so the site build has none to read the artifacts with. A snapshot regenerated at release beside the dependency snapshots needs none, every promotion of `release` carries a fresh figure, and the as-of date shows how fresh it is.
 
-**Why 90 days.** It is the `canary-recall` artifact's retention, so no older run has a record left to read.
+**Why 30 days (2026-10).** The figure should measure the audit as it runs now: its prompts, domains, and seed draw change often, and runs from months back measured a different audit. The `canary-recall` artifact's 90-day retention bounds any window, since no older run has a record left to read.
 
 **Why an unfinished domain still counts.** Dropping the run, or its unfinished domain's seeds, would raise the figure by the runs where the audit did worst; a domain that ran out of time is a miss the published recall should carry.

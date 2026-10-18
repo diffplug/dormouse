@@ -214,7 +214,7 @@ Source of truth: `seed` and `score` in `scripts/security-audit-canary.mjs`; the 
 
 ### Published recall
 
-dormouse.sh/security shows a rolling recall above the security spec: caught over seeded across the `canary-recall` artifacts of canary runs on `main` in the 90 days before its as-of date, each run linked. It is a committed snapshot, `website/src/data/canary-recall.json`, regenerated at each release (`docs/specs/deploy.md` -> "Release checklist") (rationale).
+dormouse.sh/security shows a rolling recall above the security spec: caught over seeded across the `canary-recall` artifacts of canary runs on `main` in the 30 days before its as-of date, each run linked. It is a committed snapshot, `website/src/data/canary-recall.json`, regenerated at each release (`docs/specs/deploy.md` -> "Release checklist") (rationale).
 
 - **A record out of shape fails the snapshot**, never repaired or skipped: a field but the scorer's, a count not a non-negative integer, more caught than seeded, or a link but to its own run on `diffplug/dormouse`.
 - **Every run in the window counts as its record has it** (rationale): an unfinished domain's seeds stay seeded, caught only by what it reported, and the run shows its unfinished count. A run with no `canary-recall` artifact is listed without counts.

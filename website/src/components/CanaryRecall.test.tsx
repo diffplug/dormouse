@@ -14,7 +14,7 @@ import CanaryRecall, {
 const RUN = (id: number) => `https://github.com/diffplug/dormouse/actions/runs/${id}`;
 const BASE: CanaryRecallSnapshot = {
   asOf: "2026-10-17",
-  windowDays: 90,
+  windowDays: 30,
   runsUrl: "https://github.com/diffplug/dormouse/actions/workflows/security-audit.yaml?query=branch%3Amain",
   seeded: 0,
   caught: 0,
@@ -62,16 +62,10 @@ describe("recallWeeks", () => {
     expect(later.map((w) => [w.start, w.runs.length])).toEqual([
       ["2026-09-21", 1], ["2026-09-28", 1], ["2026-10-05", 1], ["2026-10-12", 3], ["2026-10-19", 0], ["2026-10-26", 0],
     ]);
-    // A run with no record counts as a run for where the axis starts.
-    const early = recallWeeks({ ...SNAPSHOT, unrecorded: [...SNAPSHOT.unrecorded, { at: "2026-09-09T12:00:00Z", url: RUN(8) }] });
-    expect(early.map((w) => w.start)).toEqual(["2026-09-07", "2026-09-14", "2026-09-21", "2026-09-28", "2026-10-05", "2026-10-12"]);
-    // Jul 19, 90 days before Oct 17, is in the week of Jul 13.
-    const full = recallWeeks({ ...SNAPSHOT, runs: [...SNAPSHOT.runs, { at: "2026-07-19T06:21:00Z", url: RUN(7), seeded: 8, caught: 8, unfinished: 0 }] });
-    expect(full.map((w) => w.start)).toEqual([
-      "2026-07-13", "2026-07-20", "2026-07-27", "2026-08-03", "2026-08-10", "2026-08-17", "2026-08-24",
-      "2026-08-31", "2026-09-07", "2026-09-14", "2026-09-21", "2026-09-28", "2026-10-05", "2026-10-12",
-    ]);
-    expect(full[9]).toMatchObject({ runs: [], percent: null });
+    // Sep 17, 30 days before Oct 17, is in the week of Sep 14; a run there
+    // with no record still starts the axis.
+    const full = recallWeeks({ ...SNAPSHOT, unrecorded: [...SNAPSHOT.unrecorded, { at: "2026-09-17T06:21:00Z", url: RUN(7) }] });
+    expect(full.map((w) => w.start)).toEqual(["2026-09-14", "2026-09-21", "2026-09-28", "2026-10-05", "2026-10-12"]);
   });
 
   it("buckets the same whatever the reader's time zone", () => {
@@ -90,10 +84,10 @@ describe("recallWeeks", () => {
     expect(week["2026-09-28"]).toMatchObject({ seeded: 0, caught: 0, percent: null, unrecorded: 1 });
   });
 
-  it("covers the same runs as the headline, in no more than fourteen weeks", () => {
+  it("covers the same runs as the headline, in no more than six weeks", () => {
     for (const s of [SNAPSHOT, snapshot as CanaryRecallSnapshot]) {
       const weeks = recallWeeks(s);
-      expect(weeks.length).toBeLessThanOrEqual(14);
+      expect(weeks.length).toBeLessThanOrEqual(6);
       expect(weeks.reduce((n, w) => n + w.seeded, 0)).toBe(s.seeded);
       expect(weeks.reduce((n, w) => n + w.caught, 0)).toBe(s.caught);
       expect(weeks.reduce((n, w) => n + w.runs.length, 0)).toBe(s.runs.length + s.unrecorded.length);
@@ -121,14 +115,10 @@ describe("week labels", () => {
     expect(sides).toEqual([true, true, true, false]);
   });
 
-  it("name each week with a point, a crowded one on a second row", () => {
-    // Four weeks leave each label its own slot's width.
-    expect(weekTicks(recallWeeks(SNAPSHOT)).map((t) => [t.start, t.index, t.row])).toEqual([
-      ["2026-09-21", 0, 0], ["2026-09-28", 1, 0], ["2026-10-05", 2, 0], ["2026-10-12", 3, 0],
-    ]);
-    const full = recallWeeks({ ...SNAPSHOT, runs: [...SNAPSHOT.runs, { at: "2026-07-19T06:21:00Z", url: RUN(7), seeded: 8, caught: 8, unfinished: 0 }] });
-    expect(weekTicks(full).map((t) => [t.start, t.index, t.row])).toEqual([
-      ["2026-07-13", 0, 0], ["2026-09-21", 10, 0], ["2026-09-28", 11, 1], ["2026-10-05", 12, 0], ["2026-10-12", 13, 1],
+  it("name the first week and each week with a point", () => {
+    // Oct 19 and Oct 26 have no run, so no point and no name.
+    expect(weekTicks(recallWeeks({ ...SNAPSHOT, asOf: "2026-10-30" }))).toEqual([
+      { start: "2026-09-21", index: 0 }, { start: "2026-09-28", index: 1 }, { start: "2026-10-05", index: 2 }, { start: "2026-10-12", index: 3 },
     ]);
   });
 });
@@ -139,7 +129,7 @@ describe("CanaryRecall", () => {
     const shown = text(html);
     expect(shown).toContain("80%");
     expect(shown).toContain("caught 24 of 30 seeded vulnerabilities");
-    expect(shown).toContain("90 days before 2026-10-17");
+    expect(shown).toContain("30 days before 2026-10-17");
     expect(shown).toContain("seeds known vulnerabilities into a throwaway copy");
     expect(shown).toContain("Monday to Sunday UTC");
     for (const label of ["3 of 6", "no record", "7 of 8", "14 of 16*"]) expect(shown).toContain(label);
@@ -182,8 +172,8 @@ describe("CanaryRecall", () => {
     const shown = text(html);
     expect(shown).not.toMatch(/%/);
     expect(html).not.toContain("<ol");
-    expect(shown).toContain("No canary has run in the last 90 days.");
-    expect(shown).toContain("90 days before 2026-10-17");
+    expect(shown).toContain("No canary has run in the last 30 days.");
+    expect(shown).toContain("30 days before 2026-10-17");
   });
 
   it("renders the committed snapshot", () => {

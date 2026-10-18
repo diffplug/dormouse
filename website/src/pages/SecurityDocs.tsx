@@ -114,7 +114,9 @@ export default function SecurityDocs() {
         vulnerabilities are intentionally added to a copy of the application code, sometimes with
         justifying comments, to test that the audit actually catches them.
       </p>
-      <p className={`mb-4 ${BODY_TEXT_CLASS}`}>Here is the canary history over the past 90 days:</p>
+      <p className={`mb-4 ${BODY_TEXT_CLASS}`}>
+        Here is the canary history over the past {canaryRecall.windowDays} days:
+      </p>
       <CanaryRecall snapshot={canaryRecall} />
       <p className={`mb-8 ${BODY_TEXT_CLASS}`}>
         And here are the security specs. What follows is not maintained by hand:{" "}

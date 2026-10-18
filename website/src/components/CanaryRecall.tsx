@@ -133,21 +133,11 @@ export function labelsAbove(weeks: RecallWeek[]): boolean[] {
 }
 
 /**
- * The x axis: the first week, then each week with a point. Past six weeks a
- * label in the slot after the one before drops to a second row; past six, every other
- * one hides on a phone, where they would not fit.
+ * The x axis: the first week, then each week with a point. A 30-day window
+ * spans at most six weeks, and six labels fit one row at a phone's width.
  */
-export function weekTicks(weeks: RecallWeek[]): { start: string; index: number; row: 0 | 1; phone: boolean }[] {
-  const shown = weeks.flatMap((week, index) => (index === 0 || weekLabel(week) !== null ? [{ start: week.start, index }] : []));
-  const crowded = shown.length > 6;
-  const ticks: { start: string; index: number; row: 0 | 1; phone: boolean }[] = [];
-  shown.forEach(({ start, index }, n) => {
-    const phone = !crowded || n % 2 === 0;
-    const before = ticks[ticks.length - 1];
-    const row: 0 | 1 = weeks.length > 6 && before && before.row === 0 && index - before.index < 2 ? 1 : 0;
-    ticks.push({ start, index, row, phone });
-  });
-  return ticks;
+export function weekTicks(weeks: RecallWeek[]): { start: string; index: number }[] {
+  return weeks.flatMap((week, index) => (index === 0 || weekLabel(week) !== null ? [{ start: week.start, index }] : []));
 }
 
 const EXTERNAL = { target: "_blank", rel: "noopener noreferrer" } as const;
@@ -166,10 +156,6 @@ function RecallGraph({ weeks }: { weeks: RecallWeek[] }) {
     else segments.push([point]);
   });
   const above = labelsAbove(weeks);
-  // Six labels fit a phone's width; past that they show from `sm` up, and the
-  // tooltip and the week's run list still carry the counts.
-  const labelled = weeks.filter((week) => weekLabel(week) !== null).length;
-  const labelVisibility = labelled > 6 ? "hidden sm:block" : "";
   return (
     <div className="mt-4 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 text-xs">
       <div aria-hidden="true" className={`relative my-6 h-36 w-9 font-mono ${CARD_MUTED_TEXT_CLASS}`}>
@@ -247,7 +233,7 @@ function RecallGraph({ weeks }: { weeks: RecallWeek[] }) {
                 {/* The card's own surface, page then tint, so a grid line passes behind the words. */}
                 <span
                   aria-hidden="true"
-                  className={`${labelVisibility} pointer-events-none absolute left-1/2 -translate-x-1/2 whitespace-nowrap rounded bg-[var(--color-bg)] peer-open:hidden ${above[i] ? "bottom-full" : "top-full"}`}
+                  className={`pointer-events-none absolute left-1/2 -translate-x-1/2 whitespace-nowrap rounded bg-[var(--color-bg)] peer-open:hidden ${above[i] ? "bottom-full" : "top-full"}`}
                 >
                   <span className={`block rounded bg-[var(--color-text)]/[0.04] px-1 font-mono ${CARD_MUTED_TEXT_CLASS}`}>
                     {label}
@@ -259,11 +245,11 @@ function RecallGraph({ weeks }: { weeks: RecallWeek[] }) {
         </ol>
       </div>
       <div />
-      <div aria-hidden="true" className={`relative h-8 font-mono ${CARD_MUTED_TEXT_CLASS}`}>
-        {weekTicks(weeks).map(({ start, index, row, phone }) => (
+      <div aria-hidden="true" className={`relative h-4 font-mono ${CARD_MUTED_TEXT_CLASS}`}>
+        {weekTicks(weeks).map(({ start, index }) => (
           <span
             key={start}
-            className={`absolute -translate-x-1/2 whitespace-nowrap ${row ? "top-4" : "top-0"} ${phone ? "" : "hidden sm:inline"}`}
+            className="absolute top-0 -translate-x-1/2 whitespace-nowrap"
             style={{ left: `${x(index)}%` }}
           >
             {dayOf(start)}
@@ -275,8 +261,8 @@ function RecallGraph({ weeks }: { weeks: RecallWeek[] }) {
 }
 
 /**
- * The audit's measured recall, which `/security` shows under "How the
- * guarantees are checked" (docs/specs/security-audit.md -> "Canary recall").
+ * The audit's measured recall, which `/security` shows above the security
+ * spec (docs/specs/security-audit.md -> "Canary recall").
  * The as-of date stays beside the figure, so a stale snapshot reads as one.
  */
 export default function CanaryRecall({ snapshot }: { snapshot: CanaryRecallSnapshot }) {

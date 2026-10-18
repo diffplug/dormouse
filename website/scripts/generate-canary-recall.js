@@ -26,8 +26,8 @@ export const WORKFLOW = 'security-audit.yaml';
 /** The canary's `run-name` in `.github/workflows/security-audit.yaml`. */
 export const CANARY_TITLE = 'security-audit canary (recall measurement, not an audit)';
 export const ARTIFACT = 'canary-recall';
-/** The `canary-recall` artifact's retention: older runs have no record left to read. */
-export const WINDOW_DAYS = 90;
+/** The recall window; at most the `canary-recall` artifact's 90-day retention, past which no record is left to read. */
+export const WINDOW_DAYS = 30;
 /** Every field `publicRecord` in scripts/security-audit-canary.mjs writes, and no other. */
 export const RECORD_FIELDS = ['caught', 'run_url', 'seeded', 'unfinished'];
 const DAY = 86_400_000;
