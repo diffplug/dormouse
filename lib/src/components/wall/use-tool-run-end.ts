@@ -25,7 +25,7 @@ export function toolRunEnded(id: string, params: unknown): boolean {
 }
 
 /** The Tool becomes the plain terminal it runs in, in place: same Session,
- *  ref, scrollback, and rename; its browser, announcements, unsaved state,
+ *  id, scrollback, and rename; its browser, announcements, unsaved state,
  *  and any preview mark go with the designation. */
 export function endToolDesignation(lath: LathWallEngine, id: string): void {
   const meta = lath.getMeta(id);

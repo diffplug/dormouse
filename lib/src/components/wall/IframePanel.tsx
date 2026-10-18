@@ -22,6 +22,7 @@ import { connectIframeTheme } from '../../lib/themes/iframe-theme';
 import { connectToolEditor, withToolEditorConsent } from '../../lib/tool-editor';
 import { offeredRenderModes } from './browser-automation';
 import { browserSurfaceUrl, hostPathDisplay, iframeRefusal } from './browser-url';
+import { isRealBlur } from '../../lib/window-focus';
 
 // Sandbox every framed page, proxied or raw, so a tool's
 // `if (top !== self) top.location = …` framebust cannot navigate the Wall away —
@@ -407,7 +408,7 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
   useEffect(() => {
     if (resolution.kind !== 'raw') return;
     const onWindowBlur = () => {
-      if (document.hasFocus() && document.activeElement === iframeRef.current) {
+      if (!isRealBlur() && document.activeElement === iframeRef.current) {
         actions.onEnterPanel(id);
       }
     };

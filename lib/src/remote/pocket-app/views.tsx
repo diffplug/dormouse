@@ -7,12 +7,14 @@
  */
 
 import { clsx } from 'clsx';
-import type { DirectPath, DirectRelayCause } from 'remote-lib-common';
+import type { DirectPath, DirectRelayCause, PairingDeviceLabel } from 'remote-lib-common';
 import { isInstalledWebApp } from '../client/install-state';
 import { PK, pkButton } from './pocket-chrome';
 
 /**
- * The label this Client suggests at pairing.
+ * The label this Client sends at pairing, always a member of
+ * `PAIRING_DEVICE_LABELS` — the Burrow shows and keeps nothing else
+ * (`docs/specs/remote-security-model.md` -> Pairing).
  *
  * One phone can hold two Client identities — a Safari tab and a Home Screen
  * install have separate storage and therefore separate per-Burrow statics — and
@@ -20,7 +22,7 @@ import { PK, pkButton } from './pocket-chrome';
  * the mode is what lets the person approving on the laptop, and the alarm
  * dialog afterwards, tell them apart.
  */
-export function deviceLabel(): string {
+export function deviceLabel(): PairingDeviceLabel {
   return isInstalledWebApp() ? 'Dormouse Pocket (Home Screen)' : 'Dormouse Pocket (browser)';
 }
 

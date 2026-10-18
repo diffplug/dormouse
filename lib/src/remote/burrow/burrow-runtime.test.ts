@@ -11,6 +11,8 @@ import {
   DEFAULT_PAIRING_TTL_MS,
   DEFAULT_CHALLENGE_TTL_MS,
   MAX_TOKENS_PER_BURROW,
+  PAIRING_DEVICE_LABELS,
+  PAIRING_UNKNOWN_DEVICE_LABEL,
   NoiseTransportSession,
   PRESENCE_WINDOW,
   PRESENCE_WINDOW_IDLE_MS,
@@ -57,6 +59,8 @@ import {
 const ORIGIN = 'https://burrow-machine.example';
 const RP_ID = 'burrow.example';
 const BURROW_LABEL = 'Ned’s laptop';
+/** What Pocket in a browser tab names itself; a pairing shows nothing outside its set. */
+const POCKET_LABEL = PAIRING_DEVICE_LABELS[1];
 const ACCOUNT = 'owner';
 /** A gap between keepalives inside the established-session idle reap. */
 const ESTABLISHED_IDLE_STEP_MS = 100_000;
@@ -82,8 +86,12 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
   ) => {
     invitationEvents.push(outcome ? { inviteId, state, outcome } : { inviteId, state });
   };
-  let sessions: Array<{ handled: unknown[]; disposed: boolean; send: (payload: unknown) => void }> =
-    [];
+  let sessions: Array<{
+    handled: unknown[];
+    disposed: boolean;
+    send: (payload: unknown) => void;
+    label: string;
+  }> = [];
   let clock = 1_700_000_000_000;
   let burrows: BurrowRuntime[] = [];
 
@@ -139,8 +147,8 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
       onInvitationChanged: recordInvitation,
       onPolicyRaised: options.onPolicyRaised,
       createSession: withSession
-        ? ({ send }) => {
-            const entry = { handled: [] as unknown[], disposed: false, send };
+        ? ({ send, label }) => {
+            const entry = { handled: [] as unknown[], disposed: false, send, label };
             sessions.push(entry);
             return {
               handle: (data) => entry.handled.push(data),
@@ -231,7 +239,7 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
       'pairing',
       invitation.inviteId,
       'transport',
-      toBase64Url(session.sendControl({ code, label: options.label ?? 'iPhone Safari', presence })),
+      toBase64Url(session.sendControl({ code, label: options.label ?? POCKET_LABEL, presence })),
     );
     // Either a modal opened or the Burrow answered; both mean it is done thinking.
     await settleUntil(
@@ -264,7 +272,7 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
     // The modal gets the label and nothing else: no code, no key, no proof.
     expect(approvals).toHaveLength(1);
     const pending = approvals[0]!;
-    expect(pending.label).toBe('iPhone Safari');
+    expect(pending.label).toBe(POCKET_LABEL);
     expect(Object.keys(pending).sort()).toEqual([
       'approve',
       'clientId',
@@ -294,7 +302,7 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
       passkeyCredentialId: authenticator.credentialId,
       clientStaticPublicKey: toBase64Url(clientStatic.publicKey),
       deliveryId: answer.deliveryId,
-      label: 'iPhone Safari',
+      label: POCKET_LABEL,
       revokedAt: null,
     });
     // The invitation is spent by the outcome, whichever way it went.
@@ -574,7 +582,7 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
       toBase64Url(
         session!.sendControl({
           code: '42',
-          label: 'iPhone Safari',
+          label: POCKET_LABEL,
           presence: await presenceProofFor(authenticator, binding),
         }),
       ),
@@ -762,6 +770,35 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
     expect(JSON.parse(utf8Decode(receipt.messages[0]!))).toEqual({ requestId: 'r1', ok: true });
   });
 
+  it('shows and records a pairing label only as a member of the closed set', async () => {
+    // The phone chooses the label beside the digits, and a presence proof does
+    // not say whose phone: whoever redeems a setup QR registers a passkey on the
+    // account (`docs/specs/remote-security-model.md` -> Pairing).
+    makeBurrow();
+    const { invitation, session, code } = await requestPairing('c1', await newAuthenticator(), {
+      label: `${POCKET_LABEL} · code 58`,
+    });
+    expect(approvals).toHaveLength(1);
+    expect(approvals[0]!.label).toBe(PAIRING_UNKNOWN_DEVICE_LABEL);
+
+    approvals[0]!.approve(code);
+    expect(await outcome(session, 'pairing', invitation.inviteId)).toMatchObject({ ok: true });
+    expect(savedRecords).toHaveLength(1);
+    expect(savedRecords[0]!.label).toBe(PAIRING_UNKNOWN_DEVICE_LABEL);
+  });
+
+  it('names a session by its record’s label only as a member of the closed set', async () => {
+    // A record off disk may predate the set or have been written by hand, and
+    // its label names the pane the session holds.
+    makeBurrow();
+    const { authenticator, clientStatic } = await pairedClient();
+    const records = savedRecords.map((record) => ({ ...record, label: 'iPhone · code 58' }));
+    burrow.stop();
+    makeBurrow(() => records);
+    expect(await attemptConnection('c1', clientStatic, authenticator)).toMatchObject({ ok: true });
+    expect(sessions.at(-1)!.label).toBe(PAIRING_UNKNOWN_DEVICE_LABEL);
+  });
+
   /** Ask for a connection and return the decrypted outcome. */
   async function attemptConnection(
     clientId: string,
@@ -840,7 +877,7 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
       toBase64Url(
         session!.sendControl({
           code: '11',
-          label: 'iPad',
+          label: PAIRING_DEVICE_LABELS[0],
           presence: await presenceProofFor(other, pairBinding),
         }),
       ),

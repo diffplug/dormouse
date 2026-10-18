@@ -436,7 +436,8 @@ function precedingLineHasPromptContext(text: string, lastNewlineIndex: number): 
   return false;
 }
 
-// Sticky so the ground-state jump costs no copy of the chunk tail.
+// Global, so `lastIndex` lets `exec` jump to the next introducer without
+// copying the chunk tail.
 const ALT_GROUND_SCAN = /[\x1b\x9b]/g;
 
 // Elide alternate-buffer output before truncating the prompt window. Keep mode

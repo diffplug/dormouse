@@ -9,9 +9,10 @@
  * recognises it by.
  *
  * **Must** correct that accent for contrast before using it as body text.
- * Taken raw, 7 of the 11 bundled accents fall below WCAG AA against their own
- * background and four carry alpha, so using them directly would undo the
- * contrast work that moved these links off brand caramel in the first place.
+ * Taken raw, most bundled accents fall below WCAG AA against their own
+ * background, several only once their alpha is flattened onto it, so using
+ * them directly would undo the contrast work that moved these links off brand
+ * caramel in the first place.
  *
  * Correction walks the accent toward whichever of white or black contrasts
  * more with the background, stopping at the first step that clears the

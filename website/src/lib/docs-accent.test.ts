@@ -68,8 +68,8 @@ describe("docs link colour", () => {
   });
 
   it("clears WCAG AA on every bundled theme", () => {
-    // The raw accents do not: seven of eleven fall below 4.5:1 against their
-    // own background, which is why the correction exists.
+    // The raw accents do not: most fall below 4.5:1 against their own
+    // background, which is why the correction exists.
     for (const t of themes) {
       const link = docsAccentFor(t.accent, t.background);
       expect(link, t.id).not.toBeNull();

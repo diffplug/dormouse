@@ -224,16 +224,14 @@ Exactly once is unforgiving, so the panel behind the modal says which way it wen
 
 - **Local confirmation is the only path into the ACL.** Not signing in, not owning the account, not holding a synced passkey. Someone with your account and your passkey still gets no further than this dialog on a machine they are not standing at.
 - **It has to not read as a formality.** Hence *"Only authorize if your phone is showing a two-digit code. If it shows an error or no code, cancel this request."* — the copy names the failure mode, because a request that shows no code is exactly what an injected one looks like.
-- **The label is the only thing the phone chose**, and it is bounded and stripped before it is drawn. Everything else about the Client — its key, its passkey — was already proved by the handshake and the assertion, so there is nothing left for a human to squint at.
+- **The label is the only thing the phone chose**, so the laptop draws it only as one of the two names Pocket sends, and anything else as *Unknown device*. It sits right above the code input, and a request from whoever redeemed a leaked QR passes the passkey check too, so free text there could tell you which digits to type. Everything else about the Client — its key, its passkey — was already proved by the handshake and the assertion, so there is nothing left for a human to squint at.
 - **"Adds it to this machine only"** is doing real work. The ACL is per-Burrow and local; your other laptops are unaffected and will each ask separately.
 
 Confirming writes one `BurrowAclRecord` binding *that passkey credential* to *that Client key* — a pair, not either one alone — and is bound to the ceremony's immutable `pairingId`, so a request that changed underneath a displayed modal is rejected rather than silently authorizing a device nobody was shown.
 
-Two cases the copy has to survive: a phone that suggested no label, and one long enough to wrap.
+A request under any other name:
 
-<Canvas of={Pairing.UnnamedDevice} />
-
-<Canvas of={Pairing.LongValues} />
+<Canvas of={Pairing.UnknownDevice} />
 
 ---
 

@@ -5,8 +5,9 @@ import { editableImageType } from '../src/file-viewer-format';
 import { IMAGES_ROUTE } from '../src/image-format';
 import { message, request } from './document-session';
 
-/** A relative image `src` as the `/`-separated path the viewer serves under
- * `file/`, or null for a URL, an absolute path, or one leaving the document's folder. */
+/** A relative image `src` as the `/`-separated path, relative to the document's
+ * folder, that the `images/`, `edit/`, and `image-save/` routes take, or null
+ * for a URL, an absolute path, or one leaving the document's folder. */
 export function localImagePath(src: string): string | null {
   if (/^[a-z][a-z\d+.-]*:/i.test(src) || src.startsWith('/') || src.startsWith('\\')) return null;
   let path: string;

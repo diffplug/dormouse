@@ -25,6 +25,7 @@ import {
   MAX_CLIENT_ID_LENGTH,
   MAX_PENDING_PAIRINGS,
   MAX_RELAY_TO_BURROW_FRAME_LENGTH,
+  PAIRING_DEVICE_LABELS,
   PRESENCE_WINDOW,
   RELAY_PING,
   RELAY_PING_INTERVAL_MS,
@@ -615,7 +616,7 @@ describe('BurrowRuntime bounds', () => {
     const first = await establish('c1');
     await establish('c2');
     // The ACL record's label, as the pane that session holds names it.
-    expect(sessions[0]!.label).toBe('iPhone Safari');
+    expect(sessions[0]!.label).toBe(PAIRING_DEVICE_LABELS[1]);
 
     sessions[0]!.end();
     expect(sessions[0]!.disposed).toBe(true);
