@@ -13,6 +13,7 @@ import {
   generateDocs,
   resolveRepoLinks,
   securityAudiences,
+  securitySetups,
 } from './generate-docs.js';
 import { createSlugger, inlineToText, parseMarkdown, visit } from './docs-parser.js';
 import { CODING_AGENTS } from '../../lib/src/lib/coding-agents.ts';
@@ -205,6 +206,7 @@ describe('security spec', () => {
 
   it('keeps every section, in order', () => {
     expect(data.security.headings.map((h) => h.id)).toEqual([
+      'setups',
       'how-the-guarantees-are-checked',
       'guarantees',
       'what-is-not-defended',
@@ -287,6 +289,68 @@ describe('security spec', () => {
     expect(() => securityAudiences(page(doc('| g | no link | t |')))).toThrow(/names no spec/);
     expect(() => securityAudiences(page(doc('| g | [a](./website-docs.md) | t |')))).toThrow(/exactly one audience/);
     expect(securityAudiences(page(doc('| g | [a](./security-ci.md) | t |'))).security.guarantees.rows).toHaveLength(1);
+  });
+
+  it('reads the setups from the setup table and every entry\'s tags against them', () => {
+    // docs/specs/website-docs.md -> `/security` spec: a row tags itself in its
+    // `Applies to` cell, a bullet in the emphasis it opens with, and the setup
+    // table's first column is the only vocabulary either may use.
+    const page = (markdown) => {
+      const blocks = parseMarkdown(markdown, { slug: createSlugger() }).blocks;
+      resolveRepoLinks(blocks, 'docs/specs/security.md');
+      return { blocks };
+    };
+    const doc = ({
+      setups = ['| **A** | a |', '| **B** | b |'],
+      header = '| G | Applies to | Rule | Pinned by |',
+      row = '| g | A | [a](./security-ci.md) | t |',
+      bullet = '- *A, B.* **x** ([a](./security-ci.md))',
+      table = true,
+      section = true,
+    } = {}) =>
+      [
+        ...(section ? ['## Setups', '', ...(table ? ['| Setup | How |', '| --- | --- |', ...setups] : ['No table.']), ''] : []),
+        '## Guarantees', '', header, '| --- | --- | --- | --- |', row, '',
+        '## What is not defended', '', bullet, '',
+        '## Known gaps', '', '- *B.* **y** ([b](./security-remote.md))',
+      ].join('\n');
+    expect(securitySetups(page(doc()))).toEqual({
+      names: ['A', 'B'],
+      guarantees: [['A']],
+      notDefended: [['A', 'B']],
+      knownGaps: [['B']],
+    });
+    expect(() => securitySetups(page(doc({ section: false })))).toThrow(/no heading matches "Setups"/);
+    expect(() => securitySetups(page(doc({ table: false })))).toThrow(/"Setups" has no table/);
+    expect(() => securitySetups(page(doc({ setups: ['| **A** | a |', '| **B** | b |', '| **A** | c |'] })))).toThrow(
+      /"Setups" repeats A/,
+    );
+    expect(() => securitySetups(page(doc({ header: '| G | Setups | Rule | Pinned by |' })))).toThrow(
+      /"Guarantees" has no "Applies to" column/,
+    );
+    expect(() => securitySetups(page(doc({ row: '| g |  | [a](./security-ci.md) | t |' })))).toThrow(
+      /"Guarantees" entry 1 carries no setup tag/,
+    );
+    expect(() => securitySetups(page(doc({ row: '| g | A, | [a](./security-ci.md) | t |' })))).toThrow(/empty setup tag/);
+    expect(() => securitySetups(page(doc({ bullet: '- **x** ([a](./security-ci.md))' })))).toThrow(
+      /"What is not defended" entry 1 opens with no \*setup\* tag/,
+    );
+    expect(() => securitySetups(page(doc({ row: '| g | A, C | [a](./security-ci.md) | t |' })))).toThrow(
+      /"Guarantees" entry 1 names C, not a setup/,
+    );
+    expect(() => securitySetups(page(doc({ bullet: '- *B, B.* **x** ([a](./security-ci.md))' })))).toThrow(
+      /"What is not defended" entry 1 repeats B/,
+    );
+    expect(() => securitySetups(page(doc({ setups: ['| **A** | a |', '| **B** | b |', '| **C** | c |'] })))).toThrow(
+      /no entry applies to C/,
+    );
+  });
+
+  it('publishes the setups the spec\'s entries were checked against', () => {
+    // The vocabulary the page's readers pick from: the spec's four setups,
+    // in the table's order, and written by the build that checked the tags.
+    expect(data.security.setups).toEqual(['Every install', 'One-time link', 'Hosted phone', 'Self-hosted Relay']);
+    expect(data.security.setups).toEqual(securitySetups({ blocks: data.security.blocks }).names);
   });
 
   it('fails on a link into a published page whose fragment names no heading there', () => {
