@@ -21,19 +21,19 @@ describe("createManagedVoicePort", () => {
     expect(port.status()).toBeNull();
 
     port.refresh();
-    await vi.waitFor(() => expect(port.status()).toEqual({ configured: true, voiceId: "v1" }));
-    port.receiveStatus({ configured: false, voiceId: "v2" });
-    expect(port.status()).toEqual({ configured: false, voiceId: "v2" });
+    await vi.waitFor(() => expect(port.status()).toEqual({ configured: true, voiceId: "v1", notEntitled: false }));
+    port.receiveStatus({ configured: false, voiceId: "v2", notEntitled: true });
+    expect(port.status()).toEqual({ configured: false, voiceId: "v2", notEntitled: true });
     // Not a status: ignored, never cached.
     port.receiveStatus({ configured: "yes" });
-    expect(port.status()).toEqual({ configured: false, voiceId: "v2" });
+    expect(port.status()).toEqual({ configured: false, voiceId: "v2", notEntitled: true });
     expect(heard).toHaveBeenCalledTimes(2);
   });
 
   it("caches a saved edit's status without waiting for the broadcast", async () => {
-    const { port } = harness(() => ({ ok: true, configured: true, voiceId: "v1" }));
-    expect(await port.configure({ token: "dmv_x" })).toEqual({ ok: true, configured: true, voiceId: "v1" });
-    expect(port.status()).toEqual({ configured: true, voiceId: "v1" });
+    const { port } = harness(() => ({ ok: true, configured: true, voiceId: "v1", notEntitled: false }));
+    expect(await port.configure({ voiceId: "v1" })).toEqual({ ok: true, configured: true, voiceId: "v1", notEntitled: false });
+    expect(port.status()).toEqual({ configured: true, voiceId: "v1", notEntitled: false });
   });
 
   it.each([
@@ -43,11 +43,11 @@ describe("createManagedVoicePort", () => {
     let answer!: (value: unknown) => void;
     const { port } = harness(() => new Promise((resolve) => { answer = resolve; }));
     ask(port);
-    // Another window saved a token: its broadcast lands before this older answer.
-    port.receiveStatus({ configured: true, voiceId: "v2" });
-    answer({ ok: true, configured: false, voiceId: "v1" });
+    // This computer signed in: the broadcast lands before this older answer.
+    port.receiveStatus({ configured: true, voiceId: "v2", notEntitled: false });
+    answer({ ok: true, configured: false, voiceId: "v1", notEntitled: false });
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(port.status()).toEqual({ configured: true, voiceId: "v2" });
+    expect(port.status()).toEqual({ configured: true, voiceId: "v2", notEntitled: false });
   });
 
   it("reports a configure the sidecar failed as unavailable", async () => {

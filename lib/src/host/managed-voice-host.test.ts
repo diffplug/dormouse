@@ -3,11 +3,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  CLIP_CACHE_MAX_BYTES,
+  CLIP_CACHE_MAX_ENTRIES,
   createManagedVoiceHost,
   MAX_AUDIO_BYTES,
   MANAGED_VOICE_FILE,
 } from './managed-voice-host';
-import { DEFAULT_MANAGED_VOICE_ID } from '../lib/platform/managed-voice-types';
+import { DEFAULT_MANAGED_VOICE_ID, MANAGED_VOICES } from '../lib/platform/managed-voice-types';
 import { DEFAULT_RELAY_ORIGIN } from './relay-origin';
 
 /**
@@ -69,74 +71,86 @@ const audioResponse = () => new Response(new Uint8Array([9, 8, 7]), {
   status: 200, headers: { 'content-type': 'audio/mpeg', 'cache-control': 'no-store' },
 });
 
+const OTHER_VOICE = MANAGED_VOICES[1]!.id;
+const idle = (configured: boolean, voiceId = DEFAULT_MANAGED_VOICE_ID) =>
+  ({ configured, voiceId, notEntitled: false });
+
 describe('configuration', () => {
-  it('reports and broadcasts configured without ever carrying the token', async () => {
-    expect(await host.handle({ op: 'status' })).toEqual({ configured: false, voiceId: DEFAULT_MANAGED_VOICE_ID });
-    const result = await host.handle({ op: 'configure', update: { token: `  ${TOKEN}\n` } });
-    expect(result).toEqual({ ok: true, configured: true, voiceId: DEFAULT_MANAGED_VOICE_ID });
-    expect(broadcasts).toEqual([{ configured: true, voiceId: DEFAULT_MANAGED_VOICE_ID }]);
-    expect(JSON.stringify([result, broadcasts])).not.toContain(TOKEN);
-    expect(JSON.stringify(await host.handle({ op: 'status' }))).not.toContain(TOKEN);
+  it('holds the token sign-in saves, and reports and broadcasts without ever carrying it', async () => {
+    expect(await host.handle({ op: 'status' })).toEqual(idle(false));
+    await host.credential.save(TOKEN);
+    expect(broadcasts).toEqual([idle(true)]);
+    expect(JSON.stringify([broadcasts, await host.handle({ op: 'status' })])).not.toContain(TOKEN);
+  });
+
+  it('takes no token from a webview command', async () => {
+    expect(await host.handle({ op: 'configure', update: { token: TOKEN } })).toEqual({ ok: false, reason: 'invalid-voice' });
+    expect(await host.handle({ op: 'status' })).toEqual(idle(false));
+    await expect(host.credential.save('sk-nope')).rejects.toThrow();
   });
 
   it('keeps both of two edits sent at once', async () => {
     await Promise.all([
-      host.handle({ op: 'configure', update: { token: TOKEN } }),
-      host.handle({ op: 'configure', update: { voiceId: 'abc123' } }),
+      host.credential.save(TOKEN),
+      host.handle({ op: 'configure', update: { voiceId: OTHER_VOICE } }),
     ]);
-    expect(JSON.parse(await readFile(join(dir, MANAGED_VOICE_FILE), 'utf8'))).toEqual({ token: TOKEN, voiceId: 'abc123' });
-    expect(broadcasts.at(-1)).toEqual({ configured: true, voiceId: 'abc123' });
+    expect(JSON.parse(await readFile(join(dir, MANAGED_VOICE_FILE), 'utf8'))).toEqual({ token: TOKEN, voiceId: OTHER_VOICE });
+    expect(broadcasts.at(-1)).toEqual(idle(true, OTHER_VOICE));
   });
 
   it('persists owner-only and survives a restart', async () => {
-    await host.handle({ op: 'configure', update: { token: TOKEN, voiceId: 'abc123' } });
+    await host.credential.save(TOKEN);
+    await host.handle({ op: 'configure', update: { voiceId: OTHER_VOICE } });
     const file = join(dir, MANAGED_VOICE_FILE);
     if (process.platform !== 'win32') expect((await stat(file)).mode & 0o777).toBe(0o600);
-    expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ token: TOKEN, voiceId: 'abc123' });
-    expect(await make().handle({ op: 'status' })).toEqual({ configured: true, voiceId: 'abc123' });
+    expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ token: TOKEN, voiceId: OTHER_VOICE });
+    expect(await make().handle({ op: 'status' })).toEqual(idle(true, OTHER_VOICE));
   });
 
-  it('refuses malformed tokens and voice ids without storing them', async () => {
-    expect(await host.handle({ op: 'configure', update: { token: 'sk-nope' } })).toEqual({ ok: false, reason: 'invalid-token' });
-    expect(await host.handle({ op: 'configure', update: { voiceId: '../x' } })).toEqual({ ok: false, reason: 'invalid-voice' });
-    expect(await host.handle({ op: 'status' })).toEqual({ configured: false, voiceId: DEFAULT_MANAGED_VOICE_ID });
+  it('refuses a voice outside the curated set without storing it', async () => {
+    for (const voiceId of ['../x', 'AZnzlk1XvdvUeBnXmlld', 7]) {
+      expect(await host.handle({ op: 'configure', update: { voiceId } })).toEqual({ ok: false, reason: 'invalid-voice' });
+    }
+    expect(await host.handle({ op: 'status' })).toEqual(idle(false));
     expect(broadcasts).toEqual([]);
   });
 
-  it('clears the token', async () => {
-    await host.handle({ op: 'configure', update: { token: TOKEN } });
-    expect(await host.handle({ op: 'configure', update: { token: null } })).toMatchObject({ configured: false });
+  it('clears the token at sign-out', async () => {
+    await host.credential.save(TOKEN);
+    await host.credential.clear();
+    expect(broadcasts.at(-1)).toEqual(idle(false));
     expect(JSON.parse(await readFile(join(dir, MANAGED_VOICE_FILE), 'utf8')).token).toBeNull();
   });
 
-  it('treats a corrupt or hand-edited file as unconfigured', async () => {
+  it('treats a corrupt or hand-edited file as unconfigured, and a retired voice as the default', async () => {
     await writeFile(join(dir, MANAGED_VOICE_FILE), JSON.stringify({ token: 'dmv_short', voiceId: 7 }));
-    expect(await make().handle({ op: 'status' })).toEqual({ configured: false, voiceId: DEFAULT_MANAGED_VOICE_ID });
+    expect(await make().handle({ op: 'status' })).toEqual(idle(false));
+    await writeFile(join(dir, MANAGED_VOICE_FILE), JSON.stringify({ token: TOKEN, voiceId: 'abc123' }));
+    expect(await make().handle({ op: 'status' })).toEqual(idle(true));
   });
 
   it('keeps a saved token through a read error, and reads again next time', async () => {
-    await host.handle({ op: 'configure', update: { token: TOKEN } });
+    await host.credential.save(TOKEN);
     const file = join(dir, MANAGED_VOICE_FILE);
     const restarted = make();
     readFault.next = Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' });
-    expect(await restarted.handle({ op: 'configure', update: { voiceId: 'abc123' } }))
+    expect(await restarted.handle({ op: 'configure', update: { voiceId: OTHER_VOICE } }))
       .toEqual({ ok: false, reason: 'unavailable' });
     expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ token: TOKEN, voiceId: DEFAULT_MANAGED_VOICE_ID });
 
-    expect(await restarted.handle({ op: 'configure', update: { voiceId: 'abc123' } }))
-      .toEqual({ ok: true, configured: true, voiceId: 'abc123' });
-    expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ token: TOKEN, voiceId: 'abc123' });
+    expect(await restarted.handle({ op: 'configure', update: { voiceId: OTHER_VOICE } }))
+      .toEqual({ ok: true, ...idle(true, OTHER_VOICE) });
+    expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ token: TOKEN, voiceId: OTHER_VOICE });
   });
 
   it('refuses to hold a token with nowhere owner-only to keep it', async () => {
-    expect(await make({ stateDir: undefined }).handle({ op: 'configure', update: { token: TOKEN } }))
-      .toEqual({ ok: false, reason: 'unavailable' });
+    await expect(make({ stateDir: undefined }).credential.save(TOKEN)).rejects.toThrow();
   });
 });
 
 describe('speak', () => {
   beforeEach(async () => {
-    await host.handle({ op: 'configure', update: { token: TOKEN } });
+    await host.credential.save(TOKEN);
   });
 
   it('sends only the text and voice id, with the bearer token, and returns the audio', async () => {
@@ -152,9 +166,16 @@ describe('speak', () => {
   });
 
   it('answers unconfigured without a request', async () => {
-    await host.handle({ op: 'configure', update: { token: null } });
+    await host.credential.clear();
     expect(await host.handle({ op: 'speak', text: 'x' })).toEqual({ ok: false, reason: 'unconfigured' });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('forgets a token Hosted no longer knows, so Settings asks for a fresh sign-in', async () => {
+    fetchMock.mockResolvedValue(new Response('{}', { status: 401 }));
+    expect(await host.handle({ op: 'speak', text: 'x' })).toEqual({ ok: false, reason: 'HTTP 401' });
+    expect(broadcasts.at(-1)).toEqual(idle(false));
+    expect(JSON.parse(await readFile(join(dir, MANAGED_VOICE_FILE), 'utf8')).token).toBeNull();
   });
 
   it.each([400, 401, 403, 429, 502])('reports HTTP %i as a failure', async (status) => {
@@ -190,6 +211,81 @@ describe('speak', () => {
     expect(await quick.handle({ op: 'speak', text: 'x' })).toEqual({ ok: false, reason: 'timeout' });
   });
 
+  it('caches a clip by voice and text, so a repeat makes no request', async () => {
+    fetchMock.mockImplementation(async () => audioResponse());
+    const first = await host.handle({ op: 'speak', text: 'build finished' });
+    expect(await host.handle({ op: 'speak', text: '  build finished ' })).toEqual(first);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    // Another voice, or another label, asks again.
+    await host.handle({ op: 'configure', update: { voiceId: OTHER_VOICE } });
+    await host.handle({ op: 'speak', text: 'build finished' });
+    await host.handle({ op: 'speak', text: 'tests failed' });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('bounds the cache by count, evicting the least recently used', async () => {
+    fetchMock.mockImplementation(async () => audioResponse());
+    for (let i = 0; i <= CLIP_CACHE_MAX_ENTRIES; i++) await host.handle({ op: 'speak', text: `pane ${i}` });
+    fetchMock.mockClear();
+    await host.handle({ op: 'speak', text: `pane ${CLIP_CACHE_MAX_ENTRIES}` });
+    expect(fetchMock).not.toHaveBeenCalled();
+    await host.handle({ op: 'speak', text: 'pane 0' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('bounds the cache by bytes', async () => {
+    const clip = Math.floor(CLIP_CACHE_MAX_BYTES / 2) + 1;
+    fetchMock.mockImplementation(async () => new Response(new Uint8Array(Math.min(clip, MAX_AUDIO_BYTES)), {
+      status: 200, headers: { 'content-type': 'audio/mpeg' },
+    }));
+    // Each clip at the audio cap: the cache holds what fits in its bytes, no more.
+    const fits = Math.floor(CLIP_CACHE_MAX_BYTES / Math.min(clip, MAX_AUDIO_BYTES));
+    for (let i = 0; i <= fits; i++) await host.handle({ op: 'speak', text: `pane ${i}` });
+    fetchMock.mockClear();
+    await host.handle({ op: 'speak', text: 'pane 0' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('forgets every clip when the token changes', async () => {
+    fetchMock.mockImplementation(async () => audioResponse());
+    await host.handle({ op: 'speak', text: 'build finished' });
+    await host.credential.save(`dmv_${'C'.repeat(43)}`);
+    await host.handle({ op: 'speak', text: 'build finished' });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('latches a 403 as not entitled, bypassing the cache, until a speak succeeds', async () => {
+    fetchMock.mockImplementation(async () => audioResponse());
+    await host.handle({ op: 'speak', text: 'build finished' });
+    fetchMock.mockImplementation(async () => new Response('{}', { status: 403 }));
+    // Cached: no request, so nothing learned yet.
+    expect(await host.handle({ op: 'speak', text: 'build finished' })).toMatchObject({ ok: true });
+    expect(await host.handle({ op: 'speak', text: 'tests failed' })).toEqual({ ok: false, reason: 'HTTP 403' });
+    expect(broadcasts.at(-1)).toEqual({ ...idle(true), notEntitled: true });
+    // Lapsed: the cached clip is not played, so the system voice speaks.
+    expect(await host.handle({ op: 'speak', text: 'build finished' })).toEqual({ ok: false, reason: 'HTTP 403' });
+    fetchMock.mockImplementation(async () => audioResponse());
+    expect(await host.handle({ op: 'speak', text: 'build finished' })).toMatchObject({ ok: true });
+    expect(broadcasts.at(-1)).toEqual(idle(true));
+  });
+
+  it('lets an answer for a replaced token neither latch a refusal nor cache a clip', async () => {
+    const answers: Array<(response: Response) => void> = [];
+    fetchMock.mockImplementation(() => new Promise<Response>((resolve) => void answers.push(resolve)));
+    const refused = host.handle({ op: 'speak', text: 'build finished' });
+    const spoken = host.handle({ op: 'speak', text: 'tests failed' });
+    await vi.waitFor(() => expect(answers).toHaveLength(2));
+    // Signed in again while both are out.
+    await host.credential.save(`dmv_${'C'.repeat(43)}`);
+    answers[0]!(new Response('{}', { status: 403 }));
+    answers[1]!(audioResponse());
+    await Promise.all([refused, spoken]);
+    expect(broadcasts.at(-1)).toEqual(idle(true));
+    fetchMock.mockImplementation(async () => audioResponse());
+    await host.handle({ op: 'speak', text: 'tests failed' });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
   it('refuses empty or over-long text', async () => {
     expect(await host.handle({ op: 'speak', text: '   ' })).toEqual({ ok: false, reason: 'bad-request' });
     expect(await host.handle({ op: 'speak', text: 'x'.repeat(201) })).toEqual({ ok: false, reason: 'bad-request' });
@@ -206,7 +302,7 @@ describe('the build it runs in', () => {
       relay: { origin: 'http://localhost:8787', mode: 'hosted' },
       networkAllowed: async () => true,
     });
-    await local.handle({ op: 'configure', update: { token: TOKEN } });
+    await local.credential.save(TOKEN);
     fetchMock.mockResolvedValue(audioResponse());
 
     expect(await local.handle({ op: 'speak', text: 'build finished' })).toMatchObject({ ok: true });
@@ -217,7 +313,7 @@ describe('the build it runs in', () => {
     // A token saved by a Hosted build on this machine is still on disk; a
     // self-host build reaches nothing of Dormouse's (docs/specs/relay.md →
     // "Relay origin"), so it reads none of it.
-    await host.handle({ op: 'configure', update: { token: TOKEN } });
+    await host.credential.save(TOKEN);
     const selfHost = createManagedVoiceHost({
       stateDir: dir,
       onStatus: (status) => void broadcasts.push(status),
@@ -227,11 +323,9 @@ describe('the build it runs in', () => {
     });
     broadcasts = [];
 
-    expect(await selfHost.handle({ op: 'status' })).toEqual({
-      configured: false,
-      voiceId: DEFAULT_MANAGED_VOICE_ID,
-    });
-    expect(await selfHost.handle({ op: 'configure', update: { voiceId: 'abc123' } })).toEqual({
+    expect(await selfHost.handle({ op: 'status' })).toEqual(idle(false));
+    await expect(selfHost.credential.save(TOKEN)).rejects.toThrow();
+    expect(await selfHost.handle({ op: 'configure', update: { voiceId: OTHER_VOICE } })).toEqual({
       ok: false,
       reason: 'unavailable',
     });
@@ -248,10 +342,14 @@ describe('the build it runs in', () => {
 describe('the network policy', () => {
   it('sends nothing under Nothing, asking again at every speak', async () => {
     // docs/specs/remote-network.md → "Policy": managed voice is a choke point
-    // of its own. Saving a token is local, so it still works.
-    let allowed = false;
+    // of its own, a cached clip included. Saving a token is local, so it still works.
+    let allowed = true;
     const gated = make({ networkAllowed: async () => allowed });
-    expect(await gated.handle({ op: 'configure', update: { token: TOKEN } })).toMatchObject({ ok: true });
+    await gated.credential.save(TOKEN);
+    fetchMock.mockResolvedValue(audioResponse());
+    expect(await gated.handle({ op: 'speak', text: 'build finished' })).toMatchObject({ ok: true });
+    fetchMock.mockClear();
+    allowed = false;
     fetchMock.mockResolvedValue(audioResponse());
 
     expect(await gated.handle({ op: 'speak', text: 'build finished' })).toEqual({
@@ -261,7 +359,7 @@ describe('the network policy', () => {
     expect(fetchMock).not.toHaveBeenCalled();
 
     allowed = true;
-    expect(await gated.handle({ op: 'speak', text: 'build finished' })).toMatchObject({ ok: true });
+    expect(await gated.handle({ op: 'speak', text: 'something new' })).toMatchObject({ ok: true });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

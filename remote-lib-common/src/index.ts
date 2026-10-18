@@ -19,6 +19,7 @@ export * from './remote/pocket-deployment.js';
 export * from './remote/enroll-offer.js';
 export * from './remote/origin.js';
 export * from './remote/enroll-code.js';
+export * from './remote/managed-voice.js';
 export * from './remote/relay-common.js';
 export * from './remote/relay-routing.js';
 export * from './remote/web-push.js';

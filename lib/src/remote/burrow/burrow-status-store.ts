@@ -331,6 +331,15 @@ export async function beginHostedEnrollment(label: string): Promise<void> {
   }
 }
 
+/**
+ * Sign in again after the account removed this computer: forget the
+ * enrollment, then begin a new one under `label`, in that order.
+ */
+export async function signInAgain(label: string): Promise<void> {
+  await clearBurrowEnrollment();
+  await beginHostedEnrollment(label);
+}
+
 /** Stop the Hosted enrollment waiting or ended, and re-read. */
 export async function cancelHostedEnrollment(): Promise<void> {
   const active = requireBurrowLink();
