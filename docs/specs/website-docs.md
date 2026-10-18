@@ -203,7 +203,7 @@ flowchart LR
   SH[SELF_HOST.md] -->|SELF_HOST_DELTA| JS[docs.selfhost.json] --> P2
 ```
 
-`/security` shows the canary recall after "How the guarantees are checked", from the committed snapshot `docs/specs/security-audit.md` -> "Published recall" owns, spliced in by `MarkdownDocument`'s `renderAfterHeading` rather than written into the spec.
+`/security` opens with its own introduction, written in the page component rather than the spec, and the canary recall from the committed snapshot `docs/specs/security-audit.md` -> "Published recall" owns, both above the spec's first heading.
 
 The spec file on GitHub is the one place every entry appears together. The three pages cross-link, and each specialized page links `/security#how-the-guarantees-are-checked`; `website/src/pages/security-pages.test.tsx` pins the entries and links.
 
