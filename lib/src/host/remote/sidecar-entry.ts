@@ -16,7 +16,7 @@ import { parseTerminalColors, type TerminalColorProvider, type TerminalColors } 
 import { createAlertHost, type AlertRealm } from '../alert-host';
 import type { AlertEvents } from '../alert-protocol';
 import { bakedRelay } from '../relay-origin';
-import { createManagedVoiceHost } from '../managed-voice-host';
+import { createManagedVoiceHost, fileManagedVoiceStore } from '../managed-voice-host';
 import { alertedPty, createOwnerPtyStream, type OwnerPtyStream } from '../owner-pty';
 import type {
   BurrowSurfaceProvider,
@@ -492,7 +492,7 @@ export function createSidecarHost(options: SidecarHostOptions): SidecarHost {
   // Read once, here: the Burrow and managed voice take the same baked pair.
   const relay = bakedRelay();
   const voice = createManagedVoiceHost({
-    stateDir: options.stateDir,
+    store: options.stateDir ? fileManagedVoiceStore(options.stateDir) : undefined,
     // Unaddressed, so Rust hands it to every window.
     onStatus: (status) => send('voice:status', status),
     log: (message) => console.error(message),
@@ -504,8 +504,8 @@ export function createSidecarHost(options: SidecarHostOptions): SidecarHost {
   });
   const service = new BurrowService({
     // A Hosted sign-in hands managed voice its token; sign-out clears it. A
-    // self-host build has no managed voice to hand one to.
-    voiceCredential: relay.mode === 'hosted' ? voice.credential : undefined,
+    // self-host build's host has no credential to hand one to.
+    voiceCredential: voice.credential,
     store,
     provider: bridge.provider,
     kind: 'standalone',

@@ -29,7 +29,7 @@
 - **The Burrow service never opens the relay socket**, the enrollment held as above, so push, the device list, and setup codes make no request.
 - **It refuses `enroll`, `enrollOffer`, and `beginHostedEnrollment` before any request**, the offer file unread, and a change to `nothing` ends a Hosted enrollment awaiting approval.
 - **It offers no one-time link**: the resting state is `unavailable` with reason `network-off`, and `oneTimeOpen` is refused, as under `local` with no network allowed.
-- **Managed voice asks the service before every speak** and answers `network-off` without a request.
+- **Managed voice asks the service before every speak** — a VS Code window without one reads the stored policy — and answers `network-off` without a request.
 
 Source of truth: `lib/src/remote/network-policy.ts`; `BurrowService` in `lib/src/host/remote/service.ts`; `lib/src/host/remote/network-interfaces.ts`; `createManagedVoiceHost` in `lib/src/host/managed-voice-host.ts`.
 

@@ -6,6 +6,7 @@ import {
   CLIP_CACHE_MAX_BYTES,
   CLIP_CACHE_MAX_ENTRIES,
   createManagedVoiceHost,
+  fileManagedVoiceStore,
   MAX_AUDIO_BYTES,
   MANAGED_VOICE_FILE,
 } from './managed-voice-host';
@@ -47,7 +48,7 @@ let host: ReturnType<typeof make>;
 
 function make(options: { timeoutMs?: number; stateDir?: string; networkAllowed?: () => Promise<boolean> } = {}) {
   return createManagedVoiceHost({
-    stateDir: 'stateDir' in options ? options.stateDir : dir,
+    store: 'stateDir' in options ? (options.stateDir ? fileManagedVoiceStore(options.stateDir) : undefined) : fileManagedVoiceStore(dir),
     onStatus: (status) => void broadcasts.push(status),
     fetch: fetchMock as unknown as typeof fetch,
     timeoutMs: options.timeoutMs,
@@ -78,7 +79,7 @@ const idle = (configured: boolean, voiceId = DEFAULT_MANAGED_VOICE_ID) =>
 describe('configuration', () => {
   it('holds the token sign-in saves, and reports and broadcasts without ever carrying it', async () => {
     expect(await host.handle({ op: 'status' })).toEqual(idle(false));
-    await host.credential.save(TOKEN);
+    await host.credential!.save(TOKEN);
     expect(broadcasts).toEqual([idle(true)]);
     expect(JSON.stringify([broadcasts, await host.handle({ op: 'status' })])).not.toContain(TOKEN);
   });
@@ -86,12 +87,12 @@ describe('configuration', () => {
   it('takes no token from a webview command', async () => {
     expect(await host.handle({ op: 'configure', update: { token: TOKEN } })).toEqual({ ok: false, reason: 'invalid-voice' });
     expect(await host.handle({ op: 'status' })).toEqual(idle(false));
-    await expect(host.credential.save('sk-nope')).rejects.toThrow();
+    await expect(host.credential!.save('sk-nope')).rejects.toThrow();
   });
 
   it('keeps both of two edits sent at once', async () => {
     await Promise.all([
-      host.credential.save(TOKEN),
+      host.credential!.save(TOKEN),
       host.handle({ op: 'configure', update: { voiceId: OTHER_VOICE } }),
     ]);
     expect(JSON.parse(await readFile(join(dir, MANAGED_VOICE_FILE), 'utf8'))).toEqual({ token: TOKEN, voiceId: OTHER_VOICE });
@@ -99,7 +100,7 @@ describe('configuration', () => {
   });
 
   it('persists owner-only and survives a restart', async () => {
-    await host.credential.save(TOKEN);
+    await host.credential!.save(TOKEN);
     await host.handle({ op: 'configure', update: { voiceId: OTHER_VOICE } });
     const file = join(dir, MANAGED_VOICE_FILE);
     if (process.platform !== 'win32') expect((await stat(file)).mode & 0o777).toBe(0o600);
@@ -116,8 +117,8 @@ describe('configuration', () => {
   });
 
   it('clears the token at sign-out', async () => {
-    await host.credential.save(TOKEN);
-    await host.credential.clear();
+    await host.credential!.save(TOKEN);
+    await host.credential!.clear();
     expect(broadcasts.at(-1)).toEqual(idle(false));
     expect(JSON.parse(await readFile(join(dir, MANAGED_VOICE_FILE), 'utf8')).token).toBeNull();
   });
@@ -130,7 +131,7 @@ describe('configuration', () => {
   });
 
   it('keeps a saved token through a read error, and reads again next time', async () => {
-    await host.credential.save(TOKEN);
+    await host.credential!.save(TOKEN);
     const file = join(dir, MANAGED_VOICE_FILE);
     const restarted = make();
     readFault.next = Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' });
@@ -144,13 +145,13 @@ describe('configuration', () => {
   });
 
   it('refuses to hold a token with nowhere owner-only to keep it', async () => {
-    await expect(make({ stateDir: undefined }).credential.save(TOKEN)).rejects.toThrow();
+    await expect(make({ stateDir: undefined }).credential!.save(TOKEN)).rejects.toThrow();
   });
 });
 
 describe('speak', () => {
   beforeEach(async () => {
-    await host.credential.save(TOKEN);
+    await host.credential!.save(TOKEN);
   });
 
   it('sends only the text and voice id, with the bearer token, and returns the audio', async () => {
@@ -166,7 +167,7 @@ describe('speak', () => {
   });
 
   it('answers unconfigured without a request', async () => {
-    await host.credential.clear();
+    await host.credential!.clear();
     expect(await host.handle({ op: 'speak', text: 'x' })).toEqual({ ok: false, reason: 'unconfigured' });
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -249,7 +250,7 @@ describe('speak', () => {
   it('forgets every clip when the token changes', async () => {
     fetchMock.mockImplementation(async () => audioResponse());
     await host.handle({ op: 'speak', text: 'build finished' });
-    await host.credential.save(`dmv_${'C'.repeat(43)}`);
+    await host.credential!.save(`dmv_${'C'.repeat(43)}`);
     await host.handle({ op: 'speak', text: 'build finished' });
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
@@ -276,7 +277,7 @@ describe('speak', () => {
     const spoken = host.handle({ op: 'speak', text: 'tests failed' });
     await vi.waitFor(() => expect(answers).toHaveLength(2));
     // Signed in again while both are out.
-    await host.credential.save(`dmv_${'C'.repeat(43)}`);
+    await host.credential!.save(`dmv_${'C'.repeat(43)}`);
     answers[0]!(new Response('{}', { status: 403 }));
     answers[1]!(audioResponse());
     await Promise.all([refused, spoken]);
@@ -293,16 +294,86 @@ describe('speak', () => {
   });
 });
 
+describe('a store another process shares', () => {
+  it('writes only the field that changed, and invalidate reads a sibling’s change, forgetting the clips', async () => {
+    let shared: Record<string, unknown> = {};
+    const writes: string[] = [];
+    const store = {
+      read: async () => ({ ...shared }),
+      write: async (next: { token: string | null; voiceId: string }, changed: 'token' | 'voiceId') => {
+        writes.push(changed);
+        shared = { ...shared, [changed]: next[changed] };
+      },
+    };
+    const window = createManagedVoiceHost({
+      store,
+      onStatus: (status) => void broadcasts.push(status),
+      fetch: fetchMock as unknown as typeof fetch,
+      relay: { origin: DEFAULT_RELAY_ORIGIN, mode: 'hosted' },
+      networkAllowed: async () => true,
+    });
+    await window.credential!.save(TOKEN);
+    await window.handle({ op: 'configure', update: { voiceId: OTHER_VOICE } });
+    expect(writes).toEqual(['token', 'voiceId']);
+    fetchMock.mockImplementation(async () => audioResponse());
+    await window.handle({ op: 'speak', text: 'build finished' });
+
+    // A sibling window signed out.
+    shared = { voiceId: OTHER_VOICE };
+    window.invalidate();
+    await vi.waitFor(() => expect(broadcasts.at(-1)).toEqual(idle(false, OTHER_VOICE)));
+    expect(await window.handle({ op: 'speak', text: 'build finished' })).toEqual({ ok: false, reason: 'unconfigured' });
+    // Signed in again there: the old clip is not replayed.
+    shared = { token: `dmv_${'C'.repeat(43)}`, voiceId: OTHER_VOICE };
+    window.invalidate();
+    await vi.waitFor(() => expect(broadcasts.at(-1)).toEqual(idle(true, OTHER_VOICE)));
+    await window.handle({ op: 'speak', text: 'build finished' });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('a sibling’s sign-out heard while a save is out wins over the save’s earlier read', async () => {
+    let shared: Record<string, unknown> = {};
+    let release: (() => void) | null = null;
+    const store = {
+      read: async () => ({ ...shared }),
+      write: async (next: { token: string | null; voiceId: string }, changed: 'token' | 'voiceId') => {
+        if (changed === 'voiceId') await new Promise<void>((resolve) => { release = resolve; });
+        shared = { ...shared, [changed]: next[changed] };
+      },
+    };
+    const window = createManagedVoiceHost({
+      store,
+      onStatus: (status) => void broadcasts.push(status),
+      fetch: fetchMock as unknown as typeof fetch,
+      relay: { origin: DEFAULT_RELAY_ORIGIN, mode: 'hosted' },
+      networkAllowed: async () => true,
+    });
+    await window.credential!.save(TOKEN);
+    const configured = window.handle({ op: 'configure', update: { voiceId: OTHER_VOICE } });
+    await vi.waitFor(() => expect(release).not.toBeNull());
+
+    // A sibling window signed out while this one's voice write is out.
+    shared = { voiceId: shared.voiceId };
+    window.invalidate();
+    release!();
+    await configured;
+
+    await vi.waitFor(() => expect(broadcasts.at(-1)).toEqual(idle(false, OTHER_VOICE)));
+    expect(await window.handle({ op: 'speak', text: 'build finished' })).toEqual({ ok: false, reason: 'unconfigured' });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
 describe('the build it runs in', () => {
   it('speaks to the voice origin from any Hosted build, a dev build’s local Hosted included', async () => {
     const local = createManagedVoiceHost({
-      stateDir: dir,
+      store: fileManagedVoiceStore(dir),
       onStatus: () => {},
       fetch: fetchMock as unknown as typeof fetch,
       relay: { origin: 'http://localhost:8787', mode: 'hosted' },
       networkAllowed: async () => true,
     });
-    await local.credential.save(TOKEN);
+    await local.credential!.save(TOKEN);
     fetchMock.mockResolvedValue(audioResponse());
 
     expect(await local.handle({ op: 'speak', text: 'build finished' })).toMatchObject({ ok: true });
@@ -313,9 +384,9 @@ describe('the build it runs in', () => {
     // A token saved by a Hosted build on this machine is still on disk; a
     // self-host build reaches nothing of Dormouse's (docs/specs/relay.md →
     // "Relay origin"), so it reads none of it.
-    await host.credential.save(TOKEN);
+    await host.credential!.save(TOKEN);
     const selfHost = createManagedVoiceHost({
-      stateDir: dir,
+      store: fileManagedVoiceStore(dir),
       onStatus: (status) => void broadcasts.push(status),
       fetch: fetchMock as unknown as typeof fetch,
       relay: { origin: 'https://relay.example.ts.net', mode: 'self-host' },
@@ -324,7 +395,7 @@ describe('the build it runs in', () => {
     broadcasts = [];
 
     expect(await selfHost.handle({ op: 'status' })).toEqual(idle(false));
-    await expect(selfHost.credential.save(TOKEN)).rejects.toThrow();
+    expect(selfHost.credential).toBeUndefined();
     expect(await selfHost.handle({ op: 'configure', update: { voiceId: OTHER_VOICE } })).toEqual({
       ok: false,
       reason: 'unavailable',
@@ -345,7 +416,7 @@ describe('the network policy', () => {
     // of its own, a cached clip included. Saving a token is local, so it still works.
     let allowed = true;
     const gated = make({ networkAllowed: async () => allowed });
-    await gated.credential.save(TOKEN);
+    await gated.credential!.save(TOKEN);
     fetchMock.mockResolvedValue(audioResponse());
     expect(await gated.handle({ op: 'speak', text: 'build finished' })).toMatchObject({ ok: true });
     fetchMock.mockClear();
