@@ -36,14 +36,13 @@ export function MarkdownNavigation({ follow, edit }: {
     };
     const doubleClick = (event: MouseEvent) => {
       const href = documentImage(event.target);
-      if (!href) return;
+      if (!href || anchor(event.target)) return;
       event.preventDefault();
       follow(href, 'current');
     };
     const context = (event: MouseEvent) => {
-      const image = documentImage(event.target);
-      const link = image === undefined ? anchor(event.target) ?? undefined : undefined;
-      const href = image ?? link?.getAttribute('href');
+      const link = anchor(event.target) ?? undefined;
+      const href = link ? link.getAttribute('href') : documentImage(event.target);
       if (!href || !markdownLink(href)) return;
       event.preventDefault(); event.stopPropagation();
       setMenu({ href, link, x: event.clientX, y: event.clientY });

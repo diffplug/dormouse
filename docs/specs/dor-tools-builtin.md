@@ -59,6 +59,7 @@ Source of truth: `dor-tools-builtin/viewer/markdown.tsx`; `safeCreateDOM` in `do
 
 - **Must follow a relative link on plain click**, and offer Open in another surface and Edit link on its context menu. Cmd/Ctrl-click chooses another Surface. Dispatch follows `docs/specs/dor-tool.md` → Document navigation. (rationale)
 - **Must open a local PNG or JPEG image's file the same way on Edit or double-click**, with a link's context menu whose edit item opens it.
+- **Must let an enclosing link own double-click and context-menu behavior.**
 - **Must treat only a scheme-less relative reference as a document link**, resolved from the opened canonical file's directory with parent references allowed and its query ignored; HTTP(S)/mail links keep their existing handling.
 - **Must send document opens to the Tool process**, which emits OSC 367 (`docs/specs/security-local.md` → Local-file viewer); **never navigate relative to the capability URL**. The page receives only sent/error, with host failures shown by the Surface.
 - **Must resolve a fragment to the rendered heading whose case-folded, punctuation-stripped, duplicate-suffixed id it names**, never writing ids into saved Markdown. Same-document fragments scroll without reloading or prompting; a missing heading reports an error while retaining the document. Back/Forward reading-state semantics belong to `docs/specs/dor-tool.md` → Document navigation.
