@@ -281,8 +281,8 @@ importers:
         specifier: ^1.2.5
         version: 1.2.5
       '@mdxeditor/editor':
-        specifier: 4.3.2
-        version: 4.3.2(@codemirror/language@6.13.1)(@lezer/highlight@1.2.5)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(supports-color@10.2.2)(typescript@7.0.2)(yjs@13.6.33)
+        specifier: 4.3.3
+        version: 4.3.3(@codemirror/language@6.13.1)(@lezer/highlight@1.2.5)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(supports-color@10.2.2)(typescript@7.0.2)(yjs@13.6.33)
       dor-lib-common:
         specifier: workspace:*
         version: link:../dor-lib-common
@@ -2670,8 +2670,8 @@ packages:
       '@types/react': '>=16'
       react: '>=16'
 
-  '@mdxeditor/editor@4.3.2':
-    resolution: {integrity: sha512-nIFzhxcsTP6p9z2yPzZEItyVWuxOPZMbhZm5VNTVAc1OPeiPb7e7QgIwJZmlwWFpjsbmjU5ouafXbThDiGhv2A==}
+  '@mdxeditor/editor@4.3.3':
+    resolution: {integrity: sha512-/RyVGEC66xqxU0smO7pk3Yq0o1IBOUB5OYv3AD+G3TNDQLLnv/mpD6cx1U1O6rfoAAXJ2VwEMhf/NI2PZvIkYw==}
     engines: {node: '>=16'}
     peerDependencies:
       react: '>= 18 || >= 19'
@@ -10186,7 +10186,7 @@ snapshots:
       '@types/react': 19.3.0
       react: 19.3.0
 
-  '@mdxeditor/editor@4.3.2(@codemirror/language@6.13.1)(@lezer/highlight@1.2.5)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(supports-color@10.2.2)(typescript@7.0.2)(yjs@13.6.33)':
+  '@mdxeditor/editor@4.3.3(@codemirror/language@6.13.1)(@lezer/highlight@1.2.5)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(supports-color@10.2.2)(typescript@7.0.2)(yjs@13.6.33)':
     dependencies:
       '@codemirror/commands': 6.11.1
       '@codemirror/lang-markdown': 6.5.2
@@ -10234,7 +10234,7 @@ snapshots:
       micromark-extension-directive: 3.0.2
       micromark-extension-frontmatter: 2.0.0
       micromark-extension-gfm-strikethrough: 2.1.0
-      micromark-extension-gfm-table: 2.1.1
+      micromark-extension-gfm-table: 2.1.2
       micromark-extension-gfm-task-list-item: 2.1.0
       micromark-extension-highlight-mark: 1.2.0
       micromark-extension-mdx-jsx: 3.0.2
