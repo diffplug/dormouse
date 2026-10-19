@@ -81,9 +81,9 @@ export function activate(context: vscode.ExtensionContext) {
   // (burrow.ts).
   initPeerLink(context);
   context.subscriptions.push({ dispose: () => void disposePeerLink() });
+  context.subscriptions.push(initManagedVoice(context));
   // The Burrow runs here, in the extension host that owns the PTYs — in
   // whichever window wins the bind (burrow.ts).
-  context.subscriptions.push(initManagedVoice(context));
   context.subscriptions.push(initBurrow(context));
   // Whether the user is at this window, for the alerts' push gate
   // (message-router.ts).
