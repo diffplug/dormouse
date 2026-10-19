@@ -4,7 +4,7 @@
 
 import type { LathNode, LathTree, Rect } from './model';
 import { type LayoutOpts, layout } from './layout';
-import { type DropTarget, insert, move } from './ops';
+import { type DropTarget, insert, move, movedWeight } from './ops';
 
 /** A leaf node. */
 export const leaf = (id: string): LathNode => ({ kind: 'leaf', id });
@@ -28,6 +28,12 @@ export function movePreview(t: LathTree, dragged: string, target: DropTarget, re
 }
 
 /** Expected preview rect of an external drag: the inserted leaf's rect after `insert`. */
-export function insertPreview(t: LathTree, id: string, target: DropTarget, rect: Rect, opts: LayoutOpts): Rect {
-  return layout(insert(t, id, target).tree, rect, opts).get(id)!;
+export function insertPreview(t: LathTree, id: string, target: DropTarget, rect: Rect, opts: LayoutOpts, weight?: number): Rect {
+  return layout(insert(t, id, target, weight).tree, rect, opts).get(id)!;
+}
+
+/** Expected preview rect of an internal edge drag: a placeholder carrying the dragged
+ *  leaf's weight, inserted into the current layout. */
+export function landingPreview(t: LathTree, dragged: string, target: DropTarget, rect: Rect, opts: LayoutOpts): Rect {
+  return insertPreview(t, '__landing__', target, rect, opts, movedWeight(t, dragged)!);
 }

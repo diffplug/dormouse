@@ -312,6 +312,15 @@ function sameLeafSet(a: LeafId[], b: LeafId[]): boolean {
   return a.length === set.size && a.every((l) => set.has(l));
 }
 
+/** The weight a `move` of leaf `id` carries into its destination: its normalized weight
+ *  in its parent, or 1 for a root leaf; null when `id` is absent. */
+export function movedWeight(tree: LathTree, id: LeafId): number | null {
+  const idPath = findLeafPath(tree, id);
+  if (idPath === null) return null;
+  const parent = idPath.length === 0 ? null : (nodeAtPath(tree, idPath.slice(0, -1)) as SplitNode);
+  return parent ? parent.children[idPath[idPath.length - 1]].weight : 1;
+}
+
 /** Move a leaf to a drop target as one op (no token). A `swap` target defers to
  *  `swap`; an `edge` target is `remove` + `insert` beside the node at path, with the
  *  moved leaf carrying its old normalized weight. The path is read against the *input*
@@ -333,7 +342,7 @@ export function move(tree: LathTree, id: LeafId, target: DropTarget): { tree: La
   if (targetLeaves.length === 1 && targetLeaves[0] === id) return { tree, ok: false };
 
   const parent = idPath.length === 0 ? null : (nodeAtPath(tree, idPath.slice(0, -1)) as SplitNode);
-  const w = parent ? parent.children[idPath[idPath.length - 1]].weight : 1;
+  const w = movedWeight(tree, id)!;
 
   const t2 = remove(tree, id).tree;
 

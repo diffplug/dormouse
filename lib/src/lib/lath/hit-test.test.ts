@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { type LayoutOpts } from './layout';
 import { hitTest } from './hit-test';
-import { leaf, split as mk, tree, R, movePreview as movePreviewAt, insertPreview as insertPreviewAt } from './test-util';
+import { leaf, split as mk, tree, R, movePreview as movePreviewAt, insertPreview as insertPreviewAt, landingPreview } from './test-util';
 
 const opts: LayoutOpts = { gap: 0, minLeaf: { width: 0, height: 0 } };
 const RECT = R(0, 0, 1000, 600);
@@ -16,6 +16,8 @@ const movePreview = (t: ReturnType<typeof tree>, dragged: string, target: Parame
   movePreviewAt(t, dragged, target, RECT, opts);
 const insertPreview = (t: ReturnType<typeof tree>, target: Parameters<typeof insertPreviewAt>[2]) =>
   insertPreviewAt(t, X, target, RECT, opts);
+const landing = (t: ReturnType<typeof tree>, dragged: string, target: Parameters<typeof landingPreview>[2]) =>
+  landingPreview(t, dragged, target, RECT, opts);
 
 describe('hitTest — center region', () => {
   it('yields a swap for an internal drag over a leaf center, previewed at the target rect', () => {
@@ -48,7 +50,7 @@ describe('hitTest — edge bands at the leaf level', () => {
       const dragged = edge === 'left' ? 'c' : 'a';
       const c = drop(t, RECT, point, dragged, opts)!;
       expect(c.target).toEqual({ kind: 'edge', path: [1], edge });
-      expect(c.previewRect).toEqual(movePreview(t, dragged, { kind: 'edge', path: [1], edge }));
+      expect(c.previewRect).toEqual(landing(t, dragged, { kind: 'edge', path: [1], edge }));
     });
   }
 });
@@ -64,56 +66,19 @@ describe('hitTest — sliding along a shared boundary', () => {
   it('widens from the leaf to the whole column as the slide covers it (external drag)', () => {
     const alone = drop(t, RECT, bRight, null, opts)!;
     expect(alone.target).toEqual({ kind: 'edge', path: [0, 0, 1], edge: 'right' });
-    // P's children meet at y 300; P is the line's reach.
-    expect(hitTest(t, RECT, bRight, null, opts).guide).toEqual({ edge: 'right', line: 500, extent: [0, 600], stops: [300], scope: [0, 300] });
+    expect(alone.canWiden).toBe(true);
     const hit = hitTest(t, RECT, { x: 490, y: 450 }, null, opts, bRight); // down onto c's right edge
     expect(hit.anchored).toBe(true);
     expect(hit.candidate!.target).toEqual({ kind: 'edge', path: [0], edge: 'right' });
     expect(hit.candidate!.previewRect).toEqual(insertPreview(t, { kind: 'edge', path: [0], edge: 'right' }));
     expect(hit.candidate!.scopeLeafCount).toBe(3);
-    expect(hit.guide!.scope).toEqual([0, 600]);
+    expect(hit.candidate!.canWiden).toBe(false); // P is the widest scope on this line
   });
 
   it('drops the anchor once the pointer leaves its line', () => {
     const hit = hitTest(t, RECT, { x: 510, y: 300 }, null, opts, bRight); // d's left edge, x 500
     expect(hit.anchored).toBe(false);
     expect(hit.candidate!.target).toEqual({ kind: 'edge', path: [1], edge: 'left' });
-  });
-
-  it('takes the slide line from the anchor, whose scopes hold the whole group the pointer reaches', () => {
-    // row[ a, col[ row[b1, b2], c ] ]: from a, the top line steps only where a meets
-    // the column; b1|b2 is a step only for a slide that starts in b1 or b2.
-    const t = tree(mk('row', [leaf('a'), 0.5], [mk('col', [mk('row', [leaf('b1'), 0.5], [leaf('b2'), 0.5]), 0.5], [leaf('c'), 0.5]), 0.5]));
-    const fromA = hitTest(t, RECT, { x: 600, y: 5 }, null, opts, { x: 100, y: 5 });
-    expect(fromA.anchored).toBe(true);
-    expect(fromA.guide).toEqual({ edge: 'top', line: 0, extent: [0, 1000], stops: [500], scope: [0, 1000] });
-    expect(hitTest(t, RECT, { x: 600, y: 5 }, null, opts).guide!.stops).toEqual([500, 750]);
-  });
-
-  it('folds the dragged pane\'s slot into the neighbor the slide comes from', () => {
-    // col[a, b, c] dragging b: a's right edge then b's slot is still "beside a".
-    const t = tree(mk('col', [leaf('a'), 1 / 3], [leaf('b'), 1 / 3], [leaf('c'), 1 / 3]));
-    expect(hitTest(t, RECT, { x: 990, y: 100 }, 'b', opts).guide).toEqual({ edge: 'right', line: 1000, extent: [0, 600], stops: [400], scope: [0, 400] });
-    expect(hitTest(t, RECT, { x: 990, y: 500 }, 'b', opts).guide).toEqual({ edge: 'right', line: 1000, extent: [0, 600], stops: [200], scope: [200, 600] });
-    // Two panes with one dragged leave a single drop: no line.
-    const pair = tree(mk('col', [leaf('a'), 0.5], [leaf('b'), 0.5]));
-    expect(hitTest(pair, RECT, { x: 990, y: 100 }, 'b', opts).guide).toBeNull();
-  });
-
-  it('offers no slide line where the leaf is the only scope', () => {
-    const row = tree(mk('row', [leaf('a'), 0.5], [leaf('b'), 0.5]));
-    expect(hitTest(row, RECT, { x: 10, y: 300 }, null, opts).guide).toBeNull(); // a's left edge is the root's
-    expect(hitTest(row, RECT, { x: 250, y: 5 }, null, opts).guide).not.toBeNull();
-  });
-
-  it('keeps an anchored slide line over a drop that changes nothing, but no unanchored one', () => {
-    // col[ a, row[b, c] ]: a above the whole row is where a already is.
-    const t = tree(mk('col', [leaf('a'), 0.5], [mk('row', [leaf('b'), 0.5], [leaf('c'), 0.5]), 0.5]));
-    const hit = hitTest(t, RECT, { x: 750, y: 305 }, 'a', opts, { x: 250, y: 305 });
-    expect(hit.candidate).toBeNull();
-    expect(hit.anchored).toBe(true);
-    expect(hit.guide).toEqual({ edge: 'top', line: 300, extent: [0, 1000], stops: [500], scope: [0, 1000] });
-    expect(hitTest(t, RECT, { x: 250, y: 305 }, 'b', opts).guide).toBeNull(); // b's own top edge
   });
 
   it('keeps the slide edge through a corner band', () => {
@@ -132,11 +97,14 @@ describe('hitTest — boundary lines', () => {
   const right = { kind: 'edge', path: [], edge: 'right' } as const;
 
   it('drops across everything the line borders, and beside one pane in the band', () => {
-    const line = hitTest(t, RECT, { x: 995, y: 450 }, 'a', opts);
-    expect(line.candidate!.target).toEqual(right);
-    expect(line.candidate!.previewRect).toEqual(R(500, 0, 500, 600));
-    expect(line.guide!.scope).toEqual([0, 600]);
-    expect(drop(t, RECT, { x: 980, y: 450 }, 'a', opts)!.target).toEqual({ kind: 'edge', path: [1, 1], edge: 'right' });
+    const line = drop(t, RECT, { x: 995, y: 450 }, 'a', opts)!;
+    expect(line.target).toEqual(right);
+    expect(line.previewRect).toEqual(R(500, 0, 500, 600));
+    const band = drop(t, RECT, { x: 980, y: 450 }, 'a', opts)!;
+    expect(band.target).toEqual({ kind: 'edge', path: [1, 1], edge: 'right' });
+    // Half of c as it stands, not half of c once a's slot closes and c widens.
+    expect(band.previewRect).toEqual(R(750, 300, 250, 300));
+    expect(movePreview(t, 'a', band.target)).toEqual(R(500, 300, 500, 300));
   });
 
   it('reaches past the wall on its top and sides, but not below it', () => {
