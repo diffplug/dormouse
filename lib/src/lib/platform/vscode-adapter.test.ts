@@ -150,6 +150,24 @@ describe('VSCodeAdapter PTY exit handling', () => {
     });
   });
 
+  it('writes the clipboard through the extension host, rejecting with its error', async () => {
+    const adapter = new VSCodeAdapter();
+    const answer = (error?: string) => {
+      const [request] = postMessage.mock.calls.at(-1) as [{ type: string; text: string; requestId: string }];
+      expect(request.type).toBe('clipboard:writeText');
+      windowTarget.dispatchEvent(hostMessage({ type: 'clipboard:written', requestId: request.requestId, ...(error ? { error } : {}) }));
+      return request.text;
+    };
+
+    const written = adapter.writeClipboardText('copied');
+    expect(answer()).toBe('copied');
+    await expect(written).resolves.toBeUndefined();
+
+    const refused = adapter.writeClipboardText('lost');
+    answer('clipboard unavailable');
+    await expect(refused).rejects.toThrow('clipboard unavailable');
+  });
+
   it('posts allowlisted VS Code workbench commands to the extension host', () => {
     const adapter = new VSCodeAdapter();
 

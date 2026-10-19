@@ -40,6 +40,7 @@ import { managedVoicePortForBuild } from "./managed-voice-port";
 import type { PersistedWindow } from "dormouse-lib/lib/session-types";
 import { claimRecoveryCommands, windowStateSlot } from "./window-recovery";
 import { coalesceCwds } from "./coalesce-cwds";
+import { nativeClipboardWriter } from "./native-clipboard";
 import type { TerminalProtocolEvent } from "dormouse-lib/lib/terminal-protocol";
 import { getTerminalTheme, onTerminalThemeChange } from "dormouse-lib/lib/terminal-theme";
 import { parseReplay } from "dormouse-lib/lib/platform/replay-parse";
@@ -238,6 +239,8 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   async readClipboardText(): Promise<string | null> {
     try { return await this.host.invoke("read_clipboard_text"); } catch { return null; }
   }
+
+  readonly writeClipboardText = nativeClipboardWriter((command, args) => this.host.invoke(command, args));
 
   async gitInfo(paths: string[]): Promise<GitInfoResult> {
     // A missing result is a failure, never an empty answer: an absent key

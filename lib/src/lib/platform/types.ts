@@ -334,6 +334,11 @@ export interface PlatformAdapter {
   // instead of navigator.clipboard.readText() so adapters whose webview pops
   // a "Paste from <App>" confirmation (notably Tauri's WKWebView) can bypass it.
   readClipboardText?(): Promise<string | null>;
+  // Optional native clipboard text write, rejecting on failure. When present,
+  // writeTextToClipboard uses only this: WebKit refuses a browser write whose
+  // click has lost its user activation (diffplug/dormouse#1090). Pocket omits
+  // it, since its copies belong on the phone, never the Burrow's machine.
+  writeClipboardText?(text: string): Promise<void>;
   // Only present on adapters with a native (non-DOM) drag-drop source. Currently inert in Tauri; see diffplug/dormouse#38 and tauri-apps/tauri#14373.
   onFilesDropped?(handler: (paths: string[]) => void): () => void;
 

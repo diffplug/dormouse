@@ -39,7 +39,7 @@ test('each provider refuses a session name its CLI would read as an option or a 
   for (const provider of BROWSER_PROVIDER_IDS) {
     const { isSessionName } = BROWSER_PROVIDERS[provider];
     assert.equal(isSessionName('dormouse.1.default'), true, provider);
-    for (const bad of ['../../tmp/evil', 'a/b', 'a\\b', 'a\nb', '', 7]) {
+    for (const bad of ['../../tmp/evil', 'a/b', 'a\\b', 'a\nb', 'a\u0085b', '', 7]) {
       assert.equal(isSessionName(bad), false, `${provider} ${JSON.stringify(bad)}`);
     }
   }

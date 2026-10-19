@@ -2,22 +2,34 @@ import { hasShellInputControls, shellCommandKind } from 'dor/commands/shell-quot
 import { wallHandleOwning } from '../components/wall/wall-handles';
 import { beginClipboardAttempt, describeError, noteClipboardStep, reportClipboardFailure, type ClipboardAttempt } from './clipboard-failure';
 import { getMouseSelectionState } from './mouse-selection';
-import { getPlatform, PLATFORM_STRING } from './platform';
+import { getPlatform, getPlatformOrNull, PLATFORM_STRING } from './platform';
 import { shellEscapePath } from './shell-escape';
 import { getDefaultShellOpts, getTerminalShellKind, writeUserInput } from './terminal-registry';
 
 /** Report failure without throwing so callers retain the selection for retry.
- *  Without the Clipboard API (an insecure origin, such as Pocket over plain
- *  http) or when it refuses, falls back to `document.execCommand('copy')`. A
- *  write that fails both ways opens the clipboard-failure report, unless
- *  `reportFailure` is false. */
+ *  The adapter's native write wins where it has one, with no fallback after
+ *  it: its round trip outlasts the click's activation, so the browser could
+ *  only refuse too. Without one, writes through the Clipboard API, and without
+ *  that API (an insecure origin, such as Pocket over plain http) or when it
+ *  refuses, through `document.execCommand('copy')`. A write that fails opens
+ *  the clipboard-failure report, unless `reportFailure` is false. */
 export async function writeTextToClipboard(text: string, { reportFailure = true } = {}): Promise<boolean> {
   if (!text) return false;
-  const clipboard = typeof navigator === 'undefined' ? undefined : navigator.clipboard;
+  const platform = getPlatformOrNull();
   // Before any await, so the attempt describes, and the fallback runs inside,
   // the click or key that asked.
   const attempt = beginClipboardAttempt(text.length);
   const fail = () => { if (reportFailure) reportClipboardFailure(attempt); return false; };
+  if (platform?.writeClipboardText) {
+    try {
+      await platform.writeClipboardText(text);
+      return true;
+    } catch (error) {
+      noteClipboardStep(attempt, `native writeClipboardText: ${describeError(error)}`);
+      return fail();
+    }
+  }
+  const clipboard = typeof navigator === 'undefined' ? undefined : navigator.clipboard;
   if (!clipboard?.writeText) {
     noteClipboardStep(attempt, 'navigator.clipboard.writeText: unavailable');
     return copyWithExecCommand(text, attempt) || fail();
