@@ -83,12 +83,16 @@ GRANT UPDATE ("redeemedBurrowId", "redeemedAt") ON dormouse_relay_enrollment_app
 GRANT SELECT, INSERT, DELETE ON dormouse_relay_push_subscriptions TO dormouse_relay;
 GRANT UPDATE (endpoint, p256dh, auth, "vapidPublicKey", "subscribedAt")
   ON dormouse_relay_push_subscriptions TO dormouse_relay;
--- A voice approval mints only a token: no read, revocation, or count.
+-- A voice approval mints a token and evicts its owner's past the cap: never
+-- a hash read, and a revocation 008's trigger keeps permanent.
 GRANT INSERT ("userId", hash) ON dormouse_voice_tokens TO dormouse_relay;
+GRANT SELECT (id, "userId", "createdAt", "lastUsedAt", "revokedAt") ON dormouse_voice_tokens TO dormouse_relay;
+GRANT UPDATE ("revokedAt") ON dormouse_voice_tokens TO dormouse_relay;
 
--- The voice Worker: speak's token lookup and the daily count.
+-- The voice Worker: speak's token lookup and the daily count, and revoke's
+-- write, which 008's trigger keeps from clearing a revocation.
 GRANT SELECT (id, "userId", hash, "revokedAt") ON dormouse_voice_tokens TO dormouse_voice;
-GRANT UPDATE ("lastUsedAt") ON dormouse_voice_tokens TO dormouse_voice;
+GRANT UPDATE ("lastUsedAt", "revokedAt") ON dormouse_voice_tokens TO dormouse_voice;
 GRANT SELECT, INSERT ON dormouse_voice_usage TO dormouse_voice;
 GRANT UPDATE (count) ON dormouse_voice_usage TO dormouse_voice;
 

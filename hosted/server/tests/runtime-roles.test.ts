@@ -88,8 +88,12 @@ const EXPECTED: Record<Worker, string[]> = {
     "dormouse_relay_sessions: DELETE, INSERT, SELECT",
     "dormouse_relay_setup_tokens.claimed: UPDATE",
     "dormouse_relay_setup_tokens: DELETE, INSERT, SELECT",
+    "dormouse_voice_tokens.createdAt: SELECT",
     "dormouse_voice_tokens.hash: INSERT",
-    "dormouse_voice_tokens.userId: INSERT",
+    "dormouse_voice_tokens.id: SELECT",
+    "dormouse_voice_tokens.lastUsedAt: SELECT",
+    "dormouse_voice_tokens.revokedAt: SELECT, UPDATE",
+    "dormouse_voice_tokens.userId: INSERT, SELECT",
     "schema public: USAGE",
     "user.email: SELECT",
     "user.emailVerified: SELECT",
@@ -100,7 +104,7 @@ const EXPECTED: Record<Worker, string[]> = {
     "dormouse_voice_tokens.hash: SELECT",
     "dormouse_voice_tokens.id: SELECT",
     "dormouse_voice_tokens.lastUsedAt: UPDATE",
-    "dormouse_voice_tokens.revokedAt: SELECT",
+    "dormouse_voice_tokens.revokedAt: SELECT, UPDATE",
     "dormouse_voice_tokens.userId: SELECT",
     "dormouse_voice_usage.count: UPDATE",
     "dormouse_voice_usage: INSERT, SELECT",
@@ -127,7 +131,7 @@ const outcome = (worker: Worker, text: string) =>
     (error: { code?: string }) => error.code,
   );
 
-test("the relay's role is refused the account's tables, the user row's other columns and writes, voice but a token's mint, and Burrow removal", async () => {
+test("the relay's role is refused the account's tables, the user row's other columns and writes, voice but a token's mint and eviction, and Burrow removal", async () => {
   // It does log in, and reads what the entitlement check reads.
   expect(await outcome("relay", `SELECT id, email, "emailVerified" FROM "user"`)).toBe("ok");
   for (const text of [
@@ -136,8 +140,9 @@ test("the relay's role is refused the account's tables, the user row's other col
     `SELECT name FROM "user"`,
     `UPDATE "user" SET email = email`,
     `UPDATE "user" SET "emailVerified" = true`,
-    `SELECT id FROM dormouse_voice_tokens`,
-    `UPDATE dormouse_voice_tokens SET "revokedAt" = now()`,
+    `SELECT hash FROM dormouse_voice_tokens`,
+    `UPDATE dormouse_voice_tokens SET "lastUsedAt" = now()`,
+    `UPDATE dormouse_voice_tokens SET "userId" = "userId"`,
     `DELETE FROM dormouse_voice_tokens`,
     `INSERT INTO dormouse_voice_tokens ("userId", hash, "revokedAt") VALUES ('x', 'x', now())`,
     `INSERT INTO dormouse_voice_usage ("userId", day, count) VALUES ('x', now()::date, 0)`,
@@ -160,11 +165,44 @@ test("the voice role is refused the relay's tables, the account's, and its token
     `SELECT name FROM "user"`,
     `UPDATE "user" SET "emailVerified" = true`,
     `SELECT "createdAt" FROM dormouse_voice_tokens`,
-    `UPDATE dormouse_voice_tokens SET "revokedAt" = NULL`,
+    `UPDATE dormouse_voice_tokens SET "userId" = "userId"`,
+    `UPDATE dormouse_voice_tokens SET hash = hash`,
     `INSERT INTO dormouse_voice_tokens ("userId", hash) VALUES ('x', 'x')`,
     `DELETE FROM dormouse_voice_usage`,
   ])
     expect([text, await outcome("voice", text)]).toEqual([text, "42501"]);
+});
+
+test("neither role can clear or move a revocation, though both may revoke", async () => {
+  const [{ id: userId }] = await queryDatabase<{ id: string }>(
+    context.database.url,
+    `INSERT INTO "user" (id, name, email, "emailVerified", "createdAt", "updatedAt")
+    VALUES ('revocation-owner', 'Owner', 'revocation@example.test', true, now(), now()) RETURNING id`,
+  );
+  await queryDatabase(
+    context.database.url,
+    `INSERT INTO dormouse_voice_tokens ("userId", hash, "revokedAt")
+    VALUES ($1, 'live', NULL), ($1, 'revoked', now() - interval '1 day')`,
+    [userId],
+  );
+  try {
+    for (const worker of ["relay", "voice"] as const) {
+      for (const text of [
+        `UPDATE dormouse_voice_tokens SET "revokedAt" = NULL WHERE "revokedAt" IS NOT NULL`,
+        `UPDATE dormouse_voice_tokens SET "revokedAt" = now() WHERE "revokedAt" IS NOT NULL`,
+      ])
+        expect([worker, text, await outcome(worker, text)]).toEqual([worker, text, "23514"]);
+    }
+    // Revoking a live token, and a no-op on a revoked one, still work.
+    expect(
+      await outcome("voice", `UPDATE dormouse_voice_tokens SET "revokedAt" = now() WHERE "revokedAt" IS NULL`),
+    ).toBe("ok");
+    expect(
+      await outcome("relay", `UPDATE dormouse_voice_tokens SET "revokedAt" = "revokedAt"`),
+    ).toBe("ok");
+  } finally {
+    await queryDatabase(context.database.url, `DELETE FROM "user" WHERE id = $1`, [userId]);
+  }
 });
 
 test("reapplying revokes a grant made since, and keeps a role's login and password", async () => {

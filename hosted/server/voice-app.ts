@@ -1,11 +1,11 @@
 import type { VoiceEnv } from "./bindings";
 import { NO_PAGE_RULES } from "./headers";
-import { TOKEN_OWNER, elevenLabs, speakRoute, sweepOnCron } from "./voice";
+import { TOKEN_OWNER, elevenLabs, revokeRoute, speakRoute, sweepOnCron } from "./voice";
 import { workerApp } from "./worker-app";
 
 /**
- * The voice Worker (`voice.dormouse.sh`): readiness, bearer-token speech, and
- * the Cron Trigger's ElevenLabs history sweep. No cookie, no auth, no assets.
+ * The voice Worker (`voice.dormouse.sh`): readiness, bearer-token speech and
+ * revocation, and the Cron Trigger's ElevenLabs history sweep. No cookie, no auth, no assets.
  * `sweepDelayMs` exists for the test entry; production keeps the default.
  */
 export function voiceApp(
@@ -20,6 +20,9 @@ export function voiceApp(
     ready: `${TOKEN_OWNER} WHERE t.hash IS NULL AND t."revokedAt" IS NULL LIMIT 0`,
     unavailable: "Managed voice is temporarily unavailable. Please try again.",
     routes(app) {
+      revokeRoute(app, (c) => ({
+        databaseUrl: c.env.HYPERDRIVE.connectionString,
+      }));
       speakRoute(app, (c) => {
         const key = c.env.ELEVENLABS_API_KEY;
         return {

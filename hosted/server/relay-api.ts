@@ -60,7 +60,7 @@ import { allowed } from "./one-time";
 import { ENROLLMENT_TTL_MS } from "./policy-constants";
 import { relayRoom } from "./relay-room-contract";
 import { relayPushRoutes } from "./relay-push";
-import { mintVoiceToken } from "./voice-token";
+import { evictPastCap, mintVoiceToken } from "./voice-token";
 import {
   OWNER_COLUMNS,
   database,
@@ -542,13 +542,16 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
       if (!owner.entitled) return c.json({ error: NOT_ENTITLED_ERROR }, 403);
       if (purpose === "voice") {
         const voiceToken = mintVoiceToken();
-        // One statement spends the approval and mints only a voice credential.
+        // One statement spends the approval, mints only a voice credential,
+        // and evicts the owner's tokens past the cap.
         const { rowCount } = await db.query(
           `WITH spent AS (
             UPDATE dormouse_relay_enrollment_approvals SET "redeemedAt" = now()
             WHERE "userCode" = $1 AND "userId" = $2 AND purpose = 'voice'
               AND "expiresAt" > now() AND "redeemedAt" IS NULL
             RETURNING "userId"
+          ), evicted AS (
+            ${evictPastCap(`(SELECT "userId" FROM spent)`)}
           ) INSERT INTO dormouse_voice_tokens ("userId", hash)
             SELECT "userId", $3 FROM spent`,
           [userCode, owner.userId, digest(voiceToken)],

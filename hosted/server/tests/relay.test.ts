@@ -49,6 +49,7 @@ import {
 } from "../relay-api";
 import type { Client } from "../relay-auth";
 import { upsertSubscription } from "../relay-push";
+import { MAX_VOICE_TOKENS_PER_ACCOUNT } from "../voice-token";
 import { workerDatabases } from "./worker-roles";
 import {
   ENTRIES,
@@ -1740,4 +1741,48 @@ test("voice approval is independent of remote enrollment and cannot be redeemed 
   expect(enrolled.json).not.toHaveProperty("voiceToken");
   await f.sql(`DELETE FROM dormouse_relay_burrows`);
   expect(await f.sql(`SELECT hash, "revokedAt" FROM dormouse_voice_tokens`)).toEqual([{ hash: digest(token), revokedAt: null }]);
+});
+
+test("a voice redemption evicts its owner's least recently used tokens past the cap, and no one else's", async ({ onTestFinished }) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const owner = await f.account(ADMIN_EMAIL);
+  const other = await f.account();
+  // The cap's worth of live tokens: one never used since an old mint, the
+  // rest used a minute apart. A revoked one and another account's count for nothing.
+  await f.sql(
+    `INSERT INTO dormouse_voice_tokens ("userId", hash, "lastUsedAt")
+    SELECT $1, 'used-' || n, now() - n * interval '1 minute' FROM generate_series(1, $2 - 1) n`,
+    [owner, MAX_VOICE_TOKENS_PER_ACCOUNT],
+  );
+  await f.sql(
+    `INSERT INTO dormouse_voice_tokens ("userId", hash, "createdAt", "revokedAt") VALUES
+    ($1, 'orphan', now() - interval '1 year', NULL),
+    ($1, 'revoked', now() - interval '2 years', now() - interval '1 year'),
+    ($2, 'other', now() - interval '3 years', NULL)`,
+    [owner, other],
+  );
+  const live = async () =>
+    (await f.sql(`SELECT hash FROM dormouse_voice_tokens WHERE "revokedAt" IS NULL ORDER BY hash`)).map(
+      (row) => row.hash,
+    );
+  const before = await live();
+
+  const voice = await f.begin("voice");
+  await f.approve(voice.userCode, owner, "voice");
+  const enabled = await f.poll(voice.deviceCode, "voice");
+  expect(enabled.json!.status).toBe("enabled");
+  const token = digest(enabled.json!.voiceToken as string);
+  expect(await live()).toEqual([...before.filter((hash) => hash !== "orphan"), token].sort());
+  expect(
+    await f.sql(`SELECT count(*)::int AS n FROM dormouse_voice_tokens WHERE "userId" = $1 AND "revokedAt" IS NULL`, [owner]),
+  ).toEqual([{ n: MAX_VOICE_TOKENS_PER_ACCOUNT }]);
+
+  // The next goes by least recent use.
+  const again = await f.begin("voice");
+  await f.approve(again.userCode, owner, "voice");
+  expect((await f.poll(again.deviceCode, "voice")).json!.status).toBe("enabled");
+  expect(await live()).not.toContain(`used-${MAX_VOICE_TOKENS_PER_ACCOUNT - 1}`);
+  expect(await live()).toContain(`used-${MAX_VOICE_TOKENS_PER_ACCOUNT - 2}`);
+  expect(await live()).toContain("other");
 });

@@ -22,6 +22,7 @@ import type { Session } from "../../src/api";
 import { ADMIN_EMAIL } from "../entitlement";
 import { PRELAUNCH_REFUSAL, SIGN_IN_ALLOWLIST } from "../prelaunch";
 import { CRON_SWEEP_CAP, SPEECH_SWEEP_CAP, VOICE_DAILY_CAP } from "../voice";
+import { MAX_VOICE_TOKENS_PER_ACCOUNT } from "../voice-token";
 import { ALREADY_APPROVED, RECENT_LOGIN_REQUIRED } from "../relay-account";
 import { TERMS_VERSION } from "../policy-constants";
 import {
@@ -391,6 +392,11 @@ async function fixture(
         },
         body: typeof body === "string" ? body : JSON.stringify(body),
       });
+    const revoke = async (token: string | undefined) =>
+      (await voice()).dispatchFetch(voiceOrigin + "/api/voice/revoke", {
+        method: "POST",
+        headers: token ? { authorization: `Bearer ${token}` } : {},
+      });
     const mint = async () =>
       (await (await tokens("POST")).json()) as { id: string; token: string };
     /** The account's Relay routes, from this origin unless `from` names another. */
@@ -412,7 +418,7 @@ async function fixture(
         body: JSON.stringify({ version }),
         headers: { origin: from, "content-type": "application/json" },
       });
-    return { request, post, session, email, oauth, tokens, speak, mint, approve, computers, remove, accept };
+    return { request, post, session, email, oauth, tokens, speak, revoke, mint, approve, computers, remove, accept };
   }
   return {
     ...context,
@@ -989,6 +995,99 @@ test("managed voice: only the verified admin mints, speaks, and revokes", async 
   expect(
     (await admin.speak(second.token, hi)).status,
   ).toBe(403);
+});
+
+test("managed voice: a token revokes only itself, for good, entitled or not", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const admin = f.browser(),
+    other = f.browser();
+  await admin.email(ADMIN_EMAIL);
+  await other.email("other@example.test");
+  const first = await admin.mint(),
+    second = await admin.mint();
+  const otherToken = "dmv_" + "B".repeat(43);
+  await queryDatabase(
+    f.database.url,
+    `INSERT INTO dormouse_voice_tokens ("userId", hash) VALUES ($1, $2)`,
+    [(await other.session())!.user.id, digest(otherToken)],
+  );
+  const revokedAt = async () =>
+    Object.fromEntries(
+      (
+        await queryDatabase<{ hash: string; revokedAt: Date | null }>(
+          f.database.url,
+          `SELECT hash, "revokedAt" FROM dormouse_voice_tokens`,
+        )
+      ).map((row) => [row.hash, row.revokedAt?.toISOString() ?? null]),
+    );
+
+  for (const bad of [undefined, "dmv_short", "Basic x"])
+    expect((await admin.revoke(bad)).status).toBe(401);
+  expect((await admin.revoke(first.token)).status).toBe(204);
+  expect((await admin.speak(first.token, hi)).status).toBe(401);
+  expect((await admin.speak(second.token, hi)).status).toBe(200);
+  const once = await revokedAt();
+  expect(once[digest(first.token)]).not.toBeNull();
+  expect(once[digest(second.token)]).toBeNull();
+  expect(once[digest(otherToken)]).toBeNull();
+
+  // A retry, or a token Hosted never minted, answers the same and changes nothing.
+  expect((await admin.revoke(first.token)).status).toBe(204);
+  expect((await admin.revoke("dmv_" + "C".repeat(43))).status).toBe(204);
+  expect(await revokedAt()).toEqual(once);
+  // The account page's revoke keeps the first revocation's time.
+  expect((await admin.tokens("DELETE", "/" + first.id)).status).toBe(204);
+  expect(await revokedAt()).toEqual(once);
+
+  // A lapsed member still disconnects.
+  await queryDatabase(
+    f.database.url,
+    `UPDATE "user" SET "emailVerified" = false WHERE email = $1`,
+    [ADMIN_EMAIL],
+  );
+  expect((await admin.revoke(second.token)).status).toBe(204);
+  expect((await revokedAt())[digest(second.token)]).not.toBeNull();
+  expect((await revokedAt())[digest(otherToken)]).toBeNull();
+});
+
+test("managed voice: the account's mint evicts its least recently used token past the cap", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const admin = f.browser(),
+    other = f.browser();
+  await admin.email(ADMIN_EMAIL);
+  await other.email("other@example.test");
+  const [owner, stranger] = [
+    (await admin.session())!.user.id,
+    (await other.session())!.user.id,
+  ];
+  await queryDatabase(
+    f.database.url,
+    `INSERT INTO dormouse_voice_tokens ("userId", hash, "lastUsedAt")
+    SELECT $1, 'used-' || n, now() - n * interval '1 minute' FROM generate_series(1, $2 - 1) n`,
+    [owner, MAX_VOICE_TOKENS_PER_ACCOUNT],
+  );
+  await queryDatabase(
+    f.database.url,
+    `INSERT INTO dormouse_voice_tokens ("userId", hash, "createdAt") VALUES
+    ($1, 'orphan', now() - interval '1 year'), ($2, 'other', now() - interval '2 years')`,
+    [owner, stranger],
+  );
+  const { token } = await admin.mint();
+  const live = (
+    await queryDatabase<{ hash: string }>(
+      f.database.url,
+      `SELECT hash FROM dormouse_voice_tokens WHERE "revokedAt" IS NULL`,
+    )
+  ).map((row) => row.hash);
+  expect(live).toHaveLength(MAX_VOICE_TOKENS_PER_ACCOUNT + 1);
+  expect(live).not.toContain("orphan");
+  expect(live).toEqual(expect.arrayContaining([digest(token), "other", "used-1"]));
 });
 
 test("managed voice fails closed in production without an ElevenLabs key", async ({

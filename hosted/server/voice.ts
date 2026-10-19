@@ -5,7 +5,7 @@ import { withClient } from "pgstencil/postgres";
 import { isManagedVoiceId, isManagedVoiceToken, parseBearer } from "remote-lib-common";
 import { accountQuery, cookieEntitled, type AccountHost } from "./account-gate";
 import { entitledSql } from "./entitlement";
-import { mintVoiceToken } from "./voice-token";
+import { evictPastCap, mintVoiceToken } from "./voice-token";
 
 export const VOICE_DAILY_CAP = 500;
 /** Speak's token lookup, its owner's entitlement joined, before its WHERE. */
@@ -94,7 +94,8 @@ export function voiceTokenRoutes(
     const token = mintVoiceToken();
     const [row] = await accountQuery<{ id: string; createdAt: Date }>(
       host(c),
-      `INSERT INTO dormouse_voice_tokens ("userId", hash) VALUES ($1, $2)
+      `WITH evicted AS (${evictPastCap("$1")})
+      INSERT INTO dormouse_voice_tokens ("userId", hash) VALUES ($1, $2)
       RETURNING id, "createdAt"`,
       [c.get("login").userId, digest(token)],
     );
@@ -192,6 +193,31 @@ export function speakRoute(app: Hono<any>, host: (c: Context) => SpeakHost) {
     return new Response(upstream.body, {
       headers: { "content-type": "audio/mpeg", "cache-control": "no-store" },
     });
+  });
+}
+
+/**
+ * Registers the voice origin's bearer-only POST /api/voice/revoke, a desktop's
+ * Disconnect: the presented token revokes itself and no other. 204 whether it
+ * was live, already revoked, or unknown, so a retry never fails; no
+ * entitlement check, so a lapsed member still disconnects. Call before any
+ * /api/* catch-all.
+ */
+export function revokeRoute(
+  app: Hono<any>,
+  host: (c: Context) => Pick<SpeakHost, "databaseUrl">,
+) {
+  app.post("/api/voice/revoke", async (c) => {
+    const bearer = parseBearer(c.req.header("authorization"));
+    if (!isManagedVoiceToken(bearer)) return tokenRequired(c);
+    await withClient(host(c).databaseUrl, (db) =>
+      db.query(
+        `UPDATE dormouse_voice_tokens SET "revokedAt" = now()
+        WHERE hash = $1 AND "revokedAt" IS NULL`,
+        [digest(bearer)],
+      ),
+    );
+    return c.body(null, 204);
   });
 }
 
