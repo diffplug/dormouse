@@ -4,6 +4,8 @@
 
 Separate approval (2026-10): enabling voice must not enroll remote control or reset phone pairings. Purpose-separated code derivation prevents a code approved for voice from authorizing remote enrollment.
 
+No computer record (decided 2026-10-19): the account page never shows tokens, so nothing needs to know which computer holds one. A token that never expires while in use keeps Natural Voice seamless; a year idle bounds one left on a computer nobody uses, and turning off is the account's way to end them all at once. The daily cap counts per account, so more tokens never mean more speech. Expired rows are swept daily by a cron of their own, not by the 5-minute history sweep, so that sweep still never wakes Postgres; once a day costs one wake. The relay's hourly sweep would need its role to reach voice tokens. Deleting on read was rejected: an expired token mostly sits on a computer that never calls again.
+
 History sweep (sources checked 2026-09-22):
 
 - ElevenLabs stores every text-to-speech generation, including its text, in the account's speech history. Turning that off per request (`enable_logging=false`, zero-retention mode) is available to enterprise accounts only, so deletion is the remaining control. The sweep has no per-application filter, so every history item visible to its key is eligible for deletion. On 2026-10-07 the operator confirmed testing that the dedicated Dormouse service account isolates its history from other usage in the same workspace. This is operator verification, not a claim that every service-account sharing configuration has the same isolation.

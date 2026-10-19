@@ -8,7 +8,7 @@
 
 | Guarantee | Feature | Pinned by |
 | --- | --- | --- |
-| **Every dependency Dormouse puts on a user's machine, or Dormouse Hosted serves to their devices or runs for them, is disclosed** at [dormouse.sh/supply-chain](https://dormouse.sh/supply-chain), and a change without the disclosure fails CI. |  | `.github/workflows/ci.yml`, `website/scripts/product-sections.test.js`, `website/scripts/dependency-workspaces.test.js` |
+| **Every dependency Dormouse puts on a user's machine, or Dormouse Hosted serves to their devices or runs for them, is disclosed** at [dormouse.sh/supply-chain](https://dormouse.sh/supply-chain), and a change without the disclosure fails CI. |  | `.github/workflows/ci.yml`, `website/scripts/product-sections.test.js`, `website/scripts/dependency-workspaces.test.js`, `website/scripts/hosted-bundles.test.js` |
 
 The runtime dependency surface is kept small: a dependency is added only when necessary, each change justified against its supply-chain risk.
 
@@ -22,7 +22,7 @@ Every workspace is classified from its shipping route: a product root or runtime
 
 **Must disclose each npm release once, in the first section whose roots reach it**; an earlier section never enters a later section's root. **Never call the Built-in Tools optional or unshipped**: every install ships them inside `dor` (what their frame reaches: `docs/specs/security-local.md` → Local-file viewer). **Must merge a package's releases into one row per name and license**.
 
-**Must root the Hosted section at `dormouse-hosted`**: one package holds all three Workers and the account page, so the section lists more than any one Worker bundles (rationale). Pocket and the one-time page, which `hosted/` builds from `dormouse-lib` with no workspace edge, are disclosed through the Terminal's `dormouse-lib` root. **Never follow an optional peer edge in the Hosted section**: Hosted ships only esbuild bundles, which hold an optional peer only where code imports it (rationale).
+**Must root the Hosted section at `dormouse-hosted`**: one package holds all three Workers and the account page, so the section lists more than any one Worker bundles (rationale). Pocket and the one-time page, which `hosted/` builds from `dormouse-lib` with no workspace edge, are disclosed through the Terminal's `dormouse-lib` root. **Never follow an optional peer edge in the Hosted section**: Hosted ships only esbuild bundles, which hold an optional peer only where code imports it (rationale). **Must fail generation when a Hosted Worker or the account page bundles a release the disclosure lacks** (`assertHostedBundlesDisclosed` in `website/scripts/hosted-bundles.js`; rationale).
 
 **External binaries are outside this graph by construction** — the user's shell, and the CLIs `dor agent-browser` and `dor playwright` forward to (`npm i -g agent-browser`, `npm i -g @playwright/cli`; dependencies of nothing here, resolved off `PATH` or an override variable). **Dormouse instead ships nothing that pulls them in silently**.
 

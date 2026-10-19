@@ -408,7 +408,8 @@ describe('security spec', () => {
         '| [Alpha](./security-x.md#alpha) **a** see [beta](./security-x.md#beta) |  | `x/a.test.js` |',
         '| [Alpha](./security-x.md#alpha) **b** | One | `x/b\\|c.test.js` |',
       ],
-      held: ['alpha', 'nested'],
+      // A nested section's checks are not its parent's promise: each audited section holds its own.
+      held: ['alpha'],
     });
     expect(() => guaranteeRows(spec('## Alpha', '', ...table, '| **a** |  | t |', '', '## Beta', '', '- **FAIL IF** `S3` three.'), 'f.md')).toThrow(
       /f\.md: the guarantees under "Alpha" sit in a section with no FAIL IF line/,

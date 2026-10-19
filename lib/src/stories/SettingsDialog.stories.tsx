@@ -406,7 +406,7 @@ export const NotificationsUnderNothing: Story = {
     await selectTopic('Notifications')({ canvasElement });
     const body = dialog(canvasElement);
     await body.findByText(/Push is off while/);
-    await body.findByText(/Managed voice is off while/);
+    await body.findByText(/Natural Voice is off while/);
     const [link] = within(body.getByRole('region', { name: 'Notifications' })).getAllByRole('button', { name: 'Network' });
     await userEvent.click(link!);
     await waitForTopicScroll(body.getByRole('region', { name: 'Network' }));

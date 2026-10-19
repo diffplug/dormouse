@@ -18,6 +18,10 @@ import { DEFAULT_RELAY_ORIGIN } from './relay-origin';
  * origin"): changing it changes where every shipped binary sends the token.
  */
 const MANAGED_VOICE_SPEAK_URL = 'https://voice.dormouse.sh/api/voice/speak';
+const MANAGED_VOICE_TOKEN_URL = 'https://voice.dormouse.sh/api/voice/token';
+/** Each request's URL, method, and bearer. */
+const requests = () => fetchMock.mock.calls.map(([url, init]: [string, RequestInit]) =>
+  [url, init.method, (init.headers as Record<string, string>).authorization]);
 
 /** The next `readFile` fails with this, once: a Windows antivirus lock, say. */
 const readFault = vi.hoisted(() => ({ next: null as NodeJS.ErrnoException | null }));
@@ -152,6 +156,30 @@ describe('configuration', () => {
     expect(JSON.parse(await readFile(join(dir, MANAGED_VOICE_FILE), 'utf8')).token).toBeNull();
   });
 
+  it('deletes its own token at Hosted on disconnect, never waiting for the answer', async () => {
+    await seedToken();
+    let answer!: (response: Response) => void;
+    fetchMock.mockReturnValueOnce(new Promise<Response>((resolve) => { answer = resolve; }));
+    expect(await host.handle({ op: 'disconnect' })).toMatchObject({ ok: true, configured: false });
+    await vi.waitFor(() => expect(requests()).toEqual([[MANAGED_VOICE_TOKEN_URL, 'DELETE', `Bearer ${TOKEN}`]]));
+    expect(fetchMock.mock.calls[0]![1]).toMatchObject({ redirect: 'error' });
+    answer(new Response(null, { status: 204 }));
+  });
+
+  it('disconnects locally whatever Hosted answers, and asks Hosted nothing under Nowhere', async () => {
+    await seedToken();
+    fetchMock.mockRejectedValue(new Error('offline'));
+    expect(await host.handle({ op: 'disconnect' })).toMatchObject({ ok: true, configured: false });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    fetchMock.mockClear();
+    const nowhere = make({ networkAllowed: async () => false });
+    await seedToken();
+    expect(await nowhere.handle({ op: 'disconnect' })).toMatchObject({ ok: true, configured: false });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('treats a corrupt or hand-edited file as unconfigured, and a retired voice as the default', async () => {
     await writeFile(join(dir, MANAGED_VOICE_FILE), JSON.stringify({ token: 'dmv_short', voiceId: 7 }));
     expect(await make().handle({ op: 'status' })).toEqual(idle(false));
@@ -200,7 +228,7 @@ describe('speak', () => {
   it('answers unconfigured without a request', async () => {
     await host.handle({ op: 'disconnect' });
     expect(await host.handle({ op: 'speak', text: 'x' })).toEqual({ ok: false, reason: 'unconfigured' });
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(requests().filter(([url]) => url === MANAGED_VOICE_SPEAK_URL)).toEqual([]);
   });
 
   it('forgets a token Hosted no longer knows, so Settings asks for a fresh enrollment', async () => {
@@ -437,7 +465,9 @@ describe('a store another process shares', () => {
     await vi.waitFor(() => expect(broadcasts.at(-1)).toEqual(idle(true, OTHER_VOICE)));
     fetchMock.mockImplementation(async () => audioResponse());
     expect(await window.handle({ op: 'speak', text: 'build finished' })).toMatchObject({ ok: true });
-    expect(fetchMock.mock.calls[0]![1].headers.authorization).toBe(`Bearer ${OTHER_TOKEN}`);
+    expect(requests().filter(([url]) => url === MANAGED_VOICE_SPEAK_URL)).toEqual([
+      [MANAGED_VOICE_SPEAK_URL, 'POST', `Bearer ${OTHER_TOKEN}`],
+    ]);
   });
 });
 
@@ -522,15 +552,18 @@ describe('independent managed-voice lifecycle', () => {
     const file = join(dir, MANAGED_VOICE_FILE);
     renameFault.next = Object.assign(new Error('write denied'), { code: 'EACCES' });
     const result = await host.handle({ op: 'disconnect' });
-    expect(result).toMatchObject({ ok: false, message: expect.stringContaining('Retry disconnect') });
+    expect(result).toMatchObject({ ok: false, message: expect.stringContaining('Retry before restarting') });
     expect(await host.handle({ op: 'status' })).toMatchObject({ configured: false, disconnectFailed: true });
     for (const text of ['cached label', 'new private label']) {
       expect(await host.handle({ op: 'speak', text })).toEqual({ ok: false, reason: 'unconfigured' });
     }
-    expect(fetchMock).not.toHaveBeenCalled();
+    const forget = [MANAGED_VOICE_TOKEN_URL, 'DELETE', `Bearer ${TOKEN}`];
+    await vi.waitFor(() => expect(requests()).toEqual([forget]));
     expect(JSON.parse(await readFile(file, 'utf8')).token).toBe(TOKEN);
     expect(broadcasts.at(-1)).toMatchObject({ configured: false, disconnectFailed: true });
+    // The retry deletes at Hosted the token the failed clear left behind.
     expect(await host.handle({ op: 'disconnect' })).toMatchObject({ ok: true, configured: false });
+    await vi.waitFor(() => expect(requests()).toEqual([forget, forget]));
     expect(await make().handle({ op: 'status' })).toEqual(idle(false));
   });
 

@@ -28,8 +28,10 @@
     }
   ],
   "triggers": {
+    // The history sweep, then TOKEN_SWEEP_CRON in server/voice.ts.
     "crons": [
-      "*/5 * * * *"
+      "*/5 * * * *",
+      "0 4 * * *"
     ]
   },
   "observability": {

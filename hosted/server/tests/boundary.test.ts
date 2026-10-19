@@ -137,8 +137,8 @@ const SERVED: Record<Name, [string, string][]> = {
   account: [
     ["GET", "/api/auth/csrf"],
     ["GET", "/api/providers"],
-    ["GET", "/api/voice/tokens"],
-    ["POST", "/api/voice/tokens"],
+    ["GET", "/api/voice"],
+    ["DELETE", "/api/voice"],
     ...ACCOUNT_RELAY,
     ["GET", "/login"],
   ],
@@ -158,7 +158,10 @@ const SERVED: Record<Name, [string, string][]> = {
     ["POST", API_ROUTES.pushSend],
     ["GET", "/"],
   ],
-  voice: [["POST", "/api/voice/speak"]],
+  voice: [
+    ["POST", "/api/voice/speak"],
+    ["DELETE", "/api/voice/token"],
+  ],
 };
 
 /** The Hosted Relay's routes, which only the relay serves. */
@@ -205,6 +208,7 @@ const ABSENT: Record<Name, [string, string][]> = {
     ["GET", ONE_TIME_WS_ROUTES.burrow],
     ["GET", ONE_TIME_WS_ROUTES.client],
     ["POST", "/api/voice/speak"],
+    ["DELETE", "/api/voice/token"],
     ...RELAY_API,
   ],
   relay: [
@@ -212,11 +216,11 @@ const ABSENT: Record<Name, [string, string][]> = {
     ["GET", "/api/auth/get-session"],
     ["POST", "/api/auth/sign-out"],
     ["GET", "/api/providers"],
-    ["GET", "/api/voice/tokens"],
-    ["POST", "/api/voice/tokens"],
-    ["DELETE", "/api/voice/tokens/00000000-0000-4000-8000-000000000000"],
+    ["GET", "/api/voice"],
+    ["DELETE", "/api/voice"],
     ...ACCOUNT_RELAY,
     ["POST", "/api/voice/speak"],
+    ["DELETE", "/api/voice/token"],
     // The self-host installers' probe; neither a Burrow nor Pocket asks Hosted for it.
     ["GET", "/api/hello"],
     // The non-page prefixes 404 whole.
@@ -228,8 +232,8 @@ const ABSENT: Record<Name, [string, string][]> = {
     ["GET", "/api/auth/csrf"],
     ["GET", "/api/auth/get-session"],
     ["GET", "/api/providers"],
-    ["GET", "/api/voice/tokens"],
-    ["POST", "/api/voice/tokens"],
+    ["GET", "/api/voice"],
+    ["DELETE", "/api/voice"],
     ["GET", "/api/voice/speak"],
     ["GET", ONE_TIME_WS_ROUTES.burrow],
     ["GET", ONE_TIME_PAGE_PATH],
@@ -309,12 +313,14 @@ test("each Worker caches only its own hashed assets as immutable", async () => {
   expect(cache(await account.fetch(new Request(ORIGINS.relay + phone), env))).toBe("no-store");
 });
 
-test("speak is the voice Worker's, bearer-only", async () => {
-  const response = await send("voice", ORIGINS.voice + "/api/voice/speak", "POST");
-  expect(response.status).toBe(401);
-  expect(response.headers.get("content-security-policy")).toBe(
-    RUNS_NOTHING_POLICY,
-  );
+test("speak and a token's own delete are the voice Worker's, bearer-only", async () => {
+  for (const [method, path] of SERVED.voice) {
+    const response = await send("voice", ORIGINS.voice + path, method);
+    expect(response.status, `${method} ${path}`).toBe(401);
+    expect(response.headers.get("content-security-policy")).toBe(
+      RUNS_NOTHING_POLICY,
+    );
+  }
 });
 
 test("the local development entry serves no speak", async () => {
@@ -330,8 +336,9 @@ test("the local development entry serves no speak", async () => {
     platform: "node",
     packages: "external",
   });
-  expect(dev.text).toContain("/api/voice/tokens");
+  expect(dev.text).toContain('"/api/voice"');
   expect(dev.text).not.toContain("/api/voice/speak");
+  expect(dev.text).not.toContain("/api/voice/token");
   expect(dev.text).not.toContain("api.elevenlabs.io");
 });
 

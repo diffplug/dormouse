@@ -28,7 +28,7 @@ Every feature is opt-in: one you do not use adds none of its risk. With none on,
 
 ## Guarantees
 
-Every section the [nightly audit](#how-the-guarantees-are-checked) checks opens with the guarantees its `FAIL IF` lines hold, or sits under one that does, and the published page gathers them here under each feature they come with: each opens with a link to that section, and Pinned by names what catches a break before the audit does.
+Every section the [nightly audit](#how-the-guarantees-are-checked) checks opens with the guarantees its own `FAIL IF` lines hold, and the published page gathers them here under each feature they come with: each opens with a link to that section, and Pinned by names what catches a break before the audit does.
 
 ## How the guarantees are checked
 
@@ -57,6 +57,7 @@ Source of truth: root scripts in `package.json`; native jobs in `.github/workflo
 - *Hosted phone, Self-hosted Relay.* **Per-Burrow unlinkability, when push is enabled.** One push endpoint per browser lets the Relay see every Burrow one phone registered ([Residual metadata](./remote-security-model.md#residual-metadata)).
 - *Hosted phone, Self-hosted Relay.* **Phone-key durability.** Clearing site data means pairing again. Nothing is compromised; a lost key authorized nothing on its own ([Client static loss](./remote-security-model.md#client-static-loss)).
 - *One-time link, Hosted phone, Self-hosted Relay.* **Availability.** Remote terminal access needs an online Burrow and, for new relay-backed sessions, an available Relay ([Goals](./remote-security-model.md#goals); [keeping it up](../../SELF_HOST.md#keeping-the-relay-up-while-the-laptop-sleeps)).
+- *Hosted phone.* **The voice provider keeps what managed voice speaks until Dormouse deletes it.** ElevenLabs stores each spoken label in its speech history; Dormouse deletes it there, usually within minutes, but no bound is guaranteed, and deleting it need not erase the provider's backups or moderation records ([Account boundary](./security-hosted.md#account-boundary)).
 - *Hosted phone.* **Whichever account first approves a live Hosted enrollment code owns the computer it enrolls**; yours is then refused as already approved. That account still pairs no phone without the two digits typed here ([Trust boundary](./security-remote.md#trust-boundary)).
 - **The bot's upstream is pinned by tag, not commit**, so a hostile upstream could change what the bot runs without a diff here. Accepted: the trust equals what the harness already holds ([Automated Maintainer](./security-ci.md#automated-maintainer-tend)).
 - **The repo-level snapshot-testing tokens are reachable by any workflow the bot can author.** Accepted with rotation; each service's dashboard shows abuse ([Automated Maintainer](./security-ci.md#automated-maintainer-tend)).
@@ -69,6 +70,7 @@ Gaps rather than accepted risks: we intend to close them.
 - **Browser-pane scripts share loopback cookies across grant ports.** HTTP and WebSocket cookie headers are stripped, but `document.cookie` remains shared; cookie-authenticated iframe pages are unsupported ([Loopback Listeners](./security-local.md#loopback-listeners)).
 - **Windows screenshots and pasted clipboard images are only as private as the temp directory they land in:** private by default, exposed if it is shared or loosened ([Browser panes](./security-local.md#browser-panes)).
 - **Neither VS Code's peer-link token, its Tool trust receipts, nor the `recovery.json` beside them carries a Windows ACL applied by Dormouse.** They are written owner-only by unix mode, which Windows makes a no-op; standalone locks its state directory instead ([Persisted state](./security-local.md#persisted-state)).
+- *One-time link, Hosted phone, Self-hosted Relay.* **No independent third party has reviewed remote control's cryptography.** Dormouse's Noise integration, passkey (WebAuthn) channel binding, key storage, and push sealing are checked only by this project's own tests, lints, and nightly audits, which AI agents run ([Noise suite](./remote-security-model.md#noise-suite)).
 - *Hosted phone, Self-hosted Relay.* **Revocation has no mechanism**: nothing in the product revokes a paired phone ([Revocation propagation](./remote-security-model.md#revocation-propagation)).
 - *One-time link, Hosted phone, Self-hosted Relay.* **There is no structured audit trail** covering connects, attaches, denials, or writes, so a self-hoster cannot answer "did anyone connect to my laptop last night"; each pairing records its approval, and owner-local logs report some rejections ([Burrow Authorization](./remote-security-model.md#burrow-authorization), [Trust boundary](./security-remote.md#trust-boundary)).
 - **A fork PR the bot checks out mid-run reaches it with that fork's instruction files.** The harness pins project-instruction paths to the base branch only for the checkouts it makes before the agent starts ([Automated Maintainer](./security-ci.md#automated-maintainer-tend)).

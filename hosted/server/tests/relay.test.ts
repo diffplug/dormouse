@@ -1739,5 +1739,5 @@ test("voice approval is independent of remote enrollment and cannot be redeemed 
   expect(enrolled.json!.status).toBe("enrolled");
   expect(enrolled.json).not.toHaveProperty("voiceToken");
   await f.sql(`DELETE FROM dormouse_relay_burrows`);
-  expect(await f.sql(`SELECT hash, "revokedAt" FROM dormouse_voice_tokens`)).toEqual([{ hash: digest(token), revokedAt: null }]);
+  expect(await f.sql(`SELECT hash FROM dormouse_voice_tokens`)).toEqual([{ hash: digest(token) }]);
 });

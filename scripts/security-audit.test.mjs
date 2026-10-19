@@ -188,14 +188,13 @@ const ghCalls = (dir) => (existsSync(join(dir, 'gh-calls.jsonl'))
   ? readFileSync(join(dir, 'gh-calls.jsonl'), 'utf8').trim().split('\n').map(JSON.parse)
   : []);
 
-/** A day as the status issue prints it, `days` from now. */
 const DAY = 86_400_000;
-const dayFromNow = (days) => new Date(Date.now() + days * DAY).toISOString().slice(0, 10);
 // The fake GitHub files seeded ledger rows yesterday, at one instant fixed when
 // this file loads, so a run that crosses UTC midnight still prints the row
 // `SEEDED_ROW` expects.
 const SEEDED_MS = Date.now() - DAY;
 const SEEDED_AT = new Date(SEEDED_MS).toISOString().replace(/\.\d+Z$/, 'Z');
+/** A day as the status issue prints it. */
 const day = (ms) => new Date(ms).toISOString().slice(0, 10);
 const SEEDED_ROW = `${day(SEEDED_MS)} | ${day(SEEDED_MS + 7 * DAY)} |`;
 
@@ -1081,11 +1080,14 @@ for (const holder of HOLDERS) {
 
 const iso = (ms) => new Date(ms).toISOString().replace(/\.\d+Z$/, 'Z');
 const maintainer = (body, authorAssociation = 'MEMBER') => ({ author: { login: 'a-maintainer' }, authorAssociation, body });
-/** A ledger issue as the embargo tracker holds it: its title and body carry text that must never cross. */
-function ledgerIssue(number, { key, severity = 'WARNING', meta, state = 'OPEN', stateReason = state === 'CLOSED' ? 'COMPLETED' : '', ageDays = 1, comments = [] }) {
+/**
+ * A ledger issue as the embargo tracker holds it: its title and body carry text
+ * that must never cross. Filed `ageDays` before `now`, and closed at `now`.
+ */
+function ledgerIssue(number, { key, severity = 'WARNING', meta, state = 'OPEN', stateReason = state === 'CLOSED' ? 'COMPLETED' : '', ageDays = 1, comments = [], now = Date.now() }) {
   return { number, title: `[audit-finding ${key}] ${severity}: lib/a.ts:3 run — title detail ${EXPLOIT}`,
     body: `${meta ? `${ledgerMeta({ key, severity, ...meta })}\n\n` : ''}Reported by \`audit-application.md\`:\n\n- ${severity}: body detail ${EXPLOIT}\n\n## Public summary\nfrom the body ${EXPLOIT}\n`,
-    labels: [], state, stateReason, createdAt: iso(Date.now() - ageDays * DAY), closedAt: state === 'CLOSED' ? iso(Date.now()) : null,
+    labels: [], state, stateReason, createdAt: iso(now - ageDays * DAY), closedAt: state === 'CLOSED' ? iso(now) : null,
     comments: [{ author: { login: 'a-maintainer' }, authorAssociation: 'MEMBER', body: 'Seen again as WARNING in [run 9](https://github.com/x/y/actions/runs/9) at `abcdef0`.' }, ...comments] };
 }
 
@@ -1196,29 +1198,35 @@ function passOver(t, seed, again = null) {
 const disclosures = (dir) => publicIssues(dir, 'security-audit-finding');
 const statusComments = (dir) => publicIssues(dir, 'security-audit-status')[0].comments.map((c) => c.body);
 const EMBARGO_RULE = sectionIds(CI, 'docs/specs/security-audit.md', 'Embargo')[0];
-const DISCLOSURE_SEED = () => ({
-  pulls: { 77: { merged: true }, 78: { merged: false } },
-  embargo: [
-    ledgerIssue(1, { key: 'aaaaaaaaaaaa', meta: { file: 'scripts/security-audit-report.mjs' }, state: 'CLOSED',
-      comments: [maintainer('Fixed in #77'), maintainer('## Public summary\nA paste could submit a command.')] }),
-    ledgerIssue(2, { key: 'bbbbbbbbbbbb', meta: { file: 'lib/gone.ts' }, state: 'CLOSED', comments: [maintainer('Fixed in #78')] }),
-    ledgerIssue(3, { key: 'cccccccccccc', state: 'CLOSED', stateReason: 'NOT_PLANNED' }),
-    // Filed before its rule moved: the ID places it where the checked-out specs carry it now.
-    ledgerIssue(4, { key: 'dddddddddddd', severity: 'FAIL', meta: { rule: EMBARGO_RULE, spec: 'docs/specs/security-ci.md', heading: 'GitHub Actions Policies' }, ageDays: 7.01 }),
-    // No rule ID: the heading it was filed under, found in the checked-out spec.
-    ledgerIssue(9, { key: '999999999999', severity: 'FAIL', meta: { spec: 'docs/specs/security-audit.md', heading: 'Disclosure' }, state: 'CLOSED' }),
-    ledgerIssue(5, { key: 'eeeeeeeeeeee', severity: 'BLOCKER', ageDays: 6.99 }),
-    ledgerIssue(6, { key: 'ffffffffffff', state: 'CLOSED', comments: [maintainer('Fixed in someone/else#77')] }),
-    ledgerIssue(7, { key: '777777777777', severity: 'FAIL', meta: { spec: 'docs/specs/security-audit.md', heading: `Run ${EXPLOIT}` }, state: 'CLOSED' }),
-    ledgerIssue(8, { key: '888888888888', meta: { file: 'scripts/../scripts/security-audit-report.mjs' }, state: 'CLOSED' }),
-  ],
-});
+/** Every row filed relative to one instant, `now`, so a test dates them all from the same clock. */
+function DISCLOSURE_SEED(now = Date.now()) {
+  const seeded = (number, fields) => ledgerIssue(number, { ...fields, now });
+  return {
+    pulls: { 77: { merged: true }, 78: { merged: false } },
+    embargo: [
+      seeded(1, { key: 'aaaaaaaaaaaa', meta: { file: 'scripts/security-audit-report.mjs' }, state: 'CLOSED',
+        comments: [maintainer('Fixed in #77'), maintainer('## Public summary\nA paste could submit a command.')] }),
+      seeded(2, { key: 'bbbbbbbbbbbb', meta: { file: 'lib/gone.ts' }, state: 'CLOSED', comments: [maintainer('Fixed in #78')] }),
+      seeded(3, { key: 'cccccccccccc', state: 'CLOSED', stateReason: 'NOT_PLANNED' }),
+      // Filed before its rule moved: the ID places it where the checked-out specs carry it now.
+      seeded(4, { key: 'dddddddddddd', severity: 'FAIL', meta: { rule: EMBARGO_RULE, spec: 'docs/specs/security-ci.md', heading: 'GitHub Actions Policies' }, ageDays: 7.01 }),
+      // No rule ID: the heading it was filed under, found in the checked-out spec.
+      seeded(9, { key: '999999999999', severity: 'FAIL', meta: { spec: 'docs/specs/security-audit.md', heading: 'Disclosure' }, state: 'CLOSED' }),
+      seeded(5, { key: 'eeeeeeeeeeee', severity: 'BLOCKER', ageDays: 6.99 }),
+      seeded(6, { key: 'ffffffffffff', state: 'CLOSED', comments: [maintainer('Fixed in someone/else#77')] }),
+      seeded(7, { key: '777777777777', severity: 'FAIL', meta: { spec: 'docs/specs/security-audit.md', heading: `Run ${EXPLOIT}` }, state: 'CLOSED' }),
+      seeded(8, { key: '888888888888', meta: { file: 'scripts/../scripts/security-audit-report.mjs' }, state: 'CLOSED' }),
+    ],
+  };
+}
 
 // A closed ledger issue is public at once and a stale open one after seven
 // days; each gets one issue built from validated fields and a maintainer's
 // summary, never from the ledger's own text.
 test('disclosure publishes fixed, dismissed, and overdue findings from validated fields alone', (t) => {
-  const { dir, published } = passOver(t, DISCLOSURE_SEED());
+  const seeded = Date.now();
+  const { dir, published } = passOver(t, DISCLOSURE_SEED(seeded));
+  const ran = Date.now();
   assert.equal(published.status, 0, published.stderr);
   const byKey = Object.fromEntries(disclosures(dir).map((i) => [i.title.match(/^\[audit-disclosure ([^/\]]+)\/\d+\]/)[1], i]));
   assert.deepEqual(Object.keys(byKey).sort(), ['777777777777', '888888888888', '999999999999', 'aaaaaaaaaaaa', 'bbbbbbbbbbbb', 'cccccccccccc', 'dddddddddddd', 'ffffffffffff']);
@@ -1255,9 +1263,13 @@ test('disclosure publishes fixed, dismissed, and overdue findings from validated
   // The status issue lists the one still embargoed, links the disclosed, and
   // says once per disclosure that it happened.
   const body = statusIssueBody(dir);
-  assert.ok(body.includes(`| \`eeeeeeeeeeee\` | BLOCKER | finding | ${dayFromNow(-6.99)} | ${dayFromNow(0.01)} |`), body);
-  assert.ok(body.includes(`| \`dddddddddddd\` | FAIL | failed check | ${dayFromNow(-7.01)} | disclosed: #${overdue.number} |`), body);
-  assert.ok(body.includes(`- #${overdue.number} — \`dddddddddddd\`, FAIL failed check, disclosed ${dayFromNow(0)}, not yet fixed`), body);
+  // Filing dates come from the seed's one clock; the disclosure is dated by the
+  // run's own, read back from its issue, so neither moves if UTC midnight passes.
+  assert.ok(body.includes(`| \`eeeeeeeeeeee\` | BLOCKER | finding | ${day(seeded - 6.99 * DAY)} | ${day(seeded + 0.01 * DAY)} |`), body);
+  assert.ok(body.includes(`| \`dddddddddddd\` | FAIL | failed check | ${day(seeded - 7.01 * DAY)} | disclosed: #${overdue.number} |`), body);
+  const disclosedOn = overdue.body.match(/\| Disclosed \| (\d{4}-\d{2}-\d{2}) \|/)?.[1];
+  assert.ok([day(seeded), day(ran)].includes(disclosedOn), overdue.body);
+  assert.ok(body.includes(`- #${overdue.number} — \`dddddddddddd\`, FAIL failed check, disclosed ${disclosedOn}, not yet fixed`), body);
   assert.deepEqual(statusComments(dir).sort(), Object.entries(all).map(([key, i]) => `Disclosed: #${i.number}, \`${key}\` (${i.title.split('] ')[1]}).`).sort());
 });
 
