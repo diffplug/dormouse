@@ -16,7 +16,7 @@ JSON output:
   {
     "status": "reopened",
     "kind": "surface",
-    "surface_id": "...",
+    "surface_id": "..."
   }
 
 FLAGS
