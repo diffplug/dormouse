@@ -37,7 +37,7 @@ test('every Vite, vitest, Storybook, and build-script esbuild config takes its a
     // A config built on a sibling config (mergeConfig, a spread) inherits its aliases.
     const extendsSibling = /from ['"]\.\/(vite|vitest)[^'"]*\.config(\.[mc]?ts)?['"]/.test(text);
     const reachesWorkspace = Object.keys(WORKSPACE_SOURCES).some((name) => text.includes(`/${name}/src`) || text.includes(`'${name}'`) || text.includes(`"${name}"`));
-    const usesHelper = text.includes('workspace-sources.mjs');
+    const usesHelper = text.includes('workspaceSourceAliases()');
     // A config that names no internal package and has no workspace deps (canopy) needs nothing.
     const packageDir = file.split('/')[0];
     const needsHelper = reachesWorkspace || hasWorkspaceDeps(manifests.get(packageDir) ?? {});
