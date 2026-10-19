@@ -1,9 +1,9 @@
 // The one map from each internal workspace package to its source. Every
 // bundler, test runner, and type checker that reaches one of these packages
-// resolves it here, so none of them ever reads a `dist` that is stale or
-// missing. `scripts/workspace-sources.test.mjs` fails on a Vite, vitest,
-// Storybook, or esbuild config that does not take its aliases from here, and on
-// a tsconfig `paths` that disagrees with `workspaceSourcePaths`.
+// resolves it here — bundlers through `workspaceSourceAliases()`, tsc through
+// `tsconfig.workspace-sources.json` — so none of them ever reads a `dist` that
+// is stale or missing. `scripts/workspace-sources.test.mjs` fails on a config
+// that resolves them some other way, or a package with `exports` missing here.
 //
 // What runs in plain Node — a package's own `node --test` suite, `relay`, the
 // `dor` CLI bundle, and build scripts such as `scripts/relay-origin.mjs` — still
@@ -25,9 +25,6 @@ export const WORKSPACE_SOURCES = {
   'remote-lib-common': 'remote-lib-common/src',
 };
 
-/** Absolute source directories, for a dev server's `fs.allow`. */
-export const workspaceSourceDirs = Object.values(WORKSPACE_SOURCES).map((dir) => path.join(root, dir));
-
 /**
  * Vite, vitest, and esbuild `alias` entries. A string alias matches the bare
  * name and every `name/…` subpath, and a directory resolves to its `index.ts`.
@@ -38,8 +35,9 @@ export function workspaceSourceAliases() {
 
 /**
  * The tsconfig `paths` entries for a config in `configDir`, which tsc resolves
- * relative to that config. A package with a `src/index.ts` also maps its bare
- * name.
+ * relative to that config: `tsconfig.workspace-sources.json`'s, or those of a
+ * config that needs paths of its own and so cannot extend it. A package with a
+ * `src/index.ts` also maps its bare name.
  */
 export function workspaceSourcePaths(configDir) {
   const paths = {};

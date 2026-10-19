@@ -3,7 +3,7 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { buildStampVitePlugin } from "../scripts/build-stamp.mjs";
 import { relayDefineVitePlugin, relayOriginDefine, resolveRelayOrigin } from "../scripts/relay-origin.mjs";
-import { workspaceSourceAliases, workspaceSourceDirs } from "../scripts/workspace-sources.mjs";
+import { workspaceSourceAliases } from "../scripts/workspace-sources.mjs";
 
 // https://v2.tauri.app/start/frontend/vite/
 const host = process.env.TAURI_DEV_HOST;
@@ -31,7 +31,7 @@ export default defineConfig(({ command }) => ({
     watch: { ignored: ["**/src-tauri/**"] },
     fs: {
       // Allow serving files from the source-aliased workspace packages.
-      allow: [...workspaceSourceDirs, "."],
+      allow: [...Object.values(workspaceSourceAliases()), "."],
     },
   },
   // Tauri CLI reads this env var to know where the dev server is

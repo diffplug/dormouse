@@ -1,18 +1,9 @@
 {
+  "extends": "../tsconfig.workspace-sources.json",
   "compilerOptions": {
     "target": "ES2022", "lib": ["ES2022", "DOM", "DOM.Iterable"], "module": "ES2022",
     "moduleResolution": "bundler", "strict": true, "noEmit": true, "jsx": "react-jsx",
-    "skipLibCheck": true, "noUnusedLocals": true, "noUnusedParameters": true,
-    "paths": {
-      "dormouse-lib/*": ["../lib/src/*"],
-      "dor/*": ["../dor/src/*"],
-      "dor-lib-common": ["../dor-lib-common/src/index.ts"],
-      "dor-lib-common/*": ["../dor-lib-common/src/*"],
-      "dor-tools-builtin/*": ["./src/*"],
-      "dor-tools-lib/*": ["../dor-tools-lib/src/*"],
-      "remote-lib-common": ["../remote-lib-common/src/index.ts"],
-      "remote-lib-common/*": ["../remote-lib-common/src/*"]
-    }
+    "skipLibCheck": true, "noUnusedLocals": true, "noUnusedParameters": true
   },
   "include": ["viewer/**/*.ts", "viewer/**/*.tsx"]
 }

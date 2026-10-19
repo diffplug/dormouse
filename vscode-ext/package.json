@@ -105,7 +105,6 @@
     "postinstall": "chmod +x node_modules/node-pty/prebuilds/*/spawn-helper 2>/dev/null || true",
     "build:frontend": "vite build --config vite.config.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "pretest": "node ../scripts/build-workspace-deps.mjs",
     "test": "pnpm typecheck && vitest run",
     "test:smoke": "vitest run --config vitest.smoketest.config.mts",
     "prebuild": "node ../scripts/build-workspace-deps.mjs",
