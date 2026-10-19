@@ -132,19 +132,20 @@ describe('hitTest — boundary lines', () => {
   });
 });
 
-describe('hitTest — band arithmetic at the caps', () => {
-  it('caps a wide leaf band at 96px', () => {
-    const t = tree(mk('row', [leaf('a'), 0.9], [leaf('b'), 0.1])); // a: 0..900
-    // 0.3 * 900 = 270, capped to 96: x=95 is in-band (left edge), x=97 is center.
-    expect(drop(t, RECT, { x: 95, y: 300 }, 'b', opts)!.target).toEqual({ kind: 'edge', path: [0], edge: 'left' });
-    expect(drop(t, RECT, { x: 97, y: 300 }, 'b', opts)!.target).toEqual({ kind: 'swap', leaf: 'a' });
-  });
-
-  it('scales a small leaf band to 0.3 of its extent', () => {
-    const small = R(0, 0, 200, 100);
-    const t = tree(mk('row', [leaf('a'), 0.5], [leaf('b'), 0.5])); // a: 0..100, band 30px
-    expect(drop(t, small, { x: 29, y: 50 }, 'b', opts)!.target).toEqual({ kind: 'edge', path: [0], edge: 'left' });
-    expect(drop(t, small, { x: 31, y: 50 }, 'b', opts)!.target).toEqual({ kind: 'swap', leaf: 'a' });
+describe('hitTest — band arithmetic', () => {
+  it('divides a leaf into even thirds on each axis, swapping in the middle', () => {
+    // a: 0..750 x 0..600, so its thirds fall at x 250 and 500, y 200 and 400.
+    const t = tree(mk('row', [leaf('a'), 0.75], [mk('col', [leaf('b'), 0.5], [leaf('c'), 0.5]), 0.25]));
+    const at = (x: number, y: number) => drop(t, RECT, { x, y }, 'c', opts)!.target;
+    const swap = { kind: 'swap', leaf: 'a' };
+    expect(at(249, 300)).toEqual({ kind: 'edge', path: [0], edge: 'left' });
+    expect(at(251, 300)).toEqual(swap);
+    expect(at(499, 300)).toEqual(swap);
+    expect(at(501, 300)).toEqual({ kind: 'edge', path: [0], edge: 'right' });
+    expect(at(375, 199)).toEqual({ kind: 'edge', path: [0], edge: 'top' });
+    expect(at(375, 201)).toEqual(swap);
+    expect(at(375, 399)).toEqual(swap);
+    expect(at(375, 401)).toEqual({ kind: 'edge', path: [0], edge: 'bottom' });
   });
 });
 

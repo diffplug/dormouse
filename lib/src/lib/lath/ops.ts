@@ -233,11 +233,12 @@ export function swap(tree: LathTree, a: LeafId, b: LeafId): { tree: LathTree; ok
 /** Insert leaf `newId` (weight `w`) beside the node at `targetPath`, at that node's
  *  parent level. Sibling insert when the parent runs along the edge axis: renormalized
  *  alongside the current siblings, or with `keepSiblings` the siblings share the
- *  remaining `1 - w` (a reorder within the leaf's own split). Otherwise nest the target
- *  under a new split (target keeps the `1 - w` complement). `normalize` extends/flattens
- *  as directions dictate. */
+ *  remaining `1 - w` (a reorder within the leaf's own split), or with `halve` the new
+ *  leaf takes half the target's weight and the other siblings keep theirs. Otherwise nest
+ *  the target under a new split (target keeps the `1 - w` complement). `normalize`
+ *  extends/flattens as directions dictate. */
 function insertBesideNode(
-  tree: LathTree, targetPath: number[], edge: Edge, newId: LeafId, w: number, keepSiblings = false,
+  tree: LathTree, targetPath: number[], edge: Edge, newId: LeafId, w: number, keepSiblings = false, halve = false,
 ): LathTree {
   const axis = edgeAxis(edge);
   const before = edgeIsBefore(edge);
@@ -261,7 +262,9 @@ function insertBesideNode(
   if (parent && parent.kind === 'split' && parent.dir === axis) {
     const scale = keepSiblings ? 1 - w : 1;
     const children = parent.children.map((child) => ({ node: child.node, weight: child.weight * scale }));
-    children.splice(before ? idx : idx + 1, 0, { node: newLeaf, weight: w });
+    const half = children[idx].weight / 2;
+    if (halve) children[idx] = { node: children[idx].node, weight: half };
+    children.splice(before ? idx : idx + 1, 0, { node: newLeaf, weight: halve ? half : w });
     const newParent: LathNode = { kind: 'split', dir: axis, children: normalizeWeights(children) };
     return { root: normalize(replaceAtPath(root, parentPath, newParent)) };
   }
@@ -279,9 +282,9 @@ function insertBesideNode(
 
 /** Insert a NEW leaf `id` beside the node named by an `edge` `target`, carrying
  *  `weight` into its new context (raw — renormalized alongside real siblings for a
- *  sibling insert, or `weight`/`1 - weight` when nesting). `move` passes the dragged
- *  leaf's old normalized weight; door drops omit it → the default `0.5` split. The
- *  public half of `move`: `move` = weight + `remove` + re-find path + `insert`. A
+ *  sibling insert, or `weight`/`1 - weight` when nesting). Without a `weight`, a single
+ *  leaf target splits in half and any other target takes `0.5`. The public half of
+ *  `move`: `move` = weight + `remove` + re-find path + `insert`. A
  *  `swap` target, an already-present `id`, an empty tree, or a path off the tree all
  *  reject with `ok: false`. The weight is clamped into `(0, 1)` so any caller value
  *  except NaN yields a valid tree; NaN is rejected. */
@@ -289,19 +292,23 @@ export function insert(
   tree: LathTree,
   id: LeafId,
   target: DropTarget,
-  weight = 0.5,
+  weight?: number,
 ): { tree: LathTree; ok: boolean } {
-  return insertImpl(tree, id, target, weight, false);
+  return insertImpl(tree, id, target, weight ?? 0.5, false, weight === undefined);
 }
 
+/** `halveLeaf`: a target that is a single leaf splits in half, whatever `weight` says. */
 function insertImpl(
-  tree: LathTree, id: LeafId, target: DropTarget, weight: number, keepSiblings: boolean,
+  tree: LathTree, id: LeafId, target: DropTarget, weight: number, keepSiblings: boolean, halveLeaf = false,
 ): { tree: LathTree; ok: boolean } {
   if (target.kind === 'swap' || Number.isNaN(weight)) return { tree, ok: false };
   if (tree.root === null) return { tree, ok: false };
   if (findLeafPath(tree, id) !== null) return { tree, ok: false };
   const resolved = materializeTarget(tree, target);
   if (!resolved) return { tree, ok: false };
+  if (halveLeaf && nodeAtPath(resolved.tree, resolved.path)?.kind === 'leaf') {
+    return { tree: insertBesideNode(resolved.tree, resolved.path, target.edge, id, 0.5, false, true), ok: true };
+  }
   const eps = 1e-6;
   const w = Math.min(Math.max(weight, eps), 1 - eps);
   return { tree: insertBesideNode(resolved.tree, resolved.path, target.edge, id, w, keepSiblings), ok: true };
@@ -322,9 +329,11 @@ export function movedWeight(tree: LathTree, id: LeafId): number | null {
 }
 
 /** Move a leaf to a drop target as one op (no token). A `swap` target defers to
- *  `swap`; an `edge` target is `remove` + `insert` beside the node at path, with the
- *  moved leaf carrying its old normalized weight. The path is read against the *input*
- *  tree, then re-found in the post-removal tree by the target's surviving leaf set. */
+ *  `swap`; an `edge` target is `remove` + `insert` beside the node at path. Beside a
+ *  single leaf, the two split that leaf's share in half; beside a group, the moved leaf
+ *  carries its old normalized weight. A move that leaves the arrangement as it was
+ *  returns the input tree. The path is read against the *input* tree, then re-found in
+ *  the post-removal tree by the target's surviving leaf set. */
 export function move(tree: LathTree, id: LeafId, target: DropTarget): { tree: LathTree; ok: boolean } {
   if (target.kind === 'swap') {
     const r = swap(tree, id, target.leaf);
@@ -355,8 +364,10 @@ export function move(tree: LathTree, id: LeafId, target: DropTarget): { tree: La
   const container = at && at.path.length > 0 ? nodeAtPath(at.tree, at.path.slice(0, -1)) : null;
   const ownSplit = parent !== null && container?.kind === 'split' && container.dir === parent.dir
     && sameLeafSet(leaves({ root: container }), leaves({ root: parent }).filter((l) => l !== id));
-  const r = insertImpl(t2, id, destination, w, ownSplit);
-  return r.ok ? r : { tree, ok: false };
+  const r = insertImpl(t2, id, destination, w, ownSplit, true);
+  if (!r.ok) return { tree, ok: false };
+  // Back beside itself: halving would only resize it in place.
+  return structureFingerprint(r.tree.root!) === structureFingerprint(tree.root!) ? { tree, ok: true } : r;
 }
 
 /** Move the visible sash adjacent to `boundary` (children `boundary` and

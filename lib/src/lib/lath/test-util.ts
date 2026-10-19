@@ -2,7 +2,7 @@
 // property). These are test-only builders — NOT the invariant-preserving model
 // constructors — so they live beside the tests, not in the shipped model.
 
-import type { LathNode, LathTree, Rect } from './model';
+import { type LathNode, type LathTree, type Rect, nodeAtPath } from './model';
 import { type LayoutOpts, layout } from './layout';
 import { type DropTarget, insert, move, movedWeight } from './ops';
 
@@ -32,8 +32,9 @@ export function insertPreview(t: LathTree, id: string, target: DropTarget, rect:
   return layout(insert(t, id, target, weight).tree, rect, opts).get(id)!;
 }
 
-/** Expected preview rect of an internal edge drag: a placeholder carrying the dragged
- *  leaf's weight, inserted into the current layout. */
+/** Expected preview rect of an internal edge drag: a placeholder inserted into the
+ *  current layout, halving a single pane or carrying the dragged leaf's weight beside a group. */
 export function landingPreview(t: LathTree, dragged: string, target: DropTarget, rect: Rect, opts: LayoutOpts): Rect {
-  return insertPreview(t, '__landing__', target, rect, opts, movedWeight(t, dragged)!);
+  const group = target.kind === 'edge' && nodeAtPath(t, target.path)?.kind === 'split';
+  return insertPreview(t, '__landing__', target, rect, opts, group ? movedWeight(t, dragged)! : undefined);
 }

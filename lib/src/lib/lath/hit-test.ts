@@ -39,10 +39,9 @@ type Scope = { target: DropTarget & { kind: 'edge' }; start: number; end: number
 /** Placeholder leaf id for the speculative `insert` that places the preview. */
 const EXTERNAL_ID = '__lath_external_drop__';
 
-/** Edge band = this fraction of the leaf's extent on the band's axis, capped at
- *  `MAX_BAND` px, so a huge leaf still has a graspable center. */
-const BAND_FRACTION = 0.3;
-const MAX_BAND = 96;
+/** Edge band = this fraction of the leaf's extent on the band's axis: thirds, with the
+ *  middle third swapping. */
+const BAND_FRACTION = 1 / 3;
 /** How far inside a leaf its edge still counts as the boundary line, capped at half
  *  the band. A top edge's line starts at the leaf, since its header is where drags
  *  start and sweep. Beyond the wall's top and sides, the line reaches this far out. */
@@ -103,8 +102,8 @@ function hover(rects: Map<LeafId, Rect>, p: Point): Hover | null {
   }
   if (!found) return null;
   const r = found.leafRect;
-  const bandX = Math.min(BAND_FRACTION * r.width, MAX_BAND);
-  const bandY = Math.min(BAND_FRACTION * r.height, MAX_BAND);
+  const bandX = BAND_FRACTION * r.width;
+  const bandY = BAND_FRACTION * r.height;
   const bands: Array<{ edge: Edge; dist: number }> = [];
   const dl = p.x - r.x;
   const dr = r.x + r.width - p.x;
@@ -189,17 +188,18 @@ export function hitTest(
   if (leafPath === null) return miss;
 
   // The preview inserts a placeholder into the CURRENT layout, so its share reads against
-  // the panes that stay; it carries the dragged leaf's weight, as `move` does.
+  // the panes that stay. It sizes as the commit does: half of a single pane, or, beside a
+  // group, the dragged leaf's weight.
   let previewId = EXTERNAL_ID;
   while (rects.has(previewId)) previewId += '_';
-  const weight = (dragged !== null && movedWeight(tree, dragged)) || 0.5;
   const evaluate = (target: DropTarget & { kind: 'edge' }): Rect | null => {
     if (dragged !== null) {
       const r = move(tree, dragged, target);
       // Beside-itself: a committed layout identical to the current one is not a real move.
       if (!r.ok || sameLayout(rects, layout(r.tree, rect, opts))) return null;
     }
-    const r = insert(tree, previewId, target, weight);
+    const group = nodeAtPath(tree, target.path)?.kind === 'split';
+    const r = insert(tree, previewId, target, dragged !== null && group ? movedWeight(tree, dragged)! : undefined);
     return r.ok ? layout(r.tree, rect, opts).get(previewId) ?? null : null;
   };
 

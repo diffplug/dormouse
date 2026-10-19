@@ -1216,8 +1216,8 @@ describe('LathHost — pane / Door drag', () => {
     act(() => store.removeLeaf('b'));
     const liveTree = store.getSnapshot().tree;
 
-    // The next frame hit-tests the live tree: 700,300 now sits in c's (widened) center.
-    act(() => moveTo(700, 300));
+    // The next frame hit-tests the live tree: 600,300 now sits in c's (widened) center.
+    act(() => moveTo(600, 300));
     await flushFrame();
     const target: DropTarget = { kind: 'swap', leaf: 'c' };
     expect(move(liveTree, 'a', target).ok).toBe(true); // the target is valid on the live tree
