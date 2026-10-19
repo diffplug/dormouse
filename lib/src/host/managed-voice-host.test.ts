@@ -394,6 +394,30 @@ describe('a store another process shares', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('a 401 forgets only the refused token, never one a sibling saved before this window re-read', async () => {
+    const window = sharing();
+    let answer: ((response: Response) => void) | null = null;
+    fetchMock.mockImplementation(() => new Promise<Response>((resolve) => { answer = resolve; }));
+    const spoken = window.handle({ op: 'speak', text: 'build finished' });
+    await vi.waitFor(() => expect(answer).not.toBeNull());
+
+    // Revoked at the account page, then enabled again in a sibling window,
+    // whose change this window has not re-read when the old token's 401 lands.
+    shared = { ...shared, token: OTHER_TOKEN };
+    answer!(new Response('{}', { status: 401 }));
+    expect(await spoken).toEqual({ ok: false, reason: 'HTTP 401' });
+    expect(shared.token).toBe(OTHER_TOKEN);
+    expect(writes).toEqual([]);
+
+    // Without a sibling's change, the refused token is forgotten.
+    shared = { ...shared, token: TOKEN };
+    const alone = sharing();
+    fetchMock.mockResolvedValue(new Response('{}', { status: 401 }));
+    await alone.handle({ op: 'speak', text: 'build finished' });
+    expect(shared.token).toBeNull();
+    expect(await alone.handle({ op: 'status' })).toMatchObject({ configured: false });
+  });
+
   it('a re-read never re-arms a token this window failed to clear, and a sibling’s new token supersedes it', async () => {
     const window = sharing();
     writeFault = (changed, next) => {

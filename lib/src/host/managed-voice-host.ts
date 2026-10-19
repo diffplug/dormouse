@@ -220,6 +220,22 @@ export function createManagedVoiceHost(options: {
   }
 
   /** A changed token forgets every clip and every refusal the old one earned. */
+  /** Clear the stored token, memory before disk: a failed write must never leave speech armed. Runs on `serialize`. */
+  async function clearToken(): Promise<void> {
+    const current = await load().catch(() => normalizeStored(null));
+    const next = { ...current, token: null };
+    loaded = Promise.resolve(next);
+    disconnectFailed = true;
+    uncleared = current.token ?? uncleared;
+    options.onStatus(status(next));
+    if (!store) throw new Error('no owner-only store');
+    await store.write(next, 'token');
+    disconnectFailed = false;
+    uncleared = null;
+    options.onStatus(status(next));
+  }
+
+  /** Any token change forgets every clip and every refusal the old one earned. */
   const setToken = (token: string | null) => {
     const generation = ++tokenGeneration;
     if (token === null) disabled = true;
@@ -228,18 +244,7 @@ export function createManagedVoiceHost(options: {
     return serialize(async () => {
       if (speakUrl === null) throw new Error('this build has no managed voice');
       if (token === null) {
-        // Clear memory before disk. A failed write must never leave speech armed.
-        const current = await load().catch(() => normalizeStored(null));
-        const next = { ...current, token: null };
-        loaded = Promise.resolve(next);
-        disconnectFailed = true;
-        uncleared = current.token ?? uncleared;
-        options.onStatus(status(next));
-        if (!store) throw new Error('no owner-only store');
-        await store.write(next, 'token');
-        disconnectFailed = false;
-        uncleared = null;
-        options.onStatus(status(next));
+        await clearToken();
       } else {
         await save('token', (config) => ({ ...config, token }), false);
         if (generation === tokenGeneration) disabled = false;
@@ -248,6 +253,19 @@ export function createManagedVoiceHost(options: {
       }
     });
   };
+
+  /**
+   * A 401's answer: forget the token that was refused, never one a sibling
+   * window saved since, which this window may not have re-read yet.
+   */
+  const forgetRefused = (refused: string) => serialize(async () => {
+    if (!store || normalizeStored(await store.read()).token !== refused) return;
+    tokenGeneration++;
+    disabled = true;
+    clips.clear();
+    notEntitled = false;
+    await clearToken();
+  });
 
   /** Latch what Hosted last said of the entitlement, announcing a change. */
   async function noteEntitled(entitled: boolean): Promise<void> {
@@ -293,7 +311,7 @@ export function createManagedVoiceHost(options: {
         if (generation === tokenGeneration) {
           if (response.status === 403) await noteEntitled(false);
           // Revoked or unknown: forgotten, so Settings offers Enable again.
-          if (response.status === 401) await setToken(null).catch(() => {});
+          if (response.status === 401) await forgetRefused(config.token).catch(() => {});
         }
         return { ok: false, reason: response.ok ? `unexpected ${mime ?? 'body'}` : `HTTP ${response.status}` };
       }
