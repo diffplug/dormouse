@@ -9,7 +9,7 @@ import { type DropCandidate, hitTest } from '../../lib/lath/hit-test';
 import { type LathWallSnapshot, LATH_LAYOUT_OPTS } from './lath-wall-store';
 import { DRAG_THRESHOLD_PX } from '../design';
 import { shieldFrames } from '../../lib/frame-shield';
-import { subscribeWindowFocus } from '../../lib/window-focus';
+import { subscribeDragCancel } from '../../lib/drag-cancel';
 
 /** Opacity applied to the dragged leaf while its drop preview floats elsewhere. */
 const DRAG_DIM = 0.6;
@@ -95,7 +95,7 @@ export function createDragController(deps: DragControllerDeps): DragController {
   // The live drag session (mutated in place by the window handlers).
   let drag: PaneDragState | null = null;
   let releaseShield: (() => void) | null = null;
-  let unsubscribeFocus: (() => void) | null = null;
+  let unsubscribeCancel: (() => void) | null = null;
   // The last preview rect published to React state (`x,y,w,h`); a frame that lands in
   // the same band skips the redundant setState (and its forced re-layout).
   let lastPreviewKey = '';
@@ -108,8 +108,8 @@ export function createDragController(deps: DragControllerDeps): DragController {
       }
       return;
     }
-    const anchored = !!drag?.anchor;
     const { target } = candidate;
+    const anchored = !!drag?.anchor;
     let badge: string | null = target.kind === 'swap' ? '⇄ swap' : null;
     if (target.kind === 'edge' && (anchored || candidate.scopeLeafCount > 1)) {
       badge = target.path.length === 0 && !target.range ? 'whole layout'
@@ -132,9 +132,8 @@ export function createDragController(deps: DragControllerDeps): DragController {
     window.removeEventListener('pointermove', onMove);
     window.removeEventListener('pointerup', onUp);
     window.removeEventListener('pointercancel', onCancel);
-    window.removeEventListener('keydown', onKey, true);
-    unsubscribeFocus?.();
-    unsubscribeFocus = null;
+    unsubscribeCancel?.();
+    unsubscribeCancel = null;
     releaseShield?.();
     releaseShield = null;
     if (drag && drag.rafId !== null) {
@@ -151,10 +150,7 @@ export function createDragController(deps: DragControllerDeps): DragController {
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
     window.addEventListener('pointercancel', onCancel);
-    window.addEventListener('keydown', onKey, true);
-    unsubscribeFocus = subscribeWindowFocus((focused) => {
-      if (!focused) finish(false);
-    });
+    unsubscribeCancel = subscribeDragCancel(() => finish(false));
   };
 
   const runHitTest = (): void => {
@@ -285,15 +281,6 @@ export function createDragController(deps: DragControllerDeps): DragController {
     runHitTest();
     finish(true);
   }
-
-  // Capture phase: a focused terminal stops the keydown before it bubbles to the window.
-  function onKey(e: KeyboardEvent): void {
-    if (e.key !== 'Escape') return;
-    e.preventDefault();
-    e.stopPropagation();
-    finish(false);
-  }
-
 
   return {
     beginInternal(id, clientX, clientY) {

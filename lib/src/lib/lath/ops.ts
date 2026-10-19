@@ -238,7 +238,8 @@ export function swap(tree: LathTree, a: LeafId, b: LeafId): { tree: LathTree; ok
  *  the target under a new split (target keeps the `1 - w` complement). `normalize`
  *  extends/flattens as directions dictate. */
 function insertBesideNode(
-  tree: LathTree, targetPath: number[], edge: Edge, newId: LeafId, w: number, keepSiblings = false, halve = false,
+  tree: LathTree, targetPath: number[], edge: Edge, newId: LeafId, w: number,
+  share: 'renormalize' | 'keepSiblings' | 'halve' = 'renormalize',
 ): LathTree {
   const axis = edgeAxis(edge);
   const before = edgeIsBefore(edge);
@@ -260,11 +261,14 @@ function insertBesideNode(
   const idx = targetPath[targetPath.length - 1];
   const parent = nodeAtPath(tree, parentPath);
   if (parent && parent.kind === 'split' && parent.dir === axis) {
-    const scale = keepSiblings ? 1 - w : 1;
+    const scale = share === 'keepSiblings' ? 1 - w : 1;
     const children = parent.children.map((child) => ({ node: child.node, weight: child.weight * scale }));
-    const half = children[idx].weight / 2;
-    if (halve) children[idx] = { node: children[idx].node, weight: half };
-    children.splice(before ? idx : idx + 1, 0, { node: newLeaf, weight: halve ? half : w });
+    let weight = w;
+    if (share === 'halve') {
+      weight = children[idx].weight / 2;
+      children[idx] = { node: children[idx].node, weight };
+    }
+    children.splice(before ? idx : idx + 1, 0, { node: newLeaf, weight });
     const newParent: LathNode = { kind: 'split', dir: axis, children: normalizeWeights(children) };
     return { root: normalize(replaceAtPath(root, parentPath, newParent)) };
   }
@@ -280,38 +284,38 @@ function insertBesideNode(
   return { root: normalize(replaceAtPath(root, targetPath, nested)) };
 }
 
-/** Insert a NEW leaf `id` beside the node named by an `edge` `target`, carrying
- *  `weight` into its new context (raw — renormalized alongside real siblings for a
- *  sibling insert, or `weight`/`1 - weight` when nesting). Without a `weight`, a single
- *  leaf target splits in half and any other target takes `0.5`. The public half of
- *  `move`: `move` = weight + `remove` + re-find path + `insert`. A
- *  `swap` target, an already-present `id`, an empty tree, or a path off the tree all
- *  reject with `ok: false`. The weight is clamped into `(0, 1)` so any caller value
- *  except NaN yields a valid tree; NaN is rejected. */
+/** How an insert sizes its new leaf: a raw weight, or `'half'` — half of a single leaf
+ *  target, and `0.5` beside any other. */
+export type InsertSize = number | 'half';
+
+/** Insert a NEW leaf `id` beside the node named by an `edge` `target`, sized by `size`.
+ *  A weight is raw — renormalized alongside real siblings for a sibling insert, or
+ *  `weight`/`1 - weight` when nesting. The public half of `move`: `move` = size +
+ *  `remove` + re-find path + `insert`. A `swap` target, an already-present `id`, an
+ *  empty tree, or a path off the tree all reject with `ok: false`. A weight is clamped
+ *  into `(0, 1)` so any caller value except NaN yields a valid tree; NaN is rejected. */
 export function insert(
   tree: LathTree,
   id: LeafId,
   target: DropTarget,
-  weight?: number,
+  size: InsertSize = 'half',
 ): { tree: LathTree; ok: boolean } {
-  return insertImpl(tree, id, target, weight ?? 0.5, false, weight === undefined);
+  return insertImpl(tree, id, target, size, false);
 }
 
-/** `halveLeaf`: a target that is a single leaf splits in half, whatever `weight` says. */
 function insertImpl(
-  tree: LathTree, id: LeafId, target: DropTarget, weight: number, keepSiblings: boolean, halveLeaf = false,
+  tree: LathTree, id: LeafId, target: DropTarget, size: InsertSize, keepSiblings: boolean,
 ): { tree: LathTree; ok: boolean } {
-  if (target.kind === 'swap' || Number.isNaN(weight)) return { tree, ok: false };
+  if (target.kind === 'swap' || Number.isNaN(size)) return { tree, ok: false };
   if (tree.root === null) return { tree, ok: false };
   if (findLeafPath(tree, id) !== null) return { tree, ok: false };
   const resolved = materializeTarget(tree, target);
   if (!resolved) return { tree, ok: false };
-  if (halveLeaf && nodeAtPath(resolved.tree, resolved.path)?.kind === 'leaf') {
-    return { tree: insertBesideNode(resolved.tree, resolved.path, target.edge, id, 0.5, false, true), ok: true };
-  }
+  const halve = size === 'half' && nodeAtPath(resolved.tree, resolved.path)?.kind === 'leaf';
   const eps = 1e-6;
-  const w = Math.min(Math.max(weight, eps), 1 - eps);
-  return { tree: insertBesideNode(resolved.tree, resolved.path, target.edge, id, w, keepSiblings), ok: true };
+  const w = size === 'half' ? 0.5 : Math.min(Math.max(size, eps), 1 - eps);
+  const share = halve ? 'halve' : keepSiblings ? 'keepSiblings' : 'renormalize';
+  return { tree: insertBesideNode(resolved.tree, resolved.path, target.edge, id, w, share), ok: true };
 }
 
 function sameLeafSet(a: LeafId[], b: LeafId[]): boolean {
@@ -319,21 +323,23 @@ function sameLeafSet(a: LeafId[], b: LeafId[]): boolean {
   return a.length === set.size && a.every((l) => set.has(l));
 }
 
-/** The weight a `move` of leaf `id` carries into its destination: its normalized weight
- *  in its parent, or 1 for a root leaf; null when `id` is absent. */
-export function movedWeight(tree: LathTree, id: LeafId): number | null {
+/** How `move` sizes leaf `id` beside `target`: `'half'` when one other leaf remains in
+ *  the target, otherwise the leaf's normalized weight in its parent (1 for a root leaf).
+ *  Null when `id` or the target is absent. */
+export function moveSize(tree: LathTree, id: LeafId, target: DropTarget & { kind: 'edge' }): InsertSize | null {
   const idPath = findLeafPath(tree, id);
-  if (idPath === null) return null;
+  const resolved = materializeTarget(tree, target);
+  if (idPath === null || !resolved) return null;
+  if (leaves({ root: nodeAtPath(resolved.tree, resolved.path) }).filter((l) => l !== id).length === 1) return 'half';
   const parent = idPath.length === 0 ? null : (nodeAtPath(tree, idPath.slice(0, -1)) as SplitNode);
   return parent ? parent.children[idPath[idPath.length - 1]].weight : 1;
 }
 
 /** Move a leaf to a drop target as one op (no token). A `swap` target defers to
- *  `swap`; an `edge` target is `remove` + `insert` beside the node at path. Beside a
- *  single leaf, the two split that leaf's share in half; beside a group, the moved leaf
- *  carries its old normalized weight. A move that leaves the arrangement as it was
- *  returns the input tree. The path is read against the *input* tree, then re-found in
- *  the post-removal tree by the target's surviving leaf set. */
+ *  `swap`; an `edge` target is `remove` + `insert` beside the node at path, sized by
+ *  `moveSize`. A move that leaves the arrangement as it was returns the input tree
+ *  itself. The path is read against the *input* tree, then re-found in the post-removal
+ *  tree by the target's surviving leaf set. */
 export function move(tree: LathTree, id: LeafId, target: DropTarget): { tree: LathTree; ok: boolean } {
   if (target.kind === 'swap') {
     const r = swap(tree, id, target.leaf);
@@ -351,7 +357,7 @@ export function move(tree: LathTree, id: LeafId, target: DropTarget): { tree: La
   if (targetLeaves.length === 1 && targetLeaves[0] === id) return { tree, ok: false };
 
   const parent = idPath.length === 0 ? null : (nodeAtPath(tree, idPath.slice(0, -1)) as SplitNode);
-  const w = movedWeight(tree, id)!;
+  const size = moveSize(tree, id, target)!;
 
   const t2 = remove(tree, id).tree;
 
@@ -364,7 +370,7 @@ export function move(tree: LathTree, id: LeafId, target: DropTarget): { tree: La
   const container = at && at.path.length > 0 ? nodeAtPath(at.tree, at.path.slice(0, -1)) : null;
   const ownSplit = parent !== null && container?.kind === 'split' && container.dir === parent.dir
     && sameLeafSet(leaves({ root: container }), leaves({ root: parent }).filter((l) => l !== id));
-  const r = insertImpl(t2, id, destination, w, ownSplit, true);
+  const r = insertImpl(t2, id, destination, size, ownSplit);
   if (!r.ok) return { tree, ok: false };
   // Back beside itself: halving would only resize it in place.
   return structureFingerprint(r.tree.root!) === structureFingerprint(tree.root!) ? { tree, ok: true } : r;

@@ -88,10 +88,10 @@ body {
   touch-action: none;
 }
 
-/* Drag drop-preview: the speculative destination rect during a pane/Door drag. Fill,
- * border color, and border-radius are all set inline (the resolved selection color +
- * TERMINAL_SELECTION_BORDER_RADIUS); only positioning lives here. Inert to the pointer
- * so it never intercepts the drag. */
+/* Drag drop-preview boxes: the destination, its scope, and a swap's other slot during a
+ * pane/Door drag. Fill, border, and border-radius are all set inline (the resolved
+ * selection color + TERMINAL_SELECTION_BORDER_RADIUS); only positioning lives here.
+ * Inert to the pointer so it never intercepts the drag. */
 .lath-host .lath-drop-preview {
   position: absolute;
   pointer-events: none;

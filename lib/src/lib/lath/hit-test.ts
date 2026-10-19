@@ -5,9 +5,9 @@
 // Three.js adapter feeds raycast intersections). No DOM, React, or timing. See
 // docs/specs/tiling-engine.md ("Hierarchical drag and drop").
 
-import { type Edge, type LathTree, type LeafId, type Rect, edgeAxis, findLeafPath, leaves, nodeAtPath, rectsClose } from './model';
+import { type Edge, type LathTree, type LeafId, type Rect, edgeAxis, findLeafPath, leaves, nodeAtPath } from './model';
 import { type LayoutOpts, layout, nodeRectAtPath } from './layout';
-import { type DropTarget, insert, move, movedWeight } from './ops';
+import { type DropTarget, insert, move, moveSize } from './ops';
 import { materializeTarget, targetRect } from './drop-target';
 
 export type DropCandidate = {
@@ -76,15 +76,6 @@ function distToRect(r: Rect, x: number, y: number): number {
   const dx = Math.max(r.x - x, 0, x - (r.x + r.width));
   const dy = Math.max(r.y - y, 0, y - (r.y + r.height));
   return Math.hypot(dx, dy);
-}
-
-function sameLayout(a: Map<LeafId, Rect>, b: Map<LeafId, Rect>): boolean {
-  if (a.size !== b.size) return false;
-  for (const [id, ra] of a) {
-    const rb = b.get(id);
-    if (!rb || !rectsClose(ra, rb)) return false;
-  }
-  return true;
 }
 
 /** The leaf under `p` and its in-band edges, nearest first. A point in a gap (or just
@@ -188,18 +179,16 @@ export function hitTest(
   if (leafPath === null) return miss;
 
   // The preview inserts a placeholder into the CURRENT layout, so its share reads against
-  // the panes that stay. It sizes as the commit does: half of a single pane, or, beside a
-  // group, the dragged leaf's weight.
+  // the panes that stay, sized as the commit would be.
   let previewId = EXTERNAL_ID;
   while (rects.has(previewId)) previewId += '_';
   const evaluate = (target: DropTarget & { kind: 'edge' }): Rect | null => {
     if (dragged !== null) {
       const r = move(tree, dragged, target);
-      // Beside-itself: a committed layout identical to the current one is not a real move.
-      if (!r.ok || sameLayout(rects, layout(r.tree, rect, opts))) return null;
+      // Beside-itself: `move` hands back the input tree when the arrangement is unchanged.
+      if (!r.ok || r.tree === tree) return null;
     }
-    const group = nodeAtPath(tree, target.path)?.kind === 'split';
-    const r = insert(tree, previewId, target, dragged !== null && group ? movedWeight(tree, dragged)! : undefined);
+    const r = insert(tree, previewId, target, (dragged !== null && moveSize(tree, dragged, target)) || 'half');
     return r.ok ? layout(r.tree, rect, opts).get(previewId) ?? null : null;
   };
 

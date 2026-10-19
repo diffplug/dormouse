@@ -28,7 +28,7 @@ import { type LeafMeta, LATH_LAYOUT_OPTS } from './lath-wall-store';
 import { nowMs, type LathWallEngine } from './lath-wall-engine';
 import { type DragController, type DragPreview, createDragController } from './lath-drag-controller';
 import { shieldFrames } from '../../lib/frame-shield';
-import { subscribeWindowFocus } from '../../lib/window-focus';
+import { subscribeDragCancel } from '../../lib/drag-cancel';
 import { LathDropPreview } from './LathDropPreview';
 import { TerminalPanel } from './TerminalPanel';
 import { BrowserPanel } from './BrowserPanel';
@@ -467,20 +467,10 @@ export function LathHost({
       const current = store.getSnapshot();
       if (d && (current.tree !== d.tree || current.zoomedId !== null)) end(false);
     });
-    // Capture phase: a focused terminal stops the keydown before it bubbles to the window.
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      e.preventDefault();
-      e.stopPropagation();
-      end(false); // revert the preview, commit nothing
-    };
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
     window.addEventListener('pointercancel', onCancel);
-    window.addEventListener('keydown', onKey, true);
-    const unsubscribeFocus = subscribeWindowFocus((focused) => {
-      if (!focused) end(false);
-    });
+    const unsubscribeCancel = subscribeDragCancel(() => end(false)); // revert the preview, commit nothing
     const releaseShield = shieldFrames();
     return () => {
       if (rafId !== null) cancelAnimationFrame(rafId);
@@ -488,8 +478,7 @@ export function LathHost({
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('pointercancel', onCancel);
       unsubscribe();
-      window.removeEventListener('keydown', onKey, true);
-      unsubscribeFocus();
+      unsubscribeCancel();
       releaseShield();
     };
   }, [dragging, onCommitResize, store]);
