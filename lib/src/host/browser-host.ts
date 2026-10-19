@@ -114,6 +114,8 @@ export interface BrowserProvider<B = unknown> {
   view(b: B, stream: number, opts: { headed: boolean }, sink: ViewerSink): Promise<Upstream>;
   /** Shutdown: release every client-side resource. */
   dispose?(): Promise<void>;
+  /** What the provider holds for `b`, for `dor`'s diagnostics; read-only. */
+  diagnostics?(b: B): Record<string, unknown>;
 }
 
 export interface BrowserHostDeps {
@@ -159,8 +161,7 @@ function generateGuiSession(): string {
   return sessionForKey(`gui-${randomBytes(6).toString('hex')}`);
 }
 
-/** A tab id no CLI reads as an option or a path. */
-export const TAB_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+const TAB_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
 /** `value` as an optional request id: absent, valid, or `null` when invalid. */
 function optionalRequestId(value: unknown): { requestId?: string } | null {
@@ -682,6 +683,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
       settling: settling.has(id),
       viewportWritePending: viewportWrites.has(id),
       provider: found,
+      ...p.diagnostics?.(b),
       sizing: sync.diagnostics(id),
       views: [...views.get(id) ?? []].map((view) => view.diagnostics()),
       closedViews: closedViews.get(id) ?? [],
