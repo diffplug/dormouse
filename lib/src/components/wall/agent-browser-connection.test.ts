@@ -68,7 +68,7 @@ describe('viewer socket connection', () => {
   it('decodes each binary frame, and forwards url and a popped-out page as events', async () => {
     const { connection } = connect();
     const events: unknown[] = [];
-    connection.subscribe((event) => { if (event.type !== 'debug') events.push(event); });
+    connection.subscribe((event) => { events.push(event); });
     await flush();
     const provisional = encodeViewerFrame({ kind: 'provisional', jpeg: new Uint8Array([0xff, 0xd8, 1]), size: { width: 800, height: 600 } });
     const crisp = encodeViewerFrame({ kind: 'crisp', jpeg: new Uint8Array([0xff, 0xd8, 2]) });

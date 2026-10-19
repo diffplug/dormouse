@@ -30,7 +30,9 @@
 
 **Why 250 ms.** A frame already in flight when a write lands still shows the old size. The next one follows within a frame or two: 20 Hz, with Playwright's acks paced at 50 ms.
 
-**Why a page shown anew is written, not judged.** A tab Playwright opens comes up at its context's viewport (1280×720 beside a synced 900×600 page, 2026-09-24), and the pane's own tab strip can select one, so the webview's heuristic read either as another writer. agent-browser gives a new tab the viewport's size (at ratio 1).
+**Why a page shown anew is written, not judged.** A tab Playwright opens comes up at its context's viewport (1280×720 beside a synced 900×600 page, 2026-09-24), and the pane's own tab strip can select one, so the webview's heuristic read either as another writer. agent-browser gives a `tab new` tab the viewport's size (at ratio 1), but sizes each page alone (0.31.1, 2026-10-18): `set viewport 800 500 1` on a popup left its opener at 900×600 at ratio 2, and a `target=_blank` popup of that opener came up at 1280×577 at ratio 1. With only sync re-writing, a Fixed pane showed a popup, or the tab left when one closed, at that page's own size, and the pane jumped between it and the size it asked for (reported 2026-10-18).
+
+**Why the page shown has a key of its own.** Playwright's tab ids are list indexes: closing tab 0 while it is current makes the next page index 0, so a change of the active tab id missed a page shown anew, and a close beside the current page read as one.
 
 **Why the pane's laid-out size.** A Workspace presentation scales the Wall's subtree while it moves. `getBoundingClientRect` read mid-scale, as a harness reload does, synced a Playwright page to 681×589 in a 689×596 pane (0.988, 2026-09-24). No resize followed to correct it.
 
@@ -67,6 +69,10 @@
 **Why a launch opens the pending page itself.** A navigation out of `ended` relaunched a gone daemon at that page through `attach`, then ran `open` for it again on `live`: the page reloaded right after its first load, dropping any state it had set up and repeating a non-idempotent GET (review of #775, 2026-09). The controller cannot tell a relaunch from a found daemon on its own, since both answer a port, so `attach` says which. A launch carrying the previous page instead loaded that page first and then navigated away from it.
 
 **Why the launch-failure policy is a param.** Its four creators each awaited an in-memory waiter with its own liveness check, so a pane persisted mid-launch — or whose webview reloaded — then failed, showed "ended" instead of its creator's fallback (review, 2026-09).
+
+**Why the active tab is selected again.** agent-browser 0.31.1's daemon rebinds its CDP screencast only on its own tab switch (2026-10-18, a page streaming a 100 ms clock): after a `target=_blank` click it reported the popup active and sent 2 frames in 2 s, none of the popup; `tab t2`, though t2 was already active, brought 20. A new stream client did not rebind it (1 frame in 1.5 s), so an unpark counts against the tab active before it. The CLI's own `tab close` of the active tab rebound, but a close by other means left the pane frozen in the app until something re-selected. Selecting a tab already active and streaming changed nothing (20 frames), so a redundant select costs one CLI call. Playwright kept the opener current after a popup and rebound within one 750 ms refresh after a close (@playwright/cli 1.64-alpha).
+
+**Why a debug ring and a watchdog.** In a frozen pane (2026-10-18, a Tool in a second window, phase `live` since tab clicks reached the daemon) 25 s of lsof sampling every 0.3 s found no webview viewer socket, no host upstream, and no reconnect attempt, yet the connection redials on every close; it recovered minutes later, and nothing outside the webview could say why. The ring and the host's record are what `dor-diagnostics` reads; the watchdog rebuilds what it can, and its firings reach the host log.
 
 **Why a new `url` mid-launch is a navigation.** Tool serving stopped awaiting the launch, so an announcement landing mid-launch wrote a new `url` with the session still unbound; nothing rebound, the launch went live on the old page, and serving had already recorded the announcement, so the pane was never re-framed (review of #775, 2026-09).
 
