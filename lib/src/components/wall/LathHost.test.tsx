@@ -951,6 +951,10 @@ describe('LathHost — pane / Door drag', () => {
     const aSlot = movePreview(t, 'b', { kind: 'swap', leaf: 'a' });
     expect([parseFloat(swapEl.style.left), parseFloat(swapEl.style.width)]).toEqual([aSlot.x, aSlot.width]);
     expect(badge()).toBe('⇄ swap');
+    const badgeEl = container.querySelector<HTMLElement>('[data-lath-drop-choice]')!;
+    const bSlot = overlayRect();
+    expect([parseFloat(badgeEl.style.left), parseFloat(badgeEl.style.top)]).toEqual([bSlot.x + bSlot.width / 2, bSlot.y + bSlot.height / 2]);
+    expect(badgeEl.style.transform).toBe('translate(-50%, -50%)');
     act(() => moveTo(overlayRect().x + 30, 300)); // b's left band
     await flushFrame();
     expect(container.querySelector('[data-lath-drop-swap]')).toBeNull();

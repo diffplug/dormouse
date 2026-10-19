@@ -9,7 +9,13 @@ export function LathDropPreview({ preview, wall, color, zIndex }: {
 }) {
   const geometry = (r: Rect) => ({ left: r.x, top: r.y, width: r.width, height: r.height });
   const { rect, scopeRect, swapRect } = preview;
-  const badgeAt = scopeRect ?? rect;
+  // A swap's badge sits at the center of the pane it trades with; a scope's at its corner.
+  const badgePosition = swapRect
+    ? { left: rect.x + rect.width / 2, top: rect.y + rect.height / 2, transform: 'translate(-50%, -50%)' }
+    : {
+      left: Math.min((scopeRect ?? rect).x + 8, Math.max(8, wall.width - 268)),
+      top: Math.min((scopeRect ?? rect).y + 8, Math.max(8, wall.height - 40)),
+    };
   return <>
     {scopeRect && <div
       data-lath-drop-scope=""
@@ -41,8 +47,7 @@ export function LathDropPreview({ preview, wall, color, zIndex }: {
       role="status"
       className={POPUP_SURFACE_CLASS + ' pointer-events-none absolute px-2 py-1 text-sm'}
       style={{
-        left: Math.min(badgeAt.x + 8, Math.max(8, wall.width - 268)),
-        top: Math.min(badgeAt.y + 8, Math.max(8, wall.height - 40)),
+        ...badgePosition,
         maxWidth: Math.max(0, Math.min(260, wall.width - 16)),
         zIndex: zIndex + 1,
       }}
