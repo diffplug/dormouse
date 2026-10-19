@@ -55,7 +55,7 @@ export function createManagedVoicePortClient(send: SendVoiceCommand): ManagedVoi
 
   const action = async (op: string): Promise<ManagedVoiceActionResult> => {
     try {
-      return await ask<ManagedVoiceActionResult | null>({ op }) ?? { ok: false, message: 'Managed voice is unavailable.' };
+      return await ask<ManagedVoiceActionResult | null>({ op }) ?? { ok: false, message: 'Hosted Voice is unavailable.' };
     } catch (error) { return { ok: false, message: messageOf(error) }; }
   };
 

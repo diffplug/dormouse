@@ -197,13 +197,13 @@ describe('connectionsFor', () => {
     expect(voice({ managedVoice: true })).toEqual([
       {
         to: 'voice.dormouse.sh',
-        when: 'When an alert is spoken in the managed voice',
+        when: 'When an alert is spoken in Hosted Voice',
         carries: 'The pane’s name and the voice id, which Hosted passes to ElevenLabs.',
       },
     ]);
     expect(voice({})).toEqual([]);
     expect(voice({ ...relayFacts(), managedVoice: true }).map((row) => row.when))
-      .not.toContain('When an alert is spoken in the managed voice');
+      .not.toContain('When an alert is spoken in Hosted Voice');
   });
 
   it('lists the update check only with automatic checks on and an updater in this window', () => {

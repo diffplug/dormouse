@@ -97,11 +97,12 @@ const EXPECTED: Record<Worker, string[]> = {
   ],
   voice: [
     "database: CONNECT, TEMPORARY",
+    "dormouse_voice_tokens.createdAt: SELECT",
     "dormouse_voice_tokens.hash: SELECT",
     "dormouse_voice_tokens.id: SELECT",
-    "dormouse_voice_tokens.lastUsedAt: UPDATE",
-    "dormouse_voice_tokens.revokedAt: SELECT",
+    "dormouse_voice_tokens.lastUsedAt: SELECT, UPDATE",
     "dormouse_voice_tokens.userId: SELECT",
+    "dormouse_voice_tokens: DELETE",
     "dormouse_voice_usage.count: UPDATE",
     "dormouse_voice_usage: INSERT, SELECT",
     "schema public: USAGE",
@@ -137,9 +138,9 @@ test("the relay's role is refused the account's tables, the user row's other col
     `UPDATE "user" SET email = email`,
     `UPDATE "user" SET "emailVerified" = true`,
     `SELECT id FROM dormouse_voice_tokens`,
-    `UPDATE dormouse_voice_tokens SET "revokedAt" = now()`,
+    `UPDATE dormouse_voice_tokens SET "lastUsedAt" = now()`,
     `DELETE FROM dormouse_voice_tokens`,
-    `INSERT INTO dormouse_voice_tokens ("userId", hash, "revokedAt") VALUES ('x', 'x', now())`,
+    `INSERT INTO dormouse_voice_tokens ("userId", hash, "createdAt") VALUES ('x', 'x', now())`,
     `INSERT INTO dormouse_voice_usage ("userId", day, count) VALUES ('x', now()::date, 0)`,
     `DELETE FROM dormouse_relay_burrows`,
     `UPDATE dormouse_relay_burrows SET "userId" = "userId"`,
@@ -149,18 +150,19 @@ test("the relay's role is refused the account's tables, the user row's other col
     expect([text, await outcome("relay", text)]).toEqual([text, "42501"]);
 });
 
-test("the voice role is refused the relay's tables, the account's, and its tokens' other columns and writes", async () => {
+test("the voice role is refused the relay's tables, the account's, and its tokens' other writes", async () => {
   expect(
-    await outcome("voice", `SELECT id, "userId", hash, "revokedAt" FROM dormouse_voice_tokens`),
+    await outcome("voice", `SELECT id, "userId", hash, "createdAt", "lastUsedAt" FROM dormouse_voice_tokens`),
   ).toBe("ok");
+  expect(await outcome("voice", `DELETE FROM dormouse_voice_tokens WHERE hash = 'x'`)).toBe("ok");
   for (const text of [
     `SELECT * FROM dormouse_relay_sessions`,
     `SELECT * FROM dormouse_relay_burrows`,
     `SELECT * FROM "session"`,
     `SELECT name FROM "user"`,
     `UPDATE "user" SET "emailVerified" = true`,
-    `SELECT "createdAt" FROM dormouse_voice_tokens`,
-    `UPDATE dormouse_voice_tokens SET "revokedAt" = NULL`,
+    `UPDATE dormouse_voice_tokens SET "createdAt" = now()`,
+    `UPDATE dormouse_voice_tokens SET "userId" = "userId"`,
     `INSERT INTO dormouse_voice_tokens ("userId", hash) VALUES ('x', 'x')`,
     `DELETE FROM dormouse_voice_usage`,
   ])

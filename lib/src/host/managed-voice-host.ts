@@ -29,6 +29,8 @@ import {
 
 export const MANAGED_VOICE_FILE = 'managed-voice.json';
 const MANAGED_VOICE_SPEAK_PATH = '/api/voice/speak';
+/** Where a computer turning Hosted Voice off deletes its own token. */
+const MANAGED_VOICE_TOKEN_PATH = '/api/voice/token';
 /** Hosted's own bound on `text`. */
 const MAX_TEXT_LENGTH = 200;
 /** `docs/specs/standalone.md` -> "Rust ↔ sidecar bridge". */
@@ -166,6 +168,7 @@ export function createManagedVoiceHost(options: {
   // every edit and speak is refused.
   const voice = hostedVoiceOrigin(options.relay);
   const speakUrl = voice === null ? null : voice + MANAGED_VOICE_SPEAK_PATH;
+  const tokenUrl = voice === null ? null : voice + MANAGED_VOICE_TOKEN_PATH;
   let loaded: Promise<StoredManagedVoice> | null = null;
   // Each edit reads, then rewrites the whole file: two at once would drop a field.
   const serialize = createSerialQueue();
@@ -350,6 +353,26 @@ export function createManagedVoiceHost(options: {
     return result;
   }
 
+  /**
+   * Best effort, never awaited by turning off: delete `token` at Hosted, so a
+   * computer that turned Hosted Voice off leaves nothing live there. Skipped
+   * under Nowhere, failed offline; either way the token lapses unused.
+   */
+  async function forgetAtHosted(token: string): Promise<void> {
+    try {
+      if (tokenUrl === null || !(await options.networkAllowed())) return;
+      const response = await fetchImpl(tokenUrl, {
+        method: 'DELETE',
+        headers: { authorization: `Bearer ${token}` },
+        redirect: 'error',
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      await response?.body?.cancel();
+    } catch {
+      // Unreachable, or refused: the token lapses unused.
+    }
+  }
+
   function cancelEnrollment(): void {
     enrollmentSequence++;
     if (pollTimer) clearTimeout(pollTimer);
@@ -359,7 +382,7 @@ export function createManagedVoiceHost(options: {
   }
 
   async function requireEnrollmentNetwork(): Promise<void> {
-    if (speakUrl === null) throw new Error('This build has no managed voice.');
+    if (speakUrl === null) throw new Error('This build has no Hosted Voice.');
     if (!(await options.networkAllowed())) throw new Error('Network is set to Nowhere.');
   }
 
@@ -371,10 +394,10 @@ export function createManagedVoiceHost(options: {
   async function beginEnrollment(): Promise<void> {
     if (enrollment?.status === 'waiting' || enrollment?.status === 'saving') return;
     if (beginPending) return beginPending;
-    if (disconnectFailed) throw new Error('Retry disconnect before enabling managed voice.');
+    if (disconnectFailed) throw new Error('Finish turning Hosted Voice off before turning it on.');
     const sequence = ++enrollmentSequence;
     const begin = async () => {
-      if (status(await load()).configured) throw new Error('Managed voice is already enabled.');
+      if (status(await load()).configured) throw new Error('Hosted Voice is already on.');
       if (sequence !== enrollmentSequence) return;
       const body = await beginHostedApproval(options.relay.origin, 'voice', enrollmentFetch);
       if (sequence !== enrollmentSequence) return;
@@ -389,7 +412,7 @@ export function createManagedVoiceHost(options: {
       const poll = async () => {
         try {
           if (sequence !== enrollmentSequence) return;
-          if (Date.now() >= deadline) throw new Error('That code expired. Enable managed voice to get a new code.');
+          if (Date.now() >= deadline) throw new Error('That code expired. Turn on Hosted Voice to get a new code.');
           // Check outside the retrying exchange too: Nowhere ends this run.
           await requireEnrollmentNetwork();
           const answer = await pollHostedApproval(options.relay.origin, body.deviceCode, 'voice', enrollmentFetch, parseVoiceApproval);
@@ -409,13 +432,13 @@ export function createManagedVoiceHost(options: {
             // A token never saved, or never received below, is held by no one,
             // so the user is never asked to revoke it.
             try { await setToken(answer.voiceToken); }
-            catch { throw new Error('Could not save managed voice on this computer. Try again.'); }
+            catch { throw new Error('Could not save Hosted Voice on this computer. Try again.'); }
             if (sequence === enrollmentSequence) { enrollment = null; await announce(); }
             return;
           }
           throw new Error(answer.status === 'redeemed'
-            ? 'Managed voice could not finish enabling. Try again.'
-            : 'That approval ended. Enable managed voice to get a new code.');
+            ? 'Hosted Voice could not finish turning on. Try again.'
+            : 'That approval ended. Turn on Hosted Voice to get a new code.');
         } catch (error) {
           if (sequence !== enrollmentSequence) return;
           enrollment = { status: 'ended', message: error instanceof Error ? error.message : String(error) };
@@ -436,14 +459,20 @@ export function createManagedVoiceHost(options: {
         cancelEnrollment();
         if (op === 'disconnect') {
           disabled = true;
-          await setToken(null);
+          // A retry's token is the one the failed clear left behind.
+          const held = (await load().catch(() => null))?.token ?? uncleared;
+          try {
+            await setToken(null);
+          } finally {
+            if (held !== null) void forgetAtHosted(held);
+          }
         } else await announce();
       }
       return { ok: true, ...status(await load()) };
     } catch (error) {
       log(`[managed-voice] ${op} failed: ${String(error)}`);
       return { ok: false, message: op === 'disconnect'
-        ? 'Managed voice is off for this session, but disconnecting did not finish. Retry disconnect before restarting Dormouse.'
+        ? 'Hosted Voice is off for this session, but turning it off did not finish. Retry before restarting Dormouse.'
         : error instanceof Error ? error.message : String(error) };
     }
   }

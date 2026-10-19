@@ -73,18 +73,17 @@ export async function social(provider: Provider, linking: boolean) {
   window.location.assign(url.href);
 }
 
-export interface VoiceToken {
-  id: string;
-  createdAt: string;
-  /** Stamped by each speak. */
-  lastUsedAt: string | null;
-  revokedAt: string | null;
+export interface HostedVoice {
+  /** Whether this account's plan includes Hosted Voice. */
+  entitled: boolean;
+  /** Whether any computer of this account has it on. */
+  on: boolean;
 }
-async function voice(method: string, path = ""): Promise<Response> {
+async function voice(method: string): Promise<Response> {
   return request(
-    `/api/voice/tokens${path}`,
+    "/api/voice",
     { method },
-    "Voice tokens are temporarily unavailable. Try again.",
+    "Hosted Voice is temporarily unavailable. Try again.",
   );
 }
 /**
@@ -108,23 +107,14 @@ export async function acceptTerms(version: string): Promise<boolean> {
 /** A call's error when the server gave none written for this page. */
 const failed = () =>
   new Error("That did not work. Reload the page and try again.");
-/** Null when the server says this account may not use managed voice. */
-export async function getVoiceTokens(): Promise<VoiceToken[] | null> {
+export async function getHostedVoice(): Promise<HostedVoice> {
   const response = await voice("GET");
-  if (response.status === 401 || response.status === 403) return null;
   if (!response.ok) throw failed();
-  return ((await response.json()) as { tokens: VoiceToken[] }).tokens;
+  return (await response.json()) as HostedVoice;
 }
-export async function createVoiceToken() {
-  const response = await voice("POST");
-  if (!response.ok) throw failed();
-  return (await response.json()) as Pick<VoiceToken, "id" | "createdAt"> & {
-    token: string;
-  };
-}
-export async function revokeVoiceToken(id: string) {
-  if (!(await voice("DELETE", `/${encodeURIComponent(id)}`)).ok)
-    throw failed();
+/** Turns Hosted Voice off on every computer of this account. */
+export async function turnOffHostedVoice() {
+  if (!(await voice("DELETE")).ok) throw failed();
 }
 
 export interface Computer {

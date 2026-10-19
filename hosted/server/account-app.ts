@@ -5,12 +5,12 @@ import { accountRules } from "./headers";
 import { relayAccountRoutes, type RelayAccountHost } from "./relay-account";
 import { relayRoom } from "./relay-room-contract";
 import { termsRoutes } from "./terms";
-import { voiceTokenRoutes } from "./voice";
+import { voiceAccountRoutes } from "./voice";
 import { workerApp } from "./worker-app";
 
 /**
  * The account Worker (`hosted.dormouse.sh`): auth, providers, readiness,
- * terms acceptance, voice-token minting, the Relay's account routes, and the
+ * terms acceptance, Hosted Voice on or off, the Relay's account routes, and the
  * frontend. The production and preview entries differ only in `fetchAuth`'s
  * mail and in `bindings`.
  */
@@ -50,7 +50,7 @@ export function accountApp(
         closeBurrow: (userId, burrowId) => relayRoom(c.env.RELAY_ROOM, userId).closeBurrow(burrowId),
       });
       termsRoutes(app, host);
-      voiceTokenRoutes(app, host);
+      voiceAccountRoutes(app, host);
       relayAccountRoutes(app, host);
     },
     // Every desktop since v1.2.0 opens `/account` by a hard-coded path

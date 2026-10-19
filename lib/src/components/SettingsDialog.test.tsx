@@ -238,7 +238,7 @@ describe('SettingsDialog under Network → Nothing', () => {
     await render();
     expect(text()).toContain('Push is off while Network is set to Nowhere.');
     expect(text()).toContain(
-      'Managed voice is off while Network is set to Nowhere, so alerts use your browser or system voice.',
+      'Hosted Voice is off while Network is set to Nowhere, so alerts use your browser or system voice.',
     );
     expect(text()).not.toContain('Connect this machine to a Dormouse Relay');
 

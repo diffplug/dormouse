@@ -58,7 +58,7 @@ export const NotEnrolled: Story = {
     primedManagedVoice: { configured: false },
   },
   play: async ({ canvasElement }) => {
-    await within(canvasElement).findByRole('button', { name: 'Enable managed voice' });
+    await within(canvasElement).findByRole('button', { name: 'Turn on Hosted Voice' });
   },
 };
 
@@ -97,7 +97,7 @@ export const Enrolled: Story = {
     primedBurrow: { status: ENROLLED },
     primedManagedVoice: { configured: true },
   },
-  play: settled('Managed voice is enabled.'),
+  play: settled('Hosted Voice is on.'),
 };
 
 /** Disconnect's second step, which says what else it ends. */
@@ -108,7 +108,7 @@ export const DisconnectSecondStep: Story = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await userEvent.click(await canvas.findByRole('button', { name: 'Disconnect' }));
+    await userEvent.click(await canvas.findByRole('button', { name: 'Turn off' }));
     await canvas.findByText(/Alarms will use your system voice/);
   },
 };
@@ -126,7 +126,7 @@ export const NoPlan: Story = {
 export const RemoteOnly: Story = {
   parameters: { primedBurrow: { status: ENROLLED }, primedManagedVoice: { configured: false } },
   play: async ({ canvasElement }) => {
-    await within(canvasElement).findByRole('button', { name: 'Enable managed voice' });
+    await within(canvasElement).findByRole('button', { name: 'Turn on Hosted Voice' });
   },
 };
 
@@ -134,6 +134,6 @@ export const RemoteOnly: Story = {
 export const DisconnectFailed: Story = {
   parameters: { primedBurrow: { status: ENROLLED }, primedManagedVoice: { configured: false, disconnectFailed: true } },
   play: async ({ canvasElement }) => {
-    await within(canvasElement).findByRole('button', { name: 'Retry disconnect' });
+    await within(canvasElement).findByRole('button', { name: 'Retry' });
   },
 };

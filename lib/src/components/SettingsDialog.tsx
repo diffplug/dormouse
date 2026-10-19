@@ -517,16 +517,16 @@ export function AlarmSettingsSection({ sink, preview = false, onShowNetwork }: {
           <>
             Uses your browser or system voice.{' '}
             <ExternalTextLink href={HOSTED_VOICE_URL}>
-              Get managed ElevenLabs voices.
+              Get natural ElevenLabs voices with Hosted Voice.
             </ExternalTextLink>
           </>
         ) : networkOff ? (
           <>
-            Managed voice is off while <NetworkTopicLink onShow={onShowNetwork} /> is set to Nowhere,
+            Hosted Voice is off while <NetworkTopicLink onShow={onShowNetwork} /> is set to Nowhere,
             so alerts use your browser or system voice.
           </>
         ) : (
-          'Uses managed voice when enabled below, otherwise your browser or system voice.'
+          'Uses Hosted Voice when turned on below, otherwise your browser or system voice.'
         )}
       </AlarmSinkSection>
       {preview ? null : (
