@@ -127,7 +127,7 @@ Source of truth: `hosted/scripts/setup-github.mjs`; `.github/workflows/hosted-pr
 
 | Guarantee | Feature | Pinned by |
 | --- | --- | --- |
-| **Publishing the extension takes a second human's approval.** |  | `scripts/github-state-check.mjs` |
+| **Publishing the extension takes a second account's approval.** |  | `scripts/github-state-check.mjs` |
 
 GitHub Actions publishes the extension only after human approval from an account other than the triggering account, with administrator bypass disabled; `VSCE_PAT` and `OVSX_PAT` live only in that protected environment.
 

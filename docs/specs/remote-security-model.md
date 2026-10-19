@@ -11,8 +11,6 @@ Primary: no native mobile application; strong protection against account comprom
 
 Non-goals: a compromised browser runtime or operating system; a user intentionally clearing browser data; permanent device identity across browser resets; **availability** — a self-host Relay shares its deployment machine's availability; the Relay is an online dependency for each new paired session, and a one-time session needs Hosted's rendezvous until the direct switch ([relay.md](./relay.md); [One-time connection](#one-time-connection)); **traffic analysis** ([Residual metadata](#residual-metadata)).
 
-**Never claim this model for paid SaaS before an independent cryptographic review** of the Noise integration, the WebAuthn channel binding, key storage, and the push construction. No shipped build, Hosted or self-host, carries such a claim.
-
 ## Trust Model
 
 | Layer         | Responsibility                        |
