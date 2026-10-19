@@ -1,3 +1,4 @@
+/// <reference path="./cross-spawn.d.ts" />
 import spawn from 'cross-spawn';
 import path from 'node:path';
 

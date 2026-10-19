@@ -22,6 +22,7 @@ import {
   resolveRelayOrigin,
 } from '../../scripts/relay-origin.mjs';
 import { assertNothingInlined } from '../../scripts/assert-not-inlined.mjs';
+import { workspaceSourceAliases } from '../../scripts/workspace-sources.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const libHost = path.resolve(here, '../../lib/src/host');
@@ -93,14 +94,7 @@ for (const { entry, out, define, assertBaked, external } of bundles) {
     outfile,
     bundle: true,
     platform: 'node', // node builtins (http/net/fs/child_process) stay external
-    // Match the frontend and VS Code host's dor/*, dor-tools-builtin/*, and
-    // dor-tools-lib/* source mappings. Host modules share the built-in viewers'
-    // pure format registry and parse OSC 367 with dor-tools-lib.
-    alias: {
-      dor: path.resolve(here, '../../dor/src'),
-      'dor-tools-builtin': path.resolve(here, '../../dor-tools-builtin/src'),
-      'dor-tools-lib': path.resolve(here, '../../dor-tools-lib/src'),
-    },
+    alias: workspaceSourceAliases(),
     format: 'cjs',
     target: 'node24',
     // `ws`'s optional native accelerators stay unresolved rather than bundled.

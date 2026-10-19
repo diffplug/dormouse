@@ -2,11 +2,10 @@ import { build } from 'esbuild';
 import { rm } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { realpathSync } from 'node:fs';
+import { workspaceSourceAliases } from '../../scripts/workspace-sources.mjs';
 
 const absWorkingDir = fileURLToPath(new URL('../', import.meta.url));
-// From source, as the website's Vite build resolves it: the website builds
-// these assets from a checkout where dor-tools-lib has no dist yet.
-const alias = { 'dor-tools-lib': fileURLToPath(new URL('../../dor-tools-lib/src', import.meta.url)) };
+const alias = workspaceSourceAliases();
 
 /** Bundles the Monaco, Markdown, and image pages' assets, and the folder
  * viewer's tooltip, into `outdir`, which `viewerAsset` serves by name; the

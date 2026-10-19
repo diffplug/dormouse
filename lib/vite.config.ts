@@ -1,30 +1,12 @@
-import path from "path";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import { workspaceSourceAliases } from "../scripts/workspace-sources.mjs";
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
     dedupe: ["react", "react-dom"],
-    alias: {
-      // lib source imports the `dor` workspace package via the `dor/*` tsconfig
-      // path; Vite (and vitest) do not read tsconfig paths, and `dor` has no
-      // package exports, so resolve it to source — the same alias standalone uses.
-      dor: path.resolve(import.meta.dirname, "../dor/src"),
-      // The same for the built-in viewers' format registry (`dor-tools-builtin/*`).
-      "dor-tools-builtin": path.resolve(import.meta.dirname, "../dor-tools-builtin/src"),
-      // And for the Tool protocol (`dor-tools-lib/*`).
-      "dor-tools-lib": path.resolve(import.meta.dirname, "../dor-tools-lib/src"),
-      // `Wall` and `useDorControl` import `dor-lib-common/*` subpaths; that package's
-      // `exports` resolve to a `dist` a vitest run has no reason to have built.
-      // Alias to source so the tests never depend on build order.
-      "dor-lib-common": path.resolve(import.meta.dirname, "../dor-lib-common/src"),
-      // Same rationale — and the service-worker mirror test uses
-      // `boundedPushText` as its oracle, so a watch-mode run must compare
-      // against the source, not whatever dist was last built (`pretest`
-      // rebuilds it; a bare `vitest` does not).
-      "remote-lib-common": path.resolve(import.meta.dirname, "../remote-lib-common/src"),
-    },
+    alias: workspaceSourceAliases(),
   },
 });

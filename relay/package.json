@@ -5,7 +5,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "prebuild": "pnpm --filter remote-lib-common build",
+    "prebuild": "node ../scripts/build-workspace-deps.mjs",
     "build": "tsc -p tsconfig.json",
     "dev": "pnpm run build && pnpm run dev:built",
     "dev:built": "node scripts/dev.mjs",

@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 import { buildStampVitePlugin } from "../scripts/build-stamp.mjs";
+import { workspaceSourceAliases } from "../scripts/workspace-sources.mjs";
 import { CSP_NONCE_PLACEHOLDER } from "./src/csp-nonce-placeholder";
 
 /**
@@ -23,6 +24,7 @@ export default defineConfig({
   },
   resolve: {
     dedupe: ["react", "react-dom"],
+    alias: workspaceSourceAliases(),
   },
   root: path.resolve(import.meta.dirname, "../lib"),
   base: "./",

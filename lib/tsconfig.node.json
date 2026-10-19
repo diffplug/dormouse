@@ -12,7 +12,17 @@
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "noFallthroughCasesInSwitch": true
+    "noFallthroughCasesInSwitch": true,
+    "paths": {
+      "dormouse-lib/*": ["./src/*"],
+      "dor/*": ["../dor/src/*"],
+      "dor-lib-common": ["../dor-lib-common/src/index.ts"],
+      "dor-lib-common/*": ["../dor-lib-common/src/*"],
+      "dor-tools-builtin/*": ["../dor-tools-builtin/src/*"],
+      "dor-tools-lib/*": ["../dor-tools-lib/src/*"],
+      "remote-lib-common": ["../remote-lib-common/src/index.ts"],
+      "remote-lib-common/*": ["../remote-lib-common/src/*"]
+    }
   },
   "include": ["vite.config.ts", "vite.pocket.config.ts", "vite.one-time.config.ts", "vite.sw.config.ts", "vitest.argos.config.ts"]
 }

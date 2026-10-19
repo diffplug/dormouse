@@ -2,11 +2,10 @@
 // origin into the extension host as `standalone/scripts/build-sidecar-proxy.mjs`
 // does into the sidecar (docs/specs/relay.md → "Relay origin").
 
-import { fileURLToPath } from 'node:url';
-
 import * as esbuild from 'esbuild';
 
 import { assertNothingInlined } from '../../scripts/assert-not-inlined.mjs';
+import { workspaceSourceAliases } from '../../scripts/workspace-sources.mjs';
 import {
   assertRelayOriginBaked,
   relayOriginDefine,
@@ -34,18 +33,7 @@ const common = {
   // and would have to be shipped per platform — so they stay as runtime
   // `require`s that `ws` already catches and falls back from.
   external: ['vscode', 'node-pty', 'bufferutil', 'utf-8-validate', ...NATIVE_DIRECT.flatMap((name) => [name, `${name}/*`])],
-  alias: {
-    // Shared `lib/` modules the extension host bundles reach the `dor` CLI's
-    // types through the `dor/*` tsconfig path. esbuild picks the tsconfig
-    // nearest each *input file*, so `vscode-ext/tsconfig.json`'s mapping does
-    // not follow an import out into `lib/`, and `dor` has no package exports to
-    // fall back on. Same alias `lib/vite.config.ts` and standalone carry.
-    dor: fileURLToPath(new URL('../../dor/src', import.meta.url)),
-    // The built-in viewers' format registry, reached the same way.
-    'dor-tools-builtin': fileURLToPath(new URL('../../dor-tools-builtin/src', import.meta.url)),
-    // And the Tool protocol, which the host's OSC parser reads.
-    'dor-tools-lib': fileURLToPath(new URL('../../dor-tools-lib/src', import.meta.url)),
-  },
+  alias: workspaceSourceAliases(),
 };
 
 const builds = [

@@ -2,6 +2,7 @@ import { fileURLToPath } from "node:url";
 import { build, defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import { workspaceSourceAliases } from "../scripts/workspace-sources.mjs";
 
 import swConfig from "./vite.sw.config";
 
@@ -67,19 +68,7 @@ export default defineConfig({
   root: fileURLToPath(new URL("./pocket", import.meta.url)),
   resolve: {
     dedupe: ["react", "react-dom"],
-    alias: {
-      // The Pocket app imports the remote modules, which import
-      // `remote-lib-common`; its package `exports` resolve to a `dist` that a
-      // clean checkout has not built yet (this vite-only build has no `tsc -b`
-      // step to generate it). Alias to source, same as the website and
-      // Storybook configs.
-      "remote-lib-common": fileURLToPath(new URL("../remote-lib-common/src", import.meta.url)),
-      // `dor-lib-common` has the same unbuilt-`dist` exports problem, reached via
-      // `Wall` and `useDorControl`.
-      "dor-lib-common": fileURLToPath(new URL("../dor-lib-common/src", import.meta.url)),
-      // `dor-tools-lib` too, reached via the terminal parser's OSC 367 readers.
-      "dor-tools-lib": fileURLToPath(new URL("../dor-tools-lib/src", import.meta.url)),
-    },
+    alias: workspaceSourceAliases(),
   },
   build: {
     rolldownOptions: {

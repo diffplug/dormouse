@@ -643,6 +643,9 @@ importers:
       jsdom:
         specifier: ^30.0.0
         version: 30.1.3(@noble/hashes@2.4.0)
+      remote-lib-common:
+        specifier: workspace:*
+        version: link:../remote-lib-common
       tailwindcss:
         specifier: ^4.3.0
         version: 4.3.3
@@ -726,6 +729,9 @@ importers:
       playwright-core:
         specifier: ^1.63.0
         version: 1.63.0
+      remote-lib-common:
+        specifier: workspace:*
+        version: link:../remote-lib-common
       tailwindcss:
         specifier: ^4.3.0
         version: 4.3.3

@@ -26,9 +26,14 @@
     // dependency, so its protocol types resolve by path — same mapping the lib
     // app project uses.
     "paths": {
+      "dormouse-lib/*": ["../lib/src/*"],
       "dor/*": ["../dor/src/*"],
+      "dor-lib-common": ["../dor-lib-common/src/index.ts"],
+      "dor-lib-common/*": ["../dor-lib-common/src/*"],
       "dor-tools-builtin/*": ["../dor-tools-builtin/src/*"],
-      "dor-tools-lib/*": ["../dor-tools-lib/src/*"]
+      "dor-tools-lib/*": ["../dor-tools-lib/src/*"],
+      "remote-lib-common": ["../remote-lib-common/src/index.ts"],
+      "remote-lib-common/*": ["../remote-lib-common/src/*"]
     }
   },
   // `../lib/src/globals.d.ts` declares the webview's `acquireVsCodeApi`, which

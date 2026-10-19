@@ -7,12 +7,11 @@
   "scripts": {
     "dev": "vite",
     "dev:pocket": "vite --config vite.pocket.config.ts",
-    "prebuild": "pnpm --filter dor-lib-common build && pnpm --filter remote-lib-common build",
     "build": "tsc -b && vite build",
     "build:pocket": "vite build --config vite.pocket.config.ts && vite build --config vite.sw.config.ts && node scripts/assert-pocket-worker.mjs",
     "build:one-time": "vite build --config vite.one-time.config.ts && node scripts/assert-pocket-worker.mjs --one-time",
     "preview": "vite preview",
-    "pretest": "pnpm --filter dor-lib-common build && pnpm --filter remote-lib-common build",
+    "pretest": "node ../scripts/build-workspace-deps.mjs",
     "test": "pnpm typecheck && vitest run",
     "test:watch": "vitest",
     "storybook": "storybook dev -p 6006 --no-open --ci",

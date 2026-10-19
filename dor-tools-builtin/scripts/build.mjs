@@ -1,5 +1,6 @@
 import { build } from 'esbuild';
 import { fileURLToPath } from 'node:url';
+import { workspaceSourceAliases } from '../../scripts/workspace-sources.mjs';
 import { buildViewerAssets } from './build-viewer.mjs';
 
 // Runs after tsc: the self-contained Node runtime replaces tsc's re-export
@@ -12,6 +13,7 @@ await Promise.all([
     entryPoints: ['src/runtime.ts'],
     outfile: 'dist/runtime.js', bundle: true, format: 'esm', platform: 'node',
     target: 'node24',
+    alias: workspaceSourceAliases(),
     banner: { js: "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);" },
   }),
   buildViewerAssets(fileURLToPath(new URL('../dist/viewer/', import.meta.url))),

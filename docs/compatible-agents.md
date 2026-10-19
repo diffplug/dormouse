@@ -67,8 +67,6 @@ Install dependencies with `pnpm install`, then run the focused tests from the re
 
 ```sh
 pnpm --filter dormouse-lib exec vitest run src/lib/coding-agents.test.ts src/lib/resume-patterns.test.ts src/lib/watched-defaults.test.ts src/host/recovery-capture.test.ts
-pnpm --filter dor-lib-common build
-pnpm --filter remote-lib-common build
 pnpm --filter dormouse-website test
 pnpm lint:public-docs
 pnpm lint:specs
