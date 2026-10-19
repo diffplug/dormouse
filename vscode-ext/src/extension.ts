@@ -14,6 +14,7 @@ import { workspaceTitle } from './workspace-chrome';
 import { resolveSelectedShell, setSelectedShellPath, getSelectedShellPath } from './shell-selection';
 import type { ExtensionMessage } from './message-types';
 import { initBurrow } from './burrow';
+import { initManagedVoice } from './managed-voice';
 import { disposePeerLink, initPeerLink } from './peer-link';
 
 type NewTerminalMessage = Extract<ExtensionMessage, { type: 'dormouse:newTerminal' }>;
@@ -80,6 +81,7 @@ export function activate(context: vscode.ExtensionContext) {
   // (burrow.ts).
   initPeerLink(context);
   context.subscriptions.push({ dispose: () => void disposePeerLink() });
+  context.subscriptions.push(initManagedVoice(context));
   // The Burrow runs here, in the extension host that owns the PTYs — in
   // whichever window wins the bind (burrow.ts).
   context.subscriptions.push(initBurrow(context));

@@ -7,6 +7,13 @@
 
 export { DEFAULT_MANAGED_VOICE_ID, MANAGED_VOICES } from 'remote-lib-common';
 
+/**
+ * The host's bound on one speak request (`docs/specs/alert.md` -> "Managed
+ * voice"). Each bridge waits longer, so the host's answer arrives first: Rust's
+ * `MANAGED_VOICE_TIMEOUT`, and VS Code's webview command timeout.
+ */
+export const MANAGED_VOICE_REQUEST_TIMEOUT_MS = 15_000;
+
 export type ManagedVoiceEnrollment =
   | { status: 'waiting'; userCode: string; verificationUrl: string; expiresAt: number }
   | { status: 'saving' }

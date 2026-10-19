@@ -6,6 +6,7 @@ import {
   CLIP_CACHE_MAX_BYTES,
   CLIP_CACHE_MAX_ENTRIES,
   createManagedVoiceHost,
+  fileManagedVoiceStore,
   MAX_AUDIO_BYTES,
   MANAGED_VOICE_FILE,
 } from './managed-voice-host';
@@ -54,7 +55,7 @@ let host: ReturnType<typeof make>;
 
 function make(options: { timeoutMs?: number; stateDir?: string; networkAllowed?: () => Promise<boolean> } = {}) {
   return createManagedVoiceHost({
-    stateDir: 'stateDir' in options ? options.stateDir : dir,
+    store: 'stateDir' in options ? (options.stateDir ? fileManagedVoiceStore(options.stateDir) : undefined) : fileManagedVoiceStore(dir),
     onStatus: (status) => void broadcasts.push(status),
     fetch: fetchMock as unknown as typeof fetch,
     timeoutMs: options.timeoutMs,
@@ -326,10 +327,124 @@ describe('speak', () => {
   });
 });
 
+describe('a store another process shares', () => {
+  const OTHER_TOKEN = `dmv_${'C'.repeat(43)}`;
+  let shared: Record<string, unknown>;
+  let writes: string[];
+  let writeFault: ((changed: string, next: { token: string | null }) => Promise<void> | void) | null;
+
+  function sharing() {
+    return createManagedVoiceHost({
+      store: {
+        read: async () => ({ ...shared }),
+        write: async (next, changed) => {
+          writes.push(changed);
+          await writeFault?.(changed, next);
+          shared = { ...shared, [changed]: next[changed] };
+        },
+      },
+      onStatus: (status) => void broadcasts.push(status),
+      fetch: fetchMock as unknown as typeof fetch,
+      relay: { origin: DEFAULT_RELAY_ORIGIN, mode: 'hosted' },
+      networkAllowed: async () => true,
+    });
+  }
+
+  beforeEach(() => {
+    shared = { token: TOKEN };
+    writes = [];
+    writeFault = null;
+  });
+
+  it('writes only the field that changed, and invalidate reads a sibling’s change, forgetting the clips', async () => {
+    const window = sharing();
+    await window.handle({ op: 'configure', update: { voiceId: OTHER_VOICE } });
+    expect(writes).toEqual(['voiceId']);
+    fetchMock.mockImplementation(async () => audioResponse());
+    await window.handle({ op: 'speak', text: 'build finished' });
+
+    // A sibling window disconnected.
+    shared = { voiceId: OTHER_VOICE };
+    window.invalidate();
+    await vi.waitFor(() => expect(broadcasts.at(-1)).toEqual(idle(false, OTHER_VOICE)));
+    expect(await window.handle({ op: 'speak', text: 'build finished' })).toEqual({ ok: false, reason: 'unconfigured' });
+    // Enabled again there: the old clip is not replayed.
+    shared = { token: OTHER_TOKEN, voiceId: OTHER_VOICE };
+    window.invalidate();
+    await vi.waitFor(() => expect(broadcasts.at(-1)).toEqual(idle(true, OTHER_VOICE)));
+    await window.handle({ op: 'speak', text: 'build finished' });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('a sibling’s disconnect heard while a save is out wins over the save’s earlier read', async () => {
+    const window = sharing();
+    let release: (() => void) | null = null;
+    writeFault = (changed) => changed === 'voiceId' ? new Promise<void>((resolve) => { release = resolve; }) : undefined;
+    const configured = window.handle({ op: 'configure', update: { voiceId: OTHER_VOICE } });
+    await vi.waitFor(() => expect(release).not.toBeNull());
+
+    // A sibling window disconnected while this one's voice write is out.
+    shared = { voiceId: shared.voiceId };
+    window.invalidate();
+    release!();
+    await configured;
+
+    await vi.waitFor(() => expect(broadcasts.at(-1)).toEqual(idle(false, OTHER_VOICE)));
+    expect(await window.handle({ op: 'speak', text: 'build finished' })).toEqual({ ok: false, reason: 'unconfigured' });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('a 401 forgets only the refused token, never one a sibling saved before this window re-read', async () => {
+    const window = sharing();
+    let answer: ((response: Response) => void) | null = null;
+    fetchMock.mockImplementation(() => new Promise<Response>((resolve) => { answer = resolve; }));
+    const spoken = window.handle({ op: 'speak', text: 'build finished' });
+    await vi.waitFor(() => expect(answer).not.toBeNull());
+
+    // Revoked at the account page, then enabled again in a sibling window,
+    // whose change this window has not re-read when the old token's 401 lands.
+    shared = { ...shared, token: OTHER_TOKEN };
+    answer!(new Response('{}', { status: 401 }));
+    expect(await spoken).toEqual({ ok: false, reason: 'HTTP 401' });
+    expect(shared.token).toBe(OTHER_TOKEN);
+    expect(writes).toEqual([]);
+
+    // Without a sibling's change, the refused token is forgotten.
+    shared = { ...shared, token: TOKEN };
+    const alone = sharing();
+    fetchMock.mockResolvedValue(new Response('{}', { status: 401 }));
+    await alone.handle({ op: 'speak', text: 'build finished' });
+    expect(shared.token).toBeNull();
+    expect(await alone.handle({ op: 'status' })).toMatchObject({ configured: false });
+  });
+
+  it('a re-read never re-arms a token this window failed to clear, and a sibling’s new token supersedes it', async () => {
+    const window = sharing();
+    writeFault = (changed, next) => {
+      if (changed === 'token' && next.token === null) throw new Error('write denied');
+    };
+    expect(await window.handle({ op: 'disconnect' })).toMatchObject({ ok: false });
+
+    // Any change to the shared store, the voice here, makes every window re-read.
+    shared = { ...shared, voiceId: OTHER_VOICE };
+    window.invalidate();
+    await vi.waitFor(() => expect(broadcasts.at(-1)).toMatchObject({ configured: false, voiceId: OTHER_VOICE, disconnectFailed: true }));
+    expect(await window.handle({ op: 'speak', text: 'build finished' })).toEqual({ ok: false, reason: 'unconfigured' });
+
+    // A sibling enabled managed voice anew: nothing of this window's disconnect is owed.
+    shared = { token: OTHER_TOKEN, voiceId: OTHER_VOICE };
+    window.invalidate();
+    await vi.waitFor(() => expect(broadcasts.at(-1)).toEqual(idle(true, OTHER_VOICE)));
+    fetchMock.mockImplementation(async () => audioResponse());
+    expect(await window.handle({ op: 'speak', text: 'build finished' })).toMatchObject({ ok: true });
+    expect(fetchMock.mock.calls[0]![1].headers.authorization).toBe(`Bearer ${OTHER_TOKEN}`);
+  });
+});
+
 describe('the build it runs in', () => {
   it('speaks to the voice origin from any Hosted build, a dev build’s local Hosted included', async () => {
     const local = createManagedVoiceHost({
-      stateDir: dir,
+      store: fileManagedVoiceStore(dir),
       onStatus: () => {},
       fetch: fetchMock as unknown as typeof fetch,
       relay: { origin: 'http://localhost:8787', mode: 'hosted' },
@@ -348,7 +463,7 @@ describe('the build it runs in', () => {
     // "Relay origin"), so it reads none of it.
     await seedToken();
     const selfHost = createManagedVoiceHost({
-      stateDir: dir,
+      store: fileManagedVoiceStore(dir),
       onStatus: (status) => void broadcasts.push(status),
       fetch: fetchMock as unknown as typeof fetch,
       relay: { origin: 'https://relay.example.ts.net', mode: 'self-host' },
@@ -500,7 +615,7 @@ describe('independent managed-voice lifecycle', () => {
     vi.useFakeTimers();
     let disconnect: Promise<unknown> | undefined;
     host = createManagedVoiceHost({
-      stateDir: dir,
+      store: fileManagedVoiceStore(dir),
       onStatus: (status) => {
         broadcasts.push(status);
         if (status.enrollment?.status === 'saving') disconnect = host.handle({ op: 'disconnect' });

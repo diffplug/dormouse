@@ -48,7 +48,7 @@ function useManagedVoiceStatus(port: ManagedVoicePort | undefined): ManagedVoice
   return useSyncExternalStore(subscribe, snapshot);
 }
 
-/** Whether this build offers managed voice at all: a Hosted standalone build's port. */
+/** Whether this build offers managed voice at all: a Hosted desktop build's port. */
 export function useManagedVoiceOffered(): boolean {
   return getPlatform().managedVoice !== undefined;
 }
