@@ -29,7 +29,7 @@ import {
 
 export const MANAGED_VOICE_FILE = 'managed-voice.json';
 const MANAGED_VOICE_SPEAK_PATH = '/api/voice/speak';
-/** Where a computer turning Hosted Voice off deletes its own token. */
+/** Where a computer turning Natural Voice off deletes its own token. */
 const MANAGED_VOICE_TOKEN_PATH = '/api/voice/token';
 /** Hosted's own bound on `text`. */
 const MAX_TEXT_LENGTH = 200;
@@ -355,7 +355,7 @@ export function createManagedVoiceHost(options: {
 
   /**
    * Best effort, never awaited by turning off: delete `token` at Hosted, so a
-   * computer that turned Hosted Voice off leaves nothing live there. Skipped
+   * computer that turned Natural Voice off leaves nothing live there. Skipped
    * under Nowhere, failed offline; either way the token lapses unused.
    */
   async function forgetAtHosted(token: string): Promise<void> {
@@ -382,7 +382,7 @@ export function createManagedVoiceHost(options: {
   }
 
   async function requireEnrollmentNetwork(): Promise<void> {
-    if (speakUrl === null) throw new Error('This build has no Hosted Voice.');
+    if (speakUrl === null) throw new Error('This build has no Natural Voice.');
     if (!(await options.networkAllowed())) throw new Error('Network is set to Nowhere.');
   }
 
@@ -394,10 +394,10 @@ export function createManagedVoiceHost(options: {
   async function beginEnrollment(): Promise<void> {
     if (enrollment?.status === 'waiting' || enrollment?.status === 'saving') return;
     if (beginPending) return beginPending;
-    if (disconnectFailed) throw new Error('Finish turning Hosted Voice off before turning it on.');
+    if (disconnectFailed) throw new Error('Finish turning Natural Voice off before turning it on.');
     const sequence = ++enrollmentSequence;
     const begin = async () => {
-      if (status(await load()).configured) throw new Error('Hosted Voice is already on.');
+      if (status(await load()).configured) throw new Error('Natural Voice is already on.');
       if (sequence !== enrollmentSequence) return;
       const body = await beginHostedApproval(options.relay.origin, 'voice', enrollmentFetch);
       if (sequence !== enrollmentSequence) return;
@@ -412,7 +412,7 @@ export function createManagedVoiceHost(options: {
       const poll = async () => {
         try {
           if (sequence !== enrollmentSequence) return;
-          if (Date.now() >= deadline) throw new Error('That code expired. Turn on Hosted Voice to get a new code.');
+          if (Date.now() >= deadline) throw new Error('That code expired. Turn on Natural Voice to get a new code.');
           // Check outside the retrying exchange too: Nowhere ends this run.
           await requireEnrollmentNetwork();
           const answer = await pollHostedApproval(options.relay.origin, body.deviceCode, 'voice', enrollmentFetch, parseVoiceApproval);
@@ -432,13 +432,13 @@ export function createManagedVoiceHost(options: {
             // A token never saved, or never received below, is held by no one,
             // so the user is never asked to revoke it.
             try { await setToken(answer.voiceToken); }
-            catch { throw new Error('Could not save Hosted Voice on this computer. Try again.'); }
+            catch { throw new Error('Could not save Natural Voice on this computer. Try again.'); }
             if (sequence === enrollmentSequence) { enrollment = null; await announce(); }
             return;
           }
           throw new Error(answer.status === 'redeemed'
-            ? 'Hosted Voice could not finish turning on. Try again.'
-            : 'That approval ended. Turn on Hosted Voice to get a new code.');
+            ? 'Natural Voice could not finish turning on. Try again.'
+            : 'That approval ended. Turn on Natural Voice to get a new code.');
         } catch (error) {
           if (sequence !== enrollmentSequence) return;
           enrollment = { status: 'ended', message: error instanceof Error ? error.message : String(error) };
@@ -472,7 +472,7 @@ export function createManagedVoiceHost(options: {
     } catch (error) {
       log(`[managed-voice] ${op} failed: ${String(error)}`);
       return { ok: false, message: op === 'disconnect'
-        ? 'Hosted Voice is off for this session, but turning it off did not finish. Retry before restarting Dormouse.'
+        ? 'Natural Voice is off for this session, but turning it off did not finish. Retry before restarting Dormouse.'
         : error instanceof Error ? error.message : String(error) };
     }
   }

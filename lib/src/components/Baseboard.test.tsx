@@ -259,7 +259,7 @@ describe('Baseboard settings controls', () => {
 
   it.each([
     ['push', 'Push is off while Settings → Network is set to Nowhere.', 'Connect this machine'],
-    ['speech', 'Hosted Voice is off while Settings → Network is set to Nowhere', 'Uses Hosted Voice'],
+    ['speech', 'Natural Voice is off while Settings → Network is set to Nowhere', 'Uses Natural Voice'],
   ] as const)('previews %s under Nothing with its off line from the first frame', async (sink, off, on) => {
     const platform = await import('../lib/platform');
     vi.spyOn(platform, 'getPlatform').mockReturnValue({

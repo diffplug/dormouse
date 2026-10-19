@@ -58,7 +58,7 @@ export const NotEnrolled: Story = {
     primedManagedVoice: { configured: false },
   },
   play: async ({ canvasElement }) => {
-    await within(canvasElement).findByRole('button', { name: 'Turn on Hosted Voice' });
+    await within(canvasElement).findByRole('button', { name: 'Turn on Natural Voice' });
   },
 };
 
@@ -97,7 +97,7 @@ export const Enrolled: Story = {
     primedBurrow: { status: ENROLLED },
     primedManagedVoice: { configured: true },
   },
-  play: settled('Hosted Voice is on.'),
+  play: settled('Natural Voice is on.'),
 };
 
 /** Disconnect's second step, which says what else it ends. */
@@ -126,7 +126,7 @@ export const NoPlan: Story = {
 export const RemoteOnly: Story = {
   parameters: { primedBurrow: { status: ENROLLED }, primedManagedVoice: { configured: false } },
   play: async ({ canvasElement }) => {
-    await within(canvasElement).findByRole('button', { name: 'Turn on Hosted Voice' });
+    await within(canvasElement).findByRole('button', { name: 'Turn on Natural Voice' });
   },
 };
 

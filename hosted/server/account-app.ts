@@ -10,7 +10,7 @@ import { workerApp } from "./worker-app";
 
 /**
  * The account Worker (`hosted.dormouse.sh`): auth, providers, readiness,
- * terms acceptance, Hosted Voice on or off, the Relay's account routes, and the
+ * terms acceptance, Natural Voice on or off, the Relay's account routes, and the
  * frontend. The production and preview entries differ only in `fetchAuth`'s
  * mail and in `bindings`.
  */

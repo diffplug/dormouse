@@ -74,7 +74,7 @@ export async function social(provider: Provider, linking: boolean) {
 }
 
 export interface HostedVoice {
-  /** Whether this account's plan includes Hosted Voice. */
+  /** Whether this account's plan includes Natural Voice. */
   entitled: boolean;
   /** Whether any computer of this account has it on. */
   on: boolean;
@@ -83,7 +83,7 @@ async function voice(method: string): Promise<Response> {
   return request(
     "/api/voice",
     { method },
-    "Hosted Voice is temporarily unavailable. Try again.",
+    "Natural Voice is temporarily unavailable. Try again.",
   );
 }
 /**
@@ -112,7 +112,7 @@ export async function getHostedVoice(): Promise<HostedVoice> {
   if (!response.ok) throw failed();
   return (await response.json()) as HostedVoice;
 }
-/** Turns Hosted Voice off on every computer of this account. */
+/** Turns Natural Voice off on every computer of this account. */
 export async function turnOffHostedVoice() {
   if (!(await voice("DELETE")).ok) throw failed();
 }

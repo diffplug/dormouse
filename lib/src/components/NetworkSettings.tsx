@@ -262,7 +262,7 @@ export function connectionsFor(facts: NetworkFacts): ConnectionRow[] {
   if (facts.managedVoice && status.relayMode === 'hosted') {
     rows.push({
       to: hostOf(HOSTED_VOICE_ORIGIN),
-      when: 'When an alert is spoken in Hosted Voice',
+      when: 'When an alert is spoken in Natural Voice',
       carries: 'The pane’s name and the voice id, which Hosted passes to ElevenLabs.',
     });
   }

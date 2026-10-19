@@ -74,7 +74,7 @@ const badBody = (c: Context) =>
 
 /**
  * Registers the account's /api/voice routes, which never name a token: whether
- * Hosted Voice is on, and turning it off. Call before any /api/* catch-all.
+ * Natural Voice is on, and turning it off. Call before any /api/* catch-all.
  */
 export function voiceAccountRoutes(
   app: Hono<any>,

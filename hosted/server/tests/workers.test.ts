@@ -855,7 +855,7 @@ test("terms acceptance: any signed-in account records the current version once, 
   ).toEqual([{ version: TERMS_VERSION, acceptedAt: first.acceptedAt }]);
 });
 
-test("Hosted Voice: only the verified admin speaks; the account sees on or off and turns every token off", async ({
+test("Natural Voice: only the verified admin speaks; the account sees on or off and turns every token off", async ({
   onTestFinished,
 }) => {
   const f = await fixture();
@@ -969,7 +969,7 @@ test("Hosted Voice: only the verified admin speaks; the account sees on or off a
   expect((await admin.speak(disconnecting, hi)).status).toBe(401);
   expect((await admin.speak(token, hi)).status).toBe(429);
 
-  // Turning Hosted Voice off deletes every token the account holds, and no
+  // Turning Natural Voice off deletes every token the account holds, and no
   // other account's; a same-site page, a sibling Worker's included, carries
   // the cookie but not this origin.
   for (const sameSite of SAME_SITE)

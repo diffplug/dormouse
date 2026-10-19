@@ -68,7 +68,7 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
   const [session, setSession] = useState<Session | null>(null);
   const [enabled, setEnabled] = useState<Provider[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
-  // Null hides the Hosted Voice section.
+  // Null hides the Natural Voice section.
   const [hostedVoice, setHostedVoice] = useState<HostedVoice | null>(null);
   const turnOffDialog = useRef<HTMLDialogElement>(null);
   // Null hides the Computers section.
@@ -240,7 +240,7 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
         turnOffDialog.current?.close();
       }
       setHostedVoice((voice) => voice && { ...voice, on: false });
-      setNotice("Hosted Voice is off. Your computers use the system voice.");
+      setNotice("Natural Voice is off. Your computers use the system voice.");
     });
   const approve = (code: string) =>
     act("approve", async () => {
@@ -265,7 +265,7 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
           null,
       );
     });
-  // A lapsed account still sees, and may turn off, a Hosted Voice left on.
+  // A lapsed account still sees, and may turn off, a Natural Voice left on.
   const voiceShown = !!hostedVoice && (hostedVoice.entitled || hostedVoice.on);
   const fresh =
     session &&
@@ -287,7 +287,7 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
             ? "Coming soon"
             : enrolling
             ? enrolling.purpose === "voice"
-              ? "Turn on Hosted Voice"
+              ? "Turn on Natural Voice"
               : "Enroll remote control"
             : session
               ? "Your account"
@@ -301,7 +301,7 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
               ? "This link cannot be approved."
               : session
                 ? enrolling.purpose === "voice"
-                  ? "Dormouse asked to turn on Hosted Voice with this account."
+                  ? "Dormouse asked to turn on Natural Voice with this account."
                   : "Dormouse asked to enroll remote control with this account."
                 : "Sign in to approve the computer that sent you here."
             : session
@@ -453,26 +453,26 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
                 </section>
                 {voiceShown && (
                   <section aria-labelledby="voice">
-                    <h2 id="voice">Hosted Voice</h2>
+                    <h2 id="voice">Natural Voice</h2>
                     {hostedVoice.on ? (
                       <>
                         <p className="help">
                           {hostedVoice.entitled
-                            ? "Alarms speak in a natural voice on the computers where you turned Hosted Voice on."
-                            : "Hosted Voice is on for your computers, but your account has no Hosted plan, so alarms use the system voice."}{" "}
-                          Hosted Voice is in admin-only testing.
+                            ? "Alarms use Natural Voice on the computers where you turned it on."
+                            : "Natural Voice is on for your computers, but your account has no Hosted plan, so alarms use the system voice."}{" "}
+                          Natural Voice is in admin-only testing.
                         </p>
                         <button
                           disabled={!!busy}
                           onClick={() => turnOffDialog.current?.showModal()}
                         >
-                          Turn off Hosted Voice
+                          Turn off Natural Voice
                         </button>
                       </>
                     ) : (
                       <p className="help">
-                        To turn on Hosted Voice, open Dormouse on your computer
-                        and go to Settings → Notifications. Hosted Voice is in
+                        To turn on Natural Voice, open Dormouse on your computer
+                        and go to Settings → Notifications. Natural Voice is in
                         admin-only testing.
                       </p>
                     )}
@@ -481,10 +481,10 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
                       aria-labelledby="voice-off-title"
                       onCancel={(event) => busy && event.preventDefault()}
                     >
-                      <h2 id="voice-off-title">Turn off Hosted Voice?</h2>
+                      <h2 id="voice-off-title">Turn off Natural Voice?</h2>
                       <p>
                         Every computer where you turned it on goes back to the
-                        system voice. To use Hosted Voice again, turn it on in
+                        system voice. To use Natural Voice again, turn it on in
                         Dormouse on each computer.
                       </p>
                       <div className="dialog-actions">
@@ -556,8 +556,8 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
                     {voiceShown
                       ? "Remote control is"
                       : computers
-                        ? "Hosted Voice is"
-                        : "Hosted Voice and remote control are"}{" "}
+                        ? "Natural Voice is"
+                        : "Natural Voice and remote control are"}{" "}
                     not available yet.
                   </p>
                 )}
@@ -707,7 +707,7 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
                 )}
                 {!enrolling && (
                   <p className="footnote">
-                    Hosted Voice and remote control are not available yet.
+                    Natural Voice and remote control are not available yet.
                   </p>
                 )}
               </>

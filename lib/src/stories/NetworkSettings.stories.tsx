@@ -326,7 +326,7 @@ export const ManagedVoice: Story = {
   },
   play: async ({ canvasElement }) => {
     const canvas = await settled(canvasElement);
-    await canvas.findByText(/When an alert is spoken in Hosted Voice\./);
+    await canvas.findByText(/When an alert is spoken in Natural Voice\./);
   },
 };
 

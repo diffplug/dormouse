@@ -16,7 +16,7 @@ const HINT = 'mt-1 text-sm leading-relaxed text-muted';
 
 const REFUSAL: Record<Exclude<ManagedVoiceConfigResult, { ok: true }>['reason'], string> = {
   'invalid-voice': 'That voice is not one Dormouse Hosted offers.',
-  unavailable: 'This app could not save the Hosted Voice setting.',
+  unavailable: 'This app could not save the Natural Voice setting.',
 };
 
 /** What leaves this computer, said before the first request (`docs/specs/alert.md` -> "Settings dialog"). */
@@ -58,7 +58,7 @@ export function useManagedVoiceConfigured(): boolean {
   return useManagedVoiceStatus(getPlatform().managedVoice)?.configured === true;
 }
 
-/** Hosted Voice's own approval and turning off; remote control has its own enrollment. */
+/** Natural Voice's own approval and turning off; remote control has its own enrollment. */
 export function ManagedVoiceSection({ onShowNetwork }: { onShowNetwork?: () => void }) {
   const port = getPlatform().managedVoice;
   const voice = useManagedVoiceStatus(port);
@@ -77,19 +77,19 @@ export function ManagedVoiceSection({ onShowNetwork }: { onShowNetwork?: () => v
 
   return (
     <div className="mt-3">
-      <div className="text-sm text-foreground">Hosted Voice</div>
+      <div className="text-sm text-foreground">Natural Voice</div>
       <p className={HINT}>{MANAGED_VOICE_DISCLOSURE}</p>
       {voice?.configured ? (
         <>
           <div className="mt-2 text-sm leading-relaxed text-foreground">
             {voice.notEntitled ? (
               <>{NO_PLAN_COPY} <ExternalTextLink href={HOSTED_PRICING_URL}>See Hosted plans</ExternalTextLink></>
-            ) : 'Hosted Voice is on.'}
+            ) : 'Natural Voice is on.'}
           </div>
           <label className="mt-2 flex items-center gap-2">
             <span className={FIELD_LABEL}>Voice</span>
             <select
-              aria-label="Hosted Voice"
+              aria-label="Natural Voice"
               className={SELECT_CLASS}
               value={voice.voiceId}
               disabled={busy}
@@ -105,7 +105,7 @@ export function ManagedVoiceSection({ onShowNetwork }: { onShowNetwork?: () => v
           </label>
           {confirming ? (
             <div className="mt-2 text-sm leading-relaxed">
-              <p>Turn off Hosted Voice on this computer? Alarms will use your system voice.</p>
+              <p>Turn off Natural Voice on this computer? Alarms will use your system voice.</p>
               <div className="mt-2 flex gap-2">
                 <button type="button" disabled={busy} className={modalActionButton()} onClick={() => perform(() => port.disconnect())}>
                   Turn off
@@ -123,7 +123,7 @@ export function ManagedVoiceSection({ onShowNetwork }: { onShowNetwork?: () => v
         </>
       ) : voice?.disconnectFailed ? (
         <div className="mt-2">
-          <p className={HINT}>Hosted Voice is off for this session, but turning it off did not finish. Retry before restarting Dormouse.</p>
+          <p className={HINT}>Natural Voice is off for this session, but turning it off did not finish. Retry before restarting Dormouse.</p>
           <button type="button" disabled={busy} className={modalActionButton()} onClick={() => perform(() => port.disconnect())}>
             Retry
           </button>
@@ -136,13 +136,13 @@ export function ManagedVoiceSection({ onShowNetwork }: { onShowNetwork?: () => v
           onCancel={() => perform(() => port.cancelEnrollment())}
         />
       ) : saving ? (
-        <p className={HINT}>Approved. Turning on Hosted Voice…</p>
+        <p className={HINT}>Approved. Turning on Natural Voice…</p>
       ) : (
         <>
           {enrollment?.status === 'ended' ? <p className={HINT} role="status">{enrollment.message}</p> : null}
           {networkOff ? (
             <p className={HINT}>
-              Turning on Hosted Voice reaches Dormouse Hosted. Choose Local networks or Anywhere in <NetworkTopicLink onShow={onShowNetwork} /> to turn it on.
+              Turning on Natural Voice reaches Dormouse Hosted. Choose Local networks or Anywhere in <NetworkTopicLink onShow={onShowNetwork} /> to turn it on.
             </p>
           ) : (
             <button
@@ -151,7 +151,7 @@ export function ManagedVoiceSection({ onShowNetwork }: { onShowNetwork?: () => v
               className={modalActionButton({ tone: 'primary', className: 'mt-2' })}
               onClick={() => perform(() => port.beginEnrollment())}
             >
-              Turn on Hosted Voice
+              Turn on Natural Voice
             </button>
           )}
         </>

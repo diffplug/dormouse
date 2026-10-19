@@ -79,7 +79,7 @@ What each plan grants once checkout can sell it; [Published prices](#published-p
 
 | Grant | At launch |
 |---|---|
-| Managed voices for spoken alarms on every machine the member signs in on | live |
+| Natural Voice for spoken alarms on every machine the member signs in on | live |
 | A member default voice, chosen from a curated set | live |
 | Dormouse Hosted: the managed Relay, enrollment of the member's Burrows, sealed push, Pocket without a tailnet | live |
 | Founding badge | live for founding |

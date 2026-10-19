@@ -4,7 +4,7 @@
 
 Separate approval (2026-10): enabling voice must not enroll remote control or reset phone pairings. Purpose-separated code derivation prevents a code approved for voice from authorizing remote enrollment.
 
-No computer record (decided 2026-10-19): the account page never shows tokens, so nothing needs to know which computer holds one. A token that never expires while in use keeps Hosted Voice seamless; a year idle bounds one left on a computer nobody uses, and turning off is the account's way to end them all at once. The daily cap counts per account, so more tokens never mean more speech. Expired rows are swept daily by a cron of their own, not by the 5-minute history sweep, so that sweep still never wakes Postgres; once a day costs one wake. The relay's hourly sweep would need its role to reach voice tokens. Deleting on read was rejected: an expired token mostly sits on a computer that never calls again.
+No computer record (decided 2026-10-19): the account page never shows tokens, so nothing needs to know which computer holds one. A token that never expires while in use keeps Natural Voice seamless; a year idle bounds one left on a computer nobody uses, and turning off is the account's way to end them all at once. The daily cap counts per account, so more tokens never mean more speech. Expired rows are swept daily by a cron of their own, not by the 5-minute history sweep, so that sweep still never wakes Postgres; once a day costs one wake. The relay's hourly sweep would need its role to reach voice tokens. Deleting on read was rejected: an expired token mostly sits on a computer that never calls again.
 
 History sweep (sources checked 2026-09-22):
 
