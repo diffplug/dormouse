@@ -15,7 +15,7 @@
 
 **Every price on the site has one owner**, `website/src/lib/hosted-pricing.ts`; site code reads it rather than restating a number.
 
-**Must describe both grants as live, never upcoming.** The managed Relay section carries the one qualifier: the independent review `docs/specs/security-remote.md` -> "Cloud-hosted mode" requires.
+**Must describe both grants as live, never upcoming.**
 
 ### Plan cards
 
@@ -56,7 +56,7 @@ Source of truth: `Hosted` in `website/src/pages/Hosted.tsx`; the `/pricing` rule
 1. **The cohort endpoint** the page already calls: the open cohort's seats and the opted-in founders, avatars proxied onto this origin.
 2. **Checkout and entitlement**: purchase, the subscription as the account's entitlement, revocation.
 3. **Managed voice for members**: the subscription replacing the admin-only entitlement (`docs/specs/hosted.md` -> "Entitlement"), one voice per Pane.
-4. **Hosted Relay inclusion**: the subscription as the Relay's entitlement (`docs/specs/hosted.md` -> "Relay"), gated on the independent review `docs/specs/security-remote.md` -> "Cloud-hosted mode" requires.
+4. **Hosted Relay inclusion**: the subscription as the Relay's entitlement (`docs/specs/hosted.md` -> "Relay").
 5. **Renewal, cancellation, and refund** paths.
 
 Team and enterprise tiers are never sold through this page. A free hosted tier is undecided — see [Open questions](#open-questions).

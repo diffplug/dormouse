@@ -1,7 +1,7 @@
 /**
  * The relay, hostile: what an operator who records, drops, reorders,
  * duplicates, modifies, and invents frames can actually obtain
- * (docs/specs/remote-security-model.md -> Burrow bounds, Security Guarantees).
+ * (docs/specs/remote-security-model.md -> Burrow bounds; docs/specs/security-remote.md -> Trust boundary).
  *
  * `e2e-relay.test.mjs` drives the same two peers through the *honest* relay;
  * this file replaces it with one that is trying, so the assertions are about

@@ -549,7 +549,7 @@ export default function Hosted() {
           >
             trust model
           </a>{" "}
-          lists exactly which. Its independent security review is pending.
+          lists exactly which.
         </p>
       </section>
 

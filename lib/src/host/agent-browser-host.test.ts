@@ -6,7 +6,7 @@ import { dirname, join } from 'path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { BrowserOp, BrowserRequestBinding } from '../lib/platform/browser-automation';
 import { WebSocket, WebSocketServer } from 'ws';
-import { createAgentBrowserProvider } from './agent-browser-host';
+import { DAEMON_ACTION_TIMEOUT_MS, createAgentBrowserProvider } from './agent-browser-host';
 import { createBrowserCaptures, type BrowserCaptures } from './browser-capture';
 import { createBrowserHost } from './browser-host';
 import { openViewer, syncStates } from './browser-host-test-utils';
@@ -675,6 +675,12 @@ describe('agent-browser host viewer', () => {
       received,
       connected: () => vi.waitFor(() => expect(client).toBeDefined()).then(() => client!),
       send: (message: unknown) => client!.send(typeof message === 'string' ? message : JSON.stringify(message)),
+      /** The stream clients still open. */
+      clients: () => [...server.clients].filter((ws) => ws.readyState === WebSocket.OPEN),
+      /** `message` to every open stream client, as the daemon sends it. */
+      broadcast: (message: unknown) => {
+        for (const ws of server.clients) if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message));
+      },
     };
   }
 
@@ -772,6 +778,158 @@ describe('agent-browser host viewer', () => {
     // An agent's `set viewport`, as the daemon's frames show it.
     daemon.send(frame(2, 1024));
     await vi.waitFor(() => expect(syncStates(viewer).at(-1)).toBe('off'));
+  });
+
+  it('sizes the tab the daemon shows anew at the Fixed viewport, keyed on its stable tab id', async () => {
+    running(session);
+    const daemon = await fakeServer();
+    writeState(session, 'stream', daemon.port);
+    spawnMock.mockImplementation(async () => spawnResult({}));
+    const host = makeHost();
+    hosts.push(host);
+    expect((await ab(host, { op: 'viewport', width: 900, height: 600, dpr: 2 }, { session })).ok).toBe(true);
+    const { url } = await ab(host, { op: 'view', stream: daemon.port }, { session });
+    const viewer = await openViewer(url!);
+    await daemon.connected();
+    const sized = () => spawnMock.mock.calls.filter(([, args]) => args.slice(2).join(' ') === 'set viewport 900 600 2').length;
+    const tabs = (...list: [string, boolean, string][]) => daemon.send({ type: 'tabs', tabs: list.map(([tabId, active, title]) => ({ tabId, url: `https://example.com/${tabId}`, title, active })) });
+    tabs(['t1', true, 'One']);
+    tabs(['t1', true, 'Renamed']);
+    await vi.waitFor(() => expect(viewer.states).toHaveLength(2));
+    expect(sized()).toBe(1);
+    // A popup the daemon reports active comes up at its own size.
+    tabs(['t1', false, 'Renamed'], ['t2', true, 'Popup']);
+    await vi.waitFor(() => expect(sized()).toBe(2));
+  });
+
+  describe('rebinding the screencast to the active tab', () => {
+    const tabsOf = (...list: [string, boolean][]) => ({ type: 'tabs', tabs: list.map(([tabId, active]) => ({ tabId, url: `https://example.com/${tabId}`, title: tabId, active })) });
+
+    /** The daemon's own socket, answering each action with `answer`. */
+    async function daemonSocket(answer: (action: string) => object | null = (action) => (action === 'screencast_stop' ? { success: false, error: 'No screencast active' } : { success: true })) {
+      const actions: string[] = [];
+      const server = createServer((client) => {
+        let buffered = '';
+        client.on('data', (data) => {
+          buffered += data.toString();
+          const end = buffered.indexOf('\n');
+          if (end < 0) return;
+          const request = JSON.parse(buffered.slice(0, end)) as { id: string; action: string };
+          actions.push(request.action);
+          const reply = answer(request.action);
+          if (reply) client.end(`${JSON.stringify({ id: request.id, ...reply })}\n`);
+        });
+        client.on('error', () => {});
+      });
+      await new Promise<void>((resolve) => server.listen(join(process.env.AGENT_BROWSER_SOCKET_DIR!, `${session}.sock`), resolve));
+      onTestFinished(() => new Promise<void>((resolve) => server.close(() => resolve())));
+      return { actions };
+    }
+
+    /** A daemon streaming for the session, and one host whose viewers watch it. */
+    async function streaming(answer?: Parameters<typeof daemonSocket>[0]) {
+      running(session);
+      const daemon = await fakeServer();
+      writeState(session, 'stream', daemon.port);
+      const { actions } = await daemonSocket(answer);
+      const host = makeHost();
+      hosts.push(host);
+      const viewer = async (headed = false) => {
+        const { url } = await ab(host, { op: 'view', stream: daemon.port, ...(headed ? { headed } : {}) }, { session });
+        return openViewer(url!);
+      };
+      return { daemon, host, viewer, actions };
+    }
+    const settled = () => new Promise((resolve) => setTimeout(resolve, 150));
+    const RESTART = ['screencast_stop', 'screencast_start'];
+
+    it('restarts the screencast when a viewer connects, and at once when the daemon makes another tab active', async () => {
+      const { daemon, viewer, actions } = await streaming();
+      await viewer();
+      await daemon.connected();
+      await vi.waitFor(() => expect(actions).toEqual(RESTART));
+      daemon.send(tabsOf(['t1', true]));
+      await settled();
+      expect(actions).toEqual(RESTART);
+      daemon.send(tabsOf(['t1', false], ['t2', true]));
+      await vi.waitFor(() => expect(actions).toEqual([...RESTART, ...RESTART]));
+      // Only a restart: no tab is ever selected.
+      expect(spawnMock.mock.calls.map(([, args]) => args[2])).not.toContain('tab');
+    });
+
+    it('restarts once for a browser two viewers watch, and stops the screencast with the last', async () => {
+      const { daemon, viewer, actions } = await streaming();
+      const first = await viewer();
+      const second = await viewer();
+      await vi.waitFor(() => expect(daemon.clients()).toHaveLength(2));
+      daemon.broadcast(tabsOf(['t1', true]));
+      daemon.broadcast(tabsOf(['t1', false], ['t2', true]));
+      await vi.waitFor(() => expect(actions).toEqual([...RESTART, ...RESTART]));
+      await settled();
+      expect(actions).toEqual([...RESTART, ...RESTART]);
+      first.socket.close();
+      await settled();
+      expect(actions).toHaveLength(4);
+      second.socket.close();
+      await vi.waitFor(() => expect(actions).toEqual([...RESTART, ...RESTART, 'screencast_stop']));
+    });
+
+    it('restarts for a viewer that comes back after the daemon changed tabs unwatched', async () => {
+      const { daemon, viewer, actions } = await streaming();
+      const first = await viewer();
+      await daemon.connected();
+      daemon.send(tabsOf(['t1', true]));
+      await vi.waitFor(() => expect(first.states).toHaveLength(1));
+      first.socket.close();
+      await vi.waitFor(() => expect(actions).toEqual([...RESTART, 'screencast_stop']));
+      await viewer();
+      await vi.waitFor(() => expect(actions).toEqual([...RESTART, 'screencast_stop', ...RESTART]));
+    });
+
+    it('sends nothing for a headed window', async () => {
+      const { daemon, viewer, actions } = await streaming();
+      await viewer(true);
+      await daemon.connected();
+      daemon.send(tabsOf(['t1', true]));
+      daemon.send(tabsOf(['t1', false], ['t2', true]));
+      await settled();
+      expect(actions).toEqual([]);
+    });
+
+    it('takes any refusal as leaving the stream as it was, and keeps streaming', async () => {
+      const { daemon, host, viewer, actions } = await streaming(() => ({ success: false, error: 'Not yet implemented: screencast_start' }));
+      const pane = await viewer();
+      await daemon.connected();
+      await vi.waitFor(() => expect(actions).toEqual(RESTART));
+      daemon.send(tabsOf(['t1', true]));
+      await vi.waitFor(() => expect(pane.states).toHaveLength(1));
+      const { diagnostics } = await ab(host, { op: 'diagnostics' } as BrowserOp, { session });
+      expect(diagnostics?.screencast).toMatchObject({ refusals: 1, last: { outcome: expect.stringContaining('Not yet implemented') } });
+    });
+
+    it('takes a daemon that never answers as a refusal, in time', async () => {
+      const { daemon, host, viewer, actions } = await streaming(() => null);
+      await viewer();
+      await daemon.connected();
+      await vi.waitFor(() => expect(actions).toEqual(RESTART), { timeout: 2 * DAEMON_ACTION_TIMEOUT_MS + 1000 });
+      await vi.waitFor(async () => expect((await ab(host, { op: 'diagnostics' } as BrowserOp, { session })).diagnostics?.screencast).toMatchObject({ refusals: 1 }), { timeout: DAEMON_ACTION_TIMEOUT_MS + 1000 });
+    }, 10_000);
+
+    it('reaches no socket for a daemon its state files do not prove', async () => {
+      const daemon = await fakeServer();
+      const { actions } = await daemonSocket();
+      // No pid file: the stream is watched, never driven.
+      writeState(session, 'stream', daemon.port);
+      const host = makeHost();
+      hosts.push(host);
+      const { url } = await ab(host, { op: 'view', stream: daemon.port }, { session });
+      await openViewer(url!);
+      await daemon.connected();
+      daemon.send(tabsOf(['t1', true]));
+      daemon.send(tabsOf(['t1', false], ['t2', true]));
+      await settled();
+      expect(actions).toEqual([]);
+    });
   });
 
   it('sends the daemon only validated input, a paste as a key pair per character', async () => {

@@ -20,7 +20,7 @@ import {
 export { HIDDEN_PARK_DELAY_MS } from './agent-browser-surface-controller';
 import type { PaneProps } from './pane-props';
 import { usePaneChrome } from './use-pane-chrome';
-import { useSurfaceVisibility } from './use-surface-visibility';
+import { useSurfaceSight } from './use-surface-visibility';
 import {
   ModeContext,
   PaneWriteContext,
@@ -148,10 +148,10 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
   // Feed effective on-screen visibility (foreground window, not a parked leaf,
   // not under a zoomed one) so the controller can park a hidden pane after the
   // debounce. A minimized screencast stays mounted but stops pulling frames.
-  const visible = useSurfaceVisibility(parked, id);
+  const sight = useSurfaceSight(parked, id);
   useEffect(() => {
-    controller.setVisible(visible);
-  }, [controller, visible]);
+    controller.setSight(sight);
+  }, [controller, sight]);
 
   // Crossing to the single-frame iframe renderer closes all but the active tab;
   // when others are open the swap is gated behind a typed confirm (overlay below).

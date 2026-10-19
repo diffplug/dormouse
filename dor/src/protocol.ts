@@ -26,6 +26,7 @@ export const SURFACE_CONTROL_METHODS = {
   iframe: 'surface.iframe',
   browser: 'surface.browser',
   browserViewport: 'surface.browserViewport',
+  browserDiagnostics: 'surface.browserDiagnostics',
   resolveBrowser: 'surface.resolveBrowser',
   resolveOpen: 'surface.resolveOpen',
 } as const;

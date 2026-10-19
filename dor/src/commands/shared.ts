@@ -153,3 +153,10 @@ export function callerWorkingDirectory(flag: string | undefined, { env, host }: 
   const base = msysToWindowsCwd(env?.PWD ?? host.cwd(), host.platform);
   return host.resolvePath(base, flag ?? '.');
 }
+
+/** The help both browser commands give their `dor-diagnostics` intercept. */
+export function diagnosticsHelp(command: string): string {
+  return `and dor-diagnostics to print, as JSON, what the pane and the host know about
+its stream — for a pane that froze, or never showed its page:
+  ${command} --surface surface:3 dor-diagnostics`;
+}

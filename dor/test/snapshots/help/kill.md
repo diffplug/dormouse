@@ -19,7 +19,7 @@ Text output:
 JSON output:
   {
     "status": "killed",
-    "surface_id": "...",
+    "surface_id": "..."
   }
 
 FLAGS

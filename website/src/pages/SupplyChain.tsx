@@ -14,6 +14,7 @@ import {
   TH_CLASS,
 } from "../components/docs-tokens";
 import MarkdownDocument, { AnchoredHeading, type BlockNode } from "../components/MarkdownDocument";
+import { securityColumnWeights } from "../components/security-columns";
 import security from "../data/docs.security.json";
 import { type MetaArgs } from "react-router";
 import { type TocEntry } from "../lib/docs-pages";
@@ -252,10 +253,11 @@ const PRODUCTS: readonly SupplyChainProduct[] = [
 
 /**
  * The security spec's rows and bullets for what reaches a user's machine,
- * rendered from `docs.security.json` rather than restated here
+ * rendered from `docs.security.json` rather than restated here, without the
+ * feature tags this page has no feature table for
  * (docs/specs/website-docs.md -> `/security` spec).
  */
-const CONTRACT = security.audiences["supply-chain"];
+const CONTRACT = security.supplyChain;
 
 /** The spec's subsections this page shows, each only while it has something to say. */
 const CONTRACT_SECTIONS = [
@@ -326,7 +328,7 @@ export default function SupplyChain() {
         </a>
         .
       </p>
-      <MarkdownDocument blocks={[CONTRACT.guarantees as BlockNode]} />
+      <MarkdownDocument blocks={[CONTRACT.guarantees as BlockNode]} columnWeights={securityColumnWeights} />
       {CONTRACT_SECTIONS.map(({ id, text, block }) => (
         <div key={id}>
           <AnchoredHeading id={id} depth={3}>

@@ -47,6 +47,10 @@ export type BrowserOp =
   | { op: 'measure' }
   /** Fixed built-in document reading-position operations, never arbitrary JS. */
   | { op: 'tool-view'; position?: ToolViewPosition }
+  /** What the host holds for the browser — its viewer sockets, their
+   *  upstreams and captures, sync — and where its provider says it streams,
+   *  for `dor`'s diagnostics. Answered mid-launch and mid-close too. */
+  | { op: 'diagnostics' }
   /** Close the session — after the launch or attach of it running now — and
    *  cancel `cancels`: requests the closing Surface sent that can bring the
    *  browser up, by their `requestId`, however late the transport delivers
@@ -80,6 +84,8 @@ export interface BrowserResult {
   text?: string;
   /** `measure`: the active page's own values, not frame or pane dimensions. */
   viewport?: { width: number; height: number; dpr: number };
+  /** `diagnostics`: plain JSON, for people and agents to read. */
+  diagnostics?: Record<string, unknown>;
 }
 
 
