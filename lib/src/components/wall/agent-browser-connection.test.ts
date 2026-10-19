@@ -132,7 +132,7 @@ describe('viewer socket connection', () => {
 
   it('selects a newly opened tab that is not active, and not one already active on a duplicate URL', async () => {
     const selectTab = vi.fn(async () => ({ ok: true }));
-    const { connection } = connect({ selectTab });
+    const { connection } = connect({ selectTab, reselectActiveTab: false });
     await flush();
     const tab = (tabId: string, active: boolean, url = 'https://dormouse.sh/') => ({ tabId, title: 'Dormouse', url, active });
     socket().emitMessage(JSON.stringify({ type: 'tabs', tabs: [tab('t1', true)] }));
@@ -141,5 +141,85 @@ describe('viewer socket connection', () => {
     socket().emitMessage(JSON.stringify({ type: 'tabs', tabs: [tab('t1', false), tab('t2', true), tab('t3', false, 'https://other.example/')] }));
     expect(selectTab).toHaveBeenCalledExactlyOnceWith('t3');
     connection.dispose();
+  });
+
+  describe('re-selecting the active tab, so the screencast follows it', () => {
+    const tab = (tabId: string, active: boolean, url = `https://dormouse.sh/${tabId}`) => ({ tabId, title: tabId, url, active });
+    const tabs = (...list: ReturnType<typeof tab>[]) => socket().emitMessage(JSON.stringify({ type: 'tabs', tabs: list }));
+
+    async function reselecting(deps: Partial<AgentBrowserConnectionDeps> = {}) {
+      const selectTab = vi.fn(async () => ({ ok: true }));
+      const { connection } = connect({ selectTab, reselectActiveTab: true, ...deps });
+      await flush();
+      return { connection, selectTab };
+    }
+
+    it('selects a popup the daemon reports active', async () => {
+      const { connection, selectTab } = await reselecting();
+      tabs(tab('t1', true));
+      expect(selectTab).not.toHaveBeenCalled();
+      tabs(tab('t1', false), tab('t2', true, ''));
+      expect(selectTab).toHaveBeenCalledExactlyOnceWith('t2');
+      // Its URL arriving is no change of the active tab.
+      tabs(tab('t1', false), tab('t2', true));
+      expect(selectTab).toHaveBeenCalledOnce();
+      connection.dispose();
+    });
+
+    it('selects the tab made active when the active one closes', async () => {
+      const { connection, selectTab } = await reselecting();
+      tabs(tab('t1', false), tab('t2', false), tab('t3', true));
+      tabs(tab('t1', true), tab('t2', false));
+      expect(selectTab).toHaveBeenCalledExactlyOnceWith('t1');
+      connection.dispose();
+    });
+
+    it('still selects a new inactive tab, without selecting it again once active', async () => {
+      const { connection, selectTab } = await reselecting();
+      tabs(tab('t1', true));
+      tabs(tab('t1', true), tab('t2', false));
+      expect(selectTab).toHaveBeenCalledExactlyOnceWith('t2');
+      tabs(tab('t1', false), tab('t2', true));
+      expect(selectTab).toHaveBeenCalledOnce();
+      connection.dispose();
+    });
+
+    it('does not select again a tab the pane selected itself', async () => {
+      const { connection, selectTab } = await reselecting();
+      tabs(tab('t1', true), tab('t2', false));
+      connection.noteSelected('t2');
+      tabs(tab('t1', false), tab('t2', true));
+      expect(selectTab).not.toHaveBeenCalled();
+      connection.dispose();
+    });
+
+    it('takes the first report as the baseline, unless a previous view of the stream saw another tab active', async () => {
+      const first = await reselecting();
+      tabs(tab('t1', false), tab('t2', true));
+      expect(first.selectTab).not.toHaveBeenCalled();
+      first.connection.dispose();
+      const resumed = await reselecting({ lastActiveTabId: 't1' });
+      tabs(tab('t1', false), tab('t2', true));
+      expect(resumed.selectTab).toHaveBeenCalledExactlyOnceWith('t2');
+      resumed.connection.dispose();
+    });
+
+    it('selects nothing for a popped-out window', async () => {
+      const { connection, selectTab } = await reselecting({ canSelectTabs: () => false });
+      tabs(tab('t1', true));
+      tabs(tab('t1', false), tab('t2', true));
+      expect(selectTab).not.toHaveBeenCalled();
+      connection.dispose();
+    });
+
+    it("never selects on a provider whose tab ids are list indexes that shift on a close (Playwright)", async () => {
+      const { connection, selectTab } = await reselecting({ reselectActiveTab: false });
+      tabs(tab('0', false), tab('1', false), tab('2', true));
+      // Tab 0 closes: the active page is now index 1, its id shifted.
+      tabs(tab('0', false), tab('1', true));
+      tabs(tab('0', true));
+      expect(selectTab).not.toHaveBeenCalled();
+      connection.dispose();
+    });
   });
 });

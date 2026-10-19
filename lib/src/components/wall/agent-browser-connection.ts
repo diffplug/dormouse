@@ -65,6 +65,14 @@ export interface AgentBrowserConnectionDeps {
   /** Whether a newly observed inactive tab is selected for the pane: only a
    *  headless view, never a popped-out window the user drives. */
   canSelectTabs?: () => boolean;
+  /** Re-select the active tab whenever another one is reported active, which
+   *  rebinds a screencast that stayed on the page before
+   *  (`BROWSER_PROVIDER_GUI` → `reselectsActiveTab`). */
+  reselectActiveTab?: boolean;
+  /** The active tab the last connection to this same stream saw, against which
+   *  the first report counts as a change: a new viewer does not rebind the
+   *  daemon's screencast either. */
+  lastActiveTabId?: string;
   log?: (message: string) => void;
 }
 
@@ -86,6 +94,11 @@ export class AgentBrowserConnection {
   private disposed = false;
   private failures = 0;
   private knownTabIds = new Set<string>();
+  /** The active tab of the last report, or the one `lastActiveTabId` seeded. */
+  private activeTabId: string | undefined;
+  /** A select this connection issued, or was told of, that the daemon has yet
+   *  to report active: the active-tab change it causes is not re-selected. */
+  private selectIssued: string | undefined;
   private pendingNewTab: { tabId: string; initialUrl: string; seenAtMs: number } | null = null;
   private snap: AgentBrowserSnapshot;
 
@@ -97,6 +110,7 @@ export class AgentBrowserConnection {
       tabs: [],
       status: null,
     };
+    this.activeTabId = deps.lastActiveTabId;
     void this.connect();
   }
 
@@ -248,7 +262,10 @@ export class AgentBrowserConnection {
       return;
     }
 
-    this.maybeSelectNewTab(next, previousTabs);
+    // A tab selected for being new is where the pane is going: the active
+    // tab this report names is not selected over it.
+    const selectedNew = this.maybeSelectNewTab(next, previousTabs);
+    this.maybeReselectActiveTab(next, !selectedNew);
     this.knownTabIds = new Set(next.map((t) => t.tabId));
     const sig = JSON.stringify({ stream: this.deps.stream, t: next.map((t) => `${t.tabId}:${t.active ? 'A' : '-'}:${t.url}`) });
     this.log(`[ab-panel] tabs msg ${sig}`);
@@ -257,39 +274,87 @@ export class AgentBrowserConnection {
     this.emit({ type: 'tabs', tabs: next, previousTabs });
   }
 
-  private maybeSelectNewTab(next: AgentBrowserTab[], previousTabs: AgentBrowserTab[]): void {
-    const canSelect = this.deps.canSelectTabs?.() ?? true;
-    const maybeSelectTab = (tab: AgentBrowserTab, reason: string) => {
-      if (!canSelect) return;
-      this.log(`[ab-panel] selecting tab ${JSON.stringify({ tabId: tab.tabId, url: tab.url, reason })}`);
-      this.debug('select-tab', { tabId: tab.tabId, url: tab.url, reason });
-      this.deps.selectTab?.(tab.tabId).then((result) => {
-        if (!result.ok) this.log(`[agent-browser] tab ${tab.tabId} failed: ${result.error ?? 'no reason given'}`);
-      }).catch((err) => this.log(`[agent-browser] tab ${tab.tabId} failed: ${err instanceof Error ? err.message : String(err)}`));
-    };
+  /** A select of `tabId` made elsewhere (the pane's tab strip): the active-tab
+   *  change it causes is not selected again. */
+  noteSelected(tabId: string): void {
+    this.selectIssued = tabId;
+  }
 
+  /** Select the active tab again, rebinding the daemon's screencast to it;
+   *  false when there is none to select or selecting is not this pane's. */
+  reselectActiveTab(reason: string): boolean {
+    const active = this.snap.tabs.find((t) => t.active);
+    if (!active || !this.canSelect()) return false;
+    this.select(active, reason);
+    return true;
+  }
+
+  private canSelect(): boolean {
+    return this.deps.canSelectTabs?.() ?? true;
+  }
+
+  private select(tab: AgentBrowserTab, reason: string): void {
+    if (!this.canSelect()) return;
+    this.selectIssued = tab.tabId;
+    this.log(`[ab-panel] selecting tab ${JSON.stringify({ tabId: tab.tabId, url: tab.url, reason })}`);
+    this.debug('select-tab', { tabId: tab.tabId, url: tab.url, reason });
+    this.deps.selectTab?.(tab.tabId).then((result) => {
+      if (!result.ok) this.log(`[agent-browser] tab ${tab.tabId} failed: ${result.error ?? 'no reason given'}`);
+    }).catch((err) => this.log(`[agent-browser] tab ${tab.tabId} failed: ${err instanceof Error ? err.message : String(err)}`));
+  }
+
+  /**
+   * agent-browser's daemon moves its screencast only on its own tab switch:
+   * an active tab it changed by itself — a popup it reports active, a closed
+   * active tab another replaced — leaves the stream on the old page, sending
+   * nothing. Selecting the new active tab rebinds it. A change this connection
+   * selected, or was told of, is not selected again, and a select of the tab
+   * already active changes nothing, so no report answers with another.
+   */
+  private maybeReselectActiveTab(next: AgentBrowserTab[], allowed: boolean): void {
+    const active = next.find((t) => t.active);
+    const before = this.activeTabId;
+    if (!active) return;
+    this.activeTabId = active.tabId;
+    if (this.selectIssued === active.tabId) {
+      this.selectIssued = undefined;
+      return;
+    }
+    if (!allowed || !this.deps.reselectActiveTab || before === undefined || before === active.tabId) return;
+    this.debug('active-tab-changed', { from: before, to: active.tabId });
+    this.select(active, 'active-tab-changed');
+  }
+
+  /** Whether it selected a tab. */
+  private maybeSelectNewTab(next: AgentBrowserTab[], previousTabs: AgentBrowserTab[]): boolean {
+    let selected = false;
+    const select = (tab: AgentBrowserTab, reason: string) => {
+      this.select(tab, reason);
+      selected = true;
+    };
     const pending = this.pendingNewTab;
     if (pending) {
       const tab = next.find((t) => t.tabId === pending.tabId);
       if (!tab) {
         this.pendingNewTab = null;
       } else if (tab.url !== pending.initialUrl) {
-        if (!tab.active) maybeSelectTab(tab, 'new-tab-destination');
+        if (!tab.active) select(tab, 'new-tab-destination');
         else this.log(`[ab-panel] new tab destination observed ${JSON.stringify({ tabId: tab.tabId, url: tab.url, elapsedMs: Math.round(performance.now() - pending.seenAtMs) })}`);
         this.pendingNewTab = null;
       }
     }
 
-    if (this.knownTabIds.size === 0) return;
+    if (this.knownTabIds.size === 0) return selected;
     const fresh = next.filter((t) => !this.knownTabIds.has(t.tabId));
     const newest = fresh[fresh.length - 1];
-    if (!newest) return;
+    if (!newest) return selected;
     const duplicateUrl = !!newest.url && previousTabs.some((tab) => tab.url === newest.url);
-    if (!newest.active) maybeSelectTab(newest, 'new-tab-inactive');
+    if (!newest.active) select(newest, 'new-tab-inactive');
     else if (duplicateUrl) {
       this.pendingNewTab = { tabId: newest.tabId, initialUrl: newest.url, seenAtMs: performance.now() };
       this.log(`[ab-panel] new tab provisional ${JSON.stringify({ tabId: newest.tabId, url: newest.url })}`);
       this.debug('new-tab-provisional', { tabId: newest.tabId, url: newest.url });
     }
+    return selected;
   }
 }

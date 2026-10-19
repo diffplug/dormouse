@@ -534,6 +534,57 @@ describe('parking', () => {
   });
 });
 
+describe('active-tab reselect', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  const tabsMessage = (...list: [string, boolean][]) => JSON.stringify({
+    type: 'tabs',
+    tabs: list.map(([tabId, active]) => ({ tabId, title: tabId, url: `https://example.com/${tabId}`, active })),
+  });
+  const selects = (host: ReturnType<typeof installBrowserHost>) => host.requests('tab').map((r) => r.tabId);
+
+  it('selects a tab agent-browser made active on its own, and the pane re-selects nothing it chose itself', async () => {
+    const host = installBrowserHost();
+    const controller = withPort('id', { session: 'sess' }, 4321);
+    controller.attachView(makeSink());
+    await vi.advanceTimersByTimeAsync(0);
+    streamSocket(4321)?.emitMessage(tabsMessage(['t1', true]));
+    streamSocket(4321)?.emitMessage(tabsMessage(['t1', false], ['t2', true]));
+    expect(selects(host)).toEqual(['t2']);
+    controller.selectTab(controller.snapshot().tabs[0]);
+    streamSocket(4321)?.emitMessage(tabsMessage(['t1', true], ['t2', false]));
+    expect(selects(host)).toEqual(['t2', 't1']);
+  });
+
+  it('selects a tab made active while the pane was parked once it streams again', async () => {
+    const host = installBrowserHost();
+    const controller = withPort('id', { session: 'sess' }, 4321);
+    controller.attachView(makeSink());
+    await vi.advanceTimersByTimeAsync(0);
+    streamSocket(4321)?.emitMessage(tabsMessage(['t1', true]));
+    controller.setVisible(false);
+    await vi.advanceTimersByTimeAsync(HIDDEN_PARK_DELAY_MS + 50);
+    expect(controller.isParked()).toBe(true);
+    controller.setVisible(true);
+    await vi.advanceTimersByTimeAsync(0);
+    streamSocket(4321)?.emitMessage(tabsMessage(['t1', false], ['t2', true]));
+    expect(selects(host)).toEqual(['t2']);
+  });
+
+  it('never selects for a Playwright pane, whose tab ids shift when a tab closes', async () => {
+    const host = installBrowserHost();
+    const controller = withPort('id', { session: 'sess', renderMode: 'playwright-screencast' }, 4321);
+    controller.attachView(makeSink());
+    await vi.advanceTimersByTimeAsync(0);
+    streamSocket(4321)?.emitMessage(tabsMessage(['0', false], ['1', false], ['2', true]));
+    // Tab 0 closes: the same page is active at index 1.
+    streamSocket(4321)?.emitMessage(tabsMessage(['0', false], ['1', true]));
+    streamSocket(4321)?.emitMessage(tabsMessage(['0', true]));
+    expect(selects(host)).toEqual([]);
+  });
+});
+
 describe('param-write buffering', () => {
   it('buffers writes while detached and flushes them on the next attach', async () => {
     // Answering no CDP endpoint keeps the popped-out CDP observer from opening

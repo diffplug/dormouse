@@ -260,6 +260,8 @@ export class AgentBrowserSurfaceController {
   // must not be blanked to the placeholder; only a real identity change resets
   // hasFrame.
   private lastConnectedIdentity: string | null = null;
+  /** The active tab the stream at `lastConnectedIdentity` last reported. */
+  private streamActiveTabId: string | undefined;
   /** The stream of the last live/parked phase: the browser `fixedDpr` describes. */
   private boundStream: number | undefined;
 
@@ -1014,6 +1016,7 @@ export class AgentBrowserSurfaceController {
     const session = this.session!;
     const stream = phase.stream;
     const headed = this.headed;
+    const identity = `${session}:${stream}`;
     const connection = createAgentBrowserConnection({
       session,
       stream,
@@ -1025,6 +1028,10 @@ export class AgentBrowserSurfaceController {
       selectTab: (tabId) => this.driver()?.tab('select', tabId)
         ?? Promise.resolve({ ok: false, error: `${this.label} commands unavailable` }),
       canSelectTabs: () => !this.headed,
+      reselectActiveTab: BROWSER_PROVIDER_GUI[this.provider].reselectsActiveTab,
+      // An unpark views the same stream: a tab made active while parked counts
+      // as a change.
+      ...(this.lastConnectedIdentity === identity && this.streamActiveTabId ? { lastActiveTabId: this.streamActiveTabId } : {}),
       log: abDebugLog,
     });
     this.connection = connection;
@@ -1074,6 +1081,7 @@ export class AgentBrowserSurfaceController {
       } else if (event.type === 'page') {
         this.applyObservedNavigation(event.url, event.title);
       } else if (event.type === 'tabs') {
+        this.streamActiveTabId = event.tabs.find((tab) => tab.active)?.tabId ?? this.streamActiveTabId;
         this.setTabs(event.tabs);
       } else if (event.type === 'frame') {
         if (event.size) this.setDeviceSize(event.size.width, event.size.height);
@@ -1086,9 +1094,9 @@ export class AgentBrowserSurfaceController {
     this.hostSynced = false;
     // Unparking reconnects to the same session/stream; the last good frame is
     // still valid, so only blank to the placeholder when the identity changed.
-    const identity = `${session}:${stream}`;
     if (this.lastConnectedIdentity !== identity) {
       this.lastConnectedIdentity = identity;
+      this.streamActiveTabId = undefined;
       this.setHasFrame(false);
     }
   }
@@ -1626,7 +1634,9 @@ export class AgentBrowserSurfaceController {
   }
 
   selectTab(tab: StreamTab): void {
-    if (!tab.active) this.drive(`tab ${tab.tabId}`, (browser) => browser.tab('select', tab.tabId));
+    if (tab.active) return;
+    if (this.driver()) this.connection?.noteSelected(tab.tabId);
+    this.drive(`tab ${tab.tabId}`, (browser) => browser.tab('select', tab.tabId));
   }
 
   closeTab(tab: StreamTab): void {
