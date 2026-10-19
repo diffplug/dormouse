@@ -6,17 +6,24 @@ const packages = [
   ["@pgstencil/auth", "@pgstencil/auth/better-auth"],
 ] as const;
 
-test("Hosted declares every peer of the installed pgstencil packages", () => {
+test("Hosted declares every required peer of the installed pgstencil packages, and no optional one, in dependencies", () => {
   const { dependencies } = JSON.parse(readFileSync("package.json", "utf8")) as {
     dependencies: Record<string, string>;
   };
   for (const [name, entry] of packages) {
     const manifest = new URL("../package.json", import.meta.resolve(entry));
-    const { peerDependencies = {} } = JSON.parse(readFileSync(manifest, "utf8")) as {
+    const { peerDependencies = {}, peerDependenciesMeta = {} } = JSON.parse(readFileSync(manifest, "utf8")) as {
       peerDependencies?: Record<string, string>;
+      peerDependenciesMeta?: Record<string, { optional?: boolean }>;
     };
-    for (const peer of Object.keys(peerDependencies))
-      expect(Object.keys(dependencies), `${name} peers on ${peer}`).toContain(peer);
+    for (const peer of Object.keys(peerDependencies)) {
+      // An optional peer is pgstencil's tooling, which the Workers never ship.
+      if (peerDependenciesMeta[peer]?.optional) {
+        expect(Object.keys(dependencies), `${name}'s optional peer ${peer}`).not.toContain(peer);
+      } else {
+        expect(Object.keys(dependencies), `${name} peers on ${peer}`).toContain(peer);
+      }
+    }
   }
 });
 
