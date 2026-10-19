@@ -6,7 +6,7 @@ import { dirname, join } from 'path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { BrowserOp, BrowserRequestBinding } from '../lib/platform/browser-automation';
 import { WebSocket, WebSocketServer } from 'ws';
-import { RESELECT_RETRY_MS, createAgentBrowserProvider } from './agent-browser-host';
+import { RESELECT_AFTER_MS, createAgentBrowserProvider } from './agent-browser-host';
 import { createBrowserCaptures, type BrowserCaptures } from './browser-capture';
 import { createBrowserHost } from './browser-host';
 import { openViewer, syncStates } from './browser-host-test-utils';
@@ -822,32 +822,67 @@ describe('agent-browser host viewer', () => {
     }
     const settled = () => new Promise((resolve) => setTimeout(resolve, 100));
 
-    it('selects a popup the daemon reports active, and the tab left when the active one closes', async () => {
+    /** Past the check a change of active tab arms. */
+    const pastCheck = () => new Promise((resolve) => setTimeout(resolve, RESELECT_AFTER_MS + 300));
+
+    it('selects a tab the daemon made active once no frame follows, and only once', async () => {
       const { daemon, viewer } = await streaming();
       await viewer();
       await daemon.connected();
       daemon.send(tabsOf(['t1', true]));
       daemon.send(tabsOf(['t1', false], ['t2', true]));
-      await vi.waitFor(() => expect(selects()).toEqual(['tab t2']));
-      daemon.send(frame(1));
-      daemon.send(tabsOf(['t1', true]));
-      await vi.waitFor(() => expect(selects()).toEqual(['tab t2', 'tab t1']));
-    });
+      await settled();
+      expect(selects()).toEqual([]);
+      await vi.waitFor(() => expect(selects()).toEqual(['tab t2']), { timeout: RESELECT_AFTER_MS + 1000 });
+      await pastCheck();
+      expect(selects()).toEqual(['tab t2']);
+    }, 10_000);
 
-    it('selects once for a browser two viewers watch, and not a tab the pane selected', async () => {
-      const { daemon, host, viewer } = await streaming();
+    it('selects nothing for a switch whose frames follow, as an agent\'s own tab select brings', async () => {
+      const { daemon, viewer } = await streaming();
+      await viewer();
+      await daemon.connected();
+      daemon.send(tabsOf(['t1', true]));
+      daemon.send(tabsOf(['t1', false], ['t2', true]));
+      daemon.send(frame(1));
+      await pastCheck();
+      expect(selects()).toEqual([]);
+    }, 10_000);
+
+    it('selects no tab that stopped being active before its check', async () => {
+      const { daemon, viewer } = await streaming();
+      await viewer();
+      await daemon.connected();
+      daemon.send(tabsOf(['t1', true]));
+      // A popup, then an agent's quick switch back, whose frames follow.
+      daemon.send(tabsOf(['t1', false], ['t2', true]));
+      daemon.send(tabsOf(['t1', true], ['t2', false]));
+      daemon.send(frame(1));
+      await pastCheck();
+      expect(selects()).toEqual([]);
+    }, 10_000);
+
+    it('selects only the tab still active when its check comes, whose change replaced the one before', async () => {
+      const { daemon, viewer } = await streaming();
+      await viewer();
+      await daemon.connected();
+      daemon.send(tabsOf(['t1', true]));
+      daemon.send(tabsOf(['t1', false], ['t2', true]));
+      daemon.send(tabsOf(['t1', false], ['t2', false], ['t3', true]));
+      await pastCheck();
+      expect(selects()).toEqual(['tab t3']);
+    }, 10_000);
+
+    it('selects once for a browser two viewers watch', async () => {
+      const { daemon, viewer } = await streaming();
       await viewer();
       await viewer();
       await vi.waitFor(() => expect(daemon.clients()).toHaveLength(2));
       daemon.broadcast(tabsOf(['t1', true]));
       daemon.broadcast(tabsOf(['t1', false], ['t2', true]));
-      await vi.waitFor(() => expect(selects()).toEqual(['tab t2']));
-      daemon.broadcast(frame(1));
-      expect((await ab(host, { op: 'tab', action: 'select', tabId: 't1' }, { session })).ok).toBe(true);
-      daemon.broadcast(tabsOf(['t1', true], ['t2', false]));
-      await settled();
-      expect(selects()).toEqual(['tab t2', 'tab t1']);
-    });
+      await pastCheck();
+      expect(selects()).toEqual(['tab t2']);
+    }, 10_000);
 
     it('selects a tab made active while nothing viewed the browser, once a viewer comes back', async () => {
       const { daemon, viewer } = await streaming();
@@ -860,8 +895,9 @@ describe('agent-browser host viewer', () => {
       await viewer();
       await vi.waitFor(() => expect(daemon.clients()).toHaveLength(1));
       daemon.broadcast(tabsOf(['t1', false], ['t2', true]));
-      await vi.waitFor(() => expect(selects()).toEqual(['tab t2']));
-    });
+      await pastCheck();
+      expect(selects()).toEqual(['tab t2']);
+    }, 10_000);
 
     it('selects nothing for a headed window', async () => {
       const { daemon, viewer } = await streaming();
@@ -869,27 +905,8 @@ describe('agent-browser host viewer', () => {
       await daemon.connected();
       daemon.send(tabsOf(['t1', true]));
       daemon.send(tabsOf(['t1', false], ['t2', true]));
-      await settled();
+      await pastCheck();
       expect(selects()).toEqual([]);
-    });
-
-    it('selects once more when no frame follows, and only once', async () => {
-      const { daemon, viewer } = await streaming();
-      await viewer();
-      await daemon.connected();
-      daemon.send(tabsOf(['t1', true]));
-      daemon.send(tabsOf(['t1', false], ['t2', true]));
-      await vi.waitFor(() => expect(selects()).toEqual(['tab t2']));
-      await vi.waitFor(() => expect(selects()).toEqual(['tab t2', 'tab t2']), { timeout: RESELECT_RETRY_MS + 1000 });
-      await new Promise((resolve) => setTimeout(resolve, RESELECT_RETRY_MS + 300));
-      expect(selects()).toEqual(['tab t2', 'tab t2']);
-
-      // A frame following the select needs no retry.
-      daemon.send(tabsOf(['t1', true], ['t2', false]));
-      await vi.waitFor(() => expect(selects()).toHaveLength(3));
-      daemon.send(frame(2));
-      await new Promise((resolve) => setTimeout(resolve, RESELECT_RETRY_MS + 300));
-      expect(selects()).toEqual(['tab t2', 'tab t2', 'tab t1']);
     }, 10_000);
   });
 

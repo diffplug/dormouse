@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { encodeViewerFrame } from '../../lib/platform/browser-automation';
-import { DIAL_TIMEOUT_MS, IDLE_BACKSTOP_MS, VIEW_URL_TIMEOUT_MS, createAgentBrowserConnection, type AgentBrowserConnectionDeps } from './agent-browser-connection';
+import { DIAL_TIMEOUT_MS, VIEW_URL_TIMEOUT_MS, createAgentBrowserConnection, type AgentBrowserConnectionDeps } from './agent-browser-connection';
 
 class WebSocketMock {
   static instances: WebSocketMock[] = [];
@@ -214,23 +214,18 @@ describe('viewer socket connection', () => {
       await vi.advanceTimersByTimeAsync(DIAL_TIMEOUT_MS);
       expect(closes).toEqual([1]);
       expect(WebSocketMock.instances[0].closed).toBe(true);
+      // The abandoned socket opening late is not heard.
+      const opens: unknown[] = [];
+      connection.subscribe((event) => { if (event.type === 'connection-open') opens.push(event); });
+      WebSocketMock.instances[0].onopen?.(new Event('open'));
+      WebSocketMock.instances[0].emitMessage(JSON.stringify({ type: 'tabs', tabs: [{ tabId: 't1', title: 'Late', url: 'https://late.example/', active: true }] }));
+      WebSocketMock.instances[0].onerror?.(new Event('error'));
+      expect(opens).toEqual([]);
+      expect(connection.snapshot().tabs).toEqual([]);
+      expect(connection.snapshot().lastError).toBeUndefined();
+      expect(connection.diagnostics()).toMatchObject({ socket: 'retrying' });
       await vi.advanceTimersByTimeAsync(2100);
       expect(viewUrl).toHaveBeenCalledTimes(2);
-      connection.dispose();
-    });
-
-    it('dials again on its own when a close never reaches its retry', async () => {
-      vi.spyOn(console, 'warn').mockImplementation(() => {});
-      const debug = vi.fn();
-      const { connection, viewUrl } = connect({ debug });
-      await vi.advanceTimersByTimeAsync(0);
-      // Whatever went wrong on the way to scheduling the retry.
-      vi.spyOn(connection as unknown as { closed: () => void }, 'closed').mockImplementationOnce(() => { throw new Error('unexpected'); });
-      expect(() => socket().close()).toThrow('unexpected');
-      expect(connection.diagnostics()).toMatchObject({ socket: 'none' });
-      await vi.advanceTimersByTimeAsync(IDLE_BACKSTOP_MS);
-      expect(viewUrl).toHaveBeenCalledTimes(2);
-      expect(debug).toHaveBeenCalledWith('watchdog-no-socket', expect.anything());
       connection.dispose();
     });
   });

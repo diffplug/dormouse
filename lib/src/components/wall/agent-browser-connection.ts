@@ -10,12 +10,6 @@ export { parseAgentBrowserTabs };
  *  on it, before the attempt counts as a close and is retried. */
 export const VIEW_URL_TIMEOUT_MS = 15_000;
 export const DIAL_TIMEOUT_MS = 10_000;
-/** How long the connection may sit with nothing in flight — no URL asked, no
- *  dial, no retry waiting — before it dials again on its own. Every path
- *  leaves `none` at once; this backstop covers one that does not, which is
- *  what a frozen pane once showed: phase `live`, yet 25 s of lsof sampling
- *  found no viewer socket and no reconnect (2026-10-18). Keep it. */
-export const IDLE_BACKSTOP_MS = 5_000;
 
 export type AgentBrowserConnectionState = 'connecting' | 'open' | 'closed' | 'failed';
 
@@ -55,10 +49,10 @@ export type AgentBrowserConnectionEvent =
   /** A frame to paint: provisional (CSS resolution) or crisp. */
   | ({ type: 'frame' } & ViewerFrame);
 
-/** Where the socket stands: asking the host for a URL, dialing it, open,
- *  waiting to retry — or `none`, nothing in flight, which no path leaves it
- *  in for long (`IDLE_BACKSTOP_MS`). */
-export type AgentBrowserSocketStage = 'none' | 'requesting-url' | 'connecting' | 'open' | 'retrying';
+/** Where the socket stands: asking the host for a URL, dialing it, open, or
+ *  waiting to retry. Every stage but `open` carries its own deadline, so the
+ *  connection is never left with nothing in flight. */
+export type AgentBrowserSocketStage = 'requesting-url' | 'connecting' | 'open' | 'retrying';
 
 export interface AgentBrowserConnectionDeps {
   session: string;
@@ -89,10 +83,10 @@ export function createAgentBrowserConnection(deps: AgentBrowserConnectionDeps): 
 export class AgentBrowserConnection {
   private readonly listeners = new Set<(event: AgentBrowserConnectionEvent) => void>();
   private socket: WebSocket | null = null;
-  /** The one timer the stage runs: a retry's delay, a URL or dial deadline,
-   *  or the idle backstop. */
+  /** The one timer the stage runs: a retry's delay, or a URL or dial
+   *  deadline. */
   private stageTimer: ReturnType<typeof setTimeout> | undefined;
-  private stage: { stage: AgentBrowserSocketStage; since: number } = { stage: 'none', since: Date.now() };
+  private stage: { stage: AgentBrowserSocketStage; since: number } = { stage: 'requesting-url', since: Date.now() };
   /** Bumped by each dial: a late answer or event of an older one is dropped. */
   private attempt = 0;
   private disposed = false;
@@ -217,16 +211,14 @@ export class AgentBrowserConnection {
     }
   }
 
-  /** Give up on attempt `attempt`: its socket, if any, is dropped unheard. */
+  /** Give up on attempt `attempt`: its socket, if any, is closed unheard —
+   *  each handler ignores a socket that is no longer `this.socket`. */
   private abandon(attempt: number, reason: string): void {
     if (this.disposed || this.attempt !== attempt) return;
     this.attempt += 1;
     const socket = this.socket;
     this.socket = null;
-    if (socket) {
-      socket.onopen = socket.onmessage = socket.onerror = socket.onclose = null;
-      socket.close();
-    }
+    socket?.close();
     this.closed({ code: 0, reason, wasClean: false });
   }
 
@@ -237,6 +229,7 @@ export class AgentBrowserConnection {
     const socket = this.socket = new WebSocket(url);
     socket.binaryType = 'arraybuffer';
     socket.onopen = () => {
+      if (this.socket !== socket) return;
       this.setStage('open');
       this.patch({ connection: 'open' });
       this.log(`[ab-panel] viewer open ${JSON.stringify({ stream: this.deps.stream })}`);
@@ -244,6 +237,7 @@ export class AgentBrowserConnection {
       this.emit({ type: 'connection-open', stream: this.deps.stream });
     };
     socket.onmessage = (ev) => {
+      if (this.socket !== socket) return;
       if (!this.healthy) {
         this.healthy = true;
         this.failures = 0;
@@ -251,17 +245,16 @@ export class AgentBrowserConnection {
       this.handleMessage(ev.data);
     };
     socket.onerror = () => {
+      if (this.socket !== socket) return;
       this.patch({ lastError: 'viewer socket error' });
       this.log(`[ab-panel] viewer error ${JSON.stringify({ stream: this.deps.stream })}`);
       this.debug('error');
       this.emit({ type: 'connection-error', stream: this.deps.stream });
     };
     socket.onclose = (ev) => {
+      if (this.socket !== socket) return;
       this.socket = null;
       if (this.disposed) return;
-      // Nothing in flight until `closed` schedules the retry: the backstop
-      // covers a close that never gets that far.
-      this.setStage('none', { ms: IDLE_BACKSTOP_MS, run: () => this.backstop() });
       this.closed({ code: ev.code, reason: ev.reason, wasClean: ev.wasClean });
     };
   }
@@ -278,15 +271,6 @@ export class AgentBrowserConnection {
     this.log(`[ab-panel] viewer close ${JSON.stringify(data)}`);
     this.debug('close', { ...data, retryInMs: delayMs });
     this.emit({ type: 'connection-close', ...data });
-  }
-
-  /** Nothing in flight for `IDLE_BACKSTOP_MS`: record it, warn once, and
-   *  dial again. */
-  private backstop(): void {
-    if (this.disposed || this.stage.stage !== 'none') return;
-    this.debug('watchdog-no-socket', { idleMs: Date.now() - this.stage.since, failures: this.failures });
-    console.warn(`[ab-panel] viewer for stream ${this.deps.stream} sat with no socket, dial or retry; dialing again`);
-    void this.connect();
   }
 
   private handleMessage(raw: unknown): void {

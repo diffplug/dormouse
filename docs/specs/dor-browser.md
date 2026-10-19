@@ -224,7 +224,7 @@ Source of truth: `parseBrowserRequest` and `createBrowserHost` in `lib/src/host/
 
 agent-browser alone has a per-session daemon, state files beside its socket, and one fixed argv per operation; `--headed` is a no-op against a live daemon, so only a relaunch changes the mode. Its daemon's stream server and its browser's CDP port accept unauthenticated loopback TCP connections from any local process, refusing only a foreign `Origin`; Dormouse sets neither listener's flags (`docs/specs/security.md` -> "Known gaps").
 
-- **Must select a tab the daemon makes active on its own**, once per change per browser however many viewer sockets report it, judged against the tab active before — even one no socket watched — and once more if no frame follows; never for a headed window: its daemon otherwise leaves the screencast on the old page (rationale).
+- **Must select a tab the daemon made active on its own once no frame has followed for `RESELECT_AFTER_MS` and it is still active**, once per change per browser — judged against the tab active before, even one no socket watched — never for a headed window: only an asked-for switch rebinds the daemon's screencast (rationale).
 - **Never spawn a daemon outside a launch's own steps**: any CLI verb starts one at `about:blank`, so `attach` reads the live port from `<session>.pid` / `<session>.stream` and a port probe, and every other verb runs only on proof of a live daemon (`liveDaemon`) — a pid file from this boot, alive, beside a stream port that accepts.
 - **Never signal a pid without that proof** (rationale).
 - **Must run a launch's `open` in the binding's project directory while it exists**, so a relaunch reads the same `./agent-browser.json` the `dor agent-browser` there did.
