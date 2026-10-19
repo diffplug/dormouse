@@ -15,6 +15,7 @@ let platform: { burrow?: unknown; openExternal?: (url: string) => void } = {};
 vi.mock('../lib/platform', () => ({
   IS_MAC: false,
   getPlatform: () => platform,
+  getPlatformOrNull: () => platform,
 }));
 
 /**

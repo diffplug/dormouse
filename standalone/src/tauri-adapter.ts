@@ -7,6 +7,7 @@ import { invoke as rawInvoke } from "@tauri-apps/api/core";
 import { IframeLeaseOrder } from '../../lib/src/lib/platform/iframe-lease-order';
 import { open } from "@tauri-apps/plugin-shell";
 import { coalesceCwds } from "./coalesce-cwds";
+import { nativeClipboardWriter } from "./native-clipboard";
 import type {
   IframeProxyResult,
   OpenPort,
@@ -450,6 +451,8 @@ export class TauriAdapter implements PlatformAdapter {
       return await rawInvoke<string>("read_clipboard_text");
     } catch { return null; }
   }
+
+  readonly writeClipboardText = nativeClipboardWriter(rawInvoke);
 
   async toolControl(request: ToolHostRequest): Promise<ToolControlResult> {
     // The sidecar owns the filesystem (shared lib/src/host/tool-host.ts).

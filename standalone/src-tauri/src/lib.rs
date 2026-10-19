@@ -45,8 +45,8 @@ use process_wrap::std::ProcessGroup;
 #[cfg(windows)]
 use windows::Win32::System::Threading::CREATE_NO_WINDOW;
 
-// Native Win32 clipboard reads, so a paste never spawns a console-window-popping
-// PowerShell child. macOS/Linux keep the sidecar path (no console flicker there).
+// Native Win32 clipboard reads and text write, so neither spawns a
+// console-window-popping child. macOS/Linux keep the sidecar path (no console flicker there).
 #[cfg(windows)]
 mod clipboard_win;
 
@@ -1845,6 +1845,33 @@ fn read_clipboard_text(
             .get("text")
             .and_then(|v| v.as_str().map(String::from))
             .unwrap_or_default())
+    }
+}
+
+// Natively on Windows, like the reads; elsewhere through the sidecar. The
+// adapters call it on macOS and Windows only (`nativeClipboardWriter`).
+#[tauri::command(async)]
+fn write_clipboard_text(
+    state: tauri::State<'_, SidecarState>,
+    text: String,
+) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let _ = &state;
+        return clipboard_win::write_text(&text);
+    }
+    #[cfg(not(windows))]
+    {
+        let response = request_from_sidecar_timeout(
+            &state,
+            "clipboard:writeText",
+            serde_json::json!({ "text": text }),
+            Duration::from_secs(5),
+        )?;
+        match response.get("error").and_then(|v| v.as_str()) {
+            Some(error) => Err(error.to_string()),
+            None => Ok(()),
+        }
     }
 }
 
@@ -4898,6 +4925,7 @@ pub fn run() {
             read_clipboard_file_paths,
             read_clipboard_image_as_file_path,
             read_clipboard_text,
+            write_clipboard_text,
             read_update_log,
             load_session,
             save_session,
