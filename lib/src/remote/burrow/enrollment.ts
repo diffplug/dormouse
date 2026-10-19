@@ -12,7 +12,6 @@ import {
   isBurrowEnrollBeginResponse,
   isBurrowEnrollPollResponse,
   isE2eId,
-  isManagedVoiceToken,
   isNoiseStaticMaterial,
   mintNoiseStaticKeyPair,
   normalizeOrigin,
@@ -346,8 +345,7 @@ export async function beginHostedEnrollment(
 }
 
 /**
- * What one poll says. `enrolled` carries the managed-voice token the Relay
- * minted with the Burrow, or `null` where it sent none of a token's shape.
+ * What one remote-control poll says.
  * `retry` is a poll that told nothing — the Relay
  * unreachable, a 5xx, a 2xx whose body was lost mid-read, or a 429, which asks
  * the Burrow to `slowDown` — and the
@@ -360,7 +358,7 @@ export type HostedEnrollmentPoll =
   | { status: 'retry'; slowDown: boolean }
   | { status: 'expired' }
   | { status: 'redeemed'; burrowId: string }
-  | { status: 'enrolled'; enrollment: BurrowEnrollment; voiceToken: string | null }
+  | { status: 'enrolled'; enrollment: BurrowEnrollment }
   | { status: 'refused'; reason: 'not-entitled' | 'account-full' }
   | { status: 'failed'; message: string };
 
@@ -421,9 +419,7 @@ export async function pollHostedEnrollment(
     return {
       status: 'enrolled',
       enrollment: enrollmentFrom(relayOrigin, body.enrollment, label, noiseStatic),
-      // The enrolled desktop's managed voice; one of the wrong shape is
-      // dropped rather than failing an approval the Relay already spent.
-      voiceToken: isManagedVoiceToken(body.voiceToken) ? body.voiceToken : null,
+
     };
   } catch (error) {
     return { status: 'failed', message: errorMessage(error) };

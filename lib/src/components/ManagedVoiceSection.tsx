@@ -1,22 +1,17 @@
 import { useCallback, useState, useSyncExternalStore } from 'react';
 import { INLINE_ACTION_CLASS, SELECT_CLASS, modalActionButton } from './design';
 import { ExternalTextLink } from './ExternalTextLink';
-import { HOSTED_PRICING_URL, HostedEnrollView, accountHost, accountPage } from './HostedEnrollment';
-import { DisconnectConfirm, removedCopy } from './RemoteControlSection';
+import { HOSTED_PRICING_URL, HostedEnrollmentCode } from './HostedEnrollment';
+import { HOSTED_ACCOUNT_ORIGIN } from '../host/relay-origin';
 import { FIELD_LABEL, useBusyAction, useNetworkPolicy } from './remote-control-shared';
-import type { BurrowConsoleStatus } from '../host/remote/service-protocol';
 import { getPlatform } from '../lib/platform';
 import {
   MANAGED_VOICES,
   type ManagedVoiceConfigResult,
+  type ManagedVoiceActionResult,
   type ManagedVoicePort,
   type ManagedVoiceStatus,
 } from '../lib/platform/managed-voice-types';
-import {
-  getBurrowStatusSnapshot,
-  reenrollBurrow,
-  subscribeToBurrowStatus,
-} from '../remote/burrow/burrow-status-store';
 
 const HINT = 'mt-1 text-sm leading-relaxed text-muted';
 
@@ -31,7 +26,7 @@ export const MANAGED_VOICE_DISCLOSURE =
   'speak it. ElevenLabs keeps a copy until Dormouse deletes it, usually within minutes, though no limit is ' +
   'guaranteed. If voice.dormouse.sh cannot answer, the alarm uses your system voice.';
 
-/** What a member whose plan lapsed reads, where the relay socket or speak said so. */
+/** What a member whose plan lapsed reads after speak says so. */
 export const NO_PLAN_COPY = 'Your account has no Hosted plan, so alarms use your system voice.';
 
 /**
@@ -64,146 +59,109 @@ export function useManagedVoiceConfigured(): boolean {
   return useManagedVoiceStatus(getPlatform().managedVoice)?.configured === true;
 }
 
-/**
- * Managed voice in Settings → Notifications (`docs/specs/alert.md` ->
- * "Settings dialog"): enrolling with Dormouse Hosted, which is this computer's
- * Hosted enrollment ({@link HostedEnrollView}, shared with Remote control),
- * then the member's voice and Disconnect. Renders nothing in a build without
- * managed voice — a self-host build, VS Code.
- */
+/** Independent managed-voice approval and disconnect; remote control has its own enrollment. */
 export function ManagedVoiceSection({ onShowNetwork }: { onShowNetwork?: () => void }) {
   const port = getPlatform().managedVoice;
   const voice = useManagedVoiceStatus(port);
-  const burrow = useSyncExternalStore(subscribeToBurrowStatus, getBurrowStatusSnapshot);
   const networkOff = useNetworkPolicy()?.level === 'nothing';
-  // Enroll again spans the flip from enrolled to not, so its busy and error
-  // live here, above both views: a begin refused after the clear still has
-  // somewhere to say so.
-  const enrollAgainAction = useBusyAction();
-
+  const { busy, error, run } = useBusyAction();
+  const [confirming, setConfirming] = useState(false);
   if (!port) return null;
-  const status = burrow.kind === 'ready' ? burrow.status : null;
+  const enrollment = voice?.enrollment;
+  const waiting = enrollment?.status === 'waiting' ? enrollment : null;
+  const saving = enrollment?.status === 'saving';
+  const accountOrigin = waiting ? new URL(waiting.verificationUrl).origin : HOSTED_ACCOUNT_ORIGIN;
+  const perform = (action: () => Promise<ManagedVoiceActionResult>) => void run(async () => {
+    const result = await action();
+    if (!result.ok) throw new Error(result.message);
+    setConfirming(false);
+  });
 
   return (
     <div className="mt-3">
       <div className="text-sm text-foreground">Managed voice</div>
       <p className={HINT}>{MANAGED_VOICE_DISCLOSURE}</p>
-      {status === null ? null : status.enrolled ? (
-        <Enrolled
-          status={status}
-          voice={voice}
-          port={port}
-          enrollingAgain={enrollAgainAction.busy}
-          onEnrollAgain={() => void enrollAgainAction.run(() => reenrollBurrow(status.suggestedLabel))}
+      {voice?.configured ? (
+        <>
+          <div className="mt-2 text-sm leading-relaxed text-foreground">
+            {voice.notEntitled ? (
+              <>{NO_PLAN_COPY} <ExternalTextLink href={HOSTED_PRICING_URL}>See Hosted plans</ExternalTextLink></>
+            ) : 'Managed voice is enabled.'}
+          </div>
+          <label className="mt-2 flex items-center gap-2">
+            <span className={FIELD_LABEL}>Voice</span>
+            <select
+              aria-label="Managed voice"
+              className={SELECT_CLASS}
+              value={voice.voiceId}
+              disabled={busy}
+              onChange={(event) => void run(async () => {
+                const result = await port.configure({ voiceId: event.target.value });
+                if (!result.ok) throw new Error(REFUSAL[result.reason]);
+              })}
+            >
+              {MANAGED_VOICES.map((option) => (
+                <option key={option.id} value={option.id}>{option.name} ({option.description})</option>
+              ))}
+            </select>
+          </label>
+          {confirming ? (
+            <div className="mt-2 text-sm leading-relaxed">
+              <p>Disconnect managed voice? Alarms will use your system voice.</p>
+              <div className="mt-2 flex gap-2">
+                <button type="button" disabled={busy} className={modalActionButton()} onClick={() => perform(() => port.disconnect())}>
+                  Disconnect
+                </button>
+                <button type="button" disabled={busy} className={modalActionButton()} onClick={() => setConfirming(false)}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button type="button" disabled={busy} className={modalActionButton({ className: 'mt-2' })} onClick={() => setConfirming(true)}>
+              Disconnect
+            </button>
+          )}
+          <p className={HINT}>
+            Disconnecting is local. <ExternalTextLink href={`${accountOrigin}/account`}>Revoke the voice token at your Hosted account</ExternalTextLink> to revoke it there.
+          </p>
+        </>
+      ) : voice?.disconnectFailed ? (
+        <div className="mt-2">
+          <p className={HINT}>Managed voice is off for this session. Its saved token still needs to be cleared before restarting Dormouse.</p>
+          <button type="button" disabled={busy} className={modalActionButton()} onClick={() => perform(() => port.disconnect())}>
+            Retry disconnect
+          </button>
+        </div>
+      ) : waiting ? (
+        <HostedEnrollmentCode
+          waiting={{ ...waiting, accountFull: false }}
+          accountOrigin={accountOrigin}
+          busy={busy}
+          onCancel={() => perform(() => port.cancelEnrollment())}
         />
+      ) : saving ? (
+        <p className={HINT}>Approved. Enabling managed voice…</p>
       ) : (
         <>
-          <p className={HINT}>Dormouse Hosted members hear alarms in a natural ElevenLabs voice.</p>
+          {enrollment?.status === 'ended' ? <p className={HINT} role="status">{enrollment.message}</p> : null}
           {networkOff ? (
             <p className={HINT}>
-              Enrolling reaches Dormouse Hosted, which nothing does while <NetworkTopicLink onShow={onShowNetwork} />{' '}
-              is set to Nowhere. Choose Local networks or Anywhere there to enroll.
+              Enabling managed voice reaches Dormouse Hosted. Choose Local networks or Anywhere in <NetworkTopicLink onShow={onShowNetwork} /> to enable it.
             </p>
           ) : (
-            <HostedEnrollView
-              enrollment={status.hostedEnrollment}
-              accountOrigin={status.accountOrigin}
-              suggestedLabel={status.suggestedLabel}
-              askName={false}
-            />
+            <button
+              type="button"
+              disabled={busy || voice === null}
+              className={modalActionButton({ tone: 'primary', className: 'mt-2' })}
+              onClick={() => perform(() => port.beginEnrollment())}
+            >
+              Enable managed voice
+            </button>
           )}
         </>
       )}
-      {enrollAgainAction.error ? <div className="mt-1.5 text-sm text-error">{enrollAgainAction.error}</div> : null}
-    </div>
-  );
-}
-
-/** Enrolled: the plan's standing, the voice, and Disconnect. */
-function Enrolled({ status, voice, port, enrollingAgain, onEnrollAgain }: {
-  status: BurrowConsoleStatus;
-  voice: ManagedVoiceStatus | null;
-  port: ManagedVoicePort;
-  enrollingAgain: boolean;
-  onEnrollAgain: () => void;
-}) {
-  const { busy: ownBusy, error, run } = useBusyAction();
-  const busy = ownBusy || enrollingAgain;
-  const [confirming, setConfirming] = useState(false);
-  const page = accountPage(status.accountOrigin);
-  const lapsed = status.connection === 'not-entitled' || voice?.notEntitled === true;
-  const removed = status.connection === 'removed';
-
-  const choose = (voiceId: string) =>
-    void run(async () => {
-      const result = await port.configure({ voiceId });
-      if (!result.ok) throw new Error(REFUSAL[result.reason]);
-    });
-
-  return (
-    <div className="mt-2 text-sm leading-relaxed">
-      {removed ? (
-        <div className="text-error">{removedCopy(status)}</div>
-      ) : lapsed ? (
-        <div className="text-foreground">
-          {NO_PLAN_COPY} <ExternalTextLink href={HOSTED_PRICING_URL}>See Hosted plans</ExternalTextLink>
-        </div>
-      ) : (
-        <div className="text-foreground">Enrolled with Dormouse Hosted.</div>
-      )}
-      {!removed && voice && !voice.configured ? (
-        <p className={HINT}>
-          This computer enrolled before managed voice. Disconnect and enroll again to use it.
-        </p>
-      ) : null}
-      {!removed && voice?.configured ? (
-        <label className="mt-2 flex items-center gap-2">
-          <span className={FIELD_LABEL}>Voice</span>
-          <select
-            aria-label="Managed voice"
-            className={SELECT_CLASS}
-            value={voice.voiceId}
-            disabled={busy}
-            onChange={(event) => choose(event.target.value)}
-          >
-            {MANAGED_VOICES.map((option) => (
-              <option key={option.id} value={option.id}>
-                {option.name} ({option.description})
-              </option>
-            ))}
-          </select>
-        </label>
-      ) : null}
-      {error ? <div className="mt-1.5 text-error">{error}</div> : null}
-      <div className="mt-2 flex flex-wrap items-center gap-2">
-        {removed ? (
-          <button
-            type="button"
-            disabled={busy}
-            className={modalActionButton({ tone: 'primary' })}
-            onClick={onEnrollAgain}
-          >
-            {enrollingAgain ? 'Getting a code…' : 'Enroll again'}
-          </button>
-        ) : confirming ? (
-          <DisconnectConfirm
-            busy={busy}
-            run={run}
-            onDone={() => setConfirming(false)}
-            warning="Remote control disconnects too: paired phones will need to pair again."
-          />
-        ) : (
-          <button type="button" disabled={busy} className={modalActionButton()} onClick={() => setConfirming(true)}>
-            Disconnect
-          </button>
-        )}
-      </div>
-      {page && !removed ? (
-        <p className={HINT}>
-          Disconnecting is local. <ExternalTextLink href={page}>Remove this computer at {accountHost(status.accountOrigin)}</ExternalTextLink>{' '}
-          to revoke it there.
-        </p>
-      ) : null}
+      {error ? <div className="mt-1.5 text-sm text-error" role="alert">{error}</div> : null}
     </div>
   );
 }

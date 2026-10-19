@@ -518,11 +518,10 @@ describe('Hosted device-code enrollment', () => {
       expect(answer).toEqual({
         status: 'enrolled',
         enrollment: { relayUrl: RELAY, ...enrollment, label: 'My Laptop', ...noiseStatic },
-        voiceToken,
       });
       // A token of the wrong shape, or none, still enrolls: the approval is spent.
       expect(await poll(json(200, { status: 'enrolled', enrollment, voiceToken: 'sk-nope' })))
-        .toMatchObject({ status: 'enrolled', voiceToken: null });
+        .not.toHaveProperty('voiceToken');
       expect(isEnrollment((answer as { enrollment: unknown }).enrollment)).toBe(true);
       // A redemption the guard refuses fails, naming the field.
       expect(await poll(json(200, { status: 'enrolled', enrollment: { ...enrollment, burrowId: 'short' } })))

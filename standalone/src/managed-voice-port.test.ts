@@ -55,6 +55,16 @@ describe("createManagedVoicePort", () => {
     expect(await port.configure({ voiceId: "v1" })).toEqual({ ok: false, reason: "unavailable" });
   });
 
+  it("routes approval and disconnect through the voice channel and retains a failed-clear broadcast", async () => {
+    const { port, payloads } = harness(() => ({ ok: false, message: "Retry disconnect" }));
+    await port.beginEnrollment();
+    await port.cancelEnrollment();
+    port.receiveStatus({ configured: false, voiceId: "v1", disconnectFailed: true });
+    expect(await port.disconnect()).toEqual({ ok: false, message: "Retry disconnect" });
+    expect(port.status()).toMatchObject({ configured: false, disconnectFailed: true });
+    expect(payloads).toEqual([{ op: "beginEnrollment" }, { op: "cancelEnrollment" }, { op: "disconnect" }]);
+  });
+
   it("decodes the host's base64 audio once", async () => {
     const { port, payloads } = harness(() => ({ ok: true, audioBase64: btoa("\x01\x02\xff") }));
     expect(await port.speak("build finished")).toEqual({ ok: true, audio: new Uint8Array([1, 2, 255]) });

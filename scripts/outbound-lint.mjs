@@ -151,7 +151,7 @@ const OUTBOUND_SITES = {
   // --- guarded: managed voice ---
   'lib/src/host/managed-voice-host.ts': {
     class: 'guarded:managed-voice',
-    reason: 'Asks networkAllowed before every speak and answers network-off without a request.',
+    reason: 'Asks networkAllowed before every speak and voice-approval request.',
   },
   // --- guarded: the updater ---
   'standalone/src/updater.ts': {

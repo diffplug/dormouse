@@ -20,10 +20,17 @@ const MANAGED_VOICE_SPEAK_URL = 'https://voice.dormouse.sh/api/voice/speak';
 
 /** The next `readFile` fails with this, once: a Windows antivirus lock, say. */
 const readFault = vi.hoisted(() => ({ next: null as NodeJS.ErrnoException | null }));
+const renameFault = vi.hoisted(() => ({ next: null as NodeJS.ErrnoException | null }));
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>();
   return {
     ...actual,
+    rename: (async (...args: Parameters<typeof actual.rename>) => {
+      const fault = renameFault.next;
+      renameFault.next = null;
+      if (fault) throw fault;
+      return actual.rename(...args);
+    }) as typeof actual.rename,
     readFile: (async (...args: Parameters<typeof actual.readFile>) => {
       const fault = readFault.next;
       readFault.next = null;
@@ -64,6 +71,8 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  host.dispose();
+  vi.useRealTimers();
   await rm(dir, { recursive: true, force: true });
 });
 
@@ -361,5 +370,101 @@ describe('the network policy', () => {
     allowed = true;
     expect(await gated.handle({ op: 'speak', text: 'something new' })).toMatchObject({ ok: true });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+
+describe('independent managed-voice lifecycle', () => {
+  it('disables speech and reports a failed persisted clear, with a successful retry surviving restart', async () => {
+    await host.credential.save(TOKEN);
+    fetchMock.mockResolvedValue(audioResponse());
+    await host.handle({ op: 'speak', text: 'cached label' });
+    fetchMock.mockClear();
+    const file = join(dir, MANAGED_VOICE_FILE);
+    renameFault.next = Object.assign(new Error('write denied'), { code: 'EACCES' });
+    const result = await host.handle({ op: 'disconnect' });
+    expect(result).toMatchObject({ ok: false, message: expect.stringContaining('Retry disconnect') });
+    expect(await host.handle({ op: 'status' })).toMatchObject({ configured: false, disconnectFailed: true });
+    for (const text of ['cached label', 'new private label']) {
+      expect(await host.handle({ op: 'speak', text })).toEqual({ ok: false, reason: 'unconfigured' });
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(JSON.parse(await readFile(file, 'utf8')).token).toBe(TOKEN);
+    expect(broadcasts.at(-1)).toMatchObject({ configured: false, disconnectFailed: true });
+    expect(await host.handle({ op: 'disconnect' })).toMatchObject({ ok: true, configured: false });
+    expect(await make().handle({ op: 'status' })).toEqual(idle(false));
+  });
+
+  const begun = () => ({ purpose: 'voice', deviceCode: 'A'.repeat(43), userCode: '7KQM-X4TD', expiresAt: Date.now() + 600_000, interval: 1 });
+
+  it('obtains only a voice token, keeps codes out of status, and persists without a Burrow', async () => {
+    vi.useFakeTimers();
+    const begin = begun();
+    fetchMock.mockResolvedValueOnce(Response.json(begin)).mockResolvedValueOnce(Response.json({ status: 'enabled', voiceToken: TOKEN }));
+    expect(await host.handle({ op: 'beginEnrollment' })).toMatchObject({ ok: true, configured: false, enrollment: { status: 'waiting', verificationUrl: 'https://hosted.dormouse.sh/enroll?purpose=voice#7KQM-X4TD' } });
+    await vi.advanceTimersByTimeAsync(1000);
+    await vi.waitFor(async () => expect(await host.handle({ op: 'status' })).toEqual(idle(true)));
+    expect(await make().handle({ op: 'status' })).toEqual(idle(true));
+    expect(fetchMock.mock.calls.map(([, init]) => JSON.parse(init.body))).toEqual([
+      { origin: DEFAULT_RELAY_ORIGIN, purpose: 'voice' },
+      { deviceCode: begin.deviceCode, purpose: 'voice' },
+    ]);
+    expect(JSON.stringify(broadcasts)).not.toContain(begin.deviceCode);
+    expect(JSON.stringify(broadcasts)).not.toContain(TOKEN);
+  });
+
+  it('refuses an older server before it can accidentally enroll remote control', async () => {
+    vi.useFakeTimers();
+    fetchMock.mockResolvedValueOnce(Response.json({ ...begun(), purpose: undefined }));
+    expect(await host.handle({ op: 'beginEnrollment' })).toMatchObject({ ok: false });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(await host.handle({ op: 'status' })).toEqual(idle(false));
+  });
+
+  it('canceling a pending approval prevents a late token from enabling voice', async () => {
+    vi.useFakeTimers();
+    let answer!: (response: Response) => void;
+    fetchMock.mockResolvedValueOnce(Response.json(begun())).mockImplementationOnce(() => new Promise<Response>((resolve) => { answer = resolve; }));
+    await host.handle({ op: 'beginEnrollment' });
+    await vi.advanceTimersByTimeAsync(1000);
+    await host.handle({ op: 'cancelEnrollment' });
+    answer(Response.json({ status: 'enabled', voiceToken: TOKEN }));
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(await host.handle({ op: 'status' })).toEqual(idle(false));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('disconnect during the saving notification cannot re-enable a late approval', async () => {
+    vi.useFakeTimers();
+    let disconnect: Promise<unknown> | undefined;
+    host = createManagedVoiceHost({
+      stateDir: dir,
+      onStatus: (status) => {
+        broadcasts.push(status);
+        if (status.enrollment?.status === 'saving') disconnect = host.handle({ op: 'disconnect' });
+      },
+      fetch: fetchMock as unknown as typeof fetch,
+      relay: { origin: DEFAULT_RELAY_ORIGIN, mode: 'hosted' },
+      networkAllowed: async () => true,
+    });
+    fetchMock.mockResolvedValueOnce(Response.json(begun())).mockResolvedValueOnce(Response.json({ status: 'enabled', voiceToken: TOKEN }));
+    await host.handle({ op: 'beginEnrollment' });
+    await vi.advanceTimersByTimeAsync(1000);
+    await disconnect;
+    expect(await host.handle({ op: 'status' })).toEqual(idle(false));
+    expect(await make().handle({ op: 'status' })).toEqual(idle(false));
+  });
+
+  it('stops approval polling when the network policy changes to Nowhere', async () => {
+    vi.useFakeTimers();
+    let allowed = true;
+    host = make({ networkAllowed: async () => allowed });
+    fetchMock.mockResolvedValueOnce(Response.json(begun()));
+    await host.handle({ op: 'beginEnrollment' });
+    allowed = false;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(await host.handle({ op: 'status' })).toMatchObject({ configured: false, enrollment: { status: 'ended', message: 'Network is set to Nowhere.' } });
   });
 });

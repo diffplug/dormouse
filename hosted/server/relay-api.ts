@@ -478,7 +478,10 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
   // Begin writes nothing: the device code carries its own expiry, and the
   // user code is derived from it, so an unauthenticated caller grows no table.
   app.post(API_ROUTES.burrowEnrollBegin, async (c) => {
-    const claimed = (await readJson<{ origin?: unknown }>(c))?.origin;
+    const body = await readJson<{ origin?: unknown; purpose?: unknown }>(c);
+    const purpose = body?.purpose ?? "remote";
+    if (purpose !== "remote" && purpose !== "voice") return c.json({ error: "invalid purpose" }, 400);
+    const claimed = body?.origin;
     if (normalizeOrigin(claimed) !== c.env.APP_ORIGIN) {
       const mismatch: BurrowEnrollOriginMismatch = {
         error: ORIGIN_MISMATCH_ERROR,
@@ -489,12 +492,13 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
     const expiresAtS = Math.floor((Date.now() + ENROLLMENT_TTL_MS) / 1000);
     const bytes = crypto.getRandomValues(new Uint8Array(RELAY_BEARER_BYTE_LENGTH));
     new DataView(bytes.buffer).setUint32(0, expiresAtS);
-    const userCode = await userCodeOf(c.env, bytes);
+    const userCode = await userCodeOf(c.env, bytes, purpose);
     const res: BurrowEnrollBeginResponse = {
+      purpose,
       deviceCode: toBase64Url(bytes),
       userCode,
       ...(c.env.ACCOUNT_ORIGIN && {
-        verificationUrl: `${c.env.ACCOUNT_ORIGIN}${ENROLL_PAGE_PATH}#${userCode}`,
+        verificationUrl: `${c.env.ACCOUNT_ORIGIN}${ENROLL_PAGE_PATH}${purpose === "voice" ? "?purpose=voice" : ""}#${userCode}`,
       }),
       expiresAt: expiresAtS * 1000,
       interval: ENROLLMENT_POLL_INTERVAL_S,
@@ -503,37 +507,54 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
   });
 
   app.post(API_ROUTES.burrowEnrollPoll, async (c) => {
-    const deviceCode = (await readJson<{ deviceCode?: unknown }>(c))?.deviceCode;
+    const body = await readJson<{ deviceCode?: unknown; purpose?: unknown }>(c);
+    const purpose = body?.purpose ?? "remote";
+    if (purpose !== "remote" && purpose !== "voice") return c.json({ error: "invalid purpose" }, 400);
+    const deviceCode = body?.deviceCode;
     const answer = (res: BurrowEnrollPollResponse) => c.json(res);
     if (!isRelayBearer(deviceCode)) return answer({ status: "expired" });
     const bytes = fromBase64Url(deviceCode);
     // Expired by its own clock, without the database.
     const expiresAtS = new DataView(bytes.buffer, bytes.byteOffset, DEVICE_CODE_EXPIRY_BYTES).getUint32(0);
     if (expiresAtS * 1000 <= Date.now()) return answer({ status: "expired" });
-    const userCode = await userCodeOf(c.env, bytes);
+    const userCode = await userCodeOf(c.env, bytes, purpose);
     return database(c, async (db) => {
       const {
         rows: [approval],
-      } = await db.query<OwnerRow & { redeemedBurrowId: string | null }>(
-        `SELECT a."userId", a."redeemedBurrowId", ${OWNER_COLUMNS}
+      } = await db.query<OwnerRow & { redeemedBurrowId: string | null; redeemed: boolean }>(
+        `SELECT a."userId", a."redeemedBurrowId", a."redeemedAt" IS NOT NULL AS redeemed, ${OWNER_COLUMNS}
         FROM dormouse_relay_enrollment_approvals a JOIN "user" u ON u.id = a."userId"
-        WHERE a."userCode" = $1 AND a."expiresAt" > now()`,
-        [userCode],
+        WHERE a."userCode" = $1 AND a.purpose = $2 AND a."expiresAt" > now()`,
+        [userCode, purpose],
       );
       if (!approval) return answer({ status: "pending" });
       // Spent by an earlier poll whose answer this Burrow never read: the
       // Burrow it minted is the account's to remove, and nothing redeems twice.
-      if (approval.redeemedBurrowId !== null) {
-        return answer({ status: "redeemed", burrowId: approval.redeemedBurrowId });
+      if (approval.redeemed) {
+        return purpose === "voice"
+          ? c.json({ status: "redeemed" })
+          : answer({ status: "redeemed", burrowId: approval.redeemedBurrowId! });
       }
       const owner = ownerOf(approval);
       // Rechecked here: an approval does not outlive its approver's entitlement.
       if (!owner.entitled) return c.json({ error: NOT_ENTITLED_ERROR }, 403);
+      if (purpose === "voice") {
+        const voiceToken = mintVoiceToken();
+        // One statement spends the approval and mints only a voice credential.
+        const { rowCount } = await db.query(
+          `WITH spent AS (
+            UPDATE dormouse_relay_enrollment_approvals SET "redeemedAt" = now()
+            WHERE "userCode" = $1 AND "userId" = $2 AND purpose = 'voice'
+              AND "expiresAt" > now() AND "redeemedAt" IS NULL
+            RETURNING "userId"
+          ) INSERT INTO dormouse_voice_tokens ("userId", hash)
+            SELECT "userId", $3 FROM spent`,
+          [userCode, owner.userId, digest(voiceToken)],
+        );
+        return c.json(rowCount ? { status: "enabled", voiceToken } : { status: "redeemed" });
+      }
       const burrowId = randomBase64Url(E2E_ID_BYTE_LENGTH);
       const burrowToken = randomBase64Url(RELAY_BEARER_BYTE_LENGTH);
-      // The enrolled desktop's managed voice, minted with its Burrow and
-      // revoked with it (docs/specs/hosted.md -> "Managed voice").
-      const voiceToken = mintVoiceToken();
       const outcome = await locked(db, `burrows:${owner.userId}`, async () => {
         const {
           rows: [{ enrolled }],
@@ -544,24 +565,19 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
         // A full account keeps the approval, so a poll after a removal enrolls.
         if (enrolled >= MAX_BURROWS_PER_ACCOUNT) return "full";
         // Single-use: the approval is marked redeemed in the statement that
-        // enrolls its Burrow, owned by exactly its approver, and mints its
-        // voice token, so two polls cannot mint two; the marked row stays
+        // enrolls its Burrow, owned by exactly its approver,
+        // so two polls cannot mint two; the marked row stays
         // until it expires.
         const { rowCount } = await db.query(
           `WITH spent AS (
             UPDATE dormouse_relay_enrollment_approvals
             SET "redeemedBurrowId" = $3, "redeemedAt" = now()
             WHERE "userCode" = $1 AND "userId" = $2 AND "expiresAt" > ${LOCKED_NOW}
-              AND "redeemedAt" IS NULL
+              AND "redeemedAt" IS NULL AND purpose = 'remote'
             RETURNING "userId"
-          ), enrolled AS (
-            INSERT INTO dormouse_relay_burrows ("burrowId", "userId", "tokenHash")
-            SELECT $3, "userId", $4 FROM spent
-            RETURNING "burrowId", "userId"
-          )
-          INSERT INTO dormouse_voice_tokens ("userId", hash, "burrowId")
-          SELECT "userId", $5, "burrowId" FROM enrolled`,
-          [userCode, owner.userId, burrowId, digest(burrowToken), digest(voiceToken)],
+          ) INSERT INTO dormouse_relay_burrows ("burrowId", "userId", "tokenHash")
+            SELECT $3, "userId", $4 FROM spent`,
+          [userCode, owner.userId, burrowId, digest(burrowToken)],
         );
         if (rowCount) return "enrolled";
         // Lost to a poll that redeemed it while this one waited on the lock,
@@ -593,7 +609,6 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
         // The Burrow enforces `origin`/`rpId` as its ConnectionPolicy; Hosted
         // demands presence, not verification, so no `requireUserVerification`.
         enrollment: { burrowId, burrowToken, origin: c.env.APP_ORIGIN, rpId: rpIdOf(c.env) },
-        voiceToken,
       });
     });
   });
@@ -751,8 +766,8 @@ function setupTokenOf(body: unknown): string | null {
 const rpIdOf = (env: RelayEnv) => new URL(env.APP_ORIGIN).hostname;
 
 /** A device code's user code; a deployment without its secret answers 503. */
-function userCodeOf(env: RelayEnv, deviceCode: Uint8Array) {
+function userCodeOf(env: RelayEnv, deviceCode: Uint8Array, purpose: "remote" | "voice") {
   if (!env.RELAY_ENROLL_SECRET) throw new Error("RELAY_ENROLL_SECRET is not set");
-  return enrollUserCode(env.RELAY_ENROLL_SECRET, deviceCode);
+  return enrollUserCode(purpose === "voice" ? `${env.RELAY_ENROLL_SECRET}:voice` : env.RELAY_ENROLL_SECRET, deviceCode);
 }
 const invalidSetup = (c: Context) => c.json({ error: SETUP_TOKEN_INVALID_ERROR }, 401);

@@ -347,7 +347,7 @@ describe('RemoteControlSection', () => {
     expect(hostedForm().hidden).toBe(false);
     await type('input:not([type])', 'Work laptop');
 
-    await act(async () => buttonLabelled('Enroll with hosted.dormouse.sh')!.click());
+    await act(async () => buttonLabelled('Enroll remote control')!.click());
 
     expect(link.command).toHaveBeenCalledWith('beginHostedEnrollment', { label: 'Work laptop' });
     expect(codeShown()).toBe('23AB-YZ9K');
@@ -474,7 +474,7 @@ describe('RemoteControlSection', () => {
     };
     await render();
     await openPersistent();
-    await act(async () => buttonLabelled('Enroll with hosted.dormouse.sh')!.click());
+    await act(async () => buttonLabelled('Enroll remote control')!.click());
     expect(text()).toContain('Settings → Network is set to Nowhere');
   });
 
@@ -519,7 +519,7 @@ describe('RemoteControlSection', () => {
     expect(typedForm().textContent).toContain(SELF_HOST_RELAY_ORIGIN);
     // The origin is named, never typed: no field for it.
     expect(container.querySelector('input[type="url"]')).toBeNull();
-    expect(buttonLabelled('Enroll with hosted.dormouse.sh')).toBeUndefined();
+    expect(buttonLabelled('Enroll remote control')).toBeUndefined();
     expect(buttonLabelled('Connect')).toBeTruthy();
   });
 

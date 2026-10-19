@@ -373,12 +373,15 @@ export interface BurrowEnrollResponse {
 export interface BurrowEnrollBeginRequest {
   /** The relay origin the Burrow was built for; any other is a 409 {@link BurrowEnrollOriginMismatch}. */
   origin: string;
+  purpose?: 'remote' | 'voice';
 }
 
 /** The account page a `verificationUrl` names, the user code in its fragment. */
 export const ENROLL_PAGE_PATH = '/enroll';
 
 export interface BurrowEnrollBeginResponse {
+  /** Voice clients require this acknowledgement before polling; older servers enroll only remote control. */
+  purpose?: 'remote' | 'voice';
   /**
    * The Burrow's secret for polling, in the {@link isRelayBearer} shape. The
    * Burrow holds it opaque; Hosted's layout is `docs/specs/hosted.md` ->
@@ -434,6 +437,7 @@ export function isBurrowEnrollBeginResponse(value: unknown): value is BurrowEnro
 
 export interface BurrowEnrollPollRequest {
   deviceCode: string;
+  purpose?: 'remote' | 'voice';
 }
 
 /**
@@ -442,16 +446,12 @@ export interface BurrowEnrollPollRequest {
  * until the approval expires: an earlier poll enrolled `burrowId`, whose answer
  * never reached this one, and which the account must remove.
  *
- * `enrolled` also carries the enrolled desktop's managed-voice token, minted
- * with the Burrow and revoked with it (`docs/specs/hosted.md` -> "Managed
- * voice"). The Burrow holds it to `isManagedVoiceToken` and enrolls without
- * one that fails, so an approval is never stranded over it.
  */
 export type BurrowEnrollPollResponse =
   | { status: 'pending' }
   | { status: 'expired' }
   | { status: 'redeemed'; burrowId: string }
-  | { status: 'enrolled'; enrollment: BurrowEnrollResponse; voiceToken: string };
+  | { status: 'enrolled'; enrollment: BurrowEnrollResponse };
 
 /**
  * A poll answer of a known status, `redeemed` naming a routing-id-shaped

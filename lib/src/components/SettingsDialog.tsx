@@ -526,7 +526,7 @@ export function AlarmSettingsSection({ sink, preview = false, onShowNetwork }: {
             so alerts use your browser or system voice.
           </>
         ) : (
-          'Uses managed voice while this computer is enrolled with Dormouse Hosted, otherwise your browser or system voice.'
+          'Uses managed voice when enabled below, otherwise your browser or system voice.'
         )}
       </AlarmSinkSection>
       {preview ? null : (

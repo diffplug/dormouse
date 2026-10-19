@@ -101,23 +101,18 @@ export function voiceTokenRoutes(
     return c.json({ id: row.id, token, createdAt: row.createdAt }, 201);
   });
 
-  // A computer's token goes only with its computer: revoked alone, its next
-  // speak would ask for a fresh enrollment, under a new Burrow id that every
-  // paired phone would have to pair with again.
   app.delete("/api/voice/tokens/:id", cookieGate, async (c) => {
     const id = c.req.param("id");
     if (!UUID.test(id)) return fail(c, 404, "Token not found.");
-    const [row] = await accountQuery<{ computer: boolean }>(
+    const [row] = await accountQuery<{ id: string }>(
       host(c),
       `UPDATE dormouse_voice_tokens
-      SET "revokedAt" = CASE WHEN "burrowId" IS NULL THEN coalesce("revokedAt", now()) ELSE "revokedAt" END
-      WHERE id = $1 AND "userId" = $2 RETURNING "burrowId" IS NOT NULL AS computer`,
+      SET "revokedAt" = coalesce("revokedAt", now())
+      WHERE id = $1 AND "userId" = $2 RETURNING id`,
       [id, c.get("login").userId],
     );
     if (!row) return fail(c, 404, "Token not found.");
-    return row.computer
-      ? fail(c, 409, "Remove its computer to revoke this token.")
-      : c.body(null, 204);
+    return c.body(null, 204);
   });
 }
 

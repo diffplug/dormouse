@@ -7,14 +7,7 @@ import type { BurrowConsoleStatus } from '../host/remote/service-protocol';
 import { UNENROLLED_STATUS, enrolledStatus } from '../host/remote/test-burrow-link';
 import { networkPolicyResult, nothingPolicy } from '../remote/network-policy';
 
-/**
- * Settings → Notifications' managed voice in a Hosted build
- * (`docs/specs/alert.md` -> "Settings dialog"): the disclosure, enrolling with
- * Dormouse Hosted — the same device-code flow Remote control runs, whose code
- * states are `RemoteControlSection`'s stories — and, enrolled, the voice and
- * Disconnect. Every state comes from the `primedBurrow` and
- * `primedManagedVoice` parameters.
- */
+/** Independent managed-voice approval, selection, and disconnect. */
 function ManagedVoiceStory() {
   return (
     <div className="flex justify-center p-6">
@@ -65,26 +58,22 @@ export const NotEnrolled: Story = {
     primedManagedVoice: { configured: false },
   },
   play: async ({ canvasElement }) => {
-    await within(canvasElement).findByRole('button', { name: 'Enroll with hosted.dormouse.sh' });
+    await within(canvasElement).findByRole('button', { name: 'Enable managed voice' });
   },
 };
 
 /** The code waiting at the account, as the service reports it. */
 export const WaitingForApproval: Story = {
   parameters: {
-    primedBurrow: {
-      status: {
-        ...UNENROLLED_STATUS,
-        hostedEnrollment: {
-          status: 'waiting',
-          userCode: '7KQM-X4TD',
-          verificationUrl: 'https://hosted.dormouse.sh/enroll#7KQM-X4TD',
-          expiresAt: STORY_NOW + 10 * 60_000,
-          accountFull: false,
-        },
+    primedBurrow: { status: UNENROLLED_STATUS },
+    primedManagedVoice: {
+      configured: false,
+      enrollment: {
+        status: 'waiting', userCode: '7KQM-X4TD',
+        verificationUrl: 'https://hosted.dormouse.sh/enroll?purpose=voice#7KQM-X4TD',
+        expiresAt: STORY_NOW + 10 * 60_000,
       },
     },
-    primedManagedVoice: { configured: false },
     docs: { story: { height: '420px' } },
   },
   play: settled('7KQM-X4TD'),
@@ -99,7 +88,7 @@ export const UnderNothing: Story = {
     },
     primedManagedVoice: { configured: false },
   },
-  play: settled(/Choose Local networks or Anywhere there to enroll/),
+  play: settled(/Choose Local networks or Anywhere in/),
 };
 
 /** Enrolled, a member: the curated voices and Disconnect. */
@@ -108,7 +97,7 @@ export const Enrolled: Story = {
     primedBurrow: { status: ENROLLED },
     primedManagedVoice: { configured: true },
   },
-  play: settled('Enrolled with Dormouse Hosted.'),
+  play: settled('Managed voice is enabled.'),
 };
 
 /** Disconnect's second step, which says what else it ends. */
@@ -120,7 +109,7 @@ export const DisconnectSecondStep: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await userEvent.click(await canvas.findByRole('button', { name: 'Disconnect' }));
-    await canvas.findByText(/Remote control disconnects too/);
+    await canvas.findByText(/Alarms will use your system voice/);
   },
 };
 
@@ -133,22 +122,18 @@ export const NoPlan: Story = {
   play: settled(/no Hosted plan/),
 };
 
-/** Enrolled before managed voice shipped: no token, so it asks for a fresh enrollment. */
-export const EnrolledBeforeVoice: Story = {
-  parameters: {
-    primedBurrow: { status: ENROLLED },
-    primedManagedVoice: { configured: false },
+/** Remote control is enrolled while managed voice remains an independent choice. */
+export const RemoteOnly: Story = {
+  parameters: { primedBurrow: { status: ENROLLED }, primedManagedVoice: { configured: false } },
+  play: async ({ canvasElement }) => {
+    await within(canvasElement).findByRole('button', { name: 'Enable managed voice' });
   },
-  play: settled(/enrolled before managed voice/),
 };
 
-/** Removed at the account page: enrolling again gets a new code. */
-export const RemovedAtAccount: Story = {
-  parameters: {
-    primedBurrow: { status: { ...ENROLLED, connection: 'removed' } },
-    primedManagedVoice: { configured: true },
-  },
+/** A failed disk clear stops voice immediately and remains retryable. */
+export const DisconnectFailed: Story = {
+  parameters: { primedBurrow: { status: ENROLLED }, primedManagedVoice: { configured: false, disconnectFailed: true } },
   play: async ({ canvasElement }) => {
-    await within(canvasElement).findByRole('button', { name: 'Enroll again' });
+    await within(canvasElement).findByRole('button', { name: 'Retry disconnect' });
   },
 };

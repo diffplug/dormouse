@@ -499,13 +499,10 @@ export function createSidecarHost(options: SidecarHostOptions): SidecarHost {
     relay,
     // The service holds the network policy; managed voice is its second choke
     // point (`docs/specs/remote-network.md` → "Policy"). Late-bound: asked
-    // only at a speak, once the service below exists.
+    // only on a voice request, once the service below exists.
     networkAllowed: () => service.networkAllowed(),
   });
   const service = new BurrowService({
-    // A Hosted enrollment hands managed voice its token; disconnect clears it. A
-    // self-host build has no managed voice to hand one to.
-    voiceCredential: relay.mode === 'hosted' ? voice.credential : undefined,
     store,
     provider: bridge.provider,
     kind: 'standalone',
@@ -628,6 +625,7 @@ export function createSidecarHost(options: SidecarHostOptions): SidecarHost {
       for (const stop of stops) stop();
       alertHost.dispose();
       service.dispose();
+      voice.dispose();
       bridge.dispose();
       // After the service, so no session is still holding a channel: the addon's
       // threads are what would otherwise keep the sidecar from exiting.

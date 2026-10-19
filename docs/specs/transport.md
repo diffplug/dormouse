@@ -169,9 +169,9 @@ OSC parsing and stripping for those rows: `docs/specs/terminal-escapes.md` → "
 
 | Direction | Standalone carrier | Payload |
 | --- | --- | --- |
-| Webview → host | `managed_voice { payload }` → sidecar `voice:command` | op `status`, `configure` (the voice only), or `speak` |
+| Webview → host | `managed_voice { payload }` → sidecar `voice:command` | op `status`, `configure` (the voice only), `beginEnrollment`, `cancelEnrollment`, `disconnect`, or `speak` |
 | Host → webview | sidecar `voice:result` → invoke result | that op's answer |
-| Host → every webview | sidecar `voice:status` | the status after each change: a saved voice, enrollment, disconnect, or the `notEntitled` latch |
+| Host → every webview | sidecar `voice:status` | the status after each change: a saved voice, voice approval, disconnect (including persistence failure), or the `notEntitled` latch |
 
 Source of truth: `ManagedVoicePort` in `lib/src/lib/platform/managed-voice-types.ts`; `createManagedVoicePort` in `standalone/src/managed-voice-port.ts`; `createManagedVoiceHost` in `lib/src/host/managed-voice-host.ts`.
 

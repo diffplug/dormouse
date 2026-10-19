@@ -9,6 +9,7 @@ import { readdirSync, readFileSync } from "node:fs";
  * appends the next numbered file and pins it here.
  */
 const PINNED: Record<string, string> = {
+  "008_independent_voice.sql": "1fce46af1f26a192ff6aa359689d45504d97dcfebc4eaf9f4dac111124619d49",
   "001_voice_tokens.sql": "8dddec53bca7244411f3e8a007ccea665ede176c9c0bead6a0987af41c366cae",
   "002_relay.sql": "54651083ba1aac934ac0dcb5f62cc4f032d017f2c3be2161c0812ebc76f338c3",
   "003_relay_push.sql": "ee8cca19bb70eb89fcba708b54d8a188347caf0f32ec23551c56d27676ab094f",

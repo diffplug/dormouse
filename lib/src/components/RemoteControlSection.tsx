@@ -751,8 +751,7 @@ function OfferCard({
  * Disconnecting's second step, which the first click asks for: it drops every
  * paired phone until they pair again. Local only — the enrollment is forgotten
  * here and the Relay is not asked — so it is offered under Nothing too
- * ({@link HeldEnrollment}). Managed voice's Disconnect is the same step under
- * its own `label` and `warning`.
+ * ({@link HeldEnrollment}).
  */
 export function DisconnectConfirm({
   busy,

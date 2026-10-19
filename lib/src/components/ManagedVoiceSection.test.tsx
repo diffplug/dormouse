@@ -72,13 +72,15 @@ describe('ManagedVoiceSection', () => {
   });
 
   it('states what leaves the machine, then enrolls with the suggested name, no paste field', async () => {
-    const { command } = await render({ status: UNENROLLED_STATUS }, makeStubManagedVoicePort(false));
+    const { command, voice } = await render({ status: UNENROLLED_STATUS }, makeStubManagedVoicePort(false));
+    const begin = vi.spyOn(voice, 'beginEnrollment');
     expect(text()).toContain(MANAGED_VOICE_DISCLOSURE);
     expect(text()).toContain('though no limit is guaranteed');
     expect(container.querySelector('input')).toBeNull();
 
-    await act(async () => button('Enroll with hosted.dormouse.sh')!.click());
-    expect(command).toHaveBeenCalledWith('beginHostedEnrollment', { label: UNENROLLED_STATUS.suggestedLabel });
+    await act(async () => button('Enable managed voice')!.click());
+    expect(begin).toHaveBeenCalledOnce();
+    expect(command).not.toHaveBeenCalledWith('beginHostedEnrollment', expect.anything());
   });
 
   it('under Nothing, explains and points at Network rather than enrolling', async () => {
@@ -88,8 +90,8 @@ describe('ManagedVoiceSection', () => {
       makeStubManagedVoicePort(false),
       onShowNetwork,
     );
-    expect(text()).toContain('Choose Local networks or Anywhere there to enroll.');
-    expect(button('Enroll with hosted.dormouse.sh')).toBeUndefined();
+    expect(text()).toContain('Choose Local networks or Anywhere in');
+    expect(button('Enable managed voice')).toBeUndefined();
     await act(async () => button('Network')!.click());
     expect(onShowNetwork).toHaveBeenCalledOnce();
     expect(command).not.toHaveBeenCalledWith('beginHostedEnrollment', expect.anything());
@@ -97,7 +99,7 @@ describe('ManagedVoiceSection', () => {
 
   it('enrolled, picks a voice from the curated set', async () => {
     const { voice } = await render({ status: ENROLLED });
-    expect(text()).toContain('Enrolled with Dormouse Hosted.');
+    expect(text()).toContain('Managed voice is enabled.');
     const select = container.querySelector<HTMLSelectElement>('select[aria-label="Managed voice"]')!;
     expect([...select.options].map((option) => option.value)).toEqual(MANAGED_VOICES.map((v) => v.id));
     const configure = vi.spyOn(voice, 'configure');
@@ -108,11 +110,13 @@ describe('ManagedVoiceSection', () => {
     expect(configure).toHaveBeenCalledWith({ voiceId: MANAGED_VOICES[2]!.id });
   });
 
-  it.each([
-    ['the relay socket', { status: { ...ENROLLED, connection: 'not-entitled' as const } }, false],
-    ['speak', { status: ENROLLED }, true],
-  ])('says the account has no plan when %s refuses it', async (_by, primed, notEntitled) => {
-    await render(primed, makeStubManagedVoicePort(true, notEntitled));
+  it('uses voice entitlement independently of the relay socket', async () => {
+    await render({ status: { ...ENROLLED, connection: 'not-entitled' } });
+    expect(text()).not.toContain(NO_PLAN_COPY);
+  });
+
+  it('shows plans when speak refuses the voice entitlement', async () => {
+    await render({ status: ENROLLED }, makeStubManagedVoicePort(true, true));
     expect(text()).toContain(NO_PLAN_COPY);
     const openExternal = vi.fn();
     Object.assign(getPlatform(), { openExternal });
@@ -120,27 +124,45 @@ describe('ManagedVoiceSection', () => {
     expect(openExternal).toHaveBeenCalledWith(HOSTED_PRICING_URL);
   });
 
-  it('asks a computer enrolled before managed voice to enroll again', async () => {
+  it('offers voice independently when remote control is already enrolled', async () => {
     await render({ status: ENROLLED }, makeStubManagedVoicePort(false));
-    expect(text()).toContain('Disconnect and enroll again to use it.');
+    expect(button('Enable managed voice')).toBeDefined();
     expect(container.querySelector('select')).toBeNull();
   });
 
-  it('disconnects after confirming, which is the Burrow’s local Disconnect', async () => {
-    const { command } = await render({ status: ENROLLED });
-    expect(text()).toContain('Remove this computer at hosted.dormouse.sh');
+  it('disconnects voice after confirming without clearing remote control', async () => {
+    const { command, voice } = await render({ status: ENROLLED });
+    const disconnect = vi.spyOn(voice, 'disconnect');
     await act(async () => button('Disconnect')!.click());
-    expect(text()).toContain('Remote control disconnects too');
+    expect(text()).toContain('Alarms will use your system voice.');
     expect(command).not.toHaveBeenCalledWith('clearEnrollment');
     await act(async () => button('Disconnect')!.click());
-    expect(command).toHaveBeenCalledWith('clearEnrollment');
+    expect(disconnect).toHaveBeenCalledOnce();
+    expect(command).not.toHaveBeenCalledWith('clearEnrollment');
   });
+  it('keeps a failed voice disconnect visible and retryable without clearing remote control', async () => {
+    const { voice, command } = await render({ status: ENROLLED });
+    const original = voice.status()!;
+    const disconnect = vi.spyOn(voice, 'disconnect').mockImplementation(async () => {
+      vi.spyOn(voice, 'status').mockReturnValue({ ...original, configured: false, disconnectFailed: true });
+      await voice.configure({ voiceId: original.voiceId }); // Broadcast the failed-clear status.
+      return { ok: false, message: 'Could not clear the saved token.' };
+    });
+    await act(async () => button('Disconnect')!.click());
+    await act(async () => button('Disconnect')!.click());
+    expect(text()).toContain('Could not clear the saved token.');
+    expect(button('Enable managed voice')).toBeUndefined();
+    await act(async () => button('Retry disconnect')!.click());
+    expect(disconnect).toHaveBeenCalledTimes(2);
+    expect(command).not.toHaveBeenCalledWith('clearEnrollment');
+  });
+
 });
 
 describe('the spoken-alarm copy', () => {
   it.each([
     ['no port', false, 'Get managed ElevenLabs voices.'],
-    ['a Hosted build’s port', true, 'Uses managed voice while this computer is enrolled with Dormouse Hosted'],
+    ['a Hosted build’s port', true, 'Uses managed voice when enabled below'],
   ])('with %s', async (_label, port, copy) => {
     const adapter = new FakePtyAdapter();
     setPlatform(port ? Object.assign(adapter, { managedVoice: makeStubManagedVoicePort(false) }) : adapter);

@@ -8,14 +8,6 @@ import { getPlatform } from '../lib/platform';
 import { BURROW_IS_AN_APP } from '../remote/setup-copy';
 import { beginHostedEnrollment, cancelHostedEnrollment } from '../remote/burrow/burrow-status-store';
 
-/**
- * Enrolling this computer with Dormouse Hosted: the device-code
- * enrollment (`docs/specs/hosted.md` -> "Burrow enrollment") that both
- * Settings → Network's Remote control and Notifications' managed voice start.
- * One approval enrolls this computer's Burrow and hands managed voice its
- * token, so both places render the one flow from here.
- */
-
 /** Where the plans are; linked wherever an account turns out to have none. */
 export const HOSTED_PRICING_URL = 'https://dormouse.sh/hosted/#pricing';
 /** The Hosted page's voice section, the spoken-alarm row's link where the build has no managed voice. */
@@ -184,7 +176,7 @@ export function HostedEnrollView({
             disabled={busy || name === ''}
             className={modalActionButton({ tone: 'primary' })}
           >
-            {beginning ? 'Getting a code…' : ended ? 'Get a new code' : `Enroll with ${accountHost(accountOrigin)}`}
+            {beginning ? 'Getting a code…' : ended ? 'Get a new code' : 'Enroll remote control'}
           </button>
           {ended ? (
             <button
@@ -204,7 +196,7 @@ export function HostedEnrollView({
 }
 
 /** The code waiting for approval, and the way to approve it. */
-function HostedEnrollmentCode({
+export function HostedEnrollmentCode({
   waiting,
   accountOrigin,
   busy,

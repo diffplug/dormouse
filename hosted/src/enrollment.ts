@@ -3,6 +3,7 @@ import { normalizeEnrollUserCode } from "../../remote-lib-common/src/remote/enro
 /** An enrollment link's user code, or null when the link carried none valid. */
 export interface Enrollment {
   code: string | null;
+  purpose?: "remote" | "voice";
 }
 
 /**
@@ -15,5 +16,6 @@ export function takeEnrollment(): Enrollment | null {
   const { pathname, search, hash } = location;
   if (pathname !== "/enroll" || hash === "") return null;
   history.replaceState(null, "", pathname + search);
-  return { code: normalizeEnrollUserCode(hash.slice(1)) };
+  return { code: normalizeEnrollUserCode(hash.slice(1)),
+    ...(new URLSearchParams(search).get("purpose") === "voice" ? { purpose: "voice" as const } : {}) };
 }
