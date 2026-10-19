@@ -4,9 +4,10 @@
  * asks. Outside a frame, or before a host connects, reports go nowhere.
  */
 
-import { readHostMessage, type FrameMessage } from './protocol.js';
+import { readHostMessage, type FrameMessage, type ToolViewAccess } from './protocol.js';
 
 export interface ToolFrameOptions {
+  view?: ToolViewAccess;
   /** The document's dirty state, or undefined while it is still loading. */
   dirty(): boolean | undefined;
   /** Writes the document. The host's Save closes the Tool only once this
@@ -25,7 +26,7 @@ type Unaddressed<T> = T extends unknown ? Omit<T, 'dorTool' | 'connection'> : ne
 
 /** Answers the host that frames `scope`. A later `connect`, as after a reload,
  * replaces the earlier connection. */
-export function connectToolFrame({ dirty, save }: ToolFrameOptions, scope: Window = window): ToolFrame {
+export function connectToolFrame({ dirty, save, view }: ToolFrameOptions, scope: Window = window): ToolFrame {
   let host: { origin: string; connection: string } | null = null;
   const post = (message: Unaddressed<FrameMessage>) => {
     if (host) scope.parent.postMessage({ dorTool: 1, connection: host.connection, ...message }, host.origin);
@@ -46,6 +47,19 @@ export function connectToolFrame({ dirty, save }: ToolFrameOptions, scope: Windo
     // Request ids can repeat on a replacement connection; old disk writes may
     // finish, but their replies must never settle that connection's save.
     const savingHost = host;
+    if (message.kind === 'view-read' || message.kind === 'view-apply') {
+      Promise.resolve().then(async () => {
+        if (host !== savingHost) return;
+        if (!view) throw new Error('This page does not expose a reading position.');
+        if (message.kind === 'view-apply') await view.apply(message.position);
+        return view.read();
+      }).then(position => {
+        if (host === savingHost) post({ kind: 'view', request, position });
+      }, reason => {
+        if (host === savingHost) post({ kind: 'view', request, error: reason instanceof Error ? reason.message : String(reason) });
+      });
+      return;
+    }
     const completed = (error?: string) => {
       if (host !== savingHost) return;
       post({ kind: 'saved', request, dirty: dirty() ?? true, ...(error === undefined ? {} : { error }) });

@@ -918,6 +918,65 @@ describe('AgentBrowserPanel canvas input forwarding', () => {
     .flatMap((ws) => ws.sent)
     .filter((m) => m.includes('"type":"input_keyboard"'));
 
+  const sentMouse = () => sentMouseEvents().map((m) => JSON.parse(m) as Record<string, unknown>);
+
+  // A terminal's xterm takes hover and wheel wherever the pointer is; an
+  // unselected browser pane must too, in either mode.
+  it.each(['passthrough', 'command'] as const)('forwards hover and wheel over an unselected pane in %s mode', async (mode) => {
+    const canvas = await renderWithMode(mode, 'some-other-pane');
+    const wheel = new WheelEvent('wheel', { bubbles: true, cancelable: true, clientX: 200, clientY: 100, deltaX: 3, deltaY: 40 });
+    await act(async () => {
+      canvas.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 100, clientY: 50 }));
+      canvas.dispatchEvent(wheel);
+    });
+    expect(sentMouse()).toEqual([
+      expect.objectContaining({ eventType: 'mouseMoved', x: 100, y: 50, button: 'none', buttons: 0 }),
+      expect.objectContaining({ eventType: 'mouseWheel', x: 200, y: 100, deltaX: 3, deltaY: 40 }),
+    ]);
+    expect(wheel.defaultPrevented).toBe(true);
+  });
+
+  it('sends no keys to an unselected pane in passthrough', async () => {
+    const canvas = await renderWithMode('passthrough', 'some-other-pane');
+    await act(async () => {
+      canvas.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true, cancelable: true }));
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', bubbles: true, cancelable: true }));
+    });
+    expect(sentKeyEvents()).toHaveLength(0);
+  });
+
+  it('ends the page\'s hover when the pointer leaves the canvas, once', async () => {
+    const canvas = await renderWithMode('command', null);
+    await act(async () => {
+      canvas.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 100, clientY: 50 }));
+      canvas.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body }));
+      canvas.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body }));
+    });
+    expect(sentMouse().map((m) => [m.eventType, m.x, m.y])).toEqual([['mouseMoved', 100, 50], ['mouseMoved', -1, -1]]);
+  });
+
+  it('catches up a release made off the canvas before ending the hover', async () => {
+    const canvas = await renderWithMode('passthrough', 'ab-panel');
+    await act(async () => {
+      canvas.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: 100, clientY: 50, button: 0, buttons: 1 }));
+      canvas.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 110, clientY: 50, buttons: 0 }));
+      canvas.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, buttons: 0, relatedTarget: document.body }));
+    });
+    expect(sentMouse().map((m) => [m.eventType, m.buttons])).toEqual([['mousePressed', 1], ['mouseMoved', 0], ['mouseMoved', 0]]);
+    expect(sentMouse().at(-1)).toEqual(expect.objectContaining({ x: -1, y: -1 }));
+  });
+
+  it('keeps its own drag through a leave, and skips the moves of a drag that began elsewhere', async () => {
+    const canvas = await renderWithMode('passthrough', 'ab-panel');
+    await act(async () => {
+      // Another pane's drag passing over: a button down this canvas never saw pressed.
+      canvas.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 10, clientY: 10, buttons: 1 }));
+      canvas.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: 100, clientY: 50, button: 0, buttons: 1 }));
+      canvas.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, buttons: 1, relatedTarget: document.body }));
+    });
+    expect(sentMouse().map((m) => m.eventType)).toEqual(['mousePressed']);
+  });
+
   // The window key forwarder is a capture-phase listener that preventDefaults
   // what it takes, so a Workspace left in passthrough on a browser pane would go
   // on eating every keystroke while hidden (docs/specs/layout.md → "Workspaces").

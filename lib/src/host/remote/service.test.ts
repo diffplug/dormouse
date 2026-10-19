@@ -2793,6 +2793,21 @@ describe('Hosted enrollment', () => {
     expect(pollRequests()).toHaveLength(2);
   });
 
+  it('ignores a legacy redemption voice token instead of enabling managed voice', async () => {
+    const voiceToken = `dmv_${'V'.repeat(43)}`;
+    hosted();
+    await service.start();
+    await command('beginHostedEnrollment', { label: 'Work laptop' });
+    const answer = enrolledAnswer();
+    polls.push({ ...answer, body: { ...answer.body, voiceToken } });
+    await nextPoll();
+    await drain(() => store.enrollment !== null);
+    expect(JSON.stringify(sent)).not.toContain(voiceToken);
+    expect(store.enrollment).not.toHaveProperty('voiceToken');
+    await command('clearEnrollment');
+    expect(store.enrollment).toBeNull();
+  });
+
   it('is refused in a self-host build, and under Nothing, before any request', async () => {
     createService({ network: RELAY_ON }, { fetch: hostedFetch() });
     expect((await command('beginHostedEnrollment', { label: 'x' })).error).toContain('setup password');

@@ -33,6 +33,10 @@ Dormouse intercepts dor-embed-size to query or set the pane's browser viewport:
   dor agent-browser dor-embed-size 1440 900 --dpr 2
   dor agent-browser dor-embed-size --preset pane-sync
 
+and dor-diagnostics to print, as JSON, what the pane and the host know about
+its stream — for a pane that froze, or never showed its page:
+  dor agent-browser --surface surface:3 dor-diagnostics
+
 After a successful command, dor opens the browser surface bound to the session,
 or reuses the one it already has. A playwright browser (render_mode playwright-*) is
 driven with dor playwright --surface instead.

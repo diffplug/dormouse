@@ -352,13 +352,13 @@ const preview: Preview = {
         | undefined;
       platform.updates = primedUpdates ? makeStubUpdatesPort(primedUpdates.checkedAt) : undefined;
 
-      // Managed voice's port, with a token saved or not; absent is a build
-      // that offers none.
+      // Managed voice's port, with a token saved or not, and whether speak
+      // last answered that the plan lapsed; absent is a build that offers none.
       const primedManagedVoice = context.parameters?.primedManagedVoice as
-        | { configured: boolean }
+        | import('../src/lib/platform/managed-voice-types').ManagedVoiceStatus
         | undefined;
       platform.managedVoice = primedManagedVoice
-        ? makeStubManagedVoicePort(primedManagedVoice.configured)
+        ? makeStubManagedVoicePort(primedManagedVoice.configured, primedManagedVoice.notEntitled, primedManagedVoice)
         : undefined;
 
       // And the same seam again for the Settings dialog's Remote control

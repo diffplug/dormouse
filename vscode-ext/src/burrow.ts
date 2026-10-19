@@ -586,6 +586,21 @@ async function idleAnswer(cmd: string): Promise<{ result: unknown } | null> {
   }
 }
 
+/**
+ * Whether the network policy lets this window reach Hosted on its own, for
+ * managed voice: the service's answer in the broker, else the policy every
+ * window reads from `globalState`, which only the service writes.
+ */
+export async function burrowNetworkAllowed(): Promise<boolean> {
+  if (service) return service.networkAllowed();
+  try {
+    return (await idleNetworkPolicy()).level !== 'nothing';
+  } catch {
+    // A failed read counts as Nothing, as it does for the service.
+    return false;
+  }
+}
+
 /** The network policy as a service starting now would read it, the default unsaved. */
 async function idleNetworkPolicy(): Promise<NetworkPolicy> {
   if (!context) throw new Error(NO_BURROW);

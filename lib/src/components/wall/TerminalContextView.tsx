@@ -67,6 +67,7 @@ export interface TerminalContextViewProps {
   origin?: { x: number; y: number };
   defaultCommand?: string; surfaceId: string; cwd: string; helperCwd?: string; mismatch?: boolean;
   workspaceMove?: ReactNode;
+  navigation?: ReactNode;
   titleSources: { source: string; value: string; note?: string }[];
   scan: ContextScan; watchRule?: string | null; watching: boolean; todo: boolean;
   notification?: { title: string | null; body: string | null } | null;
@@ -495,6 +496,7 @@ export function TerminalContextView(p: TerminalContextViewProps) {
     <div ref={content} className="terminal-context-content flex min-h-0 flex-1 flex-col">
       <div className="shrink-0 max-h-[45%] overflow-auto pb-1" style={{ paddingLeft: 8 + reach('left'), paddingRight: 4 + reach('right'), paddingTop: reach('top') }}>
         <HeaderRow workspaceMove={p.workspaceMove} surfaceId={p.surfaceId} onExplain={() => setDetail('title')} onCopyId={() => attempt(p.onCopyId)} actions={<>
+          {p.navigation}
           {placement && <div role="group" aria-label="Helper placement" className="flex shrink-0 items-center gap-0.5">{placement.available.map(side =>
             <ContextAction key={side} label={`Place helper at ${side}`} pressed={placement.side === side} keepFocus onClick={() => placement.onChange(side)}><PlacementIcon side={side} /></ContextAction>)}</div>}
           <ContextAction label="Close terminal context" onClick={close} muted><XIcon size={15} /></ContextAction>

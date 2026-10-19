@@ -88,6 +88,7 @@ The host owns Resize with pane (rationale), answering each engagement — a choi
 
 - **Must send the pane's laid-out CSS size and display ratio over the viewer socket while engaged**, never `getBoundingClientRect()`, which a Workspace presentation scales, and never from a popped-out pane (rationale).
 - **Must serialize all viewport writes per browser in the host**, never while a launch or close settles it, and end an engagement when another writer changes the viewport, judged only by a viewport taken after the host's own write landed, as the provider vouches for it (rationale).
+- **Must write a page shown anew at the pane's size while synced, else at the last Fixed viewport the host wrote, a headless launch's included** (rationale).
 - **Must carry a Fixed choice's ended engagement to the host**, which rejects that engagement's later socket intents; the webview disengages only on the host's `off`.
 
 **Must persist resolved viewport settings**, restoring them when the browser is recreated without rereading a preset definition.
@@ -167,6 +168,8 @@ A stream is what a launch or `attach` answers for a live browser — agent-brows
 
 A pane out of sight ([Resource Policy](#resource-policy)) or unmounted parks after a debounce: its viewer socket closes and the daemon/session stays alive, unstreamed (rationale). **Never park a popped-out pane**: its socket carries the window's page and close. **Never set `AGENT_BROWSER_IDLE_TIMEOUT_MS`** for Dormouse-managed sessions: a daemon exiting when idle defeats alive-while-parked.
 
+**Must forward hover and wheel to the page over any screencast pane on screen, selected or not, in either mode, never selecting it or taking focus** (rationale). **Must end the page's hover when the pointer leaves the canvas**, except mid-drag of the canvas's own press (rationale).
+
 **Must send a local paste as bounded `input_text` messages** (`viewerTextInputs`), never a key pair per character (rationale). Select-all, copy, cut, and tab select or close go through host operations (`edit`, `tab`), since editing chords do not survive CDP input; undo/redo is not emulated.
 
 Source of truth: `lib/src/components/wall/agent-browser-surface-controller.ts` (`Phase`, `driver`), `lib/src/components/wall/AgentBrowserPanel.tsx`, `lib/src/components/wall/agent-browser-input.ts`, `onBrowserLaunchFailed` in `lib/src/components/Wall.tsx`.
@@ -200,14 +203,14 @@ Source of truth: `lib/src/components/wall/agent-browser-surface-controller.ts` (
 
 - `launch` opens an http(s) `url` in a new GUI session, or for a named session navigates its browser when up in the mode asked for, else relaunches it headed or headless; it resolves when the browser is up, not the page. **Never stop a browser a named launch finds up in its mode**: a Tool re-announced (rationale).
 - **Never start a browser from `attach` or `measure`**, except that `attach` relaunches a gone one at the page its caller names, answering `relaunched`.
-- **Never expose arbitrary CLI arguments, JavaScript or CDP methods through the webview channel**: each operation is one fixed argv or client call, and `edit` runs fixed host-owned JS plus an OS clipboard write. The trusted `dor` process keeps native passthrough.
+- **Never expose arbitrary CLI arguments, JavaScript or CDP methods through the webview channel**: each operation is one fixed argv or client call, and `edit` runs fixed host-owned JS plus an OS clipboard write. Tool reading-state operations follow `docs/specs/dor-tool.md` → Document navigation. The trusted `dor` process keeps native passthrough.
 
 **Must answer a launch inside `BROWSER_REQUEST_TIMEOUT_MS`**, queueing included — the wait every transport gives any reply, past agent-browser's own 25 s action timeout, so the webview never re-asks while the host still works.
 
 **Must run one lifecycle for both providers** (`BrowserProvider` holds the native primitives):
 
 - **Must serialize a browser's launches, relaunching attaches and closes per native identity**, in arrival order. A close runs after the work already running, supersedes work queued, and cancels by webview-minted `requestId` the closing Surface's own unanswered launches and attaches, so one arriving after it opens nothing (rationale).
-- **Must refuse every operation but `launch`, `attach` and `close` on a browser a launch is replacing or a close is ending**, `view` included, until it is done, whichever Surface asks.
+- **Must refuse every operation but `launch`, `attach` and `close` on a browser a launch is replacing or a close is ending**, `view` included, until it is done, whichever Surface asks — except `diagnostics`, answered read-only from what the host holds, asking the provider nothing then and resolving no launch environment.
 - **Must bound every provider call a browser's queue waits on**, and shutdown's wait on it (rationale).
 - **Must close every headed browser at shutdown, one still launching included**, so quitting orphans no window.
 
@@ -223,6 +226,7 @@ Source of truth: `parseBrowserRequest` and `createBrowserHost` in `lib/src/host/
 
 agent-browser alone has a per-session daemon, state files beside its socket, and one fixed argv per operation; `--headed` is a no-op against a live daemon, so only a relaunch changes the mode. Its daemon's stream server and its browser's CDP port accept unauthenticated loopback TCP connections from any local process, refusing only a foreign `Origin`; Dormouse sets neither listener's flags (`docs/specs/security.md` -> "Known gaps").
 
+- **Must restart a headless daemon's screencast (`screencast_stop`, `screencast_start` on its own socket) when its first viewer socket opens and at once when it reports another tab active**, once per change per browser, and stop it when the last closes: only an asked-for switch rebinds it, and a restart never moves the active tab (rationale). **Must take any refusal as leaving the stream as it was**, so an agent-browser without these actions degrades to a stale pane, not an error.
 - **Never spawn a daemon outside a launch's own steps**: any CLI verb starts one at `about:blank`, so `attach` reads the live port from `<session>.pid` / `<session>.stream` and a port probe, and every other verb runs only on proof of a live daemon (`liveDaemon`) — a pid file from this boot, alive, beside a stream port that accepts.
 - **Never signal a pid without that proof** (rationale).
 - **Must run a launch's `open` in the binding's project directory while it exists**, so a relaunch reads the same `./agent-browser.json` the `dor agent-browser` there did.

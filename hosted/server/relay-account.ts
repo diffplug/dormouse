@@ -7,7 +7,7 @@ import {
   normalizeEnrollUserCode,
   readJson,
 } from "remote-lib-common";
-import { accountQuery, cookieAdmin, type AccountHost } from "./account-gate";
+import { accountQuery, cookieEntitled, type AccountHost } from "./account-gate";
 import { ENROLLMENT_TTL_MS, LOGIN_FRESH_AGE_MS, RECENT_LOGIN_WINDOW } from "./policy-constants";
 
 /** What one request's account deployment provides to the Relay's account routes. */
@@ -30,7 +30,7 @@ export const ALREADY_APPROVED = "That code is already approved.";
  * `/api/*` catch-all.
  */
 export function relayAccountRoutes(app: Hono<any>, host: (c: Context) => RelayAccountHost) {
-  const gate = cookieAdmin(host, (c) => c.json({ message: NOT_ENTITLED_ERROR }, 403));
+  const gate = cookieEntitled(host, (c) => c.json({ message: NOT_ENTITLED_ERROR }, 403));
 
   const small = bodyLimit({
     maxSize: 1024,
@@ -50,9 +50,10 @@ export function relayAccountRoutes(app: Hono<any>, host: (c: Context) => RelayAc
       c.header("Retry-After", "60");
       return c.json({ message: "Too many attempts. Wait a minute before trying again." }, 429);
     }
-    const userCode = normalizeEnrollUserCode(
-      (await readJson<{ userCode?: unknown }>(c))?.userCode,
-    );
+    const body = await readJson<{ userCode?: unknown; purpose?: unknown }>(c);
+    const purpose = body?.purpose ?? "remote";
+    if (purpose !== "remote" && purpose !== "voice") return c.json({ message: "Invalid purpose." }, 400);
+    const userCode = normalizeEnrollUserCode(body?.userCode);
     if (userCode === null)
       return c.json({ message: "That is not a code from Dormouse." }, 400);
     // Whether the code was ever issued is unknowable here: begin stores
@@ -63,14 +64,14 @@ export function relayAccountRoutes(app: Hono<any>, host: (c: Context) => RelayAc
       (
         await accountQuery(
           host(c),
-          `INSERT INTO dormouse_relay_enrollment_approvals AS a ("userCode", "userId", "expiresAt")
-          VALUES ($1, $2, now() + ($3::float8 * interval '1 millisecond'))
+          `INSERT INTO dormouse_relay_enrollment_approvals AS a ("userCode", "userId", "expiresAt", purpose)
+          VALUES ($1, $2, now() + ($3::float8 * interval '1 millisecond'), $4)
           ON CONFLICT ("userCode") DO UPDATE
-            SET "userId" = EXCLUDED."userId", "expiresAt" = EXCLUDED."expiresAt",
+            SET purpose = EXCLUDED.purpose, "userId" = EXCLUDED."userId", "expiresAt" = EXCLUDED."expiresAt",
               "redeemedBurrowId" = NULL, "redeemedAt" = NULL
             WHERE a."expiresAt" <= now()
           RETURNING 1`,
-          [userCode, login.userId, ENROLLMENT_TTL_MS],
+          [userCode, login.userId, ENROLLMENT_TTL_MS, purpose],
         )
       ).length > 0;
     return approved ? c.body(null, 204) : c.json({ message: ALREADY_APPROVED }, 409);

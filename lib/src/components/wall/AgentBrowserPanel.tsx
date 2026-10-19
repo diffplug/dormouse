@@ -20,7 +20,7 @@ import {
 export { HIDDEN_PARK_DELAY_MS } from './agent-browser-surface-controller';
 import type { PaneProps } from './pane-props';
 import { usePaneChrome } from './use-pane-chrome';
-import { useSurfaceVisibility } from './use-surface-visibility';
+import { useSurfaceSight } from './use-surface-visibility';
 import {
   ModeContext,
   PaneWriteContext,
@@ -103,9 +103,9 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
   // isn't the selected one yet — the click is what selects it (via the root
   // `onClickPanel`), but `selectedId` only updates on the next render, so gating
   // mouse-down/up on `interactive` would swallow the very first click on a
-  // freshly-opened surface. Mouse forwarding therefore only requires passthrough
-  // mode; keyboard/wheel still require full `interactive` so a background pane
-  // never steals them.
+  // freshly-opened surface. Mouse-down/up therefore only require passthrough
+  // mode; keyboard still requires full `interactive` so a background pane never
+  // steals it.
   const passthrough = mode === 'passthrough';
   const passthroughRef = useRef(passthrough);
   passthroughRef.current = passthrough;
@@ -148,10 +148,10 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
   // Feed effective on-screen visibility (foreground window, not a parked leaf,
   // not under a zoomed one) so the controller can park a hidden pane after the
   // debounce. A minimized screencast stays mounted but stops pulling frames.
-  const visible = useSurfaceVisibility(parked, id);
+  const sight = useSurfaceSight(parked, id);
   useEffect(() => {
-    controller.setVisible(visible);
-  }, [controller, visible]);
+    controller.setSight(sight);
+  }, [controller, sight]);
 
   // Crossing to the single-frame iframe renderer closes all but the active tab;
   // when others are open the swap is gated behind a typed confirm (overlay below).
@@ -180,6 +180,8 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
 
   const buttonsHeldRef = useRef(0);
   const lastMoveRef = useRef(0);
+  // Whether a hover move has gone to the page since its last leave.
+  const hoveringRef = useRef(false);
   const lastClickRef = useRef({ t: 0, x: 0, y: 0, count: 0, button: -1 });
 
   const clickCountFor = (button: number, x: number, y: number): number => {
@@ -238,13 +240,20 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
   };
 
   const onCanvasMouseMove = (e: React.MouseEvent) => {
-    if (!interactiveRef.current) return;
+    // Hover and wheel take no gate: like an xterm's, they follow the pointer
+    // onto any pane on screen, in either mode, selecting nothing.
+    // A release made off the canvas is caught up from the buttons still down.
+    const held = buttonsHeldRef.current &= e.buttons;
+    // A button this canvas never saw pressed belongs to a drag that began
+    // elsewhere (another pane's selection); xterm's hover reports skip those
+    // moves too.
+    if (e.buttons && !held) return;
     const now = performance.now();
     if (now - lastMoveRef.current < 8) return;
     lastMoveRef.current = now;
     const point = toDevice(e);
     if (!point) return;
-    const held = buttonsHeldRef.current;
+    hoveringRef.current = true;
     controller.send({
       type: 'input_mouse',
       eventType: 'mouseMoved',
@@ -256,13 +265,21 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
     });
   };
 
+  // CDP has no leave event: a move past the page's top-left corner is what ends
+  // its hover. Never mid-drag of a press this canvas sent, which would drag the
+  // page's target to that corner.
+  const onCanvasMouseLeave = () => {
+    if (buttonsHeldRef.current || !hoveringRef.current) return;
+    hoveringRef.current = false;
+    controller.send({ type: 'input_mouse', eventType: 'mouseMoved', x: -1, y: -1, button: 'none', buttons: 0, modifiers: 0 });
+  };
+
   // Wheel needs a non-passive listener to preventDefault, which JSX onWheel does
   // not guarantee.
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const onWheel = (e: WheelEvent) => {
-      if (!interactiveRef.current) return;
       e.preventDefault();
       const point = toDevice(e);
       if (!point) return;
@@ -280,7 +297,7 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
     };
     canvas.addEventListener('wheel', onWheel, { passive: false });
     return () => canvas.removeEventListener('wheel', onWheel);
-  }, [controller, id, toDevice]);
+  }, [controller, toDevice]);
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (!interactiveRef.current) return;
@@ -422,6 +439,7 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
           onMouseDown={onCanvasMouseDown}
           onMouseUp={onCanvasMouseUp}
           onMouseMove={onCanvasMouseMove}
+          onMouseLeave={onCanvasMouseLeave}
           onContextMenu={(e) => {
             if (interactiveRef.current) e.preventDefault();
           }}

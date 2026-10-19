@@ -114,7 +114,7 @@ export const HostedPersistentRelay: Story = {
   },
   play: async ({ canvasElement }) => {
     await openPersistent(canvasElement);
-    await within(canvasElement).findByRole('button', { name: 'Enroll with hosted.dormouse.sh' });
+    await within(canvasElement).findByRole('button', { name: 'Enroll remote control' });
   },
 };
 

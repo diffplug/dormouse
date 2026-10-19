@@ -1,8 +1,5 @@
-/** Getting pixels in and out of the image editor, and the HTTP shape both
- * image routes share (`editorRoutes` in src/editor-routes.ts): a GET
- * returns the bytes with their revision in `X-Dor-Version`, or JSON naming why
- * the editor shows the image view-only; a save POSTs the bytes with
- * `?version=` and answers `{version}`. */
+/** Getting pixels in and out of the image editor. Its source GET carries the
+ * bytes and X-Dor-Version; save POSTs bytes with ?version= and answers {version}. */
 import { imageEditability } from '../../src/image-editability';
 import { imageKind, imageTypeName, VERSION_HEADER } from '../../src/image-format';
 import { imageResolution, type Resolution } from '../../src/image-resolution';
@@ -184,18 +181,15 @@ export async function encodeImage(r: Raster, format: ImageFormat, owned = false)
 const encodePngOffThread = (r: Raster, keep: readonly Uint8Array[], resolution?: Resolution): Promise<Uint8Array<ArrayBuffer>[]> =>
   pngWorker({ encode: { raster: r, keep, resolution } }, [r.data.buffer as ArrayBuffer]);
 
-/** An image document read from the route `load` and written to `save`, under
- * `name`: its bytes, decoded as they load. */
-export const imageSource = (load: string, save: string, name: string): DocumentSource<Blob, ImageLoad> => ({
+/** The image page's document, decoded as it loads. */
+export const imageSource = (name: string): DocumentSource<Blob, ImageLoad> => ({
   async load() {
-    const response = await checked(await fetch(load, { cache: 'no-store' }));
-    const content: ImageLoad = response.headers.get('Content-Type')?.startsWith('application/json')
-      ? { viewOnly: String((await response.json()).viewOnly) }
-      : await decodeImage(await response.blob());
+    const response = await checked(await fetch('source', { cache: 'no-store' }));
+    const content = await decodeImage(await response.blob());
     return { content, version: response.headers.get(VERSION_HEADER) ?? '', name };
   },
   async save(blob, version) {
-    const response = await checked(await fetch(`${save}?version=${encodeURIComponent(version)}`, {
+    const response = await checked(await fetch(`save?version=${encodeURIComponent(version)}`, {
       method: 'POST', headers: { 'Content-Type': blob.type }, body: blob,
     }));
     return response.json();

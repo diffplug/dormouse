@@ -138,7 +138,7 @@ const OUTBOUND_SITES = {
   },
   'lib/src/remote/burrow/enrollment.ts': {
     class: 'guarded:burrow-service',
-    reason: 'The enrollment exchange calls only the fetch parameter, which the service passes as its guarded fetch.',
+    reason: 'The enrollment exchange calls only its fetch parameter: the Burrow service or managed-voice host supplies a network-policy guard.',
   },
   'lib/src/host/remote/native-direct-peer.ts': {
     class: 'guarded:burrow-service',
@@ -151,7 +151,7 @@ const OUTBOUND_SITES = {
   // --- guarded: managed voice ---
   'lib/src/host/managed-voice-host.ts': {
     class: 'guarded:managed-voice',
-    reason: 'Asks networkAllowed before every speak and answers network-off without a request.',
+    reason: 'Asks networkAllowed before every speak and voice-approval request.',
   },
   // --- guarded: the updater ---
   'standalone/src/updater.ts': {
@@ -171,9 +171,9 @@ const OUTBOUND_SITES = {
     class: 'user:link-click',
     reason: 'The self-host guide link, opened only when the user clicks it.',
   },
-  'lib/src/components/SettingsDialog.tsx': {
+  'lib/src/components/HostedEnrollment.tsx': {
     class: 'user:link-click',
-    reason: 'The Hosted voice page link, opened only when the user clicks it.',
+    reason: 'The Hosted plans and voice page links, opened only when the user clicks one.',
   },
   'lib/src/lib/clipboard-failure.ts': {
     class: 'user:link-click',
@@ -218,7 +218,7 @@ const OUTBOUND_SITES = {
   // --- loopback ---
   'lib/src/host/agent-browser-host.ts': {
     class: 'loopback',
-    reason: 'Dials agent-browser\'s stream and the browser\'s CDP on 127.0.0.1 only (viewStream, askCdpEndpoint).',
+    reason: 'Dials agent-browser\'s stream and the browser\'s CDP on 127.0.0.1 only (viewStream, askCdpEndpoint), and the daemon\'s own Unix socket beside the state files liveDaemon proves, for its fixed screencast actions only (daemonAction).',
   },
   'lib/src/host/browser-viewer.ts': {
     class: 'loopback',
@@ -304,9 +304,9 @@ const REMOTE_LITERALS = {
     hosts: ['dormouse.sh'],
     reason: 'The self-host guide link.',
   },
-  'lib/src/components/SettingsDialog.tsx': {
+  'lib/src/components/HostedEnrollment.tsx': {
     hosts: ['dormouse.sh'],
-    reason: 'The Hosted voice page link.',
+    reason: 'The Hosted plans and voice page links.',
   },
   'lib/src/lib/clipboard-failure.ts': {
     hosts: ['github.com'],

@@ -75,6 +75,15 @@ type Viewer = Binding & {
   sent: Map<ViewerState['type'], { json: string; message: ViewerState }>;
 };
 const pagesOf = (v: Viewer) => v.browser.contexts().flatMap(context => context.pages());
+// A key per page for its whole life, which `ViewerSink.shown` takes: a tab id
+// here is the page's index, which shifts when an earlier tab closes.
+const pageKeys = new WeakMap<Page, string>();
+let pageCount = 0;
+const pageKey = (page: Page) => {
+  let key = pageKeys.get(page);
+  if (key === undefined) pageKeys.set(page, key = `page-${++pageCount}`);
+  return key;
+};
 const tabsOf = (v: Viewer) => Promise.all(pagesOf(v).map(async (page, index) => ({
   tabId: String(index), url: page.url(), title: await page.title().catch(() => ''), active: page === v.page,
 })));
@@ -158,6 +167,7 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
         v.cdp = undefined;
         v.page = page;
         v.viewport = page?.viewportSize() ?? undefined;
+        if (page) for (const { sink } of v.subscribers) sink.shown(pageKey(page));
         if (page) await startFrames(v);
       }
       const tabs = await tabsOf(v);
@@ -448,6 +458,7 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
       v.subscribers.add(subscriber);
       // Earlier viewers already hold this state; the refresh below sends only what changed.
       for (const { message } of v.sent.values()) sink.state(message);
+      if (v.page) sink.shown(pageKey(v.page));
       void refresh(v).then(() => startFrames(v)).catch(log);
       if (v.subscribers.size === 1) schedule(v);
       return {

@@ -69,6 +69,35 @@ describe('createBrowserHost', () => {
     } finally { await host.close(); }
   });
 
+  it('answers diagnostics read-only, mid-launch too without asking the provider, and never resolving a launch environment', async () => {
+    const fake = fakeProvider();
+    const find = vi.fn(async () => ({ stream: 4321 }));
+    fake.provider.find = find;
+    const launchEnv = vi.fn(async () => ({}));
+    const host = createBrowserHost({ writeClipboardText: vi.fn(), launchEnv, providers: { 'agent-browser': () => fake.provider } });
+    const browser = { provider: 'agent-browser', binding: { session: 'diag' } } as const;
+    try {
+      // Read-only: the provider is asked only where the browser streams.
+      expect((await host.request({ ...browser, op: 'diagnostics' })).ok).toBe(true);
+      expect(find).toHaveBeenCalledOnce();
+      expect(fake.calls).toEqual([]);
+      expect(launchEnv).not.toHaveBeenCalled();
+
+      // Mid-launch, nothing reaches the provider.
+      find.mockResolvedValue({ gone: 'not running', named: false } as never);
+      fake.gate('stop diag');
+      const launching = host.request({ ...browser, op: 'launch', headed: false, url: 'https://example.com/' });
+      await vi.waitFor(() => expect(fake.calls).toContain('stop diag'));
+      find.mockClear();
+      const calls = fake.calls.length;
+      expect((await host.request({ ...browser, op: 'diagnostics' })).ok).toBe(true);
+      expect(find).not.toHaveBeenCalled();
+      expect(fake.calls).toHaveLength(calls);
+      fake.release('stop diag');
+      await launching;
+    } finally { await host.close(); }
+  });
+
   it('finishes a close of a session before a launch into it begins', async () => {
     const fake = fakeProvider();
     const host = createBrowserHost({ writeClipboardText: vi.fn(), providers: { 'agent-browser': () => fake.provider } });
@@ -500,7 +529,7 @@ describe('sync-to-pane', () => {
 
   it('sizes a page shown anew, never reading its own size as another writer', async () => {
     const pane = await paneOn();
-    const tabs = (active: string) => pane.fake.views[0].sink.state({ type: 'tabs', tabs: ['t1', 't2'].map((tabId) => ({ tabId, title: tabId, url: `http://localhost/${tabId}`, active: tabId === active })) });
+    const tabs = (active: string) => pane.fake.views[0].sink.shown(active);
     tabs('t1');
     await pane.size(800, 600);
     await vi.waitFor(() => expect(pane.writes()).toHaveLength(1));
@@ -516,6 +545,57 @@ describe('sync-to-pane', () => {
     await settled();
     expect(pane.state()).toBe('synced');
   });
+
+  it('gives a page shown anew the Fixed viewport last written, until the pane engages sync', async () => {
+    const pane = await paneOn();
+    const shown = (page: string) => pane.fake.views[0].sink.shown(page);
+    shown('t1');
+    expect((await pane.host.request({ ...s1, op: 'viewport', width: 1024, height: 768, dpr: 1 })).ok).toBe(true);
+    // A popup the daemon made active, then the opener again once it closes.
+    shown('t2');
+    await vi.waitFor(() => expect(pane.writes()).toEqual(['viewport s1 1024x768@1', 'viewport s1 1024x768@1']));
+    // The page the Fixed write was made on, and one written since, have it.
+    shown('t2');
+    shown('t1');
+    shown('t2');
+    await flush();
+    expect(pane.writes()).toHaveLength(2);
+
+    // Resize with pane owns every page's size from here.
+    await pane.size(800, 600, 'e2');
+    await vi.waitFor(() => expect(pane.writes().at(-1)).toBe('viewport s1 800x600@2'));
+    shown('t1');
+    await vi.waitFor(() => expect(pane.writes()).toEqual([...Array(2).fill('viewport s1 1024x768@1'), 'viewport s1 800x600@2', 'viewport s1 800x600@2']));
+
+    // Another writer ends the sync: a page shown anew keeps its own size, and
+    // never the Fixed one sync replaced.
+    await flush();
+    pane.seen(800, 600);
+    await vi.waitFor(() => expect(pane.state()).toBe('synced'));
+    pane.seen(1280, 720);
+    await vi.waitFor(() => expect(pane.state()).toBe('off'));
+    shown('t2');
+    await flush();
+    expect(pane.writes()).toHaveLength(4);
+  });
+
+  for (const provider of ['agent-browser', 'playwright'] as const) {
+    it(`gives a ${provider} page shown anew the Fixed size its headless launch came up at`, async () => {
+      const fake = fakeProvider();
+      fake.provider.evaluate = async () => ({ width: 1440, height: 900, dpr: 1 });
+      const host = createBrowserHost({ writeClipboardText: vi.fn(), providers: { [provider]: () => fake.provider } });
+      hosts.push(host);
+      const browser = { provider, binding: { session: 's1' } } as const;
+      expect(await host.request({ ...browser, op: 'launch', headed: false, url: 'https://example.com/', initialViewport: { mode: 'fixed', width: 1440, height: 900, dpr: 1 } })).toMatchObject({ ok: true });
+      await openViewer((await host.request({ ...browser, op: 'view', stream: 4321 })).url!);
+      await vi.waitFor(() => expect(fake.views).toHaveLength(1));
+      const writes = () => fake.calls.filter((call) => call.startsWith('viewport '));
+      const before = writes().length;
+      fake.views[0].sink.shown('page-1');
+      fake.views[0].sink.shown('page-2');
+      await vi.waitFor(() => expect(writes().slice(before)).toEqual(['viewport s1 1440x900@1']));
+    });
+  }
 
   it('ends sync for a Fixed resolution, which lands after the write in flight', async () => {
     const pane = await paneOn();
@@ -720,4 +800,28 @@ describe('launch environment', () => {
       expect(launchEnv).toHaveBeenCalledTimes(2);
     } finally { await host.close(); }
   });
+});
+
+
+it('Tool reading positions use fixed code, validated data, and reject stale provider replies', async () => {
+  const fake = fakeProvider();
+  const evaluate = vi.fn(async (_binding: unknown, _script: string) => ({ top: 42, mode: 'source', extra: 'discard' }));
+  fake.provider.evaluate = evaluate;
+  const host = createBrowserHost({ writeClipboardText: vi.fn(), providers: { 'agent-browser': () => fake.provider } });
+  const browser = { provider: 'agent-browser', binding: { session: 'tool-view' } } as const;
+  try {
+    expect(await host.request({ ...browser, op: 'tool-view' })).toEqual({ ok: true, position: { top: 42, mode: 'source' } });
+    expect(await host.request({ ...browser, op: 'tool-view', position: { top: -1 } })).toMatchObject({ ok: false });
+    expect(evaluate).toHaveBeenCalledTimes(1);
+    const fragment = 'heading";alert(1)';
+    await host.request({ ...browser, op: 'tool-view', position: { fragment } });
+    expect(evaluate.mock.calls[1][1]).toContain(JSON.stringify({ fragment }));
+    let finish!: (value: unknown) => void;
+    fake.provider.evaluate = () => new Promise(resolve => { finish = resolve; });
+    const pending = host.request({ ...browser, op: 'tool-view' });
+    await flush();
+    await host.request({ ...browser, op: 'close' });
+    finish({ top: 5 });
+    expect(await pending).toMatchObject({ ok: false });
+  } finally { await host.close(); }
 });

@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { afterEach, expect, it, vi } from 'vitest';
-import { cancelEditorClose, connectToolEditor, confirmToolEditorsClose, decideEditorClose, getEditorClosePrompt } from './tool-editor';
+import { toolEditorView, cancelEditorClose, connectToolEditor, confirmToolEditorsClose, decideEditorClose, getEditorClosePrompt } from './tool-editor';
 import { getToolDirty, recordToolDirty, resetToolDirty } from './tool-dirty-store';
 
 let disconnect: (() => void) | undefined;
@@ -85,4 +85,18 @@ it('ignores an old preview frame after its replacement connects', () => {
   oldDisconnect();
   second.emit({ kind: 'state', dirty: false });
   expect(getToolDirty('file')).toBe(false);
+});
+
+
+it('view replies cannot clear dirty state or settle a save, and disconnect retires pending views', async () => {
+  const { emit, post } = editor(); emit({ kind: 'ready', dirty: true });
+  const reading = toolEditorView('file')!;
+  const request = post.mock.calls.at(-1)![0].request;
+  emit({ kind: 'view', request, position: { top: 42 }, dirty: false });
+  expect(await reading).toEqual({ top: 42 });
+  expect(getToolDirty('file')).toBe(true);
+  const pending = toolEditorView('file', { fragment: 'heading' })!;
+  const rejected = expect(pending).rejects.toThrow(/disconnected/);
+  disconnect!(); await rejected;
+  expect(toolEditorView('file')).toBeNull();
 });

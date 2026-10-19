@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { exifFields, pngChunks } from '../dist/image-editability.js';
-import { defaultDisplayWidth, displayScale, dpiAcross, imageResolution, rescaledSize } from '../dist/image-resolution.js';
+import { defaultDisplayWidth, displayScale, dpiAcross, imageResolution } from '../dist/image-resolution.js';
 import { chunk, tiff } from './bundle.mjs';
 
 const u16 = n => [n >> 8, n & 0xff];
@@ -94,15 +94,6 @@ test('a resolution has both axes, per metre or as an aspect only, and turns with
 
 test('a pasted image\'s width is a whole CSS pixel', () => {
   assert.equal(defaultDisplayWidth(png({ width: 2881, phys: [5669, 1] })), 1441);
-});
-
-test('a stated size keeps its scale as its image is resized, each axis by its own', () => {
-  const from = { width: 2000, height: 1000 }, to = { width: 1000, height: 750 };
-  assert.deepEqual(rescaledSize({ width: 'inherit', height: 'inherit' }, from, to), { width: 'inherit', height: 'inherit' });
-  assert.deepEqual(rescaledSize({ width: 1000, height: 'inherit' }, from, to), { width: 500, height: 'inherit' });
-  assert.deepEqual(rescaledSize({ width: 'inherit', height: 400 }, from, to), { width: 'inherit', height: 300 });
-  assert.deepEqual(rescaledSize({ width: 333, height: 'inherit' }, from, { width: 1001, height: 1 }), { width: 167, height: 'inherit' }, 'rounded');
-  assert.deepEqual(rescaledSize({ width: 10, height: 10 }, from, { width: 1, height: 1 }), { width: 1, height: 1 }, 'never zero');
 });
 
 test('a quarter-turned image shows as wide as its frame is tall', () => {

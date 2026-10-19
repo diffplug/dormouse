@@ -1,7 +1,7 @@
 # Dor Tools Library
 
 > - See `docs/specs/glossary.md` for Session / Pane vocabulary.
-> - Owns `dor-tools-lib`, the MIT package that Tools and their hosts share for the Tool integration protocol: its license and dependency boundary, entry points, and consumers. The wire rules it implements belong to `docs/specs/dor-tool.md` → OSC 367, Unsaved changes, and Closing unsaved Tools.
+> - Owns `dor-tools-lib`, the MIT package that Tools and their hosts share for the Tool integration protocol: its license and dependency boundary, entry points, and consumers. The wire rules it implements belong to `docs/specs/dor-tool.md` → OSC 367, Unsaved changes, Closing unsaved Tools, and Document navigation.
 
 ## Package
 
@@ -13,7 +13,7 @@
 |---|---|---|
 | `osc` | an encoder per verb, throwing on a value the host would ignore; a reader for its own dehydrate payload | a parser per verb |
 | `protocol` | reads host messages | reads frame messages |
-| `frame` | the save-channel client | — |
+| `frame` | the save/reading-state channel client | — |
 
 - **The host (`lib`) must reach the package through source aliases**, beside every `dor-tools-builtin/*` alias, since no host build compiles the package first.
 - `dor-tools-builtin` speaks the protocol through it (`docs/specs/dor-tools-builtin.md` → Packaging).

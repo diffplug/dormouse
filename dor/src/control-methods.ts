@@ -4,6 +4,8 @@ import type {
   BrowserSurfaceRequest,
   BrowserSurfaceResponse,
   BrowserViewportRequest,
+  BrowserDiagnosticsRequest,
+  BrowserDiagnosticsResponse,
   BrowserViewportResponse,
   AwaitSurfaceRequest,
   AwaitSurfaceResponse,
@@ -142,6 +144,12 @@ export abstract class MethodControlClient implements ControlClient {
       request,
       { timeoutMs: BROWSER_REQUEST_TIMEOUT_MS + 5_000 },
     );
+  }
+
+  // The host answers at once, but asks the provider where its browser
+  // streams, bounded at a few seconds.
+  browserDiagnostics(request: BrowserDiagnosticsRequest): Promise<BrowserDiagnosticsResponse> {
+    return this.request<BrowserDiagnosticsResponse>(SURFACE_CONTROL_METHODS.browserDiagnostics, request);
   }
 
   resolveBrowser(request: ResolveBrowserRequest): Promise<ResolveBrowserResponse> {

@@ -7,6 +7,7 @@
 import type { BrowserAutomationProvider, BrowserBinding } from 'dor-lib-common/browser-providers';
 import type { BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
 import type { AgentBrowserTab } from '../agent-browser-tab';
+import type { ToolViewPosition } from 'dor-tools-lib/protocol';
 
 export type { BrowserAutomationProvider };
 export { BROWSER_REQUEST_TIMEOUT_MS } from 'dor-lib-common/browser-providers';
@@ -44,6 +45,12 @@ export type BrowserOp =
   | { op: 'viewport'; width: number; height: number; dpr?: number; endsSync?: string }
   /** Read the active page's CSS viewport and effective device pixel ratio. */
   | { op: 'measure' }
+  /** Fixed built-in document reading-position operations, never arbitrary JS. */
+  | { op: 'tool-view'; position?: ToolViewPosition }
+  /** What the host holds for the browser — its viewer sockets, their
+   *  upstreams and captures, sync — and where its provider says it streams,
+   *  for `dor`'s diagnostics. Answered mid-launch and mid-close too. */
+  | { op: 'diagnostics' }
   /** Close the session — after the launch or attach of it running now — and
    *  cancel `cancels`: requests the closing Surface sent that can bring the
    *  browser up, by their `requestId`, however late the transport delivers
@@ -53,6 +60,7 @@ export type BrowserOp =
 export type BrowserRequest = { provider: BrowserAutomationProvider; binding: BrowserRequestBinding } & BrowserOp;
 
 export interface BrowserResult {
+  position?: ToolViewPosition;
   ok: boolean;
   error?: string;
   /** `launch` / `attach`: what the browser is bound to — the session (minted
@@ -76,6 +84,8 @@ export interface BrowserResult {
   text?: string;
   /** `measure`: the active page's own values, not frame or pane dimensions. */
   viewport?: { width: number; height: number; dpr: number };
+  /** `diagnostics`: plain JSON, for people and agents to read. */
+  diagnostics?: Record<string, unknown>;
 }
 
 

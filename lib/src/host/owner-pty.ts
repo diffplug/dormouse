@@ -14,12 +14,14 @@ import {
 } from '../lib/terminal-protocol';
 import type { TerminalSemanticEvent } from '../lib/terminal-state';
 import { ToolLaunchLatch } from '../lib/tool-launch-latch';
+import { outputPaints } from '../lib/terminal-controls';
 import { stripMouseReportsFromInput } from '../lib/terminal-report-filter';
 
 /**
  * What the process that owns a PTY does with it on behalf of its alerts, the
- * same in both hosts: VS Code's extension host (`vscode-ext/src/message-router.ts`)
- * and standalone's sidecar (`lib/src/host/remote/sidecar-entry.ts`).
+ * same in both hosts — VS Code's extension host (`vscode-ext/src/message-router.ts`)
+ * and standalone's sidecar (`lib/src/host/remote/sidecar-entry.ts`) — and in the
+ * fake adapter, whose owner is the browser.
  */
 
 export interface OwnerPtyStreamOptions {
@@ -47,17 +49,21 @@ export interface OwnerPtyStream extends ProcessedPtyStream {
   /** The host is typing `typed` into this PTY generation to run it: that run
    *  alone may make OSC 367 `open` requests (`ToolLaunchLatch`). */
   armLaunch(typed: string): void;
+  /** Output Dormouse writes as chrome — the website tutorial's runner frames:
+   *  parsed and rendered like any read, never counted as the program working. */
+  writeChrome(raw: string): void;
 }
 
 /**
  * One PTY generation's parse site, feeding the alerts and the renderer from the
  * same pass: per batch, reports and command boundaries to the manager in stream
  * order (`applyTerminalEvents`), then the Tool and semantic events, then the
- * replies; then each visible chunk counts as the Session working, ahead of the
- * renderer (`docs/specs/terminal-escapes.md` → "Parsing location").
+ * replies; then each chunk that paints counts as the Session working, ahead of
+ * the renderer (`docs/specs/terminal-escapes.md` → "Parsing location").
  */
 export function createOwnerPtyStream(id: string, options: OwnerPtyStreamOptions): OwnerPtyStream {
   const launch = new ToolLaunchLatch();
+  let chrome = false;
   const stream = createProcessedPtyStream({
     colorProvider: options.colorProvider,
     onEvents(events) {
@@ -69,11 +75,17 @@ export function createOwnerPtyStream(id: string, options: OwnerPtyStreamOptions)
       for (const text of collectTerminalClipboardOffers(events)) options.onClipboardOffer(text);
     },
     onChunk(chunk) {
-      options.alerts.onData(id);
+      if (!chrome && outputPaints(chunk.data)) options.alerts.onData(id);
       options.onChunk(chunk);
     },
   });
-  return Object.assign(stream, { armLaunch: (typed: string) => launch.arm(typed) });
+  return Object.assign(stream, {
+    armLaunch: (typed: string) => launch.arm(typed),
+    writeChrome(raw: string) {
+      chrome = true;
+      try { stream.write(raw); } finally { chrome = false; }
+    },
+  });
 }
 
 /** The slice of a host's PTY manager that input and size changes reach. */

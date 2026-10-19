@@ -5,7 +5,7 @@ import { isLathPersistedLayout, lathLayoutFromStore } from './persistence';
 import { targetRect } from './drop-target';
 import { type LathNode, findLeafPath, nodeAtPath, leafTree, leaves, validate } from './model';
 import { insert, move, remove, restore, split as splitLeaf } from './ops';
-import { leaf, split, tree, R } from './test-util';
+import { leaf, split, tree, R, landingPreview } from './test-util';
 
 const opts = { gap: 0, minLeaf: { width: 0, height: 0 } };
 const box = R(0, 0, 1000, 600);
@@ -87,11 +87,11 @@ describe('group drop discovery', () => {
     }
   });
 
-  it('counts the group without the dragged pane and previews the committed move', () => {
+  it('counts the group without the dragged pane and previews it among the panes that stay', () => {
     const candidate = hitTest(row, box, top(875), 'd', opts, top(375)).candidate!;
     expect(candidate.target).toEqual({ kind: 'edge', path: [], edge: 'top', range: { start: 1, end: 4 } });
     expect(candidate.scopeLeafCount).toBe(2);
-    expect(candidate.previewRect).toEqual(layout(move(row, 'd', candidate.target).tree, box, opts).get('d'));
+    expect(candidate.previewRect).toEqual(landingPreview(row, 'd', candidate.target, box, opts));
   });
 
   it('does not reserve a real pane id for external preview bookkeeping', () => {
@@ -117,12 +117,13 @@ describe('three-pane layout choices', () => {
             { x: r.x + r.width / 2, y: r.y + r.height - 1 },
           ]);
           for (const rect of layout(original, box, opts).values()) {
-            const points = [
-              { x: rect.x + 1, y: rect.y + rect.height / 2 },
-              { x: rect.x + rect.width - 1, y: rect.y + rect.height / 2 },
-              { x: rect.x + rect.width / 2, y: rect.y + 1 },
-              { x: rect.x + rect.width / 2, y: rect.y + rect.height - 1 },
-            ];
+            // On each boundary line, and in each edge band.
+            const points = [1, 20].flatMap((inset) => [
+              { x: rect.x + inset, y: rect.y + rect.height / 2 },
+              { x: rect.x + rect.width - inset, y: rect.y + rect.height / 2 },
+              { x: rect.x + rect.width / 2, y: rect.y + inset },
+              { x: rect.x + rect.width / 2, y: rect.y + rect.height - inset },
+            ]);
             for (const point of points) for (const anchor of [null, ...edgePoints]) {
               const candidate = hitTest(original, box, point, dragged, opts, anchor).candidate;
               if (!candidate) continue;
@@ -130,7 +131,7 @@ describe('three-pane layout choices', () => {
               expect(result.ok).toBe(true);
               expect(validate(result.tree)).toEqual([]);
               expect(new Set(leaves(result.tree))).toEqual(new Set(['a', 'b', 'c']));
-              expect(layout(result.tree, box, opts).get(dragged)).toEqual(candidate.previewRect);
+              expect(candidate.previewRect).toEqual(landingPreview(original, dragged, candidate.target, box, opts));
               found.add(shape(result.tree.root!));
             }
           }
@@ -210,7 +211,9 @@ describe('group drop geometry and persistence', () => {
           expect(result.ok).toBe(true);
           expect(validate(result.tree)).toEqual([]);
           expect(new Set(leaves(result.tree))).toEqual(new Set([...leaves(original), ...(dragged === null ? ['new'] : [])]));
-          expect(layout(result.tree, bounds, geometry).get(dragged ?? 'new')).toEqual(candidate.previewRect);
+          expect(candidate.previewRect).toEqual(dragged === null
+            ? layout(result.tree, bounds, geometry).get('new')
+            : landingPreview(original, dragged, candidate.target, bounds, geometry));
           expect(JSON.stringify(original)).toBe(before);
         }
       }

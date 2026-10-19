@@ -12,6 +12,7 @@ import {
 import { TEST_SETUP_PASSWORD } from '../test-setup-password';
 import {
   beginHostedEnrollment,
+  pollHostedApproval,
   isEnrollment,
   performEnrollment,
   pollHostedEnrollment,
@@ -506,7 +507,8 @@ describe('Hosted device-code enrollment', () => {
 
     it('posts the device code alone, and maps an enrolled answer through the enrollment guard', async () => {
       const enrollment = { burrowId: BURROW_ID, burrowToken: 'tok', origin: RELAY, rpId: 'relay.dormouse.sh' };
-      const fetchMock = json(200, { status: 'enrolled', enrollment });
+      const voiceToken = `dmv_${'V'.repeat(43)}`;
+      const fetchMock = json(200, { status: 'enrolled', enrollment, voiceToken });
 
       const answer = await poll(fetchMock);
 
@@ -518,6 +520,9 @@ describe('Hosted device-code enrollment', () => {
         status: 'enrolled',
         enrollment: { relayUrl: RELAY, ...enrollment, label: 'My Laptop', ...noiseStatic },
       });
+      // A token of the wrong shape, or none, still enrolls: the approval is spent.
+      expect(await poll(json(200, { status: 'enrolled', enrollment, voiceToken: 'sk-nope' })))
+        .not.toHaveProperty('voiceToken');
       expect(isEnrollment((answer as { enrollment: unknown }).enrollment)).toBe(true);
       // A redemption the guard refuses fails, naming the field.
       expect(await poll(json(200, { status: 'enrolled', enrollment: { ...enrollment, burrowId: 'short' } })))
@@ -569,5 +574,32 @@ describe('Hosted device-code enrollment', () => {
         message: expect.stringContaining('not an enrollment poll'),
       });
     });
+  });
+});
+
+
+describe.each(['remote', 'voice'] as const)('%s approval transport', (purpose) => {
+  const poll = (fetchMock: typeof fetch) => pollHostedApproval(
+    'https://relay.dormouse.sh', 'D'.repeat(RELAY_BEARER_LENGTH), purpose, fetchMock,
+    (body) => body && typeof body === 'object' && 'status' in body && body.status === 'pending' ? { status: 'pending' } : null,
+  );
+
+  it('retries a lost successful body, but fails a complete malformed answer', async () => {
+    const lost = new Response();
+    vi.spyOn(lost, 'text').mockRejectedValueOnce(new Error('connection reset'));
+    expect(await poll(vi.fn(async () => lost))).toEqual({ status: 'retry', slowDown: false });
+    expect(await poll(vi.fn(async () => new Response('{broken')))).toMatchObject({ status: 'failed' });
+  });
+
+  it('distinguishes entitlement from other 403 refusals', async () => {
+    expect(await poll(vi.fn(async () => Response.json({ error: NOT_ENTITLED_ERROR }, { status: 403 }))))
+      .toEqual({ status: 'refused', reason: 'not-entitled' });
+    expect(await poll(vi.fn(async () => Response.json({ error: 'forbidden' }, { status: 403 }))))
+      .toMatchObject({ status: 'failed', message: expect.stringContaining('HTTP 403') });
+  });
+
+  it.each([429, 503])('retries HTTP %i without parsing success', async (status) => {
+    expect(await poll(vi.fn(async () => new Response('', { status }))))
+      .toEqual({ status: 'retry', slowDown: status === 429 });
   });
 });

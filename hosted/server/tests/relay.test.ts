@@ -6,7 +6,6 @@ import { createTestContext } from "pgstencil/testing";
 import { queryDatabase, withClient } from "pgstencil/postgres";
 import {
   API_ROUTES,
-  MAX_ENROLLED_BURROWS,
   MAX_PENDING_REAUTH_NONCES_PER_SESSION,
   MAX_PUSH_QUERY_DELIVERY_IDS,
   MAX_PUSH_SUBSCRIPTIONS_PER_ACCOUNT,
@@ -23,6 +22,7 @@ import {
   sealPush,
   utf8Encode,
   isEnrollUserCode,
+  isManagedVoiceToken,
   isRelayBearer,
   toBase64Url,
   verifyPresenceProof,
@@ -34,11 +34,12 @@ import {
   randomSecret,
   registrationClientData,
 } from "../../../remote-lib-common/test/harness/actors.mjs";
-import { ADMIN_EMAIL } from "../admin";
+import { ADMIN_EMAIL } from "../entitlement";
 import { migrations } from "../migrations";
 import { ENROLLMENT_TTL_MS } from "../policy-constants";
 import {
   ENROLLMENT_POLL_INTERVAL_S,
+  MAX_BURROWS_PER_ACCOUNT,
   MAX_PASSKEYS_PER_ACCOUNT,
   MAX_SESSIONS_PER_ACCOUNT,
   MAX_SETUP_CHALLENGES_PER_BURROW,
@@ -270,8 +271,8 @@ async function fixture({ bindings = {} }: { bindings?: Record<string, string | u
   }
 
   /** A device-code enrollment begun as the Burrow begins one. */
-  async function begin() {
-    const begun = await call("POST", API_ROUTES.burrowEnrollBegin, { body: { origin } });
+  async function begin(purpose: "remote" | "voice" = "remote") {
+    const begun = await call("POST", API_ROUTES.burrowEnrollBegin, { body: { origin, purpose } });
     expect(begun.status).toBe(200);
     return begun.json as {
       deviceCode: string;
@@ -282,15 +283,15 @@ async function fixture({ bindings = {} }: { bindings?: Record<string, string | u
     };
   }
 
-  const poll = (deviceCode: unknown) =>
-    call("POST", API_ROUTES.burrowEnrollPoll, { body: { deviceCode } });
+  const poll = (deviceCode: unknown, purpose: "remote" | "voice" = "remote") =>
+    call("POST", API_ROUTES.burrowEnrollPoll, { body: { deviceCode, purpose } });
 
   /** What the account Worker's approval writes (`hosted/server/relay-account.ts`). */
-  const approve = (userCode: string, userId: string) =>
+  const approve = (userCode: string, userId: string, purpose: "remote" | "voice" = "remote") =>
     sql(
-      `INSERT INTO dormouse_relay_enrollment_approvals ("userCode", "userId", "expiresAt")
-      VALUES ($1, $2, now() + interval '10 minutes')`,
-      [userCode, userId],
+      `INSERT INTO dormouse_relay_enrollment_approvals ("userCode", "userId", "expiresAt", purpose)
+      VALUES ($1, $2, now() + interval '10 minutes', $3)`,
+      [userCode, userId, purpose],
     );
 
   /** The relay's Cron Trigger, as Cloudflare fires it. */
@@ -931,7 +932,9 @@ test("a device-code enrollment: begin stores nothing, pending until approved, th
   await f.approve(begun.userCode, owner);
   const enrolled = await f.poll(begun.deviceCode);
   expect(enrolled.status).toBe(200);
-  const { enrollment } = enrolled.json as { enrollment: Record<string, string> };
+  const { enrollment } = enrolled.json as {
+    enrollment: Record<string, string>;
+  };
   expect(enrolled.json).toEqual({
     status: "enrolled",
     enrollment: { burrowId: enrollment.burrowId, burrowToken: enrollment.burrowToken, origin, rpId },
@@ -939,6 +942,8 @@ test("a device-code enrollment: begin stores nothing, pending until approved, th
   expect(await f.sql(`SELECT "burrowId", "userId", "tokenHash" FROM dormouse_relay_burrows`)).toEqual([
     { burrowId: enrollment.burrowId, userId: owner, tokenHash: digest(enrollment.burrowToken) },
   ]);
+  expect(enrolled.json).not.toHaveProperty("voiceToken");
+  expect(await f.sql(`SELECT * FROM dormouse_voice_tokens`)).toEqual([]);
   // Spent: the approval stays, marked with the Burrow it minted, so a poll
   // whose answer was lost learns it was redeemed; nothing redeems twice.
   expect(
@@ -949,6 +954,7 @@ test("a device-code enrollment: begin stores nothing, pending until approved, th
   expect((await f.mint(enrollment.burrowToken)).status).toBe(200);
   // Removing the Burrow never makes its approval redeemable again.
   await f.sql(`DELETE FROM dormouse_relay_burrows`);
+  expect(await f.sql(`SELECT count(*)::int AS n FROM dormouse_voice_tokens`)).toEqual([{ n: 0 }]);
   expect((await f.poll(begun.deviceCode)).json).toEqual({ status: "redeemed", burrowId: enrollment.burrowId });
   expect(await f.sql(`SELECT count(*)::int AS n FROM dormouse_relay_burrows`)).toEqual([{ n: 0 }]);
   // Expired, the marker is swept with the rest.
@@ -1027,16 +1033,19 @@ test("an enrollment expires, is refused past its approver's entitlement, and wai
   await f.sql(`UPDATE "user" SET "emailVerified" = true WHERE id = $1`, [owner]);
 
   // A full account names the page that removes one, and keeps the approval.
-  const enrolled = [];
-  for (let i = 0; i < MAX_ENROLLED_BURROWS; i++) enrolled.push(await f.burrow(owner));
+  await f.sql(
+    `INSERT INTO dormouse_relay_burrows ("burrowId", "userId", "tokenHash")
+    SELECT 'full' || lpad(n::text, 18, '0'), $1, 'hash-' || n FROM generate_series(1, $2::int) n`,
+    [owner, MAX_BURROWS_PER_ACCOUNT],
+  );
   expect(await f.poll(begun.deviceCode)).toMatchObject({
     status: 409,
     json: {
-      error: `this account already has ${MAX_ENROLLED_BURROWS} computers enrolled; remove one at ${ORIGINS.account}/account first`,
+      error: `this account already has ${MAX_BURROWS_PER_ACCOUNT} computers enrolled; remove one at ${ORIGINS.account}/account first`,
     },
   });
   // A removed Burrow makes room.
-  await f.sql(`DELETE FROM dormouse_relay_burrows WHERE "burrowId" = $1`, [enrolled[0].burrowId]);
+  await f.sql(`DELETE FROM dormouse_relay_burrows WHERE "burrowId" = 'full' || lpad('1', 18, '0')`, []);
   expect((await f.poll(begun.deviceCode)).json).toMatchObject({ status: "enrolled" });
   // Full again, a poll whose answer was lost still learns it was redeemed,
   // and so does one past its approver's entitlement.
@@ -1703,4 +1712,32 @@ test("subscribe refuses a p256dh of the right shape off P-256, writing nothing",
     }),
   ).toMatchObject({ status: 400, json: { error: "malformed request" } });
   expect(await f.rows()).toEqual([]);
+});
+
+
+test("voice approval is independent of remote enrollment and cannot be redeemed for remote control", async ({ onTestFinished }) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const owner = await f.account(ADMIN_EMAIL);
+  const voice = await f.begin("voice");
+  expect(voice.verificationUrl).toBe(`${ORIGINS.account}/enroll?purpose=voice#${voice.userCode}`);
+  // Even approving the derived code for the wrong purpose cannot authorize voice.
+  await f.approve(voice.userCode, owner);
+  expect((await f.poll(voice.deviceCode, "voice")).json).toEqual({ status: "pending" });
+  await f.sql(`DELETE FROM dormouse_relay_enrollment_approvals`);
+  await f.approve(voice.userCode, owner, "voice");
+  expect((await f.poll(voice.deviceCode)).json).toEqual({ status: "pending" });
+  const outcomes = await Promise.all([f.poll(voice.deviceCode, "voice"), f.poll(voice.deviceCode, "voice")]);
+  expect(outcomes.map((r) => r.json!.status).sort()).toEqual(["enabled", "redeemed"]);
+  const token = outcomes.find((r) => r.json!.status === "enabled")!.json!.voiceToken as string;
+  expect(isManagedVoiceToken(token)).toBe(true);
+  expect(await f.sql(`SELECT * FROM dormouse_relay_burrows`)).toEqual([]);
+  expect(await f.sql(`SELECT hash FROM dormouse_voice_tokens`)).toEqual([{ hash: digest(token) }]);
+  const remote = await f.begin();
+  await f.approve(remote.userCode, owner);
+  const enrolled = await f.poll(remote.deviceCode);
+  expect(enrolled.json!.status).toBe("enrolled");
+  expect(enrolled.json).not.toHaveProperty("voiceToken");
+  await f.sql(`DELETE FROM dormouse_relay_burrows`);
+  expect(await f.sql(`SELECT hash, "revokedAt" FROM dormouse_voice_tokens`)).toEqual([{ hash: digest(token), revokedAt: null }]);
 });

@@ -534,6 +534,45 @@ describe('parking', () => {
   });
 });
 
+describe('diagnostics', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it('answers its own record beside the host\'s, asking the host nothing else', async () => {
+    const host = installBrowserHost({ diagnostics: () => ({ ok: true, diagnostics: { views: [] } }) });
+    const controller = withPort('id', { session: 'sess' }, 4321);
+    controller.attachView(makeSink());
+    await vi.advanceTimersByTimeAsync(0);
+    const inputs = { docVisible: true, hostShown: true, workspaceActive: false, parked: false, covered: false };
+    controller.setSight(inputs);
+    controller.setSight(inputs);
+    await vi.advanceTimersByTimeAsync(HIDDEN_PARK_DELAY_MS + 50);
+    expect(controller.isParked()).toBe(true);
+    controller.setSight({ ...inputs, workspaceActive: true });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(controller.isParked()).toBe(false);
+    host.browser.mockClear();
+
+    const { webview, host: hosted } = await controller.diagnostics();
+    expect(hosted).toEqual({ views: [] });
+    expect(host.browser.mock.calls.map(([request]) => request.op)).toEqual(['diagnostics']);
+    // What hid the pane, and what it did then, are in its ring.
+    const events = (webview.events as { event: string }[]).map((e) => e.event);
+    expect(events.filter((event) => event === 'sight')).toHaveLength(2);
+    expect(events).toEqual(expect.arrayContaining(['phase', 'park-requested', 'unpark-requested']));
+  });
+
+  it('asks no host for a Surface with no session yet', async () => {
+    const host = installBrowserHost({ launch: () => new Promise(() => {}) });
+    const controller = acquireAgentBrowserSurfaceController('id', { url: 'https://example.com/' });
+    controller.attachView(makeSink());
+    await vi.advanceTimersByTimeAsync(0);
+    host.browser.mockClear();
+    expect((await controller.diagnostics()).host).toBeNull();
+    expect(host.browser).not.toHaveBeenCalled();
+  });
+});
+
 describe('param-write buffering', () => {
   it('buffers writes while detached and flushes them on the next attach', async () => {
     // Answering no CDP endpoint keeps the popped-out CDP observer from opening
