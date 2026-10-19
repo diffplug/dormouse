@@ -19,7 +19,7 @@
  * See docs/specs/website-docs.md.
  */
 
-import { existsSync, realpathSync } from 'node:fs';
+import { existsSync, realpathSync, statSync } from 'node:fs';
 import { readFile, readdir, writeFile, mkdir, copyFile, rm } from 'node:fs/promises';
 import { dirname, join, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -27,9 +27,11 @@ import {
   createSlugger,
   hasScheme,
   inlineToText,
+  isDelimiterRow,
   isProtocolRelative,
   parseMarkdown,
   slugify,
+  splitCells,
   visit,
 } from './docs-parser.js';
 import {
@@ -507,8 +509,8 @@ async function syncGuideMedia(files) {
  * GitHub URL, and only then is a link that happens to address this site's own
  * origin localized like any other.
  */
-async function buildDocument({ file, delta, label, fallbackTitle, canonicalUrl }) {
-  const markdown = await readFile(join(repoRoot, file), 'utf8');
+async function buildDocument({ file, delta, label, fallbackTitle, canonicalUrl, transform = (markdown) => markdown }) {
+  const markdown = transform(await readFile(join(repoRoot, file), 'utf8'));
 
   // One slugger for the whole document, so ids are unique across the page.
   const parsed = parseMarkdown(markdown, { slug: createSlugger() });
@@ -576,9 +578,9 @@ const buildSelfHost = () =>
  * restated — the spec is what the nightly audit reads, and a hand-written copy
  * in a page is the one that rots. `/security` shows its own audience — the
  * local application and the pipeline — and remote control's
- * ({@link SECURITY_PAGE_AUDIENCES}); the spec file on GitHub is the one place
- * every row appears together. A guarantee row, an undefended edge, or a known gap belongs to
- * the audience of the spec its links name, and every link in one entry must
+ * ({@link SECURITY_PAGE_AUDIENCES}). A guarantee row, an undefended edge, or a
+ * known gap belongs to the audience of the spec its links name — a gathered
+ * guarantee's Rule names the domain spec it sits in — and every link in one entry must
  * agree. An entry naming no spec, a spec in no group, or specs in more than one
  * fails the build: the spec's own pointers are the classification, so a new
  * spec has to be placed here before its rows can publish anywhere but the
@@ -656,68 +658,178 @@ export function audienceBlocks(page, audiences, names) {
   return page.blocks.map((block) => swap.get(block) ?? block);
 }
 
-/** The section whose table names the setups, and the guarantees' column that tags them. */
-const SECURITY_SETUPS_TITLE = 'Setups';
-const SECURITY_SETUP_COLUMN = 'Applies to';
+/** The section whose table names the features, and the guarantees' column that tags them. */
+const SECURITY_FEATURES_TITLE = 'Features';
+const SECURITY_FEATURE_COLUMN = 'Feature';
 
 /**
- * The setups each guarantee row and list bullet applies to, checked against
- * the setup table's first column — the one copy of the vocabulary — and
+ * The features each guarantee row and list bullet concerns, checked against
+ * the names bolded at the head of the feature table's first column — the one
+ * copy of the vocabulary — and
  * orthogonal to the audience split: an audience is the spec a row's links name,
- * a setup is which reader must know the row. A row tags itself in its
- * `Applies to` cell, a bullet with the emphasis it opens with, each a
- * comma-separated list. An entry with no tag, an unknown or repeated one, a
- * setup no entry uses, or a missing table fails the build, so a new entry
- * cannot publish without saying whom it concerns.
+ * a feature is which reader must know the row. A row tags itself in its
+ * `Feature` cell, a bullet with the emphasis it opens with, each a
+ * comma-separated list; an entry with no tag holds for every install. An
+ * unknown or repeated tag, a feature no entry uses, or a missing table fails the
+ * build, so a feature's risks cannot drift from the feature table.
  */
-export function securitySetups(page) {
+export function securityFeatures(page) {
   const headings = page.blocks.filter((b) => b.type === 'heading');
-  const heading = findExactlyOneHeading(headings, (h) => h.text === SECURITY_SETUPS_TITLE, SECURITY_SETUPS_TITLE);
+  const heading = findExactlyOneHeading(headings, (h) => h.text === SECURITY_FEATURES_TITLE, SECURITY_FEATURES_TITLE);
   const table = sectionBlocks(page.blocks, heading).find((b) => b.type === 'table');
-  if (!table) throw new Error(`/security: "${SECURITY_SETUPS_TITLE}" has no table naming the setups`);
-  const names = table.rows.map((row) => inlineToText(row[0]).trim());
-  assertDistinctSetups(names, `/security: "${SECURITY_SETUPS_TITLE}"`);
+  if (!table) throw new Error(`/security: "${SECURITY_FEATURES_TITLE}" has no table naming the features`);
+  const names = table.rows.map((row, i) => {
+    const [lead] = row[0];
+    if (lead?.type !== 'strong') throw new Error(`/security: "${SECURITY_FEATURES_TITLE}" row ${i + 1} opens with no **feature name**`);
+    return inlineToText(lead.children).replace(/\.$/, '').trim();
+  });
+  assertDistinctFeatures(names, `/security: "${SECURITY_FEATURES_TITLE}"`);
   const used = new Set();
   const out = { names };
   for (const { key, title, block, entries } of securitySections(page)) {
-    const column = entries === 'rows' ? block.header.findIndex((cell) => inlineToText(cell).trim() === SECURITY_SETUP_COLUMN) : null;
-    if (column === -1) throw new Error(`/security: "${title}" has no "${SECURITY_SETUP_COLUMN}" column`);
+    const column = entries === 'rows' ? columnOf(block, SECURITY_FEATURE_COLUMN, title) : null;
     out[key] = block[entries].map((entry, i) => {
       const label = `/security: "${title}" entry ${i + 1}`;
-      const tags = setupTagsOf(entry, column, label);
-      assertDistinctSetups(tags, label);
+      const tags = featureTagsOf(entry, column, label);
+      assertDistinctFeatures(tags, label);
       const unknown = tags.filter((tag) => !names.includes(tag));
       if (unknown.length > 0) {
-        throw new Error(`${label} names ${unknown.join(', ')}, not a setup in "${SECURITY_SETUPS_TITLE}" (${names.join(', ')})`);
+        throw new Error(`${label} names ${unknown.join(', ')}, not a feature in "${SECURITY_FEATURES_TITLE}" (${names.join(', ')})`);
       }
       tags.forEach((tag) => used.add(tag));
       return tags;
     });
   }
   const unused = names.filter((name) => !used.has(name));
-  if (unused.length > 0) throw new Error(`/security: no entry applies to ${unused.join(', ')}`);
+  if (unused.length > 0) throw new Error(`/security: no entry concerns ${unused.join(', ')}`);
   return out;
 }
 
-/** A row's `Applies to` cell, or the emphasis a bullet opens with, split on commas. */
-function setupTagsOf(entry, column, label) {
-  let cell;
-  if (column === null) {
-    const first = entry.children[0]?.children?.[0];
-    if (first?.type !== 'em') throw new Error(`${label} opens with no *setup* tag`);
-    cell = inlineToText(first.children).replace(/\.$/, '');
-  } else {
-    cell = inlineToText(entry[column] ?? []);
-  }
-  if (cell.trim() === '') throw new Error(`${label} carries no setup tag`);
+/** The index of `table`'s column headed `name`; a missing one fails the build. */
+function columnOf(table, name, title) {
+  const column = table.header.findIndex((cell) => inlineToText(cell).trim() === name);
+  if (column === -1) throw new Error(`/security: "${title}" has no "${name}" column`);
+  return column;
+}
+
+/** `table` without its column at `column`. */
+function withoutColumn(table, column) {
+  const drop = (cells) => cells.filter((_, i) => i !== column);
+  return { ...table, align: drop(table.align), header: drop(table.header), rows: table.rows.map(drop) };
+}
+
+/** The emphasis a bullet opens with, or null: its feature tag. */
+const featureLeadOf = (item) => (item.children[0]?.children?.[0]?.type === 'em' ? item.children[0].children[0] : null);
+
+/** A row's `Feature` cell, or the emphasis a bullet opens with, split on commas; none is every install. */
+function featureTagsOf(entry, column, label) {
+  const cell = column === null ? inlineToText(featureLeadOf(entry)?.children ?? []).replace(/\.$/, '') : inlineToText(entry[column] ?? []);
+  if (cell.trim() === '') return [];
   const tags = cell.split(',').map((tag) => tag.trim());
-  if (tags.some((tag) => tag === '')) throw new Error(`${label} carries an empty setup tag ("${cell}")`);
+  if (tags.some((tag) => tag === '')) throw new Error(`${label} carries an empty feature tag ("${cell}")`);
   return tags;
 }
 
-function assertDistinctSetups(names, label) {
+function assertDistinctFeatures(names, label) {
   const repeated = [...new Set(names.filter((name, i) => names.indexOf(name) !== i))];
   if (repeated.length > 0) throw new Error(`${label} repeats ${repeated.join(', ')}`);
+}
+
+/**
+ * The specs that describe the audit itself, not a boundary it checks: their
+ * sections are the process a guarantee rests on, and no entry need claim them.
+ */
+const SECURITY_PROCESS_SPECS = ['docs/specs/security.md', 'docs/specs/security-audit.md'];
+
+/**
+ * Hold the audit to the guarantees: every section carrying `FAIL IF` lines
+ * outside {@link SECURITY_PROCESS_SPECS} sits under a guarantee table, its own
+ * or one around it ({@link guaranteeRows}). A check behind no promise fails the
+ * build; an admitted risk beside it is no substitute.
+ */
+export function securityCoverage(index, held) {
+  const unheld = index.domains.flatMap((domain) =>
+    domain.specs
+      .filter((spec) => !SECURITY_PROCESS_SPECS.includes(spec.path))
+      .flatMap((spec) => spec.sections.filter((section) => !held.has(section.url)).map((section) => `${spec.path} -> "${section.title}"`)),
+  );
+  if (unheld.length > 0) throw new Error(`/security: no guarantee holds the checks under ${unheld.join(', ')}`);
+}
+
+/** The guarantees' column naming what pins each row on every build. */
+const SECURITY_PINNED_COLUMN = 'Pinned by';
+
+/**
+ * Link every repository path a guarantee row's `Pinned by` cell names to that
+ * file on GitHub, so a reader can open what pins the row. A code span holding a
+ * `/` is a path, and one that does not exist fails the build; any other (`cargo
+ * test`) stays code. The links carry no `repoPath`: they name what pins a row,
+ * never the spec that classifies it ({@link securityAudiences}).
+ */
+export function linkPinnedBy(page) {
+  const { title, block } = securitySections(page).find(({ key }) => key === 'guarantees');
+  const column = columnOf(block, SECURITY_PINNED_COLUMN, title);
+  for (const row of block.rows) {
+    row[column] = row[column].map((node) => {
+      if (node.type !== 'code' || !node.value.includes('/')) return node;
+      const file = join(repoRoot, node.value);
+      if (!existsSync(file)) throw new Error(`/security: "${title}" is pinned by ${node.value}, which does not exist`);
+      const view = statSync(file).isDirectory() ? REPO_BLOB_BASE.replace(/\/blob\//, '/tree/') : REPO_BLOB_BASE;
+      return { type: 'link', href: `${view}/${node.value}`, children: [node] };
+    });
+  }
+}
+
+/**
+ * An audience's three blocks with no feature tags: the guarantees without their
+ * `Feature` column, each tagged bullet without the emphasis it opens with. For
+ * a page that shows no feature table to read the tags against.
+ */
+export function withoutFeatures(sections) {
+  const { guarantees, notDefended, knownGaps } = sections;
+  const untag = (item) => {
+    if (!featureLeadOf(item)) return item;
+    const [first, ...rest] = item.children;
+    const [, space, ...inline] = first.children;
+    const lead = space?.type === 'text' ? space.value.trimStart() : '';
+    const tail = space?.type === 'text' ? inline : [space, ...inline].filter(Boolean);
+    return { ...item, children: [{ ...first, children: lead ? [{ ...space, value: lead }, ...tail] : tail }, ...rest] };
+  };
+  return {
+    ...sections,
+    guarantees: withoutColumn(guarantees, columnOf(guarantees, SECURITY_FEATURE_COLUMN, 'Guarantees')),
+    notDefended: { ...notDefended, items: notDefended.items.map(untag) },
+    knownGaps: { ...knownGaps, items: knownGaps.items.map(untag) },
+  };
+}
+
+/** The group a guarantee that names no feature falls in. */
+const SECURITY_BASELINE_GROUP = 'Every install';
+
+/**
+ * `blocks` with the "Guarantees" table split under a subheading per feature,
+ * {@link SECURITY_BASELINE_GROUP} first, then `features` in the feature
+ * table's order: a row under each feature it names, or the baseline when it
+ * names none, with no Feature column. A feature no row names on this page gets
+ * no subheading.
+ */
+export function groupGuarantees(blocks, features) {
+  const heading = findExactlyOneHeading(blocks.filter((b) => b.type === 'heading'), (h) => h.text === 'Guarantees', 'Guarantees');
+  const table = sectionBlocks(blocks, heading).find((b) => b.type === 'table');
+  if (!table) throw new Error('/security: no "Guarantees" table to group');
+  const column = columnOf(table, SECURITY_FEATURE_COLUMN, 'Guarantees');
+  const tags = table.rows.map((row, i) => featureTagsOf(row, column, `/security: "Guarantees" entry ${i + 1}`));
+  const shown = withoutColumn(table, column);
+  const ids = new Set(headingsOf(blocks).map((h) => h.id));
+  const groups = [SECURITY_BASELINE_GROUP, ...features].flatMap((name) => {
+    const rows = shown.rows.filter((_, i) => (name === SECURITY_BASELINE_GROUP ? tags[i].length === 0 : tags[i].includes(name)));
+    if (rows.length === 0) return [];
+    const id = slugify(name);
+    if (ids.has(id)) throw new Error(`/security: the "${name}" guarantees would share #${id} with another heading`);
+    return [{ type: 'heading', depth: heading.depth + 1, id, text: name, children: [{ type: 'text', value: name }] }, { ...shown, rows }];
+  });
+  const index = blocks.indexOf(table);
+  return [...blocks.slice(0, index), ...groups, ...blocks.slice(index + 1)];
 }
 
 /**
@@ -728,25 +840,57 @@ function assertDistinctSetups(names, label) {
  * `canonicalUrl`, because the delta removes no section — the page is the spec,
  * which is the point of publishing it. `pageBlocks` is the same document with
  * the three split blocks narrowed to {@link SECURITY_PAGE_AUDIENCES}; `blocks`
- * keeps every entry. `setups` is the setup table's vocabulary, every entry's
- * tags checked against it ({@link securitySetups}).
+ * keeps every entry. `supplyChain` is `/supply-chain`'s audience without its
+ * feature tags: that page splits its inventory by product and has no feature
+ * table to read them against. `features` is the feature table's vocabulary,
+ * every entry's tags checked against it ({@link securityFeatures}). Each
+ * guarantee opens with a link to the section holding it ({@link guaranteeRows}),
+ * and `/security` groups its own by feature ({@link groupGuarantees}).
  */
 const buildSecurity = async () => {
+  const guarantees = await gatherGuarantees();
   const page = await buildDocument({
     file: 'docs/specs/security.md',
     delta: SECURITY_DELTA,
     label: '/security',
     fallbackTitle: 'Security',
+    transform: (markdown) => withGuarantees(markdown, guarantees.rows),
   });
+  linkPinnedBy(page);
   const audiences = securityAudiences(page);
+  const index = await auditIndex();
+  securityCoverage(index, guarantees.held);
+  const { names } = securityFeatures(page);
   return {
     ...page,
-    setups: securitySetups(page).names,
+    features: names,
     audiences,
-    pageBlocks: audienceBlocks(page, audiences, SECURITY_PAGE_AUDIENCES),
-    auditIndex: await auditIndex(),
+    pageBlocks: groupGuarantees(audienceBlocks(page, audiences, SECURITY_PAGE_AUDIENCES), names),
+    supplyChain: withoutFeatures(audiences['supply-chain']),
+    auditIndex: index,
   };
 };
+
+/**
+ * Each prose line of a security spec above its fold, with the heading it sits
+ * under (null above the first), that heading's depth, and its GitHub anchor.
+ * GitHub suffixes a repeated anchor with its count, as it renders the file.
+ */
+function* specSectionLines(text) {
+  const seen = new Map();
+  let section = null;
+  for (const line of proseLines(text)) {
+    const heading = line.match(/^(#{2,6})\s+(.+?)\s*$/);
+    if (heading) {
+      if (/^(\d+\.\s*)?Future$/i.test(heading[2])) return;
+      const base = githubSlug(heading[2]);
+      const n = seen.get(base) ?? 0;
+      seen.set(base, n + 1);
+      section = { heading: heading[2], depth: heading[1].length, anchor: n === 0 ? base : `${base}-${n}` };
+    }
+    yield { line, section, isHeading: Boolean(heading) };
+  }
+}
 
 /**
  * Each heading of a security spec, above its fold, that leads at least one
@@ -755,26 +899,124 @@ const buildSecurity = async () => {
  * section to be listed under, so it fails the build rather than drop out.
  */
 export function auditedSections(text, label) {
-  const sections = [];
-  const seen = new Map();
-  let current = null;
-  for (const line of proseLines(text)) {
-    const heading = line.match(/^(#{2,6})\s+(.+?)\s*$/);
-    if (heading) {
-      if (/^(\d+\.\s*)?Future$/i.test(heading[2])) break;
-      // GitHub suffixes a repeated anchor with its count, as it renders the file.
-      const base = githubSlug(heading[2]);
-      const n = seen.get(base) ?? 0;
-      seen.set(base, n + 1);
-      const title = heading[2].replace(/`/g, '').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1');
-      current = { title, anchor: n === 0 ? base : `${base}-${n}`, checks: 0 };
-      sections.push(current);
+  const sections = new Map();
+  for (const { line, section, isHeading } of specSectionLines(text)) {
+    if (isHeading) {
+      const title = section.heading.replace(/`/g, '').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1');
+      sections.set(section, { title, anchor: section.anchor, checks: 0 });
     } else if (FAIL_IF_RE.test(line)) {
-      if (!current) throw new Error(`${label}: a FAIL IF above its first section heading`);
-      current.checks++;
+      if (!section) throw new Error(`${label}: a FAIL IF above its first section heading`);
+      sections.get(section).checks++;
     }
   }
-  return sections.filter((section) => section.checks > 0);
+  return [...sections.values()].filter((section) => section.checks > 0);
+}
+
+/**
+ * The domain specs whose audited sections open with the guarantees their
+ * checks hold, in the order `/security` lists them.
+ */
+export const SECURITY_GUARANTEE_SPECS = [
+  'docs/specs/security-local.md',
+  'docs/specs/security-remote.md',
+  'docs/specs/security-hosted.md',
+  'docs/specs/security-supply-chain.md',
+  'docs/specs/security-ci.md',
+];
+
+/** The columns of a domain spec's guarantee table, and of the table `/security` gathers them into. */
+const GUARANTEE_COLUMNS = ['Guarantee', 'Feature', 'Pinned by'];
+
+/** Whether `line` is a guarantee table's header row, read the way the site's parser reads a row. */
+const isGuaranteeHeader = (line) => line.includes('|') && splitCells(line).map((cell) => cell.trim()).join('|') === GUARANTEE_COLUMNS.join('|');
+
+/**
+ * One domain spec's guarantee rows as rows of `/security`'s table, and the
+ * anchors of the sections they hold. Each table headed {@link GUARANTEE_COLUMNS}
+ * holds the section it sits under and every section nested in it; each of its
+ * rows opens with a link to that section, its own section links rebased onto
+ * docs/specs/security.md, which sits beside every domain spec. A table in a
+ * section with no `FAIL IF` line, two in one section, one with no delimiter
+ * row, or a row without three cells fails the build: a guarantee states what
+ * the checks beside it hold.
+ */
+export function guaranteeRows(text, path) {
+  const audited = new Set(auditedSections(text, path).map((section) => section.anchor));
+  const file = posix.basename(path);
+  const rebase = (cell) => cell.trim().replace(/\|/g, '\\|').replace(/\]\(#/g, `](./${file}#`);
+  const tabled = new Set();
+  const rows = [];
+  const held = [];
+  let holder = null;
+  let table = null;
+  for (const { line, section, isHeading } of specSectionLines(text)) {
+    if (table && !table.delimited) {
+      if (!isDelimiterRow(line)) throw new Error(`${table.label}: a header with no delimiter row`);
+      table.delimited = true;
+      continue;
+    }
+    if (table && line.startsWith('|')) {
+      const cells = splitCells(line);
+      if (cells.length !== GUARANTEE_COLUMNS.length) throw new Error(`${table.label}: row "${line}" has ${cells.length} cells, not 3`);
+      const [guarantee, feature, pins] = cells.map(rebase);
+      rows.push(`| ${table.rule} ${guarantee} | ${feature} | ${pins} |`);
+      continue;
+    }
+    table = null;
+    if (isHeading) {
+      if (holder && section.depth <= holder.depth) holder = null;
+      if (holder) held.push(section.anchor);
+      continue;
+    }
+    if (!isGuaranteeHeader(line)) continue;
+    const label = `${path}: the guarantees under "${section?.heading}"`;
+    if (!section || !audited.has(section.anchor)) throw new Error(`${label} sit in a section with no FAIL IF line`);
+    if (tabled.has(section.anchor)) throw new Error(`${label} are split across two tables`);
+    tabled.add(section.anchor);
+    holder ??= section;
+    held.push(section.anchor);
+    table = { label, rule: `[${section.heading}](./${file}#${section.anchor})`, delimited: false };
+  }
+  return { rows, held };
+}
+
+/**
+ * Every guarantee the domain specs hold, in {@link SECURITY_GUARANTEE_SPECS}
+ * order, and the GitHub URL of every section they hold; a guarantee table in
+ * any other spec fails the build rather than drop out of `/security`.
+ */
+export async function gatherGuarantees(root = repoRoot) {
+  const specs = (await readdir(join(root, 'docs/specs'))).filter((name) => name.endsWith('.md')).map((name) => `docs/specs/${name}`);
+  const texts = new Map(await Promise.all(specs.map(async (path) => [path, await readFile(join(root, path), 'utf8')])));
+  for (const [path, text] of texts) {
+    if (!SECURITY_GUARANTEE_SPECS.includes(path) && proseLines(text).some(isGuaranteeHeader)) {
+      throw new Error(`${path}: carries guarantees, but is not one of SECURITY_GUARANTEE_SPECS`);
+    }
+  }
+  const rows = [];
+  const held = new Set();
+  for (const path of SECURITY_GUARANTEE_SPECS) {
+    const spec = guaranteeRows(texts.get(path), path);
+    rows.push(...spec.rows);
+    for (const anchor of spec.held) held.add(`${REPO_BLOB_BASE}/${path}#${anchor}`);
+  }
+  return { rows, held };
+}
+
+/**
+ * docs/specs/security.md with `rows` as the table closing its "Guarantees"
+ * section. The spec writes none of its own: each guarantee is stated once,
+ * beside the checks that hold it.
+ */
+export function withGuarantees(markdown, rows) {
+  const start = markdown.indexOf('\n## Guarantees\n');
+  if (start === -1) throw new Error('/security: no "## Guarantees" section to gather the guarantees into');
+  const end = markdown.indexOf('\n## ', start + 1);
+  const section = markdown.slice(start, end === -1 ? undefined : end);
+  if (section.includes('| Guarantee |')) throw new Error('/security: "Guarantees" writes a table; a guarantee belongs beside its checks');
+  if (rows.length === 0) throw new Error('/security: no domain spec states a guarantee');
+  const table = [`| ${GUARANTEE_COLUMNS.join(' | ')} |`, `|${' --- |'.repeat(GUARANTEE_COLUMNS.length)}`, ...rows].join('\n');
+  return `${markdown.slice(0, start)}${section.replace(/\n*$/, '')}\n\n${table}\n${end === -1 ? '' : `\n${markdown.slice(end + 1)}`}`;
 }
 
 /**

@@ -81,8 +81,7 @@ chromatic-build-*.xml
 chromatic-diagnostics.json
 lib/screenshots/
 
-# symlinked skill files
-.agents/skills/
+# Codex per-user state.
 .codex
 
 # Claude Code: per-user state and skill symlinks are local-only.
