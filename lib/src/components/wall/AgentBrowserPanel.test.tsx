@@ -335,7 +335,7 @@ describe('AgentBrowserPanel render mode controller', () => {
     expect(host.requests('tab')).toContainEqual({ provider: 'agent-browser', binding: { session: 'browser-session' }, op: 'tab', action: 'select', tabId: 't2' });
   });
 
-  it('selects a provisional new tab that already reports active once, so the screencast follows it', async () => {
+  it('does not force-select a provisional new tab that already reports active', async () => {
     const host = installBrowserHost();
 
     await renderPanel(paneProps('ab-panel', { surfaceType: 'browser', session: 'browser-session', stream: 1111 }));
@@ -357,7 +357,7 @@ describe('AgentBrowserPanel render mode controller', () => {
       }));
     });
 
-    expect(host.requests('tab')).toEqual([{ provider: 'agent-browser', binding: { session: 'browser-session' }, op: 'tab', action: 'select', tabId: 't2' }]);
+    expect(host.browser.mock.calls.map(([request]) => request.op).filter((op) => DRIVES.has(op))).toEqual([]);
   });
 
   it('selects a provisional new tab after it reaches its destination if it is not active', async () => {
@@ -392,9 +392,7 @@ describe('AgentBrowserPanel render mode controller', () => {
       }));
     });
 
-    // Reported active, it was selected; at its destination behind the opener,
-    // it is selected again, and the opener the report names active is not.
-    expect(host.requests('tab').map((request) => request.tabId)).toEqual(['t2', 't2']);
+    expect(host.requests('tab')).toContainEqual({ provider: 'agent-browser', binding: { session: 'browser-session' }, op: 'tab', action: 'select', tabId: 't2' });
   });
 
   it('keeps the last known active tab when the stream emits a transient empty tab list', async () => {

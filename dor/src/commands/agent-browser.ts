@@ -12,7 +12,7 @@ import {
 } from 'dor-lib-common/browser-providers';
 import type { BrowserCliDescriptor } from './browser-cli.js';
 import type { Command, DorCommandContext } from './types.js';
-import { stringParser, workspaceFlag } from './shared.js';
+import { diagnosticsHelp, stringParser, workspaceFlag } from './shared.js';
 
 const INSTALL_HINT = BROWSER_PROVIDERS['agent-browser'].installHint;
 const INSTALL_DOCS = 'https://agent-browser.dev';
@@ -79,9 +79,7 @@ Dormouse intercepts dor-embed-size to query or set the pane's browser viewport:
   dor agent-browser dor-embed-size 1440 900 --dpr 2
   dor agent-browser dor-embed-size --preset pane-sync
 
-and dor-diagnostics to print, as JSON, everything the pane and the host know
-about its stream — for a pane that froze, or never showed its page:
-  dor agent-browser --surface surface:3 dor-diagnostics
+${diagnosticsHelp('dor agent-browser')}
 
 After a successful command, dor opens the browser surface bound to the session,
 or reuses the one it already has. A playwright browser (render_mode playwright-*) is

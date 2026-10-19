@@ -9,9 +9,6 @@ import { getAgentBrowserScreenController } from './agent-browser-screen';
 import { viewportFromMeasurement } from './browser-surface';
 import {
   HIDDEN_PARK_DELAY_MS,
-  WATCHDOG_FRAME_STALL_MS,
-  WATCHDOG_TICK_MS,
-  WATCHDOG_URL_MS,
   acquireAgentBrowserSurfaceController,
   closeBrowserSurface,
   disposeAgentBrowserSurfaceController,
@@ -537,146 +534,42 @@ describe('parking', () => {
   });
 });
 
-describe('active-tab reselect', () => {
+describe('diagnostics', () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
-  const tabsMessage = (...list: [string, boolean][]) => JSON.stringify({
-    type: 'tabs',
-    tabs: list.map(([tabId, active]) => ({ tabId, title: tabId, url: `https://example.com/${tabId}`, active })),
-  });
-  const selects = (host: ReturnType<typeof installBrowserHost>) => host.requests('tab').map((r) => r.tabId);
-
-  it('selects a tab agent-browser made active on its own, and the pane re-selects nothing it chose itself', async () => {
-    const host = installBrowserHost();
-    const controller = withPort('id', { session: 'sess' }, 4321);
-    controller.attachView(makeSink());
-    await vi.advanceTimersByTimeAsync(0);
-    streamSocket(4321)?.emitMessage(tabsMessage(['t1', true]));
-    streamSocket(4321)?.emitMessage(tabsMessage(['t1', false], ['t2', true]));
-    expect(selects(host)).toEqual(['t2']);
-    controller.selectTab(controller.snapshot().tabs[0]);
-    streamSocket(4321)?.emitMessage(tabsMessage(['t1', true], ['t2', false]));
-    expect(selects(host)).toEqual(['t2', 't1']);
-  });
-
-  it('selects a tab made active while the pane was parked once it streams again', async () => {
-    const host = installBrowserHost();
-    const controller = withPort('id', { session: 'sess' }, 4321);
-    controller.attachView(makeSink());
-    await vi.advanceTimersByTimeAsync(0);
-    streamSocket(4321)?.emitMessage(tabsMessage(['t1', true]));
-    controller.setVisible(false);
-    await vi.advanceTimersByTimeAsync(HIDDEN_PARK_DELAY_MS + 50);
-    expect(controller.isParked()).toBe(true);
-    controller.setVisible(true);
-    await vi.advanceTimersByTimeAsync(0);
-    streamSocket(4321)?.emitMessage(tabsMessage(['t1', false], ['t2', true]));
-    expect(selects(host)).toEqual(['t2']);
-  });
-
-  it('never selects for a Playwright pane, whose tab ids shift when a tab closes', async () => {
-    const host = installBrowserHost();
-    const controller = withPort('id', { session: 'sess', renderMode: 'playwright-screencast' }, 4321);
-    controller.attachView(makeSink());
-    await vi.advanceTimersByTimeAsync(0);
-    streamSocket(4321)?.emitMessage(tabsMessage(['0', false], ['1', false], ['2', true]));
-    // Tab 0 closes: the same page is active at index 1.
-    streamSocket(4321)?.emitMessage(tabsMessage(['0', false], ['1', true]));
-    streamSocket(4321)?.emitMessage(tabsMessage(['0', true]));
-    expect(selects(host)).toEqual([]);
-  });
-});
-
-describe('diagnostics and the watchdog', () => {
-  beforeEach(() => vi.useFakeTimers());
-  afterEach(() => vi.useRealTimers());
-
-  const tabsMessage = (...list: [string, boolean][]) => JSON.stringify({
-    type: 'tabs',
-    tabs: list.map(([tabId, active]) => ({ tabId, title: tabId, url: `https://example.com/${tabId}`, active })),
-  });
-  const warnings = (warn: ReturnType<typeof vi.spyOn>, kind: string) =>
-    warn.mock.calls.filter(([message]) => String(message).includes(`watchdog ${kind}`));
-
-  it('records phases, parking and sight in its ring, and answers the host\'s record beside it', async () => {
-    installBrowserHost({ diagnostics: () => ({ ok: true, diagnostics: { views: [] } }) });
+  it('answers its own record beside the host\'s, asking the host nothing else', async () => {
+    const host = installBrowserHost({ diagnostics: () => ({ ok: true, diagnostics: { views: [] } }) });
     const controller = withPort('id', { session: 'sess' }, 4321);
     controller.attachView(makeSink());
     await vi.advanceTimersByTimeAsync(0);
     const inputs = { docVisible: true, hostShown: true, workspaceActive: false, parked: false, covered: false };
-    controller.setVisible(false, inputs);
-    controller.setVisible(false, { ...inputs });
+    controller.setSight(inputs);
+    controller.setSight(inputs);
     await vi.advanceTimersByTimeAsync(HIDDEN_PARK_DELAY_MS + 50);
-    controller.setVisible(true, { ...inputs, workspaceActive: true });
+    expect(controller.isParked()).toBe(true);
+    controller.setSight({ ...inputs, workspaceActive: true });
     await vi.advanceTimersByTimeAsync(0);
+    expect(controller.isParked()).toBe(false);
+    host.browser.mockClear();
 
-    const { webview, host } = await controller.diagnostics();
-    expect(host).toEqual({ views: [] });
-    const events = (webview.events as { event: string; data?: Record<string, unknown> }[]);
-    expect(events.filter((e) => e.event === 'sight').map((e) => e.data?.workspaceActive)).toEqual([false, true]);
-    expect(events.filter((e) => e.event === 'phase').map((e) => `${e.data?.from}->${e.data?.to} ${e.data?.why}`))
-      .toEqual(['idle->live stream handed over', 'live->parked park', 'parked->live unpark']);
-    expect(events.map((e) => e.event)).toEqual(expect.arrayContaining(['park-requested', 'unpark-requested', 'view-url-request', 'connect', 'open']));
-    expect(webview.phase).toMatchObject({ k: 'live', stream: 4321 });
-    expect(webview.connection).toMatchObject({ socket: 'open', failures: 0 });
+    const { webview, host: hosted } = await controller.diagnostics();
+    expect(hosted).toEqual({ views: [] });
+    expect(host.browser.mock.calls.map(([request]) => request.op)).toEqual(['diagnostics']);
+    // What hid the pane, and what it did then, are in its ring.
+    const events = (webview.events as { event: string }[]).map((e) => e.event);
+    expect(events.filter((event) => event === 'sight')).toHaveLength(2);
+    expect(events).toEqual(expect.arrayContaining(['phase', 'park-requested', 'unpark-requested']));
   });
 
-  it('rebuilds a live pane\'s connection whose viewer URL never comes, logging it once', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    let views = 0;
-    const host = installBrowserHost({ view: (request) => (++views === 1 ? new Promise(() => {}) : { ok: true, url: `ws://127.0.0.1:${request.stream}` }) });
-    const controller = withPort('id', { session: 'sess' }, 4321);
-    controller.attachView(makeSink());
-    await vi.advanceTimersByTimeAsync(WATCHDOG_URL_MS);
-    expect(host.requests('view')).toHaveLength(1);
-    await vi.advanceTimersByTimeAsync(3 * WATCHDOG_TICK_MS);
-    expect(host.requests('view')).toHaveLength(2);
-    expect(warnings(warn, 'no-socket')).toHaveLength(1);
-    expect(streamSocket(4321)?.readyState).toBe(1);
-    // Healed: nothing more fires.
-    await vi.advanceTimersByTimeAsync(WATCHDOG_URL_MS * 2);
-    expect(warnings(warn, 'no-socket')).toHaveLength(1);
-    const { webview } = await controller.diagnostics();
-    expect((webview.events as { event: string }[]).map((e) => e.event)).toContain('watchdog-no-socket');
-  });
-
-  it('selects the active tab once more when no frame follows its change', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const host = installBrowserHost();
-    const controller = withPort('id', { session: 'sess' }, 4321);
+  it('asks no host for a Surface with no session yet', async () => {
+    const host = installBrowserHost({ launch: () => new Promise(() => {}) });
+    const controller = acquireAgentBrowserSurfaceController('id', { url: 'https://example.com/' });
     controller.attachView(makeSink());
     await vi.advanceTimersByTimeAsync(0);
-    const socket = streamSocket(4321);
-    socket?.emitMessage(JSON.stringify({ type: 'status', connected: true, screencasting: true }));
-    socket?.emitMessage(tabsMessage(['t1', true]));
-    socket?.emitMessage(tabsMessage(['t1', false], ['t2', true]));
-    expect(host.requests('tab').map((r) => r.tabId)).toEqual(['t2']);
-    await vi.advanceTimersByTimeAsync(WATCHDOG_FRAME_STALL_MS + 2 * WATCHDOG_TICK_MS);
-    expect(host.requests('tab').map((r) => r.tabId)).toEqual(['t2', 't2']);
-    expect(warnings(warn, 'frame-stall')).toHaveLength(1);
-    // Once per change.
-    await vi.advanceTimersByTimeAsync(10 * WATCHDOG_TICK_MS);
-    expect(host.requests('tab')).toHaveLength(2);
-
-    // A change a frame follows needs nothing more.
-    socket?.emitMessage(tabsMessage(['t1', true], ['t2', false]));
-    emitFrame(socket);
-    await vi.advanceTimersByTimeAsync(WATCHDOG_FRAME_STALL_MS + 2 * WATCHDOG_TICK_MS);
-    expect(host.requests('tab').map((r) => r.tabId)).toEqual(['t2', 't2', 't1']);
-  });
-
-  it('logs a flapping viewer socket once a window', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    installBrowserHost();
-    const controller = withPort('id', { session: 'sess' }, 4321);
-    controller.attachView(makeSink());
-    await vi.advanceTimersByTimeAsync(0);
-    for (let i = 0; i < 6; i++) {
-      streamSocket(4321)?.close();
-      await vi.advanceTimersByTimeAsync(2100);
-    }
-    expect(warnings(warn, 'flapping')).toHaveLength(1);
+    host.browser.mockClear();
+    expect((await controller.diagnostics()).host).toBeNull();
+    expect(host.browser).not.toHaveBeenCalled();
   });
 });
 

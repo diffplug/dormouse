@@ -30,9 +30,10 @@ import {
 } from 'dor-lib-common';
 import { WebSocket } from 'ws';
 import { isAllowedAgentBrowserBinary } from '../lib/agent-browser-binary';
+import { messageOf } from '../lib/errors';
 import { parseAgentBrowserTabs } from '../lib/agent-browser-tab';
 import { CAPTURE_JPEG_QUALITY, type BrowserResult, type ViewerInput, type ViewerState } from '../lib/platform/browser-automation';
-import type { BrowserAct, BrowserProvider, LiveBrowser, ProviderBinding } from './browser-host';
+import { TAB_ID, type BrowserAct, type BrowserProvider, type LiveBrowser, type ProviderBinding } from './browser-host';
 import { CAPTURE_TIMEOUT_MS } from './browser-capture';
 import { measuredViewport, type MeasuredViewport, type Upstream, type ViewerSink } from './browser-viewer';
 
@@ -177,6 +178,10 @@ function cdpCalls(socket: WebSocket, event: (method: string, params: Record<stri
 // viewport (`measuredViewport`), measured this often.
 const MEASURE_SCRIPT = "document.visibilityState === 'visible' ? { width: innerWidth, height: innerHeight, dpr: devicePixelRatio } : null";
 const MEASURE_INTERVAL_MS = 1000;
+
+/** A tab selected because the daemon made it active on its own is selected
+ *  once more when no new frame follows within this long. */
+export const RESELECT_RETRY_MS = 2_000;
 
 export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}): BrowserProvider<ProviderBinding> {
   const log = deps.log ?? (() => {});
@@ -361,6 +366,58 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
   // daemon asks it nothing.
   const cdpEndpoints = new Map<string, { stream: number; url: string }>();
 
+  // Per session, outliving each viewer socket on it: the tab its daemon last
+  // reported active, the last select sent for it (`performance.now()`), when
+  // its stream last sent a changed frame, and a reselect's pending retry.
+  type TabState = { active?: string; selected?: { tabId: string; at: number }; lastFrameAt: number; retry?: ReturnType<typeof setTimeout> };
+  const tabStates = new Map<string, TabState>();
+  const tabStateOf = (session: string): TabState => {
+    let state = tabStates.get(session);
+    if (!state) tabStates.set(session, state = { lastFrameAt: -Infinity });
+    return state;
+  };
+
+  /**
+   * agent-browser's daemon rebinds its screencast only on its own tab switch
+   * (measured against 0.31.1): a tab it made active by
+   * itself — a popup it reports active, the tab left when the active one
+   * closed — leaves the stream on the old page, sending nothing. Select it
+   * when a viewer's stream reports the change, judged against what that
+   * stream reported before — seeded with the browser's last known tab, so a
+   * viewer that reconnects after a change selects too — but once per change
+   * per browser: each viewer's stream reports it, each a little apart. Once
+   * more if no new frame follows. Never for a headed window, which its user
+   * drives.
+   */
+  function followActiveTab(b: ProviderBinding, before: string | undefined, active: string, headed: boolean): void {
+    const state = tabStateOf(b.session);
+    state.active = active;
+    if (headed || before === undefined || before === active) return;
+    const { selected } = state;
+    if (selected?.tabId === active && performance.now() - selected.at < RESELECT_RETRY_MS) return;
+    reselect(b, active, true);
+  }
+
+  function reselect(b: ProviderBinding, tabId: string, retry: boolean): void {
+    if (!TAB_ID.test(tabId) || TAB_VERBS.has(tabId)) return;
+    const state = tabStateOf(b.session);
+    clearTimeout(state.retry);
+    state.retry = undefined;
+    const sentAt = performance.now();
+    state.selected = { tabId, at: sentAt };
+    log(`[agent-browser] selecting ${tabId} of ${b.session}, which its daemon made active${retry ? '' : ' (again: no frame followed)'}`);
+    void drive(b, ['tab', tabId]).then(
+      (result) => { if (result.exitCode !== 0) log(`[agent-browser] selecting ${tabId} failed: ${cliError(result)}`); },
+      (error: unknown) => log(`[agent-browser] selecting ${tabId} failed: ${messageOf(error)}`),
+    );
+    if (!retry) return;
+    state.retry = setTimeout(() => {
+      state.retry = undefined;
+      if (state.active === tabId && state.lastFrameAt < sentAt) reselect(b, tabId, false);
+    }, RESELECT_RETRY_MS);
+    state.retry.unref?.();
+  }
+
   /** The CDP endpoint of the browser the daemon streaming on `stream` runs,
    *  asked of that daemon once. */
   async function cdpEndpoint(b: ProviderBinding, stream: number): Promise<string | undefined> {
@@ -518,6 +575,8 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
       if (measured !== undefined && (typeof measured !== 'number' || !Number.isFinite(measured) || measured <= 0)) throw new Error('the browser did not report a DPR');
       const argv = actArgv(act.op === 'viewport' && act.dpr === undefined && typeof measured === 'number' ? { ...act, dpr: measured } : act);
       if (!argv) return { ok: false, error: 'invalid tab operation' };
+      // A tab the pane selects becomes active by that select, not on its own.
+      if (act.op === 'tab' && act.action === 'select') tabStateOf(b.session).selected = { tabId: act.tabId, at: performance.now() };
       const result = await drive(b, argv);
       return result.exitCode === 0 ? { ok: true } : { ok: false, error: cliError(result) };
     },
@@ -539,6 +598,17 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
     },
 
     view: (b, port, { headed }, sink) => viewStream(b, port, headed, sink),
+
+    // A launch or close replaces the daemon, whose tab ids start over.
+    async release(b) {
+      clearTimeout(tabStates.get(b.session)?.retry);
+      tabStates.delete(b.session);
+    },
+
+    async dispose() {
+      for (const state of tabStates.values()) clearTimeout(state.retry);
+      tabStates.clear();
+    },
   };
 
   /**
@@ -565,6 +635,8 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
     let closing = false;
     let observer: { close(): void } | null = null;
     let lastFrame: Buffer | undefined;
+    // The active tab this stream last reported, from the browser's last known.
+    let streamActive = tabStates.get(b.session)?.active;
     const lastState = new Map<string, string>();
     // The stream's status names the daemon's configured viewport, which a
     // headed window does not follow: the window's own, as its page reports
@@ -607,6 +679,7 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
       if (message.type === 'frame' && typeof message.data === 'string') {
         if (headed || lastFrame?.equals(data)) return;
         lastFrame = data;
+        tabStateOf(b.session).lastFrameAt = performance.now();
         const size = frameSize(message.metadata);
         sink.frame(Buffer.from(message.data, 'base64'), size, size && Math.max(size.width, CHROME_MIN_WINDOW_WIDTH));
         // The daemon's frames follow its `set viewport` exactly, ordered with
@@ -628,7 +701,11 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
         sink.state({ type: 'tabs', tabs });
         // The daemon's tab ids (`t1`, `t2`, …) are never reused while it runs.
         const active = tabs.find((tab) => tab.active)?.tabId;
-        if (active !== undefined) sink.shown(active);
+        if (active !== undefined && !closing) {
+          sink.shown(active);
+          followActiveTab(b, streamActive, active, headed);
+          streamActive = active;
+        }
         return;
       }
       status = {

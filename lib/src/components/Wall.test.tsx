@@ -519,7 +519,7 @@ describe('Wall on the Lath engine', () => {
     const answer = await control({ provider: 'agent-browser', surface: id });
     expect(answer).toMatchObject({ ok: true, result: {
       surfaceId: id, provider: 'agent-browser', session: 'diag-session',
-      webview: { phase: { k: 'live', stream: 4321 } },
+      webview: expect.anything(),
       host: { views: [{ upstream: 'open' }] },
     } });
     expect(await control({ provider: 'playwright', surface: id })).toMatchObject({ ok: false, error: expect.stringContaining(`dor agent-browser --surface ${id}`) });

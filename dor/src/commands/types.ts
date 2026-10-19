@@ -550,18 +550,16 @@ export interface BrowserSurfaceRequest extends WorkspaceScopedRequest {
   initialViewport?: BrowserViewportSetting;
 }
 
-export type BrowserViewportRequest = WorkspaceScopedRequest & { provider: BrowserAutomationProvider; setting?: BrowserViewportSetting | { preset: string; dpr?: number } } & (
+/** Which browser Surface a Dormouse-owned browser verb names: exactly one of
+ *  its key, a Surface handle, or a raw session. */
+export type BrowserIdentity =
   | { key: string; surface?: undefined; session?: undefined }
   | { surface: string; key?: undefined; session?: undefined }
-  | { session: string; key?: undefined; surface?: undefined }
-);
+  | { session: string; key?: undefined; surface?: undefined };
 
-/** `dor-diagnostics`: which browser Surface, by the same identities. */
-export type BrowserDiagnosticsRequest = WorkspaceScopedRequest & { provider: BrowserAutomationProvider } & (
-  | { key: string; surface?: undefined; session?: undefined }
-  | { surface: string; key?: undefined; session?: undefined }
-  | { session: string; key?: undefined; surface?: undefined }
-);
+export type BrowserViewportRequest = WorkspaceScopedRequest & { provider: BrowserAutomationProvider; setting?: BrowserViewportSetting | { preset: string; dpr?: number } } & BrowserIdentity;
+
+export type BrowserDiagnosticsRequest = WorkspaceScopedRequest & { provider: BrowserAutomationProvider } & BrowserIdentity;
 
 /** The webview's and the host's own record of one browser Surface, as plain
  *  JSON for people and agents to read; `webview` is null for a Surface no

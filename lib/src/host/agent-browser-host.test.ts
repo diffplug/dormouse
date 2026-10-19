@@ -6,7 +6,7 @@ import { dirname, join } from 'path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { BrowserOp, BrowserRequestBinding } from '../lib/platform/browser-automation';
 import { WebSocket, WebSocketServer } from 'ws';
-import { createAgentBrowserProvider } from './agent-browser-host';
+import { RESELECT_RETRY_MS, createAgentBrowserProvider } from './agent-browser-host';
 import { createBrowserCaptures, type BrowserCaptures } from './browser-capture';
 import { createBrowserHost } from './browser-host';
 import { openViewer, syncStates } from './browser-host-test-utils';
@@ -675,6 +675,12 @@ describe('agent-browser host viewer', () => {
       received,
       connected: () => vi.waitFor(() => expect(client).toBeDefined()).then(() => client!),
       send: (message: unknown) => client!.send(typeof message === 'string' ? message : JSON.stringify(message)),
+      /** The stream clients still open. */
+      clients: () => [...server.clients].filter((ws) => ws.readyState === WebSocket.OPEN),
+      /** `message` to every open stream client, as the daemon sends it. */
+      broadcast: (message: unknown) => {
+        for (const ws of server.clients) if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message));
+      },
     };
   }
 
@@ -794,6 +800,97 @@ describe('agent-browser host viewer', () => {
     // A popup the daemon reports active comes up at its own size.
     tabs(['t1', false, 'Renamed'], ['t2', true, 'Popup']);
     await vi.waitFor(() => expect(sized()).toBe(2));
+  });
+
+  describe('selecting a tab the daemon made active on its own', () => {
+    const tabsOf = (...list: [string, boolean][]) => ({ type: 'tabs', tabs: list.map(([tabId, active]) => ({ tabId, url: `https://example.com/${tabId}`, title: tabId, active })) });
+    const selects = () => spawnMock.mock.calls.map(([, args]) => args.slice(2).join(' ')).filter((call) => call.startsWith('tab '));
+
+    /** A daemon streaming for the session, and one host whose viewers watch it. */
+    async function streaming() {
+      running(session);
+      const daemon = await fakeServer();
+      writeState(session, 'stream', daemon.port);
+      spawnMock.mockImplementation(async () => spawnResult({}));
+      const host = makeHost();
+      hosts.push(host);
+      const viewer = async (headed = false) => {
+        const { url } = await ab(host, { op: 'view', stream: daemon.port, ...(headed ? { headed } : {}) }, { session });
+        return openViewer(url!);
+      };
+      return { daemon, host, viewer };
+    }
+    const settled = () => new Promise((resolve) => setTimeout(resolve, 100));
+
+    it('selects a popup the daemon reports active, and the tab left when the active one closes', async () => {
+      const { daemon, viewer } = await streaming();
+      await viewer();
+      await daemon.connected();
+      daemon.send(tabsOf(['t1', true]));
+      daemon.send(tabsOf(['t1', false], ['t2', true]));
+      await vi.waitFor(() => expect(selects()).toEqual(['tab t2']));
+      daemon.send(frame(1));
+      daemon.send(tabsOf(['t1', true]));
+      await vi.waitFor(() => expect(selects()).toEqual(['tab t2', 'tab t1']));
+    });
+
+    it('selects once for a browser two viewers watch, and not a tab the pane selected', async () => {
+      const { daemon, host, viewer } = await streaming();
+      await viewer();
+      await viewer();
+      await vi.waitFor(() => expect(daemon.clients()).toHaveLength(2));
+      daemon.broadcast(tabsOf(['t1', true]));
+      daemon.broadcast(tabsOf(['t1', false], ['t2', true]));
+      await vi.waitFor(() => expect(selects()).toEqual(['tab t2']));
+      daemon.broadcast(frame(1));
+      expect((await ab(host, { op: 'tab', action: 'select', tabId: 't1' }, { session })).ok).toBe(true);
+      daemon.broadcast(tabsOf(['t1', true], ['t2', false]));
+      await settled();
+      expect(selects()).toEqual(['tab t2', 'tab t1']);
+    });
+
+    it('selects a tab made active while nothing viewed the browser, once a viewer comes back', async () => {
+      const { daemon, viewer } = await streaming();
+      const first = await viewer();
+      await daemon.connected();
+      daemon.send(tabsOf(['t1', true]));
+      await vi.waitFor(() => expect(first.states).toHaveLength(1));
+      first.socket.close();
+      await vi.waitFor(() => expect(daemon.clients()).toHaveLength(0));
+      await viewer();
+      await vi.waitFor(() => expect(daemon.clients()).toHaveLength(1));
+      daemon.broadcast(tabsOf(['t1', false], ['t2', true]));
+      await vi.waitFor(() => expect(selects()).toEqual(['tab t2']));
+    });
+
+    it('selects nothing for a headed window', async () => {
+      const { daemon, viewer } = await streaming();
+      await viewer(true);
+      await daemon.connected();
+      daemon.send(tabsOf(['t1', true]));
+      daemon.send(tabsOf(['t1', false], ['t2', true]));
+      await settled();
+      expect(selects()).toEqual([]);
+    });
+
+    it('selects once more when no frame follows, and only once', async () => {
+      const { daemon, viewer } = await streaming();
+      await viewer();
+      await daemon.connected();
+      daemon.send(tabsOf(['t1', true]));
+      daemon.send(tabsOf(['t1', false], ['t2', true]));
+      await vi.waitFor(() => expect(selects()).toEqual(['tab t2']));
+      await vi.waitFor(() => expect(selects()).toEqual(['tab t2', 'tab t2']), { timeout: RESELECT_RETRY_MS + 1000 });
+      await new Promise((resolve) => setTimeout(resolve, RESELECT_RETRY_MS + 300));
+      expect(selects()).toEqual(['tab t2', 'tab t2']);
+
+      // A frame following the select needs no retry.
+      daemon.send(tabsOf(['t1', true], ['t2', false]));
+      await vi.waitFor(() => expect(selects()).toHaveLength(3));
+      daemon.send(frame(2));
+      await new Promise((resolve) => setTimeout(resolve, RESELECT_RETRY_MS + 300));
+      expect(selects()).toEqual(['tab t2', 'tab t2', 'tab t1']);
+    }, 10_000);
   });
 
   it('sends the daemon only validated input, a paste as a key pair per character', async () => {

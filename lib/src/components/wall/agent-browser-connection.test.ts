@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { encodeViewerFrame } from '../../lib/platform/browser-automation';
-import { createAgentBrowserConnection, type AgentBrowserConnectionDeps } from './agent-browser-connection';
+import { DIAL_TIMEOUT_MS, IDLE_BACKSTOP_MS, VIEW_URL_TIMEOUT_MS, createAgentBrowserConnection, type AgentBrowserConnectionDeps } from './agent-browser-connection';
 
 class WebSocketMock {
   static instances: WebSocketMock[] = [];
   static OPEN = 1;
+  /** A dial that never opens. */
+  static hang = false;
 
   onopen: ((event: Event) => void) | null = null;
   onmessage: ((event: MessageEvent) => void) | null = null;
@@ -17,7 +19,7 @@ class WebSocketMock {
 
   constructor(public url: string) {
     WebSocketMock.instances.push(this);
-    queueMicrotask(() => this.onopen?.(new Event('open')));
+    if (!WebSocketMock.hang) queueMicrotask(() => this.onopen?.(new Event('open')));
   }
 
   send(data: string) {
@@ -49,6 +51,7 @@ const flush = async () => { for (let i = 0; i < 5; i++) await Promise.resolve();
 beforeEach(() => {
   vi.stubGlobal('WebSocket', WebSocketMock);
   WebSocketMock.instances = [];
+  WebSocketMock.hang = false;
 });
 
 afterEach(() => {
@@ -104,7 +107,9 @@ describe('viewer socket connection', () => {
       // Grants are single-use: the reconnect asked again.
       expect(viewUrl).toHaveBeenCalledTimes(2);
       expect(socket().url).toBe('ws://127.0.0.1:9/view/2');
-      // An open resets the count; a refused URL adds to it like a close.
+      // A socket that hears from the host resets the count; a refused URL
+      // adds to it like a close.
+      socket().emitMessage(JSON.stringify({ type: 'status', connected: true, screencasting: true }));
       viewUrl.mockRejectedValueOnce(new Error('the browser is being relaunched or closed'));
       socket().close();
       await vi.advanceTimersByTimeAsync(2100);
@@ -132,7 +137,7 @@ describe('viewer socket connection', () => {
 
   it('selects a newly opened tab that is not active, and not one already active on a duplicate URL', async () => {
     const selectTab = vi.fn(async () => ({ ok: true }));
-    const { connection } = connect({ selectTab, reselectActiveTab: false });
+    const { connection } = connect({ selectTab });
     await flush();
     const tab = (tabId: string, active: boolean, url = 'https://dormouse.sh/') => ({ tabId, title: 'Dormouse', url, active });
     socket().emitMessage(JSON.stringify({ type: 'tabs', tabs: [tab('t1', true)] }));
@@ -143,82 +148,89 @@ describe('viewer socket connection', () => {
     connection.dispose();
   });
 
-  describe('re-selecting the active tab, so the screencast follows it', () => {
-    const tab = (tabId: string, active: boolean, url = `https://dormouse.sh/${tabId}`) => ({ tabId, title: tabId, url, active });
-    const tabs = (...list: ReturnType<typeof tab>[]) => socket().emitMessage(JSON.stringify({ type: 'tabs', tabs: list }));
+  describe('never left without a socket, a dial or a retry', () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
 
-    async function reselecting(deps: Partial<AgentBrowserConnectionDeps> = {}) {
-      const selectTab = vi.fn(async () => ({ ok: true }));
-      const { connection } = connect({ selectTab, reselectActiveTab: true, ...deps });
-      await flush();
-      return { connection, selectTab };
-    }
+    const closesOf = (connection: ReturnType<typeof connect>['connection']) => {
+      const closes: number[] = [];
+      connection.subscribe((event) => { if (event.type === 'connection-close') closes.push(event.failures); });
+      return closes;
+    };
 
-    it('selects a popup the daemon reports active', async () => {
-      const { connection, selectTab } = await reselecting();
-      tabs(tab('t1', true));
-      expect(selectTab).not.toHaveBeenCalled();
-      tabs(tab('t1', false), tab('t2', true, ''));
-      expect(selectTab).toHaveBeenCalledExactlyOnceWith('t2');
-      // Its URL arriving is no change of the active tab.
-      tabs(tab('t1', false), tab('t2', true));
-      expect(selectTab).toHaveBeenCalledOnce();
+    it('counts a socket that opens and closes before the host says anything', async () => {
+      const { connection } = connect();
+      const closes = closesOf(connection);
+      for (let i = 0; i < 3; i++) {
+        await vi.advanceTimersByTimeAsync(10_000);
+        socket().close();
+      }
+      expect(closes).toEqual([1, 2, 3]);
+      expect(connection.snapshot().connection).toBe('failed');
       connection.dispose();
     });
 
-    it('selects the tab made active when the active one closes', async () => {
-      const { connection, selectTab } = await reselecting();
-      tabs(tab('t1', false), tab('t2', false), tab('t3', true));
-      tabs(tab('t1', true), tab('t2', false));
-      expect(selectTab).toHaveBeenCalledExactlyOnceWith('t1');
+    it('dials again after a close whose listener throws, and records the throw', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const debug = vi.fn();
+      const { connection, viewUrl } = connect({ debug });
+      // A listener hears of a close with its retry already scheduled.
+      const stages: unknown[] = [];
+      connection.subscribe((event) => {
+        if (event.type !== 'connection-close') return;
+        stages.push(connection.diagnostics().socket);
+        throw new Error('listener bug');
+      });
+      const heard: string[] = [];
+      connection.subscribe((event) => heard.push(event.type));
+      await vi.advanceTimersByTimeAsync(0);
+      socket().close();
+      expect(heard).toContain('connection-close');
+      expect(stages).toEqual(['retrying']);
+      await vi.advanceTimersByTimeAsync(2100);
+      expect(viewUrl).toHaveBeenCalledTimes(2);
+      expect(socket().url).toBe('ws://127.0.0.1:9/view/2');
+      expect(debug).toHaveBeenCalledWith('listener-threw', expect.objectContaining({ event: 'connection-close', message: 'listener bug' }));
+      expect(warn).toHaveBeenCalledOnce();
       connection.dispose();
     });
 
-    it('still selects a new inactive tab, without selecting it again once active', async () => {
-      const { connection, selectTab } = await reselecting();
-      tabs(tab('t1', true));
-      tabs(tab('t1', true), tab('t2', false));
-      expect(selectTab).toHaveBeenCalledExactlyOnceWith('t2');
-      tabs(tab('t1', false), tab('t2', true));
-      expect(selectTab).toHaveBeenCalledOnce();
+    it('gives up on a viewer URL the host never grants, and asks again', async () => {
+      let granted = 0;
+      const viewUrl = vi.fn(() => (++granted === 1 ? new Promise<string>(() => {}) : Promise.resolve('ws://127.0.0.1:9/view/2')));
+      const { connection } = connect({ viewUrl });
+      const closes = closesOf(connection);
+      await vi.advanceTimersByTimeAsync(VIEW_URL_TIMEOUT_MS);
+      expect(closes).toEqual([1]);
+      await vi.advanceTimersByTimeAsync(2100);
+      expect(socket().url).toBe('ws://127.0.0.1:9/view/2');
       connection.dispose();
     });
 
-    it('does not select again a tab the pane selected itself', async () => {
-      const { connection, selectTab } = await reselecting();
-      tabs(tab('t1', true), tab('t2', false));
-      connection.noteSelected('t2');
-      tabs(tab('t1', false), tab('t2', true));
-      expect(selectTab).not.toHaveBeenCalled();
+    it('gives up on a dial that never opens, and dials again', async () => {
+      WebSocketMock.hang = true;
+      const { connection, viewUrl } = connect();
+      const closes = closesOf(connection);
+      await vi.advanceTimersByTimeAsync(DIAL_TIMEOUT_MS);
+      expect(closes).toEqual([1]);
+      expect(WebSocketMock.instances[0].closed).toBe(true);
+      await vi.advanceTimersByTimeAsync(2100);
+      expect(viewUrl).toHaveBeenCalledTimes(2);
       connection.dispose();
     });
 
-    it('takes the first report as the baseline, unless a previous view of the stream saw another tab active', async () => {
-      const first = await reselecting();
-      tabs(tab('t1', false), tab('t2', true));
-      expect(first.selectTab).not.toHaveBeenCalled();
-      first.connection.dispose();
-      const resumed = await reselecting({ lastActiveTabId: 't1' });
-      tabs(tab('t1', false), tab('t2', true));
-      expect(resumed.selectTab).toHaveBeenCalledExactlyOnceWith('t2');
-      resumed.connection.dispose();
-    });
-
-    it('selects nothing for a popped-out window', async () => {
-      const { connection, selectTab } = await reselecting({ canSelectTabs: () => false });
-      tabs(tab('t1', true));
-      tabs(tab('t1', false), tab('t2', true));
-      expect(selectTab).not.toHaveBeenCalled();
-      connection.dispose();
-    });
-
-    it("never selects on a provider whose tab ids are list indexes that shift on a close (Playwright)", async () => {
-      const { connection, selectTab } = await reselecting({ reselectActiveTab: false });
-      tabs(tab('0', false), tab('1', false), tab('2', true));
-      // Tab 0 closes: the active page is now index 1, its id shifted.
-      tabs(tab('0', false), tab('1', true));
-      tabs(tab('0', true));
-      expect(selectTab).not.toHaveBeenCalled();
+    it('dials again on its own when a close never reaches its retry', async () => {
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const debug = vi.fn();
+      const { connection, viewUrl } = connect({ debug });
+      await vi.advanceTimersByTimeAsync(0);
+      // Whatever went wrong on the way to scheduling the retry.
+      vi.spyOn(connection as unknown as { closed: () => void }, 'closed').mockImplementationOnce(() => { throw new Error('unexpected'); });
+      expect(() => socket().close()).toThrow('unexpected');
+      expect(connection.diagnostics()).toMatchObject({ socket: 'none' });
+      await vi.advanceTimersByTimeAsync(IDLE_BACKSTOP_MS);
+      expect(viewUrl).toHaveBeenCalledTimes(2);
+      expect(debug).toHaveBeenCalledWith('watchdog-no-socket', expect.anything());
       connection.dispose();
     });
   });

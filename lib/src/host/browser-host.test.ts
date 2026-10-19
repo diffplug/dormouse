@@ -69,45 +69,32 @@ describe('createBrowserHost', () => {
     } finally { await host.close(); }
   });
 
-  it('answers diagnostics from what it holds, mid-launch too, never resolving a launch environment', async () => {
+  it('answers diagnostics read-only, mid-launch too without asking the provider, and never resolving a launch environment', async () => {
     const fake = fakeProvider();
-    fake.provider.find = async () => ({ stream: 4321 });
+    const find = vi.fn(async () => ({ stream: 4321 }));
+    fake.provider.find = find;
     const launchEnv = vi.fn(async () => ({}));
     const host = createBrowserHost({ writeClipboardText: vi.fn(), launchEnv, providers: { 'agent-browser': () => fake.provider } });
     const browser = { provider: 'agent-browser', binding: { session: 'diag' } } as const;
     try {
-      const viewer = await openViewer((await host.request({ ...browser, op: 'view', stream: 4321 })).url!);
-      await vi.waitFor(() => expect(fake.views).toHaveLength(1));
-      fake.views[0].sink.shown('t1');
-      fake.views[0].sink.frame(new Uint8Array([0xff, 0xd8, 1]));
-      const first = await host.request({ ...browser, op: 'diagnostics' });
-      expect(first.ok).toBe(true);
-      expect(first.diagnostics).toMatchObject({
-        identity: 'diag', settling: false, provider: { stream: 4321 },
-        sizing: { shownPage: 't1', fixed: null, sync: null },
-        views: [{ upstream: 'open', framesIn: 1, provisional: 1, shownPage: 't1', headed: false }],
-        closedViews: [],
-      });
+      // Read-only: the provider is asked only where the browser streams.
+      expect((await host.request({ ...browser, op: 'diagnostics' })).ok).toBe(true);
+      expect(find).toHaveBeenCalledOnce();
+      expect(fake.calls).toEqual([]);
+      expect(launchEnv).not.toHaveBeenCalled();
 
-      viewer.socket.close(4000, 'gone');
-      await vi.waitFor(async () => expect((await host.request({ ...browser, op: 'diagnostics' })).diagnostics?.closedViews).toMatchObject([
-        { stream: 4321, upstream: 'closed', closed: { code: 4000, reason: 'gone', by: 'webview' } },
-      ]));
-
-      // Mid-launch, the provider is not asked.
-      fake.provider.find = async () => ({ gone: 'not running', named: false });
+      // Mid-launch, nothing reaches the provider.
+      find.mockResolvedValue({ gone: 'not running', named: false } as never);
       fake.gate('stop diag');
       const launching = host.request({ ...browser, op: 'launch', headed: false, url: 'https://example.com/' });
       await vi.waitFor(() => expect(fake.calls).toContain('stop diag'));
-      const settling = await host.request({ ...browser, op: 'diagnostics' });
-      expect(settling.diagnostics).toMatchObject({ settling: true, provider: expect.stringContaining('not asked') });
+      find.mockClear();
+      const calls = fake.calls.length;
+      expect((await host.request({ ...browser, op: 'diagnostics' })).ok).toBe(true);
+      expect(find).not.toHaveBeenCalled();
+      expect(fake.calls).toHaveLength(calls);
       fake.release('stop diag');
       await launching;
-      // A browser no request has resolved an environment for gets none.
-      launchEnv.mockClear();
-      expect((await host.request({ provider: 'agent-browser', binding: { session: 'other' }, op: 'diagnostics' })).ok).toBe(true);
-      expect(launchEnv).not.toHaveBeenCalled();
-      expect((await host.request({ provider: 'agent-browser', binding: {}, op: 'diagnostics' })).ok).toBe(false);
     } finally { await host.close(); }
   });
 
@@ -567,17 +554,18 @@ describe('sync-to-pane', () => {
     // A popup the daemon made active, then the opener again once it closes.
     shown('t2');
     await vi.waitFor(() => expect(pane.writes()).toEqual(['viewport s1 1024x768@1', 'viewport s1 1024x768@1']));
+    // The page the Fixed write was made on, and one written since, have it.
     shown('t2');
     shown('t1');
-    await vi.waitFor(() => expect(pane.writes()).toHaveLength(3));
+    shown('t2');
     await flush();
-    expect(pane.writes()).toHaveLength(3);
+    expect(pane.writes()).toHaveLength(2);
 
     // Resize with pane owns every page's size from here.
     await pane.size(800, 600, 'e2');
     await vi.waitFor(() => expect(pane.writes().at(-1)).toBe('viewport s1 800x600@2'));
-    shown('t2');
-    await vi.waitFor(() => expect(pane.writes()).toEqual([...Array(3).fill('viewport s1 1024x768@1'), 'viewport s1 800x600@2', 'viewport s1 800x600@2']));
+    shown('t1');
+    await vi.waitFor(() => expect(pane.writes()).toEqual([...Array(2).fill('viewport s1 1024x768@1'), 'viewport s1 800x600@2', 'viewport s1 800x600@2']));
 
     // Another writer ends the sync: a page shown anew keeps its own size, and
     // never the Fixed one sync replaced.
@@ -586,9 +574,9 @@ describe('sync-to-pane', () => {
     await vi.waitFor(() => expect(pane.state()).toBe('synced'));
     pane.seen(1280, 720);
     await vi.waitFor(() => expect(pane.state()).toBe('off'));
-    shown('t1');
+    shown('t2');
     await flush();
-    expect(pane.writes()).toHaveLength(5);
+    expect(pane.writes()).toHaveLength(4);
   });
 
   for (const provider of ['agent-browser', 'playwright'] as const) {

@@ -31,23 +31,16 @@ interface BrowserProviderGui {
   cli: string;
   /** What to run from a terminal to size the viewport on a host that cannot. */
   viewportHint: string;
-  /** Whether the pane re-selects the active tab whenever the provider reports
-   *  another one active, so its screencast follows: agent-browser's daemon
-   *  leaves its screencast on the old page when its active tab changes on its
-   *  own (docs/specs/dor-browser.md → "Browser Connection"); Playwright's is
-   *  the host's own, which follows the CLI's current page, and its tab ids are
-   *  list indexes that shift when a tab closes. */
-  reselectsActiveTab: boolean;
 }
 
-function gui(provider: BrowserAutomationProvider, reselectsActiveTab: boolean): BrowserProviderGui {
+function gui(provider: BrowserAutomationProvider): BrowserProviderGui {
   const cli = `dor ${provider}`;
-  return { label: provider, cli, viewportHint: `${cli} dor-embed-size …`, reselectsActiveTab };
+  return { label: provider, cli, viewportHint: `${cli} dor-embed-size …` };
 }
 
 export const BROWSER_PROVIDER_GUI: Record<BrowserAutomationProvider, BrowserProviderGui> = {
-  'agent-browser': gui('agent-browser', true),
-  playwright: gui('playwright', false),
+  'agent-browser': gui('agent-browser'),
+  playwright: gui('playwright'),
 };
 
 /** Why a GUI entry point cannot open `provider`'s browser here. */

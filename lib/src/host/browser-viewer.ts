@@ -27,6 +27,7 @@ import {
 import { BrowserStreamGrants } from './browser-stream-guard';
 import type { CaptureClaim } from './browser-capture-budget';
 import { isLoopbackHost } from './loopback-guard';
+import { msSince } from '../lib/elapsed';
 
 /** What a provider pushes to one viewer of a live browser. */
 export interface ViewerSink {
@@ -36,9 +37,9 @@ export interface ViewerSink {
   frame(jpeg: Uint8Array, size?: ViewportSize, windowWidth?: number): void;
   /** A state change. */
   state(message: ViewerState): void;
-  /** The page the browser shows now — its active tab — by a key the
-   *  provider keeps for that page's whole life, on each change and to each
-   *  view as it subscribes: a tab id that shifts as tabs close names no page. */
+  /** The page the browser shows now — its active tab — on each change and to
+   *  each view as it subscribes, by a key its provider keeps for the page's
+   *  whole life. */
   shown(page: string): void;
   /** The browser went away on its own — its window closed, its daemon or
    *  connection died — never because the host closed it. */
@@ -252,15 +253,13 @@ export class BrowserView implements ViewerSink {
   private lastStart = -Infinity;
   private avgMs = 120;
   private timer: ReturnType<typeof setTimeout> | undefined;
-  private readonly stats = { framesIn: 0, provisional: 0, crisp: 0, captures: 0, captureMs: 0, bytesOut: 0 };
-  // The same counts over the socket's life, and when each last happened
-  // (`Date.now()`), for `diagnostics`.
-  private readonly totals = { framesIn: 0, provisional: 0, crisp: 0, captures: 0, captureFailures: 0 };
-  private readonly openedAt = Date.now();
-  private lastFrameInAt: number | undefined;
-  private lastFrameOutAt: number | undefined;
+  // Counted over the socket's life: `diagnostics` reads them, `logStats` the
+  // change since it last logged.
+  private readonly stats = { framesIn: 0, provisional: 0, crisp: 0, captures: 0, captureFailures: 0, captureMs: 0, bytesOut: 0 };
+  private logged = { ...this.stats };
+  private readonly openedAt = performance.now();
+  private lastSentAt: number | undefined;
   private lastCaptureMs: number | undefined;
-  private captureStartedAt: number | undefined;
   private closedWith: { code: number; reason: string; by: 'host' | 'webview' } | undefined;
   private statsTimer: ReturnType<typeof setInterval> | undefined;
   /** Running while a headed view's browser has no page. */
@@ -312,8 +311,6 @@ export class BrowserView implements ViewerSink {
   frame(jpeg: Uint8Array, size?: ViewportSize, windowWidth?: number): void {
     if (this.closed || this.deps.headed) return;
     this.stats.framesIn += 1;
-    this.totals.framesIn += 1;
-    this.lastFrameInAt = Date.now();
     if (size) this.size = size;
     const now = performance.now();
     if (now - this.lastChange > SETTLE_MS) this.burstStart = now;
@@ -387,8 +384,7 @@ export class BrowserView implements ViewerSink {
     const message = encodeViewerFrame({ kind, jpeg, ...(this.size ? { size: this.size } : {}), ...(windowWidth ? { windowWidth } : {}) });
     this.last = { kind, jpeg, message };
     this.stats[kind] += 1;
-    this.totals[kind] += 1;
-    this.lastFrameOutAt = Date.now();
+    this.lastSentAt = performance.now();
     this.transmit(message);
   }
 
@@ -452,8 +448,6 @@ export class BrowserView implements ViewerSink {
     const generation = this.provisionalGeneration;
     let started = this.lastStart = performance.now();
     this.stats.captures += 1;
-    this.totals.captures += 1;
-    this.captureStartedAt = Date.now();
     const claim: CaptureClaim = {
       urgent: started - this.lastInput <= URGENT_AFTER_INPUT_MS,
       wanted: () => !this.closed,
@@ -463,9 +457,8 @@ export class BrowserView implements ViewerSink {
     void this.deps.capture(claim).catch(() => undefined).then((jpeg) => {
       const elapsedMs = performance.now() - started;
       this.stats.captureMs += elapsedMs;
-      this.captureStartedAt = undefined;
       this.lastCaptureMs = Math.round(elapsedMs);
-      if (!jpeg) this.totals.captureFailures += 1;
+      if (!jpeg) this.stats.captureFailures += 1;
       if (elapsedMs > STALL_WARNING_MS) this.deps.log?.(`[browser-viewer] capture stalled ${Math.round(elapsedMs)}ms`);
       // An overdue capture timed a page load, not a capture: clamp it.
       this.avgMs = this.avgMs * 0.6 + Math.min(elapsedMs, this.overdueAfterMs()) * 0.4;
@@ -484,26 +477,26 @@ export class BrowserView implements ViewerSink {
   /** This socket as it stands, for `dor`'s diagnostics: plain JSON, its
    *  times in ms before now. */
   diagnostics(): Record<string, unknown> {
-    const now = Date.now();
-    const ago = (at: number | undefined) => (at === undefined ? null : now - at);
+    const now = performance.now();
     return {
-      openedMsAgo: now - this.openedAt,
+      openedMsAgo: msSince(this.openedAt, now),
       headed: this.deps.headed,
       upstream: this.closed ? 'closed' : this.upstream ? 'open' : 'connecting',
       capturable: this.capturable,
       shownPage: this.shownPage ?? null,
-      ...this.totals,
-      lastFrameInMsAgo: ago(this.lastFrameInAt),
-      lastFrameOutMsAgo: ago(this.lastFrameOutAt),
-      captureInFlightMs: ago(this.captureStartedAt),
+      ...this.stats,
+      captureMs: Math.round(this.stats.captureMs),
+      lastFrameInMsAgo: msSince(Number.isFinite(this.lastChange) ? this.lastChange : undefined, now),
+      lastFrameSentMsAgo: msSince(this.lastSentAt, now),
+      captureInFlightMs: this.inFlight ? msSince(this.lastStart, now) : null,
       lastCaptureMs: this.lastCaptureMs ?? null,
-      avgCaptureMs: Math.round(this.avgMs),
       ...(this.closedWith ? { closed: this.closedWith } : {}),
     };
   }
 
   private logStats(): void {
-    const { stats } = this;
+    const stats = Object.fromEntries(Object.entries(this.stats).map(([key, value]) => [key, value - this.logged[key as keyof typeof this.stats]])) as typeof this.stats;
+    this.logged = { ...this.stats };
     const lag = lagMonitor;
     this.deps.log?.(`[browser-viewer] ${JSON.stringify({
       perSecond: {
@@ -516,7 +509,6 @@ export class BrowserView implements ViewerSink {
       captureAvgMs: stats.captures ? Math.round(stats.captureMs / stats.captures) : null,
       eventLoopDelayMs: lag ? { p99: Math.round(lag.percentile(99) / 1e6), max: Math.round(lag.max / 1e6) } : null,
     })}`);
-    for (const key of Object.keys(stats) as (keyof typeof stats)[]) stats[key] = 0;
     lag?.reset();
   }
 

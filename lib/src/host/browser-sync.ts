@@ -56,10 +56,11 @@ interface Sync<B> {
 }
 
 export interface ViewportSyncDeps<B> {
-  /** Size the browser; answers once the write has landed or failed. */
-  write(browser: B, size: SyncSize, isCurrent: () => boolean): Promise<BrowserResult>;
-  /** Write a Fixed viewport again, to the page now shown. */
-  writeFixed(browser: B, size: FixedSize, isCurrent: () => boolean): Promise<BrowserResult>;
+  /** Size the browser, unless `isCurrent` no longer holds when the write's
+   *  turn comes; answers once it has landed or failed. `keepDpr`: a Fixed
+   *  size's ratio, as asked, rather than the pane's display ratio, which
+   *  only a provider that can apply it writes. */
+  write(browser: B, size: FixedSize, opts: { isCurrent: () => boolean; keepDpr?: boolean }): Promise<BrowserResult>;
   /** Send `message` to every pane viewing browser `id`. */
   report(id: string, message: Extract<ViewerState, { type: 'sync' }>): void;
   /** Whether nothing may reach browser `id` now: a launch or close of it
@@ -79,8 +80,9 @@ export function createViewportSync<B extends { id: string }>(deps: ViewportSyncD
   // syncs it.
   const shown = new Map<string, string>();
   // The Fixed viewport this host last wrote to each browser not syncing — a
-  // launch's initial one included — until a pane engages sync.
-  const fixedSizes = new Map<string, FixedSize>();
+  // launch's initial one included — until a pane engages sync, and the
+  // pages it has been written to since.
+  const fixedSizes = new Map<string, { size: FixedSize; pages: Set<string> }>();
 
   function report(s: Sync<B>): void {
     deps.report(s.browser.id, { type: 'sync', state: s.state, engagement: s.engagement });
@@ -132,7 +134,7 @@ export function createViewportSync<B extends { id: string }>(deps: ViewportSyncD
     clearMismatch(s);
     setState(s, 'applying');
     const engagement = s.engagement;
-    s.writing = deps.write(s.browser, size, () => syncs.get(id) === s && s.state !== 'off' && s.engagement === engagement)
+    s.writing = deps.write(s.browser, size, { isCurrent: () => syncs.get(id) === s && s.state !== 'off' && s.engagement === engagement })
       .catch((error: unknown): BrowserResult => ({ ok: false, error: messageOf(error) }))
       .then((result) => {
         s.writing = undefined;
@@ -207,12 +209,16 @@ export function createViewportSync<B extends { id: string }>(deps: ViewportSyncD
       pump(s);
       return;
     }
+    // A page shown again already has the size.
     const fixed = fixedSizes.get(id);
-    if (!fixed || deps.blocked(id)) return;
-    void deps.writeFixed(browser, fixed, () => fixedSizes.get(id) === fixed)
+    if (!fixed || fixed.pages.has(page) || deps.blocked(id)) return;
+    fixed.pages.add(page);
+    void deps.write(browser, fixed.size, { isCurrent: () => fixedSizes.get(id) === fixed, keepDpr: true })
       .catch((error: unknown): BrowserResult => ({ ok: false, error: messageOf(error) }))
       .then((result) => {
-        if (!result.ok) deps.log(`[browser-sync] sizing ${id}'s page shown anew failed: ${result.error ?? 'no reason given'}`);
+        if (result.ok) return;
+        fixed.pages.delete(page);
+        deps.log(`[browser-sync] sizing ${id}'s page shown anew failed: ${result.error ?? 'no reason given'}`);
       });
   }
 
@@ -231,7 +237,8 @@ export function createViewportSync<B extends { id: string }>(deps: ViewportSyncD
      *  too. An engagement chosen after the Fixed request arrived owns the
      *  browser's next size. */
     fixed(id: string, engagement: string | undefined, size: FixedSize): void {
-      fixedSizes.set(id, size);
+      const page = shown.get(id);
+      fixedSizes.set(id, { size, pages: new Set(page === undefined ? [] : [page]) });
       if (engagement === undefined) return;
       end(id, engagement);
       const s = syncs.get(id);
@@ -246,7 +253,7 @@ export function createViewportSync<B extends { id: string }>(deps: ViewportSyncD
       const s = syncs.get(id);
       return {
         shownPage: shown.get(id) ?? null,
-        fixed: fixedSizes.get(id) ?? null,
+        fixed: fixedSizes.get(id)?.size ?? null,
         sync: s ? { stream: s.stream, engagement: s.engagement, state: s.state, target: s.target, applied: s.applied ?? null, writing: !!s.writing, stale: s.stale } : null,
       };
     },

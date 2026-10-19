@@ -1,6 +1,6 @@
 import { useContext, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { hostShown, subscribeHostShown } from '../../lib/host-shown';
-import { coveredByZoom, isSeen } from '../../lib/surface-sight';
+import { coveredByZoom, isSeenObserved, type SurfaceSightObserved } from '../../lib/surface-sight';
 import { WorkspaceActiveContext, ZoomedIdContext } from './wall-context';
 
 /**
@@ -16,28 +16,17 @@ import { WorkspaceActiveContext, ZoomedIdContext } from './wall-context';
  * that stays visible in the zoom margin passes none.
  */
 export function useSurfaceVisibility(parked = false, id?: string): boolean {
-  return useSurfaceSight(parked, id).seen;
+  return isSeenObserved(useSurfaceSight(parked, id));
 }
 
-/** What `useSurfaceVisibility` judges by, each input as observed. */
-export interface SurfaceSightObserved {
-  /** `document.visibilityState` is not hidden. */
-  docVisible: boolean;
-  /** The host reports the window (VS Code: webview) shown. */
-  hostShown: boolean;
-  workspaceActive: boolean;
-  parked: boolean;
-  covered: boolean;
-}
-
-/** `useSurfaceVisibility` with the inputs it read, for a caller that records
- *  why (the browser controller's debug ring). `inputs` keeps its identity
- *  until one of them changes. */
-export function useSurfaceSight(parked = false, id?: string): { seen: boolean; inputs: SurfaceSightObserved } {
+/** What `useSurfaceVisibility` judges by, as observed, for a caller that
+ *  records why (the browser controller's debug ring). Keeps its identity
+ *  until an input changes. */
+export function useSurfaceSight(parked = false, id?: string): SurfaceSightObserved {
   const [docVisible, setDocVisible] = useState<boolean>(() => document.visibilityState !== 'hidden');
   const workspaceActive = useContext(WorkspaceActiveContext);
   const zoomedId = useContext(ZoomedIdContext);
-  const shownByHost = useSyncExternalStore(subscribeHostShown, hostShown);
+  const hostShownNow = useSyncExternalStore(subscribeHostShown, hostShown);
 
   useEffect(() => {
     const onChange = () => setDocVisible(document.visibilityState !== 'hidden');
@@ -46,12 +35,8 @@ export function useSurfaceSight(parked = false, id?: string): { seen: boolean; i
   }, []);
 
   const covered = id !== undefined && coveredByZoom(id, zoomedId);
-  const inputs = useMemo(
-    () => ({ docVisible, hostShown: shownByHost, workspaceActive, parked, covered }),
-    [docVisible, shownByHost, workspaceActive, parked, covered],
+  return useMemo(
+    () => ({ docVisible, hostShown: hostShownNow, workspaceActive, parked, covered }),
+    [docVisible, hostShownNow, workspaceActive, parked, covered],
   );
-  return {
-    seen: isSeen({ windowShown: docVisible && shownByHost, workspaceActive, parked, covered }),
-    inputs,
-  };
 }

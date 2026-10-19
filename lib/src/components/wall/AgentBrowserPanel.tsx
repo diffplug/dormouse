@@ -150,8 +150,8 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
   // debounce. A minimized screencast stays mounted but stops pulling frames.
   const sight = useSurfaceSight(parked, id);
   useEffect(() => {
-    controller.setVisible(sight.seen, sight.inputs);
-  }, [controller, sight.seen, sight.inputs]);
+    controller.setSight(sight);
+  }, [controller, sight]);
 
   // Crossing to the single-frame iframe renderer closes all but the active tab;
   // when others are open the swap is gated behind a typed confirm (overlay below).

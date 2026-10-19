@@ -22,9 +22,9 @@ Dormouse intercepts dor-embed-size to query or set the pane's browser viewport:
   dor playwright dor-embed-size 1440 900
   dor playwright dor-embed-size --preset pane-sync
 
-and dor-diagnostics to print, as JSON, everything the pane and the host know
-about its stream:
-  dor playwright --surface surface:4 dor-diagnostics
+and dor-diagnostics to print, as JSON, what the pane and the host know about
+its stream — for a pane that froze, or never showed its page:
+  dor playwright --surface surface:3 dor-diagnostics
 
 open and goto accept URLs, host:port, :port, or a terminal surface handle.
 Launch once with open, then navigate with goto: playwright's open restarts the

@@ -19,6 +19,8 @@ import { isAllowedBinaryFor } from '../../lib/agent-browser-binary';
 import { getPlatform } from '../../lib/platform';
 import { defaultBrowserViewportConfig, isBrowserViewportSetting, resolveBrowserViewport, type BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
 import { readTextFromClipboard } from '../../lib/clipboard';
+import { msSince } from '../../lib/elapsed';
+import { isSeenObserved, type SurfaceSightObserved } from '../../lib/surface-sight';
 import { isAbDebugLogsEnabled } from '../../lib/feature-flags';
 import {
   registerAgentBrowserScreen,
@@ -63,24 +65,31 @@ import {
 // don't tear down and rebuild the stream connection.
 export const HIDDEN_PARK_DELAY_MS = 1000;
 
-/** The always-on debug ring's length, per Surface. */
-const DEBUG_RING_LIMIT = 500;
-/** How often a live Surface's watchdog looks. */
-export const WATCHDOG_TICK_MS = 1000;
-/** A live pane left this long with no socket, no dial and no retry —
- *  or this long asking the host for a URL, or dialing it — is rebuilt. */
-export const WATCHDOG_NO_SOCKET_MS = 5000;
-export const WATCHDOG_URL_MS = 15000;
-export const WATCHDOG_DIAL_MS = 10000;
-/** An open stream with no frame this long after its active tab changed has
- *  the tab selected once more. */
-export const WATCHDOG_FRAME_STALL_MS = 2000;
-/** This many socket closes inside the window is a flapping connection. */
-const WATCHDOG_FLAP_CLOSES = 5;
-const WATCHDOG_FLAP_WINDOW_MS = 30000;
-
 /** One entry of a Surface's debug ring. */
 interface DebugEntry { t: number; event: string; data?: Record<string, unknown> }
+
+/**
+ * A Surface's always-on debug ring, read by `dor-diagnostics`: the newest
+ * `size` lifecycle events — phase changes, park requests, what decides sight,
+ * the viewer connection's dials, closes and retries, tab reports as a
+ * summary, dropped commands. Never per frame: frames are counted instead.
+ */
+class DebugRing {
+  private readonly entries: (DebugEntry | undefined)[];
+  private next = 0;
+  constructor(private readonly size: number) {
+    this.entries = new Array<DebugEntry | undefined>(size);
+  }
+  record(event: string, data?: Record<string, unknown>): void {
+    this.entries[this.next] = { t: Date.now(), event, ...(data ? { data } : {}) };
+    this.next = (this.next + 1) % this.size;
+  }
+  /** Oldest first, each with its age. */
+  read(now: number): { msAgo: number | null; event: string; data?: Record<string, unknown> }[] {
+    const ordered = [...this.entries.slice(this.next), ...this.entries.slice(0, this.next)];
+    return ordered.filter((entry) => entry !== undefined).map(({ t, ...rest }) => ({ msAgo: msSince(t, now), ...rest }));
+  }
+}
 
 // The high-rate `[ab-panel]` diagnostics fire per stream event, so the flag is
 // read ONCE — lazily, on the first log — and memoized: toggling needs a
@@ -279,8 +288,6 @@ export class AgentBrowserSurfaceController {
   // must not be blanked to the placeholder; only a real identity change resets
   // hasFrame.
   private lastConnectedIdentity: string | null = null;
-  /** The active tab the stream at `lastConnectedIdentity` last reported. */
-  private streamActiveTabId: string | undefined;
   /** The stream of the last live/parked phase: the browser `fixedDpr` describes. */
   private boundStream: number | undefined;
 
@@ -387,18 +394,10 @@ export class AgentBrowserSurfaceController {
   private readonly viewListeners = new Set<() => void>();
   private viewSnapshot: AgentBrowserViewSnapshot;
 
-  // --- diagnostics (`diagnostics()`; docs/specs/dor-browser.md → "Browser
-  // Connection") ---
-  private readonly ring: DebugEntry[] = [];
-  private sight: Record<string, boolean> | null = null;
-  private readonly frames = { received: 0, painted: 0, decodeFailures: 0, lastReceivedAt: undefined as number | undefined, lastPaintedAt: undefined as number | undefined };
-  private watchdogTimer: ReturnType<typeof setInterval> | undefined;
-  /** Since when a live pane's connection has looked stuck, and how. */
-  private stuckSince: { stage: string; at: number } | undefined;
-  /** The active-tab change the frame-stall watchdog already re-selected for. */
-  private stallHandledFor: number | undefined;
-  private recentCloses: number[] = [];
-  private flapLoggedAt: number | undefined;
+  // --- diagnostics (`diagnostics()`) ---
+  private readonly ring = new DebugRing(500);
+  private sight: SurfaceSightObserved | null = null;
+  private readonly frames = { received: 0, painted: 0, decodeFailures: 0, lastReceivedAt: undefined as number | undefined };
 
   constructor(id: string, params: AgentBrowserSurfaceParams) {
     this.id = id;
@@ -764,13 +763,17 @@ export class AgentBrowserSurfaceController {
     this.setHeaded(headed);
   }
 
-  /** Whether the pane is seen, and the inputs that say so, recorded when
-   *  they change. */
-  setVisible(visible: boolean, inputs?: object): void {
-    if (inputs && JSON.stringify(inputs) !== JSON.stringify(this.sight)) {
-      this.sight = { ...inputs } as Record<string, boolean>;
-      this.record('sight', { visible, ...this.sight });
-    }
+  /** What decides whether the pane is seen, as the view observes it:
+   *  recorded when it changes, and the pane's sight taken from it. */
+  setSight(sight: SurfaceSightObserved): void {
+    if (sight === this.sight) return;
+    this.sight = sight;
+    const visible = isSeenObserved(sight);
+    this.ring.record('sight', { visible, ...sight });
+    this.setVisible(visible);
+  }
+
+  setVisible(visible: boolean): void {
     if (this.visible === visible) return;
     this.visible = visible;
     this.updateParkState();
@@ -790,14 +793,12 @@ export class AgentBrowserSurfaceController {
 
   /** Enter `next`, with the viewer socket following it. */
   private setPhase(next: Phase, why?: string): void {
-    const from = this.phase.k;
-    this.phase = next;
-    this.record('phase', {
-      from, to: next.k, ...(why ? { why } : {}),
+    this.ring.record('phase', {
+      from: this.phase.k, to: next.k,
       ...('stream' in next ? { stream: next.stream } : {}),
-      ...(next.k === 'ended' && next.error ? { error: next.error } : {}),
+      ...(why || (next.k === 'ended' && next.error) ? { why: why ?? (next as { error?: string }).error } : {}),
     });
-    this.armWatchdog();
+    this.phase = next;
     // A ratio this Surface fixed describes only the browser it was set on.
     if ((next.k === 'live' || next.k === 'parked') && next.stream !== this.boundStream) {
       this.boundStream = next.stream;
@@ -825,7 +826,7 @@ export class AgentBrowserSurfaceController {
    *  is viewed at once. */
   private bind(handover?: number): void {
     if (!this.session) this.launch();
-    else if (handover) this.goLive(handover, false, 'stream handed over');
+    else if (handover) this.goLive(handover);
     else this.attach(true);
   }
 
@@ -836,14 +837,14 @@ export class AgentBrowserSurfaceController {
     const phase = this.phase;
     if (phase.k === 'relaunching' || phase.k === 'launching') return;
     if (phase.k === 'live' && phase.stream === stream) return;
-    if (phase.k === 'parked') this.setPhase({ k: 'parked', stream }, 'stream handed over');
-    else this.goLive(stream, false, 'stream handed over');
+    if (phase.k === 'parked') this.setPhase({ k: 'parked', stream });
+    else this.goLive(stream);
   }
 
-  private goLive(stream: number, resumed = false, why?: string): void {
+  private goLive(stream: number, resumed = false): void {
     this.setPhase(this.parkRequested && !this.headed
       ? { k: 'parked', stream }
-      : { k: 'live', stream, seen: false, resumed }, why);
+      : { k: 'live', stream, seen: false, resumed });
   }
 
   /**
@@ -860,7 +861,7 @@ export class AgentBrowserSurfaceController {
     const binaryPath = this.binaryPath;
     const browser = browserHandle(this.provider, { session, cwd: this.cwd, binaryPath });
     const phase: Phase = { k: 'launching', ...(session && browser ? { named: { session, browser } } : {}) };
-    this.setPhase(phase, 'launch');
+    this.setPhase(phase);
     // A launch that cannot start settles as late as one that fails, so whoever
     // created this Surface is always listening by then. A named one is sent
     // only once every close of its session this webview sent has been
@@ -888,7 +889,7 @@ export class AgentBrowserSurfaceController {
         }
         if (!res.ok || !res.session) {
           const error = res.error ?? `Could not open ${this.label}`;
-          this.setPhase({ k: 'ended', error }, 'launch failed');
+          this.setPhase({ k: 'ended', error });
           this.settleLaunch(error);
           this.reportLaunchFailure(error);
           return;
@@ -907,7 +908,7 @@ export class AgentBrowserSurfaceController {
         });
         this.launchSession = undefined;
         this.openedByHost(url);
-        if (res.stream) this.goLive(res.stream, false, 'launched');
+        if (res.stream) this.goLive(res.stream);
         else this.attach(false);
         this.settleLaunch(null);
       });
@@ -974,11 +975,11 @@ export class AgentBrowserSurfaceController {
     if (!session) { this.launch(); return; }
     const browser = this.handle();
     if (!browser) {
-      this.setPhase({ k: 'ended' }, 'provider unavailable');
+      this.setPhase({ k: 'ended' });
       return;
     }
     const phase: Phase = { k: 'attaching' };
-    this.setPhase(phase, relaunch ? 'attach, relaunching a gone browser' : 'attach');
+    this.setPhase(phase);
     const url = relaunch ? this.launchUrl() : undefined;
     // A browser this relaunches for a Surface closed meanwhile is closed by
     // the host: it runs the close after this attach, or cancels it (`close`).
@@ -991,8 +992,8 @@ export class AgentBrowserSurfaceController {
         // Only a gone daemon is relaunched at the page; a live one was only
         // found, so a navigation pending to it still has to run.
         if (res.relaunched) this.openedByHost(url);
-        if (res.ok && res.stream) this.goLive(res.stream, false, res.relaunched ? 'attach relaunched' : 'attached');
-        else this.setPhase({ k: 'ended', error: relaunch ? res.error : undefined }, `attach failed: ${res.error ?? 'no stream'}`);
+        if (res.ok && res.stream) this.goLive(res.stream);
+        else this.setPhase({ k: 'ended', error: relaunch ? res.error : undefined }, `attach answered ${res.error ?? 'no stream'}`);
       });
   }
 
@@ -1032,14 +1033,14 @@ export class AgentBrowserSurfaceController {
   private setParkRequested(parkRequested: boolean): void {
     if (this.parkRequested === parkRequested) return;
     this.parkRequested = parkRequested;
-    this.record(parkRequested ? 'park-requested' : 'unpark-requested', { phase: this.phase.k });
+    this.ring.record(parkRequested ? 'park-requested' : 'unpark-requested');
     const phase = this.phase;
     // A parked pane holds no viewer socket; the daemon/session stays alive and
     // re-broadcasts on reconnect. An unpark views the stream it parked at at
     // once, and asks the host only if that fails: the daemon may have moved
     // while no client was alive.
-    if (parkRequested && phase.k === 'live') this.setPhase({ k: 'parked', stream: phase.stream }, 'park');
-    else if (!parkRequested && phase.k === 'parked') this.goLive(phase.stream, true, 'unpark');
+    if (parkRequested && phase.k === 'live') this.setPhase({ k: 'parked', stream: phase.stream });
+    else if (!parkRequested && phase.k === 'parked') this.goLive(phase.stream, true);
   }
 
   // --- viewer socket (keyed; exists exactly while live) ---
@@ -1062,7 +1063,6 @@ export class AgentBrowserSurfaceController {
     const session = this.session!;
     const stream = phase.stream;
     const headed = this.headed;
-    const identity = `${session}:${stream}`;
     const connection = createAgentBrowserConnection({
       session,
       stream,
@@ -1074,12 +1074,8 @@ export class AgentBrowserSurfaceController {
       selectTab: (tabId) => this.driver()?.tab('select', tabId)
         ?? Promise.resolve({ ok: false, error: `${this.label} commands unavailable` }),
       canSelectTabs: () => !this.headed,
-      reselectActiveTab: BROWSER_PROVIDER_GUI[this.provider].reselectsActiveTab,
-      debug: (event, data) => this.record(event, data),
-      // An unpark views the same stream: a tab made active while parked counts
-      // as a change.
-      ...(this.lastConnectedIdentity === identity && this.streamActiveTabId ? { lastActiveTabId: this.streamActiveTabId } : {}),
       log: abDebugLog,
+      debug: (event, data) => this.ring.record(event, data),
     });
     this.connection = connection;
     this.connectionUnsub = connection.subscribe((event) => {
@@ -1097,10 +1093,9 @@ export class AgentBrowserSurfaceController {
       } else if (event.type === 'sync') {
         this.applyHostSync(event.state, event.engagement);
       } else if (event.type === 'connection-close') {
-        this.noteClose();
         // An unpark's daemon may have moved while nothing viewed it.
         if (phase.resumed) this.attach(false);
-        else if (event.failures >= 3) this.streamLost(`viewer socket failed ${event.failures} times`);
+        else if (event.failures >= 3) this.streamLost(`viewer socket closed ${event.failures} times`);
       } else if (event.type === 'status') {
         this.setStatus(event.status);
         // A browser not yet reported connected is still coming up.
@@ -1119,7 +1114,7 @@ export class AgentBrowserSurfaceController {
         if (this.headed && typeof width === 'number' && typeof height === 'number' && typeof dpr === 'number') {
           this.windowViewport = { width, height, dpr };
         }
-        if (lost) this.streamLost('status connected: false');
+        if (lost) this.streamLost('stream reported its browser gone');
       } else if (event.type === 'url') {
         // A navigation committed. `tabs` catches up only when the driving
         // command completes — for a slow page, the whole load — so record it now:
@@ -1129,7 +1124,6 @@ export class AgentBrowserSurfaceController {
       } else if (event.type === 'page') {
         this.applyObservedNavigation(event.url, event.title);
       } else if (event.type === 'tabs') {
-        this.streamActiveTabId = event.tabs.find((tab) => tab.active)?.tabId ?? this.streamActiveTabId;
         this.setTabs(event.tabs);
       } else if (event.type === 'frame') {
         this.frames.received += 1;
@@ -1144,9 +1138,9 @@ export class AgentBrowserSurfaceController {
     this.hostSynced = false;
     // Unparking reconnects to the same session/stream; the last good frame is
     // still valid, so only blank to the placeholder when the identity changed.
+    const identity = `${session}:${stream}`;
     if (this.lastConnectedIdentity !== identity) {
       this.lastConnectedIdentity = identity;
-      this.streamActiveTabId = undefined;
       this.setHasFrame(false);
     }
   }
@@ -1219,7 +1213,6 @@ export class AgentBrowserSurfaceController {
       0, 0, part.width * canvas.width / whole.width, part.height * canvas.height / whole.height);
     bitmap.close();
     this.frames.painted += 1;
-    this.frames.lastPaintedAt = Date.now();
     this.setHasFrame(true);
   }
 
@@ -1573,7 +1566,7 @@ export class AgentBrowserSurfaceController {
     // The phase first: flipping headedness while still live would reopen the
     // viewer socket on the browser the relaunch is closing.
     const phase: Phase = { k: 'relaunching' };
-    this.setPhase(phase, headed ? 'pop out' : 'pop in');
+    this.setPhase(phase);
     // A pop-in keeps the window's resolution: the screencast is fixed at it
     // once the headless browser is live.
     const windowViewport = this.windowViewport;
@@ -1592,7 +1585,7 @@ export class AgentBrowserSurfaceController {
       if (this.phase !== phase) return;
       if (res.ok && res.stream) {
         this.openedByHost(target);
-        this.goLive(res.stream, false, 'relaunched');
+        this.goLive(res.stream);
         return;
       }
       // Failed: back in the pane at the page it was on, relaunching headless
@@ -1615,7 +1608,6 @@ export class AgentBrowserSurfaceController {
    * that close.
    */
   private streamLost(why: string): void {
-    this.record('stream-lost', { why });
     const phase = this.phase;
     if (phase.k !== 'live') return;
     if (!this.headed) this.setPhase({ k: 'ended' }, why);
@@ -1653,7 +1645,7 @@ export class AgentBrowserSurfaceController {
     const browser = this.driver();
     if (!browser) {
       abDebugLog(`[ab-panel] ${label} dropped in ${this.phase.k}`);
-      this.record('drive-dropped', { label, phase: this.phase.k });
+      this.ring.record('drive-dropped', { label, phase: this.phase.k });
       return;
     }
     void act(browser).then((result) => {
@@ -1689,9 +1681,7 @@ export class AgentBrowserSurfaceController {
   }
 
   selectTab(tab: StreamTab): void {
-    if (tab.active) return;
-    if (this.driver()) this.connection?.noteSelected(tab.tabId);
-    this.drive(`tab ${tab.tabId}`, (browser) => browser.tab('select', tab.tabId));
+    if (!tab.active) this.drive(`tab ${tab.tabId}`, (browser) => browser.tab('select', tab.tabId));
   }
 
   closeTab(tab: StreamTab): void {
@@ -1752,124 +1742,37 @@ export class AgentBrowserSurfaceController {
     this.sendKey(e, 'keyDown');
   }
 
-  // --- diagnostics: the debug ring and the watchdog ---
+  // --- diagnostics ---
 
-  /** Append to the always-on debug ring, oldest dropped past its length. */
-  private record(event: string, data?: Record<string, unknown>): void {
-    this.ring.push({ t: Date.now(), event, ...(data ? { data } : {}) });
-    if (this.ring.length > DEBUG_RING_LIMIT) this.ring.splice(0, this.ring.length - DEBUG_RING_LIMIT);
-  }
-
-  /** Run the watchdog exactly while live; a cheap tick, never otherwise. */
-  private armWatchdog(): void {
-    const live = this.phase.k === 'live';
-    if (live && this.watchdogTimer === undefined) {
-      this.watchdogTimer = setInterval(() => this.watch(), WATCHDOG_TICK_MS);
-    } else if (!live && this.watchdogTimer !== undefined) {
-      clearInterval(this.watchdogTimer);
-      this.watchdogTimer = undefined;
-    }
-    if (!live) this.stuckSince = undefined;
-  }
-
-  /** A watchdog firing: into the ring with what the pane looked like, and
-   *  once to the console, which reaches the host's logs. */
-  private fire(kind: string, data: Record<string, unknown>): void {
-    const snapshot = this.webviewDiagnostics(false);
-    this.record(`watchdog-${kind}`, { ...data, snapshot });
-    console.warn(`[${this.provider}] watchdog ${kind} on ${this.id}: ${JSON.stringify(data)}`);
-  }
-
-  private watch(): void {
+  /**
+   * Everything needed to tell why this Surface's pane shows what it shows —
+   * the controller, its connection and debug ring, and the host's own record
+   * of the browser — for `dor-diagnostics`. Read-only: it starts and changes
+   * nothing.
+   */
+  async diagnostics(): Promise<{ webview: Record<string, unknown>; host: Record<string, unknown> | null }> {
+    const now = Date.now();
     const phase = this.phase;
-    if (phase.k !== 'live') return;
-    const now = Date.now();
-    const connection = this.connection;
-    const stage = connection?.socketStage();
-    // A live pane holds a socket, is dialing one, or waits to retry: anything
-    // else, or a dial that never ends, left it frozen. One nobody sees parks
-    // within HIDDEN_PARK_DELAY_MS, well inside every bound here.
-    const stuck = !connection ? 'no connection'
-      : stage!.stage === 'none' && !stage!.retryScheduled ? 'no socket, dial or retry'
-      : stage!.stage === 'requesting-url' && stage!.sinceMs > WATCHDOG_URL_MS ? 'viewer URL never answered'
-      : stage!.stage === 'connecting' && stage!.sinceMs > WATCHDOG_DIAL_MS ? 'viewer socket never opened'
-      : undefined;
-    if (!stuck) this.stuckSince = undefined;
-    else if (this.stuckSince?.stage !== stuck) this.stuckSince = { stage: stuck, at: now };
-    else if (now - this.stuckSince.at >= (stage?.stage === 'none' || !connection ? WATCHDOG_NO_SOCKET_MS : 0)) {
-      this.fire('no-socket', { why: stuck, stuckMs: now - this.stuckSince.at });
-      this.stuckSince = undefined;
-      // Rebuild the connection: a fresh URL, a fresh socket.
-      this.connectionKey = null;
-      this.reconcileConnection();
-      return;
-    }
-
-    // An open stream whose active tab changed, still with no frame: the
-    // daemon's screencast may have stayed on the old page.
-    const changedAt = connection?.lastActiveTabChange();
-    if (connection && stage?.stage === 'open' && !this.headed && this.status?.screencasting
-      && BROWSER_PROVIDER_GUI[this.provider].reselectsActiveTab
-      && changedAt !== undefined && changedAt !== this.stallHandledFor
-      && (this.frames.lastReceivedAt ?? 0) < changedAt && now - changedAt > WATCHDOG_FRAME_STALL_MS) {
-      this.stallHandledFor = changedAt;
-      this.fire('frame-stall', { sinceTabChangeMs: now - changedAt });
-      connection.reselectActiveTab('watchdog frame stall');
-    }
-  }
-
-  /** A socket close: past `WATCHDOG_FLAP_CLOSES` in the window, the
-   *  connection is flapping, which reconnects keep hiding; logged once a window. */
-  private noteClose(): void {
-    const now = Date.now();
-    this.recentCloses = [...this.recentCloses.filter((at) => now - at < WATCHDOG_FLAP_WINDOW_MS), now];
-    if (this.recentCloses.length >= WATCHDOG_FLAP_CLOSES
-      && (this.flapLoggedAt === undefined || now - this.flapLoggedAt >= WATCHDOG_FLAP_WINDOW_MS)) {
-      this.flapLoggedAt = now;
-      this.fire('flapping', { closes: this.recentCloses.length, windowMs: WATCHDOG_FLAP_WINDOW_MS });
-    }
-  }
-
-  /** The webview's side, as it stands: plain JSON, times in ms before now. */
-  private webviewDiagnostics(withRing: boolean): Record<string, unknown> {
-    const now = Date.now();
-    const ago = (at: number | undefined) => (at === undefined ? null : now - at);
-    const { k, ...phase } = this.phase as Phase & Record<string, unknown>;
-    return {
+    const webview = {
       provider: this.provider,
       session: this.session ?? null,
       headed: this.headed,
-      phase: { k, ...('named' in phase ? { named: (phase.named as { session: string }).session } : phase) },
+      phase: phase.k,
+      stream: 'stream' in phase ? phase.stream : null,
+      error: phase.k === 'ended' ? phase.error ?? null : null,
       visible: this.visible,
       viewAttached: this.sink !== null,
       parkRequested: this.parkRequested,
       sight: this.sight,
       connection: this.connection?.diagnostics() ?? null,
       status: this.status,
-      tabs: this.tabs.map((tab) => ({ tabId: tab.tabId, url: tab.url, active: tab.active })),
+      tabs: this.tabs.map(({ tabId, url, active }) => ({ tabId, url, active })),
       hasFrame: this.hasFrame,
-      frames: {
-        received: this.frames.received,
-        painted: this.frames.painted,
-        decodeFailures: this.frames.decodeFailures,
-        lastReceivedMsAgo: ago(this.frames.lastReceivedAt),
-        lastPaintedMsAgo: ago(this.frames.lastPaintedAt),
-      },
-      viewport: { setting: this.browserViewport, syncEngaged: this.syncEngaged, hostSynced: this.hostSynced, device: this.device, pane: this.paneSize },
+      frames: { ...this.frames, lastReceivedAt: undefined, lastReceivedMsAgo: msSince(this.frames.lastReceivedAt, now) },
+      viewport: { setting: this.browserViewport, syncEngaged: this.syncEngaged, hostSynced: this.hostSynced, device: this.device },
       pendingIntent: this.pendingIntent,
-      watchdog: { running: this.watchdogTimer !== undefined, stuck: this.stuckSince ? { ...this.stuckSince, at: undefined, forMs: now - this.stuckSince.at } : null },
-      ...(withRing ? { events: this.ring.map(({ t, event, data }) => ({ msAgo: now - t, event, ...(data ? { data } : {}) })) } : {}),
+      events: this.ring.read(now),
     };
-  }
-
-  /**
-   * Everything needed to tell why this Surface's pane shows what it shows —
-   * the webview's controller, connection and debug ring, and the host's own
-   * record of the browser — for `dor`'s diagnostics. Read-only: it starts and
-   * changes nothing.
-   */
-  async diagnostics(): Promise<{ webview: Record<string, unknown>; host: Record<string, unknown> | null }> {
-    const webview = this.webviewDiagnostics(true);
     const handle = this.session ? this.handle() : null;
     if (!handle) return { webview, host: null };
     const answer = await handle.diagnostics();
@@ -1921,7 +1824,7 @@ export class AgentBrowserSurfaceController {
     this.teardownPaneSizeObserver();
     this.paneSize = null;
     // Leaving `live` drops the viewer socket.
-    this.setPhase({ k: 'disposed' }, 'released');
+    this.setPhase({ k: 'disposed' });
     this.dprQuery?.removeEventListener('change', this.onDprChange);
     this.dprQuery = null;
     this.registration?.dispose();

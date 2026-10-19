@@ -159,7 +159,8 @@ function generateGuiSession(): string {
   return sessionForKey(`gui-${randomBytes(6).toString('hex')}`);
 }
 
-const TAB_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+/** A tab id no CLI reads as an option or a path. */
+export const TAB_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
 /** `value` as an optional request id: absent, valid, or `null` when invalid. */
 function optionalRequestId(value: unknown): { requestId?: string } | null {
@@ -415,8 +416,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     // Pane sync carries the display's ratio for agent-browser, whose viewport
     // writer can apply it. Playwright's context ratio is immutable here: sync
     // means CSS dimensions only, not an explicit DPR request.
-    write: (bound, size, isCurrent) => writeViewport(bound, { op: 'viewport', ...size, ...(bound.p === providers.get('playwright') ? { dpr: undefined } : {}) }, { isCurrent }),
-    writeFixed: (bound, size, isCurrent) => writeViewport(bound, { op: 'viewport', ...size }, { isCurrent }),
+    write: (bound, size, { isCurrent, keepDpr }) => writeViewport(bound, { op: 'viewport', ...size, ...(!keepDpr && bound.p === providers.get('playwright') ? { dpr: undefined } : {}) }, { isCurrent }),
     report: (id, message) => { for (const view of views.get(id) ?? []) view.state(message); },
     blocked: (id) => closed || settling.has(id),
     log,
@@ -433,6 +433,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     sync.forget(id);
     // Their browser is going: whoever still views it asks again.
     for (const view of views.get(id) ?? []) view.close(1001, 'the browser was relaunched or closed');
+    closedViews.delete(id);
     await p.release?.(b);
     return generation;
   }
@@ -630,9 +631,10 @@ export function createBrowserHost(deps: BrowserHostDeps) {
         const open = views.get(bound.id);
         open?.delete(view);
         if (open?.size === 0) views.delete(bound.id);
-        const kept = closedViews.get(bound.id) ?? [];
+        let kept = closedViews.get(bound.id);
+        if (!kept) closedViews.set(bound.id, kept = []);
         kept.push({ stream, closedAt: new Date().toISOString(), ...view.diagnostics() });
-        closedViews.set(bound.id, kept.slice(-CLOSED_VIEWS_KEPT));
+        if (kept.length > CLOSED_VIEWS_KEPT) kept.shift();
       },
       // A popped-out window is never sized with a pane.
       ...(isHeaded ? {} : { sync: sync.view(bound, stream) }),
@@ -678,11 +680,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     return {
       identity: id,
       settling: settling.has(id),
-      lifecycleBusy: lifecycle.has(id),
-      generation: generations.get(id) ?? 0,
-      headedTracked: headed.has(id),
       viewportWritePending: viewportWrites.has(id),
-      captureRunning: captures.running(id),
       provider: found,
       sizing: sync.diagnostics(id),
       views: [...views.get(id) ?? []].map((view) => view.diagnostics()),

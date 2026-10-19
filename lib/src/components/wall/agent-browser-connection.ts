@@ -1,9 +1,21 @@
 import { decodeViewerFrame, type BrowserResult, type ViewerFrame, type ViewerState } from '../../lib/platform/browser-automation';
 import { type AgentBrowserTab, parseAgentBrowserTabs } from '../../lib/agent-browser-tab';
+import { messageOf } from '../../lib/errors';
 
 // Re-exported so existing importers keep resolving the tab type/parser from here.
 export type { AgentBrowserTab };
 export { parseAgentBrowserTabs };
+
+/** How long the host may take to grant a viewer URL, and the socket to open
+ *  on it, before the attempt counts as a close and is retried. */
+export const VIEW_URL_TIMEOUT_MS = 15_000;
+export const DIAL_TIMEOUT_MS = 10_000;
+/** How long the connection may sit with nothing in flight — no URL asked, no
+ *  dial, no retry waiting — before it dials again on its own. Every path
+ *  leaves `none` at once; this backstop covers one that does not, which is
+ *  what a frozen pane once showed: phase `live`, yet 25 s of lsof sampling
+ *  found no viewer socket and no reconnect (2026-10-18). Keep it. */
+export const IDLE_BACKSTOP_MS = 5_000;
 
 export type AgentBrowserConnectionState = 'connecting' | 'open' | 'closed' | 'failed';
 
@@ -43,9 +55,10 @@ export type AgentBrowserConnectionEvent =
   /** A frame to paint: provisional (CSS resolution) or crisp. */
   | ({ type: 'frame' } & ViewerFrame);
 
-/** Where the socket stands: none (a retry is waiting, or the connection is
- *  disposed), asking the host for a URL, dialing it, or open. */
-export type AgentBrowserSocketStage = 'none' | 'requesting-url' | 'connecting' | 'open';
+/** Where the socket stands: asking the host for a URL, dialing it, open,
+ *  waiting to retry — or `none`, nothing in flight, which no path leaves it
+ *  in for long (`IDLE_BACKSTOP_MS`). */
+export type AgentBrowserSocketStage = 'none' | 'requesting-url' | 'connecting' | 'open' | 'retrying';
 
 export interface AgentBrowserConnectionDeps {
   session: string;
@@ -58,14 +71,6 @@ export interface AgentBrowserConnectionDeps {
   /** Whether a newly observed inactive tab is selected for the pane: only a
    *  headless view, never a popped-out window the user drives. */
   canSelectTabs?: () => boolean;
-  /** Re-select the active tab whenever another one is reported active, which
-   *  rebinds a screencast that stayed on the page before
-   *  (`BROWSER_PROVIDER_GUI` → `reselectsActiveTab`). */
-  reselectActiveTab?: boolean;
-  /** The active tab the last connection to this same stream saw, against which
-   *  the first report counts as a change: a new viewer does not rebind the
-   *  daemon's screencast either. */
-  lastActiveTabId?: string;
   log?: (message: string) => void;
   /** Record a lifecycle event in the Surface's always-on debug ring. */
   debug?: (event: string, data?: Record<string, unknown>) => void;
@@ -84,20 +89,19 @@ export function createAgentBrowserConnection(deps: AgentBrowserConnectionDeps): 
 export class AgentBrowserConnection {
   private readonly listeners = new Set<(event: AgentBrowserConnectionEvent) => void>();
   private socket: WebSocket | null = null;
-  private retryTimer: ReturnType<typeof setTimeout> | undefined;
-  private retryAt: number | undefined;
-  /** When the stage the socket is in began (`Date.now()`). */
+  /** The one timer the stage runs: a retry's delay, a URL or dial deadline,
+   *  or the idle backstop. */
+  private stageTimer: ReturnType<typeof setTimeout> | undefined;
   private stage: { stage: AgentBrowserSocketStage; since: number } = { stage: 'none', since: Date.now() };
-  /** When the reported active tab last changed, past the baseline. */
-  private activeTabChangedAt: number | undefined;
+  /** Bumped by each dial: a late answer or event of an older one is dropped. */
+  private attempt = 0;
   private disposed = false;
+  /** Closes since a socket last proved healthy — its first message, not its
+   *  open, so a socket that opens and closes at once still counts. */
   private failures = 0;
+  private healthy = false;
+  private readonly warnedThrows = new Set<string>();
   private knownTabIds = new Set<string>();
-  /** The active tab of the last report, or the one `lastActiveTabId` seeded. */
-  private activeTabId: string | undefined;
-  /** A select this connection issued, or was told of, that the daemon has yet
-   *  to report active: the active-tab change it causes is not re-selected. */
-  private selectIssued: string | undefined;
   private pendingNewTab: { tabId: string; initialUrl: string; seenAtMs: number } | null = null;
   private snap: AgentBrowserSnapshot;
 
@@ -109,7 +113,6 @@ export class AgentBrowserConnection {
       tabs: [],
       status: null,
     };
-    this.activeTabId = deps.lastActiveTabId;
     void this.connect();
   }
 
@@ -122,31 +125,15 @@ export class AgentBrowserConnection {
     return this.snap;
   }
 
-  /** The socket's stage and how long it has been in it: what the
-   *  controller's watchdog judges a stuck connection by. */
-  socketStage(): { stage: AgentBrowserSocketStage; sinceMs: number; retryScheduled: boolean } {
-    return { stage: this.stage.stage, sinceMs: Date.now() - this.stage.since, retryScheduled: this.retryTimer !== undefined };
-  }
-
-  /** When the reported active tab last changed, past a socket's baseline. */
-  lastActiveTabChange(): number | undefined {
-    return this.activeTabChangedAt;
-  }
-
   /** The connection as it stands, for `dor`'s diagnostics. */
   diagnostics(): Record<string, unknown> {
-    const now = Date.now();
     return {
       stream: this.deps.stream,
       state: this.snap.connection,
       socket: this.stage.stage,
-      socketStageMs: now - this.stage.since,
-      retryInMs: this.retryAt === undefined ? null : Math.max(0, this.retryAt - now),
+      socketStageMs: Date.now() - this.stage.since,
       failures: this.failures,
       lastError: this.snap.lastError ?? null,
-      activeTabId: this.activeTabId ?? null,
-      activeTabChangedMsAgo: this.activeTabChangedAt === undefined ? null : now - this.activeTabChangedAt,
-      selectIssued: this.selectIssued ?? null,
     };
   }
 
@@ -157,21 +144,37 @@ export class AgentBrowserConnection {
 
   dispose(): void {
     this.disposed = true;
-    if (this.retryTimer !== undefined) clearTimeout(this.retryTimer);
-    this.retryTimer = undefined;
-    this.retryAt = undefined;
-    this.setStage('none');
+    clearTimeout(this.stageTimer);
+    this.stageTimer = undefined;
     const ws = this.socket;
     this.socket = null;
     ws?.close();
   }
 
-  private setStage(stage: AgentBrowserSocketStage): void {
+  /** Enter `stage`, its one timer (`after`) replacing the last. */
+  private setStage(stage: AgentBrowserSocketStage, after?: { ms: number; run: () => void }): void {
+    clearTimeout(this.stageTimer);
+    this.stageTimer = after && !this.disposed ? setTimeout(after.run, after.ms) : undefined;
     this.stage = { stage, since: Date.now() };
   }
 
+  /**
+   * Each listener alone: one that throws must not keep the next from hearing
+   * the event, nor the connection from the work after it — a throw out of a
+   * close's listeners once could leave a pane with no socket and no retry.
+   */
   private emit(event: AgentBrowserConnectionEvent): void {
-    for (const listener of this.listeners) listener(event);
+    for (const listener of this.listeners) {
+      try {
+        listener(event);
+      } catch (error) {
+        this.debug('listener-threw', { event: event.type, message: messageOf(error), stack: error instanceof Error ? error.stack : undefined });
+        if (!this.warnedThrows.has(event.type)) {
+          this.warnedThrows.add(event.type);
+          console.warn(`[ab-panel] a '${event.type}' listener threw:`, error);
+        }
+      }
+    }
   }
 
   private debug(event: string, data?: Record<string, unknown>): void {
@@ -186,37 +189,67 @@ export class AgentBrowserConnection {
     this.snap = { ...this.snap, ...next };
   }
 
+  /** Ask the host for a URL and dial it, each bounded: a deadline that
+   *  passes, like anything that throws on the way, is a close, retried. */
   private async connect(): Promise<void> {
-    this.retryTimer = undefined;
-    this.retryAt = undefined;
-    this.setStage('requesting-url');
-    this.debug('view-url-request');
+    if (this.disposed) return;
+    const attempt = ++this.attempt;
+    const current = () => !this.disposed && this.attempt === attempt;
     const asked = Date.now();
+    this.setStage('requesting-url', { ms: VIEW_URL_TIMEOUT_MS, run: () => this.abandon(attempt, 'the host granted no viewer URL in time') });
+    this.debug('view-url-request');
     let url: string;
     try {
       url = await this.deps.viewUrl();
     } catch (err) {
-      if (this.disposed) return;
-      const reason = err instanceof Error ? err.message : String(err);
+      if (!current()) return;
+      const reason = messageOf(err);
       this.debug('view-url-error', { error: reason, ms: Date.now() - asked });
       this.closed({ code: 0, reason, wasClean: false });
       return;
     }
-    if (this.disposed) return;
+    if (!current()) return;
+    try {
+      this.dial(url, attempt);
+      this.debug('connect', { ms: Date.now() - asked });
+    } catch (err) {
+      this.abandon(attempt, `could not dial the viewer: ${messageOf(err)}`);
+    }
+  }
+
+  /** Give up on attempt `attempt`: its socket, if any, is dropped unheard. */
+  private abandon(attempt: number, reason: string): void {
+    if (this.disposed || this.attempt !== attempt) return;
+    this.attempt += 1;
+    const socket = this.socket;
+    this.socket = null;
+    if (socket) {
+      socket.onopen = socket.onmessage = socket.onerror = socket.onclose = null;
+      socket.close();
+    }
+    this.closed({ code: 0, reason, wasClean: false });
+  }
+
+  private dial(url: string, attempt: number): void {
     this.log(`[ab-panel] connecting viewer ${JSON.stringify({ stream: this.deps.stream })}`);
-    this.debug('connect', { ms: Date.now() - asked });
-    this.setStage('connecting');
+    this.setStage('connecting', { ms: DIAL_TIMEOUT_MS, run: () => this.abandon(attempt, 'the viewer socket did not open in time') });
+    this.healthy = false;
     const socket = this.socket = new WebSocket(url);
     socket.binaryType = 'arraybuffer';
     socket.onopen = () => {
-      this.failures = 0;
       this.setStage('open');
       this.patch({ connection: 'open' });
       this.log(`[ab-panel] viewer open ${JSON.stringify({ stream: this.deps.stream })}`);
       this.debug('open');
       this.emit({ type: 'connection-open', stream: this.deps.stream });
     };
-    socket.onmessage = (ev) => this.handleMessage(ev.data);
+    socket.onmessage = (ev) => {
+      if (!this.healthy) {
+        this.healthy = true;
+        this.failures = 0;
+      }
+      this.handleMessage(ev.data);
+    };
     socket.onerror = () => {
       this.patch({ lastError: 'viewer socket error' });
       this.log(`[ab-panel] viewer error ${JSON.stringify({ stream: this.deps.stream })}`);
@@ -226,25 +259,34 @@ export class AgentBrowserConnection {
     socket.onclose = (ev) => {
       this.socket = null;
       if (this.disposed) return;
-      this.setStage('none');
+      // Nothing in flight until `closed` schedules the retry: the backstop
+      // covers a close that never gets that far.
+      this.setStage('none', { ms: IDLE_BACKSTOP_MS, run: () => this.backstop() });
       this.closed({ code: ev.code, reason: ev.reason, wasClean: ev.wasClean });
     };
   }
 
-  /** The socket closed, or could not be asked for: count it, and dial again. */
+  /** The socket closed, or could not be asked for: count it, and dial again
+   *  — scheduled before anyone hears of the close, so nothing a listener does
+   *  can leave the connection with no retry. */
   private closed({ code, reason, wasClean }: { code: number; reason: string; wasClean: boolean }): void {
     this.failures += 1;
     this.patch({ connection: this.failures >= 3 ? 'failed' : 'closed' });
+    const delayMs = Math.min(1000 * 2 ** this.failures, 10000);
+    this.setStage('retrying', { ms: delayMs, run: () => void this.connect() });
     const data = { stream: this.deps.stream, failures: this.failures, code, reason, wasClean };
     this.log(`[ab-panel] viewer close ${JSON.stringify(data)}`);
-    this.debug('close', data);
+    this.debug('close', { ...data, retryInMs: delayMs });
     this.emit({ type: 'connection-close', ...data });
-    if (this.disposed) return;
-    const delayMs = Math.min(1000 * 2 ** this.failures, 10000);
-    this.setStage('none');
-    this.retryAt = Date.now() + delayMs;
-    this.debug('retry', { delayMs });
-    this.retryTimer = setTimeout(() => void this.connect(), delayMs);
+  }
+
+  /** Nothing in flight for `IDLE_BACKSTOP_MS`: record it, warn once, and
+   *  dial again. */
+  private backstop(): void {
+    if (this.disposed || this.stage.stage !== 'none') return;
+    this.debug('watchdog-no-socket', { idleMs: Date.now() - this.stage.since, failures: this.failures });
+    console.warn(`[ab-panel] viewer for stream ${this.deps.stream} sat with no socket, dial or retry; dialing again`);
+    void this.connect();
   }
 
   private handleMessage(raw: unknown): void {
@@ -294,101 +336,49 @@ export class AgentBrowserConnection {
       return;
     }
 
-    // A tab selected for being new is where the pane is going: the active
-    // tab this report names is not selected over it.
-    const selectedNew = this.maybeSelectNewTab(next, previousTabs);
-    this.maybeReselectActiveTab(next, !selectedNew);
+    this.maybeSelectNewTab(next, previousTabs);
     this.knownTabIds = new Set(next.map((t) => t.tabId));
     const sig = JSON.stringify({ stream: this.deps.stream, t: next.map((t) => `${t.tabId}:${t.active ? 'A' : '-'}:${t.url}`) });
     this.log(`[ab-panel] tabs msg ${sig}`);
-    this.debug('tabs', { tabs: next });
+    const active = next.find((t) => t.active);
+    this.debug('tabs', { count: next.length, active: active?.tabId ?? null, url: active?.url ?? null });
     this.patch({ tabs: next });
     this.emit({ type: 'tabs', tabs: next, previousTabs });
   }
 
-  /** A select of `tabId` made elsewhere (the pane's tab strip): the active-tab
-   *  change it causes is not selected again. */
-  noteSelected(tabId: string): void {
-    this.selectIssued = tabId;
-  }
-
-  /** Select the active tab again, rebinding the daemon's screencast to it;
-   *  false when there is none to select or selecting is not this pane's. */
-  reselectActiveTab(reason: string): boolean {
-    const active = this.snap.tabs.find((t) => t.active);
-    if (!active || !this.canSelect()) return false;
-    this.select(active, reason);
-    return true;
-  }
-
-  private canSelect(): boolean {
-    return this.deps.canSelectTabs?.() ?? true;
-  }
-
-  private select(tab: AgentBrowserTab, reason: string): void {
-    if (!this.canSelect()) return;
-    this.selectIssued = tab.tabId;
-    this.log(`[ab-panel] selecting tab ${JSON.stringify({ tabId: tab.tabId, url: tab.url, reason })}`);
-    this.debug('select-tab', { tabId: tab.tabId, url: tab.url, reason });
-    this.deps.selectTab?.(tab.tabId).then((result) => {
-      if (!result.ok) this.log(`[agent-browser] tab ${tab.tabId} failed: ${result.error ?? 'no reason given'}`);
-    }).catch((err) => this.log(`[agent-browser] tab ${tab.tabId} failed: ${err instanceof Error ? err.message : String(err)}`));
-  }
-
-  /**
-   * agent-browser's daemon moves its screencast only on its own tab switch:
-   * an active tab it changed by itself — a popup it reports active, a closed
-   * active tab another replaced — leaves the stream on the old page, sending
-   * nothing. Selecting the new active tab rebinds it. A change this connection
-   * selected, or was told of, is not selected again, and a select of the tab
-   * already active changes nothing, so no report answers with another.
-   */
-  private maybeReselectActiveTab(next: AgentBrowserTab[], allowed: boolean): void {
-    const active = next.find((t) => t.active);
-    const before = this.activeTabId;
-    if (!active) return;
-    this.activeTabId = active.tabId;
-    const changed = before !== undefined && before !== active.tabId;
-    if (changed) this.activeTabChangedAt = Date.now();
-    if (this.selectIssued === active.tabId) {
-      this.selectIssued = undefined;
-      return;
-    }
-    if (!changed || !allowed || !this.deps.reselectActiveTab) return;
-    this.debug('active-tab-changed', { from: before, to: active.tabId });
-    this.select(active, 'active-tab-changed');
-  }
-
-  /** Whether it selected a tab. */
-  private maybeSelectNewTab(next: AgentBrowserTab[], previousTabs: AgentBrowserTab[]): boolean {
-    let selected = false;
-    const select = (tab: AgentBrowserTab, reason: string) => {
-      this.select(tab, reason);
-      selected = true;
+  private maybeSelectNewTab(next: AgentBrowserTab[], previousTabs: AgentBrowserTab[]): void {
+    const canSelect = this.deps.canSelectTabs?.() ?? true;
+    const maybeSelectTab = (tab: AgentBrowserTab, reason: string) => {
+      if (!canSelect) return;
+      this.log(`[ab-panel] selecting tab ${JSON.stringify({ tabId: tab.tabId, url: tab.url, reason })}`);
+      this.debug('select-tab', { tabId: tab.tabId, url: tab.url, reason });
+      this.deps.selectTab?.(tab.tabId).then((result) => {
+        if (!result.ok) this.log(`[agent-browser] tab ${tab.tabId} failed: ${result.error ?? 'no reason given'}`);
+      }).catch((err) => this.log(`[agent-browser] tab ${tab.tabId} failed: ${messageOf(err)}`));
     };
+
     const pending = this.pendingNewTab;
     if (pending) {
       const tab = next.find((t) => t.tabId === pending.tabId);
       if (!tab) {
         this.pendingNewTab = null;
       } else if (tab.url !== pending.initialUrl) {
-        if (!tab.active) select(tab, 'new-tab-destination');
+        if (!tab.active) maybeSelectTab(tab, 'new-tab-destination');
         else this.log(`[ab-panel] new tab destination observed ${JSON.stringify({ tabId: tab.tabId, url: tab.url, elapsedMs: Math.round(performance.now() - pending.seenAtMs) })}`);
         this.pendingNewTab = null;
       }
     }
 
-    if (this.knownTabIds.size === 0) return selected;
+    if (this.knownTabIds.size === 0) return;
     const fresh = next.filter((t) => !this.knownTabIds.has(t.tabId));
     const newest = fresh[fresh.length - 1];
-    if (!newest) return selected;
+    if (!newest) return;
     const duplicateUrl = !!newest.url && previousTabs.some((tab) => tab.url === newest.url);
-    if (!newest.active) select(newest, 'new-tab-inactive');
+    if (!newest.active) maybeSelectTab(newest, 'new-tab-inactive');
     else if (duplicateUrl) {
       this.pendingNewTab = { tabId: newest.tabId, initialUrl: newest.url, seenAtMs: performance.now() };
       this.log(`[ab-panel] new tab provisional ${JSON.stringify({ tabId: newest.tabId, url: newest.url })}`);
       this.debug('new-tab-provisional', { tabId: newest.tabId, url: newest.url });
     }
-    return selected;
   }
 }
