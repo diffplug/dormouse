@@ -109,10 +109,17 @@ async function readClipboardFilePaths(runtime = {}) {
   return readFilePathsLinux(runtime);
 }
 
+/** pbcopy and pbpaste encode by the locale, and an app launched from Finder or
+ *  the Dock inherits launchd's environment, which sets none: without this they
+ *  mangle non-ASCII text. */
+function macUtf8Env(runtime) {
+  return { ...(runtime.env || process.env), LC_CTYPE: 'UTF-8' };
+}
+
 async function readTextMac(runtime) {
   const exec = runtime.exec || execFileP;
   try {
-    const { stdout } = await exec('pbpaste', [], { maxBuffer: MAX_BUFFER });
+    const { stdout } = await exec('pbpaste', [], { maxBuffer: MAX_BUFFER, env: macUtf8Env(runtime) });
     return stdout;
   } catch {
     return '';
@@ -275,15 +282,16 @@ async function readClipboardImageAsFilePath(runtime = {}) {
 }
 
 // Write text to the OS clipboard via the platform's native CLI (stdin), mirroring
-// the native reads above. Backs the agent-browser host's edit channel: copy/cut
-// land the grabbed selection on the user's real clipboard (the VS Code host uses
-// vscode.env.clipboard.writeText for the same purpose).
-function writeViaStdin(cmd, args, text, runtime) {
+// the native reads above. Backs standalone's copies on macOS
+// (`write_clipboard_text`) and the agent-browser host's edit channel, whose
+// copy/cut land the grabbed selection on the user's real clipboard (the VS Code
+// host uses vscode.env.clipboard.writeText for both).
+function writeViaStdin(cmd, args, text, runtime, env) {
   const spawnFn = runtime.spawn || spawn;
   return new Promise((resolve, reject) => {
     let child;
     try {
-      child = spawnFn(cmd, args, { stdio: ['pipe', 'ignore', 'ignore'], windowsHide: true });
+      child = spawnFn(cmd, args, { stdio: ['pipe', 'ignore', 'ignore'], windowsHide: true, ...(env ? { env } : {}) });
     } catch (err) {
       reject(err);
       return;
@@ -305,8 +313,10 @@ function writeViaStdin(cmd, args, text, runtime) {
 async function writeClipboardText(text, runtime = {}) {
   const platform = runtime.platform || process.platform;
   const env = runtime.env || process.env;
-  if (platform === 'darwin') return writeViaStdin('pbcopy', [], text, runtime);
-  if (platform === 'win32') return writeViaStdin(windowsSystemPath(env, 'System32', 'clip.exe'), [], text, runtime);
+  if (platform === 'darwin') return writeViaStdin('pbcopy', [], text, runtime, macUtf8Env(runtime));
+  // clip.exe reads stdin in the console code page unless it opens with a
+  // UTF-16LE byte-order mark, which keeps non-ASCII text intact.
+  if (platform === 'win32') return writeViaStdin(windowsSystemPath(env, 'System32', 'clip.exe'), [], Buffer.from(`\ufeff${text}`, 'utf16le'), runtime);
   const wayland = Boolean(env.WAYLAND_DISPLAY);
   const attempts = wayland
     ? [['wl-copy', []], ['xclip', ['-selection', 'clipboard']]]

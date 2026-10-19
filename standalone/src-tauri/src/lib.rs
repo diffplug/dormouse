@@ -45,8 +45,8 @@ use process_wrap::std::ProcessGroup;
 #[cfg(windows)]
 use windows::Win32::System::Threading::CREATE_NO_WINDOW;
 
-// Native Win32 clipboard reads, so a paste never spawns a console-window-popping
-// PowerShell child. macOS/Linux keep the sidecar path (no console flicker there).
+// Native Win32 clipboard reads and text write, so neither spawns a
+// console-window-popping child. macOS/Linux keep the sidecar path (no console flicker there).
 #[cfg(windows)]
 mod clipboard_win;
 
@@ -1156,9 +1156,8 @@ fn set_macos_dock_icon() {
     }
 }
 
-fn read_log_tail(max_bytes: usize) -> Result<String, String> {
-    let path = log_path();
-    File::open(path)
+fn read_log_tail(path: &Path, max_bytes: usize) -> Result<String, String> {
+    open_log(path, OpenOptions::new().read(true))
         .and_then(|mut file| log_tail::read_utf8_tail(&mut file, max_bytes))
         .map_err(|e| format!("read {}: {e}", path.display()))
 }
@@ -1848,6 +1847,33 @@ fn read_clipboard_text(
     }
 }
 
+// Natively on Windows, like the reads; elsewhere through the sidecar. The
+// adapters call it on macOS and Windows only (`nativeClipboardWriter`).
+#[tauri::command(async)]
+fn write_clipboard_text(
+    state: tauri::State<'_, SidecarState>,
+    text: String,
+) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let _ = &state;
+        return clipboard_win::write_text(&text);
+    }
+    #[cfg(not(windows))]
+    {
+        let response = request_from_sidecar_timeout(
+            &state,
+            "clipboard:writeText",
+            serde_json::json!({ "text": text }),
+            Duration::from_secs(5),
+        )?;
+        match response.get("error").and_then(|v| v.as_str()) {
+            Some(error) => Err(error.to_string()),
+            None => Ok(()),
+        }
+    }
+}
+
 /// docs/specs/standalone.md §UI watchdog.
 type UiWatchdog = Mutex<ui_watchdog::Watchdog>;
 
@@ -1977,7 +2003,7 @@ fn restart_hung_webviews(app: &AppHandle, labels: &[String]) {
 
 #[tauri::command(async)]
 fn read_update_log() -> Result<String, String> {
-    read_log_tail(10_000)
+    read_log_tail(log_path(), 10_000)
 }
 
 // --- Per-window session persistence (docs/specs/standalone.md §Persistence) ---
@@ -4898,6 +4924,7 @@ pub fn run() {
             read_clipboard_file_paths,
             read_clipboard_image_as_file_path,
             read_clipboard_text,
+            write_clipboard_text,
             read_update_log,
             load_session,
             save_session,
@@ -6433,8 +6460,8 @@ mod tests {
         assert_eq!(mode(&fresh), 0o600);
     }
 
-    /// A symlink planted at the log's name is refused by both opens, so neither
-    /// truncates nor appends to whatever it points at.
+    /// A symlink planted at the log's name is refused by every open, so none
+    /// truncates, appends to, or reads back whatever it points at.
     #[cfg(unix)]
     #[test]
     fn log_open_refuses_a_planted_symlink() {
@@ -6446,6 +6473,7 @@ mod tests {
 
         assert!(super::open_log(&path, fs::OpenOptions::new().create(true).write(true).truncate(true)).is_err());
         assert!(super::open_log(&path, fs::OpenOptions::new().create(true).append(true)).is_err());
+        assert!(super::read_log_tail(&path, 10_000).is_err());
         assert_eq!(fs::read(&victim).unwrap(), b"keep");
     }
 

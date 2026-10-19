@@ -24,14 +24,14 @@ Pinned by `hosted/server/tests/boundary.test.ts`, `hosted/server/tests/workers.t
 
 | Guarantee | Feature | Pinned by |
 | --- | --- | --- |
-| **A Hosted account signs you in and grants nothing more.** Login never mints terminal access or stands in for pairing and presence; only an entitled account reaches managed voice, which never logs what you say. | Hosted phone | `hosted/server/tests/policy.test.ts`, `hosted/server/tests/workers.test.ts` |
+| **A Hosted account signs you in and grants nothing more.** Login never mints terminal access or stands in for pairing and presence; only an entitled account reaches managed voice, whose Worker neither logs nor stores the text it speaks. | Hosted phone | `hosted/server/tests/policy.test.ts`, `hosted/server/tests/workers.test.ts` |
 
 - **FAIL IF** `S83` the consumer changes `authPolicy` away from explicit linking or multiple independent logins, or accepts an explicit connection callback after its initiating login was revoked; inspect `hosted/server/policy.ts` and the packed adapter.
 - **FAIL IF** `S84` an unused provider credential enables login, an unknown provider name is accepted, or incomplete enabled credentials silently degrade; inspect `providerBindings` in `hosted/server/policy.ts`.
-- **FAIL IF** `S85` speak or a voice token's mint admits an account the entitlement (`docs/specs/hosted.md` -> "Entitlement") does not, without rechecking per request, stores a voice token other than as its SHA-256, accepts one idle past `VOICE_TOKEN_IDLE_DAYS`, lets a bearer delete any token but its own, logs speak text, forwards an ElevenLabs error body or status, or lets a binding or request field choose the upstream origin, path prefix, model, or format, or a voice outside `MANAGED_VOICES`; or the relay mints a voice token without redeeming a voice-purpose approval, or remote enrollment mints voice credentials; inspect `hosted/server/entitlement.ts`, `hosted/server/voice.ts`, and `hosted/server/relay-api.ts`.
+- **FAIL IF** `S85` speak or a voice token's mint admits an account the entitlement (`docs/specs/hosted.md` -> "Entitlement") does not, without rechecking per request, stores a voice token other than as its SHA-256, accepts one idle past `VOICE_TOKEN_IDLE_DAYS`, lets a bearer delete any token but its own, logs or stores speak text, forwards an ElevenLabs error body or status, or lets a binding or request field choose the upstream origin, path prefix, model, or format, or a voice outside `MANAGED_VOICES`; or the relay mints a voice token without redeeming a voice-purpose approval, or remote enrollment mints voice credentials; inspect `hosted/server/entitlement.ts`, `hosted/server/voice.ts`, and `hosted/server/relay-api.ts`.
 - **FAIL IF** `S86` Hosted account login mints a Burrow ACL grant or substitutes for the existing encrypted pairing/presence proof. The one-time rendezvous carries only handshake ciphertext and authorizes nothing; the ends' handshake and the laptop's confirmation do.
 
-Pinned by `hosted/server/tests/workers.test.ts` and `hosted/server/tests/policy.test.ts`.
+What ElevenLabs keeps of it is `docs/specs/security.md` -> "What is not defended". Pinned by `hosted/server/tests/workers.test.ts` and `hosted/server/tests/policy.test.ts`.
 
 ## Rendezvous boundary
 

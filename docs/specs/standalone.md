@@ -30,11 +30,11 @@ Source of truth: `bootstrap` in `standalone/src/main.tsx`, whose comments carry 
 
 Source of truth: `standalone/src-tauri/src/lib.rs` (`SidecarState`, the `#[tauri::command]` set) and `standalone/sidecar/main.js` (the dispatch table); `TauriAdapter` in `standalone/src/tauri-adapter.ts`.
 
-**stdout is the protocol**: sidecar diagnostics go to stderr. Most invokes are thin sidecar forwarders; two carve-outs are handled in Rust: `load_session` / `save_session` (§Persistence) and the Windows `clipboard` readers (`clipboard_win.rs`; `docs/specs/mouse-and-clipboard.md` §8.6).
+**stdout is the protocol**: sidecar diagnostics go to stderr. Most invokes are thin sidecar forwarders; two carve-outs are handled in Rust: `load_session` / `save_session` (§Persistence) and the Windows clipboard reads and text write (`clipboard_win.rs`; `docs/specs/mouse-and-clipboard.md` §8.6).
 
 **Managed-voice audio is the one byte payload that rides the pipe**, as base64 in its `voice:result` line (rationale; `docs/specs/transport.md` → "Managed voice").
 
-**A blocking command must be async** — `#[tauri::command(async)]` or a plain `#[tauri::command]` over an `async fn`. Tauri runs a sync command on the main thread, where waiting on the sidecar or the arrival-journal lock stops the webview painting for the whole round trip (rationale). **The three clipboard readers included**: their non-Windows branches round-trip through the sidecar. A source-scanning test in `lib.rs` enforces it.
+**A blocking command must be async** — `#[tauri::command(async)]` or a plain `#[tauri::command]` over an `async fn`. Tauri runs a sync command on the main thread, where waiting on the sidecar or the arrival-journal lock stops the webview painting for the whole round trip (rationale). **The clipboard commands included**: their non-Windows branches round-trip through the sidecar. A source-scanning test in `lib.rs` enforces it.
 
 `pty_graceful_kill`: §Routing; `docs/specs/transport.md` → Graceful shutdown. **The sidecar keeps each PTY's latest 200,000 UTF-16 code units for replay.** Pinned by `standalone/sidecar/pty-core.test.js`. `dor` control plumbing and the sidecar env: `docs/specs/dor-cli.md` → Host Plumbing.
 
