@@ -3,22 +3,18 @@
  * "Managed voice"): every window runs its own `createManagedVoiceHost`, the
  * one the standalone sidecar runs, over a store in `SecretStorage`. The token
  * is a bearer credential, and `SecretStorage` is the store whose changes every
- * window of the extension hears, so a sign-in or sign-out the broker's Burrow
- * service writes reaches every window's status, cache, and refusal latch.
+ * window of the extension hears, so an approval or Disconnect in one window
+ * reaches every window's status, cache, and refusal latch.
  */
 
 import type * as vscode from 'vscode';
 
-import {
-  createManagedVoiceHost,
-  type ManagedVoiceCredential,
-  type ManagedVoiceStore,
-} from '../../lib/src/host/managed-voice-host';
+import { createManagedVoiceHost, type ManagedVoiceStore } from '../../lib/src/host/managed-voice-host';
 import { bakedRelay } from '../../lib/src/host/relay-origin';
 import type { ManagedVoiceStatus } from '../../lib/src/lib/platform/managed-voice-types';
 import { log } from './log';
 
-/** The voice token: a bearer credential, as the enrollment's `burrowToken` is. */
+/** The voice token: a bearer credential, as the Burrow enrollment's `burrowToken` is. */
 export const MANAGED_VOICE_TOKEN_KEY = 'dormouse.managed-voice.token';
 /**
  * The member's voice. Not a credential: it rides `SecretStorage` only so a
@@ -47,7 +43,7 @@ export function secretManagedVoiceStore(secrets: vscode.SecretStorage): ManagedV
 export interface ManagedVoiceDeps {
   /** Post to every live webview in this window. */
   broadcastStatus(status: ManagedVoiceStatus): void;
-  /** Whether the network policy lets this window reach Hosted, asked at every speak. */
+  /** Whether the network policy lets this window reach Hosted, asked before every speak and approval request. */
   networkAllowed(): Promise<boolean>;
 }
 
@@ -74,6 +70,7 @@ export function initManagedVoice(context: vscode.ExtensionContext): vscode.Dispo
   return {
     dispose() {
       watch?.dispose();
+      voice.dispose();
       if (host === voice) host = null;
     },
   };
@@ -82,9 +79,4 @@ export function initManagedVoice(context: vscode.ExtensionContext): vscode.Dispo
 /** A webview's `voice:command`; `null` where this window has no host. */
 export function handleVoiceCommand(payload: unknown): Promise<unknown> {
   return host ? host.handle(payload) : Promise.resolve(null);
-}
-
-/** What the broker's Burrow service saves a sign-in's token through. */
-export function managedVoiceCredential(): ManagedVoiceCredential | undefined {
-  return host?.credential;
 }

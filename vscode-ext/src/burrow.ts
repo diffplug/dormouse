@@ -66,7 +66,6 @@ import {
 } from './peer-link';
 import type { PtySink } from './processed-pty-streams';
 import { VsCodeBurrowStateStore } from './burrow-store';
-import type { ManagedVoiceCredential } from '../../lib/src/host/managed-voice-host';
 import { log } from './log';
 
 /**
@@ -85,8 +84,6 @@ export interface BurrowDeps {
    * (`processed-pty-streams.ts`) rather than a registry of its own per attachment.
    */
   streamPty(ptyId: string, sink: PtySink): () => void;
-  /** This window's managed voice, which a Hosted sign-in hands its token (`managed-voice.ts`). */
-  voiceCredential?(): ManagedVoiceCredential | undefined;
 }
 
 let deps: BurrowDeps | null = null;
@@ -288,9 +285,6 @@ function startService(): void {
       }
     },
     relay: bakedRelay(),
-    // A Hosted sign-in hands managed voice its token; sign-out clears it, in
-    // `SecretStorage`, which every window hears.
-    voiceCredential: bound.voiceCredential?.(),
     // Building the factory loads nothing: the addon is opened inside the first
     // offer, if one ever comes (`native-direct-peer.ts`).
     createDirectPeer: createNativeDirectPeerFactory(),

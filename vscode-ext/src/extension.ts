@@ -83,7 +83,6 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push({ dispose: () => void disposePeerLink() });
   // The Burrow runs here, in the extension host that owns the PTYs — in
   // whichever window wins the bind (burrow.ts).
-  // Managed voice first: the Burrow service a sign-in starts saves its token there.
   context.subscriptions.push(initManagedVoice(context));
   context.subscriptions.push(initBurrow(context));
   // Whether the user is at this window, for the alerts' push gate
@@ -255,11 +254,11 @@ export async function deactivate() {
   // (docs/specs/vscode.md -> "Serialization and restore").
   //
   // Closing any headed pop-out window (so quitting never orphans a real Chrome
-  // window — spec → "Pop-Out" lifecycle) is the one step that does not have
-  // to queue behind it: it shares no state with the PTY interrupt and spends its
-  // time in external processes rather than on this thread. Kicked off first but
-  // joined after, so it overlaps the capture poll instead of adding its own round
-  // trips to the serial teardown.
+  // window — docs/specs/dor-browser.md -> "Pop-Out") is the one step that does
+  // not have to queue behind it: it shares no state with the PTY interrupt and
+  // spends its time in external processes rather than on this thread. Kicked off
+  // first but joined after, so it overlaps the capture poll instead of adding its
+  // own round trips to the serial teardown.
   step('closing popped-out browser windows');
   // Absorbed rather than propagated. Two reasons it must not throw out of the
   // join below: it would surface as an unhandledRejection while capture is

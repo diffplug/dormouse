@@ -49,7 +49,7 @@ All ops are pure and synchronous and return `{ tree, ok }` plus op-specific fiel
 | `split` | Insert a new leaf beside a reference, taking half its weight. |
 | `remove` | Remove a leaf and return its restore token; siblings absorb its weight proportionally. |
 | `replace` / `swap` | Change leaf identities atomically, preserving geometry. |
-| `move` | Remove and reinsert atomically, carrying the old weight. Back in its own split the siblings keep their proportions, so a reorder or drop-back moves no other pane. A target that cannot be re-found after the removal rejects. |
+| `move` | Remove and reinsert atomically. Beside a single leaf the two split that leaf in half; beside a group the leaf carries its old weight, and back in its own split the siblings keep their proportions. A move that leaves the arrangement unchanged returns the input tree; a target that cannot be re-found after the removal rejects. |
 | `resize` | Move the visible boundary, clamped against recursive minimums; every other child keeps its rect. Callers pass the drag-start tree and the cumulative delta. |
 | `insert` | Insert a new leaf beside an edge target. |
 | `restore` | Reinsert from a persisted token through the tiers in [Restore tokens (Doors)](#restore-tokens-doors). |
@@ -64,12 +64,13 @@ Drags use pointer events only, never HTML5 DnD, so they are drivable from CDP. *
 
 `hitTest` returns the one drop a point would commit: its target, its preview rect, and its scope. The scope model:
 
-- A leaf's center yields `swap` (internal drags only, never with itself); its inner edge bands drop beside the leaf.
+- A leaf's middle third on each axis yields `swap` (internal drags only, never with itself); its outer thirds drop beside the leaf, splitting it in half, for a Door drop too.
+- **A boundary line drops across everything it borders**: a gutter, or the wall's edge just past its top and sides, scopes to the outermost ancestor sharing it (rationale).
 - **A slide along an edge widens the scope** to the smallest one spanning anchor to pointer: the leaf, a contiguous range of an ancestor's children laid along the line, or a whole ancestor sharing the line. Equal spans resolve to the innermost (rationale); leaving the line drops the anchor.
 - **Must anchor a slide only where the pointer pauses on an edge drop**, never on the dragged pane's own rejected edge, so sweeping a header along the header row drops beside one pane at a time (rationale).
-- **Every drop's preview rect is the exact rect it would commit** — a speculative op plus `layout`, never a heuristic zone. Rejected ops and beside-itself no-ops yield no drop.
+- **An edge drop previews where it lands in the current layout**, before the dragged pane's slot closes: a speculative `insert` sized as the commit would be, plus `layout`, never a heuristic zone (rationale). A swap previews both panes' slots. Rejected moves and beside-itself no-ops yield no drop.
 
-A pane drag starts on a leaf's header, and **never while zoomed or during a sash drag**. The press has already run the header's click path, so a drag begins from passthrough on that pane (rationale). Drops surface as proposals the Wall commits: drag start moves selection onto the dragged pane, a candidate drop `move`s it, and a release below the wall minimizes it with its token. Escape, pointer cancellation, window blur, or a release on nothing cancels, and a Door stays. **Must delegate Workspace-strip pane drops to `docs/specs/layout.md` → Moving Surfaces between Workspaces** before local hit-testing.
+A pane drag starts on a leaf's header, and **never while zoomed or during a sash drag**. The press has already run the header's click path, so a drag begins from passthrough on that pane (rationale). Drops surface as proposals the Wall commits: drag start moves selection onto the dragged pane, a candidate drop `move`s it, and a release below the wall minimizes it with its token. Escape, pointer cancellation, a real window blur (`docs/specs/layout.md` → Corner cases #2), or a release on nothing cancels, and a Door stays. **Must shield every `<iframe>` from the pointer during a pane, Door, sash, or Workspace tab drag**, so Tool and browser panes drag and resize like terminals (`shieldFrames` in `lib/src/lib/frame-shield.ts`). **Must delegate Workspace-strip pane drops to `docs/specs/layout.md` → Moving Surfaces between Workspaces** before local hit-testing.
 
 A Door drag-out yields no swap. Its drop inserts the Surface at the hit-tested position — **the token is not consulted, because the user chose the position**.
 
@@ -127,7 +128,7 @@ An adapter owns exactly three things: mapping input into Wall coordinates, apply
 
 - **Must never re-parent, reorder, or unmount a leaf's div within one Wall** except on a remove commit, and **must render leaf divs in sorted-by-id DOM order, never tree order** — moving DOM nodes blurs the xterm inside one and reloads a moved `<iframe>`.
 - **Header, body, and whole-leaf overlay slots resolve from `leafMeta` through one component registry**, never a surface-kind branch beside it; an unregistered key renders that slot empty.
-- A sash drag streams a `resize` preview and proposes one commit on release; Escape, pointer cancellation, window blur, or a concurrent tree or zoom change cancels it.
+- A sash drag streams a `resize` preview and proposes one commit on release; Escape, pointer cancellation, a real window blur, or a concurrent tree or zoom change cancels it.
 
 Source of truth: `LathHost` in `lib/src/components/wall/LathHost.tsx`.
 

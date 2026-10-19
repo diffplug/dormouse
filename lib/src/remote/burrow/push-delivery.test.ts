@@ -2,6 +2,8 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 
 import {
   MAX_PUSH_QUERY_DELIVERY_IDS,
+  PAIRING_DEVICE_LABELS,
+  PAIRING_UNKNOWN_DEVICE_LABEL,
   fromBase64Url,
   generateNoiseKeyPair,
   openPush,
@@ -32,6 +34,9 @@ const ENROLLMENT = { relayUrl: 'https://relay.example', burrowToken: 'burrow-tok
 function id32(name: string): string {
   return name.padEnd(43, '0').slice(0, 43);
 }
+
+/** The two labels Pocket pairs under, the only ones a record shows by. */
+const [HOME_SCREEN, BROWSER] = PAIRING_DEVICE_LABELS;
 
 /** Delivery is keyed on the record's `deliveryId`, never on who holds it. */
 const PHONE = id32('delivery-phone');
@@ -144,7 +149,7 @@ function lastRecipients(): string[] {
 beforeEach(() => {
   requests = [];
   subscribed = [PHONE];
-  records = [aclRecord(PHONE, 'iPhone Safari')];
+  records = [aclRecord(PHONE, BROWSER)];
   resetPushDevices();
 });
 
@@ -202,22 +207,28 @@ describe('toPushText', () => {
 
 describe('push target preview', () => {
   it('names only the newest subscribed records a bounded send can target', async () => {
-    const base = aclRecord(PHONE, 'base');
+    const base = aclRecord(PHONE, BROWSER);
+    // Labels come from a set of two, so only the oldest record a send targets
+    // is told apart: listing from the oldest, or all, would name more Home
+    // Screen rows or more rows.
     records = Array.from({ length: MAX_PUSH_QUERY_DELIVERY_IDS + 3 }, (_, i) => ({
-      ...base, deliveryId: id32(`preview-${i}-`), label: `phone ${i}`,
+      ...base, deliveryId: id32(`preview-${i}-`), label: i <= 3 ? HOME_SCREEN : BROWSER,
     }));
     subscribed = records.map((record) => record.deliveryId);
     expect(new Set(subscribed).size).toBe(records.length);
     const expected = records.slice(-MAX_PUSH_QUERY_DELIVERY_IDS);
-    expect(await loadPushDevices(deps())).toEqual(expected.map(({ label }) => ({ label })));
+    expect(await loadPushDevices(deps())).toEqual([
+      { label: HOME_SCREEN },
+      ...Array.from({ length: MAX_PUSH_QUERY_DELIVERY_IDS - 1 }, () => ({ label: BROWSER })),
+    ]);
     await sendPush(deps(), 'pty-1', 'terminal');
     expect(lastRecipients()).toEqual(expected.map(({ deliveryId }) => deliveryId));
   });
 
   it('does not list an older subscription excluded before the Relay intersection', async () => {
-    const base = aclRecord(PHONE, 'base');
+    const base = aclRecord(PHONE, BROWSER);
     records = Array.from({ length: MAX_PUSH_QUERY_DELIVERY_IDS + 1 }, (_, i) => ({
-      ...base, deliveryId: id32(`preview-${i}-`), label: `phone ${i}`,
+      ...base, deliveryId: id32(`preview-${i}-`),
     }));
     subscribed = [records[0]!.deliveryId];
     expect(await loadPushDevices(deps())).toEqual([]);
@@ -240,7 +251,7 @@ describe('sendPush', () => {
     // propagates a revocation — so the Burrow must not address it. It stays out
     // of the request because the ACL, read at the send, chooses targets.
     subscribed = [PHONE, REVOKED];
-    records = [aclRecord(PHONE, 'iPhone Safari')];
+    records = [aclRecord(PHONE, BROWSER)];
     await sendPush(deps(), 'pty-1', 'terminal');
     expect(lastRecipients()).toEqual([PHONE]);
   });
@@ -308,7 +319,7 @@ describe('sendPush', () => {
  */
 describe('sealed push', () => {
   it('seals one distinct ciphertext per recipient, and posts no plaintext', async () => {
-    records = [aclRecord(PHONE, 'iPhone Safari'), aclRecord(TABLET, 'iPad')];
+    records = [aclRecord(PHONE, BROWSER), aclRecord(TABLET, HOME_SCREEN)];
     await sendPush(deps({ seal: realSeal }), 'pty-1', 'build finished');
 
     const recipients = lastSend()!.recipients;
@@ -325,7 +336,7 @@ describe('sealed push', () => {
   });
 
   it('opens with the recipient own key and with no other', async () => {
-    records = [aclRecord(PHONE, 'iPhone Safari'), aclRecord(TABLET, 'iPad')];
+    records = [aclRecord(PHONE, BROWSER), aclRecord(TABLET, HOME_SCREEN)];
     await sendPush(deps({ seal: realSeal }), 'pty-1', 'build finished');
     const [phone, tablet] = lastSend()!.recipients;
 
@@ -387,7 +398,7 @@ describe('sealed push', () => {
   it('keeps sealing for the rest when one recipient cannot be sealed for', async () => {
     // A corrupt record must cost that phone its notification, not every phone
     // its notification.
-    records = [aclRecord(PHONE, 'iPhone Safari'), aclRecord(TABLET, 'iPad')];
+    records = [aclRecord(PHONE, BROWSER), aclRecord(TABLET, HOME_SCREEN)];
     const seal: AlertPushDeps['seal'] = (clientStaticPublicKey, plaintext) =>
       clientStaticPublicKey === records[0]!.clientStaticPublicKey
         ? Promise.resolve(null)
@@ -421,14 +432,26 @@ describe('push device list', () => {
     await refreshPushDevices(deps());
     expect(getPushDevices()).toEqual({
       status: 'ready',
-      devices: [{ label: 'iPhone Safari' }],
+      devices: [{ label: BROWSER }],
     });
+  });
+
+  it('names a record only by a label Pocket sends', async () => {
+    // The phone chose the label at pairing, and a record off disk may predate
+    // the closed set (`docs/specs/remote-security-model.md` -> Pairing).
+    records = [aclRecord(PHONE, 'iPhone · code 58'), aclRecord(TABLET, HOME_SCREEN)];
+    subscribed = [PHONE, TABLET];
+    await refreshPushDevices(deps());
+    expect(getPushDevices().devices).toEqual([
+      { label: PAIRING_UNKNOWN_DEVICE_LABEL },
+      { label: HOME_SCREEN },
+    ]);
   });
 
   it('omits a subscribed device that is no longer in the ACL', async () => {
     subscribed = [PHONE, REVOKED];
     await refreshPushDevices(deps());
-    expect(getPushDevices().devices).toEqual([{ label: 'iPhone Safari' }]);
+    expect(getPushDevices().devices).toEqual([{ label: BROWSER }]);
   });
 
   it('reports error rather than an empty list when the Relay is unreachable', async () => {
@@ -467,7 +490,7 @@ describe('push device list', () => {
   });
 
   it('keeps a newer refresh when an older request resolves last', async () => {
-    records = [aclRecord(PHONE, 'iPhone Safari'), aclRecord(TABLET, 'iPad')];
+    records = [aclRecord(PHONE, BROWSER), aclRecord(TABLET, HOME_SCREEN)];
     let resolveOlder: (response: Response) => void = () => {};
     const older = refreshPushDevices(
       deps({
@@ -487,7 +510,7 @@ describe('push device list', () => {
     );
 
     await newer;
-    expect(getPushDevices().devices).toEqual([{ label: 'iPad' }]);
+    expect(getPushDevices().devices).toEqual([{ label: HOME_SCREEN }]);
 
     resolveOlder({
       ok: true,
@@ -495,6 +518,6 @@ describe('push device list', () => {
     } as Response);
     await older;
 
-    expect(getPushDevices().devices).toEqual([{ label: 'iPad' }]);
+    expect(getPushDevices().devices).toEqual([{ label: HOME_SCREEN }]);
   });
 });

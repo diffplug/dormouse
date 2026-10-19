@@ -3,7 +3,7 @@
 > - See `docs/specs/glossary.md` for Burrow / Client / Relay and Pane / Session vocabulary.
 > - **Owns:** the plans, the founding ladder, what a plan grants, how a desktop proves membership, the managed-voice boundary, and the content contract of the Hosted page.
 > - **Defers:** page chrome, rail, and link obligations to `docs/specs/website-docs.md` -> "Reference page chrome"; the Hosted Relay's accounts, enrollment, and entitlement, and managed voice's routes, to `docs/specs/hosted.md`; the cloud-hosted trust boundary to `docs/specs/security-remote.md` -> "Cloud-hosted mode"; alarm delivery to `docs/specs/alert.md` -> "Spoken alarms".
-> - **Status:** the Hosted page publishes the plans and the FAQ, and a desktop signs in to Hosted for managed voice (`docs/specs/hosted.md` -> "Managed voice"); everything that takes money — checkout, the subscription as the entitlement, the hosted Relay — is under [Future](#future).
+> - **Status:** the Hosted page publishes the plans and the FAQ, and a desktop enrolls with Hosted for managed voice (`docs/specs/hosted.md` -> "Managed voice"); everything that takes money — checkout, the subscription as the entitlement, the hosted Relay — is under [Future](#future).
 
 ## The Hosted page
 
@@ -95,13 +95,12 @@ What each plan grants once checkout can sell it; [Published prices](#published-p
 - **Founding checkout offers the founders-row opt-in, unticked**; the account can withdraw it at any time.
 - **The success page asks the four Van Westendorp questions**, optional and unsent until answered: too expensive to consider, too cheap to trust, expensive but would consider, a bargain. Their answers inform later list changes.
 - **The entitlement is the account's subscription, read on the server on every voice and Relay request.** No licence, no offline verification, and no grace past what the subscription grants; a lapsed member's voices fall back to the system voice and its Burrows to `not-entitled`.
-- **A desktop signs in from Settings by device code**, the flow Burrow enrollment already runs (`docs/specs/hosted.md` -> "Burrow enrollment"). The approval mints a desktop credential the host keeps and never hands a webview. Sign-in is the only account surface in the free client.
 - **Must license one individual, including work use, with no device limit and no per-device charge**; enrollment's abuse ceiling is far above what a person owns (`docs/specs/hosted.md` -> "Burrow enrollment"). **Must disclose material usage limits before purchase**, including managed voice's daily cap.
 - **A full refund or a finally reversed payment ends the subscription**, so the next request is refused. A partial refund or billing correction never ends it, and an open dispute only suspends it ("Paid-launch requirements").
 
 ### Managed voice
 
-What is built — the endpoint, what a request carries, the disclosure, the clip cache, the daily cap, and the fallback — is `docs/specs/hosted.md` -> "Managed voice" and `docs/specs/alert.md` -> "Managed voice".
+What is built — the endpoint, what a request carries, the clip cache, the daily cap, and the fallback — is `docs/specs/hosted.md` -> "Managed voice" and `docs/specs/alert.md` -> "Managed voice"; the disclosure is `docs/specs/alert.md` -> "Settings dialog".
 
 - **Must disclose before enabling managed voice that labels can come from program-supplied titles, command labels, or directory names and that secret filtering is heuristic**, not a guarantee of confidentiality. Connection metadata remains visible to the serving infrastructure.
 - **One voice per Pane.** The member default applies everywhere; a per-Pane override is persisted with the pane's settings and follows the Session through minimize and restore. Doors and headers show nothing new.

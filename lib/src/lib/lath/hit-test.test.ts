@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { type LayoutOpts } from './layout';
 import { hitTest } from './hit-test';
-import { leaf, split as mk, tree, R, movePreview as movePreviewAt, insertPreview as insertPreviewAt } from './test-util';
+import { leaf, split as mk, tree, R, movePreview as movePreviewAt, insertPreview as insertPreviewAt, landingPreview } from './test-util';
 
 const opts: LayoutOpts = { gap: 0, minLeaf: { width: 0, height: 0 } };
 const RECT = R(0, 0, 1000, 600);
@@ -16,6 +16,8 @@ const movePreview = (t: ReturnType<typeof tree>, dragged: string, target: Parame
   movePreviewAt(t, dragged, target, RECT, opts);
 const insertPreview = (t: ReturnType<typeof tree>, target: Parameters<typeof insertPreviewAt>[2]) =>
   insertPreviewAt(t, X, target, RECT, opts);
+const landing = (t: ReturnType<typeof tree>, dragged: string, target: Parameters<typeof landingPreview>[2]) =>
+  landingPreview(t, dragged, target, RECT, opts);
 
 describe('hitTest — center region', () => {
   it('yields a swap for an internal drag over a leaf center, previewed at the target rect', () => {
@@ -25,6 +27,7 @@ describe('hitTest — center region', () => {
     // b swapped onto a's slot.
     expect(c.previewRect).toEqual(movePreview(t, 'b', { kind: 'swap', leaf: 'a' }));
     expect(c.previewRect).toEqual(R(0, 0, 500, 600));
+    expect(c.swapRect).toEqual(R(500, 0, 500, 600)); // a takes b's slot
   });
 
   it('never swaps a leaf with itself (over the dragged leaf center → no candidates)', () => {
@@ -47,7 +50,7 @@ describe('hitTest — edge bands at the leaf level', () => {
       const dragged = edge === 'left' ? 'c' : 'a';
       const c = drop(t, RECT, point, dragged, opts)!;
       expect(c.target).toEqual({ kind: 'edge', path: [1], edge });
-      expect(c.previewRect).toEqual(movePreview(t, dragged, { kind: 'edge', path: [1], edge }));
+      expect(c.previewRect).toEqual(landing(t, dragged, { kind: 'edge', path: [1], edge }));
     });
   }
 });
@@ -88,19 +91,61 @@ describe('hitTest — sliding along a shared boundary', () => {
   });
 });
 
-describe('hitTest — band arithmetic at the caps', () => {
-  it('caps a wide leaf band at 96px', () => {
-    const t = tree(mk('row', [leaf('a'), 0.9], [leaf('b'), 0.1])); // a: 0..900
-    // 0.3 * 900 = 270, capped to 96: x=95 is in-band (left edge), x=97 is center.
-    expect(drop(t, RECT, { x: 95, y: 300 }, 'b', opts)!.target).toEqual({ kind: 'edge', path: [0], edge: 'left' });
-    expect(drop(t, RECT, { x: 97, y: 300 }, 'b', opts)!.target).toEqual({ kind: 'swap', leaf: 'a' });
+describe('hitTest — boundary lines', () => {
+  // row[ a, col[b, c] ]: a 0..500; b above c on the right, meeting at y 300.
+  const t = tree(mk('row', [leaf('a'), 0.5], [mk('col', [leaf('b'), 0.5], [leaf('c'), 0.5]), 0.5]));
+  const right = { kind: 'edge', path: [], edge: 'right' } as const;
+
+  it('drops across everything the line borders, and beside one pane in the band', () => {
+    const line = drop(t, RECT, { x: 995, y: 450 }, 'a', opts)!;
+    expect(line.target).toEqual(right);
+    expect(line.previewRect).toEqual(R(500, 0, 500, 600));
+    const band = drop(t, RECT, { x: 980, y: 450 }, 'a', opts)!;
+    expect(band.target).toEqual({ kind: 'edge', path: [1, 1], edge: 'right' });
+    // Half of c as it stands, not half of c once a's slot closes and c widens.
+    expect(band.previewRect).toEqual(R(750, 300, 250, 300));
+    expect(movePreview(t, 'a', band.target)).toEqual(R(500, 300, 500, 300));
   });
 
-  it('scales a small leaf band to 0.3 of its extent', () => {
-    const small = R(0, 0, 200, 100);
-    const t = tree(mk('row', [leaf('a'), 0.5], [leaf('b'), 0.5])); // a: 0..100, band 30px
-    expect(drop(t, small, { x: 29, y: 50 }, 'b', opts)!.target).toEqual({ kind: 'edge', path: [0], edge: 'left' });
-    expect(drop(t, small, { x: 31, y: 50 }, 'b', opts)!.target).toEqual({ kind: 'swap', leaf: 'a' });
+  it('reaches past the wall on its top and sides, but not below it', () => {
+    expect(drop(t, RECT, { x: 1005, y: 450 }, 'a', opts)!.target).toEqual(right);
+    expect(drop(t, RECT, { x: 750, y: -5 }, 'a', opts)!.target).toEqual({ kind: 'edge', path: [], edge: 'top' });
+    expect(drop(t, RECT, { x: 750, y: 605 }, 'a', opts)).toBeNull();
+  });
+
+  it('starts a top line at the leaf, leaving its header to the band', () => {
+    expect(drop(t, RECT, { x: 750, y: 3 }, 'a', opts)!.target).toEqual({ kind: 'edge', path: [1, 0], edge: 'top' });
+  });
+
+  it('spans a gutter across the group it bounds', () => {
+    // col[ row[a, b], c ]: the a|b row's bottom is one line.
+    const stack = tree(mk('col', [mk('row', [leaf('a'), 0.5], [leaf('b'), 0.5]), 0.5], [leaf('c'), 0.5]));
+    expect(drop(stack, RECT, { x: 250, y: 295 }, null, opts)!.target).toEqual({ kind: 'edge', path: [0], edge: 'bottom' });
+    expect(drop(stack, RECT, { x: 250, y: 280 }, null, opts)!.target).toEqual({ kind: 'edge', path: [0, 0], edge: 'bottom' });
+  });
+
+  it('keeps the line under half a small leaf band', () => {
+    const small = R(0, 0, 40, 100); // b: 20..40, band 6px, line 3px
+    const pair = tree(mk('row', [leaf('a'), 0.5], [leaf('b'), 0.5]));
+    expect(drop(pair, small, { x: 36, y: 50 }, null, opts)!.target).toEqual({ kind: 'edge', path: [1], edge: 'right' });
+    expect(drop(pair, small, { x: 38, y: 50 }, null, opts)!.target).toEqual({ kind: 'edge', path: [], edge: 'right' });
+  });
+});
+
+describe('hitTest — band arithmetic', () => {
+  it('divides a leaf into even thirds on each axis, swapping in the middle', () => {
+    // a: 0..750 x 0..600, so its thirds fall at x 250 and 500, y 200 and 400.
+    const t = tree(mk('row', [leaf('a'), 0.75], [mk('col', [leaf('b'), 0.5], [leaf('c'), 0.5]), 0.25]));
+    const at = (x: number, y: number) => drop(t, RECT, { x, y }, 'c', opts)!.target;
+    const swap = { kind: 'swap', leaf: 'a' };
+    expect(at(249, 300)).toEqual({ kind: 'edge', path: [0], edge: 'left' });
+    expect(at(251, 300)).toEqual(swap);
+    expect(at(499, 300)).toEqual(swap);
+    expect(at(501, 300)).toEqual({ kind: 'edge', path: [0], edge: 'right' });
+    expect(at(375, 199)).toEqual({ kind: 'edge', path: [0], edge: 'top' });
+    expect(at(375, 201)).toEqual(swap);
+    expect(at(375, 399)).toEqual(swap);
+    expect(at(375, 401)).toEqual({ kind: 'edge', path: [0], edge: 'bottom' });
   });
 });
 
@@ -128,8 +173,9 @@ describe('hitTest — misses', () => {
   const t = tree(mk('row', [leaf('a'), 0.5], [leaf('b'), 0.5]));
 
   it('returns null off the wall and for an empty tree', () => {
-    expect(drop(t, RECT, { x: -5, y: 300 }, 'a', opts)).toBeNull();
-    expect(drop(t, RECT, { x: 1005, y: 300 }, 'a', opts)).toBeNull();
+    expect(drop(t, RECT, { x: -9, y: 300 }, 'b', opts)).toBeNull();
+    expect(drop(t, RECT, { x: 1009, y: 300 }, 'a', opts)).toBeNull();
+    expect(drop(t, RECT, { x: 500, y: -9 }, 'a', opts)).toBeNull();
     expect(drop(t, RECT, { x: 500, y: 700 }, 'a', opts)).toBeNull();
     expect(drop(tree(null), RECT, { x: 100, y: 100 }, 'a', opts)).toBeNull();
   });

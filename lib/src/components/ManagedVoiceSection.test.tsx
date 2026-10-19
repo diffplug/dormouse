@@ -17,7 +17,7 @@ import {
 import { DEFAULT_RELAY_ORIGIN } from '../host/relay-origin';
 import type { BurrowConsoleStatus } from '../host/remote/service-protocol';
 import { networkPolicyResult, nothingPolicy } from '../remote/network-policy';
-import { HOSTED_PRICING_URL, SIGN_IN_LABEL } from './HostedSignIn';
+import { HOSTED_PRICING_URL } from './HostedEnrollment';
 import { MANAGED_VOICE_DISCLOSURE, ManagedVoiceSection, NO_PLAN_COPY } from './ManagedVoiceSection';
 import { AlarmSettingsSection } from './SettingsDialog';
 
@@ -30,8 +30,8 @@ const text = () => container.textContent ?? '';
 const button = (label: string) =>
   [...container.querySelectorAll('button')].find((b) => b.textContent?.trim() === label);
 
-/** A Hosted build signed in: the Burrow enrolled with Hosted and connected. */
-const SIGNED_IN: BurrowConsoleStatus = enrolledStatus({
+/** A Hosted build's Burrow, enrolled with Hosted and connected. */
+const ENROLLED: BurrowConsoleStatus = enrolledStatus({
   relayOrigin: DEFAULT_RELAY_ORIGIN,
   relayMode: 'hosted',
   accountOrigin: 'https://hosted.dormouse.sh',
@@ -71,33 +71,35 @@ describe('ManagedVoiceSection', () => {
     expect(container.innerHTML).toBe('');
   });
 
-  it('states what leaves the machine, then signs in with the suggested name, no paste field', async () => {
-    const { command } = await render({ status: UNENROLLED_STATUS }, makeStubManagedVoicePort(false));
+  it('states what leaves the machine, then enrolls with the suggested name, no paste field', async () => {
+    const { command, voice } = await render({ status: UNENROLLED_STATUS }, makeStubManagedVoicePort(false));
+    const begin = vi.spyOn(voice, 'beginEnrollment');
     expect(text()).toContain(MANAGED_VOICE_DISCLOSURE);
     expect(text()).toContain('though no limit is guaranteed');
     expect(container.querySelector('input')).toBeNull();
 
-    await act(async () => button(SIGN_IN_LABEL)!.click());
-    expect(command).toHaveBeenCalledWith('beginHostedEnrollment', { label: UNENROLLED_STATUS.suggestedLabel });
+    await act(async () => button('Enable managed voice')!.click());
+    expect(begin).toHaveBeenCalledOnce();
+    expect(command).not.toHaveBeenCalledWith('beginHostedEnrollment', expect.anything());
   });
 
-  it('under Nothing, explains and points at Network rather than signing in', async () => {
+  it('under Nothing, explains and points at Network rather than enrolling', async () => {
     const onShowNetwork = vi.fn();
     const { command } = await render(
       { status: UNENROLLED_STATUS, network: networkPolicyResult(nothingPolicy(), 'hosted', []) },
       makeStubManagedVoicePort(false),
       onShowNetwork,
     );
-    expect(text()).toContain('Choose Local networks or Anywhere there to sign in.');
-    expect(button(SIGN_IN_LABEL)).toBeUndefined();
+    expect(text()).toContain('Choose Local networks or Anywhere in');
+    expect(button('Enable managed voice')).toBeUndefined();
     await act(async () => button('Network')!.click());
     expect(onShowNetwork).toHaveBeenCalledOnce();
     expect(command).not.toHaveBeenCalledWith('beginHostedEnrollment', expect.anything());
   });
 
-  it('signed in, picks a voice from the curated set', async () => {
-    const { voice } = await render({ status: SIGNED_IN });
-    expect(text()).toContain('Signed in to Dormouse Hosted.');
+  it('enrolled, picks a voice from the curated set', async () => {
+    const { voice } = await render({ status: ENROLLED });
+    expect(text()).toContain('Managed voice is enabled.');
     const select = container.querySelector<HTMLSelectElement>('select[aria-label="Managed voice"]')!;
     expect([...select.options].map((option) => option.value)).toEqual(MANAGED_VOICES.map((v) => v.id));
     const configure = vi.spyOn(voice, 'configure');
@@ -108,11 +110,13 @@ describe('ManagedVoiceSection', () => {
     expect(configure).toHaveBeenCalledWith({ voiceId: MANAGED_VOICES[2]!.id });
   });
 
-  it.each([
-    ['the relay socket', { status: { ...SIGNED_IN, connection: 'not-entitled' as const } }, false],
-    ['speak', { status: SIGNED_IN }, true],
-  ])('says the account has no plan when %s refuses it', async (_by, primed, notEntitled) => {
-    await render(primed, makeStubManagedVoicePort(true, notEntitled));
+  it('uses voice entitlement independently of the relay socket', async () => {
+    await render({ status: { ...ENROLLED, connection: 'not-entitled' } });
+    expect(text()).not.toContain(NO_PLAN_COPY);
+  });
+
+  it('shows plans when speak refuses the voice entitlement', async () => {
+    await render({ status: ENROLLED }, makeStubManagedVoicePort(true, true));
     expect(text()).toContain(NO_PLAN_COPY);
     const openExternal = vi.fn();
     Object.assign(getPlatform(), { openExternal });
@@ -120,27 +124,45 @@ describe('ManagedVoiceSection', () => {
     expect(openExternal).toHaveBeenCalledWith(HOSTED_PRICING_URL);
   });
 
-  it('asks a computer signed in before managed voice to sign in again', async () => {
-    await render({ status: SIGNED_IN }, makeStubManagedVoicePort(false));
-    expect(text()).toContain('Sign out and sign in again to use it.');
+  it('offers voice independently when remote control is already enrolled', async () => {
+    await render({ status: ENROLLED }, makeStubManagedVoicePort(false));
+    expect(button('Enable managed voice')).toBeDefined();
     expect(container.querySelector('select')).toBeNull();
   });
 
-  it('signs out after confirming, which is the Burrow’s local Disconnect', async () => {
-    const { command } = await render({ status: SIGNED_IN });
-    expect(text()).toContain('Remove this computer at hosted.dormouse.sh');
-    await act(async () => button('Sign out')!.click());
-    expect(text()).toContain('Remote control signs out too');
+  it('disconnects voice after confirming without clearing remote control', async () => {
+    const { command, voice } = await render({ status: ENROLLED });
+    const disconnect = vi.spyOn(voice, 'disconnect');
+    await act(async () => button('Disconnect')!.click());
+    expect(text()).toContain('Alarms will use your system voice.');
     expect(command).not.toHaveBeenCalledWith('clearEnrollment');
-    await act(async () => button('Sign out')!.click());
-    expect(command).toHaveBeenCalledWith('clearEnrollment');
+    await act(async () => button('Disconnect')!.click());
+    expect(disconnect).toHaveBeenCalledOnce();
+    expect(command).not.toHaveBeenCalledWith('clearEnrollment');
   });
+  it('keeps a failed voice disconnect visible and retryable without clearing remote control', async () => {
+    const { voice, command } = await render({ status: ENROLLED });
+    const original = voice.status()!;
+    const disconnect = vi.spyOn(voice, 'disconnect').mockImplementation(async () => {
+      vi.spyOn(voice, 'status').mockReturnValue({ ...original, configured: false, disconnectFailed: true });
+      await voice.configure({ voiceId: original.voiceId }); // Broadcast the failed-clear status.
+      return { ok: false, message: 'Disconnecting did not finish.' };
+    });
+    await act(async () => button('Disconnect')!.click());
+    await act(async () => button('Disconnect')!.click());
+    expect(text()).toContain('Disconnecting did not finish.');
+    expect(button('Enable managed voice')).toBeUndefined();
+    await act(async () => button('Retry disconnect')!.click());
+    expect(disconnect).toHaveBeenCalledTimes(2);
+    expect(command).not.toHaveBeenCalledWith('clearEnrollment');
+  });
+
 });
 
 describe('the spoken-alarm copy', () => {
   it.each([
     ['no port', false, 'Get managed ElevenLabs voices.'],
-    ['a Hosted build’s port', true, 'Uses managed voice while this computer is signed in to Dormouse Hosted'],
+    ['a Hosted build’s port', true, 'Uses managed voice when enabled below'],
   ])('with %s', async (_label, port, copy) => {
     const adapter = new FakePtyAdapter();
     setPlatform(port ? Object.assign(adapter, { managedVoice: makeStubManagedVoicePort(false) }) : adapter);

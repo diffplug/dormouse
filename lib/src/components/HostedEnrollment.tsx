@@ -8,21 +8,10 @@ import { getPlatform } from '../lib/platform';
 import { BURROW_IS_AN_APP } from '../remote/setup-copy';
 import { beginHostedEnrollment, cancelHostedEnrollment } from '../remote/burrow/burrow-status-store';
 
-/**
- * Signing in to Dormouse Hosted from this computer: the device-code
- * enrollment (`docs/specs/hosted.md` -> "Burrow enrollment") that both
- * Settings → Network's Remote control and Notifications' managed voice start.
- * One approval enrolls this computer's Burrow and hands managed voice its
- * token, so both places render the one flow from here.
- */
-
 /** Where the plans are; linked wherever an account turns out to have none. */
 export const HOSTED_PRICING_URL = 'https://dormouse.sh/hosted/#pricing';
 /** The Hosted page's voice section, the spoken-alarm row's link where the build has no managed voice. */
 export const HOSTED_VOICE_URL = 'https://dormouse.sh/hosted/#voice';
-
-/** The begin button's words, everywhere sign-in starts. */
-export const SIGN_IN_LABEL = 'Sign in to Dormouse Hosted';
 
 /** The one field the offer card and the typed form both ask for. */
 export function BurrowNameField({
@@ -63,15 +52,15 @@ export const HOSTED_ENROLLMENT_CODE_LABEL = 'Enrollment code';
  * own sentence.
  */
 export const HOSTED_ENROLLMENT_ENDED_COPY: Record<HostedEnrollmentEndReason, string> = {
-  expired: 'That code expired before it was approved, so this computer was not signed in.',
-  'not-entitled': 'The account that approved that code has no Hosted plan, so this computer was not signed in.',
+  expired: 'That code expired before it was approved, so this computer was not enrolled.',
+  'not-entitled': 'The account that approved that code has no Hosted plan, so this computer was not enrolled.',
   'answer-lost':
-    'That code was approved and used, but the answer never reached this computer, so it was not signed in.',
-  failed: 'This computer could not finish signing in.',
+    'That code was approved and used, but the answer never reached this computer, so it was not enrolled.',
+  failed: 'This computer could not finish enrolling.',
 };
 
 /** The copy a status's `redeeming` shows: approved, and the enrollment being saved. */
-export const HOSTED_ENROLLMENT_REDEEMING_COPY = 'Approved. Signing this computer in…';
+export const HOSTED_ENROLLMENT_REDEEMING_COPY = 'Approved. Enrolling this computer…';
 
 /** The account page the service names in `status.accountOrigin`, where computers are removed. */
 export function accountPage(accountOrigin: string | null): string | null {
@@ -81,8 +70,8 @@ export function accountPage(accountOrigin: string | null): string | null {
 /** What a lost answer asks of the person: the Burrow it enrolled, named where the service knows it. */
 export function answerLostRemoval(burrowId: string | undefined): string {
   return burrowId
-    ? `Remove Burrow ${burrowId} from your account, then sign in again.`
-    : 'Remove the computer it added from your account, then sign in again.';
+    ? `Remove Burrow ${burrowId} from your account, then enroll again.`
+    : 'Remove the computer it added from your account, then enroll again.';
 }
 
 /** Why the last Hosted enrollment ended, with the account page where it says to go there. */
@@ -115,7 +104,7 @@ export function HostedEnrollmentEnded({
 }
 
 /**
- * Signing in (`docs/specs/hosted.md` -> "Burrow enrollment"): a button that
+ * Enrolling (`docs/specs/hosted.md` -> "Burrow enrollment"): a button that
  * begins it, under the name to keep for this machine where `askName`; then
  * the code, in large type, a button that opens the account page the service
  * composed to approve it, the time left, and Cancel; ended, why, with a new
@@ -187,7 +176,7 @@ export function HostedEnrollView({
             disabled={busy || name === ''}
             className={modalActionButton({ tone: 'primary' })}
           >
-            {beginning ? 'Getting a code…' : ended ? 'Get a new code' : SIGN_IN_LABEL}
+            {beginning ? 'Getting a code…' : ended ? 'Get a new code' : 'Enroll remote control'}
           </button>
           {ended ? (
             <button
@@ -207,7 +196,7 @@ export function HostedEnrollView({
 }
 
 /** The code waiting for approval, and the way to approve it. */
-function HostedEnrollmentCode({
+export function HostedEnrollmentCode({
   waiting,
   accountOrigin,
   busy,
@@ -235,9 +224,9 @@ function HostedEnrollmentCode({
       </div>
       {waiting.accountFull ? (
         <div className="mt-1.5 text-error">
-          That account already has as many computers as it can sign in.{' '}
+          That account already has as many computers as it can enroll.{' '}
           {page ? <ExternalTextLink href={page}>Remove one at {hostOf(page)}</ExternalTextLink> : 'Remove one from your account'}{' '}
-          and this computer signs in on its own.
+          and this computer enrolls on its own.
         </div>
       ) : null}
       <div className="mt-2 flex flex-wrap items-center gap-2">

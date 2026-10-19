@@ -14,8 +14,18 @@ export { DEFAULT_MANAGED_VOICE_ID, MANAGED_VOICES } from 'remote-lib-common';
  */
 export const MANAGED_VOICE_REQUEST_TIMEOUT_MS = 15_000;
 
+export type ManagedVoiceEnrollment =
+  | { status: 'waiting'; userCode: string; verificationUrl: string; expiresAt: number }
+  | { status: 'saving' }
+  | { status: 'ended'; message: string };
+
+export type ManagedVoiceActionResult = { ok: true } | { ok: false; message: string };
+
 export interface ManagedVoiceStatus {
-  /** A voice token is held: this desktop signed in to Dormouse Hosted with managed voice. */
+  enrollment?: ManagedVoiceEnrollment | null;
+  /** Voice is off in memory, but clearing its saved credential needs a retry. */
+  disconnectFailed?: boolean;
+  /** A voice token is held after explicit managed-voice approval. */
   configured: boolean;
   /** The member default, always one of `MANAGED_VOICES`. */
   voiceId: string;
@@ -28,7 +38,7 @@ export interface ManagedVoiceStatus {
 
 /**
  * What the webview may change: the default voice. **Never the token**, which
- * only the Burrow service's sign-in writes and sign-out clears.
+ * only managed-voice approval writes and its disconnect clears.
  */
 export interface ManagedVoiceConfigUpdate {
   voiceId: string;
@@ -53,6 +63,9 @@ export interface ManagedVoicePort {
   status(): ManagedVoiceStatus | null;
   /** Called after every change to `status()`. */
   subscribe(listener: () => void): () => void;
+  beginEnrollment(): Promise<ManagedVoiceActionResult>;
+  cancelEnrollment(): Promise<ManagedVoiceActionResult>;
+  disconnect(): Promise<ManagedVoiceActionResult>;
   configure(update: ManagedVoiceConfigUpdate): Promise<ManagedVoiceConfigResult>;
   /** Never rejects: every failure is an `ok: false` answer. */
   speak(text: string): Promise<ManagedVoiceSpeakResult>;

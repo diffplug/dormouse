@@ -20,7 +20,9 @@ Without a title, a viewer's header falls back to its running command, `dor __vie
 
 MDXEditor 4.3 parses `<!-- … -->` and discards it, and trims and re-serializes the whole document on export; without the comment node and style detection, saving a typical README after a one-word edit deleted its comments and rewrote every `-` bullet as `*` (measured 2026-10).
 
-Image sizes live in the document because GitHub shows an `<img>` without a `width` pixel for pixel: a Retina screenshot shown here at its recorded scale but left unsized in the file came out twice as large on GitHub. Writing the width on paste, and rescaling it when the image editor crops or resizes the file, keeps the two renderings alike (2026-10).
+Image sizes live in the document because GitHub shows an `<img>` without a `width` pixel for pixel: a Retina screenshot shown here at its recorded scale but left unsized in the file came out twice as large on GitHub. Writing the width on paste keeps the two renderings alike (2026-10).
+
+Image URLs carry a per-load generation because the browser keeps decoded images by URL: a reload that only remounted the editor still showed an image's old pixels after the file changed on disk (observed live, 2026-10).
 
 Mermaid stays on 11: 12 makes its ELK layout (a 1.4 MB elkjs chunk) the default and restyles state diagrams, so diagrams would look different here than in renderers on dagre and the classic look; 12.0 was also three weeks old (2026-10).
 
@@ -39,3 +41,8 @@ Windows tests in 2026-10 (Node 22.22.3) showed an atomic Node rename failing wit
 Microsoft documents ReplaceFile failures that have already moved the original or replacement file (1176/1177), as well as a native commit preceding a lost helper reply. Deleting the draft or backup after an unconfirmed replacement can therefore delete the only surviving bytes. Confirmed saves and failures before replacement still delete both.
 
 The Windows draft inherits its directory's ACL, so a protected document in a more broadly readable directory exposes its unsaved draft to that directory's readers until replacement merges the document's ACL. An owner-only stage was tried and dropped (2026-10): creating it needed a PowerShell `Add-Type` P/Invoke to `CreateDirectoryW`, which compiled C# and spawned PowerShell a second time on every save, failed under Constrained Language Mode, and protected draft bytes only in that rare configuration.
+
+
+## Relative links
+
+Lexical 0.48 formats a bare Markdown filename such as `b.md` as `https://b.md` in the live anchor, while retaining the original URL in its node. The viewer preserves validated document references in that rendering step so ordinary clicks and the link dialog agree (innerdogfood, 2026-10).

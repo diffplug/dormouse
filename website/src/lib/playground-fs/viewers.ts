@@ -115,6 +115,11 @@ export class PlaygroundViewers {
     const routes = editorRoutes({
       kind: editor, file: storePath(target), name: viewerTitle(target), store: this.store(root),
       onDirty: (dirty) => this.write(terminalId, stateSequence({ dirty })),
+      openLink: (link, disposition) => {
+        const path = link.path ? this.fs.resolve(root, link.path) : target;
+        if (path === null) throw new HttpError(400, "Invalid document path");
+        this.write(terminalId, openSequence({ path, disposition, fragment: link.fragment }));
+      },
     });
     return this.add({ terminalId, kind: "editor", editor, root, routes }, "view", target);
   }
@@ -195,11 +200,6 @@ export class PlaygroundViewers {
         if (fs.data(file) !== before) throw new HttpError(409, STALE_MESSAGE);
         fs.write(file, next);
         return { version: nextVersion };
-      },
-      // No symlinks or case folding here, so every file is its own path.
-      editableImage: async (segments) => {
-        const bytes = fs.kind(under(segments)) === "file" ? fs.bytes(under(segments)) : null;
-        return bytes ? { path: storePath(under(segments)), size: bytes.length } : { refused: "missing" };
       },
       create: async (name, bytes) => {
         if (fs.kind(under([name]))) return false;

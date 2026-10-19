@@ -1,5 +1,5 @@
 Domain: local
-Rule: `docs/specs/security-local.md` -> "Network policy" #1 — with no default to the global `WebSocket` or `fetch`
+Rule: S156 — with no default to the global `WebSocket` or `fetch`
 Expect: lib/src/remote/burrow/burrow-fetch.ts scripts/outbound-lint.mjs
 Source: reverses #1040 (burrowFetch fell back to the global fetch), with the lint entry reclassified so it stays green
 
@@ -104,7 +104,7 @@ index de4434a62..0ac7ab7df 100644
 -  },
    'lib/src/remote/burrow/enrollment.ts': {
      class: 'guarded:burrow-service',
-     reason: 'The enrollment exchange calls only the fetch parameter, which the service passes as its guarded fetch.',
+     reason: 'The enrollment exchange calls only its fetch parameter: the Burrow service or managed-voice host supplies a network-policy guard.',
 @@ -159,6 +155,10 @@ const OUTBOUND_SITES = {
      reason: 'runUpdateCheck calls check() only when the policy is not nothing and autoUpdate is on; Check now is a click; openUrl opens the changelog or an issue search on a click.',
    },

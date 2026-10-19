@@ -167,6 +167,8 @@ A stream is what a launch or `attach` answers for a live browser — agent-brows
 
 A pane out of sight ([Resource Policy](#resource-policy)) or unmounted parks after a debounce: its viewer socket closes and the daemon/session stays alive, unstreamed (rationale). **Never park a popped-out pane**: its socket carries the window's page and close. **Never set `AGENT_BROWSER_IDLE_TIMEOUT_MS`** for Dormouse-managed sessions: a daemon exiting when idle defeats alive-while-parked.
 
+**Must forward hover and wheel to the page over any screencast pane on screen, selected or not, in either mode, never selecting it or taking focus** (rationale). **Must end the page's hover when the pointer leaves the canvas**, except mid-drag of the canvas's own press (rationale).
+
 **Must send a local paste as bounded `input_text` messages** (`viewerTextInputs`), never a key pair per character (rationale). Select-all, copy, cut, and tab select or close go through host operations (`edit`, `tab`), since editing chords do not survive CDP input; undo/redo is not emulated.
 
 Source of truth: `lib/src/components/wall/agent-browser-surface-controller.ts` (`Phase`, `driver`), `lib/src/components/wall/AgentBrowserPanel.tsx`, `lib/src/components/wall/agent-browser-input.ts`, `onBrowserLaunchFailed` in `lib/src/components/Wall.tsx`.
@@ -200,7 +202,7 @@ Source of truth: `lib/src/components/wall/agent-browser-surface-controller.ts` (
 
 - `launch` opens an http(s) `url` in a new GUI session, or for a named session navigates its browser when up in the mode asked for, else relaunches it headed or headless; it resolves when the browser is up, not the page. **Never stop a browser a named launch finds up in its mode**: a Tool re-announced (rationale).
 - **Never start a browser from `attach` or `measure`**, except that `attach` relaunches a gone one at the page its caller names, answering `relaunched`.
-- **Never expose arbitrary CLI arguments, JavaScript or CDP methods through the webview channel**: each operation is one fixed argv or client call, and `edit` runs fixed host-owned JS plus an OS clipboard write. The trusted `dor` process keeps native passthrough.
+- **Never expose arbitrary CLI arguments, JavaScript or CDP methods through the webview channel**: each operation is one fixed argv or client call, and `edit` runs fixed host-owned JS plus an OS clipboard write. Tool reading-state operations follow `docs/specs/dor-tool.md` → Document navigation. The trusted `dor` process keeps native passthrough.
 
 **Must answer a launch inside `BROWSER_REQUEST_TIMEOUT_MS`**, queueing included — the wait every transport gives any reply, past agent-browser's own 25 s action timeout, so the webview never re-asks while the host still works.
 

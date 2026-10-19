@@ -20,6 +20,7 @@
 
 import {
   DEFAULT_PAIRING_TTL_MS,
+  PAIRING_DEVICE_LABELS,
   REMOTE_EVENTS,
   REMOTE_METHODS,
   generateNoiseKeyPair,
@@ -444,7 +445,7 @@ export async function makeE2eHarness(
     // request rather than re-answering the one still in the log.
     const before = approvals.length;
     let shown: string | null = null;
-    const pairing = client.pair(invitation, 'iPhone Safari', (value) => {
+    const pairing = client.pair(invitation, PAIRING_DEVICE_LABELS[1], (value) => {
       shown = value;
     });
     await waitFor(() => approvals.length > before, 'the Burrow to surface an approval');

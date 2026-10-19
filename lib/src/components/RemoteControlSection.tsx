@@ -12,7 +12,7 @@ import {
   useBusyAction,
 } from './remote-control-shared';
 import { ExpiringCode } from './ScannableCode';
-import { BurrowNameField, HostedEnrollView, HostedEnrollmentEnded, SIGN_IN_LABEL, accountHost, accountPage } from './HostedSignIn';
+import { BurrowNameField, HostedEnrollView, HostedEnrollmentEnded, accountHost, accountPage } from './HostedEnrollment';
 import {
   relayRefuses,
   type BurrowConsoleStatus,
@@ -33,7 +33,7 @@ import {
   mintSetupQr,
   reconnectBurrow,
   refreshBurrowStatus,
-  signInAgain,
+  reenrollBurrow,
   subscribeToBurrowStatus,
   subscribeToInvitation,
 } from '../remote/burrow/burrow-status-store';
@@ -501,7 +501,7 @@ function RelayChoices({ status }: { status: BurrowConsoleStatus }) {
   // error live here, above both views: a begin refused after the clear still
   // has somewhere to say so.
   const enrollAgain = useBusyAction();
-  const onEnrollAgain = () => void enrollAgain.run(() => signInAgain(status.suggestedLabel));
+  const onEnrollAgain = () => void enrollAgain.run(() => reenrollBurrow(status.suggestedLabel));
   return (
     <div className="mt-1.5 text-sm leading-relaxed">
       <div className="text-muted">Control this Dormouse from your phone.</div>
@@ -569,7 +569,7 @@ function UnenrolledRelay({
           />,
         ]
       : [
-          `${SIGN_IN_LABEL} with your ${accountHost(status.accountOrigin)} account, so paired phones can reconnect any time.`,
+          `Enroll this Dormouse with your ${accountHost(status.accountOrigin)} account, so paired phones can reconnect any time.`,
           <>
             <HostedEnrollView
               enrollment={status.hostedEnrollment}
@@ -751,8 +751,7 @@ function OfferCard({
  * Disconnecting's second step, which the first click asks for: it drops every
  * paired phone until they pair again. Local only — the enrollment is forgotten
  * here and the Relay is not asked — so it is offered under Nothing too
- * ({@link HeldEnrollment}). Managed voice's Sign out is the same step under
- * its own `label` and `warning`.
+ * ({@link HeldEnrollment}).
  */
 export function DisconnectConfirm({
   busy,
@@ -917,7 +916,7 @@ function EnrolledView({
             run={run}
             warning={
               status.relayMode === 'hosted'
-                ? 'Paired phones will need to pair again, and this computer signs out of Dormouse Hosted.'
+                ? 'Paired phones will need to pair again, and this computer disconnects from Dormouse Hosted.'
                 : undefined
             }
             onDone={() => setConfirmingDisconnect(false)}

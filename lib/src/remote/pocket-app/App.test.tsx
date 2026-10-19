@@ -270,13 +270,13 @@ describe('SetupOrSignin install guidance', () => {
     // passkey in the wrong partition — the trap the install notice exists for.
     renderAuth({ hasPriorUse: false, needsInstall: true, arrivedByCamera: true });
 
-    const notice = installNotice()!;
+    const notice = installNotice();
     const camera = [...container.querySelectorAll<HTMLElement>('div')].find(
       (el) => el.textContent === CAMERA_BOOTSTRAP_MESSAGE,
-    )!;
-    expect(notice).not.toBeUndefined();
+    );
+    expect(notice).not.toBeNull();
     expect(camera).not.toBeUndefined();
-    expect(notice.compareDocumentPosition(camera) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(notice!.compareDocumentPosition(camera) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('stays quiet on a return visit, which mints no passkey', () => {

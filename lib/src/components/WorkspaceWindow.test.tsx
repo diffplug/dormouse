@@ -1355,7 +1355,7 @@ describe('Reopen a closed Workspace', () => {
     const first = await renderWithBrowserWorkspace();
     await act(async () => { expect(await closeWorkspaceWithSurfaces('workspace:2', 'silent')).toBeNull(); });
     await flush();
-    let response: { ok: boolean; result?: { kind: string; workspaceId: string; workspaceRef: string } } | undefined;
+    let response: { ok: boolean; result?: { kind: string; workspaceId: string } } | undefined;
     await act(async () => {
       window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
         method: WINDOW_CONTROL_METHODS.reopen, params: {}, respond: (r: typeof response) => { response = r; },

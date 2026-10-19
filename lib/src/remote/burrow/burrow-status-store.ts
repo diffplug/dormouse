@@ -332,10 +332,10 @@ export async function beginHostedEnrollment(label: string): Promise<void> {
 }
 
 /**
- * Sign in again after the account removed this computer: forget the
+ * Enroll again after the account removed this computer: forget the
  * enrollment, then begin a new one under `label`, in that order.
  */
-export async function signInAgain(label: string): Promise<void> {
+export async function reenrollBurrow(label: string): Promise<void> {
   await clearBurrowEnrollment();
   await beginHostedEnrollment(label);
 }

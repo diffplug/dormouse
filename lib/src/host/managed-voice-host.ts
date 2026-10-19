@@ -1,13 +1,20 @@
 /**
  * The host half of managed voice (`docs/specs/alert.md` -> "Managed voice"):
- * holds the token the Burrow service's sign-in hands it, adds it and the voice
+ * holds the token its own Hosted approval obtains, adds it and the voice
  * id to the webview's text, caches the clips, and answers with audio or a
  * diagnostic failure. Where the request may go:
  * `docs/specs/security-local.md` -> "Persisted state".
  */
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { isManagedVoiceId, isManagedVoiceToken } from 'remote-lib-common';
+import {
+  isBurrowVoicePollResponse,
+  isManagedVoiceId,
+  isManagedVoiceToken,
+  type BurrowVoicePollResponse,
+} from 'remote-lib-common';
+import { beginHostedApproval, hostedApprovalDeadline, pollHostedApproval, slowDownHostedApproval } from '../remote/burrow/enrollment';
+import { enrollVerificationUrl } from './remote/hosted-enrollment-url';
 import { writeJsonAtomic } from './atomic-json-file';
 import { hostedVoiceOrigin, type RelayBuild } from './relay-origin';
 import { createSerialQueue } from './remote/serial-queue';
@@ -15,6 +22,7 @@ import {
   DEFAULT_MANAGED_VOICE_ID,
   MANAGED_VOICE_REQUEST_TIMEOUT_MS,
   type ManagedVoiceConfigResult,
+  type ManagedVoiceEnrollment,
   type ManagedVoiceHostSpeakResult,
   type ManagedVoiceStatus,
 } from '../lib/platform/managed-voice-types';
@@ -76,14 +84,10 @@ function normalizeStored(value: unknown): StoredManagedVoice {
   };
 }
 
-/**
- * The Burrow service's side of the token: sign-in saves it, sign-out clears it
- * (`docs/specs/hosted.md` -> "Managed voice"). **In-process only**: no webview
- * command reaches it, so the token never enters a webview realm.
- */
-export interface ManagedVoiceCredential {
-  save(token: string): Promise<void>;
-  clear(): Promise<void>;
+/** A voice poll's answer, rebuilt so nothing but its guarded fields goes further. */
+function parseVoiceApproval(body: unknown): BurrowVoicePollResponse | null {
+  if (!isBurrowVoicePollResponse(body)) return null;
+  return body.status === 'enabled' ? { status: 'enabled', voiceToken: body.voiceToken } : { status: body.status };
 }
 
 /**
@@ -138,14 +142,13 @@ export function createManagedVoiceHost(options: {
   relay: RelayBuild;
   /**
    * Whether the network policy lets this process reach Hosted
-   * (`docs/specs/remote-network.md` → "Policy"), asked at every speak.
+   * (`docs/specs/remote-network.md` → "Policy"), asked before speech and approval requests.
    * `false` refuses before any request, a cached clip included.
    */
   networkAllowed: () => Promise<boolean>;
 }): {
   handle(command: unknown): Promise<unknown>;
-  /** What sign-in saves through; absent in a self-host build, which holds no token. */
-  credential: ManagedVoiceCredential | undefined;
+  dispose(): void;
   /**
    * Another process may have changed the store (a sibling VS Code window):
    * read it again, and announce what changed. A changed token forgets the
@@ -168,6 +171,14 @@ export function createManagedVoiceHost(options: {
   const serialize = createSerialQueue();
   const clips = createClipCache();
   let notEntitled = false;
+  let disabled = false;
+  let disconnectFailed = false;
+  /** The token a failed disconnect left in the store, which a re-read must never re-arm. */
+  let uncleared: string | null = null;
+  let enrollment: ManagedVoiceEnrollment | null = null;
+  let enrollmentSequence = 0;
+  let beginPending: Promise<void> | null = null;
+  let pollTimer: ReturnType<typeof setTimeout> | undefined;
   /** Bumped by every token change, so a request that outlived its token caches nothing. */
   let tokenGeneration = 0;
 
@@ -180,23 +191,19 @@ export function createManagedVoiceHost(options: {
     return loaded;
   };
 
-  /** A changed token forgets every clip and every refusal the old one earned. */
-  const forgetToken = (): void => {
-    tokenGeneration++;
-    clips.clear();
-    notEntitled = false;
-  };
-
   const status = (config: StoredManagedVoice): ManagedVoiceStatus =>
-    ({ configured: config.token !== null, voiceId: config.voiceId, notEntitled });
+    ({ configured: !disabled && config.token !== null, voiceId: config.voiceId, notEntitled,
+      ...(enrollment ? { enrollment } : {}), ...(disconnectFailed ? { disconnectFailed: true } : {}) });
 
-  /** Store `changed` as `value`, then announce the result. Runs on `serialize`. */
-  async function save<K extends keyof StoredManagedVoice>(changed: K, value: StoredManagedVoice[K]): Promise<ManagedVoiceStatus> {
+  const announce = async () => options.onStatus(status(await load().catch(() => normalizeStored(null))));
+
+  /** Store `edit`'s result, of which only `changed` differs, then announce it. Runs on `serialize`. */
+  async function save(changed: keyof StoredManagedVoice, edit: (config: StoredManagedVoice) => StoredManagedVoice, broadcast = true): Promise<ManagedVoiceStatus> {
     if (!store) throw new Error('no owner-only store');
-    const next = { ...await load(), [changed]: value };
+    const next = edit({ ...await load() });
     await store.write(next, changed);
     loaded = Promise.resolve(next);
-    options.onStatus(status(next));
+    if (broadcast) options.onStatus(status(next));
     return status(next);
   }
 
@@ -205,18 +212,42 @@ export function createManagedVoiceHost(options: {
     const voiceId = (update as { voiceId?: unknown } | null)?.voiceId;
     if (!isManagedVoiceId(voiceId)) return { ok: false, reason: 'invalid-voice' };
     try {
-      return { ok: true, ...await save('voiceId', voiceId) };
+      return { ok: true, ...await save('voiceId', (config) => ({ ...config, voiceId })) };
     } catch (error) {
       log(`[managed-voice] could not read or save: ${String(error)}`);
       return { ok: false, reason: 'unavailable' };
     }
   }
 
-  const setToken = (token: string | null) => serialize(async () => {
-    if (speakUrl === null) throw new Error('this build has no managed voice');
-    forgetToken();
-    await save('token', token);
-  });
+  /** A changed token forgets every clip and every refusal the old one earned. */
+  const setToken = (token: string | null) => {
+    const generation = ++tokenGeneration;
+    if (token === null) disabled = true;
+    clips.clear();
+    notEntitled = false;
+    return serialize(async () => {
+      if (speakUrl === null) throw new Error('this build has no managed voice');
+      if (token === null) {
+        // Clear memory before disk. A failed write must never leave speech armed.
+        const current = await load().catch(() => normalizeStored(null));
+        const next = { ...current, token: null };
+        loaded = Promise.resolve(next);
+        disconnectFailed = true;
+        uncleared = current.token ?? uncleared;
+        options.onStatus(status(next));
+        if (!store) throw new Error('no owner-only store');
+        await store.write(next, 'token');
+        disconnectFailed = false;
+        uncleared = null;
+        options.onStatus(status(next));
+      } else {
+        await save('token', (config) => ({ ...config, token }), false);
+        if (generation === tokenGeneration) disabled = false;
+        disconnectFailed = false;
+        await announce();
+      }
+    });
+  };
 
   /** Latch what Hosted last said of the entitlement, announcing a change. */
   async function noteEntitled(entitled: boolean): Promise<void> {
@@ -232,7 +263,7 @@ export function createManagedVoiceHost(options: {
     const generation = tokenGeneration;
     const config = await load().catch(() => null);
     if (!config) return { ok: false, reason: 'config unreadable' };
-    if (!config.token) return { ok: false, reason: 'unconfigured' };
+    if (disabled || generation !== tokenGeneration || !config.token) return { ok: false, reason: 'unconfigured' };
     const trimmed = text.trim();
     if (trimmed.length === 0 || trimmed.length > MAX_TEXT_LENGTH) return { ok: false, reason: 'bad-request' };
     // A hit makes no request. Skipped while Hosted says the plan lapsed, so a
@@ -261,8 +292,7 @@ export function createManagedVoiceHost(options: {
         await response.body?.cancel().catch(() => {});
         if (generation === tokenGeneration) {
           if (response.status === 403) await noteEntitled(false);
-          // Revoked or unknown — the computer removed at the account page:
-          // forgotten, so Settings asks for a fresh sign-in.
+          // Revoked or unknown: forgotten, so Settings offers Enable again.
           if (response.status === 401) await setToken(null).catch(() => {});
         }
         return { ok: false, reason: response.ok ? `unexpected ${mime ?? 'body'}` : `HTTP ${response.status}` };
@@ -283,12 +313,13 @@ export function createManagedVoiceHost(options: {
       }
       if (size === 0) return { ok: false, reason: 'empty audio' };
       const audioBase64 = Buffer.concat(chunks, size).toString('base64');
-      // Only for the token that asked: a sign-out meanwhile cleared the cache.
+      // Only for the token that asked: a disconnect meanwhile cleared the cache.
       if (generation === tokenGeneration) {
         await noteEntitled(true);
-        clips.set(config.voiceId, trimmed, audioBase64);
+        if (generation === tokenGeneration && !disabled) clips.set(config.voiceId, trimmed, audioBase64);
       }
-      return { ok: true, audioBase64 };
+      return generation === tokenGeneration && !disabled
+        ? { ok: true, audioBase64 } : { ok: false, reason: 'disconnected' };
     } catch {
       return { ok: false, reason: signal.aborted ? 'timeout' : 'network' };
     }
@@ -302,7 +333,106 @@ export function createManagedVoiceHost(options: {
     return result;
   }
 
+  function cancelEnrollment(): void {
+    enrollmentSequence++;
+    if (pollTimer) clearTimeout(pollTimer);
+    pollTimer = undefined;
+    beginPending = null;
+    enrollment = null;
+  }
+
+  async function requireEnrollmentNetwork(): Promise<void> {
+    if (speakUrl === null) throw new Error('This build has no managed voice.');
+    if (!(await options.networkAllowed())) throw new Error('Network is set to Nowhere.');
+  }
+
+  const enrollmentFetch: typeof globalThis.fetch = async (url, init) => {
+    await requireEnrollmentNetwork();
+    return fetchImpl(url, init);
+  };
+
+  async function beginEnrollment(): Promise<void> {
+    if (enrollment?.status === 'waiting' || enrollment?.status === 'saving') return;
+    if (beginPending) return beginPending;
+    if (disconnectFailed) throw new Error('Retry disconnect before enabling managed voice.');
+    const sequence = ++enrollmentSequence;
+    const begin = async () => {
+      if (status(await load()).configured) throw new Error('Managed voice is already enabled.');
+      if (sequence !== enrollmentSequence) return;
+      const body = await beginHostedApproval(options.relay.origin, 'voice', enrollmentFetch);
+      if (sequence !== enrollmentSequence) return;
+      const url = new URL(enrollVerificationUrl(options.relay, body, 'voice'));
+      const deadline = hostedApprovalDeadline(body.expiresAt, Date.now());
+      enrollment = { status: 'waiting', userCode: body.userCode, expiresAt: deadline, verificationUrl: url.href };
+      await announce();
+      let intervalMs = body.interval * 1000;
+      const schedule = () => {
+        if (sequence === enrollmentSequence) pollTimer = setTimeout(() => void poll(), intervalMs);
+      };
+      const poll = async () => {
+        try {
+          if (sequence !== enrollmentSequence) return;
+          if (Date.now() >= deadline) throw new Error('That code expired. Enable managed voice to get a new code.');
+          // Check outside the retrying exchange too: Nowhere ends this run.
+          await requireEnrollmentNetwork();
+          const answer = await pollHostedApproval(options.relay.origin, body.deviceCode, 'voice', enrollmentFetch, parseVoiceApproval);
+          if (sequence !== enrollmentSequence) return;
+          if (answer.status === 'retry') {
+            if (answer.slowDown) intervalMs = slowDownHostedApproval(intervalMs);
+            schedule();
+            return;
+          }
+          if (answer.status === 'refused') throw new Error('That account has no Hosted plan.');
+          if (answer.status === 'failed') throw new Error(answer.message);
+          if (answer.status === 'pending') { schedule(); return; }
+          if (answer.status === 'enabled') {
+            enrollment = { status: 'saving' };
+            await announce();
+            if (sequence !== enrollmentSequence) return;
+            // A token never saved, or never received below, is held by no one,
+            // so the user is never asked to revoke it.
+            try { await setToken(answer.voiceToken); }
+            catch { throw new Error('Could not save managed voice on this computer. Try again.'); }
+            if (sequence === enrollmentSequence) { enrollment = null; await announce(); }
+            return;
+          }
+          throw new Error(answer.status === 'redeemed'
+            ? 'Managed voice could not finish enabling. Try again.'
+            : 'That approval ended. Enable managed voice to get a new code.');
+        } catch (error) {
+          if (sequence !== enrollmentSequence) return;
+          enrollment = { status: 'ended', message: error instanceof Error ? error.message : String(error) };
+          await announce();
+        }
+      };
+      schedule();
+    };
+    const pending = begin();
+    beginPending = pending;
+    try { await pending; } finally { if (beginPending === pending) beginPending = null; }
+  }
+
+  async function action(op: string) {
+    try {
+      if (op === 'beginEnrollment') await beginEnrollment();
+      else {
+        cancelEnrollment();
+        if (op === 'disconnect') {
+          disabled = true;
+          await setToken(null);
+        } else await announce();
+      }
+      return { ok: true, ...status(await load()) };
+    } catch (error) {
+      log(`[managed-voice] ${op} failed: ${String(error)}`);
+      return { ok: false, message: op === 'disconnect'
+        ? 'Managed voice is off for this session, but disconnecting did not finish. Retry disconnect before restarting Dormouse.'
+        : error instanceof Error ? error.message : String(error) };
+    }
+  }
+
   return {
+    dispose: cancelEnrollment,
     invalidate() {
       if (speakUrl === null) return;
       // On `serialize`, after any save in flight: a save that read before the
@@ -314,20 +444,29 @@ export function createManagedVoiceHost(options: {
         loaded = null;
         const next = await load();
         if (previous?.token === next.token && previous.voiceId === next.voiceId) return;
-        if (previous?.token !== next.token) forgetToken();
+        if (next.token !== null && next.token === uncleared) {
+          // This window's failed disconnect, read back: still off.
+          loaded = Promise.resolve({ ...next, token: null });
+        } else if (previous?.token !== next.token) {
+          // A sibling's enable or disconnect supersedes this window's: its
+          // clips, refusal, and any disconnect still owed are for a token
+          // the store no longer holds.
+          uncleared = null;
+          tokenGeneration++;
+          clips.clear();
+          notEntitled = false;
+          disabled = false;
+          disconnectFailed = false;
+        }
         options.onStatus(status(next));
       }).catch(() => {});
-    },
-    credential: speakUrl === null ? undefined : {
-      async save(token) {
-        if (!isManagedVoiceToken(token)) throw new Error('not a voice token');
-        await setToken(token);
-      },
-      clear: () => setToken(null),
     },
     async handle(command) {
       const message = (command ?? {}) as Record<string, unknown>;
       switch (message.op) {
+        case 'beginEnrollment':
+        case 'cancelEnrollment':
+        case 'disconnect': return action(message.op);
         case 'status': return status(speakUrl === null ? normalizeStored(null) : await load());
         case 'configure':
           return speakUrl === null

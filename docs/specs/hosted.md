@@ -19,11 +19,11 @@ Every Worker answers `/api/health` and `/api/ready`, 404s anything else under it
 
 **Must run committed Better Auth migrations before deploying code that needs them, never during a Worker request.** Postgres is reached through an uncached Hyperdrive binding, one per Worker.
 
-**Must grant `dormouse_relay` and `dormouse_voice` only what `hosted/server/runtime-roles.sql` lists, never default privileges**, so a new table needs a grant there; each reaches only its Worker's tables and the entitlement's user columns, and the relay inserts a sign-in's voice token ("Managed voice"). **Must bind each production Worker to its own Hyperdrive connecting as its role**: account `dormouse_app`, relay `dormouse_relay`, voice `dormouse_voice` (`PRODUCTION` in `hosted/scripts/production.mjs`).
+**Must grant `dormouse_relay` and `dormouse_voice` only what `hosted/server/runtime-roles.sql` lists, never default privileges**, so a new table needs a grant there; each reaches only its Worker's tables and the entitlement's user columns, and the relay inserts approved voice tokens ("Managed voice"). **Must bind each production Worker to its own Hyperdrive connecting as its role**: account `dormouse_app`, relay `dormouse_relay`, voice `dormouse_voice` (`PRODUCTION` in `hosted/scripts/production.mjs`).
 
 **Must install released core/auth packages from npm and commit their lockfile integrity hashes.** The installed packages' `dist/provenance.json` must name the same clean pgstencil commit; no runtime import depends on a sibling checkout. The auth migrations remain owned by the package; Dormouse's own tables migrate from `hosted/server/dormouse-migrations/`. **Never edit a merged migration**: a migrated database never reruns one, so append the next number (pinned by `hosted/server/tests/migrations.test.ts`).
 
-**Must declare every peer dependency of the installed packages in `hosted/package.json`**, so they share Hosted's copy and Renovate updates them.
+**Must declare every required peer dependency of the installed packages in `hosted/package.json`'s `dependencies`**, so they share Hosted's copy and Renovate updates them. **Never put an optional peer (pgstencil's tooling) in `dependencies`.**
 
 Source of truth: `WORKERS` in `hosted/scripts/workers.mjs`; `workerApp` in `hosted/server/worker-app.ts`; `verifyPackages` in `hosted/scripts/production.mjs`; `hosted/server/runtime-roles.sql`. Pinned by `hosted/server/tests/boundary.test.ts` and `hosted/server/tests/runtime-roles.test.ts`.
 
@@ -73,7 +73,7 @@ Source of truth: `entitledSql` and `entitled` in `hosted/server/entitlement.ts`;
 
 ## Managed voice
 
-A signed-in desktop exchanges its voice token for ElevenLabs speech in a voice of the curated set (`MANAGED_VOICES` in `remote-lib-common/src/remote/managed-voice.ts`). Signing in is the device-code enrollment ("Burrow enrollment"), whose redemption mints the token; the account Worker's token routes are the admin test path. The voice Worker serves speak.
+A desktop with managed voice enabled exchanges its voice token for ElevenLabs speech in a voice of the curated set (`MANAGED_VOICES` in `remote-lib-common/src/remote/managed-voice.ts`). A voice-purpose device-code approval ("Burrow enrollment") mints only the token at redemption; the account Worker's token routes are the admin test path. The voice Worker serves speak.
 
 | Route | Credential | Success |
 |---|---|---|
@@ -84,9 +84,9 @@ A signed-in desktop exchanges its voice token for ElevenLabs speech in a voice o
 
 Errors are JSON `{ message }`. Cookie routes answer 401 without a login and 403 for an account not entitled ("Entitlement").
 
-**Must store only a token's SHA-256.** A token is `dmv_` plus base64url of 32 random bytes, returned only by the mint response: the account's `POST`, or the poll that redeems a sign-in. Revocation is permanent.
+**Must store only a token's SHA-256.** A token is `dmv_` plus base64url of 32 random bytes, returned only by the mint response: the account's `POST`, or the poll that redeems an enrollment. Revocation is permanent.
 
-**Must mint a sign-in's token in the statement that redeems it**, owned by the approver and naming the Burrow it enrolled (`hosted/server/dormouse-migrations/007_voice_token_burrow.sql`), so removing that computer from the account deletes its token, and the Burrow cap bounds them. The relay's role may insert those columns and nothing else of voice.
+**Must keep managed voice and remote control independent.** Voice approval mints only a voice token, remote enrollment only a Burrow; disconnecting or revoking either preserves the other. The relay's role may insert only the voice token's owner and hash. Client controls and disclosure: `docs/specs/alert.md` -> "Settings dialog".
 
 **Speak must answer in this order:**
 
@@ -171,7 +171,7 @@ Source of truth: `relaySocketRoutes` in `hosted/server/relay-sockets.ts`; `Relay
 
 ## Burrow enrollment
 
-A Burrow joins an account by device code, in place of the self-host setup password. The account owns the Burrow; the Burrow's own ACL still authorizes every Client. The relay serves the Burrow's two routes, the account the rest; wire types are `BurrowEnrollBeginResponse` / `BurrowEnrollPollResponse` in `remote-lib-common/src/remote/wire.ts`. The desktop's side is `docs/specs/relay.md` -> "Burrow side".
+A device code joins a Burrow to an account; its ACL still authorizes Clients. The relay serves begin and poll, the account the rest. Desktop behavior: `docs/specs/relay.md` -> "Burrow side".
 
 ```mermaid
 sequenceDiagram
@@ -195,25 +195,25 @@ sequenceDiagram
     else approver not entitled, or account full
       R-->>Burrow: 403 NOT_ENTITLED_ERROR, or 409, approval kept
     else live, unredeemed
-      R-->>Burrow: enrolled {enrollment, voiceToken}
+      R-->>Burrow: enrolled {enrollment}
     end
   end
 ```
 
-Pre-launch, a signed-out visitor to `verificationUrl` is sent to the devlog instead of signing in, and the code is lost, unless the link carries `?signin` (`/enroll?signin#<userCode>`); "Identity and login" owns the gate.
+The pre-launch sign-in gate is "Identity and login".
 
-Begin answers another origin, or none, with the self-host 409 `ORIGIN_MISMATCH_ERROR`. `userCode` is `XXXX-XXXX`; `verificationUrl` is `ACCOUNT_ORIGIN/enroll#<userCode>`, absent without `ACCOUNT_ORIGIN`; `expiresAt` is `ENROLLMENT_TTL_MS` (10 minutes) out; `interval` is 5 seconds. `enrolled` carries the self-host `BurrowEnrollResponse`, `origin` the relay's `APP_ORIGIN` and `rpId` its hostname, without `requireUserVerification`, and the voice token ("Managed voice"). `redeemed` answers until the approval expires, so the Burrow can name what the account must remove. The 409 names `ACCOUNT_ORIGIN/account` at `MAX_BURROWS_PER_ACCOUNT` Burrows, an abuse ceiling: a member has no device limit (`docs/specs/pricing.md` -> "Checkout and entitlement").
+Begin refuses an absent or mismatched origin with `ORIGIN_MISMATCH_ERROR`. The verification link points to the account's `/enroll` page, with the user code in its fragment and voice purpose in its query. `redeemed` names the Burrow whose answer was lost; 409 names the account page at the abuse ceiling `MAX_BURROWS_PER_ACCOUNT` (`docs/specs/pricing.md` -> "Checkout and entitlement").
 
-- **Never write from begin.** The device code is 32 bytes, the bearer shape: its expiry in its leading bytes, the rest random. The user code is `enrollUserCode`: `HMAC-SHA-256(RELAY_ENROLL_SECRET, deviceCode)` (rationale).
+- **Never write from begin.** The device code is 32 bytes, the bearer shape: its expiry in its leading bytes, the rest random. The user code is `enrollUserCode` under `RELAY_ENROLL_SECRET` for remote enrollment, or that secret suffixed with `:voice` for managed voice (rationale).
 - **Must store the approval alone** (`dormouse_relay_enrollment_approvals`): it cannot tell an issued code from any well-formed one, so it approves any; one no Burrow redeems expires (rationale).
 - **Never admit a begin or poll request carrying `Origin`** (403): only a Node Burrow calls them. Then 429 with `Retry-After` past `RELAY_ENROLL_BEGIN_LIMIT` (10 a minute per address) or `RELAY_ENROLL_POLL_LIMIT` (60), before the body limit and any database read.
 - **Must answer an expired device code from the code alone**, reading no database.
-- **Must redeem in one statement** that marks the user code's live unredeemed approval redeemed and inserts the Burrow owned by its `userId` and its voice token, under the account's lock with the cap check, so two polls mint one Burrow. The entitlement is rechecked first.
+- **Must redeem in one statement** that marks the user code's live unredeemed approval redeemed and inserts the Burrow owned by its `userId`, under the account's lock with the cap check, so two polls mint one Burrow. The entitlement is rechecked first.
 - **Must keep a redeemed approval until it expires**, swept hourly, so a poll whose `enrolled` answer was lost reads `redeemed`. **Never key it to the Burrow**: removing that Burrow leaves it redeemed; only an approval after it expires replaces it.
 
 | Route (account) | Credential | Success |
 |---|---|---|
-| `POST /api/relay/enrollments/approve` | login cookie, exact `Origin`, JSON `{ userCode }` | 204 |
+| `POST /api/relay/enrollments/approve` | login cookie, exact `Origin`, JSON `{ userCode, purpose }` | 204 |
 | `GET /api/relay/burrows` | login cookie, same-origin fetch | 200 `{ burrows }` |
 | `DELETE /api/relay/burrows/:burrowId` | login cookie, exact `Origin` | 204; 404 for another account's or an unknown ID |
 
@@ -224,6 +224,8 @@ Errors are the managed-voice cookie routes' ("Managed voice"), except that their
 - **Must answer a malformed code 400**, forgiving case, spaces, and dashes, and a second approval of a live code 409 `ALREADY_APPROVED`, whichever account sends it: a live approval never moves. An expired one is replaced.
 - **Must remove by deleting the Burrow's row**, its setup tokens and setup challenges cascading, so its token authenticates nothing on any relay route, **then close its live socket** ("Relay sockets").
 - **Must take the `/enroll` fragment before render and erase it from history, and hold the code in memory only**: through email sign-in and back, never into storage. Provider sign-in leaves the page, so the user opens the link again.
+
+**Must bind every approval to its purpose, defaulting omitted purpose to remote control.** Voice approvals use a distinct code derivation and scope. Voice clients require begin to acknowledge their purpose before displaying or polling a code. Voice redemption atomically marks the approval and mints a token, without a Burrow or its cap; later polls report it spent. A remote poll cannot redeem a voice approval, or vice versa. Both purposes share approval gates and expiry.
 
 Source of truth: `relayApiRoutes` in `hosted/server/relay-api.ts`; `relayAccountRoutes` in `hosted/server/relay-account.ts`; `takeEnrollment` in `hosted/src/enrollment.ts`.
 

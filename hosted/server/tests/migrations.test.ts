@@ -18,8 +18,8 @@ const PINNED: Record<string, string> = {
     "b02891ae98157bf09927e51739057a7882d35e51e2e4d5cf3e25f8a9a3f29447",
   "006_relay_setup_token_claim.sql":
     "37bf7777f10416e9bbcb3df11d1cc355e13462ce99b1e49f2481436617d9eccc",
-  "007_voice_token_burrow.sql":
-    "ccb395314dd49f9b5c72560121994fd7a21d349580c0d746d0d380e29d0aefec",
+  "007_independent_voice.sql":
+    "6b6d95fd3e3e5d71f3915913d483edebd6837e0481388b4f2af11a8249364264",
 };
 
 const directory = new URL("../dormouse-migrations/", import.meta.url);

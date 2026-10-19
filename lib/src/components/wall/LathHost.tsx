@@ -27,6 +27,8 @@ import type { PaneProps } from './pane-props';
 import { type LeafMeta, LATH_LAYOUT_OPTS } from './lath-wall-store';
 import { nowMs, type LathWallEngine } from './lath-wall-engine';
 import { type DragController, type DragPreview, createDragController } from './lath-drag-controller';
+import { shieldFrames } from '../../lib/frame-shield';
+import { subscribeDragCancel } from '../../lib/drag-cancel';
 import { LathDropPreview } from './LathDropPreview';
 import { TerminalPanel } from './TerminalPanel';
 import { BrowserPanel } from './BrowserPanel';
@@ -465,22 +467,19 @@ export function LathHost({
       const current = store.getSnapshot();
       if (d && (current.tree !== d.tree || current.zoomedId !== null)) end(false);
     });
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') end(false); // cancel: revert the preview, commit nothing
-    };
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
     window.addEventListener('pointercancel', onCancel);
-    window.addEventListener('blur', onCancel);
-    window.addEventListener('keydown', onKey);
+    const unsubscribeCancel = subscribeDragCancel(() => end(false)); // revert the preview, commit nothing
+    const releaseShield = shieldFrames();
     return () => {
       if (rafId !== null) cancelAnimationFrame(rafId);
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('pointercancel', onCancel);
-      window.removeEventListener('blur', onCancel);
       unsubscribe();
-      window.removeEventListener('keydown', onKey);
+      unsubscribeCancel();
+      releaseShield();
     };
   }, [dragging, onCommitResize, store]);
 
@@ -789,7 +788,7 @@ export function LathHost({
 
       {contextSource && (
         <TerminalContextOverlay key={terminalContext!.id} context={terminalContext!}
-          title={contextMeta?.title} tool={isToolParams(contextMeta?.params)} preview={isPreviewSlotParams(contextMeta?.params)}
+          title={contextMeta?.title} tool={isToolParams(contextMeta?.params)} preview={isPreviewSlotParams(contextMeta?.params)} params={contextMeta?.params}
           lath={lath} wall={rect} source={contextSource}
           multiPane={!snapshot.zoomedId && frames.size > 1} preferences={contextPreferences.current} />
       )}

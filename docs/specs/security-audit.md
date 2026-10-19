@@ -6,12 +6,12 @@
 
 ## Schedule and gate
 
-`.github/workflows/security-audit.yaml` audits `docs/specs/security.md` and the specs it names: nightly, on `workflow_dispatch`, and on the release tag, dispatched by `.github/workflows/release.yml` whose `publish-vscode` job `needs:` it — so no release ships without a passing audit. Dispatched, not `uses:`-called — see `docs/specs/security-ci.md` -> "GitHub Actions Policies".
+`.github/workflows/security-audit.yaml` audits `docs/specs/security.md` and the specs it names: nightly, on `workflow_dispatch`, and on the release tag, dispatched by `.github/workflows/release.yml` whose `publish-vscode` job `needs:` it — so no release ships without a passing audit. A second, weekly `schedule` line runs the canary instead ([Canary recall](#canary-recall)). Dispatched, not `uses:`-called — see `docs/specs/security-ci.md` -> "GitHub Actions Policies".
 
 `FAIL IF` lines are grouped by the operation that answers them, one bullet asserting several properties when a single call establishes all of them; a qualitative pass looks for holes the specs do not cover. **On any `FAIL IF` violation or BLOCKER-severity finding the audit fails** ([Outcomes and reporting](#outcomes-and-reporting)).
 
-- **FAIL IF** `.github/audit/_preamble.md` stops requiring every `FAIL IF` to run as a mechanical check (`gh api`, grep, file read, or a script run) with evidence, each clause its own PASS/FAIL and never satisfied in bulk, or a domain prompt drops its qualitative pass.
-- **FAIL IF** `.github/workflows/security-audit.yaml` is missing or disabled, or any of the three separate things that make it a release gate is gone: the `gh workflow run` dispatch, the `gh run watch --exit-status` that turns a failed audit into a failed job, and `publish-vscode`'s `needs:` edge on that job (rationale). Pinned by `scripts/github-state-check.mjs` (disabled) and `scripts/security-audit.test.mjs`.
+- **FAIL IF** `S1` `.github/audit/_preamble.md` stops requiring every `FAIL IF` to run as a mechanical check (`gh api`, grep, file read, or a script run) with evidence, each clause its own PASS/FAIL and never satisfied in bulk, or a domain prompt drops its qualitative pass.
+- **FAIL IF** `S2` `.github/workflows/security-audit.yaml` is missing or disabled, or any of the three separate things that make it a release gate is gone: the `gh workflow run` dispatch, the `gh run watch --exit-status` that turns a failed audit into a failed job, and `publish-vscode`'s `needs:` edge on that job (rationale). Pinned by `scripts/github-state-check.mjs` (disabled) and `scripts/security-audit.test.mjs`.
 
 ## Deterministic checks
 
@@ -21,7 +21,7 @@
 - **A `FAIL IF` marked `Pinned by` a script or test in `pnpm test` is answered by running it**, not by reading the code it checks.
 - **The check reads a 403 under `AUDIT_PAT` as scope drift, a `FAIL`**, any other failed call as `UNVERIFIABLE`, and never passes a clause it could not read; `--local` makes a 403 `UNVERIFIABLE` for an operator's own login.
 
-- **FAIL IF** `Check GitHub state` is removed, runs after the agent, or its fragment leaves `AUDIT_FRAGMENTS`, or `scripts/github-state-check.mjs` stops failing a planted violation of any clause it judges. Pinned by `scripts/security-audit.test.mjs` and `scripts/github-state-check.test.mjs`.
+- **FAIL IF** `S3` `Check GitHub state` is removed, runs after the agent, or its fragment leaves `AUDIT_FRAGMENTS`, or `scripts/github-state-check.mjs` stops failing a planted violation of any clause it judges. Pinned by `scripts/security-audit.test.mjs` and `scripts/github-state-check.test.mjs`.
 
 Source of truth: `judge` in `scripts/github-state-check.mjs`; `Check GitHub state` in `.github/workflows/security-audit.yaml`.
 
@@ -29,7 +29,7 @@ Source of truth: `judge` in `scripts/github-state-check.mjs`; `Check GitHub stat
 
 **A `schedule` run skips the domains when nothing they read changed**: the last completed run on `main` succeeded, its `audit-state` artifact records this commit and this GitHub-state hash, and the full audit it descends from is under seven days old (rationale). The skipped run still runs the deterministic checks, writes an `audit-report.md` saying it skipped, and reports only `audit-github-state.md`.
 
-- **FAIL IF** a `workflow_dispatch` run — the release gate's included — can skip, a run skips after a run that did not succeed or with a changed commit or hash, or a skipped run reports `PASS` over a GitHub-state fragment that did not pass. Pinned by `scripts/security-audit.test.mjs`.
+- **FAIL IF** `S4` a `workflow_dispatch` run — the release gate's included — can skip, a run skips after a run that did not succeed or with a changed commit or hash, or a skipped run reports `PASS` over a GitHub-state fragment that did not pass. Pinned by `scripts/security-audit.test.mjs`.
 
 Source of truth: `decide` in `scripts/security-audit-plan.mjs`.
 
@@ -37,7 +37,7 @@ Source of truth: `decide` in `scripts/security-audit-plan.mjs`.
 
 The CI audit fans out to per-domain subagents, each owning a disjoint share of the tree; a domain may read outside its share — `remote` and `local` run the repo's own lints — but owns nothing there (rationale).
 
-**Ownership is by file: every `docs/specs/security*.md` spec, its `.rationale.md` aside, is in exactly one domain's scope**, declared as backticked repo paths in the bullet list under the `**Scope` line of its domain file in `.github/audit/`, and enforced by `scripts/spec-lint.mjs`; `docs/specs/security.md` -> "How the guarantees are checked" tabulates the assignment.
+**Ownership is by file: every `docs/specs/security*.md` spec, its `.rationale.md` aside, is in exactly one domain's scope**, declared as backticked repo paths in the bullet list under the `**Scope` line of its domain file in `.github/audit/`, and enforced by `scripts/spec-lint.mjs`; dormouse.sh/security publishes the assignment as its audit index (`docs/specs/website-docs.md` -> "`/security` spec").
 
 `AUDIT_PAT` is a step-level `env:` on the one job, so every subagent inherits it, and only the prompt tells `remote`, `local`, and `hosted` not to use it (`docs/specs/security.md` -> "Known gaps"); `## Future` -> Credential separation stages the fix.
 
@@ -45,13 +45,13 @@ CI and the local runner share the prompts and their scopes in `.github/audit/` (
 
 **The qualitative scopes are stated by subtraction, so adding a directory cannot orphan it** (rationale). `local` takes the remainder of every other domain's claims, worked out from `ls -A` rather than from a list. **Dotfile directories are named explicitly wherever they land**, and **the subtraction is recursive**: where a domain claims a subdirectory rather than a whole tree, the rest of that tree belongs to `local`.
 
-- **FAIL IF** a `docs/specs/security*.md` spec (not a `.rationale.md`) is in no domain's scope, or in two, or a scope names a file that does not exist (rationale).
-- **FAIL IF** `.github/audit/orchestrator.md` lets the orchestrator audit anything itself (rationale).
-- **FAIL IF** the audit stops fanning out to a dedicated `remote` subagent scoped to `docs/specs/security-remote.md`, a dedicated `local` subagent scoped to `docs/specs/security-local.md`, or a dedicated `hosted` subagent scoped to `docs/specs/security-hosted.md`, or any of those scopes is merged back into a context that also carries another domain (rationale).
-- **FAIL IF** `remote`, `local`, or `hosted` does not run on Opus and the mechanical domains on Sonnet, the stronger model on the code-reading domains, in **both** `.github/workflows/security-audit.yaml`'s `claude_args` — its `--model` sets the floor and its `--agents` raises those three domains — and `scripts/security-audit-local.sh` (rationale). Pinned by `scripts/security-audit.test.mjs`.
-- **FAIL IF** `.github/audit/` is missing a prompt file the workflow names, or `scripts/security-audit-local.sh` stops running the audit from those same files (rationale), or exits zero after a failed process, a missing or unfinished fragment, or any verdict other than exact `VERDICT: PASS`. Pinned by `scripts/security-audit.test.mjs`.
-- **FAIL IF** the union of the subagents' qualitative scopes does not cover every top-level path in the repository: the catch-all's remainder stops subtracting every other domain's prompt, or a second domain claims the remainder (rationale). Pinned by `scripts/security-audit.test.mjs`.
-- **FAIL IF** `.github/audit/` or `.vscode/` is outside **any** consumer of `.github/workflows/workflow-audit.yaml`'s diff window — the commit list, `own_changes`, `is_clean_merge`, and both content classifiers' refusals, whose half is *derived* from the single `WINDOW` array. The security specs are deliberately *not* watched there (rationale).
+- **FAIL IF** `S5` a `docs/specs/security*.md` spec (not a `.rationale.md`) is in no domain's scope, or in two, or a scope names a file that does not exist (rationale).
+- **FAIL IF** `S6` `.github/audit/orchestrator.md` lets the orchestrator audit anything itself (rationale).
+- **FAIL IF** `S7` the audit stops fanning out to a dedicated `remote` subagent scoped to `docs/specs/security-remote.md`, a dedicated `local` subagent scoped to `docs/specs/security-local.md`, or a dedicated `hosted` subagent scoped to `docs/specs/security-hosted.md`, or any of those scopes is merged back into a context that also carries another domain (rationale).
+- **FAIL IF** `S8` `remote`, `local`, or `hosted` does not run on Opus and the mechanical domains on Sonnet, the stronger model on the code-reading domains, in **both** `.github/workflows/security-audit.yaml`'s `claude_args` — its `--model` sets the floor and its `--agents` raises those three domains — and `scripts/security-audit-local.sh` (rationale). Pinned by `scripts/security-audit.test.mjs`.
+- **FAIL IF** `S9` `.github/audit/` is missing a prompt file the workflow names, or `scripts/security-audit-local.sh` stops running the audit from those same files (rationale), or exits zero after a failed process, a missing or unfinished fragment, or any verdict other than exact `VERDICT: PASS`. Pinned by `scripts/security-audit.test.mjs`.
+- **FAIL IF** `S10` the union of the subagents' qualitative scopes does not cover every top-level path in the repository: the catch-all's remainder stops subtracting every other domain's prompt, or a second domain claims the remainder (rationale). Pinned by `scripts/security-audit.test.mjs`.
+- **FAIL IF** `S11` `.github/audit/` or `.vscode/` is outside **any** consumer of `.github/workflows/workflow-audit.yaml`'s diff window — the commit list, `own_changes`, `is_clean_merge`, and both content classifiers' refusals, whose half is *derived* from the single `WINDOW` array. The security specs are deliberately *not* watched there (rationale).
 
 Source of truth: the `**Scope` and `## Qualitative pass` sections of each domain prompt in `.github/audit/`; `claude_args` in `.github/workflows/security-audit.yaml`; `run_domain` in `scripts/security-audit-local.sh`.
 
@@ -62,11 +62,11 @@ Source of truth: the `**Scope` and `## Qualitative pass` sections of each domain
 - **Each domain appends to its own fragment as it determines each result**, and the fragments upload with the transcript, so an orchestrator that dies mid-merge still ships what the domains found.
 - **A fragment opens `VERDICT: INCONCLUSIVE` and closes with the literal `<!-- END OF REPORT -->`**, its verdict rewritten once at the end. **The sentinel, not existence, is what a reader treats as finished** (rationale).
 
-- **FAIL IF** the orchestrator prompt stops requiring a non-turn-ending wait — a Bash `until` loop over the fragments' sentinels, **breaking on its own sub-cap under the Bash cap the workflow sets** so every call ends by printing its answer, re-issued under a bounded 32-minute deadline **persisted to a file** (`$RUNNER_TEMP/audit-deadline`) rather than recomputed from `now`. That cap is `BASH_DEFAULT_TIMEOUT_MS` in `.github/workflows/security-audit.yaml`, set above the loop's 540-second break (rationale).
-- **FAIL IF** the audit job's `timeout-minutes` in `.github/workflows/security-audit.yaml` is not above the orchestrator's persisted wait deadline (rationale), or `AUDIT_FRAGMENTS` there stops naming every domain's fragment. Pinned by `scripts/security-audit.test.mjs`.
-- **FAIL IF** the prompt permits ending the turn without `audit-report.md` (rationale).
-- **FAIL IF** a domain prompt lets findings be held for a write-up at the end, lets a domain that delegates end its turn or background its wait loop, or the wait, the merge, or the verdict treats existence rather than the sentinel as a domain having reported (rationale).
-- **FAIL IF** the orchestrator can report `PASS` while a subagent left no report fragment — nor `FAIL`, unless some domain actually returned one: the prompt writes no status file when a fragment is missing and no domain failed, routing an audit that ran out of time to INCONCLUSIVE. Both exit non-zero and hold the release gate shut (rationale).
+- **FAIL IF** `S12` the orchestrator prompt stops requiring a non-turn-ending wait — a Bash `until` loop over the fragments' sentinels, **breaking on its own sub-cap under the Bash cap the workflow sets** so every call ends by printing its answer, re-issued under a bounded 32-minute deadline **persisted to a file** (`$RUNNER_TEMP/audit-deadline`) rather than recomputed from `now`. That cap is `BASH_DEFAULT_TIMEOUT_MS` in `.github/workflows/security-audit.yaml`, set above the loop's 540-second break (rationale).
+- **FAIL IF** `S13` the audit job's `timeout-minutes` in `.github/workflows/security-audit.yaml` is not above the orchestrator's persisted wait deadline (rationale), or `AUDIT_FRAGMENTS` there stops naming every domain's fragment. Pinned by `scripts/security-audit.test.mjs`.
+- **FAIL IF** `S14` the prompt permits ending the turn without `audit-report.md` (rationale).
+- **FAIL IF** `S15` a domain prompt lets findings be held for a write-up at the end, lets a domain that delegates end its turn or background its wait loop, or the wait, the merge, or the verdict treats existence rather than the sentinel as a domain having reported (rationale).
+- **FAIL IF** `S16` the orchestrator can report `PASS` while a subagent left no report fragment — nor `FAIL`, unless some domain actually returned one: the prompt writes no status file when a fragment is missing and no domain failed, routing an audit that ran out of time to INCONCLUSIVE. Both exit non-zero and hold the release gate shut (rationale).
 
 Source of truth: `.github/audit/orchestrator.md`; the fragment contract in `.github/audit/_preamble.md`; the wait and merge blocks run as shipped in `scripts/security-audit.test.mjs`.
 
@@ -88,17 +88,17 @@ Source of truth: `.github/audit/orchestrator.md`; the fragment contract in `.git
 
 **An `INFO` off the grammar is an anomaly, never a doubt**: a line opening exactly `- INFO: ` whose remainder starts like no other line is kept verbatim in the private report and changes no verdict (rationale).
 
-**A domain owes one result per `FAIL IF` rule in the specs its `**Scope` claims**, numbered by position under its heading, so a skipped section is a missing rule. A rule pinned to `scripts/github-state-check.mjs` alone is owed by `audit-github-state.md` instead, which owes every rule that pin names, no `QUALITATIVE` line, and no evidence lines on its findings. A verdict line or `audit-status.txt` that disagrees with the computed verdict is reported as an anomaly; a pessimistic one holds at INCONCLUSIVE, never raising to `FAIL`.
+**A domain owes one result per `FAIL IF` rule in the specs its `**Scope` claims**, so a skipped section is a missing rule. **A result, a ledger key, and a seed name a rule by its ID alone**, placed by the spec and heading the checked-out specs give it wherever a reader needs them, so a rule moved or reworded re-keys nothing (rationale). A rule pinned to `scripts/github-state-check.mjs` alone is owed by `audit-github-state.md` instead, which owes every rule that pin names, no `QUALITATIVE` line, and no evidence lines on its findings. A verdict line or `audit-status.txt` that disagrees with the computed verdict is reported as an anomaly; a pessimistic one holds at INCONCLUSIVE, never raising to `FAIL`.
 
 - **The private report is what did not pass**: computed verdicts, anomalies, non-`PASS` results, missing rules, malformed lines, and merged findings. `PASS` lines and the orchestrator's `audit-report.md` stay in the encrypted artifact.
 - **The private report is split, never truncated**, by `scripts/clamp-issue-body.mjs` into the issue body and its comments, under a bounded part count (rationale).
 - **The `audit-transcript` artifact uploads during postprocessing**; runner timeout or cancellation can prevent upload, and a missing artifact receives no download link (rationale).
 - **A `FAIL IF` names only a condition an audit run can read**: the readable half is audited, and the rest is staged under `## Future` only while it is unbuilt, otherwise stated beside the rule. `AUDIT_PAT`-readable GitHub state stays audited (rationale).
 
-- **FAIL IF** the `Redact secrets from agent output` step is removed, stops covering any sink later archived or filed (`audit-report.md`, every `AUDIT_FRAGMENTS` fragment, and the transcript), or stops failing closed by deleting those files when the redactor itself throws (rationale). Pinned by `scripts/security-audit.test.mjs`.
-- **FAIL IF** the reporting step takes a verdict from a `VERDICT:` line or `audit-status.txt` over the computed one, reads a stated verdict from a first line other than exact `VERDICT: PASS`, `VERDICT: FAIL`, or `VERDICT: INCONCLUSIVE`, a fragment computes PASS under any INCONCLUSIVE condition above, an `INFO` line, in the grammar or not, changes a verdict or opens a ledger issue, the manifest is read from anywhere but the claimed specs' `FAIL IF` lines or comes back empty for a fragment or spec it cannot resolve, or a builder that throws hands on anything but INCONCLUSIVE (rationale).
-- **FAIL IF** the private report omits a note for a condition that holds — a failing, missing, unreadable, cut-off, or inconclusive domain, an anomaly, or no status — or any note asserts something about a condition other than its own, or the status issue's domain table omits one (rationale).
-- **FAIL IF** the audit has been weakened in a way no bullet above names — e.g. the prompt no longer requires the qualitative pass, a `FAIL IF` can be ignored, the reporting step that rewrites the status issue and exits non-zero has been removed, or the `AUDIT_PAT` pre-check is removed or bypassed. **This bullet is a judgement item, not a checklist.**
+- **FAIL IF** `S17` the `Redact secrets from agent output` step is removed, stops covering any sink later archived or filed (`audit-report.md`, every `AUDIT_FRAGMENTS` fragment, and the transcript), or stops failing closed by deleting those files when the redactor itself throws (rationale). Pinned by `scripts/security-audit.test.mjs`.
+- **FAIL IF** `S18` the reporting step takes a verdict from a `VERDICT:` line or `audit-status.txt` over the computed one, reads a stated verdict from a first line other than exact `VERDICT: PASS`, `VERDICT: FAIL`, or `VERDICT: INCONCLUSIVE`, a fragment computes PASS under any INCONCLUSIVE condition above, an `INFO` line, in the grammar or not, changes a verdict or opens a ledger issue, the manifest is read from anywhere but the claimed specs' `FAIL IF` lines or comes back empty for a fragment or spec it cannot resolve, or a builder that throws hands on anything but INCONCLUSIVE (rationale).
+- **FAIL IF** `S19` the private report omits a note for a condition that holds — a failing, missing, unreadable, cut-off, or inconclusive domain, an anomaly, or no status — or any note asserts something about a condition other than its own, or the status issue's domain table omits one (rationale).
+- **FAIL IF** `S20` the audit has been weakened in a way no bullet above names — e.g. the prompt no longer requires the qualitative pass, a `FAIL IF` can be ignored, the reporting step that rewrites the status issue and exits non-zero has been removed, or the `AUDIT_PAT` pre-check is removed or bypassed. **This bullet is a judgement item, not a checklist.**
 
 The reporting step's known gaps are `docs/specs/security.md` -> "Known gaps" (rationale).
 
@@ -108,10 +108,10 @@ Source of truth: `Compose the audit report` and `Publish the audit status` in `.
 
 **A BLOCKER fails the run like a failed `FAIL IF`**; the severity rubric and evidence rules are `.github/audit/_preamble.md`'s (rationale). **Findings naming the same file and root cause within five lines are one finding**, at the worst severity reported, across domains. **Delegation follows each domain prompt's `## Work streams`**, one `qualitative` stream among them, the domain's only qualitative pass.
 
-- **FAIL IF** `.github/audit/_preamble.md` stops rating BLOCKER by attacker-controlled input reaching code execution, a credential, or an authorization grant, or stops requiring every BLOCKER and WARNING to quote its code, trace source to a named sink, and give a reproduction, or a BLOCKER or WARNING lacking those lines can reach PASS (rationale).
-- **FAIL IF** the private report stops merging findings by file, root cause, and a five-line window, or the ledger files one file and root cause as two open issues.
-- **FAIL IF** a domain prompt's `## Work streams` omits or repeats a heading its manifest owes, or `.github/audit/_preamble.md` lets a domain delegate by any other partition or run more than one qualitative pass (rationale).
-- **FAIL IF** `.github/audit/_preamble.md` stops requiring a PASS to trace each input a gate compares to whether the rule's attacker sets it, to judge a configuration's omissions by their actual fallback and take its failure and default paths, to keep every condition of a split rule, and to re-verify the open findings citing its rule (rationale).
+- **FAIL IF** `S21` `.github/audit/_preamble.md` stops rating BLOCKER by attacker-controlled input reaching code execution, a credential, or an authorization grant, or stops requiring every BLOCKER and WARNING to quote its code, trace source to a named sink, and give a reproduction, or a BLOCKER or WARNING lacking those lines can reach PASS (rationale).
+- **FAIL IF** `S22` the private report stops merging findings by file, root cause, and a five-line window, or the ledger files one file and root cause as two open issues.
+- **FAIL IF** `S23` a domain prompt's `## Work streams` omits or repeats a heading its manifest owes, or `.github/audit/_preamble.md` lets a domain delegate by any other partition or run more than one qualitative pass (rationale).
+- **FAIL IF** `S24` `.github/audit/_preamble.md` stops requiring a PASS to trace each input a gate compares to whether the rule's attacker sets it, to judge a configuration's omissions by their actual fallback and take its failure and default paths, to keep every condition of a split rule, and to re-verify the open findings citing its rule (rationale).
 
 Source of truth: `.github/audit/_preamble.md`; `dedupFindings` in `scripts/security-audit-report.mjs`.
 
@@ -122,7 +122,7 @@ Source of truth: `.github/audit/_preamble.md`; `dedupFindings` in `scripts/secur
 | Sink | Carries |
 |---|---|
 | Public status issue, labeled `security-audit-status` | the run's time, link, commit, and outcome; whether the domains were skipped and when they last ran; each domain's computed verdict and its failed-check, missing-rule, malformed-line, BLOCKER, and WARNING counts; each failed check's spec and heading; how many verdict lines disagreed; whether the private filing failed; each open ledger finding's severity, kind, and dates, keyed as [Disclosure](#disclosure) allows; the latest disclosures |
-| Public disclosure issue, labeled `security-audit-finding`, one per ledger key | what [Disclosure](#disclosure) lists |
+| Public disclosure issue, labeled `security-audit-finding`, one per ledger issue | what [Disclosure](#disclosure) lists |
 | Private issue in `diffplug/dormouse-embargo`, one per non-PASS run | the private report ([Outcomes and reporting](#outcomes-and-reporting)), titled with date and commit |
 | Ledger issue in `diffplug/dormouse-embargo`, one per open finding key | one failed rule, its clauses together, or one merged BLOCKER or WARNING, with its evidence |
 | `audit-open-findings.txt`, on the runner | the open ledger titles, leaving the runner only in the transcript |
@@ -134,11 +134,11 @@ Source of truth: `.github/audit/_preamble.md`; `dedupFindings` in `scripts/secur
 
 `EMBARGO_TOKEN` is a fine-grained PAT with Issues: write on `diffplug/dormouse-embargo` alone, minted on an admin's account.
 
-- **FAIL IF** a public issue can carry finding text: a status or disclosure title, body, or comment is posted from anything but `scripts/security-audit-public-body.mjs` and the step's fixed failure sentence, or that builder emits anything but fixed text, counts, dates, validated run metadata, fragment names, ledger keys and severities, headings it found in the checked-out spec, files it found in the checked-out tree, PR numbers the API reports merged, and a maintainer's public summary. A failed check naming no such heading, in the line form `.github/audit/_preamble.md` fixes, is counted, never quoted (rationale).
-- **FAIL IF** `secrets.EMBARGO_TOKEN` is referenced anywhere but the `env:` of `List open findings`, `File embargoed findings`, and `Read the findings ledger`, a workflow or job `env:` or a `$GITHUB_ENV` write could carry it to another step, any of them runs anything but `gh` and shell builtins, `List open findings` writes a title anywhere but `audit-open-findings.txt`, or `Read the findings ledger` writes anywhere but `audit-ledger-snapshot.jsonl` or keeps a title past its key and severity, a body past its opening metadata line, or a comment past a maintainer's `Fixed in` PR number or public summary (rationale). Pinned by `scripts/security-audit.test.mjs`.
-- **FAIL IF** a non-PASS run whose private filing failed or was skipped can succeed, or its status issue omits that the filing failed; or a PASS run files anything in the private tracker but ledger issues, or `scripts/security-audit-local.sh` files anything.
-- **FAIL IF** the `audit-transcript` artifact can upload anything but age ciphertext: its `path:` names a non-`.age` file, it uploads when `Encrypt the audit transcript` did not succeed, that step reads its recipient from anywhere but `.github/audit/transcript-recipient.txt`, or it stops running whatever the audit step's outcome (`if: always()`).
-- **FAIL IF** `diffplug/dormouse-embargo` is publicly visible: an unauthenticated `curl -s -o /dev/null -w '%{http_code}' https://github.com/diffplug/dormouse-embargo` must print `404` (rationale). Pinned by `scripts/github-state-check.mjs`.
+- **FAIL IF** `S25` a public issue can carry finding text: a status or disclosure title, body, or comment is posted from anything but `scripts/security-audit-public-body.mjs` and the step's fixed failure sentence, or that builder emits anything but fixed text, counts, dates, validated run metadata, fragment names, ledger keys and severities, headings it found in the checked-out spec, files it found in the checked-out tree, PR numbers the API reports merged, and a maintainer's public summary. A failed check naming no rule its domain owes, in the line form `.github/audit/_preamble.md` fixes, is counted, never quoted (rationale).
+- **FAIL IF** `S26` `secrets.EMBARGO_TOKEN` is referenced anywhere but the `env:` of `List open findings`, `File embargoed findings`, and `Read the findings ledger`, a workflow or job `env:` or a `$GITHUB_ENV` write could carry it to another step, any of them runs anything but `gh` and shell builtins, `List open findings` writes a title anywhere but `audit-open-findings.txt`, or `Read the findings ledger` writes anywhere but `audit-ledger-snapshot.jsonl` or keeps a title past its key and severity, a body past its opening metadata line, or a comment past a maintainer's `Fixed in` PR number or public summary (rationale). Pinned by `scripts/security-audit.test.mjs`.
+- **FAIL IF** `S27` a non-PASS run whose private filing failed or was skipped can succeed, or its status issue omits that the filing failed; or a PASS run files anything in the private tracker but ledger issues, or `scripts/security-audit-local.sh` files anything.
+- **FAIL IF** `S28` the `audit-transcript` artifact can upload anything but age ciphertext: its `path:` names a non-`.age` file, it uploads when `Encrypt the audit transcript` did not succeed, that step reads its recipient from anywhere but `.github/audit/transcript-recipient.txt`, or it stops running whatever the audit step's outcome (`if: always()`).
+- **FAIL IF** `S29` `diffplug/dormouse-embargo` is publicly visible: an unauthenticated `curl -s -o /dev/null -w '%{http_code}' https://github.com/diffplug/dormouse-embargo` must print `404` (rationale). Pinned by `scripts/github-state-check.mjs`.
 
 That the agent shares its job with these steps is `docs/specs/security.md` -> "Known gaps".
 
@@ -146,15 +146,15 @@ Source of truth: `.github/workflows/security-audit.yaml`; `scripts/security-audi
 
 ### Findings ledger
 
-**Every run reads the ledger, a PASS included, and only a human closes a ledger issue** (rationale). A ledger issue's title starts `[audit-finding <key>]`: a failure's key hashes its rule's spec, heading, and number; a finding's, its normalized file and the root-cause symbol it names, or its rule where it names none (rationale). A key with no open issue gets one, a PASS's WARNINGs included, an `INFO` never; one already open gets a `Seen again` comment. Any open `[audit-finding …]` issue counts, a hand-filed `manual-…` key included.
+**Every run reads the ledger, a PASS included, and only a human closes a ledger issue** (rationale). A ledger issue's title starts `[audit-finding <key>]`: a failure's key hashes its rule's ID; a finding's, its normalized file and the root-cause symbol it names, or its rule's ID where it names none (rationale). A key with no open issue gets one, a PASS's WARNINGs included, an `INFO` never; one already open gets a `Seen again` comment. Any open `[audit-finding …]` issue counts, a hand-filed `manual-…` key included.
 
-A filed ledger issue's body opens with one metadata line, `<!-- audit-ledger {…} -->`: JSON holding its key, severity, and its rule's spec and heading or its finding's file, with no `--` inside. **A maintainer closes a fixed ledger issue with a comment opening `Fixed in #<n>`** (`Fixed by`, `diffplug/dormouse#<n>`, or the PR's URL are read alike), and closes one not worth fixing as not planned.
+A filed ledger issue's body opens with one metadata line, `<!-- audit-ledger {…} -->`: JSON holding its key, severity, and its rule's ID, spec, and heading or its finding's file, with no `--` inside. **A maintainer closes a fixed ledger issue with a comment opening `Fixed in #<n>`** (`Fixed by`, `diffplug/dormouse#<n>`, or the PR's URL are read alike), and closes one not worth fixing as not planned.
 
-Before the agent starts, `List open findings` writes the open titles to `audit-open-findings.txt` for the domains to re-verify. A PASS line naming `[audit-finding <key>]` and then a `path:line` re-verifies a failure cited on its rule, or on its heading for a hand-filed citation (rationale).
+Before the agent starts, `List open findings` writes the open titles to `audit-open-findings.txt` for the domains to re-verify. A PASS line naming `[audit-finding <key>]` and then a `path:line` re-verifies a failure on the rule it cites, `FAIL: S42` minted or `FAIL S42: <summary>` hand-filed (rationale).
 
-- **FAIL IF** `File embargoed findings` can close, edit, or reopen an issue, comment on a ledger issue with anything but its fixed `Seen again` sentence, or open a ledger issue for a key that already has one open (rationale).
-- **FAIL IF** a PASS's status issue reads as all clear while the ledger holds an open finding or could not be read, or a PASS whose findings were not filed or whose ledger could not be read exits zero (rationale). Pinned by `scripts/security-audit.test.mjs`.
-- **FAIL IF** a failure's key changes with its clause letter or a finding's with its line or the words around its symbol, or an open issue with a key the run did not mint stops counting. Pinned by `scripts/security-audit.test.mjs`.
+- **FAIL IF** `S30` `File embargoed findings` can close, edit, or reopen an issue, comment on a ledger issue with anything but its fixed `Seen again` sentence, or open a ledger issue for a key that already has one open (rationale).
+- **FAIL IF** `S31` a PASS's status issue reads as all clear while the ledger holds an open finding or could not be read, or a PASS whose findings were not filed or whose ledger could not be read exits zero (rationale). Pinned by `scripts/security-audit.test.mjs`.
+- **FAIL IF** `S32` a failure's key changes with its clause letter or where its rule sits, or a finding's with its line or the words around its symbol, or an open issue with a key the run did not mint stops counting. Pinned by `scripts/security-audit.test.mjs`.
 
 ### Disclosure
 
@@ -167,12 +167,12 @@ Before the agent starts, `List open findings` writes the open titles to `audit-o
 | closed as not planned | dismissed | created closed |
 | open 7 days | not yet fixed | created open; closed, rewritten, by the first run that sees the ledger issue closed |
 
-A disclosure carries the key, severity, kind, dates, reason, and where: the rule's spec and heading or the finding's file, each only when the checked-out tree has it; a ledger issue with no metadata line names neither. `Read the findings ledger` keeps of each ledger issue its number, state, close reason, dates, title key and severity, metadata line, and maintainers' fix citations and public summaries. **The one free text that crosses is a maintainer's comment opening `## Public summary`**, verbatim (rationale). A hand-filed key stays off the status issue until disclosed.
+A disclosure carries the key, severity, kind, dates, reason, and where: the rule's spec and heading, found by its ID, or the finding's file, each only when the checked-out tree has it; a ledger issue with no metadata line names neither. `Read the findings ledger` keeps of each ledger issue its number, state, close reason, dates, title key and severity, metadata line, and maintainers' fix citations and public summaries. **The one free text that crosses is a maintainer's comment opening `## Public summary`**, verbatim (rationale). A hand-filed key stays off the status issue until disclosed.
 
 The status issue is the one open issue labeled `security-audit-status`; a run that finds none creates it. **A run comments on it only when the outcome changes and once per new disclosure.**
 
-- **FAIL IF** a disclosure can be published before its ledger issue closes or turns 7 days old, one closed or 7 days old stays unpublished after a run that read it, a ledger issue gets a second disclosure issue, or a public summary is taken from an issue body or from a comment whose author association is not `OWNER`, `MEMBER`, or `COLLABORATOR` (rationale). Pinned by `scripts/security-audit.test.mjs`.
-- **FAIL IF** the status issue is missing, closed, or one of several open issues labeled `security-audit-status` in `diffplug/dormouse`. Pinned by `scripts/github-state-check.mjs`.
+- **FAIL IF** `S33` a disclosure can be published before its ledger issue closes or turns 7 days old, one closed or 7 days old stays unpublished after a run that read it, a ledger issue gets a second disclosure issue, or a public summary is taken from an issue body or from a comment whose author association is not `OWNER`, `MEMBER`, or `COLLABORATOR` (rationale). Pinned by `scripts/security-audit.test.mjs`.
+- **FAIL IF** `S34` the status issue is missing, closed, or one of several open issues labeled `security-audit-status` in `diffplug/dormouse`. Pinned by `scripts/github-state-check.mjs`.
 
 A maintainer pins the status issue by hand; `scripts/github-state-check.mjs` reports an unpinned one as a WARNING, which changes no verdict (rationale).
 
@@ -186,42 +186,46 @@ The audit job declares `environment: security-audit`, **whose deployment-branch-
 - **The PAT is fine-grained and read-only**: `Administration` + `Secrets` + `Environments`, scoped to `diffplug/dormouse` only, minted on an admin's account, stored env-scoped.
 - `gh api` responses never carry secret values (rationale).
 
-- **FAIL IF** the step that verifies `AUDIT_PAT` is provisioned before the audit runs is removed or bypassed (rationale). Pinned by `scripts/security-audit.test.mjs`.
-- **FAIL IF** a workflow step prints `$AUDIT_PAT` or `$CLAUDE_CODE_OAUTH_TOKEN`, or `.github/audit/_preamble.md` stops forbidding a domain to print a secret value or to pass the PAT any way but an unexpanded `GH_TOKEN=` prefix (rationale).
+- **FAIL IF** `S35` the step that verifies `AUDIT_PAT` is provisioned before the audit runs is removed or bypassed (rationale). Pinned by `scripts/security-audit.test.mjs`.
+- **FAIL IF** `S36` a workflow step prints `$AUDIT_PAT` or `$CLAUDE_CODE_OAUTH_TOKEN`, or `.github/audit/_preamble.md` stops forbidding a domain to print a secret value or to pass the PAT any way but an unexpanded `GH_TOKEN=` prefix (rationale).
 
 Source of truth: `Verify AUDIT_PAT is provisioned` in `.github/workflows/security-audit.yaml`; `Never print a secret value` in `.github/audit/_preamble.md`.
 
 ## Canary recall
 
-**A `workflow_dispatch` with `canary: true` measures the audit's recall instead of auditing** (rationale). Its `canary` job runs on `main` alone, and the `audit` job not at all:
+**A `workflow_dispatch` with `canary: true`, or the weekly `schedule` line, measures the audit's recall instead of auditing** (rationale). Its `canary` job runs on `main` alone, and the `audit` job not at all:
 
 1. `seed` applies `CANARY_SEEDS` seeds from `.github/audit/canaries/`, dealt round-robin across the code domains; then it deletes the pool and replaces the history with one root commit, so nothing in the checkout tells a seed from the code around it (rationale).
 2. The audit's agent runs the code domains over that checkout: `supply-chain`, `remote`, `local`, and `hosted`, handed an empty open-findings list. `ci-and-secrets` reads live GitHub state, which a checkout cannot seed, and the ledger is never read.
-3. `score` counts a seed caught only when a `FAIL` result, or a finding at or above the seed's catch severity, cites one of its `Expect:` files and, for a seed naming a `FAIL IF`, that rule: the result's rule id, or the finding's spec and heading.
+3. `score` counts a seed caught only when a `FAIL` result, or a finding at or above the seed's catch severity, cites one of its `Expect:` files and, for a seed naming a `FAIL IF`, that rule's ID: the result's, or one the finding names as its root cause or anywhere in its text.
 
 - **A seed re-introduces a vulnerability already fixed on `main`, or a synthetic one, and deletes the test and lint cases that would fail on it**, so the seeded tree passes CI as a regression on `main` has (rationale). Its header is factual and names no finding under embargo.
 - **A seed's catch severity is WARNING unless its `Severity:` header names another**, then ` — ` and why (rationale).
-- The public record is the step summary's line and the `canary-recall` artifact: seeded and caught counts, how many domains left no finished report, and the run link. Reserved: its fields are what scope **audit-canary-publication** reads; add, never rename.
+- The public record is the step summary's line and the `canary-recall` artifact: seeded and caught counts, how many domains left no finished report, and the run link. `validateRecord` in `website/scripts/generate-canary-recall.js` accepts exactly these fields; add one to both, never rename.
 - Which seeds ran, what caught them, and findings on code no seed touched stay in the `canary-transcript` artifact; a canary files them nowhere.
 - A canary run is a completed run on `main`, so the next scheduled run audits in full ([Skipping an unchanged audit](#skipping-an-unchanged-audit)).
 
-- **FAIL IF** the `canary` job can push or file: it holds any write permission, runs its agent on a token but its own read-only one, keeps the checkout's credentials, runs `gh` or `git push`, or names `AUDIT_PAT` or `EMBARGO_TOKEN`; or `scripts/security-audit-local.sh canary`, which seeds a copy of the committed tree, files anything. Pinned by `scripts/security-audit-canary.test.mjs`.
-- **FAIL IF** a canary run can gate a release or feed the skip: the `audit` job runs in it, it runs on a ref but `main`, it uploads an `audit-state` artifact, or the gate in `.github/workflows/release.yml` can select a run with the canary's title. Pinned by `scripts/security-audit-canary.test.mjs`.
-- **FAIL IF** a canary publishes seed detail: the step summary or the `canary-recall` artifact carries anything but the counts and a validated run link, or the scorecard, the seeds applied, or a fragment leaves the runner but as age ciphertext to `.github/audit/transcript-recipient.txt`. Pinned by `scripts/security-audit-canary.test.mjs`.
-- **FAIL IF** a seed stops applying to the tree, alone or over the rest of the pool, or names a rule that moved or that its `Domain:` does not own, or a code domain has fewer than three seeds. Pinned by `scripts/security-audit-canary.test.mjs`, which `pnpm test` runs.
+- **FAIL IF** `S37` the `canary` job can push or file: it holds any write permission, runs its agent on a token but its own read-only one, keeps the checkout's credentials, runs `gh` or `git push`, or names `AUDIT_PAT` or `EMBARGO_TOKEN`; or `scripts/security-audit-local.sh canary`, which seeds a copy of the committed tree, files anything. Pinned by `scripts/security-audit-canary.test.mjs`.
+- **FAIL IF** `S38` a canary run, dispatched or weekly, can gate a release or feed the skip: the `audit` job runs in it, it runs on a ref but `main`, it uploads an `audit-state` artifact, or the gate in `.github/workflows/release.yml` can select a run with the canary's title. Pinned by `scripts/security-audit-canary.test.mjs`.
+- **FAIL IF** `S39` a canary publishes seed detail: the step summary or the `canary-recall` artifact carries anything but the counts and a validated run link, or the scorecard, the seeds applied, or a fragment leaves the runner but as age ciphertext to `.github/audit/transcript-recipient.txt`. Pinned by `scripts/security-audit-canary.test.mjs`.
+- **FAIL IF** `S40` a seed stops applying to the tree, alone or over the rest of the pool, or names an ID no rule carries, a rule no longer holding its phrase, or one its `Domain:` does not own, or a code domain has fewer than three seeds. Pinned by `scripts/security-audit-canary.test.mjs`, which `pnpm test` runs.
 
 Source of truth: `seed` and `score` in `scripts/security-audit-canary.mjs`; the `canary` job in `.github/workflows/security-audit.yaml`; `run_canary` in `scripts/security-audit-local.sh`.
+
+### Published recall
+
+dormouse.sh/security shows a rolling recall under "How the guarantees are checked": caught over seeded across the `canary-recall` artifacts of canary runs on `main` in the 30 days before its as-of date, each run linked. It is a committed snapshot, `website/src/data/canary-recall.json`, regenerated at each release (`docs/specs/deploy.md` -> "Release checklist") (rationale).
+
+- **A record out of shape fails the snapshot**, never repaired or skipped: a field but the scorer's, a count not a non-negative integer, more caught than seeded, or a link but to its own run on `diffplug/dormouse`.
+- **Every run in the window counts as its record has it** (rationale): an unfinished domain's seeds stay seeded, caught only by what it reported, and the run shows its unfinished count. A run with no `canary-recall` artifact is listed without counts.
+- The generator downloads `canary-recall` alone, never `canary-transcript`.
+
+Source of truth: `summarize` in `website/scripts/generate-canary-recall.js`; `CanaryRecall` in `website/src/components/CanaryRecall.tsx`.
 
 ## Future
 
 **Scope: audit-credential-separation** — [Credential separation](#credential-separation).
 
-**Scope: audit-canary-publication** — [Published recall](#published-recall).
-
 ### Credential separation
 
 A second job outside the `security-audit` environment, running the domains that need no PAT and passing their fragments back as artifacts, would leave `remote`, `local`, and `hosted` unable to hold `AUDIT_PAT` at all. The fragments would cross as ciphertext, and `File embargoed findings` would move to a job no agent ran on, holding the key to read them.
-
-### Published recall
-
-`docs/specs/security.md` -> "How the guarantees are checked", as published at dormouse.sh/security, would show a rolling recall: caught over seeded, summed across the `canary-recall` artifacts of the last 90 days' canary runs on `main`, each run linked, read by the website build through the public Actions API. A weekly canary on a second `schedule` line, told apart by `github.event.schedule`, would keep that window full; until then a maintainer dispatches one.

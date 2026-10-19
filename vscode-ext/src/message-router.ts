@@ -40,7 +40,7 @@ import {
   pushAlert,
 } from './burrow';
 import { log } from './log';
-import { configureManagedVoice, handleVoiceCommand, managedVoiceCredential } from './managed-voice';
+import { configureManagedVoice, handleVoiceCommand } from './managed-voice';
 import type { WebviewChannel } from './webview-messaging';
 
 const clipboardOps = require('../../lib/clipboard-ops.cjs') as {
@@ -106,7 +106,6 @@ configureManagedVoice({
 configureBurrow({
   brokerRequest,
   broadcastToWebviews,
-  voiceCredential: managedVoiceCredential,
   streamPty: processedPtyStreams.streamPty,
   writePty: writeClientInput,
   resizePty: resizeForClient,

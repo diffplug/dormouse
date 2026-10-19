@@ -96,6 +96,8 @@
 
 **Why the keystroke fallback is not routed into the manager.** The fallback in `docs/specs/terminal-state.md` is renderer-side and lower confidence than a shell-reported command boundary. Wiring it in would buy integration-less shells a worse version of WATCHING at the price of a second command-tracking path to keep in sync.
 
+**Why only output that paints counts.** Two diagnostic reports (2026-10-18) showed a finished Claude Code holding its ring deferred for over ten minutes: idle, it sends `CSI ? 6 n` every 200 ms for as long as the terminal answers (Claude Code 2.1.303; unanswered, it asks once), so the detector never saw 5 s of silence. A third showed Codex answering a click with frames that only reset colors and move the cursor, which looked like work and rang `codex went quiet` once the user left. Discounting only known-inert sequences keeps every misread on the side of the old count.
+
 **Why resumed work defers an owed ring.** The marked `ttr.pgstencil-adopt` speech (2026-09-09 18:17:03) followed a WATCHING settle and resumed output. Withdrawing only confirmed WATCHING left program-sent reports ringing through animation. Deferral preserves the debt; the same episode and original deadlines prevent alarm replay and avoid adding another full delay after quiet (product decision, 2026-10-01).
 
 ## Terminal reports
@@ -155,6 +157,8 @@
 **Why the label is sanitized before it reaches the engine.** WebKit silently drops an utterance containing angle brackets **and leaves the synthesizer wedged**, so every later utterance is dropped until the page reloads. Pane labels carry chrome like `<idle>`, and terminal-supplied titles reach speech, so any program could permanently disable spoken alarms for the session by putting a `<` in its title. Substituting spaces rather than deleting also keeps adjacent words separate and prevents formatting markers such as `*` from being announced.
 
 ## Managed voice
+
+Disconnect failure (2026-10): the atomic writer can fail while the old token remains on disk. Disabling in memory first prevents further label uploads; the retryable error tells the user that a restart could still reload that token.
 
 **Why the token stays in the host.** A renderer runs terminal-supplied text beside framed pages; a bearer credential there is one script injection away from leaving the machine. The sidecar keeps it with the Burrow's credential (`docs/specs/security-local.rationale.md` → "Persisted state") and makes the request without the webview's CSP granting any remote `connect-src`. The cost is one IPC round trip per managed utterance, its audio returning as base64.
 

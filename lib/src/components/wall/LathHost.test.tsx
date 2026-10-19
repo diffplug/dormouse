@@ -11,7 +11,7 @@ import { layout } from '../../lib/lath/layout';
 import { LATH_EASING } from '../../lib/lath/animator';
 import { type DropTarget, move } from '../../lib/lath/ops';
 import { leafTree, type LathNode, type LathTree, type Rect } from '../../lib/lath/model';
-import { leaf, split, tree as treeOf, movePreview as movePreviewAt } from '../../lib/lath/test-util';
+import { leaf, split, tree as treeOf, movePreview as movePreviewAt, landingPreview as landingPreviewAt } from '../../lib/lath/test-util';
 import { leafMeta } from '../../lib/lath/test-fixtures';
 import { PANE_HEADER_HEIGHT_PX } from '../design';
 import { SLIDE_ARM_MS } from './lath-drag-controller';
@@ -27,6 +27,8 @@ const RECT = { x: 0, y: 0, width: W, height: H };
 /** Expected preview rect of an internal drag under this suite's rect + opts. */
 const movePreview = (t: LathTree, dragged: string, target: DropTarget): Rect =>
   movePreviewAt(t, dragged, target, RECT, LATH_LAYOUT_OPTS);
+const landingPreview = (t: LathTree, dragged: string, target: DropTarget): Rect =>
+  landingPreviewAt(t, dragged, target, RECT, LATH_LAYOUT_OPTS);
 
 // The hit-test / sash-preview recompute is coalesced into one requestAnimationFrame;
 // wait a real frame so the pending commit lands before asserting on it.
@@ -36,6 +38,27 @@ async function flushFrame() {
   });
 }
 
+/** Move focus into an `<iframe>` in a leaf, as pressing a Tool or browser pane does;
+ *  the window then fires `blur` although focus never left the page. */
+function focusFrameIn(id: string): void {
+  const frame = document.createElement('iframe');
+  document.querySelector(`[data-lath-leaf="${id}"]`)!.appendChild(frame);
+  frame.focus();
+  expect(document.activeElement).toBe(frame);
+}
+
+const shielded = () => document.documentElement.hasAttribute('data-frame-shield');
+
+/** Press Escape in a terminal-like input in `id` that, like xterm, stops the keydown
+ *  there. Returns whether the input received it. */
+function pressEscapeInTerminal(id: string): boolean {
+  const input = document.createElement('textarea');
+  document.querySelector(`[data-lath-leaf="${id}"]`)!.appendChild(input);
+  let received = false;
+  input.addEventListener('keydown', (e) => { received = true; e.stopPropagation(); });
+  act(() => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+  return received;
+}
 
 /** a | b | c — an equal-weight row split, built from the shared core test builders. */
 const rowOf = (...ids: string[]): LathTree =>
@@ -336,6 +359,18 @@ describe('LathHost — sash drag', () => {
     expect(onCommitResize).toHaveBeenCalledWith([], 0, 45);
   });
 
+  it('keeps a sash drag through focus entering a pane iframe, shielding iframes meanwhile', () => {
+    const store = seeded(rowOf('a', 'b'), [['a', leafMeta()], ['b', leafMeta()]]);
+    const { onCommitResize } = mount(store);
+    act(() => firstSash().dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientX: 100 })));
+    expect(shielded()).toBe(true);
+    focusFrameIn('b');
+    act(() => window.dispatchEvent(new Event('blur')));
+    act(() => window.dispatchEvent(new MouseEvent('pointerup', { clientX: 140 })));
+    expect(onCommitResize).toHaveBeenCalledExactlyOnceWith([], 0, 40);
+    expect(shielded()).toBe(false);
+  });
+
   it('cancels on pointercancel and accepts the next sash gesture', async () => {
     const store = seeded(rowOf('a', 'b'), [['a', leafMeta()], ['b', leafMeta()]]);
     const { onCommitResize } = mount(store);
@@ -394,7 +429,7 @@ describe('LathHost — sash drag', () => {
     expect(onCommitResize).not.toHaveBeenCalled();
   });
 
-  it('cancels the drag on Escape without committing', () => {
+  it('cancels the drag on Escape from a terminal without committing or reaching the terminal', () => {
     const store = seeded(rowOf('a', 'b', 'c'), [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })], ['c', leafMeta({ title: 'C' })]]);
     const { onCommitResize } = mount(store);
     const widthBefore = leafDiv('a')!.style.width;
@@ -402,7 +437,7 @@ describe('LathHost — sash drag', () => {
 
     act(() => sash.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientX: 100, clientY: 10 })));
     act(() => window.dispatchEvent(new MouseEvent('pointermove', { clientX: 130, clientY: 10 })));
-    act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));
+    expect(pressEscapeInTerminal('a')).toBe(false);
 
     expect(onCommitResize).not.toHaveBeenCalled();
     expect(leafDiv('a')!.style.width).toBe(widthBefore); // reverted
@@ -911,6 +946,21 @@ describe('LathHost — pane / Door drag', () => {
     await flushFrame();
     expect(overlayEl()).not.toBeNull();
     expect(overlayRect()).toEqual(movePreview(t, 'a', { kind: 'swap', leaf: 'b' }));
+    // A swap shows b taking a's slot, and says so.
+    const swapEl = container.querySelector<HTMLElement>('[data-lath-drop-swap]')!;
+    const aSlot = movePreview(t, 'b', { kind: 'swap', leaf: 'a' });
+    expect([parseFloat(swapEl.style.left), parseFloat(swapEl.style.width)]).toEqual([aSlot.x, aSlot.width]);
+    expect(badge()).toBe('⇄ swap');
+    const badgeEl = container.querySelector<HTMLElement>('[data-lath-drop-choice]')!;
+    const bSlot = overlayRect();
+    expect([parseFloat(badgeEl.style.left), parseFloat(badgeEl.style.top)]).toEqual([bSlot.x + bSlot.width / 2, bSlot.y + bSlot.height / 2]);
+    expect(badgeEl.style.transform).toBe('translate(-50%, -50%)');
+    act(() => moveTo(overlayRect().x + 30, 300)); // b's left band
+    await flushFrame();
+    expect(container.querySelector('[data-lath-drop-swap]')).toBeNull();
+    expect(badge()).toBeNull();
+    act(() => moveTo(601, 300));
+    await flushFrame();
 
     act(() => up());
     expect(onProposeMove).toHaveBeenCalledWith('a', { kind: 'swap', leaf: 'b' });
@@ -953,6 +1003,22 @@ describe('LathHost — pane / Door drag', () => {
     expect(onProposeMove).not.toHaveBeenCalled();
   });
 
+  it('keeps a pane drag through focus entering a pane iframe, shielding iframes meanwhile', async () => {
+    const store = seeded(rowOf('a', 'b'), [['a', leafMeta()], ['b', leafMeta()]]);
+    const { onProposeMove } = mountDrag(store);
+    act(() => down(header('a'), 100, 15));
+    expect(shielded()).toBe(false); // not before the threshold
+    focusFrameIn('a'); // the header press selects a Tool, focusing its body
+    act(() => window.dispatchEvent(new Event('blur')));
+    act(() => moveTo(601, 300));
+    await flushFrame();
+    expect(shielded()).toBe(true);
+    expect(overlayEl()).not.toBeNull();
+    act(() => up());
+    expect(onProposeMove).toHaveBeenCalledWith('a', { kind: 'swap', leaf: 'b' });
+    expect(shielded()).toBe(false);
+  });
+
   it('cancels an external drop moved off-wall before its pending frame', async () => {
     const store = seeded(leafTree('a'), [['a', leafMeta()]]);
     const { onExternalDrop } = mountDrag(store, { externalDrag: { id: 'door', startX: 100, startY: 700 } });
@@ -975,7 +1041,7 @@ describe('LathHost — pane / Door drag', () => {
     act(() => down(header('c'), 100, 320)); // press on c's header (c is the bottom leaf)
     act(() => moveTo(100, 5)); // a's top band
     await flushFrame();
-    expect(overlayRect()).toEqual(movePreview(t, 'c', { kind: 'edge', path: [0, 0], edge: 'top' }));
+    expect(overlayRect()).toEqual(landingPreview(t, 'c', { kind: 'edge', path: [0, 0], edge: 'top' }));
     expect(badge()).toBeNull();
 
     await pause();
@@ -983,7 +1049,7 @@ describe('LathHost — pane / Door drag', () => {
     expect(badge()).toContain('slide along the edge to widen');
     act(() => moveTo(600, 5)); // along the same line into b
     await flushFrame();
-    expect(overlayRect()).toEqual(movePreview(t, 'c', { kind: 'edge', path: [0], edge: 'top' }));
+    expect(overlayRect()).toEqual(landingPreview(t, 'c', { kind: 'edge', path: [0], edge: 'top' }));
 
     act(() => up());
     expect(onProposeMove).toHaveBeenCalledWith('c', { kind: 'edge', path: [0], edge: 'top' });
@@ -1001,7 +1067,7 @@ describe('LathHost — pane / Door drag', () => {
     await flushFrame();
     expect(badge()).toContain('2 panes');
     const target: DropTarget = { kind: 'edge', path: [], edge: 'top', range: { start: 0, end: 2 } };
-    expect(overlayRect()).toEqual(movePreview(store.getSnapshot().tree, 'd', target));
+    expect(overlayRect()).toEqual(landingPreview(store.getSnapshot().tree, 'd', target));
     const scope = container.querySelector<HTMLElement>('[data-lath-drop-scope]')!;
     expect(parseFloat(scope.style.left)).toBe(0);
     expect(parseFloat(scope.style.width)).toBeGreaterThan(390);
@@ -1051,14 +1117,14 @@ describe('LathHost — pane / Door drag', () => {
     expect(onProposeMove).not.toHaveBeenCalled();
   });
 
-  it('cancels on Escape with no proposal', async () => {
+  it('cancels on Escape from a terminal with no proposal, keeping it from the terminal', async () => {
     const store = seeded(rowOf('a', 'b'), [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })]]);
     const { onProposeMove, onProposeMinimize } = mountDrag(store);
 
     act(() => down(header('a'), 100, 15));
     act(() => moveTo(601, 300));
     await flushFrame();
-    act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));
+    expect(pressEscapeInTerminal('b')).toBe(false);
 
     expect(onProposeMove).not.toHaveBeenCalled();
     expect(onProposeMinimize).not.toHaveBeenCalled();
@@ -1154,8 +1220,8 @@ describe('LathHost — pane / Door drag', () => {
     act(() => store.removeLeaf('b'));
     const liveTree = store.getSnapshot().tree;
 
-    // The next frame hit-tests the live tree: 700,300 now sits in c's (widened) center.
-    act(() => moveTo(700, 300));
+    // The next frame hit-tests the live tree: 600,300 now sits in c's (widened) center.
+    act(() => moveTo(600, 300));
     await flushFrame();
     const target: DropTarget = { kind: 'swap', leaf: 'c' };
     expect(move(liveTree, 'a', target).ok).toBe(true); // the target is valid on the live tree

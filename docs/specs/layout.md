@@ -29,7 +29,7 @@ Pane drag scopes: `docs/specs/tiling-engine.md` → "Hierarchical drag and drop"
 
 **Must hold the slot's header while a switch holds its ghost** (`docs/specs/dor-tool.md` → Switching the slot): the ghost's face and Display glyph stay until the new view is ready. A terminal face's label keeps its name until the retarget, then shows the Tool's name (`docs/specs/dor-tool.md` → Naming); derivation resumes once ready. A serving Tool's name, read from its params, needs no hold (rationale).
 
-**Never give a Tool navigation, an address, or a dev-server chip** (rationale).
+**Must offer document Back/Forward on both Tool faces when the Surface has history**, in Terminal Context at narrow widths (`docs/specs/dor-tool.md` → Document navigation). **Never give a Tool an address or a dev-server chip** (rationale).
 
 Every Pane header ends with the pane-action group: zoom/unzoom, minimize, kill.
 
@@ -455,7 +455,7 @@ A store commit that empties the tree (last pane killed or minimized) spawns one 
 
 > Numbers are cited from other specs and code: never renumber; leave a retired one retired.
 
-- #2 — A focused iframe surface is not a window blur: it blurs the window while `document.hasFocus()` stays true, so presence ends only on a real blur (`docs/specs/alert.md` → Engagement). Source of truth: `subscribeWindowFocus` in `lib/src/lib/window-focus.ts`.
+- #2 — A focused iframe surface is not a window blur: it blurs the window while `document.hasFocus()` stays true, so presence ends (`docs/specs/alert.md` → Engagement), and a pane or sash drag cancels, only on a real blur. Source of truth: `isRealBlur` in `lib/src/lib/window-focus.ts`.
 - #6 — Focus-neutral surface creation (`dor ensure` / `dor iframe` / `dor agent-browser`): unlike `dor split`, these open in the background without moving focus off the caller (`docs/specs/dor-cli.md`, `docs/specs/dor-browser.md`); the create never re-parents the caller's subtree, steals activation, or selects. The one exception: `dor iframe` / `dor agent-browser` replacing the pane the user is *currently selected on* moves selection to the replacement, else it would dangle on the removed leaf; any other pane, or a door selection, is left untouched. Any completed teardown preserves the caller's live selection.
 
 ## Future

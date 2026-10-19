@@ -19,13 +19,8 @@
  * it falls under. Calls use `gh api`; `--local` reads a 403 as unverifiable
  * rather than as PAT scope drift, for an operator's own `gh` login.
  *
- * Result lines name these sections (scripts/spec-lint.mjs check 13 keeps them
- * honest): docs/specs/security-ci.md -> "Automated Maintainer (tend)",
- * "Hosted Deployments", and "VS Code Extension Releases";
- * docs/specs/security-supply-chain.md -> "Cooldown and alerts";
- * docs/specs/security.md -> "Reporting a vulnerability";
- * docs/specs/security-audit.md -> "Schedule and gate", "Embargo", and
- * "Disclosure".
+ * Result lines name each rule by its stable ID (`RULES` below), so a rule
+ * moved to another heading or spec keeps its citation here.
  *
  * Usage: node scripts/github-state-check.mjs [--out <fragment>] [--local]
  *   [--repo <owner/name>]
@@ -41,34 +36,32 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
 import { readRepoFile, repoRoot } from './lint-kit.mjs';
-import { ruleNumber, ruleId } from './security-audit-report.mjs';
+import { citedRule } from './security-audit-report.mjs';
 
 export const FRAGMENT = 'audit-github-state.md';
 const EXPECTED = '.github/audit/expected-github-state.json';
 const SENTINEL = '<!-- END OF REPORT -->';
 
-// Each rule a clause answers, as its spec, its heading, and a phrase only that
-// rule's text carries; the rule's number is looked up in the spec, so a
-// renumbered or reworded rule fails here rather than citing the wrong one.
-const CI = 'docs/specs/security-ci.md';
-const TEND = 'Automated Maintainer (tend)';
-const RULESETS = [CI, TEND, 'either admin-gating ruleset'];
-const BOT = [CI, TEND, '`dormouse-bot` holds'];
-const ENVIRONMENTS = [CI, TEND, 'any GitHub environment except'];
-const INVENTORY = [CI, TEND, 'the secret inventory departs'];
-const TEND_ALLOWED = [CI, TEND, '`secrets.allowed`'];
-const LIVENESS = [CI, TEND, '`.github/workflows/workflow-audit.yaml` is missing'];
-const PERMISSIONS = [CI, TEND, '`default_workflow_permissions`'];
-const HOSTED = [CI, 'Hosted Deployments', 'a Hosted environment lacks'];
-const HOSTED_CREDENTIALS = [CI, 'Hosted Deployments', 'Hosted credentials appear'];
-const HOSTED_APP = [CI, 'Hosted Deployments', 'the App (`Integration` actor'];
-const VSCODE = [CI, 'VS Code Extension Releases', '`vscode-extension-publish` lacks'];
-const COOLDOWN = ['docs/specs/security-supply-chain.md', 'Cooldown and alerts', 'secret scanning or its push protection'];
-const REPORTING = ['docs/specs/security.md', 'Reporting a vulnerability', 'private vulnerability reporting is disabled'];
-const GATE = ['docs/specs/security-audit.md', 'Schedule and gate', '`.github/workflows/security-audit.yaml` is missing or disabled'];
-const EMBARGO = ['docs/specs/security-audit.md', 'Embargo', '`diffplug/dormouse-embargo` is publicly visible'];
-const STATUS_ISSUE = ['docs/specs/security-audit.md', 'Disclosure', 'status issue is missing'];
-export const SECTIONS = [RULESETS, BOT, ENVIRONMENTS, INVENTORY, TEND_ALLOWED, LIVENESS, PERMISSIONS, HOSTED,
+// Each rule a clause answers, as its ID and a phrase only that rule's text
+// carries; the phrase is checked against the rule as each clause is judged, so
+// a reworded rule fails here rather than being judged by the wrong clause.
+const RULESETS = ['S52', 'either admin-gating ruleset'];
+const BOT = ['S54', '`dormouse-bot` holds'];
+const ENVIRONMENTS = ['S55', 'any GitHub environment except'];
+const INVENTORY = ['S56', 'the secret inventory departs'];
+const TEND_ALLOWED = ['S57', '`secrets.allowed`'];
+const LIVENESS = ['S58', '`.github/workflows/workflow-audit.yaml` is missing'];
+const PERMISSIONS = ['S64', '`default_workflow_permissions`'];
+const HOSTED = ['S65', 'a Hosted environment lacks'];
+const HOSTED_CREDENTIALS = ['S66', 'Hosted credentials appear'];
+const HOSTED_APP = ['S68', 'the App (`Integration` actor'];
+const VSCODE = ['S70', '`vscode-extension-publish` lacks'];
+const COOLDOWN = ['S266', 'secret scanning or its push protection'];
+const REPORTING = ['S268', 'private vulnerability reporting is disabled'];
+const GATE = ['S2', '`.github/workflows/security-audit.yaml` is missing or disabled'];
+const EMBARGO = ['S29', '`diffplug/dormouse-embargo` is publicly visible'];
+const STATUS_ISSUE = ['S34', 'status issue is missing'];
+export const RULES = [RULESETS, BOT, ENVIRONMENTS, INVENTORY, TEND_ALLOWED, LIVENESS, PERMISSIONS, HOSTED,
   HOSTED_CREDENTIALS, HOSTED_APP, VSCODE, COOLDOWN, REPORTING, GATE, EMBARGO, STATUS_ISSUE];
 
 /** The open issues carrying the status label, and the repository's pinned issues: one GraphQL read. */
@@ -299,8 +292,8 @@ function judge(state, { expected, tendAllowed, now = new Date(), local = false }
   const results = [];
   const info = [];
   const warnings = [];
-  const add = (verdict, [spec, heading, phrase], clause, evidence) =>
-    results.push({ verdict, spec, heading, rule: ruleNumber(repoRoot, spec, heading, phrase), clause, evidence });
+  const add = (verdict, [id, phrase], clause, evidence) =>
+    results.push({ verdict, rule: citedRule(repoRoot, id, phrase).id, clause, evidence });
   const unreadable = (keys) => keys.map((k) => [k, state.errors[k]]).filter(([, status]) => status !== undefined);
   /** Judge `fn` unless a state key it needs could not be read. */
   const check = (cite, clause, needs, fn) => {
@@ -486,14 +479,11 @@ function fragment({ results, info, warnings = [] }, hash) {
   // verdict from: a rule with several clauses letters them `.a`, `.b`, … in
   // the order they were judged.
   const perRule = new Map();
+  for (const r of results) perRule.set(r.rule, [...(perRule.get(r.rule) ?? []), r]);
   for (const r of results) {
-    const key = `${r.spec}\0${r.heading}\0${r.rule}`;
-    perRule.set(key, [...(perRule.get(key) ?? []), r]);
-  }
-  for (const r of results) {
-    const siblings = perRule.get(`${r.spec}\0${r.heading}\0${r.rule}`);
-    const clause = siblings.length > 1 ? String.fromCharCode(97 + siblings.indexOf(r)) : null;
-    lines.push(`- ${r.verdict}: ${ruleId(r.spec, r.heading, r.rule, clause)} — ${r.clause}: ${r.evidence}`);
+    const siblings = perRule.get(r.rule);
+    const clause = siblings.length > 1 ? `.${String.fromCharCode(97 + siblings.indexOf(r))}` : '';
+    lines.push(`- ${r.verdict}: ${r.rule}${clause} — ${r.clause}: ${r.evidence}`);
   }
   lines.push('', '### Findings', '');
   // Located at the expected-state file, with the subject a finding names as its

@@ -43,7 +43,7 @@ describe("createManagedVoicePort", () => {
     let answer!: (value: unknown) => void;
     const { port } = harness(() => new Promise((resolve) => { answer = resolve; }));
     ask(port);
-    // This computer signed in: the broadcast lands before this older answer.
+    // This computer enrolled: the broadcast lands before this older answer.
     port.receiveStatus({ configured: true, voiceId: "v2", notEntitled: false });
     answer({ ok: true, configured: false, voiceId: "v1", notEntitled: false });
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -53,6 +53,16 @@ describe("createManagedVoicePort", () => {
   it("reports a configure the sidecar failed as unavailable", async () => {
     const { port } = harness(() => null);
     expect(await port.configure({ voiceId: "v1" })).toEqual({ ok: false, reason: "unavailable" });
+  });
+
+  it("routes approval and disconnect through the voice channel and retains a failed-clear broadcast", async () => {
+    const { port, payloads } = harness(() => ({ ok: false, message: "Retry disconnect" }));
+    await port.beginEnrollment();
+    await port.cancelEnrollment();
+    port.receiveStatus({ configured: false, voiceId: "v1", disconnectFailed: true });
+    expect(await port.disconnect()).toEqual({ ok: false, message: "Retry disconnect" });
+    expect(port.status()).toMatchObject({ configured: false, disconnectFailed: true });
+    expect(payloads).toEqual([{ op: "beginEnrollment" }, { op: "cancelEnrollment" }, { op: "disconnect" }]);
   });
 
   it("decodes the host's base64 audio once", async () => {

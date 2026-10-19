@@ -26,7 +26,6 @@ import {
   WS_ROUTES,
   WS_TOKEN_PARAM,
   boundedBurrowLabel,
-  boundedPairingLabel,
   constantTimeEqual,
   createNoiseResponder,
   formatInvitationExpiry,
@@ -37,6 +36,7 @@ import {
   isConnectionRequestV1,
   isE2eRelayToBurrowFrame,
   isPairingRequestV1,
+  knownPairingDeviceLabel,
   MAX_CLIENT_ID_LENGTH,
   MAX_RELAY_TO_BURROW_FRAME_LENGTH,
   pairingInvitationPrologue,
@@ -1302,10 +1302,12 @@ export class BurrowRuntime {
       accountId: request.presence.accountId,
       passkeyCredentialId: request.presence.binding.passkeyCredentialId,
       passkeyPublicKeyHash: proof.passkeyPublicKeyHash,
-      // Attacker-chosen free text rendered in the one dialog the ACL rests on:
-      // bounded and stripped once, here, so the queue projection, the modal, and
-      // the persisted record all see the same safe value.
-      label: boundedPairingLabel(request.label),
+      // The phone chooses this beside the digits, and a presence proof does not
+      // say whose phone (a redeemed setup QR registers its holder's passkey):
+      // mapped once, here, so the queue projection, the modal, and the
+      // persisted record all see a member of the closed set
+      // (`docs/specs/remote-security-model.md` -> Pairing).
+      label: knownPairingDeviceLabel(request.label),
       verifiedAt: this.#now(),
       policy,
     };
@@ -1719,9 +1721,10 @@ export class BurrowRuntime {
         createSession({
           burrowId: this.#enrollment.burrowId,
           send,
-          // Bounded again rather than trusted: a record off disk may have been
-          // written by hand, and this is shown on a pane.
-          label: boundedPairingLabel(label),
+          // Mapped again rather than trusted: a record off disk may predate
+          // the closed set or have been written by hand, and this is shown on
+          // a pane.
+          label: knownPairingDeviceLabel(label),
           end: () => this.#disposeEstablished(clientId, { goodbye: true, only: e2e }),
         }),
       directPeering: this.#directPeering,

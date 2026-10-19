@@ -8,21 +8,21 @@
  */
 
 import { hostname } from 'node:os';
+import { enrollVerificationUrl, SELF_HOST_DEVICE_CODE_REFUSAL } from './hosted-enrollment-url';
+export { enrollVerificationUrl } from './hosted-enrollment-url';
 import {
   API_ROUTES,
-  ENROLL_PAGE_PATH,
-  MAX_ENROLL_POLL_INTERVAL_S,
   MAX_PENDING_PAIRINGS,
   deriveNoiseStaticPublicKey,
   formatPairingInvitationUrl,
   isSetupTokenResponse,
-  parseLinkFragment,
   randomBase64Url,
-  type BurrowEnrollBeginResponse,
   type EnrollmentOffer,
 } from 'remote-lib-common';
 import {
   beginHostedEnrollment,
+  hostedApprovalDeadline,
+  slowDownHostedApproval,
   originMismatchMessage,
   performEnrollment,
   pollHostedEnrollment,
@@ -31,7 +31,6 @@ import {
   type EnrollmentStatic,
 } from '../../remote/burrow/enrollment';
 import type { BurrowSurfaceProvider } from '../../remote/burrow/burrow-surface-provider';
-import type { ManagedVoiceCredential } from '../managed-voice-host';
 import { burrowFetch, describingFetchFailures, probeBurrowStanding } from '../../remote/burrow/burrow-fetch';
 import type { PendingPairing } from '../../remote/burrow/pairing-approval';
 import {
@@ -162,13 +161,7 @@ export interface BurrowServiceOptions {
   readOffer?: () => Promise<EnrollmentOffer | null>;
   /** This machine's interfaces, for `networkPolicy`; injected by the tests. */
   listInterfaces?: () => NetworkInterfaceInfo[];
-  /**
-   * Where a Hosted sign-in keeps the managed-voice token its redemption
-   * carries, and what sign-out clears (`docs/specs/hosted.md` -> "Managed
-   * voice"): the standalone sidecar's managed-voice host. Absent where the
-   * host has no managed voice (VS Code), which drops the token.
-   */
-  voiceCredential?: ManagedVoiceCredential;
+
 }
 
 /**
@@ -251,45 +244,6 @@ function hostedEnrollmentRefusal(accountOrigin: string): string {
   );
 }
 
-/** What `beginHostedEnrollment` answers in a self-host build. */
-const SELF_HOST_DEVICE_CODE_REFUSAL =
-  'This Dormouse enrolls with its own Relay’s setup password; enrollment codes are for Dormouse Hosted.';
-
-/**
- * How long a Hosted enrollment waits for approval, by this machine's clock:
- * the Relay's `expiresAt`, held to these bounds, since that is the Relay's
- * clock and this one may be minutes off it. The Relay's `expired` ends it too.
- */
-const HOSTED_ENROLLMENT_MIN_WAIT_MS = 60_000;
-const HOSTED_ENROLLMENT_MAX_WAIT_MS = 15 * 60_000;
-
-/** How much a 429 lengthens the poll interval, up to `MAX_ENROLL_POLL_INTERVAL_S`. */
-const HOSTED_ENROLLMENT_SLOW_DOWN_MS = 5_000;
-
-/**
- * The account page that approves `begin.userCode`, composed here
- * (`docs/specs/hosted.md` -> "Burrow enrollment"): **never the Relay's
- * `verificationUrl` in a release build**, which opens
- * `HOSTED_ACCOUNT_ORIGIN/enroll#<userCode>`. A dev Hosted build
- * (`isDevHostedBuild`) takes the origin of the Relay's `verificationUrl`,
- * holding it to a link's checks — https or loopback http, no credentials, path
- * `/enroll`, no query, fragment exactly the code — and throws without one.
- */
-export function enrollVerificationUrl(
-  relay: RelayBuild,
-  begin: Pick<BurrowEnrollBeginResponse, 'userCode' | 'verificationUrl'>,
-): string {
-  const account = hostedAccountOrigin(relay);
-  if (account === null) throw new Error(SELF_HOST_DEVICE_CODE_REFUSAL);
-  const origin = isDevHostedBuild(relay) ? namedAccountOrigin(begin) : account;
-  if (origin === null) {
-    throw new Error(
-      `The Relay at ${relay.origin} named no account page to approve ${begin.userCode} at.`,
-    );
-  }
-  return `${origin}${ENROLL_PAGE_PATH}#${begin.userCode}`;
-}
-
 /**
  * The account origin `status` names: `HOSTED_ACCOUNT_ORIGIN` in a release
  * Hosted build; in a dev one, `resolved` — the origin the last begin took from
@@ -297,26 +251,6 @@ export function enrollVerificationUrl(
  */
 export function accountOriginFor(relay: RelayBuild, resolved: string | null = null): string | null {
   return isDevHostedBuild(relay) ? resolved : hostedAccountOrigin(relay);
-}
-
-/** The origin of a `verificationUrl` that is exactly `<origin>/enroll#<userCode>`, or `null`. */
-function namedAccountOrigin(
-  begin: Pick<BurrowEnrollBeginResponse, 'userCode' | 'verificationUrl'>,
-): string | null {
-  const named = begin.verificationUrl;
-  if (typeof named !== 'string') return null;
-  let origin: string;
-  try {
-    origin = new URL(named).origin;
-  } catch {
-    return null;
-  }
-  const fragment = parseLinkFragment(named, origin, {
-    maxLength: 512,
-    pathname: ENROLL_PAGE_PATH,
-    hashPrefix: '#',
-  });
-  return fragment === begin.userCode ? origin : null;
 }
 
 /**
@@ -471,7 +405,7 @@ interface HostedEnrollmentRun {
   readonly label: string;
   readonly userCode: string;
   readonly verificationUrl: string;
-  /** This machine's deadline (`HOSTED_ENROLLMENT_MAX_WAIT_MS`). */
+  /** This machine's deadline (bounded independently of the Relay clock). */
   readonly expiresAt: number;
   intervalMs: number;
   /** The last poll found the approving account full. */
@@ -498,7 +432,6 @@ export class BurrowService {
   readonly #now: () => number;
   readonly #readOffer: () => Promise<EnrollmentOffer | null>;
   readonly #listInterfaces: () => NetworkInterfaceInfo[];
-  readonly #voiceCredential: ManagedVoiceCredential | undefined;
 
   #burrow: BurrowRuntime | null = null;
   /**
@@ -620,7 +553,6 @@ export class BurrowService {
     this.#now = options.now ?? (() => Date.now());
     this.#readOffer = options.readOffer ?? (() => readEnrollmentOffer());
     this.#listInterfaces = options.listInterfaces ?? listNetworkInterfaces;
-    this.#voiceCredential = options.voiceCredential;
   }
 
   /**
@@ -655,11 +587,7 @@ export class BurrowService {
     await this.#networkPolicy();
     const enrollment = await loadEnrollmentFor(this.#store, this.#relay.origin);
     if (enrollment) await this.#startBurrow(enrollment);
-    // A voice token is a sign-in's, and means nothing without its enrollment:
-    // one pasted before sign-in existed, or outliving a cleared enrollment.
-    else await this.#voiceCredential?.clear().catch((error: unknown) => {
-      console.warn('[burrow] could not clear the managed-voice token', error);
-    });
+
   }
 
   /** Stop the Burrow, end any one-time connection, and forget the connection-scoped state. */
@@ -899,18 +827,13 @@ export class BurrowService {
     this.#refuseEnrolled();
     if (this.#enrollRun?.redeeming) return this.#hostedEnrollmentState()!;
     const verificationUrl = enrollVerificationUrl(this.#relay, begin);
-    const now = this.#now();
-    const wait = Math.min(
-      Math.max(begin.expiresAt - now, HOSTED_ENROLLMENT_MIN_WAIT_MS),
-      HOSTED_ENROLLMENT_MAX_WAIT_MS,
-    );
     const run: HostedEnrollmentRun = {
       deviceCode: begin.deviceCode,
       noiseStatic,
       label,
       userCode: begin.userCode,
       verificationUrl,
-      expiresAt: now + wait,
+      expiresAt: hostedApprovalDeadline(begin.expiresAt, this.#now()),
       intervalMs: begin.interval * 1000,
       accountFull: false,
       redeeming: false,
@@ -991,7 +914,7 @@ export class BurrowService {
     );
     // Held whatever happened while the poll was out: see the method.
     if (answer.status === 'enrolled') {
-      await this.#redeemHostedEnrollment(run, answer.enrollment, answer.voiceToken);
+      await this.#redeemHostedEnrollment(run, answer.enrollment);
       return;
     }
     if (this.#enrollRun !== run) return;
@@ -1002,10 +925,7 @@ export class BurrowService {
         return;
       case 'retry':
         if (answer.slowDown) {
-          run.intervalMs = Math.min(
-            run.intervalMs + HOSTED_ENROLLMENT_SLOW_DOWN_MS,
-            MAX_ENROLL_POLL_INTERVAL_S * 1000,
-          );
+          run.intervalMs = slowDownHostedApproval(run.intervalMs);
         }
         this.#schedulePoll(run);
         return;
@@ -1045,7 +965,6 @@ export class BurrowService {
   async #redeemHostedEnrollment(
     run: HostedEnrollmentRun,
     enrollment: BurrowEnrollment,
-    voiceToken: string | null,
   ): Promise<void> {
     if (this.#enrollRun === run) {
       if (run.timer) clearTimeout(run.timer);
@@ -1065,20 +984,11 @@ export class BurrowService {
             `This computer was already enrolled as Burrow ${this.#enrollment.burrowId} when another code was approved.`,
           );
         }
-        try {
-          await this.#adoptEnrollment(enrollment, undefined, () => {
-            saved = true;
-            // Retain the persisted identity even if startup's ACL read fails.
-            this.#enrollment = enrollment;
-          });
-        } finally {
-          // Signed in once the enrollment is saved, whether or not it started.
-          if (saved && voiceToken !== null) {
-            await this.#voiceCredential?.save(voiceToken).catch((error: unknown) => {
-              console.warn('[burrow] could not save the managed-voice token', error);
-            });
-          }
-        }
+        await this.#adoptEnrollment(enrollment, undefined, () => {
+          saved = true;
+          // Retain the persisted identity even if startup's ACL read fails.
+          this.#enrollment = enrollment;
+        });
       });
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
@@ -1202,12 +1112,6 @@ export class BurrowService {
     this.#stopBurrow();
     this.#enrollment = null;
     this.#emitStatus();
-    // Signing out of Hosted: the enrollment's managed voice goes with it. The
-    // account keeps both until the computer is removed there
-    // (`docs/specs/hosted.md` -> "Managed voice").
-    await this.#voiceCredential?.clear().catch((error: unknown) => {
-      console.warn('[burrow] could not clear the managed-voice token', error);
-    });
     return {};
   }
 

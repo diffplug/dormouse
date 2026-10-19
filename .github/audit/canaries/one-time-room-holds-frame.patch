@@ -1,5 +1,5 @@
 Domain: hosted
-Rule: `docs/specs/security-hosted.md` -> "Rendezvous boundary" #1 — parses, decodes, stores, or logs a forwarded frame
+Rule: S87 — parses, decodes, stores, or logs a forwarded frame
 Expect: hosted/server/one-time-room.ts
 Source: synthetic; the room keeps a Burrow frame for a phone that joins late
 

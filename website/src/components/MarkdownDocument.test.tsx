@@ -65,3 +65,20 @@ describe("inline code wrapping", () => {
     expect(render("abcdef0123456789abcdef0123456789")).toMatch(/class="[^"]*break-words/);
   });
 });
+
+describe("renderAfterSection", () => {
+  const heading = (depth: number, id: string): BlockNode => ({
+    type: "heading", depth, id, text: id, children: [{ type: "text", value: id }],
+  });
+  const para = (value: string): BlockNode => ({ type: "paragraph", children: [{ type: "text", value }] });
+
+  it("splices after a section's last block, its subsections included, before the next heading at its level or above", () => {
+    const blocks = [heading(2, "a"), para("a1"), heading(3, "a-sub"), para("a2"), heading(2, "b"), para("b1")];
+    const markup = renderToStaticMarkup(
+      <MarkdownDocument blocks={blocks} renderAfterSection={(h) => <i>end {h.id}</i>} />,
+    );
+    const order = ["a1", "a2", "<i>end a-sub</i>", "<i>end a</i>", ">b<", "b1", "<i>end b</i>"].map((m) => markup.indexOf(m));
+    for (const at of order) expect(at).toBeGreaterThan(-1);
+    expect(order).toEqual([...order].sort((x, y) => x - y));
+  });
+});

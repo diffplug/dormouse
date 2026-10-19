@@ -146,6 +146,10 @@ export function persistableLeafMeta(meta: LeafMeta): LeafMeta {
     toolPortConflict: _toolPortConflict,
     toolAnnouncedPort: _toolAnnouncedPort,
     toolAnnouncedPath: _toolAnnouncedPath,
+    toolHistory: _toolHistory,
+    toolNavigating: _toolNavigating,
+    toolNavigationError: _toolNavigationError,
+    toolViewRequest: _toolViewRequest,
     ...rest
   } = meta.params;
   return { ...meta, params: rest };

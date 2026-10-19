@@ -260,28 +260,54 @@ function Blocks({ nodes }: { nodes: BlockNode[] }): ReactNode {
   return nodes.map((node, i) => <Block key={i} node={node} />);
 }
 
+type Heading = Extract<BlockNode, { type: "heading" }>;
+
 /**
  * Render a parsed document.
  *
- * `renderAfterHeading` lets a page splice its own content in after a heading
- * (the agent-skill page uses it for CLI reference links) without the page
- * having to slice the block list up and reassemble the document itself.
+ * `renderAfterHeading` and `renderAfterSection` let a page splice its own
+ * content in after a heading (the agent-skill page uses it for CLI reference
+ * links) or at the end of that heading's section, before the next heading of
+ * the same or a higher level, without the page having to slice the block list
+ * up and reassemble the document itself.
  */
 export default function MarkdownDocument({
   blocks,
   renderAfterHeading,
+  renderAfterSection,
 }: {
   blocks: BlockNode[];
-  renderAfterHeading?: (heading: Extract<BlockNode, { type: "heading" }>) => ReactNode;
+  renderAfterHeading?: (heading: Heading) => ReactNode;
+  renderAfterSection?: (heading: Heading) => ReactNode;
 }) {
+  // The headings whose sections close just before each block index; an inner
+  // section closes before the one around it.
+  const closing = new Map<number, Heading[]>();
+  if (renderAfterSection) {
+    blocks.forEach((node, i) => {
+      if (node.type !== "heading") return;
+      let end = i + 1;
+      while (end < blocks.length) {
+        const next = blocks[end];
+        if (next.type === "heading" && next.depth <= node.depth) break;
+        end++;
+      }
+      closing.set(end, [node, ...(closing.get(end) ?? [])]);
+    });
+  }
+  const close = (i: number) => closing.get(i)?.map((heading) => (
+    <Fragment key={`after-${heading.id}`}>{renderAfterSection!(heading)}</Fragment>
+  ));
   return (
     <>
       {blocks.map((node, i) => (
         <Fragment key={i}>
+          {close(i)}
           <Block node={node} />
           {node.type === "heading" && renderAfterHeading?.(node)}
         </Fragment>
       ))}
+      {close(blocks.length)}
     </>
   );
 }

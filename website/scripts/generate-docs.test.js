@@ -8,9 +8,12 @@ import {
   applyDelta,
   assertNoSiteLinks,
   assertRouteFragments,
+  auditIndex,
+  auditedSections,
   generateDocs,
   resolveRepoLinks,
   securityAudiences,
+  securitySetups,
 } from './generate-docs.js';
 import { createSlugger, inlineToText, parseMarkdown, visit } from './docs-parser.js';
 import { CODING_AGENTS } from '../../lib/src/lib/coding-agents.ts';
@@ -203,10 +206,11 @@ describe('security spec', () => {
 
   it('keeps every section, in order', () => {
     expect(data.security.headings.map((h) => h.id)).toEqual([
+      'setups',
+      'how-the-guarantees-are-checked',
       'guarantees',
       'what-is-not-defended',
       'known-gaps',
-      'how-the-guarantees-are-checked',
       'reporting-a-vulnerability',
     ]);
   });
@@ -285,6 +289,68 @@ describe('security spec', () => {
     expect(() => securityAudiences(page(doc('| g | no link | t |')))).toThrow(/names no spec/);
     expect(() => securityAudiences(page(doc('| g | [a](./website-docs.md) | t |')))).toThrow(/exactly one audience/);
     expect(securityAudiences(page(doc('| g | [a](./security-ci.md) | t |'))).security.guarantees.rows).toHaveLength(1);
+  });
+
+  it('reads the setups from the setup table and every entry\'s tags against them', () => {
+    // docs/specs/website-docs.md -> `/security` spec: a row tags itself in its
+    // `Applies to` cell, a bullet in the emphasis it opens with, and the setup
+    // table's first column is the only vocabulary either may use.
+    const page = (markdown) => {
+      const blocks = parseMarkdown(markdown, { slug: createSlugger() }).blocks;
+      resolveRepoLinks(blocks, 'docs/specs/security.md');
+      return { blocks };
+    };
+    const doc = ({
+      setups = ['| **A** | a |', '| **B** | b |'],
+      header = '| G | Applies to | Rule | Pinned by |',
+      row = '| g | A | [a](./security-ci.md) | t |',
+      bullet = '- *A, B.* **x** ([a](./security-ci.md))',
+      table = true,
+      section = true,
+    } = {}) =>
+      [
+        ...(section ? ['## Setups', '', ...(table ? ['| Setup | How |', '| --- | --- |', ...setups] : ['No table.']), ''] : []),
+        '## Guarantees', '', header, '| --- | --- | --- | --- |', row, '',
+        '## What is not defended', '', bullet, '',
+        '## Known gaps', '', '- *B.* **y** ([b](./security-remote.md))',
+      ].join('\n');
+    expect(securitySetups(page(doc()))).toEqual({
+      names: ['A', 'B'],
+      guarantees: [['A']],
+      notDefended: [['A', 'B']],
+      knownGaps: [['B']],
+    });
+    expect(() => securitySetups(page(doc({ section: false })))).toThrow(/no heading matches "Setups"/);
+    expect(() => securitySetups(page(doc({ table: false })))).toThrow(/"Setups" has no table/);
+    expect(() => securitySetups(page(doc({ setups: ['| **A** | a |', '| **B** | b |', '| **A** | c |'] })))).toThrow(
+      /"Setups" repeats A/,
+    );
+    expect(() => securitySetups(page(doc({ header: '| G | Setups | Rule | Pinned by |' })))).toThrow(
+      /"Guarantees" has no "Applies to" column/,
+    );
+    expect(() => securitySetups(page(doc({ row: '| g |  | [a](./security-ci.md) | t |' })))).toThrow(
+      /"Guarantees" entry 1 carries no setup tag/,
+    );
+    expect(() => securitySetups(page(doc({ row: '| g | A, | [a](./security-ci.md) | t |' })))).toThrow(/empty setup tag/);
+    expect(() => securitySetups(page(doc({ bullet: '- **x** ([a](./security-ci.md))' })))).toThrow(
+      /"What is not defended" entry 1 opens with no \*setup\* tag/,
+    );
+    expect(() => securitySetups(page(doc({ row: '| g | A, C | [a](./security-ci.md) | t |' })))).toThrow(
+      /"Guarantees" entry 1 names C, not a setup/,
+    );
+    expect(() => securitySetups(page(doc({ bullet: '- *B, B.* **x** ([a](./security-ci.md))' })))).toThrow(
+      /"What is not defended" entry 1 repeats B/,
+    );
+    expect(() => securitySetups(page(doc({ setups: ['| **A** | a |', '| **B** | b |', '| **C** | c |'] })))).toThrow(
+      /no entry applies to C/,
+    );
+  });
+
+  it('publishes the setups the spec\'s entries were checked against', () => {
+    // The vocabulary the page's readers pick from: the spec's four setups,
+    // in the table's order, and written by the build that checked the tags.
+    expect(data.security.setups).toEqual(['Every install', 'One-time link', 'Hosted phone', 'Self-hosted Relay']);
+    expect(data.security.setups).toEqual(securitySetups({ blocks: data.security.blocks }).names);
   });
 
   it('fails on a link into a published page whose fragment names no heading there', () => {
@@ -488,5 +554,59 @@ describe('same-site links', () => {
     const external = generatedHrefs().filter((href) => /^https?:\/\//i.test(href));
     expect(external.length).toBeGreaterThan(0);
     for (const href of external) expect(href).not.toContain('dormouse.sh');
+  });
+});
+
+describe('audit index', () => {
+  const SPEC = [
+    '# Spec',
+    'A `FAIL IF` pointer mid-line is no check.',
+    '## Alpha',
+    '- **FAIL IF** `S1` one.',
+    '**FAIL IF** `S2` two, leading its paragraph.',
+    '## Beta',
+    'Prose, and a `**FAIL IF**` quoted mid-line.',
+    '### `Gamma` [linked](./x.md)',
+    '```',
+    '- **FAIL IF** inside a fence.',
+    '```',
+    '- **FAIL IF** `S3` three.',
+    '## Alpha',
+    '- **FAIL IF** `S4` four, under a repeated heading.',
+    '## Future',
+    '- **FAIL IF** staged, below the fold.',
+  ].join('\n');
+
+  it('counts each FAIL IF under its nearest heading, above the fold and outside fences, with GitHub anchors', () => {
+    expect(auditedSections(SPEC, 'fixture')).toEqual([
+      { title: 'Alpha', anchor: 'alpha', checks: 2 },
+      { title: 'Gamma linked', anchor: 'gamma-linked', checks: 1 },
+      { title: 'Alpha', anchor: 'alpha-1', checks: 1 },
+    ]);
+  });
+
+  it('refuses a FAIL IF with no section above it', () => {
+    expect(() => auditedSections('# Spec\n- **FAIL IF** orphaned.\n## Alpha\n', 'fixture')).toThrow(/fixture: a FAIL IF above/);
+  });
+
+  it('lists every security spec once, under the domain whose scope claims it, linked on GitHub', async () => {
+    const index = await auditIndex();
+    expect(data.security.auditIndex).toEqual(index);
+    const { readdir } = await import('node:fs/promises');
+    const specs = (await readdir(new URL('../../docs/specs/', import.meta.url)))
+      .filter((f) => /^security[a-z-]*\.md$/.test(f) && !f.endsWith('.rationale.md'))
+      .map((f) => `docs/specs/${f}`);
+    const listed = index.domains.flatMap((d) => d.specs.map((s) => s.path));
+    expect([...listed].sort()).toEqual(specs.sort());
+    expect(index.domains.map((d) => d.name)).toEqual(['ci-and-secrets', 'hosted', 'local', 'remote', 'supply-chain']);
+    for (const domain of index.domains) {
+      expect(domain.checks).toBe(domain.specs.reduce((n, s) => n + s.checks, 0));
+      for (const spec of domain.specs) {
+        expect(spec.url).toBe(`${REPO_BLOB_BASE}/${spec.path}`);
+        expect(spec.sections.length).toBeGreaterThan(0);
+        for (const section of spec.sections) expect(section.url.startsWith(`${spec.url}#`)).toBe(true);
+      }
+    }
+    expect(index.checks).toBe(index.domains.reduce((n, d) => n + d.checks, 0));
   });
 });

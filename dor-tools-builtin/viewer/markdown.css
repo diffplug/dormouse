@@ -51,6 +51,9 @@ body .mdxeditor-toolbar button{padding:2px}
 .controls .save:not([aria-disabled=true]){background:var(--vscode-button-background,Highlight);color:var(--vscode-button-foreground,HighlightText)}
 .controls .save:hover:not([aria-disabled=true]){background:color-mix(in srgb,currentColor 10%,var(--vscode-button-background,Highlight))}
 .error{padding:6px 12px;color:var(--vscode-errorForeground,CanvasText);background:var(--vscode-sideBar-background,Canvas);white-space:pre-wrap;flex:none}
+.md-link-menu{position:fixed;z-index:1000;width:210px;padding:4px;background:var(--vscode-menu-background,Canvas);color:var(--vscode-menu-foreground,CanvasText);border:1px solid var(--baseBorder);border-radius:4px;box-shadow:0 3px 12px var(--vscode-widget-shadow,transparent)}
+.md-link-menu button{display:block;width:100%;text-align:left;font:inherit;font-size:12px;padding:5px 7px;border:0;border-radius:2px;background:transparent;color:inherit;cursor:pointer}
+.md-link-menu button:hover,.md-link-menu button:focus-visible{background:var(--baseBgHover);outline:1px solid var(--accentBorder)}
 
 /* Prose: the terminal's font size, tight leading and margins. */
 .prose{font-size:var(--vscode-editor-font-size,13px);line-height:1.4;padding:8px 14px 24px;max-width:none}
@@ -147,13 +150,6 @@ body .mdxeditor-source-editor .cm-scroller{line-height:1.35}
 .md-image-edit:hover{color:var(--baseTextContrast)}
 .md-image-edit svg{display:block}
 .md-image-edit:focus-visible{outline:1px solid var(--vscode-focusBorder,Highlight)}
-
-/* The image editor over the whole page. */
-.image-overlay{position:absolute;inset:0;z-index:10;display:flex;flex-direction:column;background:var(--vscode-editor-background,Canvas)}
-.image-overlay-name{opacity:.65;font-size:11px;max-width:min(24ch,15cqi);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-right:2px}
-.image-overlay-pending{display:flex;align-items:center;gap:8px;padding:6px 12px}
-.image-overlay-pending .state{opacity:.65}
-.image-overlay-pending button{margin-left:auto;font:inherit;font-size:12px;color:inherit;border:0;background:transparent;padding:3px 7px;border-radius:3px;cursor:pointer}
 
 dialog{max-width:min(420px,90vw);border:1px solid var(--vscode-focusBorder,GrayText);padding:20px;background:var(--vscode-editorWidget-background,Canvas);color:var(--vscode-editor-foreground,CanvasText);font:inherit}
 dialog h2{font-size:14px;margin:0 0 8px}dialog p{margin:0 0 16px}dialog form>div{display:flex;justify-content:flex-end;gap:8px}

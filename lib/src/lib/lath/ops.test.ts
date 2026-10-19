@@ -144,22 +144,28 @@ describe('move', () => {
     expect(r.a.x).toBeGreaterThanOrEqual(r.b.x + r.b.width);
   });
 
-  it('preserves pane widths when reordering siblings or dropping back at the same boundary', () => {
+  it('leaves a drop back beside itself unchanged, and splits a pane in half within its own split', () => {
     const t = tree(mk('row', [leaf('a'), 0.2], [leaf('b'), 0.3], [leaf('c'), 0.5]));
-    const same = move(t, 'b', { kind: 'edge', path: [0], edge: 'right' });
-    expect(rects(same.tree)).toEqual(rects(t));
+    expect(move(t, 'b', { kind: 'edge', path: [0], edge: 'right' })).toEqual({ tree: t, ok: true });
     const reordered = move(t, 'b', { kind: 'edge', path: [2], edge: 'right' });
-    expect(rects(reordered.tree)).toEqual({
-      a: R(0, 0, 20, 100), c: R(20, 0, 50, 100), b: R(70, 0, 30, 100),
+    // b's slot closes (a 40, c 100), then c splits in half with b.
+    expect(rects(reordered.tree, R(0, 0, 140, 100))).toEqual({
+      a: R(0, 0, 40, 100), c: R(40, 0, 50, 100), b: R(90, 0, 50, 100),
     });
   });
 
-  it('shares a leaf moved into another split alongside its new siblings', () => {
+  it('splits a single pane in half when moved into another split', () => {
     const t = tree(mk('row', [leaf('a'), 0.5], [mk('col', [leaf('b'), 0.5], [leaf('c'), 0.5]), 0.5]));
     const out = move(t, 'a', { kind: 'edge', path: [1, 1], edge: 'bottom' });
-    expect(rects(out.tree, R(0, 0, 90, 90))).toEqual({
-      b: R(0, 0, 90, 30), c: R(0, 30, 90, 30), a: R(0, 60, 90, 30),
+    expect(rects(out.tree)).toEqual({
+      b: R(0, 0, 100, 50), c: R(0, 50, 100, 25), a: R(0, 75, 100, 25),
     });
+  });
+
+  it('splits a single pane in half when nesting beside it, whatever the moved weight', () => {
+    const t = tree(mk('row', [leaf('a'), 0.2], [leaf('b'), 0.8]));
+    const out = move(t, 'a', { kind: 'edge', path: [1], edge: 'bottom' });
+    expect(rects(out.tree)).toEqual({ b: R(0, 0, 100, 50), a: R(0, 50, 100, 50) });
   });
 
   it('moves a leaf beside an ancestor split (“beside the whole column”)', () => {
@@ -206,9 +212,17 @@ describe('insert', () => {
     expect(validate(out.tree)).toEqual([]);
   });
 
-  it('renormalizes a sibling insert alongside the existing children', () => {
+  it('splits a single sibling in half without a weight, leaving the others', () => {
     const t = tree(mk('row', ...['a', 'b', 'c', 'd'].map((id): [ReturnType<typeof leaf>, number] => [leaf(id), 0.25])));
     const out = insert(t, 'X', { kind: 'edge', path: [3], edge: 'right' });
+    expect(rects(out.tree, R(0, 0, 80, 10))).toEqual({
+      a: R(0, 0, 20, 10), b: R(20, 0, 20, 10), c: R(40, 0, 20, 10), d: R(60, 0, 10, 10), X: R(70, 0, 10, 10),
+    });
+  });
+
+  it('renormalizes a weighted sibling insert alongside the existing children', () => {
+    const t = tree(mk('row', ...['a', 'b', 'c', 'd'].map((id): [ReturnType<typeof leaf>, number] => [leaf(id), 0.25])));
+    const out = insert(t, 'X', { kind: 'edge', path: [3], edge: 'right' }, 0.5);
     expect(rects(out.tree, R(0, 0, 90, 10))).toEqual({
       a: R(0, 0, 15, 10), b: R(15, 0, 15, 10), c: R(30, 0, 15, 10), d: R(45, 0, 15, 10), X: R(60, 0, 30, 10),
     });
