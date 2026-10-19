@@ -251,13 +251,13 @@ test('readClipboardText on mac shells out to pbpaste', async () => {
   const calls = [];
   const text = await readClipboardText({
     platform: 'darwin',
-    exec: async (cmd, args) => {
-      calls.push([cmd, args]);
+    exec: async (cmd, args, options) => {
+      calls.push([cmd, args, options.env.LC_CTYPE]);
       return { stdout: 'hello clipboard' };
     },
   });
   assert.equal(text, 'hello clipboard');
-  assert.deepEqual(calls, [['pbpaste', []]]);
+  assert.deepEqual(calls, [['pbpaste', [], 'UTF-8']]);
 });
 
 test('readClipboardText on mac returns empty string when pbpaste fails', async () => {
@@ -346,6 +346,7 @@ test('writeClipboardText on mac shells out to pbcopy via stdin', async () => {
   await writeClipboardText('copied!', { platform: 'darwin', spawn: f.spawn });
   assert.deepEqual(f.calls.map((c) => [c[0], c[1]]), [['pbcopy', []]]);
   assert.deepEqual(f.writes, [['pbcopy', 'copied!']]);
+  assert.equal(f.calls[0][2].env.LC_CTYPE, 'UTF-8');
 });
 
 test('writeClipboardText on windows shells out to clip', async () => {

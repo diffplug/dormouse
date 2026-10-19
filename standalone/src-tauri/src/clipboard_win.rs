@@ -334,6 +334,14 @@ mod tests {
         u32::from_le_bytes([header[10], header[11], header[12], header[13]])
     }
 
+    // The real clipboard: Windows CI's `cargo test` is where this write runs.
+    #[test]
+    fn write_text_round_trips_through_read_text() {
+        let text = "copied café ✓ 🐭\r\nsecond line";
+        write_text(text).expect("write_text");
+        assert_eq!(read_text().as_deref(), Some(text));
+    }
+
     #[test]
     fn bmp_file_header_32bpp_has_offset_54() {
         // 32bpp BI_RGB: no palette, no masks → pixels start right after the header.
