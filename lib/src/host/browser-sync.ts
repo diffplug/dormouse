@@ -5,12 +5,18 @@
  * viewport against the size it wrote. Only the host knows when its writes
  * began and landed, so only it can tell a report taken before a write from
  * another writer — an agent's `set viewport` — which ends the sync.
+ *
+ * Both providers size each page alone, and a page shown anew — a popup, the
+ * tab left when the active one closes — keeps whatever size it had: the pane's
+ * size, or else the last Fixed one this host wrote, is written to it too.
  */
 import { messageOf } from '../lib/errors';
 import type { BrowserResult, ViewerState, ViewerSyncIntent, ViewerSyncState } from '../lib/platform/browser-automation';
 import type { BrowserViewDeps, ViewportSize } from './browser-viewer';
 
 type SyncSize = ViewportSize & { dpr: number };
+/** A Fixed viewport as asked for: without a ratio, the page keeps its own. */
+export type FixedSize = ViewportSize & { dpr?: number };
 
 /** How long the browser's viewport must differ from the size last written,
  *  with no write since, before it is another writer's: a frame already in
@@ -50,8 +56,11 @@ interface Sync<B> {
 }
 
 export interface ViewportSyncDeps<B> {
-  /** Size the browser; answers once the write has landed or failed. */
-  write(browser: B, size: SyncSize, isCurrent: () => boolean): Promise<BrowserResult>;
+  /** Size the browser, unless `isCurrent` no longer holds when the write's
+   *  turn comes; answers once it has landed or failed. `keepDpr`: a Fixed
+   *  size's ratio, as asked, rather than the pane's display ratio, which
+   *  only a provider that can apply it writes. */
+  write(browser: B, size: FixedSize, opts: { isCurrent: () => boolean; keepDpr?: boolean }): Promise<BrowserResult>;
   /** Send `message` to every pane viewing browser `id`. */
   report(id: string, message: Extract<ViewerState, { type: 'sync' }>): void;
   /** Whether nothing may reach browser `id` now: a launch or close of it
@@ -67,8 +76,13 @@ export function createViewportSync<B extends { id: string }>(deps: ViewportSyncD
   // ones whose first intent has not arrived. A later engagement cannot revive
   // an older one still arriving on another viewer socket.
   const ended = new Map<string, Set<string>>();
-  // The page each browser shows, by its tab id, whether or not a pane syncs it.
+  // The page each browser shows, by its provider's key, whether or not a pane
+  // syncs it.
   const shown = new Map<string, string>();
+  // The Fixed viewport this host last wrote to each browser not syncing — a
+  // launch's initial one included — until a pane engages sync, and the
+  // pages it has been written to since.
+  const fixedSizes = new Map<string, { size: FixedSize; pages: Set<string> }>();
 
   function report(s: Sync<B>): void {
     deps.report(s.browser.id, { type: 'sync', state: s.state, engagement: s.engagement });
@@ -91,6 +105,7 @@ export function createViewportSync<B extends { id: string }>(deps: ViewportSyncD
     syncs.delete(id);
     ended.delete(id);
     shown.delete(id);
+    fixedSizes.delete(id);
   }
 
   /** Stop syncing: another writer set the browser's viewport. */
@@ -119,7 +134,7 @@ export function createViewportSync<B extends { id: string }>(deps: ViewportSyncD
     clearMismatch(s);
     setState(s, 'applying');
     const engagement = s.engagement;
-    s.writing = deps.write(s.browser, size, () => syncs.get(id) === s && s.state !== 'off' && s.engagement === engagement)
+    s.writing = deps.write(s.browser, size, { isCurrent: () => syncs.get(id) === s && s.state !== 'off' && s.engagement === engagement })
       .catch((error: unknown): BrowserResult => ({ ok: false, error: messageOf(error) }))
       .then((result) => {
         s.writing = undefined;
@@ -140,6 +155,7 @@ export function createViewportSync<B extends { id: string }>(deps: ViewportSyncD
       deps.report(id, { type: 'sync', state: 'off', engagement: message.engagement });
       return;
     }
+    fixedSizes.delete(id);
     let s = syncs.get(id);
     // Another browser streams under this identity now (a `dor agent-browser` re-run).
     if (s && s.stream !== stream) {
@@ -181,14 +197,29 @@ export function createViewportSync<B extends { id: string }>(deps: ViewportSyncD
     }
   }
 
-  /** The browser shows page `tabId`: another page is sized, never judged. */
-  function pageShown(id: string, stream: number, tabId: string): void {
+  /** The browser shows `page`: another page is sized, never judged. */
+  function pageShown(browser: B, stream: number, page: string): void {
+    const { id } = browser;
     const before = shown.get(id);
-    shown.set(id, tabId);
+    shown.set(id, page);
+    if (before === undefined || before === page) return;
     const s = syncs.get(id);
-    if (before === undefined || before === tabId || !s || s.stream !== stream) return;
-    s.stale = true;
-    pump(s);
+    if (s && s.stream === stream && s.state !== 'off') {
+      s.stale = true;
+      pump(s);
+      return;
+    }
+    // A page shown again already has the size.
+    const fixed = fixedSizes.get(id);
+    if (!fixed || fixed.pages.has(page) || deps.blocked(id)) return;
+    fixed.pages.add(page);
+    void deps.write(browser, fixed.size, { isCurrent: () => fixedSizes.get(id) === fixed, keepDpr: true })
+      .catch((error: unknown): BrowserResult => ({ ok: false, error: messageOf(error) }))
+      .then((result) => {
+        if (result.ok) return;
+        fixed.pages.delete(page);
+        deps.log(`[browser-sync] sizing ${id}'s page shown anew failed: ${result.error ?? 'no reason given'}`);
+      });
   }
 
   return {
@@ -198,13 +229,16 @@ export function createViewportSync<B extends { id: string }>(deps: ViewportSyncD
       return {
         intent: (message) => intent(browser, stream, message),
         viewport: (size, takenAt) => viewport(browser.id, stream, size, takenAt),
-        pageShown: (tabId) => pageShown(browser.id, stream, tabId),
+        pageShown: (page) => pageShown(browser, stream, page),
       };
     },
 
-    /** Commit a successful Fixed viewport. An engagement chosen
-     *  after the Fixed request arrived owns the browser's next size. */
-    fixed(id: string, engagement?: string): void {
+    /** Commit a successful Fixed viewport, which a page shown anew is given
+     *  too. An engagement chosen after the Fixed request arrived owns the
+     *  browser's next size. */
+    fixed(id: string, engagement: string | undefined, size: FixedSize): void {
+      const page = shown.get(id);
+      fixedSizes.set(id, { size, pages: new Set(page === undefined ? [] : [page]) });
       if (engagement === undefined) return;
       end(id, engagement);
       const s = syncs.get(id);
@@ -213,6 +247,16 @@ export function createViewportSync<B extends { id: string }>(deps: ViewportSyncD
     },
 
     current(id: string): string | undefined { return syncs.get(id)?.engagement; },
+
+    /** Browser `id`'s sizing as it stands, for `dor`'s diagnostics. */
+    diagnostics(id: string): Record<string, unknown> {
+      const s = syncs.get(id);
+      return {
+        shownPage: shown.get(id) ?? null,
+        fixed: fixedSizes.get(id)?.size ?? null,
+        sync: s ? { stream: s.stream, engagement: s.engagement, state: s.state, target: s.target, applied: s.applied ?? null, writing: !!s.writing, stale: s.stale } : null,
+      };
+    },
 
     /** A launch or close replaces or ends browser `id`. */
     forget,
@@ -223,6 +267,7 @@ export function createViewportSync<B extends { id: string }>(deps: ViewportSyncD
       syncs.clear();
       ended.clear();
       shown.clear();
+      fixedSizes.clear();
     },
   };
 }

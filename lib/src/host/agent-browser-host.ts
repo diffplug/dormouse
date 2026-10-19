@@ -13,6 +13,7 @@
 import * as net from 'net';
 import * as os from 'os';
 import * as path from 'path';
+import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
 // All external spawns go through dor-lib-common's spawnAndCapture, which owns the
 // Windows recipe (cross-spawn for PATHEXT/.cmd, windowsHide, exit-vs-close). The
@@ -177,6 +178,14 @@ function cdpCalls(socket: WebSocket, event: (method: string, params: Record<stri
 // viewport (`measuredViewport`), measured this often.
 const MEASURE_SCRIPT = "document.visibilityState === 'visible' ? { width: innerWidth, height: innerHeight, dpr: devicePixelRatio } : null";
 const MEASURE_INTERVAL_MS = 1000;
+
+/** How long one action on the daemon's own socket may take, answer included. */
+export const DAEMON_ACTION_TIMEOUT_MS = 2_000;
+// The longest answer line read from the daemon's socket.
+const DAEMON_ANSWER_MAX_BYTES = 65_536;
+/** The screencast `screencast_start` asks for: what the daemon's stream sends
+ *  itself (0.31.1: JPEG frames of the same size and weight). */
+const SCREENCAST_START = { action: 'screencast_start', format: 'jpeg', quality: 80 } as const;
 
 export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}): BrowserProvider<ProviderBinding> {
   const log = deps.log ?? (() => {});
@@ -361,6 +370,148 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
   // daemon asks it nothing.
   const cdpEndpoints = new Map<string, { stream: number; url: string }>();
 
+  // Per session, outliving each viewer socket on it: the active tab its
+  // streams last reported, the one its screencast was last rebound for, how
+  // many headless streams watch, the rebinds queued in order, and the last
+  // outcome, for diagnostics.
+  type ScreencastState = {
+    active?: string;
+    reboundFor?: string;
+    streams: number;
+    queue: Promise<void>;
+    rebinds: number;
+    refusals: number;
+    last?: { reason: string; outcome: string; at: string };
+    warned: Set<string>;
+  };
+  const screencasts = new Map<string, ScreencastState>();
+  const screencastOf = (session: string): ScreencastState => {
+    let state = screencasts.get(session);
+    if (!state) screencasts.set(session, state = { streams: 0, queue: Promise.resolve(), rebinds: 0, refusals: 0, warned: new Set() });
+    return state;
+  };
+
+  /**
+   * One action on the session's daemon over its own socket, beside the state
+   * files `liveDaemon` proves it by and only for the daemon streaming on
+   * `stream`: a newline-delimited JSON request and one answer line, bounded.
+   * The CLI has no verb for the screencast actions (agent-browser 0.31.1), so
+   * this is the host's one use of the socket. Anything but a `success: true`
+   * answer — no daemon, no socket (Windows has none), an error, a timeout, an
+   * action a later agent-browser renamed — is a refusal, with its reason.
+   */
+  async function daemonAction(b: ProviderBinding, stream: number, request: Record<string, unknown>): Promise<string | undefined> {
+    if (process.platform === 'win32') return 'no daemon socket on Windows';
+    if ((await liveDaemon(b))?.stream !== stream) return 'not the live daemon of this stream';
+    const file = path.join(agentBrowserStateDir(b), `${b.session}.sock`);
+    return new Promise<string | undefined>((resolve) => {
+      let answer = '';
+      const socket = net.connect(file);
+      const settle = (refusal: string | undefined) => { socket.destroy(); resolve(refusal); };
+      socket.setTimeout(DAEMON_ACTION_TIMEOUT_MS, () => settle('no answer in time'));
+      socket.once('error', (error) => settle(error.message));
+      socket.once('close', () => settle('closed without an answer'));
+      socket.on('data', (data: Buffer) => {
+        answer += data.toString();
+        const end = answer.indexOf('\n');
+        if (end < 0) {
+          if (answer.length > DAEMON_ANSWER_MAX_BYTES) settle('answer too long');
+          return;
+        }
+        let parsed: { success?: unknown; error?: unknown };
+        try {
+          parsed = JSON.parse(answer.slice(0, end));
+        } catch {
+          settle('unreadable answer');
+          return;
+        }
+        settle(parsed.success === true ? undefined : typeof parsed.error === 'string' ? parsed.error : 'refused');
+      });
+      socket.write(`${JSON.stringify({ id: `dormouse-${randomUUID()}`, ...request })}\n`);
+    });
+  }
+
+  /**
+   * agent-browser's daemon rebinds its screencast only on a switch someone
+   * asks for (`tab tN`); a tab it makes active by itself — a popup it reports
+   * active, the tab left when the active one closes — leaves the stream on
+   * the old page, while the page may still paint now and then, so frames
+   * prove nothing. A new stream client does not rebind it either. Restarting
+   * the screencast (`screencast_stop`, which may answer that none runs, then
+   * `screencast_start`) binds it to the active tab and never changes which
+   * tab that is, so it races no agent's own switches (all measured against
+   * 0.31.1). Rebinds run in order per browser; one refused leaves the stream
+   * as it was.
+   */
+  function rebindScreencast(b: ProviderBinding, stream: number, reason: string): void {
+    const state = screencastOf(b.session);
+    state.queue = state.queue.then(async () => {
+      await daemonAction(b, stream, { action: 'screencast_stop' });
+      record(b, state, reason, await daemonAction(b, stream, SCREENCAST_START));
+    });
+  }
+
+  /** The browser's last headless stream closed: an explicit screencast keeps
+   *  capturing with no client (0.31.1), so it stops. */
+  function stopScreencast(b: ProviderBinding, stream: number): void {
+    const state = screencastOf(b.session);
+    state.queue = state.queue.then(async () => {
+      const refusal = await daemonAction(b, stream, { action: 'screencast_stop' });
+      // None running is the stop it wanted.
+      record(b, state, 'last viewer closed', refusal === 'No screencast active' ? undefined : refusal);
+    });
+  }
+
+  function record(b: ProviderBinding, state: ScreencastState, reason: string, refusal: string | undefined): void {
+    state.rebinds += 1;
+    if (refusal !== undefined) state.refusals += 1;
+    state.last = { reason, outcome: refusal === undefined ? 'done' : `refused: ${refusal}`, at: new Date().toISOString() };
+    if (refusal !== undefined && !state.warned.has(refusal)) {
+      state.warned.add(refusal);
+      log(`[agent-browser] the daemon of ${b.session} refused a screencast action (${reason}): ${refusal}`);
+    }
+  }
+
+  /**
+   * A headless stream's report of the active tab: a change from what this
+   * stream saw before, to a tab the screencast was not already rebound for,
+   * rebinds it — once per change per browser, however many streams report
+   * it, each a little apart.
+   */
+  function followActiveTab(b: ProviderBinding, stream: number, before: string | undefined, active: string, headed: boolean): void {
+    const state = screencastOf(b.session);
+    state.active = active;
+    if (headed) return;
+    if (state.reboundFor === undefined || before === undefined) {
+      state.reboundFor ??= active;
+      return;
+    }
+    if (before === active || state.reboundFor === active) return;
+    state.reboundFor = active;
+    rebindScreencast(b, stream, `the daemon made ${active} active`);
+  }
+
+  /** Count a headless stream of the browser open — the first rebinds its
+   *  screencast, whatever changed while none watched — returning its close. */
+  function screencastWatched(b: ProviderBinding, stream: number): () => void {
+    // Its own state, which a launch's `release` may have replaced by then.
+    const state = screencastOf(b.session);
+    state.streams += 1;
+    if (state.streams === 1) {
+      state.reboundFor = undefined;
+      rebindScreencast(b, stream, 'a viewer connected');
+    }
+    let closed = false;
+    return () => {
+      if (closed) return;
+      closed = true;
+      state.streams -= 1;
+      if (state.streams > 0 || screencasts.get(b.session) !== state) return;
+      state.reboundFor = undefined;
+      stopScreencast(b, stream);
+    };
+  }
+
   /** The CDP endpoint of the browser the daemon streaming on `stream` runs,
    *  asked of that daemon once. */
   async function cdpEndpoint(b: ProviderBinding, stream: number): Promise<string | undefined> {
@@ -539,6 +690,20 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
     },
 
     view: (b, port, { headed }, sink) => viewStream(b, port, headed, sink),
+
+    // A launch or close replaces the daemon, whose tab ids start over.
+    async release(b) {
+      screencasts.delete(b.session);
+    },
+
+    async dispose() {
+      screencasts.clear();
+    },
+
+    diagnostics(b) {
+      const state = screencasts.get(b.session);
+      return state ? { screencast: { streams: state.streams, active: state.active ?? null, reboundFor: state.reboundFor ?? null, actions: state.rebinds, refusals: state.refusals, last: state.last ?? null } } : {};
+    },
   };
 
   /**
@@ -565,6 +730,11 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
     let closing = false;
     let observer: { close(): void } | null = null;
     let lastFrame: Buffer | undefined;
+    // The active tab this stream last reported, from the browser's last known.
+    let streamActive = screencasts.get(b.session)?.active;
+    // A headed window has no screencast; `daemonAction` proves the daemon.
+    const rebinds = !headed;
+    let unwatch: (() => void) | undefined;
     const lastState = new Map<string, string>();
     // The stream's status names the daemon's configured viewport, which a
     // headed window does not follow: the window's own, as its page reports
@@ -587,6 +757,7 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
         resolve();
       });
       socket.on('close', () => {
+        unwatch?.();
         observer?.close();
         if (!opened) reject(new Error(`no agent-browser stream answers on port ${port}`));
         else if (!closing) sink.gone();
@@ -623,7 +794,16 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
       if (lastState.get(message.type) === text) return;
       lastState.set(message.type, text);
       if (message.type === 'tabs') {
-        if (Array.isArray(message.tabs)) sink.state({ type: 'tabs', tabs: parseAgentBrowserTabs(message.tabs) });
+        if (!Array.isArray(message.tabs)) return;
+        const tabs = parseAgentBrowserTabs(message.tabs);
+        sink.state({ type: 'tabs', tabs });
+        // The daemon's tab ids (`t1`, `t2`, …) are never reused while it runs.
+        const active = tabs.find((tab) => tab.active)?.tabId;
+        if (active !== undefined && !closing) {
+          sink.shown(active);
+          followActiveTab(b, port, streamActive, active, !rebinds);
+          streamActive = active;
+        }
         return;
       }
       status = {
@@ -636,6 +816,7 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
       sendStatus();
     });
     await open;
+    if (rebinds) unwatch = screencastWatched(b, port);
     if (headed) {
       observer = observeWindow(b, port, sink, (measured) => {
         windowViewport = measured;
@@ -654,6 +835,7 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
       },
       close() {
         closing = true;
+        unwatch?.();
         observer?.close();
         socket.close();
       },

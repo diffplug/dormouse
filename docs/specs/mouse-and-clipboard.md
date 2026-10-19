@@ -181,8 +181,9 @@ Every break is a mark that a click cycles keep → space → none; a scope or fo
 - **Never take focus**; only an actual scrollbar press keeps its default (rationale). Presses inside it count as inside its pane (`anchoredTarget`); its `mousedown` and `contextmenu` never reach the pane.
 - **Esc**, a click outside the editor, a content change or a resize it cannot follow (§3.4), a confirmed copy, or **any input the terminal receives** — typing, a paste, Pocket's input bar — dismisses it and cancels the selection. Source of truth: `writeUserInput` in `lib/src/lib/terminal-lifecycle.ts`, pinned by `lib/src/lib/terminal-lifecycle.selection.test.ts`.
 - **Must confirm only after a successful clipboard write, and only for the selection copied**; the selection then clears, however it moved meanwhile (rationale).
-- **Must leave empty copies idle without writing.** **Must say a failed write failed**, keeping the selection for a retry. Without the Clipboard API, or refused by it, the write first falls back to `execCommand('copy')` (rationale).
-- **Must open the clipboard-failure report when a write fails both ways**, unless its caller opts out. **Its details never carry the copied text**; they go to the tracking issue the report links.
+- **Must leave empty copies idle without writing.** **Must say a failed write failed**, keeping the selection for a retry.
+- **Must write through the adapter's native `writeClipboardText` where it has one, and never fall back from it** (rationale). **Pocket's adapter must have none**: its copies belong on the phone. Without one, the write takes the Clipboard API, and `execCommand('copy')` where that is missing or refuses (rationale).
+- **Must open the clipboard-failure report when a write fails every way it may take**, unless its caller opts out. **Its details never carry the copied text**; they go to the tracking issue the report links.
 
 Source of truth: `CopyEditor` in `lib/src/components/CopyEditor.tsx`; `copySelection` in `lib/src/lib/copy-selection.ts`; `writeTextToClipboard` in `lib/src/lib/clipboard.ts`, pinned by `lib/src/lib/clipboard-write.test.ts`; `ClipboardFailureGlobal` in `lib/src/components/ClipboardFailureDialog.tsx`.
 
@@ -283,9 +284,9 @@ Paste reads the clipboard in three tiers, preferred in order:
 
 Every tier empty ⇒ silent no-op.
 
-`standalone/sidecar/clipboard-ops.js` reads the clipboard for both hosts' Node side by shelling out to each platform's clipboard tools. **Every spawn must pass `windowsHide`** (CREATE_NO_WINDOW; rationale).
+`standalone/sidecar/clipboard-ops.js` reads the clipboard for both hosts' Node side, and writes it for standalone's, by shelling out to each platform's clipboard tools. **Every spawn must pass `windowsHide`** (CREATE_NO_WINDOW; rationale).
 
-**The standalone/Tauri build on Windows reads the Win32 clipboard directly in Rust**, dropping the subprocess, with the same temp-file cleanup for an image. Non-Windows Tauri stays on the sidecar path.
+**The standalone/Tauri build on Windows reads and writes the Win32 clipboard directly in Rust**, dropping the subprocess, with the same temp-file cleanup for an image. Non-Windows Tauri stays on the sidecar path.
 
 **Must refuse the whole file-reference paste or drop (tiers 1 and 3, and §8.7) when any path carries a C0, DEL, or C1 character** (`hasShellInputControls`), bracketed or not, and show a notice on the pane (rationale).
 

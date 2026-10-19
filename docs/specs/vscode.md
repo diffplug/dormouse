@@ -87,7 +87,7 @@ The colour push (`dormouse:themeColors`): `docs/specs/transport.md` → "Message
 
 ## CSP policy
 
-The policy starts from `default-src 'none'`; each grant below names what needs it. Every other grant is `webview.cspSource` alone (`style-src`, `font-src`, `img-src`, `connect-src`), plus `data: blob:` images and the loopback `ws:` below; nothing else.
+The policy starts from `default-src 'none'`; each grant below names what needs it. Every other grant is `webview.cspSource` alone (`style-src`, `font-src`, `img-src`, `connect-src`), plus `data: blob:` images, `media-src blob:` for managed voice's clip ("Managed voice"), and the loopback `ws:` below; nothing else.
 
 **`frame-src` is loopback-only**: `dor iframe` frames its target through the transparent proxy the extension host stands up, so the only origin ever embedded is loopback on an OS-assigned port (`docs/specs/dor-browser.md`).
 
@@ -173,6 +173,18 @@ Source of truth: `vscode-ext/src/burrow.ts`, `ensurePeerNet` in `vscode-ext/src/
 **One universal VSIX carries every platform's addon** (rationale): the build stages the addon, its dependencies, and only the platform packages `vscode-ext/package.json` declares under `optionalDependencies` into `dist/node_modules`. `node-pty`'s one package carries every prebuild.
 
 Source of truth: `vscode-ext/scripts/stage-native-direct.mjs`; `initBurrow` in `vscode-ext/src/burrow.ts`; `createNativeDirectPeerFactory` in `lib/src/host/remote/native-direct-peer.ts`.
+
+## Managed voice
+
+**Every window's extension host runs its own managed-voice host**, the one standalone's sidecar runs (`docs/specs/alert.md` -> "Managed voice"), answering its own webviews (`docs/specs/transport.md` -> "Managed voice"); its clip cache and refusal latch are per window.
+
+- **The token and the chosen voice live in `SecretStorage`, each under a key of its own**: the token is a bearer credential, and the voice rides there only because `secrets.onDidChange` reaches every window. **Every window re-reads on that change**, dropping its clips and latch when the token changed, so an approval or Disconnect in one window reaches all of them.
+- **An approval runs in the window that asked**, its code shown only there; the token it saves reaches the rest by the re-read.
+- **Never re-arm on a re-read a token this window's failed Disconnect left in the store**; a different token, a sibling's later approval, supersedes it.
+- **A window asks the network policy before every speak and approval request**: the service in the broker, the stored policy elsewhere, a failed read counting as Nothing.
+- **The webview has the port only when the host says so**: `getWebviewHtml` sets `MANAGED_VOICE_GLOBAL` from the extension bundle's baked mode, which the webview bundle does not carry.
+
+Source of truth: `vscode-ext/src/managed-voice.ts`; `readInjectedManagedVoice` in `lib/src/lib/vscode-managed-voice-global.ts`; `VSCodeAdapter` in `lib/src/lib/platform/vscode-adapter.ts`; pinned by `vscode-ext/test/managed-voice.test.ts`.
 
 ## Peer surfaces
 

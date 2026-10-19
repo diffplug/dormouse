@@ -350,7 +350,7 @@ const THEMATIC_BREAK = /^\s*([-*_])(\s*\1){2,}\s*$/;
  * speculatively on every paragraph line, where `parseInline` would raise on
  * inline content the parser rejects.
  */
-function splitCells(row) {
+export function splitCells(row) {
   const trimmed = row.trim().replace(/^\|/, '').replace(/\|$/, '');
   const cells = [];
   let cur = '';
@@ -376,7 +376,7 @@ function splitRow(row, line) {
  * delimiter row and a preceding line that merely contains a pipe becomes a
  * table — where the `---` is a setext underline, which has to raise instead.
  */
-function isDelimiterRow(row) {
+export function isDelimiterRow(row) {
   return row.includes('|') && /^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)*\|?\s*$/.test(row);
 }
 

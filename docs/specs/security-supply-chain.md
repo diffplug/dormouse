@@ -6,6 +6,10 @@
 
 ## Disclosure
 
+| Guarantee | Feature | Pinned by |
+| --- | --- | --- |
+| **Every dependency Dormouse puts on a user's machine, or Dormouse Hosted serves to their devices or runs for them, is disclosed** at [dormouse.sh/supply-chain](https://dormouse.sh/supply-chain), and a change without the disclosure fails CI. |  | `.github/workflows/ci.yml`, `website/scripts/product-sections.test.js`, `website/scripts/dependency-workspaces.test.js`, `website/scripts/hosted-bundles.test.js` |
+
 The runtime dependency surface is kept small: a dependency is added only when necessary, each change justified against its supply-chain risk.
 
 **Every dependency Dormouse *puts on a user's machine*, or Dormouse Hosted *serves to their devices or runs for them*, is listed at [dormouse.sh/supply-chain](https://dormouse.sh/supply-chain).** The test is narrower than "everything a user runs" (rationale). Three inventories:
@@ -18,7 +22,7 @@ Every workspace is classified from its shipping route: a product root or runtime
 
 **Must disclose each npm release once, in the first section whose roots reach it**; an earlier section never enters a later section's root. **Never call the Built-in Tools optional or unshipped**: every install ships them inside `dor` (what their frame reaches: `docs/specs/security-local.md` → Local-file viewer). **Must merge a package's releases into one row per name and license**.
 
-**Must root the Hosted section at `dormouse-hosted`**: one package holds all three Workers and the account page, so the section lists more than any one Worker bundles (rationale). Pocket and the one-time page, which `hosted/` builds from `dormouse-lib` with no workspace edge, are disclosed through the Terminal's `dormouse-lib` root. **Never follow an optional peer edge in the Hosted section**: Hosted ships only esbuild bundles, which hold an optional peer only where code imports it (rationale).
+**Must root the Hosted section at `dormouse-hosted`**: one package holds all three Workers and the account page, so the section lists more than any one Worker bundles (rationale). Pocket and the one-time page, which `hosted/` builds from `dormouse-lib` with no workspace edge, are disclosed through the Terminal's `dormouse-lib` root. **Never follow an optional peer edge in the Hosted section**: Hosted ships only esbuild bundles, which hold an optional peer only where code imports it (rationale). **Must fail generation when a Hosted Worker or the account page bundles a release the disclosure lacks** (`assertHostedBundlesDisclosed` in `website/scripts/hosted-bundles.js`; rationale).
 
 **External binaries are outside this graph by construction** — the user's shell, and the CLIs `dor agent-browser` and `dor playwright` forward to (`npm i -g agent-browser`, `npm i -g @playwright/cli`; dependencies of nothing here, resolved off `PATH` or an override variable). **Dormouse instead ships nothing that pulls them in silently**.
 
@@ -45,6 +49,10 @@ Source of truth: `productSections` / `excludedWorkspacePackages` in `website/scr
 
 ## Bundled runtime
 
+| Guarantee | Feature | Pinned by |
+| --- | --- | --- |
+| **The bundled runtime is the version disclosed.** The build verifies the binary against the pin. |  | `standalone/src-tauri/build.rs` |
+
 **The standalone app ships a Node.js runtime binary**, copied into the Tauri bundle as a sidecar by `standalone/src-tauri/build.rs`.
 
 - **Its version is pinned exactly in the root `package.json` under `devEngines.runtime.version`**, and the build is the authority.
@@ -62,12 +70,15 @@ Source of truth: `bundle_node_runtime` / `verify_node_version` in `standalone/sr
 
 ## Cooldown and alerts
 
+| Guarantee | Feature | Pinned by |
+| --- | --- | --- |
+| **Renovate and pnpm adopt a dependency release only after at least a 24-hour cooldown**, except audited pgstencil releases approved with 2FA. |  | `scripts/supply-chain-config.test.mjs` |
+
 **Maturity gating runs in both the pnpm configuration and the Renovate configuration, except for pgstencil releases audited on their main commit, staged, and approved with 2FA.** (rationale)
 
 - **FAIL IF** `S261` `pnpm-workspace.yaml` is missing `minimumReleaseAge: 1440`. Pinned by `scripts/supply-chain-config.test.mjs`.
 - **FAIL IF** `S262` `minimumReleaseAgeExclude` in `pnpm-workspace.yaml` contains anything except `pgstencil` and `@pgstencil/*`, or a Renovate package rule sets `minimumReleaseAge: null` for any package outside `pgstencil` and `@pgstencil/**`. Pinned by `scripts/supply-chain-config.test.mjs`.
 - **FAIL IF** `S263` `.github/renovate.json` is missing `npm` or `cargo` from `enabledManagers`, limits either with `includePaths` or `ignorePaths`, or lacks a `minimumReleaseAge` package rule covering each of the `patch`, `minor`, and `major` update types for both managers (rationale). Pinned by `scripts/supply-chain-config.test.mjs`.
 - **FAIL IF** `S264` `.github/renovate.json` has no `vulnerabilityAlerts` block, or that block does not set `minimumReleaseAge` **explicitly**. Renovate's built-in default for that block is `minimumReleaseAge: null`, force-applied before lookup, so *omitting* the key drops the cooldown rather than inheriting it from `packageRules`. Keeping it is deliberate (rationale). Pinned by `scripts/supply-chain-config.test.mjs`.
-- **FAIL IF** `S265` `install_skills.sh` runs a package through `npx` without an exact version: outside the lockfile, both cooldowns, and Renovate, a hand bump to a release at least a day old is its only gate (rationale). `skills` never checks `skills-lock.json`'s `computedHash`; it installs each source's current default branch (`docs/specs/security.md` -> "Known gaps"). The `npx` rule is pinned by `scripts/supply-chain-config.test.mjs`.
 - **FAIL IF** `S266` secret scanning or its push protection is disabled on the repository (`gh api repos/diffplug/dormouse --jq .security_and_analysis`), or Dependabot alerts are off (`GET /repos/diffplug/dormouse/vulnerability-alerts` must answer 204, not 404). Push protection is the one control that acts *before* a credential lands, blocking a push whose diff carries a recognized provider token; it applies to `dormouse-bot` too (rationale). Pinned by `scripts/github-state-check.mjs`.
 - **FAIL IF** `S267` zizmor or actionlint, which `.github/workflows/ci.yml` installs outside the lockfile, is not pinned to an exact version and verified by hash (`.github/zizmor-requirements.txt`, the actionlint tarball's SHA-256); each is bumped by hand to a release past the cooldown. Pinned by `scripts/supply-chain-config.test.mjs`.

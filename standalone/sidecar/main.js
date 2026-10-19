@@ -254,6 +254,13 @@ function handleLine(line) {
           text: await clipboard.readClipboardText(),
         }));
         break;
+      case 'clipboard:writeText':
+        respondAsync('clipboard:written', data.requestId, async () => {
+          if (typeof data.text !== 'string') throw new Error('clipboard:writeText needs text');
+          await clipboard.writeClipboardText(data.text);
+          return {};
+        });
+        break;
       default: console.error(`[sidecar] Unknown event: ${event}`);
     }
   } catch (err) {

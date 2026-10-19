@@ -1,6 +1,6 @@
-import { useContext, useEffect, useState, useSyncExternalStore } from 'react';
+import { useContext, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { hostShown, subscribeHostShown } from '../../lib/host-shown';
-import { coveredByZoom, isSeen } from '../../lib/surface-sight';
+import { coveredByZoom, isSeenObserved, type SurfaceSightObserved } from '../../lib/surface-sight';
 import { WorkspaceActiveContext, ZoomedIdContext } from './wall-context';
 
 /**
@@ -16,10 +16,17 @@ import { WorkspaceActiveContext, ZoomedIdContext } from './wall-context';
  * that stays visible in the zoom margin passes none.
  */
 export function useSurfaceVisibility(parked = false, id?: string): boolean {
+  return isSeenObserved(useSurfaceSight(parked, id));
+}
+
+/** What `useSurfaceVisibility` judges by, as observed, for a caller that
+ *  records why (the browser controller's debug ring). Keeps its identity
+ *  until an input changes. */
+export function useSurfaceSight(parked = false, id?: string): SurfaceSightObserved {
   const [docVisible, setDocVisible] = useState<boolean>(() => document.visibilityState !== 'hidden');
   const workspaceActive = useContext(WorkspaceActiveContext);
   const zoomedId = useContext(ZoomedIdContext);
-  const shownByHost = useSyncExternalStore(subscribeHostShown, hostShown);
+  const hostShownNow = useSyncExternalStore(subscribeHostShown, hostShown);
 
   useEffect(() => {
     const onChange = () => setDocVisible(document.visibilityState !== 'hidden');
@@ -27,10 +34,9 @@ export function useSurfaceVisibility(parked = false, id?: string): boolean {
     return () => document.removeEventListener('visibilitychange', onChange);
   }, []);
 
-  return isSeen({
-    windowShown: docVisible && shownByHost,
-    workspaceActive,
-    parked,
-    covered: id !== undefined && coveredByZoom(id, zoomedId),
-  });
+  const covered = id !== undefined && coveredByZoom(id, zoomedId);
+  return useMemo(
+    () => ({ docVisible, hostShown: hostShownNow, workspaceActive, parked, covered }),
+    [docVisible, hostShownNow, workspaceActive, parked, covered],
+  );
 }

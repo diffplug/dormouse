@@ -11,6 +11,13 @@ Pocket lets a phone attach to a terminal on the user's laptop, so the pairing st
 
 ### Trust boundary
 
+| Guarantee | Feature | Pinned by |
+| --- | --- | --- |
+| **Nothing but a human at the laptop can authorize a phone.** The only path into a Burrow's ACL is typing, on that Burrow, the two digits the phone shows, and the Burrow makes every access decision. | Hosted phone, Self-hosted Relay | `lib/src/remote/burrow/burrow-runtime.test.ts`, `lib/src/host/remote/service.test.ts`, `scripts/e2e-lint.mjs`, `remote-lib-common/test/security-guarantees.test.mjs` |
+| **The Relay cannot read ceremony or terminal content or grant terminal access.** One end-to-end channel per ceremony carries content under keys the Relay never holds; account data and routing metadata remain visible. | Hosted phone, Self-hosted Relay | `relay/test/malicious-relay.test.mjs`, `scripts/e2e-lint.mjs` |
+| **A stolen or synced passkey buys sign-in, not a terminal.** Every connection also needs the phone's own paired key and user presence the laptop verified itself: a fresh proof bound to that connection, or one it verified earlier for that phone, which lapses when idle and after a maximum age. | Hosted phone, Self-hosted Relay | `lib/src/remote/burrow/burrow-runtime.test.ts`, `remote-lib-common/test/security-guarantees.test.mjs` |
+| **The Burrow bounds remote session state and handshake admission independently of the Relay.** Deadlines use its own clock. | One-time link, Hosted phone, Self-hosted Relay | `lib/src/remote/burrow/burrow-bounds.test.ts`, `relay/test/malicious-relay.test.mjs` |
+
 **Five layers, none sufficient alone** (`docs/specs/remote-security-model.md` -> "Trust Model"). A deployment may raise the presence layer to *user verification* with `DORMOUSE_REQUIRE_USER_VERIFICATION=true`.
 
 **There is exactly one channel and no other path.** One suite (`Noise_IK_25519_ChaChaPoly_SHA256`) carries both ceremonies, protocol-v1, and the terminal stream; there is no negotiation, no cipher or pattern selector, no plaintext relay route, and no reader for any of the pre-cutover frames.
@@ -45,6 +52,10 @@ Only one local confirmation of the phone's two digits mints an ACL record. The w
 
 ### Relay origin
 
+| Guarantee | Feature | Pinned by |
+| --- | --- | --- |
+| **A Burrow talks only to the one relay origin its build was pointed at, and a self-host build contacts Dormouse's servers only when you click a link.** A stock build reaches only Hosted. | One-time link, Hosted phone, Self-hosted Relay | `lib/src/host/relay-origin.test.ts`, `lib/src/host/remote/service.test.ts` |
+
 `docs/specs/relay.md` -> "Relay origin" owns the rule these checks audit.
 
 - **FAIL IF** `S192` `DEFAULT_RELAY_ORIGIN` is not exactly `https://relay.dormouse.sh` in **both** `scripts/relay-origin.mjs` and `lib/src/host/relay-origin.ts` (`lib/src/host/relay-origin.test.ts` pins both), or `.github/workflows/release.yml` sets `DORMOUSE_RELAY_ORIGIN` — either changes what every shipped binary talks to.
@@ -52,10 +63,14 @@ Only one local confirmation of the phone's two digits mints an ACL record. The w
 - **FAIL IF** `S194` a Hosted build's enrollment opens an account page other than the one `enrollVerificationUrl` in `lib/src/host/remote/service.ts` composes (a dev Hosted build's exception: `docs/specs/relay.md` -> "Burrow side"), `HOSTED_ACCOUNT_ORIGIN` in `lib/src/host/relay-origin.ts` is not exactly `https://hosted.dormouse.sh`, is read from anything a build or user sets, or is requested by the desktop, or the enrollment's device code reaches a webview (`HostedEnrollmentState`). Pinned by `lib/src/host/remote/service.test.ts`.
 - **FAIL IF** `S195` `assertRelayOriginBaked` is no longer called on the built bundle by both `standalone/scripts/build-sidecar-proxy.mjs` and `vscode-ext/scripts/esbuild.mjs` — including the **watch** branch of the VS Code script — `standalone/vite.config.ts` drops `relayDefineVitePlugin`, `resolveRelayOrigin` stops failing the build on any case `docs/specs/relay.md` -> "Relay origin" lists, or `bakedRelayMode` in `lib/src/host/relay-origin.ts` answers `'hosted'` for anything but a baked `hosted` (rationale). Pinned by `lib/src/host/relay-origin.test.ts` and `standalone/scripts/webview-relay-define.test.mjs`.
 - **FAIL IF** `S196` a Burrow reaches or enrolls with a Relay at any origin but its baked one — taking one from a command, the offer file, or a stored enrollment — or connects on, or saves, an enrollment naming another (`docs/specs/relay.md` -> "Relay origin"; read `BurrowService` in `lib/src/host/remote/service.ts`), or `POST /api/burrow/enroll` in `relay/src/app.ts` reads the credential or touches `burrows.json` for a request naming another origin.
-- **FAIL IF** `S197` a self-host build can reach `dormouse.sh` or any host under it unless the user clicks a link to it (`docs/specs/relay.md` -> "Relay origin"). `hostedOrigin` and `hostedVoiceOrigin` in `lib/src/host/relay-origin.ts` must answer `null` there and every caller do nothing on `null`; `standalone/vite.config.ts` must bake the webview through `resolveRelayOrigin`; `startUpdateCheck` in `standalone/src/updater.ts` must return before `check()` unless `bakedRelayMode()` is `'hosted'`; `managedVoicePortForBuild` in `standalone/src/managed-voice-port.ts` must give a self-host webview no port; and `standalone/scripts/tauri.mjs` must overlay a self-host `tauri build` with no updater endpoint. Search the rest of `lib/src/host/`, `standalone/`, and `vscode-ext/src/` for any other request to a `dormouse.sh` host.
+- **FAIL IF** `S197` a self-host build can reach `dormouse.sh` or any host under it unless the user clicks a link to it (`docs/specs/relay.md` -> "Relay origin"). `hostedOrigin` and `hostedVoiceOrigin` in `lib/src/host/relay-origin.ts` must answer `null` there and every caller do nothing on `null`; `standalone/vite.config.ts` must bake the webview through `resolveRelayOrigin`; `startUpdateCheck` in `standalone/src/updater.ts` must return before `check()` unless `bakedRelayMode()` is `'hosted'`; `managedVoicePortForBuild` in `standalone/src/managed-voice-port.ts` must give a self-host webview no port, and `getWebviewHtml` in `vscode-ext/src/webview-html.ts` must set `MANAGED_VOICE_GLOBAL` only when `bakedRelayMode()` is `'hosted'`; and `standalone/scripts/tauri.mjs` must overlay a self-host `tauri build` with no updater endpoint. Search the rest of `lib/src/host/`, `standalone/`, and `vscode-ext/src/` for any other request to a `dormouse.sh` host.
 - **FAIL IF** `S198` an enrollment exchange in `lib/src/remote/burrow/enrollment.ts` or `burrowRequest` in `lib/src/remote/burrow/burrow-fetch.ts` drops `redirect: 'error'`, or a Burrow→Relay HTTP request outside those exchanges bypasses `lib/src/remote/burrow/burrow-fetch.ts` (rationale).
 
 ### Credentials at rest
+
+| Guarantee | Feature | Pinned by |
+| --- | --- | --- |
+| **The self-host installer restricts Relay credentials to the installing account**, on macOS, Windows, and Linux; Burrow enrollment uses protected app storage or VS Code's secret storage. | Hosted phone, Self-hosted Relay | `scripts/deploy-lint.mjs` |
 
 **Persistent credentials are a full bypass of some layer if they leak to another local account.** File-backed credentials use mode `0700`/`0600` on Unix and owner-only DACLs in the installed Windows Relay and standalone Burrow, since Node modes do not protect Windows files; VS Code uses its own storage, per row.
 
@@ -88,6 +103,10 @@ The Client's per-Burrow browser storage follows `docs/specs/remote-security-mode
 
 ### The setup password
 
+| Guarantee | Feature | Pinned by |
+| --- | --- | --- |
+| **The Relay generates its 256-bit setup credential, with no operator-supplied value**, and Burrow enrollment is globally admission-limited. | Self-hosted Relay | `relay/test/setup-password-store.test.mjs`, `relay/test/token-bucket.test.mjs` |
+
 **One password bootstraps everything the Relay can grant.** Enrolling Burrows is its only endpoint, but an enrolled Burrow mints setup tokens and a setup token registers an owner passkey. **The Relay generates it, never the operator** (`docs/specs/relay.md` -> "Configuration"). **Online guessing is bounded without trusting network identity** (rationale).
 
 - **FAIL IF** `S214` the setup password comparison stops being constant-time, its rate-limited rejection loses the fixed delay, or a random setup/Burrow bearer rejection gains that delay and lets public traffic retain requests. `secretEquals` in `relay/src/secrets.ts` compares SHA-256 digests with `timingSafeEqual`; `CREDENTIAL_FAILURE_DELAY_MS` in `relay/src/app.ts` is the delay, and `relay/test/burrows.test.mjs` pins which rejections pay it.
@@ -95,12 +114,20 @@ The Client's per-Burrow browser storage follows `docs/specs/remote-security-mode
 
 ### Cross-origin access
 
+| Guarantee | Feature | Pinned by |
+| --- | --- | --- |
+| **A cross-origin browser receives no grant from the Relay.** | Self-hosted Relay | `relay/test/cors.test.mjs` |
+
 Pocket uses relative API URLs at the configured origin; Burrow HTTP runs in Node. The Relay grants no preflight or CORS response; it does not reject every request carrying a foreign `Origin` (rationale).
 
 - **FAIL IF** `S216` the Relay installs CORS middleware, emits `Access-Control-Allow-Origin`, or accepts authentication from a cookie (rationale). Pinned by `relay/test/cors.test.mjs`.
 - **FAIL IF** `S217` a self-host Relay response for Pocket — the shell, an asset, `sw.js`, or the SPA fallback — lacks `pocketContentSecurityPolicy` in `remote-lib-common/src/remote/relay-common.ts` for its configured origin, or that policy names a directive or source beyond those `docs/specs/pocket-app.md` -> "Deployment: same-origin, always" lists: the Pocket origin holds Client statics and opens sealed pushes. Read `registerPocketServing` in `relay/src/app.ts`; pinned by `relay/test/static.test.mjs`. Hosted's is `docs/specs/security-hosted.md` -> "Relay boundary".
 
 ### Network posture (self-hosted)
+
+| Guarantee | Feature | Pinned by |
+| --- | --- | --- |
+| **The self-host HTTPS origin may be public; its plaintext backend may not.** Terminal access still needs local Burrow approval. | Self-hosted Relay | `relay/test/config.test.mjs`, `scripts/deploy-lint.mjs` |
 
 `scripts/deploy-lint.mjs` checks that every installer still holds the controls this section and "Credentials at rest" name (`AGENTS.md` lint table); whether each is *correct* is this audit's (rationale).
 
@@ -121,6 +148,11 @@ The HTTPS origin may be public. Tailnet-only Serve is the installer default and 
 
 ### What crosses the boundary
 
+| Guarantee | Feature | Pinned by |
+| --- | --- | --- |
+| **Push notifications are opt-in, and a push is sealed to the one phone that receives it.** | Hosted phone, Self-hosted Relay | `lib/src/remote/pocket-app/App.push.test.tsx`, `relay/test/push.test.mjs`, `remote-lib-common/test/push-seal.test.mjs` |
+| **Push, when enabled, cannot be aimed back into the tailnet.** | Self-hosted Relay | `relay/test/push-endpoint.test.mjs` |
+
 **The relay is a dumb ciphertext pipe**: it routes `e2e` envelopes within one Client↔Burrow binding and decodes nothing. Once a Burrow has decrypted them, both directions carry untrusted bytes — inbound, `terminal.write` is keystrokes into a real shell and the ACL is the entire gate; outbound, notification text is Pane-derived, so it is **bounded on the Burrow before sealing and re-bounded at the render sink** (rationale).
 
 **Web Push is the one path where the Relay makes an outbound request to an address a Client supplied**, a live SSRF concern on a Relay inside a tailnet, where `100.64/10` is exactly the range a push endpoint must not reach (egress rules: `docs/specs/relay.md` -> "Web Push"). The blocked ranges are loopback, private, CGNAT, link-local, documentation, benchmark, multicast, reserved, IPv4-mapped, unique-local, and site-local. The Hosted Relay, which cannot pin a resolution, admits only known push services' hosts (`docs/specs/security-hosted.md` -> "Relay boundary").
@@ -133,6 +165,11 @@ The HTTPS origin may be public. Tailnet-only Serve is the installer default and 
 - **FAIL IF** `S231` the relay routes a Burrow-originated frame from a socket that is not the Client's current Burrow binding, or begins decoding, remembering, or acting on an `e2e` ciphertext. `relay/src/relay.ts` must route the `e2e` envelope and nothing else: it holds no gate, no challenge memory, and no notion of an authorized session (rationale). A Relay-side type import from the protocol-v1 half of `remote-lib-common/src/remote/wire.ts` is the leading indicator and fails the same way, as does one under `hosted/server/`.
 
 ### Direct path
+
+| Guarantee | Feature | Pinned by |
+| --- | --- | --- |
+| **Under Local networks only, terminal traffic crosses only the networks you allow.** Handshakes, pairing, alerts, and managed voice still pass through Hosted from any network. | One-time link, Hosted phone | `lib/src/host/remote/local-networks.test.ts`, `lib/src/remote/burrow/burrow-direct-only.test.ts`, `lib/src/host/remote/outbound.test.ts`, `scripts/outbound-lint.mjs` |
+| **Under Anywhere, a paired phone may relay through Hosted, end-to-end encrypted.** Cloudflare STUN sees this computer's public address as a phone connects. | One-time link, Hosted phone | `lib/src/remote/burrow/burrow-direct-only.test.ts`, `lib/src/host/remote/service.test.ts`, `lib/src/host/remote/outbound.test.ts`, `scripts/outbound-lint.mjs` |
 
 **An authorized session can leave the Relay for a WebRTC data channel, carrying what it already carried**: the same Noise session, counters, and bounds. `docs/specs/remote-api.md` -> "Direct path" owns the design and `docs/specs/remote-security-model.md` -> "Direct path" why it adds no trust layer.
 
@@ -149,6 +186,10 @@ The HTTPS origin may be public. Tailnet-only Serve is the installer default and 
 
 ### One-time connection
 
+| Guarantee | Feature | Pinned by |
+| --- | --- | --- |
+| **A one-time connection is one session, confirmed at the laptop.** Only typing, on the laptop, the two digits that phone shows authorizes it; nothing is saved at either end, and its terminal traffic runs only directly between the two devices, over a network Settings → Network allows; Hosted carries the handshake alone. | One-time link | `lib/src/remote/client/one-time-e2e.test.ts`, `lib/src/remote/burrow/one-time-runtime.test.ts`, `scripts/e2e-lint.mjs` |
+
 `docs/specs/one-time.md` owns the link and the rendezvous wire ("Wire contract"); `docs/specs/remote-security-model.md` -> "One-time connection" owns the ceremony.
 
 - **FAIL IF** `S242` the Relay or `BurrowRuntime` can accept a one-time frame: `E2eKind` and `isE2eKind` in `remote-lib-common/src/remote/wire.ts` must admit exactly `pairing` and `connection`, and no one-time name may appear under `relay/src/`, in `remote-lib-common/src/remote/wire.ts`, or in `lib/src/remote/burrow/burrow-runtime.ts`, a one-time name being an identifier or string `ONE_TIME_NAME` in `scripts/e2e-lint.mjs` matches. `scripts/e2e-lint.mjs` holds both textually.
@@ -164,6 +205,10 @@ The HTTPS origin may be public. Tailnet-only Serve is the installer default and 
 
 ## Auxiliary helpers
 
+| Guarantee | Feature | Pinned by |
+| --- | --- | --- |
+| **A phone sees and drives only your ordinary terminals.** A helper terminal stays hidden from it until you promote it. | One-time link, Hosted phone, Self-hosted Relay | `lib/src/remote/burrow/peer-surfaces.test.ts` |
+
 - **FAIL IF** `S252` an unpromoted helper appears in remote directory discovery or resolves for a direct attach or resize: its output and input stay hidden until promotion makes it an ordinary terminal. Read `collectDirectorySnapshot` in `lib/src/remote/burrow/directory-collect.ts` and `driveOwnSurface` in `lib/src/remote/burrow/peer-surfaces.ts`.
 
 ## Future
@@ -175,5 +220,4 @@ The HTTPS origin may be public. Tailnet-only Serve is the installer default and 
 Hosted's admin-entitled routing is implemented (`docs/specs/security-hosted.md` -> "Relay boundary"). Broad paid activation remains staged; its review must cover these operator responsibilities:
 
 - **Must review Hosted operator handling of residual metadata before paid activation.** The visible metadata is `docs/specs/remote-security-model.md` -> "Residual metadata"; the trust boundary above still excludes plaintext and new Burrow authorization.
-- **An independent cryptographic review is a precondition** of claiming this model for a paid service (`docs/specs/remote-security-model.md` -> "Security Guarantees").
 - **Never rely on tailnet reachability for paid Hosted admission.** Review public admission and the multi-tenant account boundary before activation (`docs/specs/hosted.md` -> "Burrow enrollment"); the self-host setup password supplies no Hosted identity.

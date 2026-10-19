@@ -7,6 +7,10 @@
 
 ## Terminal output
 
+| Guarantee | Feature | Pinned by |
+| --- | --- | --- |
+| **Terminal output cannot write your clipboard or steal focus.** File access requires a user action or the gated OSC 367 `open` of a Tool run Dormouse launched. OSC 52 only offers a copy format; links require confirmation, naming any app scheme, or an allowed local preview; deceptive links and dangerous Windows handlers have no open action. |  | `lib/src/lib/terminal-protocol.test.ts`, `lib/src/lib/mouse-selection.test.ts`, `lib/src/lib/copy-editor.test.ts`, `lib/src/lib/external-links.test.ts`, `lib/src/lib/terminal-link-activation.test.ts`, `lib/src/components/ExternalLinkModalHost.test.tsx`, `lib/src/lib/tool-launch-latch.test.ts`, `lib/src/components/wall/preview-slot.test.tsx` |
+
 The attacker is any program writing to a PTY.
 
 Output reaches the screen, Session state, and bounded terminal reports — rendered text/images, alerts, titles, prompt/command boundaries, CWD, and `OSC 8` — except the OSC 367 `open` of a Tool run the host launched, gated below, a stopping Tool's `dehydrate`, which reaches only its own next run (`docs/specs/dor-tool.md` → Reaping), and agent recovery, below. xterm.js and ImageAddon answer cursor, device, focus, size, and graphics reports (`docs/specs/transport.md` -> "Report filtering on the input side"). Retained output is bounded by representation (`docs/specs/terminal-state.md` -> "Supported OSC Inputs", `docs/specs/terminal-escapes.md` -> "Parsing location", `docs/specs/layout.md` -> "Inline graphics").
@@ -24,7 +28,7 @@ Notification text: `docs/specs/alert.md` -> "Text And Security".
 - **FAIL IF** `S124` a `TerminalProtocolEvent` reaches the clipboard, a file, or anything but the screen, Session state, or a bounded terminal report beyond the two Tool exceptions above and the `OSC 52` copy-editor offer, or the parser emits a `response` outside three answer families — `OSC 10/11/12 ; ?` color, `OSC 99` capability, `CSI > q` device: `TerminalProtocolParser` in `lib/src/lib/terminal-protocol.ts` and its consumers.
 - **FAIL IF** `S125` `TerminalProtocolParser` stops consuming `OSC 52`, `OSC 50`, or an `OSC 1337` outside `OSC1337_FORWARDED`, or a parse site stops running it before `pty:data` leaves it (rationale). Pinned by `lib/src/lib/terminal-protocol.test.ts`.
 - **FAIL IF** `S126` an escape sequence `docs/specs/terminal-escapes.md`'s registry marks consumed or ignored, or one it does not list, has any visible, clipboard, file, focus, or privilege effect rather than failing inertly (rationale).
-- **FAIL IF** `S127` an `OSC 52` payload can reach the clipboard except as the copy editor's program format the user chose and copied, is retained unbounded or with control characters other than newline and tab, or is accepted into a pane with no shadowed drag: `parseOsc52` and `CLIPBOARD_OFFER_LIMIT` in `lib/src/lib/terminal-protocol.ts`, `offerProgramCopy` in `lib/src/lib/mouse-selection.ts`, `copySelection` in `lib/src/lib/copy-selection.ts`. Pinned by `lib/src/lib/terminal-protocol.test.ts`, `lib/src/lib/mouse-selection.test.ts`, and `lib/src/lib/copy-editor.test.ts`.
+- **FAIL IF** `S127` an `OSC 52` payload can reach the clipboard except as the copy editor's program format the user chose and copied, is retained unbounded or with control characters other than newline and tab, or is accepted into a pane with no shadowed drag; or anything but `writeTextToClipboard` in `lib/src/lib/clipboard.ts` calls an adapter's `writeClipboardText`, which no user gesture gates: `parseOsc52` and `CLIPBOARD_OFFER_LIMIT` in `lib/src/lib/terminal-protocol.ts`, `offerProgramCopy` in `lib/src/lib/mouse-selection.ts`, `copySelection` in `lib/src/lib/copy-selection.ts`. Pinned by `lib/src/lib/terminal-protocol.test.ts`, `lib/src/lib/mouse-selection.test.ts`, and `lib/src/lib/copy-editor.test.ts`.
 - **FAIL IF** `S128` a value the parser retains stops being bounded and control-stripped before storage, or a new one arrives without a limit — `TITLE_LIMIT`, `BODY_LIMIT` and `COMMAND_LINE_LIMIT` in `lib/src/lib/terminal-protocol.ts`, `sanitizeText` in `lib/src/lib/osc-sanitize.ts`, `MAX_CWD_LENGTH` and `boundedCwdValue` in `lib/src/lib/terminal-state.ts`; or an incomplete semantic OSC stops being bounded by `OSC_INCOMPLETE_LIMIT`, or ImageAddon by the encoded-byte, pixel, and storage limits of `IMAGE_ADDON_OPTIONS` in `lib/src/lib/terminal-lifecycle.ts`. `commandLineEvents` bounds a command line before decoding as well as after (rationale).
 - **FAIL IF** `S129` an `OSC 8` activation reaches an adapter's `openExternal` without the confirmation dialog, the dialog renders an open action for a **deceptive** verdict or a blocked target, or a scheme outside the `STANDARD_SCHEMES` allowlist opens from a dialog not naming it as another app (rationale): `linkHandler` in `lib/src/lib/terminal-lifecycle.ts`, `inspectExternalUri` and `classifyDisplayMatch` in `lib/src/lib/external-links.ts`, the render branches in `lib/src/components/ExternalLinkModal.tsx`. Pinned by `lib/src/lib/external-links.test.ts` and `lib/src/components/ExternalLinkModalHost.test.tsx`; the host also rejects a deceptive confirmation (rationale).
 - **FAIL IF** `S130` a host launches an external URL without revalidating it through `normalizeExternalUri` in `lib/src/lib/external-links.ts`, consent notwithstanding — VS Code's in the extension host (`vscode-ext/src/message-router.ts`), standalone's in `standalone/src/tauri-adapter.ts` and `openUrl` in `standalone/src/updater.ts` — or that function accepts a scheme in `PSEUDO_SCHEMES` or `REFUSED_APP_SCHEMES`, or the latter drops `ms-msdt`, `search-ms`, `ms-officecmd`, or `ms-appinstaller` (rationale). Pinned by `vscode-ext/test/message-router.test.ts` and `standalone/src/tauri-adapter.test.ts`.
@@ -33,6 +37,10 @@ Notification text: `docs/specs/alert.md` -> "Text And Security".
 - **FAIL IF** `S133` cold restore types a command `normalizeResumeCommand` in `lib/src/lib/resume-patterns.ts` did not rebuild at the typing boundary (`restoreTerminal` in `lib/src/lib/terminal-lifecycle.ts`), its grammar admits more than the invocations `docs/compatible-agents.md` -> "Detection" names — another argument, whitespace, or a shell metacharacter — or capture scans output from before its first interrupt (`captureAgentRecovery` in `lib/src/host/recovery-capture.ts`). Pinned by `lib/src/lib/coding-agents.test.ts`, `lib/src/lib/terminal-registry.alert.test.ts`, and `lib/src/host/recovery-capture.test.ts`.
 
 ## Browser panes
+
+| Guarantee | Feature | Pinned by |
+| --- | --- | --- |
+| **A page in a browser pane cannot forge a host message.** In VS Code every host message carries a per-boot token it cannot read, the standalone adapters have no inbox for it to post to, and every other listener it can reach checks the sender. |  | `lib/src/lib/platform/vscode-adapter.test.ts`, `standalone/src/sidecar-adapters.test.ts`, `lib/src/lib/webview-message-listeners.test.ts` |
 
 The attacker is the page inside a browser pane.
 
@@ -54,6 +62,10 @@ Source of truth: `isProxyOrigin` in `lib/src/lib/iframe-proxy-registry.ts`, the 
 
 ## The dor control socket
 
+| Guarantee | Feature | Pinned by |
+| --- | --- | --- |
+| **Only your own account can drive your terminals through `dor`.** The socket sits in a directory only you can open, and its token never crosses the wire. |  | `standalone/sidecar/dor-control-server.test.js` |
+
 The attacker is another local account. The channel carries the whole Surface API — keystrokes into any Pane, its screen and scrollback back out, `dor kill` — and an app restart behind the running-work confirmation (`docs/specs/dor-cli.md` -> "Host Plumbing", "dor app").
 
 The socket bounds other local accounts, never a process running as the user (`docs/specs/security.md` -> "What is not defended"; rationale).
@@ -69,6 +81,10 @@ The socket bounds other local accounts, never a process running as the user (`do
 
 ## Loopback Listeners
 
+| Guarantee | Feature | Pinned by |
+| --- | --- | --- |
+| **A loopback listener grants a stranger nothing it could not get from the upstream directly.** |  | `scripts/loopback-lint.mjs`, `lib/src/host/loopback-guard.test.ts`, `lib/src/host/iframe-proxy.test.ts`, `lib/src/host/browser-viewer.test.ts`, `dor-tools-builtin/test/file-viewer.test.mjs` |
+
 Dormouse binds loopback HTTP and WebSocket servers to render its own surfaces.
 
 **A loopback bind is not an access control.** `127.0.0.1` keeps out the network, but the attacker that matters is a page open in the user's own browser, which reaches loopback exactly as easily as our webview does; **an ephemeral port is not a secret either** (rationale).
@@ -81,7 +97,7 @@ Listeners check their loopback name and recognize callers; the iframe proxy admi
 - **FAIL IF** `S144` the iframe proxy stops checking that `Host` names its own grant port, on either path. Its per-grant ephemeral port and one-fixed-upstream binding are real mitigations but neither is a secret, so the `Host` check is what makes DNS rebinding fail.
 - **FAIL IF** `S145` the iframe proxy drops upstream `X-Frame-Options` / CSP `frame-ancestors` without replacing them with exactly `frame-ancestors 'self' <validated embedder chain>` — the full chain the webview supplies with each proxy URL request — admits another source, or targets the shim anywhere but its own proxy origin and that chain's innermost origin. `'self'` admits same-grant nesting only. With no usable chain it must preserve the headers and inject nothing (rationale).
 - **FAIL IF** `S146` an iframe proxy grant outlives its view — a leased grant or its upgraded pipe survives its lease's release or its owner's reinitialization or end, or a lease's owner comes from the webview, not the host transport — or a *foreign* `Origin` refreshes an unleased grant's idle timer: a grant holds a live upstream binding a stranger must not keep open. An *absent* `Origin` must keep refreshing it, as a live frame's own loads send. `releaseIframeProxyLease` in `lib/src/host/iframe-proxy.ts` and its callers.
-- **FAIL IF** `S147` the browser viewer listener upgrades without both its own loopback `Host` and a single-use, 60-second grant for that one view, or passes a provider a webview message it has not rebuilt; or the host dials an agent-browser stream or a browser's CDP off loopback: `createViewerServer` and `parseViewerInput` in `lib/src/host/browser-viewer.ts`, `viewStream` and `askCdpEndpoint` in `lib/src/host/agent-browser-host.ts`. The webview holds no CDP and reaches no daemon (rationale). Pinned by `lib/src/host/browser-viewer.test.ts`.
+- **FAIL IF** `S147` the browser viewer listener upgrades without both its own loopback `Host` and a single-use, 60-second grant for that one view, or passes a provider a webview message it has not rebuilt; or the host dials an agent-browser stream or a browser's CDP off loopback, or sends the daemon's own socket anything but its screencast stop and start, or reaches one but beside the state files `liveDaemon` proves: `createViewerServer` and `parseViewerInput` in `lib/src/host/browser-viewer.ts`, `viewStream`, `askCdpEndpoint` and `daemonAction` in `lib/src/host/agent-browser-host.ts`. The webview holds no CDP and reaches no daemon (rationale). Pinned by `lib/src/host/browser-viewer.test.ts`.
 - **FAIL IF** `S148` the browser-dev bridge drops any of its four gates — the per-run token, the loopback `Host` check, the `application/json` content-type required of every non-GET, and the exact-origin `access-control-allow-origin` — or the first three stop running together before routing. It is dev-only, but dispatches `pty_spawn` with caller-supplied `shell`, `args`, `cwd` and `env` on a maintainer or CI-agent machine (rationale).
 - **FAIL IF** `S149` the browser-dev Vite server permits cross-origin reads of token-bearing modules or disables its DNS-rebinding Host check. Pinned by `standalone/scripts/dev-agent-browser.test.mjs` (rationale).
 
@@ -90,6 +106,10 @@ What header stripping leaves shared is a known gap (`docs/specs/security.md` -> 
 Source of truth: the shared rule and predicates — `isLoopbackHost`, `isOwnOrigin`, `isForeignOrigin` — in `lib/src/host/loopback-guard.ts`; `startDevVite` in `standalone/scripts/dev-run.mjs`.
 
 ### Local-file viewer
+
+| Guarantee | Feature | Pinned by |
+| --- | --- | --- |
+| **A built-in viewer answers only a holder of its capability URL, and reaches only what you opened.** Every request needs that viewer's fresh unguessable URL, its own loopback name, and no foreign origin. The file viewer reads only the file you opened, the files it references in its folder or, for Markdown, the images there, and its own assets, and writes only that file and images in a Markdown document's folder; the folder viewer lists only inside the folder you opened. A file's name cannot write a terminal escape through a viewer's title. |  | `dor-tools-builtin/test/file-viewer.test.mjs`, `dor-tools-builtin/test/folder-viewer.test.mjs`, `dor-tools-builtin/test/error-viewer.test.mjs` |
 
 **FAIL IF** `S150` `dor-tools-builtin/src/file-viewer.ts` serves any request without the fresh 256-bit URL capability, its own case-insensitive loopback `Host`, and an absent or same-listener `Origin`. Methods are GET/HEAD, plus POSTs requiring its own non-null Origin and a bounded body: text-editor save/state, Markdown document opens, and Markdown image rename carry JSON, and Markdown image paste and PNG/JPEG image-editor saves carry the image's bytes typed `image/png`, `image/jpeg`, `image/gif`, or `image/webp`, none of them CORS-safelisted. Compare capability prefixes by SHA-256 then `timingSafeEqual`, including malformed lengths. `allowsFileViewerRequest` in `dor-tools-builtin/src/file-viewer-loopback-guard.ts` gates every route. Never grant CORS access to foreign origins, cache responses, or send the capability as a referrer.
 
@@ -109,6 +129,10 @@ Source of truth: `startCapabilityViewer` in `dor-tools-builtin/src/viewer-server
 
 ## Network policy
 
+| Guarantee | Feature | Pinned by |
+| --- | --- | --- |
+| **Under Settings → Network → Nowhere, a new install's level, Dormouse opens no connection on its own**: no relay socket, one-time link, push, managed voice, or update check. What you click, and what your terminals, browser panes, and agents reach, restored ones included, are yours. |  | `scripts/outbound-lint.mjs`, `lib/src/host/remote/outbound.test.ts`, `vscode-ext/test/outbound.test.ts`, `lib/src/host/remote/service.test.ts`, `lib/src/host/managed-voice-host.test.ts`, `standalone/src/updater.test.ts` |
+
 The exposure is traffic the user never chose, which under Nothing is none. `docs/specs/remote-network.md` -> "Policy" owns the rule these checks audit.
 
 - **FAIL IF** `S156` anything opens a connection on its own while the network policy is `nothing` or unread. `BurrowService` in `lib/src/host/remote/service.ts` must route every socket, request, and direct peer through its transport guard, which refuses at the call, and `BurrowRuntime` and `burrowFetch` must take theirs from it with no default to the global `WebSocket` or `fetch`; start no `BurrowRuntime` under `nothing`; and refuse `enroll`, `enrollOffer`, `beginHostedEnrollment`, and `oneTimeOpen` before any request. `createManagedVoiceHost` in `lib/src/host/managed-voice-host.ts` must ask `networkAllowed` before every speak and voice-approval request, and `runUpdateCheck` in `standalone/src/updater.ts` must not call `check()` unless the policy it read is not `nothing` and `autoUpdate` is on, a failed read counting as `nothing`. Every other network primitive in shipped code is an `OUTBOUND_SITES` entry `scripts/outbound-lint.mjs` prints, its `FORMS` the inventory: read each `guarded:` entry back to its choke point, each `user:` entry's trigger to a click, a command, or the user's own terminal, browser pane, or agent, and each `loopback`, `local-ipc`, `phone`, or `dev-only` entry to what it claims (rationale). Pinned by the lint; by `lib/src/host/remote/outbound.test.ts` and `vscode-ext/test/outbound.test.ts`, each host's real service watched at the Node layer; and by `lib/src/host/remote/service.test.ts`, `lib/src/remote/burrow/burrow-fetch.test.ts`, `lib/src/remote/burrow/burrow-relay-socket.test.ts`, `lib/src/host/managed-voice-host.test.ts`, and `standalone/src/updater.test.ts`.
@@ -120,6 +144,10 @@ The exposure is traffic the user never chose, which under Nothing is none. `docs
 
 ## Persisted state
 
+| Guarantee | Feature | Pinned by |
+| --- | --- | --- |
+| **Current persistence writers never save terminal scrollback.** Standalone snapshots are owner-only; VS Code controls access to its own storage. Older snapshots may hold transcripts until retired. |  | `lib/src/lib/session-save.test.ts`, `lib/src/lib/session-restore.test.ts`; `cargo test` in `standalone/src-tauri` (the owner-only half) |
+
 The attacker is another local account reading disk; what the remote stack leaves behind is `docs/specs/security-remote.md` -> "Credentials at rest".
 
 **Standalone's session store is owner-only before any bytes are written** — every window snapshot, its geometry sibling, and the arrival journal (`docs/specs/standalone.md` -> "Persistence", "Boot and geometry", "Arrival queue"), on every platform. The same helper locks the whole standalone app-data directory before the sidecar spawns.
@@ -128,7 +156,7 @@ The attacker is another local account reading disk; what the remote stack leaves
 
 **Standalone writes `recovery.json` beside its sessions directory**, under the state root, owner-only: one rebuilt agent-resume invocation per Surface, never a buffer, unlinked as it is read (`docs/compatible-agents.md` -> "Recovery record").
 
-**The managed-voice token is a bearer credential at rest**, written only by managed-voice approval — `managed-voice.json` beside the Burrow's enrollment in the state dir, `0700`/`0600`, under the owner-only DACL `burrow_state_dir` applies on Windows before the sidecar spawns (rationale); `docs/specs/alert.md` → "Managed voice" keeps it from any webview. Where the token may go is `docs/specs/security-remote.md` -> "Relay origin".
+**The managed-voice token is a bearer credential at rest**, written only by managed-voice approval — in VS Code, `SecretStorage` beside the enrollment (`docs/specs/vscode.md` -> "Managed voice"); in standalone, `managed-voice.json` beside the Burrow's enrollment in the state dir, `0700`/`0600`, under the owner-only DACL `burrow_state_dir` applies on Windows before the sidecar spawns (rationale); `docs/specs/alert.md` → "Managed voice" keeps it from any webview. Where the token may go is `docs/specs/security-remote.md` -> "Relay origin".
 
 **VS Code persists pane structure in VS Code's own storage** — `workspaceState` and `vscode.setState()` — so the modes there are VS Code's, not ours, and no transcript reaches either (`docs/specs/vscode.md` -> "Serialization and restore"). Dormouse also writes `recovery.json` in extension storage, mode `0600` on Unix: one rebuilt agent-resume invocation per Surface, no buffer, unlinked as it is read (`docs/compatible-agents.md` -> "Recovery record").
 
@@ -143,11 +171,19 @@ Source of truth: `SESSION_STATE_KEY` in `vscode-ext/src/session-state.ts`, `ensu
 
 ## Terminal context directory actions
 
+| Guarantee | Feature | Pinned by |
+| --- | --- | --- |
+| **A directory a terminal reports reaches a process only as one validated path.** |  | `lib/src/host/local-directory.test.ts` |
+
 - **FAIL IF** `S164` a context directory argument, or a terminal-reported directory Workspace auto-naming hands the host's git lookup (`docs/specs/layout.md` → "Workspace names"), reaches a process without being validated as an existing absolute directory and passed as its canonical path in one argument with no shell interpretation; a UNC or device path (`isUncOrDevicePath` in `dor-lib-common/src/browser-providers.ts`), or a link whose target is one, reaches any filesystem call there, or is offered to Explore; a context directory action goes through the external-URL allowlist rather than this validation; the native opener runs a program the path names (macOS reveals with `open -R`; Windows refuses a path Explorer would split); or a VS Code per-terminal context request or helper ownership update leaves the owning router.
 
 Source of truth: `context` in `standalone/sidecar/pty-core.js`; `attachRouter` in `vscode-ext/src/message-router.ts`; `lookupGitDir` in `lib/src/host/git-info.ts`; `canonicalLocalDirectory` in `lib/src/host/local-directory.ts`.
 
 ## Spawned programs
+
+| Guarantee | Feature | Pinned by |
+| --- | --- | --- |
+| **A folder you open cannot get Dormouse to run a program it planted.** On Windows no program is spawned by bare name, and git in a repository you have not trusted runs no program its config names. |  | `standalone/sidecar/pty-core.test.js`, `lib/src/host/git-cli.test.ts`, `vscode-ext/test/pty-manager.test.ts` |
 
 The attacker is a file planted in a folder the user opens: Windows looks a bare program name up in the working directory before `PATH` (rationale). For a browser's `binaryPath` it is also the webview realm, which writes a pane's saved params (rationale). For the Playwright installation it is also another local account, which may create folders at a Windows drive root (rationale).
 
@@ -160,6 +196,10 @@ The attacker is a file planted in a folder the user opens: Windows looks a bare 
 Source of truth: `windowsSystemPath` in `standalone/sidecar/windows-system.js`; `resolveBinaryPath` in `dor-lib-common/src/resolve-binary.ts`; `ensureChild` in `vscode-ext/src/pty-manager.ts`; `UNTRUSTED_REPO_GIT_ARGS` in `dor-lib-common/src/git.ts`.
 
 ## Dor Tool configuration
+
+| Guarantee | Feature | Pinned by |
+| --- | --- | --- |
+| **A repository's Tool runs nothing until you trust it in Dormouse's own window.** No command grants that trust, and a control character in what the repository configures is escaped before it reaches your terminal and refused before it reaches a launch. |  | `lib/src/host/tool-host.test.ts`, `dor/test/cli-output.test.mjs`, `dor/test/open-picker.test.mjs` |
 
 Approval workflow, declaration and resolution belong to `docs/specs/dor-tool.md` → Trust, Declaring tools.
 

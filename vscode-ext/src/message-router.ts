@@ -27,6 +27,7 @@ import { ASK_BUDGET_MS } from '../../lib/src/host/remote/service-protocol';
 import { configurePeerLink, remoteNotifyPeerChange } from './peer-link';
 import { createProcessedPtyStreams } from './processed-pty-streams';
 import {
+  burrowNetworkAllowed,
   configureBurrow,
   deliverCommandResult,
   deliverUiEvent,
@@ -39,6 +40,7 @@ import {
   pushAlert,
 } from './burrow';
 import { log } from './log';
+import { configureManagedVoice, handleVoiceCommand } from './managed-voice';
 import type { WebviewChannel } from './webview-messaging';
 
 const clipboardOps = require('../../lib/clipboard-ops.cjs') as {
@@ -94,6 +96,11 @@ configurePeerLink({
   deliverCommandResult,
   deliverUiEvent,
   onClientAuthenticated: greetPeerWindow,
+});
+
+configureManagedVoice({
+  broadcastStatus: (status) => broadcastToWebviews({ type: 'voice:status', status }),
+  networkAllowed: burrowNetworkAllowed,
 });
 
 configureBurrow({
@@ -655,6 +662,17 @@ export function attachRouter(
             post({ type: 'clipboard:image', path: null, requestId: msg.requestId } satisfies ExtensionMessage);
           });
         break;
+      case 'clipboard:writeText':
+        // VS Code's own API, which reaches the user's clipboard even when this
+        // extension host runs remotely. A Thenable, so wrapped for `catch`.
+        Promise.resolve(vscode.env.clipboard.writeText(msg.text))
+          .then(() => post({ type: 'clipboard:written', requestId: msg.requestId } satisfies ExtensionMessage))
+          .catch((err) => {
+            const error = String(err?.message ?? err);
+            log.info(`[clipboard] writeText failed: ${error}`);
+            post({ type: 'clipboard:written', error, requestId: msg.requestId } satisfies ExtensionMessage);
+          });
+        break;
       case 'dormouse:openExternal': {
         const uri = normalizeExternalUri(msg.uri);
         if (!uri) break;
@@ -737,6 +755,15 @@ export function attachRouter(
         break;
       case 'burrow:command':
         handleBurrowCommand(msg.payload);
+        break;
+      case 'voice:command':
+        handleVoiceCommand(msg.payload).then(
+          (result) => post({ type: 'voice:result', requestId: msg.requestId, result } satisfies ExtensionMessage),
+          (err) => {
+            log.info(`[managed-voice] command failed: ${err?.message ?? err}`);
+            post({ type: 'voice:result', requestId: msg.requestId, result: null } satisfies ExtensionMessage);
+          },
+        );
         break;
       case 'dormouse:themeColors':
         // Webview reports its resolved terminal theme; cache for OSC color replies.

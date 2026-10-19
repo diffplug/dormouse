@@ -6,6 +6,10 @@
 
 ## GitHub Actions Policies
 
+| Guarantee | Feature | Pinned by |
+| --- | --- | --- |
+| **Merging to `main` and creating a tag are admin-only**, except the `hosted/` tag a dedicated App records after a reviewed Hosted deploy, and every workflow this repository authors pins its actions by commit. |  | `scripts/github-state-check.mjs`, `scripts/workflow-lint.mjs` |
+
 Renovate updates the commit pins; the generated `tend-*.yaml` pin `max-sixty/tend/claude` by version tag (see "Upstream compromise").
 
 **Agent-managed workflows are `tend-*.yaml`, `.github/workflows/workflow-audit.yaml`, and `.github/workflows/security-audit.yaml`.** They are exempt from the `pull_request_target` and write-permission rules below because they must modify issues, PRs, or code; "Automated Maintainer (tend)" bounds their scope.
@@ -21,6 +25,10 @@ Renovate updates the commit pins; the generated `tend-*.yaml` pin `max-sixty/ten
 `.github/workflows/ci.yml` also runs actionlint and zizmor over every workflow; `.github/zizmor.yml` names each exception it accepts.
 
 ## Automated Maintainer (tend)
+
+| Guarantee | Feature | Pinned by |
+| --- | --- | --- |
+| **The bot maintainer cannot merge, tag, or read a release secret**, and its token never enters its own environment. |  | `.github/workflows/workflow-audit.yaml`, nightly |
 
 The [tend](https://github.com/max-sixty/tend) agent harness runs as the GitHub user `dormouse-bot`: it reviews PRs, triages issues, fixes CI failures, regenerates its own workflow files nightly, responds to mentions, and polls its notification feed. A prompt injection in that harness reaches the secrets below, and **none escalates directly into malicious content on `main` or into any deployment-related secret** — those paths stay admin-gated.
 
@@ -98,6 +106,10 @@ Source of truth: `packageRules` in `.github/renovate.json`; `.github/workflows/w
 
 ## Hosted Deployments
 
+| Guarantee | Feature | Pinned by |
+| --- | --- | --- |
+| **Hosted runs only code from `main`, and a production deploy needs a maintainer's approval.** | One-time link, Hosted phone | `scripts/github-state-check.mjs` |
+
 Hosted credentials live only in the three Hosted environments the secret inventory above places them in. `hosted-production` and `hosted-release-tag` admit only `main`; `hosted-preview` admits only `main` and `refs/pull/*/merge`. `hosted-preview` and `hosted-production` require Ned or Edgar's review with administrator bypass disabled; self-review is allowed. Preview approval authorizes the PR code to receive test-resource credentials only. `hosted-release-tag` requires no review: approving the deploy approves its tag, which runs only after that deploy's live verification succeeds, so a `hosted/` tag records what is live.
 
 - **FAIL IF** `S65` a Hosted environment lacks those branch restrictions, or `hosted-preview` or `hosted-production` lacks required reviewers or disabled administrator bypass. Pinned by `scripts/github-state-check.mjs`.
@@ -113,6 +125,10 @@ Source of truth: `hosted/scripts/setup-github.mjs`; `.github/workflows/hosted-pr
 
 ## VS Code Extension Releases
 
+| Guarantee | Feature | Pinned by |
+| --- | --- | --- |
+| **Publishing the extension takes a second account's approval.** |  | `scripts/github-state-check.mjs` |
+
 GitHub Actions publishes the extension only after human approval from an account other than the triggering account, with administrator bypass disabled; `VSCE_PAT` and `OVSX_PAT` live only in that protected environment.
 
 - **FAIL IF** `S70` `vscode-extension-publish` lacks nonempty required reviewers, `prevent_self_review: true`, or `can_admins_bypass: false`. Pinned by `scripts/github-state-check.mjs`.
@@ -120,6 +136,10 @@ GitHub Actions publishes the extension only after human approval from an account
 - **FAIL IF** `S72` `.github/workflows/release.yml` uses production desktop signing secrets in CI, or stops generating an ephemeral Tauri updater key for unsigned CI artifacts. Pinned by `scripts/workflow-lint.mjs`.
 
 ## Desktop Releases
+
+| Guarantee | Feature | Pinned by |
+| --- | --- | --- |
+| **Desktop binaries are signed locally, and an installed app takes an update only under the one key it shipped trusting.** CI never holds production signing or updater keys, the signing script verifies CI's attestations and hashes first, and the updater asks only `dormouse.sh` over HTTPS. |  | `scripts/sign-and-deploy.test.mjs`, `standalone/scripts/updater-trust-root.test.mjs` |
 
 **Production signing is local, never in CI.** GitHub Actions builds unsigned artifacts, publishes attestations and hash manifests, and uploads them; `scripts/sign-and-deploy.sh` verifies the CI artifact attestations and the recorded SHA-256 hashes before signing, then signs each platform locally (Windows Authenticode needs a physical YubiKey and the signing PIN; macOS signing and notarization run locally too) and uploads the release assets. CI never holds the production Tauri updater private key: it uses an ephemeral key, and **Tauri updater signing is applied locally after OS signing**, so the updater signs the bundles users download. Procedure: `docs/specs/deploy.md` -> "Two-stage pipeline".
 

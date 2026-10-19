@@ -86,9 +86,11 @@ GRANT UPDATE (endpoint, p256dh, auth, "vapidPublicKey", "subscribedAt")
 -- A voice approval mints only a token: no read, revocation, or count.
 GRANT INSERT ("userId", hash) ON dormouse_voice_tokens TO dormouse_relay;
 
--- The voice Worker: speak's token lookup and the daily count.
-GRANT SELECT (id, "userId", hash, "revokedAt") ON dormouse_voice_tokens TO dormouse_voice;
+-- The voice Worker: speak's token lookup and idle expiry, a disconnecting
+-- computer's own delete, and the daily count.
+GRANT SELECT (id, "userId", hash, "createdAt", "lastUsedAt") ON dormouse_voice_tokens TO dormouse_voice;
 GRANT UPDATE ("lastUsedAt") ON dormouse_voice_tokens TO dormouse_voice;
+GRANT DELETE ON dormouse_voice_tokens TO dormouse_voice;
 GRANT SELECT, INSERT ON dormouse_voice_usage TO dormouse_voice;
 GRANT UPDATE (count) ON dormouse_voice_usage TO dormouse_voice;
 

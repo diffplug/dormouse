@@ -242,7 +242,7 @@ describe('a viewer socket', () => {
     expect(headed.socket.states()).toEqual([{ type: 'url', url: 'https://example.com/' }]);
   });
 
-  it('captures the tab an active-tab change shows, and nothing for other tab edits', async () => {
+  it('captures the page a change of the page shown shows, and nothing for other tab edits', async () => {
     const { view, capture, captures } = makeView();
     view.frame(jpeg(1));
     await vi.advanceTimersByTimeAsync(100);
@@ -252,11 +252,15 @@ describe('a viewer socket', () => {
       type: 'tabs' as const,
       tabs: ['t1', 't2'].map((tabId) => ({ tabId, url: `https://${tabId}.example/`, title, active: tabId === active })),
     });
+    view.shown('t1');
     view.state(tabs('t1', 'One'));
     view.state(tabs('t1', 'Renamed'));
+    view.shown('t1');
+    // A tab list naming another tab active is no page shown.
+    view.state(tabs('t2', 'Renamed'));
     await vi.advanceTimersByTimeAsync(1000);
     expect(capture).toHaveBeenCalledOnce();
-    view.state(tabs('t2', 'Renamed'));
+    view.shown('t2');
     await vi.advanceTimersByTimeAsync(1000);
     expect(capture).toHaveBeenCalledTimes(2);
   });

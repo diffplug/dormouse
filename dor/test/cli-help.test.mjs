@@ -50,6 +50,18 @@ test('help snapshots cover every command in global help', async (t) => {
   await assertSnapshotInventory(['dor', ...commandNames]);
 });
 
+test('every help JSON output example parses as JSON', async () => {
+  for (const name of (await readdir(snapshotsDir)).filter((file) => file.endsWith('.md'))) {
+    const lines = (await readFile(join(snapshotsDir, name), 'utf8')).split('\n');
+    lines.forEach((line, index) => {
+      if (line !== 'JSON output:') return;
+      const example = [];
+      for (let next = index + 1; lines[next]?.startsWith('  '); next++) example.push(lines[next]);
+      assert.doesNotThrow(() => JSON.parse(example.join('\n')), `${name}: ${example.join('\n')}`);
+    });
+  }
+});
+
 function parseCommandNames(stdout) {
   const lines = stdout.split('\n');
   const commandsIndex = lines.indexOf('COMMANDS');

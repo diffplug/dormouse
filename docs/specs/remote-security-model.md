@@ -254,21 +254,6 @@ Source of truth: `remote-lib-common/src/security/noise.ts`, `isEnrollment` / `pe
 
 **Loss is expected, and recovery is a re-run of the normal flow**: scan a fresh setup code, generate a new per-Burrow static, pair again, optionally revoke the old record (`revokedAt`). **Nothing is compromised** — the lost key authorized nothing without its paired passkey.
 
-## Security Guarantees
-
-The checklist an auditor or a change reviewer verifies against, each property established above and pinned by `remote-lib-common/test/security-guarantees.test.mjs`:
-
-* Adding a new passkey does not grant Burrow access.
-* Compromising the Relay does not let it create an authorized Client.
-* Compromising the Relay reveals no pairing decision, Burrow label, remote-api message, terminal byte, or notification text.
-* Passkey synchronization does not automatically create trusted Clients.
-* Every trusted Client must be explicitly paired with every Burrow.
-* Every connection requires user presence the Burrow itself verified — a fresh proof bound to that connection's transcript, or one it verified for the same identities and Client static within its presence window; the Relay can neither supply nor extend one.
-* Every access decision is ultimately made by the Burrow.
-* A one-time session is authorized only by typing, on the Burrow, the two digits its phone shows; it writes nothing at either end and runs only on the direct path (pinned by `lib/src/remote/client/one-time-e2e.test.ts`).
-
-**Never claim this model for paid SaaS before an independent cryptographic review** of the Noise integration, the WebAuthn channel binding, key storage, and the push construction. No shipped build, Hosted or self-host, carries such a claim.
-
 ## Residual metadata
 
 **No traffic-analysis resistance, per-Burrow unlinkability, or metadata anonymity is claimed.** The Relay still observes account and passkey authentication data, IPs, Burrow IDs and online state, routing relationships, every session's reauth exchange, push endpoints, timing, ciphertext sizes, and volume — **the last three only while the Relay is carrying the session**, since a session that has switched to the [direct path](#direct-path) leaves it the fact of the session and each end's liveness and nothing else. Two leaks follow and are accepted rather than closed (rationale): Client→Burrow timing exposes inter-keystroke timing on a relayed session while keystroke *values* stay encrypted, ending at the switch — which in exchange shows each paired peer the other's addresses, until then known only to the Relay — and one `PushSubscription` per worker scope lets a shared endpoint correlate every `deliveryId` one Pocket profile registers across Burrows. A push carries no counter, so a Relay that kept an envelope can re-deliver it ([Push sealing](#push-sealing)). A connection that rode a [presence window](#presence-window) makes no reauth exchange and answers sooner, so the Relay can tell it from one that proved.

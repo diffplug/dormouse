@@ -14,6 +14,7 @@ import {
   TH_CLASS,
 } from "../components/docs-tokens";
 import MarkdownDocument, { AnchoredHeading, type BlockNode } from "../components/MarkdownDocument";
+import { securityColumnWeights } from "../components/security-columns";
 import security from "../data/docs.security.json";
 import { type MetaArgs } from "react-router";
 import { type TocEntry } from "../lib/docs-pages";
@@ -236,7 +237,7 @@ const PRODUCTS: readonly SupplyChainProduct[] = [
     id: "hosted",
     title: "Dormouse Hosted",
     description:
-      "Only if you use Dormouse Hosted, and none of it is installed on your computer. relay.dormouse.sh serves Pocket and the one-time connection page to your phone — Pocket, which you may install to the Home Screen, keeps the phone's pairing keys — and its Worker routes your Hosted sessions and carries the one-time handshake. hosted.dormouse.sh serves your account page, and voice.dormouse.sh runs managed voice. All three Workers run on Cloudflare. Pocket and the one-time page are built from the Terminal's code, so their packages are listed under the Terminal. The Workers and the account page share one package, so this lists every package its runtime dependencies reach, which is more than any one Worker bundles, except optional add-ons such as test frameworks that a dependency supports but no Hosted code loads.",
+      "Only if you use Dormouse Hosted, and none of it is installed on your computer. relay.dormouse.sh serves Pocket and the one-time connection page to your phone — Pocket, which you may install to the Home Screen, keeps the phone's pairing keys — and its Worker routes your Hosted sessions and carries the one-time handshake. hosted.dormouse.sh serves your account page, and voice.dormouse.sh runs Natural Voice. All three Workers run on Cloudflare. Pocket and the one-time page are built from the Terminal's code, so their packages are listed under the Terminal. The Workers and the account page share one package, so this lists every package its runtime dependencies reach, which is more than any one Worker bundles, except optional add-ons such as test frameworks that a dependency supports but no Hosted code loads.",
     summary: { count: npmDeps.hosted.length, detail: "npm packages" },
     sections: [
       {
@@ -252,10 +253,11 @@ const PRODUCTS: readonly SupplyChainProduct[] = [
 
 /**
  * The security spec's rows and bullets for what reaches a user's machine,
- * rendered from `docs.security.json` rather than restated here
+ * rendered from `docs.security.json` rather than restated here, without the
+ * feature tags this page has no feature table for
  * (docs/specs/website-docs.md -> `/security` spec).
  */
-const CONTRACT = security.audiences["supply-chain"];
+const CONTRACT = security.supplyChain;
 
 /** The spec's subsections this page shows, each only while it has something to say. */
 const CONTRACT_SECTIONS = [
@@ -326,7 +328,7 @@ export default function SupplyChain() {
         </a>
         .
       </p>
-      <MarkdownDocument blocks={[CONTRACT.guarantees as BlockNode]} />
+      <MarkdownDocument blocks={[CONTRACT.guarantees as BlockNode]} columnWeights={securityColumnWeights} />
       {CONTRACT_SECTIONS.map(({ id, text, block }) => (
         <div key={id}>
           <AnchoredHeading id={id} depth={3}>

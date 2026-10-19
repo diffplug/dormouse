@@ -25,6 +25,19 @@ export function isSeen({ windowShown, workspaceActive, parked, covered }: Surfac
   return windowShown && workspaceActive && !parked && !covered;
 }
 
+/** The inputs as the webview observes them, the window's shown state still
+ *  in its two parts. */
+export type SurfaceSightObserved = Omit<SurfaceSightInputs, 'windowShown'> & {
+  /** `document.visibilityState` is not hidden. */
+  docVisible: boolean;
+  /** The host reports the window (VS Code: webview) shown. */
+  hostShown: boolean;
+};
+
+export function isSeenObserved({ docVisible, hostShown, ...rest }: SurfaceSightObserved): boolean {
+  return isSeen({ windowShown: docVisible && hostShown, ...rest });
+}
+
 /** Whether `zoomedId`, the Workspace's zoomed leaf, covers leaf `id`. */
 export function coveredByZoom(id: string, zoomedId: string | null): boolean {
   return zoomedId !== null && zoomedId !== id;

@@ -7,6 +7,10 @@
 
 ## Origin boundary
 
+| Guarantee | Feature | Pinned by |
+| --- | --- | --- |
+| **Each Hosted Worker answers only its own origin and runs only its own code.** No third-party script, analytics, or framing; sign-in cookies stay on the account origin, and its session never reaches browser storage. | One-time link, Hosted phone | `hosted/server/tests/boundary.test.ts`, `hosted/server/tests/workers.test.ts` |
+
 - **FAIL IF** `S77` a Worker routes a request whose URL origin is not its own `APP_ORIGIN`, a sibling's included, rather than answering 421; inspect `workerApp` in `hosted/server/worker-app.ts`.
 - **FAIL IF** `S78` an account cookie request — a cookie route's, or the auth handler's but a provider callback or `/api/auth/csrf` — presents an `Origin` but its own exactly, sibling origins under `dormouse.sh` included; is a read (`GET` or `HEAD`; to auth, anything but `POST`) that reaches its handler without `Sec-Fetch-Site: same-origin` rather than answering 403, so no header, `none`, and a sibling's `same-site` are refused; is state-changing and lacks that Origin, or to auth skips the CSRF check; is an auth read that skips `prelaunchAuth`'s lookup, or reaches it ungated; or any Worker grants credentialed CORS. Inspect `cookieEntitled` / `ownPageRead` / `openAuthRead` in `hosted/server/account-gate.ts`, their use in `accountApp` in `hosted/server/account-app.ts` and `prelaunchAuth` in `hosted/server/prelaunch.ts`, and the packed adapter (rationale).
 - **FAIL IF** `S79` the relay or voice Worker's bindings mapper passes an auth secret (`AUTH_SECRET`, a provider credential, or `POSTMARK_SERVER_TOKEN`), the account's or relay's passes `ELEVENLABS_API_KEY`, the account's or voice's passes `RELAY_ENROLL_SECRET` or `RELAY_VAPID_PRIVATE_KEY`, or the relay or voice entry imports Better Auth, or `WORKERS` in `hosted/scripts/workers.mjs` provisions either an auth secret; inspect `hosted/server/bindings.ts` and each entry's import graph.
@@ -18,14 +22,22 @@ Pinned by `hosted/server/tests/boundary.test.ts`, `hosted/server/tests/workers.t
 
 ## Account boundary
 
+| Guarantee | Feature | Pinned by |
+| --- | --- | --- |
+| **A Hosted account signs you in and grants nothing more.** Login never mints terminal access or stands in for pairing and presence; only an entitled account reaches managed voice, whose Worker neither logs nor stores the text it speaks. | Hosted phone | `hosted/server/tests/policy.test.ts`, `hosted/server/tests/workers.test.ts` |
+
 - **FAIL IF** `S83` the consumer changes `authPolicy` away from explicit linking or multiple independent logins, or accepts an explicit connection callback after its initiating login was revoked; inspect `hosted/server/policy.ts` and the packed adapter.
 - **FAIL IF** `S84` an unused provider credential enables login, an unknown provider name is accepted, or incomplete enabled credentials silently degrade; inspect `providerBindings` in `hosted/server/policy.ts`.
-- **FAIL IF** `S85` a managed-voice route admits an account the entitlement (`docs/specs/hosted.md` -> "Entitlement") does not, without rechecking per request, stores a voice token other than as its SHA-256, logs speak text, forwards an ElevenLabs error body or status, or lets a binding or request field choose the upstream origin, path prefix, model, or format, or a voice outside `MANAGED_VOICES`; or the relay mints a voice token without redeeming a voice-purpose approval, or remote enrollment mints voice credentials; inspect `hosted/server/entitlement.ts`, `hosted/server/voice.ts`, and `hosted/server/relay-api.ts`.
+- **FAIL IF** `S85` speak or a voice token's mint admits an account the entitlement (`docs/specs/hosted.md` -> "Entitlement") does not, without rechecking per request, stores a voice token other than as its SHA-256, accepts one idle past `VOICE_TOKEN_IDLE_DAYS`, lets a bearer delete any token but its own, logs or stores speak text, forwards an ElevenLabs error body or status, or lets a binding or request field choose the upstream origin, path prefix, model, or format, or a voice outside `MANAGED_VOICES`; or the relay mints a voice token without redeeming a voice-purpose approval, or remote enrollment mints voice credentials; inspect `hosted/server/entitlement.ts`, `hosted/server/voice.ts`, and `hosted/server/relay-api.ts`.
 - **FAIL IF** `S86` Hosted account login mints a Burrow ACL grant or substitutes for the existing encrypted pairing/presence proof. The one-time rendezvous carries only handshake ciphertext and authorizes nothing; the ends' handshake and the laptop's confirmation do.
 
-Pinned by `hosted/server/tests/workers.test.ts` and `hosted/server/tests/policy.test.ts`.
+What ElevenLabs keeps of it is `docs/specs/security.md` -> "What is not defended". Pinned by `hosted/server/tests/workers.test.ts` and `hosted/server/tests/policy.test.ts`.
 
 ## Rendezvous boundary
+
+| Guarantee | Feature | Pinned by |
+| --- | --- | --- |
+| **The one-time rendezvous relays a handshake it cannot read, to one phone, until the link expires.** It decodes and keeps no frame, never admits a second phone, and reads no cookie or account. | One-time link | `hosted/server/tests/one-time.test.ts`, `scripts/e2e-lint.mjs` |
 
 **The one-time room is a counter with two sockets** on the relay Worker: `docs/specs/one-time.md` -> "Hosted rendezvous" owns its routes and lifecycle, and "Phone page" the page beside them; these are the checks on them.
 
@@ -43,6 +55,10 @@ Pinned by `hosted/server/tests/workers.test.ts` and `hosted/server/tests/policy.
 `scripts/e2e-lint.mjs` also holds `hosted/server/` to the Relay's absences: no protocol-v1 type, no direct-path signal or SDP, no ICE server — the page's STUN is client code (`docs/specs/security-remote.md` -> "Direct path"). Pinned by `hosted/server/tests/one-time.test.ts`, `hosted/scripts/stage-relay.test.mjs`, `lib/src/remote/pocket-app/assert-pocket-worker.test.ts`, and `hosted/scripts/production.test.mjs`.
 
 ## Relay boundary
+
+| Guarantee | Feature | Pinned by |
+| --- | --- | --- |
+| **Hosted's Relay keeps each account's computers, passkeys, and push registrations to that account.** It stores tokens only hashed, rechecks the owner's entitlement on every request, closes a removed computer's socket, and neither decodes a frame nor reads a push. | Hosted phone | `hosted/server/tests/relay.test.ts`, `hosted/server/tests/relay-room.test.ts`, `hosted/server/tests/relay-push.test.ts` |
 
 **The Hosted Relay** on the relay Worker, and its account routes on the account Worker: `docs/specs/hosted.md` -> "Relay", "Relay sockets", and "Burrow enrollment" own them; these are the checks on them. Inspect `relayApiRoutes` in `hosted/server/relay-api.ts`, `hosted/server/relay-auth.ts`, `relaySocketRoutes` in `hosted/server/relay-sockets.ts`, `RelayRoom` in `hosted/server/relay-room.ts`, the frame layer in `remote-lib-common/src/remote/relay-routing.ts`, `relayAccountRoutes` in `hosted/server/relay-account.ts`, `cookieEntitled` in `hosted/server/account-gate.ts`, `hosted/server/relay-push.ts`, and `hosted/server/dormouse-migrations/002_relay.sql`, `003_relay_push.sql`, `004_relay_enrollment_redeemed.sql`, `006_relay_setup_token_claim.sql`, and `007_independent_voice.sql`.
 
@@ -71,6 +87,10 @@ Pinned by `hosted/server/tests/relay.test.ts`, `hosted/server/tests/relay-push.t
 
 ## Deployment boundary
 
+| Guarantee | Feature | Pinned by |
+| --- | --- | --- |
+| **Hosted runs only pgstencil releases that passed pgstencil's own audit.** A production deploy carries no test controls and verifies each pgstencil package's provenance; a preview reaches no real provider. | One-time link, Hosted phone | `hosted/scripts/production.test.mjs`, `hosted/server/tests/artifacts.test.ts` |
+
 - **FAIL IF** `S117` a production Worker exposes the captured-email inbox or deterministic clock controls, or imports the testing injection module; inspect `hosted/server/worker.ts`, `hosted/server/relay-worker.ts`, `hosted/server/voice-worker.ts`, the build configuration, and `hosted/server/tests/worker-entry.ts`.
 - **FAIL IF** `S118` either installed pgstencil package lacks `dist/provenance.json`, records `dirty`, names a commit that is not 40 lowercase hex or differs from the other's; `pnpm-lock.yaml` resolves either package from outside npm or without an integrity hash; or a runtime import depends on a sibling pgstencil checkout. Inspect `verifyPackages` in `hosted/scripts/production.mjs`, `hosted/server/tests/artifacts.test.ts`, and Hosted runtime imports.
 - **FAIL IF** `S119` either installed package lacks a verified npm SLSA provenance attestation whose Fulcio certificate SAN names `diffplug/pgstencil` `.github/workflows/release.yml` on `refs/heads/main`, whose source-repository digest (OID `1.3.6.1.4.1.57264.1.13`) equals `dist/provenance.json`'s commit, or whose signed subject/payload disagrees with the installed package, certificate, or commit.
@@ -88,4 +108,4 @@ Pinned by `hosted/server/tests/artifacts.test.ts`, `hosted/server/tests/workers.
 
 **Live production acceptance**: verify Hyperdrive and role values that `preflight` reads, and Cloudflare script injection excluded for the Hosted hostname (`hosted/README.md`). Recorded configuration proves neither live controls nor browser acceptance.
 
-Public voice and Relay need abuse, authorization, data-disclosure, and recovery checks, and paid use independent remote-model review; `docs/specs/hosted.md` owns the staged work.
+Public voice and Relay need abuse, authorization, data-disclosure, and recovery checks; `docs/specs/hosted.md` owns the staged work.

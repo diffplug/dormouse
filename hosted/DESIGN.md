@@ -126,7 +126,7 @@ At 540px and below, header padding becomes 16px, main top padding becomes 36px, 
 
 ## Elevation & Depth
 
-The account interface has no shadows, gradients, overlays, or animated transitions. Background changes and spacing establish grouping; notices sit inline with the form or account content.
+The account interface has no shadows, gradients, or animated transitions. Background changes and spacing establish grouping; notices sit inline with the form or account content. The one overlay is the Turn off Natural Voice confirmation, a native modal dialog: flat, edged in the control background, over a dimmed page.
 
 ## Shapes
 
@@ -139,7 +139,7 @@ Buttons and inputs share gently rounded corners from the control radius token an
 - **Inputs:** full-width fields with visible labels. Email and verification code share styling; readonly email keeps its normal appearance. The code field receives focus when revealed.
 - **Feedback:** errors use `role="alert"` and an inline retry action. Notices and loading text use `role="status"`.
 - **Account method rows:** show the provider name with either a Connect action or Connected text. State is communicated in words, not solely through color.
-- **Voice tokens (admin only):** token rows reuse the account method row, with creation date, a detail-role last-used line, and a Revoke action or Revoked text. A newly minted token appears in a notice block with its copy-now warning and a primary-colored Copy action.
+- **Natural Voice:** whether it is on, in words, with a Turn off Natural Voice action while it is; otherwise where in Dormouse to turn it on. Turning off asks first, in a dialog whose primary-colored Turn off sits right of Cancel. No token or computer is ever named.
 - **Enrollment approval:** the `/enroll` page replaces the account content with the user code in the user-code role, the instruction to approve only while Dormouse shows it, a primary Approve (or Sign in again, when the login is too old), and a Don’t approve text button.
 - **Computers (admin only):** rows reuse the account method row, with the id prefix, a detail-role enrollment date, and a Remove action.
 - **Navigation:** plain product and external links in the header and footer, with no tab bar or card wrapper.

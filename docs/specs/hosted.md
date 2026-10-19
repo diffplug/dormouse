@@ -9,9 +9,9 @@
 
 | Worker | Origin | Serves | Holds |
 |---|---|---|---|
-| `dormouse-hosted` | `https://hosted.dormouse.sh` | the account frontend, `/api/auth/*`, `/api/providers`, voice tokens, the Relay's account routes ("Burrow enrollment") | the login cookie, auth secrets, Hyperdrive, the approval rate limit, a binding to the relay's `RelayRoom` |
+| `dormouse-hosted` | `https://hosted.dormouse.sh` | the account frontend, `/api/auth/*`, `/api/providers`, Natural Voice on or off, the Relay's account routes ("Burrow enrollment") | the login cookie, auth secrets, Hyperdrive, the approval rate limit, a binding to the relay's `RelayRoom` |
 | `dormouse-relay` | `https://relay.dormouse.sh` | the Hosted Relay, its sockets, and Pocket ("Relay", "Relay sockets"), the one-time rendezvous and `/connect/` (`docs/specs/one-time.md` -> "Hosted rendezvous") | Hyperdrive, `OneTimeRoom`, `RelayRoom`, the one-time, sign-in, setup, and enrollment rate limits, `ACCOUNT_ORIGIN`, `RELAY_ENROLL_SECRET`, the VAPID pair |
-| `dormouse-voice` | `https://voice.dormouse.sh` | speak and the history sweep ("Managed voice") | `ELEVENLABS_API_KEY`, Hyperdrive |
+| `dormouse-voice` | `https://voice.dormouse.sh` | speak, a token's own delete, and the history sweep ("Managed voice") | `ELEVENLABS_API_KEY`, Hyperdrive |
 
 Every Worker answers `/api/health` and `/api/ready`, 404s anything else under its non-page prefixes (`/api`, and the relay's `/ws` too), `/dev/*`, or `/__test/*`, and answers a thrown request 503 under `secureHeaders`. `/api/ready` answers 200 once a query its role must be granted runs through its Hyperdrive, else a bare 503; it reads no row and has no rate limit. The account falls back to its SPA assets, the relay to Pocket's. Origin and binding isolation: `docs/specs/security-hosted.md` -> "Origin boundary" (rationale).
 
@@ -73,24 +73,28 @@ Source of truth: `entitledSql` and `entitled` in `hosted/server/entitlement.ts`;
 
 ## Managed voice
 
-A desktop with managed voice enabled exchanges its voice token for ElevenLabs speech in a voice of the curated set (`MANAGED_VOICES` in `remote-lib-common/src/remote/managed-voice.ts`). A voice-purpose device-code approval ("Burrow enrollment") mints only the token at redemption; the account Worker's token routes are the admin test path. The voice Worker serves speak.
+A desktop with Natural Voice on exchanges its voice token for ElevenLabs speech in a voice of the curated set (`MANAGED_VOICES` in `remote-lib-common/src/remote/managed-voice.ts`). A voice-purpose device-code approval ("Burrow enrollment") mints only the token at redemption.
 
 | Route | Credential | Success |
 |---|---|---|
-| `GET /api/voice/tokens` | login cookie, same-origin fetch | 200 `{ tokens }` |
-| `POST /api/voice/tokens` | login cookie, exact `Origin` | 201 `{ id, token, createdAt }` |
-| `DELETE /api/voice/tokens/:id` | login cookie, exact `Origin` | 204; 404 for another account's or an unknown ID |
+| `GET /api/voice` | login cookie, same-origin fetch | 200 `{ entitled, on }`, `on` while the account holds a live token |
+| `DELETE /api/voice` | login cookie, exact `Origin` | 204, the account's tokens deleted |
 | `POST /api/voice/speak` | `Authorization: Bearer dmv_…`, JSON `{ text, voiceId }` | 200 `audio/mpeg`, `Cache-Control: no-store` |
+| `DELETE /api/voice/token` | `Authorization: Bearer dmv_…` | 204, that token deleted, live or not |
 
-Errors are JSON `{ message }`. Cookie routes answer 401 without a login and 403 for an account not entitled ("Entitlement").
+Errors are JSON `{ message }`. Cookie routes answer 401 without a login and admit any account, entitled or not, so a lapsed one can still turn Natural Voice off.
 
-**Must store only a token's SHA-256.** A token is `dmv_` plus base64url of 32 random bytes, returned only by the mint response: the account's `POST`, or the poll that redeems an enrollment. Revocation is permanent.
+**Must store only a token's SHA-256, and nothing about the computer holding it.** A token is `dmv_` plus base64url of 32 random bytes, returned only by the poll that redeems a voice approval.
 
-**Must keep managed voice and remote control independent.** Voice approval mints only a voice token, remote enrollment only a Burrow; disconnecting or revoking either preserves the other. The relay's role may insert only the voice token's owner and hash. Client controls and disclosure: `docs/specs/alert.md` -> "Settings dialog".
+**A token is live until a year (`VOICE_TOKEN_IDLE_DAYS`) passes without a counted speak, or since its mint if none**; speak and `on` refuse any other. **Must delete expired tokens from the voice Worker's daily Cron Trigger (`TOKEN_SWEEP_CRON`)**, its only database pass (rationale).
+
+**Never name a token, or list computers, on the account page.** It says whether Natural Voice is on, and turning it off asks first.
+
+**Must keep managed voice and remote control independent.** Voice approval mints only a voice token, remote enrollment only a Burrow; turning either off preserves the other. The relay's role may insert only the voice token's owner and hash. Client controls and disclosure: `docs/specs/alert.md` -> "Settings dialog".
 
 **Speak must answer in this order:**
 
-1. 401 for a missing, malformed, unknown, or revoked token.
+1. 401 for a missing, malformed, unknown, or expired token.
 2. 403 when the owner is not entitled.
 3. 400 for malformed JSON, `text` outside 1–200 characters after trim, or a `voiceId` outside the curated set.
 4. 503 when the deployment has no `ELEVENLABS_API_KEY`.
@@ -102,7 +106,7 @@ Errors are JSON `{ message }`. Cookie routes answer 401 without a login and 403 
 **Must delete ElevenLabs speech history, which keeps each generation's text, from the production voice Worker only**: one pass shortly after each successful speak, and a Cron Trigger every 5 minutes for what that missed. No retention bound is guaranteed (rationale).
 
 - **Must use an ElevenLabs service account dedicated to Dormouse voice, with history access isolated from other workspace usage.** A sweep deletes every history item visible to its key (rationale).
-- **Never touch the database or any binding but `ELEVENLABS_API_KEY` in a sweep**, so an idle deployment lets Postgres suspend. Without the key nothing runs; development and previews never sweep.
+- **Never touch the database or any binding but `ELEVENLABS_API_KEY` in a history sweep**, so an idle deployment lets Postgres suspend. Without the key nothing runs; development and previews never sweep.
 - **Must fail the cron invocation when its pass cannot list or any delete fails; the after-speech pass only logs** (rationale).
 
 Source of truth: `hosted/server/voice.ts`; `hosted/server/voice-app.ts`; `mintVoiceToken` in `hosted/server/voice-token.ts`.
@@ -231,7 +235,7 @@ Source of truth: `relayApiRoutes` in `hosted/server/relay-api.ts`; `relayAccount
 
 ## Development and release
 
-**Must run local development with `dor tool hosted` inside Dormouse.** Its single loopback `http://localhost:<port>` origin serves Vite and Node auth on a disposable development database, with the voice token and Relay account routes but never speak, which every Hosted build reaches only at `https://voice.dormouse.sh`. Host, Origin, and Fetch Metadata checks guard the local captured-email inbox; no production entry imports an inbox or test-control handler.
+**Must run local development with `dor tool hosted` inside Dormouse.** Its single loopback `http://localhost:<port>` origin serves Vite and Node auth on a disposable development database, with the account's Natural Voice and Relay routes but never the voice origin's, which every Hosted build reaches only at `https://voice.dormouse.sh`. Host, Origin, and Fetch Metadata checks guard the local captured-email inbox; no production entry imports an inbox or test-control handler.
 
 **Must verify the three production Worker bundles and run the consumer's integration suite before release.** Only test entries inject deterministic Better Auth. Simulated callbacks do not certify provider registrations; production acceptance requires real browser login with each enabled provider and email delivery.
 
@@ -269,5 +273,5 @@ Source of truth: `.github/workflows/hosted-production.yml`; `hosted/scripts/prod
 
 1. Deploy the configured providers and pass real production acceptance. pgstencil includes the Microsoft fix; personal and work/school callbacks need acceptance.
 2. Add per-browser login listing/revocation, sign-out-everywhere, and account recovery before broad paid use. Revisit the fixed 24-hour login lifetime for daily voice use.
-3. Managed voice for every member: the subscription as the entitlement in place of `ADMIN_EMAIL` (`docs/specs/pricing.md` -> "Checkout and entitlement"), per-account quotas, usage accounting, spending bounds beyond the fixed daily cap, retiring the account page's hand-minted tokens, and explicit text/redaction disclosure.
+3. Managed voice for every member: the subscription as the entitlement in place of `ADMIN_EMAIL` (`docs/specs/pricing.md` -> "Checkout and entitlement"), per-account quotas, usage accounting, spending bounds beyond the fixed daily cap, and explicit text/redaction disclosure.
 4. Open sign-in: delete `hosted/server/prelaunch.ts` and the frontend's pre-launch notice.

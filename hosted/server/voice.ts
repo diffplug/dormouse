@@ -1,17 +1,21 @@
 // Rules: docs/specs/hosted.md -> "Managed voice".
 import type { Context, Hono } from "hono";
 import { digest } from "@pgstencil/auth/security";
-import { withClient } from "pgstencil/postgres";
+import { queryDatabase, withClient } from "pgstencil/postgres";
 import { isManagedVoiceId, isManagedVoiceToken, parseBearer } from "remote-lib-common";
-import { accountQuery, cookieEntitled, type AccountHost } from "./account-gate";
+import { accountQuery, cookieLogin, type AccountHost } from "./account-gate";
 import { entitledSql } from "./entitlement";
-import { mintVoiceToken } from "./voice-token";
 
 export const VOICE_DAILY_CAP = 500;
+/** A token unused this long is refused, as if it never existed. */
+export const VOICE_TOKEN_IDLE_DAYS = 365;
+/** Whether the token aliased `t` is live: used, or minted, within the idle bound. */
+export const LIVE_TOKEN = `coalesce(t."lastUsedAt", t."createdAt") > now() - interval '${VOICE_TOKEN_IDLE_DAYS} days'`;
+/** The idle-token sweep's daily Cron Trigger; the voice Worker's other is the history sweep's. */
+export const TOKEN_SWEEP_CRON = "0 4 * * *";
 /** Speak's token lookup, its owner's entitlement joined, before its WHERE. */
 export const TOKEN_OWNER = `SELECT t.id, t."userId", ${entitledSql("u")} AS entitled
   FROM dormouse_voice_tokens t JOIN "user" u ON u.id = t."userId"`;
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const MAX_BODY = 4096;
 
 /** Resolves to the upstream's response; any non-2xx or throw becomes 502. */
@@ -69,58 +73,54 @@ const badBody = (c: Context) =>
   fail(c, 400, "Send JSON with text and voiceId.");
 
 /**
- * Registers the account's /api/voice/tokens routes; call before any /api/*
- * catch-all.
+ * Registers the account's /api/voice routes, which never name a token: whether
+ * Natural Voice is on, and turning it off. Call before any /api/* catch-all.
  */
-export function voiceTokenRoutes(
+export function voiceAccountRoutes(
   app: Hono<any>,
   host: (c: Context) => AccountHost,
 ) {
-  // Cookie routes: only this origin may change tokens, and only an entitled account.
-  const cookieGate = cookieEntitled(host, notEntitled);
+  // Any signed-in account: a lapsed one may still turn its computers off.
+  const cookieGate = cookieLogin(host);
 
-  app.get("/api/voice/tokens", cookieGate, async (c) => {
-    const tokens = await accountQuery(
+  app.get("/api/voice", cookieGate, async (c) => {
+    const [row] = await accountQuery<{ entitled: boolean; on: boolean }>(
       host(c),
-      `SELECT id, "createdAt", "lastUsedAt", "revokedAt"
-      FROM dormouse_voice_tokens
-      WHERE "userId" = $1 ORDER BY "createdAt" DESC, id`,
+      `SELECT ${entitledSql("u")} AS entitled, EXISTS (
+        SELECT 1 FROM dormouse_voice_tokens t WHERE t."userId" = u.id AND ${LIVE_TOKEN}
+      ) AS on
+      FROM "user" u WHERE u.id = $1`,
       [c.get("login").userId],
     );
-    return c.json({ tokens });
+    return c.json({ entitled: row?.entitled === true, on: row?.on === true });
   });
 
-  app.post("/api/voice/tokens", cookieGate, async (c) => {
-    const token = mintVoiceToken();
-    const [row] = await accountQuery<{ id: string; createdAt: Date }>(
+  app.delete("/api/voice", cookieGate, async (c) => {
+    await accountQuery(
       host(c),
-      `INSERT INTO dormouse_voice_tokens ("userId", hash) VALUES ($1, $2)
-      RETURNING id, "createdAt"`,
-      [c.get("login").userId, digest(token)],
+      `DELETE FROM dormouse_voice_tokens WHERE "userId" = $1`,
+      [c.get("login").userId],
     );
-    return c.json({ id: row.id, token, createdAt: row.createdAt }, 201);
-  });
-
-  app.delete("/api/voice/tokens/:id", cookieGate, async (c) => {
-    const id = c.req.param("id");
-    if (!UUID.test(id)) return fail(c, 404, "Token not found.");
-    const [row] = await accountQuery<{ id: string }>(
-      host(c),
-      `UPDATE dormouse_voice_tokens
-      SET "revokedAt" = coalesce("revokedAt", now())
-      WHERE id = $1 AND "userId" = $2 RETURNING id`,
-      [id, c.get("login").userId],
-    );
-    if (!row) return fail(c, 404, "Token not found.");
     return c.body(null, 204);
   });
 }
 
 /**
- * Registers the voice origin's bearer-only POST /api/voice/speak; call before
- * any /api/* catch-all. It reads no cookie and never asks auth.
+ * Registers the voice origin's bearer-only routes, speak and a disconnecting
+ * computer's DELETE of its own token; call before any /api/* catch-all. They
+ * read no cookie and never ask auth.
  */
-export function speakRoute(app: Hono<any>, host: (c: Context) => SpeakHost) {
+export function voiceBearerRoutes(app: Hono<any>, host: (c: Context) => SpeakHost) {
+  // 204 whether or not the token was live: the computer forgets it either way.
+  app.delete("/api/voice/token", async (c) => {
+    const bearer = parseBearer(c.req.header("authorization"));
+    if (!isManagedVoiceToken(bearer)) return tokenRequired(c);
+    await withClient(host(c).databaseUrl, (db) =>
+      db.query(`DELETE FROM dormouse_voice_tokens WHERE hash = $1`, [digest(bearer)]),
+    );
+    return c.body(null, 204);
+  });
+
   app.post("/api/voice/speak", async (c) => {
     const bearer = parseBearer(c.req.header("authorization"));
     if (!isManagedVoiceToken(bearer)) return tokenRequired(c);
@@ -134,7 +134,7 @@ export function speakRoute(app: Hono<any>, host: (c: Context) => SpeakHost) {
         userId: string;
         entitled: boolean;
       }>(
-        `${TOKEN_OWNER} WHERE t.hash = $1 AND t."revokedAt" IS NULL`,
+        `${TOKEN_OWNER} WHERE t.hash = $1 AND ${LIVE_TOKEN}`,
         [digest(bearer)],
       );
       if (!owner) return tokenRequired(c);
@@ -193,6 +193,11 @@ export function speakRoute(app: Hono<any>, host: (c: Context) => SpeakHost) {
       headers: { "content-type": "audio/mpeg", "cache-control": "no-store" },
     });
   });
+}
+
+/** The daily pass: every token no longer live, which speak already refuses. */
+export async function sweepIdleTokens(databaseUrl: string) {
+  await queryDatabase(databaseUrl, `DELETE FROM dormouse_voice_tokens t WHERE NOT (${LIVE_TOKEN})`, []);
 }
 
 /** Deletions per pass. Fits Workers Free's 50 subrequests (hosted.rationale.md). */

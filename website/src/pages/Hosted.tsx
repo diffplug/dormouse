@@ -64,13 +64,13 @@ export function meta({ location }: MetaArgs) {
   return siteMeta(location.pathname, {
     title: "Dormouse Hosted",
     description:
-      "The terminal is free. Dormouse Hosted adds a managed Relay for Pocket and managed voices "
+      "The terminal is free. Dormouse Hosted adds a managed Relay for Pocket and Natural Voice "
       + `for spoken alarms — from $${LIST_MONTHLY} a month, with founding prices while they last.`,
   });
 }
 
 export const HOSTED_TOC: TocEntry[] = [
-  { id: "voice", text: "Managed voices", children: [] },
+  { id: "voice", text: "Natural Voice", children: [] },
   { id: "remote-control", text: "The managed Relay", children: [] },
   { id: "self-hosting", text: "Self-hosting stays free", children: [] },
   { id: "account", text: "Your Hosted account", children: [] },
@@ -494,7 +494,7 @@ export default function Hosted() {
           className={`mb-3 ${ACCENT_TEXT_CLASS}`}
           aria-hidden="true"
         />
-        <AnchoredHeading id="voice" spacing="mt-0 mb-3">Managed voices</AnchoredHeading>
+        <AnchoredHeading id="voice" spacing="mt-0 mb-3">Natural Voice</AnchoredHeading>
         <p className={`mb-3 font-display text-sm ${ACCENT_TEXT_CLASS}`}>Included with any plan</p>
         <p className={`mb-4 ${BODY_TEXT_CLASS}`}>
           Free and with no account, Dormouse speaks an unattended terminal’s name in your
@@ -503,7 +503,7 @@ export default function Hosted() {
           up or pay for.
         </p>
         <p className={`mb-4 leading-relaxed ${MUTED_TEXT_CLASS}`}>
-          Managed voices send a shortened displayed label, voice id, and authentication
+          Natural Voice sends a shortened displayed label, voice id, and authentication
           credential to our service; ElevenLabs receives the label and voice id. Labels
           can contain program-supplied titles, command labels, or directory names.
           Filtering cannot remove every secret. The terminal screen and output stream
@@ -514,7 +514,7 @@ export default function Hosted() {
         <p className={`leading-relaxed ${MUTED_TEXT_CLASS}`}>
           The system voice stays, and stays the fallback: offline, past the daily fair-use
           cap, or if my endpoint fails, Dormouse speaks in the system voice rather than
-          going silent. Managed voices allow 500 requests per subscriber per UTC day;
+          going silent. Natural Voice allows 500 requests per subscriber per UTC day;
           provider failures count, cached playback does not.
         </p>
       </section>
@@ -549,7 +549,7 @@ export default function Hosted() {
           >
             trust model
           </a>{" "}
-          lists exactly which. Its independent security review is pending.
+          lists exactly which.
         </p>
       </section>
 

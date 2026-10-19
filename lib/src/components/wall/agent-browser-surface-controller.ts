@@ -19,6 +19,8 @@ import { isAllowedBinaryFor } from '../../lib/agent-browser-binary';
 import { getPlatform } from '../../lib/platform';
 import { defaultBrowserViewportConfig, isBrowserViewportSetting, resolveBrowserViewport, type BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
 import { readTextFromClipboard } from '../../lib/clipboard';
+import { msSince } from '../../lib/elapsed';
+import { isSeenObserved, type SurfaceSightObserved } from '../../lib/surface-sight';
 import { isAbDebugLogsEnabled } from '../../lib/feature-flags';
 import {
   registerAgentBrowserScreen,
@@ -62,6 +64,32 @@ import {
 // immediately, so quick visibility flips — or a StrictMode unmount→remount —
 // don't tear down and rebuild the stream connection.
 export const HIDDEN_PARK_DELAY_MS = 1000;
+
+/** One entry of a Surface's debug ring. */
+interface DebugEntry { t: number; event: string; data?: Record<string, unknown> }
+
+/**
+ * A Surface's always-on debug ring, read by `dor-diagnostics`: the newest
+ * `size` lifecycle events — phase changes, park requests, what decides sight,
+ * the viewer connection's dials, closes and retries, tab reports as a
+ * summary, dropped commands. Never per frame: frames are counted instead.
+ */
+class DebugRing {
+  private readonly entries: (DebugEntry | undefined)[];
+  private next = 0;
+  constructor(private readonly size: number) {
+    this.entries = new Array<DebugEntry | undefined>(size);
+  }
+  record(event: string, data?: Record<string, unknown>): void {
+    this.entries[this.next] = { t: Date.now(), event, ...(data ? { data } : {}) };
+    this.next = (this.next + 1) % this.size;
+  }
+  /** Oldest first, each with its age. */
+  read(now: number): { msAgo: number | null; event: string; data?: Record<string, unknown> }[] {
+    const ordered = [...this.entries.slice(this.next), ...this.entries.slice(0, this.next)];
+    return ordered.filter((entry) => entry !== undefined).map(({ t, ...rest }) => ({ msAgo: msSince(t, now), ...rest }));
+  }
+}
 
 // The high-rate `[ab-panel]` diagnostics fire per stream event, so the flag is
 // read ONCE — lazily, on the first log — and memoized: toggling needs a
@@ -365,6 +393,11 @@ export class AgentBrowserSurfaceController {
 
   private readonly viewListeners = new Set<() => void>();
   private viewSnapshot: AgentBrowserViewSnapshot;
+
+  // --- diagnostics (`diagnostics()`) ---
+  private readonly ring = new DebugRing(500);
+  private sight: SurfaceSightObserved | null = null;
+  private readonly frames = { received: 0, painted: 0, decodeFailures: 0, lastReceivedAt: undefined as number | undefined };
 
   constructor(id: string, params: AgentBrowserSurfaceParams) {
     this.id = id;
@@ -730,6 +763,16 @@ export class AgentBrowserSurfaceController {
     this.setHeaded(headed);
   }
 
+  /** What decides whether the pane is seen, as the view observes it:
+   *  recorded when it changes, and the pane's sight taken from it. */
+  setSight(sight: SurfaceSightObserved): void {
+    if (sight === this.sight) return;
+    this.sight = sight;
+    const visible = isSeenObserved(sight);
+    this.ring.record('sight', { visible, ...sight });
+    this.setVisible(visible);
+  }
+
   setVisible(visible: boolean): void {
     if (this.visible === visible) return;
     this.visible = visible;
@@ -749,7 +792,12 @@ export class AgentBrowserSurfaceController {
   // --- phase ---
 
   /** Enter `next`, with the viewer socket following it. */
-  private setPhase(next: Phase): void {
+  private setPhase(next: Phase, why?: string): void {
+    this.ring.record('phase', {
+      from: this.phase.k, to: next.k,
+      ...('stream' in next ? { stream: next.stream } : {}),
+      ...(why || (next.k === 'ended' && next.error) ? { why: why ?? (next as { error?: string }).error } : {}),
+    });
     this.phase = next;
     // A ratio this Surface fixed describes only the browser it was set on.
     if ((next.k === 'live' || next.k === 'parked') && next.stream !== this.boundStream) {
@@ -945,7 +993,7 @@ export class AgentBrowserSurfaceController {
         // found, so a navigation pending to it still has to run.
         if (res.relaunched) this.openedByHost(url);
         if (res.ok && res.stream) this.goLive(res.stream);
-        else this.setPhase({ k: 'ended', error: relaunch ? res.error : undefined });
+        else this.setPhase({ k: 'ended', error: relaunch ? res.error : undefined }, `attach answered ${res.error ?? 'no stream'}`);
       });
   }
 
@@ -985,6 +1033,7 @@ export class AgentBrowserSurfaceController {
   private setParkRequested(parkRequested: boolean): void {
     if (this.parkRequested === parkRequested) return;
     this.parkRequested = parkRequested;
+    this.ring.record(parkRequested ? 'park-requested' : 'unpark-requested');
     const phase = this.phase;
     // A parked pane holds no viewer socket; the daemon/session stays alive and
     // re-broadcasts on reconnect. An unpark views the stream it parked at at
@@ -1026,6 +1075,7 @@ export class AgentBrowserSurfaceController {
         ?? Promise.resolve({ ok: false, error: `${this.label} commands unavailable` }),
       canSelectTabs: () => !this.headed,
       log: abDebugLog,
+      debug: (event, data) => this.ring.record(event, data),
     });
     this.connection = connection;
     this.connectionUnsub = connection.subscribe((event) => {
@@ -1045,7 +1095,7 @@ export class AgentBrowserSurfaceController {
       } else if (event.type === 'connection-close') {
         // An unpark's daemon may have moved while nothing viewed it.
         if (phase.resumed) this.attach(false);
-        else if (event.failures >= 3) this.streamLost();
+        else if (event.failures >= 3) this.streamLost(`viewer socket closed ${event.failures} times`);
       } else if (event.type === 'status') {
         this.setStatus(event.status);
         // A browser not yet reported connected is still coming up.
@@ -1064,7 +1114,7 @@ export class AgentBrowserSurfaceController {
         if (this.headed && typeof width === 'number' && typeof height === 'number' && typeof dpr === 'number') {
           this.windowViewport = { width, height, dpr };
         }
-        if (lost) this.streamLost();
+        if (lost) this.streamLost('stream reported its browser gone');
       } else if (event.type === 'url') {
         // A navigation committed. `tabs` catches up only when the driving
         // command completes — for a slow page, the whole load — so record it now:
@@ -1076,6 +1126,8 @@ export class AgentBrowserSurfaceController {
       } else if (event.type === 'tabs') {
         this.setTabs(event.tabs);
       } else if (event.type === 'frame') {
+        this.frames.received += 1;
+        this.frames.lastReceivedAt = Date.now();
         if (event.size) this.setDeviceSize(event.size.width, event.size.height);
         this.paintFrame(event);
       }
@@ -1119,6 +1171,7 @@ export class AgentBrowserSurfaceController {
       else this.paintBitmap(sink.canvas, bitmap, frame);
     }, () => {
       // A malformed frame is only a missed paint; the next one replaces it.
+      this.frames.decodeFailures += 1;
     }).finally(() => {
       this.decoding = false;
       const next = this.pendingFrame;
@@ -1159,6 +1212,7 @@ export class AgentBrowserSurfaceController {
     canvas.getContext('2d')?.drawImage(bitmap, 0, 0, part.width, part.height,
       0, 0, part.width * canvas.width / whole.width, part.height * canvas.height / whole.height);
     bitmap.close();
+    this.frames.painted += 1;
     this.setHasFrame(true);
   }
 
@@ -1553,10 +1607,10 @@ export class AgentBrowserSurfaceController {
    * the controller before it closes the session, so no stream is left to see
    * that close.
    */
-  private streamLost(): void {
+  private streamLost(why: string): void {
     const phase = this.phase;
     if (phase.k !== 'live') return;
-    if (!this.headed) this.setPhase({ k: 'ended' });
+    if (!this.headed) this.setPhase({ k: 'ended' }, why);
     else if (phase.seen) this.popIn();
   }
 
@@ -1591,6 +1645,7 @@ export class AgentBrowserSurfaceController {
     const browser = this.driver();
     if (!browser) {
       abDebugLog(`[ab-panel] ${label} dropped in ${this.phase.k}`);
+      this.ring.record('drive-dropped', { label, phase: this.phase.k });
       return;
     }
     void act(browser).then((result) => {
@@ -1685,6 +1740,43 @@ export class AgentBrowserSurfaceController {
       }
     }
     this.sendKey(e, 'keyDown');
+  }
+
+  // --- diagnostics ---
+
+  /**
+   * Everything needed to tell why this Surface's pane shows what it shows —
+   * the controller, its connection and debug ring, and the host's own record
+   * of the browser — for `dor-diagnostics`. Read-only: it starts and changes
+   * nothing.
+   */
+  async diagnostics(): Promise<{ webview: Record<string, unknown>; host: Record<string, unknown> | null }> {
+    const now = Date.now();
+    const phase = this.phase;
+    const webview = {
+      provider: this.provider,
+      session: this.session ?? null,
+      headed: this.headed,
+      phase: phase.k,
+      stream: 'stream' in phase ? phase.stream : null,
+      error: phase.k === 'ended' ? phase.error ?? null : null,
+      visible: this.visible,
+      viewAttached: this.sink !== null,
+      parkRequested: this.parkRequested,
+      sight: this.sight,
+      connection: this.connection?.diagnostics() ?? null,
+      status: this.status,
+      tabs: this.tabs.map(({ tabId, url, active }) => ({ tabId, url, active })),
+      hasFrame: this.hasFrame,
+      frames: { ...this.frames, lastReceivedAt: undefined, lastReceivedMsAgo: msSince(this.frames.lastReceivedAt, now) },
+      viewport: { setting: this.browserViewport, syncEngaged: this.syncEngaged, hostSynced: this.hostSynced, device: this.device },
+      pendingIntent: this.pendingIntent,
+      events: this.ring.read(now),
+    };
+    const handle = this.session ? this.handle() : null;
+    if (!handle) return { webview, host: null };
+    const answer = await handle.diagnostics();
+    return { webview, host: answer.ok && answer.diagnostics ? answer.diagnostics : { error: answer.error ?? 'no answer' } };
   }
 
   // --- teardown ---

@@ -38,12 +38,22 @@ vi.mock('../src/iframe-proxy-host', () => ({
 
 /** What the router hands VS Code's external opener. */
 const opened = vi.hoisted(() => [] as string[]);
+/** VS Code's clipboard: what it was handed, and whether the next write fails. */
+const vsClipboard = vi.hoisted(() => ({ written: [] as string[], fail: false }));
 vi.mock('vscode', async (importOriginal) => {
   const stub = await importOriginal<typeof import('./vscode-stub')>();
   return {
     ...stub,
     Uri: { ...stub.Uri, parse: (value: string) => ({ value }) },
-    env: { openExternal: async (uri: { value: string }) => { opened.push(uri.value); return true; } },
+    env: {
+      openExternal: async (uri: { value: string }) => { opened.push(uri.value); return true; },
+      clipboard: {
+        writeText: async (text: string) => {
+          if (vsClipboard.fail) throw new Error('clipboard unavailable');
+          vsClipboard.written.push(text);
+        },
+      },
+    },
   };
 });
 
@@ -90,6 +100,7 @@ vi.mock('../src/pty-manager', async (importOriginal) => ({
 }));
 
 vi.mock('../src/burrow', () => ({
+  burrowNetworkAllowed: async () => true,
   configureBurrow: (deps: BurrowDeps) => {
     wiring.burrow = deps;
   },
@@ -164,6 +175,15 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+it('answers a voice command under its request id, null where the window has no managed voice', async () => {
+  const webview = fakeWebview();
+  const disposable = router.attachRouter(webview.channel, {});
+  try {
+    webview.send({ type: 'voice:command', payload: { op: 'status' }, requestId: 'req-7' });
+    await vi.waitFor(() => expect(webview.posted).toContainEqual({ type: 'voice:result', requestId: 'req-7', result: null }));
+  } finally { disposable.dispose(); }
+});
+
 it('reports rejected helper creation as an exited terminal', () => {
   const webview = fakeWebview();
   const disposable = router.attachRouter(webview.channel, {});
@@ -234,6 +254,23 @@ it('revalidates an external open in the extension host, refusing the schemes the
     }
     expect(opened).toEqual(['vscode://file/x.ts', 'https://example.com/']);
   } finally {
+    attached.dispose();
+  }
+});
+
+it('writes the clipboard through VS Code, answering by request id with any error', async () => {
+  const webview = fakeWebview();
+  const attached = router.attachRouter(webview.channel, {});
+  vsClipboard.written.length = 0;
+  try {
+    webview.send({ type: 'clipboard:writeText', text: 'copied', requestId: 'req-3' });
+    await vi.waitFor(() => expect(webview.posted).toContainEqual({ type: 'clipboard:written', requestId: 'req-3' }));
+    expect(vsClipboard.written).toEqual(['copied']);
+    vsClipboard.fail = true;
+    webview.send({ type: 'clipboard:writeText', text: 'lost', requestId: 'req-4' });
+    await vi.waitFor(() => expect(webview.posted).toContainEqual({ type: 'clipboard:written', error: 'clipboard unavailable', requestId: 'req-4' }));
+  } finally {
+    vsClipboard.fail = false;
     attached.dispose();
   }
 });
