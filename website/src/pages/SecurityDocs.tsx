@@ -22,6 +22,7 @@ import CanaryRecall from "../components/CanaryRecall";
 import DocsLayout from "../components/DocsLayout";
 import { LINK_CLASS, NOTE_CLASS, NOTE_MUTED_TEXT_CLASS } from "../components/docs-tokens";
 import MarkdownDocument, { type BlockNode } from "../components/MarkdownDocument";
+import { securityColumnWeights } from "../components/security-columns";
 
 export function meta({ location }: MetaArgs) {
   return siteMeta(location.pathname, {
@@ -40,6 +41,7 @@ export default function SecurityDocs() {
     <DocsLayout activePath="/security" title={security.title} toc={security.toc}>
       <MarkdownDocument
         blocks={security.pageBlocks as BlockNode[]}
+        columnWeights={securityColumnWeights}
         renderAfterSection={(heading) =>
           heading.id === CHECKED_ID ? (
             <>

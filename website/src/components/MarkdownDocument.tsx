@@ -8,7 +8,7 @@
  *
  * See docs/specs/website-docs.md -> Markdown rendering contract.
  */
-import { Fragment, type ReactNode } from "react";
+import { createContext, Fragment, useContext, type ReactNode } from "react";
 import {
   BODY_TEXT_CLASS,
   CODE_CLASS,
@@ -85,6 +85,20 @@ function CodeSpan({ value }: { value: string }) {
     </code>
   );
 }
+
+/** A cell's plain text: what a column-weight lookup keys on. */
+function textOf(nodes: InlineNode[]): string {
+  return nodes.map((node) => ("value" in node ? node.value : "children" in node ? textOf(node.children) : "")).join("");
+}
+
+/**
+ * Relative widths for a table's columns, from its header cells' text, or
+ * undefined to let the browser size them by content. A page supplies one when
+ * its own tables need columns weighted; nothing else about a table changes.
+ */
+export type ColumnWeights = (header: string[]) => number[] | undefined;
+
+const ColumnWeightsContext = createContext<ColumnWeights | undefined>(undefined);
 
 function Inline({ nodes }: { nodes: InlineNode[] }): ReactNode {
   return nodes.map((node, i) => {
@@ -185,6 +199,7 @@ export function AnchoredHeading({
 }
 
 function Block({ node }: { node: BlockNode }): ReactNode {
+  const columnWeights = useContext(ColumnWeightsContext);
   switch (node.type) {
     case "heading":
       return (
@@ -216,14 +231,24 @@ function Block({ node }: { node: BlockNode }): ReactNode {
         </Tag>
       );
     }
-    case "table":
+    case "table": {
+      const weights = columnWeights?.(node.header.map(textOf));
+      const total = weights?.reduce((sum, weight) => sum + weight, 0) ?? 0;
       return (
         <div className={`mb-6 ${TABLE_WRAP_CLASS}`}>
-          <table className={TABLE_CLASS}>
+          {/* Weighted columns hold their share: fixed layout, a floor below which the table scrolls in its box, and headers that wrap. */}
+          <table className={weights ? `${TABLE_CLASS} table-fixed min-w-[40rem]` : TABLE_CLASS}>
+            {weights ? (
+              <colgroup>
+                {weights.map((weight, i) => (
+                  <col key={i} style={{ width: `${((weight / total) * 100).toFixed(2)}%` }} />
+                ))}
+              </colgroup>
+            ) : null}
             <thead>
               <tr className={TABLE_HEAD_ROW_CLASS}>
                 {node.header.map((cell, i) => (
-                  <th key={i} className={TH_CLASS}>
+                  <th key={i} className={weights ? TH_CLASS.replace("whitespace-nowrap", "whitespace-normal") : TH_CLASS}>
                     <Inline nodes={cell} />
                   </th>
                 ))}
@@ -243,6 +268,7 @@ function Block({ node }: { node: BlockNode }): ReactNode {
           </table>
         </div>
       );
+    }
     case "blockquote":
       return (
         <blockquote className={`mb-4 border-l-2 border-[var(--docs-accent)]/50 pl-4 ${MUTED_TEXT_CLASS}`}>
@@ -275,10 +301,12 @@ export default function MarkdownDocument({
   blocks,
   renderAfterHeading,
   renderAfterSection,
+  columnWeights,
 }: {
   blocks: BlockNode[];
   renderAfterHeading?: (heading: Heading) => ReactNode;
   renderAfterSection?: (heading: Heading) => ReactNode;
+  columnWeights?: ColumnWeights;
 }) {
   // The headings whose sections close just before each block index; an inner
   // section closes before the one around it.
@@ -299,7 +327,7 @@ export default function MarkdownDocument({
     <Fragment key={`after-${heading.id}`}>{renderAfterSection!(heading)}</Fragment>
   ));
   return (
-    <>
+    <ColumnWeightsContext.Provider value={columnWeights}>
       {blocks.map((node, i) => (
         <Fragment key={i}>
           {close(i)}
@@ -308,6 +336,6 @@ export default function MarkdownDocument({
         </Fragment>
       ))}
       {close(blocks.length)}
-    </>
+    </ColumnWeightsContext.Provider>
   );
 }

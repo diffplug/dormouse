@@ -82,3 +82,28 @@ describe("renderAfterSection", () => {
     expect(order).toEqual([...order].sort((x, y) => x - y));
   });
 });
+
+describe("column weights", () => {
+  const table: BlockNode = {
+    type: "table",
+    align: [null, null],
+    header: [[{ type: "text", value: "Guarantee" }], [{ type: "text", value: "Pinned by" }]],
+    rows: [[[{ type: "text", value: "g" }], [{ type: "text", value: "p" }]]],
+  };
+
+  it("gives each column its share of the table, by its header's text", () => {
+    const markup = renderToStaticMarkup(
+      <MarkdownDocument blocks={[table]} columnWeights={(header) => (header[0] === "Guarantee" ? [3, 1] : undefined)} />,
+    );
+    expect(markup).toContain('<colgroup><col style="width:75.00%"/><col style="width:25.00%"/></colgroup>');
+    expect(markup).toMatch(/<table class="[^"]*\btable-fixed\b/);
+  });
+
+  it("leaves a table no weights name to size by its content", () => {
+    for (const columnWeights of [undefined, () => undefined]) {
+      const markup = renderToStaticMarkup(<MarkdownDocument blocks={[table]} columnWeights={columnWeights} />);
+      expect(markup).not.toContain("<colgroup");
+      expect(markup).not.toContain("table-fixed");
+    }
+  });
+});

@@ -219,6 +219,19 @@ describe("feature tags", () => {
   }
 });
 
+// The weights in website/src/components/security-columns.ts key on header
+// text, so a renamed column would silently fall back to content sizing.
+describe("column weights", () => {
+  for (const page of PAGES) {
+    it(`${page.route} weights the columns of every guarantee table${page.route === "/security" ? " and the feature table" : ""}`, () => {
+      const tables = [...renderMain(page.element).matchAll(/<table\b.*?<\/table>/gs)].map(([table]) => table);
+      const weighted = tables.filter((table) => table.includes(">Pinned by<") || (page.route === "/security" && table.includes(">What you trust beyond this computer<")));
+      expect(weighted.length).toBeGreaterThan(0);
+      for (const table of weighted) expect(table).toContain("<colgroup>");
+    });
+  }
+});
+
 // Every repository path a guarantee is pinned by opens that file on GitHub.
 describe("pinned by", () => {
   for (const page of PAGES) {

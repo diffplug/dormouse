@@ -19,6 +19,7 @@ import DocsLayout from "../components/DocsLayout";
 import { HostingRequirementNotice } from "../components/HostingRequirementNotice";
 import { BODY_TEXT_CLASS, CODE_CLASS, LINK_CLASS, NOTE_CLASS, NOTE_MUTED_TEXT_CLASS } from "../components/docs-tokens";
 import MarkdownDocument, { AnchoredHeading, type BlockNode } from "../components/MarkdownDocument";
+import { securityColumnWeights } from "../components/security-columns";
 import { type TocEntry } from "../lib/docs-pages";
 
 export function meta({ location }: MetaArgs) {
@@ -69,7 +70,7 @@ export default function SelfHostDocs() {
         </a>
         .
       </p>
-      <MarkdownDocument blocks={[security.selfHostGuarantees as BlockNode]} />
+      <MarkdownDocument blocks={[security.selfHostGuarantees as BlockNode]} columnWeights={securityColumnWeights} />
       {MODEL_SECTIONS.map(({ id, text, block }) => (
         <div key={id}>
           <AnchoredHeading id={id} depth={3}>

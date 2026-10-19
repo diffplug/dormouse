@@ -14,6 +14,7 @@ import {
   TH_CLASS,
 } from "../components/docs-tokens";
 import MarkdownDocument, { AnchoredHeading, type BlockNode } from "../components/MarkdownDocument";
+import { securityColumnWeights } from "../components/security-columns";
 import security from "../data/docs.security.json";
 import { type MetaArgs } from "react-router";
 import { type TocEntry } from "../lib/docs-pages";
@@ -327,7 +328,7 @@ export default function SupplyChain() {
         </a>
         .
       </p>
-      <MarkdownDocument blocks={[CONTRACT.guarantees as BlockNode]} />
+      <MarkdownDocument blocks={[CONTRACT.guarantees as BlockNode]} columnWeights={securityColumnWeights} />
       {CONTRACT_SECTIONS.map(({ id, text, block }) => (
         <div key={id}>
           <AnchoredHeading id={id} depth={3}>
