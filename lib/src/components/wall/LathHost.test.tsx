@@ -47,6 +47,17 @@ function focusFrameIn(id: string): void {
 
 const shielded = () => document.documentElement.hasAttribute('data-frame-shield');
 
+/** Press Escape in a terminal-like input in `id` that, like xterm, stops the keydown
+ *  there. Returns whether the input received it. */
+function pressEscapeInTerminal(id: string): boolean {
+  const input = document.createElement('textarea');
+  document.querySelector(`[data-lath-leaf="${id}"]`)!.appendChild(input);
+  let received = false;
+  input.addEventListener('keydown', (e) => { received = true; e.stopPropagation(); });
+  act(() => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+  return received;
+}
+
 /** a | b | c — an equal-weight row split, built from the shared core test builders. */
 const rowOf = (...ids: string[]): LathTree =>
   treeOf(split('row', ...ids.map((id): [LathNode, number] => [leaf(id), 1 / ids.length])));
@@ -416,7 +427,7 @@ describe('LathHost — sash drag', () => {
     expect(onCommitResize).not.toHaveBeenCalled();
   });
 
-  it('cancels the drag on Escape without committing', () => {
+  it('cancels the drag on Escape from a terminal without committing or reaching the terminal', () => {
     const store = seeded(rowOf('a', 'b', 'c'), [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })], ['c', leafMeta({ title: 'C' })]]);
     const { onCommitResize } = mount(store);
     const widthBefore = leafDiv('a')!.style.width;
@@ -424,7 +435,7 @@ describe('LathHost — sash drag', () => {
 
     act(() => sash.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientX: 100, clientY: 10 })));
     act(() => window.dispatchEvent(new MouseEvent('pointermove', { clientX: 130, clientY: 10 })));
-    act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));
+    expect(pressEscapeInTerminal('a')).toBe(false);
 
     expect(onCommitResize).not.toHaveBeenCalled();
     expect(leafDiv('a')!.style.width).toBe(widthBefore); // reverted
@@ -1114,14 +1125,14 @@ describe('LathHost — pane / Door drag', () => {
     expect(onProposeMove).not.toHaveBeenCalled();
   });
 
-  it('cancels on Escape with no proposal', async () => {
+  it('cancels on Escape from a terminal with no proposal, keeping it from the terminal', async () => {
     const store = seeded(rowOf('a', 'b'), [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })]]);
     const { onProposeMove, onProposeMinimize } = mountDrag(store);
 
     act(() => down(header('a'), 100, 15));
     act(() => moveTo(601, 300));
     await flushFrame();
-    act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));
+    expect(pressEscapeInTerminal('b')).toBe(false);
 
     expect(onProposeMove).not.toHaveBeenCalled();
     expect(onProposeMinimize).not.toHaveBeenCalled();

@@ -467,13 +467,17 @@ export function LathHost({
       const current = store.getSnapshot();
       if (d && (current.tree !== d.tree || current.zoomedId !== null)) end(false);
     });
+    // Capture phase: a focused terminal stops the keydown before it bubbles to the window.
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') end(false); // cancel: revert the preview, commit nothing
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopPropagation();
+      end(false); // revert the preview, commit nothing
     };
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
     window.addEventListener('pointercancel', onCancel);
-    window.addEventListener('keydown', onKey);
+    window.addEventListener('keydown', onKey, true);
     const unsubscribeFocus = subscribeWindowFocus((focused) => {
       if (!focused) end(false);
     });
@@ -484,7 +488,7 @@ export function LathHost({
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('pointercancel', onCancel);
       unsubscribe();
-      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('keydown', onKey, true);
       unsubscribeFocus();
       releaseShield();
     };

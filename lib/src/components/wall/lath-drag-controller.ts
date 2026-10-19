@@ -136,7 +136,7 @@ export function createDragController(deps: DragControllerDeps): DragController {
     window.removeEventListener('pointermove', onMove);
     window.removeEventListener('pointerup', onUp);
     window.removeEventListener('pointercancel', onCancel);
-    window.removeEventListener('keydown', onKey);
+    window.removeEventListener('keydown', onKey, true);
     unsubscribeFocus?.();
     unsubscribeFocus = null;
     releaseShield?.();
@@ -155,7 +155,7 @@ export function createDragController(deps: DragControllerDeps): DragController {
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
     window.addEventListener('pointercancel', onCancel);
-    window.addEventListener('keydown', onKey);
+    window.addEventListener('keydown', onKey, true);
     unsubscribeFocus = subscribeWindowFocus((focused) => {
       if (!focused) finish(false);
     });
@@ -290,8 +290,12 @@ export function createDragController(deps: DragControllerDeps): DragController {
     finish(true);
   }
 
+  // Capture phase: a focused terminal stops the keydown before it bubbles to the window.
   function onKey(e: KeyboardEvent): void {
-    if (e.key === 'Escape') finish(false);
+    if (e.key !== 'Escape') return;
+    e.preventDefault();
+    e.stopPropagation();
+    finish(false);
   }
 
 
