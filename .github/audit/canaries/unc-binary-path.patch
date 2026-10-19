@@ -1,5 +1,5 @@
 Domain: local
-Rule: `docs/specs/security-local.md` -> "Spawned programs" #4 — a UNC or device path, a relative path
+Rule: S168 — a UNC or device path, a relative path
 Expect: dor-lib-common/src/browser-providers.ts
 Source: reverses #1040 (a UNC binaryPath passed the executable gate)
 

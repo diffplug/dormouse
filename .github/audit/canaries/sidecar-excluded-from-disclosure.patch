@@ -1,5 +1,5 @@
 Domain: supply-chain
-Rule: `docs/specs/security-supply-chain.md` -> "Disclosure" #4 — or excludes such a workspace
+Rule: S256 — or excludes such a workspace
 Expect: website/scripts/generate-deps.js
 Source: synthetic; the generator classifies the sidecar workspace, which the Tauri bundle ships node_modules and all, as installing nothing
 

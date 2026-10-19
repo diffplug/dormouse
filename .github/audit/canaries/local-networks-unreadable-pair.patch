@@ -1,5 +1,5 @@
 Domain: remote
-Rule: `docs/specs/security-remote.md` -> "One-time connection" #9 — or on one the stack could not read
+Rule: S250 — or on one the stack could not read
 Expect: lib/src/remote/direct/direct-peer.ts
 Source: reverses #1031 (a selected-pair read that throws counts as no pair once open)
 
