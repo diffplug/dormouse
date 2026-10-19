@@ -7,7 +7,12 @@
  */
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { isManagedVoiceId, isManagedVoiceToken } from 'remote-lib-common';
+import {
+  isBurrowVoicePollResponse,
+  isManagedVoiceId,
+  isManagedVoiceToken,
+  type BurrowVoicePollResponse,
+} from 'remote-lib-common';
 import { beginHostedApproval, hostedApprovalDeadline, pollHostedApproval, slowDownHostedApproval } from '../remote/burrow/enrollment';
 import { enrollVerificationUrl } from './remote/hosted-enrollment-url';
 import { writeJsonAtomic } from './atomic-json-file';
@@ -47,14 +52,10 @@ function normalizeStored(value: unknown): StoredConfig {
   };
 }
 
-type VoiceApproval = { status: 'pending' | 'expired' | 'redeemed' } | { status: 'enabled'; voiceToken: string };
-
-function parseVoiceApproval(body: unknown): VoiceApproval | null {
-  if (!body || typeof body !== 'object') return null;
-  const answer = body as Record<string, unknown>;
-  if (answer.status === 'pending' || answer.status === 'expired' || answer.status === 'redeemed') return { status: answer.status };
-  if (answer.status === 'enabled' && isManagedVoiceToken(answer.voiceToken)) return { status: 'enabled', voiceToken: answer.voiceToken };
-  return null;
+/** A voice poll's answer, rebuilt so nothing but its guarded fields goes further. */
+function parseVoiceApproval(body: unknown): BurrowVoicePollResponse | null {
+  if (!isBurrowVoicePollResponse(body)) return null;
+  return body.status === 'enabled' ? { status: 'enabled', voiceToken: body.voiceToken } : { status: body.status };
 }
 
 /**

@@ -13,6 +13,7 @@ import {
 } from '../security/bytes.js';
 import { NOISE_MAX_MESSAGE_LENGTH } from '../security/noise.js';
 import { isEnrollUserCode } from './enroll-code.js';
+import { isManagedVoiceToken } from './managed-voice.js';
 import type { PasskeyAssertion } from '../security/passkey.js';
 import type { PresenceBinding } from '../security/presence.js';
 import type { SealedPushV1 } from '../security/push-seal.js';
@@ -445,7 +446,6 @@ export interface BurrowEnrollPollRequest {
  * redemption is single-use. `redeemed` answers every later poll of that code
  * until the approval expires: an earlier poll enrolled `burrowId`, whose answer
  * never reached this one, and which the account must remove.
- *
  */
 export type BurrowEnrollPollResponse =
   | { status: 'pending' }
@@ -469,6 +469,34 @@ export function isBurrowEnrollPollResponse(value: unknown): value is BurrowEnrol
       return isE2eId(answer.burrowId);
     case 'enrolled':
       return !!answer.enrollment && typeof answer.enrollment === 'object';
+    default:
+      return false;
+  }
+}
+
+/**
+ * A voice-purpose poll's answer (`docs/specs/hosted.md` -> "Burrow
+ * enrollment"). `enabled` answers once, carrying the managed-voice token the
+ * redemption minted; `redeemed` answers every later poll of that code until
+ * the approval expires, naming nothing, since a voice approval mints no Burrow.
+ */
+export type BurrowVoicePollResponse =
+  | { status: 'pending' }
+  | { status: 'expired' }
+  | { status: 'redeemed' }
+  | { status: 'enabled'; voiceToken: string };
+
+/** A voice poll answer of a known status, `enabled` carrying a token of the voice token's shape. */
+export function isBurrowVoicePollResponse(value: unknown): value is BurrowVoicePollResponse {
+  if (!value || typeof value !== 'object') return false;
+  const answer = value as Record<string, unknown>;
+  switch (answer.status) {
+    case 'pending':
+    case 'expired':
+    case 'redeemed':
+      return true;
+    case 'enabled':
+      return isManagedVoiceToken(answer.voiceToken);
     default:
       return false;
   }

@@ -43,6 +43,7 @@ import type {
   BurrowEnrollBeginResponse,
   BurrowEnrollOriginMismatch,
   BurrowEnrollPollResponse,
+  BurrowVoicePollResponse,
   BurrowsResponse,
   PasskeyAssertion,
   PresenceBinding,
@@ -512,6 +513,7 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
     if (purpose !== "remote" && purpose !== "voice") return c.json({ error: "invalid purpose" }, 400);
     const deviceCode = body?.deviceCode;
     const answer = (res: BurrowEnrollPollResponse) => c.json(res);
+    const voiceAnswer = (res: BurrowVoicePollResponse) => c.json(res);
     if (!isRelayBearer(deviceCode)) return answer({ status: "expired" });
     const bytes = fromBase64Url(deviceCode);
     // Expired by its own clock, without the database.
@@ -532,7 +534,7 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
       // Burrow it minted is the account's to remove, and nothing redeems twice.
       if (approval.redeemed) {
         return purpose === "voice"
-          ? c.json({ status: "redeemed" })
+          ? voiceAnswer({ status: "redeemed" })
           : answer({ status: "redeemed", burrowId: approval.redeemedBurrowId! });
       }
       const owner = ownerOf(approval);
@@ -551,7 +553,7 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
             SELECT "userId", $3 FROM spent`,
           [userCode, owner.userId, digest(voiceToken)],
         );
-        return c.json(rowCount ? { status: "enabled", voiceToken } : { status: "redeemed" });
+        return voiceAnswer(rowCount ? { status: "enabled", voiceToken } : { status: "redeemed" });
       }
       const burrowId = randomBase64Url(E2E_ID_BYTE_LENGTH);
       const burrowToken = randomBase64Url(RELAY_BEARER_BYTE_LENGTH);
