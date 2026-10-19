@@ -656,66 +656,67 @@ export function audienceBlocks(page, audiences, names) {
   return page.blocks.map((block) => swap.get(block) ?? block);
 }
 
-/** The section whose table names the setups, and the guarantees' column that tags them. */
-const SECURITY_SETUPS_TITLE = 'Setups';
-const SECURITY_SETUP_COLUMN = 'Applies to';
+/** The section whose table names the features, and the guarantees' column that tags them. */
+const SECURITY_FEATURES_TITLE = 'Features';
+const SECURITY_FEATURE_COLUMN = 'Feature';
 
 /**
- * The setups each guarantee row and list bullet applies to, checked against
- * the setup table's first column — the one copy of the vocabulary — and
+ * The features each guarantee row and list bullet concerns, checked against
+ * the feature table's first column — the one copy of the vocabulary — and
  * orthogonal to the audience split: an audience is the spec a row's links name,
- * a setup is which reader must know the row. A row tags itself in its
- * `Applies to` cell, a bullet with the emphasis it opens with, each a
- * comma-separated list. An entry with no tag, an unknown or repeated one, a
- * setup no entry uses, or a missing table fails the build, so a new entry
- * cannot publish without saying whom it concerns.
+ * a feature is which reader must know the row. A row tags itself in its
+ * `Feature` cell, a bullet with the emphasis it opens with, each a
+ * comma-separated list; an entry with no tag holds for every install. An
+ * unknown or repeated tag, a feature no entry uses, or a missing table fails the
+ * build, so a feature's risks cannot drift from the feature table.
  */
-export function securitySetups(page) {
+export function securityFeatures(page) {
   const headings = page.blocks.filter((b) => b.type === 'heading');
-  const heading = findExactlyOneHeading(headings, (h) => h.text === SECURITY_SETUPS_TITLE, SECURITY_SETUPS_TITLE);
+  const heading = findExactlyOneHeading(headings, (h) => h.text === SECURITY_FEATURES_TITLE, SECURITY_FEATURES_TITLE);
   const table = sectionBlocks(page.blocks, heading).find((b) => b.type === 'table');
-  if (!table) throw new Error(`/security: "${SECURITY_SETUPS_TITLE}" has no table naming the setups`);
+  if (!table) throw new Error(`/security: "${SECURITY_FEATURES_TITLE}" has no table naming the features`);
   const names = table.rows.map((row) => inlineToText(row[0]).trim());
-  assertDistinctSetups(names, `/security: "${SECURITY_SETUPS_TITLE}"`);
+  assertDistinctFeatures(names, `/security: "${SECURITY_FEATURES_TITLE}"`);
   const used = new Set();
   const out = { names };
   for (const { key, title, block, entries } of securitySections(page)) {
-    const column = entries === 'rows' ? block.header.findIndex((cell) => inlineToText(cell).trim() === SECURITY_SETUP_COLUMN) : null;
-    if (column === -1) throw new Error(`/security: "${title}" has no "${SECURITY_SETUP_COLUMN}" column`);
+    const column = entries === 'rows' ? featureColumn(block, title) : null;
     out[key] = block[entries].map((entry, i) => {
       const label = `/security: "${title}" entry ${i + 1}`;
-      const tags = setupTagsOf(entry, column, label);
-      assertDistinctSetups(tags, label);
+      const tags = featureTagsOf(entry, column, label);
+      assertDistinctFeatures(tags, label);
       const unknown = tags.filter((tag) => !names.includes(tag));
       if (unknown.length > 0) {
-        throw new Error(`${label} names ${unknown.join(', ')}, not a setup in "${SECURITY_SETUPS_TITLE}" (${names.join(', ')})`);
+        throw new Error(`${label} names ${unknown.join(', ')}, not a feature in "${SECURITY_FEATURES_TITLE}" (${names.join(', ')})`);
       }
       tags.forEach((tag) => used.add(tag));
       return tags;
     });
   }
   const unused = names.filter((name) => !used.has(name));
-  if (unused.length > 0) throw new Error(`/security: no entry applies to ${unused.join(', ')}`);
+  if (unused.length > 0) throw new Error(`/security: no entry concerns ${unused.join(', ')}`);
   return out;
 }
 
-/** A row's `Applies to` cell, or the emphasis a bullet opens with, split on commas. */
-function setupTagsOf(entry, column, label) {
-  let cell;
-  if (column === null) {
-    const first = entry.children[0]?.children?.[0];
-    if (first?.type !== 'em') throw new Error(`${label} opens with no *setup* tag`);
-    cell = inlineToText(first.children).replace(/\.$/, '');
-  } else {
-    cell = inlineToText(entry[column] ?? []);
-  }
-  if (cell.trim() === '') throw new Error(`${label} carries no setup tag`);
+function featureColumn(table, title) {
+  const column = table.header.findIndex((cell) => inlineToText(cell).trim() === SECURITY_FEATURE_COLUMN);
+  if (column === -1) throw new Error(`/security: "${title}" has no "${SECURITY_FEATURE_COLUMN}" column`);
+  return column;
+}
+
+/** The emphasis a bullet opens with, or null: its feature tag. */
+const featureLeadOf = (item) => (item.children[0]?.children?.[0]?.type === 'em' ? item.children[0].children[0] : null);
+
+/** A row's `Feature` cell, or the emphasis a bullet opens with, split on commas; none is every install. */
+function featureTagsOf(entry, column, label) {
+  const cell = column === null ? inlineToText(featureLeadOf(entry)?.children ?? []).replace(/\.$/, '') : inlineToText(entry[column] ?? []);
+  if (cell.trim() === '') return [];
   const tags = cell.split(',').map((tag) => tag.trim());
-  if (tags.some((tag) => tag === '')) throw new Error(`${label} carries an empty setup tag ("${cell}")`);
+  if (tags.some((tag) => tag === '')) throw new Error(`${label} carries an empty feature tag ("${cell}")`);
   return tags;
 }
 
-function assertDistinctSetups(names, label) {
+function assertDistinctFeatures(names, label) {
   const repeated = [...new Set(names.filter((name, i) => names.indexOf(name) !== i))];
   if (repeated.length > 0) throw new Error(`${label} repeats ${repeated.join(', ')}`);
 }
@@ -783,21 +784,21 @@ export function linkPinnedBy(page) {
 }
 
 /**
- * An audience's three blocks with no setup tags: the guarantees without their
- * `Applies to` column, each bullet without the emphasis it opens with. For a
- * page that shows no setup table to read the tags against.
+ * An audience's three blocks with no feature tags: the guarantees without their
+ * `Feature` column, each tagged bullet without the emphasis it opens with. For
+ * a page that shows no feature table to read the tags against.
  */
-export function withoutSetups(sections) {
+export function withoutFeatures(sections) {
   const { guarantees, notDefended, knownGaps } = sections;
-  const column = guarantees.header.findIndex((cell) => inlineToText(cell).trim() === SECURITY_SETUP_COLUMN);
-  if (column === -1) throw new Error(`/security: "Guarantees" has no "${SECURITY_SETUP_COLUMN}" column`);
+  const column = featureColumn(guarantees, 'Guarantees');
   const drop = (cells) => cells.filter((_, i) => i !== column);
   const untag = (item) => {
+    if (!featureLeadOf(item)) return item;
     const [first, ...rest] = item.children;
-    const [tag, space, ...inline] = first.children;
-    if (tag?.type !== 'em' || space?.type !== 'text') throw new Error('/security: a bullet opens with no *setup* tag');
-    const lead = space.value.trimStart();
-    return { ...item, children: [{ ...first, children: lead ? [{ ...space, value: lead }, ...inline] : inline }, ...rest] };
+    const [, space, ...inline] = first.children;
+    const lead = space?.type === 'text' ? space.value.trimStart() : '';
+    const tail = space?.type === 'text' ? inline : [space, ...inline].filter(Boolean);
+    return { ...item, children: [{ ...first, children: lead ? [{ ...space, value: lead }, ...tail] : tail }, ...rest] };
   };
   return {
     ...sections,
@@ -816,9 +817,9 @@ export function withoutSetups(sections) {
  * which is the point of publishing it. `pageBlocks` is the same document with
  * the three split blocks narrowed to {@link SECURITY_PAGE_AUDIENCES}; `blocks`
  * keeps every entry. `supplyChain` is `/supply-chain`'s audience without its
- * setup tags: that page splits its inventory by product and has no setup table
- * to read them against. `setups` is the setup table's vocabulary, every entry's
- * tags checked against it ({@link securitySetups}).
+ * feature tags: that page splits its inventory by product and has no feature
+ * table to read them against. `features` is the feature table's vocabulary,
+ * every entry's tags checked against it ({@link securityFeatures}).
  */
 const buildSecurity = async () => {
   const page = await buildDocument({
@@ -833,10 +834,10 @@ const buildSecurity = async () => {
   securityCoverage(page, index);
   return {
     ...page,
-    setups: securitySetups(page).names,
+    features: securityFeatures(page).names,
     audiences,
     pageBlocks: audienceBlocks(page, audiences, SECURITY_PAGE_AUDIENCES),
-    supplyChain: withoutSetups(audiences['supply-chain']),
+    supplyChain: withoutFeatures(audiences['supply-chain']),
     auditIndex: index,
   };
 };

@@ -15,8 +15,8 @@ import {
   resolveRepoLinks,
   securityAudiences,
   securityCoverage,
-  securitySetups,
-  withoutSetups,
+  securityFeatures,
+  withoutFeatures,
 } from './generate-docs.js';
 import { createSlugger, inlineToText, parseMarkdown, visit } from './docs-parser.js';
 import { CODING_AGENTS } from '../../lib/src/lib/coding-agents.ts';
@@ -209,7 +209,7 @@ describe('security spec', () => {
 
   it('keeps every section, in order', () => {
     expect(data.security.headings.map((h) => h.id)).toEqual([
-      'setups',
+      'features',
       'guarantees',
       'how-the-guarantees-are-checked',
       'what-is-not-defended',
@@ -294,66 +294,61 @@ describe('security spec', () => {
     expect(securityAudiences(page(doc('| g | [a](./security-ci.md) | t |'))).security.guarantees.rows).toHaveLength(1);
   });
 
-  it('reads the setups from the setup table and every entry\'s tags against them', () => {
+  it('reads the features from the feature table and every entry\'s tags against them', () => {
     // docs/specs/website-docs.md -> `/security` spec: a row tags itself in its
-    // `Applies to` cell, a bullet in the emphasis it opens with, and the setup
-    // table's first column is the only vocabulary either may use.
+    // `Feature` cell, a bullet in the emphasis it opens with, an untagged entry
+    // holds for every install, and the feature table's first column is the only
+    // vocabulary either may use.
     const page = (markdown) => {
       const blocks = parseMarkdown(markdown, { slug: createSlugger() }).blocks;
       resolveRepoLinks(blocks, 'docs/specs/security.md');
       return { blocks };
     };
     const doc = ({
-      setups = ['| **A** | a |', '| **B** | b |'],
-      header = '| G | Applies to | Rule | Pinned by |',
+      features = ['| **A** | a |', '| **B** | b |'],
+      header = '| G | Feature | Rule | Pinned by |',
       row = '| g | A | [a](./security-ci.md) | t |',
       bullet = '- *A, B.* **x** ([a](./security-ci.md))',
       table = true,
       section = true,
     } = {}) =>
       [
-        ...(section ? ['## Setups', '', ...(table ? ['| Setup | How |', '| --- | --- |', ...setups] : ['No table.']), ''] : []),
-        '## Guarantees', '', header, '| --- | --- | --- | --- |', row, '',
-        '## What is not defended', '', bullet, '',
+        ...(section ? ['## Features', '', ...(table ? ['| Feature | How |', '| --- | --- |', ...features] : ['No table.']), ''] : []),
+        '## Guarantees', '', header, '| --- | --- | --- | --- |', row, '| h |  | [a](./security-ci.md) | t |', '',
+        '## What is not defended', '', bullet, '- **w** ([a](./security-ci.md))', '',
         '## Known gaps', '', '- *B.* **y** ([b](./security-remote.md))',
       ].join('\n');
-    expect(securitySetups(page(doc()))).toEqual({
+    expect(securityFeatures(page(doc()))).toEqual({
       names: ['A', 'B'],
-      guarantees: [['A']],
-      notDefended: [['A', 'B']],
+      guarantees: [['A'], []],
+      notDefended: [['A', 'B'], []],
       knownGaps: [['B']],
     });
-    expect(() => securitySetups(page(doc({ section: false })))).toThrow(/no heading matches "Setups"/);
-    expect(() => securitySetups(page(doc({ table: false })))).toThrow(/"Setups" has no table/);
-    expect(() => securitySetups(page(doc({ setups: ['| **A** | a |', '| **B** | b |', '| **A** | c |'] })))).toThrow(
-      /"Setups" repeats A/,
+    expect(() => securityFeatures(page(doc({ section: false })))).toThrow(/no heading matches "Features"/);
+    expect(() => securityFeatures(page(doc({ table: false })))).toThrow(/"Features" has no table/);
+    expect(() => securityFeatures(page(doc({ features: ['| **A** | a |', '| **B** | b |', '| **A** | c |'] })))).toThrow(
+      /"Features" repeats A/,
     );
-    expect(() => securitySetups(page(doc({ header: '| G | Setups | Rule | Pinned by |' })))).toThrow(
-      /"Guarantees" has no "Applies to" column/,
+    expect(() => securityFeatures(page(doc({ header: '| G | Features | Rule | Pinned by |' })))).toThrow(
+      /"Guarantees" has no "Feature" column/,
     );
-    expect(() => securitySetups(page(doc({ row: '| g |  | [a](./security-ci.md) | t |' })))).toThrow(
-      /"Guarantees" entry 1 carries no setup tag/,
+    expect(() => securityFeatures(page(doc({ row: '| g | A, | [a](./security-ci.md) | t |' })))).toThrow(/empty feature tag/);
+    expect(() => securityFeatures(page(doc({ row: '| g | A, C | [a](./security-ci.md) | t |' })))).toThrow(
+      /"Guarantees" entry 1 names C, not a feature/,
     );
-    expect(() => securitySetups(page(doc({ row: '| g | A, | [a](./security-ci.md) | t |' })))).toThrow(/empty setup tag/);
-    expect(() => securitySetups(page(doc({ bullet: '- **x** ([a](./security-ci.md))' })))).toThrow(
-      /"What is not defended" entry 1 opens with no \*setup\* tag/,
-    );
-    expect(() => securitySetups(page(doc({ row: '| g | A, C | [a](./security-ci.md) | t |' })))).toThrow(
-      /"Guarantees" entry 1 names C, not a setup/,
-    );
-    expect(() => securitySetups(page(doc({ bullet: '- *B, B.* **x** ([a](./security-ci.md))' })))).toThrow(
+    expect(() => securityFeatures(page(doc({ bullet: '- *B, B.* **x** ([a](./security-ci.md))' })))).toThrow(
       /"What is not defended" entry 1 repeats B/,
     );
-    expect(() => securitySetups(page(doc({ setups: ['| **A** | a |', '| **B** | b |', '| **C** | c |'] })))).toThrow(
-      /no entry applies to C/,
+    expect(() => securityFeatures(page(doc({ features: ['| **A** | a |', '| **B** | b |', '| **C** | c |'] })))).toThrow(
+      /no entry concerns C/,
     );
   });
 
-  it('publishes the setups the spec\'s entries were checked against', () => {
-    // The vocabulary the page's readers pick from: the spec's four setups,
+  it('publishes the features the spec\'s entries were checked against', () => {
+    // The vocabulary the page's readers pick from: the spec's three features,
     // in the table's order, and written by the build that checked the tags.
-    expect(data.security.setups).toEqual(['Every install', 'One-time link', 'Hosted phone', 'Self-hosted Relay']);
-    expect(data.security.setups).toEqual(securitySetups({ blocks: data.security.blocks }).names);
+    expect(data.security.features).toEqual(['One-time link', 'Hosted phone', 'Self-hosted Relay']);
+    expect(data.security.features).toEqual(securityFeatures({ blocks: data.security.blocks }).names);
   });
 
   it('holds every guarantee to a checked section, and every checked section to an entry', () => {
@@ -411,7 +406,7 @@ describe('security spec', () => {
     expect(() => page('`scripts/no-such-lint.mjs`')).toThrow(/pinned by scripts\/no-such-lint\.mjs, which does not exist/);
   });
 
-  it('publishes /supply-chain\'s entries without the setup tags it has no table for', () => {
+  it('publishes /supply-chain\'s entries without the feature tags it has no table for', () => {
     const sections = data.security.supplyChain;
     expect(sections.guarantees.header.map((cell) => inlineToText(cell))).toEqual(['Guarantee', 'Rule', 'Pinned by']);
     expect(sections.guarantees.rows.every((row) => row.length === 3)).toBe(true);
@@ -421,17 +416,18 @@ describe('security spec', () => {
     expect(sections.guarantees.rows).toHaveLength(data.security.audiences['supply-chain'].guarantees.rows.length);
     const page = parseMarkdown(
       [
-        '## Guarantees', '', '| G | Applies to | Rule |', '| --- | :-: | --- |', '| g | A | r |', '',
-        '## What is not defended', '', '- *A, B.* **x** y', '', '## Known gaps', '', '- *B.* z',
+        '## Guarantees', '', '| G | Feature | Rule |', '| --- | :-: | --- |', '| g | A | r |', '',
+        '## What is not defended', '', '- *A, B.* **x** y', '', '## Known gaps', '', '- *B.* z', '- **v** w',
       ].join('\n'),
       { slug: createSlugger() },
     ).blocks;
     const [, guarantees, , notDefended, , knownGaps] = page;
-    const untagged = withoutSetups({ guarantees, notDefended, knownGaps });
+    const untagged = withoutFeatures({ guarantees, notDefended, knownGaps });
     expect(untagged.guarantees.align).toEqual([guarantees.align[0], guarantees.align[2]]);
     expect(untagged.guarantees.rows).toEqual([[guarantees.rows[0][0], guarantees.rows[0][2]]]);
     expect(inlineToText(untagged.notDefended.items[0].children[0].children)).toBe('x y');
     expect(inlineToText(untagged.knownGaps.items[0].children[0].children)).toBe('z');
+    expect(untagged.knownGaps.items[1]).toBe(knownGaps.items[1]);
   });
 
   it('fails on a link into a published page whose fragment names no heading there', () => {

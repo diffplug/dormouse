@@ -55,7 +55,7 @@ const PAGES = [
     route: "/supply-chain",
     element: <SupplyChain />,
     audiences: ["supply-chain"],
-    // Split by product, with no setup table to read a tag against.
+    // Split by product, with no feature table to read a tag against.
     tagged: false,
     links: [
       `${sitePath("/security")}#how-the-guarantees-are-checked`,
@@ -127,39 +127,48 @@ function tablesIn(html: string): { header: string[]; rows: string[][] }[] {
   });
 }
 
-// docs/specs/website-docs.md -> `/security` spec: the setup table is the
-// vocabulary every entry tags itself from, so a reader finds their setup first.
-it("/security names every setup in its setup table, ahead of the guarantees", () => {
+// docs/specs/website-docs.md -> `/security` spec: the feature table is the
+// vocabulary every entry tags itself from, so a reader finds what they use first.
+it("/security names every feature in its feature table, ahead of the guarantees", () => {
   const main = renderMain(<SecurityDocs />);
-  const setups = main.indexOf('id="setups"');
+  const features = main.indexOf('id="features"');
   const guarantees = main.indexOf('id="guarantees"');
-  expect(setups).toBeGreaterThan(0);
-  expect(guarantees).toBeGreaterThan(setups);
-  const [table] = tablesIn(main.slice(setups, guarantees));
-  expect(table.header[0]).toBe("Setup");
-  expect(table.rows.map((row) => row[0])).toEqual(security.setups);
+  expect(features).toBeGreaterThan(0);
+  expect(guarantees).toBeGreaterThan(features);
+  const [table] = tablesIn(main.slice(features, guarantees));
+  expect(table.header[0]).toBe("Feature");
+  expect(table.rows.map((row) => row[0])).toEqual(security.features);
 });
 
-describe("setup tags", () => {
+/**
+ * The feature tag each undefended edge and known gap in `html` opens with, or
+ * null for one that holds for every install: the bullets under each heading
+ * whose anchor ends `not-defended` or `known-gaps`, up to the next heading.
+ */
+const bulletLeads = (html: string) =>
+  [...html.matchAll(/<h\d id="[^"]*(?:not-defended|known-gaps)".*?(?=<h\d|$)/gs)].flatMap(([section]) =>
+    [...section.matchAll(/<li\b[^>]*><p\b[^>]*>(<em\b[^>]*>(.*?)<\/em>)?/g)].map(([, , lead]) => lead ?? null),
+  );
+
+describe("feature tags", () => {
   for (const page of PAGES.filter((page) => !page.tagged)) {
-    it(`${page.route} shows no setup tags`, () => {
+    it(`${page.route} shows no feature tags`, () => {
       const main = renderMain(page.element);
-      expect(tablesIn(main).some((table) => table.header.includes("Applies to"))).toBe(false);
-      const leads = [...main.matchAll(/<li\b[^>]*><p\b[^>]*><em\b[^>]*>(.*?)<\/em>/g)].map(([, lead]) => lead);
-      expect(leads).toEqual([]);
+      expect(tablesIn(main).some((table) => table.header.includes("Feature"))).toBe(false);
+      expect(bulletLeads(main).filter((lead) => lead !== null)).toEqual([]);
     });
   }
 
   for (const page of PAGES.filter((page) => page.tagged)) {
-    it(`${page.route} shows the setups each guarantee and bullet applies to`, () => {
+    it(`${page.route} shows the features each guarantee and bullet concerns`, () => {
       const main = renderMain(page.element);
       const tagged = (cell: string) => {
-        const tags = cell.replace(/\.$/, "").split(", ");
-        for (const tag of tags) expect(security.setups, cell).toContain(tag);
+        if (cell === "") return;
+        for (const tag of cell.replace(/\.$/, "").split(", ")) expect(security.features, cell).toContain(tag);
       };
-      const guarantees = tablesIn(main).filter((table) => table.header.includes("Applies to"));
+      const guarantees = tablesIn(main).filter((table) => table.header.includes("Feature") && table.header.includes("Guarantee"));
       expect(guarantees).toHaveLength(1);
-      const column = guarantees[0].header.indexOf("Applies to");
+      const column = guarantees[0].header.indexOf("Feature");
       expect(guarantees[0].rows.length).toBeGreaterThan(0);
       for (const row of guarantees[0].rows) tagged(row[column]);
       const audiences = security.audiences as Record<string, Record<"notDefended" | "knownGaps", { items: unknown[] }>>;
@@ -167,9 +176,12 @@ describe("setup tags", () => {
         (n, name) => n + audiences[name].notDefended.items.length + audiences[name].knownGaps.items.length,
         0,
       );
-      const leads = [...main.matchAll(/<li\b[^>]*><p\b[^>]*><em\b[^>]*>(.*?)<\/em>/g)].map(([, lead]) => lead);
+      const leads = bulletLeads(main);
       expect(leads).toHaveLength(bullets);
-      leads.forEach(tagged);
+      leads.forEach((lead) => tagged(lead ?? ""));
+      // Every feature reaches this page's reader somewhere, so none is lost in the split.
+      const shown = new Set([...guarantees[0].rows.map((row) => row[column]), ...leads].flatMap((cell) => (cell ?? "").replace(/\.$/, "").split(", ")));
+      if (page.route === "/security") for (const feature of security.features) expect(shown).toContain(feature);
     });
   }
 });

@@ -194,7 +194,7 @@ Source of truth: `SELF_HOST_DELTA` in `website/scripts/generate-docs.js`; `SelfH
 
 **Must** render the guarantees table and the two lists by audience, from `docs.security.json`, never restated: `securityAudiences` splits each entry by the spec its links name, and an entry naming no spec, a spec in no group, or two groups fails the build. **`/security` must render the `self-host` audience's entries beside its own** (`SECURITY_PAGE_AUDIENCES`): a Hosted or one-time reader is never sent to `/self-host`.
 
-**Must tag every guarantee row and list bullet with the setups it applies to**, named only from the first column of the spec's "Setups" table: a row in its `Applies to` cell, a bullet in the emphasis it opens with. `securitySetups` fails the build on an entry with no tag, an unknown or repeated one, a setup no entry uses, or a missing table. Setups say which reader must know an entry, never which page shows it; the audience split ignores them. **`/supply-chain` shows no tags** (`withoutSetups`): it splits its inventory by product and has no setup table to read them against.
+**Must tag every guarantee row and list bullet with the features it concerns, and leave untagged one that holds for every install**, named only from the first column of the spec's "Features" table: a row in its `Feature` cell, a bullet in the emphasis it opens with. `securityFeatures` fails the build on an unknown or repeated tag, a feature no entry concerns, or a missing table. Features say which reader must know an entry, never which page shows it; the audience split ignores them. **`/supply-chain` shows no tags** (`withoutFeatures`): it splits its inventory by product and has no feature table to read them against.
 
 **Must link every guarantee row to a section that carries `FAIL IF` lines, and every such section outside `docs/specs/security.md` and `docs/specs/security-audit.md`, the audit's own process, from a guarantee, an undefended edge, or a known gap.** `securityCoverage` fails the build on a promise no check stands behind, or a check behind no promise and no admitted risk.
 
@@ -211,7 +211,7 @@ flowchart LR
 
 The spec file on GitHub is the one place every entry appears together. The three pages cross-link, and each specialized page links `/security#how-the-guarantees-are-checked`; `website/src/pages/security-pages.test.tsx` pins the entries and links.
 
-Source of truth: `buildSecurity`, `SECURITY_AUDIENCES` (spec → audience), and `securitySetups` in `website/scripts/generate-docs.js`; `SecurityDocs` in `website/src/pages/SecurityDocs.tsx`.
+Source of truth: `buildSecurity`, `SECURITY_AUDIENCES` (spec → audience), and `securityFeatures` in `website/scripts/generate-docs.js`; `SecurityDocs` in `website/src/pages/SecurityDocs.tsx`.
 
 ## Generated documentation boundary
 
