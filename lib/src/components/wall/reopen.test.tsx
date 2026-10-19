@@ -98,7 +98,7 @@ describe('the reopen stack', () => {
 describe('Reopen', () => {
   it('rebuilds a reopenable close where it sat, as a new Surface with a new id', async () => {
     await renderTerminalBesideBrowser();
-    const killed = await control<{ surfaceRef: string }>(SURFACE_CONTROL_METHODS.kill, { surface: 'surface:web', confirmation: { mode: 'dangerously' } });
+    const killed = await control<{ surfaceId: string }>(SURFACE_CONTROL_METHODS.kill, { surface: 'surface:web', confirmation: { mode: 'dangerously' } });
     expect(killed.ok).toBe(true);
     await harness.flush();
     expect(leafIds()).toEqual(['surface:a']);
@@ -168,7 +168,7 @@ describe('Reopen', () => {
     expect(await control(WINDOW_CONTROL_METHODS.reopen)).toEqual({ ok: false, error: 'Nothing to reopen' });
     await control(SURFACE_CONTROL_METHODS.kill, { surface: 'surface:web', confirmation: { mode: 'dangerously' } });
     await harness.flush();
-    const reopened = await control<{ kind: string; surfaceRef: string }>(WINDOW_CONTROL_METHODS.reopen);
+    const reopened = await control<{ kind: string; surfaceId: string }>(WINDOW_CONTROL_METHODS.reopen);
     expect(reopened.result).toMatchObject({ status: 'reopened', kind: 'surface', surfaceId: 'surface:1' });
     await harness.flush();
     expect(leafIds()).toHaveLength(2);

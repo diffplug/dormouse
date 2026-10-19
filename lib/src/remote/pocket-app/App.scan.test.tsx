@@ -13,7 +13,12 @@
 import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { generateNoiseKeyPair, toBase64Url, type PairingInvitation } from 'remote-lib-common';
+import {
+  PAIRING_DEVICE_LABELS,
+  generateNoiseKeyPair,
+  toBase64Url,
+  type PairingInvitation,
+} from 'remote-lib-common';
 
 import App, {
   BURROW_REMOVED_COPY,
@@ -173,8 +178,8 @@ vi.mock('../../lib/terminal-registry', () => ({
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
-/** The label Pocket suggests from an installed app; see `deviceLabel`. */
-const DEVICE_LABEL = 'Dormouse Pocket (Home Screen)';
+/** The label Pocket sends from an installed app; see `deviceLabel`. */
+const DEVICE_LABEL = PAIRING_DEVICE_LABELS[0];
 
 let container: HTMLDivElement;
 let root: Root;
@@ -340,6 +345,8 @@ describe('a first run, from the scan to the terminal', () => {
     expect(fake.retireSetupToken).not.toHaveBeenCalled();
     // The invitation reached `pair` as the parser produced it.
     expect(fake.pair.mock.calls[0]![0].inviteId).toBe(invitation.inviteId);
+    // Under a label the Burrow shows, not as `Unknown device`.
+    expect(fake.pair.mock.calls[0]![1]).toBe(DEVICE_LABEL);
 
     // The digits are on screen while the outcome is pending.
     // Matched on the live region's accessible name, not on the sentence beside

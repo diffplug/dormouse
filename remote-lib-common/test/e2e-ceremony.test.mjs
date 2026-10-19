@@ -19,6 +19,8 @@ import {
   ONE_TIME_DENIAL_CODES,
   ONE_TIME_DEVICE_LABELS,
   ONE_TIME_UNKNOWN_DEVICE_LABEL,
+  PAIRING_DEVICE_LABELS,
+  PAIRING_UNKNOWN_DEVICE_LABEL,
   PAIRING_CODE_LENGTH,
   PRESENCE_WINDOW,
   SESSION_END_V1,
@@ -39,6 +41,7 @@ import {
   isPresenceProofV1,
   isSessionEndV1,
   knownOneTimeDeviceLabel,
+  knownPairingDeviceLabel,
   presenceChallenge,
   samplePairingCode,
   toBase64Url,
@@ -499,6 +502,33 @@ test('a one-time label shows only as a member of the closed set', () => {
   // a near miss, and a non-string all read as the one fallback.
   for (const label of ['iPhone · code 58', 'iphone', ' iPad', 'iPad\u0000', 'Dormouse Pocket (browser)', '', 42, null]) {
     assert.equal(knownOneTimeDeviceLabel(label), ONE_TIME_UNKNOWN_DEVICE_LABEL, String(label));
+  }
+});
+
+test('a pairing label shows only as a member of the closed set', () => {
+  assert.deepEqual([...PAIRING_DEVICE_LABELS], ['Dormouse Pocket (Home Screen)', 'Dormouse Pocket (browser)']);
+  assert.equal(Object.isFrozen(PAIRING_DEVICE_LABELS), true);
+  assert.equal(PAIRING_UNKNOWN_DEVICE_LABEL, 'Unknown device');
+  for (const label of PAIRING_DEVICE_LABELS) assert.equal(knownPairingDeviceLabel(label), label);
+  // The phone chooses the label and the digits, and a presence proof does not
+  // say whose phone: text that could name digits, a near miss, the other
+  // ceremony's set, and a non-string all read as the one fallback.
+  for (const label of [
+    'Dormouse Pocket (browser) · code 58',
+    'iPhone · code 58',
+    'dormouse pocket (browser)',
+    ' Dormouse Pocket (browser)',
+    'Dormouse Pocket (browser)\u0000',
+    'Dormouse Pocket',
+    'iPhone',
+    PAIRING_UNKNOWN_DEVICE_LABEL,
+    '',
+    42,
+    null,
+    undefined,
+    ['Dormouse Pocket (browser)'],
+  ]) {
+    assert.equal(knownPairingDeviceLabel(label), PAIRING_UNKNOWN_DEVICE_LABEL, String(label));
   }
 });
 

@@ -21,6 +21,7 @@ import {
   MAX_PUSH_QUERY_DELIVERY_IDS,
   PUSH_SEND_DEADLINE_MS,
   boundedPushText,
+  knownPairingDeviceLabel,
   utf8Encode,
   type BurrowAclRecord,
   type PushDevicesResponse,
@@ -110,7 +111,7 @@ function pushTargets(records: readonly BurrowAclRecord[]): readonly BurrowAclRec
 
 /**
  * The devices the settings dialog names: subscribed on the Relay **and** still
- * active in the Burrow's ACL, joined by `deliveryId` to the ACL's human labels.
+ * active in the Burrow's ACL, joined by `deliveryId` to the ACL's device labels.
  *
  * Only the Burrow can do this join — it holds the records that mint delivery ids,
  * and the Relay never learns a label. The send path does not need it: the
@@ -128,7 +129,9 @@ export async function loadPushDevices(deps: AlertPushDeps): Promise<PushDevice[]
   const labels = new Map(pushTargets(deps.activeRecords()).map((r) => [r.deliveryId, r.label]));
   return body.devices
     .filter((device) => labels.has(device.deliveryId))
-    .map((device) => ({ label: labels.get(device.deliveryId) || 'Unnamed device' }));
+    // A record's label is the phone's choice, and one off disk may predate the
+    // closed set: shown only as a member (`docs/specs/remote-security-model.md` -> Pairing).
+    .map((device) => ({ label: knownPairingDeviceLabel(labels.get(device.deliveryId)) }));
 }
 
 /**

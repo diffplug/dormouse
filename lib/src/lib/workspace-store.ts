@@ -184,13 +184,6 @@ export function activateWorkspaceAt(index: number): void {
   if (target) setActiveWorkspace(target.id);
 }
 
-/** A generated id no Workspace in the list holds, the closing one included. */
-function freshWorkspaceId(): WorkspaceId {
-  let id = generateWorkspaceId();
-  while (state.workspaces.some((workspace) => workspace.id === id)) id = generateWorkspaceId();
-  return id;
-}
-
 /**
  * Add a Workspace where its group meets the other: an unpinned one at the end of
  * the unpinned group, just left of `+`; a pinned one (an arrival from another
@@ -200,7 +193,7 @@ export function createWorkspace(opts?: { id?: WorkspaceId; name?: string; nameIs
   if (opts?.id !== undefined && state.workspaces.some((workspace) => workspace.id === opts.id)) {
     throw new Error(`Duplicate Workspace id: ${opts.id}`);
   }
-  const id = opts?.id ?? freshWorkspaceId();
+  const id = opts?.id ?? generateWorkspaceId();
   const meta: WorkspaceMeta = {
     id,
     name: opts?.name ?? nextDefaultName(),
@@ -249,7 +242,7 @@ export function closeWorkspace(id: WorkspaceId): boolean {
   const index = state.workspaces.findIndex((ws) => ws.id === id);
   if (index === -1) return false;
   const workspaces = state.workspaces.filter((ws) => ws.id !== id);
-  if (workspaces.length === 0) workspaces.push({ id: freshWorkspaceId(), name: nextDefaultName(), nameIsAuto: true });
+  if (workspaces.length === 0) workspaces.push({ id: generateWorkspaceId(), name: nextDefaultName(), nameIsAuto: true });
   const activeId = state.activeId === id ? workspaces[Math.min(index, workspaces.length - 1)].id : state.activeId;
   emit({ workspaces, activeId });
   return true;

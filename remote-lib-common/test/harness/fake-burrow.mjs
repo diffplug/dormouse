@@ -42,7 +42,7 @@ import {
   SESSION_END_V1,
   WS_ROUTES,
   WS_TOKEN_PARAM,
-  boundedPairingLabel,
+  knownPairingDeviceLabel,
   clampTerminalDimension,
   constantTimeEqual,
   createNoiseResponder,
@@ -424,8 +424,8 @@ export class FakeBurrow extends EventEmitter {
       accountId: request.presence.accountId,
       passkeyCredentialId: binding.passkeyCredentialId,
       passkeyPublicKeyHash: proof.passkeyPublicKeyHash,
-      // Attacker-chosen free text rendered in the one dialog the ACL rests on.
-      label: boundedPairingLabel(request.label),
+      // The phone chooses it, beside the digits: only a member of the set shows.
+      label: knownPairingDeviceLabel(request.label),
       verifiedAt: Date.now(),
     };
     this.emit('pairing-request', { clientId: frame.clientId, label: pending.approval.label });

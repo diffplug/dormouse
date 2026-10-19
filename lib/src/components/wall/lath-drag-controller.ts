@@ -8,6 +8,8 @@ import type { DropTarget } from '../../lib/lath/ops';
 import { type DropCandidate, hitTest } from '../../lib/lath/hit-test';
 import { type LathWallSnapshot, LATH_LAYOUT_OPTS } from './lath-wall-store';
 import { DRAG_THRESHOLD_PX } from '../design';
+import { shieldFrames } from '../../lib/frame-shield';
+import { subscribeWindowFocus } from '../../lib/window-focus';
 
 /** Opacity applied to the dragged leaf while its drop preview floats elsewhere. */
 const DRAG_DIM = 0.6;
@@ -90,6 +92,8 @@ export type DragControllerDeps = {
 export function createDragController(deps: DragControllerDeps): DragController {
   // The live drag session (mutated in place by the window handlers).
   let drag: PaneDragState | null = null;
+  let releaseShield: (() => void) | null = null;
+  let unsubscribeFocus: (() => void) | null = null;
   // The last preview rect published to React state (`x,y,w,h`); a frame that lands in
   // the same band skips the redundant setState (and its forced re-layout).
   let lastPreviewKey = '';
@@ -125,8 +129,11 @@ export function createDragController(deps: DragControllerDeps): DragController {
     window.removeEventListener('pointermove', onMove);
     window.removeEventListener('pointerup', onUp);
     window.removeEventListener('pointercancel', onCancel);
-    window.removeEventListener('blur', onCancel);
     window.removeEventListener('keydown', onKey);
+    unsubscribeFocus?.();
+    unsubscribeFocus = null;
+    releaseShield?.();
+    releaseShield = null;
     if (drag && drag.rafId !== null) {
       cancelAnimationFrame(drag.rafId);
       drag.rafId = null;
@@ -141,8 +148,10 @@ export function createDragController(deps: DragControllerDeps): DragController {
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
     window.addEventListener('pointercancel', onCancel);
-    window.addEventListener('blur', onCancel);
     window.addEventListener('keydown', onKey);
+    unsubscribeFocus = subscribeWindowFocus((focused) => {
+      if (!focused) finish(false);
+    });
   };
 
   const runHitTest = (): void => {
@@ -252,6 +261,7 @@ export function createDragController(deps: DragControllerDeps): DragController {
     if (!d.active) {
       if (Math.hypot(e.clientX - d.startX, e.clientY - d.startY) < DRAG_THRESHOLD_PX) return;
       d.active = true;
+      releaseShield = shieldFrames();
       if (!d.external) {
         deps.latestRef.current.onDragStart?.(d.id); // Wall applies its selection policy
         const el = deps.leafElsRef.current.get(d.id);
