@@ -20,7 +20,7 @@
   },
   "dependencies": {
     "@codemirror/language": "^6.12.4",
-    "@lexical/link": "0.48.0",
+    "@lexical/link": "0.52.0",
     "@lezer/highlight": "^1.2.5",
     "@mdxeditor/editor": "4.3.3",
     "dor-lib-common": "workspace:*",
