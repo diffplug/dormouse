@@ -1,15 +1,23 @@
 import { validToolFragment } from 'dor-tools-lib/osc';
+import { CONTROLS } from './file-viewer-format.js';
+
+const SCHEME = /^[a-z][a-z\d+.-]*:/i;
+
+/** A link that keeps the page's own web/mail handling instead of opening a document. */
+export function isWebLink(href: string): boolean {
+  return /^(?:https?:|mailto:)/i.test(href.trim());
+}
 
 /** URL syntax is removed before decoding, so `%23` still names a file's `#`.
  * This parses a document reference, never a URL against the capability URL. */
 export function markdownLink(href: string): { path: string; fragment?: string } | null {
-  if (!href || href.length > 4096 || /^[a-z][a-z\d+.-]*:/i.test(href.trim()) || href.startsWith('/') || href.includes('\\')) return null;
+  if (!href || href.length > 4096 || SCHEME.test(href.trim()) || href.includes('\\')) return null;
   const hash = href.indexOf('#');
   try {
     const path = decodeURIComponent((hash < 0 ? href : href.slice(0, hash)).split('?', 1)[0]);
     const fragment = hash < 0 ? undefined : decodeURIComponent(href.slice(hash + 1));
-    if (path.startsWith('/') || path.includes('\\') || /^[a-z][a-z\d+.-]*:/i.test(path)
-      || /[\u0000-\u001f\u007f-\u009f]/.test(path) || (fragment !== undefined && !validToolFragment(fragment))) return null;
+    if (path.startsWith('/') || path.includes('\\') || SCHEME.test(path) || CONTROLS.test(path)
+      || (fragment !== undefined && !validToolFragment(fragment))) return null;
     return { path, ...(fragment === undefined ? {} : { fragment }) };
   } catch { return null; }
 }

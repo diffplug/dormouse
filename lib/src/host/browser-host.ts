@@ -740,7 +740,6 @@ export function createBrowserHost(deps: BrowserHostDeps) {
           return await edit(bound, r.edit);
         case 'tool-view': {
           const generation = generations.get(bound.id) ?? 0;
-          if (settling.has(bound.id)) throw new Error('the browser is being relaunched or closed');
           // Only this fixed operation reaches evaluate; serialized validated data
           // cannot become code, even when a heading contains script punctuation.
           const argument = JSON.stringify(r.position ?? null);

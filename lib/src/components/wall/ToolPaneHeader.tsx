@@ -24,7 +24,7 @@ import {
 } from './wall-context';
 import type { PaneProps } from './pane-props';
 import { ToolNavigationButtons } from './ToolNavigationButtons';
-import { toolHistory } from './tool-navigation';
+import { hasToolHistory } from './tool-navigation';
 
 export function ToolPaneHeader(props: PaneProps) {
   // A preview slot switch keeps the face it holds (`docs/specs/layout.md` ->
@@ -69,7 +69,7 @@ function ToolBrowserHeader({ id, title, params, switching }: PaneProps & { switc
   // A switch retires the browser the ghost shows, so the glyph holds too.
   const displayMode = useHeldWhile(useAgentBrowserDisplayMode(screen), switching);
   const headerRef = useRef<HTMLDivElement>(null);
-  const tier = useHeaderTier(headerRef, toolHeaderTier, { reservePx: (toolHistory(params)?.entries.length ?? 0) > 1 ? 2 * HEADER_CONTROL_SLOT_PX : 0 });
+  const tier = useHeaderTier(headerRef, toolHeaderTier, { reservePx: hasToolHistory(params) ? 2 * HEADER_CONTROL_SLOT_PX : 0 });
   const rename = usePaneRename(id);
   const keep = usePreviewKeep(id, preview);
 

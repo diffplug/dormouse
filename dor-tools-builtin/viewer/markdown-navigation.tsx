@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { markdownLink, headingIds } from '../src/markdown-links';
+import { headingIds, isWebLink, markdownLink } from '../src/markdown-links';
 
-export function assignHeadingIds(): void {
-  const headings = [...document.querySelectorAll<HTMLElement>('.prose h1,.prose h2,.prose h3,.prose h4,.prose h5,.prose h6')];
-  headingIds(headings.map(h => h.textContent ?? '')).forEach((id, i) => { headings[i].id = id; });
+/** The rendered heading `fragment` names. Ids are derived when a fragment is
+ * followed, never written into the document or kept in sync while editing. */
+export function headingFor(fragment: string): HTMLElement | undefined {
+  const headings = [...document.querySelectorAll<HTMLElement>('.prose :is(h1,h2,h3,h4,h5,h6)')];
+  return headings[headingIds(headings.map(h => h.textContent ?? '')).indexOf(fragment)];
 }
 
 /** Links are reading actions. The context menu keeps editing available without
@@ -22,7 +24,7 @@ export function MarkdownNavigation({ follow, edit }: {
       const href = link.getAttribute('href') ?? '';
       // Web/mail links keep their existing handling. Unsupported local links
       // reach the route's visible error, never the capability URL as navigation.
-      if (/^(?:https?:|mailto:)/i.test(href.trim())) return;
+      if (isWebLink(href)) return;
       event.preventDefault(); event.stopImmediatePropagation();
       setMenu(null);
       if (event.detail <= 1) follow(href, event.ctrlKey || event.metaKey ? 'other' : 'current');
@@ -35,10 +37,7 @@ export function MarkdownNavigation({ follow, edit }: {
     };
     document.addEventListener('click', click, true);
     document.addEventListener('contextmenu', context, true);
-    const observer = new MutationObserver(assignHeadingIds);
-    observer.observe(document.getElementById('root')!, { childList: true, characterData: true, subtree: true });
-    assignHeadingIds();
-    return () => { document.removeEventListener('click', click, true); document.removeEventListener('contextmenu', context, true); observer.disconnect(); };
+    return () => { document.removeEventListener('click', click, true); document.removeEventListener('contextmenu', context, true); };
   }, [follow]);
   useEffect(() => {
     if (!menu) return;

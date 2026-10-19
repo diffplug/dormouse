@@ -58,9 +58,9 @@ Source of truth: `dor-tools-builtin/viewer/markdown.tsx`; `safeCreateDOM` in `do
 ### Relative links
 
 - **Must follow a relative link on plain click**, and offer Open in another surface and Edit link on its context menu. Cmd/Ctrl-click chooses another Surface. Dispatch follows `docs/specs/dor-tool.md` → Document navigation. (rationale)
-- **Must split the query and fragment before percent-decoding the path**, resolve from the opened canonical file's directory, and permit parent-directory references. Ignore queries; keep the decoded fragment separate. Reject absolute paths, `file:` URLs, other schemes, backslashes, malformed encoding, and controls as local document references; existing HTTP(S)/mail handling remains available.
-- **Must send document opens through a bounded same-origin JSON POST to the Tool process**, which emits OSC 367; never navigate relative to the capability URL or expand the current file grant. The page receives only sent/error, with host failures shown by the Surface.
-- **Must give rendered headings stable, case-folded, punctuation-stripped ids with duplicate suffixes**, without modifying saved Markdown. Same-document fragments scroll without reloading or prompting; a missing heading reports an error while retaining the document. Back/Forward reading-state semantics belong to `docs/specs/dor-tool.md` → Document navigation.
+- **Must treat only a scheme-less relative reference as a document link**, resolved from the opened canonical file's directory with parent references allowed and its query ignored; HTTP(S)/mail links keep their existing handling.
+- **Must send document opens to the Tool process**, which emits OSC 367 (`docs/specs/security-local.md` → Local-file viewer); **never navigate relative to the capability URL**. The page receives only sent/error, with host failures shown by the Surface.
+- **Must resolve a fragment to the rendered heading whose case-folded, punctuation-stripped, duplicate-suffixed id it names**, never writing ids into saved Markdown. Same-document fragments scroll without reloading or prompting; a missing heading reports an error while retaining the document. Back/Forward reading-state semantics belong to `docs/specs/dor-tool.md` → Document navigation.
 
 Source of truth: `dor-tools-builtin/viewer/markdown.tsx`; `markdownLink` in `dor-tools-builtin/src/markdown-links.ts`; `runFileViewer` in `dor-tools-builtin/src/file-viewer.ts`.
 

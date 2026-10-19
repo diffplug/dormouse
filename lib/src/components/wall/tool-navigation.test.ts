@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { commitToolHistory, documentDirectory, toolHistory } from './tool-navigation';
+import { commitToolHistory, toolHistory } from './tool-navigation';
+import { directoryOf } from '../../lib/tool-open-requests';
 
 const location = (target: string, top = 0) => ({ target, cwd: '/repo', handler: 'builtin:file', position: { top } });
 describe('Tool document history', () => {
@@ -21,9 +22,9 @@ describe('Tool document history', () => {
     expect(toolHistory({ toolHistory: { entries: [], index: 0 } })).toBeNull();
   });
   it('takes the document directory on either host platform, including filesystem roots', () => {
-    expect(documentDirectory('/a.md')).toBe('/');
-    expect(documentDirectory('/repo/docs/a.md')).toBe('/repo/docs');
-    expect(documentDirectory('C:\\a.md')).toBe('C:\\');
-    expect(documentDirectory('C:\\repo\\a.md')).toBe('C:\\repo');
+    expect(directoryOf('/a.md')).toBe('/');
+    expect(directoryOf('/repo/docs/a.md')).toBe('/repo/docs');
+    expect(directoryOf('C:\\a.md')).toBe('C:\\');
+    expect(directoryOf('C:\\repo\\a.md')).toBe('C:\\repo');
   });
 });

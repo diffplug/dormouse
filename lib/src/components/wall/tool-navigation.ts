@@ -1,6 +1,7 @@
 import { readToolViewPosition, type ToolViewPosition } from 'dor-tools-lib/protocol';
 import { SURFACE_CONTROL_METHODS } from 'dor/protocol';
 import { parseRenderMode } from 'dor-lib-common/browser-providers';
+import { builtinHandler } from 'dor-tools-builtin/file-viewer-format';
 import { getPlatform } from '../../lib/platform';
 import { dispatchDorControlRequest } from '../../lib/platform/dor-control-dispatch';
 import { toolEditorView } from '../../lib/tool-editor';
@@ -17,11 +18,25 @@ export function toolHistory(params: Record<string, unknown> | undefined): ToolHi
   return value && Array.isArray(value.entries) && Number.isInteger(value.index) && value.index >= 0 && value.index < value.entries.length ? value : null;
 }
 
+/** Whether the Surface has somewhere to go Back or Forward to. */
+export function hasToolHistory(params: Record<string, unknown> | undefined): boolean {
+  return (toolHistory(params)?.entries.length ?? 0) > 1;
+}
+
+/** A document navigation or its reading-position restore is under way. */
+export function toolNavigationPending(params: Record<string, unknown> | undefined): boolean {
+  return !!(params?.toolNavigating || params?.toolViewRequest);
+}
+
+/** The `open` handler name a Tool's scope and result `name` stand for. */
+export function toolHandlerName(scope: unknown, name: unknown): string | undefined {
+  if (typeof name !== 'string') return undefined;
+  return scope === 'builtin' ? builtinHandler('kind', name)?.tool : name;
+}
+
 export function toolLocation(params: Record<string, unknown>, cwd: string): ToolLocation | null {
   if (typeof params.toolTarget !== 'string') return null;
-  const name = typeof params.toolName === 'string' ? params.toolName : undefined;
-  const handler = name && (params.toolScope === 'builtin' ? `builtin:${name}` : name);
-  return { target: params.toolTarget, handler, cwd };
+  return { target: params.toolTarget, handler: toolHandlerName(params.toolScope, params.toolName), cwd };
 }
 
 export function commitToolHistory(previous: ToolHistory | null, current: ToolLocation, next: ToolLocation, index?: number): ToolHistory {
@@ -40,17 +55,13 @@ export function commitToolHistory(previous: ToolHistory | null, current: ToolLoc
 
 export function requestToolHistory(id: string, direction: 'back' | 'forward'): void {
   dispatchDorControlRequest({ requestId: `tool-history-${crypto.randomUUID()}`, surfaceId: id, method: SURFACE_CONTROL_METHODS.tool,
-    params: { history: direction, disposition: 'current', fresh: false, minimized: false } }, () => {});
+    params: { history: direction, disposition: 'current' } }, () => {});
 }
 
-export function documentDirectory(path: string): string {
-  const cut = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
-  const directory = path.slice(0, cut);
-  return /^([A-Za-z]:)?$/.test(directory) ? path.slice(0, cut + 1) : directory;
-}
-
+/** The built-in Markdown editor is the one page exposing a reading position. */
 export function hasToolView(params: Record<string, unknown> | undefined): boolean {
-  return params?.toolScope === 'builtin' && params.toolName === 'file' && typeof params.toolTarget === 'string' && /\.(?:md|markdown)$/i.test(params.toolTarget);
+  return params?.toolScope === 'builtin' && params.toolName === 'file' && typeof params.toolTarget === 'string'
+    && !!builtinHandler('kind', 'file')?.format(params.toolTarget)?.markdown;
 }
 
 /** Iframe and automation transports share the page's bounded reading-state

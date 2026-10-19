@@ -17,7 +17,7 @@ import type { PaneProps } from './pane-props';
 import { toolSemanticName } from './tool-name';
 import { usePaneRename } from './use-pane-rename';
 import { ToolNavigationButtons } from './ToolNavigationButtons';
-import { toolHistory } from './tool-navigation';
+import { hasToolHistory } from './tool-navigation';
 import {
   getMouseSelectionState,
   setOverride as setMouseOverride,
@@ -124,7 +124,7 @@ export function TerminalPaneHeader({ id, title, params, terminalContext = false 
   const tabRef = useRef<HTMLDivElement>(null);
   // A Tool's terminal face, past approval, offers Break (docs/specs/dor-tool.md -> Run end).
   const breakable = isToolParams(params) && toolFace(params) !== 'pending-approval';
-  const tier = useHeaderTier(tabRef, terminalHeaderTier, { reservePx: (terminalContext ? HEADER_CONTROL_SLOT_PX : 0) + (breakable ? HEADER_CONTROL_SLOT_PX : 0) + ((toolHistory(params)?.entries.length ?? 0) > 1 ? 2 * HEADER_CONTROL_SLOT_PX : 0) });
+  const tier = useHeaderTier(tabRef, terminalHeaderTier, { reservePx: (terminalContext ? HEADER_CONTROL_SLOT_PX : 0) + (breakable ? HEADER_CONTROL_SLOT_PX : 0) + (hasToolHistory(params) ? 2 * HEADER_CONTROL_SLOT_PX : 0) });
   const compactOrWider = tier === 'full' || tier === 'compact';
   const tiny = tier === 'tiny';
   const keep = usePreviewKeep(id, preview);

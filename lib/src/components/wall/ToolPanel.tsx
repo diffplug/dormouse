@@ -6,7 +6,7 @@
  */
 import { useCallback, useContext, useEffect } from 'react';
 import { clsx } from 'clsx';
-import { TERMINAL_BOTTOM_RADIUS_CLASS } from '../design';
+import { ModalCloseButton, TERMINAL_BOTTOM_RADIUS_CLASS } from '../design';
 import { previewLayerReady, type GhostRect, type PreviewGhost, type PreviewTransition } from '../../lib/preview-transition-store';
 import { BrowserPanel } from './BrowserPanel';
 import { TerminalPanel } from './TerminalPanel';
@@ -15,7 +15,8 @@ import { ToolPortConflict } from './ToolPortConflict';
 import { toolFace, type ToolFace } from './browser-surface';
 import { BROWSER_LAYER_ATTRIBUTE, usePreviewSlotView } from './preview-transition';
 import { PaneWriteContext, TerminalContextContext, WallActionsContext } from './wall-context';
-import { hasToolView, toolView, type ToolViewRequest } from './tool-navigation';
+import { toolView, type ToolViewRequest } from './tool-navigation';
+import { errorText } from './dor-control-shared';
 import type { PaneProps } from './pane-props';
 
 /** What a half or browser layer is during a switch, or outside one (`live`,
@@ -96,7 +97,7 @@ export function ToolPanel(props: PaneProps) {
   const write = useContext(PaneWriteContext);
   const viewRequest = props.params?.toolViewRequest as ToolViewRequest | undefined;
   useEffect(() => {
-    if (!viewRequest || !props.params?.url || !hasToolView(props.params)) return;
+    if (!viewRequest || !props.params?.url) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const deadline = Date.now() + 10000;
@@ -107,7 +108,7 @@ export function ToolPanel(props: PaneProps) {
       } catch (error) {
         if (cancelled) return;
         if (Date.now() < deadline) timer = setTimeout(() => void apply(), 100);
-        else write.updateParams(props.id, { toolViewRequest: undefined, toolNavigationError: error instanceof Error ? error.message : 'Reading position unavailable.' });
+        else write.updateParams(props.id, { toolViewRequest: undefined, toolNavigationError: errorText(error) });
       }
     };
     void apply();
@@ -144,7 +145,7 @@ export function ToolPanel(props: PaneProps) {
     >
       {typeof props.params?.toolNavigationError === 'string' && <div role="alert" className="absolute inset-x-0 top-0 z-20 flex items-center gap-2 border-b border-border bg-surface-raised px-3 py-2 text-sm text-foreground">
         <span className="min-w-0 flex-1">{props.params.toolNavigationError}</span>
-        <button type="button" onClick={() => write.updateParams(props.id, { toolNavigationError: undefined })} aria-label="Dismiss navigation error">×</button>
+        <ModalCloseButton onClick={() => write.updateParams(props.id, { toolNavigationError: undefined })} aria-label="Dismiss navigation error" />
       </div>}
       {/* Revealed over the browser's ghost, which follows it. */}
       <Half face="terminal" state={roleState(terminal, instant)} className={terminal === 'revealing' && 'z-10'}>

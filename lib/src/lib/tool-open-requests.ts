@@ -22,28 +22,28 @@ export function dispatchToolOpens(id: string, events: readonly TerminalProtocolE
 function dispatchToolOpen(id: string, { path, preview, disposition, fragment }: ToolOpen): void {
   const sequence = (newest.get(id) ?? 0) + 1;
   newest.set(id, sequence);
-  if (disposition) {
-    dispatchDorControlRequest({ requestId: `osc-link-${crypto.randomUUID()}`, surfaceId: id, method: SURFACE_CONTROL_METHODS.tool,
-      params: { file: path, disposition, fragment, cwd: getInheritableCwd(id) ?? directoryOf(path), fresh: false, minimized: false } }, () => {}, { oscOpen: true });
-    return;
-  }
-  requestOpen(id, path, preview, (failed) => {
+  // A document link resolves from the Tool's own document and reports its own
+  // failure (docs/specs/dor-tool.md -> Document navigation).
+  if (disposition) return requestOpen(id, { file: path, disposition, fragment });
+  const open = (asPreview: boolean, settled?: (failed: boolean) => void) =>
+    requestOpen(id, { file: path, preview: asPreview, cwd: getInheritableCwd(id) ?? directoryOf(path) }, settled);
+  open(preview, (failed) => {
     // A failed activate shows its failure in the slot as a failed select does.
-    if (failed && !preview && newest.get(id) === sequence) requestOpen(id, path, true);
+    if (failed && !preview && newest.get(id) === sequence) open(true);
   });
 }
 
-function requestOpen(id: string, path: string, preview: boolean, settled?: (failed: boolean) => void): void {
+function requestOpen(id: string, params: Record<string, unknown>, settled?: (failed: boolean) => void): void {
   dispatchDorControlRequest({
     requestId: `osc-open-${crypto.randomUUID()}`,
     surfaceId: id,
     method: SURFACE_CONTROL_METHODS.tool,
-    params: { file: path, preview, cwd: getInheritableCwd(id) ?? directoryOf(path), fresh: false, minimized: false },
+    params: { ...params, fresh: false, minimized: false },
   }, (response) => settled?.(!response.ok && response.error !== PREVIEW_SUPERSEDED_ERROR), { oscOpen: true });
 }
 
 /** The parent of an absolute native path; a root keeps its separator. */
-function directoryOf(path: string): string {
+export function directoryOf(path: string): string {
   const cut = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
   const dir = path.slice(0, cut);
   return /^([A-Za-z]:)?$/.test(dir) ? path.slice(0, cut + 1) : dir;

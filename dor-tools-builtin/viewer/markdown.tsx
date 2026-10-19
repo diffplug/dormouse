@@ -26,8 +26,9 @@ import { installTooltips } from './tooltip';
 import { rescaledSize } from '../src/image-resolution';
 import './markdown.css';
 import { request } from './document-session';
-import { MarkdownNavigation, assignHeadingIds } from './markdown-navigation';
-import { readToolViewPosition, type ToolViewAccess } from 'dor-tools-lib/protocol';
+import { MarkdownNavigation, headingFor } from './markdown-navigation';
+import { isWebLink } from '../src/markdown-links';
+import type { ToolViewAccess } from 'dor-tools-lib/protocol';
 
 declare module '@mdxeditor/editor' {
   /** The command a paste or drop inserts an image node by, with the source
@@ -52,18 +53,20 @@ const scroller = () => document.querySelector<HTMLElement>(realm?.getValue(viewM
 const nextPaint = () => new Promise<void>(done => requestAnimationFrame(() => requestAnimationFrame(() => done())));
 const view: ToolViewAccess = {
   read: () => ({ mode: realm?.getValue(viewMode$) === 'source' ? 'source' : 'rich-text', top: scroller()?.scrollTop ?? 0 }),
-  async apply(value) {
-    const position = readToolViewPosition(value);
-    if (!position) throw new Error('Invalid reading position.');
-    if (!store.doc.loaded) throw new Error('The document is still loading.');
+  // Both transports validate the position before it arrives.
+  async apply(position) {
+    // Waits out a load here, so the host's one request needs no retry across it.
+    await new Promise<void>(done => {
+      if (store.doc.loaded) return done();
+      const stop = changes.subscribe(() => { if (store.doc.loaded) { stop(); done(); } });
+    });
     realm?.pub(viewMode$, position.mode ?? 'rich-text');
     await nextPaint();
-    assignHeadingIds();
     const scroll = scroller();
     if (!scroll) throw new Error('The document is still loading.');
     if (position.top !== undefined) scroll.scrollTop = position.top;
     else if (position.fragment) {
-      const heading = [...document.querySelectorAll<HTMLElement>('.prose [id]')].find(h => h.id === position.fragment);
+      const heading = headingFor(position.fragment);
       if (heading) scroll.scrollTop += heading.getBoundingClientRect().top - scroll.getBoundingClientRect().top;
       else update({ error: `Heading not found: #${position.fragment}` });
     } else scroll.scrollTop = 0;
@@ -254,7 +257,7 @@ const tokenClasses = [syntaxHighlighting(classHighlighter)];
 const plugins = [
   capture(), markdownSafetyPlugin(), commentsPlugin(),
   headingsPlugin(), listsPlugin(), quotePlugin(), thematicBreakPlugin(), linkPlugin(), linkDialogPlugin({ onClickLinkCallback: href => {
-    if (/^(?:https?:|mailto:)/i.test(href.trim())) { window.open(href, '_blank', 'noopener,noreferrer'); return; }
+    if (isWebLink(href)) { window.open(href, '_blank', 'noopener,noreferrer'); return; }
     followLink(href);
   } }),
   // Unpadded tables: padding to aligned columns rewrites every row of a table when one cell changes.
