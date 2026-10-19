@@ -3,7 +3,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { assertWorkspaceCoverage, getWorkspacePackages } from './dependency-workspaces.js';
-import { entersWorkspace, excludedWorkspacePackages, productSections } from './product-sections.js';
+import { excludedWorkspacePackages, productSections } from './product-sections.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, '../..');
@@ -20,19 +20,10 @@ describe('the product sections over this repository', () => {
     )).not.toThrow();
   });
 
-  // relay.dormouse.sh serves Pocket and the one-time page, which `hosted/`
-  // builds from `dormouse-lib` without declaring an edge to it.
-  it('root Hosted at its Workers and at the code Pocket is built from', () => {
-    expect(rootsOf('hosted')).toEqual(expect.arrayContaining(['dormouse-hosted', 'dormouse-lib']));
+  // One package holds all three Workers and the account page.
+  it('root Hosted at its Workers', () => {
+    expect(rootsOf('hosted')).toEqual(['dormouse-hosted']);
     expect(excludedWorkspacePackages).not.toContain('dormouse-hosted');
-  });
-
-  it('enter a shared root from each section naming it, and another section\'s root from none', () => {
-    expect(entersWorkspace('dormouse-lib', 'hosted')).toBe(true);
-    expect(entersWorkspace('dormouse-lib', 'terminal')).toBe(true);
-    expect(entersWorkspace('dor-tools-builtin', 'terminal')).toBe(false);
-    expect(entersWorkspace('relay', 'hosted')).toBe(false);
-    expect(entersWorkspace('remote-lib-common', 'hosted')).toBe(true);
   });
 });
 
@@ -56,7 +47,8 @@ describe('the committed npm disclosure', () => {
     expect(repeats).toEqual([]);
   });
 
-  // Pocket bundles React and xterm.js, both already listed under the Terminal.
+  // relay.dormouse.sh serves Pocket and the one-time page, built from
+  // `dormouse-lib`, whose React and xterm.js the Terminal's root discloses.
   it('leaves Pocket\'s packages under the Terminal', () => {
     for (const name of ['react', '@xterm/xterm']) {
       expect(npm.terminal.map((row) => row.name)).toContain(name);

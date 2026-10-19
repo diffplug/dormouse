@@ -13,12 +13,7 @@ import {
   missingDependency,
   optionalSiblingsAtSameVersion,
 } from "./dependency-workspaces.js";
-import {
-  entersWorkspace,
-  excludedWorkspacePackages,
-  productSections,
-  sectionsOfRoot,
-} from "./product-sections.js";
+import { excludedWorkspacePackages, productSections } from "./product-sections.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "../..");
@@ -29,6 +24,9 @@ const cargoManifestPath = resolve(repoRoot, "standalone/src-tauri/Cargo.toml");
 const rootPackageJsonPath = resolve(repoRoot, "package.json");
 const themeExtensionsPath = resolve(repoRoot, "lib/src/lib/themes/bundled-extensions.json");
 const productDependencyFilters = productSections.flatMap((section) => section.roots);
+const sectionOfRoot = new Map(
+  productSections.flatMap((section) => section.roots.map((root) => [root, section.id])),
+);
 function readJson(path) {
   return JSON.parse(readFileSync(path, "utf-8"));
 }
@@ -131,7 +129,7 @@ function addExternalPackage(pkg) {
 function scanWorkspacePackage(name) {
   if (visitedWorkspacePackageNames.has(name)) return;
   // Another section's root: that section walks it.
-  if (!entersWorkspace(name, currentSection)) return;
+  if (sectionOfRoot.has(name) && sectionOfRoot.get(name) !== currentSection) return;
   const workspacePackage = workspacePackagesByName.get(name);
   if (!workspacePackage) {
     throw new Error(`Workspace package "${name}" was not found`);
@@ -173,7 +171,7 @@ function scanDependency(fromDir, packageName, declaredBy) {
 }
 
 function scanDependencies(pkg, fromDir) {
-  const isProductRoot = sectionsOfRoot.has(pkg.name);
+  const isProductRoot = sectionOfRoot.has(pkg.name);
   const isWorkspace = workspacePackagesByName.has(pkg.name);
   for (const { name, optional, peer } of getDependencyNames(pkg)) {
     scanDependency(fromDir, name, { pkg, optional, peer, isWorkspace, isProductRoot });

@@ -18,7 +18,7 @@ Every workspace is classified from its shipping route: a product root or runtime
 
 **Must disclose each npm release once, in the first section whose roots reach it**; an earlier section never enters a later section's root. **Never call the Built-in Tools optional or unshipped**: every install ships them inside `dor` (what their frame reaches: `docs/specs/security-local.md` → Local-file viewer). **Must merge a package's releases into one row per name and license**.
 
-**Must root the Hosted section at `dormouse-hosted` and `dormouse-lib`**: one package holds all three Workers and the account page, so the section lists more than any one Worker bundles (rationale), and `hosted/` builds Pocket and the one-time page from `dormouse-lib` with no workspace edge.
+**Must root the Hosted section at `dormouse-hosted`**: one package holds all three Workers and the account page, so the section lists more than any one Worker bundles (rationale). Pocket and the one-time page, which `hosted/` builds from `dormouse-lib` with no workspace edge, are disclosed through the Terminal's `dormouse-lib` root.
 
 **External binaries are outside this graph by construction** — the user's shell, and the CLIs `dor agent-browser` and `dor playwright` forward to (`npm i -g agent-browser`, `npm i -g @playwright/cli`; dependencies of nothing here, resolved off `PATH` or an override variable). **Dormouse instead ships nothing that pulls them in silently**.
 

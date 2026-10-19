@@ -11,8 +11,7 @@
 // Each section is disclosed as its own table, walked in this order: a package
 // belongs to the first section that reaches it, and a root of a later section is
 // not entered from an earlier one, so `dor` -> `dor-tools-builtin` leaves the
-// built-in Tools' graph to its own section. A root may serve several sections,
-// as `dormouse-lib` does; the first lists its graph.
+// built-in Tools' graph to its own section.
 export const productSections = [
   {
     id: "terminal",
@@ -41,10 +40,9 @@ export const productSections = [
     roots: [
       // Hosted's three Workers and the account page. One package, so the walk
       // cannot tell the relay Worker's graph from the account's or voice's.
+      // Pocket and the one-time page, which relay.dormouse.sh serves, are built
+      // from `dormouse-lib`, so the Terminal's root discloses them.
       "dormouse-hosted",
-      // Pocket and the one-time page relay.dormouse.sh serves, from its
-      // `build:pocket` and `build:one-time`; `hosted/` declares no edge to it.
-      "dormouse-lib",
     ],
   },
 ];
@@ -57,13 +55,3 @@ export const excludedWorkspacePackages = [
   "dormouse-website", // Visitor browser code; no installed artifact, key, or session.
 ];
 
-/** Each root's section ids, in walk order. */
-export const sectionsOfRoot = productSections.reduce((map, { id, roots }) => {
-  for (const root of roots) map.set(root, [...(map.get(root) ?? []), id]);
-  return map;
-}, new Map());
-
-/** Whether `section`'s walk enters workspace `name`: never a root only other sections name. */
-export function entersWorkspace(name, section) {
-  return !sectionsOfRoot.has(name) || sectionsOfRoot.get(name).includes(section);
-}
