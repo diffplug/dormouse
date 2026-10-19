@@ -21,21 +21,45 @@ vi.mock('../../lib/src/host/relay-origin', async (importOriginal) => {
 
 const TOKEN = `dmv_${'A'.repeat(43)}`;
 
-/** One `SecretStorage` every window shares, firing `onDidChange` in all of them. */
+/** One `SecretStorage` every window shares, firing `onDidChange` in all of them; `failDeletes` makes a delete reject, changing nothing. */
 function sharedSecrets() {
   const values = new Map<string, string>();
   const watchers = new Set<(event: { key: string }) => void>();
   const announce = (key: string) => { for (const watcher of watchers) watcher({ key }); };
+  const faults = { failDeletes: false };
   const secrets = {
     get: async (key: string) => values.get(key),
     store: async (key: string, value: string) => { values.set(key, value); announce(key); },
-    delete: async (key: string) => { values.delete(key); announce(key); },
+    delete: async (key: string) => {
+      if (faults.failDeletes) throw new Error('keychain locked');
+      values.delete(key);
+      announce(key);
+    },
     onDidChange: (watcher: (event: { key: string }) => void) => {
       watchers.add(watcher);
       return { dispose: () => void watchers.delete(watcher) };
     },
   } as unknown as vscode.SecretStorage;
-  return { values, secrets };
+  return { values, secrets, faults };
+}
+
+/** Hosted's voice Worker, as far as a window sees it: speak refuses a token once revoked. */
+function fakeHosted() {
+  const revoked = new Set<string>();
+  const speaks: string[] = [];
+  const fetch = vi.fn(async (url: string, init: RequestInit) => {
+    const token = (init.headers as Record<string, string>).authorization.replace('Bearer ', '');
+    if (url.endsWith('/api/voice/revoke')) {
+      revoked.add(token);
+      return new Response(null, { status: 204 });
+    }
+    speaks.push(token);
+    return revoked.has(token)
+      ? new Response('{}', { status: 401 })
+      : new Response(new Uint8Array([9, 8, 7]), { headers: { 'content-type': 'audio/mpeg' } });
+  });
+  vi.stubGlobal('fetch', fetch);
+  return { revoked, speaks };
 }
 
 /** One window: a fresh copy of the module, as each extension host loads its own. */
@@ -54,6 +78,7 @@ async function openWindow(secrets: vscode.SecretStorage) {
 const opened: Array<{ dispose(): void }> = [];
 afterEach(() => {
   for (const disposable of opened.splice(0)) disposable.dispose();
+  vi.unstubAllGlobals();
 });
 
 describe('managed voice in the VS Code extension host', () => {
@@ -97,5 +122,30 @@ describe('managed voice in the VS Code extension host', () => {
     await vi.waitFor(() => expect(sibling.statuses.at(-1)).toEqual({ configured: false, voiceId, notEntitled: false }));
     expect(await sibling.module.handleVoiceCommand({ op: 'speak', text: 'build finished' }))
       .toEqual({ ok: false, reason: 'unconfigured' });
+  });
+
+  it('stops the other windows through Hosted when Disconnect cannot delete the token', async () => {
+    const hosted = fakeHosted();
+    const { values, secrets, faults } = sharedSecrets();
+    const first = await openWindow(secrets);
+    const sibling = await openWindow(secrets);
+    opened.push(first.disposable, sibling.disposable);
+    await secrets.store(first.module.MANAGED_VOICE_TOKEN_KEY, TOKEN);
+    await vi.waitFor(() => expect(sibling.statuses.at(-1)).toMatchObject({ configured: true }));
+    expect(await sibling.module.handleVoiceCommand({ op: 'speak', text: 'build finished' })).toMatchObject({ ok: true });
+
+    // The delete fails, so no window hears a change; the token stays in SecretStorage.
+    faults.failDeletes = true;
+    expect(await first.module.handleVoiceCommand({ op: 'disconnect' })).toMatchObject({ ok: false });
+    expect(values.get(first.module.MANAGED_VOICE_TOKEN_KEY)).toBe(TOKEN);
+    await vi.waitFor(() => expect([...hosted.revoked]).toEqual([TOKEN]));
+
+    // The sibling's next request is refused, which turns it off there too.
+    expect(await sibling.module.handleVoiceCommand({ op: 'speak', text: 'tests failed' }))
+      .toEqual({ ok: false, reason: 'HTTP 401' });
+    await vi.waitFor(() => expect(sibling.statuses.at(-1)).toMatchObject({ configured: false }));
+    expect(await sibling.module.handleVoiceCommand({ op: 'speak', text: 'deploy finished' }))
+      .toEqual({ ok: false, reason: 'unconfigured' });
+    expect(hosted.speaks).toEqual([TOKEN, TOKEN]);
   });
 });

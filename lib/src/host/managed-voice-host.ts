@@ -2,7 +2,7 @@
  * The host half of managed voice (`docs/specs/alert.md` -> "Managed voice"):
  * holds the token its own Hosted approval obtains, adds it and the voice
  * id to the webview's text, caches the clips, and answers with audio or a
- * diagnostic failure. Where the request may go:
+ * diagnostic failure; at Disconnect it asks Hosted to revoke the token. Where the request may go:
  * `docs/specs/security-local.md` -> "Persisted state".
  */
 import { readFile } from 'node:fs/promises';
@@ -29,6 +29,7 @@ import {
 
 export const MANAGED_VOICE_FILE = 'managed-voice.json';
 const MANAGED_VOICE_SPEAK_PATH = '/api/voice/speak';
+const MANAGED_VOICE_REVOKE_PATH = '/api/voice/revoke';
 /** Hosted's own bound on `text`. */
 const MAX_TEXT_LENGTH = 200;
 /** `docs/specs/standalone.md` -> "Rust ↔ sidecar bridge". */
@@ -53,25 +54,34 @@ export interface ManagedVoiceStore {
    * lock cached as defaults would let the next edit overwrite the token.
    */
   read(): Promise<unknown>;
-  /** Persist `next`, of which only `changed` differs from what was read. */
+  /**
+   * Persist `next[changed]` alone, keeping the other field as stored: a
+   * caller whose read failed passes defaults there, which must never land.
+   */
   write(next: StoredManagedVoice, changed: keyof StoredManagedVoice): Promise<void>;
 }
 
-/** The sidecar's store: `managed-voice.json` in the owner-only state directory, rewritten whole. */
+/**
+ * The sidecar's store: `managed-voice.json` in the owner-only state directory,
+ * rewritten whole from a fresh read, so a write fails rather than reset the
+ * field it was not given.
+ */
 export function fileManagedVoiceStore(stateDir: string): ManagedVoiceStore {
   const file = join(stateDir, MANAGED_VOICE_FILE);
+  async function read(): Promise<unknown> {
+    try {
+      return JSON.parse(await readFile(file, 'utf8'));
+    } catch (error) {
+      // Only a missing or unparsable file is "no config": a transient lock
+      // (EBUSY, EPERM, EMFILE) is retried on the next read.
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT' || error instanceof SyntaxError) return null;
+      throw error;
+    }
+  }
   return {
-    async read() {
-      try {
-        return JSON.parse(await readFile(file, 'utf8'));
-      } catch (error) {
-        // Only a missing or unparsable file is "no config": a transient lock
-        // (EBUSY, EPERM, EMFILE) is retried on the next read.
-        if ((error as NodeJS.ErrnoException).code === 'ENOENT' || error instanceof SyntaxError) return null;
-        throw error;
-      }
-    },
-    write: (next) => writeJsonAtomic(stateDir, file, next),
+    read,
+    write: async (next, changed) =>
+      writeJsonAtomic(stateDir, file, { ...normalizeStored(await read()), [changed]: next[changed] }),
   };
 }
 
@@ -166,6 +176,7 @@ export function createManagedVoiceHost(options: {
   // every edit and speak is refused.
   const voice = hostedVoiceOrigin(options.relay);
   const speakUrl = voice === null ? null : voice + MANAGED_VOICE_SPEAK_PATH;
+  const revokeUrl = voice === null ? null : voice + MANAGED_VOICE_REVOKE_PATH;
   let loaded: Promise<StoredManagedVoice> | null = null;
   // Each edit reads, then rewrites the whole file: two at once would drop a field.
   const serialize = createSerialQueue();
@@ -219,19 +230,51 @@ export function createManagedVoiceHost(options: {
     }
   }
 
-  /** Clear the stored token, memory before disk: a failed write must never leave speech armed. Runs on `serialize`. */
-  async function clearToken(): Promise<void> {
-    const current = await load().catch(() => normalizeStored(null));
-    const next = { ...current, token: null };
-    loaded = Promise.resolve(next);
+  /**
+   * Ask Hosted to revoke `token`, so no copy of it (a sibling window's, or
+   * one this host failed to clear) speaks again. Never rejects: a failure is
+   * only logged, and the account page can still revoke it.
+   */
+  async function revokeOnHosted(token: string): Promise<void> {
+    if (revokeUrl === null) return;
+    if (!(await options.networkAllowed().catch(() => false))) {
+      log('[managed-voice] not revoked on Hosted: network is set to Nowhere');
+      return;
+    }
+    const signal = AbortSignal.timeout(timeoutMs);
+    try {
+      const response = await fetchImpl(revokeUrl, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${token}` },
+        redirect: 'error',
+        signal,
+      });
+      await response.body?.cancel().catch(() => {});
+      if (!response.ok) log(`[managed-voice] revoke on Hosted failed: HTTP ${response.status}`);
+    } catch {
+      log(`[managed-voice] revoke on Hosted failed: ${signal.aborted ? 'timeout' : 'network'}`);
+    }
+  }
+
+  /**
+   * Clear the stored token, memory before disk: a failed write must never
+   * leave speech armed. `revoke` also asks Hosted to revoke it, whatever the
+   * write does. Runs on `serialize`.
+   */
+  async function clearToken(revoke: boolean): Promise<void> {
+    // Unread, the token is unknown: nothing to revoke, and the store keeps the voice.
+    const current = await load().catch(() => null);
+    const held = current?.token ?? uncleared;
+    if (current) loaded = Promise.resolve({ ...current, token: null });
     disconnectFailed = true;
-    uncleared = current.token ?? uncleared;
-    options.onStatus(status(next));
+    uncleared = held;
+    if (revoke && held) void revokeOnHosted(held);
+    await announce();
     if (!store) throw new Error('no owner-only store');
-    await store.write(next, 'token');
+    await store.write({ ...current ?? normalizeStored(null), token: null }, 'token');
     disconnectFailed = false;
     uncleared = null;
-    options.onStatus(status(next));
+    await announce();
   }
 
   /** Any token change forgets every clip and every refusal the old one earned. */
@@ -243,7 +286,7 @@ export function createManagedVoiceHost(options: {
     return serialize(async () => {
       if (speakUrl === null) throw new Error('this build has no managed voice');
       if (token === null) {
-        await clearToken();
+        await clearToken(true);
       } else {
         await save('token', (config) => ({ ...config, token }), false);
         if (generation === tokenGeneration) disabled = false;
@@ -263,7 +306,8 @@ export function createManagedVoiceHost(options: {
     disabled = true;
     clips.clear();
     notEntitled = false;
-    await clearToken();
+    // Already refused: Hosted holds nothing of it to revoke.
+    await clearToken(false);
   });
 
   /** Latch what Hosted last said of the entitlement, announcing a change. */
@@ -393,7 +437,12 @@ export function createManagedVoiceHost(options: {
           // Check outside the retrying exchange too: Nowhere ends this run.
           await requireEnrollmentNetwork();
           const answer = await pollHostedApproval(options.relay.origin, body.deviceCode, 'voice', enrollmentFetch, parseVoiceApproval);
-          if (sequence !== enrollmentSequence) return;
+          // Below, a token this host discards (canceled, or never saved) is
+          // held by no one, so it is revoked rather than left for the user.
+          if (sequence !== enrollmentSequence) {
+            if (answer.status === 'enabled') void revokeOnHosted(answer.voiceToken);
+            return;
+          }
           if (answer.status === 'retry') {
             if (answer.slowDown) intervalMs = slowDownHostedApproval(intervalMs);
             schedule();
@@ -405,11 +454,15 @@ export function createManagedVoiceHost(options: {
           if (answer.status === 'enabled') {
             enrollment = { status: 'saving' };
             await announce();
-            if (sequence !== enrollmentSequence) return;
-            // A token never saved, or never received below, is held by no one,
-            // so the user is never asked to revoke it.
+            if (sequence !== enrollmentSequence) {
+              void revokeOnHosted(answer.voiceToken);
+              return;
+            }
             try { await setToken(answer.voiceToken); }
-            catch { throw new Error('Could not save managed voice on this computer. Try again.'); }
+            catch {
+              void revokeOnHosted(answer.voiceToken);
+              throw new Error('Could not save managed voice on this computer. Try again.');
+            }
             if (sequence === enrollmentSequence) { enrollment = null; await announce(); }
             return;
           }
