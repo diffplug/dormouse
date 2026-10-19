@@ -103,9 +103,11 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
   // isn't the selected one yet — the click is what selects it (via the root
   // `onClickPanel`), but `selectedId` only updates on the next render, so gating
   // mouse-down/up on `interactive` would swallow the very first click on a
-  // freshly-opened surface. Mouse forwarding therefore only requires passthrough
-  // mode; keyboard/wheel still require full `interactive` so a background pane
-  // never steals them.
+  // freshly-opened surface. Mouse-down/up therefore only require passthrough
+  // mode; keyboard still requires full `interactive` so a background pane never
+  // steals it. Hover and wheel take no gate: like an xterm's, they follow the
+  // pointer onto any pane on screen, in either mode, selecting nothing and
+  // moving no focus.
   const passthrough = mode === 'passthrough';
   const passthroughRef = useRef(passthrough);
   passthroughRef.current = passthrough;
@@ -238,13 +240,16 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
   };
 
   const onCanvasMouseMove = (e: React.MouseEvent) => {
-    if (!interactiveRef.current) return;
+    const held = buttonsHeldRef.current;
+    // A button this canvas never saw pressed belongs to a drag that began
+    // elsewhere (a pane drag, another pane's selection); xterm's hover reports
+    // skip those moves too.
+    if (e.buttons && !held) return;
     const now = performance.now();
     if (now - lastMoveRef.current < 8) return;
     lastMoveRef.current = now;
     const point = toDevice(e);
     if (!point) return;
-    const held = buttonsHeldRef.current;
     controller.send({
       type: 'input_mouse',
       eventType: 'mouseMoved',
@@ -256,13 +261,20 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
     });
   };
 
+  // CDP has no leave event: a move past the page's top-left corner is what ends
+  // its hover. Never mid-drag of a press this canvas sent, which would drag the
+  // page's target to that corner.
+  const onCanvasMouseLeave = () => {
+    if (buttonsHeldRef.current) return;
+    controller.send({ type: 'input_mouse', eventType: 'mouseMoved', x: -1, y: -1, button: 'none', buttons: 0, modifiers: 0 });
+  };
+
   // Wheel needs a non-passive listener to preventDefault, which JSX onWheel does
   // not guarantee.
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const onWheel = (e: WheelEvent) => {
-      if (!interactiveRef.current) return;
       e.preventDefault();
       const point = toDevice(e);
       if (!point) return;
@@ -422,6 +434,7 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
           onMouseDown={onCanvasMouseDown}
           onMouseUp={onCanvasMouseUp}
           onMouseMove={onCanvasMouseMove}
+          onMouseLeave={onCanvasMouseLeave}
           onContextMenu={(e) => {
             if (interactiveRef.current) e.preventDefault();
           }}

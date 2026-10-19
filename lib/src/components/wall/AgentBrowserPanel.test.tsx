@@ -863,6 +863,7 @@ describe('AgentBrowserPanel canvas input forwarding', () => {
     mode: 'passthrough' | 'command',
     selectedId: string | null,
     workspaceActive = true,
+    actions = stubActions(),
   ): Promise<HTMLCanvasElement> {
     const props = paneProps('ab-panel', { surfaceType: 'agent-browser', session: 'browser-session', stream: 4321 });
     await act(async () => {
@@ -870,7 +871,7 @@ describe('AgentBrowserPanel canvas input forwarding', () => {
         <StrictMode>
           <WorkspaceActiveContext.Provider value={workspaceActive}>
             <PaneWriteContext.Provider value={paneWriteFor(() => {})}>
-              <WallActionsContext.Provider value={stubActions()}>
+              <WallActionsContext.Provider value={actions}>
                 <ModeContext.Provider value={mode}>
                   <SelectedIdContext.Provider value={selectedId}>
                     <AgentBrowserPanel {...props} />
@@ -917,6 +918,50 @@ describe('AgentBrowserPanel canvas input forwarding', () => {
   const sentKeyEvents = () => WebSocketMock.instances
     .flatMap((ws) => ws.sent)
     .filter((m) => m.includes('"type":"input_keyboard"'));
+
+  const sentMouse = () => sentMouseEvents().map((m) => JSON.parse(m) as Record<string, unknown>);
+
+  // A terminal's xterm takes hover and wheel wherever the pointer is; an
+  // unselected browser pane must too, in either mode, without selecting itself,
+  // taking focus, or receiving keys.
+  it.each(['passthrough', 'command'] as const)('forwards hover and wheel over an unselected pane in %s mode, and nothing else', async (mode) => {
+    const actions = stubActions();
+    const canvas = await renderWithMode(mode, 'some-other-pane', true, actions);
+    const wheel = new WheelEvent('wheel', { bubbles: true, cancelable: true, clientX: 200, clientY: 100, deltaX: 3, deltaY: 40 });
+    await act(async () => {
+      canvas.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 100, clientY: 50 }));
+      canvas.dispatchEvent(wheel);
+      canvas.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true, cancelable: true }));
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', bubbles: true, cancelable: true }));
+    });
+    expect(sentMouse()).toEqual([
+      expect.objectContaining({ eventType: 'mouseMoved', x: 100, y: 50, button: 'none', buttons: 0 }),
+      expect.objectContaining({ eventType: 'mouseWheel', x: 200, y: 100, deltaX: 3, deltaY: 40 }),
+    ]);
+    expect(wheel.defaultPrevented).toBe(true);
+    expect(sentKeyEvents()).toHaveLength(0);
+    expect(actions.onClickPanel).not.toHaveBeenCalled();
+    expect(container.contains(document.activeElement)).toBe(false);
+  });
+
+  it('ends the page\'s hover when the pointer leaves the canvas', async () => {
+    const canvas = await renderWithMode('command', null);
+    await act(async () => {
+      canvas.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body }));
+    });
+    expect(sentMouse()).toEqual([expect.objectContaining({ eventType: 'mouseMoved', x: -1, y: -1, buttons: 0 })]);
+  });
+
+  it('keeps its own drag through a leave, and skips the moves of a drag that began elsewhere', async () => {
+    const canvas = await renderWithMode('passthrough', 'ab-panel');
+    await act(async () => {
+      // Another pane's drag passing over: a button down this canvas never saw pressed.
+      canvas.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 10, clientY: 10, buttons: 1 }));
+      canvas.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: 100, clientY: 50, button: 0, buttons: 1 }));
+      canvas.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, buttons: 1, relatedTarget: document.body }));
+    });
+    expect(sentMouse().map((m) => m.eventType)).toEqual(['mousePressed']);
+  });
 
   // The window key forwarder is a capture-phase listener that preventDefaults
   // what it takes, so a Workspace left in passthrough on a browser pane would go
