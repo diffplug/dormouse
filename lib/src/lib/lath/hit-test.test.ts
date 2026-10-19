@@ -89,6 +89,16 @@ describe('hitTest — sliding along a shared boundary', () => {
     expect(hitTest(t, RECT, { x: 600, y: 5 }, null, opts).guide!.stops).toEqual([500, 750]);
   });
 
+  it('folds the dragged pane\'s slot into the neighbor the slide comes from', () => {
+    // col[a, b, c] dragging b: a's right edge then b's slot is still "beside a".
+    const t = tree(mk('col', [leaf('a'), 1 / 3], [leaf('b'), 1 / 3], [leaf('c'), 1 / 3]));
+    expect(hitTest(t, RECT, { x: 990, y: 100 }, 'b', opts).guide).toEqual({ edge: 'right', line: 1000, extent: [0, 600], stops: [400], scope: [0, 400] });
+    expect(hitTest(t, RECT, { x: 990, y: 500 }, 'b', opts).guide).toEqual({ edge: 'right', line: 1000, extent: [0, 600], stops: [200], scope: [200, 600] });
+    // Two panes with one dragged leave a single drop: no line.
+    const pair = tree(mk('col', [leaf('a'), 0.5], [leaf('b'), 0.5]));
+    expect(hitTest(pair, RECT, { x: 990, y: 100 }, 'b', opts).guide).toBeNull();
+  });
+
   it('offers no slide line where the leaf is the only scope', () => {
     const row = tree(mk('row', [leaf('a'), 0.5], [leaf('b'), 0.5]));
     expect(hitTest(row, RECT, { x: 10, y: 300 }, null, opts).guide).toBeNull(); // a's left edge is the root's

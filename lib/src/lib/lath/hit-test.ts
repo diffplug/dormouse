@@ -178,20 +178,36 @@ function scopesOnLine(
 }
 
 /** The line a slide from `leafPath` moves along: its reach is the outermost ancestor
- *  sharing the line, and it steps at each gutter between children laid along it. Null
- *  when the leaf is the only scope the line offers. */
-function slideLine(
+ *  sharing the line, and it steps at each gutter between children laid along it. The
+ *  dragged pane's own slot joins the neighbor on the slide's side (`from`), since
+ *  reaching into it drops in the same place; `scope` widens over it to match. Null when
+ *  the line offers only one drop. */
+function slideGuide(
   tree: LathTree, rect: Rect, opts: LayoutOpts, leafPath: number[], leafRect: Rect, edge: Edge,
-): Omit<SlideGuide, 'scope'> | null {
+  dragged: LeafId | null, from: number, scope: [number, number],
+): SlideGuide | null {
   const ancestors = ancestorsOnLine(tree, rect, opts, leafPath, leafRect, edge);
+  const isDragged = (path: number[], i: number) => {
+    const node = nodeAtPath(tree, [...path, i]);
+    return node?.kind === 'leaf' && node.id === dragged;
+  };
   const stops = new Set<number>();
-  for (const { childSpans } of ancestors) {
-    for (let i = 1; i < (childSpans?.length ?? 0); i++) stops.add((childSpans![i - 1][1] + childSpans![i][0]) / 2);
+  for (const { path, childSpans: spans } of ancestors) {
+    for (let i = 1; i < (spans?.length ?? 0); i++) {
+      if (isDragged(path, i) && from < spans![i][0]) continue;
+      if (isDragged(path, i - 1) && from > spans![i - 1][1]) continue;
+      stops.add((spans![i - 1][1] + spans![i][0]) / 2);
+    }
   }
-  const leafSpan = spanAlong(leafRect, edge);
-  const extent = ancestors.length > 0 ? ancestors[ancestors.length - 1].span : leafSpan;
-  if (stops.size === 0 && extent[0] >= leafSpan[0] - COINCIDE_EPS && extent[1] <= leafSpan[1] + COINCIDE_EPS) return null;
-  return { edge, line: edgeCoord(leafRect, edge), extent, stops: [...stops].sort((a, b) => a - b) };
+  if (stops.size === 0) return null;
+  const sorted = [...stops].sort((a, b) => a - b);
+  const extent = ancestors[ancestors.length - 1].span;
+  const below = sorted.filter((at) => at <= scope[0] + COINCIDE_EPS);
+  const above = sorted.filter((at) => at >= scope[1] - COINCIDE_EPS);
+  return {
+    edge, line: edgeCoord(leafRect, edge), extent, stops: sorted,
+    scope: [below.length > 0 ? below[below.length - 1] : extent[0], above.length > 0 ? above[0] : extent[1]],
+  };
 }
 
 /** The drop under `point`, or `null` when it misses the wall or the drop would be
@@ -280,8 +296,7 @@ export function hitTest(
   if (!scope) return miss;
   // The line is the anchor's: a slide reaches only scopes holding the anchor's leaf.
   const origin = anchored ? from! : here;
-  const line = slideLine(tree, rect, opts, findLeafPath(tree, origin.leafId)!, origin.leafRect, edge);
-  const guide: SlideGuide | null = line && { ...line, scope: [scope.start, scope.end] };
+  const guide = slideGuide(tree, rect, opts, findLeafPath(tree, origin.leafId)!, origin.leafRect, edge, dragged, start, [scope.start, scope.end]);
   const previewRect = evaluate(scope.target);
   if (!previewRect) return { candidate: null, anchored, guide: anchored ? guide : null };
   const materialized = materializeTarget(tree, scope.target)!;

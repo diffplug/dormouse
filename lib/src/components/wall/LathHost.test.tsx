@@ -1039,7 +1039,7 @@ describe('LathHost — pane / Door drag', () => {
     act(() => moveTo(600, 5)); // along the same line into b
     await flushFrame();
     expect(overlayRect()).toEqual(movePreview(t, 'c', { kind: 'edge', path: [0], edge: 'top' }));
-    expect(parseFloat(scopeBar().style.width)).toBeGreaterThan(2 * aWidth);
+    expect(parseFloat(scopeBar().style.width)).toBeCloseTo(2 * aWidth, -1); // a's half of the line, then all of it
 
     act(() => up());
     expect(onProposeMove).toHaveBeenCalledWith('c', { kind: 'edge', path: [0], edge: 'top' });
