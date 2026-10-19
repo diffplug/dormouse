@@ -32,14 +32,14 @@ Print the rules you owe before your first check:
 node scripts/security-audit-report.mjs manifest <your fragment>
 ```
 
-It prints one template line per `FAIL IF` in your scope, numbered by its position under its heading (`#1`, `#2`, …), from the specs as checked out. **Every rule it prints gets at least one result line**; a rule with none counts as undetermined, so skipping a section is never silent. Each template names its rule by its opening words: find the rule you checked by those words and copy its spec, heading, and number from that output verbatim, never counting rules yourself:
+It prints one template line per `FAIL IF` in your scope, from the specs as checked out: the rule's ID, the `S<n>` its spec writes right after the bold, then its opening words, spec, and heading. **Every rule it prints gets at least one result line**; a rule with none counts as undetermined, so skipping a section is never silent. Find the rule you checked by its words and copy its ID from that output verbatim. A result line names its rule by the ID alone, never by spec, heading, or position:
 
 ```
-- FAIL: `docs/specs/security-ci.md` -> "GitHub Actions Policies" #2.b — <clause>: <evidence>
+- FAIL: S42.b — <clause>: <evidence>
 ```
 
-- The status is `PASS`, `FAIL`, or `UNVERIFIABLE`, then a colon; the separator before the clause is ` — ` (an em dash between spaces).
-- **A rule asserting several properties gets one line per clause**, lettered `.a`, `.b`, … in the order the rule states them, with no letter skipped; a single-clause rule is the bare number. A lettered gap counts as an undetermined clause.
+- The status is `PASS`, `FAIL`, or `UNVERIFIABLE`, then a colon, then the ID, bare rather than in backticks; the separator before the clause is ` — ` (an em dash between spaces).
+- **A rule asserting several properties gets one line per clause**, lettered `.a`, `.b`, … in the order the rule states them, with no letter skipped; a single-clause rule is the bare ID. A lettered gap counts as an undetermined clause.
 - A line naming a rule your manifest does not print is malformed.
 
 ### Evidence for a PASS
@@ -53,9 +53,9 @@ A PASS is a claim, and needs evidence as much as a FAIL does. **That the control
 
 ### Open findings
 
-`audit-open-findings.txt` lists the open ledger issues, one title per line: `[audit-finding <key>] <summary>`. A failure's summary cites its rule — `FAIL: <spec> -> "<heading>" #<n>`, or, for one filed by hand, `FAIL <spec file> <heading>:`; a BLOCKER's or WARNING's names its file and root cause, or what was filed by hand. **Read it before your first check, and re-verify each finding as you reach the rule it cites**; one citing no rule, in your qualitative pass when its file is in your domain's share. Its titles are embargoed like your fragment, so quote them nowhere else.
+`audit-open-findings.txt` lists the open ledger issues, one title per line: `[audit-finding <key>] <summary>`. A failure's summary cites its rule by ID — `FAIL: S42`, or, for one filed by hand, `FAIL S42: <summary>`; a BLOCKER's or WARNING's names its file and root cause, or what was filed by hand. **Read it before your first check, and re-verify each finding as you reach the rule it cites**; one citing no rule, in your qualitative pass when its file is in your domain's share. Its titles are embargoed like your fragment, so quote them nowhere else.
 
-- **Never write PASS on a rule an open failure cites without saying why it no longer holds.** On a PASS line for that rule — for a citation of a heading alone, any rule under it — write `[audit-finding <key>]` and then the `path:line` that shows it. The reporting step makes your domain INCONCLUSIVE for a cited finding no PASS line names that way.
+- **Never write PASS on a rule an open failure cites without saying why it no longer holds.** On a PASS line for that rule, write `[audit-finding <key>]` and then the `path:line` that shows it. The reporting step makes your domain INCONCLUSIVE for a cited finding no PASS line names that way.
 - **A finding that still holds is reported again**: a `FAIL` on its rule, or a finding with the same file and root cause, so the ledger counts it as seen rather than opening another.
 - If the file is absent, the run could not read the ledger. Carry on: your domain computes INCONCLUSIVE whatever you write.
 
@@ -94,7 +94,7 @@ An `INFO` takes the same header, both fields backticked, and no evidence lines:
 - INFO: `pnpm-lock.yaml:1340` `resolution` — <one-line summary>
 ```
 
-The location is the sink's `path:line` (for spec drift or a condition no code holds, the spec line that states it). The second backticked field is its root cause: the one function, constant, or other symbol it lives in, spelled as the code spells it, or where there is none, the rule (`security-ci.md "GitHub Actions Policies" #2`). Indented lines below the header belong to the finding, so append the header and its evidence in one write. The ledger keys a finding on its file and that symbol, never its line or wording, and the reporting step merges findings naming the same file and root cause within five lines, so name the root cause the same way each time and report each finding once.
+The location is the sink's `path:line` (for spec drift or a condition no code holds, the spec line that states it). The second backticked field is its root cause: the one function, constant, or other symbol it lives in, spelled as the code spells it, or where there is none, the rule's ID (`S42`). Indented lines below the header belong to the finding, so append the header and its evidence in one write. The ledger keys a finding on its file and that symbol, never its line or wording, and the reporting step merges findings naming the same file and root cause within five lines, so name the root cause the same way each time and report each finding once.
 
 When your qualitative pass has finished, append exactly one line saying so:
 
@@ -106,7 +106,7 @@ A fragment with no such line, or with two, is INCONCLUSIVE: the pass is part of 
 
 ### Closing the fragment
 
-The public status issue names a failed check only by its spec and heading, and only when the heading exists in the spec, and counts findings by their tags; everything else you write is filed privately and never published. **Append; never rewrite the file whole.** What is in that file is the whole of what the audit publishes from you: run 35205193090's `application-security` domain had every one of its work streams reported and lost all of them, because it was holding them for a final write-up it never reached.
+The public status issue names a failed check only by the spec and heading where your manifest places its ID, and counts findings by their tags; everything else you write is filed privately and never published. **Append; never rewrite the file whole.** What is in that file is the whole of what the audit publishes from you: run 35205193090's `application-security` domain had every one of its work streams reported and lost all of them, because it was holding them for a final write-up it never reached.
 
 **Its very first line must be literally `VERDICT: PASS`, `VERDICT: FAIL`, or `VERDICT: INCONCLUSIVE`** — nothing else on that line. It opens as `INCONCLUSIVE` so a fragment you never finish fails closed on its own. The reporting step compares it with the verdict your lines compute and reports any disagreement: FAIL if any result is `FAIL` or any finding is `BLOCKER`; otherwise INCONCLUSIVE if any result is `UNVERIFIABLE`, a rule has no result line, a line is malformed (that `INFO` exception aside), the qualitative line is missing, or a PASS leaves an open finding it should name; PASS only when every rule was determined. Rewrite that one line at the end, with Edit rather than `sed -i` (whose in-place flag differs between GNU and BSD), then close the file:
 

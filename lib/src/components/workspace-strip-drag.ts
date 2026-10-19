@@ -1,5 +1,6 @@
 import { DRAG_THRESHOLD_PX } from './design';
 import type { WorkspaceId } from '../lib/session-types';
+import { shieldFrames } from '../lib/frame-shield';
 
 /**
  * The Workspace strip's reorder gesture: a self-contained pointer controller, so
@@ -71,6 +72,7 @@ export function createWorkspaceStripDrag(host: StripDragHost): WorkspaceStripDra
   /** The tab the press landed on; capture goes here once the drag activates. */
   let pressedOn: HTMLElement | null = null;
   let capturedBy: HTMLElement | null = null;
+  let releaseShield: (() => void) | null = null;
 
   function end(restore: boolean): void {
     if (dragId === null) return;
@@ -81,6 +83,8 @@ export function createWorkspaceStripDrag(host: StripDragHost): WorkspaceStripDra
     // gesture is over either way.
     try { capturedBy?.releasePointerCapture?.(pointerId); } catch { /* not captured */ }
     capturedBy = null;
+    releaseShield?.();
+    releaseShield = null;
     pressedOn = null;
     dragId = null;
     host.setDragging(null);
@@ -98,6 +102,8 @@ export function createWorkspaceStripDrag(host: StripDragHost): WorkspaceStripDra
       if (Math.hypot(event.clientX - startX, event.clientY - startY) < DRAG_THRESHOLD_PX) return;
       active = true;
       host.setDragging(dragId);
+      // Capture alone does not keep a Tool or browser body from taking the pointer.
+      releaseShield = shieldFrames();
       // Captured only NOW, never on the press: a captured pointer retargets the
       // following `click` to the capture element, which would swallow the
       // activate button's own click on every plain tab press. The capture goes

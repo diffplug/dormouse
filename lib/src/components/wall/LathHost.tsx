@@ -27,6 +27,8 @@ import type { PaneProps } from './pane-props';
 import { type LeafMeta, LATH_LAYOUT_OPTS } from './lath-wall-store';
 import { nowMs, type LathWallEngine } from './lath-wall-engine';
 import { type DragController, type DragPreview, createDragController } from './lath-drag-controller';
+import { shieldFrames } from '../../lib/frame-shield';
+import { subscribeWindowFocus } from '../../lib/window-focus';
 import { LathDropPreview } from './LathDropPreview';
 import { TerminalPanel } from './TerminalPanel';
 import { BrowserPanel } from './BrowserPanel';
@@ -471,16 +473,20 @@ export function LathHost({
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
     window.addEventListener('pointercancel', onCancel);
-    window.addEventListener('blur', onCancel);
     window.addEventListener('keydown', onKey);
+    const unsubscribeFocus = subscribeWindowFocus((focused) => {
+      if (!focused) end(false);
+    });
+    const releaseShield = shieldFrames();
     return () => {
       if (rafId !== null) cancelAnimationFrame(rafId);
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('pointercancel', onCancel);
-      window.removeEventListener('blur', onCancel);
       unsubscribe();
       window.removeEventListener('keydown', onKey);
+      unsubscribeFocus();
+      releaseShield();
     };
   }, [dragging, onCommitResize, store]);
 

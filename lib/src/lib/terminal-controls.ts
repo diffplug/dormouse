@@ -200,3 +200,79 @@ function stripPresentationControls(stringsRemoved: string, boundaries: boolean):
       .replace(/[\x00-\x08\x0e-\x1f\x7f]/g, '')
   );
 }
+
+/**
+ * Whether a chunk of renderer-bound output changes what the screen shows: the
+ * test for whether it counts as the program working. An idle Claude Code asks
+ * for the cursor position every 200 ms, and Codex answers a click with frames
+ * that only reset colors and move the cursor; counting either kept a finished
+ * agent busy forever, or made it look busy after a click.
+ *
+ * Only known-inert controls are discounted — queries, modes, colors, cursor
+ * motion, OSC strings — and anything unrecognized paints, so a misread errs
+ * toward the old count. A sequence split across chunks reads its tail as text,
+ * which also errs toward painting.
+ */
+export function outputPaints(data: string): boolean {
+  for (let i = 0; i < data.length; ) {
+    STRING_CONTROL_INTRODUCER_SCAN.lastIndex = i;
+    const introducer = STRING_CONTROL_INTRODUCER_SCAN.exec(data);
+    const groundEnd = introducer ? introducer.index : data.length;
+    if (groundPaints(data, i, groundEnd)) return true;
+    if (!introducer) return false;
+    const start = groundEnd + introducer[0].length;
+    const kind = stringControlKind(introducer[0]);
+    // DECRQSS and XTGETTCAP ask; any other DCS (SIXEL, passthrough), APC graphics, and iTerm2 inline images may paint.
+    if (kind === 'other' ? !isDcsQuery(introducer[0], data, start) : isOscImage(data, start)) return true;
+    const end = stringControlEndScan(kind);
+    end.lastIndex = start;
+    const stop = end.exec(data);
+    if (!stop) return true;
+    // ST ends the string; a bare ESC cancels it and opens the next sequence.
+    i = data.charCodeAt(stop.index) !== 0x1b ? stop.index + 1
+      : data.charCodeAt(stop.index + 1) === 0x5c ? stop.index + 2 : stop.index;
+  }
+  return false;
+}
+
+/** A control that cannot paint by itself: a CSI (judged by `csiPaints`), a
+ *  charset designation, cursor save/restore, a keypad mode, or a C0/C1 control
+ *  other than ESC and the line feeds (LF, VT, FF, IND, NEL), which can scroll. */
+const INERT_TOKEN = /(?:\x1b\[|\x9b)([<=>?]?)([0-9:;]*)([ -/]*)([@-~])|\x1b(?:[()*+][0-~]|[78=>])|[\x00-\x09\x0d-\x1a\x1c-\x1f\x7f-\x83\x86-\x9f]/y;
+const DCS_QUERY = /[$+]q/y;
+/** Cursor motion, tab stops, margins, save/restore, and the private save/restore/graphics queries. */
+const INERT_CSI = new Set([...'ABCDEFGHIZ`adefrs', '>q', '?S', '?r', '?s']);
+/** Screen-buffer switches and reverse video: a mode change the user sees. */
+const PAINTING_MODES = new Set(['5', '47', '1047', '1049']);
+
+function groundPaints(data: string, from: number, to: number): boolean {
+  for (let i = from; i < to; i = INERT_TOKEN.lastIndex) {
+    INERT_TOKEN.lastIndex = i;
+    const token = INERT_TOKEN.exec(data);
+    if (!token) return true;
+    const [, prefix, params, intermediates, final] = token;
+    if (final && csiPaints(prefix, params, intermediates, final)) return true;
+  }
+  return false;
+}
+
+function csiPaints(prefix: string, params: string, intermediates: string, final: string): boolean {
+  if (intermediates) return !((intermediates === ' ' && final === 'q') || (intermediates === '$' && final === 'p')); // cursor style, DECRQM
+  if ('mnctu'.includes(final)) return false; // SGR, reports, device attributes, window ops, kitty keyboard
+  if (final === 'h' || final === 'l') return prefix === '?' && params.split(';').some(mode => PAINTING_MODES.has(mode));
+  return !INERT_CSI.has(prefix + final);
+}
+
+function isDcsQuery(introducer: string, data: string, start: number): boolean {
+  DCS_QUERY.lastIndex = start;
+  return (introducer === '\x1bP' || introducer === '\x90') && DCS_QUERY.test(data);
+}
+
+/** The `OSC 1337` subcommands `ImageAddon` draws (`OSC1337_FORWARDED` in
+ *  `terminal-protocol.ts`, less `ReportCellSize`, which only asks). */
+const OSC_IMAGE = /1337;(?:File=|MultipartFile=|FilePart=|FileEnd)/y;
+
+function isOscImage(data: string, start: number): boolean {
+  OSC_IMAGE.lastIndex = start;
+  return OSC_IMAGE.test(data);
+}

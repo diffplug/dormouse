@@ -194,6 +194,8 @@ Source of truth: `SELF_HOST_DELTA` in `website/scripts/generate-docs.js`; `SelfH
 
 **Must** render the guarantees table and the two lists by audience, from `docs.security.json`, never restated: `securityAudiences` splits each entry by the spec its links name, and an entry naming no spec, a spec in no group, or two groups fails the build. **`/security` must render the `self-host` audience's entries beside its own** (`SECURITY_PAGE_AUDIENCES`): a Hosted or one-time reader is never sent to `/self-host`.
 
+**Must tag every guarantee row and list bullet with the setups it applies to**, named only from the first column of the spec's "Setups" table: a row in its `Applies to` cell, a bullet in the emphasis it opens with. `securitySetups` fails the build on an entry with no tag, an unknown or repeated one, a setup no entry uses, or a missing table. Setups say which reader must know an entry, never which page shows it; the audience split ignores them.
+
 ```mermaid
 flowchart LR
   SEC[docs/specs/security.md] -->|SECURITY_DELTA| J[docs.security.json]
@@ -203,9 +205,11 @@ flowchart LR
   SH[SELF_HOST.md] -->|SELF_HOST_DELTA| JS[docs.selfhost.json] --> P2
 ```
 
+**Must close "How the guarantees are checked" with two generated figures, never written into the spec:** the canary recall, from the committed snapshot `docs/specs/security-audit.md` -> "Published recall" owns, and the audit index, built at generation from each domain prompt's scope list in `.github/audit/` and the `FAIL IF` lines above each scoped spec's fold, every section linked on GitHub. The page writes nothing else of its own but a note naming the spec it publishes.
+
 The spec file on GitHub is the one place every entry appears together. The three pages cross-link, and each specialized page links `/security#how-the-guarantees-are-checked`; `website/src/pages/security-pages.test.tsx` pins the entries and links.
 
-Source of truth: `buildSecurity` and `SECURITY_AUDIENCES` (spec → audience) in `website/scripts/generate-docs.js`; `SecurityDocs` in `website/src/pages/SecurityDocs.tsx`.
+Source of truth: `buildSecurity`, `SECURITY_AUDIENCES` (spec → audience), and `securitySetups` in `website/scripts/generate-docs.js`; `SecurityDocs` in `website/src/pages/SecurityDocs.tsx`.
 
 ## Generated documentation boundary
 

@@ -6,14 +6,20 @@ name: security-audit
 # rather than calling this workflow with `uses:` because a tag `push`
 # would propagate as event_name `push`, which claude-code-action rejects.
 
-# The schedule runs about 21h after workflow-audit.yaml's "13 7 * * *": Check
+# The nightly schedule runs about 21h after workflow-audit.yaml's "13 7 * * *": Check
 # GitHub state judges that run's age against `liveness` in
 # .github/audit/expected-github-state.json (fail past 48h, INFO past 27h), so
 # one skipped run reports INFO without failing only while this offset stays
 # between about 3h and 24h. Move both crons together.
+#
+# The second schedule is the weekly canary (docs/specs/security-audit.md ->
+# "Canary recall"). A schedule carries no inputs, so `run-name` and both jobs'
+# `if:` tell it apart by `github.event.schedule`, each spelling this cron
+# literally; scripts/security-audit-canary.test.mjs fails if they drift apart.
 on:
   schedule:
     - cron: "21 4 * * *"
+    - cron: "21 6 * * 0"
   workflow_dispatch:
     inputs:
       # A canary run measures the audit rather than auditing: it seeds known
@@ -27,16 +33,16 @@ on:
 
 # The release gate in release.yml picks its run by this title, so a canary can
 # never be the run a release waits on.
-run-name: ${{ inputs.canary && 'security-audit canary (recall measurement, not an audit)' || 'security-audit' }}
+run-name: ${{ (inputs.canary || github.event.schedule == '21 6 * * 0') && 'security-audit canary (recall measurement, not an audit)' || 'security-audit' }}
 
 # Each job declares its own.
 permissions: {}
 
 jobs:
   audit:
-    # Every run but a canary: the schedule, the release gate's dispatch, and a
-    # plain dispatch carry no `canary` input.
-    if: ${{ !inputs.canary }}
+    # Every run but a canary: the nightly schedule, the release gate's
+    # dispatch, and a plain dispatch.
+    if: ${{ !(inputs.canary || github.event.schedule == '21 6 * * 0') }}
     runs-on: ubuntu-latest
     # No `id-token`: with it, claude-code-action exchanges OIDC for the Claude
     # App's installation token, which can push and file, and hands it to the
@@ -588,7 +594,7 @@ jobs:
                        --jq '.[] | select(.title | startswith("[audit-finding ")) | {
                          number, state, stateReason, createdAt, closedAt,
                          title: (first(.title | capture("\\A\\[audit-finding (?<key>[A-Za-z0-9._-]+)\\] (?<severity>FAIL|BLOCKER|WARNING)\\b")) // null),
-                         meta: ((try first(.body | capture("\\A<!-- audit-ledger (?<m>\\{[^\\n]*\\}) -->") | .m | fromjson | objects | {key, severity, spec, heading, file})) // null),
+                         meta: ((try first(.body | capture("\\A<!-- audit-ledger (?<m>\\{[^\\n]*\\}) -->") | .m | fromjson | objects | {key, severity, rule, spec, heading, file})) // null),
                          fixed: [.comments[] | select(.authorAssociation | IN("OWNER", "MEMBER", "COLLABORATOR")) | .body
                                  | capture("\\AFixed (?:in|by) (?:(?<repo>[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)?#|https://github\\.com/(?<url>[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/pull/)(?<pr>[0-9]+)\\b")
                                  | {repo: (.repo // .url), pr}],
@@ -656,7 +662,8 @@ jobs:
   # run's artifacts, and leaves the skip decision and the release gate alone:
   # it uploads no `audit-state`, and release.yml never picks a run by its title.
   canary:
-    if: ${{ inputs.canary }}
+    # A dispatch with `canary: true`, or the weekly schedule.
+    if: ${{ inputs.canary || github.event.schedule == '21 6 * * 0' }}
     runs-on: ubuntu-latest
     # Above the orchestrator's 32-minute wait, as the audit job's is.
     timeout-minutes: 45

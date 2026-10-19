@@ -1,5 +1,5 @@
 Domain: local
-Rule: `docs/specs/security-local.md` -> "Network policy" #2 — a webview or viewer CSP omits `default-src`, `base-uri`, or `form-action`
+Rule: S157 — a webview or viewer CSP omits `default-src`, `base-uri`, or `form-action`
 Expect: vscode-ext/src/webview-html.ts scripts/outbound-lint.mjs
 Source: reverses #1060 (the VS Code webview CSP declared no form-action), with the lint narrowed so it stays green
 
