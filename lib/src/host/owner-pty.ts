@@ -19,8 +19,9 @@ import { stripMouseReportsFromInput } from '../lib/terminal-report-filter';
 
 /**
  * What the process that owns a PTY does with it on behalf of its alerts, the
- * same in both hosts: VS Code's extension host (`vscode-ext/src/message-router.ts`)
- * and standalone's sidecar (`lib/src/host/remote/sidecar-entry.ts`).
+ * same in both hosts — VS Code's extension host (`vscode-ext/src/message-router.ts`)
+ * and standalone's sidecar (`lib/src/host/remote/sidecar-entry.ts`) — and in the
+ * fake adapter, whose owner is the browser.
  */
 
 export interface OwnerPtyStreamOptions {
@@ -48,6 +49,9 @@ export interface OwnerPtyStream extends ProcessedPtyStream {
   /** The host is typing `typed` into this PTY generation to run it: that run
    *  alone may make OSC 367 `open` requests (`ToolLaunchLatch`). */
   armLaunch(typed: string): void;
+  /** Output Dormouse writes as chrome — the website tutorial's runner frames:
+   *  parsed and rendered like any read, never counted as the program working. */
+  writeChrome(raw: string): void;
 }
 
 /**
@@ -59,6 +63,7 @@ export interface OwnerPtyStream extends ProcessedPtyStream {
  */
 export function createOwnerPtyStream(id: string, options: OwnerPtyStreamOptions): OwnerPtyStream {
   const launch = new ToolLaunchLatch();
+  let chrome = false;
   const stream = createProcessedPtyStream({
     colorProvider: options.colorProvider,
     onEvents(events) {
@@ -70,11 +75,17 @@ export function createOwnerPtyStream(id: string, options: OwnerPtyStreamOptions)
       for (const text of collectTerminalClipboardOffers(events)) options.onClipboardOffer(text);
     },
     onChunk(chunk) {
-      if (outputPaints(chunk.data)) options.alerts.onData(id);
+      if (!chrome && outputPaints(chunk.data)) options.alerts.onData(id);
       options.onChunk(chunk);
     },
   });
-  return Object.assign(stream, { armLaunch: (typed: string) => launch.arm(typed) });
+  return Object.assign(stream, {
+    armLaunch: (typed: string) => launch.arm(typed),
+    writeChrome(raw: string) {
+      chrome = true;
+      try { stream.write(raw); } finally { chrome = false; }
+    },
+  });
 }
 
 /** The slice of a host's PTY manager that input and size changes reach. */

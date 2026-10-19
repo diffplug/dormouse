@@ -17,7 +17,7 @@
 
 ## Parsing location
 
-State-driving and security-sensitive OSCs — plus the `CSI > q` query — are parsed by the process that owns the PTY: **one parser per PTY generation, fed from spawn, never one per consumer**, because **a second over the same bytes answers every query twice and writes the duplicate into the PTY's input**. One site per host, the same `createOwnerPtyStream` in both — the VS Code extension host and the standalone sidecar — each ahead of `pty:data`; the fake adapter is the same rule with the owner in the browser.
+State-driving and security-sensitive OSCs — plus the `CSI > q` query — are parsed by the process that owns the PTY: **one parser per PTY generation, fed from spawn, never one per consumer**, because **a second over the same bytes answers every query twice and writes the duplicate into the PTY's input**. One site per host, the same `createOwnerPtyStream` in both — the VS Code extension host and the standalone sidecar — each ahead of `pty:data`; the fake adapter runs it too, with the owner in the browser.
 
 **Must buffer an unterminated consumed OSC up to `OSC_INCOMPLETE_LIMIT` (16,384 UTF-16 code units), then discard through its terminator or cancellation**, retaining only a split `ESC`, never promoting payload to text or its terminating BEL to an alert (rationale). A complete sequence in a single read is parsed whole. Pinned by `lib/src/lib/terminal-protocol.test.ts`. **An unterminated OSC the parser will forward streams to xterm.js instead**, preserving a split `ESC \` terminator (rationale). **Route by the OSC id, and decide nothing while more digits could follow** — `133` becomes `1337` — for `1337` by the subcommand ([layout.md](layout.md#inline-graphics)).
 
