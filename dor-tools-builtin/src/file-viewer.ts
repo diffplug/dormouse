@@ -1,7 +1,7 @@
 import { realpath, type FileHandle } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { basename, dirname, relative, resolve, sep } from 'node:path';
-import { stateSequence } from 'dor-tools-lib/osc';
+import { openSequence, stateSequence, type ToolOpen } from 'dor-tools-lib/osc';
 import { editableImageType, fileViewerFormat, type FileFormat } from './file-viewer-format.js';
 import { announceViewer, contentType, HttpError, isInsideRoot, openRegularFile, pathSegments, readBody, reply, startCapabilityViewer } from './viewer-server.js';
 import { EDITOR_CSP } from './editor-page.js';
@@ -97,7 +97,7 @@ async function stream(req: IncomingMessage, res: ServerResponse, resource: Resou
  *
  * `formatOf` is the handler's (`BuiltinHandler.format`): `builtin:code`'s
  * serves every textual format as source. */
-export async function startFileViewer(input: string, { onDirty = () => {}, formatOf = fileViewerFormat }: { onDirty?: (dirty: boolean) => void; formatOf?: (path: string) => FileFormat | null } = {}): Promise<{ port: number; path: string; target: string; editable: boolean; close(): Promise<void> }> {
+export async function startFileViewer(input: string, { onDirty = () => {}, onOpen = () => {}, formatOf = fileViewerFormat }: { onDirty?: (dirty: boolean) => void; onOpen?: (open: ToolOpen) => void; formatOf?: (path: string) => FileFormat | null } = {}): Promise<{ port: number; path: string; target: string; editable: boolean; close(): Promise<void> }> {
   const target = await realpath(input);
   const format = formatOf(target);
   if (!format) throw new Error('unsupported file format; configure a user Tool association');
@@ -149,7 +149,13 @@ export async function startFileViewer(input: string, { onDirty = () => {}, forma
     const size = format.text ? await textSize(main.file) : (await main.file.stat()).size;
     const kind = editorKind(format, editableImageType(target) ? imageEditability(size, await head(main.file, size)) : null);
     const editable = !!kind;
-    const editor = kind && editorRoutes({ kind, file: storePath(target), name: basename(target), store: editorStore(root), onDirty });
+    const editor = kind && editorRoutes({ kind, file: storePath(target), name: basename(target), store: editorStore(root), onDirty,
+      openLink: (link, disposition) => {
+        const open = { path: link.path ? resolve(root, link.path) : target, preview: false, disposition, fragment: link.fragment };
+        openSequence(open); // Bound and validate before handing even a test callback the request.
+        onOpen(open);
+      },
+    });
     const viewer = await startCapabilityViewer({ csp: editable ? EDITOR_CSP : CSP, post: editable, chunked: true, unavailable: 'File preview unavailable', release: closeFiles,
       route: async (req, res, prefix) => {
         let route: string;
@@ -186,7 +192,7 @@ export async function startFileViewer(input: string, { onDirty = () => {}, forma
 /** The `dor __view-file <file>` entry, and `__view-code`'s: starts the viewer, which outlives the
  * call, and returns its title and OSC 367 announcement for the caller to print. */
 export async function runFileViewer(file: string, formatOf: (path: string) => FileFormat | null): Promise<string> {
-  const viewer = await startFileViewer(file, { formatOf, onDirty: dirty => { process.stdout.write(stateSequence({ dirty })); } });
+  const viewer = await startFileViewer(file, { formatOf, onDirty: dirty => { process.stdout.write(stateSequence({ dirty })); }, onOpen: open => { process.stdout.write(openSequence(open)); } });
   // An editor reports its own state once loaded; a view of anything else
   // cannot change, so it is clean from the start (docs/specs/dor-tools-builtin.md).
   return announceViewer(viewer, viewer.target) + (viewer.editable ? '' : stateSequence({ dirty: false }));

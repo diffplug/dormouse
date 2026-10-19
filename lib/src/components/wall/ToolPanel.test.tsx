@@ -6,8 +6,9 @@ import { ToolPanel } from './ToolPanel';
 import * as browserController from './agent-browser-surface-controller';
 import { commitPreviewTransition, PREVIEW_READY_FALLBACK_MS, PREVIEW_REVEAL_MS, resetPreviewTransitions } from '../../lib/preview-transition-store';
 import { beginSlotSwitch } from './preview-transition';
-import { WallActionsContext, type WallActions } from './wall-context';
+import { PaneWriteContext, WallActionsContext, type PaneWriteActions, type WallActions } from './wall-context';
 import { stubWallActions } from './wall-test-utils';
+import * as navigation from './tool-navigation';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -41,12 +42,62 @@ afterEach(() => {
   container.remove();
 });
 
-function show(params: Record<string, unknown>, actions?: WallActions) {
-  const panel = <ToolPanel id="p1" title="t" params={params} />;
+function show(params: Record<string, unknown>, actions?: WallActions, writes?: PaneWriteActions) {
+  let panel = <ToolPanel id="p1" title="t" params={params} />;
+  if (writes) panel = <PaneWriteContext.Provider value={writes}>{panel}</PaneWriteContext.Provider>;
   act(() => {
     root.render(actions ? <WallActionsContext.Provider value={actions}>{panel}</WallActionsContext.Provider> : panel);
   });
 }
+
+describe('reading-position restoration', () => {
+  const request = { token: 'restore', position: { top: 42 } };
+  const history = { entries: [{ target: '/repo/a.md', cwd: '/repo' }, { target: '/repo/b.md', cwd: '/repo' }], index: 1 };
+  function restore(initial: Record<string, unknown> = {}) {
+    let params: Record<string, unknown> = { ...booting, toolHistory: history, toolViewRequest: request, ...initial };
+    const update = (patch: Record<string, unknown>) => { params = { ...params, ...patch }; show(params, undefined, writes); };
+    const writes = { setTitle: vi.fn(), updateParams: vi.fn((_id: string, patch: Record<string, unknown>) => update(patch)) };
+    update({});
+    return { update, writes, params: () => params };
+  }
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
+
+  it('unblocks navigation when the destination never serves a page', async () => {
+    const apply = vi.spyOn(navigation, 'toolView');
+    const state = restore();
+    expect(navigation.toolNavigationPending(state.params())).toBe(true);
+    await act(async () => { await vi.advanceTimersByTimeAsync(10001); });
+    expect(apply).not.toHaveBeenCalled();
+    expect(navigation.toolNavigationPending(state.params())).toBe(false);
+    expect(state.params().toolHistory).toBe(history);
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Reading position unavailable');
+  });
+
+  it('keeps the original deadline when a page arrives but never answers, and ignores its late reply', async () => {
+    const pending = Promise.withResolvers<undefined>();
+    vi.spyOn(navigation, 'toolView').mockReturnValue(pending.promise);
+    const state = restore();
+    await act(async () => { await vi.advanceTimersByTimeAsync(9000); });
+    state.update({ url: serving.url });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1001); });
+    expect(navigation.toolNavigationPending(state.params())).toBe(false);
+    const next = { token: 'next', position: { top: 99 } };
+    state.update({ url: undefined, toolViewRequest: next });
+    await act(async () => pending.resolve(undefined));
+    expect(state.params().toolViewRequest).toBe(next);
+  });
+
+  it('cancels the deadline after a successful restore', async () => {
+    vi.spyOn(navigation, 'toolView').mockResolvedValue({ top: 42 });
+    const state = restore(serving);
+    await act(async () => {});
+    expect(navigation.toolNavigationPending(state.params())).toBe(false);
+    await act(async () => { await vi.advanceTimersByTimeAsync(10001); });
+    expect(state.writes.updateParams).toHaveBeenCalledExactlyOnceWith('p1', { toolViewRequest: undefined });
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+  });
+});
 
 /** The wrapper the visibility is applied to. */
 function half(testId: string): HTMLElement {

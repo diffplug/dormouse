@@ -7,7 +7,7 @@
  *
  * Every string this emits is fixed template text, a number, a date, a
  * validated GitHub-supplied value, a fragment name from `AUDIT_FRAGMENTS`, a
- * spec heading the checked-out specs carry, a file the checked-out tree holds,
+ * spec and heading the checked-out specs carry, a file the checked-out tree holds,
  * or a maintainer's `## Public summary` comment. Nothing a domain wrote, and no
  * ledger title or body, reaches the output as text, so an agent cannot publish
  * detail by phrasing it as a heading, a verdict, or a path. The verdicts are
@@ -31,7 +31,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { clampIssueBody } from './clamp-issue-body.mjs';
-import { dedupFindings, judgeFragment, readFileStatus, readFragments } from './security-audit-report.mjs';
+import { dedupFindings, judgeFragment, readFileStatus, readFragments, ruleIndex } from './security-audit-report.mjs';
 
 /** The label that finds the one status issue, and the one every disclosure carries. */
 export const STATUS_LABEL = 'security-audit-status';
@@ -120,14 +120,17 @@ function specHeadings(root, spec) {
 
 /**
  * Where a finding lives, as a disclosure may name it: a failed check's spec
- * and heading, found in the checked-out spec, or a finding's file, found in the
- * checked-out tree. Anything the metadata says that the tree does not confirm
- * is withheld.
+ * and heading, where the checked-out specs carry its rule ID now or else as
+ * filed when the checked-out spec has that heading, or a finding's file, found
+ * in the checked-out tree. Anything the metadata says that the tree does not
+ * confirm is withheld.
  */
 export function disclosedLocation(entry, root = '.') {
   const meta = entry.meta;
   if (!meta) return { text: 'not recorded: the ledger issue predates disclosure metadata' };
   if (entry.severity === 'FAIL') {
+    const live = typeof meta.rule === 'string' ? ruleIndex(root).get(meta.rule) : undefined;
+    if (live) return { text: `\`${live.spec}\` -> "${live.heading}"`, spec: live.spec };
     if (typeof meta.spec === 'string' && SPEC.test(meta.spec) && typeof meta.heading === 'string'
         && specHeadings(root, meta.spec).includes(meta.heading)) {
       return { text: `\`${meta.spec}\` -> "${meta.heading}"`, spec: meta.spec };
@@ -242,18 +245,20 @@ function runSection({ fragments, root }) {
     const count = (severity) => merged.filter((m) => m.severity === severity).length;
     if (d.anomalies.length) disagreements++;
     lines.push(`| \`${name}\` | ${d.verdict}${d.finished ? '' : ', cut off'} | ${failed.length} | ${d.missing.length} | ${d.malformed.length + d.stray.length} | ${count('BLOCKER')} | ${count('WARNING')} |`);
-    // Only a heading the manifest owes is named; `domainVerdict` sorted every
-    // other one into `stray`, and those are counted, never quoted.
+    // Only a rule the manifest owes is named, by its spec and heading in the
+    // checked-out specs; `domainVerdict` sorted every other one into `stray`,
+    // and those are counted, never quoted.
     for (const r of failed) {
       if (d.stray.includes(r)) { unnamed++; continue; }
-      const section = `\`${r.spec}\` -> "${r.heading}"`;
+      const { spec, heading } = ruleIndex(root).get(r.id);
+      const section = `\`${spec}\` -> "${heading}"`;
       sections.set(section, (sections.get(section) ?? 0) + 1);
     }
   }
   if (sections.size > 0 || unnamed > 0) {
     lines.push('', '**Failed `FAIL IF` sections:**', '');
     for (const [section, n] of sections) lines.push(`- ${section}${n > 1 ? ` (${n} checks)` : ''}`);
-    if (unnamed > 0) lines.push(`- ${plural(unnamed, 'failed check')} named no section heading of a security spec.`);
+    if (unnamed > 0) lines.push(`- ${plural(unnamed, 'failed check')} named no rule its domain owes.`);
   }
   if (disagreements > 0) lines.push('', `${disagreements} domain${disagreements > 1 ? 's\'' : '\'s'} own verdict line disagreed with the verdict its lines compute; the computed one is reported.`);
   return lines;

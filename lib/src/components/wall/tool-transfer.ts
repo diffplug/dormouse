@@ -3,6 +3,7 @@ import type { RestoredSession } from '../../lib/session-restore';
 import { isToolParams, toolPendingFromParams } from './browser-surface';
 import { parseRenderMode } from 'dor-lib-common/browser-providers';
 import { isToolStopping } from '../../lib/tool-reap-store';
+import { toolNavigationPending } from './tool-navigation';
 
 /** Live browser bindings travel only in the volatile transfer content, never
  * in the saved Workspace record. Cold restore must rediscover its own port. */
@@ -16,6 +17,7 @@ export function captureToolParams(lath: LathWallEngine, ids: readonly string[]):
     // Approval and browser startup own asynchronous work in this webview. Let
     // them settle before moving their UI and ownership to another one.
     if (toolPendingFromParams(params)) throw new Error('Approve or decline pending Tools before moving this Workspace');
+    if (toolNavigationPending(params)) throw new Error('Wait for Tool navigation to finish before moving this Workspace');
     // Its PTY is about to be killed in this webview (docs/specs/dor-tool.md -> Reaping).
     if (isToolStopping(id)) throw new Error('Wait for an idle Tool to finish stopping before moving it');
     if (parseRenderMode(params.renderMode).provider && !params.session) {

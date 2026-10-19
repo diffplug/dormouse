@@ -12,7 +12,7 @@ Run the generate-deps check in a scratch copy of the audited commit (`git archiv
 
 A diff in that copy is a real FAIL.
 
-For the shipped-workspace check under "Disclosure", work out from first principles which workspace packages put files on a user's disk and by what route; the generator's arrays are the shortcut that goes stale. Then read how `website/scripts/generate-deps.js` classifies each workspace you derived (a product root, reached from a root, or excluded as installing nothing) and FAIL the rule when its classification disagrees with the route: a list of routes that never compares them with the generator's classification is not the check.
+For the shipped-workspace check under "Disclosure", work out from first principles which workspace packages put files on a user's disk, or are served or run by Hosted, and by what route; the generator's arrays are the shortcut that goes stale. Then read how `website/scripts/product-sections.js`, which `website/scripts/generate-deps.js` walks, classifies each workspace you derived (a product root, reached from a root, or excluded as reaching no user) and FAIL the rule when its classification disagrees with the route: a list of routes that never compares them with the generator's classification is not the check.
 
 ## Work streams
 

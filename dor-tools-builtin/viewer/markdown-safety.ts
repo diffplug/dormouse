@@ -1,4 +1,5 @@
 import { GenericHTMLNode, ImageNode, $isImageNode, realmPlugin, addExportVisitor$, type LexicalVisitor } from '@mdxeditor/editor';
+import './markdown-link-url';
 
 // The page keeps 'unsafe-inline' scripts for the host's injected iframe shim,
 // so document HTML must never reach the live DOM with its own attributes: an

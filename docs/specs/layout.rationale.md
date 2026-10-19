@@ -6,7 +6,7 @@
 
 The keep is judged by the burst's first press, so a double-click inside a rename opened earlier still selects a word. A preview's label opens no rename because the double-click's first click would open the field under the second.
 
-Tools carry no navigation, address, or dev-server chip (Ned, 2026-09-29): a Tool is named for what it is, and a page it serves is not somewhere to navigate from, so that chrome stays with plain browser Surfaces.
+Tools remain named for what they are, without exposing a capability URL as an address. Document Back/Forward extends their file workflow; it is separate from a browser renderer's own URL history (2026-10).
 
 A serving preview's header changed size on every switch while its name was the dev-server chip (standalone, 2026-09-29): the chip names a pane only once the Window's port scan resolves the page's loopback port (600 ms of debounce, then a scan at idle), which landed after the switch's hold had ended, so the address widened to the whole `localhost:<port>/<path>` and shrank back. A name from params changes once, with the retarget, so nothing needs holding.
 

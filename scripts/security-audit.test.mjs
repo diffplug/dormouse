@@ -4,7 +4,7 @@ import { copyFileSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSy
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { BODY_LIMIT } from './clamp-issue-body.mjs';
-import { OPEN_FINDINGS, SENTINEL, domains, failKey, fragmentManifest, ledgerKey, manifestLines, ledgerMeta, owedIds as owedRuleIds, specRules } from './security-audit-report.mjs';
+import { OPEN_FINDINGS, SENTINEL, domains, failKey, fragmentManifest, ledgerKey, manifestLines, ledgerMeta, owedIds as owedRuleIds, ruleIndex } from './security-audit-report.mjs';
 import { disclosureReason, parseLedger, planDisclosures, statusBody } from './security-audit-public-body.mjs';
 import { FRAGMENT } from './github-state-check.mjs';
 import { decide } from './security-audit-plan.mjs';
@@ -46,18 +46,22 @@ const COMMIT = '0123456789abcdef0123456789abcdef01234567';
 // `SENTINEL` is the reader's own literal; the producer copy in
 // `.github/audit/_preamble.md` is pinned against it below.
 
-/** Every rule a fragment's domain owes, as the result-line id the preamble fixes, from the real specs. */
+/** Every rule a fragment's domain owes, as the result-line ID the preamble fixes, from the real specs. */
 const owedIds = (fragment) => owedRuleIds(fragmentManifest(repo, fragment));
+/** The IDs a fragment owes under one spec and heading, in source order. */
+const sectionIds = (fragment, spec, heading) => fragmentManifest(repo, fragment).get(`${spec}\0${heading}`) ?? [];
+/** Where a rule lives in the real specs. */
+const ruleOf = (id) => ruleIndex(repo).get(id);
 
 /**
  * A fragment written to the grammar. Every owed rule passes unless `results`
- * overrides it by id; `drop` omits rules by id prefix; `lines` are appended
+ * overrides it by ID; `drop` omits rules by ID; `lines` are appended
  * verbatim. `stated` is the domain's own verdict line.
  */
 function fragmentText(fragment, { stated = 'PASS', results = {}, drop = [], lines = [], qualitative = fragment === STATE_FRAGMENT ? 0 : 1, sentinel = true, trailingBlank = false } = {}) {
   const out = [`VERDICT: ${stated}`, ''];
   for (const id of owedIds(fragment)) {
-    if (drop.some((prefix) => id.startsWith(prefix))) continue;
+    if (drop.includes(id)) continue;
     out.push(results[id] ?? `- PASS: ${id} — the clause: evidence`);
   }
   out.push(...lines);
@@ -69,11 +73,8 @@ function fragmentText(fragment, { stated = 'PASS', results = {}, drop = [], line
 /** The first rule a fragment owes, for overriding. */
 const firstId = (fragment) => owedIds(fragment)[0];
 
-/** A rule id's ledger key, as the reporting step mints it for a failure on that rule. */
-function failKeyOf(id) {
-  const [, spec, heading, n] = id.match(/^`([^`]+)` -> "([^"]+)" #(\d+)$/);
-  return failKey(spec, heading, Number(n));
-}
+/** A rule ID's ledger key, as the reporting step mints it for a failure on that rule. */
+const failKeyOf = (id) => failKey(id);
 
 /** A BLOCKER or WARNING with all three evidence fields. */
 const finding = (severity, location, cause, summary) => [
@@ -138,7 +139,7 @@ function stubGh(dir, seed) {
       public: [], pulls: {},
       embargo: (process.env.GH_LEDGER_OPEN ?? '').split('\\n').filter(Boolean).map((row) => ({
         number: Number(row.slice(0, row.indexOf(' '))), title: row.slice(row.indexOf(' ') + 1), body: '', labels: [],
-        state: 'OPEN', stateReason: '', createdAt: new Date(Date.now() - 86_400_000).toISOString().replace(/\\.\\d+Z$/, 'Z'), closedAt: null, comments: [] })),
+        state: 'OPEN', stateReason: '', createdAt: ${JSON.stringify(SEEDED_AT)}, closedAt: null, comments: [] })),
     };
     const save = () => fs.writeFileSync('gh-state.json', JSON.stringify(state));
     const repo = embargo ? ${JSON.stringify(EMBARGO_REPO)} : 'fixture/repo';
@@ -187,10 +188,16 @@ const ghCalls = (dir) => (existsSync(join(dir, 'gh-calls.jsonl'))
   ? readFileSync(join(dir, 'gh-calls.jsonl'), 'utf8').trim().split('\n').map(JSON.parse)
   : []);
 
-/** A day as the status issue prints it, `days` from now; the fake GitHub files seeded ledger rows yesterday. */
+/** A day as the status issue prints it, `days` from now. */
 const DAY = 86_400_000;
 const dayFromNow = (days) => new Date(Date.now() + days * DAY).toISOString().slice(0, 10);
-const SEEDED_ROW = `${dayFromNow(-1)} | ${dayFromNow(6)} |`;
+// The fake GitHub files seeded ledger rows yesterday, at one instant fixed when
+// this file loads, so a run that crosses UTC midnight still prints the row
+// `SEEDED_ROW` expects.
+const SEEDED_MS = Date.now() - DAY;
+const SEEDED_AT = new Date(SEEDED_MS).toISOString().replace(/\.\d+Z$/, 'Z');
+const day = (ms) => new Date(ms).toISOString().slice(0, 10);
+const SEEDED_ROW = `${day(SEEDED_MS)} | ${day(SEEDED_MS + 7 * DAY)} |`;
 
 /** The fake GitHub as the run left it. */
 const ghState = (dir) => JSON.parse(readFileSync(join(dir, 'gh-state.json'), 'utf8'));
@@ -248,6 +255,7 @@ const privateParts = (dir) => readdirSync(dir).filter((f) => /^audit-private-par
 // Each scenario writes `frags[i]` (options for `fragmentText`, null for none,
 // or a string written raw) and the orchestrator's `status`.
 const [SUPPLY, CI, REMOTE, LOCAL, HOSTED] = fragments;
+const ORIGIN_BOUNDARY = sectionIds(HOSTED, 'docs/specs/security-hosted.md', 'Origin boundary');
 const allPass = () => fragments.map(() => ({}));
 /** Every fragment passes but those named: `{ [fragment]: options }`. */
 const only = (byFragment) => fragments.map((f) => (f in byFragment ? byFragment[f] : {}));
@@ -264,7 +272,7 @@ const cases = [
     notes: ["A domain's verdict could not be read", 'A domain claimed more than its result lines record'] },
   { name: 'unverifiable checks override merged PASS', status: 'PASS',
     frags: only({ [SUPPLY]: { stated: 'INCONCLUSIVE', results: { [firstId(SUPPLY)]: `- UNVERIFIABLE: ${firstId(SUPPLY)} — the clause: network error` } } }),
-    expected: 'INCONCLUSIVE', notes: ['- UNVERIFIABLE: `docs/specs/security-supply-chain.md`'] },
+    expected: 'INCONCLUSIVE', notes: [`- \`${SUPPLY}\`, \`docs/specs/security-supply-chain.md\` -> "Disclosure": - UNVERIFIABLE: ${firstId(SUPPLY)} — the clause`] },
   { name: 'dissent overrides missing merged verdict',
     frags: only({ [SUPPLY]: { stated: 'FAIL', results: { [firstId(SUPPLY)]: `- FAIL: ${firstId(SUPPLY)} — the clause: violated` } } }), expected: 'FAIL' },
   { name: 'FAIL with explanation overrides merged PASS', status: 'PASS',
@@ -296,14 +304,19 @@ const cases = [
     frags: only({ [LOCAL]: { stated: 'INCONCLUSIVE' } }), expected: 'INCONCLUSIVE', notes: ['This is not a security finding'] },
   // Whole sections were skipped silently: every rule the specs carry is owed a line.
   { name: 'a skipped section is INCONCLUSIVE', status: 'PASS',
-    frags: only({ [HOSTED]: { drop: ['`docs/specs/security-hosted.md` -> "Origin boundary"'] } }), expected: 'INCONCLUSIVE',
-    notes: ['### Rules with no result line', `- \`${HOSTED}\`: \`docs/specs/security-hosted.md\` -> "Origin boundary" #6`],
-    publicRows: [`| \`${HOSTED}\` | INCONCLUSIVE | 0 | 6 | 0 |`] },
+    frags: only({ [HOSTED]: { drop: ORIGIN_BOUNDARY } }), expected: 'INCONCLUSIVE',
+    notes: ['### Rules with no result line', `- \`${HOSTED}\`: ${ORIGIN_BOUNDARY.at(-1)}, \`docs/specs/security-hosted.md\` -> "Origin boundary"`],
+    publicRows: [`| \`${HOSTED}\` | INCONCLUSIVE | 0 | ${ORIGIN_BOUNDARY.length} | 0 |`] },
   // #797: a `FAIL —` line the lift expected as `FAIL:` was lost. Off the
   // grammar, a line is malformed, and a malformed line cannot pass.
   { name: 'a malformed result line is INCONCLUSIVE', status: 'PASS',
-    frags: only({ [SUPPLY]: { lines: ['- FAIL — `docs/specs/security-supply-chain.md` -> "Disclosure" #1: violated'] } }), expected: 'INCONCLUSIVE',
-    notes: ['### Malformed lines', '- FAIL — `docs/specs/security-supply-chain.md`'], publicRows: [`| \`${SUPPLY}\` | INCONCLUSIVE | 0 | 0 | 1 |`] },
+    frags: only({ [SUPPLY]: { lines: [`- FAIL — ${firstId(SUPPLY)}: violated`] } }), expected: 'INCONCLUSIVE',
+    notes: ['### Malformed lines', `- FAIL — ${firstId(SUPPLY)}`], publicRows: [`| \`${SUPPLY}\` | INCONCLUSIVE | 0 | 0 | 1 |`] },
+  // The grammar's ID is bare: the code span a spec writes it in, or the old
+  // positional citation, is off the grammar.
+  ...[`- PASS: \`${firstId(SUPPLY)}\` — the clause: ok`, '- PASS: `docs/specs/security-supply-chain.md` -> "Disclosure" #1 — the clause: ok'].map((line) => ({
+    name: `a result line naming its rule another way is malformed: ${line}`, status: 'PASS',
+    frags: only({ [SUPPLY]: { lines: [line] } }), expected: 'INCONCLUSIVE', notes: ['### Malformed lines', line] })),
   { name: 'a bold result line is malformed', status: 'PASS',
     frags: only({ [SUPPLY]: { lines: ['- **FAIL IF** something holds: PASS.'] } }), expected: 'INCONCLUSIVE', notes: ['### Malformed lines'] },
   // Only an INFO is let off the grammar (below): a BLOCKER or WARNING written
@@ -321,7 +334,7 @@ const cases = [
     frags: only({ [SUPPLY]: { results: { [firstId(SUPPLY)]: `- PASS: ${firstId(SUPPLY)}.a — one: ok\n- PASS: ${firstId(SUPPLY)}.c — three: ok` } } }),
     expected: 'INCONCLUSIVE', notes: [`- \`${SUPPLY}\`: ${firstId(SUPPLY)}.b`] },
   { name: 'a result naming a rule nobody owes is INCONCLUSIVE', status: 'PASS',
-    frags: only({ [SUPPLY]: { lines: ['- PASS: `docs/specs/security-supply-chain.md` -> "Disclosure" #99 — the clause: ok'] } }), expected: 'INCONCLUSIVE',
+    frags: only({ [SUPPLY]: { lines: [`- PASS: ${firstId(CI)} — the clause: ok`] } }), expected: 'INCONCLUSIVE',
     notes: ['names no rule this domain owes'] },
   { name: 'no qualitative pass is INCONCLUSIVE', status: 'PASS', frags: only({ [LOCAL]: { qualitative: 0 } }), expected: 'INCONCLUSIVE',
     notes: ['it recorded no finished qualitative pass'] },
@@ -545,12 +558,13 @@ test('a passing run files its WARNINGs in the ledger and nothing else', (t) => {
 // unchanged, on the presence of the controls they name. The domains are handed
 // the open findings, and a PASS over one a rule cites must say why it no
 // longer holds, at a `path:line`.
-const CI_POLICIES = owedIds(CI).filter((id) => id.includes('`docs/specs/security-ci.md` -> "GitHub Actions Policies"'));
+const CI_POLICIES = sectionIds(CI, 'docs/specs/security-ci.md', 'GitHub Actions Policies');
 const MINTED_RULE = CI_POLICIES[1];
 const MINTED_KEY = failKeyOf(MINTED_RULE);
 const MINTED_OPEN = `41 [audit-finding ${MINTED_KEY}] FAIL: ${MINTED_RULE}\n`;
-// Hand-filed, before keys were minted: a heading, no rule number.
-const MANUAL_OPEN = '42 [audit-finding manual-example-gate] FAIL security-ci.md GitHub Actions Policies: a hand-filed failure\n';
+// Hand-filed under a name of its own, citing its rule by ID.
+const MANUAL_RULE = CI_POLICIES.at(-1);
+const MANUAL_OPEN = `42 [audit-finding manual-example-gate] FAIL ${MANUAL_RULE}: a hand-filed failure\n`;
 
 /** Every domain passes; `ci` overrides the CI fragment's options. */
 function runOverOpen(t, open, ci = {}, options = {}) {
@@ -565,16 +579,19 @@ function runOverOpen(t, open, ci = {}, options = {}) {
 
 for (const [name, open, ci, expected, note, options = {}] of [
   ['a PASS over an open failure with no reason is INCONCLUSIVE', MINTED_OPEN, {}, 'MISSING',
-    `\`${CI}\`: ${MINTED_RULE} passes over \`[audit-finding ${MINTED_KEY}]\``],
+    `\`${CI}\`: ${MINTED_RULE} passes over \`[audit-finding ${MINTED_KEY}]\`, \`docs/specs/security-ci.md\` -> "GitHub Actions Policies"`],
   ['a PASS naming the open failure without a path:line is INCONCLUSIVE', MINTED_OPEN,
     { results: { [MINTED_RULE]: `- PASS: ${MINTED_RULE} — c: holds; [audit-finding ${MINTED_KEY}] fixed upstream` } }, 'MISSING',
     '### Open findings passed without a reason'],
   ['a PASS naming the open failure and where it was fixed passes', MINTED_OPEN,
     { results: { [MINTED_RULE]: `- PASS: ${MINTED_RULE} — c: holds; [audit-finding ${MINTED_KEY}] no longer holds: the gate now reads \`scripts/workflow-lint.mjs:130\`` } }, 'PASS', null],
-  ['a PASS under a hand-filed heading citation with no reason is INCONCLUSIVE', MANUAL_OPEN, {}, 'MISSING',
-    `\`${CI}\`: \`docs/specs/security-ci.md\` -> "GitHub Actions Policies" passes over \`[audit-finding manual-example-gate]\``],
-  ['any PASS line under the hand-filed heading may give the reason', MANUAL_OPEN,
-    { results: { [CI_POLICIES.at(-1)]: `- PASS: ${CI_POLICIES.at(-1)} — c: holds; [audit-finding manual-example-gate] no longer holds: \`.github/workflows/security-audit.yaml:17\`` } }, 'PASS', null],
+  ['a PASS over a hand-filed rule citation with no reason is INCONCLUSIVE', MANUAL_OPEN, {}, 'MISSING',
+    `\`${CI}\`: ${MANUAL_RULE} passes over \`[audit-finding manual-example-gate]\``],
+  ['a PASS on another rule under the hand-filed rule\'s heading gives no reason', MANUAL_OPEN,
+    { results: { [CI_POLICIES[0]]: `- PASS: ${CI_POLICIES[0]} — c: holds; [audit-finding manual-example-gate] no longer holds: \`.github/workflows/security-audit.yaml:17\`` } }, 'MISSING',
+    `\`${CI}\`: ${MANUAL_RULE} passes over \`[audit-finding manual-example-gate]\``],
+  ['the PASS line on the hand-filed rule may give the reason', MANUAL_OPEN,
+    { results: { [MANUAL_RULE]: `- PASS: ${MANUAL_RULE} — c: holds; [audit-finding manual-example-gate] no longer holds: \`.github/workflows/security-audit.yaml:17\`` } }, 'PASS', null],
   ['a finding citing no rule holds no PASS to a reason', '43 [audit-finding manual-example-lint] WARNING a lint misses a case\n', {}, 'PASS', null],
   ['no open-findings list leaves every domain INCONCLUSIVE', '', {}, 'MISSING', 'No open ledger findings were handed to the domains.', { listToken: '' }],
 ]) {
@@ -598,6 +615,38 @@ test('a failure re-reported under another clause letter is seen again, not refil
   assert.ok(!embargoCalls.some(({ args }) => args[1] === 'create' && args[args.indexOf('--title') + 1].startsWith('[audit-finding ')));
 });
 
+// A rule keeps its ID wherever it moves, so a refactor of the specs re-keys no
+// open finding: the moved rule's failure is seen again on the issue it was
+// filed under, and its metadata places it where it lives now.
+for (const [where, spec, heading] of [
+  ['another heading', 'docs/specs/security-ci.md', 'Desktop Releases'],
+  ['another spec', 'docs/specs/security-audit.md', 'Embargo'],
+]) {
+  test(`a rule moved to ${where} keeps its failure's ledger key`, (t) => {
+    const { dir, env } = fixture(t);
+    const from = join(dir, 'docs/specs/security-ci.md');
+    const ruleLine = readFileSync(from, 'utf8').split('\n').find((l) => l.startsWith(`- **FAIL IF** \`${MINTED_RULE}\` `));
+    assert.ok(ruleLine, MINTED_RULE);
+    writeFileSync(from, readFileSync(from, 'utf8').replace(`${ruleLine}\n`, ''));
+    const to = join(dir, spec);
+    const text = readFileSync(to, 'utf8');
+    const under = text.indexOf(`\n## ${heading}\n`);
+    assert.ok(under >= 0, heading);
+    writeFileSync(to, `${text.slice(0, under)}\n## ${heading}\n\n${ruleLine}\n${text.slice(under + heading.length + 5)}`);
+    stubGh(dir);
+    writeFileSync(join(dir, 'audit-status.txt'), 'FAIL');
+    fragments.forEach((f) => writeFileSync(join(dir, f), fragmentText(f, f === CI
+      ? { stated: 'FAIL', results: { [MINTED_RULE]: `- FAIL: ${MINTED_RULE} — c: violated again` } } : {})));
+    const { outputs } = runReporting(dir, env, { embargoEnv: { GH_LEDGER_OPEN: MINTED_OPEN } });
+    assert.equal(outputs.compose.status, 'FAIL');
+    assert.equal(readFileSync(join(dir, 'audit-ledger/index.tsv'), 'utf8'), `${MINTED_KEY}\tFAIL\n`);
+    assert.ok(readFileSync(join(dir, 'audit-ledger/1.md'), 'utf8').startsWith(ledgerMeta({ key: MINTED_KEY, severity: 'FAIL', rule: MINTED_RULE, spec, heading })));
+    const embargoCalls = ghCalls(dir).filter(({ embargo }) => embargo);
+    assert.ok(embargoCalls.some(({ args }) => args[1] === 'comment' && args[2] === '41'), JSON.stringify(embargoCalls));
+    assert.ok(!embargoCalls.some(({ args }) => args[1] === 'create' && args[args.indexOf('--title') + 1].startsWith('[audit-finding ')));
+  });
+}
+
 // A ledger key must not move with what a domain chose to call it: the clause
 // letter of a failure, or the line and wording of a finding's root cause.
 test('ledger keys ignore the clause letter and a finding\'s wording', (t) => {
@@ -609,17 +658,18 @@ test('ledger keys ignore the clause letter and a finding\'s wording', (t) => {
   const asB = keyed({ results: { [rule]: `- PASS: ${rule}.a — c: ok\n- FAIL: ${rule}.b — c: violated` } });
   const asC = keyed({ results: { [rule]: `- PASS: ${rule}.a — c: ok\n- PASS: ${rule}.b — c: ok\n- FAIL: ${rule}.c — c: violated` } });
   assert.equal(asB, asC);
-  // An unlettered failure keeps the key it was minted under before clause letters were dropped.
-  const [, spec, heading, n] = rule.match(/^`([^`]+)` -> "([^"]+)" #(\d+)$/);
-  assert.equal(asB, `${ledgerKey('check', spec, heading, n, '')}\tFAIL\n`);
+  // The key hashes the rule's ID alone, never where the rule sits.
+  assert.equal(asB, `${ledgerKey('check', rule)}\tFAIL\n`);
   const symbol = keyed({ stated: 'PASS', lines: finding('WARNING', 'lib/src/config.ts:40', 'parseConfig()', 'one night') });
   const reworded = keyed({ stated: 'PASS', lines: finding('WARNING', './lib/src/config.ts:90', 'parseConfig falls back to defaults', 'another night') });
   assert.equal(symbol, reworded);
   assert.equal(symbol, `${ledgerKey('finding', 'lib/src/config.ts', 'parseconfig')}\tWARNING\n`);
-  // A cause written as its rule, or in prose, keys on all of it: neither the
-  // heading's proper noun nor a product name is a symbol.
-  const ruleCause = (n) => keyed({ stated: 'PASS', lines: finding('WARNING', '.github/workflows/x.yaml:4', `security-audit.md "Environment and AUDIT_PAT" #${n}`, 'one') });
-  assert.notEqual(ruleCause(2), ruleCause(4));
+  // A cause written as its rule keys on the rule's ID, a clause letter ignored;
+  // one in prose keys on all of it: a product name is no symbol.
+  const ruleCause = (cause) => keyed({ stated: 'PASS', lines: finding('WARNING', '.github/workflows/x.yaml:4', cause, 'one') });
+  assert.notEqual(ruleCause('S2'), ruleCause('S4'));
+  assert.equal(ruleCause('S2'), ruleCause('S2.b'));
+  assert.equal(ruleCause('S2'), `${ledgerKey('finding', '.github/workflows/x.yaml', 'S2')}\tWARNING\n`);
   const prose = (cause) => keyed({ stated: 'PASS', lines: finding('WARNING', '.github/workflows/x.yaml:4', cause, 'one') });
   assert.notEqual(prose('GitHub token reaches a log'), prose('GitHub cache is shared'));
 });
@@ -628,7 +678,7 @@ test('ledger keys ignore the clause letter and a finding\'s wording', (t) => {
 // so a PASS that re-verified them still lists them on the status issue.
 test('a hand-filed ledger key still counts as an open finding', (t) => {
   const { dir, outputs, published } = runOverOpen(t, MANUAL_OPEN,
-    { results: { [CI_POLICIES[0]]: `- PASS: ${CI_POLICIES[0]} — c: holds; [audit-finding manual-example-gate] no longer holds: \`lib/src/x.ts:3\`` } });
+    { results: { [MANUAL_RULE]: `- PASS: ${MANUAL_RULE} — c: holds; [audit-finding manual-example-gate] no longer holds: \`lib/src/x.ts:3\`` } });
   assert.equal(outputs.compose.status, 'PASS');
   assert.equal(published.status, 0, published.stderr);
   assert.equal(readFileSync(join(dir, OPEN_FINDINGS), 'utf8'), MANUAL_OPEN.slice(3));
@@ -670,7 +720,7 @@ test('every FAIL IF rule is owed by its domain, its deterministic check, or both
     for (const spec of specs) {
       const text = readFileSync(join(repo, spec), 'utf8').split(/^## Future\b/m)[0];
       const rules = text.split('\n').filter((l) => /^\s*(?:[-*]\s+)?\*\*FAIL IF\b/.test(l)).length;
-      const covered = new Set([...owed, ...state].filter((id) => id.startsWith(`\`${spec}\``)));
+      const covered = new Set([...owed, ...state].filter((id) => ruleOf(id).spec === spec));
       assert.equal(covered.size, rules, `${fragment}: ${spec}`);
     }
   }
@@ -678,26 +728,28 @@ test('every FAIL IF rule is owed by its domain, its deterministic check, or both
   // test, the domain still answers the rest of it.
   const ci = new Set(owedIds(CI));
   assert.ok(state.has(VSCODE_RULE) && !ci.has(VSCODE_RULE));
-  const gate = owedIds(STATE_FRAGMENT).find((id) => id.includes('"Schedule and gate"'));
+  const gate = owedIds(STATE_FRAGMENT).find((id) => ruleOf(id).heading === 'Schedule and gate');
   assert.ok(gate && ci.has(gate));
 });
 
-// A domain that counts its way to a rule number can land on a neighbour: run
-// 38982560206's remote domain swapped "Trust boundary" #14 and #15. So each
-// template names its rule by opening words no sibling under its heading shares.
-test('the manifest names every owed rule by opening words its siblings do not share', () => {
+// A domain that counts its way to a rule can land on a neighbour: run
+// 38982560206's remote domain swapped two "Trust boundary" rules. So each
+// template carries its rule's ID, names the rule by opening words no sibling
+// under its heading shares, and places it by spec and heading.
+test('the manifest names every owed rule by its ID and opening words its siblings do not share', () => {
   for (const fragment of allFragments) {
     const ids = owedIds(fragment);
     const lines = manifestLines(repo, fragment);
     assert.equal(lines.length, ids.length, fragment);
     const openings = new Map();
     ids.forEach((id, i) => {
-      const m = lines[i].match(/^- PASS: (.+) — <clause of the rule opening "(.+?)(?: …)?">: <evidence>$/);
+      const m = lines[i].match(/^- PASS: (S\d+) — <clause of the rule opening "(.+?)(?: …)?", under `(.+)` -> "(.+)">: <evidence>$/);
       assert.ok(m, lines[i]);
       assert.equal(m[1], id);
-      const [, spec, heading, n] = id.match(/^`(.+)` -> "(.+)" #(\d+)$/);
-      const rule = specRules(repo, spec).filter((r) => r.heading === heading)[Number(n) - 1];
-      const words = rule.text.replace(/^\s*(?:[-*]\s+)?\*\*FAIL IF\*\*\s*/, '').replaceAll('**', '').split(/\s+/).join(' ');
+      const rule = ruleOf(id);
+      const [spec, heading] = [m[3], m[4]];
+      assert.deepEqual([spec, heading], [rule.spec, rule.heading], id);
+      const words = rule.text.replace(/^\s*(?:[-*]\s+)?\*\*FAIL IF\*\*\s*`S\d+`\s*/, '').replaceAll('**', '').split(/\s+/).join(' ');
       assert.ok(words.startsWith(m[2]), `${id}: "${m[2]}"`);
       const key = `${spec}\0${heading}`;
       assert.ok(!openings.get(key)?.has(m[2]), `${id} shares its opening with a sibling`);
@@ -728,8 +780,7 @@ test('every security spec FAIL IF section is claimed by exactly one domain', () 
     for (const key of fragmentManifest(repo, fragment).keys()) owners.set(key, [...(owners.get(key) ?? []), domain]);
   }
   const state = fragmentManifest(repo, STATE_FRAGMENT);
-  const sections = new Set(readdirSync(join(repo, 'docs/specs')).filter((f) => /^security[a-z-]*\.md$/.test(f))
-    .flatMap((f) => specRules(repo, `docs/specs/${f}`).map((r) => `${r.spec}\0${r.heading}`)));
+  const sections = new Set([...ruleIndex(repo).values()].map((r) => `${r.spec}\0${r.heading}`));
   assert.ok(sections.size > 0);
   for (const key of sections) {
     const by = owners.get(key) ?? [];
@@ -779,7 +830,7 @@ test('redactor failure removes every archived sink', (t) => {
 
 // The deterministic fragment owes the rules pinned to its script and no
 // qualitative line; this one fails the VS Code reviewer rule.
-const VSCODE_RULE = owedIds(STATE_FRAGMENT).find((id) => id.includes('"VS Code Extension Releases"'));
+const VSCODE_RULE = owedIds(STATE_FRAGMENT).find((id) => ruleOf(id).heading === 'VS Code Extension Releases');
 const STATE_FAIL = fragmentText(STATE_FRAGMENT, { stated: 'FAIL',
   results: { [VSCODE_RULE]: `- FAIL: ${VSCODE_RULE} — \`vscode-extension-publish\` sets \`prevent_self_review: true\`: prevent_self_review false` } });
 
@@ -911,11 +962,12 @@ test('the plan step skips on recorded state, writes the stand-in report, and rec
 // --- Embargo: detail goes private, the public issue gets verdicts and counts ---
 
 // Issue #1027 published a working command-injection payload. A FAIL line and a
-// BLOCKER carrying one, a FAIL line naming a heading no spec has, malformed
+// BLOCKER carrying one, a FAIL line naming an ID no spec has, malformed
 // lines carrying one, and a verdict line with an appended explanation: none of
 // their text may reach the public body, and all of it must reach the private
 // issue.
 const EXPLOIT = '$(printf calc-injected-7f3a)';
+const PAT_RULE = sectionIds(CI, 'docs/specs/security-audit.md', 'Environment and `AUDIT_PAT`')[0];
 test('the status issue carries counts and verified section names, never finding text', (t) => {
   const { dir, env } = fixture(t);
   stubGh(dir);
@@ -923,9 +975,9 @@ test('the status issue carries counts and verified section names, never finding 
   writeFileSync(join(dir, 'audit-report.md'), `# Security audit\n\nThe merged report quotes ${EXPLOIT}.\n`);
   fragments.forEach((f, i) => writeFileSync(join(dir, f), i !== 1 ? fragmentText(f) : fragmentText(f, {
     stated: `FAIL — ${EXPLOIT}`,
-    results: { '`docs/specs/security-audit.md` -> "Environment and `AUDIT_PAT`" #1': `- FAIL: \`docs/specs/security-audit.md\` -> "Environment and \`AUDIT_PAT\`" #1 — reproduced with ${EXPLOIT}` },
+    results: { [PAT_RULE]: `- FAIL: ${PAT_RULE} — reproduced with ${EXPLOIT}` },
     lines: [
-      `- FAIL: \`docs/specs/security-audit.md\` -> "Run ${EXPLOIT} to see" #1 — a heading no spec has`,
+      `- FAIL: S99999 — an ID no spec has: run ${EXPLOIT} to see`,
       ...finding('BLOCKER', 'lib/a.ts:3', 'run', `the reporter runs ${EXPLOIT}`),
       `- **WARNING** — ${EXPLOIT} again`,
       '- INFO: `docs/x.md:1` `drift` — nothing to see',
@@ -942,7 +994,7 @@ test('the status issue carries counts and verified section names, never finding 
   for (const { fragment } of domains(repo)) assert.ok(publicBody.includes(`| \`${fragment}\` | `), fragment);
   for (const fragment of ['audit-remote.md', 'audit-local.md']) assert.ok(publicBody.includes(`| \`${fragment}\` | PASS | 0 | 0 | 0 | 0 | 0 |`), publicBody);
   assert.ok(publicBody.includes('- `docs/specs/security-audit.md` -> "Environment and `AUDIT_PAT`"'), publicBody);
-  assert.ok(publicBody.includes('1 failed check named no section heading'), publicBody);
+  assert.ok(publicBody.includes('1 failed check named no rule its domain owes.'), publicBody);
   assert.ok(publicBody.includes(COMMIT), publicBody);
   assert.match(publicBody, /Finding detail stays private until the finding is fixed, or 7 days after it is filed/);
   const privately = calls.filter(({ embargo }) => embargo).map(({ body }) => body).join('');
@@ -1072,7 +1124,7 @@ test('the ledger read keeps metadata, citations, and maintainer summaries, never
   assert.ok(!text.includes('calc-injected-7f3a') && !text.includes('detail') && !text.includes('Seen again'), text);
   const [fixed, manual] = text.trim().split('\n').map(JSON.parse);
   assert.deepEqual(fixed.title, { key: 'aaaaaaaaaaaa', severity: 'WARNING' });
-  assert.deepEqual(fixed.meta, { key: 'aaaaaaaaaaaa', severity: 'WARNING', spec: null, heading: null, file: 'lib/a.ts' });
+  assert.deepEqual(fixed.meta, { key: 'aaaaaaaaaaaa', severity: 'WARNING', rule: null, spec: null, heading: null, file: 'lib/a.ts' });
   assert.deepEqual(fixed.fixed, [{ repo: null, pr: '12' }, { repo: 'fixture/repo', pr: '13' }]);
   assert.equal(fixed.summary, 'A paste could submit a command.');
   assert.deepEqual([fixed.state, fixed.stateReason], ['CLOSED', 'COMPLETED']);
@@ -1107,7 +1159,7 @@ test('a filed ledger issue opens with metadata the ledger read reads back', (t) 
   stubGh(dir);
   writeFileSync(join(dir, 'audit-status.txt'), 'FAIL');
   const id = firstId(CI);
-  const [, spec, heading] = id.match(/^`([^`]+)` -> "([^"]+)"/);
+  const { spec, heading } = ruleOf(id);
   fragments.forEach((f, i) => writeFileSync(join(dir, f), fragmentText(f, i === 1
     ? { stated: 'FAIL', results: { [id]: `- FAIL: ${id} — c: violated` }, lines: finding('WARNING', './lib/src/b.ts:5', 'paste', 'a paste submits') }
     : {})));
@@ -1118,8 +1170,8 @@ test('a filed ledger issue opens with metadata the ledger read reads back', (t) 
   const metas = readFileSync(join(dir, 'audit-ledger-snapshot.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l).meta)
     .sort((a, b) => a.severity.localeCompare(b.severity));
   assert.deepEqual(metas, [
-    { key: failKeyOf(id), severity: 'FAIL', spec, heading, file: null },
-    { key: ledgerKey('finding', 'lib/src/b.ts', 'paste'), severity: 'WARNING', spec: null, heading: null, file: 'lib/src/b.ts' }]);
+    { key: failKeyOf(id), severity: 'FAIL', rule: id, spec, heading, file: null },
+    { key: ledgerKey('finding', 'lib/src/b.ts', 'paste'), severity: 'WARNING', rule: null, spec: null, heading: null, file: 'lib/src/b.ts' }]);
   assert.equal(ledgerMeta({ heading: 'a --> b' }), '<!-- audit-ledger {"heading":"a -\\u002d> b"} -->');
 });
 
@@ -1143,6 +1195,7 @@ function passOver(t, seed, again = null) {
 }
 const disclosures = (dir) => publicIssues(dir, 'security-audit-finding');
 const statusComments = (dir) => publicIssues(dir, 'security-audit-status')[0].comments.map((c) => c.body);
+const EMBARGO_RULE = sectionIds(CI, 'docs/specs/security-audit.md', 'Embargo')[0];
 const DISCLOSURE_SEED = () => ({
   pulls: { 77: { merged: true }, 78: { merged: false } },
   embargo: [
@@ -1150,7 +1203,10 @@ const DISCLOSURE_SEED = () => ({
       comments: [maintainer('Fixed in #77'), maintainer('## Public summary\nA paste could submit a command.')] }),
     ledgerIssue(2, { key: 'bbbbbbbbbbbb', meta: { file: 'lib/gone.ts' }, state: 'CLOSED', comments: [maintainer('Fixed in #78')] }),
     ledgerIssue(3, { key: 'cccccccccccc', state: 'CLOSED', stateReason: 'NOT_PLANNED' }),
-    ledgerIssue(4, { key: 'dddddddddddd', severity: 'FAIL', meta: { spec: 'docs/specs/security-audit.md', heading: 'Embargo' }, ageDays: 7.01 }),
+    // Filed before its rule moved: the ID places it where the checked-out specs carry it now.
+    ledgerIssue(4, { key: 'dddddddddddd', severity: 'FAIL', meta: { rule: EMBARGO_RULE, spec: 'docs/specs/security-ci.md', heading: 'GitHub Actions Policies' }, ageDays: 7.01 }),
+    // No rule ID: the heading it was filed under, found in the checked-out spec.
+    ledgerIssue(9, { key: '999999999999', severity: 'FAIL', meta: { spec: 'docs/specs/security-audit.md', heading: 'Disclosure' }, state: 'CLOSED' }),
     ledgerIssue(5, { key: 'eeeeeeeeeeee', severity: 'BLOCKER', ageDays: 6.99 }),
     ledgerIssue(6, { key: 'ffffffffffff', state: 'CLOSED', comments: [maintainer('Fixed in someone/else#77')] }),
     ledgerIssue(7, { key: '777777777777', severity: 'FAIL', meta: { spec: 'docs/specs/security-audit.md', heading: `Run ${EXPLOIT}` }, state: 'CLOSED' }),
@@ -1165,13 +1221,15 @@ test('disclosure publishes fixed, dismissed, and overdue findings from validated
   const { dir, published } = passOver(t, DISCLOSURE_SEED());
   assert.equal(published.status, 0, published.stderr);
   const byKey = Object.fromEntries(disclosures(dir).map((i) => [i.title.match(/^\[audit-disclosure ([^/\]]+)\/\d+\]/)[1], i]));
-  assert.deepEqual(Object.keys(byKey).sort(), ['777777777777', '888888888888', 'aaaaaaaaaaaa', 'bbbbbbbbbbbb', 'cccccccccccc', 'dddddddddddd', 'ffffffffffff']);
+  assert.deepEqual(Object.keys(byKey).sort(), ['777777777777', '888888888888', '999999999999', 'aaaaaaaaaaaa', 'bbbbbbbbbbbb', 'cccccccccccc', 'dddddddddddd', 'ffffffffffff']);
+  assert.ok(byKey['999999999999'].body.includes('| Where | `docs/specs/security-audit.md` -> "Disclosure" |'), byKey['999999999999'].body);
   // A heading the checked-out spec lacks, or a path that climbs, is withheld.
   assert.ok(byKey['777777777777'].body.includes('| Where | withheld: the cited spec section is not in the checked-out specs |'), byKey['777777777777'].body);
   assert.ok(byKey['888888888888'].body.includes('| Where | path withheld'), byKey['888888888888'].body);
   const all = { ...byKey };
   delete byKey['777777777777'];
   delete byKey['888888888888'];
+  delete byKey['999999999999'];
   assert.deepEqual(Object.values(byKey).map((i) => i.title).sort(), [
     '[audit-disclosure aaaaaaaaaaaa/1] WARNING finding', '[audit-disclosure bbbbbbbbbbbb/2] WARNING finding',
     '[audit-disclosure cccccccccccc/3] WARNING finding', '[audit-disclosure dddddddddddd/4] FAIL failed check', '[audit-disclosure ffffffffffff/6] WARNING finding']);

@@ -200,3 +200,14 @@ describe('serveSequence reaping options', () => {
     assert.throws(() => serveSequence({ port: 1, persist: 'sometimes' }), RangeError);
   });
 });
+
+test('navigation is additive to legacy open and cannot be a preview', () => {
+  for (const disposition of ['current', 'other']) {
+    const value = { path: '/repo/a.md', preview: false, disposition, fragment: '日本語' };
+    assert.deepEqual(parseToolOpen(content(openSequence(value))), value);
+  }
+  for (const extra of [{ disposition: 'fresh' }, { disposition: 'current', preview: true }, { fragment: 'a' }, { disposition: 'current', fragment: 'bad\u009b' }]) {
+    assert.equal(parseToolOpen(`open;${JSON.stringify({ v: 1, path: '/a', ...extra })}`), null);
+    assert.throws(() => openSequence({ path: '/a', ...extra }));
+  }
+});

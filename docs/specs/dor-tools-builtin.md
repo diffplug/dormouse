@@ -55,6 +55,15 @@ Source of truth: `saveText` / `StorePath` in `dor-tools-builtin/src/editor-route
 
 Source of truth: `dor-tools-builtin/viewer/markdown.tsx`; `safeCreateDOM` in `dor-tools-builtin/viewer/markdown-safety.ts`; `editorRoutes` in `dor-tools-builtin/src/editor-routes.ts`; `dor-tools-builtin/src/markdown-images.ts`. Tests: `dor-tools-builtin/test/markdown-editor.test.mjs`.
 
+### Relative links
+
+- **Must follow a relative link on plain click**, and offer Open in another surface and Edit link on its context menu. Cmd/Ctrl-click chooses another Surface. Dispatch follows `docs/specs/dor-tool.md` → Document navigation. (rationale)
+- **Must treat only a scheme-less relative reference as a document link**, resolved from the opened canonical file's directory with parent references allowed and its query ignored; HTTP(S)/mail links keep their existing handling.
+- **Must send document opens to the Tool process**, which emits OSC 367 (`docs/specs/security-local.md` → Local-file viewer); **never navigate relative to the capability URL**. The page receives only sent/error, with host failures shown by the Surface.
+- **Must resolve a fragment to the rendered heading whose case-folded, punctuation-stripped, duplicate-suffixed id it names**, never writing ids into saved Markdown. Same-document fragments scroll without reloading or prompting; a missing heading reports an error while retaining the document. Back/Forward reading-state semantics belong to `docs/specs/dor-tool.md` → Document navigation.
+
+Source of truth: `dor-tools-builtin/viewer/markdown.tsx`; `markdownLink` in `dor-tools-builtin/src/markdown-links.ts`; `runFileViewer` in `dor-tools-builtin/src/file-viewer.ts`.
+
 ## Image editor
 
 `builtin:file` edits PNG and JPEG, alone or over a [Markdown document](#markdown-editor).

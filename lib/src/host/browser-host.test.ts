@@ -721,3 +721,27 @@ describe('launch environment', () => {
     } finally { await host.close(); }
   });
 });
+
+
+it('Tool reading positions use fixed code, validated data, and reject stale provider replies', async () => {
+  const fake = fakeProvider();
+  const evaluate = vi.fn(async (_binding: unknown, _script: string) => ({ top: 42, mode: 'source', extra: 'discard' }));
+  fake.provider.evaluate = evaluate;
+  const host = createBrowserHost({ writeClipboardText: vi.fn(), providers: { 'agent-browser': () => fake.provider } });
+  const browser = { provider: 'agent-browser', binding: { session: 'tool-view' } } as const;
+  try {
+    expect(await host.request({ ...browser, op: 'tool-view' })).toEqual({ ok: true, position: { top: 42, mode: 'source' } });
+    expect(await host.request({ ...browser, op: 'tool-view', position: { top: -1 } })).toMatchObject({ ok: false });
+    expect(evaluate).toHaveBeenCalledTimes(1);
+    const fragment = 'heading";alert(1)';
+    await host.request({ ...browser, op: 'tool-view', position: { fragment } });
+    expect(evaluate.mock.calls[1][1]).toContain(JSON.stringify({ fragment }));
+    let finish!: (value: unknown) => void;
+    fake.provider.evaluate = () => new Promise(resolve => { finish = resolve; });
+    const pending = host.request({ ...browser, op: 'tool-view' });
+    await flush();
+    await host.request({ ...browser, op: 'close' });
+    finish({ top: 5 });
+    expect(await pending).toMatchObject({ ok: false });
+  } finally { await host.close(); }
+});

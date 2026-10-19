@@ -130,3 +130,32 @@ test('a save that throws before returning a promise answers with an error', asyn
   await settle();
   assert.deepEqual(posted.at(-1).message, { dorTool: 1, connection: 'c', kind: 'saved', request: '1', dirty: true, error: 'Write failed' });
 });
+
+test('reading positions have no dirty state and stale applications cannot answer a replacement connection', async () => {
+  const { window, posted } = scope();
+  let finish;
+  let position = { mode: 'source', top: 123 };
+  connectToolFrame({ dirty: () => true, save: async () => assert.fail('must not save'), view: {
+    read: () => position,
+    apply: value => new Promise(resolve => { position = value; finish = resolve; }),
+  } }, window);
+  window.deliver({ dorTool: 1, kind: 'connect', connection: 'old' });
+  window.deliver({ dorTool: 1, kind: 'view-read', connection: 'old', request: '1' });
+  await settle();
+  assert.deepEqual(posted.at(-1).message, { dorTool: 1, kind: 'view', connection: 'old', request: '1', position });
+  window.deliver({ dorTool: 1, kind: 'view-apply', connection: 'old', request: '2', position: { top: 7 } });
+  await settle();
+  window.deliver({ dorTool: 1, kind: 'connect', connection: 'new' });
+  finish(); await settle();
+  assert.equal(posted.filter(p => p.message.kind === 'view').length, 1);
+});
+
+test('reading-position exceptions answer the request instead of escaping the channel', async () => {
+  const { window, posted } = scope();
+  connectToolFrame({ dirty: () => false, save: async () => {}, view: { read: () => { throw new Error('Not ready'); }, apply: async () => {} } }, window);
+  window.deliver({ dorTool: 1, kind: 'connect', connection: 'c' });
+  window.deliver({ dorTool: 1, kind: 'view-read', connection: 'c', request: '1' });
+  await settle();
+  assert.equal(posted.at(-1).message.error, 'Not ready');
+  assert.equal('dirty' in posted.at(-1).message, false);
+});

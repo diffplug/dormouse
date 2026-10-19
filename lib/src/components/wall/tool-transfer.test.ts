@@ -73,3 +73,14 @@ describe('Tool Workspace transfer', () => {
     expect(() => captureToolParams(lath, ['tool'])).not.toThrow();
   });
 });
+
+
+it('history travels live but only the current document survives a durable save', () => {
+  const toolHistory = { entries: [{ target: '/a.md', cwd: '/' }, { target: '/b.md', cwd: '/' }], index: 1 };
+  const lath = engine({ ...params, toolTarget: '/b.md', toolHistory } as typeof params);
+  const captured = captureToolParams(lath, ['tool']);
+  expect(captured.tool.toolHistory).toEqual(toolHistory);
+  expect(lath.serializeLayout().leafMeta.tool.params).not.toHaveProperty('toolHistory');
+  lath.store.updateParams('tool', { toolNavigating: 'request' });
+  expect(() => captureToolParams(lath, ['tool'])).toThrow(/navigation/);
+});
