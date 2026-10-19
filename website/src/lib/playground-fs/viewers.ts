@@ -201,11 +201,6 @@ export class PlaygroundViewers {
         fs.write(file, next);
         return { version: nextVersion };
       },
-      // No symlinks or case folding here, so every file is its own path.
-      editableImage: async (segments) => {
-        const bytes = fs.kind(under(segments)) === "file" ? fs.bytes(under(segments)) : null;
-        return bytes ? { path: storePath(under(segments)), size: bytes.length } : { refused: "missing" };
-      },
       create: async (name, bytes) => {
         if (fs.kind(under([name]))) return false;
         fs.write(under([name]), bytes);

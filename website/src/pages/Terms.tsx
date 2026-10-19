@@ -26,7 +26,7 @@ export const TERMS_SECTIONS: PolicySection[] = [
   { id: "subscriptions", title: "Subscriptions and payment", body: <>
     <p>A subscription is billed monthly or yearly, at the price shown when you buy it, in US dollars. DiffPlug LLC is the seller and uses Stripe Billing and Stripe-hosted Checkout to process payments and manage subscriptions. We are responsible for the subscription, refunds, and applicable sales tax or VAT obligations. Checkout shows the total, including any applicable tax, before you authorize payment.</p>
     <p>Every plan renews automatically at the end of each period until you cancel. There is no free trial; the refund below takes its place.</p>
-    <p>A subscription covers one individual, including that person’s work use, with no per-device charge. It may not be shared, resold, or transferred to another person. Device enrollment and usage limits are described below. For shared accounts, multiple users, or organization-level features, email <a className={LINK_CLASS} href="mailto:support@dormouse.sh">support@dormouse.sh</a>.</p>
+    <p>A subscription covers one individual, including that person’s work use, with no device limit and no per-device charge. It may not be shared, resold, or transferred to another person. Usage limits are described below. For shared accounts, multiple users, or organization-level features, email <a className={LINK_CLASS} href="mailto:support@dormouse.sh">support@dormouse.sh</a>.</p>
     <p>If a renewal payment fails, the paid features stop until a payment succeeds. Dormouse keeps working in the meantime, with spoken alarms in your system voice. A partial refund or billing correction alone does not end your subscription.</p>
     <p>During a payment dispute or chargeback, we may temporarily suspend the paid access covered by the disputed payment while we investigate. We will notify you and provide a way to contact us. If the suspension was mistaken or the disputed payment is restored, we will restore any remaining paid access and the founding price you held before the suspension. If the subscription payment is finally reversed, we may end the access covered by that payment and stop future renewals. This does not limit your right to dispute a charge or any refund or remedy owed to you.</p>
   </> },
@@ -47,7 +47,7 @@ export const TERMS_SECTIONS: PolicySection[] = [
     <p>A founding badge is cosmetic. It grants nothing beyond the plan itself.</p>
   </> },
   { id: "fair-use", title: "Fair use", body: <>
-    <p>Managed voices have a daily request limit, and the managed Relay limits how many copies of Dormouse an account can enroll. The Hosted page states the current limits. Past the voice limit, Dormouse speaks in your system voice until the limit resets. There is no per-device fee.</p>
+    <p>Managed voices have a daily request limit, which the Hosted page states. Past the voice limit, Dormouse speaks in your system voice until the limit resets. There is no per-device fee.</p>
     <p>We also limit connection attempts and requests to protect availability and prevent abuse, and may act immediately against abuse or security threats. Material reductions to the paid service remain subject to the notice and refund provisions below.</p>
   </> },
   { id: "managed-voices", title: "Managed voices and ElevenLabs", body: <>

@@ -18,7 +18,7 @@ index 8c7c5aa89..dc5d94aab 100644
 + * `Sec-Fetch-Site: same-origin` or `same-site` — the relay and voice pages
 + * share the login cookie — and an `Origin`, if presented, is exactly
 + * `origin`. Another site's page, a typed URL, and a request without Fetch
-  * Metadata all fail. {@link cookieAdmin}'s in-process login lookup vouches
+  * Metadata all fail. {@link cookieEntitled}'s in-process login lookup vouches
   * for a request its gate admitted by carrying the header itself.
   */
  export function ownPageRead(request: Request, origin: string): boolean {

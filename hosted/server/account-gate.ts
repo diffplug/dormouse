@@ -2,7 +2,7 @@
 // docs/specs/security-hosted.md -> "Origin boundary".
 import type { Context, MiddlewareHandler } from "hono";
 import { queryDatabase } from "pgstencil/postgres";
-import { isAdmin } from "./admin";
+import { entitled } from "./entitlement";
 
 /** What one request's account deployment provides to its cookie routes. */
 export interface AccountHost {
@@ -22,7 +22,7 @@ export const accountQuery = <Row extends Record<string, unknown>>(
  * Whether the account's own page made this read: the browser says
  * `Sec-Fetch-Site: same-origin`, and an `Origin`, if presented, is exactly
  * `origin`. A sibling's page, a navigation, and a request without Fetch
- * Metadata all fail. {@link cookieAdmin}'s in-process login lookup vouches
+ * Metadata all fail. {@link cookieEntitled}'s in-process login lookup vouches
  * for a request its gate admitted by carrying the header itself.
  */
 export function ownPageRead(request: Request, origin: string): boolean {
@@ -57,17 +57,17 @@ export interface AccountLogin {
  * and a state-changing request presents exactly this `Origin` — same-site
  * pages, the relay and voice origins among them, share the login cookie —
  * then the Better Auth handler's `get-session` answers the login (401
- * without one), and only the verified admin passes (`refuse` answers anyone
- * else). Sets `login`.
+ * without one), and only an entitled account passes, read per request
+ * (`refuse` answers anyone else). Sets `login`.
  */
-export function cookieAdmin(
+export function cookieEntitled(
   host: (c: Context) => AccountHost,
   refuse: (c: Context) => Response,
 ): MiddlewareHandler<{ Variables: { login: AccountLogin } }> {
   return cookieGate(host, refuse);
 }
 
-/** {@link cookieAdmin}'s gate for a route any signed-in account may use. */
+/** {@link cookieEntitled}'s gate for a route any signed-in account may use. */
 export function cookieLogin(
   host: (c: Context) => AccountHost,
 ): MiddlewareHandler<{ Variables: { login: AccountLogin } }> {
@@ -95,11 +95,11 @@ function cookieGate(
     );
     if (!response.ok) throw new Error("Login lookup failed");
     const session = (await response.json()) as {
-      user?: { id: string; email?: unknown; emailVerified?: unknown };
+      user?: { id: string };
       session?: { createdAt?: unknown };
     } | null;
     if (!session?.user) return c.json({ message: "Sign in first." }, 401);
-    if (refuse && !isAdmin(session.user)) return refuse(c);
+    if (refuse && !(await entitled(host(c).databaseUrl, session.user.id))) return refuse(c);
     c.set("login", {
       userId: session.user.id,
       createdAt: session.session?.createdAt,

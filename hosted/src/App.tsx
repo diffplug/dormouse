@@ -254,11 +254,11 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
     });
   const approve = (code: string) =>
     act("approve", async () => {
-      await approveEnrollment(code);
+      await approveEnrollment(code, enrolling?.purpose);
       clearEnrollment();
       await refresh();
       setNotice(
-        `Approved ${code}. Dormouse on your computer finishes enrolling in a few seconds.`,
+        `Approved ${code}. Dormouse on your computer finishes the requested setup in a few seconds.`,
       );
     });
   const clearEnrollment = () => {
@@ -299,7 +299,9 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
           {comingSoon
             ? "Coming soon"
             : enrolling
-            ? "Approve a computer"
+            ? enrolling.purpose === "voice"
+              ? "Enable managed voice"
+              : "Enroll remote control"
             : session
               ? "Your account"
               : "Sign in to Dormouse Hosted"}
@@ -311,7 +313,9 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
             ? !enrolling.code
               ? "This link cannot be approved."
               : session
-                ? "Dormouse on your computer asked to join this account."
+                ? enrolling.purpose === "voice"
+                  ? "Dormouse asked to use managed voice with this account."
+                  : "Dormouse asked to enroll remote control with this account."
                 : "Sign in to approve the computer that sent you here."
             : session
               ? "Manage how you sign in."
@@ -464,8 +468,8 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
                   <section aria-labelledby="voice">
                     <h2 id="voice">Voice tokens</h2>
                     <p className="help">
-                      A token lets Dormouse desktop speak with managed voice.
-                      Managed voice is in admin-only testing.
+                      Enabling managed voice in Dormouse gives it its own token.
+                      Revoke a token here to stop its access. Managed voice is in admin-only testing.
                     </p>
                     {minted && (
                       <div className="notice minted">
@@ -518,9 +522,9 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
                   <section aria-labelledby="computers">
                     <h2 id="computers">Computers</h2>
                     <p className="help">
-                      A phone reaches a computer enrolled here through the
-                      Hosted Relay only once paired by two digits typed at that
-                      computer. Remote control is in admin-only testing.
+                      A phone reaches an enrolled computer through the Hosted Relay
+                      once paired by two digits typed at that computer. Remote control
+                      is in admin-only testing.
                     </p>
                     {computers.length === 0 && (
                       <p className="help">

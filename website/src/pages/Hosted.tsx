@@ -367,7 +367,7 @@ function FoundingCard({ cohort, onBuy }: { cohort: Cohort; onBuy: (tier: Tier) =
  * What a buy button does until checkout ships.
  *
  * Deliberately loud about being unfinished: the prices are real and the plan
- * is specified, but purchase and desktop sign-in are a later stage,
+ * is specified, but purchase is a later stage,
  * and a button that quietly did nothing would read as a bug.
  */
 function CheckoutTodo({ tier, onClose }: { tier: Tier; onClose: () => void }) {
@@ -409,7 +409,7 @@ function CheckoutTodo({ tier, onClose }: { tier: Tier; onClose: () => void }) {
         </h2>
         <p className={`mt-4 leading-relaxed ${MUTED_TEXT_CLASS}`}>
           {tier.name} is priced and specified, but nothing here takes payment: purchase
-          and signing in from the app are the next stage of work. You have not been
+          is the next stage of work. You have not been
           charged, and no seat has been taken.
         </p>
         <p className={`mt-4 leading-relaxed ${MUTED_TEXT_CLASS}`}>
@@ -499,7 +499,7 @@ export default function Hosted() {
         <p className={`mb-4 ${BODY_TEXT_CLASS}`}>
           Free and with no account, Dormouse speaks an unattended terminal’s name in your
           browser or system voice. A plan swaps that for a natural ElevenLabs
-          voice on every machine you sign in on, chosen from a curated set. I hold the vendor key, so there is no second account to set
+          voice on every machine you enroll, chosen from a curated set. I hold the vendor key, so there is no second account to set
           up or pay for.
         </p>
         <p className={`mb-4 leading-relaxed ${MUTED_TEXT_CLASS}`}>
@@ -534,8 +534,8 @@ export default function Hosted() {
           Dormouse Pocket puts your terminals on your phone. It needs a Relay to connect
           the two, and Hosted runs it for you: enrollment of your own computers, sealed
           push notifications, and Pocket without a tailnet. Your terminals still run on
-          your own awake, online computer. An account can enroll up to 32 copies of
-          Dormouse, with no per-device charge; standalone and VS Code count separately.
+          your own awake, online computer. Enroll every computer you use: there is no
+          device limit and no per-device charge.
         </p>
         <p className={`leading-relaxed ${MUTED_TEXT_CLASS}`}>
           Terminal traffic is end-to-end encrypted between your computer and your phone,

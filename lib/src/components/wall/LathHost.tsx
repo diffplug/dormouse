@@ -28,7 +28,7 @@ import { type LeafMeta, LATH_LAYOUT_OPTS } from './lath-wall-store';
 import { nowMs, type LathWallEngine } from './lath-wall-engine';
 import { type DragController, type DragPreview, createDragController } from './lath-drag-controller';
 import { shieldFrames } from '../../lib/frame-shield';
-import { subscribeWindowFocus } from '../../lib/window-focus';
+import { subscribeDragCancel } from '../../lib/drag-cancel';
 import { LathDropPreview } from './LathDropPreview';
 import { TerminalPanel } from './TerminalPanel';
 import { BrowserPanel } from './BrowserPanel';
@@ -467,16 +467,10 @@ export function LathHost({
       const current = store.getSnapshot();
       if (d && (current.tree !== d.tree || current.zoomedId !== null)) end(false);
     });
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') end(false); // cancel: revert the preview, commit nothing
-    };
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
     window.addEventListener('pointercancel', onCancel);
-    window.addEventListener('keydown', onKey);
-    const unsubscribeFocus = subscribeWindowFocus((focused) => {
-      if (!focused) end(false);
-    });
+    const unsubscribeCancel = subscribeDragCancel(() => end(false)); // revert the preview, commit nothing
     const releaseShield = shieldFrames();
     return () => {
       if (rafId !== null) cancelAnimationFrame(rafId);
@@ -484,8 +478,7 @@ export function LathHost({
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('pointercancel', onCancel);
       unsubscribe();
-      window.removeEventListener('keydown', onKey);
-      unsubscribeFocus();
+      unsubscribeCancel();
       releaseShield();
     };
   }, [dragging, onCommitResize, store]);

@@ -10,7 +10,6 @@ import {
   MODAL_OVERLAY_INSET,
   ModalCloseButton,
   ModalFrame,
-  INLINE_ACTION_CLASS,
   OVERLAY_MAX_HEIGHT,
   SETTINGS_SECTION,
   Shortcut,
@@ -23,7 +22,8 @@ import { WatchedCommandList } from './WatchedCommandList';
 import { NetworkPhones, NetworkSettings, NetworkUpdates } from './NetworkSettings';
 import { useNetworkPolicy } from './remote-control-shared';
 import { PushTestButton, SpeakTestButton } from './AlarmTestButtons';
-import { ManagedVoiceSection, useManagedVoiceOffered } from './ManagedVoiceSection';
+import { HOSTED_VOICE_URL } from './HostedEnrollment';
+import { ManagedVoiceSection, NetworkTopicLink, useManagedVoiceOffered } from './ManagedVoiceSection';
 import { getPlatform } from '../lib/platform';
 import { getShellsSnapshot, subscribeToShells } from '../lib/shell-store';
 import { getDelayedKillSetting, labsAvailable, setDelayedKillSetting, subscribeToLabsSettings } from '../lib/labs-settings';
@@ -41,23 +41,9 @@ import {
 } from '../lib/terminal-registry';
 
 const TITLE_ID = 'settings-dialog-title';
-const HOSTED_VOICE_URL = 'https://dormouse.sh/hosted/#voice';
 
 /** A picker row; `min-w-0` lets the picker's trigger truncate in a narrow dialog. */
 const PICKER_ROW = 'flex items-center gap-1.5 text-sm text-foreground [&>div]:min-w-0';
-
-/**
- * Where Settings → Network is named from another topic: a link to it inside the
- * dialog, and its path in the Baseboard's preview, which has no topic to reach.
- */
-function NetworkTopicLink({ onShow }: { onShow?: () => void }) {
-  if (!onShow) return <>Settings → Network</>;
-  return (
-    <button type="button" className={INLINE_ACTION_CLASS} onClick={onShow}>
-      Network
-    </button>
-  );
-}
 
 /**
  * The "Push will be sent to …" line. Every state names a cause, because a push
@@ -540,12 +526,12 @@ export function AlarmSettingsSection({ sink, preview = false, onShowNetwork }: {
             so alerts use your browser or system voice.
           </>
         ) : (
-          'Uses managed voice while a voice token is saved, otherwise your browser or system voice.'
+          'Uses managed voice when enabled below, otherwise your browser or system voice.'
         )}
       </AlarmSinkSection>
       {preview ? null : (
         <div className={UNDER_SWITCH_INDENT}>
-          <ManagedVoiceSection />
+          <ManagedVoiceSection onShowNetwork={onShowNetwork} />
         </div>
       )}
     </>

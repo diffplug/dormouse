@@ -5,7 +5,7 @@
  * (`lib/src/host/remote/test-burrow-link.ts` keeps the same rule).
  */
 
-import { DEFAULT_MANAGED_VOICE_ID, type ManagedVoicePort } from './managed-voice-types';
+import { DEFAULT_MANAGED_VOICE_ID, type ManagedVoicePort, type ManagedVoiceStatus } from './managed-voice-types';
 import type { UpdatesPort, UpdatesSnapshot } from './types';
 
 /** An updater whose last successful check was `checkedAt`; Check now succeeds at once. */
@@ -25,14 +25,31 @@ export function makeStubUpdatesPort(checkedAt: number | null): UpdatesPort {
   };
 }
 
-/** A managed-voice port with a token saved, or not; it speaks nothing. */
-export function makeStubManagedVoicePort(configured: boolean): ManagedVoicePort {
-  const status = { configured, voiceId: DEFAULT_MANAGED_VOICE_ID };
+/**
+ * A managed-voice port with a token saved, or not, and Hosted's last word on
+ * the plan; choosing a voice takes, and it speaks nothing.
+ */
+export function makeStubManagedVoicePort(configured: boolean, notEntitled = false, extra: Partial<ManagedVoiceStatus> = {}): ManagedVoicePort {
+  let status = { configured, voiceId: DEFAULT_MANAGED_VOICE_ID, notEntitled, ...extra };
+  const listeners = new Set<() => void>();
   return {
-    offerSetup: false,
+    beginEnrollment: async () => ({ ok: true }),
+    cancelEnrollment: async () => ({ ok: true }),
+    disconnect: async () => {
+      status = { ...status, configured: false };
+      for (const listener of listeners) listener();
+      return { ok: true };
+    },
     status: () => status,
-    subscribe: () => () => {},
-    configure: async () => ({ ok: false, reason: 'unavailable' }),
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => void listeners.delete(listener);
+    },
+    configure: async ({ voiceId }) => {
+      status = { ...status, voiceId };
+      for (const listener of listeners) listener();
+      return { ok: true, ...status };
+    },
     speak: async () => ({ ok: false, reason: 'a stub speaks nothing' }),
   };
 }

@@ -24,6 +24,7 @@ import {
   isSetupTokenResponse,
   isBurrowEnrollBeginResponse,
   isBurrowEnrollPollResponse,
+  isBurrowVoicePollResponse,
   MAX_ENROLL_POLL_INTERVAL_S,
   MIN_ENROLL_POLL_INTERVAL_S,
   RELAY_BEARER_LENGTH,
@@ -331,6 +332,25 @@ test('isBurrowEnrollBeginResponse holds each field to its shape and bounds', () 
     { ...begin, interval: MAX_ENROLL_POLL_INTERVAL_S + 1 },
   ]) {
     assert.equal(isBurrowEnrollBeginResponse(wrong), false, JSON.stringify(wrong));
+  }
+});
+
+test('isBurrowVoicePollResponse knows four answers, an enabled one carrying a voice token', () => {
+  const voiceToken = `dmv_${'A'.repeat(43)}`;
+  assert.ok(isBurrowVoicePollResponse({ status: 'pending' }));
+  assert.ok(isBurrowVoicePollResponse({ status: 'expired' }));
+  assert.ok(isBurrowVoicePollResponse({ status: 'redeemed' }));
+  assert.ok(isBurrowVoicePollResponse({ status: 'enabled', voiceToken }));
+  for (const wrong of [
+    null,
+    'pending',
+    { status: 'enabled' },
+    { status: 'enabled', voiceToken: 'dmv_short' },
+    { status: 'enabled', voiceToken: 7 },
+    { status: 'enrolled', enrollment: {} },
+    { status: 'approved' },
+  ]) {
+    assert.equal(isBurrowVoicePollResponse(wrong), false, JSON.stringify(wrong));
   }
 });
 

@@ -168,6 +168,8 @@ A stream is what a launch or `attach` answers for a live browser — agent-brows
 
 A pane out of sight ([Resource Policy](#resource-policy)) or unmounted parks after a debounce: its viewer socket closes and the daemon/session stays alive, unstreamed (rationale). **Never park a popped-out pane**: its socket carries the window's page and close. **Never set `AGENT_BROWSER_IDLE_TIMEOUT_MS`** for Dormouse-managed sessions: a daemon exiting when idle defeats alive-while-parked.
 
+**Must forward hover and wheel to the page over any screencast pane on screen, selected or not, in either mode, never selecting it or taking focus** (rationale). **Must end the page's hover when the pointer leaves the canvas**, except mid-drag of the canvas's own press (rationale).
+
 **Must send a local paste as bounded `input_text` messages** (`viewerTextInputs`), never a key pair per character (rationale). Select-all, copy, cut, and tab select or close go through host operations (`edit`, `tab`), since editing chords do not survive CDP input; undo/redo is not emulated.
 
 Source of truth: `lib/src/components/wall/agent-browser-surface-controller.ts` (`Phase`, `driver`), `lib/src/components/wall/AgentBrowserPanel.tsx`, `lib/src/components/wall/agent-browser-input.ts`, `onBrowserLaunchFailed` in `lib/src/components/Wall.tsx`.

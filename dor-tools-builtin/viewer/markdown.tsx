@@ -5,16 +5,15 @@ import { $getNodeByKey, $getNearestNodeFromDOMNode, COMMAND_PRIORITY_HIGH, getNe
 import { syntaxHighlighting } from '@codemirror/language';
 import { classHighlighter } from '@lezer/highlight';
 import {
-  $isImageNode, createActiveEditorSubscription$, editImageToolbarComponent$, iconComponentFor$, ImageNode, imagePreviewHandler$, INSERT_IMAGE_COMMAND, useCellValue,
+  $isImageNode, createActiveEditorSubscription$, editImageToolbarComponent$, iconComponentFor$, ImageNode, INSERT_IMAGE_COMMAND, useCellValue,
   BlockTypeSelect, BoldItalicUnderlineToggles, codeBlockPlugin, codeMirrorPlugin, CodeToggle, CreateLink, diffSourcePlugin,
   DiffSourceToggleWrapper, frontmatterPlugin, headingsPlugin, imagePlugin, InsertCodeBlock, InsertTable, InsertThematicBreak,
   linkDialogPlugin, linkDialogState$, openLinkEditDialog$, linkPlugin, listsPlugin, ListsToggle, markdownShortcutPlugin, MDXEditor, quotePlugin, realmPlugin,
   rootEditor$, Separator, viewMode$, tablePlugin, thematicBreakPlugin, toolbarPlugin, UndoRedo, type MDXEditorMethods, type MDXEditorProps, type Realm,
 } from '@mdxeditor/editor';
 import '@mdxeditor/editor/style.css';
-import { checked, documentPage, loadingState, stateLabel, textSource, type DocumentState } from './document-session';
-import { editableImage, handOffImageEdits, imageSources, imageUrl, ImagesPanel, localImagePath, updateImages, type SavedImages } from './images-panel';
-import { ImageOverlay, type Resize } from './image-overlay';
+import { checked, documentSession, loadingState, stateLabel, textSource, type DocumentState } from './document-session';
+import { editableImage, handOffImageEdits, imageSources, imageUrl, ImagesPanel, localImagePath, pathRoute } from './images-panel';
 import { ImageResizeHandles } from './image-resize';
 import { commentsPlugin } from './markdown-comments';
 import { markdownSafetyPlugin } from './markdown-safety';
@@ -23,7 +22,6 @@ import { mermaidDescriptor } from './mermaid-block';
 import { SaveButton } from './save-button';
 import { Signal } from './signal';
 import { installTooltips } from './tooltip';
-import { rescaledSize } from '../src/image-resolution';
 import './markdown.css';
 import { request } from './document-session';
 import { MarkdownNavigation, headingFor } from './markdown-navigation';
@@ -38,15 +36,15 @@ declare module '@mdxeditor/editor' {
 
 // Page state outside React, replaced whole on each change: the session reports
 // into it, the editor's image nodes feed it, and components subscribe.
-// `editing` is the image open in the editor overlay; `saved` holds the
-// revision of each image saved from it.
-let store: { doc: DocumentState; error: string | null; images: string[]; panel: boolean; editor: LexicalEditor | null; editing: string | null; saved: SavedImages } =
-  { doc: loadingState, error: null, images: [], panel: false, editor: null, editing: null, saved: {} };
+let store: { doc: DocumentState; error: string | null; images: string[]; panel: boolean; editor: LexicalEditor | null } =
+  { doc: loadingState, error: null, images: [], panel: false, editor: null };
 const changes = new Signal();
 const update = (change: Partial<typeof store>) => { store = { ...store, ...change }; changes.emit(); };
 const usePage = () => useSyncExternalStore(changes.subscribe, () => store);
 const editorRef = createRef<MDXEditorMethods>();
 let realm: Realm | undefined;
+/** The Page's key, and the generation each document image's URL carries, so
+ * a reload shows pixels changed on disk: remounting alone keeps stale ones. */
 let loads = 0;
 
 const scroller = () => document.querySelector<HTMLElement>(realm?.getValue(viewMode$) === 'source' ? '.mdxeditor-source-editor .cm-scroller' : '.mdxeditor-root-contenteditable');
@@ -71,7 +69,6 @@ const view: ToolViewAccess = {
   },
 };
 Object.defineProperty(window, '__dorToolView', { value: view });
-const page = documentPage(view);
 
 function followLink(href: string, disposition: 'current' | 'other' = 'current') {
   realm?.pub(linkDialogState$, { type: 'inactive' });
@@ -85,7 +82,7 @@ function editLink(anchor: HTMLAnchorElement) {
 }
 // The editor trims the document; saves end it with one newline, and the server
 // restores the file's line endings.
-const session = page.open<string>({
+const session = documentSession<string>({
   snapshot() {
     const markdown = editorRef.current!.getMarkdown();
     return { content: markdown ? `${markdown}\n` : '', mark: markdown };
@@ -100,33 +97,16 @@ const session = page.open<string>({
 }, {
   report(doc) { update({ doc }); },
   fail(error) { update({ error }); },
-}, textSource);
+}, textSource, view);
 
-/** The document's source for the image node `key`, when the image editor can open it. */
+/** The document's source for the image node `key`, when it opens as an editable image. */
 function editablePath(editor: LexicalEditor, key: string): string | null {
   const path = editor.getEditorState().read(() => { const node = $getNodeByKey(key); return $isImageNode(node) ? localImagePath(node.getSrc()) : null; });
   return editableImage(path) ? path : null;
 }
 
-/** Opens a PNG or JPEG under the document's folder in the image editor overlay. */
-const editImage = (path: string) => update({ editing: path });
-
-/** After an image save: every display of it loads the new file. When the
- * save resized it, each reference that states a size keeps its scale, as an
- * edit; the rest of the document's source stays as it is. It lands before the
- * image's save resolves (`updateImages`), so the close-prompt save,
- * which writes the image first, then writes the rescaled document. */
-function refreshImage(path: string, version: string, resize: Resize | null) {
-  update({ saved: { ...store.saved, [path]: version } });
-  // A new handler makes each image node resolve its URL again.
-  realm?.pub(imagePreviewHandler$, async (src: string) => imageUrl(src, store.saved));
-  if (resize && store.editor) updateImages(store.editor, node => {
-    const size = { width: node.getWidth(), height: node.getHeight() };
-    if (localImagePath(node.getSrc()) !== path || (size.width === 'inherit' && size.height === 'inherit')) return;
-    const next = rescaledSize(size, resize.from, resize.to);
-    node.setWidthAndHeight(next.width, next.height);
-  });
-}
+/** Open through the same handler selection and dirty consent as a document link. */
+const editImage = (path: string) => followLink(pathRoute(path));
 
 let listing = false;
 /** Lists the document's images again, once for however many changes call
@@ -145,8 +125,8 @@ let DefaultImageToolbar: ComponentType<ImageChromeProps> = () => null;
 type ImageChromeProps = { nodeKey: string; imageSource: string; initialImagePath: string | null; title: string; alt: string; width?: number | 'inherit'; height?: number | 'inherit' };
 
 /** What we draw beside each image MDXEditor renders, in place of its image
- * toolbar: the resize handles, Edit and double-click to open it in the image
- * editor, then MDXEditor's own buttons. All of it through the image's own
+ * toolbar: the resize handles, Edit to open its file as a document, then
+ * MDXEditor's own buttons. All of it through the image's own
  * editor: the root's, or a table cell's. */
 function ImageChrome(props: ImageChromeProps) {
   const iconFor = useCellValue(iconComponentFor$);
@@ -162,16 +142,12 @@ function ImageChrome(props: ImageChromeProps) {
     return refreshImages;
   }, [editor, props.imageSource]);
   useEffect(() => editor && editor !== store.editor ? handOffImageEdits(editor, props.nodeKey) : undefined, [editor, props.nodeKey]);
+  // `MarkdownNavigation` opens it on double-click and offers its context menu.
   useEffect(() => {
     const wrapper = ref.current?.parentElement;
     if (!wrapper || !path) return;
-    const open = (event: MouseEvent) => {
-      if (!(event.target instanceof HTMLImageElement)) return;
-      event.preventDefault();
-      editImage(path);
-    };
-    wrapper.addEventListener('dblclick', open);
-    return () => wrapper.removeEventListener('dblclick', open);
+    wrapper.dataset.documentImage = pathRoute(path);
+    return () => { delete wrapper.dataset.documentImage; };
   }, [path]);
   return (
     <>
@@ -260,7 +236,7 @@ const plugins = [
   } }),
   // Unpadded tables: padding to aligned columns rewrites every row of a table when one cell changes.
   tablePlugin({ tablePipeAlign: false }), frontmatterPlugin(), markdownShortcutPlugin(),
-  imagePlugin({ imageUploadHandler: upload, imagePreviewHandler: async src => imageUrl(src, store.saved), disableImageResize: true, allowSetImageDimensions: true, EditImageToolbar: ImageChrome as FC }),
+  imagePlugin({ imageUploadHandler: upload, imagePreviewHandler: async src => imageUrl(src, loads), disableImageResize: true, allowSetImageDimensions: true, EditImageToolbar: ImageChrome as FC }),
   codeBlockPlugin({ defaultCodeBlockLanguage: '', codeBlockEditorDescriptors: [mermaidDescriptor] }),
   codeMirrorPlugin({ codeBlockLanguages: {
     '': 'Plain text', sh: 'Shell', bash: 'Bash', js: 'JavaScript', jsx: 'JSX', ts: 'TypeScript', tsx: 'TSX', json: 'JSON',
@@ -286,7 +262,6 @@ const onEditorError: MDXEditorProps['onError'] = ({ error: reason }) => {
   realm?.pub(viewMode$, 'source');
   session.fail(`Showing source: the rich editor cannot parse this file (${reason}).`);
 };
-const closeImage = () => { update({ editing: null }); editorRef.current?.focus(); };
 
 /** The rich editor; it follows only the theme, so page state changes leave it be. */
 function Editor({ markdown }: { markdown: string }) {
@@ -307,24 +282,15 @@ function ErrorBanner() {
 /** The images panel, hung in the editor's content box: under the toolbar
  * however it wraps, and under an error. */
 function Panel({ editor }: { editor: LexicalEditor }) {
-  const { images, saved } = usePage();
+  const { images } = usePage();
   const content = editor.getRootElement()?.closest('.mdxeditor-diff-source-wrapper');
-  return content ? createPortal(<ImagesPanel editor={editor} sources={images} saved={saved} onEdit={editImage} />, content) : null;
-}
-
-/** The images panel and the image editor overlay, above the editor. */
-function Overlays() {
-  const { panel, editor, editing } = usePage();
-  return (
-    <>
-      {panel && editor && <Panel editor={editor} />}
-      {editing && <ImageOverlay key={editing} path={editing} page={page} onSaved={refreshImage} onClose={closeImage} />}
-    </>
-  );
+  return content ? createPortal(<ImagesPanel editor={editor} sources={images} generation={loads} onEdit={editImage} />, content) : null;
 }
 
 function Page({ markdown }: { markdown: string }) {
-  return <><ErrorBanner /><Editor markdown={markdown} /><Overlays /><MarkdownNavigation follow={followLink} edit={editLink} /></>;
+  // Only the panel's editor, so other page state changes leave the editor be.
+  const panel = useSyncExternalStore(changes.subscribe, () => store.panel ? store.editor : null);
+  return <><ErrorBanner /><Editor markdown={markdown} />{panel && <Panel editor={panel} />}<MarkdownNavigation follow={followLink} edit={editLink} /></>;
 }
 
 installTooltips();
