@@ -14,6 +14,7 @@ import {
   linkPinnedBy,
   resolveRepoLinks,
   securityAudiences,
+  securityCoverage,
   securitySetups,
   withoutSetups,
 } from './generate-docs.js';
@@ -353,6 +354,37 @@ describe('security spec', () => {
     // in the table's order, and written by the build that checked the tags.
     expect(data.security.setups).toEqual(['Every install', 'One-time link', 'Hosted phone', 'Self-hosted Relay']);
     expect(data.security.setups).toEqual(securitySetups({ blocks: data.security.blocks }).names);
+  });
+
+  it('holds every guarantee to a checked section, and every checked section to an entry', () => {
+    // docs/specs/website-docs.md -> `/security` spec: a promise with no check,
+    // or a check behind no promise and no admitted risk, fails the build.
+    const page = ({ row = '| g | [a](./security-ci.md#a) |', bullet = '- x ([b](./security-ci.md#b))' } = {}) => {
+      const blocks = parseMarkdown(
+        ['## Guarantees', '', '| G | Rule |', '| --- | --- |', row, '', '## What is not defended', '', bullet, '', '## Known gaps', '', '- y ([c](./security-audit.md#c))'].join('\n'),
+        { slug: createSlugger() },
+      ).blocks;
+      resolveRepoLinks(blocks, 'docs/specs/security.md');
+      return { blocks };
+    };
+    const section = (path, anchor) => ({ title: anchor, url: `${REPO_BLOB_BASE}/${path}#${anchor}`, checks: 1 });
+    const index = {
+      domains: [{
+        specs: [
+          { path: 'docs/specs/security-ci.md', sections: [section('docs/specs/security-ci.md', 'a'), section('docs/specs/security-ci.md', 'b')] },
+          // The audit's own contract is the process, which no entry need claim.
+          { path: 'docs/specs/security-audit.md', sections: [section('docs/specs/security-audit.md', 'd')] },
+        ],
+      }],
+    };
+    expect(() => securityCoverage(page(), index)).not.toThrow();
+    expect(() => securityCoverage(page({ row: '| g | [m](./remote-security-model.md#pairing) |' }), index)).toThrow(
+      /"Guarantees" entry 1 links no section that carries a FAIL IF/,
+    );
+    expect(() => securityCoverage(page({ bullet: '- x ([a](./security-ci.md#a))' }), index)).toThrow(
+      /no guarantee, undefended edge, or known gap links docs\/specs\/security-ci\.md -> "b"/,
+    );
+    expect(() => securityCoverage({ blocks: data.security.blocks }, data.security.auditIndex)).not.toThrow();
   });
 
   it('links each path a guarantee is pinned by to GitHub, and fails on one that does not exist', () => {

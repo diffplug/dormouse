@@ -720,6 +720,43 @@ function assertDistinctSetups(names, label) {
   if (repeated.length > 0) throw new Error(`${label} repeats ${repeated.join(', ')}`);
 }
 
+/**
+ * The specs that describe the audit itself, not a boundary it checks: their
+ * sections are the process a guarantee rests on, and no entry need claim them.
+ */
+const SECURITY_PROCESS_SPECS = ['docs/specs/security.md', 'docs/specs/security-audit.md'];
+
+/**
+ * Hold the guarantees and the audit to each other: every guarantee row links
+ * at least one section that carries `FAIL IF` lines, and every such section
+ * outside {@link SECURITY_PROCESS_SPECS} is linked by a guarantee, an
+ * undefended edge, or a known gap. A promise with no check, or a check behind
+ * no promise and no admitted risk, fails the build.
+ */
+export function securityCoverage(page, index) {
+  const audited = new Map(
+    index.domains.flatMap((domain) => domain.specs.flatMap((spec) => spec.sections.map((section) => [section.url, { ...section, path: spec.path }]))),
+  );
+  const claimed = new Set();
+  for (const { key, title, block, entries } of securitySections(page)) {
+    block[entries].forEach((entry, i) => {
+      const links = [];
+      visit(entry, (node) => {
+        if (node.type === 'link' && node.repoPath && audited.has(node.href)) links.push(node.href);
+      });
+      if (key === 'guarantees' && links.length === 0) {
+        throw new Error(`/security: "${title}" entry ${i + 1} links no section that carries a FAIL IF`);
+      }
+      links.forEach((href) => claimed.add(href));
+    });
+  }
+  const unclaimed = [...audited.values()].filter((section) => !SECURITY_PROCESS_SPECS.includes(section.path) && !claimed.has(section.url));
+  if (unclaimed.length > 0) {
+    const names = unclaimed.map((section) => `${section.path} -> "${section.title}"`).join(', ');
+    throw new Error(`/security: no guarantee, undefended edge, or known gap links ${names}`);
+  }
+}
+
 /** The guarantees' column naming what pins each row on every build. */
 const SECURITY_PINNED_COLUMN = 'Pinned by';
 
@@ -792,13 +829,15 @@ const buildSecurity = async () => {
   });
   linkPinnedBy(page);
   const audiences = securityAudiences(page);
+  const index = await auditIndex();
+  securityCoverage(page, index);
   return {
     ...page,
     setups: securitySetups(page).names,
     audiences,
     pageBlocks: audienceBlocks(page, audiences, SECURITY_PAGE_AUDIENCES),
     supplyChain: withoutSetups(audiences['supply-chain']),
-    auditIndex: await auditIndex(),
+    auditIndex: index,
   };
 };
 

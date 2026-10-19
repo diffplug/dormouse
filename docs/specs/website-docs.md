@@ -196,6 +196,8 @@ Source of truth: `SELF_HOST_DELTA` in `website/scripts/generate-docs.js`; `SelfH
 
 **Must tag every guarantee row and list bullet with the setups it applies to**, named only from the first column of the spec's "Setups" table: a row in its `Applies to` cell, a bullet in the emphasis it opens with. `securitySetups` fails the build on an entry with no tag, an unknown or repeated one, a setup no entry uses, or a missing table. Setups say which reader must know an entry, never which page shows it; the audience split ignores them. **`/supply-chain` shows no tags** (`withoutSetups`): it splits its inventory by product and has no setup table to read them against.
 
+**Must link every guarantee row to a section that carries `FAIL IF` lines, and every such section outside `docs/specs/security.md` and `docs/specs/security-audit.md`, the audit's own process, from a guarantee, an undefended edge, or a known gap.** `securityCoverage` fails the build on a promise no check stands behind, or a check behind no promise and no admitted risk.
+
 ```mermaid
 flowchart LR
   SEC[docs/specs/security.md] -->|SECURITY_DELTA| J[docs.security.json]
