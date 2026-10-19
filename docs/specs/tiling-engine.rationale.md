@@ -26,6 +26,10 @@ Lath replaced dockview-react, whose broader model charged five taxes:
 
 **Pausing anchors the slide.** A pane drag starts on its header, inside its top band, and moving it sideways crosses every other header's top band. Anchoring on contact would stretch a group from the dragged pane on every such sweep; anchoring on a pause leaves quick sweeps naming one pane at a time.
 
+**Lines before slides.** Most wanted scopes are the tree's own groups: beside one pane, between two, or along a whole side. Reaching a group by pause-and-slide hid them behind a timed gesture, so the gutter and the wall's edge name the group directly and the slide remains for partial ranges. A top edge's line stays outside the leaf because the header fills its top 30px: an inner strip there would turn every sweep across the header row into a full-width drop.
+
+**Previews measure the layout that stays.** A preview of the committed `move` placed the pane after its own slot had closed, so every other pane shifted in the preview too, and the drop could not be judged against the panes that stay put. Drawn into the current layout, the preview shows which part of the existing panes the drop takes; the commit then rebalances that share once the old slot is gone. A line along the drop edge, marking where a slide steps, was tried and dropped (2026-10): it explained the slide but not where the pane would land.
+
 **The header-press quirk.** A pane drag starts from a `pointerdown` the header has already handled as a click, so the pane is selected and in passthrough by the time the 5px threshold trips. Suppressing it would mean deferring the header's own click until the gesture resolves, and the end state is the one a drag wants anyway — the dragged pane is the selected pane.
 
 ## Parked leaves
