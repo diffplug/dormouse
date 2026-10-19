@@ -55,11 +55,9 @@ const view: ToolViewAccess = {
   read: () => ({ mode: realm?.getValue(viewMode$) === 'source' ? 'source' : 'rich-text', top: scroller()?.scrollTop ?? 0 }),
   // Both transports validate the position before it arrives.
   async apply(position) {
-    // Waits out a load here, so the host's one request needs no retry across it.
-    await new Promise<void>(done => {
-      if (store.doc.loaded) return done();
-      const stop = changes.subscribe(() => { if (store.doc.loaded) { stop(); done(); } });
-    });
+    // The host retries within its deadline. Never retain an apply that could
+    // change the page after the host has abandoned this navigation.
+    if (!store.doc.loaded) throw new Error('The document is still loading.');
     realm?.pub(viewMode$, position.mode ?? 'rich-text');
     await nextPaint();
     const scroll = scroller();

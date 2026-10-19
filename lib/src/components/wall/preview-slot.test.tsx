@@ -1265,6 +1265,16 @@ describe('a switching slot', () => {
 });
 
 describe('Tool document navigation', () => {
+  it('still navigates when the Markdown page cannot supply its reading position', async () => {
+    installHost();
+    await mountWall([{ id: 'surface:slot', params: viewerParams('a.md', { toolScope: 'builtin', toolName: 'file' }) }]);
+    shell('surface:a', null); shell('surface:slot', 'view /repo/a.md');
+    // No connected editor: reading the position rejects, as on the terminal face.
+    expect(await answer(await request({ file: '/repo/b.md', disposition: 'current' }, 'surface:slot')))
+      .toMatchObject({ status: 'retargeted', surfaceId: 'surface:slot' });
+    expect((await paramsOf('surface:slot'))?.toolTarget).toBe('/repo/b.md');
+  });
+
   it('pins an in-place visit and traverses Back/Forward without persisting its history', async () => {
     await mountSlot();
     expect(await answer(await request({ file: '/repo/b.md', disposition: 'current' }, 'surface:slot')))
