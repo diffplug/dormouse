@@ -222,8 +222,8 @@ export function outputPaints(data: string): boolean {
     if (!introducer) return false;
     const start = groundEnd + introducer[0].length;
     const kind = stringControlKind(introducer[0]);
-    // DECRQSS and XTGETTCAP ask; any other DCS (SIXEL, passthrough), and APC graphics, may paint.
-    if (kind === 'other' && !isDcsQuery(introducer[0], data, start)) return true;
+    // DECRQSS and XTGETTCAP ask; any other DCS (SIXEL, passthrough), APC graphics, and iTerm2 inline images may paint.
+    if (kind === 'other' ? !isDcsQuery(introducer[0], data, start) : isOscImage(data, start)) return true;
     const end = stringControlEndScan(kind);
     end.lastIndex = start;
     const stop = end.exec(data);
@@ -237,8 +237,8 @@ export function outputPaints(data: string): boolean {
 
 /** A control that cannot paint by itself: a CSI (judged by `csiPaints`), a
  *  charset designation, cursor save/restore, a keypad mode, or a C0/C1 control
- *  other than ESC and the line feeds, which can scroll. */
-const INERT_TOKEN = /(?:\x1b\[|\x9b)([<=>?]?)([0-9:;]*)([ -/]*)([@-~])|\x1b(?:[()*+][0-~]|[78=>])|[\x00-\x09\x0d-\x1a\x1c-\x1f\x7f-\x9f]/y;
+ *  other than ESC and the line feeds (LF, VT, FF, IND, NEL), which can scroll. */
+const INERT_TOKEN = /(?:\x1b\[|\x9b)([<=>?]?)([0-9:;]*)([ -/]*)([@-~])|\x1b(?:[()*+][0-~]|[78=>])|[\x00-\x09\x0d-\x1a\x1c-\x1f\x7f-\x83\x86-\x9f]/y;
 const DCS_QUERY = /[$+]q/y;
 /** Cursor motion, tab stops, margins, save/restore, and the private save/restore/graphics queries. */
 const INERT_CSI = new Set([...'ABCDEFGHIZ`adefrs', '>q', '?S', '?r', '?s']);
@@ -266,4 +266,13 @@ function csiPaints(prefix: string, params: string, intermediates: string, final:
 function isDcsQuery(introducer: string, data: string, start: number): boolean {
   DCS_QUERY.lastIndex = start;
   return (introducer === '\x1bP' || introducer === '\x90') && DCS_QUERY.test(data);
+}
+
+/** The `OSC 1337` subcommands `ImageAddon` draws (`OSC1337_FORWARDED` in
+ *  `terminal-protocol.ts`, less `ReportCellSize`, which only asks). */
+const OSC_IMAGE = /1337;(?:File=|MultipartFile=|FilePart=|FileEnd)/y;
+
+function isOscImage(data: string, start: number): boolean {
+  OSC_IMAGE.lastIndex = start;
+  return OSC_IMAGE.test(data);
 }

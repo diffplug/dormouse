@@ -206,6 +206,7 @@ describe('outputPaints', () => {
     ['an empty hyperlink', '\x1b]8;;https://example.com\x1b\\\x1b]8;;\x07'],
     ['a DECRQSS query, BEL being payload in a DCS', '\x1bP$q\x07m\x1b\\'],
     ['C1 forms', '\x9b?6n\x9d104\x9c'],
+    ['an iTerm2 cell-size query', '\x1b]1337;ReportCellSize\x07'],
     ['nothing', ''],
   ])('discounts %s', (_, data) => expect(outputPaints(data)).toBe(false));
 
@@ -220,6 +221,9 @@ describe('outputPaints', () => {
     ['a reverse index', '\x1bM'],
     ['a SIXEL image', '\x1bPq#0;2;0;0;0#0~~\x1b\\'],
     ['a kitty graphics image', '\x1b_Ga=T;AAAA\x1b\\'],
+    ['an iTerm2 inline image', '\x1b]1337;File=inline=1:AAAA\x07'],
+    ['a C1 index', '\x84'],
+    ['a C1 next line', '\x85'],
     ['text after a cancelled OSC', '\x1b]8;;x\x18hi'],
     ['an unknown CSI', '\x1b[5z'],
     ['a sequence cut off by the chunk', '\x1b[?6'],
