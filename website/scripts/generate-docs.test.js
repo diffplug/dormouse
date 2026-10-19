@@ -6,12 +6,14 @@ import {
   SITE_ORIGIN,
   SITE_ROUTES,
   applyDelta,
+  audienceBlocks,
   assertNoSiteLinks,
   assertRouteFragments,
   auditIndex,
   auditedSections,
   gatherGuarantees,
   generateDocs,
+  groupGuarantees,
   guaranteeRows,
   linkPinnedBy,
   resolveRepoLinks,
@@ -19,6 +21,7 @@ import {
   securityCoverage,
   securityFeatures,
   withGuarantees,
+  withRuleLeading,
   withoutFeatures,
 } from './generate-docs.js';
 import { createSlugger, inlineToText, parseMarkdown, visit } from './docs-parser.js';
@@ -264,9 +267,11 @@ describe('security spec', () => {
 
   it('renders its own page as its audience and remote control’s, in spec order, every other block untouched', () => {
     expect(SECURITY_PAGE_AUDIENCES).toEqual(['security', 'self-host']);
-    const swapped = data.security.pageBlocks.filter((b, i) => b !== data.security.blocks[i]);
+    const narrowed = audienceBlocks({ blocks: data.security.blocks }, data.security.audiences, SECURITY_PAGE_AUDIENCES);
+    expect(data.security.pageBlocks).toEqual(groupGuarantees(narrowed, data.security.features));
+    const swapped = narrowed.filter((b, i) => b !== data.security.blocks[i]);
     expect(swapped).toHaveLength(3);
-    const whole = (b) => data.security.blocks[data.security.pageBlocks.indexOf(b)];
+    const whole = (b) => data.security.blocks[narrowed.indexOf(b)];
     for (const [block, key, entries] of [
       [swapped[0], 'guarantees', 'rows'],
       [swapped[1], 'notDefended', 'items'],
@@ -277,7 +282,36 @@ describe('security spec', () => {
       expect(new Set(rendered)).toEqual(new Set(shown));
       expect(rendered).toEqual(whole(block)[entries].map((e) => JSON.stringify(e)).filter((e) => shown.includes(e)));
     }
-    expect(data.security.pageBlocks).toHaveLength(data.security.blocks.length);
+    expect(narrowed).toHaveLength(data.security.blocks.length);
+  });
+
+  it('groups the guarantees under a subheading per feature, each row led by its Rule', () => {
+    const blocks = parseMarkdown(
+      [
+        '## Guarantees', '', 'Intro.', '',
+        '| Guarantee | Feature | Rule | Pinned by |', '| --- | --- | --- | --- |',
+        '| g1 |  | r1 | p1 |', '| g2 | A, B | r2 | p2 |', '| g3 | B | r3 | p3 |', '',
+        '## Next', '', 'After.',
+      ].join('\n'),
+      { slug: createSlugger() },
+    ).blocks;
+    const grouped = groupGuarantees(blocks, ['A', 'B', 'C']);
+    expect(grouped.slice(0, 2)).toEqual(blocks.slice(0, 2));
+    expect(grouped.slice(-2)).toEqual(blocks.slice(-2));
+    const groups = grouped.slice(2, -2);
+    expect(groups.filter((b) => b.type === 'heading').map((h) => [h.depth, h.id, h.text])).toEqual([
+      [3, 'every-install', 'Every install'], [3, 'a', 'A'], [3, 'b', 'B'],
+    ]);
+    const tables = groups.filter((b) => b.type === 'table');
+    expect(tables.map((table) => table.header.map((cell) => inlineToText(cell)))).toEqual(Array(3).fill(['Guarantee', 'Pinned by']));
+    expect(tables.map((table) => table.rows.map((row) => row.map((cell) => inlineToText(cell))))).toEqual([
+      [['r1 g1', 'p1']],
+      [['r2 g2', 'p2']],
+      [['r2 g2', 'p2'], ['r3 g3', 'p3']],
+    ]);
+    const clash = parseMarkdown('## Guarantees\n\n| Guarantee | Feature | Rule | Pinned by |\n| --- | --- | --- | --- |\n| g | Next | r | p |\n\n## Next\n', { slug: createSlugger() }).blocks;
+    expect(() => groupGuarantees(clash, ['Next'])).toThrow(/"Next" guarantees would share #next/);
+    expect(() => withRuleLeading({ ...blocks[2], header: blocks[2].header.slice(0, 2) })).toThrow(/no "Rule" column/);
   });
 
   it('refuses an entry whose links name no audience, or two', () => {
@@ -459,8 +493,8 @@ describe('security spec', () => {
 
   it('publishes /supply-chain\'s entries without the feature tags it has no table for', () => {
     const sections = data.security.supplyChain;
-    expect(sections.guarantees.header.map((cell) => inlineToText(cell))).toEqual(['Guarantee', 'Rule', 'Pinned by']);
-    expect(sections.guarantees.rows.every((row) => row.length === 3)).toBe(true);
+    expect(sections.guarantees.header.map((cell) => inlineToText(cell))).toEqual(['Guarantee', 'Pinned by']);
+    expect(sections.guarantees.rows.every((row) => row.length === 2)).toBe(true);
     for (const item of [...sections.notDefended.items, ...sections.knownGaps.items]) {
       expect(item.children[0].children[0].type).toBe('strong');
     }

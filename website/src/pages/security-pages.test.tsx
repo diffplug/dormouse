@@ -137,7 +137,7 @@ it("/security names every feature in its feature table, ahead of the guarantees"
   expect(guarantees).toBeGreaterThan(features);
   const [table] = tablesIn(main.slice(features, guarantees));
   expect(table.header[0]).toBe("Feature");
-  expect(table.rows.map((row) => row[0])).toEqual(security.features);
+  expect(table.rows.map((row) => row[0].split(".")[0])).toEqual(security.features);
 });
 
 /**
@@ -159,18 +159,54 @@ describe("feature tags", () => {
     });
   }
 
+  /**
+   * Each guarantee row /security shows, as its cell reads there (Rule, then
+   * Guarantee), with the features it names; none is every install.
+   */
+  const rowFeatures = (() => {
+    const text = (nodes: unknown): string =>
+      Array.isArray(nodes) ? nodes.map((n) => (n as { value?: string }).value ?? text((n as { children?: unknown }).children)).join("") : "";
+    const audiences = security.audiences as Record<string, { guarantees: { rows: unknown[][] } }>;
+    return PAGES[0].audiences
+      .flatMap((name) => audiences[name].guarantees.rows)
+      .map((row) => ({ cell: `${text(row[2])} ${text(row[0])}`, features: text(row[1]).split(", ").filter(Boolean) }));
+  })();
+  const decode = (html: string) =>
+    html.replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+
+  it("/security groups each guarantee under every feature it names, every install first", () => {
+    const main = renderMain(<SecurityDocs />);
+    const section = main.slice(main.indexOf('id="guarantees"'), main.indexOf('id="how-the-guarantees-are-checked"'));
+    const groups = [...section.matchAll(/<h3 id="([^"]+)".*?<\/h3>(.*?)(?=<h3|$)/gs)].map(([, id, body]) => ({ id, body }));
+    const names = ["Every install", ...security.features];
+    expect(groups.map((g) => g.id)).toEqual(names.map((name) => name.toLowerCase().replace(/ /g, "-")));
+    for (const [i, name] of names.entries()) {
+      const [table] = tablesIn(groups[i].body);
+      expect(table.header).toEqual(["Guarantee", "Pinned by"]);
+      const expected = rowFeatures.filter((row) => (i === 0 ? row.features.length === 0 : row.features.includes(name)));
+      expect(new Set(table.rows.map((row) => decode(row[0]))), name).toEqual(new Set(expected.map((row) => row.cell)));
+      expect(table.rows).toHaveLength(expected.length);
+      // The Rule leads its row as a link to the section that holds it.
+      expect(groups[i].body).toMatch(/<td\b[^>]*><a href="https:\/\/github\.com\/diffplug\/dormouse\/blob\/main\/docs\/specs\/security-/);
+    }
+    // A row naming two features appears under both.
+    expect(rowFeatures.some((row) => row.features.length > 1)).toBe(true);
+  });
+
   for (const page of PAGES.filter((page) => page.tagged)) {
-    it(`${page.route} shows the features each guarantee and bullet concerns`, () => {
+    it(`${page.route} tags each bullet with the features it concerns`, () => {
       const main = renderMain(page.element);
       const tagged = (cell: string) => {
         if (cell === "") return;
         for (const tag of cell.replace(/\.$/, "").split(", ")) expect(security.features, cell).toContain(tag);
       };
-      const guarantees = tablesIn(main).filter((table) => table.header.includes("Feature") && table.header.includes("Guarantee"));
-      expect(guarantees).toHaveLength(1);
-      const column = guarantees[0].header.indexOf("Feature");
-      expect(guarantees[0].rows.length).toBeGreaterThan(0);
-      for (const row of guarantees[0].rows) tagged(row[column]);
+      if (page.route !== "/security") {
+        const guarantees = tablesIn(main).filter((table) => table.header.includes("Feature") && table.header.includes("Guarantee"));
+        expect(guarantees).toHaveLength(1);
+        const column = guarantees[0].header.indexOf("Feature");
+        expect(guarantees[0].rows.length).toBeGreaterThan(0);
+        for (const row of guarantees[0].rows) tagged(row[column]);
+      }
       const audiences = security.audiences as Record<string, Record<"notDefended" | "knownGaps", { items: unknown[] }>>;
       const bullets = page.audiences.reduce(
         (n, name) => n + audiences[name].notDefended.items.length + audiences[name].knownGaps.items.length,
@@ -179,9 +215,6 @@ describe("feature tags", () => {
       const leads = bulletLeads(main);
       expect(leads).toHaveLength(bullets);
       leads.forEach((lead) => tagged(lead ?? ""));
-      // Every feature reaches this page's reader somewhere, so none is lost in the split.
-      const shown = new Set([...guarantees[0].rows.map((row) => row[column]), ...leads].flatMap((cell) => (cell ?? "").replace(/\.$/, "").split(", ")));
-      if (page.route === "/security") for (const feature of security.features) expect(shown).toContain(feature);
     });
   }
 });
@@ -192,9 +225,12 @@ describe("pinned by", () => {
     it(`${page.route} links each path a guarantee is pinned by`, () => {
       // A code span breaks its path with <wbr>s; the cell's text is the path.
       const html = renderMain(page.element).replace(/<wbr\/>/g, "");
-      const [table] = [...html.matchAll(/<table\b.*?<\/table>/gs)].map(([t]) => t).filter((t) => t.includes(">Pinned by<"));
-      const column = tablesIn(table)[0].header.indexOf("Pinned by");
-      const cells = [...table.matchAll(/<tr\b.*?<\/tr>/gs)].slice(1).map(([row]) => [...row.matchAll(/<td\b[^>]*>(.*?)<\/td>/gs)][column][1]);
+      const tables = [...html.matchAll(/<table\b.*?<\/table>/gs)].map(([t]) => t).filter((t) => t.includes(">Pinned by<"));
+      expect(tables.length).toBeGreaterThan(0);
+      const cells = tables.flatMap((table) => {
+        const column = tablesIn(table)[0].header.indexOf("Pinned by");
+        return [...table.matchAll(/<tr\b.*?<\/tr>/gs)].slice(1).map(([row]) => [...row.matchAll(/<td\b[^>]*>(.*?)<\/td>/gs)][column][1]);
+      });
       const paths = cells.flatMap((cell) => [...cell.matchAll(/<code\b[^>]*>([^<]*\/[^<]*)<\/code>/g)].map(([, path]) => ({ cell, path })));
       expect(paths.length).toBeGreaterThan(0);
       for (const { cell, path } of paths) {

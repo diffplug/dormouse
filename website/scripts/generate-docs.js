@@ -662,7 +662,8 @@ const SECURITY_FEATURE_COLUMN = 'Feature';
 
 /**
  * The features each guarantee row and list bullet concerns, checked against
- * the feature table's first column — the one copy of the vocabulary — and
+ * the names bolded at the head of the feature table's first column — the one
+ * copy of the vocabulary — and
  * orthogonal to the audience split: an audience is the spec a row's links name,
  * a feature is which reader must know the row. A row tags itself in its
  * `Feature` cell, a bullet with the emphasis it opens with, each a
@@ -675,7 +676,11 @@ export function securityFeatures(page) {
   const heading = findExactlyOneHeading(headings, (h) => h.text === SECURITY_FEATURES_TITLE, SECURITY_FEATURES_TITLE);
   const table = sectionBlocks(page.blocks, heading).find((b) => b.type === 'table');
   if (!table) throw new Error(`/security: "${SECURITY_FEATURES_TITLE}" has no table naming the features`);
-  const names = table.rows.map((row) => inlineToText(row[0]).trim());
+  const names = table.rows.map((row, i) => {
+    const [lead] = row[0];
+    if (lead?.type !== 'strong') throw new Error(`/security: "${SECURITY_FEATURES_TITLE}" row ${i + 1} opens with no **feature name**`);
+    return inlineToText(lead.children).replace(/\.$/, '').trim();
+  });
   assertDistinctFeatures(names, `/security: "${SECURITY_FEATURES_TITLE}"`);
   const used = new Set();
   const out = { names };
@@ -792,6 +797,52 @@ export function withoutFeatures(sections) {
   };
 }
 
+/** The column linking the section that holds each guarantee. */
+const SECURITY_RULE_COLUMN = 'Rule';
+
+/**
+ * A guarantees table with each row's Rule leading its Guarantee cell, and no
+ * Rule column: the section a promise sits in reads as its name.
+ */
+export function withRuleLeading(table) {
+  const column = table.header.findIndex((cell) => inlineToText(cell).trim() === SECURITY_RULE_COLUMN);
+  if (column === -1) throw new Error(`/security: "Guarantees" has no "${SECURITY_RULE_COLUMN}" column`);
+  const drop = (cells) => cells.filter((_, i) => i !== column);
+  const lead = (row) => drop(row.map((cell, i) => (i === 0 ? [...row[column], { type: 'text', value: ' ' }, ...cell] : cell)));
+  return { ...table, align: drop(table.align), header: drop(table.header), rows: table.rows.map(lead) };
+}
+
+/** The group a guarantee that names no feature falls in. */
+const SECURITY_BASELINE_GROUP = 'Every install';
+
+/**
+ * `blocks` with the "Guarantees" table split under a subheading per feature,
+ * {@link SECURITY_BASELINE_GROUP} first, then `features` in the feature
+ * table's order: a row under each feature it names, or the baseline when it
+ * names none, the Rule leading each row ({@link withRuleLeading}) and no
+ * Feature column. A feature no row names on this page gets no subheading.
+ */
+export function groupGuarantees(blocks, features) {
+  const at = blocks.findIndex((b) => b.type === 'heading' && b.text === 'Guarantees');
+  const end = blocks.findIndex((b, i) => i > at && b.type === 'heading' && b.depth <= blocks[at].depth);
+  const index = blocks.findIndex((b, i) => i > at && (end === -1 || i < end) && b.type === 'table');
+  if (at === -1 || index === -1) throw new Error('/security: no "Guarantees" table to group');
+  const table = blocks[index];
+  const column = featureColumn(table, 'Guarantees');
+  const tags = table.rows.map((row, i) => featureTagsOf(row, column, `/security: "Guarantees" entry ${i + 1}`));
+  const drop = (cells) => cells.filter((_, i) => i !== column);
+  const shown = withRuleLeading({ ...table, align: drop(table.align), header: drop(table.header), rows: table.rows.map(drop) });
+  const ids = new Set(headingsOf(blocks).map((h) => h.id));
+  const groups = [SECURITY_BASELINE_GROUP, ...features].flatMap((name) => {
+    const rows = shown.rows.filter((_, i) => (name === SECURITY_BASELINE_GROUP ? tags[i].length === 0 : tags[i].includes(name)));
+    if (rows.length === 0) return [];
+    const id = slugify(name);
+    if (ids.has(id)) throw new Error(`/security: the "${name}" guarantees would share #${id} with another heading`);
+    return [{ type: 'heading', depth: blocks[at].depth + 1, id, text: name, children: [{ type: 'text', value: name }] }, { ...shown, rows }];
+  });
+  return [...blocks.slice(0, index), ...groups, ...blocks.slice(index + 1)];
+}
+
 /**
  * `/security` from docs/specs/security.md, every section of it.
  *
@@ -803,7 +854,10 @@ export function withoutFeatures(sections) {
  * keeps every entry. `supplyChain` is `/supply-chain`'s audience without its
  * feature tags: that page splits its inventory by product and has no feature
  * table to read them against. `features` is the feature table's vocabulary,
- * every entry's tags checked against it ({@link securityFeatures}).
+ * every entry's tags checked against it ({@link securityFeatures}). The
+ * pages' guarantees lead each row with its Rule ({@link withRuleLeading}), and
+ * `/security` groups its own by feature ({@link groupGuarantees});
+ * `selfHostGuarantees` is `/self-host`'s.
  */
 const buildSecurity = async () => {
   const guarantees = await gatherGuarantees();
@@ -818,12 +872,15 @@ const buildSecurity = async () => {
   const audiences = securityAudiences(page);
   const index = await auditIndex();
   securityCoverage(index, guarantees.held);
+  const { names } = securityFeatures(page);
+  const supplyChain = withoutFeatures(audiences['supply-chain']);
   return {
     ...page,
-    features: securityFeatures(page).names,
+    features: names,
     audiences,
-    pageBlocks: audienceBlocks(page, audiences, SECURITY_PAGE_AUDIENCES),
-    supplyChain: withoutFeatures(audiences['supply-chain']),
+    pageBlocks: groupGuarantees(audienceBlocks(page, audiences, SECURITY_PAGE_AUDIENCES), names),
+    selfHostGuarantees: withRuleLeading(audiences['self-host'].guarantees),
+    supplyChain: { ...supplyChain, guarantees: withRuleLeading(supplyChain.guarantees) },
     auditIndex: index,
   };
 };
