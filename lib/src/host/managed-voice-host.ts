@@ -219,7 +219,6 @@ export function createManagedVoiceHost(options: {
     }
   }
 
-  /** A changed token forgets every clip and every refusal the old one earned. */
   /** Clear the stored token, memory before disk: a failed write must never leave speech armed. Runs on `serialize`. */
   async function clearToken(): Promise<void> {
     const current = await load().catch(() => normalizeStored(null));
