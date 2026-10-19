@@ -442,7 +442,7 @@ export interface BurrowEnrollPollRequest {
  * until the approval expires: an earlier poll enrolled `burrowId`, whose answer
  * never reached this one, and which the account must remove.
  *
- * `enrolled` also carries the signed-in desktop's managed-voice token, minted
+ * `enrolled` also carries the enrolled desktop's managed-voice token, minted
  * with the Burrow and revoked with it (`docs/specs/hosted.md` -> "Managed
  * voice"). The Burrow holds it to `isManagedVoiceToken` and enrolls without
  * one that fails, so an approval is never stranded over it.

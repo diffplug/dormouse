@@ -22,7 +22,7 @@ import { WatchedCommandList } from './WatchedCommandList';
 import { NetworkPhones, NetworkSettings, NetworkUpdates } from './NetworkSettings';
 import { useNetworkPolicy } from './remote-control-shared';
 import { PushTestButton, SpeakTestButton } from './AlarmTestButtons';
-import { HOSTED_VOICE_URL } from './HostedSignIn';
+import { HOSTED_VOICE_URL } from './HostedEnrollment';
 import { ManagedVoiceSection, NetworkTopicLink, useManagedVoiceOffered } from './ManagedVoiceSection';
 import { getPlatform } from '../lib/platform';
 import { getShellsSnapshot, subscribeToShells } from '../lib/shell-store';
@@ -526,7 +526,7 @@ export function AlarmSettingsSection({ sink, preview = false, onShowNetwork }: {
             so alerts use your browser or system voice.
           </>
         ) : (
-          'Uses managed voice while this computer is signed in to Dormouse Hosted, otherwise your browser or system voice.'
+          'Uses managed voice while this computer is enrolled with Dormouse Hosted, otherwise your browser or system voice.'
         )}
       </AlarmSinkSection>
       {preview ? null : (

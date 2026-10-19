@@ -464,7 +464,7 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
                   <section aria-labelledby="voice">
                     <h2 id="voice">Voice tokens</h2>
                     <p className="help">
-                      Signing in from Dormouse gives that computer its own
+                      Enrolling a computer from Dormouse gives it its own
                       token; removing the computer below revokes it. Managed
                       voice is in admin-only testing.
                     </p>
@@ -519,7 +519,7 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
                   <section aria-labelledby="computers">
                     <h2 id="computers">Computers</h2>
                     <p className="help">
-                      Computers signed in to this account speak with managed
+                      Computers enrolled with this account speak with managed
                       voice. A phone reaches one through the Hosted Relay only
                       once paired by two digits typed at that computer. Both
                       are in admin-only testing.

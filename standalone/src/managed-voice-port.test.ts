@@ -43,7 +43,7 @@ describe("createManagedVoicePort", () => {
     let answer!: (value: unknown) => void;
     const { port } = harness(() => new Promise((resolve) => { answer = resolve; }));
     ask(port);
-    // This computer signed in: the broadcast lands before this older answer.
+    // This computer enrolled: the broadcast lands before this older answer.
     port.receiveStatus({ configured: true, voiceId: "v2", notEntitled: false });
     answer({ ok: true, configured: false, voiceId: "v1", notEntitled: false });
     await new Promise((resolve) => setTimeout(resolve, 0));

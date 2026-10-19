@@ -3,7 +3,7 @@
 > - See `docs/specs/glossary.md` for Burrow / Client / Relay and Pane / Session vocabulary.
 > - **Owns:** the plans, the founding ladder, what a plan grants, how a desktop proves membership, the managed-voice boundary, and the content contract of the Hosted page.
 > - **Defers:** page chrome, rail, and link obligations to `docs/specs/website-docs.md` -> "Reference page chrome"; the Hosted Relay's accounts, enrollment, and entitlement, and managed voice's routes, to `docs/specs/hosted.md`; the cloud-hosted trust boundary to `docs/specs/security-remote.md` -> "Cloud-hosted mode"; alarm delivery to `docs/specs/alert.md` -> "Spoken alarms".
-> - **Status:** the Hosted page publishes the plans and the FAQ, and a desktop signs in to Hosted for managed voice (`docs/specs/hosted.md` -> "Managed voice"); everything that takes money — checkout, the subscription as the entitlement, the hosted Relay — is under [Future](#future).
+> - **Status:** the Hosted page publishes the plans and the FAQ, and a desktop enrolls with Hosted for managed voice (`docs/specs/hosted.md` -> "Managed voice"); everything that takes money — checkout, the subscription as the entitlement, the hosted Relay — is under [Future](#future).
 
 ## The Hosted page
 

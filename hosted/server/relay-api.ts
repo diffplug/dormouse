@@ -531,7 +531,7 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
       if (!owner.entitled) return c.json({ error: NOT_ENTITLED_ERROR }, 403);
       const burrowId = randomBase64Url(E2E_ID_BYTE_LENGTH);
       const burrowToken = randomBase64Url(RELAY_BEARER_BYTE_LENGTH);
-      // The signed-in desktop's managed voice, minted with its Burrow and
+      // The enrolled desktop's managed voice, minted with its Burrow and
       // revoked with it (docs/specs/hosted.md -> "Managed voice").
       const voiceToken = mintVoiceToken();
       const outcome = await locked(db, `burrows:${owner.userId}`, async () => {

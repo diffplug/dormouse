@@ -9,10 +9,10 @@ import { networkPolicyResult, nothingPolicy } from '../remote/network-policy';
 
 /**
  * Settings → Notifications' managed voice in a Hosted build
- * (`docs/specs/alert.md` -> "Settings dialog"): the disclosure, signing in to
+ * (`docs/specs/alert.md` -> "Settings dialog"): the disclosure, enrolling with
  * Dormouse Hosted — the same device-code flow Remote control runs, whose code
- * states are `RemoteControlSection`'s stories — and, signed in, the voice and
- * Sign out. Every state comes from the `primedBurrow` and
+ * states are `RemoteControlSection`'s stories — and, enrolled, the voice and
+ * Disconnect. Every state comes from the `primedBurrow` and
  * `primedManagedVoice` parameters.
  */
 function ManagedVoiceStory() {
@@ -51,21 +51,21 @@ function settled(text: string | RegExp) {
   };
 }
 
-/** A Hosted build signed in: its Burrow enrolled with Hosted, connected. */
-const SIGNED_IN: BurrowConsoleStatus = enrolledStatus({
+/** A Hosted build's Burrow, enrolled with Hosted and connected. */
+const ENROLLED: BurrowConsoleStatus = enrolledStatus({
   relayOrigin: DEFAULT_RELAY_ORIGIN,
   relayMode: 'hosted',
   accountOrigin: 'https://hosted.dormouse.sh',
 });
 
-/** Not signed in: the disclosure, the pitch, and the button that gets a code. */
-export const NotSignedIn: Story = {
+/** Not enrolled: the disclosure, the pitch, and the button that gets a code. */
+export const NotEnrolled: Story = {
   parameters: {
     primedBurrow: { status: UNENROLLED_STATUS },
     primedManagedVoice: { configured: false },
   },
   play: async ({ canvasElement }) => {
-    await within(canvasElement).findByRole('button', { name: 'Sign in to Dormouse Hosted' });
+    await within(canvasElement).findByRole('button', { name: 'Enroll with hosted.dormouse.sh' });
   },
 };
 
@@ -90,7 +90,7 @@ export const WaitingForApproval: Story = {
   play: settled('7KQM-X4TD'),
 };
 
-/** Under Nothing: why it cannot sign in, and the way to Network — never a silent policy change. */
+/** Under Nothing: why it cannot enroll, and the way to Network — never a silent policy change. */
 export const UnderNothing: Story = {
   parameters: {
     primedBurrow: {
@@ -99,56 +99,56 @@ export const UnderNothing: Story = {
     },
     primedManagedVoice: { configured: false },
   },
-  play: settled(/Choose Local networks or Anywhere there to sign in/),
+  play: settled(/Choose Local networks or Anywhere there to enroll/),
 };
 
-/** Signed in, a member: the curated voices and Sign out. */
-export const SignedIn: Story = {
+/** Enrolled, a member: the curated voices and Disconnect. */
+export const Enrolled: Story = {
   parameters: {
-    primedBurrow: { status: SIGNED_IN },
+    primedBurrow: { status: ENROLLED },
     primedManagedVoice: { configured: true },
   },
-  play: settled('Signed in to Dormouse Hosted.'),
+  play: settled('Enrolled with Dormouse Hosted.'),
 };
 
-/** Sign out's second step, which says what else it ends. */
-export const SignOutConfirm: Story = {
+/** Disconnect's second step, which says what else it ends. */
+export const DisconnectSecondStep: Story = {
   parameters: {
-    primedBurrow: { status: SIGNED_IN },
+    primedBurrow: { status: ENROLLED },
     primedManagedVoice: { configured: true },
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await userEvent.click(await canvas.findByRole('button', { name: 'Sign out' }));
-    await canvas.findByText(/Remote control signs out too/);
+    await userEvent.click(await canvas.findByRole('button', { name: 'Disconnect' }));
+    await canvas.findByText(/Remote control disconnects too/);
   },
 };
 
-/** Signed in, but speak answered 403: the plan lapsed, and the plans are a click away. */
+/** Enrolled, but speak answered 403: the plan lapsed, and the plans are a click away. */
 export const NoPlan: Story = {
   parameters: {
-    primedBurrow: { status: SIGNED_IN },
+    primedBurrow: { status: ENROLLED },
     primedManagedVoice: { configured: true, notEntitled: true },
   },
   play: settled(/no Hosted plan/),
 };
 
-/** Signed in before managed voice shipped: no token, so it asks for a fresh sign-in. */
-export const SignedInBeforeVoice: Story = {
+/** Enrolled before managed voice shipped: no token, so it asks for a fresh enrollment. */
+export const EnrolledBeforeVoice: Story = {
   parameters: {
-    primedBurrow: { status: SIGNED_IN },
+    primedBurrow: { status: ENROLLED },
     primedManagedVoice: { configured: false },
   },
-  play: settled(/signed in before managed voice/),
+  play: settled(/enrolled before managed voice/),
 };
 
-/** Removed at the account page: signing in again gets a new code. */
+/** Removed at the account page: enrolling again gets a new code. */
 export const RemovedAtAccount: Story = {
   parameters: {
-    primedBurrow: { status: { ...SIGNED_IN, connection: 'removed' } },
+    primedBurrow: { status: { ...ENROLLED, connection: 'removed' } },
     primedManagedVoice: { configured: true },
   },
   play: async ({ canvasElement }) => {
-    await within(canvasElement).findByRole('button', { name: 'Sign in again' });
+    await within(canvasElement).findByRole('button', { name: 'Enroll again' });
   },
 };

@@ -76,7 +76,7 @@ const idle = (configured: boolean, voiceId = DEFAULT_MANAGED_VOICE_ID) =>
   ({ configured, voiceId, notEntitled: false });
 
 describe('configuration', () => {
-  it('holds the token sign-in saves, and reports and broadcasts without ever carrying it', async () => {
+  it('holds the token enrollment saves, and reports and broadcasts without ever carrying it', async () => {
     expect(await host.handle({ op: 'status' })).toEqual(idle(false));
     await host.credential.save(TOKEN);
     expect(broadcasts).toEqual([idle(true)]);
@@ -115,7 +115,7 @@ describe('configuration', () => {
     expect(broadcasts).toEqual([]);
   });
 
-  it('clears the token at sign-out', async () => {
+  it('clears the token at disconnect', async () => {
     await host.credential.save(TOKEN);
     await host.credential.clear();
     expect(broadcasts.at(-1)).toEqual(idle(false));
@@ -171,7 +171,7 @@ describe('speak', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('forgets a token Hosted no longer knows, so Settings asks for a fresh sign-in', async () => {
+  it('forgets a token Hosted no longer knows, so Settings asks for a fresh enrollment', async () => {
     fetchMock.mockResolvedValue(new Response('{}', { status: 401 }));
     expect(await host.handle({ op: 'speak', text: 'x' })).toEqual({ ok: false, reason: 'HTTP 401' });
     expect(broadcasts.at(-1)).toEqual(idle(false));
@@ -275,7 +275,7 @@ describe('speak', () => {
     const refused = host.handle({ op: 'speak', text: 'build finished' });
     const spoken = host.handle({ op: 'speak', text: 'tests failed' });
     await vi.waitFor(() => expect(answers).toHaveLength(2));
-    // Signed in again while both are out.
+    // Enrolled again while both are out.
     await host.credential.save(`dmv_${'C'.repeat(43)}`);
     answers[0]!(new Response('{}', { status: 403 }));
     answers[1]!(audioResponse());

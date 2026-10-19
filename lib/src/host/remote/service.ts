@@ -163,8 +163,8 @@ export interface BurrowServiceOptions {
   /** This machine's interfaces, for `networkPolicy`; injected by the tests. */
   listInterfaces?: () => NetworkInterfaceInfo[];
   /**
-   * Where a Hosted sign-in keeps the managed-voice token its redemption
-   * carries, and what sign-out clears (`docs/specs/hosted.md` -> "Managed
+   * Where a Hosted enrollment keeps the managed-voice token its redemption
+   * carries, and what disconnect clears (`docs/specs/hosted.md` -> "Managed
    * voice"): the standalone sidecar's managed-voice host. Absent where the
    * host has no managed voice (VS Code), which drops the token.
    */
@@ -655,8 +655,8 @@ export class BurrowService {
     await this.#networkPolicy();
     const enrollment = await loadEnrollmentFor(this.#store, this.#relay.origin);
     if (enrollment) await this.#startBurrow(enrollment);
-    // A voice token is a sign-in's, and means nothing without its enrollment:
-    // one pasted before sign-in existed, or outliving a cleared enrollment.
+    // A voice token is an enrollment's, and means nothing without its enrollment:
+    // one pasted before managed voice existed, or outliving a cleared enrollment.
     else await this.#voiceCredential?.clear().catch((error: unknown) => {
       console.warn('[burrow] could not clear the managed-voice token', error);
     });
@@ -1072,7 +1072,7 @@ export class BurrowService {
             this.#enrollment = enrollment;
           });
         } finally {
-          // Signed in once the enrollment is saved, whether or not it started.
+          // Enrolled once the enrollment is saved, whether or not it started.
           if (saved && voiceToken !== null) {
             await this.#voiceCredential?.save(voiceToken).catch((error: unknown) => {
               console.warn('[burrow] could not save the managed-voice token', error);
@@ -1202,7 +1202,7 @@ export class BurrowService {
     this.#stopBurrow();
     this.#enrollment = null;
     this.#emitStatus();
-    // Signing out of Hosted: the enrollment's managed voice goes with it. The
+    // Disconnecting from Hosted: the enrollment's managed voice goes with it. The
     // account keeps both until the computer is removed there
     // (`docs/specs/hosted.md` -> "Managed voice").
     await this.#voiceCredential?.clear().catch((error: unknown) => {

@@ -1,6 +1,6 @@
 /**
  * The host half of managed voice (`docs/specs/alert.md` -> "Managed voice"):
- * holds the token the Burrow service's sign-in hands it, adds it and the voice
+ * holds the token the Burrow service's enrollment hands it, adds it and the voice
  * id to the webview's text, caches the clips, and answers with audio or a
  * diagnostic failure. Where the request may go:
  * `docs/specs/security-local.md` -> "Persisted state".
@@ -45,7 +45,7 @@ function normalizeStored(value: unknown): StoredConfig {
 }
 
 /**
- * The Burrow service's side of the token: sign-in saves it, sign-out clears it
+ * The Burrow service's side of the token: enrollment saves it, disconnect clears it
  * (`docs/specs/hosted.md` -> "Managed voice"). **In-process only**: no webview
  * command reaches it, so the token never enters a webview realm.
  */
@@ -227,7 +227,7 @@ export function createManagedVoiceHost(options: {
         if (generation === tokenGeneration) {
           if (response.status === 403) await noteEntitled(false);
           // Revoked or unknown — the computer removed at the account page:
-          // forgotten, so Settings asks for a fresh sign-in.
+          // forgotten, so Settings asks for a fresh enrollment.
           if (response.status === 401) await setToken(null).catch(() => {});
         }
         return { ok: false, reason: response.ok ? `unexpected ${mime ?? 'body'}` : `HTTP ${response.status}` };
@@ -248,7 +248,7 @@ export function createManagedVoiceHost(options: {
       }
       if (size === 0) return { ok: false, reason: 'empty audio' };
       const audioBase64 = Buffer.concat(chunks, size).toString('base64');
-      // Only for the token that asked: a sign-out meanwhile cleared the cache.
+      // Only for the token that asked: a disconnect meanwhile cleared the cache.
       if (generation === tokenGeneration) {
         await noteEntitled(true);
         clips.set(config.voiceId, trimmed, audioBase64);

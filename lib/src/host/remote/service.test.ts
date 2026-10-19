@@ -2776,12 +2776,12 @@ describe('Hosted enrollment', () => {
     expect(pollRequests()).toHaveLength(2);
   });
 
-  it('hands the voice token a redemption carries to managed voice, and sign-out clears it', async () => {
+  it('hands the voice token a redemption carries to managed voice, and disconnect clears it', async () => {
     const voiceToken = `dmv_${'V'.repeat(43)}`;
     const voice = { save: vi.fn(async (_token: string) => {}), clear: vi.fn(async () => {}) };
     hosted(undefined, { voiceCredential: voice });
     await service.start();
-    // Start found no enrollment, so it cleared what no sign-in holds.
+    // Start found no enrollment, so it cleared what no enrollment holds.
     voice.clear.mockClear();
     await command('beginHostedEnrollment', { label: 'Work laptop' });
     const answer = enrolledAnswer();

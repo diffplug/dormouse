@@ -171,7 +171,7 @@ const OUTBOUND_SITES = {
     class: 'user:link-click',
     reason: 'The self-host guide link, opened only when the user clicks it.',
   },
-  'lib/src/components/HostedSignIn.tsx': {
+  'lib/src/components/HostedEnrollment.tsx': {
     class: 'user:link-click',
     reason: 'The Hosted plans and voice page links, opened only when the user clicks one.',
   },
@@ -304,7 +304,7 @@ const REMOTE_LITERALS = {
     hosts: ['dormouse.sh'],
     reason: 'The self-host guide link.',
   },
-  'lib/src/components/HostedSignIn.tsx': {
+  'lib/src/components/HostedEnrollment.tsx': {
     hosts: ['dormouse.sh'],
     reason: 'The Hosted plans and voice page links.',
   },

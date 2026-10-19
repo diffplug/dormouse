@@ -8,7 +8,7 @@
 export { DEFAULT_MANAGED_VOICE_ID, MANAGED_VOICES } from 'remote-lib-common';
 
 export interface ManagedVoiceStatus {
-  /** A voice token is held: this desktop signed in to Dormouse Hosted with managed voice. */
+  /** A voice token is held: this desktop's Hosted enrollment carried managed voice. */
   configured: boolean;
   /** The member default, always one of `MANAGED_VOICES`. */
   voiceId: string;
@@ -21,7 +21,7 @@ export interface ManagedVoiceStatus {
 
 /**
  * What the webview may change: the default voice. **Never the token**, which
- * only the Burrow service's sign-in writes and sign-out clears.
+ * only the Burrow service's enrollment writes and disconnect clears.
  */
 export interface ManagedVoiceConfigUpdate {
   voiceId: string;

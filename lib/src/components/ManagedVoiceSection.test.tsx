@@ -17,7 +17,7 @@ import {
 import { DEFAULT_RELAY_ORIGIN } from '../host/relay-origin';
 import type { BurrowConsoleStatus } from '../host/remote/service-protocol';
 import { networkPolicyResult, nothingPolicy } from '../remote/network-policy';
-import { HOSTED_PRICING_URL, SIGN_IN_LABEL } from './HostedSignIn';
+import { HOSTED_PRICING_URL } from './HostedEnrollment';
 import { MANAGED_VOICE_DISCLOSURE, ManagedVoiceSection, NO_PLAN_COPY } from './ManagedVoiceSection';
 import { AlarmSettingsSection } from './SettingsDialog';
 
@@ -30,8 +30,8 @@ const text = () => container.textContent ?? '';
 const button = (label: string) =>
   [...container.querySelectorAll('button')].find((b) => b.textContent?.trim() === label);
 
-/** A Hosted build signed in: the Burrow enrolled with Hosted and connected. */
-const SIGNED_IN: BurrowConsoleStatus = enrolledStatus({
+/** A Hosted build's Burrow, enrolled with Hosted and connected. */
+const ENROLLED: BurrowConsoleStatus = enrolledStatus({
   relayOrigin: DEFAULT_RELAY_ORIGIN,
   relayMode: 'hosted',
   accountOrigin: 'https://hosted.dormouse.sh',
@@ -71,33 +71,33 @@ describe('ManagedVoiceSection', () => {
     expect(container.innerHTML).toBe('');
   });
 
-  it('states what leaves the machine, then signs in with the suggested name, no paste field', async () => {
+  it('states what leaves the machine, then enrolls with the suggested name, no paste field', async () => {
     const { command } = await render({ status: UNENROLLED_STATUS }, makeStubManagedVoicePort(false));
     expect(text()).toContain(MANAGED_VOICE_DISCLOSURE);
     expect(text()).toContain('though no limit is guaranteed');
     expect(container.querySelector('input')).toBeNull();
 
-    await act(async () => button(SIGN_IN_LABEL)!.click());
+    await act(async () => button('Enroll with hosted.dormouse.sh')!.click());
     expect(command).toHaveBeenCalledWith('beginHostedEnrollment', { label: UNENROLLED_STATUS.suggestedLabel });
   });
 
-  it('under Nothing, explains and points at Network rather than signing in', async () => {
+  it('under Nothing, explains and points at Network rather than enrolling', async () => {
     const onShowNetwork = vi.fn();
     const { command } = await render(
       { status: UNENROLLED_STATUS, network: networkPolicyResult(nothingPolicy(), 'hosted', []) },
       makeStubManagedVoicePort(false),
       onShowNetwork,
     );
-    expect(text()).toContain('Choose Local networks or Anywhere there to sign in.');
-    expect(button(SIGN_IN_LABEL)).toBeUndefined();
+    expect(text()).toContain('Choose Local networks or Anywhere there to enroll.');
+    expect(button('Enroll with hosted.dormouse.sh')).toBeUndefined();
     await act(async () => button('Network')!.click());
     expect(onShowNetwork).toHaveBeenCalledOnce();
     expect(command).not.toHaveBeenCalledWith('beginHostedEnrollment', expect.anything());
   });
 
-  it('signed in, picks a voice from the curated set', async () => {
-    const { voice } = await render({ status: SIGNED_IN });
-    expect(text()).toContain('Signed in to Dormouse Hosted.');
+  it('enrolled, picks a voice from the curated set', async () => {
+    const { voice } = await render({ status: ENROLLED });
+    expect(text()).toContain('Enrolled with Dormouse Hosted.');
     const select = container.querySelector<HTMLSelectElement>('select[aria-label="Managed voice"]')!;
     expect([...select.options].map((option) => option.value)).toEqual(MANAGED_VOICES.map((v) => v.id));
     const configure = vi.spyOn(voice, 'configure');
@@ -109,8 +109,8 @@ describe('ManagedVoiceSection', () => {
   });
 
   it.each([
-    ['the relay socket', { status: { ...SIGNED_IN, connection: 'not-entitled' as const } }, false],
-    ['speak', { status: SIGNED_IN }, true],
+    ['the relay socket', { status: { ...ENROLLED, connection: 'not-entitled' as const } }, false],
+    ['speak', { status: ENROLLED }, true],
   ])('says the account has no plan when %s refuses it', async (_by, primed, notEntitled) => {
     await render(primed, makeStubManagedVoicePort(true, notEntitled));
     expect(text()).toContain(NO_PLAN_COPY);
@@ -120,19 +120,19 @@ describe('ManagedVoiceSection', () => {
     expect(openExternal).toHaveBeenCalledWith(HOSTED_PRICING_URL);
   });
 
-  it('asks a computer signed in before managed voice to sign in again', async () => {
-    await render({ status: SIGNED_IN }, makeStubManagedVoicePort(false));
-    expect(text()).toContain('Sign out and sign in again to use it.');
+  it('asks a computer enrolled before managed voice to enroll again', async () => {
+    await render({ status: ENROLLED }, makeStubManagedVoicePort(false));
+    expect(text()).toContain('Disconnect and enroll again to use it.');
     expect(container.querySelector('select')).toBeNull();
   });
 
-  it('signs out after confirming, which is the Burrow’s local Disconnect', async () => {
-    const { command } = await render({ status: SIGNED_IN });
+  it('disconnects after confirming, which is the Burrow’s local Disconnect', async () => {
+    const { command } = await render({ status: ENROLLED });
     expect(text()).toContain('Remove this computer at hosted.dormouse.sh');
-    await act(async () => button('Sign out')!.click());
-    expect(text()).toContain('Remote control signs out too');
+    await act(async () => button('Disconnect')!.click());
+    expect(text()).toContain('Remote control disconnects too');
     expect(command).not.toHaveBeenCalledWith('clearEnrollment');
-    await act(async () => button('Sign out')!.click());
+    await act(async () => button('Disconnect')!.click());
     expect(command).toHaveBeenCalledWith('clearEnrollment');
   });
 });
@@ -140,7 +140,7 @@ describe('ManagedVoiceSection', () => {
 describe('the spoken-alarm copy', () => {
   it.each([
     ['no port', false, 'Get managed ElevenLabs voices.'],
-    ['a Hosted build’s port', true, 'Uses managed voice while this computer is signed in to Dormouse Hosted'],
+    ['a Hosted build’s port', true, 'Uses managed voice while this computer is enrolled with Dormouse Hosted'],
   ])('with %s', async (_label, port, copy) => {
     const adapter = new FakePtyAdapter();
     setPlatform(port ? Object.assign(adapter, { managedVoice: makeStubManagedVoicePort(false) }) : adapter);

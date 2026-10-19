@@ -944,7 +944,7 @@ test("a device-code enrollment: begin stores nothing, pending until approved, th
   expect(await f.sql(`SELECT "burrowId", "userId", "tokenHash" FROM dormouse_relay_burrows`)).toEqual([
     { burrowId: enrollment.burrowId, userId: owner, tokenHash: digest(enrollment.burrowToken) },
   ]);
-  // The signed-in desktop's voice token, minted with the Burrow, stored as its hash.
+  // The enrolled desktop's voice token, minted with the Burrow, stored as its hash.
   expect(isManagedVoiceToken(voiceToken)).toBe(true);
   expect(await f.sql(`SELECT "userId", hash, "burrowId", "revokedAt" FROM dormouse_voice_tokens`)).toEqual([
     { userId: owner, hash: digest(voiceToken), burrowId: enrollment.burrowId, revokedAt: null },

@@ -1,7 +1,7 @@
 import { useCallback, useState, useSyncExternalStore } from 'react';
 import { INLINE_ACTION_CLASS, SELECT_CLASS, modalActionButton } from './design';
 import { ExternalTextLink } from './ExternalTextLink';
-import { HOSTED_PRICING_URL, HostedEnrollView, accountHost, accountPage } from './HostedSignIn';
+import { HOSTED_PRICING_URL, HostedEnrollView, accountHost, accountPage } from './HostedEnrollment';
 import { DisconnectConfirm, removedCopy } from './RemoteControlSection';
 import { FIELD_LABEL, useBusyAction, useNetworkPolicy } from './remote-control-shared';
 import type { BurrowConsoleStatus } from '../host/remote/service-protocol';
@@ -14,7 +14,7 @@ import {
 } from '../lib/platform/managed-voice-types';
 import {
   getBurrowStatusSnapshot,
-  signInAgain,
+  reenrollBurrow,
   subscribeToBurrowStatus,
 } from '../remote/burrow/burrow-status-store';
 
@@ -66,9 +66,9 @@ export function useManagedVoiceConfigured(): boolean {
 
 /**
  * Managed voice in Settings → Notifications (`docs/specs/alert.md` ->
- * "Settings dialog"): signing in to Dormouse Hosted, which is this computer's
+ * "Settings dialog"): enrolling with Dormouse Hosted, which is this computer's
  * Hosted enrollment ({@link HostedEnrollView}, shared with Remote control),
- * then the member's voice and Sign out. Renders nothing in a build without
+ * then the member's voice and Disconnect. Renders nothing in a build without
  * managed voice — a self-host build, VS Code.
  */
 export function ManagedVoiceSection({ onShowNetwork }: { onShowNetwork?: () => void }) {
@@ -76,10 +76,10 @@ export function ManagedVoiceSection({ onShowNetwork }: { onShowNetwork?: () => v
   const voice = useManagedVoiceStatus(port);
   const burrow = useSyncExternalStore(subscribeToBurrowStatus, getBurrowStatusSnapshot);
   const networkOff = useNetworkPolicy()?.level === 'nothing';
-  // Sign in again spans the flip from signed in to not, so its busy and error
+  // Enroll again spans the flip from enrolled to not, so its busy and error
   // live here, above both views: a begin refused after the clear still has
   // somewhere to say so.
-  const signInAgainAction = useBusyAction();
+  const enrollAgainAction = useBusyAction();
 
   if (!port) return null;
   const status = burrow.kind === 'ready' ? burrow.status : null;
@@ -89,20 +89,20 @@ export function ManagedVoiceSection({ onShowNetwork }: { onShowNetwork?: () => v
       <div className="text-sm text-foreground">Managed voice</div>
       <p className={HINT}>{MANAGED_VOICE_DISCLOSURE}</p>
       {status === null ? null : status.enrolled ? (
-        <SignedIn
+        <Enrolled
           status={status}
           voice={voice}
           port={port}
-          signingInAgain={signInAgainAction.busy}
-          onSignInAgain={() => void signInAgainAction.run(() => signInAgain(status.suggestedLabel))}
+          enrollingAgain={enrollAgainAction.busy}
+          onEnrollAgain={() => void enrollAgainAction.run(() => reenrollBurrow(status.suggestedLabel))}
         />
       ) : (
         <>
           <p className={HINT}>Dormouse Hosted members hear alarms in a natural ElevenLabs voice.</p>
           {networkOff ? (
             <p className={HINT}>
-              Signing in reaches Dormouse Hosted, which nothing does while <NetworkTopicLink onShow={onShowNetwork} />{' '}
-              is set to Nowhere. Choose Local networks or Anywhere there to sign in.
+              Enrolling reaches Dormouse Hosted, which nothing does while <NetworkTopicLink onShow={onShowNetwork} />{' '}
+              is set to Nowhere. Choose Local networks or Anywhere there to enroll.
             </p>
           ) : (
             <HostedEnrollView
@@ -114,21 +114,21 @@ export function ManagedVoiceSection({ onShowNetwork }: { onShowNetwork?: () => v
           )}
         </>
       )}
-      {signInAgainAction.error ? <div className="mt-1.5 text-sm text-error">{signInAgainAction.error}</div> : null}
+      {enrollAgainAction.error ? <div className="mt-1.5 text-sm text-error">{enrollAgainAction.error}</div> : null}
     </div>
   );
 }
 
-/** Signed in: the plan's standing, the voice, and Sign out. */
-function SignedIn({ status, voice, port, signingInAgain, onSignInAgain }: {
+/** Enrolled: the plan's standing, the voice, and Disconnect. */
+function Enrolled({ status, voice, port, enrollingAgain, onEnrollAgain }: {
   status: BurrowConsoleStatus;
   voice: ManagedVoiceStatus | null;
   port: ManagedVoicePort;
-  signingInAgain: boolean;
-  onSignInAgain: () => void;
+  enrollingAgain: boolean;
+  onEnrollAgain: () => void;
 }) {
   const { busy: ownBusy, error, run } = useBusyAction();
-  const busy = ownBusy || signingInAgain;
+  const busy = ownBusy || enrollingAgain;
   const [confirming, setConfirming] = useState(false);
   const page = accountPage(status.accountOrigin);
   const lapsed = status.connection === 'not-entitled' || voice?.notEntitled === true;
@@ -149,11 +149,11 @@ function SignedIn({ status, voice, port, signingInAgain, onSignInAgain }: {
           {NO_PLAN_COPY} <ExternalTextLink href={HOSTED_PRICING_URL}>See Hosted plans</ExternalTextLink>
         </div>
       ) : (
-        <div className="text-foreground">Signed in to Dormouse Hosted.</div>
+        <div className="text-foreground">Enrolled with Dormouse Hosted.</div>
       )}
       {!removed && voice && !voice.configured ? (
         <p className={HINT}>
-          This computer signed in before managed voice. Sign out and sign in again to use it.
+          This computer enrolled before managed voice. Disconnect and enroll again to use it.
         </p>
       ) : null}
       {!removed && voice?.configured ? (
@@ -181,27 +181,26 @@ function SignedIn({ status, voice, port, signingInAgain, onSignInAgain }: {
             type="button"
             disabled={busy}
             className={modalActionButton({ tone: 'primary' })}
-            onClick={onSignInAgain}
+            onClick={onEnrollAgain}
           >
-            {signingInAgain ? 'Getting a code…' : 'Sign in again'}
+            {enrollingAgain ? 'Getting a code…' : 'Enroll again'}
           </button>
         ) : confirming ? (
           <DisconnectConfirm
             busy={busy}
             run={run}
             onDone={() => setConfirming(false)}
-            label="Sign out"
-            warning="Remote control signs out too: paired phones will need to pair again."
+            warning="Remote control disconnects too: paired phones will need to pair again."
           />
         ) : (
           <button type="button" disabled={busy} className={modalActionButton()} onClick={() => setConfirming(true)}>
-            Sign out
+            Disconnect
           </button>
         )}
       </div>
       {page && !removed ? (
         <p className={HINT}>
-          Signing out is local. <ExternalTextLink href={page}>Remove this computer at {accountHost(status.accountOrigin)}</ExternalTextLink>{' '}
+          Disconnecting is local. <ExternalTextLink href={page}>Remove this computer at {accountHost(status.accountOrigin)}</ExternalTextLink>{' '}
           to revoke it there.
         </p>
       ) : null}

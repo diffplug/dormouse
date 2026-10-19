@@ -421,7 +421,7 @@ export async function pollHostedEnrollment(
     return {
       status: 'enrolled',
       enrollment: enrollmentFrom(relayOrigin, body.enrollment, label, noiseStatic),
-      // The signed-in desktop's managed voice; one of the wrong shape is
+      // The enrolled desktop's managed voice; one of the wrong shape is
       // dropped rather than failing an approval the Relay already spent.
       voiceToken: isManagedVoiceToken(body.voiceToken) ? body.voiceToken : null,
     };
