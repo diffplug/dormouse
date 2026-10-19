@@ -28,7 +28,7 @@ Every feature is opt-in: one you do not use adds none of its risk. With none on,
 
 ## Guarantees
 
-Every section the [nightly audit](#how-the-guarantees-are-checked) checks opens with the guarantees its `FAIL IF` lines hold, or sits under one that does, and the published page gathers them here under each feature they come with: each opens with a link to that section, and Pinned by names what catches a break before the audit does.
+Every section the [nightly audit](#how-the-guarantees-are-checked) checks opens with the guarantees its own `FAIL IF` lines hold, and the published page gathers them here under each feature they come with: each opens with a link to that section, and Pinned by names what catches a break before the audit does.
 
 ## How the guarantees are checked
 
