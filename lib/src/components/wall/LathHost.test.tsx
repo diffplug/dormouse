@@ -885,6 +885,7 @@ describe('LathHost — pane / Door drag', () => {
   // Hold the pointer still long enough to anchor a slide.
   const pause = () => act(() => new Promise<void>((resolve) => setTimeout(resolve, SLIDE_ARM_MS + 20)));
   const badge = () => container.querySelector('[data-lath-drop-choice]')?.textContent ?? null;
+  const guide = () => container.querySelector<HTMLElement>('[data-lath-slide-guide]');
 
   // col[ row[a, b], c ]: dragging c onto a's top edge drops above 'a'; sliding along
   // that edge into b widens it to above the whole a|b row (its ancestor).
@@ -1015,13 +1016,19 @@ describe('LathHost — pane / Door drag', () => {
     await flushFrame();
     expect(overlayRect()).toEqual(movePreview(t, 'c', { kind: 'edge', path: [0, 0], edge: 'top' }));
     expect(badge()).toBeNull();
+    // The line it could slide along shows before the pause, marked where a meets b.
+    expect(guide()?.dataset.armed).toBe('false');
+    expect(guide()!.querySelectorAll('[data-lath-slide-stop]')).toHaveLength(3);
+    const scopeBar = () => guide()!.querySelector<HTMLElement>('[data-lath-slide-scope]')!;
+    const aWidth = parseFloat(scopeBar().style.width);
 
     await pause();
     expect(badge()).toContain('one pane');
-    expect(badge()).toContain('slide along the edge to widen');
+    expect(guide()?.dataset.armed).toBe('true');
     act(() => moveTo(600, 5)); // along the same line into b
     await flushFrame();
     expect(overlayRect()).toEqual(movePreview(t, 'c', { kind: 'edge', path: [0], edge: 'top' }));
+    expect(parseFloat(scopeBar().style.width)).toBeGreaterThan(2 * aWidth);
 
     act(() => up());
     expect(onProposeMove).toHaveBeenCalledWith('c', { kind: 'edge', path: [0], edge: 'top' });
@@ -1046,6 +1053,24 @@ describe('LathHost — pane / Door drag', () => {
     act(() => up());
     expect(onProposeMove).toHaveBeenCalledWith('d', target);
     expect(badge()).toBeNull();
+  });
+
+  it('keeps the slide line while the slide rests on a drop that changes nothing', async () => {
+    // col[ a, row[b, c] ]: a above the whole b|c row is where a already is.
+    const t: LathTree = { root: split('col', [leaf('a'), 0.5], [split('row', [leaf('b'), 0.5], [leaf('c'), 0.5]), 0.5]) };
+    const store = seeded(t, ['a', 'b', 'c'].map(id => [id, leafMeta()]));
+    const { onProposeMove } = mountDrag(store);
+    act(() => down(header('a'), 100, 15));
+    act(() => moveTo(200, 320)); // b's top band
+    await flushFrame();
+    await pause();
+    act(() => moveTo(600, 320)); // along the line into c
+    await flushFrame();
+    expect(overlayEl()).toBeNull();
+    expect(guide()?.dataset.armed).toBe('true');
+    act(() => up());
+    expect(onProposeMove).not.toHaveBeenCalled();
+    expect(guide()).toBeNull();
   });
 
   it('does not anchor a slide on the dragged pane\'s own header', async () => {

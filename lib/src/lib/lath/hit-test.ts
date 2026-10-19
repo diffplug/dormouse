@@ -17,12 +17,28 @@ export type DropCandidate = {
   scopeRect: Rect;
   /** Leaves in that scope, not counting the dragged one. */
   scopeLeafCount: number;
-  /** Sliding further along this edge reaches a wider scope. */
-  canWiden: boolean;
+};
+
+/** One boundary line a slide moves along. Positions run along the line (x for
+ *  top/bottom, y for left/right) in Wall coordinates. */
+export type SlideGuide = {
+  edge: Edge;
+  /** The line's position across it: y for top/bottom, x for left/right. */
+  line: number;
+  /** How far a slide from the anchor (or, before one, from here) can reach. */
+  extent: [number, number];
+  /** Where crossing the line steps the scope to the next pane or group, inside `extent`. */
+  stops: number[];
+  /** The chosen scope's span. */
+  scope: [number, number];
 };
 
 export type DropHit = {
   candidate: DropCandidate | null;
+  /** The line an edge drop can slide along. Null for a swap, a miss, a line that offers
+   *  only one scope, or an unanchored drop that would do nothing; an anchored slide keeps
+   *  it through such scopes, so the way back stays on screen. */
+  guide: SlideGuide | null;
   /** The anchor still lies on the hovered edge's line, so the slide continues. False
    *  when there was no anchor, or the pointer left that line (the caller drops it). */
   anchored: boolean;
@@ -113,22 +129,42 @@ function hover(rects: Map<LeafId, Rect>, p: Point): Hover | null {
   return found;
 }
 
+type LineAncestor = {
+  path: number[];
+  span: [number, number];
+  /** Each child's span, when the ancestor's children run along the line. */
+  childSpans: Array<[number, number]> | null;
+};
+
+/** The leaf's ancestors whose `edge` lies on the leaf's line, innermost first. */
+function ancestorsOnLine(
+  tree: LathTree, rect: Rect, opts: LayoutOpts, leafPath: number[], leafRect: Rect, edge: Edge,
+): LineAncestor[] {
+  const line = edgeCoord(leafRect, edge);
+  const out: LineAncestor[] = [];
+  for (let k = leafPath.length - 1; k >= 0; k--) {
+    const path = leafPath.slice(0, k);
+    const ar = nodeRectAtPath(tree, rect, opts, path);
+    if (!ar || Math.abs(edgeCoord(ar, edge) - line) > COINCIDE_EPS) continue;
+    const ancestor = nodeAtPath(tree, path);
+    const childSpans = ancestor?.kind === 'split' && ancestor.dir !== edgeAxis(edge)
+      ? ancestor.children.map((_, i) => spanAlong(nodeRectAtPath(tree, rect, opts, [...path, i])!, edge))
+      : null;
+    out.push({ path, span: spanAlong(ar, edge), childSpans });
+  }
+  return out;
+}
+
 /** Every scope whose `edge` lies on the hovered leaf's line, innermost first: the leaf,
  *  then each ancestor sharing that boundary. Where an ancestor's children run along the
  *  line, the adjacent children covering `[lo, hi]` also form a range scope. */
 function scopesOnLine(
   tree: LathTree, rect: Rect, opts: LayoutOpts, leafPath: number[], leafRect: Rect, edge: Edge, lo: number, hi: number,
 ): Scope[] {
-  const line = edgeCoord(leafRect, edge);
   const [ls, le] = spanAlong(leafRect, edge);
   const out: Scope[] = [{ target: { kind: 'edge', path: leafPath, edge }, start: ls, end: le }];
-  for (let k = leafPath.length - 1; k >= 0; k--) {
-    const path = leafPath.slice(0, k);
-    const ar = nodeRectAtPath(tree, rect, opts, path);
-    if (!ar || Math.abs(edgeCoord(ar, edge) - line) > COINCIDE_EPS) continue;
-    const ancestor = nodeAtPath(tree, path);
-    if (ancestor?.kind === 'split' && ancestor.dir !== edgeAxis(edge)) {
-      const spans = ancestor.children.map((_, i) => spanAlong(nodeRectAtPath(tree, rect, opts, [...path, i])!, edge));
+  for (const { path, span, childSpans: spans } of ancestorsOnLine(tree, rect, opts, leafPath, leafRect, edge)) {
+    if (spans) {
       const first = spans.findIndex(([, end]) => end >= lo - COINCIDE_EPS);
       let last = spans.length - 1;
       while (last > 0 && spans[last][0] > hi + COINCIDE_EPS) last--;
@@ -136,10 +172,26 @@ function scopesOnLine(
         out.push({ target: { kind: 'edge', path, edge, range: { start: first, end: last + 1 } }, start: spans[first][0], end: spans[last][1] });
       }
     }
-    const [as, ae] = spanAlong(ar, edge);
-    out.push({ target: { kind: 'edge', path, edge }, start: as, end: ae });
+    out.push({ target: { kind: 'edge', path, edge }, start: span[0], end: span[1] });
   }
   return out;
+}
+
+/** The line a slide from `leafPath` moves along: its reach is the outermost ancestor
+ *  sharing the line, and it steps at each gutter between children laid along it. Null
+ *  when the leaf is the only scope the line offers. */
+function slideLine(
+  tree: LathTree, rect: Rect, opts: LayoutOpts, leafPath: number[], leafRect: Rect, edge: Edge,
+): Omit<SlideGuide, 'scope'> | null {
+  const ancestors = ancestorsOnLine(tree, rect, opts, leafPath, leafRect, edge);
+  const stops = new Set<number>();
+  for (const { childSpans } of ancestors) {
+    for (let i = 1; i < (childSpans?.length ?? 0); i++) stops.add((childSpans![i - 1][1] + childSpans![i][0]) / 2);
+  }
+  const leafSpan = spanAlong(leafRect, edge);
+  const extent = ancestors.length > 0 ? ancestors[ancestors.length - 1].span : leafSpan;
+  if (stops.size === 0 && extent[0] >= leafSpan[0] - COINCIDE_EPS && extent[1] <= leafSpan[1] + COINCIDE_EPS) return null;
+  return { edge, line: edgeCoord(leafRect, edge), extent, stops: [...stops].sort((a, b) => a - b) };
 }
 
 /** The drop under `point`, or `null` when it misses the wall or the drop would be
@@ -162,7 +214,7 @@ export function hitTest(
   opts: LayoutOpts,
   anchor: Point | null = null,
 ): DropHit {
-  const miss: DropHit = { candidate: null, anchored: false };
+  const miss: DropHit = { candidate: null, anchored: false, guide: null };
   if (tree.root === null) return miss;
   if (point.x < rect.x || point.x > rect.x + rect.width || point.y < rect.y || point.y > rect.y + rect.height) {
     return miss;
@@ -199,8 +251,9 @@ export function hitTest(
     const target: DropTarget = { kind: 'swap', leaf: here.leafId };
     const previewRect = evaluate(target);
     return {
-      candidate: previewRect && { target, previewRect, scopeRect: here.leafRect, scopeLeafCount: 1, canWiden: false },
+      candidate: previewRect && { target, previewRect, scopeRect: here.leafRect, scopeLeafCount: 1 },
       anchored: false,
+      guide: null,
     };
   }
 
@@ -224,20 +277,23 @@ export function hitTest(
     if (!scope || s.end - s.start < scope.end - scope.start - COINCIDE_EPS) scope = s;
   }
   // An anchor whose line no common ancestor spans cannot continue; the caller drops it.
-  if (!scope) return { candidate: null, anchored: false };
+  if (!scope) return miss;
+  // The line is the anchor's: a slide reaches only scopes holding the anchor's leaf.
+  const origin = anchored ? from! : here;
+  const line = slideLine(tree, rect, opts, findLeafPath(tree, origin.leafId)!, origin.leafRect, edge);
+  const guide: SlideGuide | null = line && { ...line, scope: [scope.start, scope.end] };
   const previewRect = evaluate(scope.target);
-  if (!previewRect) return { candidate: null, anchored };
+  if (!previewRect) return { candidate: null, anchored, guide: anchored ? guide : null };
   const materialized = materializeTarget(tree, scope.target)!;
   const scopeLeaves = leaves({ root: nodeAtPath(materialized.tree, materialized.path) });
-  const extent = scope.end - scope.start;
   return {
     candidate: {
       target: scope.target,
       previewRect,
       scopeRect: targetRect(tree, rect, opts, scope.target)!,
       scopeLeafCount: scopeLeaves.filter((id) => id !== dragged).length,
-      canWiden: scopes.some((s) => s.end - s.start > extent + COINCIDE_EPS),
     },
     anchored,
+    guide,
   };
 }

@@ -5,7 +5,7 @@ import type { SurfaceWorkspaceDrag } from './surface-workspace-drag';
 import type { MutableRefObject, RefObject } from 'react';
 import { type Rect, rectKey } from '../../lib/lath/model';
 import type { DropTarget } from '../../lib/lath/ops';
-import { type DropCandidate, hitTest } from '../../lib/lath/hit-test';
+import { type DropCandidate, type DropHit, type SlideGuide, hitTest } from '../../lib/lath/hit-test';
 import { type LathWallSnapshot, LATH_LAYOUT_OPTS } from './lath-wall-store';
 import { DRAG_THRESHOLD_PX } from '../design';
 import { shieldFrames } from '../../lib/frame-shield';
@@ -19,10 +19,14 @@ const DRAG_DIM = 0.6;
 export const SLIDE_ARM_MS = 300;
 
 export type DragPreview = {
-  rect: Rect;
+  /** Where the drop lands, or null while a slide rests on a drop that changes nothing. */
+  rect: Rect | null;
   scopeRect: Rect | null;
   /** Scope label shown once a slide is anchored or the scope spans several panes. */
   badge: string | null;
+  /** The line the drop can slide along; `armed` once a pause anchored the slide. */
+  guide: SlideGuide | null;
+  armed: boolean;
 };
 
 /** A live pane / Door drag session. Each frame hit-tests against the *live* store
@@ -89,6 +93,8 @@ export type DragControllerDeps = {
   suppressNextClickRef: MutableRefObject<boolean>;
 };
 
+const NO_HIT = { candidate: null, guide: null };
+
 export function createDragController(deps: DragControllerDeps): DragController {
   // The live drag session (mutated in place by the window handlers).
   let drag: PaneDragState | null = null;
@@ -98,28 +104,29 @@ export function createDragController(deps: DragControllerDeps): DragController {
   // the same band skips the redundant setState (and its forced re-layout).
   let lastPreviewKey = '';
 
-  const publishPreview = (candidate: DropCandidate | null): void => {
-    if (candidate === null) {
+  const publishPreview = ({ candidate, guide }: Pick<DropHit, 'candidate' | 'guide'>): void => {
+    if (candidate === null && guide === null) {
       if (lastPreviewKey !== '') {
         lastPreviewKey = '';
         deps.setDragPreview(null);
       }
       return;
     }
-    const { target } = candidate;
     const anchored = !!drag?.anchor;
     let badge: string | null = null;
-    if (target.kind === 'edge' && (anchored || candidate.scopeLeafCount > 1)) {
+    if (candidate?.target.kind === 'edge' && (anchored || candidate.scopeLeafCount > 1)) {
+      const { target } = candidate;
       badge = target.path.length === 0 && !target.range ? 'whole layout'
         : candidate.scopeLeafCount === 1 ? 'one pane' : candidate.scopeLeafCount + ' panes';
-      if (anchored && candidate.canWiden) badge += ' \u00b7 slide along the edge to widen';
     }
     const preview: DragPreview = {
-      rect: candidate.previewRect,
-      scopeRect: target.kind === 'edge' ? candidate.scopeRect : null,
+      rect: candidate?.previewRect ?? null,
+      scopeRect: candidate?.target.kind === 'edge' ? candidate.scopeRect : null,
       badge,
+      guide,
+      armed: anchored,
     };
-    const key = [rectKey(preview.rect), preview.scopeRect && rectKey(preview.scopeRect), preview.badge].join('|');
+    const key = [preview.rect && rectKey(preview.rect), preview.scopeRect && rectKey(preview.scopeRect), preview.badge, JSON.stringify(guide), anchored].join('|');
     if (key === lastPreviewKey) return;
     lastPreviewKey = key;
     deps.setDragPreview(preview);
@@ -176,13 +183,13 @@ export function createDragController(deps: DragControllerDeps): DragController {
     const hit = hitTest(deps.getSnapshot().tree, deps.rectRef.current, point, d.external ? null : d.id, LATH_LAYOUT_OPTS, d.anchor);
     if (!hit.anchored) d.anchor = null; // left the slide's line
     d.candidate = hit.candidate;
-    publishPreview(hit.candidate);
+    publishPreview(hit);
   };
 
   const clearHit = (d: PaneDragState): void => {
     d.candidate = null;
     d.anchor = null;
-    publishPreview(null);
+    publishPreview(NO_HIT);
   };
 
   // A pause on an edge drop anchors a slide there; a pause mid-slide keeps the anchor.
@@ -212,7 +219,7 @@ export function createDragController(deps: DragControllerDeps): DragController {
     const d = drag;
     detach();
     drag = null;
-    publishPreview(null);
+    publishPreview(NO_HIT);
     if (d && !d.external) {
       const el = deps.leafElsRef.current.get(d.id);
       if (el) el.style.opacity = ''; // un-dim (the move commit tweens it into place)
@@ -312,7 +319,7 @@ export function createDragController(deps: DragControllerDeps): DragController {
         detach();
         drag = null;
         deps.latestRef.current.workspaceDrag?.end();
-        publishPreview(null);
+        publishPreview(NO_HIT);
       }
     },
     hasDrag() {

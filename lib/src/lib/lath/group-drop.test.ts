@@ -79,8 +79,9 @@ describe('group drop discovery', () => {
     const pair = slide(375, 625);
     expect(pair.scopeRect).toEqual(R(250, 0, 500, 600));
     expect(pair.scopeLeafCount).toBe(2);
-    expect(pair.canWiden).toBe(true);
-    expect(slide(125, 875).canWiden).toBe(false);
+    const guide = (from: number, to: number) => hitTest(row, box, top(to), null, opts, top(from)).guide!;
+    expect(guide(375, 625)).toEqual({ edge: 'top', line: 0, extent: [0, 1000], stops: [250, 500, 750], scope: [250, 750] });
+    expect(guide(125, 875).scope).toEqual([0, 1000]);
     for (const [from, to] of [[375, 625], [375, 125], [375, 875], [125, 875]]) {
       const candidate = slide(from, to);
       expect(candidate.previewRect).toEqual(layout(insert(row, 'new', candidate.target).tree, box, opts).get('new'));

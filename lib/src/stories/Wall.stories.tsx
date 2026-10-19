@@ -248,7 +248,7 @@ export const ContiguousGroupDrop: Story = {
   args: flatRowArgs(4),
   parameters: {
     fakePty: { scenario: flattenScenario(SCENARIO_SHELL_PROMPT) },
-    docs: { description: { story: 'The dashed outline shows the chosen group; the solid area is the exact drop destination. Pause on an edge, then slide along it to widen or narrow the group.' } },
+    docs: { description: { story: 'The dashed outline shows the chosen group; the solid area is the exact drop destination. The line along the edge marks how far a slide reaches and where it steps to the next pane; pause on it to arm the slide, then slide to widen or narrow the group.' } },
   },
   play: async () => {
     await settleTerminals();
@@ -260,8 +260,8 @@ export const ContiguousGroupDrop: Story = {
     const across = neighbor.getBoundingClientRect();
     source.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, clientX: from.x + 20, clientY: from.y + 15 }));
     window.dispatchEvent(new PointerEvent('pointermove', { clientX: to.x + to.width / 2, clientY: to.y + 5 }));
-    // The pause anchors the slide; its badge invites widening.
-    await waitForCondition(() => document.querySelector('[data-lath-drop-choice]')?.textContent?.includes('slide along the edge') === true);
+    // The pause arms the slide line.
+    await waitForCondition(() => document.querySelector<HTMLElement>('[data-lath-slide-guide]')?.dataset.armed === 'true');
     window.dispatchEvent(new PointerEvent('pointermove', { clientX: across.x + across.width / 2, clientY: across.y + 5 }));
     await waitForCondition(() => document.querySelector('[data-lath-drop-choice]')?.textContent?.includes('2 panes') === true);
   },
