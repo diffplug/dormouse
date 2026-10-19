@@ -367,7 +367,7 @@ function FoundingCard({ cohort, onBuy }: { cohort: Cohort; onBuy: (tier: Tier) =
  * What a buy button does until checkout ships.
  *
  * Deliberately loud about being unfinished: the prices are real and the plan
- * is specified, but purchase and desktop enrollment are a later stage,
+ * is specified, but purchase is a later stage,
  * and a button that quietly did nothing would read as a bug.
  */
 function CheckoutTodo({ tier, onClose }: { tier: Tier; onClose: () => void }) {
@@ -409,7 +409,7 @@ function CheckoutTodo({ tier, onClose }: { tier: Tier; onClose: () => void }) {
         </h2>
         <p className={`mt-4 leading-relaxed ${MUTED_TEXT_CLASS}`}>
           {tier.name} is priced and specified, but nothing here takes payment: purchase
-          and enrolling from the app are the next stage of work. You have not been
+          is the next stage of work. You have not been
           charged, and no seat has been taken.
         </p>
         <p className={`mt-4 leading-relaxed ${MUTED_TEXT_CLASS}`}>

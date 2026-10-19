@@ -25,7 +25,7 @@ const REFUSAL: Record<Exclude<ManagedVoiceConfigResult, { ok: true }>['reason'],
   unavailable: 'This app could not save the managed voice setting.',
 };
 
-/** What leaves this computer, said before the first request (`docs/specs/pricing.md` -> "Managed voice"). */
+/** What leaves this computer, said before the first request (`docs/specs/alert.md` -> "Settings dialog"). */
 export const MANAGED_VOICE_DISCLOSURE =
   'Only the spoken pane label and the voice you choose are sent to voice.dormouse.sh, which has ElevenLabs ' +
   'speak it. ElevenLabs keeps a copy until Dormouse deletes it, usually within minutes, though no limit is ' +
