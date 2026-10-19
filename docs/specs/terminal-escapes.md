@@ -52,7 +52,7 @@ Source of truth: `createOwnerPtyStream` in `lib/src/host/owner-pty.ts`; `oscDisp
 
 **`textData` is the same chunk with every string-control payload removed**, for consumers reading output as text; every other control is left for `stripTerminalControls`. Tool events are OSC 367 ([dor-tool.md](dor-tool.md#osc-367)). **Notification-derived state never travels as `pty:data`.**
 
-**A chunk counts as output for the quiesce detector only when its `visibleData` is non-empty**, so a chunk of nothing but notification/progress OSCs is not meaningful output, while one carrying visible output alongside them is.
+Which `visibleData` counts as output for the quiesce detector: [alert.md](alert.md#watching-track).
 
 Replay (`pty:replay`) is the raw stream requiring re-parse: **the webview runs a one-shot parser over the buffered bytes** (`parseReplay` in `lib/src/lib/platform/replay-parse.ts`). **Historical replay must not re-fire** alerts, quiesce events, protocol notifications, or query responses — it applies the semantic and Tool events and drops the rest (rationale). **Every parser in a realm holding the theme takes `themeColorProvider`**, one-shot replay parsers included: a *declined* query stays in `visibleData` for the receiving renderer to answer, and answering is the owner's alone (rationale).
 

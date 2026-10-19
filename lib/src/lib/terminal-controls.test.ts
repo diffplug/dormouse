@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { stripTerminalControls, TerminalControlStreamFilter } from './terminal-controls';
+import { outputPaints, stripTerminalControls, TerminalControlStreamFilter } from './terminal-controls';
 import { TerminalProtocolParser } from './terminal-protocol';
 
 describe('one string-control grammar', () => {
@@ -193,4 +193,35 @@ describe('stripTerminalControls', () => {
     }
   });
 
+});
+
+describe('outputPaints', () => {
+  it.each([
+    ['an idle Claude Code cursor-position poll', '\x1b[?6n'],
+    ['image-size queries with a palette reset', '\x1b[16t\x1b[c\x1b]104;255\x07'],
+    ['a Codex frame that resets colors and moves the cursor', '\x1b[?2026h\x1b[39m\x1b[49m\x1b[0m\x1b[51;3H\x1b[?25h\x1b[?2026l'],
+    ['mode and key-protocol toggles', '\x1b[?1004h\x1b[?2004l\x1b[>1u\x1b[<u\x1b[>4;1m\x1b[2 q'],
+    ['save, restore, charsets and keypad', '\x1b7\x1b8\x1b(B\x1b=\x1b>'],
+    ['bare controls', '\r\x07\b\t'],
+    ['an empty hyperlink', '\x1b]8;;https://example.com\x1b\\\x1b]8;;\x07'],
+    ['a DECRQSS query, BEL being payload in a DCS', '\x1bP$q\x07m\x1b\\'],
+    ['C1 forms', '\x9b?6n\x9d104\x9c'],
+    ['nothing', ''],
+  ])('discounts %s', (_, data) => expect(outputPaints(data)).toBe(false));
+
+  it.each([
+    ['text', 'x'],
+    ['a space', ' '],
+    ['a line feed', '\n'],
+    ['text inside a synchronized frame', '\x1b[?2026h\x1b[1;1Hhi\x1b[?2026l'],
+    ['an erase', '\x1b[2K'],
+    ['a scroll', '\x1b[3S'],
+    ['an alt-screen switch', '\x1b[?1049h'],
+    ['a reverse index', '\x1bM'],
+    ['a SIXEL image', '\x1bPq#0;2;0;0;0#0~~\x1b\\'],
+    ['a kitty graphics image', '\x1b_Ga=T;AAAA\x1b\\'],
+    ['text after a cancelled OSC', '\x1b]8;;x\x18hi'],
+    ['an unknown CSI', '\x1b[5z'],
+    ['a sequence cut off by the chunk', '\x1b[?6'],
+  ])('counts %s', (_, data) => expect(outputPaints(data)).toBe(true));
 });

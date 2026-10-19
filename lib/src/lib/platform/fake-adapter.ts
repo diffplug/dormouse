@@ -20,7 +20,7 @@ import {
 import { themeColorProvider } from '../terminal-theme';
 import { applyLiveToolEvents } from '../tool-events';
 import { ToolLaunchLatch } from '../tool-launch-latch';
-import { outputPaints } from '../output-paints';
+import { outputPaints } from '../terminal-controls';
 import { offerProgramCopy } from '../mouse-selection';
 
 /** This renderer is its host's one realm. */

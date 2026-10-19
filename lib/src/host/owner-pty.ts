@@ -14,7 +14,7 @@ import {
 } from '../lib/terminal-protocol';
 import type { TerminalSemanticEvent } from '../lib/terminal-state';
 import { ToolLaunchLatch } from '../lib/tool-launch-latch';
-import { outputPaints } from '../lib/output-paints';
+import { outputPaints } from '../lib/terminal-controls';
 import { stripMouseReportsFromInput } from '../lib/terminal-report-filter';
 
 /**
