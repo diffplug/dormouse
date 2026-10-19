@@ -354,6 +354,14 @@ test('writeClipboardText on windows shells out to clip', async () => {
   assert.deepEqual(f.calls.map((c) => [c[0], c[1]]), [['D:\\Win\\System32\\clip.exe', []]]);
 });
 
+test('writeClipboardText on windows sends clip UTF-16LE behind a byte-order mark', async () => {
+  const f = fakeSpawn();
+  await writeClipboardText('café ✓', { platform: 'win32', env: WINDOWS_ENV, spawn: f.spawn });
+  const sent = f.writes[0][1];
+  assert.deepEqual([...sent.subarray(0, 2)], [0xff, 0xfe]);
+  assert.equal(sent.subarray(2).toString('utf16le'), 'café ✓');
+});
+
 test('writeClipboardText spawns with windowsHide so no console window flickers', async () => {
   const f = fakeSpawn();
   await writeClipboardText('x', { platform: 'win32', spawn: f.spawn });

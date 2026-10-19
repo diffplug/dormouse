@@ -1,17 +1,23 @@
 /**
  * @vitest-environment jsdom
  *
- * `writeTextToClipboard`'s fallback for a page without the Clipboard API, such
- * as Pocket over plain http (docs/specs/mouse-and-clipboard.md §4.5).
+ * `writeTextToClipboard`: the adapter's native write where it has one, else
+ * the Clipboard API, falling back for a page without it, such as Pocket over
+ * plain http (docs/specs/mouse-and-clipboard.md §4.5).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('./platform', () => ({ IS_MAC: false, IS_WINDOWS: false, PLATFORM_STRING: 'Linux', getPlatform: () => ({}) }));
+/** The installed adapter's native write; absent unless a test sets it. */
+let nativeWrite: ((text: string) => Promise<void>) | undefined;
+vi.mock('./platform', () => {
+  const platform = () => (nativeWrite ? { writeClipboardText: nativeWrite } : {});
+  return { IS_MAC: false, IS_WINDOWS: false, PLATFORM_STRING: 'Linux', getPlatform: platform, getPlatformOrNull: platform };
+});
 vi.mock('./mouse-selection', () => ({ getMouseSelectionState: () => ({ bracketedPaste: false }) }));
 vi.mock('./terminal-registry', () => ({ getDefaultShellOpts: () => null, getTerminalShellKind: () => null, writeUserInput: () => {} }));
 
 import { writeTextToClipboard } from './clipboard';
-import { dismissClipboardFailure, getClipboardFailure } from './clipboard-failure';
+import { dismissClipboardFailure, getClipboardFailure, recordInput } from './clipboard-failure';
 
 /** What each `execCommand('copy')` copied: a `copy` listener's `setData`,
  *  else what a focused textarea had selected. */
@@ -25,6 +31,7 @@ function stubClipboard(clipboard: Partial<Clipboard> | undefined): void {
 }
 
 beforeEach(() => {
+  nativeWrite = undefined;
   copiedText = [];
   firesCopy = false;
   execCommand = vi.fn((command: string) => {
@@ -106,6 +113,26 @@ describe('writeTextToClipboard', () => {
     expect(document.querySelector('textarea')).toBeNull();
   });
 
+  it('prefers the adapter\'s native write over the Clipboard API', async () => {
+    const writeText = vi.fn(() => Promise.resolve());
+    stubClipboard({ writeText });
+    nativeWrite = vi.fn(() => Promise.resolve());
+    expect(await writeTextToClipboard('hello')).toBe(true);
+    expect(nativeWrite).toHaveBeenCalledWith('hello');
+    expect(writeText).not.toHaveBeenCalled();
+    expect(execCommand).not.toHaveBeenCalled();
+  });
+
+  it('never falls back to the browser after a native write fails', async () => {
+    const writeText = vi.fn(() => Promise.resolve());
+    stubClipboard({ writeText });
+    firesCopy = true;
+    nativeWrite = vi.fn(() => Promise.reject(new Error('pbcopy exited 1')));
+    expect(await writeTextToClipboard('hello', { reportFailure: false })).toBe(false);
+    expect(writeText).not.toHaveBeenCalled();
+    expect(execCommand).not.toHaveBeenCalled();
+  });
+
   it('writes nothing for empty text', async () => {
     stubClipboard(undefined);
     expect(await writeTextToClipboard('')).toBe(false);
@@ -127,6 +154,37 @@ describe('clipboard failure report', () => {
     expect(failure?.report).toContain('NotAllowedError: denied');
     expect(failure?.report).toContain("execCommand('copy'): returned false");
     expect(failure?.report).toContain('textLength: 12');
+    expect(failure?.report).not.toContain('secret-token');
+  });
+
+  it('reports the latest trusted inputs with the activation each arrived with', async () => {
+    const button = document.body.appendChild(document.createElement('button'));
+    button.className = 'copy-target extra';
+    Object.defineProperty(navigator, 'userActivation', { value: { isActive: true, hasBeenActive: true }, configurable: true });
+    try {
+      recordInput({ type: 'pointerdown', isTrusted: true, target: button });
+      recordInput({ type: 'mousedown', isTrusted: false, target: button });
+      (navigator.userActivation as { isActive: boolean }).isActive = false;
+      recordInput({ type: 'click', isTrusted: true, target: button });
+      nativeWrite = () => Promise.reject(new Error('refused'));
+      expect(await writeTextToClipboard('hello')).toBe(false);
+      const lines = getClipboardFailure()!.report.split('\n');
+      const timeline = lines.slice(lines.findIndex(line => line.startsWith('input timeline')) + 1).filter(line => line.startsWith('  -'));
+      expect(timeline.slice(-2).map(line => line.replace(/^ {2}-\d+ms /, ''))).toEqual([
+        'pointerdown button.copy-target active=true',
+        'click button.copy-target active=false',
+      ]);
+    } finally {
+      Reflect.deleteProperty(navigator, 'userActivation');
+      button.remove();
+    }
+  });
+
+  it('reports a failed native write with its error', async () => {
+    nativeWrite = () => Promise.reject(new Error('pbcopy exited 1'));
+    expect(await writeTextToClipboard('secret-token')).toBe(false);
+    const failure = getClipboardFailure();
+    expect(failure?.report).toContain('native writeClipboardText: Error: pbcopy exited 1');
     expect(failure?.report).not.toContain('secret-token');
   });
 

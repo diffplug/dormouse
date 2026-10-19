@@ -88,6 +88,12 @@ function entry(surfaceId: string, over: Partial<DirectoryEntry> = {}): Directory
   };
 }
 
+describe('RemotePtyAdapter clipboard', () => {
+  it('has no native write, so a copy lands on the phone, never the Burrow\'s machine', () => {
+    expect(new RemotePtyAdapter(new FakeClient()).writeClipboardText).toBeUndefined();
+  });
+});
+
 describe('RemotePtyAdapter directory', () => {
   it('turns a snapshot into onPtyList without treating command exitCode as PTY death', async () => {
     const client = new FakeClient();

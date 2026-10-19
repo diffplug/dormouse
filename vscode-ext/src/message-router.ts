@@ -662,6 +662,16 @@ export function attachRouter(
             post({ type: 'clipboard:image', path: null, requestId: msg.requestId } satisfies ExtensionMessage);
           });
         break;
+      case 'clipboard:writeText':
+        // VS Code's own API, which reaches the user's clipboard even when this
+        // extension host runs remotely. A Thenable, so wrapped for `catch`.
+        Promise.resolve(vscode.env.clipboard.writeText(msg.text))
+          .then(() => post({ type: 'clipboard:written', requestId: msg.requestId } satisfies ExtensionMessage))
+          .catch((err) => {
+            log.info(`[clipboard] writeText failed: ${err?.message ?? err}`);
+            post({ type: 'clipboard:written', error: String(err?.message ?? err), requestId: msg.requestId } satisfies ExtensionMessage);
+          });
+        break;
       case 'dormouse:openExternal': {
         const uri = normalizeExternalUri(msg.uri);
         if (!uri) break;

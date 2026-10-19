@@ -306,7 +306,9 @@ async function writeClipboardText(text, runtime = {}) {
   const platform = runtime.platform || process.platform;
   const env = runtime.env || process.env;
   if (platform === 'darwin') return writeViaStdin('pbcopy', [], text, runtime);
-  if (platform === 'win32') return writeViaStdin(windowsSystemPath(env, 'System32', 'clip.exe'), [], text, runtime);
+  // clip.exe reads stdin in the console code page unless it opens with a
+  // UTF-16LE byte-order mark, which keeps non-ASCII text intact.
+  if (platform === 'win32') return writeViaStdin(windowsSystemPath(env, 'System32', 'clip.exe'), [], Buffer.from(`\ufeff${text}`, 'utf16le'), runtime);
   const wayland = Boolean(env.WAYLAND_DISPLAY);
   const attempts = wayland
     ? [['wl-copy', []], ['xclip', ['-selection', 'clipboard']]]

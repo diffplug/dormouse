@@ -1,4 +1,4 @@
-//! Native Windows clipboard reads.
+//! Native Windows clipboard reads, and the text write.
 //!
 //! The standalone app used to read the clipboard by round-tripping through the
 //! Node sidecar, which shelled out to `powershell.exe` (`Get-Clipboard`, ...).
@@ -18,11 +18,12 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use windows::Win32::Foundation::HGLOBAL;
+use windows::Win32::Foundation::{GlobalFree, HANDLE, HGLOBAL};
 use windows::Win32::System::DataExchange::{
-    CloseClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
+    CloseClipboard, EmptyClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
+    SetClipboardData,
 };
-use windows::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
+use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GMEM_MOVEABLE};
 use windows::Win32::System::Ole::{CF_DIB, CF_HDROP, CF_UNICODETEXT};
 use windows::Win32::UI::Shell::{DragQueryFileW, HDROP};
 
@@ -103,6 +104,33 @@ pub fn read_text() -> Option<String> {
         let units = unsafe { std::slice::from_raw_parts(ptr as *const u16, size / 2) };
         Some(utf16_up_to_nul(units))
     })
+}
+
+/// Replace the clipboard with `text` as CF_UNICODETEXT. In process for the
+/// same reason as the reads: `clip.exe` from the sidecar would pop a console
+/// window, and it reads stdin in the console code page.
+pub fn write_text(text: &str) -> Result<(), String> {
+    let units: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
+    let _guard = ClipboardGuard::open().ok_or("the clipboard is held by another process")?;
+    // SAFETY: guarded by the open clipboard. The block is ours to free until
+    // SetClipboardData succeeds, when the system takes it; it is sized for
+    // `units`, which the copy fills exactly.
+    unsafe {
+        EmptyClipboard().map_err(|e| format!("EmptyClipboard: {e}"))?;
+        let block = GlobalAlloc(GMEM_MOVEABLE, units.len() * 2).map_err(|e| format!("GlobalAlloc: {e}"))?;
+        let ptr = GlobalLock(block) as *mut u16;
+        if ptr.is_null() {
+            let _ = GlobalFree(Some(block));
+            return Err("GlobalLock failed".into());
+        }
+        std::ptr::copy_nonoverlapping(units.as_ptr(), ptr, units.len());
+        let _ = GlobalUnlock(block);
+        if let Err(e) = SetClipboardData(CF_UNICODETEXT.0 as u32, Some(HANDLE(block.0))) {
+            let _ = GlobalFree(Some(block));
+            return Err(format!("SetClipboardData: {e}"));
+        }
+    }
+    Ok(())
 }
 
 /// The string a CF_UNICODETEXT block holds: everything up to the first NUL, or
