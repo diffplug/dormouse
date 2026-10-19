@@ -139,7 +139,7 @@ function stubGh(dir, seed) {
       public: [], pulls: {},
       embargo: (process.env.GH_LEDGER_OPEN ?? '').split('\\n').filter(Boolean).map((row) => ({
         number: Number(row.slice(0, row.indexOf(' '))), title: row.slice(row.indexOf(' ') + 1), body: '', labels: [],
-        state: 'OPEN', stateReason: '', createdAt: new Date(Date.now() - 86_400_000).toISOString().replace(/\\.\\d+Z$/, 'Z'), closedAt: null, comments: [] })),
+        state: 'OPEN', stateReason: '', createdAt: ${JSON.stringify(SEEDED_AT)}, closedAt: null, comments: [] })),
     };
     const save = () => fs.writeFileSync('gh-state.json', JSON.stringify(state));
     const repo = embargo ? ${JSON.stringify(EMBARGO_REPO)} : 'fixture/repo';
@@ -188,10 +188,16 @@ const ghCalls = (dir) => (existsSync(join(dir, 'gh-calls.jsonl'))
   ? readFileSync(join(dir, 'gh-calls.jsonl'), 'utf8').trim().split('\n').map(JSON.parse)
   : []);
 
-/** A day as the status issue prints it, `days` from now; the fake GitHub files seeded ledger rows yesterday. */
+/** A day as the status issue prints it, `days` from now. */
 const DAY = 86_400_000;
 const dayFromNow = (days) => new Date(Date.now() + days * DAY).toISOString().slice(0, 10);
-const SEEDED_ROW = `${dayFromNow(-1)} | ${dayFromNow(6)} |`;
+// The fake GitHub files seeded ledger rows yesterday, at one instant fixed when
+// this file loads, so a run that crosses UTC midnight still prints the row
+// `SEEDED_ROW` expects.
+const SEEDED_MS = Date.now() - DAY;
+const SEEDED_AT = new Date(SEEDED_MS).toISOString().replace(/\.\d+Z$/, 'Z');
+const day = (ms) => new Date(ms).toISOString().slice(0, 10);
+const SEEDED_ROW = `${day(SEEDED_MS)} | ${day(SEEDED_MS + 7 * DAY)} |`;
 
 /** The fake GitHub as the run left it. */
 const ghState = (dir) => JSON.parse(readFileSync(join(dir, 'gh-state.json'), 'utf8'));
