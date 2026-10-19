@@ -178,7 +178,7 @@ Source of truth: `vscode-ext/scripts/stage-native-direct.mjs`; `initBurrow` in `
 
 **Every window's extension host runs its own managed-voice host**, the one standalone's sidecar runs (`docs/specs/alert.md` -> "Managed voice"), answering its own webviews (`docs/specs/transport.md` -> "Managed voice"); its clip cache and refusal latch are per window.
 
-- **The token and the chosen voice live in `SecretStorage`, each under a key of its own**: the token is a bearer credential, and the voice rides there only because `secrets.onDidChange` reaches every window. **Every window re-reads on that change**, dropping its clips and latch when the token changed, so an approval or Disconnect in one window reaches all of them.
+- **The token and the chosen voice live in `SecretStorage`, each under a key of its own**: the token is a bearer credential, and the voice rides there only because `secrets.onDidChange` reaches every window. **Every window re-reads on that change**, dropping its clips and latch when the token changed, so an approval or Disconnect in one window reaches all of them. **A Disconnect whose delete fails reaches them through Hosted's revocation** instead: each window's next speak request is refused 401, which turns managed voice off there; until then a clip it cached still plays.
 - **An approval runs in the window that asked**, its code shown only there; the token it saves reaches the rest by the re-read.
 - **Never re-arm on a re-read a token this window's failed Disconnect left in the store**; a different token, a sibling's later approval, supersedes it.
 - **A window asks the network policy before every speak and approval request**: the service in the broker, the stored policy elsewhere, a failed read counting as Nothing.

@@ -411,6 +411,7 @@ Every rule above holds for both engines.
 - **Must bound the host request** at `MANAGED_VOICE_REQUEST_TIMEOUT_MS` (inside `SPEECH_ENGINE_TIMEOUT_MS`, so a fallback still fits) and `MAX_AUDIO_BYTES`, accepting only `audio/mpeg`, and store only a token of the `dmv_…` shape and a voice of the curated set (`MANAGED_VOICES`).
 - **Must cache clips by voice and text in the host's memory, bounded in count and bytes, never persisted**; a hit makes no request, and a token change empties it. **A 403 latches `notEntitled`**, which bypasses the cache until a speak succeeds, so a lapsed member hears the system voice; **a 401 forgets the token it refused, never one saved since**. An answer to an older token changes nothing.
 - **Must disable managed voice in memory immediately on Disconnect, including cached and in-flight results, even if clearing its persisted token fails.** A failure stays visible and retryable; it must never report a successful disconnect while the token remains on disk.
+- **Disconnect must ask Hosted to revoke the token** (`docs/specs/hosted.md` -> "Managed voice"), as must a host discarding one its approval delivered (canceled, overtaken, or unsaved); the answer never delays or undoes the local clear, and a failure or Nowhere is only logged.
 
 Source of truth: `withFallback` in `lib/src/lib/speech-engine.ts`; `createManagedVoiceEngine` in `lib/src/lib/managed-voice-engine.ts`; `createManagedVoiceHost` in `lib/src/host/managed-voice-host.ts`; `MANAGED_VOICES` in `remote-lib-common/src/remote/managed-voice.ts`.
 

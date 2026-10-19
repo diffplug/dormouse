@@ -4,6 +4,8 @@
 
 Separate approval (2026-10): enabling voice must not enroll remote control or reset phone pairings. Purpose-separated code derivation prevents a code approved for voice from authorizing remote enrollment.
 
+Token cap (2026-10): Disconnect revokes its own token, but one it could not reach (offline, under Nowhere, a lost poll answer) stays live, so every Enable could add one. The cap evicts rather than refuses, unlike the Burrow cap: no desktop lists voice tokens, so an account at the cap could not see what to remove, and the least recently used is almost always one no desktop holds. Evicting per device was rejected because a token carries no device identity, and revoking every older token at each mint would disconnect the member's other machines. The cap equals the Burrow abuse ceiling so it never acts as a device limit (`docs/specs/pricing.md` -> "Checkout and entitlement"). The eviction shares the mint's snapshot, so two concurrent mints may each leave one over; the next mint trims it.
+
 History sweep (sources checked 2026-09-22):
 
 - ElevenLabs stores every text-to-speech generation, including its text, in the account's speech history. Turning that off per request (`enable_logging=false`, zero-retention mode) is available to enterprise accounts only, so deletion is the remaining control. The sweep has no per-application filter, so every history item visible to its key is eligible for deletion. On 2026-10-07 the operator confirmed testing that the dedicated Dormouse service account isolates its history from other usage in the same workspace. This is operator verification, not a claim that every service-account sharing configuration has the same isolation.

@@ -19,7 +19,7 @@ Every Worker answers `/api/health` and `/api/ready`, 404s anything else under it
 
 **Must run committed Better Auth migrations before deploying code that needs them, never during a Worker request.** Postgres is reached through an uncached Hyperdrive binding, one per Worker.
 
-**Must grant `dormouse_relay` and `dormouse_voice` only what `hosted/server/runtime-roles.sql` lists, never default privileges**, so a new table needs a grant there; each reaches only its Worker's tables and the entitlement's user columns, and the relay inserts approved voice tokens ("Managed voice"). **Must bind each production Worker to its own Hyperdrive connecting as its role**: account `dormouse_app`, relay `dormouse_relay`, voice `dormouse_voice` (`PRODUCTION` in `hosted/scripts/production.mjs`).
+**Must grant `dormouse_relay` and `dormouse_voice` only what `hosted/server/runtime-roles.sql` lists, never default privileges**, so a new table needs a grant there; each reaches only its Worker's tables and the entitlement's user columns, and the relay mints approved voice tokens and evicts past their cap ("Managed voice"). **Must bind each production Worker to its own Hyperdrive connecting as its role**: account `dormouse_app`, relay `dormouse_relay`, voice `dormouse_voice` (`PRODUCTION` in `hosted/scripts/production.mjs`).
 
 **Must install released core/auth packages from npm and commit their lockfile integrity hashes.** The installed packages' `dist/provenance.json` must name the same clean pgstencil commit; no runtime import depends on a sibling checkout. The auth migrations remain owned by the package; Dormouse's own tables migrate from `hosted/server/dormouse-migrations/`. **Never edit a merged migration**: a migrated database never reruns one, so append the next number (pinned by `hosted/server/tests/migrations.test.ts`).
 
@@ -81,12 +81,16 @@ A desktop with managed voice enabled exchanges its voice token for ElevenLabs sp
 | `POST /api/voice/tokens` | login cookie, exact `Origin` | 201 `{ id, token, createdAt }` |
 | `DELETE /api/voice/tokens/:id` | login cookie, exact `Origin` | 204; 404 for another account's or an unknown ID |
 | `POST /api/voice/speak` | `Authorization: Bearer dmv_…`, JSON `{ text, voiceId }` | 200 `audio/mpeg`, `Cache-Control: no-store` |
+| `POST /api/voice/revoke` | `Authorization: Bearer dmv_…` | 204 for a live, revoked, or unknown token; 401 only for a missing or malformed one |
 
 Errors are JSON `{ message }`. Cookie routes answer 401 without a login and 403 for an account not entitled ("Entitlement").
 
-**Must store only a token's SHA-256.** A token is `dmv_` plus base64url of 32 random bytes, returned only by the mint response: the account's `POST`, or the poll that redeems an enrollment. Revocation is permanent.
+**Must store only a token's SHA-256.** A token is `dmv_` plus base64url of 32 random bytes, returned only by the mint response: the account's `POST`, or the poll that redeems an enrollment. **Never clear or move a revocation**: a trigger refuses it (migration 008), since the relay's and voice's roles may write `revokedAt`.
 
-**Must keep managed voice and remote control independent.** Voice approval mints only a voice token, remote enrollment only a Burrow; disconnecting or revoking either preserves the other. The relay's role may insert only the voice token's owner and hash. Client controls and disclosure: `docs/specs/alert.md` -> "Settings dialog".
+- **Revoke must reach only the presented token's row and ask nothing but the token**, no cookie or entitlement, so a lapsed member still disconnects.
+- **Must keep at most `MAX_VOICE_TOKENS_PER_ACCOUNT` live tokens per account**: each mint, in its own statement, revokes the owner's least recently used past it, a never-used token ranked by its mint (rationale).
+
+**Must keep managed voice and remote control independent.** Voice approval mints only a voice token, remote enrollment only a Burrow; disconnecting or revoking either preserves the other. The relay's role may insert only the voice token's owner and hash, and revoke its owner's past the cap; it never reads a hash. Client controls and disclosure: `docs/specs/alert.md` -> "Settings dialog".
 
 **Speak must answer in this order:**
 
@@ -105,7 +109,7 @@ Errors are JSON `{ message }`. Cookie routes answer 401 without a login and 403 
 - **Never touch the database or any binding but `ELEVENLABS_API_KEY` in a sweep**, so an idle deployment lets Postgres suspend. Without the key nothing runs; development and previews never sweep.
 - **Must fail the cron invocation when its pass cannot list or any delete fails; the after-speech pass only logs** (rationale).
 
-Source of truth: `hosted/server/voice.ts`; `hosted/server/voice-app.ts`; `mintVoiceToken` in `hosted/server/voice-token.ts`.
+Source of truth: `hosted/server/voice.ts`; `hosted/server/voice-app.ts`; `hosted/server/voice-token.ts`; `hosted/server/dormouse-migrations/008_voice_revocation_permanent.sql`.
 
 ## Relay
 
@@ -271,3 +275,5 @@ Source of truth: `.github/workflows/hosted-production.yml`; `hosted/scripts/prod
 2. Add per-browser login listing/revocation, sign-out-everywhere, and account recovery before broad paid use. Revisit the fixed 24-hour login lifetime for daily voice use.
 3. Managed voice for every member: the subscription as the entitlement in place of `ADMIN_EMAIL` (`docs/specs/pricing.md` -> "Checkout and entitlement"), per-account quotas, usage accounting, spending bounds beyond the fixed daily cap, retiring the account page's hand-minted tokens, and explicit text/redaction disclosure.
 4. Open sign-in: delete `hosted/server/prelaunch.ts` and the frontend's pre-launch notice.
+
+**Orphaned voice tokens.** A token whose `enabled` poll answer is lost is held by no one and stays live until the cap evicts it; expire never-used tokens, or have the desktop confirm receipt.
