@@ -105,9 +105,7 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
   // mouse-down/up on `interactive` would swallow the very first click on a
   // freshly-opened surface. Mouse-down/up therefore only require passthrough
   // mode; keyboard still requires full `interactive` so a background pane never
-  // steals it. Hover and wheel take no gate: like an xterm's, they follow the
-  // pointer onto any pane on screen, in either mode, selecting nothing and
-  // moving no focus.
+  // steals it.
   const passthrough = mode === 'passthrough';
   const passthroughRef = useRef(passthrough);
   passthroughRef.current = passthrough;
@@ -182,6 +180,8 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
 
   const buttonsHeldRef = useRef(0);
   const lastMoveRef = useRef(0);
+  // Whether a hover move has gone to the page since its last leave.
+  const hoveringRef = useRef(false);
   const lastClickRef = useRef({ t: 0, x: 0, y: 0, count: 0, button: -1 });
 
   const clickCountFor = (button: number, x: number, y: number): number => {
@@ -240,16 +240,20 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
   };
 
   const onCanvasMouseMove = (e: React.MouseEvent) => {
-    const held = buttonsHeldRef.current;
+    // Hover and wheel take no gate: like an xterm's, they follow the pointer
+    // onto any pane on screen, in either mode, selecting nothing.
+    // A release made off the canvas is caught up from the buttons still down.
+    const held = buttonsHeldRef.current &= e.buttons;
     // A button this canvas never saw pressed belongs to a drag that began
-    // elsewhere (a pane drag, another pane's selection); xterm's hover reports
-    // skip those moves too.
+    // elsewhere (another pane's selection); xterm's hover reports skip those
+    // moves too.
     if (e.buttons && !held) return;
     const now = performance.now();
     if (now - lastMoveRef.current < 8) return;
     lastMoveRef.current = now;
     const point = toDevice(e);
     if (!point) return;
+    hoveringRef.current = true;
     controller.send({
       type: 'input_mouse',
       eventType: 'mouseMoved',
@@ -265,7 +269,8 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
   // its hover. Never mid-drag of a press this canvas sent, which would drag the
   // page's target to that corner.
   const onCanvasMouseLeave = () => {
-    if (buttonsHeldRef.current) return;
+    if (buttonsHeldRef.current || !hoveringRef.current) return;
+    hoveringRef.current = false;
     controller.send({ type: 'input_mouse', eventType: 'mouseMoved', x: -1, y: -1, button: 'none', buttons: 0, modifiers: 0 });
   };
 
@@ -292,7 +297,7 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
     };
     canvas.addEventListener('wheel', onWheel, { passive: false });
     return () => canvas.removeEventListener('wheel', onWheel);
-  }, [controller, id, toDevice]);
+  }, [controller, toDevice]);
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (!interactiveRef.current) return;
