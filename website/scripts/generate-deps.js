@@ -10,6 +10,7 @@ import {
   externalPlatformSiblings,
   linkedPeerPackageJsonPath,
   getWorkspacePackages,
+  isLonePlatformBuild,
   missingDependency,
   optionalSiblingsAtSameVersion,
 } from "./dependency-workspaces.js";
@@ -160,9 +161,10 @@ function scanDependency(fromDir, packageName, declaredBy) {
 
   const realPackageJsonPath = realpathSync(packageJsonPath);
   if (visitedExternalPackagePaths.has(realPackageJsonPath)) return;
+  const pkg = readJson(realPackageJsonPath);
+  if (isLonePlatformBuild(declaredBy, pkg, productRootOptionals)) return;
   visitedExternalPackagePaths.add(realPackageJsonPath);
 
-  const pkg = readJson(realPackageJsonPath);
   for (const sibling of externalPlatformSiblings(declaredBy, pkg, productRootOptionals)) {
     describeLater(sibling, [pkg.name], pkg.version);
   }

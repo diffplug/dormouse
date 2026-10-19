@@ -20,6 +20,8 @@ Why peers are disclosed, and only where pnpm linked them: the walk once read onl
 
 Why an installed platform build an external package declares brings its whole family: which build installs depends on the generating machine — the `typescript` peer brings `@typescript/typescript-darwin-arm64` on an Apple-silicon laptop and `-linux-x64` in CI — and the host's build really ships wherever a `node_modules` is copied (the sidecar) or installed (the Relay). Disclosing only the installed one would fail the snapshot gate on every machine but one; skipping it would leave a shipped package out. The family members are published in lockstep (for `typescript@7.0.2`, identical license, author, and homepage, and no dependencies; checked against the registry 2026-10), so describing them from whichever one installed gives the same snapshot everywhere. A family a product root declares is left to that root, so `node-datachannel`'s android and musl builds stay undisclosed.
 
+Why an installed platform build with no such sibling is skipped: a machine that cannot install it has neither its manifest nor a lockstep sibling to describe it from, so disclosing it only where it installed made the snapshot depend on the machine. `fsevents` (darwin only, alone in `vite`'s optional block) put the macOS snapshot one row ahead of CI's Linux one (2026-10). The lockfile's only other lone platform builds, `sharp`'s libvips builds, sit in no disclosed graph (2026-10), so the skip hides nothing that ships; a lone build that reached a copied `node_modules` would.
+
 Why being a devDependency of the repo does not count as covered: a selfhoster's `pnpm install` would otherwise drag the whole toolchain into the disclosure.
 
 ## Bundled runtime
