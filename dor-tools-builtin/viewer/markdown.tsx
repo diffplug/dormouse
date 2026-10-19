@@ -1,14 +1,14 @@
 import { createRef, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentType, type FC } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createPortal, flushSync } from 'react-dom';
-import { $getNodeByKey, COMMAND_PRIORITY_HIGH, getNearestEditorFromDOMNode, type LexicalCommand, type LexicalEditor } from 'lexical';
+import { $getNodeByKey, $getNearestNodeFromDOMNode, COMMAND_PRIORITY_HIGH, getNearestEditorFromDOMNode, type LexicalCommand, type LexicalEditor } from 'lexical';
 import { syntaxHighlighting } from '@codemirror/language';
 import { classHighlighter } from '@lezer/highlight';
 import {
   $isImageNode, createActiveEditorSubscription$, editImageToolbarComponent$, iconComponentFor$, ImageNode, imagePreviewHandler$, INSERT_IMAGE_COMMAND, useCellValue,
   BlockTypeSelect, BoldItalicUnderlineToggles, codeBlockPlugin, codeMirrorPlugin, CodeToggle, CreateLink, diffSourcePlugin,
   DiffSourceToggleWrapper, frontmatterPlugin, headingsPlugin, imagePlugin, InsertCodeBlock, InsertTable, InsertThematicBreak,
-  linkDialogPlugin, linkPlugin, listsPlugin, ListsToggle, markdownShortcutPlugin, MDXEditor, quotePlugin, realmPlugin,
+  linkDialogPlugin, linkDialogState$, openLinkEditDialog$, linkPlugin, listsPlugin, ListsToggle, markdownShortcutPlugin, MDXEditor, quotePlugin, realmPlugin,
   rootEditor$, Separator, viewMode$, tablePlugin, thematicBreakPlugin, toolbarPlugin, UndoRedo, type MDXEditorMethods, type MDXEditorProps, type Realm,
 } from '@mdxeditor/editor';
 import '@mdxeditor/editor/style.css';
@@ -25,6 +25,9 @@ import { Signal } from './signal';
 import { installTooltips } from './tooltip';
 import { rescaledSize } from '../src/image-resolution';
 import './markdown.css';
+import { request } from './document-session';
+import { MarkdownNavigation, assignHeadingIds } from './markdown-navigation';
+import { readToolViewPosition, type ToolViewAccess } from 'dor-tools-lib/protocol';
 
 declare module '@mdxeditor/editor' {
   /** The command a paste or drop inserts an image node by, with the source
@@ -45,7 +48,40 @@ const editorRef = createRef<MDXEditorMethods>();
 let realm: Realm | undefined;
 let loads = 0;
 
-const page = documentPage();
+const scroller = () => document.querySelector<HTMLElement>(realm?.getValue(viewMode$) === 'source' ? '.mdxeditor-source-editor .cm-scroller' : '.mdxeditor-root-contenteditable');
+const nextPaint = () => new Promise<void>(done => requestAnimationFrame(() => requestAnimationFrame(() => done())));
+const view: ToolViewAccess = {
+  read: () => ({ mode: realm?.getValue(viewMode$) === 'source' ? 'source' : 'rich-text', top: scroller()?.scrollTop ?? 0 }),
+  async apply(value) {
+    const position = readToolViewPosition(value);
+    if (!position) throw new Error('Invalid reading position.');
+    if (!store.doc.loaded) throw new Error('The document is still loading.');
+    realm?.pub(viewMode$, position.mode ?? 'rich-text');
+    await nextPaint();
+    assignHeadingIds();
+    const scroll = scroller();
+    if (!scroll) throw new Error('The document is still loading.');
+    if (position.top !== undefined) scroll.scrollTop = position.top;
+    else if (position.fragment) {
+      const heading = [...document.querySelectorAll<HTMLElement>('.prose [id]')].find(h => h.id === position.fragment);
+      if (heading) scroll.scrollTop += heading.getBoundingClientRect().top - scroll.getBoundingClientRect().top;
+      else update({ error: `Heading not found: #${position.fragment}` });
+    } else scroll.scrollTop = 0;
+  },
+};
+Object.defineProperty(window, '__dorToolView', { value: view });
+const page = documentPage(view);
+
+function followLink(href: string, disposition: 'current' | 'other' = 'current') {
+  realm?.pub(linkDialogState$, { type: 'inactive' });
+  void request('open', { href, disposition }).catch(reason => session.fail(reason));
+}
+function editLink(anchor: HTMLAnchorElement) {
+  const editor = getNearestEditorFromDOMNode(anchor);
+  if (!editor) return;
+  editor.focus();
+  editor.update(() => { $getNearestNodeFromDOMNode(anchor)?.selectStart(); }, { onUpdate: () => realm?.pub(openLinkEditDialog$, undefined) });
+}
 // The editor trims the document; saves end it with one newline, and the server
 // restores the file's line endings.
 const session = page.open<string>({
@@ -217,7 +253,10 @@ const tokenClasses = [syntaxHighlighting(classHighlighter)];
 // `capture()` comes before `imagePlugin()`, so it reads MDXEditor's own image toolbar first.
 const plugins = [
   capture(), markdownSafetyPlugin(), commentsPlugin(),
-  headingsPlugin(), listsPlugin(), quotePlugin(), thematicBreakPlugin(), linkPlugin(), linkDialogPlugin(),
+  headingsPlugin(), listsPlugin(), quotePlugin(), thematicBreakPlugin(), linkPlugin(), linkDialogPlugin({ onClickLinkCallback: href => {
+    if (/^(?:https?:|mailto:)/i.test(href.trim())) { window.open(href, '_blank', 'noopener,noreferrer'); return; }
+    followLink(href);
+  } }),
   // Unpadded tables: padding to aligned columns rewrites every row of a table when one cell changes.
   tablePlugin({ tablePipeAlign: false }), frontmatterPlugin(), markdownShortcutPlugin(),
   imagePlugin({ imageUploadHandler: upload, imagePreviewHandler: async src => imageUrl(src, store.saved), disableImageResize: true, allowSetImageDimensions: true, EditImageToolbar: ImageChrome as FC }),
@@ -284,7 +323,7 @@ function Overlays() {
 }
 
 function Page({ markdown }: { markdown: string }) {
-  return <><ErrorBanner /><Editor markdown={markdown} /><Overlays /></>;
+  return <><ErrorBanner /><Editor markdown={markdown} /><Overlays /><MarkdownNavigation follow={followLink} edit={editLink} /></>;
 }
 
 installTooltips();

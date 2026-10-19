@@ -1,9 +1,13 @@
-import { readFrameMessage, type HostMessage } from 'dor-tools-lib/protocol';
+import { readFrameMessage, type FrameMessage, type HostMessage, type ToolViewPosition } from 'dor-tools-lib/protocol';
 import { getToolDirty, recordToolDirty } from './tool-dirty-store';
 
 /** The live connection per Tool; `ready` once its frame has answered. */
-type Editor = { label: string; ready: boolean; save(): Promise<void> };
+type Editor = { label: string; ready: boolean; save(): Promise<void>; view(position?: ToolViewPosition): Promise<ToolViewPosition | undefined> };
 const editors = new Map<string, Editor>();
+export function toolEditorView(id: string, position?: ToolViewPosition): Promise<ToolViewPosition | undefined> | null {
+  const editor = editors.get(id);
+  return editor?.ready ? editor.view(position) : null;
+}
 const listeners = new Set<() => void>();
 export type EditorClosePrompt = { items: readonly { id: string; label: string }[]; saving: boolean; error?: string };
 let prompt: EditorClosePrompt | null = null;
@@ -70,13 +74,18 @@ export async function decideEditorClose(choice: 'save' | 'discard' | 'cancel'): 
 export function connectToolEditor(id: string, label: string, frame: HTMLIFrameElement, origin: string): () => void {
   const connection = crypto.randomUUID();
   let nextRequest = 0;
-  const pending = new Map<string, { resolve(): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> }>();
+  const pending = new Map<string, { kind: 'saved' | 'view'; resolve(message: FrameMessage): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> }>();
   const send = (message: HostMessage) => frame.contentWindow?.postMessage(message, origin);
   const connect = () => send({ dorTool: 1, kind: 'connect', connection });
-  const editor: Editor = { label, ready: false, save: () => new Promise<void>((resolve, reject) => {
+  const editor: Editor = { label, ready: false, view: position => new Promise((resolve, reject) => {
+    const request = String(++nextRequest);
+    const timer = setTimeout(() => { pending.delete(request); reject(new Error('The editor did not answer the reading-position request.')); }, 10000);
+    pending.set(request, { kind: 'view', resolve: message => resolve(message.kind === 'view' ? message.position : undefined), reject, timer });
+    send(position === undefined ? { dorTool: 1, kind: 'view-read', connection, request } : { dorTool: 1, kind: 'view-apply', connection, request, position });
+  }), save: () => new Promise<void>((resolve, reject) => {
     const request = String(++nextRequest);
     const timer = setTimeout(() => { pending.delete(request); reject(new Error('The editor did not finish saving. Your file remains open.')); }, 15000);
-    pending.set(request, { resolve, reject, timer });
+    pending.set(request, { kind: 'saved', resolve: () => resolve(), reject, timer });
     send({ dorTool: 1, kind: 'save', connection, request });
   }) };
   editors.set(id, editor);
@@ -84,13 +93,15 @@ export function connectToolEditor(id: string, label: string, frame: HTMLIFrameEl
     const data = readFrameMessage(event.data);
     if (editors.get(id) !== editor || event.source !== frame.contentWindow || event.origin !== origin
       || data?.connection !== connection) return;
-    editor.ready = true;
-    recordToolDirty(id, data.dirty);
-    if (data.kind === 'saved') {
+    if (data.kind !== 'view') {
+      editor.ready = true;
+      recordToolDirty(id, data.dirty);
+    }
+    if (data.kind === 'saved' || data.kind === 'view') {
       const waiting = pending.get(data.request);
-      if (waiting) {
+      if (waiting && waiting.kind === data.kind) {
         pending.delete(data.request); clearTimeout(waiting.timer);
-        if (data.error !== undefined) waiting.reject(new Error(data.error)); else waiting.resolve();
+        if (data.error !== undefined) waiting.reject(new Error(data.error)); else waiting.resolve(data);
       }
     }
   };

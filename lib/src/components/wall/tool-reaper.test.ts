@@ -129,6 +129,11 @@ describe('toolReapBlocker', () => {
     expect(toolReapBlocker(ID, lath.getMeta(ID)?.params)).toBeNull();
   });
 
+  it('refuses a pending document navigation', () => {
+    const lath = servingTool({ toolNavigating: 'request' });
+    expect(toolReapBlocker(ID, lath.getMeta(ID)?.params)).toMatch(/navigation/);
+  });
+
   it('refuses a preview slot, and a command other than the designated one', () => {
     const slot = servingTool({ toolPreview: true });
     expect(toolReapBlocker(ID, slot.getMeta(ID)?.params)).toMatch(/preview/);

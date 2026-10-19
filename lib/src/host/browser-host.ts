@@ -12,6 +12,7 @@
  */
 import { randomBytes } from 'crypto';
 import * as path from 'path';
+import { readToolViewPosition } from 'dor-tools-lib/protocol';
 import {
   BROWSER_PROVIDERS,
   isBrowserProvider,
@@ -224,6 +225,11 @@ function parseOp(r: Record<string, unknown>): BrowserOp | string {
     }
     case 'edit':
       return editScript(r.edit) !== undefined ? { op: 'edit', edit: r.edit as BrowserEditOp } : `unknown edit op '${String(r.edit)}'`;
+    case 'tool-view': {
+      if (r.position === undefined) return { op: 'tool-view' };
+      const position = readToolViewPosition(r.position);
+      return position ? { op: 'tool-view', position } : 'invalid reading position';
+    }
     case 'navigate':
       return isBrowsableUrl(r.url) ? { op: 'navigate', url: r.url } : 'Browser navigation requires an http(s) URL';
     case 'history':
@@ -732,6 +738,18 @@ export function createBrowserHost(deps: BrowserHostDeps) {
         }
         case 'edit':
           return await edit(bound, r.edit);
+        case 'tool-view': {
+          const generation = generations.get(bound.id) ?? 0;
+          if (settling.has(bound.id)) throw new Error('the browser is being relaunched or closed');
+          // Only this fixed operation reaches evaluate; serialized validated data
+          // cannot become code, even when a heading contains script punctuation.
+          const argument = JSON.stringify(r.position ?? null);
+          const value = await p.evaluate(b, `(async()=>{const v=window.__dorToolView;if(!v)throw Error('Reading position unavailable');const position=${argument};if(position)await v.apply(position);return v.read()})()`);
+          if (settling.has(bound.id) || generation !== (generations.get(bound.id) ?? 0)) throw new Error('the browser changed during navigation');
+          const position = readToolViewPosition(value);
+          if (!position) throw new Error('invalid reading position from page');
+          return { ok: true, position };
+        }
         case 'measure': {
           const generation = generations.get(bound.id) ?? 0;
           // A query after a size mutation must observe that mutation, even if

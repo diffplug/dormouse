@@ -29,6 +29,7 @@ import { PREVIEW_READY_FALLBACK_MS, resetPreviewTransitions } from '../../lib/pr
 import { PREVIEW_INTERRUPT_GRACE_MS, PREVIEW_OUTPUT_QUIET_MS, PROMPT_RETURN_TIMEOUT_MS } from './use-dor-control';
 import { setDevServerResolution } from './agent-browser-ports';
 import * as helpers from '../../lib/helper-terminal';
+import { decideEditorClose, getEditorClosePrompt } from '../../lib/tool-editor';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -104,7 +105,7 @@ function shell(id: string, line: string | null, options: ShellOptions = {}): voi
 /** The user host's answer for `dor open [--tool other] <file>`; `other`
  *  declares no key. */
 function openLookup(file: string, tool = 'viewer') {
-  const target = `/repo/${file}`;
+  const target = file.startsWith('/') ? file : `/repo/${file}`;
   return {
     status: 'ok' as const, scope: 'user' as const, projectRoot: '/repo', path: '/config/dormouse.yml', name: tool,
     run: [tool === 'viewer' ? 'view' : tool, target], key: tool === 'viewer' ? [target] : null, render: 'iframe' as const,
@@ -170,7 +171,7 @@ type ToolResult = { status: string; surfaceId: string; command: string; minimize
 function dispatch(method: string, params: Record<string, unknown>, caller = 'surface:a') {
   const respond = vi.fn();
   window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
-    method, surfaceId: caller, params, signal: requests.signal, respond,
+    requestId: crypto.randomUUID(), method, surfaceId: caller, params, signal: requests.signal, respond,
   } }));
   return respond;
 }
@@ -1261,4 +1262,84 @@ describe('a switching slot', () => {
     expect(old.isConnected).toBe(false);
     expect(terminalHalf().style.visibility).toBe('');
   }, 10_000);
+});
+
+describe('Tool document navigation', () => {
+  it('pins an in-place visit and traverses Back/Forward without persisting its history', async () => {
+    await mountSlot();
+    expect(await answer(await request({ file: '/repo/b.md', disposition: 'current' }, 'surface:slot')))
+      .toMatchObject({ status: 'retargeted', surfaceId: 'surface:slot' });
+    expect(await paramsOf('surface:slot')).toMatchObject({ toolTarget: '/repo/b.md' });
+    expect((await paramsOf('surface:slot'))?.toolPreview).toBeUndefined();
+    expect((await paramsOf('surface:slot'))?.toolHistory).toBeUndefined();
+    expect((await paramsOf('surface:slot'))?.toolNavigating).toBeUndefined();
+    await answer(await request({ history: 'back', disposition: 'current' }, 'surface:slot'));
+    expect((await paramsOf('surface:slot'))?.toolTarget).toBe('/repo/a.md');
+    await answer(await request({ history: 'forward', disposition: 'current' }, 'surface:slot'));
+    expect((await paramsOf('surface:slot'))?.toolTarget).toBe('/repo/b.md');
+    expect(leafCount()).toBe(2);
+  });
+  it('focuses an existing destination without interrupting or extending either history', async () => {
+    installHost();
+    await mountWall([
+      { id: 'surface:slot', params: viewerParams('a.md', { toolPreview: undefined }) },
+      { id: 'surface:other', params: viewerParams('b.md', { toolPreview: undefined }) },
+    ]);
+    shell('surface:a', null); shell('surface:slot', 'view /repo/a.md'); shell('surface:other', 'view /repo/b.md');
+    for (const disposition of ['current', 'other']) {
+      expect(await answer(await request({ file: '/repo/b.md', disposition }, 'surface:slot'))).toMatchObject({ status: 'existing', surfaceId: 'surface:other' });
+    }
+    expect(typed['surface:slot']).toEqual([]);
+    expect(typed['surface:other']).toEqual([]);
+    const back = await request({ history: 'back', disposition: 'current' }, 'surface:slot');
+    await waitUntil(() => back.mock.calls.length > 0);
+    expect(back.mock.calls[0][0].ok).toBe(false);
+  });
+  it('a new visit after Back drops the forward branch', async () => {
+    await mountSlot();
+    await answer(await request({ file: '/repo/b.md', disposition: 'current' }, 'surface:slot'));
+    await answer(await request({ history: 'back', disposition: 'current' }, 'surface:slot'));
+    await answer(await request({ file: '/repo/c.png', disposition: 'current' }, 'surface:slot'));
+    const forward = await request({ history: 'forward', disposition: 'current' }, 'surface:slot');
+    await waitUntil(() => forward.mock.calls.length > 0);
+    expect(forward.mock.calls[0][0].ok).toBe(false);
+    expect((await paramsOf('surface:slot'))?.toolTarget).toBe('/repo/c.png');
+  });
+  it('rejects duplicate pending navigation and preserves the source when interruption times out', async () => {
+    await mountSlot({ slot: { holdInterrupt: true } });
+    const first = await request({ file: '/repo/b.md', disposition: 'current' }, 'surface:slot');
+    const second = await request({ file: '/repo/c.md', disposition: 'current' }, 'surface:slot');
+    await waitUntil(() => second.mock.calls.length > 0);
+    expect(second.mock.calls[0][0].ok).toBe(false);
+    await waitUntil(() => first.mock.calls.length > 0, PREVIEW_INTERRUPT_GRACE_MS + 1000);
+    expect(first.mock.calls[0][0].ok).toBe(false);
+    expect((await paramsOf('surface:slot'))?.toolTarget).toBe('/repo/a.md');
+  });
+});
+
+
+it('document navigation Cancel keeps the draft and history; Discard permits replacement', async () => {
+  await mountSlot();
+  recordToolDirty('surface:slot', true);
+  const cancelled = await request({ file: '/repo/b.md', disposition: 'current' }, 'surface:slot');
+  await waitUntil(() => getEditorClosePrompt() !== null);
+  expect(typed['surface:slot']).toEqual([]);
+  await act(async () => decideEditorClose('cancel'));
+  await waitUntil(() => cancelled.mock.calls.length > 0);
+  expect(cancelled.mock.calls[0][0].ok).toBe(false);
+  expect((await paramsOf('surface:slot'))?.toolTarget).toBe('/repo/a.md');
+  const discarded = await request({ file: '/repo/b.md', disposition: 'current' }, 'surface:slot');
+  await waitUntil(() => getEditorClosePrompt() !== null);
+  await act(async () => decideEditorClose('discard'));
+  expect(await answer(discarded)).toMatchObject({ status: 'retargeted', surfaceId: 'surface:slot' });
+});
+
+it('Back resolves the original handler in its original lookup directory', async () => {
+  const host = installHost();
+  await mountWall([{ id: 'surface:slot', params: viewerParams('docs/a.md', { toolPreview: undefined }) }]);
+  shell('surface:a', null); shell('surface:slot', 'view /repo/docs/a.md');
+  await answer(await request({ file: '/repo/docs/b.md', disposition: 'current' }, 'surface:slot'));
+  expect(host).toHaveBeenLastCalledWith(expect.objectContaining({ op: 'open', cwd: '/repo/docs' }));
+  await answer(await request({ history: 'back', disposition: 'current' }, 'surface:slot'));
+  expect(host).toHaveBeenLastCalledWith(expect.objectContaining({ op: 'open', target: '/repo/docs/a.md', cwd: '/repo', tool: 'viewer' }));
 });

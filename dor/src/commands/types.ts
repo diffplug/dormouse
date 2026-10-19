@@ -281,6 +281,10 @@ export interface EnsureSurfaceResponse {
  * authorized it (`docs/specs/dor-tool.md` -> Trust).
  */
 export interface ToolSurfaceRequest extends WorkspaceScopedRequest {
+  /** Document-link placement; internal UI/Tool protocol, not a CLI flag. */
+  disposition?: 'current' | 'other';
+  fragment?: string;
+  history?: 'back' | 'forward';
   /** Local-file dispatch (`dor open`). */
   file?: string;
   tool?: string;

@@ -48,7 +48,8 @@ export function TerminalContextOverlay({ context, title, tool, preview = false, 
     setManual(side);
   }, [context.id, preferences]);
   // LathHost re-renders on every commit and resize frame; the panel needs only these.
-  const panel = useMemo(() => <TerminalContext {...context} title={title} tool={tool} preview={preview}
-    placement={{ side: shown.side, available: shown.available, onChange }} />, [context, title, tool, preview, shown, onChange]);
+  const params = tool ? lath.getMeta(context.id)?.params : undefined;
+  const panel = useMemo(() => <TerminalContext {...context} title={title} tool={tool} preview={preview} params={params}
+    placement={{ side: shown.side, available: shown.available, onChange }} />, [context, title, tool, preview, params, shown, onChange]);
   return <div ref={host} className="absolute" style={{ ...boxPx(initial.rect), zIndex: Z_CONTEXT }}>{panel}</div>;
 }

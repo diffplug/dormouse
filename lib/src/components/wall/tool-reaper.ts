@@ -55,6 +55,7 @@ export function toolReapBlocker(id: string, params: Record<string, unknown> | un
   // A pending kill's restore must bring back the same process (docs/specs/reopen.md).
   if (isPendingKillSession(id)) return 'it is a pending kill';
   if (toolPendingFromParams(params)) return 'awaiting approval';
+  if (params.toolNavigating || params.toolViewRequest) return 'document navigation is pending';
   if (params.toolPreview === true) return 'a preview slot';
   // A popped-out browser is in sight in its own window, Door or not.
   if (parseRenderMode(params.renderMode).presentation === 'popout') return 'its browser is popped out';

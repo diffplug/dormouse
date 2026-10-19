@@ -15,10 +15,11 @@ import { writeTextToClipboard } from '../../lib/clipboard';
 import { listenerUrlsByPort } from './port-url';
 import { hostBrowserProviders } from './browser-automation';
 import { DEFAULT_HELPER_COMMAND } from '../../lib/terminal-context-types';
+import { ToolNavigationButtons } from './ToolNavigationButtons';
 
 /** `preview`: the Surface is its Workspace's preview slot, which the context
  *  offers to keep (`docs/specs/layout.md` -> Pane header). */
-export function TerminalContext({ id, title, closing, origin, warning: openWarning, tool = false, preview = false, placement }: TerminalContextState & { title?: string; tool?: boolean; preview?: boolean } & Pick<TerminalContextViewProps, 'placement'>) {
+export function TerminalContext({ id, title, closing, origin, warning: openWarning, tool = false, preview = false, placement, params }: TerminalContextState & { title?: string; tool?: boolean; preview?: boolean; params?: Record<string, unknown> } & Pick<TerminalContextViewProps, 'placement'>) {
   const context = useContext(TerminalContextContext);
   const actions = useContext(WallActionsContext);
   const workspaceActive = useContext(WorkspaceActiveContext);
@@ -62,6 +63,7 @@ export function TerminalContext({ id, title, closing, origin, warning: openWarni
   const source = wallHandleOwning(id);
   const warning = openWarning ?? (helperError || (helper && helper.status !== 'waiting' && (!cwd || !helperCwd) ? 'Directory comparison unavailable: a terminal has not reported its directory.' : undefined));
   return <TerminalContextView placement={placement} terminalRole={tool ? 'tool' : 'helper'} closing={closing} origin={origin} surfaceId={id}
+    navigation={tool ? <ToolNavigationButtons id={id} params={params} /> : undefined}
     workspaceMove={source?.canMoveSurfaces ? <MoveWorkspaceAction id={id} sourceId={source.workspaceId} /> : undefined} titleSources={titleSources} cwd={cwd ? display(cwd) : 'Directory unknown'} helperCwd={helperCwd && display(helperCwd)} mismatch={mismatch}
     scan={scan} watchRule={offeredRule} watching={watchRule !== null} todo={activities.get(id)?.todo === true} notification={activities.get(id)?.notification}
     status={tool ? (state.currentCommand ? 'running' : 'completed') : helper?.status ?? 'waiting'} command={tool ? state.currentCommand?.rawCommandLine ?? state.lastCommand?.rawCommandLine ?? '' : helper?.command ?? defaultCommand} defaultCommand={defaultCommand} warning={warning}

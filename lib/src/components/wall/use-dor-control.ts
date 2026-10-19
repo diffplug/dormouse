@@ -72,6 +72,9 @@ import { decidePreviewSlot, retargetToolLeaf, type PreviewSlotPin } from './prev
 import { beginSlotSwitch } from './preview-transition';
 import { commitPreviewTransition, endPreviewTransition } from '../../lib/preview-transition-store';
 import { retireToolRun } from './use-tool-serving';
+import { validToolFragment } from 'dor-tools-lib/osc';
+import { confirmToolEditorsClose } from '../../lib/tool-editor';
+import { commitToolHistory, documentDirectory, hasToolView, toolHistory, toolLocation, toolView } from './tool-navigation';
 
 import { listenerUrlsByPort } from './port-url';
 import { becomeToolMeta, dorDirectionForEdge, toolLeafMeta, type LathWallEngine } from './lath-wall-engine';
@@ -86,6 +89,9 @@ import type { DooredItem } from './wall-types';
  *  verbs' own) are the router's, not a Wall's: `WindowControlParams` in
  *  `workspace-control.ts`. */
 export type DorControlParams = {
+  disposition?: unknown;
+  fragment?: unknown;
+  history?: unknown;
   destination?: unknown;
   focus?: unknown;
   dangerouslyDestroyIframePageState?: unknown;
@@ -1098,6 +1104,36 @@ export function useDorControl({
     }
 
     if (detail.method === SURFACE_CONTROL_METHODS.tool) {
+      const documentLink = params.disposition !== undefined || params.history !== undefined;
+      const sourceId = detail.surfaceId;
+      const sourceMeta = sourceId ? lath.getMeta(sourceId) : undefined;
+      const sourceParams = sourceMeta?.params;
+      const sourceRun = sourceId ? getTerminalPaneState(sourceId).currentCommand?.id : undefined;
+      const history = toolHistory(sourceParams);
+      const historyIndex = params.history === 'back' ? (history?.index ?? 0) - 1
+        : params.history === 'forward' ? (history?.index ?? 0) + 1 : undefined;
+      const historical = historyIndex === undefined ? undefined : history?.entries[historyIndex];
+      if (documentLink) {
+        if (!sourceId || !isToolParams(sourceParams) || !toolLocation(sourceParams, '')
+          || (params.disposition !== 'current' && params.disposition !== 'other')
+          || (params.history !== undefined && (params.disposition !== 'current' || !historical))
+          || (params.fragment !== undefined && !validToolFragment(params.fragment))
+          || params.preview || params.fresh || params.minimized) {
+          detail.respond({ ok: false, error: 'invalid Tool navigation' });
+          return;
+        }
+        // Set before lookup/queueing: two clicks from one old page must never
+        // execute as successive navigations in the replacement page.
+        if (sourceParams.toolNavigating || sourceParams.toolViewRequest) { detail.respond({ ok: false, error: 'Tool navigation is already in progress' }); return; }
+        lath.store.updateParams(sourceId, { toolNavigating: detail.requestId, toolNavigationError: undefined });
+        const respond = detail.respond;
+        detail.respond = result => {
+          if (!result.ok && lath.getMeta(sourceId)?.params?.toolNavigating === detail.requestId) {
+            lath.store.updateParams(sourceId, { toolNavigationError: result.error });
+          }
+          respond(result);
+        };
+      }
       // An OSC 367 `open` reaches here only from the run the host itself
       // launched in that PTY (`ToolLaunchLatch`, at the PTY owner's parse), and
       // acts only for a Tool Session. The command line the shell reports is
@@ -1139,13 +1175,13 @@ export function useDorControl({
           return error !== null;
         };
         if (unavailable()) return;
-        const cwd = stringParam(params.cwd)?.trim();
+        const cwd = documentLink ? historical?.cwd ?? documentDirectory(String(sourceParams!.toolTarget)) : stringParam(params.cwd)?.trim();
         if (!cwd) {
           detail.respond({ ok: false, error: 'cwd is required' });
           return;
         }
         let toolName = stringParam(params.name)?.trim();
-        const openFile = stringParam(params.file);
+        const openFile = historical?.target ?? stringParam(params.file);
         const opening = openFile !== undefined;
         if (opening && (params.name !== undefined || params.command !== undefined || params.args !== undefined)) {
           detail.respond({ ok: false, error: 'open accepts a file and optional tool, not a command' });
@@ -1175,7 +1211,12 @@ export function useDorControl({
         const respondTool = (
           status: ToolSurfaceResponse['status'],
           surface: { surfaceId: string; command: string; cwd: string; minimized: boolean },
-        ) => detail.respond({
+        ) => {
+          const position = historical?.position ?? (typeof params.fragment === 'string' ? { fragment: params.fragment } : undefined);
+          if (documentLink && position && hasToolView(lath.getMeta(surface.surfaceId)?.params)) {
+            lath.store.updateParams(surface.surfaceId, { toolViewRequest: { token: crypto.randomUUID(), position } });
+          }
+          detail.respond({
           ok: true,
           result: {
             status,
@@ -1186,7 +1227,8 @@ export function useDorControl({
             key,
             ...(warnings.length > 0 ? { warnings } : {}),
           },
-        });
+          });
+        };
         // What both placements read of the pane `dor` ran in, before the prompt
         // wait and again after it (docs/specs/dor-tool.md -> Take-over).
         const readCallerGate = (id: string, toolCwd: string): ToolTakeoverGate => {
@@ -1244,7 +1286,7 @@ export function useDorControl({
           }
           const lookup = await platform.toolControl(opening
             ? {
-              op: 'open', target: openFile, cwd, tool: stringParam(params.tool),
+              op: 'open', target: openFile, cwd, tool: historical?.handler ?? stringParam(params.tool),
               ...(previewSignal ? { preview: true } : {}),
             }
             : { op: 'lookup', name: toolName!, cwd, args: toolArgs, global: booleanParam(params.global) });
@@ -1413,6 +1455,83 @@ export function useDorControl({
 
         const callerId = detail.surfaceId;
         const callerGate = callerId === undefined ? null : readCallerGate(callerId, cwd);
+
+        const sourceUnchanged = () => !!sourceId && isTargetable(sourceId)
+          && lath.getMeta(sourceId)?.params?.toolNavigating === detail.requestId
+          && getTerminalPaneState(sourceId).currentCommand?.id === sourceRun
+          && lath.getMeta(sourceId)?.params?.toolTarget === sourceParams?.toolTarget;
+        if (documentLink && !sourceUnchanged()) {
+          detail.respond({ ok: false, error: 'The source Tool changed before navigation.' });
+          return;
+        }
+        if (params.disposition === 'current' && sourceId && sourceMeta && sourceParams && openTarget) {
+          const sameDocument = sourceParams.toolTarget === openTarget && sourceParams.toolName === toolName && sourceParams.toolScope === toolScope;
+          const match = historyIndex === undefined && key ? findSurfaceByParams(candidate => matchesToolKey(candidate, toolScope, key)) : null;
+          const slot = findPreviewSlot();
+          const reuseSlot = historyIndex === undefined && slot?.id !== sourceId && slot
+            && lath.getMeta(slot.id)?.params?.toolTarget === openTarget;
+          // Reuse remains the ordinary open path below. History traversal is
+          // local to this Surface and never follows a key into another one.
+          if (sameDocument || (!match && !reuseSlot) || historyIndex !== undefined) {
+            const current = toolLocation(sourceParams, history?.entries[history.index]?.cwd ?? stringParam(sourceParams.cwd) ?? cwd)!;
+            if (!sameDocument && !await confirmToolEditorsClose([sourceId])) {
+              detail.respond({ ok: false, error: 'Navigation cancelled.' }); return;
+            }
+            if (unavailable()) return;
+            if (!sourceUnchanged()) { detail.respond({ ok: false, error: 'The source Tool changed before navigation.' }); return; }
+            try { current.position = await toolView(sourceId, sourceParams); }
+            catch (error) { detail.respond({ ok: false, error: errorText(error) }); return; }
+            if (unavailable()) return;
+            if (!sourceUnchanged()) { detail.respond({ ok: false, error: 'The source Tool changed before navigation.' }); return; }
+            const next = { target: openTarget, cwd, handler: toolScope === 'builtin' ? `builtin:${toolName}` : toolName,
+              position: historical?.position ?? (typeof params.fragment === 'string' ? { fragment: params.fragment } : undefined) };
+            const nextHistory = commitToolHistory(history, current, next, historyIndex);
+            if (sameDocument) {
+              // An anchor is a view change: never ask to discard edits or
+              // reload the page, even through Back/Forward.
+              if (params.fragment !== undefined || historyIndex !== undefined) {
+                lath.store.updateParams(sourceId, { toolHistory: nextHistory });
+                if (isPreviewSlotParams(sourceParams)) previewSlot.pin(sourceId);
+              }
+              respondStanding('existing', sourceId, revealSurface(sourceId));
+              return;
+            }
+            const token = beginSlotSwitch(sourceId, () => lath.getMeta(sourceId)?.params);
+            const running = getTerminalPaneState(sourceId).currentCommand;
+            const run = running ? { id: running.id, at: Date.now(), input: getSessionInputVersion(sourceId) } : undefined;
+            lateRestores.current.get(sourceId)?.();
+            const interrupted = await interruptToPrompt(sourceId, detail.signal, PREVIEW_INTERRUPT_GRACE_MS);
+            if (!interrupted.ok || unavailable() || !isTargetable(sourceId)
+              || (run && getSessionInputVersion(sourceId) !== run.input)) {
+              if (token !== null) endPreviewTransition(sourceId, token);
+              if (interrupted === INTERRUPT_OUTLIVED && run) restoreOnLatePrompt(sourceId, run);
+              else if (interrupted !== INTERRUPT_OUTLIVED) await restoreInterruptedRun(sourceId, run);
+              if (!interrupted.ok) detail.respond({ ok: false, error: `Cannot navigate: ${interrupted.message}` });
+              else if (!unavailable()) detail.respond({ ok: false, error: 'The source Tool changed before navigation.' });
+              return;
+            }
+            const nextCommand = toolRunCommand(toolRun, sourceId);
+            if (token !== null) commitPreviewTransition(sourceId, token,
+              ready => watchTerminalReady(sourceId, nextCommand, () => toolFace(lath.getMeta(sourceId)?.params) === 'terminal', ready));
+            retargetToolLeaf(lath, sourceId, { title: toolName ?? nextCommand, identity: { ...identity, command: nextCommand } }, isPreviewSlotParams(sourceParams) ? previewSlot.pin : undefined);
+            lath.store.updateParams(sourceId, { toolHistory: nextHistory, toolViewRequest: undefined });
+            const started = await typeToolCommand(sourceId, nextCommand, runDirectory(sourceId), detail.signal, { acceptCompletedRun: true });
+            if (started !== 'ready') {
+              if (token !== null) endPreviewTransition(sourceId, token);
+              // Restore only into the untouched prompt we own, never into a
+              // program or a line the user started after our interrupt.
+              if (isTargetable(sourceId) && getTerminalPaneState(sourceId).currentCommand === null
+                && (!run || getSessionInputVersion(sourceId) === run.input)) {
+                holdForHostInterrupt(sourceId);
+                lath.store.setMeta(sourceId, { ...sourceMeta, params: { ...sourceParams, toolNavigating: detail.requestId } });
+                await retypeInterruptedRun(sourceId, undefined, String(sourceParams.command));
+              }
+              detail.respond({ ok: false, error: 'The destination Tool did not start.' }); return;
+            }
+            respondStanding('retargeted', sourceId, revealSurface(sourceId));
+            return;
+          }
+        }
 
         /**
          * Run the resolved Tool in the preview slot in place: interrupt it, then
@@ -1665,7 +1784,12 @@ export function useDorControl({
             for (const id of [...interruptedSlotRuns.current.keys()]) await restoreInterruptedRun(id);
           }
         }
-      }).finally(settleSwitch);
+      }).finally(() => {
+        settleSwitch();
+        if (documentLink && sourceId && lath.getMeta(sourceId)?.params?.toolNavigating === detail.requestId) {
+          lath.store.updateParams(sourceId, { toolNavigating: undefined });
+        }
+      });
       return;
     }
 
