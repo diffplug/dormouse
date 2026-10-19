@@ -2166,9 +2166,11 @@ export function useDorControl({
       return;
     }
 
-    if (detail.method === SURFACE_CONTROL_METHODS.browserViewport) {
-      const provider = requestedProvider();
-      if (!provider) return;
+    /** The browser Surface of `provider` a `--key`, `--session` or
+     *  `--surface` names; null once the caller is answered. A `--surface`
+     *  must have its session named unless `sessionless` (diagnostics, which
+     *  serve a launch that never named one too). */
+    const browserTarget = (provider: BrowserAutomationProvider, sessionless = false): string | null => {
       let targetId: string | null = null;
       const key = stringParam(params.key);
       const session = stringParam(params.session);
@@ -2184,17 +2186,54 @@ export function useDorControl({
         if (matches.length === 1) targetId = matches[0].id;
         else if (matches.length > 1) {
           detail.respond({ ok: false, error: `session '${session}' is bound to multiple Surfaces; use --surface` });
-          return;
+          return null;
         }
       } else {
         const found = requireBrowserSurface(params.surface, detail);
-        if (!found || !requireAutomationSession(found, provider, detail)) return;
+        if (!found) return null;
+        if (sessionless && parseRenderMode(found.renderMode).provider !== provider) {
+          const rendering = parseRenderMode(found.renderMode).provider;
+          detail.respond({ ok: false, error: `surface '${found.id}' is not ${provider} rendered (render_mode: ${found.renderMode})${rendering ? ` — use ${BROWSER_PROVIDER_GUI[rendering].cli} --surface ${found.id}` : ''}` });
+          return null;
+        }
+        if (!sessionless && !requireAutomationSession(found, provider, detail)) return null;
         targetId = found.id;
       }
       if (!targetId) {
         detail.respond({ ok: false, error: 'No bound browser Surface; use --surface with a screencast' });
-        return;
+        return null;
       }
+      return targetId;
+    };
+
+    if (detail.method === SURFACE_CONTROL_METHODS.browserDiagnostics) {
+      const provider = requestedProvider();
+      if (!provider) return;
+      const targetId = browserTarget(provider, true);
+      if (!targetId) return;
+      const surfaceParams = lath.getMeta(targetId)?.params;
+      const controller = getAgentBrowserSurfaceController(targetId);
+      try {
+        const found = controller ? await controller.diagnostics() : null;
+        detail.respond({ ok: true, result: {
+          surfaceId: targetId,
+          provider,
+          renderMode: parseRenderMode((surfaceParams as { renderMode?: unknown } | undefined)?.renderMode).mode,
+          session: agentBrowserSessionFromParams(surfaceParams) ?? null,
+          webview: found?.webview ?? null,
+          host: found?.host ?? null,
+        } });
+      } catch (error) {
+        detail.respond({ ok: false, error: error instanceof Error ? error.message : String(error) });
+      }
+      return;
+    }
+
+    if (detail.method === SURFACE_CONTROL_METHODS.browserViewport) {
+      const provider = requestedProvider();
+      if (!provider) return;
+      const targetId = browserTarget(provider);
+      if (!targetId) return;
       const surfaceParams = lath.getMeta(targetId)?.params;
       const mode = parseRenderMode((surfaceParams as { renderMode?: unknown } | undefined)?.renderMode);
       if (params.setting !== undefined && mode.presentation !== 'screencast') {

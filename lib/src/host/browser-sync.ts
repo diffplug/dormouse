@@ -241,6 +241,16 @@ export function createViewportSync<B extends { id: string }>(deps: ViewportSyncD
 
     current(id: string): string | undefined { return syncs.get(id)?.engagement; },
 
+    /** Browser `id`'s sizing as it stands, for `dor`'s diagnostics. */
+    diagnostics(id: string): Record<string, unknown> {
+      const s = syncs.get(id);
+      return {
+        shownPage: shown.get(id) ?? null,
+        fixed: fixedSizes.get(id) ?? null,
+        sync: s ? { stream: s.stream, engagement: s.engagement, state: s.state, target: s.target, applied: s.applied ?? null, writing: !!s.writing, stale: s.stale } : null,
+      };
+    },
+
     /** A launch or close replaces or ends browser `id`. */
     forget,
 

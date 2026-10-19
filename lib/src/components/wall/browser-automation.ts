@@ -120,6 +120,7 @@ export interface BrowserHandle {
   tab(action: 'select' | 'close', tabId: string): Promise<BrowserResult>;
   viewport(width: number, height: number, dpr?: number, endsSync?: string): Promise<BrowserResult>;
   measure(): Promise<BrowserResult>;
+  diagnostics(): Promise<BrowserResult>;
   /** `cancels`: the closing Surface's own requests still unanswered. */
   close(cancels?: readonly string[]): Promise<BrowserResult>;
 }
@@ -162,6 +163,7 @@ export function browserHandle(provider: BrowserAutomationProvider, binding: Omit
     tab: (action, tabId) => send({ op: 'tab', action, tabId }),
     viewport: (width, height, dpr, endsSync) => send({ op: 'viewport', width, height, ...(dpr !== undefined ? { dpr } : {}), ...(endsSync !== undefined ? { endsSync } : {}) }),
     measure: () => send({ op: 'measure' }),
+    diagnostics: () => send({ op: 'diagnostics' }),
     close: (cancels = []) => send({ op: 'close', ...(cancels.length ? { cancels: [...cancels] } : {}) }),
   };
 }

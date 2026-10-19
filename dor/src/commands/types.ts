@@ -556,6 +556,25 @@ export type BrowserViewportRequest = WorkspaceScopedRequest & { provider: Browse
   | { session: string; key?: undefined; surface?: undefined }
 );
 
+/** `dor-diagnostics`: which browser Surface, by the same identities. */
+export type BrowserDiagnosticsRequest = WorkspaceScopedRequest & { provider: BrowserAutomationProvider } & (
+  | { key: string; surface?: undefined; session?: undefined }
+  | { surface: string; key?: undefined; session?: undefined }
+  | { session: string; key?: undefined; surface?: undefined }
+);
+
+/** The webview's and the host's own record of one browser Surface, as plain
+ *  JSON for people and agents to read; `webview` is null for a Surface no
+ *  view has started, `host` for one with no session yet. */
+export interface BrowserDiagnosticsResponse {
+  surfaceId: string;
+  provider: BrowserAutomationProvider;
+  renderMode: SurfaceRenderMode;
+  session: string | null;
+  webview: Record<string, unknown> | null;
+  host: Record<string, unknown> | null;
+}
+
 export interface BrowserViewportResponse {
   surfaceId: string;
   provider: BrowserAutomationProvider;
@@ -575,6 +594,7 @@ export interface BrowserSurfaceResponse {
 export interface ControlClient {
   browserSurface(request: BrowserSurfaceRequest): Promise<BrowserSurfaceResponse>;
   browserViewport(request: BrowserViewportRequest): Promise<BrowserViewportResponse>;
+  browserDiagnostics(request: BrowserDiagnosticsRequest): Promise<BrowserDiagnosticsResponse>;
   resolveBrowser(request: ResolveBrowserRequest): Promise<ResolveBrowserResponse>;
   listSurfaces(request: ListSurfacesRequest): Promise<ListSurfacesResponse>;
   splitSurface(request: SplitSurfaceRequest): Promise<SplitSurfaceResponse>;

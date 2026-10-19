@@ -69,6 +69,48 @@ describe('createBrowserHost', () => {
     } finally { await host.close(); }
   });
 
+  it('answers diagnostics from what it holds, mid-launch too, never resolving a launch environment', async () => {
+    const fake = fakeProvider();
+    fake.provider.find = async () => ({ stream: 4321 });
+    const launchEnv = vi.fn(async () => ({}));
+    const host = createBrowserHost({ writeClipboardText: vi.fn(), launchEnv, providers: { 'agent-browser': () => fake.provider } });
+    const browser = { provider: 'agent-browser', binding: { session: 'diag' } } as const;
+    try {
+      const viewer = await openViewer((await host.request({ ...browser, op: 'view', stream: 4321 })).url!);
+      await vi.waitFor(() => expect(fake.views).toHaveLength(1));
+      fake.views[0].sink.shown('t1');
+      fake.views[0].sink.frame(new Uint8Array([0xff, 0xd8, 1]));
+      const first = await host.request({ ...browser, op: 'diagnostics' });
+      expect(first.ok).toBe(true);
+      expect(first.diagnostics).toMatchObject({
+        identity: 'diag', settling: false, provider: { stream: 4321 },
+        sizing: { shownPage: 't1', fixed: null, sync: null },
+        views: [{ upstream: 'open', framesIn: 1, provisional: 1, shownPage: 't1', headed: false }],
+        closedViews: [],
+      });
+
+      viewer.socket.close(4000, 'gone');
+      await vi.waitFor(async () => expect((await host.request({ ...browser, op: 'diagnostics' })).diagnostics?.closedViews).toMatchObject([
+        { stream: 4321, upstream: 'closed', closed: { code: 4000, reason: 'gone', by: 'webview' } },
+      ]));
+
+      // Mid-launch, the provider is not asked.
+      fake.provider.find = async () => ({ gone: 'not running', named: false });
+      fake.gate('stop diag');
+      const launching = host.request({ ...browser, op: 'launch', headed: false, url: 'https://example.com/' });
+      await vi.waitFor(() => expect(fake.calls).toContain('stop diag'));
+      const settling = await host.request({ ...browser, op: 'diagnostics' });
+      expect(settling.diagnostics).toMatchObject({ settling: true, provider: expect.stringContaining('not asked') });
+      fake.release('stop diag');
+      await launching;
+      // A browser no request has resolved an environment for gets none.
+      launchEnv.mockClear();
+      expect((await host.request({ provider: 'agent-browser', binding: { session: 'other' }, op: 'diagnostics' })).ok).toBe(true);
+      expect(launchEnv).not.toHaveBeenCalled();
+      expect((await host.request({ provider: 'agent-browser', binding: {}, op: 'diagnostics' })).ok).toBe(false);
+    } finally { await host.close(); }
+  });
+
   it('finishes a close of a session before a launch into it begins', async () => {
     const fake = fakeProvider();
     const host = createBrowserHost({ writeClipboardText: vi.fn(), providers: { 'agent-browser': () => fake.provider } });

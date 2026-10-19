@@ -20,6 +20,7 @@ import type {
   BrowserExec,
   BrowserExecResult,
   BrowserViewportRequest,
+  BrowserDiagnosticsRequest,
   ResolveBrowserResponse,
   CliOptions,
   CliResult,
@@ -354,6 +355,7 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
   const flags = parsed.value;
 
   if (flags.rest[0] === 'dor-embed-size') return runEmbedSize(d.provider, flags, options);
+  if (flags.rest[0] === 'dor-diagnostics') return runDiagnostics(d.provider, flags, options);
 
   const command = nativeCommand(d.provider, flags.rest);
   const informational = flags.rest.some((arg) => d.informational.has(arg));
@@ -576,6 +578,28 @@ async function runEmbedSize(provider: BrowserAutomationProvider, flags: Resolved
       ? `${result.actual.width} × ${result.actual.height} CSS px @ ${result.actual.dpr} DPR`
       : 'unavailable';
     return { exitCode: 0, stdout: `${result.surfaceId} ${provider} ${result.renderMode}: ${setting} (${result.ready ? 'ready' : 'not ready'}; actual ${actual})\n`, stderr: '' };
+  } catch (error) {
+    return fail(errorMessage(error));
+  }
+}
+
+/** `dor-diagnostics`: the webview's and the host's record of the browser
+ *  Surface the identity flags name, as indented JSON. */
+async function runDiagnostics(provider: BrowserAutomationProvider, flags: ResolvedSessionFlags, options: CliOptions): Promise<CliResult> {
+  const extra = flags.rest.slice(1);
+  if (extra.length) return fail(`dor-diagnostics takes no arguments (got '${extra[0]}')`);
+  const client = requireControlClient(options);
+  if (client instanceof Error) return fail(client.message);
+  try {
+    const result = await client.browserDiagnostics({
+      provider,
+      ...(flags.key === undefined ? flags.surface === undefined ? { session: flags.session! } : { surface: flags.surface } : { key: flags.key }),
+      ...(flags.workspace === undefined ? {} : { workspace: flags.workspace }),
+    } as BrowserDiagnosticsRequest);
+    return { exitCode: 0, stdout: `${JSON.stringify({
+      surface_id: result.surfaceId, provider: result.provider, render_mode: result.renderMode,
+      session: result.session, webview: result.webview, host: result.host,
+    }, null, 2)}\n`, stderr: '' };
   } catch (error) {
     return fail(errorMessage(error));
   }

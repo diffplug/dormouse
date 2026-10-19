@@ -499,6 +499,33 @@ describe('Wall on the Lath engine', () => {
     expect(requests('viewport')).toEqual([expect.objectContaining({ width: 390, height: 844 })]);
   });
 
+  it('answers a browser Surface\'s diagnostics from its controller and its host, and names the right command for another provider', async () => {
+    hostBrowsers({ diagnostics: async () => ({ ok: true, diagnostics: { views: [{ upstream: 'open' }] } }) });
+    await act(async () => root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />));
+    await flush();
+    const id = await dispatchAgentBrowser({ session: 'diag-session', wsPort: 4321 });
+    const control = async (params: Record<string, unknown>) => {
+      let response: { ok: boolean; result?: Record<string, unknown>; error?: string } | undefined;
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+          method: SURFACE_CONTROL_METHODS.browserDiagnostics,
+          params,
+          respond: (value: typeof response) => { response = value; },
+        } }));
+      });
+      await flush();
+      return response;
+    };
+    const answer = await control({ provider: 'agent-browser', surface: id });
+    expect(answer).toMatchObject({ ok: true, result: {
+      surfaceId: id, provider: 'agent-browser', session: 'diag-session',
+      webview: { phase: { k: 'live', stream: 4321 } },
+      host: { views: [{ upstream: 'open' }] },
+    } });
+    expect(await control({ provider: 'playwright', surface: id })).toMatchObject({ ok: false, error: expect.stringContaining(`dor agent-browser --surface ${id}`) });
+    expect(await control({ provider: 'agent-browser', surface: 'surface:a' })).toMatchObject({ ok: false, error: expect.stringContaining('has no browser') });
+  });
+
   // The control socket is a wire protocol, not the CLI: `dor iframe` validates
   // its argument, but anything holding the control token reaches this method
   // directly — and on a host with no iframe proxy the value becomes a raw

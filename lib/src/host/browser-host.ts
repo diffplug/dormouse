@@ -249,6 +249,7 @@ function parseOp(r: Record<string, unknown>): BrowserOp | string {
         : 'invalid viewport';
     }
     case 'measure': return { op: 'measure' };
+    case 'diagnostics': return { op: 'diagnostics' };
     case 'close': {
       const cancels = r.cancels;
       if (cancels === undefined) return { op: 'close' };
@@ -273,6 +274,8 @@ const REQUEST_BUDGET_MS = BROWSER_REQUEST_TIMEOUT_MS - 2_000;
 // hung CLI holds that browser's later requests, and shutdown, only this long.
 const CLOSE_TIMEOUT_MS = 10_000;
 const OPEN_SETTLE_MS = 4_000;
+// How long diagnostics wait on the provider's word on where a browser streams.
+const DIAGNOSTICS_FIND_MS = 3_000;
 const LAUNCH_CLOSE_RESERVE_MS = OPEN_SETTLE_MS + 4_000;
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -290,6 +293,10 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   const viewers = createViewerServer();
   // The viewer sockets open on each browser: a launch or close ends them.
   const views = new Map<string, Set<BrowserView>>();
+  // The last viewer sockets each browser saw close, newest last, for `dor`'s
+  // diagnostics.
+  const closedViews = new Map<string, Record<string, unknown>[]>();
+  const CLOSED_VIEWS_KEPT = 8;
   const captures = createBrowserCaptures();
   const budget = createCaptureBudget();
   let closed = false;
@@ -623,6 +630,9 @@ export function createBrowserHost(deps: BrowserHostDeps) {
         const open = views.get(bound.id);
         open?.delete(view);
         if (open?.size === 0) views.delete(bound.id);
+        const kept = closedViews.get(bound.id) ?? [];
+        kept.push({ stream, closedAt: new Date().toISOString(), ...view.diagnostics() });
+        closedViews.set(bound.id, kept.slice(-CLOSED_VIEWS_KEPT));
       },
       // A popped-out window is never sized with a pane.
       ...(isHeaded ? {} : { sync: sync.view(bound, stream) }),
@@ -652,6 +662,32 @@ export function createBrowserHost(deps: BrowserHostDeps) {
       log(error);
       return undefined;
     }
+  }
+
+  // --- diagnostics ---
+
+  /** What this host holds for `bound`'s browser, and where its provider says
+   *  it streams — unless a launch or close is settling it, when nothing may
+   *  reach the provider. Never starts a browser: `find` is `attach`'s own. */
+  async function diagnose({ p, b, id }: Bound): Promise<Record<string, unknown>> {
+    let found: unknown = 'not asked: a launch or close is settling the browser';
+    if (!settling.has(id) && !closed) {
+      const [answer] = await settleAllWithin([p.find(b).catch((error: unknown) => ({ error: messageOf(error) }))], DIAGNOSTICS_FIND_MS, { error: 'no answer in time' });
+      found = answer;
+    }
+    return {
+      identity: id,
+      settling: settling.has(id),
+      lifecycleBusy: lifecycle.has(id),
+      generation: generations.get(id) ?? 0,
+      headedTracked: headed.has(id),
+      viewportWritePending: viewportWrites.has(id),
+      captureRunning: captures.running(id),
+      provider: found,
+      sizing: sync.diagnostics(id),
+      views: [...views.get(id) ?? []].map((view) => view.diagnostics()),
+      closedViews: closedViews.get(id) ?? [],
+    };
   }
 
   // --- editing ---
@@ -693,6 +729,12 @@ export function createBrowserHost(deps: BrowserHostDeps) {
       if ((r.op === 'launch' || r.op === 'attach') && wasCancelled(r.requestId)) throw new Error('the browser was closed');
       if (r.op === 'close') cancelRequests(r.cancels);
       const p = providerFor(r.provider);
+      // Read-only and answered at once: no launch environment, no queue.
+      if (r.op === 'diagnostics') {
+        if (r.binding.session === undefined) return { ok: false, error: 'a session is required' };
+        const b = p.bind({ ...r.binding, session: r.binding.session });
+        return { ok: true, diagnostics: await diagnose({ p, b, id: p.identity(b) }) };
+      }
       const binding: ProviderBinding = { ...r.binding, session: r.binding.session ?? generateGuiSession() };
       if (deps.launchEnv) {
         // Keyed on the cwd a provider defaults to, so the one it answers with

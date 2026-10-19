@@ -5,8 +5,6 @@ import { type AgentBrowserTab, parseAgentBrowserTabs } from '../../lib/agent-bro
 export type { AgentBrowserTab };
 export { parseAgentBrowserTabs };
 
-const DEBUG_RING_LIMIT = 300;
-
 export type AgentBrowserConnectionState = 'connecting' | 'open' | 'closed' | 'failed';
 
 export interface AgentBrowserStreamStatus {
@@ -43,16 +41,11 @@ export type AgentBrowserConnectionEvent =
   /** Where the host's sync-to-pane stands for `engagement`. */
   | Extract<ViewerState, { type: 'sync' }>
   /** A frame to paint: provisional (CSS resolution) or crisp. */
-  | ({ type: 'frame' } & ViewerFrame)
-  | { type: 'debug'; event: AgentBrowserDebugEvent };
+  | ({ type: 'frame' } & ViewerFrame);
 
-export interface AgentBrowserDebugEvent {
-  ts: number;
-  session: string;
-  stream: number;
-  event: string;
-  data?: unknown;
-}
+/** Where the socket stands: none (a retry is waiting, or the connection is
+ *  disposed), asking the host for a URL, dialing it, or open. */
+export type AgentBrowserSocketStage = 'none' | 'requesting-url' | 'connecting' | 'open';
 
 export interface AgentBrowserConnectionDeps {
   session: string;
@@ -74,6 +67,8 @@ export interface AgentBrowserConnectionDeps {
    *  daemon's screencast either. */
   lastActiveTabId?: string;
   log?: (message: string) => void;
+  /** Record a lifecycle event in the Surface's always-on debug ring. */
+  debug?: (event: string, data?: Record<string, unknown>) => void;
 }
 
 export function createAgentBrowserConnection(deps: AgentBrowserConnectionDeps): AgentBrowserConnection {
@@ -88,9 +83,13 @@ export function createAgentBrowserConnection(deps: AgentBrowserConnectionDeps): 
  */
 export class AgentBrowserConnection {
   private readonly listeners = new Set<(event: AgentBrowserConnectionEvent) => void>();
-  private readonly debugEvents: AgentBrowserDebugEvent[] = [];
   private socket: WebSocket | null = null;
   private retryTimer: ReturnType<typeof setTimeout> | undefined;
+  private retryAt: number | undefined;
+  /** When the stage the socket is in began (`Date.now()`). */
+  private stage: { stage: AgentBrowserSocketStage; since: number } = { stage: 'none', since: Date.now() };
+  /** When the reported active tab last changed, past the baseline. */
+  private activeTabChangedAt: number | undefined;
   private disposed = false;
   private failures = 0;
   private knownTabIds = new Set<string>();
@@ -123,8 +122,32 @@ export class AgentBrowserConnection {
     return this.snap;
   }
 
-  debugSnapshot(): AgentBrowserDebugEvent[] {
-    return [...this.debugEvents];
+  /** The socket's stage and how long it has been in it: what the
+   *  controller's watchdog judges a stuck connection by. */
+  socketStage(): { stage: AgentBrowserSocketStage; sinceMs: number; retryScheduled: boolean } {
+    return { stage: this.stage.stage, sinceMs: Date.now() - this.stage.since, retryScheduled: this.retryTimer !== undefined };
+  }
+
+  /** When the reported active tab last changed, past a socket's baseline. */
+  lastActiveTabChange(): number | undefined {
+    return this.activeTabChangedAt;
+  }
+
+  /** The connection as it stands, for `dor`'s diagnostics. */
+  diagnostics(): Record<string, unknown> {
+    const now = Date.now();
+    return {
+      stream: this.deps.stream,
+      state: this.snap.connection,
+      socket: this.stage.stage,
+      socketStageMs: now - this.stage.since,
+      retryInMs: this.retryAt === undefined ? null : Math.max(0, this.retryAt - now),
+      failures: this.failures,
+      lastError: this.snap.lastError ?? null,
+      activeTabId: this.activeTabId ?? null,
+      activeTabChangedMsAgo: this.activeTabChangedAt === undefined ? null : now - this.activeTabChangedAt,
+      selectIssued: this.selectIssued ?? null,
+    };
   }
 
   send(payload: Record<string, unknown>): void {
@@ -136,26 +159,23 @@ export class AgentBrowserConnection {
     this.disposed = true;
     if (this.retryTimer !== undefined) clearTimeout(this.retryTimer);
     this.retryTimer = undefined;
+    this.retryAt = undefined;
+    this.setStage('none');
     const ws = this.socket;
     this.socket = null;
     ws?.close();
+  }
+
+  private setStage(stage: AgentBrowserSocketStage): void {
+    this.stage = { stage, since: Date.now() };
   }
 
   private emit(event: AgentBrowserConnectionEvent): void {
     for (const listener of this.listeners) listener(event);
   }
 
-  private debug(event: string, data?: unknown): void {
-    const item: AgentBrowserDebugEvent = {
-      ts: Date.now(),
-      session: this.deps.session,
-      stream: this.deps.stream,
-      event,
-      ...(data !== undefined ? { data } : {}),
-    };
-    this.debugEvents.push(item);
-    if (this.debugEvents.length > DEBUG_RING_LIMIT) this.debugEvents.splice(0, this.debugEvents.length - DEBUG_RING_LIMIT);
-    this.emit({ type: 'debug', event: item });
+  private debug(event: string, data?: Record<string, unknown>): void {
+    this.deps.debug?.(event, { stream: this.deps.stream, ...data });
   }
 
   private log(message: string): void {
@@ -167,23 +187,30 @@ export class AgentBrowserConnection {
   }
 
   private async connect(): Promise<void> {
+    this.retryTimer = undefined;
+    this.retryAt = undefined;
+    this.setStage('requesting-url');
+    this.debug('view-url-request');
+    const asked = Date.now();
     let url: string;
     try {
       url = await this.deps.viewUrl();
     } catch (err) {
       if (this.disposed) return;
       const reason = err instanceof Error ? err.message : String(err);
-      this.debug('view-url-error', { error: reason });
+      this.debug('view-url-error', { error: reason, ms: Date.now() - asked });
       this.closed({ code: 0, reason, wasClean: false });
       return;
     }
     if (this.disposed) return;
     this.log(`[ab-panel] connecting viewer ${JSON.stringify({ stream: this.deps.stream })}`);
-    this.debug('connect');
+    this.debug('connect', { ms: Date.now() - asked });
+    this.setStage('connecting');
     const socket = this.socket = new WebSocket(url);
     socket.binaryType = 'arraybuffer';
     socket.onopen = () => {
       this.failures = 0;
+      this.setStage('open');
       this.patch({ connection: 'open' });
       this.log(`[ab-panel] viewer open ${JSON.stringify({ stream: this.deps.stream })}`);
       this.debug('open');
@@ -199,6 +226,7 @@ export class AgentBrowserConnection {
     socket.onclose = (ev) => {
       this.socket = null;
       if (this.disposed) return;
+      this.setStage('none');
       this.closed({ code: ev.code, reason: ev.reason, wasClean: ev.wasClean });
     };
   }
@@ -212,7 +240,11 @@ export class AgentBrowserConnection {
     this.debug('close', data);
     this.emit({ type: 'connection-close', ...data });
     if (this.disposed) return;
-    this.retryTimer = setTimeout(() => void this.connect(), Math.min(1000 * 2 ** this.failures, 10000));
+    const delayMs = Math.min(1000 * 2 ** this.failures, 10000);
+    this.setStage('none');
+    this.retryAt = Date.now() + delayMs;
+    this.debug('retry', { delayMs });
+    this.retryTimer = setTimeout(() => void this.connect(), delayMs);
   }
 
   private handleMessage(raw: unknown): void {
@@ -316,11 +348,13 @@ export class AgentBrowserConnection {
     const before = this.activeTabId;
     if (!active) return;
     this.activeTabId = active.tabId;
+    const changed = before !== undefined && before !== active.tabId;
+    if (changed) this.activeTabChangedAt = Date.now();
     if (this.selectIssued === active.tabId) {
       this.selectIssued = undefined;
       return;
     }
-    if (!allowed || !this.deps.reselectActiveTab || before === undefined || before === active.tabId) return;
+    if (!changed || !allowed || !this.deps.reselectActiveTab) return;
     this.debug('active-tab-changed', { from: before, to: active.tabId });
     this.select(active, 'active-tab-changed');
   }
