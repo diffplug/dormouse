@@ -1,5 +1,5 @@
 Domain: supply-chain
-Rule: `docs/specs/security-supply-chain.md` -> "Disclosure" #2 — or stops failing on a diff
+Rule: S254 — or stops failing on a diff
 Expect: .github/workflows/ci.yml
 Source: synthetic; the CI disclosure check diffs the npm snapshot alone, so a stale Cargo or runtime snapshot passes
 

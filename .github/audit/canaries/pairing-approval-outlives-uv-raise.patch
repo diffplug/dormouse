@@ -1,5 +1,5 @@
 Domain: remote
-Rule: `docs/specs/security-remote.md` -> "Trust boundary" #14 — a pairing verified before the raise is `presence-rejected` when it is approved
+Rule: S190 — a pairing verified before the raise is `presence-rejected` when it is approved
 Expect: lib/src/remote/burrow/burrow-runtime.ts
 Source: reverses part of #1044 (a UV raise while a pairing awaited local approval no longer voided its proof)
 
