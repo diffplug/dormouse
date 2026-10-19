@@ -20,6 +20,7 @@ import {
 import { themeColorProvider } from '../terminal-theme';
 import { applyLiveToolEvents } from '../tool-events';
 import { ToolLaunchLatch } from '../tool-launch-latch';
+import { outputPaints } from '../output-paints';
 import { offerProgramCopy } from '../mouse-selection';
 
 /** This renderer is its host's one realm. */
@@ -514,7 +515,7 @@ export class FakePtyAdapter implements PlatformAdapter {
     for (const text of collectTerminalClipboardOffers(parsed.events)) offerProgramCopy(id, text);
 
     if (parsed.visibleData.length === 0) return;
-    if (!options.skipActivity) this.alertManager.onData(id);
+    if (!options.skipActivity && outputPaints(parsed.visibleData)) this.alertManager.onData(id);
     const textData = textProjectionOf(parsed);
     for (const handler of this.dataHandlers) {
       handler({ id, data: parsed.visibleData, textData });

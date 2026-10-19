@@ -258,3 +258,39 @@ describe('owed alerts during resumed output', () => {
     expect(spoken).not.toHaveBeenCalled();
   });
 });
+
+describe('output that paints nothing', () => {
+  function ownerStream() {
+    return createOwnerPtyStream(ID, {
+      alerts: manager, colorProvider: () => null,
+      onToolEvents() {}, onSemanticEvents() {}, writeResponse() {}, onClipboardOffer() {}, onChunk() {},
+    });
+  }
+  function work(stream: ReturnType<typeof ownerStream>): void {
+    stream.write('working');
+    vi.advanceTimersByTime(1_600);
+    stream.write('still working');
+    stream.write('more');
+    expect(manager.getState(ID).status).toBe('BUSY');
+  }
+  it('shows a deferred report while an idle program polls the cursor position', () => {
+    const stream = ownerStream();
+    work(stream);
+    stream.write('\x1b]9;done\x07');
+    expect(manager.getState(ID)).toMatchObject({ status: 'BUSY', notification: { body: 'done' } });
+    for (let elapsed = 0; elapsed < 10_000; elapsed += 200) {
+      vi.advanceTimersByTime(200);
+      stream.write('\x1b[?6n');
+    }
+    expect(manager.getState(ID).status).toBe('ALERT_RINGING');
+  });
+  it('never wakes an idle watched command for frames that only move the cursor', () => {
+    const stream = ownerStream();
+    for (let elapsed = 0; elapsed < 3_000; elapsed += 50) {
+      vi.advanceTimersByTime(50);
+      stream.write('\x1b[?2026h\x1b[39m\x1b[49m\x1b[0m\x1b[51;3H\x1b[?25h\x1b[?2026l');
+    }
+    settle();
+    expect(manager.getState(ID)).toMatchObject({ status: 'NOTHING_TO_SHOW', episode: null });
+  });
+});

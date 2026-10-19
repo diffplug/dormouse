@@ -14,6 +14,7 @@ import {
 } from '../lib/terminal-protocol';
 import type { TerminalSemanticEvent } from '../lib/terminal-state';
 import { ToolLaunchLatch } from '../lib/tool-launch-latch';
+import { outputPaints } from '../lib/output-paints';
 import { stripMouseReportsFromInput } from '../lib/terminal-report-filter';
 
 /**
@@ -53,8 +54,8 @@ export interface OwnerPtyStream extends ProcessedPtyStream {
  * One PTY generation's parse site, feeding the alerts and the renderer from the
  * same pass: per batch, reports and command boundaries to the manager in stream
  * order (`applyTerminalEvents`), then the Tool and semantic events, then the
- * replies; then each visible chunk counts as the Session working, ahead of the
- * renderer (`docs/specs/terminal-escapes.md` → "Parsing location").
+ * replies; then each chunk that paints counts as the Session working, ahead of
+ * the renderer (`docs/specs/terminal-escapes.md` → "Parsing location").
  */
 export function createOwnerPtyStream(id: string, options: OwnerPtyStreamOptions): OwnerPtyStream {
   const launch = new ToolLaunchLatch();
@@ -69,7 +70,7 @@ export function createOwnerPtyStream(id: string, options: OwnerPtyStreamOptions)
       for (const text of collectTerminalClipboardOffers(events)) options.onClipboardOffer(text);
     },
     onChunk(chunk) {
-      options.alerts.onData(id);
+      if (outputPaints(chunk.data)) options.alerts.onData(id);
       options.onChunk(chunk);
     },
   });

@@ -81,6 +81,24 @@ describe('FakePtyAdapter', () => {
     });
   });
 
+  it('counts only output that paints as the program working', () => {
+    const { adapter } = createAdapter();
+    const alertEvents: { status: string }[] = [];
+    adapter.onAlertState((detail) => alertEvents.push(detail));
+    adapter.spawnPty('t1');
+    adapter.sendOutput('t1', 'working');
+    vi.advanceTimersByTime(1_600);
+    adapter.sendOutput('t1', 'still working');
+    adapter.sendOutput('t1', 'more');
+    adapter.sendOutput('t1', '\x1b]9;Build finished\x07');
+    expect(alertEvents.at(-1)?.status).not.toBe('ALERT_RINGING');
+    for (let elapsed = 0; elapsed < 10_000; elapsed += 200) {
+      vi.advanceTimersByTime(200);
+      adapter.sendOutput('t1', '\x1b[?6n');
+    }
+    expect(alertEvents.at(-1)).toMatchObject({ status: 'ALERT_RINGING' });
+  });
+
   it('judges a report after the command boundary written before it', async () => {
     const { adapter } = createAdapter();
     adapter.spawnPty('t1');
