@@ -190,7 +190,7 @@ Source of truth: `SELF_HOST_DELTA` in `website/scripts/generate-docs.js`; `SelfH
 
 `docs/specs/security.md` stays canonical in `docs/specs/`. `SECURITY_DELTA` withholds its `#` title and front-matter blockquote and nothing else.
 
-**Must gather the guarantees table from the domain specs, never write it in `docs/specs/security.md`:** an audited section of a spec in `SECURITY_GUARANTEE_SPECS` states its guarantees in one `| Guarantee | Feature | Pinned by |` table, and `withGuarantees` closes the "Guarantees" section with every row, in that list's order, its Rule linking the section. `guaranteeRows` fails the build on a table in a section with no `FAIL IF` line, two in one section, or a row without three cells; `gatherGuarantees` on one in any other spec.
+**Must gather the guarantees table from the domain specs, never write it in `docs/specs/security.md`:** an audited section of a spec in `SECURITY_GUARANTEE_SPECS` states its guarantees in one `| Guarantee | Feature | Pinned by |` table, and `withGuarantees` closes the "Guarantees" section with every row, in that list's order, each led by its section. `guaranteeRows` fails the build on a table in a section with no `FAIL IF` line, two in one section, or a row without three cells; `gatherGuarantees` on one in any other spec.
 
 **Must** publish every section, so **the spec may carry no `## Future` heading and no `Reserved:` paragraph**; `checkSecurityFold` pins that, and staged material has to be withheld by a delta rule before it can exist there.
 

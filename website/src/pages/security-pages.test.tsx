@@ -7,6 +7,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import security from "../data/docs.security.json";
+import { textOf, type InlineNode } from "../components/MarkdownDocument";
 import { sitePath } from "../lib/site-meta";
 import SecurityDocs from "./SecurityDocs";
 import SelfHostDocs from "./SelfHostDocs";
@@ -116,9 +117,13 @@ it("/security closes how the guarantees are checked with the canary recall and t
   expect(main.indexOf("<h2", heading)).toBeGreaterThan(index);
 });
 
-/** Each table in `html`: its header cells and its rows' cells, as text. */
+/** Each table in `html`: its header cells and its rows' cells, as plain text. */
 function tablesIn(html: string): { header: string[]; rows: string[][] }[] {
-  const text = (cell: string) => cell.replace(/<[^>]+>/g, "").trim();
+  const text = (cell: string) =>
+    cell
+      .replace(/<[^>]+>/g, "")
+      .replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&")
+      .trim();
   const cells = (row: string, tag: string) =>
     [...row.matchAll(new RegExp(`<${tag}\\b[^>]*>(.*?)</${tag}>`, "gs"))].map(([, cell]) => text(cell));
   return [...html.matchAll(/<table\b.*?<\/table>/gs)].map(([table]) => {
@@ -160,19 +165,15 @@ describe("feature tags", () => {
   }
 
   /**
-   * Each guarantee row /security shows, as its cell reads there (Rule, then
-   * Guarantee), with the features it names; none is every install.
+   * Each guarantee row /security shows, as its cell reads there (led by the
+   * section that holds it), with the features it names; none is every install.
    */
   const rowFeatures = (() => {
-    const text = (nodes: unknown): string =>
-      Array.isArray(nodes) ? nodes.map((n) => (n as { value?: string }).value ?? text((n as { children?: unknown }).children)).join("") : "";
-    const audiences = security.audiences as Record<string, { guarantees: { rows: unknown[][] } }>;
+    const audiences = security.audiences as Record<string, { guarantees: { rows: InlineNode[][][] } }>;
     return PAGES[0].audiences
       .flatMap((name) => audiences[name].guarantees.rows)
-      .map((row) => ({ cell: `${text(row[2])} ${text(row[0])}`, features: text(row[1]).split(", ").filter(Boolean) }));
+      .map((row) => ({ cell: textOf(row[0]), features: textOf(row[1]).split(", ").filter(Boolean) }));
   })();
-  const decode = (html: string) =>
-    html.replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
 
   it("/security groups each guarantee under every feature it names, every install first", () => {
     const main = renderMain(<SecurityDocs />);
@@ -184,9 +185,9 @@ describe("feature tags", () => {
       const [table] = tablesIn(groups[i].body);
       expect(table.header).toEqual(["Guarantee", "Pinned by"]);
       const expected = rowFeatures.filter((row) => (i === 0 ? row.features.length === 0 : row.features.includes(name)));
-      expect(new Set(table.rows.map((row) => decode(row[0]))), name).toEqual(new Set(expected.map((row) => row.cell)));
+      expect(new Set(table.rows.map((row) => row[0])), name).toEqual(new Set(expected.map((row) => row.cell)));
       expect(table.rows).toHaveLength(expected.length);
-      // The Rule leads its row as a link to the section that holds it.
+      // Each row opens with a link to the section that holds it.
       expect(groups[i].body).toMatch(/<td\b[^>]*><a href="https:\/\/github\.com\/diffplug\/dormouse\/blob\/main\/docs\/specs\/security-/);
     }
     // A row naming two features appears under both.

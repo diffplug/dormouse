@@ -21,7 +21,6 @@ import {
   securityCoverage,
   securityFeatures,
   withGuarantees,
-  withRuleLeading,
   withoutFeatures,
 } from './generate-docs.js';
 import { createSlugger, inlineToText, parseMarkdown, visit } from './docs-parser.js';
@@ -285,12 +284,12 @@ describe('security spec', () => {
     expect(narrowed).toHaveLength(data.security.blocks.length);
   });
 
-  it('groups the guarantees under a subheading per feature, each row led by its Rule', () => {
+  it('groups the guarantees under a subheading per feature', () => {
     const blocks = parseMarkdown(
       [
         '## Guarantees', '', 'Intro.', '',
-        '| Guarantee | Feature | Rule | Pinned by |', '| --- | --- | --- | --- |',
-        '| g1 |  | r1 | p1 |', '| g2 | A, B | r2 | p2 |', '| g3 | B | r3 | p3 |', '',
+        '| Guarantee | Feature | Pinned by |', '| --- | --- | --- |',
+        '| g1 |  | p1 |', '| g2 | A, B | p2 |', '| g3 | B | p3 |', '',
         '## Next', '', 'After.',
       ].join('\n'),
       { slug: createSlugger() },
@@ -305,13 +304,14 @@ describe('security spec', () => {
     const tables = groups.filter((b) => b.type === 'table');
     expect(tables.map((table) => table.header.map((cell) => inlineToText(cell)))).toEqual(Array(3).fill(['Guarantee', 'Pinned by']));
     expect(tables.map((table) => table.rows.map((row) => row.map((cell) => inlineToText(cell))))).toEqual([
-      [['r1 g1', 'p1']],
-      [['r2 g2', 'p2']],
-      [['r2 g2', 'p2'], ['r3 g3', 'p3']],
+      [['g1', 'p1']],
+      [['g2', 'p2']],
+      [['g2', 'p2'], ['g3', 'p3']],
     ]);
-    const clash = parseMarkdown('## Guarantees\n\n| Guarantee | Feature | Rule | Pinned by |\n| --- | --- | --- | --- |\n| g | Next | r | p |\n\n## Next\n', { slug: createSlugger() }).blocks;
+    const clash = parseMarkdown('## Guarantees\n\n| Guarantee | Feature | Pinned by |\n| --- | --- | --- |\n| g | Next | p |\n\n## Next\n', { slug: createSlugger() }).blocks;
     expect(() => groupGuarantees(clash, ['Next'])).toThrow(/"Next" guarantees would share #next/);
-    expect(() => withRuleLeading({ ...blocks[2], header: blocks[2].header.slice(0, 2) })).toThrow(/no "Rule" column/);
+    expect(() => groupGuarantees(blocks.filter((b) => b.type !== 'table'), ['A'])).toThrow(/no "Guarantees" table to group/);
+    expect(() => groupGuarantees(blocks.filter((b) => b.type !== 'heading' || b.text !== 'Guarantees'), ['A'])).toThrow(/no heading matches "Guarantees"/);
   });
 
   it('refuses an entry whose links name no audience, or two', () => {
@@ -393,11 +393,11 @@ describe('security spec', () => {
 
   it('gathers each domain spec\'s guarantees under the section that holds them', () => {
     // docs/specs/website-docs.md -> `/security` spec: a guarantee is stated
-    // once, beside its checks; the page's table and its Rule cells are built.
+    // once, beside its checks; the page's table, each row led by its section, is built.
     const table = ['| Guarantee | Feature | Pinned by |', '| --- | --- | --- |'];
     const spec = (...lines) => ['# Spec', '', ...lines].join('\n');
     const SPEC = spec(
-      '## Alpha', '', ...table, '| **a** see [beta](#beta) |  | `x/a.test.js` |', '| **b** | One | `x/b.test.js` |', '',
+      '## Alpha', '', ...table, '| **a** see [beta](#beta) |  | `x/a.test.js` |', '|**b**|One|`x/b\\|c.test.js`|', '',
       '- **FAIL IF** `S1` one.', '',
       '### Nested', '', '- **FAIL IF** `S2` two.', '',
       '## Beta', '', '- **FAIL IF** `S3` three.', '',
@@ -405,8 +405,8 @@ describe('security spec', () => {
     );
     expect(guaranteeRows(SPEC, 'docs/specs/security-x.md')).toEqual({
       rows: [
-        '| **a** see [beta](./security-x.md#beta) |  | [Alpha](./security-x.md#alpha) | `x/a.test.js` |',
-        '| **b** | One | [Alpha](./security-x.md#alpha) | `x/b.test.js` |',
+        '| [Alpha](./security-x.md#alpha) **a** see [beta](./security-x.md#beta) |  | `x/a.test.js` |',
+        '| [Alpha](./security-x.md#alpha) **b** | One | `x/b\\|c.test.js` |',
       ],
       held: ['alpha', 'nested'],
     });
@@ -417,6 +417,9 @@ describe('security spec', () => {
       /split across two tables/,
     );
     expect(() => guaranteeRows(spec('## Alpha', '', ...table, '| **a** | t |', '', '- **FAIL IF** `S1` one.'), 'f.md')).toThrow(/has 2 cells, not 3/);
+    expect(() => guaranteeRows(spec('## Alpha', '', table[0], '| **a** |  | t |', '', '- **FAIL IF** `S1` one.'), 'f.md')).toThrow(/a header with no delimiter row/);
+    // A header spaced differently is still a guarantee table, read as the site's parser reads it.
+    expect(guaranteeRows(spec('## Alpha', '', '|Guarantee|Feature|Pinned by|', table[1], '| **a** |  | t |', '', '- **FAIL IF** `S1` one.'), 'f.md').rows).toHaveLength(1);
   });
 
   it('fails on a guarantee in a spec /security does not gather from', async () => {
@@ -428,7 +431,7 @@ describe('security spec', () => {
     }
     const { rows, held } = await gatherGuarantees(root);
     expect(rows).toHaveLength(5);
-    expect(rows[0]).toBe('| **g** |  | [A](./security-local.md#a) | t |');
+    expect(rows[0]).toBe('| [A](./security-local.md#a) **g** |  | t |');
     expect(held).toContain(`${REPO_BLOB_BASE}/docs/specs/security-ci.md#a`);
     await writeText(join(root, 'docs/specs/layout.md'), audited);
     await expect(gatherGuarantees(root)).rejects.toThrow(/docs\/specs\/layout\.md: carries guarantees/);
@@ -436,8 +439,8 @@ describe('security spec', () => {
 
   it('closes the spec\'s "Guarantees" section with the gathered table, and refuses one written there', () => {
     const md = '# S\n\n## Guarantees\n\nIntro.\n\n## Next\n\nText.\n';
-    expect(withGuarantees(md, ['| g | | r | p |'])).toBe(
-      '# S\n\n## Guarantees\n\nIntro.\n\n| Guarantee | Feature | Rule | Pinned by |\n| --- | --- | --- | --- |\n| g | | r | p |\n\n## Next\n\nText.\n',
+    expect(withGuarantees(md, ['| g | | p |'])).toBe(
+      '# S\n\n## Guarantees\n\nIntro.\n\n| Guarantee | Feature | Pinned by |\n| --- | --- | --- |\n| g | | p |\n\n## Next\n\nText.\n',
     );
     expect(() => withGuarantees(md.replace('Intro.', '| Guarantee | Rule |'), ['| g |'])).toThrow(/belongs beside its checks/);
     expect(() => withGuarantees(md, [])).toThrow(/no domain spec states a guarantee/);
@@ -464,7 +467,8 @@ describe('security spec', () => {
     const { rows } = await gatherGuarantees();
     const guarantees = data.security.blocks.filter((b) => b.type === 'table').find((b) => inlineToText(b.header[0]) === 'Guarantee');
     expect(guarantees.rows).toHaveLength(rows.length);
-    expect(guarantees.rows.map((row) => inlineToText(row[2]))).toEqual(rows.map((row) => row.split(' | ')[2].replace(/^\[([^\]]*)\].*$/, '$1')));
+    const [gathered] = parseMarkdown(['| Guarantee | Feature | Pinned by |', '| --- | --- | --- |', ...rows].join('\n'), { slug: createSlugger() }).blocks;
+    expect(guarantees.rows.map((row) => inlineToText(row[0]))).toEqual(gathered.rows.map((row) => inlineToText(row[0])));
   });
 
   it('links each path a guarantee is pinned by to GitHub, and fails on one that does not exist', () => {

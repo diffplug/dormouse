@@ -70,7 +70,7 @@ export default function SelfHostDocs() {
         </a>
         .
       </p>
-      <MarkdownDocument blocks={[security.selfHostGuarantees as BlockNode]} columnWeights={securityColumnWeights} />
+      <MarkdownDocument blocks={[MODEL.guarantees as BlockNode]} columnWeights={securityColumnWeights} />
       {MODEL_SECTIONS.map(({ id, text, block }) => (
         <div key={id}>
           <AnchoredHeading id={id} depth={3}>

@@ -174,3 +174,5 @@ export const TABLE_ROW_CLASS = "border-b border-[var(--color-text)]/10";
  *  head without a second colour level doing the work. */
 export const TABLE_HEAD_ROW_CLASS = "border-b border-[var(--color-text)]/25";
 export const TH_CLASS = "py-2 pr-4 font-display font-normal whitespace-nowrap";
+/** A header cell of a table with weighted columns, which wraps to hold its share. */
+export const TH_WRAP_CLASS = "py-2 pr-4 font-display font-normal whitespace-normal";

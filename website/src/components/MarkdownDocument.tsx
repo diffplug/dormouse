@@ -20,6 +20,7 @@ import {
   TABLE_HEAD_ROW_CLASS,
   TABLE_ROW_CLASS,
   TH_CLASS,
+  TH_WRAP_CLASS,
   TABLE_WRAP_CLASS,
 } from "./docs-tokens";
 
@@ -87,7 +88,7 @@ function CodeSpan({ value }: { value: string }) {
 }
 
 /** A cell's plain text: what a column-weight lookup keys on. */
-function textOf(nodes: InlineNode[]): string {
+export function textOf(nodes: InlineNode[]): string {
   return nodes.map((node) => ("value" in node ? node.value : "children" in node ? textOf(node.children) : "")).join("");
 }
 
@@ -248,7 +249,7 @@ function Block({ node }: { node: BlockNode }): ReactNode {
             <thead>
               <tr className={TABLE_HEAD_ROW_CLASS}>
                 {node.header.map((cell, i) => (
-                  <th key={i} className={weights ? TH_CLASS.replace("whitespace-nowrap", "whitespace-normal") : TH_CLASS}>
+                  <th key={i} className={weights ? TH_WRAP_CLASS : TH_CLASS}>
                     <Inline nodes={cell} />
                   </th>
                 ))}

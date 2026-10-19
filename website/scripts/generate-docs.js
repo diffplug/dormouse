@@ -27,9 +27,11 @@ import {
   createSlugger,
   hasScheme,
   inlineToText,
+  isDelimiterRow,
   isProtocolRelative,
   parseMarkdown,
   slugify,
+  splitCells,
   visit,
 } from './docs-parser.js';
 import {
@@ -685,7 +687,7 @@ export function securityFeatures(page) {
   const used = new Set();
   const out = { names };
   for (const { key, title, block, entries } of securitySections(page)) {
-    const column = entries === 'rows' ? featureColumn(block, title) : null;
+    const column = entries === 'rows' ? columnOf(block, SECURITY_FEATURE_COLUMN, title) : null;
     out[key] = block[entries].map((entry, i) => {
       const label = `/security: "${title}" entry ${i + 1}`;
       const tags = featureTagsOf(entry, column, label);
@@ -703,10 +705,17 @@ export function securityFeatures(page) {
   return out;
 }
 
-function featureColumn(table, title) {
-  const column = table.header.findIndex((cell) => inlineToText(cell).trim() === SECURITY_FEATURE_COLUMN);
-  if (column === -1) throw new Error(`/security: "${title}" has no "${SECURITY_FEATURE_COLUMN}" column`);
+/** The index of `table`'s column headed `name`; a missing one fails the build. */
+function columnOf(table, name, title) {
+  const column = table.header.findIndex((cell) => inlineToText(cell).trim() === name);
+  if (column === -1) throw new Error(`/security: "${title}" has no "${name}" column`);
   return column;
+}
+
+/** `table` without its column at `column`. */
+function withoutColumn(table, column) {
+  const drop = (cells) => cells.filter((_, i) => i !== column);
+  return { ...table, align: drop(table.align), header: drop(table.header), rows: table.rows.map(drop) };
 }
 
 /** The emphasis a bullet opens with, or null: its feature tag. */
@@ -759,8 +768,7 @@ const SECURITY_PINNED_COLUMN = 'Pinned by';
  */
 export function linkPinnedBy(page) {
   const { title, block } = securitySections(page).find(({ key }) => key === 'guarantees');
-  const column = block.header.findIndex((cell) => inlineToText(cell).trim() === SECURITY_PINNED_COLUMN);
-  if (column === -1) throw new Error(`/security: "${title}" has no "${SECURITY_PINNED_COLUMN}" column`);
+  const column = columnOf(block, SECURITY_PINNED_COLUMN, title);
   for (const row of block.rows) {
     row[column] = row[column].map((node) => {
       if (node.type !== 'code' || !node.value.includes('/')) return node;
@@ -779,8 +787,6 @@ export function linkPinnedBy(page) {
  */
 export function withoutFeatures(sections) {
   const { guarantees, notDefended, knownGaps } = sections;
-  const column = featureColumn(guarantees, 'Guarantees');
-  const drop = (cells) => cells.filter((_, i) => i !== column);
   const untag = (item) => {
     if (!featureLeadOf(item)) return item;
     const [first, ...rest] = item.children;
@@ -791,25 +797,10 @@ export function withoutFeatures(sections) {
   };
   return {
     ...sections,
-    guarantees: { ...guarantees, align: drop(guarantees.align), header: drop(guarantees.header), rows: guarantees.rows.map(drop) },
+    guarantees: withoutColumn(guarantees, columnOf(guarantees, SECURITY_FEATURE_COLUMN, 'Guarantees')),
     notDefended: { ...notDefended, items: notDefended.items.map(untag) },
     knownGaps: { ...knownGaps, items: knownGaps.items.map(untag) },
   };
-}
-
-/** The column linking the section that holds each guarantee. */
-const SECURITY_RULE_COLUMN = 'Rule';
-
-/**
- * A guarantees table with each row's Rule leading its Guarantee cell, and no
- * Rule column: the section a promise sits in reads as its name.
- */
-export function withRuleLeading(table) {
-  const column = table.header.findIndex((cell) => inlineToText(cell).trim() === SECURITY_RULE_COLUMN);
-  if (column === -1) throw new Error(`/security: "Guarantees" has no "${SECURITY_RULE_COLUMN}" column`);
-  const drop = (cells) => cells.filter((_, i) => i !== column);
-  const lead = (row) => drop(row.map((cell, i) => (i === 0 ? [...row[column], { type: 'text', value: ' ' }, ...cell] : cell)));
-  return { ...table, align: drop(table.align), header: drop(table.header), rows: table.rows.map(lead) };
 }
 
 /** The group a guarantee that names no feature falls in. */
@@ -819,27 +810,25 @@ const SECURITY_BASELINE_GROUP = 'Every install';
  * `blocks` with the "Guarantees" table split under a subheading per feature,
  * {@link SECURITY_BASELINE_GROUP} first, then `features` in the feature
  * table's order: a row under each feature it names, or the baseline when it
- * names none, the Rule leading each row ({@link withRuleLeading}) and no
- * Feature column. A feature no row names on this page gets no subheading.
+ * names none, with no Feature column. A feature no row names on this page gets
+ * no subheading.
  */
 export function groupGuarantees(blocks, features) {
-  const at = blocks.findIndex((b) => b.type === 'heading' && b.text === 'Guarantees');
-  const end = blocks.findIndex((b, i) => i > at && b.type === 'heading' && b.depth <= blocks[at].depth);
-  const index = blocks.findIndex((b, i) => i > at && (end === -1 || i < end) && b.type === 'table');
-  if (at === -1 || index === -1) throw new Error('/security: no "Guarantees" table to group');
-  const table = blocks[index];
-  const column = featureColumn(table, 'Guarantees');
+  const heading = findExactlyOneHeading(blocks.filter((b) => b.type === 'heading'), (h) => h.text === 'Guarantees', 'Guarantees');
+  const table = sectionBlocks(blocks, heading).find((b) => b.type === 'table');
+  if (!table) throw new Error('/security: no "Guarantees" table to group');
+  const column = columnOf(table, SECURITY_FEATURE_COLUMN, 'Guarantees');
   const tags = table.rows.map((row, i) => featureTagsOf(row, column, `/security: "Guarantees" entry ${i + 1}`));
-  const drop = (cells) => cells.filter((_, i) => i !== column);
-  const shown = withRuleLeading({ ...table, align: drop(table.align), header: drop(table.header), rows: table.rows.map(drop) });
+  const shown = withoutColumn(table, column);
   const ids = new Set(headingsOf(blocks).map((h) => h.id));
   const groups = [SECURITY_BASELINE_GROUP, ...features].flatMap((name) => {
     const rows = shown.rows.filter((_, i) => (name === SECURITY_BASELINE_GROUP ? tags[i].length === 0 : tags[i].includes(name)));
     if (rows.length === 0) return [];
     const id = slugify(name);
     if (ids.has(id)) throw new Error(`/security: the "${name}" guarantees would share #${id} with another heading`);
-    return [{ type: 'heading', depth: blocks[at].depth + 1, id, text: name, children: [{ type: 'text', value: name }] }, { ...shown, rows }];
+    return [{ type: 'heading', depth: heading.depth + 1, id, text: name, children: [{ type: 'text', value: name }] }, { ...shown, rows }];
   });
+  const index = blocks.indexOf(table);
   return [...blocks.slice(0, index), ...groups, ...blocks.slice(index + 1)];
 }
 
@@ -854,10 +843,9 @@ export function groupGuarantees(blocks, features) {
  * keeps every entry. `supplyChain` is `/supply-chain`'s audience without its
  * feature tags: that page splits its inventory by product and has no feature
  * table to read them against. `features` is the feature table's vocabulary,
- * every entry's tags checked against it ({@link securityFeatures}). The
- * pages' guarantees lead each row with its Rule ({@link withRuleLeading}), and
- * `/security` groups its own by feature ({@link groupGuarantees});
- * `selfHostGuarantees` is `/self-host`'s.
+ * every entry's tags checked against it ({@link securityFeatures}). Each
+ * guarantee opens with a link to the section holding it ({@link guaranteeRows}),
+ * and `/security` groups its own by feature ({@link groupGuarantees}).
  */
 const buildSecurity = async () => {
   const guarantees = await gatherGuarantees();
@@ -873,39 +861,34 @@ const buildSecurity = async () => {
   const index = await auditIndex();
   securityCoverage(index, guarantees.held);
   const { names } = securityFeatures(page);
-  const supplyChain = withoutFeatures(audiences['supply-chain']);
   return {
     ...page,
     features: names,
     audiences,
     pageBlocks: groupGuarantees(audienceBlocks(page, audiences, SECURITY_PAGE_AUDIENCES), names),
-    selfHostGuarantees: withRuleLeading(audiences['self-host'].guarantees),
-    supplyChain: { ...supplyChain, guarantees: withRuleLeading(supplyChain.guarantees) },
+    supplyChain: withoutFeatures(audiences['supply-chain']),
     auditIndex: index,
   };
 };
 
 /**
  * Each prose line of a security spec above its fold, with the heading it sits
- * under (null above the first) and that heading's GitHub anchor. GitHub
- * suffixes a repeated anchor with its count, as it renders the file.
+ * under (null above the first), that heading's depth, and its GitHub anchor.
+ * GitHub suffixes a repeated anchor with its count, as it renders the file.
  */
 function* specSectionLines(text) {
   const seen = new Map();
   let section = null;
-  const lines = proseLines(text);
-  for (let i = 0; i < lines.length; i++) {
-    const heading = lines[i].match(/^(#{2,6})\s+(.+?)\s*$/);
+  for (const line of proseLines(text)) {
+    const heading = line.match(/^(#{2,6})\s+(.+?)\s*$/);
     if (heading) {
       if (/^(\d+\.\s*)?Future$/i.test(heading[2])) return;
       const base = githubSlug(heading[2]);
       const n = seen.get(base) ?? 0;
       seen.set(base, n + 1);
       section = { heading: heading[2], depth: heading[1].length, anchor: n === 0 ? base : `${base}-${n}` };
-      yield { line: lines[i], section, isHeading: true, lines, i };
-    } else {
-      yield { line: lines[i], section, isHeading: false, lines, i };
     }
+    yield { line, section, isHeading: Boolean(heading) };
   }
 }
 
@@ -941,47 +924,58 @@ export const SECURITY_GUARANTEE_SPECS = [
   'docs/specs/security-ci.md',
 ];
 
-/** The header of a domain spec's guarantee table, and of the table `/security` gathers them into. */
-const GUARANTEE_HEADER = '| Guarantee | Feature | Pinned by |';
-const GATHERED_HEADER = '| Guarantee | Feature | Rule | Pinned by |';
+/** The columns of a domain spec's guarantee table, and of the table `/security` gathers them into. */
+const GUARANTEE_COLUMNS = ['Guarantee', 'Feature', 'Pinned by'];
+
+/** Whether `line` is a guarantee table's header row, read the way the site's parser reads a row. */
+const isGuaranteeHeader = (line) => line.includes('|') && splitCells(line).map((cell) => cell.trim()).join('|') === GUARANTEE_COLUMNS.join('|');
 
 /**
  * One domain spec's guarantee rows as rows of `/security`'s table, and the
- * anchors of the sections they hold. Each table headed {@link GUARANTEE_HEADER}
- * holds the section it sits under and every section nested in it; its rows
- * become `/security`'s with a Rule cell linking that section, their own
- * section links rebased onto docs/specs/security.md, which sits beside every
- * domain spec. A table in a section with no `FAIL IF` line, two in one
- * section, or a row without three cells fails the build: a guarantee states
- * what the checks beside it hold.
+ * anchors of the sections they hold. Each table headed {@link GUARANTEE_COLUMNS}
+ * holds the section it sits under and every section nested in it; each of its
+ * rows opens with a link to that section, its own section links rebased onto
+ * docs/specs/security.md, which sits beside every domain spec. A table in a
+ * section with no `FAIL IF` line, two in one section, one with no delimiter
+ * row, or a row without three cells fails the build: a guarantee states what
+ * the checks beside it hold.
  */
 export function guaranteeRows(text, path) {
   const audited = new Set(auditedSections(text, path).map((section) => section.anchor));
   const file = posix.basename(path);
+  const rebase = (cell) => cell.trim().replace(/\|/g, '\\|').replace(/\]\(#/g, `](./${file}#`);
   const tabled = new Set();
   const rows = [];
   const held = [];
   let holder = null;
-  for (const { line, section, isHeading, lines, i } of specSectionLines(text)) {
+  let table = null;
+  for (const { line, section, isHeading } of specSectionLines(text)) {
+    if (table && !table.delimited) {
+      if (!isDelimiterRow(line)) throw new Error(`${table.label}: a header with no delimiter row`);
+      table.delimited = true;
+      continue;
+    }
+    if (table && line.startsWith('|')) {
+      const cells = splitCells(line);
+      if (cells.length !== GUARANTEE_COLUMNS.length) throw new Error(`${table.label}: row "${line}" has ${cells.length} cells, not 3`);
+      const [guarantee, feature, pins] = cells.map(rebase);
+      rows.push(`| ${table.rule} ${guarantee} | ${feature} | ${pins} |`);
+      continue;
+    }
+    table = null;
     if (isHeading) {
       if (holder && section.depth <= holder.depth) holder = null;
       if (holder) held.push(section.anchor);
       continue;
     }
-    if (line.trim() !== GUARANTEE_HEADER) continue;
+    if (!isGuaranteeHeader(line)) continue;
     const label = `${path}: the guarantees under "${section?.heading}"`;
     if (!section || !audited.has(section.anchor)) throw new Error(`${label} sit in a section with no FAIL IF line`);
     if (tabled.has(section.anchor)) throw new Error(`${label} are split across two tables`);
     tabled.add(section.anchor);
     holder ??= section;
     held.push(section.anchor);
-    const rule = `[${section.heading}](./${file}#${section.anchor})`;
-    for (let r = i + 2; r < lines.length && lines[r].startsWith('|'); r++) {
-      const cells = lines[r].trim().replace(/^\|\s?|\s?\|$/g, '').split(/(?<!\\)\s\|\s/);
-      if (cells.length !== 3) throw new Error(`${label}: row "${lines[r]}" has ${cells.length} cells, not 3`);
-      const [guarantee, feature, pins] = cells.map((cell) => cell.replace(/\]\(#/g, `](./${file}#`));
-      rows.push(`| ${guarantee} | ${feature} | ${rule} | ${pins} |`);
-    }
+    table = { label, rule: `[${section.heading}](./${file}#${section.anchor})`, delimited: false };
   }
   return { rows, held };
 }
@@ -995,7 +989,7 @@ export async function gatherGuarantees(root = repoRoot) {
   const specs = (await readdir(join(root, 'docs/specs'))).filter((name) => name.endsWith('.md')).map((name) => `docs/specs/${name}`);
   const texts = new Map(await Promise.all(specs.map(async (path) => [path, await readFile(join(root, path), 'utf8')])));
   for (const [path, text] of texts) {
-    if (!SECURITY_GUARANTEE_SPECS.includes(path) && proseLines(text).some((line) => line.trim() === GUARANTEE_HEADER)) {
+    if (!SECURITY_GUARANTEE_SPECS.includes(path) && proseLines(text).some(isGuaranteeHeader)) {
       throw new Error(`${path}: carries guarantees, but is not one of SECURITY_GUARANTEE_SPECS`);
     }
   }
@@ -1021,7 +1015,7 @@ export function withGuarantees(markdown, rows) {
   const section = markdown.slice(start, end === -1 ? undefined : end);
   if (section.includes('| Guarantee |')) throw new Error('/security: "Guarantees" writes a table; a guarantee belongs beside its checks');
   if (rows.length === 0) throw new Error('/security: no domain spec states a guarantee');
-  const table = [GATHERED_HEADER, '| --- | --- | --- | --- |', ...rows].join('\n');
+  const table = [`| ${GUARANTEE_COLUMNS.join(' | ')} |`, `|${' --- |'.repeat(GUARANTEE_COLUMNS.length)}`, ...rows].join('\n');
   return `${markdown.slice(0, start)}${section.replace(/\n*$/, '')}\n\n${table}\n${end === -1 ? '' : `\n${markdown.slice(end + 1)}`}`;
 }
 
