@@ -25,6 +25,7 @@ describe('hitTest — center region', () => {
     // b swapped onto a's slot.
     expect(c.previewRect).toEqual(movePreview(t, 'b', { kind: 'swap', leaf: 'a' }));
     expect(c.previewRect).toEqual(R(0, 0, 500, 600));
+    expect(c.swapRect).toEqual(R(500, 0, 500, 600)); // a takes b's slot
   });
 
   it('never swaps a leaf with itself (over the dragged leaf center → no candidates)', () => {

@@ -17,6 +17,8 @@ export type DropCandidate = {
   scopeRect: Rect;
   /** Leaves in that scope, not counting the dragged one. */
   scopeLeafCount: number;
+  /** For a swap, where the hovered leaf lands: the dragged leaf's slot. */
+  swapRect?: Rect;
 };
 
 /** One boundary line a slide moves along. Positions run along the line (x for
@@ -278,7 +280,9 @@ export function hitTest(
     const target: DropTarget = { kind: 'swap', leaf: here.leafId };
     const result = evaluate(target);
     return {
-      candidate: result && { target, previewRect: result.get(previewId)!, scopeRect: here.leafRect, scopeLeafCount: 1 },
+      candidate: result && {
+        target, previewRect: result.get(previewId)!, scopeRect: here.leafRect, scopeLeafCount: 1, swapRect: result.get(here.leafId)!,
+      },
       anchored: false,
       guide: null,
     };

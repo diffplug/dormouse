@@ -22,7 +22,9 @@ export type DragPreview = {
   /** Where the drop lands, or null while a slide rests on a drop that changes nothing. */
   rect: Rect | null;
   scopeRect: Rect | null;
-  /** Scope label shown once a slide is anchored or the scope spans several panes. */
+  /** For a swap, where the hovered pane goes: the dragged pane's slot. */
+  swapRect: Rect | null;
+  /** "swap", or the scope's label once a slide is anchored or it spans several panes. */
   badge: string | null;
   /** The line the drop can slide along; `armed` once a pause anchored the slide. */
   guide: SlideGuide | null;
@@ -113,7 +115,7 @@ export function createDragController(deps: DragControllerDeps): DragController {
       return;
     }
     const anchored = !!drag?.anchor;
-    let badge: string | null = null;
+    let badge: string | null = candidate?.target.kind === 'swap' ? '⇄ swap' : null;
     if (candidate?.target.kind === 'edge' && (anchored || candidate.scopeLeafCount > 1)) {
       const { target } = candidate;
       badge = target.path.length === 0 && !target.range ? 'whole layout'
@@ -122,11 +124,12 @@ export function createDragController(deps: DragControllerDeps): DragController {
     const preview: DragPreview = {
       rect: candidate?.previewRect ?? null,
       scopeRect: candidate?.target.kind === 'edge' ? candidate.scopeRect : null,
+      swapRect: candidate?.swapRect ?? null,
       badge,
       guide,
       armed: anchored,
     };
-    const key = [preview.rect && rectKey(preview.rect), preview.scopeRect && rectKey(preview.scopeRect), preview.badge, JSON.stringify(guide), anchored].join('|');
+    const key = [preview.rect && rectKey(preview.rect), preview.scopeRect && rectKey(preview.scopeRect), preview.swapRect && rectKey(preview.swapRect), preview.badge, JSON.stringify(guide), anchored].join('|');
     if (key === lastPreviewKey) return;
     lastPreviewKey = key;
     deps.setDragPreview(preview);
