@@ -107,7 +107,6 @@ Gaps rather than accepted risks: we intend to close them.
 - *Every install.* **The notarization password sits on a command line for up to half an hour** per architecture; the remedy is known and not yet done ([Desktop Releases](./security-ci.md#desktop-releases)).
 - *Hosted phone, Self-hosted Relay.* **Pocket Home Screen camera verification requires real iOS hardware** ([Device verification](./remote-security-model.md#device-verification)).
 - *Every install.* **A hand- or bot-edited lockfile skips the cooldown.** Nothing checks the age of a version a lockfile edit adopts ([Cooldown and alerts](./security-supply-chain.md#cooldown-and-alerts)).
-- *Every install.* **`install_skills.sh` installs agent skills unverified.** It never checks the hashes `skills-lock.json` records, and pins no commit ([Cooldown and alerts](./security-supply-chain.md#cooldown-and-alerts)).
 - *Every install.* **Any local process can drive agent-browser's browser.** Its Chrome's debugging port and its daemon's stream server take unauthenticated loopback connections, so another local account can run script there, read `file://` URLs, or watch it; a web page cannot, since both refuse a foreign `Origin` ([Loopback Listeners](./security-local.md#loopback-listeners)).
 - *Every install.* **A bundled theme's disclosed version and license are unchecked.** A test pins which theme extensions are disclosed, not what each record says ([Disclosure](./security-supply-chain.md#disclosure)).
 

@@ -13,7 +13,6 @@ const real = () => ({
   renovate: readRepoFile('.github/renovate.json'),
   pkg: readRepoFile('package.json'),
   release: readRepoFile('.github/workflows/release.yml'),
-  skills: readRepoFile('install_skills.sh'),
   ci: readRepoFile('.github/workflows/ci.yml'),
   zizmor: readRepoFile('.github/zizmor-requirements.txt'),
 });
@@ -68,11 +67,6 @@ function check(files) {
     fail('release.yml build-standalone does not install Node from node-version-file: package.json');
   }
 
-  for (const line of files.skills.split('\n').filter((l) => /(^|\s)npx\s/.test(l) && !/^\s*#/.test(l))) {
-    const pkgArg = line.trim().split(/\s+/).slice(1).find((arg) => !arg.startsWith('-'));
-    if (!/^(@[\w.-]+\/)?[\w.-]+@\d+\.\d+\.\d+$/.test(pkgArg ?? '')) fail(`install_skills.sh runs \`${line.trim()}\` without an exact version`);
-  }
-
   // The CI linters outside the lockfile: an exact version, verified by hash.
   const zizmor = files.zizmor.split('\n').filter((l) => l.trim() && !l.trim().startsWith('#')).join(' ').replace(/\\\s+/g, ' ');
   if (!/^zizmor==\d+\.\d+\.\d+(\s+--hash=sha256:[0-9a-f]{64})+\s*$/.test(zizmor.trim())) fail('.github/zizmor-requirements.txt does not pin zizmor exactly with hashes');
@@ -111,8 +105,6 @@ for (const [name, mutate, expected] of [
   ['a volta pin added', json('pkg', (p) => { p.volta = { node: '24.0.0' }; }), 'declares volta.node'],
   ['an engines pin added', json('pkg', (p) => { p.engines = { node: '>=24' }; }), 'declares engines.node'],
   ['the release build pins Node inline', text('release', '        with:\n          node-version-file: package.json', '        with:\n          node-version: 24'), 'node-version-file: package.json'],
-  ['install_skills.sh runs npx unpinned', text('skills', 'skills@1.7.0', 'skills@latest'), 'without an exact version'],
-  ['install_skills.sh runs npx with no version', text('skills', 'skills@1.7.0', 'skills'), 'without an exact version'],
   ['zizmor unhashed', (files) => { files.zizmor = 'zizmor==1.30.1\n'; }, 'does not pin zizmor exactly'],
   ['zizmor by range', (files) => { files.zizmor = files.zizmor.replace(/zizmor==[\d.]+/, 'zizmor>=1.30'); }, 'does not pin zizmor exactly'],
   ['zizmor installed without hashes', text('ci', '--require-hashes ', ''), 'does not install zizmor'],
