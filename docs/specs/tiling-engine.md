@@ -65,6 +65,7 @@ Drags use pointer events only, never HTML5 DnD, so they are drivable from CDP. *
 `hitTest` returns the one drop a point would commit: its target, its preview rect, and its scope. The scope model:
 
 - A leaf's center yields `swap` (internal drags only, never with itself); its inner edge bands drop beside the leaf.
+- **A boundary line drops across everything it borders**: a gutter, or the wall's edge just past its top and sides, scopes to the outermost ancestor sharing it (rationale).
 - **A slide along an edge widens the scope** to the smallest one spanning anchor to pointer: the leaf, a contiguous range of an ancestor's children laid along the line, or a whole ancestor sharing the line. Equal spans resolve to the innermost (rationale); leaving the line drops the anchor.
 - **Must anchor a slide only where the pointer pauses on an edge drop**, never on the dragged pane's own rejected edge, so sweeping a header along the header row drops beside one pane at a time (rationale).
 - **Must show an edge drop's slide line from the first frame, before a pause arms it**: its reach and where the scope steps, both from the anchor's leaf, so the user sees where to slide. An anchored slide keeps it over a scope whose drop changes nothing.

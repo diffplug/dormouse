@@ -45,7 +45,8 @@ export type DropHit = {
 };
 
 type Point = { x: number; y: number };
-type Hover = { leafId: LeafId; leafRect: Rect; bands: Edge[] };
+/** `line` is the nearest in-band edge when the point lies on that boundary line. */
+type Hover = { leafId: LeafId; leafRect: Rect; bands: Edge[]; line: Edge | null };
 type Scope = { target: DropTarget & { kind: 'edge' }; start: number; end: number };
 
 /** Placeholder leaf id for the speculative `insert` of an external (Door) drag. */
@@ -55,6 +56,10 @@ const EXTERNAL_ID = '__lath_external_drop__';
  *  `MAX_BAND` px, so a huge leaf still has a graspable center. */
 const BAND_FRACTION = 0.3;
 const MAX_BAND = 96;
+/** How far inside a leaf its edge still counts as the boundary line, capped at half
+ *  the band. A top edge's line starts at the leaf, since its header is where drags
+ *  start and sweep. Beyond the wall's top and sides, the line reaches this far out. */
+const LINE_PX = 8;
 /** Tolerance (px) for boundaries "coinciding" and spans covering a slide. */
 const COINCIDE_EPS = 0.5;
 
@@ -96,8 +101,8 @@ function sameLayout(a: Map<LeafId, Rect>, b: Map<LeafId, Rect>): boolean {
   return true;
 }
 
-/** The leaf under `p` and its in-band edges, nearest first. A point in a gap (or a
- *  hairline overshoot) attributes to the nearest leaf, so boundaries have no dead zones. */
+/** The leaf under `p` and its in-band edges, nearest first. A point in a gap (or just
+ *  outside the wall) attributes to the nearest leaf, so boundaries have no dead zones. */
 function hover(rects: Map<LeafId, Rect>, p: Point): Hover | null {
   let found: Hover | null = null;
   let best = Infinity;
@@ -105,7 +110,7 @@ function hover(rects: Map<LeafId, Rect>, p: Point): Hover | null {
     const d = distToRect(r, p.x, p.y);
     if (d < best) {
       best = d;
-      found = { leafId: id, leafRect: r, bands: [] };
+      found = { leafId: id, leafRect: r, bands: [], line: null };
       if (d === 0) break;
     }
   }
@@ -126,6 +131,11 @@ function hover(rects: Map<LeafId, Rect>, p: Point): Hover | null {
   const rank: Record<Edge, number> = { left: 0, right: 1, top: 2, bottom: 3 };
   bands.sort((a, b) => a.dist - b.dist || rank[a.edge] - rank[b.edge]);
   found.bands = bands.map((b) => b.edge);
+  const nearest = bands[0];
+  if (nearest) {
+    const band = nearest.edge === 'left' || nearest.edge === 'right' ? bandX : bandY;
+    if (nearest.dist < (nearest.edge === 'top' ? 0 : Math.min(LINE_PX, band / 2))) found.line = nearest.edge;
+  }
   return found;
 }
 
@@ -214,11 +224,12 @@ function slideGuide(
  *  rejected or a beside-itself no-op. `dragged` is the leaf being dragged (`null` for
  *  an external Door drag, which yields no `swap` and previews via `insert`).
  *
- *  A leaf's center region swaps; its edge bands drop beside it. `anchor` is where a
- *  slide along an edge began: while the pointer stays on that boundary line, the scope
- *  is the smallest one — the leaf, a contiguous range of an ancestor's children, or a
- *  whole ancestor — whose edge spans from the anchor to the pointer. Without an anchor
- *  the scope is the hovered leaf alone.
+ *  A leaf's center region swaps; its edge bands drop beside it. On the boundary line
+ *  itself (a gutter or the wall's edge) the scope is everything the line borders: the
+ *  outermost ancestor sharing it. `anchor` is where a slide along an edge began: while
+ *  the pointer stays on that boundary line, the scope is the smallest one — the leaf, a
+ *  contiguous range of an ancestor's children, or a whole ancestor — whose edge spans
+ *  from the anchor to the pointer. Without an anchor the scope is the hovered leaf.
  *
  *  The pointer is hit-tested against the layout WITHOUT removing `dragged`: it may
  *  hover its own slot, and self-targeting drops fall out through the filters. */
@@ -232,7 +243,7 @@ export function hitTest(
 ): DropHit {
   const miss: DropHit = { candidate: null, anchored: false, guide: null };
   if (tree.root === null) return miss;
-  if (point.x < rect.x || point.x > rect.x + rect.width || point.y < rect.y || point.y > rect.y + rect.height) {
+  if (point.x < rect.x - LINE_PX || point.x > rect.x + rect.width + LINE_PX || point.y < rect.y - LINE_PX || point.y > rect.y + rect.height) {
     return miss;
   }
 
@@ -244,13 +255,13 @@ export function hitTest(
 
   let previewId = dragged ?? EXTERNAL_ID;
   if (dragged === null) while (rects.has(previewId)) previewId += '_';
-  const evaluate = (target: DropTarget): Rect | null => {
+  const evaluate = (target: DropTarget): Map<LeafId, Rect> | null => {
     const r = dragged !== null ? move(tree, dragged, target) : insert(tree, previewId, target);
     if (!r.ok) return null;
     const resultRects = layout(r.tree, rect, opts);
     // Beside-itself: a committed layout identical to the current one is not a real move.
     if (dragged !== null && target.kind === 'edge' && sameLayout(rects, resultRects)) return null;
-    return resultRects.get(previewId) ?? null;
+    return resultRects.has(previewId) ? resultRects : null;
   };
 
   // A live slide keeps its edge through the corners it crosses, as long as the hovered
@@ -265,9 +276,9 @@ export function hitTest(
     // Center → swap (internal only; never with yourself).
     if (dragged === null || here.leafId === dragged) return miss;
     const target: DropTarget = { kind: 'swap', leaf: here.leafId };
-    const previewRect = evaluate(target);
+    const result = evaluate(target);
     return {
-      candidate: previewRect && { target, previewRect, scopeRect: here.leafRect, scopeLeafCount: 1 },
+      candidate: result && { target, previewRect: result.get(previewId)!, scopeRect: here.leafRect, scopeLeafCount: 1 },
       anchored: false,
       guide: null,
     };
@@ -285,10 +296,11 @@ export function hitTest(
   const hi = Math.max(start, at);
 
   const scopes = scopesOnLine(tree, rect, opts, leafPath, here.leafRect, edge, lo, hi);
-  // The smallest scope spanning the slide; on a tie the innermost wins, since tied
-  // scopes differ only in the new pane's size.
-  let scope: Scope | null = null;
-  for (const s of scopes) {
+  // On the line, everything it borders; otherwise the smallest scope spanning the
+  // slide, where on a tie the innermost wins, since tied scopes differ only in the new
+  // pane's size.
+  let scope: Scope | null = here.line === edge ? scopes[scopes.length - 1] : null;
+  if (!scope) for (const s of scopes) {
     if (s.start > lo + COINCIDE_EPS || s.end < hi - COINCIDE_EPS) continue;
     if (!scope || s.end - s.start < scope.end - scope.start - COINCIDE_EPS) scope = s;
   }
@@ -297,7 +309,7 @@ export function hitTest(
   // The line is the anchor's: a slide reaches only scopes holding the anchor's leaf.
   const origin = anchored ? from! : here;
   const guide = slideGuide(tree, rect, opts, findLeafPath(tree, origin.leafId)!, origin.leafRect, edge, dragged, start, [scope.start, scope.end]);
-  const previewRect = evaluate(scope.target);
+  const previewRect = evaluate(scope.target)?.get(previewId);
   if (!previewRect) return { candidate: null, anchored, guide: anchored ? guide : null };
   const materialized = materializeTarget(tree, scope.target)!;
   const scopeLeaves = leaves({ root: nodeAtPath(materialized.tree, materialized.path) });

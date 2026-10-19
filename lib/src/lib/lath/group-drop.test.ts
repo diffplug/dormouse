@@ -118,12 +118,13 @@ describe('three-pane layout choices', () => {
             { x: r.x + r.width / 2, y: r.y + r.height - 1 },
           ]);
           for (const rect of layout(original, box, opts).values()) {
-            const points = [
-              { x: rect.x + 1, y: rect.y + rect.height / 2 },
-              { x: rect.x + rect.width - 1, y: rect.y + rect.height / 2 },
-              { x: rect.x + rect.width / 2, y: rect.y + 1 },
-              { x: rect.x + rect.width / 2, y: rect.y + rect.height - 1 },
-            ];
+            // On each boundary line, and in each edge band.
+            const points = [1, 20].flatMap((inset) => [
+              { x: rect.x + inset, y: rect.y + rect.height / 2 },
+              { x: rect.x + rect.width - inset, y: rect.y + rect.height / 2 },
+              { x: rect.x + rect.width / 2, y: rect.y + inset },
+              { x: rect.x + rect.width / 2, y: rect.y + rect.height - inset },
+            ]);
             for (const point of points) for (const anchor of [null, ...edgePoints]) {
               const candidate = hitTest(original, box, point, dragged, opts, anchor).candidate;
               if (!candidate) continue;
