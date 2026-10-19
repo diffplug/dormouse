@@ -158,11 +158,11 @@ export async function removeComputer(burrowId: string) {
   });
   if (!response.ok) throw await refused(response);
 }
-export async function approveEnrollment(userCode: string) {
+export async function approveEnrollment(userCode: string, purpose: "remote" | "voice" = "remote") {
   const response = await relay("/enrollments/approve", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ userCode }),
+    body: JSON.stringify({ userCode, purpose }),
   });
   if (!response.ok) throw await refused(response);
 }

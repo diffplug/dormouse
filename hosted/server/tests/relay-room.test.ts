@@ -40,7 +40,7 @@ import { FakeBurrow } from "../../../remote-lib-common/test/harness/fake-burrow.
 import { FakeClient } from "../../../remote-lib-common/test/harness/fake-client.mjs";
 import { openFrameSocket, until } from "../../../remote-lib-common/test/harness/frame-socket.mjs";
 import { e2eCases, socketCases } from "../../../remote-lib-common/test/harness/relay-parity.mjs";
-import { ADMIN_EMAIL } from "../admin";
+import { ADMIN_EMAIL } from "../entitlement";
 import { migrations } from "../migrations";
 import { relayAccountRoutes } from "../relay-account";
 import { RELAY_ROOM_SWEEP_MS, RELAY_ROW_READ_TIMEOUT_MS } from "../relay-room-contract";

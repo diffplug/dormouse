@@ -158,6 +158,8 @@
 
 ## Managed voice
 
+Disconnect failure (2026-10): the atomic writer can fail while the old token remains on disk. Disabling in memory first prevents further label uploads; the retryable error tells the user that a restart could still reload that token.
+
 **Why the token stays in the host.** A renderer runs terminal-supplied text beside framed pages; a bearer credential there is one script injection away from leaving the machine. The sidecar keeps it with the Burrow's credential (`docs/specs/security-local.rationale.md` → "Persisted state") and makes the request without the webview's CSP granting any remote `connect-src`. The cost is one IPC round trip per managed utterance, its audio returning as base64.
 
 **Why fallback stops once audio starts.** Falling back after managed audio began would repeat a half-heard label in a second voice, and the Session would publish `speaking` twice for one delivery. A failure before `playing` has produced no sound, so speaking the same text through Web Speech still delivers the alarm once. Audio refused by the webview's autoplay policy lands on the fallback path; Web Speech may refuse the same gesture-less call (Chrome's synchronous `not-allowed`, commented at `webSpeechEngine` in `lib/src/lib/speech-engine.ts`), in which case the attempt ends unstarted.

@@ -1,18 +1,16 @@
 // Rules: docs/specs/hosted.md -> "Managed voice".
 import type { Context, Hono } from "hono";
 import { digest } from "@pgstencil/auth/security";
-import { SecureRandom, token as randomToken } from "pgstencil";
 import { withClient } from "pgstencil/postgres";
-import { parseBearer } from "remote-lib-common";
-import { isAdmin } from "./admin";
-import { accountQuery, cookieAdmin, type AccountHost } from "./account-gate";
+import { isManagedVoiceId, isManagedVoiceToken, parseBearer } from "remote-lib-common";
+import { accountQuery, cookieEntitled, type AccountHost } from "./account-gate";
+import { entitledSql } from "./entitlement";
+import { mintVoiceToken } from "./voice-token";
 
 export const VOICE_DAILY_CAP = 500;
-const TOKEN = /^dmv_[A-Za-z0-9_-]{43}$/;
-/** Speak's token lookup, its owner's entitlement columns joined, before its WHERE. */
-export const TOKEN_OWNER = `SELECT t.id, t."userId", u.email, u."emailVerified"
+/** Speak's token lookup, its owner's entitlement joined, before its WHERE. */
+export const TOKEN_OWNER = `SELECT t.id, t."userId", ${entitledSql("u")} AS entitled
   FROM dormouse_voice_tokens t JOIN "user" u ON u.id = t."userId"`;
-const VOICE_ID = /^[A-Za-z0-9]{1,64}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const MAX_BODY = 4096;
 
@@ -60,12 +58,12 @@ export interface SpeakHost {
 
 const fail = (
   c: Context,
-  status: 400 | 401 | 403 | 404 | 429 | 502 | 503,
+  status: 400 | 401 | 403 | 404 | 409 | 429 | 502 | 503,
   message: string,
 ) => c.json({ message }, status);
 const tokenRequired = (c: Context) =>
   fail(c, 401, "A valid voice token is required.");
-const notAdmin = (c: Context) =>
+const notEntitled = (c: Context) =>
   fail(c, 403, "Managed voice is not available for this account.");
 const badBody = (c: Context) =>
   fail(c, 400, "Send JSON with text and voiceId.");
@@ -78,13 +76,14 @@ export function voiceTokenRoutes(
   app: Hono<any>,
   host: (c: Context) => AccountHost,
 ) {
-  // Cookie routes: only this origin may change tokens, and only the admin.
-  const cookieGate = cookieAdmin(host, notAdmin);
+  // Cookie routes: only this origin may change tokens, and only an entitled account.
+  const cookieGate = cookieEntitled(host, notEntitled);
 
   app.get("/api/voice/tokens", cookieGate, async (c) => {
     const tokens = await accountQuery(
       host(c),
-      `SELECT id, "createdAt", "lastUsedAt", "revokedAt" FROM dormouse_voice_tokens
+      `SELECT id, "createdAt", "lastUsedAt", "revokedAt"
+      FROM dormouse_voice_tokens
       WHERE "userId" = $1 ORDER BY "createdAt" DESC, id`,
       [c.get("login").userId],
     );
@@ -92,7 +91,7 @@ export function voiceTokenRoutes(
   });
 
   app.post("/api/voice/tokens", cookieGate, async (c) => {
-    const token = "dmv_" + randomToken(new SecureRandom());
+    const token = mintVoiceToken();
     const [row] = await accountQuery<{ id: string; createdAt: Date }>(
       host(c),
       `INSERT INTO dormouse_voice_tokens ("userId", hash) VALUES ($1, $2)
@@ -104,17 +103,16 @@ export function voiceTokenRoutes(
 
   app.delete("/api/voice/tokens/:id", cookieGate, async (c) => {
     const id = c.req.param("id");
-    const revoked =
-      UUID.test(id) &&
-      (
-        await accountQuery(
-          host(c),
-          `UPDATE dormouse_voice_tokens SET "revokedAt" = coalesce("revokedAt", now())
-          WHERE id = $1 AND "userId" = $2 RETURNING id`,
-          [id, c.get("login").userId],
-        )
-      ).length > 0;
-    return revoked ? c.body(null, 204) : fail(c, 404, "Token not found.");
+    if (!UUID.test(id)) return fail(c, 404, "Token not found.");
+    const [row] = await accountQuery<{ id: string }>(
+      host(c),
+      `UPDATE dormouse_voice_tokens
+      SET "revokedAt" = coalesce("revokedAt", now())
+      WHERE id = $1 AND "userId" = $2 RETURNING id`,
+      [id, c.get("login").userId],
+    );
+    if (!row) return fail(c, 404, "Token not found.");
+    return c.body(null, 204);
   });
 }
 
@@ -125,7 +123,7 @@ export function voiceTokenRoutes(
 export function speakRoute(app: Hono<any>, host: (c: Context) => SpeakHost) {
   app.post("/api/voice/speak", async (c) => {
     const bearer = parseBearer(c.req.header("authorization"));
-    if (!bearer || !TOKEN.test(bearer)) return tokenRequired(c);
+    if (!isManagedVoiceToken(bearer)) return tokenRequired(c);
     const { databaseUrl, synthesize } = host(c);
     // One connection for the owner lookup and the count; released before the upstream call.
     const speech = await withClient(databaseUrl, async (db) => {
@@ -134,14 +132,13 @@ export function speakRoute(app: Hono<any>, host: (c: Context) => SpeakHost) {
       } = await db.query<{
         id: string;
         userId: string;
-        email: string;
-        emailVerified: boolean;
+        entitled: boolean;
       }>(
         `${TOKEN_OWNER} WHERE t.hash = $1 AND t."revokedAt" IS NULL`,
         [digest(bearer)],
       );
       if (!owner) return tokenRequired(c);
-      if (!isAdmin(owner)) return notAdmin(c);
+      if (!owner.entitled) return notEntitled(c);
 
       let body: Record<string, unknown>;
       try {
@@ -159,7 +156,7 @@ export function speakRoute(app: Hono<any>, host: (c: Context) => SpeakHost) {
       const spoken = text.trim();
       if (spoken.length < 1 || spoken.length > 200)
         return fail(c, 400, "Text must be 1 to 200 characters.");
-      if (!VOICE_ID.test(voiceId)) return fail(c, 400, "Unknown voice.");
+      if (!isManagedVoiceId(voiceId)) return fail(c, 400, "Unknown voice.");
 
       if (!synthesize)
         return fail(c, 503, "Managed voice is not configured on this server.");

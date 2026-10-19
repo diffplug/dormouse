@@ -13,6 +13,7 @@ import {
 } from '../security/bytes.js';
 import { NOISE_MAX_MESSAGE_LENGTH } from '../security/noise.js';
 import { isEnrollUserCode } from './enroll-code.js';
+import { isManagedVoiceToken } from './managed-voice.js';
 import type { PasskeyAssertion } from '../security/passkey.js';
 import type { PresenceBinding } from '../security/presence.js';
 import type { SealedPushV1 } from '../security/push-seal.js';
@@ -373,12 +374,15 @@ export interface BurrowEnrollResponse {
 export interface BurrowEnrollBeginRequest {
   /** The relay origin the Burrow was built for; any other is a 409 {@link BurrowEnrollOriginMismatch}. */
   origin: string;
+  purpose?: 'remote' | 'voice';
 }
 
 /** The account page a `verificationUrl` names, the user code in its fragment. */
 export const ENROLL_PAGE_PATH = '/enroll';
 
 export interface BurrowEnrollBeginResponse {
+  /** Voice clients require this acknowledgement before polling; older servers enroll only remote control. */
+  purpose?: 'remote' | 'voice';
   /**
    * The Burrow's secret for polling, in the {@link isRelayBearer} shape. The
    * Burrow holds it opaque; Hosted's layout is `docs/specs/hosted.md` ->
@@ -434,6 +438,7 @@ export function isBurrowEnrollBeginResponse(value: unknown): value is BurrowEnro
 
 export interface BurrowEnrollPollRequest {
   deviceCode: string;
+  purpose?: 'remote' | 'voice';
 }
 
 /**
@@ -464,6 +469,34 @@ export function isBurrowEnrollPollResponse(value: unknown): value is BurrowEnrol
       return isE2eId(answer.burrowId);
     case 'enrolled':
       return !!answer.enrollment && typeof answer.enrollment === 'object';
+    default:
+      return false;
+  }
+}
+
+/**
+ * A voice-purpose poll's answer (`docs/specs/hosted.md` -> "Burrow
+ * enrollment"). `enabled` answers once, carrying the managed-voice token the
+ * redemption minted; `redeemed` answers every later poll of that code until
+ * the approval expires, naming nothing, since a voice approval mints no Burrow.
+ */
+export type BurrowVoicePollResponse =
+  | { status: 'pending' }
+  | { status: 'expired' }
+  | { status: 'redeemed' }
+  | { status: 'enabled'; voiceToken: string };
+
+/** A voice poll answer of a known status, `enabled` carrying a token of the voice token's shape. */
+export function isBurrowVoicePollResponse(value: unknown): value is BurrowVoicePollResponse {
+  if (!value || typeof value !== 'object') return false;
+  const answer = value as Record<string, unknown>;
+  switch (answer.status) {
+    case 'pending':
+    case 'expired':
+    case 'redeemed':
+      return true;
+    case 'enabled':
+      return isManagedVoiceToken(answer.voiceToken);
     default:
       return false;
   }

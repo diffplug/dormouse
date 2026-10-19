@@ -1,17 +1,27 @@
 /**
  * The host half of managed voice (`docs/specs/alert.md` -> "Managed voice"):
- * holds the token, adds it and the voice id to the webview's text, and answers
- * with audio or a diagnostic failure. Where the request may go:
+ * holds the token its own Hosted approval obtains, adds it and the voice
+ * id to the webview's text, caches the clips, and answers with audio or a
+ * diagnostic failure. Where the request may go:
  * `docs/specs/security-local.md` -> "Persisted state".
  */
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import {
+  isBurrowVoicePollResponse,
+  isManagedVoiceId,
+  isManagedVoiceToken,
+  type BurrowVoicePollResponse,
+} from 'remote-lib-common';
+import { beginHostedApproval, hostedApprovalDeadline, pollHostedApproval, slowDownHostedApproval } from '../remote/burrow/enrollment';
+import { enrollVerificationUrl } from './remote/hosted-enrollment-url';
 import { writeJsonAtomic } from './atomic-json-file';
 import { hostedVoiceOrigin, type RelayBuild } from './relay-origin';
 import { createSerialQueue } from './remote/serial-queue';
 import {
   DEFAULT_MANAGED_VOICE_ID,
   type ManagedVoiceConfigResult,
+  type ManagedVoiceEnrollment,
   type ManagedVoiceHostSpeakResult,
   type ManagedVoiceStatus,
 } from '../lib/platform/managed-voice-types';
@@ -20,14 +30,13 @@ export const MANAGED_VOICE_FILE = 'managed-voice.json';
 const MANAGED_VOICE_SPEAK_PATH = '/api/voice/speak';
 /** `docs/specs/alert.md` -> "Managed voice"; Rust's `MANAGED_VOICE_TIMEOUT` sits above it. */
 const MANAGED_VOICE_REQUEST_TIMEOUT_MS = 15_000;
-/** Hosted's own `voiceId` grammar. */
-const MANAGED_VOICE_ID_PATTERN = /^[A-Za-z0-9]{1,64}$/;
-/** `dmv_` + base64url of 32 random bytes, unpadded. */
-const MANAGED_VOICE_TOKEN_PATTERN = /^dmv_[A-Za-z0-9_-]{43}$/;
 /** Hosted's own bound on `text`. */
 const MAX_TEXT_LENGTH = 200;
 /** `docs/specs/standalone.md` -> "Rust ↔ sidecar bridge". */
 export const MAX_AUDIO_BYTES = 512 * 1024;
+/** The clip cache's bounds: an alarm label repeats, so a few dozen clips cover a day. */
+export const CLIP_CACHE_MAX_ENTRIES = 32;
+export const CLIP_CACHE_MAX_BYTES = 4 * 1024 * 1024;
 
 interface StoredConfig {
   token: string | null;
@@ -36,17 +45,63 @@ interface StoredConfig {
 
 function normalizeStored(value: unknown): StoredConfig {
   const record = value && typeof value === 'object' ? value as Record<string, unknown> : {};
-  const token = typeof record.token === 'string' && MANAGED_VOICE_TOKEN_PATTERN.test(record.token)
-    ? record.token : null;
-  const voiceId = typeof record.voiceId === 'string' && MANAGED_VOICE_ID_PATTERN.test(record.voiceId)
-    ? record.voiceId : DEFAULT_MANAGED_VOICE_ID;
-  return { token, voiceId };
+  return {
+    token: isManagedVoiceToken(record.token) ? record.token : null,
+    // A voice the curated set no longer holds reads as the default, which speak can send.
+    voiceId: isManagedVoiceId(record.voiceId) ? record.voiceId : DEFAULT_MANAGED_VOICE_ID,
+  };
+}
+
+/** A voice poll's answer, rebuilt so nothing but its guarded fields goes further. */
+function parseVoiceApproval(body: unknown): BurrowVoicePollResponse | null {
+  if (!isBurrowVoicePollResponse(body)) return null;
+  return body.status === 'enabled' ? { status: 'enabled', voiceToken: body.voiceToken } : { status: body.status };
+}
+
+/**
+ * Clips by voice and text, least recently used evicted first, bounded in count
+ * and bytes. Memory only: never persisted.
+ */
+function createClipCache() {
+  const clips = new Map<string, string>();
+  let bytes = 0;
+  const sizeOf = (base64: string) => Buffer.byteLength(base64, 'base64');
+  const keyOf = (voiceId: string, text: string) => `${voiceId}\n${text}`;
+  return {
+    get(voiceId: string, text: string): string | undefined {
+      const key = keyOf(voiceId, text);
+      const clip = clips.get(key);
+      if (clip === undefined) return undefined;
+      clips.delete(key);
+      clips.set(key, clip);
+      return clip;
+    },
+    set(voiceId: string, text: string, clip: string): void {
+      const key = keyOf(voiceId, text);
+      const old = clips.get(key);
+      if (old !== undefined) {
+        clips.delete(key);
+        bytes -= sizeOf(old);
+      }
+      clips.set(key, clip);
+      bytes += sizeOf(clip);
+      for (const [oldest, evicted] of clips) {
+        if (clips.size <= CLIP_CACHE_MAX_ENTRIES && bytes <= CLIP_CACHE_MAX_BYTES) break;
+        clips.delete(oldest);
+        bytes -= sizeOf(evicted);
+      }
+    },
+    clear(): void {
+      clips.clear();
+      bytes = 0;
+    },
+  };
 }
 
 export function createManagedVoiceHost(options: {
   /** The owner-only state directory; without one no token can be stored. */
   stateDir?: string;
-  /** Each saved change's status, for every window; never the token. */
+  /** Each change's status, for every window; never the token. */
   onStatus: (status: ManagedVoiceStatus) => void;
   fetch?: typeof globalThis.fetch;
   timeoutMs?: number;
@@ -55,11 +110,11 @@ export function createManagedVoiceHost(options: {
   relay: RelayBuild;
   /**
    * Whether the network policy lets this process reach Hosted
-   * (`docs/specs/remote-network.md` → "Policy"), asked at every speak.
-   * `false` refuses before any request.
+   * (`docs/specs/remote-network.md` → "Policy"), asked before speech and approval requests.
+   * `false` refuses before any request, a cached clip included.
    */
   networkAllowed: () => Promise<boolean>;
-}): { handle(command: unknown): Promise<unknown> } {
+}): { handle(command: unknown): Promise<unknown>; dispose(): void } {
   const fetchImpl = options.fetch ?? globalThis.fetch;
   const timeoutMs = options.timeoutMs ?? MANAGED_VOICE_REQUEST_TIMEOUT_MS;
   const log = options.log ?? (() => {});
@@ -74,6 +129,16 @@ export function createManagedVoiceHost(options: {
   let loaded: Promise<StoredConfig> | null = null;
   // Each edit reads, then rewrites the whole file: two at once would drop a field.
   const serialize = createSerialQueue();
+  const clips = createClipCache();
+  let notEntitled = false;
+  let disabled = false;
+  let disconnectFailed = false;
+  let enrollment: ManagedVoiceEnrollment | null = null;
+  let enrollmentSequence = 0;
+  let beginPending: Promise<void> | null = null;
+  let pollTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Bumped by every token change, so a request that outlived its token caches nothing. */
+  let tokenGeneration = 0;
 
   const load = (): Promise<StoredConfig> => {
     loaded ??= (async () => {
@@ -95,42 +160,82 @@ export function createManagedVoiceHost(options: {
   };
 
   const status = (config: StoredConfig): ManagedVoiceStatus =>
-    ({ configured: config.token !== null, voiceId: config.voiceId });
+    ({ configured: !disabled && config.token !== null, voiceId: config.voiceId, notEntitled,
+      ...(enrollment ? { enrollment } : {}), ...(disconnectFailed ? { disconnectFailed: true } : {}) });
+
+  const announce = async () => options.onStatus(status(await load().catch(() => normalizeStored(null))));
+
+  /** Rewrite the file with `edit` applied, then announce the result. Runs on `serialize`. */
+  async function save(edit: (config: StoredConfig) => StoredConfig, broadcast = true): Promise<ManagedVoiceStatus> {
+    if (!store) throw new Error('no owner-only state directory');
+    const next = edit({ ...await load() });
+    await writeJsonAtomic(store.dir, store.file, next);
+    loaded = Promise.resolve(next);
+    if (broadcast) options.onStatus(status(next));
+    return status(next);
+  }
 
   async function configure(update: unknown): Promise<ManagedVoiceConfigResult> {
     if (!store) return { ok: false, reason: 'unavailable' };
-    const edit = update && typeof update === 'object' ? update as Record<string, unknown> : {};
-    let next: StoredConfig;
+    const voiceId = (update as { voiceId?: unknown } | null)?.voiceId;
+    if (!isManagedVoiceId(voiceId)) return { ok: false, reason: 'invalid-voice' };
     try {
-      next = { ...await load() };
-      if ('token' in edit) {
-        if (edit.token === null) next.token = null;
-        else if (typeof edit.token === 'string' && MANAGED_VOICE_TOKEN_PATTERN.test(edit.token.trim())) {
-          next.token = edit.token.trim();
-        } else return { ok: false, reason: 'invalid-token' };
-      }
-      if ('voiceId' in edit) {
-        if (typeof edit.voiceId !== 'string' || !MANAGED_VOICE_ID_PATTERN.test(edit.voiceId.trim())) {
-          return { ok: false, reason: 'invalid-voice' };
-        }
-        next.voiceId = edit.voiceId.trim();
-      }
-      await writeJsonAtomic(store.dir, store.file, next);
+      return { ok: true, ...await save((config) => ({ ...config, voiceId })) };
     } catch (error) {
       log(`[managed-voice] could not read or save: ${String(error)}`);
       return { ok: false, reason: 'unavailable' };
     }
-    loaded = Promise.resolve(next);
-    options.onStatus(status(next));
-    return { ok: true, ...status(next) };
+  }
+
+  /** A changed token forgets every clip and every refusal the old one earned. */
+  const setToken = (token: string | null) => {
+    const generation = ++tokenGeneration;
+    if (token === null) disabled = true;
+    clips.clear();
+    notEntitled = false;
+    return serialize(async () => {
+      if (speakUrl === null) throw new Error('this build has no managed voice');
+      if (token === null) {
+        // Clear memory before disk. A failed write must never leave speech armed.
+        const next = { ...await load().catch(() => normalizeStored(null)), token: null };
+        loaded = Promise.resolve(next);
+        disconnectFailed = true;
+        options.onStatus(status(next));
+        if (!store) throw new Error('no owner-only state directory');
+        await writeJsonAtomic(store.dir, store.file, next);
+        disconnectFailed = false;
+        options.onStatus(status(next));
+      } else {
+        await save((config) => ({ ...config, token }), false);
+        if (generation === tokenGeneration) disabled = false;
+        disconnectFailed = false;
+        await announce();
+      }
+    });
+  };
+
+  /** Latch what Hosted last said of the entitlement, announcing a change. */
+  async function noteEntitled(entitled: boolean): Promise<void> {
+    if (notEntitled === !entitled) return;
+    notEntitled = !entitled;
+    const config = await load().catch(() => null);
+    if (config) options.onStatus(status(config));
   }
 
   async function request(speakUrl: string, text: string): Promise<ManagedVoiceHostSpeakResult> {
+    // Before the read: a token change while it is out must not let this
+    // request's answer cache a clip or latch a refusal against the new token.
+    const generation = tokenGeneration;
     const config = await load().catch(() => null);
     if (!config) return { ok: false, reason: 'config unreadable' };
-    if (!config.token) return { ok: false, reason: 'unconfigured' };
+    if (disabled || generation !== tokenGeneration || !config.token) return { ok: false, reason: 'unconfigured' };
     const trimmed = text.trim();
     if (trimmed.length === 0 || trimmed.length > MAX_TEXT_LENGTH) return { ok: false, reason: 'bad-request' };
+    // A hit makes no request. Skipped while Hosted says the plan lapsed, so a
+    // lapsed member hears the system voice and the next request can learn
+    // the plan is back.
+    const cached = notEntitled ? undefined : clips.get(config.voiceId, trimmed);
+    if (cached !== undefined) return { ok: true, audioBase64: cached };
 
     const signal = AbortSignal.timeout(timeoutMs);
     try {
@@ -150,6 +255,11 @@ export function createManagedVoiceHost(options: {
       if (!response.ok || mime !== 'audio/mpeg' || declared > MAX_AUDIO_BYTES) {
         // Hosted's `{ message }` body is never needed.
         await response.body?.cancel().catch(() => {});
+        if (generation === tokenGeneration) {
+          if (response.status === 403) await noteEntitled(false);
+          // Revoked or unknown: forgotten, so Settings offers Enable again.
+          if (response.status === 401) await setToken(null).catch(() => {});
+        }
         return { ok: false, reason: response.ok ? `unexpected ${mime ?? 'body'}` : `HTTP ${response.status}` };
       }
       const reader = response.body?.getReader();
@@ -167,7 +277,14 @@ export function createManagedVoiceHost(options: {
         chunks.push(value);
       }
       if (size === 0) return { ok: false, reason: 'empty audio' };
-      return { ok: true, audioBase64: Buffer.concat(chunks, size).toString('base64') };
+      const audioBase64 = Buffer.concat(chunks, size).toString('base64');
+      // Only for the token that asked: a disconnect meanwhile cleared the cache.
+      if (generation === tokenGeneration) {
+        await noteEntitled(true);
+        if (generation === tokenGeneration && !disabled) clips.set(config.voiceId, trimmed, audioBase64);
+      }
+      return generation === tokenGeneration && !disabled
+        ? { ok: true, audioBase64 } : { ok: false, reason: 'disconnected' };
     } catch {
       return { ok: false, reason: signal.aborted ? 'timeout' : 'network' };
     }
@@ -181,10 +298,112 @@ export function createManagedVoiceHost(options: {
     return result;
   }
 
+  function cancelEnrollment(): void {
+    enrollmentSequence++;
+    if (pollTimer) clearTimeout(pollTimer);
+    pollTimer = undefined;
+    beginPending = null;
+    enrollment = null;
+  }
+
+  async function requireEnrollmentNetwork(): Promise<void> {
+    if (speakUrl === null) throw new Error('This build has no managed voice.');
+    if (!(await options.networkAllowed())) throw new Error('Network is set to Nowhere.');
+  }
+
+  const enrollmentFetch: typeof globalThis.fetch = async (url, init) => {
+    await requireEnrollmentNetwork();
+    return fetchImpl(url, init);
+  };
+
+  async function beginEnrollment(): Promise<void> {
+    if (enrollment?.status === 'waiting' || enrollment?.status === 'saving') return;
+    if (beginPending) return beginPending;
+    if (disconnectFailed) throw new Error('Retry disconnect before enabling managed voice.');
+    const sequence = ++enrollmentSequence;
+    const begin = async () => {
+      if (status(await load()).configured) throw new Error('Managed voice is already enabled.');
+      if (sequence !== enrollmentSequence) return;
+      const body = await beginHostedApproval(options.relay.origin, 'voice', enrollmentFetch);
+      if (sequence !== enrollmentSequence) return;
+      const url = new URL(enrollVerificationUrl(options.relay, body, 'voice'));
+      const deadline = hostedApprovalDeadline(body.expiresAt, Date.now());
+      enrollment = { status: 'waiting', userCode: body.userCode, expiresAt: deadline, verificationUrl: url.href };
+      await announce();
+      let intervalMs = body.interval * 1000;
+      const schedule = () => {
+        if (sequence === enrollmentSequence) pollTimer = setTimeout(() => void poll(), intervalMs);
+      };
+      const poll = async () => {
+        try {
+          if (sequence !== enrollmentSequence) return;
+          if (Date.now() >= deadline) throw new Error('That code expired. Enable managed voice to get a new code.');
+          // Check outside the retrying exchange too: Nowhere ends this run.
+          await requireEnrollmentNetwork();
+          const answer = await pollHostedApproval(options.relay.origin, body.deviceCode, 'voice', enrollmentFetch, parseVoiceApproval);
+          if (sequence !== enrollmentSequence) return;
+          if (answer.status === 'retry') {
+            if (answer.slowDown) intervalMs = slowDownHostedApproval(intervalMs);
+            schedule();
+            return;
+          }
+          if (answer.status === 'refused') throw new Error('That account has no Hosted plan.');
+          if (answer.status === 'failed') throw new Error(answer.message);
+          if (answer.status === 'pending') { schedule(); return; }
+          if (answer.status === 'enabled') {
+            enrollment = { status: 'saving' };
+            await announce();
+            if (sequence !== enrollmentSequence) return;
+            // A token never saved, or never received below, is held by no one,
+            // so the user is never asked to revoke it.
+            try { await setToken(answer.voiceToken); }
+            catch { throw new Error('Could not save managed voice on this computer. Try again.'); }
+            if (sequence === enrollmentSequence) { enrollment = null; await announce(); }
+            return;
+          }
+          throw new Error(answer.status === 'redeemed'
+            ? 'Managed voice could not finish enabling. Try again.'
+            : 'That approval ended. Enable managed voice to get a new code.');
+        } catch (error) {
+          if (sequence !== enrollmentSequence) return;
+          enrollment = { status: 'ended', message: error instanceof Error ? error.message : String(error) };
+          await announce();
+        }
+      };
+      schedule();
+    };
+    const pending = begin();
+    beginPending = pending;
+    try { await pending; } finally { if (beginPending === pending) beginPending = null; }
+  }
+
+  async function action(op: string) {
+    try {
+      if (op === 'beginEnrollment') await beginEnrollment();
+      else {
+        cancelEnrollment();
+        if (op === 'disconnect') {
+          disabled = true;
+          await setToken(null);
+        } else await announce();
+      }
+      return { ok: true, ...status(await load()) };
+    } catch (error) {
+      log(`[managed-voice] ${op} failed: ${String(error)}`);
+      return { ok: false, message: op === 'disconnect'
+        ? 'Managed voice is off for this session, but disconnecting did not finish. Retry disconnect before restarting Dormouse.'
+        : error instanceof Error ? error.message : String(error) };
+    }
+  }
+
   return {
+    dispose: cancelEnrollment,
     async handle(command) {
       const message = (command ?? {}) as Record<string, unknown>;
       switch (message.op) {
+        case 'beginEnrollment':
+        case 'cancelEnrollment':
+        case 'disconnect': return action(message.op);
         case 'status': return status(speakUrl === null ? normalizeStored(null) : await load());
         case 'configure':
           return speakUrl === null

@@ -8,6 +8,7 @@ import { bakedRelayMode } from "dormouse-lib/host/relay-origin";
 import { messageOf } from "dormouse-lib/lib/errors";
 import type {
   ManagedVoiceConfigResult,
+  ManagedVoiceActionResult,
   ManagedVoiceHostSpeakResult,
   ManagedVoicePort,
   ManagedVoiceStatus,
@@ -49,7 +50,9 @@ export function createManagedVoicePort(invoke: Invoke): StandaloneManagedVoicePo
   const apply = (data: unknown): void => {
     const next = data as Partial<ManagedVoiceStatus> | null;
     if (typeof next?.configured !== "boolean" || typeof next.voiceId !== "string") return;
-    status = { configured: next.configured, voiceId: next.voiceId };
+    status = { configured: next.configured, voiceId: next.voiceId, notEntitled: next.notEntitled === true,
+      ...(next.enrollment ? { enrollment: next.enrollment } : {}),
+      ...(next.disconnectFailed ? { disconnectFailed: true } : {}) };
     for (const listener of listeners) listener();
   };
   const ask = async <T>(payload: Record<string, unknown>): Promise<T> => {
@@ -59,8 +62,16 @@ export function createManagedVoicePort(invoke: Invoke): StandaloneManagedVoicePo
     return result;
   };
 
+  const action = async (op: string): Promise<ManagedVoiceActionResult> => {
+    try {
+      return await ask<ManagedVoiceActionResult | null>({ op }) ?? { ok: false, message: 'Managed voice is unavailable.' };
+    } catch (error) { return { ok: false, message: messageOf(error) }; }
+  };
+
   return {
-    offerSetup: import.meta.env.DEV,
+    beginEnrollment: () => action("beginEnrollment"),
+    cancelEnrollment: () => action("cancelEnrollment"),
+    disconnect: () => action("disconnect"),
     status: () => status,
     subscribe(listener) {
       listeners.add(listener);
