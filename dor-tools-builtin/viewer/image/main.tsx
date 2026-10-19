@@ -3,7 +3,7 @@
  * (docs/specs/dor-tools-builtin.md -> Image editor). */
 import { createRef, useSyncExternalStore } from 'react';
 import { createRoot } from 'react-dom/client';
-import { documentPage, loadingState, stateLabel, type DocumentState } from '../document-session';
+import { documentSession, loadingState, stateLabel, type DocumentState } from '../document-session';
 import { SaveButton } from '../save-button';
 import { Signal } from '../signal';
 import { editorDocument, ImageDocument, type ImageEditorHandle } from './editor';
@@ -19,13 +19,13 @@ const editor = createRef<ImageEditorHandle>();
 let loads = 0;
 
 // A reload mounts a fresh editor, so undo starts over.
-const session = documentPage().open(editorDocument(editor, (load, name) => {
+const session = documentSession(editorDocument(editor, (load, name) => {
   const key = ++loads;
   root.render(<Page key={key} load={load} name={name} src={`source?v=${key}`} />);
 }), {
   report(doc) { update({ doc }); },
   fail(error) { update({ error }); },
-}, imageSource('source', 'save', document.title));
+}, imageSource(document.title));
 
 function Controls() {
   const doc = useStore(s => s.doc);

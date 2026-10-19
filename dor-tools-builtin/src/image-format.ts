@@ -13,11 +13,7 @@ export const PASTE_BOUND: SizeBound = { limit: IMAGE_BOUND.limit, message: 'Past
 /** The response header carrying an editable image's revision, which its save
  * echoes as the `version` query parameter. */
 export const VERSION_HEADER = 'X-Dor-Version';
-/** The Markdown editor's image routes, each followed by the image's `/`-separated
- * path relative to the document's folder: read to edit (with `VERSION_HEADER`),
- * save in place, and show. */
-export const EDIT_ROUTE = 'edit/';
-export const IMAGE_SAVE_ROUTE = 'image-save/';
+/** The Markdown editor's image display route, followed by a document-relative path. */
 export const IMAGES_ROUTE = 'images/';
 // An image the Markdown editor shows can be opened directly; it never runs as a document there.
 export const IMAGE_CSP = "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'";

@@ -1,7 +1,6 @@
 /** A self-contained raster image editor: one pixel layer plus markup objects
  * above it, flattened at image resolution on save. It lays out to fill its
- * parent and owns no window-level listeners, so a page can host it whole or
- * as an overlay. Remount it (a new `key`) to load other pixels. */
+ * parent. Remount it (a new `key`) to load other pixels. */
 import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode, type Ref, type RefObject } from 'react';
 import { flushSync } from 'react-dom';
 import type { DocumentEditor } from '../document-session';
@@ -30,7 +29,7 @@ export interface ImageEditorProps {
   name: string;
   /** After every document change. */
   onChange?(): void;
-  /** The host's own controls (its Save and Close), at the toolbar's end. */
+  /** The host's own controls (its state, Reload, and Save), at the toolbar's end. */
   controls?: ReactNode;
   /** The host's error, shown over the canvas. */
   error?: string | null;
@@ -69,7 +68,7 @@ const VIEW_ONLY: ImageEditorHandle = {
 function ImageViewOnly({ src, name, note, controls, ref }: { src: string; name: string; note: string; controls?: ReactNode; ref?: Ref<ImageEditorHandle> }) {
   useImperativeHandle(ref, () => VIEW_ONLY);
   const root = useRef<HTMLDivElement>(null);
-  // Focused like the editor, so its host's Esc reaches it.
+  // Focused like the editor.
   useEffect(() => { root.current?.focus({ preventScroll: true }); }, []);
   return (
     <div ref={root} className="image-editor" tabIndex={-1} aria-label={`${name}, view only`}>
