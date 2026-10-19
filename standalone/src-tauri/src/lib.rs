@@ -1156,9 +1156,8 @@ fn set_macos_dock_icon() {
     }
 }
 
-fn read_log_tail(max_bytes: usize) -> Result<String, String> {
-    let path = log_path();
-    File::open(path)
+fn read_log_tail(path: &Path, max_bytes: usize) -> Result<String, String> {
+    open_log(path, OpenOptions::new().read(true))
         .and_then(|mut file| log_tail::read_utf8_tail(&mut file, max_bytes))
         .map_err(|e| format!("read {}: {e}", path.display()))
 }
@@ -1977,7 +1976,7 @@ fn restart_hung_webviews(app: &AppHandle, labels: &[String]) {
 
 #[tauri::command(async)]
 fn read_update_log() -> Result<String, String> {
-    read_log_tail(10_000)
+    read_log_tail(log_path(), 10_000)
 }
 
 // --- Per-window session persistence (docs/specs/standalone.md §Persistence) ---
@@ -6433,8 +6432,8 @@ mod tests {
         assert_eq!(mode(&fresh), 0o600);
     }
 
-    /// A symlink planted at the log's name is refused by both opens, so neither
-    /// truncates nor appends to whatever it points at.
+    /// A symlink planted at the log's name is refused by every open, so none
+    /// truncates, appends to, or reads back whatever it points at.
     #[cfg(unix)]
     #[test]
     fn log_open_refuses_a_planted_symlink() {
@@ -6446,6 +6445,7 @@ mod tests {
 
         assert!(super::open_log(&path, fs::OpenOptions::new().create(true).write(true).truncate(true)).is_err());
         assert!(super::open_log(&path, fs::OpenOptions::new().create(true).append(true)).is_err());
+        assert!(super::read_log_tail(&path, 10_000).is_err());
         assert_eq!(fs::read(&victim).unwrap(), b"keep");
     }
 
