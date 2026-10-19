@@ -12,7 +12,7 @@ import {
   rootEditor$, Separator, viewMode$, tablePlugin, thematicBreakPlugin, toolbarPlugin, UndoRedo, type MDXEditorMethods, type MDXEditorProps, type Realm,
 } from '@mdxeditor/editor';
 import '@mdxeditor/editor/style.css';
-import { checked, documentSession, loadingState, stateLabel, textSource, type DocumentState } from './document-session';
+import { checked, documentSession, loadingState, request, stateLabel, textSource, type DocumentState } from './document-session';
 import { editableImage, handOffImageEdits, imageSources, imageUrl, ImagesPanel, localImagePath, pathRoute } from './images-panel';
 import { ImageResizeHandles } from './image-resize';
 import { commentsPlugin } from './markdown-comments';
@@ -23,7 +23,6 @@ import { SaveButton } from './save-button';
 import { Signal } from './signal';
 import { installTooltips } from './tooltip';
 import './markdown.css';
-import { request } from './document-session';
 import { MarkdownNavigation, headingFor } from './markdown-navigation';
 import { isWebLink } from '../src/markdown-links';
 import type { ToolViewAccess } from 'dor-tools-lib/protocol';

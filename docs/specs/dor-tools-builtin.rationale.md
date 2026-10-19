@@ -42,7 +42,6 @@ Microsoft documents ReplaceFile failures that have already moved the original or
 
 The Windows draft inherits its directory's ACL, so a protected document in a more broadly readable directory exposes its unsaved draft to that directory's readers until replacement merges the document's ACL. An owner-only stage was tried and dropped (2026-10): creating it needed a PowerShell `Add-Type` P/Invoke to `CreateDirectoryW`, which compiled C# and spawned PowerShell a second time on every save, failed under Constrained Language Mode, and protected draft bytes only in that rare configuration.
 
-
 ## Relative links
 
 Lexical 0.48 formats a bare Markdown filename such as `b.md` as `https://b.md` in the live anchor, while retaining the original URL in its node. The viewer preserves validated document references in that rendering step so ordinary clicks and the link dialog agree (innerdogfood, 2026-10).
