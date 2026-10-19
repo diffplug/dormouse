@@ -209,8 +209,8 @@ describe('security spec', () => {
   it('keeps every section, in order', () => {
     expect(data.security.headings.map((h) => h.id)).toEqual([
       'setups',
-      'how-the-guarantees-are-checked',
       'guarantees',
+      'how-the-guarantees-are-checked',
       'what-is-not-defended',
       'known-gaps',
       'reporting-a-vulnerability',
