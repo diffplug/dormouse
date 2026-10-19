@@ -30,7 +30,7 @@ import { listenToWindow } from "./window-label";
 let quitAdapter: TauriAdapter | null = null;
 
 // The quit-confirmation gate (docs/specs/standalone.md §Quit flow,
-// "Confirmation dialog"). When quit fires with ≥1 running session and a gate is
+// "Quit protocol"). When quit fires with ≥1 running session and a gate is
 // installed, the gate owns the decision and must eventually call
 // `ctx.confirm()` (vote to quit) or `ctx.cancel()` (abort the whole quit). With
 // no gate installed the handler falls through to an immediate unconfirmed vote —

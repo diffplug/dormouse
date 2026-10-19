@@ -24,15 +24,15 @@ const SHELL = "<!doctype html><title>Pocket</title>";
 const DIAGNOSTICS = "<!doctype html><title>Diagnostics</title>";
 const IMMUTABLE = "public, max-age=31536000, immutable";
 
+/** Every path the relay asked its assets for, in order. */
+const fetched: string[] = [];
+
 /**
  * The staged Pocket build as Cloudflare's assets serve it with the relay's
  * config: `auto-trailing-slash` HTML handling (a directory answers with its
  * `index.html`, which itself redirects to the directory) and no not-found
  * handling, so a missing file is a bare 404.
  */
-/** Every path the relay asked its assets for, in order. */
-const fetched: string[] = [];
-
 function assets(request: Request) {
   const { pathname } = new URL(request.url);
   fetched.push(pathname);

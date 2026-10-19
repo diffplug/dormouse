@@ -3,7 +3,7 @@
  * the initiator half of the e2e harness (`docs/specs/relay.md` -> "E2E
  * framing"). Deliberately `PocketClient`-free: it is a bare
  * `/ws/client` socket plus the real ceremonies, so the suite tests the wire
- * rather than a production class that does not send these frames yet.
+ * independently of the production class.
  *
  * It runs both ceremonies end to end against a live Relay: {@link pair} scans
  * a Burrow invitation, runs IK against its one-use key, obtains its presence
