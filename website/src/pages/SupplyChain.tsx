@@ -232,6 +232,22 @@ const PRODUCTS: readonly SupplyChainProduct[] = [
       },
     ],
   },
+  {
+    id: "hosted",
+    title: "Dormouse Hosted",
+    description:
+      "Only if you use Dormouse Hosted, and none of it is installed on your computer. relay.dormouse.sh serves Pocket and the one-time connection page to your phone — Pocket, which you may install to the Home Screen, keeps the phone's pairing keys — and its Worker routes your Hosted sessions and carries the one-time handshake. hosted.dormouse.sh serves your account page, and voice.dormouse.sh runs managed voice. All three Workers run on Cloudflare. Pocket and the one-time page are built from the Terminal's code, so their packages are listed under the Terminal. The Workers and the account page share one package, so this lists every package its runtime dependencies reach, except optional add-ons such as test frameworks that a dependency supports but no Hosted code loads. That is still more than any one Worker bundles: most of the excess is test tooling one dependency, pgstencil, declares as a runtime dependency.",
+    summary: { count: npmDeps.hosted.length, detail: "npm packages" },
+    sections: [
+      {
+        id: "hosted-npm-dependencies",
+        title: "npm Dependencies",
+        description: "Runtime npm packages of Hosted's Workers, account page, Pocket, and the one-time page that the sections above do not already list.",
+        nameLabel: "Package",
+        deps: npmDeps.hosted,
+      },
+    ],
+  },
 ];
 
 /**
@@ -320,9 +336,9 @@ export default function SupplyChain() {
         </div>
       ))}
       <p className={`text-base mb-2 ${MUTED_TEXT_CLASS}`}>
-        The inventory is split by what you install. Every install gets the Terminal and the
-        built-in Tools; the Relay only if you host one yourself. A package an earlier section
-        already lists is not repeated.
+        The inventory is split by product. Every install gets the Terminal and the built-in
+        Tools; the Relay only if you host one yourself; Dormouse Hosted only if you use it. A
+        package an earlier section already lists is not repeated.
       </p>
 
       <p className={`text-base mb-2 ${MUTED_TEXT_CLASS}`}>
@@ -347,7 +363,7 @@ export default function SupplyChain() {
         </a>{" "}
         and their transitive dependencies, which power this marketing site but don't ship in the app, so they're not listed below.
       </p>
-      <div className="grid gap-3 border-y border-[var(--color-text)]/10 py-4 text-sm md:grid-cols-3">
+      <div className="grid gap-3 border-y border-[var(--color-text)]/10 py-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
         {PRODUCTS.map(({ id, title, summary }) => (
           <div key={id}>
             <div className="font-mono text-2xl">{summary.count}</div>

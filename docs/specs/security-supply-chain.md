@@ -1,6 +1,6 @@
 # Supply Chain Security
 
-> - Owns what Dormouse puts on a user's machine — the dependency graph, the bundled runtime, the themes — how that is disclosed, and the cooldown before a new release is adopted, maintainer tooling outside the lockfile included.
+> - Owns what Dormouse puts on a user's machine, and what Dormouse Hosted serves to their devices and runs for them — the dependency graph, the bundled runtime, the themes — how that is disclosed, and the cooldown before a new release is adopted, maintainer tooling outside the lockfile included.
 > - Defers the disclosure page's rendering to `docs/specs/website-docs.md -> "Reference page chrome"` and the runtime's build to `docs/specs/standalone.md`.
 > - Read `docs/specs/security.md` first; `docs/specs/security-audit.md` says how the `FAIL IF` lines here are run.
 
@@ -8,15 +8,17 @@
 
 The runtime dependency surface is kept small: a dependency is added only when necessary, each change justified against its supply-chain risk.
 
-**Every dependency Dormouse *puts on a user's machine* is listed at [dormouse.sh/supply-chain](https://dormouse.sh/supply-chain).** The test is narrower than "everything a user runs" (rationale). Three inventories:
+**Every dependency Dormouse *puts on a user's machine*, or Dormouse Hosted *serves to their devices or runs for them*, is listed at [dormouse.sh/supply-chain](https://dormouse.sh/supply-chain).** The test is narrower than "everything a user runs" (rationale). Three inventories:
 
-- every npm dependency, direct and transitive, by section: Terminal, Built-in Tools, Relay
+- every npm dependency, direct and transitive, by section: Terminal, Built-in Tools, Relay, Hosted
 - every cargo dependency, direct and transitive
 - the Node.js runtime bundled as a Tauri sidecar in the standalone app
 
-Every workspace is classified from its shipping route: a product root or runtime edge if Dormouse writes its files onto a user's disk, an exclusion only if it installs no artifact.
+Every workspace is classified from its shipping route: a product root or runtime edge if Dormouse writes its files onto a user's disk or Hosted serves or runs them, an exclusion only if it does neither.
 
 **Must disclose each npm release once, in the first section whose roots reach it**; an earlier section never enters a later section's root. **Never call the Built-in Tools optional or unshipped**: every install ships them inside `dor` (what their frame reaches: `docs/specs/security-local.md` → Local-file viewer). **Must merge a package's releases into one row per name and license**.
+
+**Must root the Hosted section at `dormouse-hosted`**: one package holds all three Workers and the account page, so the section lists more than any one Worker bundles (rationale). Pocket and the one-time page, which `hosted/` builds from `dormouse-lib` with no workspace edge, are disclosed through the Terminal's `dormouse-lib` root. **Never follow an optional peer edge in the Hosted section**: Hosted ships only esbuild bundles, which hold an optional peer only where code imports it (rationale).
 
 **External binaries are outside this graph by construction** — the user's shell, and the CLIs `dor agent-browser` and `dor playwright` forward to (`npm i -g agent-browser`, `npm i -g @playwright/cli`; dependencies of nothing here, resolved off `PATH` or an override variable). **Dormouse instead ships nothing that pulls them in silently**.
 
@@ -24,7 +26,7 @@ The dependency lists are regenerated and committed with every production depende
 
 **Cargo discloses build edges but not dev edges, and a git-patched crate at its fork.** `website/scripts/cargo-dependencies.test.js` pins both.
 
-**Must disclose a peer dependency where pnpm linked it for that instance**, beside the package in its own `.pnpm/<id>/node_modules`, never through the hidden hoist: a required peer always, an optional one only when pnpm supplied it (rationale).
+**Must disclose a peer dependency where pnpm linked it for that instance**, beside the package in its own `.pnpm/<id>/node_modules`, never through the hidden hoist: a required peer always, an optional one only when pnpm supplied it, outside Hosted (rationale).
 
 **An unresolvable dependency throws unless an optional-edge rule covers it.** `node-datachannel` publishes one prebuilt package per platform, and pnpm installs only the host's.
 
@@ -36,10 +38,10 @@ The dependency lists are regenerated and committed with every production depende
 
 - **FAIL IF** `S253` `node website/scripts/generate-deps.js` changes `website/src/data/dependencies-npm.json`, `website/src/data/dependencies-cargo.json`, or `website/src/data/dependencies-runtime.json` when run in a clean checkout of the audited commit after `pnpm install --frozen-lockfile` (rationale).
 - **FAIL IF** `S254` `.github/workflows/ci.yml` stops running that generator under that same install precondition, or stops failing on a diff in any one of those three snapshots; none is exempt from the gate (rationale).
-- **FAIL IF** `S255` the generator stops naming `dormouse-lib` as a root independently of workspace edges (rationale), names a root or exclusion by anything but its package name, or stops rejecting, before generating disclosure, an unclassified workspace or an exclusion reachable from a product root over runtime and optional edges (development edges do not count). The rejection is pinned by `website/scripts/dependency-workspaces.test.js`; the `dormouse-lib` root is not.
-- **FAIL IF** `S256` the disclosure omits the graph of a workspace whose files reach a user's disk, or excludes such a workspace. A judgement item: derive the routes from `pnpm-workspace.yaml` and the builds — the VSIX (`vscode-ext/package.json`), the Tauri bundle and its sidecar (`standalone/src-tauri/tauri.conf.json`, `standalone/vite.config.ts`), `dor`'s bundle (`dor/package.json`), and the self-host install (`deploy/local/`) — not the generator's arrays, which it enforces but cannot justify (rationale).
+- **FAIL IF** `S255` the generator stops naming `dormouse-lib` as a Terminal root independently of workspace edges (rationale), names a root or exclusion by anything but its package name, or stops rejecting, before generating disclosure, an unclassified workspace or an exclusion reachable from a product root over runtime and optional edges (development edges do not count). The rejection is pinned by `website/scripts/dependency-workspaces.test.js`; the Terminal's `dormouse-lib` root is not.
+- **FAIL IF** `S256` the disclosure omits the graph of a workspace whose files reach a user's disk or that Hosted serves or runs, or excludes such a workspace. A judgement item: derive the routes from `pnpm-workspace.yaml` and the builds — the VSIX (`vscode-ext/package.json`), the Tauri bundle and its sidecar (`standalone/src-tauri/tauri.conf.json`, `standalone/vite.config.ts`), `dor`'s bundle (`dor/package.json`), the self-host install (`deploy/local/`), and Hosted's build (`hosted/package.json`, `hosted/scripts/stage-relay.mjs`, `hosted/wrangler.jsonc`, `hosted/wrangler.relay.jsonc`, `hosted/wrangler.voice.jsonc`) — not the generator's arrays, which it enforces but cannot justify (rationale).
 
-Source of truth: `productSections` / `excludedWorkspacePackages` in `website/scripts/generate-deps.js`; `assertWorkspaceCoverage` in `website/scripts/dependency-workspaces.js`.
+Source of truth: `productSections` / `excludedWorkspacePackages` in `website/scripts/product-sections.js`; `assertWorkspaceCoverage` in `website/scripts/dependency-workspaces.js`.
 
 ## Bundled runtime
 
