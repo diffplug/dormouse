@@ -72,6 +72,18 @@ describe('dependency edges', () => {
     ]);
   });
 
+  // Hosted ships bundles only, which hold an optional peer only where imported.
+  it('drops only optional peers when a section follows none', () => {
+    expect(getDependencyNames({
+      optionalDependencies: { 'native-darwin': '2.0.0' },
+      peerDependencies: { hono: '*', vitest: '*' },
+      peerDependenciesMeta: { vitest: { optional: true }, next: { optional: true } },
+    }, { optionalPeers: false })).toEqual([
+      { name: 'native-darwin', optional: true, peer: false },
+      { name: 'hono', optional: false, peer: true },
+    ]);
+  });
+
   it('accepts a manifest declaring neither block', () => {
     expect(getDependencyNames({})).toEqual([]);
   });

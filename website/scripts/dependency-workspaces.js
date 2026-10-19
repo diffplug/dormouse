@@ -59,8 +59,9 @@ export function assertWorkspaceCoverage(workspacePackages, roots, exclusions) {
 // the peer for this instance (`linkedPeerPackageJsonPath`): it installs a
 // required peer always and an optional one when something in the graph supplies
 // it, as `debug` gets `supports-color` in the Relay. pnpm also reads an optional
-// peer named only in `peerDependenciesMeta`.
-export function getDependencyNames(pkg) {
+// peer named only in `peerDependenciesMeta`. Without `optionalPeers`, only
+// required peers are edges.
+export function getDependencyNames(pkg, { optionalPeers = true } = {}) {
   const edges = [
     ...Object.keys(pkg.dependencies ?? {}).map((name) => ({ name, optional: false, peer: false })),
     ...Object.keys(pkg.optionalDependencies ?? {}).map((name) => ({ name, optional: true, peer: false })),
@@ -72,7 +73,8 @@ export function getDependencyNames(pkg) {
     ...Object.keys(peerMeta).filter((name) => peerMeta[name]?.optional),
   ]);
   for (const name of peers) {
-    if (!declared.has(name)) edges.push({ name, optional: Boolean(peerMeta[name]?.optional), peer: true });
+    const optional = Boolean(peerMeta[name]?.optional);
+    if (!declared.has(name) && (optionalPeers || !optional)) edges.push({ name, optional, peer: true });
   }
   return edges;
 }

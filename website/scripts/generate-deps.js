@@ -108,7 +108,7 @@ const productRootOptionals = new Set(productDependencyFilters.flatMap((name) =>
 function describeLater(packageName, siblings, version) {
   const key = `${packageName}@${version ?? ""}`;
   if (!undescribedPackages.has(key)) {
-    undescribedPackages.set(key, { packageName, section: currentSection, siblings, version });
+    undescribedPackages.set(key, { packageName, section: currentSection.id, siblings, version });
   }
 }
 /** Each package's `contributors` (or `authors`), the last resort for its author. */
@@ -118,7 +118,7 @@ function addExternalPackage(pkg) {
   const people = formatPeople(pkg.contributors) ?? formatPeople(pkg.authors);
   if (people) listedPeople.set(pkg.name, people);
   externalReleases.push({
-    section: currentSection,
+    section: currentSection.id,
     name: pkg.name,
     version: pkg.version,
     license: normalizeLicense(pkg.license),
@@ -130,7 +130,7 @@ function addExternalPackage(pkg) {
 function scanWorkspacePackage(name) {
   if (visitedWorkspacePackageNames.has(name)) return;
   // Another section's root: that section walks it.
-  if (sectionOfRoot.has(name) && sectionOfRoot.get(name) !== currentSection) return;
+  if (sectionOfRoot.has(name) && sectionOfRoot.get(name) !== currentSection.id) return;
   const workspacePackage = workspacePackagesByName.get(name);
   if (!workspacePackage) {
     throw new Error(`Workspace package "${name}" was not found`);
@@ -175,13 +175,13 @@ function scanDependency(fromDir, packageName, declaredBy) {
 function scanDependencies(pkg, fromDir) {
   const isProductRoot = sectionOfRoot.has(pkg.name);
   const isWorkspace = workspacePackagesByName.has(pkg.name);
-  for (const { name, optional, peer } of getDependencyNames(pkg)) {
+  for (const { name, optional, peer } of getDependencyNames(pkg, currentSection)) {
     scanDependency(fromDir, name, { pkg, optional, peer, isWorkspace, isProductRoot });
   }
 }
 
 for (const section of productSections) {
-  currentSection = section.id;
+  currentSection = section;
   for (const packageName of section.roots) scanWorkspacePackage(packageName);
 }
 
@@ -348,43 +348,27 @@ const missingAuthor = {
   "better-call": "Bereket Engida",
   "brace-expansion": "Julian Gruber",
   "defu": "Pooya Parsa",
-  "esbuild": "Evan Wallace",
-  "expect-type": "Misha Kaletsky",
   "graceful-fs": "Isaac Z. Schlueter, Ben Noordhuis, and contributors",
   "jiti": "Pooya Parsa",
-  "jsdom": "Elijah Insua",
   "mkdirp": "James Halliday, Isaac Z. Schlueter",
-  "pathe": "Pooya Parsa, Daniel Roe",
   "pg-cloudflare": "Brian Carlson",
   "pg-int8": "Charmander",
   "pg-protocol": "Brian Carlson",
   "pgstencil": "DiffPlug",
   "process-nextick-args": "Calvin Metcalf",
   "readable-stream": "Node.js contributors",
-  "rolldown": "VoidZero Inc. and contributors",
   "rou3": "Pooya Parsa",
-  "std-env": "Pooya Parsa",
   "string_decoder": "Node.js contributors",
-  "tinybench": "Tinylibs",
-  "tinyrainbow": "Tinylibs",
-  "w3c-xmlserializer": "Sebastian Mayr",
   // No holder in the package's files: its project or maintainer.
   "@pkgjs/parseargs": "pkgjs contributors",
-  "lightningcss": "Devon Govett",
 };
-// Every package under these scopes, or in these platform families, names its
-// holder only in its LICENSE, or in its family's.
+// Every package under these scopes names its holder only in its LICENSE.
 const missingAuthorScopes = {
   "@better-auth/": "Bereket Engida",
   "@chevrotain/": "Shahar Soel",
-  "@esbuild/": "Evan Wallace",
   "@lexical/": "Meta Platforms, Inc. and affiliates",
   "@pgstencil/": "DiffPlug",
   "@radix-ui/": "WorkOS",
-  "@rolldown/binding-": "VoidZero Inc. and contributors",
-  "@rolldown/pluginutils": "rolldown/plugins contributors",
-  "@vitest/": "VoidZero Inc. and Vitest contributors",
-  "lightningcss-": "Devon Govett",
 };
 // Packages whose metadata names neither `homepage` nor `repository`, by scope.
 const missingHomepageScopes = {

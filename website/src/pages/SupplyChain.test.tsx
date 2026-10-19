@@ -32,6 +32,11 @@ describe("the Dormouse Hosted product", () => {
     expect(markup).toContain("none of it is installed on your computer");
   });
 
+  it("says what it over-discloses and what it leaves out", () => {
+    expect(markup).toContain("more than any one Worker bundles");
+    expect(markup).toContain("no Hosted code loads");
+  });
+
   it("counts its table in the summary row", () => {
     expect(npmDeps.hosted.length).toBeGreaterThan(0);
     expect(markup).toContain(

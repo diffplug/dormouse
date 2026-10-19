@@ -12,6 +12,8 @@
 // belongs to the first section that reaches it, and a root of a later section is
 // not entered from an earlier one, so `dor` -> `dor-tools-builtin` leaves the
 // built-in Tools' graph to its own section.
+// A section follows the optional peers pnpm supplied unless it sets
+// `optionalPeers: false`.
 export const productSections = [
   {
     id: "terminal",
@@ -44,6 +46,11 @@ export const productSections = [
       // from `dormouse-lib`, so the Terminal's root discloses them.
       "dormouse-hosted",
     ],
+    // Hosted ships esbuild bundles alone, never a `node_modules`, and a bundle
+    // holds an optional peer only if code imports it: `better-auth` declares
+    // `vitest` and `next`, which pnpm supplies from the workspace, and imports
+    // neither in a Worker.
+    optionalPeers: false,
   },
 ];
 

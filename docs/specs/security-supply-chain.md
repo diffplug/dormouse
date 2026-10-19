@@ -18,7 +18,7 @@ Every workspace is classified from its shipping route: a product root or runtime
 
 **Must disclose each npm release once, in the first section whose roots reach it**; an earlier section never enters a later section's root. **Never call the Built-in Tools optional or unshipped**: every install ships them inside `dor` (what their frame reaches: `docs/specs/security-local.md` → Local-file viewer). **Must merge a package's releases into one row per name and license**.
 
-**Must root the Hosted section at `dormouse-hosted`**: one package holds all three Workers and the account page, so the section lists more than any one Worker bundles (rationale). Pocket and the one-time page, which `hosted/` builds from `dormouse-lib` with no workspace edge, are disclosed through the Terminal's `dormouse-lib` root.
+**Must root the Hosted section at `dormouse-hosted`**: one package holds all three Workers and the account page, so the section lists more than any one Worker bundles (rationale). Pocket and the one-time page, which `hosted/` builds from `dormouse-lib` with no workspace edge, are disclosed through the Terminal's `dormouse-lib` root. **Never follow an optional peer edge in the Hosted section**: Hosted ships only esbuild bundles, which hold an optional peer only where code imports it (rationale).
 
 **External binaries are outside this graph by construction** — the user's shell, and the CLIs `dor agent-browser` and `dor playwright` forward to (`npm i -g agent-browser`, `npm i -g @playwright/cli`; dependencies of nothing here, resolved off `PATH` or an override variable). **Dormouse instead ships nothing that pulls them in silently**.
 
@@ -26,7 +26,7 @@ The dependency lists are regenerated and committed with every production depende
 
 **Cargo discloses build edges but not dev edges, and a git-patched crate at its fork.** `website/scripts/cargo-dependencies.test.js` pins both.
 
-**Must disclose a peer dependency where pnpm linked it for that instance**, beside the package in its own `.pnpm/<id>/node_modules`, never through the hidden hoist: a required peer always, an optional one only when pnpm supplied it (rationale).
+**Must disclose a peer dependency where pnpm linked it for that instance**, beside the package in its own `.pnpm/<id>/node_modules`, never through the hidden hoist: a required peer always, an optional one only when pnpm supplied it, outside Hosted (rationale).
 
 **An unresolvable dependency throws unless an optional-edge rule covers it.** `node-datachannel` publishes one prebuilt package per platform, and pnpm installs only the host's.
 

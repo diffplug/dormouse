@@ -25,6 +25,12 @@ describe('the product sections over this repository', () => {
     expect(rootsOf('hosted')).toEqual(['dormouse-hosted']);
     expect(excludedWorkspacePackages).not.toContain('dormouse-hosted');
   });
+
+  // The other sections ship a `node_modules`, where every linked peer is on disk.
+  it('skip optional peers in Hosted alone, which ships only bundles', () => {
+    expect(productSections.filter((section) => section.optionalPeers === false).map((section) => section.id))
+      .toEqual(['hosted']);
+  });
 });
 
 describe('the committed npm disclosure', () => {
@@ -45,6 +51,26 @@ describe('the committed npm disclosure', () => {
       }
     }
     expect(repeats).toEqual([]);
+  });
+
+  // `better-auth`'s optional peer `vitest`, supplied by Hosted's devDependency,
+  // brought vite, playwright, and jsdom, none of which a Worker bundles.
+  it('leaves the optional peers no Worker imports out of Hosted', () => {
+    for (const name of ['vitest', 'vite', 'playwright', 'jsdom']) expect(npm.hosted.map((row) => row.name)).not.toContain(name);
+  });
+
+  // What the three Workers bundle, from their source maps (2026-10): an optional
+  // peer a Worker imports, as `pg` is of `better-auth`, still arrives by another edge.
+  it('still lists every package the Workers bundle', () => {
+    const disclosed = Object.values(npm).flat().map((row) => row.name);
+    for (const name of [
+      '@better-auth/core', '@better-auth/kysely-adapter', '@better-auth/memory-adapter', '@better-auth/telemetry',
+      '@better-auth/utils', '@better-fetch/fetch', '@noble/ciphers', '@noble/hashes',
+      '@opentelemetry/semantic-conventions', '@pgstencil/auth', 'better-auth', 'better-call', 'defu', 'hono', 'jose',
+      'kysely', 'pg', 'pg-cloudflare', 'pg-connection-string', 'pg-int8', 'pg-pool', 'pg-protocol', 'pg-types',
+      'pgpass', 'pgstencil', 'postgres-array', 'postgres-bytea', 'postgres-date', 'postgres-interval', 'rou3',
+      'split2', 'xtend', 'zod',
+    ]) expect(disclosed).toContain(name);
   });
 
   // relay.dormouse.sh serves Pocket and the one-time page, built from
