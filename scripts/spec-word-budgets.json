@@ -25,12 +25,12 @@
   "docs/specs/remote-security-model.md": 5700,
   "docs/specs/reopen.md": 1200,
   "docs/specs/security-audit.md": 4700,
-  "docs/specs/security-ci.md": 3200,
-  "docs/specs/security-hosted.md": 2650,
-  "docs/specs/security-local.md": 5200,
-  "docs/specs/security-remote.md": 6300,
+  "docs/specs/security-ci.md": 3350,
+  "docs/specs/security-hosted.md": 2850,
+  "docs/specs/security-local.md": 5550,
+  "docs/specs/security-remote.md": 6800,
   "docs/specs/security-supply-chain.md": 1600,
-  "docs/specs/security.md": 3600,
+  "docs/specs/security.md": 2350,
   "docs/specs/shortcuts.md": 1150,
   "docs/specs/standalone.md": 6450,
   "docs/specs/terminal-context.md": 950,
@@ -42,5 +42,5 @@
   "docs/specs/tutorial.md": 1750,
   "docs/specs/vscode.md": 4100,
   "docs/specs/webgl-text.md": 750,
-  "docs/specs/website-docs.md": 3000
+  "docs/specs/website-docs.md": 3100
 }

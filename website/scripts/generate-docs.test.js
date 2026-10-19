@@ -10,15 +10,21 @@ import {
   assertRouteFragments,
   auditIndex,
   auditedSections,
+  gatherGuarantees,
   generateDocs,
+  guaranteeRows,
   linkPinnedBy,
   resolveRepoLinks,
   securityAudiences,
   securityCoverage,
   securityFeatures,
+  withGuarantees,
   withoutFeatures,
 } from './generate-docs.js';
 import { createSlugger, inlineToText, parseMarkdown, visit } from './docs-parser.js';
+import { mkdtemp, mkdir as mkdirp, writeFile as writeText } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { CODING_AGENTS } from '../../lib/src/lib/coding-agents.ts';
 
 const data = await generateDocs();
@@ -351,35 +357,80 @@ describe('security spec', () => {
     expect(data.security.features).toEqual(securityFeatures({ blocks: data.security.blocks }).names);
   });
 
-  it('holds every guarantee to a checked section, and every checked section to an entry', () => {
-    // docs/specs/website-docs.md -> `/security` spec: a promise with no check,
-    // or a check behind no promise and no admitted risk, fails the build.
-    const page = ({ row = '| g | [a](./security-ci.md#a) |', bullet = '- x ([b](./security-ci.md#b))' } = {}) => {
-      const blocks = parseMarkdown(
-        ['## Guarantees', '', '| G | Rule |', '| --- | --- |', row, '', '## What is not defended', '', bullet, '', '## Known gaps', '', '- y ([c](./security-audit.md#c))'].join('\n'),
-        { slug: createSlugger() },
-      ).blocks;
-      resolveRepoLinks(blocks, 'docs/specs/security.md');
-      return { blocks };
-    };
+  it('gathers each domain spec\'s guarantees under the section that holds them', () => {
+    // docs/specs/website-docs.md -> `/security` spec: a guarantee is stated
+    // once, beside its checks; the page's table and its Rule cells are built.
+    const table = ['| Guarantee | Feature | Pinned by |', '| --- | --- | --- |'];
+    const spec = (...lines) => ['# Spec', '', ...lines].join('\n');
+    const SPEC = spec(
+      '## Alpha', '', ...table, '| **a** see [beta](#beta) |  | `x/a.test.js` |', '| **b** | One | `x/b.test.js` |', '',
+      '- **FAIL IF** `S1` one.', '',
+      '### Nested', '', '- **FAIL IF** `S2` two.', '',
+      '## Beta', '', '- **FAIL IF** `S3` three.', '',
+      '## Future', '', ...table, '| **c** |  | t |',
+    );
+    expect(guaranteeRows(SPEC, 'docs/specs/security-x.md')).toEqual({
+      rows: [
+        '| **a** see [beta](./security-x.md#beta) |  | [Alpha](./security-x.md#alpha) | `x/a.test.js` |',
+        '| **b** | One | [Alpha](./security-x.md#alpha) | `x/b.test.js` |',
+      ],
+      held: ['alpha', 'nested'],
+    });
+    expect(() => guaranteeRows(spec('## Alpha', '', ...table, '| **a** |  | t |', '', '## Beta', '', '- **FAIL IF** `S3` three.'), 'f.md')).toThrow(
+      /f\.md: the guarantees under "Alpha" sit in a section with no FAIL IF line/,
+    );
+    expect(() => guaranteeRows(spec('## Alpha', '', ...table, '| **a** |  | t |', '', ...table, '| **b** |  | t |', '', '- **FAIL IF** `S1` one.'), 'f.md')).toThrow(
+      /split across two tables/,
+    );
+    expect(() => guaranteeRows(spec('## Alpha', '', ...table, '| **a** | t |', '', '- **FAIL IF** `S1` one.'), 'f.md')).toThrow(/has 2 cells, not 3/);
+  });
+
+  it('fails on a guarantee in a spec /security does not gather from', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'guarantees-'));
+    await mkdirp(join(root, 'docs/specs'), { recursive: true });
+    const audited = '## A\n\n| Guarantee | Feature | Pinned by |\n| --- | --- | --- |\n| **g** |  | t |\n\n- **FAIL IF** `S1` one.\n';
+    for (const name of ['security-local', 'security-remote', 'security-hosted', 'security-supply-chain', 'security-ci']) {
+      await writeText(join(root, `docs/specs/${name}.md`), audited);
+    }
+    const { rows, held } = await gatherGuarantees(root);
+    expect(rows).toHaveLength(5);
+    expect(rows[0]).toBe('| **g** |  | [A](./security-local.md#a) | t |');
+    expect(held).toContain(`${REPO_BLOB_BASE}/docs/specs/security-ci.md#a`);
+    await writeText(join(root, 'docs/specs/layout.md'), audited);
+    await expect(gatherGuarantees(root)).rejects.toThrow(/docs\/specs\/layout\.md: carries guarantees/);
+  });
+
+  it('closes the spec\'s "Guarantees" section with the gathered table, and refuses one written there', () => {
+    const md = '# S\n\n## Guarantees\n\nIntro.\n\n## Next\n\nText.\n';
+    expect(withGuarantees(md, ['| g | | r | p |'])).toBe(
+      '# S\n\n## Guarantees\n\nIntro.\n\n| Guarantee | Feature | Rule | Pinned by |\n| --- | --- | --- | --- |\n| g | | r | p |\n\n## Next\n\nText.\n',
+    );
+    expect(() => withGuarantees(md.replace('Intro.', '| Guarantee | Rule |'), ['| g |'])).toThrow(/belongs beside its checks/);
+    expect(() => withGuarantees(md, [])).toThrow(/no domain spec states a guarantee/);
+  });
+
+  it('holds every audited section to a guarantee', () => {
+    // docs/specs/website-docs.md -> `/security` spec: a check behind no
+    // promise fails the build, and the audit's own process needs none.
     const section = (path, anchor) => ({ title: anchor, url: `${REPO_BLOB_BASE}/${path}#${anchor}`, checks: 1 });
     const index = {
       domains: [{
         specs: [
           { path: 'docs/specs/security-ci.md', sections: [section('docs/specs/security-ci.md', 'a'), section('docs/specs/security-ci.md', 'b')] },
-          // The audit's own contract is the process, which no entry need claim.
           { path: 'docs/specs/security-audit.md', sections: [section('docs/specs/security-audit.md', 'd')] },
         ],
       }],
     };
-    expect(() => securityCoverage(page(), index)).not.toThrow();
-    expect(() => securityCoverage(page({ row: '| g | [m](./remote-security-model.md#pairing) |' }), index)).toThrow(
-      /"Guarantees" entry 1 links no section that carries a FAIL IF/,
-    );
-    expect(() => securityCoverage(page({ bullet: '- x ([a](./security-ci.md#a))' }), index)).toThrow(
-      /no guarantee, undefended edge, or known gap links docs\/specs\/security-ci\.md -> "b"/,
-    );
-    expect(() => securityCoverage({ blocks: data.security.blocks }, data.security.auditIndex)).not.toThrow();
+    const held = (...anchors) => new Set(anchors.map((a) => `${REPO_BLOB_BASE}/docs/specs/security-ci.md#${a}`));
+    expect(() => securityCoverage(index, held('a', 'b'))).not.toThrow();
+    expect(() => securityCoverage(index, held('a'))).toThrow(/no guarantee holds the checks under docs\/specs\/security-ci\.md -> "b"/);
+  });
+
+  it('publishes every guarantee the domain specs hold, in their order', async () => {
+    const { rows } = await gatherGuarantees();
+    const guarantees = data.security.blocks.filter((b) => b.type === 'table').find((b) => inlineToText(b.header[0]) === 'Guarantee');
+    expect(guarantees.rows).toHaveLength(rows.length);
+    expect(guarantees.rows.map((row) => inlineToText(row[2]))).toEqual(rows.map((row) => row.split(' | ')[2].replace(/^\[([^\]]*)\].*$/, '$1')));
   });
 
   it('links each path a guarantee is pinned by to GitHub, and fails on one that does not exist', () => {

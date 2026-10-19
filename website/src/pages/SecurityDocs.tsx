@@ -8,8 +8,9 @@
  * `pageBlocks`, so the guarantees table and the two lists carry the local
  * application's, the pipeline's, and remote control's entries — the
  * supply-chain ones are on `/supply-chain`, remote control's also on
- * `/self-host`, and the spec file on GitHub is where every entry appears
- * together. The page adds only the two figures generated from the audit's own
+ * `/self-host`. The generator gathers the guarantees from the domain specs,
+ * where each sits beside its checks; the spec file on GitHub holds every
+ * undefended edge and known gap. The page adds only the two figures generated from the audit's own
  * records, and a note saying so.
  */
 import { type MetaArgs } from "react-router";
@@ -49,8 +50,9 @@ export default function SecurityDocs() {
                 <a href={SPEC_URL} className={LINK_CLASS} target="_blank" rel="noopener noreferrer">
                   docs/specs/security.md
                 </a>
-                , the spec the audit runs against, published as is; the two figures above are
-                generated from the audit's own records. It shows the guarantees for the local
+                , the spec the audit runs against, published as is, with each guarantee gathered from
+                beside the checks that hold it; the two figures above are generated from the audit's
+                own records. It shows the guarantees for the local
                 application, remote control, and the release pipeline; what reaches your machine is in
                 the{" "}
                 <a href={sitePath("/supply-chain")} className={LINK_CLASS}>

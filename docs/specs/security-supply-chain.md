@@ -6,6 +6,10 @@
 
 ## Disclosure
 
+| Guarantee | Feature | Pinned by |
+| --- | --- | --- |
+| **Every dependency Dormouse puts on a user's machine, or Dormouse Hosted serves to their devices or runs for them, is disclosed** at [dormouse.sh/supply-chain](https://dormouse.sh/supply-chain), and a change without the disclosure fails CI. |  | `.github/workflows/ci.yml`, `website/scripts/product-sections.test.js`, `website/scripts/dependency-workspaces.test.js` |
+
 The runtime dependency surface is kept small: a dependency is added only when necessary, each change justified against its supply-chain risk.
 
 **Every dependency Dormouse *puts on a user's machine*, or Dormouse Hosted *serves to their devices or runs for them*, is listed at [dormouse.sh/supply-chain](https://dormouse.sh/supply-chain).** The test is narrower than "everything a user runs" (rationale). Three inventories:
@@ -45,6 +49,10 @@ Source of truth: `productSections` / `excludedWorkspacePackages` in `website/scr
 
 ## Bundled runtime
 
+| Guarantee | Feature | Pinned by |
+| --- | --- | --- |
+| **The bundled runtime is the version disclosed.** The build verifies the binary against the pin. |  | `standalone/src-tauri/build.rs` |
+
 **The standalone app ships a Node.js runtime binary**, copied into the Tauri bundle as a sidecar by `standalone/src-tauri/build.rs`.
 
 - **Its version is pinned exactly in the root `package.json` under `devEngines.runtime.version`**, and the build is the authority.
@@ -61,6 +69,10 @@ The Windows runtime's PE Subsystem field is patched from console (3) to GUI (2) 
 Source of truth: `bundle_node_runtime` / `verify_node_version` in `standalone/src-tauri/build.rs`; `getBundledRuntimeDependencies` in `website/scripts/generate-deps.js`.
 
 ## Cooldown and alerts
+
+| Guarantee | Feature | Pinned by |
+| --- | --- | --- |
+| **Renovate and pnpm adopt a dependency release only after at least a 24-hour cooldown**, except audited pgstencil releases approved with 2FA. |  | `scripts/supply-chain-config.test.mjs` |
 
 **Maturity gating runs in both the pnpm configuration and the Renovate configuration, except for pgstencil releases audited on their main commit, staged, and approved with 2FA.** (rationale)
 

@@ -7,6 +7,10 @@
 
 ## Terminal output
 
+| Guarantee | Feature | Pinned by |
+| --- | --- | --- |
+| **Terminal output cannot write your clipboard or steal focus.** File access requires a user action or the gated OSC 367 `open` of a Tool run Dormouse launched. OSC 52 only offers a copy format; links require confirmation, naming any app scheme, or an allowed local preview; deceptive links and dangerous Windows handlers have no open action. |  | `lib/src/lib/terminal-protocol.test.ts`, `lib/src/lib/mouse-selection.test.ts`, `lib/src/lib/copy-editor.test.ts`, `lib/src/lib/external-links.test.ts`, `lib/src/lib/terminal-link-activation.test.ts`, `lib/src/components/ExternalLinkModalHost.test.tsx`, `lib/src/lib/tool-launch-latch.test.ts`, `lib/src/components/wall/preview-slot.test.tsx` |
+
 The attacker is any program writing to a PTY.
 
 Output reaches the screen, Session state, and bounded terminal reports — rendered text/images, alerts, titles, prompt/command boundaries, CWD, and `OSC 8` — except the OSC 367 `open` of a Tool run the host launched, gated below, a stopping Tool's `dehydrate`, which reaches only its own next run (`docs/specs/dor-tool.md` → Reaping), and agent recovery, below. xterm.js and ImageAddon answer cursor, device, focus, size, and graphics reports (`docs/specs/transport.md` -> "Report filtering on the input side"). Retained output is bounded by representation (`docs/specs/terminal-state.md` -> "Supported OSC Inputs", `docs/specs/terminal-escapes.md` -> "Parsing location", `docs/specs/layout.md` -> "Inline graphics").
@@ -34,6 +38,10 @@ Notification text: `docs/specs/alert.md` -> "Text And Security".
 
 ## Browser panes
 
+| Guarantee | Feature | Pinned by |
+| --- | --- | --- |
+| **A page in a browser pane cannot forge a host message.** In VS Code every host message carries a per-boot token it cannot read, the standalone adapters have no inbox for it to post to, and every other listener it can reach checks the sender. |  | `lib/src/lib/platform/vscode-adapter.test.ts`, `standalone/src/sidecar-adapters.test.ts`, `lib/src/lib/webview-message-listeners.test.ts` |
+
 The attacker is the page inside a browser pane.
 
 Where Windows screenshots and pasted images land is a known gap (`docs/specs/security.md` -> "Known gaps").
@@ -54,6 +62,10 @@ Source of truth: `isProxyOrigin` in `lib/src/lib/iframe-proxy-registry.ts`, the 
 
 ## The dor control socket
 
+| Guarantee | Feature | Pinned by |
+| --- | --- | --- |
+| **Only your own account can drive your terminals through `dor`.** The socket sits in a directory only you can open, and its token never crosses the wire. |  | `standalone/sidecar/dor-control-server.test.js` |
+
 The attacker is another local account. The channel carries the whole Surface API — keystrokes into any Pane, its screen and scrollback back out, `dor kill` — and an app restart behind the running-work confirmation (`docs/specs/dor-cli.md` -> "Host Plumbing", "dor app").
 
 The socket bounds other local accounts, never a process running as the user (`docs/specs/security.md` -> "What is not defended"; rationale).
@@ -68,6 +80,10 @@ The socket bounds other local accounts, never a process running as the user (`do
 - **FAIL IF** `S140` the raw token reaches a socket, or either side compares a proof with anything but the SHA-256-then-`timingSafeEqual` of `proofMatches`. The construction is hand-mirrored between `standalone/sidecar/dor-control-server.js` and `dor/src/control-client.ts`; only the two proof domains are pinned across the copies, by `lib/src/lib/mirrored-constants.test.ts` (rationale).
 
 ## Loopback Listeners
+
+| Guarantee | Feature | Pinned by |
+| --- | --- | --- |
+| **A loopback listener grants a stranger nothing it could not get from the upstream directly.** |  | `scripts/loopback-lint.mjs`, `lib/src/host/loopback-guard.test.ts`, `lib/src/host/iframe-proxy.test.ts`, `lib/src/host/browser-viewer.test.ts`, `dor-tools-builtin/test/file-viewer.test.mjs` |
 
 Dormouse binds loopback HTTP and WebSocket servers to render its own surfaces.
 
@@ -109,6 +125,10 @@ Source of truth: `startCapabilityViewer` in `dor-tools-builtin/src/viewer-server
 
 ## Network policy
 
+| Guarantee | Feature | Pinned by |
+| --- | --- | --- |
+| **Under Settings → Network → Nowhere, a new install's level, Dormouse opens no connection on its own**: no relay socket, one-time link, push, managed voice, or update check. What you click, and what your terminals, browser panes, and agents reach, restored ones included, are yours. |  | `scripts/outbound-lint.mjs`, `lib/src/host/remote/outbound.test.ts`, `vscode-ext/test/outbound.test.ts`, `lib/src/host/remote/service.test.ts`, `lib/src/host/managed-voice-host.test.ts`, `standalone/src/updater.test.ts` |
+
 The exposure is traffic the user never chose, which under Nothing is none. `docs/specs/remote-network.md` -> "Policy" owns the rule these checks audit.
 
 - **FAIL IF** `S156` anything opens a connection on its own while the network policy is `nothing` or unread. `BurrowService` in `lib/src/host/remote/service.ts` must route every socket, request, and direct peer through its transport guard, which refuses at the call, and `BurrowRuntime` and `burrowFetch` must take theirs from it with no default to the global `WebSocket` or `fetch`; start no `BurrowRuntime` under `nothing`; and refuse `enroll`, `enrollOffer`, `beginHostedEnrollment`, and `oneTimeOpen` before any request. `createManagedVoiceHost` in `lib/src/host/managed-voice-host.ts` must ask `networkAllowed` before every speak, and `runUpdateCheck` in `standalone/src/updater.ts` must not call `check()` unless the policy it read is not `nothing` and `autoUpdate` is on, a failed read counting as `nothing`. Every other network primitive in shipped code is an `OUTBOUND_SITES` entry `scripts/outbound-lint.mjs` prints, its `FORMS` the inventory: read each `guarded:` entry back to its choke point, each `user:` entry's trigger to a click, a command, or the user's own terminal, browser pane, or agent, and each `loopback`, `local-ipc`, `phone`, or `dev-only` entry to what it claims (rationale). Pinned by the lint; by `lib/src/host/remote/outbound.test.ts` and `vscode-ext/test/outbound.test.ts`, each host's real service watched at the Node layer; and by `lib/src/host/remote/service.test.ts`, `lib/src/remote/burrow/burrow-fetch.test.ts`, `lib/src/remote/burrow/burrow-relay-socket.test.ts`, `lib/src/host/managed-voice-host.test.ts`, and `standalone/src/updater.test.ts`.
@@ -119,6 +139,10 @@ The exposure is traffic the user never chose, which under Nothing is none. `docs
 - **FAIL IF** `S161` the policy can be written by anything but the user's own choice or the Burrow service's first-read default (`docs/specs/remote-network.md` -> "Policy"). The service is the only writer, and `setNetworkPolicy` accepts only an exact policy (`parseNetworkPolicy` in `lib/src/remote/network-policy.ts`, `requestedNetworkPolicy` in `lib/src/host/remote/service.ts`); no Client, Relay, or Hosted answer may reach the store, and a stored record that is not a policy must read as `nothing`.
 
 ## Persisted state
+
+| Guarantee | Feature | Pinned by |
+| --- | --- | --- |
+| **Current persistence writers never save terminal scrollback.** Standalone snapshots are owner-only; VS Code controls access to its own storage. Older snapshots may hold transcripts until retired. |  | `lib/src/lib/session-save.test.ts`, `lib/src/lib/session-restore.test.ts`; `cargo test` in `standalone/src-tauri` (the owner-only half) |
 
 The attacker is another local account reading disk; what the remote stack leaves behind is `docs/specs/security-remote.md` -> "Credentials at rest".
 
@@ -143,11 +167,19 @@ Source of truth: `SESSION_STATE_KEY` in `vscode-ext/src/session-state.ts`, `ensu
 
 ## Terminal context directory actions
 
+| Guarantee | Feature | Pinned by |
+| --- | --- | --- |
+| **A directory a terminal reports reaches a process only as one validated path.** |  | `lib/src/host/local-directory.test.ts` |
+
 - **FAIL IF** `S164` a context directory argument, or a terminal-reported directory Workspace auto-naming hands the host's git lookup (`docs/specs/layout.md` → "Workspace names"), reaches a process without being validated as an existing absolute directory and passed as its canonical path in one argument with no shell interpretation; a UNC or device path (`isUncOrDevicePath` in `dor-lib-common/src/browser-providers.ts`), or a link whose target is one, reaches any filesystem call there, or is offered to Explore; a context directory action goes through the external-URL allowlist rather than this validation; the native opener runs a program the path names (macOS reveals with `open -R`; Windows refuses a path Explorer would split); or a VS Code per-terminal context request or helper ownership update leaves the owning router.
 
 Source of truth: `context` in `standalone/sidecar/pty-core.js`; `attachRouter` in `vscode-ext/src/message-router.ts`; `lookupGitDir` in `lib/src/host/git-info.ts`; `canonicalLocalDirectory` in `lib/src/host/local-directory.ts`.
 
 ## Spawned programs
+
+| Guarantee | Feature | Pinned by |
+| --- | --- | --- |
+| **A folder you open cannot get Dormouse to run a program it planted.** On Windows no program is spawned by bare name, and git in a repository you have not trusted runs no program its config names. |  | `standalone/sidecar/pty-core.test.js`, `lib/src/host/git-cli.test.ts`, `vscode-ext/test/pty-manager.test.ts` |
 
 The attacker is a file planted in a folder the user opens: Windows looks a bare program name up in the working directory before `PATH` (rationale). For a browser's `binaryPath` it is also the webview realm, which writes a pane's saved params (rationale). For the Playwright installation it is also another local account, which may create folders at a Windows drive root (rationale).
 
@@ -160,6 +192,10 @@ The attacker is a file planted in a folder the user opens: Windows looks a bare 
 Source of truth: `windowsSystemPath` in `standalone/sidecar/windows-system.js`; `resolveBinaryPath` in `dor-lib-common/src/resolve-binary.ts`; `ensureChild` in `vscode-ext/src/pty-manager.ts`; `UNTRUSTED_REPO_GIT_ARGS` in `dor-lib-common/src/git.ts`.
 
 ## Dor Tool configuration
+
+| Guarantee | Feature | Pinned by |
+| --- | --- | --- |
+| **A repository's Tool runs nothing until you trust it in Dormouse's own window.** No command grants that trust, and a control character in what the repository configures is escaped before it reaches your terminal and refused before it reaches a launch. |  | `lib/src/host/tool-host.test.ts`, `dor/test/cli-output.test.mjs`, `dor/test/open-picker.test.mjs` |
 
 Approval workflow, declaration and resolution belong to `docs/specs/dor-tool.md` → Trust, Declaring tools.
 

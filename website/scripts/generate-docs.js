@@ -507,8 +507,8 @@ async function syncGuideMedia(files) {
  * GitHub URL, and only then is a link that happens to address this site's own
  * origin localized like any other.
  */
-async function buildDocument({ file, delta, label, fallbackTitle, canonicalUrl }) {
-  const markdown = await readFile(join(repoRoot, file), 'utf8');
+async function buildDocument({ file, delta, label, fallbackTitle, canonicalUrl, transform = (markdown) => markdown }) {
+  const markdown = transform(await readFile(join(repoRoot, file), 'utf8'));
 
   // One slugger for the whole document, so ids are unique across the page.
   const parsed = parseMarkdown(markdown, { slug: createSlugger() });
@@ -576,9 +576,9 @@ const buildSelfHost = () =>
  * restated — the spec is what the nightly audit reads, and a hand-written copy
  * in a page is the one that rots. `/security` shows its own audience — the
  * local application and the pipeline — and remote control's
- * ({@link SECURITY_PAGE_AUDIENCES}); the spec file on GitHub is the one place
- * every row appears together. A guarantee row, an undefended edge, or a known gap belongs to
- * the audience of the spec its links name, and every link in one entry must
+ * ({@link SECURITY_PAGE_AUDIENCES}). A guarantee row, an undefended edge, or a
+ * known gap belongs to the audience of the spec its links name — a gathered
+ * guarantee's Rule names the domain spec it sits in — and every link in one entry must
  * agree. An entry naming no spec, a spec in no group, or specs in more than one
  * fails the build: the spec's own pointers are the classification, so a new
  * spec has to be placed here before its rows can publish anywhere but the
@@ -728,34 +728,18 @@ function assertDistinctFeatures(names, label) {
 const SECURITY_PROCESS_SPECS = ['docs/specs/security.md', 'docs/specs/security-audit.md'];
 
 /**
- * Hold the guarantees and the audit to each other: every guarantee row links
- * at least one section that carries `FAIL IF` lines, and every such section
- * outside {@link SECURITY_PROCESS_SPECS} is linked by a guarantee, an
- * undefended edge, or a known gap. A promise with no check, or a check behind
- * no promise and no admitted risk, fails the build.
+ * Hold the audit to the guarantees: every section carrying `FAIL IF` lines
+ * outside {@link SECURITY_PROCESS_SPECS} sits under a guarantee table, its own
+ * or one around it ({@link guaranteeRows}). A check behind no promise fails the
+ * build; an admitted risk beside it is no substitute.
  */
-export function securityCoverage(page, index) {
-  const audited = new Map(
-    index.domains.flatMap((domain) => domain.specs.flatMap((spec) => spec.sections.map((section) => [section.url, { ...section, path: spec.path }]))),
+export function securityCoverage(index, held) {
+  const unheld = index.domains.flatMap((domain) =>
+    domain.specs
+      .filter((spec) => !SECURITY_PROCESS_SPECS.includes(spec.path))
+      .flatMap((spec) => spec.sections.filter((section) => !held.has(section.url)).map((section) => `${spec.path} -> "${section.title}"`)),
   );
-  const claimed = new Set();
-  for (const { key, title, block, entries } of securitySections(page)) {
-    block[entries].forEach((entry, i) => {
-      const links = [];
-      visit(entry, (node) => {
-        if (node.type === 'link' && node.repoPath && audited.has(node.href)) links.push(node.href);
-      });
-      if (key === 'guarantees' && links.length === 0) {
-        throw new Error(`/security: "${title}" entry ${i + 1} links no section that carries a FAIL IF`);
-      }
-      links.forEach((href) => claimed.add(href));
-    });
-  }
-  const unclaimed = [...audited.values()].filter((section) => !SECURITY_PROCESS_SPECS.includes(section.path) && !claimed.has(section.url));
-  if (unclaimed.length > 0) {
-    const names = unclaimed.map((section) => `${section.path} -> "${section.title}"`).join(', ');
-    throw new Error(`/security: no guarantee, undefended edge, or known gap links ${names}`);
-  }
+  if (unheld.length > 0) throw new Error(`/security: no guarantee holds the checks under ${unheld.join(', ')}`);
 }
 
 /** The guarantees' column naming what pins each row on every build. */
@@ -822,16 +806,18 @@ export function withoutFeatures(sections) {
  * every entry's tags checked against it ({@link securityFeatures}).
  */
 const buildSecurity = async () => {
+  const guarantees = await gatherGuarantees();
   const page = await buildDocument({
     file: 'docs/specs/security.md',
     delta: SECURITY_DELTA,
     label: '/security',
     fallbackTitle: 'Security',
+    transform: (markdown) => withGuarantees(markdown, guarantees.rows),
   });
   linkPinnedBy(page);
   const audiences = securityAudiences(page);
   const index = await auditIndex();
-  securityCoverage(page, index);
+  securityCoverage(index, guarantees.held);
   return {
     ...page,
     features: securityFeatures(page).names,
@@ -843,32 +829,143 @@ const buildSecurity = async () => {
 };
 
 /**
+ * Each prose line of a security spec above its fold, with the heading it sits
+ * under (null above the first) and that heading's GitHub anchor. GitHub
+ * suffixes a repeated anchor with its count, as it renders the file.
+ */
+function* specSectionLines(text) {
+  const seen = new Map();
+  let section = null;
+  const lines = proseLines(text);
+  for (let i = 0; i < lines.length; i++) {
+    const heading = lines[i].match(/^(#{2,6})\s+(.+?)\s*$/);
+    if (heading) {
+      if (/^(\d+\.\s*)?Future$/i.test(heading[2])) return;
+      const base = githubSlug(heading[2]);
+      const n = seen.get(base) ?? 0;
+      seen.set(base, n + 1);
+      section = { heading: heading[2], depth: heading[1].length, anchor: n === 0 ? base : `${base}-${n}` };
+      yield { line: lines[i], section, isHeading: true, lines, i };
+    } else {
+      yield { line: lines[i], section, isHeading: false, lines, i };
+    }
+  }
+}
+
+/**
  * Each heading of a security spec, above its fold, that leads at least one
  * `FAIL IF` line, with how many and its GitHub anchor. A check counts toward
  * the nearest heading above it, at any depth; one above every heading has no
  * section to be listed under, so it fails the build rather than drop out.
  */
 export function auditedSections(text, label) {
-  const sections = [];
-  const seen = new Map();
-  let current = null;
-  for (const line of proseLines(text)) {
-    const heading = line.match(/^(#{2,6})\s+(.+?)\s*$/);
-    if (heading) {
-      if (/^(\d+\.\s*)?Future$/i.test(heading[2])) break;
-      // GitHub suffixes a repeated anchor with its count, as it renders the file.
-      const base = githubSlug(heading[2]);
-      const n = seen.get(base) ?? 0;
-      seen.set(base, n + 1);
-      const title = heading[2].replace(/`/g, '').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1');
-      current = { title, anchor: n === 0 ? base : `${base}-${n}`, checks: 0 };
-      sections.push(current);
+  const sections = new Map();
+  for (const { line, section, isHeading } of specSectionLines(text)) {
+    if (isHeading) {
+      const title = section.heading.replace(/`/g, '').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1');
+      sections.set(section, { title, anchor: section.anchor, checks: 0 });
     } else if (FAIL_IF_RE.test(line)) {
-      if (!current) throw new Error(`${label}: a FAIL IF above its first section heading`);
-      current.checks++;
+      if (!section) throw new Error(`${label}: a FAIL IF above its first section heading`);
+      sections.get(section).checks++;
     }
   }
-  return sections.filter((section) => section.checks > 0);
+  return [...sections.values()].filter((section) => section.checks > 0);
+}
+
+/**
+ * The domain specs whose audited sections open with the guarantees their
+ * checks hold, in the order `/security` lists them.
+ */
+export const SECURITY_GUARANTEE_SPECS = [
+  'docs/specs/security-local.md',
+  'docs/specs/security-remote.md',
+  'docs/specs/security-hosted.md',
+  'docs/specs/security-supply-chain.md',
+  'docs/specs/security-ci.md',
+];
+
+/** The header of a domain spec's guarantee table, and of the table `/security` gathers them into. */
+const GUARANTEE_HEADER = '| Guarantee | Feature | Pinned by |';
+const GATHERED_HEADER = '| Guarantee | Feature | Rule | Pinned by |';
+
+/**
+ * One domain spec's guarantee rows as rows of `/security`'s table, and the
+ * anchors of the sections they hold. Each table headed {@link GUARANTEE_HEADER}
+ * holds the section it sits under and every section nested in it; its rows
+ * become `/security`'s with a Rule cell linking that section, their own
+ * section links rebased onto docs/specs/security.md, which sits beside every
+ * domain spec. A table in a section with no `FAIL IF` line, two in one
+ * section, or a row without three cells fails the build: a guarantee states
+ * what the checks beside it hold.
+ */
+export function guaranteeRows(text, path) {
+  const audited = new Set(auditedSections(text, path).map((section) => section.anchor));
+  const file = posix.basename(path);
+  const tabled = new Set();
+  const rows = [];
+  const held = [];
+  let holder = null;
+  for (const { line, section, isHeading, lines, i } of specSectionLines(text)) {
+    if (isHeading) {
+      if (holder && section.depth <= holder.depth) holder = null;
+      if (holder) held.push(section.anchor);
+      continue;
+    }
+    if (line.trim() !== GUARANTEE_HEADER) continue;
+    const label = `${path}: the guarantees under "${section?.heading}"`;
+    if (!section || !audited.has(section.anchor)) throw new Error(`${label} sit in a section with no FAIL IF line`);
+    if (tabled.has(section.anchor)) throw new Error(`${label} are split across two tables`);
+    tabled.add(section.anchor);
+    holder ??= section;
+    held.push(section.anchor);
+    const rule = `[${section.heading}](./${file}#${section.anchor})`;
+    for (let r = i + 2; r < lines.length && lines[r].startsWith('|'); r++) {
+      const cells = lines[r].trim().replace(/^\|\s?|\s?\|$/g, '').split(/(?<!\\)\s\|\s/);
+      if (cells.length !== 3) throw new Error(`${label}: row "${lines[r]}" has ${cells.length} cells, not 3`);
+      const [guarantee, feature, pins] = cells.map((cell) => cell.replace(/\]\(#/g, `](./${file}#`));
+      rows.push(`| ${guarantee} | ${feature} | ${rule} | ${pins} |`);
+    }
+  }
+  return { rows, held };
+}
+
+/**
+ * Every guarantee the domain specs hold, in {@link SECURITY_GUARANTEE_SPECS}
+ * order, and the GitHub URL of every section they hold; a guarantee table in
+ * any other spec fails the build rather than drop out of `/security`.
+ */
+export async function gatherGuarantees(root = repoRoot) {
+  const specs = (await readdir(join(root, 'docs/specs'))).filter((name) => name.endsWith('.md')).map((name) => `docs/specs/${name}`);
+  const texts = new Map(await Promise.all(specs.map(async (path) => [path, await readFile(join(root, path), 'utf8')])));
+  for (const [path, text] of texts) {
+    if (!SECURITY_GUARANTEE_SPECS.includes(path) && proseLines(text).some((line) => line.trim() === GUARANTEE_HEADER)) {
+      throw new Error(`${path}: carries guarantees, but is not one of SECURITY_GUARANTEE_SPECS`);
+    }
+  }
+  const rows = [];
+  const held = new Set();
+  for (const path of SECURITY_GUARANTEE_SPECS) {
+    const spec = guaranteeRows(texts.get(path), path);
+    rows.push(...spec.rows);
+    for (const anchor of spec.held) held.add(`${REPO_BLOB_BASE}/${path}#${anchor}`);
+  }
+  return { rows, held };
+}
+
+/**
+ * docs/specs/security.md with `rows` as the table closing its "Guarantees"
+ * section. The spec writes none of its own: each guarantee is stated once,
+ * beside the checks that hold it.
+ */
+export function withGuarantees(markdown, rows) {
+  const start = markdown.indexOf('\n## Guarantees\n');
+  if (start === -1) throw new Error('/security: no "## Guarantees" section to gather the guarantees into');
+  const end = markdown.indexOf('\n## ', start + 1);
+  const section = markdown.slice(start, end === -1 ? undefined : end);
+  if (section.includes('| Guarantee |')) throw new Error('/security: "Guarantees" writes a table; a guarantee belongs beside its checks');
+  if (rows.length === 0) throw new Error('/security: no domain spec states a guarantee');
+  const table = [GATHERED_HEADER, '| --- | --- | --- | --- |', ...rows].join('\n');
+  return `${markdown.slice(0, start)}${section.replace(/\n*$/, '')}\n\n${table}\n${end === -1 ? '' : `\n${markdown.slice(end + 1)}`}`;
 }
 
 /**
