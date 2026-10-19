@@ -594,7 +594,7 @@ jobs:
                        --jq '.[] | select(.title | startswith("[audit-finding ")) | {
                          number, state, stateReason, createdAt, closedAt,
                          title: (first(.title | capture("\\A\\[audit-finding (?<key>[A-Za-z0-9._-]+)\\] (?<severity>FAIL|BLOCKER|WARNING)\\b")) // null),
-                         meta: ((try first(.body | capture("\\A<!-- audit-ledger (?<m>\\{[^\\n]*\\}) -->") | .m | fromjson | objects | {key, severity, spec, heading, file})) // null),
+                         meta: ((try first(.body | capture("\\A<!-- audit-ledger (?<m>\\{[^\\n]*\\}) -->") | .m | fromjson | objects | {key, severity, rule, spec, heading, file})) // null),
                          fixed: [.comments[] | select(.authorAssociation | IN("OWNER", "MEMBER", "COLLABORATOR")) | .body
                                  | capture("\\AFixed (?:in|by) (?:(?<repo>[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)?#|https://github\\.com/(?<url>[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/pull/)(?<pr>[0-9]+)\\b")
                                  | {repo: (.repo // .url), pr}],

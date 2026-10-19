@@ -1,5 +1,5 @@
 Domain: supply-chain
-Rule: `docs/specs/security-supply-chain.md` -> "Bundled runtime" #2 — fails the build unless it matches
+Rule: S258 — fails the build unless it matches
 Expect: standalone/src-tauri/build.rs
 Source: synthetic; the bundled runtime's version check compares the major alone, so the disclosed version no longer provably equals the one shipped
 

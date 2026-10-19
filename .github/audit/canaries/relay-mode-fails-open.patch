@@ -1,5 +1,5 @@
 Domain: remote
-Rule: `docs/specs/security-remote.md` -> "Relay origin" #4 — answers `'hosted'` for anything but a baked `hosted`
+Rule: S195 — answers `'hosted'` for anything but a baked `hosted`
 Expect: lib/src/host/relay-origin.ts
 Source: reverses #1060 (a relay mode with no define, or an unknown one, read as Hosted)
 
