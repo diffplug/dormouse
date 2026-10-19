@@ -1071,20 +1071,35 @@ fn prepare_log_dir(path: &Path, own_dir: bool) -> bool {
     builder.create(dir).is_ok() && restrict_to_owner(dir, 0o700).is_ok()
 }
 
-/// Open a log handle owner-only. On unix it never follows a symlink at `path`,
-/// and it refuses a file another account owns, which it cannot `fchmod`.
+/// Open a log handle owner-only, for reading or writing. On unix it never
+/// follows a symlink at `path`, and it refuses a file another account owns,
+/// which it cannot `fchmod`. Anything but a regular file is refused before its
+/// mode is touched.
 fn open_log(path: &Path, options: &mut OpenOptions) -> std::io::Result<File> {
+    let regular_only = |file: File| {
+        if file.metadata()?.is_file() {
+            Ok(file)
+        } else {
+            Err(std::io::Error::other(format!("{} is not a regular file", path.display())))
+        }
+    };
     #[cfg(unix)]
     {
         use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-        let file = options.mode(0o600).custom_flags(libc::O_NOFOLLOW).open(path)?;
+        // O_NONBLOCK keeps a FIFO at `path` from hanging the open; it has no
+        // effect on the regular file that is all this ever returns.
+        let file = options
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+            .open(path)?;
+        let file = regular_only(file)?;
         // An existing file keeps its mode through `open`; this tightens it.
         file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
         Ok(file)
     }
     #[cfg(not(unix))]
     {
-        let file = options.open(path)?;
+        let file = regular_only(options.open(path)?)?;
         restrict_to_owner(path, 0o600).map_err(std::io::Error::other)?;
         Ok(file)
     }
@@ -1157,8 +1172,11 @@ fn set_macos_dock_icon() {
 }
 
 fn read_log_tail(max_bytes: usize) -> Result<String, String> {
-    let path = log_path();
-    File::open(path)
+    read_log_tail_at(log_path(), max_bytes)
+}
+
+fn read_log_tail_at(path: &Path, max_bytes: usize) -> Result<String, String> {
+    open_log(path, OpenOptions::new().read(true))
         .and_then(|mut file| log_tail::read_utf8_tail(&mut file, max_bytes))
         .map_err(|e| format!("read {}: {e}", path.display()))
 }
@@ -6447,6 +6465,38 @@ mod tests {
         assert!(super::open_log(&path, fs::OpenOptions::new().create(true).write(true).truncate(true)).is_err());
         assert!(super::open_log(&path, fs::OpenOptions::new().create(true).append(true)).is_err());
         assert_eq!(fs::read(&victim).unwrap(), b"keep");
+    }
+
+    /// The webview's log read goes through the same open: a planted symlink
+    /// is refused rather than read back, and so is anything but a regular
+    /// file, a FIFO without hanging.
+    #[cfg(unix)]
+    #[test]
+    fn log_read_refuses_a_symlink_or_non_regular_file() {
+        let root = TempDir::new("log-read-symlink");
+        let victim = root.path().join("victim");
+        fs::write(&victim, b"secret").unwrap();
+        let path = root.path().join("dormouse.log");
+        std::os::unix::fs::symlink(&victim, &path).unwrap();
+        assert!(super::read_log_tail_at(&path, 10_000).is_err());
+
+        let fifo = root.path().join("fifo.log");
+        let c_path = std::ffi::CString::new(fifo.as_os_str().as_encoded_bytes()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(c_path.as_ptr(), 0o600) }, 0);
+        assert!(super::read_log_tail_at(&fifo, 10_000).is_err());
+
+        // A directory opens for reading on unix; it is refused before its
+        // mode is tightened.
+        use std::os::unix::fs::PermissionsExt;
+        let dir = root.path().join("dir.log");
+        fs::create_dir(&dir).unwrap();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(super::open_log(&dir, fs::OpenOptions::new().read(true)).is_err());
+        assert_eq!(fs::metadata(&dir).unwrap().permissions().mode() & 0o777, 0o755);
+
+        let real = root.path().join("real.log");
+        fs::write(&real, b"line\n").unwrap();
+        assert_eq!(super::read_log_tail_at(&real, 10_000).unwrap(), "line\n");
     }
 
     #[cfg(unix)]
