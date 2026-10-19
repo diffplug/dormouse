@@ -46,6 +46,9 @@ describe('isAllowedAgentBrowserBinary', () => {
       // Control characters are how one argument becomes two.
       '/usr/local/bin/agent-browser\n/bin/sh',
       '/usr/local/bin/agent-browser\u0000',
+      // C1 too: U+0085 is a line break to some readers, U+009F ends the set.
+      '/usr/local/bin/agent-browser\u0085/bin/sh',
+      '/usr/local/bin/agent-browser\u009f',
       '',
       undefined,
       null,
@@ -59,6 +62,6 @@ describe('isAllowedAgentBrowserBinary', () => {
 
  it('validates Playwright executable hints independently of agent-browser', () => {
   for (const candidate of ['playwright-cli', '/opt/bin/playwright-cli', 'C:\\tools\\playwright-cli.cmd']) expect(isAllowedPlaywrightBinary(candidate)).toBe(true);
-  for (const candidate of ['agent-browser', '/bin/sh', './playwright-cli', '/opt/../playwright-cli', '/opt/playwright-cli\n', '\\\\host\\share\\playwright-cli.cmd', '//host/share/playwright-cli']) expect(isAllowedPlaywrightBinary(candidate)).toBe(false);
+  for (const candidate of ['agent-browser', '/bin/sh', './playwright-cli', '/opt/../playwright-cli', '/opt/playwright-cli\n', '/opt/playwright-cli\u0085', '/opt/playwright-cli\u009f', '\\\\host\\share\\playwright-cli.cmd', '//host/share/playwright-cli']) expect(isAllowedPlaywrightBinary(candidate)).toBe(false);
   expect(isAllowedPlaywrightBinary('/opt/custom-wrapper', '/opt/custom-wrapper')).toBe(true);
 });

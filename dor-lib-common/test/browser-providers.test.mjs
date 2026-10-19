@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { BROWSER_PROVIDER_IDS, BROWSER_PROVIDERS, parseRenderMode, parseStreamPort, renderModeFor, sessionForKey } from '../dist/browser-providers.js';
+import { BROWSER_PROVIDER_IDS, BROWSER_PROVIDERS, isAllowedAgentBrowserBinary, isAllowedPlaywrightBinary, parseRenderMode, parseStreamPort, renderModeFor, sessionForKey } from '../dist/browser-providers.js';
 
 test('sessionForKey namespaces a key under the workspace', () => {
   assert.equal(sessionForKey('default'), 'dormouse.1.default');
@@ -39,7 +39,7 @@ test('each provider refuses a session name its CLI would read as an option or a 
   for (const provider of BROWSER_PROVIDER_IDS) {
     const { isSessionName } = BROWSER_PROVIDERS[provider];
     assert.equal(isSessionName('dormouse.1.default'), true, provider);
-    for (const bad of ['../../tmp/evil', 'a/b', 'a\\b', 'a\nb', '', 7]) {
+    for (const bad of ['../../tmp/evil', 'a/b', 'a\\b', 'a\nb', 'a\u0085b', 'a\u009fb', '', 7]) {
       assert.equal(isSessionName(bad), false, `${provider} ${JSON.stringify(bad)}`);
     }
   }
@@ -57,4 +57,15 @@ test('parseStreamPort reads a top-level or nested port, and nothing from malform
   for (const stdout of ['not json', JSON.stringify({ data: {} }), JSON.stringify({ port: 'nope' }), JSON.stringify({ port: 0 }), JSON.stringify({ port: 70000 }), JSON.stringify({ port: 80.5 })]) {
     assert.equal(parseStreamPort(stdout), undefined, stdout);
   }
+});
+
+test('the binary gates refuse a C0, DEL, or C1 control anywhere in the path', () => {
+  for (const control of ['\u0000', '\n', '\u007f', '\u0085', '\u009f']) {
+    assert.equal(isAllowedAgentBrowserBinary(`/usr/local/bin/agent-browser${control}`), false, JSON.stringify(control));
+    assert.equal(isAllowedAgentBrowserBinary(`/usr/local/bin${control}/agent-browser`), false, JSON.stringify(control));
+    assert.equal(isAllowedPlaywrightBinary(`/opt/bin/playwright-cli${control}`), false, JSON.stringify(control));
+  }
+  // The neighbours of the C1 block are ordinary path characters.
+  assert.equal(isAllowedAgentBrowserBinary('/opt/\u00a0/agent-browser'), true);
+  assert.equal(isAllowedAgentBrowserBinary('/opt/~/agent-browser'), true);
 });

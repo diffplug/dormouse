@@ -1,14 +1,15 @@
 /**
- * Pure, dependency-free shell quoting. The webview (the only layer that knows
- * the target pane's shell) turns a raw argv array into a single command string
- * for that shell. Keep this module free of Node imports so it can be bundled
- * into the browser-side webview as well as the CLI.
+ * Pure shell quoting. The webview (the only layer that knows the target pane's
+ * shell) turns a raw argv array into a single command string for that shell.
+ * Keep this module free of Node imports so it can be bundled into the
+ * browser-side webview as well as the CLI.
  */
+
+import { CONTROL_CHARACTERS } from 'dor-lib-common/control-characters';
 
 export type ShellCommandKind = 'cmd' | 'posix' | 'powershell';
 
-/** C0, DEL, and C1, as a character class body. */
-export const CONTROL_CHARACTERS = '\\x00-\\x1f\\x7f-\\x9f';
+export { CONTROL_CHARACTERS };
 /** Unicode format characters that reorder or hide the text around them: every
  *  bidi control, the zero-width space and joiners, the word joiner and
  *  invisible operators, and the BOM — the set `boundedPushText` in

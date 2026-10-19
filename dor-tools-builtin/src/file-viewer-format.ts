@@ -1,3 +1,5 @@
+import { CONTROL_CHARACTERS } from 'dor-lib-common/control-characters';
+
 /** Formats supported by the built-in local viewer. Unknown files need a user
  * Tool association rather than being guessed to be text. */
 const MIME: Record<string, string> = {
@@ -85,7 +87,7 @@ export function defaultBuiltin(folder: boolean): BuiltinHandler {
 }
 
 /** C0, DEL, and C1 controls. */
-export const CONTROLS = /[\x00-\x1f\x7f-\x9f]/;
+export const CONTROLS = new RegExp(`[${CONTROL_CHARACTERS}]`);
 
 /** The title naming a viewer's canonical `target`, `/` or `\` separated: its
  * basename, or the whole path for a filesystem root. Controls are stripped,
