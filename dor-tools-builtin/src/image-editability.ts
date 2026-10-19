@@ -78,7 +78,7 @@ export function pngChunks(bytes: Uint8Array): PngChunk[] {
 }
 
 /** An image's size in its own pixels. */
-export interface PixelSize { width: number; height: number }
+interface PixelSize { width: number; height: number }
 
 /** The size a PNG's IHDR declares; null without one. */
 export function pngSize(b: Uint8Array): PixelSize | null {

@@ -50,14 +50,14 @@ Source of truth: `saveText` / `StorePath` in `dor-tools-builtin/src/editor-route
 - **Never show an image at a size the document does not state**: unsized, it shows pixel for pixel, within the column. A pasted or dropped PNG or JPEG with a recorded scale goes in at its pixel width over that scale (rationale).
 - **Must write a pasted or dropped PNG, JPEG, GIF, or WebP beside the document as a new file**, signature-checked, at most 32 MiB, never replacing a file; its reference is an unsaved edit.
 - **Must rename a listed image on disk at once**, to an image name in its own directory not starting with `.`, never replacing another file (case-only renames allowed); rewritten references are an unsaved edit.
-- **Must edit a PNG or JPEG in the [Image editor](#image-editor) over the document** where the grant may replace it (`docs/specs/security-local.md` → "Local-file viewer"); a save that changes its pixel size rescales each width and height the document states for it, per axis, as an unsaved edit.
-- **Must report the Tool dirty while the document or open image is unsaved**, and the close-prompt save writes both.
+- **Must show an image's current pixels after Reload**, including a file changed outside the page (rationale).
 
 Source of truth: `dor-tools-builtin/viewer/markdown.tsx`; `safeCreateDOM` in `dor-tools-builtin/viewer/markdown-safety.ts`; `editorRoutes` in `dor-tools-builtin/src/editor-routes.ts`; `dor-tools-builtin/src/markdown-images.ts`. Tests: `dor-tools-builtin/test/markdown-editor.test.mjs`.
 
 ### Relative links
 
 - **Must follow a relative link on plain click**, and offer Open in another surface and Edit link on its context menu. Cmd/Ctrl-click chooses another Surface. Dispatch follows `docs/specs/dor-tool.md` → Document navigation. (rationale)
+- **Must open a local PNG or JPEG image's file the same way on Edit or double-click**, with a link's context menu whose edit item opens it.
 - **Must treat only a scheme-less relative reference as a document link**, resolved from the opened canonical file's directory with parent references allowed and its query ignored; HTTP(S)/mail links keep their existing handling.
 - **Must send document opens to the Tool process**, which emits OSC 367 (`docs/specs/security-local.md` → Local-file viewer); **never navigate relative to the capability URL**. The page receives only sent/error, with host failures shown by the Surface.
 - **Must resolve a fragment to the rendered heading whose case-folded, punctuation-stripped, duplicate-suffixed id it names**, never writing ids into saved Markdown. Same-document fragments scroll without reloading or prompting; a missing heading reports an error while retaining the document. Back/Forward reading-state semantics belong to `docs/specs/dor-tool.md` → Document navigation.
@@ -66,7 +66,7 @@ Source of truth: `dor-tools-builtin/viewer/markdown.tsx`; `markdownLink` in `dor
 
 ## Image editor
 
-`builtin:file` edits PNG and JPEG, alone or over a [Markdown document](#markdown-editor).
+`builtin:file` edits PNG and JPEG.
 
 - **Must leave a PNG or JPEG past 32 MiB or 2²⁶ pixels, or an animated, HDR, or narrow-range PNG, view-only**, judged from its header before decoding.
 - **Must save the submitted bytes unchanged, within 32 MiB**, under the revision, identity, permission, and replacement rules of [Editing files](#editing-files).
