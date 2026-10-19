@@ -96,6 +96,8 @@
 
 **Why the keystroke fallback is not routed into the manager.** The fallback in `docs/specs/terminal-state.md` is renderer-side and lower confidence than a shell-reported command boundary. Wiring it in would buy integration-less shells a worse version of WATCHING at the price of a second command-tracking path to keep in sync.
 
+**Why only output that paints counts.** Two diagnostic reports (2026-10-18) showed a finished Claude Code holding its ring deferred for over ten minutes: idle, it sends `CSI ? 6 n` every 200 ms for as long as the terminal answers (Claude Code 2.1.303; unanswered, it asks once), so the detector never saw 5 s of silence. A third showed Codex answering a click with frames that only reset colors and move the cursor, which looked like work and rang `codex went quiet` once the user left. Discounting only known-inert sequences keeps every misread on the side of the old count.
+
 **Why resumed work defers an owed ring.** The marked `ttr.pgstencil-adopt` speech (2026-09-09 18:17:03) followed a WATCHING settle and resumed output. Withdrawing only confirmed WATCHING left program-sent reports ringing through animation. Deferral preserves the debt; the same episode and original deadlines prevent alarm replay and avoid adding another full delay after quiet (product decision, 2026-10-01).
 
 ## Terminal reports

@@ -3999,5 +3999,358 @@
         "3.6.7"
       ]
     }
+  ],
+  "hosted": [
+    {
+      "name": "@better-auth/core",
+      "license": "MIT",
+      "author": "Bereket Engida",
+      "homepage": "https://www.better-auth.com",
+      "versions": [
+        "1.7.10"
+      ]
+    },
+    {
+      "name": "@better-auth/drizzle-adapter",
+      "license": "MIT",
+      "author": "Bereket Engida",
+      "homepage": "https://www.better-auth.com/docs/adapters/drizzle",
+      "versions": [
+        "1.7.10"
+      ]
+    },
+    {
+      "name": "@better-auth/kysely-adapter",
+      "license": "MIT",
+      "author": "Bereket Engida",
+      "homepage": "https://www.better-auth.com/docs/adapters/kysely",
+      "versions": [
+        "1.7.10"
+      ]
+    },
+    {
+      "name": "@better-auth/memory-adapter",
+      "license": "MIT",
+      "author": "Bereket Engida",
+      "homepage": "https://www.better-auth.com",
+      "versions": [
+        "1.7.10"
+      ]
+    },
+    {
+      "name": "@better-auth/mongo-adapter",
+      "license": "MIT",
+      "author": "Bereket Engida",
+      "homepage": "https://www.better-auth.com/docs/adapters/mongodb",
+      "versions": [
+        "1.7.10"
+      ]
+    },
+    {
+      "name": "@better-auth/prisma-adapter",
+      "license": "MIT",
+      "author": "Bereket Engida",
+      "homepage": "https://www.better-auth.com/docs/adapters/prisma",
+      "versions": [
+        "1.7.10"
+      ]
+    },
+    {
+      "name": "@better-auth/telemetry",
+      "license": "MIT",
+      "author": "Bereket Engida",
+      "homepage": "https://www.better-auth.com",
+      "versions": [
+        "1.7.10"
+      ]
+    },
+    {
+      "name": "@better-auth/utils",
+      "license": "MIT",
+      "author": "Bereket Engida",
+      "homepage": "https://github.com/better-auth/utils",
+      "versions": [
+        "0.5.0"
+      ]
+    },
+    {
+      "name": "@better-fetch/fetch",
+      "license": "MIT",
+      "author": "Bereket Engida",
+      "homepage": "https://github.com/better-auth/better-fetch",
+      "versions": [
+        "1.3.2"
+      ]
+    },
+    {
+      "name": "@noble/hashes",
+      "license": "MIT",
+      "author": "Paul Miller (https://paulmillr.com)",
+      "homepage": "https://paulmillr.com/noble/",
+      "versions": [
+        "2.4.0"
+      ]
+    },
+    {
+      "name": "@opentelemetry/semantic-conventions",
+      "license": "Apache-2.0",
+      "author": "OpenTelemetry Authors",
+      "homepage": "https://github.com/open-telemetry/opentelemetry-js/tree/main/semantic-conventions",
+      "versions": [
+        "1.43.0"
+      ]
+    },
+    {
+      "name": "@pgstencil/auth",
+      "license": "MIT",
+      "author": "DiffPlug",
+      "homepage": "https://github.com/diffplug/pgstencil#readme",
+      "versions": [
+        "0.4.0"
+      ]
+    },
+    {
+      "name": "@standard-schema/spec",
+      "license": "MIT",
+      "author": "Colin McDonnell",
+      "homepage": "https://standardschema.dev",
+      "versions": [
+        "1.1.0"
+      ]
+    },
+    {
+      "name": "better-auth",
+      "license": "MIT",
+      "author": "Bereket Engida",
+      "homepage": "https://better-auth.com",
+      "versions": [
+        "1.7.10"
+      ]
+    },
+    {
+      "name": "better-call",
+      "license": "MIT",
+      "author": "Bereket Engida",
+      "homepage": "https://github.com/better-auth/better-call",
+      "versions": [
+        "1.4.2"
+      ]
+    },
+    {
+      "name": "defu",
+      "license": "MIT",
+      "author": "Pooya Parsa",
+      "homepage": "https://github.com/unjs/defu",
+      "versions": [
+        "6.1.7"
+      ]
+    },
+    {
+      "name": "jose",
+      "license": "MIT",
+      "author": "Filip Skokan <panva.ip@gmail.com>",
+      "homepage": "https://github.com/panva/jose",
+      "versions": [
+        "6.2.12"
+      ]
+    },
+    {
+      "name": "kysely",
+      "license": "MIT",
+      "author": "Sami Koskimäki <sami@jakso.me>",
+      "homepage": "https://kysely.dev",
+      "versions": [
+        "0.29.6"
+      ]
+    },
+    {
+      "name": "nanostores",
+      "license": "MIT",
+      "author": "Andrey Sitnik <andrey@sitnik.es>",
+      "homepage": "https://github.com/nanostores/nanostores",
+      "versions": [
+        "1.5.3"
+      ]
+    },
+    {
+      "name": "oauth4webapi",
+      "license": "MIT",
+      "author": "Filip Skokan <panva.ip@gmail.com>",
+      "homepage": "https://github.com/panva/oauth4webapi",
+      "versions": [
+        "3.8.8"
+      ]
+    },
+    {
+      "name": "openid-client",
+      "license": "MIT",
+      "author": "Filip Skokan <panva.ip@gmail.com>",
+      "homepage": "https://github.com/panva/openid-client",
+      "versions": [
+        "6.8.8"
+      ]
+    },
+    {
+      "name": "pg",
+      "license": "MIT",
+      "author": "Brian Carlson <brian.m.carlson@gmail.com>",
+      "homepage": "https://github.com/brianc/node-postgres",
+      "versions": [
+        "8.23.1"
+      ]
+    },
+    {
+      "name": "pg-cloudflare",
+      "license": "MIT",
+      "author": "Brian Carlson",
+      "homepage": "https://github.com/brianc/node-postgres",
+      "versions": [
+        "1.4.1"
+      ]
+    },
+    {
+      "name": "pg-connection-string",
+      "license": "MIT",
+      "author": "Blaine Bublitz <blaine@iceddev.com> (http://iceddev.com/)",
+      "homepage": "https://github.com/brianc/node-postgres/tree/master/packages/pg-connection-string",
+      "versions": [
+        "2.14.1"
+      ]
+    },
+    {
+      "name": "pg-int8",
+      "license": "ISC",
+      "author": "Charmander",
+      "homepage": "https://github.com/charmander/pg-int8",
+      "versions": [
+        "1.0.1"
+      ]
+    },
+    {
+      "name": "pg-pool",
+      "license": "MIT",
+      "author": "Brian M. Carlson",
+      "homepage": "https://github.com/brianc/node-postgres/tree/master/packages/pg-pool#readme",
+      "versions": [
+        "3.14.0"
+      ]
+    },
+    {
+      "name": "pg-protocol",
+      "license": "MIT",
+      "author": "Brian Carlson",
+      "homepage": "https://github.com/brianc/node-postgres",
+      "versions": [
+        "1.16.1"
+      ]
+    },
+    {
+      "name": "pg-types",
+      "license": "MIT",
+      "author": "Brian M. Carlson",
+      "homepage": "https://github.com/brianc/node-pg-types",
+      "versions": [
+        "2.2.0"
+      ]
+    },
+    {
+      "name": "pgpass",
+      "license": "MIT",
+      "author": "Hannes Hörl <hannes.hoerl+pgpass@snowreporter.com>",
+      "homepage": "https://github.com/hoegaarden/pgpass",
+      "versions": [
+        "1.0.5"
+      ]
+    },
+    {
+      "name": "pgstencil",
+      "license": "MIT",
+      "author": "DiffPlug",
+      "homepage": "https://github.com/diffplug/pgstencil#readme",
+      "versions": [
+        "0.4.0"
+      ]
+    },
+    {
+      "name": "postgres-array",
+      "license": "MIT",
+      "author": "Ben Drucker",
+      "homepage": "https://github.com/bendrucker/postgres-array",
+      "versions": [
+        "2.0.0"
+      ]
+    },
+    {
+      "name": "postgres-bytea",
+      "license": "MIT",
+      "author": "Ben Drucker",
+      "homepage": "https://github.com/bendrucker/postgres-bytea",
+      "versions": [
+        "1.0.1"
+      ]
+    },
+    {
+      "name": "postgres-date",
+      "license": "MIT",
+      "author": "Ben Drucker",
+      "homepage": "https://github.com/bendrucker/postgres-date",
+      "versions": [
+        "1.0.7"
+      ]
+    },
+    {
+      "name": "postgres-interval",
+      "license": "MIT",
+      "author": "Ben Drucker",
+      "homepage": "https://github.com/bendrucker/postgres-interval",
+      "versions": [
+        "1.2.0"
+      ]
+    },
+    {
+      "name": "rou3",
+      "license": "MIT",
+      "author": "Pooya Parsa",
+      "homepage": "https://github.com/h3js/rou3",
+      "versions": [
+        "0.9.2"
+      ]
+    },
+    {
+      "name": "set-cookie-parser",
+      "license": "MIT",
+      "author": "Nathan Friedly",
+      "homepage": "https://github.com/nfriedly/set-cookie-parser",
+      "versions": [
+        "3.1.2"
+      ]
+    },
+    {
+      "name": "split2",
+      "license": "ISC",
+      "author": "Matteo Collina <hello@matteocollina.com>",
+      "homepage": "https://github.com/mcollina/split2",
+      "versions": [
+        "4.2.0"
+      ]
+    },
+    {
+      "name": "xtend",
+      "license": "MIT",
+      "author": "Raynos <raynos2@gmail.com>",
+      "homepage": "https://github.com/Raynos/xtend",
+      "versions": [
+        "4.0.2"
+      ]
+    },
+    {
+      "name": "zod",
+      "license": "MIT",
+      "author": "Colin McDonnell <zod@colinhacks.com>",
+      "homepage": "https://zod.dev",
+      "versions": [
+        "4.6.5"
+      ]
+    }
   ]
 }

@@ -7,19 +7,10 @@ import type { AlertManager } from '../alert-manager';
 import { createAlertHost, type AlertHost, type AlertRealm } from '../../host/alert-host';
 import { createAlertClient, type AlertClientMethods } from '../../host/alert-client';
 import { normalizeExternalUri } from '../external-links';
-import {
-  applyTerminalEvents,
-  collectTerminalClipboardOffers,
-  collectTerminalProtocolResponses,
-  TerminalProtocolParser,
-  textProjectionOf,
-} from '../terminal-protocol';
-import {
-  applyTerminalSemanticEvents,
-} from '../terminal-state-store';
+import { createOwnerPtyStream, type OwnerPtyStream } from '../../host/owner-pty';
+import { applyTerminalSemanticEvents } from '../terminal-state-store';
 import { themeColorProvider } from '../terminal-theme';
 import { applyLiveToolEvents } from '../tool-events';
-import { ToolLaunchLatch } from '../tool-launch-latch';
 import { offerProgramCopy } from '../mouse-selection';
 
 /** This renderer is its host's one realm. */
@@ -69,9 +60,8 @@ export class FakePtyAdapter implements PlatformAdapter {
   private defaultScenario: FakeScenario | null = null;
   private scenarioMap = new Map<string, FakeScenario>();
   private inputHandlers = new Map<string, (data: string) => void>();
-  private protocolParsers = new Map<string, TerminalProtocolParser>();
-  /** Each PTY generation's OSC 367 `open` latch, as a host's owner stream keeps it. */
-  private launchLatches = new Map<string, ToolLaunchLatch>();
+  /** Each PTY generation's parse site, the one every host's owner runs. */
+  private ownerStreams = new Map<string, OwnerPtyStream>();
   private openPortsMap = new Map<string, OpenPort[]>();
   /**
    * The alerts' host role, in process: the renderer's verbs reach it through
@@ -185,8 +175,7 @@ export class FakePtyAdapter implements PlatformAdapter {
     this.resizeHandlers.clear();
     this.spawnHandlers.clear();
     this.inputHandlers.clear();
-    this.protocolParsers.clear();
-    this.launchLatches.clear();
+    this.ownerStreams.clear();
     this.openPortsMap.clear();
     // What this realm parked settles `cancelled`, as a disposing adapter's does.
     this.alerts.dispose();
@@ -207,8 +196,7 @@ export class FakePtyAdapter implements PlatformAdapter {
       this.alertManager.setHelper(id, true);
     }
     this.terminals.add(id);
-    this.protocolParsers.set(id, new TerminalProtocolParser(themeColorProvider));
-    this.launchLatches.set(id, new ToolLaunchLatch());
+    this.ownerStreams.set(id, this.createOwnerStream(id));
     this.terminalSizes.set(id, {
       cols: options?.cols ?? DEFAULT_PTY_SIZE.cols,
       rows: options?.rows ?? DEFAULT_PTY_SIZE.rows,
@@ -289,7 +277,7 @@ export class FakePtyAdapter implements PlatformAdapter {
   writePty(id: string, data: string, options?: WritePtyOptions): void {
     if (options?.userInput) this.alertManager.acknowledge(id, { input: true });
     if (!this.terminals.has(id)) return;
-    if (options?.launch) this.launchLatch(id).arm(data);
+    if (options?.launch) this.ownerStream(id).armLaunch(data);
     // Only echo if no scenario is actively playing
     if (this.activeTimers.has(id)) return;
     // Route to custom input handler if set
@@ -323,8 +311,7 @@ export class FakePtyAdapter implements PlatformAdapter {
     this.pendingHelperPrompts.delete(id);
     this.terminalSizes.delete(id);
     this.inputHandlers.delete(id);
-    this.protocolParsers.delete(id);
-    this.launchLatches.delete(id);
+    this.ownerStreams.delete(id);
     this.openPortsMap.delete(id);
     // The Session is over, so its alert state goes with it.
     this.alertManager.remove(id);
@@ -484,40 +471,33 @@ export class FakePtyAdapter implements PlatformAdapter {
     }
   }
 
-  private getProtocolParser(id: string): TerminalProtocolParser {
-    let parser = this.protocolParsers.get(id);
-    if (!parser) {
-      parser = new TerminalProtocolParser(themeColorProvider);
-      this.protocolParsers.set(id, parser);
+  private ownerStream(id: string): OwnerPtyStream {
+    let stream = this.ownerStreams.get(id);
+    if (!stream) {
+      stream = this.createOwnerStream(id);
+      this.ownerStreams.set(id, stream);
     }
-    return parser;
+    return stream;
   }
 
-  private launchLatch(id: string): ToolLaunchLatch {
-    let latch = this.launchLatches.get(id);
-    if (!latch) {
-      latch = new ToolLaunchLatch();
-      this.launchLatches.set(id, latch);
-    }
-    return latch;
+  private createOwnerStream(id: string): OwnerPtyStream {
+    return createOwnerPtyStream(id, {
+      alerts: this.alertManager,
+      colorProvider: themeColorProvider,
+      // The Tool and terminal-state stores are this renderer's own.
+      onToolEvents: events => applyLiveToolEvents(id, events),
+      onSemanticEvents: events => applyTerminalSemanticEvents(id, events),
+      writeResponse: data => this.inputHandlers.get(id)?.(data),
+      onClipboardOffer: text => offerProgramCopy(id, text),
+      onChunk: chunk => {
+        for (const handler of this.dataHandlers) handler({ id, ...chunk });
+      },
+    });
   }
 
   private emitPtyData(id: string, data: string, options: { skipActivity?: boolean } = {}): void {
-    const parsed = this.getProtocolParser(id).process(data);
-    // The Tool stores are this renderer's own.
-    applyLiveToolEvents(id, this.launchLatch(id).admit(parsed.events));
-    applyTerminalSemanticEvents(id, applyTerminalEvents(this.alertManager, id, parsed.events));
-    const inputHandler = this.inputHandlers.get(id);
-    for (const response of collectTerminalProtocolResponses(parsed.events)) {
-      inputHandler?.(response);
-    }
-    for (const text of collectTerminalClipboardOffers(parsed.events)) offerProgramCopy(id, text);
-
-    if (parsed.visibleData.length === 0) return;
-    if (!options.skipActivity) this.alertManager.onData(id);
-    const textData = textProjectionOf(parsed);
-    for (const handler of this.dataHandlers) {
-      handler({ id, data: parsed.visibleData, textData });
-    }
+    const stream = this.ownerStream(id);
+    if (options.skipActivity) stream.writeChrome(data);
+    else stream.write(data);
   }
 }

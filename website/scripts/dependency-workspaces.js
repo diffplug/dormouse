@@ -1,5 +1,26 @@
-import { existsSync } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { basename, dirname, join, resolve } from 'node:path';
+
+/** Every package `pnpm-workspace.yaml` lists under `repoRoot`, with its directory and manifest. */
+export function getWorkspacePackages(repoRoot) {
+  const workspaceYaml = readFileSync(resolve(repoRoot, 'pnpm-workspace.yaml'), 'utf-8');
+  const dirs = [];
+  let inPackages = false;
+  for (const line of workspaceYaml.split(/\r?\n/)) {
+    if (/^packages:\s*$/.test(line)) {
+      inPackages = true;
+      continue;
+    }
+    if (inPackages && /^\S/.test(line)) break;
+
+    const match = inPackages ? line.match(/^\s*-\s+["']?(.+?)["']?\s*$/) : null;
+    if (match) dirs.push(match[1]);
+  }
+  return dirs.map((dir) => {
+    const absoluteDir = resolve(repoRoot, dir);
+    return { dir: absoluteDir, pkg: JSON.parse(readFileSync(resolve(absoluteDir, 'package.json'), 'utf-8')) };
+  });
+}
 
 // Coverage is checked before resolving node_modules: a newly shipped workspace
 // must not silently disappear just because no existing root depends on it.
@@ -38,8 +59,9 @@ export function assertWorkspaceCoverage(workspacePackages, roots, exclusions) {
 // the peer for this instance (`linkedPeerPackageJsonPath`): it installs a
 // required peer always and an optional one when something in the graph supplies
 // it, as `debug` gets `supports-color` in the Relay. pnpm also reads an optional
-// peer named only in `peerDependenciesMeta`.
-export function getDependencyNames(pkg) {
+// peer named only in `peerDependenciesMeta`. Without `optionalPeers`, only
+// required peers are edges.
+export function getDependencyNames(pkg, { optionalPeers = true } = {}) {
   const edges = [
     ...Object.keys(pkg.dependencies ?? {}).map((name) => ({ name, optional: false, peer: false })),
     ...Object.keys(pkg.optionalDependencies ?? {}).map((name) => ({ name, optional: true, peer: false })),
@@ -51,7 +73,8 @@ export function getDependencyNames(pkg) {
     ...Object.keys(peerMeta).filter((name) => peerMeta[name]?.optional),
   ]);
   for (const name of peers) {
-    if (!declared.has(name)) edges.push({ name, optional: Boolean(peerMeta[name]?.optional), peer: true });
+    const optional = Boolean(peerMeta[name]?.optional);
+    if (!declared.has(name) && (optionalPeers || !optional)) edges.push({ name, optional, peer: true });
   }
   return edges;
 }
