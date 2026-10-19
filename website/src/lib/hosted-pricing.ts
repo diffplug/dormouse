@@ -113,7 +113,7 @@ export function pricingJsonLd(pageUrl: string): string {
     "@type": "Product",
     name: "Dormouse Hosted",
     description:
-      "The Individual plan for Dormouse: the managed Relay for Pocket and managed voices "
+      "The Individual plan for Dormouse: the managed Relay for Pocket and Natural Voice "
       + "for spoken alarms. The terminal itself stays free.",
     brand: { "@type": "Brand", name: "Dormouse" },
     url: pageUrl,

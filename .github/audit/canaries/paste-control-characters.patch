@@ -57,7 +57,7 @@ index 69a8ed7bf..4e73e342a 100644
 +import { shellCommandKind } from 'dor/commands/shell-quote';
  import { beginClipboardAttempt, describeError, noteClipboardStep, reportClipboardFailure, type ClipboardAttempt } from './clipboard-failure';
  import { getMouseSelectionState } from './mouse-selection';
- import { getPlatform, PLATFORM_STRING } from './platform';
+ import { getPlatform, getPlatformOrNull, PLATFORM_STRING } from './platform';
 @@ -105,19 +104,13 @@ function writePasteToPty(terminalId: string, text: string): void {
    writeUserInput(terminalId, payload);
  }

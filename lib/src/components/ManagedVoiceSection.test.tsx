@@ -78,7 +78,7 @@ describe('ManagedVoiceSection', () => {
     expect(text()).toContain('though no limit is guaranteed');
     expect(container.querySelector('input')).toBeNull();
 
-    await act(async () => button('Enable managed voice')!.click());
+    await act(async () => button('Turn on Natural Voice')!.click());
     expect(begin).toHaveBeenCalledOnce();
     expect(command).not.toHaveBeenCalledWith('beginHostedEnrollment', expect.anything());
   });
@@ -91,7 +91,7 @@ describe('ManagedVoiceSection', () => {
       onShowNetwork,
     );
     expect(text()).toContain('Choose Local networks or Anywhere in');
-    expect(button('Enable managed voice')).toBeUndefined();
+    expect(button('Turn on Natural Voice')).toBeUndefined();
     await act(async () => button('Network')!.click());
     expect(onShowNetwork).toHaveBeenCalledOnce();
     expect(command).not.toHaveBeenCalledWith('beginHostedEnrollment', expect.anything());
@@ -99,8 +99,8 @@ describe('ManagedVoiceSection', () => {
 
   it('enrolled, picks a voice from the curated set', async () => {
     const { voice } = await render({ status: ENROLLED });
-    expect(text()).toContain('Managed voice is enabled.');
-    const select = container.querySelector<HTMLSelectElement>('select[aria-label="Managed voice"]')!;
+    expect(text()).toContain('Natural Voice is on.');
+    const select = container.querySelector<HTMLSelectElement>('select[aria-label="Natural Voice"]')!;
     expect([...select.options].map((option) => option.value)).toEqual(MANAGED_VOICES.map((v) => v.id));
     const configure = vi.spyOn(voice, 'configure');
     await act(async () => {
@@ -126,17 +126,17 @@ describe('ManagedVoiceSection', () => {
 
   it('offers voice independently when remote control is already enrolled', async () => {
     await render({ status: ENROLLED }, makeStubManagedVoicePort(false));
-    expect(button('Enable managed voice')).toBeDefined();
+    expect(button('Turn on Natural Voice')).toBeDefined();
     expect(container.querySelector('select')).toBeNull();
   });
 
   it('disconnects voice after confirming without clearing remote control', async () => {
     const { command, voice } = await render({ status: ENROLLED });
     const disconnect = vi.spyOn(voice, 'disconnect');
-    await act(async () => button('Disconnect')!.click());
+    await act(async () => button('Turn off')!.click());
     expect(text()).toContain('Alarms will use your system voice.');
     expect(command).not.toHaveBeenCalledWith('clearEnrollment');
-    await act(async () => button('Disconnect')!.click());
+    await act(async () => button('Turn off')!.click());
     expect(disconnect).toHaveBeenCalledOnce();
     expect(command).not.toHaveBeenCalledWith('clearEnrollment');
   });
@@ -148,11 +148,11 @@ describe('ManagedVoiceSection', () => {
       await voice.configure({ voiceId: original.voiceId }); // Broadcast the failed-clear status.
       return { ok: false, message: 'Disconnecting did not finish.' };
     });
-    await act(async () => button('Disconnect')!.click());
-    await act(async () => button('Disconnect')!.click());
+    await act(async () => button('Turn off')!.click());
+    await act(async () => button('Turn off')!.click());
     expect(text()).toContain('Disconnecting did not finish.');
-    expect(button('Enable managed voice')).toBeUndefined();
-    await act(async () => button('Retry disconnect')!.click());
+    expect(button('Turn on Natural Voice')).toBeUndefined();
+    await act(async () => button('Retry')!.click());
     expect(disconnect).toHaveBeenCalledTimes(2);
     expect(command).not.toHaveBeenCalledWith('clearEnrollment');
   });
@@ -161,8 +161,8 @@ describe('ManagedVoiceSection', () => {
 
 describe('the spoken-alarm copy', () => {
   it.each([
-    ['no port', false, 'Get managed ElevenLabs voices.'],
-    ['a Hosted build’s port', true, 'Uses managed voice when enabled below'],
+    ['no port', false, 'Get ElevenLabs voices with Natural Voice.'],
+    ['a Hosted build’s port', true, 'Uses Natural Voice when turned on below'],
   ])('with %s', async (_label, port, copy) => {
     const adapter = new FakePtyAdapter();
     setPlatform(port ? Object.assign(adapter, { managedVoice: makeStubManagedVoicePort(false) }) : adapter);

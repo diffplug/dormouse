@@ -1,11 +1,21 @@
 import type { VoiceEnv } from "./bindings";
 import { NO_PAGE_RULES } from "./headers";
-import { TOKEN_OWNER, elevenLabs, speakRoute, sweepOnCron } from "./voice";
+import {
+  LIVE_TOKEN,
+  TOKEN_OWNER,
+  TOKEN_SWEEP_CRON,
+  elevenLabs,
+  sweepIdleTokens,
+  sweepOnCron,
+  voiceBearerRoutes,
+} from "./voice";
 import { workerApp } from "./worker-app";
 
 /**
- * The voice Worker (`voice.dormouse.sh`): readiness, bearer-token speech, and
- * the Cron Trigger's ElevenLabs history sweep. No cookie, no auth, no assets.
+ * The voice Worker (`voice.dormouse.sh`): readiness, bearer-token speech and
+ * forgetting, and two Cron Triggers: the ElevenLabs history sweep, which never
+ * touches the database, and the daily idle-token sweep. No cookie, no auth, no
+ * assets.
  * `sweepDelayMs` exists for the test entry; production keeps the default.
  */
 export function voiceApp(
@@ -17,10 +27,10 @@ export function voiceApp(
     rules: () => NO_PAGE_RULES,
     // Speak's token lookup, its WHERE columns included: the role's own table
     // and the entitlement's columns.
-    ready: `${TOKEN_OWNER} WHERE t.hash IS NULL AND t."revokedAt" IS NULL LIMIT 0`,
+    ready: `${TOKEN_OWNER} WHERE t.hash IS NULL AND ${LIVE_TOKEN} LIMIT 0`,
     unavailable: "Managed voice is temporarily unavailable. Please try again.",
     routes(app) {
-      speakRoute(app, (c) => {
+      voiceBearerRoutes(app, (c) => {
         const key = c.env.ELEVENLABS_API_KEY;
         return {
           databaseUrl: c.env.HYPERDRIVE.connectionString,
@@ -34,9 +44,12 @@ export function voiceApp(
         };
       });
     },
-    // The Cron Trigger: the mapper decides whether a key reaches the sweep.
-    async scheduled(_controller, env) {
-      if (env.ELEVENLABS_API_KEY) await sweepOnCron(env.ELEVENLABS_API_KEY);
+    // Every other schedule is the history sweep's, and the mapper decides
+    // whether a key reaches it.
+    async scheduled(controller, env) {
+      if ((controller as { cron?: string }).cron === TOKEN_SWEEP_CRON)
+        await sweepIdleTokens(env.HYPERDRIVE.connectionString);
+      else if (env.ELEVENLABS_API_KEY) await sweepOnCron(env.ELEVENLABS_API_KEY);
     },
   });
 }

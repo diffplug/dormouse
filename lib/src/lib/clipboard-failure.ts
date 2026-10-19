@@ -10,13 +10,31 @@ export interface ClipboardFailure {
   count: number;
 }
 
-/** When the page last saw a trusted press or key, which is what grants a
- *  clipboard write its activation. */
-const lastInput: Record<'pointerdown' | 'keydown', number | undefined> = { pointerdown: undefined, keydown: undefined };
+/** The trusted input events that can grant, or follow from, a clipboard
+ *  write's activation. */
+const TIMELINE_EVENTS = ['keydown', 'pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'] as const;
+const TIMELINE_LENGTH = 12;
+
+/** The latest trusted input events, oldest first, each with whether the page
+ *  held transient activation as it arrived: whether a failed write's press was
+ *  never granted activation, or was granted and lost before its click. */
+const timeline: Array<{ type: string; at: number; target: string; active: boolean | undefined }> = [];
 if (typeof window !== 'undefined') {
-  for (const type of ['pointerdown', 'keydown'] as const) {
-    window.addEventListener(type, event => { if (event.isTrusted) lastInput[type] = performance.now(); }, { capture: true, passive: true });
-  }
+  for (const type of TIMELINE_EVENTS) window.addEventListener(type, recordInput, { capture: true, passive: true });
+}
+
+/** Add one input event to the timeline; exported because tests cannot
+ *  dispatch a trusted event. */
+export function recordInput(event: Pick<Event, 'type' | 'isTrusted' | 'target'>): void {
+  if (!event.isTrusted) return;
+  timeline.push({ type: event.type, at: performance.now(), target: describeElement(event.target), active: navigator.userActivation?.isActive });
+  if (timeline.length > TIMELINE_LENGTH) timeline.shift();
+}
+
+function describeElement(target: EventTarget | null): string {
+  if (!(target instanceof Element)) return 'none';
+  const firstClass = typeof target.className === 'string' ? target.className.trim().split(/\s+/)[0] : '';
+  return target.tagName.toLowerCase() + (firstClass ? `.${firstClass}` : '');
 }
 
 /** The page's state when a write starts, read synchronously so it describes
@@ -31,7 +49,6 @@ export function beginClipboardAttempt(textLength: number): ClipboardAttempt {
   const activation = typeof navigator === 'undefined' ? undefined : navigator.userActivation;
   const event = typeof window === 'undefined' ? undefined : (window as { event?: Event }).event;
   const active = typeof document === 'undefined' ? null : document.activeElement;
-  const since = (at: number | undefined) => at === undefined ? 'never' : `${Math.round(now - at)}ms ago`;
   return {
     startedAt: now,
     lines: [
@@ -40,10 +57,10 @@ export function beginClipboardAttempt(textLength: number): ClipboardAttempt {
       `textLength: ${textLength}`,
       `activation: ${activation ? `isActive=${activation.isActive} hasBeenActive=${activation.hasBeenActive}` : 'unsupported'}`,
       `event: ${event ? `${event.type} isTrusted=${event.isTrusted}` : 'none'}`,
-      `lastPointerdown: ${since(lastInput.pointerdown)}`,
-      `lastKeydown: ${since(lastInput.keydown)}`,
       `document: hasFocus=${typeof document === 'undefined' ? 'n/a' : document.hasFocus()} visibility=${typeof document === 'undefined' ? 'n/a' : document.visibilityState}`,
-      `activeElement: ${active ? active.tagName.toLowerCase() + (active.className && typeof active.className === 'string' ? `.${active.className.trim().split(/\s+/)[0]}` : '') : 'none'}`,
+      `activeElement: ${describeElement(active)}`,
+      'input timeline (trusted, oldest first; activation as each arrived):',
+      ...(timeline.length === 0 ? ['  none'] : timeline.map(entry => `  -${Math.round(now - entry.at)}ms ${entry.type} ${entry.target} active=${entry.active ?? 'unknown'}`)),
     ],
   };
 }

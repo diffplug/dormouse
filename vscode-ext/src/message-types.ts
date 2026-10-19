@@ -24,6 +24,7 @@ export type WebviewMessage =
   | { type: 'surface:reserveIds'; count: number; floor: number; requestId: string }
   | { type: 'clipboard:readFiles'; requestId: string }
   | { type: 'clipboard:readImage'; requestId: string }
+  | { type: 'clipboard:writeText'; text: string; requestId: string }
   | { type: 'dormouse:openExternal'; uri: string }
   | { type: 'dormouse:runWorkbenchCommand'; command: VSCodeWorkbenchCommand }
   // Validated host-side, so the webview's shape is not trusted here.
@@ -82,6 +83,7 @@ export type ExtensionMessage =
   | { type: 'surface:reservedIds'; ids: string[]; requestId: string }
   | { type: 'clipboard:files'; paths: string[] | null; requestId: string }
   | { type: 'clipboard:image'; path: string | null; requestId: string }
+  | { type: 'clipboard:written'; error?: string; requestId: string }
   | { type: 'browser:result'; result: BrowserResult; requestId: string }
   | { type: 'iframe:proxyUrl'; requestId: string; result: IframeProxyResult }
   | { type: 'tool:result'; requestId: string; result: ToolControlResult }

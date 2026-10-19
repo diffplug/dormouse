@@ -8,22 +8,21 @@ import {
 import {
   acceptTerms,
   approveEnrollment,
-  createVoiceToken,
   getAccounts,
   getComputers,
+  getHostedVoice,
   getProviders,
   getSession,
-  getVoiceTokens,
   post,
   providerNames,
   removeComputer,
-  revokeVoiceToken,
   social,
+  turnOffHostedVoice,
   type Account,
   type Computer,
+  type HostedVoice,
   type Provider,
   type Session,
-  type VoiceToken,
 } from "./api";
 import {
   LOGIN_FRESH_AGE_MS,
@@ -69,9 +68,10 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
   const [session, setSession] = useState<Session | null>(null);
   const [enabled, setEnabled] = useState<Provider[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
-  // Null hides the Voice tokens section.
-  const [voiceTokens, setVoiceTokens] = useState<VoiceToken[] | null>(null);
-  // Null hides the Computers section, as for voice tokens.
+  // Null hides the Natural Voice section.
+  const [hostedVoice, setHostedVoice] = useState<HostedVoice | null>(null);
+  const turnOffDialog = useRef<HTMLDialogElement>(null);
+  // Null hides the Computers section.
   const [computers, setComputers] = useState<Computer[] | null>(null);
   // The enrollment awaiting approval, in memory only: through sign-in and
   // back, never into storage (docs/specs/hosted.md -> "Burrow enrollment").
@@ -81,7 +81,6 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
     enrollingRef.current = next;
     setEnrollingState(next);
   };
-  const [minted, setMinted] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -103,10 +102,10 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
       getProviders(),
     ]);
     // A failed list hides its section, never the account page.
-    const [linked, tokens, enrolled] = current
+    const [linked, voice, enrolled] = current
       ? await Promise.all([
           getAccounts(),
-          getVoiceTokens().catch(() => null),
+          getHostedVoice().catch(() => null),
           getComputers().catch(() => null),
         ])
       : [[], null, null];
@@ -115,7 +114,7 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
     setSession(current);
     setEnabled(providers);
     setAccounts(linked);
-    setVoiceTokens(tokens);
+    setHostedVoice(voice);
     setComputers(enrolled);
     history.replaceState(
       null,
@@ -223,8 +222,8 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
       await post("sign-out");
       setSession(null);
       setAccounts([]);
+      setHostedVoice(null);
       setComputers(null);
-      setMinted("");
       setEnterCode(false);
       setCode("");
       await refresh();
@@ -232,25 +231,16 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
         "Signed out of this browser. Your other devices stay signed in.",
       );
     });
-  const mintToken = () =>
-    act("mint", async () => {
-      const { token, id, createdAt } = await createVoiceToken();
-      setMinted(token);
-      setVoiceTokens((tokens) => [
-        { id, createdAt, lastUsedAt: null, revokedAt: null },
-        ...(tokens ?? []),
-      ]);
-    });
-  const revokeToken = (id: string) =>
-    act(`revoke-${id}`, async () => {
-      await revokeVoiceToken(id);
-      const revokedAt = new Date().toISOString();
-      setVoiceTokens(
-        (tokens) =>
-          tokens?.map((token) =>
-            token.id === id ? { ...token, revokedAt } : token,
-          ) ?? null,
-      );
+  const turnOffVoice = () =>
+    act("voice-off", async () => {
+      try {
+        await turnOffHostedVoice();
+      } finally {
+        // Closed either way, so a failure's error shows on the page.
+        turnOffDialog.current?.close();
+      }
+      setHostedVoice((voice) => voice && { ...voice, on: false });
+      setNotice("Natural Voice is off. Your computers use the system voice.");
     });
   const approve = (code: string) =>
     act("approve", async () => {
@@ -275,11 +265,8 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
           null,
       );
     });
-  const copyMinted = () =>
-    act("copy", async () => {
-      await navigator.clipboard.writeText(minted);
-      setNotice("Token copied. Paste it into Dormouse’s voice settings.");
-    });
+  // A lapsed account still sees, and may turn off, a Natural Voice left on.
+  const voiceShown = !!hostedVoice && (hostedVoice.entitled || hostedVoice.on);
   const fresh =
     session &&
     Date.now() - Date.parse(session.session.createdAt) < LOGIN_FRESH_AGE_MS;
@@ -300,7 +287,7 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
             ? "Coming soon"
             : enrolling
             ? enrolling.purpose === "voice"
-              ? "Enable managed voice"
+              ? "Turn on Natural Voice"
               : "Enroll remote control"
             : session
               ? "Your account"
@@ -314,7 +301,7 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
               ? "This link cannot be approved."
               : session
                 ? enrolling.purpose === "voice"
-                  ? "Dormouse asked to use managed voice with this account."
+                  ? "Dormouse asked to turn on Natural Voice with this account."
                   : "Dormouse asked to enroll remote control with this account."
                 : "Sign in to approve the computer that sent you here."
             : session
@@ -464,58 +451,58 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
                       </p>
                     )}
                 </section>
-                {voiceTokens && (
+                {voiceShown && (
                   <section aria-labelledby="voice">
-                    <h2 id="voice">Voice tokens</h2>
-                    <p className="help">
-                      Enabling managed voice in Dormouse gives it its own token.
-                      Revoke a token here to stop its access. Managed voice is in admin-only testing.
-                    </p>
-                    {minted && (
-                      <div className="notice minted">
-                        <p>Copy this token now. You won’t see it again.</p>
-                        <code>{minted}</code>
+                    <h2 id="voice">Natural Voice</h2>
+                    {hostedVoice.on ? (
+                      <>
+                        <p className="help">
+                          {hostedVoice.entitled
+                            ? "Alarms use Natural Voice on the computers where you turned it on."
+                            : "Natural Voice is on for your computers, but your account has no Hosted plan, so alarms use the system voice."}{" "}
+                          Natural Voice is in admin-only testing.
+                        </p>
                         <button
-                          className="copy"
                           disabled={!!busy}
-                          onClick={() => void copyMinted()}
+                          onClick={() => turnOffDialog.current?.showModal()}
                         >
-                          Copy token
+                          Turn off Natural Voice
+                        </button>
+                      </>
+                    ) : (
+                      <p className="help">
+                        To turn on Natural Voice, open Dormouse on your computer
+                        and go to Settings → Notifications. Natural Voice is in
+                        admin-only testing.
+                      </p>
+                    )}
+                    <dialog
+                      ref={turnOffDialog}
+                      aria-labelledby="voice-off-title"
+                      onCancel={(event) => busy && event.preventDefault()}
+                    >
+                      <h2 id="voice-off-title">Turn off Natural Voice?</h2>
+                      <p>
+                        Every computer where you turned it on goes back to the
+                        system voice. To use Natural Voice again, turn it on in
+                        Dormouse on each computer.
+                      </p>
+                      <div className="dialog-actions">
+                        <button
+                          disabled={!!busy}
+                          onClick={() => turnOffDialog.current?.close()}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          className="confirm"
+                          disabled={!!busy}
+                          onClick={() => void turnOffVoice()}
+                        >
+                          {busy === "voice-off" ? "Turning off…" : "Turn off"}
                         </button>
                       </div>
-                    )}
-                    {voiceTokens.map((token) => (
-                      <div className="method" key={token.id}>
-                        <span>
-                          Created{" "}
-                          {new Date(token.createdAt).toLocaleDateString()}
-                          <span className="detail">
-                            {token.lastUsedAt
-                              ? `Last used ${new Date(token.lastUsedAt).toLocaleString()}`
-                              : "Never used"}
-                          </span>
-                        </span>
-                        {token.revokedAt ? (
-                          <span className="status">Revoked</span>
-                        ) : (
-                          <button
-                            disabled={!!busy}
-                            onClick={() => void revokeToken(token.id)}
-                          >
-                            {busy === `revoke-${token.id}`
-                              ? "Revoking…"
-                              : "Revoke"}
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                    <button
-                      className="mint"
-                      disabled={!!busy}
-                      onClick={() => void mintToken()}
-                    >
-                      {busy === "mint" ? "Creating…" : "Create token"}
-                    </button>
+                    </dialog>
                   </section>
                 )}
                 {computers && (
@@ -564,13 +551,13 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
                     {busy === "logout" ? "Signing out…" : "Sign out"}
                   </button>
                 </section>
-                {!(voiceTokens && computers) && (
+                {!(voiceShown && computers) && (
                   <p className="footnote">
-                    {voiceTokens
+                    {voiceShown
                       ? "Remote control is"
                       : computers
-                        ? "Hosted voice is"
-                        : "Hosted voice and remote control are"}{" "}
+                        ? "Natural Voice is"
+                        : "Natural Voice and remote control are"}{" "}
                     not available yet.
                   </p>
                 )}
@@ -720,7 +707,7 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
                 )}
                 {!enrolling && (
                   <p className="footnote">
-                    Hosted voice and remote control are not available yet.
+                    Natural Voice and remote control are not available yet.
                   </p>
                 )}
               </>
