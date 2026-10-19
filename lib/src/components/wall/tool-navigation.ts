@@ -1,7 +1,7 @@
 import { readToolViewPosition, type ToolViewPosition } from 'dor-tools-lib/protocol';
 import { SURFACE_CONTROL_METHODS } from 'dor/protocol';
 import { parseRenderMode } from 'dor-lib-common/browser-providers';
-import { builtinHandler } from 'dor-tools-builtin/file-viewer-format';
+import { builtinHandler, fileViewerFormat, runsOwnScript } from 'dor-tools-builtin/file-viewer-format';
 import { getPlatform } from '../../lib/platform';
 import { dispatchDorControlRequest } from '../../lib/platform/dor-control-dispatch';
 import { toolEditorView } from '../../lib/tool-editor';
@@ -32,6 +32,21 @@ export function toolNavigationPending(params: Record<string, unknown> | undefine
 export function toolHandlerName(scope: unknown, name: unknown): string | undefined {
   if (typeof name !== 'string') return undefined;
   return scope === 'builtin' ? builtinHandler('kind', name)?.tool : name;
+}
+
+/**
+ * Whether a document-link open of `target`, resolved to the handler `scope` and
+ * `name` name, waits for the user to confirm it in host UI: the target is a
+ * format whose built-in preview runs the file's own script, and the handler is
+ * not a built-in that shows it inertly. A user or repository Tool given such a
+ * file is assumed to render it too. A link may climb with `..` to anywhere on
+ * disk under any link text, so the page cannot be the one that asks.
+ */
+export function documentLinkNeedsConfirmation(scope: unknown, name: unknown, target: string): boolean {
+  const format = fileViewerFormat(target);
+  if (!format || !runsOwnScript(format)) return false;
+  const handler = toolHandlerName(scope, name);
+  return handler !== 'builtin:code' && handler !== 'builtin:folder';
 }
 
 export function toolLocation(params: Record<string, unknown>, cwd: string): ToolLocation | null {

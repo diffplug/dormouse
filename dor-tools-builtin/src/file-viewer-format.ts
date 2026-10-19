@@ -81,6 +81,14 @@ export function builtinHandler(by: 'tool' | 'kind' | 'argv', value: unknown): Bu
   return BUILTIN_HANDLERS.find(handler => handler[by] === value);
 }
 
+/** Whether `builtin:file` serves this format as a page that runs the file's
+ * own script: HTML, and SVG, which it serves as its own document under the
+ * viewer CSP's inline scripts. Everything else it shows inertly or in its own
+ * shipped editor. */
+export function runsOwnScript(format: FileFormat): boolean {
+  return !format.text && /^(text\/html|image\/svg\+xml)\b/.test(format.mime);
+}
+
 /** The built-in a folder or a file opens with when no rule matches. */
 export function defaultBuiltin(folder: boolean): BuiltinHandler {
   return BUILTIN_HANDLERS.find(handler => handler.opens === (folder ? 'folder' : 'file'))!;

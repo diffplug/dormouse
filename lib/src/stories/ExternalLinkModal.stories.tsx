@@ -2,8 +2,9 @@ import { useState, type ComponentProps } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { ExternalLinkModal } from '../components/ExternalLinkModal';
 import { classifyDisplayMatch, inspectExternalUri } from '../lib/external-links';
+import { documentLinkRequest } from '../lib/external-link-confirmation';
 
-function ExternalLinkModalStory({ uri, displayText, ...dialog }: { uri: string; displayText: string } & Pick<ComponentProps<typeof ExternalLinkModal>, 'handlers' | 'error' | 'busy'>) {
+function ExternalLinkModalStory({ uri, displayText, documentLink = false, ...dialog }: { uri: string; displayText: string; documentLink?: boolean } & Pick<ComponentProps<typeof ExternalLinkModal>, 'handlers' | 'error' | 'busy'>) {
   const [selected, setSelected] = useState(0);
   return (
     <div className="relative h-[360px] w-[680px] overflow-hidden rounded bg-app-bg font-mono text-terminal-fg">
@@ -15,7 +16,7 @@ function ExternalLinkModalStory({ uri, displayText, ...dialog }: { uri: string; 
         {...dialog}
         selected={selected}
         onSelect={setSelected}
-        request={{
+        request={documentLink ? documentLinkRequest(uri) : {
           uri,
           displayText,
           verdict: classifyDisplayMatch(uri, displayText),
@@ -129,5 +130,15 @@ export const FileOpenFailed: Story = {
     uri: 'file:///Users/dev/project/image.png',
     displayText: '[Image #2]',
     error: 'no such file or folder: file:///Users/dev/project/image.png',
+  },
+};
+
+// A Markdown link whose target runs its own scripts: the Tool's page named it,
+// so the host asks with the full resolved path before it opens.
+export const DocumentLinkToActivePage: Story = {
+  args: {
+    uri: '/Users/dev/Downloads/report/index.html',
+    displayText: '',
+    documentLink: true,
   },
 };
