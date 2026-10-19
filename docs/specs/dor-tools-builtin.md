@@ -51,6 +51,7 @@ Source of truth: `saveText` / `StorePath` in `dor-tools-builtin/src/editor-route
 - **Must write a pasted or dropped PNG, JPEG, GIF, or WebP beside the document as a new file**, signature-checked, at most 32 MiB, never replacing a file; its reference is an unsaved edit.
 - **Must rename a listed image on disk at once**, to an image name in its own directory not starting with `.`, never replacing another file (case-only renames allowed); rewritten references are an unsaved edit.
 - **Must show an image's current pixels after Reload**, including a file changed outside the page (rationale).
+- **Never rewrite a Markdown image's stated dimensions when its file is edited.**
 
 Source of truth: `dor-tools-builtin/viewer/markdown.tsx`; `safeCreateDOM` in `dor-tools-builtin/viewer/markdown-safety.ts`; `editorRoutes` in `dor-tools-builtin/src/editor-routes.ts`; `dor-tools-builtin/src/markdown-images.ts`. Tests: `dor-tools-builtin/test/markdown-editor.test.mjs`.
 

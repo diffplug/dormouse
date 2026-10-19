@@ -20,7 +20,7 @@ Without a title, a viewer's header falls back to its running command, `dor __vie
 
 MDXEditor 4.3 parses `<!-- … -->` and discards it, and trims and re-serializes the whole document on export; without the comment node and style detection, saving a typical README after a one-word edit deleted its comments and rewrote every `-` bullet as `*` (measured 2026-10).
 
-Image sizes live in the document because GitHub shows an `<img>` without a `width` pixel for pixel: a Retina screenshot shown here at its recorded scale but left unsized in the file came out twice as large on GitHub. Writing the width on paste keeps the two renderings alike. Editing an image's file leaves the widths that reference it as they are, since the image opens as its own document, which cannot see the Markdown stating them (2026-10).
+Image sizes live in the document because GitHub shows an `<img>` without a `width` pixel for pixel: a Retina screenshot shown here at its recorded scale but left unsized in the file came out twice as large on GitHub. Writing the width on paste keeps the two renderings alike (2026-10).
 
 Image URLs carry a per-load generation because the browser keeps decoded images by URL: a reload that only remounted the editor still showed an image's old pixels after the file changed on disk (observed live, 2026-10).
 
