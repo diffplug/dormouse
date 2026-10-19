@@ -19,7 +19,7 @@
  * See docs/specs/website-docs.md.
  */
 
-import { existsSync, realpathSync } from 'node:fs';
+import { existsSync, realpathSync, statSync } from 'node:fs';
 import { readFile, readdir, writeFile, mkdir, copyFile, rm } from 'node:fs/promises';
 import { dirname, join, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -720,6 +720,56 @@ function assertDistinctSetups(names, label) {
   if (repeated.length > 0) throw new Error(`${label} repeats ${repeated.join(', ')}`);
 }
 
+/** The guarantees' column naming what pins each row on every build. */
+const SECURITY_PINNED_COLUMN = 'Pinned by';
+
+/**
+ * Link every repository path a guarantee row's `Pinned by` cell names to that
+ * file on GitHub, so a reader can open what pins the row. A code span holding a
+ * `/` is a path, and one that does not exist fails the build; any other (`cargo
+ * test`) stays code. The links carry no `repoPath`: they name what pins a row,
+ * never the spec that classifies it ({@link securityAudiences}).
+ */
+export function linkPinnedBy(page) {
+  const { title, block } = securitySections(page).find(({ key }) => key === 'guarantees');
+  const column = block.header.findIndex((cell) => inlineToText(cell).trim() === SECURITY_PINNED_COLUMN);
+  if (column === -1) throw new Error(`/security: "${title}" has no "${SECURITY_PINNED_COLUMN}" column`);
+  for (const row of block.rows) {
+    row[column] = row[column].map((node) => {
+      if (node.type !== 'code' || !node.value.includes('/')) return node;
+      const file = join(repoRoot, node.value);
+      if (!existsSync(file)) throw new Error(`/security: "${title}" is pinned by ${node.value}, which does not exist`);
+      const view = statSync(file).isDirectory() ? REPO_BLOB_BASE.replace(/\/blob\//, '/tree/') : REPO_BLOB_BASE;
+      return { type: 'link', href: `${view}/${node.value}`, children: [node] };
+    });
+  }
+}
+
+/**
+ * An audience's three blocks with no setup tags: the guarantees without their
+ * `Applies to` column, each bullet without the emphasis it opens with. For a
+ * page that shows no setup table to read the tags against.
+ */
+export function withoutSetups(sections) {
+  const { guarantees, notDefended, knownGaps } = sections;
+  const column = guarantees.header.findIndex((cell) => inlineToText(cell).trim() === SECURITY_SETUP_COLUMN);
+  if (column === -1) throw new Error(`/security: "Guarantees" has no "${SECURITY_SETUP_COLUMN}" column`);
+  const drop = (cells) => cells.filter((_, i) => i !== column);
+  const untag = (item) => {
+    const [first, ...rest] = item.children;
+    const [tag, space, ...inline] = first.children;
+    if (tag?.type !== 'em' || space?.type !== 'text') throw new Error('/security: a bullet opens with no *setup* tag');
+    const lead = space.value.trimStart();
+    return { ...item, children: [{ ...first, children: lead ? [{ ...space, value: lead }, ...inline] : inline }, ...rest] };
+  };
+  return {
+    ...sections,
+    guarantees: { ...guarantees, align: drop(guarantees.align), header: drop(guarantees.header), rows: guarantees.rows.map(drop) },
+    notDefended: { ...notDefended, items: notDefended.items.map(untag) },
+    knownGaps: { ...knownGaps, items: knownGaps.items.map(untag) },
+  };
+}
+
 /**
  * `/security` from docs/specs/security.md, every section of it.
  *
@@ -728,7 +778,9 @@ function assertDistinctSetups(names, label) {
  * `canonicalUrl`, because the delta removes no section — the page is the spec,
  * which is the point of publishing it. `pageBlocks` is the same document with
  * the three split blocks narrowed to {@link SECURITY_PAGE_AUDIENCES}; `blocks`
- * keeps every entry. `setups` is the setup table's vocabulary, every entry's
+ * keeps every entry. `supplyChain` is `/supply-chain`'s audience without its
+ * setup tags: that page splits its inventory by product and has no setup table
+ * to read them against. `setups` is the setup table's vocabulary, every entry's
  * tags checked against it ({@link securitySetups}).
  */
 const buildSecurity = async () => {
@@ -738,12 +790,14 @@ const buildSecurity = async () => {
     label: '/security',
     fallbackTitle: 'Security',
   });
+  linkPinnedBy(page);
   const audiences = securityAudiences(page);
   return {
     ...page,
     setups: securitySetups(page).names,
     audiences,
     pageBlocks: audienceBlocks(page, audiences, SECURITY_PAGE_AUDIENCES),
+    supplyChain: withoutSetups(audiences['supply-chain']),
     auditIndex: await auditIndex(),
   };
 };

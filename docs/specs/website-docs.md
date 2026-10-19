@@ -194,7 +194,7 @@ Source of truth: `SELF_HOST_DELTA` in `website/scripts/generate-docs.js`; `SelfH
 
 **Must** render the guarantees table and the two lists by audience, from `docs.security.json`, never restated: `securityAudiences` splits each entry by the spec its links name, and an entry naming no spec, a spec in no group, or two groups fails the build. **`/security` must render the `self-host` audience's entries beside its own** (`SECURITY_PAGE_AUDIENCES`): a Hosted or one-time reader is never sent to `/self-host`.
 
-**Must tag every guarantee row and list bullet with the setups it applies to**, named only from the first column of the spec's "Setups" table: a row in its `Applies to` cell, a bullet in the emphasis it opens with. `securitySetups` fails the build on an entry with no tag, an unknown or repeated one, a setup no entry uses, or a missing table. Setups say which reader must know an entry, never which page shows it; the audience split ignores them.
+**Must tag every guarantee row and list bullet with the setups it applies to**, named only from the first column of the spec's "Setups" table: a row in its `Applies to` cell, a bullet in the emphasis it opens with. `securitySetups` fails the build on an entry with no tag, an unknown or repeated one, a setup no entry uses, or a missing table. Setups say which reader must know an entry, never which page shows it; the audience split ignores them. **`/supply-chain` shows no tags** (`withoutSetups`): it splits its inventory by product and has no setup table to read them against.
 
 ```mermaid
 flowchart LR

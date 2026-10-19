@@ -252,10 +252,11 @@ const PRODUCTS: readonly SupplyChainProduct[] = [
 
 /**
  * The security spec's rows and bullets for what reaches a user's machine,
- * rendered from `docs.security.json` rather than restated here
+ * rendered from `docs.security.json` rather than restated here, without the
+ * setup tags this page has no setup table for
  * (docs/specs/website-docs.md -> `/security` spec).
  */
-const CONTRACT = security.audiences["supply-chain"];
+const CONTRACT = security.supplyChain;
 
 /** The spec's subsections this page shows, each only while it has something to say. */
 const CONTRACT_SECTIONS = [

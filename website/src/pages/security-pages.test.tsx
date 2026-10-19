@@ -48,12 +48,15 @@ const PAGES = [
     element: <SecurityDocs />,
     // Remote control's rows too: Hosted and one-time readers never visit /self-host.
     audiences: ["security", "self-host"],
+    tagged: true,
     links: [sitePath("/supply-chain"), sitePath("/self-host")],
   },
   {
     route: "/supply-chain",
     element: <SupplyChain />,
     audiences: ["supply-chain"],
+    // Split by product, with no setup table to read a tag against.
+    tagged: false,
     links: [
       `${sitePath("/security")}#how-the-guarantees-are-checked`,
       `${sitePath("/self-host")}#what-the-installer-does`,
@@ -63,6 +66,7 @@ const PAGES = [
     route: "/self-host",
     element: <SelfHostDocs />,
     audiences: ["self-host"],
+    tagged: true,
     links: [
       `${sitePath("/security")}#how-the-guarantees-are-checked`,
       sitePath("/supply-chain"),
@@ -137,7 +141,16 @@ it("/security names every setup in its setup table, ahead of the guarantees", ()
 });
 
 describe("setup tags", () => {
-  for (const page of PAGES) {
+  for (const page of PAGES.filter((page) => !page.tagged)) {
+    it(`${page.route} shows no setup tags`, () => {
+      const main = renderMain(page.element);
+      expect(tablesIn(main).some((table) => table.header.includes("Applies to"))).toBe(false);
+      const leads = [...main.matchAll(/<li\b[^>]*><p\b[^>]*><em\b[^>]*>(.*?)<\/em>/g)].map(([, lead]) => lead);
+      expect(leads).toEqual([]);
+    });
+  }
+
+  for (const page of PAGES.filter((page) => page.tagged)) {
     it(`${page.route} shows the setups each guarantee and bullet applies to`, () => {
       const main = renderMain(page.element);
       const tagged = (cell: string) => {
@@ -157,6 +170,25 @@ describe("setup tags", () => {
       const leads = [...main.matchAll(/<li\b[^>]*><p\b[^>]*><em\b[^>]*>(.*?)<\/em>/g)].map(([, lead]) => lead);
       expect(leads).toHaveLength(bullets);
       leads.forEach(tagged);
+    });
+  }
+});
+
+// Every repository path a guarantee is pinned by opens that file on GitHub.
+describe("pinned by", () => {
+  for (const page of PAGES) {
+    it(`${page.route} links each path a guarantee is pinned by`, () => {
+      // A code span breaks its path with <wbr>s; the cell's text is the path.
+      const html = renderMain(page.element).replace(/<wbr\/>/g, "");
+      const [table] = [...html.matchAll(/<table\b.*?<\/table>/gs)].map(([t]) => t).filter((t) => t.includes(">Pinned by<"));
+      const column = tablesIn(table)[0].header.indexOf("Pinned by");
+      const cells = [...table.matchAll(/<tr\b.*?<\/tr>/gs)].slice(1).map(([row]) => [...row.matchAll(/<td\b[^>]*>(.*?)<\/td>/gs)][column][1]);
+      const paths = cells.flatMap((cell) => [...cell.matchAll(/<code\b[^>]*>([^<]*\/[^<]*)<\/code>/g)].map(([, path]) => ({ cell, path })));
+      expect(paths.length).toBeGreaterThan(0);
+      for (const { cell, path } of paths) {
+        const escaped = path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        expect(cell).toMatch(new RegExp(`<a href="https://github\\.com/diffplug/dormouse/(blob|tree)/main/${escaped}"[^>]*><code\\b`));
+      }
     });
   }
 });

@@ -11,9 +11,11 @@ import {
   auditIndex,
   auditedSections,
   generateDocs,
+  linkPinnedBy,
   resolveRepoLinks,
   securityAudiences,
   securitySetups,
+  withoutSetups,
 } from './generate-docs.js';
 import { createSlugger, inlineToText, parseMarkdown, visit } from './docs-parser.js';
 import { CODING_AGENTS } from '../../lib/src/lib/coding-agents.ts';
@@ -351,6 +353,53 @@ describe('security spec', () => {
     // in the table's order, and written by the build that checked the tags.
     expect(data.security.setups).toEqual(['Every install', 'One-time link', 'Hosted phone', 'Self-hosted Relay']);
     expect(data.security.setups).toEqual(securitySetups({ blocks: data.security.blocks }).names);
+  });
+
+  it('links each path a guarantee is pinned by to GitHub, and fails on one that does not exist', () => {
+    const page = (cell) => {
+      const blocks = parseMarkdown(
+        ['## Guarantees', '', '| G | Rule | Pinned by |', '| --- | --- | --- |', `| g | r | ${cell} |`, '', '## What is not defended', '', '- x', '', '## Known gaps', '', '- y'].join('\n'),
+        { slug: createSlugger() },
+      ).blocks;
+      linkPinnedBy({ blocks });
+      return blocks[1].rows[0][2];
+    };
+    expect(page('`scripts/spec-lint.mjs`; `cargo test` in `standalone/src-tauri`, nightly')).toEqual([
+      { type: 'link', href: `${REPO_BLOB_BASE}/scripts/spec-lint.mjs`, children: [{ type: 'code', value: 'scripts/spec-lint.mjs' }] },
+      { type: 'text', value: '; ' },
+      { type: 'code', value: 'cargo test' },
+      { type: 'text', value: ' in ' },
+      {
+        type: 'link',
+        href: `${REPO_BLOB_BASE.replace('/blob/', '/tree/')}/standalone/src-tauri`,
+        children: [{ type: 'code', value: 'standalone/src-tauri' }],
+      },
+      { type: 'text', value: ', nightly' },
+    ]);
+    expect(() => page('`scripts/no-such-lint.mjs`')).toThrow(/pinned by scripts\/no-such-lint\.mjs, which does not exist/);
+  });
+
+  it('publishes /supply-chain\'s entries without the setup tags it has no table for', () => {
+    const sections = data.security.supplyChain;
+    expect(sections.guarantees.header.map((cell) => inlineToText(cell))).toEqual(['Guarantee', 'Rule', 'Pinned by']);
+    expect(sections.guarantees.rows.every((row) => row.length === 3)).toBe(true);
+    for (const item of [...sections.notDefended.items, ...sections.knownGaps.items]) {
+      expect(item.children[0].children[0].type).toBe('strong');
+    }
+    expect(sections.guarantees.rows).toHaveLength(data.security.audiences['supply-chain'].guarantees.rows.length);
+    const page = parseMarkdown(
+      [
+        '## Guarantees', '', '| G | Applies to | Rule |', '| --- | :-: | --- |', '| g | A | r |', '',
+        '## What is not defended', '', '- *A, B.* **x** y', '', '## Known gaps', '', '- *B.* z',
+      ].join('\n'),
+      { slug: createSlugger() },
+    ).blocks;
+    const [, guarantees, , notDefended, , knownGaps] = page;
+    const untagged = withoutSetups({ guarantees, notDefended, knownGaps });
+    expect(untagged.guarantees.align).toEqual([guarantees.align[0], guarantees.align[2]]);
+    expect(untagged.guarantees.rows).toEqual([[guarantees.rows[0][0], guarantees.rows[0][2]]]);
+    expect(inlineToText(untagged.notDefended.items[0].children[0].children)).toBe('x y');
+    expect(inlineToText(untagged.knownGaps.items[0].children[0].children)).toBe('z');
   });
 
   it('fails on a link into a published page whose fragment names no heading there', () => {
