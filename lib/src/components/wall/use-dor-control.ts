@@ -1,4 +1,5 @@
 import { moveSurface } from './surface-move';
+import { messageOf } from '../../lib/errors';
 import { clearHoldLapse, holdForHostInterrupt } from '../../lib/tool-run-hold';
 import { recordToolDirty } from '../../lib/tool-dirty-store';
 import { createSerialQueue } from '../../host/remote/serial-queue';
@@ -751,25 +752,34 @@ export function useDorControl({
 
   // Past the browser gate, web verbs stay renderMode-gated: an `iframe`
   // renderer is a browser with nothing to drive (docs/specs/glossary.md →
-  // Panes and Surfaces). The session `target` is bound to, or null once the
-  // caller is answered.
+  // Panes and Surfaces). Whether `provider` renders `target`, else false once
+  // the caller is answered.
+  const requireProvider = useCallback((
+    target: DorSurface,
+    provider: BrowserAutomationProvider,
+    detail: DorControlRequest,
+  ): boolean => {
+    const rendering = parseRenderMode(target.renderMode).provider;
+    if (rendering === provider) return true;
+    // Name the command that does work on it, so the caller's next try lands.
+    const remedy = rendering
+      ? `drive it with ${BROWSER_PROVIDER_GUI[rendering].cli} --surface ${target.id}`
+      : `an iframe cannot be driven; open its page with dor agent-browser open ${browserUrlFromParams(lath.getMeta(target.id)?.params) ?? '<url>'}`;
+    detail.respond({
+      ok: false,
+      error: `surface '${target.id}' is not ${provider} rendered (render_mode: ${target.renderMode}) — ${remedy}`,
+    });
+    return false;
+  }, [lath]);
+
+  // The session `target` is bound to, past the provider gate, or null once
+  // the caller is answered.
   const requireAutomationSession = useCallback((
     target: DorSurface,
     provider: BrowserAutomationProvider,
     detail: DorControlRequest,
   ): string | null => {
-    const rendering = parseRenderMode(target.renderMode).provider;
-    if (rendering !== provider) {
-      // Name the command that does work on it, so the caller's next try lands.
-      const remedy = rendering
-        ? `drive it with ${BROWSER_PROVIDER_GUI[rendering].cli} --surface ${target.id}`
-        : `an iframe cannot be driven; open its page with dor agent-browser open ${browserUrlFromParams(lath.getMeta(target.id)?.params) ?? '<url>'}`;
-      detail.respond({
-        ok: false,
-        error: `surface '${target.id}' is not ${provider} rendered (render_mode: ${target.renderMode}) — ${remedy}`,
-      });
-      return null;
-    }
+    if (!requireProvider(target, provider, detail)) return null;
     // The session is the one row field the projection deliberately withholds
     // (it is an identifier, not a capability), so read it from the params —
     // live metadata for panes and parked doors alike.
@@ -781,7 +791,7 @@ export function useDorControl({
       return null;
     }
     return session;
-  }, [lath]);
+  }, [lath, requireProvider]);
 
   /** A Surface a command may still target: not mid-fade, and not mid-closure
    *  (`closeSurface` awaits the helper guard before it tears down; a match made
@@ -2166,9 +2176,11 @@ export function useDorControl({
       return;
     }
 
-    if (detail.method === SURFACE_CONTROL_METHODS.browserViewport) {
-      const provider = requestedProvider();
-      if (!provider) return;
+    /** The browser Surface of `provider` a `--key`, `--session` or
+     *  `--surface` names; null once the caller is answered. A `--surface`
+     *  must have its session named unless `sessionless` (diagnostics, which
+     *  serve a launch that never named one too). */
+    const browserTarget = (provider: BrowserAutomationProvider, sessionless = false): string | null => {
       let targetId: string | null = null;
       const key = stringParam(params.key);
       const session = stringParam(params.session);
@@ -2184,17 +2196,48 @@ export function useDorControl({
         if (matches.length === 1) targetId = matches[0].id;
         else if (matches.length > 1) {
           detail.respond({ ok: false, error: `session '${session}' is bound to multiple Surfaces; use --surface` });
-          return;
+          return null;
         }
       } else {
         const found = requireBrowserSurface(params.surface, detail);
-        if (!found || !requireAutomationSession(found, provider, detail)) return;
+        if (!found || !(sessionless ? requireProvider(found, provider, detail) : requireAutomationSession(found, provider, detail))) return null;
         targetId = found.id;
       }
       if (!targetId) {
         detail.respond({ ok: false, error: 'No bound browser Surface; use --surface with a screencast' });
-        return;
+        return null;
       }
+      return targetId;
+    };
+
+    if (detail.method === SURFACE_CONTROL_METHODS.browserDiagnostics) {
+      const provider = requestedProvider();
+      if (!provider) return;
+      const targetId = browserTarget(provider, true);
+      if (!targetId) return;
+      const surfaceParams = lath.getMeta(targetId)?.params;
+      const controller = getAgentBrowserSurfaceController(targetId);
+      try {
+        const found = controller ? await controller.diagnostics() : null;
+        detail.respond({ ok: true, result: {
+          surfaceId: targetId,
+          provider,
+          renderMode: parseRenderMode((surfaceParams as { renderMode?: unknown } | undefined)?.renderMode).mode,
+          session: agentBrowserSessionFromParams(surfaceParams) ?? null,
+          webview: found?.webview ?? null,
+          host: found?.host ?? null,
+        } });
+      } catch (error) {
+        detail.respond({ ok: false, error: messageOf(error) });
+      }
+      return;
+    }
+
+    if (detail.method === SURFACE_CONTROL_METHODS.browserViewport) {
+      const provider = requestedProvider();
+      if (!provider) return;
+      const targetId = browserTarget(provider);
+      if (!targetId) return;
       const surfaceParams = lath.getMeta(targetId)?.params;
       const mode = parseRenderMode((surfaceParams as { renderMode?: unknown } | undefined)?.renderMode);
       if (params.setting !== undefined && mode.presentation !== 'screencast') {
@@ -2402,7 +2445,7 @@ export function useDorControl({
     }
 
     detail.respond({ ok: false, error: unsupportedControlMethodMessage(detail.method) });
-  }, [beginPreviewSwitch, browserKeyScope, buildDorSurfaces, buildDorSurfaceList, closeSurface, createContentSurface, createSplitSurface, ensureBrowserSurface, findBrowserSurface, findSurfaceIdRunningCommand, findSurfaceByParams, isTargetable, revealSurface, previewSlot, restoreInterruptedRun, restoreOnLatePrompt, supersedePreviews, isClosingWorkspace, requireAutomationSession, requireBrowserSurface, requireListedSurface, requireTerminalSurface, resolveListedSurface, resolveVisibleSurface, lath, nav, answeringWorkspaceId, workspaceScope]);
+  }, [beginPreviewSwitch, browserKeyScope, buildDorSurfaces, buildDorSurfaceList, closeSurface, createContentSurface, createSplitSurface, ensureBrowserSurface, findBrowserSurface, findSurfaceIdRunningCommand, findSurfaceByParams, isTargetable, revealSurface, previewSlot, restoreInterruptedRun, restoreOnLatePrompt, supersedePreviews, isClosingWorkspace, requireAutomationSession, requireBrowserSurface, requireProvider, requireListedSurface, requireTerminalSurface, resolveListedSurface, resolveVisibleSurface, lath, nav, answeringWorkspaceId, workspaceScope]);
 
   return { findSurfaceByParams, updateSurfaceParams, handleDorControl };
 }

@@ -550,11 +550,28 @@ export interface BrowserSurfaceRequest extends WorkspaceScopedRequest {
   initialViewport?: BrowserViewportSetting;
 }
 
-export type BrowserViewportRequest = WorkspaceScopedRequest & { provider: BrowserAutomationProvider; setting?: BrowserViewportSetting | { preset: string; dpr?: number } } & (
+/** Which browser Surface a Dormouse-owned browser verb names: exactly one of
+ *  its key, a Surface handle, or a raw session. */
+export type BrowserIdentity =
   | { key: string; surface?: undefined; session?: undefined }
   | { surface: string; key?: undefined; session?: undefined }
-  | { session: string; key?: undefined; surface?: undefined }
-);
+  | { session: string; key?: undefined; surface?: undefined };
+
+export type BrowserViewportRequest = WorkspaceScopedRequest & { provider: BrowserAutomationProvider; setting?: BrowserViewportSetting | { preset: string; dpr?: number } } & BrowserIdentity;
+
+export type BrowserDiagnosticsRequest = WorkspaceScopedRequest & { provider: BrowserAutomationProvider } & BrowserIdentity;
+
+/** The webview's and the host's own record of one browser Surface, as plain
+ *  JSON for people and agents to read; `webview` is null for a Surface no
+ *  view has started, `host` for one with no session yet. */
+export interface BrowserDiagnosticsResponse {
+  surfaceId: string;
+  provider: BrowserAutomationProvider;
+  renderMode: SurfaceRenderMode;
+  session: string | null;
+  webview: Record<string, unknown> | null;
+  host: Record<string, unknown> | null;
+}
 
 export interface BrowserViewportResponse {
   surfaceId: string;
@@ -575,6 +592,7 @@ export interface BrowserSurfaceResponse {
 export interface ControlClient {
   browserSurface(request: BrowserSurfaceRequest): Promise<BrowserSurfaceResponse>;
   browserViewport(request: BrowserViewportRequest): Promise<BrowserViewportResponse>;
+  browserDiagnostics(request: BrowserDiagnosticsRequest): Promise<BrowserDiagnosticsResponse>;
   resolveBrowser(request: ResolveBrowserRequest): Promise<ResolveBrowserResponse>;
   listSurfaces(request: ListSurfacesRequest): Promise<ListSurfacesResponse>;
   splitSurface(request: SplitSurfaceRequest): Promise<SplitSurfaceResponse>;

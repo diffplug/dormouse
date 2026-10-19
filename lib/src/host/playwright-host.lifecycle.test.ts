@@ -407,6 +407,21 @@ test('frames reach the viewer as binary, decoded once, their acks paced to ~20 a
   }
 });
 
+test('the page left current when the current one closes is sized at the Fixed viewport, though its tab id is unchanged', async () => {
+  const second = Object.assign(new EventEmitter(), page, { url: () => 'http://localhost/second', setViewportSize: vi.fn(async () => {}) });
+  page.setViewportSize = vi.fn(async () => {});
+  let pages = [page, second];
+  browser.contexts = () => [{ pages: () => pages }];
+  const viewer = await viewSession();
+  await vi.waitFor(() => expect(viewer.states.map((state) => state.type)).toContain('tabs'));
+  expect((await pw({ op: 'viewport', width: 800, height: 600 })).ok).toBe(true);
+  expect(page.setViewportSize).toHaveBeenCalledExactlyOnceWith({ width: 800, height: 600 });
+  // Tab 0 closes: the page at index 1 is current at index 0.
+  pages = [second];
+  await vi.waitFor(() => expect(second.setViewportSize).toHaveBeenCalledExactlyOnceWith({ width: 800, height: 600 }), { timeout: 3000 });
+  viewer.socket.terminate();
+});
+
 test('a browser that disconnects on its own tells its viewers it is gone', async () => {
   const viewer = await viewSession();
   await vi.waitFor(() => expect(viewer.states.map((state) => state.type)).toContain('status'));

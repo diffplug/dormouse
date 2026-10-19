@@ -167,7 +167,7 @@ Implemented commands call private `surface.*` control methods, **enumerated once
 
 **Must quote for every parser a style covers**: `powershell` doubles each character that closes a PowerShell single-quoted string, `'` and U+2018–U+201B; `posix` steps each `'` and `\` outside its single quotes, so fish, classified `posix`, parses it too (rationale).
 
-**Every public first-party command except the `dor agent-browser` and `dor playwright` passthrough accepts `--json`**, emitting a stable object with the same handles as its text output: **one key per id** (`id`, `surface_id`, `workspace_id`), never a second spelling of it. Text output is the primary interface, for agents as much as humans. Any JSON mode under a native browser command belongs to its delegated CLI; `dor-embed-size` owns its JSON output.
+**Every public first-party command except the `dor agent-browser` and `dor playwright` passthrough accepts `--json`**, emitting a stable object with the same handles as its text output: **one key per id** (`id`, `surface_id`, `workspace_id`), never a second spelling of it. Text output is the primary interface, for agents as much as humans. Any JSON mode under a native browser command belongs to its delegated CLI; `dor-embed-size` and `dor-diagnostics` own their JSON output.
 
 **A command that operates on one existing Surface takes the target as a required positional handle** (`read` / `send` / `await` / `kill`); **a command that creates or places a Surface keeps `--surface` as an optional *reference* Surface** (`split`, `ensure`, `iframe`, browser creation). So `--surface` means "place near this" everywhere except [`dor agent-browser` and `dor playwright`](#browser-surface-addressing), whose whole positional space belongs to the provider's CLI.
 
@@ -245,6 +245,8 @@ Source of truth: `dor/src/commands/open-target.ts`, `resolveOpenTargetArgs` in `
 **Must intercept `dor-embed-size` under either browser command before native passthrough.** Identity flags select one existing bound Surface; raw `--session` must match uniquely. No selection creates or restarts a browser. A provider mismatch fails with the matching full command name; sizing mutations require a screencast.
 
 **Must query without dimensions or a preset; otherwise apply the requested sizing and await its measurement.** A disconnected browser reports no invented dimensions. Dimensions and preset selection are mutually exclusive; `pane-sync` rejects a DPR override. Fail invalid settings before changing size.
+
+**Must intercept `dor-diagnostics` the same way**, selecting one browser Surface of that provider, with or without a session, and printing its webview and host records as JSON, changing nothing.
 
 **Must keep a new managed browser's viewport preparation out of native stdout**; when and how it is sized is `docs/specs/dor-browser.md` → Viewport presets. Native `playwright open` still restarts its browser.
 

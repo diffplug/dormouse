@@ -38,7 +38,7 @@ import {
 } from '../lib/platform/browser-automation';
 import { createBrowserCaptures } from './browser-capture';
 import { createCaptureBudget, type CaptureClaim } from './browser-capture-budget';
-import { createViewportSync } from './browser-sync';
+import { createViewportSync, type FixedSize } from './browser-sync';
 import type { WebSocket } from 'ws';
 import { BrowserView, WEBVIEW_ID, closeSocket, createViewerServer, measuredViewport, type Upstream, type ViewerSink } from './browser-viewer';
 
@@ -114,6 +114,8 @@ export interface BrowserProvider<B = unknown> {
   view(b: B, stream: number, opts: { headed: boolean }, sink: ViewerSink): Promise<Upstream>;
   /** Shutdown: release every client-side resource. */
   dispose?(): Promise<void>;
+  /** What the provider holds for `b`, for `dor`'s diagnostics; read-only. */
+  diagnostics?(b: B): Record<string, unknown>;
 }
 
 export interface BrowserHostDeps {
@@ -249,6 +251,7 @@ function parseOp(r: Record<string, unknown>): BrowserOp | string {
         : 'invalid viewport';
     }
     case 'measure': return { op: 'measure' };
+    case 'diagnostics': return { op: 'diagnostics' };
     case 'close': {
       const cancels = r.cancels;
       if (cancels === undefined) return { op: 'close' };
@@ -273,8 +276,14 @@ const REQUEST_BUDGET_MS = BROWSER_REQUEST_TIMEOUT_MS - 2_000;
 // hung CLI holds that browser's later requests, and shutdown, only this long.
 const CLOSE_TIMEOUT_MS = 10_000;
 const OPEN_SETTLE_MS = 4_000;
+// How long diagnostics wait on the provider's word on where a browser streams.
+const DIAGNOSTICS_FIND_MS = 3_000;
 const LAUNCH_CLOSE_RESERVE_MS = OPEN_SETTLE_MS + 4_000;
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/** A Fixed viewport's size, its ratio only when one was asked for. */
+const fixedSize = ({ width, height, dpr }: { width: number; height: number; dpr?: number }): FixedSize =>
+  ({ width, height, ...(dpr === undefined ? {} : { dpr }) });
 
 /** One request, resolved: its provider, the provider's binding, and the
  *  native identity everything per-browser keys on. */
@@ -286,6 +295,10 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   const viewers = createViewerServer();
   // The viewer sockets open on each browser: a launch or close ends them.
   const views = new Map<string, Set<BrowserView>>();
+  // The last viewer sockets each browser saw close, newest last, for `dor`'s
+  // diagnostics.
+  const closedViews = new Map<string, Record<string, unknown>[]>();
+  const CLOSED_VIEWS_KEPT = 8;
   const captures = createBrowserCaptures();
   const budget = createCaptureBudget();
   let closed = false;
@@ -404,7 +417,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     // Pane sync carries the display's ratio for agent-browser, whose viewport
     // writer can apply it. Playwright's context ratio is immutable here: sync
     // means CSS dimensions only, not an explicit DPR request.
-    write: (bound, size, isCurrent) => writeViewport(bound, { op: 'viewport', ...size, ...(bound.p === providers.get('playwright') ? { dpr: undefined } : {}) }, { isCurrent }),
+    write: (bound, size, { isCurrent, keepDpr }) => writeViewport(bound, { op: 'viewport', ...size, ...(!keepDpr && bound.p === providers.get('playwright') ? { dpr: undefined } : {}) }, { isCurrent }),
     report: (id, message) => { for (const view of views.get(id) ?? []) view.state(message); },
     blocked: (id) => closed || settling.has(id),
     log,
@@ -421,6 +434,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     sync.forget(id);
     // Their browser is going: whoever still views it asks again.
     for (const view of views.get(id) ?? []) view.close(1001, 'the browser was relaunched or closed');
+    closedViews.delete(id);
     await p.release?.(b);
     return generation;
   }
@@ -446,7 +460,11 @@ export function createBrowserHost(deps: BrowserHostDeps) {
    *  stopping what runs the session first unless it is `fresh`. Answers once
    *  the browser is up, never waiting for the page. */
   function launch(bound: Bound, url: string | undefined, isHeaded: boolean, fresh: boolean, requestDeadline: number, initialViewport?: BrowserViewportSetting): Promise<LiveBrowser> {
-    return settle(bound.id, () => bringUpBrowser(bound, url, isHeaded, fresh, requestDeadline, initialViewport));
+    return settle(bound.id, () => bringUpBrowser(bound, url, isHeaded, fresh, requestDeadline, initialViewport)).then((live) => {
+      // The size it came up at is the one a page it shows anew is given.
+      if (!isHeaded && initialViewport?.mode === 'fixed') sync.fixed(bound.id, undefined, fixedSize(initialViewport));
+      return live;
+    });
   }
 
   async function bringUpBrowser(bound: Bound, url: string | undefined, isHeaded: boolean, fresh: boolean, requestDeadline: number, initialViewport?: BrowserViewportSetting): Promise<LiveBrowser> {
@@ -614,6 +632,10 @@ export function createBrowserHost(deps: BrowserHostDeps) {
         const open = views.get(bound.id);
         open?.delete(view);
         if (open?.size === 0) views.delete(bound.id);
+        let kept = closedViews.get(bound.id);
+        if (!kept) closedViews.set(bound.id, kept = []);
+        kept.push({ stream, closedAt: new Date().toISOString(), ...view.diagnostics() });
+        if (kept.length > CLOSED_VIEWS_KEPT) kept.shift();
       },
       // A popped-out window is never sized with a pane.
       ...(isHeaded ? {} : { sync: sync.view(bound, stream) }),
@@ -643,6 +665,29 @@ export function createBrowserHost(deps: BrowserHostDeps) {
       log(error);
       return undefined;
     }
+  }
+
+  // --- diagnostics ---
+
+  /** What this host holds for `bound`'s browser, and where its provider says
+   *  it streams — unless a launch or close is settling it, when nothing may
+   *  reach the provider. Never starts a browser: `find` is `attach`'s own. */
+  async function diagnose({ p, b, id }: Bound): Promise<Record<string, unknown>> {
+    let found: unknown = 'not asked: a launch or close is settling the browser';
+    if (!settling.has(id) && !closed) {
+      const [answer] = await settleAllWithin([p.find(b).catch((error: unknown) => ({ error: messageOf(error) }))], DIAGNOSTICS_FIND_MS, { error: 'no answer in time' });
+      found = answer;
+    }
+    return {
+      identity: id,
+      settling: settling.has(id),
+      viewportWritePending: viewportWrites.has(id),
+      provider: found,
+      ...p.diagnostics?.(b),
+      sizing: sync.diagnostics(id),
+      views: [...views.get(id) ?? []].map((view) => view.diagnostics()),
+      closedViews: closedViews.get(id) ?? [],
+    };
   }
 
   // --- editing ---
@@ -684,6 +729,12 @@ export function createBrowserHost(deps: BrowserHostDeps) {
       if ((r.op === 'launch' || r.op === 'attach') && wasCancelled(r.requestId)) throw new Error('the browser was closed');
       if (r.op === 'close') cancelRequests(r.cancels);
       const p = providerFor(r.provider);
+      // Read-only and answered at once: no launch environment, no queue.
+      if (r.op === 'diagnostics') {
+        if (r.binding.session === undefined) return { ok: false, error: 'a session is required' };
+        const b = p.bind({ ...r.binding, session: r.binding.session });
+        return { ok: true, diagnostics: await diagnose({ p, b, id: p.identity(b) }) };
+      }
       const binding: ProviderBinding = { ...r.binding, session: r.binding.session ?? generateGuiSession() };
       if (deps.launchEnv) {
         // Keyed on the cwd a provider defaults to, so the one it answers with
@@ -764,7 +815,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
         }
         case 'viewport': {
           const engagement = r.endsSync ?? sync.current(bound.id);
-          return await writeViewport(bound, r, { onSuccess: () => sync.fixed(bound.id, engagement) });
+          return await writeViewport(bound, r, { onSuccess: () => sync.fixed(bound.id, engagement, fixedSize(r)) });
         }
         default:
           return await p.act(b, r);
