@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { builtinModules } from "node:module";
 import { vapidKeysFrom } from "../../scripts/vapid.mjs";
 import { WORKERS, parseConfig } from "../../scripts/workers.mjs";
+import { workspaceSourceAliases } from "../../../scripts/workspace-sources.mjs";
 
 interface WranglerConfig {
   name: string;
@@ -142,11 +143,14 @@ export function bundleWorker(entry: string, inject: string[] = []) {
     platform: "node",
     conditions: ["workerd", "worker"],
     external: ["node:*", "cloudflare:*"],
-    alias: Object.fromEntries(
-      builtinModules
-        .filter((name) => !name.startsWith("node:"))
-        .map((name) => [name, `node:${name}`]),
-    ),
+    alias: {
+      ...workspaceSourceAliases(),
+      ...Object.fromEntries(
+        builtinModules
+          .filter((name) => !name.startsWith("node:"))
+          .map((name) => [name, `node:${name}`]),
+      ),
+    },
     banner: {
       js: "import { createRequire } from 'node:module'; const require = createRequire('/worker.js');",
     },

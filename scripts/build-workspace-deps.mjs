@@ -16,8 +16,7 @@
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { workspaceDeps, workspacePackages } from './workspace-packages.mjs';
+import { workspaceDeps, workspacePackages, workspaceRoot } from './workspace-packages.mjs';
 
 const NESTED = 'DORMOUSE_BUILDING_WORKSPACE_DEPS';
 if (process.env[NESTED]) process.exit(0);
@@ -28,14 +27,14 @@ const pending = workspaceDeps(JSON.parse(readFileSync(path.resolve('package.json
 while (pending.length) {
   const name = pending.pop();
   const { manifest } = packages.get(name);
-  if (builds.has(name) || !manifest.exports || !manifest.scripts?.build) continue;
+  if (builds.has(name) || !manifest.exports) continue;
   builds.add(name);
   pending.push(...workspaceDeps(manifest));
 }
 if (builds.size === 0) process.exit(0);
 
 const result = spawnSync('pnpm', [...[...builds].flatMap((name) => ['--filter', name]), 'run', 'build'], {
-  cwd: path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'),
+  cwd: workspaceRoot,
   stdio: 'inherit',
   env: { ...process.env, [NESTED]: '1' },
   shell: process.platform === 'win32',

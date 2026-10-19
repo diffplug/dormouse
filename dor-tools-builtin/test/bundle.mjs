@@ -4,6 +4,7 @@
 import { fileURLToPath } from 'node:url';
 import { crc32 } from 'node:zlib';
 import { build } from 'esbuild';
+import { workspaceSourceAliases } from '../../scripts/workspace-sources.mjs';
 
 /** The module at `path` (relative to this folder), bundled and imported. Its
  * `import.meta.url` is its source file's, so a worker URL resolves. */
@@ -12,6 +13,7 @@ export async function load(path) {
   const bundle = await build({
     entryPoints: [fileURLToPath(url)],
     bundle: true, format: 'esm', platform: 'neutral', write: false, logLevel: 'silent',
+    alias: workspaceSourceAliases(),
     define: { 'import.meta.url': JSON.stringify(url.href) },
   });
   return import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`);

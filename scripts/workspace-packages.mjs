@@ -7,13 +7,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+export const workspaceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 /** Each workspace package's manifest, keyed by its name, with `dir` relative to the repo root. */
 export function workspacePackages() {
   const packages = new Map();
-  for (const dir of YAML.parse(readFileSync(path.join(root, 'pnpm-workspace.yaml'), 'utf8')).packages) {
-    const manifest = JSON.parse(readFileSync(path.join(root, dir, 'package.json'), 'utf8'));
+  for (const dir of YAML.parse(readFileSync(path.join(workspaceRoot, 'pnpm-workspace.yaml'), 'utf8')).packages) {
+    const manifest = JSON.parse(readFileSync(path.join(workspaceRoot, dir, 'package.json'), 'utf8'));
     packages.set(manifest.name, { dir, manifest });
   }
   return packages;

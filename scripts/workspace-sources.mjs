@@ -1,15 +1,15 @@
-// The one map from each internal workspace package to its source. Every
-// bundler, test runner, and type checker that reaches one of these packages
-// resolves it here — bundlers through `workspaceSourceAliases()`, tsc through
-// `tsconfig.workspace-sources.json` — so none of them ever reads a `dist` that
-// is stale or missing. `scripts/workspace-sources.test.mjs` fails on a config
-// that resolves them some other way, or a package with `exports` missing here.
+// The one map from each internal workspace package to its source. What only
+// bundles or type-checks reads these packages from here — bundlers through
+// `workspaceSourceAliases()`, `noEmit` tsconfigs through
+// `tsconfig.workspace-sources.json` — so it never reads a `dist` that is stale
+// or missing. `scripts/workspace-sources.test.mjs` fails on a config that
+// resolves them some other way, or on a package with `exports` missing here.
 //
-// What runs in plain Node — a package's own `node --test` suite, `relay`, the
-// `dor` CLI bundle, and build scripts such as `scripts/relay-origin.mjs` — still
-// reads `dist`; `scripts/build-workspace-deps.mjs` builds that first.
+// What emits a `dist` of its own or runs in plain Node — the packages' `tsc`
+// builds, the `dor` CLI bundle, `relay`, each package's `node --test` suite, and
+// build scripts such as `scripts/relay-origin.mjs` — reads upstream `dist`
+// instead, which `scripts/build-workspace-deps.mjs` builds first.
 
-import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -31,21 +31,4 @@ export const WORKSPACE_SOURCES = {
  */
 export function workspaceSourceAliases() {
   return Object.fromEntries(Object.entries(WORKSPACE_SOURCES).map(([name, dir]) => [name, path.join(root, dir)]));
-}
-
-/**
- * The tsconfig `paths` entries for a config in `configDir`, which tsc resolves
- * relative to that config: `tsconfig.workspace-sources.json`'s, or those of a
- * config that needs paths of its own and so cannot extend it. A package with a
- * `src/index.ts` also maps its bare name.
- */
-export function workspaceSourcePaths(configDir) {
-  const paths = {};
-  for (const [name, dir] of Object.entries(WORKSPACE_SOURCES)) {
-    const relative = path.relative(configDir, path.join(root, dir)).split(path.sep).join('/');
-    const target = relative.startsWith('..') ? relative : `./${relative}`;
-    if (existsSync(path.join(root, dir, 'index.ts'))) paths[name] = [`${target}/index.ts`];
-    paths[`${name}/*`] = [`${target}/*`];
-  }
-  return paths;
 }
