@@ -6,7 +6,6 @@ import {
   assertWorkspaceCoverage,
   getDependencyNames,
   externalPlatformSiblings,
-  isLonePlatformBuild,
   linkedPeerPackageJsonPath,
   missingDependency,
 } from './dependency-workspaces.js';
@@ -171,30 +170,5 @@ describe('an installed platform build an external package declares', () => {
     expect(externalPlatformSiblings({ ...edge, optional: false }, build(name), none)).toEqual([]);
     expect(externalPlatformSiblings({ ...edge, isWorkspace: true }, build(name), none)).toEqual([]);
     expect(externalPlatformSiblings(edge, build(name), new Set([name]))).toEqual([]);
-  });
-});
-
-// docs/specs/security-supply-chain.md -> "Disclosure": a machine that cannot
-// install a lone platform build has nothing to describe it from, so every
-// machine must skip it for the snapshot to be the same everywhere.
-describe('an external platform build with no sibling', () => {
-  const vite = { name: 'vite', optionalDependencies: { fsevents: '~2.3.3' } };
-  const edge = { pkg: vite, optional: true, peer: false, isWorkspace: false, isProductRoot: false };
-  const fsevents = { name: 'fsevents', version: '2.3.3', os: ['darwin'] };
-  const none = new Set();
-
-  it('is skipped installed as it is absent', () => {
-    expect(missingDependency(edge)).toBe('skip');
-    expect(isLonePlatformBuild(edge, fsevents, none)).toBe(true);
-  });
-
-  it('is read when portable, required, a workspace\'s, in a family, or a product root\'s', () => {
-    expect(isLonePlatformBuild(edge, { name: 'fsevents' }, none)).toBe(false);
-    expect(isLonePlatformBuild({ ...edge, optional: false }, fsevents, none)).toBe(false);
-    expect(isLonePlatformBuild({ ...edge, isWorkspace: true }, fsevents, none)).toBe(false);
-    expect(isLonePlatformBuild(
-      { ...edge, pkg: { optionalDependencies: { fsevents: '2.3.3', 'fsevents-linux': '2.3.3' } } }, fsevents, none,
-    )).toBe(false);
-    expect(isLonePlatformBuild(edge, fsevents, new Set(['fsevents']))).toBe(false);
   });
 });

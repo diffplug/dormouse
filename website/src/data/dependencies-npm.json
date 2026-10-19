@@ -4862,6 +4862,15 @@
       ]
     },
     {
+      "name": "fsevents",
+      "license": "MIT",
+      "author": "Philipp Dunkel, Ben Noordhuis, Elan Shankar, Miroslav Bajtoš, Paul Miller",
+      "homepage": "https://github.com/fsevents/fsevents",
+      "versions": [
+        "2.3.3"
+      ]
+    },
+    {
       "name": "get-caller-file",
       "license": "ISC",
       "author": "Stefan Penner",

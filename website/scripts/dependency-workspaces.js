@@ -130,34 +130,17 @@ export function optionalSiblingsAtSameVersion(pkg, packageName) {
 }
 
 /**
- * Whether `manifest` is a platform build (naming an `os`, `cpu`, or `libc`) that
- * an external package declares optionally. Which one installs depends on the
- * generating machine — `typescript` brings `@typescript/typescript-darwin-arm64`
- * on one and `-linux-x64` on another. A family a product root declares is left
- * to that root, which names only the builds this project ships.
+ * The siblings to describe from an installed platform build (a manifest naming
+ * an `os`, `cpu`, or `libc`) that an external package declares optionally. Which
+ * one installs depends on the generating machine — `typescript` brings
+ * `@typescript/typescript-darwin-arm64` on one and `-linux-x64` on another — and
+ * it ships wherever a copied `node_modules` does, so the whole family is
+ * disclosed. A family a product root declares is left to that root, which
+ * names only the builds this project ships.
  */
-function isExternalPlatformBuild({ optional, isWorkspace }, manifest, productRootOptionals) {
-  if (!optional || isWorkspace) return false;
-  if (!(manifest.os || manifest.cpu || manifest.libc)) return false;
-  return !productRootOptionals.has(manifest.name);
-}
-
-/**
- * The siblings to describe from an installed external platform build: it ships
- * wherever a copied `node_modules` does, so the whole family is disclosed.
- */
-export function externalPlatformSiblings(edge, manifest, productRootOptionals) {
-  if (!isExternalPlatformBuild(edge, manifest, productRootOptionals)) return [];
-  return optionalSiblingsAtSameVersion(edge.pkg, manifest.name);
-}
-
-/**
- * Whether an installed external platform build has no sibling to describe it
- * from, as `fsevents` has none beside it in `vite`. It is then skipped, as on a
- * machine that cannot install it, where nothing describes it: disclosing it here
- * alone would make the snapshot depend on the generating machine.
- */
-export function isLonePlatformBuild(edge, manifest, productRootOptionals) {
-  return isExternalPlatformBuild(edge, manifest, productRootOptionals)
-    && optionalSiblingsAtSameVersion(edge.pkg, manifest.name).length === 0;
+export function externalPlatformSiblings({ pkg, optional, isWorkspace }, manifest, productRootOptionals) {
+  if (!optional || isWorkspace) return [];
+  if (!(manifest.os || manifest.cpu || manifest.libc)) return [];
+  if (productRootOptionals.has(manifest.name)) return [];
+  return optionalSiblingsAtSameVersion(pkg, manifest.name);
 }
