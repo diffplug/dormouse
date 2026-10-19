@@ -1,9 +1,9 @@
 /**
  * The host half of managed voice (`docs/specs/alert.md` -> "Managed voice"):
  * holds the token its own Hosted approval obtains, adds it and the voice
- * id to the webview's text, caches the clips, and answers with audio or a
- * diagnostic failure; at Disconnect it asks Hosted to revoke the token. Where the request may go:
- * `docs/specs/security-local.md` -> "Persisted state".
+ * id to the webview's text, caches the clips, answers with audio or a
+ * diagnostic failure, and at Disconnect asks Hosted to revoke the token.
+ * Where the request may go: `docs/specs/security-local.md` -> "Persisted state".
  */
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
