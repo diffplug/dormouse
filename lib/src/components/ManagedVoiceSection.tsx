@@ -2,7 +2,6 @@ import { useCallback, useState, useSyncExternalStore } from 'react';
 import { INLINE_ACTION_CLASS, SELECT_CLASS, modalActionButton } from './design';
 import { ExternalTextLink } from './ExternalTextLink';
 import { HOSTED_PRICING_URL, HostedEnrollmentCode } from './HostedEnrollment';
-import { HOSTED_ACCOUNT_ORIGIN } from '../host/relay-origin';
 import { FIELD_LABEL, useBusyAction, useNetworkPolicy } from './remote-control-shared';
 import { getPlatform } from '../lib/platform';
 import {
@@ -70,7 +69,6 @@ export function ManagedVoiceSection({ onShowNetwork }: { onShowNetwork?: () => v
   const enrollment = voice?.enrollment;
   const waiting = enrollment?.status === 'waiting' ? enrollment : null;
   const saving = enrollment?.status === 'saving';
-  const accountOrigin = waiting ? new URL(waiting.verificationUrl).origin : HOSTED_ACCOUNT_ORIGIN;
   const perform = (action: () => Promise<ManagedVoiceActionResult>) => void run(async () => {
     const result = await action();
     if (!result.ok) throw new Error(result.message);
@@ -122,13 +120,10 @@ export function ManagedVoiceSection({ onShowNetwork }: { onShowNetwork?: () => v
               Disconnect
             </button>
           )}
-          <p className={HINT}>
-            Disconnecting is local. <ExternalTextLink href={`${accountOrigin}/account`}>Revoke the voice token at your Hosted account</ExternalTextLink> to revoke it there.
-          </p>
         </>
       ) : voice?.disconnectFailed ? (
         <div className="mt-2">
-          <p className={HINT}>Managed voice is off for this session. Its saved token still needs to be cleared before restarting Dormouse.</p>
+          <p className={HINT}>Managed voice is off for this session, but disconnecting did not finish. Retry before restarting Dormouse.</p>
           <button type="button" disabled={busy} className={modalActionButton()} onClick={() => perform(() => port.disconnect())}>
             Retry disconnect
           </button>
@@ -136,7 +131,7 @@ export function ManagedVoiceSection({ onShowNetwork }: { onShowNetwork?: () => v
       ) : waiting ? (
         <HostedEnrollmentCode
           waiting={{ ...waiting, accountFull: false }}
-          accountOrigin={accountOrigin}
+          accountOrigin={new URL(waiting.verificationUrl).origin}
           busy={busy}
           onCancel={() => perform(() => port.cancelEnrollment())}
         />

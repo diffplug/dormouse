@@ -257,8 +257,7 @@ export function createManagedVoiceHost(options: {
         await response.body?.cancel().catch(() => {});
         if (generation === tokenGeneration) {
           if (response.status === 403) await noteEntitled(false);
-          // Revoked or unknown — the computer removed at the account page:
-          // forgotten, so Settings asks for a fresh enrollment.
+          // Revoked or unknown: forgotten, so Settings offers Enable again.
           if (response.status === 401) await setToken(null).catch(() => {});
         }
         return { ok: false, reason: response.ok ? `unexpected ${mime ?? 'body'}` : `HTTP ${response.status}` };
@@ -355,13 +354,15 @@ export function createManagedVoiceHost(options: {
             enrollment = { status: 'saving' };
             await announce();
             if (sequence !== enrollmentSequence) return;
+            // A token never saved, or never received below, is held by no one,
+            // so the user is never asked to revoke it.
             try { await setToken(answer.voiceToken); }
-            catch { throw new Error('Could not save managed voice. Revoke the unused voice token at your Hosted account, then try again.'); }
+            catch { throw new Error('Could not save managed voice on this computer. Try again.'); }
             if (sequence === enrollmentSequence) { enrollment = null; await announce(); }
             return;
           }
           throw new Error(answer.status === 'redeemed'
-            ? 'The approval was used but its answer was lost. Revoke the unused voice token at your Hosted account, then try again.'
+            ? 'Managed voice could not finish enabling. Try again.'
             : 'That approval ended. Enable managed voice to get a new code.');
         } catch (error) {
           if (sequence !== enrollmentSequence) return;
@@ -390,7 +391,7 @@ export function createManagedVoiceHost(options: {
     } catch (error) {
       log(`[managed-voice] ${op} failed: ${String(error)}`);
       return { ok: false, message: op === 'disconnect'
-        ? 'Managed voice is off for this session, but its saved token could not be cleared. Retry disconnect before restarting Dormouse.'
+        ? 'Managed voice is off for this session, but disconnecting did not finish. Retry disconnect before restarting Dormouse.'
         : error instanceof Error ? error.message : String(error) };
     }
   }

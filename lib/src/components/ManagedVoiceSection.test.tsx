@@ -146,11 +146,11 @@ describe('ManagedVoiceSection', () => {
     const disconnect = vi.spyOn(voice, 'disconnect').mockImplementation(async () => {
       vi.spyOn(voice, 'status').mockReturnValue({ ...original, configured: false, disconnectFailed: true });
       await voice.configure({ voiceId: original.voiceId }); // Broadcast the failed-clear status.
-      return { ok: false, message: 'Could not clear the saved token.' };
+      return { ok: false, message: 'Disconnecting did not finish.' };
     });
     await act(async () => button('Disconnect')!.click());
     await act(async () => button('Disconnect')!.click());
-    expect(text()).toContain('Could not clear the saved token.');
+    expect(text()).toContain('Disconnecting did not finish.');
     expect(button('Enable managed voice')).toBeUndefined();
     await act(async () => button('Retry disconnect')!.click());
     expect(disconnect).toHaveBeenCalledTimes(2);
