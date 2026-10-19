@@ -8,13 +8,18 @@ export function headingFor(fragment: string): HTMLElement | undefined {
   return headings[headingIds(headings.map(h => h.textContent ?? '')).indexOf(fragment)];
 }
 
-/** Links are reading actions. The context menu keeps editing available without
- * making a plain click enter the link editor instead of following the link. */
+/** The document path a local image opens, which `ImageChrome` and the Images
+ * panel set on an element around it. */
+const documentImage = (target: EventTarget | null) =>
+  target instanceof HTMLImageElement ? target.closest<HTMLElement>('[data-document-image]')?.dataset.documentImage : undefined;
+
+/** Document links and embedded images share navigation and its context menu. */
 export function MarkdownNavigation({ follow, edit }: {
   follow(href: string, disposition: 'current' | 'other'): void;
   edit(anchor: HTMLAnchorElement): void;
 }) {
-  const [menu, setMenu] = useState<{ anchor: HTMLAnchorElement; x: number; y: number } | null>(null);
+  /** `link` is the anchor the menu opened on; an image's menu has none. */
+  const [menu, setMenu] = useState<{ href: string; link?: HTMLAnchorElement; x: number; y: number } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const anchor = (target: EventTarget | null) => target instanceof Element ? target.closest<HTMLAnchorElement>('.prose a[href]') : null;
@@ -29,22 +34,34 @@ export function MarkdownNavigation({ follow, edit }: {
       setMenu(null);
       if (event.detail <= 1) follow(href, event.ctrlKey || event.metaKey ? 'other' : 'current');
     };
+    const doubleClick = (event: MouseEvent) => {
+      const href = documentImage(event.target);
+      if (!href || anchor(event.target)) return;
+      event.preventDefault();
+      follow(href, 'current');
+    };
     const context = (event: MouseEvent) => {
-      const link = anchor(event.target);
-      if (!link || !markdownLink(link.getAttribute('href') ?? '')) return;
+      const link = anchor(event.target) ?? undefined;
+      const href = link ? link.getAttribute('href') : documentImage(event.target);
+      if (!href || !markdownLink(href)) return;
       event.preventDefault(); event.stopPropagation();
-      setMenu({ anchor: link, x: event.clientX, y: event.clientY });
+      setMenu({ href, link, x: event.clientX, y: event.clientY });
     };
     document.addEventListener('click', click, true);
+    document.addEventListener('dblclick', doubleClick, true);
     document.addEventListener('contextmenu', context, true);
-    return () => { document.removeEventListener('click', click, true); document.removeEventListener('contextmenu', context, true); };
+    return () => {
+      document.removeEventListener('click', click, true);
+      document.removeEventListener('dblclick', doubleClick, true);
+      document.removeEventListener('contextmenu', context, true);
+    };
   }, [follow]);
   useEffect(() => {
     if (!menu) return;
     menuRef.current?.querySelector('button')?.focus();
     const close = (event: Event) => { if (!menuRef.current?.contains(event.target as Node)) setMenu(null); };
     const key = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setMenu(null); menu.anchor.focus(); }
+      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setMenu(null); menu.link?.focus(); }
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         event.preventDefault();
         const buttons = [...(menuRef.current?.querySelectorAll('button') ?? [])];
@@ -58,7 +75,7 @@ export function MarkdownNavigation({ follow, edit }: {
   }, [menu]);
   if (!menu) return null;
   return <div ref={menuRef} className="md-link-menu" role="menu" style={{ left: Math.max(0, Math.min(menu.x, innerWidth - 215)), top: Math.max(0, Math.min(menu.y, innerHeight - 72)) }}>
-    <button role="menuitem" onClick={() => { follow(menu.anchor.getAttribute('href')!, 'other'); setMenu(null); }}>Open in another surface</button>
-    <button role="menuitem" onClick={() => { edit(menu.anchor); setMenu(null); }}>Edit link</button>
+    <button role="menuitem" onClick={() => { follow(menu.href, 'other'); setMenu(null); }}>Open in another surface</button>
+    <button role="menuitem" onClick={() => { if (menu.link) edit(menu.link); else follow(menu.href, 'current'); setMenu(null); }}>{menu.link ? 'Edit link' : 'Edit image'}</button>
   </div>;
 }

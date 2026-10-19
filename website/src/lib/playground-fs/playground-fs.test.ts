@@ -214,30 +214,14 @@ describe("PlaygroundViewers", () => {
     expect(fs.files(PLAYGROUND_CWD).filter((name) => name.startsWith("image-"))).toEqual([]);
   });
 
-  it("edits an image under the document at its revision through edit/ and image-save/", async () => {
+  it("Markdown reads images but has no route that replaces their bytes", async () => {
     const { fs, open } = harness();
     fs.write(`${PLAYGROUND_CWD}/src/shot.png`, PNG);
     const viewer = open("__view-file", [README]);
-    const opened = await viewer.handle(get("edit/src/shot.png"));
-    expect(await bytes(opened)).toEqual(PNG);
-    const version = opened!.headers[VERSION_HEADER];
-    expect(version).toBe(sha256(PNG));
-    const query = `?version=${version}`;
-    expect(await viewer.handle(upload("image-save/src/shot.png", JPEG, "image/jpeg", query))).toMatchObject({ status: 415 });
-    expect(await viewer.handle(upload("image-save/src/shot.png", JPEG, "image/png", query))).toMatchObject({ status: 415 });
-    expect(await viewer.handle(upload("image-save/src/shot.png", PNG_EDITED, "image/png"))).toMatchObject({ status: 400 });
-    const saved = await viewer.handle(upload("image-save/src/shot.png", PNG_EDITED, "image/png", query));
-    expect(JSON.parse(await text(saved))).toEqual({ version: sha256(PNG_EDITED) });
-    expect(await bytes(await viewer.handle(get("images/src/shot.png")))).toEqual(PNG_EDITED);
-    expect(await viewer.handle(upload("image-save/src/shot.png", PNG, "image/png", query))).toMatchObject({ status: 409 });
-    expect(await viewer.handle(get("edit/../shot.png"))).toMatchObject({ status: 404 });
-    expect(await viewer.handle(get("edit/LICENSE.gif"))).toMatchObject({ status: 415 });
-    expect(await viewer.handle(get("edit/src/missing.png"))).toMatchObject({ status: 404 });
-    // One past the editor's pixel bound opens view-only, with why.
-    fs.write(`${PLAYGROUND_CWD}/src/huge.png`, HUGE_PNG);
-    const huge = (await viewer.handle(get("edit/src/huge.png")))!;
-    expect(huge).toMatchObject({ status: 200, headers: { "Content-Type": "application/json" } });
-    expect(JSON.parse(await text(huge)).viewOnly).toMatch(/9000 × 9000 pixels/);
+    expect(await bytes(await viewer.handle(get("images/src/shot.png")))).toEqual(PNG);
+    expect(await viewer.handle(get("edit/src/shot.png"))).toMatchObject({ status: 404 });
+    expect(await viewer.handle(upload("image-save/src/shot.png", PNG_EDITED, "image/png", `?version=${sha256(PNG)}`))).toMatchObject({ status: 404 });
+    expect(fs.bytes(`${PLAYGROUND_CWD}/src/shot.png`)).toEqual(PNG);
   });
 
   it("renames an image within its folder, never over another file", async () => {
