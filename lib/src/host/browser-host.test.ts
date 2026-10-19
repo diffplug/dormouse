@@ -500,7 +500,7 @@ describe('sync-to-pane', () => {
 
   it('sizes a page shown anew, never reading its own size as another writer', async () => {
     const pane = await paneOn();
-    const tabs = (active: string) => pane.fake.views[0].sink.state({ type: 'tabs', tabs: ['t1', 't2'].map((tabId) => ({ tabId, title: tabId, url: `http://localhost/${tabId}`, active: tabId === active })) });
+    const tabs = (active: string) => pane.fake.views[0].sink.shown(active);
     tabs('t1');
     await pane.size(800, 600);
     await vi.waitFor(() => expect(pane.writes()).toHaveLength(1));
@@ -516,6 +516,56 @@ describe('sync-to-pane', () => {
     await settled();
     expect(pane.state()).toBe('synced');
   });
+
+  it('gives a page shown anew the Fixed viewport last written, until the pane engages sync', async () => {
+    const pane = await paneOn();
+    const shown = (page: string) => pane.fake.views[0].sink.shown(page);
+    shown('t1');
+    expect((await pane.host.request({ ...s1, op: 'viewport', width: 1024, height: 768, dpr: 1 })).ok).toBe(true);
+    // A popup the daemon made active, then the opener again once it closes.
+    shown('t2');
+    await vi.waitFor(() => expect(pane.writes()).toEqual(['viewport s1 1024x768@1', 'viewport s1 1024x768@1']));
+    shown('t2');
+    shown('t1');
+    await vi.waitFor(() => expect(pane.writes()).toHaveLength(3));
+    await flush();
+    expect(pane.writes()).toHaveLength(3);
+
+    // Resize with pane owns every page's size from here.
+    await pane.size(800, 600, 'e2');
+    await vi.waitFor(() => expect(pane.writes().at(-1)).toBe('viewport s1 800x600@2'));
+    shown('t2');
+    await vi.waitFor(() => expect(pane.writes()).toEqual([...Array(3).fill('viewport s1 1024x768@1'), 'viewport s1 800x600@2', 'viewport s1 800x600@2']));
+
+    // Another writer ends the sync: a page shown anew keeps its own size, and
+    // never the Fixed one sync replaced.
+    await flush();
+    pane.seen(800, 600);
+    await vi.waitFor(() => expect(pane.state()).toBe('synced'));
+    pane.seen(1280, 720);
+    await vi.waitFor(() => expect(pane.state()).toBe('off'));
+    shown('t1');
+    await flush();
+    expect(pane.writes()).toHaveLength(5);
+  });
+
+  for (const provider of ['agent-browser', 'playwright'] as const) {
+    it(`gives a ${provider} page shown anew the Fixed size its headless launch came up at`, async () => {
+      const fake = fakeProvider();
+      fake.provider.evaluate = async () => ({ width: 1440, height: 900, dpr: 1 });
+      const host = createBrowserHost({ writeClipboardText: vi.fn(), providers: { [provider]: () => fake.provider } });
+      hosts.push(host);
+      const browser = { provider, binding: { session: 's1' } } as const;
+      expect(await host.request({ ...browser, op: 'launch', headed: false, url: 'https://example.com/', initialViewport: { mode: 'fixed', width: 1440, height: 900, dpr: 1 } })).toMatchObject({ ok: true });
+      await openViewer((await host.request({ ...browser, op: 'view', stream: 4321 })).url!);
+      await vi.waitFor(() => expect(fake.views).toHaveLength(1));
+      const writes = () => fake.calls.filter((call) => call.startsWith('viewport '));
+      const before = writes().length;
+      fake.views[0].sink.shown('page-1');
+      fake.views[0].sink.shown('page-2');
+      await vi.waitFor(() => expect(writes().slice(before)).toEqual(['viewport s1 1440x900@1']));
+    });
+  }
 
   it('ends sync for a Fixed resolution, which lands after the write in flight', async () => {
     const pane = await paneOn();

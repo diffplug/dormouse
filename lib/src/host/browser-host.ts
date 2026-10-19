@@ -38,7 +38,7 @@ import {
 } from '../lib/platform/browser-automation';
 import { createBrowserCaptures } from './browser-capture';
 import { createCaptureBudget, type CaptureClaim } from './browser-capture-budget';
-import { createViewportSync } from './browser-sync';
+import { createViewportSync, type FixedSize } from './browser-sync';
 import type { WebSocket } from 'ws';
 import { BrowserView, WEBVIEW_ID, closeSocket, createViewerServer, measuredViewport, type Upstream, type ViewerSink } from './browser-viewer';
 
@@ -276,6 +276,10 @@ const OPEN_SETTLE_MS = 4_000;
 const LAUNCH_CLOSE_RESERVE_MS = OPEN_SETTLE_MS + 4_000;
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+/** A Fixed viewport's size, its ratio only when one was asked for. */
+const fixedSize = ({ width, height, dpr }: { width: number; height: number; dpr?: number }): FixedSize =>
+  ({ width, height, ...(dpr === undefined ? {} : { dpr }) });
+
 /** One request, resolved: its provider, the provider's binding, and the
  *  native identity everything per-browser keys on. */
 type Bound = { p: BrowserProvider<unknown>; b: unknown; id: string };
@@ -405,6 +409,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     // writer can apply it. Playwright's context ratio is immutable here: sync
     // means CSS dimensions only, not an explicit DPR request.
     write: (bound, size, isCurrent) => writeViewport(bound, { op: 'viewport', ...size, ...(bound.p === providers.get('playwright') ? { dpr: undefined } : {}) }, { isCurrent }),
+    writeFixed: (bound, size, isCurrent) => writeViewport(bound, { op: 'viewport', ...size }, { isCurrent }),
     report: (id, message) => { for (const view of views.get(id) ?? []) view.state(message); },
     blocked: (id) => closed || settling.has(id),
     log,
@@ -446,7 +451,11 @@ export function createBrowserHost(deps: BrowserHostDeps) {
    *  stopping what runs the session first unless it is `fresh`. Answers once
    *  the browser is up, never waiting for the page. */
   function launch(bound: Bound, url: string | undefined, isHeaded: boolean, fresh: boolean, requestDeadline: number, initialViewport?: BrowserViewportSetting): Promise<LiveBrowser> {
-    return settle(bound.id, () => bringUpBrowser(bound, url, isHeaded, fresh, requestDeadline, initialViewport));
+    return settle(bound.id, () => bringUpBrowser(bound, url, isHeaded, fresh, requestDeadline, initialViewport)).then((live) => {
+      // The size it came up at is the one a page it shows anew is given.
+      if (!isHeaded && initialViewport?.mode === 'fixed') sync.fixed(bound.id, undefined, fixedSize(initialViewport));
+      return live;
+    });
   }
 
   async function bringUpBrowser(bound: Bound, url: string | undefined, isHeaded: boolean, fresh: boolean, requestDeadline: number, initialViewport?: BrowserViewportSetting): Promise<LiveBrowser> {
@@ -764,7 +773,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
         }
         case 'viewport': {
           const engagement = r.endsSync ?? sync.current(bound.id);
-          return await writeViewport(bound, r, { onSuccess: () => sync.fixed(bound.id, engagement) });
+          return await writeViewport(bound, r, { onSuccess: () => sync.fixed(bound.id, engagement, fixedSize(r)) });
         }
         default:
           return await p.act(b, r);

@@ -623,7 +623,12 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
       if (lastState.get(message.type) === text) return;
       lastState.set(message.type, text);
       if (message.type === 'tabs') {
-        if (Array.isArray(message.tabs)) sink.state({ type: 'tabs', tabs: parseAgentBrowserTabs(message.tabs) });
+        if (!Array.isArray(message.tabs)) return;
+        const tabs = parseAgentBrowserTabs(message.tabs);
+        sink.state({ type: 'tabs', tabs });
+        // The daemon's tab ids (`t1`, `t2`, …) are never reused while it runs.
+        const active = tabs.find((tab) => tab.active)?.tabId;
+        if (active !== undefined) sink.shown(active);
         return;
       }
       status = {

@@ -36,6 +36,10 @@ export interface ViewerSink {
   frame(jpeg: Uint8Array, size?: ViewportSize, windowWidth?: number): void;
   /** A state change. */
   state(message: ViewerState): void;
+  /** The page the browser shows now — its active tab — by a key the
+   *  provider keeps for that page's whole life, on each change and to each
+   *  view as it subscribes: a tab id that shifts as tabs close names no page. */
+  shown(page: string): void;
   /** The browser went away on its own — its window closed, its daemon or
    *  connection died — never because the host closed it. */
   gone(): void;
@@ -205,7 +209,7 @@ export interface BrowserViewDeps {
   onClose(): void;
   /** Sync-to-pane's side of a pane's socket — never a headed one's: the
    *  pane's size to write, the browser's viewport as its provider vouches for
-   *  it, and each change of the page shown (its active tab). */
+   *  it, and each change of the page shown (`ViewerSink.shown`). */
   sync?: {
     intent(intent: ViewerSyncIntent): void;
     viewport(size: ViewportSize, takenAt: number): void;
@@ -238,7 +242,7 @@ export class BrowserView implements ViewerSink {
   // The current burst of changed frames: when it began, and its latest.
   private burstStart = -Infinity;
   private lastChange = -Infinity;
-  private activeTab: string | undefined;
+  private shownPage: string | undefined;
   // Counts the provisional paints that supersede a capture in flight — not
   // those made only because one is overdue, which it is newer than.
   private provisionalGeneration = 0;
@@ -311,15 +315,15 @@ export class BrowserView implements ViewerSink {
   state(message: ViewerState): void {
     if (this.closed || this.socket.readyState !== WebSocket.OPEN) return;
     this.socket.send(JSON.stringify(message));
-    if (message.type !== 'tabs') return;
+  }
+
+  shown(page: string): void {
+    if (this.closed) return;
     // Selecting another tab sends no screencast frame, and the stream is
-    // otherwise quiet on a static page: capture the tab now shown.
-    const active = message.tabs.find((tab) => tab.active)?.tabId;
-    if (active !== undefined && this.activeTab !== undefined && active !== this.activeTab && this.last) this.pulse();
-    if (active !== undefined) {
-      this.activeTab = active;
-      this.deps.sync?.pageShown(active);
-    }
+    // otherwise quiet on a static page: capture the page now shown.
+    if (this.shownPage !== undefined && page !== this.shownPage && this.last) this.pulse();
+    this.shownPage = page;
+    this.deps.sync?.pageShown(page);
   }
 
   viewport(size: ViewportSize, takenAt: number): void {

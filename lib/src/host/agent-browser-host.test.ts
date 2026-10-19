@@ -774,6 +774,28 @@ describe('agent-browser host viewer', () => {
     await vi.waitFor(() => expect(syncStates(viewer).at(-1)).toBe('off'));
   });
 
+  it('sizes the tab the daemon shows anew at the Fixed viewport, keyed on its stable tab id', async () => {
+    running(session);
+    const daemon = await fakeServer();
+    writeState(session, 'stream', daemon.port);
+    spawnMock.mockImplementation(async () => spawnResult({}));
+    const host = makeHost();
+    hosts.push(host);
+    expect((await ab(host, { op: 'viewport', width: 900, height: 600, dpr: 2 }, { session })).ok).toBe(true);
+    const { url } = await ab(host, { op: 'view', stream: daemon.port }, { session });
+    const viewer = await openViewer(url!);
+    await daemon.connected();
+    const sized = () => spawnMock.mock.calls.filter(([, args]) => args.slice(2).join(' ') === 'set viewport 900 600 2').length;
+    const tabs = (...list: [string, boolean, string][]) => daemon.send({ type: 'tabs', tabs: list.map(([tabId, active, title]) => ({ tabId, url: `https://example.com/${tabId}`, title, active })) });
+    tabs(['t1', true, 'One']);
+    tabs(['t1', true, 'Renamed']);
+    await vi.waitFor(() => expect(viewer.states).toHaveLength(2));
+    expect(sized()).toBe(1);
+    // A popup the daemon reports active comes up at its own size.
+    tabs(['t1', false, 'Renamed'], ['t2', true, 'Popup']);
+    await vi.waitFor(() => expect(sized()).toBe(2));
+  });
+
   it('sends the daemon only validated input, a paste as a key pair per character', async () => {
     running(session);
     const daemon = await fakeServer();
