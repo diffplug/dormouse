@@ -16,7 +16,6 @@ import { toolFace, type ToolFace } from './browser-surface';
 import { BROWSER_LAYER_ATTRIBUTE, usePreviewSlotView } from './preview-transition';
 import { PaneWriteContext, TerminalContextContext, WallActionsContext } from './wall-context';
 import { toolView, type ToolViewRequest } from './tool-navigation';
-import { errorText } from './dor-control-shared';
 import type { PaneProps } from './pane-props';
 
 /** What a half or browser layer is during a switch, or outside one (`live`,
@@ -96,19 +95,27 @@ export function ToolPanel(props: PaneProps) {
   const { generation, transition } = usePreviewSlotView(props.id);
   const write = useContext(PaneWriteContext);
   const viewRequest = props.params?.toolViewRequest as ToolViewRequest | undefined;
+  // The request's deadline includes startup and unanswered transport calls.
+  // A URL/session change may retry delivery, but must not renew this deadline.
+  useEffect(() => {
+    if (!viewRequest?.token) return;
+    const timer = setTimeout(() => write.updateParams(props.id, {
+      toolViewRequest: undefined, toolNavigationError: 'Reading position unavailable.',
+    }), 10000);
+    return () => clearTimeout(timer);
+  }, [props.id, viewRequest?.token, write]);
+
   useEffect(() => {
     if (!viewRequest || !props.params?.url) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const deadline = Date.now() + 10000;
     const apply = async () => {
       try {
         await toolView(props.id, props.params!, viewRequest.position);
         if (!cancelled) write.updateParams(props.id, { toolViewRequest: undefined });
-      } catch (error) {
+      } catch {
         if (cancelled) return;
-        if (Date.now() < deadline) timer = setTimeout(() => void apply(), 100);
-        else write.updateParams(props.id, { toolViewRequest: undefined, toolNavigationError: errorText(error) });
+        timer = setTimeout(() => void apply(), 100);
       }
     };
     void apply();
