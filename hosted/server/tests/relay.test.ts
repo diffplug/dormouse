@@ -1732,7 +1732,7 @@ test("voice approval is independent of remote enrollment and cannot be redeemed 
   const token = outcomes.find((r) => r.json!.status === "enabled")!.json!.voiceToken as string;
   expect(isManagedVoiceToken(token)).toBe(true);
   expect(await f.sql(`SELECT * FROM dormouse_relay_burrows`)).toEqual([]);
-  expect(await f.sql(`SELECT hash, "burrowId" FROM dormouse_voice_tokens`)).toEqual([{ hash: digest(token), burrowId: null }]);
+  expect(await f.sql(`SELECT hash FROM dormouse_voice_tokens`)).toEqual([{ hash: digest(token) }]);
   const remote = await f.begin();
   await f.approve(remote.userCode, owner);
   const enrolled = await f.poll(remote.deviceCode);

@@ -5,6 +5,7 @@
 
 import {
   API_ROUTES,
+  MAX_ENROLL_POLL_INTERVAL_S,
   BAD_PASSWORD_ERROR,
   NOT_ENTITLED_ERROR,
   ORIGIN_MISMATCH_ERROR,
@@ -326,22 +327,55 @@ export async function beginHostedEnrollment(
   fetch: typeof globalThis.fetch,
 ): Promise<HostedEnrollmentBegun> {
   const noiseStatic = await mintNoiseStatic();
+  return { begin: await beginHostedApproval(relayOrigin, 'remote', fetch), noiseStatic };
+}
+
+/** Shared device-code exchange; callers retain their own cancellation and persistence rules. */
+export async function beginHostedApproval(
+  relayOrigin: string,
+  purpose: 'remote' | 'voice',
+  fetch: typeof globalThis.fetch,
+): Promise<BurrowEnrollBeginResponse> {
   const response = await fetch(`${relayOrigin}${API_ROUTES.burrowEnrollBegin}`, {
     method: 'POST',
     signal: AbortSignal.timeout(BURROW_REQUEST_TIMEOUT_MS),
     redirect: 'error',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ origin: relayOrigin } satisfies BurrowEnrollBeginRequest),
+    body: JSON.stringify({ origin: relayOrigin, ...(purpose === 'voice' ? { purpose } : {}) } satisfies BurrowEnrollBeginRequest),
   });
   if (!response.ok) {
     const detail = await response.text().catch(() => '');
-    throw new Error(refusalMessage(response.status, detail, relayOrigin));
+    throw new Error(approvalRefusalMessage(response.status, detail, relayOrigin, purpose));
   }
   const body: unknown = await response.json().catch(() => null);
   if (!isBurrowEnrollBeginResponse(body)) {
     throw new Error('Could not enroll: the Relay’s answer was not an enrollment code.');
   }
-  return { begin: body, noiseStatic };
+  // Older servers default to remote enrollment; voice must see explicit support
+  // before exposing a code or polling an approval that could enroll a Burrow.
+  if (purpose === 'voice' && body.purpose !== purpose) {
+    throw new Error('Hosted could not start independent managed-voice approval. Try again after Hosted is updated.');
+  }
+  return body;
+}
+
+/** Bound the remote clock: allow skew, but never wait indefinitely for approval. */
+export function hostedApprovalDeadline(expiresAt: number, now: number): number {
+  return now + Math.min(Math.max(expiresAt - now, 60_000), 15 * 60_000);
+}
+
+export function slowDownHostedApproval(intervalMs: number): number {
+  return Math.min(intervalMs + 5_000, MAX_ENROLL_POLL_INTERVAL_S * 1000);
+}
+
+export type HostedApprovalFailure =
+  | { status: 'retry'; slowDown: boolean }
+  | { status: 'refused'; reason: 'not-entitled' | 'account-full' }
+  | { status: 'failed'; message: string };
+
+function approvalRefusalMessage(status: number, detail: string, relayOrigin: string, purpose: 'remote' | 'voice'): string {
+  // A voice response may contain a token; never echo its body into renderer status.
+  return purpose === 'voice' ? `Hosted refused managed-voice approval (HTTP ${status}).` : refusalMessage(status, detail, relayOrigin);
 }
 
 /**
@@ -355,12 +389,10 @@ export async function beginHostedEnrollment(
  */
 export type HostedEnrollmentPoll =
   | { status: 'pending' }
-  | { status: 'retry'; slowDown: boolean }
   | { status: 'expired' }
   | { status: 'redeemed'; burrowId: string }
   | { status: 'enrolled'; enrollment: BurrowEnrollment }
-  | { status: 'refused'; reason: 'not-entitled' | 'account-full' }
-  | { status: 'failed'; message: string };
+  | HostedApprovalFailure;
 
 /**
  * `POST /api/burrow/enroll/poll` once. **Never throws**: the service's poll
@@ -375,6 +407,23 @@ export async function pollHostedEnrollment(
   noiseStatic: EnrollmentStatic,
   fetch: typeof globalThis.fetch,
 ): Promise<HostedEnrollmentPoll> {
+  return pollHostedApproval(relayOrigin, deviceCode, 'remote', fetch, (body): HostedEnrollmentPoll | null => {
+    if (!isBurrowEnrollPollResponse(body)) return null;
+    // Rebuilt, so nothing but the guarded fields reaches status.
+    if (body.status === 'redeemed') return { status: 'redeemed', burrowId: body.burrowId };
+    if (body.status !== 'enrolled') return { status: body.status };
+    return { status: 'enrolled', enrollment: enrollmentFrom(relayOrigin, body.enrollment, label, noiseStatic) };
+  });
+}
+
+/** One poll, with retries and refusals shared by both purposes; only success parsing differs. */
+export async function pollHostedApproval<T>(
+  relayOrigin: string,
+  deviceCode: string,
+  purpose: 'remote' | 'voice',
+  fetch: typeof globalThis.fetch,
+  parse: (body: unknown) => T | null,
+): Promise<T | HostedApprovalFailure> {
   let response: Response;
   try {
     response = await fetch(`${relayOrigin}${API_ROUTES.burrowEnrollPoll}`, {
@@ -383,7 +432,7 @@ export async function pollHostedEnrollment(
       // The device code is a bearer until it expires.
       redirect: 'error',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ deviceCode } satisfies BurrowEnrollPollRequest),
+      body: JSON.stringify({ deviceCode, ...(purpose === 'voice' ? { purpose } : {}) } satisfies BurrowEnrollPollRequest),
     });
   } catch {
     return { status: 'retry', slowDown: false };
@@ -395,35 +444,24 @@ export async function pollHostedEnrollment(
     if (response.status === 403 && refusedError(detail) === NOT_ENTITLED_ERROR) {
       return { status: 'refused', reason: 'not-entitled' };
     }
-    // The poll's only 409: the account is at Hosted's abuse ceiling of computers.
-    if (response.status === 409) return { status: 'refused', reason: 'account-full' };
-    return { status: 'failed', message: refusalMessage(response.status, detail, relayOrigin) };
+    if (purpose === 'remote' && response.status === 409) return { status: 'refused', reason: 'account-full' };
+    return { status: 'failed', message: approvalRefusalMessage(response.status, detail, relayOrigin, purpose) };
   }
-  // A body lost on the wire after a 2xx's headers is a transport failure like
-  // one before them: the next poll can still hear `redeemed`. Only a complete
-  // body that is not an enrollment poll fails.
+  // A body lost after 2xx headers is still a transport failure. Poll again to
+  // learn whether the approval was redeemed; a complete malformed body fails.
   let text: string;
   try {
     text = await response.text();
   } catch {
     return { status: 'retry', slowDown: false };
   }
-  const body = parseJson(text);
-  if (!isBurrowEnrollPollResponse(body)) {
-    return { status: 'failed', message: 'Could not enroll: the Relay’s answer was not an enrollment poll.' };
-  }
-  // Rebuilt, so nothing but the guarded fields reaches `status`.
-  if (body.status === 'redeemed') return { status: 'redeemed', burrowId: body.burrowId };
-  if (body.status !== 'enrolled') return { status: body.status };
   try {
-    return {
-      status: 'enrolled',
-      enrollment: enrollmentFrom(relayOrigin, body.enrollment, label, noiseStatic),
-
-    };
+    const answer = parse(parseJson(text));
+    if (answer !== null) return answer;
   } catch (error) {
     return { status: 'failed', message: errorMessage(error) };
   }
+  return { status: 'failed', message: 'Could not enroll: the Relay’s answer was not an enrollment poll.' };
 }
 
 /** The Noise static an enrollment carries, minted before its first request. */

@@ -84,23 +84,43 @@ const OTHER_VOICE = MANAGED_VOICES[1]!.id;
 const idle = (configured: boolean, voiceId = DEFAULT_MANAGED_VOICE_ID) =>
   ({ configured, voiceId, notEntitled: false });
 
+async function seedToken(token = TOKEN): Promise<void> {
+  await writeFile(join(dir, MANAGED_VOICE_FILE), JSON.stringify({ token, voiceId: DEFAULT_MANAGED_VOICE_ID }), { mode: 0o600 });
+}
+
+const begun = () => ({ purpose: 'voice', deviceCode: 'A'.repeat(43), userCode: '7KQM-X4TD', expiresAt: Date.now() + 600_000, interval: 1 });
+
+async function approveVoice(target = host, token = TOKEN) {
+  vi.useFakeTimers();
+  try {
+    fetchMock.mockResolvedValueOnce(Response.json(begun())).mockResolvedValueOnce(Response.json({ status: 'enabled', voiceToken: token }));
+    expect(await target.handle({ op: 'beginEnrollment' })).toMatchObject({ ok: true });
+    await vi.advanceTimersByTimeAsync(1000);
+    await vi.waitFor(async () => {
+      const status = await target.handle({ op: 'status' }) as { enrollment?: { status: string } };
+      expect(['waiting', 'saving']).not.toContain(status.enrollment?.status);
+    });
+  } finally {
+    vi.useRealTimers();
+  }
+}
+
 describe('configuration', () => {
   it('holds the token enrollment saves, and reports and broadcasts without ever carrying it', async () => {
     expect(await host.handle({ op: 'status' })).toEqual(idle(false));
-    await host.credential.save(TOKEN);
-    expect(broadcasts).toEqual([idle(true)]);
+    await approveVoice();
+    expect(broadcasts.at(-1)).toEqual(idle(true));
     expect(JSON.stringify([broadcasts, await host.handle({ op: 'status' })])).not.toContain(TOKEN);
   });
 
   it('takes no token from a webview command', async () => {
     expect(await host.handle({ op: 'configure', update: { token: TOKEN } })).toEqual({ ok: false, reason: 'invalid-voice' });
     expect(await host.handle({ op: 'status' })).toEqual(idle(false));
-    await expect(host.credential.save('sk-nope')).rejects.toThrow();
   });
 
   it('keeps both of two edits sent at once', async () => {
     await Promise.all([
-      host.credential.save(TOKEN),
+      approveVoice(),
       host.handle({ op: 'configure', update: { voiceId: OTHER_VOICE } }),
     ]);
     expect(JSON.parse(await readFile(join(dir, MANAGED_VOICE_FILE), 'utf8'))).toEqual({ token: TOKEN, voiceId: OTHER_VOICE });
@@ -108,7 +128,7 @@ describe('configuration', () => {
   });
 
   it('persists owner-only and survives a restart', async () => {
-    await host.credential.save(TOKEN);
+    await approveVoice();
     await host.handle({ op: 'configure', update: { voiceId: OTHER_VOICE } });
     const file = join(dir, MANAGED_VOICE_FILE);
     if (process.platform !== 'win32') expect((await stat(file)).mode & 0o777).toBe(0o600);
@@ -125,8 +145,8 @@ describe('configuration', () => {
   });
 
   it('clears the token at disconnect', async () => {
-    await host.credential.save(TOKEN);
-    await host.credential.clear();
+    await seedToken();
+    await host.handle({ op: 'disconnect' });
     expect(broadcasts.at(-1)).toEqual(idle(false));
     expect(JSON.parse(await readFile(join(dir, MANAGED_VOICE_FILE), 'utf8')).token).toBeNull();
   });
@@ -139,7 +159,7 @@ describe('configuration', () => {
   });
 
   it('keeps a saved token through a read error, and reads again next time', async () => {
-    await host.credential.save(TOKEN);
+    await seedToken();
     const file = join(dir, MANAGED_VOICE_FILE);
     const restarted = make();
     readFault.next = Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' });
@@ -153,13 +173,15 @@ describe('configuration', () => {
   });
 
   it('refuses to hold a token with nowhere owner-only to keep it', async () => {
-    await expect(make({ stateDir: undefined }).credential.save(TOKEN)).rejects.toThrow();
+    const unavailable = make({ stateDir: undefined });
+    await approveVoice(unavailable);
+    expect(await unavailable.handle({ op: 'status' })).toMatchObject({ configured: false, enrollment: { status: 'ended', message: expect.stringContaining('Could not save') } });
   });
 });
 
 describe('speak', () => {
   beforeEach(async () => {
-    await host.credential.save(TOKEN);
+    await seedToken();
   });
 
   it('sends only the text and voice id, with the bearer token, and returns the audio', async () => {
@@ -175,7 +197,7 @@ describe('speak', () => {
   });
 
   it('answers unconfigured without a request', async () => {
-    await host.credential.clear();
+    await host.handle({ op: 'disconnect' });
     expect(await host.handle({ op: 'speak', text: 'x' })).toEqual({ ok: false, reason: 'unconfigured' });
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -258,9 +280,10 @@ describe('speak', () => {
   it('forgets every clip when the token changes', async () => {
     fetchMock.mockImplementation(async () => audioResponse());
     await host.handle({ op: 'speak', text: 'build finished' });
-    await host.credential.save(`dmv_${'C'.repeat(43)}`);
+    await host.handle({ op: 'disconnect' });
+    await approveVoice(host, `dmv_${'C'.repeat(43)}`);
     await host.handle({ op: 'speak', text: 'build finished' });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.filter(([url]) => url === MANAGED_VOICE_SPEAK_URL)).toHaveLength(2);
   });
 
   it('latches a 403 as not entitled, bypassing the cache, until a speak succeeds', async () => {
@@ -285,14 +308,15 @@ describe('speak', () => {
     const spoken = host.handle({ op: 'speak', text: 'tests failed' });
     await vi.waitFor(() => expect(answers).toHaveLength(2));
     // Enrolled again while both are out.
-    await host.credential.save(`dmv_${'C'.repeat(43)}`);
+    await host.handle({ op: 'disconnect' });
+    await approveVoice(host, `dmv_${'C'.repeat(43)}`);
     answers[0]!(new Response('{}', { status: 403 }));
     answers[1]!(audioResponse());
     await Promise.all([refused, spoken]);
     expect(broadcasts.at(-1)).toEqual(idle(true));
     fetchMock.mockImplementation(async () => audioResponse());
     await host.handle({ op: 'speak', text: 'tests failed' });
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls.filter(([url]) => url === MANAGED_VOICE_SPEAK_URL)).toHaveLength(3);
   });
 
   it('refuses empty or over-long text', async () => {
@@ -311,7 +335,7 @@ describe('the build it runs in', () => {
       relay: { origin: 'http://localhost:8787', mode: 'hosted' },
       networkAllowed: async () => true,
     });
-    await local.credential.save(TOKEN);
+    await seedToken();
     fetchMock.mockResolvedValue(audioResponse());
 
     expect(await local.handle({ op: 'speak', text: 'build finished' })).toMatchObject({ ok: true });
@@ -322,7 +346,7 @@ describe('the build it runs in', () => {
     // A token saved by a Hosted build on this machine is still on disk; a
     // self-host build reaches nothing of Dormouse's (docs/specs/relay.md →
     // "Relay origin"), so it reads none of it.
-    await host.credential.save(TOKEN);
+    await seedToken();
     const selfHost = createManagedVoiceHost({
       stateDir: dir,
       onStatus: (status) => void broadcasts.push(status),
@@ -333,7 +357,7 @@ describe('the build it runs in', () => {
     broadcasts = [];
 
     expect(await selfHost.handle({ op: 'status' })).toEqual(idle(false));
-    await expect(selfHost.credential.save(TOKEN)).rejects.toThrow();
+    expect(await selfHost.handle({ op: 'beginEnrollment' })).toMatchObject({ ok: false });
     expect(await selfHost.handle({ op: 'configure', update: { voiceId: OTHER_VOICE } })).toEqual({
       ok: false,
       reason: 'unavailable',
@@ -354,7 +378,7 @@ describe('the network policy', () => {
     // of its own, a cached clip included. Saving a token is local, so it still works.
     let allowed = true;
     const gated = make({ networkAllowed: async () => allowed });
-    await gated.credential.save(TOKEN);
+    await seedToken();
     fetchMock.mockResolvedValue(audioResponse());
     expect(await gated.handle({ op: 'speak', text: 'build finished' })).toMatchObject({ ok: true });
     fetchMock.mockClear();
@@ -376,7 +400,7 @@ describe('the network policy', () => {
 
 describe('independent managed-voice lifecycle', () => {
   it('disables speech and reports a failed persisted clear, with a successful retry surviving restart', async () => {
-    await host.credential.save(TOKEN);
+    await seedToken();
     fetchMock.mockResolvedValue(audioResponse());
     await host.handle({ op: 'speak', text: 'cached label' });
     fetchMock.mockClear();
@@ -394,8 +418,6 @@ describe('independent managed-voice lifecycle', () => {
     expect(await host.handle({ op: 'disconnect' })).toMatchObject({ ok: true, configured: false });
     expect(await make().handle({ op: 'status' })).toEqual(idle(false));
   });
-
-  const begun = () => ({ purpose: 'voice', deviceCode: 'A'.repeat(43), userCode: '7KQM-X4TD', expiresAt: Date.now() + 600_000, interval: 1 });
 
   it('obtains only a voice token, keeps codes out of status, and persists without a Burrow', async () => {
     vi.useFakeTimers();
@@ -420,6 +442,45 @@ describe('independent managed-voice lifecycle', () => {
     await vi.advanceTimersByTimeAsync(60_000);
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(await host.handle({ op: 'status' })).toEqual(idle(false));
+  });
+
+  it('rejects a malformed voice token without saving or exposing it', async () => {
+    vi.useFakeTimers();
+    fetchMock.mockResolvedValueOnce(Response.json(begun()))
+      .mockResolvedValueOnce(Response.json({ status: 'enabled', voiceToken: 'sk-nope' }));
+    await host.handle({ op: 'beginEnrollment' });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(await host.handle({ op: 'status' })).toMatchObject({ configured: false, enrollment: { status: 'ended' } });
+    expect(await make().handle({ op: 'status' })).toEqual(idle(false));
+    expect(JSON.stringify(broadcasts)).not.toContain('sk-nope');
+  });
+
+  it('reports a non-entitlement 403 without blaming the plan or exposing the body', async () => {
+    vi.useFakeTimers();
+    fetchMock.mockResolvedValueOnce(Response.json(begun()))
+      .mockResolvedValueOnce(Response.json({ error: 'forbidden', voiceToken: TOKEN }, { status: 403 }));
+    await host.handle({ op: 'beginEnrollment' });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(await host.handle({ op: 'status' })).toMatchObject({ configured: false, enrollment: { status: 'ended', message: 'Hosted refused managed-voice approval (HTTP 403).' } });
+    expect(JSON.stringify(broadcasts)).not.toContain(TOKEN);
+  });
+
+  it('slows down after a 429 and enables voice after a transport retry', async () => {
+    vi.useFakeTimers();
+    fetchMock.mockResolvedValueOnce(Response.json(begun()))
+      .mockResolvedValueOnce(new Response('', { status: 429 }))
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce(Response.json({ status: 'enabled', voiceToken: TOKEN }));
+    await host.handle({ op: 'beginEnrollment' });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(5999);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    await vi.advanceTimersByTimeAsync(6000);
+    await vi.waitFor(async () => expect(await host.handle({ op: 'status' })).toEqual(idle(true)));
+    expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 
   it('canceling a pending approval prevents a late token from enabling voice', async () => {

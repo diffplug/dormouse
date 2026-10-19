@@ -237,7 +237,7 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
       const { token, id, createdAt } = await createVoiceToken();
       setMinted(token);
       setVoiceTokens((tokens) => [
-        { id, createdAt, lastUsedAt: null, revokedAt: null, computer: false },
+        { id, createdAt, lastUsedAt: null, revokedAt: null },
         ...(tokens ?? []),
       ]);
     });

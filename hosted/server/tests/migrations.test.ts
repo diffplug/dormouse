@@ -9,7 +9,6 @@ import { readdirSync, readFileSync } from "node:fs";
  * appends the next numbered file and pins it here.
  */
 const PINNED: Record<string, string> = {
-  "008_independent_voice.sql": "1fce46af1f26a192ff6aa359689d45504d97dcfebc4eaf9f4dac111124619d49",
   "001_voice_tokens.sql": "8dddec53bca7244411f3e8a007ccea665ede176c9c0bead6a0987af41c366cae",
   "002_relay.sql": "54651083ba1aac934ac0dcb5f62cc4f032d017f2c3be2161c0812ebc76f338c3",
   "003_relay_push.sql": "ee8cca19bb70eb89fcba708b54d8a188347caf0f32ec23551c56d27676ab094f",
@@ -19,8 +18,8 @@ const PINNED: Record<string, string> = {
     "b02891ae98157bf09927e51739057a7882d35e51e2e4d5cf3e25f8a9a3f29447",
   "006_relay_setup_token_claim.sql":
     "37bf7777f10416e9bbcb3df11d1cc355e13462ce99b1e49f2481436617d9eccc",
-  "007_voice_token_burrow.sql":
-    "ccb395314dd49f9b5c72560121994fd7a21d349580c0d746d0d380e29d0aefec",
+  "007_independent_voice.sql":
+    "6b6d95fd3e3e5d71f3915913d483edebd6837e0481388b4f2af11a8249364264",
 };
 
 const directory = new URL("../dormouse-migrations/", import.meta.url);

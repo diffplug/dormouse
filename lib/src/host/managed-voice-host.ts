@@ -7,7 +7,8 @@
  */
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { API_ROUTES, isBurrowEnrollBeginResponse, isManagedVoiceId, isManagedVoiceToken, MAX_ENROLL_POLL_INTERVAL_S } from 'remote-lib-common';
+import { isManagedVoiceId, isManagedVoiceToken } from 'remote-lib-common';
+import { beginHostedApproval, hostedApprovalDeadline, pollHostedApproval, slowDownHostedApproval } from '../remote/burrow/enrollment';
 import { enrollVerificationUrl } from './remote/hosted-enrollment-url';
 import { writeJsonAtomic } from './atomic-json-file';
 import { hostedVoiceOrigin, type RelayBuild } from './relay-origin';
@@ -46,14 +47,14 @@ function normalizeStored(value: unknown): StoredConfig {
   };
 }
 
-/**
- * The host-only credential: managed-voice approval saves it, disconnect clears it
- * (`docs/specs/hosted.md` -> "Managed voice"). **In-process only**: no webview
- * command reaches it, so the token never enters a webview realm.
- */
-export interface ManagedVoiceCredential {
-  save(token: string): Promise<void>;
-  clear(): Promise<void>;
+type VoiceApproval = { status: 'pending' | 'expired' | 'redeemed' } | { status: 'enabled'; voiceToken: string };
+
+function parseVoiceApproval(body: unknown): VoiceApproval | null {
+  if (!body || typeof body !== 'object') return null;
+  const answer = body as Record<string, unknown>;
+  if (answer.status === 'pending' || answer.status === 'expired' || answer.status === 'redeemed') return { status: answer.status };
+  if (answer.status === 'enabled' && isManagedVoiceToken(answer.voiceToken)) return { status: 'enabled', voiceToken: answer.voiceToken };
+  return null;
 }
 
 /**
@@ -112,7 +113,7 @@ export function createManagedVoiceHost(options: {
    * `false` refuses before any request, a cached clip included.
    */
   networkAllowed: () => Promise<boolean>;
-}): { handle(command: unknown): Promise<unknown>; credential: ManagedVoiceCredential; dispose(): void } {
+}): { handle(command: unknown): Promise<unknown>; dispose(): void } {
   const fetchImpl = options.fetch ?? globalThis.fetch;
   const timeoutMs = options.timeoutMs ?? MANAGED_VOICE_REQUEST_TIMEOUT_MS;
   const log = options.log ?? (() => {});
@@ -305,15 +306,15 @@ export function createManagedVoiceHost(options: {
     enrollment = null;
   }
 
-  async function enrollmentRequest(path: string, body: Record<string, unknown>): Promise<Response> {
+  async function requireEnrollmentNetwork(): Promise<void> {
     if (speakUrl === null) throw new Error('This build has no managed voice.');
     if (!(await options.networkAllowed())) throw new Error('Network is set to Nowhere.');
-    return fetchImpl(options.relay.origin + path, {
-      method: 'POST', redirect: 'error', signal: AbortSignal.timeout(10_000),
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ ...body, purpose: 'voice' }),
-    });
   }
+
+  const enrollmentFetch: typeof globalThis.fetch = async (url, init) => {
+    await requireEnrollmentNetwork();
+    return fetchImpl(url, init);
+  };
 
   async function beginEnrollment(): Promise<void> {
     if (enrollment?.status === 'waiting' || enrollment?.status === 'saving') return;
@@ -323,47 +324,33 @@ export function createManagedVoiceHost(options: {
     const begin = async () => {
       if (status(await load()).configured) throw new Error('Managed voice is already enabled.');
       if (sequence !== enrollmentSequence) return;
-      const response = await enrollmentRequest(API_ROUTES.burrowEnrollBegin, { origin: options.relay.origin });
-      const body: unknown = await response.json().catch(() => null);
-      if (!response.ok || !isBurrowEnrollBeginResponse(body) || body.purpose !== 'voice') {
-        throw new Error('Hosted could not start independent managed-voice approval. Try again after Hosted is updated.');
-      }
+      const body = await beginHostedApproval(options.relay.origin, 'voice', enrollmentFetch);
       if (sequence !== enrollmentSequence) return;
       const url = new URL(enrollVerificationUrl(options.relay, body, 'voice'));
-      enrollment = { status: 'waiting', userCode: body.userCode, expiresAt: body.expiresAt, verificationUrl: url.href };
+      const deadline = hostedApprovalDeadline(body.expiresAt, Date.now());
+      enrollment = { status: 'waiting', userCode: body.userCode, expiresAt: deadline, verificationUrl: url.href };
       await announce();
-      // Bound the remote clock independently; a corrupt far-future expiry
-      // must never leave this host polling indefinitely.
-      const deadline = Math.min(body.expiresAt, Date.now() + 15 * 60_000);
-      let interval = body.interval;
+      let intervalMs = body.interval * 1000;
       const schedule = () => {
-        if (sequence === enrollmentSequence) pollTimer = setTimeout(() => void poll(), interval * 1000);
+        if (sequence === enrollmentSequence) pollTimer = setTimeout(() => void poll(), intervalMs);
       };
       const poll = async () => {
         try {
           if (sequence !== enrollmentSequence) return;
           if (Date.now() >= deadline) throw new Error('That code expired. Enable managed voice to get a new code.');
-          const response = await enrollmentRequest(API_ROUTES.burrowEnrollPoll, { deviceCode: body.deviceCode });
+          // Check outside the retrying exchange too: Nowhere ends this run.
+          await requireEnrollmentNetwork();
+          const answer = await pollHostedApproval(options.relay.origin, body.deviceCode, 'voice', enrollmentFetch, parseVoiceApproval);
           if (sequence !== enrollmentSequence) return;
-          if (response.status === 429) {
-            interval = Math.min(interval + 5, MAX_ENROLL_POLL_INTERVAL_S);
+          if (answer.status === 'retry') {
+            if (answer.slowDown) intervalMs = slowDownHostedApproval(intervalMs);
             schedule();
             return;
           }
-          if (response.status >= 500) { schedule(); return; }
-          if (response.status === 403) throw new Error('That account has no Hosted plan.');
-          if (!response.ok) throw new Error('Hosted refused managed-voice approval.');
-          // Reading can fail after the server spent the approval. Retry that
-          // transport failure; never expose a malformed body (it may hold a token).
-          let raw: string;
-          try { raw = await response.text(); } catch { schedule(); return; }
-          if (sequence !== enrollmentSequence) return;
-          let parsed: unknown;
-          try { parsed = JSON.parse(raw); } catch { throw new Error('Hosted returned an invalid voice approval.'); }
-          if (!parsed || typeof parsed !== 'object') throw new Error('Hosted returned an invalid voice approval.');
-          const answer = parsed as { status?: string; voiceToken?: unknown };
+          if (answer.status === 'refused') throw new Error('That account has no Hosted plan.');
+          if (answer.status === 'failed') throw new Error(answer.message);
           if (answer.status === 'pending') { schedule(); return; }
-          if (answer.status === 'enabled' && isManagedVoiceToken(answer.voiceToken)) {
+          if (answer.status === 'enabled') {
             enrollment = { status: 'saving' };
             await announce();
             if (sequence !== enrollmentSequence) return;
@@ -377,8 +364,6 @@ export function createManagedVoiceHost(options: {
             : 'That approval ended. Enable managed voice to get a new code.');
         } catch (error) {
           if (sequence !== enrollmentSequence) return;
-          // A transport failure may have lost a redeemed answer; ask again.
-          if (error instanceof TypeError || (error instanceof Error && error.name === 'TimeoutError')) { schedule(); return; }
           enrollment = { status: 'ended', message: error instanceof Error ? error.message : String(error) };
           await announce();
         }
@@ -411,13 +396,6 @@ export function createManagedVoiceHost(options: {
 
   return {
     dispose: cancelEnrollment,
-    credential: {
-      async save(token) {
-        if (!isManagedVoiceToken(token)) throw new Error('not a voice token');
-        await setToken(token);
-      },
-      clear: () => { disabled = true; return setToken(null); },
-    },
     async handle(command) {
       const message = (command ?? {}) as Record<string, unknown>;
       switch (message.op) {

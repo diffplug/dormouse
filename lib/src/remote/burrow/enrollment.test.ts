@@ -12,6 +12,7 @@ import {
 import { TEST_SETUP_PASSWORD } from '../test-setup-password';
 import {
   beginHostedEnrollment,
+  pollHostedApproval,
   isEnrollment,
   performEnrollment,
   pollHostedEnrollment,
@@ -573,5 +574,32 @@ describe('Hosted device-code enrollment', () => {
         message: expect.stringContaining('not an enrollment poll'),
       });
     });
+  });
+});
+
+
+describe.each(['remote', 'voice'] as const)('%s approval transport', (purpose) => {
+  const poll = (fetchMock: typeof fetch) => pollHostedApproval(
+    'https://relay.dormouse.sh', 'D'.repeat(RELAY_BEARER_LENGTH), purpose, fetchMock,
+    (body) => body && typeof body === 'object' && 'status' in body && body.status === 'pending' ? { status: 'pending' } : null,
+  );
+
+  it('retries a lost successful body, but fails a complete malformed answer', async () => {
+    const lost = new Response();
+    vi.spyOn(lost, 'text').mockRejectedValueOnce(new Error('connection reset'));
+    expect(await poll(vi.fn(async () => lost))).toEqual({ status: 'retry', slowDown: false });
+    expect(await poll(vi.fn(async () => new Response('{broken')))).toMatchObject({ status: 'failed' });
+  });
+
+  it('distinguishes entitlement from other 403 refusals', async () => {
+    expect(await poll(vi.fn(async () => Response.json({ error: NOT_ENTITLED_ERROR }, { status: 403 }))))
+      .toEqual({ status: 'refused', reason: 'not-entitled' });
+    expect(await poll(vi.fn(async () => Response.json({ error: 'forbidden' }, { status: 403 }))))
+      .toMatchObject({ status: 'failed', message: expect.stringContaining('HTTP 403') });
+  });
+
+  it.each([429, 503])('retries HTTP %i without parsing success', async (status) => {
+    expect(await poll(vi.fn(async () => new Response('', { status }))))
+      .toEqual({ status: 'retry', slowDown: status === 429 });
   });
 });

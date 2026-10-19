@@ -82,7 +82,7 @@ export function voiceTokenRoutes(
   app.get("/api/voice/tokens", cookieGate, async (c) => {
     const tokens = await accountQuery(
       host(c),
-      `SELECT id, "createdAt", "lastUsedAt", "revokedAt", "burrowId" IS NOT NULL AS computer
+      `SELECT id, "createdAt", "lastUsedAt", "revokedAt"
       FROM dormouse_voice_tokens
       WHERE "userId" = $1 ORDER BY "createdAt" DESC, id`,
       [c.get("login").userId],

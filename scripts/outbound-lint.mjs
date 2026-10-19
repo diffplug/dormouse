@@ -138,7 +138,7 @@ const OUTBOUND_SITES = {
   },
   'lib/src/remote/burrow/enrollment.ts': {
     class: 'guarded:burrow-service',
-    reason: 'The enrollment exchange calls only the fetch parameter, which the service passes as its guarded fetch.',
+    reason: 'The enrollment exchange calls only its fetch parameter: the Burrow service or managed-voice host supplies a network-policy guard.',
   },
   'lib/src/host/remote/native-direct-peer.ts': {
     class: 'guarded:burrow-service',

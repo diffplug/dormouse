@@ -86,7 +86,7 @@ Errors are JSON `{ message }`. Cookie routes answer 401 without a login and 403 
 
 **Must store only a token's SHA-256.** A token is `dmv_` plus base64url of 32 random bytes, returned only by the mint response: the account's `POST`, or the poll that redeems an enrollment. Revocation is permanent.
 
-**Must keep managed voice and remote control independent.** Voice approval mints only a voice token, remote enrollment only a Burrow; disconnecting or revoking either preserves the other. Existing computer-linked tokens are detached by migration. The relay's role may insert only the voice token's owner and hash. Client controls and disclosure: `docs/specs/alert.md` -> "Settings dialog".
+**Must keep managed voice and remote control independent.** Voice approval mints only a voice token, remote enrollment only a Burrow; disconnecting or revoking either preserves the other. The relay's role may insert only the voice token's owner and hash. Client controls and disclosure: `docs/specs/alert.md` -> "Settings dialog".
 
 **Speak must answer in this order:**
 

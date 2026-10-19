@@ -12,7 +12,6 @@ import { enrollVerificationUrl, SELF_HOST_DEVICE_CODE_REFUSAL } from './hosted-e
 export { enrollVerificationUrl } from './hosted-enrollment-url';
 import {
   API_ROUTES,
-  MAX_ENROLL_POLL_INTERVAL_S,
   MAX_PENDING_PAIRINGS,
   deriveNoiseStaticPublicKey,
   formatPairingInvitationUrl,
@@ -22,6 +21,8 @@ import {
 } from 'remote-lib-common';
 import {
   beginHostedEnrollment,
+  hostedApprovalDeadline,
+  slowDownHostedApproval,
   originMismatchMessage,
   performEnrollment,
   pollHostedEnrollment,
@@ -244,17 +245,6 @@ function hostedEnrollmentRefusal(accountOrigin: string): string {
 }
 
 /**
- * How long a Hosted enrollment waits for approval, by this machine's clock:
- * the Relay's `expiresAt`, held to these bounds, since that is the Relay's
- * clock and this one may be minutes off it. The Relay's `expired` ends it too.
- */
-const HOSTED_ENROLLMENT_MIN_WAIT_MS = 60_000;
-const HOSTED_ENROLLMENT_MAX_WAIT_MS = 15 * 60_000;
-
-/** How much a 429 lengthens the poll interval, up to `MAX_ENROLL_POLL_INTERVAL_S`. */
-const HOSTED_ENROLLMENT_SLOW_DOWN_MS = 5_000;
-
-/**
  * The account origin `status` names: `HOSTED_ACCOUNT_ORIGIN` in a release
  * Hosted build; in a dev one, `resolved` — the origin the last begin took from
  * the Relay — or `null` before any; `null` in a self-host build.
@@ -415,7 +405,7 @@ interface HostedEnrollmentRun {
   readonly label: string;
   readonly userCode: string;
   readonly verificationUrl: string;
-  /** This machine's deadline (`HOSTED_ENROLLMENT_MAX_WAIT_MS`). */
+  /** This machine's deadline (bounded independently of the Relay clock). */
   readonly expiresAt: number;
   intervalMs: number;
   /** The last poll found the approving account full. */
@@ -837,18 +827,13 @@ export class BurrowService {
     this.#refuseEnrolled();
     if (this.#enrollRun?.redeeming) return this.#hostedEnrollmentState()!;
     const verificationUrl = enrollVerificationUrl(this.#relay, begin);
-    const now = this.#now();
-    const wait = Math.min(
-      Math.max(begin.expiresAt - now, HOSTED_ENROLLMENT_MIN_WAIT_MS),
-      HOSTED_ENROLLMENT_MAX_WAIT_MS,
-    );
     const run: HostedEnrollmentRun = {
       deviceCode: begin.deviceCode,
       noiseStatic,
       label,
       userCode: begin.userCode,
       verificationUrl,
-      expiresAt: now + wait,
+      expiresAt: hostedApprovalDeadline(begin.expiresAt, this.#now()),
       intervalMs: begin.interval * 1000,
       accountFull: false,
       redeeming: false,
@@ -940,10 +925,7 @@ export class BurrowService {
         return;
       case 'retry':
         if (answer.slowDown) {
-          run.intervalMs = Math.min(
-            run.intervalMs + HOSTED_ENROLLMENT_SLOW_DOWN_MS,
-            MAX_ENROLL_POLL_INTERVAL_S * 1000,
-          );
+          run.intervalMs = slowDownHostedApproval(run.intervalMs);
         }
         this.#schedulePoll(run);
         return;
