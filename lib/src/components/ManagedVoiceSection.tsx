@@ -16,7 +16,7 @@ const HINT = 'mt-1 text-sm leading-relaxed text-muted';
 
 const REFUSAL: Record<Exclude<ManagedVoiceConfigResult, { ok: true }>['reason'], string> = {
   'invalid-voice': 'That voice is not one Dormouse Hosted offers.',
-  unavailable: 'This app could not save the managed voice setting.',
+  unavailable: 'This app could not save the Natural Voice setting.',
 };
 
 /** What leaves this computer, said before the first request (`docs/specs/alert.md` -> "Settings dialog"). */
@@ -58,7 +58,7 @@ export function useManagedVoiceConfigured(): boolean {
   return useManagedVoiceStatus(getPlatform().managedVoice)?.configured === true;
 }
 
-/** Independent managed-voice approval and disconnect; remote control has its own enrollment. */
+/** Natural Voice's own approval and turning off; remote control has its own enrollment. */
 export function ManagedVoiceSection({ onShowNetwork }: { onShowNetwork?: () => void }) {
   const port = getPlatform().managedVoice;
   const voice = useManagedVoiceStatus(port);
@@ -77,19 +77,19 @@ export function ManagedVoiceSection({ onShowNetwork }: { onShowNetwork?: () => v
 
   return (
     <div className="mt-3">
-      <div className="text-sm text-foreground">Managed voice</div>
+      <div className="text-sm text-foreground">Natural Voice</div>
       <p className={HINT}>{MANAGED_VOICE_DISCLOSURE}</p>
       {voice?.configured ? (
         <>
           <div className="mt-2 text-sm leading-relaxed text-foreground">
             {voice.notEntitled ? (
               <>{NO_PLAN_COPY} <ExternalTextLink href={HOSTED_PRICING_URL}>See Hosted plans</ExternalTextLink></>
-            ) : 'Managed voice is enabled.'}
+            ) : 'Natural Voice is on.'}
           </div>
           <label className="mt-2 flex items-center gap-2">
             <span className={FIELD_LABEL}>Voice</span>
             <select
-              aria-label="Managed voice"
+              aria-label="Natural Voice"
               className={SELECT_CLASS}
               value={voice.voiceId}
               disabled={busy}
@@ -105,10 +105,10 @@ export function ManagedVoiceSection({ onShowNetwork }: { onShowNetwork?: () => v
           </label>
           {confirming ? (
             <div className="mt-2 text-sm leading-relaxed">
-              <p>Disconnect managed voice? Alarms will use your system voice.</p>
+              <p>Turn off Natural Voice on this computer? Alarms will use your system voice.</p>
               <div className="mt-2 flex gap-2">
                 <button type="button" disabled={busy} className={modalActionButton()} onClick={() => perform(() => port.disconnect())}>
-                  Disconnect
+                  Turn off
                 </button>
                 <button type="button" disabled={busy} className={modalActionButton()} onClick={() => setConfirming(false)}>
                   Cancel
@@ -117,15 +117,15 @@ export function ManagedVoiceSection({ onShowNetwork }: { onShowNetwork?: () => v
             </div>
           ) : (
             <button type="button" disabled={busy} className={modalActionButton({ className: 'mt-2' })} onClick={() => setConfirming(true)}>
-              Disconnect
+              Turn off
             </button>
           )}
         </>
       ) : voice?.disconnectFailed ? (
         <div className="mt-2">
-          <p className={HINT}>Managed voice is off for this session, but disconnecting did not finish. Retry before restarting Dormouse.</p>
+          <p className={HINT}>Natural Voice is off for this session, but turning it off did not finish. Retry before restarting Dormouse.</p>
           <button type="button" disabled={busy} className={modalActionButton()} onClick={() => perform(() => port.disconnect())}>
-            Retry disconnect
+            Retry
           </button>
         </div>
       ) : waiting ? (
@@ -136,13 +136,13 @@ export function ManagedVoiceSection({ onShowNetwork }: { onShowNetwork?: () => v
           onCancel={() => perform(() => port.cancelEnrollment())}
         />
       ) : saving ? (
-        <p className={HINT}>Approved. Enabling managed voice…</p>
+        <p className={HINT}>Approved. Turning on Natural Voice…</p>
       ) : (
         <>
           {enrollment?.status === 'ended' ? <p className={HINT} role="status">{enrollment.message}</p> : null}
           {networkOff ? (
             <p className={HINT}>
-              Enabling managed voice reaches Dormouse Hosted. Choose Local networks or Anywhere in <NetworkTopicLink onShow={onShowNetwork} /> to enable it.
+              Turning on Natural Voice reaches Dormouse Hosted. Choose Local networks or Anywhere in <NetworkTopicLink onShow={onShowNetwork} /> to turn it on.
             </p>
           ) : (
             <button
@@ -151,7 +151,7 @@ export function ManagedVoiceSection({ onShowNetwork }: { onShowNetwork?: () => v
               className={modalActionButton({ tone: 'primary', className: 'mt-2' })}
               onClick={() => perform(() => port.beginEnrollment())}
             >
-              Enable managed voice
+              Turn on Natural Voice
             </button>
           )}
         </>

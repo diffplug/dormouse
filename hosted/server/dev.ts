@@ -11,7 +11,7 @@ import { authPolicy } from "./policy";
 import { migrations } from "./migrations";
 import { allowedDevRequest } from "./dev-host-guard";
 import { relayAccountRoutes, type RelayAccountHost } from "./relay-account";
-import { voiceTokenRoutes } from "./voice";
+import { voiceAccountRoutes } from "./voice";
 
 // Bind first, then derive the origin from the port actually bound, so an unset
 // PORT runs beside another checkout's server. `localhost`, not `127.0.0.1`: it
@@ -68,7 +68,7 @@ const host: RelayAccountHost = {
   // No relay runs here, so no Burrow holds a socket to close.
   closeBurrow: async () => {},
 };
-voiceTokenRoutes(app, () => host);
+voiceAccountRoutes(app, () => host);
 relayAccountRoutes(app, () => host);
 // No speak: a Hosted build speaks only at the fixed voice origin, so no
 // Dormouse build could reach one here.

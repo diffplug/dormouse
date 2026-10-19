@@ -21,7 +21,14 @@ import {
 import type { Session } from "../../src/api";
 import { ADMIN_EMAIL } from "../entitlement";
 import { PRELAUNCH_REFUSAL, SIGN_IN_ALLOWLIST } from "../prelaunch";
-import { CRON_SWEEP_CAP, SPEECH_SWEEP_CAP, VOICE_DAILY_CAP } from "../voice";
+import {
+  CRON_SWEEP_CAP,
+  SPEECH_SWEEP_CAP,
+  TOKEN_SWEEP_CRON,
+  VOICE_DAILY_CAP,
+  VOICE_TOKEN_IDLE_DAYS,
+} from "../voice";
+import { mintVoiceToken } from "../voice-token";
 import { ALREADY_APPROVED, RECENT_LOGIN_REQUIRED } from "../relay-account";
 import { TERMS_VERSION } from "../policy-constants";
 import {
@@ -378,10 +385,10 @@ async function fixture(
       }
       return { path, result: await request(path) };
     }
-    // Token management is same-origin JSON on the account; speak is
-    // bearer-only on the voice Worker, with no cookie.
-    const tokens = (method: string, path = "") =>
-      request("/api/voice/tokens" + path, { method, headers: { origin } });
+    // On or off is same-origin JSON on the account; speak and a token's own
+    // delete are bearer-only on the voice Worker, with no cookie.
+    const hostedVoice = (method = "GET", from = origin) =>
+      request("/api/voice", { method, headers: { origin: from } });
     const speak = async (token: string | undefined, body: unknown) =>
       (await voice()).dispatchFetch(voiceOrigin + "/api/voice/speak", {
         method: "POST",
@@ -391,8 +398,21 @@ async function fixture(
         },
         body: typeof body === "string" ? body : JSON.stringify(body),
       });
-    const mint = async () =>
-      (await (await tokens("POST")).json()) as { id: string; token: string };
+    const forget = async (token: string) =>
+      (await voice()).dispatchFetch(voiceOrigin + "/api/voice/token", {
+        method: "DELETE",
+        headers: { authorization: `Bearer ${token}` },
+      });
+    /** A voice token for this login, as a redeemed voice approval mints one. */
+    const mint = async (createdAt = "now()") => {
+      const token = mintVoiceToken();
+      await queryDatabase(
+        context.database.url,
+        `INSERT INTO dormouse_voice_tokens ("userId", hash, "createdAt") VALUES ($1, $2, ${createdAt})`,
+        [(await session())!.user.id, digest(token)],
+      );
+      return token;
+    };
     /** The account's Relay routes, from this origin unless `from` names another. */
     const approve = (userCode: unknown, from = origin) =>
       request("/api/relay/enrollments/approve", {
@@ -412,7 +432,7 @@ async function fixture(
         body: JSON.stringify({ version }),
         headers: { origin: from, "content-type": "application/json" },
       });
-    return { request, post, session, email, oauth, tokens, speak, mint, approve, computers, remove, accept };
+    return { request, post, session, email, oauth, hostedVoice, speak, forget, mint, approve, computers, remove, accept };
   }
   return {
     ...context,
@@ -440,6 +460,13 @@ async function fixture(
     /** `name`'s `/api/ready`; the relay and voice run as their own roles. */
     ready: async (name: "relay" | "voice") =>
       (await (name === "voice" ? voice() : relay())).dispatchFetch(ORIGINS[name] + "/api/ready"),
+    /** The voice Worker's Cron Trigger `cron`, as Cloudflare fires it, as its own role. */
+    voiceCron: async (cron: string) =>
+      (
+        (await (await voice()).getWorker()) as unknown as {
+          scheduled(options: { cron: string }): Promise<{ outcome: string }>;
+        }
+      ).scheduled({ cron }),
     /** Background passes the voice Worker scheduled so far; the test entry only. */
     waitUntilCalls: async () =>
       Number(
@@ -661,7 +688,7 @@ test("pre-launch, production signs in only the allowlist's verified emails", asy
     await browser.oauth("github", profile);
     expect(await browser.session()).toBeNull();
     expect(
-      (await browser.request("/api/voice/tokens")).status,
+      (await browser.request("/api/voice")).status,
     ).toBe(401);
   }
   const unlisted = () =>
@@ -687,7 +714,7 @@ test("pre-launch, production signs in only the allowlist's verified emails", asy
   await linking.oauth("github", { email: "stranger@example.test" });
   await linking.oauth("github", { email: "second@example.test", subject: "67890" }, true);
   expect(await linking.session()).toBeNull();
-  expect((await linking.request("/api/voice/tokens")).status).toBe(401);
+  expect((await linking.request("/api/voice")).status).toBe(401);
   expect(await unlisted()).toHaveLength(0);
 });
 
@@ -828,41 +855,21 @@ test("terms acceptance: any signed-in account records the current version once, 
   ).toEqual([{ version: TERMS_VERSION, acceptedAt: first.acceptedAt }]);
 });
 
-test("managed voice: only the verified admin mints, speaks, and revokes", async ({
+test("Natural Voice: only the verified admin speaks; the account sees on or off and turns every token off", async ({
   onTestFinished,
 }) => {
   const f = await fixture();
   onTestFinished(f.close);
   const admin = f.browser(),
     other = f.browser();
-  expect((await admin.tokens("GET")).status).toBe(401);
+  expect((await admin.hostedVoice()).status).toBe(401);
   await other.email("other@example.test");
-  expect((await other.tokens("GET")).status).toBe(403);
-  expect((await other.tokens("POST")).status).toBe(403);
+  expect(await (await other.hostedVoice()).json()).toEqual({ entitled: false, on: false });
   await admin.email(ADMIN_EMAIL);
-  expect(await (await admin.tokens("GET")).json()).toEqual({ tokens: [] });
-  // A same-site page — a sibling Worker's included — carries the cookie but not this origin.
-  for (const sameSite of SAME_SITE)
-    expect(
-      (
-        await admin.request("/api/voice/tokens", {
-          method: "POST",
-          headers: { origin: sameSite },
-        })
-      ).status,
-      sameSite,
-    ).toBe(403);
+  expect(await (await admin.hostedVoice()).json()).toEqual({ entitled: true, on: false });
 
-  const minted = await admin.tokens("POST");
-  expect(minted.status).toBe(201);
-  const { id, token } = (await minted.json()) as { id: string; token: string };
-  expect(token).toMatch(/^dmv_[A-Za-z0-9_-]{43}$/);
-  const stored = await queryDatabase<{ hash: string }>(
-    f.database.url,
-    "SELECT hash FROM dormouse_voice_tokens",
-  );
-  expect(stored).toEqual([{ hash: digest(token) }]);
-
+  const token = await admin.mint();
+  expect(await (await admin.hostedVoice()).json()).toEqual({ entitled: true, on: true });
   const spoken = await admin.speak(token, {
     text: "  Build passed.  ",
     voiceId,
@@ -887,19 +894,9 @@ test("managed voice: only the verified admin mints, speaks, and revokes", async 
       `https://api.elevenlabs.io/v1/history?page_size=${SPEECH_SWEEP_CAP}`,
     ]),
   );
-  const [listed] = (
-    (await (await admin.tokens("GET")).json()) as {
-      tokens: { id: string; lastUsedAt: string | null; revokedAt: null }[];
-    }
-  ).tokens;
-  expect(listed.id).toBe(id);
-  expect(listed.lastUsedAt).not.toBeNull();
-  expect(Object.keys(listed).sort()).toEqual([
-    "createdAt",
-    "id",
-    "lastUsedAt",
-    "revokedAt",
-  ]);
+  expect(
+    await queryDatabase(f.database.url, `SELECT "lastUsedAt" IS NOT NULL AS used FROM dormouse_voice_tokens`),
+  ).toEqual([{ used: true }]);
 
   for (const body of [
     "not json",
@@ -946,49 +943,75 @@ test("managed voice: only the verified admin mints, speaks, and revokes", async 
   expect(f.elevenLabs.requests.length).toBe(requests);
 
   // A token held by any other account is refused even though it is valid.
-  const otherToken = "dmv_" + "B".repeat(43);
-  await queryDatabase(
-    f.database.url,
-    `INSERT INTO dormouse_voice_tokens ("userId", hash) VALUES ($1, $2)`,
-    [(await other.session())!.user.id, digest(otherToken)],
-  );
-  expect((await other.speak(otherToken, hi)).status).toBe(
-    403,
-  );
+  const otherToken = await other.mint();
+  expect((await other.speak(otherToken, hi)).status).toBe(403);
 
   // No refused or failed speech (400, 401, 403, 429, 502) scheduled a sweep.
   expect(await f.waitUntilCalls()).toBe(1);
 
-  for (const sameSite of SAME_SITE)
-    expect(
-      (
-        await admin.request("/api/voice/tokens/" + id, {
-          method: "DELETE",
-          headers: { origin: sameSite },
-        })
-      ).status,
-      sameSite,
-    ).toBe(403);
-  expect((await admin.tokens("DELETE", "/" + id)).status).toBe(204);
+  // A year without a speak, counted from the mint until the first, refuses
+  // the token as if it never existed; inside it, speak reaches the cap.
+  const idle = `now() - interval '${VOICE_TOKEN_IDLE_DAYS} days'`;
+  expect((await admin.speak(await admin.mint(`${idle} - interval '1 minute'`), hi)).status).toBe(401);
+  expect((await admin.speak(await admin.mint(`${idle} + interval '1 minute'`), hi)).status).toBe(429);
+  await queryDatabase(f.database.url, `UPDATE dormouse_voice_tokens SET "lastUsedAt" = ${idle} - interval '1 minute'`);
   expect((await admin.speak(token, hi)).status).toBe(401);
-  expect((await admin.tokens("DELETE", "/not-a-token")).status).toBe(404);
-  expect(
-    (await admin.tokens("DELETE", "/00000000-0000-4000-8000-000000000000"))
-      .status,
-  ).toBe(404);
+  expect(await (await admin.hostedVoice()).json()).toEqual({ entitled: true, on: false });
+  await queryDatabase(f.database.url, `UPDATE dormouse_voice_tokens SET "lastUsedAt" = now()`);
+  expect(await (await admin.hostedVoice()).json()).toEqual({ entitled: true, on: true });
 
-  // The admin address counts only while verified, rechecked on every request.
-  const second = await admin.mint();
+  // A disconnecting computer deletes its own token, and only its own; a
+  // repeat, or one already gone, still answers 204.
+  const disconnecting = await admin.mint();
+  expect((await admin.forget("dmv_unknown")).status).toBe(401);
+  expect((await admin.forget(disconnecting)).status).toBe(204);
+  expect((await admin.forget(disconnecting)).status).toBe(204);
+  expect((await admin.speak(disconnecting, hi)).status).toBe(401);
+  expect((await admin.speak(token, hi)).status).toBe(429);
+
+  // Turning Natural Voice off deletes every token the account holds, and no
+  // other account's; a same-site page, a sibling Worker's included, carries
+  // the cookie but not this origin.
+  for (const sameSite of SAME_SITE)
+    expect((await admin.hostedVoice("DELETE", sameSite)).status, sameSite).toBe(403);
+  expect((await admin.hostedVoice("DELETE")).status).toBe(204);
+  expect((await admin.speak(token, hi)).status).toBe(401);
+  expect(await (await admin.hostedVoice()).json()).toEqual({ entitled: true, on: false });
+  expect(
+    await queryDatabase(f.database.url, "SELECT hash FROM dormouse_voice_tokens"),
+  ).toEqual([{ hash: digest(otherToken) }]);
+
+  // The admin address counts only while verified, rechecked on every
+  // request; a lapsed account still sees its computers on, and turns them off.
+  const lapsed = await admin.mint();
   await queryDatabase(
     f.database.url,
     `UPDATE "user" SET "emailVerified" = false WHERE email = $1`,
     [ADMIN_EMAIL],
   );
-  expect((await admin.tokens("GET")).status).toBe(403);
-  expect((await admin.tokens("POST")).status).toBe(403);
+  expect((await admin.speak(lapsed, hi)).status).toBe(403);
+  expect(await (await admin.hostedVoice()).json()).toEqual({ entitled: false, on: true });
+  expect((await admin.hostedVoice("DELETE")).status).toBe(204);
+  expect((await admin.speak(lapsed, hi)).status).toBe(401);
+});
+
+test("the voice Worker's daily cron deletes only tokens a year idle, and never touches ElevenLabs", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const admin = f.browser();
+  await admin.email(ADMIN_EMAIL);
+  const idle = `now() - interval '${VOICE_TOKEN_IDLE_DAYS} days'`;
+  const live = await admin.mint(`${idle} + interval '1 minute'`);
+  const used = await admin.mint(`${idle} - interval '1 day'`);
+  await admin.mint(`${idle} - interval '1 minute'`);
+  await queryDatabase(f.database.url, `UPDATE dormouse_voice_tokens SET "lastUsedAt" = now() WHERE hash = $1`, [digest(used)]);
+  expect((await f.voiceCron(TOKEN_SWEEP_CRON)).outcome).toBe("ok");
   expect(
-    (await admin.speak(second.token, hi)).status,
-  ).toBe(403);
+    (await queryDatabase<{ hash: string }>(f.database.url, "SELECT hash FROM dormouse_voice_tokens")).map((row) => row.hash).sort(),
+  ).toEqual([digest(live), digest(used)].sort());
+  expect(f.elevenLabs.sweeps).toEqual([]);
 });
 
 test("managed voice fails closed in production without an ElevenLabs key", async ({
@@ -998,7 +1021,7 @@ test("managed voice fails closed in production without an ElevenLabs key", async
   onTestFinished(f.close);
   const admin = f.browser();
   await admin.email(ADMIN_EMAIL);
-  const response = await admin.speak((await admin.mint()).token, hi);
+  const response = await admin.speak(await admin.mint(), hi);
   expect(response.status).toBe(503);
   expect(f.elevenLabs.requests).toEqual([]);
 });
