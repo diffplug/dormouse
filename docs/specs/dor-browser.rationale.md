@@ -56,6 +56,10 @@
 
 **What parking is worth.** Lath leaves stay mounted, so a background window would otherwise retain every pane's ~20Hz stream and its crisp captures. The ~1s debounce rides through transient visibility flips and StrictMode remounts without rebuilding the connection.
 
+**Why hover and wheel ignore selection.** They go to whatever is under the pointer, so no other pane can lose them; gating them on selection in passthrough only left a browser beside the terminal being typed in unscrollable and blind to hover. A terminal's xterm scrolls and reports hover in any pane, in either mode, skipping moves while a button it never saw pressed is down, and the canvas mirrors that.
+
+**Why a leave is a move to (-1, -1).** CDP's `Input.dispatchMouseEvent` has no leave type; a `mouseMoved` past the viewport's top-left corner fires `mouseleave` on the hovered element and the document (measured through Playwright 1.63's CDP and agent-browser 0.31.1's stream, 2026-10). Mid-drag it would drag the page's target to that corner.
+
 **Why a paste is text, not keys.** agent-browser's stream takes only key and mouse events, so a paste once went from the webview as a key down and up per character. Sent to the Playwright host, whose input queue closes the viewer (1008) at 256 queued messages, any paste over about 128 characters arriving as one burst truncated and dropped the pane into a 2 s reconnect (static reading, 2026-09).
 
 **Why the connection is dropped at relaunch start rather than left to fail.** The host closes the browser and kills the daemon, so the old socket's close is certain. Left connected, its three reconnect failures flagged the pane "ended" about three seconds into a pop-in that a slow page could hold open for 25s.
