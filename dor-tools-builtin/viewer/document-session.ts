@@ -1,4 +1,5 @@
 import { connectToolFrame } from 'dor-tools-lib/frame';
+import type { ToolViewAccess } from 'dor-tools-lib/protocol';
 
 /** What the page shows: whether a document is loaded, has unsaved edits, or is saving. */
 export interface DocumentState { loaded: boolean; dirty: boolean; saving: boolean }
@@ -61,9 +62,10 @@ export const message = (reason: unknown) => reason instanceof Error ? reason.mes
 export const stateLabel = ({ loaded, dirty, saving }: DocumentState) =>
   !loaded ? 'Loading…' : saving ? 'Saving…' : dirty ? 'Unsaved' : 'Saved';
 
-/** Asks through `dialog` (the page's `#confirm`, before a reload) whether to
+/** Asks through the page's `#confirm` dialog, before a reload, whether to
  * discard edits: true when its form closes it with the value `discard`. */
-export function confirmDiscard(dialog = document.getElementById('confirm') as HTMLDialogElement): Promise<boolean> {
+function confirmDiscard(): Promise<boolean> {
+  const dialog = document.getElementById('confirm') as HTMLDialogElement;
   dialog.returnValue = 'cancel';
   const answer = new Promise<boolean>(resolve => dialog.addEventListener('close', () => resolve(dialog.returnValue === 'discard'), { once: true }));
   dialog.showModal();
@@ -73,8 +75,6 @@ export function confirmDiscard(dialog = document.getElementById('confirm') as HT
 /** One document a page has open: its revision on disk, the editor's mark for
  * it, and one revision-checked save at a time. */
 export interface OpenDocument {
-  /** Whether the first load has landed. */
-  loaded(): boolean;
   /** Whether the editor had moved off the saved revision when it last reported. */
   dirty(): boolean;
   /** Reads the file into the editor; shows a failure. */
@@ -92,93 +92,32 @@ export interface OpenDocument {
   rebase(): void;
   /** Shows `reason` as this document's error. */
   fail(reason: unknown): void;
-  /** Takes the document off the page. */
-  close(): void;
 }
 
-export interface DocumentPage {
-  /** Opens a document in front of the page's others. */
-  open<Mark, Content = string, Loaded = Content>(editor: DocumentEditor<Mark, Content, Loaded>, view: DocumentView, source: DocumentSource<Content, Loaded>): OpenDocument;
-}
-
-/** A built-in editor page (docs/specs/dor-tools-builtin.md -> Editing files)
- * over a stack of open documents: its own, and any it edits in front, as the
- * Markdown page's image overlay. Cmd/Ctrl+S saves the front document; the
- * Tool is dirty while any document is, which the page reports to the
- * containing iframe at once and to the Tool's OSC 367 stream in order; the
- * host's close-prompt save writes them all. */
-export function documentPage(): DocumentPage {
-  /** The page's own document first; the last is in front. Each one's
-   * `dirty()` is as it last reported, so the page reads no editor here. */
-  const documents: OpenDocument[] = [];
-  let lastDirty: boolean | undefined;
-  let stateQueue = Promise.resolve();
-  const toolDirty = () => documents.some(doc => doc.dirty());
-  // The host's close prompt saves through this channel (docs/specs/dor-tool.md -> Closing unsaved Tools).
-  const host = connectToolFrame({
-    dirty: () => documents[0]?.loaded() ? toolDirty() : undefined,
-    async save() {
-      // In turn, as the viewer takes one save at a time, and front first: an
-      // image save rescales the page's document before it resolves.
-      let failure: { reason: unknown } | undefined;
-      for (const doc of [...documents].reverse()) {
-        try { await doc.write(); } catch (reason) { failure ??= { reason }; }
-      }
-      if (failure) throw failure.reason;
-    },
-  });
-
-  function report() {
-    // Post immediately so the preview is pinned before a second selection can
-    // replace it. The ordered OSC reports also cover automated browser renders.
-    host.report();
-    const dirty = toolDirty();
-    if (dirty !== lastDirty) {
-      lastDirty = dirty;
-      stateQueue = stateQueue.then(() => request('state', { dirty })).then(() => {}, reason => documents[0]?.fail(reason));
-    }
-  }
-
-  // Capture phase: runs before the editors, and outside them too.
-  window.addEventListener('keydown', event => {
-    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
-      event.preventDefault();
-      void documents.at(-1)?.save();
-    }
-  }, true);
-  window.addEventListener('beforeunload', event => {
-    if (window.parent === window && toolDirty()) { event.preventDefault(); event.returnValue = ''; }
-  });
-
-  return {
-    open(editor, view, source) {
-      const doc = openDocument(editor, view, source, report, () => {
-        const at = documents.indexOf(doc);
-        if (at < 0) return;
-        documents.splice(at, 1);
-        report();
-      });
-      documents.push(doc);
-      return doc;
-    },
-  };
-}
-
-function openDocument<Mark, Content, Loaded>(editor: DocumentEditor<Mark, Content, Loaded>, view: DocumentView,
-  source: DocumentSource<Content, Loaded>, onReport: () => void, onClose: () => void): OpenDocument {
+/** One built-in editor per page. Keyboard saves and the host's close prompt
+ * write the same document; navigation owns replacing the page. */
+export function documentSession<Mark, Content = string, Loaded = Content>(editor: DocumentEditor<Mark, Content, Loaded>,
+  view: DocumentView, source: DocumentSource<Content, Loaded>, position?: ToolViewAccess): OpenDocument {
   let version = '';
   let saved: { mark: Mark } | undefined;
   let saving: Promise<void> | null = null;
   /** As last reported; undefined before the first report. */
   let shown: DocumentState | undefined;
+  let stateQueue = Promise.resolve();
   const fail = (reason: unknown) => view.fail(message(reason));
   const dirty = () => !!saved && !editor.holds(saved.mark);
   const current = () => editor.mark ? editor.mark() : editor.snapshot().mark;
+  // The host's close prompt saves through this channel (docs/specs/dor-tool.md -> Closing unsaved Tools).
+  const host = connectToolFrame({ view: position, dirty: () => saved ? !!shown?.dirty : undefined, save: write });
 
   function report() {
     const state = { loaded: !!saved, dirty: dirty(), saving: saving !== null };
-    if (!shown || state.loaded !== shown.loaded || state.dirty !== shown.dirty || state.saving !== shown.saving) view.report(shown = state);
-    onReport();
+    const dirtyChanged = state.dirty !== shown?.dirty;
+    if (!shown || state.loaded !== shown.loaded || dirtyChanged || state.saving !== shown.saving) view.report(shown = state);
+    // Post immediately so a dirty preview is pinned before another selection.
+    // Ordered OSC reports also cover automated browser renderers.
+    host.report();
+    if (dirtyChanged) stateQueue = stateQueue.then(() => request('state', { dirty: state.dirty })).then(() => {}, fail);
   }
   function write(): Promise<void> {
     if (saving) return saving;
@@ -200,12 +139,23 @@ function openDocument<Mark, Content, Loaded>(editor: DocumentEditor<Mark, Conten
     saved = { mark: current() };
     report();
   }
+  const save = () => write().catch(() => {});
+
+  // Capture phase: runs before the editor, and outside it too.
+  window.addEventListener('keydown', event => {
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
+      event.preventDefault();
+      void save();
+    }
+  }, true);
+  window.addEventListener('beforeunload', event => {
+    if (window.parent === window && shown?.dirty) { event.preventDefault(); event.returnValue = ''; }
+  });
 
   return {
-    loaded: () => !!saved,
     dirty: () => !!shown?.dirty,
     load: () => load().catch(fail),
-    save: () => write().catch(() => {}),
+    save,
     write,
     async reload() {
       if (saving || (dirty() && !await confirmDiscard())) return;
@@ -219,6 +169,5 @@ function openDocument<Mark, Content, Loaded>(editor: DocumentEditor<Mark, Conten
       report();
     },
     fail,
-    close: onClose,
   };
 }

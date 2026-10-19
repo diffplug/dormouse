@@ -4,9 +4,9 @@
  * slot switch holds as a ghost until the next view is ready
  * (`docs/specs/dor-tool.md` -> Switching the slot).
  */
-import { useCallback, useContext } from 'react';
+import { useCallback, useContext, useEffect } from 'react';
 import { clsx } from 'clsx';
-import { TERMINAL_BOTTOM_RADIUS_CLASS } from '../design';
+import { ModalCloseButton, TERMINAL_BOTTOM_RADIUS_CLASS } from '../design';
 import { previewLayerReady, type GhostRect, type PreviewGhost, type PreviewTransition } from '../../lib/preview-transition-store';
 import { BrowserPanel } from './BrowserPanel';
 import { TerminalPanel } from './TerminalPanel';
@@ -14,7 +14,8 @@ import { ToolApproval } from './ToolApproval';
 import { ToolPortConflict } from './ToolPortConflict';
 import { toolFace, type ToolFace } from './browser-surface';
 import { BROWSER_LAYER_ATTRIBUTE, usePreviewSlotView } from './preview-transition';
-import { TerminalContextContext, WallActionsContext } from './wall-context';
+import { PaneWriteContext, TerminalContextContext, WallActionsContext } from './wall-context';
+import { toolView, type ToolViewRequest } from './tool-navigation';
 import type { PaneProps } from './pane-props';
 
 /** What a half or browser layer is during a switch, or outside one (`live`,
@@ -92,6 +93,37 @@ export function ToolPanel(props: PaneProps) {
   const actions = useContext(WallActionsContext);
   const context = useContext(TerminalContextContext);
   const { generation, transition } = usePreviewSlotView(props.id);
+  const write = useContext(PaneWriteContext);
+  const viewRequest = props.params?.toolViewRequest as ToolViewRequest | undefined;
+  // The request's deadline includes startup and unanswered transport calls.
+  // A URL/session change may retry delivery, but must not renew this deadline.
+  useEffect(() => {
+    if (!viewRequest?.token) return;
+    const timer = setTimeout(() => write.updateParams(props.id, {
+      toolViewRequest: undefined, toolNavigationError: 'Reading position unavailable.',
+    }), 10000);
+    return () => clearTimeout(timer);
+  }, [props.id, viewRequest?.token, write]);
+
+  useEffect(() => {
+    if (!viewRequest || !props.params?.url) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const apply = async () => {
+      try {
+        await toolView(props.id, props.params!, viewRequest.position);
+        if (!cancelled) write.updateParams(props.id, { toolViewRequest: undefined });
+      } catch {
+        if (cancelled) return;
+        timer = setTimeout(() => void apply(), 100);
+      }
+    };
+    void apply();
+    return () => { cancelled = true; clearTimeout(timer); };
+    // A fresh binding or request cancels work for the retired page. Other
+    // metadata updates must not restart restoration while the user scrolls.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.id, props.params?.url, props.params?.session, viewRequest?.token, write]);
 
   // Rendered alone, not as one of two halves: mounting TerminalPanel would spawn
   // a shell in a repo the user has not approved yet. Nothing runs until they do.
@@ -118,6 +150,10 @@ export function ToolPanel(props: PaneProps) {
       // A switch's ghosts take no input; a press on one still selects the pane.
       onMouseDown={transition ? () => actions.onClickPanel(props.id) : undefined}
     >
+      {typeof props.params?.toolNavigationError === 'string' && <div role="alert" className="absolute inset-x-0 top-0 z-20 flex items-center gap-2 border-b border-border bg-surface-raised px-3 py-2 text-sm text-foreground">
+        <span className="min-w-0 flex-1">{props.params.toolNavigationError}</span>
+        <ModalCloseButton onClick={() => write.updateParams(props.id, { toolNavigationError: undefined })} aria-label="Dismiss navigation error" />
+      </div>}
       {/* Revealed over the browser's ghost, which follows it. */}
       <Half face="terminal" state={roleState(terminal, instant)} className={terminal === 'revealing' && 'z-10'}>
         <TerminalPanel {...props} renderTerminal={context.mounted?.id !== props.id} parked={props.parked || terminal === 'hidden' || transition !== null} />

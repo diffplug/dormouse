@@ -118,7 +118,27 @@ export function parseToolState(content: string): ToolState | null {
   return record && record.v === 1 && typeof record.dirty === 'boolean' ? { dirty: record.dirty } : null;
 }
 
-export interface ToolOpen { path: string; preview: boolean }
+export interface ToolOpen {
+  path: string;
+  preview: boolean;
+  /** A document link: navigate its Surface, or use ordinary open placement. */
+  disposition?: 'current' | 'other';
+  /** Decoded heading, separate from the native filesystem path. */
+  fragment?: string;
+}
+
+/** C0, DEL, and C1 controls. */
+const CONTROLS = /[\u0000-\u001f\u007f-\u009f]/;
+
+export function validToolFragment(value: unknown): value is string {
+  return typeof value === 'string' && value.length <= 2048 && !CONTROLS.test(value);
+}
+
+/** A disposition is `current` or `other` and never a preview; a fragment needs one. */
+function validOpenNavigation(preview: unknown, disposition: unknown, fragment: unknown): boolean {
+  if (disposition !== undefined && (preview === true || (disposition !== 'current' && disposition !== 'other'))) return false;
+  return fragment === undefined || (disposition !== undefined && validToolFragment(fragment));
+}
 
 const OPEN_PATH_LIMIT = 2048;
 
@@ -126,7 +146,7 @@ const OPEN_PATH_LIMIT = 2048;
  * relative path, or one carrying a control character. */
 export function validToolOpenPath(value: unknown): value is string {
   return typeof value === 'string' && value.length <= OPEN_PATH_LIMIT
-    && (value.startsWith('/') || /^[A-Za-z]:[\\/]/.test(value)) && !/[\u0000-\u001f\u007f-\u009f]/.test(value);
+    && (value.startsWith('/') || /^[A-Za-z]:[\\/]/.test(value)) && !CONTROLS.test(value);
 }
 
 /** Parse an `open` request; `content` is everything after `367;`. `preview`
@@ -135,7 +155,10 @@ export function parseToolOpen(content: string): ToolOpen | null {
   const record = parseToolPayload(content, 'open');
   if (!record || record.v !== 1 || !validToolOpenPath(record.path)) return null;
   if (record.preview !== undefined && typeof record.preview !== 'boolean') return null;
-  return { path: record.path, preview: record.preview === true };
+  if (!validOpenNavigation(record.preview, record.disposition, record.fragment)) return null;
+  return { path: record.path, preview: record.preview === true,
+    ...(record.disposition === undefined ? {} : { disposition: record.disposition as ToolOpen['disposition'] }),
+    ...(record.fragment === undefined ? {} : { fragment: record.fragment as string }) };
 }
 
 export interface ServeOptions {
@@ -172,12 +195,14 @@ export function stateSequence({ dirty }: ToolState): string {
 }
 
 /** The `open` request a Tool writes to show `path` in the Workspace's preview
- * slot (`preview`) or open it as `dor open` would. The host answers nothing;
- * a failure shows in the preview slot. Throws on a path the host would ignore. */
-export function openSequence({ path, preview = false }: { path: string; preview?: boolean }): string {
+ * slot (`preview`), open it as `dor open` would, or navigate a document with
+ * `disposition`. The host answers nothing. Throws on values it would ignore. */
+export function openSequence({ path, preview = false, disposition, fragment }: Omit<ToolOpen, 'preview'> & { preview?: boolean }): string {
   if (!validToolOpenPath(path)) throw new RangeError(`not an absolute path: ${JSON.stringify(path)}`);
   if (typeof preview !== 'boolean') throw new TypeError('preview must be a boolean');
-  return sequence('open', { v: 1, path, preview });
+  if (!validOpenNavigation(preview, disposition, fragment)) throw new TypeError('invalid open disposition or fragment');
+  // JSON drops the undefined fields, keeping a plain open's legacy shape.
+  return sequence('open', { v: 1, path, preview, disposition, fragment });
 }
 
 /** The environment variable a rehydrated Tool reads its payload from. */

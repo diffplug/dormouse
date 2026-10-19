@@ -274,6 +274,9 @@ importers:
       '@codemirror/language':
         specifier: ^6.12.4
         version: 6.13.1
+      '@lexical/link':
+        specifier: 0.48.0
+        version: 0.48.0(typescript@7.0.2)
       '@lezer/highlight':
         specifier: ^1.2.5
         version: 1.2.5

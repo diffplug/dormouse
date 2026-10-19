@@ -10,6 +10,7 @@ import { getPlatform, PLATFORM_STRING } from '../../lib/platform';
 import { toolReapIdleMsOverride } from '../../lib/feature-flags';
 import { getHelper } from '../../lib/helper-terminal';
 import { isPendingKillSession } from '../../lib/pending-kills';
+import { toolNavigationPending } from './tool-navigation';
 import { isToolCommandArgv } from '../../lib/session-types';
 import { toolCommandFromParams } from '../../lib/session-save';
 import {
@@ -55,6 +56,7 @@ export function toolReapBlocker(id: string, params: Record<string, unknown> | un
   // A pending kill's restore must bring back the same process (docs/specs/reopen.md).
   if (isPendingKillSession(id)) return 'it is a pending kill';
   if (toolPendingFromParams(params)) return 'awaiting approval';
+  if (toolNavigationPending(params)) return 'document navigation is pending';
   if (params.toolPreview === true) return 'a preview slot';
   // A popped-out browser is in sight in its own window, Door or not.
   if (parseRenderMode(params.renderMode).presentation === 'popout') return 'its browser is popped out';

@@ -1,8 +1,7 @@
 import { constants } from 'node:fs';
-import { copyFile, link, lstat, open, realpath, rename, stat, unlink, type FileHandle } from 'node:fs/promises';
+import { copyFile, link, lstat, open, realpath, rename, unlink, type FileHandle } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { fileViewerFormat } from './file-viewer-format.js';
-import { storePath, type InPlaceImage } from './editor-routes.js';
 import { isImage } from './image-format.js';
 import { HttpError, isInsideRoot, openRegularFile, resolveInside } from './viewer-server.js';
 
@@ -21,19 +20,6 @@ export async function openImage(root: string, segments: string[]): Promise<{ fil
   if (!isInsideRoot(root, canonical) || !isImage(canonical)) throw new HttpError(404);
   const file = await openRegularFile(canonical).catch(() => { throw new HttpError(404); });
   return { file, mime: fileViewerFormat(canonical)!.mime };
-}
-
-/** A regular file at or under `root` for replacement: its spelling stays
- * under `root` and must be its realpath, so no symlink below `root` is
- * followed (`not-in-place` otherwise); `missing` when it is not there or its
- * realpath leaves `root`. */
-export async function editableImageFile(root: string, segments: string[]): Promise<InPlaceImage> {
-  const path = resolveInside(root, segments);
-  const canonical = path === null ? null : await realpath(path).catch(() => null);
-  if (canonical === null || !isInsideRoot(root, canonical)) return { refused: 'missing' };
-  if (canonical !== path) return { refused: 'not-in-place' };
-  const found = await stat(path).catch(() => null);
-  return found?.isFile() ? { path: storePath(path), size: found.size } : { refused: 'missing' };
 }
 
 /** Writes `name` in `root` exclusively; false when it exists. */

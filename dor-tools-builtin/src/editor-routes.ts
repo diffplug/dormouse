@@ -4,45 +4,33 @@
  * an `EditorStore` that owns every filesystem check. Browser-safe. */
 import { editorPage, imagePage, markdownPage } from './editor-page.js';
 import { editableImageType, type FileFormat } from './file-viewer-format.js';
-import { imageEditability, type Editability } from './image-editability.js';
+import type { Editability } from './image-editability.js';
 import { defaultDisplayWidth } from './image-resolution.js';
 import {
-  checkImageSave, EDIT_ROUTE, IMAGE_BOUND, IMAGE_CSP, IMAGE_SAVE_ROUTE, IMAGES_ROUTE, isImage, PASTE_ATTEMPTS, PASTE_BOUND,
+  checkImageSave, IMAGE_BOUND, IMAGE_CSP, IMAGES_ROUTE, isImage, PASTE_ATTEMPTS, PASTE_BOUND,
   PASTE_EXHAUSTED_MESSAGE, pastedImageExtension, pastedImageName, type SizeBound, VERSION_HEADER,
 } from './image-format.js';
 import { HttpError, parseJsonBody, pathSegments } from './viewer-http.js';
+import { markdownLink } from './markdown-links.js';
 
 export const TEXT_BOUND: SizeBound = { limit: 8 * 1024 * 1024, message: 'Text files are limited to 8 MiB.' };
 /** A save whose revision is no longer the file's. */
 export const STALE_MESSAGE = 'The file changed on disk. Your edits are safe here; compare or reload before saving.';
 /** A save or read whose file is no longer at its path. */
 export const PATH_CHANGED_MESSAGE = 'The file path changed. Reopen it before saving.';
-/** Why the Markdown editor shows an image it may read but not replace in place (`EditorStore.editableImage`). */
-export const NOT_IN_PLACE_MESSAGE = "This image can't be edited in place: its path goes through a symlink or is spelled differently from the file on disk.";
-
 /** A path an `EditorStore` reads or replaces, which only `storePath` mints. */
 export type StorePath = string & { readonly __storePath: unique symbol };
-/** Mints a `StorePath`: a host for the document it opened, a store for a path
- * it vetted. Never a page-supplied path, so writes reach nothing else. */
+/** Mints a `StorePath` for the document a host opened. Never a page-supplied
+ * path, so writes reach nothing else. */
 export const storePath = (path: string): StorePath => path as StorePath;
 
-/** An image `EditorStore.editableImage` found: its path and size when it may
- * be replaced in place, else why not. */
-export type InPlaceImage = { path: StorePath; size: number } | { refused: 'missing' | 'not-in-place' };
-
-/** Where an editor's files live. Each method enforces its containment, and
- * throws `HttpError` for a refusal; `editableImage` names its refusal, whose
- * status and message are the route's. */
+/** The opened file and bounded image creation/rename operations beside it. */
 export interface EditorStore {
   /** A file's exact bytes and their sha256 revision; 413 with `bound.message` past `bound.limit`. */
   read(file: StorePath, bound: SizeBound): Promise<{ bytes: Uint8Array; version: string }>;
   /** Replaces `file` with `encode` of its current bytes while its revision is
    * still `version` (409 `STALE_MESSAGE` otherwise), at most `bound.limit` bytes. */
   replace(file: StorePath, version: string, bound: SizeBound, encode: (current: Uint8Array) => Uint8Array): Promise<{ version: string }>;
-  /** The regular file at `segments` under the document's folder when it may be
-   * replaced in place; `not-in-place` when its spelling is not its own path on
-   * disk; `missing` when it is not there or leaves the folder. */
-  editableImage(segments: string[]): Promise<InPlaceImage>;
   /** Writes `name` beside the document, never replacing; false when it exists. */
   create(name: string, bytes: Uint8Array): Promise<boolean>;
   /** Moves the file at `from` to `to`, both under the document's folder in
@@ -130,21 +118,18 @@ const image = ({ bytes, version }: { bytes: Uint8Array; version: string }, type:
 const jsonBody = (request: EditorRequest, limit: number) =>
   parseJsonBody(request.contentType, limit, bound => request.body({ limit: bound, message: '' })) as Promise<Record<string, unknown> | null>;
 
-/** An image an editor replaces, and its type. */
-interface ImageTarget { path: StorePath; mime: string }
-
 /** The routes of one editor over `file`, the document it opened (titled
  * `name`); null for a route it does not answer, which the caller may. */
-export function editorRoutes({ kind, file, name, store, onDirty }: {
+export function editorRoutes({ kind, file, name, store, onDirty, openLink }: {
   kind: EditorKind;
   file: StorePath;
   name: string;
   store: EditorStore;
   onDirty(dirty: boolean): void;
+  openLink?(link: { path: string; fragment?: string }, disposition: 'current' | 'other'): void;
 }): (request: EditorRequest) => Promise<EditorReply | null> {
-  const fileType = editableImageType(file);
-  /** The image editor's own document. */
-  const ownImage: ImageTarget | null = kind === 'image' && fileType ? { path: file, mime: fileType } : null;
+  /** The image editor's own document's type. */
+  const imageType = kind === 'image' ? editableImageType(file) : undefined;
   let saving = false;
   /** One save at a time per editor. */
   const save = async <T>(write: () => Promise<T>): Promise<T> => {
@@ -152,43 +137,28 @@ export function editorRoutes({ kind, file, name, store, onDirty }: {
     saving = true;
     try { return await write(); } finally { saving = false; }
   };
-  /** Replaces `target` with the request's body, typed by its Content-Type, at
+  /** Replaces the image with the request's body, typed by its Content-Type, at
    * the revision its `version` query names. */
-  const imageSave = async (request: EditorRequest, target: ImageTarget): Promise<EditorReply> => {
+  const imageSave = async (request: EditorRequest, mime: string): Promise<EditorReply> => {
     const bytes = await request.body(IMAGE_BOUND);
     const version = request.query.get('version');
     if (!version) throw new HttpError(400);
     return json(await save(() => {
-      checkImageSave(target.mime, request.contentType, bytes);
-      return store.replace(target.path, version, IMAGE_BOUND, () => bytes);
+      checkImageSave(mime, request.contentType, bytes);
+      return store.replace(file, version, IMAGE_BOUND, () => bytes);
     }));
-  };
-  /** A PNG or JPEG under the document's folder that may be replaced in
-   * place, or why the editor shows it view-only; 415 for another type, 404
-   * when it is missing. */
-  const inPlaceImage = async (route: string): Promise<ImageTarget & { size: number } | { viewOnly: string }> => {
-    const segments = imageSegments(route);
-    const mime = editableImageType(route);
-    if (!mime) throw new HttpError(415, 'Only PNG and JPEG images can be edited.');
-    const found = await store.editableImage(segments);
-    if ('path' in found) return { path: found.path, mime, size: found.size };
-    if (found.refused === 'missing') throw new HttpError(404);
-    return { viewOnly: NOT_IN_PLACE_MESSAGE };
-  };
-  /** The Markdown editor's image to edit: its bytes and revision, or, as
-   * JSON, why the editor shows it view-only (`imageEditability`). */
-  const imageToEdit = async (route: string): Promise<EditorReply> => {
-    const target = await inPlaceImage(route);
-    if ('viewOnly' in target) return json(target);
-    const bySize = imageEditability(target.size, new Uint8Array(0));
-    if ('viewOnly' in bySize) return json(bySize);
-    const file = await store.read(target.path, IMAGE_BOUND);
-    const byHeader = imageEditability(file.bytes.length, file.bytes);
-    return 'viewOnly' in byHeader ? json(byHeader) : image(file, target.mime);
   };
   return async request => {
     const { route } = request;
     if (request.method === 'POST') {
+      if (kind === 'markdown' && route === 'open' && openLink) {
+        const data = await jsonBody(request, 8192);
+        const link = typeof data?.href === 'string' ? markdownLink(data.href) : null;
+        if (!link || (data?.disposition !== 'current' && data?.disposition !== 'other')) throw new HttpError(400, 'Not a supported relative document link.');
+        try { openLink(link, data.disposition); }
+        catch (error) { throw new HttpError(400, error instanceof Error ? error.message : 'Cannot open this link.'); }
+        return json({ status: 'sent' });
+      }
       if (kind === 'markdown' && route === 'image') {
         // With the width the page inserts it at, read from the whole file, as a
         // JPEG's frame header may sit behind any amount of EXIF or ICC.
@@ -207,12 +177,7 @@ export function editorRoutes({ kind, file, name, store, onDirty }: {
         if (!await store.rename(from, to)) throw new HttpError(409, `${to[to.length - 1]} already exists.`);
         return json({});
       }
-      if (kind === 'markdown' && route.startsWith(IMAGE_SAVE_ROUTE)) {
-        const target = await inPlaceImage(route.slice(IMAGE_SAVE_ROUTE.length));
-        if ('viewOnly' in target) throw new HttpError(404, target.viewOnly);
-        return imageSave(request, target);
-      }
-      if (ownImage && route === 'save') return imageSave(request, ownImage);
+      if (imageType && route === 'save') return imageSave(request, imageType);
       if (route !== 'save' && route !== 'state') throw new HttpError(404);
       // JSON escapes a byte as at most six (`\u00XX`).
       const data = await jsonBody(request, TEXT_BOUND.limit * 6 + 1024);
@@ -228,8 +193,7 @@ export function editorRoutes({ kind, file, name, store, onDirty }: {
     if (route === 'view') {
       return { body: (kind === 'image' ? imagePage : kind === 'markdown' ? markdownPage : editorPage)(name), type: 'text/html; charset=utf-8' };
     }
-    if (route === 'source') return ownImage ? image(await store.read(file, IMAGE_BOUND), ownImage.mime) : json({ ...await readText(store, file), name });
-    if (kind === 'markdown' && route.startsWith(EDIT_ROUTE)) return imageToEdit(route.slice(EDIT_ROUTE.length));
+    if (route === 'source') return imageType ? image(await store.read(file, IMAGE_BOUND), imageType) : json({ ...await readText(store, file), name });
     return null;
   };
 }
