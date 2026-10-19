@@ -1,6 +1,6 @@
 /**
- * End-to-end scenarios for each guarantee in
- * docs/specs/remote-security-model.md § Security Guarantees, driven through
+ * End-to-end scenarios for each remote-control guarantee in
+ * docs/specs/security.md -> "Guarantees", driven through
  * the full Client / Relay / Burrow flow of the harness actors — the real QR
  * grammar, the real IK handshakes, the real presence verifier, and the real
  * ACL conjunction.

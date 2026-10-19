@@ -11,6 +11,8 @@ Primary: no native mobile application; strong protection against account comprom
 
 Non-goals: a compromised browser runtime or operating system; a user intentionally clearing browser data; permanent device identity across browser resets; **availability** — a self-host Relay shares its deployment machine's availability; the Relay is an online dependency for each new paired session, and a one-time session needs Hosted's rendezvous until the direct switch ([relay.md](./relay.md); [One-time connection](#one-time-connection)); **traffic analysis** ([Residual metadata](#residual-metadata)).
 
+**Never claim this model for paid SaaS before an independent cryptographic review** of the Noise integration, the WebAuthn channel binding, key storage, and the push construction. No shipped build, Hosted or self-host, carries such a claim.
+
 ## Trust Model
 
 | Layer         | Responsibility                        |
@@ -253,21 +255,6 @@ Source of truth: `remote-lib-common/src/security/noise.ts`, `isEnrollment` / `pe
 **Never treat browser storage as permanent.** An iOS browser tab is the weakest, an Android tab is generally durable, and an installed PWA is the preferred mode on both (rationale).
 
 **Loss is expected, and recovery is a re-run of the normal flow**: scan a fresh setup code, generate a new per-Burrow static, pair again, optionally revoke the old record (`revokedAt`). **Nothing is compromised** — the lost key authorized nothing without its paired passkey.
-
-## Security Guarantees
-
-The checklist an auditor or a change reviewer verifies against, each property established above and pinned by `remote-lib-common/test/security-guarantees.test.mjs`:
-
-* Adding a new passkey does not grant Burrow access.
-* Compromising the Relay does not let it create an authorized Client.
-* Compromising the Relay reveals no pairing decision, Burrow label, remote-api message, terminal byte, or notification text.
-* Passkey synchronization does not automatically create trusted Clients.
-* Every trusted Client must be explicitly paired with every Burrow.
-* Every connection requires user presence the Burrow itself verified — a fresh proof bound to that connection's transcript, or one it verified for the same identities and Client static within its presence window; the Relay can neither supply nor extend one.
-* Every access decision is ultimately made by the Burrow.
-* A one-time session is authorized only by typing, on the Burrow, the two digits its phone shows; it writes nothing at either end and runs only on the direct path (pinned by `lib/src/remote/client/one-time-e2e.test.ts`).
-
-**Never claim this model for paid SaaS before an independent cryptographic review** of the Noise integration, the WebAuthn channel binding, key storage, and the push construction. No shipped build, Hosted or self-host, carries such a claim.
 
 ## Residual metadata
 

@@ -413,8 +413,8 @@ describe('security spec', () => {
 
   it('keeps the fragment on a link into another spec', () => {
     expect(data.security.repoLinks).toContainEqual({
-      from: './remote-security-model.md#pairing',
-      to: `${REPO_BLOB_BASE}/docs/specs/remote-security-model.md#pairing`,
+      from: './security-remote.md#trust-boundary',
+      to: `${REPO_BLOB_BASE}/docs/specs/security-remote.md#trust-boundary`,
     });
   });
 });
