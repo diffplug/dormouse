@@ -497,7 +497,6 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
                         </span>
                         {token.revokedAt ? (
                           <span className="status">Revoked</span>
-
                         ) : (
                           <button
                             disabled={!!busy}
