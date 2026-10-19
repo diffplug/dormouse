@@ -21,7 +21,13 @@ import {
 import type { Session } from "../../src/api";
 import { ADMIN_EMAIL } from "../entitlement";
 import { PRELAUNCH_REFUSAL, SIGN_IN_ALLOWLIST } from "../prelaunch";
-import { CRON_SWEEP_CAP, SPEECH_SWEEP_CAP, VOICE_DAILY_CAP, VOICE_TOKEN_IDLE_DAYS } from "../voice";
+import {
+  CRON_SWEEP_CAP,
+  SPEECH_SWEEP_CAP,
+  TOKEN_SWEEP_CRON,
+  VOICE_DAILY_CAP,
+  VOICE_TOKEN_IDLE_DAYS,
+} from "../voice";
 import { mintVoiceToken } from "../voice-token";
 import { ALREADY_APPROVED, RECENT_LOGIN_REQUIRED } from "../relay-account";
 import { TERMS_VERSION } from "../policy-constants";
@@ -454,6 +460,13 @@ async function fixture(
     /** `name`'s `/api/ready`; the relay and voice run as their own roles. */
     ready: async (name: "relay" | "voice") =>
       (await (name === "voice" ? voice() : relay())).dispatchFetch(ORIGINS[name] + "/api/ready"),
+    /** The voice Worker's Cron Trigger `cron`, as Cloudflare fires it, as its own role. */
+    voiceCron: async (cron: string) =>
+      (
+        (await (await voice()).getWorker()) as unknown as {
+          scheduled(options: { cron: string }): Promise<{ outcome: string }>;
+        }
+      ).scheduled({ cron }),
     /** Background passes the voice Worker scheduled so far; the test entry only. */
     waitUntilCalls: async () =>
       Number(
@@ -980,6 +993,25 @@ test("Hosted Voice: only the verified admin speaks; the account sees on or off a
   expect(await (await admin.hostedVoice()).json()).toEqual({ entitled: false, on: true });
   expect((await admin.hostedVoice("DELETE")).status).toBe(204);
   expect((await admin.speak(lapsed, hi)).status).toBe(401);
+});
+
+test("the voice Worker's daily cron deletes only tokens a year idle, and never touches ElevenLabs", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const admin = f.browser();
+  await admin.email(ADMIN_EMAIL);
+  const idle = `now() - interval '${VOICE_TOKEN_IDLE_DAYS} days'`;
+  const live = await admin.mint(`${idle} + interval '1 minute'`);
+  const used = await admin.mint(`${idle} - interval '1 day'`);
+  await admin.mint(`${idle} - interval '1 minute'`);
+  await queryDatabase(f.database.url, `UPDATE dormouse_voice_tokens SET "lastUsedAt" = now() WHERE hash = $1`, [digest(used)]);
+  expect((await f.voiceCron(TOKEN_SWEEP_CRON)).outcome).toBe("ok");
+  expect(
+    (await queryDatabase<{ hash: string }>(f.database.url, "SELECT hash FROM dormouse_voice_tokens")).map((row) => row.hash).sort(),
+  ).toEqual([digest(live), digest(used)].sort());
+  expect(f.elevenLabs.sweeps).toEqual([]);
 });
 
 test("managed voice fails closed in production without an ElevenLabs key", async ({

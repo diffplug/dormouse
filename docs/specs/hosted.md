@@ -86,7 +86,7 @@ Errors are JSON `{ message }`. Cookie routes answer 401 without a login and admi
 
 **Must store only a token's SHA-256, and nothing about the computer holding it.** A token is `dmv_` plus base64url of 32 random bytes, returned only by the poll that redeems a voice approval.
 
-**A token is live until a year (`VOICE_TOKEN_IDLE_DAYS`) passes without a counted speak, or since its mint if none**; speak and `on` refuse any other. Only turning off, a computer's own delete, and account deletion remove a row (rationale).
+**A token is live until a year (`VOICE_TOKEN_IDLE_DAYS`) passes without a counted speak, or since its mint if none**; speak and `on` refuse any other. **Must delete expired tokens from the voice Worker's daily Cron Trigger (`TOKEN_SWEEP_CRON`)**, its only database pass (rationale).
 
 **Never name a token, or list computers, on the account page.** It says whether Hosted Voice is on, and turning it off asks first.
 
@@ -106,7 +106,7 @@ Errors are JSON `{ message }`. Cookie routes answer 401 without a login and admi
 **Must delete ElevenLabs speech history, which keeps each generation's text, from the production voice Worker only**: one pass shortly after each successful speak, and a Cron Trigger every 5 minutes for what that missed. No retention bound is guaranteed (rationale).
 
 - **Must use an ElevenLabs service account dedicated to Dormouse voice, with history access isolated from other workspace usage.** A sweep deletes every history item visible to its key (rationale).
-- **Never touch the database or any binding but `ELEVENLABS_API_KEY` in a sweep**, so an idle deployment lets Postgres suspend. Without the key nothing runs; development and previews never sweep.
+- **Never touch the database or any binding but `ELEVENLABS_API_KEY` in a history sweep**, so an idle deployment lets Postgres suspend. Without the key nothing runs; development and previews never sweep.
 - **Must fail the cron invocation when its pass cannot list or any delete fails; the after-speech pass only logs** (rationale).
 
 Source of truth: `hosted/server/voice.ts`; `hosted/server/voice-app.ts`; `mintVoiceToken` in `hosted/server/voice-token.ts`.

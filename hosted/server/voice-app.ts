@@ -1,12 +1,21 @@
 import type { VoiceEnv } from "./bindings";
 import { NO_PAGE_RULES } from "./headers";
-import { LIVE_TOKEN, TOKEN_OWNER, elevenLabs, voiceBearerRoutes, sweepOnCron } from "./voice";
+import {
+  LIVE_TOKEN,
+  TOKEN_OWNER,
+  TOKEN_SWEEP_CRON,
+  elevenLabs,
+  sweepIdleTokens,
+  sweepOnCron,
+  voiceBearerRoutes,
+} from "./voice";
 import { workerApp } from "./worker-app";
 
 /**
  * The voice Worker (`voice.dormouse.sh`): readiness, bearer-token speech and
- * forgetting, and the Cron Trigger's ElevenLabs history sweep. No cookie, no
- * auth, no assets.
+ * forgetting, and two Cron Triggers: the ElevenLabs history sweep, which never
+ * touches the database, and the daily idle-token sweep. No cookie, no auth, no
+ * assets.
  * `sweepDelayMs` exists for the test entry; production keeps the default.
  */
 export function voiceApp(
@@ -35,9 +44,12 @@ export function voiceApp(
         };
       });
     },
-    // The Cron Trigger: the mapper decides whether a key reaches the sweep.
-    async scheduled(_controller, env) {
-      if (env.ELEVENLABS_API_KEY) await sweepOnCron(env.ELEVENLABS_API_KEY);
+    // Every other schedule is the history sweep's, and the mapper decides
+    // whether a key reaches it.
+    async scheduled(controller, env) {
+      if ((controller as { cron?: string }).cron === TOKEN_SWEEP_CRON)
+        await sweepIdleTokens(env.HYPERDRIVE.connectionString);
+      else if (env.ELEVENLABS_API_KEY) await sweepOnCron(env.ELEVENLABS_API_KEY);
     },
   });
 }
