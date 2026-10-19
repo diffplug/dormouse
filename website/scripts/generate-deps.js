@@ -448,6 +448,7 @@ const cargoMissingAuthor = {
   "serde_spanned": "toml-rs contributors",
   "softbuffer": "Kirill Chibisov",
   "soup3": "The Gtk-rs Project Developers",
+  "static_vcruntime": "Chris Denton",
   "tokio-rustls": "quininer kel",
   "toml_parser": "toml-rs contributors",
   "toml_writer": "toml-rs contributors",

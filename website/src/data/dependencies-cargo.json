@@ -17,7 +17,7 @@
       "homepage": "https://github.com/rust-lang/libc",
       "declaredName": "libc",
       "versions": [
-        "0.2.190"
+        "0.2.191"
       ]
     },
     {
@@ -87,7 +87,7 @@
       "homepage": "https://tauri.app/",
       "declaredName": "tauri",
       "versions": [
-        "2.12.3"
+        "2.12.4"
       ]
     },
     {
@@ -97,7 +97,7 @@
       "homepage": "https://tauri.app/",
       "declaredName": "tauri-build",
       "versions": [
-        "2.7.2"
+        "2.7.3"
       ]
     },
     {
@@ -107,7 +107,7 @@
       "homepage": "https://github.com/tauri-apps/plugins-workspace",
       "declaredName": "tauri-plugin-shell",
       "versions": [
-        "2.4.1"
+        "2.5.0"
       ]
     },
     {
@@ -117,7 +117,7 @@
       "homepage": "https://github.com/tauri-apps/plugins-workspace",
       "declaredName": "tauri-plugin-updater",
       "versions": [
-        "2.13.3"
+        "2.14.0"
       ]
     },
     {
@@ -2598,33 +2598,6 @@
       ]
     },
     {
-      "name": "sigchld",
-      "license": "MIT",
-      "author": "Jack O'Connor",
-      "homepage": "https://github.com/oconnor663/sigchld.rs",
-      "versions": [
-        "0.2.4"
-      ]
-    },
-    {
-      "name": "signal-hook",
-      "license": "MIT OR Apache-2.0",
-      "author": "Michal 'vorner' Vaner <vorner@vorner.cz>, Thomas Himmelstoss <thimm@posteo.de>",
-      "homepage": "https://github.com/vorner/signal-hook",
-      "versions": [
-        "0.3.18"
-      ]
-    },
-    {
-      "name": "signal-hook-registry",
-      "license": "MIT OR Apache-2.0",
-      "author": "Michal 'vorner' Vaner <vorner@vorner.cz>, Masaki Hara <ackie.h.gmai@gmail.com>",
-      "homepage": "https://github.com/vorner/signal-hook",
-      "versions": [
-        "1.4.8"
-      ]
-    },
-    {
       "name": "simd_cesu8",
       "license": "MIT OR Apache-2.0",
       "author": "Sean C. Roach <me@seancroach.dev>",
@@ -2721,6 +2694,15 @@
       "homepage": "https://github.com/storyyeller/stable_deref_trait",
       "versions": [
         "1.2.1"
+      ]
+    },
+    {
+      "name": "static_vcruntime",
+      "license": "MIT OR Apache-2.0 OR Zlib",
+      "author": "Chris Denton",
+      "homepage": "https://github.com/ChrisDenton/static_vcruntime",
+      "versions": [
+        "3.0.0"
       ]
     },
     {
@@ -2866,7 +2848,7 @@
       "author": "Tauri Programme within The Commons Conservancy",
       "homepage": "https://tauri.app/",
       "versions": [
-        "2.7.2"
+        "2.7.3"
       ]
     },
     {
@@ -2875,7 +2857,7 @@
       "author": "Tauri Programme within The Commons Conservancy",
       "homepage": "https://tauri.app/",
       "versions": [
-        "2.7.2"
+        "2.7.3"
       ]
     },
     {
@@ -2893,7 +2875,7 @@
       "author": "Tauri Programme within The Commons Conservancy",
       "homepage": "https://tauri.app/",
       "versions": [
-        "2.12.1"
+        "2.12.2"
       ]
     },
     {
@@ -2902,7 +2884,7 @@
       "author": "Tauri Programme within The Commons Conservancy",
       "homepage": "https://tauri.app/",
       "versions": [
-        "2.12.1"
+        "2.12.2"
       ]
     },
     {
@@ -2911,7 +2893,7 @@
       "author": "Tauri Programme within The Commons Conservancy",
       "homepage": "https://tauri.app/",
       "versions": [
-        "2.10.1"
+        "2.10.2"
       ]
     },
     {
