@@ -9,7 +9,7 @@
 
 | Guarantee | Feature | Pinned by |
 | --- | --- | --- |
-| **Each Hosted Worker answers only its own origin and runs only its own code.** No third-party script, analytics, or framing; sign-in cookies stay on the account origin, and its session never reaches browser storage. | Hosted phone | `hosted/server/tests/boundary.test.ts`, `hosted/server/tests/workers.test.ts` |
+| **Each Hosted Worker answers only its own origin and runs only its own code.** No third-party script, analytics, or framing; sign-in cookies stay on the account origin, and its session never reaches browser storage. | One-time link, Hosted phone | `hosted/server/tests/boundary.test.ts`, `hosted/server/tests/workers.test.ts` |
 
 - **FAIL IF** `S77` a Worker routes a request whose URL origin is not its own `APP_ORIGIN`, a sibling's included, rather than answering 421; inspect `workerApp` in `hosted/server/worker-app.ts`.
 - **FAIL IF** `S78` an account cookie request — a cookie route's, or the auth handler's but a provider callback or `/api/auth/csrf` — presents an `Origin` but its own exactly, sibling origins under `dormouse.sh` included; is a read (`GET` or `HEAD`; to auth, anything but `POST`) that reaches its handler without `Sec-Fetch-Site: same-origin` rather than answering 403, so no header, `none`, and a sibling's `same-site` are refused; is state-changing and lacks that Origin, or to auth skips the CSRF check; is an auth read that skips `prelaunchAuth`'s lookup, or reaches it ungated; or any Worker grants credentialed CORS. Inspect `cookieEntitled` / `ownPageRead` / `openAuthRead` in `hosted/server/account-gate.ts`, their use in `accountApp` in `hosted/server/account-app.ts` and `prelaunchAuth` in `hosted/server/prelaunch.ts`, and the packed adapter (rationale).
