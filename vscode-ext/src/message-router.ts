@@ -668,8 +668,9 @@ export function attachRouter(
         Promise.resolve(vscode.env.clipboard.writeText(msg.text))
           .then(() => post({ type: 'clipboard:written', requestId: msg.requestId } satisfies ExtensionMessage))
           .catch((err) => {
-            log.info(`[clipboard] writeText failed: ${err?.message ?? err}`);
-            post({ type: 'clipboard:written', error: String(err?.message ?? err), requestId: msg.requestId } satisfies ExtensionMessage);
+            const error = String(err?.message ?? err);
+            log.info(`[clipboard] writeText failed: ${error}`);
+            post({ type: 'clipboard:written', error, requestId: msg.requestId } satisfies ExtensionMessage);
           });
         break;
       case 'dormouse:openExternal': {

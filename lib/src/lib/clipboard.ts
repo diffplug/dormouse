@@ -16,7 +16,6 @@ import { getDefaultShellOpts, getTerminalShellKind, writeUserInput } from './ter
 export async function writeTextToClipboard(text: string, { reportFailure = true } = {}): Promise<boolean> {
   if (!text) return false;
   const platform = getPlatformOrNull();
-  const clipboard = typeof navigator === 'undefined' ? undefined : navigator.clipboard;
   // Before any await, so the attempt describes, and the fallback runs inside,
   // the click or key that asked.
   const attempt = beginClipboardAttempt(text.length);
@@ -30,6 +29,7 @@ export async function writeTextToClipboard(text: string, { reportFailure = true 
       return fail();
     }
   }
+  const clipboard = typeof navigator === 'undefined' ? undefined : navigator.clipboard;
   if (!clipboard?.writeText) {
     noteClipboardStep(attempt, 'navigator.clipboard.writeText: unavailable');
     return copyWithExecCommand(text, attempt) || fail();

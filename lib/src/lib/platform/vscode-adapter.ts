@@ -348,7 +348,7 @@ export class VSCodeAdapter implements PlatformAdapter {
   async writeClipboardText(text: string): Promise<void> {
     const reply = await this.requestResponse<{ error?: string }>(
       'clipboard:writeText', 'clipboard:written', { text },
-      (msg) => ({ error: msg.error }),
+      (msg) => msg,
       5000,
     );
     if (!reply) throw new Error('clipboard:writeText timed out');

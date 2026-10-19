@@ -7,6 +7,7 @@ import { invoke as rawInvoke } from "@tauri-apps/api/core";
 import { IframeLeaseOrder } from '../../lib/src/lib/platform/iframe-lease-order';
 import { open } from "@tauri-apps/plugin-shell";
 import { coalesceCwds } from "./coalesce-cwds";
+import { nativeClipboardWriter } from "./native-clipboard";
 import type {
   IframeProxyResult,
   OpenPort,
@@ -42,7 +43,6 @@ import { embedderOrigins } from "dormouse-lib/lib/embedder-origins";
 import { createAlertClient, type AlertClientMethods } from "dormouse-lib/host/alert-client";
 import { ALERT_EVENTS, type AlertCommand } from "dormouse-lib/host/alert-protocol";
 import { normalizeExternalUri } from "dormouse-lib/lib/external-links";
-import { IS_MAC, IS_WINDOWS } from "dormouse-lib/lib/platform";
 import type { PersistedWindow } from "dormouse-lib/lib/session-types";
 import { TauriSessionStore } from "./tauri-session-store";
 import { claimRecoveryCommands, windowStateSlot } from "./window-recovery";
@@ -452,11 +452,7 @@ export class TauriAdapter implements PlatformAdapter {
     } catch { return null; }
   }
 
-  /** Native on macOS and Windows. Linux keeps the browser's write, since its
-   *  native one needs xclip or wl-copy installed. */
-  readonly writeClipboardText = IS_MAC || IS_WINDOWS
-    ? async (text: string): Promise<void> => { await rawInvoke("write_clipboard_text", { text }); }
-    : undefined;
+  readonly writeClipboardText = nativeClipboardWriter(rawInvoke);
 
   async toolControl(request: ToolHostRequest): Promise<ToolControlResult> {
     // The sidecar owns the filesystem (shared lib/src/host/tool-host.ts).

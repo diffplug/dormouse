@@ -1848,7 +1848,8 @@ fn read_clipboard_text(
     }
 }
 
-// Natively on Windows, like the reads; elsewhere the sidecar's pbcopy/xclip.
+// Natively on Windows, like the reads; elsewhere through the sidecar. The
+// adapters call it on macOS and Windows only (`nativeClipboardWriter`).
 #[tauri::command(async)]
 fn write_clipboard_text(
     state: tauri::State<'_, SidecarState>,

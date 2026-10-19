@@ -13,7 +13,7 @@ export interface ClipboardFailure {
 /** The trusted input events that can grant, or follow from, a clipboard
  *  write's activation. */
 const TIMELINE_EVENTS = ['keydown', 'pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'] as const;
-const TIMELINE_LENGTH = 8;
+const TIMELINE_LENGTH = 12;
 
 /** The latest trusted input events, oldest first, each with whether the page
  *  held transient activation as it arrived: whether a failed write's press was

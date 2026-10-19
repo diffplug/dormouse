@@ -36,11 +36,11 @@ import { embedderOrigins } from "dormouse-lib/lib/embedder-origins";
 import { createAlertClient, type AlertClientMethods } from "dormouse-lib/host/alert-client";
 import type { AlertCommand } from "dormouse-lib/host/alert-protocol";
 import { normalizeExternalUri } from "dormouse-lib/lib/external-links";
-import { IS_MAC, IS_WINDOWS } from "dormouse-lib/lib/platform";
 import { managedVoicePortForBuild } from "./managed-voice-port";
 import type { PersistedWindow } from "dormouse-lib/lib/session-types";
 import { claimRecoveryCommands, windowStateSlot } from "./window-recovery";
 import { coalesceCwds } from "./coalesce-cwds";
+import { nativeClipboardWriter } from "./native-clipboard";
 import type { TerminalProtocolEvent } from "dormouse-lib/lib/terminal-protocol";
 import { getTerminalTheme, onTerminalThemeChange } from "dormouse-lib/lib/terminal-theme";
 import { parseReplay } from "dormouse-lib/lib/platform/replay-parse";
@@ -240,10 +240,7 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     try { return await this.host.invoke("read_clipboard_text"); } catch { return null; }
   }
 
-  /** As the Tauri adapter's: native on macOS and Windows only. */
-  readonly writeClipboardText = IS_MAC || IS_WINDOWS
-    ? async (text: string): Promise<void> => { await this.host.invoke("write_clipboard_text", { text }); }
-    : undefined;
+  readonly writeClipboardText = nativeClipboardWriter((command, args) => this.host.invoke(command, args));
 
   async gitInfo(paths: string[]): Promise<GitInfoResult> {
     // A missing result is a failure, never an empty answer: an absent key
