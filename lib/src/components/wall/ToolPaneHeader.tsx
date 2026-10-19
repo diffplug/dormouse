@@ -23,6 +23,8 @@ import {
   ZoomedIdContext,
 } from './wall-context';
 import type { PaneProps } from './pane-props';
+import { ToolNavigationButtons } from './ToolNavigationButtons';
+import { hasToolHistory } from './tool-navigation';
 
 export function ToolPaneHeader(props: PaneProps) {
   // A preview slot switch keeps the face it holds (`docs/specs/layout.md` ->
@@ -67,7 +69,7 @@ function ToolBrowserHeader({ id, title, params, switching }: PaneProps & { switc
   // A switch retires the browser the ghost shows, so the glyph holds too.
   const displayMode = useHeldWhile(useAgentBrowserDisplayMode(screen), switching);
   const headerRef = useRef<HTMLDivElement>(null);
-  const tier = useHeaderTier(headerRef, toolHeaderTier);
+  const tier = useHeaderTier(headerRef, toolHeaderTier, { reservePx: hasToolHistory(params) ? 2 * HEADER_CONTROL_SLOT_PX : 0 });
   const rename = usePaneRename(id);
   const keep = usePreviewKeep(id, preview);
 
@@ -88,6 +90,7 @@ function ToolBrowserHeader({ id, title, params, switching }: PaneProps & { switc
         <BrowserDisplayButton mode={displayMode} onOpen={screen ? () => screen.actions.openModal() : undefined} />
       )}
       <TerminalContextButton surfaceId={id} />
+      {tier !== 'tiny' && <ToolNavigationButtons id={id} params={params} />}
       {/* Hidden where the tiny tier leaves no room for it. */}
       {tier !== 'tiny' && <BreakToolButton surfaceId={id} />}
       <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">

@@ -11,6 +11,7 @@ import {
   PASTE_EXHAUSTED_MESSAGE, pastedImageExtension, pastedImageName, type SizeBound, VERSION_HEADER,
 } from './image-format.js';
 import { HttpError, parseJsonBody, pathSegments } from './viewer-http.js';
+import { markdownLink } from './markdown-links.js';
 
 export const TEXT_BOUND: SizeBound = { limit: 8 * 1024 * 1024, message: 'Text files are limited to 8 MiB.' };
 /** A save whose revision is no longer the file's. */
@@ -135,12 +136,13 @@ interface ImageTarget { path: StorePath; mime: string }
 
 /** The routes of one editor over `file`, the document it opened (titled
  * `name`); null for a route it does not answer, which the caller may. */
-export function editorRoutes({ kind, file, name, store, onDirty }: {
+export function editorRoutes({ kind, file, name, store, onDirty, openLink }: {
   kind: EditorKind;
   file: StorePath;
   name: string;
   store: EditorStore;
   onDirty(dirty: boolean): void;
+  openLink?(link: { path: string; fragment?: string }, disposition: 'current' | 'other'): void;
 }): (request: EditorRequest) => Promise<EditorReply | null> {
   const fileType = editableImageType(file);
   /** The image editor's own document. */
@@ -189,6 +191,14 @@ export function editorRoutes({ kind, file, name, store, onDirty }: {
   return async request => {
     const { route } = request;
     if (request.method === 'POST') {
+      if (kind === 'markdown' && route === 'open' && openLink) {
+        const data = await jsonBody(request, 8192);
+        const link = typeof data?.href === 'string' ? markdownLink(data.href) : null;
+        if (!link || (data?.disposition !== 'current' && data?.disposition !== 'other')) throw new HttpError(400, 'Not a supported relative document link.');
+        try { openLink(link, data.disposition); }
+        catch (error) { throw new HttpError(400, error instanceof Error ? error.message : 'Cannot open this link.'); }
+        return json({ status: 'sent' });
+      }
       if (kind === 'markdown' && route === 'image') {
         // With the width the page inserts it at, read from the whole file, as a
         // JPEG's frame header may sit behind any amount of EXIF or ICC.

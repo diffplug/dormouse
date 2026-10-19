@@ -264,3 +264,23 @@ test('an image past the editor\'s byte or pixel bound opens view-only in the ove
     assert.equal((await send(viewer, route(viewer, `images/${path}`))).status, 200, path);
   }
 });
+
+test('navigation emits a resolved open request without granting the destination to this viewer', async () => {
+  const opened = [];
+  await writeFile(join(docs, 'links.md'), '# Links');
+  const viewer = await startFileViewer(join(docs, 'links.md'), { onOpen: value => opened.push(value) });
+  viewers.push(viewer);
+  const open = (href, disposition = 'current', options = {}) => send(viewer, route(viewer, 'open'), { body: { href, disposition }, ...options });
+  assert.equal((await open('../other%20file.md?x=1#details')).status, 200);
+  assert.deepEqual(opened.at(-1), { path: join(root, 'other file.md'), preview: false, disposition: 'current', fragment: 'details' });
+  assert.equal((await open('#top', 'other')).status, 200);
+  assert.equal(opened.at(-1).path, join(docs, 'links.md'));
+  assert.equal(opened.at(-1).disposition, 'other');
+  for (const href of ['/absolute.md', 'file:///absolute.md', 'https://example.test', 'bad%00.md']) assert.equal((await open(href)).status, 400);
+  assert.equal((await open('a.md', 'fresh')).status, 400);
+  assert.equal((await open('a.md', 'current', { origin: 'https://elsewhere.test' })).status, 403);
+  assert.equal((await open('a.md', 'current', { type: 'text/plain' })).status, 415);
+  assert.equal((await open('x'.repeat(9000))).status, 413);
+  assert.equal((await send(viewer, route(viewer, 'file/secret.txt'))).status, 404);
+  assert.equal(opened.length, 2);
+});

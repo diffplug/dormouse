@@ -29,7 +29,7 @@ Pane drag scopes: `docs/specs/tiling-engine.md` → "Hierarchical drag and drop"
 
 **Must hold the slot's header while a switch holds its ghost** (`docs/specs/dor-tool.md` → Switching the slot): the ghost's face and Display glyph stay until the new view is ready. A terminal face's label keeps its name until the retarget, then shows the Tool's name (`docs/specs/dor-tool.md` → Naming); derivation resumes once ready. A serving Tool's name, read from its params, needs no hold (rationale).
 
-**Never give a Tool navigation, an address, or a dev-server chip** (rationale).
+**Must offer document Back/Forward on both Tool faces when the Surface has history**, in Terminal Context at narrow widths (`docs/specs/dor-tool.md` → Document navigation). **Never give a Tool an address or a dev-server chip** (rationale).
 
 Every Pane header ends with the pane-action group: zoom/unzoom, minimize, kill.
 

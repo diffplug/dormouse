@@ -795,7 +795,7 @@ export function LathHost({
 
       {contextSource && (
         <TerminalContextOverlay key={terminalContext!.id} context={terminalContext!}
-          title={contextMeta?.title} tool={isToolParams(contextMeta?.params)} preview={isPreviewSlotParams(contextMeta?.params)}
+          title={contextMeta?.title} tool={isToolParams(contextMeta?.params)} preview={isPreviewSlotParams(contextMeta?.params)} params={contextMeta?.params}
           lath={lath} wall={rect} source={contextSource}
           multiPane={!snapshot.zoomedId && frames.size > 1} preferences={contextPreferences.current} />
       )}

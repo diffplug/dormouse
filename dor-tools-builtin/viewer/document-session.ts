@@ -1,4 +1,5 @@
 import { connectToolFrame } from 'dor-tools-lib/frame';
+import type { ToolViewAccess } from 'dor-tools-lib/protocol';
 
 /** What the page shows: whether a document is loaded, has unsaved edits, or is saving. */
 export interface DocumentState { loaded: boolean; dirty: boolean; saving: boolean }
@@ -107,7 +108,7 @@ export interface DocumentPage {
  * Tool is dirty while any document is, which the page reports to the
  * containing iframe at once and to the Tool's OSC 367 stream in order; the
  * host's close-prompt save writes them all. */
-export function documentPage(): DocumentPage {
+export function documentPage(view?: ToolViewAccess): DocumentPage {
   /** The page's own document first; the last is in front. Each one's
    * `dirty()` is as it last reported, so the page reads no editor here. */
   const documents: OpenDocument[] = [];
@@ -116,6 +117,7 @@ export function documentPage(): DocumentPage {
   const toolDirty = () => documents.some(doc => doc.dirty());
   // The host's close prompt saves through this channel (docs/specs/dor-tool.md -> Closing unsaved Tools).
   const host = connectToolFrame({
+    view,
     dirty: () => documents[0]?.loaded() ? toolDirty() : undefined,
     async save() {
       // In turn, as the viewer takes one save at a time, and front first: an

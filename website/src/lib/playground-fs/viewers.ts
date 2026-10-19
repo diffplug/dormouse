@@ -115,6 +115,11 @@ export class PlaygroundViewers {
     const routes = editorRoutes({
       kind: editor, file: storePath(target), name: viewerTitle(target), store: this.store(root),
       onDirty: (dirty) => this.write(terminalId, stateSequence({ dirty })),
+      openLink: (link, disposition) => {
+        const path = link.path ? this.fs.resolve(root, link.path) : target;
+        if (path === null) throw new HttpError(400, "Invalid document path");
+        this.write(terminalId, openSequence({ path, disposition, fragment: link.fragment }));
+      },
     });
     return this.add({ terminalId, kind: "editor", editor, root, routes }, "view", target);
   }
