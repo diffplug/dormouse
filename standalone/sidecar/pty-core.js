@@ -800,7 +800,7 @@ async function readProcessTable(runtime) {
       return pairs;
     }
 
-    // macOS (and any other POSIX): ps gives the whole pid/ppid table.
+    // macOS: ps gives the whole pid/ppid table.
     if (platform === 'darwin') {
       const out = await runText(runtime, 'ps', ['-axo', 'pid=,ppid='], { timeout: OPEN_PORT_TIMEOUT_MS });
       return parsePsPairs(out);

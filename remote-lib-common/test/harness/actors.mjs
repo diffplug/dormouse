@@ -19,7 +19,7 @@ import {
   NoiseTransportSession,
   PRESENCE_WINDOW,
   PresenceWindows,
-  boundedPairingLabel,
+  knownPairingDeviceLabel,
   concatBytes,
   createNoiseInitiator,
   createNoiseResponder,
@@ -385,7 +385,7 @@ export class SimBurrow {
       clientStaticPublicKey: pending.clientStaticPublicKey,
       deliveryId: randomSecret(),
       approvedBy,
-      label: label ?? boundedPairingLabel(request.label),
+      label: label ?? knownPairingDeviceLabel(request.label),
     });
     this.windows.seed(pending.clientStaticPublicKey, record, verifiedAt);
     return answer(

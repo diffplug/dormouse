@@ -1,5 +1,5 @@
 Domain: local
-Rule: `docs/specs/security-local.md` -> "Persisted state" #1 — The one exception is the macOS hang sample
+Rule: S162 — The one exception is the macOS hang sample
 Expect: standalone/src-tauri/src/lib.rs
 Source: reverses #1028 (the hang sample was written at the umask after a bare create_dir_all)
 

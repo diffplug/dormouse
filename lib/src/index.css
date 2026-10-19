@@ -97,6 +97,11 @@ body {
   pointer-events: none;
 }
 
+/* Held by `shieldFrames` while a drag reads window pointer events. */
+[data-frame-shield] iframe {
+  pointer-events: none;
+}
+
 /* --- Command mode marching-ants animation --- */
 
 @keyframes marching-ants {

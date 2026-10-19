@@ -25,20 +25,13 @@ type Story = StoryObj<typeof RemotePairingModalStory>;
 
 // The whole surface: a device name, and two digits to read off the phone.
 export const Default: Story = {
-  args: { label: 'Ned’s iPhone' },
+  args: { label: 'Dormouse Pocket (Home Screen)' },
 };
 
-// Empty label → the `(unnamed)` fallback.
-export const UnnamedDevice: Story = {
-  args: { label: '' },
-};
-
-// A long label, to exercise the review block's `break-words` wrapping.
-export const LongValues: Story = {
-  args: {
-    label:
-      'Ned’s work iPhone 15 Pro Max in the downstairs office by the window (personal profile)',
-  },
+// A label Pocket does not send reads as this, whatever the phone wrote
+// (docs/specs/remote-security-model.md -> Pairing).
+export const UnknownDevice: Story = {
+  args: { label: 'Unknown device' },
 };
 
 // A one-time connection's request: the same warning, and what it grants in

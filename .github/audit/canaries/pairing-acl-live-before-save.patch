@@ -1,5 +1,5 @@
 Domain: remote
-Rule: `docs/specs/security-remote.md` -> "Trust boundary" #2 — authorizes nothing until its durable save succeeds
+Rule: S178 — authorizes nothing until its durable save succeeds
 Expect: lib/src/remote/burrow/burrow-runtime.ts
 Source: reverses part of #571 (an approved pairing went live in the Burrow's ACL before its durable write succeeded, and stayed live when the write failed)
 

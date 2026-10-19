@@ -7,7 +7,7 @@
  *
  *   node scripts/security-audit-report.mjs manifest <fragment>
  *     The result lines that domain owes: one per `FAIL IF` rule in its specs,
- *     each naming its rule's opening words.
+ *     each carrying its rule's ID, opening words, spec, and heading.
  *   node scripts/security-audit-report.mjs check <fragment>
  *     The local runner's verdict on one fragment; exit 0 only on PASS.
  *   node scripts/security-audit-report.mjs compose --run-url <url> [--transcript-url <url>] --outputs <file>
@@ -25,21 +25,18 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync,
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { clampIssueBody } from './clamp-issue-body.mjs';
+import { auditedRules, FAIL_IF_RE, isDomainPrompt, proseLines, RULE_ID, scopeOf } from './spec-md.mjs';
 
 export const SENTINEL = '<!-- END OF REPORT -->';
 const AUDIT_DIR = '.github/audit';
 /** The open ledger issues' titles, one per line, written before the domains start. */
 export const OPEN_FINDINGS = 'audit-open-findings.txt';
 
-/** A rule line in a spec, the same match `scripts/spec-lint.mjs` uses: the bold leads the line. */
-const FAIL_IF_RE = /^\s*(?:[-*]\s+)?\*\*FAIL IF\b/;
-const HEADING_RE = /^(#{1,6})\s+(.+?)\s*$/;
 const FENCE_RE = /^\s*(```|~~~)/;
 
-/** A rule's id as `ruleId` writes it: `` `spec` -> "heading" #n ``, capturing all three. */
-export const RULE_ID = /`(docs\/specs\/security[a-z-]*\.md)` -> "([^"\n]+)" #([1-9]\d*)/.source;
-/** `- PASS: `docs/specs/security-ci.md` -> "GitHub Actions Policies" #2.b — <clause>: <evidence>` */
-const RESULT_RE = new RegExp(`^- (PASS|FAIL|UNVERIFIABLE): ${RULE_ID}(?:\\.([a-z]))? — (\\S.*)$`);
+export { RULE_ID };
+/** `- PASS: S42.b — <clause>: <evidence>`: the rule's stable ID, never its spec or heading. */
+const RESULT_RE = new RegExp(`^- (PASS|FAIL|UNVERIFIABLE): (${RULE_ID})(?:\\.([a-z]))? — (\\S.*)$`);
 /** `- WARNING: `path/to/file.ts:88` `rootCause` — <summary>` */
 const FINDING_RE = /^- (BLOCKER|WARNING|INFO): `([^`\s:]+):([1-9]\d*)(?:-\d+)?` `([^`\n]+)` — (\S.*)$/;
 /** `- QUALITATIVE: done — <what the pass covered>` */
@@ -72,17 +69,11 @@ export function domains(root = '.') {
 function readDomains(root) {
   const dir = join(root, AUDIT_DIR);
   const out = [];
-  for (const file of readdirSync(dir).filter((f) => f.endsWith('.md') && !f.startsWith('_') && f !== 'orchestrator.md').sort()) {
-    const lines = readFileSync(join(dir, file), 'utf8').split('\n');
+  for (const file of readdirSync(dir).filter(isDomainPrompt).sort()) {
+    const lines = proseLines(readFileSync(join(dir, file), 'utf8'));
     const fragment = lines.map((l) => l.match(/^\*\*Output file:\*\* `([\w.-]+\.md)`/)?.[1]).find(Boolean);
-    const at = lines.findIndex((l) => /^\*\*Scope\b/.test(l));
-    if (!fragment || at < 0) continue;
-    let j = at + 1;
-    while (j < lines.length && lines[j].trim() === '') j++;
-    const specs = [];
-    for (; j < lines.length && /^[-*]\s/.test(lines[j]); j++) {
-      for (const m of lines[j].matchAll(/`([^`]+)`/g)) specs.push(m[1]);
-    }
+    const specs = scopeOf(lines);
+    if (!fragment || specs === null) continue;
     out.push({ domain: file.replace(/\.md$/, ''), fragment, specs });
   }
   return out;
@@ -97,51 +88,61 @@ function readDomains(root) {
 export const DETERMINISTIC = { 'audit-github-state.md': 'scripts/github-state-check.mjs' };
 
 /**
- * Every `FAIL IF` rule of one spec, in source order: its heading, its number
- * under that heading (its position), and the `Pinned by` clause its text
- * carries, sub-bullets included. Fenced code is skipped, and nothing under
- * `## Future` is a rule.
+ * Every `FAIL IF` rule of one spec, in source order: its ID, its heading, and
+ * the `Pinned by` clause its text carries, sub-bullets included. Fenced code
+ * is skipped, and nothing under `## Future` is a rule. Throws for a rule with
+ * no ID, which nothing could owe or cite.
  */
 export function specRules(root, spec) {
   const path = join(root, spec);
   // Fail closed: a moved spec must not shrink what its domain owes to nothing.
   if (!existsSync(path)) throw new Error(`a domain claims ${spec}, which does not exist`);
-  const rules = [];
-  let heading = null;
-  let fenced = false;
-  let rule = null;
-  for (const line of readFileSync(path, 'utf8').split('\n')) {
-    if (FENCE_RE.test(line)) { fenced = !fenced; rule = null; continue; }
-    if (fenced) continue;
-    const h = line.match(HEADING_RE);
-    if (h) {
-      if (h[1] === '##' && /^Future\b/.test(h[2])) break;
-      heading = h[2];
-      rule = null;
-      continue;
-    }
-    if (heading !== null && FAIL_IF_RE.test(line)) {
-      rule = { spec, heading, n: rules.filter((r) => r.heading === heading).length + 1, text: line };
-      rules.push(rule);
-    } else if (rule && /^\s+\S/.test(line)) {
-      rule.text += `\n${line}`;
-    } else {
-      rule = null;
-    }
-  }
-  for (const r of rules) r.pin = r.text.match(/Pinned by ([^\n]*?)(?:\.(?:\s|$)|$)/)?.[1] ?? '';
-  return rules;
+  return auditedRules(readFileSync(path, 'utf8')).map(({ line, heading, id, text }) => {
+    if (id === null) throw new Error(`${spec}:${line}: a FAIL IF rule with no ID; \`pnpm lint:specs\` says which to give it`);
+    return { id, spec, heading, text, pin: text.match(/Pinned by ([^\n]*?)(?:\.(?:\s|$)|$)/)?.[1] ?? '' };
+  });
 }
 
-/** The rule under `heading` whose text contains `phrase`: how a script cites the rule it answers. */
-export function ruleNumber(root, spec, heading, phrase) {
-  const hits = specRules(root, spec).filter((r) => r.heading === heading && r.text.includes(phrase));
-  if (hits.length !== 1) throw new Error(`${spec} -> "${heading}" has ${hits.length} rules containing ${JSON.stringify(phrase)}`);
-  return hits[0].n;
+const indexCache = new Map();
+/**
+ * Every rule the domains' specs carry, by ID: where each lives now, so a
+ * result, a ledger entry, or a seed that names only the ID can be placed.
+ * Throws on an ID two rules carry.
+ */
+export function ruleIndex(root = '.') {
+  if (!indexCache.has(root)) {
+    const index = new Map();
+    for (const spec of [...new Set(domains(root).flatMap((d) => d.specs))].sort()) {
+      for (const r of specRules(root, spec)) {
+        if (index.has(r.id)) throw new Error(`${r.id} names a rule in ${index.get(r.id).spec} and in ${spec}`);
+        index.set(r.id, r);
+      }
+    }
+    indexCache.set(root, index);
+  }
+  return indexCache.get(root);
+}
+
+/** A rule's place for a reader: `` `spec` -> "heading" ``, or a note when no spec carries the ID. */
+export function ruleAt(root, id) {
+  const r = ruleIndex(root).get(id);
+  return r ? `\`${r.spec}\` -> "${r.heading}"` : 'in no security spec';
 }
 
 /**
- * The rules a fragment owes a result for, as `spec\0heading` -> rule numbers.
+ * The rule a script cites by ID, checked to contain `phrase`, so a rule
+ * reworded out from under its citation fails loudly rather than being judged
+ * by the wrong clause.
+ */
+export function citedRule(root, id, phrase) {
+  const r = ruleIndex(root).get(id);
+  if (!r) throw new Error(`${id} names no rule in the security specs`);
+  if (!r.text.includes(phrase)) throw new Error(`${id} (${ruleAt(root, id)}) no longer contains ${JSON.stringify(phrase)}`);
+  return r;
+}
+
+/**
+ * The rules a fragment owes a result for, as `spec\0heading` -> rule IDs.
  * A domain owes every rule in the specs its `**Scope` claims except those
  * pinned by a deterministic script alone; that script's fragment owes every
  * rule whose pin names it. Throws for a fragment nothing writes: an empty
@@ -159,7 +160,7 @@ export function fragmentManifest(root, fragment) {
       if (script ? !r.pin.includes(`\`${script}\``) : pinnedAlone(r)) continue;
       const key = `${spec}\0${r.heading}`;
       if (!owed.has(key)) owed.set(key, []);
-      owed.get(key).push(r.n);
+      owed.get(key).push(r.id);
     }
   }
   if (script && owed.size === 0) throw new Error(`no rule is pinned by ${script}`);
@@ -197,7 +198,7 @@ export function parseFragment(text, { evidence = true } = {}) {
     finding = null;
     let m;
     if ((m = line.match(RESULT_RE))) {
-      parsed.results.push({ status: m[1], spec: m[2], heading: m[3], rule: Number(m[4]), clause: m[5] ?? null, line });
+      parsed.results.push({ status: m[1], id: m[2], clause: m[3] ?? null, line });
     } else if ((m = line.match(FINDING_RE))) {
       finding = { severity: m[1], path: m[2], line: Number(m[3]), cause: m[4], summary: m[5], header: line, block: [line] };
     } else if (QUALITATIVE_RE.test(line)) {
@@ -225,63 +226,51 @@ function closeFinding(parsed, finding, evidence) {
   parsed.findings.push(finding);
 }
 
-/** A rule's id in the result-line grammar: `` `spec` -> "heading" #n[.c] ``. */
-export const ruleId = (spec, heading, n, clause) => `\`${spec}\` -> "${heading}" #${n}${clause ? `.${clause}` : ''}`;
-
-/** A rule's text without its `FAIL IF` marker or emphasis, as one line. */
-const ruleWords = (text) => text.replace(FAIL_IF_RE, '').replace(/^\*\*\s*/, '').replaceAll('**', '').split(/\s+/).filter(Boolean);
+/** A rule's text without its `FAIL IF` marker, its ID, or emphasis, as one line. */
+const ruleWords = (text) => text.replace(FAIL_IF_RE, '').replace(/^\*\*\s*/, '').replace(new RegExp(`^\`${RULE_ID}\`\\s*`), '')
+  .replaceAll('**', '').split(/\s+/).filter(Boolean);
 
 /**
  * The manifest's template lines, each naming its rule by the opening words
- * that tell it from every other rule under its heading, so a domain copies a
- * rule's number rather than counting to it.
+ * that tell it from every other rule under its heading, and by its spec and
+ * heading, so a domain finds the rule it checked and copies its ID.
  */
 export function manifestLines(root, fragment) {
-  return [...fragmentManifest(root, fragment)].flatMap(([key, numbers]) => {
+  return [...fragmentManifest(root, fragment)].flatMap(([key, ids]) => {
     const [spec, heading] = key.split('\0');
-    const words = specRules(root, spec).filter((r) => r.heading === heading).map((r) => ruleWords(r.text));
+    const siblings = specRules(root, spec).filter((r) => r.heading === heading);
+    const words = new Map(siblings.map((r) => [r.id, ruleWords(r.text)]));
     let k = 8;
-    while (k < Math.max(...words.map((w) => w.length)) && new Set(words.map((w) => w.slice(0, k).join(' '))).size < words.length) k++;
-    return numbers.map((n) => {
-      const w = words[n - 1];
-      return `- PASS: ${ruleId(spec, heading, n)} — <clause of the rule opening "${w.slice(0, k).join(' ')}${w.length > k ? ' …' : ''}">: <evidence>`;
+    const all = [...words.values()];
+    while (k < Math.max(...all.map((w) => w.length)) && new Set(all.map((w) => w.slice(0, k).join(' '))).size < all.length) k++;
+    return ids.map((id) => {
+      const w = words.get(id);
+      return `- PASS: ${id} — <clause of the rule opening "${w.slice(0, k).join(' ')}${w.length > k ? ' …' : ''}", under \`${spec}\` -> "${heading}">: <evidence>`;
     });
   });
 }
 
-/** Every rule id a manifest owes, in order. */
-export const owedIds = (owed) => [...owed].flatMap(([key, numbers]) => {
-  const [spec, heading] = key.split('\0');
-  return numbers.map((n) => ruleId(spec, heading, n));
-});
+/** Every rule ID a manifest owes, in order. */
+export const owedIds = (owed) => [...owed.values()].flat();
 
 // --- Open ledger findings --------------------------------------------------
 
 /** `[audit-finding <key>] <summary>`: a minted hash key, or a hand-filed `manual-…` one. */
 const LEDGER_TITLE_RE = /^\[audit-finding ([\w.-]+)\] (\S.*)$/;
-/** A minted failure's summary: `FAIL: `spec` -> "heading" #n`. */
-const MINTED_CITE_RE = new RegExp(`^FAIL: ${RULE_ID}`);
-/** A hand-filed one's: `FAIL security-ci.md GitHub Actions Policies: <summary>`, citing a heading alone. */
-const MANUAL_CITE_RE = /^FAIL (security[a-z-]*\.md) ([^:\n]+):/;
+/** A failure's summary cites its rule by ID: minted `FAIL: S42`, or hand-filed `FAIL S42: <summary>`. */
+const FAIL_CITE_RE = new RegExp(`^FAIL:? (${RULE_ID})(?::|$)`);
 /** A `path:line`, where a re-verified finding's reason points. */
 const LOCATION_RE = /[\w@-]+(?:[./][\w@-]+)+:[1-9]\d*/;
 
 /**
- * The open ledger findings, one per `[audit-finding …]` title, with the rule a
- * failure cites: its spec, heading, and number, or for a hand-filed title its
- * heading alone (`rule` null). A finding that cites no rule is re-verified by
+ * The open ledger findings, one per `[audit-finding …]` title, with the rule
+ * ID a failure cites, or null. A finding that cites no rule is re-verified by
  * the qualitative pass, which no line records.
  */
 export function parseOpenFindings(text) {
   return text.split('\n').flatMap((line) => {
     const m = line.trim().match(LEDGER_TITLE_RE);
-    if (!m) return [];
-    const minted = m[2].match(MINTED_CITE_RE);
-    const manual = minted ? null : m[2].match(MANUAL_CITE_RE);
-    return [{ key: m[1],
-      spec: minted ? minted[1] : manual ? `docs/specs/${manual[1]}` : null,
-      heading: minted ? minted[2] : manual ? manual[2].trim() : null,
-      rule: minted ? Number(minted[3]) : null }];
+    return m ? [{ key: m[1], rule: m[2].match(FAIL_CITE_RE)?.[1] ?? null }] : [];
   });
 }
 
@@ -293,21 +282,20 @@ export function readOpenFindings(root = '.') {
 
 /**
  * Each open failure a fragment passed without saying why: every result line
- * on its rule (on its heading, for a heading-level citation) is `PASS`, and
- * none names `[audit-finding <key>]` followed by a `path:line`. A `FAIL` or
- * `UNVERIFIABLE` there leaves the finding open, and no line at all is already
- * a missing rule.
+ * on its rule is `PASS`, and none names `[audit-finding <key>]` followed by a
+ * `path:line`. A `FAIL` or `UNVERIFIABLE` there leaves the finding open, and
+ * no line at all is already a missing rule.
  */
 function unexplainedPasses(results, owed, open) {
+  const owes = new Set(owedIds(owed));
   const out = [];
   for (const f of open) {
-    const numbers = f.spec ? owed.get(`${f.spec}\0${f.heading}`) : null;
-    if (!numbers || (f.rule !== null && !numbers.includes(f.rule))) continue;
-    const scope = results.filter((r) => r.spec === f.spec && r.heading === f.heading && (f.rule === null || r.rule === f.rule));
+    if (f.rule === null || !owes.has(f.rule)) continue;
+    const scope = results.filter((r) => r.id === f.rule);
     if (scope.length === 0 || scope.some((r) => r.status !== 'PASS')) continue;
     const marker = `[audit-finding ${f.key}]`;
     if (scope.some((r) => r.line.includes(marker) && LOCATION_RE.test(r.line.slice(r.line.indexOf(marker))))) continue;
-    out.push(`${f.rule === null ? `\`${f.spec}\` -> "${f.heading}"` : ruleId(f.spec, f.heading, f.rule)} passes over \`${marker}\``);
+    out.push(`${f.rule} passes over \`${marker}\``);
   }
   return out;
 }
@@ -329,26 +317,21 @@ export function domainVerdict(text, owed, { deterministic = false, open = [] } =
   const p = parseFragment(text, { evidence: !deterministic });
   const missing = [];
   const stray = [];
+  const owes = owedIds(owed);
   const byRule = new Map();
   for (const r of p.results) {
-    const key = `${r.spec}\0${r.heading}`;
-    if (!owed.get(key)?.includes(r.rule)) { stray.push(r); continue; }
-    const id = `${key}\0${r.rule}`;
-    if (!byRule.has(id)) byRule.set(id, []);
-    byRule.get(id).push(r);
+    if (!owes.includes(r.id)) { stray.push(r); continue; }
+    if (!byRule.has(r.id)) byRule.set(r.id, []);
+    byRule.get(r.id).push(r);
   }
-  for (const [key, numbers] of owed) {
-    const [spec, heading] = key.split('\0');
-    for (const n of numbers) {
-      const name = ruleId(spec, heading, n);
-      const lines = byRule.get(`${key}\0${n}`);
-      if (!lines) { missing.push(name); continue; }
-      // Clauses are lettered from `a` with no gap: a gap is a clause skipped.
-      const letters = [...new Set(lines.map((r) => r.clause).filter(Boolean))].sort();
-      letters.forEach((letter, i) => {
-        if (letter !== String.fromCharCode(97 + i)) missing.push(`${name}.${String.fromCharCode(97 + i)}`);
-      });
-    }
+  for (const id of owes) {
+    const lines = byRule.get(id);
+    if (!lines) { missing.push(id); continue; }
+    // Clauses are lettered from `a` with no gap: a gap is a clause skipped.
+    const letters = [...new Set(lines.map((r) => r.clause).filter(Boolean))].sort();
+    letters.forEach((letter, i) => {
+      if (letter !== String.fromCharCode(97 + i)) missing.push(`${id}.${String.fromCharCode(97 + i)}`);
+    });
   }
   const failed = p.results.some((r) => r.status === 'FAIL') || p.findings.some((f) => f.severity === 'BLOCKER');
   const doubts = [];
@@ -404,18 +387,22 @@ const normPath = (p) => p.replace(/^\.\//, '').replace(/^\/+/, '');
  */
 const SYMBOL_RE = /[A-Za-z_$][\w$]*(?:\(\))?/g;
 const codeLike = (token) => /^[a-z$][\w$]*[A-Z]|_|\(\)$/.test(token);
-/** A root cause written as the rule it lives in: `security-ci.md "GitHub Actions Policies" #2`. */
-const RULE_CAUSE_RE = /\.md\b[^"]*"[^"]+"\s*#\d+/;
+/** A root cause written as the rule it lives in, `S42`, a clause letter ignored: the rule's ID. */
+const RULE_CAUSE_RE = new RegExp(`^(${RULE_ID})(?:\\.[a-z])?$`);
+/** The rule ID a finding's root cause names, or null for a symbol or prose. */
+export const causeRule = (cause) => cause.trim().match(RULE_CAUSE_RE)?.[1] ?? null;
 
 /**
- * A finding's root cause as its key reads it: the symbol it names, not the
- * words around it, so `parseConfig()` and `parseConfig fallback` are one
- * cause. A single token is its own symbol; prose naming none falls back to the
- * whole cause (the rule it lives in), lowercased with its punctuation dropped.
+ * A finding's root cause as its key reads it: the rule ID it names, or the
+ * symbol, not the words around it, so `parseConfig()` and `parseConfig
+ * fallback` are one cause. A single token is its own symbol; prose naming none
+ * falls back to the whole cause, lowercased with its punctuation dropped.
  */
 export function rootCause(cause) {
   const text = cause.trim();
-  const symbol = RULE_CAUSE_RE.test(text) ? null : /\s/.test(text) ? text.match(SYMBOL_RE)?.find(codeLike) : text;
+  const rule = causeRule(text);
+  if (rule) return rule;
+  const symbol = /\s/.test(text) ? text.match(SYMBOL_RE)?.find(codeLike) : text;
   return (symbol ?? text.replace(/[`'"“”,;:]/g, '')).toLowerCase().replace(/\(\)$/, '').replace(/\s+/g, ' ');
 }
 
@@ -449,8 +436,8 @@ export function dedupFindings(entries) {
 }
 
 /**
- * A ledger issue body's first line: the finding's key, severity, and its spec
- * and heading or its file, as JSON in an HTML comment. `Read the findings
+ * A ledger issue body's first line: the finding's key, severity, and its rule
+ * ID, spec, and heading or its file, as JSON in an HTML comment. `Read the findings
  * ledger` reads it back from the start of the body alone, and
  * `scripts/security-audit-public-body.mjs` validates every field before a
  * disclosure names it. No `--` survives, so the comment cannot end early.
@@ -459,9 +446,8 @@ export const ledgerMeta = (meta) => `<!-- audit-ledger ${JSON.stringify(meta).re
 
 /** A ledger key: stable across runs, so line drift does not open a second issue for one finding. */
 export const ledgerKey = (...parts) => createHash('sha256').update(parts.join('\0')).digest('hex').slice(0, 12);
-/** A failed rule's key: its spec, heading, and number, never the clause letter a domain chose. */
-// The empty fifth part is where the clause letter was, so a single-clause key minted before is unchanged.
-export const failKey = (spec, heading, rule) => ledgerKey('check', spec, heading, rule, '');
+/** A failed rule's key: its ID alone, never its spec, heading, or the clause letter a domain chose, so a rule moved or reworded keeps it. */
+export const failKey = (id) => ledgerKey('check', id);
 
 // --- Compose ---------------------------------------------------------------
 
@@ -486,10 +472,12 @@ function compose({ fragments, root = '.', fileStatus, runUrl, transcriptUrl = ''
   const ledger = new Map();
   for (const [fragment, d] of Object.entries(byFragment)) {
     for (const r of d.results.filter((x) => x.status === 'FAIL')) {
-      const key = failKey(r.spec, r.heading, r.rule);
+      const key = failKey(r.id);
       const line = `Reported by \`${fragment}\`:\n\n${r.line}\n`;
-      if (ledger.has(key)) ledger.get(key).body += `\n${line}`;
-      else ledger.set(key, { key, severity: 'FAIL', title: `FAIL: ${ruleId(r.spec, r.heading, r.rule)}`, body: line, meta: { spec: r.spec, heading: r.heading } });
+      if (ledger.has(key)) { ledger.get(key).body += `\n${line}`; continue; }
+      // Placed by where the ID lives now; a stray ID no spec carries is filed with no place.
+      const { spec = null, heading = null } = ruleIndex(root).get(r.id) ?? {};
+      ledger.set(key, { key, severity: 'FAIL', title: `FAIL: ${r.id}`, body: `${r.id} is ${ruleAt(root, r.id)}.\n\n${line}`, meta: { rule: r.id, spec, heading } });
     }
   }
   for (const m of merged.filter((x) => x.severity !== 'INFO')) {
@@ -531,14 +519,14 @@ function compose({ fragments, root = '.', fileStatus, runUrl, transcriptUrl = ''
   if (anomalies.length) lines.push('### Anomalies', '', '_Where a verdict line disagrees with the lines under it, the computed verdict is the one this run reports._', '', ...anomalies, '');
 
   const nonPass = Object.entries(byFragment).flatMap(([name, d]) =>
-    d.results.filter((r) => r.status !== 'PASS').map((r) => `- \`${name}\`: ${clip(r.line)}`));
+    d.results.filter((r) => r.status !== 'PASS').map((r) => `- \`${name}\`, ${ruleAt(root, r.id)}: ${clip(r.line)}`));
   if (nonPass.length) lines.push('### Checks that did not pass', '', ...nonPass, '');
 
   const missing = Object.entries(byFragment).flatMap(([name, d]) =>
-    (d.absent ? [] : d.missing).map((m) => `- \`${name}\`: ${m}`));
+    (d.absent ? [] : d.missing).map((m) => `- \`${name}\`: ${m}, ${ruleAt(root, m.replace(/\.[a-z]$/, ''))}`));
   if (missing.length) lines.push('### Rules with no result line', '', '_Each counts as undetermined: the domain skipped it, or wrote its line outside the grammar._', '', ...missing, '');
 
-  const unexplained = Object.entries(byFragment).flatMap(([name, d]) => d.unexplained.map((u) => `- \`${name}\`: ${u}`));
+  const unexplained = Object.entries(byFragment).flatMap(([name, d]) => d.unexplained.map((u) => `- \`${name}\`: ${u}, ${ruleAt(root, u.split(' ')[0])}`));
   if (unexplained.length) lines.push('### Open findings passed without a reason', '', '_Each counts as undetermined: a PASS on a rule an open ledger finding cites must name the finding and the `path:line` showing it no longer holds._', '', ...unexplained, '');
 
   const malformed = Object.entries(byFragment).flatMap(([name, d]) => [
@@ -617,8 +605,8 @@ function main(argv) {
     console.log(`${args._}: ${d.verdict}${d.doubts.length ? ` (${d.doubts.join('; ')})` : ''}`);
     for (const a of d.anomalies) console.log(`  anomaly: ${a}`);
     for (const line of d.looseInfo) console.log(`  anomaly: an INFO line off the grammar: ${clip(line, 200)}`);
-    for (const m of d.missing) console.log(`  no result line: ${m}`);
-    for (const u of d.unexplained) console.log(`  open finding passed without a reason: ${u}`);
+    for (const m of d.missing) console.log(`  no result line: ${m}, ${ruleAt('.', m.replace(/\.[a-z]$/, ''))}`);
+    for (const u of d.unexplained) console.log(`  open finding passed without a reason: ${u}, ${ruleAt('.', u.split(' ')[0])}`);
     for (const m of d.malformed) console.log(`  malformed (${m.why}): ${clip(m.line, 200)}`);
     process.exit(d.verdict === 'PASS' ? 0 : 1);
   }

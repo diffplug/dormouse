@@ -209,7 +209,10 @@ export function isPairingCode(value: unknown): value is string {
 export interface PairingRequestV1 {
   /** The two digits the phone is displaying; the person types them on the Burrow. */
   readonly code: string;
-  /** The Client's own name for itself, shown in the approval modal. */
+  /**
+   * Pocket's name for itself, one of {@link PAIRING_DEVICE_LABELS}. The guard
+   * admits any bounded string; the Burrow keeps and shows only a member.
+   */
   readonly label: string;
   readonly presence: PresenceProofV1;
 }
@@ -218,6 +221,38 @@ export function isPairingRequestV1(value: unknown): value is PairingRequestV1 {
   if (!value || typeof value !== 'object') return false;
   const request = value as Record<string, unknown>;
   return isPairingCode(request.code) && bounded(request.label) && isPresenceProofV1(request.presence);
+}
+
+/**
+ * Every label Pocket sends at pairing, and the only ones a Burrow shows or
+ * records (`docs/specs/remote-security-model.md` -> "Pairing"). **The phone
+ * chooses both the digits and the label**, and the approval modal draws the
+ * label right above the input the digits go in, so free text there could tell
+ * the person which digits to type. A presence proof does not narrow who that
+ * is: redeeming a setup QR registers the redeemer's own passkey on the
+ * account. Frozen, so no importer can widen it.
+ */
+export const PAIRING_DEVICE_LABELS = Object.freeze([
+  'Dormouse Pocket (Home Screen)',
+  'Dormouse Pocket (browser)',
+] as const);
+
+export type PairingDeviceLabel = (typeof PAIRING_DEVICE_LABELS)[number];
+
+/** What a Burrow shows and records for any pairing label outside {@link PAIRING_DEVICE_LABELS}. */
+export const PAIRING_UNKNOWN_DEVICE_LABEL = 'Unknown device';
+
+/**
+ * `label` when it is exactly a member of {@link PAIRING_DEVICE_LABELS}, else
+ * {@link PAIRING_UNKNOWN_DEVICE_LABEL}. Applied on receipt and again wherever an
+ * ACL record's label is shown, since a record off disk may hold anything.
+ */
+export function knownPairingDeviceLabel(
+  label: unknown,
+): PairingDeviceLabel | typeof PAIRING_UNKNOWN_DEVICE_LABEL {
+  return includesCode(PAIRING_DEVICE_LABELS, label)
+    ? (label as PairingDeviceLabel)
+    : PAIRING_UNKNOWN_DEVICE_LABEL;
 }
 
 /**

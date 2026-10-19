@@ -1,5 +1,5 @@
 Domain: hosted
-Rule: `docs/specs/security-hosted.md` -> "Relay boundary" #4 — or removal reaches another account's Burrow
+Rule: S100 — or removal reaches another account's Burrow
 Expect: hosted/server/relay-account.ts
 Source: synthetic; the Burrow removal deletes by Burrow id alone, without the signed-in account's scope
 

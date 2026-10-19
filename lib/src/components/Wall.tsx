@@ -2357,8 +2357,8 @@ export function Wall({
   // Engine-directed writes for the pane props contract (docs/specs/tiling-engine.md
   // → "Pane props contract"): route a pane/header's title / params writes to the
   // engine's per-leaf metadata. Memoized so the sink handed to panels via context
-  // keeps a stable identity. The render-swap and binary-refresh param writes in
-  // Wall.tsx above route through the same engine.
+  // keeps a stable identity. The render-swap param writes in Wall.tsx above
+  // route through the same engine.
   const paneWrite = useMemo<PaneWriteActions>(() => ({
     setTitle: (id, title) => lath.store.setTitle(id, title),
     updateParams: (id, patch) => lath.store.updateParams(id, patch),

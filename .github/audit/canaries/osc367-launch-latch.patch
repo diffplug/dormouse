@@ -1,5 +1,5 @@
 Domain: local
-Rule: `docs/specs/security-local.md` -> "Terminal output" #9 — from output outside the run the host launched in that PTY
+Rule: S132 — from output outside the run the host launched in that PTY
 Expect: lib/src/lib/tool-launch-latch.ts
 Source: reverses #1061 (a later start reporting the launched command line was read as the launched run)
 

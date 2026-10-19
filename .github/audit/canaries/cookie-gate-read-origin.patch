@@ -1,5 +1,5 @@
 Domain: hosted
-Rule: `docs/specs/security-hosted.md` -> "Origin boundary" #2 — a sibling's `same-site` are refused
+Rule: S78 — a sibling's `same-site` are refused
 Expect: hosted/server/account-gate.ts
 Source: reverses part of #1104 (the cookie read gate admitted a sibling page's `same-site` read that presents no `Origin`)
 
