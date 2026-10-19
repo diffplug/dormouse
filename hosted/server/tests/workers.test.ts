@@ -895,6 +895,7 @@ test("managed voice: only the verified admin mints, speaks, and revokes", async 
   expect(listed.id).toBe(id);
   expect(listed.lastUsedAt).not.toBeNull();
   expect(Object.keys(listed).sort()).toEqual([
+    "computer",
     "createdAt",
     "id",
     "lastUsedAt",
@@ -976,6 +977,33 @@ test("managed voice: only the verified admin mints, speaks, and revokes", async 
     (await admin.tokens("DELETE", "/00000000-0000-4000-8000-000000000000"))
       .status,
   ).toBe(404);
+
+  // A computer's token is listed as one, and only removing the computer revokes it.
+  const computer = "CCCCCCCCCCCCCCCCCCCCCC";
+  const adminId = (await admin.session())!.user.id;
+  await queryDatabase(
+    f.database.url,
+    `INSERT INTO dormouse_relay_burrows ("burrowId", "userId", "tokenHash") VALUES ($1, $2, 'x')`,
+    [computer, adminId],
+  );
+  const [{ id: computerTokenId }] = await queryDatabase<{ id: string }>(
+    f.database.url,
+    `INSERT INTO dormouse_voice_tokens ("userId", hash, "burrowId") VALUES ($1, $2, $3) RETURNING id`,
+    [adminId, digest("dmv_" + "C".repeat(43)), computer],
+  );
+  const voiceListed = (await (await admin.tokens("GET")).json()) as {
+    tokens: { id: string; computer: boolean }[];
+  };
+  expect(voiceListed.tokens.find((t) => t.id === computerTokenId)?.computer).toBe(true);
+  expect(voiceListed.tokens.find((t) => t.id === id)?.computer).toBe(false);
+  expect((await admin.tokens("DELETE", "/" + computerTokenId)).status).toBe(409);
+  expect(
+    await queryDatabase(
+      f.database.url,
+      `SELECT "revokedAt" FROM dormouse_voice_tokens WHERE id = $1`,
+      [computerTokenId],
+    ),
+  ).toEqual([{ revokedAt: null }]);
 
   // The admin address counts only while verified, rechecked on every request.
   const second = await admin.mint();

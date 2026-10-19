@@ -237,7 +237,7 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
       const { token, id, createdAt } = await createVoiceToken();
       setMinted(token);
       setVoiceTokens((tokens) => [
-        { id, createdAt, lastUsedAt: null, revokedAt: null },
+        { id, createdAt, lastUsedAt: null, revokedAt: null, computer: false },
         ...(tokens ?? []),
       ]);
     });
@@ -494,6 +494,8 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
                         </span>
                         {token.revokedAt ? (
                           <span className="status">Revoked</span>
+                        ) : token.computer ? (
+                          <span className="status">A computer’s</span>
                         ) : (
                           <button
                             disabled={!!busy}

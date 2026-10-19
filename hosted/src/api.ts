@@ -79,6 +79,8 @@ export interface VoiceToken {
   /** Stamped by each speak. */
   lastUsedAt: string | null;
   revokedAt: string | null;
+  /** Minted by a computer's enrollment, and revoked only by removing that computer. */
+  computer: boolean;
 }
 async function voice(method: string, path = ""): Promise<Response> {
   return request(

@@ -79,14 +79,14 @@ An enrolled desktop exchanges its voice token for ElevenLabs speech in a voice o
 |---|---|---|
 | `GET /api/voice/tokens` | login cookie, same-origin fetch | 200 `{ tokens }` |
 | `POST /api/voice/tokens` | login cookie, exact `Origin` | 201 `{ id, token, createdAt }` |
-| `DELETE /api/voice/tokens/:id` | login cookie, exact `Origin` | 204; 404 for another account's or an unknown ID |
+| `DELETE /api/voice/tokens/:id` | login cookie, exact `Origin` | 204; 404 for another account's or an unknown ID; 409 for an enrollment's |
 | `POST /api/voice/speak` | `Authorization: Bearer dmv_…`, JSON `{ text, voiceId }` | 200 `audio/mpeg`, `Cache-Control: no-store` |
 
 Errors are JSON `{ message }`. Cookie routes answer 401 without a login and 403 for an account not entitled ("Entitlement").
 
 **Must store only a token's SHA-256.** A token is `dmv_` plus base64url of 32 random bytes, returned only by the mint response: the account's `POST`, or the poll that redeems an enrollment. Revocation is permanent.
 
-**Must mint an enrollment's token in the statement that redeems it**, owned by the approver and naming the Burrow it enrolled (`hosted/server/dormouse-migrations/007_voice_token_burrow.sql`), so removing that computer from the account deletes its token, and the Burrow cap bounds them. The relay's role may insert those columns and nothing else of voice.
+**Must mint an enrollment's token in the statement that redeems it**, owned by the approver and naming the Burrow it enrolled (`hosted/server/dormouse-migrations/007_voice_token_burrow.sql`), so removing that computer from the account deletes its token, and the Burrow cap bounds them. **Never revoke an enrollment's token alone**: re-enrolling under a new `burrowId` would unpair its phones. The relay's role may insert those columns and nothing else of voice.
 
 **Speak must answer in this order:**
 
