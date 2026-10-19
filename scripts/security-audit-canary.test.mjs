@@ -213,7 +213,7 @@ const seedOf = (id, domain, expect, rule = null, severity = 'WARNING') => ({ id,
 test('a seed is caught only by a FAIL or a BLOCKER or WARNING citing its file, and its rule ID when it has one', () => {
   const seeds = [
     seedOf('rule-by-fail', 'local', ['src/a.ts'], RULE),
-    seedOf('rule-in-summary-alone', 'local', ['src/b.ts'], RULE),
+    seedOf('rule-in-summary', 'local', ['src/b.ts'], RULE),
     seedOf('rule-wrong-rule', 'local', ['src/c.ts'], RULE),
     seedOf('rule-by-root-cause', 'local', ['src/g.ts'], RULE),
     seedOf('class-by-blocker', 'hosted', ['src/d.ts']),
@@ -223,7 +223,7 @@ test('a seed is caught only by a FAIL or a BLOCKER or WARNING citing its file, a
   const card = score(seeds, {
     [fragmentOf.local]: fragment([
       '- FAIL: S132.b — clause: src/a.ts:3',
-      // A rule named in the summary, its root cause a symbol: not the rule's finding.
+      // A rule named in the summary, its root cause a symbol: still the rule's finding.
       ...warning('WARNING', 'src/b.ts:4', ' (S132)'),
       '- FAIL: S131 — clause: src/c.ts:5',
       ...warning('WARNING', 'src/c.ts:5'),
@@ -234,12 +234,12 @@ test('a seed is caught only by a FAIL or a BLOCKER or WARNING citing its file, a
     [fragmentOf.hosted]: fragment([...warning('BLOCKER', 'src/d.ts:1'), '- INFO: `src/e.ts:1` `cause` — not a catch', ...warning('WARNING', 'src/z.ts:1'), '- INFO: `src/y.ts:1` `cause` — not counted']),
     [fragmentOf['supply-chain']]: fragment(['A paragraph naming src/f.ts is prose, not a catch.'], { finished: false }),
   });
-  assert.deepEqual(card.seeds.filter((s) => s.caught).map((s) => s.id), ['rule-by-fail', 'rule-by-root-cause', 'class-by-blocker']);
-  assert.deepEqual([card.seeded, card.caught], [7, 3]);
+  assert.deepEqual(card.seeds.filter((s) => s.caught).map((s) => s.id), ['rule-by-fail', 'rule-in-summary', 'rule-by-root-cause', 'class-by-blocker']);
+  assert.deepEqual([card.seeded, card.caught], [7, 4]);
   assert.deepEqual(card.domains, {
     'supply-chain': { seeded: 1, caught: 0 },
     remote: { seeded: 0, caught: 0 },
-    local: { seeded: 4, caught: 2 },
+    local: { seeded: 4, caught: 3 },
     hosted: { seeded: 2, caught: 1 },
   });
   // The one line citing no file a seed touched.

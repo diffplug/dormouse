@@ -46,7 +46,7 @@ export const CANARY_DOMAINS = ['supply-chain', 'remote', 'local', 'hosted'];
 const COMMIT_MESSAGE = 'Audited tree';
 const HEADER_RE = /^(Domain|Rule|Class|Expect|Source|Severity): (\S.*)$/;
 const RULE_RE = new RegExp(`^(${RULE_ID}) — (\\S.*)$`);
-const ID_WORD_RE = new RegExp(`\\b(${RULE_ID})\\b`);
+const ID_WORDS_RE = new RegExp(`\\b(${RULE_ID})\\b`, 'g');
 const SEVERITY_RE = new RegExp(`^(${Object.keys(SEVERITY_RANK).join('|')}) — \\S`);
 /** The least finding severity that catches a seed whose header names none. */
 const DEFAULT_SEVERITY = 'WARNING';
@@ -145,17 +145,24 @@ export function seed({ root = '.', key, count, stash }) {
 
 // --- Score -------------------------------------------------------------------
 
+/** Every rule ID a finding's text names, as a word. */
+const idsIn = (text) => [...text.matchAll(ID_WORDS_RE)].map((m) => m[1]);
+
 /**
  * The lines that can catch a seed: each `FAIL` result and each finding, an
  * INFO off the grammar included, with the text a citation is looked for in
- * and the rule ID it names: a result's, or a finding's root cause.
+ * and the rule IDs it names: a result's own, or every ID a finding names, in
+ * its root cause or anywhere in its text, since a finding rooted at a symbol
+ * may still cite the rule it breaks.
  */
 function candidates(name, p) {
   return [
-    ...p.results.filter((r) => r.status === 'FAIL').map((r) => ({ fragment: name, kind: 'FAIL', text: r.line, rule: r.id })),
-    ...p.findings.map((f) => ({ fragment: name, kind: f.severity, text: f.block.join('\n'), rule: causeRule(f.cause) })),
-    // Off the grammar, an INFO has no root-cause field: the first ID it names stands in.
-    ...p.looseInfo.map((line) => ({ fragment: name, kind: 'INFO', text: line, rule: line.match(ID_WORD_RE)?.[1] ?? null })),
+    ...p.results.filter((r) => r.status === 'FAIL').map((r) => ({ fragment: name, kind: 'FAIL', text: r.line, rules: [r.id] })),
+    ...p.findings.map((f) => {
+      const text = f.block.join('\n');
+      return { fragment: name, kind: f.severity, text, rules: [causeRule(f.cause), ...idsIn(text)].filter(Boolean) };
+    }),
+    ...p.looseInfo.map((line) => ({ fragment: name, kind: 'INFO', text: line, rules: idsIn(line) })),
   ];
 }
 
@@ -165,13 +172,12 @@ const severeEnough = (line, severity) => line.kind === 'FAIL' || SEVERITY_RANK[l
 /**
  * Whether one line catches one seed: it is severe enough, it cites an expected
  * file, and for a `FAIL IF` seed it names the seed's rule ID — a `FAIL` result
- * on that rule, or a finding whose root cause is that rule, as the preamble
- * spells one (`S42`).
+ * on that rule, or a finding naming it as its root cause (`S42`) or in its text.
  */
 function catches(line, s) {
   if (!severeEnough(line, s.severity)) return false;
   if (!s.expect.some((file) => line.text.includes(file))) return false;
-  return !s.rule || line.rule === s.rule.id;
+  return !s.rule || line.rules.includes(s.rule.id);
 }
 
 /**

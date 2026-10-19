@@ -197,7 +197,7 @@ Source of truth: `Verify AUDIT_PAT is provisioned` in `.github/workflows/securit
 
 1. `seed` applies `CANARY_SEEDS` seeds from `.github/audit/canaries/`, dealt round-robin across the code domains; then it deletes the pool and replaces the history with one root commit, so nothing in the checkout tells a seed from the code around it (rationale).
 2. The audit's agent runs the code domains over that checkout: `supply-chain`, `remote`, `local`, and `hosted`, handed an empty open-findings list. `ci-and-secrets` reads live GitHub state, which a checkout cannot seed, and the ledger is never read.
-3. `score` counts a seed caught only when a `FAIL` result, or a finding at or above the seed's catch severity, cites one of its `Expect:` files and, for a seed naming a `FAIL IF`, that rule's ID: the result's, or the finding's root cause.
+3. `score` counts a seed caught only when a `FAIL` result, or a finding at or above the seed's catch severity, cites one of its `Expect:` files and, for a seed naming a `FAIL IF`, that rule's ID: the result's, or one the finding names as its root cause or anywhere in its text.
 
 - **A seed re-introduces a vulnerability already fixed on `main`, or a synthetic one, and deletes the test and lint cases that would fail on it**, so the seeded tree passes CI as a regression on `main` has (rationale). Its header is factual and names no finding under embargo.
 - **A seed's catch severity is WARNING unless its `Severity:` header names another**, then ` — ` and why (rationale).
