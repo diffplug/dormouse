@@ -1187,7 +1187,7 @@
       "author": "Petyo Ivanov",
       "homepage": "https://mdxeditor.dev/",
       "versions": [
-        "4.3.2"
+        "4.3.3"
       ]
     },
     {
@@ -3174,7 +3174,7 @@
       "author": "Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)",
       "homepage": "https://github.com/micromark/micromark-extension-gfm-table",
       "versions": [
-        "2.1.1"
+        "2.1.2"
       ]
     },
     {
