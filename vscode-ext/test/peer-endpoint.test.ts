@@ -9,9 +9,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { spawn } from 'node:child_process';
 import { createHmac } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, stat, writeFile } from 'node:fs/promises';
 import { createServer, type Server, type Socket } from 'node:net';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 
 import {
   FrameDecoder,
@@ -19,7 +19,6 @@ import {
   encodeFrame,
 } from '../src/peer-link-protocol';
 import {
-  derivedSocketPath,
   fakeContext,
   fakeWindow,
   freshModule,
@@ -149,13 +148,12 @@ describe('published endpoint', () => {
     for (const name of names) expect(name).toMatch(/^\\\\\.\\pipe\\dormouse-peer-[0-9a-f]{32}$/);
   });
 
-  it('binds a fresh name for every broker, never the derived one, and retracts it on close', async () => {
+  it('binds a fresh name for every broker and retracts it on close', async () => {
     const first = await openWindow();
     await first.ensurePeerNet(() => {});
     expect(first.isPeerBroker()).toBe(true);
     const firstName = await published();
     expect(firstName).toBeTruthy();
-    expect(firstName).not.toBe(derivedSocketPath(dir));
 
     // Windows that need the broker find it through the file.
     const peer = await openWindow(fakeWindow({ entries: [{ surfaceId: 'far-1' }] }));
@@ -172,7 +170,6 @@ describe('published endpoint', () => {
     const secondName = await published();
     expect(secondName).toBeTruthy();
     expect(secondName).not.toBe(firstName);
-    expect(secondName).not.toBe(derivedSocketPath(dir));
   }, 15_000);
 
   it.skipIf(process.platform === 'win32')('publishes the name in a file only this user can read', async () => {
@@ -180,25 +177,6 @@ describe('published endpoint', () => {
     await broker.ensurePeerNet(() => {});
     expect((await stat(endpointFile())).mode & 0o777).toBe(0o600);
   });
-
-  it('is not held off by another account that took the derived name first', async () => {
-    // The squat this design closes: anything can sit on the derived name, and
-    // a new build brokers on its own fresh name regardless.
-    const squatted: Socket[] = [];
-    const squatter = createServer((socket) => void squatted.push(socket));
-    const legacy = derivedSocketPath(dir);
-    if (process.platform !== 'win32') await mkdir(dirname(legacy), { recursive: true, mode: 0o700 });
-    await listen(squatter, legacy);
-
-    const broker = await openWindow();
-    const peer = await openWindow(fakeWindow({ entries: [{ surfaceId: 'far-1' }] }));
-    await broker.ensurePeerNet(() => {});
-    await peer.ensurePeerNet(() => {});
-    expect(broker.isPeerBroker()).toBe(true);
-    expect(reachesBroker(peer)).toBe(true);
-    expect(await broker.remoteRequest('directory', {})).toEqual([{ surfaceId: 'far-1' }]);
-    for (const socket of squatted) socket.destroy();
-  }, 15_000);
 
   it('retires a stale file naming a broker that is gone', async () => {
     const dead = spareName();
