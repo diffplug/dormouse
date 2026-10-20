@@ -188,7 +188,7 @@ jobs:
           exit 1
 
       # Includes the library's pretest builds and typecheck on a fresh checkout.
-      # Leave Vitest's worker settings unchanged for this first timing comparison.
+      # The library suite runs with Vitest's default worker settings.
       - name: Test library
         timeout-minutes: 20
         run: pnpm test:lib
