@@ -1425,7 +1425,8 @@ async function attemptPublished(legacyPath: string, token: string): Promise<bool
   const published = await readEndpoint();
   if (published !== null) {
     const record = parseEndpoint(published);
-    if ((await joinBroker(record, token)) === 'connected') return true;
+    const first = await joinBroker(record, token);
+    if (first === 'connected') return true;
     // Never retire on the first failure, for the reason unix never unlinks on
     // the first refusal: every client of a dead broker gets here at once, and
     // one of them may have published a replacement while we waited.
@@ -1436,7 +1437,7 @@ async function attemptPublished(legacyPath: string, token: string): Promise<bool
     }
     const outcome = await joinBroker(record, token);
     if (outcome === 'connected') return true;
-    if (outcome === 'silent' && record && processAlive(record.pid)) return false;
+    if (first === 'silent' && outcome === 'silent' && record && processAlive(record.pid)) return false;
     if (!(await retractEndpoint(published))) {
       log.error(`[peer-link] could not remove the stale peer endpoint ${endpointPath()}`);
       return false;
