@@ -22,6 +22,9 @@ import { getWebCrypto, type WebCryptoLike } from './webcrypto.js';
 /** One domain per signed statement, like every other in this package. */
 export const PRESENCE_DOMAIN = 'dormouse/presence/v1';
 
+/** The domain {@link signinChallenge} hashes under: never a presence statement. */
+export const SIGNIN_DOMAIN = 'dormouse/signin/v1';
+
 /**
  * The longest any single binding field may be. A type check alone bounds
  * nothing — a megabyte string is a `string` — and every real field here is a
@@ -139,4 +142,32 @@ function bindingFields(binding: PresenceBinding): Uint8Array[] {
     fromBase64Url(binding.handshakeHash),
     utf8Encode(binding.passkeyCredentialId),
   ];
+}
+
+/**
+ * The WebAuthn challenge a sign-in assertion signs:
+ * `SHA-256(lengthPrefixedConcat(SIGNIN_DOMAIN, relayChallenge))`, base64url,
+ * over the bytes `POST /api/signin/begin`'s challenge encodes.
+ *
+ * **Sign-in never signs a value the Relay chose.** Both kinds of assertion come
+ * from the same passkey under the same RP ID, and the verifier reads only the
+ * challenge `clientDataJSON` names, so a sign-in that signed `begin`'s bytes as
+ * given would let a Relay answer `begin` with a {@link presenceChallenge} for a
+ * connection of its own and present the user's sign-in tap to a Burrow as
+ * presence. Hashed under its own domain, a sign-in challenge equals a presence
+ * challenge only on a SHA-256 collision.
+ *
+ * **Throws on a challenge that is not base64url or is unbounded**; the Relay
+ * treats a throw as a malformed `finish`.
+ */
+export async function signinChallenge(
+  relayChallenge: string,
+  crypto: WebCryptoLike = getWebCrypto(),
+): Promise<string> {
+  if (!bounded(relayChallenge)) throw new Error('sign-in challenge is missing or over the field limit');
+  const digest = await crypto.subtle.digest(
+    'SHA-256',
+    lengthPrefixedConcat([utf8Encode(SIGNIN_DOMAIN), fromBase64Url(relayChallenge)]),
+  );
+  return toBase64Url(new Uint8Array(digest));
 }

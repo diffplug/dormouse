@@ -34,10 +34,12 @@ import {
   presenceChallenge,
   pushEndpointFingerprint,
   randomBase64Url,
+  signinChallenge,
   toBase64Url,
   type PasskeyAssertion,
   type PresenceBinding,
   type ReauthBeginResponse,
+  type SigninFinishRequest,
   type TerminalDataEvent,
 } from 'remote-lib-common';
 
@@ -2110,6 +2112,99 @@ describe('the presence proof', () => {
 
     await pairing;
     expect(phone.prompts.map((prompt) => prompt.allowCredentials)).toEqual([[harness.authenticator.credentialId]]);
+  });
+
+  it('signs only a sign-in challenge it derived, so a sign-in tap is never presence for another connection', async () => {
+    let burrowClock = Date.now();
+    const harness = await makeE2eHarness({ burrowNow: () => burrowClock });
+    const { burrowId, relay, noiseStatic, authenticator } = harness;
+    await harness.pairAndApprove(await harness.mintInvitation());
+    // Past the window the pairing opened, so a connection needs a proof.
+    burrowClock += PRESENCE_WINDOW_MAX_MS + 1;
+
+    // A connection on this phone's own paired static, which this phone never opened.
+    const record = harness.knownBurrows.records.get(burrowId)!;
+    const clientStatic = {
+      privateKey: record.clientStaticKeyPair.privateKey,
+      publicKey: fromBase64Url(record.clientStaticKeyPair.publicKeyRaw),
+    };
+    const open = (clientId: string, connectionId: string) =>
+      openConnectionSession({
+        socket: relay.burrowSocket,
+        burrowId,
+        clientId,
+        connectionId,
+        clientStatic,
+        burrowStaticPublicKey: noiseStatic.publicKey,
+      });
+    const other = { clientId: testRoutingId(), connectionId: testRoutingId() };
+    const otherSession = await open(other.clientId, other.connectionId);
+    const otherBinding: PresenceBinding = {
+      kind: 'connection',
+      burrowId,
+      connectionId: other.connectionId,
+      burrowChallenge: otherSession.burrowChallenge,
+      handshakeHash: toBase64Url(otherSession.session.handshakeHash),
+      passkeyCredentialId: authenticator.credentialId,
+    };
+    const otherNonce = randomBase64Url(32);
+    const relayChosen = await presenceChallenge(otherBinding, otherNonce);
+
+    // A Relay that answers sign-in's `begin` with that connection's presence challenge.
+    const prompts: string[] = [];
+    const finishes: SigninFinishRequest[] = [];
+    const fetch = (async (url: string, init?: RequestInit) => {
+      const path = new URL(url, 'http://test').pathname;
+      if (path === '/api/signin/begin') {
+        return { ok: true, status: 200, json: async () => ({ challenge: relayChosen, rpId: RP_ID }) } as Response;
+      }
+      if (path === '/api/signin/finish') finishes.push(JSON.parse(init!.body as string) as SigninFinishRequest);
+      return harness.fetch(url, init);
+    }) as typeof globalThis.fetch;
+    const phone = new PocketClient({
+      wsBase: 'ws://test',
+      fetch,
+      webauthn: {
+        ...fakeWebAuthn,
+        getAssertion: (challenge) => {
+          prompts.push(challenge);
+          return harness.authenticator.assert(challenge, ORIGIN);
+        },
+      },
+      createWebSocket: () => relay.openClientSocket(),
+      knownBurrows: memoryKnownBurrows(),
+      pendingDeletions: memoryPendingDeletions(),
+      storage: memoryStorage(),
+    });
+    await phone.signin();
+    expect(prompts).toEqual([await signinChallenge(relayChosen)]);
+    expect(finishes.map((finish) => finish.challenge)).toEqual([relayChosen]);
+
+    // That connection presents the sign-in assertion as its presence proof: the
+    // Burrow admits it to nothing and opens no window for the static.
+    sendE2eFrame(relay.burrowSocket, {
+      clientId: other.clientId,
+      burrowId,
+      kind: 'connection',
+      id: other.connectionId,
+      step: 'transport',
+      ct: toBase64Url(
+        otherSession.session.sendControl({
+          presence: {
+            binding: otherBinding,
+            relayNonce: otherNonce,
+            accountId: ACCOUNT_ID,
+            passkeyCredentialId: authenticator.credentialId,
+            passkeyPublicKey: authenticator.publicKey,
+            assertion: finishes[0]!.assertion,
+          },
+        }),
+      ),
+    });
+    expect(
+      await readOutcome(relay.burrowSocket, otherSession.session, 'connection', other.connectionId),
+    ).toMatchObject({ ok: false });
+    expect((await open(testRoutingId(), testRoutingId())).offer).toBe('none');
   });
 });
 

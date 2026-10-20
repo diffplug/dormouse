@@ -20,6 +20,7 @@ import {
   normalizeChallenge,
   pocketContentSecurityPolicy,
   reducePasskeyLabel,
+  signinChallenge,
   toBase64Url,
   utf8Encode,
 } from '../dist/index.js';
@@ -184,7 +185,9 @@ test('checkRegistration runs its checks in order, redeeming the challenge before
 test('verifySigninAssertion spends the challenge before verifying, and verifies under the policy', async () => {
   const authenticator = await SimAuthenticator.create({ rpId: RP_ID, userVerification: false });
   const challenge = randomSecret();
-  const assertion = await authenticator.assert({ challenge, origin: ORIGIN });
+  const signed = await signinChallenge(challenge);
+  const assertion = await authenticator.assert({ challenge: signed, origin: ORIGIN });
+  const request = { challenge, assertion };
   const passkey = { publicKey: authenticator.publicKey };
   const steps = (live, policy = {}) => {
     const log = [];
@@ -196,32 +199,67 @@ test('verifySigninAssertion spends the challenge before verifying, and verifies 
     };
   };
   const ok = steps(true);
-  assert.deepEqual(await verifySigninAssertion(assertion, ok), { ok: true, passkey });
+  assert.deepEqual(await verifySigninAssertion(request, ok), { ok: true, passkey });
   assert.deepEqual(ok.log, [`find ${authenticator.credentialId}`, `consume ${challenge}`]);
 
   const refused = (status, error) => ({ ok: false, status, error });
   assert.deepEqual(await verifySigninAssertion(undefined, steps(true)), refused(400, 'malformed assertion'));
   assert.deepEqual(
-    await verifySigninAssertion({ ...assertion, credentialId: 'other' }, steps(true)),
+    await verifySigninAssertion({ challenge, assertion: { ...assertion, credentialId: 'other' } }, steps(true)),
     refused(404, 'unknown credential'),
   );
   assert.deepEqual(
-    await verifySigninAssertion({ ...assertion, clientDataJSON: '***' }, steps(true)),
+    await verifySigninAssertion({ challenge, assertion: { ...assertion, clientDataJSON: '***' } }, steps(true)),
     refused(400, 'malformed clientDataJSON'),
   );
-  assert.deepEqual(await verifySigninAssertion(assertion, steps(false)), refused(400, 'unrecognized or expired challenge'));
+  assert.deepEqual(await verifySigninAssertion(request, steps(false)), refused(400, 'unrecognized or expired challenge'));
+  // A finish that names no `begin` challenge spends nothing.
+  for (const missing of [undefined, 'not base64url!', 'A'.repeat(1028)]) {
+    const none = steps(true);
+    assert.deepEqual(
+      await verifySigninAssertion({ challenge: missing, assertion }, none),
+      refused(400, 'unrecognized or expired challenge'),
+    );
+    assert.deepEqual(none.log, [`find ${authenticator.credentialId}`]);
+  }
   // A forged signature is refused only after its challenge was spent: it never replays.
   const forged = await authenticator.assert({
-    challenge,
+    challenge: signed,
     origin: ORIGIN,
     tamper: { signWith: await SimAuthenticator.foreignSigningKey() },
   });
   const spent = steps(true);
-  assert.deepEqual(await verifySigninAssertion(forged, spent), refused(401, 'assertion rejected: signature-invalid'));
+  assert.deepEqual(
+    await verifySigninAssertion({ challenge, assertion: forged }, spent),
+    refused(401, 'assertion rejected: signature-invalid'),
+  );
   assert.equal(spent.log.at(-1), `consume ${challenge}`);
   // The UV policy reaches the verifier.
   assert.deepEqual(
-    await verifySigninAssertion(assertion, steps(true, { requireUserVerification: true })),
+    await verifySigninAssertion(request, steps(true, { requireUserVerification: true })),
     refused(401, 'assertion rejected: user-verification-missing'),
   );
+});
+
+test('verifySigninAssertion accepts only an assertion over the derived sign-in challenge', async () => {
+  const authenticator = await SimAuthenticator.create({ rpId: RP_ID, userVerification: false });
+  const challenge = randomSecret();
+  const passkey = { publicKey: authenticator.publicKey };
+  const steps = () => ({
+    findPasskey: async () => passkey,
+    consumeChallenge: () => true,
+    policy: { origin: ORIGIN, rpId: RP_ID },
+  });
+  const refusal = { ok: false, status: 400, error: 'unrecognized or expired challenge' };
+  // Signed over `begin`'s own bytes: what a presence assertion over a
+  // Relay-chosen value would look like.
+  const raw = await authenticator.assert({ challenge, origin: ORIGIN });
+  assert.deepEqual(await verifySigninAssertion({ challenge, assertion: raw }, steps()), refusal);
+  // Signed over another challenge's derivation.
+  const other = await authenticator.assert({ challenge: await signinChallenge(randomSecret()), origin: ORIGIN });
+  assert.deepEqual(await verifySigninAssertion({ challenge, assertion: other }, steps()), refusal);
+  // A padded serialization of the derived challenge still signs in.
+  const signed = await signinChallenge(challenge);
+  const padded = await authenticator.assert({ challenge: signed, origin: ORIGIN, tamper: { challenge: `${signed}=` } });
+  assert.deepEqual(await verifySigninAssertion({ challenge, assertion: padded }, steps()), { ok: true, passkey });
 });

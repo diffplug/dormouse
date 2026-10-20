@@ -23,6 +23,7 @@ import {
   type ConnectionPolicy,
   type PasskeyAssertion,
 } from '../security/passkey.js';
+import { signinChallenge } from '../security/presence.js';
 import { boundedPushText } from '../security/push.js';
 import { MAX_SEALED_PUSH_LENGTH, isSealedPushV1 } from '../security/push-seal.js';
 import { getWebCrypto } from '../security/webcrypto.js';
@@ -361,13 +362,18 @@ export function assertionChallenge(assertion: { readonly clientDataJSON?: unknow
 /**
  * `POST /api/signin/finish`'s verifier, in order: the assertion's shape (400),
  * its credential's stored passkey through `findPasskey` (404), the challenge
- * its `clientDataJSON` names (400), that challenge spent through
- * `consumeChallenge` BEFORE verifying, so a captured assertion never replays
- * even if verification succeeds (400), and `verifyPasskeyAssertion` against
- * the stored key under `policy`, the same UV policy re-auth enforces (401).
+ * its `clientDataJSON` names (400), the `begin` challenge the request names
+ * spent through `consumeChallenge` BEFORE verifying, so a captured assertion
+ * never replays even if verification succeeds (400), the signed challenge
+ * being {@link signinChallenge} of that one and nothing else (400), and
+ * `verifyPasskeyAssertion` against the stored key under `policy`, the same UV
+ * policy re-auth enforces (401).
+ *
+ * The signed value is derived, never `begin`'s bytes, so no sign-in assertion
+ * is ever a presence assertion (`signinChallenge`).
  */
 export async function verifySigninAssertion<Passkey extends { readonly publicKey: string }>(
-  assertion: unknown,
+  request: unknown,
   {
     findPasskey,
     consumeChallenge,
@@ -378,18 +384,27 @@ export async function verifySigninAssertion<Passkey extends { readonly publicKey
     policy: ConnectionPolicy;
   },
 ): Promise<{ readonly ok: true; readonly passkey: Passkey } | RelayRefusal> {
-  const candidate = assertion as Partial<PasskeyAssertion> | null | undefined;
+  const body = (request && typeof request === 'object' ? request : {}) as {
+    challenge?: unknown;
+    assertion?: unknown;
+  };
+  const candidate = body.assertion as Partial<PasskeyAssertion> | null | undefined;
   if (!candidate || typeof candidate !== 'object' || typeof candidate.credentialId !== 'string') {
     return refuse(400, MALFORMED_ASSERTION_ERROR);
   }
   const passkey = await findPasskey(candidate.credentialId);
   if (!passkey) return refuse(404, UNKNOWN_CREDENTIAL_ERROR);
-  const challenge = assertionChallenge(candidate);
-  if (challenge === null) return refuse(400, MALFORMED_CLIENT_DATA_ERROR);
-  if (!(await consumeChallenge(challenge))) return refuse(400, UNKNOWN_CHALLENGE_ERROR);
+  const signed = assertionChallenge(candidate);
+  if (signed === null) return refuse(400, MALFORMED_CLIENT_DATA_ERROR);
+  const issued = normalizeChallenge(body.challenge);
+  const expected = issued === null ? null : await signinChallenge(issued).catch(() => null);
+  if (issued === null || expected === null || !(await consumeChallenge(issued))) {
+    return refuse(400, UNKNOWN_CHALLENGE_ERROR);
+  }
+  if (signed !== expected) return refuse(400, UNKNOWN_CHALLENGE_ERROR);
   const result = await verifyPasskeyAssertion(candidate as PasskeyAssertion, passkey.publicKey, {
     ...policy,
-    challenge,
+    challenge: expected,
   });
   if (!result.ok) return refuse(401, assertionRejectedError(result.reason));
   return { ok: true, passkey };

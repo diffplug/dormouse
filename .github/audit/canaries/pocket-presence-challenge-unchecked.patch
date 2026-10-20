@@ -4,18 +4,10 @@ Expect: lib/src/remote/client/pocket-client.ts
 Source: reverses part of #1223 (Pocket signed the challenge the Relay's `begin` answered instead of deriving its own)
 
 diff --git a/lib/src/remote/client/pocket-client.test.ts b/lib/src/remote/client/pocket-client.test.ts
-index bb9c28ef3..d560251d5 100644
+index 227b0f9..a1ced6f 100644
 --- a/lib/src/remote/client/pocket-client.test.ts
 +++ b/lib/src/remote/client/pocket-client.test.ts
-@@ -31,7 +31,6 @@ import {
-   generateNoiseKeyPair,
-   hashPasskeyPublicKey,
-   parsePairingInvitationUrl,
--  presenceChallenge,
-   pushEndpointFingerprint,
-   randomBase64Url,
-   toBase64Url,
-@@ -49,7 +48,6 @@ import {
+@@ -51,7 +51,6 @@ import {
    BurrowIdentityMismatchError,
    PAIRING_DENIAL_MESSAGES,
    PASSKEY_UNAVAILABLE_MESSAGE,
@@ -23,24 +15,7 @@ index bb9c28ef3..d560251d5 100644
    PocketClient,
    SessionExpiredError,
    SessionSupersededError,
-@@ -73,15 +71,7 @@ import {
- } from '../direct/test-fake-peer';
- import type { DirectPeerLike } from '../direct/direct-peer';
- import type { RemoteTimer } from '../ws';
--import {
--  createTestAuthenticator,
--  openConnectionSession,
--  readOutcome,
--  sendE2eFrame,
--  settle,
--  testRoutingId,
--  type TestAuthenticator,
--} from '../test-e2e-client';
-+import { createTestAuthenticator, settle, type TestAuthenticator } from '../test-e2e-client';
- import { PasskeyAlreadyRegisteredError, type WebAuthnClient } from './webauthn';
- import {
-   ACCOUNT_ID,
-@@ -2003,99 +1993,6 @@ describe('the presence proof', () => {
+@@ -2005,99 +2004,6 @@ describe('the presence proof', () => {
      return { client, prompts, finished };
    }
  
@@ -141,7 +116,7 @@ index bb9c28ef3..d560251d5 100644
      const harness = await makeE2eHarness();
      const phone = await behindRelay(
 diff --git a/lib/src/remote/client/pocket-client.ts b/lib/src/remote/client/pocket-client.ts
-index 79f5c541b..e65c42a3d 100644
+index 33381cf..352a714 100644
 --- a/lib/src/remote/client/pocket-client.ts
 +++ b/lib/src/remote/client/pocket-client.ts
 @@ -38,7 +38,6 @@ import {
@@ -152,7 +127,7 @@ index 79f5c541b..e65c42a3d 100644
    pushEndpointFingerprint,
    pushSubscriptionDeletePath,
    randomBase64Url,
-@@ -354,14 +353,6 @@ export const CONNECTION_DENIAL_MESSAGES: Record<ConnectionDenialCode, string> =
+@@ -356,14 +355,6 @@ export const CONNECTION_DENIAL_MESSAGES: Record<ConnectionDenialCode, string> =
    'burrow-error': 'The computer could not finish the connection.',
  };
  
@@ -167,7 +142,7 @@ index 79f5c541b..e65c42a3d 100644
  /**
   * What a ceremony that simply never answered reports.
   *
-@@ -1160,12 +1151,6 @@ export class PocketClient {
+@@ -1170,12 +1161,6 @@ export class PocketClient {
     * authenticates no other pairing or connection; the Relay's `finish` proves
     * nothing to the Burrow, which recomputes the challenge and verifies the same
     * assertion itself.
@@ -180,7 +155,7 @@ index 79f5c541b..e65c42a3d 100644
     */
    async #provePresence(binding: PresenceBinding): Promise<PresenceProofV1> {
      const auth = this.#auth();
-@@ -1174,13 +1159,7 @@ export class PocketClient {
+@@ -1184,13 +1169,7 @@ export class PocketClient {
        { binding },
        auth,
      );
