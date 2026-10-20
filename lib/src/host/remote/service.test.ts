@@ -1305,7 +1305,7 @@ describe('pairing queue', () => {
 
   it('keeps a raised UV demand across a restart when the store could not save it', async () => {
     const socket = await running();
-    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     // A locked keychain or a full disk: the raise cannot be written.
     let saves = 0;
     const save = store.saveEnrollment;
@@ -1316,6 +1316,7 @@ describe('pairing queue', () => {
     socket.receive({ t: 'policy', requireUserVerification: true });
     await vi.waitFor(() => expect(saves).toBe(1));
     expect(store.enrollment!.requireUserVerification).toBeFalsy();
+    warn.mockRestore();
 
     // The store recovers; the Burrow restarts, and its Relay never repeats the demand.
     store.saveEnrollment = save;
