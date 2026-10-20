@@ -38,6 +38,7 @@ import {
   isPairingOutcomeV1,
   isRelayBearer,
   pairingInvitationPrologue,
+  presenceChallenge,
   pushEndpointFingerprint,
   pushSubscriptionDeletePath,
   randomBase64Url,
@@ -352,6 +353,14 @@ export const CONNECTION_DENIAL_MESSAGES: Record<ConnectionDenialCode, string> = 
   'burrow-busy': 'The computer is already handling as many phones as it can. Try again shortly.',
   'burrow-error': 'The computer could not finish the connection.',
 };
+
+/**
+ * Shown when the Relay's `begin` names a presence challenge other than the one
+ * this phone derives for its own ceremony. No prompt opened, so nothing was
+ * signed.
+ */
+export const PRESENCE_CHALLENGE_MISMATCH_MESSAGE =
+  'The Relay asked for a passkey check that does not match this request, so none was made. Try again.';
 
 /**
  * What a ceremony that simply never answered reports.
@@ -1151,6 +1160,12 @@ export class PocketClient {
    * authenticates no other pairing or connection; the Relay's `finish` proves
    * nothing to the Burrow, which recomputes the challenge and verifies the same
    * assertion itself.
+   *
+   * **The challenge and the credential are this phone's own, never the
+   * Relay's.** Pocket derives the challenge from the binding it sent and the
+   * Relay's nonce, and refuses before any prompt when `begin` answers a
+   * different one: that would be the user's tap vouching for a ceremony this
+   * phone is not in. The only credential offered is the one the binding names.
    */
   async #provePresence(binding: PresenceBinding): Promise<PresenceProofV1> {
     const auth = this.#auth();
@@ -1159,11 +1174,15 @@ export class PocketClient {
       { binding },
       auth,
     );
-    const assertion = await this.#webauthn.getAssertion(
-      begin.challenge,
-      begin.rpId,
-      begin.allowCredentials,
-    );
+    // A nonce `presenceChallenge` refuses — absent, unbounded, not base64url —
+    // is the same refusal as a mismatch.
+    const challenge = await presenceChallenge(binding, begin.relayNonce).catch(() => null);
+    if (challenge === null || begin.challenge !== challenge) {
+      throw new Error(PRESENCE_CHALLENGE_MISMATCH_MESSAGE);
+    }
+    const assertion = await this.#webauthn.getAssertion(challenge, begin.rpId, [
+      binding.passkeyCredentialId,
+    ]);
     await this.#api<ReauthFinishResponse>(
       API_ROUTES.reauthFinish,
       { relayNonce: begin.relayNonce, assertion },
