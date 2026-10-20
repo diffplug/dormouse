@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { realpathSync } from "node:fs";
 import { required, cloudflare, hyperdriveOrigin, originsOf } from "./preview.mjs";
@@ -11,6 +10,7 @@ import {
   oauthProviders,
   readConfigs,
 } from "./workers.mjs";
+import { verifyPackages } from "./pgstencil-provenance.mjs";
 
 /**
  * Each Worker's production name and origin, pinned here so an edited config
@@ -142,42 +142,6 @@ export function productionSmoke(configs, sha, options = {}) {
     attempts: ATTEMPTS,
     ...options,
   });
-}
-/**
- * Each installed pgstencil package's `dist/provenance.json` names one clean
- * commit; returns that commit and each package's installed name and version.
- */
-export async function verifyPackages() {
-  const commits = [];
-  const packages = [];
-  for (const name of ["pgstencil", "@pgstencil/auth/better-auth"]) {
-    // Resolve the installed entrypoint, then read the provenance beside it.
-    const entry = import.meta.resolve(name);
-    const provenance = JSON.parse(
-      await readFile(new URL("./provenance.json", entry), "utf8"),
-    );
-    const { name: installed, version } = JSON.parse(
-      await readFile(new URL("../package.json", entry), "utf8"),
-    );
-    packages.push({ name: installed, version });
-    assert.match(
-      provenance.commit,
-      /^[a-f0-9]{40}$/,
-      "Production requires accepted, clean pgstencil provenance",
-    );
-    assert.notEqual(
-      provenance.dirty,
-      true,
-      "Production requires accepted, clean pgstencil provenance",
-    );
-    commits.push(provenance.commit);
-  }
-  assert.equal(
-    commits[0],
-    commits[1],
-    "Production requires accepted, clean pgstencil provenance",
-  );
-  return { commit: commits[0], packages };
 }
 /**
  * Before the backup, so a release whose Cloudflare or Postgres side is not

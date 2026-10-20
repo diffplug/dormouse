@@ -2,7 +2,6 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
-  judgeProvenance,
   judgeSignatures,
   judgeUpstream,
   lockedDigest,
@@ -141,10 +140,6 @@ test("a package npm did not verify, from another registry, or without one SLSA b
   const two = audit();
   two.verified[0].attestationBundles.push(two.verified[0].attestationBundles[0]);
   assert.throws(() => judgeSignatures(two, PACKAGES, COMMIT), failure("pgstencil@0.4.0 has no single SLSA provenance attestation"));
-});
-
-test("judgeProvenance holds each package to its own name and version", () => {
-  assert.throws(() => judgeProvenance(bundleOf(audit()), { ...PACKAGES[1] }, COMMIT), failure("@pgstencil/auth's attestation names another package or tarball"));
 });
 
 test("the installed packages' versions and locked tarball digests reach npm, and its verdict gates the upstream check", async () => {

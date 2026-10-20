@@ -20,5 +20,5 @@ Cookie reads (2026-10-11):
 pgstencil provenance at deploy time (2026-10-20):
 
 - Renovate opens a pgstencil bump as soon as a release is approved (`.github/renovate.json`), and a production deploy can follow its merge within hours. While only the nightly audit judged S119 and S120, a release deployed between two runs shipped on S118's self-reported `dist/provenance.json` alone, so the `verify` job now runs the same checks and the audit judges that script rather than repeating it by hand.
-- npm does not audit a pnpm install, and `npm audit signatures` verifies a package from the registry by its installed name and version alone, so the temporary consumer holds only `package.json` stubs and downloads no package code. npm checks the subject against the registry's tarball; comparing it with `pnpm-lock.yaml`'s integrity ties it to the tarball pnpm installed.
+- npm checks the subject against the registry's tarball; comparing it with `pnpm-lock.yaml`'s integrity ties it to the tarball pnpm installed.
 - npm verifies the signature and the certificate's chain, not who signed: the payload's workflow claim is the signer's own statement, so the certificate's SAN and source-repository digest are read too.

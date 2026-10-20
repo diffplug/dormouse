@@ -6,14 +6,14 @@ import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { verifyPackages } from "./production.mjs";
 
 /**
- * The installed pgstencil packages' signed provenance and upstream standing:
- * npm's verified SLSA attestation binds each to pgstencil's release workflow
- * on `main` and to the commit `dist/provenance.json` names, and that commit is
- * on pgstencil `main` with a passing `security-audit`. The production `verify`
- * job runs this before any deploy, so a bump is checked before it ships.
+ * The installed pgstencil packages' provenance and upstream standing: both
+ * `dist/provenance.json` files name one clean commit, npm's verified SLSA
+ * attestation binds each package to pgstencil's release workflow on `main` and
+ * to that commit, and the commit is on pgstencil `main` with a passing
+ * `security-audit`. The production `verify` job runs this before any deploy,
+ * so a bump is checked before it ships.
  */
 const REPOSITORY = "diffplug/pgstencil";
 const NPM = "https://registry.npmjs.org/";
@@ -21,6 +21,43 @@ const SLSA = "https://slsa.dev/provenance/v1";
 const SIGNER = `https://github.com/${REPOSITORY}/.github/workflows/release.yml@refs/heads/main`;
 /** Fulcio's Source Repository Digest, OID 1.3.6.1.4.1.57264.1.13, DER-encoded. */
 const SOURCE_DIGEST = Buffer.from("060a2b0601040183bf30010d", "hex");
+
+/**
+ * Each installed pgstencil package's `dist/provenance.json` names one clean
+ * commit; returns that commit and each package's installed name and version.
+ */
+export async function verifyPackages() {
+  const commits = [];
+  const packages = [];
+  for (const name of ["pgstencil", "@pgstencil/auth/better-auth"]) {
+    // Resolve the installed entrypoint, then read the provenance beside it.
+    const entry = import.meta.resolve(name);
+    const provenance = JSON.parse(
+      await readFile(new URL("./provenance.json", entry), "utf8"),
+    );
+    const { name: installed, version } = JSON.parse(
+      await readFile(new URL("../package.json", entry), "utf8"),
+    );
+    packages.push({ name: installed, version });
+    assert.match(
+      provenance.commit,
+      /^[a-f0-9]{40}$/,
+      "Production requires accepted, clean pgstencil provenance",
+    );
+    assert.notEqual(
+      provenance.dirty,
+      true,
+      "Production requires accepted, clean pgstencil provenance",
+    );
+    commits.push(provenance.commit);
+  }
+  assert.equal(
+    commits[0],
+    commits[1],
+    "Production requires accepted, clean pgstencil provenance",
+  );
+  return { commit: commits[0], packages };
+}
 
 /** `name@version`'s sha512, as hex, from `pnpm-lock.yaml`'s packages. */
 export function lockedDigest(lock, name, version) {
@@ -67,7 +104,7 @@ function extensionValues(bytes, oid, start, end, found = []) {
  * source commit. npm has already checked the signature, the certificate's
  * chain, and the subject against the registry's tarball.
  */
-export function judgeProvenance(bundle, { name, version, digest }, commit) {
+function judgeProvenance(bundle, { name, version, digest }, commit) {
   const raw = Buffer.from(bundle.verificationMaterial.certificate.rawBytes, "base64");
   const certificate = new X509Certificate(raw);
   assert.equal(certificate.subjectAltName, `URI:${SIGNER}`, `${name} was not signed by pgstencil's release workflow on main`);
