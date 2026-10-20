@@ -426,13 +426,22 @@ async function fixture(
       }>;
     const remove = (burrowId: string, from = origin) =>
       request(`/api/relay/burrows/${burrowId}`, { method: "DELETE", headers: { origin: from } });
+    const passkeys = async () =>
+      (await request("/api/relay/passkeys")).json() as Promise<{
+        passkeys: { credentialId: string; label: string; createdAt: string; burrowId: string | null }[];
+      }>;
+    const removePasskey = (credentialId: string, from = origin) =>
+      request(`/api/relay/passkeys/${encodeURIComponent(credentialId)}`, {
+        method: "DELETE",
+        headers: { origin: from },
+      });
     const accept = (version: unknown, from = origin) =>
       request("/api/terms/acceptance", {
         method: "POST",
         body: JSON.stringify({ version }),
         headers: { origin: from, "content-type": "application/json" },
       });
-    return { request, post, session, email, oauth, hostedVoice, speak, forget, mint, approve, computers, remove, accept };
+    return { request, post, session, email, oauth, hostedVoice, speak, forget, mint, approve, computers, remove, passkeys, removePasskey, accept };
   }
   return {
     ...context,
@@ -1211,6 +1220,69 @@ test("enrollment: only a recent admin login from this origin approves, and the B
       [begun.userCode],
     ),
   ).toEqual([{ redeemedBurrowId: null, redeemedAt: null }]);
+});
+
+test("the account lists its passkeys with the computer that added each, and removing one ends its sessions", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const admin = f.browser(),
+    other = f.browser("203.0.113.11");
+  await admin.email(ADMIN_EMAIL);
+  await other.email("other@example.test");
+  const adminId = (await admin.session())!.user.id;
+  const otherId = (await other.session())!.user.id;
+  const sql = (text: string, values: unknown[] = []) => queryDatabase(f.database.url, text, values);
+  const laptop = "LLLLLLLLLLLLLLLLLLLLLL";
+  await sql(`INSERT INTO dormouse_relay_burrows ("burrowId", "userId", "tokenHash") VALUES ($1, $2, 'l')`, [
+    laptop,
+    adminId,
+  ]);
+  // A passkey a computer's code added, a legacy one with no computer, and
+  // another account's, each with a session it signed in.
+  for (const [credentialId, userId, burrowId] of [
+    ["stranger-key", adminId, laptop],
+    ["own-key", adminId, null],
+    ["foreign-key", otherId, null],
+  ] as const) {
+    await sql(
+      `INSERT INTO dormouse_relay_passkeys ("credentialId", "userId", "publicKey", label, "burrowId")
+      VALUES ($1, $2, 'x', $1, $3)`,
+      [credentialId, userId, burrowId],
+    );
+    await sql(
+      `INSERT INTO dormouse_relay_sessions ("tokenHash", "userId", "expiresAt", "credentialId")
+      VALUES ($1, $2, now() + interval '1 hour', $1)`,
+      [credentialId, userId],
+    );
+  }
+  const listed = await admin.passkeys();
+  expect(listed.passkeys.map(({ credentialId, label, burrowId }) => ({ credentialId, label, burrowId })).sort((a, b) =>
+    a.credentialId < b.credentialId ? -1 : 1,
+  )).toEqual([
+    { credentialId: "own-key", label: "own-key", burrowId: null },
+    { credentialId: "stranger-key", label: "stranger-key", burrowId: laptop },
+  ]);
+  expect(Math.abs(Date.parse(listed.passkeys[0].createdAt) - Date.now())).toBeLessThan(60_000);
+  // An account the Relay does not entitle sees none.
+  expect((await other.request("/api/relay/passkeys")).status).toBe(403);
+
+  // Removing the computer keeps its passkey, unattributed.
+  expect((await admin.remove(laptop)).status).toBe(204);
+  expect((await admin.passkeys()).passkeys.find((p) => p.credentialId === "stranger-key")?.burrowId).toBeNull();
+
+  // Remove: this origin only; another account's passkey is not found.
+  expect((await admin.removePasskey("stranger-key", ORIGINS.relay)).status).toBe(403);
+  expect((await admin.removePasskey("foreign-key")).status).toBe(404);
+  expect((await admin.removePasskey("stranger-key")).status).toBe(204);
+  expect((await admin.removePasskey("stranger-key")).status).toBe(404);
+  expect((await admin.passkeys()).passkeys.map(({ credentialId }) => credentialId)).toEqual(["own-key"]);
+  // Its session went with it; every other stands.
+  expect(await sql(`SELECT "tokenHash" FROM dormouse_relay_sessions ORDER BY "tokenHash"`)).toEqual([
+    { tokenHash: "foreign-key" },
+    { tokenHash: "own-key" },
+  ]);
 });
 
 test("enrollment approval needs a login from the recent-login window, and attempts are limited per account", async ({

@@ -427,6 +427,63 @@ test("setup, sign-in, and a presence proof end to end, scoped to the account tha
     expect(await f.sql(`SELECT * FROM dormouse_relay_${table}`), table).toEqual([]);
 });
 
+test("a passkey names the computer whose code registered it and outlives it; removing the passkey ends its sessions", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const owner = await f.account(ADMIN_EMAIL);
+  const laptop = await f.burrow(owner);
+  const desktop = await f.burrow(owner);
+  const phone = await newAuthenticator();
+  const tablet = await newAuthenticator();
+  const registered = await f.register(phone, await f.setupToken(laptop.token));
+  expect(registered.status).toBe(200);
+  const setupSession = registered.json!.sessionToken;
+  expect((await f.register(tablet, await f.setupToken(desktop.token))).status).toBe(200);
+  const minter = (authenticator: Authenticator) =>
+    f.sql(`SELECT "burrowId" FROM dormouse_relay_passkeys WHERE "credentialId" = $1`, [
+      authenticator.credentialId,
+    ]);
+  expect(await minter(phone)).toEqual([{ burrowId: laptop.burrowId }]);
+  expect(await minter(tablet)).toEqual([{ burrowId: desktop.burrowId }]);
+
+  // Removing the computer leaves its passkey, unattributed: the phone still
+  // signs in to the account's other computers.
+  await f.sql(`DELETE FROM dormouse_relay_burrows WHERE "burrowId" = $1`, [laptop.burrowId]);
+  expect(await minter(phone)).toEqual([{ burrowId: null }]);
+  expect((await f.call("GET", API_ROUTES.burrows, { bearer: setupSession })).status).toBe(200);
+
+  // Every session a passkey signed in, setup's included, names it.
+  const signedIn = (await f.session(phone)).sessionToken;
+  const other = (await f.session(tablet)).sessionToken;
+  expect(
+    await f.sql(`SELECT "credentialId" FROM dormouse_relay_sessions WHERE "tokenHash" = ANY($1) ORDER BY 1`, [
+      [digest(setupSession), digest(signedIn)],
+    ]),
+  ).toEqual([{ credentialId: phone.credentialId }, { credentialId: phone.credentialId }]);
+  const pending = await f.call("POST", API_ROUTES.reauthBegin, {
+    bearer: signedIn,
+    body: { binding: f.pairing(desktop.burrowId, phone) },
+  });
+  expect(pending.status).toBe(200);
+
+  // Removing the passkey, as the account page does, ends its sessions and
+  // their nonces, and it signs in to nothing again; the other passkey's stand.
+  await f.sql(`DELETE FROM dormouse_relay_passkeys WHERE "credentialId" = $1 AND "userId" = $2`, [
+    phone.credentialId,
+    owner,
+  ]);
+  for (const bearer of [setupSession, signedIn])
+    expect(await f.call("GET", API_ROUTES.burrows, { bearer })).toMatchObject({
+      status: 401,
+      json: { error: UNAUTHORIZED_ERROR },
+    });
+  expect(await f.sql(`SELECT nonce FROM dormouse_relay_presence_nonces`)).toEqual([]);
+  expect((await f.signin(phone)).status).toBe(404);
+  expect((await f.call("GET", API_ROUTES.burrows, { bearer: other })).status).toBe(200);
+});
+
 test("one setup token registers once, however many finishes race it", async ({ onTestFinished }) => {
   const f = await fixture();
   onTestFinished(f.close);
@@ -669,7 +726,9 @@ test("every table a caller grows is capped by whoever grows it, and expired rows
   const full = tokens.at(-2)!;
   expect(await f.register(await newAuthenticator(), full)).toMatchObject({
     status: 409,
-    json: { error: `this account already has ${MAX_PASSKEYS_PER_ACCOUNT} passkeys` },
+    json: {
+      error: `this account already has ${MAX_PASSKEYS_PER_ACCOUNT} passkeys; remove one at ${ORIGINS.account}/account first`,
+    },
   });
   expect((await f.call("POST", API_ROUTES.setupBegin, { body: { setupToken: full } })).status).toBe(200);
 
