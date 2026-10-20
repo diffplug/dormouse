@@ -52,6 +52,7 @@ for (const source of [
   '<span title="<literal>">safe</span>\n',
   'Use \\<your relay> and &lt;https://example.com&gt;.\n',
   '\\<script>alert(1)\\</script>\n',
+  'Write \\&#x3C; and \\&#x3E; literally, but \\\\&lt;.\n',
   'A \\[label] **bold** and \\[label]\\(url).\n',
 ]) {
   test(`retains semantics: ${JSON.stringify(source)}`, () => {
