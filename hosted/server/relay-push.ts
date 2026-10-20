@@ -440,9 +440,8 @@ interface Subscription {
  * share-locked, so a concurrent removal either waits for this write and
  * cascades it, or commits first and the Burrow is unknown. A `deliveryId`
  * the Burrow did not mint (`deliveryIdMintedBy`, under the token's stored
- * digest) only replaces the row held for it, answering `unminted` when there
- * is none, so it never adds a row to evict another. One transaction under the
- * account's advisory lock:
+ * digest) answers `unminted` and writes nothing, so it never adds a row to
+ * evict another. One transaction under the account's advisory lock:
  *
  * 1. Every address this delivery is moving off — read from the account's rows
  *    carrying its `deliveryId`, whichever Burrow — has its rows dropped,
@@ -474,13 +473,7 @@ export function upsertSubscription(
       record.burrowId,
       record.deliveryId,
     );
-    if (!minted) {
-      const { rowCount: held } = await db.query(
-        `SELECT 1 FROM dormouse_relay_push_subscriptions WHERE "burrowId" = $1 AND "deliveryId" = $2`,
-        [record.burrowId, record.deliveryId],
-      );
-      if (!held) return "unminted";
-    }
+    if (!minted) return "unminted";
     // `clock_timestamp()`, not `now()`: `now()` is the transaction's start,
     // before the lock, so a write that waited would sort older than the one it
     // followed, and the caps would evict it first.

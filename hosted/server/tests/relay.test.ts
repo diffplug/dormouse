@@ -1160,7 +1160,7 @@ async function pushFixture(options?: Parameters<typeof fixture>[0]) {
   /** A delivery id `burrow` minted for a paired phone: the one kind subscribe adds a row for. */
   const id = async (burrow: { burrowId: string; token: string } = laptop) =>
     mintPushDeliveryId(await pushDeliveryKey(burrow.token), burrow.burrowId);
-  /** A row as one from before ids were minted left it, past subscribe's check. */
+  /** A row as a hand edit would leave it, past subscribe's check. */
   const seedRow = (burrowId: string, deliveryId: string, endpoint: string) =>
     f.sql(
       `INSERT INTO dormouse_relay_push_subscriptions ("burrowId", "deliveryId", endpoint, p256dh, auth, "vapidPublicKey")
@@ -1363,7 +1363,7 @@ test("subscribe upserts as the self-host Relay does: a moved endpoint takes its 
   await reset();
 
   // A moved delivery drops its own stale rows under every Burrow that holds it:
-  // one Burrow mints each id, so only a row from before left it under two.
+  // one Burrow mints each id, so only a hand edit leaves it under two.
   await f.seedRow(other.burrowId, deliveryId, FCM + "old");
   expect((await f.subscribe(deliveryId, sub("new"))).json!.burrowIds).toEqual([f.laptop.burrowId]);
   expect(await endpoints()).toEqual([FCM + "new"]);
@@ -1735,14 +1735,6 @@ test("subscribe adds a row only for an id the Burrow minted, so a session that i
   for (let i = 0; i <= MAX_PUSH_SUBSCRIPTIONS_PER_BURROW; i++)
     expect((await f.subscribe(randomSecret(), browserSubscription(FCM + `junk${i}`).subscription)).status).toBe(403);
   expect((await f.devices()).json!.devices.map((d: { deliveryId: string }) => d.deliveryId)).toEqual([phone]);
-
-  // A row from before ids were minted moves to a rotated endpoint, and once gone the id adds nothing.
-  const legacy = randomSecret();
-  await f.seedRow(f.laptop.burrowId, legacy, FCM + "legacy");
-  expect((await f.subscribe(legacy, browserSubscription(FCM + "rotated").subscription)).status).toBe(200);
-  expect((await f.rows()).map((row) => row.endpoint).sort()).toEqual([FCM + "rotated", expect.any(String)].sort());
-  await f.call("DELETE", pushSubscriptionDeletePath(legacy), { bearer: f.sessionToken });
-  expect((await f.subscribe(legacy)).status).toBe(403);
   expect((await f.rows()).map((row) => row.deliveryId)).toEqual([phone]);
 });
 

@@ -15,10 +15,9 @@
 import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { UNMINTED_DELIVERY_ID_ERROR, toBase64Url } from 'remote-lib-common';
+import { toBase64Url } from 'remote-lib-common';
 
 import App from './App';
-import { RelayRefusalError } from '../client/pocket-client';
 import type { KnownBurrowV1 } from '../client/pocket-db';
 import type { PushAvailability } from '../client/push-subscribe';
 import { alertText, buttonNamed, click, rowFor, settle } from './app-test-utils';
@@ -240,28 +239,6 @@ describe('the one Enable on the Burrows view', () => {
     expect(rowText('First laptop')).toContain('Push on');
     expect(rowText('Second laptop')).not.toContain('Push on');
     expect(buttonNamed(container, ENABLE)).not.toBeNull();
-  });
-
-  /**
-   * A pairing whose computer mints untagged delivery ids is refused for good, so
-   * it must not stop the Burrows after it, and the message says what repairs it.
-   */
-  it('registers past a pairing its computer did not mint, then says how to repair it', async () => {
-    fake.subscribeInBrowser.mockResolvedValue({ endpoint: 'https://push.example/abc' });
-    fake.subscribeToPush.mockImplementation(async (burrowId) => {
-      if (burrowId === 'burrow-1') throw new RelayRefusalError(UNMINTED_DELIVERY_ID_ERROR, 403);
-      return { burrowIds: [...registered.add(burrowId)] };
-    });
-    await openBurrows();
-
-    await click(container, ENABLE);
-
-    expect(fake.subscribeToPush.mock.calls.map(([burrowId]) => burrowId)).toEqual(['burrow-1', 'burrow-2']);
-    expect(rowText('Second laptop')).toContain('Push on');
-    expect(rowText('First laptop')).not.toContain('Push on');
-    expect(alertText(container)).toBe(
-      'Push could not be turned on for First laptop. Update Dormouse on that computer, then pair this phone again.',
-    );
   });
 
   /**

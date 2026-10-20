@@ -116,7 +116,7 @@ index 574db60ac..a93599f37 100644
    subject: string,
 @@ -274,20 +223,21 @@ export function createWebPushSender(
          // The registration route applies the same parse, but enforce it again
-         // for legacy or manually edited state. Node connects to an IP literal
+         // for manually edited state. Node connects to an IP literal
          // without invoking the Agent's DNS lookup.
 -        const url = parsePublicPushEndpoint(target.endpoint);
 -        if (!url) throw new Error('push endpoint is not a public HTTPS URL');

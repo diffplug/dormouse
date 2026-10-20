@@ -60,8 +60,8 @@ async function deliveryIdTag(
 /**
  * A fresh delivery id for one paired Client of `burrowId`: 16 random bytes,
  * then the first 16 bytes of an HMAC-SHA256 over them under
- * {@link pushDeliveryKey}. A Relay registers a new subscription only for an id
- * that verifies ({@link deliveryIdMintedBy}), so a session that is not a paired
+ * {@link pushDeliveryKey}. A Relay registers a subscription only for an id that
+ * verifies ({@link deliveryIdMintedBy}), so a session that is not a paired
  * phone cannot register one (`docs/specs/relay.md` -> Web Push).
  */
 export async function mintPushDeliveryId(

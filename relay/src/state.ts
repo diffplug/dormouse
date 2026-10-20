@@ -636,25 +636,13 @@ export class PushSubscriptionStore extends JsonFileStore {
    *
    * The committed set is then capped ({@link capSubscriptions}).
    *
-   * With `existingOnly`, for a `deliveryId` the Burrow did not mint, only a row
-   * already held for this (burrow, delivery) is replaced, and `null` answers
-   * that there is none — checked inside the mutex, so a concurrent delete
-   * cannot let it add a row, and it never adds one to evict another.
-   *
    * `docs/specs/relay.md` -> State files owns the rule and the gap it leaves.
    */
   upsert(
     record: Omit<StoredPushSubscription, 'subscribedAt'>,
-    { existingOnly = false }: { existingOnly?: boolean } = {},
-  ): Promise<PushSubscriptionUpsertResult | null> {
+  ): Promise<PushSubscriptionUpsertResult> {
     return this.mutate(async () => {
       const all = await this.list();
-      if (
-        existingOnly &&
-        !all.some((s) => s.burrowId === record.burrowId && s.deliveryId === record.deliveryId)
-      ) {
-        return null;
-      }
       const stored: StoredPushSubscription = { ...record, subscribedAt: this.now() };
       const replacedEndpoints = new Set(
         all

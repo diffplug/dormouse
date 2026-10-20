@@ -998,24 +998,22 @@ export function createApp(config: AppConfig): CreatedApp {
     }
 
     // Only a paired Client adds a row: its id carries the tag the Burrow minted
-    // it with. Any other id may only replace a row already held, so a session
-    // that is not a paired phone cannot fill the cap and evict one.
+    // it with, so a session that is not a paired phone cannot fill the cap and
+    // evict one.
     const minted = await deliveryIdMintedBy(
       await pushDeliveryKey(burrow.burrowToken),
       burrow.burrowId,
       body.deliveryId,
     );
-    const stored = await pushStore.upsert(
-      {
-        burrowId: body.burrowId,
-        deliveryId: body.deliveryId,
-        endpoint: body.subscription.endpoint,
-        keys: body.subscription.keys,
-        vapidPublicKey: config.vapidPublicKey,
-      },
-      { existingOnly: !minted },
-    );
-    if (!stored) return c.json({ error: UNMINTED_DELIVERY_ID_ERROR }, 403);
+    if (!minted) return c.json({ error: UNMINTED_DELIVERY_ID_ERROR }, 403);
+
+    const stored = await pushStore.upsert({
+      burrowId: body.burrowId,
+      deliveryId: body.deliveryId,
+      endpoint: body.subscription.endpoint,
+      keys: body.subscription.keys,
+      vapidPublicKey: config.vapidPublicKey,
+    });
     // The state the mutation left behind, not the delta: a committed POST whose
     // response was lost is repaired by its own idempotent retry, which cannot
     // re-announce a deletion but can always answer what is there now.

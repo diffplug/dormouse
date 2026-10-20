@@ -102,7 +102,7 @@ test('real delivery connects to the address the endpoint parse checked, under a 
 // Endpoints WHATWG reads as a DNS name or a public host that a looser parser
 // reads as a private literal, or that are not WHATWG's own serialization of
 // themselves. Registration refuses them, and delivery, re-checking a row a hand
-// edit or an older Relay left, never connects to one.
+// edit left, never connects to one.
 const AMBIGUOUS_ENDPOINTS = [
   "https://100.64.0.1'/push",
   'https://127.0.0.1;/push',
@@ -198,9 +198,8 @@ function unmintedId() {
 }
 
 /**
- * Put a row on disk as a hand edit or an older Relay left it, past the
- * subscribe route's check — the only way a row carries an id its Burrow did
- * not mint.
+ * Put a row on disk as a hand edit would, past the subscribe route's check —
+ * the only way a row carries an id its Burrow did not mint.
  */
 function seedRow(stateDir, row) {
   const store = new PushSubscriptionStore(stateDir, () => Date.now(), new BurrowStore(stateDir));
@@ -409,30 +408,6 @@ test('subscribe adds a row only for an id the Burrow minted', async () => {
   await assert.rejects(storedRows(stateDir), 'nothing was written');
 });
 
-test('an id the Burrow did not mint may only refresh the row it already holds', async () => {
-  // A row from before ids were tagged keeps working: its phone can still move it
-  // to a rotated endpoint, but once it is gone the id adds nothing.
-  const { app, stateDir, burrow, sessionToken } = await pushApp();
-  const deliveryId = unmintedId();
-  await seedRow(stateDir, { burrowId: burrow.burrowId, deliveryId, ...subscription() });
-
-  const moved = await subscribe(app, {
-    sessionToken,
-    burrow,
-    deliveryId,
-    sub: subscription('https://push.example.com/rotated'),
-  });
-  assert.equal(moved.status, 200);
-  assert.deepEqual(
-    (await storedRows(stateDir)).map((row) => row.endpoint),
-    ['https://push.example.com/rotated'],
-  );
-
-  await removeDelivery(app, sessionToken, deliveryId);
-  assert.equal((await subscribe(app, { sessionToken, burrow, deliveryId })).status, 403);
-  assert.deepEqual(await storedRows(stateDir), []);
-});
-
 test('a session that is not a paired phone cannot evict a paired phone', async () => {
   const { app, burrow, sessionToken } = await pushApp();
   const phone = await mintedId(burrow);
@@ -599,7 +574,7 @@ test('a moved delivery drops its own stale rows under every Burrow that holds it
   const deliveryId = await mintedId(burrow);
   const old = subscription('https://push.example.com/old');
 
-  // One Burrow mints each id, so only a row from before that left it under two.
+  // One Burrow mints each id, so only a hand edit leaves it under two.
   await seedRow(stateDir, { burrowId: other.burrowId, deliveryId, ...old });
   // A different Burrow, the same delivery, a new address: this Burrow has no row of
   // its own to read the replaced endpoint from.
