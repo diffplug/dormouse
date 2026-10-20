@@ -431,17 +431,10 @@ export class DirectPeer {
     }
   }
 
-  /**
-   * The offerer's second half, once `direct-answer` has decrypted. A Burrow
-   * only answers, but a path policy holds every description a peer applies.
-   */
+  /** The offerer's second half, once `direct-answer` has decrypted. */
   async acceptAnswer(answerSdp: string): Promise<void> {
     try {
-      const policy = this.#pathPolicy;
-      await this.#peer.setRemoteDescription({
-        type: 'answer',
-        sdp: policy ? policy.acceptRemote(answerSdp) : answerSdp,
-      });
+      await this.#peer.setRemoteDescription({ type: 'answer', sdp: answerSdp });
     } catch (error) {
       this.#fail(`could not accept a direct answer: ${String(error)}`);
     }
