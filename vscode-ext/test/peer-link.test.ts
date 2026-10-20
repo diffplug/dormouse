@@ -74,6 +74,11 @@ let realTmp: string | undefined;
 const opened: LinkModule[] = [];
 
 const derivedSocketPath = (): string => socketPathFor(dir);
+/** Where a window dials the broker: the derived path, or on Windows the published name. */
+const brokerPath = async (): Promise<string> =>
+  process.platform === 'win32'
+    ? (JSON.parse(await readFile(join(dir, 'burrow.peer-endpoint'), 'utf8')) as { name: string }).name
+    : derivedSocketPath();
 
 interface SocketFileIdentity {
   dev: bigint;
@@ -170,44 +175,6 @@ afterEach(async () => {
 });
 
 describe('bind-as-lease', () => {
-  it.skipIf(process.platform !== 'win32')('reclaims a dead named pipe and elects exactly one broker for racing windows', async () => {
-    // Windows removes the pipe when its process dies; there is no Unix corpse
-    // inode to unlink. Exercise the actual transport, not a fake socket path.
-    const corpse = spawn(process.execPath, ['-e',
-      "require('node:net').createServer().listen(process.argv[1], () => process.send('listening'))",
-      derivedSocketPath()], { stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
-    try {
-      await new Promise<void>((resolve, reject) => {
-        corpse.once('message', () => resolve());
-        corpse.once('error', reject);
-        corpse.once('exit', (code) => reject(new Error(`pipe fixture exited ${code}`)));
-      });
-      const exited = new Promise<void>((resolve) => corpse.once('exit', () => resolve()));
-      corpse.kill('SIGKILL');
-      await exited;
-      const firstSide = fakeWindow({ entries: [{ surfaceId: 'first' }] });
-      const secondSide = fakeWindow({ entries: [{ surfaceId: 'second' }] });
-      const first = await openWindow(firstSide);
-      const second = await openWindow(secondSide);
-      const roles: boolean[] = [];
-      await Promise.all([
-        first.ensurePeerNet((held) => roles.push(held)),
-        second.ensurePeerNet((held) => roles.push(held)),
-      ]);
-      const brokers = [first, second].filter((mod) => mod.isPeerBroker());
-      expect(brokers).toHaveLength(1);
-      expect(roles).toEqual([true]);
-      const expected = first.isPeerBroker() ? secondSide.entries : firstSide.entries;
-      await waitFor(async () => JSON.stringify(await brokers[0].remoteRequest('directory', {})) === JSON.stringify(expected));
-    } finally {
-      if (corpse.exitCode === null && corpse.signalCode === null) {
-        const exited = new Promise<void>((resolve) => corpse.once('exit', () => resolve()));
-        corpse.kill('SIGKILL');
-        await exited;
-      }
-    }
-  }, 15_000);
-
   it('rejects when the peer socket cannot be bound', async () => {
     const mod = await openWindow(fakeWindow());
     const failingServer = createServer();
@@ -222,7 +189,9 @@ describe('bind-as-lease', () => {
     // libuv callback with nothing to catch it.
     const mod = await openWindow(fakeWindow());
     const server = createServer();
-    const path = derivedSocketPath();
+    const path = process.platform === 'win32'
+      ? `\\\\.\\pipe\\dormouse-peer-test-${process.pid}`
+      : derivedSocketPath();
     if (process.platform !== 'win32') await mkdir(dirname(path), { recursive: true, mode: 0o700 });
     await mod.listenServer(server, path);
     try {
@@ -881,7 +850,7 @@ describe('bind-as-lease', () => {
     expect(peer.isPeerLinkSettled()).toBe(false);
   });
 
-  it('does not send an old broker’s delayed answer to its replacement', async () => {
+  it.skipIf(process.platform === 'win32')('does not send an old broker’s delayed answer to its replacement', async () => {
     const token = 'test-peer-token';
     await writeFile(join(dir, 'burrow.peer-token'), token, { mode: 0o600 });
 
@@ -1117,7 +1086,7 @@ describe('peer handshake', () => {
     const token = await readToken();
     expect(token).toBeTruthy();
 
-    const socket = createConnection({ path: derivedSocketPath() });
+    const socket = createConnection({ path: await brokerPath() });
     const reader = frameReader(socket);
     await new Promise((resolve) => socket.on('connect', resolve));
 
@@ -1154,7 +1123,7 @@ describe('peer handshake', () => {
     const broker = await openWindow(brokerSide);
     await broker.ensurePeerNet(() => {});
 
-    const socket = createConnection({ path: derivedSocketPath() });
+    const socket = createConnection({ path: await brokerPath() });
     const reader = frameReader(socket);
     await new Promise((resolve) => socket.on('connect', resolve));
     const challenge = await reader.next();
@@ -1179,7 +1148,7 @@ describe('peer handshake', () => {
     const broker = await openWindow(brokerSide);
     await broker.ensurePeerNet(() => {});
 
-    const socket = createConnection({ path: derivedSocketPath() });
+    const socket = createConnection({ path: await brokerPath() });
     const reader = frameReader(socket);
     await new Promise((resolve) => socket.on('connect', resolve));
     expect((await reader.next()).kind).toBe('challenge');
@@ -1197,7 +1166,7 @@ describe('peer handshake', () => {
     await broker.ensurePeerNet(() => {});
     const token = await readToken();
 
-    const first = createConnection({ path: derivedSocketPath() });
+    const first = createConnection({ path: await brokerPath() });
     const firstReader = frameReader(first);
     await new Promise((resolve) => first.on('connect', resolve));
     const captured = await firstReader.next();
@@ -1206,7 +1175,7 @@ describe('peer handshake', () => {
 
     // A second connection gets a fresh challenge, so the captured proof is
     // worth nothing — which is the whole point of the nonce.
-    const second = createConnection({ path: derivedSocketPath() });
+    const second = createConnection({ path: await brokerPath() });
     const secondReader = frameReader(second);
     await new Promise((resolve) => second.on('connect', resolve));
     const fresh = await secondReader.next();
@@ -1218,7 +1187,9 @@ describe('peer handshake', () => {
     second.destroy();
   });
 
-  it('serves nothing to a squatter that took the path but not the token', async () => {
+  // Windows never depends on the derived name; `peer-endpoint.test.ts` covers
+  // what holds a published one.
+  it.skipIf(process.platform === 'win32')('serves nothing to a squatter that took the path but not the token', async () => {
     // The co-resident-user attack: bind the path first, then wait to be handed
     // this installation's terminals. The client must send its hello and nothing
     // else, and must disconnect on a welcome it cannot verify.
@@ -1272,7 +1243,9 @@ describe('peer handshake', () => {
     }
   });
 
-  it('rejects a non-object frame from the process holding the socket', async () => {
+  // Windows never depends on the derived name; `peer-endpoint.test.ts` covers
+  // what holds a published one.
+  it.skipIf(process.platform === 'win32')('rejects a non-object frame from the process holding the socket', async () => {
     let squatterSocket: import('node:net').Socket | null = null;
     let window: LinkModule | null = null;
     let closed = false;

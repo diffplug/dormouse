@@ -83,6 +83,16 @@ The socket bounds other local accounts, never a process running as the user (`do
 - **FAIL IF** `S139` `ensureControlDir` in `standalone/sidecar/dor-control-server.js` stops requiring all four of a real directory, not a symlink, owned by this uid, at exactly mode `0700`, or `resolveControlSocketPath` stops refusing to name a socket when that predicate fails or derives a socket or pipe name from anything but fresh random bytes, the PID included. Pinned by `standalone/sidecar/dor-control-server.test.js`.
 - **FAIL IF** `S140` the raw token reaches a socket, or either side compares a proof with anything but the SHA-256-then-`timingSafeEqual` of `proofMatches`. The construction is hand-mirrored between `standalone/sidecar/dor-control-server.js` and `dor/src/control-client.ts`; only the two proof domains are pinned across the copies, by `lib/src/lib/mirrored-constants.test.ts` (rationale).
 
+## The VS Code peer link
+
+| Guarantee | Feature | Pinned by |
+| --- | --- | --- |
+| **Another Windows account cannot keep VS Code's windows from their Burrow by taking a pipe name first.** Each broker binds a name nobody can predict and publishes it only in your own storage, and a name that cannot prove the shared secret is abandoned. | One-time link, Hosted phone, Self-hosted Relay | `vscode-ext/test/peer-endpoint.test.ts` |
+
+The attacker is another local account; the link carries the Burrow's commands and every window's terminals between VS Code windows (`docs/specs/vscode.md` -> "Burrow: a service in the extension host").
+
+- **FAIL IF** `S274` on Windows a broker binds a pipe name not minted per bind from fresh CSPRNG bytes (`freshEndpointName` in `vscode-ext/src/peer-endpoint.ts`), a window learns the broker's name other than from `burrow.peer-endpoint` in the extension's global storage, a window keeps dialing a published name whose holder refused, failed to prove the token, or stayed silent after its publishing pid died, or replaces on silence alone a broker whose pid is alive. `attemptPublished` in `vscode-ext/src/peer-link.ts`; pinned by `vscode-ext/test/peer-endpoint.test.ts`.
+
 ## Loopback Listeners
 
 | Guarantee | Feature | Pinned by |
@@ -164,7 +174,7 @@ The attacker is another local account reading disk; what the remote stack leaves
 
 **VS Code persists pane structure in VS Code's own storage** — `workspaceState` and `vscode.setState()` — so the modes there are VS Code's, not ours, and no transcript reaches either (`docs/specs/vscode.md` -> "Serialization and restore"). Dormouse also writes `recovery.json` in extension storage, mode `0600` on Unix: one rebuilt agent-resume invocation per Surface, no buffer, unlinked as it is read (`docs/compatible-agents.md` -> "Recovery record").
 
-**The VS Code peer-link token is a local credential at rest** — `burrow.peer-token` in the extension's global storage, written mode `0600`, its socket directory re-checked on every contention round. Neither control does anything on Windows, and Dormouse applies no Windows DACL to the peer-link token, `recovery.json`, or the `tool-trust` receipts (`docs/specs/security.md` -> "Known gaps"; rationale).
+**The VS Code peer-link token is a local credential at rest** — `burrow.peer-token` in the extension's global storage, written mode `0600`, its socket directory re-checked on every contention round; a Windows broker's `burrow.peer-endpoint` beside it is written the same way. Neither control does anything on Windows, and Dormouse applies no Windows DACL to the peer-link token or endpoint, `recovery.json`, or the `tool-trust` receipts (`docs/specs/security.md` -> "Known gaps"; rationale).
 
 No standalone log call (`docs/specs/standalone.md` -> "Logging") carries PTY bytes, but the log records the `dor` socket path (rationale).
 
