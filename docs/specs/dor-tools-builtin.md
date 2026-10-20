@@ -43,6 +43,7 @@ Source of truth: `saveText` / `StorePath` in `dor-tools-builtin/src/editor-route
 
 `.md` and `.markdown` open in the bundled MDXEditor page; `.mdx` and other text stay in Monaco. Saving, reloading, and dirty reports follow [Editing files](#editing-files).
 
+- **Must resolve the viewer's direct `lexical` and `@lexical/link` imports to the same installed modules MDXEditor uses** (rationale).
 - **Must support GFM tables, task lists, frontmatter, code blocks, fenced `mermaid` diagrams, and a whole-document source mode**, which opens with the error when the rich editor cannot parse a file. Mermaid stays on 11 (rationale).
 - **Must keep HTML comments verbatim and save with one final newline, the file's majority bullet and thematic-break marker, and unpadded tables**; the rest follows MDXEditor's serialization. Its normalization of loaded text is not an edit (rationale).
 - **Never let document HTML reach the live DOM outside an allowlist** of tags and attributes, `href` limited to `http(s):`, `mailto:`, fragments, and scheme-less paths; saving keeps every original attribute, escaped, and HTML images serialize in an inert document. Mermaid diagrams are the one other path, under mermaid's own sanitizer (`docs/specs/security-local.md` → "Local-file viewer"; rationale).

@@ -18,6 +18,8 @@ Without a title, a viewer's header falls back to its running command, `dor __vie
 
 ## Markdown editor
 
+MDXEditor 4.3.3 depends on Lexical `^0.48.0`; independent direct bumps to 0.52 install a second copy (PRs #1195 and #1205, 2026-10). Lexical's active editor state and node classes belong to its module instance, and the viewer's relative-link patch changes `LinkNode.prototype`, so even a successful build can leave editor helpers using the wrong state or patching a class MDXEditor never instantiates. Renovate leaves these direct pins to the MDXEditor upgrade PR; grouping alone does not select compatible versions.
+
 MDXEditor 4.3 parses `<!-- … -->` and discards it, and trims and re-serializes the whole document on export; without the comment node and style detection, saving a typical README after a one-word edit deleted its comments and rewrote every `-` bullet as `*` (measured 2026-10).
 
 Image sizes live in the document because GitHub shows an `<img>` without a `width` pixel for pixel: a Retina screenshot shown here at its recorded scale but left unsized in the file came out twice as large on GitHub. Writing the width on paste keeps the two renderings alike (2026-10).

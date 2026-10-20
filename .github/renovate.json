@@ -18,6 +18,13 @@
   },
   "packageRules": [
     {
+      "description": "Direct Lexical imports must share MDXEditor's installed modules (docs/specs/dor-tools-builtin.md -> Markdown editor). Update these exact pins in the MDXEditor upgrade PR when its Lexical dependencies change; independent bumps can install a second copy even when grouped together.",
+      "matchManagers": ["npm"],
+      "matchFileNames": ["dor-tools-builtin/package.json"],
+      "matchPackageNames": ["lexical", "@lexical/**"],
+      "enabled": false
+    },
+    {
       "description": "The built-in Markdown editor stays on Mermaid 11; see docs/specs/dor-tools-builtin.rationale.md, Markdown editor",
       "matchPackageNames": ["mermaid"],
       "allowedVersions": "<12"
