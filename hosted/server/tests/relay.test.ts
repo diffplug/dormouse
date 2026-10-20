@@ -23,6 +23,7 @@ import {
   pushDeliveryKey,
   pushSubscriptionDeletePath,
   sealPush,
+  signinChallenge,
   utf8Encode,
   isEnrollUserCode,
   isManagedVoiceToken,
@@ -226,8 +227,9 @@ async function fixture({ bindings = {} }: { bindings?: Record<string, string | u
     const begin = await call("POST", API_ROUTES.signinBegin, { ip });
     expect(begin.status).toBe(200);
     expect(begin.json!.rpId).toBe(rpId);
-    const assertion = await authenticator.assert({ challenge: begin.json!.challenge, origin });
-    return call("POST", API_ROUTES.signinFinish, { body: { assertion } });
+    const challenge = begin.json!.challenge as string;
+    const assertion = await authenticator.assert({ challenge: await signinChallenge(challenge), origin });
+    return call("POST", API_ROUTES.signinFinish, { body: { challenge, assertion } });
   }
 
   async function session(authenticator: Authenticator) {
@@ -427,6 +429,63 @@ test("setup, sign-in, and a presence proof end to end, scoped to the account tha
     expect(await f.sql(`SELECT * FROM dormouse_relay_${table}`), table).toEqual([]);
 });
 
+test("a passkey names the computer whose code registered it and outlives it; removing the passkey ends its sessions", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const owner = await f.account(ADMIN_EMAIL);
+  const laptop = await f.burrow(owner);
+  const desktop = await f.burrow(owner);
+  const phone = await newAuthenticator();
+  const tablet = await newAuthenticator();
+  const registered = await f.register(phone, await f.setupToken(laptop.token));
+  expect(registered.status).toBe(200);
+  const setupSession = registered.json!.sessionToken;
+  expect((await f.register(tablet, await f.setupToken(desktop.token))).status).toBe(200);
+  const minter = (authenticator: Authenticator) =>
+    f.sql(`SELECT "burrowId" FROM dormouse_relay_passkeys WHERE "credentialId" = $1`, [
+      authenticator.credentialId,
+    ]);
+  expect(await minter(phone)).toEqual([{ burrowId: laptop.burrowId }]);
+  expect(await minter(tablet)).toEqual([{ burrowId: desktop.burrowId }]);
+
+  // Removing the computer leaves its passkey, unattributed: the phone still
+  // signs in to the account's other computers.
+  await f.sql(`DELETE FROM dormouse_relay_burrows WHERE "burrowId" = $1`, [laptop.burrowId]);
+  expect(await minter(phone)).toEqual([{ burrowId: null }]);
+  expect((await f.call("GET", API_ROUTES.burrows, { bearer: setupSession })).status).toBe(200);
+
+  // Every session a passkey signed in, setup's included, names it.
+  const signedIn = (await f.session(phone)).sessionToken;
+  const other = (await f.session(tablet)).sessionToken;
+  expect(
+    await f.sql(`SELECT "credentialId" FROM dormouse_relay_sessions WHERE "tokenHash" = ANY($1) ORDER BY 1`, [
+      [digest(setupSession), digest(signedIn)],
+    ]),
+  ).toEqual([{ credentialId: phone.credentialId }, { credentialId: phone.credentialId }]);
+  const pending = await f.call("POST", API_ROUTES.reauthBegin, {
+    bearer: signedIn,
+    body: { binding: f.pairing(desktop.burrowId, phone) },
+  });
+  expect(pending.status).toBe(200);
+
+  // Removing the passkey, as the account page does, ends its sessions and
+  // their nonces, and it signs in to nothing again; the other passkey's stand.
+  await f.sql(`DELETE FROM dormouse_relay_passkeys WHERE "credentialId" = $1 AND "userId" = $2`, [
+    phone.credentialId,
+    owner,
+  ]);
+  for (const bearer of [setupSession, signedIn])
+    expect(await f.call("GET", API_ROUTES.burrows, { bearer })).toMatchObject({
+      status: 401,
+      json: { error: UNAUTHORIZED_ERROR },
+    });
+  expect(await f.sql(`SELECT nonce FROM dormouse_relay_presence_nonces`)).toEqual([]);
+  expect((await f.signin(phone)).status).toBe(404);
+  expect((await f.call("GET", API_ROUTES.burrows, { bearer: other })).status).toBe(200);
+});
+
 test("one setup token registers once, however many finishes race it", async ({ onTestFinished }) => {
   const f = await fixture();
   onTestFinished(f.close);
@@ -449,12 +508,20 @@ test("one setup token registers once, however many finishes race it", async ({ o
 
   // A sign-in assertion is single-use too.
   const phone = results[0].status === 200 ? first : second;
-  const begin = await f.call("POST", API_ROUTES.signinBegin);
-  const assertion = await phone.assert({ challenge: begin.json!.challenge, origin });
+  const challenge = (await f.call("POST", API_ROUTES.signinBegin)).json!.challenge as string;
+  const assertion = await phone.assert({ challenge: await signinChallenge(challenge), origin });
   const signins = await Promise.all(
-    [0, 1].map(() => f.call("POST", API_ROUTES.signinFinish, { body: { assertion } })),
+    [0, 1].map(() => f.call("POST", API_ROUTES.signinFinish, { body: { challenge, assertion } })),
   );
   expect(signins.map((result) => result.status).sort()).toEqual([200, 400]);
+
+  // And only over the derived challenge: an assertion over `begin`'s bytes as
+  // given, the shape of a presence assertion over a Relay-chosen value, is refused.
+  const raw = (await f.call("POST", API_ROUTES.signinBegin)).json!.challenge as string;
+  const unhashed = await phone.assert({ challenge: raw, origin });
+  expect(
+    (await f.call("POST", API_ROUTES.signinFinish, { body: { challenge: raw, assertion: unhashed } })).json,
+  ).toEqual({ error: "unrecognized or expired challenge" });
 });
 
 test("a refused finish puts the token back on its own expiry; a removed Burrow's tokens die with it", async ({
@@ -525,8 +592,8 @@ test("a setup challenge redeems only with its own Burrow's tokens", async ({ onT
     json: { error: "unrecognized or expired challenge" },
   });
   // Nor does a sign-in challenge register.
-  const signinChallenge = (await f.call("POST", API_ROUTES.signinBegin)).json!.challenge;
-  expect((await f.finish(phone, token, signinChallenge)).json).toEqual({
+  const signinBegun = (await f.call("POST", API_ROUTES.signinBegin)).json!.challenge;
+  expect((await f.finish(phone, token, signinBegun)).json).toEqual({
     error: "unrecognized or expired challenge",
   });
   // Both codes survive the refusals, and the challenge is still its own Burrow's.
@@ -534,8 +601,11 @@ test("a setup challenge redeems only with its own Burrow's tokens", async ({ onT
   const otherBegin = await f.call("POST", API_ROUTES.setupBegin, { body: { setupToken: other } });
   expect(otherBegin.status).toBe(200);
   // A setup challenge never signs in, even for a registered credential.
-  const assertion = await phone.assert({ challenge: otherBegin.json!.challenge, origin });
-  expect((await f.call("POST", API_ROUTES.signinFinish, { body: { assertion } })).json).toEqual({
+  const setupChallenge = otherBegin.json!.challenge as string;
+  const assertion = await phone.assert({ challenge: await signinChallenge(setupChallenge), origin });
+  expect(
+    (await f.call("POST", API_ROUTES.signinFinish, { body: { challenge: setupChallenge, assertion } })).json,
+  ).toEqual({
     error: "unrecognized or expired challenge",
   });
 });
@@ -669,7 +739,9 @@ test("every table a caller grows is capped by whoever grows it, and expired rows
   const full = tokens.at(-2)!;
   expect(await f.register(await newAuthenticator(), full)).toMatchObject({
     status: 409,
-    json: { error: `this account already has ${MAX_PASSKEYS_PER_ACCOUNT} passkeys` },
+    json: {
+      error: `this account already has ${MAX_PASSKEYS_PER_ACCOUNT} passkeys; remove one at ${ORIGINS.account}/account first`,
+    },
   });
   expect((await f.call("POST", API_ROUTES.setupBegin, { body: { setupToken: full } })).status).toBe(200);
 

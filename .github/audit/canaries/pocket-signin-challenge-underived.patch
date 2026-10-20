@@ -1,0 +1,99 @@
+Domain: remote
+Rule: S271 — `signin` must sign `signinChallenge` of the Relay's challenge, never its bytes
+Expect: lib/src/remote/client/pocket-client.ts
+Source: reverses part of #1243 (Pocket signed the challenge the Relay's sign-in `begin` answered as given)
+
+diff --git a/lib/src/remote/client/pocket-client.test.ts b/lib/src/remote/client/pocket-client.test.ts
+index b7a91c6..5a2ab8e 100644
+--- a/lib/src/remote/client/pocket-client.test.ts
++++ b/lib/src/remote/client/pocket-client.test.ts
+@@ -34,12 +34,10 @@ import {
+   presenceChallenge,
+   pushEndpointFingerprint,
+   randomBase64Url,
+-  signinChallenge,
+   toBase64Url,
+   type PasskeyAssertion,
+   type PresenceBinding,
+   type ReauthBeginResponse,
+-  type SigninFinishRequest,
+   type TerminalDataEvent,
+ } from 'remote-lib-common';
+ 
+@@ -2125,44 +2123,6 @@ describe('the presence proof', () => {
+     await pairing;
+     expect(phone.prompts.map((prompt) => prompt.allowCredentials)).toEqual([[harness.authenticator.credentialId]]);
+   });
+-
+-  it('signs only a sign-in challenge it derived, so a sign-in tap is never presence for another connection', async () => {
+-    const { harness, binding, nonce, present } = await anotherConnectionOnThePairedStatic();
+-    const relayChosen = await presenceChallenge(binding, nonce);
+-
+-    // A Relay that answers sign-in's `begin` with that connection's presence challenge.
+-    const prompts: string[] = [];
+-    const finishes: SigninFinishRequest[] = [];
+-    const fetch = (async (url: string, init?: RequestInit) => {
+-      const path = new URL(url, 'http://test').pathname;
+-      if (path === '/api/signin/begin') {
+-        return { ok: true, status: 200, json: async () => ({ challenge: relayChosen, rpId: RP_ID }) } as Response;
+-      }
+-      if (path === '/api/signin/finish') finishes.push(JSON.parse(init!.body as string) as SigninFinishRequest);
+-      return harness.fetch(url, init);
+-    }) as typeof globalThis.fetch;
+-    const phone = new PocketClient({
+-      wsBase: 'ws://test',
+-      fetch,
+-      webauthn: {
+-        ...fakeWebAuthn,
+-        getAssertion: (challenge) => {
+-          prompts.push(challenge);
+-          return harness.authenticator.assert(challenge, ORIGIN);
+-        },
+-      },
+-      createWebSocket: () => harness.relay.openClientSocket(),
+-      knownBurrows: memoryKnownBurrows(),
+-      pendingDeletions: memoryPendingDeletions(),
+-      storage: memoryStorage(),
+-    });
+-    await phone.signin();
+-    expect(prompts).toEqual([await signinChallenge(relayChosen)]);
+-    expect(finishes.map((finish) => finish.challenge)).toEqual([relayChosen]);
+-
+-    // That connection presents the sign-in assertion as its presence proof.
+-    await present(finishes[0]!.assertion);
+-  });
+ });
+ 
+ /**
+diff --git a/lib/src/remote/client/pocket-client.ts b/lib/src/remote/client/pocket-client.ts
+index 33381cf..3a96c14 100644
+--- a/lib/src/remote/client/pocket-client.ts
++++ b/lib/src/remote/client/pocket-client.ts
+@@ -43,7 +43,6 @@ import {
+   pushSubscriptionDeletePath,
+   randomBase64Url,
+   samplePairingCode,
+-  signinChallenge,
+   toBase64Url,
+   type ConnectionDenialCode,
+   type ConnectionRequestV1,
+@@ -606,17 +605,10 @@ export class PocketClient {
+     }
+   }
+ 
+-  /**
+-   * Sign in with a discoverable passkey; the session is kept across launches.
+-   *
+-   * **The authenticator signs `signinChallenge(begin.challenge)`, never
+-   * `begin`'s bytes**, so a Relay cannot pass off a presence challenge for a
+-   * connection of its own as a sign-in and present the tap to a Burrow.
+-   */
++  /** Sign in with a discoverable passkey; the session is kept across launches. */
+   async signin(): Promise<SigninFinishResponse> {
+     const begin = await this.#api<SigninBeginResponse>(API_ROUTES.signinBegin, {});
+-    const challenge = await signinChallenge(begin.challenge);
+-    const assertion = await this.#webauthn.getAssertion(challenge, begin.rpId);
++    const assertion = await this.#webauthn.getAssertion(begin.challenge, begin.rpId);
+     const request: SigninFinishRequest = { challenge: begin.challenge, assertion };
+     const finish = await this.#api<SigninFinishResponse>(API_ROUTES.signinFinish, request);
+     this.#setSession({

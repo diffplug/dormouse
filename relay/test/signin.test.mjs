@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { Hono } from 'hono';
-import { API_ROUTES } from 'remote-lib-common';
+import { API_ROUTES, signinChallenge } from 'remote-lib-common';
 import { SimAuthenticator } from '../../remote-lib-common/test/harness/actors.mjs';
 
 import { MAX_PENDING_CHALLENGES } from '../dist/app.js';
@@ -58,11 +58,11 @@ test('sign-in rejects a replayed challenge/assertion', async () => {
   const authenticator = await newAuthenticator();
   assert.equal((await register(app, authenticator)).status, 200);
 
-  const { res, assertion } = await signin(app, authenticator);
+  const { res, assertion, challenge } = await signin(app, authenticator);
   assert.equal(res.status, 200);
 
   // Same assertion again — its challenge was consumed on the first finish.
-  const replay = await post(app, API_ROUTES.signinFinish, { assertion });
+  const replay = await post(app, API_ROUTES.signinFinish, { challenge, assertion });
   assert.equal(replay.status, 400);
   assert.match((await replay.json()).error, /challenge/);
 });
@@ -74,14 +74,30 @@ test('sign-in accepts a padded base64url clientData challenge', async () => {
 
   const begin = await post(app, API_ROUTES.signinBegin, {});
   const { challenge } = await begin.json();
+  const signed = await signinChallenge(challenge);
   const assertion = await authenticator.assert({
-    challenge,
+    challenge: signed,
     origin: ORIGIN,
     rpId: RP_ID,
-    tamper: { challenge: padBase64Url(challenge) },
+    tamper: { challenge: padBase64Url(signed) },
   });
-  const res = await post(app, API_ROUTES.signinFinish, { assertion });
+  const res = await post(app, API_ROUTES.signinFinish, { challenge, assertion });
   assert.equal(res.status, 200);
+});
+
+test('sign-in refuses an assertion over begin’s bytes as given, so none is ever a presence assertion', async () => {
+  const { app } = await freshApp();
+  const authenticator = await newAuthenticator();
+  assert.equal((await register(app, authenticator)).status, 200);
+
+  const begin = await post(app, API_ROUTES.signinBegin, {});
+  const { challenge } = await begin.json();
+  const raw = await authenticator.assert({ challenge, origin: ORIGIN, rpId: RP_ID });
+  for (const body of [{ assertion: raw }, { challenge, assertion: raw }]) {
+    const res = await post(app, API_ROUTES.signinFinish, body);
+    assert.equal(res.status, 400);
+    assert.match((await res.json()).error, /unrecognized or expired challenge/);
+  }
 });
 
 test('sign-in rejects a tampered signature', async () => {
@@ -189,11 +205,11 @@ test('the sign-in challenge store is capped, not merely swept', async () => {
 
   // Evicted by the flood: a challenge the store no longer holds cannot redeem.
   const stale = await authenticator.assert({
-    challenge: first.challenge,
+    challenge: await signinChallenge(first.challenge),
     origin: ORIGIN,
     rpId: RP_ID,
   });
-  const res = await post(app, API_ROUTES.signinFinish, { assertion: stale });
+  const res = await post(app, API_ROUTES.signinFinish, { challenge: first.challenge, assertion: stale });
   assert.equal(res.status, 400);
   assert.match((await res.json()).error, /unrecognized or expired challenge/);
 

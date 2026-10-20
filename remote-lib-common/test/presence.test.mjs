@@ -7,7 +7,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 
-import { PRESENCE_DOMAIN, isPresenceBinding, presenceChallenge } from '../dist/index.js';
+import {
+  PRESENCE_DOMAIN,
+  SIGNIN_DOMAIN,
+  isPresenceBinding,
+  presenceChallenge,
+  signinChallenge,
+} from '../dist/index.js';
 
 const HANDSHAKE_HASH = Buffer.alloc(32, 0x11).toString('base64url');
 const BURROW_CHALLENGE = Buffer.alloc(32, 0x22).toString('base64url');
@@ -161,4 +167,19 @@ test('a field that is not base64url throws rather than hashing garbage', async (
   // silently different challenge.
   await assert.rejects(presenceChallenge({ ...PAIRING, handshakeHash: 'not base64url!' }, RELAY_NONCE));
   await assert.rejects(presenceChallenge(PAIRING, 'not base64url!'));
+});
+
+test('the sign-in challenge is the documented bytes, under its own domain', async () => {
+  const expected = expectedChallenge([utf8(SIGNIN_DOMAIN), b64u(RELAY_NONCE)]);
+  assert.equal(await signinChallenge(RELAY_NONCE), expected);
+  assert.notEqual(SIGNIN_DOMAIN, PRESENCE_DOMAIN);
+  // Never the Relay's bytes as given, and never a presence challenge over them.
+  assert.notEqual(expected, RELAY_NONCE);
+  assert.notEqual(expected, await presenceChallenge(PAIRING, RELAY_NONCE));
+});
+
+test('the sign-in challenge refuses what it cannot bound or decode', async () => {
+  await assert.rejects(signinChallenge(undefined));
+  await assert.rejects(signinChallenge('A'.repeat(1028)));
+  await assert.rejects(signinChallenge('not base64url!'));
 });

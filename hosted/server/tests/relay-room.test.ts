@@ -27,6 +27,7 @@ import {
   REMOTE_METHODS,
   SESSION_END_V1,
   generateNoiseKeyPair,
+  signinChallenge,
   utf8Encode,
 } from "remote-lib-common";
 import {
@@ -205,8 +206,8 @@ async function signedIn(burrowToken: string) {
   });
   expect(finished.status).toBe(200);
   const challenge = (await call(API_ROUTES.signinBegin, { body: {} })).json.challenge;
-  const assertion = await authenticator.assert({ challenge, origin });
-  const signed = await call(API_ROUTES.signinFinish, { body: { assertion } });
+  const assertion = await authenticator.assert({ challenge: await signinChallenge(challenge), origin });
+  const signed = await call(API_ROUTES.signinFinish, { body: { challenge, assertion } });
   expect(signed.status).toBe(200);
   return { authenticator, sessionToken: signed.json.sessionToken as string };
 }

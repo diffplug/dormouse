@@ -727,7 +727,7 @@ export function createApp(config: AppConfig): CreatedApp {
     // The pipeline both Relays run (`verifySigninAssertion`), under the same
     // Relay-wide UV policy re-auth enforces, so sign-in is not a softer path
     // than a presence proof when UV is required.
-    const verdict = await verifySigninAssertion(body?.assertion, {
+    const verdict = await verifySigninAssertion(body, {
       findPasskey: (credentialId) => accounts.findPasskey(credentialId),
       consumeChallenge: (challenge) => signinChallenges.consume(challenge),
       policy: { origin, rpId, requireUserVerification: config.requireUserVerification },

@@ -117,7 +117,7 @@ The relay Worker serves the self-host Relay's HTTP API to many accounts: the pat
 
 | Route | On Hosted |
 |---|---|
-| `POST /api/setup/begin`, `/finish` | The passkey joins the account owning the token's Burrow: `accountId` is its user ID, `existingCredentialIds` its passkeys; 409 at `MAX_PASSKEYS_PER_ACCOUNT`; `finish`'s session counts toward `MAX_SESSIONS_PER_ACCOUNT` as sign-in's does |
+| `POST /api/setup/begin`, `/finish` | The passkey joins the account owning the token's Burrow, recorded as that Burrow's: `accountId` is its user ID, `existingCredentialIds` its passkeys; 409 at `MAX_PASSKEYS_PER_ACCOUNT`, naming the account page; `finish`'s session counts toward `MAX_SESSIONS_PER_ACCOUNT` as sign-in's does |
 | `POST /api/setup/retire` | Spends only a token one of the session's account's Burrows minted |
 | `POST /api/signin/finish` | The asserted credential's account; `accountId` is its user ID. 401 `NOT_ENTITLED_ERROR`, and no session, for an account not entitled |
 | `POST /api/reauth/begin`, `/finish` | Only the session's account's credentials and nonces |
@@ -220,13 +220,16 @@ Begin refuses an absent or mismatched origin with `ORIGIN_MISMATCH_ERROR`. The v
 | `POST /api/relay/enrollments/approve` | login cookie, exact `Origin`, JSON `{ userCode, purpose }` | 204 |
 | `GET /api/relay/burrows` | login cookie, same-origin fetch | 200 `{ burrows }` |
 | `DELETE /api/relay/burrows/:burrowId` | login cookie, exact `Origin` | 204; 404 for another account's or an unknown ID |
+| `GET /api/relay/passkeys` | login cookie, same-origin fetch | 200 `{ passkeys }`, each with the enrolled Burrow whose setup token registered it, or none |
+| `DELETE /api/relay/passkeys/:credentialId` | login cookie, exact `Origin` | 204; 404 for another account's or an unknown ID |
 
 Errors are the managed-voice cookie routes' ("Managed voice"), except that their 403 carries `NOT_ENTITLED_ERROR`.
 
 - **Must refuse approval from a login older than `LOGIN_FRESH_AGE_MS`**, 403 `RECENT_LOGIN_REQUIRED`, failing closed when the login's `createdAt` is missing or unparsable; the voice routes require no recent login.
 - **Must count every approval attempt** against `RELAY_APPROVE_LIMIT` (10 a minute per account) before reading the body: 429 with `Retry-After` past it.
 - **Must answer a malformed code 400**, forgiving case, spaces, and dashes, and a second approval of a live code 409 `ALREADY_APPROVED`, whichever account sends it: a live approval never moves. An expired one is replaced.
-- **Must remove by deleting the Burrow's row**, its setup tokens and setup challenges cascading, so its token authenticates nothing on any relay route, **then close its live socket** ("Relay sockets").
+- **Must remove by deleting the Burrow's row**, its setup tokens and setup challenges cascading, so its token authenticates nothing on any relay route, **then close its live socket** ("Relay sockets"). **Never remove a passkey with its Burrow**: it is left with no Burrow (rationale).
+- **Must remove a passkey by deleting its row**, every session it signed in cascading, so it signs in to nothing again. A session from before sessions named their passkey lives out its expiry.
 - **Must take the `/enroll` fragment before render and erase it from history, and hold the code in memory only**: through email sign-in and back, never into storage. Provider sign-in leaves the page, so the user opens the link again.
 
 **Must bind every approval to its purpose, defaulting omitted purpose to remote control.** Voice approvals use a distinct code derivation and scope. Voice clients require begin to acknowledge their purpose before displaying or polling a code. Voice redemption atomically marks the approval and mints a token, without a Burrow or its cap; later polls report it spent. A remote poll cannot redeem a voice approval, or vice versa. Both purposes share approval gates and expiry.
