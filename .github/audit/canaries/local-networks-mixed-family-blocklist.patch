@@ -1,7 +1,7 @@
 Domain: remote
 Rule: S272 — only against IPv4 ranges
 Expect: lib/src/host/remote/network-interfaces.ts
-Source: reverses the per-family allowed-range check (one BlockList held both families, so an IPv6 range over ::ffff:0:0/96 admitted IPv4)
+Source: reverses #1240 (one BlockList held both families, so an IPv6 range over ::ffff:0:0/96 admitted IPv4)
 
 diff --git a/lib/src/host/remote/local-networks.test.ts b/lib/src/host/remote/local-networks.test.ts
 index 621427f53..e31f4609e 100644
