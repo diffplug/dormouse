@@ -759,7 +759,7 @@ async function retireUnlessExpired(client: PocketClient, setupToken: string): Pr
 function toBurrowView(
   record: KnownBurrowSummary,
   online: boolean,
-  { removed = false, otherAccount = false }: { removed?: boolean; otherAccount?: boolean } = {},
+  { removed, otherAccount }: Pick<BurrowView, 'removed' | 'otherAccount'> = {},
 ): BurrowView {
   return {
     burrowId: record.burrowId,
