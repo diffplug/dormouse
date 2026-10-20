@@ -162,14 +162,14 @@ export async function signin(app, authenticator, { origin = ORIGIN, rpId = RP_ID
 
 // --- Slice 2: live Relay + WebSocket relay scaffolding --------------------
 
+/** Every {@link wsConnect} socket, so a Relay teardown can force them shut. */
+const OPEN_SOCKETS = new Set();
+
 /**
  * Boot a real listening server for a `createApp` result (WS needs a socket, not
  * `app.request`). Binds port 0 and reports the OS-assigned port; the returned
  * `wsUrl` is ready for `/ws/burrow` / `/ws/client`.
  */
-/** Every {@link wsConnect} socket, so a Relay teardown can force them shut. */
-const OPEN_SOCKETS = new Set();
-
 export function startRelay(created) {
   return new Promise((resolve) => {
     // Loopback: these are built with the checked-in `PASSWORD` from

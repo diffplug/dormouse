@@ -14,7 +14,7 @@ import { spawn } from 'node:child_process';
 import { StringDecoder } from 'node:string_decoder';
 import { setTimeout as delay } from 'node:timers/promises';
 
-/** Every child this run started, newest first, so teardown is reverse order. */
+/** Every child this run started, in start order; {@link spawnedHandles} reverses it for teardown. */
 const started = [];
 
 /**
