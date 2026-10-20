@@ -202,7 +202,7 @@ export function reportWindowPresence(state: vscode.WindowState): void {
   const active = (state as { active?: unknown }).active === true;
   alertManager.setViewer(WINDOW_VIEWER, { present: state.focused && active, focusId: null });
 }
-/** Every PTY write and resize, as the alerts must see it. */
+/** Every PTY write, as the alerts must see it. */
 const alertedPtys = alertedPty(alertManager, ptyManager);
 /**
  * This window's parse sites: one per PTY generation, created at spawn and fed
