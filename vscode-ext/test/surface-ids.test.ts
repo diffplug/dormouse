@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { chmod, mkdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rename, rm, utimes, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -32,6 +32,13 @@ const lock = () => `${file()}.lock`;
 async function holdLock(pid: number, token = 'theirs') {
   await mkdir(lock());
   await writeFile(path.join(lock(), 'owner.json'), JSON.stringify({ pid, token }));
+}
+/** Release that lock as a holder does: moved aside in one step, so a waiter
+ *  never renames its own lock onto the emptied directory mid-removal. */
+async function releaseLock() {
+  const aside = `${lock()}.released`;
+  await rename(lock(), aside);
+  await rm(aside, { recursive: true });
 }
 const lockToken = async () => (JSON.parse(await readFile(path.join(lock(), 'owner.json'), 'utf8')) as { token: string }).token;
 /** A pid no process has: one that just exited. */
@@ -86,7 +93,7 @@ describe('createSurfaceIdAllocator', () => {
     void waiting.then(() => { settled = true; });
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(settled).toBe(false);
-    await rm(lock(), { recursive: true });
+    await releaseLock();
     expect(await waiting).toEqual(['surface:1']);
     await expect(readFile(path.join(lock(), 'owner.json'))).rejects.toThrow();
   });
