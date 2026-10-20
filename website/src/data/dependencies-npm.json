@@ -2702,7 +2702,7 @@
       "author": "Dr.-Ing. Mario Heiderich, Cure53 <mario@cure53.de> (https://cure53.de/)",
       "homepage": "https://github.com/cure53/DOMPurify",
       "versions": [
-        "3.2.7",
+        "3.4.15",
         "3.4.16"
       ]
     },
@@ -3436,7 +3436,7 @@
       "author": "Microsoft Corporation",
       "homepage": "https://github.com/microsoft/monaco-editor",
       "versions": [
-        "0.55.1"
+        "0.57.0"
       ]
     },
     {
