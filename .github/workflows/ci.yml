@@ -83,11 +83,11 @@ jobs:
           echo "::error::could not install zsh; the shell-integration suite would silently cover only bash"
           exit 1
 
-      # It finishes in about 4 minutes. Without a bound, a test file that never
-      # exits holds the job until the 6-hour default.
+      # Library tests have their own runner. test:other finishes the checkout
+      # isolation check before overlapping audit and package tests.
       - name: Test
         timeout-minutes: 20
-        run: pnpm test
+        run: pnpm test:other
 
       - name: Build
         run: pnpm build
@@ -155,11 +155,49 @@ jobs:
           [ -L "$root/previous" ] || { echo "::error::no previous release retained after an update"; exit 1; }
           bash -n "$root/bin/manage"
           bash -n "$root/bin/run-relay"
+  library-test:
+    name: Library Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: package.json
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # browser-launch-env.test.ts skips its real POSIX shell cases without zsh.
+      - name: Install zsh (browser shell tests)
+        timeout-minutes: 13
+        run: |
+          for i in 1 2 3; do
+            if sudo timeout 120 apt-get update -q \
+               && sudo timeout 120 apt-get install -y -q --no-install-recommends zsh; then
+              exit 0
+            fi
+            echo "::warning::apt attempt $i for zsh failed or timed out"
+            if [ "$i" -lt 3 ]; then sleep 15; fi
+          done
+          echo "::error::could not install zsh; the browser shell tests would silently skip zsh"
+          exit 1
+
+      # Includes the library's pretest builds and typecheck on a fresh checkout.
+      # The library suite runs with Vitest's default worker settings.
+      - name: Test library
+        timeout-minutes: 20
+        run: pnpm test:lib
+
   # The workflows themselves: actionlint for syntax, expressions, and the
   # shell in every `run:` block; zizmor for GitHub Actions security
   # (`.github/zizmor.yml` names each accepted exception). The repository's own
   # workflow rules — docs/specs/security-ci.md's `FAIL IF` lines — are
-  # `scripts/workflow-lint.mjs`, which runs in `pnpm test` above. Both tools
+  # `scripts/workflow-lint.mjs`, which runs in `test:checks` above. Both tools
   # sit outside the lockfile, so each is pinned exactly and verified by hash
   # (docs/specs/security-supply-chain.md -> "Cooldown and alerts").
   workflow-lint:
