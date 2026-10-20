@@ -22,6 +22,8 @@ MDXEditor 4.3.3 depends on Lexical `^0.48.0`; independent direct bumps to 0.52 i
 
 MDXEditor 4.3 parses `<!-- … -->` and discards it, and trims and re-serializes the whole document on export; without the comment node and style detection, saving a typical README after a one-word edit deleted its comments and rewrote every `-` bullet as `*` (measured 2026-10).
 
+Issue #1254 (2026-10) exposed unconditional bracket escaping, literal angle brackets changing spelling across rich/source imports, and blank lines inserted after every heading. Serializer options keep simple labels and per-heading spacing without retaining a parallel source tree, while entity-encoding text brackets survives MDX JSX parsing. Code and HTML still use their own serializers. MDXEditor also leaves its initial-normalization flag set after a failed import; treating source changes as edits after that failure permits repair and save.
+
 Image sizes live in the document because GitHub shows an `<img>` without a `width` pixel for pixel: a Retina screenshot shown here at its recorded scale but left unsized in the file came out twice as large on GitHub. Writing the width on paste keeps the two renderings alike (2026-10).
 
 Image URLs carry a per-load generation because the browser keeps decoded images by URL: a reload that only remounted the editor still showed an image's old pixels after the file changed on disk (observed live, 2026-10).

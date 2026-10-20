@@ -16,6 +16,7 @@ import { checked, documentSession, loadingState, request, stateLabel, textSource
 import { editableImage, handOffImageEdits, imageSources, imageUrl, ImagesPanel, localImagePath, pathRoute } from './images-panel';
 import { ImageResizeHandles } from './image-resize';
 import { commentsPlugin } from './markdown-comments';
+import { markdownFormat } from './markdown-format';
 import { markdownSafetyPlugin } from './markdown-safety';
 import { pageTheme, subscribeTheme } from './page-theme';
 import { mermaidDescriptor } from './mermaid-block';
@@ -247,15 +248,6 @@ const plugins = [
   toolbarPlugin({ toolbarContents: Toolbar }),
 ];
 
-/** The list bullet and thematic break the file uses most, so a save keeps its style. */
-function markdownStyle(markdown: string) {
-  const prose = markdown.replace(/^(```|~~~)[^]*?^\1/gm, '');
-  const count = (pattern: RegExp) => prose.match(pattern)?.length ?? 0;
-  const bullets = (['-', '*', '+'] as const).map(b => [b, count(new RegExp(`^[ \\t]*\\${b}[ \\t]+\\S`, 'gm'))] as const);
-  const bullet = bullets.reduce((best, next) => next[1] > best[1] ? next : best)[0];
-  return { bullet, rule: count(/^\*{3,}[ \t]*$/gm) > count(/^-{3,}[ \t]*$/gm) ? '*' as const : '-' as const };
-}
-
 /** Whether this editor failed to parse its document. MDXEditor clears its
  * normalize flag only in a rich-text export, which a parse error suppresses,
  * so every later source edit would otherwise arrive as normalization. */
@@ -271,7 +263,7 @@ const onEditorError: MDXEditorProps['onError'] = ({ error: reason }) => {
 /** The rich editor; it follows only the theme, so page state changes leave it be. */
 function Editor({ markdown }: { markdown: string }) {
   const theme = useSyncExternalStore(subscribeTheme, pageTheme);
-  const style = useMemo(() => markdownStyle(markdown), [markdown]);
+  const style = useMemo(() => markdownFormat(markdown), [markdown]);
   return (
     <MDXEditor ref={editorRef} markdown={markdown} plugins={plugins} toMarkdownOptions={style}
       className={theme.dark ? 'dark-theme' : 'light-theme'} contentEditableClassName="prose" spellCheck
