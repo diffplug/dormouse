@@ -19,7 +19,18 @@ export function ExternalLinkModalHost() {
   );
   useDialogKeyboardOwner(pending !== null);
   // Each click owns its lookup, selection and launch result, even for the same URL.
-  return pending ? <PendingLinkDialog key={pending.id} request={pending} /> : null;
+  if (!pending) return null;
+  return pending.answer ? <PendingAnswerDialog key={pending.id} request={pending} /> : <PendingLinkDialog key={pending.id} request={pending} />;
+}
+
+/** A question another flow awaits: confirming only answers it. */
+function PendingAnswerDialog({ request }: { request: PendingExternalLink }) {
+  const confirm = () => {
+    if (getExternalLinkConfirmationSnapshot() !== request) return;
+    request.answer!(true);
+    clearExternalLinkConfirmation();
+  };
+  return <ExternalLinkModal request={request} onCancel={clearExternalLinkConfirmation} onConfirm={confirm} />;
 }
 
 function PendingLinkDialog({ request }: { request: PendingExternalLink }) {

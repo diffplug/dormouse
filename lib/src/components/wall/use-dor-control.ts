@@ -75,8 +75,9 @@ import { commitPreviewTransition, endPreviewTransition } from '../../lib/preview
 import { retireToolRun } from './use-tool-serving';
 import { validToolFragment } from 'dor-tools-lib/osc';
 import { confirmToolEditorsClose } from '../../lib/tool-editor';
+import { confirmDocumentLinkOpen } from '../../lib/external-link-confirmation';
 import { directoryOf } from '../../lib/tool-open-requests';
-import { commitToolHistory, hasToolView, toolHandlerName, toolHistory, toolLocation, toolNavigationPending, toolView } from './tool-navigation';
+import { commitToolHistory, documentLinkNeedsConfirmation, hasToolView, toolHandlerName, toolHistory, toolLocation, toolNavigationPending, toolView } from './tool-navigation';
 
 import { listenerUrlsByPort } from './port-url';
 import { becomeToolMeta, dorDirectionForEdge, toolLeafMeta, type LathWallEngine } from './lath-wall-engine';
@@ -1449,6 +1450,24 @@ export function useDorControl({
             return;
           }
           toolRun = argv!;
+        }
+
+        // A document link's target is the Tool's to name: a Markdown link can
+        // climb with `..` to anywhere on disk under any link text. One whose
+        // preview would run that file's own script therefore opens only once
+        // the user confirms its full path here, in host UI the page cannot
+        // reach. An anchor in the document already shown loads nothing new.
+        // Back/Forward asks again: re-asking costs one click, and no rule then
+        // depends on how a history entry got there.
+        if (documentLink && openTarget !== undefined
+          && !(sourceParams!.toolTarget === openTarget && sourceParams!.toolName === toolName && sourceParams!.toolScope === toolScope)
+          && documentLinkNeedsConfirmation(toolScope, toolName, openTarget)) {
+          const confirmed = await confirmDocumentLinkOpen(openTarget, detail.signal);
+          if (unavailable()) return;
+          if (!confirmed) {
+            detail.respond({ ok: false, error: 'Navigation cancelled.' });
+            return;
+          }
         }
 
         const identity: ToolIdentityParams = {

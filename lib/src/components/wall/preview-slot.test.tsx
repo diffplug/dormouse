@@ -1328,6 +1328,61 @@ describe('Tool document navigation', () => {
 });
 
 
+describe('a document link to a page that runs its own script', () => {
+  /** The Tool in `surface:slot` follows a document link, as its OSC 367 `open`. */
+  const follow = (path: string) => act(async () => applyLiveToolEvents('surface:slot',
+    [{ kind: 'toolOpen', open: { path, preview: false, disposition: 'current' } }]));
+  const dialogButton = (label: string) => [...document.body.querySelectorAll('button')].find(button => button.textContent === label)!;
+  /** Wait for the slot to show `target`. */
+  async function untilTarget(target: string): Promise<void> {
+    for (let tries = 0; tries < 100; tries++) {
+      if ((await paramsOf('surface:slot'))?.toolTarget === target) return;
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
+    }
+    expect((await paramsOf('surface:slot'))?.toolTarget).toBe(target);
+  }
+
+  it('waits for the user to confirm its full path in host UI, and a cancel runs nothing', async () => {
+    await mountSlot();
+    await follow('/elsewhere/page.html');
+    await waitUntil(() => getExternalLinkConfirmationSnapshot() !== null);
+    expect(getExternalLinkConfirmationSnapshot()?.uri).toBe('/elsewhere/page.html');
+    expect(document.body.textContent).toContain('/elsewhere/page.html');
+    await flush();
+    expect(typed['surface:slot']).toEqual([]);
+    expect((await paramsOf('surface:slot'))?.toolTarget).toBe('/repo/a.md');
+
+    act(() => dialogButton('Cancel').click());
+    await flush();
+    expect(typed['surface:slot']).toEqual([]);
+    expect((await paramsOf('surface:slot'))?.toolTarget).toBe('/repo/a.md');
+
+    await follow('/elsewhere/page.html');
+    await waitUntil(() => getExternalLinkConfirmationSnapshot() !== null);
+    act(() => dialogButton('Open file').click());
+    await untilTarget('/elsewhere/page.html');
+  });
+
+  it('opens an inert target on the click alone, and asks again on Forward to the page', async () => {
+    await mountSlot();
+    await follow('/elsewhere/notes.md');
+    await untilTarget('/elsewhere/notes.md');
+    expect(getExternalLinkConfirmationSnapshot()).toBeNull();
+    await follow('/elsewhere/diagram.svg');
+    await waitUntil(() => getExternalLinkConfirmationSnapshot() !== null);
+    act(() => dialogButton('Open file').click());
+    await untilTarget('/elsewhere/diagram.svg');
+    await answer(await request({ history: 'back', disposition: 'current' }, 'surface:slot'));
+    expect(getExternalLinkConfirmationSnapshot()).toBeNull();
+    const forward = await request({ history: 'forward', disposition: 'current' }, 'surface:slot');
+    await waitUntil(() => getExternalLinkConfirmationSnapshot()?.uri === '/elsewhere/diagram.svg');
+    act(() => clearExternalLinkConfirmation());
+    await waitUntil(() => forward.mock.calls.length > 0);
+    expect(forward.mock.calls[0][0]).toMatchObject({ ok: false, error: 'Navigation cancelled.' });
+    expect((await paramsOf('surface:slot'))?.toolTarget).toBe('/elsewhere/notes.md');
+  });
+});
+
 it('document navigation Cancel keeps the draft and history; Discard permits replacement', async () => {
   await mountSlot();
   recordToolDirty('surface:slot', true);

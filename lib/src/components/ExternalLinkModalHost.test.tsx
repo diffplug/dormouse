@@ -1,10 +1,10 @@
 /** @vitest-environment jsdom */
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ExternalLinkModalHost } from './ExternalLinkModalHost';
 import type { DorControlResult } from 'dor/protocol';
-import { clearExternalLinkConfirmation, getExternalLinkConfirmationSnapshot, requestExternalLinkConfirmation } from '../lib/external-link-confirmation';
+import { clearExternalLinkConfirmation, confirmDocumentLinkOpen, getExternalLinkConfirmationSnapshot, requestExternalLinkConfirmation } from '../lib/external-link-confirmation';
 
 const mocks = vi.hoisted(() => ({ open: vi.fn(), toolControl: vi.fn(), confirm: () => {} }));
 vi.mock('../lib/platform', () => ({ getPlatform: () => ({ openExternal: mocks.open, toolControl: mocks.toolControl }) }));
@@ -200,4 +200,41 @@ it('explains a file link with no originating terminal instead of passing it to t
   expect(alertText()).toContain('originating terminal');
   expect(mocks.open).not.toHaveBeenCalled();
   expect(requests).toHaveLength(0);
+});
+
+describe('a document link\'s confirmation', () => {
+  const path = '/elsewhere/page.html';
+  const ask = (signal?: AbortSignal) => {
+    let answer!: Promise<boolean>;
+    act(() => { answer = confirmDocumentLinkOpen(path, signal); });
+    return answer;
+  };
+
+  it('shows the full path and answers yes only on an explicit open, opening nothing itself', async () => {
+    const answer = ask();
+    expect(document.body.textContent).toContain(path);
+    expect(document.activeElement?.textContent).toBe('Cancel');
+    act(() => button('Open file').click());
+    expect(await answer).toBe(true);
+    expect(getExternalLinkConfirmationSnapshot()).toBeNull();
+    expect(mocks.open).not.toHaveBeenCalled();
+    expect(requests).toHaveLength(0);
+  });
+
+  it('answers no on cancel, on another link replacing it, and on abort', async () => {
+    const cancelled = ask();
+    act(() => button('Cancel').click());
+    expect(await cancelled).toBe(false);
+
+    const replaced = ask();
+    act(() => requestExternalLinkConfirmation('https://example.com/'));
+    expect(await replaced).toBe(false);
+    act(() => clearExternalLinkConfirmation());
+
+    const controller = new AbortController();
+    const aborted = ask(controller.signal);
+    act(() => controller.abort());
+    expect(await aborted).toBe(false);
+    expect(getExternalLinkConfirmationSnapshot()).toBeNull();
+  });
 });

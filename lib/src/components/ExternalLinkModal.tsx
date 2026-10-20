@@ -18,6 +18,8 @@ export interface ExternalLinkModalRequest {
   displayText: string;
   verdict: DisplayMatchVerdict;
   decision: ExternalUriDecision;
+  /** Why this open is asked about, below the target. */
+  note?: string;
 }
 
 // "Open ___" button label suffix: the scheme noun sits next to the cursor, so
@@ -107,6 +109,9 @@ export function ExternalLinkModal({
         {displayUri}
       </ModalReviewBlock>
 
+      {request.note && openableDecision && !isDeceptive && (
+        <p className="mt-3 text-xs text-muted">{request.note}</p>
+      )}
       {openableDecision?.otherApp && !isDeceptive && (
         <p className="mt-3 text-xs text-muted">
           Dormouse hands this link to whichever app is registered for{' '}

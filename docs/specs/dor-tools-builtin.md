@@ -57,7 +57,7 @@ Source of truth: `dor-tools-builtin/viewer/markdown.tsx`; `safeCreateDOM` in `do
 
 ### Relative links
 
-- **Must follow a relative link on plain click**, and offer Open in another surface and Edit link on its context menu. Cmd/Ctrl-click chooses another Surface. Dispatch follows `docs/specs/dor-tool.md` → Document navigation. (rationale)
+- **Must follow a relative link on plain click**, and offer Open in another surface and Edit link on its context menu. Cmd/Ctrl-click chooses another Surface. Dispatch, and any confirmation the host asks first, follows `docs/specs/dor-tool.md` → Document navigation. (rationale)
 - **Must open a local PNG or JPEG image's file the same way on Edit or double-click**, with a link's context menu whose edit item opens it.
 - **Must let an enclosing link own double-click and context-menu behavior.**
 - **Must treat only a scheme-less relative reference as a document link**, resolved from the opened canonical file's directory with parent references allowed and its query ignored; HTTP(S)/mail links keep their existing handling.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { commitToolHistory, toolHistory } from './tool-navigation';
+import { commitToolHistory, documentLinkNeedsConfirmation, toolHistory } from './tool-navigation';
 import { directoryOf } from '../../lib/tool-open-requests';
 
 const location = (target: string, top = 0) => ({ target, cwd: '/repo', handler: 'builtin:file', position: { top } });
@@ -26,5 +26,21 @@ describe('Tool document history', () => {
     expect(directoryOf('/repo/docs/a.md')).toBe('/repo/docs');
     expect(directoryOf('C:\\a.md')).toBe('C:\\');
     expect(directoryOf('C:\\repo\\a.md')).toBe('C:\\repo');
+  });
+});
+
+describe('which document links wait for confirmation', () => {
+  it('asks before a page that runs its own script, under any handler that would render it', () => {
+    for (const target of ['/x/page.html', '/x/PAGE.HTM', '/x/diagram.svg', 'C:\\x\\page.html']) {
+      expect(documentLinkNeedsConfirmation('builtin', 'file', target), target).toBe(true);
+      expect(documentLinkNeedsConfirmation('user', 'viewer', target), target).toBe(true);
+    }
+  });
+  it('opens inert targets, and active ones shown as source or as a folder, on the click alone', () => {
+    for (const target of ['/x/notes.md', '/x/a.txt', '/x/photo.png', '/x/anim.gif', '/x/clip.mp4', '/x/script.js', '/x/feed.xml', '/x/doc.pdf', '/x/README']) {
+      expect(documentLinkNeedsConfirmation('builtin', 'file', target), target).toBe(false);
+    }
+    expect(documentLinkNeedsConfirmation('builtin', 'code', '/x/page.html')).toBe(false);
+    expect(documentLinkNeedsConfirmation('builtin', 'folder', '/x/site.html')).toBe(false);
   });
 });
