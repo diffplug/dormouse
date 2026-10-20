@@ -122,7 +122,7 @@ jobs:
           PREVIEW_AUTH_SECRET: ${{ secrets.PREVIEW_AUTH_SECRET }}
       - name: Create or reuse PR database branch
         id: database
-        uses: neondatabase/create-branch-action@fb620d43d4c565abaf088b848a4e28e5c4ea4d9c # v6
+        uses: neondatabase/create-branch-action@fb620d43d4c565abaf088b848a4e28e5c4ea4d9c # 6.3.1
         with:
           project_id: ${{ vars.NEON_PROJECT_ID }}
           parent_branch: ${{ vars.NEON_PREVIEW_PARENT_BRANCH }}
