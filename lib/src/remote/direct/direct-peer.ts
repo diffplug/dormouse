@@ -222,8 +222,9 @@ export interface DirectPathPolicy {
   describe(sdp: string): string | null;
   /**
    * The peer's description as this end applies it: every candidate that is not
-   * an IP address inside the allowed networks removed, a name included, so the
-   * ICE agent sends no check and makes no lookup toward one. None left is not a
+   * an IP address inside the allowed networks removed, a name included, and
+   * each one kept rebuilt from the fields checked, so the ICE agent sends no
+   * check and makes no lookup toward any other address. None left is not a
    * refusal: the peer's own checks still reach this end's allowed candidates.
    */
   acceptRemote(sdp: string): string;

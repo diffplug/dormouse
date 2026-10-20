@@ -20,6 +20,7 @@
  * this file resolves, and the shipped factory is driven by the last case alone.
  */
 
+import { createSocket, type SocketType } from 'node:dgram';
 import { createRequire } from 'node:module';
 import { isIP } from 'node:net';
 import { networkInterfaces } from 'node:os';
@@ -493,6 +494,49 @@ describe('the direct path over the native addon', () => {
     },
     CASE_BUDGET_MS,
   );
+
+  /**
+   * The strip and the addon reading one offer: the ICE agent checks only the
+   * candidates the policy kept, at the addresses it read. Two loopback
+   * listeners stand in for the phone — one behind a candidate in a browser's
+   * spelling, one behind a line a whitespace split and the addon's parser
+   * divide into different fields — and the first one's check retransmitted
+   * shows every pair has had its turn.
+   */
+  it('checks only the candidates the policy kept, at the addresses it read', async () => {
+    const listen = async (type: SocketType, address: string) => {
+      const socket = createSocket(type);
+      const listener = { socket, checks: 0, port: 0 };
+      socket.on('message', () => (listener.checks += 1));
+      await new Promise<void>((resolve) => socket.bind(0, address, resolve));
+      listener.port = socket.address().port;
+      return listener;
+    };
+    const kept = await listen('udp6', '::1');
+    const unread = await listen('udp4', '127.0.0.1');
+    const offerer = buildPeer();
+    const burrow = buildPeer();
+    try {
+      offerer.createDataChannel(DIRECT_CHANNEL_LABEL, { ordered: true });
+      await offerer.setLocalDescription(await offerer.createOffer());
+      const offer = [
+        ...offerer.localDescription!.sdp!.split(/\r\n|\r|\n/).filter((line) => line && !line.startsWith('a=candidate')),
+        `a=candidate:842163049 1 udp 1000 ::1 ${kept.port} typ host generation 0`,
+        // Split on whitespace, its address is inside 2001::/16; the addon reads a priority of 2001 and 127.0.0.1.
+        `a=candidate: 1 1 UDP 2001::ffff:127.0.0.1 ${unread.port} typ host`,
+        '',
+      ].join('\r\n');
+      const accepted = localNetworksPath(['::1/128', '2001::/16']).acceptRemote(offer);
+      await burrow.setRemoteDescription({ type: 'offer', sdp: accepted });
+      await waitFor(() => kept.checks >= 2, 'the kept candidate’s check to be retransmitted', ATTEMPT_BUDGET_MS);
+      expect(unread.checks).toBe(0);
+    } finally {
+      burrow.close();
+      offerer.close();
+      kept.socket.close();
+      unread.socket.close();
+    }
+  });
 
   /**
    * Anywhere on the real stack (`docs/specs/remote-network.md` -> "Anywhere"):
