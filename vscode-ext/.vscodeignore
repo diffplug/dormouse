@@ -1,5 +1,13 @@
+# vsce warns that the extension should be bundled: it counts the Markdown
+# viewer's lazy chunks in dor-cli/dist/builtin/viewer, which stay split on
+# purpose (dor-tools-builtin/scripts/build-viewer.mjs). The extension host's
+# own code is already bundled into dist/extension.js and dist/pty-host.js.
 src/
+test/
+scripts/
 node_modules/
+*.mts
+icon-no-border.svg
 .gitignore
 tsconfig.json
 pnpm-lock.yaml

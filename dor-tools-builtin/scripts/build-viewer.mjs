@@ -21,6 +21,10 @@ export async function buildViewerAssets(outdir) {
       target: 'es2022', minify: true, loader: { '.ttf': 'file' }, assetNames: '[name]',
     }),
     // Mermaid and CodeMirror's languages load as split chunks on first use.
+    // Keep them split: inlined, every Markdown open would parse ~5 MB of
+    // diagram and language code it rarely needs (228 chunks, 2026-10). Each
+    // viewer is likewise its own build, so a page loads only its own code.
+    // vsce's "bundle your extension" warning counts these chunks; ignore it.
     build({
       absWorkingDir,
       entryPoints: { markdown: 'viewer/markdown.tsx' },
