@@ -107,7 +107,7 @@ jobs:
         with:
           fetch-depth: 1
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: package.json
 
@@ -162,7 +162,7 @@ jobs:
       # artifact here, and it carries nothing a finding could.
       - name: Upload the audited state
         if: always() && steps.plan.outcome == 'success'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: audit-state
           path: ${{ runner.temp }}/audit-state/audit-state.json
@@ -207,7 +207,7 @@ jobs:
 
       - name: Audit against the security specs
         if: steps.plan.outputs.skip != 'true'
-        uses: anthropics/claude-code-action@58985842b834ed26087302ba27d07bc24ca8697a # v1.0.244
+        uses: anthropics/claude-code-action@db77d4d3c98f3f6380e7cd45ffba2342a3dbde3c # v1.0.254
         env:
           # `claude-code-action` resets `GH_TOKEN` to its own internal
           # workflow token, so setting `GH_TOKEN` at this scope is
@@ -411,7 +411,7 @@ jobs:
 
       - name: Archive audit transcript
         if: always() && steps.encrypt.outcome == 'success'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: audit-transcript
           # Ciphertext only: one `.age` file, never a plaintext sink.
@@ -712,7 +712,7 @@ jobs:
           # No token left in `.git/config` for the agent to push with.
           persist-credentials: false
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: package.json
 
@@ -739,7 +739,7 @@ jobs:
       # The audit job's agent step, less `ci-and-secrets`: the same pinned
       # action, prompts, tools, and model split.
       - name: Audit the seeded checkout
-        uses: anthropics/claude-code-action@58985842b834ed26087302ba27d07bc24ca8697a # v1.0.244
+        uses: anthropics/claude-code-action@db77d4d3c98f3f6380e7cd45ffba2342a3dbde3c # v1.0.254
         env:
           BASH_DEFAULT_TIMEOUT_MS: "600000"
         with:
@@ -809,7 +809,7 @@ jobs:
 
       - name: Archive the canary transcript
         if: always() && steps.encrypt.outcome == 'success'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: canary-transcript
           # Ciphertext only: one `.age` file, never a plaintext sink.
@@ -819,7 +819,7 @@ jobs:
 
       - name: Upload the canary recall
         if: always() && steps.score.outcome == 'success'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: canary-recall
           path: ${{ runner.temp }}/canary-recall/canary-recall.json
