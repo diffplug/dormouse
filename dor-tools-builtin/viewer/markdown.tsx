@@ -90,6 +90,7 @@ const session = documentSession<string>({
   async apply(text) {
     // A reload mounts a fresh editor: its own normalization is then not an edit, and undo starts over.
     uploadedWidths.clear();
+    unparsed = false;
     flushSync(() => root.render(<Page key={++loads} markdown={text.replace(/\r\n?/g, '\n')} />));
     await new Promise(resolve => setTimeout(resolve));
   },
@@ -255,9 +256,14 @@ function markdownStyle(markdown: string) {
   return { bullet, rule: count(/^\*{3,}[ \t]*$/gm) > count(/^-{3,}[ \t]*$/gm) ? '*' as const : '-' as const };
 }
 
+/** Whether this editor failed to parse its document. MDXEditor clears its
+ * normalize flag only in a rich-text export, which a parse error suppresses,
+ * so every later source edit would otherwise arrive as normalization. */
+let unparsed = false;
 // The editor's own reformatting of loaded text is not an edit.
-const onEditorChange: MDXEditorProps['onChange'] = (_, normalize) => { if (normalize) session.rebase(); else session.changed(); };
+const onEditorChange: MDXEditorProps['onChange'] = (_, normalize) => { if (normalize && !unparsed) session.rebase(); else session.changed(); };
 const onEditorError: MDXEditorProps['onError'] = ({ error: reason }) => {
+  unparsed = true;
   realm?.pub(viewMode$, 'source');
   session.fail(`Showing source: the rich editor cannot parse this file (${reason}).`);
 };
