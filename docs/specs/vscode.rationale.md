@@ -66,6 +66,12 @@
 
 **What squatting the socket path buys.** One HMAC over a nonce the squatter chose — which is not the token — and nothing else.
 
+**Why Windows publishes its endpoint.** With a derived pipe name, another account could create it before any window bound it after a restart, and every window's bind then failed: remote control and peer surfaces stayed down. Keying the name by the token does not help: the token and storage path are permanent, so the keyed name is fixed after its first bind, and Windows lists it to every account. A name minted per bind cannot be created in advance, and once bound, libuv's first-instance flag and the pipe's default DACL keep another account from adding an instance of it.
+
+**Why a published name is retired on any failure, not only a refusal.** A dead broker's name is free again and was listed while it lived, so another account can bind it as the broker goes. Under unix's refusal-only rule every window would then retry it forever: the same denial, moved from boot to the first broker restart. The cost is that a live broker that cannot finish a handshake within `HANDSHAKE_BUDGET_MS`, twice, is replaced, and the two Burrows displace each other until the hung one recovers.
+
+**Why the broker holds the derived name too.** VS Code keeps running an extension's old version in each window until that window restarts its extensions, so after an update windows of both builds share one installation. An older-build window that found the derived name free would bind it and run a second Burrow under the same enrollment. A squatter on that name costs a current broker one `HANDSHAKE_BUDGET_MS` dial before it is believed, and keeps older-build windows from any broker (`docs/specs/security.md` -> "What is not defended").
+
 **Why a mid-contention command waits rather than being refused.** While the contention runs the window is neither broker nor client, and a bind plus a handshake is not instant. Refusing there would tell an enrolled machine's webview it has no Burrow seconds before it gets one, and the gates that arm on that answer (`enrolled-gate.ts`) would stay down.
 
 **Where the `WebSocket` boundary falls.** `globalThis.WebSocket` arrived in Node 22, and VS Code 1.92 — the floor `engines.vscode` declares — shipped Node 20.14 (its release notes, July 2024), so an older extension host has no global to use.

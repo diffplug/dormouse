@@ -14,13 +14,13 @@ For `## Network policy`, read `docs/specs/remote-network.md` -> "Policy", then `
 
 For `## Terminal context directory actions`, read `docs/specs/terminal-context.md` and `docs/specs/layout.md` -> "Workspace names"; for `## Dor Tool configuration`, `docs/specs/dor-tool.md` -> "Declaring tools", "Trust", and "Serving"; then the code each section's `Source of truth` names.
 
-For the rest of `docs/specs/security-local.md`, read each section's owner first — `docs/specs/terminal-escapes.md` and the owners its rows name, `docs/specs/dor-tool.md` -> "Reaping", "Terminal links", and "Opening local files", `docs/specs/dor-browser.md` -> "Automated Browser", "Iframe Renderer", and "Iframe Host Capability And CSP", `docs/specs/dor-cli.md` -> "Spawning External Binaries" and "Host Plumbing", `docs/specs/vscode.md` -> "Webview message authentication", `docs/specs/standalone.md` -> "Persistence", `docs/compatible-agents.md` -> "Recovery contract (maintainers)" — then the parser, the iframe shim, the control-socket code, the persistence paths they point at, and the files the checklist below names.
+For the rest of `docs/specs/security-local.md`, read each section's owner first — `docs/specs/terminal-escapes.md` and the owners its rows name, `docs/specs/dor-tool.md` -> "Reaping", "Terminal links", and "Opening local files", `docs/specs/dor-browser.md` -> "Automated Browser", "Iframe Renderer", and "Iframe Host Capability And CSP", `docs/specs/dor-cli.md` -> "Spawning External Binaries" and "Host Plumbing", `docs/specs/vscode.md` -> "Webview message authentication" and "Burrow: a service in the extension host", `docs/specs/standalone.md` -> "Persistence", `docs/compatible-agents.md` -> "Recovery contract (maintainers)" — then the parser, the iframe shim, the control-socket code, the persistence paths they point at, and the files the checklist below names.
 
 ## Work streams
 
 Delegate only by these streams (`.github/audit/_preamble.md` -> "Work streams"). Each holds every rule under the headings it names, subheadings included:
 
-- `local-terminal` — `docs/specs/security-local.md`: "Terminal output", "Browser panes", "The dor control socket", "Persisted state", "Terminal context directory actions", "Spawned programs", "Dor Tool configuration".
+- `local-terminal` — `docs/specs/security-local.md`: "Terminal output", "Browser panes", "The dor control socket", "The VS Code peer link", "Persisted state", "Terminal context directory actions", "Spawned programs", "Dor Tool configuration".
 - `local-listeners` — `docs/specs/security-local.md`: "Loopback Listeners", "Local-file viewer", "Network policy".
 - `qualitative` — the qualitative pass below, once, over the whole of this domain's scope.
 

@@ -135,16 +135,23 @@ The shared `BurrowService` (`docs/specs/relay.md` → "Burrow side", which owns 
 
 Source of truth: `VsCodeBurrowStateStore` in `vscode-ext/src/burrow-store.ts`, `markOneTimeServing` and `contendIfServing` in `vscode-ext/src/burrow.ts`.
 
-**Which window: bind-as-lease.** **The bind is the lease**, so the windows' extension hosts never fight over the enrollment's one `/ws/burrow` socket (rationale). Every contending window binds one fixed path — `<hash>.sock` in a per-user `dormouse-peer-<uid>` directory in the temp dir, or `\\.\pipe\dormouse-peer-<hash>` on Windows — **the hash is the first 12 hex characters of SHA-256 over `context.globalStorageUri.fsPath`**, so every window, whatever its build, computes the same path (hashed for the platform path cap; rationale). The winner is the broker and runs the service; every other window connects as a client once the broker's welcome verifies.
+**Which window: bind-as-lease.** **The bind is the lease**, so the windows' extension hosts never fight over the enrollment's one `/ws/burrow` socket (rationale). On unix every contending window binds one fixed path, `<hash>.sock` in a per-user `dormouse-peer-<uid>` directory in the temp dir; **the hash is the first 12 hex characters of SHA-256 over `context.globalStorageUri.fsPath`**, so every window, whatever its build, computes the same path (hashed for the platform path cap; rationale). The winner is the broker and runs the service; every other window connects as a client once the broker's welcome verifies.
 
 - **Roles never flip downward**: no `onRole(false)` after a `true` (rationale).
 - **Contend on broker death, not on a timer**: `bind` picks exactly one; no TTL, heartbeat file, or watcher.
 - **Never unlink on the first refusal; a reclaimed bind is re-checked (`stillOurs`) before it serves** (rationale).
 - **A bind is not a role until it is believed**: **an unverified bind reads as unsettled**, and a command landing mid-verification is held for the verdict (rationale).
 
-**Trust.** The socket path is derived, not secret, so two layers stand between it and this installation's terminals.
+**Windows: a published endpoint**, since another account could create a derived pipe name first (rationale):
 
-*The directory.* On unix every bind and connect is held to `peerDirIsSafe()`, the predicate the `dor` control socket uses (`docs/specs/security-local.md` → "The dor control socket"). A loose directory we own is tightened; anything else is somebody else's and **the peer link stands down for good**, releasing the callers waiting on the contention. Windows pipes have no directory and skip this layer (`docs/specs/security.md` → "What is not defended").
+- **Every bind takes a fresh `\\.\pipe\dormouse-peer-<32 random hex>`**, published by an exclusive `wx` create of `burrow.peer-endpoint` beside the token. **Windows find the broker only through that file**; one that loses the create closes its pipe and dials the winner.
+- **Every published bind is provisional**, believed only if the file still names it after `RECLAIM_VERIFY_MS`: a window retiring a stale file can remove a fresh one.
+- **A published name that twice fails to yield a verified welcome, a jittered re-read apart, is retired** whatever the failure, and only while the file still names it (rationale); a closing broker retracts its own the same way.
+- **The broker also listens on the derived `\\.\pipe\dormouse-peer-<hash>`**, so an older build's window joins it rather than electing a second Burrow (rationale). If that name is taken, only a verified broker there makes this window retract its file and join it.
+
+**Trust.** Neither the socket path nor a listed pipe name is secret, so two layers stand between them and this installation's terminals.
+
+*The directory.* On unix every bind and connect is held to `peerDirIsSafe()`, the predicate the `dor` control socket uses (`docs/specs/security-local.md` → "The dor control socket"). A loose directory we own is tightened; anything else is somebody else's and **the peer link stands down for good**, releasing the callers waiting on the contention. Windows pipes have no directory; the published endpoint stands in for it (`docs/specs/security-local.md` → "The VS Code peer link").
 
 *The handshake.* The shared secret is a mode-0600 `burrow.peer-token` in `globalStorageUri`, **created once with an exclusive `wx` write rather than a rename** so two windows starting together agree on one token. **Treat an empty read as *not yet written*, never as the token**, waiting it out with a bounded retry (rationale); **exhausting that wait latches the same permanent stand-down** as an unsafe directory. The token **never crosses the socket**; three frames prove mutual knowledge of it:
 
@@ -160,7 +167,7 @@ Source of truth: `VsCodeBurrowStateStore` in `vscode-ext/src/burrow-store.ts`, `
 
 **A window with no Burrow at all still answers the read-only commands (`idleAnswer`) exactly as an idle service would**; the policy is read and never saved. The idle `status` reads the installer's offer file, so the one-click card renders on a machine no window has a Burrow for. **Everything else refuses with an error**, so the console hook fails fast.
 
-Source of truth: `vscode-ext/src/burrow.ts`, `ensurePeerNet` in `vscode-ext/src/peer-link.ts`; pinned by `vscode-ext/test/burrow.test.ts` and `vscode-ext/test/peer-link.test.ts`.
+Source of truth: `vscode-ext/src/burrow.ts`, `ensurePeerNet` and `attemptPublished` in `vscode-ext/src/peer-link.ts`; pinned by `vscode-ext/test/burrow.test.ts`, `vscode-ext/test/peer-link.test.ts`, and `vscode-ext/test/peer-endpoint.test.ts`.
 
 **The webview bridge.** A webview reaches the service over `BurrowLink`, implemented in `vscode-adapter.ts` on three messages, each wrapping the shared client's shape in a `payload`: `burrow:command { payload: BurrowCommand }` out, `burrow:result { payload: BurrowResult }` and `burrow:event { payload }` back. **Everything else is the shared client** in `lib/src/host/remote/link-client.ts` (`docs/specs/transport.md` → Message protocol). Results are **broadcast to every webview in the window** — safe only because the shared client mints globally unique ids — and one correlation id serves both the in-window fan-out and the cross-window forward.
 

@@ -1,8 +1,8 @@
 /**
  * Cross-window broker/client transport for the Burrow. The bind-as-lease,
- * monotone-role, and mutual-handshake contracts live in `docs/specs/vscode.md`
- * → "Burrow: a service in the extension host"; routing in "Peer surfaces across
- * windows".
+ * published-endpoint, monotone-role, and mutual-handshake contracts live in
+ * `docs/specs/vscode.md` → "Burrow: a service in the extension host"; routing
+ * in "Peer surfaces across windows".
  */
 
 import { chmod, lstat, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
@@ -35,6 +35,7 @@ import {
   type PeerLinkResponse,
   type PeerLinkWelcome,
 } from './peer-link-protocol';
+import { freshEndpointName, publishesEndpoint } from './peer-endpoint';
 import type { PtySink } from './processed-pty-streams';
 import { log } from './log';
 
@@ -95,6 +96,12 @@ export function configurePeerLink(next: PeerLinkDeps): void {
 }
 
 const TOKEN_FILE = 'burrow.peer-token';
+/**
+ * Where a Windows broker publishes the pipe name it bound, beside the token and
+ * under the same protection: only this user can write it, so nobody else can
+ * point this installation's windows somewhere or force a second election.
+ */
+const ENDPOINT_FILE = 'burrow.peer-endpoint';
 
 /**
  * How long a window losing the exclusive create will wait for the winner's
@@ -146,8 +153,8 @@ function peerDirPath(): string {
  * stands the peer link down for good rather than spinning against it.
  *
  * Windows named pipes are not filesystem objects, so there is no directory
- * here to check; the squat that leaves open is recorded in
- * `docs/specs/security.md` → "What is not defended".
+ * here to check; a fresh name per bind, published only in this user's storage
+ * ({@link attemptPublished}), stands in for it.
  *
  * The same predicate is duplicated as `ensureControlDir()` in
  * standalone/sidecar/dor-control-server.js (sync fs, returns the directory
@@ -179,12 +186,16 @@ async function peerDirIsSafe(): Promise<boolean> {
 }
 
 /**
- * The one path every window of this installation contends for.
+ * The one path every window of this installation contends for on unix.
  *
  * Hashed rather than joined: macOS caps a unix socket path near 104 bytes and
  * the extension's globalStorage path is most of that on its own. Derived from
  * that path rather than random precisely because it must be *the same* in every
  * window — the bind is the arbitration.
+ *
+ * On Windows this is only the name older builds bind: a broker there holds it
+ * as a second listener so their windows join it ({@link olderBuildHoldsLegacy}),
+ * and never depends on getting it, because another account can create it first.
  */
 function socketPath(): string | null {
   if (!context) return null;
@@ -257,6 +268,66 @@ async function ensureToken(): Promise<string> {
   }
 }
 
+function endpointPath(): string | null {
+  return context ? join(context.globalStorageUri.fsPath, ENDPOINT_FILE) : null;
+}
+
+/**
+ * The pipe name the broker published: `null` when there is no file, otherwise
+ * its trimmed contents. An empty file is waited out as *not yet written*, like
+ * the token, since the exclusive create lands before its bytes; one that stays
+ * empty, or cannot be read, comes back as `''` — a name nothing answers on, so
+ * the caller retires it like any dead broker's.
+ */
+async function readEndpoint(): Promise<string | null> {
+  const path = endpointPath();
+  if (!path) return null;
+  for (let attempt = 1; ; attempt++) {
+    const raw = await readFile(path, 'utf8').then(
+      (text) => text.trim(),
+      (error: NodeJS.ErrnoException) => (error.code === 'ENOENT' ? null : ''),
+    );
+    if (raw !== '' || attempt >= TOKEN_WRITE_ATTEMPTS) return raw;
+    await delay(TOKEN_WRITE_POLL_MS);
+  }
+}
+
+/**
+ * Publish this window's freshly bound name, exclusively: `false` when another
+ * window's file is already there, which makes that window the one to dial.
+ * 0600 for the same reason as the token; on Windows the extension's storage
+ * under the user profile is what keeps other accounts out.
+ */
+async function publishEndpoint(name: string): Promise<boolean> {
+  const path = endpointPath();
+  if (!path) return false;
+  try {
+    await writeFile(path, name, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false;
+    throw error;
+  }
+}
+
+/**
+ * Remove the endpoint file if it still says `name`, reporting whether it is
+ * gone. Compared first so a window retiring a dead broker's name never removes
+ * a live one's that replaced it; the gap between the read and the unlink is
+ * what {@link attemptPublished}'s verification covers.
+ */
+async function retractEndpoint(name: string): Promise<boolean> {
+  const path = endpointPath();
+  if (!path) return false;
+  if ((await readEndpoint()) !== name) return true;
+  try {
+    await rm(path);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT';
+  }
+}
+
 // ---------------------------------------------------------------- server side
 
 /**
@@ -278,16 +349,28 @@ export interface PeerLinkClient {
 
 let server: Server | null = null;
 /**
+ * Windows only: the second listener on the name older builds bind, so their
+ * windows join this broker instead of electing their own
+ * ({@link olderBuildHoldsLegacy}). Closed with `server`.
+ */
+let legacyServer: Server | null = null;
+/**
+ * Windows only: the fresh name `server` is bound to, once this window has bound
+ * one — what it publishes, verifies, and retracts. Cleared with `server`.
+ */
+let boundEndpoint: string | null = null;
+/**
  * Whether the bind in `server` has been *believed*.
  *
  * A reclaimed bind is provisional: `stillOurs` spends 250 ms watching for a
  * competing window that cleared the same corpse and bound after us, and the
- * loser stands down through `closeServer(false)`. Between the bind and that
- * verdict `server !== null` is true while this window may be about to give the
- * socket up, so every *role* answer reads this instead — otherwise an enroll or
- * a secrets-change landing inside that window is told it is the broker, starts
- * a service, and the stand-down never tears it down: two Burrows under one burrowId,
- * displacing each other on the relay forever.
+ * loser stands down through `closeServer(false)`; on Windows every published
+ * bind is provisional the same way ({@link attemptPublished}). Between the bind
+ * and that verdict `server !== null` is true while this window may be about to
+ * give the socket up, so every *role* answer reads this instead — otherwise an
+ * enroll or a secrets-change landing inside that window is told it is the
+ * broker, starts a service, and the stand-down never tears it down: two Burrows
+ * under one burrowId, displacing each other on the relay forever.
  */
 let brokerConfirmed = false;
 /** Claimed and cleared with `server`; the two always move together. */
@@ -770,9 +853,9 @@ export function listenServer(nextServer: Server, path: string): Promise<void> {
   });
 }
 
-/** Take the socket path, or report that somebody else holds it. */
-async function tryBind(path: string, token: string): Promise<boolean> {
-  const nextServer = createServer((socket) => {
+/** A listener that challenges every connection it accepts. */
+function createPeerServer(): Server {
+  return createServer((socket) => {
     const client: PeerLinkClient = {
       socket,
       decoder: new FrameDecoder(),
@@ -796,8 +879,13 @@ async function tryBind(path: string, token: string): Promise<boolean> {
     // of the token must not volunteer one into whatever bound this path.
     send(client, { kind: 'challenge', nonce: client.challenge });
   });
+}
+
+/** Listen on `path`, or close the server and report that somebody else holds it. */
+async function listenOrClose(nextServer: Server, path: string): Promise<boolean> {
   try {
     await listenServer(nextServer, path);
+    return true;
   } catch {
     // Callback form deliberately: closing a server that never listened emits an
     // `'error'` nobody is listening for, which an EventEmitter rethrows and
@@ -805,16 +893,22 @@ async function tryBind(path: string, token: string): Promise<boolean> {
     nextServer.close(() => {});
     return false;
   }
+}
+
+/** Take the socket path, or report that somebody else holds it. */
+async function tryBind(path: string, token: string): Promise<boolean> {
+  const nextServer = createPeerServer();
+  if (!(await listenOrClose(nextServer, path))) return false;
   server = nextServer;
   // Synchronous, and before the first `await` past the bind: `listen` binds
   // inside the call and resolves on a nextTick, so no thread-pool callback of
   // *this* process can interleave. A competing window is a separate extension
   // host, so its unlink and rebind can still land here — this narrows the gap
   // to a few microseconds of straight-line code rather than closing it, and
-  // reads the file our own bind made ({@link boundSocketFile}). Skipped on
-  // Windows: a named pipe is not a filesystem object, so there is no anchor
-  // to take and nothing there can displace us ({@link stillOurs}).
-  boundSocketFile = process.platform === 'win32' ? null : socketFileIdentitySync(path);
+  // reads the file our own bind made ({@link boundSocketFile}). Skipped where
+  // the endpoint is published: that name is ours alone, and what can be
+  // displaced there is the file naming it ({@link attemptPublished}).
+  boundSocketFile = publishesEndpoint() ? null : socketFileIdentitySync(path);
   // Provisional until the caller settles it: a reclaimed bind may still be
   // displaced (see {@link brokerConfirmed}).
   brokerConfirmed = false;
@@ -1198,6 +1292,8 @@ async function attempt(): Promise<boolean> {
     return true;
   }
 
+  if (publishesEndpoint()) return attemptPublished(path, token);
+
   if (await tryBind(path, token)) {
     // Disposal can land inside any of the awaits above; a socket bound after it
     // would outlive the window that owns it.
@@ -1257,6 +1353,106 @@ async function attempt(): Promise<boolean> {
     return true;
   }
   return false;
+}
+
+/**
+ * Dial a published broker; a verified welcome settles this window as its
+ * client. `''` — a file that stayed empty — names nothing to dial.
+ */
+async function joinBroker(path: string, token: string): Promise<boolean> {
+  if (!path || (await tryConnect(path, token)) !== 'connected') return false;
+  if (disposed) disconnectClient();
+  else settle(false);
+  return true;
+}
+
+/**
+ * One round where the endpoint is published rather than derived (Windows):
+ * dial the name the broker published, or retire a dead broker's file and
+ * publish a fresh name of our own.
+ *
+ * Every name is minted per bind, so nobody can create it before we do; but a
+ * dead broker's name is free again, and Windows lists every pipe to every
+ * account. So a published name is retired on any failure to reach a verified
+ * broker on it — not only a refusal — or another account that bound it after
+ * the broker went would hold this installation's windows off it forever.
+ */
+async function attemptPublished(legacyPath: string, token: string): Promise<boolean> {
+  const published = await readEndpoint();
+  if (published !== null) {
+    if (await joinBroker(published, token)) return true;
+    // Never retire on the first failure, for the reason unix never unlinks on
+    // the first refusal: every client of a dead broker gets here at once, and
+    // one of them may have published a replacement while we waited.
+    await delay(Math.floor(Math.random() * RECLAIM_JITTER_MS));
+    const now = await readEndpoint();
+    if (now !== published) return now !== null && (await joinBroker(now, token));
+    if (await joinBroker(published, token)) return true;
+    if (!(await retractEndpoint(published))) {
+      log.error(`[peer-link] could not remove the stale peer endpoint ${endpointPath()}`);
+      return false;
+    }
+  }
+
+  const name = freshEndpointName();
+  if (!(await tryBind(name, token))) return false;
+  boundEndpoint = name;
+  if (disposed) {
+    await closeServer(true);
+    return true;
+  }
+  if (!(await publishEndpoint(name))) {
+    // Another window published first, so it is the broker and we are not.
+    await closeServer(false);
+    const winner = await readEndpoint();
+    return winner !== null && (await joinBroker(winner, token));
+  }
+
+  if (await olderBuildHoldsLegacy(legacyPath, token)) {
+    // Its broker already runs the Burrow, and a second would displace it on
+    // the relay, so this window has joined that one instead.
+    await closeServer(true);
+    if (disposed) disconnectClient();
+    else settle(false);
+    return true;
+  }
+
+  // Provisional even uncontested: a window retiring the file we replaced reads
+  // it before it unlinks, and can unlink ours in between. Whoever's name the
+  // file holds after the wait is the broker; anyone else stands down, and the
+  // loop's next round dials the winner.
+  await delay(RECLAIM_VERIFY_MS);
+  if (disposed) {
+    await closeServer(true);
+    return true;
+  }
+  if ((await readEndpoint()) !== name) {
+    await closeServer(false);
+    return false;
+  }
+  log.info('[peer-link] serving peers on a freshly published endpoint');
+  brokerConfirmed = true;
+  settle(true);
+  return true;
+}
+
+/**
+ * Hold the derived name older builds bind, as a second listener, so a window
+ * still running one joins this broker rather than electing its own. Reports
+ * whether an older build's broker holds it already — the only reason this
+ * window stands down, and only once that broker proves the token: anything
+ * else on the name (another account, say) is ignored, because this window
+ * never depends on it.
+ */
+async function olderBuildHoldsLegacy(path: string, token: string): Promise<boolean> {
+  const nextServer = createPeerServer();
+  if (await listenOrClose(nextServer, path)) {
+    // Disposal may have closed `server` while this bound; nothing would close it.
+    if (server) legacyServer = nextServer;
+    else nextServer.close();
+    return false;
+  }
+  return (await tryConnect(path, token)) === 'connected';
 }
 
 /** How long to let a competing reclaim land before believing we won it. */
@@ -1341,18 +1537,29 @@ async function contend(): Promise<void> {
 
 /**
  * Give up this window's server. Unlink only when the path still names our
- * socket: removing a winner's would strand every client dialing it.
+ * socket: removing a winner's would strand every client dialing it. A
+ * published name is retracted only while the file still says it, so `unlink`
+ * there can never remove another broker's.
  */
 async function closeServer(unlink: boolean): Promise<void> {
   const closing = server;
+  const closingLegacy = legacyServer;
+  const published = boundEndpoint;
   server = null;
+  legacyServer = null;
+  boundEndpoint = null;
   brokerConfirmed = false;
   serverToken = null;
   boundSocketFile = null;
   for (const peer of [...clients]) dropClient(peer);
+  if (closingLegacy?.listening) closingLegacy.close();
   if (!closing) return;
   if (closing.listening) closing.close();
   if (!unlink) return;
+  if (published !== null) {
+    await retractEndpoint(published);
+    return;
+  }
   const path = socketPath();
   if (path) await rm(path, { force: true }).catch(() => {});
 }
