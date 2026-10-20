@@ -95,8 +95,8 @@ jobs:
     timeout-minutes: 40
     # The AUDIT_PAT (read-only Administration + Secrets + Environments)
     # lives in this environment, whose deployment-branch-policy admits
-    # only `main` and `v*` tags — refs that the §3 rulesets reserve to
-    # admins. A bot-pushed feature branch cannot reach this job at all
+    # only `main` and `v*` tags — refs that the `Tag operations` and
+    # `Merge access` rulesets reserve to admins. A bot-pushed feature branch cannot reach this job at all
     # (GitHub rejects the run before any step starts), so the PAT
     # cannot be exfiltrated through a hand-authored workflow on a
     # non-admin-gated ref.

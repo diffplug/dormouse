@@ -16,8 +16,9 @@
  * **The addon is resolved here rather than through the shipped factory.** It is
  * installed under `standalone/sidecar`, which is where the shipped bundle finds
  * it with a bare `require`; `lib` must not depend on it, because `lib` is a
- * browser bundle root. So these cases inject a plain factory over the polyfill
- * this file resolves, and the shipped factory is driven by the last case alone.
+ * browser bundle root. So the negotiation cases inject a plain factory over the
+ * polyfill this file resolves; the Local networks, Anywhere, and teardown cases
+ * build through the shipped factory, and only the last tears it down.
  */
 
 import { createSocket, type SocketType } from 'node:dgram';
@@ -99,7 +100,7 @@ const CASE_BUDGET_MS = 45_000;
 interface Negotiation {
   /** Whether the channel this attempt describes has come up. */
   open(): boolean;
-  /** Drop this attempt's peers, so a retry does not run beside them. */
+  /** Close this run's peers; each case calls it once it is done with them. */
   abandon(): void;
 }
 
@@ -560,17 +561,6 @@ describe('the direct path over the native addon', () => {
   });
 
   /**
-   * The shipped factory, last because its teardown is the process's.
-   *
-   * **A teardown is terminal**: the native threads are gone, so a peer built on
-   * them is not one this process can use and every later offer declines,
-   * leaving that session relayed. The other half of the contract — a load that
-   * fails warns once and declines from then on — is not drivable here: vitest's
-   * `require` resolves from inside the store, where every workspace package is
-   * reachable, so the addon cannot be made to not load without replacing the
-   * module system this case exists to exercise.
-   */
-  /**
    * **What the reliability check does *not* reach on this stack.** `DirectPeer`
    * refuses a channel that is unordered or partially reliable, and the answerer
    * is the end where that could bite — it adopts a channel the peer created. A
@@ -601,6 +591,17 @@ describe('the direct path over the native addon', () => {
     CASE_BUDGET_MS,
   );
 
+  /**
+   * The shipped factory, last because its teardown is the process's.
+   *
+   * **A teardown is terminal**: the native threads are gone, so a peer built on
+   * them is not one this process can use and every later offer declines,
+   * leaving that session relayed. The other half of the contract — a load that
+   * fails warns once and declines from then on — is not drivable here: vitest's
+   * `require` resolves from inside the store, where every workspace package is
+   * reachable, so the addon cannot be made to not load without replacing the
+   * module system this case exists to exercise.
+   */
   it('builds a peer through a bare require, and declines once torn down', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {

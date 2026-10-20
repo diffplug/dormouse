@@ -36,7 +36,7 @@ export interface BurrowAclRecord {
   /**
    * The opaque bearer capability this Client registers, queries, and deletes
    * push subscriptions with (`docs/specs/remote-security-model.md` → Push
-   * sealing). Minted by the Burrow at approval, base64url of 32 random bytes, and
+   * sealing). Minted by the Burrow at approval with `mintPushDeliveryId`, and
    * known only to this record and the Client's own `KnownBurrowV1`.
    */
   readonly deliveryId: string;

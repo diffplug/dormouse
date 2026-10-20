@@ -73,7 +73,7 @@ Nothing in step 8 is driven around the product. The digits go into the modal's o
 
 ## Artifacts
 
-Everything lands in the run directory, whose path is printed at the start and at the end. **Nothing is written into the repo.**
+Everything lands in the run directory, whose path is printed at the start and at the end. **No artifact is written into the repo**; Burrow staging still is (Known limitations).
 
 ```
 relay.log            the Relay's whole stdout/stderr

@@ -9,7 +9,7 @@ if (!/^[^'\\]+$/.test(ADMIN_EMAIL)) throw new Error("ADMIN_EMAIL cannot be inlin
 
 /**
  * The entitlement (docs/specs/pricing.md -> "Checkout and entitlement"): a
- * SQL boolean over the `"user"` row aliased `user`, so a query that resolves
+ * SQL boolean over the `"user"` row aliased by `user` (default `u`), so a query that resolves
  * a bearer resolves its owner's entitlement in the same statement. Admin-only
  * until billing ships: the verified `ADMIN_EMAIL`.
  */
