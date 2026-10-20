@@ -74,8 +74,10 @@ const CASES = [
   ['check 8: an external rationale key with no heading', EXTERNAL_RATIONALE, '\n## No matching heading\n'],
   ['check 13: a missing heading in an external spec', SOURCE, `\n// ${EXTERNAL_SPEC} -> "No Such Heading"\n`],
   ['check 4: a repo path that does not exist', SPEC, '\nSee `lib/src/no-such-file.ts`.\n'],
-  ['check 11: a (rationale) marker under a heading the rationale does not key', SPEC, '\n## Planted\n\nA rule (rationale).\n'],
-  ['check 11: the marker as the last item of its parenthetical', SPEC, '\n## Planted\n\nA rule (see below; rationale).\n'],
+  // Start a new root: a rationale keyed to the original H1 also covers every
+  // appended H2, so that would not plant a defect in specs such as security.md.
+  ['check 11: a (rationale) marker under a heading the rationale does not key', SPEC, '\n# Planted\n\nA rule (rationale).\n'],
+  ['check 11: the marker as the last item of its parenthetical', SPEC, '\n# Planted\n\nA rule (see below; rationale).\n'],
   ['check 12: a bare file name in Source of truth', SPEC, '\nSource of truth: `lint-kit.mjs`.\n'],
   ['check 12: a bare file name under a punctuated lead-in', SPEC, '\nSource of truth, all in `lib/src/lib/`: `Wall.tsx`.\n'],
   ['check 12: a symbol the named file lacks', SPEC, '\nSource of truth: `noSuchSymbolXyz` in `scripts/lint-kit.mjs`.\n'],
