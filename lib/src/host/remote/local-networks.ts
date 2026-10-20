@@ -8,7 +8,7 @@
 import { isIP } from 'node:net';
 import { networkInterfaces, type NetworkInterfaceInfo as OsAddress } from 'node:os';
 import type { DirectPathPolicy } from '../../remote/direct/direct-peer';
-import { allowedAddressTest, isOfferedAddress } from './network-interfaces';
+import { allowedAddressTest, canonicalAddress, isOfferedAddress } from './network-interfaces';
 
 /**
  * The one address of `raw` an attempt's socket binds under `allowed`, or `null`
@@ -34,25 +34,72 @@ export function bindAddressFor(
   return family.length === 1 ? family[0]! : null;
 }
 
+/** Splits an SDP into lines at any of CRLF, LF, or CR. */
+const LINE_END = /\r\n|\r|\n/;
+
 /**
- * `sdp` with every candidate outside `inAllowed`, or with no address to read,
- * removed and a default address outside it written as `0.0.0.0`, and how many
- * candidates are left. Lines end at any of CRLF, LF, or CR and fields at the
- * C-locale whitespace libdatachannel splits on, never JavaScript's wider `\s`,
- * so no line the native parser reads as a candidate escapes this one; lines
- * rejoin with the first ending found.
+ * RFC 8839's candidate attribute in the one spelling this module reads: single
+ * spaces, a foundation of ice-chars, decimal numbers, UDP (the only transport
+ * the ICE agent checks), and any extensions after the type, which are dropped.
+ */
+const CANDIDATE = /^a=candidate:([A-Za-z0-9+/]{1,32}) (\d+) (?:UDP|udp) (\d+) (\S+) (\d+) typ (host|srflx|prflx|relay)(?: [\x21-\x7e]+)*$/;
+
+/** A line the native parser could read as a candidate, however it is spelled. */
+const CANDIDATE_LIKE = /^[ \t\v\f]*a=candidate/i;
+
+/** One candidate line as {@link CANDIDATE} reads it. */
+interface Candidate {
+  /** An IP literal, in {@link canonicalAddress}'s spelling. */
+  readonly address: string;
+  /** The line rebuilt from the fields read, and nothing else. */
+  readonly line: string;
+}
+
+/**
+ * `line` as a candidate toward an IP literal, rebuilt from the fields read, or
+ * `null` for anything else: a name, a zoned address, a number out of range, or
+ * a line not in {@link CANDIDATE}'s spelling. The native parser reads fields by
+ * rules of its own, so it is handed only the rebuilt line, whose address is
+ * the one checked.
+ */
+function parseCandidate(line: string): Candidate | null {
+  const match = CANDIDATE.exec(line);
+  if (!match) return null;
+  const [, foundation, componentText, priorityText, written, portText, type] = match;
+  const address = canonicalAddress(written);
+  const component = Number(componentText);
+  const priority = Number(priorityText);
+  const port = Number(portText);
+  if (address === null || component < 1 || component > 256 || priority > 0xffffffff || port > 0xffff) return null;
+  return {
+    address,
+    line: `a=candidate:${foundation} ${component} UDP ${priority} ${address} ${port} typ ${type}`,
+  };
+}
+
+/**
+ * `sdp` with every candidate kept only where it is an IP literal inside
+ * `inAllowed`, rebuilt by {@link parseCandidate}, a default address outside it
+ * written as `0.0.0.0`, and how many candidates are left. Lines end at any of
+ * CRLF, LF, or CR, and a `c=` line's fields at the C-locale whitespace
+ * libdatachannel splits on, never JavaScript's wider `\s`, so no line the
+ * native parser reads as a candidate or a default address escapes this one;
+ * lines rejoin with the first ending found.
  */
 function keepAllowed(sdp: string, inAllowed: (address: string) => boolean): { sdp: string; candidates: number } {
-  const eol = /\r\n|\r|\n/.exec(sdp)?.[0] ?? '\n';
+  const eol = LINE_END.exec(sdp)?.[0] ?? '\n';
   let candidates = 0;
   const lines: string[] = [];
-  for (const line of sdp.split(/\r\n|\r|\n/)) {
-    const fields = line.split(/[ \t\v\f]+/).filter((field) => field !== '');
-    if (/^a=candidate:/i.test(fields[0] ?? '')) {
-      const address = fields[4];
-      if (!address || !inAllowed(address)) continue;
+  for (const line of sdp.split(LINE_END)) {
+    if (CANDIDATE_LIKE.test(line)) {
+      const candidate = parseCandidate(line);
+      if (!candidate || !inAllowed(candidate.address)) continue;
       candidates += 1;
-    } else if (/^c=/i.test(fields[0] ?? '')) {
+      lines.push(candidate.line);
+      continue;
+    }
+    const fields = line.split(/[ \t\v\f]+/).filter((field) => field !== '');
+    if (/^c=/i.test(fields[0] ?? '')) {
       const address = fields[2];
       if (!address || !inAllowed(address)) {
         lines.push('c=IN IP4 0.0.0.0');
@@ -83,18 +130,15 @@ const isPrivateAddress = allowedAddressTest([
   'fe80::/10',
 ]);
 
-const CANDIDATE_LINE = /^a=candidate:\S+ \S+ \S+ \S+ (\S+) /;
-
 /**
  * The first candidate of `sdp` that is an IP literal outside every private
  * range — a phone's server-reflexive candidate, most often — and outside
  * `skip`, or `null`.
  */
 export function firstPublicCandidate(sdp: string, skip: (address: string) => boolean = () => false): string | null {
-  for (const line of sdp.split(/\r?\n/)) {
-    const address = CANDIDATE_LINE.exec(line)?.[1];
-    if (address === undefined || address.includes('%') || isIP(address) === 0) continue;
-    if (!isPrivateAddress(address) && !skip(address)) return address;
+  for (const line of sdp.split(LINE_END)) {
+    const address = parseCandidate(line)?.address;
+    if (address !== undefined && !isPrivateAddress(address) && !skip(address)) return address;
   }
   return null;
 }

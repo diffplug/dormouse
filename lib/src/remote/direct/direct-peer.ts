@@ -222,8 +222,9 @@ export interface DirectPathPolicy {
   describe(sdp: string): string | null;
   /**
    * The peer's description as this end applies it: every candidate that is not
-   * an IP address inside the allowed networks removed, a name included, so the
-   * ICE agent sends no check and makes no lookup toward one. None left is not a
+   * an IP address inside the allowed networks removed, a name included, and
+   * each one kept rebuilt from the fields checked, so the ICE agent sends no
+   * check and makes no lookup toward any other address. None left is not a
    * refusal: the peer's own checks still reach this end's allowed candidates.
    */
   acceptRemote(sdp: string): string;
@@ -430,10 +431,17 @@ export class DirectPeer {
     }
   }
 
-  /** The offerer's second half, once `direct-answer` has decrypted. */
+  /**
+   * The offerer's second half, once `direct-answer` has decrypted. A Burrow
+   * only answers, but a path policy holds every description a peer applies.
+   */
   async acceptAnswer(answerSdp: string): Promise<void> {
     try {
-      await this.#peer.setRemoteDescription({ type: 'answer', sdp: answerSdp });
+      const policy = this.#pathPolicy;
+      await this.#peer.setRemoteDescription({
+        type: 'answer',
+        sdp: policy ? policy.acceptRemote(answerSdp) : answerSdp,
+      });
     } catch (error) {
       this.#fail(`could not accept a direct answer: ${String(error)}`);
     }

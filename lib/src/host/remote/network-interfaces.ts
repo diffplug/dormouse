@@ -29,6 +29,16 @@ function serializeIpv6(address: string): string | null {
   }
 }
 
+/**
+ * An IP literal's one spelling — IPv4 as a dotted quad, IPv6 as
+ * {@link serializeIpv6} writes it — or `null` for a name or a zoned address.
+ */
+export function canonicalAddress(address: string): string | null {
+  if (address.includes('%')) return null;
+  const family = isIP(address);
+  return family === 4 ? address : family === 6 ? serializeIpv6(address) : null;
+}
+
 /** The eight 16-bit groups of an IPv6 address {@link serializeIpv6} spelled. */
 function ipv6Groups(serialized: string): number[] {
   const [head, tail] = serialized.split('::') as [string, string | undefined];

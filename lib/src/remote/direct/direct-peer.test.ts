@@ -761,6 +761,22 @@ describe('DirectPeer', () => {
       expect(run.answerer.remoteDescription).toEqual({ type: 'offer', sdp: `${offer}a=accepted\r\n` });
     });
 
+    it('applies an answer as the policy accepts it, were an offerer held to one', async () => {
+      const network = new FakeDirectNetwork();
+      const timers = fakeTimers();
+      const offerer = network.createOfferer();
+      const held = new DirectPeer({
+        peer: offerer,
+        handlers: handlers(),
+        pathPolicy: lanOnlyPolicy({ acceptRemote: (sdp) => `${sdp}a=accepted\r\n` }),
+        setTimer: timers.setTimer,
+      });
+      const answering = new DirectPeer({ peer: network.createAnswerer(), handlers: handlers(), setTimer: timers.setTimer });
+      const answer = await answering.answer((await held.offer())!);
+      await held.acceptAnswer(answer!);
+      expect(offerer.remoteDescription).toEqual({ type: 'answer', sdp: `${answer}a=accepted\r\n` });
+    });
+
     it('sends its description as the policy describes it, and refuses when nothing is left', async () => {
       const stripped = pair({}, lanOnlyPolicy({ describe: (sdp) => `${sdp}a=described\r\n` }));
       const offer = await stripped.clientPeer.offer();
