@@ -1,0 +1,126 @@
+Domain: remote
+Rule: S272 — only against IPv4 ranges
+Expect: lib/src/host/remote/network-interfaces.ts
+Source: reverses the per-family allowed-range check (one BlockList held both families, so an IPv6 range over ::ffff:0:0/96 admitted IPv4)
+
+diff --git a/lib/src/host/remote/local-networks.test.ts b/lib/src/host/remote/local-networks.test.ts
+index 621427f53..e31f4609e 100644
+--- a/lib/src/host/remote/local-networks.test.ts
++++ b/lib/src/host/remote/local-networks.test.ts
+@@ -295,27 +295,6 @@ describe('localNetworksPath', () => {
+     expect(path.refusal({ local: '100.97.229.25', remote: '100.101.7.8' })?.end).toBe('local');
+   });
+ 
+-  it('lets an IPv6 range over the IPv4-mapped block admit no IPv4 end, in the strip or the pair', () => {
+-    const offer = [
+-      'v=0',
+-      'a=candidate:1 1 udp 2113937151 203.0.113.7 51236 typ host',
+-      'a=candidate:2 1 udp 2113937151 ::ffff:203.0.113.7 51237 typ host',
+-      'a=candidate:3 1 udp 2113937151 2001:db8::7 51238 typ host',
+-      '',
+-    ].join('\r\n');
+-    for (const range of ['::/0', '::ffff:0:0/96']) {
+-      const path = localNetworksPath([range]);
+-      expect(candidatesIn(path.acceptRemote(offer)), range).toEqual(
+-        range === '::/0' ? ['a=candidate:3 1 UDP 2113937151 2001:db8::7 51238 typ host'] : [],
+-      );
+-      expect(candidatesIn(path.describe(ANSWER) ?? '').filter((line) => /\d+\.\d+\.\d+\.\d+ /.test(line)), range).toEqual([]);
+-      expect(path.refusal({ local: '192.168.86.160', remote: '203.0.113.7' })?.end, range).toBe('local');
+-      expect(path.refusal({ local: '::ffff:192.168.86.160', remote: '::ffff:203.0.113.7' })?.end, range).toBe('local');
+-    }
+-    // An IPv4 range beside it still decides IPv4 ends alone.
+-    expect(localNetworksPath(['::/0', ...LAN]).refusal({ local: '192.168.86.160', remote: '203.0.113.7' })?.end).toBe('remote');
+-  });
+-
+   it('refuses a name, an mDNS name, a missing end, or no pair at all', () => {
+     const path = localNetworksPath(LAN);
+     for (const remote of ['phone.local', '0f1e2d3c-aaaa-bbbb-cccc-000000000000.local', null]) {
+diff --git a/lib/src/host/remote/network-interfaces.test.ts b/lib/src/host/remote/network-interfaces.test.ts
+index 69c2b30cc..575dde448 100644
+--- a/lib/src/host/remote/network-interfaces.test.ts
++++ b/lib/src/host/remote/network-interfaces.test.ts
+@@ -87,24 +87,12 @@ describe('allowedAddressTest', () => {
+   });
+ 
+   it('matches an IPv4-mapped IPv6 address against its IPv4 range', () => {
++    // `BlockList` compares it as IPv4 (Node 24, 2026-09), so no unwrap is needed.
+     expect(addressAllowed('::ffff:192.168.1.5', allowed)).toBe(true);
+     expect(addressAllowed('::ffff:c0a8:105', allowed)).toBe(true);
+     expect(addressAllowed('::ffff:192.168.2.5', allowed)).toBe(false);
+   });
+ 
+-  it('never admits an IPv4 address, mapped or not, through an IPv6 range', () => {
+-    // Node's `BlockList` matches IPv4 against an IPv6 subnet over `::ffff:0:0/96`.
+-    for (const range of ['::/0', '::/1', '::/64', '::ffff:0:0/96', '::ffff:808:0/120']) {
+-      for (const address of ['8.8.8.8', '::ffff:8.8.8.8', '::ffff:808:808', '192.168.1.5']) {
+-        expect(addressAllowed(address, [range]), `${address} in ${range}`).toBe(false);
+-      }
+-    }
+-    // The IPv6 range still admits the IPv6 it covers, and an IPv4 range beside it still holds.
+-    expect(addressAllowed('2001:db8::5', ['::/0'])).toBe(true);
+-    expect(addressAllowed('::ffff:192.168.1.5', ['::/0', ...allowed])).toBe(true);
+-    expect(addressAllowed('8.8.8.8', ['::/0', ...allowed])).toBe(false);
+-  });
+-
+   it('allows no hostname, mDNS name, zoned address, or empty list', () => {
+     for (const address of ['router.local', '4f1d2c3e-aaaa-bbbb-cccc-000000000000.local', 'fe80::1%en0', '', 'localhost']) {
+       expect(addressAllowed(address, [...allowed, 'fe80::/10']), address).toBe(false);
+diff --git a/lib/src/host/remote/network-interfaces.ts b/lib/src/host/remote/network-interfaces.ts
+index d99b26365..b898820d5 100644
+--- a/lib/src/host/remote/network-interfaces.ts
++++ b/lib/src/host/remote/network-interfaces.ts
+@@ -87,45 +87,28 @@ export function canonicalCidr(text: string): string | null {
+   return cidr && `${cidr.network}/${cidr.prefix}`;
+ }
+ 
+-/**
+- * One `BlockList` per family. Node's `BlockList` matches an IPv4 address
+- * against an IPv6 subnet covering `::ffff:0:0/96`, even when asked to check
+- * it as `'ipv4'`, so one list holding both families would let `::/0` (or any
+- * IPv6 range over the mapped block) admit every IPv4 address.
+- */
+-function blockListsOf(cidrs: readonly string[]): { ipv4: BlockList; ipv6: BlockList } {
+-  const lists = { ipv4: new BlockList(), ipv6: new BlockList() };
++function blockListOf(cidrs: readonly string[]): BlockList {
++  const list = new BlockList();
+   for (const text of cidrs) {
+     const cidr = parseCidr(text);
+-    if (cidr) lists[cidr.family].addSubnet(cidr.network, cidr.prefix, cidr.family);
++    if (cidr) list.addSubnet(cidr.network, cidr.prefix, cidr.family);
+   }
+-  return lists;
+-}
+-
+-/** The dotted quad an IPv4-mapped IPv6 address (`::ffff:a.b.c.d`) carries, or `null`. */
+-function mappedIpv4(address: string): string | null {
+-  const serialized = serializeIpv6(address);
+-  if (serialized === null) return null;
+-  const groups = ipv6Groups(serialized);
+-  if (groups.slice(0, 5).some((group) => group !== 0) || groups[5] !== 0xffff) return null;
+-  return [groups[6]! >> 8, groups[6]! & 0xff, groups[7]! >> 8, groups[7]! & 0xff].join('.');
++  return list;
+ }
+ 
+ /**
+  * Whether an address is an IP literal inside one of `cidrs`, which are parsed
+  * once for every address tested. A hostname, an mDNS name, or a zoned address
+- * is in none; a CIDR that does not parse matches nothing. Each family is
+- * checked only against its own ranges, and an IPv4-mapped IPv6 address is
+- * checked as the IPv4 address it carries, so an IPv6 range never admits IPv4.
++ * is in none; a CIDR that does not parse matches nothing. An IPv4-mapped IPv6
++ * address matches its IPv4 range: `BlockList` compares it as IPv4, which
++ * `network-interfaces.test.ts` pins.
+  */
+ export function allowedAddressTest(cidrs: readonly string[]): (address: string) => boolean {
+-  const lists = blockListsOf(cidrs);
++  const list = blockListOf(cidrs);
+   return (address) => {
+     const family = isIP(address);
+     if (family === 0 || address.includes('%')) return false;
+-    if (family === 4) return lists.ipv4.check(address, 'ipv4');
+-    const ipv4 = mappedIpv4(address);
+-    return ipv4 === null ? lists.ipv6.check(address, 'ipv6') : lists.ipv4.check(ipv4, 'ipv4');
++    return list.check(address, family === 4 ? 'ipv4' : 'ipv6');
+   };
+ }
+ 
