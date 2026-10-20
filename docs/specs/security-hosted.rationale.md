@@ -14,3 +14,11 @@ Cookie reads (2026-10-11):
 - Writes stay unlooked-up so the adapter's Origin and CSRF refusals still come before any database read. The one write that starts something with a login is `link-social`, whose callback is open: an unlisted login can attach another identity its holder controls to its own unlisted account (pinned in `workers.test.ts`), which grants nothing, since every read still deletes its logins. Before 2026-10-11, the callback's lookup ended that login first.
 - The deletion stays on the read rather than moving to sign-in: the unlisted logins it removes are created inside a provider callback the packed adapter completes, where only its signed session cookie names them. Every use of a login starts with a read, so the gated read is its first use.
 - 403, not a signed-out answer, so a refusal never reads as a logout.
+
+## Deployment boundary
+
+pgstencil provenance at deploy time (2026-10-20):
+
+- Renovate opens a pgstencil bump as soon as a release is approved (`.github/renovate.json`), and a production deploy can follow its merge within hours. While only the nightly audit judged S119 and S120, a release deployed between two runs shipped on S118's self-reported `dist/provenance.json` alone, so the `verify` job now runs the same checks and the audit judges that script rather than repeating it by hand.
+- npm does not audit a pnpm install, and `npm audit signatures` verifies a package from the registry by its installed name and version alone, so the temporary consumer holds only `package.json` stubs and downloads no package code. npm checks the subject against the registry's tarball; comparing it with `pnpm-lock.yaml`'s integrity ties it to the tarball pnpm installed.
+- npm verifies the signature and the certificate's chain, not who signed: the payload's workflow claim is the signer's own statement, so the certificate's SAN and source-repository digest are read too.

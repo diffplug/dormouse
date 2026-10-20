@@ -26,10 +26,13 @@ jobs:
           node-version-file: package.json
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # The token reads only pgstencil's public commit and check runs.
+      - name: Require clean pgstencil provenance, npm-signed by its release workflow from an audited main commit
+        run: node hosted/scripts/pgstencil-provenance.mjs
+        env:
+          GH_TOKEN: ${{ github.token }}
       - run: pnpm test:hosted
       - run: pnpm build:hosted
-      - name: Require accepted package provenance
-        run: node --input-type=module -e 'import { verifyPackages } from "./hosted/scripts/production.mjs"; await verifyPackages();'
       # Every Worker's static files, each under its own `dist/<worker>/`.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
