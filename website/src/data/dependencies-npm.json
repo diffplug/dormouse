@@ -3003,7 +3003,8 @@
       "author": "Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)",
       "homepage": "https://github.com/syntax-tree/mdast-util-from-markdown",
       "versions": [
-        "2.0.3"
+        "2.0.3",
+        "2.1.0"
       ]
     },
     {
