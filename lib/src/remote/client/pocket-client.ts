@@ -1070,10 +1070,10 @@ export class PocketClient {
   }
 
   async #tombstone(
-    record: { readonly burrowId: string; readonly accountId: string },
+    { burrowId, accountId }: Pick<KnownBurrowSummary, 'burrowId' | 'accountId'>,
     deliveryId: string,
   ): Promise<PendingDeliveryDeletionV1> {
-    const tombstone = { burrowId: record.burrowId, accountId: record.accountId, deliveryId, queuedAt: this.#now() };
+    const tombstone = { burrowId, accountId, deliveryId, queuedAt: this.#now() };
     await this.#pendingDeletions.put(tombstone);
     return tombstone;
   }
