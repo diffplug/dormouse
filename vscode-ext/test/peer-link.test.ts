@@ -9,7 +9,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { spawn } from 'node:child_process';
-import { createHmac } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import { access, chmod, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { createConnection, createServer, Socket, type Server } from 'node:net';
 import { dirname, join } from 'node:path';
@@ -173,6 +173,7 @@ describe('bind-as-lease', () => {
   it.skipIf(process.platform !== 'win32')('reclaims a dead named pipe and elects exactly one broker for racing windows', async () => {
     // Windows removes the pipe when its process dies; there is no Unix corpse
     // inode to unlink. Exercise the actual transport, not a fake socket path.
+    await writeFile(join(dir, 'burrow.peer-token'), 'test-peer-token', { mode: 0o600 });
     const corpse = spawn(process.execPath, ['-e',
       "require('node:net').createServer().listen(process.argv[1], () => process.send('listening'))",
       derivedSocketPath()], { stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
@@ -222,6 +223,9 @@ describe('bind-as-lease', () => {
     // libuv callback with nothing to catch it.
     const mod = await openWindow(fakeWindow());
     const server = createServer();
+    if (process.platform === 'win32') {
+      await writeFile(join(dir, 'burrow.peer-token'), 'test-peer-token', { mode: 0o600 });
+    }
     const path = derivedSocketPath();
     if (process.platform !== 'win32') await mkdir(dirname(path), { recursive: true, mode: 0o700 });
     await mod.listenServer(server, path);
@@ -1086,6 +1090,118 @@ describe('bind-as-lease', () => {
  * so anything on the machine can compute it; these are the properties that make
  * knowing it worthless.
  */
+describe('the contended path', () => {
+  it('keys the Windows pipe name by the shared token, so the storage path alone cannot name it', async () => {
+    const mod = await openWindow(fakeWindow());
+    const keyed = mod.peerSocketPath(dir, 'token-a', 'win32');
+    expect(keyed).toMatch(/^\\\\\.\\pipe\\dormouse-peer-[0-9a-f]{32}$/);
+    expect(mod.peerSocketPath(dir, 'token-a', 'win32')).toBe(keyed);
+    expect(mod.peerSocketPath(dir, 'token-b', 'win32')).not.toBe(keyed);
+    // What any local user can compute from the storage path is not it.
+    const pathOnly = createHash('sha256').update(dir).digest('hex').slice(0, 12);
+    expect(keyed).not.toContain(pathOnly);
+    expect(mod.legacyPeerPipePath(dir, 'win32')).toBe(`\\\\.\\pipe\\dormouse-peer-${pathOnly}`);
+  });
+
+  it('names the unix socket from the storage path alone, under the per-user directory', async () => {
+    const mod = await openWindow(fakeWindow());
+    expect(mod.peerSocketPath(dir, 'token-a', 'linux')).toBe(mod.peerSocketPath(dir, 'token-b', 'linux'));
+    expect(mod.legacyPeerPipePath(dir, 'linux')).toBeNull();
+    if (process.platform !== 'win32') {
+      expect(mod.peerSocketPath(dir, 'token-a', process.platform)).toBe(derivedSocketPath());
+    }
+  });
+
+  /** A process holding the path-only pipe that an older build would contend for. */
+  async function holdLegacyPipe(onSocket: (socket: Socket) => void): Promise<() => Promise<void>> {
+    const mod = await openWindow(fakeWindow());
+    const path = mod.legacyPeerPipePath(dir);
+    if (!path) throw new Error('only Windows has a legacy pipe');
+    const live = new Set<Socket>();
+    const server = createServer((socket) => {
+      live.add(socket);
+      socket.on('close', () => live.delete(socket));
+      onSocket(socket);
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(path, () => resolve());
+    });
+    await mod.disposePeerLink();
+    return async () => {
+      for (const socket of live) socket.destroy();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    };
+  }
+
+  it.skipIf(process.platform !== 'win32')('brokers on the keyed pipe while a squatter holds the path-only name', async () => {
+    const release = await holdLegacyPipe((socket) => socket.destroy());
+    try {
+      const { broker, peer } = await linkedPair();
+      expect(broker.isPeerBroker()).toBe(true);
+      expect(peer.isPeerLinkSettled()).toBe(true);
+    } finally {
+      await release();
+    }
+  });
+
+  it.skipIf(process.platform !== 'win32')('joins an older build\'s broker on the path-only name rather than electing a second', async () => {
+    const token = 'test-peer-token';
+    await writeFile(join(dir, 'burrow.peer-token'), token, { mode: 0o600 });
+    let welcomed = 0;
+    const release = await holdLegacyPipe((socket) => {
+      const decoder = new FrameDecoder();
+      socket.setEncoding('utf8');
+      socket.write(encodeFrame({ kind: 'challenge', nonce: 'old-broker' }));
+      socket.on('data', (chunk: string) => {
+        for (const frame of decoder.push(chunk)) {
+          const message = frame as { kind?: string; nonce?: string };
+          if (message.kind !== 'hello') continue;
+          welcomed += 1;
+          socket.write(encodeFrame({ kind: 'welcome', proof: proof(token, PEER_SERVER_PROOF_DOMAIN, String(message.nonce)) }));
+        }
+      });
+    });
+    try {
+      const roles: boolean[] = [];
+      const mod = await openWindow(fakeWindow());
+      await mod.ensurePeerNet((held) => roles.push(held));
+      expect(roles).toEqual([]);
+      expect(mod.isPeerBroker()).toBe(false);
+      expect(mod.isPeerLinkSettled()).toBe(true);
+      expect(welcomed).toBe(1);
+    } finally {
+      await release();
+    }
+  });
+
+  it.skipIf(process.platform !== 'win32')('answers an older build dialing the path-only name', async () => {
+    const { broker } = await linkedPair();
+    const path = broker.legacyPeerPipePath(dir);
+    if (!path) throw new Error('only Windows has a legacy pipe');
+    const token = await readToken();
+    const socket = createConnection({ path });
+    const decoder = new FrameDecoder();
+    const nonce = 'older-window';
+    const welcome = await new Promise<{ kind?: string; proof?: string }>((resolve, reject) => {
+      socket.setEncoding('utf8');
+      socket.once('error', reject);
+      socket.on('data', (chunk: string) => {
+        for (const frame of decoder.push(chunk)) {
+          const message = frame as { kind?: string; nonce?: string; proof?: string };
+          if (message.kind === 'challenge') {
+            socket.write(encodeFrame({ kind: 'hello', nonce, proof: proof(token, PEER_CLIENT_PROOF_DOMAIN, String(message.nonce)) }));
+          } else {
+            resolve(message);
+          }
+        }
+      });
+    });
+    socket.destroy();
+    expect(welcome).toEqual({ kind: 'welcome', proof: proof(token, PEER_SERVER_PROOF_DOMAIN, nonce) });
+  });
+});
+
 describe('peer handshake', () => {
   /** Read one frame at a time off a raw socket. */
   function frameReader(socket: import('node:net').Socket) {

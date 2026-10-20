@@ -7,7 +7,7 @@
 
 import { chmod, lstat, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { statSync, type BigIntStats } from 'node:fs';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, createHmac, randomUUID } from 'node:crypto';
 import { createConnection, createServer, type Server, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -181,19 +181,44 @@ async function peerDirIsSafe(): Promise<boolean> {
  * The one path every window of this installation contends for.
  *
  * Hashed rather than joined: macOS caps a unix socket path near 104 bytes and
- * the extension's globalStorage path is most of that on its own. Derived from
- * that path rather than random precisely because it must be *the same* in every
- * window — the bind is the arbitration.
+ * the extension's globalStorage path is most of that on its own. Derived rather
+ * than random precisely because it must be *the same* in every window — the
+ * bind is the arbitration.
+ *
+ * On unix the per-user directory ({@link peerDirIsSafe}) keeps another user from
+ * creating the path first, so the storage path alone names it. Windows has no
+ * such directory: the pipe namespace is machine-wide, and a name any local user
+ * can compute is one they can take before we bind it. So there the name is an
+ * HMAC over the storage path keyed by the shared token, which only a process
+ * that can read {@link TOKEN_FILE} can produce.
  */
-function socketPath(): string | null {
-  if (!context) return null;
-  const id = createHash('sha256')
-    .update(context.globalStorageUri.fsPath)
-    .digest('hex')
-    .slice(0, 12);
-  return process.platform === 'win32'
-    ? `\\\\.\\pipe\\dormouse-peer-${id}`
-    : join(peerDirPath(), `${id}.sock`);
+export function peerSocketPath(
+  storagePath: string,
+  token: string,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  if (platform !== 'win32') {
+    const id = createHash('sha256').update(storagePath).digest('hex').slice(0, 12);
+    return join(peerDirPath(), `${id}.sock`);
+  }
+  const id = createHmac('sha256', token).update(storagePath).digest('hex').slice(0, 32);
+  return `\\\\.\\pipe\\dormouse-peer-${id}`;
+}
+
+/**
+ * The pipe builds before {@link peerSocketPath} keyed the name contended for on
+ * Windows: the storage path's hash alone. A broker still binds it, best-effort,
+ * and a window that won the keyed pipe checks it for an older build's broker
+ * before serving ({@link joinLegacyBroker}), so the two builds share one broker
+ * while both run. `null` off Windows, where the name never changed.
+ */
+export function legacyPeerPipePath(
+  storagePath: string,
+  platform: NodeJS.Platform = process.platform,
+): string | null {
+  if (platform !== 'win32') return null;
+  const id = createHash('sha256').update(storagePath).digest('hex').slice(0, 12);
+  return `\\\\.\\pipe\\dormouse-peer-${id}`;
 }
 
 /**
@@ -303,6 +328,14 @@ let serverToken: string | null = null;
  * closing it (see `tryBind`).
  */
 let boundSocketFile: SocketFileIdentity | null = null;
+/** The path `server` is bound to, claimed and cleared with it. */
+let boundPath: string | null = null;
+/**
+ * Windows only: the same server's second listener, on the name older builds
+ * contend for ({@link legacyPeerPipePath}), so an older window dials this
+ * broker rather than electing its own. Opened and closed with `server`.
+ */
+let legacyServer: Server | null = null;
 const clients = new Set<PeerLinkClient>();
 /** Provider-local route handle → the peer window that owns it. */
 const routes = new Map<string, PeerLinkClient>();
@@ -769,9 +802,9 @@ export function listenServer(nextServer: Server, path: string): Promise<void> {
   });
 }
 
-/** Take the socket path, or report that somebody else holds it. */
-async function tryBind(path: string, token: string): Promise<boolean> {
-  const nextServer = createServer((socket) => {
+/** A listener that challenges and then serves every window that connects. */
+function createPeerServer(): Server {
+  return createServer((socket) => {
     const client: PeerLinkClient = {
       socket,
       decoder: new FrameDecoder(),
@@ -795,6 +828,11 @@ async function tryBind(path: string, token: string): Promise<boolean> {
     // of the token must not volunteer one into whatever bound this path.
     send(client, { kind: 'challenge', nonce: client.challenge });
   });
+}
+
+/** Take the socket path, or report that somebody else holds it. */
+async function tryBind(path: string, token: string): Promise<boolean> {
+  const nextServer = createPeerServer();
   try {
     await listenServer(nextServer, path);
   } catch {
@@ -805,6 +843,7 @@ async function tryBind(path: string, token: string): Promise<boolean> {
     return false;
   }
   server = nextServer;
+  boundPath = path;
   // Synchronous, and before the first `await` past the bind: `listen` binds
   // inside the call and resolves on a nextTick, so no thread-pool callback of
   // *this* process can interleave. A competing window is a separate extension
@@ -1168,8 +1207,8 @@ function settle(broker: boolean): void {
  * mid-startup) and the loop retries.
  */
 async function attempt(): Promise<boolean> {
-  const path = socketPath();
-  if (!path) return false;
+  if (!context) return false;
+  const storagePath = context.globalStorageUri.fsPath;
   if (!(await peerDirIsSafe())) {
     log.error(
       `[peer-link] ${peerDirPath()} is not a private directory of this user; the peer link is off`,
@@ -1196,10 +1235,16 @@ async function attempt(): Promise<boolean> {
     settle(false);
     return true;
   }
+  const path = peerSocketPath(storagePath, token);
 
   if (await tryBind(path, token)) {
     // Disposal can land inside any of the awaits above; a socket bound after it
     // would outlive the window that owns it.
+    if (disposed) {
+      await closeServer(true);
+      return true;
+    }
+    if (await joinLegacyBroker(storagePath, token)) return true;
     if (disposed) {
       await closeServer(true);
       return true;
@@ -1232,6 +1277,11 @@ async function attempt(): Promise<boolean> {
           return true;
         }
         if (await stillOurs(path)) {
+          if (await joinLegacyBroker(storagePath, token)) return true;
+          if (disposed) {
+            await closeServer(true);
+            return true;
+          }
           log.info('[peer-link] took over a socket its broker left behind');
           // Only now: until the verification returns, this window may still be
           // the one that stands down ({@link brokerConfirmed}).
@@ -1256,6 +1306,39 @@ async function attempt(): Promise<boolean> {
     return true;
   }
   return false;
+}
+
+/**
+ * Windows only, between winning the keyed pipe and serving on it: hold the name
+ * older builds contend for as well, or, when an older build's broker already
+ * holds it, stand down and become that broker's client. Either way the two
+ * builds share one broker — two would both connect `/ws/burrow` and displace
+ * each other on the Relay. A holder that cannot prove the token is a squatter,
+ * and the keyed pipe serves regardless. Returns whether this window stood down.
+ *
+ * Still unconfirmed here ({@link brokerConfirmed}), so standing down is not a
+ * role flipping downward.
+ */
+async function joinLegacyBroker(storagePath: string, token: string): Promise<boolean> {
+  const path = legacyPeerPipePath(storagePath);
+  if (!path) return false;
+  const nextServer = createPeerServer();
+  try {
+    await listenServer(nextServer, path);
+    if (server) legacyServer = nextServer;
+    else nextServer.close(() => {});
+    return false;
+  } catch {
+    // The same callback form as `tryBind`, for the same reason.
+    nextServer.close(() => {});
+  }
+  if ((await tryConnect(path, token)) !== 'connected') return false;
+  log.info('[peer-link] an older build of this extension holds the Burrow; joined it');
+  await closeServer(false);
+  // The same as `attempt`'s own connect: nobody is left to close it.
+  if (disposed) disconnectClient();
+  else settle(false);
+  return true;
 }
 
 /** How long to let a competing reclaim land before believing we won it. */
@@ -1348,11 +1431,14 @@ async function closeServer(unlink: boolean): Promise<void> {
   brokerConfirmed = false;
   serverToken = null;
   boundSocketFile = null;
+  const path = boundPath;
+  boundPath = null;
+  if (legacyServer?.listening) legacyServer.close();
+  legacyServer = null;
   for (const peer of [...clients]) dropClient(peer);
   if (!closing) return;
   if (closing.listening) closing.close();
   if (!unlink) return;
-  const path = socketPath();
   if (path) await rm(path, { force: true }).catch(() => {});
 }
 
