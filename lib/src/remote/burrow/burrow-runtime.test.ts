@@ -430,7 +430,7 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
     // A ciphertext that cannot decrypt would otherwise poison the session.
     sendE2e('c1', 'pairing', invitation.inviteId, 'transport', randomBase64Url(64));
     await settle();
-    expect(retirement(invitation)).toEqual({ inviteId: invitation.inviteId, state: 'reserved' });
+    expect(burrow.invitationState(invitation.inviteId)).toBe('reserved');
     write.resolve();
     await completed;
     expect(burrow.activeRecords).toHaveLength(1);
