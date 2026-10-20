@@ -50,16 +50,19 @@ const ACCOUNT_KEY = "account";
 /**
  * Everything routing needs of a socket, held as its attachment so a woken
  * object rebuilds it from `ctx.getWebSockets` rather than from memory.
- * `retired` is the generation guard: set on a socket unregistered ahead of its
- * close handshake, after which it is neither routed nor torn down again.
+ * `openedAt` is when it was accepted, the start of its silence until it
+ * pings. `retired` is the generation guard: set on a socket unregistered
+ * ahead of its close handshake, after which it is neither routed nor torn
+ * down again.
  */
 type Conn =
-  | { role: "burrow"; burrowId: string; retired?: true }
+  | { role: "burrow"; burrowId: string; openedAt: number; retired?: true }
   | {
       role: "client";
       clientId: string;
       expiresAt: number;
       burrowId: string | null;
+      openedAt: number;
       retired?: true;
     };
 type BurrowConn = Extract<Conn, { role: "burrow" }>;
@@ -154,7 +157,11 @@ export class RelayRoom extends DurableObject implements RelayRoomRpc {
         this.#retire(existing, WS_CLOSE_BURROW_REPLACED, WS_CLOSE_BURROW_REPLACED_REASON);
       const { 0: client, 1: server } = new WebSocketPair();
       this.ctx.acceptWebSocket(server, ["burrow", burrowTag(burrowId)]);
-      server.serializeAttachment({ role: "burrow", burrowId } satisfies BurrowConn);
+      server.serializeAttachment({
+        role: "burrow",
+        burrowId,
+        openedAt: this.now(),
+      } satisfies BurrowConn);
       await this.#armBy(this.now() + RELAY_ROOM_SWEEP_MS);
       return new Response(null, { status: 101, webSocket: client });
     });
@@ -182,6 +189,7 @@ export class RelayRoom extends DurableObject implements RelayRoomRpc {
       clientId,
       expiresAt,
       burrowId: null,
+      openedAt: this.now(),
     } satisfies ClientConn);
     await this.#armBy(expiresAt);
     return new Response(null, { status: 101, webSocket: client });
@@ -375,16 +383,18 @@ export class RelayRoom extends DurableObject implements RelayRoomRpc {
   }
 
   /**
-   * Whether `held` stopped answering pings: its last auto-response is older
-   * than `RELAY_IDLE_TIMEOUT_MS`, and it is retired with 1001 here. A socket
-   * that never pinged is not judged. Checked where a dead socket would cost
-   * something — routing to a Burrow, admitting at the Client cap, reporting a
-   * Burrow online — and nowhere on a timer.
+   * Whether `held` stopped answering pings: its last auto-response, or its
+   * opening if it never pinged, is older than `RELAY_IDLE_TIMEOUT_MS`, and it
+   * is retired with 1001 here. Counting from the opening keeps a socket that
+   * never pings from holding a place at the Client cap until its session
+   * expires. Checked where a dead socket would cost something — routing to a
+   * Burrow, admitting at the Client cap, reporting a Burrow online — and
+   * nowhere on a timer.
    */
   #goneSilent(held: Held): boolean {
     const answered = this.ctx.getWebSocketAutoResponseTimestamp(held.ws);
-    if (answered === null || this.now() - answered.getTime() <= RELAY_IDLE_TIMEOUT_MS)
-      return false;
+    const lastHeard = answered?.getTime() ?? held.conn.openedAt;
+    if (this.now() - lastHeard <= RELAY_IDLE_TIMEOUT_MS) return false;
     this.#retire(held, WS_CLOSE_IDLE, WS_CLOSE_IDLE_REASON);
     return true;
   }
