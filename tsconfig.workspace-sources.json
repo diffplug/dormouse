@@ -1,0 +1,22 @@
+// Every check-only (`noEmit`) tsconfig that reaches an internal package extends
+// this, so tsc reads its source rather than a dist. It mirrors
+// `WORKSPACE_SOURCES` in scripts/workspace-sources.mjs, and
+// scripts/workspace-sources.test.mjs pins the two together.
+{
+  "compilerOptions": {
+    "paths": {
+      "dormouse-lib": ["./lib/src"],
+      "dormouse-lib/*": ["./lib/src/*"],
+      "dor": ["./dor/src"],
+      "dor/*": ["./dor/src/*"],
+      "dor-lib-common": ["./dor-lib-common/src"],
+      "dor-lib-common/*": ["./dor-lib-common/src/*"],
+      "dor-tools-builtin": ["./dor-tools-builtin/src"],
+      "dor-tools-builtin/*": ["./dor-tools-builtin/src/*"],
+      "dor-tools-lib": ["./dor-tools-lib/src"],
+      "dor-tools-lib/*": ["./dor-tools-lib/src/*"],
+      "remote-lib-common": ["./remote-lib-common/src"],
+      "remote-lib-common/*": ["./remote-lib-common/src/*"]
+    }
+  }
+}

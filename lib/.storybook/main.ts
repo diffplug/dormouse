@@ -3,6 +3,7 @@ import path from 'path';
 import { createRequire } from 'module';
 import remarkGfm from 'remark-gfm';
 import { fileURLToPath } from 'url';
+import { workspaceSourceAliases } from '../../scripts/workspace-sources.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const requireFromHere = createRequire(import.meta.url);
@@ -37,27 +38,7 @@ const config: StorybookConfig = {
       '@tauri-apps/api/core': stub,
       '@tauri-apps/plugin-shell': stub,
       '@tauri-apps/plugin-updater': stub,
-      'dormouse-lib': path.resolve(here, '..', 'src'),
-      // Mirror tsconfig.app.json's `dor/* → ../dor/src/*` mapping so stories
-      // that import `Wall` (which pulls `dor/commands/*`, `dor/protocol`)
-      // resolve. Storybook's Vite doesn't read tsconfig paths, so without this
-      // any Wall-importing story fails with "Failed to resolve import 'dor/…'".
-      // Safe next to `dormouse-lib`: a string alias only matches `dor` or `dor/…`.
-      dor: path.resolve(here, '..', '..', 'dor', 'src'),
-      // Same reason: `Wall` → `IframePanel` names the built-in viewers' formats.
-      'dor-tools-builtin': path.resolve(here, '..', '..', 'dor-tools-builtin', 'src'),
-      // And the Tool protocol the terminal parser and `IframePanel` speak.
-      'dor-tools-lib': path.resolve(here, '..', '..', 'dor-tools-lib', 'src'),
-      // Same reason: `Wall` → `RemotePairingModalHost` pulls in the remote host
-      // modules, which import `remote-lib-common`. Its package `exports` point
-      // at a `dist` the Storybook/Argos job never builds, so alias the bare
-      // specifier to source too.
-      'remote-lib-common': path.resolve(here, '..', '..', 'remote-lib-common', 'src'),
-      // And `Wall` → `useDorControl` → `connect-port` imports
-      // `dor-lib-common/browser-providers`, whose `exports` point at the same kind of
-      // unbuilt `dist`. The directory alias covers the subpath and the bare
-      // specifier both.
-      'dor-lib-common': path.resolve(here, '..', '..', 'dor-lib-common', 'src'),
+      ...workspaceSourceAliases(),
       // `docs/stories/*.mdx` lives outside this package, so Node resolution
       // from that file never reaches `lib/node_modules` and the docs blocks
       // fail to resolve. Resolve them here, where the package *is* installed,

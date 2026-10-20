@@ -1,6 +1,7 @@
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
+import { workspaceSourceAliases } from '../../scripts/workspace-sources.mjs';
 
 // The format helper also serves the renderer, which names a preview's target
 // with it, and the website playground serves the viewer pages from the page
@@ -11,6 +12,7 @@ test('the shared modules bundle for a browser without Node shims', async () => {
       .map(name => fileURLToPath(new URL(`../src/${name}.ts`, import.meta.url))),
     outdir: 'browser-shared-test',
     bundle: true,
+    alias: workspaceSourceAliases(),
     platform: 'browser',
     format: 'esm',
     treeShaking: false,

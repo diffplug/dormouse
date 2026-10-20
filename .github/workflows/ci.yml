@@ -231,9 +231,8 @@ jobs:
 
       # The smoketest loads what the build emits, so the build has to precede
       # it. `build:frontend` alone — this job never touches the extension host
-      # bundle — and its `prebuild:frontend` hook builds the two workspace
-      # packages the webview bundle imports, which a clean checkout has no dist
-      # for.
+      # bundle — and it reads every workspace package from source, so a clean
+      # checkout needs no other build first.
       - name: Build the webview frontend
         run: pnpm --filter dormouse build:frontend
 

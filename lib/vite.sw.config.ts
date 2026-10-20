@@ -1,5 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
+import { workspaceSourceAliases } from "../scripts/workspace-sources.mjs";
 
 // The Pocket service worker, built separately from the app it serves
 // (docs/specs/pocket-app.md -> Installable web app owns the rules;
@@ -17,12 +18,7 @@ import { defineConfig } from "vite";
 // same baseline.
 export default defineConfig({
   resolve: {
-    alias: {
-      // Same unbuilt-`dist` problem the app config has: the worker imports the
-      // shared security primitives, whose package `exports` point at a `dist`
-      // this vite-only build never generates.
-      "remote-lib-common": fileURLToPath(new URL("../remote-lib-common/src", import.meta.url)),
-    },
+    alias: workspaceSourceAliases(),
   },
   build: {
     outDir: fileURLToPath(new URL("./dist-pocket", import.meta.url)),

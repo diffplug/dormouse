@@ -14,7 +14,7 @@
     }
   },
   "scripts": {
-    "prebuild": "pnpm --filter dor-lib-common build && pnpm --filter dor-tools-lib build",
+    "prebuild": "node ../scripts/build-workspace-deps.mjs",
     "build": "tsc -p tsconfig.json && tsc -p tsconfig.viewer.json && node scripts/build.mjs",
     "test": "pnpm run build && node --test test/*.test.mjs"
   },

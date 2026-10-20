@@ -1,4 +1,5 @@
 {
+  "extends": "../tsconfig.workspace-sources.json",
   "compilerOptions": {
     "target": "ES2022",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
@@ -11,10 +12,7 @@
     "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
     "allowJs": true,
-    "types": ["node", "vite/client"],
-    "paths": {
-      "remote-lib-common": ["../remote-lib-common/src/index.ts"]
-    }
+    "types": ["node", "vite/client"]
   },
   "include": ["src", "server", "vite.config.ts", "vitest.config.ts"]
 }

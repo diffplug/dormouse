@@ -1,4 +1,5 @@
 {
+  "extends": "../tsconfig.workspace-sources.json",
   "compilerOptions": {
     "target": "ES2020",
     "useDefineForClassFields": true,
@@ -14,13 +15,7 @@
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "noFallthroughCasesInSwitch": true,
-    "paths": {
-      "dormouse-lib/*": ["./src/*"],
-      "dor/*": ["../dor/src/*"],
-      "dor-tools-builtin/*": ["../dor-tools-builtin/src/*"],
-      "dor-tools-lib/*": ["../dor-tools-lib/src/*"]
-    }
+    "noFallthroughCasesInSwitch": true
   },
   "include": ["src"],
   // The pure rewrite helpers typecheck here (DOM provides URL); the Node proxy

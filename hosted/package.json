@@ -6,6 +6,7 @@
     "dev": "tsx server/dev.ts",
     "typecheck": "tsc --noEmit",
     "build": "pnpm --filter dormouse-lib build:pocket && pnpm --filter dormouse-lib build:one-time && pnpm typecheck && vite build && node scripts/stage-relay.mjs && wrangler deploy --dry-run --outdir dist-worker/account && wrangler deploy --dry-run --config wrangler.relay.jsonc --outdir dist-worker/relay && wrangler deploy --dry-run --config wrangler.voice.jsonc --outdir dist-worker/voice",
+    "pretest": "node ../scripts/build-workspace-deps.mjs",
     "test": "pnpm test:deploy && vitest run",
     "db:migrate": "tsx server/db.ts migrate",
     "db:validate": "tsx server/db.ts validate",
