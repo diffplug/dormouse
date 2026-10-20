@@ -98,9 +98,16 @@ jobs:
             "/repos/$GITHUB_REPOSITORY/actions/workflows/workflow-audit.yaml/runs?per_page=100" \
             --jq '.workflow_runs[] | select(.conclusion == "success" and .head_branch == "main" and .event == "schedule") | .created_at')
           SINCE=${SUCCESSES%%$'\n'*}
-          if [ -z "$SINCE" ]; then
-            SINCE=$(date -u -d '25 hours ago' --iso-8601=seconds)
-          fi
+          # No listed success falls back to a fixed date, never one read off
+          # the runner clock: the day this workflow reached main, earlier than
+          # any run the listing could ever hold. Deleting or cancelling runs
+          # then only ever moves the bound earlier; "now minus a day" would
+          # let deleting the listed successes shrink the window past commits
+          # nobody audited. A genuine first run still succeeds, reporting every
+          # window commit since the floor (those older than the activity log's
+          # quarter as unexplained) — loud on purpose, since an empty listing
+          # is never the steady state.
+          SINCE=${SINCE:-2026-05-22T00:00:00Z}
           echo "Auditing commits since: $SINCE"
 
           # .github/audit/ is in the window because it holds the security
