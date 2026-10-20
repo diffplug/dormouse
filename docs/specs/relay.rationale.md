@@ -40,7 +40,7 @@
 
 **Two facts made the dependency unnecessary.** The browser hands the new credential's public key back as SPKI DER, and `remote-lib-common` already carried a full assertion verifier — written for the Burrow — that works against an SPKI key. Nothing was left for a library to do.
 
-**Why the challenge issuers are capped as well as swept.** The mint is unauthenticated (Guardrails), so expiry alone lets the map plateau at request-rate × TTL rather than at a bound the process chose. A flood evicts abandoned challenges of its own making, the ceremony that loses one retries, and single use is untouched.
+**Why the challenge issuers are capped as well as swept.** The mint is unauthenticated (Guardrails), so expiry alone lets the map plateau at request-rate × TTL rather than at a bound the process chose. A burst evicts mostly abandoned challenges of its own making and the ceremony that loses one retries; a sustained flood evicts a real one before its passkey prompt is answered. Single use is untouched either way.
 
 ## HTTP API
 

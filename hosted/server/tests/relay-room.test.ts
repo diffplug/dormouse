@@ -613,7 +613,7 @@ test("a ping is answered without waking the object, and changes nothing it holds
   expect(after.storage).toEqual(before.storage);
 });
 
-test("a Burrow silent past three ping intervals is gone when routed to, and is not reported online", async ({
+test("a Burrow silent past three ping intervals, or never pinging that long, is gone when routed to, and is not reported online", async ({
   onTestFinished,
 }) => {
   onTestFinished(async () => {
@@ -630,18 +630,22 @@ test("a Burrow silent past three ping intervals is gone when routed to, and is n
   }
   const room = await owner.room();
   await room.skew(RELAY_IDLE_TIMEOUT_MS + 1_000);
-  // `pinging` pings again on time; `quiet` does not; `neverPinged` is never judged.
+  // `pinging` pings again on time; `quiet` does not; `neverPinged` is judged from its opening.
   pinging.socket.ws.send(RELAY_PING);
   expect(await pinging.socket.take()).toBe(RELAY_PONG);
 
   const client = await owner.driver.connectClient();
-  client.send(e2eClientFrame(quiet.burrowId));
-  expect((await client.take()).error).toBe(`burrow ${quiet.burrowId} is offline`);
-  expect((await quiet.socket.closed).code).toBe(WS_CLOSE_IDLE);
+  for (const { burrowId, socket } of [quiet, neverPinged]) {
+    client.send(e2eClientFrame(burrowId));
+    expect((await client.take()).error).toBe(`burrow ${burrowId} is offline`);
+    expect((await socket.closed).code).toBe(WS_CLOSE_IDLE);
+  }
 
-  // `pinging`'s last pong is now behind the skewed clock too: not online, and gone.
+  // `pinging`'s last pong is now behind the skewed clock too: not online, and
+  // gone. One opened on the skewed clock has not been silent that long.
   await room.skew(2 * RELAY_IDLE_TIMEOUT_MS);
-  expect(await room.onlineBurrows(owner.userId)).toEqual([neverPinged.burrowId]);
+  const fresh = await owner.driver.connectBurrow();
+  expect(await room.onlineBurrows(owner.userId)).toEqual([fresh.burrowId]);
   expect((await pinging.socket.closed).code).toBe(WS_CLOSE_IDLE);
 });
 
@@ -656,18 +660,28 @@ test("at the Client cap, a silent socket is gone and a live one is never evicted
   });
   const clients = [];
   for (let i = 0; i < MAX_RELAY_CLIENT_SOCKETS; i += 1) clients.push(await owner.driver.connectClient());
-  const [silent] = clients;
+  const [silent, neverPinged] = clients;
   silent.ws.send(RELAY_PING);
   expect(await silent.take()).toBe(RELAY_PONG);
   // Full, and nobody silent yet: refused.
   expect((await owner.driver.openClient().closed).code).toBe(WS_CLOSE_TRY_AGAIN_LATER);
+  // Every socket but the first two is replaced by one opened on a later clock.
+  for (const { ws } of clients.splice(2)) ws.close();
+  await until(async () => (await room.probe()).attachments.filter(live).length === 2);
   await room.skew(RELAY_IDLE_TIMEOUT_MS + 1_000);
-  // The one that pinged and fell silent goes; those that never pinged stay.
-  const admitted = owner.driver.openClient();
-  await admitted.ready;
+  for (let i = 2; i < MAX_RELAY_CLIENT_SOCKETS; i += 1) clients.push(await owner.driver.connectClient());
+  // The one that pinged and fell silent goes, and so does the one that never
+  // pinged in as long; those opened since stay.
+  for (let i = 0; i < 2; i += 1) {
+    const admitted = owner.driver.openClient();
+    await admitted.ready;
+    expect(await admitted.quiet(150)).toBe(true);
+  }
   expect((await silent.closed).code).toBe(WS_CLOSE_IDLE);
-  expect(await admitted.quiet(150)).toBe(true);
-  expect(clients.slice(1).every(({ ws }) => ws.readyState === WebSocket.OPEN)).toBe(true);
+  expect((await neverPinged.closed).code).toBe(WS_CLOSE_IDLE);
+  expect(clients.slice(2).every(({ ws }) => ws.readyState === WebSocket.OPEN)).toBe(true);
+  // Full again, and nobody silent: refused.
+  expect((await owner.driver.openClient().closed).code).toBe(WS_CLOSE_TRY_AGAIN_LATER);
 });
 
 test("revocation closes a Burrow 4001 and tells its Clients; removal on the account pushes it", async ({
