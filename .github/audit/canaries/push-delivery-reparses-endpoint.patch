@@ -1,0 +1,149 @@
+Domain: remote
+Rule: S226 — handing the endpoint string to a parser of its own
+Expect: relay/src/push.ts relay/src/push-endpoint.ts
+Source: reverses #1226 (registration admits any host WHATWG parses, and delivery hands web-push the endpoint string)
+
+diff --git a/relay/src/push-endpoint.ts b/relay/src/push-endpoint.ts
+index 5472615a8..3a1afeec8 100644
+--- a/relay/src/push-endpoint.ts
++++ b/relay/src/push-endpoint.ts
+@@ -93,14 +93,6 @@ export function isPublicNetworkAddress(address: string): boolean {
+ /** Shared with the Hosted Relay (`docs/specs/relay.md` -> State files). */
+ export { MAX_PUSH_ENDPOINT_LENGTH };
+ 
+-/**
+- * One DNS name: lowercase letters, digits, and inner hyphens per label, at
+- * most 63 characters a label, no trailing dot. Anything else WHATWG admits in
+- * a host (`'`, `;`, `_`, …) is a character another URL parser may read as the
+- * end of the host.
+- */
+-const DNS_NAME = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+-
+ /**
+  * The one parse of a push endpoint, shared by registration and delivery: the
+  * URL delivery connects to, or `null`. Refuses anything another URL parser
+@@ -117,11 +109,10 @@ export function parsePublicPushEndpoint(value: string): URL | null {
+   } catch {
+     return null;
+   }
+-  if (parsed.href !== value) return null;
+   if (parsed.protocol !== 'https:' || parsed.username || parsed.password) return null;
+-  const hostname = unbracket(parsed.hostname);
++  const hostname = unbracket(parsed.hostname).toLowerCase();
+   if (isIP(hostname) !== 0) return isPublicNetworkAddress(hostname) ? parsed : null;
+-  if (!DNS_NAME.test(hostname) || hostname === 'localhost' || hostname.endsWith('.localhost')) {
++  if (!hostname || hostname === 'localhost' || hostname.endsWith('.localhost')) {
+     return null;
+   }
+   return parsed;
+diff --git a/relay/src/push.ts b/relay/src/push.ts
+index 574db60ac..a93599f37 100644
+--- a/relay/src/push.ts
++++ b/relay/src/push.ts
+@@ -19,7 +19,7 @@
+  */
+ 
+ import { createECDH, timingSafeEqual } from 'node:crypto';
+-import { request as httpsRequest, type Agent } from 'node:https';
++import type { Agent } from 'node:https';
+ 
+ import webpush from 'web-push';
+ 
+@@ -34,7 +34,6 @@ import type { StoredPushSubscription } from './state.js';
+ import {
+   createPublicPushAgent,
+   parsePublicPushEndpoint,
+-  unbracket,
+ } from './push-endpoint.js';
+ 
+ /** What a push service needs to reach one browser. */
+@@ -213,56 +212,6 @@ function pushErrorDetail(body: string): string {
+     : collapsed;
+ }
+ 
+-/** What a push service answered: its status, and at most {@link MAX_KEPT_RESPONSE_BYTES} of its body. */
+-interface PushServiceResponse {
+-  readonly statusCode: number;
+-  readonly body: string;
+-}
+-
+-const MAX_KEPT_RESPONSE_BYTES = 1024;
+-
+-/**
+- * POST one prepared push to `url` — the URL {@link parsePublicPushEndpoint}
+- * answered, never the endpoint string re-parsed — through `agent`, so the
+- * host registration checked is the host this connects to.
+- */
+-function postToPushService(
+-  url: URL,
+-  request: webpush.RequestDetails,
+-  agent: Agent,
+-): Promise<PushServiceResponse> {
+-  return new Promise((resolve, reject) => {
+-    const outgoing = httpsRequest(
+-      {
+-        hostname: unbracket(url.hostname),
+-        port: url.port || undefined,
+-        path: `${url.pathname}${url.search}`,
+-        method: request.method,
+-        headers: request.headers,
+-        agent,
+-        timeout: PUSH_REQUEST_TIMEOUT_MS,
+-      },
+-      (response) => {
+-        const kept: Buffer[] = [];
+-        let room = MAX_KEPT_RESPONSE_BYTES;
+-        response.on('data', (chunk: Buffer) => {
+-          if (room <= 0) return;
+-          const take = chunk.subarray(0, room);
+-          kept.push(take);
+-          room -= take.length;
+-        });
+-        response.on('end', () =>
+-          resolve({ statusCode: response.statusCode ?? 0, body: Buffer.concat(kept).toString('utf8') }),
+-        );
+-        response.on('error', reject);
+-      },
+-    );
+-    outgoing.on('timeout', () => outgoing.destroy(new Error('Socket timeout')));
+-    outgoing.on('error', reject);
+-    outgoing.end(request.body ?? undefined);
+-  });
+-}
+-
+ export function createWebPushSender(
+   keys: VapidKeys,
+   subject: string,
+@@ -274,20 +223,21 @@ export function createWebPushSender(
+         // The registration route applies the same parse, but enforce it again
+         // for legacy or manually edited state. Node connects to an IP literal
+         // without invoking the Agent's DNS lookup.
+-        const url = parsePublicPushEndpoint(target.endpoint);
+-        if (!url) throw new Error('push endpoint is not a public HTTPS URL');
+-        // `web-push` builds the encrypted body and the VAPID header only; it
+-        // never connects, having a URL parser of its own.
+-        const request = webpush.generateRequestDetails(
+-          { endpoint: url.href, keys: { ...target.keys } },
+-          payload,
+-          {
++        if (!parsePublicPushEndpoint(target.endpoint)) {
++          throw new Error('push endpoint is not a public HTTPS URL');
++        }
++        const response = await webpush
++          .sendNotification({ endpoint: target.endpoint, keys: { ...target.keys } }, payload, {
+             vapidDetails: { subject, publicKey: keys.publicKey, privateKey: keys.privateKey },
+             TTL: PUSH_TTL_SECONDS,
++            timeout: PUSH_REQUEST_TIMEOUT_MS,
+             urgency: 'high',
+-          },
+-        );
+-        const response = await postToPushService(url, request, agent);
++            agent,
++          })
++          .catch((err: { statusCode?: number; body?: string }) => {
++            if (typeof err.statusCode !== 'number') throw err;
++            return { statusCode: err.statusCode, body: err.body ?? '' };
++          });
+         const status = response.statusCode;
+         if (status >= 200 && status <= 299) return 'delivered';
+         // 404/410 is the push service's way of saying the subscription is dead
