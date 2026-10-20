@@ -16,10 +16,6 @@
     "./browser-providers": {
       "types": "./dist/browser-providers.d.ts",
       "default": "./dist/browser-providers.js"
-    },
-    "./control-characters": {
-      "types": "./dist/control-characters.d.ts",
-      "default": "./dist/control-characters.js"
     }
   },
   "scripts": {

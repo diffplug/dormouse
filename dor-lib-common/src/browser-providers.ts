@@ -9,8 +9,6 @@
  * webview, the Node hosts, and `dor`.
  */
 
-import { CONTROL_CHARACTERS, hasControlCharacter } from './control-characters.js';
-
 /** A browser-automation provider: whose CLI drives a browser Surface. */
 export type BrowserAutomationProvider = 'agent-browser' | 'playwright';
 
@@ -106,9 +104,9 @@ export function isAllowedPlaywrightBinary(candidate: unknown, configuredPath?: s
 
 function isAllowedBrowserBinary(candidate: unknown, configuredPath: string | undefined, name: string, filename: RegExp): candidate is string {
   if (typeof candidate !== 'string' || candidate.length === 0 || candidate.length > 4096) return false;
-  // Control characters have no place in a path and are how one argument
-  // becomes two on the platforms that take a command string.
-  if (hasControlCharacter(candidate)) return false;
+  // Control characters, C0, DEL and C1, have no place in a path and are how
+  // one argument becomes two on the platforms that take a command string.
+  if (/[\u0000-\u001f\u007f-\u009f]/.test(candidate)) return false;
   if (configuredPath && candidate === configuredPath) return true;
   if (candidate === name) return true;
   if (isUncOrDevicePath(candidate) || !ABSOLUTE_RE.test(candidate)) return false;
@@ -125,14 +123,12 @@ export interface BrowserBinding {
   binaryPath?: string;
 }
 
-const AGENT_BROWSER_SESSION_RE = new RegExp(`^(?!-)[^/\\\\${CONTROL_CHARACTERS}]{1,200}$`);
-
 /** An agent-browser session name. `dor agent-browser --session` passes a user's raw name
  *  through, so anything goes but what agent-browser would read as an option or
  *  its socket directory as a path: the name lands after `--session` and in
  *  `<socket dir>/<session>.pid`, whose pid a relaunch signals. */
 function isAgentBrowserSession(value: unknown): value is string {
-  return typeof value === 'string' && AGENT_BROWSER_SESSION_RE.test(value);
+  return typeof value === 'string' && /^(?!-)[^/\\\x00-\x1f\x7f-\x9f]{1,200}$/.test(value);
 }
 
 /** A Playwright session name: Dormouse mints these, and the CLI takes them

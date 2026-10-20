@@ -4,10 +4,10 @@ Expect: dor-lib-common/src/browser-providers.ts
 Source: reverses #1040 (a UNC binaryPath passed the executable gate)
 
 diff --git a/dor-lib-common/src/browser-providers.ts b/dor-lib-common/src/browser-providers.ts
-index 6dc70bbf6..c20ed4767 100644
+index 5ba6a6c46..1384983bf 100644
 --- a/dor-lib-common/src/browser-providers.ts
 +++ b/dor-lib-common/src/browser-providers.ts
-@@ -69,10 +69,10 @@ export const DEFAULT_PLAYWRIGHT_BIN = 'playwright-cli';
+@@ -67,10 +67,10 @@ export const DEFAULT_PLAYWRIGHT_BIN = 'playwright-cli';
  const PLAYWRIGHT_FILENAME_RE = /^playwright-cli(?:\.(?:cmd|bat|exe|com|ps1))?$/i;
  const AGENT_BROWSER_FILENAME_RE = /^agent-browser(?:\.(?:cmd|bat|exe|com|ps1))?$/i;
  
@@ -22,8 +22,8 @@ index 6dc70bbf6..c20ed4767 100644
  
  /**
   * True for a path opening with two separators in either spelling: a UNC share
-@@ -111,7 +111,7 @@ function isAllowedBrowserBinary(candidate: unknown, configuredPath: string | und
-   if (hasControlCharacter(candidate)) return false;
+@@ -109,7 +109,7 @@ function isAllowedBrowserBinary(candidate: unknown, configuredPath: string | und
+   if (/[\u0000-\u001f\u007f-\u009f]/.test(candidate)) return false;
    if (configuredPath && candidate === configuredPath) return true;
    if (candidate === name) return true;
 -  if (isUncOrDevicePath(candidate) || !ABSOLUTE_RE.test(candidate)) return false;
@@ -32,7 +32,7 @@ index 6dc70bbf6..c20ed4767 100644
    if (segments.includes('..')) return false;
    return filename.test(segments[segments.length - 1] ?? '');
 diff --git a/lib/src/lib/agent-browser-binary.test.ts b/lib/src/lib/agent-browser-binary.test.ts
-index 882cb1214..ddbb7d570 100644
+index 4bf54d1e7..c45055dda 100644
 --- a/lib/src/lib/agent-browser-binary.test.ts
 +++ b/lib/src/lib/agent-browser-binary.test.ts
 @@ -35,14 +35,6 @@ describe('isAllowedAgentBrowserBinary', () => {
@@ -50,11 +50,11 @@ index 882cb1214..ddbb7d570 100644
        // Control characters are how one argument becomes two.
        '/usr/local/bin/agent-browser\n/bin/sh',
        '/usr/local/bin/agent-browser\u0000',
-@@ -62,6 +54,6 @@ describe('isAllowedAgentBrowserBinary', () => {
+@@ -61,6 +53,6 @@ describe('isAllowedAgentBrowserBinary', () => {
  
   it('validates Playwright executable hints independently of agent-browser', () => {
    for (const candidate of ['playwright-cli', '/opt/bin/playwright-cli', 'C:\\tools\\playwright-cli.cmd']) expect(isAllowedPlaywrightBinary(candidate)).toBe(true);
--  for (const candidate of ['agent-browser', '/bin/sh', './playwright-cli', '/opt/../playwright-cli', '/opt/playwright-cli\n', '/opt/playwright-cli\u0085', '/opt/playwright-cli\u009f', '/opt/a\u0085b/playwright-cli', '\\\\host\\share\\playwright-cli.cmd', '//host/share/playwright-cli']) expect(isAllowedPlaywrightBinary(candidate)).toBe(false);
-+  for (const candidate of ['agent-browser', '/bin/sh', './playwright-cli', '/opt/../playwright-cli', '/opt/playwright-cli\n', '/opt/playwright-cli\u0085', '/opt/playwright-cli\u009f', '/opt/a\u0085b/playwright-cli']) expect(isAllowedPlaywrightBinary(candidate)).toBe(false);
+-  for (const candidate of ['agent-browser', '/bin/sh', './playwright-cli', '/opt/../playwright-cli', '/opt/playwright-cli\n', '/opt/a\u0085b/playwright-cli', '\\\\host\\share\\playwright-cli.cmd', '//host/share/playwright-cli']) expect(isAllowedPlaywrightBinary(candidate)).toBe(false);
++  for (const candidate of ['agent-browser', '/bin/sh', './playwright-cli', '/opt/../playwright-cli', '/opt/playwright-cli\n', '/opt/a\u0085b/playwright-cli']) expect(isAllowedPlaywrightBinary(candidate)).toBe(false);
    expect(isAllowedPlaywrightBinary('/opt/custom-wrapper', '/opt/custom-wrapper')).toBe(true);
  });
