@@ -1,7 +1,7 @@
 Domain: remote
 Rule: S271 — `signin` must sign `signinChallenge` of the Relay's challenge, never its bytes
 Expect: lib/src/remote/client/pocket-client.ts
-Source: reverses part of the sign-in challenge derivation (Pocket signed the challenge the Relay's sign-in `begin` answered as given)
+Source: reverses part of #1243 (Pocket signed the challenge the Relay's sign-in `begin` answered as given)
 
 diff --git a/lib/src/remote/client/pocket-client.test.ts b/lib/src/remote/client/pocket-client.test.ts
 index 227b0f9..bb9c28e 100644
