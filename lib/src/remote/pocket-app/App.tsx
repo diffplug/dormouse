@@ -14,7 +14,7 @@
  * `pocket-chrome.tsx` and docs/specs/theme.md.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { clsx } from 'clsx';
 import {
   PocketClient,
@@ -41,6 +41,7 @@ import {
   hasCurrentPushSubscription,
   needsHomeScreenInstall,
   subscribeToPushInBrowser,
+  unsubscribeFromPushInBrowser,
   type PushAvailability,
 } from '../client/push-subscribe';
 import type { RemotePtyAdapter } from '../client/remote-adapter';
@@ -645,6 +646,17 @@ export default function App({
     setPhase({ at: 'auth' });
   };
 
+  // A phone that is leaving: every record goes the way Remove takes it, and
+  // the browser's push address with them. A failure part-way leaves this
+  // screen up, signed in, to try again; what was already removed stays removed.
+  const forgetThisPhone = () =>
+    run(FORGET_PHONE_OP, async () => {
+      await client.forgetThisPhone();
+      await unsubscribeFromPushInBrowser();
+      setBurrows([]);
+      setPhase({ at: 'auth' });
+    });
+
   // --- Views ---------------------------------------------------------------
 
   // Gated, not degraded: nothing above has performed a remote operation, and
@@ -736,6 +748,7 @@ export default function App({
           onEnablePush={onEnablePush}
           onRetryPushConfig={onRetryPushConfig}
           onSignOut={signOut}
+          onForgetThisPhone={forgetThisPhone}
         />
       );
   }
@@ -1042,6 +1055,22 @@ function InstallNotice(): React.ReactElement {
 /** The `run` label the registration owns; the card selects its spinner on it. */
 const PUSH_OP = 'push';
 
+const FORGET_PHONE_OP = 'forget-phone';
+
+/** Plain Sign out keeps every record; this is the one that does not. */
+export const FORGET_PHONE_LABEL = 'Sign out and forget this phone';
+export const FORGET_PHONE_TITLE = 'Forget this phone?';
+export const FORGET_PHONE_CONFIRM = 'Forget this phone';
+/**
+ * What forgetting cannot reach. A Burrow has no per-phone removal: its
+ * Disconnect, which drops every phone, is the only way it stops listing this
+ * one (`docs/specs/remote-security-model.md` -> "Revocation propagation").
+ */
+export const FORGET_PHONE_BODY =
+  'Removes every Burrow from this phone, stops its push notifications, and signs out. '
+  + 'This can’t be undone: each Burrow must be paired again. '
+  + 'Each Burrow still lists this phone until its Disconnect, in Settings → Network, clears it.';
+
 const PUSH_ENABLE_LABEL = 'Enable push notifications';
 
 /** The one pitch, on the one card. */
@@ -1195,6 +1224,7 @@ export function BurrowsView({
   onEnablePush,
   onRetryPushConfig,
   onSignOut,
+  onForgetThisPhone,
 }: {
   /** The pinned records; a Burrow with no record is not one of these. */
   burrows: BurrowView[];
@@ -1217,7 +1247,11 @@ export function BurrowsView({
   onEnablePush: () => void;
   onRetryPushConfig: () => void;
   onSignOut: () => void;
+  /** Runs only from the confirmation this view asks first. */
+  onForgetThisPhone: () => void;
 }): React.ReactElement {
+  const [confirmingForget, setConfirmingForget] = useState(false);
+  const forgetTitleId = useId();
   const pushNotice = pushNoticeState({
     pairedBurrowIds: burrows.filter(isPushTarget).map((h) => h.burrowId),
     isPushSubscribed,
@@ -1322,14 +1356,53 @@ export function BurrowsView({
         >
           {SCAN_LABEL}
         </button>
-        <button
-          type="button"
-          className={clsx(pkButton({ tone: 'ghost', size: 'sm' }), 'self-center')}
-          disabled={busy !== null}
-          onClick={onSignOut}
-        >
-          Sign out
-        </button>
+        {/* Asked inline rather than in a dialog: the screen is a single column
+            already, and the question replaces the two exits it asks about. */}
+        {confirmingForget ? (
+          <div className={PK.notice} role="group" aria-labelledby={forgetTitleId}>
+            <div id={forgetTitleId} className={PK.noticeTitle}>
+              {FORGET_PHONE_TITLE}
+            </div>
+            <p className={PK.noticeBody}>{FORGET_PHONE_BODY}</p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                className={pkButton({ tone: 'outline', size: 'sm' })}
+                disabled={busy !== null}
+                onClick={() => setConfirmingForget(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className={pkButton({ size: 'sm' })}
+                disabled={busy !== null}
+                onClick={onForgetThisPhone}
+              >
+                {busy === FORGET_PHONE_OP ? '…' : FORGET_PHONE_CONFIRM}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-col items-center">
+            <button
+              type="button"
+              className={pkButton({ tone: 'ghost', size: 'sm' })}
+              disabled={busy !== null}
+              onClick={onSignOut}
+            >
+              Sign out
+            </button>
+            <button
+              type="button"
+              className={pkButton({ tone: 'ghost', size: 'sm' })}
+              disabled={busy !== null}
+              onClick={() => setConfirmingForget(true)}
+            >
+              {FORGET_PHONE_LABEL}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -12,6 +12,7 @@ import {
   hasCurrentPushSubscription,
   requiresInstallForPush,
   subscribeToPushInBrowser,
+  unsubscribeFromPushInBrowser,
 } from './push-subscribe';
 
 /**
@@ -351,5 +352,26 @@ describe('subscribeToPushInBrowser', () => {
       'push service unreachable',
     );
     expect(onReplaced).toHaveBeenCalledOnce();
+  });
+});
+
+describe('unsubscribeFromPushInBrowser', () => {
+  it('drops the scope-wide subscription', async () => {
+    stubBrowser({ permission: 'granted' });
+    const unsubscribe = vi.fn(async () => true);
+    getRegistration.mockResolvedValue(registration({ unsubscribe }));
+
+    await unsubscribeFromPushInBrowser();
+
+    expect(unsubscribe).toHaveBeenCalledOnce();
+  });
+
+  it('never throws, so a leaving phone still signs out', async () => {
+    stubBrowser({ permission: 'granted' });
+    getRegistration.mockResolvedValue(
+      registration({ unsubscribe: () => Promise.reject(new Error('push service unreachable')) }),
+    );
+
+    await expect(unsubscribeFromPushInBrowser()).resolves.toBeUndefined();
   });
 });

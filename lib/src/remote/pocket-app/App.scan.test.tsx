@@ -25,6 +25,9 @@ import App, {
   CAMERA_BOOTSTRAP_MESSAGE,
   BURROWS_EMPTY,
   BURROWS_TITLE,
+  FORGET_PHONE_CONFIRM,
+  FORGET_PHONE_LABEL,
+  FORGET_PHONE_TITLE,
   SCAN_LABEL,
 } from './App';
 import {
@@ -82,6 +85,8 @@ const fake = vi.hoisted(() => ({
   >(),
   connect: vi.fn<(burrowId: string) => Promise<ConnectResult>>(),
   forgetBurrow: vi.fn<(burrowId: string) => Promise<void>>(),
+  forgetThisPhone: vi.fn<() => Promise<void>>(),
+  unsubscribePush: vi.fn<() => Promise<void>>(),
   clientClose: vi.fn<() => void>(),
   hello: vi.fn<() => Promise<unknown>>(),
   adapterInit: vi.fn<() => Promise<void>>(),
@@ -102,6 +107,7 @@ vi.mock('../client/push-subscribe', () => ({
   hasCurrentPushSubscription: () => Promise.resolve(false),
   needsHomeScreenInstall: () => false,
   subscribeToPushInBrowser: () => Promise.reject(new Error('not under test')),
+  unsubscribeFromPushInBrowser: () => fake.unsubscribePush(),
 }));
 
 vi.mock('../client/pocket-db', async (importOriginal) => ({
@@ -142,6 +148,7 @@ vi.mock('../client/pocket-client', async (importOriginal) => ({
     listKnownBurrows = () => fake.listKnownBurrows();
     listBurrows = () => fake.listBurrows();
     forgetBurrow = (burrowId: string) => fake.forgetBurrow(burrowId);
+    forgetThisPhone = () => fake.forgetThisPhone();
     pair = (
       invitation: PairingInvitation,
       label: string,
@@ -247,6 +254,11 @@ beforeEach(() => {
   fake.pair.mockReset();
   fake.connect.mockReset().mockResolvedValue({ ok: true, burrowLabel: 'First laptop' });
   fake.forgetBurrow.mockReset().mockResolvedValue(undefined);
+  fake.forgetThisPhone.mockReset().mockImplementation(async () => {
+    fake.hasPriorUse = false;
+    fake.sessionToken = null;
+  });
+  fake.unsubscribePush.mockReset().mockResolvedValue(undefined);
   fake.clientClose.mockReset();
   fake.hello.mockReset().mockResolvedValue({});
   fake.adapterInit.mockReset().mockResolvedValue(undefined);
@@ -586,6 +598,10 @@ describe('a session kept from an earlier launch', () => {
 
     expect(fake.signOut).toHaveBeenCalledOnce();
     expect(buttonNamed(container, 'Sign in with passkey')).not.toBeNull();
+    // The records, the passkey cache, and the push address all stay.
+    expect(fake.forgetThisPhone).not.toHaveBeenCalled();
+    expect(fake.forgetBurrow).not.toHaveBeenCalled();
+    expect(fake.unsubscribePush).not.toHaveBeenCalled();
   });
 
   /**
@@ -1033,5 +1049,60 @@ describe('a Burrow the Relay no longer lists', () => {
     act(() => rowFor(container, 'First laptop').querySelector('button')!.click());
     await settle();
     expect(alertText(container)).toBe(BURROW_UNAVAILABLE_MESSAGE);
+  });
+});
+
+describe('forgetting this phone', () => {
+  beforeEach(async () => {
+    fake.hasPriorUse = true;
+    fake.sessionToken = 'stored';
+    fake.listKnownBurrows.mockResolvedValue([await knownBurrow('burrow-1')]);
+    fake.listBurrows.mockResolvedValue([{ burrowId: 'burrow-1', label: 'x', online: true }]);
+  });
+
+  const confirmation = () => container.querySelector('[role="group"]');
+
+  it('asks first, and Cancel forgets nothing', async () => {
+    await boot();
+
+    await click(container, FORGET_PHONE_LABEL);
+
+    expect(confirmation()?.textContent).toContain(FORGET_PHONE_TITLE);
+    expect(fake.forgetThisPhone).not.toHaveBeenCalled();
+    // The question replaces both exits rather than sitting beside them.
+    expect(buttonNamed(container, 'Sign out')).toBeNull();
+
+    await click(container, 'Cancel');
+
+    expect(confirmation()).toBeNull();
+    expect(fake.forgetThisPhone).not.toHaveBeenCalled();
+    expect(fake.unsubscribePush).not.toHaveBeenCalled();
+    expect(rowFor(container, 'First laptop')).not.toBeNull();
+  });
+
+  it('forgets every record, drops the push subscription, and lands on the auth screen', async () => {
+    await boot();
+
+    await click(container, FORGET_PHONE_LABEL);
+    await click(container, FORGET_PHONE_CONFIRM);
+
+    expect(fake.forgetThisPhone).toHaveBeenCalledOnce();
+    expect(fake.unsubscribePush).toHaveBeenCalledOnce();
+    expect(container.textContent).not.toContain(BURROWS_TITLE);
+    expect(buttonNamed(container, SCAN_LABEL)).not.toBeNull();
+    expect(alertText(container)).toBeNull();
+  });
+
+  it('stays signed in on the list, saying why, when forgetting fails', async () => {
+    fake.forgetThisPhone.mockRejectedValue(new Error('storage unavailable'));
+    await boot();
+
+    await click(container, FORGET_PHONE_LABEL);
+    await click(container, FORGET_PHONE_CONFIRM);
+
+    expect(alertText(container)).toBe('storage unavailable');
+    expect(fake.unsubscribePush).not.toHaveBeenCalled();
+    expect(container.textContent).toContain(BURROWS_TITLE);
+    expect(buttonNamed(container, FORGET_PHONE_CONFIRM)).not.toBeNull();
   });
 });
