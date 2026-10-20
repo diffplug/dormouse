@@ -25,7 +25,7 @@
     "@mdxeditor/editor": "4.3.3",
     "dor-lib-common": "workspace:*",
     "dor-tools-lib": "workspace:*",
-    "lexical": "0.48.0",
+    "lexical": "0.52.0",
     "mermaid": "11.17.2",
     "monaco-editor": "0.55.1",
     "react": "^19.3.0",

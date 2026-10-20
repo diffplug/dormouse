@@ -290,8 +290,8 @@ importers:
         specifier: workspace:*
         version: link:../dor-tools-lib
       lexical:
-        specifier: 0.48.0
-        version: 0.48.0(typescript@7.0.2)
+        specifier: 0.52.0
+        version: 0.52.0(typescript@7.0.2)
       mermaid:
         specifier: 11.17.2
         version: 11.17.2
@@ -2497,6 +2497,14 @@ packages:
 
   '@lexical/internal@0.48.0':
     resolution: {integrity: sha512-sRwg53K7N0ZQ7KNAvcCY38LSwGizbXP1zlR1lIojZp0GoqHWNvR+vL49t1wYXu1nXx3Osf4ilHHm+aGcwq5hTw==}
+    peerDependencies:
+      typescript: '>=5.2'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
+  '@lexical/internal@0.52.0':
+    resolution: {integrity: sha512-Y7jKqeh4Irf/FwNmAqHIk3b05HpMsHv2RyWPQ8+M7FAdEbT9N2mksjc8ZUZ3tHqDMi7FNiLkjZN/DwbdekUb1g==}
     peerDependencies:
       typescript: '>=5.2'
     peerDependenciesMeta:
@@ -6187,6 +6195,14 @@ packages:
 
   lexical@0.48.0:
     resolution: {integrity: sha512-KK4Tyr/cPsleoZ7XvhGRiRmcrZidSmoFUdIXK9nPubIifoC+80Dc5THyc4xtGKtsW24S1TsHzk5gmfBU+TxmEg==}
+    peerDependencies:
+      typescript: '>=5.2'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
+  lexical@0.52.0:
+    resolution: {integrity: sha512-mePejqwCDaW0GR89IoofJTTlk/EiwwlGhbs1D8qOx/Iw6ieG5D3nh7PSPLv0Csia0UC58HpuV91DilJjqeAWSw==}
     peerDependencies:
       typescript: '>=5.2'
     peerDependenciesMeta:
@@ -9984,6 +10000,10 @@ snapshots:
     optionalDependencies:
       typescript: 7.0.2
 
+  '@lexical/internal@0.52.0(typescript@7.0.2)':
+    optionalDependencies:
+      typescript: 7.0.2
+
   '@lexical/link@0.48.0(typescript@7.0.2)':
     dependencies:
       '@lexical/extension': 0.48.0(typescript@7.0.2)
@@ -13568,6 +13588,12 @@ snapshots:
   lexical@0.48.0(typescript@7.0.2):
     dependencies:
       '@lexical/internal': 0.48.0(typescript@7.0.2)
+    optionalDependencies:
+      typescript: 7.0.2
+
+  lexical@0.52.0(typescript@7.0.2):
+    dependencies:
+      '@lexical/internal': 0.52.0(typescript@7.0.2)
     optionalDependencies:
       typescript: 7.0.2
 
