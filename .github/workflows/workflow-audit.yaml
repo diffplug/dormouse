@@ -391,7 +391,7 @@ jobs:
             before=" $(git for-each-ref --contains "$1" --format='%(refname:lstrip=3)' refs/audit/before/ | tr '\n' ' ')"
             while IFS=$'\t' read -r row type actor state; do
               if [ "$state" = after-lost ]; then
-                [[ "$type" != force_push && "$ADMIN_LOGINS" = *" $actor "* ]] && continue
+                [[ ( "$type" = push || "$type" = branch_creation ) && "$ADMIN_LOGINS" = *" $actor "* ]] && continue
                 printf 'unresolved\t-\t%s\n' "$row"
                 return
               fi

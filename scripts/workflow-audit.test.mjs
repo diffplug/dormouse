@@ -307,6 +307,15 @@ test('skips an admin update that cannot be resolved', t => {
   assert.equal(f.run(), 0);
 });
 
+test('never skips an admin PR merge whose new tip is lost', t => {
+  const f = pushFixture(t);
+  f.events([
+    ['2026-01-01T00:00:00Z', 'pr_merge', 'admin-user', f.before, 'f'.repeat(40)],
+    ['2026-01-02T00:00:00Z', 'push', 'admin-user', f.before, f.sha],
+  ]);
+  assert.equal(f.run(), 1);
+});
+
 test('reports a commit a non-admin force-pushed first', t => {
   const f = pushFixture(t);
   f.events([['2026-01-01T00:00:00Z', 'force_push', 'bot-user', f.before, f.sha]]);
