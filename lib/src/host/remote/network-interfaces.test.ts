@@ -87,10 +87,22 @@ describe('allowedAddressTest', () => {
   });
 
   it('matches an IPv4-mapped IPv6 address against its IPv4 range', () => {
-    // `BlockList` compares it as IPv4 (Node 24, 2026-09), so no unwrap is needed.
     expect(addressAllowed('::ffff:192.168.1.5', allowed)).toBe(true);
     expect(addressAllowed('::ffff:c0a8:105', allowed)).toBe(true);
     expect(addressAllowed('::ffff:192.168.2.5', allowed)).toBe(false);
+  });
+
+  it('never admits an IPv4 address, mapped or not, through an IPv6 range', () => {
+    // Node's `BlockList` matches IPv4 against an IPv6 subnet over `::ffff:0:0/96`.
+    for (const range of ['::/0', '::/1', '::/64', '::ffff:0:0/96', '::ffff:808:0/120']) {
+      for (const address of ['8.8.8.8', '::ffff:8.8.8.8', '::ffff:808:808', '192.168.1.5']) {
+        expect(addressAllowed(address, [range]), `${address} in ${range}`).toBe(false);
+      }
+    }
+    // The IPv6 range still admits the IPv6 it covers, and an IPv4 range beside it still holds.
+    expect(addressAllowed('2001:db8::5', ['::/0'])).toBe(true);
+    expect(addressAllowed('::ffff:192.168.1.5', ['::/0', ...allowed])).toBe(true);
+    expect(addressAllowed('8.8.8.8', ['::/0', ...allowed])).toBe(false);
   });
 
   it('allows no hostname, mDNS name, zoned address, or empty list', () => {

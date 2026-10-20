@@ -87,28 +87,45 @@ export function canonicalCidr(text: string): string | null {
   return cidr && `${cidr.network}/${cidr.prefix}`;
 }
 
-function blockListOf(cidrs: readonly string[]): BlockList {
-  const list = new BlockList();
+/**
+ * One `BlockList` per family. Node's `BlockList` matches an IPv4 address
+ * against an IPv6 subnet covering `::ffff:0:0/96`, even when asked to check
+ * it as `'ipv4'`, so one list holding both families would let `::/0` (or any
+ * IPv6 range over the mapped block) admit every IPv4 address.
+ */
+function blockListsOf(cidrs: readonly string[]): { ipv4: BlockList; ipv6: BlockList } {
+  const lists = { ipv4: new BlockList(), ipv6: new BlockList() };
   for (const text of cidrs) {
     const cidr = parseCidr(text);
-    if (cidr) list.addSubnet(cidr.network, cidr.prefix, cidr.family);
+    if (cidr) lists[cidr.family].addSubnet(cidr.network, cidr.prefix, cidr.family);
   }
-  return list;
+  return lists;
+}
+
+/** The dotted quad an IPv4-mapped IPv6 address (`::ffff:a.b.c.d`) carries, or `null`. */
+function mappedIpv4(address: string): string | null {
+  const serialized = serializeIpv6(address);
+  if (serialized === null) return null;
+  const groups = ipv6Groups(serialized);
+  if (groups.slice(0, 5).some((group) => group !== 0) || groups[5] !== 0xffff) return null;
+  return [groups[6]! >> 8, groups[6]! & 0xff, groups[7]! >> 8, groups[7]! & 0xff].join('.');
 }
 
 /**
  * Whether an address is an IP literal inside one of `cidrs`, which are parsed
  * once for every address tested. A hostname, an mDNS name, or a zoned address
- * is in none; a CIDR that does not parse matches nothing. An IPv4-mapped IPv6
- * address matches its IPv4 range: `BlockList` compares it as IPv4, which
- * `network-interfaces.test.ts` pins.
+ * is in none; a CIDR that does not parse matches nothing. Each family is
+ * checked only against its own ranges, and an IPv4-mapped IPv6 address is
+ * checked as the IPv4 address it carries, so an IPv6 range never admits IPv4.
  */
 export function allowedAddressTest(cidrs: readonly string[]): (address: string) => boolean {
-  const list = blockListOf(cidrs);
+  const lists = blockListsOf(cidrs);
   return (address) => {
     const family = isIP(address);
     if (family === 0 || address.includes('%')) return false;
-    return list.check(address, family === 4 ? 'ipv4' : 'ipv6');
+    if (family === 4) return lists.ipv4.check(address, 'ipv4');
+    const ipv4 = mappedIpv4(address);
+    return ipv4 === null ? lists.ipv6.check(address, 'ipv6') : lists.ipv4.check(ipv4, 'ipv4');
   };
 }
 
