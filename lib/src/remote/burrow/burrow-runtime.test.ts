@@ -421,6 +421,23 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
     expect(e2eFrames('pairing', invitation.inviteId)).toHaveLength(framesBefore);
   });
 
+  it('lets no pairing frame end a ceremony whose write has started', async () => {
+    const write = Promise.withResolvers<void>();
+    makeBurrow(undefined, { saveAcl: () => write.promise });
+    const { invitation, session, code } = await requestPairing('c1', await newAuthenticator());
+    const completed = approvals[0]!.approve(code);
+    await settle();
+    // A ciphertext that cannot decrypt would otherwise poison the session.
+    sendE2e('c1', 'pairing', invitation.inviteId, 'transport', randomBase64Url(64));
+    await settle();
+    expect(retirement(invitation)).toEqual({ inviteId: invitation.inviteId, state: 'reserved' });
+    write.resolve();
+    await completed;
+    expect(burrow.activeRecords).toHaveLength(1);
+    expect(await outcome(session, 'pairing', invitation.inviteId)).toMatchObject({ ok: true });
+    expect(retirement(invitation)?.outcome).toBe('paired');
+  });
+
   it('keeps approved writes after teardown without reviving the retired ceremony', async () => {
     const write = Promise.withResolvers<void>();
     const saveAcl = vi.fn(() => write.promise);
