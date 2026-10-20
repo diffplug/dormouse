@@ -802,13 +802,19 @@ describe('the sidecar host', () => {
     expect(opens()).toEqual(['/launched']);
   });
 
-  it('opens the work-start window before an input\'s write, and never for a terminal reply', () => {
-    const opened: string[] = [];
-    vi.spyOn(host.alerts, 'onInput').mockImplementation((id) => void opened.push(`input ${id} after ${calls.length} calls`));
-    host.handleCommand('pty:input', { id: 'pty-1', data: '\x1b[I' });
-    host.handleCommand('pty:input', { id: 'pty-1', data: 'hi\r', paced: true });
-    expect(opened).toEqual(['input pty-1 after 1 calls']);
-    expect(calls.map((call) => call.op)).toEqual(['write', 'write']);
+  it('lets a write start work: output after it defers a report', () => {
+    vi.useFakeTimers();
+    try {
+      host.handleCommand('pty:input', { id: 'pty-1', data: 'hi\r', paced: true });
+      for (let t = 0; t < 2_000; t += 100) {
+        vi.advanceTimersByTime(100);
+        host.onPtyEvent('data', { id: 'pty-1', data: 'frame' });
+      }
+      host.alerts.notifyFromProtocol('pty-1', REPORT);
+      expect(stateOf('pty-1').status).not.toBe('ALERT_RINGING');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('removes a killed Session\'s alert state', () => {

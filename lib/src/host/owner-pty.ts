@@ -15,7 +15,7 @@ import {
 import type { TerminalSemanticEvent } from '../lib/terminal-state';
 import { ToolLaunchLatch } from '../lib/tool-launch-latch';
 import { outputPaints } from '../lib/terminal-controls';
-import { inputCanStartWork, stripMouseReportsFromInput } from '../lib/terminal-report-filter';
+import { stripMouseReportsFromInput } from '../lib/terminal-report-filter';
 
 /**
  * What the process that owns a PTY does with it on behalf of its alerts, the
@@ -95,15 +95,13 @@ export interface PtyWriteTarget {
 
 /**
  * A host's PTY writes as its alerts must see them, whoever asked — a local
- * renderer, a remote Client, or a `dor` verb: **human input is acknowledged,
- * echo window opened, and any input but terminal replies opens the work-start
- * window, all before its bytes reach the PTY** (`docs/specs/alert.md` →
- * Engagement).
+ * renderer, a remote Client, or a `dor` verb: **alerts hear each write
+ * (`AlertManager.onWrite`) before its bytes reach the PTY**
+ * (`docs/specs/alert.md` → Engagement).
  */
 export function alertedPty(alerts: AlertManager, pty: PtyWriteTarget) {
   const write = (id: string, data: string, options: { paced?: boolean; userInput?: boolean } = {}): void => {
-    if (options.userInput) alerts.acknowledge(id, { input: true });
-    if (inputCanStartWork(data)) alerts.onInput(id);
+    alerts.onWrite(id, data, options);
     pty.write(id, data, options.paced ? { paced: true } : undefined);
   };
   return {

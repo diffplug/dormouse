@@ -12,7 +12,6 @@ import { applyTerminalSemanticEvents } from '../terminal-state-store';
 import { themeColorProvider } from '../terminal-theme';
 import { applyLiveToolEvents } from '../tool-events';
 import { offerProgramCopy } from '../mouse-selection';
-import { inputCanStartWork } from '../terminal-report-filter';
 
 /** This renderer is its host's one realm. */
 const LOCAL_VIEWER = 'local';
@@ -276,8 +275,7 @@ export class FakePtyAdapter implements PlatformAdapter {
   }
 
   writePty(id: string, data: string, options?: WritePtyOptions): void {
-    if (options?.userInput) this.alertManager.acknowledge(id, { input: true });
-    if (inputCanStartWork(data)) this.alertManager.onInput(id);
+    this.alertManager.onWrite(id, data, options);
     if (!this.terminals.has(id)) return;
     if (options?.launch) this.ownerStream(id).armLaunch(data);
     // Only echo if no scenario is actively playing

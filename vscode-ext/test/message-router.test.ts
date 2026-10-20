@@ -775,7 +775,7 @@ it('replays every listed PTY at a reconnect, an empty buffer included', () => {
 /**
  * A Session's alert state follows its PTY here, whoever asked
  * (docs/specs/alert.md): started over, and seeded, at the spawn; given the
- * resize grace at the resize; removed at the kill.
+ * work-start window at each input; removed at the kill.
  */
 describe('alert state follows the PTY', () => {
   it('spawns a cold-restored pane with its persisted TODO, and tells its webview', () => {
@@ -797,19 +797,22 @@ describe('alert state follows the PTY', () => {
     }
   });
 
-  it('opens the work-start window before an input\'s write, and never for a terminal reply', async () => {
-    // The router's own instance: `resetModules` gave this test one registry.
-    const { AlertManager } = await import('../../lib/src/lib/alert-manager');
-    vi.spyOn(AlertManager.prototype, 'onInput').mockImplementation((id) => void ptys.order.push(`input ${id}`));
-    ptys.onWrite = (id) => void ptys.order.push(`write ${id}`);
+  it('lets a write start work: output after it defers a report', () => {
+    vi.useFakeTimers();
     const webview = fakeWebview();
     const disposable = router.attachRouter(webview.channel);
     try {
-      webview.send({ type: 'pty:input', id: 'pty-sent', data: '\x1b[I' });
+      webview.send({ type: 'pty:spawn', id: 'pty-sent', options: { cwd: '/repo' } });
       webview.send({ type: 'pty:input', id: 'pty-sent', data: 'hi\r', paced: true });
-      expect(ptys.order).toEqual(['write pty-sent', 'input pty-sent', 'write pty-sent']);
+      for (let t = 0; t < 2_000; t += 100) {
+        vi.advanceTimersByTime(100);
+        ptys.callbacks!.onData('pty-sent', 'frame');
+      }
+      ptys.callbacks!.onData('pty-sent', REPORT);
+      expect(router.getAlertStates().get('pty-sent')?.status).not.toBe('ALERT_RINGING');
     } finally {
       disposable.dispose();
+      vi.useRealTimers();
     }
   });
 

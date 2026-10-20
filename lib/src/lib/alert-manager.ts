@@ -2,6 +2,7 @@ import { createAlertEpisode, type AlertEpisode } from './alert-episode';
 import { QuiesceDetector, type QuiesceStatus } from './quiesce-detector';
 import { DEFAULT_ALERT_SETTINGS, type AlertSettings } from './alert-settings-model';
 import { cfg } from '../cfg';
+import { inputCanStartWork } from './terminal-report-filter';
 import {
   commandWatchKey,
   resolveCommandStart,
@@ -312,7 +313,7 @@ interface AlertEntry {
  * observe→claim→ring seam, so await can claim completions before suppression. */
 export class AlertManager {
   private entries = new Map<string, AlertEntry>();
-  /** Blocks late output/resize from recreating a removed entry. Only a semantic
+  /** Blocks late output or input from recreating a removed entry. Only a semantic
    * or protocol event proves a reused id belongs to a live replacement. */
   private removed = new Set<string>();
   private claimants = new Map<string, Set<CompletionClaimant>>();
@@ -404,10 +405,15 @@ export class AlertManager {
     this.settleWaiters(id, 'died');
   }
 
-  /** Input other than terminal replies reached the PTY: its output may start work. */
-  onInput(id: string): void {
+  /**
+   * A write is about to reach the PTY. Human input acknowledges, and any input
+   * but terminal replies and mouse reports lets output start work — a `dor
+   * send` or a launch as much as a keystroke (`QuiesceDetector.expectWork`).
+   */
+  onWrite(id: string, data: string, { userInput = false }: { userInput?: boolean } = {}): void {
+    if (userInput) this.acknowledge(id, { input: true });
     // Same reasoning as `onData`: the first keystroke can beat any output.
-    this.streamEntry(id)?.detector.onInput();
+    if (userInput || inputCanStartWork(data)) this.streamEntry(id)?.detector.expectWork();
   }
 
   // --- WATCHING rule set ---
@@ -796,6 +802,9 @@ export class AlertManager {
       return;
     }
 
+    // A program announcing work may start a run as input does, so a turn it
+    // began unasked still reads as busy.
+    entry.detector.expectWork();
     if (entry.progress?.state === progress.state && entry.progress.percent === progress.percent) return;
     entry.progress = { state: progress.state, percent: progress.percent };
     this.notify(id);

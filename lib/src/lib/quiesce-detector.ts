@@ -38,14 +38,14 @@ type DetectorTimer = 'busyCandidate' | 'busyConfirm' | 'mightNeedAttention' | 's
  * observer, not an alarm. It never latches: a settle is announced through
  * `onSettled` and the detector immediately starts over.
  *
- * A busy run must begin within `cfg.alert.workStartWindow` of input: a program
- * repaints on focus, on resize, and on its own timers without working, and
- * output it was not asked for is ignored until it is already busy.
+ * A busy run must begin within `cfg.alert.workStartWindow` of `expectWork`: a
+ * program repaints on focus, on resize, and on its own timers without working,
+ * and output nothing asked for is ignored until it is already busy.
  */
 export class QuiesceDetector {
   private status: QuiesceStatus = 'NOTHING_TO_SHOW';
   private disposed = false;
-  private lastInputAt = -Infinity;
+  private lastWorkExpectedAt = -Infinity;
   private timers = new Map<DetectorTimer, ReturnType<typeof setTimeout>>();
   private firstOutputAt: number | null = null;
   private lastOutputAt: number | null = null;
@@ -70,7 +70,7 @@ export class QuiesceDetector {
   /** Start over from quiet, forgetting the previous command's output history. */
   reset(): void {
     if (this.disposed) return;
-    this.clearActivityTimers();
+    this.clearTimers();
     this.resetOutputTracking();
     this.setStatus('NOTHING_TO_SHOW');
   }
@@ -91,7 +91,7 @@ export class QuiesceDetector {
     // Only a run's first chunk is gated; once it began, its output counts.
     if (
       this.status === 'NOTHING_TO_SHOW' && this.firstOutputAt === null
-      && now - this.lastInputAt > cfg.alert.workStartWindow
+      && now - this.lastWorkExpectedAt > cfg.alert.workStartWindow
     ) return false;
 
     this.lastOutputAt = now;
@@ -113,15 +113,16 @@ export class QuiesceDetector {
     return true;
   }
 
-  /** Input reached the program, so output may begin a busy run. Kept across
-   *  `reset`: the keystroke that starts a command precedes its boundary. */
-  onInput(): void {
-    this.lastInputAt = Date.now();
+  /** Input reached the program, or it announced work: output may begin a busy
+   *  run. Kept across `reset`: the keystroke that starts a command precedes
+   *  its boundary. */
+  expectWork(): void {
+    this.lastWorkExpectedAt = Date.now();
   }
 
   dispose(): void {
     this.disposed = true;
-    this.clearActivityTimers();
+    this.clearTimers();
   }
 
   private handleNothingToShowOutput(now: number): void {
@@ -140,13 +141,13 @@ export class QuiesceDetector {
   }
 
   private enterMightBeBusy(): void {
-    this.clearActivityTimers();
+    this.clearTimers();
     this.setStatus('MIGHT_BE_BUSY');
     this.schedule('busyConfirm', T_BUSY_CONFIRM_GAP);
   }
 
   private enterBusy(): void {
-    this.clearActivityTimers();
+    this.clearTimers();
     this.resetOutputTracking();
     this.setStatus('BUSY');
     this.startMightNeedAttentionTimer();
@@ -191,7 +192,7 @@ export class QuiesceDetector {
     this.timers.set(kind, timer);
   }
 
-  private clearActivityTimers(): void {
+  private clearTimers(): void {
     for (const timer of this.timers.values()) clearTimeout(timer);
     this.timers.clear();
   }

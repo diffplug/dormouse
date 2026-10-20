@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AlertManager } from './alert-manager';
 import { createAlertDeliveryScheduler, type AlertDeliveryScheduler } from './alert-delivery-scheduler';
 import { DEFAULT_ALERT_SETTINGS, type AlertSettings } from './alert-settings-model';
-import { engage, leave, REPORT } from './alert-manager-test-utils';
+import { engage, leave, REPORT, work } from './alert-manager-test-utils';
 
 /**
  * When a ring is spoken or pushed (`docs/specs/alert.md` -> Alarm settings):
@@ -26,11 +26,10 @@ let delivered: Delivered[];
 const sinks = () => delivered.map((delivery) => delivery.sink);
 const episodeId = (id = PANE) => manager.getState(id).episode!.id;
 const ring = (id = PANE) => manager.notifyFromProtocol(id, REPORT);
-/** Clear the ring with a click, then allow a fresh report after input and its output. */
+/** Clear the ring with a click, then allow a fresh report after work. */
 const ringAgain = () => {
   manager.acknowledge(PANE, { input: false });
-  manager.onInput(PANE);
-  manager.onData(PANE);
+  work(manager, PANE);
   ring();
   vi.advanceTimersByTime(5_000);
 };

@@ -65,7 +65,6 @@ interface MockTerminalInstance {
   writes: string[];
   addons: Array<{ constructor: { name: string }; options?: Record<string, unknown> }>;
   emitInput(data: string): void;
-  emitResize(cols: number, rows: number): void;
 }
 
 class MockElement {
@@ -826,13 +825,17 @@ describe('terminal-registry alert behavior', () => {
     });
   });
 
-  it('Story 12: resize noise never creates a false alert', () => {
+  it('Story 12: a repaint long after the last input never creates a false alert', () => {
     const id = 'story-12';
-    const entry = createSession(id);
+    createSession(id);
     enableAlert(id);
+    advance(cfg.alert.workStartWindow + 1);
 
-    entry.terminal.emitResize(120, 40);
-    emitOutput(id, 'redraw noise');
+    // sendOutput, not emitOutput: a repaint on resize or focus is output nobody typed.
+    fakePlatform.sendOutput(id, 'redraw');
+    advance(1_600);
+    fakePlatform.sendOutput(id, 'redraw');
+    fakePlatform.sendOutput(id, 'redraw');
     advance(12_000);
 
     expect(getActivity(id)).toMatchObject({
@@ -1250,26 +1253,6 @@ describe('terminal-registry alert behavior', () => {
 
     expect(getActivity(id)).toMatchObject({
       status: 'ALERT_RINGING',
-      todo: false,
-    });
-  });
-
-  it('ignores a resize redraw long after the last input', () => {
-    const id = 'resize-redraw';
-    const session = createSession(id);
-    enableAlert(id);
-    engageSession(id);
-    advance(cfg.alert.workStartWindow + 1);
-
-    // sendOutput, not emitOutput: a redraw is output nobody typed.
-    session.terminal.emitResize(120, 30);
-    fakePlatform.sendOutput(id, 'prompt redraw');
-    advance(1_600);
-    fakePlatform.sendOutput(id, 'prompt redraw');
-    fakePlatform.sendOutput(id, 'prompt redraw');
-
-    expect(getActivity(id)).toMatchObject({
-      status: 'NOTHING_TO_SHOW',
       todo: false,
     });
   });

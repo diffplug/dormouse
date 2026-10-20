@@ -31,10 +31,21 @@ export function goIdle(manager: AlertManager, id: string, viewer = VIEWER): void
   manager.setViewer(viewer, { present: false, focusId: id }, 'idle');
 }
 
+/** A key the user presses, through the human-input path: acknowledged, and output may start work. */
+export function press(manager: AlertManager, id: string): void {
+  manager.onWrite(id, 'x', { userInput: true });
+}
+
+/** A write that sets the program working — Enter, a `dor send`, a launch — and its first output. */
+export function work(manager: AlertManager, id: string): void {
+  manager.onWrite(id, '\r');
+  manager.onData(id);
+}
+
 /** Start `commandLine` the way a typed command starts: the Enter that runs it,
  *  then shell integration's line and start. */
 export function runCommand(manager: AlertManager, id: string, commandLine = 'pnpm build'): void {
-  manager.onInput(id);
+  manager.onWrite(id, '\r');
   manager.applyTerminalSemanticEvents(id, [
     { type: 'commandLine', commandLine },
     { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
@@ -70,10 +81,9 @@ export function armCommandExit(manager: AlertManager, id: string, commandLine = 
   leave(manager);
 }
 
-/** Input, then two output bursts across the busy-candidate gap: NOTHING_TO_SHOW -> MIGHT_BE_BUSY. */
+/** Work, then a second output burst across the busy-candidate gap: NOTHING_TO_SHOW -> MIGHT_BE_BUSY. */
 export function driveToCandidate(manager: AlertManager, id: string): void {
-  manager.onInput(id);
-  manager.onData(id);
+  work(manager, id);
   vi.advanceTimersByTime(1_600);
   manager.onData(id);
 }

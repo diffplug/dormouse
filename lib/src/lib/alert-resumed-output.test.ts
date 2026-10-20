@@ -2,10 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AlertManager } from './alert-manager';
 import { createAlertDeliveryScheduler, type AlertDeliveryScheduler } from './alert-delivery-scheduler';
 import { DEFAULT_ALERT_SETTINGS } from './alert-settings-model';
-import { armCommandExit, driveToBusy, driveToCandidate, engage, finishCommand, goIdle, heartbeat, REPORT, runCommand, settle } from './alert-manager-test-utils';
+import { armCommandExit, driveToBusy, driveToCandidate, engage, finishCommand, goIdle, heartbeat, press, REPORT, runCommand, settle, work } from './alert-manager-test-utils';
 import { toPersistedAlertState } from './session-types';
 import { createOwnerPtyStream } from '../host/owner-pty';
-import { cfg } from '../cfg';
 
 const ID = 'resumed-work';
 const WATCHED = 'longtask';
@@ -30,6 +29,13 @@ afterEach(() => {
   manager.dispose();
   vi.useRealTimers();
 });
+/** Output every 100ms for `ms`: dense enough to confirm work. */
+function burst(ms: number): void {
+  for (let elapsed = 0; elapsed < ms; elapsed += 100) {
+    vi.advanceTimersByTime(100);
+    manager.onData(ID);
+  }
+}
 function ring(source: 'watching' | 'report'): void {
   if (source === 'report') manager.notifyFromProtocol(ID, REPORT);
   else { driveToBusy(manager, ID); settle(); }
@@ -43,8 +49,7 @@ describe('owed alerts during resumed output', () => {
     manager.onData(ID);
     manager.registerCompletionClaimant(ID, (event) => {
       if (event.kind !== 'settled') return false;
-      manager.onInput(ID);
-      manager.onData(ID);
+      work(manager, ID);
       return true;
     });
     settle();
@@ -72,7 +77,7 @@ describe('owed alerts during resumed output', () => {
     ring(source);
     const episode = manager.getState(ID).episode;
     // Another turn starts, and runs for two minutes.
-    manager.onInput(ID);
+    work(manager, ID);
     heartbeat(manager, ID, 120_000);
     expect(manager.getState(ID).status).not.toBe('ALERT_RINGING');
     expect(manager.getState(ID).episode).toEqual(episode);
@@ -162,24 +167,28 @@ describe('owed alerts during resumed output', () => {
     expect(manager.getState(ID)).toMatchObject({ status: 'ALERT_RINGING', episode });
   });
   it('ignores a repaint long after the last input when deciding whether to defer', () => {
-    vi.advanceTimersByTime(cfg.alert.workStartWindow + 1);
+    vi.advanceTimersByTime(60_000);
     ring('report');
     // A resize or focus repaint, with nothing typed since the command started.
-    for (let elapsed = 0; elapsed < 3_000; elapsed += 100) {
-      vi.advanceTimersByTime(100);
-      manager.onData(ID);
-      expect(manager.getState(ID).status).toBe('ALERT_RINGING');
-    }
-    vi.advanceTimersByTime(DELAY - 3_000);
-    expect(spoken).toHaveBeenCalledOnce();
+    burst(3_000);
+    expect(manager.getState(ID).status).toBe('ALERT_RINGING');
+  });
+  it('lets a progress report start work with no input, deferring an owed ring while the turn runs', () => {
+    vi.advanceTimersByTime(60_000);
+    ring('report');
+    const episode = manager.getState(ID).episode;
+    // A turn the program began unasked, announced as `OSC 9;4;3`.
+    manager.updateProtocolProgress(ID, { state: 'indeterminate', percent: null });
+    burst(3_000);
+    expect(manager.getState(ID)).toMatchObject({ status: 'OSC_NOTIF_BUSY', episode });
+    vi.advanceTimersByTime(5_000);
+    expect(manager.getState(ID)).toMatchObject({ status: 'ALERT_RINGING', episode });
   });
   it('ignores repeated typing echoes', () => {
-    manager.acknowledge(ID, { input: true });
+    press(manager, ID);
     for (let i = 0; i < 20; i++) {
       vi.advanceTimersByTime(400);
-      // A keystroke as the host's input path delivers it, then its echo.
-      manager.acknowledge(ID, { input: true });
-      manager.onInput(ID);
+      press(manager, ID);
       manager.onData(ID);
     }
     vi.advanceTimersByTime(751);

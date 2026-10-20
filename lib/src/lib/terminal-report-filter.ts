@@ -42,10 +42,11 @@ export function stripMouseReportsFromInput(data: string): string {
 }
 
 /** Input a program may start work on: anything but terminal replies — a focus
- *  report among them — and mouse reports. */
+ *  report among them — and mouse reports, read as the renderer reads them. */
 export function inputCanStartWork(data: string): boolean {
-  const withoutMouseReports = stripMouseReportsFromInput(data);
-  return withoutMouseReports.length > 0 && !inputIsReplayTerminalReport(withoutMouseReports);
+  // Both start with ESC; checking first keeps a large paste off the regexes.
+  if (data.length > 0 && data.charCodeAt(0) !== 0x1b) return true;
+  return !inputIsReplayTerminalReport(data) && stripMouseReportsFromInput(data).length > 0;
 }
 
 // Baseline for a dead Session's terminal only; a live process still owns its modes. The

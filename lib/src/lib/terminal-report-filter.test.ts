@@ -95,5 +95,11 @@ describe('terminal-report-filter: inputCanStartWork', () => {
     expect(inputCanStartWork('\x1b[A')).toBe(true); // cursor up
     expect(inputCanStartWork('\x03')).toBe(true);
     expect(inputCanStartWork('\x1b[<0;12;4Ma')).toBe(true);
+    expect(inputCanStartWork('x'.repeat(1_000_000))).toBe(true); // a large paste
+  });
+
+  it('reads a mouse report beside a focus report as the renderer does: a keystroke', () => {
+    // Not a reply as a whole and not mouse-only, so `terminal-lifecycle` writes it as user input.
+    expect(inputCanStartWork('\x1b[<0;12;4M\x1b[I')).toBe(true);
   });
 });

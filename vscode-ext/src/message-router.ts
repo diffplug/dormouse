@@ -83,7 +83,7 @@ configurePeerLink({
   invalidateDirectory: notifyDirectoryChanged,
   streamPty: processedPtyStreams.streamPty,
   writePty: writeClientInput,
-  resizePty: resizeForClient,
+  resizePty: ptyManager.resize,
   // Peer PTYs use generated provider-local route handles. Keep those handles
   // outside this window's real PTY namespace so local ids always fall through
   // to the manager that owns them.
@@ -108,7 +108,7 @@ configureBurrow({
   broadcastToWebviews,
   streamPty: processedPtyStreams.streamPty,
   writePty: writeClientInput,
-  resizePty: resizeForClient,
+  resizePty: ptyManager.resize,
 });
 
 /**
@@ -118,10 +118,6 @@ configureBurrow({
 function writeClientInput(ptyId: string, data: string): void {
   alertedPtys.writeClientInput(ptyId, data);
   for (const listener of clientInputListeners) listener(ptyId);
-}
-
-function resizeForClient(ptyId: string, cols: number, rows: number, repaint?: boolean): void {
-  ptyManager.resize(ptyId, cols, rows, repaint);
 }
 
 /**

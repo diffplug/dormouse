@@ -8,7 +8,7 @@ import {
 } from './terminal-protocol';
 import { cfg } from '../cfg';
 import { toPersistedAlertState } from './session-types';
-import { armCommandExit, collectEpisodes, driveToBusy, driveToCandidate, engage, finishCommand, goIdle, heartbeat, leave, REPORT, runCommand, settle } from './alert-manager-test-utils';
+import { armCommandExit, collectEpisodes, driveToBusy, driveToCandidate, engage, finishCommand, goIdle, heartbeat, leave, press, REPORT, runCommand, settle, work } from './alert-manager-test-utils';
 
 describe('AlertManager in isolation', () => {
   let manager: AlertManager;
@@ -51,7 +51,7 @@ describe('AlertManager in isolation', () => {
       manager.toggleTodo(HELPER);
       manager.clearTodo(HELPER);
       manager.seed(HELPER, { todo: true });
-      manager.onInput(HELPER);
+      press(manager, HELPER);
       finishCommand(manager, HELPER, 1);
       manager.onExit(HELPER, 0);
       vi.advanceTimersByTime(10_000);
@@ -201,8 +201,7 @@ describe('AlertManager in isolation', () => {
     expect(manager.getState(id).status).toBe('ALERT_RINGING');
 
     // The next turn starts.
-    manager.onInput(id);
-    manager.onData(id);
+    work(manager, id);
     expect(manager.getState(id).status).toBe('ALERT_RINGING');
 
     for (let i = 0; i < 10; i++) {
@@ -412,8 +411,7 @@ describe('AlertManager in isolation', () => {
     const id = 'acknowledged-then-output';
     manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'first' });
     manager.dismissAlert(id);
-    manager.onInput(id);
-    manager.onData(id);
+    work(manager, id);
     manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'second' });
     vi.advanceTimersByTime(5_000);
     expect(manager.getState(id).status).toBe('ALERT_RINGING');
@@ -538,8 +536,7 @@ describe('AlertManager in isolation', () => {
     expect(manager.getState(id).status).toBe('OSC_NOTIF_BUSY');
 
     // The run goes on after the answer, then its cycle ends.
-    manager.onInput(id);
-    manager.onData(id);
+    work(manager, id);
     manager.updateProtocolProgress(id, { state: 'clear', percent: null });
     vi.advanceTimersByTime(5_000);
 
@@ -719,8 +716,7 @@ describe('AlertManager in isolation', () => {
     expect(manager.getState(id).episode).toBeNull();
 
     // Output since the clear: the next bell is news, not the acknowledged state.
-    manager.onInput(id);
-    manager.onData(id);
+    work(manager, id);
     applyTerminalEvents(manager, id, [{ kind: 'notification', notification: bell }]);
     vi.advanceTimersByTime(5_000);
     const second = manager.getState(id).episode;
@@ -1139,8 +1135,7 @@ describe('AlertManager in isolation', () => {
     it('rings immediately in an idle pane and after a single output chunk', () => {
       manager.notifyFromProtocol('idle', REPORT);
       expect(manager.getState('idle').status).toBe('ALERT_RINGING');
-      manager.onInput('one-chunk');
-      manager.onData('one-chunk');
+      work(manager, 'one-chunk');
       manager.notifyFromProtocol('one-chunk', REPORT);
       expect(manager.getState('one-chunk')).toMatchObject({ status: 'ALERT_RINGING', notification: REPORT });
     });
@@ -1371,7 +1366,7 @@ describe('AlertManager in isolation', () => {
       applyTerminalEvents(manager, id, parsed.events);
       if (parsed.visibleData.length > 0) manager.onData(id);
     };
-    manager.onInput(id);
+    manager.onWrite(id, '\r');
     feed('\x1b]633;E;./build.sh\x07\x1b]633;C\x07');
     for (let t = 0; t < 3_000; t += 200) {
       feed('compiling...\r\n');
@@ -1616,8 +1611,7 @@ describe('AlertManager in isolation', () => {
       const id = 'await-keeps-earlier-todo';
       manager.notifyFromProtocol(id, { source: 'OSC 777', title: 'earlier', body: null });
       manager.dismissAlert(id);
-      manager.onInput(id);
-      manager.onData(id);
+      work(manager, id);
       manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'later' });
       vi.advanceTimersByTime(5_000);
       expect(manager.getState(id).notification?.body).toBe('later');
@@ -1719,8 +1713,7 @@ describe('AlertManager in isolation', () => {
       // The peer was sent another turn and is talking again. Nothing clears the
       // latched ring — it is still the human's — but the quiet it describes is
       // over, so it cannot answer "output stopped" about the turn in flight.
-      manager.onInput(id);
-      manager.onData(id);
+      work(manager, id);
       vi.advanceTimersByTime(gapMs);
       manager.onData(id);
       vi.advanceTimersByTime(gapMs);
@@ -1745,8 +1738,7 @@ describe('AlertManager in isolation', () => {
       // Output that reaches MIGHT_BE_BUSY and then stops: the confirm timer
       // returns the detector to NOTHING_TO_SHOW without ever settling, so the
       // latch is untouched and the detector's status is back where it started.
-      manager.onInput(id);
-      manager.onData(id);
+      work(manager, id);
       vi.advanceTimersByTime(1_600);
       manager.onData(id);
       vi.advanceTimersByTime(10_000);
@@ -1910,10 +1902,8 @@ describe('AlertManager in isolation', () => {
       const quietOutcome = watch(quiet);
       const strictOutcome = watch(strict);
 
-      for (const id of ['await-grace-quiet', 'await-grace-exit']) {
-        manager.onInput(id);
-        manager.onData(id);
-      }
+      work(manager, 'await-grace-quiet');
+      work(manager, 'await-grace-exit');
       vi.advanceTimersByTime(AWAIT_GRACE_MS);
 
       // Output is evidence of work for `quiet`; for `exit` only a command start is.
@@ -2034,7 +2024,7 @@ describe('AlertManager in isolation', () => {
       // that were already on their way out. Rebuilding here would strand an
       // entry and a detector nothing ever disposes.
       manager.onData(id);
-      manager.onInput(id);
+      press(manager, id);
       expect(manager.getState(id)).toEqual(DEFAULT_ALERT_STATE);
 
       // A replacement pane may reuse the id; its first reported command is the
