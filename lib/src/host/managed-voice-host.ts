@@ -55,25 +55,34 @@ export interface ManagedVoiceStore {
    * lock cached as defaults would let the next edit overwrite the token.
    */
   read(): Promise<unknown>;
-  /** Persist `next`, of which only `changed` differs from what was read. */
+  /**
+   * Persist `next[changed]` alone, keeping the other field as stored: a
+   * caller whose read failed passes defaults there, which must never land.
+   */
   write(next: StoredManagedVoice, changed: keyof StoredManagedVoice): Promise<void>;
 }
 
-/** The sidecar's store: `managed-voice.json` in the owner-only state directory, rewritten whole. */
+/**
+ * The sidecar's store: `managed-voice.json` in the owner-only state directory,
+ * rewritten whole from a fresh read, so a write fails rather than reset the
+ * field it was not given.
+ */
 export function fileManagedVoiceStore(stateDir: string): ManagedVoiceStore {
   const file = join(stateDir, MANAGED_VOICE_FILE);
+  async function read(): Promise<unknown> {
+    try {
+      return JSON.parse(await readFile(file, 'utf8'));
+    } catch (error) {
+      // Only a missing or unparsable file is "no config": a transient lock
+      // (EBUSY, EPERM, EMFILE) is retried on the next read.
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT' || error instanceof SyntaxError) return null;
+      throw error;
+    }
+  }
   return {
-    async read() {
-      try {
-        return JSON.parse(await readFile(file, 'utf8'));
-      } catch (error) {
-        // Only a missing or unparsable file is "no config": a transient lock
-        // (EBUSY, EPERM, EMFILE) is retried on the next read.
-        if ((error as NodeJS.ErrnoException).code === 'ENOENT' || error instanceof SyntaxError) return null;
-        throw error;
-      }
-    },
-    write: (next) => writeJsonAtomic(stateDir, file, next),
+    read,
+    write: async (next, changed) =>
+      writeJsonAtomic(stateDir, file, { ...normalizeStored(await read()), [changed]: next[changed] }),
   };
 }
 
@@ -224,17 +233,17 @@ export function createManagedVoiceHost(options: {
 
   /** Clear the stored token, memory before disk: a failed write must never leave speech armed. Runs on `serialize`. */
   async function clearToken(): Promise<void> {
-    const current = await load().catch(() => normalizeStored(null));
-    const next = { ...current, token: null };
-    loaded = Promise.resolve(next);
+    // Unread, the voice is unknown: never cached, and the store keeps it.
+    const current = await load().catch(() => null);
+    loaded = current ? Promise.resolve({ ...current, token: null }) : null;
     disconnectFailed = true;
-    uncleared = current.token ?? uncleared;
-    options.onStatus(status(next));
+    uncleared = current?.token ?? uncleared;
+    await announce();
     if (!store) throw new Error('no owner-only store');
-    await store.write(next, 'token');
+    await store.write({ ...current ?? normalizeStored(null), token: null }, 'token');
     disconnectFailed = false;
     uncleared = null;
-    options.onStatus(status(next));
+    await announce();
   }
 
   /** Any token change forgets every clip and every refusal the old one earned. */
@@ -246,7 +255,15 @@ export function createManagedVoiceHost(options: {
     return serialize(async () => {
       if (speakUrl === null) throw new Error('this build has no managed voice');
       if (token === null) {
-        await clearToken();
+        // Read here, after any save queued first: a token a disconnect
+        // overtakes mid-save is deleted too. A retry's is the one the failed
+        // clear left behind.
+        const held = (await load().catch(() => null))?.token ?? uncleared;
+        try {
+          await clearToken();
+        } finally {
+          if (held !== null) void forgetAtHosted(held);
+        }
       } else {
         await save('token', (config) => ({ ...config, token }), false);
         if (generation === tokenGeneration) disabled = false;
@@ -354,9 +371,9 @@ export function createManagedVoiceHost(options: {
   }
 
   /**
-   * Best effort, never awaited by turning off: delete `token` at Hosted, so a
-   * computer that turned Natural Voice off leaves nothing live there. Skipped
-   * under Nowhere, failed offline; either way the token lapses unused.
+   * Best effort, never awaited: delete `token` at Hosted, so a token this
+   * computer turned off or discarded unsaved leaves nothing live there.
+   * Skipped under Nowhere, failed offline; either way the token lapses unused.
    */
   async function forgetAtHosted(token: string): Promise<void> {
     try {
@@ -416,7 +433,12 @@ export function createManagedVoiceHost(options: {
           // Check outside the retrying exchange too: Nowhere ends this run.
           await requireEnrollmentNetwork();
           const answer = await pollHostedApproval(options.relay.origin, body.deviceCode, 'voice', enrollmentFetch, parseVoiceApproval);
-          if (sequence !== enrollmentSequence) return;
+          // Below, a token this host discards (canceled, overtaken, or never
+          // saved) is held by no one, so it is deleted at Hosted.
+          if (sequence !== enrollmentSequence) {
+            if (answer.status === 'enabled') void forgetAtHosted(answer.voiceToken);
+            return;
+          }
           if (answer.status === 'retry') {
             if (answer.slowDown) intervalMs = slowDownHostedApproval(intervalMs);
             schedule();
@@ -428,11 +450,15 @@ export function createManagedVoiceHost(options: {
           if (answer.status === 'enabled') {
             enrollment = { status: 'saving' };
             await announce();
-            if (sequence !== enrollmentSequence) return;
-            // A token never saved, or never received below, is held by no one,
-            // so the user is never asked to revoke it.
+            if (sequence !== enrollmentSequence) {
+              void forgetAtHosted(answer.voiceToken);
+              return;
+            }
             try { await setToken(answer.voiceToken); }
-            catch { throw new Error('Could not save Natural Voice on this computer. Try again.'); }
+            catch {
+              void forgetAtHosted(answer.voiceToken);
+              throw new Error('Could not save Natural Voice on this computer. Try again.');
+            }
             if (sequence === enrollmentSequence) { enrollment = null; await announce(); }
             return;
           }
@@ -459,13 +485,7 @@ export function createManagedVoiceHost(options: {
         cancelEnrollment();
         if (op === 'disconnect') {
           disabled = true;
-          // A retry's token is the one the failed clear left behind.
-          const held = (await load().catch(() => null))?.token ?? uncleared;
-          try {
-            await setToken(null);
-          } finally {
-            if (held !== null) void forgetAtHosted(held);
-          }
+          await setToken(null);
         } else await announce();
       }
       return { ok: true, ...status(await load()) };
