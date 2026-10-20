@@ -41,6 +41,13 @@ export function stripMouseReportsFromInput(data: string): string {
   return data.replace(MOUSE_REPORT_TOKENS, '');
 }
 
+/** Input a program may start work on: anything but terminal replies — a focus
+ *  report among them — and mouse reports. */
+export function inputCanStartWork(data: string): boolean {
+  const withoutMouseReports = stripMouseReportsFromInput(data);
+  return withoutMouseReports.length > 0 && !inputIsReplayTerminalReport(withoutMouseReports);
+}
+
 // Baseline for a dead Session's terminal only; a live process still owns its modes. The
 // mouse-encoding resets are parser-only (`terminal.modes` does not expose them).
 // See docs/specs/transport.md §Replay-time mode-reset tail (Dormouse-emitted).

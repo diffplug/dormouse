@@ -5,7 +5,7 @@
  * manager it drives and runs under fake timers.
  *
  * Timing from cfg.alert: busyCandidateGap=1500, busyConfirmGap=500,
- * mightNeedAttention=2000, needsAttentionConfirm=3000.
+ * mightNeedAttention=2000, needsAttentionConfirm=3000, workStartWindow=5000.
  */
 import { vi } from 'vitest';
 import type { ActivityNotification, AlertManager } from './alert-manager';
@@ -31,8 +31,10 @@ export function goIdle(manager: AlertManager, id: string, viewer = VIEWER): void
   manager.setViewer(viewer, { present: false, focusId: id }, 'idle');
 }
 
-/** Start `commandLine` the way shell integration reports it: the line, then its start. */
+/** Start `commandLine` the way a typed command starts: the Enter that runs it,
+ *  then shell integration's line and start. */
 export function runCommand(manager: AlertManager, id: string, commandLine = 'pnpm build'): void {
+  manager.onInput(id);
   manager.applyTerminalSemanticEvents(id, [
     { type: 'commandLine', commandLine },
     { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
@@ -68,8 +70,9 @@ export function armCommandExit(manager: AlertManager, id: string, commandLine = 
   leave(manager);
 }
 
-/** Two output bursts across the busy-candidate gap: NOTHING_TO_SHOW -> MIGHT_BE_BUSY. */
+/** Input, then two output bursts across the busy-candidate gap: NOTHING_TO_SHOW -> MIGHT_BE_BUSY. */
 export function driveToCandidate(manager: AlertManager, id: string): void {
+  manager.onInput(id);
   manager.onData(id);
   vi.advanceTimersByTime(1_600);
   manager.onData(id);

@@ -121,7 +121,7 @@ function writeClientInput(ptyId: string, data: string): void {
 }
 
 function resizeForClient(ptyId: string, cols: number, rows: number, repaint?: boolean): void {
-  alertedPtys.resize(ptyId, cols, rows, repaint);
+  ptyManager.resize(ptyId, cols, rows, repaint);
 }
 
 /**
@@ -604,7 +604,7 @@ export function attachRouter(
         alertedPtys.write(msg.id, msg.data, { paced: msg.paced, userInput: msg.userInput === true });
         break;
       case 'pty:resize':
-        alertedPtys.resize(msg.id, msg.cols, msg.rows);
+        ptyManager.resize(msg.id, msg.cols, msg.rows);
         break;
       case 'pty:kill':
         release(msg.id);

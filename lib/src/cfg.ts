@@ -22,8 +22,10 @@ export const cfg = {
     mightNeedAttention: 2_000,
     /** ms — additional silence before confirming NEEDS_ATTENTION. */
     needsAttentionConfirm: 3_000,
-    /** ms — ignore resize redraw noise. */
-    resizeDebounce: 500,
+    /** ms — after input reaches the program, how long its output may still
+     * begin a busy run. Output that begins later — a repaint on focus or
+     * resize, a status-line tick — is not work. */
+    workStartWindow: 5_000,
     /** ms — default inactivity timeout: presence lapses this long after the last typing, mouse, or scroll input. */
     inactivityTimeout: 15_000,
     /** ms — shared grace period for keystroke echo AND fast command completions.

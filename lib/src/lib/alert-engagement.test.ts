@@ -37,9 +37,21 @@ function output(id: string, ms: number, everyMs = 100): void {
   }
 }
 
+/** Input that sets the program working, then `ms` of its output. */
+function work(id: string, ms: number): void {
+  manager.onInput(id);
+  output(id, ms);
+}
+
+/** A key the user presses, as the host's input path delivers it. */
+function press(id: string): void {
+  manager.acknowledge(id, { input: true });
+  manager.onInput(id);
+}
+
 /** One keystroke into the pane, echoed a few ms later. */
 function keystroke(id: string): void {
-  manager.acknowledge(id, { input: true });
+  press(id);
   vi.advanceTimersByTime(8);
   manager.onData(id);
 }
@@ -147,7 +159,7 @@ describe('held completions', () => {
   });
 
   it('sends an escalated report through animation deferral', () => {
-    output(PANE, 3_000);
+    work(PANE, 3_000);
     engage(manager, PANE);
     manager.notifyFromProtocol(PANE, PERMISSION);
     output(PANE, 1_000);
@@ -160,7 +172,7 @@ describe('held completions', () => {
   });
 
   it('holds a ring that comes due while engaged without ever having shown', () => {
-    output(PANE, 3_000);
+    work(PANE, 3_000);
     manager.notifyFromProtocol(PANE, PERMISSION);
     engage(manager, PANE);
     vi.advanceTimersByTime(5_000);
@@ -171,7 +183,7 @@ describe('held completions', () => {
   });
 
   it('rings a never-shown deferred ring once quiet if the viewer left before it came due', () => {
-    output(PANE, 3_000);
+    work(PANE, 3_000);
     manager.notifyFromProtocol(PANE, PERMISSION);
     engage(manager, PANE);
     leave(manager);
@@ -205,7 +217,8 @@ describe('held completions', () => {
   it('defers a held settle once watched work resumes, without losing it', () => {
     engage(manager, PANE);
     watchedTurn(PANE);
-    output(PANE, 3_000);
+    // Another turn arrives, sent by a peer rather than typed.
+    work(PANE, 3_000);
     goIdle(manager, PANE);
     expect(ringing(PANE)).toBe(false);
     vi.advanceTimersByTime(5_000);
@@ -261,7 +274,7 @@ describe('acknowledge', () => {
 
   /** A report behind confirmed work: a ring that has not shown. */
   function deferredReport(): void {
-    output(PANE, 3_000);
+    work(PANE, 3_000);
     manager.notifyFromProtocol(PANE, PERMISSION);
   }
 
@@ -344,7 +357,7 @@ describe('echo window', () => {
   it('counts output once the window has passed', () => {
     manager.acknowledge(PANE, { input: false });
     manager.onData(PANE);
-    manager.acknowledge(PANE, { input: true });
+    press(PANE);
     vi.advanceTimersByTime(cfg.alert.echoWindow);
     output(PANE, 2_000);
     // Confirmed busy, so a report now waits for quiet.
@@ -368,6 +381,55 @@ describe('echo window', () => {
 });
 
 /**
+ * A busy run begins only within `cfg.alert.workStartWindow` of input reaching
+ * the program, through the host's input path; a terminal reply is not input.
+ */
+describe('the work-start gate', () => {
+  const pty = () => alertedPty(manager, { write() {} });
+
+  /** Claude launched, painted, and left idle long past its last input. */
+  function idleClaude(): void {
+    manager.setWatchedCommands(['claude']);
+    runCommand(manager, PANE, 'claude');
+    output(PANE, 800);
+    vi.advanceTimersByTime(60_000);
+  }
+
+  it('never rings the repaint a click into an idle program causes', () => {
+    idleClaude();
+    const episodes = collectEpisodes(manager, PANE);
+
+    // The click engages the pane and xterm reports the focus; Claude repaints.
+    engage(manager, PANE);
+    manager.acknowledge(PANE, { input: false });
+    pty().write(PANE, '\x1b[I');
+    output(PANE, 2_000);
+    leave(manager);
+    vi.advanceTimersByTime(60_000);
+
+    expect(ringing(PANE)).toBe(false);
+    expect(episodes.size).toBe(0);
+    expect(manager.getState(PANE)).toMatchObject({ todo: false, notification: null });
+  });
+
+  it('rings the turn a `dor send` starts, but not the repaint before it', () => {
+    idleClaude();
+    // A status-line tick nobody asked for.
+    output(PANE, 2_000);
+    vi.advanceTimersByTime(10_000);
+    expect(ringing(PANE)).toBe(false);
+
+    pty().write(PANE, 'hi\r', { paced: true });
+    output(PANE, 3_000);
+    vi.advanceTimersByTime(5_000);
+    expect(manager.getState(PANE)).toMatchObject({
+      status: 'ALERT_RINGING',
+      notification: { source: 'WATCHING', title: 'claude went quiet' },
+    });
+  });
+});
+
+/**
  * A synthetic timeline with the timings of a recorded Claude Code 2.1 session
  * (2026-09-23, under `TERM_PROGRAM=iTerm.app`): the user types a prompt,
  * submits it, and sits back without touching anything; Claude asks for
@@ -384,9 +446,9 @@ describe('walking away from a permission prompt', () => {
     for (let t = 230; t < 830; t += 100) steps.push(at(t, () => manager.onData(PANE)));
     // The prompt, typed at 40ms a key, each key echoed.
     for (let t = 6_000; t <= 9_000; t += 40) {
-      steps.push(at(t, () => manager.acknowledge(PANE, { input: true })), at(t + 7, () => manager.onData(PANE)));
+      steps.push(at(t, () => press(PANE)), at(t + 7, () => manager.onData(PANE)));
     }
-    steps.push(at(ENTER_AT, () => manager.acknowledge(PANE, { input: true })));
+    steps.push(at(ENTER_AT, () => press(PANE)));
     // Working, then the permission prompt drawn.
     for (let t = 9_390; t < 11_960; t += 110) steps.push(at(t, () => manager.onData(PANE)));
     steps.push(at(17_960, () => applyTerminalEvents(manager, PANE, parser.process(OSC99).events)));
@@ -448,7 +510,7 @@ describe('a Claude Code turn', () => {
       onClipboardOffer() {},
       onChunk() {},
     });
-    const pty = alertedPty(manager, { write() {}, resize() {} });
+    const pty = alertedPty(manager, { write() {} });
     emit = (ms, data) => at(ms, () => stream.write(data));
     key = (ms, data) => at(ms, () => pty.write(PANE, data, { userInput: true }));
     episodes = collectEpisodes(manager, PANE);

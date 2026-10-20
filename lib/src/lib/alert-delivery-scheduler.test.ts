@@ -26,9 +26,10 @@ let delivered: Delivered[];
 const sinks = () => delivered.map((delivery) => delivery.sink);
 const episodeId = (id = PANE) => manager.getState(id).episode!.id;
 const ring = (id = PANE) => manager.notifyFromProtocol(id, REPORT);
-/** Clear the ring with a click, then allow a fresh report after output. */
+/** Clear the ring with a click, then allow a fresh report after input and its output. */
 const ringAgain = () => {
   manager.acknowledge(PANE, { input: false });
+  manager.onInput(PANE);
   manager.onData(PANE);
   ring();
   vi.advanceTimersByTime(5_000);

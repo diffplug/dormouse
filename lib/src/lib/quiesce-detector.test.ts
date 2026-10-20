@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { QuiesceDetector, type QuiesceStatus } from './quiesce-detector';
 
 // Timing constants from cfg.alert:
-// busyCandidateGap=1500, busyConfirmGap=500, mightNeedAttention=2000, needsAttentionConfirm=3000, resizeDebounce=500
+// busyCandidateGap=1500, busyConfirmGap=500, mightNeedAttention=2000, needsAttentionConfirm=3000, workStartWindow=5000
 
 describe('QuiesceDetector', () => {
   beforeEach(() => {
@@ -24,6 +24,7 @@ describe('QuiesceDetector', () => {
   }
 
   function driveMonitorToBusy(monitor: QuiesceDetector) {
+    monitor.onInput();
     monitor.onData();
     vi.advanceTimersByTime(1_500);
     monitor.onData();
@@ -45,6 +46,7 @@ describe('QuiesceDetector', () => {
   it('only treats confirmed work and its finishing window as busy', () => {
     const { monitor, settled } = createMonitor();
     expect(monitor.isConfirmedBusy()).toBe(false);
+    monitor.onInput();
     monitor.onData();
     expect(monitor.isConfirmedBusy()).toBe(false);
     vi.advanceTimersByTime(1_500);
@@ -64,11 +66,10 @@ describe('QuiesceDetector', () => {
     expect(settled).toHaveBeenCalledOnce();
   });
 
-  it('rejects resize redraws and disposed output', () => {
+  it('rejects output nobody asked for and disposed output', () => {
     const { monitor } = createMonitor();
-    monitor.onResize();
     expect(monitor.onData()).toBe(false);
-    vi.advanceTimersByTime(500);
+    monitor.onInput();
     expect(monitor.onData()).toBe(true);
     expect(monitor.isConfirmedBusy()).toBe(false);
     monitor.dispose();
@@ -77,6 +78,7 @@ describe('QuiesceDetector', () => {
 
   it('keeps the first meaningful output after a reset in NOTHING_TO_SHOW', () => {
     const { monitor, changes } = createMonitor();
+    monitor.onInput();
     monitor.reset();
     monitor.onData();
     expect(monitor.getStatus()).toBe('NOTHING_TO_SHOW');
@@ -85,6 +87,7 @@ describe('QuiesceDetector', () => {
 
   it('enters MIGHT_BE_BUSY when a later output arrives after the candidate gap', () => {
     const { monitor, changes } = createMonitor();
+    monitor.onInput();
     monitor.onData();
     vi.advanceTimersByTime(1_500);
     monitor.onData();
@@ -94,6 +97,7 @@ describe('QuiesceDetector', () => {
 
   it('can also enter MIGHT_BE_BUSY from dense output once the candidate timer matures', () => {
     const { monitor, changes } = createMonitor();
+    monitor.onInput();
     monitor.onData();
     vi.advanceTimersByTime(750);
     monitor.onData();
@@ -105,6 +109,7 @@ describe('QuiesceDetector', () => {
 
   it('confirms MIGHT_BE_BUSY into BUSY on further output', () => {
     const { monitor, changes } = createMonitor();
+    monitor.onInput();
     monitor.onData();
     vi.advanceTimersByTime(1_500);
     monitor.onData();
@@ -116,6 +121,7 @@ describe('QuiesceDetector', () => {
 
   it('falls back from MIGHT_BE_BUSY to NOTHING_TO_SHOW if work is not confirmed', () => {
     const { monitor, changes, settled } = createMonitor();
+    monitor.onInput();
     monitor.onData();
     vi.advanceTimersByTime(1_500);
     monitor.onData();
@@ -129,11 +135,14 @@ describe('QuiesceDetector', () => {
 
   it.each([false, true])('forgets stale candidate history before a short redraw (failed confirmation: %s)', (failedConfirmation) => {
     const { monitor, settled } = createMonitor();
+    monitor.onInput();
     monitor.onData();
     vi.advanceTimersByTime(1_500);
     if (failedConfirmation) monitor.onData();
     vi.advanceTimersByTime(218_342);
 
+    // Input inside the window, so only the forgotten history keeps it idle.
+    monitor.onInput();
     monitor.onData();
     vi.advanceTimersByTime(62);
     monitor.onData();
@@ -148,11 +157,13 @@ describe('QuiesceDetector', () => {
 
   it('expires candidate history even when the confirmation timer has not run', () => {
     const { monitor, settled } = createMonitor();
+    monitor.onInput();
     monitor.onData();
     vi.advanceTimersByTime(1_500);
     monitor.onData();
     expect(monitor.getStatus()).toBe('MIGHT_BE_BUSY');
     vi.setSystemTime(Date.now() + 218_342);
+    monitor.onInput();
     monitor.onData();
     expect(monitor.getStatus()).toBe('NOTHING_TO_SHOW');
     vi.advanceTimersByTime(62);
@@ -288,6 +299,7 @@ describe('QuiesceDetector', () => {
 
   it('reset() returns MIGHT_BE_BUSY to NOTHING_TO_SHOW', () => {
     const { monitor, changes } = createMonitor();
+    monitor.onInput();
     monitor.onData();
     vi.advanceTimersByTime(1_500);
     monitor.onData();
@@ -312,6 +324,7 @@ describe('QuiesceDetector', () => {
 
   it('reset() forgets output history, so the next output starts candidate tracking over', () => {
     const { monitor, changes } = createMonitor();
+    monitor.onInput();
     monitor.onData();
     vi.advanceTimersByTime(1_400);
     monitor.reset();
@@ -322,23 +335,76 @@ describe('QuiesceDetector', () => {
     expect(changes).toEqual([]);
   });
 
-  it('onResize suppresses output detection for 500ms', () => {
-    const { monitor, changes } = createMonitor();
-    monitor.onResize();
-    monitor.onData();
-    expect(monitor.getStatus()).toBe('NOTHING_TO_SHOW');
-    expect(changes).toEqual([]);
-  });
+  describe('work-start gate', () => {
+    it('ignores sustained output with no input', () => {
+      const { monitor, changes, settled } = createMonitor();
+      for (let i = 0; i < 20; i++) {
+        expect(monitor.onData()).toBe(false);
+        vi.advanceTimersByTime(500);
+      }
+      vi.advanceTimersByTime(10_000);
+      expect(monitor.getStatus()).toBe('NOTHING_TO_SHOW');
+      expect(changes).toEqual([]);
+      expect(settled).not.toHaveBeenCalled();
+    });
 
-  it('output after the resize debounce participates in busy detection normally', () => {
-    const { monitor, changes } = createMonitor();
-    monitor.onResize();
-    vi.advanceTimersByTime(500);
-    monitor.onData();
-    vi.advanceTimersByTime(1_500);
-    monitor.onData();
-    expect(monitor.getStatus()).toBe('MIGHT_BE_BUSY');
-    expect(changes).toEqual(['MIGHT_BE_BUSY']);
+    it('lets output that begins within the window start a run', () => {
+      const { monitor, changes } = createMonitor();
+      // An idle program's repaint, then the keystroke that sets it working.
+      expect(monitor.onData()).toBe(false);
+      monitor.onInput();
+      vi.advanceTimersByTime(4_900);
+      expect(monitor.onData()).toBe(true);
+      vi.advanceTimersByTime(1_500);
+      monitor.onData();
+      monitor.onData();
+      expect(monitor.getStatus()).toBe('BUSY');
+      expect(changes).toEqual(['MIGHT_BE_BUSY', 'BUSY']);
+    });
+
+    it('ignores output that begins after the window', () => {
+      const { monitor, changes } = createMonitor();
+      monitor.onInput();
+      vi.advanceTimersByTime(5_001);
+      expect(monitor.onData()).toBe(false);
+      vi.advanceTimersByTime(1_500);
+      expect(monitor.onData()).toBe(false);
+      expect(monitor.onData()).toBe(false);
+      expect(monitor.getStatus()).toBe('NOTHING_TO_SHOW');
+      expect(changes).toEqual([]);
+    });
+
+    it('keeps counting a run begun inside the window through its settle, and gates the next', () => {
+      const { monitor, changes, settled } = createMonitor();
+      monitor.onInput();
+      vi.advanceTimersByTime(4_000);
+      monitor.onData();
+      vi.advanceTimersByTime(1_500);
+      monitor.onData();
+      monitor.onData();
+      expect(monitor.getStatus()).toBe('BUSY');
+      vi.advanceTimersByTime(1_500);
+      expect(monitor.onData()).toBe(true);
+      vi.advanceTimersByTime(5_000);
+      expect(settled).toHaveBeenCalledOnce();
+      expect(changes).toEqual(['MIGHT_BE_BUSY', 'BUSY', 'MIGHT_NEED_ATTENTION', 'NOTHING_TO_SHOW']);
+      // The next run needs input of its own.
+      expect(monitor.onData()).toBe(false);
+    });
+
+    it('keeps input across reset(), which opens no window of its own', () => {
+      const { monitor } = createMonitor();
+      monitor.onInput();
+      monitor.reset();
+      monitor.onData();
+      vi.advanceTimersByTime(1_500);
+      monitor.onData();
+      monitor.onData();
+      expect(monitor.getStatus()).toBe('BUSY');
+      vi.advanceTimersByTime(4_000);
+      monitor.reset();
+      expect(monitor.onData()).toBe(false);
+    });
   });
 
   it('resets the BUSY silence timer when more output arrives', () => {
@@ -366,6 +432,7 @@ describe('QuiesceDetector', () => {
   it('does not emit changes after dispose', () => {
     const onChange = vi.fn();
     const monitor = new QuiesceDetector({ onChange });
+    monitor.onInput();
     monitor.onData();
     vi.advanceTimersByTime(1_500);
     monitor.onData();

@@ -708,6 +708,7 @@ describe('alarm delivery', () => {
 
       // Focus alone is not presence: an older VS Code reports no `active`.
       alert(webview, { op: 'dismiss', id: 'pty-1' });
+      webview.send({ type: 'pty:input', id: 'pty-1', data: 'y\r' });
       ptys.callbacks!.onData('pty-1', 'output');
       moveWindow({ focused: true });
       ptys.callbacks!.onData('pty-1', REPORT);
@@ -796,15 +797,17 @@ describe('alert state follows the PTY', () => {
     }
   });
 
-  it('opens the resize grace before the PTY resizes', async () => {
+  it('opens the work-start window before an input\'s write, and never for a terminal reply', async () => {
     // The router's own instance: `resetModules` gave this test one registry.
     const { AlertManager } = await import('../../lib/src/lib/alert-manager');
-    vi.spyOn(AlertManager.prototype, 'onResize').mockImplementation((id) => void ptys.order.push(`grace ${id}`));
+    vi.spyOn(AlertManager.prototype, 'onInput').mockImplementation((id) => void ptys.order.push(`input ${id}`));
+    ptys.onWrite = (id) => void ptys.order.push(`write ${id}`);
     const webview = fakeWebview();
     const disposable = router.attachRouter(webview.channel);
     try {
-      webview.send({ type: 'pty:resize', id: 'pty-sized', cols: 100, rows: 30 });
-      expect(ptys.order).toEqual(['grace pty-sized', 'resize pty-sized']);
+      webview.send({ type: 'pty:input', id: 'pty-sent', data: '\x1b[I' });
+      webview.send({ type: 'pty:input', id: 'pty-sent', data: 'hi\r', paced: true });
+      expect(ptys.order).toEqual(['write pty-sent', 'input pty-sent', 'write pty-sent']);
     } finally {
       disposable.dispose();
     }

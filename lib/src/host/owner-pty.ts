@@ -15,7 +15,7 @@ import {
 import type { TerminalSemanticEvent } from '../lib/terminal-state';
 import { ToolLaunchLatch } from '../lib/tool-launch-latch';
 import { outputPaints } from '../lib/terminal-controls';
-import { stripMouseReportsFromInput } from '../lib/terminal-report-filter';
+import { inputCanStartWork, stripMouseReportsFromInput } from '../lib/terminal-report-filter';
 
 /**
  * What the process that owns a PTY does with it on behalf of its alerts, the
@@ -88,21 +88,22 @@ export function createOwnerPtyStream(id: string, options: OwnerPtyStreamOptions)
   });
 }
 
-/** The slice of a host's PTY manager that input and size changes reach. */
+/** The slice of a host's PTY manager that input reaches. */
 export interface PtyWriteTarget {
   write(id: string, data: string, options?: { paced?: boolean }): void;
-  resize(id: string, cols: number, rows: number, repaint?: boolean): void;
 }
 
 /**
- * A host's PTY writes and resizes as its alerts must see them, whoever asked —
- * a local renderer or a remote Client: **human input is acknowledged, echo
- * window opened, before its bytes reach the PTY**, and a resize opens its grace
- * window before the program repaints (`docs/specs/alert.md` → Engagement).
+ * A host's PTY writes as its alerts must see them, whoever asked — a local
+ * renderer, a remote Client, or a `dor` verb: **human input is acknowledged,
+ * echo window opened, and any input but terminal replies opens the work-start
+ * window, all before its bytes reach the PTY** (`docs/specs/alert.md` →
+ * Engagement).
  */
 export function alertedPty(alerts: AlertManager, pty: PtyWriteTarget) {
   const write = (id: string, data: string, options: { paced?: boolean; userInput?: boolean } = {}): void => {
     if (options.userInput) alerts.acknowledge(id, { input: true });
+    if (inputCanStartWork(data)) alerts.onInput(id);
     pty.write(id, data, options.paced ? { paced: true } : undefined);
   };
   return {
@@ -114,10 +115,6 @@ export function alertedPty(alerts: AlertManager, pty: PtyWriteTarget) {
      */
     writeClientInput(id: string, data: string): void {
       write(id, data, { userInput: stripMouseReportsFromInput(data).length > 0 });
-    },
-    resize(id: string, cols: number, rows: number, repaint?: boolean): void {
-      alerts.onResize(id);
-      pty.resize(id, cols, rows, repaint);
     },
   };
 }

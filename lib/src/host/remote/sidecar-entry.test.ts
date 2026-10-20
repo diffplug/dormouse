@@ -406,13 +406,6 @@ describe('PTYs', () => {
     expect(emitted('terminal:clientInput')).toEqual([{ id: 'pty-1' }]);
   });
 
-  it('gives a Client\'s repaint bounce the resize grace', () => {
-    const onResize = vi.spyOn(alerts, 'onResize');
-    bridge.provider.resizePty('pty-1', 80, 24, true);
-    expect(onResize).toHaveBeenCalledWith('pty-1');
-    expect(resized).toEqual([{ id: 'pty-1', cols: 80, rows: 24, repaint: true }]);
-  });
-
   it('writes and resizes straight through to the manager', () => {
     bridge.provider.writePty('pty-1', 'ls\r');
     bridge.provider.resizePty('pty-1', 80, 24);
@@ -809,12 +802,13 @@ describe('the sidecar host', () => {
     expect(opens()).toEqual(['/launched']);
   });
 
-  it('opens the resize grace before the PTY resizes', () => {
-    const graced: string[] = [];
-    vi.spyOn(host.alerts, 'onResize').mockImplementation((id) => void graced.push(`grace ${id} after ${calls.length} calls`));
-    host.handleCommand('pty:resize', { id: 'pty-1', cols: 100, rows: 30 });
-    expect(graced).toEqual(['grace pty-1 after 0 calls']);
-    expect(calls.map((call) => [call.op, call.args])).toEqual([['resize', ['pty-1', 100, 30, undefined]]]);
+  it('opens the work-start window before an input\'s write, and never for a terminal reply', () => {
+    const opened: string[] = [];
+    vi.spyOn(host.alerts, 'onInput').mockImplementation((id) => void opened.push(`input ${id} after ${calls.length} calls`));
+    host.handleCommand('pty:input', { id: 'pty-1', data: '\x1b[I' });
+    host.handleCommand('pty:input', { id: 'pty-1', data: 'hi\r', paced: true });
+    expect(opened).toEqual(['input pty-1 after 1 calls']);
+    expect(calls.map((call) => call.op)).toEqual(['write', 'write']);
   });
 
   it('removes a killed Session\'s alert state', () => {

@@ -35,6 +35,7 @@ describe('engagement reporter', () => {
     platform.spawnPty('pane-a');
     publishEngagementFocus(wall, 'pane-a');
     window.dispatchEvent(new Event('keydown'));
+    platform.writePty('pane-a', '\r', { userInput: true });
     platform.sendOutput('pane-a', '\x1b]633;E;claude\x07\x1b]633;C\x07');
     // Claude works for three seconds and goes quiet; the user reads along,
     // moving the mouse now and then but never typing.

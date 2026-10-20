@@ -404,10 +404,10 @@ export class AlertManager {
     this.settleWaiters(id, 'died');
   }
 
-  onResize(id: string): void {
-    // Same reasoning as `onData`: the resize grace window is part of the
-    // always-on detector, and a Pane's first fit usually beats any PTY event.
-    this.streamEntry(id)?.detector.onResize();
+  /** Input other than terminal replies reached the PTY: its output may start work. */
+  onInput(id: string): void {
+    // Same reasoning as `onData`: the first keystroke can beat any output.
+    this.streamEntry(id)?.detector.onInput();
   }
 
   // --- WATCHING rule set ---

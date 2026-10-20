@@ -190,7 +190,8 @@ function clearWatchedCommands(): void {
 }
 
 // Timing helpers based on cfg.alert values:
-// busyCandidateGap=1500, busyConfirmGap=500, mightNeedAttention=2000, needsAttentionConfirm=3000
+// busyCandidateGap=1500, busyConfirmGap=500, mightNeedAttention=2000, needsAttentionConfirm=3000,
+// workStartWindow=5000. `emitOutput` writes through the PTY's echo, so it is input as well.
 
 function driveToBusy(id: string): void {
   emitOutput(id, 'prompt> ');
@@ -592,6 +593,8 @@ describe('terminal-registry alert behavior', () => {
     );
     enableAlert(id);
     engageSession(id);
+    // The keystroke that started it; the scenario already owns the output.
+    fakePlatform.writePty(id, '\r');
 
     advance(1_800);
     expect(getActivity(id)).toMatchObject({ status: 'BUSY' });
@@ -1251,16 +1254,19 @@ describe('terminal-registry alert behavior', () => {
     });
   });
 
-  it('ignores prompt redraw output immediately after a resize', () => {
-    const id = 'resize-debounce';
+  it('ignores a resize redraw long after the last input', () => {
+    const id = 'resize-redraw';
     const session = createSession(id);
     enableAlert(id);
     engageSession(id);
+    advance(cfg.alert.workStartWindow + 1);
 
+    // sendOutput, not emitOutput: a redraw is output nobody typed.
     session.terminal.emitResize(120, 30);
-    emitOutput(id, 'prompt redraw');
+    fakePlatform.sendOutput(id, 'prompt redraw');
     advance(1_600);
-    emitOutput(id, 'working...');
+    fakePlatform.sendOutput(id, 'prompt redraw');
+    fakePlatform.sendOutput(id, 'prompt redraw');
 
     expect(getActivity(id)).toMatchObject({
       status: 'NOTHING_TO_SHOW',

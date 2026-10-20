@@ -5,6 +5,7 @@ import { DEFAULT_ALERT_SETTINGS } from './alert-settings-model';
 import { armCommandExit, driveToBusy, driveToCandidate, engage, finishCommand, goIdle, heartbeat, REPORT, runCommand, settle } from './alert-manager-test-utils';
 import { toPersistedAlertState } from './session-types';
 import { createOwnerPtyStream } from '../host/owner-pty';
+import { cfg } from '../cfg';
 
 const ID = 'resumed-work';
 const WATCHED = 'longtask';
@@ -42,6 +43,7 @@ describe('owed alerts during resumed output', () => {
     manager.onData(ID);
     manager.registerCompletionClaimant(ID, (event) => {
       if (event.kind !== 'settled') return false;
+      manager.onInput(ID);
       manager.onData(ID);
       return true;
     });
@@ -69,6 +71,8 @@ describe('owed alerts during resumed output', () => {
   it.each(['watching', 'report'] as const)('keeps a %s past its deadlines during output, then delivers once on quiet', (source) => {
     ring(source);
     const episode = manager.getState(ID).episode;
+    // Another turn starts, and runs for two minutes.
+    manager.onInput(ID);
     heartbeat(manager, ID, 120_000);
     expect(manager.getState(ID).status).not.toBe('ALERT_RINGING');
     expect(manager.getState(ID).episode).toEqual(episode);
@@ -157,27 +161,25 @@ describe('owed alerts during resumed output', () => {
     expect(episode).not.toBeNull();
     expect(manager.getState(ID)).toMatchObject({ status: 'ALERT_RINGING', episode });
   });
-  it('ignores resize output when deciding whether to defer', () => {
+  it('ignores a repaint long after the last input when deciding whether to defer', () => {
+    vi.advanceTimersByTime(cfg.alert.workStartWindow + 1);
     ring('report');
-    manager.onResize(ID);
-    manager.onData(ID);
-    expect(manager.getState(ID).status).toBe('ALERT_RINGING');
-    vi.advanceTimersByTime(DELAY);
+    // A resize or focus repaint, with nothing typed since the command started.
+    for (let elapsed = 0; elapsed < 3_000; elapsed += 100) {
+      vi.advanceTimersByTime(100);
+      manager.onData(ID);
+      expect(manager.getState(ID).status).toBe('ALERT_RINGING');
+    }
+    vi.advanceTimersByTime(DELAY - 3_000);
     expect(spoken).toHaveBeenCalledOnce();
-  });
-  it('ignores late isolated resize output', () => {
-    manager.onResize(ID);
-    manager.onData(ID);
-    vi.advanceTimersByTime(600);
-    manager.onData(ID); // A late redraw outside the resize grace is still only one chunk.
-    manager.notifyFromProtocol(ID, REPORT);
-    expect(manager.getState(ID).status).toBe('ALERT_RINGING');
   });
   it('ignores repeated typing echoes', () => {
     manager.acknowledge(ID, { input: true });
     for (let i = 0; i < 20; i++) {
       vi.advanceTimersByTime(400);
+      // A keystroke as the host's input path delivers it, then its echo.
       manager.acknowledge(ID, { input: true });
+      manager.onInput(ID);
       manager.onData(ID);
     }
     vi.advanceTimersByTime(751);

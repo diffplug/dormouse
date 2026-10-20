@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  inputCanStartWork,
   inputIsReplayTerminalReport,
   inputIsSyntheticTerminalReport,
   stripMouseReportsFromInput,
@@ -77,5 +78,22 @@ describe('terminal-report-filter: inputIsReplayTerminalReport', () => {
     expect(inputIsReplayTerminalReport('\x1b[2J')).toBe(false); // clear screen — not a report
     expect(inputIsReplayTerminalReport('hello')).toBe(false);
     expect(inputIsReplayTerminalReport('\x1b[3;4Rx')).toBe(false); // report + stray char
+  });
+});
+
+describe('terminal-report-filter: inputCanStartWork', () => {
+  it('rejects terminal replies and mouse reports', () => {
+    expect(inputCanStartWork('\x1b[I')).toBe(false); // focus in
+    expect(inputCanStartWork('\x1b[O')).toBe(false); // focus out
+    expect(inputCanStartWork('\x1b[12;3R')).toBe(false); // cursor position report
+    expect(inputCanStartWork('\x1b[<0;12;4M\x1b[<0;12;4m')).toBe(false); // SGR click
+  });
+
+  it('accepts keys, Ctrl-C, and a key typed alongside a mouse report', () => {
+    expect(inputCanStartWork('a')).toBe(true);
+    expect(inputCanStartWork('\r')).toBe(true);
+    expect(inputCanStartWork('\x1b[A')).toBe(true); // cursor up
+    expect(inputCanStartWork('\x03')).toBe(true);
+    expect(inputCanStartWork('\x1b[<0;12;4Ma')).toBe(true);
   });
 });
