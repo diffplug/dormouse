@@ -462,8 +462,10 @@ export function createApp(config: AppConfig): CreatedApp {
   // Separate issuers per flow: a setup challenge cannot be redeemed at sign-in.
   // Both are capped as well as swept: `POST /api/signin/begin` needs no auth
   // and no body, so the expiry sweep alone only makes the map plateau at
-  // request-rate x TTL. A flood evicts abandoned challenges of its own making —
-  // a real ceremony that loses one retries — and cannot forge or extend any.
+  // request-rate x TTL. A flood evicts mostly abandoned challenges of its own
+  // making, but a sustained one also evicts a real ceremony's before its
+  // passkey prompt is answered, failing sign-in while it lasts; it cannot forge
+  // or extend any.
   const setupChallenges = new ChallengeIssuer({ now, maxPending: MAX_PENDING_CHALLENGES });
   const signinChallenges = new ChallengeIssuer({ now, maxPending: MAX_PENDING_CHALLENGES });
   // The presence nonces of `/api/reauth/*`. Its own store for the same reason
