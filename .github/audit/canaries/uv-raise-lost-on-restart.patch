@@ -4,16 +4,16 @@ Expect: lib/src/host/remote/service.ts
 Source: reverses part of #1242 (a UV raise the store failed to save was lost at the next restart)
 
 diff --git a/lib/src/host/remote/service.test.ts b/lib/src/host/remote/service.test.ts
-index 07d7ccb1a..3e110b162 100644
+index 8c884618a..3e110b162 100644
 --- a/lib/src/host/remote/service.test.ts
 +++ b/lib/src/host/remote/service.test.ts
-@@ -1303,49 +1303,6 @@ describe('pairing queue', () => {
+@@ -1303,50 +1303,6 @@ describe('pairing queue', () => {
      expect(store.acl[BURROW_ID]).toHaveLength(1);
    });
  
 -  it('keeps a raised UV demand across a restart when the store could not save it', async () => {
 -    const socket = await running();
--    vi.spyOn(console, 'warn').mockImplementation(() => {});
+-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 -    // A locked keychain or a full disk: the raise cannot be written.
 -    let saves = 0;
 -    const save = store.saveEnrollment;
@@ -24,6 +24,7 @@ index 07d7ccb1a..3e110b162 100644
 -    socket.receive({ t: 'policy', requireUserVerification: true });
 -    await vi.waitFor(() => expect(saves).toBe(1));
 -    expect(store.enrollment!.requireUserVerification).toBeFalsy();
+-    warn.mockRestore();
 -
 -    // The store recovers; the Burrow restarts, and its Relay never repeats the demand.
 -    store.saveEnrollment = save;
