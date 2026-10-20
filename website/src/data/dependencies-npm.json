@@ -411,7 +411,7 @@
       "author": "Einar Otto Stangvik <einaros@gmail.com> (http://2x.io)",
       "homepage": "https://github.com/websockets/ws",
       "versions": [
-        "8.21.3"
+        "8.22.0"
       ]
     },
     {
