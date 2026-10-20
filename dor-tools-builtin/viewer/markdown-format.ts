@@ -44,7 +44,7 @@ export function markdownFormat(markdown: string): Options {
         });
       },
     },
-    join: [(left) => {
+    join: [left => {
       if (left.type !== 'heading') return;
       const text = left.children.map(child => 'value' in child ? child.value : '').join('');
       return headings.get(`${left.depth}:${text}`) ?? (tight > loose ? 0 : 1);

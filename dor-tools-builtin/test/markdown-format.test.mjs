@@ -4,8 +4,8 @@ import { test } from 'node:test';
 import { load } from './bundle.mjs';
 
 // Exercise the exact parser/serializer versions used by the installed editor.
-const require = createRequire(import.meta.url);
-const editor = createRequire(require.resolve('@mdxeditor/editor'));
+const viewer = createRequire(new URL('../viewer/markdown.tsx', import.meta.url));
+const editor = createRequire(viewer.resolve('@mdxeditor/editor'));
 const dependency = name => import(editor.resolve(name));
 const { fromMarkdown } = await dependency('mdast-util-from-markdown');
 const { toMarkdown } = await dependency('mdast-util-to-markdown');
@@ -25,7 +25,6 @@ for (const source of [
 ]) {
   test(`preserves issue 1254 formatting: ${JSON.stringify(source)}`, () => {
     assert.equal(roundtrip(source), source);
-    assert.equal(roundtrip(roundtrip(source)), source);
   });
 }
 

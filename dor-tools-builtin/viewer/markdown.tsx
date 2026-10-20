@@ -7,7 +7,7 @@ import { classHighlighter } from '@lezer/highlight';
 import {
   $isImageNode, createActiveEditorSubscription$, editImageToolbarComponent$, iconComponentFor$, ImageNode, INSERT_IMAGE_COMMAND, useCellValue,
   BlockTypeSelect, BoldItalicUnderlineToggles, codeBlockPlugin, codeMirrorPlugin, CodeToggle, CreateLink, diffSourcePlugin,
-  DiffSourceToggleWrapper, frontmatterPlugin, headingsPlugin, imagePlugin, InsertCodeBlock, InsertTable, InsertThematicBreak,
+  DiffSourceToggleWrapper, frontmatterPlugin, headingsPlugin, imagePlugin, initialMarkdownNormalize$, InsertCodeBlock, InsertTable, InsertThematicBreak,
   linkDialogPlugin, linkDialogState$, openLinkEditDialog$, linkPlugin, listsPlugin, ListsToggle, markdownShortcutPlugin, MDXEditor, quotePlugin, realmPlugin,
   rootEditor$, Separator, viewMode$, tablePlugin, thematicBreakPlugin, toolbarPlugin, UndoRedo, type MDXEditorMethods, type MDXEditorProps, type Realm,
 } from '@mdxeditor/editor';
@@ -91,7 +91,6 @@ const session = documentSession<string>({
   async apply(text) {
     // A reload mounts a fresh editor: its own normalization is then not an edit, and undo starts over.
     uploadedWidths.clear();
-    unparsed = false;
     flushSync(() => root.render(<Page key={++loads} markdown={text.replace(/\r\n?/g, '\n')} />));
     await new Promise(resolve => setTimeout(resolve));
   },
@@ -248,14 +247,12 @@ const plugins = [
   toolbarPlugin({ toolbarContents: Toolbar }),
 ];
 
-/** Whether this editor failed to parse its document. MDXEditor clears its
- * normalize flag only in a rich-text export, which a parse error suppresses,
- * so every later source edit would otherwise arrive as normalization. */
-let unparsed = false;
 // The editor's own reformatting of loaded text is not an edit.
-const onEditorChange: MDXEditorProps['onChange'] = (_, normalize) => { if (normalize && !unparsed) session.rebase(); else session.changed(); };
+const onEditorChange: MDXEditorProps['onChange'] = (_, normalize) => { if (normalize) session.rebase(); else session.changed(); };
 const onEditorError: MDXEditorProps['onError'] = ({ error: reason }) => {
-  unparsed = true;
+  // MDXEditor clears its normalize flag only in a rich-text export, which a
+  // parse error suppresses, so every later source edit would arrive as normalization.
+  realm?.pub(initialMarkdownNormalize$, false);
   realm?.pub(viewMode$, 'source');
   session.fail(`Showing source: the rich editor cannot parse this file (${reason}).`);
 };
