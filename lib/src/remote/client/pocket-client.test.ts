@@ -1701,8 +1701,53 @@ describe('the durable deletion queue', () => {
     // The id survives in the queue, which is the only thing that can name that
     // row again.
     expect([...harness.pendingDeletions.records.values()]).toEqual([
-      { burrowId: 'h1', deliveryId: 'delivery-h1', queuedAt: expect.any(Number) },
+      { burrowId: 'h1', accountId: ACCOUNT_ID, deliveryId: 'delivery-h1', queuedAt: expect.any(Number) },
     ]);
+  });
+
+  /**
+   * The Relay's deletion is scoped to the caller's account and answers 204
+   * for a row it does not hold, so a 204 under another account deletes
+   * nothing and must not spend the tombstone.
+   */
+  it('keeps another account’s tombstone for that account’s session', async () => {
+    const harness = await signedIn({
+      '/api/push/subscriptions/delivery-a': () => ({ status: 204 }),
+      '/api/push/subscriptions/delivery-b': () => ({ status: 204 }),
+    });
+    await harness.pendingDeletions.put({ burrowId: 'a', accountId: 'other-account', deliveryId: 'delivery-a', queuedAt: 1 });
+    await harness.pendingDeletions.put({ burrowId: 'b', accountId: ACCOUNT_ID, deliveryId: 'delivery-b', queuedAt: 1 });
+
+    await harness.client.retirePendingDeletions();
+
+    expect(harness.calls.some((c) => c.url.includes('delivery-a'))).toBe(false);
+    expect([...harness.pendingDeletions.records.values()].map((t) => t.deliveryId)).toEqual(['delivery-a']);
+  });
+
+  it('forgetBurrow under another account queues the deletion for the record’s account', async () => {
+    const harness = await signedIn({
+      '/api/push/subscriptions/delivery-h1': () => ({ status: 204 }),
+    });
+    await seedRecord(harness.knownBurrows, 'h1', { accountId: 'other-account' });
+
+    await harness.client.forgetBurrow('h1');
+
+    expect(harness.knownBurrows.records.has('h1')).toBe(false);
+    expect(harness.calls.some((c) => c.url.includes('delivery-h1'))).toBe(false);
+    expect([...harness.pendingDeletions.records.values()]).toEqual([
+      { burrowId: 'h1', accountId: 'other-account', deliveryId: 'delivery-h1', queuedAt: expect.any(Number) },
+    ]);
+  });
+
+  it('drains a tombstone queued before tombstones named an account under any session', async () => {
+    const harness = await signedIn({
+      '/api/push/subscriptions/delivery-h1': () => ({ status: 204 }),
+    });
+    await harness.pendingDeletions.put({ burrowId: 'h1', deliveryId: 'delivery-h1', queuedAt: 1 });
+
+    await harness.client.retirePendingDeletions();
+
+    expect(harness.pendingDeletions.records.size).toBe(0);
   });
 });
 

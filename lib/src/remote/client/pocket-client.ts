@@ -83,6 +83,7 @@ import {
   type KnownBurrowV1,
   type KnownBurrowSummary,
   type PendingDeletionStore,
+  type PendingDeliveryDeletionV1,
 } from './pocket-db';
 import { SCAN_LABEL } from '../setup-copy';
 import { RelayHeartbeat, realTimer, type RemoteTimer, type RemoteWebSocket } from '../ws';
@@ -656,7 +657,7 @@ export class PocketClient {
   async forgetBurrow(burrowId: string): Promise<void> {
     const record = await this.#knownBurrows.getSummary(burrowId);
     if (record?.authorization.state === 'paired') {
-      await this.#tombstone(burrowId, record.authorization.deliveryId);
+      await this.#tombstone(record, record.authorization.deliveryId);
     }
     await this.#knownBurrows.delete(burrowId);
     await this.retirePendingDeletions();
@@ -734,7 +735,8 @@ export class PocketClient {
   }
 
   /**
-   * Drain the tombstone queue, clearing each entry only on a Relay answer.
+   * Drain the signed-in account's tombstones, clearing each only on a Relay
+   * answer; another account's wait for that account's session.
    *
    * Best-effort and never throws: its callers are boot, sign-in, and the step
    * before registering a replacement, none of which may fail over a deletion
@@ -748,15 +750,7 @@ export class PocketClient {
     } catch {
       return;
     }
-    for (const tombstone of queued) {
-      try {
-        await this.deletePushSubscription(tombstone.deliveryId);
-        await this.#pendingDeletions.delete(tombstone.burrowId, tombstone.deliveryId);
-      } catch {
-        // Kept for the next drain: the id in the tombstone is the only handle
-        // that can ever delete this row.
-      }
-    }
+    for (const tombstone of queued) await this.#retire(tombstone);
   }
 
   // --- Relay socket --------------------------------------------------------
@@ -899,7 +893,7 @@ export class PocketClient {
       existing?.authorization.state === 'paired' &&
       existing.authorization.deliveryId !== outcome.deliveryId
     ) {
-      await this.#tombstone(burrowId, existing.authorization.deliveryId);
+      await this.#tombstone(existing, existing.authorization.deliveryId);
     }
     const record: KnownBurrowV1 = {
       burrowId,
@@ -1067,21 +1061,39 @@ export class PocketClient {
   async #dropAuthorization(record: KnownBurrowV1): Promise<void> {
     if (record.authorization.state !== 'paired') return;
     const { deliveryId } = record.authorization;
-    await this.#tombstone(record.burrowId, deliveryId);
+    const tombstone = await this.#tombstone(record, deliveryId);
     await this.#knownBurrows.put({ ...record, authorization: { state: 'pairing-required' } });
     // Best-effort: the tombstone is what makes this retryable, so a failure
     // here costs a later drain rather than the row.
-    try {
-      await this.deletePushSubscription(deliveryId);
-      await this.#pendingDeletions.delete(record.burrowId, deliveryId);
-    } catch {
-      // Left queued.
-    }
+    await this.#retire(tombstone);
     this.#core.disposeSession();
   }
 
-  async #tombstone(burrowId: string, deliveryId: string): Promise<void> {
-    await this.#pendingDeletions.put({ burrowId, deliveryId, queuedAt: this.#now() });
+  async #tombstone(
+    record: { readonly burrowId: string; readonly accountId: string },
+    deliveryId: string,
+  ): Promise<PendingDeliveryDeletionV1> {
+    const tombstone = { burrowId: record.burrowId, accountId: record.accountId, deliveryId, queuedAt: this.#now() };
+    await this.#pendingDeletions.put(tombstone);
+    return tombstone;
+  }
+
+  /**
+   * Delete one tombstone's row and clear it, but only under the account that
+   * owns the row: another account's 204 deletes nothing, so clearing on it
+   * would strand the row. Never throws; a tombstone kept is retried later.
+   */
+  async #retire(tombstone: PendingDeliveryDeletionV1): Promise<void> {
+    // A tombstone with no account predates the field and drains under any
+    // session, as every tombstone did then.
+    if (tombstone.accountId !== undefined && tombstone.accountId !== this.#session?.accountId) return;
+    try {
+      await this.deletePushSubscription(tombstone.deliveryId);
+      await this.#pendingDeletions.delete(tombstone.burrowId, tombstone.deliveryId);
+    } catch {
+      // Kept for the next drain: the id in the tombstone is the only handle
+      // that can ever delete this row.
+    }
   }
 
   // --- Remote-api v1 (see ClientSessionCore) --------------------------------
