@@ -89,7 +89,7 @@ Pinned by `hosted/server/tests/relay.test.ts`, `hosted/server/tests/relay-push.t
 
 | Guarantee | Feature | Pinned by |
 | --- | --- | --- |
-| **Hosted runs only pgstencil releases that passed pgstencil's own audit.** A production deploy carries no test controls first verifies each pgstencil package's provenance and npm attestation; a preview reaches no real provider. | One-time link, Hosted phone | `hosted/scripts/production.test.mjs`, `hosted/server/tests/artifacts.test.ts` |
+| **Hosted runs only pgstencil releases that passed pgstencil's own audit.** A production deploy carries no test controls and first verifies each pgstencil package's provenance and npm attestation; a preview reaches no real provider. | One-time link, Hosted phone | `hosted/scripts/production.test.mjs`, `hosted/server/tests/artifacts.test.ts` |
 
 - **FAIL IF** `S117` a production Worker exposes the captured-email inbox or deterministic clock controls, or imports the testing injection module; inspect `hosted/server/worker.ts`, `hosted/server/relay-worker.ts`, `hosted/server/voice-worker.ts`, the build configuration, and `hosted/server/tests/worker-entry.ts`.
 - **FAIL IF** `S118` either installed pgstencil package lacks `dist/provenance.json`, records `dirty`, names a commit that is not 40 lowercase hex or differs from the other's; `pnpm-lock.yaml` resolves either package from outside npm or without an integrity hash; or a runtime import depends on a sibling pgstencil checkout. Inspect `verifyPackages` in `hosted/scripts/production.mjs`, `hosted/server/tests/artifacts.test.ts`, and Hosted runtime imports.
