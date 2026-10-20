@@ -1303,6 +1303,49 @@ describe('pairing queue', () => {
     expect(store.acl[BURROW_ID]).toHaveLength(1);
   });
 
+  it('keeps a raised UV demand across a restart when the store could not save it', async () => {
+    const socket = await running();
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    // A locked keychain or a full disk: the raise cannot be written.
+    let saves = 0;
+    const save = store.saveEnrollment;
+    store.saveEnrollment = async () => {
+      saves++;
+      throw new Error('store unavailable');
+    };
+    socket.receive({ t: 'policy', requireUserVerification: true });
+    await vi.waitFor(() => expect(saves).toBe(1));
+    expect(store.enrollment!.requireUserVerification).toBeFalsy();
+
+    // The store recovers; the Burrow restarts, and its Relay never repeats the demand.
+    store.saveEnrollment = save;
+    await setPolicy(NOTHING);
+    await setPolicy(RELAY_ON);
+    const restarted = sockets.at(-1)!;
+    expect(restarted).not.toBe(socket);
+    restarted.open();
+    // The start retried the save.
+    expect(store.enrollment).toEqual({ ...ENROLLMENT, requireUserVerification: true });
+
+    // A presence-only passkey never reaches the modal.
+    const presenceOnly = await createTestAuthenticator({
+      rpId: ENROLLMENT.rpId,
+      origin: ORIGIN,
+      userVerified: false,
+    });
+    const qr = (await command('setupQr')).result as SetupQrResult;
+    const invitation = await parsePairingInvitationUrl(qr.url, ORIGIN);
+    await pairThroughSocket({
+      socket: restarted,
+      burrowId: ENROLLMENT.burrowId,
+      clientId: 'c1',
+      invitation: invitation!,
+      authenticator: presenceOnly,
+    });
+    await settle();
+    expect(queueEvents().flatMap((event) => event.queue)).toEqual([]);
+  });
+
   it('rejects stale modal actions after the client replaces its pairing', async () => {
     const socket = await running();
     const first = await pair(socket, 'c1', { label: BROWSER });

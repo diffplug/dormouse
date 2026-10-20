@@ -1508,7 +1508,9 @@ export class BurrowService {
     return false;
   }
 
-  async #startBurrow(enrollment: BurrowEnrollment): Promise<void> {
+  async #startBurrow(stored: BurrowEnrollment): Promise<void> {
+    if (this.#disposed) return;
+    const enrollment = await this.#withRaisedPolicy(stored);
     if (this.#disposed) return;
     if (!(await this.#hasUsableNoiseStatic(enrollment)) || this.#disposed) return;
     // Never two. Callers are serialized (see `#serialize`), but a Burrow left in
@@ -1556,22 +1558,47 @@ export class BurrowService {
    * Keep the Relay's raise to user verification across restarts, onto the
    * enrollment whose Burrow heard it — and only while that is still this
    * machine's enrollment, so a raise queued behind a clear or a re-enroll
-   * writes nothing. The running Burrow already enforces it; a failed save is
-   * retried by the raise after the next start.
+   * writes nothing. The running Burrow already enforces it. The raise lands on
+   * `#enrollment` before the save and stays there if the save fails, so a
+   * restart in this process still starts raised (`#withRaisedPolicy`), never
+   * lowered by a Relay that stays silent.
    */
   #persistRaisedPolicy(raisedBy: BurrowEnrollment): void {
     void this.#serialize(async () => {
       const current = this.#enrollment;
       if (this.#disposed || current?.burrowToken !== raisedBy.burrowToken) return;
       const raised = { ...current, requireUserVerification: true };
-      try {
-        await this.#store.saveEnrollment(raised);
-      } catch (error) {
-        console.warn('[burrow] could not persist the Relay\'s user-verification demand', error);
-        return;
-      }
       this.#enrollment = raised;
+      await this.#saveRaisedPolicy(raised);
     });
+  }
+
+  /**
+   * `stored` raised to user verification when this process already holds a
+   * raise for the same enrollment that the store lacks — a save that failed —
+   * retrying the save. A store that keeps failing is raised again only by the
+   * Relay's next `policy` frame after a relaunch.
+   */
+  async #withRaisedPolicy(stored: BurrowEnrollment): Promise<BurrowEnrollment> {
+    const held = this.#enrollment;
+    if (
+      stored.requireUserVerification ||
+      !held?.requireUserVerification ||
+      held.burrowToken !== stored.burrowToken
+    ) {
+      return stored;
+    }
+    const raised = { ...stored, requireUserVerification: true };
+    await this.#saveRaisedPolicy(raised);
+    return raised;
+  }
+
+  async #saveRaisedPolicy(raised: BurrowEnrollment): Promise<void> {
+    try {
+      await this.#store.saveEnrollment(raised);
+    } catch (error) {
+      console.warn('[burrow] could not persist the Relay\'s user-verification demand', error);
+    }
   }
 
   /**
