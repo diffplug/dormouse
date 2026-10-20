@@ -16,8 +16,9 @@
  * **The addon is resolved here rather than through the shipped factory.** It is
  * installed under `standalone/sidecar`, which is where the shipped bundle finds
  * it with a bare `require`; `lib` must not depend on it, because `lib` is a
- * browser bundle root. So these cases inject a plain factory over the polyfill
- * this file resolves, and only the last case tears the shipped factory down.
+ * browser bundle root. So the negotiation cases inject a plain factory over the
+ * polyfill this file resolves; the Local networks, Anywhere, and teardown cases
+ * build through the shipped factory, and only the last tears it down.
  */
 
 import { createSocket, type SocketType } from 'node:dgram';
