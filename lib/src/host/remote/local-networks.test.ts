@@ -166,7 +166,7 @@ describe('localNetworksPath', () => {
     ].join('\r\n');
 
     const accepted = localNetworksPath(LAN).acceptRemote(offer);
-    expect(candidatesIn(accepted)).toEqual(['a=candidate:1 1 udp 2113937151 192.168.86.23 51234 typ host']);
+    expect(candidatesIn(accepted)).toEqual(['a=candidate:1 1 UDP 2113937151 192.168.86.23 51234 typ host']);
     expect(accepted).toContain('\r\nc=IN IP4 0.0.0.0\r\n');
     expect(accepted).toContain('\r\na=end-of-candidates\r\n');
 
@@ -194,11 +194,58 @@ describe('localNetworksPath', () => {
     expect(accepted).not.toContain('203.0.113.7');
     expect(accepted).not.toContain('candidate:8');
     expect(candidatesIn(accepted)).toEqual([
-      'a=candidate:1 1 udp 2113937151 192.168.86.23 51234 typ host',
-      'a=candidate:4 1 udp 2113937151 192.168.86.23 51238 typ host',
-      'a=candidate:6 1 udp 2113937151 192.168.86.23 51240 typ host',
+      'a=candidate:1 1 UDP 2113937151 192.168.86.23 51234 typ host',
+      'a=candidate:4 1 UDP 2113937151 192.168.86.23 51238 typ host',
+      'a=candidate:6 1 UDP 2113937151 192.168.86.23 51240 typ host',
     ]);
     expect(accepted).toContain('\r\nc=IN IP4 0.0.0.0\r\n');
+  });
+
+  it('keeps each candidate rebuilt from the fields it read, its address spelled one way', () => {
+    const offer = [
+      'v=0',
+      'a=candidate:842163049 01 udp 0213937151 192.168.86.23 051234 typ host generation 0 network-id 1',
+      'a=candidate:2 1 UDP 2113937151 FD65:C3D1:3E82:67D9:0:0:0:1 51235 typ host',
+      'a=candidate:3 1 udp 1677729535 ::ffff:192.168.86.24 51236 typ srflx raddr 0.0.0.0 rport 0',
+      '',
+    ].join('\r\n');
+    expect(candidatesIn(localNetworksPath(LAN).acceptRemote(offer))).toEqual([
+      'a=candidate:842163049 1 UDP 213937151 192.168.86.23 51234 typ host',
+      'a=candidate:2 1 UDP 2113937151 fd65:c3d1:3e82:67d9::1 51235 typ host',
+      // IPv4-mapped is its IPv4 address, as the selected pair's check reads it.
+      'a=candidate:3 1 UDP 1677729535 ::ffff:c0a8:5618 51236 typ srflx',
+    ]);
+  });
+
+  it('strips a candidate line in any but the one spelling, whatever address it reads as', () => {
+    // Each names an allowed address in some reading; none is in the spelling the strip reads.
+    const allowed = [...LAN, '2001::/16'];
+    const lines = [
+      // Split on whitespace, its address is inside 2001::/16; the native parser reads a priority of 2001 and 127.0.0.1.
+      'a=candidate: 1 1 UDP 2001::ffff:127.0.0.1 51234 typ host',
+      'a=candidate:1 1 udp 2113937151  192.168.86.23 51234 typ host',
+      'a=candidate:1 1 udp 2113937151\t192.168.86.23 51234 typ host',
+      'a=candidate:1 1 udp 2113937151 192.168.86.23 51234 typ host ',
+      ' a=candidate:1 1 udp 2113937151 192.168.86.23 51234 typ host',
+      'A=candidate:1 1 udp 2113937151 192.168.86.23 51234 typ host',
+      'a=candidate:1 1x udp 2113937151 192.168.86.23 51234 typ host',
+      'a=candidate:1 1 udp 0x7e000000 192.168.86.23 51234 typ host',
+      'a=candidate:1 1 udp 4294967296 192.168.86.23 51234 typ host',
+      'a=candidate:1 1 udp 2113937151 192.168.86.23 65536 typ host',
+      'a=candidate:1 257 udp 2113937151 192.168.86.23 51234 typ host',
+      `a=candidate:${'f'.repeat(33)} 1 udp 2113937151 192.168.86.23 51234 typ host`,
+      'a=candidate:1 1 tcp 2113937151 192.168.86.23 9 typ host tcptype active',
+      'a=candidate:1 1 udp 2113937151 192.168.86.023 51234 typ host',
+      'a=candidate:1 1 udp 2113937151 fd65:c3d1:3e82:67d9::1%en0 51234 typ host',
+      'a=candidate:1 1 udp 2113937151 192.168.86.23 51234 TYP host',
+      'a=candidate:1 1 udp 2113937151 192.168.86.23 51234 typ local',
+    ];
+    const accepted = localNetworksPath(allowed).acceptRemote(['v=0', ...lines, ''].join('\r\n'));
+    expect(candidatesIn(accepted)).toEqual([]);
+    expect(accepted).toBe('v=0\r\n');
+    // The same lines in the one spelling are kept.
+    const canonical = 'a=candidate:1 1 udp 2113937151 192.168.86.23 51234 typ host';
+    expect(candidatesIn(localNetworksPath(allowed).acceptRemote(`v=0\r\n${canonical}\r\n`))).toHaveLength(1);
   });
 
   it('reports the offer’s first public candidate, whatever the allowed networks, as a diagnostic', () => {
