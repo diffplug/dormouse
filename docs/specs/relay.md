@@ -105,7 +105,7 @@ Paths and shapes are `API_ROUTES` / `WS_ROUTES` and their types in `remote-lib-c
 | `POST /api/burrow/setup-token` | burrow token | Mints the token behind this Burrow's QR (below) |
 | `GET /api/burrows` | session token | Enrolled Burrows and whether each is connected |
 | `GET /api/push/config` | — | The public VAPID key, or `null` when push is off |
-| `POST /api/push/subscribe` | session token | Upserts `(burrowId, deliveryId)`; 404 for an unknown `burrowId` (rationale) |
+| `POST /api/push/subscribe` | session token | Upserts `(burrowId, deliveryId)`; 404 for an unknown `burrowId` (rationale); 403 `UNMINTED_DELIVERY_ID_ERROR` for an id that may not add a row ("Web Push") |
 | `POST /api/push/subscriptions/query` | session token | Which **presented** `deliveryIds` are registered, and for which Burrow |
 | `DELETE /api/push/subscriptions/:deliveryId` | session token | **Always 204**, revealing nothing |
 | `GET /api/push/devices` | burrow token | This Burrow's `deliveryId`s under the current VAPID key |
@@ -157,11 +157,12 @@ Source of truth: `remote-lib-common/src/security/pairing-invitation.ts` and `par
 The Relay reaches a phone whose app is closed through the platform's push service, via `web-push`; the Burrow and webview halves are `docs/specs/alert.md` -> "Push notifications". Delivery-id authorization: `docs/specs/remote-security-model.md` -> "Burrow Authorization".
 
 - **Two audiences, two credentials.** A Client registers, queries, and deletes its own rows with a session token plus the `deliveryId` the Burrow minted; a Burrow reads and sends with its `burrowToken`. **The send route takes the `burrowId` from the token, never the body.**
+- **Only a paired Client adds a row**: one whose `deliveryId` `deliveryIdMintedBy` verifies under its Burrow's `pushDeliveryKey` (`docs/specs/remote-security-model.md` -> "Burrow Authorization"). **Any other id only replaces the row held for that Burrow and delivery**, adding and evicting none (rationale); an older Burrow's untagged id so registers only where its row exists, until the phone re-pairs.
 - **The Relay never selects recipients**: an absent or empty `recipients` is a 400, not a fan-out.
 - **`/api/push/devices` gives a Burrow identities only: the endpoint and its keys never leave the Relay.**
 - **Delivery views are VAPID-current**: rows registered under another key are omitted from query, devices, and send (rationale), and stay on disk until Pocket re-registers.
 - **A subscription authorizes nothing**; the Burrow's ACL alone decides what a Client reaches.
-- **Endpoint egress is public HTTPS only.** Registration refuses credentials, localhost, and non-public IP literals; delivery's own HTTPS agent refuses, at connect time, a hostname with any non-public answer and connects to the exact address it checked. Ranges: `docs/specs/security-remote.md` -> "What crosses the boundary".
+- **Endpoint egress is public HTTPS only, under one parse.** Registration and delivery share `parsePublicPushEndpoint`, refusing an endpoint that is not WHATWG's serialization of itself, a host neither one DNS name nor an IP literal, credentials, localhost, and non-public IP literals. **Delivery connects to the host it answered, never re-parsing the endpoint** (rationale); its HTTPS agent refuses, at connect time, a hostname with any non-public answer and connects to the exact address it checked. Ranges: `docs/specs/security-remote.md` -> "What crosses the boundary".
 - **The payload is sealed and the Relay reads none of it**: `docs/specs/remote-security-model.md` -> "Push sealing".
 - **404/410 deletes the row; any other refusal is logged — by endpoint origin only, the endpoint being a bearer capability — with the push service's reason (rationale), and counted in `failed`**, the route answering 200 either way.
 - **A per-request inactivity timeout and a per-send wall-clock deadline on the route both resolve as `failed`**, keeping the row (rationale). **Must count sender throws as `failed`**, preserving sibling deliveries.

@@ -19,6 +19,7 @@
  */
 
 import { createECDH, timingSafeEqual } from 'node:crypto';
+import { request as httpsRequest, type Agent } from 'node:https';
 
 import webpush from 'web-push';
 
@@ -32,7 +33,8 @@ import {
 import type { StoredPushSubscription } from './state.js';
 import {
   createPublicPushAgent,
-  isPublicHttpsPushEndpoint,
+  parsePublicPushEndpoint,
+  unbracket,
 } from './push-endpoint.js';
 
 /** What a push service needs to reach one browser. */
@@ -155,8 +157,8 @@ export const PUSH_REQUEST_TIMEOUT_MS = 10_000;
  * {@link createWebPushSender}, so the bound holds for whatever {@link PushSender}
  * is injected and is stated where the route's own latency contract lives.
  *
- * The deadline bounds the *route*, not the socket: `web-push` accepts no
- * `AbortSignal`, so a request that loses the race is left to its own
+ * The deadline bounds the *route*, not the socket: a {@link PushSender} takes
+ * no `AbortSignal`, so a request that loses the race is left to its own
  * inactivity timeout rather than cancelled. What this prevents is a hung push
  * service holding the handler open indefinitely and letting successive alarms
  * pile up concurrent sends.
@@ -203,9 +205,7 @@ function endpointOrigin(endpoint: string): string {
  */
 const MAX_LOGGED_ERROR_BODY = 200;
 
-function pushErrorDetail(err: unknown): string {
-  const body = (err as { body?: unknown }).body;
-  if (typeof body !== 'string') return '';
+function pushErrorDetail(body: string): string {
   const collapsed = body.replace(/\s+/g, ' ').trim();
   if (!collapsed) return '';
   return collapsed.length > MAX_LOGGED_ERROR_BODY
@@ -213,46 +213,103 @@ function pushErrorDetail(err: unknown): string {
     : collapsed;
 }
 
-export function createWebPushSender(keys: VapidKeys, subject: string): PushSender {
-  const agent = createPublicPushAgent();
+/** What a push service answered: its status, and at most {@link MAX_KEPT_RESPONSE_BYTES} of its body. */
+interface PushServiceResponse {
+  readonly statusCode: number;
+  readonly body: string;
+}
+
+const MAX_KEPT_RESPONSE_BYTES = 1024;
+
+/**
+ * POST one prepared push to `url` — the URL {@link parsePublicPushEndpoint}
+ * answered, never the endpoint string re-parsed — through `agent`, so the
+ * host registration checked is the host this connects to.
+ */
+function postToPushService(
+  url: URL,
+  request: webpush.RequestDetails,
+  agent: Agent,
+): Promise<PushServiceResponse> {
+  return new Promise((resolve, reject) => {
+    const outgoing = httpsRequest(
+      {
+        hostname: unbracket(url.hostname),
+        port: url.port || undefined,
+        path: `${url.pathname}${url.search}`,
+        method: request.method,
+        headers: request.headers,
+        agent,
+        timeout: PUSH_REQUEST_TIMEOUT_MS,
+      },
+      (response) => {
+        const kept: Buffer[] = [];
+        let room = MAX_KEPT_RESPONSE_BYTES;
+        response.on('data', (chunk: Buffer) => {
+          if (room <= 0) return;
+          const take = chunk.subarray(0, room);
+          kept.push(take);
+          room -= take.length;
+        });
+        response.on('end', () =>
+          resolve({ statusCode: response.statusCode ?? 0, body: Buffer.concat(kept).toString('utf8') }),
+        );
+        response.on('error', reject);
+      },
+    );
+    outgoing.on('timeout', () => outgoing.destroy(new Error('Socket timeout')));
+    outgoing.on('error', reject);
+    outgoing.end(request.body ?? undefined);
+  });
+}
+
+export function createWebPushSender(
+  keys: VapidKeys,
+  subject: string,
+  agent: Agent = createPublicPushAgent(),
+): PushSender {
   return {
     async send(target, payload) {
       try {
-        // The registration route applies the same cheap check, but enforce it
-        // again for legacy or manually edited state. Node may connect to an IP
-        // literal without invoking the Agent's DNS lookup.
-        if (!isPublicHttpsPushEndpoint(target.endpoint)) {
-          throw new Error('push endpoint is not a public HTTPS URL');
-        }
-        await webpush.sendNotification(
-          { endpoint: target.endpoint, keys: { ...target.keys } },
+        // The registration route applies the same parse, but enforce it again
+        // for legacy or manually edited state. Node connects to an IP literal
+        // without invoking the Agent's DNS lookup.
+        const url = parsePublicPushEndpoint(target.endpoint);
+        if (!url) throw new Error('push endpoint is not a public HTTPS URL');
+        // `web-push` builds the encrypted body and the VAPID header only; it
+        // never connects, having a URL parser of its own.
+        const request = webpush.generateRequestDetails(
+          { endpoint: url.href, keys: { ...target.keys } },
           payload,
           {
             vapidDetails: { subject, publicKey: keys.publicKey, privateKey: keys.privateKey },
             TTL: PUSH_TTL_SECONDS,
-            timeout: PUSH_REQUEST_TIMEOUT_MS,
             urgency: 'high',
-            agent,
           },
         );
-        return 'delivered';
-      } catch (err) {
-        const status = (err as { statusCode?: number }).statusCode;
+        const response = await postToPushService(url, request, agent);
+        const status = response.statusCode;
+        if (status >= 200 && status <= 299) return 'delivered';
         // 404/410 is the push service's way of saying the subscription is dead
         // for good — the browser was uninstalled, permission revoked, or the
         // endpoint rotated. Anything else may succeed on the next alarm.
         if (status === 404 || status === 410) return 'expired';
-        // The only trace this failure leaves: the send route folds it into a
-        // count, so a rotated VAPID key or a wedged push service would
-        // otherwise fail every alarm with nothing anywhere. The endpoint is a
-        // bearer capability — log its origin only.
-        console.warn(
-          `push delivery failed for ${endpointOrigin(target.endpoint)}:`,
-          status ?? (err instanceof Error ? err.message : String(err)),
-          pushErrorDetail(err),
-        );
+        logDeliveryFailure(target.endpoint, status, pushErrorDetail(response.body));
+        return 'failed';
+      } catch (err) {
+        logDeliveryFailure(target.endpoint, err instanceof Error ? err.message : String(err), '');
         return 'failed';
       }
     },
   };
+}
+
+/**
+ * The only trace a failure leaves: the send route folds it into a count, so a
+ * rotated VAPID key or a wedged push service would otherwise fail every alarm
+ * with nothing anywhere. The endpoint is a bearer capability — log its origin
+ * only.
+ */
+function logDeliveryFailure(endpoint: string, reason: number | string, detail: string): void {
+  console.warn(`push delivery failed for ${endpointOrigin(endpoint)}:`, reason, detail);
 }

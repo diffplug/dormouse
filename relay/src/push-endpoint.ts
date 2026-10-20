@@ -3,8 +3,10 @@
  *
  * Checking `https:` at registration is not enough: a literal private address,
  * or a public hostname that resolves to one later, would turn push delivery
- * into a blind POST primitive against the Relay's network. Registration
- * rejects obvious local/literal targets; the HTTPS agent enforces the same
+ * into a blind POST primitive against the Relay's network. Registration and
+ * delivery share one parse ({@link parsePublicPushEndpoint}), so the host
+ * registration checked is the host delivery connects to; it rejects
+ * ambiguous and local/literal targets, and the HTTPS agent enforces the same
  * public-address rule on the DNS result used for each actual connection, so
  * DNS rebinding and mixed public/private answers cannot bypass it.
  */
@@ -67,7 +69,8 @@ for (const [network, prefix] of [
   blockedIpv6Addresses.addSubnet(network, prefix, 'ipv6');
 }
 
-function unbracket(hostname: string): string {
+/** An IPv6 literal host without its brackets; any other host unchanged. */
+export function unbracket(hostname: string): string {
   return hostname.startsWith('[') && hostname.endsWith(']')
     ? hostname.slice(1, -1)
     : hostname;
@@ -91,21 +94,42 @@ export function isPublicNetworkAddress(address: string): boolean {
 export { MAX_PUSH_ENDPOINT_LENGTH };
 
 /**
- * Cheap admission check. Hostnames are revalidated through DNS at connection
- * time; literals and the special localhost namespace can be rejected now.
+ * One DNS name: lowercase letters, digits, and inner hyphens per label, at
+ * most 63 characters a label, no trailing dot. Anything else WHATWG admits in
+ * a host (`'`, `;`, `_`, …) is a character another URL parser may read as the
+ * end of the host.
  */
-export function isPublicHttpsPushEndpoint(value: string): boolean {
-  if (value.length > MAX_PUSH_ENDPOINT_LENGTH) return false;
+const DNS_NAME = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+
+/**
+ * The one parse of a push endpoint, shared by registration and delivery: the
+ * URL delivery connects to, or `null`. Refuses anything another URL parser
+ * could read differently — an endpoint that is not already WHATWG's own
+ * serialization of itself, or a host that is neither one DNS name nor an IP
+ * literal — then credentials, localhost, and non-public literals. A DNS name
+ * is revalidated through its connection-time lookup ({@link createPublicLookup}).
+ */
+export function parsePublicPushEndpoint(value: string): URL | null {
+  if (value.length > MAX_PUSH_ENDPOINT_LENGTH) return null;
   let parsed: URL;
   try {
     parsed = new URL(value);
   } catch {
-    return false;
+    return null;
   }
-  if (parsed.protocol !== 'https:' || parsed.username || parsed.password) return false;
-  const hostname = unbracket(parsed.hostname).toLowerCase();
-  if (!hostname || hostname === 'localhost' || hostname.endsWith('.localhost')) return false;
-  return isIP(hostname) === 0 || isPublicNetworkAddress(hostname);
+  if (parsed.href !== value) return null;
+  if (parsed.protocol !== 'https:' || parsed.username || parsed.password) return null;
+  const hostname = unbracket(parsed.hostname);
+  if (isIP(hostname) !== 0) return isPublicNetworkAddress(hostname) ? parsed : null;
+  if (!DNS_NAME.test(hostname) || hostname === 'localhost' || hostname.endsWith('.localhost')) {
+    return null;
+  }
+  return parsed;
+}
+
+/** Registration's admission check: {@link parsePublicPushEndpoint} accepts it. */
+export function isPublicHttpsPushEndpoint(value: string): boolean {
+  return parsePublicPushEndpoint(value) !== null;
 }
 
 type ResolveAll = (

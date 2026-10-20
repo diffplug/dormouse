@@ -14,7 +14,7 @@ import { NOISE_KEY_LENGTH } from './noise.js';
 /** Base64url of a raw 32-byte X25519 public key. */
 export const CLIENT_STATIC_PUBLIC_KEY_LENGTH = base64UrlLength(NOISE_KEY_LENGTH);
 
-/** How many bytes a delivery id is: 256 bits, like every other bearer handle. */
+/** How many bytes a delivery id is: 128 random bits and a 128-bit tag (`mintPushDeliveryId`). */
 export const DELIVERY_ID_BYTE_LENGTH = 32;
 
 /** Base64url of {@link DELIVERY_ID_BYTE_LENGTH} bytes. */

@@ -47,7 +47,8 @@ import {
   toBase64Url,
   utf8Encode,
   verifyPresenceProof,
-  DELIVERY_ID_BYTE_LENGTH,
+  mintPushDeliveryId,
+  pushDeliveryKey,
   type ConnectionOutcomeV1,
   type ConnectionPolicy,
   type E2eRelayToBurrowFrame,
@@ -1345,6 +1346,13 @@ export class BurrowRuntime {
     // must not overwrite each other, and a failed save must not grant access in
     // memory or revoke an existing pairing. Only the committed copy is live.
     return this.#saveApproval(async () => {
+      // Tagged under the token, so the Relay registers push only for an id this
+      // Burrow minted (`docs/specs/relay.md` -> Web Push). Minted ahead of the
+      // checks below, so no await separates them from the write.
+      const deliveryId = await mintPushDeliveryId(
+        await pushDeliveryKey(this.#enrollment.burrowToken),
+        this.#enrollment.burrowId,
+      );
       if (this.#clients.get(clientId)?.pairing !== pending) return;
       if (pending.expiresAt <= this.#now()) {
         this.#finishPairing(clientId, 'invitation-expired');
@@ -1363,7 +1371,7 @@ export class BurrowRuntime {
           passkeyCredentialId: approval.passkeyCredentialId,
           passkeyPublicKeyHash: approval.passkeyPublicKeyHash,
           clientStaticPublicKey: pending.clientStaticPublicKey,
-          deliveryId: randomBase64Url(DELIVERY_ID_BYTE_LENGTH),
+          deliveryId,
           approvedBy: 'burrow-user',
           label: approval.label,
         });

@@ -42,6 +42,8 @@ import {
   toBase64Url,
   isPushDeliveryId,
   admissiblePushSubscription,
+  deliveryIdMintedBy,
+  pushDeliveryKey,
   isSealedPushRecipient,
   verifyPasskeyAssertion,
   TokenBucket,
@@ -55,6 +57,7 @@ import {
   MALFORMED_BINDING_ERROR,
   UNKNOWN_CREDENTIAL_ERROR,
   UNKNOWN_NONCE_ERROR,
+  UNMINTED_DELIVERY_ID_ERROR,
   WRONG_CREDENTIAL_ERROR,
   assertionRejectedError,
   checkRegistration,
@@ -989,17 +992,30 @@ export function createApp(config: AppConfig): CreatedApp {
 
     // Subscribing to a burrow that does not exist would strand a row no Burrow can
     // ever read or prune.
-    if (!(await burrowStore.has(body.burrowId))) {
+    const burrow = await burrowStore.find(body.burrowId);
+    if (!burrow) {
       return c.json({ error: 'unknown burrow' }, 404);
     }
 
-    const stored = await pushStore.upsert({
-      burrowId: body.burrowId,
-      deliveryId: body.deliveryId,
-      endpoint: body.subscription.endpoint,
-      keys: body.subscription.keys,
-      vapidPublicKey: config.vapidPublicKey,
-    });
+    // Only a paired Client adds a row: its id carries the tag the Burrow minted
+    // it with. Any other id may only replace a row already held, so a session
+    // that is not a paired phone cannot fill the cap and evict one.
+    const minted = await deliveryIdMintedBy(
+      await pushDeliveryKey(burrow.burrowToken),
+      burrow.burrowId,
+      body.deliveryId,
+    );
+    const stored = await pushStore.upsert(
+      {
+        burrowId: body.burrowId,
+        deliveryId: body.deliveryId,
+        endpoint: body.subscription.endpoint,
+        keys: body.subscription.keys,
+        vapidPublicKey: config.vapidPublicKey,
+      },
+      { existingOnly: !minted },
+    );
+    if (!stored) return c.json({ error: UNMINTED_DELIVERY_ID_ERROR }, 403);
     // The state the mutation left behind, not the delta: a committed POST whose
     // response was lost is repaired by its own idempotent retry, which cannot
     // re-announce a deletion but can always answer what is there now.

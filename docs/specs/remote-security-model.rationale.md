@@ -28,6 +28,8 @@ The self-host operator explicitly accepted the fallback tradeoff: same-origin ma
 
 **Why a delivery id is possession-only, and why that is not anonymity.** The Client-facing push routes have no session-scoped alternative: a session is authenticated to an *account*, and an account may hold several Clients, so a route keyed on the session would let one phone read or delete another's rows; listing one would turn a capability into a directory. What the id buys is access control and nothing else — the Relay still sees which endpoint each id registers, when, and against which Burrow. The shared-endpoint correlation under [Residual metadata](#residual-metadata) is the concrete shape of that.
 
+**Why a delivery id carries a tag.** The Relay must refuse a new push row from a session that is not a paired phone, and holds no ACL to check one against; the `burrowToken` is the one secret it shares with the Burrow. The 128 random bits keep the id unguessable, and the tag keeps it unforgeable without the token.
+
 ## Presence proofs
 
 **Why an unbound `begin`, or a `finish` with no nonce, is refused outright.** Either arm answers a challenge that nothing ties to a ceremony — a signature the caller could replay into a pairing or a connection it never participated in. Refusing at the route leaves no code path that mints presence for an unspecified purpose.

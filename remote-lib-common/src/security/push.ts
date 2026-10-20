@@ -1,5 +1,5 @@
 /**
- * The two Web Push helpers both runtimes share (spec: docs/specs/alert.md ->
+ * The Web Push helpers every runtime shares (spec: docs/specs/alert.md ->
  * Push notifications).
  *
  * A Web Push subscription is a bearer capability: anyone holding the endpoint
@@ -8,10 +8,91 @@
  * write to, and the Burrow's ACL remains the only thing that decides what a
  * Client may reach (docs/specs/remote-security-model.md). The authorization for
  * a subscription row is possession of the `deliveryId` the Burrow minted at
- * pairing, so nothing here signs anything.
+ * pairing, which carries a tag its Relay can check.
  */
-import { toBase64Url, utf8Encode } from './bytes.js';
+import {
+  constantTimeEqual,
+  fromBase64Url,
+  isExactBase64Url,
+  lengthPrefixedConcat,
+  toBase64Url,
+  utf8Encode,
+} from './bytes.js';
+import { DELIVERY_ID_BYTE_LENGTH, DELIVERY_ID_LENGTH } from './acl.js';
 import { getWebCrypto, type WebCryptoLike } from './webcrypto.js';
+
+// ---------------------------------------------------------------------------
+// Delivery ids
+
+/** The random half of a delivery id; the rest is its tag. */
+const DELIVERY_ID_NONCE_LENGTH = 16;
+const DELIVERY_ID_TAG_DOMAIN = utf8Encode('dormouse/push-delivery/v1');
+
+/**
+ * The key a Burrow tags its delivery ids under and its Relay checks them with:
+ * SHA-256 of the `burrowToken`, the one secret the two share. The Hosted Relay
+ * stores exactly this digest (hex) as the token's hash, so it checks an id
+ * without holding the token.
+ */
+export async function pushDeliveryKey(
+  burrowToken: string,
+  crypto: WebCryptoLike = getWebCrypto(),
+): Promise<Uint8Array> {
+  return new Uint8Array(await crypto.subtle.digest('SHA-256', utf8Encode(burrowToken)));
+}
+
+async function deliveryIdTag(
+  deliveryKey: Uint8Array,
+  burrowId: string,
+  nonce: Uint8Array,
+  crypto: WebCryptoLike,
+): Promise<Uint8Array> {
+  const algorithm = { name: 'HMAC', hash: 'SHA-256' };
+  const key = await crypto.subtle.importKey('raw', deliveryKey, algorithm, false, ['sign']);
+  const mac = await crypto.subtle.sign(
+    algorithm,
+    key,
+    lengthPrefixedConcat([DELIVERY_ID_TAG_DOMAIN, utf8Encode(burrowId), nonce]),
+  );
+  return new Uint8Array(mac).slice(0, DELIVERY_ID_BYTE_LENGTH - DELIVERY_ID_NONCE_LENGTH);
+}
+
+/**
+ * A fresh delivery id for one paired Client of `burrowId`: 16 random bytes,
+ * then the first 16 bytes of an HMAC-SHA256 over them under
+ * {@link pushDeliveryKey}. A Relay registers a new subscription only for an id
+ * that verifies ({@link deliveryIdMintedBy}), so a session that is not a paired
+ * phone cannot register one (`docs/specs/relay.md` -> Web Push).
+ */
+export async function mintPushDeliveryId(
+  deliveryKey: Uint8Array,
+  burrowId: string,
+  crypto: WebCryptoLike = getWebCrypto(),
+): Promise<string> {
+  const nonce = crypto.getRandomValues(new Uint8Array(DELIVERY_ID_NONCE_LENGTH));
+  const id = new Uint8Array(DELIVERY_ID_BYTE_LENGTH);
+  id.set(nonce);
+  id.set(await deliveryIdTag(deliveryKey, burrowId, nonce, crypto), DELIVERY_ID_NONCE_LENGTH);
+  return toBase64Url(id);
+}
+
+/**
+ * Whether `burrowId`'s Burrow minted `deliveryId` ({@link mintPushDeliveryId}).
+ * Async for the HMAC, so never named `is…`: an un-awaited call would read as
+ * always true.
+ */
+export async function deliveryIdMintedBy(
+  deliveryKey: Uint8Array,
+  burrowId: string,
+  deliveryId: unknown,
+  crypto: WebCryptoLike = getWebCrypto(),
+): Promise<boolean> {
+  if (!isExactBase64Url(deliveryId, DELIVERY_ID_LENGTH)) return false;
+  const id = fromBase64Url(deliveryId);
+  const nonce = id.slice(0, DELIVERY_ID_NONCE_LENGTH);
+  const tag = await deliveryIdTag(deliveryKey, burrowId, nonce, crypto);
+  return constantTimeEqual(id.slice(DELIVERY_ID_NONCE_LENGTH), tag);
+}
 
 /**
  * A stable digest of a delivery address, for answering one question only: is

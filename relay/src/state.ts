@@ -465,7 +465,12 @@ export class BurrowStore extends JsonFileStore {
    * identifier the account can already list, not a secret.
    */
   async has(burrowId: string): Promise<boolean> {
-    return (await this.list()).some((h) => h.burrowId === burrowId);
+    return (await this.find(burrowId)) !== undefined;
+  }
+
+  /** The enrolled Burrow `burrowId` names, read as {@link has} reads it. */
+  async find(burrowId: string): Promise<StoredBurrow | undefined> {
+    return (await this.list()).find((h) => h.burrowId === burrowId);
   }
 
   /**
@@ -629,16 +634,27 @@ export class PushSubscriptionStore extends JsonFileStore {
    * * **Drop rows matched on the endpoint**, which is what reaches siblings
    *   holding delivery ids this request never names.
    *
-   * The committed set is then capped ({@link capSubscriptions}), because a
-   * self-chosen `deliveryId` makes every request a fresh row otherwise.
+   * The committed set is then capped ({@link capSubscriptions}).
+   *
+   * With `existingOnly`, for a `deliveryId` the Burrow did not mint, only a row
+   * already held for this (burrow, delivery) is replaced, and `null` answers
+   * that there is none — checked inside the mutex, so a concurrent delete
+   * cannot let it add a row, and it never adds one to evict another.
    *
    * `docs/specs/relay.md` -> State files owns the rule and the gap it leaves.
    */
   upsert(
     record: Omit<StoredPushSubscription, 'subscribedAt'>,
-  ): Promise<PushSubscriptionUpsertResult> {
+    { existingOnly = false }: { existingOnly?: boolean } = {},
+  ): Promise<PushSubscriptionUpsertResult | null> {
     return this.mutate(async () => {
       const all = await this.list();
+      if (
+        existingOnly &&
+        !all.some((s) => s.burrowId === record.burrowId && s.deliveryId === record.deliveryId)
+      ) {
+        return null;
+      }
       const stored: StoredPushSubscription = { ...record, subscribedAt: this.now() };
       const replacedEndpoints = new Set(
         all

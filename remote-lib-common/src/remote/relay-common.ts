@@ -165,12 +165,12 @@ export const MAX_REQUEST_BODY_BYTES = 64 * 1024;
 /**
  * How many push subscriptions one Burrow, and one account, may hold.
  *
- * `POST /api/push/subscribe` needs a session token and a `deliveryId` the
- * caller picks for itself — the Relay cannot check one against a Burrow's ACL,
- * by design — so without a cap one signed-in caller appends a durable row per
- * request, and every push route thereafter reads it. Every sibling transient
- * store is capped (`MAX_PENDING_REAUTH_NONCES_PER_SESSION`,
- * `MAX_TOKENS_PER_BURROW`); this is the durable one, so it matters more.
+ * `POST /api/push/subscribe` adds a row only for a `deliveryId` its Burrow
+ * minted (`deliveryIdMintedBy`), but the Relay cannot check one against the
+ * Burrow's ACL, by design, so a revoked phone's id still adds one; every push
+ * route reads every row. Every sibling transient store is capped
+ * (`MAX_PENDING_REAUTH_NONCES_PER_SESSION`, `MAX_TOKENS_PER_BURROW`); this is
+ * the durable one, so it matters more.
  *
  * Far above any real use: the per-Burrow cap is phones paired with one laptop,
  * the per-account cap that across every laptop an account enrolled. A
@@ -220,8 +220,8 @@ export const MAX_PUSH_SEND_BODY_BYTES =
 
 /**
  * Base64url of exactly {@link DELIVERY_ID_LENGTH} characters — the Burrow mints
- * 32 random bytes, so anything else is not an id any Burrow ever issued and must
- * be refused before it becomes a row key.
+ * 32 bytes, so anything else is not an id any Burrow ever issued and must be
+ * refused before it becomes a row key.
  */
 export function isPushDeliveryId(value: unknown): value is string {
   return isExactBase64Url(value, DELIVERY_ID_LENGTH);

@@ -53,15 +53,15 @@ Source of truth: `generatePocketKeyPair` in `lib/src/remote/client/pocket-privat
 
 **The ACL is authoritative**; the Relay cannot unilaterally grant access.
 
-`BurrowAclRecord` binds the Burrow and account to one passkey credential and public key hash, one Client static public key, a fresh 256-bit `deliveryId`, approval metadata, and a nullable revocation time. Persisted through `BurrowStateStore` (`docs/specs/security-remote.md` -> "Credentials at rest"), **never on the Relay** ([relay.md](./relay.md)).
+`BurrowAclRecord` binds the Burrow and account to one passkey credential and public key hash, one Client static public key, a fresh `deliveryId`, approval metadata, and a nullable revocation time. Persisted through `BurrowStateStore` (`docs/specs/security-remote.md` -> "Credentials at rest"), **never on the Relay** ([relay.md](./relay.md)).
 
 **Authorization is the conjunction, on one record.** `BurrowAcl.authorize` reports a miss (`passkey-not-paired`, `client-not-paired`, `pairing-mismatch`) unless the passkey credential and the Client static match the *same* active record. Halves on different records are not authorization, and a passkey added to the account after pairing grants nothing until a new local approval.
 
 **The two E2E fields are checked for exact length on read, and that is the whole of the Burrow-ACL version**: `isBurrowAclRecord` + `filterAclRecords` drop anything malformed, pre-cutover, or belonging to another `burrowId` before it reaches the conjunction, and **there is no migration reader** — such a Burrow reads an empty ACL and every phone pairs again. Hygiene, not authorization (rationale).
 
-**Delivery IDs are opaque bearer capabilities**, minted by the Burrow at approval and held only by the record and the Client's own pinned copy. **Possession is the whole authorization** for registering, querying, and deleting a push subscription, so the Relay never lists one to a session ([relay.md](./relay.md) -> Web Push). They are not an anonymity mechanism (rationale).
+**Delivery IDs are opaque bearer capabilities**, minted by the Burrow at approval and held only by the record and the Client's own pinned copy. **Each is 16 random bytes then the first 16 bytes of HMAC-SHA256, keyed by SHA-256 of the `burrowToken`, over `lengthPrefixedConcat` of `dormouse/push-delivery/v1`, the `burrowId`, and those random bytes**, so both Relays can tell an id the Burrow minted, Hosted from the token digest it stores (rationale). **Possession is the whole authorization** for registering, querying, and deleting a push subscription, so the Relay never lists one to a session ([relay.md](./relay.md) -> Web Push). They are not an anonymity mechanism (rationale).
 
-Source of truth: `remote-lib-common/src/security/acl.ts` (the schema and `BurrowAcl.authorize`), `lib/src/remote/burrow/acl.ts` (the read filter).
+Source of truth: `remote-lib-common/src/security/acl.ts` (the schema and `BurrowAcl.authorize`), `lib/src/remote/burrow/acl.ts` (the read filter), `mintPushDeliveryId` in `remote-lib-common/src/security/push.ts`.
 
 ## Presence proofs
 

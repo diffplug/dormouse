@@ -34,7 +34,7 @@
 
 **Why a fresh `deliveryId` cannot close the endpoint gap.** Linking a new delivery id to its scope's previous address would take cross-Burrow device identity on the Relay, which the model does not have; until the push service 404/410s them, the stale rows are the price.
 
-**Why the subscription store gets per-field bounds and row caps.** A `deliveryId` is the caller's own choice and no Relay can check one against a Burrow's ACL, and every push route re-parses the whole file, so unchecked growth is paid on every request. An evicted Client reads as un-registered and repairs by pressing Enable, the recovery a dropped row already has.
+**Why the subscription store gets per-field bounds and row caps.** Every push route re-parses the whole file, so unchecked growth is paid on every request, and only the Burrow's minting, not its ACL, stands behind a new row: a phone revoked on the Burrow keeps an id that still verifies. An evicted Client reads as un-registered and repairs by pressing Enable, the recovery a dropped row already has.
 
 ## WebAuthn without a WebAuthn library
 
@@ -62,7 +62,11 @@
 
 **Why the log carries the service's reason body.** A status alone does not separate a bad subject from a bad key from a bad payload, and the service's own explanation is visible nowhere else — the route answers 200 either way and the Burrow sees only a `failed` count.
 
-**The outer deadline protects delivery waiting, not the socket.** `web-push` accepts no `AbortSignal`: a request that loses the race keeps running under its own inactivity timeout. The route-level deadline stops a wedged push service from holding the handler open while successive alarms stack sends behind it, and catches what socket inactivity cannot — trickled bytes or a stall mid-handshake reset that timer forever. Every send in a fan-out starts at once, so one wall-clock bound covers delivery waiting at any device count; state reads and pruning writes remain outside it.
+**Why only a minted id adds a row.** A session proves an account, not a phone, so ids a caller chose for itself would let any signed-in session fill a Burrow's cap and evict its paired phones' rows. The tag is the one proof of pairing the Relay can check without the ACL, which stays on the Burrow. Replacing a held row stays open to any id so a pairing from before tagging keeps working through endpoint rotation; it adds no row, so it cannot evict one.
+
+**Why delivery owns the request instead of `web-push`.** `web-push` re-parses the endpoint string with Node's legacy `url.parse`, which ends a host at characters WHATWG keeps in it, so a check on one parse and a connection on the other could name different hosts, and an IP literal skips the agent's DNS guard. Building only the body and headers with `web-push` and connecting to the URL the check returned makes the two agree by construction; refusing every non-canonical endpoint keeps any other reader of the stored string agreeing too.
+
+**The outer deadline protects delivery waiting, not the socket.** The sender takes no `AbortSignal`: a request that loses the race keeps running under its own inactivity timeout. The route-level deadline stops a wedged push service from holding the handler open while successive alarms stack sends behind it, and catches what socket inactivity cannot — trickled bytes or a stall mid-handshake reset that timer forever. Every send in a fan-out starts at once, so one wall-clock bound covers delivery waiting at any device count; state reads and pruning writes remain outside it.
 
 **Why a stale-VAPID row is hidden rather than reported.** Such an endpoint cannot receive a send signed by the current key, so listing it would let the Burrow name and retry an unreachable device; omitting it surfaces Pocket's re-registration action instead.
 

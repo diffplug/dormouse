@@ -1,4 +1,5 @@
 // Rules: docs/specs/hosted.md -> "Relay" (push); shared semantics docs/specs/relay.md -> "Web Push".
+import { Buffer } from "node:buffer";
 import type { Hono } from "hono";
 import {
   API_ROUTES,
@@ -8,9 +9,11 @@ import {
   MAX_PUSH_SUBSCRIPTIONS_PER_BURROW,
   PUSH_SEND_DEADLINE_MS,
   PUSH_TTL_SECONDS,
+  UNMINTED_DELIVERY_ID_ERROR,
   admissiblePushSubscription,
   concatBytes,
   defaultVapidSubject,
+  deliveryIdMintedBy,
   isPushDeliveryId,
   isSealedPushRecipient,
   readJson,
@@ -274,7 +277,8 @@ export function relayPushRoutes(app: Hono<{ Bindings: RelayEnv }>) {
       keys: body.subscription.keys,
       vapidPublicKey: push.signer.publicKey,
     });
-    if (!stored) return c.json({ error: "unknown burrow" }, 404);
+    if (stored === "unknown-burrow") return c.json({ error: "unknown burrow" }, 404);
+    if (stored === "unminted") return c.json({ error: UNMINTED_DELIVERY_ID_ERROR }, 403);
     return c.json(stored satisfies PushSubscribeResponse);
   });
 
@@ -431,10 +435,13 @@ interface Subscription {
 }
 
 /**
- * Stores `record` for `userId`'s Burrow, or answers null when the Burrow is
- * not that account's — or is being removed: the Burrow row is share-locked,
- * so a concurrent removal either waits for this write and cascades it, or
- * commits first and the Burrow is unknown. One transaction under the
+ * Stores `record` for `userId`'s Burrow, or answers `unknown-burrow` when the
+ * Burrow is not that account's — or is being removed: the Burrow row is
+ * share-locked, so a concurrent removal either waits for this write and
+ * cascades it, or commits first and the Burrow is unknown. A `deliveryId`
+ * the Burrow did not mint (`deliveryIdMintedBy`, under the token's stored
+ * digest) only replaces the row held for it, answering `unminted` when there
+ * is none, so it never adds a row to evict another. One transaction under the
  * account's advisory lock:
  *
  * 1. Every address this delivery is moving off — read from the account's rows
@@ -451,15 +458,29 @@ export function upsertSubscription(
   db: Client,
   userId: string,
   record: Subscription,
-): Promise<PushSubscribeResponse | null> {
+): Promise<PushSubscribeResponse | "unknown-burrow" | "unminted"> {
   return locked(db, `push:${userId}`, async () => {
     // Share-locks the Burrow row, so a subscribe racing that Burrow's removal
     // waits for it and answers 404 rather than failing the foreign key.
-    const { rowCount } = await db.query(
-      `SELECT 1 FROM dormouse_relay_burrows WHERE "burrowId" = $1 AND "userId" = $2 FOR KEY SHARE`,
+    const {
+      rows: [burrow],
+    } = await db.query<{ tokenHash: string }>(
+      `SELECT "tokenHash" FROM dormouse_relay_burrows WHERE "burrowId" = $1 AND "userId" = $2 FOR KEY SHARE`,
       [record.burrowId, userId],
     );
-    if (!rowCount) return null;
+    if (!burrow) return "unknown-burrow";
+    const minted = await deliveryIdMintedBy(
+      Buffer.from(burrow.tokenHash, "hex"),
+      record.burrowId,
+      record.deliveryId,
+    );
+    if (!minted) {
+      const { rowCount: held } = await db.query(
+        `SELECT 1 FROM dormouse_relay_push_subscriptions WHERE "burrowId" = $1 AND "deliveryId" = $2`,
+        [record.burrowId, record.deliveryId],
+      );
+      if (!held) return "unminted";
+    }
     // `clock_timestamp()`, not `now()`: `now()` is the transaction's start,
     // before the lock, so a write that waited would sort older than the one it
     // followed, and the caps would evict it first.

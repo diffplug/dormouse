@@ -131,6 +131,8 @@ export const UNKNOWN_CREDENTIAL_ERROR = 'unknown credential';
 export const MALFORMED_BINDING_ERROR = 'malformed presence binding';
 export const UNKNOWN_NONCE_ERROR = 'unrecognized or expired nonce';
 export const WRONG_CREDENTIAL_ERROR = 'assertion is for a different credential';
+/** `POST /api/push/subscribe`'s 403 for a delivery id the Burrow did not mint and no row holds. */
+export const UNMINTED_DELIVERY_ID_ERROR = 'delivery id was not minted by this burrow';
 /** The 401 a failed `verifyPasskeyAssertion` answers with, naming its reason. */
 export const assertionRejectedError = (reason: string) => `assertion rejected: ${reason}`;
 

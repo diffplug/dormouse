@@ -21,11 +21,13 @@ import {
   WS_CLOSE_BURROW_REPLACED,
   WS_CLOSE_BURROW_REVOKED,
   createNoiseInitiator,
+  deliveryIdMintedBy,
   e2eConnectionPrologue,
   fromBase64Url,
   generateNoiseKeyPair,
   mintNoiseStaticKeyPair,
   pairingInvitationPrologue,
+  pushDeliveryKey,
   toBase64Url,
   utf8Decode,
   utf8Encode,
@@ -291,7 +293,14 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
       accountId: ACCOUNT,
       passkeyCredentialId: authenticator.credentialId,
     });
-    expect(typeof answer.deliveryId).toBe('string');
+    // Tagged under this Burrow's token, the one id its Relay registers push for.
+    expect(
+      await deliveryIdMintedBy(
+        await pushDeliveryKey(enrollment.burrowToken),
+        enrollment.burrowId,
+        answer.deliveryId,
+      ),
+    ).toBe(true);
 
     // One record, binding the passkey to the Client static IK authenticated —
     // never to anything the payload merely claimed.
