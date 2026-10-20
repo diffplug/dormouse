@@ -1753,6 +1753,80 @@ describe('the durable deletion queue', () => {
   });
 });
 
+describe('forgetting this phone', () => {
+  /** A signed-in phone holding two records, a cached passkey, and a push digest. */
+  async function leavingPhone(routes: Record<string, RouteHandler> = {}) {
+    const storage = memoryStorage();
+    const harness = await signedIn(routes, { storage });
+    await seedRecord(harness.knownBurrows, 'h1');
+    await seedRecord(harness.knownBurrows, 'h2');
+    storage.setRegisteredPushEndpoint('endpoint-digest');
+    return { ...harness, storage };
+  }
+
+  it('removes every record, queues every delivery id, wipes the caches, and signs out, offline', async () => {
+    // No deletion route: every DELETE fails as an unreachable Relay's would.
+    const phone = await leavingPhone();
+    expect(phone.storage.knownCredentialIds()).toEqual([CREDENTIAL_ID]);
+
+    await phone.client.forgetThisPhone();
+
+    expect(phone.knownBurrows.records.size).toBe(0);
+    expect(
+      [...phone.pendingDeletions.records.values()].map(({ accountId, deliveryId }) => ({ accountId, deliveryId })),
+    ).toEqual([
+      { accountId: ACCOUNT_ID, deliveryId: 'delivery-h1' },
+      { accountId: ACCOUNT_ID, deliveryId: 'delivery-h2' },
+    ]);
+    expect(phone.storage.knownCredentialIds()).toEqual([]);
+    expect(phone.client.hasPriorUse()).toBe(false);
+    expect(phone.storage.getRegisteredPushEndpoint()).toBeNull();
+    expect(phone.client.sessionToken).toBeNull();
+    expect(phone.storage.getSession()).toBeNull();
+  });
+
+  it('retires every delivery row under the session before signing out', async () => {
+    const deletes: string[] = [];
+    const phone = await leavingPhone({
+      '/api/push/subscriptions/delivery-h1': () => (deletes.push('delivery-h1'), { status: 204 }),
+      '/api/push/subscriptions/delivery-h2': () => (deletes.push('delivery-h2'), { status: 204 }),
+    });
+
+    await phone.client.forgetThisPhone();
+
+    expect(deletes.sort()).toEqual(['delivery-h1', 'delivery-h2']);
+    expect(phone.pendingDeletions.records.size).toBe(0);
+    expect(phone.client.sessionToken).toBeNull();
+  });
+
+  it('queues another account’s delivery id for that account', async () => {
+    const phone = await leavingPhone({
+      '/api/push/subscriptions/delivery-h1': () => ({ status: 204 }),
+      '/api/push/subscriptions/delivery-h2': () => ({ status: 204 }),
+    });
+    await seedRecord(phone.knownBurrows, 'h3', { accountId: 'other-account' });
+
+    await phone.client.forgetThisPhone();
+
+    expect(phone.knownBurrows.records.size).toBe(0);
+    expect([...phone.pendingDeletions.records.values()]).toEqual([
+      { burrowId: 'h3', accountId: 'other-account', deliveryId: 'delivery-h3', queuedAt: expect.any(Number) },
+    ]);
+  });
+
+  it('is not what plain sign-out does', async () => {
+    const phone = await leavingPhone();
+
+    phone.client.signOut();
+
+    expect([...phone.knownBurrows.records.keys()]).toEqual(['h1', 'h2']);
+    expect(phone.pendingDeletions.records.size).toBe(0);
+    expect(phone.storage.knownCredentialIds()).toEqual([CREDENTIAL_ID]);
+    expect(phone.storage.getRegisteredPushEndpoint()).toBe('endpoint-digest');
+    expect(phone.client.sessionToken).toBeNull();
+  });
+});
+
 // --- The account plane ------------------------------------------------------
 
 describe('the session across launches', () => {
@@ -2390,6 +2464,23 @@ describe('localStoragePocketStorage', () => {
 
     localStoragePocketStorage().clearSession(SESSION.token);
     expect(map.has('dormouse-pocket:session')).toBe(false);
+  });
+
+  it('forgets the passkey cache and the push digest in the tab and in storage', () => {
+    const { map, store } = fakeLocalStorage();
+    vi.stubGlobal('localStorage', store);
+    const earlierVisit = localStoragePocketStorage();
+    earlierVisit.setPasskeyPublicKey('cred-1', 'pk-1');
+    earlierVisit.setRegisteredPushEndpoint('digest');
+    const storage = localStoragePocketStorage();
+    storage.setPasskeyPublicKey('cred-2', 'pk-2');
+
+    for (const id of storage.knownCredentialIds()) storage.forgetPasskeyPublicKey(id);
+    storage.clearRegisteredPushEndpoint();
+
+    expect(storage.knownCredentialIds()).toEqual([]);
+    expect(storage.getRegisteredPushEndpoint()).toBeNull();
+    expect([...map.keys()]).toEqual([]);
   });
 
   it('clears the stored session only while it holds the token being cleared', () => {

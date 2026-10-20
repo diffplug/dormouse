@@ -1,9 +1,15 @@
 import type { Meta, StoryObj } from '@storybook/react';
-import { within } from 'storybook/test';
+import { userEvent, within } from 'storybook/test';
 // Importing from App.tsx runs `pocket-chrome`'s `index.css` side-effect import,
 // so Tailwind's utilities load for these stories. Storybook manages the theme
 // tokens (`--vscode-*`) itself.
-import { BurrowsView, type BurrowView } from '../remote/pocket-app/App';
+import {
+  BurrowsView,
+  FORGET_PHONE_CONFIRM,
+  FORGET_PHONE_LABEL,
+  FORGET_PHONE_TITLE,
+  type BurrowView,
+} from '../remote/pocket-app/App';
 import { PhoneFrame } from './PhoneFrame';
 
 // A paired online burrow (Connect), a burrow whose authorization the laptop revoked
@@ -48,6 +54,7 @@ const meta: Meta<typeof BurrowsView> = {
     onEnablePush: () => {},
     onRetryPushConfig: () => {},
     onSignOut: () => {},
+    onForgetThisPhone: () => {},
   },
   decorators: [
     (Story, context) => (
@@ -131,6 +138,18 @@ export const Refreshing: Story = {
 // Removing a record → the row's Remove shows "…" while the tombstone is written.
 export const Forgetting: Story = {
   args: { busy: 'forget' },
+};
+
+// Sign out and forget this phone → asked inline first, in place of both exits:
+// it removes every record and cannot be undone.
+export const ForgetThisPhoneConfirm: Story = {
+  args: { burrows: MIXED_BURROWS.slice(0, 1) },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(await canvas.findByRole('button', { name: FORGET_PHONE_LABEL }));
+    await canvas.findByRole('group', { name: FORGET_PHONE_TITLE });
+    await canvas.findByRole('button', { name: FORGET_PHONE_CONFIRM });
+  },
 };
 
 // Burrow dropped → the red error text above the list, in the words `setOnBurrowGone`

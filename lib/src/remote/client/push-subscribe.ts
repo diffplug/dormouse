@@ -135,6 +135,21 @@ export async function subscribeToPushInBrowser(
   return { endpoint, keys: { p256dh, auth } };
 }
 
+/**
+ * Drop the scope's `PushSubscription`, so its address reaches this device no
+ * more. Best-effort and never throws: a phone that is leaving must still sign
+ * out, and a Relay row left pointing at a dead address is pruned on its next
+ * delivery.
+ */
+export async function unsubscribeFromPushInBrowser(): Promise<void> {
+  try {
+    const registration = await getPushServiceWorkerRegistration();
+    await (await registration?.pushManager.getSubscription())?.unsubscribe();
+  } catch {
+    // Nothing left to do with a subscription the browser will not drop.
+  }
+}
+
 /** A missing reported key mismatches, safely forcing rotation. */
 function sameBytes(actual: ArrayBuffer | null, expected: Uint8Array): boolean {
   if (!actual) return false;

@@ -128,6 +128,7 @@ export function memoryStorage(): PocketStorage {
     knownCredentialIds: () => [...passkeys.keys()],
     getRegisteredPushEndpoint: () => pushEndpoint,
     setRegisteredPushEndpoint: (fingerprint) => void (pushEndpoint = fingerprint),
+    clearRegisteredPushEndpoint: () => void (pushEndpoint = null),
     getSession: () => session,
     setSession: (next) => void (session = next),
     clearSession: (token) => {

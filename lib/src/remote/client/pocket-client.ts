@@ -125,9 +125,9 @@ export interface PocketStorage {
   getPasskeyPublicKey(credentialId: string): string | null;
   setPasskeyPublicKey(credentialId: string, publicKey: string): void;
   /**
-   * Drop a cached key again. Only {@link PocketClient.setup} calls it, for a
-   * credential it cached moments earlier and the Relay then refused, so it
-   * never has an older visit's key to lose.
+   * Drop a cached key again: {@link PocketClient.setup} for a credential it
+   * cached moments earlier and the Relay then refused, and
+   * {@link PocketClient.forgetThisPhone} for every key this device holds.
    */
   forgetPasskeyPublicKey(credentialId: string): void;
   /** Credential ids this device has stored a public key for (may be empty). */
@@ -140,6 +140,8 @@ export interface PocketStorage {
    */
   getRegisteredPushEndpoint(): string | null;
   setRegisteredPushEndpoint(fingerprint: string): void;
+  /** Back to "never registered"; only {@link PocketClient.forgetThisPhone} calls it. */
+  clearRegisteredPushEndpoint(): void;
   /**
    * The Relay session, kept so a relaunch lands signed in. It reaches the
    * Relay alone; every Burrow ceremony still demands its own presence proof.
@@ -659,18 +661,46 @@ export class PocketClient {
     return this.#knownBurrows.listSummaries();
   }
 
-  /**
-   * Forget one Burrow locally: the tombstone is written *before* the record that
-   * holds the delivery id is deleted, so an unreachable Relay cannot strand a
-   * push row nothing can name again.
-   */
+  /** Forget one Burrow locally (Remove), then drain the deletion queue. */
   async forgetBurrow(burrowId: string): Promise<void> {
+    await this.#removeRecord(burrowId);
+    await this.retirePendingDeletions();
+  }
+
+  /**
+   * Make this device forget every Burrow and the account, then sign out: a
+   * phone that is leaving. Each record goes the way {@link forgetBurrow} takes
+   * it, its delivery id tombstoned first, and the queue drains once at the end
+   * under this session, so an unreachable Relay leaves the tombstones for a
+   * later session of their account. Then the passkey cache and the push
+   * endpoint digest go, which makes the next launch a first visit.
+   *
+   * The browser's `PushSubscription` is the caller's to drop: this class
+   * touches no browser push API.
+   */
+  async forgetThisPhone(): Promise<void> {
+    for (const { burrowId } of await this.#knownBurrows.listSummaries()) {
+      await this.#removeRecord(burrowId);
+    }
+    await this.retirePendingDeletions();
+    for (const credentialId of this.#storage.knownCredentialIds()) {
+      this.#storage.forgetPasskeyPublicKey(credentialId);
+    }
+    this.#storage.clearRegisteredPushEndpoint();
+    this.signOut();
+  }
+
+  /**
+   * Delete one record locally: the tombstone is written *before* the record
+   * that holds the delivery id is deleted, so an unreachable Relay cannot
+   * strand a push row nothing can name again.
+   */
+  async #removeRecord(burrowId: string): Promise<void> {
     const record = await this.#knownBurrows.getSummary(burrowId);
     if (record?.authorization.state === 'paired') {
       await this.#tombstone(record, record.authorization.deliveryId);
     }
     await this.#knownBurrows.delete(burrowId);
-    await this.retirePendingDeletions();
   }
 
   // --- Web Push ------------------------------------------------------------
@@ -1499,9 +1529,8 @@ export function localStoragePocketStorage(): PocketStorage {
       passkeys.set(credentialId, publicKey);
       write(PASSKEY_PREFIX + credentialId, publicKey);
     },
-    // No tombstone: the only key ever forgotten was written by this same run,
-    // so storage holds it only if that write worked — in which case this
-    // removal does too.
+    // No tombstone in the mirror: storage that refuses this removal refuses
+    // the reads too, so a key it still holds is one nothing reads back.
     forgetPasskeyPublicKey: (credentialId) => {
       passkeys.delete(credentialId);
       drop(PASSKEY_PREFIX + credentialId);
@@ -1520,6 +1549,11 @@ export function localStoragePocketStorage(): PocketStorage {
     setRegisteredPushEndpoint: (fingerprint) => {
       pushEndpoint = fingerprint;
       write(PUSH_ENDPOINT_KEY, fingerprint);
+    },
+    // As with the passkeys, no tombstone: blocked storage reads nothing back.
+    clearRegisteredPushEndpoint: () => {
+      pushEndpoint = undefined;
+      drop(PUSH_ENDPOINT_KEY);
     },
     // No mirror: the client reads this once, at construction, and holds the
     // session itself for the life of the tab.

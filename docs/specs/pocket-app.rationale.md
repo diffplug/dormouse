@@ -78,6 +78,8 @@ The phone subsequently reported `write-record / DataError` in the disposable dat
 
 **Why the Relay session may sit in `localStorage`.** Without it every cold launch, and every relaunch of an installed app iOS evicted, cost a sign-in prompt before the Burrows list. The token is authentication-plane only: it reaches the Relay's routes and sockets for at most its 12 hours, and never stands in for a presence proof at a Burrow (remote-security-model, Presence proofs). Its exposure is the Client statics' class, which already live in the same origin's storage and are the stronger capability; script running in the Pocket origin is outside the model either way. It holds the credential id because pairing names the passkey a proof is built from, which a relaunch could not otherwise recover without a prompt.
 
+**Why forgetting this phone also drops the browser's push subscription.** Another account's tombstone drains only under that account's session, which a leaving phone may never hold again. With the subscription gone, the push service answers that row's next delivery with a 410, and the Relay deletes it then.
+
 **Why one module owns every IndexedDB open.** Two modules opening the same database can disagree about the version, and a connection held open across an upgrade blocks it indefinitely. Centralizing name, version, upgrade and open makes both states unreachable rather than merely unlikely.
 
 ## Serving the built bundle
