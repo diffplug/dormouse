@@ -35,6 +35,8 @@ const fake = vi.hoisted(() => ({
   retirePendingDeletions: vi.fn<() => Promise<void>>(),
   /** Paired Burrows the Relay's list no longer names: removed rows. */
   unlisted: [] as string[],
+  /** Burrows paired under an earlier account, which this session's list never names. */
+  previousAccount: [] as string[],
   /** Every client call, in order, so "before" can be asserted rather than assumed. */
   order: [] as string[],
 }));
@@ -68,9 +70,15 @@ vi.mock('../client/pocket-client', async (importOriginal) => ({
     setOnTransportChanged = () => undefined;
     close = () => undefined;
     openSocket = async () => undefined;
-    listKnownBurrows = async () => KNOWN;
+    listKnownBurrows = async () =>
+      KNOWN.map((record) =>
+        fake.previousAccount.includes(record.burrowId) ? { ...record, accountId: 'previous' } : record,
+      );
     listBurrows = async () =>
-      KNOWN.filter((record) => !fake.unlisted.includes(record.burrowId)).map((record) => ({
+      KNOWN.filter(
+        (record) =>
+          !fake.unlisted.includes(record.burrowId) && !fake.previousAccount.includes(record.burrowId),
+      ).map((record) => ({
         burrowId: record.burrowId,
         label: record.label,
         online: true,
@@ -134,6 +142,7 @@ beforeEach(() => {
   fake.availability = 'ready';
   fake.order = [];
   fake.unlisted = [];
+  fake.previousAccount = [];
   fake.subscribeInBrowser.mockReset();
   fake.retirePendingDeletions.mockReset().mockResolvedValue(undefined);
   fake.listPushSubscribedBurrows.mockReset().mockResolvedValue([]);
@@ -256,6 +265,30 @@ describe('the one Enable on the Burrows view', () => {
     });
     await openBurrows();
 
+    await click(container, ENABLE);
+
+    expect(fake.subscribeToPush.mock.calls.map(([burrowId]) => burrowId)).toEqual(['burrow-2']);
+    expect(alertText(container)).toBeNull();
+    expect(container.textContent).toContain('Push notifications on.');
+    expect(buttonNamed(container, ENABLE)).toBeNull();
+  });
+
+  /**
+   * Records outlive an account switch, but the Relay scopes registration to the
+   * session's account and refuses a Burrow another account holds. Registering
+   * one would stop the loop before this account's own Burrows, and re-offer an
+   * Enable that can never finish.
+   */
+  it('skips a Burrow paired under another account, and keeps its row', async () => {
+    fake.previousAccount = ['burrow-1'];
+    fake.subscribeInBrowser.mockResolvedValue({ endpoint: 'https://push.example/abc' });
+    fake.subscribeToPush.mockImplementation(async (burrowId) => {
+      if (fake.previousAccount.includes(burrowId)) throw new Error('unknown burrow');
+      return { burrowIds: [...registered.add(burrowId)] };
+    });
+    await openBurrows();
+
+    expect(rowFor(container, 'First laptop')).not.toBeNull();
     await click(container, ENABLE);
 
     expect(fake.subscribeToPush.mock.calls.map(([burrowId]) => burrowId)).toEqual(['burrow-2']);
