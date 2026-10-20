@@ -295,6 +295,27 @@ describe('localNetworksPath', () => {
     expect(path.refusal({ local: '100.97.229.25', remote: '100.101.7.8' })?.end).toBe('local');
   });
 
+  it('lets an IPv6 range over the IPv4-mapped block admit no IPv4 end, in the strip or the pair', () => {
+    const offer = [
+      'v=0',
+      'a=candidate:1 1 udp 2113937151 203.0.113.7 51236 typ host',
+      'a=candidate:2 1 udp 2113937151 ::ffff:203.0.113.7 51237 typ host',
+      'a=candidate:3 1 udp 2113937151 2001:db8::7 51238 typ host',
+      '',
+    ].join('\r\n');
+    for (const range of ['::/0', '::ffff:0:0/96']) {
+      const path = localNetworksPath([range]);
+      expect(candidatesIn(path.acceptRemote(offer)), range).toEqual(
+        range === '::/0' ? ['a=candidate:3 1 UDP 2113937151 2001:db8::7 51238 typ host'] : [],
+      );
+      expect(candidatesIn(path.describe(ANSWER) ?? '').filter((line) => /\d+\.\d+\.\d+\.\d+ /.test(line)), range).toEqual([]);
+      expect(path.refusal({ local: '192.168.86.160', remote: '203.0.113.7' })?.end, range).toBe('local');
+      expect(path.refusal({ local: '::ffff:192.168.86.160', remote: '::ffff:203.0.113.7' })?.end, range).toBe('local');
+    }
+    // An IPv4 range beside it still decides IPv4 ends alone.
+    expect(localNetworksPath(['::/0', ...LAN]).refusal({ local: '192.168.86.160', remote: '203.0.113.7' })?.end).toBe('remote');
+  });
+
   it('refuses a name, an mDNS name, a missing end, or no pair at all', () => {
     const path = localNetworksPath(LAN);
     for (const remote of ['phone.local', '0f1e2d3c-aaaa-bbbb-cccc-000000000000.local', null]) {

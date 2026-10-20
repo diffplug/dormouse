@@ -92,14 +92,21 @@ export interface BurrowView {
    * Absent is listed.
    */
   removed?: boolean;
+  /**
+   * The record was paired under an account other than the signed-in one, so
+   * this session's Relay does not hold the Burrow. The row keeps its offline
+   * face; absent is the signed-in account's.
+   */
+  otherAccount?: boolean;
 }
 
 /**
- * A Burrow push can be registered against: paired, and still on the Relay's
- * list, whose `pushSubscribe` refuses a Burrow it no longer holds.
+ * A Burrow push can be registered against: paired, of the signed-in account,
+ * and still on the Relay's list, whose `pushSubscribe` refuses a Burrow the
+ * session's account does not hold.
  */
 function isPushTarget(burrow: BurrowView): boolean {
-  return !burrow.needsPairing && !burrow.removed;
+  return !burrow.needsPairing && !burrow.removed && !burrow.otherAccount;
 }
 
 /** What a removed Burrow's row says, by who serves this Pocket. */
@@ -352,8 +359,9 @@ export default function App({
    * The Burrows list: the pinned records, with online state stamped on from the
    * Relay, and a record of the signed-in account the Relay's list no longer
    * names marked removed — only ever off a list that was read, since a failed
-   * read throws. **Another account's record is never marked removed**: this
-   * session's list names only its own account's Burrows. **A Burrow with no
+   * read throws. **Another account's record is never marked removed**, only
+   * `otherAccount`: this session's list names only its own account's Burrows,
+   * so it can say nothing about that one. **A Burrow with no
    * record is not shown** — the Relay's list is discovery, and a row for a
    * computer this phone holds no key for would offer an action that cannot
    * exist. Answers the rows it painted.
@@ -362,13 +370,13 @@ export default function App({
     const account = client.accountId;
     const [records, enrolled] = await Promise.all([client.listKnownBurrows(), client.listBurrows()]);
     const online = new Map(enrolled.map((burrow) => [burrow.burrowId, burrow.online]));
-    const views = records.map((record) =>
-      toBurrowView(
-        record,
-        online.get(record.burrowId) ?? false,
-        account !== null && record.accountId === account && !online.has(record.burrowId),
-      ),
-    );
+    const views = records.map((record) => {
+      const ours = account !== null && record.accountId === account;
+      return toBurrowView(record, online.get(record.burrowId) ?? false, {
+        removed: ours && !online.has(record.burrowId),
+        otherAccount: !ours,
+      });
+    });
     setBurrows(views);
     setPhase({ at: 'burrows' });
     // Owed deletions retry here: this runs after every sign-in and on every
@@ -748,13 +756,18 @@ async function retireUnlessExpired(client: PocketClient, setupToken: string): Pr
 }
 
 /** One pinned record as the list renders it. */
-function toBurrowView(record: KnownBurrowSummary, online: boolean, removed = false): BurrowView {
+function toBurrowView(
+  record: KnownBurrowSummary,
+  online: boolean,
+  { removed, otherAccount }: Pick<BurrowView, 'removed' | 'otherAccount'> = {},
+): BurrowView {
   return {
     burrowId: record.burrowId,
     label: record.label || record.burrowId,
     online,
     needsPairing: record.authorization.state !== 'paired',
     ...(removed ? { removed } : {}),
+    ...(otherAccount ? { otherAccount } : {}),
   };
 }
 

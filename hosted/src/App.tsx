@@ -11,16 +11,19 @@ import {
   getAccounts,
   getComputers,
   getHostedVoice,
+  getPasskeys,
   getProviders,
   getSession,
   post,
   providerNames,
   removeComputer,
+  removePasskey,
   social,
   turnOffHostedVoice,
   type Account,
   type Computer,
   type HostedVoice,
+  type Passkey,
   type Provider,
   type Session,
 } from "./api";
@@ -73,6 +76,8 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
   const turnOffDialog = useRef<HTMLDialogElement>(null);
   // Null hides the Computers section.
   const [computers, setComputers] = useState<Computer[] | null>(null);
+  // Null hides the Passkeys section.
+  const [passkeys, setPasskeys] = useState<Passkey[] | null>(null);
   // The enrollment awaiting approval, in memory only: through sign-in and
   // back, never into storage (docs/specs/hosted.md -> "Burrow enrollment").
   const [enrolling, setEnrollingState] = useState(enrollment);
@@ -102,13 +107,14 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
       getProviders(),
     ]);
     // A failed list hides its section, never the account page.
-    const [linked, voice, enrolled] = current
+    const [linked, voice, enrolled, registered] = current
       ? await Promise.all([
           getAccounts(),
           getHostedVoice().catch(() => null),
           getComputers().catch(() => null),
+          getPasskeys().catch(() => null),
         ])
-      : [[], null, null];
+      : [[], null, null, null];
     if (current) await recordContinued().catch(() => {});
     if (generation !== refreshGeneration.current) return;
     setSession(current);
@@ -116,6 +122,7 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
     setAccounts(linked);
     setHostedVoice(voice);
     setComputers(enrolled);
+    setPasskeys(registered);
     history.replaceState(
       null,
       "",
@@ -224,6 +231,7 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
       setAccounts([]);
       setHostedVoice(null);
       setComputers(null);
+      setPasskeys(null);
       setEnterCode(false);
       setCode("");
       await refresh();
@@ -262,6 +270,22 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
       setComputers(
         (enrolled) =>
           enrolled?.filter((computer) => computer.burrowId !== burrowId) ??
+          null,
+      );
+      // Its passkeys stay, no longer attributed to it.
+      setPasskeys(
+        (registered) =>
+          registered?.map((passkey) =>
+            passkey.burrowId === burrowId ? { ...passkey, burrowId: null } : passkey,
+          ) ?? null,
+      );
+    });
+  const removeKey = (credentialId: string) =>
+    act(`passkey-${credentialId}`, async () => {
+      await removePasskey(credentialId);
+      setPasskeys(
+        (registered) =>
+          registered?.filter((passkey) => passkey.credentialId !== credentialId) ??
           null,
       );
     });
@@ -533,6 +557,41 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
                           onClick={() => void removeOne(computer.burrowId)}
                         >
                           {busy === `remove-${computer.burrowId}`
+                            ? "Removing…"
+                            : "Remove"}
+                        </button>
+                      </div>
+                    ))}
+                  </section>
+                )}
+                {passkeys && (
+                  <section aria-labelledby="passkeys">
+                    <h2 id="passkeys">Passkeys</h2>
+                    <p className="help">
+                      Each passkey signs a phone in to every computer above. A
+                      computer&rsquo;s setup code adds one. Remove any you do not
+                      recognize, and that phone can no longer sign in.
+                    </p>
+                    {passkeys.length === 0 && (
+                      <p className="help">No passkeys yet.</p>
+                    )}
+                    {passkeys.map((passkey) => (
+                      <div className="method" key={passkey.credentialId}>
+                        <span>
+                          {passkey.label || "Unnamed passkey"}
+                          <span className="detail">
+                            Added{" "}
+                            {new Date(passkey.createdAt).toLocaleDateString()}
+                            {passkey.burrowId
+                              ? ` from Computer ${passkey.burrowId.slice(0, 8)}`
+                              : ""}
+                          </span>
+                        </span>
+                        <button
+                          disabled={!!busy}
+                          onClick={() => void removeKey(passkey.credentialId)}
+                        >
+                          {busy === `passkey-${passkey.credentialId}`
                             ? "Removing…"
                             : "Remove"}
                         </button>

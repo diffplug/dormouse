@@ -275,10 +275,12 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
             [spent.userId],
           );
           if (count >= MAX_PASSKEYS_PER_ACCOUNT) return "full";
+          // Attributed to the minting Burrow, so the account page can say where
+          // it came from.
           const inserted = await db.query(
-            `INSERT INTO dormouse_relay_passkeys ("credentialId", "userId", "publicKey", label)
-            VALUES ($1, $2, $3, $4) ON CONFLICT ("credentialId") DO NOTHING`,
-            [credentialId, spent.userId, publicKey, label],
+            `INSERT INTO dormouse_relay_passkeys ("credentialId", "userId", "publicKey", label, "burrowId")
+            VALUES ($1, $2, $3, $4, $5) ON CONFLICT ("credentialId") DO NOTHING`,
+            [credentialId, spent.userId, publicKey, label, spent.burrowId],
           );
           if (!inserted.rowCount) return "duplicate";
           await db.query(`DELETE FROM dormouse_relay_setup_tokens WHERE "tokenHash" = $1`, [
@@ -290,14 +292,16 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
         if (outcome === "duplicate") return c.json({ error: DUPLICATE_CREDENTIAL_ERROR }, 409);
         if (outcome === "full")
           return c.json(
-            { error: `this account already has ${MAX_PASSKEYS_PER_ACCOUNT} passkeys` },
+            {
+              error: `this account already has ${MAX_PASSKEYS_PER_ACCOUNT} passkeys; ${removeOneFirst(c.env)}`,
+            },
             409,
           );
         registered = true;
         // Registering signs in too; `claimSetupToken` refused an owner not
         // entitled, so no session is minted for one.
         const res: SetupFinishResponse = {
-          ...(await mintSession(db, spent.userId)),
+          ...(await mintSession(db, spent.userId, credentialId)),
           accountId: spent.userId,
           credentialId,
         };
@@ -346,17 +350,17 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
             WHERE p."credentialId" = $1`,
             [credentialId],
           );
-          return row && { ...ownerOf(row), publicKey: row.publicKey };
+          return row && { ...ownerOf(row), publicKey: row.publicKey, credentialId };
         },
         consumeChallenge: (challenge) => consumeChallenge(db, challenge, null),
         policy: { origin: c.env.APP_ORIGIN, rpId: rpIdOf(c.env) },
       });
       if (!verdict.ok) return c.json({ error: verdict.error }, verdict.status);
-      const { userId, entitled, publicKey } = verdict.passkey;
+      const { userId, entitled, publicKey, credentialId } = verdict.passkey;
       // A session is never minted for an account that is not entitled.
       if (!entitled) return c.json({ error: NOT_ENTITLED_ERROR }, 401);
       const res: SigninFinishResponse = {
-        ...(await mintSession(db, userId)),
+        ...(await mintSession(db, userId, credentialId)),
         accountId: userId,
         passkeyPublicKey: publicKey,
       };
@@ -593,17 +597,13 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
         );
         return spent ? { redeemed: spent.redeemedBurrowId } : "expired";
       });
-      if (outcome === "full") {
-        const where = c.env.ACCOUNT_ORIGIN;
+      if (outcome === "full")
         return c.json(
           {
-            error: `this account already has ${MAX_BURROWS_PER_ACCOUNT} computers enrolled; remove one ${
-              where ? `at ${where}/account` : "from your account"
-            } first`,
+            error: `this account already has ${MAX_BURROWS_PER_ACCOUNT} computers enrolled; ${removeOneFirst(c.env)}`,
           },
           409,
         );
-      }
       if (outcome === "expired") return answer({ status: "expired" });
       if (outcome !== "enrolled") return answer({ status: "redeemed", burrowId: outcome.redeemed });
       return answer({
@@ -746,14 +746,17 @@ export async function admit(
   });
 }
 
-/** A fresh session for `userId`, within its account's cap. */
-async function mintSession(db: Client, userId: string) {
+/**
+ * A fresh session for `userId`, within its account's cap, signed in by
+ * `credentialId`: removing that passkey ends it.
+ */
+async function mintSession(db: Client, userId: string, credentialId: string) {
   const sessionToken = randomBase64Url(RELAY_BEARER_BYTE_LENGTH);
   const expiresAt = await admit(
     db,
     SESSIONS,
     userId,
-    { tokenHash: digest(sessionToken), userId },
+    { tokenHash: digest(sessionToken), userId, credentialId },
     RELAY_SESSION_TTL_MS,
   );
   return { sessionToken, expiresAt: expiresAt! };
@@ -766,6 +769,10 @@ function setupTokenOf(body: unknown): string | null {
 }
 
 const rpIdOf = (env: RelayEnv) => new URL(env.APP_ORIGIN).hostname;
+
+/** What a full account's 409 tells it to do: free a slot on its account page. */
+const removeOneFirst = ({ ACCOUNT_ORIGIN: where }: RelayEnv) =>
+  `remove one ${where ? `at ${where}/account` : "from your account"} first`;
 
 /** A device code's user code; a deployment without its secret answers 503. */
 function userCodeOf(env: RelayEnv, deviceCode: Uint8Array, purpose: "remote" | "voice") {

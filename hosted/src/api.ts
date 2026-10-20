@@ -125,7 +125,7 @@ async function relay(path: string, init: RequestInit = {}): Promise<Response> {
   return request(
     `/api/relay${path}`,
     init,
-    "Computers are temporarily unavailable. Try again.",
+    "Computers and passkeys are temporarily unavailable. Try again.",
   );
 }
 /** The server's message for a refused request: each is written for this page. */
@@ -144,6 +144,27 @@ export async function getComputers(): Promise<Computer[] | null> {
 }
 export async function removeComputer(burrowId: string) {
   const response = await relay(`/burrows/${encodeURIComponent(burrowId)}`, {
+    method: "DELETE",
+  });
+  if (!response.ok) throw await refused(response);
+}
+export interface Passkey {
+  credentialId: string;
+  /** Chosen by the phone that registered it. */
+  label: string;
+  createdAt: string;
+  /** The enrolled computer whose setup code registered it, or null once removed. */
+  burrowId: string | null;
+}
+/** Null when the server says this account may not use the Hosted Relay. */
+export async function getPasskeys(): Promise<Passkey[] | null> {
+  const response = await relay("/passkeys");
+  if (response.status === 401 || response.status === 403) return null;
+  if (!response.ok) throw await refused(response);
+  return ((await response.json()) as { passkeys: Passkey[] }).passkeys;
+}
+export async function removePasskey(credentialId: string) {
+  const response = await relay(`/passkeys/${encodeURIComponent(credentialId)}`, {
     method: "DELETE",
   });
   if (!response.ok) throw await refused(response);
