@@ -43,6 +43,24 @@ jobs:
     # Every run but a canary: the nightly schedule, the release gate's
     # dispatch, and a plain dispatch.
     if: ${{ !(inputs.canary || github.event.schedule == '21 6 * * 0') }}
+    # One run at a time, so filing and publishing never overlap: `File
+    # embargoed findings` creates against one listing of the open ledger, and
+    # `Publish the audit status` against one listing of disclosures, so two
+    # runs at once could file one key twice or disclose one ledger issue twice.
+    # The group sits on this whole job rather than on a job of those two steps
+    # because what they file is the composed report, plaintext that leaves this
+    # runner only for the private tracker; handing it to another job would
+    # take an artifact, and this repository's artifacts are public. One fixed
+    # name for every ref and event, since every run shares the one ledger.
+    # `queue: max` keeps every pending run where GitHub's default keeps one and
+    # cancels the older, so the release gate's run is never dropped, only
+    # delayed behind the run ahead of it; `cancel-in-progress: false` never
+    # stops a run mid-filing (the two cannot be combined in any case). The
+    # canary files nothing and stays outside the group.
+    concurrency:
+      group: security-audit-ledger
+      queue: max
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     # No `id-token`: with it, claude-code-action exchanges OIDC for the Claude
     # App's installation token, which can push and file, and hands it to the

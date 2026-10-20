@@ -6,3 +6,8 @@ paths:
   '**/.github/workflows/tend-*.yaml':
     ignore:
       - unexpected key "queue" for "concurrency" section
+  # The audit's job-level `concurrency` keeps every pending run with
+  # `queue: max`; see the comment above that block.
+  '**/.github/workflows/security-audit.yaml':
+    ignore:
+      - unexpected key "queue" for "concurrency" section

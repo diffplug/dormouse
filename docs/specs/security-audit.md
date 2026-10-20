@@ -153,6 +153,7 @@ A filed ledger issue's body opens with one metadata line, `<!-- audit-ledger {â€
 Before the agent starts, `List open findings` writes the open titles to `audit-open-findings.txt` for the domains to re-verify. A PASS line naming `[audit-finding <key>]` and then a `path:line` re-verifies a failure on the rule it cites, `FAIL: S42` minted or `FAIL S42: <summary>` hand-filed (rationale).
 
 - **FAIL IF** `S30` `File embargoed findings` can close, edit, or reopen an issue, comment on a ledger issue with anything but its fixed `Seen again` sentence, or open a ledger issue for a key that already has one open (rationale).
+- **FAIL IF** `S270` two `audit` jobs of `.github/workflows/security-audit.yaml` can run at once, or a queued one be dropped: the job loses its one fixed `concurrency` group, sets `cancel-in-progress: true`, or queues with anything but `queue: max` (rationale). Pinned by `scripts/security-audit.test.mjs`.
 - **FAIL IF** `S31` a PASS's status issue reads as all clear while the ledger holds an open finding or could not be read, or a PASS whose findings were not filed or whose ledger could not be read exits zero (rationale). Pinned by `scripts/security-audit.test.mjs`.
 - **FAIL IF** `S32` a failure's key changes with its clause letter or where its rule sits, or a finding's with its line or the words around its symbol, or an open issue with a key the run did not mint stops counting. Pinned by `scripts/security-audit.test.mjs`.
 

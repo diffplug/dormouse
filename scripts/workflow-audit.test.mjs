@@ -307,6 +307,15 @@ test('skips an admin update that cannot be resolved', t => {
   assert.equal(f.run(), 0);
 });
 
+test('never skips an admin PR merge whose new tip is lost', t => {
+  const f = pushFixture(t);
+  f.events([
+    ['2026-01-01T00:00:00Z', 'pr_merge', 'admin-user', f.before, 'f'.repeat(40)],
+    ['2026-01-02T00:00:00Z', 'push', 'admin-user', f.before, f.sha],
+  ]);
+  assert.equal(f.run(), 1);
+});
+
 test('reports a commit a non-admin force-pushed first', t => {
   const f = pushFixture(t);
   f.events([['2026-01-01T00:00:00Z', 'force_push', 'bot-user', f.before, f.sha]]);
@@ -350,17 +359,53 @@ test('one unfetchable tip does not cost its batch the others', t => {
   assert.equal(result.status, 0, result.stderr);
 });
 
-test('the lower bound comes only from a successful scheduled run on main', () => {
-  const jq = auditBlock.match(/workflow-audit\.yaml\/runs\?per_page=100" \\\n\s*--jq '([^']+)'/)?.[1];
-  assert.ok(jq, 'the SUCCESSES listing and its --jq filter');
-  const run = (conclusion, head_branch, event, created_at) => ({ conclusion, head_branch, event, created_at });
-  const listing = { workflow_runs: [
+// The shipped lower-bound block, run against a stub `gh` that applies its own
+// `--jq` to a listing, and a stub `date` whose clock no bound may read.
+const boundBlock = auditBlock.slice(auditBlock.indexOf('SUCCESSES=$(gh api'), auditBlock.indexOf('echo "Auditing commits since: $SINCE"'));
+// The workflow's first scheduled run on main: no listing can hold an earlier one.
+const FIRST_RUN = '2026-05-23T07:57:04Z';
+const run = (conclusion, head_branch, event, created_at) => ({ conclusion, head_branch, event, created_at });
+
+function lowerBound(t, workflowRuns) {
+  const dir = tempDir(t, 'workflow-audit-bound-');
+  const listing = join(dir, 'listing.json');
+  writeFileSync(listing, JSON.stringify({ workflow_runs: workflowRuns }));
+  writeFileSync(join(dir, 'gh'), `#!/bin/bash
+set -euo pipefail
+while [ $# -gt 0 ]; do
+  if [ "$1" = --jq ]; then jq -r "$2" "$LISTING"; exit; fi
+  shift
+done
+exit 1
+`, { mode: 0o755 });
+  writeFileSync(join(dir, 'date'), '#!/bin/sh\necho 2099-01-01T00:00:00+00:00\n', { mode: 0o755 });
+  const result = spawnSync('bash', ['-c', `set -euo pipefail\n${boundBlock}\nprintf '%s' "$SINCE"`], {
+    env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, GITHUB_REPOSITORY: 'test/repo', LISTING: listing },
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  return result.stdout;
+}
+
+test('the lower bound comes only from a successful scheduled run on main', (t) => {
+  const listing = [
     run('success', 'bot/evil', 'push', '2026-10-03T09:00:00Z'),
     run('success', 'main', 'workflow_dispatch', '2026-10-03T08:00:00Z'),
     run('success', 'bot/evil', 'schedule', '2026-10-03T07:30:00Z'),
     run('failure', 'main', 'schedule', '2026-10-03T07:13:00Z'),
+    run('cancelled', 'main', 'schedule', '2026-10-02T09:00:00Z'),
     run('success', 'main', 'schedule', '2026-10-02T07:13:00Z'),
-  ] };
-  const out = execFileSync('jq', ['-r', jq], { input: JSON.stringify(listing) }).toString().trim();
-  assert.equal(out.split('\n')[0], '2026-10-02T07:13:00Z');
+    run('success', 'main', 'schedule', '2026-10-01T07:13:00Z'),
+  ];
+  assert.equal(lowerBound(t, listing), '2026-10-02T07:13:00Z');
+  // Deleting the newest success falls back to the one before it.
+  assert.equal(lowerBound(t, listing.filter((r) => r.created_at !== '2026-10-02T07:13:00Z')), '2026-10-01T07:13:00Z');
+});
+
+test('with no listed success the lower bound is a fixed floor before any run, never the clock', (t) => {
+  for (const listing of [[], [run('failure', 'main', 'schedule', '2026-10-03T07:13:00Z'), run('success', 'bot/evil', 'push', '2026-10-03T09:00:00Z')]]) {
+    const floor = lowerBound(t, listing);
+    assert.match(floor, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+    assert.ok(floor <= FIRST_RUN, `the floor ${floor} is later than the first run ${FIRST_RUN}, so deleting every run would move the bound later`);
+  }
 });
