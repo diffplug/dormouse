@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import YAML from 'yaml';
 import { BODY_LIMIT } from './clamp-issue-body.mjs';
 import { OPEN_FINDINGS, SENTINEL, domains, failKey, fragmentManifest, ledgerKey, manifestLines, ledgerMeta, owedIds as owedRuleIds, ruleIndex } from './security-audit-report.mjs';
 import { disclosureReason, parseLedger, planDisclosures, statusBody } from './security-audit-public-body.mjs';
@@ -1746,6 +1747,20 @@ test('the audit runs nightly and on dispatch, and gates the VS Code publish', ()
   assert.match(gate, /^gh run watch "\$run_id" -R "\$repo" --exit-status$/m);
   const publish = release.slice(release.indexOf('\n  publish-vscode:\n'));
   assert.match(publish, /^    needs:\n(?:      - .+\n)*      - security-audit\n/m);
+});
+
+// "Findings ledger": one audit job at a time, so no two runs file or publish
+// at once, and a queued run, the release gate's included, waits rather than
+// being dropped.
+test('audit jobs run one at a time and every queued run is kept', () => {
+  const doc = YAML.parse(workflow);
+  assert.equal(doc.concurrency, undefined, 'a workflow-level group would hold the canary too and queue the default way');
+  const { group, ...rest } = doc.jobs.audit.concurrency ?? {};
+  assert.ok(typeof group === 'string' && group && !group.includes('${{'), `the audit job's group is one fixed name for every run: ${group}`);
+  assert.deepEqual(rest, { queue: 'max', 'cancel-in-progress': false });
+  const steps = doc.jobs.audit.steps.map((step) => step.name);
+  for (const name of ['File embargoed findings', 'Publish the audit status']) assert.ok(steps.includes(name), name);
+  assert.equal(doc.jobs.canary.concurrency, undefined);
 });
 
 // "Domains": the code-reading domains on Opus, the mechanical ones on the

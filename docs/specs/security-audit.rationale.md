@@ -146,6 +146,8 @@ The steps list the tracker with `--limit 1000`: the default of 30 once left an o
 
 `File embargoed findings` comments on a ledger issue only with its fixed `Seen again` sentence because its token is a maintainer's own: the ledger issues and comments the workflow writes carry an admin's login and the `MEMBER` association, so what marks a public summary as a human's is that the workflow never writes one.
 
+**Why the whole `audit` job is one concurrency group, queued with `queue: max`.** `File embargoed findings` lists the open ledger once and creates against that listing, and `Publish the audit status` lists the disclosures once and creates against that, so two runs between their list and their create (the nightly, a dispatch, the release gate's dispatch) could file one key twice or disclose one ledger issue twice. The two steps cannot move to a job of their own, which would serialize only them: what they file is the composed report, which would have to cross jobs as an artifact, and this repository's artifacts are public. A run therefore waits behind the run ahead of it, at most that job's timeout. GitHub's default keeps one pending run per group and cancels the older one when another queues, so three overlapping runs could cancel the release gate's, failing a release closed on no finding; `queue: max` keeps up to 100.
+
 ## Disclosure
 
 **Why disclose at all, and why 7 days (maintainer decision, 2026-10-11).** A user should be able to see what the audit found once telling them is safe. Fix PRs are public anyway and describe their fixes plainly, so a fixed finding's PR is its plain description. An embargo with no end would let a finding nobody fixes stay secret forever; 7 days bounds that, for WARNINGs and failed checks as much as BLOCKERs.
