@@ -32,9 +32,9 @@ type SendInput =
   | { kind: 'key'; key: string };
 
 // stricli parses each flag independently, so it can't enforce "no duplicate input
-// flags" or "--text before --key". `cli.ts` runs this before stricli parses, next
-// to the flag definitions below — keep the recognized-flag list in `sendFlagName`
-// in sync with `parameters.flags`.
+// flags" or "--text before --key". `cli-core.ts` runs this as `preParse` before
+// stricli parses — keep `sendFlagName`'s input and output flags in sync with
+// `parameters.flags`.
 export function validateSendFlags(args: string[]): ParseResult<void> {
   const flagPositions = new Map<string, number>();
   const positionalStart = args.indexOf('--');

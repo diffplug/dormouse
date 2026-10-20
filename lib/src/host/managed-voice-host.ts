@@ -179,7 +179,7 @@ export function createManagedVoiceHost(options: {
   const speakUrl = voice === null ? null : voice + MANAGED_VOICE_SPEAK_PATH;
   const tokenUrl = voice === null ? null : voice + MANAGED_VOICE_TOKEN_PATH;
   let loaded: Promise<StoredManagedVoice> | null = null;
-  // Each edit reads, then rewrites the whole file: two at once would drop a field.
+  // Each edit derives its record from the loaded one: two at once would drop one's change.
   const serialize = createSerialQueue();
   const clips = createClipCache();
   let notEntitled = false;

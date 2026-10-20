@@ -168,7 +168,7 @@ export class SetupTokenIssuer {
     }
   }
 
-  /** Keep only `limit` live tokens for one Burrow, oldest expiry first. */
+  /** Keep only `limit` outstanding tokens for one Burrow, oldest expiry first. */
   #trimBurrow(burrowId: string, limit: number): void {
     // Only this Burrow's rows are candidates, so a loop of mints cannot cost
     // another Burrow the token it is currently displaying.

@@ -136,7 +136,7 @@ const FLAPPY_TITLE = "🐭 FlappyTerm 🐭";
 const FLAPPY_DESKTOP_GAME_OVER_PROMPT = "Read about Dormouse Pocket  [p]";
 const FLAPPY_POCKET_GAME_OVER_PROMPT = "Dormouse Hosted updates [n]";
 
-// --- Flappy Term game constants (ported from flappy-term.html) ---
+// --- Flappy Term game constants ---
 const FLAPPY_TICK_MS = 60;
 const FLAPPY_GRAVITY = 0.18;
 const FLAPPY_FLAP_V = -1.1;

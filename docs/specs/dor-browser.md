@@ -119,7 +119,7 @@ Source of truth: `resolveBrowserViewport` in `dor-lib-common/src/browser-viewpor
 
 ## Automated Browser
 
-Dormouse is a viewer and client for the user's installed provider CLI; it neither bundles nor forks a browser. `dor agent-browser` / `dor playwright` extract identity flags, handle `dor-embed-size` and prepare initial sizing ([Viewport presets](#viewport-presets)); native commands then run against the resolved session, and flags Dormouse does not model pass through (`docs/specs/dor-cli.md` → Browser Surface Addressing). The webview's two channels:
+Dormouse is a viewer and client for the user's installed provider CLI; it neither bundles nor forks a browser. `dor agent-browser` / `dor playwright` extract identity flags, handle `dor-embed-size` and `dor-diagnostics`, and prepare initial sizing ([Viewport presets](#viewport-presets)); native commands then run against the resolved session, and flags Dormouse does not model pass through (`docs/specs/dor-cli.md` → Browser Surface Addressing). The webview's two channels:
 
 ```mermaid
 flowchart LR
@@ -172,7 +172,7 @@ A pane out of sight ([Resource Policy](#resource-policy)) or unmounted parks aft
 
 **Must send a local paste as bounded `input_text` messages** (`viewerTextInputs`), never a key pair per character (rationale). Select-all, copy, cut, and tab select or close go through host operations (`edit`, `tab`), since editing chords do not survive CDP input; undo/redo is not emulated.
 
-Source of truth: `lib/src/components/wall/agent-browser-surface-controller.ts` (`Phase`, `driver`), `lib/src/components/wall/AgentBrowserPanel.tsx`, `lib/src/components/wall/agent-browser-input.ts`, `onBrowserLaunchFailed` in `lib/src/components/Wall.tsx`.
+Source of truth: `lib/src/components/wall/agent-browser-surface-controller.ts` (`Phase`, `driver`), `lib/src/components/wall/AgentBrowserPanel.tsx`, `lib/src/components/wall/agent-browser-input.ts`, `viewerTextInputs` in `lib/src/lib/platform/browser-automation.ts`, `onBrowserLaunchFailed` in `lib/src/components/Wall.tsx`.
 
 ### Viewer Socket
 
@@ -248,7 +248,7 @@ Source of truth: `createPlaywrightProvider` in `lib/src/host/playwright-host.ts`
 
 ## Iframe Renderer
 
-`dor iframe <url>` frames the page's own DOM — zero-lag for human inspection, but agents cannot drive or read it. On hosts with `createIframeProxyUrl`, `IframePanel` frames a per-grant loopback proxy URL; without it, a raw uninstrumented iframe. The desktop playground's fronts only its own viewers (`docs/specs/tutorial.md` → Playground filesystem).
+`dor iframe <url>` frames the page's own DOM — zero-lag for human inspection, but agents cannot drive or read it. On hosts with `createIframeProxyUrl`, `IframePanel` frames a per-grant loopback proxy URL; without it, a raw uninstrumented iframe. The desktop playground's `createIframeProxyUrl` fronts only its own viewers (`docs/specs/tutorial.md` → Playground filesystem).
 
 The proxy instruments any `http://` upstream, loopback and remote alike: headers are rewritten per the table below and the shim injected into HTML; HTTP and WebSocket traffic passes through. A site's "do not embed" is overridden, not obeyed (rationale); the sandbox neutralizes JS framebusting. **Must refuse link-local / cloud-metadata address literals (`scheme`) after canonicalizing equivalent spellings** — decimal/octal/hex, short forms, IPv4-mapped IPv6; this checks the hostname literal, not DNS answers, and named targets remain the user's command authority.
 

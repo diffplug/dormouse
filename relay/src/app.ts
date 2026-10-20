@@ -169,8 +169,8 @@ export interface AppConfig {
   readonly vapidPublicKey?: string;
   /**
    * Web Push delivery. Injectable for the same reason as `now` — the send route
-   * is testable without a real push service. `index.ts` supplies the `web-push`
-   * implementation.
+   * is testable without a real push service. `start.ts` supplies
+   * `createWebPushSender`.
    */
   readonly pushSender?: PushSender;
   /**

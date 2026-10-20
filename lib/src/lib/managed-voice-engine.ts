@@ -19,7 +19,7 @@ export interface ManagedVoicePlayback {
   create(url: string): ManagedVoiceAudio;
 }
 
-/** Blob URL + `HTMLAudioElement`; the standalone CSP grants `media-src blob:`. */
+/** Blob URL + `HTMLAudioElement`; both hosts' CSPs grant `media-src blob:`. */
 export const browserPlayback: ManagedVoicePlayback = {
   url: (audio) => URL.createObjectURL(new Blob([audio as BlobPart], { type: 'audio/mpeg' })),
   revoke: (url) => URL.revokeObjectURL(url),

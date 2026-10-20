@@ -139,7 +139,8 @@ function decodeVapidKey(value: string, name: 'public' | 'private', length: numbe
 }
 
 /**
- * Real delivery through `web-push`, at the shared `PUSH_TTL_SECONDS`. The
+ * Real delivery: `web-push` builds the encrypted body and VAPID headers, and
+ * `postToPushService` sends them, at the shared `PUSH_TTL_SECONDS`. The
  * request timeout is a separate bound on socket inactivity while talking to
  * the push service.
  */
