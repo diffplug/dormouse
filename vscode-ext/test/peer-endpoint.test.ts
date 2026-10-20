@@ -7,6 +7,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { spawn } from 'node:child_process';
 import { createHmac } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises';
 import { createServer, type Server, type Socket } from 'node:net';
@@ -61,8 +62,39 @@ const opened: LinkModule[] = [];
 const servers: Server[] = [];
 
 const endpointFile = (): string => join(dir, 'burrow.peer-endpoint');
+/** The pipe name the endpoint file publishes, or `null` when there is none. */
 const published = async (): Promise<string | null> =>
-  readFile(endpointFile(), 'utf8').then((text) => text.trim(), () => null);
+  readFile(endpointFile(), 'utf8').then(
+    (text) => (JSON.parse(text) as { name: string }).name,
+    () => null,
+  );
+/** Stand in for a broker publishing `name` from process `pid`. */
+const publish = (name: string, pid: number): Promise<void> =>
+  writeFile(endpointFile(), JSON.stringify({ name, pid }), { mode: 0o600 });
+
+/** The pid of a process that has exited, as a crashed broker's would be. */
+async function deadPid(): Promise<number> {
+  const child = spawn(process.execPath, ['-e', '']);
+  await new Promise((resolve) => child.once('exit', resolve));
+  return child.pid!;
+}
+
+/** Hand a connecting window the welcome only `token`'s holder can give. */
+function answerHandshake(socket: Socket, token: string): void {
+  const decoder = new FrameDecoder();
+  socket.setEncoding('utf8');
+  socket.on('data', (chunk: string) => {
+    for (const frame of decoder.push(chunk)) {
+      const hello = frame as { kind: string; nonce: string };
+      if (hello.kind !== 'hello') continue;
+      const proof = createHmac('sha256', token)
+        .update(PEER_SERVER_PROOF_DOMAIN + hello.nonce)
+        .digest('base64url');
+      socket.write(encodeFrame({ kind: 'welcome', proof }));
+    }
+  });
+  socket.write(encodeFrame({ kind: 'challenge', nonce: 'broker-nonce' }));
+}
 
 /** A name nothing has bound, on whichever namespace this platform dials. */
 let spare = 0;
@@ -178,7 +210,7 @@ describe('published endpoint', () => {
 
   it('retires a stale file naming a broker that is gone', async () => {
     const dead = spareName();
-    await writeFile(endpointFile(), dead, { mode: 0o600 });
+    await publish(dead, await deadPid());
 
     const mod = await openWindow();
     const roles: boolean[] = [];
@@ -208,7 +240,7 @@ describe('published endpoint', () => {
       socket.write(encodeFrame({ kind: 'challenge', nonce: 'squatter-nonce' }));
     });
     await listen(squatter, taken);
-    await writeFile(endpointFile(), taken, { mode: 0o600 });
+    await publish(taken, await deadPid());
 
     const side = fakeWindow({ entries: [{ surfaceId: 'secret-1' }] });
     const mod = await openWindow(side);
@@ -238,6 +270,55 @@ describe('published endpoint', () => {
     expect(roles).toEqual([true]);
   }, 20_000);
 
+  it('retires a dead broker’s name held by something that never answers', async () => {
+    // Silence alone is ambiguous, so what retires it is that the process which
+    // published the name is gone.
+    const taken = spareName();
+    const held: Socket[] = [];
+    await listen(createServer((socket) => void held.push(socket)), taken);
+    await publish(taken, await deadPid());
+
+    const mod = await openWindow();
+    await mod.ensurePeerNet(() => {});
+
+    expect(mod.isPeerBroker()).toBe(true);
+    expect(await published()).not.toBe(taken);
+    for (const socket of held) socket.destroy();
+  }, 30_000);
+
+  it('waits for a live broker that stopped answering rather than replacing it', async () => {
+    // A broker never stands down, so replacing one stalled behind a busy
+    // extension host would leave two Burrows once it caught up.
+    const token = 'shared-token';
+    await writeFile(join(dir, 'burrow.peer-token'), token, { mode: 0o600 });
+    const stalledName = spareName();
+    let stalled = true;
+    const dialed: Socket[] = [];
+    await listen(
+      createServer((socket) => {
+        dialed.push(socket);
+        if (!stalled) answerHandshake(socket, token);
+      }),
+      stalledName,
+    );
+    await publish(stalledName, process.pid);
+
+    const mod = await openWindow();
+    const roles: boolean[] = [];
+    const settled = mod.ensurePeerNet((held) => roles.push(held));
+    // Two silent dials make a full round; a third means it went round again
+    // instead of retiring the name.
+    await waitFor(() => dialed.length >= 3, 30_000);
+    expect(mod.isPeerBroker()).toBe(false);
+    expect(await published()).toBe(stalledName);
+
+    stalled = false;
+    await settled;
+    expect(roles).toEqual([]);
+    expect(reachesBroker(mod)).toBe(true);
+    for (const socket of dialed) socket.destroy();
+  }, 60_000);
+
   it('brings connected peers to a fresh broker when theirs dies and leaves its file behind', async () => {
     // A broker whose extension host crashed: its pipe is gone, its file is not.
     const token = 'shared-token';
@@ -246,22 +327,10 @@ describe('published endpoint', () => {
     const accepted: Socket[] = [];
     const broker = createServer((socket) => {
       accepted.push(socket);
-      const decoder = new FrameDecoder();
-      socket.setEncoding('utf8');
-      socket.on('data', (chunk: string) => {
-        for (const frame of decoder.push(chunk)) {
-          const hello = frame as { kind: string; nonce: string };
-          if (hello.kind !== 'hello') continue;
-          const proof = createHmac('sha256', token)
-            .update(PEER_SERVER_PROOF_DOMAIN + hello.nonce)
-            .digest('base64url');
-          socket.write(encodeFrame({ kind: 'welcome', proof }));
-        }
-      });
-      socket.write(encodeFrame({ kind: 'challenge', nonce: 'broker-nonce' }));
+      answerHandshake(socket, token);
     });
     await listen(broker, crashed);
-    await writeFile(endpointFile(), crashed, { mode: 0o600 });
+    await publish(crashed, await deadPid());
 
     const sides = [
       fakeWindow({ entries: [{ surfaceId: 'b-1' }] }),

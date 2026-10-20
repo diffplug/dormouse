@@ -91,7 +91,7 @@ The socket bounds other local accounts, never a process running as the user (`do
 
 The attacker is another local account; the link carries the Burrow's commands and every window's terminals between VS Code windows (`docs/specs/vscode.md` -> "Burrow: a service in the extension host").
 
-- **FAIL IF** `S274` on Windows a broker binds a pipe name not minted per bind from fresh CSPRNG bytes (`freshEndpointName` in `vscode-ext/src/peer-endpoint.ts`), a window learns the broker's name other than from `burrow.peer-endpoint` in the extension's global storage, a window keeps dialing a published name that twice failed to yield a verified welcome, or anything but a verified broker on the derived name older builds bind changes a window's role. `attemptPublished` in `vscode-ext/src/peer-link.ts`; pinned by `vscode-ext/test/peer-endpoint.test.ts`.
+- **FAIL IF** `S274` on Windows a broker binds a pipe name not minted per bind from fresh CSPRNG bytes (`freshEndpointName` in `vscode-ext/src/peer-endpoint.ts`), a window learns the broker's name other than from `burrow.peer-endpoint` in the extension's global storage, a window keeps dialing a published name whose holder refused, failed to prove the token, or stayed silent after its publishing pid died, or replaces on silence alone a broker whose pid is alive, or anything but a verified broker on the derived name older builds bind changes a window's role. `attemptPublished` in `vscode-ext/src/peer-link.ts`; pinned by `vscode-ext/test/peer-endpoint.test.ts`.
 
 ## Loopback Listeners
 

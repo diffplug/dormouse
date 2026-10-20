@@ -273,11 +273,43 @@ function endpointPath(): string | null {
 }
 
 /**
- * The pipe name the broker published: `null` when there is no file, otherwise
+ * What a broker publishes: the pipe name it bound, and its own pid, so a window
+ * can tell a broker that has stalled from one that is gone.
+ */
+interface EndpointRecord {
+  name: string;
+  pid: number;
+}
+
+/** The record a raw endpoint file holds, or `null` for anything else. */
+function parseEndpoint(raw: string): EndpointRecord | null {
+  try {
+    const value = JSON.parse(raw) as Partial<EndpointRecord>;
+    return typeof value.name === 'string' && value.name && Number.isInteger(value.pid) && value.pid! > 0
+      ? { name: value.name, pid: value.pid! }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Whether a process with this pid exists; one we may not signal still does. */
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
+/**
+ * The raw endpoint file: `null` when there is no file, otherwise
  * its trimmed contents. An empty file is waited out as *not yet written*, like
  * the token, since the exclusive create lands before its bytes; one that stays
- * empty, or cannot be read, comes back as `''` — a name nothing answers on, so
- * the caller retires it like any dead broker's.
+ * empty, or cannot be read, comes back as `''`, which names no broker, so the
+ * caller retires it like any dead broker's. The raw text is the file's
+ * identity for {@link retractEndpoint}; {@link parseEndpoint} reads it.
  */
 async function readEndpoint(): Promise<string | null> {
   const path = endpointPath();
@@ -298,11 +330,11 @@ async function readEndpoint(): Promise<string | null> {
  * 0600 for the same reason as the token; on Windows the extension's storage
  * under the user profile is what keeps other accounts out.
  */
-async function publishEndpoint(name: string): Promise<boolean> {
+async function publishEndpoint(raw: string): Promise<boolean> {
   const path = endpointPath();
   if (!path) return false;
   try {
-    await writeFile(path, name, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+    await writeFile(path, raw, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
     return true;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false;
@@ -311,15 +343,15 @@ async function publishEndpoint(name: string): Promise<boolean> {
 }
 
 /**
- * Remove the endpoint file if it still says `name`, reporting whether it is
+ * Remove the endpoint file if it still says `raw`, reporting whether it is
  * gone. Compared first so a window retiring a dead broker's name never removes
  * a live one's that replaced it; the gap between the read and the unlink is
  * what {@link attemptPublished}'s verification covers.
  */
-async function retractEndpoint(name: string): Promise<boolean> {
+async function retractEndpoint(raw: string): Promise<boolean> {
   const path = endpointPath();
   if (!path) return false;
-  if ((await readEndpoint()) !== name) return true;
+  if ((await readEndpoint()) !== raw) return true;
   try {
     await rm(path);
     return true;
@@ -355,8 +387,8 @@ let server: Server | null = null;
  */
 let legacyServer: Server | null = null;
 /**
- * Windows only: the fresh name `server` is bound to, once this window has bound
- * one — what it publishes, verifies, and retracts. Cleared with `server`.
+ * Windows only: the endpoint record for the fresh name `server` is bound to,
+ * as the raw text it publishes, verifies, and retracts. Cleared with `server`.
  */
 let boundEndpoint: string | null = null;
 /**
@@ -1057,6 +1089,9 @@ function stopForwarding(): void {
  * Connect to whoever holds the socket and finish the mutual handshake.
  * `'refused'` means the path exists but nothing is listening on it — a broker
  * that died without unlinking — which is the caller's cue to clear it and bind.
+ * `'silent'` means nothing failed but no verified welcome came within the
+ * budget, which a stalled broker and a squatter that says nothing look alike in;
+ * `'failed'` is everything else, each a holder that is not our broker.
  *
  * Between `connect` and a verified `welcome` this window sends exactly one
  * frame, its `hello`, and answers nothing: no directory, no PTY stream, no
@@ -1064,7 +1099,9 @@ function stopForwarding(): void {
  * that guessed the path, and the whole point of the ordering is that guessing
  * the path is not enough to be served.
  */
-function tryConnect(path: string, token: string): Promise<'connected' | 'refused' | 'failed'> {
+type ConnectOutcome = 'connected' | 'refused' | 'failed' | 'silent';
+
+function tryConnect(path: string, token: string): Promise<ConnectOutcome> {
   return new Promise((resolve) => {
     const socket = createConnection({ path });
     const decoder = new FrameDecoder();
@@ -1073,14 +1110,14 @@ function tryConnect(path: string, token: string): Promise<'connected' | 'refused
     let helloSent = false;
     let settled = false;
 
-    const finish = (outcome: 'connected' | 'refused' | 'failed'): void => {
+    const finish = (outcome: ConnectOutcome): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       if (outcome !== 'connected') socket.destroy();
       resolve(outcome);
     };
-    const timer = setTimeout(() => finish('failed'), HANDSHAKE_BUDGET_MS);
+    const timer = setTimeout(() => finish('silent'), HANDSHAKE_BUDGET_MS);
 
     const drop = () => {
       if (client !== socket) return;
@@ -1357,13 +1394,16 @@ async function attempt(): Promise<boolean> {
 
 /**
  * Dial a published broker; a verified welcome settles this window as its
- * client. `''` — a file that stayed empty — names nothing to dial.
+ * client. Anything else is reported as {@link tryConnect}'s outcome, with a
+ * record that names no broker reading as `'failed'`.
  */
-async function joinBroker(path: string, token: string): Promise<boolean> {
-  if (!path || (await tryConnect(path, token)) !== 'connected') return false;
+async function joinBroker(record: EndpointRecord | null, token: string): Promise<ConnectOutcome> {
+  if (!record) return 'failed';
+  const outcome = await tryConnect(record.name, token);
+  if (outcome !== 'connected') return outcome;
   if (disposed) disconnectClient();
   else settle(false);
-  return true;
+  return outcome;
 }
 
 /**
@@ -1373,21 +1413,30 @@ async function joinBroker(path: string, token: string): Promise<boolean> {
  *
  * Every name is minted per bind, so nobody can create it before we do; but a
  * dead broker's name is free again, and Windows lists every pipe to every
- * account. So a published name is retired on any failure to reach a verified
- * broker on it — not only a refusal — or another account that bound it after
- * the broker went would hold this installation's windows off it forever.
+ * account. So a published name is retired when its holder cannot prove the
+ * token — not only on a refusal — or another account that bound it after the
+ * broker went would hold this installation's windows off it forever. Silence
+ * is the one failure a live broker can also give, stalled behind a busy
+ * extension host, so silence retires the name only once the process that
+ * published it is gone: replacing a stalled broker would leave two Burrows
+ * under one enrollment, since a broker never stands down.
  */
 async function attemptPublished(legacyPath: string, token: string): Promise<boolean> {
   const published = await readEndpoint();
   if (published !== null) {
-    if (await joinBroker(published, token)) return true;
+    const record = parseEndpoint(published);
+    if ((await joinBroker(record, token)) === 'connected') return true;
     // Never retire on the first failure, for the reason unix never unlinks on
     // the first refusal: every client of a dead broker gets here at once, and
     // one of them may have published a replacement while we waited.
     await delay(Math.floor(Math.random() * RECLAIM_JITTER_MS));
     const now = await readEndpoint();
-    if (now !== published) return now !== null && (await joinBroker(now, token));
-    if (await joinBroker(published, token)) return true;
+    if (now !== published) {
+      return now !== null && (await joinBroker(parseEndpoint(now), token)) === 'connected';
+    }
+    const outcome = await joinBroker(record, token);
+    if (outcome === 'connected') return true;
+    if (outcome === 'silent' && record && processAlive(record.pid)) return false;
     if (!(await retractEndpoint(published))) {
       log.error(`[peer-link] could not remove the stale peer endpoint ${endpointPath()}`);
       return false;
@@ -1396,16 +1445,17 @@ async function attemptPublished(legacyPath: string, token: string): Promise<bool
 
   const name = freshEndpointName();
   if (!(await tryBind(name, token))) return false;
-  boundEndpoint = name;
+  const raw = JSON.stringify({ name, pid: process.pid } satisfies EndpointRecord);
+  boundEndpoint = raw;
   if (disposed) {
     await closeServer(true);
     return true;
   }
-  if (!(await publishEndpoint(name))) {
+  if (!(await publishEndpoint(raw))) {
     // Another window published first, so it is the broker and we are not.
     await closeServer(false);
     const winner = await readEndpoint();
-    return winner !== null && (await joinBroker(winner, token));
+    return winner !== null && (await joinBroker(parseEndpoint(winner), token)) === 'connected';
   }
 
   if (await olderBuildHoldsLegacy(legacyPath, token)) {
@@ -1426,7 +1476,7 @@ async function attemptPublished(legacyPath: string, token: string): Promise<bool
     await closeServer(true);
     return true;
   }
-  if ((await readEndpoint()) !== name) {
+  if ((await readEndpoint()) !== raw) {
     await closeServer(false);
     return false;
   }
