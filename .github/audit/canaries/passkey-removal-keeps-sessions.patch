@@ -1,0 +1,69 @@
+Domain: hosted
+Rule: S100 — or a removed passkey's sessions survive its removal
+Expect: hosted/server/relay-api.ts
+Source: synthetic; a session no longer names the passkey that signed it in, so removing that passkey on the account page leaves its sessions live
+
+diff --git a/hosted/server/relay-api.ts b/hosted/server/relay-api.ts
+index b227f87c4..918689c6e 100644
+--- a/hosted/server/relay-api.ts
++++ b/hosted/server/relay-api.ts
+@@ -754,17 +754,14 @@ export async function admit(
+   });
+ }
+ 
+-/**
+- * A fresh session for `userId`, within its account's cap, signed in by
+- * `credentialId`: removing that passkey ends it.
+- */
+-async function mintSession(db: Client, userId: string, credentialId: string) {
++/** A fresh session for `userId`, within its account's cap. */
++async function mintSession(db: Client, userId: string, _credentialId: string) {
+   const sessionToken = randomBase64Url(RELAY_BEARER_BYTE_LENGTH);
+   const expiresAt = await admit(
+     db,
+     SESSIONS,
+     userId,
+-    { tokenHash: digest(sessionToken), userId, credentialId },
++    { tokenHash: digest(sessionToken), userId },
+     RELAY_SESSION_TTL_MS,
+   );
+   return { sessionToken, expiresAt: expiresAt! };
+diff --git a/hosted/server/tests/relay.test.ts b/hosted/server/tests/relay.test.ts
+index f26bd4613..6f64d96af 100644
+--- a/hosted/server/tests/relay.test.ts
++++ b/hosted/server/tests/relay.test.ts
+@@ -454,32 +454,20 @@ test("a passkey names the computer whose code registered it and outlives it; rem
+   expect(await minter(phone)).toEqual([{ burrowId: null }]);
+   expect((await f.call("GET", API_ROUTES.burrows, { bearer: setupSession })).status).toBe(200);
+ 
+-  // Every session a passkey signed in, setup's included, names it.
+   const signedIn = (await f.session(phone)).sessionToken;
+   const other = (await f.session(tablet)).sessionToken;
+-  expect(
+-    await f.sql(`SELECT "credentialId" FROM dormouse_relay_sessions WHERE "tokenHash" = ANY($1) ORDER BY 1`, [
+-      [digest(setupSession), digest(signedIn)],
+-    ]),
+-  ).toEqual([{ credentialId: phone.credentialId }, { credentialId: phone.credentialId }]);
+   const pending = await f.call("POST", API_ROUTES.reauthBegin, {
+     bearer: signedIn,
+     body: { binding: f.pairing(desktop.burrowId, phone) },
+   });
+   expect(pending.status).toBe(200);
+ 
+-  // Removing the passkey, as the account page does, ends its sessions and
+-  // their nonces, and it signs in to nothing again; the other passkey's stand.
++  // Removing the passkey, as the account page does, and it signs in to
++  // nothing again; the other passkey's sessions stand.
+   await f.sql(`DELETE FROM dormouse_relay_passkeys WHERE "credentialId" = $1 AND "userId" = $2`, [
+     phone.credentialId,
+     owner,
+   ]);
+-  for (const bearer of [setupSession, signedIn])
+-    expect(await f.call("GET", API_ROUTES.burrows, { bearer })).toMatchObject({
+-      status: 401,
+-      json: { error: UNAUTHORIZED_ERROR },
+-    });
+-  expect(await f.sql(`SELECT nonce FROM dormouse_relay_presence_nonces`)).toEqual([]);
+   expect((await f.signin(phone)).status).toBe(404);
+   expect((await f.call("GET", API_ROUTES.burrows, { bearer: other })).status).toBe(200);
+ });

@@ -62,6 +62,8 @@
 
 **Why the tombstone is written before the record is forgotten.** The delivery id is the only handle that can ever name that Relay row again. Forgetting the record first leaves nothing to retry with if the call fails, and the row outlives the Client that could have retired it.
 
+**Why a tombstone names its account.** The Relay's push deletion is scoped to the caller's account and answers 204 for a row it does not hold, so it cannot leak which rows exist. A phone that removed an account's computer and then signed in as another account used to spend that tombstone on a 204 that deleted nothing, leaving the first account's row alive. A tombstone queued before the account was recorded drains under any session, as all did then.
+
 ## What Pocket stores
 
 Burrow listing and push-subscription queries formerly decrypted every stored key despite using metadata alone. Besides duplicate work, this prevented listing/removing a record with a damaged envelope. Summary reads omit the private-key field without interpreting it.

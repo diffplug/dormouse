@@ -125,11 +125,13 @@ afterAll(async () => {
 const send = (name: Name, url: string, method = "GET") =>
   workers[name].dispatchFetch(url, { method, redirect: "manual" });
 
-/** The Relay's routes the account serves: approval, and its Burrows. */
+/** The Relay's routes the account serves: approval, and its Burrows and passkeys. */
 const ACCOUNT_RELAY: [string, string][] = [
   ["POST", "/api/relay/enrollments/approve"],
   ["GET", "/api/relay/burrows"],
   ["DELETE", "/api/relay/burrows/AAAAAAAAAAAAAAAAAAAAAA"],
+  ["GET", "/api/relay/passkeys"],
+  ["DELETE", "/api/relay/passkeys/AAAA"],
 ];
 
 /** A route each Worker serves, as method and path. */

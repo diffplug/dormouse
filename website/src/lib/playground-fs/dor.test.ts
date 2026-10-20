@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { FakePtyAdapter } from "dormouse-lib/lib/platform/fake-adapter";
 import { serveSequence } from "dor-tools-lib/osc";
 import { startPlaygroundDor } from "./dor";
@@ -38,6 +38,10 @@ function answerControl(result: unknown): ControlDetail[] {
 }
 let stopListening = () => {};
 afterEach(() => stopListening());
+
+// The first `dor` run imports the real CLI, which can outlast `ran`'s 1000ms
+// `vi.waitFor` on a cold CI worker; load it once here so no test pays for it.
+beforeAll(async () => { await import("./cli"); });
 
 /** `dor <args>` run to its exit. */
 async function ran(args: string[]) {

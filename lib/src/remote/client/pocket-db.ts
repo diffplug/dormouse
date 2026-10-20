@@ -264,6 +264,13 @@ export function summarizeKnownBurrow(
  */
 export interface PendingDeliveryDeletionV1 {
   readonly burrowId: string;
+  /**
+   * The account whose session can delete the row: the record's `accountId`.
+   * The Relay's deletion is scoped to the caller's account and answers 204
+   * either way, so only a drain under this account proves the row is gone.
+   * Absent on a tombstone queued before tombstones carried it.
+   */
+  readonly accountId?: string;
   readonly deliveryId: string;
   readonly queuedAt: number;
 }

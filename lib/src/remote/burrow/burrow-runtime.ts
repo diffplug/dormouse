@@ -1260,6 +1260,10 @@ export class BurrowRuntime {
     // Processed only for its exact pending id: an unknown one is dropped
     // without decryption.
     if (!pending || pending.inviteId !== frame.id) return;
+    // Local consent is final once the write starts, so nothing the phone sends
+    // can end the ceremony, not even a ciphertext that would poison the
+    // session: it is not read. The write's own result is the outcome.
+    if (pending.committing) return;
     if (pending.expiresAt <= this.#now()) {
       this.#finishPairing(frame.clientId, 'invitation-expired');
       return;

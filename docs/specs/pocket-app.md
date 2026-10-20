@@ -119,7 +119,7 @@ Installed means `navigator.standalone === true` (iOS) or the standard `(display-
 
 **Enable registers, and the offer counts, only the signed-in account's paired Burrows its list still names**: another account's record is never a target, since the session's Relay holds none of that account's Burrows.
 
-**Obsolete delivery mappings are retired, durably.** A `pairing-required` transition, a re-pair that mints a new id, and an explicit **Remove** each write the old `{ burrowId, deliveryId }` to `PendingDeliveryDeletionV1` *before* the record forgets it (rationale), then call the idempotent deletion route; tombstones retry until a Relay answer clears them. **This deletes the delivery row alone** — never the scope's shared `PushSubscription`, and never another Burrow's row.
+**Obsolete delivery mappings are retired, durably.** A `pairing-required` transition, a re-pair that mints a new id, and an explicit **Remove** each write the old `{ burrowId, accountId, deliveryId }` (the record's account) to `PendingDeliveryDeletionV1` *before* the record forgets it (rationale), then call the idempotent deletion route; tombstones retry until a Relay answer clears them. **Only a session of the tombstone's account sends or clears it** (rationale). **This deletes the delivery row alone** — never the scope's shared `PushSubscription`, and never another Burrow's row.
 
 Source of truth: `getPushAvailability` / `subscribeToPushInBrowser` in `lib/src/remote/client/push-subscribe.ts`; `pushNoticeState` in `lib/src/remote/pocket-app/App.tsx`; `PocketClient.subscribeToPush` / `retirePendingDeletions` in `lib/src/remote/client/pocket-client.ts`; `pushEndpointFingerprint` in `remote-lib-common/src/security/push.ts`.
 

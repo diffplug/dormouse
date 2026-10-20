@@ -25,9 +25,9 @@ export const ALREADY_APPROVED = "That code is already approved.";
 
 /**
  * The account's half of the Hosted Relay: approving a device-code enrollment,
- * and listing and removing the account's Burrows. Cookie routes under the
- * voice routes' gate; the relay Worker serves none of them. Call before any
- * `/api/*` catch-all.
+ * and listing and removing the account's Burrows and passkeys. Cookie routes
+ * under the voice routes' gate; the relay Worker serves none of them. Call
+ * before any `/api/*` catch-all.
  */
 export function relayAccountRoutes(app: Hono<any>, host: (c: Context) => RelayAccountHost) {
   const gate = cookieEntitled(host, (c) => c.json({ message: NOT_ENTITLED_ERROR }, 403));
@@ -111,5 +111,32 @@ export function relayAccountRoutes(app: Hono<any>, host: (c: Context) => RelayAc
       console.error("Closing a removed Burrow's relay socket failed; the sweep will", error);
     }
     return c.body(null, 204);
+  });
+
+  // Each passkey with the computer whose setup code registered it, while that
+  // computer is enrolled: the label is whatever the registering phone chose.
+  app.get("/api/relay/passkeys", gate, async (c) => {
+    const passkeys = await accountQuery(
+      host(c),
+      `SELECT "credentialId", label, "createdAt", "burrowId" FROM dormouse_relay_passkeys
+      WHERE "userId" = $1 ORDER BY "createdAt" DESC, "credentialId"`,
+      [c.get("login").userId],
+    );
+    return c.json({ passkeys });
+  });
+
+  // The row goes, and every session it signed in with it (their presence
+  // nonces cascading from them), so it signs in to nothing again. A relay
+  // socket one of them already opened closes at that session's expiry.
+  app.delete("/api/relay/passkeys/:credentialId", gate, async (c) => {
+    const removed =
+      (
+        await accountQuery(
+          host(c),
+          `DELETE FROM dormouse_relay_passkeys WHERE "credentialId" = $1 AND "userId" = $2 RETURNING 1`,
+          [c.req.param("credentialId"), c.get("login").userId],
+        )
+      ).length > 0;
+    return removed ? c.body(null, 204) : c.json({ message: "Passkey not found." }, 404);
   });
 }

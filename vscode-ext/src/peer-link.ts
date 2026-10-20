@@ -145,8 +145,9 @@ function peerDirPath(): string {
  * possibly on purpose, and no amount of retrying makes it ours — so the caller
  * stands the peer link down for good rather than spinning against it.
  *
- * Windows named pipes are not filesystem objects and carry their own ACL, so
- * there is nothing here for them to check.
+ * Windows named pipes are not filesystem objects, so there is no directory
+ * here to check; the squat that leaves open is recorded in
+ * `docs/specs/security.md` → "What is not defended".
  *
  * The same predicate is duplicated as `ensureControlDir()` in
  * standalone/sidecar/dor-control-server.js (sync fs, returns the directory
