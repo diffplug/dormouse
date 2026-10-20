@@ -41,7 +41,7 @@ pnpm --filter dor build   # dor CLI tests and help snapshots
 
 No other package needs building first. Bundlers and check-only type checkers read the internal packages from source (`scripts/workspace-sources.mjs`); a package's own build, and a script that runs Node against an upstream `dist`, builds that `dist` and everything it depends on first (`scripts/build-workspace-deps.mjs`).
 
-For `cargo test`, the build script needs a self-contained Node 24.18.0 binary and rejects Homebrew's. Copy the bundled one from the main checkout and point the env var at that source path, **never at the worktree's own `binaries/` path** (the build script copies source onto destination and truncates the file to 0 bytes):
+For `cargo test`, the build script needs a self-contained Node binary at the root `package.json` `devEngines.runtime.version` pin and rejects Homebrew's. Copy the bundled one from the main checkout and point the env var at that source path, **never at the worktree's own `binaries/` path** (the build script copies source onto destination and truncates the file to 0 bytes):
 
 ```
 DORMOUSE_MAIN_CHECKOUT=/path/to/main-checkout
