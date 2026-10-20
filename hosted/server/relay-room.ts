@@ -157,11 +157,8 @@ export class RelayRoom extends DurableObject implements RelayRoomRpc {
         this.#retire(existing, WS_CLOSE_BURROW_REPLACED, WS_CLOSE_BURROW_REPLACED_REASON);
       const { 0: client, 1: server } = new WebSocketPair();
       this.ctx.acceptWebSocket(server, ["burrow", burrowTag(burrowId)]);
-      server.serializeAttachment({
-        role: "burrow",
-        burrowId,
-        openedAt: this.now(),
-      } satisfies BurrowConn);
+      const openedAt = this.now();
+      server.serializeAttachment({ role: "burrow", burrowId, openedAt } satisfies BurrowConn);
       await this.#armBy(this.now() + RELAY_ROOM_SWEEP_MS);
       return new Response(null, { status: 101, webSocket: client });
     });
@@ -184,12 +181,13 @@ export class RelayRoom extends DurableObject implements RelayRoomRpc {
     const clientId = newClientId();
     const { 0: client, 1: server } = new WebSocketPair();
     this.ctx.acceptWebSocket(server, ["client", clientTag(clientId)]);
+    const openedAt = this.now();
     server.serializeAttachment({
       role: "client",
       clientId,
       expiresAt,
       burrowId: null,
-      openedAt: this.now(),
+      openedAt,
     } satisfies ClientConn);
     await this.#armBy(expiresAt);
     return new Response(null, { status: 101, webSocket: client });
