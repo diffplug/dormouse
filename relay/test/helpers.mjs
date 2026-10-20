@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { serve } from '@hono/node-server';
-import { API_ROUTES, WS_ROUTES, WS_TOKEN_PARAM } from 'remote-lib-common';
+import { API_ROUTES, WS_ROUTES, WS_TOKEN_PARAM, signinChallenge } from 'remote-lib-common';
 
 import { createApp } from '../dist/app.js';
 import {
@@ -151,13 +151,16 @@ export async function register(app, authenticator, options = {}) {
   });
 }
 
-/** begin → assert → finish sign-in for `authenticator`; returns the finish Response. */
+/**
+ * begin → assert → finish sign-in for `authenticator`, signing the derived
+ * `signinChallenge` as Pocket does; returns the finish Response.
+ */
 export async function signin(app, authenticator, { origin = ORIGIN, rpId = RP_ID, tamper } = {}) {
   const begin = await post(app, API_ROUTES.signinBegin, {});
   const { challenge } = await begin.json();
-  const assertion = await authenticator.assert({ challenge, origin, rpId, tamper });
-  const res = await post(app, API_ROUTES.signinFinish, { assertion });
-  return { res, assertion };
+  const assertion = await authenticator.assert({ challenge: await signinChallenge(challenge), origin, rpId, tamper });
+  const res = await post(app, API_ROUTES.signinFinish, { challenge, assertion });
+  return { res, assertion, challenge };
 }
 
 // --- Slice 2: live Relay + WebSocket relay scaffolding --------------------

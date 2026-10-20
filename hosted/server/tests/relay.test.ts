@@ -23,6 +23,7 @@ import {
   pushDeliveryKey,
   pushSubscriptionDeletePath,
   sealPush,
+  signinChallenge,
   utf8Encode,
   isEnrollUserCode,
   isManagedVoiceToken,
@@ -226,8 +227,9 @@ async function fixture({ bindings = {} }: { bindings?: Record<string, string | u
     const begin = await call("POST", API_ROUTES.signinBegin, { ip });
     expect(begin.status).toBe(200);
     expect(begin.json!.rpId).toBe(rpId);
-    const assertion = await authenticator.assert({ challenge: begin.json!.challenge, origin });
-    return call("POST", API_ROUTES.signinFinish, { body: { assertion } });
+    const challenge = begin.json!.challenge as string;
+    const assertion = await authenticator.assert({ challenge: await signinChallenge(challenge), origin });
+    return call("POST", API_ROUTES.signinFinish, { body: { challenge, assertion } });
   }
 
   async function session(authenticator: Authenticator) {
@@ -506,12 +508,20 @@ test("one setup token registers once, however many finishes race it", async ({ o
 
   // A sign-in assertion is single-use too.
   const phone = results[0].status === 200 ? first : second;
-  const begin = await f.call("POST", API_ROUTES.signinBegin);
-  const assertion = await phone.assert({ challenge: begin.json!.challenge, origin });
+  const challenge = (await f.call("POST", API_ROUTES.signinBegin)).json!.challenge as string;
+  const assertion = await phone.assert({ challenge: await signinChallenge(challenge), origin });
   const signins = await Promise.all(
-    [0, 1].map(() => f.call("POST", API_ROUTES.signinFinish, { body: { assertion } })),
+    [0, 1].map(() => f.call("POST", API_ROUTES.signinFinish, { body: { challenge, assertion } })),
   );
   expect(signins.map((result) => result.status).sort()).toEqual([200, 400]);
+
+  // And only over the derived challenge: an assertion over `begin`'s bytes as
+  // given, the shape of a presence assertion over a Relay-chosen value, is refused.
+  const raw = (await f.call("POST", API_ROUTES.signinBegin)).json!.challenge as string;
+  const unhashed = await phone.assert({ challenge: raw, origin });
+  expect(
+    (await f.call("POST", API_ROUTES.signinFinish, { body: { challenge: raw, assertion: unhashed } })).json,
+  ).toEqual({ error: "unrecognized or expired challenge" });
 });
 
 test("a refused finish puts the token back on its own expiry; a removed Burrow's tokens die with it", async ({
@@ -582,8 +592,8 @@ test("a setup challenge redeems only with its own Burrow's tokens", async ({ onT
     json: { error: "unrecognized or expired challenge" },
   });
   // Nor does a sign-in challenge register.
-  const signinChallenge = (await f.call("POST", API_ROUTES.signinBegin)).json!.challenge;
-  expect((await f.finish(phone, token, signinChallenge)).json).toEqual({
+  const signinBegun = (await f.call("POST", API_ROUTES.signinBegin)).json!.challenge;
+  expect((await f.finish(phone, token, signinBegun)).json).toEqual({
     error: "unrecognized or expired challenge",
   });
   // Both codes survive the refusals, and the challenge is still its own Burrow's.
@@ -591,8 +601,11 @@ test("a setup challenge redeems only with its own Burrow's tokens", async ({ onT
   const otherBegin = await f.call("POST", API_ROUTES.setupBegin, { body: { setupToken: other } });
   expect(otherBegin.status).toBe(200);
   // A setup challenge never signs in, even for a registered credential.
-  const assertion = await phone.assert({ challenge: otherBegin.json!.challenge, origin });
-  expect((await f.call("POST", API_ROUTES.signinFinish, { body: { assertion } })).json).toEqual({
+  const setupChallenge = otherBegin.json!.challenge as string;
+  const assertion = await phone.assert({ challenge: await signinChallenge(setupChallenge), origin });
+  expect(
+    (await f.call("POST", API_ROUTES.signinFinish, { body: { challenge: setupChallenge, assertion } })).json,
+  ).toEqual({
     error: "unrecognized or expired challenge",
   });
 });

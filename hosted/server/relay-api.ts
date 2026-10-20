@@ -339,8 +339,8 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
 
   app.post(API_ROUTES.signinFinish, (c) =>
     database(c, async (db) => {
-      const body = await readJson<{ assertion?: unknown }>(c);
-      const verdict = await verifySigninAssertion(body?.assertion, {
+      const body = await readJson<unknown>(c);
+      const verdict = await verifySigninAssertion(body, {
         findPasskey: async (credentialId) => {
           const {
             rows: [row],

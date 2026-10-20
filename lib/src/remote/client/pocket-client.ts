@@ -43,6 +43,7 @@ import {
   pushSubscriptionDeletePath,
   randomBase64Url,
   samplePairingCode,
+  signinChallenge,
   toBase64Url,
   type ConnectionDenialCode,
   type ConnectionRequestV1,
@@ -69,6 +70,7 @@ import {
   type SetupBeginResponse,
   type SetupFinishResponse,
   type SigninBeginResponse,
+  type SigninFinishRequest,
   type SigninFinishResponse,
   type TerminalAttachResult,
 } from 'remote-lib-common';
@@ -605,11 +607,19 @@ export class PocketClient {
     }
   }
 
-  /** Sign in with a discoverable passkey; the session is kept across launches. */
+  /**
+   * Sign in with a discoverable passkey; the session is kept across launches.
+   *
+   * **The authenticator signs `signinChallenge(begin.challenge)`, never
+   * `begin`'s bytes**, so a Relay cannot pass off a presence challenge for a
+   * connection of its own as a sign-in and present the tap to a Burrow.
+   */
   async signin(): Promise<SigninFinishResponse> {
     const begin = await this.#api<SigninBeginResponse>(API_ROUTES.signinBegin, {});
-    const assertion = await this.#webauthn.getAssertion(begin.challenge, begin.rpId);
-    const finish = await this.#api<SigninFinishResponse>(API_ROUTES.signinFinish, { assertion });
+    const challenge = await signinChallenge(begin.challenge);
+    const assertion = await this.#webauthn.getAssertion(challenge, begin.rpId);
+    const request: SigninFinishRequest = { challenge: begin.challenge, assertion };
+    const finish = await this.#api<SigninFinishResponse>(API_ROUTES.signinFinish, request);
     this.#setSession({
       token: finish.sessionToken,
       accountId: finish.accountId,

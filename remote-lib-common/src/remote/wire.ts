@@ -251,12 +251,18 @@ export interface SetupFinishResponse {
 }
 
 export interface SigninBeginResponse {
-  /** Base64url challenge for `navigator.credentials.get()`. */
+  /**
+   * Base64url single-use challenge. The authenticator signs
+   * `signinChallenge(challenge)`, never these bytes.
+   */
   challenge: string;
   rpId: string;
 }
 
 export interface SigninFinishRequest {
+  /** `begin`'s challenge, as answered. */
+  challenge: string;
+  /** Signed over `signinChallenge(challenge)`. */
   assertion: PasskeyAssertion;
 }
 export interface SigninFinishResponse {
