@@ -42,6 +42,8 @@ import {
   toBase64Url,
   isPushDeliveryId,
   admissiblePushSubscription,
+  deliveryIdMintedBy,
+  pushDeliveryKey,
   isSealedPushRecipient,
   verifyPasskeyAssertion,
   TokenBucket,
@@ -55,6 +57,7 @@ import {
   MALFORMED_BINDING_ERROR,
   UNKNOWN_CREDENTIAL_ERROR,
   UNKNOWN_NONCE_ERROR,
+  UNMINTED_DELIVERY_ID_ERROR,
   WRONG_CREDENTIAL_ERROR,
   assertionRejectedError,
   checkRegistration,
@@ -991,9 +994,20 @@ export function createApp(config: AppConfig): CreatedApp {
 
     // Subscribing to a burrow that does not exist would strand a row no Burrow can
     // ever read or prune.
-    if (!(await burrowStore.has(body.burrowId))) {
+    const burrow = await burrowStore.find(body.burrowId);
+    if (!burrow) {
       return c.json({ error: 'unknown burrow' }, 404);
     }
+
+    // Only a paired Client adds a row: its id carries the tag the Burrow minted
+    // it with, so a session that is not a paired phone cannot fill the cap and
+    // evict one.
+    const minted = await deliveryIdMintedBy(
+      await pushDeliveryKey(burrow.burrowToken),
+      burrow.burrowId,
+      body.deliveryId,
+    );
+    if (!minted) return c.json({ error: UNMINTED_DELIVERY_ID_ERROR }, 403);
 
     const stored = await pushStore.upsert({
       burrowId: body.burrowId,

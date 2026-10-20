@@ -4,10 +4,10 @@ Expect: lib/src/remote/burrow/burrow-runtime.ts
 Source: reverses part of #571 (an approved pairing went live in the Burrow's ACL before its durable write succeeded, and stayed live when the write failed)
 
 diff --git a/lib/src/remote/burrow/burrow-runtime.test.ts b/lib/src/remote/burrow/burrow-runtime.test.ts
-index 8c3b0a269..cf1863ff2 100644
+index 3febfdce3..529451bb8 100644
 --- a/lib/src/remote/burrow/burrow-runtime.test.ts
 +++ b/lib/src/remote/burrow/burrow-runtime.test.ts
-@@ -302,52 +302,6 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
+@@ -319,52 +319,6 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
      expect(dismissed).toEqual(['c1']);
    });
  
@@ -60,7 +60,7 @@ index 8c3b0a269..cf1863ff2 100644
    it('serializes concurrent approval snapshots so neither record is lost', async () => {
      const write = Promise.withResolvers<void>();
      const saveAcl = vi.fn<NonNullable<BurrowOptions['saveAcl']>>()
-@@ -369,24 +323,6 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
+@@ -386,24 +340,6 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
      expect(await outcome(second.session, 'pairing', second.invitation.inviteId)).toMatchObject({ ok: true });
    });
  
@@ -86,10 +86,10 @@ index 8c3b0a269..cf1863ff2 100644
      const write = Promise.withResolvers<void>();
      makeBurrow(undefined, { saveAcl: () => write.promise });
 diff --git a/lib/src/remote/burrow/burrow-runtime.ts b/lib/src/remote/burrow/burrow-runtime.ts
-index 50f2c18df..489e5d5b9 100644
+index 36d4d072e..601c758a8 100644
 --- a/lib/src/remote/burrow/burrow-runtime.ts
 +++ b/lib/src/remote/burrow/burrow-runtime.ts
-@@ -1331,8 +1331,7 @@ export class BurrowRuntime {
+@@ -1343,8 +1343,7 @@ export class BurrowRuntime {
      }
      const approval = pending.approval;
      // Serialize snapshot creation as well as persistence: overlapping approvals
@@ -97,9 +97,9 @@ index 50f2c18df..489e5d5b9 100644
 -    // memory or revoke an existing pairing. Only the committed copy is live.
 +    // must not overwrite each other.
      return this.#saveApproval(async () => {
-       if (this.#clients.get(clientId)?.pairing !== pending) return;
-       if (pending.expiresAt <= this.#now()) {
-@@ -1357,8 +1356,8 @@ export class BurrowRuntime {
+       // Tagged under the token, so the Relay registers push only for an id this
+       // Burrow minted (`docs/specs/relay.md` -> Web Push). Minted ahead of the
+@@ -1376,8 +1375,8 @@ export class BurrowRuntime {
            label: approval.label,
          });
          pending.committing = true;

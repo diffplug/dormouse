@@ -3,9 +3,9 @@
  * notifications, docs/specs/relay.md -> HTTP API).
  *
  * Rows are keyed on the pair (`burrowId`, `deliveryId`), and the delivery id is
- * the whole authorization: 256 unguessable bits the Burrow minted at pairing and
- * handed to exactly one Client, so registering, querying and deleting need no
- * challenge and no signature. The cases that matter are the ones where a caller
+ * the whole authorization: an unguessable id the Burrow minted at pairing,
+ * tagged so its Relay can tell, and handed to exactly one Client, so
+ * registering, querying and deleting need no challenge and no signature. The cases that matter are the ones where a caller
  * must NOT learn about a row it does not already hold the capability for, and
  * where a Burrow must not reach another Burrow's subscribers.
  */
@@ -13,6 +13,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createECDH, randomBytes } from 'node:crypto';
+import { Agent as HttpsAgent } from 'node:https';
+import { Socket } from 'node:net';
 import { readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -21,14 +23,16 @@ import {
   MAX_PUSH_QUERY_DELIVERY_IDS,
   MAX_SEALED_PUSH_LENGTH,
   generateNoiseKeyPair,
+  mintPushDeliveryId,
   openPush,
+  pushDeliveryKey,
   pushSubscriptionDeletePath,
   sealPush,
   randomBase64Url,
+  UNMINTED_DELIVERY_ID_ERROR,
   utf8Decode,
   utf8Encode,
 } from 'remote-lib-common';
-import webpush from 'web-push';
 
 import {
   PUSH_REQUEST_TIMEOUT_MS,
@@ -68,23 +72,57 @@ test('VAPID subject validation accepts contact URLs and rejects invalid values',
   }
 });
 
-test('real delivery gives push-service requests a bounded socket timeout', async () => {
-  const originalSendNotification = webpush.sendNotification;
-  let requestOptions;
-  webpush.sendNotification = async (_subscription, _payload, options) => {
-    requestOptions = options;
-    return { statusCode: 201, body: '', headers: {} };
-  };
-
-  try {
-    const sender = createWebPushSender(generateVapidKeys(), 'mailto:admin@example.com');
-    const result = await sender.send(subscription(), '{}');
-    assert.equal(result, 'delivered');
-    assert.equal(requestOptions.timeout, PUSH_REQUEST_TIMEOUT_MS);
-    assert.equal(PUSH_REQUEST_TIMEOUT_MS, 10_000);
-  } finally {
-    webpush.sendNotification = originalSendNotification;
+/**
+ * An HTTPS agent that records where each connection would go and makes none:
+ * the socket it hands back fails at once, as an unreachable service would.
+ */
+class RecordingAgent extends HttpsAgent {
+  connections = [];
+  createConnection(options) {
+    this.connections.push({ host: options.host, port: options.port, timeout: options.timeout });
+    const socket = new Socket();
+    process.nextTick(() => socket.destroy(new Error('no network in tests')));
+    return socket;
   }
+}
+
+test('real delivery connects to the address the endpoint parse checked, under a socket timeout', async () => {
+  const agent = new RecordingAgent();
+  const sender = createWebPushSender(generateVapidKeys(), 'mailto:admin@example.com', agent);
+  for (const endpoint of ['https://push.example.com/sub/abc', 'https://[2606:4700:4700::1111]/sub']) {
+    assert.equal(await sender.send(subscription(endpoint), '{}'), 'failed');
+  }
+  assert.deepEqual(agent.connections, [
+    { host: 'push.example.com', port: 443, timeout: PUSH_REQUEST_TIMEOUT_MS },
+    { host: '2606:4700:4700::1111', port: 443, timeout: PUSH_REQUEST_TIMEOUT_MS },
+  ]);
+  assert.equal(PUSH_REQUEST_TIMEOUT_MS, 10_000);
+});
+
+// Endpoints WHATWG reads as a DNS name or a public host that a looser parser
+// reads as a private literal, or that are not WHATWG's own serialization of
+// themselves. Registration refuses them, and delivery, re-checking a row a hand
+// edit left, never connects to one.
+const AMBIGUOUS_ENDPOINTS = [
+  "https://100.64.0.1'/push",
+  'https://127.0.0.1;/push',
+  'https://192.168.1.1;/push',
+  'https://10.0.0.1%27/push',
+  'https://push.example.com\\@127.0.0.1/push',
+  'https://0x7f.0.0.1/push',
+  'https://PUSH.example.com/push',
+  'https://push.example.com:443/push',
+  'https://push.example.com./push',
+  'https://push_example.com/push',
+];
+
+test('real delivery never connects to an ambiguous endpoint', async () => {
+  const agent = new RecordingAgent();
+  const sender = createWebPushSender(generateVapidKeys(), 'mailto:admin@example.com', agent);
+  for (const endpoint of AMBIGUOUS_ENDPOINTS) {
+    assert.equal(await sender.send(subscription(endpoint), '{}'), 'failed', endpoint);
+  }
+  assert.deepEqual(agent.connections, []);
 });
 
 // Apple answers 403 BadJwtToken for a loopback subject, so accepting one would
@@ -149,9 +187,23 @@ function subscription(endpoint = 'https://push.example.com/sub/abc') {
   };
 }
 
-/** A delivery id in the shape a Burrow mints: base64url of 32 random bytes. */
-function newDeliveryId() {
+/** A delivery id `burrow` minted for a paired Client: the one kind its Relay adds a row for. */
+async function mintedId(burrow) {
+  return mintPushDeliveryId(await pushDeliveryKey(burrow.burrowToken), burrow.burrowId);
+}
+
+/** An id in the shape a Burrow mints that no Burrow minted: 32 random bytes. */
+function unmintedId() {
   return randomBase64Url(32);
+}
+
+/**
+ * Put a row on disk as a hand edit would, past the subscribe route's check —
+ * the only way a row carries an id its Burrow did not mint.
+ */
+function seedRow(stateDir, row) {
+  const store = new PushSubscriptionStore(stateDir, () => Date.now(), new BurrowStore(stateDir));
+  return store.upsert({ ...row, vapidPublicKey: VAPID_PUBLIC });
 }
 
 /** A fresh app with push configured, plus an enrolled burrow and a signed-in owner. */
@@ -243,7 +295,7 @@ test('config reports null when push is unconfigured, and subscribe is unavailabl
   const attempt = await subscribe(app, {
     sessionToken,
     burrow: { burrowId: 'x' },
-    deliveryId: newDeliveryId(),
+    deliveryId: unmintedId(),
   });
   assert.equal(attempt.status, 503);
 });
@@ -252,7 +304,7 @@ test('config reports null when push is unconfigured, and subscribe is unavailabl
 
 test('subscribe round-trip persists the subscription owner-only', async () => {
   const { app, stateDir, burrow, sessionToken } = await pushApp();
-  const deliveryId = newDeliveryId();
+  const deliveryId = await mintedId(burrow);
 
   const res = await subscribe(app, { sessionToken, burrow, deliveryId });
   assert.equal(res.status, 200);
@@ -274,7 +326,7 @@ test('subscribe requires a session', async () => {
   const { app, burrow } = await pushApp();
   const res = await post(app, API_ROUTES.pushSubscribe, {
     burrowId: burrow.burrowId,
-    deliveryId: newDeliveryId(),
+    deliveryId: unmintedId(),
     subscription: subscription(),
   });
   assert.equal(res.status, 401);
@@ -282,7 +334,7 @@ test('subscribe requires a session', async () => {
 
 test('a delivery id that is not 32 base64url bytes is refused before it becomes a key', async () => {
   const { app, burrow, sessionToken } = await pushApp();
-  for (const deliveryId of [undefined, '', 'too-short', `${newDeliveryId()}x`, 'not!base64url!', 42]) {
+  for (const deliveryId of [undefined, '', 'too-short', `${unmintedId()}x`, 'not!base64url!', 42]) {
     const res = await subscribe(app, { sessionToken, burrow, deliveryId });
     assert.equal(res.status, 400, String(deliveryId));
   }
@@ -293,7 +345,7 @@ test('a non-https endpoint is rejected', async () => {
   const res = await subscribe(app, {
     sessionToken,
     burrow,
-    deliveryId: newDeliveryId(),
+    deliveryId: await mintedId(burrow),
     sub: subscription('http://192.168.1.1/internal'),
   });
   assert.equal(res.status, 400);
@@ -310,11 +362,25 @@ test('private and link-local https endpoints are rejected', async () => {
     const res = await subscribe(app, {
       sessionToken,
       burrow,
-      deliveryId: newDeliveryId(),
+      deliveryId: await mintedId(burrow),
       sub: subscription(endpoint),
     });
     assert.equal(res.status, 400, endpoint);
   }
+});
+
+test('an endpoint another URL parser could read differently is refused at subscribe', async () => {
+  const { app, stateDir, burrow, sessionToken } = await pushApp();
+  for (const endpoint of AMBIGUOUS_ENDPOINTS) {
+    const res = await subscribe(app, {
+      sessionToken,
+      burrow,
+      deliveryId: await mintedId(burrow),
+      sub: subscription(endpoint),
+    });
+    assert.equal(res.status, 400, endpoint);
+  }
+  await assert.rejects(storedRows(stateDir), 'nothing was written');
 });
 
 test('subscribing to an unknown burrow is rejected', async () => {
@@ -322,16 +388,51 @@ test('subscribing to an unknown burrow is rejected', async () => {
   const res = await subscribe(app, {
     sessionToken,
     burrow: { burrowId: 'not-a-real-burrow' },
-    deliveryId: newDeliveryId(),
+    deliveryId: unmintedId(),
   });
   assert.equal(res.status, 404);
 });
 
+// --- only a paired Client adds a row ---------------------------------------
+// A session is the account, not a phone: anyone signed in could otherwise pick
+// ids of its own, fill a Burrow's cap, and evict the paired phones' rows.
+
+test('subscribe adds a row only for an id the Burrow minted', async () => {
+  const { app, stateDir, burrow, sessionToken } = await pushApp();
+  const { body: other } = await enrollBurrow(app);
+  for (const deliveryId of [unmintedId(), await mintedId(other)]) {
+    const res = await subscribe(app, { sessionToken, burrow, deliveryId });
+    assert.equal(res.status, 403);
+    assert.deepEqual(await res.json(), { error: UNMINTED_DELIVERY_ID_ERROR });
+  }
+  await assert.rejects(storedRows(stateDir), 'nothing was written');
+});
+
+test('a session that is not a paired phone cannot evict a paired phone', async () => {
+  const { app, burrow, sessionToken } = await pushApp();
+  const phone = await mintedId(burrow);
+  await subscribe(app, { sessionToken, burrow, deliveryId: phone });
+
+  for (let i = 0; i <= MAX_PUSH_SUBSCRIPTIONS_PER_BURROW; i += 1) {
+    const res = await subscribe(app, {
+      sessionToken,
+      burrow,
+      deliveryId: unmintedId(),
+      sub: subscription(`https://push.example.com/junk/${i}`),
+    });
+    assert.equal(res.status, 403);
+  }
+
+  const res = await app.request(API_ROUTES.pushDevices, {
+    headers: { Authorization: `Bearer ${burrow.burrowToken}` },
+  });
+  assert.deepEqual((await res.json()).devices.map((d) => d.deliveryId), [phone]);
+});
+
 // --- every stored field is bounded, and so is the row count ----------------
 // A durable row of unknown size is re-read and re-parsed by every push route,
-// and `deliveryId` is the caller's own choice, so an unbounded field or an
-// uncapped file turns one signed-in request into permanent degradation
-// (`docs/specs/relay.md` -> State files).
+// so an unbounded field or an uncapped file turns one paired phone's requests
+// into permanent degradation (`docs/specs/relay.md` -> State files).
 
 test('an over-long endpoint is refused before it becomes a durable row', async () => {
   const { app, stateDir, burrow, sessionToken } = await pushApp();
@@ -340,7 +441,7 @@ test('an over-long endpoint is refused before it becomes a durable row', async (
   const res = await subscribe(app, {
     sessionToken,
     burrow,
-    deliveryId: newDeliveryId(),
+    deliveryId: await mintedId(burrow),
     sub: subscription(endpoint),
   });
 
@@ -367,7 +468,7 @@ test('encryption keys RFC 8291 could not have produced are refused', async () =>
     const res = await subscribe(app, {
       sessionToken,
       burrow,
-      deliveryId: newDeliveryId(),
+      deliveryId: await mintedId(burrow),
       sub: { endpoint: 'https://push.example.com/sub/abc', keys },
     });
     assert.equal(res.status, 400, JSON.stringify(keys).slice(0, 40));
@@ -380,7 +481,7 @@ test('a padded base64 p256dh still registers — browsers serialize both ways', 
   const res = await subscribe(app, {
     sessionToken,
     burrow,
-    deliveryId: newDeliveryId(),
+    deliveryId: await mintedId(burrow),
     // 65 and 16 raw bytes as PADDED base64: the longest either can really be.
     sub: {
       endpoint: 'https://push.example.com/sub/abc',
@@ -393,10 +494,10 @@ test('a padded base64 p256dh still registers — browsers serialize both ways', 
 test('the per-burrow row cap evicts the oldest subscription, never the new one', async () => {
   const { app, stateDir, burrow, sessionToken } = await pushApp();
   const ids = [];
-  // One past the cap, each a fresh delivery id and a fresh endpoint — the shape
-  // a caller minting its own ids produces.
+  // One past the cap, each a fresh minted id and a fresh endpoint — a Burrow
+  // with more paired phones than the cap.
   for (let i = 0; i <= MAX_PUSH_SUBSCRIPTIONS_PER_BURROW; i += 1) {
-    const deliveryId = newDeliveryId();
+    const deliveryId = await mintedId(burrow);
     ids.push(deliveryId);
     const res = await subscribe(app, {
       sessionToken,
@@ -416,7 +517,7 @@ test('the per-burrow row cap evicts the oldest subscription, never the new one',
 
 test('re-subscribing replaces the row rather than accumulating one per rotation', async () => {
   const { app, stateDir, burrow, sessionToken } = await pushApp();
-  const deliveryId = newDeliveryId();
+  const deliveryId = await mintedId(burrow);
 
   await subscribe(app, { sessionToken, burrow, deliveryId, sub: subscription('https://push.example.com/1') });
   await subscribe(app, { sessionToken, burrow, deliveryId, sub: subscription('https://push.example.com/2') });
@@ -433,8 +534,8 @@ test('rotating the endpoint drops every row still carrying the replaced one', as
   const { app, stateDir, burrow, sessionToken } = await pushApp();
   const { body: other } = await enrollBurrow(app);
   const original = subscription('https://push.example.com/original');
-  const forBurrow = newDeliveryId();
-  const forOther = newDeliveryId();
+  const forBurrow = await mintedId(burrow);
+  const forOther = await mintedId(other);
 
   assert.equal((await subscribe(app, { sessionToken, burrow, deliveryId: forBurrow, sub: original })).status, 200);
   assert.equal(
@@ -470,13 +571,11 @@ test('a moved delivery drops its own stale rows under every Burrow that holds it
   // reported as registered.
   const { app, stateDir, burrow, sessionToken } = await pushApp();
   const { body: other } = await enrollBurrow(app);
-  const deliveryId = newDeliveryId();
+  const deliveryId = await mintedId(burrow);
   const old = subscription('https://push.example.com/old');
 
-  assert.equal(
-    (await subscribe(app, { sessionToken, burrow: other, deliveryId, sub: old })).status,
-    200,
-  );
+  // One Burrow mints each id, so only a hand edit leaves it under two.
+  await seedRow(stateDir, { burrowId: other.burrowId, deliveryId, ...old });
   // A different Burrow, the same delivery, a new address: this Burrow has no row of
   // its own to read the replaced endpoint from.
   const moved = await subscribe(app, {
@@ -500,8 +599,8 @@ test('a moved delivery drops its own stale rows under every Burrow that holds it
 test('subscribe answers every Burrow whose rows carry the presented endpoint', async () => {
   const { app, burrow, sessionToken } = await pushApp();
   const { body: other } = await enrollBurrow(app);
-  const forBurrow = newDeliveryId();
-  const forOther = newDeliveryId();
+  const forBurrow = await mintedId(burrow);
+  const forOther = await mintedId(other);
 
   const first = await subscribe(app, { sessionToken, burrow, deliveryId: forBurrow });
   assert.deepEqual((await first.json()).burrowIds, [burrow.burrowId]);
@@ -515,7 +614,7 @@ test('subscribe answers every Burrow whose rows carry the presented endpoint', a
   const foreign = await subscribe(app, {
     sessionToken,
     burrow,
-    deliveryId: newDeliveryId(),
+    deliveryId: await mintedId(burrow),
     sub: subscription('https://push.example.com/other-phone'),
   });
   assert.deepEqual((await foreign.json()).burrowIds, [burrow.burrowId]);
@@ -528,8 +627,8 @@ test('a retried subscribe whose first response was lost still reports the truth'
   // what lets the Client repair its view without remembering what it did.
   const { app, burrow, sessionToken } = await pushApp();
   const { body: other } = await enrollBurrow(app);
-  const forBurrow = newDeliveryId();
-  const forOther = newDeliveryId();
+  const forBurrow = await mintedId(burrow);
+  const forOther = await mintedId(other);
   await subscribe(app, { sessionToken, burrow, deliveryId: forBurrow });
   await subscribe(app, { sessionToken, burrow: other, deliveryId: forOther });
 
@@ -547,8 +646,8 @@ test('a retried subscribe whose first response was lost still reports the truth'
 test('query reports the presented ids, and never one the caller did not name', async () => {
   const { app, burrow, sessionToken } = await pushApp();
   const { body: other } = await enrollBurrow(app);
-  const mine = newDeliveryId();
-  const someone = newDeliveryId();
+  const mine = await mintedId(burrow);
+  const someone = await mintedId(other);
   await subscribe(app, { sessionToken, burrow, deliveryId: mine });
   await subscribe(app, {
     sessionToken,
@@ -564,13 +663,13 @@ test('query reports the presented ids, and never one the caller did not name', a
   // the read on a capability instead of an identity.
   assert.deepEqual(await res.json(), { registered: [{ burrowId: burrow.burrowId, deliveryId: mine }] });
 
-  const unnamed = await query(app, sessionToken, [newDeliveryId()]);
+  const unnamed = await query(app, sessionToken, [unmintedId()]);
   assert.deepEqual(await unnamed.json(), { registered: [] });
 });
 
 test('query is bounded, and requires a session', async () => {
   const { app, burrow, sessionToken } = await pushApp();
-  const deliveryId = newDeliveryId();
+  const deliveryId = await mintedId(burrow);
   await subscribe(app, { sessionToken, burrow, deliveryId });
 
   for (const deliveryIds of [
@@ -578,7 +677,7 @@ test('query is bounded, and requires a session', async () => {
     [],
     'not-an-array',
     [42],
-    Array.from({ length: MAX_PUSH_QUERY_DELIVERY_IDS + 1 }, newDeliveryId),
+    Array.from({ length: MAX_PUSH_QUERY_DELIVERY_IDS + 1 }, unmintedId),
   ]) {
     const res = await query(app, sessionToken, deliveryIds);
     assert.equal(res.status, 400, JSON.stringify(deliveryIds)?.slice(0, 40));
@@ -588,7 +687,7 @@ test('query is bounded, and requires a session', async () => {
 
 test('query hides rows registered under an old VAPID key', async () => {
   const { app, stateDir, burrow, sessionToken } = await pushApp();
-  const deliveryId = newDeliveryId();
+  const deliveryId = await mintedId(burrow);
   await subscribe(app, { sessionToken, burrow, deliveryId });
 
   await rotateStoredVapidKey(stateDir);
@@ -602,9 +701,9 @@ test('query hides rows registered under an old VAPID key', async () => {
 test('deleting is idempotent and answers 204 whether or not a row existed', async () => {
   const { app, stateDir, burrow, sessionToken } = await pushApp();
   const { body: other } = await enrollBurrow(app);
-  const deliveryId = newDeliveryId();
+  const deliveryId = await mintedId(burrow);
   await subscribe(app, { sessionToken, burrow, deliveryId });
-  await subscribe(app, { sessionToken, burrow: other, deliveryId });
+  await seedRow(stateDir, { burrowId: other.burrowId, deliveryId, ...subscription() });
 
   const live = await removeDelivery(app, sessionToken, deliveryId);
   assert.equal(live.status, 204);
@@ -616,7 +715,7 @@ test('deleting is idempotent and answers 204 whether or not a row existed', asyn
   // A repeat and an id that never existed answer identically — the route must
   // not become an oracle for whether a guessed id names a row.
   assert.equal((await removeDelivery(app, sessionToken, deliveryId)).status, 204);
-  assert.equal((await removeDelivery(app, sessionToken, newDeliveryId())).status, 204);
+  assert.equal((await removeDelivery(app, sessionToken, unmintedId())).status, 204);
   assert.equal((await removeDelivery(app, sessionToken, 'not-even-an-id')).status, 204);
 
   assert.equal((await removeDelivery(app, undefined, deliveryId)).status, 401);
@@ -626,7 +725,7 @@ test('deleting is idempotent and answers 204 whether or not a row existed', asyn
 
 test('devices lists this burrow subscribers by delivery id, never a label', async () => {
   const { app, burrow, sessionToken } = await pushApp();
-  const deliveryId = newDeliveryId();
+  const deliveryId = await mintedId(burrow);
   await subscribe(app, { sessionToken, burrow, deliveryId });
 
   const res = await app.request(API_ROUTES.pushDevices, {
@@ -644,7 +743,7 @@ test('devices lists this burrow subscribers by delivery id, never a label', asyn
 test('a burrow cannot see another burrow subscribers', async () => {
   const { app, burrow, sessionToken } = await pushApp();
   const { body: other } = await enrollBurrow(app);
-  await subscribe(app, { sessionToken, burrow, deliveryId: newDeliveryId() });
+  await subscribe(app, { sessionToken, burrow, deliveryId: await mintedId(burrow) });
 
   const res = await app.request(API_ROUTES.pushDevices, {
     headers: { Authorization: `Bearer ${other.burrowToken}` },
@@ -654,7 +753,7 @@ test('a burrow cannot see another burrow subscribers', async () => {
 
 test('devices hides subscriptions registered under an old VAPID key', async () => {
   const { app, stateDir, burrow, sessionToken } = await pushApp();
-  await subscribe(app, { sessionToken, burrow, deliveryId: newDeliveryId() });
+  await subscribe(app, { sessionToken, burrow, deliveryId: await mintedId(burrow) });
 
   await rotateStoredVapidKey(stateDir);
 
@@ -681,8 +780,8 @@ test('devices rejects a session token — it is burrow-gated', async () => {
 
 test('send fans out to every named delivery', async () => {
   const { app, sender, burrow, sessionToken } = await pushApp();
-  const phone = newDeliveryId();
-  const tablet = newDeliveryId();
+  const phone = await mintedId(burrow);
+  const tablet = await mintedId(burrow);
   await subscribe(app, { sessionToken, burrow, deliveryId: phone, sub: subscription('https://push.example.com/phone') });
   await subscribe(app, { sessionToken, burrow, deliveryId: tablet, sub: subscription('https://push.example.com/tablet') });
 
@@ -708,7 +807,7 @@ test('the forwarded payload is the sealed envelope and nothing else', async () =
   // the Relay holds no key, cannot open it, and must not add, drop, or
   // re-encode a field on the way through.
   const { app, sender, burrow, sessionToken } = await pushApp();
-  const deliveryId = newDeliveryId();
+  const deliveryId = await mintedId(burrow);
   await subscribe(app, { sessionToken, burrow, deliveryId });
 
   const burrowStatic = await generateNoiseKeyPair();
@@ -746,7 +845,7 @@ test('an extra field on the envelope reaches no phone, not even the burrowId', a
   // Relay that holds no key and must forward neither (docs/specs/security-remote.md -> "What
   // crosses the boundary").
   const { app, sender, burrow, sessionToken } = await pushApp();
-  const deliveryId = newDeliveryId();
+  const deliveryId = await mintedId(burrow);
   await subscribe(app, { sessionToken, burrow, deliveryId });
 
   const sealed = { ...fakeSealed(), burrowId: 'AAAAAAAAAAAAAAAAAAAAAA', title: 'build finished' };
@@ -762,7 +861,7 @@ test('send without recipients is rejected — the Burrow must choose them', asyn
   // The Burrow holds the ACL; a Relay that picked recipients itself would keep
   // notifying a Client the Burrow had revoked.
   const { app, sender, burrow, sessionToken } = await pushApp();
-  await subscribe(app, { sessionToken, burrow, deliveryId: newDeliveryId() });
+  await subscribe(app, { sessionToken, burrow, deliveryId: await mintedId(burrow) });
 
   for (const body of [{}, { recipients: [] }, { recipients: 'all' }]) {
     const res = await sendAs(app, burrow.burrowToken, body);
@@ -773,12 +872,12 @@ test('send without recipients is rejected — the Burrow must choose them', asyn
 
 test('send bounds the recipient list and every envelope in it', async () => {
   const { app, sender, burrow, sessionToken } = await pushApp();
-  const deliveryId = newDeliveryId();
+  const deliveryId = await mintedId(burrow);
   await subscribe(app, { sessionToken, burrow, deliveryId });
   const good = fakeSealed();
 
   const tooMany = Array.from({ length: MAX_PUSH_QUERY_DELIVERY_IDS + 1 }, () => ({
-    deliveryId: newDeliveryId(),
+    deliveryId: unmintedId(),
     sealed: fakeSealed(),
   }));
   assert.equal((await sendAs(app, burrow.burrowToken, { recipients: tooMany })).status, 400);
@@ -801,8 +900,8 @@ test('send bounds the recipient list and every envelope in it', async () => {
 
 test('send addresses only the named deliveries', async () => {
   const { app, sender, burrow, sessionToken } = await pushApp();
-  const phone = newDeliveryId();
-  const tablet = newDeliveryId();
+  const phone = await mintedId(burrow);
+  const tablet = await mintedId(burrow);
   await subscribe(app, { sessionToken, burrow, deliveryId: phone, sub: subscription('https://push.example.com/phone') });
   await subscribe(app, { sessionToken, burrow, deliveryId: tablet, sub: subscription('https://push.example.com/tablet') });
 
@@ -814,7 +913,7 @@ test('send addresses only the named deliveries', async () => {
 
 test('a named delivery with no subscription counts as unknown, not delivered', async () => {
   const { app, burrow } = await pushApp();
-  const res = await sendAs(app, burrow.burrowToken, to(newDeliveryId()));
+  const res = await sendAs(app, burrow.burrowToken, to(unmintedId()));
   assert.deepEqual(await res.json(), { delivered: 0, expired: 0, unknown: 1, failed: 0 });
 });
 
@@ -828,7 +927,7 @@ test('every delivery-id route refuses an id no Burrow could have minted', async 
   // past that the body limit refuses it with a 413 first, which is what
   // `body-limit.test.mjs` covers.
   const oversized = 'A'.repeat(10_000);
-  for (const bad of ['never-subscribed', oversized, `${newDeliveryId()}x`]) {
+  for (const bad of ['never-subscribed', oversized, `${unmintedId()}x`]) {
     assert.equal((await query(app, sessionToken, [bad])).status, 400, `query ${bad.length}`);
     const sent = await sendAs(app, burrow.burrowToken, to(bad));
     assert.equal(sent.status, 400, `send ${bad.length}`);
@@ -841,7 +940,7 @@ test('every delivery-id route refuses an id no Burrow could have minted', async 
 
 test('send treats a subscription registered under an old VAPID key as unknown', async () => {
   const { app, sender, stateDir, burrow, sessionToken } = await pushApp();
-  const deliveryId = newDeliveryId();
+  const deliveryId = await mintedId(burrow);
   await subscribe(app, { sessionToken, burrow, deliveryId });
 
   await rotateStoredVapidKey(stateDir);
@@ -853,7 +952,7 @@ test('send treats a subscription registered under an old VAPID key as unknown', 
 
 test('a subscription the push service calls gone is dropped', async () => {
   const { app, sender, stateDir, burrow, sessionToken } = await pushApp();
-  const deliveryId = newDeliveryId();
+  const deliveryId = await mintedId(burrow);
   await subscribe(app, { sessionToken, burrow, deliveryId, sub: subscription('https://push.example.com/dead') });
   sender.expire('https://push.example.com/dead');
 
@@ -865,7 +964,7 @@ test('a subscription the push service calls gone is dropped', async () => {
 
 test('a transient failure leaves the subscription in place', async () => {
   const { app, sender, stateDir, burrow, sessionToken } = await pushApp();
-  const deliveryId = newDeliveryId();
+  const deliveryId = await mintedId(burrow);
   await subscribe(app, { sessionToken, burrow, deliveryId, sub: subscription('https://push.example.com/flaky') });
   sender.fail('https://push.example.com/flaky');
 
@@ -883,8 +982,8 @@ test('a synchronous sender failure preserves subscriptions and the rest of the f
     },
   };
   const { app, stateDir, burrow, sessionToken } = await pushApp({ pushSender });
-  const broken = newDeliveryId();
-  const healthy = newDeliveryId();
+  const broken = await mintedId(burrow);
+  const healthy = await mintedId(burrow);
   await subscribe(app, { sessionToken, burrow, deliveryId: broken, sub: subscription('https://push.example.com/broken') });
   await subscribe(app, { sessionToken, burrow, deliveryId: healthy, sub: subscription('https://push.example.com/healthy') });
 
@@ -899,7 +998,7 @@ test('a send that never answers is bounded and leaves the subscription in place'
   // the socket-inactivity timer forever. Without a wall-clock bound the handler
   // stays open and successive alarms stack concurrent sends on top of it.
   const { app, sender, stateDir, burrow, sessionToken } = await pushApp({ pushSendDeadlineMs: 30 });
-  const deliveryId = newDeliveryId();
+  const deliveryId = await mintedId(burrow);
   const endpoint = 'https://push.example.com/wedged';
   await subscribe(app, { sessionToken, burrow, deliveryId, sub: subscription(endpoint) });
   sender.hang(endpoint);
@@ -913,8 +1012,8 @@ test('a send that never answers is bounded and leaves the subscription in place'
 
 test('one wedged device does not hold up the rest of the fan-out', async () => {
   const { app, sender, burrow, sessionToken } = await pushApp({ pushSendDeadlineMs: 30 });
-  const wedged = newDeliveryId();
-  const healthy = newDeliveryId();
+  const wedged = await mintedId(burrow);
+  const healthy = await mintedId(burrow);
   await subscribe(app, { sessionToken, burrow, deliveryId: wedged, sub: subscription('https://push.example.com/wedged') });
   await subscribe(app, { sessionToken, burrow, deliveryId: healthy, sub: subscription('https://push.example.com/healthy') });
   sender.hang('https://push.example.com/wedged');
@@ -926,7 +1025,7 @@ test('one wedged device does not hold up the rest of the fan-out', async () => {
 test('a burrow cannot push to another burrow subscribers', async () => {
   const { app, sender, burrow, sessionToken } = await pushApp();
   const { body: other } = await enrollBurrow(app);
-  const deliveryId = newDeliveryId();
+  const deliveryId = await mintedId(burrow);
   await subscribe(app, { sessionToken, burrow, deliveryId });
 
   // Naming the delivery explicitly must not escape the token's own burrow scope.
@@ -937,7 +1036,7 @@ test('a burrow cannot push to another burrow subscribers', async () => {
 
 test('send rejects an unknown burrow token', async () => {
   const { app } = await pushApp();
-  const res = await sendAs(app, 'not-a-burrow-token', to(newDeliveryId()));
+  const res = await sendAs(app, 'not-a-burrow-token', to(unmintedId()));
   assert.equal(res.status, 401);
 });
 
@@ -948,7 +1047,7 @@ test('a row whose Burrow is no longer enrolled is dropped on read', async () => 
   // so a subscription registered against that Burrow must stop being reported as
   // live — Pocket would otherwise show push as on for a machine that is gone.
   const { app, stateDir, burrow, sessionToken } = await pushApp();
-  const deliveryId = newDeliveryId();
+  const deliveryId = await mintedId(burrow);
   await subscribe(app, { sessionToken, burrow, deliveryId });
   assert.deepEqual(await (await query(app, sessionToken, [deliveryId])).json(), {
     registered: [{ burrowId: burrow.burrowId, deliveryId }],
@@ -956,7 +1055,7 @@ test('a row whose Burrow is no longer enrolled is dropped on read', async () => 
 
   // A second Burrow survives the edit, so the row that goes is the orphan.
   const { body: survivor } = await enrollBurrow(app);
-  const survivorDelivery = newDeliveryId();
+  const survivorDelivery = await mintedId(survivor);
   const burrows = JSON.parse(await readFile(join(stateDir, 'burrows.json'), 'utf8'));
   await writeFile(
     join(stateDir, 'burrows.json'),
@@ -985,7 +1084,7 @@ test('a `burrows.json` absent for an instant revokes nobody, and truncates nothi
   // absent-vs-empty distinction the relay's revocation sweep makes. Emptying
   // the array is the revocation; losing the file for an instant is not.
   const { app, stateDir, burrow, sessionToken } = await pushApp();
-  const deliveryId = newDeliveryId();
+  const deliveryId = await mintedId(burrow);
   await subscribe(app, { sessionToken, burrow, deliveryId });
 
   const path = join(stateDir, 'burrows.json');
@@ -1000,13 +1099,11 @@ test('a `burrows.json` absent for an instant revokes nobody, and truncates nothi
   // against an empty enrolled set would not hide the rows, it would delete
   // them. The routes 404 a subscribe while the file is gone, so this is the
   // store's own guarantee, held whatever a future caller reaches it through.
-  const store = new PushSubscriptionStore(stateDir, () => Date.now(), new BurrowStore(stateDir));
-  const second = newDeliveryId();
-  await store.upsert({
+  const second = unmintedId();
+  await seedRow(stateDir, {
     burrowId: burrow.burrowId,
     deliveryId: second,
     ...subscription('https://push.example.com/second'),
-    vapidPublicKey: VAPID_PUBLIC,
   });
   assert.deepEqual(
     (await storedRows(stateDir)).map((row) => row.deliveryId).sort(),
@@ -1028,7 +1125,7 @@ test('a `burrows.json` absent for an instant revokes nobody, and truncates nothi
 
 test('a pre-cutover or hand-mangled row is dropped on read, with exactly one warning', async () => {
   const { app, stateDir, burrow, sessionToken } = await pushApp();
-  const deliveryId = newDeliveryId();
+  const deliveryId = await mintedId(burrow);
   await subscribe(app, { sessionToken, burrow, deliveryId });
   const path = join(stateDir, 'push-subscriptions.json');
 

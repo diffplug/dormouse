@@ -14,10 +14,13 @@ import {
   NOT_ENTITLED_ERROR,
   SETUP_TOKEN_INVALID_ERROR,
   UNAUTHORIZED_ERROR,
+  UNMINTED_DELIVERY_ID_ERROR,
   enrollUserCode,
   fromBase64Url,
   generateNoiseKeyPair,
+  mintPushDeliveryId,
   openPush,
+  pushDeliveryKey,
   pushSubscriptionDeletePath,
   sealPush,
   utf8Encode,
@@ -27,6 +30,7 @@ import {
   toBase64Url,
   verifyPresenceProof,
   type PresenceBinding,
+  type PushSubscribeResponse,
 } from "remote-lib-common";
 import {
   SimAuthenticator,
@@ -1153,7 +1157,24 @@ async function pushFixture(options?: Parameters<typeof fixture>[0]) {
       `SELECT "burrowId", "deliveryId", endpoint FROM dormouse_relay_push_subscriptions
       ORDER BY "subscribedAt", "burrowId", "deliveryId"`,
     );
-  return { ...f, owner, laptop, sessionToken: session, subscribe, query, devices, send, rows };
+  /** A delivery id `burrow` minted for a paired phone: the one kind subscribe adds a row for. */
+  const id = async (burrow: { burrowId: string; token: string } = laptop) =>
+    mintPushDeliveryId(await pushDeliveryKey(burrow.token), burrow.burrowId);
+  /** A row as a hand edit would leave it, past subscribe's check. */
+  const seedRow = (burrowId: string, deliveryId: string, endpoint: string) =>
+    f.sql(
+      `INSERT INTO dormouse_relay_push_subscriptions ("burrowId", "deliveryId", endpoint, p256dh, auth, "vapidPublicKey")
+      VALUES ($1, $2, $3, $4, $5, $6)`,
+      [
+        burrowId,
+        deliveryId,
+        endpoint,
+        browserSubscription().subscription.keys.p256dh,
+        browserSubscription().subscription.keys.auth,
+        testVapidKeys().RELAY_VAPID_PUBLIC_KEY,
+      ],
+    );
+  return { ...f, owner, laptop, sessionToken: session, subscribe, query, devices, send, rows, id, seedRow };
 }
 
 test("push end to end: a Burrow's sealed envelope reaches the push service encrypted to the phone, and nothing else", async ({
@@ -1166,7 +1187,7 @@ test("push end to end: a Burrow's sealed envelope reaches the push service encry
     applicationServerKey: keys.RELAY_VAPID_PUBLIC_KEY,
   });
   const phone = browserSubscription();
-  const deliveryId = randomSecret();
+  const deliveryId = await f.id();
   const subscribed = await f.subscribe(deliveryId, phone.subscription);
   expect(subscribed.status).toBe(200);
   expect(subscribed.json).toEqual({ subscribedAt: expect.any(Number), burrowIds: [f.laptop.burrowId] });
@@ -1249,7 +1270,7 @@ test("push rows are the account's: another account's session or Burrow subscribe
   const f = await pushFixture();
   onTestFinished(f.close);
   const shared = browserSubscription().subscription;
-  const deliveryA = randomSecret();
+  const deliveryA = await f.id();
   expect((await f.subscribe(deliveryA, shared)).status).toBe(200);
 
   const b = await f.account();
@@ -1270,16 +1291,16 @@ test("push rows are the account's: another account's session or Burrow subscribe
   expect((await f.query([deliveryA], sessionB)).json).toEqual({ registered: [] });
   expect((await f.call("DELETE", pushSubscriptionDeletePath(deliveryA), { bearer: sessionB })).status).toBe(204);
   // B's own row at A's address answers only B's Burrow.
-  const ownB = randomSecret();
+  const ownB = await f.id(laptopB);
   expect((await f.subscribe(ownB, shared, { burrowId: laptopB.burrowId, bearer: sessionB })).json).toMatchObject({
     burrowIds: [laptopB.burrowId],
   });
-  // B registering A's id at a new address moves nothing of A's: A's address is
-  // not one B's delivery is moving off, so B's row there stays too.
+  // A's id is not one B's Burrow minted, so B cannot register it at all.
   const moved = browserSubscription().subscription;
-  expect(
-    (await f.subscribe(deliveryA, moved, { burrowId: laptopB.burrowId, bearer: sessionB })).json,
-  ).toMatchObject({ burrowIds: [laptopB.burrowId] });
+  expect(await f.subscribe(deliveryA, moved, { burrowId: laptopB.burrowId, bearer: sessionB })).toMatchObject({
+    status: 403,
+    json: { error: UNMINTED_DELIVERY_ID_ERROR },
+  });
   expect((await f.query([ownB], sessionB)).json).toEqual({
     registered: [{ burrowId: laptopB.burrowId, deliveryId: ownB }],
   });
@@ -1289,11 +1310,11 @@ test("push rows are the account's: another account's session or Burrow subscribe
       .json,
   ).toMatchObject({ burrowIds: [laptopB.burrowId] });
   // B's Burrow neither lists nor reaches A's subscriber.
-  const onlyA = randomSecret();
+  const onlyA = await f.id();
   await f.entitle(f.owner);
   expect((await f.subscribe(onlyA)).status).toBe(200);
   await f.entitle(b);
-  expect((await f.devices(laptopB.token)).json!.devices).toHaveLength(2);
+  expect((await f.devices(laptopB.token)).json!.devices).toHaveLength(1);
   expect((await f.send(to(onlyA), laptopB.token)).json).toEqual({
     delivered: 0,
     expired: 0,
@@ -1325,14 +1346,14 @@ test("subscribe upserts as the self-host Relay does: a moved endpoint takes its 
   const endpoints = async () => (await f.rows()).map((row) => row.endpoint);
 
   // Re-subscribing replaces the row rather than accumulating one per rotation.
-  const deliveryId = randomSecret();
+  const deliveryId = await f.id();
   await f.subscribe(deliveryId, sub("1"));
   await f.subscribe(deliveryId, sub("2"));
   expect(await endpoints()).toEqual([FCM + "2"]);
   await reset();
 
   // Rotating the endpoint drops every row still carrying the replaced one.
-  const [forLaptop, forOther] = [randomSecret(), randomSecret()];
+  const [forLaptop, forOther] = [await f.id(), await f.id(other)];
   await f.subscribe(forLaptop, sub("original"));
   await f.subscribe(forOther, sub("original"), { burrowId: other.burrowId });
   expect((await f.subscribe(forLaptop, sub("replacement"))).json!.burrowIds).toEqual([f.laptop.burrowId]);
@@ -1341,8 +1362,9 @@ test("subscribe upserts as the self-host Relay does: a moved endpoint takes its 
   ]);
   await reset();
 
-  // A moved delivery drops its own stale rows under every Burrow that holds it.
-  await f.subscribe(deliveryId, sub("old"), { burrowId: other.burrowId });
+  // A moved delivery drops its own stale rows under every Burrow that holds it:
+  // one Burrow mints each id, so only a hand edit leaves it under two.
+  await f.seedRow(other.burrowId, deliveryId, FCM + "old");
   expect((await f.subscribe(deliveryId, sub("new"))).json!.burrowIds).toEqual([f.laptop.burrowId]);
   expect(await endpoints()).toEqual([FCM + "new"]);
   expect((await f.query([deliveryId])).json!.registered).toEqual([{ burrowId: f.laptop.burrowId, deliveryId }]);
@@ -1353,7 +1375,7 @@ test("subscribe upserts as the self-host Relay does: a moved endpoint takes its 
   expect(
     [...(await f.subscribe(forOther, sub("phone"), { burrowId: other.burrowId })).json!.burrowIds].sort(),
   ).toEqual([f.laptop.burrowId, other.burrowId].sort());
-  expect((await f.subscribe(randomSecret(), sub("other-phone"))).json!.burrowIds).toEqual([f.laptop.burrowId]);
+  expect((await f.subscribe(await f.id(), sub("other-phone"))).json!.burrowIds).toEqual([f.laptop.burrowId]);
   await reset();
 
   // A retried subscribe whose first response was lost still reports the truth.
@@ -1366,7 +1388,7 @@ test("subscribe upserts as the self-host Relay does: a moved endpoint takes its 
 
   // A brand-new delivery id cannot know its scope's previous address: those rows survive.
   await f.subscribe(forLaptop, sub("before"));
-  await f.subscribe(randomSecret(), sub("after"));
+  await f.subscribe(await f.id(), sub("after"));
   expect((await endpoints()).sort()).toEqual([FCM + "after", FCM + "before"]);
 });
 
@@ -1400,7 +1422,7 @@ test("subscriptions are capped per Burrow and per account, evicting the oldest a
   await seed(strangers.burrowId, MAX_PUSH_SUBSCRIPTIONS_PER_BURROW + 8, "z");
 
   await seed(f.laptop.burrowId, MAX_PUSH_SUBSCRIPTIONS_PER_BURROW, "a");
-  const newest = randomSecret();
+  const newest = await f.id();
   expect((await f.subscribe(newest)).status).toBe(200);
   expect(await count(`s."burrowId" = $1`, [f.laptop.burrowId])).toBe(MAX_PUSH_SUBSCRIPTIONS_PER_BURROW);
   expect(await count(`s."deliveryId" = $1`, [newest])).toBe(1);
@@ -1411,7 +1433,7 @@ test("subscriptions are capped per Burrow and per account, evicting the oldest a
   const perAccount = MAX_PUSH_SUBSCRIPTIONS_PER_ACCOUNT / MAX_PUSH_SUBSCRIPTIONS_PER_BURROW;
   for (let i = 1; i < perAccount; i++) await seed((await f.burrow(f.owner)).burrowId, MAX_PUSH_SUBSCRIPTIONS_PER_BURROW, `b${i}x`);
   const last = await f.burrow(f.owner);
-  const latest = randomSecret();
+  const latest = await f.id(last);
   expect((await f.subscribe(latest, undefined, { burrowId: last.burrowId })).status).toBe(200);
   expect(await count(`b."userId" = $1`, [f.owner])).toBe(MAX_PUSH_SUBSCRIPTIONS_PER_ACCOUNT);
   expect(await count(`s."deliveryId" = $1`, [latest])).toBe(1);
@@ -1425,7 +1447,7 @@ test("removing a Burrow drops its subscriptions; views are VAPID-current; push i
 }) => {
   const f = await pushFixture();
   onTestFinished(f.close);
-  const [kept, stale] = [randomSecret(), randomSecret()];
+  const [kept, stale] = [await f.id(), await f.id()];
   await f.subscribe(kept);
   await f.subscribe(stale);
   // A row registered under another key is stale: no readback, no device, no delivery.
@@ -1468,7 +1490,7 @@ test("send outcomes: 404 and 410 prune, a refusal, a redirect, or a throw is fai
   const f = await pushFixture();
   onTestFinished(f.close);
   const outcomes = ["ok", "gone404", "gone410", "refused", "redirect", "throw"];
-  const ids = Object.fromEntries(outcomes.map((name) => [name, randomSecret()]));
+  const ids = Object.fromEntries(await Promise.all(outcomes.map(async (name) => [name, await f.id()])));
   for (const name of outcomes) await f.subscribe(ids[name], browserSubscription(FCM + name).subscription);
   f.answerPushes((url) => {
     const name = url.pathname.split("/").at(-1);
@@ -1518,7 +1540,7 @@ test("a send holds no Postgres connection while a push service answers, and reop
 }) => {
   const f = await pushFixture();
   onTestFinished(f.close);
-  const gone = randomSecret();
+  const gone = await f.id();
   await f.subscribe(gone, browserSubscription(FCM + "gone").subscription);
   let released = false;
   f.answerPushes(async () => {
@@ -1535,7 +1557,7 @@ test("a send signs one VAPID JWT per push-service origin", async ({ onTestFinish
   const f = await pushFixture();
   onTestFinished(f.close);
   const mozilla = "https://updates.push.services.mozilla.com/wpush/v2/";
-  const ids = [randomSecret(), randomSecret(), randomSecret()];
+  const ids = [await f.id(), await f.id(), await f.id()];
   for (const [i, endpoint] of [FCM + "a", FCM + "b", mozilla + "c"].entries())
     await f.subscribe(ids[i], browserSubscription(endpoint).subscription);
   expect((await f.send(to(...ids))).json).toMatchObject({ delivered: 3 });
@@ -1601,8 +1623,8 @@ test("a capped write that waited on its lock is stamped after the write it follo
     });
   }
   const vapidPublicKey = testVapidKeys().RELAY_VAPID_PUBLIC_KEY;
-  const subscriptions = await interleaved((db) => {
-    const deliveryId = randomSecret();
+  const subscriptions = await interleaved(async (db) => {
+    const deliveryId = await f.id();
     const { keys } = browserSubscription().subscription;
     return upsertSubscription(db, f.owner, {
       burrowId: f.laptop.burrowId,
@@ -1612,7 +1634,9 @@ test("a capped write that waited on its lock is stamped after the write it follo
       vapidPublicKey,
     });
   });
-  expect(subscriptions.waited!.subscribedAt).toBeGreaterThan(subscriptions.first!.subscribedAt);
+  const stamped = (result: Awaited<ReturnType<typeof upsertSubscription>>) =>
+    (result as PushSubscribeResponse).subscribedAt;
+  expect(stamped(subscriptions.waited)).toBeGreaterThan(stamped(subscriptions.first));
   const sessions = await interleaved((db) =>
     admit(db, SESSIONS, f.owner, { tokenHash: digest(randomSecret()), userId: f.owner }, 60_000),
   );
@@ -1622,7 +1646,7 @@ test("a capped write that waited on its lock is stamped after the write it follo
 test("a send waits at most its deadline for a hung push service, keeping the row", async ({ onTestFinished }) => {
   const f = await pushFixture();
   onTestFinished(f.close);
-  const [hung, ok] = [randomSecret(), randomSecret()];
+  const [hung, ok] = [await f.id(), await f.id()];
   await f.subscribe(hung, browserSubscription(FCM + "hung").subscription);
   await f.subscribe(ok, browserSubscription(FCM + "ok").subscription);
   f.answerPushes((url) =>
@@ -1659,7 +1683,7 @@ test("only a known push service's endpoint registers, and a row naming any other
     "https://updates.push.services.mozilla.com/wpush/v2/gAAAA",
     "https://wns2-par02p.notify.windows.com/w/?token=BQYAAAB",
   ])
-    expect((await f.subscribe(randomSecret(), browserSubscription(endpoint).subscription)).status, endpoint).toBe(200);
+    expect((await f.subscribe(await f.id(), browserSubscription(endpoint).subscription)).status, endpoint).toBe(200);
   expect(await f.rows()).toHaveLength(3);
   // A row the allowlist no longer admits, however it got there, is never fetched.
   const legacy = randomSecret();
@@ -1696,6 +1720,22 @@ test("send requires and bounds its recipients, and the push routes refuse an id 
   // A session is not a Burrow token, nor the reverse.
   expect((await f.devices(f.sessionToken)).status).toBe(401);
   expect((await f.query([randomSecret()], f.laptop.token)).status).toBe(401);
+});
+
+test("subscribe adds a row only for an id the Burrow minted, so a session that is not a paired phone evicts none", async ({
+  onTestFinished,
+}) => {
+  const f = await pushFixture();
+  onTestFinished(f.close);
+  const other = await f.burrow(f.owner);
+  const phone = await f.id();
+  expect((await f.subscribe(phone)).status).toBe(200);
+  for (const deliveryId of [randomSecret(), await f.id(other)])
+    expect(await f.subscribe(deliveryId)).toMatchObject({ status: 403, json: { error: UNMINTED_DELIVERY_ID_ERROR } });
+  for (let i = 0; i <= MAX_PUSH_SUBSCRIPTIONS_PER_BURROW; i++)
+    expect((await f.subscribe(randomSecret(), browserSubscription(FCM + `junk${i}`).subscription)).status).toBe(403);
+  expect((await f.devices()).json!.devices.map((d: { deliveryId: string }) => d.deliveryId)).toEqual([phone]);
+  expect((await f.rows()).map((row) => row.deliveryId)).toEqual([phone]);
 });
 
 test("subscribe refuses a p256dh of the right shape off P-256, writing nothing", async ({ onTestFinished }) => {
