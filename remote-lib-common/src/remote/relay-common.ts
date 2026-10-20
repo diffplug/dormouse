@@ -384,10 +384,7 @@ export async function verifySigninAssertion<Passkey extends { readonly publicKey
     policy: ConnectionPolicy;
   },
 ): Promise<{ readonly ok: true; readonly passkey: Passkey } | RelayRefusal> {
-  const body = (request && typeof request === 'object' ? request : {}) as {
-    challenge?: unknown;
-    assertion?: unknown;
-  };
+  const body = (request ?? {}) as { readonly challenge?: unknown; readonly assertion?: unknown };
   const candidate = body.assertion as Partial<PasskeyAssertion> | null | undefined;
   if (!candidate || typeof candidate !== 'object' || typeof candidate.credentialId !== 'string') {
     return refuse(400, MALFORMED_ASSERTION_ERROR);
