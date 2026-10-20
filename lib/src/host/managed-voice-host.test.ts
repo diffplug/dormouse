@@ -23,8 +23,8 @@ const MANAGED_VOICE_TOKEN_URL = 'https://voice.dormouse.sh/api/voice/token';
 const requests = () => fetchMock.mock.calls.map(([url, init]: [string, RequestInit]) =>
   [url, init.method, (init.headers as Record<string, string>).authorization]);
 
-/** The next `readFile` fails with this, once: a Windows antivirus lock, say. */
-const readFault = vi.hoisted(() => ({ next: null as NodeJS.ErrnoException | null }));
+/** The next `readFile` fails with this, once and then `repeats` more times: a Windows antivirus lock, say. */
+const readFault = vi.hoisted(() => ({ next: null as NodeJS.ErrnoException | null, repeats: 0 }));
 const renameFault = vi.hoisted(() => ({ next: null as NodeJS.ErrnoException | null }));
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>();
@@ -38,7 +38,8 @@ vi.mock('node:fs/promises', async (importOriginal) => {
     }) as typeof actual.rename,
     readFile: (async (...args: Parameters<typeof actual.readFile>) => {
       const fault = readFault.next;
-      readFault.next = null;
+      if (readFault.repeats > 0) readFault.repeats--;
+      else readFault.next = null;
       if (fault) throw fault;
       return actual.readFile(...args);
     }) as typeof actual.readFile,
@@ -205,6 +206,18 @@ describe('configuration', () => {
     const unavailable = make({ stateDir: undefined });
     await approveVoice(unavailable);
     expect(await unavailable.handle({ op: 'status' })).toMatchObject({ configured: false, enrollment: { status: 'ended', message: expect.stringContaining('Could not save') } });
+    // Held by no one, so deleted at Hosted.
+    await vi.waitFor(() => expect(requests().at(-1)).toEqual([MANAGED_VOICE_TOKEN_URL, 'DELETE', `Bearer ${TOKEN}`]));
+  });
+
+  it('keeps the saved voice through a disconnect whose reads fail', async () => {
+    await writeFile(join(dir, MANAGED_VOICE_FILE), JSON.stringify({ token: TOKEN, voiceId: OTHER_VOICE }), { mode: 0o600 });
+    const restarted = make();
+    readFault.next = Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' });
+    readFault.repeats = 1;
+    expect(await restarted.handle({ op: 'disconnect' })).toMatchObject({ ok: true, configured: false, voiceId: OTHER_VOICE });
+    expect(JSON.parse(await readFile(join(dir, MANAGED_VOICE_FILE), 'utf8'))).toEqual({ token: null, voiceId: OTHER_VOICE });
+    expect(broadcasts.at(-1)).toEqual(idle(false, OTHER_VOICE));
   });
 });
 
@@ -641,7 +654,9 @@ describe('independent managed-voice lifecycle', () => {
     answer(Response.json({ status: 'enabled', voiceToken: TOKEN }));
     await vi.advanceTimersByTimeAsync(5000);
     expect(await host.handle({ op: 'status' })).toEqual(idle(false));
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    // Polling stopped, and the late token is deleted at Hosted.
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(requests().at(-1)).toEqual([MANAGED_VOICE_TOKEN_URL, 'DELETE', `Bearer ${TOKEN}`]);
   });
 
   it('disconnect during the saving notification cannot re-enable a late approval', async () => {
@@ -663,6 +678,33 @@ describe('independent managed-voice lifecycle', () => {
     await disconnect;
     expect(await host.handle({ op: 'status' })).toEqual(idle(false));
     expect(await make().handle({ op: 'status' })).toEqual(idle(false));
+    // The token the disconnect overtook, never saved, is deleted at Hosted.
+    await vi.waitFor(() => expect(requests().at(-1)).toEqual([MANAGED_VOICE_TOKEN_URL, 'DELETE', `Bearer ${TOKEN}`]));
+  });
+
+  it('deletes at Hosted a token a disconnect clears while it is being saved', async () => {
+    vi.useFakeTimers();
+    const files = fileManagedVoiceStore(dir);
+    host = createManagedVoiceHost({
+      store: {
+        read: files.read,
+        write(next, changed) {
+          // The disconnect queues behind this save, before it lands.
+          if (next.token !== null) void host.handle({ op: 'disconnect' });
+          return files.write(next, changed);
+        },
+      },
+      onStatus: (status) => void broadcasts.push(status),
+      fetch: fetchMock as unknown as typeof fetch,
+      relay: { origin: DEFAULT_RELAY_ORIGIN, mode: 'hosted' },
+      networkAllowed: async () => true,
+    });
+    fetchMock.mockResolvedValueOnce(Response.json(begun())).mockResolvedValueOnce(Response.json({ status: 'enabled', voiceToken: TOKEN }));
+    await host.handle({ op: 'beginEnrollment' });
+    await vi.advanceTimersByTimeAsync(1000);
+    await vi.waitFor(() => expect(requests().at(-1)).toEqual([MANAGED_VOICE_TOKEN_URL, 'DELETE', `Bearer ${TOKEN}`]));
+    expect(await host.handle({ op: 'status' })).toEqual(idle(false));
+    expect(JSON.parse(await readFile(join(dir, MANAGED_VOICE_FILE), 'utf8')).token).toBeNull();
   });
 
   it('stops approval polling when the network policy changes to Nowhere', async () => {
