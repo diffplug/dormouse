@@ -192,10 +192,6 @@ async function peerDirIsSafe(): Promise<boolean> {
  * the extension's globalStorage path is most of that on its own. Derived from
  * that path rather than random precisely because it must be *the same* in every
  * window — the bind is the arbitration.
- *
- * On Windows this is only the name older builds bind: a broker there holds it
- * as a second listener so their windows join it ({@link olderBuildHoldsLegacy}),
- * and never depends on getting it, because another account can create it first.
  */
 function socketPath(): string | null {
   if (!context) return null;
@@ -203,9 +199,7 @@ function socketPath(): string | null {
     .update(context.globalStorageUri.fsPath)
     .digest('hex')
     .slice(0, 12);
-  return process.platform === 'win32'
-    ? `\\\\.\\pipe\\dormouse-peer-${id}`
-    : join(peerDirPath(), `${id}.sock`);
+  return join(peerDirPath(), `${id}.sock`);
 }
 
 /**
@@ -380,12 +374,6 @@ export interface PeerLinkClient {
 
 
 let server: Server | null = null;
-/**
- * Windows only: the second listener on the name older builds bind, so their
- * windows join this broker instead of electing their own
- * ({@link olderBuildHoldsLegacy}). Closed with `server`.
- */
-let legacyServer: Server | null = null;
 /**
  * Windows only: the endpoint record for the fresh name `server` is bound to,
  * as the raw text it publishes, verifies, and retracts. Cleared with `server`.
@@ -885,9 +873,9 @@ export function listenServer(nextServer: Server, path: string): Promise<void> {
   });
 }
 
-/** A listener that challenges every connection it accepts. */
-function createPeerServer(): Server {
-  return createServer((socket) => {
+/** Take the socket path, or report that somebody else holds it. */
+async function tryBind(path: string, token: string): Promise<boolean> {
+  const nextServer = createServer((socket) => {
     const client: PeerLinkClient = {
       socket,
       decoder: new FrameDecoder(),
@@ -911,13 +899,8 @@ function createPeerServer(): Server {
     // of the token must not volunteer one into whatever bound this path.
     send(client, { kind: 'challenge', nonce: client.challenge });
   });
-}
-
-/** Listen on `path`, or close the server and report that somebody else holds it. */
-async function listenOrClose(nextServer: Server, path: string): Promise<boolean> {
   try {
     await listenServer(nextServer, path);
-    return true;
   } catch {
     // Callback form deliberately: closing a server that never listened emits an
     // `'error'` nobody is listening for, which an EventEmitter rethrows and
@@ -925,12 +908,6 @@ async function listenOrClose(nextServer: Server, path: string): Promise<boolean>
     nextServer.close(() => {});
     return false;
   }
-}
-
-/** Take the socket path, or report that somebody else holds it. */
-async function tryBind(path: string, token: string): Promise<boolean> {
-  const nextServer = createPeerServer();
-  if (!(await listenOrClose(nextServer, path))) return false;
   server = nextServer;
   // Synchronous, and before the first `await` past the bind: `listen` binds
   // inside the call and resolves on a nextTick, so no thread-pool callback of
@@ -1300,8 +1277,7 @@ function settle(broker: boolean): void {
  * mid-startup) and the loop retries.
  */
 async function attempt(): Promise<boolean> {
-  const path = socketPath();
-  if (!path) return false;
+  if (!context) return false;
   if (!(await peerDirIsSafe())) {
     log.error(
       `[peer-link] ${peerDirPath()} is not a private directory of this user; the peer link is off`,
@@ -1329,8 +1305,10 @@ async function attempt(): Promise<boolean> {
     return true;
   }
 
-  if (publishesEndpoint()) return attemptPublished(path, token);
+  if (publishesEndpoint()) return attemptPublished(token);
 
+  const path = socketPath();
+  if (!path) return false;
   if (await tryBind(path, token)) {
     // Disposal can land inside any of the awaits above; a socket bound after it
     // would outlive the window that owns it.
@@ -1421,7 +1399,7 @@ async function joinBroker(record: EndpointRecord | null, token: string): Promise
  * published it is gone: replacing a stalled broker would leave two Burrows
  * under one enrollment, since a broker never stands down.
  */
-async function attemptPublished(legacyPath: string, token: string): Promise<boolean> {
+async function attemptPublished(token: string): Promise<boolean> {
   const published = await readEndpoint();
   if (published !== null) {
     const record = parseEndpoint(published);
@@ -1459,15 +1437,6 @@ async function attemptPublished(legacyPath: string, token: string): Promise<bool
     return winner !== null && (await joinBroker(parseEndpoint(winner), token)) === 'connected';
   }
 
-  if (await olderBuildHoldsLegacy(legacyPath, token)) {
-    // Its broker already runs the Burrow, and a second would displace it on
-    // the relay, so this window has joined that one instead.
-    await closeServer(true);
-    if (disposed) disconnectClient();
-    else settle(false);
-    return true;
-  }
-
   // Provisional even uncontested: a window retiring the file we replaced reads
   // it before it unlinks, and can unlink ours in between. Whoever's name the
   // file holds after the wait is the broker; anyone else stands down, and the
@@ -1485,25 +1454,6 @@ async function attemptPublished(legacyPath: string, token: string): Promise<bool
   brokerConfirmed = true;
   settle(true);
   return true;
-}
-
-/**
- * Hold the derived name older builds bind, as a second listener, so a window
- * still running one joins this broker rather than electing its own. Reports
- * whether an older build's broker holds it already — the only reason this
- * window stands down, and only once that broker proves the token: anything
- * else on the name (another account, say) is ignored, because this window
- * never depends on it.
- */
-async function olderBuildHoldsLegacy(path: string, token: string): Promise<boolean> {
-  const nextServer = createPeerServer();
-  if (await listenOrClose(nextServer, path)) {
-    // Disposal may have closed `server` while this bound; nothing would close it.
-    if (server) legacyServer = nextServer;
-    else nextServer.close();
-    return false;
-  }
-  return (await tryConnect(path, token)) === 'connected';
 }
 
 /** How long to let a competing reclaim land before believing we won it. */
@@ -1594,16 +1544,13 @@ async function contend(): Promise<void> {
  */
 async function closeServer(unlink: boolean): Promise<void> {
   const closing = server;
-  const closingLegacy = legacyServer;
   const published = boundEndpoint;
   server = null;
-  legacyServer = null;
   boundEndpoint = null;
   brokerConfirmed = false;
   serverToken = null;
   boundSocketFile = null;
   for (const peer of [...clients]) dropClient(peer);
-  if (closingLegacy?.listening) closingLegacy.close();
   if (!closing) return;
   if (closing.listening) closing.close();
   if (!unlink) return;

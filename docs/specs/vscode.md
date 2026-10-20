@@ -147,7 +147,6 @@ Source of truth: `VsCodeBurrowStateStore` in `vscode-ext/src/burrow-store.ts`, `
 - **Every bind takes a fresh `\\.\pipe\dormouse-peer-<32 random hex>`**, published with the broker's pid by an exclusive `wx` create of `burrow.peer-endpoint` beside the token. **Windows find the broker only through that file**; one that loses the create closes its pipe and dials the winner.
 - **Every published bind is provisional**, believed only if the file still names it after `RECLAIM_VERIFY_MS`: a window retiring a stale file can remove a fresh one.
 - **A published name that twice fails to yield a verified welcome, a jittered re-read apart, is retired**, only while the file still names it — unless both dials met only silence and the publishing pid is alive, since a stalled broker is waited for (`docs/specs/security-local.md` → "The VS Code peer link"; rationale). A closing broker retracts its own the same way.
-- **The broker also listens on the derived `\\.\pipe\dormouse-peer-<hash>`**, so an older build's window joins it rather than electing a second Burrow (rationale). If that name is taken, only a verified broker there makes this window retract its file and join it.
 
 **Trust.** Neither the socket path nor a listed pipe name is secret, so two layers stand between them and this installation's terminals.
 

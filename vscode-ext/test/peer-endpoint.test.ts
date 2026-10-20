@@ -31,28 +31,24 @@ import {
 type LinkModule = typeof import('../src/peer-link');
 
 /** Where the mock below puts its sockets; one directory per test. */
-const endpoint = { dir: '' };
+const endpoint = vi.hoisted(() => ({ dir: '' }));
 
 /**
- * This platform's arbitration as one window sees it: the published endpoint
- * with Windows' pipe names swapped for unix sockets (keeping the real name's
- * random part), or an older build's derived path. Registered per window, before
- * {@link freshModule} evaluates that window's copy of `peer-link`.
+ * Windows' arbitration, its pipe names swapped for unix sockets that keep the
+ * real name's random part.
  */
-function mockEndpoint(publishes: boolean): void {
-  vi.doMock('../src/peer-endpoint', async (importOriginal) => {
-    const real = await importOriginal<typeof import('../src/peer-endpoint')>();
-    return {
-      publishesEndpoint: () => publishes,
-      freshEndpointName: () => {
-        const name = real.freshEndpointName();
-        return process.platform === 'win32'
-          ? name
-          : join(endpoint.dir, `${name.slice(name.lastIndexOf('\\') + 1)}.sock`);
-      },
-    };
-  });
-}
+vi.mock('../src/peer-endpoint', async (importOriginal) => {
+  const real = await importOriginal<typeof import('../src/peer-endpoint')>();
+  return {
+    publishesEndpoint: () => true,
+    freshEndpointName: () => {
+      const name = real.freshEndpointName();
+      return process.platform === 'win32'
+        ? name
+        : join(endpoint.dir, `${name.slice(name.lastIndexOf('\\') + 1)}.sock`);
+    },
+  };
+});
 
 vi.mock('../src/log', () => ({ log: { init() {}, info() {}, error() {} } }));
 
@@ -103,11 +99,7 @@ const spareName = (): string =>
     ? `\\\\.\\pipe\\dormouse-peer-test-${process.pid}-${++spare}`
     : join(endpoint.dir, `spare-${++spare}.sock`);
 
-async function openWindow(
-  side = fakeWindow(),
-  { olderBuild = false }: { olderBuild?: boolean } = {},
-): Promise<LinkModule> {
-  mockEndpoint(!olderBuild);
+async function openWindow(side = fakeWindow()): Promise<LinkModule> {
   const mod = await freshModule<LinkModule>(() => import('../src/peer-link'));
   mod.initPeerLink(fakeContext(dir));
   mod.configurePeerLink(side.deps());
@@ -256,11 +248,6 @@ describe('published endpoint', () => {
   }, 15_000);
 
   it('settles windows starting together into one broker that the others reach', async () => {
-    // With the derived name squatted, the file alone has to elect one broker:
-    // nothing can join through that name instead.
-    const legacy = derivedSocketPath(dir);
-    if (process.platform !== 'win32') await mkdir(dirname(legacy), { recursive: true, mode: 0o700 });
-    await listen(createServer((socket) => socket.destroy()), legacy);
     const windows = [await openWindow(), await openWindow(), await openWindow()];
     const roles: boolean[] = [];
     await Promise.all(windows.map((mod) => mod.ensurePeerNet((held) => roles.push(held))));
@@ -358,36 +345,4 @@ describe('published endpoint', () => {
     expect(reachesBroker(late)).toBe(true);
     await waitFor(async () => (await elected.remoteRequest('directory', {})).length === 2, 10_000);
   }, 30_000);
-});
-
-describe('alongside older builds', () => {
-  it('joins an older build’s broker on the derived name instead of electing a second one', async () => {
-    const older = await openWindow(fakeWindow(), { olderBuild: true });
-    await older.ensurePeerNet(() => {});
-    expect(older.isPeerBroker()).toBe(true);
-
-    const roles: boolean[] = [];
-    const newer = await openWindow(fakeWindow({ entries: [{ surfaceId: 'far-1' }] }));
-    await newer.ensurePeerNet((held) => roles.push(held));
-
-    expect(roles).toEqual([]);
-    expect(reachesBroker(newer)).toBe(true);
-    expect(await older.remoteRequest('directory', {})).toEqual([{ surfaceId: 'far-1' }]);
-    // It retracted the name it briefly published, so later windows are not sent there.
-    expect(await published()).toBeNull();
-  }, 15_000);
-
-  it('lets an older build’s window join a newer broker through the derived name', async () => {
-    const newer = await openWindow();
-    await newer.ensurePeerNet(() => {});
-    expect(newer.isPeerBroker()).toBe(true);
-
-    const roles: boolean[] = [];
-    const older = await openWindow(fakeWindow({ entries: [{ surfaceId: 'far-1' }] }), { olderBuild: true });
-    await older.ensurePeerNet((held) => roles.push(held));
-
-    expect(roles).toEqual([]);
-    expect(reachesBroker(older)).toBe(true);
-    expect(await newer.remoteRequest('directory', {})).toEqual([{ surfaceId: 'far-1' }]);
-  }, 15_000);
 });

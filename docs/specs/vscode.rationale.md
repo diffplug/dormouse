@@ -72,7 +72,6 @@
 
 **Why silence needs the pid.** A broker stalled behind a busy extension host (a paused debugger, another extension's synchronous work) accepts at the OS level and then says nothing, exactly like a squatter that holds the name silently. Replacing it would be permanent: a broker never stands down and nothing makes it re-read the file, so once it caught up two Burrows would displace each other on the Relay until a window reloaded. A live pid tells the two apart; the residual is a squatter that also gets a process at the dead broker's pid, which keeps windows waiting (`docs/specs/security.md` -> "What is not defended").
 
-**Why the broker holds the derived name too.** VS Code keeps running an extension's old version in each window until that window restarts its extensions, so after an update windows of both builds share one installation. An older-build window that found the derived name free would bind it and run a second Burrow under the same enrollment. A squatter on that name costs a current broker one `HANDSHAKE_BUDGET_MS` dial before it is believed, and keeps older-build windows from any broker (`docs/specs/security.md` -> "What is not defended").
 
 **Why a mid-contention command waits rather than being refused.** While the contention runs the window is neither broker nor client, and a bind plus a handshake is not instant. Refusing there would tell an enrolled machine's webview it has no Burrow seconds before it gets one, and the gates that arm on that answer (`enrolled-gate.ts`) would stay down.
 

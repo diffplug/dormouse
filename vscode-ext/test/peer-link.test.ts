@@ -74,6 +74,11 @@ let realTmp: string | undefined;
 const opened: LinkModule[] = [];
 
 const derivedSocketPath = (): string => socketPathFor(dir);
+/** Where a window dials the broker: the derived path, or on Windows the published name. */
+const brokerPath = async (): Promise<string> =>
+  process.platform === 'win32'
+    ? (JSON.parse(await readFile(join(dir, 'burrow.peer-endpoint'), 'utf8')) as { name: string }).name
+    : derivedSocketPath();
 
 interface SocketFileIdentity {
   dev: bigint;
@@ -184,7 +189,9 @@ describe('bind-as-lease', () => {
     // libuv callback with nothing to catch it.
     const mod = await openWindow(fakeWindow());
     const server = createServer();
-    const path = derivedSocketPath();
+    const path = process.platform === 'win32'
+      ? `\\\\.\\pipe\\dormouse-peer-test-${process.pid}`
+      : derivedSocketPath();
     if (process.platform !== 'win32') await mkdir(dirname(path), { recursive: true, mode: 0o700 });
     await mod.listenServer(server, path);
     try {
@@ -843,7 +850,7 @@ describe('bind-as-lease', () => {
     expect(peer.isPeerLinkSettled()).toBe(false);
   });
 
-  it('does not send an old broker’s delayed answer to its replacement', async () => {
+  it.skipIf(process.platform === 'win32')('does not send an old broker’s delayed answer to its replacement', async () => {
     const token = 'test-peer-token';
     await writeFile(join(dir, 'burrow.peer-token'), token, { mode: 0o600 });
 
@@ -1079,7 +1086,7 @@ describe('peer handshake', () => {
     const token = await readToken();
     expect(token).toBeTruthy();
 
-    const socket = createConnection({ path: derivedSocketPath() });
+    const socket = createConnection({ path: await brokerPath() });
     const reader = frameReader(socket);
     await new Promise((resolve) => socket.on('connect', resolve));
 
@@ -1116,7 +1123,7 @@ describe('peer handshake', () => {
     const broker = await openWindow(brokerSide);
     await broker.ensurePeerNet(() => {});
 
-    const socket = createConnection({ path: derivedSocketPath() });
+    const socket = createConnection({ path: await brokerPath() });
     const reader = frameReader(socket);
     await new Promise((resolve) => socket.on('connect', resolve));
     const challenge = await reader.next();
@@ -1141,7 +1148,7 @@ describe('peer handshake', () => {
     const broker = await openWindow(brokerSide);
     await broker.ensurePeerNet(() => {});
 
-    const socket = createConnection({ path: derivedSocketPath() });
+    const socket = createConnection({ path: await brokerPath() });
     const reader = frameReader(socket);
     await new Promise((resolve) => socket.on('connect', resolve));
     expect((await reader.next()).kind).toBe('challenge');
@@ -1159,7 +1166,7 @@ describe('peer handshake', () => {
     await broker.ensurePeerNet(() => {});
     const token = await readToken();
 
-    const first = createConnection({ path: derivedSocketPath() });
+    const first = createConnection({ path: await brokerPath() });
     const firstReader = frameReader(first);
     await new Promise((resolve) => first.on('connect', resolve));
     const captured = await firstReader.next();
@@ -1168,7 +1175,7 @@ describe('peer handshake', () => {
 
     // A second connection gets a fresh challenge, so the captured proof is
     // worth nothing — which is the whole point of the nonce.
-    const second = createConnection({ path: derivedSocketPath() });
+    const second = createConnection({ path: await brokerPath() });
     const secondReader = frameReader(second);
     await new Promise((resolve) => second.on('connect', resolve));
     const fresh = await secondReader.next();
