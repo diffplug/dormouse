@@ -290,17 +290,13 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
         });
         if (outcome === "retired") return invalidSetup(c);
         if (outcome === "duplicate") return c.json({ error: DUPLICATE_CREDENTIAL_ERROR }, 409);
-        if (outcome === "full") {
-          const where = c.env.ACCOUNT_ORIGIN;
+        if (outcome === "full")
           return c.json(
             {
-              error: `this account already has ${MAX_PASSKEYS_PER_ACCOUNT} passkeys; remove one ${
-                where ? `at ${where}/account` : "from your account"
-              } first`,
+              error: `this account already has ${MAX_PASSKEYS_PER_ACCOUNT} passkeys; ${removeOneFirst(c.env)}`,
             },
             409,
           );
-        }
         registered = true;
         // Registering signs in too; `claimSetupToken` refused an owner not
         // entitled, so no session is minted for one.
@@ -601,17 +597,13 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
         );
         return spent ? { redeemed: spent.redeemedBurrowId } : "expired";
       });
-      if (outcome === "full") {
-        const where = c.env.ACCOUNT_ORIGIN;
+      if (outcome === "full")
         return c.json(
           {
-            error: `this account already has ${MAX_BURROWS_PER_ACCOUNT} computers enrolled; remove one ${
-              where ? `at ${where}/account` : "from your account"
-            } first`,
+            error: `this account already has ${MAX_BURROWS_PER_ACCOUNT} computers enrolled; ${removeOneFirst(c.env)}`,
           },
           409,
         );
-      }
       if (outcome === "expired") return answer({ status: "expired" });
       if (outcome !== "enrolled") return answer({ status: "redeemed", burrowId: outcome.redeemed });
       return answer({
@@ -777,6 +769,10 @@ function setupTokenOf(body: unknown): string | null {
 }
 
 const rpIdOf = (env: RelayEnv) => new URL(env.APP_ORIGIN).hostname;
+
+/** What a full account's 409 tells it to do: free a slot on its account page. */
+const removeOneFirst = ({ ACCOUNT_ORIGIN: where }: RelayEnv) =>
+  `remove one ${where ? `at ${where}/account` : "from your account"} first`;
 
 /** A device code's user code; a deployment without its secret answers 503. */
 function userCodeOf(env: RelayEnv, deviceCode: Uint8Array, purpose: "remote" | "voice") {

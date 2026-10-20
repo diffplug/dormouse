@@ -1258,12 +1258,13 @@ test("the account lists its passkeys with the computer that added each, and remo
     );
   }
   const listed = await admin.passkeys();
-  expect(listed.passkeys.map(({ credentialId, label, burrowId }) => ({ credentialId, label, burrowId })).sort((a, b) =>
-    a.credentialId < b.credentialId ? -1 : 1,
-  )).toEqual([
-    { credentialId: "own-key", label: "own-key", burrowId: null },
-    { credentialId: "stranger-key", label: "stranger-key", burrowId: laptop },
-  ]);
+  expect(listed.passkeys.map(({ createdAt, ...passkey }) => passkey)).toEqual(
+    expect.arrayContaining([
+      { credentialId: "own-key", label: "own-key", burrowId: null },
+      { credentialId: "stranger-key", label: "stranger-key", burrowId: laptop },
+    ]),
+  );
+  expect(listed.passkeys).toHaveLength(2);
   expect(Math.abs(Date.parse(listed.passkeys[0].createdAt) - Date.now())).toBeLessThan(60_000);
   // An account the Relay does not entitle sees none.
   expect((await other.request("/api/relay/passkeys")).status).toBe(403);
