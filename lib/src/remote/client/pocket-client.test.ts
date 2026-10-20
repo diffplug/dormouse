@@ -31,10 +31,13 @@ import {
   generateNoiseKeyPair,
   hashPasskeyPublicKey,
   parsePairingInvitationUrl,
+  presenceChallenge,
   pushEndpointFingerprint,
   randomBase64Url,
   toBase64Url,
   type PasskeyAssertion,
+  type PresenceBinding,
+  type ReauthBeginResponse,
   type TerminalDataEvent,
 } from 'remote-lib-common';
 
@@ -46,6 +49,7 @@ import {
   BurrowIdentityMismatchError,
   PAIRING_DENIAL_MESSAGES,
   PASSKEY_UNAVAILABLE_MESSAGE,
+  PRESENCE_CHALLENGE_MISMATCH_MESSAGE,
   PocketClient,
   SessionExpiredError,
   SessionSupersededError,
@@ -69,7 +73,15 @@ import {
 } from '../direct/test-fake-peer';
 import type { DirectPeerLike } from '../direct/direct-peer';
 import type { RemoteTimer } from '../ws';
-import { createTestAuthenticator, settle, type TestAuthenticator } from '../test-e2e-client';
+import {
+  createTestAuthenticator,
+  openConnectionSession,
+  readOutcome,
+  sendE2eFrame,
+  settle,
+  testRoutingId,
+  type TestAuthenticator,
+} from '../test-e2e-client';
 import { PasskeyAlreadyRegisteredError, type WebAuthnClient } from './webauthn';
 import {
   ACCOUNT_ID,
@@ -1946,6 +1958,158 @@ describe('the presence proof', () => {
     expect(emptied.sessionToken).toBeNull();
     expect(storage.getSession()).toBeNull();
     expect(harness.approvals).toEqual([]);
+  });
+
+  /**
+   * A phone behind a Relay that rewrites every `begin` answer with `tamper`,
+   * counting the prompts its authenticator gets after sign-in and the
+   * assertions it hands the Relay's `finish`.
+   */
+  async function behindRelay(
+    harness: E2eHarness,
+    tamper: (answer: ReauthBeginResponse, binding: PresenceBinding) => Promise<ReauthBeginResponse>,
+    knownBurrows: MemoryKnownBurrows = harness.knownBurrows,
+  ) {
+    const prompts: Array<{ challenge: string; allowCredentials?: readonly string[] }> = [];
+    const finished: PasskeyAssertion[] = [];
+    const fetch = (async (url: string, init?: RequestInit) => {
+      const path = new URL(url, 'http://test').pathname;
+      if (path === '/api/reauth/finish') {
+        finished.push((JSON.parse(init!.body as string) as { assertion: PasskeyAssertion }).assertion);
+      }
+      const response = await harness.fetch(url, init);
+      if (path !== '/api/reauth/begin') return response;
+      const { binding } = JSON.parse(init!.body as string) as { binding: PresenceBinding };
+      const answer = await tamper((await response.json()) as ReauthBeginResponse, binding);
+      return { ok: true, status: 200, json: async () => answer } as Response;
+    }) as typeof globalThis.fetch;
+    const client = new PocketClient({
+      wsBase: 'ws://test',
+      fetch,
+      webauthn: {
+        ...fakeWebAuthn,
+        getAssertion: (challenge, _rpId, allowCredentials) => {
+          prompts.push({ challenge, allowCredentials });
+          return harness.authenticator.assert(challenge, ORIGIN);
+        },
+      },
+      createWebSocket: () => harness.relay.openClientSocket(),
+      knownBurrows,
+      pendingDeletions: memoryPendingDeletions(),
+      storage: memoryStorage(),
+    });
+    await client.signin();
+    prompts.length = 0;
+    return { client, prompts, finished };
+  }
+
+  /** The challenge an honest `begin` would answer for another handshake's transcript. */
+  const anotherHandshake = async (answer: ReauthBeginResponse, binding: PresenceBinding) => ({
+    ...answer,
+    challenge: await presenceChallenge({ ...binding, handshakeHash: randomBase64Url(32) }, answer.relayNonce),
+  });
+
+  it('refuses a challenge bound to another connection before any prompt, so that one gains no presence', async () => {
+    let burrowClock = Date.now();
+    const harness = await makeE2eHarness({ burrowNow: () => burrowClock });
+    const { burrowId, relay, noiseStatic, authenticator } = harness;
+    await harness.pairAndApprove(await harness.mintInvitation());
+    // Past the window the pairing opened, so the connection needs a proof.
+    burrowClock += PRESENCE_WINDOW_MAX_MS + 1;
+
+    // Another connection on this phone's own paired static, which this phone never opened.
+    const record = harness.knownBurrows.records.get(burrowId)!;
+    const clientStatic = {
+      privateKey: record.clientStaticKeyPair.privateKey,
+      publicKey: fromBase64Url(record.clientStaticKeyPair.publicKeyRaw),
+    };
+    const open = (clientId: string, connectionId: string) =>
+      openConnectionSession({
+        socket: relay.burrowSocket,
+        burrowId,
+        clientId,
+        connectionId,
+        clientStatic,
+        burrowStaticPublicKey: noiseStatic.publicKey,
+      });
+    const other = { clientId: testRoutingId(), connectionId: testRoutingId() };
+    const otherSession = await open(other.clientId, other.connectionId);
+    const otherBinding: PresenceBinding = {
+      kind: 'connection',
+      burrowId,
+      connectionId: other.connectionId,
+      burrowChallenge: otherSession.burrowChallenge,
+      handshakeHash: toBase64Url(otherSession.session.handshakeHash),
+      passkeyCredentialId: authenticator.credentialId,
+    };
+    const otherNonce = randomBase64Url(32);
+    const phone = await behindRelay(harness, async (answer) => ({
+      ...answer,
+      challenge: await presenceChallenge(otherBinding, otherNonce),
+    }));
+
+    await expect(phone.client.connect(burrowId)).rejects.toThrow(PRESENCE_CHALLENGE_MISMATCH_MESSAGE);
+    expect(phone.prompts).toEqual([]);
+    expect(phone.finished).toEqual([]);
+
+    // The other connection presents whatever reached `finish`: with no tap, the
+    // Burrow admits it to nothing and opens no window for the static.
+    sendE2eFrame(relay.burrowSocket, {
+      clientId: other.clientId,
+      burrowId,
+      kind: 'connection',
+      id: other.connectionId,
+      step: 'transport',
+      ct: toBase64Url(
+        otherSession.session.sendControl({
+          presence: {
+            binding: otherBinding,
+            relayNonce: otherNonce,
+            accountId: ACCOUNT_ID,
+            passkeyCredentialId: authenticator.credentialId,
+            passkeyPublicKey: authenticator.publicKey,
+            assertion: phone.finished[0],
+          },
+        }),
+      ),
+    });
+    expect(
+      await readOutcome(relay.burrowSocket, otherSession.session, 'connection', other.connectionId),
+    ).toMatchObject({ ok: false });
+    expect((await open(testRoutingId(), testRoutingId())).offer).toBe('none');
+
+    // An honest `begin` still connects, with the one prompt it needs.
+    const honest = await behindRelay(harness, async (answer) => answer);
+    expect(await honest.client.connect(burrowId)).toEqual({ ok: true, burrowLabel: BURROW_LABEL });
+    expect(honest.prompts).toHaveLength(1);
+  });
+
+  it('refuses a Relay challenge it did not derive before any prompt, when pairing', async () => {
+    const harness = await makeE2eHarness();
+    const phone = await behindRelay(harness, anotherHandshake, memoryKnownBurrows());
+
+    await expect(phone.client.pair(await harness.mintInvitation(), POCKET_LABEL)).rejects.toThrow(
+      PRESENCE_CHALLENGE_MISMATCH_MESSAGE,
+    );
+    expect(phone.prompts).toEqual([]);
+    expect(phone.finished).toEqual([]);
+    expect(harness.approvals).toEqual([]);
+  });
+
+  it('offers the authenticator only the paired credential, whatever the Relay lists', async () => {
+    const harness = await makeE2eHarness();
+    const phone = await behindRelay(
+      harness,
+      async (answer) => ({ ...answer, allowCredentials: ['another-credential', ...answer.allowCredentials] }),
+      memoryKnownBurrows(),
+    );
+    const invitation = await harness.mintInvitation();
+    const pairing = phone.client.pair(invitation, POCKET_LABEL, () => {});
+    await waitFor(() => harness.approvals.length > 0, 'the Burrow to surface an approval');
+    harness.approvals[0]!.deny();
+
+    await pairing;
+    expect(phone.prompts.map((prompt) => prompt.allowCredentials)).toEqual([[harness.authenticator.credentialId]]);
   });
 });
 
