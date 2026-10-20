@@ -32,7 +32,7 @@ export function markdownFormat(markdown: string): Options {
       },
       text(node, _parent, state, info) {
         const safe = state.safe(node.value, { ...info, encode: ['<', '>'] })
-          .replace(/&#x3C;/gi, '&lt;').replace(/&#x3E;/gi, '&gt;');
+          .replace(/\\[^]|&#x3([CE]);/g, (match, hex: string | undefined) => hex ? (hex === 'C' ? '&lt;' : '&gt;') : match);
         // Restore only simple, complete labels. Keep escapes inside link labels,
         // list items (task syntax), and documents with reference definitions.
         if (references || state.stack.some(kind => ['label', 'reference', 'listItem'].includes(kind))) return safe;
