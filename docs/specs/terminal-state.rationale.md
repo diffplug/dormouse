@@ -14,6 +14,8 @@ Native path payloads are not URLs: decoding `%20` or trimming edge spaces change
 
 ## Shell-integration injection
 
+**Why Unix integration scripts stay LF in Windows builds.** A Windows checkout with `core.autocrlf=true` converted the bundled Bash script to CRLF; WSL Bash failed on `do\r` before sourcing the user profile, so commands installed through that profile disappeared from PATH (observed on WSL2, 2026-10). `.gitattributes` keeps the packaged source valid for Unix shells.
+
 **Why the mechanism cannot be uniform.** One env var guarantees a `PATH` binary is *found*, but no shell has an env var for *run our hook code on every prompt* — hence a per-shell mechanism, and hence the Channel column: an env-var channel is as reliable as the `PATH` prepend, while a `shellArgs` channel only fires for the launch shapes Dormouse recognizes.
 
 **Why bash injection keys on the launch args.** `--init-file` and login mode are mutually exclusive, so the script has to replace login-profile sourcing itself, which is only safe when the launch was a plain interactive/login shell — Git Bash's `--login -i` is why login flags stay in the allowed set, while anything with a specific `-c <cmd>` is a job, not a session.

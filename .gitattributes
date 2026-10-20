@@ -10,6 +10,11 @@
 # The POSIX `dor` launcher (no extension) must stay LF.
 dor/bin/dor text eol=lf
 
+# Windows bundles also supply these scripts to WSL and Git Bash.
+# CRLF breaks parsing before the login profile can restore the user's PATH.
+standalone/sidecar/shell-integration/bash/** text eol=lf
+standalone/sidecar/shell-integration/zsh/** text eol=lf
+
 # Markdown merges sentence by sentence once `pnpm setup:git` defines this
 # driver (scripts/md-merge.mjs); until then Git merges these files by line.
 *.md merge=md-sentences

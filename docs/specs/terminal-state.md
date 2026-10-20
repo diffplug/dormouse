@@ -79,7 +79,9 @@ Source of truth: `TerminalProtocolParser` / `commandLineEvents` in `lib/src/lib/
 
 **bash's `E` is the submitted line, read back from history only when the last entry provably is it, else its first simple command** (`$BASH_COMMAND`) (rationale).
 
-**Both distributions ship the scripts**: standalone per `docs/specs/standalone.md` -> "Build and development", the VS Code build into `dist/shell-integration`, which the host names in `DORMOUSE_SHELL_INTEGRATION_DIR`.
+**Both distributions ship scripts**: standalone via sidecar resources (`docs/specs/standalone.md` -> "Build and development"), VS Code in `dist/shell-integration`, located through `DORMOUSE_SHELL_INTEGRATION_DIR`.
+
+**Must ship bash/zsh scripts as LF, including Windows packages** (rationale).
 
 **Emitted fields must be filtered before they are written — a security boundary.** An attacker-chosen directory name or command can carry an OSC terminator (BEL, `ESC \`, or the C1 ST `U+009C`) that ends the `633` sequence early, so the remainder arrives as a fresh, fully-trusted OSC. **The parser cannot defend against this** — it scans raw bytes (rationale). The field grammar the parser decodes:
 
