@@ -48,10 +48,6 @@
 
 **Why the socket path is hashed.** macOS caps a unix socket path near 104 bytes, and `context.globalStorageUri.fsPath` is most of that on its own — joining a name onto it overflows.
 
-**Why the Windows pipe name is keyed by the token.** The pipe namespace is machine-wide, and `peerDirIsSafe` has no directory to check there, so a name derived from the storage path alone is one another local user can compute and create first. The handshake still keeps them from being served, but every window's bind then fails and the peer link and remote control stay down. Keyed by the token, the name is known only to processes that can read `burrow.peer-token`, which sits under the user's profile.
-
-**Why a Windows broker still answers the path-only name.** An extension update reaches each VS Code window only when that window restarts its extension host, so old and new builds run side by side. Without the shared name each would elect its own broker, and two brokers displace each other on the Relay (above). The path-only name stays squattable, which leaves an older build where it was; the keyed pipe serves regardless.
-
 **Why the enrollment is memoized.** `SecretStorage` is a keychain round trip, and both the activation probe and the service want the same answer.
 
 **Why the memo must be dropped on any window's change.** Without it a window promoted to broker could resurrect an enrollment another window had cleared, or never see one another window had just created — `SecretStorage` is shared across all of an extension's windows.

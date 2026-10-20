@@ -5,8 +5,7 @@
  */
 
 import { vi } from 'vitest';
-import { createHash, createHmac } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { access, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -27,20 +26,16 @@ export async function tempStorageDir(): Promise<string> {
 
 /**
  * The one path every window of an installation contends for, mirroring
- * `peerSocketPath()` and `peerDirPath()`. Duplicated on purpose: a derivation
- * that drifted would silently give each window its own lease and its own
- * Burrow, and the per-user directory (unix) or the token key (Windows) is the
- * layer that keeps another OS user from creating the path first. On Windows the
- * name needs the installation's token, so it must be written first.
+ * `socketPath()` and `peerDirPath()`. Duplicated on purpose: a derivation that
+ * drifted would silently give each window its own lease and its own Burrow, and
+ * the per-user directory is the layer that keeps another OS user from creating
+ * the path first.
  */
 export function derivedSocketPath(storageDir: string): string {
-  if (process.platform !== 'win32') {
-    const id = createHash('sha256').update(storageDir).digest('hex').slice(0, 12);
-    return join(tmpdir(), `dormouse-peer-${process.getuid?.() ?? 0}`, `${id}.sock`);
-  }
-  const token = readFileSync(join(storageDir, 'burrow.peer-token'), 'utf8').trim();
-  const id = createHmac('sha256', token).update(storageDir).digest('hex').slice(0, 32);
-  return `\\\\.\\pipe\\dormouse-peer-${id}`;
+  const id = createHash('sha256').update(storageDir).digest('hex').slice(0, 12);
+  return process.platform === 'win32'
+    ? `\\\\.\\pipe\\dormouse-peer-${id}`
+    : join(tmpdir(), `dormouse-peer-${process.getuid?.() ?? 0}`, `${id}.sock`);
 }
 
 export async function removeDir(dir: string): Promise<void> {
