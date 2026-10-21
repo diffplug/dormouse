@@ -213,7 +213,7 @@ Source of truth: `Verify AUDIT_PAT is provisioned` in `.github/workflows/securit
 - **FAIL IF** `S39` a canary publishes seed detail: the step summary or the `canary-recall` artifact carries anything but the counts and a validated run link, or the scorecard, the seeds applied, or a fragment leaves the runner but as age ciphertext to `.github/audit/transcript-recipient.txt`. Pinned by `scripts/security-audit-canary.test.mjs`.
 - **FAIL IF** `S40` a seed stops applying to the tree, alone or over the rest of the pool, or names an ID no rule carries, a rule no longer holding its phrase, or one its `Domain:` does not own, or a code domain has fewer than three seeds. Pinned by `scripts/security-audit-canary.test.mjs`, which `pnpm test` runs.
 
-`scripts/security-audit-local.sh canary --key <run ID>` seeds what that CI canary run seeded, when run at its commit.
+`scripts/security-audit-local.sh canary --key <run ID>` seeds that CI canary run's commit with what that run seeded.
 
 Source of truth: `seed` and `score` in `scripts/security-audit-canary.mjs`; the `canary` job in `.github/workflows/security-audit.yaml`; `run_canary` in `scripts/security-audit-local.sh`.
 
@@ -224,7 +224,7 @@ dormouse.sh/security shows a rolling recall under "How the guarantees are checke
 - **A record out of shape fails the snapshot**, never repaired or skipped: a field but the scorer's, a count not a non-negative integer, more caught than seeded, or a link but to its own run on `diffplug/dormouse`.
 - **Every run in the window counts as its record has it** (rationale): an unfinished domain's seeds stay seeded, caught only by what it reported, and the run shows its unfinished count. A run with no `canary-recall` artifact is listed without counts.
 - The generator downloads `canary-recall` and `codex-recall` alone, never `canary-transcript`.
-- **A red-team record counts only from an admin's dispatch on `main`**, paired with its canary run by link, the newest per run; one whose seeded count differs from that run's, or whose either count falls below Claude's or above the two engines' sum, fails the snapshot.
+- **A red-team record pairs with its canary run by link**, the newest successful run on `main` per canary run; one whose seeded count differs from that run's, or whose either count falls below Claude's or above the two engines' sum, fails the snapshot.
 
 Source of truth: `summarize` in `website/scripts/generate-canary-recall.js`; `CanaryRecall` in `website/src/components/CanaryRecall.tsx`.
 

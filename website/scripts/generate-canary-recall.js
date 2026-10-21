@@ -9,7 +9,7 @@
  * `canary-recall` artifact — never `canary-transcript`, which is ciphertext and
  * not ours to open here — validates it, and writes
  * website/src/data/canary-recall.json. The red team's records ride along:
- * each admin-dispatched `codex-audit-report.yaml` run's `codex-recall`, paired
+ * each successful `codex-audit-report.yaml` run's `codex-recall`, paired
  * with the canary run whose seeds it shares (docs/specs/security-audit.md ->
  * "Red team"). Run by hand with the dependency
  * snapshots (docs/specs/deploy.md -> "Release checklist"), because
@@ -156,20 +156,13 @@ function listCanaryRuns(since) {
 }
 
 /**
- * The successful red-team runs on `main` created since `since`, each
- * dispatched by an admin: `codex-audit-report.yaml` refuses anyone else, and
- * this reads the role again rather than trust that it did.
+ * The successful red-team runs on `main` created since `since`. Success alone
+ * is an admin's dispatch: `codex-audit-report.yaml` fails any other.
  */
 function listCodexRuns(since) {
   const query = `repos/${REPO}/actions/workflows/${CODEX_WORKFLOW}/runs?branch=main&status=success&created=%3E%3D${since}&per_page=100`;
-  const runs = gh(['api', '--paginate', '--jq', '.workflow_runs[]', query]).trim().split('\n').filter(Boolean).map((l) => JSON.parse(l))
+  return gh(['api', '--paginate', '--jq', '.workflow_runs[]', query]).trim().split('\n').filter(Boolean).map((l) => JSON.parse(l))
     .filter((r) => r.display_title === CODEX_TITLE && r.head_branch === 'main' && r.head_repository?.full_name === REPO && r.event === 'workflow_dispatch');
-  const roles = new Map();
-  const role = (login) => {
-    if (!roles.has(login)) roles.set(login, gh(['api', `repos/${REPO}/collaborators/${login}/permission`, '--jq', '.role_name']).trim());
-    return roles.get(login);
-  };
-  return runs.filter((r) => /^[A-Za-z0-9-]+$/.test(r.triggering_actor?.login ?? '') && role(r.triggering_actor.login) === 'admin');
 }
 
 /** The run's one-file artifact `name`, parsed, or null when the run has no unexpired one. */

@@ -22,8 +22,8 @@
 # recall"): it copies the committed tree to a temporary directory, seeds it from
 # `.github/audit/canaries/` as CI does, runs the code domains there, and
 # scores their fragments. Your checkout is never touched, and nothing is filed.
-# `--key` takes a CI canary run's seed key, its run ID, so the same commit seeds
-# the same seeds that run did.
+# `--key` takes a CI canary run's seed key, its run ID: the canary then seeds
+# that run's commit, read on your `gh` login, with the seeds that run dealt.
 #
 # `--engine codex` runs the same prompts on Codex instead of Claude: the red
 # team (docs/specs/security-audit.md -> "Red team"), advisory, never the
@@ -160,17 +160,25 @@ run_domain_recorded() {
   return "$status"
 }
 
-# The command that publishes the red team's report, printed, never run.
+# The command that publishes the red team's report on the commit it audited,
+# printed, never run.
 print_codex_report() {
-  local commit
-  commit=$(git rev-parse HEAD 2>/dev/null) || commit="<commit>"
+  local commit="$1"
+  shift
   echo
   echo "==> advisory: a Codex verdict never gates a release (docs/specs/security-audit.md -> \"Red team\")."
+  echo "==> to publish them:"
+  echo "gh workflow run codex-audit-report.yaml -R $GITHUB_REPOSITORY --ref main -f commit=$commit -f model=$CODEX_MODEL $*"
+}
+
+# The red team's report on the domains just run in the working tree.
+print_codex_verdicts() {
+  local commit
+  commit=$(git rev-parse HEAD 2>/dev/null) || commit="<commit>"
   if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
     echo "==> the checkout has uncommitted changes; these results are of that tree, not of $commit." >&2
   fi
-  echo "==> to publish them:"
-  echo "gh workflow run codex-audit-report.yaml -R $GITHUB_REPOSITORY --ref main -f commit=$commit -f model=$CODEX_MODEL $*"
+  print_codex_report "$commit" "-f verdicts='${VERDICTS# }'"
 }
 
 # The open ledger findings every domain re-verifies, as CI's `List open
@@ -205,15 +213,17 @@ run_github_state() {
   node scripts/security-audit-report.mjs check audit-github-state.md >&2
 }
 
-# The canary, in a copy of the committed tree: seeded, audited by the code
+# The canary, in a copy of a committed tree: seeded, audited by the code
 # domains, then scored. `--key` (or `CANARY_KEY`) picks the seeds; the same
-# key and pool seed the same way, so a CI canary run's ID over its commit
-# seeds what it seeded (`seed --key "$GITHUB_RUN_ID"` in the workflow).
+# key and pool seed the same way. A `--key` that is a CI canary run's ID
+# (`seed --key "$GITHUB_RUN_ID"` in the workflow) seeds that run's commit,
+# read from the API, so it seeds what that run seeded whatever is checked out.
 run_canary() {
-  local count=8 key="${CANARY_KEY:-}" claude_card="" tree stash domain
+  local count=8 key="${CANARY_KEY:-}" run_key="" commit="HEAD" claude_card="" tree stash domain
   while [ $# -gt 0 ]; do
     case "$1" in
-      --key) key="${2:-}"; shift 2 || { echo "error: --key needs a value" >&2; return 64; } ;;
+      --key) key="${2:-}"; shift 2 || { echo "error: --key needs a value" >&2; return 64; }
+        case "$key" in ''|*[!0-9]*) run_key="" ;; *) run_key="$key" ;; esac ;;
       --claude-scorecard) claude_card="${2:-}"; shift 2 || { echo "error: --claude-scorecard needs a file" >&2; return 64; } ;;
       *[!0-9]*|'') echo "error: unexpected canary argument '$1'" >&2; return 64 ;;
       *) count="$1"; shift ;;
@@ -221,15 +231,21 @@ run_canary() {
   done
   if [ -n "$claude_card" ]; then
     [ "$ENGINE" = codex ] || { echo "error: --claude-scorecard is the Codex engine's" >&2; return 64; }
-    [ -n "$key" ] || { echo "error: --claude-scorecard needs the --key of the run it scored" >&2; return 64; }
+    [ -n "$run_key" ] || { echo "error: --claude-scorecard needs the --key of the run it scored" >&2; return 64; }
     [ -f "$claude_card" ] || { echo "error: no scorecard at $claude_card" >&2; return 1; }
     claude_card=$(cd "$(dirname "$claude_card")" && pwd)/$(basename "$claude_card")
   fi
   key="${key:-$(date +%s)}"
+  if [ -n "$run_key" ]; then
+    commit=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_key" --jq .head_sha) && [ -n "$commit" ] ||
+      { echo "error: could not read run $run_key's commit, which its seeds were dealt over" >&2; return 1; }
+    git cat-file -e "$commit^{commit}" 2>/dev/null ||
+      { echo "error: run $run_key audited $commit, which this clone does not have; fetch it first" >&2; return 1; }
+  fi
   tree=$(mktemp -d)
   stash=$(mktemp -d)
-  git archive HEAD | tar -x -C "$tree"
-  echo "==> canary: seeding $count in $tree"
+  git archive "$commit" | tar -x -C "$tree"
+  echo "==> canary: seeding $count in $tree ($commit)"
   (cd "$tree" && node scripts/security-audit-canary.mjs seed --key "$key" --count "$count" --stash "$stash" &&
     pnpm install --frozen-lockfile >/dev/null)
   # Run here rather than through the copy's runner, which would read the real
@@ -240,18 +256,19 @@ run_canary() {
     --scorecard "$stash/scorecard.json" --public "$stash/canary-recall.json" ${claude_card:+--union "$claude_card"})
   echo "==> scorecard: $stash/scorecard.json; seeded tree: $tree"
   [ "$ENGINE" = codex ] || return 0
-  case "$key" in
-    *[!0-9]*) echo "==> keyed by no CI run, so there is no canary run to publish against." ; return 0 ;;
-  esac
+  if [ -z "$run_key" ]; then
+    echo "==> keyed by no CI run, so there is no canary run to publish against."
+    return 0
+  fi
   if [ -z "$claude_card" ]; then
-    echo "==> to publish, re-run with --claude-scorecard: the scorecard.json in run $key's decrypted canary-transcript."
+    echo "==> to publish, re-run with --claude-scorecard: the scorecard.json in run $run_key's decrypted canary-transcript."
     return 0
   fi
   # shellcheck disable=SC2046,SC2016
-  print_codex_report $(node -e '
+  print_codex_report "$commit" $(node -e '
     const card = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
     console.log(`-f canary_run=${process.argv[2]} -f canary_seeded=${card.seeded} -f canary_caught=${card.caught} -f canary_either=${card.either} -f canary_unfinished=${card.unfinished.length}`);
-  ' "$stash/scorecard.json" "$key")
+  ' "$stash/scorecard.json" "$run_key")
 }
 
 if [ $# -gt 0 ]; then
@@ -263,7 +280,7 @@ if [ $# -gt 0 ]; then
   esac
   write_open_findings
   run_domain_recorded "$1" || status=$?
-  [ "$ENGINE" = claude ] || print_codex_report "-f verdicts='${VERDICTS# }'"
+  [ "$ENGINE" = claude ] || print_codex_verdicts
   exit "$status"
 fi
 
@@ -281,5 +298,5 @@ echo
 echo "==> fragments:"
 ls -la audit-*.md 2>/dev/null || echo "  (none)"
 echo "==> each verdict above is the one CI computes; there is no merge here, so read the fragments directly."
-[ "$ENGINE" = claude ] || print_codex_report "-f verdicts='${VERDICTS# }'"
+[ "$ENGINE" = claude ] || print_codex_verdicts
 exit "$status"
