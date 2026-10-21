@@ -104,7 +104,7 @@ describe('terminal-report-filter: inputCanStartWork', () => {
     expect(inputCanStartWork('\x1b[<35;12;4M')).toBe(false); // SGR hover
   });
 
-  it('rejects a wheel tick, the user's input that asks for no work', () => {
+  it('rejects a wheel tick, input that asks for no work', () => {
     expect(inputCanStartWork('\x1b[<65;12;4M', { userInput: true })).toBe(false);
   });
 
