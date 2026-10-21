@@ -17,8 +17,7 @@
  */
 
 import {
-  HOSTED_ENROLLMENT_END_REASONS,
-  type HostedEnrollmentState,
+  parseHostedEnrollmentState,
   type InvitationEvent,
   type PushSendSummary,
   type BurrowConsoleStatus,
@@ -236,31 +235,6 @@ function refreshAfterMutation(): Promise<void> {
   return refreshBurrowStatus();
 }
 
-/**
- * A `hostedEnrollment` as this build can draw it, or `null` for a shape it does
- * not know. Built field by field, in a fixed order, which {@link STATUS_FIELDS}
- * compares on.
- */
-function hostedEnrollmentOf(value: unknown): HostedEnrollmentState | null {
-  if (!value || typeof value !== 'object') return null;
-  const state = value as Record<string, unknown>;
-  if (state.status === 'waiting') {
-    const { userCode, verificationUrl, expiresAt } = state;
-    return typeof userCode === 'string' && typeof verificationUrl === 'string' && typeof expiresAt === 'number'
-      ? { status: 'waiting', userCode, verificationUrl, expiresAt, accountFull: state.accountFull === true }
-      : null;
-  }
-  if (state.status === 'redeeming') return { status: 'redeeming' };
-  if (state.status !== 'ended') return null;
-  const reason = HOSTED_ENROLLMENT_END_REASONS.find((known) => known === state.reason) ?? 'failed';
-  return {
-    status: 'ended',
-    reason,
-    ...(typeof state.message === 'string' ? { message: state.message } : {}),
-    ...(typeof state.burrowId === 'string' ? { burrowId: state.burrowId } : {}),
-  };
-}
-
 async function readBurrowStatus(): Promise<void> {
   const active = burrowLink();
   if (!active) {
@@ -275,7 +249,7 @@ async function readBurrowStatus(): Promise<void> {
     // window may extend (`docs/specs/vscode.md` → "Peer surfaces").
     setState(
       status
-        ? { kind: 'ready', status: { ...status, hostedEnrollment: hostedEnrollmentOf(status.hostedEnrollment) } }
+        ? { kind: 'ready', status: { ...status, hostedEnrollment: parseHostedEnrollmentState(status.hostedEnrollment) } }
         : UNSUPPORTED,
     );
   } catch (error) {

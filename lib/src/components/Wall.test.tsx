@@ -1,3 +1,4 @@
+import { previousWorkspaceSession } from '../lib/window-session-aggregator';
 /**
  * @vitest-environment jsdom
  *
@@ -112,6 +113,20 @@ function hostBrowsers(...args: Parameters<typeof installBrowserHost>): ReturnTyp
 }
 
 describe('Wall on the Lath engine', () => {
+
+  it('reattaches the Door itself when a persisted token names another Surface', async () => {
+    await act(async () => root.render(<Wall initialPaneIds={['surface:a']} initialDoors={[{
+      id: 'surface:door-a', title: 'A',
+      token: { leafId: 'surface:wrong', weight: 0.5, siblingId: 'surface:a', edge: 'right', index: 1, fingerprint: null },
+    }]} />));
+    await flush();
+    await act(async () => { container.querySelector<HTMLElement>('[data-door-id="surface:door-a"] button')!.click(); });
+    await flush();
+    expect(container.querySelector('[data-lath-leaf="surface:door-a"]')).not.toBeNull();
+    expect(container.querySelector('[data-lath-leaf="surface:wrong"]')).toBeNull();
+    expect(container.querySelector('[data-door-id="surface:door-a"]')).toBeNull();
+  });
+
   it('consumes dirty reports only for Tool-designated members, including minimized Tools', async () => {
     await act(async () => root.render(<Wall initialPaneIds={['surface:a']} initialDoors={[{
       id: 'surface:tool-door', title: 'storybook', component: 'tool', tabComponent: 'tool',
@@ -338,6 +353,49 @@ describe('Wall on the Lath engine', () => {
     expect(saved!.lathLayout!.version).toBe(1);
     // The surviving pane is present in the Lath layout's leaf meta.
     expect(Object.keys(saved!.lathLayout!.leafMeta ?? {})).toContain('surface:a');
+  });
+
+  it.each(['split', 'close', 'minimize', 'no change'] as const)('validates the transfer snapshot after %s during its CWD probe', async (change) => {
+    await act(async () => root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />));
+    await flush();
+    const handle = getWallHandle(DEFAULT_WORKSPACE_ID)!;
+    await act(async () => { await handle.flushPersistence(); });
+    let resolveCwd!: (cwd: string) => void;
+    vi.spyOn(fake, 'getCwd').mockResolvedValue('/fresh')
+      .mockImplementationOnce(() => new Promise(resolve => { resolveCwd = resolve; }));
+    const prepared = handle.prepareWorkspaceTransfer();
+    const outcome = prepared.then(() => 'accepted', error => error.message);
+    await act(async () => {
+      if (change === 'close') {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+          method: SURFACE_CONTROL_METHODS.kill,
+          params: { surface: 'surface:a', confirmation: { mode: 'dangerously' } },
+          respond: () => {},
+        } }));
+      } else if (change === 'minimize') container.querySelector<HTMLButtonElement>('[data-lath-leaf="surface:a"] [aria-label="Minimize"]')!.click();
+      else if (change === 'split') window.dispatchEvent(new KeyboardEvent('keydown', { key: '|', bubbles: true }));
+    });
+    await flush();
+    if (change === 'split') expect(handle.surfaceIds()).toHaveLength(2);
+    else if (change === 'close') expect(handle.surfaceIds()).not.toContain('surface:a');
+    else if (change === 'minimize') expect(handle.serializeNow().doors).toEqual([expect.objectContaining({ id: 'surface:a' })]);
+    resolveCwd('/fresh');
+    expect(await outcome).toBe(change === 'no change' ? 'accepted' : 'Workspace changed while preparing its move; try again');
+    if (change === 'no change') expect((await prepared).payload.workspace.session.panes).toEqual([expect.objectContaining({ id: 'surface:a', cwd: '/fresh' })]);
+  });
+
+  it('still publishes fresh CWDs from an ordinary Workspace save when the layout changes during its probe', async () => {
+    await act(async () => root.render(<Wall workspaceId={DEFAULT_WORKSPACE_ID} initialPaneIds={['surface:a']} initialMode="command" />));
+    await flush();
+    const handle = getWallHandle(DEFAULT_WORKSPACE_ID)!;
+    await act(async () => { await handle.flushPersistence(); });
+    let resolveCwd!: (cwd: string) => void;
+    vi.spyOn(fake, 'getCwd').mockResolvedValue('/fresh')
+      .mockImplementationOnce(() => new Promise(resolve => { resolveCwd = resolve; }));
+    const saving = handle.flushPersistence();
+    await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: '|', bubbles: true })));
+    await act(async () => { resolveCwd('/fresh'); await saving; });
+    expect(previousWorkspaceSession(DEFAULT_WORKSPACE_ID)?.panes.find(p => p.id === 'surface:a')?.cwd).toBe('/fresh');
   });
 
   it('honors a no-probe flush queued behind a probing save', async () => {

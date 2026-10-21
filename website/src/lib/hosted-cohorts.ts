@@ -49,7 +49,8 @@ function count(value: unknown): number | undefined {
  * becoming a leak.
  */
 function sameOriginPath(value: unknown): string | undefined {
-  return typeof value === "string" && /^\/(?![/\\])/.test(value) ? value : undefined;
+  // URL parsing removes these characters before resolving the authority.
+  return typeof value === "string" && !/[\t\r\n]/.test(value) && /^\/(?![/\\])/.test(value) ? value : undefined;
 }
 
 function founder(value: unknown): Founder | undefined {

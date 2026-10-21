@@ -22,8 +22,7 @@ import type { SessionFlushRequest } from '../../lib/platform/types';
 export interface SessionPersistenceHandle {
   /** Persist immediately, awaiting the whole queued pipeline. */
   flush: (options?: SaveOptions) => Promise<void>;
-  /** Build this Workspace's record without publishing it — what a Workspace
-   *  leaving for another Window carries with it. */
+  /** Build this Workspace's record without publishing it, for a save or transfer. */
   serialize: (options?: SaveOptions) => Promise<PersistedSession>;
   /** This Workspace's record now, with no cwd probe: what a Surface move
    *  publishes in the same synchronous run as its ownership change. */
@@ -138,8 +137,7 @@ export function useSessionPersistence({
     return { panes, doors, lathLayout: lath.serializeLayout() };
   }, [lath, doorsRef]);
 
-  /** The same record a save would publish, handed back instead. The Workspace
-   *  is leaving, so nothing here may touch this Window's aggregator. */
+  /** Build only: a save publishes the result; a transfer carries it to another Window. */
   const serialize = useCallback((options?: SaveOptions): Promise<PersistedSession> => {
     const { panes, doors, lathLayout } = collect();
     return buildPersistedSession(

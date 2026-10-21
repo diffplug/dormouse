@@ -1128,7 +1128,8 @@ export function Wall({
     const fallbackRef = sel && selectedTypeRef.current === 'pane' && lath.store.has(sel)
       ? sel
       : lath.listPanes()[0]?.id;
-    const r = token ? lath.store.restoreLeaf(meta, token, { fallbackRef }) : { ok: false };
+    // A persisted placement hint cannot change the Surface being reattached.
+    const r = token?.leafId === id ? lath.store.restoreLeaf(meta, token, { fallbackRef }) : { ok: false };
     // No token, or no tier applied: add it the way a new pane is added (beside
     // the last leaf, or as the root of an empty tree).
     if (!r.ok) lath.store.addLeaf(id, meta, null);
@@ -1917,17 +1918,25 @@ export function Wall({
       return meta ? deriveDisplayedSurfaceLabel(surfaceKindFromParams(meta.params), next, persistedPanelTitle(meta.title)) : null;
     },
     flushPersistence: (options) => persistence.flush(options),
-    prepareWorkspaceTransfer: () => {
+    prepareWorkspaceTransfer: async () => {
       // No pending kill follows a Workspace to its destination.
       finalizePendingKills(ownPendingKill);
-      return prepareWorkspaceTransfer({
-      workspaceId: effectiveWorkspaceId,
-      naming: getWorkspace(effectiveWorkspaceId) ?? { name: '', nameIsAuto: false },
-      serialize: persistence.serialize,
-      surfaceIds: memberSurfaceIds,
-      hasTerminal: surfaceHasTerminal,
-      captureTools: () => captureToolParams(lath, memberSurfaceIds()),
-      });
+      const snapshot = lath.store.getSnapshot();
+      const doorSnapshot = doorsRef.current;
+      const prepared = await prepareWorkspaceTransfer({
+        workspaceId: effectiveWorkspaceId,
+        naming: getWorkspace(effectiveWorkspaceId) ?? { name: '', nameIsAuto: false },
+        serialize: persistence.serialize,
+        surfaceIds: memberSurfaceIds,
+        hasTerminal: surfaceHasTerminal,
+        captureTools: () => captureToolParams(lath, memberSurfaceIds()),
+        });
+      // The CWD probe may outlive a split, close, or minimize. Only transfers
+      // require an unchanged record; an ordinary save can publish and follow up.
+      if (lath.store.getSnapshot() !== snapshot || doorsRef.current !== doorSnapshot) {
+        throw new Error('Workspace changed while preparing its move; try again');
+      }
+      return prepared;
     },
     closeAll,
     handleDorControl,

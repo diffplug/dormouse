@@ -17,7 +17,7 @@ import {
 import { DEFAULT_RELAY_ORIGIN } from '../host/relay-origin';
 import type { BurrowConsoleStatus } from '../host/remote/service-protocol';
 import { networkPolicyResult, nothingPolicy } from '../remote/network-policy';
-import { HOSTED_PRICING_URL } from './HostedEnrollment';
+import { HOSTED_APPROVAL_ENDED_COPY, HOSTED_ENROLLMENT_CODE_LABEL, HOSTED_PRICING_URL } from './HostedEnrollment';
 import { MANAGED_VOICE_DISCLOSURE, ManagedVoiceSection, NO_PLAN_COPY } from './ManagedVoiceSection';
 import { AlarmSettingsSection } from './SettingsDialog';
 
@@ -157,6 +157,32 @@ describe('ManagedVoiceSection', () => {
     expect(command).not.toHaveBeenCalledWith('clearEnrollment');
   });
 
+  it('shows the digits to type at the account in remote control’s view, and its endings in voice’s words', async () => {
+    const waiting = makeStubManagedVoicePort(false, false, {
+      enrollment: {
+        status: 'waiting',
+        confirmDigits: '47',
+        verificationUrl: 'https://hosted.dormouse.sh/enroll?purpose=voice#7KQM-X4TD',
+        expiresAt: Date.now() + 10 * 60_000,
+        accountFull: false,
+      },
+    });
+    const { voice } = await render({ status: UNENROLLED_STATUS }, waiting);
+    expect(container.querySelector(`[aria-label="${HOSTED_ENROLLMENT_CODE_LABEL}"]`)?.textContent).toBe('47');
+    expect(button('Turn on Natural Voice')).toBeUndefined();
+    const cancel = vi.spyOn(voice, 'cancelEnrollment');
+    await act(async () => button('Cancel')!.click());
+    expect(cancel).toHaveBeenCalledOnce();
+
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await render(
+      { status: UNENROLLED_STATUS },
+      makeStubManagedVoicePort(false, false, { enrollment: { status: 'ended', reason: 'mismatch' } }),
+    );
+    expect(text()).toContain(HOSTED_APPROVAL_ENDED_COPY.voice.mismatch);
+    expect(button('Turn on Natural Voice')).toBeDefined();
+  });
 });
 
 describe('the spoken-alarm copy', () => {
