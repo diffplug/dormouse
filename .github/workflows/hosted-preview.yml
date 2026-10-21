@@ -2,19 +2,19 @@ name: Hosted PR preview
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, closed]
+    types: [opened, synchronize, reopened, labeled, unlabeled, closed]
 
 permissions:
   contents: read
 
-# Let provisioning finish before cleanup/redeploy; canceling halfway leaks resources.
-concurrency:
-  group: hosted-pr-preview-${{ github.event.pull_request.number }}
-  cancel-in-progress: false
+# Only a PR labeled `hosted-preview` deploys, so an unlabeled PR never waits on
+# the environment's approval. Removing the label or closing the PR cleans up.
 
 jobs:
   changes:
-    if: github.event.action != 'closed'
+    if: >-
+      contains(fromJSON('["opened", "synchronize", "reopened"]'), github.event.action) ||
+      (github.event.action == 'labeled' && github.event.label.name == 'hosted-preview')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -76,11 +76,17 @@ jobs:
     needs: verify
     # Never expose deployment credentials to fork code or pull_request_target.
     if: >-
-      github.event.action != 'closed' &&
+      contains(github.event.pull_request.labels.*.name, 'hosted-preview') &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       vars.HOSTED_PREVIEWS_ENABLED == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Let provisioning finish before cleanup/redeploy; canceling halfway leaks
+    # resources. Job-level, so a deploy awaiting approval never holds back the
+    # next push's verify.
+    concurrency:
+      group: hosted-pr-preview-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
     environment:
       name: hosted-preview
       url: ${{ steps.deploy.outputs.url }}
@@ -148,11 +154,15 @@ jobs:
 
   cleanup:
     if: >-
-      github.event.action == 'closed' &&
+      ((github.event.action == 'closed' && contains(github.event.pull_request.labels.*.name, 'hosted-preview')) ||
+      (github.event.action == 'unlabeled' && github.event.label.name == 'hosted-preview')) &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       vars.HOSTED_PREVIEWS_ENABLED == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    concurrency:
+      group: hosted-pr-preview-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
     environment: hosted-preview
     steps:
       # Cleanup holds deployment credentials and is not path-gated: run the base

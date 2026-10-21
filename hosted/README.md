@@ -101,11 +101,11 @@ gh variable set NEON_PREVIEW_PARENT_BRANCH --repo diffplug/dormouse --env hosted
 gh variable set HOSTED_PREVIEWS_ENABLED --repo diffplug/dormouse --body true
 ```
 
-A qualifying PR runs Hosted tests and builds before provisioning; `docs/specs/hosted.md` -> "PR previews" owns which PRs qualify and what each one gets. The URL is in the deployment environment link and job summary; no PR comment bot or write-scoped workflow token is needed.
+A PR touching Hosted runs its tests and builds; adding the `hosted-preview` label provisions a preview, which still waits for an environment reviewer's approval; `docs/specs/hosted.md` -> "PR previews" owns which PRs qualify and what each one gets. The URL is in the deployment environment link and job summary; no PR comment bot or write-scoped workflow token is needed.
 
 Open `https://dormouse-hosted-pr-N.SUBDOMAIN.workers.dev/`, request a code for a disposable address, and read it at `/dev/emails`. The PR's one-time page is at `https://dormouse-relay-pr-N.SUBDOMAIN.workers.dev/connect/`; its voice Worker has no ElevenLabs key, so speak never reaches ElevenLabs. This inbox is public to anyone with the URL. No real email or OAuth provider is contacted. A preview's Hyperdrive connects as its branch's owner role, so a preview never exercises the relay's and voice's restricted roles: a missing grant passes there, and `pnpm test:hosted`, which binds those Workers to their roles, is what catches it. The database stores messages across Worker restarts.
 
-New commits retain the URL and test accounts. Migrations are append-only; to change an already-applied migration, close the PR, wait for successful cleanup, then reopen. Closing or merging deletes the three Workers, the Hyperdrive, and the Neon branch. Rerun failed cleanup. Keep previews enabled until all live previews are removed. Manual cleanup uses `node hosted/scripts/preview.mjs cleanup` with the preview environment's credentials and `PR_NUMBER`. These credentials cannot be downloaded back from GitHub; retain independent copies in your password manager.
+New commits retain the URL and test accounts. Migrations are append-only; to change an already-applied migration, close the PR, wait for successful cleanup, then reopen. Removing the label, closing, or merging deletes the three Workers, the Hyperdrive, and the Neon branch. Rerun failed cleanup. Keep previews enabled until all live previews are removed. Manual cleanup uses `node hosted/scripts/preview.mjs cleanup` with the preview environment's credentials and `PR_NUMBER`. These credentials cannot be downloaded back from GitHub; retain independent copies in your password manager.
 
 ## Provision the production boundary
 
