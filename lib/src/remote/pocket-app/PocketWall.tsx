@@ -123,6 +123,8 @@ export function PocketWall({ adapter, onError, restoreTheme }: {
       terminal={
         <MobileWall
           sessions={wallSessions}
+          sessionItems={sessionItems}
+          onSessionTodoClear={null}
           activeSessionId={activePaneId ?? undefined}
           onActiveSessionChange={setActivePaneId}
           onSessionMinimize={() => setKeyboardMode('sessions')}
