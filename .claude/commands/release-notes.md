@@ -1,6 +1,6 @@
 ---
 name: release-notes
-description: Draft release notes, recommend and apply a version bump, and update CHANGELOG.md for the next dormouse release by analyzing all merge commits and squash-merged PRs since the last release tag. Used as step 2 of the release checklist in docs/specs/deploy.md.
+description: Draft release notes, recommend and apply a version bump, and update CHANGELOG.md for the next dormouse release by analyzing all merge commits and squash-merged PRs since the last release tag. Used as step 3 of the release checklist in docs/specs/deploy.md.
 user-invocable: true
 ---
 

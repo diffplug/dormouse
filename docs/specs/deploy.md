@@ -25,13 +25,14 @@ A release that changes remote control or Hosted runs the red team first (`docs/s
 
 Human-driven, in order:
 
-1. **Update website snapshots** — run `node website/scripts/generate-deps.js` and `node website/scripts/generate-canary-recall.js` (on your `gh` login), review the diffs in `website/src/data/dependencies-{npm,cargo,runtime}.json` and `website/src/data/canary-recall.json`, commit if changed.
-2. **Draft release notes and bump version** — run `/release-notes` at the repo root ([.claude/commands/release-notes.md](../../.claude/commands/release-notes.md)), which owns the steps. Review the diff.
-3. **Commit and tag** — `git commit -am "Release vX.Y.Z"` then `git tag vX.Y.Z`.
-4. **Push** — `git push && git push origin vX.Y.Z`, which triggers CI (Stage 1).
-5. **Run local signing** — plug in the PIV USB key, then `./scripts/sign-and-deploy.sh all X.Y.Z`: it waits for CI, verifies and signs artifacts, writes the website update manifest, and creates the GitHub Release. Secrets follow [Environment / secrets](#environment--secrets). **Must reject a dirty tree, untracked files, or commits ahead of the configured upstream**; without an upstream the script warns that push status is unknown.
-6. **Deploy website** — commit `website/public/standalone-latest.json`. Cloudflare Pages project `mouseterm` deploys `release` to `dormouse.sh`; `main` produces previews. Promote reviewed `main` with `git fetch origin` then `git push origin origin/main:release`, without force.
-7. **Verify the release**
+1. **Start a release branch** — from the main checkout, `wt switch --create release-next --base main`, then `pnpm install` in the new worktree; every later step runs there. **A release reaches `main` through one PR, never a direct push.**
+2. **Update website snapshots** — run `node website/scripts/generate-deps.js` and `node website/scripts/generate-canary-recall.js` (on your `gh` login), review the diffs in `website/src/data/dependencies-{npm,cargo,runtime}.json` and `website/src/data/canary-recall.json`, commit if changed.
+3. **Draft release notes and bump version** — run `/release-notes` at the repo root ([.claude/commands/release-notes.md](../../.claude/commands/release-notes.md)), which owns the steps. Review the diff.
+4. **Commit and tag** — `git commit -am "Release vX.Y.Z"` then `git tag vX.Y.Z`.
+5. **Push** — `git push -u origin HEAD && git push origin vX.Y.Z`, which triggers CI (Stage 1).
+6. **Run local signing** — plug in the PIV USB key, then `./scripts/sign-and-deploy.sh all X.Y.Z`: it waits for CI, verifies and signs artifacts, writes the website update manifest, and creates the GitHub Release. Secrets follow [Environment / secrets](#environment--secrets). **Must reject a dirty tree, untracked files, or commits ahead of the configured upstream**; without an upstream the script warns that push status is unknown.
+7. **Deploy website** — commit `website/public/standalone-latest.json`, push, and open the release PR. **Must merge it with a merge commit, never a squash**, so the tag stays in `main`'s history for the [build stamp](#build-stamp). Cloudflare Pages project `mouseterm` deploys `release` to `dormouse.sh`; `main` produces previews. Promote the merged `main` with `git fetch origin` then `git push origin origin/main:release`, without force.
+8. **Verify the release**
    - GitHub Release assets are correct
    - On a Mac: extract the `.tar.gz`, open the `.app`, no Gatekeeper warning
    - On Windows: run the `.exe` installer, no SmartScreen warning
@@ -174,7 +175,7 @@ Config lives in [tauri.conf.json](../../standalone/src-tauri/tauri.conf.json) (`
 
 Shape: `version`, `notes`, `pub_date`, and a `platforms` map keyed `darwin-aarch64` / `windows-x86_64` / `linux-x86_64`, each with `url` and `signature` (that bundle's `.sig`, verbatim). **The script fails rather than emit a platform with an empty signature.**
 
-Manifest URLs carry the version in the *path* (`/v0.1.0/`) while the *filenames* stay stable. **The homepage's download buttons read their URLs from this same committed manifest**, so a release is only downloadable once step 6 has deployed it (`website/src/pages/Home.tsx`).
+Manifest URLs carry the version in the *path* (`/v0.1.0/`) while the *filenames* stay stable. **The homepage's download buttons read their URLs from this same committed manifest**, so a release is only downloadable once step 7 has deployed it (`website/src/pages/Home.tsx`).
 
 Source of truth: `sign_updates` in `scripts/sign-and-deploy.sh`; `plugins.updater` in `standalone/src-tauri/tauri.conf.json`.
 
