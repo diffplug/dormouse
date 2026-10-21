@@ -821,10 +821,14 @@ export function MobileTerminalUi({
   }, [stopEdgeScroll]);
 
   useEffect(() => {
-    // Input callbacks follow the active Session; pending input from the
-    // previous one must never send to its replacement. Keep the textarea
-    // mounted so cancelling a composition does not dismiss the keyboard.
+    // Keep the textarea mounted so cancelling a composition does not dismiss
+    // the keyboard. Touch-mode changes leave its input ownership unchanged.
     if (composingRef.current) composingRef.current.cancelled = true;
+  }, [activeSessionId]);
+
+  useEffect(() => {
+    // Input callbacks follow the active Session; a gesture or confirmation
+    // begun on the previous one must never send to its replacement.
     stopEdgeScroll();
     clearGestureCompletionTimer();
     commitGestureState(MOBILE_GESTURE_IDLE_STATE);

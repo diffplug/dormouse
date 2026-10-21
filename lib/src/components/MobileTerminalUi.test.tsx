@@ -133,6 +133,20 @@ describe('MobileTerminalUi keyboard input', () => {
     expect(input.value).toBe('');
   });
 
+  it.each<Partial<MobileTerminalUiProps>>([{ activeTouchMode: 'selection' }, { interactive: false }])('keeps composition when only UI availability changes: %j', (change) => {
+    const onSendInput = vi.fn();
+    const props = { sessions: [{ id: 'same', title: 'same', active: true, episode: null }], onSendInput };
+    const { input, renderWith } = renderUi(props);
+    act(() => {
+      input.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+      setNativeFieldValue(input, '\u65e5\u672c');
+    });
+    renderWith({ ...props, ...change });
+    renderWith(props);
+    act(() => input.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '\u65e5\u672c' })));
+    expect(onSendInput.mock.calls).toEqual([['\u65e5\u672c']]);
+  });
+
   it.each(['switch', 'remove', 'return'])('drops composed text after its Session changes: %s', (transition) => {
     const originalInput = vi.fn();
     const replacementInput = vi.fn();
