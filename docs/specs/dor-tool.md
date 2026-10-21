@@ -78,7 +78,7 @@ Source of truth: `createToolHost` in `lib/src/host/tool-host.ts`; `resolveToolAp
 
 ## Serving
 
-A Tool frames a port from its Session's process-tree scan while its designated command is current, which `docs/specs/security-local.md` → Dor Tool configuration audits; an OSC announcement only selects among the discovered ports. **Must recheck Tool designation and the command run after asynchronous discovery and browser startup.**
+A Tool frames a port from its Session's process-tree scan while its designated command is current, which `docs/specs/security-local.md` → Dor Tool configuration audits; an OSC announcement only selects among discovered ports. **Must recheck Tool designation and command run after asynchronous discovery and browser startup.**
 
 | Policy | Selection |
 | --- | --- |
@@ -90,7 +90,7 @@ A Tool frames a port from its Session's process-tree scan while its designated c
 - **Must scan unbound Tools on a poll while their command runs, and a Tool alone at once when its announced port or path changes** (rationale).
 - **Must reset settle memory and retire browser resources when the observed command run changes**, even with unchanged command text (rationale).
 - **Must let a changed announced port or path override a committed conflict or browser**, but only after a matching scan; an unchanged announcement never undoes URL-bar navigation (rationale).
-- **Must stop ordinary port scans once a browser or conflict is committed**, so an unannounced port appearing after settle is not detected.
+- **Must stop ordinary port scans once a browser or conflict is committed**, so an unannounced port appearing after settle goes undetected.
 - **Must display the browser destination at once and leave the launch to the Surface's controller** (`docs/specs/dor-browser.md` → Browser Connection), in the session the Tool has or else its own `tool.<leafId>`, falling back to the embed.
 
 Reserved: **Must derive a Tool's URL again on cold restore**, compatible with future `prespawn_port` and `DORMOUSE_TOOL_PORT` in scope **dor-tools**; [Persistence and hosts](#persistence-and-hosts) owns the saved projection.
