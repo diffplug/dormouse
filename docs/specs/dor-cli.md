@@ -10,6 +10,8 @@
 
 **Both launchers must set `ELECTRON_RUN_AS_NODE=1` themselves** before `exec "$DORMOUSE_NODE" "$DORMOUSE_CLI_JS"`, or under VS Code `dor` silently does nothing and **exits 0** (rationale). **Dormouse-launched terminals must rely on injected env, never on a globally installed Node**; each launcher's `PATH`-`node` fallback is for developer/manual use. **Both launchers must return the CLI's exit status** (`dor/test/launcher.test.mjs`, including `dor.cmd` on Windows).
 
+**Must supply the current directory as `PWD` from the Windows launcher**, replacing stale inherited values.
+
 Public PTY env:
 
 - `DORMOUSE_NODE` — Node runtime the launcher execs; `process.execPath` under VS Code; standalone on Windows: `docs/specs/standalone.md` -> "Windows node subsystem".
@@ -33,7 +35,7 @@ The CLI also reads `DORMOUSE_AGENT_BROWSER_BIN` and `DORMOUSE_PLAYWRIGHT_BIN`, t
 
 **On Windows the `PATH` prepend must survive Git Bash / MSYS login:** the PTY core strips `ORIGINAL_PATH` from the child env on win32, so a login shell cannot rebuild a pre-prepend `PATH` from it (rationale). No-op for cmd.exe / PowerShell, which never read it.
 
-**A caller cwd must leave the MSYS drive form before it goes on the wire.** Git Bash exports `PWD` as a POSIX path (`/c/Users/…`) that win32 `path.resolve` would mangle into `C:\c\Users\…` and match no Surface.
+**Must convert MSYS drive paths to native Windows paths before sending a caller cwd.**
 
 Source of truth: `scripts/stage-dor-cli.mjs`, `dor/bin/dor`, `dor/bin/dor.cmd`, `withoutInheritedMsysOriginalPath` in `standalone/sidecar/pty-core.js`, `callerWorkingDirectory` in `dor/src/commands/shared.ts`.
 
