@@ -1472,13 +1472,12 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
   const sessions = new Map(); // id -> { chunks: string[], chars: number, received: number }
   const REPLAY_CHARS = 200000;
   const ptyShells = new Map(); // id -> resolved shell executable
-  const ptySurfaces = new Map(); // id -> the DORMOUSE_SURFACE_ID its shell carries
   /** The live PTY's id at `pid`, which a port scan names its roots by. */
   const idAtPid = (pid) => { for (const [id, p] of ptys) if (p.pid === pid) return id; };
   scanPorts ??= createPortScanner((pids, count) => getOpenPortsForPids(pids, {
     budgetCount: count,
     shellOf: (pid) => ptyShells.get(idAtPid(pid)),
-    surfaceOf: (pid) => ptySurfaces.get(idAtPid(pid)),
+    surfaceOf: idAtPid,
   }));
   // Repaint restoration belongs to the PTY owner, where every local and remote
   // resize passes: a later resize or repaint, exit, kill, or replacement
@@ -1601,7 +1600,6 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
     const session = { chunks: [], chars: 0, received: 0, shell: config.shell };
     sessions.set(id, session);
     ptyShells.set(id, config.shell);
-    ptySurfaces.set(id, config.env.DORMOUSE_SURFACE_ID);
 
     p.onData((data) => {
       // A generation replaced under the id never speaks for it, as its exit
@@ -1639,7 +1637,6 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
       cancelInput(id);
       ptys.delete(id);
       ptyShells.delete(id);
-      ptySurfaces.delete(id);
     });
 
     if (config.cwdWarning) {
@@ -1753,7 +1750,6 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
       stopPty(p);
       ptys.delete(id);
       ptyShells.delete(id);
-      ptySurfaces.delete(id);
     }
   }
 
@@ -1765,7 +1761,6 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
     }
     ptys.clear();
     ptyShells.clear();
-    ptySurfaces.clear();
     helpers.clear();
     sessions.clear();
   }
