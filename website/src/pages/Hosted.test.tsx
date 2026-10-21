@@ -181,6 +181,17 @@ describe("the founding card's live half", () => {
     expect(el.querySelector('[aria-label="3 founders so far"]')?.textContent).toBe("GPB");
   });
 
+  it.each([
+    "/\t/evil.example/avatar.png",
+    "/\n/evil.example/avatar.png",
+    "/\r\\evil.example/avatar.png",
+  ])("rejects avatar paths that normalize to another origin: %j", async (avatar) => {
+    expect(new URL(avatar, "https://dormouse.sh").origin).toBe("https://evil.example");
+    const el = await mountCohort({ founders: { total: 1, shown: [{ name: "Ada", avatar }] } });
+    expect(el.querySelectorAll("img")).toHaveLength(0);
+    expect(el.querySelector('[aria-label="1 founder so far"]')?.textContent).toBe("A");
+  });
+
   it("caps the row and folds the rest into +N", async () => {
     const shown = Array.from({ length: MAX_SHOWN_FOUNDERS + 5 }, (_, i) => ({ name: `F${i}` }));
     const el = await mountCohort({ founders: { total: 200, shown } });
