@@ -137,7 +137,7 @@ A Workspace's name is auto, derived from its terminals, until a user renames it;
 - **Never ask git about a remote cwd.** **Must re-ask after a command finishes** (rationale). A host without `gitInfo` names by directory.
 - **Never treat a path absent from a `gitInfo` answer, or any path of a rejected request, as "no repository"**: it is unanswered. **A host failure must reject**, never answer `{}`. An unanswered path keeps its last answer, else holds the name, and is re-asked later.
 - **Never submit an untouched rename editor**: opening it must not pin an auto-name, even one that changed while it was open.
-- **Must run only `rev-parse` and `config --get`, reading `HEAD` directly**, so `core.fsmonitor` never runs; a lookup past its deadline is left out of the answer.
+- **Must run only `config --get`, finding the repository with `localGitRepository` and reading `HEAD` directly**, so `core.fsmonitor` never runs; a lookup past its deadline is left out of the answer.
 
 Source of truth: `installWorkspaceAutoNaming` in `lib/src/lib/workspace-autoname-controller.ts`; `gitInfo` in `lib/src/host/git-info.ts`.
 

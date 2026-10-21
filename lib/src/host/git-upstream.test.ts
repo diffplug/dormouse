@@ -3,10 +3,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const GIT = '/usr/bin/git';
 const spawnAndCapture = vi.fn();
 const resolveBinaryPath = vi.fn((_name: string, _env: unknown): string | undefined => GIT);
+const localGitRepository = vi.fn(async (dir: string) => ({ gitDir: `${dir}/.git`, commonDir: `${dir}/.git`, workTree: dir }) as unknown);
 vi.mock('dor-lib-common', async (importOriginal) => ({
   ...await importOriginal<typeof import('dor-lib-common')>(),
   spawnAndCapture: (...args: unknown[]) => spawnAndCapture(...args),
   resolveBinaryPath: (name: string, env: unknown) => resolveBinaryPath(name, env),
+  localGitRepository: (dir: string) => localGitRepository(dir),
 }));
 
 const { resolveUpstreamUrl } = await import('./git-upstream');
@@ -35,6 +37,14 @@ describe('resolveUpstreamUrl', () => {
     spawnAndCapture.mockReset();
     resolveBinaryPath.mockReturnValueOnce(undefined).mockReturnValueOnce(undefined);
     expect(await resolveUpstreamUrl('/repo')).toBeNull();
+    expect(spawnAndCapture).not.toHaveBeenCalled();
+  });
+
+  it('runs no git where localGitRepository refuses the directory', async () => {
+    script(ok('origin/main'), ok('https://github.com/o/r'));
+    localGitRepository.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
+    expect(await resolveUpstreamUrl('/repo')).toBeNull();
+    expect(localGitRepository).toHaveBeenCalledWith('/repo');
     expect(spawnAndCapture).not.toHaveBeenCalled();
   });
 

@@ -1,5 +1,5 @@
-import { realpath } from 'node:fs/promises';
 import { basename, relative, sep } from 'node:path';
+import { localRealpath } from 'dor-lib-common/local-path';
 // Bundled: the `engines.vscode` floor's extension host runs Node 20.14, which
 // predates `path.matchesGlob`.
 import picomatch from 'picomatch';
@@ -77,7 +77,7 @@ async function matchingOpenRules(
 ): Promise<OpenRule[]> {
   // Canonical like the target: a logical CWD under a symlink would put `../`
   // hops into every relative path, and slash patterns would miss files in it.
-  const relativeBase = await realpath(cwd).catch(() => cwd);
+  const relativeBase = await localRealpath(cwd).then(local => local.path, () => cwd);
   const suffix = directory ? FOLDER_MATCH_SUFFIX : '';
   const relativePath = relative(relativeBase, target).split(sep).join('/') + suffix;
   const canonicalPath = target.split(sep).join('/') + suffix;

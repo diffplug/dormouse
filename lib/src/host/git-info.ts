@@ -3,13 +3,14 @@
  * (`docs/specs/layout.md` → "Workspace names"). Bundled into the standalone
  * sidecar as `git-info.cjs`.
  *
- * Only `rev-parse` and `config --get` run, and `HEAD` is read directly: nothing
- * reads the index, and `runGit` disables `core.fsmonitor` regardless. A
- * repository's `.git/config` is still read, the risk `git-upstream.ts` already
- * accepts.
+ * `localGitRepository` finds the repository, `HEAD` is read directly, and only
+ * `config --get` runs: nothing reads the index, and `runGit` disables
+ * `core.fsmonitor` regardless. A repository's `.git/config` is still read, the
+ * risk `git-upstream.ts` already accepts.
  */
 import { readFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
+import { localGitRepository } from 'dor-lib-common';
 import type { GitDirInfo, GitInfoResult } from '../lib/platform/git-types';
 import { settleAllWithin } from '../lib/settle-within';
 import { runGit } from './git-cli';
@@ -61,16 +62,15 @@ export async function lookupGitDir(path: string): Promise<GitDirInfo | null> {
   // context directory actions").
   const dir = await canonicalLocalDirectory(path);
   if (!dir) return null;
-  const [dirs, remote] = await Promise.all([
-    runGit(dir, ['rev-parse', '--path-format=absolute', '--git-common-dir', '--git-dir']),
-    // Fails harmlessly outside a repository, so it need not wait for rev-parse.
+  const [repository, remote] = await Promise.all([
+    localGitRepository(dir),
+    // `runGit` asks `localGitRepository` itself, so this need not wait.
     runGit(dir, ['config', '--get', 'remote.origin.url']),
   ]);
-  const [commonDir, gitDir] = dirs?.split('\n') ?? [];
-  if (!commonDir || !gitDir) return null;
-  const branch = await headBranch(gitDir).catch(() => null);
+  if (!repository) return null;
+  const branch = await headBranch(repository.gitDir).catch(() => null);
   if (!branch) return null;
-  const repo = (remote && remoteRepoName(remote)) || checkoutName(commonDir);
+  const repo = (remote && remoteRepoName(remote)) || checkoutName(repository.commonDir);
   return { repo, branch };
 }
 

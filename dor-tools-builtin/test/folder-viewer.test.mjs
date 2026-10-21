@@ -192,6 +192,35 @@ test('a symlink leaving the root lists as other and can be neither listed nor op
   assert.deepEqual(opened, [{ path: join(root, 'sub', 'a.txt'), preview: true }]);
 });
 
+// POSIX reads `//<root>/…` as `<root>/…`, inside the root, so only the refusal
+// keeps each link below from listing or opening.
+test('a symlink to a share lists as other, and is never followed to list, open, or compact', posixOnly, async () => {
+  await files({ sub: null, 'sub/a.txt': 'a', chain: null });
+  await symlink(`/${join(root, 'sub')}`, join(root, 'share-dir'));
+  await symlink(`/${join(root, 'sub', 'a.txt')}`, join(root, 'share-file'));
+  await symlink(`/${join(root, 'sub')}`, join(root, 'chain', 'only'));
+  const viewer = await start();
+  assert.deepEqual((await list(viewer)).entries, [
+    entry('chain', 'dir'), entry('sub', 'dir'), entry('share-dir', 'other'), entry('share-file', 'other'),
+  ]);
+  assert.deepEqual((await list(viewer, 'chain')).entries, [entry('only', 'other')]);
+  for (const path of ['share-dir', 'share-dir/a.txt', 'chain/only']) assert.equal((await list(viewer, path)).status, 404, path);
+  for (const path of ['share-dir', 'share-file', 'share-dir/a.txt']) assert.equal((await post(viewer, 'select', { path })).status, 404, path);
+  assert.equal(opened.length, 0);
+  await assert.rejects(startFolderViewer(join(root, 'share-dir'), { open: async () => ({ ok: true, status: 'sent' }) }));
+});
+
+test('runs no git in a folder whose .git names a share', { skip: !hasGit ? 'git is not installed' : posixOnly.skip }, async () => {
+  const repo = join(base, 'repo');
+  assert.equal(spawnSync('git', ['init', '-q', repo]).status, 0);
+  await writeFile(join(repo, '.git', 'info', 'exclude'), '*.log\n');
+  await files({ 'a.log': '' });
+  // git itself would take `//<base>/repo/.git` as the repository, and flag a.log.
+  await writeFile(join(root, '.git'), `gitdir: /${join(repo, '.git')}\n`);
+  assert.equal(spawnSync('git', ['check-ignore', 'a.log'], { cwd: root }).status, 0);
+  assert.deepEqual((await list(await start())).entries, [entry('.git', 'file'), entry('a.log', 'file')]);
+});
+
 test('flags git-ignored entries without running the folder\'s fsmonitor', { skip: !hasGit ? 'git is not installed' : posixOnly.skip }, async () => {
   const git = (...args) => assert.equal(spawnSync('git', args, { cwd: root }).status, 0, args.join(' '));
   git('init', '-q', '.');

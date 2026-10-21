@@ -370,6 +370,33 @@ test('outside git, the walk hands each repo it reaches to git and skips macOS Li
   }
 });
 
+test('runs no git in a folder whose .git names a share, listing it by walking instead', { skip: process.platform === 'win32' }, async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dor-share-'));
+  try {
+    const repo = join(dir, 'repo');
+    await mkdir(repo);
+    execFileSync('git', ['init', '-q'], { cwd: repo });
+    await writeFile(join(repo, '.git', 'info', 'exclude'), '*.log\n');
+    // `//<dir>/repo/.git` is `<dir>/repo/.git` to POSIX, so git itself would
+    // list from it, leaving x.log out: only the refusal keeps it in.
+    const planted = join(dir, 'planted');
+    await mkdir(planted);
+    await writeFile(join(planted, '.git'), `gitdir: /${join(repo, '.git')}\n`);
+    await writeFile(join(planted, 'own.ts'), '');
+    await writeFile(join(planted, 'x.log'), '');
+    assert.equal(execFileSync('git', ['ls-files', '--others', '--exclude-standard'], { cwd: planted }).toString(), 'own.ts\n');
+    const top = [];
+    await listFiles(planted, { onFiles: paths => top.push(...paths) });
+    assert.deepEqual(top.sort(), ['own.ts', 'x.log']);
+    // The walk hands each repository it reaches to git: this one too is refused.
+    const nested = [];
+    await listFiles(dir, { onFiles: paths => nested.push(...paths) });
+    assert.deepEqual(nested.sort(), ['planted/own.ts', 'planted/x.log']);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('listing a repository never runs the fsmonitor its own config names', { skip: process.platform === 'win32' }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'dor-fsmonitor-'));
   try {
