@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { act, StrictMode } from 'react';
+import { act, StrictMode, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakePtyAdapter, setPlatform } from '../../lib/platform';
@@ -299,6 +299,56 @@ describe('IframePanel', () => {
     expect(updateParameters).toHaveBeenLastCalledWith({ url: 'http://example.test/two' });
   });
 
+  it('reloads the observed page and preserves its history', async () => {
+    const platform = proxyPlatform();
+    const createProxy = vi.fn(async (url: string) => ({
+      ok: true as const,
+      url: url.replace('http://example.test', PROXY),
+    }));
+    platform.createIframeProxyUrl = createProxy;
+    const setTitle = vi.fn();
+    function Harness() {
+      const [params, setParams] = useState({ url: 'http://example.test/app' });
+      return <PaneWriteContext.Provider value={{
+        updateParams: (_id, patch) => setParams((current) => ({ ...current, ...patch })),
+        setTitle,
+      }}><WallActionsContext.Provider value={stubActions()}>
+        <IframePanel id="iframe-reload-current" title="Current page" params={params} />
+      </WallActionsContext.Provider></PaneWriteContext.Provider>;
+    }
+    await act(async () => root.render(<StrictMode><Harness /></StrictMode>));
+    const chrome = () => getAgentBrowserScreenController('iframe-reload-current')!;
+    const observe = async (path: string) => act(async () => {
+      window.dispatchEvent(new MessageEvent('message', {
+        origin: PROXY, data: { __dormouse: 'location', url: PROXY + path, loaded: true },
+      }));
+    });
+    await observe('/other?q=1#part');
+    const original = container.querySelector('iframe');
+    setTitle.mockClear();
+    await act(async () => chrome().chromeActions.reload());
+    expect(createProxy).toHaveBeenLastCalledWith('http://example.test/other?q=1#part', expect.any(String));
+    expect(container.querySelector('iframe')!.src).toBe(PROXY + '/other?q=1#part');
+    expect(container.querySelector('iframe')).not.toBe(original);
+    expect(setTitle).not.toHaveBeenCalled();
+
+    await observe('/third');
+    await act(async () => chrome().chromeActions.back());
+    await act(async () => chrome().chromeActions.reload());
+    await act(async () => chrome().chromeActions.forward());
+    expect(chrome().chrome().url).toBe('http://example.test/third');
+    await act(async () => chrome().chromeActions.back());
+    await act(async () => chrome().chromeActions.back());
+    expect(chrome().chrome().url).toBe('http://example.test/app');
+  });
+
+  it('reloads a raw frame even when its URL is unchanged', async () => {
+    const original = await renderPanel(stubActions(), paneProps('iframe-raw-reload'));
+    await act(async () => getAgentBrowserScreenController('iframe-raw-reload')!.chromeActions.reload());
+    expect(container.querySelector('iframe')!.src).toBe(original.src);
+    expect(container.querySelector('iframe')).not.toBe(original);
+  });
+
   it('maps proxied frame location messages into chrome without updating params', async () => {
     const updateParameters = vi.fn();
     const { platform } = installBrowserHost();
@@ -466,10 +516,10 @@ describe('iframe failures offer a way out', () => {
       expect(vi.mocked(platform.createIframeProxyUrl).mock.calls.length).toBeGreaterThan(resolved);
       expect(banner()).toBeNull();
 
-      // Flagged again, then a later report from the shim clears it.
+      // Reload replaced the frame. Flag its new document, then clear on a report.
       await report();
       await act(async () => { vi.advanceTimersByTime(2000); });
-      await act(async () => { iframe.dispatchEvent(new Event('load')); });
+      await act(async () => { container.querySelector('iframe')!.dispatchEvent(new Event('load')); });
       await act(async () => { vi.advanceTimersByTime(1100); });
       expect(banner()).not.toBeNull();
       await report('/back-on-the-proxy');
