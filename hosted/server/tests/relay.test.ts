@@ -41,9 +41,8 @@ import {
 } from "../../../remote-lib-common/test/harness/actors.mjs";
 import { ADMIN_EMAIL } from "../entitlement";
 import { migrations } from "../migrations";
-import { ENROLLMENT_TTL_MS } from "../policy-constants";
+import { ENROLLMENT_POLL_INTERVAL_S, ENROLLMENT_TTL_MS } from "../policy-constants";
 import {
-  ENROLLMENT_POLL_INTERVAL_S,
   MAX_BURROWS_PER_ACCOUNT,
   MAX_PASSKEYS_PER_ACCOUNT,
   MAX_SESSIONS_PER_ACCOUNT,

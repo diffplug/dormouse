@@ -57,7 +57,7 @@ import type {
 } from "remote-lib-common";
 import type { RelayEnv } from "./bindings";
 import { allowed } from "./one-time";
-import { ENROLLMENT_TTL_MS } from "./policy-constants";
+import { ENROLLMENT_POLL_INTERVAL_S, ENROLLMENT_TTL_MS } from "./policy-constants";
 import { relayRoom } from "./relay-room-contract";
 import { relayPushRoutes } from "./relay-push";
 import { mintVoiceToken } from "./voice-token";
@@ -87,12 +87,6 @@ export const MAX_SESSIONS_PER_ACCOUNT = 32;
 /** One live registration challenge per live setup token of the same Burrow (rationale). */
 export const MAX_SETUP_CHALLENGES_PER_BURROW = MAX_TOKENS_PER_BURROW;
 
-/**
- * Seconds a Burrow waits between polls: inside
- * `MIN_ENROLL_POLL_INTERVAL_S`–`MAX_ENROLL_POLL_INTERVAL_S`, or every shipped
- * Burrow refuses the begin.
- */
-export const ENROLLMENT_POLL_INTERVAL_S = 5;
 /**
  * A device code's leading bytes: its expiry, big-endian epoch seconds; the
  * rest of its 32 are random.
