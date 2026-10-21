@@ -256,7 +256,7 @@ Source of truth: `allowedDevRequest` in `hosted/server/dev-host-guard.ts`; `host
 
 **Must isolate each PR in three persistent workers.dev Workers (`dormouse-{hosted,relay,voice}-pr-N`), one uncached Hyperdrive all three share, and a Neon branch from an empty dedicated preview project**, all reused until the PR closes or loses the label. That Hyperdrive connects as the branch's owner, so no preview exercises the restricted roles; `hosted/server/tests` binds the relay and voice to them (rationale). Preview configs exclude production routes, triggers, and credentials; runtime bindings cannot enable OAuth, Postmark, or ElevenLabs. **Must give each relay preview its own Durable Object namespaces, each preview preview-only rate-limit namespaces, and wire each preview to its own PR's siblings** (the account's `RELAY_ROOM`, the relay's `ACCOUNT_ORIGIN`). **Must derive every preview secret from `PREVIEW_AUTH_SECRET` and its Worker's name**, the relay's VAPID pair included, so no production key reaches a preview and subscriptions survive the PR's redeploys.
 
-**Must sweep before provisioning, never at close:** each preview deploy first deletes every closed or unlabeled PR's preview (rationale).
+**Must sweep before provisioning, never at close:** each preview deploy first deletes every closed or unlabeled PR's preview (rationale). **Never let preview cleanup target production's Cloudflare account or Neon project** (`PRODUCTION_IDS`).
 
 **Must capture preview mail in Postgres and expose escaped text only**, on a public inbox that accepts only the preview's configured origin. No test clock is deployed. Preview data is disposable; it is not access-controlled.
 

@@ -314,7 +314,17 @@ function neon(env) {
   return call;
 }
 
+/** Production's Cloudflare account and Neon project (`hosted/README.md`), which no deletion here may target. */
+export const PRODUCTION_IDS = ["0a95e814ccf2b6a95d2dc3bea0a4a2b4", "young-dust-56119072"];
+
+function refuseProduction(env) {
+  for (const name of ["CLOUDFLARE_ACCOUNT_ID", "NEON_PROJECT_ID"])
+    if (PRODUCTION_IDS.includes(env[name]?.trim()))
+      throw new Error(`${name} names production; preview cleanup refuses it`);
+}
+
 export async function cleanup(env = process.env) {
+  refuseProduction(env);
   const bases = await readConfigs();
   const name = previewName(env.PR_NUMBER, bases.account.name);
   // Validate both providers before deleting anything, so a missing Neon token is caught first.
@@ -343,6 +353,7 @@ export async function cleanup(env = process.env) {
  * up when a PR closes.
  */
 export async function sweep(env = process.env) {
+  refuseProduction(env);
   const bases = await readConfigs();
   // Validates the one PR a sweep never touches: the deploy's own.
   previewName(env.PR_NUMBER, bases.account.name);
