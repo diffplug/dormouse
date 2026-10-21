@@ -254,7 +254,7 @@ Source of truth: `createPlaywrightProvider` in `lib/src/host/playwright-host.ts`
 
 The proxy instruments any `http://` upstream, loopback and remote alike: headers are rewritten per the table below and the shim injected into HTML; HTTP and WebSocket traffic passes through. A site's "do not embed" is overridden, not obeyed (rationale); the sandbox neutralizes JS framebusting. **Must refuse link-local / cloud-metadata address literals (`scheme`) after canonicalizing equivalent spellings** — decimal/octal/hex, short forms, IPv4-mapped IPv6; this checks the hostname literal, not DNS answers, and named targets remain the user's command authority.
 
-**Must refuse `https://` at every entry to the iframe renderer on a host with the proxy** (a host without it frames https raw):
+**Must refuse `https://`, regardless of scheme casing, at every entry to the iframe renderer on a host with the proxy** (a host without it frames https raw):
 
 | Entry | Outcome |
 | --- | --- |
