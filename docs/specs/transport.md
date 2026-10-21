@@ -136,7 +136,7 @@ Source of truth: the message schema in `vscode-ext/src/message-types.ts` (`Webvi
 | Direction | Message | Contract |
 | --- | --- | --- |
 | Webview → host | `dormouse:openExternal` | Open a user-confirmed external URI from an OSC 8 hyperlink; revalidation: `docs/specs/mouse-and-clipboard.md` -> "OSC 8 hyperlinks". |
-| Webview → host | `pty:getOpenPorts` | TCP listening ports of a PTY's shell **and all of its descendant subprocesses**, answered with `pty:openPorts`. |
+| Webview → host | `pty:getOpenPorts` | TCP listening ports of a PTY's shell **and all of its descendant subprocesses**, answered with `pty:openPorts`. On Windows these include programs a Git Bash shell ran across MSYS execs, and processes in a running WSL distro whose environment carries the pane's `DORMOUSE_SURFACE_ID` (rationale). |
 | Host → webview | `pty:openPorts` | De-duplicated by `(family, address, port)`; empty when the PTY is gone or enumeration fails. |
 | Webview → host | `pty:getOpenPortsMany` | `ids`, answered by `pty:openPortsMany` from one scan. |
 | Host → webview | `pty:openPortsMany` | `[]` for an id with no live PTY. |
@@ -267,7 +267,7 @@ Source of truth: `sliceSince` in `lib/src/host/replay-buffer.ts`; `answerForIds`
 
 **Never queue a port request behind another scan**, so each request's own budget holds (rationale).
 
-**Must budget port requests for both serial scans and an IPC margin per hop**: `2 × OPEN_PORT_TIMEOUT_MS + count × OPEN_PORT_TIMEOUT_PER_ID_MS + hops × OPEN_PORT_ROUND_TRIP_MARGIN_MS`. VS Code's child request uses one hop; its webview request uses two. Tauri's sidecar request uses one. **Must share the Windows socket-scan allowance across `Get-NetTCPConnection` and its `netstat` fallback**, starting none after exhaustion. The constants are mirrored across TypeScript, the sidecar, and Rust, pinned by `lib/src/lib/mirrored-constants.test.ts`.
+**Must budget port requests for both serial scans and an IPC margin per hop**: `2 × OPEN_PORT_TIMEOUT_MS + count × OPEN_PORT_TIMEOUT_PER_ID_MS + hops × OPEN_PORT_ROUND_TRIP_MARGIN_MS`. VS Code's child request uses one hop; its webview request uses two. Tauri's sidecar request uses one. **Must share the Windows socket-scan allowance across `Get-NetTCPConnection` and its `netstat` fallback**, starting none after exhaustion. **Must run Git Bash's MSYS `ps` beside the process-table read, and the WSL scan beside the socket scan within its allowance**, never as another serial step. The constants are mirrored across TypeScript, the sidecar, and Rust, pinned by `lib/src/lib/mirrored-constants.test.ts`.
 
 Source of truth: `openPortRequestTimeoutMs` in `lib/src/lib/platform/types.ts`; `open_ports_many_timeout` in `standalone/src-tauri/src/lib.rs`; `createPortScanner` in `standalone/sidecar/port-scanner.js`.
 

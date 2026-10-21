@@ -1947,6 +1947,82 @@ test('getOpenPortsForPids answers per root pid from ONE process table and ONE so
   assert.deepEqual(ports.get(300).map((p) => p.port), [5173]);
 });
 
+test('getOpenPortsForPids (win32) follows Git Bash across MSYS execs and finds WSL listeners in the distro', async () => {
+  const WSL = 'D:\\Win\\System32\\wsl.exe';
+  const MSYS_PS = 'C:\\Git\\usr\\bin\\ps.exe';
+  const shells = new Map([[100, 'C:\\Git\\bin\\bash.exe'], [500, 'D:\\Win\\System32\\WindowsPowerShell\\v1.0\\powershell.exe']]);
+  const surfaces = new Map([[100, 'surface:gb'], [500, 'surface:wsl']]);
+  const scripts = [];
+  const execFile = (cmd, args) => {
+    const script = args[args.length - 1];
+    if (cmd === POWERSHELL && script.includes('Win32_Process')) {
+      return JSON.stringify([
+        [100, 1, 'bash.exe'], [101, 100, 'bash.exe'],
+        // `node` exec'd through winpty: its MSYS parent's Windows process is gone.
+        [300, 299, 'winpty.exe'], [301, 300, 'winpty-agent.exe'], [302, 301, 'node.exe'],
+        [500, 1, 'powershell.exe'], [501, 500, 'wsl.exe'],
+        [900, 1, 'node.exe'],
+      ].map(([ProcessId, ParentProcessId, Name]) => ({ ProcessId, ParentProcessId, Name })));
+    }
+    if (cmd === POWERSHELL && script.includes('Get-NetTCPConnection')) {
+      return JSON.stringify([{ LocalAddress: '::', LocalPort: 3000, OwningProcess: 302 }, { LocalAddress: '::', LocalPort: 9000, OwningProcess: 900 }]);
+    }
+    if (cmd === MSYS_PS) {
+      return [
+        '      PID    PPID    PGID     WINPID   TTY         UID    STIME COMMAND',
+        '    14835       1   14835        101  cons0       4096 13:24:18 /usr/bin/bash',
+        'I   14869   14835   14869        300  cons0       4096 13:24:37 /usr/bin/winpty',
+      ].join('\n');
+    }
+    if (cmd === WSL && args[0] === '--list') return 'U\0b\0u\0n\0t\0u\0\r\0\n\0';
+    if (cmd === WSL) {
+      assert.deepEqual(args.slice(0, 4), ['-d', 'Ubuntu', '-e', 'sh']);
+      scripts.push(script);
+      return [
+        '/proc/2609/environ:DORMOUSE_SURFACE_ID=surface:wsl',
+        '@2609 python3',
+        'lrwx------ 1 me me 64 Oct 21 13:24 3 -> socket:[55555]',
+        '#tcp',
+        '  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode',
+        '   0: 0100007F:1F90 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 55555 1 0 100 0 0 10 0',
+        // Another Surface's listener in the same distro.
+        '   1: 0100007F:1388 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 66666 1 0 100 0 0 10 0',
+        '#tcp6',
+        '  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode',
+      ].join('\n');
+    }
+    throw new Error(`unexpected spawn: ${cmd} ${args.join(' ')}`);
+  };
+  const fsModule = { statSync: (file) => { if (file === MSYS_PS) return { isFile: () => true }; throw new Error('ENOENT'); } };
+
+  const ports = await getOpenPortsForPids([100, 500], {
+    platform: 'win32', env: WINDOWS_ENV, execFile, fsModule,
+    shellOf: (pid) => shells.get(pid), surfaceOf: (pid) => surfaces.get(pid),
+  });
+
+  assert.deepEqual(ports.get(100), [{ protocol: 'tcp', family: 'IPv6', address: '::', port: 3000, pid: 302, processName: 'node.exe' }]);
+  assert.deepEqual(ports.get(500), [{ protocol: 'tcp', family: 'IPv4', address: '127.0.0.1', port: 8080, pid: 2609, processName: 'python3' }]);
+  // Only the Surface that runs wsl.exe is looked for in the distro.
+  assert.equal(scripts.length, 1);
+  assert.match(scripts[0], /DORMOUSE_SURFACE_ID=\(surface:wsl\)/);
+});
+
+test('getOpenPortsForPids (win32) runs neither extra read for a shell that needs none', async () => {
+  const spawns = [];
+  const execFile = (cmd, args) => {
+    spawns.push(cmd);
+    const script = args[args.length - 1];
+    if (script.includes('Win32_Process')) return JSON.stringify([{ ProcessId: 100, ParentProcessId: 1, Name: 'cmd.exe' }]);
+    if (script.includes('Get-NetTCPConnection')) return '[]';
+    throw new Error(`unexpected spawn: ${cmd}`);
+  };
+  await getOpenPortsForPids([100], {
+    platform: 'win32', env: WINDOWS_ENV, execFile,
+    shellOf: () => 'D:\\Win\\System32\\cmd.exe', surfaceOf: () => 'surface:1',
+  });
+  assert.deepEqual(spawns, [POWERSHELL, POWERSHELL]);
+});
+
 test('getOpenPortsMany answers a key for every requested id, [] for one with no PTY', async () => {
   const events = [];
   const mgr = create((event, data) => events.push({ event, data }), {
