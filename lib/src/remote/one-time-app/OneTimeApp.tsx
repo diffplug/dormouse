@@ -162,6 +162,7 @@ export function OneTimeApp({
   const adapterRef = useRef<RemotePtyAdapter | null>(null);
   /** Set by the first ending: nothing after it moves the page. */
   const endedRef = useRef(false);
+  const mountedRef = useRef(false);
 
   // Gated, not degraded: no link is parsed and nothing is offered until the
   // probe answers, and a browser that fails it gets a fixed requirement.
@@ -207,9 +208,13 @@ export function OneTimeApp({
 
   // A page torn down mid-session leaves nothing running.
   useEffect(
-    () => () => {
-      disposeWall();
-      clientRef.current?.close();
+    () => {
+      mountedRef.current = true;
+      return () => {
+        mountedRef.current = false;
+        disposeWall();
+        clientRef.current?.close();
+      };
     },
     [disposeWall],
   );
@@ -237,6 +242,7 @@ export function OneTimeApp({
           if (!endedRef.current) setPhase({ at: 'connecting' });
         },
       );
+      if (!mountedRef.current || endedRef.current) return;
       if (!result.ok) {
         end(result.message);
         return;
@@ -251,7 +257,7 @@ export function OneTimeApp({
       adapterRef.current = adapter;
       // Ended while the wall stood up: the ending already ran, so this is the
       // one adapter it could not see.
-      if (endedRef.current) {
+      if (!mountedRef.current || endedRef.current) {
         disposeWall();
         return;
       }

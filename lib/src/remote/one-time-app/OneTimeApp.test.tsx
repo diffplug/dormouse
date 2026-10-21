@@ -400,6 +400,32 @@ describe('the tap', () => {
 });
 
 describe('the endings', () => {
+  it.each(['unmounted', 'cancelled'])('does not start a wall when the connection resolves after the page is %s', async (ending) => {
+    const scripted = await tapped();
+    if (ending === 'unmounted') act(() => root.render(null));
+    else await click(container, 'Cancel');
+    scripted.resolve({ ok: true, burrowLabel: 'Studio iMac' });
+    await act(async () => {});
+
+    expect(scripted.client.close).toHaveBeenCalled();
+    expect(fake.mount).not.toHaveBeenCalled();
+  });
+
+  it('releases an adapter whose startup finishes after page teardown', async () => {
+    const scripted = await tapped();
+    const adapter = { dispose: vi.fn(async () => undefined) };
+    let finish!: (value: typeof adapter) => void;
+    fake.mount.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+    scripted.resolve({ ok: true, burrowLabel: 'Studio iMac' });
+    await waitFor(() => fake.mount.mock.calls.length === 1);
+    act(() => root.render(null));
+    await act(async () => { finish(adapter); });
+
+    expect(scripted.client.close).toHaveBeenCalled();
+    expect(adapter.dispose).toHaveBeenCalledOnce();
+    expect(fake.disposeAllSessions).toHaveBeenCalledOnce();
+  });
+
   it('ends from the wall: the client closed, the terminals released, fixed copy', async () => {
     const { client, adapter } = await onTheWall();
     await click(container, ONE_TIME_END_LABEL);
