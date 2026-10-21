@@ -46,7 +46,7 @@ flowchart TD
   P -- approved --> C[connect]
 ```
 
-**A phone that registers nothing spends the code at `POST /api/setup/retire`**, so a photographed QR cannot register a passkey afterwards. **A session the Relay no longer honors falls back to sign-in with the same code**, which the session gate refused before spending. **Only a sign-in refused 404 falls back to registering** (rationale). Pairing runs per [remote-security-model.md](./remote-security-model.md) → Pairing, and **the two digits go on screen before the outcome is known and stay until it lands**. **Cancelling closes the relay socket** and reports nothing. (rationale) **A refused token is reported, never folded away**: `SETUP_TOKEN_INVALID_ERROR` becomes `SetupTokenInvalidError`, whose recovery is a new code on the computer.
+**A phone that registers nothing spends the code at `POST /api/setup/retire`**, so a photographed QR cannot register a passkey afterwards. **A session the Relay no longer honors falls back to sign-in with the same code**, which the session gate refused before spending. **Only a sign-in refused 404 falls back to registering** (rationale). Pairing follows [remote-security-model.md](./remote-security-model.md) → Pairing, and **the two digits appear before the outcome and remain until it arrives**. **Must close the relay socket on cancellation and suppress ceremony failures, including rejections.** (rationale) **A refused token is reported, never folded away**: `SETUP_TOKEN_INVALID_ERROR` becomes `SetupTokenInvalidError`, whose recovery is a new code on the computer.
 
 **Runtimes are gated, not degraded**: `probeNoiseSupport` runs before sign-in, setup, pairing, or connection; `false` renders a fixed upgrade requirement instead.
 
