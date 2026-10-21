@@ -17,12 +17,17 @@ test('Windows paths the CLI reports come back as Linux paths, in text and JSON',
   // Another distro's share is not this caller's filesystem.
   assert.equal(linuxPathText('\\\\wsl$\\Debian\\home\\x', 'Ubuntu'), '\\\\wsl$\\Debian\\home\\x');
   assert.equal(linuxPathText('no paths: 10:30, http://localhost:5173/', 'Ubuntu'), 'no paths: 10:30, http://localhost:5173/');
+  // A directory may hold a space; a filename still ends at one.
+  assert.equal(linuxPathText('saved to C:\\Users\\John Doe\\Pictures\\s.png now', 'Ubuntu'), 'saved to /mnt/c/Users/John Doe/Pictures/s.png now');
+  assert.equal(linuxPathText('{"path":"\\\\\\\\wsl.localhost\\\\Ubuntu\\\\home\\\\me\\\\my shots\\\\s.png"}', 'Ubuntu'), '{"path":"/home/me/my shots/s.png"}');
 });
 
-test('only a plain distro name counts as a WSL caller', () => {
-  assert.equal(callerWslDistro({ WSL_DISTRO_NAME: 'Ubuntu-24.04' }), 'Ubuntu-24.04');
-  assert.equal(callerWslDistro({ WSL_DISTRO_NAME: '..\\x' }), undefined);
-  assert.equal(callerWslDistro({}), undefined);
+test('only a Windows dor with a plain distro name has a WSL caller', () => {
+  assert.equal(callerWslDistro({ WSL_DISTRO_NAME: 'Ubuntu-24.04' }, 'win32'), 'Ubuntu-24.04');
+  assert.equal(callerWslDistro({ WSL_DISTRO_NAME: '..\\x' }, 'win32'), undefined);
+  assert.equal(callerWslDistro({}, 'win32'), undefined);
+  // A Linux dor inside the distro sees the same variable.
+  assert.equal(callerWslDistro({ WSL_DISTRO_NAME: 'Ubuntu' }, 'linux'), undefined);
 });
 
 function wslCall(stdout = '') {
@@ -54,7 +59,7 @@ test('a WSL caller\'s path arguments reach the Windows CLI as Windows paths', { 
   assert.deepEqual(argsSeen[3].slice(-2), ['screenshot', '--filename=C:\\Windows\\Temp\\p.png']);
 });
 
-test('a WSL caller without a Windows install is told where to install it', async () => {
+test('a WSL caller without a Windows install is told where to install it', { skip: process.platform !== 'win32' && 'a Windows dor only' }, async () => {
   const result = await runCli(['agent-browser', 'open', 'https://example.com'], {
     env: { PWD: process.cwd(), WSL_DISTRO_NAME: 'Ubuntu', DORMOUSE_AGENT_BROWSER_BIN: '/nowhere/agent-browser', PATH: '' },
   });

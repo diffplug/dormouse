@@ -16,17 +16,19 @@ export interface PathArgs {
   readonly flags: ReadonlySet<string>;
 }
 
-/** The WSL distribution `dor` was called from: the launcher forwards it. */
-export function callerWslDistro(env: Readonly<Record<string, string | undefined>>): string | undefined {
-  const distro = env.WSL_DISTRO_NAME;
+/** The WSL distribution that called this Windows `dor`: the launcher
+ *  forwards it. A Linux `dor` inside a distro has it too, but is no caller
+ *  across the boundary. */
+export function callerWslDistro(env: Readonly<Record<string, string | undefined>>, platform: NodeJS.Platform = process.platform): string | undefined {
+  const distro = platform === 'win32' ? env.WSL_DISTRO_NAME : undefined;
   return distro && /^[A-Za-z0-9._-]+$/.test(distro) ? distro : undefined;
 }
 
 /** `/mnt/c/x` → `C:\x` (WSL's default automount), else `\\wsl.localhost\<distro>\...`. */
 export function windowsPathOf(linux: string, distro: string): string {
   const mount = /^\/mnt\/([a-z])(?:\/(.*))?$/i.exec(linux);
-  if (mount) return `${mount[1]!.toUpperCase()}:\\${(mount[2] ?? '').replaceAll('/', '\\')}`;
-  return `\\\\wsl.localhost\\${distro}${linux.replaceAll('/', '\\')}`;
+  if (mount) return `${mount[1]!.toUpperCase()}:\\${(mount[2] ?? '').replace(/\//g, '\\')}`;
+  return `\\\\wsl.localhost\\${distro}${linux.replace(/\//g, '\\')}`;
 }
 
 /**
@@ -52,9 +54,10 @@ export function windowsPathArgs(args: readonly string[], verb: string | undefine
 }
 
 // A path the Windows CLI printed: this distro's UNC share, or a drive path.
-// Single or JSON-doubled separators; ends at whitespace or a quote.
-const WSL_SHARE = /\\{2,4}wsl(?:\.localhost|\$)\\{1,2}([A-Za-z0-9._-]+)((?:\\{1,2}[^\\\s"'<>|]+)*)/gi;
-const DRIVE = /\b([A-Za-z]):((?:\\{1,2}[^\\\s"'<>|:*?]+)+|\\{1,2})/g;
+// Single or JSON-doubled separators. A directory may hold spaces; the last
+// segment ends at whitespace or a quote.
+const WSL_SHARE = /\\{2,4}wsl(?:\.localhost|\$)\\{1,2}([A-Za-z0-9._-]+)((?:\\{1,2}[^\\\r\n"'<>|]+(?=\\))*(?:\\{1,2}[^\\\s"'<>|]+)?)/gi;
+const DRIVE = /\b([A-Za-z]):((?:\\{1,2}[^\\\r\n"'<>|:*?]+(?=\\))*\\{1,2}[^\\\s"'<>|:*?]+|\\{1,2})/g;
 
 /** `text` with each Windows path a WSL caller can reach written as a Linux path. */
 export function linuxPathText(text: string, distro: string): string {
