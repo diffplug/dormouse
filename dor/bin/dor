@@ -8,7 +8,22 @@ if [ -n "${DORMOUSE_NODE:-}" ] && [ -n "${DORMOUSE_CLI_JS:-}" ]; then
   # and exits 0 — so `dor` would silently do nothing.
   ELECTRON_RUN_AS_NODE=1
   export ELECTRON_RUN_AS_NODE
-  exec "$DORMOUSE_NODE" "$DORMOUSE_CLI_JS" "$@"
+  # WSL runs the Windows runtime so it can open the host's named pipe. Only
+  # the executable needs a Linux spelling; Node still expects a Windows script
+  # path. wslpath respects the distro's configured automount root. Only this
+  # exec forwards ELECTRON_RUN_AS_NODE and the caller's PWD, translated, back
+  # to Windows; the pane's WSLENV carries the rest.
+  NODE_EXEC=$DORMOUSE_NODE
+  if [ -n "${WSL_DISTRO_NAME:-}" ]; then
+    case "$DORMOUSE_NODE" in
+      [A-Za-z]:*)
+        NODE_EXEC=$(wslpath -u "$DORMOUSE_NODE") || exit 1
+        WSLENV="${WSLENV:+$WSLENV:}ELECTRON_RUN_AS_NODE/w:PWD/pw"
+        export WSLENV
+        ;;
+    esac
+  fi
+  exec "$NODE_EXEC" "$DORMOUSE_CLI_JS" "$@"
 fi
 
 SCRIPT_DIR=$(CDPATH= cd "$(dirname "$0")" && pwd)
