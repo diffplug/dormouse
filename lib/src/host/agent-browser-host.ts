@@ -189,11 +189,10 @@ const SCREENCAST_START = { action: 'screencast_start', format: 'jpeg', quality: 
 
 export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}): BrowserProvider<ProviderBinding> {
   const log = deps.log ?? (() => {});
-  // The sessions this host last launched headed. agent-browser restates its
-  // launch options on every command and relaunches a browser they no longer
-  // match, so every call states the mode, or a config's `headed` would turn
-  // a headless browser into a window. Any other session is headless: `dor`
-  // launches a pane's browser so, and shutdown closes every headed one.
+  // The sessions this host last launched headed, whose mode every command
+  // states (`sessionArgs`), or a config's `headed` would turn a headless
+  // browser into a window. Any other session is headless: `dor` launches a
+  // pane's browser so, and shutdown closes every headed one.
   const headedSessions = new Set<string>();
 
   // Preserve a bound executable, falling through on ENOENT if it went stale.
@@ -212,7 +211,6 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
     args: string[],
     options: { timeoutMs?: number; cwd?: string } = {},
   ): Promise<CliResult> {
-    args = ['--headed', String(headedSessions.has(b.session)), ...args];
     const env = b.env ?? process.env;
     const configured = env[AGENT_BROWSER_BIN_ENV];
     let binaryPath = b.binaryPath;
@@ -249,7 +247,7 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
   }
 
   function run(b: ProviderBinding, args: string[], options?: { timeoutMs?: number; cwd?: string }): Promise<CliResult> {
-    return runWithBinaryFallback(b, [...SESSION_ARGS(b.session), ...args], options);
+    return runWithBinaryFallback(b, [...SESSION_ARGS(b.session, headedSessions.has(b.session)), ...args], options);
   }
 
   // Read a session's stream WebSocket port via `stream status --json` — only
@@ -259,7 +257,7 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
   // port. Retry briefly to close that window.
   async function readStreamPort(b: ProviderBinding, deadline: number): Promise<number | undefined> {
     for (let attempt = 0; attempt < STREAM_PORT_READ_ATTEMPTS; attempt++) {
-      const result = await runWithBinaryFallback(b, streamStatusArgs(b.session), { timeoutMs: Math.max(0, deadline - Date.now()) });
+      const result = await runWithBinaryFallback(b, streamStatusArgs(b.session, headedSessions.has(b.session)), { timeoutMs: Math.max(0, deadline - Date.now()) });
       if (result.exitCode === 0) {
         const port = parseStreamPort(result.stdout);
         if (port !== undefined) return port;

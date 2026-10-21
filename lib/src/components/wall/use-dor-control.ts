@@ -2161,37 +2161,37 @@ export function useDorControl({
       if (!provider) return;
       // agent-browser: the mode the bound Surface shows its browser in, which
       // `dor` restates on every command for the session (none: headless).
-      const headedFor = (id: string | undefined) => provider === 'agent-browser'
-        ? { headed: id !== undefined && isHeadedMode((lath.getMeta(id)?.params as { renderMode?: unknown } | undefined)?.renderMode) }
-        : {};
+      const headedFor = (renderMode: unknown) => provider === 'agent-browser' ? { headed: isHeadedMode(renderMode) } : {};
       // `--surface`: that Surface's binding, once it is this provider's and named.
       const key = stringParam(params.key);
       if (key === undefined) {
         const target = requireBrowserSurface(params.surface, detail);
         if (!target || !requireAutomationSession(target, provider, detail)) return;
-        const binding = browserBindingFromParams(lath.getMeta(target.id)?.params)!;
-        const stored = (lath.getMeta(target.id)?.params as { browserViewport?: unknown } | undefined)?.browserViewport;
+        const targetParams = lath.getMeta(target.id)?.params as { browserViewport?: unknown; renderMode?: unknown } | undefined;
+        const binding = browserBindingFromParams(targetParams)!;
+        const stored = targetParams?.browserViewport;
         const initialViewport = isBrowserViewportSetting(stored) ? stored : undefined;
         const launchViewport = initialViewport?.mode === 'fixed' ? initialViewport
           : initialViewport?.mode === 'pane-sync' ? getAgentBrowserSurfaceController(target.id)?.getMeasuredPaneSize() ?? { width: 1440, height: 900 } : undefined;
-        detail.respond({ ok: true, result: { binding, fresh: false, ...headedFor(target.id), ...(provider === 'playwright' && initialViewport ? { initialViewport, launchViewport } : {}) } });
+        detail.respond({ ok: true, result: { binding, fresh: false, ...headedFor(targetParams?.renderMode), ...(provider === 'playwright' && initialViewport ? { initialViewport, launchViewport } : {}) } });
         return;
       }
       // `--key`: the Surface in this Wall bound to that key, else the key's
       // own session in this Workspace, its first commands pinned to one cwd
       // and executable (docs/specs/dor-browser.md → Managed identity).
       const found = findBrowserSurface(provider, { key });
-      const binding = (found ? browserBindingFromParams(lath.getMeta(found.id)?.params) : null)
+      const foundParams = found ? lath.getMeta(found.id)?.params as { browserViewport?: unknown; renderMode?: unknown } | undefined : undefined;
+      const binding = (found ? browserBindingFromParams(foundParams) : null)
         ?? browserReservations.current.resolve(provider, key, browserKeyScope(), params.proposed,
           // Window-wide: a Surface bound to this key's session may have left
           // for another Workspace, still holding it.
           (session) => listWallHandles().some((wall) => wall.browserSessions(provider).includes(session)));
       if (found || !params.proposed) {
-        const stored = found && (lath.getMeta(found.id)?.params as { browserViewport?: unknown } | undefined)?.browserViewport;
+        const stored = foundParams?.browserViewport;
         const initialViewport = isBrowserViewportSetting(stored) ? stored : undefined;
         const launchViewport = initialViewport?.mode === 'fixed' ? initialViewport
           : initialViewport?.mode === 'pane-sync' ? (found ? getAgentBrowserSurfaceController(found.id)?.getMeasuredPaneSize() : undefined) ?? { width: 1440, height: 900 } : undefined;
-        detail.respond({ ok: true, result: { binding, fresh: false, ...(found ? headedFor(found.id) : {}), ...(provider === 'playwright' && initialViewport ? { initialViewport, launchViewport } : {}) } });
+        detail.respond({ ok: true, result: { binding, fresh: false, ...(found ? headedFor(foundParams?.renderMode) : {}), ...(provider === 'playwright' && initialViewport ? { initialViewport, launchViewport } : {}) } });
       } else {
         const existingNative = await browserHandle(provider, binding)?.measure();
         if (existingNative?.ok && existingNative.viewport) {

@@ -373,7 +373,7 @@ test('every agent-browser call states the pane\'s mode, unless the command gives
   for (const argv of launch) assert.equal(argv[argv.indexOf('--headed') + 1], 'false', argv.join(' '));
   assert.deepEqual(await run(true, ['click', '@e1']), [
     ['--session', 'dormouse.1.default', '--headed', 'true', 'click', '@e1'],
-    ['--session', 'dormouse.1.default', 'stream', 'status', '--json', '--headed', 'true'],
+    ['--session', 'dormouse.1.default', '--headed', 'true', 'stream', 'status', '--json'],
   ]);
   assert.deepEqual((await run(false, ['--headed', 'click', '@e1']))[0], ['--session', 'dormouse.1.default', '--headed', 'click', '@e1']);
 });

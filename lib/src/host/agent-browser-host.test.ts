@@ -17,8 +17,8 @@ type SpawnResult = { stdout?: string; stderr?: string; code?: number };
 
 const spawnMock = vi.hoisted(() => vi.fn());
 /** The mode each spawn stated, keyed by the args `spawnMock` saw: the host
- *  leads every call with `--headed <mode>`, which the mock strips so the
- *  args read as the operation's own argv. */
+ *  follows every `--session <name>` with `--headed <mode>`, which the mock
+ *  strips so the args read as the operation's own argv. */
 const spawnHeaded = vi.hoisted(() => new WeakMap<string[], boolean>());
 
 // A pid no process on this machine can hold (macOS/Linux pid_max is far lower),
@@ -144,9 +144,9 @@ function running(...sessions: string[]): void {
 vi.mock('dor-lib-common', async (importOriginal) => ({
   ...(await importOriginal<typeof import('dor-lib-common')>()),
   spawnAndCapture: (binary: string, args: string[], ...rest: unknown[]) => {
-    if (args[0] !== '--headed' || !['true', 'false'].includes(args[1]!)) throw new Error(`no mode stated: ${args.join(' ')}`);
-    const argv = args.slice(2);
-    spawnHeaded.set(argv, args[1] === 'true');
+    if (args[2] !== '--headed' || !['true', 'false'].includes(args[3]!)) throw new Error(`no mode stated: ${args.join(' ')}`);
+    const argv = [...args.slice(0, 2), ...args.slice(4)];
+    spawnHeaded.set(argv, args[3] === 'true');
     return spawnMock(binary, argv, ...rest);
   },
   resolveBinaryPath: (binary: string) => binary === 'agent-browser' ? '/test/bin/agent-browser' : binary,

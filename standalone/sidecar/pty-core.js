@@ -709,12 +709,12 @@ module.exports.getCwdsForPids = getCwdsForPids;
 
 // ── Open-port discovery ──────────────────────────────────────────────────────
 //
-// `getOpenPortsForPids(rootPids)` answers, per root pid, "which TCP ports are
+// `getOpenPortsForPids(roots)` answers, per root pid, "which TCP ports are
 // listening, opened by this shell or any of its descendant processes?" It works
 // in two steps that are each platform-specific but share the same shape:
 //
-//   1. getDescendantPids(rootPid) — walk the process tree to the full set of
-//      PIDs rooted at the shell (the shell itself plus every transitive child).
+//   1. readProcessTable + buildDescendantSet — walk the process tree to the
+//      full set of PIDs rooted at the shell (itself plus every transitive child).
 //   2. getListeningPortsForPids(pids) — enumerate TCP sockets in the LISTEN
 //      state owned by any PID in that set.
 //
@@ -751,11 +751,20 @@ module.exports.openPortScanTimeoutMs = openPortScanTimeoutMs;
  * [pid, ppid] pairs via breadth-first walk. Shared by every platform.
  */
 function buildDescendantSet(pairs, rootPid) {
+  return descendantsIn(childrenIndex(pairs), rootPid);
+}
+
+/** `ppid -> [pid]` from `[pid, ppid]` pairs, for walking one table from many roots. */
+function childrenIndex(pairs) {
   const children = new Map();
   for (const [pid, ppid] of pairs) {
     if (!children.has(ppid)) children.set(ppid, []);
     children.get(ppid).push(pid);
   }
+  return children;
+}
+
+function descendantsIn(children, rootPid) {
   const result = new Set([rootPid]);
   const queue = [rootPid];
   while (queue.length > 0) {
@@ -800,12 +809,6 @@ function parsePsPairs(output) {
 
 module.exports.parsePsPairs = parsePsPairs;
 
-async function getDescendantPids(rootPid, runtime = {}) {
-  const pairs = await readProcessTable(runtime);
-  // Port discovery tolerates a failed scan; `shellHasWork` must not.
-  return pairs ? [...buildDescendantSet(pairs, rootPid)] : [rootPid];
-}
-
 // Windows processes a shell keeps for its whole life, which are no work of the
 // user's: Git Bash's launcher runs MSYS bash beneath it, and wsl.exe a relay
 // and its host with a console. Keyed by the shell's own name.
@@ -824,17 +827,10 @@ async function shellHasWork(rootPid, shell, runtime = {}) {
   const table = await readProcessTable(runtime);
   if (!table || !table.some(([pid]) => pid === rootPid)) throw new Error('Unable to inspect terminal processes');
   const plumbing = (runtime.platform || process.platform) === 'win32' && WINDOWS_SHELL_PLUMBING.get(shellStem(shell));
-  const rows = new Map(table.map(([pid, ppid, name]) => [pid, { ppid, name: (name || '').toLowerCase() }]));
-  const shellPids = new Set([rootPid]);
   // Plumbing counts as the shell only beneath the shell itself, so work it
-  // starts under plumbing is still found. The walk lists each pid after its parent.
-  for (const pid of buildDescendantSet(table, rootPid)) {
-    if (shellPids.has(pid)) continue;
-    const { ppid, name } = rows.get(pid);
-    if (!plumbing || !shellPids.has(ppid) || !plumbing.has(name)) return true;
-    shellPids.add(pid);
-  }
-  return false;
+  // starts under plumbing is still found.
+  const shellPids = buildDescendantSet(plumbing ? table.filter(([, , name]) => plumbing.has((name || '').toLowerCase())) : [], rootPid);
+  return [...buildDescendantSet(table, rootPid)].some((pid) => !shellPids.has(pid));
 }
 
 module.exports.shellHasWork = shellHasWork;
@@ -881,8 +877,6 @@ async function readProcessTable(runtime) {
   }
   return null;
 }
-
-module.exports.getDescendantPids = getDescendantPids;
 
 /** The global autorun command: one line, at most 4096 characters (docs/specs/terminal-context.md). */
 function validCommand(value) {
@@ -1145,14 +1139,20 @@ async function runPowerShellJson(script, runtime, timeout) {
   return normalizeJsonArray(JSON.parse(await runPowerShell(script, runtime, timeout)));
 }
 
-async function windowsListeningPorts(pids, runtime = {}, names) {
+/** Milliseconds left of `budgetMs` from now, for each step of a scan in turn;
+ *  throws once none remain. */
+function scanDeadline(runtime, budgetMs) {
   const now = runtime.now || (() => performance.now());
-  const deadline = now() + (runtime.scanTimeoutMs ?? OPEN_PORT_TIMEOUT_MS);
-  const remaining = () => {
+  const deadline = now() + budgetMs;
+  return () => {
     const ms = Math.ceil(deadline - now());
     if (ms <= 0) throw new Error('port scan deadline exhausted');
     return ms;
   };
+}
+
+async function windowsListeningPorts(pids, runtime = {}, names) {
+  const remaining = scanDeadline(runtime, runtime.scanTimeoutMs ?? OPEN_PORT_TIMEOUT_MS);
   const pidSet = new Set(pids);
   let ports;
   try {
@@ -1218,7 +1218,7 @@ module.exports.parseMsysPs = parseMsysPs;
 
 /** The MSYS `ps.exe` beside a Git Bash shell (`bin\bash.exe` or `usr\bin\bash.exe`). */
 function msysPsFor(shell, fsModule = fs) {
-  if (!shell || path.win32.basename(shell).toLowerCase() !== 'bash.exe') return undefined;
+  if (!shell || shellStem(shell) !== 'bash') return undefined;
   const dir = path.win32.dirname(shell);
   return [path.win32.join(dir, 'ps.exe'), path.win32.join(dir, '..', 'usr', 'bin', 'ps.exe')]
     .find((candidate) => fileExists(candidate, fsModule));
@@ -1226,21 +1226,22 @@ function msysPsFor(shell, fsModule = fs) {
 
 /** Grows each owned set across MSYS execs: an MSYS process it holds owns its
  *  MSYS descendants, and each of those its Windows descendants. */
-function adoptMsysDescendants(owned, pairs, msysRows) {
+function adoptMsysDescendants(owned, children, msysRows) {
   const byWinpid = new Map(msysRows.map(([pid, , winpid]) => [winpid, pid]));
-  const msysPairs = msysRows.map(([pid, ppid]) => [pid, ppid]);
   const winpidOf = new Map(msysRows.map(([pid, , winpid]) => [pid, winpid]));
+  const msysChildren = childrenIndex(msysRows);
   for (const pids of owned.values()) {
-    for (let grew = true; grew;) {
-      grew = false;
-      for (const pid of [...pids]) {
-        const msys = byWinpid.get(pid);
-        if (msys === undefined) continue;
-        for (const child of buildDescendantSet(msysPairs, msys)) {
-          const winpid = winpidOf.get(child);
-          if (winpid === undefined || pids.has(winpid)) continue;
-          for (const descendant of buildDescendantSet(pairs, winpid)) pids.add(descendant);
-          grew = true;
+    // Each adopted Windows subtree may hold another MSYS process, so newly
+    // owned pids are visited in turn.
+    const pending = [...pids];
+    while (pending.length > 0) {
+      const msys = byWinpid.get(pending.pop());
+      if (msys === undefined) continue;
+      for (const child of descendantsIn(msysChildren, msys)) {
+        const winpid = winpidOf.get(child);
+        if (winpid === undefined || pids.has(winpid)) continue;
+        for (const descendant of descendantsIn(children, winpid)) {
+          if (!pids.has(descendant)) { pids.add(descendant); pending.push(descendant); }
         }
       }
     }
@@ -1293,13 +1294,7 @@ module.exports.parseWslPortScan = parseWslPortScan;
 /** Listening ports inside every running distro for `surfaceIds`, inside the
  *  socket scan's budget; [] on any failure. */
 async function wslListeningPorts(surfaceIds, runtime, budgetMs) {
-  const now = runtime.now || (() => performance.now());
-  const deadline = now() + budgetMs;
-  const remaining = () => {
-    const ms = Math.ceil(deadline - now());
-    if (ms <= 0) throw new Error('port scan deadline exhausted');
-    return ms;
-  };
+  const remaining = scanDeadline(runtime, budgetMs);
   const env = runtime.env || process.env;
   const wsl = windowsSystemPath(env, 'System32', 'wsl.exe');
   // UTF-8 output: plain wsl.exe listings are UTF-16.
@@ -1325,25 +1320,34 @@ async function wslListeningPorts(surfaceIds, runtime, budgetMs) {
  * a subprocess — two spawns for N terminals instead of 2N. Returns [] per pid on
  * any platform failure rather than throwing.
  *
- * On Windows, `runtime.shellOf(pid)` and `runtime.surfaceOf(pid)` name a root's
- * shell and Surface, for the Git Bash and WSL reads above. Each runs beside a
- * step the scan already waits for, never after it.
+ * Each root is `{ pid, shell, surfaceId }`: on Windows its shell and Surface
+ * drive the Git Bash and WSL reads above. Each runs beside a step the scan
+ * already waits for, never after it.
  */
-async function getOpenPortsForPids(rootPids, runtime = {}) {
+async function getOpenPortsForPids(rootList, runtime = {}) {
   const byRoot = new Map();
-  const roots = [...new Set(rootPids.filter((pid) => Number.isInteger(pid)))];
+  const shellOf = new Map();
+  const surfaceOf = new Map();
+  for (const { pid, shell, surfaceId } of rootList) {
+    if (!Number.isInteger(pid)) continue;
+    shellOf.set(pid, shell);
+    surfaceOf.set(pid, surfaceId);
+  }
+  const roots = [...shellOf.keys()];
   if (roots.length === 0) return byRoot;
   const windows = (runtime.platform || process.platform) === 'win32';
 
-  const msysPs = windows ? roots.map((root) => msysPsFor(runtime.shellOf?.(root), runtime.fsModule)).find(Boolean) : undefined;
+  let msysPs;
+  if (windows) for (const shell of shellOf.values()) if ((msysPs = msysPsFor(shell, runtime.fsModule))) break;
   const [pairs, msysRows] = await Promise.all([
     readProcessTable(runtime),
     msysPs ? runTextLenient(runtime, msysPs, ['-a'], { timeout: OPEN_PORT_TIMEOUT_MS }).then(parseMsysPs) : [],
   ]);
   // A failed scan is tolerated here (unlike helper-work inspection): each root
-  // then owns only itself, exactly as `getDescendantPids` falls back.
-  const owned = new Map(roots.map((root) => [root, pairs ? buildDescendantSet(pairs, root) : new Set([root])]));
-  if (pairs && msysRows.length > 0) adoptMsysDescendants(owned, pairs, msysRows);
+  // then owns only itself.
+  const children = pairs ? childrenIndex(pairs) : new Map();
+  const owned = new Map(roots.map((root) => [root, descendantsIn(children, root)]));
+  if (pairs && msysRows.length > 0) adoptMsysDescendants(owned, children, msysRows);
   const union = new Set();
   for (const pids of owned.values()) for (const pid of pids) union.add(pid);
 
@@ -1352,7 +1356,7 @@ async function getOpenPortsForPids(rootPids, runtime = {}) {
   const wslSurfaces = new Map();
   if (windows && names) {
     for (const [root, pids] of owned) {
-      const surfaceId = runtime.surfaceOf?.(root);
+      const surfaceId = surfaceOf.get(root);
       if (surfaceId && SURFACE_ID_PATTERN.test(surfaceId) && [...pids].some((pid) => names.get(pid)?.toLowerCase() === 'wsl.exe')) wslSurfaces.set(root, surfaceId);
     }
   }
@@ -1489,7 +1493,7 @@ module.exports.pacedInputSegments = pacedInputSegments;
 // same reason: `canonicalLocalDirectory` in `lib/src/host/local-directory.ts`,
 // which `main.js` takes from `git-info.cjs` and VS Code's `pty-host.js`
 // bundles. The default opens nothing.
-module.exports.create = function create(send, ptyModule, { platform = process.platform, replay = false, sliceSince = null, onHelper = () => {}, canonicalDirectory = async () => null, scanPorts = null } = {}) {
+module.exports.create = function create(send, ptyModule, { platform = process.platform, replay = false, sliceSince = null, onHelper = () => {}, canonicalDirectory = async () => null, scanPorts = createPortScanner((roots, count) => getOpenPortsForPids(roots, { budgetCount: count })) } = {}) {
   if (!ptyModule || typeof ptyModule.spawn !== 'function') {
     throw new TypeError('create() requires a node-pty compatible module');
   }
@@ -1506,13 +1510,6 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
   const sessions = new Map(); // id -> { chunks: string[], chars: number, received: number }
   const REPLAY_CHARS = 200000;
   const ptyShells = new Map(); // id -> resolved shell executable
-  /** The live PTY's id at `pid`, which a port scan names its roots by. */
-  const idAtPid = (pid) => { for (const [id, p] of ptys) if (p.pid === pid) return id; };
-  scanPorts ??= createPortScanner((pids, count) => getOpenPortsForPids(pids, {
-    budgetCount: count,
-    shellOf: (pid) => ptyShells.get(idAtPid(pid)),
-    surfaceOf: idAtPid,
-  }));
   // Repaint restoration belongs to the PTY owner, where every local and remote
   // resize passes: a later resize or repaint, exit, kill, or replacement
   // cancels it, and a Viewer's detach does not, or the PTY is left a row off
@@ -1905,7 +1902,8 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
     send('context', result);
   }
 
-  /** One scan answering every id; an id with no live PTY answers `empty`. */
+  /** One scan answering every id; an id with no live PTY answers `empty`.
+   *  `scan` gets each live PTY as `{ pid, shell, surfaceId }`. */
   async function answerForIds(ids, empty, scan) {
     const answers = {};
     const live = [];
@@ -1915,21 +1913,23 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
       if (p) live.push([id, p]);
     }
     // Hosts dispatch these without awaiting, so a failed scan answers empty
-    // rather than rejecting.
-    const resolved = await scan([...new Set(live.map(([, p]) => p.pid))]).catch(() => new Map());
+    // rather than rejecting. A PTY's DORMOUSE_SURFACE_ID is its id (`spawn`).
+    const resolved = await scan(live.map(([id, p]) => ({ pid: p.pid, shell: ptyShells.get(id), surfaceId: id }))).catch(() => new Map());
     // A scan completing after exit or replacement cannot describe the new PTY.
     for (const [id, p] of live) if (ptys.get(id) === p) answers[id] = resolved.get(p.pid) ?? empty;
     return answers;
   }
 
+  const cwdsForRoots = (roots) => getCwdsForPids([...new Set(roots.map((root) => root.pid))]);
+
   async function getCwd(id, requestId) {
-    send('cwd', { id, cwd: (await answerForIds([id], null, getCwdsForPids))[id], requestId });
+    send('cwd', { id, cwd: (await answerForIds([id], null, cwdsForRoots))[id], requestId });
   }
 
   /** One answer for every id a save asks about, so N panes cost one process
    *  scan rather than N (docs/specs/transport.md -> "Persisted session"). */
   async function getCwds(ids, requestId) {
-    send('cwds', { cwds: await answerForIds(ids, null, getCwdsForPids), requestId });
+    send('cwds', { cwds: await answerForIds(ids, null, cwdsForRoots), requestId });
   }
 
   async function getOpenPorts(id, requestId) {

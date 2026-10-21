@@ -219,7 +219,7 @@ export interface BrowserCliDescriptor {
    *  succeeded — the browser exists then, so asking starts none — under the
    *  caller's own environment; the port it prints is handed over with the
    *  bind. Absent when the host reports the port. */
-  streamStatus?(session: string): string[];
+  streamStatus?(session: string, headed?: boolean): string[];
 }
 
 const AGENT_BROWSER_VALUE_FLAGS = new Set([
@@ -469,15 +469,14 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
   // a browser they no longer match, so a config's `headed` would turn a
   // pane's headless browser into a window: every call states the pane's mode,
   // unless the command gives its own.
-  const modeArgs = headed === undefined || nativeLaunchOptions.some((arg) => arg.split('=', 1)[0] === '--headed')
-    ? [] : ['--headed', String(headed)];
+  const mode = nativeLaunchOptions.some((arg) => arg.split('=', 1)[0] === '--headed') ? undefined : headed;
   let result: BrowserExecResult;
   let prebound = false;
   const explicitDevice = d.provider === 'agent-browser'
     ? hasExplicitAgentBrowserDevice(rest, env)
     : hasExplicitPlaywrightLaunch(rest);
   try {
-    const sessionArgs = binding.session ? [...spec.sessionArgs(binding.session), ...modeArgs] : [];
+    const sessionArgs = binding.session ? spec.sessionArgs(binding.session, mode) : [];
     const launching = fresh === true && d.provider === 'agent-browser' && d.navigationVerbs.has(command ?? '')
       && launchViewport !== undefined && !explicitDevice;
     let destinationArgs = rest;
@@ -546,8 +545,8 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
   // passthrough rather than nagging about the missing surface.
   if (result.exitCode === 0 && mayBind && binding.session !== undefined && !(client instanceof Error) && !prebound) {
     try {
-      const statusArgs = d.streamStatus?.(binding.session);
-      const wsPort = statusArgs === undefined ? undefined : parseStreamPort((await run([...statusArgs, ...modeArgs, ...nativeLaunchOptions])).stdout);
+      const statusArgs = d.streamStatus?.(binding.session, mode);
+      const wsPort = statusArgs === undefined ? undefined : parseStreamPort((await run([...statusArgs, ...nativeLaunchOptions])).stdout);
       await client.browserSurface({
         provider: d.provider,
         key: flags.key,
