@@ -261,8 +261,6 @@ export class AgentBrowserSurfaceController {
   }
 
   private phase: Phase = { k: 'idle' };
-  /** Invalidates clipboard reads when the page changes, even away and back. */
-  private inputPageEpoch = 0;
   private handleCache: { session?: string; cwd?: string; binaryPath?: string; handle: BrowserHandle | null } | null = null;
   /** The presentation this Surface shows: a separate OS window, or in the pane.
    *  Seeded from `renderMode`; changed by a relaunch (optimistically, reverted
@@ -450,18 +448,9 @@ export class AgentBrowserSurfaceController {
     // Native history nav — issued like tab actions, through the daemon gate.
     this.chromeActions = {
       navigate: (url) => this.navigate(url),
-      back: () => {
-        this.inputPageEpoch += 1;
-        this.drive('back', (browser) => browser.history('back'));
-      },
-      forward: () => {
-        this.inputPageEpoch += 1;
-        this.drive('forward', (browser) => browser.history('forward'));
-      },
-      reload: () => {
-        this.inputPageEpoch += 1;
-        this.drive('reload', (browser) => browser.history('reload'));
-      },
+      back: () => this.drive('back', (browser) => browser.history('back')),
+      forward: () => this.drive('forward', (browser) => browser.history('forward')),
+      reload: () => this.drive('reload', (browser) => browser.history('reload')),
     };
 
     this.viewSnapshot = this.buildViewSnapshot();
@@ -1241,9 +1230,6 @@ export class AgentBrowserSurfaceController {
   }
 
   private setTabs(next: StreamTab[]): void {
-    const before = this.activeTab();
-    const after = next.find((tab) => tab.active) ?? next[0] ?? null;
-    if (before?.tabId !== after?.tabId || before?.url !== after?.url) this.inputPageEpoch += 1;
     this.tabs = next;
     this.rememberActiveTabUrl(next);
     this.recomputeChrome();
@@ -1402,7 +1388,6 @@ export class AgentBrowserSurfaceController {
   // its URL until the load completes and `tabs` brings the real title.
   private applyStreamUrl(url: string): void {
     if (!isShownUrl(url)) return;
-    this.inputPageEpoch += 1;
     this.rememberRestorableUrl(url);
     const active = this.activeTab();
     if (!active) {
@@ -1674,7 +1659,6 @@ export class AgentBrowserSurfaceController {
    *  launched when it never had a session. */
   private navigate(url: string): void {
     if (!url) return;
-    this.inputPageEpoch += 1;
     if (this.driver()) {
       // The latest navigation, superseding one an unpark has yet to catch up on.
       delete this.pendingIntent.url;
@@ -1697,14 +1681,10 @@ export class AgentBrowserSurfaceController {
   }
 
   selectTab(tab: StreamTab): void {
-    if (!tab.active) {
-      this.inputPageEpoch += 1;
-      this.drive(`tab ${tab.tabId}`, (browser) => browser.tab('select', tab.tabId));
-    }
+    if (!tab.active) this.drive(`tab ${tab.tabId}`, (browser) => browser.tab('select', tab.tabId));
   }
 
   closeTab(tab: StreamTab): void {
-    if (tab.tabId === this.activeTab()?.tabId) this.inputPageEpoch += 1;
     this.drive(`tab close ${tab.tabId}`, (browser) => browser.tab('close', tab.tabId));
   }
 
@@ -1741,12 +1721,11 @@ export class AgentBrowserSurfaceController {
   handleKeyDownLike(e: KeyLike): void {
     const mod = e.metaKey || e.ctrlKey;
     if (mod && e.key.toLowerCase() === 'v') {
-      const { phase, connection, inputPageEpoch } = this;
+      // A slow read must not land in a browser relaunched meanwhile.
+      const { phase, connection } = this;
       if (phase.k !== 'live' || !connection) return;
       void readTextFromClipboard().then((text) => {
-        if (text && this.phase === phase && this.connection === connection && this.inputPageEpoch === inputPageEpoch) {
-          this.insertText(text);
-        }
+        if (text && this.phase === phase && this.connection === connection) this.insertText(text);
       });
       return;
     }

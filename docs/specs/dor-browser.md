@@ -170,7 +170,7 @@ A pane out of sight ([Resource Policy](#resource-policy)) or unmounted parks aft
 
 **Must forward hover and wheel to the page over any screencast pane on screen, selected or not, in either mode, never selecting it or taking focus** (rationale). **Must end the page's hover when the pointer leaves the canvas**, except mid-drag of the canvas's own press (rationale).
 
-**Must send local pastes as bounded `input_text` messages** (`viewerTextInputs`), never per-character keys (rationale). **Must discard pending pastes when their connection or page changes**, including requested navigation, tab switches, and reloads. **Must route select-all, copy, cut, and tab actions through host operations** (`edit`, `tab`); undo/redo is not emulated.
+**Must send a local paste as bounded `input_text` messages** (`viewerTextInputs`), never a key pair per character (rationale). Select-all, copy, cut, and tab select or close go through host operations (`edit`, `tab`), since editing chords do not survive CDP input; undo/redo is not emulated.
 
 Source of truth: `lib/src/components/wall/agent-browser-surface-controller.ts` (`Phase`, `driver`), `lib/src/components/wall/AgentBrowserPanel.tsx`, `lib/src/components/wall/agent-browser-input.ts`, `viewerTextInputs` in `lib/src/lib/platform/browser-automation.ts`, `onBrowserLaunchFailed` in `lib/src/components/Wall.tsx`.
 
