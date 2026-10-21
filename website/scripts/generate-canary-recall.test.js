@@ -2,7 +2,8 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { publicRecord } from '../../scripts/security-audit-canary.mjs';
-import { CANARY_TITLE, RECORD_FIELDS, WINDOW_DAYS, summarize, validateRecord } from './generate-canary-recall.js';
+import { codexRecord } from '../../scripts/security-audit-public-body.mjs';
+import { CANARY_TITLE, CODEX_FIELDS, CODEX_TITLE, RECORD_FIELDS, WINDOW_DAYS, summarize, validateCodexRecord, validateRecord } from './generate-canary-recall.js';
 
 // docs/specs/security-audit.md -> "Canary recall".
 
@@ -65,6 +66,53 @@ describe('summarize', () => {
   it('is empty with no run in the window', () => {
     expect(summarize([], { now: NOW })).toMatchObject({ seeded: 0, caught: 0, runs: [], unrecorded: [] });
   });
+});
+
+const codex = (id, paired, fields = {}) => ({ claude_run_url: URL(paired), commit: 'a'.repeat(40), model: 'gpt-6-sol',
+  seeded: 8, caught: 5, either: 7, unfinished: 0, run_url: URL(id), ...fields });
+
+describe('validateCodexRecord', () => {
+  it('reads exactly the fields the red-team builder writes', () => {
+    const written = codexRecord({ runUrl: URL(9), commit: 'a'.repeat(40), model: 'gpt-6-sol', repo: 'diffplug/dormouse',
+      canary: { run: '7', seeded: 8, caught: 5, either: 7, unfinished: 0 } });
+    expect(Object.keys(written).sort()).toEqual(CODEX_FIELDS);
+    expect(validateCodexRecord(written, 9)).toEqual({ url: URL(9), claudeUrl: URL(7), seeded: 8, caught: 5, either: 7, unfinished: 0 });
+  });
+
+  it('rejects a record out of shape or linked elsewhere', () => {
+    for (const [bad, message] of [
+      [{ ...codex(9, 7), note: 'x' }, /has fields/],
+      [codex(9, 7, { either: 4 }), /caught 5, either 4/],
+      [codex(9, 7, { either: 9 }), /either 9, seeded 8/],
+      [codex(9, 7, { unfinished: 5 }), /5 unfinished/],
+      [codex(9, 7, { run_url: URL(8) }), /links/],
+      [codex(9, 7, { claude_run_url: 'https://github.com/evil/dormouse/actions/runs/7' }), /pairs with/],
+    ]) expect(() => validateCodexRecord(bad, 9), JSON.stringify(bad)).toThrow(message);
+  });
+});
+
+describe('summarize with the red team', () => {
+  it('pairs each canary run with its newest red-team record, and ignores one paired outside the window', () => {
+    const snapshot = summarize([{ id: 7, createdAt: daysAgo(3), record: record(7) }], { now: NOW, codex: [
+      { id: 9, record: codex(9, 7, { caught: 2, either: 6 }) },
+      { id: 11, record: codex(11, 7) },
+      { id: 12, record: codex(12, 1) },
+    ] });
+    expect(snapshot.runs).toEqual([{ at: daysAgo(3), url: URL(7), seeded: 8, caught: 6, unfinished: 0,
+      codex: { url: URL(11), caught: 5, either: 7, unfinished: 0 } }]);
+  });
+
+  it('refuses a pairing its canary record cannot support', () => {
+    const run = [{ id: 7, createdAt: daysAgo(3), record: record(7) }];
+    for (const fields of [{ seeded: 6, either: 6 }, { either: 5 }, { caught: 0, either: 7 }]) {
+      expect(() => summarize(run, { now: NOW, codex: [{ id: 9, record: codex(9, 7, fields) }] }), JSON.stringify(fields)).toThrow(/cannot pair/);
+    }
+  });
+});
+
+it('selects red-team runs by the title their workflow gives them', () => {
+  const workflow = readFileSync(resolve(import.meta.dirname, '../../.github/workflows/codex-audit-report.yaml'), 'utf8');
+  expect(workflow).toMatch(new RegExp(`^run-name: ${CODEX_TITLE.replace(/[()]/g, '\\$&')}$`, 'm'));
 });
 
 it('selects runs by the title the workflow gives a canary', () => {

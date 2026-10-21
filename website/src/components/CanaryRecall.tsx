@@ -7,12 +7,22 @@ export type CanaryRecallSnapshot = {
   runsUrl: string;
   seeded: number;
   caught: number;
-  runs: { at: string; url: string; seeded: number; caught: number; unfinished: number }[];
+  runs: { at: string; url: string; seeded: number; caught: number; unfinished: number; codex?: CodexCounts }[];
   unrecorded: { at: string; url: string }[];
 };
 
+/** The red team's counts over one canary run's seeds (docs/specs/security-audit.md -> "Red team"). */
+export type CodexCounts = { url: string; caught: number; either: number; unfinished: number };
+
 /** One run inside a week. `seeded` and `caught` are null for a run that left no record. */
-export type RecallRun = { url: string; at: string; seeded: number | null; caught: number | null; unfinished: number };
+export type RecallRun = {
+  url: string;
+  at: string;
+  seeded: number | null;
+  caught: number | null;
+  unfinished: number;
+  codex?: CodexCounts;
+};
 
 /**
  * One week of the window: Monday 00:00 UTC through Sunday, so the weekly
@@ -30,6 +40,12 @@ export type RecallWeek = {
   unfinished: number;
   /** Runs that week that left no record, and so add nothing to its counts. */
   unrecorded: number;
+  /**
+   * The red team, over that week's runs it was paired with; null when none
+   * was. `either` is over every counted run, a run Codex did not see adding
+   * Claude's catches alone, so it never falls below `percent`.
+   */
+  codex: { runs: number; seeded: number; caught: number; percent: number; either: number; eitherPercent: number } | null;
 };
 
 const DAY = 86_400_000;
@@ -55,7 +71,7 @@ const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
  */
 export function recallWeeks(snapshot: CanaryRecallSnapshot): RecallWeek[] {
   const runs: RecallRun[] = [
-    ...snapshot.runs.map(({ url, at, seeded, caught, unfinished }) => ({ url, at, seeded, caught, unfinished })),
+    ...snapshot.runs.map(({ url, at, seeded, caught, unfinished, codex }) => ({ url, at, seeded, caught, unfinished, codex })),
     ...snapshot.unrecorded.map(({ url, at }) => ({ url, at, seeded: null, caught: null, unfinished: 0 })),
   ].sort((a, b) => a.at.localeCompare(b.at) || a.url.localeCompare(b.url));
   const asOf = Date.parse(`${snapshot.asOf}T00:00:00Z`);
@@ -68,6 +84,10 @@ export function recallWeeks(snapshot: CanaryRecallSnapshot): RecallWeek[] {
     const counted = mine.filter((run) => run.seeded !== null);
     const seeded = counted.reduce((n, run) => n + run.seeded!, 0);
     const caught = counted.reduce((n, run) => n + run.caught!, 0);
+    const paired = counted.filter((run) => run.codex);
+    const codexSeeded = paired.reduce((n, run) => n + run.seeded!, 0);
+    const codexCaught = paired.reduce((n, run) => n + run.codex!.caught, 0);
+    const either = counted.reduce((n, run) => n + (run.codex ? run.codex.either : run.caught!), 0);
     weeks.push({
       start: isoDay(monday),
       runs: mine,
@@ -76,6 +96,16 @@ export function recallWeeks(snapshot: CanaryRecallSnapshot): RecallWeek[] {
       percent: seeded > 0 ? Math.round((caught / seeded) * 100) : null,
       unfinished: mine.filter((run) => run.unfinished > 0).length,
       unrecorded: mine.length - counted.length,
+      codex: codexSeeded > 0
+        ? {
+            runs: paired.length,
+            seeded: codexSeeded,
+            caught: codexCaught,
+            percent: Math.round((codexCaught / codexSeeded) * 100),
+            either,
+            eitherPercent: Math.round((either / seeded) * 100),
+          }
+        : null,
     });
   }
   return weeks;
@@ -95,6 +125,12 @@ export function weekDescription(week: RecallWeek): string {
       ? `Week of ${dayOf(week.start)}: no counts`
       : `Week of ${dayOf(week.start)}: caught ${week.caught} of ${week.seeded} over ${plural(counted, "run")} (${week.percent}%)`,
   ];
+  if (week.codex) {
+    parts.push(
+      `Codex caught ${week.codex.caught} of ${week.codex.seeded} over ${plural(week.codex.runs, "run")} (${week.codex.percent}%)`,
+      `caught by either: ${week.codex.either} of ${week.seeded} (${week.codex.eitherPercent}%)`,
+    );
+  }
   if (week.unfinished > 0) parts.push(`${plural(week.unfinished, "run")} with a domain that left no finished report`);
   if (week.unrecorded > 0) parts.push(`${plural(week.unrecorded, "run")} left no record`);
   return parts.join("; ");
@@ -103,7 +139,8 @@ export function weekDescription(week: RecallWeek): string {
 /** One run in a week's list, in words. */
 export function runLabel(run: RecallRun): string {
   const counts = run.seeded === null ? "no record" : `${run.caught} of ${run.seeded}${run.unfinished > 0 ? "*" : ""}`;
-  return `${dayOf(run.at)}: ${counts}`;
+  const codex = run.codex ? `; Codex ${run.codex.caught}${run.codex.unfinished > 0 ? "*" : ""}, either ${run.codex.either}` : "";
+  return `${dayOf(run.at)}: ${counts}${codex}`;
 }
 
 /**
@@ -143,18 +180,74 @@ export function weekTicks(weeks: RecallWeek[]): { start: string; index: number }
 const EXTERNAL = { target: "_blank", rel: "noopener noreferrer" } as const;
 const GRID = [100, 50, 0];
 
+/**
+ * The three lines, told apart by dash and marker shape as well as color, since
+ * the color comes from the reader's theme: Claude solid in the accent with
+ * round points, Codex solid in the text color with square ones, either dashed
+ * in the accent with diamonds.
+ */
+const SERIES = {
+  claude: { label: "Claude, the release gate", stroke: "var(--docs-accent)", dash: undefined },
+  codex: { label: "Codex, advisory", stroke: "color-mix(in srgb, var(--color-text) 65%, transparent)", dash: undefined },
+  either: { label: "Caught by either", stroke: "var(--docs-accent)", dash: "5 4" },
+} as const;
+type Series = keyof typeof SERIES;
+
+/** One polyline per unbroken run of weeks with a value: a week without one breaks the line. */
+function segmentsOf(values: (number | null)[], x: (i: number) => number): string[][] {
+  const segments: string[][] = [];
+  values.forEach((value, i) => {
+    if (value === null) return;
+    const point = `${x(i)},${100 - value}`;
+    if (i > 0 && values[i - 1] !== null) segments[segments.length - 1].push(point);
+    else segments.push([point]);
+  });
+  return segments;
+}
+
+function SeriesSwatch({ series }: { series: Series }) {
+  const { stroke, dash } = SERIES[series];
+  return (
+    <svg aria-hidden="true" className="h-2 w-6 overflow-visible" viewBox="0 0 24 8">
+      <line x1="0" y1="4" x2="24" y2="4" style={{ stroke }} strokeWidth={2} strokeDasharray={dash} />
+      <SeriesMarker series={series} cx={12} cy={4} r={3} />
+    </svg>
+  );
+}
+
+/** A point's shape around (cx, cy), `r` its half-width. */
+function SeriesMarker({ series, cx, cy, r }: { series: Series; cx: number; cy: number; r: number }) {
+  const fill = SERIES[series].stroke;
+  if (series === "claude") return <circle cx={cx} cy={cy} r={r} style={{ fill }} />;
+  // The square a little smaller and the diamond a little larger, so the three read as the same weight.
+  if (series === "codex") return <rect x={cx - r * 0.9} y={cy - r * 0.9} width={r * 1.8} height={r * 1.8} style={{ fill }} />;
+  const d = r * 0.8;
+  return <rect x={cx - d} y={cy - d} width={d * 2} height={d * 2} transform={`rotate(45 ${cx} ${cy})`} style={{ fill }} />;
+}
+
+/** The legend, shown once any week has a red-team point: identity is never color alone. */
+function RecallLegend() {
+  return (
+    <ul aria-label="Lines" className={`mt-4 flex flex-wrap gap-x-4 gap-y-1 text-xs ${CARD_MUTED_TEXT_CLASS}`}>
+      {(Object.keys(SERIES) as Series[]).map((series) => (
+        <li key={series} className="flex items-center gap-1.5">
+          <SeriesSwatch series={series} />
+          {SERIES[series].label}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 /** Percent caught per UTC week, 0–100% up the y axis, oldest to newest left to right. */
 function RecallGraph({ weeks }: { weeks: RecallWeek[] }) {
   const n = weeks.length;
   const x = (i: number) => ((i + 0.5) / n) * 100;
-  // One polyline per unbroken run of weeks with counts: a week without breaks the line.
-  const segments: string[][] = [];
-  weeks.forEach((week, i) => {
-    if (week.percent === null) return;
-    const point = `${x(i)},${100 - week.percent}`;
-    if (i > 0 && weeks[i - 1].percent !== null) segments[segments.length - 1].push(point);
-    else segments.push([point]);
-  });
+  const lines: [Series, string[][]][] = [
+    ["either", segmentsOf(weeks.map((w) => w.codex?.eitherPercent ?? null), x)],
+    ["codex", segmentsOf(weeks.map((w) => w.codex?.percent ?? null), x)],
+    ["claude", segmentsOf(weeks.map((w) => w.percent), x)],
+  ];
   const above = labelsAbove(weeks);
   return (
     <div className="mt-4 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 text-xs">
@@ -180,18 +273,37 @@ function RecallGraph({ weeks }: { weeks: RecallWeek[] }) {
           viewBox="0 0 100 100"
           preserveAspectRatio="none"
         >
-          {segments.map((segment) => (
-            <polyline
-              key={segment[0]}
-              points={segment.join(" ")}
-              fill="none"
-              style={{ stroke: "var(--docs-accent)" }}
-              strokeWidth={2}
-              strokeLinejoin="round"
-              vectorEffect="non-scaling-stroke"
-            />
-          ))}
+          {lines.flatMap(([series, segments]) =>
+            segments.map((segment) => (
+              <polyline
+                key={`${series}-${segment[0]}`}
+                points={segment.join(" ")}
+                fill="none"
+                style={{ stroke: SERIES[series].stroke }}
+                strokeWidth={2}
+                strokeDasharray={SERIES[series].dash}
+                strokeLinejoin="round"
+                vectorEffect="non-scaling-stroke"
+              />
+            )),
+          )}
         </svg>
+        {/* The red team's points: the week's own point below opens its runs and describes all three. */}
+        {weeks.flatMap((week, i) =>
+          week.codex
+            ? (["codex", "either"] as const).map((series) => (
+                <svg
+                  key={`${series}-${week.start}`}
+                  aria-hidden="true"
+                  className="pointer-events-none absolute size-2.5 -translate-x-1/2 -translate-y-1/2 overflow-visible"
+                  style={{ left: `${x(i)}%`, top: `${100 - (series === "codex" ? week.codex!.percent : week.codex!.eitherPercent)}%` }}
+                  viewBox="0 0 10 10"
+                >
+                  <SeriesMarker series={series} cx={5} cy={5} r={5} />
+                </svg>
+              ))
+            : [],
+        )}
         <ol aria-label="Percent caught per week, oldest first" className="absolute inset-0">
           {weeks.map((week, i) => {
             const label = weekLabel(week);
@@ -269,7 +381,8 @@ export default function CanaryRecall({ snapshot }: { snapshot: CanaryRecallSnaps
   const { asOf, windowDays, runsUrl, seeded, caught } = snapshot;
   const weeks = recallWeeks(snapshot);
   const any = snapshot.runs.length + snapshot.unrecorded.length > 0;
-  const unfinished = snapshot.runs.some((run) => run.unfinished > 0);
+  const unfinished = snapshot.runs.some((run) => run.unfinished > 0 || (run.codex?.unfinished ?? 0) > 0);
+  const redTeam = weeks.some((week) => week.codex !== null);
   return (
     <aside aria-label="Canary recall" className={`mb-6 ${CARD_CLASS} text-[var(--color-text)]`}>
       {seeded > 0 ? (
@@ -286,11 +399,15 @@ export default function CanaryRecall({ snapshot }: { snapshot: CanaryRecallSnaps
         A canary seeds known vulnerabilities into a throwaway copy of the repository and counts
         how many the audit reports. Summed over the canary runs of the {windowDays} days before{" "}
         {asOf}.{any ? " Each point is one week, Monday to Sunday UTC; open it for that week's runs." : ""}
+        {redTeam
+          ? " A maintainer also runs Codex on some canaries' seeds as a red team; its line covers only those runs, and the dashed line counts a seed either caught."
+          : ""}
       </p>
+      {redTeam ? <RecallLegend /> : null}
       {any ? <RecallGraph weeks={weeks} /> : null}
       {unfinished ? (
         <p className={`text-sm ${CARD_MUTED_TEXT_CLASS}`}>
-          * Hollow: a run that week had a domain that left no finished report, and its seeds count as missed.
+          * A domain left no finished report, and its seeds count as missed; a hollow point marks a week where a Claude run had one.
         </p>
       ) : null}
       {snapshot.unrecorded.length > 0 ? (

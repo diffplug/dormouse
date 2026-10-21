@@ -12,11 +12,12 @@
  *     says which changes are seeds.
  *     Writes the seeds applied to <dir>/seeds.json, outside the checkout.
  *   node scripts/security-audit-canary.mjs score --stash <dir> --scorecard <file> --public <file>
- *       [--run-url <url>] [--summary <file>]
+ *       [--run-url <url>] [--summary <file>] [--union <scorecard>]
  *     Score the code domains' fragments in the working directory against
  *     <dir>/seeds.json: the scorecard, with seed detail, for the encrypted
  *     archive; the public record, counts alone; and one summary line appended
- *     to <file>.
+ *     to <file>. `--union` names another engine's scorecard over the same
+ *     seeds, and adds to this one's how many seeds either caught.
  *   node scripts/security-audit-canary.mjs domains
  *     The domains a canary runs, space-separated.
  *   node scripts/security-audit-canary.mjs redact <file>...
@@ -210,6 +211,18 @@ export function score(seeds, fragments) {
   };
 }
 
+/**
+ * How many seeds `scorecard` or `other` caught, both scored over the same
+ * seeds: a canary keyed alike over the same commit. Throws when the seeds
+ * differ, since a union over two different seedings counts nothing real.
+ */
+export function union(scorecard, other) {
+  const ids = (card) => card.seeds.map((s) => s.id).sort().join();
+  if (ids(scorecard) !== ids(other)) throw new Error('the two scorecards seeded different seeds: key both canaries alike, over the same commit');
+  const caught = new Set(other.seeds.filter((s) => s.caught).map((s) => s.id));
+  return scorecard.seeds.filter((s) => s.caught || caught.has(s.id)).length;
+}
+
 /** What the canary publishes: counts and the run link, nothing a seed's detail could be read from. */
 export function publicRecord(scorecard, runUrl = '') {
   if (runUrl && !RUN_URL_RE.test(runUrl)) throw new Error(`not a run URL: ${JSON.stringify(runUrl)}`);
@@ -266,6 +279,7 @@ function main(argv) {
   if (command === 'score') {
     const seeds = JSON.parse(readFileSync(join(args.stash, 'seeds.json'), 'utf8'));
     const scorecard = score(seeds, readFragments());
+    if (args.union) scorecard.either = union(scorecard, JSON.parse(readFileSync(args.union, 'utf8')));
     const record = publicRecord(scorecard, args['run-url'] ?? '');
     for (const [file, value] of [[args.scorecard, scorecard], [args.public, record]]) {
       mkdirSync(dirname(file), { recursive: true });
@@ -273,6 +287,7 @@ function main(argv) {
     }
     if (args.summary) appendFileSync(args.summary, `${summaryLine(record)}\n`);
     console.log(summaryLine(record));
+    if ('either' in scorecard) console.log(`either: ${scorecard.either}/${scorecard.seeded} seeds caught by this engine or the other`);
     return;
   }
   if (command === 'redact') {

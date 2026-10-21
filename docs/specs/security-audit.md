@@ -1,6 +1,6 @@
 # Security Audit
 
-> - Owns how the security specs are audited: the schedule and the release gate, the deterministic checks and the skip they allow, the domains and their prompts, the orchestration contract, the three outcomes, the reporting steps, the embargo on finding detail and its disclosure, the environment that holds `AUDIT_PAT`, and the canary that measures recall.
+> - Owns how the security specs are audited: the schedule and the release gate, the deterministic checks and the skip they allow, the domains and their prompts, the orchestration contract, the three outcomes, the reporting steps, the embargo on finding detail and its disclosure, the environment that holds `AUDIT_PAT`, the canary that measures recall, and the advisory Codex red team.
 > - Defers what is audited to `docs/specs/security.md` and the specs it names, and each agent's procedure to its prompt in `.github/audit/`.
 > - Read `docs/specs/security.md` first.
 
@@ -48,7 +48,7 @@ CI and the local runner share the prompts and their scopes in `.github/audit/` (
 - **FAIL IF** `S5` a `docs/specs/security*.md` spec (not a `.rationale.md`) is in no domain's scope, or in two, or a scope names a file that does not exist (rationale).
 - **FAIL IF** `S6` `.github/audit/orchestrator.md` lets the orchestrator audit anything itself (rationale).
 - **FAIL IF** `S7` the audit stops fanning out to a dedicated `remote` subagent scoped to `docs/specs/security-remote.md`, a dedicated `local` subagent scoped to `docs/specs/security-local.md`, or a dedicated `hosted` subagent scoped to `docs/specs/security-hosted.md`, or any of those scopes is merged back into a context that also carries another domain (rationale).
-- **FAIL IF** `S8` `remote`, `local`, or `hosted` does not run on Opus and the mechanical domains on Sonnet, the stronger model on the code-reading domains, in **both** `.github/workflows/security-audit.yaml`'s `claude_args` — its `--model` sets the floor and its `--agents` raises those three domains — and `scripts/security-audit-local.sh` (rationale). Pinned by `scripts/security-audit.test.mjs`.
+- **FAIL IF** `S8` `remote`, `local`, or `hosted` does not run on Opus and the mechanical domains on Sonnet, the stronger model on the code-reading domains, in **both** `.github/workflows/security-audit.yaml`'s `claude_args` — its `--model` sets the floor and its `--agents` raises those three domains — and `scripts/security-audit-local.sh`'s default Claude engine (rationale). This split is the release gate; the Codex engine never is ([Red team](#red-team)). Pinned by `scripts/security-audit.test.mjs`.
 - **FAIL IF** `S9` `.github/audit/` is missing a prompt file the workflow names, or `scripts/security-audit-local.sh` stops running the audit from those same files (rationale), or exits zero after a failed process, a missing or unfinished fragment, or any verdict other than exact `VERDICT: PASS`. Pinned by `scripts/security-audit.test.mjs`.
 - **FAIL IF** `S10` the union of the subagents' qualitative scopes does not cover every top-level path in the repository: the catch-all's remainder stops subtracting every other domain's prompt, or a second domain claims the remainder (rationale). Pinned by `scripts/security-audit.test.mjs`.
 - **FAIL IF** `S11` `.github/audit/` or `.vscode/` is outside **any** consumer of `.github/workflows/workflow-audit.yaml`'s diff window — the commit list, `own_changes`, `is_clean_merge`, and both content classifiers' refusals, whose half is *derived* from the single `WINDOW` array. The security specs are deliberately *not* watched there (rationale).
@@ -121,6 +121,8 @@ Source of truth: `.github/audit/_preamble.md`; `dedupFindings` in `scripts/secur
 
 | Sink | Carries |
 |---|---|
+| Red-team comment on the status issue, one per `codex-audit-report.yaml` run | what [Red team](#red-team) lists |
+| `codex-recall` artifact | that run's canary counts, model, commit, and the two run links |
 | Public status issue, labeled `security-audit-status` | the run's time, link, commit, and outcome; whether the domains were skipped and when they last ran; each domain's computed verdict and its failed-check, missing-rule, malformed-line, BLOCKER, and WARNING counts; each failed check's spec and heading; how many verdict lines disagreed; whether the private filing failed; each open ledger finding's severity, kind, and dates, keyed as [Disclosure](#disclosure) allows; the latest disclosures |
 | Public disclosure issue, labeled `security-audit-finding`, one per ledger issue | what [Disclosure](#disclosure) lists |
 | Private issue in `diffplug/dormouse-embargo`, one per non-PASS run | the private report ([Outcomes and reporting](#outcomes-and-reporting)), titled with date and commit |
@@ -134,7 +136,7 @@ Source of truth: `.github/audit/_preamble.md`; `dedupFindings` in `scripts/secur
 
 `EMBARGO_TOKEN` is a fine-grained PAT with Issues: write on `diffplug/dormouse-embargo` alone, minted on an admin's account.
 
-- **FAIL IF** `S25` a public issue can carry finding text: a status or disclosure title, body, or comment is posted from anything but `scripts/security-audit-public-body.mjs` and the step's fixed failure sentence, or that builder emits anything but fixed text, counts, dates, validated run metadata, fragment names, ledger keys and severities, headings it found in the checked-out spec, files it found in the checked-out tree, PR numbers the API reports merged, and a maintainer's public summary. A failed check naming no rule its domain owes, in the line form `.github/audit/_preamble.md` fixes, is counted, never quoted (rationale).
+- **FAIL IF** `S25` a public issue can carry finding text: a status or disclosure title, body, or comment is posted from anything but `scripts/security-audit-public-body.mjs` and the step's fixed failure sentence, or that builder emits anything but fixed text, counts, dates, validated run metadata and model names, fragment names, ledger keys and severities, headings it found in the checked-out spec, files it found in the checked-out tree, PR numbers the API reports merged, and a maintainer's public summary. A failed check naming no rule its domain owes, in the line form `.github/audit/_preamble.md` fixes, is counted, never quoted (rationale).
 - **FAIL IF** `S26` `secrets.EMBARGO_TOKEN` is referenced anywhere but the `env:` of `List open findings`, `File embargoed findings`, and `Read the findings ledger`, a workflow or job `env:` or a `$GITHUB_ENV` write could carry it to another step, any of them runs anything but `gh` and shell builtins, `List open findings` writes a title anywhere but `audit-open-findings.txt`, or `Read the findings ledger` writes anywhere but `audit-ledger-snapshot.jsonl` or keeps a title past its key and severity, a body past its opening metadata line, or a comment past a maintainer's `Fixed in` PR number or public summary (rationale). Pinned by `scripts/security-audit.test.mjs`.
 - **FAIL IF** `S27` a non-PASS run whose private filing failed or was skipped can succeed, or its status issue omits that the filing failed; or a PASS run files anything in the private tracker but ledger issues, or `scripts/security-audit-local.sh` files anything.
 - **FAIL IF** `S28` the `audit-transcript` artifact can upload anything but age ciphertext: its `path:` names a non-`.age` file, it uploads when `Encrypt the audit transcript` did not succeed, that step reads its recipient from anywhere but `.github/audit/transcript-recipient.txt`, or it stops running whatever the audit step's outcome (`if: always()`).
@@ -206,22 +208,35 @@ Source of truth: `Verify AUDIT_PAT is provisioned` in `.github/workflows/securit
 - Which seeds ran, what caught them, and findings on code no seed touched stay in the `canary-transcript` artifact; a canary files them nowhere.
 - A canary run is a completed run on `main`, so the next scheduled run audits in full ([Skipping an unchanged audit](#skipping-an-unchanged-audit)).
 
-- **FAIL IF** `S37` the `canary` job can push or file: it holds any write permission, runs its agent on a token but its own read-only one, keeps the checkout's credentials, runs `gh` or `git push`, or names `AUDIT_PAT` or `EMBARGO_TOKEN`; or `scripts/security-audit-local.sh canary`, which seeds a copy of the committed tree, files anything. Pinned by `scripts/security-audit-canary.test.mjs`.
+- **FAIL IF** `S37` the `canary` job can push or file: it holds any write permission, runs its agent on a token but its own read-only one, keeps the checkout's credentials, runs `gh` or `git push`, or names `AUDIT_PAT` or `EMBARGO_TOKEN`; or `scripts/security-audit-local.sh canary`, which seeds a copy of the committed tree, files anything, either engine's included. Pinned by `scripts/security-audit-canary.test.mjs`.
 - **FAIL IF** `S38` a canary run, dispatched or weekly, can gate a release or feed the skip: the `audit` job runs in it, it runs on a ref but `main`, it uploads an `audit-state` artifact, or the gate in `.github/workflows/release.yml` can select a run with the canary's title. Pinned by `scripts/security-audit-canary.test.mjs`.
 - **FAIL IF** `S39` a canary publishes seed detail: the step summary or the `canary-recall` artifact carries anything but the counts and a validated run link, or the scorecard, the seeds applied, or a fragment leaves the runner but as age ciphertext to `.github/audit/transcript-recipient.txt`. Pinned by `scripts/security-audit-canary.test.mjs`.
 - **FAIL IF** `S40` a seed stops applying to the tree, alone or over the rest of the pool, or names an ID no rule carries, a rule no longer holding its phrase, or one its `Domain:` does not own, or a code domain has fewer than three seeds. Pinned by `scripts/security-audit-canary.test.mjs`, which `pnpm test` runs.
+
+`scripts/security-audit-local.sh canary --key <run ID>` seeds that CI canary run's commit with what that run seeded.
 
 Source of truth: `seed` and `score` in `scripts/security-audit-canary.mjs`; the `canary` job in `.github/workflows/security-audit.yaml`; `run_canary` in `scripts/security-audit-local.sh`.
 
 ### Published recall
 
-dormouse.sh/security shows a rolling recall under "How the guarantees are checked": caught over seeded across the `canary-recall` artifacts of canary runs on `main` in the 30 days before its as-of date, each run linked. It is a committed snapshot, `website/src/data/canary-recall.json`, regenerated at each release (`docs/specs/deploy.md` -> "Release checklist") (rationale).
+dormouse.sh/security shows a rolling recall under "How the guarantees are checked": caught over seeded across the `canary-recall` artifacts of canary runs on `main` in the 30 days before its as-of date, each run linked. Its weekly graph draws three lines: Claude over every run; Codex over the runs a [Red team](#red-team) record pairs with; and caught by either, where a run no record pairs adds Claude's catches alone. It is a committed snapshot, `website/src/data/canary-recall.json`, regenerated at each release (`docs/specs/deploy.md` -> "Release checklist") (rationale).
 
 - **A record out of shape fails the snapshot**, never repaired or skipped: a field but the scorer's, a count not a non-negative integer, more caught than seeded, or a link but to its own run on `diffplug/dormouse`.
 - **Every run in the window counts as its record has it** (rationale): an unfinished domain's seeds stay seeded, caught only by what it reported, and the run shows its unfinished count. A run with no `canary-recall` artifact is listed without counts.
-- The generator downloads `canary-recall` alone, never `canary-transcript`.
+- The generator downloads `canary-recall` and `codex-recall` alone, never `canary-transcript`.
+- **A red-team record pairs with its canary run by link**, the newest successful run on `main` per canary run; one whose seeded count differs from that run's, or whose either count falls below Claude's or above the two engines' sum, fails the snapshot.
 
 Source of truth: `summarize` in `website/scripts/generate-canary-recall.js`; `CanaryRecall` in `website/src/components/CanaryRecall.tsx`.
+
+## Red team
+
+**Codex audits the audit from outside its model family, and is advisory: no Codex verdict gates a release, feeds the skip, or files** (rationale). `scripts/security-audit-local.sh --engine codex` runs the same prompts on `gpt-6-sol` under the `daybreak_blue` Cyber access program, sandboxed to the working tree. **A maintainer runs it quarterly, and before any release that changes remote control or Hosted**: every domain, and a canary keyed by the latest CI canary run on `main` and scored against that run's decrypted scorecard. A Codex BLOCKER or WARNING reaches the ledger only as a maintainer's hand-filed `manual-` key ([Findings ledger](#findings-ledger)).
+
+`.github/workflows/codex-audit-report.yaml` publishes the run from `workflow_dispatch` inputs that carry nothing a finding could be read from: the commit, the model, each domain's computed verdict, and the canary's run ID and seeded, Codex-caught, either-caught, and unfinished counts. `scripts/security-audit-public-body.mjs` checks each against its pattern and the commit against `main`, checks the counts against that canary run's own record and commit, comments once on the status issue, and writes the `codex-recall` record [Published recall](#published-recall) pairs.
+
+- **FAIL IF** `S275` `.github/workflows/codex-audit-report.yaml` can gate, file, or publish past its inputs: it holds any write permission but its one job's `issues: write`, reads a secret, interpolates an input into a script, runs on a ref but `main`, posts for anyone but an admin or anything but `codexComment`'s text, or the gate in `.github/workflows/release.yml` can select its run; or `scripts/security-audit-local.sh` runs Codex unsandboxed or on another model or program. Pinned by `scripts/security-audit.test.mjs`.
+
+Source of truth: `run_domain` in `scripts/security-audit-local.sh`; `publishCodex` in `scripts/security-audit-public-body.mjs`; `.github/workflows/codex-audit-report.yaml`.
 
 ## Future
 

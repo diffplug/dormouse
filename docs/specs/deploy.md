@@ -21,6 +21,8 @@ Source of truth: `create_release` in `scripts/sign-and-deploy.sh`; `publish-vsco
 
 **Must ship a desktop release that carries, or changes, the one-time link version only after Hosted production serves that version** — its rendezvous routes and its `/connect/` page (`docs/specs/one-time.md` -> "Link"): run `.github/workflows/hosted-production.yml` first and confirm its live verification passed, `oneTimeSmoke` included. **Hosted must never stop serving a link version a shipped Burrow emits.**
 
+A release that changes remote control or Hosted runs the red team first (`docs/specs/security-audit.md` -> "Red team").
+
 Human-driven, in order:
 
 1. **Update website snapshots** — run `node website/scripts/generate-deps.js` and `node website/scripts/generate-canary-recall.js` (on your `gh` login), review the diffs in `website/src/data/dependencies-{npm,cargo,runtime}.json` and `website/src/data/canary-recall.json`, commit if changed.
