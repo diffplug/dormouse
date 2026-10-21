@@ -823,38 +823,18 @@ const WINDOWS_SHELL_PLUMBING = new Map([
 async function shellHasWork(rootPid, shell, runtime = {}) {
   const table = await readProcessTable(runtime);
   if (!table || !table.some(([pid]) => pid === rootPid)) throw new Error('Unable to inspect terminal processes');
-  const stem = path.win32.basename(shell || '').replace(/^-/, '').replace(/\.exe$/i, '').toLowerCase();
-  const plumbing = (runtime.platform || process.platform) === 'win32' && WINDOWS_SHELL_PLUMBING.get(stem);
-  const names = new Map(table.map(([pid, , name]) => [pid, (name || '').toLowerCase()]));
+  const plumbing = (runtime.platform || process.platform) === 'win32' && WINDOWS_SHELL_PLUMBING.get(shellStem(shell));
+  const rows = new Map(table.map(([pid, ppid, name]) => [pid, { ppid, name: (name || '').toLowerCase() }]));
   const shellPids = new Set([rootPid]);
   // Plumbing counts as the shell only beneath the shell itself, so work it
-  // starts under plumbing is still found.
-  for (const [pid, ppid] of plumbing ? walkParentsFirst(table, rootPid) : []) {
-    if (shellPids.has(ppid) && plumbing.has(names.get(pid))) shellPids.add(pid);
+  // starts under plumbing is still found. The walk lists each pid after its parent.
+  for (const pid of buildDescendantSet(table, rootPid)) {
+    if (shellPids.has(pid)) continue;
+    const { ppid, name } = rows.get(pid);
+    if (!plumbing || !shellPids.has(ppid) || !plumbing.has(name)) return true;
+    shellPids.add(pid);
   }
-  return [...buildDescendantSet(table, rootPid)].some(pid => !shellPids.has(pid));
-}
-
-/** The `[pid, ppid]` pairs below `rootPid`, each after its parent. */
-function walkParentsFirst(pairs, rootPid) {
-  const children = new Map();
-  for (const [pid, ppid] of pairs) {
-    if (!children.has(ppid)) children.set(ppid, []);
-    children.get(ppid).push(pid);
-  }
-  const ordered = [];
-  const seen = new Set([rootPid]);
-  const queue = [rootPid];
-  while (queue.length > 0) {
-    const current = queue.shift();
-    for (const child of children.get(current) || []) {
-      if (seen.has(child)) continue;
-      seen.add(child);
-      ordered.push([child, current]);
-      queue.push(child);
-    }
-  }
-  return ordered;
+  return false;
 }
 
 module.exports.shellHasWork = shellHasWork;
@@ -1753,7 +1733,7 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
         // never the foreground program, so only POSIX compares it.
         result.busy = !p ? false
           : await shellHasWork(p.pid, ptyShells.get(request.id))
-            || (process.platform !== 'win32' && !!p.process && shellBasename(p.process) !== shellBasename(ptyShells.get(request.id)));
+            || (platform !== 'win32' && !!p.process && shellBasename(p.process) !== shellBasename(ptyShells.get(request.id)));
       } else if (request.op === 'promote') {
         if (request.restore) {
           if (!sessions.has(request.id) || !validHelperOwner(request.id, request.restore)) throw new Error('Invalid helper owner');
