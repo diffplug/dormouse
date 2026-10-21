@@ -218,7 +218,7 @@ Source of truth: `handleDualTap` in `lib/src/components/wall/keyboard/handle-dua
 
 `docs/specs/shortcuts.md` tables every binding; this section owns the dispatch behavior behind it.
 
-**Must leave Cmd/Ctrl/Alt-modified pane action keys unhandled, except arrow swap chords and printed symbol bindings** ([Spatial navigation](#spatial-navigation)). Shift may produce any binding; Option or AltGr may produce `|`, `%`, `"`, or `>`.
+**Must leave Cmd/Ctrl/Alt chords unhandled except swaps and printed symbols** ([Spatial navigation](#spatial-navigation)): Shift permits any binding; Option/AltGr permits `|`, `%`, `"`, `>`.
 
 **Must use `,` to rename the selected terminal pane or Workspace tab in command mode**, without activating an inactive Workspace.
 
