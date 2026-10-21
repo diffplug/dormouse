@@ -19,10 +19,9 @@ import {
   randomBase64Url,
   type EnrollmentOffer,
 } from 'remote-lib-common';
+import { HostedApproval, type HostedApprovalFlow } from './hosted-approval';
 import {
   beginHostedEnrollment,
-  hostedApprovalDeadline,
-  slowDownHostedApproval,
   originMismatchMessage,
   performEnrollment,
   pollHostedEnrollment,
@@ -96,7 +95,6 @@ import {
   type EnrollParams,
   type EnrollResult,
   type HostedEnrollParams,
-  type HostedEnrollmentEnded,
   type HostedEnrollmentState,
   type BurrowStatusEvent,
   type InvitationEvent,
@@ -394,25 +392,10 @@ export function enqueuePending(pairings: Map<string, PendingPairing>, pending: P
   pairings.set(pending.clientId, pending);
 }
 
-/**
- * A Hosted enrollment awaiting approval. The device code and the Noise static
- * stay here, in this process; `status` carries the rest
- * ({@link HostedEnrollmentState}).
- */
-interface HostedEnrollmentRun {
-  readonly deviceCode: string;
+/** What a remote-control approval holds in this process until a poll redeems it. */
+interface HostedEnrollmentHeld {
   readonly noiseStatic: EnrollmentStatic;
   readonly label: string;
-  readonly userCode: string;
-  readonly verificationUrl: string;
-  /** This machine's deadline (bounded independently of the Relay clock). */
-  readonly expiresAt: number;
-  intervalMs: number;
-  /** The last poll found the approving account full. */
-  accountFull: boolean;
-  /** A poll redeemed it, and its enrollment is being saved and started. */
-  redeeming: boolean;
-  timer: ReturnType<typeof setTimeout> | null;
 }
 
 export class BurrowService {
@@ -475,14 +458,8 @@ export class BurrowService {
    */
   readonly #pairings = new Map<string, PendingPairing>();
 
-  /** The Hosted enrollment awaiting approval, polled by its own timer. */
-  #enrollRun: HostedEnrollmentRun | null = null;
-  /** How the last one ended short of enrolling, until the next begin or a cancel. */
-  #enrollEnded: HostedEnrollmentEnded | null = null;
-  /** Bumped by every begin and cancel, so a begin still in flight that was superseded keeps nothing. */
-  #enrollSeq = 0;
-  /** The begin in flight, which every other begin joins. */
-  #enrollBegin: Promise<HostedEnrollmentState> | null = null;
+  /** The Hosted enrollment: its code, polls, and redemption ({@link #hostedEnrollmentFlow}). */
+  readonly #hostedEnrollment: HostedApproval<string, HostedEnrollmentHeld, BurrowEnrollment>;
   /** The account origin the last begin resolved: what a dev Hosted build's `status` names. */
   #accountOrigin: string | null = null;
 
@@ -551,6 +528,11 @@ export class BurrowService {
       createDirectPeer &&
       ((pathPolicy, stun) => (this.#level() === 'nothing' ? null : createDirectPeer(pathPolicy, stun)));
     this.#now = options.now ?? (() => Date.now());
+    this.#hostedEnrollment = new HostedApproval(this.#hostedEnrollmentFlow(), {
+      onChange: () => this.#emitStatus(),
+      now: this.#now,
+      log: (message) => console.warn(`[burrow] ${message}`),
+    });
     this.#readOffer = options.readOffer ?? (() => readEnrollmentOffer());
     this.#listInterfaces = options.listInterfaces ?? listNetworkInterfaces;
   }
@@ -594,7 +576,7 @@ export class BurrowService {
   dispose(): void {
     if (this.#disposed) return;
     this.#disposed = true;
-    this.#stopHostedEnrollment();
+    this.#hostedEnrollment.dispose();
     this.#stopBurrow();
     const oneTime = this.#oneTime;
     this.#oneTime = null;
@@ -631,7 +613,8 @@ export class BurrowService {
       case 'beginHostedEnrollment':
         return this.#beginHostedEnrollment(params as HostedEnrollParams | undefined);
       case 'cancelHostedEnrollment':
-        return this.#cancelHostedEnrollment();
+        this.#hostedEnrollment.cancel();
+        return {};
       case 'status':
         return this.#status();
       case 'reconnect':
@@ -793,12 +776,9 @@ export class BurrowService {
   // --- Hosted enrollment (`docs/specs/hosted.md` -> "Burrow enrollment") ---
 
   /**
-   * Begin a device-code enrollment and poll it from here, answering the
-   * `waiting` state the panel draws. **A code already waiting or redeeming is
-   * answered, not voided** — another VS Code window's Enroll lands on the same
-   * service — and a begin in flight is joined; one that ended is replaced once
-   * a new code is in hand. Refused in a self-host build, on an enrolled
-   * machine, and under `nothing` before any request.
+   * Begin a device-code enrollment, which {@link #hostedEnrollment} polls,
+   * answering the `waiting` state the panel draws. Refused in a self-host
+   * build, on an enrolled machine, and under `nothing` before any request.
    */
   async #beginHostedEnrollment(params: HostedEnrollParams | undefined): Promise<HostedEnrollmentState> {
     if (this.#relay.mode === 'self-host') throw new Error(SELF_HOST_DEVICE_CODE_REFUSAL);
@@ -806,46 +786,30 @@ export class BurrowService {
     await this.#networkPolicy();
     this.#refuseNothing();
     this.#refuseEnrolled();
-    if (this.#enrollRun) return this.#hostedEnrollmentState()!;
-    if (this.#enrollBegin) return await this.#enrollBegin;
-    const begun = this.#beginRun(label, ++this.#enrollSeq);
-    this.#enrollBegin = begun;
-    try {
-      return await begun;
-    } finally {
-      if (this.#enrollBegin === begun) this.#enrollBegin = null;
-    }
+    return this.#hostedEnrollment.begin(label);
   }
 
-  /** The begin request, then the run it starts in place of any before it, unless `seq` was superseded. */
-  async #beginRun(label: string, seq: number): Promise<HostedEnrollmentState> {
-    const { begin, noiseStatic } = await beginHostedEnrollment(this.#relay.origin, this.#fetch);
-    if (seq !== this.#enrollSeq || this.#disposed) {
-      throw new Error('This enrollment was cancelled.');
-    }
-    // Enrolled, or redeeming another code, while this one was asked for.
-    this.#refuseEnrolled();
-    if (this.#enrollRun?.redeeming) return this.#hostedEnrollmentState()!;
-    const verificationUrl = enrollVerificationUrl(this.#relay, begin);
-    const run: HostedEnrollmentRun = {
-      deviceCode: begin.deviceCode,
-      noiseStatic,
-      label,
-      userCode: begin.userCode,
-      verificationUrl,
-      expiresAt: hostedApprovalDeadline(begin.expiresAt, this.#now()),
-      intervalMs: begin.interval * 1000,
-      accountFull: false,
-      redeeming: false,
-      timer: null,
+  /** What a remote-control approval begins, polls, and keeps: a Burrow. */
+  #hostedEnrollmentFlow(): HostedApprovalFlow<string, HostedEnrollmentHeld, BurrowEnrollment> {
+    return {
+      begin: async (label) => {
+        const { begin, noiseStatic } = await beginHostedEnrollment(this.#relay.origin, this.#fetch);
+        return { begin, held: { noiseStatic, label } };
+      },
+      // Enrolled, by another code's redemption, while this one was asked for.
+      admit: () => this.#refuseEnrolled(),
+      verificationUrl: (begin) => {
+        const url = enrollVerificationUrl(this.#relay, begin);
+        this.#accountOrigin = new URL(url).origin;
+        return url;
+      },
+      poll: (deviceCode, { label, noiseStatic }) =>
+        pollHostedEnrollment(this.#relay.origin, deviceCode, label, noiseStatic, this.#fetch),
+      redeem: async (enrollment) => {
+        await this.#holdHostedEnrollment(enrollment);
+        return true;
+      },
     };
-    this.#clearEnrollRun();
-    this.#enrollEnded = null;
-    this.#enrollRun = run;
-    this.#accountOrigin = new URL(verificationUrl).origin;
-    this.#schedulePoll(run);
-    this.#emitStatus();
-    return this.#hostedEnrollmentState()!;
   }
 
   /** What `enroll` and `enrollOffer` answer in a Hosted build: the account this build approves codes at. */
@@ -863,118 +827,16 @@ export class BurrowService {
   }
 
   /**
-   * Stop the enrollment waiting or ended, and say so; a begin in flight keeps
-   * nothing. **A redeeming one is left to land**: its credential is spent.
-   * Cancel stops future polls, but a poll already out that redeems is still
-   * held ({@link #redeemHostedEnrollment}).
+   * Hold an enrollment a poll redeemed, whether or not its code is still the
+   * one waiting: the Relay has spent and recorded it. Only an enrolled machine
+   * or a disposed service cannot hold it, and a failure to — either of those,
+   * the origin check, or the save — throws a sentence naming the Burrow the
+   * account must remove.
    */
-  #cancelHostedEnrollment(): Record<string, never> {
-    this.#enrollSeq++;
-    this.#enrollBegin = null;
-    const run = this.#enrollRun && !this.#enrollRun.redeeming ? this.#enrollRun : null;
-    const had = run !== null || this.#enrollEnded !== null;
-    if (run) this.#clearEnrollRun();
-    this.#enrollEnded = null;
-    if (had) this.#emitStatus();
-    return {};
-  }
-
-  /** At disposal: forget every Hosted enrollment, unannounced, and void a begin in flight. */
-  #stopHostedEnrollment(): void {
-    this.#enrollSeq++;
-    this.#enrollBegin = null;
-    this.#clearEnrollRun();
-    this.#enrollEnded = null;
-  }
-
-  #clearEnrollRun(): void {
-    if (this.#enrollRun?.timer) clearTimeout(this.#enrollRun.timer);
-    this.#enrollRun = null;
-  }
-
-  /** The next poll after `run.intervalMs`, or at the deadline if that comes first. */
-  #schedulePoll(run: HostedEnrollmentRun): void {
-    const delay = Math.max(0, Math.min(run.intervalMs, run.expiresAt - this.#now()));
-    run.timer = setTimeout(() => void this.#pollHostedEnrollment(run), delay);
-  }
-
-  async #pollHostedEnrollment(run: HostedEnrollmentRun): Promise<void> {
-    run.timer = null;
-    if (this.#enrollRun !== run) return;
-    if (this.#now() >= run.expiresAt) {
-      this.#endHostedEnrollment(run, { reason: 'expired' });
-      return;
-    }
-    const answer = await pollHostedEnrollment(
-      this.#relay.origin,
-      run.deviceCode,
-      run.label,
-      run.noiseStatic,
-      this.#fetch,
-    );
-    // Held whatever happened while the poll was out: see the method.
-    if (answer.status === 'enrolled') {
-      await this.#redeemHostedEnrollment(run, answer.enrollment);
-      return;
-    }
-    if (this.#enrollRun !== run) return;
-    switch (answer.status) {
-      case 'pending':
-        this.#setAccountFull(run, false);
-        this.#schedulePoll(run);
-        return;
-      case 'retry':
-        if (answer.slowDown) {
-          run.intervalMs = slowDownHostedApproval(run.intervalMs);
-        }
-        this.#schedulePoll(run);
-        return;
-      case 'expired':
-        this.#endHostedEnrollment(run, { reason: 'expired' });
-        return;
-      // An earlier poll redeemed it and its answer was lost on the way.
-      case 'redeemed':
-        this.#endHostedEnrollment(run, { reason: 'answer-lost', burrowId: answer.burrowId });
-        return;
-      // The Relay keeps an approval it refused, so a full account polls on
-      // and enrolls once a computer is removed; an entitlement ends it.
-      case 'refused':
-        if (answer.reason === 'account-full') {
-          this.#setAccountFull(run, true);
-          this.#schedulePoll(run);
-        } else {
-          this.#endHostedEnrollment(run, { reason: answer.reason });
-        }
-        return;
-      case 'failed':
-        this.#endHostedEnrollment(run, { reason: 'failed', message: answer.message });
-        return;
-    }
-  }
-
-  /**
-   * Hold an enrollment a poll of `run` redeemed. **Single-use, and recorded by
-   * the Relay**, so it is held even when `run` was cancelled or replaced while
-   * the poll was out; `run`, if still current, reports `redeeming` until the
-   * save-and-start on the lifecycle chain finishes. Only an enrolled machine or
-   * a disposed service cannot hold it, and a failure to — either of those, the
-   * origin check, or the save — ends every enrollment with a sentence naming
-   * the Burrow the account must remove (a console warning once disposed,
-   * there being nothing left to show it).
-   */
-  async #redeemHostedEnrollment(
-    run: HostedEnrollmentRun,
-    enrollment: BurrowEnrollment,
-  ): Promise<void> {
-    if (this.#enrollRun === run) {
-      if (run.timer) clearTimeout(run.timer);
-      run.timer = null;
-      run.redeeming = true;
-      this.#emitStatus();
-    }
+  async #holdHostedEnrollment(enrollment: BurrowEnrollment): Promise<void> {
     const stranded =
       `Your account holds Burrow ${enrollment.burrowId}, which this computer could not keep; ` +
-      `remove it at ${new URL(run.verificationUrl).origin}${ACCOUNT_PAGE_PATH}.`;
+      `remove it at ${accountOriginFor(this.#relay, this.#accountOrigin) ?? HOSTED_ACCOUNT_ORIGIN}${ACCOUNT_PAGE_PATH}.`;
     let saved = false;
     try {
       await this.#serialize(async () => {
@@ -992,56 +854,12 @@ export class BurrowService {
       });
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
-      const message = saved
-        ? `${detail} This computer saved its enrollment; restart Dormouse to try connecting again.`
-        : `${detail} ${stranded}`;
-      if (this.#disposed) {
-        console.warn(`[burrow] ${message}`);
-        return;
-      }
-      // A redemption of another code still landing reports itself first.
-      if (this.#enrollRun === run || !this.#enrollRun?.redeeming) {
-        this.#enrollSeq++;
-        this.#clearEnrollRun();
-      }
-      this.#enrollEnded = { reason: 'failed', message };
-      this.#emitStatus();
-      return;
+      throw new Error(
+        saved
+          ? `${detail} This computer saved its enrollment; restart Dormouse to try connecting again.`
+          : `${detail} ${stranded}`,
+      );
     }
-    // Enrolled: whatever code is still waiting — a replacing begin's — is moot.
-    this.#enrollSeq++;
-    this.#clearEnrollRun();
-    this.#emitStatus();
-  }
-
-  #setAccountFull(run: HostedEnrollmentRun, full: boolean): void {
-    if (run.accountFull === full) return;
-    run.accountFull = full;
-    this.#emitStatus();
-  }
-
-  /** End `run` short of enrolling, if it is still the one waiting. */
-  #endHostedEnrollment(run: HostedEnrollmentRun, ended: HostedEnrollmentEnded): void {
-    if (this.#enrollRun !== run) return;
-    this.#clearEnrollRun();
-    this.#enrollEnded = ended;
-    this.#emitStatus();
-  }
-
-  /** What `status` reports of the Hosted enrollment: never its device code. */
-  #hostedEnrollmentState(): HostedEnrollmentState | null {
-    const run = this.#enrollRun;
-    if (run?.redeeming) return { status: 'redeeming' };
-    if (run) {
-      return {
-        status: 'waiting',
-        userCode: run.userCode,
-        verificationUrl: run.verificationUrl,
-        expiresAt: run.expiresAt,
-        accountFull: run.accountFull,
-      };
-    }
-    return this.#enrollEnded ? { status: 'ended', ...this.#enrollEnded } : null;
   }
 
   /**
@@ -1060,7 +878,7 @@ export class BurrowService {
   async #status(): Promise<BurrowConsoleStatus> {
     const offer = this.#enrollment ? null : await readUsableOffer(this.#relay, this.#readOffer);
     const enrollment = this.#enrollment;
-    const hostedEnrollment = this.#hostedEnrollmentState();
+    const hostedEnrollment = this.#hostedEnrollment.state();
     const accountOrigin = accountOriginFor(this.#relay, this.#accountOrigin);
     if (!enrollment) {
       return unenrolledStatus(offer, this.#kind, this.#relay, this.#serving(), hostedEnrollment, accountOrigin);
@@ -1346,7 +1164,7 @@ export class BurrowService {
     await this.#store.saveNetworkPolicy(next);
     this.#policy = next;
     // Nothing polls nothing: an enrollment awaiting approval ends with the level.
-    if (next.level === 'nothing') this.#cancelHostedEnrollment();
+    if (next.level === 'nothing') this.#hostedEnrollment.cancel();
     if (!samePaths(previous, next)) {
       this.#oneTime?.end('user-ended');
       this.#restOneTime();

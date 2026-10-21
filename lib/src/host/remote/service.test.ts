@@ -2678,6 +2678,7 @@ describe('network policy', () => {
 
 describe('Hosted enrollment', () => {
   const USER_CODE = '23AB-YZ9K';
+  const CONFIRM_DIGITS = '47';
   const DEVICE_CODE = 'D'.repeat(RELAY_BEARER_LENGTH);
   const INTERVAL_S = 5;
   const TTL_MS = 10 * 60_000;
@@ -2768,6 +2769,7 @@ describe('Hosted enrollment', () => {
     begin = {
       deviceCode: DEVICE_CODE,
       userCode: USER_CODE,
+      confirmDigits: CONFIRM_DIGITS,
       // Followed in no release build: the account page is the Burrow's to compose.
       verificationUrl: `https://hosted.example/enroll#${USER_CODE}`,
       expiresAt: Date.now() + TTL_MS,
@@ -2787,7 +2789,7 @@ describe('Hosted enrollment', () => {
     expect(error).toBeUndefined();
     const waiting = {
       status: 'waiting',
-      userCode: USER_CODE,
+      confirmDigits: CONFIRM_DIGITS,
       verificationUrl: `https://hosted.dormouse.sh/enroll#${USER_CODE}`,
       expiresAt: Date.now() + TTL_MS,
       accountFull: false,
@@ -2941,6 +2943,18 @@ describe('Hosted enrollment', () => {
     expect(pollRequests()).toHaveLength(asked);
   });
 
+  it('ends on an approval typed with other digits, enrolling nothing and polling no more', async () => {
+    hosted();
+    await command('beginHostedEnrollment', { label: 'x' });
+    polls.push({ status: 200, body: { status: 'mismatch' } });
+    await nextPoll();
+    expect(await hostedEnrollment()).toEqual({ status: 'ended', reason: 'mismatch' });
+    expect(store.enrollment).toBeNull();
+    const asked = pollRequests().length;
+    await vi.advanceTimersByTimeAsync(INTERVAL_S * 3000);
+    expect(pollRequests()).toHaveLength(asked);
+  });
+
   it('stops polling on cancel, on Nothing, and on dispose', async () => {
     hosted();
     await command('beginHostedEnrollment', { label: 'x' });
@@ -2999,8 +3013,8 @@ describe('Hosted enrollment', () => {
     // joined has passed that await and observed the still-pending begin.
     await command('networkPolicy');
     expect(settle).toHaveLength(2);
-    settle[1]!(reply(200, { ...begin, userCode: '9999-ZZZZ' }));
-    expect((await fresh).result).toMatchObject({ status: 'waiting', userCode: '9999-ZZZZ' });
+    settle[1]!(reply(200, { ...begin, userCode: '9999-ZZZZ', confirmDigits: '99' }));
+    expect((await fresh).result).toMatchObject({ status: 'waiting', confirmDigits: '99' });
     expect((await joined).result).toEqual((await fresh).result);
     expect(beginRequests()).toHaveLength(2);
   });
@@ -3028,9 +3042,9 @@ describe('Hosted enrollment', () => {
     const answer = heldPoll();
     await nextPoll();
     await command('cancelHostedEnrollment');
-    begin = { ...begin, deviceCode: 'E'.repeat(RELAY_BEARER_LENGTH), userCode: '9999-ZZZZ' };
+    begin = { ...begin, deviceCode: 'E'.repeat(RELAY_BEARER_LENGTH), userCode: '9999-ZZZZ', confirmDigits: '99' };
     await command('beginHostedEnrollment', { label: 'x' });
-    expect(await hostedEnrollment()).toMatchObject({ status: 'waiting', userCode: '9999-ZZZZ' });
+    expect(await hostedEnrollment()).toMatchObject({ status: 'waiting', confirmDigits: '99' });
     answer(enrolledAnswer());
     await drain(() => store.enrollment !== null);
     await drain(() => vi.getTimerCount() === 0);
@@ -3048,7 +3062,7 @@ describe('Hosted enrollment', () => {
     const late = heldPoll();
     await nextPoll();
     await command('cancelHostedEnrollment');
-    begin = { ...begin, deviceCode: 'E'.repeat(RELAY_BEARER_LENGTH), userCode: '9999-ZZZZ' };
+    begin = { ...begin, deviceCode: 'E'.repeat(RELAY_BEARER_LENGTH), userCode: '9999-ZZZZ', confirmDigits: '99' };
     await command('beginHostedEnrollment', { label: 'x' });
     polls.push(enrolledAnswer());
     await nextPoll();
@@ -3243,7 +3257,7 @@ describe('Hosted enrollment', () => {
     // the first window shows would leave it approving nothing.
     hosted();
     const first = (await command('beginHostedEnrollment', { label: 'x' })).result;
-    begin = { ...begin, deviceCode: 'E'.repeat(RELAY_BEARER_LENGTH), userCode: '9999-ZZZZ' };
+    begin = { ...begin, deviceCode: 'E'.repeat(RELAY_BEARER_LENGTH), userCode: '9999-ZZZZ', confirmDigits: '99' };
     expect((await command('beginHostedEnrollment', { label: 'y' })).result).toEqual(first);
     expect(beginRequests()).toHaveLength(1);
   });
@@ -3258,8 +3272,8 @@ describe('Hosted enrollment', () => {
       .filter((message) => message.event === 'burrow:result')
       .filter((message) => String(message.data.burrowRequestId).startsWith('join-'));
     expect(answers.map((message) => message.data.result)).toEqual([
-      expect.objectContaining({ userCode: USER_CODE }),
-      expect.objectContaining({ userCode: USER_CODE }),
+      expect.objectContaining({ confirmDigits: CONFIRM_DIGITS }),
+      expect.objectContaining({ confirmDigits: CONFIRM_DIGITS }),
     ]);
     expect(beginRequests()).toHaveLength(1);
   });
@@ -3279,14 +3293,14 @@ describe('Hosted enrollment', () => {
     expect(await hostedEnrollment()).toEqual({ status: 'ended', reason: 'expired' });
     expect(statusEvents()).toHaveLength(events);
 
-    begin = { ...good, deviceCode: 'E'.repeat(RELAY_BEARER_LENGTH), userCode: '9999-ZZZZ' };
+    begin = { ...good, deviceCode: 'E'.repeat(RELAY_BEARER_LENGTH), userCode: '9999-ZZZZ', confirmDigits: '99' };
     await command('beginHostedEnrollment', { label: 'x' });
     expect(statusEvents()).toHaveLength(events + 1);
     await nextPoll();
     expect(JSON.parse(pollRequests().at(-1)!.init!.body as string)).toEqual({
       deviceCode: 'E'.repeat(RELAY_BEARER_LENGTH),
     });
-    expect(await hostedEnrollment()).toMatchObject({ status: 'waiting', userCode: '9999-ZZZZ' });
+    expect(await hostedEnrollment()).toMatchObject({ status: 'waiting', confirmDigits: '99' });
   });
 });
 

@@ -7,13 +7,9 @@
  */
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import {
-  isBurrowVoicePollResponse,
-  isManagedVoiceId,
-  isManagedVoiceToken,
-  type BurrowVoicePollResponse,
-} from 'remote-lib-common';
-import { beginHostedApproval, hostedApprovalDeadline, pollHostedApproval, slowDownHostedApproval } from '../remote/burrow/enrollment';
+import { isManagedVoiceId, isManagedVoiceToken } from 'remote-lib-common';
+import { beginHostedApproval, pollHostedVoiceApproval } from '../remote/burrow/enrollment';
+import { HostedApproval } from './remote/hosted-approval';
 import { enrollVerificationUrl } from './remote/hosted-enrollment-url';
 import { writeJsonAtomic } from './atomic-json-file';
 import { hostedVoiceOrigin, type RelayBuild } from './relay-origin';
@@ -22,7 +18,6 @@ import {
   DEFAULT_MANAGED_VOICE_ID,
   MANAGED_VOICE_REQUEST_TIMEOUT_MS,
   type ManagedVoiceConfigResult,
-  type ManagedVoiceEnrollment,
   type ManagedVoiceHostSpeakResult,
   type ManagedVoiceStatus,
 } from '../lib/platform/managed-voice-types';
@@ -93,12 +88,6 @@ function normalizeStored(value: unknown): StoredManagedVoice {
     // A voice the curated set no longer holds reads as the default, which speak can send.
     voiceId: isManagedVoiceId(record.voiceId) ? record.voiceId : DEFAULT_MANAGED_VOICE_ID,
   };
-}
-
-/** A voice poll's answer, rebuilt so nothing but its guarded fields goes further. */
-function parseVoiceApproval(body: unknown): BurrowVoicePollResponse | null {
-  if (!isBurrowVoicePollResponse(body)) return null;
-  return body.status === 'enabled' ? { status: 'enabled', voiceToken: body.voiceToken } : { status: body.status };
 }
 
 /**
@@ -187,10 +176,6 @@ export function createManagedVoiceHost(options: {
   let disconnectFailed = false;
   /** The token a failed disconnect left in the store, which a re-read must never re-arm. */
   let uncleared: string | null = null;
-  let enrollment: ManagedVoiceEnrollment | null = null;
-  let enrollmentSequence = 0;
-  let beginPending: Promise<void> | null = null;
-  let pollTimer: ReturnType<typeof setTimeout> | undefined;
   /** Bumped by every token change, so a request that outlived its token caches nothing. */
   let tokenGeneration = 0;
 
@@ -203,9 +188,11 @@ export function createManagedVoiceHost(options: {
     return loaded;
   };
 
-  const status = (config: StoredManagedVoice): ManagedVoiceStatus =>
-    ({ configured: !disabled && config.token !== null, voiceId: config.voiceId, notEntitled,
-      ...(enrollment ? { enrollment } : {}), ...(disconnectFailed ? { disconnectFailed: true } : {}) });
+  const status = (config: StoredManagedVoice): ManagedVoiceStatus => {
+    const enrollment = approval.state();
+    return { configured: !disabled && config.token !== null, voiceId: config.voiceId, notEntitled,
+      ...(enrollment ? { enrollment } : {}), ...(disconnectFailed ? { disconnectFailed: true } : {}) };
+  };
 
   const announce = async () => options.onStatus(status(await load().catch(() => normalizeStored(null))));
 
@@ -390,14 +377,6 @@ export function createManagedVoiceHost(options: {
     }
   }
 
-  function cancelEnrollment(): void {
-    enrollmentSequence++;
-    if (pollTimer) clearTimeout(pollTimer);
-    pollTimer = undefined;
-    beginPending = null;
-    enrollment = null;
-  }
-
   async function requireEnrollmentNetwork(): Promise<void> {
     if (speakUrl === null) throw new Error('This build has no Natural Voice.');
     if (!(await options.networkAllowed())) throw new Error('Network is set to Nowhere.');
@@ -408,81 +387,44 @@ export function createManagedVoiceHost(options: {
     return fetchImpl(url, init);
   };
 
-  async function beginEnrollment(): Promise<void> {
-    if (enrollment?.status === 'waiting' || enrollment?.status === 'saving') return;
-    if (beginPending) return beginPending;
-    if (disconnectFailed) throw new Error('Finish turning Natural Voice off before turning it on.');
-    const sequence = ++enrollmentSequence;
-    const begin = async () => {
+  /**
+   * Natural Voice's own approval: the shared device-code run, its credential
+   * the voice token. A token this host discards — the approval canceled or
+   * overtaken, or the save failed — is held by no one, so it is deleted at
+   * Hosted.
+   */
+  const approval = new HostedApproval<void, null, string>({
+    begin: async () => {
+      if (disconnectFailed) throw new Error('Finish turning Natural Voice off before turning it on.');
       if (status(await load()).configured) throw new Error('Natural Voice is already on.');
-      if (sequence !== enrollmentSequence) return;
-      const body = await beginHostedApproval(options.relay.origin, 'voice', enrollmentFetch);
-      if (sequence !== enrollmentSequence) return;
-      const url = new URL(enrollVerificationUrl(options.relay, body, 'voice'));
-      const deadline = hostedApprovalDeadline(body.expiresAt, Date.now());
-      enrollment = { status: 'waiting', userCode: body.userCode, expiresAt: deadline, verificationUrl: url.href };
-      await announce();
-      let intervalMs = body.interval * 1000;
-      const schedule = () => {
-        if (sequence === enrollmentSequence) pollTimer = setTimeout(() => void poll(), intervalMs);
-      };
-      const poll = async () => {
-        try {
-          if (sequence !== enrollmentSequence) return;
-          if (Date.now() >= deadline) throw new Error('That code expired. Turn on Natural Voice to get a new code.');
-          // Check outside the retrying exchange too: Nowhere ends this run.
-          await requireEnrollmentNetwork();
-          const answer = await pollHostedApproval(options.relay.origin, body.deviceCode, 'voice', enrollmentFetch, parseVoiceApproval);
-          // Below, a token this host discards (canceled, overtaken, or never
-          // saved) is held by no one, so it is deleted at Hosted.
-          if (sequence !== enrollmentSequence) {
-            if (answer.status === 'enabled') void forgetAtHosted(answer.voiceToken);
-            return;
-          }
-          if (answer.status === 'retry') {
-            if (answer.slowDown) intervalMs = slowDownHostedApproval(intervalMs);
-            schedule();
-            return;
-          }
-          if (answer.status === 'refused') throw new Error('That account has no Hosted plan.');
-          if (answer.status === 'failed') throw new Error(answer.message);
-          if (answer.status === 'pending') { schedule(); return; }
-          if (answer.status === 'enabled') {
-            enrollment = { status: 'saving' };
-            await announce();
-            if (sequence !== enrollmentSequence) {
-              void forgetAtHosted(answer.voiceToken);
-              return;
-            }
-            try { await setToken(answer.voiceToken); }
-            catch {
-              void forgetAtHosted(answer.voiceToken);
-              throw new Error('Could not save Natural Voice on this computer. Try again.');
-            }
-            if (sequence === enrollmentSequence) { enrollment = null; await announce(); }
-            return;
-          }
-          throw new Error(answer.status === 'redeemed'
-            ? 'Natural Voice could not finish turning on. Try again.'
-            : 'That approval ended. Turn on Natural Voice to get a new code.');
-        } catch (error) {
-          if (sequence !== enrollmentSequence) return;
-          enrollment = { status: 'ended', message: error instanceof Error ? error.message : String(error) };
-          await announce();
-        }
-      };
-      schedule();
-    };
-    const pending = begin();
-    beginPending = pending;
-    try { await pending; } finally { if (beginPending === pending) beginPending = null; }
-  }
+      return { begin: await beginHostedApproval(options.relay.origin, 'voice', enrollmentFetch), held: null };
+    },
+    verificationUrl: (begin) => new URL(enrollVerificationUrl(options.relay, begin, 'voice')).href,
+    poll: async (deviceCode) => {
+      // Checked outside the retrying exchange too: Nowhere ends this run.
+      await requireEnrollmentNetwork();
+      return pollHostedVoiceApproval(options.relay.origin, deviceCode, enrollmentFetch);
+    },
+    redeem: async (token, current) => {
+      if (!current) {
+        void forgetAtHosted(token);
+        return false;
+      }
+      try {
+        await setToken(token);
+      } catch {
+        void forgetAtHosted(token);
+        throw new Error('Could not save Natural Voice on this computer. Try again.');
+      }
+      return true;
+    },
+  }, { onChange: () => void announce(), log });
 
   async function action(op: string) {
     try {
-      if (op === 'beginEnrollment') await beginEnrollment();
+      if (op === 'beginEnrollment') await approval.begin();
       else {
-        cancelEnrollment();
+        approval.cancel();
         if (op === 'disconnect') {
           disabled = true;
           await setToken(null);
@@ -498,7 +440,7 @@ export function createManagedVoiceHost(options: {
   }
 
   return {
-    dispose: cancelEnrollment,
+    dispose: () => approval.dispose(),
     invalidate() {
       if (speakUrl === null) return;
       // On `serialize`, after any save in flight: a save that read before the

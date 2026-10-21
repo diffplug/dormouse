@@ -40,27 +40,45 @@ export function BurrowNameField({
   );
 }
 
-/**
- * The accessible name of the code a Hosted enrollment shows, which the account
- * page shows beside Approve for the person to compare.
- */
-export const HOSTED_ENROLLMENT_CODE_LABEL = 'Enrollment code';
+/** What a Hosted approval turns on: remote control, or Natural Voice. */
+export type HostedApprovalPurpose = 'remote' | 'voice';
 
 /**
- * What an enrollment that ended short of enrolling says. **Fixed copy chosen
- * by code**, as `PAIRING_OUTCOME_COPY` is: `failed` alone adds the service's
- * own sentence.
+ * The accessible name of the two digits a Hosted approval shows, which the
+ * person types beside Approve on the account page.
  */
-export const HOSTED_ENROLLMENT_ENDED_COPY: Record<HostedEnrollmentEndReason, string> = {
-  expired: 'That code expired before it was approved, so this computer was not enrolled.',
-  'not-entitled': 'The account that approved that code has no Hosted plan, so this computer was not enrolled.',
-  'answer-lost':
-    'That code was approved and used, but the answer never reached this computer, so it was not enrolled.',
-  failed: 'This computer could not finish enrolling.',
+export const HOSTED_ENROLLMENT_CODE_LABEL = 'Digits to type at your account';
+
+/** What an approval that ended short did not do. */
+const NOT_DONE: Record<HostedApprovalPurpose, string> = {
+  remote: 'this computer was not enrolled',
+  voice: 'Natural Voice was not turned on',
 };
 
-/** The copy a status's `redeeming` shows: approved, and the enrollment being saved. */
-export const HOSTED_ENROLLMENT_REDEEMING_COPY = 'Approved. Enrolling this computer…';
+/**
+ * What an approval that ended short says, by purpose. **Fixed copy chosen by
+ * code**, as `PAIRING_OUTCOME_COPY` is: `failed` alone adds the host's own
+ * sentence.
+ */
+export const HOSTED_APPROVAL_ENDED_COPY = Object.fromEntries(
+  (['remote', 'voice'] as const).map((purpose) => {
+    const result = NOT_DONE[purpose];
+    const copy: Record<HostedEnrollmentEndReason, string> = {
+      expired: `That code expired before it was approved, so ${result}.`,
+      'not-entitled': `The account that approved that code has no Hosted plan, so ${result}.`,
+      mismatch: `The digits typed at your account were not the ones shown here, so ${result}.`,
+      'answer-lost': `That code was approved and used, but the answer never reached this computer, so ${result}.`,
+      failed: purpose === 'remote' ? 'This computer could not finish enrolling.' : 'Natural Voice could not finish turning on.',
+    };
+    return [purpose, copy];
+  }),
+) as Record<HostedApprovalPurpose, Record<HostedEnrollmentEndReason, string>>;
+
+/** The copy a status's `redeeming` shows: approved, and the credential being saved. */
+export const HOSTED_APPROVAL_REDEEMING_COPY: Record<HostedApprovalPurpose, string> = {
+  remote: 'Approved. Enrolling this computer…',
+  voice: 'Approved. Turning on Natural Voice…',
+};
 
 /** The account page the service names in `status.accountOrigin`, where computers are removed. */
 export function accountPage(accountOrigin: string | null): string | null {
@@ -74,19 +92,24 @@ export function answerLostRemoval(burrowId: string | undefined): string {
     : 'Remove the computer it added from your account, then enroll again.';
 }
 
-/** Why the last Hosted enrollment ended, with the account page where it says to go there. */
+/**
+ * Why the last Hosted approval ended, with the account page where it says to
+ * go there: only a lost remote-control answer left something to remove.
+ */
 export function HostedEnrollmentEnded({
   ended,
   accountOrigin,
+  purpose = 'remote',
 }: {
   ended: Extract<HostedEnrollmentState, { status: 'ended' }>;
   accountOrigin: string | null;
+  purpose?: HostedApprovalPurpose;
 }) {
-  const lost = ended.reason === 'answer-lost';
+  const lost = purpose === 'remote' && ended.reason === 'answer-lost';
   const page = lost ? accountPage(accountOrigin) : null;
   return (
     <div className="mt-1.5 text-sm leading-relaxed" role="status">
-      <div className="text-foreground">{HOSTED_ENROLLMENT_ENDED_COPY[ended.reason]}</div>
+      <div className="text-foreground">{HOSTED_APPROVAL_ENDED_COPY[purpose][ended.reason]}</div>
       {lost ? <div className="mt-1 text-foreground">{answerLostRemoval(ended.burrowId)}</div> : null}
       {ended.reason === 'failed' && ended.message ? <div className="mt-1 text-error">{ended.message}</div> : null}
       {ended.reason === 'not-entitled' ? (
@@ -104,12 +127,43 @@ export function HostedEnrollmentEnded({
 }
 
 /**
+ * A Hosted approval under way, for either purpose: the code waiting, the
+ * credential being saved, or why it ended. The host polls; this renders its
+ * state, never one of its own.
+ */
+export function HostedApprovalProgress({
+  enrollment,
+  purpose,
+  accountOrigin,
+  busy,
+  onCancel,
+}: {
+  enrollment: HostedEnrollmentState | null | undefined;
+  purpose: HostedApprovalPurpose;
+  accountOrigin: string | null;
+  busy: boolean;
+  onCancel: () => void;
+}) {
+  if (enrollment?.status === 'waiting') {
+    return <HostedEnrollmentCode waiting={enrollment} accountOrigin={accountOrigin} busy={busy} onCancel={onCancel} />;
+  }
+  if (enrollment?.status === 'redeeming') {
+    return (
+      <div className="mt-1.5 text-sm leading-relaxed text-foreground" role="status">
+        {HOSTED_APPROVAL_REDEEMING_COPY[purpose]}
+      </div>
+    );
+  }
+  if (enrollment?.status === 'ended') {
+    return <HostedEnrollmentEnded ended={enrollment} accountOrigin={accountOrigin} purpose={purpose} />;
+  }
+  return null;
+}
+
+/**
  * Enrolling (`docs/specs/hosted.md` -> "Burrow enrollment"): a button that
  * begins it, under the name to keep for this machine where `askName`; then
- * the code, in large type, a button that opens the account page the service
- * composed to approve it, the time left, and Cancel; ended, why, with a new
- * code a click away. The service polls; this renders its `status`, never a
- * state of its own.
+ * {@link HostedApprovalProgress}; ended, a new code a click away.
  *
  * **The name field is hidden while a code waits, never unmounted**, so what
  * was typed survives a Cancel. Without `askName` the service's suggested name
@@ -147,20 +201,13 @@ export function HostedEnrollView({
 
   return (
     <div>
-      {waiting ? (
-        <HostedEnrollmentCode
-          waiting={waiting}
-          accountOrigin={accountOrigin}
-          busy={busy}
-          onCancel={() => void run(cancelHostedEnrollment)}
-        />
-      ) : null}
-      {redeeming ? (
-        <div className="mt-1.5 text-sm leading-relaxed text-foreground" role="status">
-          {HOSTED_ENROLLMENT_REDEEMING_COPY}
-        </div>
-      ) : null}
-      {ended ? <HostedEnrollmentEnded ended={ended} accountOrigin={accountOrigin} /> : null}
+      <HostedApprovalProgress
+        enrollment={enrollment}
+        purpose="remote"
+        accountOrigin={accountOrigin}
+        busy={busy}
+        onCancel={() => void run(cancelHostedEnrollment)}
+      />
       <form
         className="mt-1.5"
         hidden={waiting !== null || redeeming}
@@ -195,7 +242,10 @@ export function HostedEnrollView({
   );
 }
 
-/** The code waiting for approval, and the way to approve it. */
+/**
+ * The code waiting for approval: the two digits the account page asks for, in
+ * large type, and the way there.
+ */
 export function HostedEnrollmentCode({
   waiting,
   accountOrigin,
@@ -212,12 +262,12 @@ export function HostedEnrollmentCode({
   const page = accountPage(accountOrigin);
   return (
     <div className="mt-1.5 text-sm leading-relaxed">
-      <div className="text-muted">Approve this computer at your account. Check that it shows this code:</div>
+      <div className="text-muted">Approve at your account, and type these two digits there:</div>
       <div
         aria-label={HOSTED_ENROLLMENT_CODE_LABEL}
         className="mt-1.5 text-center font-mono text-xl font-bold tracking-widest text-foreground select-all"
       >
-        {waiting.userCode}
+        {waiting.confirmDigits}
       </div>
       <div className="mt-1 text-center text-xs text-muted">
         {minutesLeft > 0 ? `Expires in ${minutesLeft} min.` : 'This code has expired.'}

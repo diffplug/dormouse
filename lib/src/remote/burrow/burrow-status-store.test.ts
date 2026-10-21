@@ -262,7 +262,7 @@ describe('a Hosted enrollment in the status', () => {
     vi.useFakeTimers();
     let hostedEnrollment: unknown = {
       status: 'waiting',
-      userCode: '23AB-YZ9K',
+      confirmDigits: '47',
       verificationUrl: 'https://hosted.dormouse.sh/enroll#23AB-YZ9K',
       expiresAt: 1_800_000_000_000,
       accountFull: false,
@@ -309,7 +309,7 @@ describe('a Hosted enrollment in the status', () => {
       await vi.advanceTimersByTimeAsync(2000);
       expect(shown()).toEqual({ status: 'redeeming' });
 
-      for (const malformed of [undefined, null, { status: 'waiting', userCode: 7 }, { status: 'gone' }]) {
+      for (const malformed of [undefined, null, { status: 'waiting', confirmDigits: 47 }, { status: 'gone' }]) {
         hostedEnrollment = malformed;
         await vi.advanceTimersByTimeAsync(2000);
         expect(shown(), JSON.stringify(malformed)).toBeNull();
