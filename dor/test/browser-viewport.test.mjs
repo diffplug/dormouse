@@ -103,6 +103,43 @@ test('agent-browser preparation preserves valued flags and only replaces the des
   assert.deepEqual(argsSeen[3].slice(2), ['--proxy', 'http://localhost:7890', 'open', 'http://localhost:5173', '--headers', '{"Authorization":"token"}']);
 });
 
+for (const flags of [
+  ['--config', '/tmp/browser.json', '--profile=/tmp/browser profile'],
+  ['--headed', 'false', '--args', '--disable-gpu', '--proxy=http://localhost:7890', '--allow-file-access'],
+]) test('viewport preparation keeps browser launch options: ' + flags[0], async () => {
+  const calls = [];
+  const result = await runCli(['agent-browser', 'open', 'http://localhost:5173', ...flags, '--quiet'], {
+    env: { PWD: process.cwd() },
+    client: {
+      resolveBrowser: async () => ({ binding: { session: 'dormouse.1.default' }, fresh: true,
+        initialViewport: { mode: 'fixed', width: 1440, height: 900 }, launchViewport: { width: 1440, height: 900 } }),
+      browserSurface: async () => ({}),
+    },
+    execAgentBrowser: async (_binary, args) => {
+      calls.push(args);
+      return { exitCode: 0, stdout: args.includes('eval') ? '2\n' : '', stderr: '' };
+    },
+  });
+  assert.equal(result.exitCode, 0, result.stderr);
+  assert.deepEqual(calls[1], ['--session', 'dormouse.1.default', ...flags, 'eval', 'window.devicePixelRatio']);
+  assert.deepEqual(calls[2], ['--session', 'dormouse.1.default', ...flags, 'set', 'viewport', '1440', '900', '2']);
+  assert.deepEqual(calls[3], ['--session', 'dormouse.1.default', 'open', 'http://localhost:5173', ...flags, '--quiet']);
+  assert.deepEqual(calls[4], ['--session', 'dormouse.1.default', 'stream', 'status', '--json', ...flags]);
+});
+
+test('stream discovery preserves custom configuration after a non-navigation command', async () => {
+  const calls = [];
+  const result = await runCli(['agent-browser', '--config=/tmp/browser.json', 'eval', 'window.devicePixelRatio'], {
+    client: {
+      resolveBrowser: async () => ({ binding: { session: 'dormouse.1.default' }, fresh: false }),
+      browserSurface: async () => ({}),
+    },
+    execAgentBrowser: async (_binary, args) => { calls.push(args); return { exitCode: 0, stdout: '1', stderr: '' }; },
+  });
+  assert.equal(result.exitCode, 0, result.stderr);
+  assert.deepEqual(calls[1], ['--session', 'dormouse.1.default', 'stream', 'status', '--json', '--config=/tmp/browser.json']);
+});
+
 test('open-target sugar ignores a proxy flag value', async () => {
   const argsSeen = [];
   const options = {

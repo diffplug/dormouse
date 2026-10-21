@@ -16,6 +16,10 @@
 
 **Why a reuse is one intent.** Revealing the target and then asking for its mode and its URL separately sent `open <url>` in the same tick as a pop-out began its close/reopen, deterministically: the navigation raced the relaunch, which had already captured the old URL.
 
+## Viewport presets
+
+Viewport preparation with agent-browser 0.27.0 (Windows, 2026-10-21): dropping `--config` after the blank navigation replaced the temporary profile with the occupied default profile, failing the DPR query. The native daemon compares launch settings on each call; preparation and stream discovery therefore keep the browser configuration consistent while leaving output controls on the user command.
+
 ## Display Modal And Render Swaps
 
 **Why the iframe swap is eager.** A 1–3s daemon boot behind a modal that has already closed; and while the swap awaited `open`, a slow page held the iframe on screen for the whole load and a timed-out `open` dropped the swap silently — leaving an orphan `gui-<hex>` browser nobody could see or close.

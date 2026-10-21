@@ -231,6 +231,30 @@ const AGENT_BROWSER_BOOLEAN_FLAGS = new Set([
   '--confirm-interactive', '--no-auto-dialog', '--verbose', '-v', '--quiet', '-q', '--debug', '--restore',
 ]);
 
+// Each native CLI call can reconfigure the daemon. Changing these options
+// between the blank page and the viewport writes can replace its browser.
+// Output flags stay on the user's command: quiet/boundaries would hide the DPR.
+const AGENT_BROWSER_LAUNCH_FLAGS = new Set([
+  '--config', '--profile', '--executable-path', '--extension', '--args', '--proxy', '--proxy-bypass',
+  '--user-agent', '--allow-file-access', '--headed', '--ignore-https-errors', '--color-scheme',
+  '--download-path', '--engine', '--enable', '--init-script',
+]);
+
+/** The same launch settings must accompany every internal native call. */
+function agentBrowserLaunchOptions(args: string[]): string[] {
+  const options: string[] = [];
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i]!;
+    if (arg === '--') break;
+    const name = arg.split('=', 1)[0]!;
+    const start = i;
+    if (AGENT_BROWSER_VALUE_FLAGS.has(name) && !arg.includes('=')) i += 1;
+    else if (AGENT_BROWSER_BOOLEAN_FLAGS.has(name) && ['true', 'false'].includes(args[i + 1] ?? '')) i += 1;
+    if (AGENT_BROWSER_LAUNCH_FLAGS.has(name)) options.push(...args.slice(start, i + 1));
+  }
+  return options;
+}
+
 /** Build a blank navigation with every launch option preserved. Unknown flags
  * are refused: guessing their arity could replace a flag value and let the
  * destination page run before its viewport is ready. */
@@ -429,6 +453,7 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
     ? exec(binaryPath ?? binary, argv, cwd, envOverride)
     : cwd === undefined ? exec(binaryPath ?? binary, argv) : exec(binaryPath ?? binary, argv, cwd);
 
+  const nativeLaunchOptions = d.provider === 'agent-browser' ? agentBrowserLaunchOptions(rest) : [];
   let result: BrowserExecResult;
   let prebound = false;
   const explicitDevice = d.provider === 'agent-browser'
@@ -445,11 +470,11 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
       if (blank.exitCode !== 0) return fail(`Could not prepare the agent-browser viewport before navigation: ${blank.stderr.trim() || `agent-browser exited ${blank.exitCode}`}`);
       let dpr = launchViewport.dpr;
       if (dpr === undefined) {
-        const ratio = await run([...sessionArgs, 'eval', 'window.devicePixelRatio']);
+        const ratio = await run([...sessionArgs, ...nativeLaunchOptions, 'eval', 'window.devicePixelRatio']);
         dpr = ratio.exitCode === 0 ? parseNativeDpr(ratio.stdout) : undefined;
         if (dpr === undefined) return fail('Could not measure agent-browser DPR before navigation');
       }
-      const viewport = await run([...sessionArgs, 'set', 'viewport', String(launchViewport.width), String(launchViewport.height), String(dpr)]);
+      const viewport = await run([...sessionArgs, ...nativeLaunchOptions, 'set', 'viewport', String(launchViewport.width), String(launchViewport.height), String(dpr)]);
       if (viewport.exitCode !== 0) return fail(`Could not set the agent-browser viewport before navigation: ${viewport.stderr.trim() || `agent-browser exited ${viewport.exitCode}`}`);
     }
     const playwrightOpen = d.provider === 'playwright' && command === 'open' && launchViewport !== undefined && !explicitDevice;
@@ -499,7 +524,7 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
   if (result.exitCode === 0 && mayBind && binding.session !== undefined && !(client instanceof Error) && !prebound) {
     try {
       const statusArgs = d.streamStatus?.(binding.session);
-      const wsPort = statusArgs === undefined ? undefined : parseStreamPort((await run(statusArgs)).stdout);
+      const wsPort = statusArgs === undefined ? undefined : parseStreamPort((await run([...statusArgs, ...nativeLaunchOptions])).stdout);
       await client.browserSurface({
         provider: d.provider,
         key: flags.key,

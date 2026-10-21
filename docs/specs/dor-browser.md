@@ -111,7 +111,7 @@ Source of truth: `lib/src/components/wall/AgentBrowserScreenModal.tsx`, `offered
 
 **Must preserve the current device-pixel ratio when DPR is omitted.** A ratio the provider cannot apply fails before changing dimensions; Playwright accepts only its context's current ratio. **Never turn an observed Playwright DPR into an explicit request for future contexts.** Presets describe viewport geometry, not devices.
 
-**Must apply initial dimensions before the destination page's first script runs**, for managed CLI, GUI and Tool launches. Deferred `pane-sync` launches start at a fixed size until placement. **Must engage sync when resolving that preset**, sending the actual pane dimensions on first attach. A failed initialization never navigates at a silently substituted size. **Must apply a renderer and viewport chosen together to the new renderer.**
+**Must apply initial dimensions before the destination page's first script runs**, for managed CLI, GUI and Tool launches. **Must preserve explicit launch configuration through preparation and stream discovery** (rationale). Deferred `pane-sync` starts fixed until placement. **Must engage sync when resolving that preset**, sending the actual pane dimensions on first attach. Failed initialization never navigates at a substituted size. **Must apply a renderer and viewport chosen together to the new renderer.**
 
 **Must query the active page's measured CSS dimensions and DPR**, never infer them from the pane or a screenshot. `dor`'s sizing commands share the Display modal's serialized writes (`docs/specs/dor-cli.md` → Browser viewport control).
 
