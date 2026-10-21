@@ -890,6 +890,26 @@ describe('updater', () => {
       expect(update.install).toHaveBeenCalledOnce();
     });
 
+    it.each(['visible', 'dismissed before refusal', 'dismissed after refusal'])(
+      'Check now preserves a restart refusal when the notice is %s', async (notice) => {
+        await reachDownloadedUpdate(makeUpdate('0.5.0'));
+        let refuse!: (reason: string) => void;
+        mocks.requestAppRestart.mockReturnValue(new Promise<boolean>((_resolve, reject) => { refuse = reject; }));
+        restartToUpdate();
+        if (notice === 'dismissed before refusal') dismissBanner();
+        refuse('Restart needs a packaged build');
+        await vi.advanceTimersByTimeAsync(0);
+        if (notice === 'dismissed after refusal') dismissBanner();
+
+        checkNow();
+
+        expect(readBannerState()).toEqual({
+          status: 'restart-refused', version: '0.5.0', reason: 'Restart needs a packaged build',
+        });
+        expect(hasPendingUpdate()).toBe(true);
+      },
+    );
+
     it('keeps a dismissal that lands before the refusal', async () => {
       await reachDownloadedUpdate(makeUpdate('0.5.0'));
       let refuse!: (reason: string) => void;

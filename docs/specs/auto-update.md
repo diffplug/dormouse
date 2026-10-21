@@ -33,7 +33,7 @@ Only `main` checks, so only it can hold a download, which lives in its webview's
 
 ## Update notice in the Baseboard
 
-Update status is a text notice in the Baseboard's `notice` slot (`docs/specs/layout.md`), one per updater state (`UpdateBannerState`). The `available` notice carries the approval; a notice's changelog link opens `https://dormouse.sh/changelog/after/<getVersion()>`. **"Restart now" must call `quit_restart`** (`docs/specs/standalone.md` → "Restart"): the quit installs on its way out, then relaunches. A refusal turns a still-shown `downloaded` into `restart-refused`, carrying the host's reason and never "Restart now", since the refusal holds until relaunch; the update stays pending.
+Update status is a text notice in the Baseboard's `notice` slot (`docs/specs/layout.md`), one per updater state (`UpdateBannerState`). The `available` notice carries the approval; a notice's changelog link opens `https://dormouse.sh/changelog/after/<getVersion()>`. **"Restart now" must call `quit_restart`** (`docs/specs/standalone.md` → "Restart"): the quit installs on its way out, then relaunches. A refusal turns a still-shown `downloaded` into `restart-refused`, carrying the host's reason and never "Restart now", since the refusal holds until relaunch; the update stays pending. **Must retain the refusal through dismissal and Check now**, which shows it again.
 
 **Must let every state be dismissed, and never cancel an approved download or install by it**; dismissing an unapproved `available` approves nothing, and Check now may offer it again.
 
