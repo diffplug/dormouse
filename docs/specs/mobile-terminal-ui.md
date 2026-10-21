@@ -2,7 +2,7 @@
 
 > See `docs/specs/glossary.md` for Session / Pane / Door vocabulary. This spec uses it throughout.
 
-The mobile terminal composition: `MobileTerminalUi` (the wrapper owning touch modes, input modes, and the keyboard reserve) around `MobileWall` (one visible terminal Session at a time, with session switching). **Mobile exposes no split-pane layout and no multiple Workspaces.**
+The mobile composition: `MobileTerminalUi` (touch modes, input modes, keyboard reserve) around `MobileWall` (one visible terminal Session at a time). **Mobile exposes no split-pane layout and no multiple Workspaces.**
 
 Three consumers compose them: the website Pocket playground (`website/src/components/PocketTerminalExperience.tsx` on `FakePtyAdapter`; `docs/specs/tutorial.md`), the Pocket app (`lib/src/remote/pocket-app/PocketWall.tsx` on `RemotePtyAdapter`; `docs/specs/pocket-app.md`), and Storybook.
 
@@ -62,6 +62,8 @@ Source of truth: `EdgeScrollMotion` / `scrollMobileTerminal` in `lib/src/lib/mob
 Touching the pane content away from either edge opens the radial menu (the rose), offset from the touch so the thumb never covers it. Drag distance from its center decides everything, in the order `RADIUS_FADE_START` < `RADIUS_HIGHLIGHT` < `RADIUS_SELECT`: root groups fade by alignment with the drag only past the first, the second previews the closest compass direction, and crossing the third (the drawn circle) selects it. **Reduced-motion users see the menu's opening animation (labels and select circle appearing) at its final state immediately.**
 
 Source of truth: the `RADIUS_*` constants in `lib/src/lib/mobile-gesture-menu.ts`; `MobileGestureRadialMenu` in `lib/src/components/MobileGestureRadialMenu.tsx`.
+
+**Must cancel gestures and pending confirmations when the active Session changes**, never sending their input to its replacement.
 
 ### Root layout
 

@@ -821,12 +821,13 @@ export function MobileTerminalUi({
   }, [stopEdgeScroll]);
 
   useEffect(() => {
-    if (touchMode === 'gestures' && interactive) return;
+    // Input callbacks follow the active Session; a gesture or confirmation
+    // begun on the previous one must never send to its replacement.
     stopEdgeScroll();
     clearGestureCompletionTimer();
     commitGestureState(MOBILE_GESTURE_IDLE_STATE);
     setPendingGestureConfirmation(null);
-  }, [clearGestureCompletionTimer, commitGestureState, interactive, touchMode, stopEdgeScroll]);
+  }, [activeSessionId, clearGestureCompletionTimer, commitGestureState, interactive, touchMode, stopEdgeScroll]);
 
   useEffect(() => clearGestureCompletionTimer, [clearGestureCompletionTimer]);
 

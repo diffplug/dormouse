@@ -640,6 +640,36 @@ describe('MobileTerminalUi edge scroll', () => {
     expect(onGestureInput.mock.invocationCallOrder[0]).toBeLessThan(onSendInput.mock.invocationCallOrder[0]);
   });
 
+  it('cancels a radial gesture when the active Session changes', () => {
+    const { pointer, props, renderWith, onSendInput } = setup();
+    pointer('pointerdown', 200, 200);
+    renderWith({ ...props, sessions: [{ id: 'other', title: 'other', active: true, episode: null }] });
+    pointer('pointermove', 300, 200);
+    pointer('pointerup', 300, 200);
+    expect(onSendInput).not.toHaveBeenCalled();
+  });
+
+  it.each(['ctrlC', 'paste'])('cancels a pending %s confirmation when its Session changes', (action) => {
+    const { pointer, props, renderWith, container, onSendInput } = setup();
+    const onPaste = vi.fn();
+    renderWith({ ...props, onPaste });
+    pointer('pointerdown', 200, 200);
+    // Cross the north diagonal, then choose its inward horizontal option.
+    const side = action === 'ctrlC' ? -1 : 1;
+    const optionX = 200 + side * 69 / Math.sqrt(2);
+    const optionY = 200 - 69 / Math.sqrt(2);
+    pointer('pointermove', 200 + side * 60, 140);
+    pointer('pointermove', optionX - side * 80, optionY);
+    pointer('pointerup', optionX - side * 80, optionY);
+    expect(container.querySelector('[data-mobile-gesture-dialog]')).not.toBeNull();
+    renderWith({ ...props, onPaste, sessions: [{ id: 'other', title: 'other', active: true, episode: null }] });
+    const dialog = container.querySelector('[data-mobile-gesture-dialog]');
+    act(() => dialog?.querySelectorAll('button')[1]?.click());
+    expect(onSendInput).not.toHaveBeenCalled();
+    expect(onPaste).not.toHaveBeenCalled();
+    expect(dialog).toBeNull();
+  });
+
   it.each<Partial<MobileTerminalUiProps>>([
     { interactive: false },
     { activeTouchMode: 'selection' },
