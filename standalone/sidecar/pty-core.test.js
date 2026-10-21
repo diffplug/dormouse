@@ -146,6 +146,49 @@ test('resolveSpawnConfig applies per-spawn dor CLI env overrides', () => {
   assert.equal(config.env.DORMOUSE_SURFACE_ID, 'pane-1');
 });
 
+test('Windows panes carry dor context through WSL and back without translating pipe or runtime paths', () => {
+  for (const shell of ['wsl.exe', 'powershell.exe', 'cmd.exe', 'bash.exe']) {
+    const env = {
+      Path: 'C:\\Windows\\System32',
+      WSLENV: 'USER_FILES/lp:USER_FLAG/u:DORMOUSE_NODE/p:DORMOUSE_CONTROL_SOCKET/p:pwd/u',
+      DORMOUSE_NODE: 'C:\\Program Files\\Dormouse\\node.exe',
+      DORMOUSE_CLI_JS: 'C:\\Program Files\\Dormouse\\dor-cli\\dist\\dor.js',
+      DORMOUSE_CONTROL_SOCKET: '\\\\.\\pipe\\test-dor',
+      DORMOUSE_CONTROL_TOKEN: 'test-token',
+      DORMOUSE_HOST: 'standalone',
+    };
+    const config = resolveSpawnConfig({ shell, surfaceId: 'surface:42' }, {
+      platform: 'win32', env,
+      osModule: { homedir: () => 'C:\\Users\\tester', tmpdir: () => 'C:\\Temp' },
+      fsModule: { statSync() { throw new Error('ENOENT'); } },
+    });
+    const entries = config.env.WSLENV.split(':');
+    assert.deepEqual(entries, [
+      'USER_FILES/lp', 'USER_FLAG/u',
+      'DORMOUSE_NODE', 'DORMOUSE_CLI_JS', 'DORMOUSE_SURFACE_ID',
+      'DORMOUSE_HOST', 'DORMOUSE_HOST_WORKSPACE',
+      'DORMOUSE_CONTROL_SOCKET', 'DORMOUSE_CONTROL_TOKEN',
+      'ELECTRON_RUN_AS_NODE/w', 'PWD/pw',
+    ]);
+    for (const key of ['DORMOUSE_NODE', 'DORMOUSE_CLI_JS', 'DORMOUSE_CONTROL_SOCKET', 'DORMOUSE_CONTROL_TOKEN']) {
+      assert.equal(config.env[key], env[key]);
+    }
+    assert.equal(config.env.DORMOUSE_SURFACE_ID, 'surface:42');
+    assert.equal(env.WSLENV, 'USER_FILES/lp:USER_FLAG/u:DORMOUSE_NODE/p:DORMOUSE_CONTROL_SOCKET/p:pwd/u');
+    const again = resolveSpawnConfig({ shell, surfaceId: 'surface:42' }, { platform: 'win32', env: config.env });
+    assert.equal(again.env.WSLENV, config.env.WSLENV);
+  }
+});
+
+test('WSL forwarding does not synthesize credentials or change native POSIX environments', () => {
+  for (const platform of ['win32', 'linux', 'darwin']) {
+    const config = resolveSpawnConfig({}, { platform, env: { WSLENV: 'USER_FLAG/u' } });
+    assert.equal(config.env.DORMOUSE_CONTROL_SOCKET, undefined);
+    assert.equal(config.env.DORMOUSE_CONTROL_TOKEN, undefined);
+    if (platform !== 'win32') assert.equal(config.env.WSLENV, 'USER_FLAG/u');
+  }
+});
+
 test('resolveSpawnConfig drops inherited Git Bash ORIGINAL_PATH on win32', () => {
   // ORIGINAL_PATH leaks in when the host was launched from Git Bash; if left in
   // place, /etc/profile rebuilds PATH from it and drops the dor-cli prepend.

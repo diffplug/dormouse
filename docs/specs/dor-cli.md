@@ -37,6 +37,15 @@ The CLI also reads `DORMOUSE_AGENT_BROWSER_BIN` and `DORMOUSE_PLAYWRIGHT_BIN`, t
 
 Source of truth: `scripts/stage-dor-cli.mjs`, `dor/bin/dor`, `dor/bin/dor.cmd`, `withoutInheritedMsysOriginalPath` in `standalone/sidecar/pty-core.js`, `callerWorkingDirectory` in `dor/src/commands/shared.ts`.
 
+### WSL interop
+
+**Must preserve the CLI runtime, host identity, Surface id, and control credentials through `WSLENV` on Windows panes**, including those that start WSL later; preserve unrelated user entries. (rationale)
+
+- **Must run the bundled Windows runtime from WSL**, translating only its executable path for the POSIX launcher; script paths and pipe endpoints remain opaque. Windows-executable interop must be enabled.
+- **Must translate the caller's `PWD` back to Windows for the CLI.**
+
+Source of truth: `withWslCliEnv` in `standalone/sidecar/pty-core.js`, `dor/bin/dor`.
+
 ## Spawning External Binaries
 
 **Every spawn of an external/user-installed binary must go through `spawnAndCapture` from `dor-lib-common`, never raw `node:child_process` `spawn`**; `spawnAndCapture` owns the Windows recipe (rationale).
