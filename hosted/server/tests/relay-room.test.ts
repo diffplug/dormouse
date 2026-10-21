@@ -554,9 +554,12 @@ test("a stalled row read answers the upgrade 503 within its bound and leaves the
   const started = Date.now();
   expect(await room.forge(owner.userId, enrolled.burrowId)).toBe(503);
   expect(Date.now() - started).toBeLessThan(RELAY_ROW_READ_TIMEOUT_MS + 5_000);
-  // The sweep's read fails the same way and closes nothing.
+  // The sweep's read fails the same way and closes nothing, and its wait
+  // never pushes the next sweep past an interval from this one's start.
+  const sweeping = Date.now();
   await room.fire();
   expect(await held.socket.quiet(150)).toBe(true);
+  expect((await room.probe()).alarm).toBeLessThan(sweeping + RELAY_ROOM_SWEEP_MS + 1_000);
 
   client.send(e2eClientFrame(held.burrowId));
   expect(await held.socket.take()).toMatchObject({ step: "init" });

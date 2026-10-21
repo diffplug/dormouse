@@ -242,7 +242,11 @@ Source of truth: `run_domain` and `write_open_findings` in `scripts/security-aud
 
 ## Red team
 
-**A maintainer runs a red team quarterly, and before any release that changes remote control or Hosted** (rationale): an open-ended pass over the code and the published guarantees without the `FAIL IF` lines, on Claude through Anthropic's Cyber Verification Program and on Codex through OpenAI's Daybreak program. Its BLOCKERs and WARNINGs reach the ledger as hand-filed `manual-` keys ([Findings ledger](#findings-ledger)).
+**A maintainer runs a red team in the first week of every month, and before any release that changes remote control or Hosted** (rationale): an open-ended pass over the code and the published guarantees without the `FAIL IF` lines, on Claude through Anthropic's Cyber Verification Program and on Codex through OpenAI's Daybreak program. Its BLOCKERs and WARNINGs reach the ledger as hand-filed `manual-` keys ([Findings ledger](#findings-ledger)).
+
+A scheduled workflow opens each month's issue, `Red team: <Month YYYY>` labelled `red-team`, unless one with that title exists; closing it as completed records the pass. A release's job summary warns, and never fails, when what the `remote` and `hosted` domains own has changed since the latest completed `red-team` issue closed.
+
+Source of truth: `.github/workflows/red-team-issue.yaml`; `SURFACES` in `scripts/red-team-since.mjs`; the `red-team-note` job in `.github/workflows/release.yml`.
 
 ## Future
 

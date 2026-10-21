@@ -2,19 +2,21 @@ name: Hosted PR preview
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, closed]
+    types: [opened, synchronize, reopened, labeled]
 
 permissions:
   contents: read
 
-# Let provisioning finish before cleanup/redeploy; canceling halfway leaks resources.
-concurrency:
-  group: hosted-pr-preview-${{ github.event.pull_request.number }}
-  cancel-in-progress: false
+# Only a PR labeled `hosted-preview` deploys, so an unlabeled PR never waits on
+# the environment's approval. Nothing runs at close: a job holding preview
+# credentials waits on that same approval, so each deploy first sweeps away
+# the previews of PRs since closed or unlabeled.
 
 jobs:
   changes:
-    if: github.event.action != 'closed'
+    if: >-
+      contains(fromJSON('["opened", "synchronize", "reopened"]'), github.event.action) ||
+      (github.event.action == 'labeled' && github.event.label.name == 'hosted-preview')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -76,11 +78,20 @@ jobs:
     needs: verify
     # Never expose deployment credentials to fork code or pull_request_target.
     if: >-
-      github.event.action != 'closed' &&
+      contains(github.event.pull_request.labels.*.name, 'hosted-preview') &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       vars.HOSTED_PREVIEWS_ENABLED == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: read
+    # Let provisioning finish before a redeploy; canceling halfway leaks
+    # resources. Job-level, so a deploy awaiting approval never holds back the
+    # next push's verify.
+    concurrency:
+      group: hosted-pr-preview-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
     environment:
       name: hosted-preview
       url: ${{ steps.deploy.outputs.url }}
@@ -120,6 +131,13 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
           PREVIEW_AUTH_SECRET: ${{ secrets.PREVIEW_AUTH_SECRET }}
+      - name: Remove the previews of closed or unlabeled PRs
+        run: pnpm --filter dormouse-hosted preview:sweep
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          NEON_PROJECT_ID: ${{ vars.NEON_PROJECT_ID }}
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
       - name: Create or reuse PR database branch
         id: database
         uses: neondatabase/create-branch-action@fb620d43d4c565abaf088b848a4e28e5c4ea4d9c # 6.3.1
@@ -145,30 +163,3 @@ jobs:
         run: pnpm --filter dormouse-hosted preview:smoke "$PREVIEW_ORIGINS" "$BUILD_SHA"
         env:
           PREVIEW_ORIGINS: ${{ steps.deploy.outputs.origins }}
-
-  cleanup:
-    if: >-
-      github.event.action == 'closed' &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      vars.HOSTED_PREVIEWS_ENABLED == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    environment: hosted-preview
-    steps:
-      # Cleanup holds deployment credentials and is not path-gated: run the base
-      # branch's script, never the closed PR's, which may not even contain it.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: refs/heads/main
-          persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version-file: package.json
-      - name: Remove this PR's Workers, Hyperdrive and Neon branch
-        run: node hosted/scripts/preview.mjs cleanup
-        env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          NEON_PROJECT_ID: ${{ vars.NEON_PROJECT_ID }}
-          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}

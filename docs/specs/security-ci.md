@@ -20,7 +20,7 @@ Renovate updates the commit pins; the generated `tend-*.yaml` pin `max-sixty/ten
 - **FAIL IF** `S42` `.github/workflows/release.yml` runs on anything but a pushed `v*` tag. Pinned by `scripts/workflow-lint.mjs`.
 - **FAIL IF** `S43` the `security-audit` job in `.github/workflows/release.yml` uses its `actions: write` for anything but dispatching `security-audit.yaml` on the release tag and watching that run. Pinned by `scripts/workflow-lint.mjs`.
 - **FAIL IF** `S44` `pull_request_target` appears as an `on:` trigger in any `.github/workflows/**` file other than `tend-*.yaml`. A mention in a comment is not a violation. Pinned by `scripts/workflow-lint.mjs`.
-- **FAIL IF** `S45` a non-agent-managed workflow has **effective** write permissions other than the release provenance permissions `id-token: write` and `attestations: write`, the `actions: write` granted to the `security-audit` job in `release.yml` (see "Release audit dispatch"), or the `issues: write` granted to the `publish` job in `codex-audit-report.yaml` (`docs/specs/security-audit.md` -> "Second-opinion audit"). Effective as in the agent-managed bullet below. Pinned by `scripts/workflow-lint.mjs`.
+- **FAIL IF** `S45` a non-agent-managed workflow has **effective** write permissions other than the release provenance permissions `id-token: write` and `attestations: write`, the `actions: write` granted to the `security-audit` job in `release.yml` (see "Release audit dispatch"), the `issues: write` granted to the `publish` job in `codex-audit-report.yaml` (`docs/specs/security-audit.md` -> "Second-opinion audit"), or the `issues: write` granted to the `open` job in `red-team-issue.yaml` (`docs/specs/security-audit.md` -> "Red team"). Effective as in the agent-managed bullet below. Pinned by `scripts/workflow-lint.mjs`.
 
 `.github/workflows/ci.yml` also runs actionlint and zizmor over every workflow; `.github/zizmor.yml` names each exception it accepts.
 
@@ -69,7 +69,7 @@ No `ANTHROPIC_API_KEY` secret exists. Every generated `tend-*.yaml` that runs `m
 
 - **FAIL IF** `S46` `WINDOW` in `.github/workflows/workflow-audit.yaml` names other paths than those above, or the walk stops covering all branches (rationale). `WINDOW` pinned by `scripts/workflow-lint.mjs`.
 - **FAIL IF** `S47` an author or committer field the commit's GitHub signature does not bind explains a commit: `TEND_BOT_TOKEN` is the credential in question, so the pusher GitHub records, or a `web-flow` signature binding the author, is evidence, and self-declared identity only ever refuses.
-- **FAIL IF** `S48` the audit stops reporting a commit whose earliest retained introduction is a PR merge (the admin reviewing, not pushing), a commit already merged to `main` (rationale), or one a classifier cannot decide — a failed API or Git call, an unresolvable tip but an admin's `push` or `branch_creation`, a missing activity-log entry — each as unexplained.
+- **FAIL IF** `S48` the audit stops reporting a commit whose earliest retained introduction is a PR merge (the admin reviewing, not pushing), a commit already merged to `main` (rationale), or one a classifier cannot decide — a failed API or Git call, a missing activity-log entry, or an activity row whose tip is lost unless that row is an admin's `push` or `branch_creation`, which is skipped so the commit's next row decides — each as unexplained.
 - **FAIL IF** `S49` tend regeneration materializes anything except regular `.config/tend.yaml` and workflow YAML blobs from the audited commit. Pinned by `scripts/workflow-audit.test.mjs` (rationale).
 - **FAIL IF** `S50` the audit deduplicates by branch or file set, which lets a later force-push of malicious content to the same files pass unremarked, or keys liveness on anything but a successful run, such as an issue existing; a silent run is the healthy steady state.
 
@@ -119,7 +119,7 @@ Hosted credentials live only in the three Hosted environments the secret invento
 The App itself holds only `contents: write` and `metadata: read` and subscribes to no event. No audit run can read that: the App is private, and listing its installation takes an organization administrator (rationale; `## Future` -> Tagger App audit).
 
 - **FAIL IF** `S68` the App (`Integration` actor `5228264`) bypasses any ruleset but `Hosted tag creation`, which must target only `refs/tags/hosted/**`, block only `creation`, and be bypassed otherwise only by admin; or `Hosted tag history` stops blocking `update` and `deletion` on `refs/tags/hosted/**` with an admin-only bypass. A leaked key adds `hosted/` tags, never moves or deletes one. Pinned by `scripts/github-state-check.mjs`.
-- **FAIL IF** `S69` a Hosted preview deploy accepts a fork or a failing verification, preview cleanup checks out a PR ref rather than `main`, or a Hosted production tag can run before live verification succeeds; inspect the workflow dependency/condition graph.
+- **FAIL IF** `S69` a Hosted preview deploy accepts a fork or a failing verification, or a Hosted production tag can run before live verification succeeds; inspect the workflow dependency/condition graph.
 
 Source of truth: `hosted/scripts/setup-github.mjs`; `.github/workflows/hosted-preview.yml`; `.github/workflows/hosted-production.yml`.
 

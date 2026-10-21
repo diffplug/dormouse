@@ -22,6 +22,9 @@ async function makePocketDir() {
   await writeFile(join(dir, 'sw.js'), 'self.addEventListener("push", () => {});');
   await mkdir(join(dir, 'assets'), { recursive: true });
   await writeFile(join(dir, 'assets', 'index-Cv4RGHv-.js'), 'export default 1;');
+  await writeFile(join(dir, 'assets', 'pocket-private-key-ChSkpulJ.js'), 'export default 2;');
+  await writeFile(join(dir, 'assets', 'plain.js'), 'export default 3;');
+  await writeFile(join(dir, 'assets', 'index-Cv4RGHv.js'), 'export default 4;');
   return dir;
 }
 
@@ -71,9 +74,21 @@ test('API routes still win over static serving', async () => {
 
 test('a content-hashed asset may be cached forever', async () => {
   const { app: hono } = app({ pocketDir: await makePocketDir() });
-  const res = await hono.request('/assets/index-Cv4RGHv-.js');
-  assert.equal(res.status, 200);
-  assert.equal(res.headers.get('cache-control'), 'public, max-age=31536000, immutable');
+  for (const path of ['/assets/index-Cv4RGHv-.js', '/assets/pocket-private-key-ChSkpulJ.js']) {
+    const res = await hono.request(path);
+    assert.equal(res.status, 200, path);
+    assert.equal(res.headers.get('cache-control'), 'public, max-age=31536000, immutable', path);
+  }
+});
+
+test('a file under assets/ whose name carries no content hash is revalidated', async () => {
+  // It can change in place under the same URL, so it is never immutable.
+  const { app: hono } = app({ pocketDir: await makePocketDir() });
+  for (const path of ['/assets/plain.js', '/assets/index-Cv4RGHv.js']) {
+    const res = await hono.request(path);
+    assert.equal(res.status, 200, path);
+    assert.equal(res.headers.get('cache-control'), 'no-cache', path);
+  }
 });
 
 test('the unhashed shell is revalidated instead', async () => {
@@ -95,7 +110,7 @@ test('a hashed asset that no longer exists 404s instead of being answered with t
   // revalidate it away, so an unchanged chunk keeping its hash across builds
   // would serve the poisoned entry forever.
   const { app: hono } = app({ pocketDir: await makePocketDir() });
-  const res = await hono.request('/assets/index-DELETED.js');
+  const res = await hono.request('/assets/index-DELETEDx.js');
 
   assert.equal(res.status, 404);
   assert.equal(res.headers.get('cache-control'), 'no-cache');
