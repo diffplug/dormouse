@@ -861,6 +861,23 @@ describe('terminal-registry alert behavior', () => {
     expect(getActivity(id)).toMatchObject({ status: 'NOTHING_TO_SHOW', todo: false });
   });
 
+  it('Story 12c: a repaint trailing a scroll never creates a false alert', () => {
+    const id = 'story-12c';
+    const entry = createSession(id);
+    enableAlert(id);
+    advance(cfg.alert.workStartWindow + 1);
+
+    entry.terminal.emitInput('\x1b[<65;10;20M');
+    advance(1_500);
+    for (let paint = 0; paint < 20; paint++) {
+      fakePlatform.sendOutput(id, 'scrolled view');
+      advance(100);
+    }
+    advance(12_000);
+
+    expect(getActivity(id)).toMatchObject({ status: 'NOTHING_TO_SHOW', todo: false });
+  });
+
   it('Story 13: multiple sessions ring independently', () => {
     const alpha = 'story-13-a';
     const beta = 'story-13-b';

@@ -413,7 +413,7 @@ export class AlertManager {
   onWrite(id: string, data: string, { userInput = false }: { userInput?: boolean } = {}): void {
     if (userInput) this.acknowledge(id, { input: true });
     // Same reasoning as `onData`: the first keystroke can beat any output.
-    if (userInput || inputCanStartWork(data)) this.streamEntry(id)?.detector.expectWork();
+    if (inputCanStartWork(data, { userInput })) this.streamEntry(id)?.detector.expectWork();
   }
 
   // --- WATCHING rule set ---

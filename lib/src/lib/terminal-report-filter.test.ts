@@ -104,8 +104,13 @@ describe('terminal-report-filter: inputCanStartWork', () => {
     expect(inputCanStartWork('\x1b[<35;12;4M')).toBe(false); // SGR hover
   });
 
-  it('accepts a wheel tick, which scrolls the program', () => {
-    expect(inputCanStartWork('\x1b[<65;12;4M')).toBe(true);
+  it('rejects a wheel tick, the user's input that asks for no work', () => {
+    expect(inputCanStartWork('\x1b[<65;12;4M', { userInput: true })).toBe(false);
+  });
+
+  it('accepts a reply-shaped key a human typed', () => {
+    expect(inputCanStartWork('\x1b[1;2R')).toBe(false);
+    expect(inputCanStartWork('\x1b[1;2R', { userInput: true })).toBe(true); // Shift+F3
   });
 
   it('accepts keys, Ctrl-C, and a key typed alongside a mouse report', () => {
