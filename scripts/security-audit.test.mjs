@@ -1522,7 +1522,7 @@ for (const [arg, runsState, runsDomain] of [['github-state', true, false], ['ci-
   });
 }
 
-// The red team: the same prompts on Codex, each domain's computed verdict
+// The second-opinion audit: the same prompts on Codex, each domain's computed verdict
 // gathered into the publishing command, which is printed and never run.
 for (const [args, verdicts, expected] of [[['remote'], 'remote=PASS', 0], [[], 'supply-chain=PASS ci-and-secrets=PASS remote=PASS local=INCONCLUSIVE hosted=PASS', 1]]) {
   test(`local runner, Codex engine: ${args[0] ?? 'every domain'}`, (t) => {
@@ -1543,6 +1543,35 @@ for (const [args, verdicts, expected] of [[['remote'], 'remote=PASS', 0], [[], '
     assert.deepEqual(ghCalls(dir).map(({ args: a }) => a.slice(0, 2).join(' ')).filter((c) => c !== 'issue list'), []);
   });
 }
+
+// A list written on another login: the domains read it, and the ledger is
+// never listed, so this run's `gh` login needs no read on it.
+test('local runner: AUDIT_OPEN_FINDINGS hands the domains a file, and the ledger is not read', (t) => {
+  const { dir, env } = fixture(t);
+  localRunnerFixture(dir);
+  stubGh(dir);
+  const title = '[audit-finding 0123456789ab] FAIL S9: from the file';
+  mkdirSync(join(dir, 'elsewhere'));
+  writeFileSync(join(dir, 'elsewhere/open.txt'), `${title}\n`);
+  stub(dir, 'codex', `
+    const fs = require('node:fs');
+    const argv = process.argv.slice(2);
+    const output = argv[argv.length - 1].match(/\\*\\*Output file:\\*\\* \\x60([^\\x60]+)\\x60/)[1];
+    fs.writeFileSync('seen-open-findings', fs.readFileSync('audit-open-findings.txt'));
+    fs.writeFileSync(output, ${JSON.stringify(Object.fromEntries(fragments.map((f) => [f, fragmentText(f)])))}[output]);
+  `);
+  // A relative path is the operator's, from where they ran the script.
+  const result = spawnSync('bash', ['../scripts/security-audit-local.sh', '--engine', 'codex', 'remote'],
+    { cwd: join(dir, 'elsewhere'), env: { ...env, AUDIT_OPEN_FINDINGS: 'open.txt', GH_LEDGER_OPEN: '7 [audit-finding ba9876543210] FAIL S5: from the ledger' }, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(readFileSync(join(dir, 'seen-open-findings'), 'utf8'), `${title}\n`);
+  assert.equal(existsSync(join(dir, 'gh-calls.jsonl')) ? readFileSync(join(dir, 'gh-calls.jsonl'), 'utf8') : '', '');
+
+  const missing = spawnSync('bash', ['scripts/security-audit-local.sh', '--engine', 'codex', 'remote'],
+    { cwd: dir, env: { ...env, AUDIT_OPEN_FINDINGS: 'nowhere.txt' }, encoding: 'utf8' });
+  assert.equal(missing.status, 64);
+  assert.match(missing.stderr, /AUDIT_OPEN_FINDINGS names no file: nowhere\.txt/);
+});
 
 test('local runner: an unknown engine is refused before anything runs', (t) => {
   const { dir, env } = fixture(t);
@@ -1812,11 +1841,11 @@ test('the model split holds in CI and locally, over the same prompt files', () =
   assert.match(local, /cat "\$AUDIT_DIR\/_preamble\.md"; echo; cat "\$AUDIT_DIR\/\$domain\.md"/);
 });
 
-// "Red team": the Codex engine is pinned and sandboxed, and its report
+// "Second-opinion audit": the Codex engine is pinned and sandboxed, and its report
 // workflow publishes only what its builder checked, for an admin, from main.
 const codexWorkflow = readFileSync(join(repo, '.github/workflows/codex-audit-report.yaml'), 'utf8');
 
-test('the red team runs sandboxed on its pinned model and program, and gates nothing', () => {
+test('the second-opinion audit runs sandboxed on its pinned model and program, and gates nothing', () => {
   assert.match(local, /^CODEX_MODEL=gpt-6-sol$/m);
   assert.match(local, /^CODEX_PROGRAM=daybreak_blue$/m);
   const exec = local.match(/codex exec [^\n]*\\\n[^\n]*/)?.[0] ?? '';
@@ -1839,12 +1868,12 @@ test('the red team runs sandboxed on its pinned model and program, and gates not
     assert.equal(spawnSync('bash', ['-c', steps[0].run], { env: { ...process.env, GITHUB_REF: ref } }).status, status, ref);
   }
   const posting = steps.filter((step) => /\bgh\b|security-audit-public-body/.test(step.run ?? ''));
-  assert.deepEqual(posting.map((step) => step.name), ['Publish the red-team report']);
+  assert.deepEqual(posting.map((step) => step.name), ['Publish the second-opinion report']);
   assert.match(posting[0].run, /node scripts\/security-audit-public-body\.mjs --engine codex /);
   assert.equal(doc.jobs.publish.steps.find((step) => step.uses?.startsWith('actions/checkout@')).with['persist-credentials'], false);
 });
 
-/** The builder's red-team path in a fixture tree, over a `gh` stub answering what it reads. */
+/** The builder's second-opinion path in a fixture tree, over a `gh` stub answering what it reads. */
 function codexFixture(t, { role = 'admin', compare = 'ahead', run = {}, record = {} } = {}) {
   const { dir, env } = fixture(t);
   copyFileSync(join(repo, 'scripts/security-audit-canary.mjs'), join(dir, 'scripts/security-audit-canary.mjs'));
@@ -1875,7 +1904,7 @@ const CODEX_ARGS = ['--engine', 'codex', '--date', '2026-10-20T12:00Z', '--run-u
 const runCodex = (dir, env, args = CODEX_ARGS) => spawnSync(process.execPath, ['scripts/security-audit-public-body.mjs', ...args], { cwd: dir, env, encoding: 'utf8' });
 const withArg = (name, value) => CODEX_ARGS.map((a, i) => (CODEX_ARGS[i - 1] === name ? value : a));
 
-test('the red-team report comments once on the status issue and writes its recall record', (t) => {
+test('the second-opinion report comments once on the status issue and writes its recall record', (t) => {
   const { dir, env } = codexFixture(t);
   const result = runCodex(dir, env);
   assert.equal(result.status, 0, result.stderr);
@@ -1888,6 +1917,18 @@ test('the red-team report comments once on the status issue and writes its recal
   assert.deepEqual(JSON.parse(readFileSync(join(dir, 'codex-recall.json'), 'utf8')), {
     claude_run_url: 'https://github.com/fixture/repo/actions/runs/77', commit: COMMIT, model: 'gpt-6-sol',
     seeded: 8, caught: 5, either: 7, unfinished: 0, run_url: 'https://github.com/fixture/repo/actions/runs/5' });
+});
+
+// Published without Claude's scorecard: the either count is not computed,
+// which the record keeps as null and the comment says, never as zero.
+test('the second-opinion report publishes a canary whose either count was not computed', (t) => {
+  const { dir, env } = codexFixture(t);
+  const result = runCodex(dir, env, withArg('--canary-either', ''));
+  assert.equal(result.status, 0, result.stderr);
+  const comment = readFileSync(join(dir, 'gh-calls.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l))
+    .find(({ args }) => args[0] === 'issue' && args[1] === 'comment');
+  assert.match(comment.body, /Claude caught 6 of 8 \(75%\), Codex 5 \(63%\); how many the two caught together was not computed\./);
+  assert.equal(JSON.parse(readFileSync(join(dir, 'codex-recall.json'), 'utf8')).either, null);
 });
 
 for (const [name, options, args, message] of [
@@ -1903,8 +1944,9 @@ for (const [name, options, args, message] of [
   ['a model name carrying text', {}, withArg('--model', 'gpt-6-sol see src/x.ts:12'), /invalid model/],
   ['caught above either', {}, withArg('--canary-caught', '8'), /invalid canary counts/],
   ['half the canary counts', {}, withArg('--canary-unfinished', ''), /invalid canary unfinished/],
+  ['caught above seeded, either not computed', {}, withArg('--canary-either', '').map((a, i, all) => (all[i - 1] === '--canary-caught' ? '9' : a)), /invalid canary counts/],
 ]) {
-  test(`the red-team report posts nothing for ${name}`, (t) => {
+  test(`the second-opinion report posts nothing for ${name}`, (t) => {
     const { dir, env } = codexFixture(t, options);
     const result = runCodex(dir, env, args);
     assert.notEqual(result.status, 0);

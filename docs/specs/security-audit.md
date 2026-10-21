@@ -1,6 +1,6 @@
 # Security Audit
 
-> - Owns how the security specs are audited: the schedule and the release gate, the deterministic checks and the skip they allow, the domains and their prompts, the orchestration contract, the three outcomes, the reporting steps, the embargo on finding detail and its disclosure, the environment that holds `AUDIT_PAT`, the canary that measures recall, and the advisory Codex red team.
+> - Owns how the security specs are audited: the schedule and the release gate, the deterministic checks and the skip they allow, the domains and their prompts, the orchestration contract, the three outcomes, the reporting steps, the embargo on finding detail and its disclosure, the environment that holds `AUDIT_PAT`, the canary that measures recall, the second-opinion audit on Codex, and the red team.
 > - Defers what is audited to `docs/specs/security.md` and the specs it names, and each agent's procedure to its prompt in `.github/audit/`.
 > - Read `docs/specs/security.md` first.
 
@@ -48,7 +48,7 @@ CI and the local runner share the prompts and their scopes in `.github/audit/` (
 - **FAIL IF** `S5` a `docs/specs/security*.md` spec (not a `.rationale.md`) is in no domain's scope, or in two, or a scope names a file that does not exist (rationale).
 - **FAIL IF** `S6` `.github/audit/orchestrator.md` lets the orchestrator audit anything itself (rationale).
 - **FAIL IF** `S7` the audit stops fanning out to a dedicated `remote` subagent scoped to `docs/specs/security-remote.md`, a dedicated `local` subagent scoped to `docs/specs/security-local.md`, or a dedicated `hosted` subagent scoped to `docs/specs/security-hosted.md`, or any of those scopes is merged back into a context that also carries another domain (rationale).
-- **FAIL IF** `S8` `remote`, `local`, or `hosted` does not run on Opus and the mechanical domains on Sonnet, the stronger model on the code-reading domains, in **both** `.github/workflows/security-audit.yaml`'s `claude_args` — its `--model` sets the floor and its `--agents` raises those three domains — and `scripts/security-audit-local.sh`'s default Claude engine (rationale). This split is the release gate; the Codex engine never is ([Red team](#red-team)). Pinned by `scripts/security-audit.test.mjs`.
+- **FAIL IF** `S8` `remote`, `local`, or `hosted` does not run on Opus and the mechanical domains on Sonnet, the stronger model on the code-reading domains, in **both** `.github/workflows/security-audit.yaml`'s `claude_args` — its `--model` sets the floor and its `--agents` raises those three domains — and `scripts/security-audit-local.sh`'s default Claude engine (rationale). This split is the release gate; the Codex engine never is ([Second-opinion audit](#second-opinion-audit)). Pinned by `scripts/security-audit.test.mjs`.
 - **FAIL IF** `S9` `.github/audit/` is missing a prompt file the workflow names, or `scripts/security-audit-local.sh` stops running the audit from those same files (rationale), or exits zero after a failed process, a missing or unfinished fragment, or any verdict other than exact `VERDICT: PASS`. Pinned by `scripts/security-audit.test.mjs`.
 - **FAIL IF** `S10` the union of the subagents' qualitative scopes does not cover every top-level path in the repository: the catch-all's remainder stops subtracting every other domain's prompt, or a second domain claims the remainder (rationale). Pinned by `scripts/security-audit.test.mjs`.
 - **FAIL IF** `S11` `.github/audit/` or `.vscode/` is outside **any** consumer of `.github/workflows/workflow-audit.yaml`'s diff window — the commit list, `own_changes`, `is_clean_merge`, and both content classifiers' refusals, whose half is *derived* from the single `WINDOW` array. The security specs are deliberately *not* watched there (rationale).
@@ -121,7 +121,7 @@ Source of truth: `.github/audit/_preamble.md`; `dedupFindings` in `scripts/secur
 
 | Sink | Carries |
 |---|---|
-| Red-team comment on the status issue, one per `codex-audit-report.yaml` run | what [Red team](#red-team) lists |
+| Second-opinion comment on the status issue, one per `codex-audit-report.yaml` run | what [Second-opinion audit](#second-opinion-audit) lists |
 | `codex-recall` artifact | that run's canary counts, model, commit, and the two run links |
 | Public status issue, labeled `security-audit-status` | the run's time, link, commit, and outcome; whether the domains were skipped and when they last ran; each domain's computed verdict and its failed-check, missing-rule, malformed-line, BLOCKER, and WARNING counts; each failed check's spec and heading; how many verdict lines disagreed; whether the private filing failed; each open ledger finding's severity, kind, and dates, keyed as [Disclosure](#disclosure) allows; the latest disclosures |
 | Public disclosure issue, labeled `security-audit-finding`, one per ledger issue | what [Disclosure](#disclosure) lists |
@@ -219,24 +219,30 @@ Source of truth: `seed` and `score` in `scripts/security-audit-canary.mjs`; the 
 
 ### Published recall
 
-dormouse.sh/security shows a rolling recall under "How the guarantees are checked": caught over seeded across the `canary-recall` artifacts of canary runs on `main` in the 30 days before its as-of date, each run linked. Its weekly graph draws three lines: Claude over every run; Codex over the runs a [Red team](#red-team) record pairs with; and caught by either, where a run no record pairs adds Claude's catches alone. It is a committed snapshot, `website/src/data/canary-recall.json`, regenerated at each release (`docs/specs/deploy.md` -> "Release checklist") (rationale).
+dormouse.sh/security shows a rolling recall under "How the guarantees are checked": caught over seeded across the `canary-recall` artifacts of canary runs on `main` in the 30 days before its as-of date, each run linked. Its weekly graph draws three lines: Claude over every run; Codex over the runs a [Second-opinion audit](#second-opinion-audit) record pairs with; and caught by either, where a run no record pairs adds Claude's catches alone, and a paired run with a null either count, not computed rather than zero, leaves its week no point. It is a committed snapshot, `website/src/data/canary-recall.json`, regenerated at each release (`docs/specs/deploy.md` -> "Release checklist") (rationale).
 
 - **A record out of shape fails the snapshot**, never repaired or skipped: a field but the scorer's, a count not a non-negative integer, more caught than seeded, or a link but to its own run on `diffplug/dormouse`.
 - **Every run in the window counts as its record has it** (rationale): an unfinished domain's seeds stay seeded, caught only by what it reported, and the run shows its unfinished count. A run with no `canary-recall` artifact is listed without counts.
 - The generator downloads `canary-recall` and `codex-recall` alone, never `canary-transcript`.
-- **A red-team record pairs with its canary run by link**, the newest successful run on `main` per canary run; one whose seeded count differs from that run's, or whose either count falls below Claude's or above the two engines' sum, fails the snapshot.
+- **A second-opinion record pairs with its canary run by link**, the newest successful run on `main` per canary run; one whose seeded count differs from that run's, or whose either count falls below Claude's or above the two engines' sum, fails the snapshot.
 
 Source of truth: `summarize` in `website/scripts/generate-canary-recall.js`; `CanaryRecall` in `website/src/components/CanaryRecall.tsx`.
 
-## Red team
+## Second-opinion audit
 
-**Codex audits the audit from outside its model family, and is advisory: no Codex verdict gates a release, feeds the skip, or files** (rationale). `scripts/security-audit-local.sh --engine codex` runs the same prompts on `gpt-6-sol` under the `daybreak_blue` Cyber access program, sandboxed to the working tree. **A maintainer runs it quarterly, and before any release that changes remote control or Hosted**: every domain, and a canary keyed by the latest CI canary run on `main` and scored against that run's decrypted scorecard. A Codex BLOCKER or WARNING reaches the ledger only as a maintainer's hand-filed `manual-` key ([Findings ledger](#findings-ledger)).
+**The second-opinion audit runs the same prompts on Codex, outside Claude's model family: no Codex verdict gates a release, feeds the skip, or files** (rationale). `scripts/security-audit-local.sh --engine codex` runs them on `gpt-6-sol` under the `daybreak_blue` Cyber access program, sandboxed to the working tree. A maintainer runs every domain nightly, and weekly a canary keyed by the latest CI canary run on `main`, which counts the seeds either engine caught given that run's decrypted scorecard, and leaves that count empty without it (rationale). A Codex BLOCKER or WARNING reaches the ledger only as a maintainer's hand-filed `manual-` key ([Findings ledger](#findings-ledger)).
+
+**On a machine running Codex, the `gh` login holds no read on the ledger**, since the sandbox reaches it (rationale): `AUDIT_OPEN_FINDINGS=<file>` hands the domains a list written on another login, copied to `audit-open-findings.txt` in place of listing the ledger.
 
 `.github/workflows/codex-audit-report.yaml` publishes the run from `workflow_dispatch` inputs that carry nothing a finding could be read from: the commit, the model, each domain's computed verdict, and the canary's run ID and seeded, Codex-caught, either-caught, and unfinished counts. `scripts/security-audit-public-body.mjs` checks each against its pattern and the commit against `main`, checks the counts against that canary run's own record and commit, comments once on the status issue, and writes the `codex-recall` record [Published recall](#published-recall) pairs.
 
 - **FAIL IF** `S275` `.github/workflows/codex-audit-report.yaml` can gate, file, or publish past its inputs: it holds any write permission but its one job's `issues: write`, reads a secret, interpolates an input into a script, runs on a ref but `main`, posts for anyone but an admin or anything but `codexComment`'s text, or the gate in `.github/workflows/release.yml` can select its run; or `scripts/security-audit-local.sh` runs Codex unsandboxed or on another model or program. Pinned by `scripts/security-audit.test.mjs`.
 
-Source of truth: `run_domain` in `scripts/security-audit-local.sh`; `publishCodex` in `scripts/security-audit-public-body.mjs`; `.github/workflows/codex-audit-report.yaml`.
+Source of truth: `run_domain` and `write_open_findings` in `scripts/security-audit-local.sh`; `publishCodex` in `scripts/security-audit-public-body.mjs`; `.github/workflows/codex-audit-report.yaml`.
+
+## Red team
+
+**A maintainer runs a red team quarterly, and before any release that changes remote control or Hosted** (rationale): an open-ended pass over the code and the published guarantees without the `FAIL IF` lines, on Claude through Anthropic's Cyber Verification Program and on Codex through OpenAI's Daybreak program. Its BLOCKERs and WARNINGs reach the ledger as hand-filed `manual-` keys ([Findings ledger](#findings-ledger)).
 
 ## Future
 

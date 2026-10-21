@@ -1,13 +1,29 @@
 Domain: hosted
 Rule: S100 — or a removed passkey's sessions survive its removal
-Expect: hosted/server/relay-api.ts
+Expect: hosted/server/relay-api.ts hosted/server/dormouse-migrations/010_relay_session_credential_required.sql
 Source: synthetic; a session no longer names the passkey that signed it in, so removing that passkey on the account page leaves its sessions live
 
+diff --git a/hosted/server/dormouse-migrations/010_relay_session_credential_required.sql b/hosted/server/dormouse-migrations/010_relay_session_credential_required.sql
+index 319cd5c41..b5300f378 100644
+--- a/hosted/server/dormouse-migrations/010_relay_session_credential_required.sql
++++ b/hosted/server/dormouse-migrations/010_relay_session_credential_required.sql
+@@ -1,9 +1,6 @@
+ -- Up Migration
+--- Every session names the passkey that signed it in, so removing that passkey
+--- ends it (docs/specs/hosted.md -> "Burrow enrollment"). A session minted
+--- before 009 names none and is deleted here; its holder signs in again.
++-- A session minted before 009 names no passkey, so removing the passkey that
++-- signed it in left it live; it is deleted here, and its holder signs in again.
+ DELETE FROM dormouse_relay_sessions WHERE "credentialId" IS NULL;
+-ALTER TABLE dormouse_relay_sessions ALTER COLUMN "credentialId" SET NOT NULL;
+ 
+ -- Down Migration
+-ALTER TABLE dormouse_relay_sessions ALTER COLUMN "credentialId" DROP NOT NULL;
 diff --git a/hosted/server/relay-api.ts b/hosted/server/relay-api.ts
-index b227f87c4..918689c6e 100644
+index a68a75d36..d6f13c53a 100644
 --- a/hosted/server/relay-api.ts
 +++ b/hosted/server/relay-api.ts
-@@ -754,17 +754,14 @@ export async function admit(
+@@ -746,17 +746,14 @@ export async function admit(
    });
  }
  
@@ -28,11 +44,39 @@ index b227f87c4..918689c6e 100644
      RELAY_SESSION_TTL_MS,
    );
    return { sessionToken, expiresAt: expiresAt! };
+diff --git a/hosted/server/tests/migrations.test.ts b/hosted/server/tests/migrations.test.ts
+index 09806ad75..cb7005345 100644
+--- a/hosted/server/tests/migrations.test.ts
++++ b/hosted/server/tests/migrations.test.ts
+@@ -32,7 +32,7 @@ const PINNED: Record<string, string> = {
+   "009_relay_passkey_removal.sql":
+     "c6c220960187e33a1350dc85e93d24f99866a72a579ed9def6a3663643f3e928",
+   "010_relay_session_credential_required.sql":
+-    "f385398d16126381b6a976d74e23e10b07370c1a1da3205e71697aa62a3399f5",
++    "892b0116797b52e9f42617be5703d2e516f3ec5c6d37cbc8c4f8504e4fcce969",
+ };
+ 
+ const directory = new URL("../dormouse-migrations/", import.meta.url);
+@@ -47,7 +47,7 @@ test("no merged Dormouse migration changes, and every one is pinned", () => {
+   }
+ });
+ 
+-test("010 deletes the sessions that name no passkey, and every later one must name one", async ({
++test("010 deletes the sessions that name no passkey", async ({
+   onTestFinished,
+ }) => {
+   // The Dormouse migrations through 009, then 010 over the rows they allowed.
+@@ -73,5 +73,4 @@ test("010 deletes the sessions that name no passkey, and every later one must na
+   copyFileSync(join(source, "010_relay_session_credential_required.sql"), join(before, "010_relay_session_credential_required.sql"));
+   await migrate(context.database.url, await readMigrations([betterAuthMigrations, before]));
+   expect(await sql(`SELECT "tokenHash" FROM dormouse_relay_sessions`)).toEqual([{ tokenHash: "named" }]);
+-  await expect(session("later", null)).rejects.toThrow(/credentialId/);
+ });
 diff --git a/hosted/server/tests/relay.test.ts b/hosted/server/tests/relay.test.ts
-index f26bd4613..6f64d96af 100644
+index 424ccd2ba..3441c7e86 100644
 --- a/hosted/server/tests/relay.test.ts
 +++ b/hosted/server/tests/relay.test.ts
-@@ -454,32 +454,20 @@ test("a passkey names the computer whose code registered it and outlives it; rem
+@@ -456,32 +456,20 @@ test("a passkey names the computer whose code registered it and outlives it; rem
    expect(await minter(phone)).toEqual([{ burrowId: null }]);
    expect((await f.call("GET", API_ROUTES.burrows, { bearer: setupSession })).status).toBe(200);
  

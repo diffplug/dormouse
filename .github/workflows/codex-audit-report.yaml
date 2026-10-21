@@ -1,10 +1,10 @@
 name: codex-audit-report
 
-# Publishes the red team's report (docs/specs/security-audit.md -> "Red team"):
-# what a maintainer's `scripts/security-audit-local.sh --engine codex` run
-# computed, typed in as dispatch inputs. Nothing here runs a model or reads a
-# secret, and nothing here gates a release: release.yml waits on
-# security-audit.yaml alone. The inputs are non-secret by construction —
+# Publishes the second-opinion audit's report (docs/specs/security-audit.md ->
+# "Second-opinion audit"): what a maintainer's `scripts/security-audit-local.sh
+# --engine codex` run computed, typed in as dispatch inputs. Nothing here runs
+# a model or reads a secret, and nothing here gates a release: release.yml
+# waits on security-audit.yaml alone. The inputs are non-secret by construction —
 # computed verdicts and counts, never a finding — and
 # `scripts/security-audit-public-body.mjs` checks each against its pattern,
 # and the counts against the CI canary run they share seeds with, before it
@@ -38,7 +38,7 @@ on:
         type: string
         default: ""
       canary_either:
-        description: "Seeds Claude or Codex caught"
+        description: "Seeds Claude or Codex caught; empty when not computed"
         type: string
         default: ""
       canary_unfinished:
@@ -65,7 +65,7 @@ jobs:
       - name: Refuse any ref but main
         run: |
           [ "$GITHUB_REF" = refs/heads/main ] && exit 0
-          echo "::error::A red-team report publishes from main only."
+          echo "::error::A second-opinion report publishes from main only."
           exit 1
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -79,7 +79,7 @@ jobs:
 
       # Inputs reach the builder through the environment, never interpolated
       # into the script. It refuses a dispatch by anyone but an admin.
-      - name: Publish the red-team report
+      - name: Publish the second-opinion report
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -103,7 +103,7 @@ jobs:
 
       # The counts website/scripts/generate-canary-recall.js reads beside the
       # CI canary run's own `canary-recall`.
-      - name: Upload the red-team recall
+      - name: Upload the second-opinion recall
         if: inputs.canary_run != ''
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

@@ -38,9 +38,9 @@ const SNAPSHOT: CanaryRecallSnapshot = {
     { at: "2026-09-30T00:00:00Z", url: RUN(6) },
   ],
 };
-// The red team paired with runs 2 and 3: Oct 5's week is all paired, Oct 12's
-// in part, so its either line adds run 5's Claude catches alone.
-const RED_TEAM: CanaryRecallSnapshot = {
+// The second-opinion audit paired with runs 2 and 3: Oct 5's week is all paired,
+// Oct 12's in part, so its either line adds run 5's Claude catches alone.
+const SECOND_OPINION: CanaryRecallSnapshot = {
   ...SNAPSHOT,
   runs: SNAPSHOT.runs.map((run) =>
     run.url === RUN(2)
@@ -107,28 +107,28 @@ describe("recallWeeks", () => {
   });
 });
 
-describe("the red team", () => {
+describe("the second-opinion audit", () => {
   it("scores Codex over its paired runs, and either over every counted run", () => {
-    const week = Object.fromEntries(recallWeeks(RED_TEAM).map((w) => [w.start, w]));
+    const week = Object.fromEntries(recallWeeks(SECOND_OPINION).map((w) => [w.start, w]));
     expect(week["2026-10-05"].codex).toEqual({ runs: 1, seeded: 8, caught: 5, percent: 63, either: 8, eitherPercent: 100 });
-    // Run 5 had no red team: its 8 Claude catches join run 3's 7 caught by either.
+    // Codex did not see run 5: its 8 Claude catches join run 3's 7 caught by either.
     expect(week["2026-10-12"].codex).toEqual({ runs: 1, seeded: 8, caught: 4, percent: 50, either: 15, eitherPercent: 94 });
     expect(week["2026-09-21"].codex).toBeNull();
-    for (const w of recallWeeks(RED_TEAM)) if (w.codex) expect(w.codex.eitherPercent).toBeGreaterThanOrEqual(w.percent!);
+    for (const w of recallWeeks(SECOND_OPINION)) if (w.codex) expect(w.codex.eitherPercent).toBeGreaterThanOrEqual(w.percent!);
   });
 
   it("says all three in each description and run", () => {
-    const week = Object.fromEntries(recallWeeks(RED_TEAM).map((w) => [w.start, w]));
+    const week = Object.fromEntries(recallWeeks(SECOND_OPINION).map((w) => [w.start, w]));
     expect(weekDescription(week["2026-10-05"])).toBe(
       "Week of Oct 5: caught 7 of 8 over 1 run (88%); Codex caught 5 of 8 over 1 run (63%); caught by either: 8 of 8 (100%)",
     );
     expect(week["2026-10-12"].runs.map(runLabel)).toEqual(["Oct 12: 6 of 8*; Codex 4*, either 7", "Oct 14: no record", "Oct 16: 8 of 8"]);
   });
 
-  it("draws three lines under a legend only once the red team has a point", () => {
-    const html = renderToStaticMarkup(<CanaryRecall snapshot={RED_TEAM} />);
+  it("draws three lines under a legend only once the second-opinion audit has a point", () => {
+    const html = renderToStaticMarkup(<CanaryRecall snapshot={SECOND_OPINION} />);
     const shown = text(html);
-    for (const label of ["Claude, the release gate", "Codex, advisory", "Caught by either"]) expect(shown).toContain(label);
+    for (const label of ["Claude, the release gate", "Codex, second opinion", "Caught by either"]) expect(shown).toContain(label);
     expect(shown).toContain("its line covers only those runs");
     // Either and Codex span Oct 5 and Oct 12; Claude keeps its own two segments.
     const lines = [...html.matchAll(/<polyline points="([^"]+)"/g)].map(([, points]) => points);
@@ -141,6 +141,31 @@ describe("the red team", () => {
     expect(html).toContain('stroke-dasharray="5 4"');
     const plain = text(renderToStaticMarkup(<CanaryRecall snapshot={SNAPSHOT} />));
     expect(plain).not.toContain("Caught by either");
+  });
+});
+
+describe("an either count that was not computed", () => {
+  // Run 3's Codex canary was published without Claude's scorecard.
+  const UNCOMPUTED: CanaryRecallSnapshot = {
+    ...SECOND_OPINION,
+    runs: SECOND_OPINION.runs.map((run) => (run.url === RUN(3) ? { ...run, codex: { ...run.codex!, either: null } } : run)),
+  };
+  const week = Object.fromEntries(recallWeeks(UNCOMPUTED).map((w) => [w.start, w]));
+
+  it("leaves that week's either empty, never zero, and keeps Codex's own count", () => {
+    expect(week["2026-10-12"].codex).toEqual({ runs: 1, seeded: 8, caught: 4, percent: 50, either: null, eitherPercent: null });
+    expect(week["2026-10-05"].codex).toMatchObject({ either: 8, eitherPercent: 100 });
+    expect(weekDescription(week["2026-10-12"])).toContain("caught by either: not computed");
+    expect(week["2026-10-12"].runs[0] && runLabel(week["2026-10-12"].runs[0])).toBe("Oct 12: 6 of 8*; Codex 4*, either not computed");
+  });
+
+  it("plots no point on the either line that week", () => {
+    const html = renderToStaticMarkup(<CanaryRecall snapshot={UNCOMPUTED} />);
+    const lines = [...html.matchAll(/<polyline points="([^"]+)"/g)].map(([, points]) => points);
+    expect(lines).toEqual([`${slot(2, 4)},0`, `${slot(2, 4)},37 ${slot(3, 4)},50`, `${slot(0, 4)},50`, `${slot(2, 4)},12 ${slot(3, 4)},12`]);
+    // One diamond in the legend, one for Oct 5's either point; none for Oct 12's.
+    expect(html.match(/rotate\(45 /g)).toHaveLength(2);
+    expect(renderToStaticMarkup(<CanaryRecall snapshot={SECOND_OPINION} />).match(/rotate\(45 /g)).toHaveLength(3);
   });
 });
 
