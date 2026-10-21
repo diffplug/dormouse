@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
-import { shellEscapePath, shellEscapePosix, shellEscapeWindows } from './shell-escape';
+import { shellEscapePath, shellEscapePosix } from './shell-escape';
 
 describe('shellEscapePosix', () => {
   it('leaves safe paths untouched', () => {
@@ -77,71 +77,57 @@ describe('shellEscapePosix', () => {
   });
 });
 
-describe('shellEscapeWindows', () => {
-  it('wraps in double quotes', () => {
-    expect(shellEscapeWindows('C:\\Users\\a.png')).toBe(`"C:\\Users\\a.png"`);
-  });
+/** File names, and the form cmd, Windows PowerShell, and pwsh each read back as
+ *  that same literal. */
+const WINDOWS_LITERAL: [string, string][] = [
+  ['C:\\Users\\a.png', 'C:\\Users\\a.png'],
+  ['C:\\a file.png', '"C:\\a file.png"'],
+  ['', '""'],
+  ["C:\\it's.png", `"C:\\it's.png"`],
+  // PowerShell closes a single-quoted string at U+2018–U+201B too; inside
+  // double quotes, as in cmd, they are plain characters.
+  ['C:\\x’; whoami; ’.txt', '"C:\\x’; whoami; ’.txt"'],
+  ['a‘b‚c‛d', '"a‘b‚c‛d"'],
+  ['C:\\a＂b＇c.txt', '"C:\\a＂b＇c.txt"'],
+  ['C:\\a;b&whoami&c|d.txt', '"C:\\a;b&whoami&c|d.txt"'],
+  ['C:\\a (1)^.txt', '"C:\\a (1)^.txt"'],
+  // PowerShell's argument mode reads a bare comma as the array operator and a
+  // leading `@` as splatting.
+  ['C:\\Users\\a,b.png', '"C:\\Users\\a,b.png"'],
+  ['@args', '"@args"'],
+  // A `$` before a backslash starts no PowerShell variable: an admin share.
+  ['\\\\host\\c$\\a b.txt', '"\\\\host\\c$\\a b.txt"'],
+];
 
-  it('doubles embedded double quotes', () => {
-    expect(shellEscapeWindows('a"b.png')).toBe(`"a""b.png"`);
-  });
-
-  it('handles spaces', () => {
-    expect(shellEscapeWindows('C:\\a file.png')).toBe(`"C:\\a file.png"`);
-  });
-
-  it('handles empty string', () => {
-    expect(shellEscapeWindows('')).toBe(`""`);
-  });
-});
+/** File names no form keeps literal in cmd, Windows PowerShell, and pwsh. */
+const WINDOWS_REFUSED = [
+  'C:\\dl\\$(whoami).txt',
+  '$env:USERNAME.txt',
+  'C:\\a$',
+  'a`$(whoami).txt',
+  'C:\\%PATH%.txt',
+  '100%.txt',
+  'a!PATH!b.txt',
+  'a"b.png',
+  'a“; whoami; ”b.txt',
+  'a„b.txt',
+];
 
 describe('shellEscapePath shell dispatch', () => {
   it('uses posix escaping for a posix Session', () => {
     expect(shellEscapePath('a b.png', 'posix')).toBe('a\\ b.png');
   });
 
-  it('uses cmd escaping for a cmd Session', () => {
-    expect(shellEscapePath('a b.png', 'cmd')).toBe(`"a b.png"`);
-  });
-
-  // A PowerShell double-quoted string is expandable: `"$(calc.exe).txt"` runs
-  // the subexpression. Quote for the pane's shell, not the host platform.
-  it('does not leave a subexpression live in a PowerShell Session', () => {
-    expect(shellEscapePath('$(calc.exe).txt', 'powershell')).toBe(`'$(calc.exe).txt'`);
-  });
-
-  it('does not leave a variable interpolation live in a PowerShell Session', () => {
-    expect(shellEscapePath('$env:USERNAME.txt', 'powershell')).toBe(`'$env:USERNAME.txt'`);
-  });
-
-  it('doubles embedded single quotes for PowerShell', () => {
-    expect(shellEscapePath(`it's.png`, 'powershell')).toBe(`'it''s.png'`);
-  });
-
-  // PowerShell also closes a single-quoted string at U+2018–U+201B.
-  it('doubles curly single quotes for PowerShell', () => {
-    expect(shellEscapePath('x’; calc; ’.txt', 'powershell')).toBe(`'x’’; calc; ’’.txt'`);
-    expect(shellEscapePath('a‘b‚c‛d', 'powershell')).toBe(`'a‘‘b‚‚c‛‛d'`);
-  });
-
-  it('leaves an inert path bare in a PowerShell Session', () => {
-    expect(shellEscapePath('C:\\Users\\a.png', 'powershell')).toBe('C:\\Users\\a.png');
-    expect(shellEscapePath('C:\\Users\\a b.png', 'powershell')).toBe(`'C:\\Users\\a b.png'`);
-  });
-
-  // PowerShell's argument mode reads a bare comma as the array operator, so an
-  // unquoted `C:\a,b.png` would reach the command as two arguments.
-  it('quotes a comma-bearing path in a PowerShell Session', () => {
-    expect(shellEscapePath('C:\\Users\\a,b.png', 'powershell')).toBe(`'C:\\Users\\a,b.png'`);
-  });
-
-  it('quotes a leading-at path in a PowerShell Session', () => {
-    expect(shellEscapePath('@args', 'powershell')).toBe(`'@args'`);
-  });
-
   // Git Bash / WSL Sessions on Windows parse posix quoting, not cmd quoting.
   it('uses posix escape for a posix Session on Windows', () => {
     expect(shellEscapePath('$(calc.exe).txt', 'posix')).toBe('\\$\\(calc.exe\\).txt');
+  });
+
+  // A cmd pane can be running PowerShell by the time the path lands, and a
+  // PowerShell pane cmd, so either gets the one form all three read alike.
+  it.each(['cmd', 'powershell'] as const)('types each path in a %s Session in the form all three read alike, or refuses it', (kind) => {
+    const expected = [...WINDOWS_LITERAL, ...WINDOWS_REFUSED.map((path) => [path, null] as const)];
+    expect(expected.map(([path]) => [path, shellEscapePath(path, kind)])).toEqual(expected);
   });
 });
 
@@ -165,5 +151,44 @@ describe('shellEscapePosix round-trips through a real shell', () => {
       expect(result.stderr).toBe('');
       expect(JSON.parse(result.stdout)).toEqual(paths);
     });
+  }
+});
+
+/** Run `typed` as the arguments of a command line in `shell`, and return the
+ *  argv that command received. */
+function argvThrough(shell: string, path: string, typed: string[]): unknown {
+  if (shell === 'cmd') {
+    const line = `"${process.execPath}" -e "process.stdout.write(JSON.stringify(process.argv.slice(1)))" -- ${typed.join(' ')}`;
+    const result = spawnSync(path, ['/d', '/s', '/c', `"${line}"`], { encoding: 'utf8', windowsVerbatimArguments: true });
+    return JSON.parse(result.stdout || JSON.stringify(result.stderr));
+  }
+  // A PowerShell function, so the shell's own argument parsing is what is read.
+  const script = '[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false); '
+    + 'function argv { [Console]::Out.Write((ConvertTo-Json -Compress -InputObject @($args))) }; '
+    + `argv ${typed.join(' ')}`;
+  const encoded = Buffer.from(script, 'utf16le').toString('base64');
+  const result = spawnSync(path, ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded], { encoding: 'utf8' });
+  return JSON.parse(result.stdout || JSON.stringify(result.stderr));
+}
+
+describe.skipIf(process.platform !== 'win32')('a cmd or PowerShell Session\'s path round-trips through every Windows shell', { timeout: 60_000 }, () => {
+  const root = process.env.SystemRoot ?? 'C:\\Windows';
+  const shells: [string, string | null][] = [
+    ['cmd', findShell(`${root}\\System32\\cmd.exe`)],
+    ['powershell', findShell(`${root}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`)],
+    ['pwsh', findShell(`${process.env.ProgramFiles ?? 'C:\\Program Files'}\\PowerShell\\7\\pwsh.exe`)],
+  ];
+  // The refused names too: any that were typed must come back literally.
+  const paths = [...WINDOWS_LITERAL.map(([path]) => path), ...WINDOWS_REFUSED];
+  for (const kind of ['cmd', 'powershell'] as const) {
+    for (const [name, shell] of shells) {
+      it.skipIf(!shell)(`reads a ${kind} Session's paths back literally in ${name}`, () => {
+        const typed = paths.flatMap((path) => {
+          const escaped = shellEscapePath(path, kind);
+          return escaped === null ? [] : [[path, escaped]];
+        });
+        expect(argvThrough(name, shell!, typed.map(([, escaped]) => escaped))).toEqual(typed.map(([path]) => path));
+      });
+    }
   }
 });

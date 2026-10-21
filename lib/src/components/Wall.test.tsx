@@ -3037,14 +3037,17 @@ describe('Wall on the Lath engine', () => {
   });
 
   it.each([
-    { kind: 'powershell' as const, defaultShell: '/bin/bash', command: "& 'program path' 'it''s.txt'" },
-    { kind: 'posix' as const, defaultShell: 'pwsh.exe', command: "'program path' 'it'\\''s.txt'" },
-  ])('quotes takeover for the existing $kind Session after changing defaults, and again once its Tool has ended', async ({ kind, defaultShell, command }) => {
+    // The form cmd, Windows PowerShell, and pwsh all read alike: the caller's
+    // prompt may be any of them.
+    { kind: 'powershell' as const, defaultShell: '/bin/bash', run: ['program', "it's (1).txt"], command: `program "it's (1).txt"` },
+    { kind: 'cmd' as const, defaultShell: '/bin/bash', run: ['program', "it's (1).txt"], command: `program "it's (1).txt"` },
+    { kind: 'posix' as const, defaultShell: 'pwsh.exe', run: ['program path', "it's.txt"], command: "'program path' 'it'\\''s.txt'" },
+  ])('quotes takeover for the existing $kind Session after changing defaults, and again once its Tool has ended', async ({ kind, defaultShell, run, command }) => {
     const controller = new AbortController();
     const typed: string[] = [];
     vi.spyOn(terminalRegistry, 'getTerminalShellKind').mockImplementation(id => id === 'surface:a' ? kind : null);
     vi.spyOn(terminalRegistry, 'getDefaultShellOpts').mockReturnValue({ shell: defaultShell });
-    Object.assign(fake, { toolControl: vi.fn(async () => ({ ...okToolLookup(['/repo']), run: ['program path', "it's.txt"] })) });
+    Object.assign(fake, { toolControl: vi.fn(async () => ({ ...okToolLookup(['/repo']), run })) });
     try {
       await act(async () => root.render(<Wall initialPaneIds={['surface:a']} />));
       await flush();
@@ -3088,8 +3091,40 @@ describe('Wall on the Lath engine', () => {
       await act(async () => window.dispatchEvent(new Event('pagehide')));
       await flush();
       expect((fake.getState() as PersistedSession).panes.find(pane => pane.id === 'surface:a')).toMatchObject({
-        command, tool: { argv: ['program path', "it's.txt"] },
+        command, tool: { argv: run },
       });
+    } finally {
+      await act(async () => { controller.abort(); await new Promise(resolve => setTimeout(resolve, 125)); });
+      fake.clearInputHandler('surface:a');
+      act(() => terminalRegistry.removeTerminalPaneState('surface:a'));
+      _resetRunHoldsForTesting();
+    }
+  });
+
+  it.each(['cmd', 'powershell'] as const)('splits rather than typing argv a %s caller\'s prompt might not read literally', async (kind) => {
+    const controller = new AbortController();
+    const typed: string[] = [];
+    vi.spyOn(terminalRegistry, 'getTerminalShellKind').mockImplementation(id => id === 'surface:a' ? kind : null);
+    vi.spyOn(terminalRegistry, 'getDefaultShellOpts').mockReturnValue({ shell: 'pwsh.exe' });
+    Object.assign(fake, { toolControl: vi.fn(async () => ({ ...okToolLookup(['/repo']), run: ['program', 'C:\\dl\\$(whoami).txt'] })) });
+    try {
+      await act(async () => root.render(<Wall initialPaneIds={['surface:a']} />));
+      await flush();
+      act(() => fake.spawnPty('surface:a'));
+      fake.setInputHandler('surface:a', data => typed.push(data));
+      terminalRegistry.seedTerminalManualCwd('surface:a', '/repo');
+      act(() => reportRunning('surface:a', 'dor tool storybook'));
+      const respond = vi.fn();
+      await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+        method: SURFACE_CONTROL_METHODS.tool, surfaceId: 'surface:a',
+        params: { name: 'storybook', cwd: '/repo' }, signal: controller.signal, respond,
+      } })));
+      await waitUntil(() => leafCount() === 2);
+      // `dor` finishes and the caller's prompt returns: nothing is typed there.
+      act(() => terminalRegistry.applyTerminalSemanticEvents('surface:a', [{ type: 'commandFinish', exitCode: 0 }, { type: 'promptStart' }]));
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); });
+      expect(typed).toEqual([]);
+      expect(respond).not.toHaveBeenCalledWith(expect.objectContaining({ result: expect.objectContaining({ status: 'takeover' }) }));
     } finally {
       await act(async () => { controller.abort(); await new Promise(resolve => setTimeout(resolve, 125)); });
       fake.clearInputHandler('surface:a');

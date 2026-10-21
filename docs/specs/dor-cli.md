@@ -176,6 +176,8 @@ Implemented commands call private `surface.*` control methods, **enumerated once
 
 **Must quote for every parser a style covers**: `powershell` doubles each character that closes a PowerShell single-quoted string, `'` and U+2018–U+201B; `posix` steps each `'` and `\` outside its single quotes, so fish, classified `posix`, parses it too (rationale).
 
+**Must keep the Windows-portable form literal in cmd, Windows PowerShell, and pwsh alike**: an argument is bare only when every character is Windows-safe, else double-quoted, and has no form when it carries `"`, U+201C–U+201E, a backtick, `%`, `!`, or a `$` not before `\`; a program needing quotes has none.
+
 **Every public first-party command except the `dor agent-browser` and `dor playwright` passthrough accepts `--json`**, emitting a stable object with the same handles as its text output: **one key per id** (`id`, `surface_id`, `workspace_id`), never a second spelling of it. Text output is the primary interface, for agents as much as humans. Any JSON mode under a native browser command belongs to its delegated CLI; `dor-embed-size` and `dor-diagnostics` own their JSON output.
 
 **A command that operates on one existing Surface takes the target as a required positional handle** (`read` / `send` / `await` / `kill`); **a command that creates or places a Surface keeps `--surface` as an optional *reference* Surface** (`split`, `ensure`, `iframe`, browser creation). So `--surface` means "place near this" everywhere except [`dor agent-browser` and `dor playwright`](#browser-surface-addressing), whose whole positional space belongs to the provider's CLI.

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { buildShellCommandForKind, quotePowerShellArg } from '../dist/commands/shell-quote.js';
+import { buildShellCommandForKind, buildWindowsPortableCommand, quotePowerShellArg } from '../dist/commands/shell-quote.js';
 
 // Argv a posix-quoted command must hand back unchanged. The backslash cases are
 // the ones fish reads differently from sh: inside its single quotes `\'` and
@@ -51,4 +51,19 @@ test('PowerShell quoting doubles every single-quote character PowerShell reads',
     buildShellCommandForKind('powershell', ['cat', 'x’; calc; ’.txt']),
     "cat 'x’’; calc; ’’.txt'",
   );
+});
+
+// Typed at a prompt that may be cmd, Windows PowerShell, or pwsh: each element
+// reads back alike there or the command has no form (`lib/src/lib/shell-escape.test.ts`
+// runs the paths through the real shells).
+test('a Windows-portable command keeps its program bare and refuses what any of them expands', () => {
+  assert.equal(
+    buildWindowsPortableCommand(['dor', '__view-file', 'C:\\a b\\it’s (1)&x.md', '']),
+    'dor __view-file "C:\\a b\\it’s (1)&x.md" ""',
+  );
+  assert.equal(buildWindowsPortableCommand(['C:\\Program Files\\view.exe', 'a.md']), null);
+  for (const arg of ['C:\\$(whoami).md', 'a`b', '%PATH%', 'a!b', 'a"b', 'a“b', 'a\rb']) {
+    assert.equal(buildWindowsPortableCommand(['dor', arg]), null, arg);
+  }
+  assert.equal(buildWindowsPortableCommand([]), null);
 });

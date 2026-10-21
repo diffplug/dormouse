@@ -118,11 +118,13 @@ function writePasteToPty(terminalId: string, text: string): void {
 }
 
 export const CONTROL_PATH_NOTICE = 'Nothing pasted: a file name has a control character';
+export const UNQUOTABLE_PATH_NOTICE = 'Nothing pasted: a file name has a character cmd or PowerShell would expand';
 
 /**
  * Shell-escape the given paths and type them at the terminal, joined by single
  * spaces with a trailing space so the next prompt keystroke starts a fresh
- * token. A path carrying a control character refuses the whole paste (spec §8.6).
+ * token. A path carrying a control character, or one with no form its
+ * Session's shells all read literally, refuses the whole paste (spec §8.6).
  */
 export function pasteFilePaths(terminalId: string, paths: string[]): void {
   if (paths.length === 0) return;
@@ -135,8 +137,12 @@ export function pasteFilePaths(terminalId: string, paths: string[]): void {
   // serves adapters/tests that have no registered Session entry.
   const shellKind = getTerminalShellKind(terminalId)
     ?? shellCommandKind(getDefaultShellOpts()?.shell, PLATFORM_STRING);
-  const text = paths.map((path) => shellEscapePath(path, shellKind)).join(' ') + ' ';
-  writePasteToPty(terminalId, text);
+  const escaped = paths.map((path) => shellEscapePath(path, shellKind));
+  if (escaped.some((path) => path === null)) {
+    wallHandleOwning(terminalId)?.showNotice(UNQUOTABLE_PATH_NOTICE, terminalId);
+    return;
+  }
+  writePasteToPty(terminalId, escaped.join(' ') + ' ');
 }
 
 export async function readTextFromClipboard(): Promise<string> {
