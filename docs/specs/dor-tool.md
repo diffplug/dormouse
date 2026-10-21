@@ -137,7 +137,7 @@ A reap stops an idle Tool's Session, shell included; rehydrate starts it again i
 
 1. Hold the run ([Run end](#run-end)), then write Ctrl+C to the PTY, the graceful-stop signal on every platform; ConPTY delivers it as `CTRL_C_EVENT` (rationale).
 2. Keep the last `dehydrate` payload the run emits from then until the kill; none earlier counts.
-3. Kill the PTY at the prompt or after a grace, whichever comes first, so a hung Tool blocks nothing.
+3. Kill the PTY at the prompt or after a grace, whichever comes first. **Must abandon the kill if the Session or run changed, input arrived, the Tool became dirty, designation ended, or closure took ownership.**
 
 **Must rehydrate a reaped Tool when it becomes visible, or when `dor tool` or `dor open` matches it** (reporting `adopted`), never into a closing or transferring Workspace: a fresh shell in the run's directory, the saved command typed as cold restore types it ([Persistence and hosts](#persistence-and-hosts)). It degrades in tiers:
 

@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakePtyAdapter, setPlatform } from '../../lib/platform';
 import type { SpawnPtyOptions } from '../../lib/platform/types';
 import { disposeSession, getOrCreateTerminal } from '../../lib/terminal-registry';
-import { registry } from '../../lib/terminal-store';
+import { markSessionTouched, registry } from '../../lib/terminal-store';
 import { applyTerminalSemanticEvents, getTerminalPaneState } from '../../lib/terminal-state-store';
 import { TerminalProtocolParser } from '../../lib/terminal-protocol';
 import { getToolAnnounce, recordToolAnnounce, resetToolAnnounces } from '../../lib/tool-announce-store';
@@ -86,6 +86,7 @@ afterEach(() => {
   resetToolAnnounces();
   resetToolDirty();
   resetToolReaps();
+  _resetPendingKillsForTesting();
   vi.useRealTimers();
 });
 
@@ -193,6 +194,37 @@ describe('stopTool', () => {
     await finishStop();
     expect(await stopped).toBe(false);
     expect(isToolReaped(ID)).toBe(false);
+  });
+
+  it.each(['new command', 'new input', 'dirty edit', 'replacement Session', 'pending close', 'new finished command', 'released designation'])('abandons a stale stop after %s', async (change) => {
+    const lath = servingTool();
+    const stopped = stopTool(lath, ID);
+    if (change === 'new command') startRun('important-work');
+    if (change === 'new finished command') {
+      startRun('important-work');
+      applyTerminalSemanticEvents(ID, [{ type: 'commandFinish', exitCode: 0 }]);
+    }
+    if (change === 'released designation') lath.store.updateParams(ID, { surfaceType: 'terminal' });
+    if (change === 'new input') markSessionTouched(ID);
+    if (change === 'dirty edit') recordToolDirty(ID, true);
+    if (change === 'pending close') addPendingKill(
+      { kind: 'surface', id: ID, workspaceId: 'workspace:1' as never, title: 't', label: 'Tool' },
+      { restore: () => {}, finalize: () => {} },
+    );
+    if (change === 'replacement Session') {
+      disposeSession(ID);
+      getOrCreateTerminal(ID);
+      startRun();
+      announce();
+      kills.length = 0;
+    }
+    await finishStop();
+    expect(await stopped).toBe(false);
+    expect(kills).toEqual([]);
+    expect(registry.has(ID)).toBe(true);
+    expect(registry.get(ID)?.exited).not.toBe(true);
+    expect(isToolReaped(ID)).toBe(false);
+    expect(isToolStopping(ID)).toBe(false);
   });
 
   it('stops nothing that is not eligible', async () => {

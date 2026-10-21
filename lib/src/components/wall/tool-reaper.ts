@@ -3,7 +3,7 @@
  * Tool that declared itself safe to stop, and start it again when it is shown.
  * `useToolReaper` decides when; this module is what a stop and a rehydrate do.
  */
-import { holdForHostInterrupt } from '../../lib/tool-run-hold';
+import { holdForHostInterrupt, releaseRunHold } from '../../lib/tool-run-hold';
 import { buildShellCommandForKind, shellCommandKind } from 'dor/commands/shell-quote';
 import { parseRenderMode } from 'dor-lib-common/browser-providers';
 import { getPlatform, PLATFORM_STRING } from '../../lib/platform';
@@ -94,7 +94,10 @@ function waitFor(id: string, done: () => boolean, timeoutMs: number): Promise<vo
  */
 export async function stopTool(lath: LathWallEngine, id: string): Promise<boolean> {
   if (toolReapBlocker(id, lath.getMeta(id)?.params) !== null) return false;
+  const entry = registry.get(id)!;
+  const inputVersion = entry.inputVersion ?? 0;
   const state = getTerminalPaneState(id);
+  const runId = state.currentCommand!.id;
   const cwd = state.currentCommand?.cwdAtStart?.path ?? state.cwd?.path ?? null;
   beginToolStop(id);
   let payload: string | null;
@@ -107,8 +110,18 @@ export async function stopTool(lath: LathWallEngine, id: string): Promise<boolea
   } finally {
     payload = endToolStop(id);
   }
-  // Closed meanwhile: its closure owns the teardown.
-  if (!registry.has(id) || !lath.getMeta(id)) return false;
+  // The interrupt can yield to a new command or edits before the grace ends.
+  // A reused Session id never makes its replacement ours to kill.
+  if (registry.get(id) !== entry) return false;
+  const latest = getTerminalPaneState(id);
+  if (!isToolParams(lath.getMeta(id)?.params)
+    || (entry.inputVersion ?? 0) !== inputVersion
+    || (latest.currentCommand ?? latest.lastCommand)?.id !== runId
+    || getToolDirty(id) === true
+    || isPendingKillSession(id)) {
+    releaseRunHold(id);
+    return false;
+  }
   const alert = getLivePersistedAlertState(id);
   reapTerminal(id);
   retireToolRun(lath, id);
