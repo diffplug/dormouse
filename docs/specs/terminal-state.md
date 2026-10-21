@@ -132,7 +132,7 @@ Source of truth: `recordTerminalUserInput` / `recordTerminalOutput` / `seedPromp
 
 **Must scope process-CWD answers to their originating PTY run**, discarding them after exit, disposal, or respawn (pinned by `lib/src/lib/terminal-lifecycle.cwd.test.ts`).
 
-Source of truth: `processCwdMayReplace` in `lib/src/lib/terminal-state.ts`, applied by `updateCwdIfAllowed` in `lib/src/lib/terminal-state-store.ts`.
+Source of truth: `seedProcessCwdAfterSpawn` in `lib/src/lib/terminal-lifecycle.ts`; precedence: `updateCwdIfAllowed` in `lib/src/lib/terminal-state-store.ts`.
 
 ## Header Derivation
 
