@@ -2,10 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdtemp, rm, realpath } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { mkdir, mkdtemp, rm, realpath, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnAndCapture, treeKillCommand, SPAWN_TIMEOUT_CODE } from '../dist/index.js';
+import { cmdShimTarget, spawnAndCapture, treeKillCommand, SPAWN_TIMEOUT_CODE } from '../dist/index.js';
 
 const node = process.execPath;
 
@@ -128,6 +129,55 @@ test('runs relative paths in the requested cwd without changing the caller cwd',
     assert.equal(await realpath(result.stdout), await realpath(cwd));
     assert.equal(process.cwd(), before);
   } finally { await rm(cwd, { recursive: true, force: true }); }
+});
+
+const windowsOnly = process.platform === 'win32' ? false : 'Windows shims';
+
+test('reads the target of agent-browser, npm cmd-shim and pnpm shims', { skip: windowsOnly }, async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'dor-shim-'));
+  try {
+    const exe = path.join(dir, 'node_modules', 'agent-browser', 'bin', 'agent-browser-win32-x64.exe');
+    const script = path.join(dir, 'node_modules', '@playwright', 'cli', 'cli.js');
+    await mkdir(path.dirname(exe), { recursive: true });
+    await mkdir(path.dirname(script), { recursive: true });
+    await writeFile(exe, '');
+    await writeFile(script, '');
+    const env = { PATH: path.dirname(node), PATHEXT: '.exe' };
+    const shim = async (name, text) => { const file = path.join(dir, name); await writeFile(file, text); return file; };
+
+    assert.deepEqual(cmdShimTarget(await shim('agent-browser.cmd', '@ECHO off\r\n"%~dp0node_modules\\agent-browser\\bin\\agent-browser-win32-x64.exe" %*\r\n'), env),
+      { binary: exe, args: [] });
+    assert.deepEqual(cmdShimTarget(await shim('playwright-cli.cmd', 'endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\node_modules\\@playwright\\cli\\cli.js" %*\r\n'), env),
+      { binary: node, args: [script] });
+    // pnpm names the target twice, once per node branch, and climbs out of .bin.
+    const bin = path.join(dir, 'node_modules', '.bin');
+    await mkdir(bin);
+    assert.deepEqual(cmdShimTarget(await shim('node_modules/.bin/playwright-cli.cmd', '@IF EXIST "%~dp0\\node.exe" (\r\n  "%~dp0\\node.exe"  "%~dp0\\..\\@playwright\\cli\\cli.js" %*\r\n) ELSE (\r\n  node  "%~dp0\\..\\@playwright\\cli\\cli.js" %*\r\n)\r\n'), env),
+      { binary: node, args: [script] });
+    // A node.exe beside the shim wins over PATH, as the shim itself decides.
+    await writeFile(path.join(dir, 'node.exe'), '');
+    assert.deepEqual(cmdShimTarget(path.join(dir, 'playwright-cli.cmd'), env), { binary: path.join(dir, 'node.exe'), args: [script] });
+
+    assert.equal(cmdShimTarget(await shim('two.cmd', '"%~dp0a.exe" %*\r\n"%~dp0b.exe" %*\r\n'), env), undefined);
+    assert.equal(cmdShimTarget(await shim('missing.cmd', '"%~dp0nothing.exe" %*\r\n'), env), undefined);
+    assert.equal(cmdShimTarget(await shim('npx.cmd', '"%NODE_EXE%" "%NPX_CLI_JS%" %*\r\n'), env), undefined);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('a .cmd shim started in a UNC cwd runs its target there, not in %SystemRoot%', { skip: windowsOnly }, async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'dor-unc-'));
+  // The admin share is the UNC path every Windows machine has, as WSL's would be.
+  const unc = `\\\\localhost\\${dir[0]}$${dir.slice(2)}`;
+  try {
+    if (!existsSync(unc)) return;
+    await mkdir(path.join(dir, 'node_modules', 'cwd-cli'), { recursive: true });
+    await writeFile(path.join(dir, 'node_modules', 'cwd-cli', 'cli.js'), 'process.stdout.write(process.cwd() + "|" + process.argv.slice(2).join("|"))');
+    const shim = path.join(dir, 'cwd-cli.cmd');
+    await writeFile(shim, '@SETLOCAL\r\nnode  "%~dp0\\node_modules\\cwd-cli\\cli.js" %*\r\n');
+    const result = await spawnAndCapture(shim, ['50%', 'a "b"'], { cwd: unc, env: { ...process.env, PATH: path.dirname(node) } });
+    assert.equal(result.ok, true);
+    assert.equal(result.stdout.toLowerCase(), `${unc}|50%|a "b"`.toLowerCase());
+  } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
 test('a timeout kills a hung child and resolves with a distinct error', async () => {

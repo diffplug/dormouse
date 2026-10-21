@@ -263,7 +263,8 @@ export class RelayRoom extends DurableObject implements RelayRoomRpc {
    * Every Client whose session has expired closes 1008, its Burrow told
    * `client-gone`; while Burrow sockets are held, each is swept against its
    * row. Then the alarm moves to the earlier of the next expiry and the next
-   * sweep, or is cleared while nothing is held. Opening a socket only ever
+   * sweep, `RELAY_ROOM_SWEEP_MS` after this one started (a slow row read never
+   * delays it), or is cleared while nothing is held. Opening a socket only ever
    * brings the alarm earlier and a close leaves it, so an alarm may find
    * nothing to do.
    */
@@ -274,7 +275,7 @@ export class RelayRoom extends DurableObject implements RelayRoomRpc {
         this.#retire(held, WS_CLOSE_UNAUTHORIZED, WS_CLOSE_UNAUTHORIZED_REASON);
     if (this.#held("burrow").length > 0) await this.#sweep();
     const next = this.#held("client").map(({ conn }) => conn.expiresAt);
-    if (this.#held("burrow").length > 0) next.push(this.now() + RELAY_ROOM_SWEEP_MS);
+    if (this.#held("burrow").length > 0) next.push(now + RELAY_ROOM_SWEEP_MS);
     if (next.length > 0) await this.ctx.storage.setAlarm(Math.min(...next));
     else await this.ctx.storage.deleteAlarm();
   }

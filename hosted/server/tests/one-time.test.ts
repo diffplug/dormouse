@@ -41,7 +41,7 @@ import { rawUpgrade, type RawSocket } from "./raw-socket";
 const origin = ORIGINS.relay;
 /** The sibling Workers' origins, which share the account's login cookie as same-site. */
 const SIBLINGS = [ORIGINS.account, ORIGINS.voice];
-const PAGE_SCRIPT = `${ONE_TIME_PAGE_PATH}assets/page-abc123.js`;
+const PAGE_SCRIPT = `${ONE_TIME_PAGE_PATH}assets/page-B39o2E6i.js`;
 const PAGE_SHELL = `<!doctype html><script type="module" crossorigin src="${PAGE_SCRIPT}"></script>`;
 
 async function start(entry: string) {
@@ -535,7 +535,7 @@ test("the page's hashed assets are immutable, and a missing one is a 404, not th
   );
   expect(script.headers.get("content-security-policy")).toBe(PAGE_POLICY);
   for (const path of [
-    `${ONE_TIME_PAGE_PATH}assets/missing-abc123.js`,
+    `${ONE_TIME_PAGE_PATH}assets/missing-B39o2E6i.js`,
     `${ONE_TIME_PAGE_PATH}assets/`,
   ]) {
     const missing = await get(path);

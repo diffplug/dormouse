@@ -175,14 +175,17 @@ export function cloudflare(env, fetcher = fetch) {
   };
 }
 
-export async function findHyperdrives(api, name) {
-  const matches = [];
+async function listHyperdrives(api) {
+  const all = [];
   for (let page = 1; ; page++) {
     const data = await api(`hyperdrive/configs?per_page=100&page=${page}`);
-    matches.push(...data.result.filter((item) => item.name === name));
-    if (page >= (data.result_info?.total_pages ?? 1)) return matches;
+    all.push(...data.result);
+    if (page >= (data.result_info?.total_pages ?? 1)) return all;
   }
 }
+
+export const findHyperdrives = async (api, name) =>
+  (await listHyperdrives(api)).filter((item) => item.name === name);
 
 /** Where `prepare` leaves a preview Worker's secrets for `deploy`. */
 const secretsFile = (worker) =>
@@ -275,12 +278,47 @@ export async function prepare(env = process.env) {
   return configs;
 }
 
+/**
+ * The preview Neon project's API. The official create action reuses branches,
+ * so a DELETE tolerates retries.
+ */
+function neon(env) {
+  const project = encodeURIComponent(required(env, "NEON_PROJECT_ID"));
+  const key = required(env, "NEON_API_KEY");
+  const call = async (path, method = "GET") => {
+    const response = await fetch(
+      `https://console.neon.tech/api/v2/projects/${project}/${path}`,
+      {
+        method,
+        headers: { authorization: `Bearer ${key}` },
+        signal: AbortSignal.timeout(60_000),
+      },
+    );
+    if (method === "DELETE" && response.status === 404) return;
+    if (!response.ok)
+      throw new Error(`Neon ${method} failed (${response.status})`);
+    return response.json();
+  };
+  call.branches = async () => {
+    const all = [];
+    let cursor;
+    do {
+      const data = await call(
+        `branches?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
+      );
+      all.push(...data.branches);
+      cursor = data.pagination?.next;
+    } while (cursor);
+    return all;
+  };
+  return call;
+}
+
 export async function cleanup(env = process.env) {
   const bases = await readConfigs();
   const name = previewName(env.PR_NUMBER, bases.account.name);
   // Validate both providers before deleting anything, so a missing Neon token is caught first.
-  required(env, "NEON_PROJECT_ID");
-  required(env, "NEON_API_KEY");
+  const db = neon(env);
   const api = cloudflare(env);
   // `force`: a Worker that implements a Durable Object namespace is deleted
   // with it rather than refused.
@@ -291,32 +329,56 @@ export async function cleanup(env = process.env) {
     );
   for (const item of await findHyperdrives(api, name))
     await api(`hyperdrive/configs/${item.id}`, "DELETE");
-  // The official create action reuses branches; cleanup must also tolerate retries.
-  const project = encodeURIComponent(required(env, "NEON_PROJECT_ID"));
-  const neon = async (path, method = "GET") => {
+  for (const branch of await db.branches())
+    if (branch.name === name)
+      await db(`branches/${encodeURIComponent(branch.id)}`, "DELETE");
+  console.log(`Removed preview resources for ${name}`);
+}
+
+/**
+ * Cleans up every other PR's preview whose PR is closed or no longer labeled
+ * `hosted-preview`, found by name among the preview account's Workers and
+ * Hyperdrives and the preview project's branches. The deploy runs it first:
+ * every job holding preview credentials waits on approval, so nothing cleans
+ * up when a PR closes.
+ */
+export async function sweep(env = process.env) {
+  const bases = await readConfigs();
+  // Validates the one PR a sweep never touches: the deploy's own.
+  previewName(env.PR_NUMBER, bases.account.name);
+  const repository = required(env, "GITHUB_REPOSITORY");
+  const token = required(env, "GH_TOKEN");
+  const db = neon(env);
+  const api = cloudflare(env);
+  const names = [
+    ...(await api("workers/scripts")).result.map((script) => script.id),
+    ...(await listHyperdrives(api)).map((item) => item.name),
+    ...(await db.branches()).map((branch) => branch.name),
+  ];
+  const prs = new Set();
+  for (const name of names)
+    for (const base of Object.values(bases)) {
+      const pr = name.startsWith(`${base.name}-pr-`) && name.slice(base.name.length + 4);
+      if (pr && /^[1-9]\d{0,8}$/.test(pr) && pr !== env.PR_NUMBER) prs.add(pr);
+    }
+  for (const pr of [...prs].sort((a, b) => a - b)) {
     const response = await fetch(
-      `https://console.neon.tech/api/v2/projects/${project}/${path}`,
+      `https://api.github.com/repos/${repository}/pulls/${pr}`,
       {
-        method,
-        headers: { authorization: `Bearer ${required(env, "NEON_API_KEY")}` },
+        headers: {
+          authorization: `Bearer ${token}`,
+          accept: "application/vnd.github+json",
+        },
         signal: AbortSignal.timeout(60_000),
       },
     );
-    if (method === "DELETE" && response.status === 404) return;
     if (!response.ok)
-      throw new Error(`Neon ${method} failed (${response.status})`);
-    return response.json();
-  };
-  let cursor;
-  do {
-    const data = await neon(
-      `branches?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
-    );
-    for (const branch of data.branches.filter((b) => b.name === name))
-      await neon(`branches/${encodeURIComponent(branch.id)}`, "DELETE");
-    cursor = data.pagination?.next;
-  } while (cursor);
-  console.log(`Removed preview resources for ${name}`);
+      throw new Error(`GitHub pull ${pr} lookup failed (${response.status})`);
+    const pull = await response.json();
+    if (pull.state === "open" && pull.labels.some((label) => label.name === "hosted-preview"))
+      continue;
+    await cleanup({ ...env, PR_NUMBER: pr });
+  }
 }
 
 if (
@@ -327,6 +389,7 @@ if (
     const action = process.argv[2];
     if (action === "prepare") await prepare();
     else if (action === "cleanup") await cleanup();
+    else if (action === "sweep") await sweep();
     else if (action === "deploy") {
       const configs = await prepare();
       try {
@@ -340,7 +403,7 @@ if (
         for (const worker of Object.keys(WORKERS))
           await rm(secretsFile(worker), { force: true });
       }
-    } else throw new Error("Use prepare, deploy or cleanup");
+    } else throw new Error("Use prepare, deploy, cleanup or sweep");
   } catch (error) {
     console.error(error.message);
     process.exitCode = 1;

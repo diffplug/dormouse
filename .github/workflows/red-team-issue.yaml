@@ -1,0 +1,54 @@
+name: red-team-issue
+
+# Opens the month's red-team issue (docs/specs/security-audit.md -> "Red team")
+# with the body in `.github/red-team-issue.md`. An issue already titled for the
+# month is left alone, so a re-run or a manual dispatch never opens a second.
+on:
+  schedule:
+    # 16:00 UTC on the 1st: 9:00 PDT, 8:00 PST.
+    - cron: '0 16 1 * *'
+  workflow_dispatch:
+
+# Each job declares its own.
+permissions: {}
+
+jobs:
+  open:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # `contents: read` to read the body from this commit; `issues: write` to
+    # open the issue.
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Refuse any ref but main
+        run: |
+          [ "$GITHUB_REF" = refs/heads/main ] && exit 0
+          echo "::error::The red-team issue opens from main only."
+          exit 1
+
+      - name: Open this month's red-team issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          repo="$GITHUB_REPOSITORY"
+          # The month in Pacific time, so a dispatch late on the last day
+          # still names that month.
+          title="Red team: $(TZ=America/Los_Angeles date '+%B %Y')"
+
+          # By label, which is exact and current, and by title search, which
+          # also finds one opened without the label.
+          labelled="$(gh issue list -R "$repo" --label red-team --state all --limit 100 --json title --jq '.[].title')"
+          searched="$(gh issue list -R "$repo" --state all --limit 100 --search "\"$title\" in:title" --json title --jq '.[].title')"
+          if printf '%s\n%s\n' "$labelled" "$searched" | grep -qxF -- "$title"; then
+            echo "\"$title\" already exists."
+            exit 0
+          fi
+
+          body="$RUNNER_TEMP/red-team-issue.md"
+          gh api -H 'Accept: application/vnd.github.raw+json' \
+            "repos/$repo/contents/.github/red-team-issue.md?ref=$GITHUB_SHA" > "$body"
+          [ -s "$body" ]
+          gh issue create -R "$repo" --title "$title" --label red-team --body-file "$body"

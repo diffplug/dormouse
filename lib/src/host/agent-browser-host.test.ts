@@ -16,6 +16,10 @@ import { WINDOW_GONE_GRACE_MS } from './browser-viewer';
 type SpawnResult = { stdout?: string; stderr?: string; code?: number };
 
 const spawnMock = vi.hoisted(() => vi.fn());
+/** The mode each spawn stated, keyed by the args `spawnMock` saw: the host
+ *  leads every call with `--headed <mode>`, which the mock strips so the
+ *  args read as the operation's own argv. */
+const spawnHeaded = vi.hoisted(() => new WeakMap<string[], boolean>());
 
 // A pid no process on this machine can hold (macOS/Linux pid_max is far lower),
 // so `process.kill(pid, 0)` answers ESRCH: "the daemon exited".
@@ -39,9 +43,11 @@ const spawnResult = (result: SpawnResult) => ({
 function mockSpawnByCommand(handlers: Record<string, (args: string[]) => Promise<SpawnResult> | SpawnResult>) {
   const calls: string[][] = [];
   spawnMock.mockImplementation(async (_binary: string, args: string[]) => {
-    calls.push(args);
     const rest = args[0] === '--session' ? args.slice(2) : args;
-    const key = rest[0] === '--headed' ? `--headed ${rest[1]}` : rest[0];
+    // A headed `open` reads as `--headed open`, the one call tests key by mode.
+    const headedOpen = rest[0] === 'open' && spawnHeaded.get(args) === true;
+    calls.push(headedOpen ? [...args.slice(0, args.length - rest.length), '--headed', ...rest] : args);
+    const key = headedOpen ? '--headed open' : rest[0];
     const handler = handlers[key];
     if (!handler) throw new Error(`unexpected spawn: ${args.join(' ')}`);
     return spawnResult(await handler(args));
@@ -137,7 +143,12 @@ function running(...sessions: string[]): void {
 // covered by dor-lib-common's tests), keeping the package's other real exports.
 vi.mock('dor-lib-common', async (importOriginal) => ({
   ...(await importOriginal<typeof import('dor-lib-common')>()),
-  spawnAndCapture: spawnMock,
+  spawnAndCapture: (binary: string, args: string[], ...rest: unknown[]) => {
+    if (args[0] !== '--headed' || !['true', 'false'].includes(args[1]!)) throw new Error(`no mode stated: ${args.join(' ')}`);
+    const argv = args.slice(2);
+    spawnHeaded.set(argv, args[1] === 'true');
+    return spawnMock(binary, argv, ...rest);
+  },
   resolveBinaryPath: (binary: string) => binary === 'agent-browser' ? '/test/bin/agent-browser' : binary,
 }));
 
@@ -364,6 +375,20 @@ describe('agent-browser host relaunch', () => {
     expect(await ab(host, { op: 'launch', url: 'https://slow.example/', headed: false })).toEqual({ ok: false, error: 'boom' });
     expect(calls.some((args) => args[2] === 'close')).toBe(true);
     expect(calls.some((args) => args[2] === 'stream')).toBe(false);
+  });
+
+  it('states the mode it launched a session in on every call, so a configured headed cannot flip it', async () => {
+    const provider = createAgentBrowserProvider();
+    const b = { session: 'dormouse.1.mode' };
+    spawnMock.mockImplementation(async () => spawnResult({}));
+    await provider.open(b, 'https://example.com/', true);
+    await provider.close(b, 1000);
+    // A closed session's next launcher picks its mode; `dor` launches headless.
+    await provider.open(b, 'https://example.com/', false);
+    await provider.close(b, 1000);
+    expect(spawnMock.mock.calls.map(([, args]) => `${spawnHeaded.get(args)} ${(args as string[]).slice(2).join(' ')}`)).toEqual([
+      'true open https://example.com/', 'true close', 'false open https://example.com/', 'false close',
+    ]);
   });
 
   it('reports a zero-exit launch that publishes no stream port without claiming it exited unsuccessfully', async () => {

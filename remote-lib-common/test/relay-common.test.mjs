@@ -19,6 +19,7 @@ import {
   admissiblePushSubscription,
   normalizeChallenge,
   pocketContentSecurityPolicy,
+  isContentHashedName,
   reducePasskeyLabel,
   signinChallenge,
   toBase64Url,
@@ -262,4 +263,11 @@ test('verifySigninAssertion accepts only an assertion over the derived sign-in c
   const signed = await signinChallenge(challenge);
   const padded = await authenticator.assert({ challenge: signed, origin: ORIGIN, tamper: { challenge: `${signed}=` } });
   assert.deepEqual(await verifySigninAssertion({ challenge, assertion: padded }, steps()), { ok: true, passkey });
+});
+
+test('isContentHashedName admits only a name ending in an 8-character base64url hash', () => {
+  for (const name of ['index-Cv4RGHv-.js', 'pocket-private-key-ChSkpulJ.js', 'index-H76isbD_.css'])
+    assert.equal(isContentHashedName(name), true, name);
+  for (const name of ['plain.js', 'index-Cv4RGHv.js', 'index-Cv4RGHvXY.js', 'sub/index-Cv4RGHv-.js', 'index-Cv4RGHv-'])
+    assert.equal(isContentHashedName(name), false, name);
 });

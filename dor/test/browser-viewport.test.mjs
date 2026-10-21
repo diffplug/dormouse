@@ -351,3 +351,29 @@ for (const provider of ['agent-browser', 'playwright']) test(provider+' viewport
   const blank=calls.filter(c=>c[0]==='exec')[0][1].slice(provider==='agent-browser'?2:1);
   assert.deepEqual(blank,[nativeArgs[0],'open','open','about:blank']);
 });
+
+test('every agent-browser call states the pane\'s mode, unless the command gives its own', async () => {
+  const run = async (headed, args, fresh = false) => {
+    const calls = [];
+    const result = await runCli(['agent-browser', ...args], {
+      env: { PWD: process.cwd() },
+      client: {
+        resolveBrowser: async () => ({ binding: { session: 'dormouse.1.default' }, fresh, headed,
+          ...(fresh ? { initialViewport: { mode: 'fixed', width: 1440, height: 900 }, launchViewport: { width: 1440, height: 900 } } : {}) }),
+        browserSurface: async () => ({}),
+      },
+      execAgentBrowser: async (_binary, argv) => { calls.push(argv); return { exitCode: 0, stdout: argv.includes('eval') ? '2\n' : '', stderr: '' }; },
+    });
+    assert.equal(result.exitCode, 0, result.stderr);
+    return calls;
+  };
+  // A config's `headed` would otherwise relaunch a screencast's browser as a window.
+  const launch = await run(false, ['open', 'http://localhost:5173'], true);
+  assert.equal(launch.length, 5);
+  for (const argv of launch) assert.equal(argv[argv.indexOf('--headed') + 1], 'false', argv.join(' '));
+  assert.deepEqual(await run(true, ['click', '@e1']), [
+    ['--session', 'dormouse.1.default', '--headed', 'true', 'click', '@e1'],
+    ['--session', 'dormouse.1.default', 'stream', 'status', '--json', '--headed', 'true'],
+  ]);
+  assert.deepEqual((await run(false, ['--headed', 'click', '@e1']))[0], ['--session', 'dormouse.1.default', '--headed', 'click', '@e1']);
+});
