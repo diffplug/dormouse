@@ -1,30 +1,23 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { SNAPSHOT_EDITOR_FONT_FAMILY } from "../../../lib/.storybook/themes";
-import { applyHostedTheme } from "../theme";
+import { applyHostedTheme, DEFAULT_THEME_ID, LIGHT_THEME_ID } from "../theme";
 import css from "../style.css?inline";
-
-declare const __ARGOS_SNAPSHOT__: true | undefined;
-// The same glyph fallback lib's preview pins for Argos (`lib/.storybook/themes.ts`).
-const snapshotFonts: Record<string, string> = typeof __ARGOS_SNAPSHOT__ !== "undefined"
-  ? { "--vscode-editor-font-family": SNAPSHOT_EDITOR_FONT_FAMILY }
-  : {};
 
 const DOCUMENT = '<!doctype html><html lang="en"><head><meta charset="utf-8"></head><body><div id="hosted-root"></div></body></html>';
 
 /** Production CSS and theme in a separate document: neither Tailwind's reset
  * nor the surrounding docs/toolbar palette participates in this page. */
-export function HostedFrame({ children, phone = false, dark = false }: {
+export function HostedFrame({ children, phone = false, light = false }: {
   children: ReactNode;
   phone?: boolean;
-  dark?: boolean;
+  light?: boolean;
 }) {
   const iframe = useRef<HTMLIFrameElement>(null);
   const [doc, setDoc] = useState<Document | null>(null);
   const [width, minimumHeight] = phone ? [390, 844] : [1200, 900];
   useLayoutEffect(() => {
-    if (doc) applyHostedTheme(doc, dark, snapshotFonts);
-  }, [doc, dark]);
+    if (doc) applyHostedTheme(doc, light ? LIGHT_THEME_ID : DEFAULT_THEME_ID);
+  }, [doc, light]);
   useLayoutEffect(() => {
     if (!doc) return;
     const style = doc.createElement("style");

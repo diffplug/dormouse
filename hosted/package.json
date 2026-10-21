@@ -29,7 +29,9 @@
     "@hono/node-server": "^2.0.10",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
-    "remote-lib-common": "workspace:*"
+    "remote-lib-common": "workspace:*",
+    "@fontsource/ubuntu-mono": "^5.3.0",
+    "@fontsource/ubuntu-sans-mono": "^5.3.0"
   },
   "devDependencies": {
     "@types/node": "^24.13.6",

@@ -2,10 +2,20 @@ import { useEffect, useRef, type Dispatch, type FormEvent, type RefObject, type 
 import { providerNames, type Account, type Computer, type HostedVoice, type Passkey, type Provider, type Session } from "./api";
 import { RECENT_LOGIN_WINDOW, TERMS_VERSION } from "../server/policy-constants";
 import { ConfirmDigits } from "./ConfirmDigits";
+import { ThemeSelect } from "./ThemeSelect";
 import type { Enrollment } from "./enrollment";
 import type { Notice, PageError } from "./settle";
 
 export const SUBSCRIBE_URL = "https://nedshed.dev/subscribe";
+
+/** The pricing cards' check mark, beside a state that is already in words. */
+function Check() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M3 8.5l3.25 3L13 4.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
 
 /** App's existing values and callbacks; the controller owns their lifecycle. */
 export interface HostedPageProps {
@@ -61,12 +71,17 @@ export function HostedPage({
   return (
     <div className="shell">
       <header>
-        <a href="/" className="brand">
-          Dormouse <span>Hosted</span>
-        </a>
-        <a href="https://dormouse.sh" rel="noreferrer">
-          About Dormouse ↗
-        </a>
+        <div className="brand">
+          <a href="https://dormouse.sh" rel="noreferrer">Dormouse</a>
+          <a href="/">Hosted</a>
+        </div>
+        {/* The site header's own links (NAV_LINKS in website/src/lib/site-nav.ts). */}
+        <nav aria-label="Dormouse site">
+          <a href="https://dormouse.sh/playground" rel="noreferrer" className="narrow-hidden">Playground</a>
+          <a href="https://dormouse.sh/#download" rel="noreferrer" className="wide-only">Download</a>
+          <a href="https://dormouse.sh/docs" rel="noreferrer">Docs</a>
+          <a href="https://github.com/diffplug/dormouse" rel="noreferrer">GitHub</a>
+        </nav>
       </header>
       <main>
         <h1>
@@ -175,7 +190,7 @@ export function HostedPage({
                   <dt>Email</dt>
                   <dd>{session.user.email ?? "No email shared"}</dd>
                   <dt>Account ID</dt>
-                  <dd className="account-id">{session.user.id}</dd>
+                  <dd><code className="token">{session.user.id}</code></dd>
                 </dl>
                 {!session.user.email && (
                   <p className="help">
@@ -192,7 +207,7 @@ export function HostedPage({
                   {session.user.email && (
                     <div className="method">
                       <span>Email code</span>
-                      <span className="status">Available</span>
+                      <span className="status"><Check />Available</span>
                     </div>
                   )}
                   {enabled.map((provider) => {
@@ -203,7 +218,7 @@ export function HostedPage({
                       <div className="method" key={provider}>
                         <span>{providerNames[provider]}</span>
                         {linked ? (
-                          <span className="status">Connected</span>
+                          <span className="status"><Check />Connected</span>
                         ) : (
                           <button
                             disabled={!!busy || !fresh}
@@ -304,7 +319,8 @@ export function HostedPage({
                     {computers.map((computer) => (
                       <div className="method" key={computer.burrowId}>
                         <span>
-                          Computer {computer.burrowId.slice(0, 8)}
+                          Computer
+                          <span className="door">{computer.burrowId.slice(0, 8)}</span>
                           <span className="detail">
                             Enrolled{" "}
                             {new Date(computer.enrolledAt).toLocaleDateString()}
@@ -525,12 +541,11 @@ export function HostedPage({
         )}
       </main>
       <footer>
-        <a href="https://dormouse.sh/security" rel="noreferrer">
-          Dormouse security ↗
-        </a>
-        <a href="https://dormouse.sh/privacy/" rel="noreferrer">Privacy ↗</a>
-        <a href="https://dormouse.sh/terms/" rel="noreferrer">Terms ↗</a>
-        <span>Optional services. Your terminals run on your own computer.</span>
+        <span className="tagline">Optional services. Your terminals run on your own computer.</span>
+        <a href="https://dormouse.sh/security" rel="noreferrer">Dormouse security</a>
+        <a href="https://dormouse.sh/privacy/" rel="noreferrer">Privacy</a>
+        <a href="https://dormouse.sh/terms/" rel="noreferrer">Terms</a>
+        <ThemeSelect />
       </footer>
     </div>
   );

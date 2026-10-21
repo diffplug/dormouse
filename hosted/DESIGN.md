@@ -1,154 +1,233 @@
 ---
 name: Dormouse Hosted
-description: Theme-adaptive account controls for Dormouse hosted services.
+description: The account pages of dormouse.sh, drawn as the next page of its docs.
 colors:
-  app-bg: "var(--vscode-sideBar-background)"
-  app-fg: "var(--vscode-sideBar-foreground)"
-  action-bg: "var(--vscode-list-activeSelectionBackground)"
-  action-fg: "var(--vscode-list-activeSelectionForeground)"
-  control-bg: "var(--vscode-list-inactiveSelectionBackground)"
-  control-fg: "var(--vscode-list-inactiveSelectionForeground)"
-  link: "var(--vscode-textLink-foreground)"
-  focus: "var(--vscode-focusBorder)"
-  error: "var(--vscode-errorForeground)"
+  page-bg: "var(--vscode-editor-background, #000)"
+  page-fg: "var(--vscode-editor-foreground, #dedede)"
+  accent: "var(--hosted-accent, #b47624)"
+  muted: "var(--hosted-muted, #767676)"
+  bad: "var(--hosted-bad, #d55050)"
+  caramel: "#b47624"
+  rule: "color-mix(in srgb, var(--page-fg) 15%, transparent)"
+  notice-bg: "color-mix(in srgb, var(--page-fg) 4%, var(--page-bg))"
+  token-bg: "color-mix(in srgb, var(--page-fg) 15%, var(--page-bg))"
+  door-bg: "color-mix(in srgb, var(--page-fg) 12%, var(--page-bg))"
 typography:
-  title:
-    fontFamily: "var(--vscode-editor-font-family)"
-    fontSize: "18px"
-    fontWeight: 600
+  display:
+    fontFamily: "Ubuntu Sans Mono, ui-monospace, monospace"
+    fontSize: "clamp(1.75rem, 3vw + 0.5rem, 2.5rem)"
+    fontWeight: 400
+    lineHeight: 1.2
+  headline:
+    fontFamily: "Ubuntu Sans Mono, ui-monospace, monospace"
+    fontSize: "24px"
+    fontWeight: 400
     lineHeight: 1.4
-  body:
-    fontFamily: "var(--vscode-editor-font-family)"
-    fontSize: "13px"
+  title:
+    fontFamily: "Ubuntu Sans Mono, ui-monospace, monospace"
+    fontSize: "20px"
+    fontWeight: 400
+    lineHeight: 1.4
+  intro:
+    fontFamily: "Ubuntu Mono, ui-monospace, monospace"
+    fontSize: "18px"
     fontWeight: 400
     lineHeight: 1.6
-  input:
-    fontFamily: "var(--vscode-editor-font-family)"
+  body:
+    fontFamily: "Ubuntu Mono, ui-monospace, monospace"
     fontSize: "16px"
     fontWeight: 400
     lineHeight: 1.6
-  detail:
-    fontFamily: "var(--vscode-editor-font-family)"
-    fontSize: "12px"
+  label:
+    fontFamily: "Ubuntu Sans Mono, ui-monospace, monospace"
+    fontSize: "14px"
     fontWeight: 400
     lineHeight: 1.6
-  user-code:
-    fontFamily: "var(--vscode-editor-font-family)"
-    fontSize: "32px"
-    fontWeight: 600
-    lineHeight: 1.2
-    letterSpacing: "0.08em"
+  detail:
+    fontFamily: "Ubuntu Mono, ui-monospace, monospace"
+    fontSize: "14px"
+    fontWeight: 400
+    lineHeight: 1.6
+  confirm-digits:
+    fontFamily: "Ubuntu Sans Mono, ui-monospace, monospace"
+    fontSize: "40px"
+    fontWeight: 400
+    letterSpacing: "0.15em"
 rounded:
-  control: "4px"
+  token: "4px"
+  control: "6px"
+  notice: "8px"
+  dialog: "12px"
 spacing:
-  small: "8px"
-  medium: "16px"
-  large: "24px"
-  section: "32px"
+  xs: "8px"
+  sm: "16px"
+  md: "24px"
+  lg: "32px"
+  xl: "48px"
 components:
   button-primary:
-    backgroundColor: "{colors.action-bg}"
-    textColor: "{colors.action-fg}"
+    backgroundColor: "transparent"
+    textColor: "{colors.accent}"
     rounded: "{rounded.control}"
-    padding: "9px 14px"
+    padding: "8px 16px"
     typography: "{typography.body}"
+    height: "48px"
     width: "100%"
   button-secondary:
-    backgroundColor: "{colors.control-bg}"
-    textColor: "{colors.control-fg}"
+    backgroundColor: "transparent"
+    textColor: "{colors.page-fg}"
     rounded: "{rounded.control}"
-    padding: "9px 14px"
+    padding: "8px 16px"
     typography: "{typography.body}"
+    height: "44px"
   button-text:
     backgroundColor: "transparent"
-    textColor: "{colors.link}"
-    rounded: "{rounded.control}"
-    padding: "6px 0"
+    textColor: "{colors.accent}"
+    padding: "0"
     typography: "{typography.body}"
+    height: "44px"
   input:
-    backgroundColor: "{colors.control-bg}"
-    textColor: "{colors.control-fg}"
+    backgroundColor: "{colors.page-bg}"
+    textColor: "{colors.page-fg}"
     rounded: "{rounded.control}"
-    padding: "10px 12px"
-    typography: "{typography.input}"
+    padding: "10px 16px"
+    typography: "{typography.body}"
+    height: "48px"
     width: "100%"
   notice:
-    backgroundColor: "{colors.control-bg}"
-    textColor: "{colors.control-fg}"
-    padding: "12px"
-    typography: "{typography.body}"
+    backgroundColor: "{colors.notice-bg}"
+    textColor: "{colors.page-fg}"
+    rounded: "{rounded.notice}"
+    padding: "14px 16px"
+  token:
+    backgroundColor: "{colors.token-bg}"
+    rounded: "{rounded.token}"
+    padding: "2px 6px"
+    typography: "{typography.detail}"
+  door:
+    backgroundColor: "{colors.door-bg}"
+    padding: "0 10px"
+    typography: "{typography.detail}"
+    height: "24px"
+  dialog:
+    backgroundColor: "{colors.page-bg}"
+    textColor: "{colors.page-fg}"
+    rounded: "{rounded.dialog}"
+    padding: "24px"
+  confirm-digits:
+    backgroundColor: "{colors.page-bg}"
+    textColor: "{colors.page-fg}"
+    rounded: "{rounded.control}"
+    typography: "{typography.confirm-digits}"
+    height: "72px"
+    width: "4ch"
 ---
 
 # Design System: Dormouse Hosted
 
 ## Overview
 
-**Creative North Star: "The Native Tenant"**
+**Creative North Star: "The Next Page of the Docs"**
 
-Hosted inherits [Dormouse's product world](../PRODUCT.md) and [parent design system](../DESIGN.md): focused, approachable, capable, with monospace text and quiet, flat controls. This app-boundary record captures the implemented account interface and its browser/mobile sizing exceptions; the parent owns shared product identity.
+Hosted continues the dormouse.sh reference pages it is linked from (`website/src/components/DocsLayout.tsx`, `SiteHeader.tsx`, `docs-tokens.ts`, `website/src/pages/Hosted.tsx`), not the app's design system: the [parent DESIGN.md](../DESIGN.md) Scope names it as the one product surface outside that system. The reader's editor theme is the ground, the site's Ubuntu pair is the type, the caramel wordmark is the one fixed color, and the theme's accent, corrected to AA, carries links and outlined actions. The visitor recognizes the site they came from, does one task in a narrow column, and leaves.
+
+The page is flat and quiet: hairline rules between sections, dashed rules between list rows, outlined controls with no fill. Product facts from [PRODUCT.md](../PRODUCT.md) that bind here are the 44px target, the 16px input, and a page that makes no request beyond its own origin.
 
 **Key Characteristics:**
 
-- Runtime theme colors, including matched foreground/background pairs.
-- A narrow task column with open spacing between sections.
-- Mobile-sized controls with compact monospace labels.
-- Inline feedback and explicit account connection states.
+- A bundled editor theme as ground, Dark Visual Studio by default, chosen in a native footer select.
+- Ubuntu Sans Mono display over Ubuntu Mono body, weight 400 only, served from Hosted's origin.
+- Accent, muted, and error colors derived per theme to AA; caramel fixed for the wordmark.
+- One narrow column; hairline section rules; dashed checklist rows.
+- Outlined controls, 44px minimum, inputs at 16px.
 
-Implementation evidence: `src/style.css`, `src/App.tsx`, and `src/main.tsx`. The surface direction contract lives in `index.html`.
+Implementation evidence: `src/style.css`, `src/theme.ts`, `src/ThemeSelect.tsx`, `src/HostedPage.tsx`, `src/ConfirmDigits.tsx`, `src/main.tsx`.
 
 ## Colors
 
-The palette comes from bundled Dormouse themes through `applyTheme()`. System color preference selects Kimbie Dark or Light Visual Studio and updates when that preference changes.
+Every color but the wordmark comes from the active bundled theme; `applyHostedTheme()` in `src/theme.ts` sets the theme's variables on `body` and derives the three `--hosted-*` tokens from them.
 
 ### Primary
 
-The active-selection pair identifies the email form's primary action. Links use the theme's link foreground; keyboard focus uses its focus border.
+- **Theme Accent** (`--hosted-accent`): the theme's accent through the docs' `docsAccentFor`, corrected to AA against the editor background. Links, the primary outline and its label, text buttons, focus outlines, the caret, the drawn check, hover borders, and (at 35%) the selection.
+- **Caramel** (fixed): the Dormouse half of the wordmark and the header nav hover, unchanged by any theme.
 
 ### Neutral
 
-Sidebar colors paint the page and text. The inactive-selection pair paints secondary buttons, inputs, and notices. Secondary prose retains the page foreground at 0.95 opacity. Error text uses the theme's error foreground.
+- **Editor Ground / Editor Ink** (`--vscode-editor-background` / `--vscode-editor-foreground`): page, inputs, select, and dialog background; body text. The fallbacks paint the site's black before `theme.ts` runs.
+- **Muted** (`--hosted-muted`, via `docsMutedTextFor`): intro, help, labels, footnotes, details, the footer, dialog prose, and placeholders, at AA.
+- **Rule** (15% foreground): section, footer, notice, and dialog edges. Control borders mix more foreground: 30% on buttons and the door's lower edge, 50% on inputs and the select.
+- **Tints** (4%, 12%, 15% foreground over the ground): notice, door, and inline token fills.
+- **Bad** (`--hosted-bad`, the theme's ANSI red through `docsStatusColorFor`): error text and the failed notice, whose border takes it at 50%.
 
-**The Matched Pair Rule.** Keep every control foreground paired with its theme background. Inputs, placeholders, and readonly values retain full foreground opacity.
+**The Theme Owns the Ground Rule.** Every surface, text, and edge color derives from the active theme's editor pair or a `--hosted-*` token; caramel is the only literal, and only for the wordmark and nav hover.
 
-**The Runtime Palette Rule.** Inherit colors through the existing theme variables; do not introduce fixed colors or synthetic tonal ramps.
+**The Docs Correction Rule.** Accent, muted, and error colors pass through the same contrast functions the docs pages use (`website/src/lib/docs-accent.ts`), so a theme reads the same here as on dormouse.sh/hosted.
 
 ## Typography
 
-All roles use the parent system's editor font. Hosted deliberately extends the compact terminal type scale with the title, body, and input roles in the frontmatter. Section headings stay at body size, bold with a 1.5 line height; account identifiers and footer text use the detail role. The enrollment user code is the one display role, sized to be compared at a glance against the code Dormouse shows.
+**Display Font:** Ubuntu Sans Mono (with ui-monospace, monospace)
 
-**The Browser Form Rule.** Preserve the input role's larger type and a minimum control height of 44px for buttons and inputs, including text buttons. These are Hosted account-form exceptions to the parent's terminal chrome sizing.
+**Body Font:** Ubuntu Mono (with ui-monospace, monospace)
+
+**Character:** The site's own pair: the sans mono for headings, header, labels, and controls; the classic mono for reading text. Both arrive through `@fontsource` at weight 400 and are served from Hosted's origin; `font-synthesis: none` forbids faux bold.
+
+### Hierarchy
+
+- **Display** (400, clamp 1.75 to 2.5rem, 1.2): the page heading, balanced.
+- **Headline** (400, 24px): the dialog heading.
+- **Title** (400, 20px, 1.4): section headings; also the wordmark size.
+- **Intro** (400, 18px, muted): the line under the heading; also the header nav size.
+- **Body** (400, 16px, 1.6): reading text, buttons, and every input.
+- **Label** (400, 14px, display face, muted): field labels, definition terms, the theme select.
+- **Detail** (400, 14px): footnotes, row details, the inline token, the door, the footer, the provider separator.
+- **Confirm digits** (400, 40px, 0.15em tracking, centered): the two enrollment digits, sized to compare at a glance against Dormouse's.
+
+**The One Weight Rule.** Hierarchy comes from size and face, never weight: only 400 ships.
 
 ## Layout
 
-The full-height shell places header and footer around a centered column capped at 480px, including 24px horizontal padding. Main content starts 64px below its container top. Section gaps use the section spacing token; provider buttons use a two-column grid with the small gap. Account method rows align the method name left and its action or connection state right, with a minimum height of 52px.
+A full-height shell stacks header, main, and footer. Main is one column capped at 528px wide with 24px side padding, 48px above and 64px below. Sections after the first sit 48px apart, each opened by a hairline rule and 32px of padding; the enrollment and provider blocks skip the rule. The intro holds 40px beneath it. Provider sign-in buttons share a two-column grid with an 8px gap.
 
-At 540px and below, header padding becomes 16px, main top padding becomes 36px, and the footer stacks vertically. The page supports a minimum width of 280px. Long account identifiers, email addresses, and errors wrap rather than truncate.
+The header is 80px tall with 32px side padding, wordmark left and site nav right (40px gaps). The footer wraps a muted tagline, three links, and the theme select, with a hairline rule above.
+
+At 540px and below, the header drops to 64px with 16px padding and tighter type, Download hides, main starts 32px down, and the footer stacks. At 360px Playground hides too. The page holds at 280px; long ids, emails, and errors wrap anywhere rather than truncate.
 
 ## Elevation & Depth
 
-The account interface has no shadows, gradients, or animated transitions. Background changes and spacing establish grouping; notices sit inline with the form or account content. The one overlay is the Turn off Natural Voice confirmation, a native modal dialog: flat, edged in the control background, over a dimmed page.
+Flat. No shadows or gradients; grouping comes from rules, spacing, and faint foreground tints. The one overlay is the Turn off Natural Voice native dialog over a 70% black backdrop. The only motion is a 150ms ease-out on button border and text color.
 
 ## Shapes
 
-Buttons and inputs share gently rounded corners from the control radius token and have no resting border. Notice blocks are square. Keyboard focus uses a visible 2px outline with 3px offset.
+Controls carry a 6px radius; notices 8px, the dialog 12px, the inline token 4px. The computer id is a door, rounded on top only (8px 8px 0 0) over a 30% foreground sill, as the app draws a minimized Pane. Readonly inputs switch to a dashed border. Focus is a 2px accent outline at a 2px offset on every interactive element.
 
 ## Components
 
-- **Buttons:** primary actions fill the column; secondary buttons serve provider sign-in, explicit connections, and sign-out. Enabled button hover brightens the existing theme color. Disabled buttons use 0.55 opacity and a default cursor. Busy actions replace their label with progress text.
-- **Text buttons and links:** use underlines with a 3px offset, thickening on hover. Text buttons retain the common minimum target height.
-- **Inputs:** full-width fields with visible labels. Email and verification code share styling; readonly email keeps its normal appearance. The code field receives focus when revealed.
-- **Feedback:** errors use `role="alert"` and an inline retry action. Notices and loading text use `role="status"`.
-- **Account method rows:** show the provider name with either a Connect action or Connected text. State is communicated in words, not solely through color.
-- **Natural Voice:** whether it is on, in words, with a Turn off Natural Voice action while it is; otherwise where in Dormouse to turn it on. Turning off asks first, in a dialog whose primary-colored Turn off sits right of Cancel. No token or computer is ever named.
-- **Enrollment approval:** the `/enroll` page replaces the account content with the user code in the user-code role, the instruction to approve only while Dormouse shows it, a primary Approve (or Sign in again, when the login is too old), and a Don’t approve text button.
-- **Computers (admin only):** rows reuse the account method row, with the id prefix, a detail-role enrollment date, and a Remove action.
-- **Navigation:** plain product and external links in the header and footer, with no tab bar or card wrapper.
+- **Site header:** caramel "Dormouse" and foreground "Hosted" in the display face, then the site's nav links in foreground, caramel on hover; every link at least 44px tall.
+- **Primary button:** a full-width accent outline with accent label, 48px tall, underlined on hover; also drawn on a link (the subscribe action). Busy actions swap the label for progress text.
+- **Secondary button:** a 30% foreground outline, 44px; hover turns border and label to the accent. Disabled is 0.5 opacity.
+- **Text button:** accent text, no border or padding, 44px tall, underlined on hover.
+- **Inputs:** labelled, full width, 48px, 16px text on the page ground with a 50% foreground border; muted placeholder at full opacity.
+- **Notice:** a faint-tinted, rule-edged block with `role="status"`; the failed variant takes the error color. Errors outside a notice are plain error text with `role="alert"` and an inline retry.
+- **Checklist rows:** sign-in methods, computers, and passkeys as 56px rows split by dashed rules, the name left and its state or action right. State is a drawn accent check plus words (Available, Connected).
+- **Computer id:** the first eight characters of the id in the door shape, beside a muted enrollment date.
+- **Account id:** the full id in the docs' inline-code token.
+- **Dialog:** native modal, 440px max, rule-edged, muted prose; actions right-aligned with the confirming action in the accent outline right of Cancel.
+- **Confirm digits:** a two-character numeric field at 4ch and 72px tall in the confirm-digits role, above help text and the full-width Approve.
+- **Footer:** muted tagline and links (accent on hover) and a native theme select over the bundled themes, 44px, with a drawn chevron; the pick persists in this origin's storage.
 
 ## Do's and Don'ts
 
-- **Do** inherit the parent theme and monospace identity.
-- **Do** preserve full foreground opacity in editable, placeholder, and readonly input text.
-- **Do** keep connection state and progress visible in action labels.
-- **Don't** import the marketing site's palette, imagery, or typography into account controls.
-- **Don't** add shadows or decorative card wrappers to this flat account surface.
-- **Don't** reduce form controls to the parent's terminal chrome dimensions.
+### Do:
+
+- **Do** take every color from the active theme or a `--hosted-*` token derived in `theme.ts`.
+- **Do** keep controls at 44px or more and every input at 16px.
+- **Do** say state in words next to the check; never by color alone.
+- **Do** serve fonts and themes from Hosted's own origin.
+
+### Don't:
+
+- **Don't** load remote fonts, the theme store, or any third-party resource.
+- **Don't** add font weights, shadows, filled buttons, or card wrappers.
+- **Don't** use caramel for anything but the wordmark and header nav hover.
+- **Don't** fall back to the app's `--vscode-sideBar-*` / list-selection tokens; Hosted's ground is the editor pair.

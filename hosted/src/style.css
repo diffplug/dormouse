@@ -1,9 +1,15 @@
 /*
- * The Hosted type scale (product theme tokens: docs/specs/hosted.md ->
- * "Interface"); a narrow single-column form: 13px body copy,
- * an 18px page heading, 16px inputs — below that iOS Safari zooms the form on
- * focus — and a 44px minimum control height, the platform touch target.
+ * Hosted continues the dormouse.sh reference pages it is linked from
+ * (docs/specs/hosted.md -> "Interface"): the reader's editor theme as ground,
+ * Ubuntu Sans Mono for display and Ubuntu Mono for body, both served from this
+ * origin, the caramel wordmark, and the theme accent corrected to AA for links
+ * and actions (`--hosted-*`, derived in theme.ts). Inputs stay at 16px, below
+ * which iOS Safari zooms the form on focus, and controls at the 44px touch
+ * target or more.
  */
+@import "@fontsource/ubuntu-mono/400.css";
+@import "@fontsource/ubuntu-sans-mono/400.css";
+
 :root {
   font-synthesis: none;
 }
@@ -11,279 +17,452 @@
   box-sizing: border-box;
 }
 body {
+  /* Fallbacks for the moment before theme.ts paints: the site's own black. */
+  --page-bg: var(--vscode-editor-background, #000);
+  --page-fg: var(--vscode-editor-foreground, #dedede);
+  --accent: var(--hosted-accent, #b47624);
+  --muted: var(--hosted-muted, #767676);
+  --bad: var(--hosted-bad, #d55050);
+  --caramel: #b47624;
+  --rule: color-mix(in srgb, var(--page-fg) 15%, transparent);
+  --display: "Ubuntu Sans Mono", ui-monospace, monospace;
   margin: 0;
-  color: var(--vscode-sideBar-foreground);
-  background: var(--vscode-sideBar-background);
-  font: 13px/1.6 var(--vscode-editor-font-family);
   min-width: 280px;
+  color: var(--page-fg);
+  background: var(--page-bg);
+  font: 16px/1.6 "Ubuntu Mono", ui-monospace, monospace;
+  font-kerning: normal;
+  caret-color: var(--accent);
+  scrollbar-color: color-mix(in srgb, var(--page-fg) 25%, transparent) transparent;
+}
+::selection {
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
 }
 button,
-input {
+input,
+select {
   font: inherit;
+  color: inherit;
 }
 button,
 a,
-input {
+input,
+select {
   -webkit-tap-highlight-color: transparent;
 }
 a {
-  color: var(--vscode-textLink-foreground);
+  color: var(--accent);
+  text-decoration: none;
   text-underline-offset: 3px;
 }
 a:hover {
-  text-decoration-thickness: 2px;
+  text-decoration: underline;
 }
 button:focus-visible,
 a:focus-visible,
-input:focus-visible {
-  outline: 2px solid var(--vscode-focusBorder);
-  outline-offset: 3px;
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 .shell {
   min-height: 100svh;
   display: flex;
   flex-direction: column;
 }
+
+/* The site header, as dormouse.sh's reference pages draw it. */
 header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 20px;
-  padding: 20px 32px;
-  background: var(--vscode-sideBar-background);
+  gap: 24px;
+  min-height: 80px;
+  padding: 0 32px;
+  font-family: var(--display);
 }
 .brand {
-  color: var(--vscode-sideBar-foreground);
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 20px;
+}
+.brand a:first-child {
+  color: var(--caramel);
+}
+.brand a:last-child {
+  color: var(--page-fg);
+}
+header nav {
+  display: flex;
+  gap: 40px;
+  font-size: 18px;
+}
+header a,
+footer a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+}
+header nav a {
+  color: var(--page-fg);
+}
+header nav a:hover {
+  color: var(--caramel);
   text-decoration: none;
-  font-weight: 600;
 }
-.brand span {
-  font-weight: 400;
-  opacity: 0.95;
-}
+
 main {
-  width: min(100%, 480px);
-  padding: 64px 24px 40px;
+  width: min(100%, 528px);
+  padding: 48px 24px 64px;
   margin: 0 auto;
   flex: 1;
 }
-h1 {
-  font-size: 18px;
-  line-height: 1.4;
-  font-weight: 600;
-  margin: 0 0 8px;
+h1,
+h2 {
+  font-family: var(--display);
+  font-weight: 400;
   text-wrap: balance;
 }
+h1 {
+  font-size: clamp(1.75rem, 3vw + 0.5rem, 2.5rem);
+  line-height: 1.2;
+  margin: 0 0 12px;
+}
 h2 {
-  font-size: 13px;
-  line-height: 1.5;
+  font-size: 20px;
+  line-height: 1.4;
   margin: 0 0 8px;
 }
 p {
   margin: 0 0 16px;
 }
 .intro {
-  opacity: 0.95;
-  margin-bottom: 32px;
+  color: var(--muted);
+  font-size: 18px;
+  margin-bottom: 40px;
 }
+.help,
+.footnote,
+.status,
+.detail,
+dt {
+  color: var(--muted);
+}
+.footnote {
+  margin-top: 40px;
+  font-size: 14px;
+}
+
 label {
   display: block;
-  margin: 16px 0 6px;
+  margin: 20px 0 8px;
+  font-family: var(--display);
+  font-size: 14px;
+  color: var(--muted);
 }
 input {
   width: 100%;
-  border: 0;
-  border-radius: 4px;
-  padding: 10px 12px;
-  color: var(--vscode-list-inactiveSelectionForeground);
-  background: var(--vscode-list-inactiveSelectionBackground);
+  min-height: 48px;
+  padding: 10px 16px;
+  border: 1px solid color-mix(in srgb, var(--page-fg) 50%, transparent);
+  border-radius: 6px;
+  background: var(--page-bg);
   font-size: 16px;
-  min-height: 44px;
 }
 input::placeholder {
-  color: inherit;
+  color: var(--muted);
   opacity: 1;
 }
 input[readonly] {
-  opacity: 1;
+  border-style: dashed;
 }
-button {
-  border: 0;
-  border-radius: 4px;
-  min-height: 44px;
-  padding: 9px 14px;
-  cursor: pointer;
-  background: var(--vscode-list-inactiveSelectionBackground);
-  color: var(--vscode-list-inactiveSelectionForeground);
-}
-button:hover:not(:disabled) {
-  filter: brightness(1.15);
-}
-button:disabled {
-  opacity: 0.55;
-  cursor: default;
-}
-.primary {
-  width: 100%;
-  margin-top: 16px;
-  background: var(--vscode-list-activeSelectionBackground);
-  color: var(--vscode-list-activeSelectionForeground);
-}
+
+button,
 .button-link {
-  display: flex;
-  box-sizing: border-box;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   min-height: 44px;
-  padding: 9px 14px;
-  border-radius: 4px;
+  padding: 8px 16px;
+  border: 1px solid color-mix(in srgb, var(--page-fg) 30%, transparent);
+  border-radius: 6px;
+  background: transparent;
+  font-family: var(--display);
+  cursor: pointer;
+  transition: border-color 150ms ease-out, color 150ms ease-out;
+}
+button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+/* The pricing cards' action: an accent outline, underlined on hover. */
+.primary {
+  width: 100%;
+  min-height: 48px;
+  margin-top: 20px;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.primary:hover:not(:disabled),
+.button-link:hover {
+  text-decoration: underline;
+}
+.button-link {
   text-decoration: none;
 }
-.button-link:hover {
-  filter: brightness(1.15);
-}
 .text-button {
-  padding: 6px 0;
-  background: transparent;
-  color: var(--vscode-textLink-foreground);
-  text-decoration: underline;
-  text-underline-offset: 3px;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  color: var(--accent);
+  font-family: inherit;
 }
 .text-button:hover:not(:disabled) {
-  background: transparent;
-  text-decoration-thickness: 2px;
+  text-decoration: underline;
 }
 .form-options {
   display: flex;
   justify-content: space-between;
   gap: 16px;
+  margin-top: 4px;
 }
+
 section {
-  margin-top: 32px;
+  margin-top: 48px;
+  padding-top: 32px;
+  border-top: 1px solid var(--rule);
+}
+section.enroll,
+section.providers {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
 }
 .providers {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
-  margin-bottom: 24px;
+  margin: 32px 0 24px;
 }
 .separator {
   grid-column: 1 / -1;
-  opacity: 0.95;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 14px;
 }
-.help,
-.footnote {
-  opacity: 0.95;
-}
-.footnote {
-  margin-top: 32px;
-}
+
 .error {
-  color: var(--vscode-errorForeground);
-  margin-bottom: 20px;
+  color: var(--bad);
+  margin-bottom: 24px;
   overflow-wrap: anywhere;
 }
 .error p {
   margin-bottom: 0;
 }
 .notice {
-  padding: 12px;
-  background: var(--vscode-list-inactiveSelectionBackground);
-  color: var(--vscode-list-inactiveSelectionForeground);
+  padding: 14px 16px;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--page-fg) 4%, var(--page-bg));
 }
 .notice.failed {
-  color: var(--vscode-errorForeground);
+  border-color: color-mix(in srgb, var(--bad) 50%, transparent);
+  color: var(--bad);
 }
+
 .identity {
   margin: 0;
 }
 dt {
-  opacity: 0.95;
-  margin-top: 12px;
+  margin-top: 16px;
+  font-family: var(--display);
+  font-size: 14px;
+}
+dt:first-child {
+  margin-top: 0;
 }
 dd {
   margin: 0;
   overflow-wrap: anywhere;
 }
-.account-id {
-  font-size: 12px;
+/* The docs pages' inline code token. */
+.token {
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--page-fg) 15%, var(--page-bg));
+  font: inherit;
+  font-size: 14px;
+  overflow-wrap: anywhere;
 }
+
+/* The pricing cards' checklist rows: dashed rules between entries. */
 .method {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  min-height: 52px;
-  padding: 4px 0;
+  min-height: 56px;
+  padding: 6px 0;
+  border-bottom: 1px dashed var(--rule);
 }
-.status,
-.detail {
-  opacity: 0.95;
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.status svg {
+  color: var(--accent);
 }
 .detail {
   display: block;
-  font-size: 12px;
+  font-size: 14px;
 }
+/* A computer's id as the app draws a minimized Pane: a door, rounded on top
+ * only (DOOR_TAB_CLASS in lib/src/components/design.tsx). */
+.door {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  min-width: 68px;
+  padding: 0 10px;
+  margin-left: 6px;
+  border-radius: 8px 8px 0 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--page-fg) 30%, transparent);
+  background: color-mix(in srgb, var(--page-fg) 12%, var(--page-bg));
+  font-size: 14px;
+}
+
 dialog {
-  width: min(100% - 32px, 400px);
+  width: min(100% - 32px, 440px);
   padding: 24px;
-  border: 1px solid var(--vscode-list-inactiveSelectionBackground);
-  border-radius: 4px;
-  color: var(--vscode-sideBar-foreground);
-  background: var(--vscode-sideBar-background);
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  color: var(--page-fg);
+  background: var(--page-bg);
 }
 dialog::backdrop {
-  background: rgb(0 0 0 / 0.5);
+  background: rgb(0 0 0 / 0.7);
+}
+dialog h2 {
+  font-size: 24px;
+}
+dialog p {
+  color: var(--muted);
 }
 .dialog-actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+  margin-top: 24px;
 }
 .dialog-actions .confirm {
-  background: var(--vscode-list-activeSelectionBackground);
-  color: var(--vscode-list-activeSelectionForeground);
+  border-color: var(--accent);
+  color: var(--accent);
 }
-.enroll {
-  margin-top: 0;
-}
+
 .confirm-digits {
-  width: 5ch;
-  font-size: 32px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
+  width: 4ch;
+  min-height: 72px;
+  font-family: var(--display);
+  font-size: 40px;
+  letter-spacing: 0.15em;
   text-align: center;
   margin-bottom: 16px;
 }
 .enroll .text-button {
-  display: block;
+  display: flex;
   margin-top: 8px;
 }
+
 footer {
   display: flex;
-  justify-content: space-between;
-  gap: 20px;
-  padding: 24px 32px;
-  font-size: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 28px;
+  padding: 24px 32px 32px;
+  border-top: 1px solid var(--rule);
+  color: var(--muted);
+  font-size: 14px;
 }
-footer span {
-  opacity: 0.95;
+footer a {
+  color: var(--muted);
 }
+footer a:hover {
+  color: var(--accent);
+}
+footer .tagline {
+  flex: 1;
+  min-width: 16ch;
+}
+.theme-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font-family: inherit;
+}
+.select-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.theme-select select {
+  appearance: none;
+  min-height: 44px;
+  padding: 0 34px 0 12px;
+  border: 1px solid color-mix(in srgb, var(--page-fg) 50%, transparent);
+  border-radius: 6px;
+  background: var(--page-bg);
+  color: var(--page-fg);
+  font-family: var(--display);
+  font-size: 14px;
+  cursor: pointer;
+}
+.select-wrap svg {
+  position: absolute;
+  right: 12px;
+  pointer-events: none;
+  color: var(--page-fg);
+}
+
 @media (max-width: 540px) {
   header {
-    padding: 16px;
-    gap: 12px;
+    min-height: 64px;
+    padding: 0 16px;
+    gap: 16px;
   }
-  header > a:last-child {
-    font-size: 12px;
+  .brand {
+    gap: 6px;
+    font-size: 16px;
+  }
+  header nav {
+    gap: 12px;
+    font-size: 14px;
+  }
+  .wide-only {
+    display: none;
   }
   main {
-    padding-top: 36px;
+    padding-top: 32px;
   }
   footer {
-    padding: 24px;
+    padding: 24px 16px 32px;
     flex-direction: column;
-    gap: 8px;
+    align-items: flex-start;
+    gap: 0;
+  }
+  footer .tagline {
+    margin-bottom: 8px;
+  }
+}
+@media (max-width: 360px) {
+  .narrow-hidden {
+    display: none;
   }
 }
