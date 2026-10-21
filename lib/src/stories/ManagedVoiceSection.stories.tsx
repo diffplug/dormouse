@@ -115,6 +115,7 @@ export const DisconnectSecondStep: Story = {
   parameters: {
     primedBurrow: { status: ENROLLED },
     primedManagedVoice: { configured: true },
+    docs: { story: { height: '400px' } },
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);

@@ -1,0 +1,59 @@
+import { Meta, Canvas } from '@storybook/addon-docs/blocks';
+import * as SignIn from '../../hosted/src/stories/SignIn.stories';
+import * as Account from '../../hosted/src/stories/Account.stories';
+
+<Meta title="Hosted/Account walkthrough" />
+
+# Sign in and manage a Hosted account
+
+Follow the browser side of Hosted: arrive, sign in, connect another sign-in method, and manage the account. These are the production page components with fixed data, not a live account. The stories' interactions run inside each page's own document.
+
+> `docs/specs/hosted.md` → “Identity and login”, “Interface”, and “Terms acceptance” are the references when changing these screens.
+
+## Arrive before launch
+
+A signed-out visitor currently meets “Coming soon” and is redirected to the devlog. The same gate applies to an enrollment link opened without an existing login. This screen is part of the current journey, even though it interrupts enrollment.
+
+<Canvas of={SignIn.ComingSoon} />
+
+An invited tester can open `/login?signin` to reach sign-in. The server still limits production sign-in to its configured allowlist. The available provider buttons depend on the deployment; email sign-in is also available.
+
+<Canvas of={SignIn.Providers} />
+
+## Continue with an email code
+
+Enter an email address, send the code, then enter it on the same page. “I already have a code” reaches this form without sending another email; “Change email” returns to the address field. The terms and privacy notice stays beside the sign-in actions.
+
+<Canvas of={SignIn.CodeEntry} />
+
+A rejected code leaves the form available to correct and retry. A refused pre-launch address currently receives the same generic failure message; the page does not explain the allowlist.
+
+<Canvas of={SignIn.CodeRejected} />
+
+## Check the account and connect a provider
+
+After sign-in, the account identifies the current login and which providers are connected. Connecting another provider starts from here. Signing in through a different provider alone does not connect it to this account.
+
+<Canvas of={Account.Ordinary} />
+
+An older login disables provider connection and asks for a fresh sign-in. Return to the account after signing in again, then start the connection there.
+
+<Canvas of={Account.StaleLogin} />
+
+## Manage the services attached to this account
+
+Once services are in use, the account brings their controls together. Review the full page on a phone as well: the footer and lower passkey rows should remain reachable. This example uses a real 390px page, independent of the surrounding Storybook width.
+
+<Canvas of={Account.Phone} />
+
+Continue with the [remote-control walkthrough](?path=/docs/hosted-remote-control-walkthrough--docs) or [Natural Voice walkthrough](?path=/docs/hosted-natural-voice-walkthrough--docs) to see how the app brings someone here and what happens when they return.
+
+## Recover a failed refresh, or sign out
+
+A saved change can be followed by a failed reload. The page distinguishes that case from a refused change, so the person can retry the read without repeating the action.
+
+<Canvas of={Account.SavedButRefreshFailed} />
+
+Signing out returns to the sign-in page with a notice that other devices remain signed in.
+
+<Canvas of={SignIn.SignedOut} />

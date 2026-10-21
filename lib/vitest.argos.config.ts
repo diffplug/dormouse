@@ -32,12 +32,14 @@ function storybookProject(browser: 'chromium' | 'webkit'): TestProjectInlineConf
       browser: {
         enabled: true,
         headless: true,
-        provider: playwright(
-          browser === 'chromium'
+        provider: playwright({
+          // Applies to every story, including date/time copy in desktop settings.
+          contextOptions: { locale: 'en-US', timezoneId: 'UTC' },
+          ...(browser === 'chromium'
             ? // Glyphs render identically on macOS and the Linux runner.
               { launchOptions: { args: ['--disable-lcd-text', '--font-render-hinting=none'] } }
-            : {},
-        ),
+            : {}),
+        }),
         instances: [{ browser }],
         // Chromatic's default capture width; Vitest's default is a 414px phone.
         viewport: { width: 1200, height: 900 },

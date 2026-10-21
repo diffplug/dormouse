@@ -13,7 +13,7 @@ const config: StorybookConfig = {
   // purpose: it is a doc about the product, not about `lib`, and it references
   // stories from here rather than defining any (MDX has not been able to define
   // a story since Storybook 7).
-  stories: ['../src/**/*.stories.@(ts|tsx)', '../../docs/stories/**/*.mdx'],
+  stories: ['../src/**/*.stories.@(ts|tsx)', '../../hosted/src/**/*.stories.tsx', '../../docs/stories/**/*.mdx'],
   addons: [
     // Runs the stories as Vitest tests for Argos (`lib/vitest.argos.config.ts`).
     '@storybook/addon-vitest',

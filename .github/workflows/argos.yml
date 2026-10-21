@@ -10,6 +10,12 @@ on:
     paths:
       - 'lib/**'
       - 'docs/stories/**'
+      - 'hosted/src/**'
+      # Hosted's controller and its DOM test reach no story, which renders
+      # `HostedPage` from fixtures; they change most often of anything here.
+      - '!hosted/src/App.tsx'
+      - '!hosted/src/App.test.tsx'
+      - '!hosted/src/main.tsx'
       # The lockfile is the root's, so an in-range bump of a rendering dependency
       # reaches the stories while matching neither glob above. Here it refreshes
       # the baseline against the commit that moved the dependency, so the pixel
@@ -34,6 +40,10 @@ on:
     paths:
       - 'lib/**'
       - 'docs/stories/**'
+      - 'hosted/src/**'
+      - '!hosted/src/App.tsx'
+      - '!hosted/src/App.test.tsx'
+      - '!hosted/src/main.tsx'
   # Manual rebaseline. No glob catches every rendering input, and a commit editing
   # these globs — this file — matches none of them, so without a dispatch the only
   # way to refresh main's baseline is to wait for an unrelated qualifying commit.

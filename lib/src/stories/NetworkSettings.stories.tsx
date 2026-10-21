@@ -290,7 +290,10 @@ export const LocalNetworksEnrolled: Story = {
 
 /** Enrolled under Anywhere: a phone that can't connect directly relays through Hosted. */
 export const AnywhereEnrolled: Story = {
-  parameters: { primedBurrow: hosted(ANYWHERE_ON, HOSTED_ENROLLED) },
+  parameters: {
+    primedBurrow: hosted(ANYWHERE_ON, HOSTED_ENROLLED),
+    docs: { story: { height: '1000px' } },
+  },
   play: async ({ canvasElement }) => {
     const canvas = await settled(canvasElement);
     await canvas.findByText(/terminal traffic when a phone can’t connect directly\./);
