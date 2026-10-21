@@ -1,3 +1,5 @@
+import { wallHandleOwning } from '../components/wall/wall-handles';
+import { isWorkspaceTransferPending } from './window-session-aggregator';
 import { getPlatform } from './platform';
 import { registry } from './terminal-store';
 import { mintSurfaceId } from './surface-ids';
@@ -6,7 +8,7 @@ import { addPendingKill } from './pending-kills';
 import { isDelayedKillEnabled } from './labs-settings';
 import type { WorkspaceId } from './session-types';
 import { getDefaultShellOpts } from './shell-defaults';
-import { getInheritableCwd, getTerminalPaneState, isPaneOscDriven, seedLaunchedCommand } from './terminal-state-store';
+import { getInheritableCwd, getTerminalPaneState, isPaneOscDriven, seedLaunchedCommand, seedTerminalManualCwd } from './terminal-state-store';
 import { DEFAULT_HELPER_COMMAND, type HelperIdentity } from './terminal-context-types';
 
 export type HelperStatus = 'waiting' | 'running' | 'completed' | 'preserved' | 'off' | 'unsupported' | 'exited';
@@ -44,7 +46,7 @@ const atPrompt = (id: string) => {
 };
 
 /** One poll per helper advances its status and, once settled, refreshes the host work inspection. */
-function watchHelper(helper: HelperTerminal, launchCwd?: string): void {
+function watchHelper(helper: HelperTerminal): void {
   clearInterval(helper.timer);
   if (!visibleParents.has(helper.parentId) || helper.promoting) return;
   const started = Date.now();
@@ -60,7 +62,7 @@ function watchHelper(helper: HelperTerminal, launchCwd?: string): void {
     else if (helper.status === 'waiting') {
       if (isPaneOscDriven(helper.id) && atPrompt(helper.id)) {
         status = 'running';
-        seedLaunchedCommand(helper.id, helper.command, launchCwd);
+        seedLaunchedCommand(helper.id, helper.command);
         getPlatform().writePty(helper.id, `${helper.command}\r`, { launch: true });
       } else if (Date.now() - started >= READINESS_TIMEOUT_MS) status = 'unsupported';
     } else if (helper.status === 'running' && atPrompt(helper.id)) status = 'completed';
@@ -148,7 +150,7 @@ function releaseHostHelper(id: string): Promise<unknown> | undefined {
  *  two owners. */
 export function reattachHelper(helper: HelperTerminal): boolean {
   const { parentId } = helper;
-  if (!parentIsOpen(parentId) || !registry.has(helper.id)) return false;
+  if (helperTransferPending(parentId) || !parentIsOpen(parentId) || !registry.has(helper.id)) return false;
   const replacement = helpers.get(parentId);
   const entry = replacement && registry.get(replacement.id);
   if (replacement && (replacement.promoting || entry?.untouched === false || getTerminalPaneState(replacement.id).currentCommand)) return false;
@@ -173,6 +175,7 @@ export function reattachHelper(helper: HelperTerminal): boolean {
  * (`docs/specs/reopen.md` → "Labs: No-confirm delayed kill").
  */
 export async function resetHelper(parentId: string, parent: { workspaceId: WorkspaceId; title: string }): Promise<void> {
+  requireHelperMutable(parentId);
   if (!isDelayedKillEnabled()) { disposeHelper(parentId); return; }
   const old = detachHelper(parentId);
   if (!old) return;
@@ -205,7 +208,17 @@ function parentIsOpen(parentId: string): boolean {
   return !!entry && !closedParents.has(entry);
 }
 
+function helperTransferPending(parentId: string): boolean {
+  const owner = wallHandleOwning(parentId);
+  return !!owner && isWorkspaceTransferPending(owner.workspaceId);
+}
+
+function requireHelperMutable(parentId: string): void {
+  if (helperTransferPending(parentId)) throw new Error('Workspace is transferring');
+}
+
 export async function openHelper(parentId: string): Promise<HelperTerminal> {
+  requireHelperMutable(parentId);
   // Concurrent openings share one creation, so a source never gets two helpers.
   const inFlight = pending.get(parentId);
   if (inFlight) return inFlight;
@@ -224,11 +237,13 @@ export async function openHelper(parentId: string): Promise<HelperTerminal> {
       if (!entry?.untouched || (previous.status !== 'completed' && previous.status !== 'off') || await helperHasWork(previous)) return previous;
       // Input or ownership can change during process inspection.
       if (helpers.get(parentId) !== previous || !entry.untouched) return helpers.get(parentId) ?? previous;
+      requireHelperMutable(parentId);
       disposeHelper(parentId);
     }
     const platform = getPlatform();
     if (!platform.terminalContext) throw new Error('Helper terminals are unavailable on this host');
     const settings = await platform.terminalContext({ op: 'settings' });
+    requireHelperMutable(parentId);
     if (!parentIsOpen(parentId)) throw new Error('The parent terminal has closed');
     const id = mintSurfaceId();
     // One cwd for the spawn and the launched command's record, so a remote parent
@@ -239,9 +254,12 @@ export async function openHelper(parentId: string): Promise<HelperTerminal> {
     helpers.set(parentId, helper);
     setPendingShellOpts(id, { ...getDefaultShellOpts(), cwd, helper: { parentId, command } });
     getOrCreateTerminal(id);
+    // Seed only missing state before readiness: shell startup may report a
+    // different directory, which autorun must keep.
+    seedTerminalManualCwd(id, cwd);
     parkElement(id);
     notifyHelpers();
-    watchHelper(helper, cwd);
+    watchHelper(helper);
     return helper;
   })();
   pending.set(parentId, operation);
@@ -250,6 +268,7 @@ export async function openHelper(parentId: string): Promise<HelperTerminal> {
 
 /** Hands the helper to the caller for placement: autorun is cancelled and the host stops treating the PTY as auxiliary. */
 export async function beginPromotion(parentId: string): Promise<HelperTerminal> {
+  requireHelperMutable(parentId);
   const helper = helpers.get(parentId);
   if (!helper) throw new Error('This terminal has no helper');
   if (helper.promoting) throw new Error('Helper promotion is in progress');

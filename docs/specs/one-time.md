@@ -177,6 +177,7 @@ Source of truth: `hosted/scripts/dev-one-time.mjs`.
 | `oneTimeStatus` | the current `OneTimeState` |
 
 - **`oneTimeOpen` takes no parameters: the origin is never webview input.** It joins an open in flight, replaces a waiting, confirming, or ended connection (ending it unannounced), and is **refused while `connecting` or `connected`**, and while `unavailable`.
+- **Must cancel a pending `oneTimeOpen` on `oneTimeEnd`, including while the policy is being read**, without cancelling later opens.
 - **Every state change is a `{ name: 'one-time', state }` event, and so is a service's start** (rationale).
 - **`status` and its event carry `serving`**: a running Burrow (none under Nothing), or a one-time status of `opening`, `waiting`, `confirming`, `connecting`, or `connected`; a flip emits `status`. What arms on each: `docs/specs/vscode.md` -> "Burrow: a service in the extension host".
 - **Approval carries a `kind`** (`pairing` | `one-time`) on `PendingPairing`, `PairingQueueItem`, `ApproveParams`, and `DenyParams`. The one-time request has a slot of its own, `clientId: ''` with a fresh random `pairingId` ticket. **The service reads any `kind` but `one-time` as a `pairing`**, so a malformed answer finds nothing to approve.

@@ -306,6 +306,21 @@ describe('painting', () => {
     expect(drawImage).toHaveBeenCalledTimes(2);
   });
 
+  it('drops a pending clipboard read when the browser relaunches before it resolves', async () => {
+    const { host, controller } = await paintFixture();
+    let resolveClipboard!: (text: string) => void;
+    (host.platform as PlatformAdapter).readClipboardText = () => new Promise((resolve) => { resolveClipboard = resolve; });
+    controller.handleKeyDownLike({ key: 'v', code: 'KeyV', ctrlKey: true, metaKey: false, altKey: false, shiftKey: false });
+    host.answers.launch = async () => ({ ok: true, stream: 7777 });
+    getAgentBrowserScreenController('id')?.actions.setRenderMode?.('agent-browser-popout');
+    await flushMicrotasks();
+    expect(streamSocket(7777)).toBeDefined();
+    resolveClipboard('private clipboard text');
+    await flushMicrotasks();
+    expect(WebSocketMock.instances.flatMap((socket) => socket.sent.map((raw) => JSON.parse(raw)))
+      .filter((message) => message.type === 'input_text')).toEqual([]);
+  });
+
   it('sends input, pasted text and repaint requests over the viewer socket, and editing chords to the host', async () => {
     const { host, controller } = await paintFixture('pasted\r\ntext');
     const sent = () => streamSocket(4321)!.sent.map((raw) => JSON.parse(raw));

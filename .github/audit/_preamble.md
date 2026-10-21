@@ -120,6 +120,8 @@ printf '\n<!-- END OF REPORT -->\n' >> <your fragment>
 
 **Delegate only by the `## Work streams` your domain file names, never by a partition of your own**: one delegate per stream, holding that stream's rules and nothing else, and the open findings citing them; the `qualitative` stream takes the open findings that cite no rule. A rule stream runs no qualitative pass; the `qualitative` stream is the domain's one pass, run by you or by one delegate. A delegate appends its lines straight to your fragment, one `printf … >>` per result line and one per finding, its evidence lines in the same call so another stream's line cannot land inside it, and writes no verdict line and no sentinel; when it finishes it touches `$RUNNER_TEMP/<your fragment>.<stream>.done`, and that file is what your wait loop below tests.
 
+### Waiting for delegates
+
 **If you delegate, block for your delegates — never end your turn to wait.** Subagents launch in the **background**: the Task tool returns an id, not a report. Ending your turn ends *you*, and your caller reads that as your report being finished — it merges the fragment as it stands and everything your delegates write afterwards is lost. Block inside a Bash call instead, and never with `run_in_background`, which returns an id immediately and blocks nothing. A single Bash call is capped at ten minutes, so break the loop yourself under the cap, issue it with `timeout: 600000`, and re-issue it under a bound of your own:
 
 ```sh
@@ -149,6 +151,8 @@ echo "$ANSWER"
 **The call's last line is its answer.** Re-issue the block verbatim on `STILL WAITING`; on `DEADLINE` or `ALL FINISHED` stop waiting and write up what you have. Your deadline is your caller's own, three minutes early, so you still have room to rewrite your verdict line and close the fragment; the 25 minutes is only the fallback for a caller that has not started waiting yet. An empty answer means the call was moved to the background, so re-issue it rather than waiting on that task.
 
 Never substitute a bare `sleep` — the harness blocks it; the `until` loop above is the sanctioned form. Run 35327271988's `application-security` domain backgrounded its own wait loop, said it was holding for four outstanding work streams, and ended its turn at 09:11:56. All four finished by 09:19:29, fourteen minutes inside the deadline, and none of their results reached the report.
+
+### Secrets and public posts
 
 Never print a secret value. `$AUDIT_PAT` is passed only as an unexpanded `GH_TOKEN=` prefix; do not echo it, do not run `printenv` or `set -x`, and do not paste the contents of any credential file into your report — report its mode and location instead. Your report is filed in a private tracker and the SDK transcript is archived encrypted, but a secret in either is still a leaked secret.
 

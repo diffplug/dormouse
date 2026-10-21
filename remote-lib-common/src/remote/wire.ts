@@ -12,7 +12,7 @@ import {
   isExactBase64Url,
 } from '../security/bytes.js';
 import { NOISE_MAX_MESSAGE_LENGTH } from '../security/noise.js';
-import { isEnrollUserCode } from './enroll-code.js';
+import { isEnrollConfirmDigits, isEnrollUserCode } from './enroll-code.js';
 import { isManagedVoiceToken } from './managed-voice.js';
 import type { PasskeyAssertion } from '../security/passkey.js';
 import type { PresenceBinding } from '../security/presence.js';
@@ -397,8 +397,13 @@ export interface BurrowEnrollBeginResponse {
    * "Burrow enrollment".
    */
   deviceCode: string;
-  /** What Dormouse shows and the account approves, `XXXX-XXXX`. */
+  /** What the link carries and the account approves, `XXXX-XXXX`. */
   userCode: string;
+  /**
+   * The two digits Dormouse shows, which the person types beside Approve; a
+   * poll of an approval whose digits differ answers `mismatch`.
+   */
+  confirmDigits: string;
   /**
    * The account page that approves `userCode`, the code in its fragment;
    * absent where the deployment names no account origin.
@@ -434,6 +439,7 @@ export function isBurrowEnrollBeginResponse(value: unknown): value is BurrowEnro
   return (
     isRelayBearer(candidate.deviceCode) &&
     isEnrollUserCode(candidate.userCode) &&
+    isEnrollConfirmDigits(candidate.confirmDigits) &&
     (verificationUrl === undefined || isBoundedString(verificationUrl, MAX_ENROLL_VERIFICATION_URL_LENGTH)) &&
     typeof expiresAt === 'number' &&
     Number.isFinite(expiresAt) &&
@@ -453,11 +459,14 @@ export interface BurrowEnrollPollRequest {
  * `expired` also answers an unknown device code. `enrolled` answers once: the
  * redemption is single-use. `redeemed` answers every later poll of that code
  * until the approval expires: an earlier poll enrolled `burrowId`, whose answer
- * never reached this one, and which the account must remove.
+ * never reached this one, and which the account must remove. `mismatch`
+ * answers every poll of a code approved with other digits than its
+ * `confirmDigits`, which nothing redeems.
  */
 export type BurrowEnrollPollResponse =
   | { status: 'pending' }
   | { status: 'expired' }
+  | { status: 'mismatch' }
   | { status: 'redeemed'; burrowId: string }
   | { status: 'enrolled'; enrollment: BurrowEnrollResponse };
 
@@ -472,6 +481,7 @@ export function isBurrowEnrollPollResponse(value: unknown): value is BurrowEnrol
   switch (answer.status) {
     case 'pending':
     case 'expired':
+    case 'mismatch':
       return true;
     case 'redeemed':
       return isE2eId(answer.burrowId);
@@ -486,11 +496,13 @@ export function isBurrowEnrollPollResponse(value: unknown): value is BurrowEnrol
  * A voice-purpose poll's answer (`docs/specs/hosted.md` -> "Burrow
  * enrollment"). `enabled` answers once, carrying the managed-voice token the
  * redemption minted; `redeemed` answers every later poll of that code until
- * the approval expires, naming nothing, since a voice approval mints no Burrow.
+ * the approval expires, naming nothing, since a voice approval mints no Burrow;
+ * `mismatch` as {@link BurrowEnrollPollResponse}'s.
  */
 export type BurrowVoicePollResponse =
   | { status: 'pending' }
   | { status: 'expired' }
+  | { status: 'mismatch' }
   | { status: 'redeemed' }
   | { status: 'enabled'; voiceToken: string };
 
@@ -501,6 +513,7 @@ export function isBurrowVoicePollResponse(value: unknown): value is BurrowVoiceP
   switch (answer.status) {
     case 'pending':
     case 'expired':
+    case 'mismatch':
     case 'redeemed':
       return true;
     case 'enabled':

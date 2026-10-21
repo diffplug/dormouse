@@ -11,11 +11,15 @@ test('Windows checkout preserves executable Unix shell integration and login-pro
   const fixture = mkdtempSync(path.join(os.tmpdir(), 'dormouse-shell-checkout-'));
   t.after(() => rmSync(fixture, { recursive: true, force: true }));
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')));
-  env.GIT_CONFIG_GLOBAL = os.devNull;
+  // Git for Windows rejects Node's null-device path. A real empty file
+  // isolates both settings consistently across Git builds and platforms.
+  const emptyConfig = path.join(fixture, 'empty-git-config');
+  writeFileSync(emptyConfig, '');
+  env.GIT_CONFIG_GLOBAL = emptyConfig;
   env.GIT_CONFIG_NOSYSTEM = '1';
   const git = (...args) => execFileSync('git', [
     '-c', 'core.autocrlf=true', '-c', 'core.safecrlf=false',
-    '-c', `core.attributesFile=${os.devNull}`, ...args,
+    '-c', `core.attributesFile=${emptyConfig}`, ...args,
   ], { cwd: fixture, env, stdio: 'pipe' });
   const relative = 'standalone/sidecar/shell-integration';
   cpSync(path.join(root, '.gitattributes'), path.join(fixture, '.gitattributes'));

@@ -33,6 +33,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { appendFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { devNull } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
 import { readRepoFile, repoRoot } from './lint-kit.mjs';
@@ -111,8 +112,8 @@ function ghFetcher(env = process.env) {
 }
 
 /** The unauthenticated status code of a URL, as the `Embargo` rule's `curl` reads it. */
-function curlStatus(url) {
-  const run = spawnSync('curl', ['-s', '-o', '/dev/null', '-w', '%{http_code}', url], { encoding: 'utf8' });
+export function curlStatus(url) {
+  const run = spawnSync('curl', ['-s', '-o', devNull, '-w', '%{http_code}', url], { encoding: 'utf8' });
   return run.status === 0 ? run.stdout.trim() : '000';
 }
 

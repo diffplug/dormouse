@@ -15,6 +15,7 @@ import {
   SETUP_TOKEN_INVALID_ERROR,
   UNAUTHORIZED_ERROR,
   UNMINTED_DELIVERY_ID_ERROR,
+  enrollConfirmDigits,
   enrollUserCode,
   fromBase64Url,
   generateNoiseKeyPair,
@@ -41,9 +42,8 @@ import {
 } from "../../../remote-lib-common/test/harness/actors.mjs";
 import { ADMIN_EMAIL } from "../entitlement";
 import { migrations } from "../migrations";
-import { ENROLLMENT_TTL_MS } from "../policy-constants";
+import { ENROLLMENT_POLL_INTERVAL_S, ENROLLMENT_TTL_MS } from "../policy-constants";
 import {
-  ENROLLMENT_POLL_INTERVAL_S,
   MAX_BURROWS_PER_ACCOUNT,
   MAX_PASSKEYS_PER_ACCOUNT,
   MAX_SESSIONS_PER_ACCOUNT,
@@ -283,6 +283,7 @@ async function fixture({ bindings = {} }: { bindings?: Record<string, string | u
     return begun.json as {
       deviceCode: string;
       userCode: string;
+      confirmDigits: string;
       verificationUrl: string;
       expiresAt: number;
       interval: number;
@@ -292,12 +293,20 @@ async function fixture({ bindings = {} }: { bindings?: Record<string, string | u
   const poll = (deviceCode: unknown, purpose: "remote" | "voice" = "remote") =>
     call("POST", API_ROUTES.burrowEnrollPoll, { body: { deviceCode, purpose } });
 
-  /** What the account Worker's approval writes (`hosted/server/relay-account.ts`). */
-  const approve = (userCode: string, userId: string, purpose: "remote" | "voice" = "remote") =>
+  /**
+   * What the account Worker's approval writes (`hosted/server/relay-account.ts`),
+   * with the digits `userCode` shows unless `confirmDigits` types others.
+   */
+  const approve = async (
+    userCode: string,
+    userId: string,
+    purpose: "remote" | "voice" = "remote",
+    confirmDigits?: string,
+  ) =>
     sql(
-      `INSERT INTO dormouse_relay_enrollment_approvals ("userCode", "userId", "expiresAt", purpose)
-      VALUES ($1, $2, now() + interval '10 minutes', $3)`,
-      [userCode, userId, purpose],
+      `INSERT INTO dormouse_relay_enrollment_approvals ("userCode", "userId", "expiresAt", purpose, "confirmDigits")
+      VALUES ($1, $2, now() + interval '10 minutes', $3, $4)`,
+      [userCode, userId, purpose, confirmDigits ?? (await enrollConfirmDigits(TEST_ENROLL_SECRET, userCode))],
     );
 
   /** The relay's Cron Trigger, as Cloudflare fires it. */
@@ -996,6 +1005,8 @@ test("a device-code enrollment: begin stores nothing, pending until approved, th
   expect(Math.abs(begun.expiresAt - (Date.now() + ENROLLMENT_TTL_MS))).toBeLessThan(60_000);
   expect(isEnrollUserCode(begun.userCode)).toBe(true);
   expect(begun.userCode).toBe(await enrollUserCode(TEST_ENROLL_SECRET, bytes));
+  // The digits Dormouse shows, the same secret's HMAC of the user code.
+  expect(begun.confirmDigits).toBe(await enrollConfirmDigits(TEST_ENROLL_SECRET, begun.userCode));
   expect(begun.verificationUrl).toBe(`${ORIGINS.account}/enroll#${begun.userCode}`);
   expect(begun.interval).toBe(ENROLLMENT_POLL_INTERVAL_S);
   // Begin wrote nothing (`pocket.test.ts` begins with no database at all).
@@ -1064,6 +1075,94 @@ test("an approval redeems only the device code its user code is derived from", a
   expect(await f.sql(`SELECT count(*)::int AS n FROM dormouse_relay_burrows`)).toEqual([{ n: 0 }]);
   // A itself still redeems.
   expect((await f.poll(a.deviceCode)).json).toMatchObject({ status: "enrolled" });
+});
+
+test("an approval with other digits redeems nothing, for either purpose, until it expires", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const owner = await f.account(ADMIN_EMAIL);
+  for (const purpose of ["remote", "voice"] as const) {
+    const begun = await f.begin(purpose);
+    const other = String((Number(begun.confirmDigits) + 1) % 100).padStart(2, "0");
+    await f.approve(begun.userCode, owner, purpose, other);
+    // Every poll says so, so a poll whose answer was lost learns it too.
+    for (let i = 0; i < 2; i++)
+      expect(await f.poll(begun.deviceCode, purpose)).toMatchObject({ status: 200, json: { status: "mismatch" } });
+    // Even an approver no longer entitled: the digits are told first.
+    await f.sql(`UPDATE "user" SET "emailVerified" = false WHERE id = $1`, [owner]);
+    expect((await f.poll(begun.deviceCode, purpose)).json).toEqual({ status: "mismatch" });
+    await f.sql(`UPDATE "user" SET "emailVerified" = true WHERE id = $1`, [owner]);
+  }
+  expect(await f.sql(`SELECT count(*)::int AS n FROM dormouse_relay_burrows`)).toEqual([{ n: 0 }]);
+  expect(await f.sql(`SELECT count(*)::int AS n FROM dormouse_voice_tokens`)).toEqual([{ n: 0 }]);
+  expect(
+    await f.sql(`SELECT count(*)::int AS n FROM dormouse_relay_enrollment_approvals WHERE "redeemedAt" IS NOT NULL`),
+  ).toEqual([{ n: 0 }]);
+});
+
+test("a poll marks a mismatched approval for its approver's page, keeping the first mark, and it still redeems nothing", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const owner = await f.account(ADMIN_EMAIL);
+  const marked = (userCode: string) =>
+    f.sql(`SELECT "mismatchedAt" FROM dormouse_relay_enrollment_approvals WHERE "userCode" = $1`, [userCode]);
+  for (const purpose of ["remote", "voice"] as const) {
+    const begun = await f.begin(purpose);
+    await f.approve(begun.userCode, owner, purpose, String((Number(begun.confirmDigits) + 1) % 100).padStart(2, "0"));
+    expect(await marked(begun.userCode)).toEqual([{ mismatchedAt: null }]);
+    expect((await f.poll(begun.deviceCode, purpose)).json).toEqual({ status: "mismatch" });
+    const [{ mismatchedAt }] = await marked(begun.userCode);
+    expect(mismatchedAt).toBeInstanceOf(Date);
+    // Marked, it still answers mismatch and redeems nothing; a later poll
+    // leaves the first mark.
+    expect((await f.poll(begun.deviceCode, purpose)).json).toEqual({ status: "mismatch" });
+    expect(await marked(begun.userCode)).toEqual([{ mismatchedAt }]);
+  }
+  expect(await f.sql(`SELECT count(*)::int AS n FROM dormouse_relay_burrows`)).toEqual([{ n: 0 }]);
+  expect(await f.sql(`SELECT count(*)::int AS n FROM dormouse_voice_tokens`)).toEqual([{ n: 0 }]);
+  expect(
+    await f.sql(`SELECT count(*)::int AS n FROM dormouse_relay_enrollment_approvals WHERE "redeemedAt" IS NOT NULL`),
+  ).toEqual([{ n: 0 }]);
+  // The code's own digits redeem, unmarked.
+  const matched = await f.begin();
+  await f.approve(matched.userCode, owner);
+  expect((await f.poll(matched.deviceCode)).json).toMatchObject({ status: "enrolled" });
+  expect(await marked(matched.userCode)).toEqual([{ mismatchedAt: null }]);
+  // Other digits, but not under a live, unredeemed approval of this purpose:
+  // an expired one, a redeemed one, or one for the other purpose. None is
+  // marked, and none redeems.
+  const unmarked = async (
+    purpose: "remote" | "voice",
+    approve: (userCode: string, wrong: string) => Promise<unknown>,
+    answer: unknown,
+  ) => {
+    const begun = await f.begin(purpose);
+    await approve(begun.userCode, String((Number(begun.confirmDigits) + 1) % 100).padStart(2, "0"));
+    expect((await f.poll(begun.deviceCode, purpose)).json).toEqual(answer);
+    expect(await marked(begun.userCode)).toEqual([{ mismatchedAt: null }]);
+  };
+  await unmarked(
+    "remote",
+    async (userCode, wrong) => {
+      await f.approve(userCode, owner, "remote", wrong);
+      await f.sql(`UPDATE dormouse_relay_enrollment_approvals SET "expiresAt" = now() WHERE "userCode" = $1`, [userCode]);
+    },
+    { status: "pending" },
+  );
+  await unmarked(
+    "voice",
+    async (userCode, wrong) => {
+      await f.approve(userCode, owner, "voice", wrong);
+      await f.sql(`UPDATE dormouse_relay_enrollment_approvals SET "redeemedAt" = now() WHERE "userCode" = $1`, [userCode]);
+    },
+    { status: "redeemed" },
+  );
+  await unmarked("remote", (userCode, wrong) => f.approve(userCode, owner, "voice", wrong), { status: "pending" });
+  expect(await f.sql(`SELECT count(*)::int AS n FROM dormouse_relay_burrows`)).toEqual([{ n: 1 }]);
 });
 
 test("two polls racing one approval mint one Burrow", async ({ onTestFinished }) => {

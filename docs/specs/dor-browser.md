@@ -111,7 +111,7 @@ Source of truth: `lib/src/components/wall/AgentBrowserScreenModal.tsx`, `offered
 
 **Must preserve the current device-pixel ratio when DPR is omitted.** A ratio the provider cannot apply fails before changing dimensions; Playwright accepts only its context's current ratio. **Never turn an observed Playwright DPR into an explicit request for future contexts.** Presets describe viewport geometry, not devices.
 
-**Must size managed CLI, GUI and Tool browsers before the destination's first script runs.** **Must preserve launch settings during preparation and stream discovery; apply `--state` once, on the blank page** (rationale). Deferred `pane-sync` starts fixed until placement. **Must engage sync when resolving that preset**, sending the actual pane dimensions on first attach. Failed initialization never navigates at a substituted size. **Must apply a renderer and viewport chosen together to the new renderer.**
+**Must size managed CLI, GUI and Tool browsers before destination scripts run.** **Must preserve launch settings during preparation and stream discovery; apply `--state` once, on the blank page** (rationale). Deferred `pane-sync` starts fixed until placement. **Must engage sync when resolving that preset**, sending actual pane dimensions on first attach. Failed initialization never navigates at a substituted size. **Must apply a renderer and viewport chosen together to the new renderer.**
 
 **Must query the active page's measured CSS dimensions and DPR**, never infer them from the pane or a screenshot. `dor`'s sizing commands share the Display modal's serialized writes (`docs/specs/dor-cli.md` → Browser viewport control).
 
@@ -248,11 +248,13 @@ Source of truth: `createPlaywrightProvider` in `lib/src/host/playwright-host.ts`
 
 ## Iframe Renderer
 
+**Must reload the current observed page, preserving its query, fragment, and history position**, including on hosts without a proxy.
+
 `dor iframe <url>` frames the page's own DOM — zero-lag for human inspection, but agents cannot drive or read it. On hosts with `createIframeProxyUrl`, `IframePanel` frames a per-grant loopback proxy URL; without it, a raw uninstrumented iframe. The desktop playground's `createIframeProxyUrl` fronts only its own viewers (`docs/specs/tutorial.md` → Playground filesystem).
 
 The proxy instruments any `http://` upstream, loopback and remote alike: headers are rewritten per the table below and the shim injected into HTML; HTTP and WebSocket traffic passes through. A site's "do not embed" is overridden, not obeyed (rationale); the sandbox neutralizes JS framebusting. **Must refuse link-local / cloud-metadata address literals (`scheme`) after canonicalizing equivalent spellings** — decimal/octal/hex, short forms, IPv4-mapped IPv6; this checks the hostname literal, not DNS answers, and named targets remain the user's command authority.
 
-**Must refuse `https://` at every entry to the iframe renderer on a host with the proxy** (a host without it frames https raw):
+**Must refuse `https://`, regardless of scheme casing, at every entry to the iframe renderer on a host with the proxy** (a host without it frames https raw):
 
 | Entry | Outcome |
 | --- | --- |

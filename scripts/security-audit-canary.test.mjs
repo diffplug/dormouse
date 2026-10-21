@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { CANARY_DOMAINS, POOL_DIR, parseSeed, publicRecord, readPool, redact, score, shuffle, summaryLine, union } from './security-audit-canary.mjs';
 import { SENTINEL, domains, ruleIndex } from './security-audit-report.mjs';
+import { streams } from './security-audit-codex.mjs';
 import { repoRoot as repo, tempDir, workflowRunBlock } from './lint-kit.mjs';
 
 // docs/specs/security-audit.md -> "Canary recall".
@@ -122,7 +123,7 @@ function checkout(t) {
   const bin = join(base, 'bin');
   const runner = join(base, 'runner');
   for (const sub of [bin, runner, ...['scripts', 'src', 'docs/specs', POOL_DIR].map((d) => join(dir, d))]) mkdirSync(sub, { recursive: true });
-  for (const f of ['security-audit-canary.mjs', 'security-audit-report.mjs', 'security-audit-local.sh', 'clamp-issue-body.mjs', 'spec-md.mjs']) {
+  for (const f of ['security-audit-canary.mjs', 'security-audit-codex.mjs', 'security-audit-report.mjs', 'security-audit-local.sh', 'clamp-issue-body.mjs', 'spec-md.mjs']) {
     copyFileSync(join(repo, 'scripts', f), join(dir, 'scripts', f));
   }
   for (const e of readdirSync(join(repo, '.github/audit'), { withFileTypes: true }).filter((x) => x.isFile())) {
@@ -459,13 +460,15 @@ test('the local Codex canary takes a CI run\'s key, publishes with or without Cl
   const first = spawnSync('bash', ['scripts/security-audit-local.sh', 'canary', '3', '--key', '42'], { cwd: dir, env, encoding: 'utf8' });
   assert.equal(first.status, 0, first.stderr);
   const claudeCard = first.stdout.match(/^==> scorecard: (\S+);/m)[1];
-  // Codex reports nothing, so either engine caught what Claude did.
+  // Codex reports nothing, so either engine caught what Claude did: each
+  // work stream's session appends to the fragment the runner opened, and only
+  // the qualitative one writes a line.
   stub(bin, 'codex', `
     const fs = require('node:fs');
     const args = process.argv.slice(2);
     fs.appendFileSync(process.env.CALLS, 'codex ' + args.slice(0, -1).join(' ') + '\\n');
     const output = args[args.length - 1].match(/\\*\\*Output file:\\*\\* \\x60([^\\x60]+)\\x60/)[1];
-    fs.writeFileSync(output, ${JSON.stringify(fragment([]))});
+    if (/^# Work stream \\x60qualitative\\x60 /m.test(args[args.length - 1])) fs.appendFileSync(output, '- QUALITATIVE: done — x\\n');
   `);
   stub(bin, 'claude', 'process.exit(5);');
   // Without Claude's scorecard, the command publishes Codex's own counts and leaves either empty.
@@ -480,7 +483,7 @@ test('the local Codex canary takes a CI run\'s key, publishes with or without Cl
   assert.match(result.stdout, /^either: 1\/2 seeds caught by this engine or the other$/m);
   assert.ok(result.stdout.includes(`gh workflow run codex-audit-report.yaml -R fixture/repo --ref main -f commit=${head} -f model=gpt-6-sol -f canary_run=42 -f canary_seeded=2 -f canary_caught=0 -f canary_either=1 -f canary_unfinished=0\n`), result.stdout);
   const codexCalls = calls(base).filter((c) => c.startsWith('codex '));
-  assert.equal(codexCalls.length, 2 * CANARY_DOMAINS.length);
+  assert.equal(codexCalls.length, 2 * CANARY_DOMAINS.reduce((n, d) => n + streams(repo, d).length, 0));
   for (const c of codexCalls) assert.equal(c, 'codex exec -m gpt-6-sol --cyber-access-program daybreak_blue --sandbox workspace-write -c sandbox_workspace_write.network_access=true --ephemeral');
   // One read, the run's commit, on each run; nothing filed.
   assert.deepEqual(calls(base).filter((c) => c.startsWith('gh ')), Array(3).fill('gh api repos/fixture/repo/actions/runs/42 --jq .head_sha'));

@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { assertHostedBundlesDisclosed, bundledReleases, hostedBundleEntries, hostedBundles, undisclosedReleases } from './hosted-bundles.js';
+import { assertHostedBundlesDisclosed, bundledReleases, hostedBundleEntries, hostedBundles, moduleScriptEntries, undisclosedReleases } from './hosted-bundles.js';
 
 const repoRoot = resolve(import.meta.dirname, '../..');
 const committed = () => JSON.parse(readFileSync(resolve(import.meta.dirname, '../src/data/dependencies-npm.json'), 'utf-8'));
@@ -53,6 +53,15 @@ describe('Hosted bundle disclosure', () => {
       { entry: 'server/voice-worker.ts', platform: 'worker' },
       { entry: 'src/main.tsx', platform: 'browser' },
     ]);
+  });
+
+  it('reads a module script\'s src in any attribute order, and refuses one it cannot read', () => {
+    expect(moduleScriptEntries([
+      '<script type="module" src="/src/main.tsx"></script>',
+      '<script src="/src/extra.ts" type="module"></script>',
+      '<script src="/classic.js"></script>',
+    ].join('\n'))).toEqual(['src/main.tsx', 'src/extra.ts']);
+    expect(() => moduleScriptEntries("<script type='module' src='/src/main.tsx'></script>")).toThrow(/cannot read the src/);
   });
 
   it('finds every release Hosted bundles in the committed disclosure, and fails on one it drops', async () => {

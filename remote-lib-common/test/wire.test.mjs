@@ -6,7 +6,9 @@ import {
   API_ROUTES,
   E2E_ID_LENGTH,
   ENROLL_USER_CODE_ALPHABET,
+  enrollConfirmDigits,
   enrollUserCode,
+  isEnrollConfirmDigits,
   isEnrollUserCode,
   normalizeEnrollUserCode,
   MAX_E2E_CIPHERTEXT_LENGTH,
@@ -296,10 +298,43 @@ test('enrollUserCode is the HMAC of the device code, five bits a character, past
   await assert.rejects(enrollUserCode(secret, deviceCode, fake(macOf([0, 1, 2, 3, 4, 5, 6]))), /No user code/);
 });
 
+test('enrollConfirmDigits is the HMAC of the user code, sixteen bits a draw, 65500 and up skipped', async () => {
+  const secret = 'test-enroll-secret';
+  // An independent reading of the same rule over node's HMAC.
+  const mac = createHmac('sha256', secret).update(`confirm:${userCode}`).digest();
+  let expected;
+  for (let at = 0; expected === undefined; at += 2) {
+    const value = mac.readUInt16BE(at);
+    if (value < 65500) expected = String(value % 100).padStart(2, '0');
+  }
+  assert.equal(await enrollConfirmDigits(secret, userCode), expected);
+  assert.ok(isEnrollConfirmDigits(expected));
+  // Another secret, or another user code, is other digits.
+  assert.notEqual(await enrollConfirmDigits(`${secret}x`, userCode), expected);
+  assert.notEqual(await enrollConfirmDigits(secret, '23AB-YZ9M'), expected);
+
+  // A draw of 65500 or more is skipped, never folded onto the low digits; a
+  // single digit is padded.
+  const macOf = (words) => {
+    const bytes = new Uint8Array(32).fill(0xff);
+    words.forEach((word, i) => new DataView(bytes.buffer).setUint16(i * 2, word));
+    return bytes;
+  };
+  const fake = (bytes) => ({ importKey: async () => ({}), sign: async () => bytes.buffer });
+  assert.equal(await enrollConfirmDigits(secret, userCode, fake(macOf([65500, 65535, 65499]))), '99');
+  assert.equal(await enrollConfirmDigits(secret, userCode, fake(macOf([65500, 7]))), '07');
+  await assert.rejects(enrollConfirmDigits(secret, userCode, fake(macOf([]))), /No confirmation digits/);
+  for (const shape of ['00', '99'])
+    assert.ok(isEnrollConfirmDigits(shape), shape);
+  for (const shape of ['0', '100', ' 42', '4a', 42, null])
+    assert.equal(isEnrollConfirmDigits(shape), false, String(shape));
+});
+
 test('isBurrowEnrollBeginResponse holds each field to its shape and bounds', () => {
   const begin = {
     deviceCode: 'D'.repeat(RELAY_BEARER_LENGTH),
     userCode,
+    confirmDigits: '07',
     verificationUrl: `https://hosted.dormouse.sh/enroll#${userCode}`,
     expiresAt: 1_800_000_000_000,
     interval: 5,
@@ -319,6 +354,9 @@ test('isBurrowEnrollBeginResponse holds each field to its shape and bounds', () 
     { ...begin, userCode: undefined },
     { ...begin, userCode: '23ab-yz9k' },
     { ...begin, userCode: '23ABYZ9K' },
+    { ...begin, confirmDigits: undefined },
+    { ...begin, confirmDigits: '7' },
+    { ...begin, confirmDigits: 7 },
     { ...begin, verificationUrl: 7 },
     { ...begin, verificationUrl: `https://hosted.dormouse.sh/enroll#${'x'.repeat(512)}` },
     { ...begin, expiresAt: undefined },
@@ -335,10 +373,11 @@ test('isBurrowEnrollBeginResponse holds each field to its shape and bounds', () 
   }
 });
 
-test('isBurrowVoicePollResponse knows four answers, an enabled one carrying a voice token', () => {
+test('isBurrowVoicePollResponse knows five answers, an enabled one carrying a voice token', () => {
   const voiceToken = `dmv_${'A'.repeat(43)}`;
   assert.ok(isBurrowVoicePollResponse({ status: 'pending' }));
   assert.ok(isBurrowVoicePollResponse({ status: 'expired' }));
+  assert.ok(isBurrowVoicePollResponse({ status: 'mismatch' }));
   assert.ok(isBurrowVoicePollResponse({ status: 'redeemed' }));
   assert.ok(isBurrowVoicePollResponse({ status: 'enabled', voiceToken }));
   for (const wrong of [
@@ -354,10 +393,11 @@ test('isBurrowVoicePollResponse knows four answers, an enabled one carrying a vo
   }
 });
 
-test('isBurrowEnrollPollResponse knows four answers, a redeemed one naming its Burrow', () => {
+test('isBurrowEnrollPollResponse knows five answers, a redeemed one naming its Burrow', () => {
   const burrowId = 'A'.repeat(22);
   assert.ok(isBurrowEnrollPollResponse({ status: 'pending' }));
   assert.ok(isBurrowEnrollPollResponse({ status: 'expired' }));
+  assert.ok(isBurrowEnrollPollResponse({ status: 'mismatch' }));
   assert.ok(isBurrowEnrollPollResponse({ status: 'redeemed', burrowId }));
   assert.ok(isBurrowEnrollPollResponse({ status: 'enrolled', enrollment: {} }));
   for (const wrong of [
