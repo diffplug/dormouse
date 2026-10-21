@@ -16,7 +16,7 @@ A focused cross-origin iframe surface swallows the gesture; the proxy shim detec
 
 ## Pane actions (command mode)
 
-Unmodified keys; Shift may produce the printed character.
+Modifier handling: [layout.md](layout.md#keyboard-shortcuts-command-mode).
 
 | Key | Action | Description |
 |-----|--------|-------------|

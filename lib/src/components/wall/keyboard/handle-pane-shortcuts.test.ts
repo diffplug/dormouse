@@ -85,6 +85,27 @@ describe('handlePaneShortcuts kill behavior', () => {
     }
   });
 
+  it.each([
+    ['|', { altKey: true }],
+    ['|', { ctrlKey: true, altKey: true }],
+    ['%', { altKey: true }],
+    ['"', { ctrlKey: true, altKey: true }],
+  ] as const)('accepts the printed split character %s through Option or AltGr', (key, modifiers) => {
+    const ctx = makeCtx();
+    const event = new KeyboardEvent('keydown', { key, ...modifiers, cancelable: true });
+    expect(handlePaneShortcuts(event, ctx, { current: null })).toBe(true);
+    expect(event.defaultPrevented).toBe(true);
+    expect(key === '"' ? ctx.wallActionsRef.current.onSplitV : ctx.wallActionsRef.current.onSplitH)
+      .toHaveBeenCalledWith('pane-a', 'keyboard');
+  });
+
+  it('does not turn a Command chord into a printed symbol binding', () => {
+    const ctx = makeCtx();
+    const event = new KeyboardEvent('keydown', { key: '|', metaKey: true, altKey: true, cancelable: true });
+    expect(handlePaneShortcuts(event, ctx, { current: null })).toBe(false);
+    expect(event.defaultPrevented).toBe(false);
+  });
+
   beforeEach(() => vi.clearAllMocks());
 
   it.each(['x', 'k'])('hands the %s gesture to the Wall kill request', (key) => {
