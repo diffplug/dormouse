@@ -100,7 +100,7 @@ Source of truth: `lib/src/lib/terminal-report-filter.ts`, pinned by `lib/src/lib
 
 #### Replay-time mode-reset tail (Dormouse-emitted)
 
-**When a Session's process is gone and its terminal stays — a dead replay, a reap, an exit — Dormouse writes the fixed `REPLAY_MODE_RESET` tail**, returning every mode a dead program could leave latched to its default, before any exit notice (rationale). **Never on a live resume**, where the running process owns its modes; a cold `restoreTerminal` replays nothing to reset.
+**When a Session's process is gone and its terminal stays — a dead replay, a reap, an exit — Dormouse writes the fixed `REPLAY_MODE_RESET` tail**, resetting input protocols and text-layout modes before any exit notice, while retaining the normal buffer and scrollback (rationale). **Never on a live resume**, where the running process owns its modes; a cold `restoreTerminal` replays nothing to reset.
 
 Source of truth: `REPLAY_MODE_RESET` in `lib/src/lib/terminal-report-filter.ts`.
 
