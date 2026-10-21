@@ -72,9 +72,9 @@ Source of truth: `lib/src/lib/terminal-mouse-router.ts`.
 
 ### 3.4 Selection Follows Content
 
-A selection is anchored to the characters under it, not to screen coordinates: stored in absolute buffer rows (scrollback + viewport).
+**Must anchor selections to characters in absolute buffer rows** (scrollback + viewport).
 
-- **Must carry selections through vertical scrolling and trimming of older scrollback** by coordinate math alone, never matching. **Must cancel when selected rows are trimmed**, even if identical text replaces them.
+- **Must follow vertical scrolling and older scrollback trims** using coordinate math, never matching. **Must cancel when selected rows are trimmed**, even if identical text replaces them.
 - **Must cancel a finalized selection on the next xterm render when its extracted selected text changes**; repaints elsewhere are irrelevant. **Never add a partial-match or content-tracking heuristic** (§9.1).
 - **Terminal resize** carries a finalized linewise selection Dormouse owns, in the normal buffer, through xterm's reflow (rationale). Its editor stays open in the same format and same-labeled scope, else As selected; per-break edits drop unless the width held.
   - **Must cancel if an edge's line was trimmed or its cells no longer read as the selected text** (rationale).
