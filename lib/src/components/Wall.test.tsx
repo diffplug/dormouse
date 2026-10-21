@@ -1,4 +1,4 @@
-import { previousWorkspaceSession } from '../lib/window-session-aggregator';
+import { previousWorkspaceSession, setWorkspaceTransferPending } from '../lib/window-session-aggregator';
 /**
  * @vitest-environment jsdom
  *
@@ -382,6 +382,62 @@ describe('Wall on the Lath engine', () => {
     resolveCwd('/fresh');
     expect(await outcome).toBe(change === 'no change' ? 'accepted' : 'Workspace changed while preparing its move; try again');
     if (change === 'no change') expect((await prepared).payload.workspace.session.panes).toEqual([expect.objectContaining({ id: 'surface:a', cwd: '/fresh' })]);
+  });
+
+  it.each(['keyboard split', 'host split', 'host replace', 'header kill', 'split', 'iframe', 'kill'] as const)('keeps Workspace membership stable during a transfer: %s', async (action) => {
+    await act(async () => root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />));
+    await flush();
+    const handle = getWallHandle(DEFAULT_WORKSPACE_ID)!;
+    const respond = vi.fn();
+    setWorkspaceTransferPending(DEFAULT_WORKSPACE_ID, true);
+    try {
+      await act(async () => {
+        if (action === 'keyboard split') window.dispatchEvent(new KeyboardEvent('keydown', { key: '|', bubbles: true }));
+        else if (action === 'host split' || action === 'host replace') window.dispatchEvent(new CustomEvent('dormouse:new-terminal', { detail: { replaceUntouched: action === 'host replace' } }));
+        else if (action === 'header kill') container.querySelector<HTMLButtonElement>('[data-lath-leaf="surface:a"] [aria-label="Kill"]')!.click();
+        else handle.handleDorControl({
+          method: SURFACE_CONTROL_METHODS[action],
+          params: { surface: 'surface:a', direction: 'right', url: 'http://localhost:8080', confirmation: { mode: 'dangerously' } },
+          respond,
+        });
+      });
+      await flush();
+      expect(handle.surfaceIds()).toEqual(['surface:a']);
+      if (action === 'split' || action === 'iframe' || action === 'kill') {
+        expect(respond).toHaveBeenCalledWith({ ok: false, error: expect.stringMatching(/transferring/i) });
+      }
+    } finally { setWorkspaceTransferPending(DEFAULT_WORKSPACE_ID, false); }
+  });
+
+  it('refuses a close whose helper inspection finishes after a transfer starts', async () => {
+    await act(async () => root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />));
+    await flush();
+    const helper: helpers.HelperTerminal = { id: 'surface:helper-a', parentId: 'surface:a', command: '', status: 'off' };
+    vi.spyOn(helpers, 'getHelper').mockReturnValue(helper);
+    let inspected!: (busy: boolean) => void;
+    vi.spyOn(helpers, 'helperHasWork').mockImplementationOnce(() => new Promise(resolve => { inspected = resolve; }));
+    const handle = getWallHandle(DEFAULT_WORKSPACE_ID)!;
+    const respond = vi.fn();
+    handle.handleDorControl({ method: SURFACE_CONTROL_METHODS.kill,
+      params: { surface: 'surface:a', confirmation: { mode: 'dangerously' } }, respond });
+    setWorkspaceTransferPending(DEFAULT_WORKSPACE_ID, true);
+    try {
+      await act(async () => { inspected(false); });
+      await flush();
+      expect(handle.surfaceIds()).toEqual(['surface:a']);
+      expect(respond).toHaveBeenCalledWith({ ok: false, error: 'Workspace is transferring' });
+    } finally { setWorkspaceTransferPending(DEFAULT_WORKSPACE_ID, false); }
+  });
+
+  it('allows a split again after a transfer is handed back', async () => {
+    await act(async () => root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />));
+    await flush();
+    setWorkspaceTransferPending(DEFAULT_WORKSPACE_ID, true);
+    await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: '|', bubbles: true })));
+    setWorkspaceTransferPending(DEFAULT_WORKSPACE_ID, false);
+    await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: '|', bubbles: true })));
+    await flush();
+    expect(getWallHandle(DEFAULT_WORKSPACE_ID)!.surfaceIds()).toHaveLength(2);
   });
 
   it('still publishes fresh CWDs from an ordinary Workspace save when the layout changes during its probe', async () => {

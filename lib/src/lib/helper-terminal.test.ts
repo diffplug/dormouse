@@ -1,3 +1,5 @@
+import { registerWallHandle, stubWallHandle } from '../components/wall/wall-handles';
+import { setWorkspaceTransferPending } from './window-session-aggregator';
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { registry, pendingShellOpts, type TerminalEntry } from './terminal-store';
@@ -23,6 +25,49 @@ afterEach(() => { setHelperVisible('parent', false); disposeHelper('parent'); re
 const prompt = (id: string) => applyTerminalSemanticEvents(id, [{ type: 'promptStart' }, { type: 'promptEnd' }]);
 
 describe('helper lifecycle', () => {
+  it.each(['open', 'reset', 'promote'] as const)('refuses helper %s while its Workspace is transferring', async action => {
+    const unregister = registerWallHandle(stubWallHandle('ws', { ownsSurface: id => id === 'parent' }));
+    const helper = action === 'open' ? undefined : await openHelper('parent');
+    setWorkspaceTransferPending('ws', true);
+    try {
+      const operation = action === 'open' ? openHelper('parent') : action === 'reset'
+        ? resetHelper('parent', { workspaceId: 'ws', title: 'shell' }) : beginPromotion('parent');
+      await expect(operation).rejects.toThrow('Workspace is transferring');
+      expect(getHelper('parent')).toBe(helper);
+      expect(helper?.promoting).toBeFalsy();
+    } finally { setWorkspaceTransferPending('ws', false); if (getHelper('parent')?.promoting) await cancelPromotion('parent'); unregister(); }
+  });
+
+  it('does not spawn a helper when its settings answer arrives during a transfer', async () => {
+    const unregister = registerWallHandle(stubWallHandle('ws', { ownsSurface: id => id === 'parent' }));
+    let answer!: (settings: object) => void;
+    host.terminalContext.mockImplementationOnce(() => new Promise(resolve => { answer = resolve; }));
+    const opening = openHelper('parent');
+    setWorkspaceTransferPending('ws', true);
+    try {
+      answer({ command: 'git status' });
+      await expect(opening).rejects.toThrow('Workspace is transferring');
+      expect(getHelper('parent')).toBeUndefined();
+      expect([...registry.keys()]).toEqual(['parent']);
+    } finally { setWorkspaceTransferPending('ws', false); unregister(); }
+  });
+
+  it('keeps the old helper when its refresh inspection finishes during a transfer', async () => {
+    const unregister = registerWallHandle(stubWallHandle('ws', { ownsSurface: id => id === 'parent' }));
+    const helper = await openHelper('parent');
+    helper.status = 'completed';
+    let inspected!: (info: object) => void;
+    host.terminalContext.mockImplementationOnce(() => new Promise(resolve => { inspected = resolve; }));
+    const opening = openHelper('parent');
+    setWorkspaceTransferPending('ws', true);
+    try {
+      inspected({ busy: false });
+      await expect(opening).rejects.toThrow('Workspace is transferring');
+      expect(getHelper('parent')).toBe(helper);
+      expect(registry.has(helper.id)).toBe(true);
+    } finally { setWorkspaceTransferPending('ws', false); unregister(); }
+  });
+
   it('takes a Surface id from the host pool at birth, past one already live', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     await installSurfaceIdPool(async (count) => Array.from({ length: count }, (_, i) => `surface:${5 + i}`), 0);

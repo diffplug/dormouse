@@ -1,7 +1,7 @@
 # Terminal context
 
 > - See `docs/specs/glossary.md` for Surface / Session / Pane vocabulary.
-> - This spec owns the helper terminal lifecycle and global autorun preference.
+> - Owns helper lifecycle and global autorun.
 > - Layout owns context composition and input focus; terminal-state owns shell semantics; alert owns suppression; transport owns live recovery; dor-cli owns helper-origin `dor` commands.
 
 ## Helper lifecycle
@@ -21,6 +21,8 @@
 Source of truth: `openHelper` / `closeHelperParent` in `lib/src/lib/helper-terminal.ts`; `markSessionTouched` in `lib/src/lib/terminal-lifecycle.ts`. Tests: `lib/src/lib/helper-terminal.test.ts`.
 
 ## Promotion and source closure
+
+Workspace movement: `docs/specs/standalone.md` → Transfer.
 
 **Must promote the actual Session into a regular split beside its source**, preserving the PTY, xterm, scrollback, directory, partial input, and identity. Cancel pending autorun, close context, make its Surface id targetable, and focus the promoted terminal. Failed placement restores auxiliary host ownership. The source's next opening creates a new helper.
 
