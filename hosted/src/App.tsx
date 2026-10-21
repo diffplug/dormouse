@@ -9,7 +9,7 @@ import {
   acceptTerms,
   approveEnrollment,
   getAccounts,
-  getApprovalMismatched,
+  getApproval,
   getComputers,
   getHostedVoice,
   getPasskeys,
@@ -123,7 +123,7 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
   // Bumped by every action and on unmount: stops re-reading for a Pending.
   const actionGeneration = useRef(0);
   // The Pending the page waits on, from its first re-read until a read ends
-  // it or an action: each read asks whether its digits mismatched. Once its
+  // it or an action: each read asks what a poll made of it. Once its
   // late notice is up (`late`), a later read that ends it replaces that.
   const awaited = useRef<{ pending: Pending; late: boolean } | null>(null);
   const callbackError = useRef(
@@ -142,7 +142,7 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
     ).catch(failed);
     // A failed list hides its section, never the account page.
     const watched = awaited.current?.pending.userCode;
-    const [linked, voice, enrolled, registered, mismatched] = current
+    const [linked, voice, enrolled, registered, approval] = current
       ? await Promise.all([
           asRead(getAccounts()).catch(failed),
           getHostedVoice().catch(() => null),
@@ -150,7 +150,7 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
           getPasskeys().catch(() => null),
           watched === undefined
             ? undefined
-            : getApprovalMismatched(watched).catch(() => undefined),
+            : getApproval(watched).catch(() => undefined),
         ])
       : [[], null, null, null, undefined];
     if (current) await recordContinued().catch(() => {});
@@ -168,7 +168,7 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
       "",
       enrollingRef.current ? "/enroll" : current ? "/account" : "/login",
     );
-    const state: AccountState = { voice, computers: enrolled, mismatched };
+    const state: AccountState = { voice, computers: enrolled, approval };
     const late = awaited.current?.late && pendingEnd(awaited.current.pending, state);
     if (late) {
       awaited.current = null;
@@ -346,7 +346,8 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
     mutate("approve", async () => {
       const voice = enrolling?.purpose === "voice";
       // The computer's next poll redeems the approval: until then neither
-      // Natural Voice nor the computer shows on the account.
+      // Natural Voice nor the computer shows on the account, nor the
+      // approval's own read says so.
       const shows = approvalShows(voice ? "voice" : "remote", {
         voice: hostedVoice,
         computers,
@@ -355,10 +356,6 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
       clearEnrollment();
       const later =
         "Keep Dormouse open on your computer; this page updates when you come back to it.";
-      if (!shows)
-        return setNotice({
-          text: `Approved ${code}. Dormouse on your computer finishes the requested setup in a few seconds.`,
-        });
       const mismatch = `The digits you typed for ${code} were not the ones Dormouse showed on your computer, so nothing was approved. Start again from Dormouse on your computer.`;
       return voice
         ? {

@@ -420,7 +420,7 @@ async function fixture(
         body: JSON.stringify({ userCode, confirmDigits }),
         headers: { origin: from, "content-type": "application/json" },
       });
-    /** Whether this account's live approval of `userCode` was found mismatched, as the page reads it. */
+    /** What a poll made of this account's live approval of `userCode`, as the page reads it. */
     const mismatched = async (userCode: string, headers?: Record<string, string>) => {
       const response = await request(`/api/relay/enrollments/${encodeURIComponent(userCode)}`, { headers });
       return { status: response.status, json: await response.json() };
@@ -1234,7 +1234,7 @@ test("enrollment: only a recent admin login from this origin approves, and the B
   ).toEqual([{ redeemedBurrowId: null, redeemedAt: null }]);
 });
 
-test("the approver's page reads its approval's mismatch once a poll found it, and only its own approval's", async ({
+test("the approver's page reads its approval's mismatch or redemption once a poll found it, and only its own approval's", async ({
   onTestFinished,
 }) => {
   const f = await fixture();
@@ -1245,7 +1245,7 @@ test("the approver's page reads its approval's mismatch once a poll found it, an
   await other.email("other@example.test");
   const begun = await f.begin();
   const wrong = String((Number(begun.confirmDigits) + 1) % 100).padStart(2, "0");
-  const unmatched = { status: 200, json: { mismatched: false } };
+  const unmatched = { status: 200, json: { mismatched: false, redeemed: false } };
   expect(await admin.mismatched(begun.userCode)).toEqual(unmatched);
   expect((await admin.approve(begun.userCode, wrong)).status).toBe(204);
   // Approved, but no poll has compared the digits yet.
@@ -1254,7 +1254,7 @@ test("the approver's page reads its approval's mismatch once a poll found it, an
   // The code forgives case and spacing, as the approval does.
   expect(await admin.mismatched(` ${begun.userCode.toLowerCase().replace("-", "")} `)).toEqual({
     status: 200,
-    json: { mismatched: true },
+    json: { mismatched: true, redeemed: false },
   });
   expect(await admin.mismatched("not a code")).toEqual({
     status: 400,
@@ -1290,6 +1290,16 @@ test("the approver's page reads its approval's mismatch once a poll found it, an
     ),
   ).toEqual([{ mismatchedAt: null }]);
   expect(await admin.mismatched(begun.userCode)).toEqual(unmatched);
+
+  // The code's own digits: redeemed once a poll redeems it, never mismatched.
+  const matched = await f.begin();
+  expect((await admin.approve(matched.userCode, matched.confirmDigits)).status).toBe(204);
+  expect(await admin.mismatched(matched.userCode)).toEqual(unmatched);
+  expect((await f.poll(matched.deviceCode)).json.status).toBe("enrolled");
+  expect(await admin.mismatched(matched.userCode)).toEqual({
+    status: 200,
+    json: { mismatched: false, redeemed: true },
+  });
 });
 
 test("the account lists its passkeys with the computer that added each, and removing one ends its sessions", async ({

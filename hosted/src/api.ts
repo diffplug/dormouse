@@ -181,9 +181,14 @@ export async function approveEnrollment(
   });
   if (!response.ok) throw await refused(response);
 }
-/** Whether this account's live approval of `userCode` was typed with other digits than its computer showed. */
-export async function getApprovalMismatched(userCode: string): Promise<boolean> {
+/** What a poll made of this account's live approval of a code; neither when there is none. */
+export interface ApprovalState {
+  /** Typed with other digits than its computer showed: it never redeems. */
+  mismatched: boolean;
+  redeemed: boolean;
+}
+export async function getApproval(userCode: string): Promise<ApprovalState> {
   const response = await relay(`/enrollments/${encodeURIComponent(userCode)}`);
   if (!response.ok) throw await refused(response);
-  return ((await response.json()) as { mismatched: boolean }).mismatched;
+  return (await response.json()) as ApprovalState;
 }

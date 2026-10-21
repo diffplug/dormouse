@@ -1,14 +1,11 @@
-import type { Computer, HostedVoice } from "./api";
+import type { ApprovalState, Computer, HostedVoice } from "./api";
 
 /** The part of the account page's state a change finished elsewhere shows in. */
 export interface AccountState {
   voice: HostedVoice | null;
   computers: Computer[] | null;
-  /**
-   * Whether the approval the page waits on was typed with other digits than
-   * its computer showed; unset when none is waited on, or the read failed.
-   */
-  mismatched?: boolean;
+  /** The approval the page waits on; unset when none is, or its read failed. */
+  approval?: ApprovalState;
 }
 
 /** A notice the page shows; `error` when it reports a failure. */
@@ -19,7 +16,7 @@ export interface Notice {
 
 /** An approval Dormouse on the computer finishes after the page's mutation. */
 export interface Pending {
-  /** The approved user code, read for a mismatch while the page waits. */
+  /** The approved user code, read while the page waits. */
   userCode: string;
   /** Whether the account, as last read, shows the change. */
   shows: (after: AccountState) => boolean;
@@ -39,23 +36,24 @@ export function pendingEnd(
   pending: Pending,
   after: AccountState,
 ): Notice | null {
-  if (after.mismatched) return { text: pending.mismatch, error: true };
+  if (after.approval?.mismatched) return { text: pending.mismatch, error: true };
   return pending.shows(after) ? { text: pending.done } : null;
 }
 
 /**
- * What an approval's redemption changes on the page, read against the state
- * before it: Natural Voice turning on, or a computer not listed before. Null
- * when no change could show it: voice already on, or no computers list to
- * compare with.
+ * What shows an approval redeemed, read against the state before it: Natural
+ * Voice turning on, or a computer not listed before. Where no change could
+ * show it (voice already on, or no computers list to compare with), the
+ * approval's own read saying it was redeemed.
  */
 export function approvalShows(
   purpose: "remote" | "voice",
   before: AccountState,
-): ((after: AccountState) => boolean) | null {
+): (after: AccountState) => boolean {
+  const redeemed = (after: AccountState) => after.approval?.redeemed === true;
   if (purpose === "voice")
-    return before.voice?.on ? null : (after) => after.voice?.on === true;
-  if (!before.computers) return null;
+    return before.voice?.on ? redeemed : (after) => after.voice?.on === true;
+  if (!before.computers) return redeemed;
   const known = new Set(before.computers.map((computer) => computer.burrowId));
   return (after) =>
     !!after.computers?.some((computer) => !known.has(computer.burrowId));

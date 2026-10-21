@@ -85,22 +85,21 @@ export function relayAccountRoutes(app: Hono<any>, host: (c: Context) => RelayAc
     return approved ? c.body(null, 204) : c.json({ message: ALREADY_APPROVED }, 409);
   });
 
-  // Whether the poll found this account's live approval of the code typed
-  // with other digits: another account's approval, or none, reads as not.
+  // What a poll made of this account's live approval of the code: typed with
+  // other digits, or redeemed. Another account's approval, or none, reads as
+  // neither.
   app.get("/api/relay/enrollments/:userCode", gate, async (c) => {
     const userCode = normalizeEnrollUserCode(c.req.param("userCode"));
     if (userCode === null)
       return c.json({ message: "That is not a code from Dormouse." }, 400);
-    const mismatched =
-      (
-        await accountQuery(
-          host(c),
-          `SELECT 1 FROM dormouse_relay_enrollment_approvals
-          WHERE "userCode" = $1 AND "userId" = $2 AND "expiresAt" > now() AND "mismatchedAt" IS NOT NULL`,
-          [userCode, c.get("login").userId],
-        )
-      ).length > 0;
-    return c.json({ mismatched });
+    const [approval] = await accountQuery<{ mismatched: boolean; redeemed: boolean }>(
+      host(c),
+      `SELECT "mismatchedAt" IS NOT NULL AS mismatched, "redeemedAt" IS NOT NULL AS redeemed
+      FROM dormouse_relay_enrollment_approvals
+      WHERE "userCode" = $1 AND "userId" = $2 AND "expiresAt" > now()`,
+      [userCode, c.get("login").userId],
+    );
+    return c.json(approval ?? { mismatched: false, redeemed: false });
   });
 
   app.get("/api/relay/burrows", gate, async (c) => {

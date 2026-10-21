@@ -19,28 +19,45 @@ const state = (on: boolean | null, ids: string[] | null): AccountState => ({
   computers: ids && ids.map(computer),
 });
 
+/** `after` with the approval's own read. */
+const approved = (
+  after: AccountState,
+  approval: { mismatched?: boolean; redeemed?: boolean },
+): AccountState => ({ ...after, approval: { mismatched: false, redeemed: false, ...approval } });
+
 describe("approvalShows", () => {
   it("waits on a voice approval until Natural Voice is on", () => {
-    const shows = approvalShows("voice", state(false, []))!;
+    const shows = approvalShows("voice", state(false, []));
     expect(shows(state(false, []))).toBe(false);
     expect(shows(state(null, []))).toBe(false);
     expect(shows(state(true, []))).toBe(true);
   });
 
-  it("has nothing to wait on when Natural Voice is already on", () => {
-    expect(approvalShows("voice", state(true, []))).toBeNull();
+  it("waits on the approval's own redemption when Natural Voice is already on", () => {
+    const shows = approvalShows("voice", state(true, []));
+    expect(shows(state(true, []))).toBe(false);
+    expect(shows(approved(state(true, []), { redeemed: false }))).toBe(false);
+    expect(shows(approved(state(true, []), { redeemed: true }))).toBe(true);
   });
 
   it("waits on a remote approval until a computer not listed before appears", () => {
-    const shows = approvalShows("remote", state(false, ["a", "b"]))!;
+    const shows = approvalShows("remote", state(false, ["a", "b"]));
     expect(shows(state(false, ["a", "b"]))).toBe(false);
     expect(shows(state(false, ["a"]))).toBe(false);
     expect(shows(state(false, null))).toBe(false);
     expect(shows(state(false, ["c", "a"]))).toBe(true);
   });
 
-  it("has nothing to compare a remote approval with when no list was read", () => {
-    expect(approvalShows("remote", state(false, null))).toBeNull();
+  it("waits on the approval's own redemption when no computers list was read", () => {
+    const shows = approvalShows("remote", state(false, null));
+    expect(shows(state(false, ["c"]))).toBe(false);
+    expect(shows(approved(state(false, null), { redeemed: false }))).toBe(false);
+    expect(shows(approved(state(false, null), { redeemed: true }))).toBe(true);
+  });
+
+  it("waits on a change the page shows where one can, not the redemption read", () => {
+    expect(approvalShows("voice", state(false, []))(approved(state(false, []), { redeemed: true }))).toBe(false);
+    expect(approvalShows("remote", state(false, []))(approved(state(false, []), { redeemed: true }))).toBe(false);
   });
 });
 
@@ -56,14 +73,14 @@ describe("pendingEnd", () => {
 
   it("waits until a read shows the change or the approval's mismatch", () => {
     expect(pendingEnd(pending, state(false, []))).toBeNull();
-    expect(pendingEnd(pending, { ...state(false, []), mismatched: false })).toBeNull();
+    expect(pendingEnd(pending, approved(state(false, []), { mismatched: false }))).toBeNull();
     expect(pendingEnd(pending, state(true, []))).toEqual({ text: "done" });
   });
 
   it("ends a mismatched approval with its error, even beside a change another made", () => {
     const error = { text: "mismatch", error: true };
-    expect(pendingEnd(pending, { ...state(false, []), mismatched: true })).toEqual(error);
-    expect(pendingEnd(pending, { ...state(true, []), mismatched: true })).toEqual(error);
+    expect(pendingEnd(pending, approved(state(false, []), { mismatched: true }))).toEqual(error);
+    expect(pendingEnd(pending, approved(state(true, []), { mismatched: true }))).toEqual(error);
   });
 });
 
