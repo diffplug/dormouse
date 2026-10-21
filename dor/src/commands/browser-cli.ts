@@ -408,7 +408,7 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
     ? { ok: true, value: { binding: { session: flags.session ?? (flags.key === undefined ? '' : sessionForKey(flags.key)) } } }
     : await resolveBinding(d, flags, client, mayBind ? { cwd: callerCwd, ...(defaultBinaryPath ? { binaryPath: defaultBinaryPath } : {}) } : undefined);
   if (!resolved.ok) return fail(resolved.message);
-  const { binding, fresh, initialViewport, launchViewport } = resolved.value;
+  const { binding, fresh, headed, initialViewport, launchViewport } = resolved.value;
   // A binding comes off saved pane params, so its directory can be gone (a
   // removed worktree). Say so, rather than let the spawn's ENOENT read as a
   // missing CLI on every later command.
@@ -457,13 +457,19 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
     exec(binaryPath ?? binary, argv, cwd, envOverride, stdin);
 
   const nativeLaunchOptions = d.provider === 'agent-browser' ? agentBrowserLaunchOptions(rest) : [];
+  // agent-browser restates its launch options on every command and relaunches
+  // a browser they no longer match, so a config's `headed` would turn a
+  // pane's headless browser into a window: every call states the pane's mode,
+  // unless the command gives its own.
+  const modeArgs = headed === undefined || nativeLaunchOptions.some((arg) => arg.split('=', 1)[0] === '--headed')
+    ? [] : ['--headed', String(headed)];
   let result: BrowserExecResult;
   let prebound = false;
   const explicitDevice = d.provider === 'agent-browser'
     ? hasExplicitAgentBrowserDevice(rest, env)
     : hasExplicitPlaywrightLaunch(rest);
   try {
-    const sessionArgs = binding.session ? spec.sessionArgs(binding.session) : [];
+    const sessionArgs = binding.session ? [...spec.sessionArgs(binding.session), ...modeArgs] : [];
     const launching = fresh === true && d.provider === 'agent-browser' && d.navigationVerbs.has(command ?? '')
       && launchViewport !== undefined && !explicitDevice;
     let destinationArgs = rest;
@@ -529,7 +535,7 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
   if (result.exitCode === 0 && mayBind && binding.session !== undefined && !(client instanceof Error) && !prebound) {
     try {
       const statusArgs = d.streamStatus?.(binding.session);
-      const wsPort = statusArgs === undefined ? undefined : parseStreamPort((await run([...statusArgs, ...nativeLaunchOptions])).stdout);
+      const wsPort = statusArgs === undefined ? undefined : parseStreamPort((await run([...statusArgs, ...modeArgs, ...nativeLaunchOptions])).stdout);
       await client.browserSurface({
         provider: d.provider,
         key: flags.key,

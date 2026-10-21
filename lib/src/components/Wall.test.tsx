@@ -1738,7 +1738,7 @@ describe('Wall on the Lath engine', () => {
       const abId = await dispatchAgentBrowser({ session: 'dormouse.1.gui-a1b2c3', surface: 'surface:a' });
       const iframeId = (await dispatchIframe('http://localhost:5173/')).id;
 
-      expect(await dispatchResolveBrowser(abId)).toMatchObject({ ok: true, result: { binding: { session: 'dormouse.1.gui-a1b2c3' }, fresh: false } });
+      expect(await dispatchResolveBrowser(abId)).toMatchObject({ ok: true, result: { binding: { session: 'dormouse.1.gui-a1b2c3' }, fresh: false, headed: false } });
       // A parked ab surface keeps its daemon session, so a minimized target resolves.
       await act(async () => {
         container.querySelector<HTMLButtonElement>(`[data-lath-leaf="${abId}"] [aria-label="Minimize"]`)!.click();
@@ -1786,7 +1786,7 @@ describe('Wall on the Lath engine', () => {
         }));
       });
       await flush();
-      expect(resolved).toEqual({ ok: true, result: { binding: { session: 'dormouse.1.app' }, fresh: false } });
+      expect(resolved).toEqual({ ok: true, result: { binding: { session: 'dormouse.1.app' }, fresh: false, headed: false } });
     } finally {
       untouchedSpy.mockRestore();
     }

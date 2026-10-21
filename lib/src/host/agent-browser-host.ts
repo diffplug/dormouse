@@ -189,6 +189,12 @@ const SCREENCAST_START = { action: 'screencast_start', format: 'jpeg', quality: 
 
 export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}): BrowserProvider<ProviderBinding> {
   const log = deps.log ?? (() => {});
+  // The sessions this host last launched headed. agent-browser restates its
+  // launch options on every command and relaunches a browser they no longer
+  // match, so every call states the mode, or a config's `headed` would turn
+  // a headless browser into a window. Any other session is headless: `dor`
+  // launches a pane's browser so, and shutdown closes every headed one.
+  const headedSessions = new Set<string>();
 
   // Preserve a bound executable, falling through on ENOENT if it went stale.
   // The host supplies the session's fresh-shell environment for every call.
@@ -206,6 +212,7 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
     args: string[],
     options: { timeoutMs?: number; cwd?: string } = {},
   ): Promise<CliResult> {
+    args = ['--headed', String(headedSessions.has(b.session)), ...args];
     const env = b.env ?? process.env;
     const configured = env[AGENT_BROWSER_BIN_ENV];
     let binaryPath = b.binaryPath;
@@ -622,7 +629,9 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
       // The project's directory, so agent-browser reads its
       // `./agent-browser.json`, while that directory still exists.
       const cwd = b.cwd !== undefined && isDirectory(b.cwd) ? b.cwd : undefined;
-      const result = await run(b, [...(headed ? ['--headed'] : []), 'open', url ?? 'about:blank'], { cwd });
+      if (headed) headedSessions.add(b.session);
+      else headedSessions.delete(b.session);
+      const result = await run(b, ['open', url ?? 'about:blank'], { cwd });
       log(`[ab-relaunch] open session=${b.session} exit=${result.exitCode}${result.stderr.trim() ? ` stderr=${result.stderr.trim()}` : ''}`);
       return { exitCode: result.exitCode, stderr: result.stderr };
     },
@@ -648,6 +657,7 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
 
     async close(b, timeoutMs) {
       const result = await run(b, ['close'], { timeoutMs });
+      headedSessions.delete(b.session);
       if (result.exitCode !== 0) throw new Error(cliError(result));
     },
 

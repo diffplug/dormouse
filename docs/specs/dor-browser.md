@@ -224,7 +224,7 @@ Source of truth: `parseBrowserRequest` and `createBrowserHost` in `lib/src/host/
 
 ### agent-browser
 
-agent-browser alone has a per-session daemon, state files beside its socket, and one fixed argv per operation; `--headed` is a no-op against a live daemon, so only a relaunch changes the mode. Its daemon's stream server and its browser's CDP port accept unauthenticated loopback TCP connections from any local process, refusing only a foreign `Origin`; Dormouse sets neither listener's flags (`docs/specs/security.md` -> "Known gaps").
+agent-browser alone has a per-session daemon, state files beside its socket, and one fixed argv per operation. **Must state a Surface's mode (`--headed true|false`) on every agent-browser command Dormouse runs for its session**, unless the user's command gives its own: the host's from the mode it last launched the session in, else headless, and `dor`'s from the bound Surface the host reports (rationale). Its daemon's stream server and its browser's CDP port accept unauthenticated loopback TCP connections from any local process, refusing only a foreign `Origin`; Dormouse sets neither listener's flags (`docs/specs/security.md` -> "Known gaps").
 
 - **Must restart a headless daemon's screencast (`screencast_stop`, `screencast_start`) when its first viewer connects or its active tab changes**, once per change per browser, and stop it when its last viewer closes. **Never change the active tab during a restart** (rationale). **Must leave the stream unchanged on refusal.**
 - **Must send those actions only to the proven daemon's Unix socket or Windows loopback port in `<session>.port`**, refusing missing, stale, or invalid port metadata.

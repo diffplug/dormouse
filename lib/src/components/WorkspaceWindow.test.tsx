@@ -803,7 +803,7 @@ describe('WorkspaceWindow', () => {
         params: { provider: 'agent-browser', key: 'default' },
         respond,
       });
-      expect(respond).toHaveBeenCalledWith({ ok: true, result: { binding: { session: expect.any(String) }, fresh: false } });
+      expect(respond).toHaveBeenCalledWith({ ok: true, result: { binding: { session: expect.any(String) }, fresh: false, headed: false } });
       return respond.mock.calls[0][0].result.binding.session;
     };
 
