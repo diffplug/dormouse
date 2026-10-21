@@ -63,6 +63,8 @@ export interface MouseSelectionState {
   bracketedPaste: boolean;
   override: OverrideState;
   selection: Selection | null;
+  /** Stable through edge movement and reflow; cleared with the selection. */
+  selectionIdentity: object | null;
   /** The token under a drag's head, in absolute buffer rows. */
   hintToken: BufferToken | null;
   /** Open while non-null: always the editor written with this exact
@@ -84,6 +86,7 @@ export const DEFAULT_MOUSE_SELECTION_STATE: MouseSelectionState = Object.freeze(
   bracketedPaste: false,
   override: 'off',
   selection: null,
+  selectionIdentity: null,
   hintToken: null,
   copyEditor: null,
   programCopy: null,
@@ -98,6 +101,7 @@ let cachedSnapshot: Map<string, MouseSelectionState> | null = null;
  *  one cannot leave another's editor, offer, or flash behind. */
 function clearSelection(s: MouseSelectionState): void {
   s.selection = null;
+  s.selectionIdentity = null;
   s.copyEditor = null;
   s.programCopy = null;
   s.copyOutcome = null;
@@ -182,6 +186,7 @@ export function setSelection(id: string, selection: Selection | null, copyEditor
   else {
     // A replaced selection keeps an in-flight flash and the drag's hint, but
     // not the program's offer, so its editor cannot show that offer either.
+    s.selectionIdentity ??= {};
     s.selection = selection;
     s.programCopy = null;
     s.copyEditor = selection.dragging || !copyEditor ? null
@@ -221,6 +226,7 @@ export function beginDrag(
   // Clearing the in-flight copy flash too keeps its timer from clearing this
   // new selection when it fires.
   clearSelection(s);
+  s.selectionIdentity = {};
   s.selection = {
     startRow: args.row,
     startCol: args.col,

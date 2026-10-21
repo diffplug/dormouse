@@ -29,6 +29,10 @@ vi.mock('./platform', async () => {
   return { ...actual, getPlatform: () => fakePlatform };
 });
 
+vi.mock('./clipboard', () => ({ writeTextToClipboard: vi.fn() }));
+import { writeTextToClipboard } from './clipboard';
+import { copySelection } from './copy-selection';
+
 import { flipCopyBreak, openCopyEditor, setCopyFormat, setCopyScope } from './copy-editor';
 import type { EditorFormat } from './copy-text';
 import { finalizedSelection, WRAPPING } from './copy-text-fixtures';
@@ -125,6 +129,25 @@ describe('a terminal resize', () => {
       expect(getMouseSelectionState(id)).toMatchObject({ selection: { endRow: 2, endCol: 1 }, copyOutcome: 'copied' });
       vi.advanceTimersByTime(700);
       expect(getMouseSelectionState(id)).toMatchObject({ selection: null, copyEditor: null, copyOutcome: null });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([true, false])('keeps a pending clipboard result through reflow (copied: %s)', async copied => {
+    const id = 'resize-copy-' + copied;
+    const terminal = await openEdited(id);
+    let complete!: (result: boolean) => void;
+    vi.mocked(writeTextToClipboard).mockImplementation(() => new Promise(resolve => { complete = resolve; }));
+    vi.useFakeTimers();
+    try {
+      const pending = copySelection(id);
+      terminal.resize(10, 10);
+      complete(copied);
+      await pending;
+      expect(getMouseSelectionState(id)).toMatchObject({ selection: { endRow: 2, endCol: 1 }, copyOutcome: copied ? 'copied' : 'failed' });
+      vi.advanceTimersByTime(1500);
+      expect(getMouseSelectionState(id).selection === null).toBe(copied);
     } finally {
       vi.useRealTimers();
     }
