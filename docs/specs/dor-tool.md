@@ -13,7 +13,7 @@ Source of truth: `surface.tool` in `lib/src/components/wall/use-dor-control.ts`.
 
 **Must designate the Surface as `tool` before its command starts serving.** A Tool has terminal and browser capabilities for one run of its command ([Run end](#run-end)), including while booting, awaiting approval, or showing a port conflict. Browser operations still require the renderer/session they operate on.
 
-- **Must retain the Session id, Surface id, and terminal across serving and renderer changes**, which are changes within one Surface.
+- **Must retain the Session id, Surface id, and terminal across serving and renderer changes.**
 - **Never offer or apply a renderer swap outside a Tool's declarable `render` values** ([Declaring tools](#declaring-tools)), in the Display modal or `onSwapRenderMode` (rationale).
 - **Must run the terminal Activity model for a Tool**, including when its browser is visible; watched-command defaults belong to `docs/specs/alert.md`.
 - **Never apply the untouched-shell kill or shell-replacement shortcut to a Tool**, which spawns touched; the Tools a close does not ask about are `docs/specs/reopen.md` → "Reopenable kinds".
