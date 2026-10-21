@@ -67,6 +67,13 @@ function locateEdge(buffer: IBuffer, edge: EdgeAnchor): GridPos | null {
   }
 }
 
+/** A marker on absolute buffer row `row`; `registerMarker` counts from the
+ *  cursor's row. */
+export function markRow(terminal: Terminal, row: number): IMarker {
+  const buffer = terminal.buffer.active;
+  return terminal.registerMarker(row - (buffer.baseY + buffer.cursorY));
+}
+
 /** Anchor a finalized linewise selection Dormouse owns; null for anything a
  *  resize cancels. The alternate buffer never reflows, and its program
  *  redraws on resize. */
@@ -78,11 +85,7 @@ export function anchorSelection(terminal: Terminal, sel: Selection): ReflowAncho
   const start = lineOffset(buffer, from, 'start');
   const end = lineOffset(buffer, to, 'end');
   if (text === null || !start || !end) return null;
-  const mark = ({ first, offset }: { first: number; offset: number }): EdgeAnchor => ({
-    // `registerMarker` counts from the cursor's row.
-    marker: terminal.registerMarker(first - (buffer.baseY + buffer.cursorY)),
-    offset,
-  });
+  const mark = ({ first, offset }: { first: number; offset: number }): EdgeAnchor => ({ marker: markRow(terminal, first), offset });
   const anchor: Anchor = {
     start: mark(start),
     end: mark(end),

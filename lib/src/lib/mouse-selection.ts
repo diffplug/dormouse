@@ -63,6 +63,9 @@ export interface MouseSelectionState {
   bracketedPaste: boolean;
   override: OverrideState;
   selection: Selection | null;
+  /** Bumped when a selection ends or is replaced; held through an edit or
+   *  follow ({@link SelectionWrite}). */
+  selectionEpoch: number;
   /** The token under a drag's head, in absolute buffer rows. */
   hintToken: BufferToken | null;
   /** Open while non-null: always the editor written with this exact
@@ -84,6 +87,7 @@ export const DEFAULT_MOUSE_SELECTION_STATE: MouseSelectionState = Object.freeze(
   bracketedPaste: false,
   override: 'off',
   selection: null,
+  selectionEpoch: 0,
   hintToken: null,
   copyEditor: null,
   programCopy: null,
@@ -98,6 +102,7 @@ let cachedSnapshot: Map<string, MouseSelectionState> | null = null;
  *  one cannot leave another's editor, offer, or flash behind. */
 function clearSelection(s: MouseSelectionState): void {
   s.selection = null;
+  s.selectionEpoch++;
   s.copyEditor = null;
   s.programCopy = null;
   s.copyOutcome = null;
@@ -170,22 +175,27 @@ export function setOverride(id: string, override: OverrideState): void {
   notify();
 }
 
+/** How a write relates to the selection before it: `replace` starts another,
+ *  `edit` moves its edges, and `follow` carries the same cells through a
+ *  scroll, trim, or reflow, so only it keeps the program's offer. */
+export type SelectionWrite = 'replace' | 'edit' | 'follow';
+
 /**
  * Replace the selection and, in the same write, the copy editor over it: none
  * unless one is given for a finalized selection, so an editor never outlives
  * the selection it was opened for.
  */
-export function setSelection(id: string, selection: Selection | null, copyEditor: CopyEditorState | null = null): void {
+export function setSelection(id: string, selection: Selection | null, copyEditor: CopyEditorState | null = null, write: SelectionWrite = 'replace'): void {
   const s = ensure(id);
   if (s.selection === null && selection === null) return;
   if (selection === null) clearSelection(s);
   else {
-    // A replaced selection keeps an in-flight flash and the drag's hint, but
-    // not the program's offer, so its editor cannot show that offer either.
+    // Every write keeps the flash and drag hint.
+    if (write === 'replace') s.selectionEpoch++;
     s.selection = selection;
-    s.programCopy = null;
+    if (write !== 'follow') s.programCopy = null;
     s.copyEditor = selection.dragging || !copyEditor ? null
-      : copyEditor.format === 'program' ? { ...copyEditor, format: 'auto', overrides: {} } : copyEditor;
+      : copyEditor.format === 'program' && s.programCopy === null ? { ...copyEditor, format: 'auto', overrides: {} } : copyEditor;
   }
   notify();
 }
