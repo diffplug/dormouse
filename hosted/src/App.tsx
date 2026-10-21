@@ -34,7 +34,7 @@ import {
   TERMS_VERSION,
 } from "../server/policy-constants";
 import { takeEnrollment, type Enrollment } from "./enrollment";
-import { approvalShows, settle, type AccountState } from "./settle";
+import { approvalShows, reread, settle, type AccountState } from "./settle";
 
 // The terms version the sign-in notice showed when this tab continued past it,
 // kept through a provider's redirect until the account's acceptance is
@@ -163,11 +163,18 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
       if (!actionPending.current)
         void refresh().catch((error) => setError(error.message));
     };
+    // Returning to the tab: mobile Safari fires no focus coming back from
+    // another app.
+    const visible = () => {
+      if (document.visibilityState === "visible") focus();
+    };
     window.addEventListener("focus", focus);
+    document.addEventListener("visibilitychange", visible);
     return () => {
       ++refreshGeneration.current;
       ++actionGeneration.current;
       window.removeEventListener("focus", focus);
+      document.removeEventListener("visibilitychange", visible);
     };
   }, [refresh]);
   useEffect(() => {
@@ -223,12 +230,17 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
   /**
    * Runs a mutation of the account, then shows the account as the server now
    * has it. A Pending it returns is re-read in the background, at the
-   * computer's poll pace, until the account shows it.
+   * computer's poll pace, until the account shows it. A failed refetch never
+   * reports the mutation, which succeeded, as failed.
    */
   const mutate = (label: string, action: () => Promise<Pending | void>) =>
     act(label, async () => {
       const pending = await action();
-      const after = await refresh();
+      const after = await reread(refresh, () =>
+        setError(
+          "Your change is saved, but this page could not reload to show it. Retry, or come back to this page later.",
+        ),
+      );
       if (pending) void follow(pending, after);
     });
   async function follow(pending: Pending, after: AccountState | undefined) {

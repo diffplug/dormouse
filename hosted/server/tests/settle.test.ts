@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { approvalShows, settle, type AccountState } from "../../src/settle";
+import { approvalShows, reread, settle, type AccountState } from "../../src/settle";
 
 const computer = (burrowId: string) => ({ burrowId, enrolledAt: "2026-10-20" });
 const state = (on: boolean | null, ids: string[] | null): AccountState => ({
@@ -29,6 +29,22 @@ describe("approvalShows", () => {
 
   it("has nothing to compare a remote approval with when no list was read", () => {
     expect(approvalShows("remote", state(false, null))).toBeNull();
+  });
+});
+
+describe("reread", () => {
+  it("resolves the read, telling nothing failed", async () => {
+    const failed = vi.fn();
+    await expect(reread(async () => 1, failed)).resolves.toBe(1);
+    expect(failed).not.toHaveBeenCalled();
+  });
+
+  it("reports a failed read itself and resolves, so the mutation stays a success", async () => {
+    const failed = vi.fn();
+    await expect(
+      reread(() => Promise.reject(new Error("offline")), failed),
+    ).resolves.toBeUndefined();
+    expect(failed).toHaveBeenCalledOnce();
   });
 });
 

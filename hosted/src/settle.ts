@@ -24,6 +24,23 @@ export function approvalShows(
     !!after.computers?.some((computer) => !known.has(computer.burrowId));
 }
 
+/**
+ * Reads the account after a mutation that succeeded: a failed read calls
+ * `failed` and resolves `undefined`, never rejecting as if the mutation had
+ * failed.
+ */
+export async function reread<T>(
+  read: () => Promise<T>,
+  failed: () => void,
+): Promise<T | undefined> {
+  try {
+    return await read();
+  } catch {
+    failed();
+    return undefined;
+  }
+}
+
 export type Settled = "done" | "timeout" | "cancelled";
 
 const delay = (ms: number) =>
