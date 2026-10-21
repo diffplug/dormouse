@@ -255,21 +255,25 @@ function agentBrowserLaunchOptions(args: string[]): string[] {
   return options;
 }
 
-/** Build a blank navigation with every launch option preserved. Unknown flags
+/** Apply saved state to the blank page only: repeating --state starts a fresh
+ * browser and loses the prepared viewport. Unknown flags
  * are refused: guessing their arity could replace a flag value and let the
  * destination page run before its viewport is ready. */
-function blankNavigationArgs(args: string[]): string[] | Error {
+function agentBrowserNavigation(args: string[]): { blank: string[]; destination: string[] } | Error {
   const result = [...args];
   const verbIndex = nativeCommandIndex('agent-browser', result);
   if (verbIndex === undefined || !['open', 'goto', 'navigate'].includes(result[verbIndex]!)) return new Error('No navigation command to prepare');
   const positions: number[] = [];
+  const statePositions = new Set<number>();
   for (let i = 0; i < result.length; i += 1) {
     const arg = result[i] ?? '';
     if (i === verbIndex) continue;
     if (arg.startsWith('-')) {
       const [name] = arg.split('=', 1);
       if (AGENT_BROWSER_VALUE_FLAGS.has(name)) {
+        const flagIndex = i;
         if (!arg.includes('=')) { if (i + 1 >= result.length) return new Error(`${name} requires a value`); i += 1; }
+        if (name === '--state') { statePositions.add(flagIndex); statePositions.add(i); }
       } else if (AGENT_BROWSER_BOOLEAN_FLAGS.has(name)) {
         if (result[i + 1] === 'true' || result[i + 1] === 'false') i += 1;
       } else return new Error(`Cannot prepare viewport with unknown agent-browser option '${arg}'`);
@@ -279,7 +283,7 @@ function blankNavigationArgs(args: string[]): string[] | Error {
   }
   if (positions.length !== 1) return new Error('Cannot determine the agent-browser navigation URL for viewport preparation');
   result[positions[0]!] = 'about:blank';
-  return result;
+  return { blank: result, destination: args.filter((_, i) => !statePositions.has(i)) };
 }
 
 function hasExplicitAgentBrowserDevice(args: string[], env: Record<string, string | undefined>): boolean {
@@ -463,10 +467,12 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
     const sessionArgs = binding.session ? spec.sessionArgs(binding.session) : [];
     const launching = fresh === true && d.provider === 'agent-browser' && d.navigationVerbs.has(command ?? '')
       && launchViewport !== undefined && !explicitDevice;
+    let destinationArgs = rest;
     if (launching) {
-      const blankArgs = blankNavigationArgs(rest);
-      if (blankArgs instanceof Error) return fail(blankArgs.message);
-      const blank = await run([...sessionArgs, ...blankArgs]);
+      const navigation = agentBrowserNavigation(rest);
+      if (navigation instanceof Error) return fail(navigation.message);
+      destinationArgs = navigation.destination;
+      const blank = await run([...sessionArgs, ...navigation.blank]);
       if (blank.exitCode !== 0) return fail(`Could not prepare the agent-browser viewport before navigation: ${blank.stderr.trim() || `agent-browser exited ${blank.exitCode}`}`);
       let dpr = launchViewport.dpr;
       if (dpr === undefined) {
@@ -512,7 +518,7 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
       }
       result = await run([...sessionArgs, ...navigation.goto]);
     } else {
-      result = await run([...sessionArgs, ...rest], launchEnv);
+      result = await run([...sessionArgs, ...destinationArgs], launchEnv);
     }
   } catch (error) {
     return isMissingBinaryError(error) ? fail(d.missingBinaryMessage(binary)) : fail(errorMessage(error));

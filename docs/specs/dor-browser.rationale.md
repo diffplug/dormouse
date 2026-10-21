@@ -18,7 +18,7 @@
 
 ## Viewport presets
 
-Viewport preparation with agent-browser 0.27.0 (Windows, 2026-10-21): dropping `--config` after the blank navigation replaced the temporary profile with the occupied default profile, failing the DPR query. The native daemon compares launch settings on each call; preparation and stream discovery therefore keep the browser configuration consistent while leaving output controls on the user command. The [0.39.1 launch hash](https://github.com/vercel-labs/agent-browser/blob/1165952d74ceed98fdc2dd97190ad41f44dd0e24/cli/src/native/actions.rs#L293-L330) also includes scrollbar and domain restrictions (checked 2026-10-21).
+Viewport preparation with agent-browser 0.27.0 (Windows, 2026-10-21): dropping `--config` after the blank navigation replaced the temporary profile with the occupied default profile, failing the DPR query. Repeating `--state` on the destination navigation started another browser at 1254×620 instead of the prepared 1440×900; applying it to the blank page once retains the loaded state and viewport. The native daemon compares launch settings on each call; preparation and stream discovery therefore keep the browser configuration consistent while leaving output controls on the user command. The [0.39.1 launch hash](https://github.com/vercel-labs/agent-browser/blob/1165952d74ceed98fdc2dd97190ad41f44dd0e24/cli/src/native/actions.rs#L293-L330) also includes scrollbar and domain restrictions (checked 2026-10-21).
 
 ## Display Modal And Render Swaps
 
