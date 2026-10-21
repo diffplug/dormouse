@@ -254,6 +254,28 @@ describe('updater', () => {
       expect(mocks.check).not.toHaveBeenCalled();
     });
 
+    it.each([
+      { failed: true, version: '0.5.0', error: 'EACCES' },
+      { from: '0.4.0', to: '0.5.0' },
+    ])('keeps a failure-marker launch quiet after dismissal: %j', async (marker) => {
+      vi.setSystemTime(new Date('2026-10-01T00:00:00Z'));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(marker));
+      localStorage.setItem(CHECK_KEY, JSON.stringify({
+        checkedAt: null, since: Date.now() - 9 * 24 * 60 * 60 * 1000, remindedAt: null,
+      }));
+      startUpdateCheck();
+      await vi.advanceTimersByTimeAsync(0);
+      dismissBanner();
+      await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
+
+      expect(readBannerState()).toEqual({ status: 'dismissed' });
+      expect(mocks.check).not.toHaveBeenCalled();
+      expect(JSON.parse(localStorage.getItem(CHECK_KEY)!).remindedAt).toBeNull();
+      checkNow();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mocks.check).toHaveBeenCalledOnce();
+    });
+
     it('reports an unconfirmed install as failure and skips the update check', async () => {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({ from: '0.4.0', to: '0.5.0' }));
 
