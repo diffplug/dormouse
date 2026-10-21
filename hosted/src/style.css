@@ -74,9 +74,10 @@ select:focus-visible {
 /* The site header, as dormouse.sh's reference pages draw it. */
 header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 24px;
+  gap: 0 24px;
   min-height: 80px;
   padding: 0 32px;
   font-family: var(--display);
@@ -138,10 +139,11 @@ p {
   margin: 0 0 16px;
 }
 .intro {
-  color: var(--muted);
   font-size: 18px;
   margin-bottom: 40px;
 }
+.intro,
+.separator,
 .help,
 .footnote,
 .status,
@@ -154,7 +156,7 @@ dt {
   font-size: 14px;
 }
 
-label {
+main label {
   display: block;
   margin: 20px 0 8px;
   font-family: var(--display);
@@ -201,29 +203,26 @@ button:disabled {
   cursor: default;
 }
 /* The pricing cards' action: an accent outline, underlined on hover. */
+.primary,
+.confirm {
+  border-color: var(--accent);
+  color: var(--accent);
+}
 .primary {
   width: 100%;
   min-height: 48px;
   margin-top: 20px;
-  border-color: var(--accent);
-  color: var(--accent);
 }
 .primary:hover:not(:disabled),
-.button-link:hover {
+.button-link:hover,
+.text-button:hover:not(:disabled) {
   text-decoration: underline;
 }
-.button-link {
-  text-decoration: none;
-}
 .text-button {
-  min-height: 44px;
   padding: 0;
   border: 0;
   color: var(--accent);
   font-family: inherit;
-}
-.text-button:hover:not(:disabled) {
-  text-decoration: underline;
 }
 .form-options {
   display: flex;
@@ -232,16 +231,10 @@ button:disabled {
   margin-top: 4px;
 }
 
-section {
+section:not(.enroll, .providers) {
   margin-top: 48px;
   padding-top: 32px;
   border-top: 1px solid var(--rule);
-}
-section.enroll,
-section.providers {
-  margin-top: 0;
-  padding-top: 0;
-  border-top: 0;
 }
 .providers {
   display: grid;
@@ -252,7 +245,6 @@ section.providers {
 .separator {
   grid-column: 1 / -1;
   margin-bottom: 4px;
-  color: var(--muted);
   font-size: 14px;
 }
 
@@ -361,10 +353,6 @@ dialog p {
   gap: 8px;
   margin-top: 24px;
 }
-.dialog-actions .confirm {
-  border-color: var(--accent);
-  color: var(--accent);
-}
 
 .confirm-digits {
   width: 4ch;
@@ -404,8 +392,6 @@ footer .tagline {
   display: inline-flex;
   align-items: center;
   gap: 10px;
-  margin: 0;
-  font-family: inherit;
 }
 .select-wrap {
   position: relative;
@@ -421,7 +407,8 @@ footer .tagline {
   background: var(--page-bg);
   color: var(--page-fg);
   font-family: var(--display);
-  font-size: 14px;
+  /* Below 16px, iOS Safari zooms the page when the select takes focus. */
+  font-size: 16px;
   cursor: pointer;
 }
 .select-wrap svg {
@@ -445,9 +432,6 @@ footer .tagline {
     gap: 12px;
     font-size: 14px;
   }
-  .wide-only {
-    display: none;
-  }
   main {
     padding-top: 32px;
   }
@@ -461,8 +445,9 @@ footer .tagline {
     margin-bottom: 8px;
   }
 }
-@media (max-width: 360px) {
-  .narrow-hidden {
+/* The site header drops Download below its md breakpoint. */
+@media (max-width: 767px) {
+  .wide-only {
     display: none;
   }
 }

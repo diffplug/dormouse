@@ -1,5 +1,6 @@
 /**
- * The docs pages' link colour, derived from the theme the reader picked.
+ * The docs pages' link colour, derived from the theme the reader picked —
+ * and Hosted's, which continues those pages (`hosted/src/theme.ts`).
  *
  * **Never** take it from `--vscode-textLink-foreground`. No bundled theme
  * defines `textLink.foreground`, so that variable always resolves to the

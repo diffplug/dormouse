@@ -20,7 +20,7 @@
  *
  * `--docs-accent` holds that fallback chain, defined once in
  * website/src/index.css; DocsLayout's effect overwrites it with the corrected
- * accent once a theme resolves (website/src/lib/docs-accent.ts).
+ * accent once a theme resolves (lib/src/lib/themes/contrast.ts).
  */
 export const LINK_CLASS = "text-[var(--docs-accent)] underline-offset-2 hover:underline";
 

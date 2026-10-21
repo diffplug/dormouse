@@ -39,7 +39,7 @@ import {
   docsMutedTextFor,
   docsMutedTextForSurfaces,
   docsStatusColorFor,
-} from "../lib/docs-accent";
+} from "dormouse-lib/lib/themes/contrast";
 import { sitePath } from "../lib/site-meta";
 
 /** Repaints the site's own tokens from the picked theme; see index.css. */
@@ -161,7 +161,7 @@ export default function DocsLayout({
   }, []);
 
   // Links follow the picked theme's own accent rather than a per-kind default
-  // (website/src/lib/docs-accent.ts). Left alone, `--docs-accent` keeps the
+  // (lib/src/lib/themes/contrast.ts). Left alone, `--docs-accent` keeps the
   // value index.css gives it, so a reader with no JS still gets a legible one.
   useEffect(() => {
     const paint = () => {

@@ -8,7 +8,7 @@ import {
   docsMutedTextFor,
   docsMutedTextForSurfaces,
   docsStatusColorFor,
-} from "./docs-accent";
+} from "dormouse-lib/lib/themes/contrast";
 import {
   DOCS_STATUS_COLORS,
   TINTED_DOCS_SURFACES,

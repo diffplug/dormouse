@@ -1,6 +1,8 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { applyHostedTheme, DEFAULT_THEME_ID, LIGHT_THEME_ID } from "../theme";
+import { applyHostedTheme, DEFAULT_THEME_ID } from "../theme";
+
+const LIGHT_THEME_ID = "vscode.theme-defaults.light-visual-studio";
 import css from "../style.css?inline";
 
 const DOCUMENT = '<!doctype html><html lang="en"><head><meta charset="utf-8"></head><body><div id="hosted-root"></div></body></html>';

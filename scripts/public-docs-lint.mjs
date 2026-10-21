@@ -522,7 +522,7 @@ async function checkGenerated() {
  * The reference pages must not render text in a translucent colour.
  *
  * `docs/specs/website-docs.md` -> "Reference page chrome" states the rule, and
- * `website/src/lib/docs-accent.ts` supplies the replacement: an opaque colour
+ * `lib/src/lib/themes/contrast.ts` supplies the replacement: an opaque colour
  * walked toward the background only as far as WCAG AA allows. Translucency
  * cannot do that — it composites against whatever surface it lands on, so the
  * same class measured 5.03:1 on one bundled theme and 2.01:1 on another.

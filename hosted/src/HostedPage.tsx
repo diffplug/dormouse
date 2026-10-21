@@ -77,7 +77,7 @@ export function HostedPage({
         </div>
         {/* The site header's own links (NAV_LINKS in website/src/lib/site-nav.ts). */}
         <nav aria-label="Dormouse site">
-          <a href="https://dormouse.sh/playground" rel="noreferrer" className="narrow-hidden">Playground</a>
+          <a href="https://dormouse.sh/playground" rel="noreferrer">Playground</a>
           <a href="https://dormouse.sh/#download" rel="noreferrer" className="wide-only">Download</a>
           <a href="https://dormouse.sh/docs" rel="noreferrer">Docs</a>
           <a href="https://github.com/diffplug/dormouse" rel="noreferrer">GitHub</a>
