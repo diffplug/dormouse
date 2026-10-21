@@ -20,7 +20,7 @@ const launcher = fileURLToPath(new URL('../bin/dor', import.meta.url));
 const cli = fileURLToPath(new URL('../dist/dor.js', import.meta.url));
 const wsl = join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'wsl.exe');
 const contextKeys = ['DORMOUSE_NODE', 'DORMOUSE_CLI_JS', 'DORMOUSE_HOST', 'DORMOUSE_SURFACE_ID',
-  'DORMOUSE_CONTROL_SOCKET', 'DORMOUSE_CONTROL_TOKEN'];
+  'DORMOUSE_CONTROL_SOCKET', 'DORMOUSE_CONTROL_TOKEN', 'DORMOUSE_AGENT_BROWSER_BIN'];
 
 function paneEnv(cliJs, extra = {}) {
   return ptyCore.resolveSpawnConfig({
@@ -54,7 +54,7 @@ test('WSL launcher preserves context, Windows paths, argv, cwd and failure statu
       console.log(JSON.stringify({platform: process.platform, cwd: process.cwd(), env: Object.fromEntries(keys.map(k => [k, process.env[k]])), args: process.argv.slice(2)}));
       process.exitCode = Number(process.argv[2]);
     `);
-    const env = paneEnv(stub, { DORMOUSE_NODE: node });
+    const env = paneEnv(stub, { DORMOUSE_NODE: node, DORMOUSE_AGENT_BROWSER_BIN: join(dir, 'agent-browser.cmd') });
     const args = ['0', 'spaces and \"quotes\"', '$HOME; & literal'];
     const result = JSON.parse((await runWsl(env, args, dir)).stdout);
     assert.equal(result.platform, 'win32');

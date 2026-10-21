@@ -39,7 +39,7 @@ Source of truth: `scripts/stage-dor-cli.mjs`, `dor/bin/dor`, `dor/bin/dor.cmd`, 
 
 ### WSL interop
 
-**Must preserve the CLI runtime, host identity, Surface id, and control credentials through `WSLENV` on Windows panes**, including those that start WSL later; preserve unrelated user entries. (rationale)
+**Must preserve every variable the CLI reads through `WSLENV` on Windows panes**, including those that start WSL later; preserve unrelated user entries. (rationale)
 
 - **Must run the bundled Windows runtime from WSL**, translating only its executable path for the POSIX launcher; script paths and pipe endpoints remain opaque. Windows-executable interop must be enabled.
 - **Must translate the caller's `PWD` back to Windows for the CLI.**

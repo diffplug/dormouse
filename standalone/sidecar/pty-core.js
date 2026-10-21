@@ -227,11 +227,13 @@ function withoutInheritedMsysOriginalPath(env, platform = process.platform) {
 
 // WSLENV entries carrying the dor CLI context into WSL and back unchanged: the
 // POSIX launcher execs our Windows Node to reach the named pipe. PWD alone is
-// translated, on the return trip only.
+// translated, on the return trip only. The binary overrides stay Windows paths:
+// the CLI that reads them is Windows Node.
 const WSL_CLI_ENV = [
   'DORMOUSE_NODE', 'DORMOUSE_CLI_JS', 'DORMOUSE_SURFACE_ID',
   'DORMOUSE_HOST', 'DORMOUSE_HOST_WORKSPACE',
   'DORMOUSE_CONTROL_SOCKET', 'DORMOUSE_CONTROL_TOKEN',
+  'DORMOUSE_AGENT_BROWSER_BIN', 'DORMOUSE_PLAYWRIGHT_BIN',
   'ELECTRON_RUN_AS_NODE/w', 'PWD/pw',
 ];
 const WSL_CLI_ENV_NAMES = new Set(WSL_CLI_ENV.map((entry) => entry.split('/')[0]));

@@ -175,6 +175,21 @@ test('Windows panes carry dor context through WSL and back without translating p
   }
 });
 
+test('WSLENV forwards every DORMOUSE_* variable the dor CLI reads', () => {
+  const fs = require('node:fs');
+  const root = path.join(__dirname, '..', '..');
+  const forwarded = new Set(WSL_CLI_ENV.map((entry) => entry.split('/')[0]));
+  for (const dir of ['dor/src', 'dor-lib-common/src']) {
+    for (const file of fs.readdirSync(path.join(root, dir), { recursive: true })) {
+      if (!/\.ts$/.test(file) || /\.test\.ts$/.test(file)) continue;
+      const source = fs.readFileSync(path.join(root, dir, file), 'utf8');
+      for (const [name] of source.matchAll(/DORMOUSE_[A-Z0-9_]+/g)) {
+        assert.ok(forwarded.has(name), `${dir}/${file} reads ${name}; add it to WSL_CLI_ENV so dor sees it from WSL`);
+      }
+    }
+  }
+});
+
 test('WSL forwarding does not synthesize credentials or change native POSIX environments', () => {
   for (const platform of ['win32', 'linux', 'darwin']) {
     const config = resolveSpawnConfig({}, { platform, env: { WSLENV: 'USER_FLAG/u' } });
