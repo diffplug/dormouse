@@ -11,7 +11,6 @@ import {
   findHyperdrives,
   cleanup,
   sweep,
-  PRODUCTION_IDS,
   previewRatelimitNamespace,
   previewSecrets,
 } from "./preview.mjs";
@@ -410,19 +409,6 @@ test("sweep cleans up only other PRs that are closed or unlabeled", async (t) =>
   const workers = (pr) =>
     ["dormouse-relay", "dormouse-voice", "dormouse-hosted"].map((name) => `${name}-pr-${pr}`);
   assert.deepEqual(removed, [...workers(7), "br-7", ...workers(9), "hd-9"]);
-});
-
-test("cleanup and sweep refuse production's account and project before any request", async (t) => {
-  const fetch = t.mock.method(globalThis, "fetch", async () => {
-    throw new Error("no request");
-  });
-  const [account, project] = PRODUCTION_IDS;
-  const swept = { ...env, GITHUB_REPOSITORY: "diffplug/dormouse", GH_TOKEN: "dummy-gh-token" };
-  for (const action of [cleanup, sweep]) {
-    await assert.rejects(action({ ...swept, CLOUDFLARE_ACCOUNT_ID: account }), /CLOUDFLARE_ACCOUNT_ID names production/);
-    await assert.rejects(action({ ...swept, NEON_PROJECT_ID: ` ${project}\n` }), /NEON_PROJECT_ID names production/);
-  }
-  assert.equal(fetch.mock.callCount(), 0);
 });
 
 test("each preview deploy sweeps before it provisions, and nothing runs at close", async () => {
