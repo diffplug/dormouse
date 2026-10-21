@@ -199,6 +199,19 @@ function stageDefaultShell(id: string, cwd: string | undefined): void {
   if (defaults?.shell || cwd) setPendingShellOpts(id, { shell: defaults?.shell, args: defaults?.args, cwd });
 }
 
+/** The directory terminal `id` reported, as a path the host's browser
+ *  providers open: a WSL pane reports Linux paths, Git Bash MSYS ones. */
+async function hostCwdOf(id: string): Promise<string | undefined> {
+  const cwd = getTerminalPaneState(id)?.cwd?.path;
+  const terminalContext = getPlatform().terminalContext;
+  if (!cwd || !terminalContext) return cwd;
+  try {
+    return (await terminalContext({ op: 'hostDirectory', id, path: cwd })).path ?? cwd;
+  } catch {
+    return cwd;
+  }
+}
+
 function ShellSpawnNotice({
   notice,
   paneElements,
@@ -2261,8 +2274,8 @@ export function Wall({
       && opening === terminalContextRef.current && opening?.id === id && !opening.closing
       && nav.hasPane(id) && !lath.isDying(id) && !isClosingSurface(id);
     const cancelledLaunch = () => new DOMException('Browser launch cancelled', 'AbortError');
+    const cwd = await hostCwdOf(id);
     if (!current()) throw cancelledLaunch();
-    const cwd = getTerminalPaneState(id)?.cwd?.path;
     const provider = parseRenderMode(mode).provider;
     // Keep the persisted agent-browser suffix from before multiple providers.
     const key = `${id}:${entry.port}:${provider === 'agent-browser' ? 'agent' : provider ?? 'iframe'}`;
@@ -2325,13 +2338,13 @@ export function Wall({
     // host has it — as an ordinary browser Surface beside it.
     const params = lath.getMeta(id)?.params;
     if (!isToolParams(params) || toolFace(params) === 'pending-approval') return;
+    const cwd = await hostCwdOf(id);
     // Consent just before the document goes; any change while asking abandons the Break.
     if (!await confirmToolEditorsClose([id]) || transferRefusal(id) || lath.getMeta(id)?.params !== params) return;
     // Only an http(s) page reopens, as a swap judges it; a transient or error
     // page on screen falls back to the Tool's own URL.
     const shownUrl = browserSurfaceUrl(getAgentBrowserScreenController(id)?.chrome().url ?? '') ?? browserUrlFromParams(params);
     const mode = resolveRenderMode(params);
-    const cwd = getTerminalPaneState(id)?.cwd?.path;
     if (terminalContextRef.current?.id === id) setTerminalContext(null);
     endToolDesignation(lath, id);
     if (!shownUrl) return;

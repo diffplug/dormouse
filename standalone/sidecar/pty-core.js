@@ -277,6 +277,25 @@ function winPathToWslMount(winPath) {
   return `/mnt/${match[1].toLowerCase()}/${match[2].replace(/\\/g, '/')}`;
 }
 
+// The distribution a `wsl.exe -d <distro>` pane runs, the shape the picker emits.
+function wslDistroOf(shell, args) {
+  return shellStem(shell) === 'wsl' && Array.isArray(args) && args[0] === '-d'
+    && /^[A-Za-z0-9._-]+$/.test(args[1] || '') ? args[1] : undefined;
+}
+
+// A directory a Windows pane's shell reported, as a path Windows opens: a WSL
+// shell's `/mnt/c/x` is `C:\x` and its other paths are the distro's
+// `\\wsl.localhost\<distro>\...` share; Git Bash's MSYS `/c/x` is `C:\x`.
+// Every other path passes through.
+function hostDirectory(dir, { platform, shell, wslDistro }) {
+  if (platform !== 'win32' || typeof dir !== 'string' || !/^\/(?!\/)/.test(dir)) return dir;
+  const stem = shellStem(shell);
+  const drive = (stem === 'wsl' ? /^\/mnt\/([a-z])(?:\/(.*))?$/i : stem === 'bash' ? /^\/([a-z])(?:\/(.*))?$/i : null)?.exec(dir);
+  if (drive) return `${drive[1].toUpperCase()}:\\${(drive[2] || '').replace(/\//g, '\\')}`;
+  return stem === 'wsl' && wslDistro ? `\\\\wsl.localhost\\${wslDistro}${dir.replace(/\//g, '\\')}` : dir;
+}
+module.exports.hostDirectory = hostDirectory;
+
 // Enable OSC 633 shell integration for shells that support reliable injection,
 // returning possibly-modified { env, shellArgs }. The keystroke-based command
 // heuristic remains the fallback for shells we can't inject (cmd.exe, others)
@@ -1628,7 +1647,7 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
       console.error(`[pty-core] spawn replaced a live PTY under ${id}; stopping the old one`);
       try { stopPty(displaced); } catch (error) { console.error(`[pty-core] stopping the displaced PTY under ${id} failed:`, error.message); }
     }
-    const session = { chunks: [], chars: 0, received: 0, shell: config.shell };
+    const session = { chunks: [], chars: 0, received: 0, shell: config.shell, wslDistro: wslDistroOf(config.shell, options?.args) };
     sessions.set(id, session);
     ptyShells.set(id, config.shell);
 
@@ -1859,6 +1878,7 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
     return 'git status';
   }
   const shellBasename = (value) => path.basename(value).replace(/^-/, '').replace(/\.exe$/i, '').toLowerCase();
+  const hostDirectoryOf = (id, dir) => hostDirectory(dir, { platform, shell: sessions.get(id)?.shell, wslDistro: sessions.get(id)?.wslDistro });
   async function context(request, requestId) {
     const result = { requestId };
     try {
@@ -1887,10 +1907,12 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
           helpers.set(request.id, { parentId: request.restore.parentId, command: request.restore.command });
         } else helpers.delete(request.id);
         onHelper(request.id, helpers.has(request.id));
+      } else if (request.op === 'hostDirectory') {
+        result.path = hostDirectoryOf(request.id, request.path);
       } else if (request.op === 'openDirectory') {
         // The resolver is the only thing that touches the path: a `stat` or
         // `realpath` here would follow a link to a share and reach its host.
-        const nativePath = await canonicalDirectory(request.path);
+        const nativePath = await canonicalDirectory(hostDirectoryOf(request.id, request.path));
         if (!nativePath) throw new Error('Directory is unavailable');
         // Absolute canonical path is one argument; no shell interprets OSC text.
         openNativeDirectory(nativePath, (error) => {
