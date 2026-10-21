@@ -436,9 +436,9 @@ test('the local canary seeds a copy, runs the code domains, scores, and files no
   assert.ok(existsSync(join(dir, POOL_DIR, 'room.patch')));
 });
 
-// The red team: the same seeds under a CI run's key, scored against that
-// run's scorecard, and the publishing command printed, never run.
-test('the local Codex canary takes a CI run\'s key, counts either engine\'s catches, and files nothing', (t) => {
+// The advisory engine: the same seeds under a CI run's key, scored against
+// that run's scorecard, and the publishing command printed, never run.
+test('the local Codex canary takes a CI run\'s key, publishes with or without Claude\'s scorecard, and files nothing', (t) => {
   const { base, dir, bin, env } = checkout(t);
   const head = execFileSync(realGit, ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim();
   // A commit past the run's: the canary still seeds the run's own.
@@ -468,6 +468,11 @@ test('the local Codex canary takes a CI run\'s key, counts either engine\'s catc
     fs.writeFileSync(output, ${JSON.stringify(fragment([]))});
   `);
   stub(bin, 'claude', 'process.exit(5);');
+  // Without Claude's scorecard, the command publishes Codex's own counts and leaves either empty.
+  const alone = spawnSync('bash', ['scripts/security-audit-local.sh', '--engine', 'codex', 'canary', '3', '--key', '42'], { cwd: dir, env, encoding: 'utf8' });
+  assert.equal(alone.status, 0, alone.stderr);
+  assert.doesNotMatch(alone.stdout, /^either:/m);
+  assert.ok(alone.stdout.includes(`gh workflow run codex-audit-report.yaml -R fixture/repo --ref main -f commit=${head} -f model=gpt-6-sol -f canary_run=42 -f canary_seeded=2 -f canary_caught=0 -f canary_unfinished=0\n`), alone.stdout);
   const result = spawnSync('bash', ['scripts/security-audit-local.sh', '--engine', 'codex', 'canary', '3', '--key', '42', '--claude-scorecard', claudeCard],
     { cwd: dir, env, encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
@@ -475,10 +480,10 @@ test('the local Codex canary takes a CI run\'s key, counts either engine\'s catc
   assert.match(result.stdout, /^either: 1\/2 seeds caught by this engine or the other$/m);
   assert.ok(result.stdout.includes(`gh workflow run codex-audit-report.yaml -R fixture/repo --ref main -f commit=${head} -f model=gpt-6-sol -f canary_run=42 -f canary_seeded=2 -f canary_caught=0 -f canary_either=1 -f canary_unfinished=0\n`), result.stdout);
   const codexCalls = calls(base).filter((c) => c.startsWith('codex '));
-  assert.equal(codexCalls.length, CANARY_DOMAINS.length);
+  assert.equal(codexCalls.length, 2 * CANARY_DOMAINS.length);
   for (const c of codexCalls) assert.equal(c, 'codex exec -m gpt-6-sol --cyber-access-program daybreak_blue --sandbox workspace-write -c sandbox_workspace_write.network_access=true --ephemeral');
-  // One read, the run's commit, on each engine's run; nothing filed.
-  assert.deepEqual(calls(base).filter((c) => c.startsWith('gh ')), Array(2).fill('gh api repos/fixture/repo/actions/runs/42 --jq .head_sha'));
+  // One read, the run's commit, on each run; nothing filed.
+  assert.deepEqual(calls(base).filter((c) => c.startsWith('gh ')), Array(3).fill('gh api repos/fixture/repo/actions/runs/42 --jq .head_sha'));
 });
 
 test('a union counts each seed once, and only over the same seeds', () => {

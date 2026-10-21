@@ -72,11 +72,18 @@ const codex = (id, paired, fields = {}) => ({ claude_run_url: URL(paired), commi
   seeded: 8, caught: 5, either: 7, unfinished: 0, run_url: URL(id), ...fields });
 
 describe('validateCodexRecord', () => {
-  it('reads exactly the fields the red-team builder writes', () => {
+  it('reads exactly the fields the advisory-engine builder writes', () => {
     const written = codexRecord({ runUrl: URL(9), commit: 'a'.repeat(40), model: 'gpt-6-sol', repo: 'diffplug/dormouse',
       canary: { run: '7', seeded: 8, caught: 5, either: 7, unfinished: 0 } });
     expect(Object.keys(written).sort()).toEqual(CODEX_FIELDS);
     expect(validateCodexRecord(written, 9)).toEqual({ url: URL(9), claudeUrl: URL(7), seeded: 8, caught: 5, either: 7, unfinished: 0 });
+  });
+
+  it('keeps an either count that was not computed as null, never zero', () => {
+    const written = codexRecord({ runUrl: URL(9), commit: 'a'.repeat(40), model: 'gpt-6-sol', repo: 'diffplug/dormouse',
+      canary: { run: '7', seeded: 8, caught: 5, either: null, unfinished: 0 } });
+    expect(validateCodexRecord(written, 9)).toMatchObject({ caught: 5, either: null });
+    expect(() => validateCodexRecord(codex(9, 7, { either: undefined }), 9)).toThrow(/either is not a non-negative integer/);
   });
 
   it('rejects a record out of shape or linked elsewhere', () => {
@@ -91,8 +98,8 @@ describe('validateCodexRecord', () => {
   });
 });
 
-describe('summarize with the red team', () => {
-  it('pairs each canary run with its newest red-team record, and ignores one paired outside the window', () => {
+describe('summarize with the advisory engine', () => {
+  it('pairs each canary run with its newest advisory-engine record, and ignores one paired outside the window', () => {
     const snapshot = summarize([{ id: 7, createdAt: daysAgo(3), record: record(7) }], { now: NOW, codex: [
       { id: 9, record: codex(9, 7, { caught: 2, either: 6 }) },
       { id: 11, record: codex(11, 7) },
@@ -100,6 +107,13 @@ describe('summarize with the red team', () => {
     ] });
     expect(snapshot.runs).toEqual([{ at: daysAgo(3), url: URL(7), seeded: 8, caught: 6, unfinished: 0,
       codex: { url: URL(11), caught: 5, either: 7, unfinished: 0 } }]);
+  });
+
+  it('pairs a record whose either count was not computed, and keeps it so', () => {
+    const snapshot = summarize([{ id: 7, createdAt: daysAgo(3), record: record(7) }], { now: NOW, codex: [
+      { id: 9, record: codex(9, 7, { caught: 2, either: null }) },
+    ] });
+    expect(snapshot.runs[0].codex).toEqual({ url: URL(9), caught: 2, either: null, unfinished: 0 });
   });
 
   it('refuses a pairing its canary record cannot support', () => {
@@ -110,7 +124,7 @@ describe('summarize with the red team', () => {
   });
 });
 
-it('selects red-team runs by the title their workflow gives them', () => {
+it('selects advisory-engine runs by the title their workflow gives them', () => {
   const workflow = readFileSync(resolve(import.meta.dirname, '../../.github/workflows/codex-audit-report.yaml'), 'utf8');
   expect(workflow).toMatch(new RegExp(`^run-name: ${CODEX_TITLE.replace(/[()]/g, '\\$&')}$`, 'm'));
 });

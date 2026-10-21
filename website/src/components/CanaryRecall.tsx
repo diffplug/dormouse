@@ -11,8 +11,11 @@ export type CanaryRecallSnapshot = {
   unrecorded: { at: string; url: string }[];
 };
 
-/** The red team's counts over one canary run's seeds (docs/specs/security-audit.md -> "Red team"). */
-export type CodexCounts = { url: string; caught: number; either: number; unfinished: number };
+/**
+ * The advisory engine's counts over one canary run's seeds
+ * (docs/specs/security-audit.md -> "Advisory engine"); `either` null when not computed.
+ */
+export type CodexCounts = { url: string; caught: number; either: number | null; unfinished: number };
 
 /** One run inside a week. `seeded` and `caught` are null for a run that left no record. */
 export type RecallRun = {
@@ -41,11 +44,19 @@ export type RecallWeek = {
   /** Runs that week that left no record, and so add nothing to its counts. */
   unrecorded: number;
   /**
-   * The red team, over that week's runs it was paired with; null when none
-   * was. `either` is over every counted run, a run Codex did not see adding
-   * Claude's catches alone, so it never falls below `percent`.
+   * The advisory engine, over that week's runs it was paired with; null when
+   * none was. `either` is over every counted run, a run Codex did not see
+   * adding Claude's catches alone, so it never falls below `percent`; null
+   * when a paired run did not compute it, which plots no point that week.
    */
-  codex: { runs: number; seeded: number; caught: number; percent: number; either: number; eitherPercent: number } | null;
+  codex: {
+    runs: number;
+    seeded: number;
+    caught: number;
+    percent: number;
+    either: number | null;
+    eitherPercent: number | null;
+  } | null;
 };
 
 const DAY = 86_400_000;
@@ -87,7 +98,9 @@ export function recallWeeks(snapshot: CanaryRecallSnapshot): RecallWeek[] {
     const paired = counted.filter((run) => run.codex);
     const codexSeeded = paired.reduce((n, run) => n + run.seeded!, 0);
     const codexCaught = paired.reduce((n, run) => n + run.codex!.caught, 0);
-    const either = counted.reduce((n, run) => n + (run.codex ? run.codex.either : run.caught!), 0);
+    const either = paired.some((run) => run.codex!.either === null)
+      ? null
+      : counted.reduce((n, run) => n + (run.codex ? run.codex.either! : run.caught!), 0);
     weeks.push({
       start: isoDay(monday),
       runs: mine,
@@ -103,7 +116,7 @@ export function recallWeeks(snapshot: CanaryRecallSnapshot): RecallWeek[] {
             caught: codexCaught,
             percent: Math.round((codexCaught / codexSeeded) * 100),
             either,
-            eitherPercent: Math.round((either / seeded) * 100),
+            eitherPercent: either === null ? null : Math.round((either / seeded) * 100),
           }
         : null,
     });
@@ -128,7 +141,9 @@ export function weekDescription(week: RecallWeek): string {
   if (week.codex) {
     parts.push(
       `Codex caught ${week.codex.caught} of ${week.codex.seeded} over ${plural(week.codex.runs, "run")} (${week.codex.percent}%)`,
-      `caught by either: ${week.codex.either} of ${week.seeded} (${week.codex.eitherPercent}%)`,
+      week.codex.either === null
+        ? "caught by either: not computed"
+        : `caught by either: ${week.codex.either} of ${week.seeded} (${week.codex.eitherPercent}%)`,
     );
   }
   if (week.unfinished > 0) parts.push(`${plural(week.unfinished, "run")} with a domain that left no finished report`);
@@ -139,7 +154,9 @@ export function weekDescription(week: RecallWeek): string {
 /** One run in a week's list, in words. */
 export function runLabel(run: RecallRun): string {
   const counts = run.seeded === null ? "no record" : `${run.caught} of ${run.seeded}${run.unfinished > 0 ? "*" : ""}`;
-  const codex = run.codex ? `; Codex ${run.codex.caught}${run.codex.unfinished > 0 ? "*" : ""}, either ${run.codex.either}` : "";
+  const codex = run.codex
+    ? `; Codex ${run.codex.caught}${run.codex.unfinished > 0 ? "*" : ""}, either ${run.codex.either ?? "not computed"}`
+    : "";
   return `${dayOf(run.at)}: ${counts}${codex}`;
 }
 
@@ -225,7 +242,7 @@ function SeriesMarker({ series, cx, cy, r }: { series: Series; cx: number; cy: n
   return <rect x={cx - d} y={cy - d} width={d * 2} height={d * 2} transform={`rotate(45 ${cx} ${cy})`} style={{ fill }} />;
 }
 
-/** The legend, shown once any week has a red-team point: identity is never color alone. */
+/** The legend, shown once any week has an advisory-engine point: identity is never color alone. */
 function RecallLegend() {
   return (
     <ul aria-label="Lines" className={`mt-4 flex flex-wrap gap-x-4 gap-y-1 text-xs ${CARD_MUTED_TEXT_CLASS}`}>
@@ -288,20 +305,24 @@ function RecallGraph({ weeks }: { weeks: RecallWeek[] }) {
             )),
           )}
         </svg>
-        {/* The red team's points: the week's own point below opens its runs and describes all three. */}
+        {/* The advisory engine's points: the week's own point below opens its runs and describes all three. */}
         {weeks.flatMap((week, i) =>
           week.codex
-            ? (["codex", "either"] as const).map((series) => (
-                <svg
-                  key={`${series}-${week.start}`}
-                  aria-hidden="true"
-                  className="pointer-events-none absolute size-2.5 -translate-x-1/2 -translate-y-1/2 overflow-visible"
-                  style={{ left: `${x(i)}%`, top: `${100 - (series === "codex" ? week.codex!.percent : week.codex!.eitherPercent)}%` }}
-                  viewBox="0 0 10 10"
-                >
-                  <SeriesMarker series={series} cx={5} cy={5} r={5} />
-                </svg>
-              ))
+            ? ([["codex", week.codex.percent], ["either", week.codex.eitherPercent]] as const).flatMap(([series, value]) =>
+                value === null
+                  ? []
+                  : [
+                      <svg
+                        key={`${series}-${week.start}`}
+                        aria-hidden="true"
+                        className="pointer-events-none absolute size-2.5 -translate-x-1/2 -translate-y-1/2 overflow-visible"
+                        style={{ left: `${x(i)}%`, top: `${100 - value}%` }}
+                        viewBox="0 0 10 10"
+                      >
+                        <SeriesMarker series={series} cx={5} cy={5} r={5} />
+                      </svg>,
+                    ],
+              )
             : [],
         )}
         <ol aria-label="Percent caught per week, oldest first" className="absolute inset-0">
@@ -382,7 +403,7 @@ export default function CanaryRecall({ snapshot }: { snapshot: CanaryRecallSnaps
   const weeks = recallWeeks(snapshot);
   const any = snapshot.runs.length + snapshot.unrecorded.length > 0;
   const unfinished = snapshot.runs.some((run) => run.unfinished > 0 || (run.codex?.unfinished ?? 0) > 0);
-  const redTeam = weeks.some((week) => week.codex !== null);
+  const advisory = weeks.some((week) => week.codex !== null);
   return (
     <aside aria-label="Canary recall" className={`mb-6 ${CARD_CLASS} text-[var(--color-text)]`}>
       {seeded > 0 ? (
@@ -399,11 +420,11 @@ export default function CanaryRecall({ snapshot }: { snapshot: CanaryRecallSnaps
         A canary seeds known vulnerabilities into a throwaway copy of the repository and counts
         how many the audit reports. Summed over the canary runs of the {windowDays} days before{" "}
         {asOf}.{any ? " Each point is one week, Monday to Sunday UTC; open it for that week's runs." : ""}
-        {redTeam
-          ? " A maintainer also runs Codex on some canaries' seeds as a red team; its line covers only those runs, and the dashed line counts a seed either caught."
+        {advisory
+          ? " A maintainer also runs Codex, an advisory engine, on some canaries' seeds; its line covers only those runs, and the dashed line counts a seed either caught."
           : ""}
       </p>
-      {redTeam ? <RecallLegend /> : null}
+      {advisory ? <RecallLegend /> : null}
       {any ? <RecallGraph weeks={weeks} /> : null}
       {unfinished ? (
         <p className={`text-sm ${CARD_MUTED_TEXT_CLASS}`}>

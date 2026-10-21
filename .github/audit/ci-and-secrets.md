@@ -30,7 +30,7 @@ Delegate only by these streams (`.github/audit/_preamble.md` -> "Work streams").
 
 - `actions` — `docs/specs/security-ci.md`: "GitHub Actions Policies", "Automated Maintainer (tend)".
 - `releases` — `docs/specs/security-ci.md`: "Hosted Deployments", "VS Code Extension Releases", "Desktop Releases".
-- `audit` — `docs/specs/security-audit.md`: "Schedule and gate", "Deterministic checks", "Skipping an unchanged audit", "Domains", "Orchestration", "Outcomes and reporting", "Findings", "Embargo", "Findings ledger", "Disclosure", "Environment and `AUDIT_PAT`", "Canary recall", "Red team".
+- `audit` — `docs/specs/security-audit.md`: "Schedule and gate", "Deterministic checks", "Skipping an unchanged audit", "Domains", "Orchestration", "Outcomes and reporting", "Findings", "Embargo", "Findings ledger", "Disclosure", "Environment and `AUDIT_PAT`", "Canary recall", "Advisory engine".
 - `qualitative` — the qualitative pass below, once, over the whole of this domain's scope.
 
 ## Qualitative pass

@@ -8,11 +8,11 @@
  * runs on `main` created in the last `WINDOW_DAYS` days, downloads each one's
  * `canary-recall` artifact — never `canary-transcript`, which is ciphertext and
  * not ours to open here — validates it, and writes
- * website/src/data/canary-recall.json. The red team's records ride along:
- * each successful `codex-audit-report.yaml` run's `codex-recall`, paired
- * with the canary run whose seeds it shares (docs/specs/security-audit.md ->
- * "Red team"). Run by hand with the dependency
- * snapshots (docs/specs/deploy.md -> "Release checklist"), because
+ * website/src/data/canary-recall.json. The advisory engine's records ride
+ * along: each successful `codex-audit-report.yaml` run's `codex-recall`,
+ * paired with the canary run whose seeds it shares
+ * (docs/specs/security-audit.md -> "Advisory engine"). Run by hand with the
+ * dependency snapshots (docs/specs/deploy.md -> "Release checklist"), because
  * downloading an artifact needs a token even on a public repository, and the
  * site is built by Cloudflare Pages, which holds none.
  */
@@ -65,10 +65,11 @@ export function validateRecord(record, id) {
 }
 
 /**
- * One red-team run's `codex-recall.json`, checked as `validateRecord` checks a
- * canary's: exactly the fields the builder writes, counts with caught no more
- * than either and either no more than seeded, and links to this very run and
- * to a run on this repository. Returns the counts and the paired run's URL.
+ * One advisory-engine run's `codex-recall.json`, checked as `validateRecord`
+ * checks a canary's: exactly the fields the builder writes, counts with
+ * caught no more than seeded and either between them, and links to this very
+ * run and to a run on this repository. A null `either` was not computed and
+ * stays null, never zero. Returns the counts and the paired run's URL.
  */
 export function validateCodexRecord(record, id) {
   const where = `run ${id}'s ${CODEX_ARTIFACT}`;
@@ -76,9 +77,11 @@ export function validateCodexRecord(record, id) {
   const keys = Object.keys(record).sort();
   if (keys.join() !== CODEX_FIELDS.join()) throw new Error(`${where} has fields ${keys.join(', ')}, not ${CODEX_FIELDS.join(', ')}`);
   for (const field of ['seeded', 'caught', 'either', 'unfinished']) {
-    if (!isCount(record[field])) throw new Error(`${where}: ${field} is not a non-negative integer`);
+    if (!isCount(record[field]) && !(field === 'either' && record.either === null)) throw new Error(`${where}: ${field} is not a non-negative integer`);
   }
-  if (record.caught > record.either || record.either > record.seeded) throw new Error(`${where}: caught ${record.caught}, either ${record.either}, seeded ${record.seeded}`);
+  if (record.caught > (record.either ?? record.seeded) || (record.either ?? record.caught) > record.seeded) {
+    throw new Error(`${where}: caught ${record.caught}, either ${record.either ?? 'not computed'}, seeded ${record.seeded}`);
+  }
   if (record.unfinished > CANARY_DOMAINS.length) throw new Error(`${where}: ${record.unfinished} unfinished domains of ${CANARY_DOMAINS.length}`);
   if (record.run_url !== runUrl(id)) throw new Error(`${where} links ${JSON.stringify(record.run_url)}, not ${runUrl(id)}`);
   const paired = /^https:\/\/github\.com\/diffplug\/dormouse\/actions\/runs\/([1-9]\d*)$/.exec(record.claude_run_url);
@@ -87,10 +90,10 @@ export function validateCodexRecord(record, id) {
 }
 
 /**
- * Each recorded canary run's red-team counts, by the canary run's URL: the
- * newest red-team run paired with it. Throws on a pairing that cannot follow
- * from the canary's own record — other seeds, or an `either` below Claude's
- * count or above the two engines' sum.
+ * Each recorded canary run's advisory-engine counts, by the canary run's URL:
+ * the newest advisory-engine run paired with it. Throws on a pairing that
+ * cannot follow from the canary's own record — other seeds, or a computed
+ * `either` below Claude's count or above the two engines' sum.
  */
 function pairCodex(recorded, codex) {
   const byUrl = new Map();
@@ -98,8 +101,9 @@ function pairCodex(recorded, codex) {
     const counts = validateCodexRecord(c.record, c.id);
     const claude = recorded.find((r) => r.url === counts.claudeUrl);
     if (!claude) continue;
-    if (counts.seeded !== claude.seeded || counts.either < claude.caught || counts.either > claude.caught + counts.caught) {
-      throw new Error(`run ${c.id}'s ${CODEX_ARTIFACT} cannot pair with ${claude.url}: seeded ${counts.seeded} of ${claude.seeded}, either ${counts.either} beside Claude's ${claude.caught}`);
+    if (counts.seeded !== claude.seeded
+      || (counts.either !== null && (counts.either < claude.caught || counts.either > claude.caught + counts.caught))) {
+      throw new Error(`run ${c.id}'s ${CODEX_ARTIFACT} cannot pair with ${claude.url}: seeded ${counts.seeded} of ${claude.seeded}, either ${counts.either ?? 'not computed'} beside Claude's ${claude.caught}`);
     }
     const { claudeUrl: _claudeUrl, seeded: _seeded, ...kept } = counts;
     byUrl.set(claude.url, kept);
@@ -110,7 +114,7 @@ function pairCodex(recorded, codex) {
 /**
  * The snapshot, from every canary run listed: `{ id, createdAt, record }`,
  * `record` null for a run that left no `canary-recall` artifact; and every
- * red-team run listed, `{ id, record }`, each record a `codex-recall`.
+ * advisory-engine run listed, `{ id, record }`, each record a `codex-recall`.
  *
  * Every run in the window counts as its record has it. A domain that left no
  * finished report caught only what its partial report cites, so the seeds
@@ -156,8 +160,9 @@ function listCanaryRuns(since) {
 }
 
 /**
- * The successful red-team runs on `main` created since `since`. Success alone
- * is an admin's dispatch: `codex-audit-report.yaml` fails any other.
+ * The successful advisory-engine runs on `main` created since `since`.
+ * Success alone is an admin's dispatch: `codex-audit-report.yaml` fails any
+ * other.
  */
 function listCodexRuns(since) {
   const query = `repos/${REPO}/actions/workflows/${CODEX_WORKFLOW}/runs?branch=main&status=success&created=%3E%3D${since}&per_page=100`;
@@ -190,7 +195,7 @@ function main() {
   writeFileSync(out, `${JSON.stringify(snapshot, null, 2)}\n`);
   console.log(`canary recall: ${snapshot.caught}/${snapshot.seeded} over ${snapshot.runs.length} run(s) since ${since}` +
     `${snapshot.unrecorded.length ? `; ${snapshot.unrecorded.length} run(s) left no record` : ''}` +
-    `; ${snapshot.runs.filter((r) => r.codex).length} paired with the red team -> ${out}`);
+    `; ${snapshot.runs.filter((r) => r.codex).length} paired with the advisory engine -> ${out}`);
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) main();
