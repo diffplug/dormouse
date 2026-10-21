@@ -340,6 +340,39 @@ describe('Wall on the Lath engine', () => {
     expect(Object.keys(saved!.lathLayout!.leafMeta ?? {})).toContain('surface:a');
   });
 
+  it('honors a no-probe flush queued behind a probing save', async () => {
+    await act(async () => root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />));
+    await flush();
+    const handle = getWallHandle(DEFAULT_WORKSPACE_ID)!;
+    await act(async () => { await handle.flushPersistence(); });
+    let resolveCwd!: (cwd: string) => void;
+    const probe = vi.spyOn(fake, 'getCwd').mockResolvedValue('/unexpected')
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveCwd = resolve; }));
+    await act(async () => {
+      const first = handle.flushPersistence();
+      const last = handle.flushPersistence({ probeCwd: false });
+      resolveCwd('/retained');
+      await Promise.all([first, last]);
+    });
+    expect(probe).toHaveBeenCalledTimes(1);
+    expect((fake.getState() as PersistedSession).panes[0].cwd).toBe('/retained');
+  });
+
+  it('probes for a normal flush queued behind a no-probe save', async () => {
+    await act(async () => root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />));
+    await flush();
+    const handle = getWallHandle(DEFAULT_WORKSPACE_ID)!;
+    await act(async () => { await handle.flushPersistence(); });
+    const probe = vi.spyOn(fake, 'getCwd').mockResolvedValue('/fresh');
+    await act(async () => {
+      const first = handle.flushPersistence({ probeCwd: false });
+      const last = handle.flushPersistence();
+      await Promise.all([first, last]);
+    });
+    expect(probe).toHaveBeenCalledTimes(1);
+    expect((fake.getState() as PersistedSession).panes[0].cwd).toBe('/fresh');
+  });
+
   it('manual keyboard splits enter passthrough on the new pane immediately', async () => {
     const onEvent = vi.fn();
     await act(async () => {
