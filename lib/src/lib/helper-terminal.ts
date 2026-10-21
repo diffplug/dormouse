@@ -6,7 +6,7 @@ import { addPendingKill } from './pending-kills';
 import { isDelayedKillEnabled } from './labs-settings';
 import type { WorkspaceId } from './session-types';
 import { getDefaultShellOpts } from './shell-defaults';
-import { getInheritableCwd, getTerminalPaneState, isPaneOscDriven, seedLaunchedCommand } from './terminal-state-store';
+import { getInheritableCwd, getTerminalPaneState, isPaneOscDriven, seedLaunchedCommand, seedTerminalManualCwd } from './terminal-state-store';
 import { DEFAULT_HELPER_COMMAND, type HelperIdentity } from './terminal-context-types';
 
 export type HelperStatus = 'waiting' | 'running' | 'completed' | 'preserved' | 'off' | 'unsupported' | 'exited';
@@ -44,7 +44,7 @@ const atPrompt = (id: string) => {
 };
 
 /** One poll per helper advances its status and, once settled, refreshes the host work inspection. */
-function watchHelper(helper: HelperTerminal, launchCwd?: string): void {
+function watchHelper(helper: HelperTerminal): void {
   clearInterval(helper.timer);
   if (!visibleParents.has(helper.parentId) || helper.promoting) return;
   const started = Date.now();
@@ -60,7 +60,7 @@ function watchHelper(helper: HelperTerminal, launchCwd?: string): void {
     else if (helper.status === 'waiting') {
       if (isPaneOscDriven(helper.id) && atPrompt(helper.id)) {
         status = 'running';
-        seedLaunchedCommand(helper.id, helper.command, launchCwd);
+        seedLaunchedCommand(helper.id, helper.command);
         getPlatform().writePty(helper.id, `${helper.command}\r`, { launch: true });
       } else if (Date.now() - started >= READINESS_TIMEOUT_MS) status = 'unsupported';
     } else if (helper.status === 'running' && atPrompt(helper.id)) status = 'completed';
@@ -239,9 +239,12 @@ export async function openHelper(parentId: string): Promise<HelperTerminal> {
     helpers.set(parentId, helper);
     setPendingShellOpts(id, { ...getDefaultShellOpts(), cwd, helper: { parentId, command } });
     getOrCreateTerminal(id);
+    // Seed only missing state before readiness: shell startup may report a
+    // different directory, which autorun must keep.
+    seedTerminalManualCwd(id, cwd);
     parkElement(id);
     notifyHelpers();
-    watchHelper(helper, cwd);
+    watchHelper(helper);
     return helper;
   })();
   pending.set(parentId, operation);
