@@ -31,6 +31,7 @@ Three origins (decided 2026-09-30):
 
 ## PR previews
 
+- Sweep at deploy, not at close (decided 2026-10-21): a `pull_request` job runs the PR's own workflow file, so any job holding preview credentials needs the approval-gated `hosted-preview` environment, and a close-time cleanup there waited for approval nobody gave; ten merged PRs' previews leaked that way. A main-only cleanup environment would have needed a second copy of the credentials, and `pull_request_target` is banned (`docs/specs/security-ci.md` -> `S44`).
 - One owner-role Hyperdrive per PR (decided 2026-10-03): a Hyperdrive per role would triple each PR's Hyperdrives against a preview-account limit nobody has measured, and the grants are exercised where they can fail a PR, in `hosted/server/tests`, which binds the relay and voice Workers to their roles.
 
 ## Relay

@@ -10,6 +10,7 @@ import {
   cloudflare,
   findHyperdrives,
   cleanup,
+  sweep,
   previewRatelimitNamespace,
   previewSecrets,
 } from "./preview.mjs";
@@ -368,16 +369,57 @@ test("deployment smoke compares enabled providers as a set, not a sequence", asy
     );
 });
 
-test("preview cleanup runs the base branch's script, never the closed PR's", async () => {
+test("sweep cleans up only other PRs that are closed or unlabeled", async (t) => {
+  const pulls = {
+    7: { state: "closed", labels: [{ name: "hosted-preview" }] },
+    8: { state: "open", labels: [{ name: "hosted-preview" }] },
+    9: { state: "open", labels: [{ name: "other" }] },
+  };
+  const removed = [];
+  t.mock.method(globalThis, "fetch", async (url, options) => {
+    const { hostname, pathname } = new URL(url);
+    if (options.method === "DELETE") {
+      removed.push(pathname.split("/").pop());
+      return result({});
+    }
+    if (hostname === "api.github.com") {
+      assert.equal(options.headers.authorization, "Bearer dummy-gh-token");
+      return Response.json(pulls[pathname.split("/").pop()]);
+    }
+    if (pathname.endsWith("workers/scripts"))
+      return result(
+        ["dormouse-hosted", "dormouse-relay-pr-7", "dormouse-voice-pr-42"].map((id) => ({ id })),
+      );
+    if (pathname.endsWith("hyperdrive/configs"))
+      return result([
+        { id: "hd-8", name: "dormouse-hosted-pr-8" },
+        { id: "hd-9", name: "dormouse-hosted-pr-9" },
+      ]);
+    if (pathname.endsWith("branches"))
+      return Response.json({
+        branches: [
+          { id: "br-main", name: "main" },
+          { id: "br-7", name: "dormouse-hosted-pr-7" },
+          { id: "br-x", name: "dormouse-hosted-pr-x" },
+        ],
+      });
+    throw new Error(`Unexpected request ${url}`);
+  });
+  await sweep({ ...env, GITHUB_REPOSITORY: "diffplug/dormouse", GH_TOKEN: "dummy-gh-token" });
+  const workers = (pr) =>
+    ["dormouse-relay", "dormouse-voice", "dormouse-hosted"].map((name) => `${name}-pr-${pr}`);
+  assert.deepEqual(removed, [...workers(7), "br-7", ...workers(9), "hd-9"]);
+});
+
+test("each preview deploy sweeps before it provisions, and nothing runs at close", async () => {
   const workflow = await readFile(
     new URL("../../.github/workflows/hosted-preview.yml", import.meta.url),
     "utf8",
   );
-  const cleanup = workflow.slice(workflow.indexOf("\n  cleanup:"));
-  assert.ok(cleanup.includes("preview.mjs cleanup"), "Found the cleanup job");
-  assert.match(cleanup, /\n {10}ref: refs\/heads\/main\n/);
-  assert.doesNotMatch(cleanup, /pull_request\.head\.sha/);
-  assert.match(cleanup, /\n {10}persist-credentials: false\n/);
+  const sweepStep = workflow.indexOf("preview:sweep");
+  assert.ok(sweepStep > workflow.indexOf("\n  deploy:"), "the deploy job sweeps");
+  assert.ok(sweepStep < workflow.indexOf("create-branch-action"), "before provisioning");
+  assert.match(workflow, /\n {4}types: \[opened, synchronize, reopened, labeled\]\n/);
 });
 
 test("deployment smoke rejects malformed health before making any auth requests", async () => {
