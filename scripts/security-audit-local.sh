@@ -38,7 +38,8 @@
 # file, one ledger title per line as CI's `List open findings` writes them,
 # copied to `audit-open-findings.txt` in place of listing the ledger with
 # `gh`. A Codex run's sandbox reaches this run's `gh` login, so on its machine
-# that login must not read the ledger: write the list on another.
+# that login must not read the ledger: write the list on another. Under
+# `--engine codex` a run that audits a domain refuses to start without it.
 #
 # The deterministic GitHub-state check (`scripts/github-state-check.mjs`) runs
 # first whenever a domain that reads its fragment does — `ci-and-secrets` and
@@ -63,7 +64,8 @@ export GITHUB_REPOSITORY="${GITHUB_REPOSITORY:-diffplug/dormouse}"
 # denies `Task`/`Agent`, so a local domain cannot delegate, and the
 # orchestrator never runs locally — but a fresh directory per run keeps the
 # wait bounded if that ever changes, where a repo-root fallback would hand the
-# next run an expired deadline.
+# next run an expired deadline. The Codex engine keeps each fragment's copy
+# there while a session runs.
 export RUNNER_TEMP="${RUNNER_TEMP:-$(mktemp -d)}"
 
 ENGINE=claude
@@ -80,6 +82,14 @@ esac
 # the Codex engine has no CI counterpart to agree with.
 CODEX_MODEL=gpt-6-sol
 CODEX_PROGRAM=daybreak_blue
+
+# Never the ledger fallback under Codex: its sandbox reaches this login.
+if [ "$ENGINE" = codex ] && [ -z "${AUDIT_OPEN_FINDINGS:-}" ]; then
+  case "${1:-}" in
+    canary|github-state) ;;
+    *) echo "error: --engine codex reads the open findings from AUDIT_OPEN_FINDINGS=<file>, written on another login; it never lists them with gh" >&2; exit 64 ;;
+  esac
+fi
 
 if ! command -v "$ENGINE" >/dev/null 2>&1; then
   echo "error: the \`$ENGINE\` CLI is not on PATH." >&2
@@ -123,19 +133,29 @@ run_domain() {
   case "$domain" in remote|local|hosted) model_args="--model opus" ;; esac
 
   if [ "$ENGINE" = codex ]; then
-    # Sandboxed to the working tree, with the network `ci-and-secrets` needs
-    # for live GitHub state; a check the sandbox keeps from the operator's `gh`
-    # login comes back UNVERIFIABLE, never PASS. The leading line stands in
-    # for the Claude run's denied `Task`: the domain runs every work stream
-    # itself.
-    echo "==> $domain -> $out (codex: $CODEX_MODEL, $CODEX_PROGRAM)"
+    # Codex has no subagents, so this runs the domain as a delegating domain
+    # would (`scripts/security-audit-codex.mjs`): one session per work stream,
+    # each appending to the fragment opened here, which is closed with the
+    # verdict its lines compute only when every session finished and only
+    # appended. Sandboxed to the working tree, with the network
+    # `ci-and-secrets` needs for live GitHub state; a check the sandbox keeps
+    # from the operator's `gh` login comes back UNVERIFIABLE, never PASS.
+    local streams stream prompt failed=0
+    streams=$(node scripts/security-audit-codex.mjs streams "$domain") || return 1
     rm -f "$out"
-    if ! codex exec -m "$CODEX_MODEL" --cyber-access-program "$CODEX_PROGRAM" \
-      --sandbox workspace-write -c sandbox_workspace_write.network_access=true --ephemeral \
-      "$(echo "Do not delegate: run every work stream yourself."; echo; cat "$AUDIT_DIR/_preamble.md"; echo; cat "$AUDIT_DIR/$domain.md")" </dev/null; then
-      echo "==> $domain auditor process failed" >&2
-      return 1
-    fi
+    node scripts/security-audit-codex.mjs open "$out"
+    for stream in $streams; do
+      echo "==> $domain/$stream -> $out (codex: $CODEX_MODEL, $CODEX_PROGRAM)"
+      prompt=$(node scripts/security-audit-codex.mjs prompt "$domain" "$stream") || { failed=1; continue; }
+      cp "$out" "$RUNNER_TEMP/$out.before"
+      if ! codex exec -m "$CODEX_MODEL" --cyber-access-program "$CODEX_PROGRAM" \
+        --sandbox workspace-write -c sandbox_workspace_write.network_access=true --ephemeral "$prompt" </dev/null; then
+        echo "==> $domain/$stream auditor process failed" >&2
+        failed=1
+      fi
+      node scripts/security-audit-codex.mjs settle "$out" "$RUNNER_TEMP/$out.before" "$stream" || failed=1
+    done
+    [ "$failed" = 1 ] || node scripts/security-audit-codex.mjs close "$out"
   else
     echo "==> $domain -> $out${model_args:+ ($model_args)}"
     rm -f "$out"
