@@ -2960,6 +2960,24 @@ describe('Hosted enrollment', () => {
     expect(pollRequests()).toHaveLength(asked);
   });
 
+  it.each([false, true])('cancels enrollment during its policy read (fresh request: %s)', async (retry) => {
+    hosted();
+    const read = Promise.withResolvers<void>();
+    store.loadNetworkPolicy = async () => {
+      await read.promise;
+      return store.network;
+    };
+    const abandoned = command('beginHostedEnrollment', { label: 'old' });
+    await command('cancelHostedEnrollment');
+    const fresh = retry ? command('beginHostedEnrollment', { label: 'fresh' }) : null;
+    read.resolve();
+
+    expect((await abandoned).error).toContain('cancelled');
+    if (fresh) expect((await fresh).result).toMatchObject({ status: 'waiting' });
+    expect(beginRequests()).toHaveLength(retry ? 1 : 0);
+    expect(vi.getTimerCount()).toBe(retry ? 1 : 0);
+  });
+
   it('stops polling on cancel, on Nothing, and on dispose', async () => {
     hosted();
     await command('beginHostedEnrollment', { label: 'x' });

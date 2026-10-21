@@ -805,8 +805,6 @@ export class BurrowService {
   async #beginHostedEnrollment(params: HostedEnrollParams | undefined): Promise<HostedEnrollmentState> {
     if (this.#relay.mode === 'self-host') throw new Error(SELF_HOST_DEVICE_CODE_REFUSAL);
     const label = this.#labelFrom(params);
-    await this.#networkPolicy();
-    this.#refuseNothing();
     this.#refuseEnrolled();
     if (this.#enrollRun) return this.#hostedEnrollmentState()!;
     if (this.#enrollBegin) return await this.#enrollBegin;
@@ -821,6 +819,14 @@ export class BurrowService {
 
   /** The begin request, then the run it starts in place of any before it, unless `seq` was superseded. */
   async #beginRun(label: string, seq: number): Promise<HostedEnrollmentState> {
+    // Register the begin before this read, so Cancel can retire it even before
+    // it has requested a code or started polling.
+    await this.#networkPolicy();
+    if (seq !== this.#enrollSeq || this.#disposed) {
+      throw new Error('This enrollment was cancelled.');
+    }
+    this.#refuseNothing();
+    this.#refuseEnrolled();
     const { begin, noiseStatic } = await beginHostedEnrollment(this.#relay.origin, this.#fetch);
     if (seq !== this.#enrollSeq || this.#disposed) {
       throw new Error('This enrollment was cancelled.');
