@@ -236,7 +236,7 @@ const WSL_CLI_ENV = [
 ];
 // dor/bin/dor adds its own return-only entries for these, so other Windows
 // programs started from WSL never see them.
-const WSL_LAUNCHER_ENV = ['ELECTRON_RUN_AS_NODE', 'PWD'];
+const WSL_LAUNCHER_ENV = ['ELECTRON_RUN_AS_NODE', 'PWD', 'WSL_DISTRO_NAME'];
 const WSL_MANAGED_NAMES = new Set([...WSL_CLI_ENV, ...WSL_LAUNCHER_ENV]);
 
 // Replace conflicting flags inherited from a parent host, preserve user vars.
@@ -370,13 +370,16 @@ function resolveSpawnConfig(options, runtime = {}) {
   };
   const osModule = runtime.osModule || os;
   const fsModule = runtime.fsModule || fs;
+  const shell = explicitShell || resolveDefaultShell(platform, env);
+  // A WSL shell reports Linux directories, which only the distro resolves: it
+  // starts there itself (`--cd`), from the default Windows directory.
+  const wslCwd = platform === 'win32' && shellStem(shell) === 'wsl' && /^\/(?!\/)/.test(requestedCwd || '') ? requestedCwd : undefined;
   // Normalize the requested cwd into a native spelling before it reaches the OS,
   // so the directory check resolves and the casing the shell (and its children)
   // perceives is stable. See canonicalizeWindowsCwd.
-  const cwd = platform === 'win32' ? canonicalizeWindowsCwd(requestedCwd) : requestedCwd;
+  const cwd = wslCwd ? undefined : platform === 'win32' ? canonicalizeWindowsCwd(requestedCwd) : requestedCwd;
   const defaultCwd = resolveDefaultCwd(platform, env, osModule);
   const missingExplicitCwd = Boolean(cwd) && !directoryExists(cwd, fsModule);
-  const shell = explicitShell || resolveDefaultShell(platform, env);
   // An empty array means "no override," not "no args" — fall through to the
   // login-flag default so `~/.zprofile` runs and PATH includes Homebrew/asdf.
   const shellArgs = explicitArgs && explicitArgs.length > 0
@@ -420,7 +423,8 @@ function resolveSpawnConfig(options, runtime = {}) {
     cwdWarning: missingExplicitCwd ? `unable to restore because directory ${cwd} was removed` : null,
     env: integrated.env,
     shell,
-    shellArgs: integrated.shellArgs,
+    // After integration, which recognizes only the exact `-d <distro>` launch.
+    shellArgs: wslCwd ? ['--cd', wslCwd, ...integrated.shellArgs] : integrated.shellArgs,
   };
 }
 
@@ -798,12 +802,42 @@ module.exports.parsePsPairs = parsePsPairs;
 
 async function getDescendantPids(rootPid, runtime = {}) {
   const pairs = await readProcessTable(runtime);
-  if (pairs && (!runtime.strict || pairs.some(([pid]) => pid === rootPid))) return [...buildDescendantSet(pairs, rootPid)];
-  // Port discovery tolerates a failed scan; helper work inspection must not
-  // mistake one for idle (docs/specs/terminal-context.md).
-  if (runtime.strict) throw new Error('Unable to inspect terminal processes');
-  return [rootPid];
+  // Port discovery tolerates a failed scan; `shellHasWork` must not.
+  return pairs ? [...buildDescendantSet(pairs, rootPid)] : [rootPid];
 }
+
+// Windows processes a shell keeps for its whole life, which are no work of the
+// user's: Git Bash's launcher runs MSYS bash beneath it, and wsl.exe a relay
+// and its host with a console. Keyed by the shell's own name.
+const WINDOWS_SHELL_PLUMBING = new Map([
+  ['bash', new Set(['bash.exe'])],
+  ['wsl', new Set(['wsl.exe', 'wslhost.exe', 'conhost.exe'])],
+]);
+
+/**
+ * Whether the shell at `rootPid` runs anything: a descendant beyond its own
+ * Windows plumbing (`WINDOWS_SHELL_PLUMBING`). Throws when the scan fails or
+ * misses the shell, since unknown work is never idle
+ * (docs/specs/terminal-context.md).
+ */
+async function shellHasWork(rootPid, shell, runtime = {}) {
+  const table = await readProcessTable(runtime);
+  if (!table || !table.some(([pid]) => pid === rootPid)) throw new Error('Unable to inspect terminal processes');
+  const plumbing = (runtime.platform || process.platform) === 'win32' && WINDOWS_SHELL_PLUMBING.get(shellStem(shell));
+  const rows = new Map(table.map(([pid, ppid, name]) => [pid, { ppid, name: (name || '').toLowerCase() }]));
+  const shellPids = new Set([rootPid]);
+  // Plumbing counts as the shell only beneath the shell itself, so work it
+  // starts under plumbing is still found. The walk lists each pid after its parent.
+  for (const pid of buildDescendantSet(table, rootPid)) {
+    if (shellPids.has(pid)) continue;
+    const { ppid, name } = rows.get(pid);
+    if (!plumbing || !shellPids.has(ppid) || !plumbing.has(name)) return true;
+    shellPids.add(pid);
+  }
+  return false;
+}
+
+module.exports.shellHasWork = shellHasWork;
 
 /** Every `[pid, ppid]` pair on this platform — `[pid, ppid, name]` on Windows,
  *  where the same query names each process (one query instead of two: ~0.3 s
@@ -1161,6 +1195,127 @@ function dedupeListeningPorts(ports) {
   return [...seen.values()].sort((a, b) => a.port - b.port || a.address.localeCompare(b.address));
 }
 
+// ── Windows shells whose work the process table cannot follow ───────────────
+//
+// Git Bash: an MSYS exec replaces the Windows process, so the program it runs
+// names a parent that no longer exists. MSYS's own `ps` keeps the link (its
+// pids survive exec) and names each process's Windows pid.
+//
+// WSL: a Linux listener is no Windows process, and with mirrored networking
+// not even a Windows socket. The distro finds the pane's processes itself, by
+// the DORMOUSE_SURFACE_ID the pane's WSLENV carries in.
+
+/** `[msysPid, msysPpid, winpid]` rows of MSYS `ps` output. */
+function parseMsysPs(output) {
+  const rows = [];
+  for (const line of output.split(/\r?\n/)) {
+    const match = /^\s*[A-Z]?\s*(\d+)\s+(\d+)\s+\d+\s+(\d+)\s/.exec(line);
+    if (match) rows.push([Number(match[1]), Number(match[2]), Number(match[3])]);
+  }
+  return rows;
+}
+module.exports.parseMsysPs = parseMsysPs;
+
+/** The MSYS `ps.exe` beside a Git Bash shell (`bin\bash.exe` or `usr\bin\bash.exe`). */
+function msysPsFor(shell, fsModule = fs) {
+  if (!shell || path.win32.basename(shell).toLowerCase() !== 'bash.exe') return undefined;
+  const dir = path.win32.dirname(shell);
+  return [path.win32.join(dir, 'ps.exe'), path.win32.join(dir, '..', 'usr', 'bin', 'ps.exe')]
+    .find((candidate) => fileExists(candidate, fsModule));
+}
+
+/** Grows each owned set across MSYS execs: an MSYS process it holds owns its
+ *  MSYS descendants, and each of those its Windows descendants. */
+function adoptMsysDescendants(owned, pairs, msysRows) {
+  const byWinpid = new Map(msysRows.map(([pid, , winpid]) => [winpid, pid]));
+  const msysPairs = msysRows.map(([pid, ppid]) => [pid, ppid]);
+  const winpidOf = new Map(msysRows.map(([pid, , winpid]) => [pid, winpid]));
+  for (const pids of owned.values()) {
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const pid of [...pids]) {
+        const msys = byWinpid.get(pid);
+        if (msys === undefined) continue;
+        for (const child of buildDescendantSet(msysPairs, msys)) {
+          const winpid = winpidOf.get(child);
+          if (winpid === undefined || pids.has(winpid)) continue;
+          for (const descendant of buildDescendantSet(pairs, winpid)) pids.add(descendant);
+          grew = true;
+        }
+      }
+    }
+  }
+}
+module.exports.adoptMsysDescendants = adoptMsysDescendants;
+
+const SURFACE_ID_PATTERN = /^[A-Za-z0-9:._-]+$/;
+
+/** The `sh` script listing, inside a distro, the processes whose environment
+ *  names one of `surfaceIds`, their sockets, and the distro's TCP tables. */
+function wslPortScript(surfaceIds) {
+  const alternatives = surfaceIds.map((id) => id.replace(/\./g, '\\.')).join('|');
+  return [
+    `m=$(grep -s -H -a -z -o -x -E 'DORMOUSE_SURFACE_ID=(${alternatives})' /proc/[0-9]*/environ | tr '\\0' '\\n');`,
+    'echo "$m";',
+    'for x in $(echo "$m" | sed -n "s#^/proc/\\([0-9]*\\)/environ:.*#\\1#p"); do',
+    'c=; read -r c < /proc/$x/comm 2>/dev/null; echo "@$x $c"; ls -l /proc/$x/fd 2>/dev/null; done;',
+    "echo '#tcp'; cat /proc/net/tcp 2>/dev/null; echo '#tcp6'; cat /proc/net/tcp6 2>/dev/null",
+  ].join(' ');
+}
+module.exports.wslPortScript = wslPortScript;
+
+/** Listening ports from `wslPortScript` output, each tagged with the surface
+ *  id its process carries. */
+function parseWslPortScan(output) {
+  const surfaceOf = new Map();
+  const names = new Map();
+  const inodeToPid = new Map();
+  const tables = { tcp: '', tcp6: '' };
+  let section = 'env';
+  let current;
+  for (const line of output.split(/\r?\n/)) {
+    if (line === '#tcp' || line === '#tcp6') { section = line.slice(1); continue; }
+    if (section !== 'env') { tables[section] += line + '\n'; continue; }
+    const env = /^\/proc\/(\d+)\/environ:DORMOUSE_SURFACE_ID=(.+)$/.exec(line);
+    if (env) { surfaceOf.set(Number(env[1]), env[2]); continue; }
+    const proc = /^@(\d+) ?(.*)$/.exec(line);
+    if (proc) { current = Number(proc[1]); if (proc[2]) names.set(current, proc[2]); continue; }
+    const socket = /socket:\[(\d+)\]/.exec(line);
+    if (socket && current !== undefined) inodeToPid.set(socket[1], current);
+  }
+  return [
+    ...parseProcNetTcp(tables.tcp, 'IPv4', inodeToPid),
+    ...parseProcNetTcp(tables.tcp6, 'IPv6', inodeToPid),
+  ].map((port) => ({ ...port, processName: names.get(port.pid), surfaceId: surfaceOf.get(port.pid) }));
+}
+module.exports.parseWslPortScan = parseWslPortScan;
+
+/** Listening ports inside every running distro for `surfaceIds`, inside the
+ *  socket scan's budget; [] on any failure. */
+async function wslListeningPorts(surfaceIds, runtime, budgetMs) {
+  const now = runtime.now || (() => performance.now());
+  const deadline = now() + budgetMs;
+  const remaining = () => {
+    const ms = Math.ceil(deadline - now());
+    if (ms <= 0) throw new Error('port scan deadline exhausted');
+    return ms;
+  };
+  const env = runtime.env || process.env;
+  const wsl = windowsSystemPath(env, 'System32', 'wsl.exe');
+  // UTF-8 output: plain wsl.exe listings are UTF-16.
+  const options = (timeout) => ({ timeout, env: { ...env, WSL_UTF8: '1' } });
+  try {
+    const listing = await runText(runtime, wsl, ['--list', '--running', '--quiet'], options(remaining()));
+    const distros = listing.replace(/\0/g, '').split(/\r?\n/).map((name) => name.trim()).filter((name) => /^[A-Za-z0-9._-]+$/.test(name));
+    const script = wslPortScript(surfaceIds);
+    const scans = await Promise.all(distros.map((distro) =>
+      runTextLenient(runtime, wsl, ['-d', distro, '-e', 'sh', '-c', script], options(remaining()))));
+    return scans.flatMap(parseWslPortScan);
+  } catch {
+    return [];
+  }
+}
+
 /**
  * `rootPid -> listening ports` for a whole set of terminals, in ONE process-table
  * read and ONE socket scan.
@@ -1169,29 +1324,51 @@ function dedupeListeningPorts(ports) {
  * --ports` asks about every terminal of every Workspace at once, and each step is
  * a subprocess — two spawns for N terminals instead of 2N. Returns [] per pid on
  * any platform failure rather than throwing.
+ *
+ * On Windows, `runtime.shellOf(pid)` and `runtime.surfaceOf(pid)` name a root's
+ * shell and Surface, for the Git Bash and WSL reads above. Each runs beside a
+ * step the scan already waits for, never after it.
  */
 async function getOpenPortsForPids(rootPids, runtime = {}) {
   const byRoot = new Map();
   const roots = [...new Set(rootPids.filter((pid) => Number.isInteger(pid)))];
   if (roots.length === 0) return byRoot;
+  const windows = (runtime.platform || process.platform) === 'win32';
 
-  const pairs = await readProcessTable(runtime);
+  const msysPs = windows ? roots.map((root) => msysPsFor(runtime.shellOf?.(root), runtime.fsModule)).find(Boolean) : undefined;
+  const [pairs, msysRows] = await Promise.all([
+    readProcessTable(runtime),
+    msysPs ? runTextLenient(runtime, msysPs, ['-a'], { timeout: OPEN_PORT_TIMEOUT_MS }).then(parseMsysPs) : [],
+  ]);
   // A failed scan is tolerated here (unlike helper-work inspection): each root
   // then owns only itself, exactly as `getDescendantPids` falls back.
   const owned = new Map(roots.map((root) => [root, pairs ? buildDescendantSet(pairs, root) : new Set([root])]));
+  if (pairs && msysRows.length > 0) adoptMsysDescendants(owned, pairs, msysRows);
   const union = new Set();
   for (const pids of owned.values()) for (const pid of pids) union.add(pid);
+
+  // A root running wsl.exe anywhere beneath it, by the Surface it carries.
+  const names = pairs ? new Map(pairs.map(([pid, , name]) => [pid, name])) : undefined;
+  const wslSurfaces = new Map();
+  if (windows && names) {
+    for (const [root, pids] of owned) {
+      const surfaceId = runtime.surfaceOf?.(root);
+      if (surfaceId && SURFACE_ID_PATTERN.test(surfaceId) && [...pids].some((pid) => names.get(pid)?.toLowerCase() === 'wsl.exe')) wslSurfaces.set(root, surfaceId);
+    }
+  }
 
   // The socket scan's budget scales with the request (`budgetCount` when
   // coalesced requests share this scan); the process-table read above does
   // not, its cost being the whole table either way.
-  const ports = await getListeningPortsForPids(
-    [...union],
-    { ...runtime, scanTimeoutMs: openPortScanTimeoutMs(runtime.budgetCount ?? roots.length) },
-    pairs ? new Map(pairs.map(([pid, , name]) => [pid, name])) : undefined,
-  );
+  const scanTimeoutMs = openPortScanTimeoutMs(runtime.budgetCount ?? roots.length);
+  const [ports, wslPorts] = await Promise.all([
+    getListeningPortsForPids([...union], { ...runtime, scanTimeoutMs }, names),
+    wslSurfaces.size > 0 ? wslListeningPorts([...new Set(wslSurfaces.values())], runtime, scanTimeoutMs) : [],
+  ]);
   for (const [root, pids] of owned) {
-    byRoot.set(root, dedupeListeningPorts(ports.filter((entry) => pids.has(entry.pid))));
+    const surfaceId = wslSurfaces.get(root);
+    const linux = surfaceId ? wslPorts.filter((entry) => entry.surfaceId === surfaceId).map(({ surfaceId: _, ...entry }) => entry) : [];
+    byRoot.set(root, dedupeListeningPorts([...ports.filter((entry) => pids.has(entry.pid)), ...linux]));
   }
   return byRoot;
 }
@@ -1312,7 +1489,7 @@ module.exports.pacedInputSegments = pacedInputSegments;
 // same reason: `canonicalLocalDirectory` in `lib/src/host/local-directory.ts`,
 // which `main.js` takes from `git-info.cjs` and VS Code's `pty-host.js`
 // bundles. The default opens nothing.
-module.exports.create = function create(send, ptyModule, { platform = process.platform, replay = false, sliceSince = null, onHelper = () => {}, canonicalDirectory = async () => null, scanPorts = createPortScanner((pids, count) => getOpenPortsForPids(pids, { budgetCount: count })) } = {}) {
+module.exports.create = function create(send, ptyModule, { platform = process.platform, replay = false, sliceSince = null, onHelper = () => {}, canonicalDirectory = async () => null, scanPorts = null } = {}) {
   if (!ptyModule || typeof ptyModule.spawn !== 'function') {
     throw new TypeError('create() requires a node-pty compatible module');
   }
@@ -1329,6 +1506,13 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
   const sessions = new Map(); // id -> { chunks: string[], chars: number, received: number }
   const REPLAY_CHARS = 200000;
   const ptyShells = new Map(); // id -> resolved shell executable
+  /** The live PTY's id at `pid`, which a port scan names its roots by. */
+  const idAtPid = (pid) => { for (const [id, p] of ptys) if (p.pid === pid) return id; };
+  scanPorts ??= createPortScanner((pids, count) => getOpenPortsForPids(pids, {
+    budgetCount: count,
+    shellOf: (pid) => ptyShells.get(idAtPid(pid)),
+    surfaceOf: idAtPid,
+  }));
   // Repaint restoration belongs to the PTY owner, where every local and remote
   // resize passes: a later resize or repaint, exit, kill, or replacement
   // cancels it, and a Viewer's detach does not, or the PTY is left a row off
@@ -1695,9 +1879,11 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
       } else if (request.op === 'info') {
         // Left null when inspection throws: unknown work is never idle.
         result.busy = null;
+        // node-pty's `process` on Windows is the name option it was given,
+        // never the foreground program, so only POSIX compares it.
         result.busy = !p ? false
-          : (await getDescendantPids(p.pid, { strict: true })).some(pid => pid !== p.pid)
-            || (!!p.process && shellBasename(p.process) !== shellBasename(ptyShells.get(request.id)));
+          : await shellHasWork(p.pid, ptyShells.get(request.id))
+            || (platform !== 'win32' && !!p.process && shellBasename(p.process) !== shellBasename(ptyShells.get(request.id)));
       } else if (request.op === 'promote') {
         if (request.restore) {
           if (!sessions.has(request.id) || !validHelperOwner(request.id, request.restore)) throw new Error('Invalid helper owner');

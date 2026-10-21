@@ -67,14 +67,37 @@ export function productionConfig(base, env, worker) {
   };
   if (base.assets)
     config.assets = { ...base.assets, directory: fromStage(base.assets.directory) };
-  if (base.hyperdrive) {
-    const variable = identity.hyperdrive;
-    const id = need(env, variable);
-    assert.match(id, /^[a-f0-9]{32}$/, `${variable} must be a Hyperdrive ID`);
-    assert.notEqual(id, "0".repeat(32), `Provision production Hyperdrive first: ${variable}`);
-    config.hyperdrive = base.hyperdrive.map(({ binding }) => ({ binding, id }));
-  }
+  const variable = identity.hyperdrive;
+  const id = need(env, variable);
+  assert.match(id, /^[a-f0-9]{32}$/, `${variable} must be a Hyperdrive ID`);
+  assert.notEqual(id, "0".repeat(32), `Provision production Hyperdrive first: ${variable}`);
+  config.hyperdrive = (base.hyperdrive ?? []).map(({ binding }) => ({ binding, id }));
   return config;
+}
+
+/**
+ * Each Worker's Hyperdrive ID, keyed as `PRODUCTION` is: an error unless every
+ * Worker binds exactly one and no two bind the same.
+ */
+function hyperdriveIds(configs) {
+  const ids = Object.fromEntries(
+    Object.keys(PRODUCTION).map((worker) => {
+      const bindings = configs[worker].hyperdrive ?? [];
+      assert.equal(
+        bindings.length,
+        1,
+        `${configs[worker].name} must bind exactly one Hyperdrive`,
+      );
+      return [worker, bindings[0].id];
+    }),
+  );
+  const variables = Object.values(PRODUCTION).map(({ hyperdrive }) => hyperdrive);
+  assert.equal(
+    new Set(Object.values(ids)).size,
+    variables.length,
+    `${variables.join(", ")} must name three different Hyperdrives`,
+  );
+  return ids;
 }
 
 /** All three, keyed as `WORKERS` is, each on its own Hyperdrive. */
@@ -85,12 +108,7 @@ export function productionConfigs(bases, env) {
       productionConfig(bases[worker], env, worker),
     ]),
   );
-  const variables = Object.values(PRODUCTION).map(({ hyperdrive }) => hyperdrive);
-  assert.equal(
-    new Set(variables.map((variable) => env[variable])).size,
-    variables.length,
-    `${variables.join(", ")} must name three different Hyperdrives`,
-  );
+  hyperdriveIds(configs);
   return configs;
 }
 
@@ -176,34 +194,34 @@ export async function verifyPackages() {
  * role, never the migration role; and each Worker holds its secrets.
  */
 export async function preflight(env, configs, api = cloudflare(env)) {
+  const ids = hyperdriveIds(configs);
   const origin = hyperdriveOrigin(need(env, "DATABASE_URL"));
-  for (const [worker, { role }] of Object.entries(PRODUCTION))
-    for (const { id } of configs[worker].hyperdrive) {
-      const { result } = await api(`hyperdrive/configs/${id}`);
-      const name = `${configs[worker].name}'s Hyperdrive`;
-      assert.equal(result.caching?.disabled, true, `${name} must disable caching`);
-      assert.equal(
-        result.origin.host,
-        origin.host,
-        `${name} must use the migration database's host`,
-      );
-      assert.equal(
-        Number(result.origin.port),
-        origin.port,
-        `${name} must use the migration database's port`,
-      );
-      assert.equal(
-        result.origin.database,
-        origin.database,
-        `${name} must use the migration database`,
-      );
-      assert.notEqual(
-        result.origin.user,
-        origin.user,
-        `${name} must not connect as the migration role`,
-      );
-      assert.equal(result.origin.user, role, `${name} must connect as ${role}`);
-    }
+  for (const [worker, { role }] of Object.entries(PRODUCTION)) {
+    const { result } = await api(`hyperdrive/configs/${ids[worker]}`);
+    const name = `${configs[worker].name}'s Hyperdrive`;
+    assert.equal(result.caching?.disabled, true, `${name} must disable caching`);
+    assert.equal(
+      result.origin.host,
+      origin.host,
+      `${name} must use the migration database's host`,
+    );
+    assert.equal(
+      Number(result.origin.port),
+      origin.port,
+      `${name} must use the migration database's port`,
+    );
+    assert.equal(
+      result.origin.database,
+      origin.database,
+      `${name} must use the migration database`,
+    );
+    assert.notEqual(
+      result.origin.user,
+      origin.user,
+      `${name} must not connect as the migration role`,
+    );
+    assert.equal(result.origin.user, role, `${name} must connect as ${role}`);
+  }
   for (const [script, secrets] of Object.entries(requiredSecrets(configs))) {
     const { result: bindings } = await api(`workers/scripts/${script}/secrets`);
     const names = new Set(bindings.map((item) => item.name));

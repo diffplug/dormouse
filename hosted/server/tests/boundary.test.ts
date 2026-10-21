@@ -77,7 +77,7 @@ const everything = {
 };
 
 const IMMUTABLE = "public, max-age=31536000, immutable";
-const HASHED_FILES = ["/assets/app-abc123.js", `${ONE_TIME_PAGE_PATH}assets/page-abc123.js`];
+const HASHED_FILES = ["/assets/app-B39o2E6i.js", `${ONE_TIME_PAGE_PATH}assets/page-B39o2E6i.js`];
 
 /** Every request any Worker sent upstream. */
 const outbound: string[] = [];
@@ -307,13 +307,18 @@ test("each Worker caches only its own hashed assets as immutable", async () => {
     });
   const env = { APP_ORIGIN: ORIGINS.relay };
   const relay = serving(relayRules);
-  for (const path of [pocket, phone, "/%61ssets/app-abc123.js"])
+  for (const path of [pocket, phone, "/%61ssets/app-B39o2E6i.js", "/assets/pocket-private-key-ChSkpulJ.js"])
     expect(cache(await relay.fetch(new Request(ORIGINS.relay + path), env)), path).toBe(IMMUTABLE);
-  expect(cache(await relay.fetch(new Request(ORIGINS.relay + "/sw.js"), env))).toBe("no-cache");
-  for (const path of ["/connect/x.js", "/api/assets/x.js", "/ws/assets/x.js"])
+  // A name without the content hash can change in place, so it is cached as its path otherwise is.
+  for (const path of ["/sw.js", "/assets/plain.js", "/assets/app-B39o2E6.js"])
+    expect(cache(await relay.fetch(new Request(ORIGINS.relay + path), env)), path).toBe("no-cache");
+  for (const path of ["/connect/x.js", `${ONE_TIME_PAGE_PATH}assets/plain.js`, "/api/assets/x.js", "/ws/assets/x.js"])
     expect(cache(await relay.fetch(new Request(ORIGINS.relay + path), env)), path).toBe("no-store");
   const account = serving(accountRules);
-  expect(cache(await account.fetch(new Request(ORIGINS.relay + phone), env))).toBe("no-store");
+  const accountEnv = { APP_ORIGIN: ORIGINS.account };
+  expect(cache(await account.fetch(new Request(ORIGINS.account + pocket), accountEnv))).toBe(IMMUTABLE);
+  for (const path of [phone, "/assets/plain.js"])
+    expect(cache(await account.fetch(new Request(ORIGINS.account + path), accountEnv)), path).toBe("no-store");
 });
 
 test("speak and a token's own delete are the voice Worker's, bearer-only", async () => {

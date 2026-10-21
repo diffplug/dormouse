@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const fs = require('node:fs');
-const { create, getDescendantPids, openNativeDirectory } = require('./pty-core');
+const { create, getDescendantPids, openNativeDirectory, shellHasWork } = require('./pty-core');
 
 test('Windows folder opening completes on launch and still reports spawn errors', () => {
   const child = new EventEmitter();
@@ -72,16 +72,37 @@ test('Windows refuses a folder whose path Explorer would split at a comma', () =
 test('process inspection fails closed while ordinary port discovery remains fail-soft', async () => {
   const runtime = { platform: 'darwin', execFile() { throw new Error('ps failed'); } };
   assert.deepEqual(await getDescendantPids(42, runtime), [42]);
-  await assert.rejects(getDescendantPids(42, { ...runtime, strict: true }), /inspect/);
+  await assert.rejects(shellHasWork(42, '/bin/zsh', runtime), /inspect/);
 });
 
-test('strict inspection requires the terminal process to appear in the process table', async () => {
+test('work inspection requires the terminal process to appear in the process table', async () => {
   for (const output of ['', 'invalid response', '1 0\n123 1']) {
     const runtime = { platform: 'darwin', execFile() { return output; } };
     assert.deepEqual(await getDescendantPids(42, runtime), [42]);
-    await assert.rejects(getDescendantPids(42, { ...runtime, strict: true }), /inspect/);
+    await assert.rejects(shellHasWork(42, '/bin/zsh', runtime), /inspect/);
   }
-  assert.deepEqual(await getDescendantPids(42, { platform: 'darwin', strict: true, execFile() { return '42 1\n43 42'; } }), [42, 43]);
+  assert.equal(await shellHasWork(42, '/bin/zsh', { platform: 'darwin', execFile() { return '42 1'; } }), false);
+  assert.equal(await shellHasWork(42, '/bin/zsh', { platform: 'darwin', execFile() { return '42 1\n43 42'; } }), true);
+});
+
+test('a Windows shell\'s own plumbing is no work, but what runs beneath it is', async () => {
+  const table = (rows) => ({
+    platform: 'win32',
+    execFile: () => JSON.stringify(rows.map(([ProcessId, ParentProcessId, Name]) => ({ ProcessId, ParentProcessId, Name }))),
+  });
+  // Git Bash's launcher keeps MSYS bash beneath it; wsl.exe a relay and its host.
+  const gitBash = [[42, 1, 'bash.exe'], [43, 42, 'bash.exe']];
+  const wsl = [[42, 1, 'wsl.exe'], [43, 42, 'wsl.exe'], [44, 43, 'wslhost.exe'], [45, 44, 'conhost.exe']];
+  const gitBashPath = 'C:\\Program Files\\Git\\bin\\bash.exe';
+  const wslPath = 'C:\\Windows\\System32\\wsl.exe';
+  assert.equal(await shellHasWork(42, gitBashPath, table(gitBash)), false);
+  assert.equal(await shellHasWork(42, wslPath, table(wsl)), false);
+  assert.equal(await shellHasWork(42, gitBashPath, table([...gitBash, [50, 43, 'node.exe']])), true);
+  assert.equal(await shellHasWork(42, wslPath, table([...wsl, [50, 43, 'node.exe']])), true);
+  // Under another shell, a process of that name is work.
+  const cmdPath = 'C:\\Windows\\System32\\cmd.exe';
+  assert.equal(await shellHasWork(42, cmdPath, table([[42, 1, 'cmd.exe'], [43, 42, 'bash.exe']])), true);
+  assert.equal(await shellHasWork(42, cmdPath, table([[42, 1, 'cmd.exe']])), false);
 });
 
 test('helper ownership survives a live listing and promotion preserves the PTY and replay', () => {

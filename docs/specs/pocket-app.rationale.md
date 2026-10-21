@@ -86,7 +86,7 @@ The phone subsequently reported `write-record / DataError` in the disposable dat
 
 **Why `no-cache` on the shell is load-bearing.** `emptyOutDir` deletes the previous build's hashed assets, so a browser reusing a heuristically cached `index.html` does not merely run stale code — it requests files that no longer exist and fails to boot, with no user recovery but clearing site data.
 
-**Why the cache class is read off the request path.** An unhashed file emitted into `assets/`, or an overridden `assetsDir`, would silently mislabel a resolved path — and the platform-shaped path differs on Windows besides.
+**Why the cache class is read off the request path.** An overridden `assetsDir` would silently mislabel a resolved path — and the platform-shaped path differs on Windows besides. The hash check exists because an unhashed file under `assets/` would otherwise be `immutable` and could never be revalidated after it changed.
 
 **Why the SPA fallback 404s under `/assets/`.** Answering a subresource miss with the shell stored an HTML body under a hashed-asset URL in the `immutable` class, which no reload could revalidate away: a request landing during a deploy broke the app for good.
 

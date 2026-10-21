@@ -3,7 +3,7 @@
  * (`hosted/server/relay-api.ts`) share beyond the wire contract: the bounds
  * both enforce, the registration checks and the sign-in pipeline in their
  * order, the passkey label reduction, and the Pocket origin's
- * Content-Security-Policy. One copy, so the two Relays cannot
+ * Content-Security-Policy and asset cache class. One copy, so the two Relays cannot
  * disagree on what a valid registration, assertion, label, or bound is
  * (`docs/specs/relay.md`, `docs/specs/hosted.md` -> "Relay").
  */
@@ -490,4 +490,14 @@ export function pocketContentSecurityPolicy(origin: string): string {
     "base-uri 'none'",
     "form-action 'self'",
   ].join('; ');
+}
+
+/**
+ * Whether a file name in a Vite `assets/` directory carries the content hash
+ * Vite's default output names put there (`[name]-[hash].[ext]`, 8 base64url
+ * characters), so its URL never serves other bytes and may be cached as
+ * immutable. A name without one can change in place.
+ */
+export function isContentHashedName(name: string): boolean {
+  return /^[^/]*-[\w-]{8}\.[a-z0-9]+$/i.test(name);
 }

@@ -40,7 +40,7 @@ Every section the [nightly audit](#how-the-guarantees-are-checked) checks opens 
 
 **Every night, a second-opinion audit runs the same prompts on Codex**, another vendor's model, published beside the audit but never gating a release; the canary measures both ([Second-opinion audit](./security-audit.md#second-opinion-audit)).
 
-**Every quarter, and before releases that change remote control or Hosted, a red team reads the code and these guarantees without the `FAIL IF` lines**, on Claude and on Codex, for what the checks themselves miss ([Red team](./security-audit.md#red-team)).
+**Every month, and before releases that change remote control or Hosted, a red team reads the code and these guarantees without the `FAIL IF` lines**, on Claude and on Codex, for what the checks themselves miss ([Red team](./security-audit.md#red-team)); each pass is a [`red-team`](https://github.com/diffplug/dormouse/issues?q=label%3Ared-team) issue.
 
 Source of truth: root scripts in `package.json`; native jobs in `.github/workflows/ci.yml`; `.github/workflows/security-audit.yaml` and its release gate in `.github/workflows/release.yml`.
 

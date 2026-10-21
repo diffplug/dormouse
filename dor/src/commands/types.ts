@@ -527,6 +527,10 @@ export interface ResolveBrowserResponse {
   binding: BrowserBinding;
   /** A new managed session that needs viewport preparation before navigation. */
   fresh?: boolean;
+  /** agent-browser only: whether the bound Surface shows its browser as its
+   *  own window. Absent when the host cannot tell, such as a live session no
+   *  Surface holds. */
+  headed?: boolean;
   initialViewport?: BrowserViewportSetting;
   launchViewport?: { width: number; height: number; dpr?: number };
 }

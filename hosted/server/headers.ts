@@ -2,6 +2,7 @@ import type { Hono } from "hono";
 import {
   ONE_TIME_PAGE_PATH,
   ONE_TIME_WS_ROUTES,
+  isContentHashedName,
   pocketContentSecurityPolicy,
 } from "remote-lib-common";
 
@@ -48,11 +49,15 @@ export type RulesFor = (path: string, appOrigin: unknown) => PathRules;
 const under = (path: string, prefix: string) =>
   path === prefix || path.startsWith(`${prefix}/`);
 
+/** A content-hashed file directly under `dir`; any other is cached as its path otherwise is. */
+const contentHashed = (path: string, dir: string) =>
+  path.startsWith(dir) && isContentHashedName(path.slice(dir.length));
+
 /** The account's: its policy everywhere, its Vite output under `/assets/` immutable. */
 export const accountRules: RulesFor = (path) => ({
   policy: ACCOUNT_POLICY,
   permissions: NO_DEVICES_PERMISSIONS,
-  cache: path.startsWith("/assets/") ? "immutable" : "no-store",
+  cache: contentHashed(path, "/assets/") ? "immutable" : "no-store",
 });
 
 /** A response that is no page: the voice origin's, and the relay's non-page prefixes. */
@@ -88,12 +93,12 @@ export const relayRules: RulesFor = (path, appOrigin) => {
     ? {
         policy: origin ? oneTimePagePolicy(origin) : RUNS_NOTHING_POLICY,
         permissions: NO_DEVICES_PERMISSIONS,
-        cache: path.startsWith(`${ONE_TIME_PAGE_PATH}assets/`) ? "immutable" : "no-store",
+        cache: contentHashed(path, `${ONE_TIME_PAGE_PATH}assets/`) ? "immutable" : "no-store",
       }
     : {
         policy: origin ? pocketContentSecurityPolicy(origin) : RUNS_NOTHING_POLICY,
         permissions: POCKET_PERMISSIONS,
-        cache: path.startsWith("/assets/") ? "immutable" : "no-cache",
+        cache: contentHashed(path, "/assets/") ? "immutable" : "no-cache",
       };
 };
 

@@ -321,6 +321,30 @@ jobs:
           # blocks publish-vscode (needs: security-audit).
           gh run watch "$run_id" -R "$repo" --exit-status
 
+  # Warns in the job summary when remote control or Hosted changed since the
+  # last completed red-team pass (docs/specs/security-audit.md -> "Red team").
+  # Advisory: nothing needs it, and it never fails the release.
+  red-team-note:
+    name: Red-team note
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    permissions:
+      contents: read
+      issues: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The first-parent history back to the last pass.
+          fetch-depth: 0
+          persist-credentials: false
+
+      # The runner's own Node: the script uses built-ins only.
+      - name: List remote control and Hosted changes since the last red-team pass
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/red-team-since.mjs
+
   publish-vscode:
     name: Publish VSCode Extension
     needs:

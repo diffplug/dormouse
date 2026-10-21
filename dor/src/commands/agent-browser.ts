@@ -136,6 +136,11 @@ export const AGENT_BROWSER: BrowserCliDescriptor = {
   // caller is, with the caller's executable.
   projectScoped: false,
   missingBinaryMessage,
+  paths: {
+    verbs: new Set(['screenshot', 'pdf', 'upload', 'download', 'har', 'trace', 'profiler', 'record', 'state', 'diff']),
+    flags: new Set(['--profile', '--state', '--executable-path', '--extension', '--init-script', '--screenshot-dir',
+      '--download-path', '--action-policy', '--config', '--baseline']),
+  },
   exec: (options) => options.execAgentBrowser,
   // Under the caller's own socket directory and CLI, whatever state files
   // that CLI writes (docs/specs/dor-browser.md → "agent-browser").
