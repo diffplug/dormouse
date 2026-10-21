@@ -1,31 +1,32 @@
-import { createContext, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { resolveThemeVars } from "../../../lib/src/lib/themes/apply";
-import { hostedTheme } from "../theme";
+import { SNAPSHOT_EDITOR_FONT_FAMILY } from "../../../lib/.storybook/themes";
+import { applyHostedTheme } from "../theme";
 import css from "../style.css?inline";
 
-export const HostedDocument = createContext<Document | null>(null);
+declare const __ARGOS_SNAPSHOT__: true | undefined;
+// The same glyph fallback lib's preview pins for Argos (`lib/.storybook/themes.ts`).
+const snapshotFonts: Record<string, string> = typeof __ARGOS_SNAPSHOT__ !== "undefined"
+  ? { "--vscode-editor-font-family": SNAPSHOT_EDITOR_FONT_FAMILY }
+  : {};
 
 const DOCUMENT = '<!doctype html><html lang="en"><head><meta charset="utf-8"></head><body><div id="hosted-root"></div></body></html>';
 
 /** Production CSS and theme in a separate document: neither Tailwind's reset
  * nor the surrounding docs/toolbar palette participates in this page. */
-export function HostedFrame({ children, width = 1200, dark = false }: {
+export function HostedFrame({ children, phone = false, dark = false }: {
   children: ReactNode;
-  width?: number;
+  phone?: boolean;
   dark?: boolean;
 }) {
   const iframe = useRef<HTMLIFrameElement>(null);
   const [doc, setDoc] = useState<Document | null>(null);
-  const minimumHeight = width === 390 ? 844 : 900;
+  const [width, minimumHeight] = phone ? [390, 844] : [1200, 900];
+  useLayoutEffect(() => {
+    if (doc) applyHostedTheme(doc, dark, snapshotFonts);
+  }, [doc, dark]);
   useLayoutEffect(() => {
     if (!doc) return;
-    const theme = hostedTheme(dark);
-    const vars = resolveThemeVars(theme);
-    for (const [name, value] of Object.entries(vars)) doc.body.style.setProperty(name, value);
-    doc.body.classList.add(theme.type === "light" ? "vscode-light" : "vscode-dark");
-    doc.body.style.colorScheme = theme.type;
-    doc.documentElement.style.colorScheme = theme.type;
     const style = doc.createElement("style");
     // 100svh would grow with the measured iframe, preventing it from shrinking
     // after a shorter state. Pin only its minimum to the simulated viewport.
@@ -57,10 +58,8 @@ export function HostedFrame({ children, width = 1200, dark = false }: {
       observer.disconnect();
       doc.removeEventListener("click", intercept);
       style.remove();
-      for (const name of Object.keys(vars)) doc.body.style.removeProperty(name);
-      doc.body.classList.remove("vscode-light", "vscode-dark");
     };
-  }, [doc, dark, minimumHeight]);
+  }, [doc, minimumHeight]);
   return <iframe
     ref={iframe}
     title="Dormouse Hosted"
@@ -68,5 +67,5 @@ export function HostedFrame({ children, width = 1200, dark = false }: {
     srcDoc={DOCUMENT}
     onLoad={() => setDoc(iframe.current!.contentDocument)}
     style={{ display: "block", width, maxWidth: "100%", height: minimumHeight, border: 0, flexShrink: 0 }}
-  >{doc && createPortal(<HostedDocument.Provider value={doc}>{children}</HostedDocument.Provider>, doc.getElementById("hosted-root")!)}</iframe>;
+  >{doc && createPortal(children, doc.getElementById("hosted-root")!)}</iframe>;
 }

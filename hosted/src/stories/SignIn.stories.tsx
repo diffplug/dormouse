@@ -1,13 +1,11 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { expect, fn } from "storybook/test";
-import { HostedStory, frameParameters, ENROLLMENT } from "./fixtures";
+import { hostedMeta, ENROLLMENT } from "./fixtures";
 import { settledFrame } from "./canvas";
 
 const meta = {
-  title: "Hosted/Sign-in", component: HostedStory,
-  parameters: frameParameters,
-  play: async ({ canvasElement }) => { await settledFrame(canvasElement); },
-} satisfies Meta<typeof HostedStory>;
+  ...hostedMeta, title: "Hosted/Sign-in",
+} satisfies Meta<typeof hostedMeta.component>;
 export default meta;
 type Story = StoryObj<typeof meta>;
 
@@ -15,7 +13,7 @@ export const Loading: Story = { args: { loading: true } };
 export const ComingSoon: Story = { args: { comingSoon: true } };
 export const EmailOnly: Story = { args: { enabled: [] } };
 export const Providers: Story = {};
-export const Phone: Story = { args: { width: 390 } };
+export const Phone: Story = { args: { phone: true } };
 export const Dark: Story = { args: { dark: true } };
 export const CodeEntry: Story = { args: { email: "alex@example.com", enterCode: true, notice: { text: "Code sent. Check your inbox. It expires in 10 minutes." } } };
 export const SendingCode: Story = { args: { email: "alex@example.com", busy: "email" } };

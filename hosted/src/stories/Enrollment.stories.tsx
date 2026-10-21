@@ -1,13 +1,12 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { expect, fn } from "storybook/test";
-import { HostedStory, frameParameters, SESSION, ACCOUNT, ENROLLMENT } from "./fixtures";
+import { hostedMeta, SESSION, ACCOUNT, ENROLLMENT } from "./fixtures";
 import { settledFrame } from "./canvas";
 
 const meta = {
-  title: "Hosted/Enrollment", component: HostedStory, parameters: frameParameters,
+  ...hostedMeta, title: "Hosted/Enrollment",
   args: { session: SESSION, enrolling: ENROLLMENT },
-  play: async ({ canvasElement }) => { await settledFrame(canvasElement); },
-} satisfies Meta<typeof HostedStory>;
+} satisfies Meta<typeof hostedMeta.component>;
 export default meta;
 type Story = StoryObj<typeof meta>;
 export const Remote: Story = {};
