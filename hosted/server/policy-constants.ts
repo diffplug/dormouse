@@ -26,4 +26,4 @@ export const ENROLLMENT_TTL_MS = 10 * 60 * 1000;
 // (`website/src/components/HostedPolicyLayout.tsx`), which
 // `hosted/server/tests/policy.test.ts` pins this to. A new version is a new
 // acceptance row, never an edit of an old one.
-export const TERMS_VERSION = "2026-10-19";
+export const TERMS_VERSION = "2026-10-20";

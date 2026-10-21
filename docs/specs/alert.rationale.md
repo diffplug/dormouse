@@ -158,6 +158,8 @@
 
 ## Managed voice
 
+**Why every speak asks the voice origin.** The host once cached clips by voice and text, a hit making no request. Turning Natural Voice off on the account page deletes the account's tokens, and a lapsed plan answers 403, but a desktop learns either only from a request, so a repeated alarm label kept speaking in Natural Voice until an uncached one happened along. Removed 2026-10: the daily cap bounds the cost, and an alarm already waits out its delay, so the request's latency goes unheard.
+
 Disconnect failure (2026-10): the atomic writer can fail while the old token remains on disk. Disabling in memory first prevents further label uploads; the retryable error tells the user that a restart could still reload that token.
 
 **Why the token stays in the host.** A renderer runs terminal-supplied text beside framed pages; a bearer credential there is one script injection away from leaving the machine. The sidecar keeps it with the Burrow's credential (`docs/specs/security-local.rationale.md` → "Persisted state") and makes the request without the webview's CSP granting any remote `connect-src`. The cost is one IPC round trip per managed utterance, its audio returning as base64.

@@ -3,8 +3,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  CLIP_CACHE_MAX_BYTES,
-  CLIP_CACHE_MAX_ENTRIES,
   createManagedVoiceHost,
   fileManagedVoiceStore,
   MAX_AUDIO_BYTES,
@@ -284,66 +282,38 @@ describe('speak', () => {
     expect(await quick.handle({ op: 'speak', text: 'x' })).toEqual({ ok: false, reason: 'timeout' });
   });
 
-  it('caches a clip by voice and text, so a repeat makes no request', async () => {
+  it('asks Hosted at every speak, a repeated label included', async () => {
     fetchMock.mockImplementation(async () => audioResponse());
-    const first = await host.handle({ op: 'speak', text: 'build finished' });
-    expect(await host.handle({ op: 'speak', text: '  build finished ' })).toEqual(first);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    // Another voice, or another label, asks again.
-    await host.handle({ op: 'configure', update: { voiceId: OTHER_VOICE } });
-    await host.handle({ op: 'speak', text: 'build finished' });
-    await host.handle({ op: 'speak', text: 'tests failed' });
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(await host.handle({ op: 'speak', text: 'build finished' })).toMatchObject({ ok: true });
+    expect(await host.handle({ op: 'speak', text: 'build finished' })).toMatchObject({ ok: true });
+    expect(requests()).toEqual([
+      [MANAGED_VOICE_SPEAK_URL, 'POST', `Bearer ${TOKEN}`],
+      [MANAGED_VOICE_SPEAK_URL, 'POST', `Bearer ${TOKEN}`],
+    ]);
   });
 
-  it('bounds the cache by count, evicting the least recently used', async () => {
+  it('turns off at a repeated label’s 401, once the account turned Natural Voice off', async () => {
     fetchMock.mockImplementation(async () => audioResponse());
-    for (let i = 0; i <= CLIP_CACHE_MAX_ENTRIES; i++) await host.handle({ op: 'speak', text: `pane ${i}` });
-    fetchMock.mockClear();
-    await host.handle({ op: 'speak', text: `pane ${CLIP_CACHE_MAX_ENTRIES}` });
-    expect(fetchMock).not.toHaveBeenCalled();
-    await host.handle({ op: 'speak', text: 'pane 0' });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(await host.handle({ op: 'speak', text: 'build finished' })).toMatchObject({ ok: true });
+    fetchMock.mockImplementation(async () => new Response('{}', { status: 401 }));
+    expect(await host.handle({ op: 'speak', text: 'build finished' })).toEqual({ ok: false, reason: 'HTTP 401' });
+    expect(broadcasts.at(-1)).toEqual(idle(false));
+    expect(await host.handle({ op: 'speak', text: 'build finished' })).toEqual({ ok: false, reason: 'unconfigured' });
   });
 
-  it('bounds the cache by bytes', async () => {
-    const clip = Math.floor(CLIP_CACHE_MAX_BYTES / 2) + 1;
-    fetchMock.mockImplementation(async () => new Response(new Uint8Array(Math.min(clip, MAX_AUDIO_BYTES)), {
-      status: 200, headers: { 'content-type': 'audio/mpeg' },
-    }));
-    // Each clip at the audio cap: the cache holds what fits in its bytes, no more.
-    const fits = Math.floor(CLIP_CACHE_MAX_BYTES / Math.min(clip, MAX_AUDIO_BYTES));
-    for (let i = 0; i <= fits; i++) await host.handle({ op: 'speak', text: `pane ${i}` });
-    fetchMock.mockClear();
-    await host.handle({ op: 'speak', text: 'pane 0' });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-  });
-
-  it('forgets every clip when the token changes', async () => {
-    fetchMock.mockImplementation(async () => audioResponse());
-    await host.handle({ op: 'speak', text: 'build finished' });
-    await host.handle({ op: 'disconnect' });
-    await approveVoice(host, `dmv_${'C'.repeat(43)}`);
-    await host.handle({ op: 'speak', text: 'build finished' });
-    expect(fetchMock.mock.calls.filter(([url]) => url === MANAGED_VOICE_SPEAK_URL)).toHaveLength(2);
-  });
-
-  it('latches a 403 as not entitled, bypassing the cache, until a speak succeeds', async () => {
+  it('latches a 403 as not entitled, a repeated label included, until a speak succeeds', async () => {
     fetchMock.mockImplementation(async () => audioResponse());
     await host.handle({ op: 'speak', text: 'build finished' });
     fetchMock.mockImplementation(async () => new Response('{}', { status: 403 }));
-    // Cached: no request, so nothing learned yet.
-    expect(await host.handle({ op: 'speak', text: 'build finished' })).toMatchObject({ ok: true });
-    expect(await host.handle({ op: 'speak', text: 'tests failed' })).toEqual({ ok: false, reason: 'HTTP 403' });
-    expect(broadcasts.at(-1)).toEqual({ ...idle(true), notEntitled: true });
-    // Lapsed: the cached clip is not played, so the system voice speaks.
+    // Lapsed: the system voice speaks the repeat too.
     expect(await host.handle({ op: 'speak', text: 'build finished' })).toEqual({ ok: false, reason: 'HTTP 403' });
+    expect(broadcasts.at(-1)).toEqual({ ...idle(true), notEntitled: true });
     fetchMock.mockImplementation(async () => audioResponse());
     expect(await host.handle({ op: 'speak', text: 'build finished' })).toMatchObject({ ok: true });
     expect(broadcasts.at(-1)).toEqual(idle(true));
   });
 
-  it('lets an answer for a replaced token neither latch a refusal nor cache a clip', async () => {
+  it('lets an answer for a replaced token neither latch a refusal nor play', async () => {
     const answers: Array<(response: Response) => void> = [];
     fetchMock.mockImplementation(() => new Promise<Response>((resolve) => void answers.push(resolve)));
     const refused = host.handle({ op: 'speak', text: 'build finished' });
@@ -354,11 +324,9 @@ describe('speak', () => {
     await approveVoice(host, `dmv_${'C'.repeat(43)}`);
     answers[0]!(new Response('{}', { status: 403 }));
     answers[1]!(audioResponse());
-    await Promise.all([refused, spoken]);
+    expect(await refused).toEqual({ ok: false, reason: 'HTTP 403' });
+    expect(await spoken).toEqual({ ok: false, reason: 'disconnected' });
     expect(broadcasts.at(-1)).toEqual(idle(true));
-    fetchMock.mockImplementation(async () => audioResponse());
-    await host.handle({ op: 'speak', text: 'tests failed' });
-    expect(fetchMock.mock.calls.filter(([url]) => url === MANAGED_VOICE_SPEAK_URL)).toHaveLength(3);
   });
 
   it('refuses empty or over-long text', async () => {
@@ -397,7 +365,7 @@ describe('a store another process shares', () => {
     writeFault = null;
   });
 
-  it('writes only the field that changed, and invalidate reads a sibling’s change, forgetting the clips', async () => {
+  it('writes only the field that changed, and invalidate reads a sibling’s change', async () => {
     const window = sharing();
     await window.handle({ op: 'configure', update: { voiceId: OTHER_VOICE } });
     expect(writes).toEqual(['voiceId']);
@@ -409,12 +377,12 @@ describe('a store another process shares', () => {
     window.invalidate();
     await vi.waitFor(() => expect(broadcasts.at(-1)).toEqual(idle(false, OTHER_VOICE)));
     expect(await window.handle({ op: 'speak', text: 'build finished' })).toEqual({ ok: false, reason: 'unconfigured' });
-    // Enabled again there: the old clip is not replayed.
+    // Enabled again there: the next speak carries the sibling's token.
     shared = { token: OTHER_TOKEN, voiceId: OTHER_VOICE };
     window.invalidate();
     await vi.waitFor(() => expect(broadcasts.at(-1)).toEqual(idle(true, OTHER_VOICE)));
     await window.handle({ op: 'speak', text: 'build finished' });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(requests().at(-1)).toEqual([MANAGED_VOICE_SPEAK_URL, 'POST', `Bearer ${OTHER_TOKEN}`]);
   });
 
   it('a sibling’s disconnect heard while a save is out wins over the save’s earlier read', async () => {
@@ -533,7 +501,7 @@ describe('the build it runs in', () => {
 describe('the network policy', () => {
   it('sends nothing under Nothing, asking again at every speak', async () => {
     // docs/specs/remote-network.md → "Policy": managed voice is a choke point
-    // of its own, a cached clip included. Saving a token is local, so it still works.
+    // of its own. Saving a token is local, so it still works.
     let allowed = true;
     const gated = make({ networkAllowed: async () => allowed });
     await seedToken();
@@ -560,16 +528,12 @@ describe('independent managed-voice lifecycle', () => {
   it('disables speech and reports a failed persisted clear, with a successful retry surviving restart', async () => {
     await seedToken();
     fetchMock.mockResolvedValue(audioResponse());
-    await host.handle({ op: 'speak', text: 'cached label' });
-    fetchMock.mockClear();
     const file = join(dir, MANAGED_VOICE_FILE);
     renameFault.next = Object.assign(new Error('write denied'), { code: 'EACCES' });
     const result = await host.handle({ op: 'disconnect' });
     expect(result).toMatchObject({ ok: false, message: expect.stringContaining('Retry before restarting') });
     expect(await host.handle({ op: 'status' })).toMatchObject({ configured: false, disconnectFailed: true });
-    for (const text of ['cached label', 'new private label']) {
-      expect(await host.handle({ op: 'speak', text })).toEqual({ ok: false, reason: 'unconfigured' });
-    }
+    expect(await host.handle({ op: 'speak', text: 'build finished' })).toEqual({ ok: false, reason: 'unconfigured' });
     const forget = [MANAGED_VOICE_TOKEN_URL, 'DELETE', `Bearer ${TOKEN}`];
     await vi.waitFor(() => expect(requests()).toEqual([forget]));
     expect(JSON.parse(await readFile(file, 'utf8')).token).toBe(TOKEN);
