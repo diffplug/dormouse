@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react';
 import type { ModalLayer } from './design';
 import { KillConfirmModal } from './KillConfirm';
-import { acceptsKillChar } from './wall/keyboard/handle-kill-confirm';
+import { acceptsKillChar, isKillAnswerKey } from './wall/keyboard/handle-kill-confirm';
 
 /** One typed-letter interaction for Workspace close and move, window close, and
  *  app quit. */
@@ -28,7 +28,7 @@ export function WorkspaceKillConfirm({ char, onConfirm, onCancel, canConfirm, ti
       // ModalFrame handles Escape first on the same capture target.
       if (event.key === 'Escape' && event.defaultPrevented) return;
       // Cmd+Q is another quit request, never an answer even when the letter is q.
-      if (event.metaKey || event.ctrlKey || event.altKey || ['Shift', 'Meta', 'Control', 'Alt'].includes(event.key)) return;
+      if (!isKillAnswerKey(event)) return;
       event.preventDefault();
       event.stopImmediatePropagation();
       const latest = latestRef.current;

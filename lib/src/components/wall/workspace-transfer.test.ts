@@ -20,7 +20,7 @@ vi.mock('./agent-browser-surface-controller', () => ({
   disposeAgentBrowserSurfaceController: (id: string) => void disposedBrowsers.push(id),
 }));
 
-const helpers = new Map<string, { id: string }>();
+const helpers = new Map<string, { id: string; promoting?: boolean }>();
 const forgotten: string[] = [];
 vi.mock('../../lib/helper-terminal', () => ({
   getHelper: (parentId: string) => helpers.get(parentId),
@@ -109,4 +109,11 @@ describe('prepareWorkspaceTransfer', () => {
     // only this Window's viewer is released, its session left running.
     expect(disposedBrowsers).toEqual(['pane-a', 'browser-b']);
   });
+});
+
+it('refuses transfer while a helper promotion is awaiting the host', async () => {
+  helpers.set('pane-a', { id: 'helper-a', promoting: true });
+  await expect(prepareWorkspaceTransfer(deps())).rejects.toThrow('Wait for helper promotion');
+  expect(released).toEqual([]);
+  expect(forgotten).toEqual([]);
 });

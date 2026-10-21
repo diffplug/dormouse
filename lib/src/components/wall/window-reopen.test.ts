@@ -5,6 +5,8 @@ import { registerWallHandle, resetWallHandles, stubWallHandle } from './wall-han
 import { windowNeedsCloseConfirmation, windowReopenSnapshot, withFreshWindowIds } from './window-reopen';
 import { installSurfaceIdPool, resetSurfaceIdPool } from '../../lib/surface-ids';
 import { _resetPendingKillsForTesting, addPendingKill } from '../../lib/pending-kills';
+import { registry, type TerminalEntry } from '../../lib/terminal-store';
+import { resetWorkspaceSurfaces, setWorkspaceSurfaces } from '../../lib/workspace-surfaces';
 import { applyTerminalSemanticEvents, removeTerminalPaneState } from '../../lib/terminal-state-store';
 
 const session = (id: string): PersistedSession => ({
@@ -53,6 +55,32 @@ describe('closing one window of several', () => {
     } finally {
       _resetPendingKillsForTesting();
       removeTerminalPaneState('gone');
+    }
+  });
+
+  it.each(['surface', 'workspace'] as const)('asks for hidden helper work belonging to a pending %s', (kind) => {
+    twoWorkspaces(null);
+    setWorkspaceSurfaces('ws-2', ['parent']);
+    const helper = { helper: { parentId: 'parent', command: '' }, helperBusy: false } as TerminalEntry;
+    registry.set('helper', helper);
+    applyTerminalSemanticEvents('helper', [{ type: 'promptStart' }]);
+    addPendingKill({ kind, id: kind === 'workspace' ? 'ws-2' : 'parent', workspaceId: 'ws-2', title: 'shell', label: kind }, { restore: () => {}, finalize: () => {} });
+    try {
+      expect(windowNeedsCloseConfirmation()).toBe(false);
+      // Hiding the helper invalidates the last idle inspection. Its parent
+      // need not have a foreground command for the helper to hold work.
+      helper.helperBusy = undefined;
+      expect(windowNeedsCloseConfirmation()).toBe(true);
+      expect(windowReopenSnapshot()).toBeNull();
+      helper.helperBusy = true;
+      expect(windowNeedsCloseConfirmation()).toBe(true);
+      helper.exited = true;
+      expect(windowNeedsCloseConfirmation()).toBe(false);
+    } finally {
+      registry.delete('helper');
+      removeTerminalPaneState('helper');
+      resetWorkspaceSurfaces();
+      _resetPendingKillsForTesting();
     }
   });
 

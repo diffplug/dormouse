@@ -53,15 +53,15 @@ A `WebviewPanelSerializer` under the `dormouse` view type restores editor panels
 
 **Every save path must merge current alert states through `toPersistedAlertState`** — the periodic `dormouse:saveState` and the deactivate refresh (`refreshSavedSessionStateFromPtys`) alike (`docs/specs/layout.md` → Session persistence): without it a restore reverts alert state, and live state would persist transient fields. The WebviewView saves into `workspaceState` (`dormouse.session`); each WebviewPanel through per-panel `vscode.setState()` from the frontend.
 
-**On deactivate**, in this order, each step bounded:
+**Must bound every deactivation step and continue after any failure or timeout**, in this order:
 
-1. Start closing browser sessions; **a failure there never skips a later step**.
+1. Start closing browser sessions.
 2. Capture agent recovery commands.
 3. Flush every webview's session.
 4. Refresh saved state from the still-live PTYs (CWD).
 5. Graceful kill (`docs/specs/transport.md` → Graceful shutdown), then force kill.
 
-**Must capture before the session flush and PTY kills** (rationale). Shared capture and durability follow `docs/compatible-agents.md`. Source of truth: `deactivate` in `vscode-ext/src/extension.ts`.
+**Must capture before the session flush and PTY kills** (rationale). Shared capture and durability follow `docs/compatible-agents.md`. Source of truth: `shutdown` in `vscode-ext/src/shutdown.ts`.
 
 **On activate**, saved state loads through `readPersistedSession()` and is injected into the webview for cold-start restore. The WebviewView and each deserialized WebviewPanel then claim their own pane ids' recovery commands from the single record (`docs/compatible-agents.md` → "Recovery record"); **a panel's pane ids come from the `vscode.setState()` blob returned at `deserializeWebviewPanel`**, so recovery needs no host-side per-panel store.
 
@@ -182,9 +182,9 @@ Source of truth: `vscode-ext/scripts/stage-native-direct.mjs`; `initBurrow` in `
 
 ## Managed voice
 
-**Every window's extension host runs its own managed-voice host**, the one standalone's sidecar runs (`docs/specs/alert.md` -> "Managed voice"), answering its own webviews (`docs/specs/transport.md` -> "Managed voice"); its clip cache and refusal latch are per window.
+**Every window's extension host runs its own managed-voice host**, the one standalone's sidecar runs (`docs/specs/alert.md` -> "Managed voice"), answering its own webviews (`docs/specs/transport.md` -> "Managed voice"); its refusal latch is per window.
 
-- **The token and the chosen voice live in `SecretStorage`, each under a key of its own**: the token is a bearer credential, and the voice rides there only because `secrets.onDidChange` reaches every window. **Every window re-reads on that change**, dropping its clips and latch when the token changed, so an approval or Disconnect in one window reaches all of them.
+- **The token and the chosen voice live in `SecretStorage`, each under a key of its own**: the token is a bearer credential, and the voice rides there only because `secrets.onDidChange` reaches every window. **Every window re-reads on that change**, dropping its latch when the token changed, so an approval or Disconnect in one window reaches all of them.
 - **An approval runs in the window that asked**, its code shown only there; the token it saves reaches the rest by the re-read.
 - **Never re-arm on a re-read a token this window's failed Disconnect left in the store**; a different token, a sibling's later approval, supersedes it.
 - **A window asks the network policy before every speak and approval request**: the service in the broker, the stored policy elsewhere, a failed read counting as Nothing.

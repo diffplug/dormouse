@@ -1,7 +1,8 @@
 import { constants } from 'node:fs';
-import { open, realpath, unlink, type FileHandle } from 'node:fs/promises';
+import { open, unlink, type FileHandle } from 'node:fs/promises';
 import { createHash, randomBytes } from 'node:crypto';
 import { dirname, join } from 'node:path';
+import { localRealpath, NonLocalPathError } from 'dor-lib-common/local-path';
 import type { SaveFileOperations } from './atomic-save.js';
 import { HttpError } from './viewer-server.js';
 import { PATH_CHANGED_MESSAGE, STALE_MESSAGE } from './editor-routes.js';
@@ -25,7 +26,11 @@ export async function readUpTo(file: FileHandle, size: number): Promise<Buffer> 
 /** Only the canonical, explicitly opened document can be written. Revalidate
  * the path and descriptor each time; a symlink substitution grants nothing. */
 export async function readEditable(target: string, bound: SizeBound) {
-  if (await realpath(target) !== target) throw new HttpError(409, PATH_CHANGED_MESSAGE);
+  const canonical = await localRealpath(target).then(local => local.path, (error: unknown) => {
+    if (error instanceof NonLocalPathError) return null;
+    throw error;
+  });
+  if (canonical !== target) throw new HttpError(409, PATH_CHANGED_MESSAGE);
   const file = await open(target, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
   try {
     const stat = await file.stat();

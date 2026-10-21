@@ -4,7 +4,7 @@ Expect: lib/src/lib/tool-launch-latch.ts
 Source: reverses #1061 (a later start reporting the launched command line was read as the launched run)
 
 diff --git a/lib/src/host/remote/sidecar-entry.test.ts b/lib/src/host/remote/sidecar-entry.test.ts
-index e74301ecd..d0fdf5b5f 100644
+index b02173d21..4218840d6 100644
 --- a/lib/src/host/remote/sidecar-entry.test.ts
 +++ b/lib/src/host/remote/sidecar-entry.test.ts
 @@ -805,7 +805,6 @@ describe('the sidecar host', () => {
@@ -16,10 +16,10 @@ index e74301ecd..d0fdf5b5f 100644
    });
  
 diff --git a/lib/src/lib/tool-launch-latch.test.ts b/lib/src/lib/tool-launch-latch.test.ts
-index 02c103888..981756ca9 100644
+index 53061a771..c27fbca4c 100644
 --- a/lib/src/lib/tool-launch-latch.test.ts
 +++ b/lib/src/lib/tool-launch-latch.test.ts
-@@ -41,26 +41,6 @@ describe('ToolLaunchLatch', () => {
+@@ -48,26 +48,6 @@ describe('ToolLaunchLatch', () => {
      expect(admitted(start('view /a') + open('/b'))).toEqual([]);
    });
  
@@ -47,7 +47,7 @@ index 02c103888..981756ca9 100644
      const { latch } = pty();
      const parser = new TerminalProtocolParser();
 diff --git a/lib/src/lib/tool-launch-latch.ts b/lib/src/lib/tool-launch-latch.ts
-index 7565b1355..6d1bcbc12 100644
+index f8f747e66..a4b30b185 100644
 --- a/lib/src/lib/tool-launch-latch.ts
 +++ b/lib/src/lib/tool-launch-latch.ts
 @@ -4,16 +4,12 @@ import type { TerminalProtocolEvent } from './terminal-protocol';
@@ -71,7 +71,7 @@ index 7565b1355..6d1bcbc12 100644
    #launched: string | null = null;
    /** The line the shell staged for its next start (`OSC 633;E`). */
    #line: string | null = null;
-@@ -37,7 +33,6 @@ export class ToolLaunchLatch {
+@@ -39,7 +35,6 @@ export class ToolLaunchLatch {
            break;
          case 'commandStart':
            this.#running = this.#launched !== null && this.#line === this.#launched;
@@ -80,10 +80,10 @@ index 7565b1355..6d1bcbc12 100644
            break;
          case 'commandFinish':
 diff --git a/vscode-ext/test/message-router.test.ts b/vscode-ext/test/message-router.test.ts
-index e5371ee69..34e945685 100644
+index 749bbe3c8..f9dd6f13d 100644
 --- a/vscode-ext/test/message-router.test.ts
 +++ b/vscode-ext/test/message-router.test.ts
-@@ -201,7 +201,6 @@ it('forwards an OSC 367 open only from the run a launch write started', () => {
+@@ -234,7 +234,6 @@ it('forwards an OSC 367 open only from the run a launch write started', () => {
      ptys.callbacks!.onData('tool-open', `${run}${open('/forged')}`);
      owner.send({ type: 'pty:input', id: 'tool-open', data: 'view /a\r', launch: true });
      ptys.callbacks!.onData('tool-open', `${run}${open('/launched')}`);

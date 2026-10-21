@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { type LathTree, findLeafPath, leafTree, leaves, validate } from './model';
 import { type LayoutOpts, layout } from './layout';
-import { insert, move, remove, replace, resize, restore, split, swap } from './ops';
+import { type RestoreToken, insert, move, remove, replace, resize, restore, split, swap } from './ops';
 // `split` here is the op; the test-util split node-builder is aliased to `mk`.
 import { leaf, split as mk, tree, R } from './test-util';
 
@@ -342,7 +342,31 @@ describe('resize', () => {
 });
 
 describe('restore', () => {
+
+  it.each([
+    { weight: 0 }, { weight: 1 }, { weight: -1 }, { weight: 2 }, { weight: Number.NaN },
+    { weight: Number.POSITIVE_INFINITY }, { weight: undefined },
+    { index: -1 }, { index: 0.5 }, { index: undefined },
+    { edge: 'diagonal' }, { siblingLeafIds: { length: 2 } },
+  ])('rejects malformed persisted token fields %j without changing the tree', patch => {
+    const original = tree(mk('row', [leaf('a'), 0.5], [leaf('b'), 0.25], [leaf('c'), 0.25]));
+    const removed = remove(original, 'b');
+    const token = { ...removed.token!, ...patch } as RestoreToken;
+    const out = restore(removed.tree, token, { fallbackRef: 'a' });
+    expect(out).toEqual({ ok: false, tier: null, tree: removed.tree });
+    expect(out.tree).toBe(removed.tree);
+    expect(validate(out.tree)).toEqual([]);
+  });
+
   const big = R(0, 0, 1000, 600);
+
+
+  it('still accepts legacy tokens without sibling-subtree fields', () => {
+    const original = tree(mk('row', [leaf('a'), 0.5], [leaf('b'), 0.25], [leaf('c'), 0.25]));
+    const removed = remove(original, 'b');
+    const { siblingLeafIds: _ids, siblingFingerprint: _fingerprint, ...legacy } = removed.token!;
+    expect(restore(removed.tree, legacy)).toEqual({ tree: original, ok: true, tier: 'exact' });
+  });
 
   it('restores exact when the fingerprinted parent is untouched', () => {
     const original = tree(mk('row', [leaf('a'), 0.5], [leaf('b'), 0.25], [leaf('c'), 0.25]));

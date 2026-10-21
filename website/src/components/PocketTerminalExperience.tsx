@@ -238,9 +238,9 @@ export function PocketTerminalExperience({
       onSendInput={(data) => { if (adapterRef.current) writeUserInput(activePaneId, data); }}
       onGestureInput={handleGestureInput}
       onGestureScroll={handleGestureScroll}
-      onPaste={async () => {
+      onPaste={async (text) => {
         const { doPaste } = await import("dormouse-lib/lib/clipboard");
-        await doPaste(activePaneId);
+        await doPaste(activePaneId, text);
       }}
     />
   );

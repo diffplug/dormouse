@@ -37,8 +37,8 @@ vi.mock('./QrCode', async (importOriginal) => {
 import { ONE_TIME_OUTCOME_LABEL, oneTimeEndedCopy } from './OneTimeConnection';
 import {
   HOSTED_ENROLLMENT_CODE_LABEL,
-  HOSTED_ENROLLMENT_ENDED_COPY,
-  HOSTED_ENROLLMENT_REDEEMING_COPY,
+  HOSTED_APPROVAL_ENDED_COPY,
+  HOSTED_APPROVAL_REDEEMING_COPY,
 } from './HostedEnrollment';
 import {
   NOT_ENTITLED_COPY,
@@ -105,7 +105,7 @@ function qr(over: Partial<SetupQrResult> = {}): SetupQrResult {
 function hostedWaiting(over: { accountFull?: boolean } = {}): HostedEnrollmentState {
   return {
     status: 'waiting',
-    userCode: '23AB-YZ9K',
+    confirmDigits: '47',
     verificationUrl: 'https://hosted.dormouse.sh/enroll#23AB-YZ9K',
     expiresAt: Date.now() + 10 * 60_000,
     accountFull: over.accountFull ?? false,
@@ -351,7 +351,7 @@ describe('RemoteControlSection', () => {
     await act(async () => buttonLabelled('Enroll remote control')!.click());
 
     expect(link.command).toHaveBeenCalledWith('beginHostedEnrollment', { label: 'Work laptop' });
-    expect(codeShown()).toBe('23AB-YZ9K');
+    expect(codeShown()).toBe('47');
     // Hidden while the code waits, never unmounted: what was typed survives.
     expect(hostedForm().hidden).toBe(true);
   });
@@ -364,7 +364,7 @@ describe('RemoteControlSection', () => {
 
     // Unfolded from the start: the dialog reopened on a code waiting.
     expect(persistentPanel().hidden).toBe(false);
-    expect(codeShown()).toBe('23AB-YZ9K');
+    expect(codeShown()).toBe('47');
     expect(text()).toContain('Expires in 10 min.');
     expect(text()).not.toContain('already has as many computers');
     await act(async () => buttonLabelled('Open hosted.dormouse.sh to approve')!.click());
@@ -392,15 +392,19 @@ describe('RemoteControlSection', () => {
     const link = makeLink(async () => ({ ...NOT_ENROLLED, hostedEnrollment: ended }));
     platform = { burrow: link };
     await render();
-    expect(text()).toContain(HOSTED_ENROLLMENT_ENDED_COPY['not-entitled']);
+    expect(text()).toContain(HOSTED_APPROVAL_ENDED_COPY.remote['not-entitled']);
 
     ended = { status: 'ended', reason: 'expired' };
     await act(async () => refreshBurrowStatus());
-    expect(text()).toContain(HOSTED_ENROLLMENT_ENDED_COPY.expired);
+    expect(text()).toContain(HOSTED_APPROVAL_ENDED_COPY.remote.expired);
+
+    ended = { status: 'ended', reason: 'mismatch' };
+    await act(async () => refreshBurrowStatus());
+    expect(text()).toContain(HOSTED_APPROVAL_ENDED_COPY.remote.mismatch);
 
     ended = { status: 'ended', reason: 'failed', message: 'keychain is locked' };
     await act(async () => refreshBurrowStatus());
-    expect(text()).toContain(HOSTED_ENROLLMENT_ENDED_COPY.failed);
+    expect(text()).toContain(HOSTED_APPROVAL_ENDED_COPY.remote.failed);
     expect(text()).toContain('keychain is locked');
 
     // A new code is just a begin, which the service answers with a fresh one.
@@ -428,7 +432,7 @@ describe('RemoteControlSection', () => {
     platform = { burrow: makeLink(async () => ({ ...NOT_ENROLLED, hostedEnrollment: { status: 'redeeming' } })) };
     await render();
     expect(persistentPanel().hidden).toBe(false);
-    expect(text()).toContain(HOSTED_ENROLLMENT_REDEEMING_COPY);
+    expect(text()).toContain(HOSTED_APPROVAL_REDEEMING_COPY.remote);
     expect(hostedForm().hidden).toBe(true);
     expect(buttonLabelled('Cancel')).toBeUndefined();
   });
@@ -443,7 +447,7 @@ describe('RemoteControlSection', () => {
       openExternal,
     };
     await render();
-    expect(text()).toContain(HOSTED_ENROLLMENT_ENDED_COPY['answer-lost']);
+    expect(text()).toContain(HOSTED_APPROVAL_ENDED_COPY.remote['answer-lost']);
     expect(text()).toContain('Remove Burrow T7lzkkrPT8nx4m9zf90V4h from your account');
     await act(async () => buttonLabelled('Manage computers at hosted.dormouse.sh')!.click());
     expect(openExternal).toHaveBeenCalledWith('https://hosted.dormouse.sh/account');
@@ -883,7 +887,7 @@ describe('RemoteControlSection', () => {
     expect(order).toEqual(['clearEnrollment', 'beginHostedEnrollment']);
     expect(link.command).toHaveBeenCalledWith('beginHostedEnrollment', { label: 'ned-mac' });
     // The code is in view, not folded behind Persistent Relay.
-    expect(codeShown()).toBe('23AB-YZ9K');
+    expect(codeShown()).toBe('47');
   });
 
   it('shows a begin refused after Enroll again cleared the enrollment', async () => {
@@ -1862,6 +1866,44 @@ describe('One-time connection', () => {
 
     await act(async () => release({ status: 'ended', reason: 'user-ended' }));
     expect(buttonLabelled('One-time connection')).toBeTruthy();
+  });
+
+  it.each([
+    { retry: false, rejected: true },
+    { retry: true, rejected: true },
+    { retry: true, rejected: false },
+  ])('ignores an obsolete open completion after Cancel: %j', async ({ retry, rejected }) => {
+    let finishOld: () => void = () => {};
+    let failOld: () => void = () => {};
+    let finishFresh: (state: OneTimeState) => void = () => {};
+    let attempts = 0;
+    const link = makeLink(async (cmd) => {
+      if (cmd === 'oneTimeOpen') {
+        if (attempts++ === 0) return new Promise((resolve, reject) => {
+          finishOld = () => resolve({ status: 'ended', reason: 'user-ended' });
+          failOld = () => reject(new Error('obsolete open failed'));
+        });
+        return new Promise((resolve) => (finishFresh = resolve));
+      }
+      if (cmd === 'oneTimeStatus') return { status: 'idle' };
+      return NOT_ENROLLED;
+    });
+    platform = { burrow: link };
+    await render();
+    await act(async () => buttonLabelled('One-time connection')!.click());
+    await act(async () => buttonLabelled('Cancel')!.click());
+    if (retry) await act(async () => buttonLabelled('One-time connection')!.click());
+    await act(async () => rejected ? failOld() : finishOld());
+    expect(text()).not.toContain('obsolete open failed');
+    if (retry) {
+      expect(text()).toContain('Getting a link\u2026');
+      expect(buttonLabelled('Cancel')).toBeTruthy();
+      await act(async () => finishFresh(oneTimeWaiting()));
+      await settleQrChunk();
+      expect(oneTimeCode()).toBeTruthy();
+    } else {
+      expect(buttonLabelled('One-time connection')!.disabled).toBe(false);
+    }
   });
 
   it('renders a refused open inline, under the button', async () => {

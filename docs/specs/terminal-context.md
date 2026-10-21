@@ -1,13 +1,13 @@
 # Terminal context
 
 > - See `docs/specs/glossary.md` for Surface / Session / Pane vocabulary.
-> - This spec owns the helper terminal lifecycle and global autorun preference.
+> - Owns helper lifecycle and global autorun.
 > - Layout owns context composition and input focus; terminal-state owns shell semantics; alert owns suppression; transport owns live recovery; dor-cli owns helper-origin `dor` commands.
 
 ## Helper lifecycle
 
 - **Must create at most one helper per source, lazily on first context opening.** Closing the source during startup cancels creation. Helpers cannot have helpers.
-- **Must start with the configured shell in the source's local directory**, using the ordinary split fallback when unavailable. Shell exports and virtual environments are not inherited. SSH integration is outside this feature.
+- **Must start with the configured shell in the source's local directory**, using the ordinary split fallback when unavailable. **Must preserve a directory the helper reports before autorun.** Shell exports and virtual environments are not inherited. SSH integration is outside this feature.
 - **Must inject autorun only after integrated shell readiness**, accepting prompt-start and prompt-end/editing states with no current command. User input before injection cancels it. Without readiness before a timeout, show an unsupported state and never write a timeout fallback.
 - **Must treat typing, paste, accepted drops, and application mouse input as user work**, disarming automatic refresh until Reset or Promote. Selection, copying, resize, and terminal protocol replies do not count. Returning to idle does not rearm autorun.
 - **Must refresh an untouched, completed or autorun-disabled helper on reopening only after a host idle check.** Foreground commands, background descendants, and failed/unknown inspection preserve the helper.
@@ -22,6 +22,8 @@ Source of truth: `openHelper` / `closeHelperParent` in `lib/src/lib/helper-termi
 
 ## Promotion and source closure
 
+Workspace movement: `docs/specs/standalone.md` → Transfer.
+
 **Must promote the actual Session into a regular split beside its source**, preserving the PTY, xterm, scrollback, directory, partial input, and identity. Cancel pending autorun, close context, make its Surface id targetable, and focus the promoted terminal. Failed placement restores auxiliary host ownership. The source's next opening creates a new helper.
 
 **Must reject Reset, source retirement, and duplicate Promote during ownership transfer**, including from a reopened context. A failed transfer or rollback reports its error and resumes inspection so promotion can be retried.
@@ -30,7 +32,7 @@ Source of truth: `openHelper` / `closeHelperParent` in `lib/src/lib/helper-termi
 
 **Must block source closure while its helper has running work**, warn, and reveal the helper. The user stops the work there and retries closure; no force-close-both or automatic promotion is offered. Failed process inspection keeps both terminals and reports the error. CLI attempts to close such a source return failure.
 
-**Must include hidden helper work in shutdown checks.** The helper's host inspection also detects background descendants; unresolved inspection, including a process table missing the live PTY process, counts conservatively as work. Minimizing the source hides its context and retains the helper.
+**Must include hidden helper work in shutdown checks**, including helpers whose source Surface or Workspace is pending kill. The helper's host inspection also detects background descendants; unresolved inspection, including a process table missing the live PTY process, counts conservatively as work. Minimizing the source hides its context and retains the helper.
 
 Source of truth: `beginPromotion` / `cancelPromotion` / `finishPromotion` / `helperHasWork` in `lib/src/lib/helper-terminal.ts`; `closeSurface` / `requestKill` / `contextActions` in `lib/src/components/Wall.tsx`; `countRunningSessions` in `lib/src/lib/terminal-state-store.ts`.
 

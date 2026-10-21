@@ -103,6 +103,44 @@ test('agent-browser preparation preserves valued flags and only replaces the des
   assert.deepEqual(argsSeen[3].slice(2), ['--proxy', 'http://localhost:7890', 'open', 'http://localhost:5173', '--headers', '{"Authorization":"token"}']);
 });
 
+for (const flags of [
+  ['--config', '/tmp/browser.json', '--profile=/tmp/browser profile'],
+  ['--profile', '/tmp/browser', '--hide-scrollbars', 'true', '--allowed-domains=localhost'],
+  ['--headed', 'false', '--args', '--disable-gpu', '--proxy=http://localhost:7890', '--allow-file-access'],
+]) test('viewport preparation keeps browser launch options: ' + flags[0], async () => {
+  const calls = [];
+  const result = await runCli(['agent-browser', 'open', 'http://localhost:5173', ...flags, '--quiet'], {
+    env: { PWD: process.cwd() },
+    client: {
+      resolveBrowser: async () => ({ binding: { session: 'dormouse.1.default' }, fresh: true,
+        initialViewport: { mode: 'fixed', width: 1440, height: 900 }, launchViewport: { width: 1440, height: 900 } }),
+      browserSurface: async () => ({}),
+    },
+    execAgentBrowser: async (_binary, args) => {
+      calls.push(args);
+      return { exitCode: 0, stdout: args.includes('eval') ? '2\n' : '', stderr: '' };
+    },
+  });
+  assert.equal(result.exitCode, 0, result.stderr);
+  assert.deepEqual(calls[1], ['--session', 'dormouse.1.default', ...flags, 'eval', 'window.devicePixelRatio']);
+  assert.deepEqual(calls[2], ['--session', 'dormouse.1.default', ...flags, 'set', 'viewport', '1440', '900', '2']);
+  assert.deepEqual(calls[3], ['--session', 'dormouse.1.default', 'open', 'http://localhost:5173', ...flags, '--quiet']);
+  assert.deepEqual(calls[4], ['--session', 'dormouse.1.default', 'stream', 'status', '--json', ...flags]);
+});
+
+test('stream discovery preserves custom configuration after a non-navigation command', async () => {
+  const calls = [];
+  const result = await runCli(['agent-browser', '--config=/tmp/browser.json', 'eval', 'window.devicePixelRatio'], {
+    client: {
+      resolveBrowser: async () => ({ binding: { session: 'dormouse.1.default' }, fresh: false }),
+      browserSurface: async () => ({}),
+    },
+    execAgentBrowser: async (_binary, args) => { calls.push(args); return { exitCode: 0, stdout: '1', stderr: '' }; },
+  });
+  assert.equal(result.exitCode, 0, result.stderr);
+  assert.deepEqual(calls[1], ['--session', 'dormouse.1.default', 'stream', 'status', '--json', '--config=/tmp/browser.json']);
+});
+
 test('open-target sugar ignores a proxy flag value', async () => {
   const argsSeen = [];
   const options = {
@@ -129,6 +167,43 @@ test('fresh agent-browser goto and navigate prepare before destination scripts',
       [verb, 'about:blank'], ['eval', 'window.devicePixelRatio'], ['set', 'viewport', '1440', '900', '2'], [verb, 'http://localhost:5173'],
     ]);
   }
+});
+
+for (const stateArgs of [['--state', '/tmp/saved state.json'], ['--state=/tmp/state.json']]) {
+  test('saved state is applied once before managed navigation: ' + stateArgs[0], async () => {
+    const calls = [];
+    let viewport;
+    let destinationViewport;
+    const result = await runCli(['agent-browser', ...stateArgs, 'open', 'http://localhost:5173'], {
+      env: { PWD: process.cwd() },
+      client: {
+        resolveBrowser: async () => ({ binding: { session: 'dormouse.1.default' }, fresh: true,
+          initialViewport: { mode: 'fixed', width: 1440, height: 900 }, launchViewport: { width: 1440, height: 900 } }),
+        browserSurface: async () => ({}),
+      },
+      execAgentBrowser: async (_binary, args) => {
+        calls.push(args);
+        // Native --state starts a clean browser, clearing its previous viewport.
+        if (args.some(arg => arg === '--state' || arg.startsWith('--state='))) viewport = undefined;
+        if (args.includes('viewport')) viewport = args.slice(args.indexOf('viewport') + 1);
+        if (args.includes('http://localhost:5173')) destinationViewport = viewport;
+        return { exitCode: 0, stdout: args.includes('eval') ? '1\n' : '', stderr: '' };
+      },
+    });
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(calls[0], ['--session', 'dormouse.1.default', ...stateArgs, 'open', 'about:blank']);
+    assert.deepEqual(destinationViewport, ['1440', '900', '1']);
+    assert.deepEqual(calls[3], ['--session', 'dormouse.1.default', 'open', 'http://localhost:5173']);
+  });
+}
+
+test('reusing a browser keeps an explicit state request on the native command', async () => {
+  const calls = [];
+  await runCli(['agent-browser', 'open', 'http://localhost:5173', '--state', '/tmp/state.json'], {
+    client: { resolveBrowser: async () => ({ binding: { session: 'dormouse.1.default' }, fresh: false }), browserSurface: async () => ({}) },
+    execAgentBrowser: async (_binary, args) => { calls.push(args); return { exitCode: 0, stdout: '', stderr: '' }; },
+  });
+  assert.deepEqual(calls[0], ['--session', 'dormouse.1.default', 'open', 'http://localhost:5173', '--state', '/tmp/state.json']);
 });
 
 test('unknown agent-browser option fails before destination navigation', async () => {

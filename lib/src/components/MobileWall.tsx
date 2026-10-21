@@ -35,6 +35,10 @@ export interface MobileWallSession {
 
 export interface MobileWallProps {
   sessions?: MobileWallSession[];
+  /** Authoritative presentation, when the Session state lives on another machine. */
+  sessionItems?: MobileTerminalSessionItem[];
+  /** Null makes TODO display-only for a consumer with no dismissal capability. */
+  onSessionTodoClear?: ((id: string) => void) | null;
   activeSessionId?: string;
   defaultActiveSessionId?: string;
   onActiveSessionChange?: (id: string) => void;
@@ -82,6 +86,8 @@ export function useMobileWallSessionItems(
 
 export function MobileWall({
   sessions: controlledSessions,
+  sessionItems: controlledSessionItems,
+  onSessionTodoClear = clearSessionTodo,
   activeSessionId,
   defaultActiveSessionId,
   onActiveSessionChange,
@@ -95,7 +101,8 @@ export function MobileWall({
   const firstSessionId = sessions[0]?.id ?? null;
   const [internalActiveSessionId, setInternalActiveSessionId] = useState<string | null>(defaultActiveSessionId ?? firstSessionId);
   const resolvedActiveSessionId = activeSessionId ?? internalActiveSessionId ?? firstSessionId;
-  const sessionItems = useMobileWallSessionItems(sessions, resolvedActiveSessionId);
+  const localSessionItems = useMobileWallSessionItems(sessions, resolvedActiveSessionId);
+  const sessionItems = controlledSessionItems ?? localSessionItems;
   const activeItem = sessionItems.find((session) => session.id === resolvedActiveSessionId) ?? sessionItems[0] ?? null;
 
   const selectSession = useCallback((id: string) => {
@@ -149,6 +156,7 @@ export function MobileWall({
     <div className={`flex h-full min-h-0 flex-col overflow-hidden bg-app-bg ${className ?? ''}`}>
       <MobileWallHeader
         session={activeItem}
+        onTodoClear={onSessionTodoClear ? () => onSessionTodoClear(activeItem.id) : undefined}
         onMinimize={() => onSessionMinimize?.(activeItem.id)}
         onKill={() => killSession(activeItem.id)}
         showKillButton={showKillButton}
@@ -164,16 +172,19 @@ export function MobileWall({
 
 function MobileWallHeader({
   session,
+  onTodoClear,
   onMinimize,
   onKill,
   showKillButton,
 }: {
   session: MobileTerminalSessionItem;
+  onTodoClear?: () => void;
   onMinimize: () => void;
   onKill: () => void;
   showKillButton: boolean;
 }) {
   const todoPill = useTodoPillContent(session.todo === true);
+  const TodoPill = onTodoClear ? 'button' : 'span';
   const row = alertRingRow(session.status, null);
   const burst = useAlertRingBurst(row, session.episode);
 
@@ -186,20 +197,20 @@ function MobileWallHeader({
         ) : null}
       </div>
       {todoPill.visible ? (
-        <button
-          type="button"
+        <TodoPill
+          type={onTodoClear ? 'button' : undefined}
           data-session-todo-for={session.id}
           data-flourishing={todoPill.flourishing ? 'true' : 'false'}
           className={`todo-pill-shell ${HEADER_PILL_CLASS}`}
-          aria-label="Dismiss TODO"
+          aria-label={onTodoClear ? 'Dismiss TODO' : 'TODO'}
           aria-hidden={todoPill.flourishing ? true : undefined}
-          onClick={(event) => {
+          onClick={onTodoClear ? (event) => {
             event.stopPropagation();
-            clearSessionTodo(session.id);
-          }}
+            onTodoClear();
+          } : undefined}
         >
           {todoPill.body}
-        </button>
+        </TodoPill>
       ) : null}
       <div className="ml-1 flex shrink-0 items-center gap-0.5">
         <HeaderActionButton

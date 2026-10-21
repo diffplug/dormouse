@@ -129,6 +129,14 @@ open:
   });
 });
 
+it.skipIf(process.platform === 'win32')('never resolves a working directory through a link to a share', async () => {
+  // POSIX reads `//<root>` as `<root>`, so following it would match `docs/README.md`.
+  const cwd = join(root, 'share-link');
+  await symlink(`/${root}`, cwd);
+  const target = join(root, 'docs', 'README.md');
+  expect(await host().handle({ op: 'open', target, cwd })).toMatchObject({ status: 'ok', name: 'markdown', run: ['markdown', target] });
+});
+
 it('still matches an absolute target when the working directory no longer exists', async () => {
   const target = join(root, 'docs', 'README.md');
   const cwd = join(root, 'missing');

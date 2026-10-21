@@ -212,18 +212,19 @@ export function subscribeToHeldWorkspaces(listener: () => void): () => void {
   return () => { heldListeners.delete(listener); };
 }
 
-/**
- * A Workspace close that would ask, under Labs: the tab leaves the strip at
- * once while its Wall stays mounted and inactive, until its countdown closes
- * it or the user restores it (`docs/specs/reopen.md` → "Labs: No-confirm
- * delayed kill").
- */
+/** Whether any helper of these Surfaces still has work; a failed probe counts as busy. */
 async function helpersHaveWork(ids: readonly string[]): Promise<boolean> {
   const helpers = ids.flatMap(id => getHelper(id) ?? []);
   const busy = await Promise.all(helpers.map(helper => helperHasWork(helper).catch(() => true)));
   return busy.includes(true);
 }
 
+/**
+ * A Workspace close that would ask, under Labs: the tab leaves the strip at
+ * once while its Wall stays mounted and inactive, until its countdown closes
+ * it or the user restores it (`docs/specs/reopen.md` → "Labs: No-confirm
+ * delayed kill").
+ */
 function pendWorkspace(id: WorkspaceId): void {
   const { workspaces } = getWorkspacesSnapshot();
   const index = workspaces.findIndex(workspace => workspace.id === id);

@@ -14,7 +14,7 @@
     "pretest": "node ../scripts/build-workspace-deps.mjs",
     "test": "pnpm typecheck && vitest run",
     "test:watch": "vitest",
-    "storybook": "storybook dev -p 6006 --no-open --ci",
+    "storybook": "storybook dev -p 6006 --ci",
     "build-storybook": "storybook build",
     "test:argos": "vitest run --config vitest.argos.config.ts",
     "typecheck": "tsc -b"

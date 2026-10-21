@@ -4,7 +4,7 @@
  * one the standalone sidecar runs, over a store in `SecretStorage`. The token
  * is a bearer credential, and `SecretStorage` is the store whose changes every
  * window of the extension hears, so an approval or Disconnect in one window
- * reaches every window's status, cache, and refusal latch.
+ * reaches every window's status and refusal latch.
  */
 
 import type * as vscode from 'vscode';

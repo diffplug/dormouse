@@ -81,6 +81,9 @@ const requested: string[] = [];
 const failedRequests: string[] = [];
 let rootChildCount = 0;
 
+/** The chunk `Wall` lazily imports when Burrow is enabled. */
+const LAZY_CHUNK = /RemotePairingModalHost-/;
+
 beforeAll(async () => {
   expect(
     existsSync(join(MEDIA_PATH, 'index.html')),
@@ -103,10 +106,20 @@ beforeAll(async () => {
   browser = await launchChromium();
   const page = await browser.newPage();
 
-  page.on('requestfinished', (req) => requested.push(req.url()));
+  // `requested` fills as requests settle, and the lazy chunk's `import()` is
+  // only issued once the Wall renders — so mounting does not mean it has
+  // settled. Wait on it explicitly, or a slow runner snapshots `requested`
+  // with the chunk still in flight.
+  let lazyChunkSettled!: () => void;
+  const lazyChunk = new Promise<void>((resolve) => (lazyChunkSettled = resolve));
+  const settle = (url: string) => {
+    requested.push(url);
+    if (LAZY_CHUNK.test(url)) lazyChunkSettled();
+  };
+  page.on('requestfinished', (req) => settle(req.url()));
   page.on('requestfailed', (req) => {
-    requested.push(req.url());
     failedRequests.push(`${req.url()} — ${req.failure()?.errorText ?? 'unknown'}`);
+    settle(req.url());
   });
   page.on('console', (msg) => {
     if (msg.type() === 'error') consoleErrors.push(msg.text());
@@ -141,6 +154,9 @@ beforeAll(async () => {
       timeout: 15_000,
     })
     .catch(() => {});
+  // Bounded so a bundle that never imports the chunk still reaches the
+  // assertion that names it, rather than timing out the hook.
+  await Promise.race([lazyChunk, new Promise((resolve) => setTimeout(resolve, 15_000))]);
 
   rootChildCount = await page.evaluate(
     () => document.getElementById('root')?.childElementCount ?? 0,
@@ -172,7 +188,7 @@ describe('the built webview boots under its own CSP', () => {
     // imported chunk — and a lazy `import()` is half of what broke here. Assert
     // the coverage rather than trusting the boot path to keep providing it.
     expect(
-      requested.filter((u) => /RemotePairingModalHost-/.test(u)),
+      requested.filter((u) => LAZY_CHUNK.test(u)),
       `no lazy chunk was requested; requests were:\n${requested.join('\n')}`,
     ).not.toEqual([]);
     expect(failedRequests).toEqual([]);

@@ -29,7 +29,7 @@ Seats left in the open cohort and the founders row load after hydration from one
 
 - **Count seats on the server** from the billing provider behind a cache of at most 60 seconds, never on the client and never stored. **Never show a count for a closed cohort.**
 - **Show a founder only if they opted in at checkout**; the box starts unticked and the account can untick it. Every other founder counts toward the `+N` that ends the row, as does everyone past the row's cap.
-- **Must serve avatars from this origin, never the OAuth provider**, so loading the page tells no provider about the reader. The client draws an initial for any avatar that is not a same-origin path, or that fails to load.
+- **Must serve avatars from this origin, never the OAuth provider**, so loading the page tells no provider about the reader. The client draws an initial for any avatar that is not a same-origin path after URL normalization, or that fails to load.
 - **The page prerenders without the endpoint**: an unreachable endpoint, a non-2xx, or a malformed field drops only that field, never an error. **A cohort closing raises the price at the next deploy.**
 
 ### Published prices
@@ -100,7 +100,7 @@ What each plan grants once checkout can sell it; [Published prices](#published-p
 
 ### Managed voice
 
-What is built — the endpoint, what a request carries, the clip cache, the daily cap, and the fallback — is `docs/specs/hosted.md` -> "Managed voice" and `docs/specs/alert.md` -> "Managed voice"; the disclosure is `docs/specs/alert.md` -> "Settings dialog".
+What is built — the endpoint, what a request carries, the daily cap, and the fallback — is `docs/specs/hosted.md` -> "Managed voice" and `docs/specs/alert.md` -> "Managed voice"; the disclosure is `docs/specs/alert.md` -> "Settings dialog".
 
 - **Must disclose before enabling managed voice that labels can come from program-supplied titles, command labels, or directory names and that secret filtering is heuristic**, not a guarantee of confidentiality. Connection metadata remains visible to the serving infrastructure.
 - **One voice per Pane.** The member default applies everywhere; a per-Pane override is persisted with the pane's settings and follows the Session through minimize and restore. Doors and headers show nothing new.

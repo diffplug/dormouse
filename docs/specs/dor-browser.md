@@ -111,7 +111,7 @@ Source of truth: `lib/src/components/wall/AgentBrowserScreenModal.tsx`, `offered
 
 **Must preserve the current device-pixel ratio when DPR is omitted.** A ratio the provider cannot apply fails before changing dimensions; Playwright accepts only its context's current ratio. **Never turn an observed Playwright DPR into an explicit request for future contexts.** Presets describe viewport geometry, not devices.
 
-**Must apply initial dimensions before the destination page's first script runs**, for managed CLI, GUI and Tool launches. Deferred `pane-sync` launches start at a fixed size until placement. **Must engage sync when resolving that preset**, sending the actual pane dimensions on first attach. A failed initialization never navigates at a silently substituted size. **Must apply a renderer and viewport chosen together to the new renderer.**
+**Must size managed CLI, GUI and Tool browsers before destination scripts run.** **Must preserve launch settings during preparation and stream discovery; apply `--state` once, on the blank page** (rationale). Deferred `pane-sync` starts fixed until placement. **Must engage sync when resolving that preset**, sending actual pane dimensions on first attach. Failed initialization never navigates at a substituted size. **Must apply a renderer and viewport chosen together to the new renderer.**
 
 **Must query the active page's measured CSS dimensions and DPR**, never infer them from the pane or a screenshot. `dor`'s sizing commands share the Display modal's serialized writes (`docs/specs/dor-cli.md` → Browser viewport control).
 
@@ -226,7 +226,8 @@ Source of truth: `parseBrowserRequest` and `createBrowserHost` in `lib/src/host/
 
 agent-browser alone has a per-session daemon, state files beside its socket, and one fixed argv per operation; `--headed` is a no-op against a live daemon, so only a relaunch changes the mode. Its daemon's stream server and its browser's CDP port accept unauthenticated loopback TCP connections from any local process, refusing only a foreign `Origin`; Dormouse sets neither listener's flags (`docs/specs/security.md` -> "Known gaps").
 
-- **Must restart a headless daemon's screencast (`screencast_stop`, `screencast_start` on its own socket) when its first viewer socket opens and at once when it reports another tab active**, once per change per browser, and stop it when the last closes: only an asked-for switch rebinds it, and a restart never moves the active tab (rationale). **Must take any refusal as leaving the stream as it was**, so an agent-browser without these actions degrades to a stale pane, not an error.
+- **Must restart a headless daemon's screencast (`screencast_stop`, `screencast_start`) when its first viewer connects or its active tab changes**, once per change per browser, and stop it when its last viewer closes. **Never change the active tab during a restart** (rationale). **Must leave the stream unchanged on refusal.**
+- **Must send those actions only to the proven daemon's Unix socket or Windows loopback port in `<session>.port`**, refusing missing, stale, or invalid port metadata.
 - **Never spawn a daemon outside a launch's own steps**: any CLI verb starts one at `about:blank`, so `attach` reads the live port from `<session>.pid` / `<session>.stream` and a port probe, and every other verb runs only on proof of a live daemon (`liveDaemon`) — a pid file from this boot, alive, beside a stream port that accepts.
 - **Never signal a pid without that proof** (rationale).
 - **Must run a launch's `open` in the binding's project directory while it exists**, so a relaunch reads the same `./agent-browser.json` the `dor agent-browser` there did.
@@ -248,11 +249,13 @@ Source of truth: `createPlaywrightProvider` in `lib/src/host/playwright-host.ts`
 
 ## Iframe Renderer
 
+**Must reload the current observed page, preserving its query, fragment, and history position**, including on hosts without a proxy.
+
 `dor iframe <url>` frames the page's own DOM — zero-lag for human inspection, but agents cannot drive or read it. On hosts with `createIframeProxyUrl`, `IframePanel` frames a per-grant loopback proxy URL; without it, a raw uninstrumented iframe. The desktop playground's `createIframeProxyUrl` fronts only its own viewers (`docs/specs/tutorial.md` → Playground filesystem).
 
 The proxy instruments any `http://` upstream, loopback and remote alike: headers are rewritten per the table below and the shim injected into HTML; HTTP and WebSocket traffic passes through. A site's "do not embed" is overridden, not obeyed (rationale); the sandbox neutralizes JS framebusting. **Must refuse link-local / cloud-metadata address literals (`scheme`) after canonicalizing equivalent spellings** — decimal/octal/hex, short forms, IPv4-mapped IPv6; this checks the hostname literal, not DNS answers, and named targets remain the user's command authority.
 
-**Must refuse `https://` at every entry to the iframe renderer on a host with the proxy** (a host without it frames https raw):
+**Must refuse `https://`, regardless of scheme casing, at every entry to the iframe renderer on a host with the proxy** (a host without it frames https raw):
 
 | Entry | Outcome |
 | --- | --- |

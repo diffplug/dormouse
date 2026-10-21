@@ -87,13 +87,45 @@ function quotePowerShellCommand(args: readonly string[]): string {
 const POWERSHELL_SINGLE_QUOTES = /['\u2018-\u201b]/g;
 
 /** PowerShell single-quoted strings are literal — no `$(...)` subexpression and
- *  no `$name` interpolation — so this is also what the webview's drop/paste
- *  path uses to quote a file path for a PowerShell pane (`shellEscapePath`).
- *  Each quote character is doubled, as `EscapeSingleQuotedStringContent` does. */
+ *  no `$name` interpolation. Each quote character is doubled, as
+ *  `EscapeSingleQuotedStringContent` does. */
 export function quotePowerShellArg(arg: string): string {
   if (arg === '') return "''";
   if (WINDOWS_SAFE_ARG.test(arg)) return arg;
   return `'${arg.replace(POWERSHELL_SINGLE_QUOTES, (c) => c + c)}'`;
+}
+
+/** What cmd or PowerShell still reads inside a double-quoted argument: every
+ *  PowerShell double quote (`"` and U+201C–U+201E) and its backtick escape, a
+ *  `$` that can start a PowerShell variable or subexpression (one before `\`,
+ *  as in `\\host\c$\`, cannot), and cmd's `%NAME%` and delayed `!NAME!`. */
+const WINDOWS_PORTABLE_UNSAFE = /["“-„`%!]|\$(?!\\)/;
+
+/** `arg` as the same literal argument to cmd, Windows PowerShell, and pwsh, for
+ *  text typed into a Session whose running shell may be another of them than
+ *  the one it launched: bare when every character is inert in each, otherwise
+ *  double-quoted, where cmd's operators and PowerShell's single quotes are
+ *  literal. Null when no such form exists. */
+export function quoteWindowsPortableArg(arg: string): string | null {
+  if (arg === '') return null;
+  if (WINDOWS_SAFE_ARG.test(arg)) return arg;
+  if (WINDOWS_PORTABLE_UNSAFE.test(arg) || hasShellInputControls(arg)) return null;
+  // PowerShell's legacy native binder removes our quotes unless there is an
+  // ASCII space. A .cmd target then parses these characters as syntax. Empty
+  // arguments disappear in that binder; a quoted trailing backslash instead
+  // escapes the closing quote in the native Windows argv parser.
+  if ((!arg.includes(' ') && /[&|<>^]/.test(arg)) || arg.endsWith('\\')) return null;
+  return `"${arg}"`;
+}
+
+/** argv as one command line cmd, Windows PowerShell, and pwsh all run alike, or
+ *  null. The program must be bare: PowerShell runs a quoted one only behind
+ *  `&`, which cmd reads as a command separator. */
+export function buildWindowsPortableCommand(args: readonly string[]): string | null {
+  const [command, ...rest] = args;
+  if (command === undefined || !WINDOWS_SAFE_ARG.test(command)) return null;
+  const quoted = rest.map(quoteWindowsPortableArg);
+  return quoted.every((arg) => arg !== null) ? [command, ...quoted].join(' ') : null;
 }
 
 function quoteCmdArg(arg: string): string {

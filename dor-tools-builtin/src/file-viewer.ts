@@ -1,4 +1,5 @@
-import { realpath, type FileHandle } from 'node:fs/promises';
+import type { FileHandle } from 'node:fs/promises';
+import { localRealpath } from 'dor-lib-common/local-path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { basename, dirname, relative, resolve, sep } from 'node:path';
 import { openSequence, stateSequence, type ToolOpen } from 'dor-tools-lib/osc';
@@ -98,7 +99,7 @@ async function stream(req: IncomingMessage, res: ServerResponse, resource: Resou
  * `formatOf` is the handler's (`BuiltinHandler.format`): `builtin:code`'s
  * serves every textual format as source. */
 export async function startFileViewer(input: string, { onDirty = () => {}, onOpen = () => {}, formatOf = fileViewerFormat }: { onDirty?: (dirty: boolean) => void; onOpen?: (open: ToolOpen) => void; formatOf?: (path: string) => FileFormat | null } = {}): Promise<{ port: number; path: string; target: string; editable: boolean; close(): Promise<void> }> {
-  const target = await realpath(input);
+  const { path: target } = await localRealpath(input);
   const format = formatOf(target);
   if (!format) throw new Error('unsupported file format; configure a user Tool association');
   // Source reaches Monaco as inert JSON; none of its references load.
@@ -112,7 +113,8 @@ export async function startFileViewer(input: string, { onDirty = () => {}, onOpe
     try {
       const route = `file/${relative(root, path).split(sep).join('/')}`;
       if (resources.has(route)) return resources.get(route);
-      const canonical = await realpath(path);
+      // Never `realpath`: a reference's link to a share would reach it first.
+      const { path: canonical } = await localRealpath(path);
       if (!isInsideRoot(root, canonical)) return;
       if (resources.size >= ASSET_LIMIT) throw new ViewerLimitError('local preview exceeds 256 referenced files');
       const type = fileViewerFormat(canonical);

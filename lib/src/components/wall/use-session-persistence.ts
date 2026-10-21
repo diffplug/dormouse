@@ -22,8 +22,7 @@ import type { SessionFlushRequest } from '../../lib/platform/types';
 export interface SessionPersistenceHandle {
   /** Persist immediately, awaiting the whole queued pipeline. */
   flush: (options?: SaveOptions) => Promise<void>;
-  /** Build this Workspace's record without publishing it — what a Workspace
-   *  leaving for another Window carries with it. */
+  /** Build this Workspace's record without publishing it, for a save or transfer. */
   serialize: (options?: SaveOptions) => Promise<PersistedSession>;
   /** This Workspace's record now, with no cwd probe: what a Surface move
    *  publishes in the same synchronous run as its ownership change. */
@@ -85,7 +84,7 @@ export function useSessionPersistence({
   }), [effectiveWorkspaceId]);
   const sessionSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sessionSavePromiseRef = useRef<Promise<void> | null>(null);
-  const pendingSaveNeededRef = useRef(false);
+  const pendingSaveRef = useRef<{ options?: SaveOptions } | null>(null);
   // See session-dirty.ts for the conservative-under-races generation model.
   const trackerRef = useRef(createSessionDirtyTracker());
   // This Workspace's own previous record, which is where a dead PTY's retained
@@ -138,8 +137,7 @@ export function useSessionPersistence({
     return { panes, doors, lathLayout: lath.serializeLayout() };
   }, [lath, doorsRef]);
 
-  /** The same record a save would publish, handed back instead. The Workspace
-   *  is leaving, so nothing here may touch this Window's aggregator. */
+  /** Build only: a save publishes the result; a transfer carries it to another Window. */
   const serialize = useCallback((options?: SaveOptions): Promise<PersistedSession> => {
     const { panes, doors, lathLayout } = collect();
     return buildPersistedSession(
@@ -181,27 +179,26 @@ export function useSessionPersistence({
 
   const persistSessionNow = useCallback(async (options?: SaveOptions): Promise<void> => {
     const runSave = (): Promise<void> => {
-      pendingSaveNeededRef.current = false;
+      const request = pendingSaveRef.current;
+      pendingSaveRef.current = null;
       // Clear dirty only on a fulfilled write (.then, not .finally).
       const token = trackerRef.current.beginSave();
-      const savePromise = doSave(options)
+      const savePromise = doSave(request?.options)
         .then(() => {
           trackerRef.current.completeSave(token);
         })
         .finally(() => {
           if (sessionSavePromiseRef.current === savePromise) {
-            sessionSavePromiseRef.current = pendingSaveNeededRef.current ? runSave() : null;
+            sessionSavePromiseRef.current = pendingSaveRef.current ? runSave() : null;
           }
         });
       sessionSavePromiseRef.current = savePromise;
       return savePromise;
     };
 
-    if (sessionSavePromiseRef.current) {
-      pendingSaveNeededRef.current = true;
-    } else {
-      runSave();
-    }
+    // Coalesce requests, retaining the latest options even when a save is busy.
+    pendingSaveRef.current = { options };
+    if (!sessionSavePromiseRef.current) runSave();
     // Await until the pipeline idles so the resolution covers the LATEST queued
     // save, not just the one in flight. Swallow a per-save rejection here: a
     // failed save still chains its queued follow-up (via `.finally`), so

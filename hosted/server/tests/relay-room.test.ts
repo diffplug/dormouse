@@ -766,7 +766,7 @@ test("a Burrow enrolled by device code pairs and connects a phone, and under Loc
   const approved = await account.request(`${ORIGINS.account}/api/relay/enrollments/approve`, {
     method: "POST",
     headers: { origin: ORIGINS.account, "content-type": "application/json" },
-    body: JSON.stringify({ userCode: begun.json.userCode }),
+    body: JSON.stringify({ userCode: begun.json.userCode, confirmDigits: begun.json.confirmDigits }),
   });
   expect(approved.status).toBe(204);
   // … and its poll answers the enrollment, once.

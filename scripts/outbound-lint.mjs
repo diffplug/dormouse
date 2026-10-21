@@ -218,7 +218,7 @@ const OUTBOUND_SITES = {
   // --- loopback ---
   'lib/src/host/agent-browser-host.ts': {
     class: 'loopback',
-    reason: 'Dials agent-browser\'s stream and the browser\'s CDP on 127.0.0.1 only (viewStream, askCdpEndpoint), and the daemon\'s own Unix socket beside the state files liveDaemon proves, for its fixed screencast actions only (daemonAction).',
+    reason: 'Dials agent-browser\'s stream and the browser\'s CDP on 127.0.0.1 only (viewStream, askCdpEndpoint), and the daemon\'s own Unix socket or Windows .port on 127.0.0.1 beside the state files liveDaemon proves, for its fixed screencast actions only (daemonAction).',
   },
   'lib/src/host/browser-viewer.ts': {
     class: 'loopback',

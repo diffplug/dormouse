@@ -7,21 +7,22 @@
  * returns `null`, which leaves the caller offering only a folder grant. Failing
  * closed costs one extra approval; guessing would mint a key for the wrong repo.
  */
+import { localGitRepository } from 'dor-lib-common';
 import { runGit as git } from './git-cli';
+import { readHead } from './git-info';
 import { canonicalRemoteUrl } from './git-remote-url';
 
 /**
- * The remote name the current branch tracks (`origin` from `origin/main`), or
- * null on a detached HEAD or a branch with no upstream.
+ * The remote the checked-out branch tracks (`branch.<name>.remote`), or null
+ * on a detached HEAD, a branch with no upstream, or one tracking a local
+ * branch (`.`). Read from `HEAD` and config, never by resolving
+ * `@{upstream}`, which opens the remote-tracking ref.
  */
-async function trackedRemote(dir: string): Promise<string | null> {
-  const upstream = await git(dir, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}']);
-  if (!upstream) return null;
-  // `origin/main` -> `origin`. A remote name cannot contain `/`, so the first
-  // segment is the remote and everything after is the branch, which may itself
-  // contain slashes (`origin/feature/x`).
-  const slash = upstream.indexOf('/');
-  return slash > 0 ? upstream.slice(0, slash) : null;
+async function trackedRemote(dir: string, gitDir: string): Promise<string | null> {
+  const head = await readHead(gitDir).catch(() => null);
+  if (!head || !('branch' in head)) return null;
+  const remote = await git(dir, ['config', '--get', `branch.${head.branch}.remote`]);
+  return remote && remote !== '.' ? remote : null;
 }
 
 /**
@@ -33,7 +34,9 @@ async function trackedRemote(dir: string): Promise<string | null> {
  * `origin` with a pull refspec still resolves to `origin`.
  */
 export async function resolveUpstreamUrl(dir: string): Promise<string | null> {
-  const remote = (await trackedRemote(dir)) ?? 'origin';
+  const repository = await localGitRepository(dir);
+  if (!repository) return null;
+  const remote = (await trackedRemote(dir, repository.gitDir)) ?? 'origin';
   const url = await git(dir, ['remote', 'get-url', remote]);
   return url ? canonicalRemoteUrl(url) : null;
 }

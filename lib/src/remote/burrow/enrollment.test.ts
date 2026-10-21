@@ -457,6 +457,7 @@ describe('Hosted device-code enrollment', () => {
   const BEGIN = {
     deviceCode: 'D'.repeat(RELAY_BEARER_LENGTH),
     userCode: '23AB-YZ9K',
+    confirmDigits: '47',
     verificationUrl: 'https://hosted.dormouse.sh/enroll#23AB-YZ9K',
     expiresAt: 1_800_000_000_000,
     interval: 5,
@@ -517,21 +518,22 @@ describe('Hosted device-code enrollment', () => {
       expect(init.redirect).toBe('error');
       expect(JSON.parse(init.body as string)).toEqual({ deviceCode: BEGIN.deviceCode });
       expect(answer).toEqual({
-        status: 'enrolled',
-        enrollment: { relayUrl: RELAY, ...enrollment, label: 'My Laptop', ...noiseStatic },
+        status: 'approved',
+        credential: { relayUrl: RELAY, ...enrollment, label: 'My Laptop', ...noiseStatic },
       });
       // A token of the wrong shape, or none, still enrolls: the approval is spent.
       expect(await poll(json(200, { status: 'enrolled', enrollment, voiceToken: 'sk-nope' })))
         .not.toHaveProperty('voiceToken');
-      expect(isEnrollment((answer as { enrollment: unknown }).enrollment)).toBe(true);
+      expect(isEnrollment((answer as { credential: unknown }).credential)).toBe(true);
       // A redemption the guard refuses fails, naming the field.
       expect(await poll(json(200, { status: 'enrolled', enrollment: { ...enrollment, burrowId: 'short' } })))
         .toEqual({ status: 'failed', message: expect.stringContaining('burrowId') });
     });
 
-    it('reads pending, expired, and redeemed as they are', async () => {
+    it('reads pending, expired, mismatch, and redeemed as they are', async () => {
       expect(await poll(json(200, { status: 'pending' }))).toEqual({ status: 'pending' });
       expect(await poll(json(200, { status: 'expired' }))).toEqual({ status: 'expired' });
+      expect(await poll(json(200, { status: 'mismatch', extra: 1 }))).toEqual({ status: 'mismatch' });
       // An earlier poll's redemption whose answer never arrived, naming the
       // Burrow it enrolled.
       const burrowId = 'A'.repeat(22);

@@ -44,19 +44,19 @@ test('full playwright command forwards native arguments and binds only to playwr
   const result = await runCli(['playwright', '--key', 'app', 'open', ':5173', '--headed'], options);
   assert.equal(result.stdout, 'native output\n');
   assert.equal(result.exitCode, 0);
-  assert.deepEqual(calls.find(c => c[0] === 'exec'), ['exec', '/tools/playwright-cli', ['--session=dormouse.1.app', 'open', 'http://localhost:5173/', '--headed'], caller]);
+  assert.deepEqual(calls.find(c => c[0] === 'exec'), ['exec', '/tools/playwright-cli', ['--session=dormouse.1.app', 'open', 'http://localhost:5173/', '--headed'], caller, undefined, 'inherit']);
   assert.equal(calls.at(-1)[1].provider, 'playwright');
 });
 test('existing key pins executable, cwd and native session across terminal directories', async () => {
   const { calls, options } = fixture({ session: 'gui-123', cwd: firstProject, binaryPath: pinnedCli });
   await runCli(['playwright', 'screenshot', 'relative.png'], options);
-  assert.deepEqual(calls.find(c => c[0] === 'exec'), ['exec', pinnedCli, ['--session=gui-123', 'screenshot', 'relative.png'], firstProject]);
+  assert.deepEqual(calls.find(c => c[0] === 'exec'), ['exec', pinnedCli, ['--session=gui-123', 'screenshot', 'relative.png'], firstProject, undefined, 'inherit']);
 });
 test('a pinned executable that is gone runs the caller\'s own, and says so', async () => {
   const gone = join(root, 'uninstalled', 'playwright-cli');
   const { calls, options } = fixture({ session: 'gui-123', cwd: firstProject, binaryPath: gone });
   const result = await runCli(['playwright', 'snapshot'], options);
-  assert.deepEqual(calls.find(c => c[0] === 'exec'), ['exec', '/tools/playwright-cli', ['--session=gui-123', 'snapshot'], firstProject]);
+  assert.deepEqual(calls.find(c => c[0] === 'exec'), ['exec', '/tools/playwright-cli', ['--session=gui-123', 'snapshot'], firstProject, undefined, 'inherit']);
   assert.equal(result.exitCode, 0);
   assert.ok(result.stderr.includes(`playwright-cli (${gone}) is gone`), result.stderr);
   // The pane then learns the executable that ran.
@@ -76,7 +76,7 @@ test('a pinned executable outside the allowlist runs the caller\'s own instead',
   for (const binaryPath of ['/bin/sh', './playwright-cli', '/opt/../bin/playwright-cli']) {
     const { calls, options } = fixture({ session: 'gui-123', cwd: firstProject, binaryPath });
     await runCli(['playwright', 'snapshot'], options);
-    assert.deepEqual(calls.find(c => c[0] === 'exec'), ['exec', '/tools/playwright-cli', ['--session=gui-123', 'snapshot'], firstProject], binaryPath);
+    assert.deepEqual(calls.find(c => c[0] === 'exec'), ['exec', '/tools/playwright-cli', ['--session=gui-123', 'snapshot'], firstProject, undefined, 'inherit'], binaryPath);
   }
 });
 test('an empty DORMOUSE_PLAYWRIGHT_BIN is unset', async () => {
@@ -89,7 +89,7 @@ test('raw -s bypasses workspace addressing', async () => {
   const { calls, options } = fixture();
   await runCli(['playwright', '-s=raw-session', 'goto', ':8080'], options);
   assert.equal(calls.some(c => c[0] === 'resolve'), false);
-  assert.deepEqual(calls[0].slice(2), [['--session=raw-session', 'goto', 'http://localhost:8080/'], caller]);
+  assert.deepEqual(calls[0].slice(2), [['--session=raw-session', 'goto', 'http://localhost:8080/'], caller, undefined, 'inherit']);
   assert.equal(calls.at(-1)[0], 'surface');
   assert.equal(calls.at(-1)[1].key, undefined);
 });

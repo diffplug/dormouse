@@ -26,18 +26,18 @@ async function reply(kind = 'saved') {
   }
   assert.fail(`host ${kind} request did not answer`);
 }
-function session(save, position) {
+function session(save, position, read, afterApply) {
   const held = { text: '' }, errors = [], writes = [];
   const doc = documentSession({
     snapshot: () => ({ content: held.text, mark: held.text }),
     holds: mark => mark === held.text,
-    apply(text) { held.text = text; },
+    apply(text) { held.text = text; afterApply?.(); },
   }, { report() {}, fail: error => errors.push(error) }, {
-    load: async () => ({ content: 'original', version: 'v1', name: 'doc.md' }),
+    load: () => read ? read() : Promise.resolve({ content: 'original', version: 'v1', name: 'doc.md' }),
     save: async (text, version) => { writes.push([text, version]); return save ? save() : { version: 'v2' }; },
   }, position);
   const edit = text => { held.text = text; doc.changed(); };
-  return { doc, errors, writes, edit };
+  return { doc, errors, writes, edit, held };
 }
 
 test('host save and keyboard save write the page document at its current revision', async () => {
@@ -91,4 +91,70 @@ test('the host can restore and read the document position through the same sessi
   send({ kind: 'connect' });
   send({ kind: 'view-apply', request: 'position', position: { mode: 'source', top: 320 } });
   assert.deepEqual((await reply('view')).position, { mode: 'source', top: 320 });
+});
+
+for (const saveWhileLoading of [false, true]) {
+  test('reload preserves edits made while disk is being read' + (saveWhileLoading ? ', even if saved' : ''), async () => {
+    const gate = Promise.withResolvers();
+    let reads = 0;
+    const { doc, edit, held, errors, writes } = session(undefined, undefined, () => ++reads === 1
+      ? Promise.resolve({ content: 'original', version: 'v1', name: 'doc.md' }) : gate.promise);
+    await doc.load();
+    const reloading = doc.reload();
+    edit('new edit');
+    if (saveWhileLoading) await doc.write();
+    gate.resolve({ content: 'old disk snapshot', version: 'v1', name: 'doc.md' });
+    await reloading;
+    assert.equal(held.text, 'new edit');
+    assert.equal(doc.dirty(), !saveWhileLoading);
+    assert.match(errors.at(-1), /changed.*reload/i);
+    edit('later edit');
+    await doc.write();
+    assert.deepEqual(writes.at(-1), ['later edit', saveWhileLoading ? 'v2' : 'v1']);
+  });
+}
+
+test('repeated reloads share one read instead of applying stale responses out of order', async () => {
+  const gate = Promise.withResolvers();
+  let reads = 0;
+  const { doc, held } = session(undefined, undefined, () => ++reads === 1
+    ? Promise.resolve({ content: 'original', version: 'v1', name: 'doc.md' }) : gate.promise);
+  await doc.load();
+  const first = doc.reload();
+  const second = doc.reload();
+  assert.equal(reads, 2);
+  gate.resolve({ content: 'fresh', version: 'fresh-version', name: 'doc.md' });
+  await Promise.all([first, second]);
+  assert.equal(held.text, 'fresh');
+  assert.equal(doc.dirty(), false);
+});
+
+for (const answer of ['cancel', 'discard']) {
+  test('concurrent dirty reloads share one discard prompt: ' + answer, async () => {
+    let close;
+    let shown = 0;
+    const dialog = { returnValue: '', addEventListener: (_name, fn) => { close = fn; }, showModal: () => { shown++; } };
+    globalThis.document = { getElementById: () => dialog };
+    const { doc, edit, held } = session();
+    await doc.load();
+    edit('unsaved');
+    const first = doc.reload(), second = doc.reload();
+    assert.equal(shown, 1);
+    dialog.returnValue = answer;
+    close();
+    await Promise.all([first, second]);
+    assert.equal(held.text, answer === 'discard' ? 'original' : 'unsaved');
+    assert.equal(doc.dirty(), answer === 'cancel');
+  });
+}
+
+test('edits immediately after applying a reload are never rebased as saved', async () => {
+  let applies = 0;
+  const { doc, edit, held } = session(undefined, undefined, undefined, () => {
+    if (++applies > 1) queueMicrotask(() => edit('edit after reload'));
+  });
+  await doc.load();
+  await doc.reload();
+  assert.equal(held.text, 'edit after reload');
+  assert.equal(doc.dirty(), true);
 });

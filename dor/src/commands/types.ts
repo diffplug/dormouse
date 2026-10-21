@@ -626,7 +626,7 @@ export interface BrowserExecResult {
 
 /** Runs the user's browser CLI binary, in `cwd` when given; injectable so CLI
  *  tests stay hermetic. */
-export type BrowserExec = (binary: string, args: string[], cwd?: string, env?: Record<string, string>) => Promise<BrowserExecResult>;
+export type BrowserExec = (binary: string, args: string[], cwd?: string, env?: Record<string, string>, stdin?: 'inherit') => Promise<BrowserExecResult>;
 
 export interface CliEnv {
   [key: string]: string | undefined;

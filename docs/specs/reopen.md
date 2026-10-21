@@ -43,7 +43,7 @@ Source of truth: `lib/src/lib/reopen-stack.ts`; `reopenSurface` in `lib/src/comp
 - **Must bind command-mode `u` on every platform**, whatever is selected. **Never bind `Ctrl+Shift+T` on Windows or Linux**: in legacy encoding it reaches programs as `Ctrl+T` (readline, fzf, emacs).
 - **Must answer `dor reopen` (`window.reopen`) in the Window**, focus-neutral, refusing an empty stack (`docs/specs/dor-cli.md` → "dor reopen").
 
-Every host takes `u` and `dor reopen`; window records and the menu item are Standalone's.
+Every host takes `u` and `dor reopen`; window records and the menu item are Standalone's. Transfer refusals: `docs/specs/standalone.md` → Transfer.
 
 Source of truth: `reopenClosed` in `lib/src/components/wall/reopen.ts`; the `.menu(...)` builder in `standalone/src-tauri/src/lib.rs`.
 

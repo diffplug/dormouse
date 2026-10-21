@@ -1,5 +1,8 @@
 @echo off
 setlocal
+rem PowerShell and cmd do not maintain an inherited POSIX PWD.
+rem The CLI reads it for relative paths and new terminals.
+set "PWD=%CD%"
 if "%DORMOUSE_NODE%"=="" goto fallback
 if "%DORMOUSE_CLI_JS%"=="" goto fallback
 rem Under VS Code, DORMOUSE_NODE is the editor's Electron binary; it only

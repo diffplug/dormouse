@@ -1,4 +1,4 @@
-import { ESC, RESET } from './ansi';
+import { ESC } from './ansi';
 import type { TerminalEntry } from './terminal-store';
 
 const REPORT_CSI = /\x1b\[[0-?]*[ -/]*[@-~]/;
@@ -48,11 +48,7 @@ export const REPLAY_MODE_RESET =
   `${ESC}?1049l${ESC}?47l${ESC}?1047l` + // exit alt-screen (current + legacy variants)
   `${ESC}?9l${ESC}?1000l${ESC}?1002l${ESC}?1003l` + // disable mouse tracking
   `${ESC}?1005l${ESC}?1006l${ESC}?1015l` + // disable mouse encodings (utf8/SGR/urxvt)
-  `${ESC}?1004l` + // focus reporting off
-  `${ESC}?2004l` + // bracketed paste off (the new shell re-enables it at its prompt)
-  `${ESC}?25h` + // show cursor
-  `${ESC}?1l` + // application cursor keys off
-  RESET; // SGR reset
+  `${ESC}!p`; // soft reset: keyboard protocols, text modes, margins, charsets, and SGR
 
 export function writeReplay(entry: TerminalEntry, ...chunks: string[]): void {
   if (chunks.length === 0) return;

@@ -20,13 +20,13 @@ Pocket is:
 
 > auth screens + `MobileTerminalUi`/`MobileWall` + **`RemotePtyAdapter`**
 
-— the composition [mobile-terminal-ui.md](./mobile-terminal-ui.md) owns, which the website also wires on `FakePtyAdapter` (`website/src/components/PocketTerminalExperience.tsx`). **Everything outside the PTY core no-ops or is absent** — `getCwd` → null, shells/clipboard empty, alerts inert, `alertAwait` settling `cancelled` rather than never resolving.
+— the composition [mobile-terminal-ui.md](./mobile-terminal-ui.md) owns, also wired on `FakePtyAdapter` (`website/src/components/PocketTerminalExperience.tsx`). **Everything outside the PTY core no-ops or is absent** — `getCwd` → null, shells/clipboard empty, alerts inert, `alertAwait` settling `cancelled` rather than never resolving.
 
 **Scanning is the only way in** — no setup password, no typed credential; the code on the computer's screen is both account setup and pairing.
 
 **A QR the native camera opened is origin bootstrap only.** The `#pair?` fragment is erased before the first render, parsed or not; nothing is retained, no call is made, the token is not spent, and the auth screen asks for a scan from inside Pocket. **An installed iOS Pocket can never receive a scanned hash** — Camera opens Safari, a different partition. (rationale)
 
-**The scanner reads a code as data**: it never navigates, and camera or pasted text goes to `parsePairingInvitationUrl` ([relay.md](./relay.md) owns the grammar) (rationale). **The invitation lives in memory only**, cleared on every terminal outcome.
+**Must parse scanned or pasted text with `parsePairingInvitationUrl`, never navigate** ([relay.md](./relay.md) owns the grammar; rationale). **Must keep invitations in memory only, clearing them on every terminal outcome.** **Must discard parses finishing after Cancel or teardown.**
 
 **After the parse.**
 
@@ -46,7 +46,7 @@ flowchart TD
   P -- approved --> C[connect]
 ```
 
-**A phone that registers nothing spends the code at `POST /api/setup/retire`**, so a photographed QR cannot register a passkey afterwards. **A session the Relay no longer honors falls back to sign-in with the same code**, which the session gate refused before spending. **Only a sign-in refused 404 falls back to registering** (rationale). Pairing runs per [remote-security-model.md](./remote-security-model.md) → Pairing, and **the two digits go on screen before the outcome is known and stay until it lands**. **Cancelling closes the relay socket** and reports nothing. (rationale) **A refused token is reported, never folded away**: `SETUP_TOKEN_INVALID_ERROR` becomes `SetupTokenInvalidError`, whose recovery is a new code on the computer.
+**A phone registering nothing spends its code at `POST /api/setup/retire`**, preventing later registration with a photographed QR. **An expired Relay session returns to sign-in with its code**, unspent by the session gate. **Only a sign-in refused 404 falls back to registering** (rationale). Pairing follows [remote-security-model.md](./remote-security-model.md) → Pairing, and **the two digits appear before the outcome and remain until it arrives**. **Must close the relay socket on cancellation and suppress ceremony failures, including rejections**, except expired sessions and unavailable passkeys still return to sign-in. (rationale) **A refused token is reported, never folded away**: `SETUP_TOKEN_INVALID_ERROR` becomes `SetupTokenInvalidError`, whose recovery is a new code on the computer.
 
 **Runtimes are gated, not degraded**: `probeNoiseSupport` runs before sign-in, setup, pairing, or connection; `false` renders a fixed upgrade requirement instead.
 
@@ -56,7 +56,7 @@ flowchart TD
 
 **Must drop an entire `terminal.data` projection pair if either projection has invalid base64url or UTF-8**, then continue accepting later data.
 
-`RemotePtyAdapter` exposes the adapter-specific `setActivePane(id)`: v1 allows one attachment per session, so pane switching is detach → attach. **Writes and resizes for a non-attached pane are dropped, but the latest resize for a pane being attached is kept**: its attach or a `terminal.resize` after it carries that size (rationale). **A refused `terminal.resize` after the attach never fails `setActivePane`.** Badges for non-attached panes come from `directory.watch` without attaching.
+`RemotePtyAdapter.setActivePane(id)` switches panes by detach → attach. **Writes and resizes for a non-attached pane are dropped, but the latest resize for a pane being attached is kept**: its attach or a `terminal.resize` after it carries that size (rationale). **A refused `terminal.resize` after the attach never fails `setActivePane`.** **Must use directory snapshots for header and picker presentation**, with display-only header TODOs; non-attached panes need no attachment.
 
 * **Must normalize dimensions before sending or caching them.**
 * **Must settle fire-and-forget PTY failures and release subscriptions that arrive after disposal**; a disposed adapter never restarts or delivers events.
