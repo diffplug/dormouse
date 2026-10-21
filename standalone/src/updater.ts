@@ -68,6 +68,7 @@ let availableUpdate: Update | null = null;
 let pendingUpdate: Update | null = null;
 let downloadPromise: Promise<void> | null = null;
 let currentVersion = '';
+let restartRefusal: string | null = null;
 /** The check in flight, which a second asker joins. */
 let checkPromise: Promise<Update | null> | null = null;
 /** The hourly reminder tick, from launch on: a terminal stays open for weeks. */
@@ -275,7 +276,9 @@ export function approveUpdate(): void {
 export function checkNow(): void {
   if (!buildChecks()) return;
   if (pendingUpdate) {
-    setState({ status: 'downloaded', version: pendingUpdate.version });
+    setState(restartRefusal === null
+      ? { status: 'downloaded', version: pendingUpdate.version }
+      : { status: 'restart-refused', version: pendingUpdate.version, reason: restartRefusal });
     return;
   }
   if (downloadPromise && availableUpdate) {
@@ -311,12 +314,14 @@ export function restartToUpdate(): void {
     })
     .catch((e) => {
       console.error('[updater] Restart failed:', e);
+      // The host's refusal lasts until relaunch, even if its notice is hidden.
+      restartRefusal = e instanceof Error ? e.message : String(e);
       // Honor a dismissal that arrived while the host was answering.
       if (state.status === 'downloaded') {
         setState({
           status: 'restart-refused',
           version: state.version,
-          reason: e instanceof Error ? e.message : String(e),
+          reason: restartRefusal,
         });
       }
     });
@@ -503,6 +508,7 @@ export function _resetForTesting(): void {
   pendingUpdate = null;
   downloadPromise = null;
   currentVersion = '';
+  restartRefusal = null;
   checkPromise = null;
   checksSnapshot = null;
   if (reminderTimer) clearInterval(reminderTimer);
