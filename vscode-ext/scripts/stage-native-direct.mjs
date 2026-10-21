@@ -59,6 +59,8 @@ for (const name of platforms) {
   }
 }
 rmSync(path.join(extRoot, deployDir), { recursive: true, force: true });
+// The addon's C++ and TypeScript sources; it loads from `dist/`.
+rmSync(path.join(target, ADDON, 'src'), { recursive: true, force: true });
 
 console.error(`[stage-native-direct] ${ADDON} with ${platforms.length} platform addons`);
 

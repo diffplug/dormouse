@@ -14,12 +14,24 @@
 #   scripts/security-audit-local.sh            # the deterministic checks, then every domain
 #   scripts/security-audit-local.sh remote                  # one domain
 #   scripts/security-audit-local.sh github-state            # the deterministic checks alone
-#   scripts/security-audit-local.sh canary [count]          # recall on seeded vulnerabilities
+#   scripts/security-audit-local.sh canary [count] [--key <key>] [--claude-scorecard <file>]
+#                                                           # recall on seeded vulnerabilities
+#   scripts/security-audit-local.sh --engine codex [any of the above]
 #
 # `canary` measures rather than audits (docs/specs/security-audit.md -> "Canary
 # recall"): it copies the committed tree to a temporary directory, seeds it from
 # `.github/audit/canaries/` as CI does, runs the code domains there, and
 # scores their fragments. Your checkout is never touched, and nothing is filed.
+# `--key` takes a CI canary run's seed key, its run ID: the canary then seeds
+# that run's commit, read on your `gh` login, with the seeds that run dealt.
+#
+# `--engine codex` runs the same prompts on Codex instead of Claude: the red
+# team (docs/specs/security-audit.md -> "Red team"), advisory, never the
+# release gate. Its canary takes `--claude-scorecard`, the decrypted
+# `scorecard.json` of the CI canary run its `--key` names, to count the seeds
+# either engine caught. It ends by printing the `gh workflow run
+# codex-audit-report.yaml` command that publishes its verdicts and counts;
+# running that is yours to do, since this script files nothing.
 #
 # The deterministic GitHub-state check (`scripts/github-state-check.mjs`) runs
 # first whenever a domain that reads its fragment does — `ci-and-secrets` and
@@ -41,8 +53,23 @@ export GITHUB_REPOSITORY="${GITHUB_REPOSITORY:-diffplug/dormouse}"
 # next run an expired deadline.
 export RUNNER_TEMP="${RUNNER_TEMP:-$(mktemp -d)}"
 
-if ! command -v claude >/dev/null 2>&1; then
-  echo "error: the \`claude\` CLI is not on PATH." >&2
+ENGINE=claude
+if [ "${1:-}" = --engine ]; then
+  [ $# -ge 2 ] || { echo "error: --engine needs claude or codex" >&2; exit 64; }
+  ENGINE="$2"
+  shift 2
+fi
+case "$ENGINE" in
+  claude|codex) ;;
+  *) echo "error: unknown engine '$ENGINE' (claude|codex)" >&2; exit 64 ;;
+esac
+# The red team's model and Cyber access program. Pinned here alone: the
+# Codex engine has no CI counterpart to agree with.
+CODEX_MODEL=gpt-6-sol
+CODEX_PROGRAM=daybreak_blue
+
+if ! command -v "$ENGINE" >/dev/null 2>&1; then
+  echo "error: the \`$ENGINE\` CLI is not on PATH." >&2
   exit 1
 fi
 
@@ -82,15 +109,31 @@ run_domain() {
   local model_args="--model sonnet"
   case "$domain" in remote|local|hosted) model_args="--model opus" ;; esac
 
-  echo "==> $domain -> $out${model_args:+ ($model_args)}"
-  rm -f "$out"
-  # shellcheck disable=SC2086
-  if ! claude -p "$(cat "$AUDIT_DIR/_preamble.md"; echo; cat "$AUDIT_DIR/$domain.md")" \
-    $model_args \
-    --allowed-tools "Read,Write,Edit,Bash,Grep,Glob" \
-    --disallowed-tools "Task,Agent,Workflow"; then
-    echo "==> $domain auditor process failed" >&2
-    return 1
+  if [ "$ENGINE" = codex ]; then
+    # Sandboxed to the working tree, with the network `ci-and-secrets` needs
+    # for live GitHub state; a check the sandbox keeps from the operator's `gh`
+    # login comes back UNVERIFIABLE, never PASS. The leading line stands in
+    # for the Claude run's denied `Task`: the domain runs every work stream
+    # itself.
+    echo "==> $domain -> $out (codex: $CODEX_MODEL, $CODEX_PROGRAM)"
+    rm -f "$out"
+    if ! codex exec -m "$CODEX_MODEL" --cyber-access-program "$CODEX_PROGRAM" \
+      --sandbox workspace-write -c sandbox_workspace_write.network_access=true --ephemeral \
+      "$(echo "Do not delegate: run every work stream yourself."; echo; cat "$AUDIT_DIR/_preamble.md"; echo; cat "$AUDIT_DIR/$domain.md")" </dev/null; then
+      echo "==> $domain auditor process failed" >&2
+      return 1
+    fi
+  else
+    echo "==> $domain -> $out${model_args:+ ($model_args)}"
+    rm -f "$out"
+    # shellcheck disable=SC2086
+    if ! claude -p "$(cat "$AUDIT_DIR/_preamble.md"; echo; cat "$AUDIT_DIR/$domain.md")" \
+      $model_args \
+      --allowed-tools "Read,Write,Edit,Bash,Grep,Glob" \
+      --disallowed-tools "Task,Agent,Workflow"; then
+      echo "==> $domain auditor process failed" >&2
+      return 1
+    fi
   fi
   if [ ! -s "$out" ]; then
     echo "==> $domain produced no fragment — in CI that is an INCONCLUSIVE audit, not a FAIL" >&2
@@ -100,7 +143,42 @@ run_domain() {
   # The verdict CI reports, computed from the fragment's lines: zero only on
   # PASS, which also needs its sentinel and a first line of exactly
   # `VERDICT: PASS`. It prints why anything else is not.
-  node scripts/security-audit-report.mjs check "$out" >&2
+  local report status=0
+  report=$(node scripts/security-audit-report.mjs check "$out") || status=$?
+  printf '%s\n' "$report" >&2
+  VERDICTS="$VERDICTS $domain=$(printf '%s\n' "$report" | sed -n '1s/^[^:]*: \([A-Z]*\).*/\1/p')"
+  return "$status"
+}
+
+# Each domain's computed verdict, `domain=VERDICT`, for the red team's report;
+# a domain that left no fragment is INCONCLUSIVE, as CI computes it.
+VERDICTS=""
+run_domain_recorded() {
+  local domain="$1" before="$VERDICTS" status=0
+  run_domain "$domain" || status=$?
+  [ "$VERDICTS" != "$before" ] || VERDICTS="$VERDICTS $domain=INCONCLUSIVE"
+  return "$status"
+}
+
+# The command that publishes the red team's report on the commit it audited,
+# printed, never run.
+print_codex_report() {
+  local commit="$1"
+  shift
+  echo
+  echo "==> advisory: a Codex verdict never gates a release (docs/specs/security-audit.md -> \"Red team\")."
+  echo "==> to publish them:"
+  echo "gh workflow run codex-audit-report.yaml -R $GITHUB_REPOSITORY --ref main -f commit=$commit -f model=$CODEX_MODEL $*"
+}
+
+# The red team's report on the domains just run in the working tree.
+print_codex_verdicts() {
+  local commit
+  commit=$(git rev-parse HEAD 2>/dev/null) || commit="<commit>"
+  if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+    echo "==> the checkout has uncommitted changes; these results are of that tree, not of $commit." >&2
+  fi
+  print_codex_report "$commit" "-f verdicts='${VERDICTS# }'"
 }
 
 # The open ledger findings every domain re-verifies, as CI's `List open
@@ -135,24 +213,62 @@ run_github_state() {
   node scripts/security-audit-report.mjs check audit-github-state.md >&2
 }
 
-# The canary, in a copy of the committed tree: seeded, audited by the code
-# domains, then scored. `CANARY_KEY` picks the seeds;
-# the same key and pool seed the same way.
+# The canary, in a copy of a committed tree: seeded, audited by the code
+# domains, then scored. `--key` (or `CANARY_KEY`) picks the seeds; the same
+# key and pool seed the same way. A `--key` that is a CI canary run's ID
+# (`seed --key "$GITHUB_RUN_ID"` in the workflow) seeds that run's commit,
+# read from the API, so it seeds what that run seeded whatever is checked out.
 run_canary() {
-  local count="${1:-8}" tree stash domain
+  local count=8 key="${CANARY_KEY:-}" run_key="" commit="HEAD" claude_card="" tree stash domain
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --key) key="${2:-}"; shift 2 || { echo "error: --key needs a value" >&2; return 64; }
+        case "$key" in ''|*[!0-9]*) run_key="" ;; *) run_key="$key" ;; esac ;;
+      --claude-scorecard) claude_card="${2:-}"; shift 2 || { echo "error: --claude-scorecard needs a file" >&2; return 64; } ;;
+      *[!0-9]*|'') echo "error: unexpected canary argument '$1'" >&2; return 64 ;;
+      *) count="$1"; shift ;;
+    esac
+  done
+  if [ -n "$claude_card" ]; then
+    [ "$ENGINE" = codex ] || { echo "error: --claude-scorecard is the Codex engine's" >&2; return 64; }
+    [ -n "$run_key" ] || { echo "error: --claude-scorecard needs the --key of the run it scored" >&2; return 64; }
+    [ -f "$claude_card" ] || { echo "error: no scorecard at $claude_card" >&2; return 1; }
+    claude_card=$(cd "$(dirname "$claude_card")" && pwd)/$(basename "$claude_card")
+  fi
+  key="${key:-$(date +%s)}"
+  if [ -n "$run_key" ]; then
+    commit=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_key" --jq .head_sha) && [ -n "$commit" ] ||
+      { echo "error: could not read run $run_key's commit, which its seeds were dealt over" >&2; return 1; }
+    git cat-file -e "$commit^{commit}" 2>/dev/null ||
+      { echo "error: run $run_key audited $commit, which this clone does not have; fetch it first" >&2; return 1; }
+  fi
   tree=$(mktemp -d)
   stash=$(mktemp -d)
-  git archive HEAD | tar -x -C "$tree"
-  echo "==> canary: seeding $count in $tree"
-  (cd "$tree" && node scripts/security-audit-canary.mjs seed --key "${CANARY_KEY:-$(date +%s)}" --count "$count" --stash "$stash" &&
+  git archive "$commit" | tar -x -C "$tree"
+  echo "==> canary: seeding $count in $tree ($commit)"
+  (cd "$tree" && node scripts/security-audit-canary.mjs seed --key "$key" --count "$count" --stash "$stash" &&
     pnpm install --frozen-lockfile >/dev/null)
   # Run here rather than through the copy's runner, which would read the real
   # findings ledger: a canary hands its domains an empty list, as CI does.
   (cd "$tree" && : > audit-open-findings.txt &&
     for domain in $(node scripts/security-audit-canary.mjs domains); do run_domain "$domain" || true; done)
   (cd "$tree" && node scripts/security-audit-canary.mjs score --stash "$stash" \
-    --scorecard "$stash/scorecard.json" --public "$stash/canary-recall.json")
+    --scorecard "$stash/scorecard.json" --public "$stash/canary-recall.json" ${claude_card:+--union "$claude_card"})
   echo "==> scorecard: $stash/scorecard.json; seeded tree: $tree"
+  [ "$ENGINE" = codex ] || return 0
+  if [ -z "$run_key" ]; then
+    echo "==> keyed by no CI run, so there is no canary run to publish against."
+    return 0
+  fi
+  if [ -z "$claude_card" ]; then
+    echo "==> to publish, re-run with --claude-scorecard: the scorecard.json in run $run_key's decrypted canary-transcript."
+    return 0
+  fi
+  # shellcheck disable=SC2046,SC2016
+  print_codex_report "$commit" $(node -e '
+    const card = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+    console.log(`-f canary_run=${process.argv[2]} -f canary_seeded=${card.seeded} -f canary_caught=${card.caught} -f canary_either=${card.either} -f canary_unfinished=${card.unfinished.length}`);
+  ' "$stash/scorecard.json" "$run_key")
 }
 
 if [ $# -gt 0 ]; then
@@ -163,7 +279,8 @@ if [ $# -gt 0 ]; then
     ci-and-secrets|supply-chain) run_github_state || status=1 ;;
   esac
   write_open_findings
-  run_domain "$1" || status=$?
+  run_domain_recorded "$1" || status=$?
+  [ "$ENGINE" = claude ] || print_codex_verdicts
   exit "$status"
 fi
 
@@ -174,11 +291,12 @@ status=0
 run_github_state || status=1
 write_open_findings
 for domain in supply-chain ci-and-secrets remote local hosted; do
-  run_domain "$domain" || status=1
+  run_domain_recorded "$domain" || status=1
 done
 
 echo
 echo "==> fragments:"
 ls -la audit-*.md 2>/dev/null || echo "  (none)"
 echo "==> each verdict above is the one CI computes; there is no merge here, so read the fragments directly."
+[ "$ENGINE" = claude ] || print_codex_verdicts
 exit "$status"

@@ -18,7 +18,10 @@ export async function stageDorCli(targetPath) {
   await rm(targetRoot, { recursive: true, force: true });
   await mkdir(targetRoot, { recursive: true });
   await cp(resolve(sourceRoot, 'bin'), resolve(targetRoot, 'bin'), { recursive: true });
-  await cp(resolve(sourceRoot, 'dist'), resolve(targetRoot, 'dist'), { recursive: true });
+  // Only the esbuild bundle and the builtin runtime it loads; the rest of
+  // `dor/dist` is tsc output that dor's own tests import.
+  await cp(resolve(sourceRoot, 'dist', 'dor.js'), resolve(targetRoot, 'dist', 'dor.js'));
+  await cp(resolve(sourceRoot, 'dist', 'builtin'), resolve(targetRoot, 'dist', 'builtin'), { recursive: true });
   // The staged tree carries its own package.json: it lands inside a host's
   // package (vscode-ext, standalone/sidecar) that declares no `type`, whose
   // metadata would otherwise have Node load the ESM `dist/dor.js` as CommonJS.

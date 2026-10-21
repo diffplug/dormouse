@@ -21,6 +21,8 @@ Source of truth: `create_release` in `scripts/sign-and-deploy.sh`; `publish-vsco
 
 **Must ship a desktop release that carries, or changes, the one-time link version only after Hosted production serves that version** — its rendezvous routes and its `/connect/` page (`docs/specs/one-time.md` -> "Link"): run `.github/workflows/hosted-production.yml` first and confirm its live verification passed, `oneTimeSmoke` included. **Hosted must never stop serving a link version a shipped Burrow emits.**
 
+A release that changes remote control or Hosted runs the red team first (`docs/specs/security-audit.md` -> "Red team").
+
 Human-driven, in order:
 
 1. **Start a release branch** — from the main checkout, `wt switch --create release-next --base main`, then `pnpm install` in the new worktree; every later step runs there. **A release reaches `main` through one PR, never a direct push.**

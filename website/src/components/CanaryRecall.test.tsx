@@ -38,6 +38,18 @@ const SNAPSHOT: CanaryRecallSnapshot = {
     { at: "2026-09-30T00:00:00Z", url: RUN(6) },
   ],
 };
+// The red team paired with runs 2 and 3: Oct 5's week is all paired, Oct 12's
+// in part, so its either line adds run 5's Claude catches alone.
+const RED_TEAM: CanaryRecallSnapshot = {
+  ...SNAPSHOT,
+  runs: SNAPSHOT.runs.map((run) =>
+    run.url === RUN(2)
+      ? { ...run, codex: { url: RUN(12), caught: 5, either: 8, unfinished: 0 } }
+      : run.url === RUN(3)
+        ? { ...run, codex: { url: RUN(13), caught: 4, either: 7, unfinished: 1 } }
+        : run,
+  ),
+};
 const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&#x27;/g, "'").replace(/\s+/g, " ");
 /** The slot `x` puts week `i` of `n` at, as a percentage across the plot. */
 const slot = (i: number, n: number) => ((i + 0.5) / n) * 100;
@@ -95,6 +107,43 @@ describe("recallWeeks", () => {
   });
 });
 
+describe("the red team", () => {
+  it("scores Codex over its paired runs, and either over every counted run", () => {
+    const week = Object.fromEntries(recallWeeks(RED_TEAM).map((w) => [w.start, w]));
+    expect(week["2026-10-05"].codex).toEqual({ runs: 1, seeded: 8, caught: 5, percent: 63, either: 8, eitherPercent: 100 });
+    // Run 5 had no red team: its 8 Claude catches join run 3's 7 caught by either.
+    expect(week["2026-10-12"].codex).toEqual({ runs: 1, seeded: 8, caught: 4, percent: 50, either: 15, eitherPercent: 94 });
+    expect(week["2026-09-21"].codex).toBeNull();
+    for (const w of recallWeeks(RED_TEAM)) if (w.codex) expect(w.codex.eitherPercent).toBeGreaterThanOrEqual(w.percent!);
+  });
+
+  it("says all three in each description and run", () => {
+    const week = Object.fromEntries(recallWeeks(RED_TEAM).map((w) => [w.start, w]));
+    expect(weekDescription(week["2026-10-05"])).toBe(
+      "Week of Oct 5: caught 7 of 8 over 1 run (88%); Codex caught 5 of 8 over 1 run (63%); caught by either: 8 of 8 (100%)",
+    );
+    expect(week["2026-10-12"].runs.map(runLabel)).toEqual(["Oct 12: 6 of 8*; Codex 4*, either 7", "Oct 14: no record", "Oct 16: 8 of 8"]);
+  });
+
+  it("draws three lines under a legend only once the red team has a point", () => {
+    const html = renderToStaticMarkup(<CanaryRecall snapshot={RED_TEAM} />);
+    const shown = text(html);
+    for (const label of ["Claude, the release gate", "Codex, advisory", "Caught by either"]) expect(shown).toContain(label);
+    expect(shown).toContain("its line covers only those runs");
+    // Either and Codex span Oct 5 and Oct 12; Claude keeps its own two segments.
+    const lines = [...html.matchAll(/<polyline points="([^"]+)"/g)].map(([, points]) => points);
+    expect(lines).toEqual([
+      `${slot(2, 4)},0 ${slot(3, 4)},6`,
+      `${slot(2, 4)},37 ${slot(3, 4)},50`,
+      `${slot(0, 4)},50`,
+      `${slot(2, 4)},12 ${slot(3, 4)},12`,
+    ]);
+    expect(html).toContain('stroke-dasharray="5 4"');
+    const plain = text(renderToStaticMarkup(<CanaryRecall snapshot={SNAPSHOT} />));
+    expect(plain).not.toContain("Caught by either");
+  });
+});
+
 describe("week labels", () => {
   it("say counts in words, never with a slash, and list each run", () => {
     const week = Object.fromEntries(recallWeeks(SNAPSHOT).map((w) => [w.start, w]));
@@ -135,7 +184,7 @@ describe("CanaryRecall", () => {
     for (const label of ["3 of 6", "no record", "7 of 8", "14 of 16*"]) expect(shown).toContain(label);
     expect(shown).not.toMatch(/\b\d+\/\d+\b/);
     for (const tick of ["100%", "50%", "0%", "Sep 21", "Oct 12"]) expect(shown).toContain(tick);
-    expect(shown).toContain("Hollow: a run that week had a domain");
+    expect(shown).toContain("a hollow point marks a week where a Claude run had one");
     expect(shown).toContain("left no record and adds nothing to its week");
     expect(html).toContain(`href="${BASE.runsUrl.replace(/&/g, "&amp;")}"`);
   });

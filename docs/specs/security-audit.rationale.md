@@ -201,3 +201,13 @@ gh secret set AUDIT_PAT --env security-audit --repo diffplug/dormouse --body 'gi
 **Why 30 days (2026-10).** The figure should measure the audit as it runs now: its prompts, domains, and seed draw change often, and runs from months back measured a different audit. The `canary-recall` artifact's 90-day retention bounds any window, since no older run has a record left to read.
 
 **Why an unfinished domain still counts.** Dropping the run, or its unfinished domain's seeds, would raise the figure by the runs where the audit did worst; a domain that ran out of time is a miss the published recall should carry.
+
+## Red team
+
+**Why a second model family (2026-10).** Every domain, the canary's included, runs on one vendor's models, so a blind spot they share is invisible to the recall figure. Codex reads the same prompts and seeds, which isolates the model as the variable: the either line is what the two together would catch.
+
+**Why advisory.** A gate needs a run that is reproducible on the release tag, with credentials CI holds; the red team runs on a maintainer's machine and login, quarterly. Its value is a second opinion and a recall comparison, not a pass.
+
+**Why typed inputs rather than an uploaded report.** Anything the Codex run wrote could carry finding detail past the embargo; verdict words, a run ID, and four counts cannot, and a pattern check proves it. The counts are checked against the Claude canary's own record so a mistyped either count fails rather than publishing.
+
+**Why quarterly, and before remote control or Hosted releases.** Those are the two surfaces an attacker reaches without local access, and where the code-reading domains run longest; a release changing them is when a miss costs most.

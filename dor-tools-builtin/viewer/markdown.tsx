@@ -7,7 +7,7 @@ import { classHighlighter } from '@lezer/highlight';
 import {
   $isImageNode, createActiveEditorSubscription$, editImageToolbarComponent$, iconComponentFor$, ImageNode, INSERT_IMAGE_COMMAND, useCellValue,
   BlockTypeSelect, BoldItalicUnderlineToggles, codeBlockPlugin, codeMirrorPlugin, CodeToggle, CreateLink, diffSourcePlugin,
-  DiffSourceToggleWrapper, frontmatterPlugin, headingsPlugin, imagePlugin, InsertCodeBlock, InsertTable, InsertThematicBreak,
+  DiffSourceToggleWrapper, frontmatterPlugin, headingsPlugin, imagePlugin, initialMarkdownNormalize$, InsertCodeBlock, InsertTable, InsertThematicBreak,
   linkDialogPlugin, linkDialogState$, openLinkEditDialog$, linkPlugin, listsPlugin, ListsToggle, markdownShortcutPlugin, MDXEditor, quotePlugin, realmPlugin,
   rootEditor$, Separator, viewMode$, tablePlugin, thematicBreakPlugin, toolbarPlugin, UndoRedo, type MDXEditorMethods, type MDXEditorProps, type Realm,
 } from '@mdxeditor/editor';
@@ -16,6 +16,7 @@ import { checked, documentSession, loadingState, request, stateLabel, textSource
 import { editableImage, handOffImageEdits, imageSources, imageUrl, ImagesPanel, localImagePath, pathRoute } from './images-panel';
 import { ImageResizeHandles } from './image-resize';
 import { commentsPlugin } from './markdown-comments';
+import { markdownFormat } from './markdown-format';
 import { markdownSafetyPlugin } from './markdown-safety';
 import { pageTheme, subscribeTheme } from './page-theme';
 import { mermaidDescriptor } from './mermaid-block';
@@ -246,18 +247,12 @@ const plugins = [
   toolbarPlugin({ toolbarContents: Toolbar }),
 ];
 
-/** The list bullet and thematic break the file uses most, so a save keeps its style. */
-function markdownStyle(markdown: string) {
-  const prose = markdown.replace(/^(```|~~~)[^]*?^\1/gm, '');
-  const count = (pattern: RegExp) => prose.match(pattern)?.length ?? 0;
-  const bullets = (['-', '*', '+'] as const).map(b => [b, count(new RegExp(`^[ \\t]*\\${b}[ \\t]+\\S`, 'gm'))] as const);
-  const bullet = bullets.reduce((best, next) => next[1] > best[1] ? next : best)[0];
-  return { bullet, rule: count(/^\*{3,}[ \t]*$/gm) > count(/^-{3,}[ \t]*$/gm) ? '*' as const : '-' as const };
-}
-
 // The editor's own reformatting of loaded text is not an edit.
 const onEditorChange: MDXEditorProps['onChange'] = (_, normalize) => { if (normalize) session.rebase(); else session.changed(); };
 const onEditorError: MDXEditorProps['onError'] = ({ error: reason }) => {
+  // MDXEditor clears its normalize flag only in a rich-text export, which a
+  // parse error suppresses, so every later source edit would arrive as normalization.
+  realm?.pub(initialMarkdownNormalize$, false);
   realm?.pub(viewMode$, 'source');
   session.fail(`Showing source: the rich editor cannot parse this file (${reason}).`);
 };
@@ -265,7 +260,7 @@ const onEditorError: MDXEditorProps['onError'] = ({ error: reason }) => {
 /** The rich editor; it follows only the theme, so page state changes leave it be. */
 function Editor({ markdown }: { markdown: string }) {
   const theme = useSyncExternalStore(subscribeTheme, pageTheme);
-  const style = useMemo(() => markdownStyle(markdown), [markdown]);
+  const style = useMemo(() => markdownFormat(markdown), [markdown]);
   return (
     <MDXEditor ref={editorRef} markdown={markdown} plugins={plugins} toMarkdownOptions={style}
       className={theme.dark ? 'dark-theme' : 'light-theme'} contentEditableClassName="prose" spellCheck

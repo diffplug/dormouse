@@ -130,7 +130,8 @@ export function check(inputs) {
         const extra = held.filter((s) => !AGENT_WRITES.includes(s));
         if (extra.length) fail(TEND, `${file} job \`${jobId}\` holds write on ${extra.join(', ')}`);
       } else {
-        const allowed = file === 'release.yml' && jobId === 'security-audit' ? [...RELEASE_WRITES, 'actions'] : RELEASE_WRITES;
+        const allowed = file === 'release.yml' && jobId === 'security-audit' ? [...RELEASE_WRITES, 'actions']
+          : file === 'codex-audit-report.yaml' && jobId === 'publish' ? [...RELEASE_WRITES, 'issues'] : RELEASE_WRITES;
         const extra = held.filter((s) => !allowed.includes(s));
         if (extra.length) fail(POLICIES, `${file} job \`${jobId}\` holds write on ${extra.join(', ')}`);
       }
