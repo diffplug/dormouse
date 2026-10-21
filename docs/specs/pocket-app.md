@@ -20,13 +20,13 @@ Pocket is:
 
 > auth screens + `MobileTerminalUi`/`MobileWall` + **`RemotePtyAdapter`**
 
-— the composition [mobile-terminal-ui.md](./mobile-terminal-ui.md) owns, which the website also wires on `FakePtyAdapter` (`website/src/components/PocketTerminalExperience.tsx`). **Everything outside the PTY core no-ops or is absent** — `getCwd` → null, shells/clipboard empty, alerts inert, `alertAwait` settling `cancelled` rather than never resolving.
+— the composition [mobile-terminal-ui.md](./mobile-terminal-ui.md) owns, also wired on `FakePtyAdapter` (`website/src/components/PocketTerminalExperience.tsx`). **Everything outside the PTY core no-ops or is absent** — `getCwd` → null, shells/clipboard empty, alerts inert, `alertAwait` settling `cancelled` rather than never resolving.
 
 **Scanning is the only way in** — no setup password, no typed credential; the code on the computer's screen is both account setup and pairing.
 
 **A QR the native camera opened is origin bootstrap only.** The `#pair?` fragment is erased before the first render, parsed or not; nothing is retained, no call is made, the token is not spent, and the auth screen asks for a scan from inside Pocket. **An installed iOS Pocket can never receive a scanned hash** — Camera opens Safari, a different partition. (rationale)
 
-**The scanner reads a code as data**: it never navigates, and camera or pasted text goes to `parsePairingInvitationUrl` ([relay.md](./relay.md) owns the grammar) (rationale). **The invitation lives in memory only**, cleared on every terminal outcome.
+**Must parse scanned or pasted text with `parsePairingInvitationUrl`, never navigate** ([relay.md](./relay.md) owns the grammar; rationale). **Must keep invitations in memory only, clearing them on every terminal outcome.** **Must discard parses finishing after Cancel or teardown.**
 
 **After the parse.**
 
