@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
-import { changedSince, lastPass, report } from './red-team-since.mjs';
+import { SURFACES, changedSince, lastPass, report } from './red-team-since.mjs';
 
 test('lastPass takes the latest completed closure, not the latest created', () => {
   assert.deepEqual(lastPass([
@@ -52,4 +52,13 @@ test('changedSince counts first-parent commits after the date that touch a surfa
 
   const subjects = changedSince({ since: '2026-10-20T00:00:00Z', cwd: dir }).map((c) => c.subject);
   assert.deepEqual(subjects, ['Merge side', 'burrow host']);
+});
+
+test('SURFACES is what the remote and hosted audit domains own', () => {
+  // The first sentence of each "You own" line, keeping the code spans that are paths.
+  const owned = ['remote.md', 'hosted.md'].flatMap((file) => {
+    const line = readFileSync(new URL(`../.github/audit/${file}`, import.meta.url), 'utf8').split('\n').find((l) => l.startsWith('You own '));
+    return [...line.split('. ')[0].matchAll(/`([^`]+)`/g)].map((m) => m[1]).filter((s) => /[/.]/.test(s));
+  });
+  assert.deepEqual([...SURFACES].sort(), owned.sort());
 });
