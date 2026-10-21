@@ -4,22 +4,15 @@ Expect: lib/src/lib/clipboard.ts
 Source: reverses #1033 (a pasted or dropped file name may carry a control character)
 
 diff --git a/lib/src/lib/clipboard.test.ts b/lib/src/lib/clipboard.test.ts
-index c200f0324..010afe71c 100644
+index b4a947159..bad9cc493 100644
 --- a/lib/src/lib/clipboard.test.ts
 +++ b/lib/src/lib/clipboard.test.ts
-@@ -35,8 +35,7 @@ vi.mock('./terminal-registry', () => ({
-   writeUserInput: (id: string, data: string) => mocks.writePty(id, data),
- }));
+@@ -37,3 +37,3 @@ vi.mock('./terminal-registry', () => ({
  
--import { CONTROL_PATH_NOTICE, doPaste } from './clipboard';
--import { registerWallHandle, stubWallHandle } from '../components/wall/wall-handles';
-+import { doPaste } from './clipboard';
- 
- describe('doPaste three-tier fallthrough', () => {
-   beforeEach(() => {
-@@ -131,29 +130,6 @@ describe('doPaste three-tier fallthrough', () => {
-     expect(payload.endsWith('\x1b[201~')).toBe(true);
-   });
+-import { CONTROL_PATH_NOTICE, UNQUOTABLE_PATH_NOTICE, doPaste } from './clipboard';
++import { UNQUOTABLE_PATH_NOTICE, doPaste } from './clipboard';
+ import { registerWallHandle, stubWallHandle } from '../components/wall/wall-handles';
+@@ -133,25 +133,2 @@ describe('doPaste three-tier fallthrough', () => {
  
 -  // Shell quotes cannot hold a byte the tty or line editor acts on first: ^C
 -  // drops the opening quote, and a CR submits the rest on the paste itself.
@@ -44,38 +37,30 @@ index c200f0324..010afe71c 100644
 -    expect(showNotice).toHaveBeenCalledWith(CONTROL_PATH_NOTICE, 't1');
 -  });
 -
-   it('leaves an unbracketed paste byte-for-byte, matching xterm', async () => {
-     mocks.readClipboardFilePaths.mockResolvedValue(null);
-     mocks.readText.mockResolvedValue('\x1b[31mred\x1b[0m');
+   // A cmd or PowerShell pane may be running the other by the time the path
 diff --git a/lib/src/lib/clipboard.ts b/lib/src/lib/clipboard.ts
-index 69a8ed7bf..4e73e342a 100644
+index c6fab2570..702da266c 100644
 --- a/lib/src/lib/clipboard.ts
 +++ b/lib/src/lib/clipboard.ts
-@@ -1,5 +1,4 @@
+@@ -1,2 +1,2 @@
 -import { hasShellInputControls, shellCommandKind } from 'dor/commands/shell-quote';
--import { wallHandleOwning } from '../components/wall/wall-handles';
 +import { shellCommandKind } from 'dor/commands/shell-quote';
- import { beginClipboardAttempt, describeError, noteClipboardStep, reportClipboardFailure, type ClipboardAttempt } from './clipboard-failure';
- import { getMouseSelectionState } from './mouse-selection';
- import { getPlatform, getPlatformOrNull, PLATFORM_STRING } from './platform';
-@@ -105,19 +104,13 @@ function writePasteToPty(terminalId: string, text: string): void {
-   writeUserInput(terminalId, payload);
- }
+ import { wallHandleOwning } from '../components/wall/wall-handles';
+@@ -119,3 +119,2 @@ function writePasteToPty(terminalId: string, text: string): void {
  
 -export const CONTROL_PATH_NOTICE = 'Nothing pasted: a file name has a control character';
--
- /**
-  * Shell-escape the given paths and type them at the terminal, joined by single
+ export const UNQUOTABLE_PATH_NOTICE = 'Nothing pasted: a file name has a character cmd or PowerShell would expand';
+@@ -125,4 +124,4 @@ export const UNQUOTABLE_PATH_NOTICE = 'Nothing pasted: a file name has a charact
   * spaces with a trailing space so the next prompt keystroke starts a fresh
-- * token. A path carrying a control character refuses the whole paste (spec §8.6).
-+ * token.
+- * token. A path carrying a control character, or one with no form its
+- * Session's shells all read literally, refuses the whole paste (spec §8.6).
++ * token. A path with no form its Session's shells all read literally refuses
++ * the whole paste (spec §8.6).
   */
- export function pasteFilePaths(terminalId: string, paths: string[]): void {
+@@ -130,6 +129,2 @@ export function pasteFilePaths(terminalId: string, paths: string[]): void {
    if (paths.length === 0) return;
 -  if (paths.some(hasShellInputControls)) {
 -    wallHandleOwning(terminalId)?.showNotice(CONTROL_PATH_NOTICE, terminalId);
 -    return;
 -  }
    // A Session keeps the shell family it launched with even after the user picks
-   // a different app-global default for future terminals. The fallback only
-   // serves adapters/tests that have no registered Session entry.
