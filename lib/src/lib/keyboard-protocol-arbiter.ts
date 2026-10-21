@@ -53,10 +53,19 @@ export function attachKeyboardProtocolArbiter(terminal: Terminal): IDisposable {
     return false;
   });
 
+  // A soft reset clears xterm's kitty stacks, including when a dead Session's
+  // terminal is reused. Its negotiation gate must restart with them.
+  const onSoftReset = terminal.parser.registerCsiHandler({ intermediates: '!', final: 'p' }, () => {
+    kittyDepth = 0;
+    setWin32InputMode(true);
+    return false;
+  });
+
   return {
     dispose() {
       onKittyPush.dispose();
       onKittyPop.dispose();
+      onSoftReset.dispose();
     },
   };
 }

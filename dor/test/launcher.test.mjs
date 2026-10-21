@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // The staged launchers, run exactly as a terminal runs `dor`. DORMOUSE_CLI_JS
@@ -13,7 +13,7 @@ const binDir = fileURLToPath(new URL('../bin/', import.meta.url));
 const isWindows = process.platform === 'win32';
 
 async function withStubCli(run) {
-  const dir = await mkdtemp(join(tmpdir(), 'dor-launcher-'));
+  const dir = await mkdtemp(join(tmpdir(), 'dor launcher-'));
   const cliJs = join(dir, 'cli.mjs');
   await writeFile(cliJs, 'process.exit(Number(process.argv[2]));\n');
   try {
@@ -23,12 +23,13 @@ async function withStubCli(run) {
   }
 }
 
-function runLauncher(cliJs, code) {
-  const env = { ...process.env, DORMOUSE_NODE: process.execPath, DORMOUSE_CLI_JS: cliJs };
+function runLauncher(cliJs, code, options = {}) {
+  const env = { ...process.env, DORMOUSE_NODE: process.execPath, DORMOUSE_CLI_JS: cliJs, ...options.env };
   if (isWindows) {
     // Node refuses to spawn a .cmd directly; go through cmd.exe as a shell does.
     return spawnSync('cmd.exe', ['/d', '/s', '/c', `""${join(binDir, 'dor.cmd')}" ${code}"`], {
       env,
+      cwd: options.cwd,
       windowsVerbatimArguments: true,
     });
   }
@@ -41,6 +42,19 @@ for (const code of [0, 7]) {
       const result = runLauncher(cliJs, code);
       assert.equal(result.error, undefined);
       assert.equal(result.status, code, String(result.stderr));
+    });
+  });
+}
+
+for (const inheritedPwd of ['C:\\stale\\parent', undefined]) {
+  test('dor.cmd supplies the caller directory despite ' + (inheritedPwd ? 'stale' : 'missing') + ' PWD', { skip: !isWindows }, async () => {
+    await withStubCli(async (cliJs) => {
+      await writeFile(cliJs, 'console.log(JSON.stringify({cwd: process.cwd(), pwd: process.env.PWD}));\n');
+      const cwd = dirname(cliJs);
+      const result = runLauncher(cliJs, 0, { cwd, env: { PWD: inheritedPwd } });
+      assert.equal(result.status, 0, String(result.stderr));
+      const actual = JSON.parse(String(result.stdout));
+      assert.equal(actual.pwd.toLowerCase(), actual.cwd.toLowerCase());
     });
   });
 }

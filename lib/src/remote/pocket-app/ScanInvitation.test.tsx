@@ -108,6 +108,36 @@ async function paste(text: string): Promise<void> {
 }
 
 describe('reading a code', () => {
+  it.each([
+    ['camera', 'cancel'], ['camera', 'unmount'], ['paste', 'cancel'], ['paste', 'unmount'],
+  ])('drops a pending %s parse after %s', async (source, ending) => {
+    const camera = fakeCamera();
+    const { onScanned, onCancel } = render({ startScan: camera.startScan });
+    await settle();
+    const { url } = await invitationUrl();
+    if (source === 'paste') act(() => setNativeFieldValue(pasteField(), url));
+    act(() => {
+      if (source === 'camera') camera.read(url);
+      else container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      if (ending === 'cancel') buttonNamed(container, 'Cancel')!.click();
+      else root.render(null);
+    });
+    await settle();
+
+    expect(onScanned).not.toHaveBeenCalled();
+    if (ending === 'cancel') expect(onCancel).toHaveBeenCalledOnce();
+    expect(camera.stops).toBeGreaterThan(0);
+  });
+
+  it('accepts a fresh paste if the caller keeps the scanner after cancellation', async () => {
+    const { onScanned } = render();
+    await settle();
+    act(() => buttonNamed(container, 'Cancel')!.click());
+    const { url } = await invitationUrl();
+    await paste(url);
+    expect(onScanned).toHaveBeenCalledOnce();
+  });
+
   it('hands a camera read straight to the caller, without navigating', async () => {
     const camera = fakeCamera();
     const { onScanned } = render({ startScan: camera.startScan });

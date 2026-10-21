@@ -16,7 +16,7 @@ export interface ImageEditorHandle {
   /** Commits pending edits (a floating selection, an open label) and starts
    * encoding them; `mark` names the revision the blob holds. */
   snapshot(): { content: Promise<Blob>; mark: Revision };
-  /** The current revision, committing nothing. */
+  /** Commits pending edits without encoding and names the current revision. */
   revision(): Revision;
   /** Whether the editor still shows revision `mark`. */
   holds(mark: Revision): boolean;
@@ -142,7 +142,9 @@ export function ImageEditor({ image, name, onChange, controls, error, ref }: Ima
 
   useImperativeHandle(ref, () => ({
     snapshot() { const mark = ctl.settle(); return { content: ctl.encode(mark), mark }; },
-    revision: () => ctl.doc,
+    // Reload checks this mark after its read. A floating selection must become
+    // a revision first, or even an unchanged selection would fail that check.
+    revision: () => ctl.settle(),
     holds: mark => ctl.holds(mark),
   }));
 

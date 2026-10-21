@@ -130,9 +130,9 @@ Source of truth: `recordTerminalUserInput` / `recordTerminalOutput` / `seedPromp
 | `manual` | Initial seed only; replaceable by any later source. |
 | (none) | Default `null`. |
 
-**Must apply asynchronous process-CWD results to their originating Session and drop results for a disposed Session** (pinned by `lib/src/lib/terminal-state-store.test.ts`).
+**Must scope process-CWD answers to their originating PTY run**, discarding them after exit, disposal, or respawn (pinned by `lib/src/lib/terminal-lifecycle.cwd.test.ts`).
 
-Source of truth: `processCwdMayReplace` in `lib/src/lib/terminal-state.ts`, applied by `updateCwdIfAllowed` in `lib/src/lib/terminal-state-store.ts`.
+Source of truth: `seedProcessCwdAfterSpawn` in `lib/src/lib/terminal-lifecycle.ts`; precedence: `updateCwdIfAllowed` in `lib/src/lib/terminal-state-store.ts`.
 
 ## Header Derivation
 

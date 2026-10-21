@@ -35,7 +35,7 @@ vi.mock('./terminal-registry', () => ({
   writeUserInput: (id: string, data: string) => mocks.writePty(id, data),
 }));
 
-import { CONTROL_PATH_NOTICE, doPaste } from './clipboard';
+import { CONTROL_PATH_NOTICE, UNQUOTABLE_PATH_NOTICE, doPaste } from './clipboard';
 import { registerWallHandle, stubWallHandle } from '../components/wall/wall-handles';
 
 describe('doPaste three-tier fallthrough', () => {
@@ -47,6 +47,30 @@ describe('doPaste three-tier fallthrough', () => {
       value: { clipboard: { readText: mocks.readText } },
       configurable: true,
     });
+  });
+
+  it.each([false, true])('pastes supplied native text with bracketed mode %s without reading the clipboard', async (bracketed) => {
+    mocks.bracketedPaste = bracketed;
+    mocks.readText.mockResolvedValue('unrelated clipboard contents');
+    mocks.readClipboardFilePaths.mockResolvedValue(null);
+    mocks.readClipboardImageAsFilePath.mockResolvedValue(null);
+    await doPaste('t1', 'first\nsecond');
+    expect(mocks.writePty).toHaveBeenCalledExactlyOnceWith('t1',
+      bracketed ? '\x1b[200~first\nsecond\x1b[201~' : 'first\nsecond');
+    expect(mocks.readText).not.toHaveBeenCalled();
+    expect(mocks.readClipboardFilePaths).not.toHaveBeenCalled();
+    expect(mocks.readClipboardImageAsFilePath).not.toHaveBeenCalled();
+  });
+
+  it('treats supplied empty paste text as empty rather than reading another clipboard', async () => {
+    mocks.readText.mockResolvedValue('unrelated clipboard contents');
+    mocks.readClipboardFilePaths.mockResolvedValue(null);
+    mocks.readClipboardImageAsFilePath.mockResolvedValue(null);
+    await doPaste('t1', '');
+    expect(mocks.writePty).not.toHaveBeenCalled();
+    expect(mocks.readText).not.toHaveBeenCalled();
+    expect(mocks.readClipboardFilePaths).not.toHaveBeenCalled();
+    expect(mocks.readClipboardImageAsFilePath).not.toHaveBeenCalled();
   });
 
   it('prefers file refs over text and skips the image read', async () => {
@@ -63,14 +87,14 @@ describe('doPaste three-tier fallthrough', () => {
 
   it("uses the target Session's shell after the app default changes", async () => {
     mocks.shellKind = 'powershell';
-    mocks.readClipboardFilePaths.mockResolvedValue(['C:\\Users\\me\\$(calc.exe).txt']);
+    mocks.readClipboardFilePaths.mockResolvedValue(["C:\\Users\\me\\it's (1).txt"]);
     mocks.readText.mockResolvedValue('coexisting text payload');
 
     await doPaste('powershell-session');
 
     expect(mocks.writePty).toHaveBeenCalledWith(
       'powershell-session',
-      "'C:\\Users\\me\\$(calc.exe).txt' ",
+      `"C:\\Users\\me\\it's (1).txt" `,
     );
   });
 
@@ -152,6 +176,32 @@ describe('doPaste three-tier fallthrough', () => {
 
     expect(mocks.writePty).not.toHaveBeenCalled();
     expect(showNotice).toHaveBeenCalledWith(CONTROL_PATH_NOTICE, 't1');
+  });
+
+  // A cmd or PowerShell pane may be running the other by the time the path
+  // lands, and no quote keeps these literal in both.
+  it.each([
+    ['cmd', 'C:\\dl\\$(whoami).txt'],
+    ['powershell', 'C:\\dl\\a%PATH%b.txt'],
+    ['powershell', 'C:\\dl\\a`$(whoami).txt'],
+    ['cmd', 'C:\\dl\\a&rem.md'],
+    ['powershell', 'C:\\dl\\a&rem.md'],
+    ['powershell', 'C:\\dl\\a^b.md'],
+    ['cmd', 'C:\\a b\\'],
+  ] as const)('refuses the whole paste into a %s Session when a file name has no literal form', async (kind, name) => {
+    mocks.shellKind = kind;
+    mocks.readClipboardFilePaths.mockResolvedValue(['C:\\fine.png', name]);
+    const showNotice = vi.fn();
+    const unregister = registerWallHandle(stubWallHandle('ws', { ownsSurface: (id) => id === 't1', showNotice }));
+
+    try {
+      await doPaste('t1');
+    } finally {
+      unregister();
+    }
+
+    expect(mocks.writePty).not.toHaveBeenCalled();
+    expect(showNotice).toHaveBeenCalledWith(UNQUOTABLE_PATH_NOTICE, 't1');
   });
 
   it('leaves an unbracketed paste byte-for-byte, matching xterm', async () => {

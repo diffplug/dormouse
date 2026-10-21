@@ -82,7 +82,7 @@ Source of truth: `ITERM2_COMPAT_VERSION` in `standalone/sidecar/pty-core.js` and
 3. Listed PTYs resume with their launch shells (consumer: `docs/specs/mouse-and-clipboard.md` -> "8.6 Paste Content"), saved minimized ones as Doors; an empty list cold-restores.
 4. With no answer in time, a collector given `retryTimeoutMs` asks once more (rationale), then reports `timedOut`: an arrival refuses, since its shells are still running; a boot cold-restores.
 
-**A collection finishes only on its own answer**: a host serving several windows echoes the `requestInit` token on the `pty:list` and every `pty:replay` behind it, and the collector ignores a different one (rationale). **An answer carrying no token is taken** — the hosts that echo none (VS Code, Pocket, the website) run one collector per JS realm. **A collection that timed out is not one that found no PTYs** (`LivePtys`): restoring over it starts a second set of shells. Source of truth: `collectLivePtys` in `lib/src/lib/reconnect.ts`.
+**Must keep collection tokens unique across webview reloads.** **A collection finishes only on its own answer**: a host serving several windows echoes the `requestInit` token on the `pty:list` and every `pty:replay` behind it, and the collector ignores a different one (rationale). **An answer carrying no token is taken** — the hosts that echo none (VS Code, Pocket, the website) run one collector per JS realm. **A collection that timed out is not one that found no PTYs** (`LivePtys`): restoring over it starts a second set of shells. Source of truth: `collectLivePtys` in `lib/src/lib/reconnect.ts`.
 
 **Seeded titles reject the sentinels.** Saved pane and door titles come back through `setTerminalUserTitle()`, which rejects the reserved `<idle>` prefix (`docs/specs/terminal-state.md` → Supported OSC Inputs); the seed also skips `<unnamed>`, the default panel placeholder (rationale).
 
@@ -100,7 +100,7 @@ Source of truth: `lib/src/lib/terminal-report-filter.ts`, pinned by `lib/src/lib
 
 #### Replay-time mode-reset tail (Dormouse-emitted)
 
-**When a Session's process is gone and its terminal stays — a dead replay, a reap, an exit — Dormouse writes the fixed `REPLAY_MODE_RESET` tail**, returning every mode a dead program could leave latched to its default, before any exit notice (rationale). **Never on a live resume**, where the running process owns its modes; a cold `restoreTerminal` replays nothing to reset.
+**When a Session's process is gone and its terminal stays — a dead replay, a reap, an exit — Dormouse writes the fixed `REPLAY_MODE_RESET` tail**, resetting input protocols and text-layout modes before any exit notice, while retaining the normal buffer and scrollback (rationale). **Never on a live resume**, where the running process owns its modes; a cold `restoreTerminal` replays nothing to reset.
 
 Source of truth: `REPLAY_MODE_RESET` in `lib/src/lib/terminal-report-filter.ts`.
 
@@ -205,7 +205,7 @@ Carriers: the `boot_reserve_ids` and `surface_reserve_ids` invokes (standalone);
 
 **The Window wrapping lives at the standalone adapter boundary, never in the shared save/restore code**, which still operates on a bare `PersistedSession` per Workspace (`docs/specs/standalone.md` → Persistence). **A Window-persisting adapter answers through `getWindowState` / `saveWindowState`, and answers nothing on the bare-Session `getState` / `saveState` pair** — its blob is a Window and every shared reader of `getState` wants a Session.
 
-**A save probes every non-browser pane's cwd in one host round trip where the adapter offers `getCwds`, and every save landing in one microtask shares that round trip**, falling back to one `getCwd` per id (rationale). **A flush may say `probeCwd: false`** and keep each pane's previously persisted cwd — the post-kill quit flush (`docs/specs/standalone.md` → "Quit flow").
+**A save probes every non-browser pane's cwd in one host round trip where the adapter offers `getCwds`, and every save landing in one microtask shares that round trip**, falling back to one `getCwd` per id (rationale). **Must retain the latest request's options when coalescing queued saves.** **A flush may say `probeCwd: false`** and keep each pane's previously persisted cwd — the post-kill quit flush (`docs/specs/standalone.md` → "Quit flow").
 
 **`PersistedSession.version` is 4 and `PersistedWindow.version` 2; a reader must discard any other version as a fresh start, never migrate it.** Every writer stamps both, pinned by `standalone/scripts/persisted-format.json`; the standalone Rust host's discard: `docs/specs/standalone.md` → Persistence.
 

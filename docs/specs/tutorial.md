@@ -82,9 +82,10 @@ The desktop shells share one filesystem, a snapshot of the tracked files of `dor
 - **Must print each spawned non-helper terminal's first prompt from `PlaygroundShellRegistry`**; no scenario plays on the desktop, and a split Tool waits on that prompt's integration (rationale).
 - **Must name `/bin/fake` as the default shell**, so a Windows visitor's Tool commands quote as posix rather than being refused as `cmd` (rationale).
 - **The playground `dor` must run the real CLI (`runCli` in `dor/src/cli-core.ts`) over a playground `CliHost` and a `ControlClient` that sends each request to the Wall; what needs Node must fail `UNSUPPORTED IN PLAYGROUND`.** It serves the `__view-*` entries itself. `FakePtyAdapter.toolControl` answers `open` and `open-handlers` from the snapshot as a host with no user `dormouse.yml` does.
+- **Must abandon a playground `dor` run on interruption or disposal**, including a pending CLI load, picker, and control requests; never send later requests or output.
 - **A `__view-*` entry must report its port before announcing it, and withdraw it on exit.**
 - **Must serve the real viewer pages, CSPs, and contracts on the Node viewers' routes** (`docs/specs/dor-tools-builtin.md`); a PNG or JPEG the image editor can edit opens in it, and view-only images and other non-text formats are refused.
-- **`createIframeProxyUrl` must map only a `localhost` URL under `/playground-fs/` to the page's own origin**, refusing others (`scheme`). The viewer pages carry the shim from `instrumentHtml`, so theme and the save channel connect as behind a proxy, and are same-origin with the Wall: first-party pages over the window's own files.
+- **`createIframeProxyUrl` must map only a `localhost` URL under `/playground-fs/` to this origin, preserving path, query, and fragment**, refusing others (`scheme`). The viewer pages carry the shim from `instrumentHtml`, so theme and the save channel connect as behind a proxy, and are same-origin with the Wall: first-party pages over the window's own files.
 - **The `/playground-fs/` service worker must stay stateless**, relaying each viewer request as below, bodies as Blobs (rationale). It registers when the first viewer starts; without one, `__view-*` exits `1`.
 
 ```mermaid

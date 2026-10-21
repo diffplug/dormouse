@@ -13,7 +13,7 @@ Source of truth: `surface.tool` in `lib/src/components/wall/use-dor-control.ts`.
 
 **Must designate the Surface as `tool` before its command starts serving.** A Tool has terminal and browser capabilities for one run of its command ([Run end](#run-end)), including while booting, awaiting approval, or showing a port conflict. Browser operations still require the renderer/session they operate on.
 
-- **Must retain the Session id, Surface id, and terminal across serving and renderer changes**, which are changes within one Surface.
+- **Must retain the Session id, Surface id, and terminal across serving and renderer changes.**
 - **Never offer or apply a renderer swap outside a Tool's declarable `render` values** ([Declaring tools](#declaring-tools)), in the Display modal or `onSwapRenderMode` (rationale).
 - **Must run the terminal Activity model for a Tool**, including when its browser is visible; watched-command defaults belong to `docs/specs/alert.md`.
 - **Never apply the untouched-shell kill or shell-replacement shortcut to a Tool**, which spawns touched; the Tools a close does not ask about are `docs/specs/reopen.md` → "Reopenable kinds".
@@ -33,9 +33,9 @@ Source of truth: `surfaceKindFromParams` in `lib/src/components/wall/browser-sur
 - **Must warn when a repo-local key omits `$PROJECT_ROOT`, or a `$TARGET` run has a key without `$TARGET`**, still allowing intentional cross-checkout or cross-file dedupe.
 - **Must reject `$PROJECT_ROOT` in user configuration**, which has no project root.
 
-**Must pass named-tool inputs as argument values, never substitute them into a shell-command string.** String `run` accepts no arguments and remains literal shell syntax. List `run` expands `$TARGET`, `$CWD`, and `$PROJECT_ROOT` within elements; a whole `$ARGS` element expands all input arguments; without `$ARGS` or `$TARGET` the inputs are appended. **Must quote argv for the destination Session's shell**, using the current default only for new Sessions; takeover stores that quoted command for restarts.
+**Must pass named-tool inputs as argument values, never substitute them into a shell-command string.** String `run` accepts no arguments and remains literal shell syntax. List `run` expands `$TARGET`, `$CWD`, and `$PROJECT_ROOT` within elements; a whole `$ARGS` element expands all input arguments; without `$ARGS` or `$TARGET` the inputs are appended. **Must quote argv for the destination Session's shell**, using the current default only for new Sessions; takeover stores that quoted command for restarts. A cmd or PowerShell take-over caller or navigation source gets the Windows-portable form (`docs/specs/dor-cli.md` -> "Current Implemented Commands"): another Windows shell may be at its prompt.
 
-**Must require exactly one existing local regular file or directory when `$TARGET` appears in the run list or dedupe key**, resolving a relative path against the invocation CWD and following symlinks to a canonical absolute path before substitution and reuse. **Must accept a `file:` URL only when its host is empty, `localhost`, or this machine's name** (case-insensitive, either side in its short form before the first dot); reject other URLs, missing paths, and every other file kind (fifo, socket, device). Run and key inputs are validated before approval shows.
+**Must require exactly one existing local regular file or directory when `$TARGET` appears in the run list or dedupe key**, resolving a relative path against the invocation CWD and following symlinks, never to a UNC or device path, to a canonical absolute path before substitution and reuse. **Must accept a `file:` URL only when its host is empty, `localhost`, or this machine's name** (case-insensitive, either side in its short form before the first dot); reject other URLs, missing paths, and every other file kind (fifo, socket, device). Run and key inputs are validated before approval shows.
 
 **Must resolve a Tool's initial viewport host-side with its declaration, including after approval.** Iframe Tools accept only `pane-sync`; automated Tools accept a preset or inline dimensions. Reuse keeps live sizing (`docs/specs/dor-browser.md` → Viewport presets).
 
@@ -78,7 +78,7 @@ Source of truth: `createToolHost` in `lib/src/host/tool-host.ts`; `resolveToolAp
 
 ## Serving
 
-A Tool frames a port from its Session's process-tree scan while its designated command is current, which `docs/specs/security-local.md` → Dor Tool configuration audits; an OSC announcement only selects among the discovered ports. **Must recheck the command run after asynchronous discovery and browser startup.**
+A Tool frames a port from its Session's process-tree scan while its designated command is current, which `docs/specs/security-local.md` → Dor Tool configuration audits; an OSC announcement only selects among the discovered ports. **Must recheck Tool designation and the command run after asynchronous discovery and browser startup.**
 
 | Policy | Selection |
 | --- | --- |
@@ -138,6 +138,8 @@ A reap stops an idle Tool's Session, shell included; rehydrate starts it again i
 1. Hold the run ([Run end](#run-end)), then write Ctrl+C to the PTY, the graceful-stop signal on every platform; ConPTY delivers it as `CTRL_C_EVENT` (rationale).
 2. Keep the last `dehydrate` payload the run emits from then until the kill; none earlier counts.
 3. Kill the PTY at the prompt or after a grace, whichever comes first, so a hung Tool blocks nothing.
+
+**Never abandon a stop once its Ctrl+C is written**: only a close or a replacement Session cancels the kill, never input, a dirty report, or being shown, which rehydrates once the stop ends (rationale).
 
 **Must rehydrate a reaped Tool when it becomes visible, or when `dor tool` or `dor open` matches it** (reporting `adopted`), never into a closing or transferring Workspace: a fresh shell in the run's directory, the saved command typed as cold restore types it ([Persistence and hosts](#persistence-and-hosts)). It degrades in tiers:
 
@@ -239,7 +241,7 @@ Source of truth: `runFilePicker` in `dor/src/commands/open-picker.ts`; `listOpen
 - **Must keep Back/Forward history on the navigating Surface**, covering every file/folder handler, including user Tools. Traversal reopens the recorded canonical target with its selected handler and lookup directory in that Surface even when another Surface shows the target; a new in-place visit after Back drops the forward branch. Pin a preview on a committed in-place file visit.
 - **Must obtain Save / Discard / Cancel before replacing a dirty document**, using [Closing unsaved Tools](#closing-unsaved-tools). A same-document anchor or reuse of another Surface leaves the draft alone. Never cache drafts or undo state in history.
 - **Must ask in the external-link dialog before a document link opens a page that runs its own script**, Back/Forward included (`docs/specs/security-local.md` -> "Terminal output"); a cancel is a navigation failure, and a same-document anchor never asks.
-- **Must validate the destination before interrupting the current Tool**, and keep the current location/history on lookup failure or cancelled consent. Refuse overlapping navigation from one Surface and stale requests whose source run changed. When the interrupt or the new run fails, keep or restore the source's run, never typing over user input. Report navigation failures on the source, without opening the preview error viewer.
+- **Must validate the destination before interrupting the current Tool**, and keep the current location/history on lookup failure or cancelled consent. A cmd or PowerShell source opens a destination with no Windows-portable form as an ordinary `dor open`. Refuse overlapping navigation from one Surface and stale requests whose source run changed. When the interrupt or the new run fails, keep or restore the source's run, never typing over user input. Report navigation failures on the source, without opening the preview error viewer.
 - **Must retain history through minimize, renderer changes, and live Workspace transfer, but never in durable saves**. Only the current document restarts after cold restore. Ending designation, Break, or closing discards history. Refuse Workspace transfer during navigation or pending reading-position restoration.
 - **Must release pending reading-position restoration on timeout**, even when the destination never serves a page or never answers; renderer rebinding must not renew the deadline.
 - **Must capture and restore Markdown reading position during history traversal**, including source/rich-text mode; an anchor visit selects rich text. Capture is best effort: a page that cannot answer still navigates. Reading-state replies are matched as save replies are, and never acknowledge a save or update dirty state. Automation renderers use a fixed host-owned read/apply operation with validated reading-state data, never page-supplied code.
@@ -315,6 +317,7 @@ Source of truth: `activateTerminalLink` in `lib/src/lib/terminal-link-activation
 | Directory | Resolved Tool CWD equals the caller's reported CWD |
 | Placement | Neither `--surface` nor `--minimize` supplied |
 | Helper | No existing auxiliary helper; preserve it by splitting |
+| Quoting | A cmd or PowerShell caller's argv has a Windows-portable form |
 
 A taken-over Surface is a Tool for one run ([Run end](#run-end)): once that run ends, a later invocation from its prompt takes the plain terminal over afresh.
 

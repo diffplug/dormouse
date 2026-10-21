@@ -92,7 +92,7 @@ async function seedToken(token = TOKEN): Promise<void> {
   await writeFile(join(dir, MANAGED_VOICE_FILE), JSON.stringify({ token, voiceId: DEFAULT_MANAGED_VOICE_ID }), { mode: 0o600 });
 }
 
-const begun = () => ({ purpose: 'voice', deviceCode: 'A'.repeat(43), userCode: '7KQM-X4TD', expiresAt: Date.now() + 600_000, interval: 1 });
+const begun = () => ({ purpose: 'voice', deviceCode: 'A'.repeat(43), userCode: '7KQM-X4TD', confirmDigits: '47', expiresAt: Date.now() + 600_000, interval: 1 });
 
 async function approveVoice(target = host, token = TOKEN) {
   vi.useFakeTimers();
@@ -102,7 +102,7 @@ async function approveVoice(target = host, token = TOKEN) {
     await vi.advanceTimersByTimeAsync(1000);
     await vi.waitFor(async () => {
       const status = await target.handle({ op: 'status' }) as { enrollment?: { status: string } };
-      expect(['waiting', 'saving']).not.toContain(status.enrollment?.status);
+      expect(['waiting', 'redeeming']).not.toContain(status.enrollment?.status);
     });
   } finally {
     vi.useRealTimers();
@@ -548,7 +548,7 @@ describe('independent managed-voice lifecycle', () => {
     vi.useFakeTimers();
     const begin = begun();
     fetchMock.mockResolvedValueOnce(Response.json(begin)).mockResolvedValueOnce(Response.json({ status: 'enabled', voiceToken: TOKEN }));
-    expect(await host.handle({ op: 'beginEnrollment' })).toMatchObject({ ok: true, configured: false, enrollment: { status: 'waiting', verificationUrl: 'https://hosted.dormouse.sh/enroll?purpose=voice#7KQM-X4TD' } });
+    expect(await host.handle({ op: 'beginEnrollment' })).toMatchObject({ ok: true, configured: false, enrollment: { status: 'waiting', confirmDigits: '47', verificationUrl: 'https://hosted.dormouse.sh/enroll?purpose=voice#7KQM-X4TD' } });
     await vi.advanceTimersByTimeAsync(1000);
     await vi.waitFor(async () => expect(await host.handle({ op: 'status' })).toEqual(idle(true)));
     expect(await make().handle({ op: 'status' })).toEqual(idle(true));
@@ -567,6 +567,17 @@ describe('independent managed-voice lifecycle', () => {
     await vi.advanceTimersByTimeAsync(60_000);
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(await host.handle({ op: 'status' })).toEqual(idle(false));
+  });
+
+  it('ends on an approval typed with other digits, enabling nothing', async () => {
+    vi.useFakeTimers();
+    fetchMock.mockResolvedValueOnce(Response.json(begun())).mockResolvedValueOnce(Response.json({ status: 'mismatch' }));
+    await host.handle({ op: 'beginEnrollment' });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(await host.handle({ op: 'status' })).toEqual({ ...idle(false), enrollment: { status: 'ended', reason: 'mismatch' } });
+    // And polls no more.
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it('rejects a malformed voice token without saving or exposing it', async () => {
@@ -630,7 +641,8 @@ describe('independent managed-voice lifecycle', () => {
       store: fileManagedVoiceStore(dir),
       onStatus: (status) => {
         broadcasts.push(status);
-        if (status.enrollment?.status === 'saving') disconnect = host.handle({ op: 'disconnect' });
+        // Once: the save's own broadcast still says redeeming.
+        if (!disconnect && status.enrollment?.status === 'redeeming') disconnect = host.handle({ op: 'disconnect' });
       },
       fetch: fetchMock as unknown as typeof fetch,
       relay: { origin: DEFAULT_RELAY_ORIGIN, mode: 'hosted' },

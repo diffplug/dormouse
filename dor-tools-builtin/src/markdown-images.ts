@@ -1,6 +1,7 @@
 import { constants } from 'node:fs';
-import { copyFile, link, lstat, open, realpath, rename, unlink, type FileHandle } from 'node:fs/promises';
+import { copyFile, link, lstat, open, rename, unlink, type FileHandle } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
+import { localRealpath } from 'dor-lib-common/local-path';
 import { fileViewerFormat } from './file-viewer-format.js';
 import { isImage } from './image-format.js';
 import { HttpError, isInsideRoot, openRegularFile, resolveInside } from './viewer-server.js';
@@ -13,10 +14,10 @@ function under(root: string, segments: string[]): string {
 }
 
 /** A regular image file at `segments` (as `imagesRoute` gives them) at or
- * under `root` (by realpath) for reading; the caller closes it. A symlink
- * whose target leaves `root` grants nothing. */
+ * under `root` (by `localRealpath`) for reading; the caller closes it. A
+ * symlink whose target leaves `root`, or is a share, grants nothing. */
 export async function openImage(root: string, segments: string[]): Promise<{ file: FileHandle; mime: string }> {
-  const canonical = await realpath(under(root, segments)).catch(() => { throw new HttpError(404); });
+  const canonical = await localRealpath(under(root, segments)).then(local => local.path, () => { throw new HttpError(404); });
   if (!isInsideRoot(root, canonical) || !isImage(canonical)) throw new HttpError(404);
   const file = await openRegularFile(canonical).catch(() => { throw new HttpError(404); });
   return { file, mime: fileViewerFormat(canonical)!.mime };
@@ -39,7 +40,7 @@ export async function createImage(root: string, name: string, bytes: Uint8Array)
 export async function renameImage(root: string, from: string[], to: string[]): Promise<boolean> {
   const source = under(root, from);
   const name = to[to.length - 1];
-  const canonicalDir = await realpath(dirname(source)).catch(() => { throw new HttpError(404); });
+  const canonicalDir = await localRealpath(dirname(source)).then(local => local.path, () => { throw new HttpError(404); });
   if (!isInsideRoot(root, canonicalDir)) throw new HttpError(404);
   const sourcePath = join(canonicalDir, basename(source));
   const targetPath = join(canonicalDir, name);

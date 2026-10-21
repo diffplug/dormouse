@@ -1,8 +1,9 @@
 import type { Dirent } from 'node:fs';
-import { opendir, realpath, stat } from 'node:fs/promises';
+import { opendir } from 'node:fs/promises';
 import type { IncomingMessage } from 'node:http';
 import { join } from 'node:path';
-import { UNTRUSTED_REPO_GIT_ARGS, resolveBinaryPath, spawnAndCapture } from 'dor-lib-common';
+import { UNTRUSTED_REPO_GIT_ARGS, localGitRepository, resolveBinaryPath, spawnAndCapture, untrustedGitEnv } from 'dor-lib-common';
+import { localRealpath } from 'dor-lib-common/local-path';
 import { DEHYDRATE_ENV, dehydrateSequence, openSequence, readDehydrated, validToolOpenPath } from 'dor-tools-lib/osc';
 import { byDisplayOrder, FOLDER_BODY_LIMIT, FOLDER_CSP, folderViewerPage } from './folder-viewer-page.js';
 import { viewerAsset } from './viewer-assets.js';
@@ -22,13 +23,15 @@ export type FolderOpenResult = { ok: true; status: string } | { ok: false; error
 export type FolderOpen = (path: string, preview: boolean) => Promise<FolderOpenResult>;
 
 /** The `names` in `dir` that `git` ignores. Any failure (no git, not a
- * repository, a timeout) answers none: ignore state only dims entries. */
+ * repository `localGitRepository` accepts, a timeout) answers none: ignore
+ * state only dims entries. */
 async function gitIgnored(git: string | undefined, dir: string, names: string[]): Promise<Set<string>> {
-  if (!git || !names.length) return new Set();
+  const repository = git && names.length ? await localGitRepository(dir) : null;
+  if (!git || !repository) return new Set();
   // `./` keeps a leading `:` from reading as pathspec magic; git resolves each
   // path's type itself, so dir-only patterns match.
   const result = await spawnAndCapture(git, [...UNTRUSTED_REPO_GIT_ARGS, 'check-ignore', '-z', '--stdin'], {
-    cwd: dir, input: names.map(name => `./${name}\0`).join(''), timeoutMs: GIT_TIMEOUT_MS, maxOutputBytes: GIT_OUTPUT_LIMIT,
+    cwd: dir, env: untrustedGitEnv(repository), input: names.map(name => `./${name}\0`).join(''), timeoutMs: GIT_TIMEOUT_MS, maxOutputBytes: GIT_OUTPUT_LIMIT,
   });
   // Exit 1 is git's "none ignored"; 128 is "not a repository" or a refused query.
   return new Set(result.ok && result.exitCode === 0 ? result.stdout.split('\0').map(path => path.slice(2)) : []);
@@ -78,8 +81,8 @@ export async function startFolderViewer(
   { open, initial = null }: { open: FolderOpen; initial?: FolderViewState | null },
 ): Promise<{ port: number; path: string; root: string; viewState(): FolderViewState | null; close(): Promise<void> }> {
   let view = initial;
-  const root = await realpath(input);
-  if (!(await stat(root)).isDirectory()) throw new Error('not a directory');
+  const { path: root, stats } = await localRealpath(input);
+  if (!stats.isDirectory()) throw new Error('not a directory');
   const page = folderViewerPage(root);
   // Resolved once, at start. PATH-resolved, never the bare name, which Windows also
   // searches for in the cwd: this process runs in the folder it lists
@@ -87,13 +90,15 @@ export async function startFolderViewer(
   const git = resolveBinaryPath('git', process.env);
 
   /** The canonical path the page-supplied POSIX path `rel` names: it must
-   * exist, and be the root or inside it. */
+   * exist, and be the root or inside it. Every path here resolves through
+   * `localRealpath`, which refuses a link to a share or device path before
+   * following it. */
   async function existingInside(rel: string): Promise<string> {
     const parts = rel === '' ? [] : pathSegments(rel, { strict: true });
     const path = parts && resolveInside(root, parts);
     if (!path) throw new HttpError(403, 'invalid path');
     let canonical: string;
-    try { canonical = await realpath(path); } catch { throw new HttpError(404, 'no such entry'); }
+    try { canonical = (await localRealpath(path)).path; } catch { throw new HttpError(404, 'no such entry'); }
     if (!isInsideRoot(root, canonical)) throw new HttpError(403, 'outside the folder');
     return canonical;
   }
@@ -104,10 +109,9 @@ export async function startFolderViewer(
     if (entry.isFile()) return 'file';
     if (!entry.isSymbolicLink()) return 'other';
     try {
-      const target = await realpath(join(dir, entry.name));
-      if (!isInsideRoot(root, target)) return 'other';
-      const stats = await stat(target);
-      return stats.isDirectory() ? 'dir' : stats.isFile() ? 'file' : 'other';
+      const target = await localRealpath(join(dir, entry.name));
+      if (!isInsideRoot(root, target.path)) return 'other';
+      return target.stats.isDirectory() ? 'dir' : target.stats.isFile() ? 'file' : 'other';
     } catch { return 'other'; }
   }
 
@@ -137,7 +141,7 @@ export async function startFolderViewer(
       let display = name;
       for (let depth = 0; depth < 32; depth++) {
         try {
-          if (!isInsideRoot(root, await realpath(path))) break;
+          if (!isInsideRoot(root, (await localRealpath(path)).path)) break;
           const children: Dirent[] = [];
           for await (const child of await opendir(path)) {
             children.push(child);

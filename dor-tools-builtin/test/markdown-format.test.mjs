@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 import { test } from 'node:test';
 import { load } from './bundle.mjs';
 
 // Exercise the exact parser/serializer versions used by the installed editor.
 const viewer = createRequire(new URL('../viewer/markdown.tsx', import.meta.url));
 const editor = createRequire(viewer.resolve('@mdxeditor/editor'));
-const dependency = name => import(editor.resolve(name));
+const dependency = name => import(pathToFileURL(editor.resolve(name)).href);
 const { fromMarkdown } = await dependency('mdast-util-from-markdown');
 const { toMarkdown } = await dependency('mdast-util-to-markdown');
 const { mdxJsx } = await dependency('micromark-extension-mdx-jsx');

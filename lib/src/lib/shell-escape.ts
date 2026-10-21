@@ -1,4 +1,4 @@
-import { quotePosixArg, quotePowerShellArg, type ShellCommandKind } from 'dor/commands/shell-quote';
+import { quotePosixArg, quoteWindowsPortableArg, type ShellCommandKind } from 'dor/commands/shell-quote';
 import { POSIX_ESCAPABLE } from './posix-escape';
 
 // Matches macOS Terminal's drag-and-drop format: backslash-escape each shell
@@ -20,24 +20,10 @@ export function shellEscapePosix(input: string): string {
   return input.replace(POSIX_UNSAFE, '\\$1');
 }
 
-// cmd.exe only: wrapping keeps whitespace and command separators in one token,
-// and `$` / `$(...)` are inert in this parser. cmd's own `%NAME%` expansion (and
-// `!NAME!` under delayed expansion) is unchanged. PowerShell's double-quoted
-// strings are expandable in a different, dangerous way, so it gets a literal
-// single-quoted string instead — see `shellEscapePath`.
-export function shellEscapeWindows(input: string): string {
-  return `"${input.replace(/"/g, '""')}"`;
-}
-
-/** Escape a pasted path for its Session's captured parser. Dispatching by OS
- * alone is unsafe; see mouse-and-clipboard.md §8.6. */
-export function shellEscapePath(input: string, shellKind: ShellCommandKind): string {
-  switch (shellKind) {
-    case 'powershell':
-      return quotePowerShellArg(input);
-    case 'cmd':
-      return shellEscapeWindows(input);
-    case 'posix':
-      return shellEscapePosix(input);
-  }
+/** Escape a pasted path for its Session's shell family, or null when it has no
+ * safe form (mouse-and-clipboard.md §8.6). A cmd or PowerShell Session may be
+ * running another of cmd, Windows PowerShell, and pwsh by the time the path
+ * lands, so both get the form each of them reads as the same literal. */
+export function shellEscapePath(input: string, shellKind: ShellCommandKind): string | null {
+  return shellKind === 'posix' ? shellEscapePosix(input) : quoteWindowsPortableArg(input);
 }

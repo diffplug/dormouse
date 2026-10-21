@@ -414,12 +414,17 @@ async function fixture(
       return token;
     };
     /** The account's Relay routes, from this origin unless `from` names another. */
-    const approve = (userCode: unknown, from = origin) =>
+    const approve = (userCode: unknown, confirmDigits: unknown, from = origin) =>
       request("/api/relay/enrollments/approve", {
         method: "POST",
-        body: JSON.stringify({ userCode }),
+        body: JSON.stringify({ userCode, confirmDigits }),
         headers: { origin: from, "content-type": "application/json" },
       });
+    /** What a poll made of this account's live approval of `userCode`, as the page reads it. */
+    const mismatched = async (userCode: string, headers?: Record<string, string>) => {
+      const response = await request(`/api/relay/enrollments/${encodeURIComponent(userCode)}`, { headers });
+      return { status: response.status, json: await response.json() };
+    };
     const computers = async () =>
       (await request("/api/relay/burrows")).json() as Promise<{
         burrows: { burrowId: string; enrolledAt: string }[];
@@ -441,7 +446,7 @@ async function fixture(
         body: JSON.stringify({ version }),
         headers: { origin: from, "content-type": "application/json" },
       });
-    return { request, post, session, email, oauth, hostedVoice, speak, forget, mint, approve, computers, remove, passkeys, removePasskey, accept };
+    return { request, post, session, email, oauth, hostedVoice, speak, forget, mint, approve, mismatched, computers, remove, passkeys, removePasskey, accept };
   }
   return {
     ...context,
@@ -458,6 +463,7 @@ async function fixture(
       (await burrowCall(API_ROUTES.burrowEnrollBegin, { origin: ORIGINS.relay })).json as {
         deviceCode: string;
         userCode: string;
+        confirmDigits: string;
         verificationUrl: string;
       },
     poll: (deviceCode: string) => burrowCall(API_ROUTES.burrowEnrollPoll, { deviceCode }),
@@ -1142,28 +1148,34 @@ test("enrollment: only a recent admin login from this origin approves, and the B
   const begun = await f.begin();
   expect(begun.verificationUrl).toBe(`${origin}/enroll#${begun.userCode}`);
 
-  expect((await admin.approve(begun.userCode)).status).toBe(401);
+  const digits = begun.confirmDigits;
+  expect((await admin.approve(begun.userCode, digits)).status).toBe(401);
   await other.email("other@example.test");
-  const refused = await other.approve(begun.userCode);
+  const refused = await other.approve(begun.userCode, digits);
   expect(refused.status).toBe(403);
   expect(await refused.json()).toEqual({ message: NOT_ENTITLED_ERROR });
   expect((await other.request("/api/relay/burrows")).status).toBe(403);
   await admin.email(ADMIN_EMAIL);
   // A same-site page — a sibling Worker's included — carries the cookie but not this origin.
   for (const sameSite of SAME_SITE)
-    expect((await admin.approve(begun.userCode, sameSite)).status, sameSite).toBe(403);
+    expect((await admin.approve(begun.userCode, digits, sameSite)).status, sameSite).toBe(403);
   expect((await f.poll(begun.deviceCode)).json).toEqual({ status: "pending" });
 
-  // A malformed code is a 400; the code forgives case and spacing.
+  // A malformed code or digits is a 400; the code forgives case and spacing.
   for (const code of ["not a code", "ZZZZ-ZZZ0", 7])
-    expect((await admin.approve(code)).status, String(code)).toBe(400);
-  expect((await admin.approve(` ${begun.userCode.toLowerCase().replace("-", "")} `)).status).toBe(204);
+    expect((await admin.approve(code, digits)).status, String(code)).toBe(400);
+  for (const typed of [undefined, "007"]) {
+    const response = await admin.approve(begun.userCode, typed);
+    expect(response.status, String(typed)).toBe(400);
+    expect(await response.json()).toEqual({ message: "Type the two digits Dormouse shows." });
+  }
+  expect((await admin.approve(` ${begun.userCode.toLowerCase().replace("-", "")} `, digits)).status).toBe(204);
   // A live approval answers the same 409 to a second approval, and never moves.
-  const again = await admin.approve(begun.userCode);
+  const again = await admin.approve(begun.userCode, digits);
   expect(again.status).toBe(409);
   expect(await again.json()).toEqual({ message: ALREADY_APPROVED });
   // A code no Burrow holds is approved all the same, and expires unredeemed.
-  expect((await admin.approve("ZZZZ-ZZZZ")).status).toBe(204);
+  expect((await admin.approve("ZZZZ-ZZZZ", "00")).status).toBe(204);
 
   const enrolled = await f.poll(begun.deviceCode);
   expect(enrolled.json.status).toBe("enrolled");
@@ -1206,13 +1218,13 @@ test("enrollment: only a recent admin login from this origin approves, and the B
 
   // A redeemed approval is approved again only once it has expired, and then unredeemed.
   expect((await f.poll(begun.deviceCode)).json).toEqual({ status: "redeemed", burrowId });
-  expect((await admin.approve(begun.userCode)).status).toBe(409);
+  expect((await admin.approve(begun.userCode, digits)).status).toBe(409);
   await queryDatabase(
     f.database.url,
     `UPDATE dormouse_relay_enrollment_approvals SET "expiresAt" = now() - interval '1 second' WHERE "userCode" = $1`,
     [begun.userCode],
   );
-  expect((await admin.approve(begun.userCode)).status).toBe(204);
+  expect((await admin.approve(begun.userCode, digits)).status).toBe(204);
   expect(
     await queryDatabase(
       f.database.url,
@@ -1220,6 +1232,74 @@ test("enrollment: only a recent admin login from this origin approves, and the B
       [begun.userCode],
     ),
   ).toEqual([{ redeemedBurrowId: null, redeemedAt: null }]);
+});
+
+test("the approver's page reads its approval's mismatch or redemption once a poll found it, and only its own approval's", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const admin = f.browser(),
+    other = f.browser("203.0.113.11");
+  await admin.email(ADMIN_EMAIL);
+  await other.email("other@example.test");
+  const begun = await f.begin();
+  const wrong = String((Number(begun.confirmDigits) + 1) % 100).padStart(2, "0");
+  const unmatched = { status: 200, json: { mismatched: false, redeemed: false } };
+  expect(await admin.mismatched(begun.userCode)).toEqual(unmatched);
+  expect((await admin.approve(begun.userCode, wrong)).status).toBe(204);
+  // Approved, but no poll has compared the digits yet.
+  expect(await admin.mismatched(begun.userCode)).toEqual(unmatched);
+  expect((await f.poll(begun.deviceCode)).json).toEqual({ status: "mismatch" });
+  // The code forgives case and spacing, as the approval does.
+  expect(await admin.mismatched(` ${begun.userCode.toLowerCase().replace("-", "")} `)).toEqual({
+    status: 200,
+    json: { mismatched: true, redeemed: false },
+  });
+  expect(await admin.mismatched("not a code")).toEqual({
+    status: 400,
+    json: { message: "That is not a code from Dormouse." },
+  });
+  // Not the account's own page, or an account the Relay does not entitle: refused.
+  expect((await admin.mismatched(begun.userCode, { "sec-fetch-site": "same-site" })).status).toBe(403);
+  expect(await other.mismatched(begun.userCode)).toEqual({ status: 403, json: { message: NOT_ENTITLED_ERROR } });
+
+  // Another account's mismatched approval reads as none at all.
+  const foreign = await f.begin();
+  await queryDatabase(
+    f.database.url,
+    `INSERT INTO dormouse_relay_enrollment_approvals
+      ("userCode", "userId", "expiresAt", purpose, "confirmDigits", "mismatchedAt")
+    VALUES ($1, $2, now() + interval '10 minutes', 'remote', $3, now())`,
+    [foreign.userCode, (await other.session())!.user.id, wrong],
+  );
+  expect(await admin.mismatched(foreign.userCode)).toEqual(unmatched);
+  // Expired, its own reads as none, and its replacement starts unmarked.
+  await queryDatabase(
+    f.database.url,
+    `UPDATE dormouse_relay_enrollment_approvals SET "expiresAt" = now() - interval '1 second' WHERE "userCode" = $1`,
+    [begun.userCode],
+  );
+  expect(await admin.mismatched(begun.userCode)).toEqual(unmatched);
+  expect((await admin.approve(begun.userCode, wrong)).status).toBe(204);
+  expect(
+    await queryDatabase(
+      f.database.url,
+      `SELECT "mismatchedAt" FROM dormouse_relay_enrollment_approvals WHERE "userCode" = $1`,
+      [begun.userCode],
+    ),
+  ).toEqual([{ mismatchedAt: null }]);
+  expect(await admin.mismatched(begun.userCode)).toEqual(unmatched);
+
+  // The code's own digits: redeemed once a poll redeems it, never mismatched.
+  const matched = await f.begin();
+  expect((await admin.approve(matched.userCode, matched.confirmDigits)).status).toBe(204);
+  expect(await admin.mismatched(matched.userCode)).toEqual(unmatched);
+  expect((await f.poll(matched.deviceCode)).json.status).toBe("enrolled");
+  expect(await admin.mismatched(matched.userCode)).toEqual({
+    status: 200,
+    json: { mismatched: false, redeemed: true },
+  });
 });
 
 test("the account lists its passkeys with the computer that added each, and removing one ends its sessions", async ({
@@ -1296,7 +1376,7 @@ test("enrollment approval needs a login from the recent-login window, and attemp
   const begun = await f.begin();
   const signedIn = Date.parse((await admin.session())!.session.createdAt);
   await f.advance(new Date(signedIn + 10 * 60_000).toISOString());
-  const stale = await admin.approve(begun.userCode);
+  const stale = await admin.approve(begun.userCode, begun.confirmDigits);
   expect(stale.status).toBe(403);
   expect(await stale.json()).toEqual({ message: RECENT_LOGIN_REQUIRED });
   expect((await f.poll(begun.deviceCode)).json).toEqual({ status: "pending" });
@@ -1306,7 +1386,7 @@ test("enrollment approval needs a login from the recent-login window, and attemp
   const approveLimit = limitOf("RELAY_APPROVE_LIMIT");
   const limited = await untilLimited(approveLimit, async (i) => {
     const valid = i === approveLimit - 1;
-    const response = await admin.approve(valid ? begun.userCode : "not a code");
+    const response = await admin.approve(valid ? begun.userCode : "not a code", begun.confirmDigits);
     if (response.status !== 429) expect(response.status).toBe(valid ? 204 : 400);
     return response;
   });

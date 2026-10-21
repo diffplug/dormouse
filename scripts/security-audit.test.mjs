@@ -9,6 +9,7 @@ import { OPEN_FINDINGS, SENTINEL, domains, failKey, fragmentManifest, ledgerKey,
 import { disclosureReason, parseLedger, planDisclosures, statusBody } from './security-audit-public-body.mjs';
 import { FRAGMENT } from './github-state-check.mjs';
 import { decide } from './security-audit-plan.mjs';
+import { codexPreamble, DELEGATION_SECTIONS, streamPrompt, streams as workStreamNames } from './security-audit-codex.mjs';
 import { repoRoot, tempDir, workflowRunBlock } from './lint-kit.mjs';
 
 const repo = repoRoot;
@@ -91,7 +92,7 @@ function fixture(t) {
   mkdirSync(join(dir, 'scripts'));
   mkdirSync(join(dir, 'docs/specs'), { recursive: true });
   mkdirSync(join(dir, '.github/audit'), { recursive: true });
-  for (const script of ['clamp-issue-body.mjs', 'security-audit-public-body.mjs', 'security-audit-report.mjs', 'spec-md.mjs']) {
+  for (const script of ['clamp-issue-body.mjs', 'security-audit-codex.mjs', 'security-audit-public-body.mjs', 'security-audit-report.mjs', 'spec-md.mjs']) {
     copyFileSync(join(repo, 'scripts', script), join(dir, 'scripts', script));
   }
   // The manifest is derived from these specs and the domain prompts' scopes,
@@ -789,23 +790,29 @@ test('every security spec FAIL IF section is claimed by exactly one domain', () 
   assert.deepEqual([...owners.keys()].filter((key) => !sections.has(key)), []);
 });
 
+/** A domain prompt's work streams, each with the `spec\0heading` keys its bullet names. */
+function workStreams(domain) {
+  const prompt = readFileSync(join(repo, `.github/audit/${domain}.md`), 'utf8');
+  const section = prompt.split(/^## Work streams$/m)[1]?.split(/^## /m)[0];
+  assert.ok(section, `${domain}: no ## Work streams section`);
+  return section.split('\n').filter((l) => l.startsWith('- `')).map((line) => {
+    const keys = [];
+    let spec = null;
+    for (const m of line.matchAll(/`(docs\/specs\/[^`]+)`|"([^"]+)"/g)) {
+      if (m[1]) spec = m[1];
+      else keys.push(`${spec}\0${m[2]}`);
+    }
+    return { name: line.match(/^- `([\w-]+)`/)[1], line, keys };
+  });
+}
+
 // The work streams replace a domain's own partition, so between them they hold
 // every heading the manifest owes, each exactly once.
 test('each domain\'s work streams cover every owed heading once', () => {
   for (const { domain, fragment } of domains(repo)) {
-    const prompt = readFileSync(join(repo, `.github/audit/${domain}.md`), 'utf8');
-    const section = prompt.split(/^## Work streams$/m)[1]?.split(/^## /m)[0];
-    assert.ok(section, `${domain}: no ## Work streams section`);
-    const named = [];
-    for (const line of section.split('\n').filter((l) => l.startsWith('- `'))) {
-      let spec = null;
-      for (const m of line.matchAll(/`(docs\/specs\/[^`]+)`|"([^"]+)"/g)) {
-        if (m[1]) spec = m[1];
-        else named.push(`${spec}\0${m[2]}`);
-      }
-    }
-    assert.ok(section.includes('- `qualitative` —'), `${domain}: no qualitative stream`);
-    assert.deepEqual([...named].sort(), [...fragmentManifest(repo, fragment).keys()].sort(), domain);
+    const listed = workStreams(domain);
+    assert.ok(listed.some((s) => s.line.startsWith('- `qualitative` —')), `${domain}: no qualitative stream`);
+    assert.deepEqual(listed.flatMap((s) => s.keys).sort(), [...fragmentManifest(repo, fragment).keys()].sort(), domain);
   }
 });
 
@@ -1522,6 +1529,53 @@ for (const [arg, runsState, runsDomain] of [['github-state', true, false], ['ci-
   });
 }
 
+/**
+ * The lines each work stream's session appends: a rule stream passes every
+ * rule under its headings, the `qualitative` stream records its one pass.
+ */
+function streamAppends(fragment) {
+  const { domain } = domains(repo).find((d) => d.fragment === fragment);
+  const manifest = fragmentManifest(repo, fragment);
+  return Object.fromEntries(workStreams(domain).map(({ name, keys }) => [name, name === 'qualitative'
+    ? ['- QUALITATIVE: done — the whole scope']
+    : keys.flatMap((k) => manifest.get(k) ?? []).map((id) => `- PASS: ${id} — the clause: evidence`)]));
+}
+
+/**
+ * A `codex` that reads its stream from the prompt's header and appends that
+ * stream's lines to the fragment, recording `domain/stream` in `codex-calls`.
+ * `CODEX_SKIP` names a fragment no session writes to; `CODEX_REWRITE` a
+ * `domain/stream` whose session rewrites the fragment whole, `CODEX_RETITLE`
+ * one that rewrites only its first line, and `CODEX_FAIL` one that exits
+ * non-zero after appending.
+ */
+function stubCodex(dir) {
+  stub(dir, 'codex', `
+    const fs = require('node:fs');
+    const argv = process.argv.slice(2);
+    const prompt = argv[argv.length - 1];
+    const [, stream, domain] = prompt.match(/^# Work stream \x60([\\w-]+)\x60 of the \x60([\\w-]+)\x60 domain$/m);
+    const output = prompt.match(/\\*\\*Output file:\\*\\* \x60([^\x60]+)\x60/)[1];
+    const me = domain + '/' + stream;
+    fs.appendFileSync('codex-calls', me + '\\n');
+    if (fs.existsSync('audit-open-findings.txt')) fs.copyFileSync('audit-open-findings.txt', 'seen-open-findings');
+    const lines = output === process.env.CODEX_SKIP ? [] : ${JSON.stringify(Object.fromEntries(fragments.map((f) => [f, streamAppends(f)])))}[output][stream];
+    if (me === process.env.CODEX_REWRITE) fs.writeFileSync(output, 'VERDICT: INCONCLUSIVE\\n\\n' + lines.map((l) => l + '\\n').join(''));
+    else for (const l of lines) fs.appendFileSync(output, l + '\\n');
+    if (me === process.env.CODEX_RETITLE) fs.writeFileSync(output, fs.readFileSync(output, 'utf8').replace(/^.*/, 'VERDICT: PASS'));
+    if (me === process.env.CODEX_FAIL) process.exit(3);
+  `);
+}
+
+/** An open-findings list written on another login, for the Codex engine to copy. */
+function openFindingsFile(dir, text = '') {
+  mkdirSync(join(dir, 'elsewhere'), { recursive: true });
+  writeFileSync(join(dir, 'elsewhere/open.txt'), text);
+  return join(dir, 'elsewhere/open.txt');
+}
+
+const codexCalls = (dir) => (existsSync(join(dir, 'codex-calls')) ? readFileSync(join(dir, 'codex-calls'), 'utf8').split('\n').filter(Boolean) : []);
+
 // The second-opinion audit: the same prompts on Codex, each domain's computed verdict
 // gathered into the publishing command, which is printed and never run.
 for (const [args, verdicts, expected] of [[['remote'], 'remote=PASS', 0], [[], 'supply-chain=PASS ci-and-secrets=PASS remote=PASS local=INCONCLUSIVE hosted=PASS', 1]]) {
@@ -1530,17 +1584,57 @@ for (const [args, verdicts, expected] of [[['remote'], 'remote=PASS', 0], [[], '
     localRunnerFixture(dir);
     stubGh(dir);
     stub(dir, 'claude', 'process.exit(5);');
-    // `local` leaves no fragment, which computes INCONCLUSIVE.
-    stub(dir, 'codex', `
-      const fs = require('node:fs');
-      const argv = process.argv.slice(2);
-      const output = argv[argv.length - 1].match(/\\*\\*Output file:\\*\\* \\x60([^\\x60]+)\\x60/)[1];
-      if (output !== 'audit-local.md') fs.writeFileSync(output, ${JSON.stringify(Object.fromEntries(fragments.map((f) => [f, fragmentText(f)])))}[output]);
-    `);
-    const result = spawnSync('bash', ['scripts/security-audit-local.sh', '--engine', 'codex', ...args], { cwd: dir, env, encoding: 'utf8' });
+    stubCodex(dir);
+    // No session writes to `local`'s fragment, which computes INCONCLUSIVE.
+    const result = spawnSync('bash', ['scripts/security-audit-local.sh', '--engine', 'codex', ...args],
+      { cwd: dir, env: { ...env, CODEX_SKIP: 'audit-local.md', AUDIT_OPEN_FINDINGS: openFindingsFile(dir) }, encoding: 'utf8' });
     assert.equal(result.status, expected, result.stderr);
     assert.match(result.stdout, new RegExp(`^gh workflow run codex-audit-report\\.yaml -R fixture/repo --ref main -f commit=\\S+ -f model=gpt-6-sol -f verdicts='${verdicts}'$`, 'm'));
-    assert.deepEqual(ghCalls(dir).map(({ args: a }) => a.slice(0, 2).join(' ')).filter((c) => c !== 'issue list'), []);
+    assert.deepEqual(ghCalls(dir), []);
+  });
+}
+
+// Codex has no subagents: each work stream is its own session, appending to
+// the fragment the runner opened, and the runner writes the verdict the lines
+// compute and the sentinel.
+test('local runner, Codex engine: one session per work stream, closed with the verdict its lines compute', (t) => {
+  const { dir, env } = fixture(t);
+  localRunnerFixture(dir);
+  stubGh(dir);
+  stubCodex(dir);
+  const result = spawnSync('bash', ['scripts/security-audit-local.sh', '--engine', 'codex', 'remote'],
+    { cwd: dir, env: { ...env, AUDIT_OPEN_FINDINGS: openFindingsFile(dir) }, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(codexCalls(dir), workStreamNames(repo, 'remote').map((s) => `remote/${s}`));
+  const text = readFileSync(join(dir, 'audit-remote.md'), 'utf8');
+  assert.equal(text.split('\n')[0], 'VERDICT: PASS');
+  assert.equal(text.match(new RegExp(SENTINEL, 'g')).length, 1);
+  assert.ok(text.trimEnd().endsWith(SENTINEL));
+  for (const line of Object.values(streamAppends('audit-remote.md')).flat()) assert.ok(text.includes(`${line}\n`), line);
+});
+
+// A session must only append: one that rewrites the fragment loses its own
+// lines and leaves the domain unfinished; one that rewrites only the first
+// line keeps them; one whose process fails leaves the domain unfinished.
+for (const [name, envKey, stream, status, finished, kept] of [
+  ['rewrites the fragment', 'CODEX_REWRITE', 'remote-transport', 1, false, false],
+  ['rewrites its first line', 'CODEX_RETITLE', 'remote-transport', 0, true, true],
+  ['fails', 'CODEX_FAIL', 'qualitative', 1, false, true],
+]) {
+  test(`local runner, Codex engine: a session that ${name}`, (t) => {
+    const { dir, env } = fixture(t);
+    localRunnerFixture(dir);
+    stubGh(dir);
+    stubCodex(dir);
+    const result = spawnSync('bash', ['scripts/security-audit-local.sh', '--engine', 'codex', 'remote'],
+      { cwd: dir, env: { ...env, [envKey]: `remote/${stream}`, AUDIT_OPEN_FINDINGS: openFindingsFile(dir) }, encoding: 'utf8' });
+    assert.equal(result.status, status, result.stderr);
+    if (envKey === 'CODEX_REWRITE') assert.match(result.stderr, /the remote-transport session rewrote audit-remote\.md instead of appending to it/);
+    const text = readFileSync(join(dir, 'audit-remote.md'), 'utf8');
+    assert.equal(text.trimEnd().endsWith(SENTINEL), finished);
+    const appends = streamAppends('audit-remote.md');
+    for (const line of appends[stream]) assert.equal(text.includes(`${line}\n`), kept, line);
+    for (const line of appends['remote-trust']) assert.ok(text.includes(`${line}\n`), line);
   });
 }
 
@@ -1551,15 +1645,8 @@ test('local runner: AUDIT_OPEN_FINDINGS hands the domains a file, and the ledger
   localRunnerFixture(dir);
   stubGh(dir);
   const title = '[audit-finding 0123456789ab] FAIL S9: from the file';
-  mkdirSync(join(dir, 'elsewhere'));
-  writeFileSync(join(dir, 'elsewhere/open.txt'), `${title}\n`);
-  stub(dir, 'codex', `
-    const fs = require('node:fs');
-    const argv = process.argv.slice(2);
-    const output = argv[argv.length - 1].match(/\\*\\*Output file:\\*\\* \\x60([^\\x60]+)\\x60/)[1];
-    fs.writeFileSync('seen-open-findings', fs.readFileSync('audit-open-findings.txt'));
-    fs.writeFileSync(output, ${JSON.stringify(Object.fromEntries(fragments.map((f) => [f, fragmentText(f)])))}[output]);
-  `);
+  openFindingsFile(dir, `${title}\n`);
+  stubCodex(dir);
   // A relative path is the operator's, from where they ran the script.
   const result = spawnSync('bash', ['../scripts/security-audit-local.sh', '--engine', 'codex', 'remote'],
     { cwd: join(dir, 'elsewhere'), env: { ...env, AUDIT_OPEN_FINDINGS: 'open.txt', GH_LEDGER_OPEN: '7 [audit-finding ba9876543210] FAIL S5: from the ledger' }, encoding: 'utf8' });
@@ -1572,6 +1659,80 @@ test('local runner: AUDIT_OPEN_FINDINGS hands the domains a file, and the ledger
   assert.equal(missing.status, 64);
   assert.match(missing.stderr, /AUDIT_OPEN_FINDINGS names no file: nowhere\.txt/);
 });
+
+// Under Codex the ledger is never listed with `gh`, so a run that audits a
+// domain refuses to start without the file; the GitHub-state check alone needs none.
+for (const args of [['remote'], ['ci-and-secrets'], []]) {
+  test(`local runner, Codex engine: ${args[0] ?? 'every domain'} without AUDIT_OPEN_FINDINGS is refused`, (t) => {
+    const { dir, env } = fixture(t);
+    rmSync(join(dir, STATE_FRAGMENT));
+    localRunnerFixture(dir);
+    stubGh(dir);
+    stubCodex(dir);
+    const result = spawnSync('bash', ['scripts/security-audit-local.sh', '--engine', 'codex', ...args],
+      { cwd: dir, env: { ...env, GH_LEDGER_OPEN: '7 [audit-finding ba9876543210] FAIL S5: from the ledger' }, encoding: 'utf8' });
+    assert.equal(result.status, 64);
+    assert.match(result.stderr, /--engine codex reads the open findings from AUDIT_OPEN_FINDINGS=<file>/);
+    assert.deepEqual(codexCalls(dir), []);
+    assert.equal(existsSync(join(dir, 'gh-calls.jsonl')), false);
+    assert.equal(existsSync(join(dir, 'state-check-calls')), false);
+  });
+}
+
+test('local runner, Codex engine: the GitHub-state check alone needs no open findings', (t) => {
+  const { dir, env } = fixture(t);
+  localRunnerFixture(dir);
+  stubCodex(dir);
+  const result = spawnSync('bash', ['scripts/security-audit-local.sh', '--engine', 'codex', 'github-state'], { cwd: dir, env, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(existsSync(join(dir, 'state-check-calls')));
+});
+
+/** `_preamble.md` cut at its `### ` headings, as `{ heading, text }`. */
+const preambleSections = (text) => text.split(/^(?=### )/m).map((part) => ({ heading: part.match(/^### (.+)$/m)?.[1] ?? null, text: part.trim() }));
+
+// Codex has no subagents, so a Codex session is never told how to delegate or
+// to wait for delegates — it once sat out its deadline in that wait loop — and
+// is told everything else the preamble says.
+test('a Codex session gets every preamble section but the delegation ones', () => {
+  const sections = preambleSections(readFileSync(join(repo, '.github/audit/_preamble.md'), 'utf8'));
+  for (const heading of DELEGATION_SECTIONS) assert.equal(sections.filter((s) => s.heading === heading).length, 1, heading);
+  for (const { domain } of domains(repo)) {
+    for (const stream of workStreamNames(repo, domain)) {
+      const prompt = streamPrompt(repo, domain, stream);
+      for (const s of sections) {
+        if (DELEGATION_SECTIONS.includes(s.heading)) {
+          for (const para of s.text.split(/\n\n+/).slice(1)) assert.ok(!prompt.includes(para), `${domain}/${stream} carries ${s.heading}: ${para.slice(0, 60)}`);
+        } else {
+          assert.ok(prompt.includes(s.text), `${domain}/${stream} lacks ${s.heading ?? 'the preamble opening'}`);
+        }
+      }
+      assert.doesNotMatch(prompt, /delegat|RUNNER_TEMP|STILL WAITING/i, `${domain}/${stream}`);
+      assert.match(prompt, new RegExp(`^# Work stream \`${stream}\` of the \`${domain}\` domain$`, 'm'));
+      assert.doesNotMatch(prompt, /^## Work streams$/m);
+      assert.equal(/^## Qualitative pass$/m.test(prompt), stream === 'qualitative', `${domain}/${stream}`);
+      assert.ok(prompt.includes(workStreams(domain).find((s) => s.name === stream).line.replace(/^- `[\w-]+` — /, '')), `${domain}/${stream} names what it holds`);
+    }
+  }
+});
+
+// The cut is by heading, so a preamble edit that renames one, or says to
+// delegate outside them, fails here rather than handing Codex the wait loop.
+for (const [name, edit] of [
+  ['renames a delegation heading', (s) => s.replace('### Waiting for delegates', '### Waiting')],
+  ['folds a delegation section into another', (s) => s.replace('### Work streams\n', '')],
+  ['says to delegate under another heading', (s) => s.replace('### Severity\n', '### Severity\n\nDelegate the rubric.\n')],
+]) {
+  test(`the Codex preamble refuses a preamble that ${name}`, (t) => {
+    const root = tempDir(t, 'dormouse-codex-preamble-');
+    mkdirSync(join(root, '.github/audit'), { recursive: true });
+    const preamble = readFileSync(join(repo, '.github/audit/_preamble.md'), 'utf8');
+    const edited = edit(preamble);
+    assert.notEqual(edited, preamble);
+    writeFileSync(join(root, '.github/audit/_preamble.md'), edited);
+    assert.throws(() => codexPreamble(root));
+  });
+}
 
 test('local runner: an unknown engine is refused before anything runs', (t) => {
   const { dir, env } = fixture(t);

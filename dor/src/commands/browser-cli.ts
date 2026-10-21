@@ -178,8 +178,8 @@ export function isMissingBinaryError(error: unknown): boolean {
 // The default exec: delegate the spawn/capture/Windows handling to
 // spawnAndCapture, and adapt its never-throws result to this call site's
 // throw-on-spawn-failure contract (callers catch ENOENT via isMissingBinaryError).
-export async function execBrowserProcess(binary: string, args: string[], cwd?: string, env?: Record<string, string>): Promise<BrowserExecResult> {
-  const result = await spawnAndCapture(binary, args, { cwd, env: env ? { ...process.env, ...env } : undefined });
+export async function execBrowserProcess(binary: string, args: string[], cwd?: string, env?: Record<string, string>, stdin?: 'inherit'): Promise<BrowserExecResult> {
+  const result = await spawnAndCapture(binary, args, { cwd, env: env ? { ...process.env, ...env } : undefined, stdin });
   if (!result.ok) {
     const error: Error & { code?: string } = new Error(result.error.message);
     error.code = result.error.code;
@@ -231,21 +231,49 @@ const AGENT_BROWSER_BOOLEAN_FLAGS = new Set([
   '--confirm-interactive', '--no-auto-dialog', '--verbose', '-v', '--quiet', '-q', '--debug', '--restore',
 ]);
 
-/** Build a blank navigation with every launch option preserved. Unknown flags
+// Each native CLI call can reconfigure the daemon. Changing these options
+// between the blank page and the viewport writes can replace its browser.
+// Output flags stay on the user's command: quiet/boundaries would hide the DPR.
+const AGENT_BROWSER_LAUNCH_FLAGS = new Set([
+  '--config', '--profile', '--executable-path', '--extension', '--args', '--proxy', '--proxy-bypass',
+  '--user-agent', '--allow-file-access', '--headed', '--ignore-https-errors', '--color-scheme',
+  '--download-path', '--engine', '--enable', '--init-script', '--hide-scrollbars', '--allowed-domains',
+]);
+
+/** The same launch settings must accompany every internal native call. */
+function agentBrowserLaunchOptions(args: string[]): string[] {
+  const options: string[] = [];
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i]!;
+    if (arg === '--') break;
+    const name = arg.split('=', 1)[0]!;
+    const start = i;
+    if (AGENT_BROWSER_VALUE_FLAGS.has(name) && !arg.includes('=')) i += 1;
+    else if (AGENT_BROWSER_BOOLEAN_FLAGS.has(name) && ['true', 'false'].includes(args[i + 1] ?? '')) i += 1;
+    if (AGENT_BROWSER_LAUNCH_FLAGS.has(name)) options.push(...args.slice(start, i + 1));
+  }
+  return options;
+}
+
+/** Apply saved state to the blank page only: repeating --state starts a fresh
+ * browser and loses the prepared viewport. Unknown flags
  * are refused: guessing their arity could replace a flag value and let the
  * destination page run before its viewport is ready. */
-function blankNavigationArgs(args: string[]): string[] | Error {
+function agentBrowserNavigation(args: string[]): { blank: string[]; destination: string[] } | Error {
   const result = [...args];
   const verbIndex = nativeCommandIndex('agent-browser', result);
   if (verbIndex === undefined || !['open', 'goto', 'navigate'].includes(result[verbIndex]!)) return new Error('No navigation command to prepare');
   const positions: number[] = [];
+  const statePositions = new Set<number>();
   for (let i = 0; i < result.length; i += 1) {
     const arg = result[i] ?? '';
     if (i === verbIndex) continue;
     if (arg.startsWith('-')) {
       const [name] = arg.split('=', 1);
       if (AGENT_BROWSER_VALUE_FLAGS.has(name)) {
+        const flagIndex = i;
         if (!arg.includes('=')) { if (i + 1 >= result.length) return new Error(`${name} requires a value`); i += 1; }
+        if (name === '--state') { statePositions.add(flagIndex); statePositions.add(i); }
       } else if (AGENT_BROWSER_BOOLEAN_FLAGS.has(name)) {
         if (result[i + 1] === 'true' || result[i + 1] === 'false') i += 1;
       } else return new Error(`Cannot prepare viewport with unknown agent-browser option '${arg}'`);
@@ -255,7 +283,7 @@ function blankNavigationArgs(args: string[]): string[] | Error {
   }
   if (positions.length !== 1) return new Error('Cannot determine the agent-browser navigation URL for viewport preparation');
   result[positions[0]!] = 'about:blank';
-  return result;
+  return { blank: result, destination: args.filter((_, i) => !statePositions.has(i)) };
 }
 
 function hasExplicitAgentBrowserDevice(args: string[], env: Record<string, string | undefined>): boolean {
@@ -425,10 +453,10 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
   // Windows, so an `agent-browser.cmd` sitting in a cloned repository would
   // win the race against the real install (docs/specs/dor-cli.md ->
   // "Spawning External Binaries"). `?? binary` is reached only by a stub.
-  const run = (argv: string[], envOverride?: Record<string, string>) => envOverride
-    ? exec(binaryPath ?? binary, argv, cwd, envOverride)
-    : cwd === undefined ? exec(binaryPath ?? binary, argv) : exec(binaryPath ?? binary, argv, cwd);
+  const run = (argv: string[], envOverride?: Record<string, string>, stdin?: 'inherit') =>
+    exec(binaryPath ?? binary, argv, cwd, envOverride, stdin);
 
+  const nativeLaunchOptions = d.provider === 'agent-browser' ? agentBrowserLaunchOptions(rest) : [];
   let result: BrowserExecResult;
   let prebound = false;
   const explicitDevice = d.provider === 'agent-browser'
@@ -438,18 +466,20 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
     const sessionArgs = binding.session ? spec.sessionArgs(binding.session) : [];
     const launching = fresh === true && d.provider === 'agent-browser' && d.navigationVerbs.has(command ?? '')
       && launchViewport !== undefined && !explicitDevice;
+    let destinationArgs = rest;
     if (launching) {
-      const blankArgs = blankNavigationArgs(rest);
-      if (blankArgs instanceof Error) return fail(blankArgs.message);
-      const blank = await run([...sessionArgs, ...blankArgs]);
+      const navigation = agentBrowserNavigation(rest);
+      if (navigation instanceof Error) return fail(navigation.message);
+      destinationArgs = navigation.destination;
+      const blank = await run([...sessionArgs, ...navigation.blank]);
       if (blank.exitCode !== 0) return fail(`Could not prepare the agent-browser viewport before navigation: ${blank.stderr.trim() || `agent-browser exited ${blank.exitCode}`}`);
       let dpr = launchViewport.dpr;
       if (dpr === undefined) {
-        const ratio = await run([...sessionArgs, 'eval', 'window.devicePixelRatio']);
+        const ratio = await run([...sessionArgs, ...nativeLaunchOptions, 'eval', 'window.devicePixelRatio']);
         dpr = ratio.exitCode === 0 ? parseNativeDpr(ratio.stdout) : undefined;
         if (dpr === undefined) return fail('Could not measure agent-browser DPR before navigation');
       }
-      const viewport = await run([...sessionArgs, 'set', 'viewport', String(launchViewport.width), String(launchViewport.height), String(dpr)]);
+      const viewport = await run([...sessionArgs, ...nativeLaunchOptions, 'set', 'viewport', String(launchViewport.width), String(launchViewport.height), String(dpr)]);
       if (viewport.exitCode !== 0) return fail(`Could not set the agent-browser viewport before navigation: ${viewport.stderr.trim() || `agent-browser exited ${viewport.exitCode}`}`);
     }
     const playwrightOpen = d.provider === 'playwright' && command === 'open' && launchViewport !== undefined && !explicitDevice;
@@ -485,9 +515,9 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
         }
         return fail(`playwright context DPR is ${measured.actual?.dpr ?? 'unavailable'}; requested ${requestedDpr}. The destination was not opened.`);
       }
-      result = await run([...sessionArgs, ...navigation.goto]);
+      result = await run([...sessionArgs, ...navigation.goto], undefined, 'inherit');
     } else {
-      result = await run([...sessionArgs, ...rest], launchEnv);
+      result = await run([...sessionArgs, ...destinationArgs], launchEnv, 'inherit');
     }
   } catch (error) {
     return isMissingBinaryError(error) ? fail(d.missingBinaryMessage(binary)) : fail(errorMessage(error));
@@ -499,7 +529,7 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
   if (result.exitCode === 0 && mayBind && binding.session !== undefined && !(client instanceof Error) && !prebound) {
     try {
       const statusArgs = d.streamStatus?.(binding.session);
-      const wsPort = statusArgs === undefined ? undefined : parseStreamPort((await run(statusArgs)).stdout);
+      const wsPort = statusArgs === undefined ? undefined : parseStreamPort((await run([...statusArgs, ...nativeLaunchOptions])).stdout);
       await client.browserSurface({
         provider: d.provider,
         key: flags.key,

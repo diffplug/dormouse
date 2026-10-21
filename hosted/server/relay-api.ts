@@ -27,6 +27,7 @@ import {
   WRONG_CREDENTIAL_ERROR,
   assertionRejectedError,
   checkRegistration,
+  enrollConfirmDigits,
   enrollUserCode,
   fromBase64Url,
   isPresenceBinding,
@@ -57,7 +58,7 @@ import type {
 } from "remote-lib-common";
 import type { RelayEnv } from "./bindings";
 import { allowed } from "./one-time";
-import { ENROLLMENT_TTL_MS } from "./policy-constants";
+import { ENROLLMENT_POLL_INTERVAL_S, ENROLLMENT_TTL_MS } from "./policy-constants";
 import { relayRoom } from "./relay-room-contract";
 import { relayPushRoutes } from "./relay-push";
 import { mintVoiceToken } from "./voice-token";
@@ -87,12 +88,6 @@ export const MAX_SESSIONS_PER_ACCOUNT = 32;
 /** One live registration challenge per live setup token of the same Burrow (rationale). */
 export const MAX_SETUP_CHALLENGES_PER_BURROW = MAX_TOKENS_PER_BURROW;
 
-/**
- * Seconds a Burrow waits between polls: inside
- * `MIN_ENROLL_POLL_INTERVAL_S`–`MAX_ENROLL_POLL_INTERVAL_S`, or every shipped
- * Burrow refuses the begin.
- */
-export const ENROLLMENT_POLL_INTERVAL_S = 5;
 /**
  * A device code's leading bytes: its expiry, big-endian epoch seconds; the
  * rest of its 32 are random.
@@ -480,8 +475,9 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
 
   // --- Enrollment: device code, approved on the account origin --------------
 
-  // Begin writes nothing: the device code carries its own expiry, and the
-  // user code is derived from it, so an unauthenticated caller grows no table.
+  // Begin writes nothing: the device code carries its own expiry, the user
+  // code is derived from it and the digits from that, so an unauthenticated
+  // caller grows no table.
   app.post(API_ROUTES.burrowEnrollBegin, async (c) => {
     const body = await readJson<{ origin?: unknown; purpose?: unknown }>(c);
     const purpose = body?.purpose ?? "remote";
@@ -502,6 +498,7 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
       purpose,
       deviceCode: toBase64Url(bytes),
       userCode,
+      confirmDigits: await enrollConfirmDigits(enrollSecret(c.env), userCode),
       ...(c.env.ACCOUNT_ORIGIN && {
         verificationUrl: `${c.env.ACCOUNT_ORIGIN}${ENROLL_PAGE_PATH}${purpose === "voice" ? "?purpose=voice" : ""}#${userCode}`,
       }),
@@ -524,14 +521,25 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
     const expiresAtS = new DataView(bytes.buffer, bytes.byteOffset, DEVICE_CODE_EXPIRY_BYTES).getUint32(0);
     if (expiresAtS * 1000 <= Date.now()) return answer({ status: "expired" });
     const userCode = await userCodeOf(c.env, bytes, purpose);
+    const confirmDigits = await enrollConfirmDigits(enrollSecret(c.env), userCode);
     return database(c, async (db) => {
+      // The read stamps a live, unredeemed approval typed with other digits,
+      // first time only, for its approver's page to tell.
       const {
         rows: [approval],
-      } = await db.query<OwnerRow & { redeemedBurrowId: string | null; redeemed: boolean }>(
-        `SELECT a."userId", a."redeemedBurrowId", a."redeemedAt" IS NOT NULL AS redeemed, ${OWNER_COLUMNS}
+      } = await db.query<
+        OwnerRow & { redeemedBurrowId: string | null; redeemed: boolean; confirmDigits: string }
+      >(
+        `WITH marked AS (
+          UPDATE dormouse_relay_enrollment_approvals SET "mismatchedAt" = now()
+          WHERE "userCode" = $1 AND purpose = $2 AND "expiresAt" > now()
+            AND "redeemedAt" IS NULL AND "confirmDigits" <> $3 AND "mismatchedAt" IS NULL
+        )
+        SELECT a."userId", a."redeemedBurrowId", a."redeemedAt" IS NOT NULL AS redeemed,
+          a."confirmDigits", ${OWNER_COLUMNS}
         FROM dormouse_relay_enrollment_approvals a JOIN "user" u ON u.id = a."userId"
         WHERE a."userCode" = $1 AND a.purpose = $2 AND a."expiresAt" > now()`,
-        [userCode, purpose],
+        [userCode, purpose, confirmDigits],
       );
       if (!approval) return answer({ status: "pending" });
       // Spent by an earlier poll whose answer this Burrow never read: the
@@ -541,6 +549,9 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
           ? voiceAnswer({ status: "redeemed" })
           : answer({ status: "redeemed", burrowId: approval.redeemedBurrowId! });
       }
+      // Approved with digits other than the ones this code showed: one attempt,
+      // spent, since a live approval is never replaced.
+      if (approval.confirmDigits !== confirmDigits) return answer({ status: "mismatch" });
       const owner = ownerOf(approval);
       // Rechecked here: an approval does not outlive its approver's entitlement.
       if (!owner.entitled) return c.json({ error: NOT_ENTITLED_ERROR }, 403);
@@ -550,12 +561,12 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
         const { rowCount } = await db.query(
           `WITH spent AS (
             UPDATE dormouse_relay_enrollment_approvals SET "redeemedAt" = now()
-            WHERE "userCode" = $1 AND "userId" = $2 AND purpose = 'voice'
+            WHERE "userCode" = $1 AND "userId" = $2 AND purpose = 'voice' AND "confirmDigits" = $4
               AND "expiresAt" > now() AND "redeemedAt" IS NULL
             RETURNING "userId"
           ) INSERT INTO dormouse_voice_tokens ("userId", hash)
             SELECT "userId", $3 FROM spent`,
-          [userCode, owner.userId, digest(voiceToken)],
+          [userCode, owner.userId, digest(voiceToken), confirmDigits],
         );
         return voiceAnswer(rowCount ? { status: "enabled", voiceToken } : { status: "redeemed" });
       }
@@ -579,11 +590,11 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
             UPDATE dormouse_relay_enrollment_approvals
             SET "redeemedBurrowId" = $3, "redeemedAt" = now()
             WHERE "userCode" = $1 AND "userId" = $2 AND "expiresAt" > ${LOCKED_NOW}
-              AND "redeemedAt" IS NULL AND purpose = 'remote'
+              AND "redeemedAt" IS NULL AND purpose = 'remote' AND "confirmDigits" = $5
             RETURNING "userId"
           ) INSERT INTO dormouse_relay_burrows ("burrowId", "userId", "tokenHash")
             SELECT $3, "userId", $4 FROM spent`,
-          [userCode, owner.userId, burrowId, digest(burrowToken)],
+          [userCode, owner.userId, burrowId, digest(burrowToken), confirmDigits],
         );
         if (rowCount) return "enrolled";
         // Lost to a poll that redeemed it while this one waited on the lock,
@@ -774,9 +785,15 @@ const rpIdOf = (env: RelayEnv) => new URL(env.APP_ORIGIN).hostname;
 const removeOneFirst = ({ ACCOUNT_ORIGIN: where }: RelayEnv) =>
   `remove one ${where ? `at ${where}/account` : "from your account"} first`;
 
-/** A device code's user code; a deployment without its secret answers 503. */
-function userCodeOf(env: RelayEnv, deviceCode: Uint8Array, purpose: "remote" | "voice") {
+/** The enrollment secret; a deployment without it answers 503. */
+function enrollSecret(env: RelayEnv): string {
   if (!env.RELAY_ENROLL_SECRET) throw new Error("RELAY_ENROLL_SECRET is not set");
-  return enrollUserCode(purpose === "voice" ? `${env.RELAY_ENROLL_SECRET}:voice` : env.RELAY_ENROLL_SECRET, deviceCode);
+  return env.RELAY_ENROLL_SECRET;
+}
+
+/** A device code's user code, under its purpose's key. */
+function userCodeOf(env: RelayEnv, deviceCode: Uint8Array, purpose: "remote" | "voice") {
+  const secret = enrollSecret(env);
+  return enrollUserCode(purpose === "voice" ? `${secret}:voice` : secret, deviceCode);
 }
 const invalidSetup = (c: Context) => c.json({ error: SETUP_TOKEN_INVALID_ERROR }, 401);

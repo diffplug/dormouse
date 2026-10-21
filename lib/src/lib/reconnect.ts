@@ -103,10 +103,6 @@ export interface CollectPtysOptions {
  */
 export const LIST_RETRY_MS = 3000;
 
-/** Distinct per collection and per webview reload; only ever compared for
- *  equality against the host's echo. */
-let collectSeq = 0;
-
 /**
  * Ask the host for its PTYs and gather the replay each one sends back.
  *
@@ -141,7 +137,8 @@ function collectLivePtysOnce(
   options: CollectPtysOptions = {},
 ): Promise<LivePtys> {
   const accept = options.accept ?? (() => true);
-  const requestId = `init-${++collectSeq}`;
+  // A reload must not reuse a token whose host reply is still in flight.
+  const requestId = `init-${crypto.randomUUID()}`;
   const mine = (detail: { requestId?: string }) =>
     detail.requestId === undefined || detail.requestId === requestId;
   return new Promise<LivePtys>((resolve) => {

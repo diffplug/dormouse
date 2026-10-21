@@ -147,6 +147,9 @@ export const replaceText = (from, to) => (path) => {
   writeFileSync(path, text.replace(from, () => to));
 };
 
+/** A lint run past this is stuck, and must not count as the lint failing. */
+const LINT_TIMEOUT_MS = 2 * 60_000;
+
 /** Run one of the lints in a child and capture the result. */
 function runLint(script) {
   try {
@@ -155,9 +158,11 @@ function runLint(script) {
       stdout: execFileSync('node', [join(repoRoot, 'scripts', script)], {
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
+        timeout: LINT_TIMEOUT_MS,
       }),
     };
   } catch (error) {
+    if (error?.code === 'ETIMEDOUT') throw new Error(`self-test: ${script} was still running after ${LINT_TIMEOUT_MS / 60_000} minutes`);
     return {
       ok: false,
       stdout: typeof error?.stdout === 'string' ? error.stdout : '',

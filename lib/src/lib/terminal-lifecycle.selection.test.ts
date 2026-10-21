@@ -29,10 +29,14 @@ vi.mock('./platform', async () => {
   return { ...actual, getPlatform: () => fakePlatform };
 });
 
+vi.mock('./clipboard', () => ({ writeTextToClipboard: vi.fn() }));
+import { writeTextToClipboard } from './clipboard';
+import { copySelection } from './copy-selection';
+
 import { flipCopyBreak, openCopyEditor, setCopyFormat, setCopyScope } from './copy-editor';
 import type { EditorFormat } from './copy-text';
 import { finalizedSelection, WRAPPING } from './copy-text-fixtures';
-import { beginDrag, flashCopy, getMouseSelectionState, setSelection, type Selection } from './mouse-selection';
+import { beginDrag, COPY_FLASH_MS, flashCopy, getMouseSelectionState, setSelection, type Selection } from './mouse-selection';
 import { getOrCreateTerminal, writeUserInput } from './terminal-registry';
 
 const write = (terminal: Terminal, data: string) => new Promise<void>((resolve) => terminal.write(data, resolve));
@@ -89,8 +93,8 @@ describe('a terminal resize', () => {
     expect(copyEditor!.overrides).toEqual({});
     expect(copyEditor!.scopes[copyEditor!.scope].label).toBe('Whole words');
     expect(copyEditor!.scopes[0].span).toEqual({ start: { row: 0, col: 6 }, end: { row: 2, col: 1 }, block: false });
-    // The moved selection's two edges, the first selection's released.
-    expect(terminal.markers).toHaveLength(2);
+    // The moved selection's reflow edges and scroll anchor; the old ones released.
+    expect(terminal.markers).toHaveLength(3);
   });
 
   it('keeps per-break edits through a resize that moves the selection but keeps the width', async () => {
@@ -125,6 +129,25 @@ describe('a terminal resize', () => {
       expect(getMouseSelectionState(id)).toMatchObject({ selection: { endRow: 2, endCol: 1 }, copyOutcome: 'copied' });
       vi.advanceTimersByTime(700);
       expect(getMouseSelectionState(id)).toMatchObject({ selection: null, copyEditor: null, copyOutcome: null });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([true, false])('keeps a pending clipboard result through reflow (copied: %s)', async copied => {
+    const id = 'resize-copy-' + copied;
+    const terminal = await openEdited(id);
+    let complete!: (result: boolean) => void;
+    vi.mocked(writeTextToClipboard).mockImplementation(() => new Promise(resolve => { complete = resolve; }));
+    vi.useFakeTimers();
+    try {
+      const pending = copySelection(id);
+      terminal.resize(10, 10);
+      complete(copied);
+      await pending;
+      expect(getMouseSelectionState(id)).toMatchObject({ selection: { endRow: 2, endCol: 1 }, copyOutcome: copied ? 'copied' : 'failed' });
+      vi.advanceTimersByTime(COPY_FLASH_MS);
+      expect(getMouseSelectionState(id).selection === null).toBe(copied);
     } finally {
       vi.useRealTimers();
     }

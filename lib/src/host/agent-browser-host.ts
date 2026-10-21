@@ -283,14 +283,14 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
   // up when the daemon is killed, so a reader must know which daemon wrote it.
   // One written before this boot describes no process now running: its pid
   // is whatever process has that number since, so it reads as absent.
-  async function readStateNumber(b: ProviderBinding, ext: 'pid' | 'stream'): Promise<number | undefined> {
+  async function readStateNumber(b: ProviderBinding, ext: 'pid' | 'stream' | 'port'): Promise<number | undefined> {
     try {
       const file = path.join(agentBrowserStateDir(b), `${b.session}.${ext}`);
       const [stat, text] = await Promise.all([fs.stat(file), fs.readFile(file, 'utf8')]);
       // `os.uptime` is whole seconds on some platforms: a second's slack.
       if (stat.mtimeMs < Date.now() - os.uptime() * 1000 - 1000) return undefined;
-      const value = Number.parseInt(text.trim(), 10);
-      return Number.isInteger(value) && value > 0 ? value : undefined;
+      const value = Number(text.trim());
+      return Number.isSafeInteger(value) && value > 0 && (ext === 'pid' || value <= 65535) ? value : undefined;
     } catch {
       return undefined; // absent (no daemon yet, custom dir, or an older CLI)
     }
@@ -397,16 +397,19 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
    * `stream`: a newline-delimited JSON request and one answer line, bounded.
    * The CLI has no verb for the screencast actions (agent-browser 0.31.1), so
    * this is the host's one use of the socket. Anything but a `success: true`
-   * answer — no daemon, no socket (Windows has none), an error, a timeout, an
+   * answer — no daemon, no endpoint, an error, a timeout, an
    * action a later agent-browser renamed — is a refusal, with its reason.
    */
   async function daemonAction(b: ProviderBinding, stream: number, request: Record<string, unknown>): Promise<string | undefined> {
-    if (process.platform === 'win32') return 'no daemon socket on Windows';
     if ((await liveDaemon(b))?.stream !== stream) return 'not the live daemon of this stream';
+    // Windows daemons publish their actual TCP port; do not guess the CLI's
+    // version-dependent fallback hash when that endpoint is absent or stale.
+    const port = process.platform === 'win32' ? await readStateNumber(b, 'port') : undefined;
+    if (process.platform === 'win32' && port === undefined) return 'no valid daemon port';
     const file = path.join(agentBrowserStateDir(b), `${b.session}.sock`);
     return new Promise<string | undefined>((resolve) => {
       let answer = '';
-      const socket = net.connect(file);
+      const socket = port === undefined ? net.connect(file) : net.connect({ host: '127.0.0.1', port });
       const settle = (refusal: string | undefined) => { socket.destroy(); resolve(refusal); };
       socket.setTimeout(DAEMON_ACTION_TIMEOUT_MS, () => settle('no answer in time'));
       socket.once('error', (error) => settle(error.message));

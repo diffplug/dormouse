@@ -64,6 +64,8 @@ The ladder has no retype (decided 2026-10-03, PR #961 review): no shipped Tool n
 
 The stop silences the run's command-exit watch first. Observed in the innerdogfood harness (2026-10-03): a folder viewer launched while engaged had its exit seen, so the reap's Ctrl+C rang `COMMAND_EXIT` while it sat Doored, and the rehydrate carried that ring back as a TODO; a push or spoken alarm would have announced the host's own housekeeping.
 
+The stop commits at the interrupt (decided 2026-10-21, PR #1286 review). By the time the grace ends the run has usually exited, so skipping the kill restores nothing: it lapses the host hold, turns the Surface into a plain terminal, and drops the payload just captured, where finishing leaves a Tool that rehydrates from it. The window is a few seconds on a Tool already out of sight for the idle threshold.
+
 A preview slot is excluded because its retarget interrupts and retypes in place (Preview slot), which a Session with no shell cannot take. A Tool with an auxiliary helper keeps a second shell alive anyway, and killing the parent would orphan it.
 
 ## Naming

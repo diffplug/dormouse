@@ -124,7 +124,21 @@ const SCRIPT = `(function () {
     });
   }
 
-  function requestList(node) { return request('list?dir=' + encodeURIComponent(node.path)); }
+  function requestList(node) {
+    var version = node.listVersion = (node.listVersion || 0) + 1;
+    return request('list?dir=' + encodeURIComponent(node.path)).then(
+      function (listing) { return { version: version, listing: listing }; },
+      function (error) { return { version: version, error: error }; });
+  }
+
+  // A newer refresh or expansion owns this directory, even if an older request
+  // settles last or waited for another directory in the same refresh batch.
+  function applyResult(node, result) {
+    if (result.version !== node.listVersion) return false;
+    if ('error' in result) throw result.error;
+    apply(node, result.listing);
+    return true;
+  }
 
   // Applies a directory's listing, keeping the nodes (and expansion) of entries that remain.
   function apply(node, listing) {
@@ -152,9 +166,9 @@ const SCRIPT = `(function () {
     node.loaded = true;
   }
 
-  function load(node) { return requestList(node).then(function (listing) { apply(node, listing); }); }
+  function load(node) { return requestList(node).then(function (result) { applyResult(node, result); }); }
 
-  // Lists the root and every loaded, expanded directory at once, then applies
+  // Lists the root and every expanded directory at once, then applies
   // the listings top-down, skipping a directory that a failed listing or its
   // parent's new one left out. A collapsed directory reloads when next expanded.
   function refresh() {
@@ -163,18 +177,16 @@ const SCRIPT = `(function () {
       dirs.push(node);
       node.children.forEach(function (child) {
         if (!child.expanded) child.loaded = false;
-        else if (child.loaded) walk(child);
+        else walk(child);
       });
     })(root);
-    return Promise.all(dirs.map(function (node) {
-      return requestList(node).then(function (listing) { return { listing: listing }; }, function (error) { return { error: error }; });
-    })).then(function (results) {
+    return Promise.all(dirs.map(requestList)).then(function (results) {
       var applied = new Set([null]);
       var error = null;
       dirs.forEach(function (node, i) {
         if (!applied.has(node.parent) || (node.parent && node.parent.children.indexOf(node) < 0)) return;
-        if ('error' in results[i]) error = error || results[i].error;
-        else { apply(node, results[i].listing); applied.add(node); }
+        try { if (applyResult(node, results[i])) applied.add(node); }
+        catch (caught) { error = error || caught; }
       });
       if (error) throw error;
     });

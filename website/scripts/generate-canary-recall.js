@@ -35,7 +35,7 @@ export const WINDOW_DAYS = 30;
 export const RECORD_FIELDS = ['caught', 'run_url', 'seeded', 'unfinished'];
 export const CODEX_WORKFLOW = 'codex-audit-report.yaml';
 /** `codex-audit-report.yaml`'s `run-name`. */
-export const CODEX_TITLE = 'codex-audit-report (advisory, not an audit)';
+export const CODEX_TITLE = 'codex second-opinion audit report';
 export const CODEX_ARTIFACT = 'codex-recall';
 /** Every field `codexRecord` in scripts/security-audit-public-body.mjs writes, and no other. */
 export const CODEX_FIELDS = ['caught', 'claude_run_url', 'commit', 'either', 'model', 'run_url', 'seeded', 'unfinished'];

@@ -30,7 +30,7 @@ export async function settleTerminals(opts?: { timeoutMs?: number }): Promise<vo
   await waitForPrimedState(opts);
   const settled = () => {
     const terms = liveTerminals();
-    return terms.length > 0 && terms.every(hasContent);
+    return terms.length > 0 && terms.every(terminalHasContent);
   };
   // Unlike the gates below, `settled` is not monotonic: a terminal that mounts
   // during `waitForCondition`'s trailing paint frames flips it back to false. So
@@ -43,7 +43,7 @@ export async function settleTerminals(opts?: { timeoutMs?: number }): Promise<vo
     const terms = liveTerminals();
     throw new Error(terms.length === 0
       ? 'no terminal ever mounted'
-      : `${terms.filter((t) => !hasContent(t)).length} of ${terms.length} terminals never wrote content`);
+      : `${terms.filter((t) => !terminalHasContent(t)).length} of ${terms.length} terminals never wrote content`);
   }
 }
 
@@ -197,7 +197,7 @@ function liveTerminals(): Terminal[] {
     .filter((t): t is Terminal => t !== null);
 }
 
-function hasContent(term: Terminal): boolean {
+export function terminalHasContent(term: Terminal): boolean {
   const buf = term.buffer.active;
   if (buf.cursorX > 0 || buf.cursorY > 0) return true;
   const line = buf.getLine(buf.cursorY);

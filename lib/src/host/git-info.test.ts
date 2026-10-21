@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -86,9 +86,25 @@ describe('gitInfo', () => {
     expect(spawned).toEqual([]);
   });
 
+  it('never follows a .git file or link that names a share, and runs no git there', async () => {
+    // Each names `<root>/myrepo/.git` to POSIX, so git itself would answer:
+    // only the refusal stops it.
+    const share = `/${join(root, 'myrepo/.git')}`;
+    const gitfile = join(root, 'planted-gitfile');
+    mkdirSync(gitfile);
+    writeFileSync(join(gitfile, '.git'), `gitdir: ${share}\n`);
+    const gitlink = join(root, 'planted-gitlink');
+    mkdirSync(gitlink);
+    symlinkSync(share, join(gitlink, '.git'));
+    spawned.length = 0;
+    expect(await gitInfo([gitfile, gitlink])).toEqual({ [gitfile]: null, [gitlink]: null });
+    expect(spawned).toEqual([]);
+  });
+
   it('hands git the canonical path, never the symlink it was given', async () => {
     const link = join(root, 'link-to-src');
-    symlinkSync(join(root, 'myrepo/src'), link);
+    // A directory junction exercises realpath without Windows symlink privileges.
+    symlinkSync(join(root, 'myrepo/src'), link, process.platform === 'win32' ? 'junction' : 'dir');
     spawned.length = 0;
     expect((await gitInfo([link]))[link]).toEqual({ repo: 'myrepo', branch: 'main' });
     const dirs = spawned.map((args) => args[args.indexOf('-C') + 1]);
@@ -106,6 +122,7 @@ describe('gitInfo', () => {
   it('leaves a lookup past its deadline out of the answer, never answering null', async () => {
     const hung = join(root, 'hung');
     mkdirSync(hung, { recursive: true });
+    git(hung, 'init', '-q');
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     try {
       const answer = gitInfo([hung]);

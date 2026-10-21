@@ -97,6 +97,7 @@ flowchart TD
 
 - A leaf removed from a two-child split whose survivor is a single leaf always degrades to neighbor (50/50), since the collapse erases the fingerprinted parent. A root-leaf removal reaches only fallback.
 - A survivor that is a split subtree keeps exact, so `A | (B over C)` restores beside the whole `B/C` column rather than inside it — including after that subtree flattened into its grandparent; a changed group degrades to neighbor.
+- **Must reject malformed restore tokens without changing the tree.** **Must ignore a Door token naming another Surface.** Reattach fallback: [layout.md](layout.md#reattach-click-door-entermd-on-door-or-drag-out).
 - **Must supply a live `fallbackRef` when the exact and neighbor tiers fail in a nonempty tree.**
 
 Source of truth: `RestoreToken` / `restore` in `lib/src/lib/lath/ops.ts`.

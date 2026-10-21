@@ -405,7 +405,8 @@ jobs:
           workspaces: standalone/src-tauri
 
       # The full TypeScript check stays on Linux. This job covers native Rust,
-      # the dor launchers, and actual shell execution for browser initialization.
+      # the dor launchers, and actual shell execution for browser initialization
+      # and for the paths a drop types into cmd and PowerShell.
       - name: Cargo test
         run: cargo test
         working-directory: standalone/src-tauri
@@ -418,12 +419,12 @@ jobs:
 
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
-      # This small host-only suite needs no native addon builds.
-      - name: Install browser shell test dependencies
+      # These small suites need no native addon builds.
+      - name: Install shell test dependencies
         run: pnpm install --frozen-lockfile --ignore-scripts
 
-      - name: Browser launch shell tests
-        run: pnpm --dir lib exec vitest run src/host/browser-launch-env.test.ts
+      - name: Windows browser host and shell tests
+        run: pnpm --dir lib exec vitest run src/host/browser-launch-env.test.ts src/host/agent-browser-host.test.ts src/lib/shell-escape.test.ts
 
       # node-pty ships the Windows addon and ConPTY DLL as prebuilds, so the
       # install above suffices. The Linux suite cannot exercise native close.

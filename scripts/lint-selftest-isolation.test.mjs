@@ -12,7 +12,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { execFile, execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { lstatSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -49,11 +49,33 @@ function changes(before, after) {
   return changed;
 }
 
+/**
+ * Past this a self-test is stuck, not slow: they all finish in about a minute
+ * together, and a hang would otherwise run silently into the CI step timeout.
+ */
+const SELFTEST_TIMEOUT_MS = 5 * 60_000;
+
 function run(script) {
   return new Promise((resolve) => {
-    execFile('node', [join(repoRoot, 'scripts', script)], { cwd: repoRoot, maxBuffer: 64 * 1024 * 1024 }, (error, stdout, stderr) =>
-      resolve({ script, code: error ? (error.code ?? error.signal) : 0, output: `${stdout}${stderr}` }),
-    );
+    // Its own process group, so the timeout also stops the sandbox re-run
+    // (`rerunInSandbox`) it waits on, which holds the output pipes open.
+    const child = spawn('node', [join(repoRoot, 'scripts', script)], { cwd: repoRoot, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    let output = '';
+    child.stdout.on('data', (chunk) => (output += chunk));
+    child.stderr.on('data', (chunk) => (output += chunk));
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      try {
+        process.kill(-child.pid, 'SIGKILL');
+      } catch {
+        // The group exited on its own just now.
+      }
+    }, SELFTEST_TIMEOUT_MS);
+    child.on('close', (code, signal) => {
+      clearTimeout(timer);
+      resolve({ script, code: timedOut ? `killed after ${SELFTEST_TIMEOUT_MS / 60_000} minutes` : (code ?? signal), output });
+    });
   });
 }
 

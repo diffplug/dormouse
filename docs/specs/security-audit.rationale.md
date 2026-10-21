@@ -10,6 +10,8 @@ The three release-gate pieces are named separately because they break independen
 
 **Why the expected values live in a file.** The script needs the spec's values as data; `.github/audit/` sits in `.github/workflows/workflow-audit.yaml`'s window, so an edit to them is surfaced like an edit to a prompt, and `ci-and-secrets` reads the file against its spec on every full run.
 
+The local unauthenticated probe returned an inconclusive result on Windows despite receiving HTTP 404 (2026-10-21): curl failed to write the response body to a Unix-only null-device path. A local HTTP regression covers real 404 and 200 responses plus a connection failure.
+
 ## Skipping an unchanged audit
 
 **Why a skip is safe.** A model pass over the same commit and the same GitHub state reads the same inputs; repeating it nightly bought variance, not coverage, at about $28 a run (2026-10). The deterministic checks still run every night, so live drift in a setting is caught whether or not the domains run. **Why seven days.** The domains also read what neither input records — a mutable upstream tag's content, npm attestations, models improving — so a skip never outlives a week. The tend tag's commit is hashed, so moving it forces a full run. **Why a dispatch never skips.** The release gate dispatches one and must audit the tag it ships, and a maintainer dispatching by hand wants a full run.
@@ -207,6 +209,8 @@ gh secret set AUDIT_PAT --env security-audit --repo diffplug/dormouse --body 'gi
 **Why a second model family (2026-10).** Every domain, the canary's included, runs on one vendor's models, so a blind spot they share is invisible to the recall figure. Codex reads the same prompts and seeds, which isolates the model as the variable: the either line is what the two together would catch.
 
 **Why it never gates.** A gate needs a run that is reproducible on the release tag, with credentials CI holds; the second-opinion audit runs on a maintainer's machine and login. Its value is a second opinion and a recall comparison, not a pass.
+
+**Why a session per work stream (2026-10).** The first nightly runs handed Codex the whole preamble: with no subagents to wait for, it ran the delegate wait loop anyway and sat out its deadline, about 30 minutes per domain. `remote` in one session also left most of its rules not fully traced; a session per stream gives each its own context, as a Claude delegate has.
 
 **Why the either count may be empty (2026-10).** Claude's scorecard sits in its canary run's encrypted transcript, which not every machine that runs Codex can decrypt. Codex's own counts stand without it; a zero in its place would plot a false either point.
 
