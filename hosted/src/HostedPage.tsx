@@ -1,9 +1,9 @@
-import type { Dispatch, FormEvent, RefObject, SetStateAction } from "react";
+import { useEffect, useRef, type Dispatch, type FormEvent, type RefObject, type SetStateAction } from "react";
 import { providerNames, type Account, type Computer, type HostedVoice, type Passkey, type Provider, type Session } from "./api";
 import { RECENT_LOGIN_WINDOW, TERMS_VERSION } from "../server/policy-constants";
 import { ConfirmDigits } from "./ConfirmDigits";
 import type { Enrollment } from "./enrollment";
-import { keepRead, type Notice, type PageError } from "./settle";
+import type { Notice, PageError } from "./settle";
 
 export const SUBSCRIBE_URL = "https://nedshed.dev/subscribe";
 
@@ -24,7 +24,6 @@ export interface HostedPageProps {
   email: string;
   code: string;
   enterCode: boolean;
-  codeInput: RefObject<HTMLInputElement | null>;
   comingSoon: boolean;
   fresh: boolean | null;
   act: (label: string, action: () => Promise<unknown>) => Promise<void>;
@@ -39,21 +38,23 @@ export interface HostedPageProps {
   setEmail: Dispatch<SetStateAction<string>>;
   setCode: Dispatch<SetStateAction<string>>;
   setEnterCode: Dispatch<SetStateAction<boolean>>;
-  setNotice: Dispatch<SetStateAction<Notice | null>>;
-  setError: Dispatch<SetStateAction<PageError | null>>;
   sendCode: () => Promise<void>;
   noteContinued: () => void;
   social: (provider: Provider, linking: boolean) => Promise<void>;
-  alreadyHaveCode: () => void;
+  changeEmail: () => void;
 }
 
 export function HostedPage({
   session, enabled, accounts, hostedVoice, turnOffDialog, computers, passkeys,
-  enrolling, loading, busy, error, notice, email, code, enterCode, codeInput,
+  enrolling, loading, busy, error, notice, email, code, enterCode,
   comingSoon, fresh, act, refresh, approve, signOut, clearEnrollment, turnOffVoice,
-  removeOne, removeKey, submit, setEmail, setCode, setEnterCode, setNotice, setError,
-  sendCode, noteContinued, social, alreadyHaveCode,
+  removeOne, removeKey, submit, setEmail, setCode, setEnterCode, changeEmail,
+  sendCode, noteContinued, social,
 }: HostedPageProps) {
+  const codeInput = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (enterCode) codeInput.current?.focus();
+  }, [enterCode]);
   // A lapsed account still sees, and may turn off, a Natural Voice left on.
   const voiceShown = !!hostedVoice && (hostedVoice.entitled || hostedVoice.on);
 
@@ -430,12 +431,7 @@ export function HostedPage({
                           type="button"
                           className="text-button"
                           disabled={!!busy}
-                          onClick={() => {
-                            setEnterCode(false);
-                            setCode("");
-                            setNotice(null);
-                            setError(keepRead);
-                          }}
+                          onClick={changeEmail}
                         >
                           Change email
                         </button>
@@ -453,7 +449,11 @@ export function HostedPage({
                         type="button"
                         className="text-button"
                         disabled={!!busy}
-                        onClick={alreadyHaveCode}
+                        onClick={(event) => {
+                          const field = event.currentTarget.form?.elements.namedItem("email");
+                          if ((field as HTMLInputElement | null)?.reportValidity())
+                            setEnterCode(true);
+                        }}
                       >
                         I already have a code
                       </button>

@@ -1,18 +1,18 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { expect, fn } from "storybook/test";
-import { HostedStory, frameParameters, SESSION, ACCOUNT, COMPUTERS, PASSKEYS } from "./fixtures";
+import { providers } from "../api";
+import { hostedMeta, SESSION, ACCOUNT, COMPUTERS, PASSKEYS } from "./fixtures";
 import { settledFrame } from "./canvas";
 
 const meta = {
-  title: "Hosted/Account", component: HostedStory, parameters: frameParameters,
+  ...hostedMeta, title: "Hosted/Account",
   args: { session: SESSION, accounts: [{ providerId: "github" }] },
-  play: async ({ canvasElement }) => { await settledFrame(canvasElement); },
-} satisfies Meta<typeof HostedStory>;
+} satisfies Meta<typeof hostedMeta.component>;
 export default meta;
 type Story = StoryObj<typeof meta>;
 export const Ordinary: Story = {};
 export const ProviderOnly: Story = { args: { session: { ...SESSION, user: { ...SESSION.user, email: null } } } };
-export const AllProvidersConnected: Story = { args: { accounts: ["github", "google", "microsoft", "apple"].map(providerId => ({ providerId })) } };
+export const AllProvidersConnected: Story = { args: { accounts: providers.map((providerId) => ({ providerId })) } };
 export const StaleLogin: Story = { args: { fresh: false },
   play: async ({ canvasElement }) => {
     const canvas = await settledFrame(canvasElement);
@@ -23,7 +23,7 @@ export const ConnectingProvider: Story = { args: { busy: "google" } };
 export const SigningOut: Story = { args: { busy: "logout" } };
 export const EmptyServices: Story = { args: { computers: [], passkeys: [], hostedVoice: { entitled: true, on: false } } };
 export const Populated: Story = { args: ACCOUNT };
-export const Phone: Story = { args: { ...ACCOUNT, width: 390 } };
+export const Phone: Story = { args: { ...ACCOUNT, phone: true } };
 export const ComputersUnavailable: Story = { args: { passkeys: PASSKEYS, computers: null } };
 export const PasskeysUnavailable: Story = { args: { computers: COMPUTERS, passkeys: null } };
 export const LongIdentity: Story = { args: {

@@ -114,7 +114,6 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [enterCode, setEnterCode] = useState(false);
-  const codeInput = useRef<HTMLInputElement>(null);
   const actionPending = useRef(false);
   const refreshGeneration = useRef(0);
   // Bumped by every action and on unmount: stops re-reading for a Pending.
@@ -205,9 +204,6 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
       document.removeEventListener("visibilitychange", visible);
     };
   }, [refresh]);
-  useEffect(() => {
-    if (enterCode) codeInput.current?.focus();
-  }, [enterCode]);
   // A failed lookup keeps its error and Retry on screen rather than sending
   // a member who is signed in away during an outage, even once that error is
   // cleared (a new enrollment link, Don't approve).
@@ -385,20 +381,22 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
     session &&
     Date.now() - Date.parse(session.session.createdAt) < LOGIN_FRESH_AGE_MS;
 
-  const alreadyHaveCode = () => {
-    if (document.querySelector<HTMLInputElement>("#email")?.reportValidity())
-      setEnterCode(true);
+  const changeEmail = () => {
+    setEnterCode(false);
+    setCode("");
+    setNotice(null);
+    setError(keepRead);
   };
 
   return <HostedPage
     session={session} enabled={enabled} accounts={accounts} hostedVoice={hostedVoice}
     turnOffDialog={turnOffDialog} computers={computers} passkeys={passkeys}
     enrolling={enrolling} loading={loading} busy={busy} error={error} notice={notice}
-    email={email} code={code} enterCode={enterCode} codeInput={codeInput}
+    email={email} code={code} enterCode={enterCode}
     comingSoon={comingSoon} fresh={fresh} act={act} refresh={refresh} approve={approve}
     signOut={signOut} clearEnrollment={clearEnrollment} turnOffVoice={turnOffVoice}
     removeOne={removeOne} removeKey={removeKey} submit={submit} setEmail={setEmail}
-    setCode={setCode} setEnterCode={setEnterCode} setNotice={setNotice} setError={setError}
-    sendCode={sendCode} noteContinued={noteContinued} social={social} alreadyHaveCode={alreadyHaveCode}
+    setCode={setCode} setEnterCode={setEnterCode} changeEmail={changeEmail}
+    sendCode={sendCode} noteContinued={noteContinued} social={social}
   />;
 }

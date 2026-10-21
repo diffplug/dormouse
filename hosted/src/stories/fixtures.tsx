@@ -1,7 +1,8 @@
-import { useContext, useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { HostedPage, type HostedPageProps } from "../HostedPage";
-import { HostedDocument, HostedFrame } from "./HostedFrame";
-import type { Computer, Passkey, Session } from "../api";
+import { HostedFrame } from "./HostedFrame";
+import { settledFrame } from "./canvas";
+import { providers, type Computer, type Passkey, type Session } from "../api";
 
 export const SESSION: Session = {
   user: { id: "account-studio", name: "Alex", email: "alex@example.com" },
@@ -17,45 +18,35 @@ export const PASSKEYS: Passkey[] = [
 ];
 export const ENROLLMENT = { code: "7KQM-X4TD", purpose: "remote" as const };
 export const ACCOUNT = { session: SESSION, computers: COMPUTERS, passkeys: PASSKEYS };
-export const ENABLED = ["github", "google", "microsoft", "apple"] as const;
-export type HostedStoryArgs = Partial<HostedPageProps> & { width?: number; dark?: boolean };
+export type HostedStoryArgs = Partial<HostedPageProps> & { phone?: boolean; dark?: boolean };
 const idle = async () => {};
 const nothing = () => {};
 
 /** Only form editing is local. Fixtures do not emulate authentication, polling,
  * or account mutations; App's DOM tests exercise those production handlers. */
-function PageFixture(args: HostedStoryArgs) {
-  const document = useContext(HostedDocument)!;
+export function HostedStory({ phone, dark, ...args }: HostedStoryArgs) {
   const [email, setEmail] = useState(args.email ?? "");
   const [code, setCode] = useState(args.code ?? "");
   const [enterCode, setEnterCode] = useState(args.enterCode ?? false);
-  const [notice, setNotice] = useState(args.notice ?? null);
-  const [error, setError] = useState(args.error ?? null);
-  const codeInput = useRef<HTMLInputElement>(null);
   const turnOffDialog = useRef<HTMLDialogElement>(null);
-  useEffect(() => { if (enterCode) codeInput.current?.focus(); }, [enterCode]);
-  return <HostedPage
-    session={null} enabled={[...ENABLED]} accounts={[]} hostedVoice={null}
+  return <HostedFrame phone={phone} dark={dark}><HostedPage
+    session={null} enabled={[...providers]} accounts={[]} hostedVoice={null}
     computers={null} passkeys={null} enrolling={null} loading={false} busy=""
-    comingSoon={false} fresh={true}
+    error={null} notice={null} comingSoon={false} fresh={true}
     act={async (_label, action) => { await action(); }} refresh={idle} approve={idle}
     signOut={idle} clearEnrollment={nothing} turnOffVoice={idle}
     removeOne={idle} removeKey={idle} submit={(event) => event.preventDefault()}
     sendCode={idle} noteContinued={nothing} social={idle}
-    alreadyHaveCode={() => {
-      if (document.querySelector<HTMLInputElement>("#email")?.reportValidity()) setEnterCode(true);
-    }}
     {...args}
-    email={email} code={code} enterCode={enterCode} notice={notice} error={error}
-    setEmail={setEmail} setCode={setCode} setEnterCode={setEnterCode}
-    setNotice={setNotice} setError={setError} codeInput={codeInput} turnOffDialog={turnOffDialog}
-  />;
-}
-export function HostedStory(args: HostedStoryArgs) {
-  return <HostedFrame width={args.width} dark={args.dark}><PageFixture {...args} /></HostedFrame>;
+    email={email} code={code} enterCode={enterCode}
+    setEmail={setEmail} setCode={setCode} setEnterCode={setEnterCode} turnOffDialog={turnOffDialog}
+    changeEmail={() => { setEnterCode(false); setCode(""); }}
+  /></HostedFrame>;
 }
 
-export const frameParameters = {
-  layout: "fullscreen",
-  docs: { story: { inline: false, height: "1000px" } },
+/** Each story file spreads this and adds its title and args. */
+export const hostedMeta = {
+  component: HostedStory,
+  parameters: { layout: "fullscreen" },
+  play: async ({ canvasElement }: { canvasElement: HTMLElement }) => { await settledFrame(canvasElement); },
 } as const;
