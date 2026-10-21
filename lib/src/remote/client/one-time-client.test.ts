@@ -513,15 +513,20 @@ describe('OneTimeClient: the confirmation', () => {
 
     // A refused upgrade, where a browser reports `error` and nothing else.
     const refused = new FakeSocket();
+    let created = false;
     const errored = new OneTimeClient({
       wsOrigin: WS_ORIGIN,
-      createWebSocket: () => refused,
+      createWebSocket: () => {
+        created = true;
+        return refused;
+      },
       now: clock.now,
       setTimer: clock.setTimer,
       visibility: VISIBLE,
     });
     const erroredResult = errored.connectOnce(burrow.link, LABEL, () => {});
-    await settle();
+    // The socket comes after the handshake's WebCrypto, which a fixed settle can outrun.
+    await flushUntil(() => (created ? true : undefined));
     refused.emitError();
     expect(await erroredResult).toEqual({ ok: false, message: ONE_TIME_UNREACHABLE_MESSAGE });
 
