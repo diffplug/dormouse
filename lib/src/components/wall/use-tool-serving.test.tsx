@@ -12,9 +12,10 @@ import { recordToolAnnounce, resetToolAnnounces } from '../../lib/tool-announce-
 import { recordToolEvents } from '../../lib/tool-events';
 import { TerminalProtocolParser } from '../../lib/terminal-protocol';
 import { useToolServing } from './use-tool-serving';
+import { surfaceKindFromParams } from './browser-surface';
 import { retargetToolLeaf } from './preview-slot';
 import { captureToolParams } from './tool-transfer';
-import { createLathWallEngine, toolLeafMeta } from './lath-wall-engine';
+import { becomeTerminalMeta, createLathWallEngine, toolLeafMeta } from './lath-wall-engine';
 import type { OpenPort } from '../../lib/platform/types';
 
 const controllerMocks = vi.hoisted(() => ({
@@ -496,6 +497,23 @@ it('ignores a scan that finishes after the command has changed', async () => {
   currentCommand = 'cat other.log';
   await act(async () => { resolve([tcp(6006)]); });
   expect(state.params.url).toBeUndefined();
+});
+
+it.each(['iframe', 'agent-browser-screencast', 'playwright-screencast'])('does not turn a broken-off Tool into a %s browser when its scan finishes', async (toolRender) => {
+  const { lath, state } = toolEngine({ surfaceType: 'tool', command: 'x', toolPort: 'announced', toolRender });
+  recordToolAnnounce('tool-1', { port: 6006, name: null, key: null, dehydrate: false, persist: null });
+  const gate = Promise.withResolvers<OpenPort[]>();
+  const platform = new FakePtyAdapter();
+  platform.getOpenPorts = vi.fn(() => gate.promise);
+  setPlatform(platform);
+  function Probe() { useToolServing({ lath, doorsRef: { current: [] } }); return null; }
+  await act(async () => root.render(<Probe />));
+  // Break keeps the command running in the terminal but releases Tool designation.
+  lath.store.setMeta('tool-1', becomeTerminalMeta(lath.getMeta('tool-1')!, null));
+  await act(async () => gate.resolve([tcp(6006)]));
+  expect(surfaceKindFromParams(state.params)).toBe('terminal');
+  expect(state.params.url).toBeUndefined();
+  expect(state.params.renderMode).toBeUndefined();
 });
 
 it('keeps the destination and browser binding after a Workspace transfer', async () => {
