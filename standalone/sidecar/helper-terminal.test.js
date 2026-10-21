@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const fs = require('node:fs');
-const { create, getDescendantPids, openNativeDirectory, shellHasWork } = require('./pty-core');
+const { create, getOpenPortsForPids, openNativeDirectory, shellHasWork } = require('./pty-core');
 
 test('Windows folder opening completes on launch and still reports spawn errors', () => {
   const child = new EventEmitter();
@@ -71,14 +71,13 @@ test('Windows refuses a folder whose path Explorer would split at a comma', () =
 
 test('process inspection fails closed while ordinary port discovery remains fail-soft', async () => {
   const runtime = { platform: 'darwin', execFile() { throw new Error('ps failed'); } };
-  assert.deepEqual(await getDescendantPids(42, runtime), [42]);
+  assert.deepEqual(await getOpenPortsForPids([{ pid: 42 }], runtime), new Map([[42, []]]));
   await assert.rejects(shellHasWork(42, '/bin/zsh', runtime), /inspect/);
 });
 
 test('work inspection requires the terminal process to appear in the process table', async () => {
   for (const output of ['', 'invalid response', '1 0\n123 1']) {
     const runtime = { platform: 'darwin', execFile() { return output; } };
-    assert.deepEqual(await getDescendantPids(42, runtime), [42]);
     await assert.rejects(shellHasWork(42, '/bin/zsh', runtime), /inspect/);
   }
   assert.equal(await shellHasWork(42, '/bin/zsh', { platform: 'darwin', execFile() { return '42 1'; } }), false);
