@@ -41,12 +41,31 @@ export function stripMouseReportsFromInput(data: string): string {
   return data.replace(MOUSE_REPORT_TOKENS, '');
 }
 
+/** A wheel tick: button 64–67 with any modifiers, never motion. X10 and URXVT
+ *  carry the button offset by 32; SGR carries it bare. */
+function isWheelReport(report: string): boolean {
+  const button = report[2] === 'M' ? report.charCodeAt(3) - 32
+    : report[2] === '<' ? parseInt(report.slice(3), 10)
+    : parseInt(report.slice(2), 10) - 32;
+  return (button & 0b1110_0000) === 64;
+}
+
+/**
+ * Strips the mouse reports no deliberate gesture made: hover, drag motion, and
+ * buttons, a click acknowledging through the Pane's DOM handler instead. A
+ * wheel tick stays — scrolling a program is input to it, as the arrow keys
+ * xterm sends for the wheel on an alternate screen without mouse reporting are.
+ */
+export function stripPassiveMouseReportsFromInput(data: string): string {
+  return data.replace(MOUSE_REPORT_TOKENS, (report) => (isWheelReport(report) ? report : ''));
+}
+
 /** Input a program may start work on: anything but terminal replies — a focus
- *  report among them — and mouse reports, read as the renderer reads them. */
+ *  report among them — and passive mouse reports, read as the renderer reads them. */
 export function inputCanStartWork(data: string): boolean {
   // Both start with ESC; checking first keeps a large paste off the regexes.
   if (data.length > 0 && data.charCodeAt(0) !== 0x1b) return true;
-  return !inputIsReplayTerminalReport(data) && stripMouseReportsFromInput(data).length > 0;
+  return !inputIsReplayTerminalReport(data) && stripPassiveMouseReportsFromInput(data).length > 0;
 }
 
 // Baseline for a dead Session's terminal only; a live process still owns its modes. The

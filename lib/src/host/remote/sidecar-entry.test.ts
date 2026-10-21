@@ -391,12 +391,20 @@ describe('PTYs', () => {
     expect(atWrite).toEqual([{ status: 'WATCHING_DISABLED', todo: false }]);
   });
 
-  // A phone's tap or scroll in tmux or vim reaches the PTY, as the desktop's does.
-  it.each(['\x1b[<64;10;5M', '\x1b[M`!!', '\x1b[64;10;5M'])('acknowledges nothing for a Client\'s mouse report %j', (report) => {
+  // A phone's tap in tmux or vim reaches the PTY, as the desktop's does.
+  it.each(['\x1b[<0;10;5M', '\x1b[<35;10;5M', '\x1b[64;10;5M'])('acknowledges nothing for a Client\'s tap or hover report %j', (report) => {
     alerts.notifyFromProtocol('pty-1', REPORT);
     bridge.provider.writePty('pty-1', report);
     expect(written).toEqual([{ id: 'pty-1', data: report }]);
     expect(alerts.getState('pty-1')).toMatchObject({ status: 'ALERT_RINGING', todo: false });
+  });
+
+  // A scroll is the user's input there too, as on the desktop.
+  it.each(['\x1b[<64;10;5M', '\x1b[M`!!'])('acknowledges a Client\'s wheel report %j as input', (report) => {
+    alerts.notifyFromProtocol('pty-1', REPORT);
+    bridge.provider.writePty('pty-1', report);
+    expect(written).toEqual([{ id: 'pty-1', data: report }]);
+    expect(alerts.getState('pty-1').status).not.toBe('ALERT_RINGING');
   });
 
   // The webview holds `untouched`, which decides whether closing asks

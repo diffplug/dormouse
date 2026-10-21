@@ -844,6 +844,23 @@ describe('terminal-registry alert behavior', () => {
     });
   });
 
+  it('Story 12b: scrolling a program never makes its repaint a busy run', () => {
+    const id = 'story-12b';
+    const entry = createSession(id);
+    enableAlert(id);
+    advance(cfg.alert.workStartWindow + 1);
+
+    // Each wheel tick is input, and the program repaints the scrolled view.
+    for (let tick = 0; tick < 30; tick++) {
+      entry.terminal.emitInput('\x1b[<65;10;20M');
+      fakePlatform.sendOutput(id, 'scrolled view');
+      advance(100);
+    }
+    advance(12_000);
+
+    expect(getActivity(id)).toMatchObject({ status: 'NOTHING_TO_SHOW', todo: false });
+  });
+
   it('Story 13: multiple sessions ring independently', () => {
     const alpha = 'story-13-a';
     const beta = 'story-13-b';
@@ -914,6 +931,10 @@ describe('terminal-registry alert behavior', () => {
     ['arrow key', '\x1b[A'],
     ['SS3 key', '\x1bOA'],
     ['mouse report with a real key', '\x1b[<35;10;20Mx'],
+    ['SGR wheel report', '\x1b[<64;10;20M'],
+    ['SGR Ctrl+wheel report', '\x1b[<81;10;20M'],
+    ['urxvt wheel report', '\x1b[96;10;20M'],
+    ['X10 wheel report', '\x1b[M`!!'],
   ])('counts a %s as a keystroke and forwards it unchanged', (_name, input) => {
     const id = 'encoded-input-acknowledges';
     const entry = createSession(id);
@@ -939,7 +960,6 @@ describe('terminal-registry alert behavior', () => {
     ['focus report', '\x1b[I'],
     ['combined replies', '\x1bP1$r0m\x1b\\\x1b[?1;2c'],
     ['SGR hover report', '\x1b[<35;10;20M'],
-    ['SGR wheel report', '\x1b[<64;10;20M'],
     ['SGR release report', '\x1b[<0;10;20m'],
     ['urxvt mouse report', '\x1b[64;10;20M'],
     ['X10 mouse report', '\x1b[M@!!'],

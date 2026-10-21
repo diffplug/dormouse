@@ -15,7 +15,7 @@ import {
 import type { TerminalSemanticEvent } from '../lib/terminal-state';
 import { ToolLaunchLatch } from '../lib/tool-launch-latch';
 import { outputPaints } from '../lib/terminal-controls';
-import { stripMouseReportsFromInput } from '../lib/terminal-report-filter';
+import { stripPassiveMouseReportsFromInput } from '../lib/terminal-report-filter';
 
 /**
  * What the process that owns a PTY does with it on behalf of its alerts, the
@@ -108,11 +108,11 @@ export function alertedPty(alerts: AlertManager, pty: PtyWriteTarget) {
     write,
     /**
      * A remote Client's write, the Burrow having dropped a mirror's terminal
-     * replies: human input unless it holds only mouse reports, which a Client
-     * sends unmarked and the desktop never acknowledges.
+     * replies: human input unless it holds only passive mouse reports, which a
+     * Client sends unmarked and the desktop never acknowledges.
      */
     writeClientInput(id: string, data: string): void {
-      write(id, data, { userInput: stripMouseReportsFromInput(data).length > 0 });
+      write(id, data, { userInput: stripPassiveMouseReportsFromInput(data).length > 0 });
     },
   };
 }

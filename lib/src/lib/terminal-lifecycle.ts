@@ -45,6 +45,7 @@ import {
   inputIsSyntheticTerminalReport,
   REPLAY_MODE_RESET,
   stripMouseReportsFromInput,
+  stripPassiveMouseReportsFromInput,
   writeReplay,
 } from './terminal-report-filter';
 import { getTerminalTheme, paintTerminalHost, startThemeObserver } from './terminal-theme';
@@ -228,14 +229,12 @@ function wireXtermHandlers(
   selection: SelectionWatch,
 ): () => void {
   const inputDisposable = terminal.onData((data) => {
-    // One strip, two readers. While an override is active the reports must not
-    // reach the PTY at all (belt and braces behind DOM interception), so the
-    // stripped chunk *is* the input; with no override the inside program that
-    // asked for them still gets them, but they are never keystrokes either way.
-    const withoutMouseReports = stripMouseReportsFromInput(data);
+    // While an override is active the reports must not reach the PTY at all
+    // (belt and braces behind DOM interception), so the stripped chunk *is* the
+    // input; with no override the inside program that asked for them gets them.
     let input = data;
     if (getMouseSelectionState(id).override !== 'off') {
-      input = withoutMouseReports;
+      input = stripMouseReportsFromInput(data);
       if (input.length === 0) return;
     }
 
@@ -243,10 +242,10 @@ function wireXtermHandlers(
 
     if (isReplayTerminalReport && registry.get(id)?.isReplaying) return;
 
-    // Inside programs can request hover and wheel reports. Mouse-only chunks
-    // are not keystrokes; actual clicks acknowledge through the Pane's DOM
-    // handler. Terminal replies are never keystrokes either.
-    if (isReplayTerminalReport || withoutMouseReports.length === 0) {
+    // Inside programs can request hover and wheel reports. A wheel tick is the
+    // user's input; hover and button reports are not — actual clicks acknowledge
+    // through the Pane's DOM handler. Terminal replies are never input either.
+    if (isReplayTerminalReport || stripPassiveMouseReportsFromInput(input).length === 0) {
       // Forwarded mouse interaction still counts as touched for kill confirmation.
       if (!isReplayTerminalReport) markSessionTouched(id);
       getPlatform().writePty(id, input);
@@ -254,8 +253,8 @@ function wireXtermHandlers(
     }
 
     // CSI/SS3 can encode real keys. The broader filter protects the prompt
-    // recorder only.
-    if (!inputIsSyntheticTerminalReport(input)) {
+    // recorder only; a wheel-only chunk types no text.
+    if (!inputIsSyntheticTerminalReport(input) && stripMouseReportsFromInput(input).length > 0) {
       recordTerminalUserInput(id, input, makePromptLineReader(terminal));
     }
     writeUserInput(id, input);
