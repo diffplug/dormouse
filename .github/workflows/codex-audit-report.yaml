@@ -1,0 +1,113 @@
+name: codex-audit-report
+
+# Publishes the red team's report (docs/specs/security-audit.md -> "Red team"):
+# what a maintainer's `scripts/security-audit-local.sh --engine codex` run
+# computed, typed in as dispatch inputs. Nothing here runs a model or reads a
+# secret, and nothing here gates a release: release.yml waits on
+# security-audit.yaml alone. The inputs are non-secret by construction —
+# computed verdicts and counts, never a finding — and
+# `scripts/security-audit-public-body.mjs` checks each against its pattern,
+# and the counts against the CI canary run they share seeds with, before it
+# posts anything.
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: "The commit on main the Codex run audited (40-hex)"
+        type: string
+        required: true
+      model:
+        description: "The Codex model the run used"
+        type: string
+        required: true
+        default: gpt-6-sol
+      verdicts:
+        description: "Each domain's computed verdict: `domain=PASS|FAIL|INCONCLUSIVE …`; empty for a canary alone"
+        type: string
+        default: ""
+      canary_run:
+        description: "The CI canary run whose key seeded the Codex canary; empty for verdicts alone"
+        type: string
+        default: ""
+      canary_seeded:
+        description: "Seeds applied"
+        type: string
+        default: ""
+      canary_caught:
+        description: "Seeds Codex caught"
+        type: string
+        default: ""
+      canary_either:
+        description: "Seeds Claude or Codex caught"
+        type: string
+        default: ""
+      canary_unfinished:
+        description: "Codex domains that left no finished report"
+        type: string
+        default: ""
+
+run-name: codex-audit-report (advisory, not an audit)
+
+# Each job declares its own.
+permissions: {}
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # `issues: write` for the one comment on the status issue; `actions: read`
+    # to read the CI canary run and download its `canary-recall`.
+    permissions:
+      contents: read
+      issues: write
+      actions: read
+    steps:
+      - name: Refuse any ref but main
+        run: |
+          [ "$GITHUB_REF" = refs/heads/main ] && exit 0
+          echo "::error::A red-team report publishes from main only."
+          exit 1
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: package.json
+
+      # Inputs reach the builder through the environment, never interpolated
+      # into the script. It refuses a dispatch by anyone but an admin.
+      - name: Publish the red-team report
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          COMMIT: ${{ inputs.commit }}
+          MODEL: ${{ inputs.model }}
+          VERDICTS: ${{ inputs.verdicts }}
+          CANARY_RUN: ${{ inputs.canary_run }}
+          CANARY_SEEDED: ${{ inputs.canary_seeded }}
+          CANARY_CAUGHT: ${{ inputs.canary_caught }}
+          CANARY_EITHER: ${{ inputs.canary_either }}
+          CANARY_UNFINISHED: ${{ inputs.canary_unfinished }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/codex-recall"
+          node scripts/security-audit-public-body.mjs --engine codex \
+            --date "$(date -u +%Y-%m-%dT%H:%MZ)" --run-url "$RUN_URL" \
+            --commit "$COMMIT" --model "$MODEL" --verdicts "$VERDICTS" \
+            --canary-run "$CANARY_RUN" --canary-seeded "$CANARY_SEEDED" \
+            --canary-caught "$CANARY_CAUGHT" --canary-either "$CANARY_EITHER" \
+            --canary-unfinished "$CANARY_UNFINISHED" \
+            --record "$RUNNER_TEMP/codex-recall/codex-recall.json"
+
+      # The counts website/scripts/generate-canary-recall.js reads beside the
+      # CI canary run's own `canary-recall`.
+      - name: Upload the red-team recall
+        if: inputs.canary_run != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: codex-recall
+          path: ${{ runner.temp }}/codex-recall/codex-recall.json
+          retention-days: 90
+          if-no-files-found: error

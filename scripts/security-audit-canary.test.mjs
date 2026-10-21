@@ -3,7 +3,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
-import { CANARY_DOMAINS, POOL_DIR, parseSeed, publicRecord, readPool, redact, score, shuffle, summaryLine } from './security-audit-canary.mjs';
+import { CANARY_DOMAINS, POOL_DIR, parseSeed, publicRecord, readPool, redact, score, shuffle, summaryLine, union } from './security-audit-canary.mjs';
 import { SENTINEL, domains, ruleIndex } from './security-audit-report.mjs';
 import { repoRoot as repo, tempDir, workflowRunBlock } from './lint-kit.mjs';
 
@@ -435,3 +435,45 @@ test('the local canary seeds a copy, runs the code domains, scores, and files no
   assert.equal(execFileSync(realGit, ['status', '--porcelain'], { cwd: dir, encoding: 'utf8' }), '');
   assert.ok(existsSync(join(dir, POOL_DIR, 'room.patch')));
 });
+
+// The red team: the same seeds under a CI run's key, scored against that
+// run's scorecard, and the publishing command printed, never run.
+test('the local Codex canary takes a CI run\'s key, counts either engine\'s catches, and files nothing', (t) => {
+  const { base, dir, bin, env } = checkout(t);
+  stub(bin, 'pnpm', '');
+  stub(bin, 'claude', `
+    const fs = require('node:fs');
+    const output = process.argv[3].match(/\\*\\*Output file:\\*\\* \\x60([^\\x60]+)\\x60/)[1];
+    fs.writeFileSync(output, ${JSON.stringify(fragment(warning('WARNING', 'src/room.ts:1')))});
+  `);
+  const first = spawnSync('bash', ['scripts/security-audit-local.sh', 'canary', '3', '--key', '42'], { cwd: dir, env, encoding: 'utf8' });
+  assert.equal(first.status, 0, first.stderr);
+  const claudeCard = first.stdout.match(/^==> scorecard: (\S+);/m)[1];
+  // Codex reports nothing, so either engine caught what Claude did.
+  stub(bin, 'codex', `
+    const fs = require('node:fs');
+    const args = process.argv.slice(2);
+    fs.appendFileSync(process.env.CALLS, 'codex ' + args.slice(0, -1).join(' ') + '\\n');
+    const output = args[args.length - 1].match(/\\*\\*Output file:\\*\\* \\x60([^\\x60]+)\\x60/)[1];
+    fs.writeFileSync(output, ${JSON.stringify(fragment([]))});
+  `);
+  stub(bin, 'claude', 'process.exit(5);');
+  const result = spawnSync('bash', ['scripts/security-audit-local.sh', '--engine', 'codex', 'canary', '3', '--key', '42', '--claude-scorecard', claudeCard],
+    { cwd: dir, env, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^canary: 0\/2 seeds caught$/m);
+  assert.match(result.stdout, /^either: 1\/2 seeds caught by this engine or the other$/m);
+  const head = execFileSync(realGit, ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim();
+  assert.ok(result.stdout.includes(`gh workflow run codex-audit-report.yaml -R fixture/repo --ref main -f commit=${head} -f model=gpt-6-sol -f canary_run=42 -f canary_seeded=2 -f canary_caught=0 -f canary_either=1 -f canary_unfinished=0\n`), result.stdout);
+  const codexCalls = calls(base).filter((c) => c.startsWith('codex '));
+  assert.equal(codexCalls.length, CANARY_DOMAINS.length);
+  for (const c of codexCalls) assert.equal(c, 'codex exec -m gpt-6-sol --cyber-access-program daybreak_blue --sandbox workspace-write -c sandbox_workspace_write.network_access=true --ephemeral');
+  assert.ok(!calls(base).some((c) => c.startsWith('gh ')), calls(base).join('\n'));
+});
+
+test('a union counts each seed once, and only over the same seeds', () => {
+  const card = (caught) => ({ seeds: Object.entries(caught).map(([id, c]) => ({ id, caught: c })) });
+  assert.equal(union(card({ a: true, b: false, c: false }), card({ a: true, b: true, c: false })), 2);
+  assert.throws(() => union(card({ a: true, b: false }), card({ a: true, c: true })), /seeded different seeds/);
+});
+

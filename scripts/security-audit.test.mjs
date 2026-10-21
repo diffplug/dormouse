@@ -1522,6 +1522,36 @@ for (const [arg, runsState, runsDomain] of [['github-state', true, false], ['ci-
   });
 }
 
+// The red team: the same prompts on Codex, each domain's computed verdict
+// gathered into the publishing command, which is printed and never run.
+for (const [args, verdicts, expected] of [[['remote'], 'remote=PASS', 0], [[], 'supply-chain=PASS ci-and-secrets=PASS remote=PASS local=INCONCLUSIVE hosted=PASS', 1]]) {
+  test(`local runner, Codex engine: ${args[0] ?? 'every domain'}`, (t) => {
+    const { dir, env } = fixture(t);
+    localRunnerFixture(dir);
+    stubGh(dir);
+    stub(dir, 'claude', 'process.exit(5);');
+    // `local` leaves no fragment, which computes INCONCLUSIVE.
+    stub(dir, 'codex', `
+      const fs = require('node:fs');
+      const argv = process.argv.slice(2);
+      const output = argv[argv.length - 1].match(/\\*\\*Output file:\\*\\* \\x60([^\\x60]+)\\x60/)[1];
+      if (output !== 'audit-local.md') fs.writeFileSync(output, ${JSON.stringify(Object.fromEntries(fragments.map((f) => [f, fragmentText(f)])))}[output]);
+    `);
+    const result = spawnSync('bash', ['scripts/security-audit-local.sh', '--engine', 'codex', ...args], { cwd: dir, env, encoding: 'utf8' });
+    assert.equal(result.status, expected, result.stderr);
+    assert.match(result.stdout, new RegExp(`^gh workflow run codex-audit-report\\.yaml -R fixture/repo --ref main -f commit=\\S+ -f model=gpt-6-sol -f verdicts='${verdicts}'$`, 'm'));
+    assert.deepEqual(ghCalls(dir).map(({ args: a }) => a.slice(0, 2).join(' ')).filter((c) => c !== 'issue list'), []);
+  });
+}
+
+test('local runner: an unknown engine is refused before anything runs', (t) => {
+  const { dir, env } = fixture(t);
+  localRunnerFixture(dir);
+  const result = spawnSync('bash', ['scripts/security-audit-local.sh', '--engine', 'gemini'], { cwd: dir, env, encoding: 'utf8' });
+  assert.equal(result.status, 64);
+  assert.match(result.stderr, /unknown engine 'gemini'/);
+});
+
 // The orchestrator prompt's two sanctioned shell blocks, executed as shipped.
 // They are the only place that decides whether a domain reported, and prose is
 // not a control: run 35205193090 merged a fragment its domain was still
@@ -1781,6 +1811,109 @@ test('the model split holds in CI and locally, over the same prompt files', () =
   assert.match(local, /^for f in _preamble orchestrator supply-chain ci-and-secrets remote local hosted; do$/m);
   assert.match(local, /cat "\$AUDIT_DIR\/_preamble\.md"; echo; cat "\$AUDIT_DIR\/\$domain\.md"/);
 });
+
+// "Red team": the Codex engine is pinned and sandboxed, and its report
+// workflow publishes only what its builder checked, for an admin, from main.
+const codexWorkflow = readFileSync(join(repo, '.github/workflows/codex-audit-report.yaml'), 'utf8');
+
+test('the red team runs sandboxed on its pinned model and program, and gates nothing', () => {
+  assert.match(local, /^CODEX_MODEL=gpt-6-sol$/m);
+  assert.match(local, /^CODEX_PROGRAM=daybreak_blue$/m);
+  const exec = local.match(/codex exec [^\n]*\\\n[^\n]*/)?.[0] ?? '';
+  assert.match(exec, /-m "\$CODEX_MODEL" --cyber-access-program "\$CODEX_PROGRAM"/);
+  assert.match(exec, /--sandbox workspace-write /);
+  assert.doesNotMatch(local, /danger-full-access|dangerously-bypass/);
+  // The release gate lists runs of security-audit.yaml alone.
+  assert.doesNotMatch(release, /codex/i);
+  const doc = YAML.parse(codexWorkflow);
+  assert.deepEqual(Object.keys(doc.on), ['workflow_dispatch']);
+  assert.deepEqual(doc.permissions, {});
+  assert.deepEqual(Object.keys(doc.jobs), ['publish']);
+  assert.deepEqual(doc.jobs.publish.permissions, { contents: 'read', issues: 'write', actions: 'read' });
+  assert.equal(doc.jobs.publish.environment, undefined);
+  assert.doesNotMatch(codexWorkflow, /secrets\./);
+  const steps = doc.jobs.publish.steps;
+  for (const step of steps) assert.doesNotMatch(step.run ?? '', /\$\{\{/, `${step.name ?? step.uses} interpolates into its script`);
+  assert.equal(steps[0].name, 'Refuse any ref but main');
+  for (const [ref, status] of [['refs/heads/main', 0], ['refs/tags/v1.2.3', 1], ['refs/heads/feature', 1]]) {
+    assert.equal(spawnSync('bash', ['-c', steps[0].run], { env: { ...process.env, GITHUB_REF: ref } }).status, status, ref);
+  }
+  const posting = steps.filter((step) => /\bgh\b|security-audit-public-body/.test(step.run ?? ''));
+  assert.deepEqual(posting.map((step) => step.name), ['Publish the red-team report']);
+  assert.match(posting[0].run, /node scripts\/security-audit-public-body\.mjs --engine codex /);
+  assert.equal(doc.jobs.publish.steps.find((step) => step.uses?.startsWith('actions/checkout@')).with['persist-credentials'], false);
+});
+
+/** The builder's red-team path in a fixture tree, over a `gh` stub answering what it reads. */
+function codexFixture(t, { role = 'admin', compare = 'ahead', run = {}, record = {} } = {}) {
+  const { dir, env } = fixture(t);
+  copyFileSync(join(repo, 'scripts/security-audit-canary.mjs'), join(dir, 'scripts/security-audit-canary.mjs'));
+  mkdirSync(join(dir, 'website/scripts'), { recursive: true });
+  copyFileSync(join(repo, 'website/scripts/generate-canary-recall.js'), join(dir, 'website/scripts/generate-canary-recall.js'));
+  const claudeRun = { display_title: 'security-audit canary (recall measurement, not an audit)', head_branch: 'main',
+    path: '.github/workflows/security-audit.yaml', head_repository: { full_name: 'fixture/repo' }, head_sha: COMMIT, ...run };
+  const canaryRecall = { seeded: 8, caught: 6, unfinished: 0, run_url: 'https://github.com/diffplug/dormouse/actions/runs/77', ...record };
+  stub(dir, 'gh', `
+    const fs = require('node:fs');
+    const args = process.argv.slice(2);
+    const opt = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : null);
+    fs.appendFileSync('gh-calls.jsonl', JSON.stringify({ args, body: opt('--body-file') && fs.readFileSync(opt('--body-file'), 'utf8') }) + '\\n');
+    const path = args[0] === 'api' ? args[1] : '';
+    if (/\\/collaborators\\/[^/]+\\/permission$/.test(path)) process.stdout.write(${JSON.stringify(role)} + '\\n');
+    else if (/\\/compare\\//.test(path)) process.stdout.write(JSON.stringify({ status: ${JSON.stringify(compare)} }));
+    else if (/\\/actions\\/runs\\/77$/.test(path)) process.stdout.write(${JSON.stringify(JSON.stringify(claudeRun))});
+    else if (args[0] === 'run' && args[1] === 'download') fs.writeFileSync(opt('-D') + '/canary-recall.json', ${JSON.stringify(JSON.stringify(canaryRecall))});
+    else if (args[0] === 'issue' && args[1] === 'list') process.stdout.write(JSON.stringify([{ number: 9 }, { number: 4 }]));
+    else if (!(args[0] === 'issue' && args[1] === 'comment')) process.exit(3);
+  `);
+  return { dir, env: { ...env, GITHUB_TRIGGERING_ACTOR: 'maintainer' } };
+}
+
+const CODEX_ARGS = ['--engine', 'codex', '--date', '2026-10-20T12:00Z', '--run-url', 'https://github.com/fixture/repo/actions/runs/5',
+  '--commit', COMMIT, '--model', 'gpt-6-sol', '--verdicts', 'remote=PASS local=FAIL', '--canary-run', '77', '--canary-seeded', '8',
+  '--canary-caught', '5', '--canary-either', '7', '--canary-unfinished', '0', '--record', 'codex-recall.json'];
+const runCodex = (dir, env, args = CODEX_ARGS) => spawnSync(process.execPath, ['scripts/security-audit-public-body.mjs', ...args], { cwd: dir, env, encoding: 'utf8' });
+const withArg = (name, value) => CODEX_ARGS.map((a, i) => (CODEX_ARGS[i - 1] === name ? value : a));
+
+test('the red-team report comments once on the status issue and writes its recall record', (t) => {
+  const { dir, env } = codexFixture(t);
+  const result = runCodex(dir, env);
+  assert.equal(result.status, 0, result.stderr);
+  const calls = readFileSync(join(dir, 'gh-calls.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  const writes = calls.filter(({ args }) => args[0] === 'issue' && args[1] !== 'list');
+  assert.deepEqual(writes.map(({ args }) => args.slice(0, 3)), [['issue', 'comment', '4']]);
+  assert.match(writes[0].body, /^<!-- codex-audit-report -->\n/);
+  assert.match(writes[0].body, /Claude caught 6 of 8 \(75%\), Codex 5 \(63%\), and the two together 7 \(88%\)\./);
+  assert.match(writes[0].body, /\| `local` \| FAIL \|/);
+  assert.deepEqual(JSON.parse(readFileSync(join(dir, 'codex-recall.json'), 'utf8')), {
+    claude_run_url: 'https://github.com/fixture/repo/actions/runs/77', commit: COMMIT, model: 'gpt-6-sol',
+    seeded: 8, caught: 5, either: 7, unfinished: 0, run_url: 'https://github.com/fixture/repo/actions/runs/5' });
+});
+
+for (const [name, options, args, message] of [
+  ['a dispatch by a non-admin', { role: 'write' }, CODEX_ARGS, /only an admin/],
+  ['a commit off main', { compare: 'diverged' }, CODEX_ARGS, /is not on main/],
+  ['a canary run that is not a canary', { run: { display_title: 'security-audit' } }, CODEX_ARGS, /is not a canary run/],
+  ['a canary run at another commit', { run: { head_sha: 'f'.repeat(40) } }, CODEX_ARGS, /the same key seeds the same seeds only over the same commit/],
+  ['other seeds', { record: { seeded: 6, caught: 5 } }, CODEX_ARGS, /seeded 6, not 8/],
+  ['either below Claude', {}, withArg('--canary-either', '5'), /cannot follow/],
+  ['either above the sum', { record: { caught: 1 } }, CODEX_ARGS, /cannot follow/],
+  ['a finding typed as a verdict', {}, withArg('--verdicts', 'remote=FAIL:token-in-log'), /invalid verdict/],
+  ['an unknown domain', {}, withArg('--verdicts', 'secrets=PASS'), /no domain/],
+  ['a model name carrying text', {}, withArg('--model', 'gpt-6-sol see src/x.ts:12'), /invalid model/],
+  ['caught above either', {}, withArg('--canary-caught', '8'), /invalid canary counts/],
+  ['half the canary counts', {}, withArg('--canary-unfinished', ''), /invalid canary unfinished/],
+]) {
+  test(`the red-team report posts nothing for ${name}`, (t) => {
+    const { dir, env } = codexFixture(t, options);
+    const result = runCodex(dir, env, args);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, message);
+    const calls = existsSync(join(dir, 'gh-calls.jsonl')) ? readFileSync(join(dir, 'gh-calls.jsonl'), 'utf8') : '';
+    assert.doesNotMatch(calls, /"comment"/);
+    assert.ok(!existsSync(join(dir, 'codex-recall.json')));
+  });
+}
 
 // "Domains": dormouse.sh/security publishes each domain with the specs its
 // scope claims, read from the same prompts the audit runs.
