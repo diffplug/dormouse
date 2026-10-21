@@ -861,6 +861,33 @@ describe('leaving the scanner', () => {
     expect(container.textContent).not.toContain(BURROWS_EMPTY);
   });
 
+  it.each([
+    {
+      error: new DOMException('The passkey prompt was dismissed.', 'NotAllowedError'),
+      auth: false,
+    },
+    { error: new SessionExpiredError(), auth: true },
+    { error: new PasskeyUnavailableError(), auth: true },
+  ])('handles a late $error.name after cancelling the pairing wait', async ({ error, auth }) => {
+    const { url } = await invitationUrl();
+    let rejectPair!: (error: Error) => void;
+    fake.pair.mockImplementation((_invitation, _label, onCode) => {
+      onCode?.('42');
+      return new Promise<PairingResult>((_resolve, reject) => {
+        rejectPair = reject;
+      });
+    });
+    await boot();
+    await pasteCode(url);
+    await click(container, 'Cancel');
+    rejectPair(error);
+    await settle();
+
+    expect(alertText(container)).toBe(auth ? error.message : null);
+    expect(buttonNamed(container, 'Refresh') !== null).toBe(!auth);
+    if (!auth) expect(buttonNamed(container, 'Refresh')!.disabled).toBe(false);
+  });
+
   it('leaves no error behind when the waiting screen is cancelled', async () => {
     const { url } = await invitationUrl();
     let releasePair!: (result: PairingResult) => void;
