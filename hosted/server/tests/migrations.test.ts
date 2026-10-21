@@ -34,7 +34,7 @@ const PINNED: Record<string, string> = {
   "010_relay_session_credential_required.sql":
     "f385398d16126381b6a976d74e23e10b07370c1a1da3205e71697aa62a3399f5",
   "011_enrollment_confirm_digits.sql":
-    "1547a0d3062da19ee1f075b46d01bacff8c32aad9c98353edd1dfa42f5bdc375",
+    "54afe9ae8a2efd3c654503d479fce96c1ce8ff4f2df249aa93b5a91e925def6e",
 };
 
 const directory = new URL("../dormouse-migrations/", import.meta.url);

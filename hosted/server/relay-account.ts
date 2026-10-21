@@ -75,13 +75,32 @@ export function relayAccountRoutes(app: Hono<any>, host: (c: Context) => RelayAc
           VALUES ($1, $2, now() + ($3::float8 * interval '1 millisecond'), $4, $5)
           ON CONFLICT ("userCode") DO UPDATE
             SET purpose = EXCLUDED.purpose, "userId" = EXCLUDED."userId", "expiresAt" = EXCLUDED."expiresAt",
-              "confirmDigits" = EXCLUDED."confirmDigits", "redeemedBurrowId" = NULL, "redeemedAt" = NULL
+              "confirmDigits" = EXCLUDED."confirmDigits", "redeemedBurrowId" = NULL, "redeemedAt" = NULL,
+              "mismatchedAt" = NULL
             WHERE a."expiresAt" <= now()
           RETURNING 1`,
           [userCode, login.userId, ENROLLMENT_TTL_MS, purpose, confirmDigits],
         )
       ).length > 0;
     return approved ? c.body(null, 204) : c.json({ message: ALREADY_APPROVED }, 409);
+  });
+
+  // Whether the poll found this account's live approval of the code typed
+  // with other digits: another account's approval, or none, reads as not.
+  app.get("/api/relay/enrollments/:userCode", gate, async (c) => {
+    const userCode = normalizeEnrollUserCode(c.req.param("userCode"));
+    if (userCode === null)
+      return c.json({ message: "That is not a code from Dormouse." }, 400);
+    const mismatched =
+      (
+        await accountQuery(
+          host(c),
+          `SELECT 1 FROM dormouse_relay_enrollment_approvals
+          WHERE "userCode" = $1 AND "userId" = $2 AND "expiresAt" > now() AND "mismatchedAt" IS NOT NULL`,
+          [userCode, c.get("login").userId],
+        )
+      ).length > 0;
+    return c.json({ mismatched });
   });
 
   app.get("/api/relay/burrows", gate, async (c) => {

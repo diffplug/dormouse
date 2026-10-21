@@ -192,6 +192,9 @@ section {
   background: var(--vscode-list-inactiveSelectionBackground);
   color: var(--vscode-list-inactiveSelectionForeground);
 }
+.notice.failed {
+  color: var(--vscode-errorForeground);
+}
 .identity {
   margin: 0;
 }

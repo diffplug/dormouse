@@ -1102,6 +1102,69 @@ test("an approval with other digits redeems nothing, for either purpose, until i
   ).toEqual([{ n: 0 }]);
 });
 
+test("a poll marks a mismatched approval for its approver's page, keeping the first mark, and it still redeems nothing", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const owner = await f.account(ADMIN_EMAIL);
+  const marked = (userCode: string) =>
+    f.sql(`SELECT "mismatchedAt" FROM dormouse_relay_enrollment_approvals WHERE "userCode" = $1`, [userCode]);
+  for (const purpose of ["remote", "voice"] as const) {
+    const begun = await f.begin(purpose);
+    await f.approve(begun.userCode, owner, purpose, String((Number(begun.confirmDigits) + 1) % 100).padStart(2, "0"));
+    expect(await marked(begun.userCode)).toEqual([{ mismatchedAt: null }]);
+    expect((await f.poll(begun.deviceCode, purpose)).json).toEqual({ status: "mismatch" });
+    const [{ mismatchedAt }] = await marked(begun.userCode);
+    expect(mismatchedAt).toBeInstanceOf(Date);
+    // Marked, it still answers mismatch and redeems nothing; a later poll
+    // leaves the first mark.
+    expect((await f.poll(begun.deviceCode, purpose)).json).toEqual({ status: "mismatch" });
+    expect(await marked(begun.userCode)).toEqual([{ mismatchedAt }]);
+  }
+  expect(await f.sql(`SELECT count(*)::int AS n FROM dormouse_relay_burrows`)).toEqual([{ n: 0 }]);
+  expect(await f.sql(`SELECT count(*)::int AS n FROM dormouse_voice_tokens`)).toEqual([{ n: 0 }]);
+  expect(
+    await f.sql(`SELECT count(*)::int AS n FROM dormouse_relay_enrollment_approvals WHERE "redeemedAt" IS NOT NULL`),
+  ).toEqual([{ n: 0 }]);
+  // The code's own digits redeem, unmarked.
+  const matched = await f.begin();
+  await f.approve(matched.userCode, owner);
+  expect((await f.poll(matched.deviceCode)).json).toMatchObject({ status: "enrolled" });
+  expect(await marked(matched.userCode)).toEqual([{ mismatchedAt: null }]);
+  // Other digits, but not under a live, unredeemed approval of this purpose:
+  // an expired one, a redeemed one, or one for the other purpose. None is
+  // marked, and none redeems.
+  const unmarked = async (
+    purpose: "remote" | "voice",
+    approve: (userCode: string, wrong: string) => Promise<unknown>,
+    answer: unknown,
+  ) => {
+    const begun = await f.begin(purpose);
+    await approve(begun.userCode, String((Number(begun.confirmDigits) + 1) % 100).padStart(2, "0"));
+    expect((await f.poll(begun.deviceCode, purpose)).json).toEqual(answer);
+    expect(await marked(begun.userCode)).toEqual([{ mismatchedAt: null }]);
+  };
+  await unmarked(
+    "remote",
+    async (userCode, wrong) => {
+      await f.approve(userCode, owner, "remote", wrong);
+      await f.sql(`UPDATE dormouse_relay_enrollment_approvals SET "expiresAt" = now() WHERE "userCode" = $1`, [userCode]);
+    },
+    { status: "pending" },
+  );
+  await unmarked(
+    "voice",
+    async (userCode, wrong) => {
+      await f.approve(userCode, owner, "voice", wrong);
+      await f.sql(`UPDATE dormouse_relay_enrollment_approvals SET "redeemedAt" = now() WHERE "userCode" = $1`, [userCode]);
+    },
+    { status: "redeemed" },
+  );
+  await unmarked("remote", (userCode, wrong) => f.approve(userCode, owner, "voice", wrong), { status: "pending" });
+  expect(await f.sql(`SELECT count(*)::int AS n FROM dormouse_relay_burrows`)).toEqual([{ n: 1 }]);
+});
+
 test("two polls racing one approval mint one Burrow", async ({ onTestFinished }) => {
   const f = await fixture();
   onTestFinished(f.close);

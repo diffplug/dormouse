@@ -77,9 +77,10 @@ GRANT SELECT, INSERT, DELETE ON
   TO dormouse_relay;
 -- A finish claims its setup token in place, so a retire can still reach it.
 GRANT UPDATE (claimed) ON dormouse_relay_setup_tokens TO dormouse_relay;
--- The account Worker inserts approvals; the poll redeems one, the sweep deletes.
+-- The account Worker inserts approvals; the poll redeems one or marks its
+-- digits mismatched, the sweep deletes.
 GRANT SELECT, DELETE ON dormouse_relay_enrollment_approvals TO dormouse_relay;
-GRANT UPDATE ("redeemedBurrowId", "redeemedAt") ON dormouse_relay_enrollment_approvals TO dormouse_relay;
+GRANT UPDATE ("redeemedBurrowId", "redeemedAt", "mismatchedAt") ON dormouse_relay_enrollment_approvals TO dormouse_relay;
 GRANT SELECT, INSERT, DELETE ON dormouse_relay_push_subscriptions TO dormouse_relay;
 GRANT UPDATE (endpoint, p256dh, auth, "vapidPublicKey", "subscribedAt")
   ON dormouse_relay_push_subscriptions TO dormouse_relay;

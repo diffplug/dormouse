@@ -4,6 +4,43 @@ import type { Computer, HostedVoice } from "./api";
 export interface AccountState {
   voice: HostedVoice | null;
   computers: Computer[] | null;
+  /**
+   * Whether the approval the page waits on was typed with other digits than
+   * its computer showed; unset when none is waited on, or the read failed.
+   */
+  mismatched?: boolean;
+}
+
+/** A notice the page shows; `error` when it reports a failure. */
+export interface Notice {
+  text: string;
+  error?: boolean;
+}
+
+/** An approval Dormouse on the computer finishes after the page's mutation. */
+export interface Pending {
+  /** The approved user code, read for a mismatch while the page waits. */
+  userCode: string;
+  /** Whether the account, as last read, shows the change. */
+  shows: (after: AccountState) => boolean;
+  waiting: string;
+  done: string;
+  late: string;
+  /** Once a read finds the digits typed were not the computer's. */
+  mismatch: string;
+}
+
+/**
+ * The notice a read of the account ends `pending` with, or null while it
+ * shows neither end. A mismatch first: that approval never redeems, so a
+ * change shown beside it is another's.
+ */
+export function pendingEnd(
+  pending: Pending,
+  after: AccountState,
+): Notice | null {
+  if (after.mismatched) return { text: pending.mismatch, error: true };
+  return pending.shows(after) ? { text: pending.done } : null;
 }
 
 /**
@@ -92,33 +129,35 @@ export async function reread<T>(
   }
 }
 
-export type Settled = "done" | "timeout" | "cancelled";
+/** How {@link settle} stopped: a read's end, or no read ended it. */
+export type Settled<R> = { ended: R } | "timeout" | "cancelled";
 
 const delay = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /**
- * Reads every `intervalMs` until a read satisfies `done`, `timeoutMs` passes,
- * or `cancelled()` holds. A read that fails, or resolves `undefined` (one a
- * newer read superseded), only waits for the next.
+ * Reads every `intervalMs` until `end` maps a read to something other than
+ * null, `timeoutMs` passes, or `cancelled()` holds. A read that fails, or
+ * resolves `undefined` (one a newer read superseded), only waits for the next.
  */
-export async function settle<T>(
+export async function settle<T, R>(
   read: () => Promise<T | undefined>,
-  done: (value: T) => boolean,
+  end: (value: T) => R | null,
   options: {
     intervalMs: number;
     timeoutMs: number;
     cancelled: () => boolean;
     wait?: (ms: number) => Promise<void>;
   },
-): Promise<Settled> {
+): Promise<Settled<R>> {
   const { intervalMs, timeoutMs, cancelled, wait = delay } = options;
   for (let waited = 0; waited < timeoutMs; waited += intervalMs) {
     await wait(intervalMs);
     if (cancelled()) return "cancelled";
     const value = await read().catch(() => undefined);
     if (cancelled()) return "cancelled";
-    if (value !== undefined && done(value)) return "done";
+    const ended = value === undefined ? null : end(value);
+    if (ended !== null) return { ended };
   }
   return "timeout";
 }

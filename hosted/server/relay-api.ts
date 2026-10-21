@@ -521,17 +521,25 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
     const expiresAtS = new DataView(bytes.buffer, bytes.byteOffset, DEVICE_CODE_EXPIRY_BYTES).getUint32(0);
     if (expiresAtS * 1000 <= Date.now()) return answer({ status: "expired" });
     const userCode = await userCodeOf(c.env, bytes, purpose);
+    const confirmDigits = await enrollConfirmDigits(enrollSecret(c.env), userCode);
     return database(c, async (db) => {
+      // The read stamps a live, unredeemed approval typed with other digits,
+      // first time only, for its approver's page to tell.
       const {
         rows: [approval],
       } = await db.query<
         OwnerRow & { redeemedBurrowId: string | null; redeemed: boolean; confirmDigits: string }
       >(
-        `SELECT a."userId", a."redeemedBurrowId", a."redeemedAt" IS NOT NULL AS redeemed,
+        `WITH marked AS (
+          UPDATE dormouse_relay_enrollment_approvals SET "mismatchedAt" = now()
+          WHERE "userCode" = $1 AND purpose = $2 AND "expiresAt" > now()
+            AND "redeemedAt" IS NULL AND "confirmDigits" <> $3 AND "mismatchedAt" IS NULL
+        )
+        SELECT a."userId", a."redeemedBurrowId", a."redeemedAt" IS NOT NULL AS redeemed,
           a."confirmDigits", ${OWNER_COLUMNS}
         FROM dormouse_relay_enrollment_approvals a JOIN "user" u ON u.id = a."userId"
         WHERE a."userCode" = $1 AND a.purpose = $2 AND a."expiresAt" > now()`,
-        [userCode, purpose],
+        [userCode, purpose, confirmDigits],
       );
       if (!approval) return answer({ status: "pending" });
       // Spent by an earlier poll whose answer this Burrow never read: the
@@ -543,7 +551,6 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
       }
       // Approved with digits other than the ones this code showed: one attempt,
       // spent, since a live approval is never replaced.
-      const confirmDigits = await enrollConfirmDigits(enrollSecret(c.env), userCode);
       if (approval.confirmDigits !== confirmDigits) return answer({ status: "mismatch" });
       const owner = ownerOf(approval);
       // Rechecked here: an approval does not outlive its approver's entitlement.

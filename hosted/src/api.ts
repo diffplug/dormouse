@@ -181,3 +181,9 @@ export async function approveEnrollment(
   });
   if (!response.ok) throw await refused(response);
 }
+/** Whether this account's live approval of `userCode` was typed with other digits than its computer showed. */
+export async function getApprovalMismatched(userCode: string): Promise<boolean> {
+  const response = await relay(`/enrollments/${encodeURIComponent(userCode)}`);
+  if (!response.ok) throw await refused(response);
+  return ((await response.json()) as { mismatched: boolean }).mismatched;
+}

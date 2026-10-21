@@ -128,6 +128,7 @@ const send = (name: Name, url: string, method = "GET") =>
 /** The Relay's routes the account serves: approval, and its Burrows and passkeys. */
 const ACCOUNT_RELAY: [string, string][] = [
   ["POST", "/api/relay/enrollments/approve"],
+  ["GET", "/api/relay/enrollments/AAAA-AAAA"],
   ["GET", "/api/relay/burrows"],
   ["DELETE", "/api/relay/burrows/AAAAAAAAAAAAAAAAAAAAAA"],
   ["GET", "/api/relay/passkeys"],

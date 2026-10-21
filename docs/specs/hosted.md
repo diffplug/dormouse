@@ -211,7 +211,7 @@ The pre-launch sign-in gate is "Identity and login".
 Begin refuses an absent or mismatched origin with `ORIGIN_MISMATCH_ERROR`. The verification link points to the account's `/enroll` page, with the user code in its fragment and voice purpose in its query. `redeemed` names the Burrow whose answer was lost; 409 names the account page at the abuse ceiling `MAX_BURROWS_PER_ACCOUNT` (`docs/specs/pricing.md` -> "Checkout and entitlement").
 
 - **Never write from begin.** The device code is 32 bytes, the bearer shape: its expiry in its leading bytes, the rest random. The user code is `enrollUserCode` under `RELAY_ENROLL_SECRET` for remote enrollment, or that secret suffixed with `:voice` for managed voice (rationale). The confirmation digits are `enrollConfirmDigits` of the user code under `RELAY_ENROLL_SECRET`; the link carries the user code, never the digits.
-- **Must redeem only an approval whose typed digits are its code's confirmation digits, compared at the poll** (rationale). Any other answers `mismatch` to every poll until it expires: one attempt per code.
+- **Must redeem only an approval whose typed digits are its code's confirmation digits, compared at the poll** (rationale). Any other answers `mismatch` to every poll until it expires: one attempt per code. The first such poll stamps the live, unredeemed approval's `mismatchedAt`, so its approver's waiting page says so at once.
 - **Must store the approval alone** (`dormouse_relay_enrollment_approvals`): it cannot tell an issued code from any well-formed one, so it approves any; one no Burrow redeems expires (rationale).
 - **Never admit a begin or poll request carrying `Origin`** (403): only a Node Burrow calls them. Then 429 with `Retry-After` past `RELAY_ENROLL_BEGIN_LIMIT` (10 a minute per address) or `RELAY_ENROLL_POLL_LIMIT` (60), before the body limit and any database read.
 - **Must answer an expired device code from the code alone**, reading no database.
@@ -221,6 +221,7 @@ Begin refuses an absent or mismatched origin with `ORIGIN_MISMATCH_ERROR`. The v
 | Route (account) | Credential | Success |
 |---|---|---|
 | `POST /api/relay/enrollments/approve` | login cookie, exact `Origin`, JSON `{ userCode, purpose, confirmDigits }` | 204 |
+| `GET /api/relay/enrollments/:userCode` | login cookie, same-origin fetch | 200 `{ mismatched }`, true only for the caller's own live approval a poll stamped |
 | `GET /api/relay/burrows` | login cookie, same-origin fetch | 200 `{ burrows }` |
 | `DELETE /api/relay/burrows/:burrowId` | login cookie, exact `Origin` | 204; 404 for another account's or an unknown ID |
 | `GET /api/relay/passkeys` | login cookie, same-origin fetch | 200 `{ passkeys }`, each with the enrolled Burrow whose setup token registered it, or none |

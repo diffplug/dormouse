@@ -420,6 +420,11 @@ async function fixture(
         body: JSON.stringify({ userCode, confirmDigits }),
         headers: { origin: from, "content-type": "application/json" },
       });
+    /** Whether this account's live approval of `userCode` was found mismatched, as the page reads it. */
+    const mismatched = async (userCode: string, headers?: Record<string, string>) => {
+      const response = await request(`/api/relay/enrollments/${encodeURIComponent(userCode)}`, { headers });
+      return { status: response.status, json: await response.json() };
+    };
     const computers = async () =>
       (await request("/api/relay/burrows")).json() as Promise<{
         burrows: { burrowId: string; enrolledAt: string }[];
@@ -441,7 +446,7 @@ async function fixture(
         body: JSON.stringify({ version }),
         headers: { origin: from, "content-type": "application/json" },
       });
-    return { request, post, session, email, oauth, hostedVoice, speak, forget, mint, approve, computers, remove, passkeys, removePasskey, accept };
+    return { request, post, session, email, oauth, hostedVoice, speak, forget, mint, approve, mismatched, computers, remove, passkeys, removePasskey, accept };
   }
   return {
     ...context,
@@ -1227,6 +1232,64 @@ test("enrollment: only a recent admin login from this origin approves, and the B
       [begun.userCode],
     ),
   ).toEqual([{ redeemedBurrowId: null, redeemedAt: null }]);
+});
+
+test("the approver's page reads its approval's mismatch once a poll found it, and only its own approval's", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const admin = f.browser(),
+    other = f.browser("203.0.113.11");
+  await admin.email(ADMIN_EMAIL);
+  await other.email("other@example.test");
+  const begun = await f.begin();
+  const wrong = String((Number(begun.confirmDigits) + 1) % 100).padStart(2, "0");
+  const unmatched = { status: 200, json: { mismatched: false } };
+  expect(await admin.mismatched(begun.userCode)).toEqual(unmatched);
+  expect((await admin.approve(begun.userCode, wrong)).status).toBe(204);
+  // Approved, but no poll has compared the digits yet.
+  expect(await admin.mismatched(begun.userCode)).toEqual(unmatched);
+  expect((await f.poll(begun.deviceCode)).json).toEqual({ status: "mismatch" });
+  // The code forgives case and spacing, as the approval does.
+  expect(await admin.mismatched(` ${begun.userCode.toLowerCase().replace("-", "")} `)).toEqual({
+    status: 200,
+    json: { mismatched: true },
+  });
+  expect(await admin.mismatched("not a code")).toEqual({
+    status: 400,
+    json: { message: "That is not a code from Dormouse." },
+  });
+  // Not the account's own page, or an account the Relay does not entitle: refused.
+  expect((await admin.mismatched(begun.userCode, { "sec-fetch-site": "same-site" })).status).toBe(403);
+  expect(await other.mismatched(begun.userCode)).toEqual({ status: 403, json: { message: NOT_ENTITLED_ERROR } });
+
+  // Another account's mismatched approval reads as none at all.
+  const foreign = await f.begin();
+  await queryDatabase(
+    f.database.url,
+    `INSERT INTO dormouse_relay_enrollment_approvals
+      ("userCode", "userId", "expiresAt", purpose, "confirmDigits", "mismatchedAt")
+    VALUES ($1, $2, now() + interval '10 minutes', 'remote', $3, now())`,
+    [foreign.userCode, (await other.session())!.user.id, wrong],
+  );
+  expect(await admin.mismatched(foreign.userCode)).toEqual(unmatched);
+  // Expired, its own reads as none, and its replacement starts unmarked.
+  await queryDatabase(
+    f.database.url,
+    `UPDATE dormouse_relay_enrollment_approvals SET "expiresAt" = now() - interval '1 second' WHERE "userCode" = $1`,
+    [begun.userCode],
+  );
+  expect(await admin.mismatched(begun.userCode)).toEqual(unmatched);
+  expect((await admin.approve(begun.userCode, wrong)).status).toBe(204);
+  expect(
+    await queryDatabase(
+      f.database.url,
+      `SELECT "mismatchedAt" FROM dormouse_relay_enrollment_approvals WHERE "userCode" = $1`,
+      [begun.userCode],
+    ),
+  ).toEqual([{ mismatchedAt: null }]);
+  expect(await admin.mismatched(begun.userCode)).toEqual(unmatched);
 });
 
 test("the account lists its passkeys with the computer that added each, and removing one ends its sessions", async ({
