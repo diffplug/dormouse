@@ -112,6 +112,20 @@ function hostBrowsers(...args: Parameters<typeof installBrowserHost>): ReturnTyp
 }
 
 describe('Wall on the Lath engine', () => {
+
+  it('reattaches the Door itself when a persisted token names another Surface', async () => {
+    await act(async () => root.render(<Wall initialPaneIds={['surface:a']} initialDoors={[{
+      id: 'surface:door-a', title: 'A',
+      token: { leafId: 'surface:wrong', weight: 0.5, siblingId: 'surface:a', edge: 'right', index: 1, fingerprint: null },
+    }]} />));
+    await flush();
+    await act(async () => { container.querySelector<HTMLElement>('[data-door-id="surface:door-a"] button')!.click(); });
+    await flush();
+    expect(container.querySelector('[data-lath-leaf="surface:door-a"]')).not.toBeNull();
+    expect(container.querySelector('[data-lath-leaf="surface:wrong"]')).toBeNull();
+    expect(container.querySelector('[data-door-id="surface:door-a"]')).toBeNull();
+  });
+
   it('consumes dirty reports only for Tool-designated members, including minimized Tools', async () => {
     await act(async () => root.render(<Wall initialPaneIds={['surface:a']} initialDoors={[{
       id: 'surface:tool-door', title: 'storybook', component: 'tool', tabComponent: 'tool',

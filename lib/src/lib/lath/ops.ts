@@ -25,6 +25,7 @@ import {
 } from './model';
 import { type LayoutOpts, allocateChildSpans, autoEdge, minSpan, nodeRectAtPath } from './layout';
 
+import { isRecord } from '../is-record';
 import { type DropTarget, materializeTarget, targetByLeafSet } from './drop-target';
 export type { DropTarget } from './drop-target';
 
@@ -144,6 +145,21 @@ export function remove(tree: LathTree, id: LeafId): { tree: LathTree; ok: boolea
   return { tree: { root: normalize(replaceAtPath(tree.root as LathNode, parentPath, newParent)) }, ok: true, token };
 }
 
+/** Persisted Doors reach restore through a deliberately shallow session reader.
+ *  Reject a bad hint before its weights or subtree fields enter tree operations. */
+function isRestoreToken(token: unknown): token is RestoreToken {
+  if (!isRecord(token)) return false;
+  return typeof token.leafId === 'string'
+    && typeof token.weight === 'number' && Number.isFinite(token.weight) && token.weight > 0
+    && (token.weight < 1 || (token.weight === 1 && token.siblingId === null && token.fingerprint === null))
+    && (token.siblingId === null || typeof token.siblingId === 'string')
+    && (token.fingerprint === null || typeof token.fingerprint === 'string')
+    && typeof token.index === 'number' && Number.isInteger(token.index) && token.index >= 0
+    && ['left', 'right', 'top', 'bottom'].includes(token.edge as string)
+    && (token.siblingLeafIds === undefined || (Array.isArray(token.siblingLeafIds) && token.siblingLeafIds.every(id => typeof id === 'string')))
+    && (token.siblingFingerprint === undefined || typeof token.siblingFingerprint === 'string');
+}
+
 /** Reinsert a removed leaf, best-effort, in three degrading tiers:
  *  exact (the fingerprinted parent still exists → same index + weight),
  *  neighbor (the sibling still exists → split beside it on the original edge),
@@ -155,7 +171,7 @@ export function restore(
   token: RestoreToken,
   opts?: { fallbackRef?: LeafId; rect?: Rect; layoutOpts?: LayoutOpts },
 ): { tree: LathTree; ok: boolean; tier: 'exact' | 'neighbor' | 'fallback' | null } {
-  if (findLeafPath(tree, token.leafId) !== null) return { tree, ok: false, tier: null };
+  if (!isRestoreToken(token) || findLeafPath(tree, token.leafId) !== null) return { tree, ok: false, tier: null };
 
   if (tree.root === null) return { tree: leafTree(token.leafId), ok: true, tier: 'fallback' };
 
