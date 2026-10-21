@@ -588,7 +588,7 @@ export function MobileTerminalUi({
   const activeSessionId = sessions.find((session) => session.active)?.id;
   const terminalHostRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
-  const composingRef = useRef(false);
+  const composingRef = useRef<{ cancelled: boolean } | null>(null);
   const edgeScrollRef = useRef<{ pointerId: number; sessionId: string; motion: EdgeScrollMotion } | null>(null);
   const edgeMomentumFrameRef = useRef<number | null>(null);
   const gestureStateRef = useRef<MobileGestureTrackingState>(MOBILE_GESTURE_IDLE_STATE);
@@ -819,6 +819,12 @@ export function MobileTerminalUi({
     document.addEventListener('visibilitychange', onVisibilityChange);
     return () => document.removeEventListener('visibilitychange', onVisibilityChange);
   }, [stopEdgeScroll]);
+
+  useEffect(() => {
+    // Keep the textarea mounted so cancelling a composition does not dismiss
+    // the keyboard. Touch-mode changes leave its input ownership unchanged.
+    if (composingRef.current) composingRef.current.cancelled = true;
+  }, [activeSessionId]);
 
   useEffect(() => {
     // Input callbacks follow the active Session; a gesture or confirmation
@@ -1136,11 +1142,13 @@ export function MobileTerminalUi({
           setInputValue('');
         }}
         onCompositionStart={() => {
-          composingRef.current = true;
+          composingRef.current = { cancelled: false };
         }}
         onCompositionEnd={(event) => {
-          composingRef.current = false;
-          flushInputValue(event.currentTarget.value);
+          const cancelled = composingRef.current?.cancelled ?? true;
+          composingRef.current = null;
+          if (cancelled) setInputValue('');
+          else flushInputValue(event.currentTarget.value);
         }}
         onChange={(event) => {
           const value = event.currentTarget.value;
