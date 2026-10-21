@@ -1574,15 +1574,19 @@ test("subscriptions are capped per Burrow and per account, evicting the oldest a
   const f = await pushFixture();
   onTestFinished(f.close);
   const vapid = testVapidKeys().RELAY_VAPID_PUBLIC_KEY;
+  // Keep ordering independent of database round-trip time. Each seed starts
+  // one millisecond later; rows within it stay one second apart.
+  const seedEpoch = Date.now() - 86_400_000;
+  let seedSequence = 0;
   /** `count` rows for `burrowId`, the oldest first, all older than any subscribe. */
   const seed = (burrowId: string, count: number, prefix: string) =>
     f.sql(
       `INSERT INTO dormouse_relay_push_subscriptions
         ("burrowId", "deliveryId", endpoint, p256dh, auth, "vapidPublicKey", "subscribedAt")
       SELECT $1, lpad($3 || i::text, 43, 'A'), $4 || $3 || i::text, 'BPoint', 'Auth', $5,
-        now() - interval '1 day' + i * interval '1 second'
+        $6::timestamptz + i * interval '1 second'
       FROM generate_series(1, $2::int) AS i`,
-      [burrowId, count, prefix, FCM, vapid],
+      [burrowId, count, prefix, FCM, vapid, new Date(seedEpoch + seedSequence++)],
     );
   const count = async (where: string, values: unknown[]) =>
     (
