@@ -1128,7 +1128,8 @@ export function Wall({
     const fallbackRef = sel && selectedTypeRef.current === 'pane' && lath.store.has(sel)
       ? sel
       : lath.listPanes()[0]?.id;
-    const r = token ? lath.store.restoreLeaf(meta, token, { fallbackRef }) : { ok: false };
+    // A persisted placement hint cannot change the Surface being reattached.
+    const r = token?.leafId === id ? lath.store.restoreLeaf(meta, token, { fallbackRef }) : { ok: false };
     // No token, or no tier applied: add it the way a new pane is added (beside
     // the last leaf, or as the root of an empty tree).
     if (!r.ok) lath.store.addLeaf(id, meta, null);
