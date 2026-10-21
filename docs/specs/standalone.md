@@ -260,6 +260,7 @@ sequenceDiagram
   end
 ```
 
+- **Must refuse preparation if the captured Workspace changes during CWD probes.**
 - **Must return preparation refusals as `{ moved: false, reason }` without changing ownership.** On `Ok` the source marks the Workspace **transferring**: still mounted, nothing released, omitted from `getWindowSnapshot`.
 - **An arrival without content is not drainable.**
 - **The target arms its collector before `adopt_ready`** (rationale), and `pty:requestInit` names **that arrival's ids and no others**. The target mounts the Workspace at the payload's index, else the drop index, and **never spawns or kills**.

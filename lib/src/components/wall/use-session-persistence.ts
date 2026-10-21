@@ -140,13 +140,21 @@ export function useSessionPersistence({
 
   /** The same record a save would publish, handed back instead. The Workspace
    *  is leaving, so nothing here may touch this Window's aggregator. */
-  const serialize = useCallback((options?: SaveOptions): Promise<PersistedSession> => {
+  const serialize = useCallback(async (options?: SaveOptions): Promise<PersistedSession> => {
+    const snapshot = lath.store.getSnapshot();
+    const doorSnapshot = doorsRef.current;
     const { panes, doors, lathLayout } = collect();
-    return buildPersistedSession(
+    const session = await buildPersistedSession(
       getPlatform(), panes, doors, lathLayout,
       sink?.previous() ?? null, saveOptions(options),
     );
-  }, [collect, sink, saveOptions]);
+    // Ownership ids are collected after this probe. Never pair them with a
+    // layout captured before a split, close, or minimize that happened during it.
+    if (lath.store.getSnapshot() !== snapshot || doorsRef.current !== doorSnapshot) {
+      throw new Error('Workspace changed while preparing its move; try again');
+    }
+    return session;
+  }, [collect, sink, saveOptions, lath, doorsRef]);
 
   const serializeNow = useCallback((): PersistedSession => {
     const { panes, doors, lathLayout } = collect();

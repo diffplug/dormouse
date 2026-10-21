@@ -340,6 +340,35 @@ describe('Wall on the Lath engine', () => {
     expect(Object.keys(saved!.lathLayout!.leafMeta ?? {})).toContain('surface:a');
   });
 
+  it.each(['split', 'close', 'minimize', 'no change'] as const)('validates the transfer snapshot after %s during its CWD probe', async (change) => {
+    await act(async () => root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />));
+    await flush();
+    const handle = getWallHandle(DEFAULT_WORKSPACE_ID)!;
+    await act(async () => { await handle.flushPersistence(); });
+    let resolveCwd!: (cwd: string) => void;
+    vi.spyOn(fake, 'getCwd').mockResolvedValue('/fresh')
+      .mockImplementationOnce(() => new Promise(resolve => { resolveCwd = resolve; }));
+    const prepared = handle.prepareWorkspaceTransfer();
+    const outcome = prepared.then(() => 'accepted', error => error.message);
+    await act(async () => {
+      if (change === 'close') {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+          method: SURFACE_CONTROL_METHODS.kill,
+          params: { surface: 'surface:a', confirmation: { mode: 'dangerously' } },
+          respond: () => {},
+        } }));
+      } else if (change === 'minimize') container.querySelector<HTMLButtonElement>('[data-lath-leaf="surface:a"] [aria-label="Minimize"]')!.click();
+      else if (change === 'split') window.dispatchEvent(new KeyboardEvent('keydown', { key: '|', bubbles: true }));
+    });
+    await flush();
+    if (change === 'split') expect(handle.surfaceIds()).toHaveLength(2);
+    else if (change === 'close') expect(handle.surfaceIds()).not.toContain('surface:a');
+    else if (change === 'minimize') expect(handle.serializeNow().doors).toEqual([expect.objectContaining({ id: 'surface:a' })]);
+    resolveCwd('/fresh');
+    expect(await outcome).toBe(change === 'no change' ? 'accepted' : 'Workspace changed while preparing its move; try again');
+    if (change === 'no change') expect((await prepared).payload.workspace.session.panes).toEqual([expect.objectContaining({ id: 'surface:a', cwd: '/fresh' })]);
+  });
+
   it('manual keyboard splits enter passthrough on the new pane immediately', async () => {
     const onEvent = vi.fn();
     await act(async () => {
