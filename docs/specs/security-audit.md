@@ -19,7 +19,7 @@
 
 - **A domain never re-derives a clause the fragment answers**; it reads the fragment as evidence and keeps the judgement bullets, the qualitative pass, and whether the expected-state file still encodes its spec.
 - **A `FAIL IF` marked `Pinned by` a script or test in `pnpm test` is answered by running it**, not by reading the code it checks.
-- **The check reads a 403 under `AUDIT_PAT` as scope drift, a `FAIL`**, any other failed call as `UNVERIFIABLE`, and never passes a clause it could not read; `--local` makes a 403 `UNVERIFIABLE` for an operator's own login on Windows, macOS, or Linux.
+- **The check reads a 403 under `AUDIT_PAT` as scope drift, a `FAIL`**, any other failed call as `UNVERIFIABLE`, and never passes a clause it could not read; `--local` makes a 403 `UNVERIFIABLE` for an operator's own login.
 
 - **FAIL IF** `S3` `Check GitHub state` is removed, runs after the agent, or its fragment leaves `AUDIT_FRAGMENTS`, or `scripts/github-state-check.mjs` stops failing a planted violation of any clause it judges. Pinned by `scripts/security-audit.test.mjs` and `scripts/github-state-check.test.mjs`.
 
