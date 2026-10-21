@@ -175,6 +175,17 @@ describe('copySelection', () => {
     }
   });
 
+  it.each([true, false])('reports a pending copy after nudging the same selection (copied: %s)', async copied => {
+    let complete!: (result: boolean) => void;
+    vi.mocked(writeTextToClipboard).mockImplementation(() => new Promise(resolve => { complete = resolve; }));
+    select({ endRow: 2, endCol: 11 });
+    const pending = copySelection(ID);
+    nudgeCopyEdge(ID, 'end', 1);
+    complete(copied);
+    await pending;
+    expect(getMouseSelectionState(ID)).toMatchObject({ selection: { endCol: 16 }, copyOutcome: copied ? 'copied' : 'failed' });
+  });
+
   it('says a failed write failed, for that selection', async () => {
     vi.mocked(writeTextToClipboard).mockResolvedValue(false);
     select({});

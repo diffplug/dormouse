@@ -180,7 +180,7 @@ Every break is a mark that a click cycles keep → space → none; a scope or fo
 - **Never show while its Wall travels**, its pane hidden, or another pane zoomed over it.
 - **Never take focus**; only an actual scrollbar press keeps its default (rationale). Presses inside it count as inside its pane (`anchoredTarget`); its `mousedown` and `contextmenu` never reach the pane.
 - **Esc**, a click outside the editor, a content change or a resize it cannot follow (§3.4), a confirmed copy, or **any input the terminal receives** — typing, a paste, Pocket's input bar — dismisses it and cancels the selection. Source of truth: `writeUserInput` in `lib/src/lib/terminal-lifecycle.ts`, pinned by `lib/src/lib/terminal-lifecycle.selection.test.ts`.
-- **Must confirm only after a successful clipboard write, and only for the selection copied**; the selection then clears, however it moved meanwhile (rationale).
+- **Must confirm only after a successful clipboard write, and only for the selection copied**; the selection then clears, even if its edges moved or reflow ran while the write was pending (rationale).
 - **Must leave empty copies idle without writing.** **Must say a failed write failed**, keeping the selection for a retry.
 - **Must write through the adapter's native `writeClipboardText` where it has one, and never fall back from it** (rationale). **Pocket's adapter must have none**: its copies belong on the phone. Without one, the write takes the Clipboard API, and `execCommand('copy')` where that is missing or refuses (rationale).
 - **Must open the clipboard-failure report when a write fails every way it may take**, unless its caller opts out. **Its details never carry the copied text**; they go to the tracking issue the report links.

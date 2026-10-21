@@ -40,6 +40,7 @@ describe('mouse-selection: default state', () => {
       bracketedPaste: false,
       override: 'off',
       selection: null,
+      selectionIdentity: null,
       hintToken: null,
       copyEditor: null,
       programCopy: null,
