@@ -251,6 +251,17 @@ describe('helper lifecycle', () => {
     prompt(helper.id); await vi.advanceTimersByTimeAsync(100);
     expect(getTerminalPaneState(helper.id).cwd?.path).toBe(expected);
   });
+  it('keeps a directory reported during shell startup when autorun begins', async () => {
+    resetTerminalPaneState('parent', { cwd: { path: '/source', pathKind: 'posix', isRemote: false, source: 'osc7', updatedAt: 0 } });
+    const helper = await openHelper('parent');
+    applyTerminalSemanticEvents(helper.id, [{ type: 'cwd', cwd: { path: '/startup', pathKind: 'posix', isRemote: false, source: 'osc7', updatedAt: 1 } }]);
+    prompt(helper.id);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(host.writePty).toHaveBeenCalledExactlyOnceWith(helper.id, 'git status\r', { launch: true });
+    expect(getTerminalPaneState(helper.id).cwd).toMatchObject({ path: '/startup', source: 'osc7' });
+    expect(getTerminalPaneState(helper.id).currentCommand?.cwdAtStart?.path).toBe('/startup');
+  });
+
   it('user input during startup cancels autorun and remains preserved at idle', async () => {
     const helper = await openHelper('parent'); registry.get(helper.id)!.untouched = false;
     prompt(helper.id); await vi.advanceTimersByTimeAsync(100);
