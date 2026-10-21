@@ -12,8 +12,8 @@ export type CanaryRecallSnapshot = {
 };
 
 /**
- * The advisory engine's counts over one canary run's seeds
- * (docs/specs/security-audit.md -> "Advisory engine"); `either` null when not computed.
+ * The second-opinion audit's counts over one canary run's seeds
+ * (docs/specs/security-audit.md -> "Second-opinion audit"); `either` null when not computed.
  */
 export type CodexCounts = { url: string; caught: number; either: number | null; unfinished: number };
 
@@ -44,7 +44,7 @@ export type RecallWeek = {
   /** Runs that week that left no record, and so add nothing to its counts. */
   unrecorded: number;
   /**
-   * The advisory engine, over that week's runs it was paired with; null when
+   * The second-opinion audit, over that week's runs it was paired with; null when
    * none was. `either` is over every counted run, a run Codex did not see
    * adding Claude's catches alone, so it never falls below `percent`; null
    * when a paired run did not compute it, which plots no point that week.
@@ -205,7 +205,7 @@ const GRID = [100, 50, 0];
  */
 const SERIES = {
   claude: { label: "Claude, the release gate", stroke: "var(--docs-accent)", dash: undefined },
-  codex: { label: "Codex, advisory", stroke: "color-mix(in srgb, var(--color-text) 65%, transparent)", dash: undefined },
+  codex: { label: "Codex, second opinion", stroke: "color-mix(in srgb, var(--color-text) 65%, transparent)", dash: undefined },
   either: { label: "Caught by either", stroke: "var(--docs-accent)", dash: "5 4" },
 } as const;
 type Series = keyof typeof SERIES;
@@ -242,7 +242,7 @@ function SeriesMarker({ series, cx, cy, r }: { series: Series; cx: number; cy: n
   return <rect x={cx - d} y={cy - d} width={d * 2} height={d * 2} transform={`rotate(45 ${cx} ${cy})`} style={{ fill }} />;
 }
 
-/** The legend, shown once any week has an advisory-engine point: identity is never color alone. */
+/** The legend, shown once any week has a second-opinion point: identity is never color alone. */
 function RecallLegend() {
   return (
     <ul aria-label="Lines" className={`mt-4 flex flex-wrap gap-x-4 gap-y-1 text-xs ${CARD_MUTED_TEXT_CLASS}`}>
@@ -305,7 +305,7 @@ function RecallGraph({ weeks }: { weeks: RecallWeek[] }) {
             )),
           )}
         </svg>
-        {/* The advisory engine's points: the week's own point below opens its runs and describes all three. */}
+        {/* The second-opinion audit's points: the week's own point below opens its runs and describes all three. */}
         {weeks.flatMap((week, i) =>
           week.codex
             ? ([["codex", week.codex.percent], ["either", week.codex.eitherPercent]] as const).flatMap(([series, value]) =>
@@ -403,7 +403,7 @@ export default function CanaryRecall({ snapshot }: { snapshot: CanaryRecallSnaps
   const weeks = recallWeeks(snapshot);
   const any = snapshot.runs.length + snapshot.unrecorded.length > 0;
   const unfinished = snapshot.runs.some((run) => run.unfinished > 0 || (run.codex?.unfinished ?? 0) > 0);
-  const advisory = weeks.some((week) => week.codex !== null);
+  const secondOpinion = weeks.some((week) => week.codex !== null);
   return (
     <aside aria-label="Canary recall" className={`mb-6 ${CARD_CLASS} text-[var(--color-text)]`}>
       {seeded > 0 ? (
@@ -420,11 +420,11 @@ export default function CanaryRecall({ snapshot }: { snapshot: CanaryRecallSnaps
         A canary seeds known vulnerabilities into a throwaway copy of the repository and counts
         how many the audit reports. Summed over the canary runs of the {windowDays} days before{" "}
         {asOf}.{any ? " Each point is one week, Monday to Sunday UTC; open it for that week's runs." : ""}
-        {advisory
-          ? " A maintainer also runs Codex, an advisory engine, on some canaries' seeds; its line covers only those runs, and the dashed line counts a seed either caught."
+        {secondOpinion
+          ? " The second-opinion audit also runs Codex on some canaries' seeds; its line covers only those runs, and the dashed line counts a seed either caught."
           : ""}
       </p>
-      {advisory ? <RecallLegend /> : null}
+      {secondOpinion ? <RecallLegend /> : null}
       {any ? <RecallGraph weeks={weeks} /> : null}
       {unfinished ? (
         <p className={`text-sm ${CARD_MUTED_TEXT_CLASS}`}>

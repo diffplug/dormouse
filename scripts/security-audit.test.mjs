@@ -1522,7 +1522,7 @@ for (const [arg, runsState, runsDomain] of [['github-state', true, false], ['ci-
   });
 }
 
-// The advisory engine: the same prompts on Codex, each domain's computed verdict
+// The second-opinion audit: the same prompts on Codex, each domain's computed verdict
 // gathered into the publishing command, which is printed and never run.
 for (const [args, verdicts, expected] of [[['remote'], 'remote=PASS', 0], [[], 'supply-chain=PASS ci-and-secrets=PASS remote=PASS local=INCONCLUSIVE hosted=PASS', 1]]) {
   test(`local runner, Codex engine: ${args[0] ?? 'every domain'}`, (t) => {
@@ -1841,11 +1841,11 @@ test('the model split holds in CI and locally, over the same prompt files', () =
   assert.match(local, /cat "\$AUDIT_DIR\/_preamble\.md"; echo; cat "\$AUDIT_DIR\/\$domain\.md"/);
 });
 
-// "Advisory engine": the Codex engine is pinned and sandboxed, and its report
+// "Second-opinion audit": the Codex engine is pinned and sandboxed, and its report
 // workflow publishes only what its builder checked, for an admin, from main.
 const codexWorkflow = readFileSync(join(repo, '.github/workflows/codex-audit-report.yaml'), 'utf8');
 
-test('the advisory engine runs sandboxed on its pinned model and program, and gates nothing', () => {
+test('the second-opinion audit runs sandboxed on its pinned model and program, and gates nothing', () => {
   assert.match(local, /^CODEX_MODEL=gpt-6-sol$/m);
   assert.match(local, /^CODEX_PROGRAM=daybreak_blue$/m);
   const exec = local.match(/codex exec [^\n]*\\\n[^\n]*/)?.[0] ?? '';
@@ -1868,12 +1868,12 @@ test('the advisory engine runs sandboxed on its pinned model and program, and ga
     assert.equal(spawnSync('bash', ['-c', steps[0].run], { env: { ...process.env, GITHUB_REF: ref } }).status, status, ref);
   }
   const posting = steps.filter((step) => /\bgh\b|security-audit-public-body/.test(step.run ?? ''));
-  assert.deepEqual(posting.map((step) => step.name), ['Publish the advisory-engine report']);
+  assert.deepEqual(posting.map((step) => step.name), ['Publish the second-opinion report']);
   assert.match(posting[0].run, /node scripts\/security-audit-public-body\.mjs --engine codex /);
   assert.equal(doc.jobs.publish.steps.find((step) => step.uses?.startsWith('actions/checkout@')).with['persist-credentials'], false);
 });
 
-/** The builder's advisory-engine path in a fixture tree, over a `gh` stub answering what it reads. */
+/** The builder's second-opinion path in a fixture tree, over a `gh` stub answering what it reads. */
 function codexFixture(t, { role = 'admin', compare = 'ahead', run = {}, record = {} } = {}) {
   const { dir, env } = fixture(t);
   copyFileSync(join(repo, 'scripts/security-audit-canary.mjs'), join(dir, 'scripts/security-audit-canary.mjs'));
@@ -1904,7 +1904,7 @@ const CODEX_ARGS = ['--engine', 'codex', '--date', '2026-10-20T12:00Z', '--run-u
 const runCodex = (dir, env, args = CODEX_ARGS) => spawnSync(process.execPath, ['scripts/security-audit-public-body.mjs', ...args], { cwd: dir, env, encoding: 'utf8' });
 const withArg = (name, value) => CODEX_ARGS.map((a, i) => (CODEX_ARGS[i - 1] === name ? value : a));
 
-test('the advisory-engine report comments once on the status issue and writes its recall record', (t) => {
+test('the second-opinion report comments once on the status issue and writes its recall record', (t) => {
   const { dir, env } = codexFixture(t);
   const result = runCodex(dir, env);
   assert.equal(result.status, 0, result.stderr);
@@ -1921,7 +1921,7 @@ test('the advisory-engine report comments once on the status issue and writes it
 
 // Published without Claude's scorecard: the either count is not computed,
 // which the record keeps as null and the comment says, never as zero.
-test('the advisory-engine report publishes a canary whose either count was not computed', (t) => {
+test('the second-opinion report publishes a canary whose either count was not computed', (t) => {
   const { dir, env } = codexFixture(t);
   const result = runCodex(dir, env, withArg('--canary-either', ''));
   assert.equal(result.status, 0, result.stderr);
@@ -1946,7 +1946,7 @@ for (const [name, options, args, message] of [
   ['half the canary counts', {}, withArg('--canary-unfinished', ''), /invalid canary unfinished/],
   ['caught above seeded, either not computed', {}, withArg('--canary-either', '').map((a, i, all) => (all[i - 1] === '--canary-caught' ? '9' : a)), /invalid canary counts/],
 ]) {
-  test(`the advisory-engine report posts nothing for ${name}`, (t) => {
+  test(`the second-opinion report posts nothing for ${name}`, (t) => {
     const { dir, env } = codexFixture(t, options);
     const result = runCodex(dir, env, args);
     assert.notEqual(result.status, 0);

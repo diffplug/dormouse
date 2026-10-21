@@ -72,7 +72,7 @@ const codex = (id, paired, fields = {}) => ({ claude_run_url: URL(paired), commi
   seeded: 8, caught: 5, either: 7, unfinished: 0, run_url: URL(id), ...fields });
 
 describe('validateCodexRecord', () => {
-  it('reads exactly the fields the advisory-engine builder writes', () => {
+  it('reads exactly the fields the second-opinion builder writes', () => {
     const written = codexRecord({ runUrl: URL(9), commit: 'a'.repeat(40), model: 'gpt-6-sol', repo: 'diffplug/dormouse',
       canary: { run: '7', seeded: 8, caught: 5, either: 7, unfinished: 0 } });
     expect(Object.keys(written).sort()).toEqual(CODEX_FIELDS);
@@ -98,8 +98,8 @@ describe('validateCodexRecord', () => {
   });
 });
 
-describe('summarize with the advisory engine', () => {
-  it('pairs each canary run with its newest advisory-engine record, and ignores one paired outside the window', () => {
+describe('summarize with the second-opinion audit', () => {
+  it('pairs each canary run with its newest second-opinion record, and ignores one paired outside the window', () => {
     const snapshot = summarize([{ id: 7, createdAt: daysAgo(3), record: record(7) }], { now: NOW, codex: [
       { id: 9, record: codex(9, 7, { caught: 2, either: 6 }) },
       { id: 11, record: codex(11, 7) },
@@ -124,7 +124,7 @@ describe('summarize with the advisory engine', () => {
   });
 });
 
-it('selects advisory-engine runs by the title their workflow gives them', () => {
+it('selects second-opinion runs by the title their workflow gives them', () => {
   const workflow = readFileSync(resolve(import.meta.dirname, '../../.github/workflows/codex-audit-report.yaml'), 'utf8');
   expect(workflow).toMatch(new RegExp(`^run-name: ${CODEX_TITLE.replace(/[()]/g, '\\$&')}$`, 'm'));
 });

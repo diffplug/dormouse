@@ -38,7 +38,9 @@ Every section the [nightly audit](#how-the-guarantees-are-checked) checks opens 
 
 **Every week, a canary audits the audit.** It seeds already-fixed or synthetic vulnerabilities into a throwaway checkout, some beside comments that justify them, removes the tests and lints that would catch them, runs the code domains over it, and publishes only how many they caught ([Canary recall](./security-audit.md#canary-recall)).
 
-**Every quarter, and before releases that change remote control or Hosted, a red team reads the code and these guarantees without the `FAIL IF` lines**, for what the checks themselves miss ([Red team](./security-audit.md#red-team)). A maintainer also runs the audit's prompts and canary seeds on Codex, another vendor's model, as an advisory engine: published beside the nightly, never gating a release ([Advisory engine](./security-audit.md#advisory-engine)).
+**Every night, a second-opinion audit runs the same prompts on Codex**, another vendor's model, published beside the audit but never gating a release; the canary measures both ([Second-opinion audit](./security-audit.md#second-opinion-audit)).
+
+**Every quarter, and before releases that change remote control or Hosted, a red team reads the code and these guarantees without the `FAIL IF` lines**, on Claude and on Codex, for what the checks themselves miss ([Red team](./security-audit.md#red-team)).
 
 Source of truth: root scripts in `package.json`; native jobs in `.github/workflows/ci.yml`; `.github/workflows/security-audit.yaml` and its release gate in `.github/workflows/release.yml`.
 

@@ -202,11 +202,11 @@ gh secret set AUDIT_PAT --env security-audit --repo diffplug/dormouse --body 'gi
 
 **Why an unfinished domain still counts.** Dropping the run, or its unfinished domain's seeds, would raise the figure by the runs where the audit did worst; a domain that ran out of time is a miss the published recall should carry.
 
-## Advisory engine
+## Second-opinion audit
 
 **Why a second model family (2026-10).** Every domain, the canary's included, runs on one vendor's models, so a blind spot they share is invisible to the recall figure. Codex reads the same prompts and seeds, which isolates the model as the variable: the either line is what the two together would catch.
 
-**Why advisory.** A gate needs a run that is reproducible on the release tag, with credentials CI holds; the advisory engine runs on a maintainer's machine and login. Its value is a second opinion and a recall comparison, not a pass.
+**Why it never gates.** A gate needs a run that is reproducible on the release tag, with credentials CI holds; the second-opinion audit runs on a maintainer's machine and login. Its value is a second opinion and a recall comparison, not a pass.
 
 **Why the either count may be empty (2026-10).** Claude's scorecard sits in its canary run's encrypted transcript, which not every machine that runs Codex can decrypt. Codex's own counts stand without it; a zero in its place would plot a false either point.
 
@@ -218,4 +218,4 @@ gh secret set AUDIT_PAT --env security-audit --repo diffplug/dormouse --body 'gi
 
 **Why quarterly, and before remote control or Hosted releases.** Those are the two surfaces an attacker reaches without local access, so a release changing them is when a miss costs most.
 
-**Why without the `FAIL IF` lines.** The audit and its advisory engine both read the rules, so a hole no rule names is invisible to them; a pass from the code and the published guarantees alone looks where the rules do not.
+**Why without the `FAIL IF` lines.** The audit and the second-opinion audit both read the rules, so a hole no rule names is invisible to them; a pass from the code and the published guarantees alone looks where the rules do not.

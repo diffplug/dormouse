@@ -26,7 +26,7 @@
 # that run's commit, read on your `gh` login, with the seeds that run dealt.
 #
 # `--engine codex` runs the same prompts on Codex instead of Claude: the
-# advisory engine (docs/specs/security-audit.md -> "Advisory engine"), never
+# second-opinion audit (docs/specs/security-audit.md -> "Second-opinion audit"), never
 # the release gate. Its canary takes `--claude-scorecard`, the decrypted
 # `scorecard.json` of the CI canary run its `--key` names, to count the seeds
 # either engine caught; without it that count is left empty. It ends by
@@ -76,7 +76,7 @@ case "$ENGINE" in
   claude|codex) ;;
   *) echo "error: unknown engine '$ENGINE' (claude|codex)" >&2; exit 64 ;;
 esac
-# The advisory engine's model and Cyber access program. Pinned here alone:
+# The second-opinion audit's model and Cyber access program. Pinned here alone:
 # the Codex engine has no CI counterpart to agree with.
 CODEX_MODEL=gpt-6-sol
 CODEX_PROGRAM=daybreak_blue
@@ -163,7 +163,7 @@ run_domain() {
   return "$status"
 }
 
-# Each domain's computed verdict, `domain=VERDICT`, for the advisory report;
+# Each domain's computed verdict, `domain=VERDICT`, for the second-opinion report;
 # a domain that left no fragment is INCONCLUSIVE, as CI computes it.
 VERDICTS=""
 run_domain_recorded() {
@@ -173,18 +173,18 @@ run_domain_recorded() {
   return "$status"
 }
 
-# The command that publishes the advisory engine's report on the commit it
+# The command that publishes the second-opinion audit's report on the commit it
 # audited, printed, never run.
 print_codex_report() {
   local commit="$1"
   shift
   echo
-  echo "==> advisory: a Codex verdict never gates a release (docs/specs/security-audit.md -> \"Advisory engine\")."
+  echo "==> second opinion: a Codex verdict never gates a release (docs/specs/security-audit.md -> \"Second-opinion audit\")."
   echo "==> to publish them:"
   echo "gh workflow run codex-audit-report.yaml -R $GITHUB_REPOSITORY --ref main -f commit=$commit -f model=$CODEX_MODEL $*"
 }
 
-# The advisory engine's report on the domains just run in the working tree.
+# The second-opinion audit's report on the domains just run in the working tree.
 print_codex_verdicts() {
   local commit
   commit=$(git rev-parse HEAD 2>/dev/null) || commit="<commit>"

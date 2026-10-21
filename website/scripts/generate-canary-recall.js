@@ -8,10 +8,10 @@
  * runs on `main` created in the last `WINDOW_DAYS` days, downloads each one's
  * `canary-recall` artifact — never `canary-transcript`, which is ciphertext and
  * not ours to open here — validates it, and writes
- * website/src/data/canary-recall.json. The advisory engine's records ride
+ * website/src/data/canary-recall.json. The second-opinion audit's records ride
  * along: each successful `codex-audit-report.yaml` run's `codex-recall`,
  * paired with the canary run whose seeds it shares
- * (docs/specs/security-audit.md -> "Advisory engine"). Run by hand with the
+ * (docs/specs/security-audit.md -> "Second-opinion audit"). Run by hand with the
  * dependency snapshots (docs/specs/deploy.md -> "Release checklist"), because
  * downloading an artifact needs a token even on a public repository, and the
  * site is built by Cloudflare Pages, which holds none.
@@ -65,7 +65,7 @@ export function validateRecord(record, id) {
 }
 
 /**
- * One advisory-engine run's `codex-recall.json`, checked as `validateRecord`
+ * One second-opinion run's `codex-recall.json`, checked as `validateRecord`
  * checks a canary's: exactly the fields the builder writes, counts with
  * caught no more than seeded and either between them, and links to this very
  * run and to a run on this repository. A null `either` was not computed and
@@ -90,8 +90,8 @@ export function validateCodexRecord(record, id) {
 }
 
 /**
- * Each recorded canary run's advisory-engine counts, by the canary run's URL:
- * the newest advisory-engine run paired with it. Throws on a pairing that
+ * Each recorded canary run's second-opinion counts, by the canary run's URL:
+ * the newest second-opinion run paired with it. Throws on a pairing that
  * cannot follow from the canary's own record — other seeds, or a computed
  * `either` below Claude's count or above the two engines' sum.
  */
@@ -114,7 +114,7 @@ function pairCodex(recorded, codex) {
 /**
  * The snapshot, from every canary run listed: `{ id, createdAt, record }`,
  * `record` null for a run that left no `canary-recall` artifact; and every
- * advisory-engine run listed, `{ id, record }`, each record a `codex-recall`.
+ * second-opinion run listed, `{ id, record }`, each record a `codex-recall`.
  *
  * Every run in the window counts as its record has it. A domain that left no
  * finished report caught only what its partial report cites, so the seeds
@@ -160,7 +160,7 @@ function listCanaryRuns(since) {
 }
 
 /**
- * The successful advisory-engine runs on `main` created since `since`.
+ * The successful second-opinion runs on `main` created since `since`.
  * Success alone is an admin's dispatch: `codex-audit-report.yaml` fails any
  * other.
  */
@@ -195,7 +195,7 @@ function main() {
   writeFileSync(out, `${JSON.stringify(snapshot, null, 2)}\n`);
   console.log(`canary recall: ${snapshot.caught}/${snapshot.seeded} over ${snapshot.runs.length} run(s) since ${since}` +
     `${snapshot.unrecorded.length ? `; ${snapshot.unrecorded.length} run(s) left no record` : ''}` +
-    `; ${snapshot.runs.filter((r) => r.codex).length} paired with the advisory engine -> ${out}`);
+    `; ${snapshot.runs.filter((r) => r.codex).length} paired with the second-opinion audit -> ${out}`);
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) main();

@@ -436,7 +436,7 @@ test('the local canary seeds a copy, runs the code domains, scores, and files no
   assert.ok(existsSync(join(dir, POOL_DIR, 'room.patch')));
 });
 
-// The advisory engine: the same seeds under a CI run's key, scored against
+// The second-opinion audit: the same seeds under a CI run's key, scored against
 // that run's scorecard, and the publishing command printed, never run.
 test('the local Codex canary takes a CI run\'s key, publishes with or without Claude\'s scorecard, and files nothing', (t) => {
   const { base, dir, bin, env } = checkout(t);
