@@ -463,3 +463,28 @@ test("preflight rejects wrong databases, caching, reused roles, and incomplete s
   );
   await assert.rejects(preflight(env, withProviders("unknown"), provider()));
 });
+test("each Worker binds exactly one Hyperdrive of its own, or neither its config nor preflight passes", async () => {
+  for (const worker of Object.keys(HYPERDRIVES)) {
+    const message = `${configs[worker].name} must bind exactly one Hyperdrive`;
+    const binding = bases[worker].hyperdrive[0];
+    for (const hyperdrive of [undefined, [], [binding, { ...binding, binding: "SECOND" }]]) {
+      assert.throws(
+        () => productionConfigs({ ...bases, [worker]: { ...bases[worker], hyperdrive } }, env),
+        failure(message),
+      );
+      // Before reading anything, so no Worker's checks are skipped.
+      const read = [];
+      await assert.rejects(
+        preflight(env, { ...configs, [worker]: { ...configs[worker], hyperdrive } }, provider({ read })),
+        failure(message),
+      );
+      assert.deepEqual(read, []);
+    }
+  }
+  // The bindings themselves are compared, not only the variables naming them.
+  const shared = { ...configs, relay: { ...configs.relay, hyperdrive: configs.account.hyperdrive } };
+  await assert.rejects(
+    preflight(env, shared, provider()),
+    failure("HYPERDRIVE_ID, RELAY_HYPERDRIVE_ID, VOICE_HYPERDRIVE_ID must name three different Hyperdrives"),
+  );
+});

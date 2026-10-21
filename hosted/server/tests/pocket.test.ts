@@ -49,7 +49,7 @@ function assets(request: Request) {
         status: 307,
         headers: { location: pathname.slice(0, -"index.html".length) },
       });
-    case "/assets/index-abc123.js":
+    case "/assets/index-B39o2E6i.js":
     case "/sw.js":
       return file("export {};", "text/javascript");
     case "/manifest.webmanifest":
@@ -114,7 +114,7 @@ test("the diagnostics harness is served at its own name, never the shell", async
 });
 
 test("hashed assets are immutable; root files revalidate; a missing asset is a 404, never the shell", async () => {
-  const script = await get("/assets/index-abc123.js");
+  const script = await get("/assets/index-B39o2E6i.js");
   expect(script.status).toBe(200);
   expect(script.headers.get("cache-control")).toBe(IMMUTABLE);
   for (const path of ["/sw.js", "/manifest.webmanifest"]) {
@@ -123,7 +123,7 @@ test("hashed assets are immutable; root files revalidate; a missing asset is a 4
     expect(response.headers.get("cache-control"), path).toBe("no-cache");
   }
   // A percent-encoded `/assets/` is the same route, and as much a hashed asset.
-  for (const path of ["/assets/missing-abc123.js", "/assets/", "/%61ssets/missing-abc123.js"]) {
+  for (const path of ["/assets/missing-B39o2E6i.js", "/assets/", "/%61ssets/missing-B39o2E6i.js"]) {
     const response = await get(path);
     expect(response.status, path).toBe(404);
     expect(response.headers.get("content-type") ?? "", path).not.toContain("text/html");

@@ -48,11 +48,20 @@ export type RulesFor = (path: string, appOrigin: unknown) => PathRules;
 const under = (path: string, prefix: string) =>
   path === prefix || path.startsWith(`${prefix}/`);
 
+/**
+ * Whether `path` is a file under `dir` whose name carries the content hash
+ * Vite's default output names (`[name]-[hash].[ext]`) put there: 8 characters
+ * of base64url before the extension. A file there without one may change
+ * under the same name, so it is cached as its path otherwise is.
+ */
+const contentHashed = (path: string, dir: string) =>
+  path.startsWith(dir) && /-[\w-]{8}\.[a-z0-9]+$/i.test(path.slice(dir.length));
+
 /** The account's: its policy everywhere, its Vite output under `/assets/` immutable. */
 export const accountRules: RulesFor = (path) => ({
   policy: ACCOUNT_POLICY,
   permissions: NO_DEVICES_PERMISSIONS,
-  cache: path.startsWith("/assets/") ? "immutable" : "no-store",
+  cache: contentHashed(path, "/assets/") ? "immutable" : "no-store",
 });
 
 /** A response that is no page: the voice origin's, and the relay's non-page prefixes. */
@@ -88,12 +97,12 @@ export const relayRules: RulesFor = (path, appOrigin) => {
     ? {
         policy: origin ? oneTimePagePolicy(origin) : RUNS_NOTHING_POLICY,
         permissions: NO_DEVICES_PERMISSIONS,
-        cache: path.startsWith(`${ONE_TIME_PAGE_PATH}assets/`) ? "immutable" : "no-store",
+        cache: contentHashed(path, `${ONE_TIME_PAGE_PATH}assets/`) ? "immutable" : "no-store",
       }
     : {
         policy: origin ? pocketContentSecurityPolicy(origin) : RUNS_NOTHING_POLICY,
         permissions: POCKET_PERMISSIONS,
-        cache: path.startsWith("/assets/") ? "immutable" : "no-cache",
+        cache: contentHashed(path, "/assets/") ? "immutable" : "no-cache",
       };
 };
 

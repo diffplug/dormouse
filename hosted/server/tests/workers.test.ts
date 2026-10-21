@@ -218,7 +218,7 @@ async function fixture(
         // Vite's content-hashed build output, with the SPA fallback answering
         // every other path — including an unknown one under /assets/ — with the shell.
         assets: (request) =>
-            new URL(request.url).pathname === "/assets/app-abc123.js"
+            new URL(request.url).pathname === "/assets/app-B39o2E6i.js"
               ? new WorkerResponse("export const build = 1;\n", {
                   headers: { "content-type": "text/javascript" },
                 })
@@ -603,7 +603,7 @@ test("same-site requests fail, the sibling Workers' included; production exclude
   expect(
     (await browser.request("/api/auth/csrf")).headers.get("cache-control"),
   ).toBe("no-store");
-  const asset = await browser.request("/assets/app-abc123.js");
+  const asset = await browser.request("/assets/app-B39o2E6i.js");
   expect(asset.headers.get("cache-control")).toBe(
     "public, max-age=31536000, immutable",
   );
@@ -616,7 +616,7 @@ test("same-site requests fail, the sibling Workers' included; production exclude
   );
   // The SPA fallback serves the shell for an unknown asset path; it must stay uncached.
   expect(
-    (await browser.request("/assets/missing-abc123.js")).headers.get(
+    (await browser.request("/assets/missing-B39o2E6i.js")).headers.get(
       "cache-control",
     ),
   ).toBe("no-store");
