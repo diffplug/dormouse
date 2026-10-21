@@ -94,8 +94,8 @@ const SiteHeader = forwardRef<HTMLElement, SiteHeaderProps>(
                     <a
                       key={href}
                       href={href}
-                      className={`cursor-pointer transition-colors ${
-                        hideOnMobile ? "hidden md:block " : ""
+                      className={`min-h-11 cursor-pointer items-center transition-colors ${
+                        hideOnMobile ? "hidden md:inline-flex " : "inline-flex "
                       }${isActive ? "text-[var(--color-caramel)]" : "hover:text-[var(--color-caramel)]"}`}
                       {...(external ? { target: "_blank", rel: "noopener noreferrer" } : {})}
                     >

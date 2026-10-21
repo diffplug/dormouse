@@ -4,103 +4,37 @@
   "title": "Design System: Dormouse Hosted",
   "extensions": {
     "colorMeta": {
-      "page-bg": {
-        "role": "neutral",
-        "displayName": "Editor Ground",
-        "canonical": "var(--vscode-editor-background)"
-      },
-      "page-fg": {
-        "role": "neutral",
-        "displayName": "Editor Ink",
-        "canonical": "var(--vscode-editor-foreground)"
-      },
-      "accent": {
-        "role": "primary",
-        "displayName": "Theme Accent (AA)",
-        "canonical": "docsAccentFor(theme.accent, background)"
-      },
-      "muted": {
-        "role": "neutral",
-        "displayName": "Muted",
-        "canonical": "docsMutedTextFor(foreground, background)"
-      },
-      "bad": {
-        "role": "neutral",
-        "displayName": "Bad",
-        "canonical": "docsStatusColorFor(ansiRed, [background])"
-      },
-      "caramel": {
-        "role": "primary",
-        "displayName": "Caramel",
-        "canonical": "#b47624",
-        "tonalRamp": [
-          "#3a2207",
-          "#553209",
-          "#70430f",
-          "#8c5616",
-          "#b47624",
-          "#c9914b",
-          "#ddb27f",
-          "#f0d9bc"
-        ]
-      },
-      "rule": {
-        "role": "neutral",
-        "displayName": "Hairline Rule",
-        "canonical": "color-mix(in srgb, var(--page-fg) 15%, transparent)"
-      }
+      "page-bg": { "role": "neutral", "displayName": "Ground", "canonical": "var(--color-bg) (docs-themed: --vscode-editor-background)" },
+      "page-fg": { "role": "neutral", "displayName": "Ink", "canonical": "var(--color-text) (docs-themed: --vscode-editor-foreground)" },
+      "accent": { "role": "primary", "displayName": "Docs Accent", "canonical": "var(--docs-accent), painted by paintDocsTokens in lib/src/site/docs-paint.ts" },
+      "muted": { "role": "neutral", "displayName": "Muted", "canonical": "var(--docs-text-muted), painted by paintDocsTokens" },
+      "code-muted": { "role": "neutral", "displayName": "Code Muted", "canonical": "var(--docs-code-text-muted), painted by paintDocsTokens" },
+      "bad": { "role": "neutral", "displayName": "Bad", "canonical": "var(--docs-status-bad), painted by paintDocsTokens" },
+      "caramel": { "role": "primary", "displayName": "Caramel", "canonical": "var(--color-caramel), @theme in lib/src/site/site.css" },
+      "rule": { "role": "neutral", "displayName": "Hairline Rule", "canonical": "--color-text at 15%" }
     },
     "typographyMeta": {
-      "display": {
-        "displayName": "Display",
-        "purpose": "Page heading."
-      },
-      "headline": {
-        "displayName": "Headline",
-        "purpose": "Dialog heading."
-      },
-      "title": {
-        "displayName": "Title",
-        "purpose": "Section headings and wordmark size."
-      },
-      "intro": {
-        "displayName": "Intro",
-        "purpose": "Muted line under the heading; header nav size."
-      },
-      "body": {
-        "displayName": "Body",
-        "purpose": "Reading text, buttons, inputs."
-      },
-      "label": {
-        "displayName": "Label",
-        "purpose": "Field labels, definition terms, theme select."
-      },
-      "detail": {
-        "displayName": "Detail",
-        "purpose": "Footnotes, row details, token, door, footer."
-      },
-      "confirm-digits": {
-        "displayName": "Confirm Digits",
-        "purpose": "The two enrollment digits."
-      }
+      "display": { "displayName": "Display", "purpose": "Page heading (PAGE_TITLE_CLASS)." },
+      "headline": { "displayName": "Headline", "purpose": "Dialog heading." },
+      "title": { "displayName": "Title", "purpose": "Section headings; wordmark size." },
+      "intro": { "displayName": "Intro", "purpose": "Muted line under the heading (PAGE_INTRO_CLASS)." },
+      "body": { "displayName": "Body", "purpose": "Reading text, text buttons, fields." },
+      "action": { "displayName": "Action", "purpose": "Every siteButton." },
+      "label": { "displayName": "Label", "purpose": "Field labels and definition terms." },
+      "detail": { "displayName": "Detail", "purpose": "Footnotes, row details, door, footer." },
+      "confirm-digits": { "displayName": "Confirm Digits", "purpose": "The two enrollment digits." }
     },
-    "shadows": [],
+    "shadows": [
+      { "name": "theme-control", "value": "shadow-2xl (DocsThemeControl)", "purpose": "The shared floating theme picker and its prompt; never page content." }
+    ],
     "motion": [
-      {
-        "name": "control-color",
-        "value": "150ms ease-out",
-        "purpose": "Button border and text color on hover."
-      }
+      { "name": "neutral-button-color", "value": "Tailwind transition-colors", "purpose": "Neutral siteButton border and label on hover." }
     ],
     "breakpoints": [
-      {
-        "name": "compact",
-        "value": "540px"
-      },
-      {
-        "name": "narrow",
-        "value": "360px"
-      }
+      { "name": "nav-tight", "value": "360px" },
+      { "name": "sm", "value": "640px" },
+      { "name": "md", "value": "768px" },
+      { "name": "lg", "value": "1024px" }
     ]
   },
   "components": [
@@ -108,105 +42,92 @@
       "name": "Primary button",
       "kind": "button",
       "refersTo": "button-primary",
-      "description": "Full-width accent outline for the page's one action.",
+      "description": "Full-width accent outline for the page's one action (ACTION_CLASS).",
       "html": "<div class=\"ds-root\"><button class=\"ds-primary\">Email me a code</button></div>",
-      "css": ".ds-root{--page-bg:var(--vscode-editor-background,#1e1e1e);--page-fg:var(--vscode-editor-foreground,#d4d4d4);--accent:var(--hosted-accent,#3794ff);--muted:var(--hosted-muted,#9d9d9d);}.ds-primary{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:8px 16px;border:1px solid color-mix(in srgb,var(--page-fg) 30%,transparent);border-radius:6px;background:transparent;color:var(--page-fg);font:16px/1.6 'Ubuntu Sans Mono',ui-monospace,monospace;cursor:pointer;transition:border-color 150ms ease-out,color 150ms ease-out;width:100%;min-height:48px;border-color:var(--accent);color:var(--accent)}.ds-primary:hover{text-decoration:underline}.ds-primary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.ds-primary:disabled{opacity:.5;cursor:default}"
+      "css": ".ds-root{--bg:var(--color-bg,#000);--fg:var(--color-text,#dedede);--accent:var(--docs-accent,#b47624);--muted:var(--docs-text-muted,#767676);background:var(--bg);color:var(--fg);padding:16px}.ds-primary{display:inline-flex;align-items:center;justify-content:center;width:100%;min-height:48px;padding:12px 16px;border:1px solid var(--accent);border-radius:6px;background:transparent;color:var(--accent);font:16px/1.5 var(--font-display,'Ubuntu Sans Mono',ui-monospace,monospace);cursor:pointer}.ds-primary:hover{text-decoration:underline}.ds-primary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.ds-primary:disabled{opacity:.5;pointer-events:none}"
     },
     {
       "name": "Secondary button",
       "kind": "button",
       "refersTo": "button-secondary",
-      "description": "Provider sign-in, connect, remove, and sign-out.",
+      "description": "Provider sign-in, connect, remove, sign-out, Cancel (siteButton neutral, fit).",
       "html": "<div class=\"ds-root\"><button class=\"ds-secondary\">GitHub</button></div>",
-      "css": ".ds-root{--page-bg:var(--vscode-editor-background,#1e1e1e);--page-fg:var(--vscode-editor-foreground,#d4d4d4);--accent:var(--hosted-accent,#3794ff);--muted:var(--hosted-muted,#9d9d9d);}.ds-secondary{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:8px 16px;border:1px solid color-mix(in srgb,var(--page-fg) 30%,transparent);border-radius:6px;background:transparent;color:var(--page-fg);font:16px/1.6 'Ubuntu Sans Mono',ui-monospace,monospace;cursor:pointer;transition:border-color 150ms ease-out,color 150ms ease-out;}.ds-secondary:hover{border-color:var(--accent);color:var(--accent)}.ds-secondary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.ds-secondary:disabled{opacity:.5;cursor:default}"
+      "css": ".ds-root{--bg:var(--color-bg,#000);--fg:var(--color-text,#dedede);--accent:var(--docs-accent,#b47624);background:var(--bg);color:var(--fg);padding:16px}.ds-secondary{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:8px 16px;border:1px solid color-mix(in oklab,var(--fg) 30%,transparent);border-radius:6px;background:transparent;color:var(--fg);font:16px/1.5 var(--font-display,'Ubuntu Sans Mono',ui-monospace,monospace);cursor:pointer;transition:color 150ms,border-color 150ms}.ds-secondary:hover{border-color:var(--accent);color:var(--accent)}.ds-secondary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.ds-secondary:disabled{opacity:.5;pointer-events:none}"
     },
     {
       "name": "Text button",
       "kind": "button",
       "refersTo": "button-text",
-      "description": "Inline retry and form options.",
-      "html": "<div class=\"ds-root\"><button class=\"ds-text\">Change email</button></div>",
-      "css": ".ds-root{--page-bg:var(--vscode-editor-background,#1e1e1e);--page-fg:var(--vscode-editor-foreground,#d4d4d4);--accent:var(--hosted-accent,#3794ff);--muted:var(--hosted-muted,#9d9d9d);}.ds-text{min-height:44px;padding:0;border:0;background:transparent;color:var(--accent);font:16px/1.6 'Ubuntu Mono',ui-monospace,monospace;cursor:pointer}.ds-text:hover{text-decoration:underline}.ds-text:focus-visible{outline:2px solid var(--accent);outline-offset:2px}"
+      "description": "LINK_CLASS at 44px: inline retry and form options.",
+      "html": "<div class=\"ds-root\"><button class=\"ds-text\">I already have a code</button></div>",
+      "css": ".ds-root{--bg:var(--color-bg,#000);--accent:var(--docs-accent,#b47624);background:var(--bg);padding:16px}.ds-text{display:inline-flex;align-items:center;min-height:44px;padding:0;border:0;background:transparent;color:var(--accent);font:16px/1.5 var(--font-body,'Ubuntu Mono',ui-monospace,monospace);text-underline-offset:2px;cursor:pointer}.ds-text:hover{text-decoration:underline}.ds-text:disabled{opacity:.5}"
     },
     {
-      "name": "Email input",
+      "name": "Email field",
       "kind": "input",
       "refersTo": "input",
-      "description": "Labelled 16px field, 48px tall.",
+      "description": "LABEL_CLASS over a FIELD_CLASS field; focus turns the border to the accent.",
       "html": "<div class=\"ds-root\"><label class=\"ds-label\" for=\"ds-email\">Email address</label><input class=\"ds-input\" id=\"ds-email\" type=\"email\" placeholder=\"you@example.com\"></div>",
-      "css": ".ds-root{--page-bg:var(--vscode-editor-background,#1e1e1e);--page-fg:var(--vscode-editor-foreground,#d4d4d4);--accent:var(--hosted-accent,#3794ff);--muted:var(--hosted-muted,#9d9d9d);}.ds-label{display:block;margin:0 0 8px;font:14px/1.6 'Ubuntu Sans Mono',ui-monospace,monospace;color:var(--muted)}.ds-input{width:100%;min-height:48px;padding:10px 16px;border:1px solid color-mix(in srgb,var(--page-fg) 50%,transparent);border-radius:6px;background:var(--page-bg);color:var(--page-fg);font:16px/1.6 'Ubuntu Mono',ui-monospace,monospace}.ds-input::placeholder{color:var(--muted);opacity:1}.ds-input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}"
+      "css": ".ds-root{--bg:var(--color-bg,#000);--fg:var(--color-text,#dedede);--accent:var(--docs-accent,#b47624);--muted:var(--docs-text-muted,#767676);background:var(--bg);color:var(--fg);padding:16px}.ds-label{display:block;margin:0 0 8px;font:14px/1.43 var(--font-display,'Ubuntu Sans Mono',ui-monospace,monospace);color:var(--muted)}.ds-input{box-sizing:border-box;width:100%;min-height:48px;padding:12px 16px;border:1px solid color-mix(in oklab,var(--fg) 50%,transparent);border-radius:6px;background:var(--bg);color:var(--fg);font:16px/1.5 var(--font-body,'Ubuntu Mono',ui-monospace,monospace);outline:none}.ds-input::placeholder{color:var(--muted)}.ds-input:focus{border-color:var(--accent)}.ds-input:read-only{border-style:dashed}"
     },
     {
-      "name": "Checklist row",
+      "name": "Checklist row with door",
       "kind": "custom",
       "refersTo": "door",
-      "description": "Dashed-rule row with the door-shaped computer id and a drawn check plus words.",
-      "html": "<div class=\"ds-root\"><div class=\"ds-row\"><span>Computer <span class=\"ds-door\">3f9a21c0</span></span><span class=\"ds-status\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 16 16\" aria-hidden=\"true\"><path d=\"M3 8.5l3 3 7-7\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></svg>Connected</span></div></div>",
-      "css": ".ds-root{--page-bg:var(--vscode-editor-background,#1e1e1e);--page-fg:var(--vscode-editor-foreground,#d4d4d4);--accent:var(--hosted-accent,#3794ff);--muted:var(--hosted-muted,#9d9d9d);}.ds-row{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:56px;padding:6px 0;border-bottom:1px dashed color-mix(in srgb,var(--page-fg) 15%,transparent);color:var(--page-fg);font:16px/1.6 'Ubuntu Mono',ui-monospace,monospace}.ds-status{display:inline-flex;align-items:center;gap:8px;color:var(--muted)}.ds-status svg{color:var(--accent)}.ds-door{display:inline-flex;align-items:center;height:24px;min-width:68px;padding:0 10px;margin-left:6px;border-radius:8px 8px 0 0;border-bottom:1px solid color-mix(in srgb,var(--page-fg) 30%,transparent);background:color-mix(in srgb,var(--page-fg) 12%,var(--page-bg));font-size:14px}"
+      "description": "DASHED_ROW_CLASS row: the door-shaped computer id and a drawn check plus words.",
+      "html": "<div class=\"ds-root\"><div class=\"ds-row\"><span>Computer <span class=\"ds-door\">3f9a21c0</span></span><span class=\"ds-status\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 256 256\" aria-hidden=\"true\"><path d=\"M232.49 80.49l-128 128a12 12 0 0 1-17 0l-56-56a12 12 0 1 1 17-17L96 183 215.51 63.51a12 12 0 0 1 17 17Z\" fill=\"currentColor\"/></svg>Connected</span></div></div>",
+      "css": ".ds-root{--bg:var(--color-bg,#000);--fg:var(--color-text,#dedede);--accent:var(--docs-accent,#b47624);--muted:var(--docs-text-muted,#767676);background:var(--bg);color:var(--fg);padding:16px}.ds-row{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:56px;padding:6px 0;border-bottom:1px dashed color-mix(in oklab,var(--fg) 15%,transparent);font:16px/1.5 var(--font-body,'Ubuntu Mono',ui-monospace,monospace)}.ds-status{display:inline-flex;align-items:center;gap:8px;color:var(--muted)}.ds-status svg{color:var(--accent)}.ds-door{display:inline-flex;align-items:center;justify-content:center;height:24px;min-width:68px;padding:0 10px;margin-left:6px;border-radius:8px 8px 0 0;border-bottom:1px solid color-mix(in oklab,var(--fg) 30%,transparent);background:color-mix(in oklab,var(--fg) 12%,transparent);font-size:14px}"
     },
     {
       "name": "Notice",
-      "kind": "custom",
+      "kind": "card",
       "refersTo": "notice",
-      "description": "Status feedback in the column.",
+      "description": "CARD_CLASS status feedback in the column.",
       "html": "<div class=\"ds-root\"><p class=\"ds-notice\" role=\"status\">Code sent. Check your inbox.</p></div>",
-      "css": ".ds-root{--page-bg:var(--vscode-editor-background,#1e1e1e);--page-fg:var(--vscode-editor-foreground,#d4d4d4);--accent:var(--hosted-accent,#3794ff);--muted:var(--hosted-muted,#9d9d9d);}.ds-notice{margin:0;padding:14px 16px;border:1px solid color-mix(in srgb,var(--page-fg) 15%,transparent);border-radius:8px;background:color-mix(in srgb,var(--page-fg) 4%,var(--page-bg));color:var(--page-fg);font:16px/1.6 'Ubuntu Mono',ui-monospace,monospace}"
+      "css": ".ds-root{--bg:var(--color-bg,#000);--fg:var(--color-text,#dedede);background:var(--bg);color:var(--fg);padding:16px}.ds-notice{margin:0;padding:20px;border:1px solid color-mix(in oklab,var(--fg) 15%,transparent);border-radius:12px;background:color-mix(in oklab,var(--fg) 4%,transparent);font:16px/1.5 var(--font-body,'Ubuntu Mono',ui-monospace,monospace)}@media (min-width:640px){.ds-notice{padding:24px}}"
     },
     {
-      "name": "Account id token",
+      "name": "Account id",
       "kind": "chip",
-      "refersTo": "token",
-      "description": "The docs' inline-code token.",
-      "html": "<div class=\"ds-root\"><code class=\"ds-token\">usr_8c1f2e7a</code></div>",
-      "css": ".ds-root{--page-bg:var(--vscode-editor-background,#1e1e1e);--page-fg:var(--vscode-editor-foreground,#d4d4d4);--accent:var(--hosted-accent,#3794ff);--muted:var(--hosted-muted,#9d9d9d);}.ds-token{padding:2px 6px;border-radius:4px;background:color-mix(in srgb,var(--page-fg) 15%,var(--page-bg));color:var(--page-fg);font:14px/1.6 'Ubuntu Mono',ui-monospace,monospace}"
+      "refersTo": "account-id",
+      "description": "CODE_CLASS inline token.",
+      "html": "<div class=\"ds-root\"><code class=\"ds-code\">usr_8c1f2e7a</code></div>",
+      "css": ".ds-root{--bg:var(--color-bg,#000);--fg:var(--color-text,#dedede);--code-muted:var(--docs-code-text-muted,#909090);background:var(--bg);color:var(--fg);padding:16px;font:16px/1.5 var(--font-body,'Ubuntu Mono',ui-monospace,monospace)}.ds-code{padding:2px 6px;border-radius:4px;background:color-mix(in oklab,var(--fg) 15%,transparent);color:var(--code-muted);font-size:.9em;overflow-wrap:break-word}"
     },
     {
       "name": "Site header",
       "kind": "nav",
       "refersTo": "",
-      "description": "Caramel wordmark left, site nav right.",
+      "description": "Shared SiteHeader with \"Hosted\" beside the caramel wordmark.",
       "html": "<div class=\"ds-root\"><header class=\"ds-header\"><span class=\"ds-brand\"><a class=\"ds-mark\" href=\"#\">Dormouse</a><a href=\"#\">Hosted</a></span><nav class=\"ds-nav\"><a href=\"#\">Docs</a><a href=\"#\">GitHub</a></nav></header></div>",
-      "css": ".ds-root{--page-bg:var(--vscode-editor-background,#1e1e1e);--page-fg:var(--vscode-editor-foreground,#d4d4d4);--accent:var(--hosted-accent,#3794ff);--muted:var(--hosted-muted,#9d9d9d);}.ds-header{display:flex;align-items:center;justify-content:space-between;gap:24px;min-height:80px;padding:0 32px;font-family:'Ubuntu Sans Mono',ui-monospace,monospace;background:var(--page-bg)}.ds-brand{display:flex;align-items:baseline;gap:10px;font-size:20px}.ds-header a{display:inline-flex;align-items:center;min-height:44px;color:var(--page-fg);text-decoration:none}.ds-header a.ds-mark{color:#b47624}.ds-nav{display:flex;gap:40px;font-size:18px}.ds-nav a:hover{color:#b47624}.ds-header a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}"
+      "css": ".ds-root{--bg:var(--color-bg,#000);--fg:var(--color-text,#dedede);--caramel:var(--color-caramel,#b47624);background:var(--bg)}.ds-header{display:flex;align-items:center;justify-content:space-between;gap:12px;height:64px;padding:0 16px;font-family:var(--font-display,'Ubuntu Sans Mono',ui-monospace,monospace);font-size:18px;color:var(--fg);background:color-mix(in srgb,var(--bg) 85%,transparent);backdrop-filter:blur(12px)}.ds-brand{display:flex;align-items:baseline;gap:10px;font-size:20px}.ds-header a{color:inherit;text-decoration:none}.ds-header a.ds-mark{color:var(--caramel)}.ds-nav{display:flex;gap:20px}.ds-nav a{transition:color 150ms}.ds-nav a:hover{color:var(--caramel)}@media (min-width:768px){.ds-header{height:80px;padding:0 32px}.ds-nav{gap:40px}}"
     }
   ],
   "narrative": {
     "northStar": "The Next Page of the Docs",
-    "overview": "Hosted continues the dormouse.sh reference pages it is linked from (`website/src/components/DocsLayout.tsx`, `SiteHeader.tsx`, `docs-tokens.ts`, `website/src/pages/Hosted.tsx`), not the app's design system: the [parent DESIGN.md](../DESIGN.md) Scope names it as the one product surface outside that system. The reader's editor theme is the ground, the site's Ubuntu pair is the type, the caramel wordmark is the one fixed color, and the theme's accent, corrected to AA, carries links and outlined actions. The visitor recognizes the site they came from, does one task in a narrow column, and leaves.\n\nThe page is flat and quiet: hairline rules between sections, dashed rules between list rows, outlined controls with no fill. Product facts from [PRODUCT.md](../PRODUCT.md) that bind here are the 44px target, the 16px input, and a page that makes no request beyond its own origin.",
+    "overview": "Hosted continues the dormouse.sh reference pages it is linked from, so it is built from their design rather than the app's: `lib/src/site/` holds the Tailwind `@theme` (`site.css`), the class strings (`docs-tokens.ts`), the per-theme token painter (`docs-paint.ts`), `SiteHeader`, and `DocsThemeControl`, and the website consumes the same module. This file records only what Hosted composes from that module and what it adds; the shared token values live there and are never restated here. The [parent DESIGN.md](../DESIGN.md) Scope names Hosted as the one product surface outside the app's system.\n\nThe reader's editor theme is the ground (`useDocsThemedBody` adds `docs-themed` to `body`, remapping `--color-bg` and `--color-text` onto `--vscode-editor-*`), the site's Ubuntu pair is the type, caramel is the wordmark, and the theme's accent corrected to AA carries links and outlined actions. The visitor recognizes the site they came from, does one task in a narrow column, and leaves. Product facts from [PRODUCT.md](../PRODUCT.md) that bind here: 44px minimum targets, 16px inputs, and no request beyond Hosted's own origin.",
     "keyCharacteristics": [
-      "A bundled editor theme as ground, Dark Visual Studio by default, chosen in a native footer select.",
-      "Ubuntu Sans Mono display over Ubuntu Mono body, weight 400 only, served from Hosted's origin.",
-      "Accent, muted, and error colors derived per theme to AA; caramel fixed for the wordmark.",
-      "One narrow column; hairline section rules; dashed checklist rows.",
-      "Outlined controls, 44px minimum, inputs at 16px."
+      "The docs theme as ground, picked in the shared theme control with the theme store off.",
+      "Ubuntu Sans Mono display over Ubuntu Mono body, weight 400 only, bundled from `@fontsource`.",
+      "One 33rem column; hairline section rules; dashed checklist rows.",
+      "Outlined controls in the display face, 44px minimum, fields at 16px.",
+      "The computer id drawn as the app's door."
     ],
     "rules": [
-      {
-        "name": "The Theme Owns the Ground Rule",
-        "body": "Every surface, text, and edge color derives from the active theme's editor pair or a `--hosted-*` token; caramel is the only literal, and only for the wordmark and nav hover.",
-        "section": "colors"
-      },
-      {
-        "name": "The Docs Correction Rule",
-        "body": "Accent, muted, and error colors pass through the same contrast functions the docs pages use (`website/src/lib/docs-accent.ts`), so a theme reads the same here as on dormouse.sh/hosted.",
-        "section": "colors"
-      },
-      {
-        "name": "The One Weight Rule",
-        "body": "Hierarchy comes from size and face, never weight: only 400 ships.",
-        "section": "typography"
-      }
+      { "name": "The Shared Token Rule", "body": "Hosted takes every color from a `lib/src/site/` variable or class; a new color, or a new tinted container, goes into that module (with its `TINTED_DOCS_SURFACES` entry) so the website and Hosted stay one design.", "section": "colors" },
+      { "name": "The One Weight Rule", "body": "Hierarchy comes from size and face, never weight: only 400 ships.", "section": "typography" }
     ],
     "dos": [
-      "Do take every color from the active theme or a `--hosted-*` token derived in `theme.ts`.",
-      "Do keep controls at 44px or more and every input at 16px.",
+      "Do compose from `lib/src/site/` and add anything reusable there, not in Hosted.",
+      "Do keep every target at 44px or more and every field at 16px.",
       "Do say state in words next to the check; never by color alone.",
-      "Do serve fonts and themes from Hosted's own origin."
+      "Do bundle fonts from `@fontsource` and serve them from Hosted's origin."
     ],
     "donts": [
-      "Don't load remote fonts, the theme store, or any third-party resource.",
-      "Don't add font weights, shadows, filled buttons, or card wrappers.",
-      "Don't use caramel for anything but the wordmark and header nav hover.",
-      "Don't fall back to the app's `--vscode-sideBar-*` / list-selection tokens; Hosted's ground is the editor pair."
+      "Don't load remote fonts, offer the theme store, or make any third-party request.",
+      "Don't add font weights, filled buttons, or shadows on page content.",
+      "Don't use caramel for anything but the wordmark and header nav.",
+      "Don't fall back to the app's `--vscode-sideBar-*` or list-selection tokens; Hosted's ground is the docs-themed editor pair."
     ]
   }
 }

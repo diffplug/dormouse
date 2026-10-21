@@ -2,83 +2,90 @@
 name: Dormouse Hosted
 description: The account pages of dormouse.sh, drawn as the next page of its docs.
 colors:
-  page-bg: "var(--vscode-editor-background, #000)"
-  page-fg: "var(--vscode-editor-foreground, #dedede)"
-  accent: "var(--hosted-accent, #b47624)"
-  muted: "var(--hosted-muted, #767676)"
-  bad: "var(--hosted-bad, #d55050)"
-  caramel: "#b47624"
-  rule: "color-mix(in srgb, var(--page-fg) 15%, transparent)"
-  notice-bg: "color-mix(in srgb, var(--page-fg) 4%, var(--page-bg))"
-  token-bg: "color-mix(in srgb, var(--page-fg) 15%, var(--page-bg))"
-  door-bg: "color-mix(in srgb, var(--page-fg) 12%, var(--page-bg))"
+  # Shared: @theme and the body tokens in lib/src/site/site.css; docs-paint.ts derives the --docs-* values per theme.
+  page-bg: "var(--color-bg)"
+  page-fg: "var(--color-text)"
+  accent: "var(--docs-accent)"
+  muted: "var(--docs-text-muted)"
+  code-muted: "var(--docs-code-text-muted)"
+  bad: "var(--docs-status-bad)"
+  caramel: "var(--color-caramel)"
+  rule: "color-mix(in oklab, var(--color-text) 15%, transparent)"
+  control-edge: "color-mix(in oklab, var(--color-text) 30%, transparent)"
+  field-edge: "color-mix(in oklab, var(--color-text) 50%, transparent)"
+  card-tint: "color-mix(in oklab, var(--color-text) 4%, transparent)"
+  door-tint: "color-mix(in oklab, var(--color-text) 12%, transparent)"
+  code-tint: "color-mix(in oklab, var(--color-text) 15%, transparent)"
 typography:
   display:
-    fontFamily: "Ubuntu Sans Mono, ui-monospace, monospace"
+    # PAGE_TITLE_CLASS
+    fontFamily: "var(--font-display)"
     fontSize: "clamp(1.75rem, 3vw + 0.5rem, 2.5rem)"
     fontWeight: 400
-    lineHeight: 1.2
+    lineHeight: 1.25
   headline:
-    fontFamily: "Ubuntu Sans Mono, ui-monospace, monospace"
-    fontSize: "24px"
+    fontFamily: "var(--font-display)"
+    fontSize: "1.5rem"
     fontWeight: 400
-    lineHeight: 1.4
   title:
-    fontFamily: "Ubuntu Sans Mono, ui-monospace, monospace"
-    fontSize: "20px"
+    fontFamily: "var(--font-display)"
+    fontSize: "1.25rem"
     fontWeight: 400
-    lineHeight: 1.4
   intro:
-    fontFamily: "Ubuntu Mono, ui-monospace, monospace"
-    fontSize: "18px"
+    # PAGE_INTRO_CLASS
+    fontFamily: "var(--font-body)"
+    fontSize: "1.125rem"
     fontWeight: 400
-    lineHeight: 1.6
   body:
-    fontFamily: "Ubuntu Mono, ui-monospace, monospace"
-    fontSize: "16px"
+    fontFamily: "var(--font-body)"
+    fontSize: "1rem"
     fontWeight: 400
-    lineHeight: 1.6
+  action:
+    # siteButton
+    fontFamily: "var(--font-display)"
+    fontSize: "1rem"
+    fontWeight: 400
   label:
-    fontFamily: "Ubuntu Sans Mono, ui-monospace, monospace"
-    fontSize: "14px"
+    fontFamily: "var(--font-display)"
+    fontSize: "0.875rem"
     fontWeight: 400
-    lineHeight: 1.6
   detail:
-    fontFamily: "Ubuntu Mono, ui-monospace, monospace"
-    fontSize: "14px"
+    fontFamily: "var(--font-body)"
+    fontSize: "0.875rem"
     fontWeight: 400
-    lineHeight: 1.6
   confirm-digits:
-    fontFamily: "Ubuntu Sans Mono, ui-monospace, monospace"
+    fontFamily: "var(--font-display)"
     fontSize: "40px"
     fontWeight: 400
     letterSpacing: "0.15em"
 rounded:
-  token: "4px"
-  control: "6px"
-  notice: "8px"
-  dialog: "12px"
+  code: "0.25rem"
+  control: "0.375rem"
+  door: "0.5rem 0.5rem 0 0"
+  card: "0.75rem"
 spacing:
-  xs: "8px"
-  sm: "16px"
-  md: "24px"
-  lg: "32px"
-  xl: "48px"
+  row: "0.375rem"
+  gutter: "1.5rem"
+  intro: "2.5rem"
+  section: "3.5rem"
+  column: "33rem"
 components:
   button-primary:
+    # ACTION_CLASS
     backgroundColor: "transparent"
     textColor: "{colors.accent}"
     rounded: "{rounded.control}"
-    padding: "8px 16px"
-    typography: "{typography.body}"
+    padding: "0.75rem 1rem"
+    typography: "{typography.action}"
     height: "48px"
     width: "100%"
   button-secondary:
+    # siteButton({ tone: "neutral", size: "fit" })
     backgroundColor: "transparent"
     textColor: "{colors.page-fg}"
     rounded: "{rounded.control}"
-    padding: "8px 16px"
-    typography: "{typography.body}"
+    padding: "0.5rem 1rem"
+    typography: "{typography.action}"
     height: "44px"
   button-text:
     backgroundColor: "transparent"
@@ -87,33 +94,35 @@ components:
     typography: "{typography.body}"
     height: "44px"
   input:
+    # FIELD_CLASS + FIELD_TEXT_CLASS
     backgroundColor: "{colors.page-bg}"
     textColor: "{colors.page-fg}"
     rounded: "{rounded.control}"
-    padding: "10px 16px"
+    padding: "0.75rem 1rem"
     typography: "{typography.body}"
     height: "48px"
     width: "100%"
   notice:
-    backgroundColor: "{colors.notice-bg}"
+    # CARD_CLASS
+    backgroundColor: "{colors.card-tint}"
     textColor: "{colors.page-fg}"
-    rounded: "{rounded.notice}"
-    padding: "14px 16px"
-  token:
-    backgroundColor: "{colors.token-bg}"
-    rounded: "{rounded.token}"
-    padding: "2px 6px"
-    typography: "{typography.detail}"
+    rounded: "{rounded.card}"
+  account-id:
+    # CODE_CLASS
+    backgroundColor: "{colors.code-tint}"
+    textColor: "{colors.code-muted}"
+    rounded: "{rounded.code}"
   door:
-    backgroundColor: "{colors.door-bg}"
-    padding: "0 10px"
+    backgroundColor: "{colors.door-tint}"
+    rounded: "{rounded.door}"
+    padding: "0 0.625rem"
     typography: "{typography.detail}"
     height: "24px"
   dialog:
+    # PANEL_CLASS
     backgroundColor: "{colors.page-bg}"
     textColor: "{colors.page-fg}"
-    rounded: "{rounded.dialog}"
-    padding: "24px"
+    rounded: "{rounded.card}"
   confirm-digits:
     backgroundColor: "{colors.page-bg}"
     textColor: "{colors.page-fg}"
@@ -129,105 +138,103 @@ components:
 
 **Creative North Star: "The Next Page of the Docs"**
 
-Hosted continues the dormouse.sh reference pages it is linked from (`website/src/components/DocsLayout.tsx`, `SiteHeader.tsx`, `docs-tokens.ts`, `website/src/pages/Hosted.tsx`), not the app's design system: the [parent DESIGN.md](../DESIGN.md) Scope names it as the one product surface outside that system. The reader's editor theme is the ground, the site's Ubuntu pair is the type, the caramel wordmark is the one fixed color, and the theme's accent, corrected to AA, carries links and outlined actions. The visitor recognizes the site they came from, does one task in a narrow column, and leaves.
+Hosted continues the dormouse.sh reference pages it is linked from, so it is built from their design rather than the app's: `lib/src/site/` holds the Tailwind `@theme` (`site.css`), the class strings (`docs-tokens.ts`), the per-theme token painter (`docs-paint.ts`), `SiteHeader`, and `DocsThemeControl`, and the website consumes the same module. This file records only what Hosted composes from that module and what it adds; the shared token values live there and are never restated here. The [parent DESIGN.md](../DESIGN.md) Scope names Hosted as the one product surface outside the app's system.
 
-The page is flat and quiet: hairline rules between sections, dashed rules between list rows, outlined controls with no fill. Product facts from [PRODUCT.md](../PRODUCT.md) that bind here are the 44px target, the 16px input, and a page that makes no request beyond its own origin.
+The reader's editor theme is the ground (`useDocsThemedBody` adds `docs-themed` to `body`, remapping `--color-bg` and `--color-text` onto `--vscode-editor-*`), the site's Ubuntu pair is the type, caramel is the wordmark, and the theme's accent corrected to AA carries links and outlined actions. The visitor recognizes the site they came from, does one task in a narrow column, and leaves. Product facts from [PRODUCT.md](../PRODUCT.md) that bind here: 44px minimum targets, 16px inputs, and no request beyond Hosted's own origin.
 
 **Key Characteristics:**
 
-- A bundled editor theme as ground, Dark Visual Studio by default, chosen in a native footer select.
-- Ubuntu Sans Mono display over Ubuntu Mono body, weight 400 only, served from Hosted's origin.
-- Accent, muted, and error colors derived per theme to AA; caramel fixed for the wordmark.
-- One narrow column; hairline section rules; dashed checklist rows.
-- Outlined controls, 44px minimum, inputs at 16px.
+- The docs theme as ground, picked in the shared theme control with the theme store off.
+- Ubuntu Sans Mono display over Ubuntu Mono body, weight 400 only, bundled from `@fontsource`.
+- One 33rem column; hairline section rules; dashed checklist rows.
+- Outlined controls in the display face, 44px minimum, fields at 16px.
+- The computer id drawn as the app's door.
 
-Implementation evidence: `src/style.css`, `src/theme.ts`, `src/ThemeSelect.tsx`, `src/HostedPage.tsx`, `src/ConfirmDigits.tsx`, `src/main.tsx`.
+Implementation evidence: `hosted/src/index.css`, `hosted/src/classes.ts`, `hosted/src/HostedPage.tsx`, `hosted/src/ConfirmDigits.tsx`, `hosted/src/App.tsx`, and `lib/src/site/`.
 
 ## Colors
 
-Every color but the wordmark comes from the active bundled theme; `applyHostedTheme()` in `src/theme.ts` sets the theme's variables on `body` and derives the three `--hosted-*` tokens from them.
+Every color is a shared variable from `lib/src/site/site.css`, repainted per theme by `paintDocsTokens`; Hosted adds no color of its own.
 
 ### Primary
 
-- **Theme Accent** (`--hosted-accent`): the theme's accent through the docs' `docsAccentFor`, corrected to AA against the editor background. Links, the primary outline and its label, text buttons, focus outlines, the caret, the drawn check, hover borders, and (at 35%) the selection.
-- **Caramel** (fixed): the Dormouse half of the wordmark and the header nav hover, unchanged by any theme.
+- **Docs Accent** (`--docs-accent`): links, the primary outline and its label, text buttons, the drawn check, hover borders and labels on neutral buttons, focused field borders, button focus outlines, the caret, and (at 35%) the selection, the last two set in `hosted/src/index.css`.
+- **Caramel** (`--color-caramel`): the wordmark and header nav hover, owned by `SiteHeader`; unchanged by any theme.
 
 ### Neutral
 
-- **Editor Ground / Editor Ink** (`--vscode-editor-background` / `--vscode-editor-foreground`): page, inputs, select, and dialog background; body text. The fallbacks paint the site's black before `theme.ts` runs.
-- **Muted** (`--hosted-muted`, via `docsMutedTextFor`): intro, help, labels, footnotes, details, the footer, dialog prose, and placeholders, at AA.
-- **Rule** (15% foreground): section, footer, notice, and dialog edges. Control borders mix more foreground: 30% on buttons and the door's lower edge, 50% on inputs and the select.
-- **Tints** (4%, 12%, 15% foreground over the ground): notice, door, and inline token fills.
-- **Bad** (`--hosted-bad`, the theme's ANSI red through `docsStatusColorFor`): error text and the failed notice, whose border takes it at 50%.
+- **Ground / Ink** (`--color-bg` / `--color-text`): page, field, and dialog background; body text.
+- **Muted** (`--docs-text-muted`): intro, help, labels, definition terms, row details, footnotes, the footer, and dialog prose. The account id takes `--docs-code-text-muted` through `CODE_CLASS`.
+- **Foreground mixes** (4%, 12%, 15%, 30%, 50% of `--color-text`): notice tint, door tint, code tint and hairline rules, neutral-button and door-sill edges, field edges.
+- **Bad** (`--docs-status-bad`): error text and the failed notice, whose border takes it at 50%.
 
-**The Theme Owns the Ground Rule.** Every surface, text, and edge color derives from the active theme's editor pair or a `--hosted-*` token; caramel is the only literal, and only for the wordmark and nav hover.
-
-**The Docs Correction Rule.** Accent, muted, and error colors pass through the same contrast functions the docs pages use (`website/src/lib/docs-accent.ts`), so a theme reads the same here as on dormouse.sh/hosted.
+**The Shared Token Rule.** Hosted takes every color from a `lib/src/site/` variable or class; a new color, or a new tinted container, goes into that module (with its `TINTED_DOCS_SURFACES` entry) so the website and Hosted stay one design.
 
 ## Typography
 
-**Display Font:** Ubuntu Sans Mono (with ui-monospace, monospace)
+**Display Font:** Ubuntu Sans Mono (`--font-display`)
 
-**Body Font:** Ubuntu Mono (with ui-monospace, monospace)
+**Body Font:** Ubuntu Mono (`--font-body`)
 
-**Character:** The site's own pair: the sans mono for headings, header, labels, and controls; the classic mono for reading text. Both arrive through `@fontsource` at weight 400 and are served from Hosted's origin; `font-synthesis: none` forbids faux bold.
+**Character:** The site's own pair: the sans mono for headings, header, labels, and every button; the classic mono for reading text and fields. `hosted/src/index.css` imports only the 400 face of each from `@fontsource`, served from Hosted's origin.
 
 ### Hierarchy
 
-- **Display** (400, clamp 1.75 to 2.5rem, 1.2): the page heading, balanced.
-- **Headline** (400, 24px): the dialog heading.
-- **Title** (400, 20px, 1.4): section headings; also the wordmark size.
-- **Intro** (400, 18px, muted): the line under the heading; also the header nav size.
-- **Body** (400, 16px, 1.6): reading text, buttons, and every input.
-- **Label** (400, 14px, display face, muted): field labels, definition terms, the theme select.
-- **Detail** (400, 14px): footnotes, row details, the inline token, the door, the footer, the provider separator.
-- **Confirm digits** (400, 40px, 0.15em tracking, centered): the two enrollment digits, sized to compare at a glance against Dormouse's.
+- **Display** (`PAGE_TITLE_CLASS`, balanced, tight leading): the page heading.
+- **Headline** (display, 1.5rem): the dialog heading.
+- **Title** (display, 1.25rem): section headings; also the wordmark size.
+- **Intro** (`PAGE_INTRO_CLASS`, muted): the line under the heading.
+- **Body** (1rem): reading text, text buttons, and every field.
+- **Action** (display, 1rem): every `siteButton`.
+- **Label** (display, 0.875rem, muted): field labels and definition terms.
+- **Detail** (body, 0.875rem): footnotes, row details, the door, the footer, "Or continue with".
+- **Confirm digits** (display, 40px, 0.15em tracking, centered): the two enrollment digits, sized to compare at a glance against Dormouse's.
 
 **The One Weight Rule.** Hierarchy comes from size and face, never weight: only 400 ships.
 
 ## Layout
 
-A full-height shell stacks header, main, and footer. Main is one column capped at 528px wide with 24px side padding, 48px above and 64px below. Sections after the first sit 48px apart, each opened by a hairline rule and 32px of padding; the enrollment and provider blocks skip the rule. The intro holds 40px beneath it. Provider sign-in buttons share a two-column grid with an 8px gap.
+A full-height shell (`min-h-svh`) offsets the fixed `SiteHeader` (`pt-16 md:pt-20`) and stacks main and footer. Main is one column capped at 33rem with 1.5rem gutters, 3rem above and 4rem below. The heading sits 0.75rem over the intro, which holds 2.5rem beneath it. Sections after the first take `SECTION_CLASS`; the enrollment, sign-in form, and provider blocks skip it. Provider sign-in buttons share a two-column grid with a 0.5rem gap. Long ids, emails, and errors wrap anywhere rather than truncate; `body` holds at 280px.
 
-The header is 80px tall with 32px side padding, wordmark left and site nav right (40px gaps). The footer wraps a muted tagline, three links, and the theme select, with a hairline rule above.
+The header passes `title="Hosted"` beside the wordmark, absolute dormouse.sh links, and `DOCS_HEADER_STYLE`. Playground and Download set `hideOnMobile`, so below `md` only Docs and GitHub remain, leaving room for "Hosted"; the nav steps its own type down at `sm` and 360px.
 
-At 540px and below, the header drops to 64px with 16px padding and tighter type, Download hides, main starts 32px down, and the footer stacks. At 360px Playground hides too. The page holds at 280px; long ids, emails, and errors wrap anywhere rather than truncate.
+The footer wraps a muted tagline (pushed left) and three links over a hairline rule, `px-4` widening to `px-8` at `md`. Below `lg` the theme control sits inline at the footer's end; from `lg` it floats bottom right.
 
 ## Elevation & Depth
 
-Flat. No shadows or gradients; grouping comes from rules, spacing, and faint foreground tints. The one overlay is the Turn off Natural Voice native dialog over a 70% black backdrop. The only motion is a 150ms ease-out on button border and text color.
+The page is flat: grouping comes from rules, spacing, and faint foreground tints. Three shared devices carry depth: the fixed header's translucent ground with a 12px backdrop blur (`DOCS_HEADER_STYLE`), the theme control's floating panel shadow (`DocsThemeControl`), and the Turn off Natural Voice native dialog over a 70% black backdrop. Neutral buttons transition color on hover; nothing else moves.
 
 ## Shapes
 
-Controls carry a 6px radius; notices 8px, the dialog 12px, the inline token 4px. The computer id is a door, rounded on top only (8px 8px 0 0) over a 30% foreground sill, as the app draws a minimized Pane. Readonly inputs switch to a dashed border. Focus is a 2px accent outline at a 2px offset on every interactive element.
+Controls and fields carry `rounded-md`; notices and the dialog `rounded-xl` from `CARD_CLASS` and `PANEL_CLASS`; the account id the code token's small radius. The computer id is a door: `TERMINAL_TOP_RADIUS_CLASS` from `lib/src/components/design.tsx` rounds its top only, over a 30% foreground sill, as the app draws a minimized Pane. Readonly fields switch to a dashed border.
 
 ## Components
 
-- **Site header:** caramel "Dormouse" and foreground "Hosted" in the display face, then the site's nav links in foreground, caramel on hover; every link at least 44px tall.
-- **Primary button:** a full-width accent outline with accent label, 48px tall, underlined on hover; also drawn on a link (the subscribe action). Busy actions swap the label for progress text.
-- **Secondary button:** a 30% foreground outline, 44px; hover turns border and label to the accent. Disabled is 0.5 opacity.
-- **Text button:** accent text, no border or padding, 44px tall, underlined on hover.
-- **Inputs:** labelled, full width, 48px, 16px text on the page ground with a 50% foreground border; muted placeholder at full opacity.
-- **Notice:** a faint-tinted, rule-edged block with `role="status"`; the failed variant takes the error color. Errors outside a notice are plain error text with `role="alert"` and an inline retry.
-- **Checklist rows:** sign-in methods, computers, and passkeys as 56px rows split by dashed rules, the name left and its state or action right. State is a drawn accent check plus words (Available, Connected).
-- **Computer id:** the first eight characters of the id in the door shape, beside a muted enrollment date.
-- **Account id:** the full id in the docs' inline-code token.
-- **Dialog:** native modal, 440px max, rule-edged, muted prose; actions right-aligned with the confirming action in the accent outline right of Cancel.
-- **Confirm digits:** a two-character numeric field at 4ch and 72px tall in the confirm-digits role, above help text and the full-width Approve.
-- **Footer:** muted tagline and links (accent on hover) and a native theme select over the bundled themes, 44px, with a drawn chevron; the pick persists in this origin's storage.
+- **Site header:** shared `SiteHeader`; see Layout for what Hosted passes it.
+- **Primary button** (`PRIMARY_CLASS`, `ACTION_CLASS` plus top margin): full-width accent outline, 48px, underlined on hover; also drawn on the subscribe link. Busy actions swap the label for progress text.
+- **Secondary button** (`siteButton` neutral, fit): a 30% foreground outline, 44px; hover turns border and label to the accent. The dialog's confirming action is the accent tone at fit size. Disabled is 50% opacity.
+- **Text button:** `LINK_CLASS` at 44px tall, for inline retry and form options.
+- **Fields** (`INPUT_CLASS`, `LABEL_CLASS`, `HELP_CLASS` in `hosted/src/classes.ts`): a labelled `FIELD_CLASS` field, 48px, 16px text; focus turns the border to the accent.
+- **Notice:** `CARD_CLASS` with `role="status"`; the failed variant is `CARD_BASE_CLASS` edged and lettered in the bad color. Errors outside a notice are plain bad text with `role="alert"` and an inline retry.
+- **Checklist rows:** sign-in methods, computers, and passkeys as 56px rows split by `DASHED_ROW_CLASS`, name left and its state or action right. State is a drawn accent check (Phosphor `CheckIcon`, bold) plus muted words (Available, Connected).
+- **Computer id:** the id's first eight characters in the door, beside a muted enrollment date.
+- **Account details:** a definition list with muted display-face terms; the account id in `CODE_CLASS`.
+- **Dialog:** native modal at `max-w-lg` holding `PANEL_CLASS`, muted prose, actions end-aligned with the accent action right of Cancel.
+- **Confirm digits:** a two-character numeric field at 4ch and 72px in the confirm-digits role, sharing the field's edge and focus, above help text and the full-width Approve.
+- **Footer:** muted tagline and three 44px links (`MUTED_ACCENT_LINK_CLASS`), plus `DocsThemeControl` with `offerStore={false}`.
 
 ## Do's and Don'ts
 
 ### Do:
 
-- **Do** take every color from the active theme or a `--hosted-*` token derived in `theme.ts`.
-- **Do** keep controls at 44px or more and every input at 16px.
+- **Do** compose from `lib/src/site/` and add anything reusable there, not in Hosted.
+- **Do** keep every target at 44px or more and every field at 16px.
 - **Do** say state in words next to the check; never by color alone.
-- **Do** serve fonts and themes from Hosted's own origin.
+- **Do** bundle fonts from `@fontsource` and serve them from Hosted's origin.
 
 ### Don't:
 
-- **Don't** load remote fonts, the theme store, or any third-party resource.
-- **Don't** add font weights, shadows, filled buttons, or card wrappers.
-- **Don't** use caramel for anything but the wordmark and header nav hover.
-- **Don't** fall back to the app's `--vscode-sideBar-*` / list-selection tokens; Hosted's ground is the editor pair.
+- **Don't** load remote fonts, offer the theme store, or make any third-party request.
+- **Don't** add font weights, filled buttons, or shadows on page content.
+- **Don't** use caramel for anything but the wordmark and header nav.
+- **Don't** fall back to the app's `--vscode-sideBar-*` or list-selection tokens; Hosted's ground is the docs-themed editor pair.
