@@ -53,15 +53,15 @@ A `WebviewPanelSerializer` under the `dormouse` view type restores editor panels
 
 **Every save path must merge current alert states through `toPersistedAlertState`** — the periodic `dormouse:saveState` and the deactivate refresh (`refreshSavedSessionStateFromPtys`) alike (`docs/specs/layout.md` → Session persistence): without it a restore reverts alert state, and live state would persist transient fields. The WebviewView saves into `workspaceState` (`dormouse.session`); each WebviewPanel through per-panel `vscode.setState()` from the frontend.
 
-**On deactivate**, in this order, each step bounded:
+**Must bound every deactivation step and continue after any failure or timeout**, in this order:
 
-1. Start closing browser sessions; **a failure there never skips a later step**.
+1. Start closing browser sessions.
 2. Capture agent recovery commands.
 3. Flush every webview's session.
 4. Refresh saved state from the still-live PTYs (CWD).
 5. Graceful kill (`docs/specs/transport.md` → Graceful shutdown), then force kill.
 
-**Must capture before the session flush and PTY kills** (rationale). Shared capture and durability follow `docs/compatible-agents.md`. Source of truth: `deactivate` in `vscode-ext/src/extension.ts`.
+**Must capture before the session flush and PTY kills** (rationale). Shared capture and durability follow `docs/compatible-agents.md`. Source of truth: `shutdown` in `vscode-ext/src/shutdown.ts`.
 
 **On activate**, saved state loads through `readPersistedSession()` and is injected into the webview for cold-start restore. The WebviewView and each deserialized WebviewPanel then claim their own pane ids' recovery commands from the single record (`docs/compatible-agents.md` → "Recovery record"); **a panel's pane ids come from the `vscode.setState()` blob returned at `deserializeWebviewPanel`**, so recovery needs no host-side per-panel store.
 
