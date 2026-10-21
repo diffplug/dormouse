@@ -22,7 +22,7 @@ import { MAX_AWAIT_TIMEOUT_MS } from '../../lib/alert-manager';
 import { pendingSurfaceRefusal } from '../../lib/pending-kills';
 import type { OpenPort, PtyDataDetail } from '../../lib/platform/types';
 import type { ToolKeyScope, ToolRender } from '../../lib/platform/tool-types';
-import { buildShellCommandForKind, hasShellInputControls, shellCommandKind } from 'dor/commands/shell-quote';
+import { buildShellCommandForKind, buildWindowsPortableCommand, hasShellInputControls, shellCommandKind } from 'dor/commands/shell-quote';
 import {
   getDefaultShellOpts,
   getSessionInputVersion,
@@ -587,6 +587,17 @@ export function toolRunCommand(run: string | readonly string[], terminalId?: str
   const kind = (terminalId ? getTerminalShellKind(terminalId) : null)
     ?? shellCommandKind(getDefaultShellOpts()?.shell, PLATFORM_STRING);
   return typeof run === 'string' ? run : buildShellCommandForKind(kind, run);
+}
+
+/** The command a Tool types at a prompt it did not launch — a take-over's
+ *  caller, an in-place navigation's source — whose shell may be another of cmd,
+ *  Windows PowerShell, and pwsh than the Session launched. A cmd or PowerShell
+ *  Session gets the form all three run alike, or null when the argv has none
+ *  (`docs/specs/dor-tool.md` -> Declaring tools). */
+function promptToolCommand(run: string | readonly string[], terminalId: string): string | null {
+  if (typeof run === 'string') return run;
+  const kind = getTerminalShellKind(terminalId) ?? shellCommandKind(getDefaultShellOpts()?.shell, PLATFORM_STRING);
+  return kind === 'posix' ? buildShellCommandForKind(kind, run) : buildWindowsPortableCommand(run);
 }
 
 /**
@@ -1495,21 +1506,20 @@ export function useDorControl({
           return !unchanged;
         };
         if (documentLink && sourceChanged()) return;
-        /** Quote `id`'s next command for its shell, hand the switch's ghost to
-         *  its terminal, and retarget its leaf. */
-        const retargetInPlace = (id: string, token: number | null, pin: boolean): string => {
-          const command = toolRunCommand(toolRun, id);
+        /** Hand the switch's ghost to `id`'s terminal and retarget its leaf to
+         *  `command`, already quoted for its shell. */
+        const retargetInPlace = (id: string, command: string, token: number | null, pin: boolean): void => {
           if (token !== null) {
             commitPreviewTransition(id, token,
               ready => watchTerminalReady(id, command, () => toolFace(lath.getMeta(id)?.params) === 'terminal', ready));
           }
           retargetToolLeaf(lath, id, { title: toolName ?? command, identity: { ...identity, command } }, pin ? previewSlot.pin : undefined);
-          return command;
         };
         /**
          * Navigate the source Surface in place (docs/specs/dor-tool.md ->
          * Document navigation). Answers the request, except for `false` where
-         * ordinary reuse below focuses an existing match instead.
+         * ordinary reuse below focuses an existing match instead, or places a
+         * Tool whose argv has no form this Surface's prompt reads literally.
          */
         const navigateInPlace = async (id: string, source: Record<string, unknown>, target: string): Promise<boolean> => {
           const traversal = historyIndex !== undefined;
@@ -1524,6 +1534,8 @@ export function useDorControl({
             respondStanding('existing', id, revealSurface(id));
             return true;
           }
+          const nextCommand = sameDocument ? '' : promptToolCommand(toolRun, id);
+          if (nextCommand === null) return false;
           const current = toolLocation(source, history?.entries[history.index]?.cwd ?? stringParam(source.cwd) ?? cwd)!;
           if (!sameDocument && !await confirmToolEditorsClose([id])) {
             detail.respond({ ok: false, error: 'Navigation cancelled.' });
@@ -1558,7 +1570,7 @@ export function useDorControl({
             else if (!unavailable()) detail.respond({ ok: false, error: 'The source Tool changed before navigation.' });
             return true;
           }
-          const nextCommand = retargetInPlace(id, token, isPreviewSlotParams(source));
+          retargetInPlace(id, nextCommand, token, isPreviewSlotParams(source));
           lath.store.updateParams(id, { toolHistory: nextHistory, toolViewRequest: undefined });
           const started = await typeToolCommand(id, nextCommand, runDirectory(id), detail.signal, { acceptCompletedRun: true });
           if (started !== 'ready') {
@@ -1634,7 +1646,8 @@ export function useDorControl({
           }
           if (!previous || !isTargetable(slotId)) return false;
           // Quoted for the slot's shell; the caller's directory is not the slot's.
-          const slotCommand = retargetInPlace(slotId, slotSwitch?.id === slotId ? slotSwitch.token : null, pin);
+          const slotCommand = toolRunCommand(toolRun, slotId);
+          retargetInPlace(slotId, slotCommand, slotSwitch?.id === slotId ? slotSwitch.token : null, pin);
           const visible = revealSurface(slotId, { focusNeutral: true });
           const slotCwd = runDirectory(slotId);
           const started = typeToolCommand(slotId, slotCommand, slotCwd, detail.signal);
@@ -1742,9 +1755,12 @@ export function useDorControl({
         // Take-over: typed alone at a prompt, the tool runs in the calling pane
         // rather than splitting (docs/specs/dor-tool.md -> Take-over). Must stay
         // below the pending-approval and key-match returns above: both of those
-        // placements win over this one.
-        if (callerId && callerGate && toolTakesOverCaller(callerGate)) {
-          command = toolRunCommand(toolRun, callerId);
+        // placements win over this one. Argv the caller's prompt might not read
+        // literally splits instead.
+        const takeoverCommand = callerId && callerGate && toolTakesOverCaller(callerGate)
+          ? promptToolCommand(toolRun, callerId) : null;
+        if (callerId && takeoverCommand !== null) {
+          command = takeoverCommand;
           toolParams.command = command;
           // Answered before the tool starts, because answering is what frees
           // the shell to run it.

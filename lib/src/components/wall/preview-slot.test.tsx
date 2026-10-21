@@ -1289,6 +1289,20 @@ describe('Tool document navigation', () => {
     expect((await paramsOf('surface:slot'))?.toolTarget).toBe('/repo/b.md');
     expect(leafCount()).toBe(2);
   });
+  // A navigating Tool's prompt may be another of cmd, Windows PowerShell, and
+  // pwsh than its Session launched: argv with no form all three read alike is
+  // placed as an ordinary open instead of typed there.
+  it.each(['cmd', 'powershell'] as const)('opens argv a %s source might not read literally elsewhere', async (kind) => {
+    installHost();
+    await mountWall([{ id: 'surface:slot', params: viewerParams('a.md', { toolPreview: undefined }) }]);
+    shell('surface:a', null); shell('surface:slot', 'view /repo/a.md');
+    vi.spyOn(terminalRegistry, 'getTerminalShellKind').mockImplementation(id => id === 'surface:slot' ? kind : null);
+    const result = await answer(await request({ file: '/repo/$(whoami).md', disposition: 'current' }, 'surface:slot'));
+    expect(result.surfaceId).not.toBe('surface:slot');
+    expect(typed['surface:slot']).toEqual([]);
+    expect((await paramsOf('surface:slot'))?.toolTarget).toBe('/repo/a.md');
+  });
+
   it('focuses an existing destination without interrupting or extending either history', async () => {
     installHost();
     await mountWall([
