@@ -30,7 +30,7 @@ Source of truth: `openHelper` / `closeHelperParent` in `lib/src/lib/helper-termi
 
 **Must block source closure while its helper has running work**, warn, and reveal the helper. The user stops the work there and retries closure; no force-close-both or automatic promotion is offered. Failed process inspection keeps both terminals and reports the error. CLI attempts to close such a source return failure.
 
-**Must include hidden helper work in shutdown checks.** The helper's host inspection also detects background descendants; unresolved inspection, including a process table missing the live PTY process, counts conservatively as work. Minimizing the source hides its context and retains the helper.
+**Must include hidden helper work in shutdown checks**, including helpers whose source Surface or Workspace is pending kill. The helper's host inspection also detects background descendants; unresolved inspection, including a process table missing the live PTY process, counts conservatively as work. Minimizing the source hides its context and retains the helper.
 
 Source of truth: `beginPromotion` / `cancelPromotion` / `finishPromotion` / `helperHasWork` in `lib/src/lib/helper-terminal.ts`; `closeSurface` / `requestKill` / `contextActions` in `lib/src/components/Wall.tsx`; `countRunningSessions` in `lib/src/lib/terminal-state-store.ts`.
 

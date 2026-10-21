@@ -42,9 +42,8 @@ import {
 } from "../../../remote-lib-common/test/harness/actors.mjs";
 import { ADMIN_EMAIL } from "../entitlement";
 import { migrations } from "../migrations";
-import { ENROLLMENT_TTL_MS } from "../policy-constants";
+import { ENROLLMENT_POLL_INTERVAL_S, ENROLLMENT_TTL_MS } from "../policy-constants";
 import {
-  ENROLLMENT_POLL_INTERVAL_S,
   MAX_BURROWS_PER_ACCOUNT,
   MAX_PASSKEYS_PER_ACCOUNT,
   MAX_SESSIONS_PER_ACCOUNT,
@@ -1183,13 +1182,18 @@ test("begin refuses another origin", async ({ onTestFinished }) => {
 
 const FCM = "https://fcm.googleapis.com/fcm/send/";
 
-/** A live session for `userId`, as sign-in writes one. */
+/** A live session for `userId`, signed in by a passkey of its own, as sign-in writes one. */
 async function sessionFor(f: Awaited<ReturnType<typeof fixture>>, userId: string) {
   const token = randomSecret();
+  const credentialId = randomSecret();
   await f.sql(
-    `INSERT INTO dormouse_relay_sessions ("tokenHash", "userId", "expiresAt")
-    VALUES ($1, $2, now() + interval '1 hour')`,
-    [digest(token), userId],
+    `INSERT INTO dormouse_relay_passkeys ("credentialId", "userId", "publicKey", label) VALUES ($1, $2, 'x', '')`,
+    [credentialId, userId],
+  );
+  await f.sql(
+    `INSERT INTO dormouse_relay_sessions ("tokenHash", "userId", "expiresAt", "credentialId")
+    VALUES ($1, $2, now() + interval '1 hour', $3)`,
+    [digest(token), userId, credentialId],
   );
   return token;
 }
@@ -1746,8 +1750,13 @@ test("a capped write that waited on its lock is stamped after the write it follo
   const stamped = (result: Awaited<ReturnType<typeof upsertSubscription>>) =>
     (result as PushSubscribeResponse).subscribedAt;
   expect(stamped(subscriptions.waited)).toBeGreaterThan(stamped(subscriptions.first));
+  const credentialId = randomSecret();
+  await f.sql(
+    `INSERT INTO dormouse_relay_passkeys ("credentialId", "userId", "publicKey", label) VALUES ($1, $2, 'x', '')`,
+    [credentialId, f.owner],
+  );
   const sessions = await interleaved((db) =>
-    admit(db, SESSIONS, f.owner, { tokenHash: digest(randomSecret()), userId: f.owner }, 60_000),
+    admit(db, SESSIONS, f.owner, { tokenHash: digest(randomSecret()), userId: f.owner, credentialId }, 60_000),
   );
   expect(sessions.waited!).toBeGreaterThan(sessions.first!);
 });

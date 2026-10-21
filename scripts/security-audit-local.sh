@@ -25,13 +25,20 @@
 # `--key` takes a CI canary run's seed key, its run ID: the canary then seeds
 # that run's commit, read on your `gh` login, with the seeds that run dealt.
 #
-# `--engine codex` runs the same prompts on Codex instead of Claude: the red
-# team (docs/specs/security-audit.md -> "Red team"), advisory, never the
-# release gate. Its canary takes `--claude-scorecard`, the decrypted
+# `--engine codex` runs the same prompts on Codex instead of Claude: the
+# second-opinion audit (docs/specs/security-audit.md -> "Second-opinion audit"), never
+# the release gate. Its canary takes `--claude-scorecard`, the decrypted
 # `scorecard.json` of the CI canary run its `--key` names, to count the seeds
-# either engine caught. It ends by printing the `gh workflow run
-# codex-audit-report.yaml` command that publishes its verdicts and counts;
-# running that is yours to do, since this script files nothing.
+# either engine caught; without it that count is left empty. It ends by
+# printing the `gh workflow run codex-audit-report.yaml` command that
+# publishes its verdicts and counts; running that is yours to do, since this
+# script files nothing.
+#
+# `AUDIT_OPEN_FINDINGS=<file>` hands every domain the open findings from that
+# file, one ledger title per line as CI's `List open findings` writes them,
+# copied to `audit-open-findings.txt` in place of listing the ledger with
+# `gh`. A Codex run's sandbox reaches this run's `gh` login, so on its machine
+# that login must not read the ledger: write the list on another.
 #
 # The deterministic GitHub-state check (`scripts/github-state-check.mjs`) runs
 # first whenever a domain that reads its fragment does — `ci-and-secrets` and
@@ -41,6 +48,12 @@
 # Reports land in ./audit-*.md, which .gitignore covers.
 
 set -euo pipefail
+
+# Resolved before the `cd` below, so a relative path is the operator's.
+if [ -n "${AUDIT_OPEN_FINDINGS:-}" ]; then
+  [ -f "$AUDIT_OPEN_FINDINGS" ] || { echo "error: AUDIT_OPEN_FINDINGS names no file: $AUDIT_OPEN_FINDINGS" >&2; exit 64; }
+  AUDIT_OPEN_FINDINGS="$(cd "$(dirname "$AUDIT_OPEN_FINDINGS")" && pwd)/$(basename "$AUDIT_OPEN_FINDINGS")"
+fi
 
 cd "$(dirname "$0")/.."
 AUDIT_DIR=.github/audit
@@ -63,8 +76,8 @@ case "$ENGINE" in
   claude|codex) ;;
   *) echo "error: unknown engine '$ENGINE' (claude|codex)" >&2; exit 64 ;;
 esac
-# The red team's model and Cyber access program. Pinned here alone: the
-# Codex engine has no CI counterpart to agree with.
+# The second-opinion audit's model and Cyber access program. Pinned here alone:
+# the Codex engine has no CI counterpart to agree with.
 CODEX_MODEL=gpt-6-sol
 CODEX_PROGRAM=daybreak_blue
 
@@ -150,7 +163,7 @@ run_domain() {
   return "$status"
 }
 
-# Each domain's computed verdict, `domain=VERDICT`, for the red team's report;
+# Each domain's computed verdict, `domain=VERDICT`, for the second-opinion report;
 # a domain that left no fragment is INCONCLUSIVE, as CI computes it.
 VERDICTS=""
 run_domain_recorded() {
@@ -160,18 +173,18 @@ run_domain_recorded() {
   return "$status"
 }
 
-# The command that publishes the red team's report on the commit it audited,
-# printed, never run.
+# The command that publishes the second-opinion audit's report on the commit it
+# audited, printed, never run.
 print_codex_report() {
   local commit="$1"
   shift
   echo
-  echo "==> advisory: a Codex verdict never gates a release (docs/specs/security-audit.md -> \"Red team\")."
+  echo "==> second opinion: a Codex verdict never gates a release (docs/specs/security-audit.md -> \"Second-opinion audit\")."
   echo "==> to publish them:"
   echo "gh workflow run codex-audit-report.yaml -R $GITHUB_REPOSITORY --ref main -f commit=$commit -f model=$CODEX_MODEL $*"
 }
 
-# The red team's report on the domains just run in the working tree.
+# The second-opinion audit's report on the domains just run in the working tree.
 print_codex_verdicts() {
   local commit
   commit=$(git rev-parse HEAD 2>/dev/null) || commit="<commit>"
@@ -182,11 +195,19 @@ print_codex_verdicts() {
 }
 
 # The open ledger findings every domain re-verifies, as CI's `List open
-# findings` step writes them, read on the operator's own login. Without the
-# file each domain computes INCONCLUSIVE, as it does in CI. It reads the
-# private tracker and files nothing there.
+# findings` step writes them, read on the operator's own login, or copied from
+# `AUDIT_OPEN_FINDINGS` with the ledger left unread. Without the file each
+# domain computes INCONCLUSIVE, as it does in CI. It reads the private tracker
+# and files nothing there.
 write_open_findings() {
   local open row
+  if [ -n "${AUDIT_OPEN_FINDINGS:-}" ]; then
+    # Through a temporary name, so a variable naming this very file keeps it.
+    cp "$AUDIT_OPEN_FINDINGS" audit-open-findings.txt.new
+    mv audit-open-findings.txt.new audit-open-findings.txt
+    echo "==> open findings: copied from $AUDIT_OPEN_FINDINGS; the ledger is not read"
+    return 0
+  fi
   rm -f audit-open-findings.txt
   # `--limit 1000`, not `gh`'s default of 30, which once left an older open
   # finding unreconciled.
@@ -260,14 +281,16 @@ run_canary() {
     echo "==> keyed by no CI run, so there is no canary run to publish against."
     return 0
   fi
+  # Without Claude's scorecard the "caught by either" count is left empty,
+  # which the published recall reads as not computed for that run.
   if [ -z "$claude_card" ]; then
-    echo "==> to publish, re-run with --claude-scorecard: the scorecard.json in run $run_key's decrypted canary-transcript."
-    return 0
+    echo "==> no --claude-scorecard (the scorecard.json in run $run_key's decrypted canary-transcript): \"caught by either\" is left empty."
   fi
   # shellcheck disable=SC2046,SC2016
   print_codex_report "$commit" $(node -e '
     const card = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
-    console.log(`-f canary_run=${process.argv[2]} -f canary_seeded=${card.seeded} -f canary_caught=${card.caught} -f canary_either=${card.either} -f canary_unfinished=${card.unfinished.length}`);
+    const either = "either" in card ? ` -f canary_either=${card.either}` : "";
+    console.log(`-f canary_run=${process.argv[2]} -f canary_seeded=${card.seeded} -f canary_caught=${card.caught}${either} -f canary_unfinished=${card.unfinished.length}`);
   ' "$stash/scorecard.json" "$run_key")
 }
 

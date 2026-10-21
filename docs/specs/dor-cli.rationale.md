@@ -16,6 +16,10 @@ The CLI's control client needs Node types, but the renderer imports CLI protocol
 
 **Why stripping `ORIGINAL_PATH` saves the prepend.** `/etc/profile` rebuilds `PATH` from an exported `ORIGINAL_PATH` whenever that variable is already set, and the value the PTY inherits predates our prepend — so a login shell would silently restore a `PATH` with no staged `bin` on it. Removing it forces the shell to recapture the exact `PATH` handed to node-pty.
 
+## WSL interop
+
+WSL inherits Windows PATH entries but not arbitrary environment variables: the launcher was discoverable while its control endpoint was missing. A Linux Node process also cannot open a Windows named pipe. Keeping the Windows runtime and script paths opaque through both environment crossings lets the launcher translate only the executable with `wslpath`; credentials remain in the environment, never a command line or file. The launcher's return-only `PWD/pw` entry translates mounted drives and Linux directories for Windows path resolution without overwriting the Linux shell's initial directory; adding it, and `ELECTRON_RUN_AS_NODE/w`, at the launcher rather than the pane keeps them away from `git.exe`, `code.exe`, and every other Windows program started from WSL. Configuring every Windows pane covers nested `wsl` invocations independently of shell-integration injection.
+
 ## Spawning External Binaries
 
 **The two Windows spawn failures cross-spawn absorbs.** Node's `spawn` does not consult `PATHEXT`, so a bare `agent-browser` ENOENTs instead of resolving the `agent-browser.cmd` shim npm/vfox installs (on POSIX that file is a real executable with a shebang); and Node ≥22 refuses to spawn `.cmd`/`.bat` without a shell (the CVE-2024-27980 hardening), so the resolved absolute `.cmd` EINVALs too. Neither failure has a POSIX counterpart.

@@ -21,9 +21,15 @@ export const RECENT_LOGIN_WINDOW = `${LOGIN_FRESH_AGE_MS / 60_000} minutes`;
 // an approval waits for its poll (the account writes it).
 export const ENROLLMENT_TTL_MS = 10 * 60 * 1000;
 
+// Seconds a Burrow waits between enrollment polls (the relay answers it from
+// begin): inside `MIN_ENROLL_POLL_INTERVAL_S`–`MAX_ENROLL_POLL_INTERVAL_S`, or
+// every shipped Burrow refuses the begin. The account screen re-reads an
+// approval's result at the same pace.
+export const ENROLLMENT_POLL_INTERVAL_S = 5;
+
 // The Hosted terms version the sign-in notice names and an account accepts by
 // continuing: the revision date both policy pages print
 // (`website/src/components/HostedPolicyLayout.tsx`), which
 // `hosted/server/tests/policy.test.ts` pins this to. A new version is a new
 // acceptance row, never an edit of an old one.
-export const TERMS_VERSION = "2026-10-19";
+export const TERMS_VERSION = "2026-10-20";

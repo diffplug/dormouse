@@ -308,6 +308,30 @@ describe('Reopen', () => {
     }
   });
 
+  it.each([false, true])('rechecks closed windows after a pending helper refuses (older local record: %s)', async (withRecord) => {
+    await renderTerminalBesideBrowser();
+    if (withRecord) {
+      await control(SURFACE_CONTROL_METHODS.kill, { surface: 'surface:web', confirmation: { mode: 'dangerously' } });
+      await harness.flush();
+      _reopenRecordsForTesting()[0].closedAt = 500;
+    }
+    const fake = new FakePtyAdapter();
+    const reopenClosedWindow = vi.fn(async (newerThan: number) => newerThan < 1000);
+    Object.assign(fake, { reopenClosedWindow });
+    setPlatform(fake);
+    const restore = vi.fn(() => false);
+    addPendingKill({ kind: 'helper', id: 'blocked-helper', workspaceId: DEFAULT_WORKSPACE_ID, surfaceId: 'surface:a', title: 'shell', label: 'Helper' }, { restore, finalize: () => {} });
+    try {
+      expect((await control(WINDOW_CONTROL_METHODS.reopen)).result).toEqual({ status: 'reopened', kind: 'window' });
+      expect(restore).toHaveBeenCalledOnce();
+      expect(reopenClosedWindow).toHaveBeenLastCalledWith(withRecord ? 500 : 0);
+      expect(_reopenRecordsForTesting()).toHaveLength(withRecord ? 1 : 0);
+      expect(getPendingKills().map(kill => kill.id)).toEqual(['blocked-helper']);
+    } finally {
+      _resetPendingKillsForTesting();
+    }
+  });
+
   it('says so briefly when `u` finds nothing to reopen', async () => {
     await renderTerminalBesideBrowser();
     await pressU();

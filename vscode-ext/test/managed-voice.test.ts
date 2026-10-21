@@ -2,7 +2,7 @@
  * Managed voice across VS Code windows (`docs/specs/vscode.md` -> "Managed
  * voice"): each window's extension host runs its own voice host over one
  * shared `SecretStorage`, so an approval or Disconnect in one window reaches
- * every window, and each keeps its own status, cache, and latch.
+ * every window, and each keeps its own status and latch.
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';

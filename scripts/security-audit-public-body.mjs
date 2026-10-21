@@ -27,9 +27,10 @@
  * Usage: node scripts/security-audit-public-body.mjs --engine codex
  *   --date <YYYY-MM-DDTHH:MMZ> --run-url <url> --commit <sha> --model <name>
  *   --verdicts <domain=VERDICT …> --canary-run <id> --canary-seeded <n>
- *   --canary-caught <n> --canary-either <n> --canary-unfinished <n>
+ *   --canary-caught <n> [--canary-either <n>] --canary-unfinished <n>
  *   --record <file>
- * The red team's report (docs/specs/security-audit.md -> "Red team"), from
+ * The second-opinion audit's report (docs/specs/security-audit.md -> "Second-opinion
+ * audit"), from
  * `.github/workflows/codex-audit-report.yaml`'s inputs: one comment on the
  * status issue, and, for a canary, its recall record written to <file>. Every
  * input is checked against its pattern, the counts against the CI canary run
@@ -345,9 +346,9 @@ export function statusBody({ status, fileStatus, date, runUrl, commit, repo, fra
 /** The outcome an earlier run recorded in the status issue's first line, or null. */
 export const previousOutcome = (body) => (typeof body === 'string' ? body.match(STATUS_MARKER)?.[1] ?? null : null);
 
-// --- The red team -------------------------------------------------------------
+// --- The second-opinion audit ------------------------------------------------------
 
-/** The marker opening every red-team comment on the status issue. */
+/** The marker opening every second-opinion comment on the status issue. */
 export const CODEX_MARKER = '<!-- codex-audit-report -->';
 const MODEL = /^[a-z0-9][a-z0-9.-]{0,63}$/;
 const COUNT = /^(?:0|[1-9]\d{0,5})$/;
@@ -366,27 +367,30 @@ export function parseVerdicts(text, root = '.') {
 }
 
 /**
- * The red team's canary counts, or null when none were given; throws unless
- * all are, each a count, caught no more than either and either no more than
- * seeded, and no more unfinished domains than the `domains` a canary runs.
+ * The second-opinion audit's canary counts, or null when none were given; throws
+ * unless all are but `either`, each a count, caught no more than seeded and
+ * either between them, and no more unfinished domains than the `domains` a
+ * canary runs. An empty `either` was not computed: null, never zero.
  */
 export function parseCanary({ run = '', seeded = '', caught = '', either = '', unfinished = '' }, domains) {
   const given = [run, seeded, caught, either, unfinished];
   if (given.every((v) => v === '')) return null;
   valid(run, /^[1-9]\d{0,19}$/, 'canary run');
-  const [s, c, e, u] = [seeded, caught, either, unfinished].map((v, i) => Number(valid(v, COUNT, ['canary seeded', 'canary caught', 'canary either', 'canary unfinished'][i])));
-  if (c > e || e > s) throw new Error(`invalid canary counts: caught ${c}, either ${e}, seeded ${s}`);
+  const [s, c, u] = [seeded, caught, unfinished].map((v, i) => Number(valid(v, COUNT, ['canary seeded', 'canary caught', 'canary unfinished'][i])));
+  const e = either === '' ? null : Number(valid(either, COUNT, 'canary either'));
+  if (c > (e ?? s) || (e ?? c) > s) throw new Error(`invalid canary counts: caught ${c}, either ${e ?? 'not computed'}, seeded ${s}`);
   if (u > domains) throw new Error(`invalid canary counts: ${u} unfinished domains of ${domains}`);
   return { run, seeded: s, caught: c, either: e, unfinished: u };
 }
 
 /**
- * Checks the red team's canary against the CI canary run it shares seeds with
- * — `claudeRun`, the API's view of it, and `claude`, its `canary-recall`
- * record, read by `validateRecord` — and returns that record's counts: a run
+ * Checks the second-opinion audit's canary against the CI canary run it shares
+ * seeds with — `claudeRun`, the API's view of it, and `claude`, its
+ * `canary-recall` record, read by `validateRecord` — and returns that
+ * record's counts: a run
  * titled `canaryTitle` of `security-audit.yaml` on `main` at the same commit,
- * as many seeds, and an `either` that neither engine's own count exceeds nor
- * their sum falls short of.
+ * as many seeds, and an `either`, when computed, that neither engine's own
+ * count exceeds nor their sum falls short of.
  */
 export function checkAgainstClaude(canary, { commit, repo, claudeRun, claude, canaryTitle, validateRecord }) {
   const where = `canary run ${canary.run}`;
@@ -395,7 +399,7 @@ export function checkAgainstClaude(canary, { commit, repo, claudeRun, claude, ca
   if (claudeRun.head_sha !== commit) throw new Error(`${where} seeded ${claudeRun.head_sha}, not ${commit}: the same key seeds the same seeds only over the same commit`);
   const counts = validateRecord(claude, Number(canary.run));
   if (counts.seeded !== canary.seeded) throw new Error(`${where} seeded ${counts.seeded}, not ${canary.seeded}`);
-  if (canary.either < counts.caught || canary.either > counts.caught + canary.caught) {
+  if (canary.either !== null && (canary.either < counts.caught || canary.either > counts.caught + canary.caught)) {
     throw new Error(`either ${canary.either} cannot follow from Claude's ${counts.caught} and Codex's ${canary.caught} of ${canary.seeded}`);
   }
   return counts;
@@ -403,14 +407,14 @@ export function checkAgainstClaude(canary, { commit, repo, claudeRun, claude, ca
 
 const percent = (n, of) => `${Math.round((n / of) * 100)}%`;
 
-/** The comment the red team's report posts on the status issue. */
+/** The comment the second-opinion audit's report posts on the status issue. */
 export function codexComment({ date, runUrl, commit, model, repo, verdicts, canary, claude }) {
   valid(date, /^\d{4}-\d\d-\d\dT\d\d:\d\dZ$/, 'date');
   valid(repo, /^[\w.-]+\/[\w.-]+$/, 'repository');
   valid(runUrl, new RegExp(`^https://github\\.com/${repo.replace(/[.]/g, '\\.')}/actions/runs/\\d+$`), 'run URL');
   valid(commit, /^[0-9a-f]{40}$/, 'commit');
   valid(model, MODEL, 'model');
-  const lines = [CODEX_MARKER, '', '## Red team: Codex (advisory)', '',
+  const lines = [CODEX_MARKER, '', '## Second-opinion audit: Codex', '',
     `Reported at ${date} · model \`${model}\` · audited commit [\`${commit.slice(0, 7)}\`](https://github.com/${repo}/commit/${commit}) · [report run](${runUrl})`, '',
     'A maintainer ran these prompts on Codex. Its verdicts never gate a release; the nightly Claude audit does.'];
   if (verdicts.length > 0) {
@@ -418,13 +422,14 @@ export function codexComment({ date, runUrl, commit, model, repo, verdicts, cana
   }
   if (canary) {
     const claudeUrl = `https://github.com/${repo}/actions/runs/${canary.run}`;
-    lines.push('', `**Canary**, on the seeds of [canary run ${canary.run}](${claudeUrl}): Claude caught ${claude.caught} of ${canary.seeded} (${percent(claude.caught, canary.seeded)}), Codex ${canary.caught} (${percent(canary.caught, canary.seeded)}), and the two together ${canary.either} (${percent(canary.either, canary.seeded)}).`);
+    const together = canary.either === null ? '; how many the two caught together was not computed' : `, and the two together ${canary.either} (${percent(canary.either, canary.seeded)})`;
+    lines.push('', `**Canary**, on the seeds of [canary run ${canary.run}](${claudeUrl}): Claude caught ${claude.caught} of ${canary.seeded} (${percent(claude.caught, canary.seeded)}), Codex ${canary.caught} (${percent(canary.caught, canary.seeded)})${together}.`);
     if (canary.unfinished > 0) lines.push('', `${plural(canary.unfinished, 'Codex domain')} left no finished report; ${canary.unfinished === 1 ? 'its' : 'their'} seeds count as missed.`);
   }
   return clampIssueBody(`${lines.join('\n')}\n`);
 }
 
-/** The red team's recall record, which website/scripts/generate-canary-recall.js reads. */
+/** The second-opinion audit's recall record, which website/scripts/generate-canary-recall.js reads; `either` null when not computed. */
 export function codexRecord({ runUrl, commit, model, repo, canary }) {
   return { claude_run_url: `https://github.com/${repo}/actions/runs/${canary.run}`, commit, model,
     seeded: canary.seeded, caught: canary.caught, either: canary.either, unfinished: canary.unfinished, run_url: runUrl };
@@ -518,9 +523,9 @@ function publish(args) {
 }
 
 /**
- * The red team's report: every input checked before anything is posted. The
- * canary's contract is imported here alone, so the nightly's own publishing
- * never loads the recall generator.
+ * The second-opinion audit's report: every input checked before anything is
+ * posted. The canary's contract is imported here alone, so the nightly's own
+ * publishing never loads the recall generator.
  */
 async function publishCodex(args) {
   const { CANARY_DOMAINS } = await import('./security-audit-canary.mjs');
@@ -536,7 +541,7 @@ async function publishCodex(args) {
   // An admin's dispatch alone: the bot's `push` can dispatch a workflow too.
   const actor = valid(process.env.GITHUB_TRIGGERING_ACTOR, /^[A-Za-z0-9-]+(?:\[bot\])?$/, 'triggering actor');
   const role = gh(['api', `repos/${repo}/collaborators/${actor}/permission`, '--jq', '.role_name']).trim();
-  if (role !== 'admin') throw new Error(`${actor} holds ${role || 'no role'} here; only an admin publishes a red-team report`);
+  if (role !== 'admin') throw new Error(`${actor} holds ${role || 'no role'} here; only an admin publishes a second-opinion report`);
   // Only a commit on this repository's `main`, so a report names code that shipped there.
   const compare = JSON.parse(gh(['api', `repos/${repo}/compare/${commit}...main`, '--jq', '{status}']));
   if (!['identical', 'ahead'].includes(compare.status)) throw new Error(`${commit} is not on main`);
@@ -558,7 +563,7 @@ async function publishCodex(args) {
   if (record) writeFileSync(valid(args.record, /\S/, 'record file'), `${JSON.stringify(record, null, 2)}\n`);
   const dir = mkdtempSync(join(process.env.RUNNER_TEMP || tmpdir(), 'codex-public-'));
   gh(['issue', 'comment', String(statuses[0].number), ...R, '--body-file', bodyFile(dir, 'codex.md', body)]);
-  console.log(`Status issue #${statuses[0].number}: red-team report posted${record ? ', recall record written' : ''}.`);
+  console.log(`Status issue #${statuses[0].number}: second-opinion report posted${record ? ', recall record written' : ''}.`);
 }
 
 async function main(argv) {

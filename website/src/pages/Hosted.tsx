@@ -507,15 +507,15 @@ export default function Hosted() {
           credential to our service; ElevenLabs receives the label and voice id. Labels
           can contain program-supplied titles, command labels, or directory names.
           Filtering cannot remove every secret. The terminal screen and output stream
-          are not uploaded for speech. The app explains this before the first request,
-          and cached clips play locally. See the{" "}
+          are not uploaded for speech. The app explains this before the first request.
+          See the{" "}
           <a href={sitePath("/privacy") + "#voice"} className={LINK_CLASS}>voice privacy details</a>.
         </p>
         <p className={`leading-relaxed ${MUTED_TEXT_CLASS}`}>
           The system voice stays, and stays the fallback: offline, past the daily fair-use
           cap, or if my endpoint fails, Dormouse speaks in the system voice rather than
           going silent. Natural Voice allows 500 requests per subscriber per UTC day;
-          provider failures count, cached playback does not.
+          each alarm spoken is one request, and provider failures count.
         </p>
       </section>
 

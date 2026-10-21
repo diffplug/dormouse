@@ -100,7 +100,7 @@ What each plan grants once checkout can sell it; [Published prices](#published-p
 
 ### Managed voice
 
-What is built — the endpoint, what a request carries, the clip cache, the daily cap, and the fallback — is `docs/specs/hosted.md` -> "Managed voice" and `docs/specs/alert.md` -> "Managed voice"; the disclosure is `docs/specs/alert.md` -> "Settings dialog".
+What is built — the endpoint, what a request carries, the daily cap, and the fallback — is `docs/specs/hosted.md` -> "Managed voice" and `docs/specs/alert.md` -> "Managed voice"; the disclosure is `docs/specs/alert.md` -> "Settings dialog".
 
 - **Must disclose before enabling managed voice that labels can come from program-supplied titles, command labels, or directory names and that secret filtering is heuristic**, not a guarantee of confidentiality. Connection metadata remains visible to the serving infrastructure.
 - **One voice per Pane.** The member default applies everywhere; a per-Pane override is persisted with the pane's settings and follows the Session through minimize and restore. Doors and headers show nothing new.

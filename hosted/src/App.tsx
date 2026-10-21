@@ -28,12 +28,26 @@ import {
   type Session,
 } from "./api";
 import {
+  ENROLLMENT_POLL_INTERVAL_S,
   LOGIN_FRESH_AGE_MS,
   RECENT_LOGIN_WINDOW,
   TERMS_VERSION,
 } from "../server/policy-constants";
 import { ConfirmDigits } from "./ConfirmDigits";
 import { takeEnrollment, type Enrollment } from "./enrollment";
+import {
+  afterRead,
+  approvalShows,
+  asRead,
+  keepRead,
+  pageError,
+  preLaunchNotice,
+  reread,
+  settle,
+  type AccountState,
+  type Lookup,
+  type PageError,
+} from "./settle";
 
 // The terms version the sign-in notice showed when this tab continued past it,
 // kept through a provider's redirect until the account's acceptance is
@@ -68,6 +82,18 @@ const SUBSCRIBE_REDIRECT_MS = 4000;
 const SIGN_IN_PARAMS = new URLSearchParams(location.search);
 const SIGN_IN_OPEN = SIGN_IN_PARAMS.has("signin") || SIGN_IN_PARAMS.has("error");
 
+/** A change Dormouse on the computer finishes after the page's mutation. */
+interface Pending {
+  /** Whether the account, as last read, shows the change. */
+  shows: (after: AccountState) => boolean;
+  waiting: string;
+  done: string;
+  late: string;
+}
+// How long the page re-reads for a Pending before saying it has not shown;
+// after that the focus refresh picks it up.
+const PENDING_TIMEOUT_MS = 60_000;
+
 export function App({ enrollment }: { enrollment: Enrollment | null }) {
   const [session, setSession] = useState<Session | null>(null);
   const [enabled, setEnabled] = useState<Provider[]>([]);
@@ -88,8 +114,9 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
     setEnrollingState(next);
   };
   const [loading, setLoading] = useState(true);
+  const [lookup, setLookup] = useState<Lookup>("pending");
   const [busy, setBusy] = useState("");
-  const [error, setError] = useState("");
+  const [error, setError] = useState<PageError | null>(null);
   const [notice, setNotice] = useState("");
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
@@ -97,20 +124,28 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
   const codeInput = useRef<HTMLInputElement>(null);
   const actionPending = useRef(false);
   const refreshGeneration = useRef(0);
+  // Bumped by every action and on unmount: stops re-reading for a Pending.
+  const actionGeneration = useRef(0);
+  // A Pending whose late notice is up: a later read that shows it replaces it.
+  const latePending = useRef<Pending | null>(null);
   const callbackError = useRef(
     new URLSearchParams(location.search).has("error"),
   );
 
-  const refresh = useCallback(async () => {
+  // Undefined when a newer refresh superseded this one.
+  const refresh = useCallback(async (): Promise<AccountState | undefined> => {
     const generation = ++refreshGeneration.current;
-    const [current, providers] = await Promise.all([
-      getSession(),
-      getProviders(),
-    ]);
+    const failed = (error: unknown): never => {
+      if (generation === refreshGeneration.current) setLookup("failed");
+      throw error;
+    };
+    const [current, providers] = await asRead(
+      Promise.all([getSession(), getProviders()]),
+    ).catch(failed);
     // A failed list hides its section, never the account page.
     const [linked, voice, enrolled, registered] = current
       ? await Promise.all([
-          getAccounts(),
+          asRead(getAccounts()).catch(failed),
           getHostedVoice().catch(() => null),
           getComputers().catch(() => null),
           getPasskeys().catch(() => null),
@@ -118,6 +153,8 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
       : [[], null, null, null];
     if (current) await recordContinued().catch(() => {});
     if (generation !== refreshGeneration.current) return;
+    setError(afterRead);
+    setLookup(current ? "signed-in" : "signed-out");
     setSession(current);
     setEnabled(providers);
     setAccounts(linked);
@@ -129,35 +166,53 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
       "",
       enrollingRef.current ? "/enroll" : current ? "/account" : "/login",
     );
+    const state = { voice, computers: enrolled };
+    const late = latePending.current;
+    if (late?.shows(state)) {
+      latePending.current = null;
+      setNotice(late.done);
+    }
+    return state;
   }, []);
   useEffect(() => {
     // An auth callback's query parameters (`?error=`) never stay in history.
     history.replaceState(null, "", location.pathname);
     void refresh()
-      .catch((error) => setError(error.message))
+      .catch((error) => setError(pageError(error)))
       .finally(() => {
         setLoading(false);
         if (callbackError.current)
-          setError(
-            "Sign-in or connection was not completed. Try again, or sign in with your existing method and connect the provider from your account.",
-          );
+          setError({
+            message:
+              "Sign-in or connection was not completed. Try again, or sign in with your existing method and connect the provider from your account.",
+            read: false,
+          });
       });
     const focus = () => {
       if (!actionPending.current)
-        void refresh().catch((error) => setError(error.message));
+        void refresh().catch((error) => setError(pageError(error)));
+    };
+    // Returning to the tab: mobile Safari fires no focus coming back from
+    // another app.
+    const visible = () => {
+      if (document.visibilityState === "visible") focus();
     };
     window.addEventListener("focus", focus);
+    document.addEventListener("visibilitychange", visible);
     return () => {
       ++refreshGeneration.current;
+      ++actionGeneration.current;
       window.removeEventListener("focus", focus);
+      document.removeEventListener("visibilitychange", visible);
     };
   }, [refresh]);
   useEffect(() => {
     if (enterCode) codeInput.current?.focus();
   }, [enterCode]);
   // A failed lookup keeps its error and Retry on screen rather than sending
-  // a member who is signed in away during an outage.
-  const comingSoon = !loading && !session && !error && !SIGN_IN_OPEN;
+  // a member who is signed in away during an outage, even once that error is
+  // cleared (a new enrollment link, Don't approve).
+  const comingSoon = preLaunchNotice(lookup, SIGN_IN_OPEN);
   useEffect(() => {
     if (!comingSoon) return;
     const timer = setTimeout(
@@ -174,32 +229,61 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
       const next = takeEnrollment();
       if (!next) return;
       setEnrolling(next);
-      setError("");
+      setError(keepRead);
       setNotice("");
     };
     window.addEventListener("hashchange", takeLink);
     return () => window.removeEventListener("hashchange", takeLink);
   }, []);
 
-  async function act(label: string, action: () => Promise<void>) {
+  async function act(label: string, action: () => Promise<unknown>) {
     if (actionPending.current) return;
     ++refreshGeneration.current;
+    ++actionGeneration.current;
+    latePending.current = null;
     actionPending.current = true;
     setBusy(label);
-    setError("");
+    setError(null);
     setNotice("");
     try {
       await action();
     } catch (error) {
-      setError(
-        error instanceof Error
-          ? error.message
-          : "Something went wrong. Please try again.",
-      );
+      setError(pageError(error));
     } finally {
       actionPending.current = false;
       setBusy("");
     }
+  }
+  /**
+   * Runs a mutation of the account, then shows the account as the server now
+   * has it. A Pending it returns is re-read in the background, at the
+   * computer's poll pace, until the account shows it. A failed refetch never
+   * reports the mutation, which succeeded, as failed.
+   */
+  const mutate = (label: string, action: () => Promise<Pending | void>) =>
+    act(label, async () => {
+      const pending = await action();
+      const after = await reread(refresh, () =>
+        setError({
+          message:
+            "Your change is saved, but this page could not reload to show it. Retry, or come back to this page later.",
+          read: true,
+        }),
+      );
+      if (pending) void follow(pending, after);
+    });
+  async function follow(pending: Pending, after: AccountState | undefined) {
+    if (after && pending.shows(after)) return setNotice(pending.done);
+    const generation = actionGeneration.current;
+    setNotice(pending.waiting);
+    const outcome = await settle(refresh, pending.shows, {
+      intervalMs: ENROLLMENT_POLL_INTERVAL_S * 1000,
+      timeoutMs: PENDING_TIMEOUT_MS,
+      cancelled: () => generation !== actionGeneration.current,
+    });
+    if (outcome === "cancelled") return;
+    if (outcome === "timeout") latePending.current = pending;
+    setNotice(outcome === "done" ? pending.done : pending.late);
   }
   const sendCode = () =>
     act("email", async () => {
@@ -217,16 +301,15 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
       void sendCode();
       return;
     }
-    void act("verify", async () => {
+    void mutate("verify", async () => {
       noteContinued();
       await post("sign-in/email-otp", { email: email.trim(), otp: code });
       setCode("");
       setEnterCode(false);
-      await refresh();
     });
   }
   const signOut = () =>
-    act("logout", async () => {
+    mutate("logout", async () => {
       await post("sign-out");
       setSession(null);
       setAccounts([]);
@@ -235,61 +318,60 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
       setPasskeys(null);
       setEnterCode(false);
       setCode("");
-      await refresh();
       setNotice(
         "Signed out of this browser. Your other devices stay signed in.",
       );
     });
   const turnOffVoice = () =>
-    act("voice-off", async () => {
+    mutate("voice-off", async () => {
       try {
         await turnOffHostedVoice();
       } finally {
         // Closed either way, so a failure's error shows on the page.
         turnOffDialog.current?.close();
       }
-      setHostedVoice((voice) => voice && { ...voice, on: false });
       setNotice("Natural Voice is off. Your computers use the system voice.");
     });
   const approve = (code: string, confirmDigits: string) =>
-    act("approve", async () => {
+    mutate("approve", async () => {
+      const voice = enrolling?.purpose === "voice";
+      // The computer's next poll redeems the approval: until then neither
+      // Natural Voice nor the computer shows on the account.
+      const shows = approvalShows(voice ? "voice" : "remote", {
+        voice: hostedVoice,
+        computers,
+      });
       await approveEnrollment(code, enrolling?.purpose, confirmDigits);
       clearEnrollment();
-      await refresh();
-      setNotice(
-        `Approved ${code}. Dormouse on your computer finishes the requested setup in a few seconds.`,
-      );
+      const later =
+        "Keep Dormouse open on your computer; this page updates when you come back to it.";
+      if (!shows)
+        return setNotice(
+          `Approved ${code}. Dormouse on your computer finishes the requested setup in a few seconds.`,
+        );
+      return voice
+        ? {
+            shows,
+            waiting: `Approved ${code}. Waiting for Dormouse on your computer to turn on Natural Voice…`,
+            done: "Natural Voice is on.",
+            late: `Approved ${code}, but Dormouse on your computer has not turned on Natural Voice yet. ${later}`,
+          }
+        : {
+            shows,
+            waiting: `Approved ${code}. Waiting for Dormouse on your computer to finish enrolling…`,
+            done: "Your computer is enrolled.",
+            late: `Approved ${code}, but Dormouse on your computer has not finished enrolling yet. ${later}`,
+          };
     });
   const clearEnrollment = () => {
     setEnrolling(null);
-    setError("");
+    setError(keepRead);
     history.replaceState(null, "", session ? "/account" : "/login");
   };
   const removeOne = (burrowId: string) =>
-    act(`remove-${burrowId}`, async () => {
-      await removeComputer(burrowId);
-      setComputers(
-        (enrolled) =>
-          enrolled?.filter((computer) => computer.burrowId !== burrowId) ??
-          null,
-      );
-      // Its passkeys stay, no longer attributed to it.
-      setPasskeys(
-        (registered) =>
-          registered?.map((passkey) =>
-            passkey.burrowId === burrowId ? { ...passkey, burrowId: null } : passkey,
-          ) ?? null,
-      );
-    });
+    mutate(`remove-${burrowId}`, () => removeComputer(burrowId));
   const removeKey = (credentialId: string) =>
-    act(`passkey-${credentialId}`, async () => {
-      await removePasskey(credentialId);
-      setPasskeys(
-        (registered) =>
-          registered?.filter((passkey) => passkey.credentialId !== credentialId) ??
-          null,
-      );
-    });
+    mutate(`passkey-${credentialId}`, () => removePasskey(credentialId));
   // A lapsed account still sees, and may turn off, a Natural Voice left on.
   const voiceShown = !!hostedVoice && (hostedVoice.entitled || hostedVoice.on);
   const fresh =
@@ -343,7 +425,7 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
           <>
             {error && (
               <div className="error" role="alert">
-                <p>{error}</p>
+                <p>{error.message}</p>
                 <button
                   type="button"
                   className="text-button"
@@ -670,7 +752,7 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
                             setEnterCode(false);
                             setCode("");
                             setNotice("");
-                            setError("");
+                            setError(keepRead);
                           }}
                         >
                           Change email

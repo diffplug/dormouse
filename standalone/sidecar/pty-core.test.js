@@ -28,6 +28,7 @@ const {
   OPEN_PORT_TIMEOUT_PER_ID_MS,
   pacedInputSegments,
   DEHYDRATE_LIMIT,
+  WSL_CLI_ENV,
 } = require('./pty-core');
 
 test('resolveSpawnConfig uses POSIX shell and home defaults', () => {
@@ -144,6 +145,71 @@ test('resolveSpawnConfig applies per-spawn dor CLI env overrides', () => {
   assert.equal(config.env.DORMOUSE_CONTROL_TOKEN, 'token');
   assert.equal(config.env.DORMOUSE_NODE, '/usr/bin/node');
   assert.equal(config.env.DORMOUSE_SURFACE_ID, 'pane-1');
+});
+
+test('Windows panes carry dor context through WSL and back without translating pipe or runtime paths', () => {
+  for (const shell of ['wsl.exe', 'powershell.exe', 'cmd.exe', 'bash.exe']) {
+    const env = {
+      Path: 'C:\\Windows\\System32',
+      WSLENV: 'USER_FILES/lp:USER_FLAG/u:DORMOUSE_NODE/p:DORMOUSE_CONTROL_SOCKET/p:pwd/u',
+      DORMOUSE_NODE: 'C:\\Program Files\\Dormouse\\node.exe',
+      DORMOUSE_CLI_JS: 'C:\\Program Files\\Dormouse\\dor-cli\\dist\\dor.js',
+      DORMOUSE_CONTROL_SOCKET: '\\\\.\\pipe\\test-dor',
+      DORMOUSE_CONTROL_TOKEN: 'test-token',
+      DORMOUSE_HOST: 'standalone',
+    };
+    const config = resolveSpawnConfig({ shell, surfaceId: 'surface:42' }, {
+      platform: 'win32', env,
+      osModule: { homedir: () => 'C:\\Users\\tester', tmpdir: () => 'C:\\Temp' },
+      fsModule: { statSync() { throw new Error('ENOENT'); } },
+    });
+    const entries = config.env.WSLENV.split(':');
+    assert.deepEqual(entries, ['USER_FILES/lp', 'USER_FLAG/u', ...WSL_CLI_ENV]);
+    for (const key of ['DORMOUSE_NODE', 'DORMOUSE_CLI_JS', 'DORMOUSE_CONTROL_SOCKET', 'DORMOUSE_CONTROL_TOKEN']) {
+      assert.equal(config.env[key], env[key]);
+    }
+    assert.equal(config.env.DORMOUSE_SURFACE_ID, 'surface:42');
+    assert.equal(env.WSLENV, 'USER_FILES/lp:USER_FLAG/u:DORMOUSE_NODE/p:DORMOUSE_CONTROL_SOCKET/p:pwd/u');
+    const again = resolveSpawnConfig({ shell, surfaceId: 'surface:42' }, { platform: 'win32', env: config.env });
+    assert.equal(again.env.WSLENV, config.env.WSLENV);
+  }
+});
+
+test('WSLENV merges an inherited entry of any casing and leaves the launcher entries to dor/bin/dor', () => {
+  const config = resolveSpawnConfig({}, {
+    platform: 'win32',
+    env: { WslEnv: 'USER_FLAG/u:PWD/pw:ELECTRON_RUN_AS_NODE/w' },
+  });
+  assert.equal(config.env.WslEnv, undefined);
+  assert.deepEqual(config.env.WSLENV.split(':'), ['USER_FLAG/u', ...WSL_CLI_ENV]);
+});
+
+test('WSLENV forwards every DORMOUSE_* variable the dor CLI reads', () => {
+  const fs = require('node:fs');
+  const root = path.join(__dirname, '..', '..');
+  const forwarded = new Set(WSL_CLI_ENV);
+  // Set by the builtin Tools for their own PowerShell child, never read from the pane.
+  const notFromPane = new Set(['DORMOUSE_SAVE_SIBLING', 'DORMOUSE_SAVE_TARGET', 'DORMOUSE_SAVE_BACKUP']);
+  // dor and the packages it bundles or loads at runtime.
+  for (const dir of ['dor/src', 'dor-lib-common/src', 'dor-tools-lib/src', 'dor-tools-builtin/src']) {
+    for (const file of fs.readdirSync(path.join(root, dir), { recursive: true })) {
+      if (!/\.tsx?$/.test(file) || /\.test\.tsx?$/.test(file)) continue;
+      const source = fs.readFileSync(path.join(root, dir, file), 'utf8');
+      for (const [name] of source.matchAll(/DORMOUSE_[A-Z0-9_]+/g)) {
+        if (notFromPane.has(name)) continue;
+        assert.ok(forwarded.has(name), `${dir}/${file} reads ${name}; add it to WSL_CLI_ENV so dor sees it from WSL`);
+      }
+    }
+  }
+});
+
+test('WSL forwarding does not synthesize credentials or change native POSIX environments', () => {
+  for (const platform of ['win32', 'linux', 'darwin']) {
+    const config = resolveSpawnConfig({}, { platform, env: { WSLENV: 'USER_FLAG/u' } });
+    assert.equal(config.env.DORMOUSE_CONTROL_SOCKET, undefined);
+    assert.equal(config.env.DORMOUSE_CONTROL_TOKEN, undefined);
+    if (platform !== 'win32') assert.equal(config.env.WSLENV, 'USER_FLAG/u');
+  }
 });
 
 test('resolveSpawnConfig drops inherited Git Bash ORIGINAL_PATH on win32', () => {
