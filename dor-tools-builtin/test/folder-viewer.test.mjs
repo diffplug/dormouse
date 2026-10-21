@@ -219,6 +219,11 @@ test('runs no git in a folder whose .git names a share', { skip: !hasGit ? 'git 
   await writeFile(join(root, '.git'), `gitdir: /${join(repo, '.git')}\n`);
   assert.equal(spawnSync('git', ['check-ignore', 'a.log'], { cwd: root }).status, 0);
   assert.deepEqual((await list(await start())).entries, [entry('.git', 'file'), entry('a.log', 'file')]);
+  // A decoy `.git` below passes the check but not git's own, so git would
+  // move up to the root's `.git`; it is never let past the decoy's folder.
+  await files({ inner: null, 'inner/.git': null, 'inner/.git/objects': null, 'inner/.git/refs': null, 'inner/.git/HEAD': 'not a ref\n', 'inner/a.log': '' });
+  assert.equal(spawnSync('git', ['check-ignore', 'a.log'], { cwd: join(root, 'inner') }).status, 0);
+  assert.deepEqual((await list(await start(), 'inner')).entries, [entry('.git', 'dir'), entry('a.log', 'file')]);
 });
 
 test('flags git-ignored entries without running the folder\'s fsmonitor', { skip: !hasGit ? 'git is not installed' : posixOnly.skip }, async () => {

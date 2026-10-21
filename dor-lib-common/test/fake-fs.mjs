@@ -21,6 +21,11 @@ export function fakeFs(entries) {
       if (!('link' in entry)) throw Object.assign(new Error(`EINVAL: ${path}`), { code: 'EINVAL' });
       return entry.link;
     },
+    readdir: async (path) => {
+      find(path);
+      const prefix = path.endsWith('\\') || path.endsWith('/') ? path : `${path}${path.includes('\\') ? '\\' : '/'}`;
+      return Object.keys(entries).filter(key => key.startsWith(prefix) && !/[\\/]/.test(key.slice(prefix.length))).map(key => key.slice(prefix.length));
+    },
     readFile: async (path, limit) => {
       const entry = find(path);
       if (!('file' in entry) || entry.file.length > limit) throw new Error(`unreadable: ${path}`);

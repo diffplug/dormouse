@@ -1,4 +1,4 @@
-import { UNTRUSTED_REPO_GIT_ARGS, localGitRepository, resolveBinaryPath, spawnAndCapture } from 'dor-lib-common';
+import { UNTRUSTED_REPO_GIT_ARGS, localGitRepository, resolveBinaryPath, spawnAndCapture, untrustedGitEnv } from 'dor-lib-common';
 
 /**
  * Run git against `dir` and answer its trimmed stdout, or null on any failure:
@@ -17,8 +17,9 @@ export async function runGit(dir: string, args: string[]): Promise<string | null
   // the host's working directory first (`docs/specs/security-local.md` ->
   // "Spawned programs").
   const git = resolveBinaryPath('git', process.env);
-  if (!git || !(await localGitRepository(dir))) return null;
-  const result = await spawnAndCapture(git, [...UNTRUSTED_REPO_GIT_ARGS, '-C', dir, ...args]);
+  const repository = git && await localGitRepository(dir);
+  if (!repository) return null;
+  const result = await spawnAndCapture(git, [...UNTRUSTED_REPO_GIT_ARGS, '-C', dir, ...args], { env: untrustedGitEnv(repository) });
   if (!result.ok || result.exitCode !== 0) return null;
   const out = result.stdout.trim();
   return out || null;

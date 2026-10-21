@@ -1,4 +1,4 @@
-export { UNTRUSTED_REPO_GIT_ARGS, localGitRepository } from './git.js';
+export { UNTRUSTED_REPO_GIT_ARGS, localGitRepository, untrustedGitEnv } from './git.js';
 export type { LocalGitRepository } from './git.js';
 export { spawnAndCapture, treeKillCommand, SPAWN_TIMEOUT_CODE } from './spawn.js';
 export type { SpawnCaptureResult } from './spawn.js';

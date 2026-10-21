@@ -59,6 +59,10 @@ test('with Windows semantics, refuses a repository that names a share before any
     "another user's home": { 'C:\\work\\.git\\config': file('[core]\n\texcludesFile = ~other/x\n') },
     'an excludes file through a link to a share': { 'C:\\work\\.git\\config': file('[core]\n\texcludesFile = ignores/x\n'), 'C:\\work\\ignores': link('\\\\host\\share') },
     'a config git would refuse': { 'C:\\work\\.git\\config': file('[core\n') },
+    'a legacy remote file linked to a share': { 'C:\\work\\.git\\remotes': dir, 'C:\\work\\.git\\remotes\\origin': link('\\\\host\\share\\origin') },
+    // git passes over a candidate it judges more strictly, so it may try the next one.
+    'the work tree, as a bare repository, naming a share': { 'C:\\work\\commondir': file('\\\\host\\share\\repo.git\n') },
+    'a lower .git without HEAD whose objects are a share': { 'C:\\work\\src\\.git': dir, 'C:\\work\\src\\.git\\objects': link('//host/share/objects') },
   };
   for (const [name, extra] of Object.entries(cases)) {
     const fs = windowsRepo(extra);

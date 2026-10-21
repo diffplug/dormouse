@@ -1,5 +1,5 @@
 import { constants } from 'node:fs';
-import { open } from 'node:fs/promises';
+import { open, readdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import nodePath from 'node:path';
 import { isUncOrDevicePath } from './browser-providers.js';
@@ -13,8 +13,8 @@ import { localRealpath, localRealpathIfExists, NonLocalPathError, type LocalPath
  *
  * A repository's own `.git/config` can name a program for git to run.
  * `core.fsmonitor` is the one such key the queries Dormouse runs can reach —
- * `rev-parse`, `config --get`, `remote get-url`, and the index readers
- * `ls-files` and `check-ignore` — since none runs a hook, reads contents
+ * `config --get`, `remote get-url`, and the index readers `ls-files` and
+ * `check-ignore` — since none runs a hook, reads contents
  * through a filter or textconv, pages to a pipe, or fetches. A subcommand that
  * does any of those needs its own override here before it runs untrusted.
  */
@@ -30,13 +30,17 @@ export interface LocalGitRepository {
 
 export interface GitRepositoryOptions {
   /** Test seams. `readFile` answers a regular file's text, and throws past `limit` bytes. */
-  fs?: LocalPathFs & { readFile?(path: string, limit: number): Promise<string> };
+  fs?: LocalPathFs & { readFile?(path: string, limit: number): Promise<string>; readdir?(path: string): Promise<string[]> };
   path?: LocalPathModule & Pick<typeof nodePath, 'dirname'>;
   home?: string;
 }
 
 /** What git opens in a git or common directory for the queries above. */
 const REPOSITORY_ENTRIES = ['HEAD', 'commondir', 'objects', 'refs', 'packed-refs', 'index', 'config', 'config.worktree', 'info/exclude', 'info/sparse-checkout'];
+/** Directories of git's legacy remote files, which `remote get-url` opens
+ *  for a remote its config gives no URL. */
+const LEGACY_REMOTE_DIRS = ['remotes', 'branches'];
+const LEGACY_REMOTE_LIMIT = 256;
 /** Config keys whose value is a path git opens for those queries. */
 const PATH_KEYS = new Set(['core.worktree', 'core.excludesfile', 'core.attributesfile']);
 const GITFILE_LIMIT = 4096;
@@ -49,8 +53,9 @@ const CONFIG_LIMIT = 1024 * 1024;
  * `commondir`, an entry git opens inside, or a path the repository's config
  * names. Any `include` in that config refuses it too, since an included file
  * can name anything. Every git run in a repository the user has not vouched
- * for asks this first and skips the run on null: git follows each of these
- * before anything could check where it went.
+ * for asks this first, skips the run on null, and otherwise runs with
+ * `untrustedGitEnv`: git follows each of these before anything could check
+ * where it went.
  */
 export async function localGitRepository(dir: string, options: GitRepositoryOptions = {}): Promise<LocalGitRepository | null> {
   const path = options.path ?? nodePath;
@@ -74,6 +79,10 @@ export async function localGitRepository(dir: string, options: GitRepositoryOpti
   }
 }
 
+/** What git takes at `level`: `<level>/.git`, else `<level>` as a bare
+ *  repository. Both candidates are checked whichever it takes, since git
+ *  judges a candidate more strictly than this does and may pass over one
+ *  this takes; `untrustedGitEnv` stops it going higher. */
 async function repositoryAt(level: string, options: GitRepositoryOptions): Promise<LocalGitRepository | null> {
   const path = options.path ?? nodePath;
   const dotGit = await localRealpathIfExists(path.join(level, '.git'), options);
@@ -88,17 +97,19 @@ async function repositoryAt(level: string, options: GitRepositoryOptions): Promi
     return { ...dirs, workTree: level };
   }
   const dirs = dotGit && await gitDirectory(dotGit.path, options);
-  if (dirs) return { ...dirs, workTree: level };
   const bare = await gitDirectory(level, options);
+  if (dirs) return { ...dirs, workTree: level };
   return bare && { ...bare, workTree: null };
 }
 
-/** `candidate`'s git and common directories when git would take it for a git
- *  directory: it holds `HEAD`, and `objects` and `refs` where `commondir` points. */
+/** `candidate`'s git and common directories when it holds `HEAD`, and
+ *  `objects` and `refs` directories where its `commondir` points. Each path
+ *  git reads to judge it is checked before the answer, as git reads them all. */
 async function gitDirectory(candidate: string, options: GitRepositoryOptions): Promise<{ gitDir: string; commonDir: string } | null> {
   const path = options.path ?? nodePath;
   const gitDir = await localRealpathIfExists(candidate, options);
-  if (!gitDir?.stats.isDirectory() || !(await localRealpathIfExists(path.join(gitDir.path, 'HEAD'), options))) return null;
+  if (!gitDir?.stats.isDirectory()) return null;
+  const head = await localRealpathIfExists(path.join(gitDir.path, 'HEAD'), options);
   const commondir = await localRealpathIfExists(path.join(gitDir.path, 'commondir'), options);
   let commonDir: LocalPath | null = gitDir;
   if (commondir) {
@@ -107,10 +118,25 @@ async function gitDirectory(candidate: string, options: GitRepositoryOptions): P
     commonDir = await localRealpathIfExists(path.resolve(gitDir.path, named), options);
     if (!commonDir?.stats.isDirectory()) return null;
   }
-  for (const name of ['objects', 'refs']) {
-    if (!(await localRealpathIfExists(path.join(commonDir.path, name), options))) return null;
-  }
+  const objects = await localRealpathIfExists(path.join(commonDir.path, 'objects'), options);
+  const refs = await localRealpathIfExists(path.join(commonDir.path, 'refs'), options);
+  if (!head || !objects?.stats.isDirectory() || !refs?.stats.isDirectory()) return null;
   return { gitDir: gitDir.path, commonDir: commonDir.path };
+}
+
+/**
+ * The environment a git run in `repository` takes: git searches no higher
+ * than the directory `localGitRepository` found it in, so it opens nothing
+ * that was not checked — it finds that repository or none — and keeps its
+ * own ownership check, which a `--git-dir` would skip. A `GIT_DIR`,
+ * `GIT_COMMON_DIR`, or `GIT_WORK_TREE` the host inherited is dropped for the
+ * same reason.
+ */
+export function untrustedGitEnv(repository: LocalGitRepository, env: NodeJS.ProcessEnv = process.env, path: Pick<typeof nodePath, 'dirname'> = nodePath): NodeJS.ProcessEnv {
+  const { GIT_DIR: _dir, GIT_COMMON_DIR: _common, GIT_WORK_TREE: _tree, ...rest } = env;
+  const level = repository.workTree ?? repository.gitDir;
+  const above = path.dirname(level);
+  return above === level ? rest : { ...rest, GIT_CEILING_DIRECTORIES: above };
 }
 
 /** Throws unless each entry git opens in `repository`, and each path its config names, is local. */
@@ -118,6 +144,13 @@ async function checkRepository({ gitDir, commonDir, workTree }: LocalGitReposito
   const path = options.path ?? nodePath;
   for (const base of new Set([gitDir, commonDir])) {
     for (const name of REPOSITORY_ENTRIES) await localRealpathIfExists(path.join(base, name), options);
+  }
+  for (const name of LEGACY_REMOTE_DIRS) {
+    const dir = await localRealpathIfExists(path.join(commonDir, name), options);
+    if (!dir?.stats.isDirectory()) continue;
+    const files = await (options.fs?.readdir ?? readdir)(dir.path);
+    if (files.length > LEGACY_REMOTE_LIMIT) throw new Error('too many legacy remotes');
+    for (const file of files) await localRealpathIfExists(path.join(dir.path, file), options);
   }
   for (const config of [path.join(commonDir, 'config'), path.join(gitDir, 'config.worktree')]) {
     const file = await localRealpathIfExists(config, options);

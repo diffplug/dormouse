@@ -392,6 +392,16 @@ test('runs no git in a folder whose .git names a share, listing it by walking in
     const nested = [];
     await listFiles(dir, { onFiles: paths => nested.push(...paths) });
     assert.deepEqual(nested.sort(), ['planted/own.ts', 'planted/x.log']);
+    // A decoy `.git` below passes the check but not git's own, so git would
+    // move up to the planted `.git`; it is never let past the decoy's folder.
+    const inner = join(planted, 'inner');
+    for (const sub of ['objects', 'refs']) await mkdir(join(inner, '.git', sub), { recursive: true });
+    await writeFile(join(inner, '.git', 'HEAD'), 'not a ref\n');
+    await writeFile(join(inner, 'y.log'), '');
+    assert.equal(execFileSync('git', ['ls-files', '--others', '--exclude-standard'], { cwd: inner }).toString(), '');
+    const decoy = [];
+    await listFiles(inner, { onFiles: paths => decoy.push(...paths) });
+    assert.deepEqual(decoy, ['y.log']);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

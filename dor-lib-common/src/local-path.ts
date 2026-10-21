@@ -87,11 +87,11 @@ export async function localRealpath(input: string, { fs = NODE_FS, path = nodePa
   }
   stats ??= await fs.lstat(current);
   // With no link left on the path, the native `realpath` follows nothing: it
-  // only answers the case a case-insensitive volume stores, as `realpath`
-  // always did here. Any other difference, such as a mapped drive's share or
-  // an 8.3 name, keeps the walked spelling.
+  // only answers the spelling the volume stores (case, an 8.3 name's long
+  // form), as `realpath` always did here. A mapped drive, which it answers as
+  // its share, keeps the walked spelling.
   const stored = fs.realpath ? await fs.realpath(current).catch(() => current) : current;
-  return { path: stored.toLowerCase() === current.toLowerCase() ? stored : current, stats };
+  return { path: isUncOrDevicePath(stored) ? current : stored, stats };
 }
 
 /** `localRealpath`, or null where nothing exists; a refusal still rejects. */

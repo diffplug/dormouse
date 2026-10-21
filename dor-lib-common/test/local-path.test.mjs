@@ -84,12 +84,12 @@ test('on this machine, refuses a link to a share that POSIX would read as a loca
   }
 });
 
-test('takes only the stored case from the native realpath, run once no link is left', async () => {
+test('takes the stored spelling from the native realpath, run once no link is left, unless it is a share', async () => {
   const stored = { 'Z:\\docs': '\\\\server\\share\\docs', 'C:\\PROGRA~1': 'C:\\Program Files', 'C:\\NOTES': 'C:\\Notes' };
   const fs = { ...fakeFs({ 'Z:\\': dir, 'Z:\\docs': dir, 'C:\\': dir, 'C:\\PROGRA~1': dir, 'C:\\NOTES': dir }), realpath: async (path) => stored[path] ?? path };
-  // A mapped drive's share, or an 8.3 name, keeps the spelling the walk resolved.
+  // A mapped drive's share keeps the drive the walk resolved; an 8.3 name takes its long form.
   assert.equal((await localRealpath('Z:\\docs', { fs, path: win32 })).path, 'Z:\\docs');
-  assert.equal((await localRealpath('C:\\PROGRA~1', { fs, path: win32 })).path, 'C:\\PROGRA~1');
+  assert.equal((await localRealpath('C:\\PROGRA~1', { fs, path: win32 })).path, 'C:\\Program Files');
   assert.equal((await localRealpath('C:\\NOTES', { fs, path: win32 })).path, 'C:\\Notes');
 });
 

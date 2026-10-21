@@ -48,13 +48,15 @@ function checkoutName(commonDir: string): string {
   return base === '.git' ? basename(resolve(commonDir, '..')) : base.replace(/\.git$/, '');
 }
 
-/** `ref: refs/heads/<branch>`, or a detached commit's full hash. Read rather
- *  than asked of git: it exists even on an unborn branch, and saves a spawn. */
-async function headBranch(gitDir: string): Promise<string | null> {
+/** The branch `HEAD` names (`ref: refs/heads/<branch>`), or a detached
+ *  commit's full hash, from a git directory `localGitRepository` checked.
+ *  Read rather than asked of git: it exists even on an unborn branch, saves a
+ *  spawn, and opens no ref. */
+export async function readHead(gitDir: string): Promise<{ branch: string } | { detached: string } | null> {
   const head = (await readFile(join(gitDir, 'HEAD'), 'utf8')).trim();
   const ref = /^ref: refs\/heads\/(.+)$/.exec(head);
-  if (ref) return ref[1];
-  return /^[0-9a-f]{7,}$/.test(head) ? head.slice(0, 7) : null;
+  if (ref) return { branch: ref[1] };
+  return /^[0-9a-f]{7,}$/.test(head) ? { detached: head } : null;
 }
 
 export async function lookupGitDir(path: string): Promise<GitDirInfo | null> {
@@ -68,8 +70,9 @@ export async function lookupGitDir(path: string): Promise<GitDirInfo | null> {
     runGit(dir, ['config', '--get', 'remote.origin.url']),
   ]);
   if (!repository) return null;
-  const branch = await headBranch(repository.gitDir).catch(() => null);
-  if (!branch) return null;
+  const head = await readHead(repository.gitDir).catch(() => null);
+  if (!head) return null;
+  const branch = 'branch' in head ? head.branch : head.detached.slice(0, 7);
   const repo = (remote && remoteRepoName(remote)) || checkoutName(repository.commonDir);
   return { repo, branch };
 }
