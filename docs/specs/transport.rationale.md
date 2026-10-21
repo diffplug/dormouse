@@ -56,6 +56,8 @@ The retry is the same argument applied to the plain boot: the arrival path refus
 
 **Why a reset tail at all.** Saved scrollback can end mid-TUI with private modes still latched — mouse tracking, the alt-screen, a hidden cursor, application cursor keys. Replaying it verbatim re-applies those DECSETs with no process alive to ever DECRST them, leaving a restored pane unable to select text, showing an alt-screen frame nothing will ever repaint, or with no visible cursor at its new shell's prompt. A live exit used to skip the tail, so a crashed TUI's pane kept its frozen frame and its mouse tracking until a reload replayed it dead and reset it: the same Session looked different before and after the reload (decided 2026-10-16). The cost is the crashed program's last alt-screen frame, which the next reload discarded anyway.
 
+The earlier list of private-mode resets missed insert mode, scroll margins, and kitty keyboard stacks (reproduced against the pinned xterm, 2026-10-20). A soft reset clears these without erasing retained text; the Windows keyboard arbiter resets its matching stack depth too. Alternate-screen exit and mouse resets remain explicit because xterm keeps those outside its soft reset.
+
 ## Transferring a Workspace
 
 The suppression is bounded and fails open because the two failures are not symmetric: duplicated bytes are a cosmetic repeat the user can scroll past, and a permanently silenced pane is a terminal they have to kill. The host's own measurements and the ordering the guarantee rests on are `docs/specs/standalone.rationale.md` → Arrival queue.
