@@ -306,6 +306,45 @@ describe('painting', () => {
     expect(drawImage).toHaveBeenCalledTimes(2);
   });
 
+  it.each(['tab report', 'navigation report', 'reload report', 'navigate', 'select tab', 'close tab', 'back', 'forward', 'reload', 'relaunch'])('drops a pending clipboard read after %s changes its target', async (change) => {
+    const { host, controller } = await paintFixture();
+    let resolveClipboard!: (text: string) => void;
+    (host.platform as PlatformAdapter).readClipboardText = () => new Promise((resolve) => { resolveClipboard = resolve; });
+    const page = { tabId: 'one', title: 'Before', url: 'https://before.example/', active: true };
+    const report = (event: unknown) => streamSocket(4321)!.emitMessage(JSON.stringify(event));
+    report({ type: 'tabs', tabs: [page] });
+    controller.handleKeyDownLike({ key: 'v', code: 'KeyV', ctrlKey: true, metaKey: false, altKey: false, shiftKey: false });
+    if (change === 'tab report') report({ type: 'tabs', tabs: [{ ...page, tabId: 'two' }] });
+    else if (change === 'navigation report') report({ type: 'page', url: 'https://after.example/' });
+    else if (change === 'reload report') report({ type: 'url', url: page.url });
+    else if (change === 'navigate') controller.chromeActions.navigate('https://after.example/');
+    else if (change === 'select tab') controller.selectTab({ ...page, tabId: 'two', active: false });
+    else if (change === 'close tab') controller.closeTab(page);
+    else if (change === 'relaunch') {
+      host.answers.launch = async () => ({ ok: true, stream: 7777 });
+      getAgentBrowserScreenController('id')?.actions.setRenderMode?.('agent-browser-popout');
+    } else controller.chromeActions[change as 'back' | 'forward' | 'reload']();
+    await flushMicrotasks();
+    if (change === 'relaunch') expect(streamSocket(7777)).toBeDefined();
+    resolveClipboard('private clipboard text');
+    await flushMicrotasks();
+    expect(WebSocketMock.instances.flatMap((socket) => socket.sent.map((raw) => JSON.parse(raw)))
+      .filter((message) => message.type === 'input_text')).toEqual([]);
+  });
+
+  it('keeps a pending paste when the active page only reports a new title', async () => {
+    const { host, controller } = await paintFixture();
+    let resolveClipboard!: (text: string) => void;
+    (host.platform as PlatformAdapter).readClipboardText = () => new Promise((resolve) => { resolveClipboard = resolve; });
+    const page = { tabId: 'one', title: 'Before', url: 'https://before.example/', active: true };
+    streamSocket(4321)!.emitMessage(JSON.stringify({ type: 'tabs', tabs: [page] }));
+    controller.handleKeyDownLike({ key: 'v', code: 'KeyV', ctrlKey: true, metaKey: false, altKey: false, shiftKey: false });
+    streamSocket(4321)!.emitMessage(JSON.stringify({ type: 'tabs', tabs: [{ ...page, title: 'After' }] }));
+    resolveClipboard('kept');
+    await flushMicrotasks();
+    expect(JSON.parse(streamSocket(4321)!.sent.at(-1)!)).toEqual({ type: 'input_text', text: 'kept' });
+  });
+
   it('sends input, pasted text and repaint requests over the viewer socket, and editing chords to the host', async () => {
     const { host, controller } = await paintFixture('pasted\r\ntext');
     const sent = () => streamSocket(4321)!.sent.map((raw) => JSON.parse(raw));
