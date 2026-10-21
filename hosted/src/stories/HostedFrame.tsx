@@ -1,14 +1,28 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { applyHostedTheme, DEFAULT_THEME_ID } from "../theme";
+import { resolveThemeVars } from "../../../lib/src/lib/themes/apply";
+import { getBundledThemes } from "../../../lib/src/lib/themes/store";
+import { DOCS_THEMED_BODY_CLASS, paintDocsTokens } from "../../../lib/src/site/docs-paint";
+import { DOCS_THEME_ID } from "../../../lib/src/site/docs-theme";
+import css from "../index.css?inline";
 
 const LIGHT_THEME_ID = "vscode.theme-defaults.light-visual-studio";
-import css from "../style.css?inline";
+
+/** What `useDocsThemedBody` does to the top-level page, on the frame's own
+ * document instead. */
+function paintFrame(doc: Document, themeId: string) {
+  const theme = getBundledThemes().find((candidate) => candidate.id === themeId)!;
+  const vars = resolveThemeVars(theme);
+  for (const [name, value] of Object.entries(vars)) doc.body.style.setProperty(name, value);
+  doc.body.classList.add(DOCS_THEMED_BODY_CLASS);
+  doc.documentElement.style.colorScheme = theme.type;
+  paintDocsTokens(doc.body, theme, vars);
+}
 
 const DOCUMENT = '<!doctype html><html lang="en"><head><meta charset="utf-8"></head><body><div id="hosted-root"></div></body></html>';
 
-/** Production CSS and theme in a separate document: neither Tailwind's reset
- * nor the surrounding docs/toolbar palette participates in this page. */
+/** Production CSS and theme in a separate document: neither lib's own
+ * Tailwind theme nor the surrounding Storybook palette reaches this page. */
 export function HostedFrame({ children, phone = false, light = false }: {
   children: ReactNode;
   phone?: boolean;
@@ -18,14 +32,14 @@ export function HostedFrame({ children, phone = false, light = false }: {
   const [doc, setDoc] = useState<Document | null>(null);
   const [width, minimumHeight] = phone ? [390, 844] : [1200, 900];
   useLayoutEffect(() => {
-    if (doc) applyHostedTheme(doc, light ? LIGHT_THEME_ID : DEFAULT_THEME_ID);
+    if (doc) paintFrame(doc, light ? LIGHT_THEME_ID : DOCS_THEME_ID);
   }, [doc, light]);
   useLayoutEffect(() => {
     if (!doc) return;
     const style = doc.createElement("style");
     // 100svh would grow with the measured iframe, preventing it from shrinking
     // after a shorter state. Pin only its minimum to the simulated viewport.
-    style.textContent = `${css}\n.shell { min-height: ${minimumHeight}px; }`;
+    style.textContent = `${css}\n[data-hosted-shell] { min-height: ${minimumHeight}px; }`;
     doc.head.append(style);
     const frame = iframe.current!;
     const bodyRoot = doc.getElementById("hosted-root")!;

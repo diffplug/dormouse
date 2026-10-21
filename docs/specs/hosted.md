@@ -51,9 +51,9 @@ Source of truth: `hosted/server/providers.js`; `authPolicy` / `providerBindings`
 
 **Must show configured sign-in methods only.** Login tokens never enter browser storage, and only public identity fields render, without provider images or external assets.
 
-**Must look like the dormouse.sh reference pages it is linked from:** a bundled editor theme, defaulting to the docs pages' default and offering their bundled picks without the theme store, the site's Ubuntu faces served from Hosted's own origin, and the caramel wordmark. It loads no marketing scripts or analytics.
+**Must be built from the dormouse.sh reference pages' own design** (`lib/src/site/`), never a copy of it: their theme and picker, offered without the theme store, the site's Ubuntu faces served from Hosted's own origin, and the site header. It loads no marketing scripts or analytics.
 
-Source of truth: `App` in `hosted/src/App.tsx`; `applyHostedTheme` in `hosted/src/theme.ts`.
+Source of truth: `App` in `hosted/src/App.tsx`; `useDocsThemedBody` in `lib/src/site/docs-paint.ts`.
 
 ## Terms acceptance
 

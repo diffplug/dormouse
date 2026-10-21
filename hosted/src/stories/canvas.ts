@@ -9,7 +9,7 @@ export async function settledFrame(canvasElement: HTMLElement) {
   await waitFor(() => expect(iframe?.dataset.ready).toBe("true"));
   const document = iframe.contentDocument!;
   await waitFor(() => {
-    expect(document.querySelector(".shell")).not.toBeNull();
+    expect(document.querySelector("[data-hosted-shell]")).not.toBeNull();
     expect(iframe.clientHeight).toBeGreaterThanOrEqual(document.body.scrollHeight);
     expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(iframe.clientWidth);
   });

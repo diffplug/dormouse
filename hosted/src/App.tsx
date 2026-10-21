@@ -32,6 +32,7 @@ import {
   LOGIN_FRESH_AGE_MS,
   TERMS_VERSION,
 } from "../server/policy-constants";
+import { useDocsThemedBody } from "../../lib/src/site/docs-paint";
 import { HostedPage, SUBSCRIBE_URL } from "./HostedPage";
 import { takeEnrollment, type Enrollment } from "./enrollment";
 import {
@@ -88,6 +89,8 @@ const SIGN_IN_OPEN = SIGN_IN_PARAMS.has("signin") || SIGN_IN_PARAMS.has("error")
 const PENDING_TIMEOUT_MS = 60_000;
 
 export function App({ enrollment }: { enrollment: Enrollment | null }) {
+  // The reader's picked theme, as on the docs pages this continues.
+  useDocsThemedBody();
   const [session, setSession] = useState<Session | null>(null);
   const [enabled, setEnabled] = useState<Provider[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -393,7 +396,7 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
     turnOffDialog={turnOffDialog} computers={computers} passkeys={passkeys}
     enrolling={enrolling} loading={loading} busy={busy} error={error} notice={notice}
     email={email} code={code} enterCode={enterCode}
-    comingSoon={comingSoon} fresh={fresh} act={act} refresh={refresh} approve={approve}
+    comingSoon={comingSoon} fresh={fresh} themeControl act={act} refresh={refresh} approve={approve}
     signOut={signOut} clearEnrollment={clearEnrollment} turnOffVoice={turnOffVoice}
     removeOne={removeOne} removeKey={removeKey} submit={submit} setEmail={setEmail}
     setCode={setCode} setEnterCode={setEnterCode} changeEmail={changeEmail}

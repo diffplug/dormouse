@@ -21,6 +21,8 @@ import {
   ACCENT_TEXT_CLASS,
   MUTED_ACCENT_LINK_CLASS,
   MUTED_TEXT_CLASS,
+  PAGE_INTRO_CLASS,
+  PAGE_TITLE_CLASS,
   TOC_INDENT_CLASS,
 } from "dormouse-lib/site/docs-tokens";
 import { DOCS_HEADER_STYLE, useDocsThemedBody } from "dormouse-lib/site/docs-paint";
@@ -205,8 +207,8 @@ export default function DocsLayout({
             </aside>
 
             <div className="min-w-0">
-              <h1 className="mb-2 font-display text-[clamp(1.75rem,3vw+0.5rem,2.5rem)]">{heading}</h1>
-              {intro && <div className={`mb-8 text-lg ${MUTED_TEXT_CLASS}`}>{intro}</div>}
+              <h1 className={`mb-2 ${PAGE_TITLE_CLASS}`}>{heading}</h1>
+              {intro && <div className={`mb-8 ${PAGE_INTRO_CLASS}`}>{intro}</div>}
 
               <main>{children}</main>
 

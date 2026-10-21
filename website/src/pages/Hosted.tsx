@@ -28,9 +28,12 @@ import {
   CARD_ACCENT_CLASS,
   CARD_CLASS,
   CARD_MUTED_TEXT_CLASS,
+  DASHED_ROW_CLASS,
   LINK_CLASS,
   MUTED_TEXT_CLASS,
+  PANEL_CLASS,
   SCROLL_MT_CLASS,
+  SECTION_CLASS,
 } from "dormouse-lib/site/docs-tokens";
 import { type TocEntry } from "../lib/docs-pages";
 import { POCKET_PLAYGROUND_PATH } from "../lib/playground-routing";
@@ -85,7 +88,7 @@ function Includes({ items }: { items: React.ReactNode[] }) {
       {items.map((item, i) => (
         <li
           key={i}
-          className="flex gap-2.5 border-b border-dashed border-[var(--color-text)]/15 py-2 leading-snug"
+          className={`flex gap-2.5 py-2 leading-snug ${DASHED_ROW_CLASS}`}
         >
           <CheckIcon
             size={16}
@@ -378,13 +381,6 @@ function CheckoutTodo({ tier, onClose }: { tier: Tier; onClose: () => void }) {
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  // The panel spells its own surface rather than taking `CARD_CLASS`: a card's
-  // translucent tint over a dimmed page left the table legible straight
-  // through it.
-  const panelClass =
-    "max-h-[85dvh] w-full max-w-lg overflow-y-auto rounded-xl border "
-    + "border-[var(--color-text)]/15 bg-[var(--color-bg)] p-5 text-[var(--color-text)] sm:p-6";
-
   return (
     <div
       className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-4 sm:items-center"
@@ -396,7 +392,7 @@ function CheckoutTodo({ tier, onClose }: { tier: Tier; onClose: () => void }) {
         aria-modal="true"
         aria-labelledby="checkout-todo-title"
         tabIndex={-1}
-        className={panelClass}
+        className={PANEL_CLASS}
         onClick={(event) => event.stopPropagation()}
       >
         <p className={`font-display text-sm tracking-wide ${ACCENT_TEXT_CLASS}`}>TODO</p>
@@ -483,7 +479,7 @@ export default function Hosted() {
         </p>
       </section>
 
-      <section className="mt-14 border-t border-[var(--color-text)]/15 pt-10">
+      <section className={SECTION_CLASS}>
         <SpeakerHighIcon
           size={28}
           weight="duotone"
@@ -515,7 +511,7 @@ export default function Hosted() {
         </p>
       </section>
 
-      <section className="mt-14 border-t border-[var(--color-text)]/15 pt-10">
+      <section className={SECTION_CLASS}>
         <CloudArrowUpIcon
           size={28}
           weight="duotone"

@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { COPY_OUTCOME_LABEL } from './design';
-import { writeTextToClipboard } from '../lib/clipboard';
+import { writeTextToClipboard } from '../lib/clipboard-write';
 import type { CopyOutcome } from '../lib/mouse-selection';
 
 /** How long a Copy button says it did, or could not. */

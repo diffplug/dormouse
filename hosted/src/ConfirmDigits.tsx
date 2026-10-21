@@ -1,4 +1,6 @@
 import { useState, type FormEvent } from "react";
+import { FIELD_TEXT_CLASS } from "../../lib/src/site/docs-tokens";
+import { HELP_CLASS, LABEL_CLASS, PRIMARY_CLASS } from "./classes";
 
 /**
  * Approve with the two digits Dormouse shows (docs/specs/hosted.md -> "Burrow
@@ -19,12 +21,12 @@ export function ConfirmDigits({
   }
   return (
     <form onSubmit={submit}>
-      <label htmlFor="confirm-digits">
+      <label htmlFor="confirm-digits" className={LABEL_CLASS}>
         Type the two digits Dormouse is showing
       </label>
       <input
         id="confirm-digits"
-        className="confirm-digits"
+        className={`mb-4 block min-h-18 w-[4ch] rounded-md border border-[var(--color-text)]/50 bg-[var(--color-bg)] text-center font-display text-[40px] tracking-[0.15em] focus:outline-none ${FIELD_TEXT_CLASS}`}
         inputMode="numeric"
         autoComplete="off"
         pattern="[0-9]{2}"
@@ -36,11 +38,11 @@ export function ConfirmDigits({
         disabled={!!busy}
         onChange={(event) => setDigits(event.target.value.replace(/\D/g, ""))}
       />
-      <p className="help">
+      <p className={HELP_CLASS}>
         Only the computer that sent you here shows them. If they are not its
         digits, nothing is approved, and that code cannot be approved again.
       </p>
-      <button className="primary" disabled={!!busy || digits.length !== 2} type="submit">
+      <button className={PRIMARY_CLASS} disabled={!!busy || digits.length !== 2} type="submit">
         {busy === "approve" ? "Approving…" : "Approve"}
       </button>
     </form>

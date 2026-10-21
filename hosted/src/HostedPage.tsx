@@ -1,19 +1,60 @@
 import { useEffect, useRef, type Dispatch, type FormEvent, type RefObject, type SetStateAction } from "react";
+import { CheckIcon } from "@phosphor-icons/react";
+import { TERMINAL_TOP_RADIUS_CLASS } from "../../lib/src/components/design";
+import DocsThemeControl from "../../lib/src/site/DocsThemeControl";
+import SiteHeader, { type SiteNavLink } from "../../lib/src/site/SiteHeader";
+import { DOCS_HEADER_STYLE } from "../../lib/src/site/docs-paint";
+import {
+  ACCENT_TEXT_CLASS,
+  CARD_BASE_CLASS,
+  CARD_CLASS,
+  CODE_CLASS,
+  DASHED_ROW_CLASS,
+  LINK_CLASS,
+  MUTED_ACCENT_LINK_CLASS,
+  MUTED_TEXT_CLASS,
+  PAGE_INTRO_CLASS,
+  PAGE_TITLE_CLASS,
+  PANEL_CLASS,
+  SECTION_CLASS,
+  STATUS_BAD_TEXT_CLASS,
+  siteButton,
+} from "../../lib/src/site/docs-tokens";
 import { providerNames, type Account, type Computer, type HostedVoice, type Passkey, type Provider, type Session } from "./api";
 import { RECENT_LOGIN_WINDOW, TERMS_VERSION } from "../server/policy-constants";
+import { HELP_CLASS, INPUT_CLASS, LABEL_CLASS, PRIMARY_CLASS } from "./classes";
 import { ConfirmDigits } from "./ConfirmDigits";
-import { ThemeSelect } from "./ThemeSelect";
 import type { Enrollment } from "./enrollment";
 import type { Notice, PageError } from "./settle";
 
 export const SUBSCRIBE_URL = "https://nedshed.dev/subscribe";
 
-/** The pricing cards' check mark, beside a state that is already in words. */
-function Check() {
+/** The site header's own links (`NAV_LINKS` in website/src/lib/site-nav.ts),
+ * absolute because this is another origin. Playground also gives way on a
+ * phone, making room for the "Hosted" beside the wordmark. */
+const SITE_LINKS: readonly SiteNavLink[] = [
+  { href: "https://dormouse.sh/playground", label: "Playground", hideOnMobile: true },
+  { href: "https://dormouse.sh/#download", label: "Download", hideOnMobile: true },
+  { href: "https://dormouse.sh/docs", label: "Docs" },
+  { href: "https://github.com/diffplug/dormouse", label: "GitHub", external: true },
+];
+
+const BUTTON_CLASS = siteButton({ tone: "neutral", size: "fit" });
+const TEXT_BUTTON_CLASS = `inline-flex min-h-11 items-center disabled:opacity-50 ${LINK_CLASS}`;
+const HEADING_CLASS = "mb-2 font-display text-xl";
+const ROW_CLASS = `flex min-h-14 items-center justify-between gap-4 py-1.5 ${DASHED_ROW_CLASS}`;
+const DETAIL_CLASS = `block text-sm ${MUTED_TEXT_CLASS}`;
+const FOOTNOTE_CLASS = `mt-10 text-sm ${MUTED_TEXT_CLASS}`;
+/** A computer's id in the shape the app draws a minimized Pane: a door. */
+const DOOR_CLASS = `${TERMINAL_TOP_RADIUS_CLASS} ml-1.5 inline-flex h-6 min-w-[68px] items-center justify-center border-b border-[var(--color-text)]/30 bg-[var(--color-text)]/[0.12] px-2.5 text-sm`;
+
+/** A state already in words, ticked as the plan cards tick theirs. */
+function Ticked({ children }: { children: string }) {
   return (
-    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
-      <path d="M3 8.5l3.25 3L13 4.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
+    <span className={`inline-flex items-center gap-2 ${MUTED_TEXT_CLASS}`}>
+      <CheckIcon size={16} weight="bold" className={ACCENT_TEXT_CLASS} aria-hidden="true" />
+      {children}
+    </span>
   );
 }
 
@@ -36,6 +77,9 @@ export interface HostedPageProps {
   enterCode: boolean;
   comingSoon: boolean;
   fresh: boolean | null;
+  /** The docs pages' theme control. Off in story frames, whose theme the
+   * control (which paints the top-level document) cannot reach. */
+  themeControl?: boolean;
   act: (label: string, action: () => Promise<unknown>) => Promise<void>;
   refresh: () => Promise<unknown>;
   approve: (code: string, confirmDigits: string) => Promise<void>;
@@ -57,7 +101,7 @@ export interface HostedPageProps {
 export function HostedPage({
   session, enabled, accounts, hostedVoice, turnOffDialog, computers, passkeys,
   enrolling, loading, busy, error, notice, email, code, enterCode,
-  comingSoon, fresh, act, refresh, approve, signOut, clearEnrollment, turnOffVoice,
+  comingSoon, fresh, themeControl = false, act, refresh, approve, signOut, clearEnrollment, turnOffVoice,
   removeOne, removeKey, submit, setEmail, setCode, setEnterCode, changeEmail,
   sendCode, noteContinued, social,
 }: HostedPageProps) {
@@ -69,22 +113,15 @@ export function HostedPage({
   const voiceShown = !!hostedVoice && (hostedVoice.entitled || hostedVoice.on);
 
   return (
-    <div className="shell">
-      <header>
-        <div className="brand">
-          <a href="https://dormouse.sh" rel="noreferrer">Dormouse</a>
-          <a href="/">Hosted</a>
-        </div>
-        {/* The site header's own links (NAV_LINKS in website/src/lib/site-nav.ts). */}
-        <nav aria-label="Dormouse site">
-          <a href="https://dormouse.sh/playground" rel="noreferrer">Playground</a>
-          <a href="https://dormouse.sh/#download" rel="noreferrer" className="wide-only">Download</a>
-          <a href="https://dormouse.sh/docs" rel="noreferrer">Docs</a>
-          <a href="https://github.com/diffplug/dormouse" rel="noreferrer">GitHub</a>
-        </nav>
-      </header>
-      <main>
-        <h1>
+    <div className="flex min-h-svh flex-col pt-16 md:pt-20" data-hosted-shell>
+      <SiteHeader
+        links={SITE_LINKS}
+        brandHref="https://dormouse.sh"
+        title="Hosted"
+        style={DOCS_HEADER_STYLE}
+      />
+      <main className="mx-auto w-full max-w-[33rem] flex-1 px-6 pt-12 pb-16">
+        <h1 className={`mb-3 text-balance leading-tight ${PAGE_TITLE_CLASS}`}>
           {comingSoon
             ? "Coming soon"
             : enrolling
@@ -95,7 +132,7 @@ export function HostedPage({
               ? "Your account"
               : "Sign in to Dormouse Hosted"}
         </h1>
-        <p className="intro">
+        <p className={`mb-10 ${PAGE_INTRO_CLASS}`}>
           {comingSoon
             ? "Check out the devlog at nedshed.dev."
             : enrolling
@@ -113,17 +150,17 @@ export function HostedPage({
         {loading ? (
           <p role="status">Checking your account…</p>
         ) : comingSoon ? (
-          <a className="primary button-link" href={SUBSCRIBE_URL}>
+          <a className={PRIMARY_CLASS} href={SUBSCRIBE_URL}>
             Subscribe at nedshed.dev
           </a>
         ) : (
           <>
             {error && (
-              <div className="error" role="alert">
+              <div className={`mb-6 [overflow-wrap:anywhere] ${STATUS_BAD_TEXT_CLASS}`} role="alert">
                 <p>{error.message}</p>
                 <button
                   type="button"
-                  className="text-button"
+                  className={TEXT_BUTTON_CLASS}
                   disabled={!!busy}
                   onClick={() => void act("retry", refresh)}
                 >
@@ -134,13 +171,15 @@ export function HostedPage({
             {notice && (
               <p
                 role={notice.error ? "alert" : "status"}
-                className={notice.error ? "notice failed" : "notice"}
+                className={notice.error
+                  ? `${CARD_BASE_CLASS} mb-2 border-[var(--docs-status-bad)]/50 ${STATUS_BAD_TEXT_CLASS}`
+                  : `${CARD_CLASS} mb-2`}
               >
                 {notice.text}
               </p>
             )}
             {enrolling && (session || !enrolling.code) ? (
-              <section aria-label="Computer to approve" className="enroll">
+              <section aria-label="Computer to approve">
                 {enrolling.code ? (
                   <>
                     {fresh ? (
@@ -150,13 +189,13 @@ export function HostedPage({
                       />
                     ) : (
                       <>
-                        <p className="help">
+                        <p className={HELP_CLASS}>
                           Approving a computer needs a login from the last{" "}
                           {RECENT_LOGIN_WINDOW}. Sign in again; this code stays
                           on this page.
                         </p>
                         <button
-                          className="primary"
+                          className={PRIMARY_CLASS}
                           disabled={!!busy}
                           onClick={() => void signOut()}
                         >
@@ -166,14 +205,14 @@ export function HostedPage({
                     )}
                   </>
                 ) : (
-                  <p className="help">
+                  <p className={HELP_CLASS}>
                     This link has no valid code. Start again from Dormouse on
                     your computer.
                   </p>
                 )}
                 <button
                   type="button"
-                  className="text-button"
+                  className={`mt-2 flex ${TEXT_BUTTON_CLASS}`}
                   disabled={!!busy}
                   onClick={clearEnrollment}
                 >
@@ -186,28 +225,28 @@ export function HostedPage({
               </section>
             ) : session ? (
               <>
-                <dl className="identity">
-                  <dt>Email</dt>
-                  <dd>{session.user.email ?? "No email shared"}</dd>
-                  <dt>Account ID</dt>
-                  <dd><code className="token">{session.user.id}</code></dd>
+                <dl>
+                  <dt className={`font-display text-sm ${MUTED_TEXT_CLASS}`}>Email</dt>
+                  <dd className="[overflow-wrap:anywhere]">{session.user.email ?? "No email shared"}</dd>
+                  <dt className={`mt-4 font-display text-sm ${MUTED_TEXT_CLASS}`}>Account ID</dt>
+                  <dd className="[overflow-wrap:anywhere]"><code className={CODE_CLASS}>{session.user.id}</code></dd>
                 </dl>
                 {!session.user.email && (
-                  <p className="help">
+                  <p className={`mt-4 ${HELP_CLASS}`}>
                     Use a connected provider to sign in. This account has no
                     email recovery method.
                   </p>
                 )}
-                <section aria-labelledby="methods">
-                  <h2 id="methods">Sign-in methods</h2>
-                  <p className="help">
+                <section aria-labelledby="methods" className={SECTION_CLASS}>
+                  <h2 id="methods" className={HEADING_CLASS}>Sign-in methods</h2>
+                  <p className={HELP_CLASS}>
                     Connecting a provider lets you use it to sign in to this
                     account, even with a different email address.
                   </p>
                   {session.user.email && (
-                    <div className="method">
+                    <div className={ROW_CLASS}>
                       <span>Email code</span>
-                      <span className="status"><Check />Available</span>
+                      <Ticked>Available</Ticked>
                     </div>
                   )}
                   {enabled.map((provider) => {
@@ -215,12 +254,13 @@ export function HostedPage({
                       (account) => account.providerId === provider,
                     );
                     return (
-                      <div className="method" key={provider}>
+                      <div className={ROW_CLASS} key={provider}>
                         <span>{providerNames[provider]}</span>
                         {linked ? (
-                          <span className="status"><Check />Connected</span>
+                          <Ticked>Connected</Ticked>
                         ) : (
                           <button
+                            className={BUTTON_CLASS}
                             disabled={!!busy || !fresh}
                             onClick={() =>
                               void act(provider, () => social(provider, true))
@@ -241,7 +281,7 @@ export function HostedPage({
                           (account) => account.providerId === provider,
                         ),
                     ) && (
-                      <p className="help">
+                      <p className={`mt-4 ${HELP_CLASS}`}>
                         To connect another provider, sign out and sign in again.
                         Connections require a login from the last{" "}
                         {RECENT_LOGIN_WINDOW}.
@@ -249,17 +289,18 @@ export function HostedPage({
                     )}
                 </section>
                 {voiceShown && (
-                  <section aria-labelledby="voice">
-                    <h2 id="voice">Natural Voice</h2>
+                  <section aria-labelledby="voice" className={SECTION_CLASS}>
+                    <h2 id="voice" className={HEADING_CLASS}>Natural Voice</h2>
                     {hostedVoice.on ? (
                       <>
-                        <p className="help">
+                        <p className={HELP_CLASS}>
                           {hostedVoice.entitled
                             ? "Alarms use Natural Voice on the computers where you turned it on."
                             : "Natural Voice is on for your computers, but your account has no Hosted plan, so alarms use the system voice."}{" "}
                           Natural Voice is in admin-only testing.
                         </p>
                         <button
+                          className={BUTTON_CLASS}
                           disabled={!!busy}
                           onClick={() => turnOffDialog.current?.showModal()}
                         >
@@ -267,7 +308,7 @@ export function HostedPage({
                         </button>
                       </>
                     ) : (
-                      <p className="help">
+                      <p className={HELP_CLASS}>
                         To turn on Natural Voice, open Dormouse on your computer
                         and go to Settings → Notifications. Natural Voice is in
                         admin-only testing.
@@ -276,57 +317,62 @@ export function HostedPage({
                     <dialog
                       ref={turnOffDialog}
                       aria-labelledby="voice-off-title"
+                      className="m-auto w-[calc(100%-2rem)] max-w-lg bg-transparent p-0 backdrop:bg-black/70"
                       onCancel={(event) => busy && event.preventDefault()}
                     >
-                      <h2 id="voice-off-title">Turn off Natural Voice?</h2>
-                      <p>
-                        Every computer where you turned it on goes back to the
-                        system voice. To use Natural Voice again, turn it on in
-                        Dormouse on each computer.
-                      </p>
-                      <div className="dialog-actions">
-                        <button
-                          disabled={!!busy}
-                          onClick={() => turnOffDialog.current?.close()}
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          className="confirm"
-                          disabled={!!busy}
-                          onClick={() => void turnOffVoice()}
-                        >
-                          {busy === "voice-off" ? "Turning off…" : "Turn off"}
-                        </button>
+                      <div className={PANEL_CLASS}>
+                        <h2 id="voice-off-title" className="mb-2 font-display text-2xl">Turn off Natural Voice?</h2>
+                        <p className={MUTED_TEXT_CLASS}>
+                          Every computer where you turned it on goes back to the
+                          system voice. To use Natural Voice again, turn it on in
+                          Dormouse on each computer.
+                        </p>
+                        <div className="mt-6 flex justify-end gap-2">
+                          <button
+                            className={BUTTON_CLASS}
+                            disabled={!!busy}
+                            onClick={() => turnOffDialog.current?.close()}
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            className={siteButton({ size: "fit" })}
+                            disabled={!!busy}
+                            onClick={() => void turnOffVoice()}
+                          >
+                            {busy === "voice-off" ? "Turning off…" : "Turn off"}
+                          </button>
+                        </div>
                       </div>
                     </dialog>
                   </section>
                 )}
                 {computers && (
-                  <section aria-labelledby="computers">
-                    <h2 id="computers">Computers</h2>
-                    <p className="help">
+                  <section aria-labelledby="computers" className={SECTION_CLASS}>
+                    <h2 id="computers" className={HEADING_CLASS}>Computers</h2>
+                    <p className={HELP_CLASS}>
                       A phone reaches an enrolled computer through the Hosted Relay
                       once paired by two digits typed at that computer. Remote control
                       is in admin-only testing.
                     </p>
                     {computers.length === 0 && (
-                      <p className="help">
+                      <p className={HELP_CLASS}>
                         No computers yet. Enroll one from Dormouse on that
                         computer.
                       </p>
                     )}
                     {computers.map((computer) => (
-                      <div className="method" key={computer.burrowId}>
+                      <div className={ROW_CLASS} key={computer.burrowId}>
                         <span>
                           Computer
-                          <span className="door">{computer.burrowId.slice(0, 8)}</span>
-                          <span className="detail">
+                          <span className={DOOR_CLASS}>{computer.burrowId.slice(0, 8)}</span>
+                          <span className={DETAIL_CLASS}>
                             Enrolled{" "}
                             {new Date(computer.enrolledAt).toLocaleDateString()}
                           </span>
                         </span>
                         <button
+                          className={BUTTON_CLASS}
                           disabled={!!busy}
                           onClick={() => void removeOne(computer.burrowId)}
                         >
@@ -339,21 +385,21 @@ export function HostedPage({
                   </section>
                 )}
                 {passkeys && (
-                  <section aria-labelledby="passkeys">
-                    <h2 id="passkeys">Passkeys</h2>
-                    <p className="help">
+                  <section aria-labelledby="passkeys" className={SECTION_CLASS}>
+                    <h2 id="passkeys" className={HEADING_CLASS}>Passkeys</h2>
+                    <p className={HELP_CLASS}>
                       Each passkey signs a phone in to every computer above. A
                       computer&rsquo;s setup code adds one. Remove any you do not
                       recognize, and that phone can no longer sign in.
                     </p>
                     {passkeys.length === 0 && (
-                      <p className="help">No passkeys yet.</p>
+                      <p className={HELP_CLASS}>No passkeys yet.</p>
                     )}
                     {passkeys.map((passkey) => (
-                      <div className="method" key={passkey.credentialId}>
+                      <div className={ROW_CLASS} key={passkey.credentialId}>
                         <span>
                           {passkey.label || "Unnamed passkey"}
-                          <span className="detail">
+                          <span className={DETAIL_CLASS}>
                             Added{" "}
                             {new Date(passkey.createdAt).toLocaleDateString()}
                             {passkey.burrowId
@@ -362,6 +408,7 @@ export function HostedPage({
                           </span>
                         </span>
                         <button
+                          className={BUTTON_CLASS}
                           disabled={!!busy}
                           onClick={() => void removeKey(passkey.credentialId)}
                         >
@@ -373,19 +420,19 @@ export function HostedPage({
                     ))}
                   </section>
                 )}
-                <section>
-                  <h2>Signed in on this browser</h2>
-                  <p className="help">
+                <section className={SECTION_CLASS}>
+                  <h2 className={HEADING_CLASS}>Signed in on this browser</h2>
+                  <p className={HELP_CLASS}>
                     Signing in elsewhere keeps this browser signed in. This
                     login expires{" "}
                     {new Date(session.session.expiresAt).toLocaleString()}.
                   </p>
-                  <button disabled={!!busy} onClick={() => void signOut()}>
+                  <button className={BUTTON_CLASS} disabled={!!busy} onClick={() => void signOut()}>
                     {busy === "logout" ? "Signing out…" : "Sign out"}
                   </button>
                 </section>
                 {!(voiceShown && computers) && (
-                  <p className="footnote">
+                  <p className={FOOTNOTE_CLASS}>
                     {voiceShown
                       ? "Remote control is"
                       : computers
@@ -398,7 +445,7 @@ export function HostedPage({
             ) : (
               <>
                 <form onSubmit={submit}>
-                  <label htmlFor="email">Email address</label>
+                  <label htmlFor="email" className={LABEL_CLASS}>Email address</label>
                   <input
                     id="email"
                     type="email"
@@ -410,10 +457,11 @@ export function HostedPage({
                     disabled={!!busy}
                     onChange={(event) => setEmail(event.target.value)}
                     placeholder="you@example.com"
+                    className={INPUT_CLASS}
                   />
                   {enterCode && (
                     <>
-                      <label htmlFor="code">8-digit sign-in code</label>
+                      <label htmlFor="code" className={LABEL_CLASS}>8-digit sign-in code</label>
                       <input
                         ref={codeInput}
                         id="code"
@@ -428,10 +476,11 @@ export function HostedPage({
                         onChange={(event) =>
                           setCode(event.target.value.replace(/\D/g, ""))
                         }
+                        className={INPUT_CLASS}
                       />
                     </>
                   )}
-                  <button className="primary" disabled={!!busy} type="submit">
+                  <button className={PRIMARY_CLASS} disabled={!!busy} type="submit">
                     {busy === "email"
                       ? "Sending code…"
                       : busy === "verify"
@@ -440,12 +489,12 @@ export function HostedPage({
                           ? "Sign in"
                           : "Email me a code"}
                   </button>
-                  <div className="form-options">
+                  <div className="mt-1 flex justify-between gap-4">
                     {enterCode ? (
                       <>
                         <button
                           type="button"
-                          className="text-button"
+                          className={TEXT_BUTTON_CLASS}
                           disabled={!!busy}
                           onClick={changeEmail}
                         >
@@ -453,7 +502,7 @@ export function HostedPage({
                         </button>
                         <button
                           type="button"
-                          className="text-button"
+                          className={TEXT_BUTTON_CLASS}
                           disabled={!!busy}
                           onClick={() => void sendCode()}
                         >
@@ -463,7 +512,7 @@ export function HostedPage({
                     ) : (
                       <button
                         type="button"
-                        className="text-button"
+                        className={TEXT_BUTTON_CLASS}
                         disabled={!!busy}
                         onClick={(event) => {
                           const field = event.currentTarget.form?.elements.namedItem("email");
@@ -479,12 +528,13 @@ export function HostedPage({
                 {enabled.length > 0 && (
                   <section
                     aria-label="Other sign-in methods"
-                    className="providers"
+                    className="mt-8 mb-6 grid grid-cols-2 gap-2"
                   >
-                    <p className="separator">Or continue with</p>
+                    <p className={`col-span-full mb-1 text-sm ${MUTED_TEXT_CLASS}`}>Or continue with</p>
                     {enabled.map((provider) => (
                       <button
                         key={provider}
+                        className={BUTTON_CLASS}
                         disabled={!!busy}
                         onClick={() =>
                           void act(provider, () => {
@@ -500,12 +550,13 @@ export function HostedPage({
                     ))}
                   </section>
                 )}
-                <p className="help">
+                <p className={HELP_CLASS}>
                   By continuing, you agree to the{" "}
                   <a
                     href="https://dormouse.sh/terms/"
                     target="_blank"
                     rel="noreferrer"
+                    className={LINK_CLASS}
                   >
                     Terms
                   </a>{" "}
@@ -514,24 +565,25 @@ export function HostedPage({
                     href="https://dormouse.sh/privacy/"
                     target="_blank"
                     rel="noreferrer"
+                    className={LINK_CLASS}
                   >
                     Privacy policy
                   </a>
                   .
                 </p>
                 {enrolling && enabled.length > 0 ? (
-                  <p className="help">
+                  <p className={HELP_CLASS}>
                     Signing in with a provider leaves this page. Afterwards,
                     open the link from Dormouse again.
                   </p>
                 ) : (
-                  <p className="help">
+                  <p className={HELP_CLASS}>
                     Already have an account? Use your existing sign-in method,
                     then connect other providers from your account.
                   </p>
                 )}
                 {!enrolling && (
-                  <p className="footnote">
+                  <p className={FOOTNOTE_CLASS}>
                     Natural Voice and remote control are not available yet.
                   </p>
                 )}
@@ -540,13 +592,18 @@ export function HostedPage({
           </>
         )}
       </main>
-      <footer>
-        <span className="tagline">Optional services. Your terminals run on your own computer.</span>
-        <a href="https://dormouse.sh/security" rel="noreferrer">Dormouse security</a>
-        <a href="https://dormouse.sh/privacy/" rel="noreferrer">Privacy</a>
-        <a href="https://dormouse.sh/terms/" rel="noreferrer">Terms</a>
-        <ThemeSelect />
+      <footer className={`flex flex-wrap items-center gap-x-7 border-t border-[var(--color-text)]/15 px-4 pt-4 pb-6 text-sm md:px-8 ${MUTED_TEXT_CLASS}`}>
+        <span className="mr-auto py-2">Optional services. Your terminals run on your own computer.</span>
+        <a href="https://dormouse.sh/security" rel="noreferrer" className={`inline-flex min-h-11 items-center ${MUTED_ACCENT_LINK_CLASS}`}>Dormouse security</a>
+        <a href="https://dormouse.sh/privacy/" rel="noreferrer" className={`inline-flex min-h-11 items-center ${MUTED_ACCENT_LINK_CLASS}`}>Privacy</a>
+        <a href="https://dormouse.sh/terms/" rel="noreferrer" className={`inline-flex min-h-11 items-center ${MUTED_ACCENT_LINK_CLASS}`}>Terms</a>
+        {themeControl ? (
+          <div className="lg:hidden">
+            <DocsThemeControl variant="inline" offerStore={false} />
+          </div>
+        ) : null}
       </footer>
+      {themeControl ? <DocsThemeControl offerStore={false} /> : null}
     </div>
   );
 }
