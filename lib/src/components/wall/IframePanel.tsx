@@ -300,10 +300,17 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
     back() { goToHistoryIndex(historyIndexRef.current - 1); },
     forward() { goToHistoryIndex(historyIndexRef.current + 1); },
     reload() {
-      const reload = () => setReloadNonce((n) => n + 1);
+      const reload = () => {
+        const current = historyRef.current.entries[historyIndexRef.current];
+        if (current) paneWrite.updateParams(id, { url: current });
+        // Unmount even a raw frame: assigning its unchanged src does not reload
+        // it. The resolving effect then mounts the current page on the same lease.
+        setResolution({ kind: 'resolving' });
+        setReloadNonce((n) => n + 1);
+      };
       if (isTool) withToolEditorConsent(id, reload); else reload();
     },
-  }), [id, isTool, commitUrl, goToHistoryIndex]);
+  }), [id, isTool, paneWrite, commitUrl, goToHistoryIndex]);
   const registrationRef = useRef<ScreenRegistration | null>(null);
   // Register the screen controller unconditionally so the browser chrome (URL +
   // far-left chip) shows for every iframe surface, on every host — `dor iframe`

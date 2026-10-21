@@ -85,7 +85,7 @@ The desktop shells share one filesystem, a snapshot of the tracked files of `dor
 - **Must abandon a playground `dor` run on interruption or disposal**, including a pending CLI load, picker, and control requests; never send later requests or output.
 - **A `__view-*` entry must report its port before announcing it, and withdraw it on exit.**
 - **Must serve the real viewer pages, CSPs, and contracts on the Node viewers' routes** (`docs/specs/dor-tools-builtin.md`); a PNG or JPEG the image editor can edit opens in it, and view-only images and other non-text formats are refused.
-- **`createIframeProxyUrl` must map only a `localhost` URL under `/playground-fs/` to the page's own origin**, refusing others (`scheme`). The viewer pages carry the shim from `instrumentHtml`, so theme and the save channel connect as behind a proxy, and are same-origin with the Wall: first-party pages over the window's own files.
+- **`createIframeProxyUrl` must map only a `localhost` URL under `/playground-fs/` to this origin, preserving path, query, and fragment**, refusing others (`scheme`). The viewer pages carry the shim from `instrumentHtml`, so theme and the save channel connect as behind a proxy, and are same-origin with the Wall: first-party pages over the window's own files.
 - **The `/playground-fs/` service worker must stay stateless**, relaying each viewer request as below, bodies as Blobs (rationale). It registers when the first viewer starts; without one, `__view-*` exits `1`.
 
 ```mermaid

@@ -127,8 +127,8 @@ describe("playgroundIframeUrl", () => {
   it("frames an announced viewer at this origin and refuses every other page", async () => {
     vi.stubGlobal("location", { origin: "https://dormouse.sh" });
     try {
-      expect(await playgroundIframeUrl("http://localhost:40000/playground-fs/t/view?x=1"))
-        .toEqual({ ok: true, url: "https://dormouse.sh/playground-fs/t/view?x=1" });
+      expect(await playgroundIframeUrl("http://localhost:40000/playground-fs/t/view?x=1#section"))
+        .toEqual({ ok: true, url: "https://dormouse.sh/playground-fs/t/view?x=1#section" });
       expect(await playgroundIframeUrl("http://localhost:5173/")).toMatchObject({ ok: false, reason: "scheme" });
       expect(await playgroundIframeUrl("http://example.com/playground-fs/t/view")).toMatchObject({ ok: false });
     } finally {
