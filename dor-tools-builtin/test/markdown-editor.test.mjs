@@ -86,6 +86,18 @@ test('serves images at or under the document folder, sandboxed, and nothing else
   assert.equal((await send(notes, route(notes, 'images/img/a%20b.png'))).status, 404);
 });
 
+test('never follows an image symlink, or a folder link, to a share', { skip: process.platform === 'win32' }, async () => {
+  // POSIX reads `//<docs>/img` as `<docs>/img`, inside the grant, so only the
+  // refusal keeps these from being served or renamed.
+  await symlink(`/${join(docs, 'img', 'a b.png')}`, join(docs, 'share.png'));
+  await symlink(`/${join(docs, 'img')}`, join(docs, 'share-img'));
+  const viewer = await start();
+  assert.equal((await send(viewer, route(viewer, 'images/share.png'))).status, 404);
+  assert.equal((await send(viewer, route(viewer, 'images/share-img/a%20b.png'))).status, 404);
+  assert.equal((await rename(viewer, 'share-img/a b.png', 'share-img/moved.png')).status, 404);
+  assert.deepEqual(await readdir(join(docs, 'img')), ['a b.png']);
+});
+
 test('an image path resolves under its folder, and on Windows never through a drive or stream colon', () => {
   assert.equal(resolveInside('/docs', ['img', 'a:b.png'], posix), '/docs/img/a:b.png');
   assert.equal(resolveInside('C:\\docs', ['img', 'a.png'], win32), 'C:\\docs\\img\\a.png');

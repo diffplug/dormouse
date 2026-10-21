@@ -1,7 +1,8 @@
-import { realpath, stat } from 'node:fs/promises';
+import type { Stats } from 'node:fs';
 import { hostname } from 'node:os';
 import { isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { localRealpath, NonLocalPathError } from 'dor-lib-common/local-path';
 import { hasShellInputControls } from 'dor/commands/shell-quote';
 import { resolveDedupeKey, substituteToolTokens, ToolFileError, usesTarget, type ToolEntry } from './tool-registry';
 
@@ -25,15 +26,17 @@ export async function resolveLocalToolTarget(input: string, cwd: string): Promis
   // filesystem error below would echo.
   if (hasShellInputControls(local)) throw new ToolFileError('local paths cannot contain terminal control characters');
   let path: string;
+  let stats: Stats;
   try {
-    path = await realpath(resolve(cwd, local));
+    // Never `realpath`: a link to a share would reach it before any check.
+    ({ path, stats } = await localRealpath(resolve(cwd, local)));
   } catch (error) {
+    if (error instanceof NonLocalPathError) throw new ToolFileError(`not a file on this machine: ${input}`);
     const code = (error as NodeJS.ErrnoException).code;
     if (code === 'ENOENT' || code === 'ENOTDIR') throw new ToolFileError(`no such file or folder: ${input}`);
     throw error;
   }
   if (hasShellInputControls(path)) throw new ToolFileError('local paths cannot contain terminal control characters');
-  const stats = await stat(path);
   if (!stats.isFile() && !stats.isDirectory()) throw new ToolFileError(`not a regular file or folder: ${input}`);
   return { path, directory: stats.isDirectory() };
 }
