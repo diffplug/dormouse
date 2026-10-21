@@ -25,7 +25,7 @@ import {
 } from './model';
 import { type LayoutOpts, allocateChildSpans, autoEdge, minSpan, nodeRectAtPath } from './layout';
 
-import { isRecord } from '../is-record';
+import { isRecord, isStringArray } from '../is-record';
 import { type DropTarget, materializeTarget, targetByLeafSet } from './drop-target';
 export type { DropTarget } from './drop-target';
 
@@ -156,7 +156,7 @@ function isRestoreToken(token: unknown): token is RestoreToken {
     && (token.fingerprint === null || typeof token.fingerprint === 'string')
     && typeof token.index === 'number' && Number.isInteger(token.index) && token.index >= 0
     && ['left', 'right', 'top', 'bottom'].includes(token.edge as string)
-    && (token.siblingLeafIds === undefined || (Array.isArray(token.siblingLeafIds) && token.siblingLeafIds.every(id => typeof id === 'string')))
+    && (token.siblingLeafIds === undefined || isStringArray(token.siblingLeafIds))
     && (token.siblingFingerprint === undefined || typeof token.siblingFingerprint === 'string');
 }
 
