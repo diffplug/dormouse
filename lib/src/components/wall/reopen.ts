@@ -26,25 +26,28 @@ export const NOTHING_TO_REOPEN = 'Nothing to reopen';
  */
 export async function reopenClosed({ gesture }: { gesture: boolean }): Promise<ReopenResponse | null> {
   const recordAt = newestReopenClosedAt() ?? 0;
-  const pending = getPendingKills()[0];
-  // A host that cannot answer leaves this Window's own records to answer.
-  const reopenedWindow = await getPlatform().reopenClosedWindow?.(Math.max(recordAt, pending?.startedAt ?? 0)).catch((error: unknown) => {
-    console.warn('[reopen] the host could not reopen a closed window', error);
-    return false;
-  });
-  if (reopenedWindow) return { status: 'reopened', kind: 'window' };
-  // A pending kill newer than every record comes back as itself, not rebuilt;
-  // one that cannot come back now gives way to the next.
+  // Compare the host's windows with each candidate, including after a pending
+  // helper refuses: skipping it must also lower the host's cutoff.
   for (const kill of getPendingKills()) {
     if (kill.startedAt < recordAt) break;
+    if (await reopenWindowAfter(kill.startedAt)) return { status: 'reopened', kind: 'window' };
     if (restorePendingKill(pendingKillKey(kill.kind, kill.id), gesture)) return restoredResponse(kill);
   }
+  if (await reopenWindowAfter(recordAt)) return { status: 'reopened', kind: 'window' };
   const record = popReopenRecord();
   if (!record) {
     if (gesture) getWallHandle(getActiveWorkspaceId())?.showNotice(NOTHING_TO_REOPEN);
     return null;
   }
   return record.kind === 'workspace' ? reopenWorkspace(record, gesture) : reopenSurface(record, gesture);
+}
+
+/** A host that cannot answer leaves this Window's own candidates to answer. */
+async function reopenWindowAfter(closedAt: number): Promise<boolean> {
+  return await getPlatform().reopenClosedWindow?.(closedAt).catch((error: unknown) => {
+    console.warn('[reopen] the host could not reopen a closed window', error);
+    return false;
+  }) ?? false;
 }
 
 function reopenSurface(record: SurfaceReopenRecord, gesture: boolean): ReopenResponse | null {
