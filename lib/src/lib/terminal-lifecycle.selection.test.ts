@@ -36,7 +36,7 @@ import { copySelection } from './copy-selection';
 import { flipCopyBreak, openCopyEditor, setCopyFormat, setCopyScope } from './copy-editor';
 import type { EditorFormat } from './copy-text';
 import { finalizedSelection, WRAPPING } from './copy-text-fixtures';
-import { beginDrag, flashCopy, getMouseSelectionState, setSelection, type Selection } from './mouse-selection';
+import { beginDrag, COPY_FLASH_MS, flashCopy, getMouseSelectionState, setSelection, type Selection } from './mouse-selection';
 import { getOrCreateTerminal, writeUserInput } from './terminal-registry';
 
 const write = (terminal: Terminal, data: string) => new Promise<void>((resolve) => terminal.write(data, resolve));
@@ -146,7 +146,7 @@ describe('a terminal resize', () => {
       complete(copied);
       await pending;
       expect(getMouseSelectionState(id)).toMatchObject({ selection: { endRow: 2, endCol: 1 }, copyOutcome: copied ? 'copied' : 'failed' });
-      vi.advanceTimersByTime(1500);
+      vi.advanceTimersByTime(COPY_FLASH_MS);
       expect(getMouseSelectionState(id).selection === null).toBe(copied);
     } finally {
       vi.useRealTimers();

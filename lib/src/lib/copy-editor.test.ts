@@ -220,13 +220,19 @@ describe('copySelection', () => {
   });
 
   it.each([true, false])('neither flashes nor fails a newer selection when an earlier copy finishes (copied: %s)', async (copied) => {
-    let complete!: (copied: boolean) => void;
-    vi.mocked(writeTextToClipboard).mockImplementation(() => new Promise((resolve) => { complete = resolve; }));
-    select({});
-    const pending = copySelection(ID);
-    beginDrag(ID, { row: 9, col: 1, altKey: false, startedInScrollback: false });
-    complete(copied);
-    await pending;
-    expect(getMouseSelectionState(ID)).toMatchObject({ copyOutcome: null, selection: { startRow: 9 } });
+    const newer = [
+      () => beginDrag(ID, { row: 9, col: 1, altKey: false, startedInScrollback: false }),
+      () => select({ startRow: 9, endRow: 9 }),
+    ];
+    for (const replace of newer) {
+      let complete!: (copied: boolean) => void;
+      vi.mocked(writeTextToClipboard).mockImplementation(() => new Promise((resolve) => { complete = resolve; }));
+      select({});
+      const pending = copySelection(ID);
+      replace();
+      complete(copied);
+      await pending;
+      expect(getMouseSelectionState(ID)).toMatchObject({ copyOutcome: null, selection: { startRow: 9 } });
+    }
   });
 });

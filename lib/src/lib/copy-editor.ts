@@ -37,9 +37,9 @@ export function openCopyEditor(id: string, terminal: Terminal | undefined = regi
   if (terminal && sel && !sel.dragging) setCopyEditor(id, editorFor(terminalCopyBuffer(terminal), spanOfSelection(sel), 'auto'));
 }
 
-/** Move the selection to `span`, where a resize's reflow put its cells, and
- *  rebuild its editor from the terminal (spec §3.4). Writes nothing when
- *  neither the span nor the editor's width changed. */
+/** Move the selection to `span`, where a scroll, trim, or resize's reflow put
+ *  its cells, and rebuild its editor from the terminal (spec §3.4). Writes
+ *  nothing when neither the span nor the editor's width changed. */
 export function followCopySelection(id: string, terminal: Terminal, span: Span): void {
   const { selection, copyEditor: editor } = getMouseSelectionState(id);
   if (!selection) return;
@@ -47,13 +47,13 @@ export function followCopySelection(id: string, terminal: Terminal, span: Span):
   if (spanEquals(span, spanOfSelection(selection)) && (!editor || sameWidth)) return;
   const moved = selectionOfSpan(span, selection);
   if (!editor) {
-    setSelection(id, moved, null, { preserveProgramCopy: true });
+    setSelection(id, moved, null, 'follow');
     return;
   }
   const next = editorFor(terminalCopyBuffer(terminal), span, editor.format);
   const label = editor.scopes[editor.scope].label;
   const scope = next.scopes.findIndex((s) => s.label === label);
-  setSelection(id, moved, { ...next, scope: Math.max(0, scope), overrides: scope >= 0 && sameWidth ? editor.overrides : {} }, { preserveProgramCopy: true });
+  setSelection(id, moved, { ...next, scope: Math.max(0, scope), overrides: scope >= 0 && sameWidth ? editor.overrides : {} }, 'follow');
 }
 
 export type FormatRenderings = Partial<Record<EditorFormat, Rendering>>;
@@ -163,5 +163,5 @@ export function nudgeCopyEdge(id: string, edge: 'start' | 'end', dir: 1 | -1): v
     ? { ...span, start: nudge(buf, span.start, dir, 'start') }
     : { ...span, end: nudge(buf, span.end, dir, 'end') };
   if (spanEquals(moved, span) || comparePos(moved.start, moved.end) > 0) return;
-  setSelection(id, selectionOfSpan(moved, sel), editorFor(buf, moved, copyEditor.format));
+  setSelection(id, selectionOfSpan(moved, sel), editorFor(buf, moved, copyEditor.format), 'edit');
 }

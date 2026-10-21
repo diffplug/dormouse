@@ -38,22 +38,28 @@ describe('watchSelection', () => {
     watch.dispose();
   });
 
-  it.each(['linewise', 'block', 'program'] as const)('carries a %s selection when older scrollback is trimmed', async kind => {
+  it.each([
+    ['linewise', {}],
+    ['block', { shape: 'block' }],
+    ['program', { owner: 'program' }],
+  ] as const)('carries a %s selection when older scrollback is trimmed', async (kind, over) => {
     const id = 'trim-' + kind;
     const terminal = new Terminal({ cols: 20, rows: 3, scrollback: 3, allowProposedApi: true });
     live.push(terminal);
     await write(terminal, 'old0\r\nold1\r\nkeep A\r\nkeep B\r\ntail0\r\ntail1');
     const watch = watchSelection(id, terminal);
-    setSelection(id, finalizedSelection({ startRow: 2, endRow: 3, endCol: 5,
-      shape: kind === 'block' ? 'block' : 'linewise', ...(kind === 'program' ? { owner: 'program' as const } : {}) }));
+    setSelection(id, finalizedSelection({ startRow: 2, endRow: 3, endCol: 5, ...over }));
     openCopyEditor(id, terminal);
     if (kind === 'program') {
       offerProgramCopy(id, 'source text');
       setCopyFormat(id, 'program');
     }
+    const markers = terminal.markers.map((m) => m.id);
     await write(terminal, '\r\ntail2');
     watch.onRender();
     expect(getMouseSelectionState(id).selection).toMatchObject({ startRow: 1, endRow: 2, endCol: 5 });
+    // Following the trim reuses the markers that moved with it.
+    expect(terminal.markers.map((m) => m.id)).toEqual(markers);
     expect(getMouseSelectionState(id).copyEditor).not.toBeNull();
     if (kind === 'program') {
       expect(getMouseSelectionState(id)).toMatchObject({ programCopy: 'source text', copyEditor: { format: 'program' } });

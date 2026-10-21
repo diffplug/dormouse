@@ -2,7 +2,7 @@ import type { IMarker, Terminal } from '@xterm/xterm';
 import { followCopySelection } from './copy-editor';
 import { spanOfSelection } from './copy-text';
 import { getMouseSelectionState, setSelection, subscribeToMouseSelection, type Selection } from './mouse-selection';
-import { anchorSelection, followReflow, type ReflowAnchor } from './selection-reflow';
+import { anchorSelection, followReflow, markRow, type ReflowAnchor } from './selection-reflow';
 import { extractSelectionText } from './selection-text';
 
 // A pane's selection held to the characters under it
@@ -25,30 +25,33 @@ export function watchSelection(id: string, terminal: Terminal): SelectionWatch {
   let anchor: ReflowAnchor | null = null;
   // A full normal buffer trims its oldest rows as output arrives. One marker
   // on the earlier edge distinguishes translation from replacement text.
-  let scrollAnchor: { marker: IMarker; row: number } | null = null;
+  let scrollMarker: IMarker | null = null;
+  /** While {@link onRender} follows a trim: the text matched and every marker
+   *  moved with it, so its write needs no fresh readings. */
+  let following = false;
   const unsubscribe = subscribeToMouseSelection(() => {
     const sel = getMouseSelectionState(id).selection;
     if (sel === selection) return;
     selection = sel;
+    if (following) return;
     baseline = sel && !sel.dragging ? extractSelectionText(terminal, sel) : null;
     anchor?.dispose();
     anchor = sel && anchorSelection(terminal, sel);
-    scrollAnchor?.marker.dispose();
-    scrollAnchor = null;
-    const buffer = terminal.buffer.active;
-    if (sel && !sel.dragging && buffer.type === 'normal') {
-      const row = Math.min(sel.startRow, sel.endRow);
-      scrollAnchor = { marker: terminal.registerMarker(row - (buffer.baseY + buffer.cursorY)), row };
-    }
+    scrollMarker?.dispose();
+    scrollMarker = sel && !sel.dragging && terminal.buffer.active.type === 'normal'
+      ? markRow(terminal, Math.min(sel.startRow, sel.endRow)) : null;
   });
   return {
     onRender() {
       if (!selection || baseline === null) return;
-      if (scrollAnchor?.marker.isDisposed) { setSelection(id, null); return; }
-      const shift = scrollAnchor ? scrollAnchor.marker.line - scrollAnchor.row : 0;
+      if (scrollMarker?.isDisposed) { setSelection(id, null); return; }
+      const shift = scrollMarker ? scrollMarker.line - Math.min(selection.startRow, selection.endRow) : 0;
       const moved = shift ? { ...selection, startRow: selection.startRow + shift, endRow: selection.endRow + shift } : selection;
       if (extractSelectionText(terminal, moved) !== baseline) setSelection(id, null);
-      else if (moved !== selection) followCopySelection(id, terminal, spanOfSelection(moved));
+      else if (moved !== selection) {
+        following = true;
+        try { followCopySelection(id, terminal, spanOfSelection(moved)); } finally { following = false; }
+      }
     },
     onResize() {
       const span = anchor && followReflow(terminal, anchor);
@@ -58,7 +61,7 @@ export function watchSelection(id: string, terminal: Terminal): SelectionWatch {
     dispose() {
       unsubscribe();
       anchor?.dispose();
-      scrollAnchor?.marker.dispose();
+      scrollMarker?.dispose();
     },
   };
 }
