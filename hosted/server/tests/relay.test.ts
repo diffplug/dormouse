@@ -1146,13 +1146,18 @@ test("begin refuses another origin", async ({ onTestFinished }) => {
 
 const FCM = "https://fcm.googleapis.com/fcm/send/";
 
-/** A live session for `userId`, as sign-in writes one. */
+/** A live session for `userId`, signed in by a passkey of its own, as sign-in writes one. */
 async function sessionFor(f: Awaited<ReturnType<typeof fixture>>, userId: string) {
   const token = randomSecret();
+  const credentialId = randomSecret();
   await f.sql(
-    `INSERT INTO dormouse_relay_sessions ("tokenHash", "userId", "expiresAt")
-    VALUES ($1, $2, now() + interval '1 hour')`,
-    [digest(token), userId],
+    `INSERT INTO dormouse_relay_passkeys ("credentialId", "userId", "publicKey", label) VALUES ($1, $2, 'x', '')`,
+    [credentialId, userId],
+  );
+  await f.sql(
+    `INSERT INTO dormouse_relay_sessions ("tokenHash", "userId", "expiresAt", "credentialId")
+    VALUES ($1, $2, now() + interval '1 hour', $3)`,
+    [digest(token), userId, credentialId],
   );
   return token;
 }

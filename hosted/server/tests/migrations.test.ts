@@ -1,6 +1,13 @@
 import { test, expect } from "vitest";
-import { createHash } from "node:crypto";
-import { readdirSync, readFileSync } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import { copyFileSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { betterAuthMigrations } from "@pgstencil/auth/better-auth-migrations";
+import { migrate, readMigrations } from "pgstencil/database";
+import { queryDatabase } from "pgstencil/postgres";
+import { createTestContext } from "pgstencil/testing";
 
 /**
  * Every Dormouse migration, by the SHA-256 of its LF-normalized text
@@ -24,6 +31,8 @@ const PINNED: Record<string, string> = {
     "b3f265e4c99b7d78c84aa58fe3e95b9a609c450ccc0a7f3701f871c8798d4801",
   "009_relay_passkey_removal.sql":
     "c6c220960187e33a1350dc85e93d24f99866a72a579ed9def6a3663643f3e928",
+  "010_relay_session_credential_required.sql":
+    "f385398d16126381b6a976d74e23e10b07370c1a1da3205e71697aa62a3399f5",
 };
 
 const directory = new URL("../dormouse-migrations/", import.meta.url);
@@ -36,4 +45,33 @@ test("no merged Dormouse migration changes, and every one is pinned", () => {
     const digest = createHash("sha256").update(text).digest("hex");
     expect(digest, `${name} was edited; append a new migration instead`).toBe(PINNED[name]);
   }
+});
+
+test("010 deletes the sessions that name no passkey, and every later one must name one", async ({
+  onTestFinished,
+}) => {
+  // The Dormouse migrations through 009, then 010 over the rows they allowed.
+  const before = mkdtempSync(join(tmpdir(), "dormouse-migrations-"));
+  onTestFinished(() => rmSync(before, { recursive: true, force: true }));
+  const source = fileURLToPath(directory);
+  for (const name of Object.keys(PINNED).filter((name) => name < "010")) copyFileSync(join(source, name), join(before, name));
+  const context = await createTestContext({ migrations: [betterAuthMigrations, before] });
+  onTestFinished(context.close);
+  const sql = (text: string, values?: unknown[]) => queryDatabase(context.database.url, text, values);
+  const userId = randomUUID();
+  await sql(`INSERT INTO "user" (id, name, email, "emailVerified") VALUES ($1, $1, $2, true)`, [userId, `${userId}@example.test`]);
+  await sql(`INSERT INTO dormouse_relay_passkeys ("credentialId", "userId", "publicKey", label) VALUES ('pk', $1, 'x', '')`, [userId]);
+  const session = (tokenHash: string, credentialId: string | null) =>
+    sql(
+      `INSERT INTO dormouse_relay_sessions ("tokenHash", "userId", "expiresAt", "credentialId")
+      VALUES ($1, $2, now() + interval '1 hour', $3)`,
+      [tokenHash, userId, credentialId],
+    );
+  await session("named", "pk");
+  await session("unnamed", null);
+
+  copyFileSync(join(source, "010_relay_session_credential_required.sql"), join(before, "010_relay_session_credential_required.sql"));
+  await migrate(context.database.url, await readMigrations([betterAuthMigrations, before]));
+  expect(await sql(`SELECT "tokenHash" FROM dormouse_relay_sessions`)).toEqual([{ tokenHash: "named" }]);
+  await expect(session("later", null)).rejects.toThrow(/credentialId/);
 });
