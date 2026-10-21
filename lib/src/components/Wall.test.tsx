@@ -2098,6 +2098,7 @@ describe('Wall on the Lath engine', () => {
   });
 
   it('gives passthrough focus to a pane when it gains zoom, and unzooms when passthrough focus ends', async () => {
+    vi.spyOn(document, 'hasFocus').mockReturnValue(false);
     const onEvent = vi.fn();
     await act(async () => {
       root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" onEvent={onEvent} />);
@@ -2115,8 +2116,8 @@ describe('Wall on the Lath engine', () => {
     expect(container.querySelector('[data-session-id="surface:a"]')?.getAttribute('data-focused')).toBe('true');
     const unzoom = container.querySelector<HTMLButtonElement>('button[aria-label="Unzoom"]');
     expect(unzoom).not.toBeNull();
-    // jsdom's document is not window-focused, so Wall renders the inactive
-    // header palette here; the surface-header unit test covers the active pair.
+    // The window is not focused, so Wall renders the inactive header palette
+    // here; the surface-header unit test covers the active pair.
     expect(unzoom?.className).toContain('bg-header-inactive-fg');
     expect(unzoom?.className).toContain('text-header-inactive-bg');
 

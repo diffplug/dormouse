@@ -3,7 +3,7 @@
  */
 import { act, StrictMode, useContext } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { LathHost, LATH_ZOOM_MARGIN, LATH_ZOOM_SHADOW } from './LathHost';
 import { createLathWallStore, type LathWallStore, type LeafMeta, LATH_LAYOUT_OPTS } from './lath-wall-store';
 import { type ContextHelper, createLathWallEngine } from './lath-wall-engine';
@@ -997,6 +997,8 @@ describe('LathHost — pane / Door drag', () => {
     act(() => down(header('a'), 100, 15));
     act(() => moveTo(601, 300));
     await flushFrame();
+    const hasFocus = vi.spyOn(document, 'hasFocus').mockReturnValue(false);
+    onTestFinished(() => hasFocus.mockRestore());
     act(() => window.dispatchEvent(new Event('blur')));
     expect(overlayEl()).toBeNull();
     act(() => up());
