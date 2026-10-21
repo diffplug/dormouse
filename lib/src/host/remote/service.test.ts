@@ -1849,6 +1849,25 @@ describe('one-time connection', () => {
     expect(idleOneTimeState(HOSTED_ORIGIN)).toEqual({ status: 'idle' });
   });
 
+  it.each([false, true])('cancels an opening policy read (fresh request: %s)', async (retry) => {
+    createHostedService();
+    const read = Promise.withResolvers<void>();
+    store.loadNetworkPolicy = async () => {
+      await read.promise;
+      return store.network;
+    };
+    const abandoned = command('oneTimeOpen');
+    await command('oneTimeEnd');
+    // A request made after Cancel must survive the old request finishing.
+    const fresh = retry ? command('oneTimeOpen') : null;
+    read.resolve();
+
+    expect((await abandoned).result).toEqual({ status: 'ended', reason: 'user-ended' });
+    if (fresh) expect((await fresh).result).toMatchObject({ status: 'waiting' });
+    expect(rendezvous.rooms).toHaveLength(retry ? 1 : 0);
+    expect(service.oneTimeEvent().state.status).toBe(retry ? 'waiting' : 'idle');
+  });
+
   it('joins an open in flight rather than minting a second room', async () => {
     createHostedService();
     const [first, second] = await Promise.all([command('oneTimeOpen'), command('oneTimeOpen')]);
@@ -2941,6 +2960,24 @@ describe('Hosted enrollment', () => {
     const asked = pollRequests().length;
     await vi.advanceTimersByTimeAsync(INTERVAL_S * 3000);
     expect(pollRequests()).toHaveLength(asked);
+  });
+
+  it.each([false, true])('cancels enrollment during its policy read (fresh request: %s)', async (retry) => {
+    hosted();
+    const read = Promise.withResolvers<void>();
+    store.loadNetworkPolicy = async () => {
+      await read.promise;
+      return store.network;
+    };
+    const abandoned = command('beginHostedEnrollment', { label: 'old' });
+    await command('cancelHostedEnrollment');
+    const fresh = retry ? command('beginHostedEnrollment', { label: 'fresh' }) : null;
+    read.resolve();
+
+    expect((await abandoned).error).toContain('cancelled');
+    if (fresh) expect((await fresh).result).toMatchObject({ status: 'waiting' });
+    expect(beginRequests()).toHaveLength(retry ? 1 : 0);
+    expect(vi.getTimerCount()).toBe(retry ? 1 : 0);
   });
 
   it('ends on an approval typed with other digits, enrolling nothing and polling no more', async () => {

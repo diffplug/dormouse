@@ -17,6 +17,8 @@ import type { HostedEnrollmentEnded, HostedEnrollmentState } from './service-pro
 
 /** What tells one purpose's approval from the other's. */
 export interface HostedApprovalFlow<A, H, C> {
+  /** Local prerequisites, cancellable before any code is requested. */
+  prepare?(): Promise<void>;
   /**
    * Ask Hosted for a code. `held` stays in this process for the polls — the
    * device code with it, never in `state()`. Throws what the panel shows.
@@ -118,6 +120,10 @@ export class HostedApproval<A, H, C> {
   }
 
   async #begin(arg: A, seq: number): Promise<HostedEnrollmentState> {
+    if (this.#flow.prepare) {
+      await this.#flow.prepare();
+      if (seq !== this.#seq || this.#disposed) throw new Error('This approval was cancelled.');
+    }
     const { begin, held } = await this.#flow.begin(arg);
     if (seq !== this.#seq || this.#disposed) throw new Error('This approval was cancelled.');
     this.#flow.admit?.();

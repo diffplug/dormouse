@@ -473,6 +473,8 @@ export class BurrowService {
   #oneTime: OneTimeRuntime | null = null;
   /** The open in flight, which a second `oneTimeOpen` joins rather than replaces. */
   #oneTimeOpening: Promise<OneTimeState> | null = null;
+  /** End also cancels opens that have not finished reading the policy. */
+  #oneTimeEndSequence = 0;
   /**
    * The one-time request awaiting the modal, in a slot of its own — never in
    * `#pairings`, so it is neither capped nor coalesced with a pairing, and its
@@ -783,8 +785,6 @@ export class BurrowService {
   async #beginHostedEnrollment(params: HostedEnrollParams | undefined): Promise<HostedEnrollmentState> {
     if (this.#relay.mode === 'self-host') throw new Error(SELF_HOST_DEVICE_CODE_REFUSAL);
     const label = this.#labelFrom(params);
-    await this.#networkPolicy();
-    this.#refuseNothing();
     this.#refuseEnrolled();
     return this.#hostedEnrollment.begin(label);
   }
@@ -792,6 +792,12 @@ export class BurrowService {
   /** What a remote-control approval begins, polls, and keeps: a Burrow. */
   #hostedEnrollmentFlow(): HostedApprovalFlow<string, HostedEnrollmentHeld, BurrowEnrollment> {
     return {
+      // The approval tracks Cancel before the policy read can yield.
+      prepare: async () => {
+        await this.#networkPolicy();
+        this.#refuseNothing();
+        this.#refuseEnrolled();
+      },
       begin: async (label) => {
         const { begin, noiseStatic } = await beginHostedEnrollment(this.#relay.origin, this.#fetch);
         return { begin, held: { noiseStatic, label } };
@@ -1035,7 +1041,11 @@ export class BurrowService {
           `Dormouse Hosted, and this build reaches only its own Relay (${this.#relay.origin}).`,
       );
     }
+    const endSequence = this.#oneTimeEndSequence;
     await this.#networkPolicy();
+    if (endSequence !== this.#oneTimeEndSequence) {
+      return { status: 'ended', reason: 'user-ended' };
+    }
     // Synchronous from here to the runtime's open: a `setNetworkPolicy` that
     // landed during the await is read here, since it ends only a live runtime,
     // and a second click that awaited the same read joins this one rather than
@@ -1083,6 +1093,7 @@ export class BurrowService {
    * under `nothing`, whose change rests an ended one at once (`#restOneTime`).
    */
   #endOneTime(): Record<string, never> {
+    this.#oneTimeEndSequence++;
     if (this.#oneTime) this.#oneTime.end('user-ended');
     else if (this.#oneTimeState.status === 'ended') this.#setOneTimeState({ status: 'idle' });
     return {};
