@@ -588,7 +588,6 @@ describe('agent-browser host attach', () => {
         ab(host, { op: 'attach', url: 'https://example.com/', headed: true }, { session }),
         ab(host, { op: 'attach', url: 'https://example.com/', headed: true }, { session }),
       ]);
-      // Opened at the page, so the caller has no navigation left to run.
       // Opened at the page, so the caller has no navigation left to run; the
       // second found the browser the first brought up, at the first's page.
       expect(first).toEqual({ ok: true, stream: port, relaunched: true, session, nativeIdentity: session });
