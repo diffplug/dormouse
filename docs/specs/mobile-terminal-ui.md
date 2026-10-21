@@ -83,8 +83,6 @@ Source of truth: `MOBILE_GESTURE_OPTION_DIRECTIONS` in `lib/src/lib/mobile-gestu
 
 ## Input mode selector
 
-The input mode selector controls what appears in the reserve area.
-
 | Mode | Reserve area content |
 | --- | --- |
 | Sessions | Session rows with active, alert, and TODO state; selecting one makes it the single visible terminal. |
@@ -98,9 +96,7 @@ Source of truth: `KEYBOARD_MODES` in `lib/src/components/MobileTerminalUi.tsx`.
 
 ## Type mode input
 
-Typing goes through a visually hidden `<textarea>` configured for terminal-style input.
-
-* **Must buffer composed text until `compositionend` and leave composing keydowns to the IME**, including its editing and confirmation keys.
+* **Must buffer composed text until `compositionend` and leave composing keydowns to the IME**, including its editing and confirmation keys. **Must cancel composed input when the active Session changes**, including a switch back.
 * **Must handle software-keyboard Enter and Backspace through `beforeinput` when no `keydown` occurs**, including deletion from the empty hidden input.
 
 Source of truth: `MobileTerminalUi` in `lib/src/components/MobileTerminalUi.tsx`; `isComposingKey` in `lib/src/lib/dom.ts`.
