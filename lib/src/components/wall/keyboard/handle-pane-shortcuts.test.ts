@@ -71,6 +71,20 @@ function keydownMeta(key: string): KeyboardEvent {
 }
 
 describe('handlePaneShortcuts kill behavior', () => {
+
+  it.each(['metaKey', 'ctrlKey', 'altKey'] as const)('leaves %s chords out of bare pane actions', modifier => {
+    for (const key of ['x', 't', '-', 'Enter', ',']) {
+      const ctx = makeCtx();
+      const event = new KeyboardEvent('keydown', { key, [modifier]: true, cancelable: true });
+      expect(handlePaneShortcuts(event, ctx, { current: null }), key).toBe(false);
+      expect(event.defaultPrevented, key).toBe(false);
+      expect(ctx.requestKill).not.toHaveBeenCalled();
+      expect(ctx.enterTerminalMode).not.toHaveBeenCalled();
+      expect(ctx.setRenamingPaneId).not.toHaveBeenCalled();
+      expect(ctx.wallActionsRef.current.onSplitV).not.toHaveBeenCalled();
+    }
+  });
+
   beforeEach(() => vi.clearAllMocks());
 
   it.each(['x', 'k'])('hands the %s gesture to the Wall kill request', (key) => {

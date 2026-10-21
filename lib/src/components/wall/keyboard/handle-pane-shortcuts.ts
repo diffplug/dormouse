@@ -27,9 +27,12 @@ export function handlePaneShortcuts(
   ctx: WallKeyboardCtx,
   navHistory: NavHistoryRef,
 ): boolean {
+  // Host chords must not become the corresponding plain pane action. Shift
+  // can produce a binding's printed character; Cmd/Ctrl arrows are explicit.
+  if (e.altKey || ((e.metaKey || e.ctrlKey) && !isArrowKey(e.key))) return false;
   const sid = ctx.selectedIdRef.current;
   // Reopen acts on the Window, so it answers whatever is selected.
-  if (e.key === 'u' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+  if (e.key === 'u') {
     e.preventDefault();
     e.stopPropagation();
     ctx.reopenClosed();

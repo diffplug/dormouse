@@ -218,6 +218,8 @@ Source of truth: `handleDualTap` in `lib/src/components/wall/keyboard/handle-dua
 
 `docs/specs/shortcuts.md` tables every binding; this section owns the dispatch behavior behind it.
 
+**Must leave Cmd/Ctrl/Alt-modified pane action keys unhandled, except the arrow swap chords** ([Spatial navigation](#spatial-navigation)). Shift may produce a binding's printed character.
+
 **Must use `,` to rename the selected terminal pane or Workspace tab in command mode**, without activating an inactive Workspace.
 
 **Must support Workspace navigation in command mode through bare `1`–`9`, arrows, and `Enter`.** Digits select by strip position; out-of-range positions are consumed without switching. **Never bind `c`, `n`/`p`, `$`, or `&`.** Rename inputs and confirmation dialogs retain their own controls.
@@ -261,7 +263,7 @@ A split from an existing pane (`|`/`%`/`-`/`"` or the header split buttons) spaw
 
 Dirty Tool close consent: `docs/specs/dor-tool.md` → Closing unsaved Tools.
 
-`x`/`k` (or the kill button, which first leaves passthrough) shows a confirmation with a random lowercase letter; typing it confirms the kill. **Never draw `x`, `k`, or Reopen's `u` as that letter**, so neither a double-tap nor a reopen accepts it. Which closes skip it: `docs/specs/reopen.md` → "The rule"; under Labs one that would show it becomes a pending kill instead (`docs/specs/reopen.md` → "Labs: No-confirm delayed kill"). `Escape`, the cancel button, and clicking another panel cancel; any other key dismisses it.
+`x`/`k` (or the kill button, which first leaves passthrough) shows a confirmation with a random lowercase letter; typing it confirms the kill. **Never draw `x`, `k`, or Reopen's `u` as that letter**, so neither a double-tap nor a reopen accepts it. Which closes skip it: `docs/specs/reopen.md` → "The rule"; under Labs one that would show it becomes a pending kill instead (`docs/specs/reopen.md` → "Labs: No-confirm delayed kill"). `Escape`, the cancel button, and clicking another panel cancel; any other answer key dismisses it. **Never answer a kill prompt with a bare modifier or a Cmd/Ctrl/Alt chord.**
 
 **Must return keyboard selection to the next surviving Door after killing a revealed Door**, falling back to previous Doors, then a pane only if no Doors remain. Apply this to confirmed and unasked kills only while the revealed pane, or the Door, is still selected in command mode; cancellation, refusal, or navigating away discards the return target.
 
@@ -299,6 +301,8 @@ The ring measures a pane's enclosing Lath leaf (header + body) through `resolveP
 Source of truth: `resolvePaneElement` in `lib/src/components/wall/resolve-pane-element.ts`.
 
 ## Spatial navigation
+
+**Must leave Alt-modified arrows unhandled.**
 
 **Must resolve arrow navigation through the engine-neutral `WallNav` seam to Lath's `neighborOf`, never a DOM rect scan.** Neighbor eligibility: `docs/specs/tiling-engine.md` → "Layout".
 
