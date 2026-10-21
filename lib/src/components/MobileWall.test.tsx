@@ -91,6 +91,19 @@ describe('MobileWall', () => {
     expect(headerInset()).toBeNull();
   });
 
+  it('still lets a local header clear its TODO', () => {
+    registry.activitySnapshot.set('pane-a', { status: 'WATCHING_DISABLED', episode: null, todo: true });
+    try {
+      renderWall();
+      const pill = container.querySelector<HTMLButtonElement>('button[aria-label="Dismiss TODO"]');
+      expect(pill).not.toBeNull();
+      act(() => pill!.click());
+      expect(registry.clearSessionTodo).toHaveBeenCalledWith('pane-a');
+    } finally {
+      registry.activitySnapshot.clear();
+    }
+  });
+
   it('wears the alarm inset on the header while the Session rings', () => {
     registry.activitySnapshot.set('pane-a', {
       status: 'ALERT_RINGING', episode: { id: 'e1', startedAt: Date.now() }, todo: false,

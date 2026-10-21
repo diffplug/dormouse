@@ -56,7 +56,7 @@ flowchart TD
 
 **Must drop an entire `terminal.data` projection pair if either projection has invalid base64url or UTF-8**, then continue accepting later data.
 
-`RemotePtyAdapter` exposes the adapter-specific `setActivePane(id)`: v1 allows one attachment per session, so pane switching is detach → attach. **Writes and resizes for a non-attached pane are dropped, but the latest resize for a pane being attached is kept**: its attach or a `terminal.resize` after it carries that size (rationale). **A refused `terminal.resize` after the attach never fails `setActivePane`.** Badges for non-attached panes come from `directory.watch` without attaching.
+`RemotePtyAdapter.setActivePane(id)` switches panes by detach → attach. **Writes and resizes for a non-attached pane are dropped, but the latest resize for a pane being attached is kept**: its attach or a `terminal.resize` after it carries that size (rationale). **A refused `terminal.resize` after the attach never fails `setActivePane`.** **Must use directory snapshots for header and picker presentation**, with display-only header TODOs; non-attached panes need no attachment.
 
 * **Must normalize dimensions before sending or caching them.**
 * **Must settle fire-and-forget PTY failures and release subscriptions that arrive after disposal**; a disposed adapter never restarts or delivers events.
