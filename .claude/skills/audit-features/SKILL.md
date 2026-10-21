@@ -1,67 +1,77 @@
 ---
 name: audit-features
-description: Audit Dormouse feature by feature against its specs for reachable bugs and unnecessary complexity, validate focused fixes, and deliver reviewable PRs when authorized. Use for requested broad or time-boxed quality passes, not routine single-feature implementation or PR review.
+description: Audit Dormouse feature by feature against its specs for reachable bugs and unnecessary complexity, then deliver small validated PRs. Use for a requested audit, bug hunt, quality pass, or time-boxed (e.g. overnight) sweep across features — not for implementing or reviewing a single change.
 ---
 
 # Audit features
 
-Aim for fewer user-visible failures and less code to maintain. PR count, test count, and hours spent are evidence of activity, not success criteria.
+Success is fewer user-visible failures and less code to maintain, not PR or test count.
 
-## Set the scope and map the system
+## Scope
 
-Use the user's requested scope, exclusions, delivery permissions, and time budget. A timed pass needs a dated stopping time and timezone; do not inherit a previous run's deadline. Reuse existing authorization rather than asking again. This skill does not authorize merging, deploying, messaging others, or starting additional agents.
+Take scope, exclusions, delivery permissions, and time budget from the user. A timed run needs a dated stop time with timezone; never inherit a previous run's. This skill grants no merge, deploy, or messaging authority. Sub-agents may do read-only per-feature review; fixes and PRs stay with you.
 
-Read `AGENTS.md` and `docs/specs/glossary.md`, then derive a feature checklist from the current spec index. Follow the repository's worktree and Dormouse tooling instructions. Consult `TESTING_AND_MODIFICATION_GUIDE.md` for relevant test entrypoints, checking that any branch-specific advice still applies.
+Derive the feature checklist from the spec index in `AGENTS.md`. Design under `## Future` is unbuilt scope, never a gap to fill.
 
-Before proposing fixes, inspect the baseline commit, working-tree state, open PRs, and representative entrypoints across the affected hosts. Read each feature's spec and relevant rationale before changing it. Treat design below `## Future` as unbuilt scope, not missing implementation to fill during an audit.
+## Per feature
 
-Track coverage separately from findings: distinguish reviewed with no finding, candidate needing evidence, reproduced defect, fixed, and not reviewed. A passing package suite alone does not establish feature coverage.
+1. Read the spec and the rationale for the sections in play, then the entrypoints on each host that ships the feature.
+2. For each candidate, apply [running-tend's necessity checks](../running-tend/SKILL.md#reviewing-prs-judge-necessity-before-correctness), then record the consequence (lost edit, wrong-target input or kill, broken persistence, platform failure), who hits it, how often, and the strongest evidence obtained.
+3. Act on the evidence:
 
-## Establish necessity before adding code
+   | Evidence | Action |
+   |---|---|
+   | Reproduced on the shipping path, or a reachable caller traced in source | Fix, PR |
+   | Plausible, but no reachable caller found yet | Ledger, as a candidate; no code |
+   | Only a mock, test, or Strict Mode unmount reaches it | Ledger, as not a bug; no code |
 
-Apply [running-tend's necessity checks](../running-tend/SKILL.md#reviewing-prs-judge-necessity-before-correctness) before designing a fix. For each candidate, record:
+   A mock that permits an impossible callback proves nothing: [#1313](https://github.com/diffplug/dormouse/pull/1313) guarded a page teardown that no shipping build performs, and closed. A late async result is a hypothesis; check whether disposal or an existing cancellation already covers it before adding a generation counter.
+4. Make the smallest repair, preferring deletion or an existing authoritative signal over a new observer, retry, or fallback state.
+5. Pin it with a regression that fails on the baseline at the intended assertion, not on a fixture that cannot start. Repair broken fixtures without weakening them: [#1320](https://github.com/diffplug/dormouse/pull/1320) uses real Windows junctions rather than mocking directory resolution.
+6. Mark the feature's coverage in the ledger.
 
-- The actor, shipping configuration, reachable caller, and sequence that violates an owning contract.
-- The actual consequence, likely frequency, and affected users.
-- The evidence obtained: source analysis, synthetic events, real browser interaction, native host behavior, or physical-device reproduction.
-- The smallest repair, including deletion or reuse of existing authoritative state.
+For IME, touch, clipboard, focus, and process behavior, say whether the evidence is simulated ordering or native behavior. The [browser harness](../debug-standalone-agent-browser/SKILL.md) simulates one window, and real-Tauri stdio, ConPTY, and sidecar bugs do not reproduce in it (`TESTING_AND_MODIFICATION_GUIDE.md` §8); a feature checked only there is covered "harness only".
 
-Prioritize lost edits, wrong-target input or process termination, broken lifecycle/persistence, and demonstrated platform failures. An async result arriving after its owner changes is a useful hypothesis to investigate, not a reason to add generation counters everywhere. Check whether disposal, identity, or an existing cancellation path already guarantees the behavior.
+## PRs
 
-A mock that permits an impossible callback or an unmount with no shipping caller proves little. Trace the real lifecycle before adding guards. For IME, touch, clipboard, focus, and process behavior, explicitly separate simulated ordering from native behavior; seek the latter when it changes the severity or justifies the mechanism.
+Keep the open batch small enough to read its review before opening more. One PR per independently explainable outcome; group tightly coupled fixes, never unrelated behavior. Stack only real dependencies, and set the GitHub base explicitly. Each description states the reachable before/after, its validation, and its limits. When review disproves necessity, close the PR and drop it from the combined tree. Never carry a rejected parent's change in through a child.
 
-Do not label every rare race a release blocker. Record uncertain candidates without implementing speculative defenses. Respect rejected scope; do not reintroduce a rejected parent change through a child PR.
+## Combined validation
 
-## Make a small batch reviewable
+Periodically merge every retained branch into one throwaway worktree and run the full gate:
 
-Choose coherent changes with independently explainable outcomes. Group tightly related fixes or test maintenance when that reduces review cost; separate unrelated product behavior. Keep the active batch small enough to read its feedback and finish its validation before opening more. Avoid a PR per assertion or a broad rewrite justified only by tidiness.
+```
+wt switch --create audit-combined --base origin/main
+git merge <branch>...
+pnpm install && pnpm test && pnpm build
+```
 
-Prefer an existing authoritative signal over a second parser or observer. If a proposed fix needs retries, fallback states, or additional bookkeeping, reconsider whether the ownership boundary can be made simpler first.
+This catches interactions and combined spec word budgets that no single PR trips. Reproduce any unexpected failure on the unchanged baseline with the same command before blaming a change; a failure the baseline shares is a limitation, not a pass. For visual changes, read the Argos diffs (Chromium and WebKit) and tell an expected change awaiting approval from a rendering defect or a story that captured before it was ready.
 
-Use independent PRs when changes do not depend on one another; stack only real dependencies and record the GitHub base explicitly. Worktree ancestry alone does not set a PR's review base. Update owning specs with behavior changes under `AGENTS.md`'s conventions; keep test mechanics beside tests.
+## Ledger
 
-Describe the reachable before/after behavior, relevant validation, and material limitations in each PR. If review disproves necessity, withdraw the change and remove it from the combined validation tree.
+Keep it in the session scratchpad, never in the tree, and keep only current state; move superseded results to a dated history section.
 
-## Validate the failure, then the combination
+```
+Baseline: <sha>   Combined: <sha> (pnpm test ✓ / build ✓)   Stop: <date time tz>
 
-Use a focused regression when it meaningfully pins the contract. Check that the original fails at the intended assertion, not because a fixture cannot create a symlink, load a dependency, or start a process. Validate the smallest affected suite and types, then the relevant package or host boundary.
+| Feature | Coverage | Finding | Evidence | Disposition | Branch / PR → base |
+```
 
-Reproduce suspicious pre-existing failures on the unchanged baseline with the same runtime and command. Separate product defects, fixture portability, environmental prerequisites, and flaky timing. Preserve assertions when repairing fixtures: real Windows junctions can exercise directory resolution without replacing it with a mock. A failure matching an old baseline remains a limitation, not a passing check.
+Coverage is one of: not reviewed, reviewed – no finding, candidate, reproduced, fixed, harness only. Also list runtime resources you own (harnesses, browser sessions, worktrees) so handoff can release exactly those.
 
-For UI or cross-process fixes, exercise the shipping path where feasible. Use [the standalone browser harness skill](../debug-standalone-agent-browser/SKILL.md) when appropriate, subject to current `AGENTS.md` tooling rules. Drive commands through the terminal under test rather than injecting its credentials into an external CLI. Use fixtures for destructive lifecycle tests and keep clear ownership of browsers, processes, and surfaces.
+## Handoff
 
-Periodically combine the retained changes in an isolated validation worktree. Run the relevant full suites, build, and repository checks there to catch interactions and combined spec budgets that individual PRs miss. Associate results with commits; if later changes are only tests, verify that production source is unchanged rather than claiming an unrun build. Broaden or repeat checks only for changed code, failures, or unresolved concerns.
+Near the stop time, take no new wide change; spend what remains on open review, CI, and verification. Before reporting, confirm every branch is pushed, CI and review are current, and each stack's merge order is stated.
 
-Inspect visual baselines, current images, and diffs in each affected browser. Distinguish an expected change awaiting approval from a rendering defect or missing snapshot readiness. Fix timing from observed lifecycle evidence; do not retry until green or approve unexplained differences.
+"Merged" on GitHub can mean merged into another feature branch. Check the target itself:
 
-## Close the loop
+```
+m=$(gh pr view <n> --json mergeCommit --jq .mergeCommit.oid)
+git fetch origin main $m
+git merge-base --is-ancestor $m origin/main && echo landed
+```
 
-Keep a concise current ledger outside tracked product files: baseline and validated commits, feature coverage, findings and dispositions, branch/worktree/PR/base, reproduction and test logs, owned runtime resources, and remaining limitations. Separate historical observations from current results so stale failures or unfinished notes cannot become the handoff.
+Check stack parents too: [#1309](https://github.com/diffplug/dormouse/pull/1309) merged into [#1283](https://github.com/diffplug/dormouse/pull/1283)'s branch, which closed unmerged, so #1309 never reached `main`. When a parent was itself squashed into `main`, its child's commit is not an ancestor even though the code landed; inspect the code on `origin/main` instead.
 
-For a timed run, reserve time for feedback, integration checks, and delivery. Do not start a new wide change near the deadline just to stay busy. If the user asked to remain active until a time, use the remaining window for unresolved review, CI monitoring, and handoff verification; otherwise finish when the agreed scope is complete.
-
-Before handoff, verify pushed commits, clean task worktrees, current CI and review status, and each stack's merge order. Leave active worktrees and unrelated processes intact. Report coverage gaps, baseline failures, expected visual approvals, and unproven candidates separately from completed fixes.
-
-When asked whether the work landed, fetch the intended target branch and inspect its actual code. GitHub's "merged" may mean merged into another feature branch. Check stack parents as well as children; fetch missing merge commits before checking ancestry, and inspect the resulting patch when squash or rebase makes ancestry inconclusive. A closed parent can strand a merged child.
-
-Summarize user impact, important simplifications, validation and its limits, and outstanding decisions. Link the PR queue and ledger. State whether fixes are merely proposed, merged into a stack, or present on the intended target. Do not equate review approval, a timeout diagnostic, or a passing rerun with proof that the underlying problem is solved.
+Report fixes as proposed, merged into a stack, or on the target; then coverage gaps, baseline failures, pending visual approvals, and unproven candidates, each separately. Link the PR queue and the ledger.
