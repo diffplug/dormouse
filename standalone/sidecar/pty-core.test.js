@@ -1389,6 +1389,24 @@ test('resolveSpawnConfig injects WSL bash integration via a sh -c detector', () 
   assert.deepEqual(config.shellArgs, ['-d', 'Ubuntu', '--', 'sh', '-c', detector]);
 });
 
+test('resolveSpawnConfig starts a WSL shell in its Linux directory, which Windows cannot resolve', () => {
+  const runtime = {
+    platform: 'win32',
+    env: { USERPROFILE: 'C:\\Users\\tester', DORMOUSE_SHELL_INTEGRATION_DIR: 'C:\\Program Files\\Dormouse\\shell-integration' },
+    osModule: { homedir: () => 'C:\\Users\\tester', tmpdir: () => 'C:\\Temp' },
+    fsModule: integrationFsModule,
+  };
+  const wsl = (cwd) => resolveSpawnConfig({ shell: 'C:\\Windows\\System32\\wsl.exe', args: ['-d', 'Ubuntu'], cwd }, runtime);
+  const config = wsl('/home/me/projects/app');
+  // Integration still recognizes the launch; the distro resolves the directory.
+  assert.deepEqual(config.shellArgs.slice(0, 6), ['--cd', '/home/me/projects/app', '-d', 'Ubuntu', '--', 'sh']);
+  assert.equal(config.cwd, 'C:\\Users\\tester');
+  assert.equal(config.cwdWarning, null);
+  // A Windows directory is still the PTY's own, with no `--cd`.
+  assert.equal(wsl(undefined).shellArgs[0], '-d');
+  assert.equal(resolveSpawnConfig({ shell: 'C:\\Windows\\System32\\cmd.exe', cwd: '/home/me' }, runtime).shellArgs.includes('--cd'), false);
+});
+
 test('resolveSpawnConfig leaves a non-standard WSL invocation untouched', () => {
   const config = resolveSpawnConfig(
     { shell: 'C:\\Windows\\System32\\wsl.exe', args: ['-d', 'Ubuntu', '--', 'htop'] },

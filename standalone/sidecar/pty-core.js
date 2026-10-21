@@ -370,13 +370,16 @@ function resolveSpawnConfig(options, runtime = {}) {
   };
   const osModule = runtime.osModule || os;
   const fsModule = runtime.fsModule || fs;
+  const shell = explicitShell || resolveDefaultShell(platform, env);
+  // A WSL shell reports Linux directories, which only the distro resolves: it
+  // starts there itself (`--cd`), from the default Windows directory.
+  const wslCwd = platform === 'win32' && shellStem(shell) === 'wsl' && /^\/(?!\/)/.test(requestedCwd || '') ? requestedCwd : undefined;
   // Normalize the requested cwd into a native spelling before it reaches the OS,
   // so the directory check resolves and the casing the shell (and its children)
   // perceives is stable. See canonicalizeWindowsCwd.
-  const cwd = platform === 'win32' ? canonicalizeWindowsCwd(requestedCwd) : requestedCwd;
+  const cwd = wslCwd ? undefined : platform === 'win32' ? canonicalizeWindowsCwd(requestedCwd) : requestedCwd;
   const defaultCwd = resolveDefaultCwd(platform, env, osModule);
   const missingExplicitCwd = Boolean(cwd) && !directoryExists(cwd, fsModule);
-  const shell = explicitShell || resolveDefaultShell(platform, env);
   // An empty array means "no override," not "no args" — fall through to the
   // login-flag default so `~/.zprofile` runs and PATH includes Homebrew/asdf.
   const shellArgs = explicitArgs && explicitArgs.length > 0
@@ -420,7 +423,8 @@ function resolveSpawnConfig(options, runtime = {}) {
     cwdWarning: missingExplicitCwd ? `unable to restore because directory ${cwd} was removed` : null,
     env: integrated.env,
     shell,
-    shellArgs: integrated.shellArgs,
+    // After integration, which recognizes only the exact `-d <distro>` launch.
+    shellArgs: wslCwd ? ['--cd', wslCwd, ...integrated.shellArgs] : integrated.shellArgs,
   };
 }
 
@@ -798,12 +802,62 @@ module.exports.parsePsPairs = parsePsPairs;
 
 async function getDescendantPids(rootPid, runtime = {}) {
   const pairs = await readProcessTable(runtime);
-  if (pairs && (!runtime.strict || pairs.some(([pid]) => pid === rootPid))) return [...buildDescendantSet(pairs, rootPid)];
-  // Port discovery tolerates a failed scan; helper work inspection must not
-  // mistake one for idle (docs/specs/terminal-context.md).
-  if (runtime.strict) throw new Error('Unable to inspect terminal processes');
-  return [rootPid];
+  // Port discovery tolerates a failed scan; `shellHasWork` must not.
+  return pairs ? [...buildDescendantSet(pairs, rootPid)] : [rootPid];
 }
+
+// Windows processes a shell keeps for its whole life, which are no work of the
+// user's: Git Bash's launcher runs MSYS bash beneath it, and wsl.exe a relay
+// and its host with a console. Keyed by the shell's own name.
+const WINDOWS_SHELL_PLUMBING = new Map([
+  ['bash', new Set(['bash.exe'])],
+  ['wsl', new Set(['wsl.exe', 'wslhost.exe', 'conhost.exe'])],
+]);
+
+/**
+ * Whether the shell at `rootPid` runs anything: a descendant beyond its own
+ * Windows plumbing (`WINDOWS_SHELL_PLUMBING`). Throws when the scan fails or
+ * misses the shell, since unknown work is never idle
+ * (docs/specs/terminal-context.md).
+ */
+async function shellHasWork(rootPid, shell, runtime = {}) {
+  const table = await readProcessTable(runtime);
+  if (!table || !table.some(([pid]) => pid === rootPid)) throw new Error('Unable to inspect terminal processes');
+  const stem = path.win32.basename(shell || '').replace(/^-/, '').replace(/\.exe$/i, '').toLowerCase();
+  const plumbing = (runtime.platform || process.platform) === 'win32' && WINDOWS_SHELL_PLUMBING.get(stem);
+  const names = new Map(table.map(([pid, , name]) => [pid, (name || '').toLowerCase()]));
+  const shellPids = new Set([rootPid]);
+  // Plumbing counts as the shell only beneath the shell itself, so work it
+  // starts under plumbing is still found.
+  for (const [pid, ppid] of plumbing ? walkParentsFirst(table, rootPid) : []) {
+    if (shellPids.has(ppid) && plumbing.has(names.get(pid))) shellPids.add(pid);
+  }
+  return [...buildDescendantSet(table, rootPid)].some(pid => !shellPids.has(pid));
+}
+
+/** The `[pid, ppid]` pairs below `rootPid`, each after its parent. */
+function walkParentsFirst(pairs, rootPid) {
+  const children = new Map();
+  for (const [pid, ppid] of pairs) {
+    if (!children.has(ppid)) children.set(ppid, []);
+    children.get(ppid).push(pid);
+  }
+  const ordered = [];
+  const seen = new Set([rootPid]);
+  const queue = [rootPid];
+  while (queue.length > 0) {
+    const current = queue.shift();
+    for (const child of children.get(current) || []) {
+      if (seen.has(child)) continue;
+      seen.add(child);
+      ordered.push([child, current]);
+      queue.push(child);
+    }
+  }
+  return ordered;
+}
+
+module.exports.shellHasWork = shellHasWork;
 
 /** Every `[pid, ppid]` pair on this platform — `[pid, ppid, name]` on Windows,
  *  where the same query names each process (one query instead of two: ~0.3 s
@@ -1695,9 +1749,11 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
       } else if (request.op === 'info') {
         // Left null when inspection throws: unknown work is never idle.
         result.busy = null;
+        // node-pty's `process` on Windows is the name option it was given,
+        // never the foreground program, so only POSIX compares it.
         result.busy = !p ? false
-          : (await getDescendantPids(p.pid, { strict: true })).some(pid => pid !== p.pid)
-            || (!!p.process && shellBasename(p.process) !== shellBasename(ptyShells.get(request.id)));
+          : await shellHasWork(p.pid, ptyShells.get(request.id))
+            || (process.platform !== 'win32' && !!p.process && shellBasename(p.process) !== shellBasename(ptyShells.get(request.id)));
       } else if (request.op === 'promote') {
         if (request.restore) {
           if (!sessions.has(request.id) || !validHelperOwner(request.id, request.restore)) throw new Error('Invalid helper owner');

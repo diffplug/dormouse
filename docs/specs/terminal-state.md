@@ -74,7 +74,7 @@ Source of truth: `TerminalProtocolParser` / `commandLineEvents` in `lib/src/lib/
 | zsh | env (`ZDOTDIR`) | Always. **Nothing may be written into that directory at runtime** — it ships inside the signed macOS bundle (`.zshrc` has the why). |
 | bash | args (`--init-file`) | **The launch args are only `-i` / `-l` / `--login`** — Git Bash's `--login -i` included, a `-c <cmd>` not (rationale). |
 | PowerShell (`pwsh`, `powershell.exe`) | args (dot-source via `-Command`) | **A bare launch or one carrying `-NoExit`, unless it uses `-File` / `-EncodedCommand`**; appended after any startup command it carries (rationale). |
-| WSL | args (a `sh -c` detector inside the distro, reaching the bash script by its `/mnt/...` path) | **Only the exact two-argument `-d <distro>` launch.** **bash is the only integrated WSL shell** (rationale). |
+| WSL | args (a `sh -c` detector inside the distro, reaching the bash script by its `/mnt/...` path) | **Only the exact two-argument `-d <distro>` launch.** **bash is the only integrated WSL shell** (rationale). A Linux starting directory, which Windows cannot resolve, is a leading `--cd <dir>` added after injection, from the default Windows directory. |
 | cmd.exe | — | Never: always the keystroke fallback, with no exit codes. |
 
 **bash's `E` is the submitted line, read back from history only when the last entry provably is it, else its first simple command** (`$BASH_COMMAND`) (rationale).
