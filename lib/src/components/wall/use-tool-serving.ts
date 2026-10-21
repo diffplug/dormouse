@@ -193,7 +193,7 @@ export function useToolServing({
         const ports = portsById[scanning[index].leaf.id];
         if (!ports) continue;
         const { leaf, run, announcedPort, announcedPath } = scanning[index];
-        if (!lath.getMeta(leaf.id) || getTerminalPaneState(leaf.id).currentCommand?.id !== run.id) continue;
+        if (!isToolParams(lath.getMeta(leaf.id)?.params) || getTerminalPaneState(leaf.id).currentCommand?.id !== run.id) continue;
         const entries = listenerUrlsByPort(ports);
         let entry;
 
