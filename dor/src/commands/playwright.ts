@@ -67,6 +67,11 @@ export const PLAYWRIGHT: BrowserCliDescriptor = {
   // the binding's directory, with the executable that first opened it.
   projectScoped: true,
   missingBinaryMessage: (binary) => `playwright-cli is not installed (looked for '${binary}').\n\nInstall it with: ${BROWSER_PROVIDERS.playwright.installHint}\nOr set ${PLAYWRIGHT_BIN_ENV} to its full path.`,
+  paths: {
+    verbs: new Set(['screenshot', 'pdf', 'upload', 'drop', 'state-load', 'state-save', 'video-start', 'video-stop',
+      'tracing-stop', 'response-body']),
+    flags: new Set(['--filename', '--config', '--profile']),
+  },
   exec: (options) => options.execPlaywright,
 };
 
