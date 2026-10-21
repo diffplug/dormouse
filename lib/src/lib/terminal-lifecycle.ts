@@ -103,8 +103,16 @@ function makePromptLineReader(terminal: Terminal): PromptLineReader {
   };
 }
 
-function seedProcessCwdAfterSpawn(id: string): void {
-  void getPlatform().getCwd(id).then((cwd) => fillTerminalProcessCwd(id, cwd));
+const processCwdRequests = new WeakMap<TerminalEntry, symbol>();
+
+function seedProcessCwdAfterSpawn(id: string, entry: TerminalEntry): void {
+  const request = Symbol();
+  processCwdRequests.set(entry, request);
+  void getPlatform().getCwd(id).then((cwd) => {
+    // A rehydrated Tool keeps its entry and Session id, but has a new process.
+    if (registry.get(id) !== entry || entry.exited || processCwdRequests.get(entry) !== request) return;
+    fillTerminalProcessCwd(id, cwd);
+  }).catch(() => { /* best effort; shell integration can still supply the cwd */ });
 }
 
 // Reconstructs the visible text from an OSC 8 hyperlink's buffer range. xterm
@@ -427,7 +435,7 @@ export function getOrCreateTerminal(id: string): TerminalEntry {
     seedLaunchedCommand(id, shellOpts.command, shellOpts.cwd);
     typeCommandWhenPromptReady(id, shellOpts.command, shellOpts.requireIntegration === true);
   }
-  seedProcessCwdAfterSpawn(id);
+  seedProcessCwdAfterSpawn(id, entry);
 
   return entry;
 }
@@ -502,7 +510,7 @@ function spawnEntryPty(id: string, entry: TerminalEntry, spawn: SpawnSeed): void
     ...(spawn.alert ? { alert: spawn.alert } : {}),
     ...(spawn.dehydrate ? { dehydrate: spawn.dehydrate } : {}),
   });
-  seedProcessCwdAfterSpawn(id);
+  seedProcessCwdAfterSpawn(id, entry);
 }
 
 /** Type `command` once the fresh shell reaches a prompt. Seeded before the

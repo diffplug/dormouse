@@ -6,7 +6,7 @@ import { openCopyEditor, setCopyFormat, setCopyScope } from '../lib/copy-editor'
 import { getMouseSelectionState, setCopyEditor, setSelection, type Selection } from '../lib/mouse-selection';
 import type { BreakKind, CopyFormat } from '../lib/copy-text';
 import { TouchUiContext } from '../components/touch-ui-context';
-import { settleTerminals, waitForCondition } from './settle-terminals';
+import { settleTerminals, requireElement } from './settle-terminals';
 import { useStorySelection } from './story-selection';
 
 const SCENARIO_CLAUDE_REPLY: FakeScenario = {
@@ -59,7 +59,7 @@ const meta: Meta<typeof CopyEditorStory> = {
   // Hold the snapshot until the terminal painted and the editor opened.
   play: async ({ args }) => {
     await settleTerminals();
-    await waitForCondition(() => getMouseSelectionState(args.id).copyEditor !== null);
+    await requireElement(`[data-copy-editor-for="${args.id}"]`, 'copy editor');
   },
 };
 

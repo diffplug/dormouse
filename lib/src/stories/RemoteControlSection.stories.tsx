@@ -122,7 +122,7 @@ export const HostedPersistentRelay: Story = {
 function hostedWaiting(accountFull = false): HostedEnrollmentState {
   return {
     status: 'waiting',
-    userCode: '7KQM-X4TD',
+    confirmDigits: '47',
     verificationUrl: 'https://hosted.dormouse.sh/enroll#7KQM-X4TD',
     expiresAt: STORY_NOW + 10 * 60_000,
     accountFull,
@@ -130,16 +130,16 @@ function hostedWaiting(accountFull = false): HostedEnrollmentState {
 }
 
 /**
- * The code waiting for approval, in large type: the account page shows the
- * same one beside Approve. Open opens the page the service composed; the
- * service polls, so nothing here waits on a click but the person's.
+ * The code waiting for approval: the two digits the account page asks for, in
+ * large type. Open opens the page the service composed; the service polls, so
+ * nothing here waits on a click but the person's.
  */
 export const HostedEnrollWaiting: Story = {
   parameters: {
     primedBurrow: { status: { ...UNENROLLED_STATUS, hostedEnrollment: hostedWaiting() } },
     docs: { story: { height: '500px' } },
   },
-  play: settled('7KQM-X4TD'),
+  play: settled('47'),
 };
 
 /**
@@ -173,6 +173,15 @@ export const HostedEnrollFailed: Story = {
     docs: { story: { height: '560px' } },
   },
   play: settled(/keychain is locked/),
+};
+
+/** Approved with other digits than this computer showed: nothing enrolled, a new code a click away. */
+export const HostedEnrollMismatch: Story = {
+  parameters: {
+    primedBurrow: { status: { ...UNENROLLED_STATUS, hostedEnrollment: { status: 'ended', reason: 'mismatch' } } },
+    docs: { story: { height: '520px' } },
+  },
+  play: settled(/were not the ones shown here/),
 };
 
 /** Approved, and the enrollment being saved and started: no code, nothing to cancel. */

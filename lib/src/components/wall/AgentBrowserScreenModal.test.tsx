@@ -185,7 +185,7 @@ describe('AgentBrowserScreenModal', () => {
     registration.dispose();
   });
 
-  it('tells the user the embed drops logins, and refuses it for an https:// page on a proxying host', () => {
+  it.each(['https', 'HTTPS', 'hTtPs'])('tells the user the embed drops logins, and refuses %s pages on a proxying host', (scheme) => {
     const platform: PlatformAdapter = new FakePtyAdapter();
     platform.createIframeProxyUrl = async () => ({ ok: true, url: 'http://127.0.0.1:61234/' });
     setPlatform(platform);
@@ -193,7 +193,7 @@ describe('AgentBrowserScreenModal', () => {
 
     const secure = registerStubScreen('secure', {
       snapshot: { ...STUB_SCREEN, renderMode: 'agent-browser-screencast' },
-      chrome: { url: 'https://example.com/account', displayUrl: 'example.com/account', title: null, key: null },
+      chrome: { url: `${scheme}://example.com/account`, displayUrl: 'example.com/account', title: null, key: null },
     });
     act(() => root.render(<AgentBrowserScreenModal controller={getAgentBrowserScreenController('secure')!} label="surface:5" onClose={() => {}} />));
     expect(document.body.textContent).toContain('no logins/cookies');

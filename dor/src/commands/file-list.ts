@@ -6,7 +6,7 @@
  */
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { UNTRUSTED_REPO_GIT_ARGS, resolveBinaryPath, spawnAndCapture } from 'dor-lib-common';
+import { UNTRUSTED_REPO_GIT_ARGS, localGitRepository, resolveBinaryPath, spawnAndCapture, untrustedGitEnv } from 'dor-lib-common';
 
 const FILE_LIST_LIMIT = 200_000;
 const GIT_TIMEOUT_MS = 15_000;
@@ -95,10 +95,12 @@ export async function listFiles(cwd: string, { onFiles, home, signal }: FileList
 const byPath = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
 /** Tracked and untracked-but-not-ignored files under `cwd`, less deleted ones;
- *  dot-folders included. Null outside a work tree. */
+ *  dot-folders included. Null outside a work tree `localGitRepository` accepts. */
 async function gitFiles(git: string, cwd: string): Promise<string[] | null> {
+  const repository = await localGitRepository(cwd);
+  if (!repository) return null;
   const listed = await spawnAndCapture(git, [...UNTRUSTED_REPO_GIT_ARGS, 'ls-files', '-z', '-t', '--cached', '--others', '--deleted', '--exclude-standard'], {
-    cwd, timeoutMs: GIT_TIMEOUT_MS, maxOutputBytes: 256 * 1024 * 1024,
+    cwd, env: untrustedGitEnv(repository), timeoutMs: GIT_TIMEOUT_MS, maxOutputBytes: 256 * 1024 * 1024,
   });
   if (!listed.ok || listed.exitCode !== 0) return null;
   // Each entry is `<tag> <path>`; a deleted file is listed again tagged `R`,

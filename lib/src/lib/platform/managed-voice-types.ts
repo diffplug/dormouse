@@ -5,6 +5,8 @@
  * set is `remote-lib-common`'s, which the voice Worker checks against too.
  */
 
+import type { HostedEnrollmentState } from '../../host/remote/service-protocol';
+
 export { DEFAULT_MANAGED_VOICE_ID, MANAGED_VOICES } from 'remote-lib-common';
 
 /**
@@ -14,10 +16,8 @@ export { DEFAULT_MANAGED_VOICE_ID, MANAGED_VOICES } from 'remote-lib-common';
  */
 export const MANAGED_VOICE_REQUEST_TIMEOUT_MS = 15_000;
 
-export type ManagedVoiceEnrollment =
-  | { status: 'waiting'; userCode: string; verificationUrl: string; expiresAt: number }
-  | { status: 'saving' }
-  | { status: 'ended'; message: string };
+/** Natural Voice's approval: the same shape as remote control's, from the same run. */
+export type ManagedVoiceEnrollment = HostedEnrollmentState;
 
 export type ManagedVoiceActionResult = { ok: true } | { ok: false; message: string };
 

@@ -16,6 +16,10 @@
     "./browser-providers": {
       "types": "./dist/browser-providers.d.ts",
       "default": "./dist/browser-providers.js"
+    },
+    "./local-path": {
+      "types": "./dist/local-path.d.ts",
+      "default": "./dist/local-path.js"
     }
   },
   "scripts": {

@@ -57,6 +57,16 @@ test('refuses a substituted symlink and invalid UTF-8 without changing either fi
   await assert.rejects(readText(editorStore(root), file), { status: 415 });
 });
 
+test('refuses a file substituted by a link to a share without following it', { skip: process.platform === 'win32' }, async () => {
+  await writeFile(file, 'original');
+  const source = await readText(editorStore(root), file);
+  // POSIX reads `//<root>/missing` as a missing local file: following it would fail
+  // with ENOENT, not the refusal.
+  await rm(file); await symlink(`/${join(root, 'missing')}`, file);
+  await assert.rejects(readText(editorStore(root), file), { status: 409 });
+  await assert.rejects(saveText(editorStore(root), file, 'ours', source.version), { status: 409 });
+});
+
 
 test('saves exact bytes, with no text handling, under the caller\'s bound', async () => {
   // A BOM-less body after a BOM, and CRLF after LF: text saves would rewrite both.

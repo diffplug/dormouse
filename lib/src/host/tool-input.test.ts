@@ -76,6 +76,23 @@ describe('local targets', () => {
   });
 });
 
+describe('share targets', () => {
+  // POSIX reads `//<dir>/…` as `<dir>/…`, so only the refusal keeps each from resolving.
+  it.skipIf(process.platform === 'win32')('refuses a share, or a link to one, before following it', async () => {
+    const dir = await realpath(await mkdtemp(join(tmpdir(), 'dor-input-shares-')));
+    try {
+      await mkdir(join(dir, 'real'));
+      await writeFile(join(dir, 'real', 'doc.md'), 'hi');
+      await symlink(`/${join(dir, 'real', 'doc.md')}`, join(dir, 'doc-link.md'));
+      await symlink(`/${join(dir, 'real')}`, join(dir, 'folder-link'));
+      for (const input of ['doc-link.md', 'folder-link', 'folder-link/doc.md']) {
+        await expect(resolveLocalToolTarget(input, dir), input).rejects.toThrow(`not a file on this machine: ${input}`);
+      }
+      expect(await resolveLocalToolTarget('real/doc.md', dir)).toEqual({ path: join(dir, 'real', 'doc.md'), directory: false });
+    } finally { await rm(dir, { recursive: true, force: true }); }
+  });
+});
+
 describe('local file URLs', () => {
   let dir: string;
   let target: string;

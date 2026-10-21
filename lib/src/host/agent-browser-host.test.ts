@@ -84,7 +84,7 @@ function useTempSocketDir(prefix: string): void {
   });
 }
 
-function writeState(session: string, ext: 'pid' | 'stream', value: number): void {
+function writeState(session: string, ext: 'pid' | 'stream' | 'port', value: number): void {
   writeFileSync(join(process.env.AGENT_BROWSER_SOCKET_DIR!, `${session}.${ext}`), `${value}\n`);
 }
 
@@ -545,6 +545,12 @@ describe('agent-browser host attach', () => {
         writeState(session, 'pid', process.pid);
         writeState(session, 'stream', await closedPort());
       }],
+      ...['65536', '123garbage', '1.5', '-1'].map((value): [string, () => Promise<void>] => [
+        `an invalid stream port ${value}`, async () => {
+          running(session);
+          writeFileSync(join(process.env.AGENT_BROWSER_SOCKET_DIR!, `${session}.stream`), value);
+        },
+      ]),
       ['a live pid and stream from before this boot', async () => {
         running(session);
         for (const ext of ['pid', 'stream']) utimesSync(join(process.env.AGENT_BROWSER_SOCKET_DIR!, `${session}.${ext}`), 0, 0);
@@ -821,7 +827,13 @@ describe('agent-browser host viewer', () => {
         });
         client.on('error', () => {});
       });
-      await new Promise<void>((resolve) => server.listen(join(process.env.AGENT_BROWSER_SOCKET_DIR!, `${session}.sock`), resolve));
+      await new Promise<void>((resolve, reject) => {
+        server.once('error', reject);
+        if (process.platform === 'win32') server.listen(0, '127.0.0.1', resolve);
+        else server.listen(join(process.env.AGENT_BROWSER_SOCKET_DIR!, `${session}.sock`), resolve);
+      });
+      const address = server.address();
+      if (address && typeof address !== 'string') writeState(session, 'port', address.port);
       onTestFinished(() => new Promise<void>((resolve) => server.close(() => resolve())));
       return { actions };
     }
@@ -914,6 +926,17 @@ describe('agent-browser host viewer', () => {
       await vi.waitFor(() => expect(actions).toEqual(RESTART), { timeout: 2 * DAEMON_ACTION_TIMEOUT_MS + 1000 });
       await vi.waitFor(async () => expect((await ab(host, { op: 'diagnostics' } as BrowserOp, { session })).diagnostics?.screencast).toMatchObject({ refusals: 1 }), { timeout: DAEMON_ACTION_TIMEOUT_MS + 1000 });
     }, 10_000);
+
+    it.runIf(process.platform === 'win32').each(['missing', 'malformed', 'out of range', 'before boot'])('refuses a Windows daemon port that is %s', async (condition) => {
+      const { host, viewer, actions } = await streaming();
+      const file = join(process.env.AGENT_BROWSER_SOCKET_DIR!, `${session}.port`);
+      if (condition === 'missing') await fsp.unlink(file);
+      else if (condition === 'before boot') utimesSync(file, new Date(0), new Date(0));
+      else writeFileSync(file, condition === 'malformed' ? '123garbage' : '65536');
+      await viewer();
+      await vi.waitFor(async () => expect((await ab(host, { op: 'diagnostics' } as BrowserOp, { session })).diagnostics?.screencast).toMatchObject({ refusals: 1, last: { outcome: 'refused: no valid daemon port' } }));
+      expect(actions).toEqual([]);
+    });
 
     it('reaches no socket for a daemon its state files do not prove', async () => {
       const daemon = await fakeServer();

@@ -88,11 +88,10 @@ const session = documentSession<string>({
     return { content: markdown ? `${markdown}\n` : '', mark: markdown };
   },
   holds: mark => editorRef.current?.getMarkdown() === mark,
-  async apply(text) {
+  apply(text) {
     // A reload mounts a fresh editor: its own normalization is then not an edit, and undo starts over.
     uploadedWidths.clear();
     flushSync(() => root.render(<Page key={++loads} markdown={text.replace(/\r\n?/g, '\n')} />));
-    await new Promise(resolve => setTimeout(resolve));
   },
 }, {
   report(doc) { update({ doc }); },

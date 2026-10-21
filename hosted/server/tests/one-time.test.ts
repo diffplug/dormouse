@@ -129,14 +129,17 @@ async function pair(fixture = production) {
 const settle = () => new Promise((resolve) => setTimeout(resolve, 200));
 
 test("a Burrow mints a fresh room and hears its room frame first", async () => {
+  // Node and workerd read independently rounded clocks (a 2ms lead observed
+  // on Windows). Keep a small skew allowance when comparing processes.
+  const clockSkewMs = 100;
   const before = Date.now();
   const first = await mint();
   const second = await mint();
   for (const { frame } of [first, second]) {
     expect(isOneTimeRoomFrame(frame)).toBe(true);
     expect(frame.roomId).toHaveLength(E2E_ID_LENGTH);
-    expect(frame.expiresAt).toBeGreaterThanOrEqual(before + ONE_TIME_LINK_TTL_MS);
-    expect(frame.expiresAt).toBeLessThanOrEqual(Date.now() + ONE_TIME_LINK_TTL_MS);
+    expect(frame.expiresAt).toBeGreaterThanOrEqual(before + ONE_TIME_LINK_TTL_MS - clockSkewMs);
+    expect(frame.expiresAt).toBeLessThanOrEqual(Date.now() + ONE_TIME_LINK_TTL_MS + clockSkewMs);
   }
   expect(first.frame.roomId).not.toBe(second.frame.roomId);
   first.burrow.close();

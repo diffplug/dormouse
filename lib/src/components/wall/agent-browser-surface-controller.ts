@@ -1721,8 +1721,11 @@ export class AgentBrowserSurfaceController {
   handleKeyDownLike(e: KeyLike): void {
     const mod = e.metaKey || e.ctrlKey;
     if (mod && e.key.toLowerCase() === 'v') {
+      // A slow read must not land in a browser relaunched meanwhile.
+      const { phase, connection } = this;
+      if (phase.k !== 'live' || !connection) return;
       void readTextFromClipboard().then((text) => {
-        if (text) this.insertText(text);
+        if (text && this.phase === phase && this.connection === connection) this.insertText(text);
       });
       return;
     }

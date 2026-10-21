@@ -27,9 +27,13 @@ export function handlePaneShortcuts(
   ctx: WallKeyboardCtx,
   navHistory: NavHistoryRef,
 ): boolean {
+  // Option and AltGr can print the symbol bindings on non-US keyboards.
+  // Plain host chords still do not become pane actions; Cmd/Ctrl arrows are explicit.
+  const printedSymbol = e.altKey && ['|', '%', '"', '>'].includes(e.key);
+  if ((e.altKey && !printedSymbol) || ((e.metaKey || (e.ctrlKey && !printedSymbol)) && !isArrowKey(e.key))) return false;
   const sid = ctx.selectedIdRef.current;
   // Reopen acts on the Window, so it answers whatever is selected.
-  if (e.key === 'u' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+  if (e.key === 'u') {
     e.preventDefault();
     e.stopPropagation();
     ctx.reopenClosed();

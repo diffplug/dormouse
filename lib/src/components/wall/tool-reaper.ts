@@ -94,6 +94,7 @@ function waitFor(id: string, done: () => boolean, timeoutMs: number): Promise<vo
  */
 export async function stopTool(lath: LathWallEngine, id: string): Promise<boolean> {
   if (toolReapBlocker(id, lath.getMeta(id)?.params) !== null) return false;
+  const entry = registry.get(id);
   const state = getTerminalPaneState(id);
   const cwd = state.currentCommand?.cwdAtStart?.path ?? state.cwd?.path ?? null;
   beginToolStop(id);
@@ -107,8 +108,9 @@ export async function stopTool(lath: LathWallEngine, id: string): Promise<boolea
   } finally {
     payload = endToolStop(id);
   }
-  // Closed meanwhile: its closure owns the teardown.
-  if (!registry.has(id) || !lath.getMeta(id)) return false;
+  // Closed meanwhile: its closure owns the teardown, and a Session reusing
+  // the id is not the one this stop interrupted.
+  if (registry.get(id) !== entry || !lath.getMeta(id)) return false;
   const alert = getLivePersistedAlertState(id);
   reapTerminal(id);
   retireToolRun(lath, id);

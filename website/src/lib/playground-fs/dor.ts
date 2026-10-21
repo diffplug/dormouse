@@ -74,7 +74,7 @@ class DorCli extends DorProgram {
     const terminal: PickerTerminal = {
       columns: () => adapter.getPtySize(terminalId).cols,
       rows: () => adapter.getPtySize(terminalId).rows,
-      write: (text) => adapter.sendOutput(terminalId, text),
+      write: (text) => { if (!this.finished) adapter.sendOutput(terminalId, text); },
       listen: (onInput, onResize) => {
         this.input = onInput;
         const stopResize = adapter.onPtyResize(({ id }) => { if (id === terminalId) onResize(); });
@@ -83,8 +83,11 @@ class DorCli extends DorProgram {
       },
     };
     import("./cli")
-      .then(({ runPlaygroundCli }) => runPlaygroundCli(args, { fs, cwd, terminalId, client: this.client, terminal }))
-      .then(({ exitCode, stdout, stderr }) => this.finish(exitCode, crlf(stdout + stderr)), (error: unknown) => this.finish(1, errorText(error)));
+      .then(async ({ runPlaygroundCli }) => {
+        if (this.finished) return;
+        const { exitCode, stdout, stderr } = await runPlaygroundCli(args, { fs, cwd, terminalId, client: this.client, terminal });
+        this.finish(exitCode, crlf(stdout + stderr));
+      }).catch((error: unknown) => this.finish(1, errorText(error)));
   }
 
   handleInput(data: string): void {
@@ -93,6 +96,8 @@ class DorCli extends DorProgram {
   }
 
   protected cleanup(): void {
+    // End the picker itself too, releasing its listing and redraw timers.
+    this.input?.("\x03");
     this.stopPicker?.();
     this.client.cancel();
   }

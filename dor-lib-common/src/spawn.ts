@@ -66,7 +66,7 @@ const CLOSE_GRACE_MS = 250;
  * with `ENOBUFS` and none of the output, which may hold secrets.
  *
  * `input` is written to the child's stdin, which is then closed; without it
- * stdin is ignored.
+ * stdin is ignored unless `stdin: inherit` forwards the caller's stream.
  *
  * Explicit cmd.exe /s /c callers must set windowsVerbatimArguments: Node's
  * default MSVCRT escaping inserts backslashes that cmd.exe does not decode.
@@ -74,12 +74,12 @@ const CLOSE_GRACE_MS = 250;
 export function spawnAndCapture(
   binary: string,
   args: readonly string[],
-  options: { cwd?: string; timeoutMs?: number; env?: NodeJS.ProcessEnv; maxOutputBytes?: number; windowsVerbatimArguments?: boolean; input?: string } = {},
+  options: { cwd?: string; timeoutMs?: number; env?: NodeJS.ProcessEnv; maxOutputBytes?: number; windowsVerbatimArguments?: boolean; input?: string; stdin?: 'inherit' } = {},
 ): Promise<SpawnCaptureResult> {
   return new Promise((resolve) => {
     let child: ReturnType<typeof spawn>;
     try {
-      child = spawn(binary, args, { stdio: [options.input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'], windowsHide: true, cwd: options.cwd, env: options.env, windowsVerbatimArguments: options.windowsVerbatimArguments });
+      child = spawn(binary, args, { stdio: [options.input === undefined ? (options.stdin ?? 'ignore') : 'pipe', 'pipe', 'pipe'], windowsHide: true, cwd: options.cwd, env: options.env, windowsVerbatimArguments: options.windowsVerbatimArguments });
     } catch (error) {
       // Invalid argv (for example a NUL in an eval string) throws before a child
       // exists; preserve the same result contract as an asynchronous ENOENT.

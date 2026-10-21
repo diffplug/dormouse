@@ -6,6 +6,7 @@ import {
   asRead,
   keepRead,
   pageError,
+  pendingEnd,
   preLaunchNotice,
   reread,
   settle,
@@ -18,28 +19,68 @@ const state = (on: boolean | null, ids: string[] | null): AccountState => ({
   computers: ids && ids.map(computer),
 });
 
+/** `after` with the approval's own read. */
+const approved = (
+  after: AccountState,
+  approval: { mismatched?: boolean; redeemed?: boolean },
+): AccountState => ({ ...after, approval: { mismatched: false, redeemed: false, ...approval } });
+
 describe("approvalShows", () => {
   it("waits on a voice approval until Natural Voice is on", () => {
-    const shows = approvalShows("voice", state(false, []))!;
+    const shows = approvalShows("voice", state(false, []));
     expect(shows(state(false, []))).toBe(false);
     expect(shows(state(null, []))).toBe(false);
     expect(shows(state(true, []))).toBe(true);
   });
 
-  it("has nothing to wait on when Natural Voice is already on", () => {
-    expect(approvalShows("voice", state(true, []))).toBeNull();
+  it("waits on the approval's own redemption when Natural Voice is already on", () => {
+    const shows = approvalShows("voice", state(true, []));
+    expect(shows(state(true, []))).toBe(false);
+    expect(shows(approved(state(true, []), { redeemed: false }))).toBe(false);
+    expect(shows(approved(state(true, []), { redeemed: true }))).toBe(true);
   });
 
   it("waits on a remote approval until a computer not listed before appears", () => {
-    const shows = approvalShows("remote", state(false, ["a", "b"]))!;
+    const shows = approvalShows("remote", state(false, ["a", "b"]));
     expect(shows(state(false, ["a", "b"]))).toBe(false);
     expect(shows(state(false, ["a"]))).toBe(false);
     expect(shows(state(false, null))).toBe(false);
     expect(shows(state(false, ["c", "a"]))).toBe(true);
   });
 
-  it("has nothing to compare a remote approval with when no list was read", () => {
-    expect(approvalShows("remote", state(false, null))).toBeNull();
+  it("waits on the approval's own redemption when no computers list was read", () => {
+    const shows = approvalShows("remote", state(false, null));
+    expect(shows(state(false, ["c"]))).toBe(false);
+    expect(shows(approved(state(false, null), { redeemed: false }))).toBe(false);
+    expect(shows(approved(state(false, null), { redeemed: true }))).toBe(true);
+  });
+
+  it("waits on a change the page shows where one can, not the redemption read", () => {
+    expect(approvalShows("voice", state(false, []))(approved(state(false, []), { redeemed: true }))).toBe(false);
+    expect(approvalShows("remote", state(false, []))(approved(state(false, []), { redeemed: true }))).toBe(false);
+  });
+});
+
+describe("pendingEnd", () => {
+  const pending = {
+    userCode: "7KQM-X4TD",
+    shows: (after: AccountState) => after.voice?.on === true,
+    waiting: "waiting",
+    done: "done",
+    late: "late",
+    mismatch: "mismatch",
+  };
+
+  it("waits until a read shows the change or the approval's mismatch", () => {
+    expect(pendingEnd(pending, state(false, []))).toBeNull();
+    expect(pendingEnd(pending, approved(state(false, []), { mismatched: false }))).toBeNull();
+    expect(pendingEnd(pending, state(true, []))).toEqual({ text: "done" });
+  });
+
+  it("ends a mismatched approval with its error, even beside a change another made", () => {
+    const error = { text: "mismatch", error: true };
+    expect(pendingEnd(pending, approved(state(false, []), { mismatched: true }))).toEqual(error);
+    expect(pendingEnd(pending, approved(state(true, []), { mismatched: true }))).toEqual(error);
   });
 });
 
@@ -125,8 +166,8 @@ describe("settle", () => {
       .mockResolvedValueOnce(2);
     const opts = options();
     // Never handed a missed read: `toFixed` throws on one.
-    const done = (value: number) => value.toFixed() === "2";
-    await expect(settle(read, done, opts)).resolves.toBe("done");
+    const end = (value: number) => (value.toFixed() === "2" ? "two" : null);
+    await expect(settle(read, end, opts)).resolves.toEqual({ ended: "two" });
     expect(read).toHaveBeenCalledTimes(4);
     expect(opts.wait).toHaveBeenCalledTimes(4);
     expect(opts.wait).toHaveBeenCalledWith(5000);
@@ -134,13 +175,13 @@ describe("settle", () => {
 
   it("gives up once the timeout's reads all missed", async () => {
     const read = vi.fn(async () => 0);
-    await expect(settle(read, () => false, options())).resolves.toBe("timeout");
+    await expect(settle(read, () => null, options())).resolves.toBe("timeout");
     expect(read).toHaveBeenCalledTimes(4);
   });
 
   it("stops without reading again once cancelled", async () => {
     const unread = vi.fn(async () => 1);
-    await expect(settle(unread, () => true, options(() => true))).resolves.toBe(
+    await expect(settle(unread, () => 1, options(() => true))).resolves.toBe(
       "cancelled",
     );
     expect(unread).not.toHaveBeenCalled();
@@ -150,7 +191,7 @@ describe("settle", () => {
       return 1;
     });
     await expect(
-      settle(read, () => true, options(() => cancelled)),
+      settle(read, () => 1, options(() => cancelled)),
     ).resolves.toBe("cancelled");
     expect(read).toHaveBeenCalledTimes(1);
   });

@@ -10,6 +10,8 @@ The three release-gate pieces are named separately because they break independen
 
 **Why the expected values live in a file.** The script needs the spec's values as data; `.github/audit/` sits in `.github/workflows/workflow-audit.yaml`'s window, so an edit to them is surfaced like an edit to a prompt, and `ci-and-secrets` reads the file against its spec on every full run.
 
+The local unauthenticated probe returned an inconclusive result on Windows despite receiving HTTP 404 (2026-10-21): curl failed to write the response body to a Unix-only null-device path. A local HTTP regression covers real 404 and 200 responses plus a connection failure.
+
 ## Skipping an unchanged audit
 
 **Why a skip is safe.** A model pass over the same commit and the same GitHub state reads the same inputs; repeating it nightly bought variance, not coverage, at about $28 a run (2026-10). The deterministic checks still run every night, so live drift in a setting is caught whether or not the domains run. **Why seven days.** The domains also read what neither input records — a mutable upstream tag's content, npm attestations, models improving — so a skip never outlives a week. The tend tag's commit is hashed, so moving it forces a full run. **Why a dispatch never skips.** The release gate dispatches one and must audit the tag it ships, and a maintainer dispatching by hand wants a full run.

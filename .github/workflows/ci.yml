@@ -423,8 +423,8 @@ jobs:
       - name: Install shell test dependencies
         run: pnpm install --frozen-lockfile --ignore-scripts
 
-      - name: Windows shell tests
-        run: pnpm --dir lib exec vitest run src/host/browser-launch-env.test.ts src/lib/shell-escape.test.ts
+      - name: Windows browser host and shell tests
+        run: pnpm --dir lib exec vitest run src/host/browser-launch-env.test.ts src/host/agent-browser-host.test.ts src/lib/shell-escape.test.ts
 
       # node-pty ships the Windows addon and ConPTY DLL as prebuilds, so the
       # install above suffices. The Linux suite cannot exercise native close.

@@ -195,6 +195,20 @@ describe('stopTool', () => {
     expect(isToolReaped(ID)).toBe(false);
   });
 
+  it('never kills a replacement Session that reused the id mid-stop', async () => {
+    const lath = servingTool();
+    const stopped = stopTool(lath, ID);
+    disposeSession(ID);
+    getOrCreateTerminal(ID);
+    startRun();
+    kills.length = 0;
+    await finishStop();
+    expect(await stopped).toBe(false);
+    expect(kills).toEqual([]);
+    expect(registry.get(ID)?.exited).not.toBe(true);
+    expect(isToolReaped(ID)).toBe(false);
+  });
+
   it('stops nothing that is not eligible', async () => {
     const lath = servingTool();
     announce({ dehydrate: false });

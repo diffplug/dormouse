@@ -107,9 +107,14 @@ const WINDOWS_PORTABLE_UNSAFE = /["“-„`%!]|\$(?!\\)/;
  *  double-quoted, where cmd's operators and PowerShell's single quotes are
  *  literal. Null when no such form exists. */
 export function quoteWindowsPortableArg(arg: string): string | null {
-  if (arg === '') return '""';
+  if (arg === '') return null;
   if (WINDOWS_SAFE_ARG.test(arg)) return arg;
   if (WINDOWS_PORTABLE_UNSAFE.test(arg) || hasShellInputControls(arg)) return null;
+  // PowerShell's legacy native binder removes our quotes unless there is an
+  // ASCII space. A .cmd target then parses these characters as syntax. Empty
+  // arguments disappear in that binder; a quoted trailing backslash instead
+  // escapes the closing quote in the native Windows argv parser.
+  if ((!arg.includes(' ') && /[&|<>^]/.test(arg)) || arg.endsWith('\\')) return null;
   return `"${arg}"`;
 }
 

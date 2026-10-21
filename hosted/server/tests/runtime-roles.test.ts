@@ -74,6 +74,7 @@ const EXPECTED: Record<Worker, string[]> = {
     "dormouse_relay_burrows.enrolledAt: UPDATE",
     "dormouse_relay_burrows: INSERT, SELECT",
     "dormouse_relay_challenges: DELETE, INSERT, SELECT",
+    "dormouse_relay_enrollment_approvals.mismatchedAt: UPDATE",
     "dormouse_relay_enrollment_approvals.redeemedAt: UPDATE",
     "dormouse_relay_enrollment_approvals.redeemedBurrowId: UPDATE",
     "dormouse_relay_enrollment_approvals: DELETE, SELECT",

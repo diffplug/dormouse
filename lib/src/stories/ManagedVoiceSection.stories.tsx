@@ -62,21 +62,31 @@ export const NotEnrolled: Story = {
   },
 };
 
-/** The code waiting at the account, as the service reports it. */
+/** The digits waiting to be typed at the account, as the host reports them: remote control's view. */
 export const WaitingForApproval: Story = {
   parameters: {
     primedBurrow: { status: UNENROLLED_STATUS },
     primedManagedVoice: {
       configured: false,
       enrollment: {
-        status: 'waiting', userCode: '7KQM-X4TD',
+        status: 'waiting', confirmDigits: '47',
         verificationUrl: 'https://hosted.dormouse.sh/enroll?purpose=voice#7KQM-X4TD',
-        expiresAt: STORY_NOW + 10 * 60_000,
+        expiresAt: STORY_NOW + 10 * 60_000, accountFull: false,
       },
     },
     docs: { story: { height: '420px' } },
   },
-  play: settled('7KQM-X4TD'),
+  play: settled('47'),
+};
+
+/** Approved with other digits: Natural Voice stays off, and Turn on gets a new code. */
+export const ApprovalMismatch: Story = {
+  parameters: {
+    primedBurrow: { status: UNENROLLED_STATUS },
+    primedManagedVoice: { configured: false, enrollment: { status: 'ended', reason: 'mismatch' } },
+    docs: { story: { height: '420px' } },
+  },
+  play: settled(/so Natural Voice was not turned on/),
 };
 
 /** Under Nothing: why it cannot enroll, and the way to Network — never a silent policy change. */

@@ -35,7 +35,7 @@ Source of truth: `surfaceKindFromParams` in `lib/src/components/wall/browser-sur
 
 **Must pass named-tool inputs as argument values, never substitute them into a shell-command string.** String `run` accepts no arguments and remains literal shell syntax. List `run` expands `$TARGET`, `$CWD`, and `$PROJECT_ROOT` within elements; a whole `$ARGS` element expands all input arguments; without `$ARGS` or `$TARGET` the inputs are appended. **Must quote argv for the destination Session's shell**, using the current default only for new Sessions; takeover stores that quoted command for restarts. A cmd or PowerShell take-over caller or navigation source gets the Windows-portable form (`docs/specs/dor-cli.md` -> "Current Implemented Commands"): another Windows shell may be at its prompt.
 
-**Must require exactly one existing local regular file or directory when `$TARGET` appears in the run list or dedupe key**, resolving a relative path against the invocation CWD and following symlinks to a canonical absolute path before substitution and reuse. **Must accept a `file:` URL only when its host is empty, `localhost`, or this machine's name** (case-insensitive, either side in its short form before the first dot); reject other URLs, missing paths, and every other file kind (fifo, socket, device). Run and key inputs are validated before approval shows.
+**Must require exactly one existing local regular file or directory when `$TARGET` appears in the run list or dedupe key**, resolving a relative path against the invocation CWD and following symlinks, never to a UNC or device path, to a canonical absolute path before substitution and reuse. **Must accept a `file:` URL only when its host is empty, `localhost`, or this machine's name** (case-insensitive, either side in its short form before the first dot); reject other URLs, missing paths, and every other file kind (fifo, socket, device). Run and key inputs are validated before approval shows.
 
 **Must resolve a Tool's initial viewport host-side with its declaration, including after approval.** Iframe Tools accept only `pane-sync`; automated Tools accept a preset or inline dimensions. Reuse keeps live sizing (`docs/specs/dor-browser.md` → Viewport presets).
 
@@ -138,6 +138,8 @@ A reap stops an idle Tool's Session, shell included; rehydrate starts it again i
 1. Hold the run ([Run end](#run-end)), then write Ctrl+C to the PTY, the graceful-stop signal on every platform; ConPTY delivers it as `CTRL_C_EVENT` (rationale).
 2. Keep the last `dehydrate` payload the run emits from then until the kill; none earlier counts.
 3. Kill the PTY at the prompt or after a grace, whichever comes first, so a hung Tool blocks nothing.
+
+**Never abandon a stop once its Ctrl+C is written**: only a close or a replacement Session cancels the kill, never input, a dirty report, or being shown, which rehydrates once the stop ends (rationale).
 
 **Must rehydrate a reaped Tool when it becomes visible, or when `dor tool` or `dor open` matches it** (reporting `adopted`), never into a closing or transferring Workspace: a fresh shell in the run's directory, the saved command typed as cold restore types it ([Persistence and hosts](#persistence-and-hosts)). It degrades in tiers:
 

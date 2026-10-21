@@ -141,6 +141,9 @@ export function ScanInvitation({
    * an error on screen telling the user to scan again.
    */
   const acceptingRef = useRef(false);
+  // Retire pending parses without disabling fresh input if this screen stays up.
+  const parseGenerationRef = useRef(0);
+  useEffect(() => () => { parseGenerationRef.current++; }, []);
   /**
    * The tail of every start this screen has run, so **at most one is ever in
    * flight**.
@@ -176,12 +179,15 @@ export function ScanInvitation({
   const accept = useCallback(
     async (text: string): Promise<void> => {
       if (acceptingRef.current) return;
+      const generation = parseGenerationRef.current;
       const invitation = await parsePairingInvitationUrl(text, appOrigin);
+      if (generation !== parseGenerationRef.current || acceptingRef.current) return;
       if (!invitation) {
-        setRejected(await rejectionFor(text, appOrigin));
+        const reason = await rejectionFor(text, appOrigin);
+        if (generation === parseGenerationRef.current && !acceptingRef.current) setRejected(reason);
         return;
       }
-      if (acceptingRef.current) return;
+      parseGenerationRef.current++;
       acceptingRef.current = true;
       // A code that parsed clears the rejection this screen may still be
       // showing: the two rows stack otherwise, and a ceremony that fails after
@@ -261,6 +267,7 @@ export function ScanInvitation({
           className={pkButton({ tone: 'ghost', size: 'sm' })}
           disabled={busy !== null}
           onClick={() => {
+            parseGenerationRef.current++;
             stopCamera();
             onCancel();
           }}

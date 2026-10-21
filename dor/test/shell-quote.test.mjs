@@ -58,11 +58,11 @@ test('PowerShell quoting doubles every single-quote character PowerShell reads',
 // runs the paths through the real shells).
 test('a Windows-portable command keeps its program bare and refuses what any of them expands', () => {
   assert.equal(
-    buildWindowsPortableCommand(['dor', '__view-file', 'C:\\a b\\it’s (1)&x.md', '']),
-    'dor __view-file "C:\\a b\\it’s (1)&x.md" ""',
+    buildWindowsPortableCommand(['dor', '__view-file', 'C:\\a b\\it’s (1)&x.md']),
+    'dor __view-file "C:\\a b\\it’s (1)&x.md"',
   );
   assert.equal(buildWindowsPortableCommand(['C:\\Program Files\\view.exe', 'a.md']), null);
-  for (const arg of ['C:\\$(whoami).md', 'a`b', '%PATH%', 'a!b', 'a"b', 'a“b', 'a\rb']) {
+  for (const arg of ['', 'C:\\a&rem.md', 'C:\\a^b.md', 'C:\\a b\\', 'C:\\$(whoami).md', 'a`b', '%PATH%', 'a!b', 'a"b', 'a“b', 'a\rb']) {
     assert.equal(buildWindowsPortableCommand(['dor', arg]), null, arg);
   }
   assert.equal(buildWindowsPortableCommand([]), null);

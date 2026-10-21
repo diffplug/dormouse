@@ -49,6 +49,30 @@ describe('doPaste three-tier fallthrough', () => {
     });
   });
 
+  it.each([false, true])('pastes supplied native text with bracketed mode %s without reading the clipboard', async (bracketed) => {
+    mocks.bracketedPaste = bracketed;
+    mocks.readText.mockResolvedValue('unrelated clipboard contents');
+    mocks.readClipboardFilePaths.mockResolvedValue(null);
+    mocks.readClipboardImageAsFilePath.mockResolvedValue(null);
+    await doPaste('t1', 'first\nsecond');
+    expect(mocks.writePty).toHaveBeenCalledExactlyOnceWith('t1',
+      bracketed ? '\x1b[200~first\nsecond\x1b[201~' : 'first\nsecond');
+    expect(mocks.readText).not.toHaveBeenCalled();
+    expect(mocks.readClipboardFilePaths).not.toHaveBeenCalled();
+    expect(mocks.readClipboardImageAsFilePath).not.toHaveBeenCalled();
+  });
+
+  it('treats supplied empty paste text as empty rather than reading another clipboard', async () => {
+    mocks.readText.mockResolvedValue('unrelated clipboard contents');
+    mocks.readClipboardFilePaths.mockResolvedValue(null);
+    mocks.readClipboardImageAsFilePath.mockResolvedValue(null);
+    await doPaste('t1', '');
+    expect(mocks.writePty).not.toHaveBeenCalled();
+    expect(mocks.readText).not.toHaveBeenCalled();
+    expect(mocks.readClipboardFilePaths).not.toHaveBeenCalled();
+    expect(mocks.readClipboardImageAsFilePath).not.toHaveBeenCalled();
+  });
+
   it('prefers file refs over text and skips the image read', async () => {
     mocks.readClipboardFilePaths.mockResolvedValue(['/tmp/a.png', '/tmp/b file.png']);
     mocks.readText.mockResolvedValue('coexisting text payload');
@@ -160,6 +184,10 @@ describe('doPaste three-tier fallthrough', () => {
     ['cmd', 'C:\\dl\\$(whoami).txt'],
     ['powershell', 'C:\\dl\\a%PATH%b.txt'],
     ['powershell', 'C:\\dl\\a`$(whoami).txt'],
+    ['cmd', 'C:\\dl\\a&rem.md'],
+    ['powershell', 'C:\\dl\\a&rem.md'],
+    ['powershell', 'C:\\dl\\a^b.md'],
+    ['cmd', 'C:\\a b\\'],
   ] as const)('refuses the whole paste into a %s Session when a file name has no literal form', async (kind, name) => {
     mocks.shellKind = kind;
     mocks.readClipboardFilePaths.mockResolvedValue(['C:\\fine.png', name]);

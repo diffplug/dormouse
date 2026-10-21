@@ -14,12 +14,12 @@ import { COPY_FLASH_MS, failCopy, flashCopy, getMouseSelectionState, TOUCH_COPY_
  * says so instead, for that selection, and keeps it.
  */
 export async function copySelection(terminalId: string, { touch = false }: { touch?: boolean } = {}): Promise<void> {
-  const { selection, copyEditor, programCopy } = getMouseSelectionState(terminalId);
+  const { selection, selectionEpoch, copyEditor, programCopy } = getMouseSelectionState(terminalId);
   if (!selection || !copyEditor) return;
   const text = editorRendering(copyEditor, programCopy).text;
   if (!text) return;
   const copied = await writeTextToClipboard(text);
-  if (getMouseSelectionState(terminalId).selection !== selection) return;
+  if (getMouseSelectionState(terminalId).selectionEpoch !== selectionEpoch) return;
   if (!copied) {
     failCopy(terminalId);
     return;

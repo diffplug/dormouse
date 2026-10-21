@@ -3,13 +3,14 @@
  * (`docs/specs/layout.md` → "Workspace names"). Bundled into the standalone
  * sidecar as `git-info.cjs`.
  *
- * Only `rev-parse` and `config --get` run, and `HEAD` is read directly: nothing
- * reads the index, and `runGit` disables `core.fsmonitor` regardless. A
- * repository's `.git/config` is still read, the risk `git-upstream.ts` already
- * accepts.
+ * `localGitRepository` finds the repository, `HEAD` is read directly, and only
+ * `config --get` runs: nothing reads the index, and `runGit` disables
+ * `core.fsmonitor` regardless. A repository's `.git/config` is still read, the
+ * risk `git-upstream.ts` already accepts.
  */
 import { readFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
+import { localGitRepository } from 'dor-lib-common';
 import type { GitDirInfo, GitInfoResult } from '../lib/platform/git-types';
 import { settleAllWithin } from '../lib/settle-within';
 import { runGit } from './git-cli';
@@ -47,13 +48,15 @@ function checkoutName(commonDir: string): string {
   return base === '.git' ? basename(resolve(commonDir, '..')) : base.replace(/\.git$/, '');
 }
 
-/** `ref: refs/heads/<branch>`, or a detached commit's full hash. Read rather
- *  than asked of git: it exists even on an unborn branch, and saves a spawn. */
-async function headBranch(gitDir: string): Promise<string | null> {
+/** The branch `HEAD` names (`ref: refs/heads/<branch>`), or a detached
+ *  commit's full hash, from a git directory `localGitRepository` checked.
+ *  Read rather than asked of git: it exists even on an unborn branch, saves a
+ *  spawn, and opens no ref. */
+export async function readHead(gitDir: string): Promise<{ branch: string } | { detached: string } | null> {
   const head = (await readFile(join(gitDir, 'HEAD'), 'utf8')).trim();
   const ref = /^ref: refs\/heads\/(.+)$/.exec(head);
-  if (ref) return ref[1];
-  return /^[0-9a-f]{7,}$/.test(head) ? head.slice(0, 7) : null;
+  if (ref) return { branch: ref[1] };
+  return /^[0-9a-f]{7,}$/.test(head) ? { detached: head } : null;
 }
 
 export async function lookupGitDir(path: string): Promise<GitDirInfo | null> {
@@ -61,16 +64,16 @@ export async function lookupGitDir(path: string): Promise<GitDirInfo | null> {
   // context directory actions").
   const dir = await canonicalLocalDirectory(path);
   if (!dir) return null;
-  const [dirs, remote] = await Promise.all([
-    runGit(dir, ['rev-parse', '--path-format=absolute', '--git-common-dir', '--git-dir']),
-    // Fails harmlessly outside a repository, so it need not wait for rev-parse.
+  const [repository, remote] = await Promise.all([
+    localGitRepository(dir),
+    // `runGit` asks `localGitRepository` itself, so this need not wait.
     runGit(dir, ['config', '--get', 'remote.origin.url']),
   ]);
-  const [commonDir, gitDir] = dirs?.split('\n') ?? [];
-  if (!commonDir || !gitDir) return null;
-  const branch = await headBranch(gitDir).catch(() => null);
-  if (!branch) return null;
-  const repo = (remote && remoteRepoName(remote)) || checkoutName(commonDir);
+  if (!repository) return null;
+  const head = await readHead(repository.gitDir).catch(() => null);
+  if (!head) return null;
+  const branch = 'branch' in head ? head.branch : head.detached.slice(0, 7);
+  const repo = (remote && remoteRepoName(remote)) || checkoutName(repository.commonDir);
   return { repo, branch };
 }
 

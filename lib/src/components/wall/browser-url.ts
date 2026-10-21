@@ -98,7 +98,7 @@ export function iframeRefusal(url: string): string | null {
   if (!url) return null;
   const framed = browserSurfaceUrl(url);
   if (!framed) return IFRAME_HTTP_ONLY;
-  return framed.startsWith('https:') && getPlatformOrNull()?.createIframeProxyUrl ? IFRAME_HTTP_ONLY : null;
+  return new URL(framed).protocol === 'https:' && getPlatformOrNull()?.createIframeProxyUrl ? IFRAME_HTTP_ONLY : null;
 }
 
 /** The host part of a schemeless authority, minus any `:port`. An IPv6 literal

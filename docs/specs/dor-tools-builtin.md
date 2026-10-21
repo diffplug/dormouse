@@ -31,7 +31,7 @@ Source of truth: `runFileViewer` in `dor-tools-builtin/src/file-viewer.ts`; `fil
 
 **Must render supported UTF-8 text other than Markdown in bundled Monaco**. Never execute source text or load its referenced assets.
 
-**Must save only on Save or Cmd/Ctrl+S, to the opened canonical file.** Preserve UTF-8 BOM and the dominant line ending (mixed endings are normalized). Bound text to 8 MiB; reject invalid UTF-8. Atomically replace only after comparing the submitted revision with current disk bytes and file identity; a conflict or write failure keeps the edit dirty. New edits during a save remain dirty after that save succeeds. Reload asks before discarding edits and reads the current file at the authorized path, including atomic replacements.
+**Must save only on Save or Cmd/Ctrl+S, to the opened canonical file.** Preserve UTF-8 BOM and the dominant line ending (mixed endings are normalized). Bound text to 8 MiB; reject invalid UTF-8. Atomically replace only after comparing the submitted revision with current disk bytes and file identity; a conflict or write failure keeps the edit dirty. New edits during a save remain dirty after that save succeeds. Reload asks before discarding edits and reads the current authorized file, including atomic replacements. **Must share concurrent reloads, reject reads overtaken by edits or saves, and keep edits after applying a reload dirty.**
 
 **Must preserve document permissions on replacement.** Drafts sit beside the document (POSIX `0600`, then the document's mode; Windows inherits the directory ACL), and on Windows the replaced original is backed up there too. **Must keep the draft and backup when replacement is unconfirmed** and report their location: failure can mean partial replacement or a commit before its reply. (rationale)
 
@@ -90,7 +90,8 @@ Source of truth: `BUILTIN_HANDLERS` in `dor-tools-builtin/src/file-viewer-format
 `builtin:folder`, the default folder viewer (`docs/specs/dor-tool.md` → Folders), is a Tool-owned `dor` process, titled as in [File viewer](#file-viewer):
 
 - **Must list names and entry types only, lazily loading expanded directories, and never serve file contents** (rationale).
-- **Must compact a directory containing exactly one child directory and nothing else into a slash-separated row**, continuing up to 32 levels per listing; hidden/ignored entries still count as siblings. Never compact through a symlink child. Refresh and Collapse all preserve the ordinary select/activate contract.
+- **Must compact a directory whose only entry is a directory into a slash-separated row**, up to 32 levels per listing; hidden/ignored entries count as siblings. Never compact through a symlink child.
+- **Must refresh expanded directories and ignore superseded results or errors**, preserving the select/activate contract through Refresh and Collapse all.
 - **Must read at most 100,000 names and retain at most 5,000 entries before following symlinks.**
 - **Must route the page's select and activate through its own process**: a same-origin POST to its capability listener, which writes it to the Tool's terminal as an OSC 367 `open` (`docs/specs/dor-tool.md` → OSC 367), `preview` for a select, in arrival order. The page learns only that it was sent, or, for a path or serialized payload the OSC encoder refuses, an error instead of a write.
 - **Must hold an activate until every select in flight settles**, keeping selects concurrent. (rationale)

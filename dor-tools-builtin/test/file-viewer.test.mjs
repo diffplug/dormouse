@@ -162,6 +162,17 @@ test('rejects parent-directory references and symlinks escaping the document dir
   assert.notEqual((await get(viewer, asset(viewer, '../secret.txt'))).status, 200);
 });
 
+test('never follows a referenced symlink to a share', { skip: process.platform === 'win32' }, async () => {
+  // POSIX reads `//<root>/pic.svg` as `<root>/pic.svg`, inside the grant, so
+  // only the refusal keeps it from being served.
+  await writeFile(join(root, 'pic.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>');
+  await symlink(`/${join(root, 'pic.svg')}`, join(root, 'linked.svg'));
+  const viewer = await start('index.html', '<img src="linked.svg"><img src="pic.svg">');
+  assert.equal((await get(viewer, asset(viewer, 'pic.svg'))).status, 200);
+  assert.equal((await get(viewer, asset(viewer, 'linked.svg'))).status, 404);
+  await assert.rejects(startFileViewer(join(root, 'linked.svg')));
+});
+
 test('supports byte ranges and HEAD for media presentation', async () => {
   const viewer = await start('sample.wav', 'RIFF example bytes');
   assert.equal((await get(viewer)).headers['content-type'], 'audio/wav');

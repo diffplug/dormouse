@@ -57,6 +57,6 @@ export function playgroundToolControl(fs: VirtualFs) {
 export async function playgroundIframeUrl(targetUrl: string): Promise<IframeProxyResult> {
   const url = new URL(targetUrl);
   return url.hostname === "localhost" && url.pathname.startsWith(VIEWER_SCOPE)
-    ? { ok: true, url: `${location.origin}${url.pathname}${url.search}` }
+    ? { ok: true, url: `${location.origin}${url.pathname}${url.search}${url.hash}` }
     : { ok: false, reason: "scheme", detail: "the playground frames only its own file viewers" };
 }

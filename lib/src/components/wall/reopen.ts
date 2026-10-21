@@ -1,3 +1,4 @@
+import { isWorkspaceTransferPending } from '../../lib/window-session-aggregator';
 import type { ReopenResponse } from 'dor/commands/types';
 import { getPlatform } from '../../lib/platform';
 import { newestReopenClosedAt, popReopenRecord, pushReopenRecord, type SurfaceReopenRecord, type WorkspaceReopenRecord } from '../../lib/reopen-stack';
@@ -59,6 +60,11 @@ function reopenSurface(record: SurfaceReopenRecord, gesture: boolean): ReopenRes
     pushReopenRecord(record);
     if (gesture) return null;
     throw new Error(mountingRefusal(getActiveWorkspaceId()));
+  }
+  if (isWorkspaceTransferPending(handle.workspaceId)) {
+    pushReopenRecord(record);
+    if (gesture) { handle.showNotice('Workspace is transferring'); return null; }
+    throw new Error('Workspace is transferring');
   }
   if (gesture) setActiveWorkspace(handle.workspaceId);
   const id = handle.reopenSurface(record, gesture);

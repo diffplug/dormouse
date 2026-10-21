@@ -1,5 +1,8 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { delimiter, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
 import { shellEscapePath, shellEscapePosix } from './shell-escape';
 
@@ -82,14 +85,12 @@ describe('shellEscapePosix', () => {
 const WINDOWS_LITERAL: [string, string][] = [
   ['C:\\Users\\a.png', 'C:\\Users\\a.png'],
   ['C:\\a file.png', '"C:\\a file.png"'],
-  ['', '""'],
   ["C:\\it's.png", `"C:\\it's.png"`],
   // PowerShell closes a single-quoted string at U+2018–U+201B too; inside
   // double quotes, as in cmd, they are plain characters.
   ['C:\\x’; whoami; ’.txt', '"C:\\x’; whoami; ’.txt"'],
   ['a‘b‚c‛d', '"a‘b‚c‛d"'],
   ['C:\\a＂b＇c.txt', '"C:\\a＂b＇c.txt"'],
-  ['C:\\a;b&whoami&c|d.txt', '"C:\\a;b&whoami&c|d.txt"'],
   ['C:\\a (1)^.txt', '"C:\\a (1)^.txt"'],
   // PowerShell's argument mode reads a bare comma as the array operator and a
   // leading `@` as splatting.
@@ -101,6 +102,13 @@ const WINDOWS_LITERAL: [string, string][] = [
 
 /** File names no form keeps literal in cmd, Windows PowerShell, and pwsh. */
 const WINDOWS_REFUSED = [
+  '',
+  'C:\\repo\\a&rem.md',
+  'C:\\a;b&whoami&c|d.txt',
+  'C:\\a^b.txt',
+  'C:\\a<b.txt',
+  'C:\\a b\\',
+  'C:\\café\\',
   'C:\\dl\\$(whoami).txt',
   '$env:USERNAME.txt',
   'C:\\a$',
@@ -159,16 +167,20 @@ describe('shellEscapePosix round-trips through a real shell', () => {
 function argvThrough(shell: string, path: string, typed: string[]): unknown {
   if (shell === 'cmd') {
     const line = `"${process.execPath}" -e "process.stdout.write(JSON.stringify(process.argv.slice(1)))" -- ${typed.join(' ')}`;
-    const result = spawnSync(path, ['/d', '/s', '/c', `"${line}"`], { encoding: 'utf8', windowsVerbatimArguments: true });
-    return JSON.parse(result.stdout || JSON.stringify(result.stderr));
+    const result = spawnSync(path, ['/d', '/s', '/c', `"${line}"`], { encoding: 'utf8', windowsVerbatimArguments: true, windowsHide: true, timeout: 10_000 });
+    expect(result.error).toBeUndefined();
+    expect(result.status, result.stderr).toBe(0);
+    return JSON.parse(result.stdout);
   }
   // A PowerShell function, so the shell's own argument parsing is what is read.
   const script = '[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false); '
     + 'function argv { [Console]::Out.Write((ConvertTo-Json -Compress -InputObject @($args))) }; '
     + `argv ${typed.join(' ')}`;
   const encoded = Buffer.from(script, 'utf16le').toString('base64');
-  const result = spawnSync(path, ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded], { encoding: 'utf8' });
-  return JSON.parse(result.stdout || JSON.stringify(result.stderr));
+  const result = spawnSync(path, ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded], { encoding: 'utf8', windowsHide: true, timeout: 10_000 });
+  expect(result.error).toBeUndefined();
+  expect(result.status, result.stderr).toBe(0);
+  return JSON.parse(result.stdout);
 }
 
 describe.skipIf(process.platform !== 'win32')('a cmd or PowerShell Session\'s path round-trips through every Windows shell', { timeout: 60_000 }, () => {
@@ -176,8 +188,40 @@ describe.skipIf(process.platform !== 'win32')('a cmd or PowerShell Session\'s pa
   const shells: [string, string | null][] = [
     ['cmd', findShell(`${root}\\System32\\cmd.exe`)],
     ['powershell', findShell(`${root}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`)],
-    ['pwsh', findShell(`${process.env.ProgramFiles ?? 'C:\\Program Files'}\\PowerShell\\7\\pwsh.exe`)],
+    ['pwsh', findShell(...(process.env.PATH ?? '').split(delimiter).map(dir => join(dir, 'pwsh.exe')), `${process.env.ProgramFiles ?? 'C:\\Program Files'}\\PowerShell\\7\\pwsh.exe`)],
   ];
+  it('has every Windows shell on the CI runner', () => {
+    if (process.env.CI) expect(shells.filter(([, shell]) => !shell)).toEqual([]);
+  });
+
+  // Exercise the real shipped batch launcher, with only its CLI entrypoint
+  // replaced by an argv recorder. A PowerShell function misses this boundary.
+  for (const [name, shell] of shells) {
+    it.skipIf(!shell)(`passes accepted paths through dor.cmd from ${name}`, () => {
+      const dir = mkdtempSync(join(tmpdir(), 'dor argv-'));
+      try {
+        const recorder = join(dir, 'argv.cjs');
+        writeFileSync(recorder, 'process.stdout.write(JSON.stringify(process.argv.slice(2)))');
+        const bin = fileURLToPath(new URL('../../../dor/bin/', import.meta.url));
+        const paths = [...WINDOWS_LITERAL.map(([path]) => path), ...WINDOWS_REFUSED];
+        const accepted = paths.flatMap(path => {
+          const quoted = shellEscapePath(path, 'powershell');
+          return quoted === null ? [] : [{ path, quoted }];
+        });
+        const line = 'dor ' + accepted.map(({ quoted }) => quoted).join(' ');
+        const env = { ...process.env, DORMOUSE_NODE: process.execPath, DORMOUSE_CLI_JS: recorder, PATH: bin + delimiter + process.env.PATH };
+        const args = name === 'cmd' ? ['/d', '/s', '/c', line] : ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(line, 'utf16le').toString('base64')];
+        const result = spawnSync(shell!, args, { env, cwd: dir, encoding: 'utf8', windowsVerbatimArguments: name === 'cmd', windowsHide: true, timeout: 10_000 });
+        expect(result.error).toBeUndefined();
+        expect(result.status, result.stderr).toBe(0);
+        expect(result.stderr).toBe('');
+        expect(JSON.parse(result.stdout)).toEqual(accepted.map(({ path }) => path));
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  }
+
   // The refused names too: any that were typed must come back literally.
   const paths = [...WINDOWS_LITERAL.map(([path]) => path), ...WINDOWS_REFUSED];
   for (const kind of ['cmd', 'powershell'] as const) {

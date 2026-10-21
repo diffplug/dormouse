@@ -9,7 +9,7 @@ The standalone app checks for updates on launch, where the network policy allows
 
 On launch the updater, in order:
 
-1. **Must read and clear the post-install marker** (§localStorage) and show its notice; a reported failure suppresses this launch's check and reminder.
+1. **Must read and clear the post-install marker** (§localStorage) and show its notice; a reported failure suppresses this launch's automatic check and reminders, even after dismissal.
 2. Reads the network policy over the Burrow link and, where it allows (`docs/specs/remote-network.md` → "Updates"), calls `check()`: no update is silent, an update raises the approval prompt.
 3. Shows the reminder if due, recording `remindedAt`.
 

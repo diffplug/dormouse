@@ -566,6 +566,15 @@ export default function App({
           // either. Both are no-ops once a successful connect has moved on.
           setPhase((current) => (current.at === 'pairing' ? { at: 'burrows' } : current));
           await loadBurrows().catch(() => undefined);
+          // Cancellation also covers rejected WebAuthn/storage work. Account
+          // failures still reach run(), which restores the sign-in screen.
+          if (
+            cancelledPairingRef.current &&
+            !(err instanceof SessionExpiredError) &&
+            !(err instanceof PasskeyUnavailableError)
+          ) {
+            return;
+          }
           throw err;
         }
       }),

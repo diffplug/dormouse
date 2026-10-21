@@ -24,6 +24,15 @@ function context(): WallKeyboardCtx {
 beforeEach(() => setWorkspaces({ workspaces: [{ id: 'ws-a', name: 'App' }, { id: 'ws-b', name: 'Build' }], activeId: 'ws-a' }));
 
 describe('workspace row navigation', () => {
+  it('leaves Alt+Arrow to its host instead of navigating the Wall', () => {
+    const ctx = context();
+    const event = new KeyboardEvent('keydown', { key: 'ArrowUp', altKey: true, cancelable: true });
+    expect(handlePaneNavigation(event, ctx, { current: null })).toBe(false);
+    expect(event.defaultPrevented).toBe(false);
+    expect(ctx.selectWorkspace).not.toHaveBeenCalled();
+    expect(ctx.nav.findInDirection).not.toHaveBeenCalled();
+  });
+
   it('moves from the top pane through tabs and + without activating, then returns to the pane', () => {
     const ctx = context();
     const history: NavHistoryRef = { current: null };
