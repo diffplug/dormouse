@@ -51,6 +51,10 @@ export class Terminal {
     return listen(this.resizeListeners, listener);
   }
 
+  onWriteParsed(): { dispose: () => void } {
+    return { dispose: () => {} };
+  }
+
   onRender(): { dispose: () => void } {
     return { dispose: () => {} };
   }

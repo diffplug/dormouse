@@ -59,6 +59,7 @@ vi.mock("@xterm/xterm", () => ({
     blur(): void {}
     onData(): { dispose: () => void } { return { dispose: () => {} }; }
     onResize(): { dispose: () => void } { return { dispose: () => {} }; }
+    onWriteParsed(): { dispose: () => void } { return { dispose: () => {} }; }
     onRender(): { dispose: () => void } { return { dispose: () => {} }; }
     dispose(): void {}
   },
