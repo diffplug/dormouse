@@ -253,8 +253,8 @@ function wireXtermHandlers(
     }
 
     // CSI/SS3 can encode real keys. The broader filter protects the prompt
-    // recorder only; a wheel-only chunk types no text.
-    if (!inputIsSyntheticTerminalReport(input) && stripMouseReportsFromInput(input).length > 0) {
+    // recorder only.
+    if (!inputIsSyntheticTerminalReport(input)) {
       recordTerminalUserInput(id, input, makePromptLineReader(terminal));
     }
     writeUserInput(id, input);
