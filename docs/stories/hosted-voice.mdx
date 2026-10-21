@@ -1,0 +1,63 @@
+import { Meta, Canvas } from '@storybook/addon-docs/blocks';
+import * as ManagedVoice from '../../lib/src/stories/ManagedVoiceSection.stories';
+import * as SignIn from '../../hosted/src/stories/SignIn.stories';
+import * as Enrollment from '../../hosted/src/stories/Enrollment.stories';
+import * as Voice from '../../hosted/src/stories/Voice.stories';
+
+<Meta title="Hosted/Natural Voice walkthrough" />
+
+# Turn Natural Voice on, then off
+
+Follow the app's Natural Voice choice through account approval and back to the app, then use the account-wide off control. These are fixed stories of the real components; approving one does not change the next or contact Hosted.
+
+> This walkthrough owns no behavior. `docs/specs/hosted.md` → “Managed voice” and “Burrow enrollment”, and `docs/specs/alert.md` → “Settings dialog” own the behavior shown here.
+
+## Start in the app's voice settings
+
+Natural Voice has its own disclosure and approval button. If Network is still Nowhere, the app points to Network before it can proceed. This journey assumes a permitted network policy and an account entitled to use Natural Voice.
+
+<Canvas of={ManagedVoice.NotEnrolled} story={{ autoplay: true }} />
+
+“Turn on Natural Voice” opens a request with two digits, just as remote enrollment does, but the request is for voice.
+
+<Canvas of={ManagedVoice.WaitingForApproval} story={{ autoplay: true }} />
+
+## Sign in and approve voice at Hosted
+
+The browser keeps the purpose visible while signing in. Before launch, a signed-out browser can meet the same gate as the [account walkthrough](?path=/docs/hosted-account-walkthrough--docs); invited testers can sign in first and reopen the app's link. After provider sign-in, reopen that link too.
+
+<Canvas of={SignIn.VoiceEntry} />
+
+A recent login reaches the approval form. Read the digits from Dormouse and enter them here. This request turns on voice; it does not enroll remote control.
+
+<Canvas of={Enrollment.Voice} />
+
+After approval, the account waits for the app to finish. A stale login or mismatched digits follows the same recovery shape as the [remote-control walkthrough](?path=/docs/hosted-remote-control-walkthrough--docs), retaining the voice purpose.
+
+<Canvas of={Enrollment.VoiceWaiting} story={{ height: '1800px' }} />
+
+The app then offers the curated voices. The account's waiting notice changes to “Natural Voice is on.”
+
+<Canvas of={ManagedVoice.Enrolled} story={{ autoplay: true }} />
+
+## Turn voice off from the account
+
+The account shows whether Natural Voice is on without listing the computers using it. “Turn off Natural Voice” opens this confirmation. Its play function opens the real dialog inside the Hosted document.
+
+<Canvas of={Voice.ConfirmTurnOff} story={{ autoplay: true }} />
+
+Cancel closes the dialog without a request. Confirming turns voice off for the account and returns to the page with a completion notice.
+
+<Canvas of={Voice.TurnedOff} />
+
+A failed request closes the dialog and leaves the account's on state visible with an error, so the person can try again.
+
+<Canvas of={Voice.TurnOffFailed} />
+
+Remote-control computers and passkeys remain available when Natural Voice is off:
+
+<Canvas of={Voice.RemoteUnaffected} story={{ height: '1800px' }} />
+
+The app also has a local “Turn off” confirmation for its own voice configuration. That control is a separate scope from the account-wide confirmation above.
+
+<Canvas of={ManagedVoice.DisconnectSecondStep} story={{ autoplay: true }} />
