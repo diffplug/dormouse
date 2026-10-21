@@ -114,6 +114,19 @@ function renderUi(props: Partial<MobileTerminalUiProps> = {}) {
 }
 
 describe('MobileTerminalUi keyboard input', () => {
+  it('routes native paste text through paste handling without typing or rereading it', () => {
+    const onPaste = vi.fn();
+    const onSendInput = vi.fn();
+    const { input } = renderUi({ onPaste, onSendInput });
+    const event = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', { value: { getData: () => 'first\nsecond' } });
+    act(() => input.dispatchEvent(event));
+    expect(event.defaultPrevented).toBe(true);
+    expect(onPaste).toHaveBeenCalledExactlyOnceWith('first\nsecond');
+    expect(onSendInput).not.toHaveBeenCalled();
+    expect(input.value).toBe('');
+  });
+
   it('leaves IME editing keys to the composition and sends committed text once', () => {
     const onSendInput = vi.fn();
     const { input } = renderUi({ onSendInput });

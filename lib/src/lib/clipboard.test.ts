@@ -49,6 +49,30 @@ describe('doPaste three-tier fallthrough', () => {
     });
   });
 
+  it.each([false, true])('pastes supplied native text with bracketed mode %s without reading the clipboard', async (bracketed) => {
+    mocks.bracketedPaste = bracketed;
+    mocks.readText.mockResolvedValue('unrelated clipboard contents');
+    mocks.readClipboardFilePaths.mockResolvedValue(null);
+    mocks.readClipboardImageAsFilePath.mockResolvedValue(null);
+    await doPaste('t1', 'first\nsecond');
+    expect(mocks.writePty).toHaveBeenCalledExactlyOnceWith('t1',
+      bracketed ? '\x1b[200~first\nsecond\x1b[201~' : 'first\nsecond');
+    expect(mocks.readText).not.toHaveBeenCalled();
+    expect(mocks.readClipboardFilePaths).not.toHaveBeenCalled();
+    expect(mocks.readClipboardImageAsFilePath).not.toHaveBeenCalled();
+  });
+
+  it('treats supplied empty paste text as empty rather than reading another clipboard', async () => {
+    mocks.readText.mockResolvedValue('unrelated clipboard contents');
+    mocks.readClipboardFilePaths.mockResolvedValue(null);
+    mocks.readClipboardImageAsFilePath.mockResolvedValue(null);
+    await doPaste('t1', '');
+    expect(mocks.writePty).not.toHaveBeenCalled();
+    expect(mocks.readText).not.toHaveBeenCalled();
+    expect(mocks.readClipboardFilePaths).not.toHaveBeenCalled();
+    expect(mocks.readClipboardImageAsFilePath).not.toHaveBeenCalled();
+  });
+
   it('prefers file refs over text and skips the image read', async () => {
     mocks.readClipboardFilePaths.mockResolvedValue(['/tmp/a.png', '/tmp/b file.png']);
     mocks.readText.mockResolvedValue('coexisting text payload');

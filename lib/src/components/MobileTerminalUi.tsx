@@ -149,7 +149,8 @@ export interface MobileTerminalUiProps {
   onSendInput?: (data: string) => void;
   onGestureInput?: (input: MobileGestureInputId, data: string) => void;
   onGestureScroll?: (lines: number) => void;
-  onPaste?: () => void | Promise<void>;
+  /** Native paste supplies its text; a gesture asks the consumer to read it. */
+  onPaste?: (text?: string) => void | Promise<void>;
   onFocusInput?: () => void;
   sessions?: MobileTerminalSessionItem[];
   onSessionSelect?: (id: string) => void;
@@ -1125,6 +1126,11 @@ export function MobileTerminalUi({
         spellCheck={false}
         inputMode="text"
         enterKeyHint="enter"
+        onPaste={(event) => {
+          if (!onPaste) return;
+          event.preventDefault();
+          void onPaste(event.clipboardData.getData('text/plain'));
+        }}
         onKeyDown={(event) => {
           // IME navigation and confirmation belong to the composition.
           if (composingRef.current || isComposingKey(event.nativeEvent)) return;
