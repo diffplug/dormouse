@@ -1,3 +1,4 @@
+import { previousWorkspaceSession } from '../lib/window-session-aggregator';
 /**
  * @vitest-environment jsdom
  *
@@ -367,6 +368,20 @@ describe('Wall on the Lath engine', () => {
     resolveCwd('/fresh');
     expect(await outcome).toBe(change === 'no change' ? 'accepted' : 'Workspace changed while preparing its move; try again');
     if (change === 'no change') expect((await prepared).payload.workspace.session.panes).toEqual([expect.objectContaining({ id: 'surface:a', cwd: '/fresh' })]);
+  });
+
+  it('still publishes fresh CWDs from an ordinary Workspace save when the layout changes during its probe', async () => {
+    await act(async () => root.render(<Wall workspaceId={DEFAULT_WORKSPACE_ID} initialPaneIds={['surface:a']} initialMode="command" />));
+    await flush();
+    const handle = getWallHandle(DEFAULT_WORKSPACE_ID)!;
+    await act(async () => { await handle.flushPersistence(); });
+    let resolveCwd!: (cwd: string) => void;
+    vi.spyOn(fake, 'getCwd').mockResolvedValue('/fresh')
+      .mockImplementationOnce(() => new Promise(resolve => { resolveCwd = resolve; }));
+    const saving = handle.flushPersistence();
+    await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: '|', bubbles: true })));
+    await act(async () => { resolveCwd('/fresh'); await saving; });
+    expect(previousWorkspaceSession(DEFAULT_WORKSPACE_ID)?.panes.find(p => p.id === 'surface:a')?.cwd).toBe('/fresh');
   });
 
   it('manual keyboard splits enter passthrough on the new pane immediately', async () => {

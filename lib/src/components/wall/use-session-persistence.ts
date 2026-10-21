@@ -22,8 +22,7 @@ import type { SessionFlushRequest } from '../../lib/platform/types';
 export interface SessionPersistenceHandle {
   /** Persist immediately, awaiting the whole queued pipeline. */
   flush: (options?: SaveOptions) => Promise<void>;
-  /** Build this Workspace's record without publishing it — what a Workspace
-   *  leaving for another Window carries with it. */
+  /** Build this Workspace's record without publishing it, for a save or transfer. */
   serialize: (options?: SaveOptions) => Promise<PersistedSession>;
   /** This Workspace's record now, with no cwd probe: what a Surface move
    *  publishes in the same synchronous run as its ownership change. */
@@ -138,23 +137,14 @@ export function useSessionPersistence({
     return { panes, doors, lathLayout: lath.serializeLayout() };
   }, [lath, doorsRef]);
 
-  /** The same record a save would publish, handed back instead. The Workspace
-   *  is leaving, so nothing here may touch this Window's aggregator. */
-  const serialize = useCallback(async (options?: SaveOptions): Promise<PersistedSession> => {
-    const snapshot = lath.store.getSnapshot();
-    const doorSnapshot = doorsRef.current;
+  /** Build only: a save publishes the result; a transfer carries it to another Window. */
+  const serialize = useCallback((options?: SaveOptions): Promise<PersistedSession> => {
     const { panes, doors, lathLayout } = collect();
-    const session = await buildPersistedSession(
+    return buildPersistedSession(
       getPlatform(), panes, doors, lathLayout,
       sink?.previous() ?? null, saveOptions(options),
     );
-    // Ownership ids are collected after this probe. Never pair them with a
-    // layout captured before a split, close, or minimize that happened during it.
-    if (lath.store.getSnapshot() !== snapshot || doorsRef.current !== doorSnapshot) {
-      throw new Error('Workspace changed while preparing its move; try again');
-    }
-    return session;
-  }, [collect, sink, saveOptions, lath, doorsRef]);
+  }, [collect, sink, saveOptions]);
 
   const serializeNow = useCallback((): PersistedSession => {
     const { panes, doors, lathLayout } = collect();
