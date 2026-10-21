@@ -49,7 +49,7 @@ import { attachSurfacePorts } from './surface-ports';
 import { browserSurfaceUrl, hostPathDisplay, iframeRefusal } from './browser-url';
 import { isBrowserProvider, isTcpPort, parseRenderMode, renderModeFor } from 'dor-lib-common/browser-providers';
 import type { BrowserResult } from '../../lib/platform/browser-automation';
-import { BROWSER_PROVIDER_GUI, browserHandle, headedRenderMode, providerUnavailable } from './browser-automation';
+import { BROWSER_PROVIDER_GUI, browserHandle, headedRenderMode, isHeadedMode, providerUnavailable } from './browser-automation';
 import { defaultBrowserViewportConfig, isBrowserViewportSetting, resolveBrowserViewport, type BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
 import { BrowserBindingReservations } from './browser-binding-reservations';
 import { listWallHandles } from './wall-handles';
@@ -2159,6 +2159,11 @@ export function useDorControl({
     if (detail.method === SURFACE_CONTROL_METHODS.resolveBrowser) {
       const provider = requestedProvider();
       if (!provider) return;
+      // agent-browser: the mode the bound Surface shows its browser in, which
+      // `dor` restates on every command for the session (none: headless).
+      const headedFor = (id: string | undefined) => provider === 'agent-browser'
+        ? { headed: id !== undefined && isHeadedMode((lath.getMeta(id)?.params as { renderMode?: unknown } | undefined)?.renderMode) }
+        : {};
       // `--surface`: that Surface's binding, once it is this provider's and named.
       const key = stringParam(params.key);
       if (key === undefined) {
@@ -2169,7 +2174,7 @@ export function useDorControl({
         const initialViewport = isBrowserViewportSetting(stored) ? stored : undefined;
         const launchViewport = initialViewport?.mode === 'fixed' ? initialViewport
           : initialViewport?.mode === 'pane-sync' ? getAgentBrowserSurfaceController(target.id)?.getMeasuredPaneSize() ?? { width: 1440, height: 900 } : undefined;
-        detail.respond({ ok: true, result: { binding, fresh: false, ...(provider === 'playwright' && initialViewport ? { initialViewport, launchViewport } : {}) } });
+        detail.respond({ ok: true, result: { binding, fresh: false, ...headedFor(target.id), ...(provider === 'playwright' && initialViewport ? { initialViewport, launchViewport } : {}) } });
         return;
       }
       // `--key`: the Surface in this Wall bound to that key, else the key's
@@ -2186,7 +2191,7 @@ export function useDorControl({
         const initialViewport = isBrowserViewportSetting(stored) ? stored : undefined;
         const launchViewport = initialViewport?.mode === 'fixed' ? initialViewport
           : initialViewport?.mode === 'pane-sync' ? (found ? getAgentBrowserSurfaceController(found.id)?.getMeasuredPaneSize() : undefined) ?? { width: 1440, height: 900 } : undefined;
-        detail.respond({ ok: true, result: { binding, fresh: false, ...(provider === 'playwright' && initialViewport ? { initialViewport, launchViewport } : {}) } });
+        detail.respond({ ok: true, result: { binding, fresh: false, ...(found ? headedFor(found.id) : {}), ...(provider === 'playwright' && initialViewport ? { initialViewport, launchViewport } : {}) } });
       } else {
         const existingNative = await browserHandle(provider, binding)?.measure();
         if (existingNative?.ok && existingNative.viewport) {
@@ -2206,7 +2211,7 @@ export function useDorControl({
           return;
         }
         const launchViewport = initialViewport.mode === 'fixed' ? initialViewport : { width: 1440, height: 900 };
-        detail.respond({ ok: true, result: { binding, fresh: true, initialViewport, launchViewport } });
+        detail.respond({ ok: true, result: { binding, fresh: true, ...headedFor(undefined), initialViewport, launchViewport } });
       }
       return;
     }
