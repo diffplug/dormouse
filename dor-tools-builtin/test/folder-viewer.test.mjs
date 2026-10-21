@@ -277,12 +277,14 @@ test('no route returns file contents', async () => {
  * `names`, or whose directories list as `listings` maps them. Each select or
  * activate it sends waits in `posts` until the test settles it; view-state
  * reports land in `states`, and `saved` answers its restore. */
-async function runPage(names, { listings = null, saved = null } = {}) {
+async function runPage(names, { listings = null, saved = null, listRequest = null } = {}) {
   class Element {
-    constructor() { this.style = {}; this.classList = { toggle() {} }; this.handlers = {}; this.attributes = {}; }
+    constructor() { this.children = []; this.style = {}; this.classList = { toggle() {} }; this.handlers = {}; this.attributes = {}; }
     setAttribute(name, value) { this.attributes[name] = value; }
     removeAttribute() {}
-    appendChild(child) { return child; }
+    set textContent(value) { this.text = value; this.children = []; }
+    get textContent() { return this.text; }
+    appendChild(child) { this.children.push(child); return child; }
     addEventListener(type, handler) { this.handlers[type] = handler; }
     scrollIntoView() {}
     closest() { return this; }
@@ -308,7 +310,8 @@ async function runPage(names, { listings = null, saved = null } = {}) {
     }
     return init
       ? new Promise((resolve, reject) => posts.push({ sent: `${url} ${JSON.parse(init.body).path}`, ok: () => resolve(answer({ ok: true, status: 'created' })), fail: () => reject(new Error('lost')) }))
-      : Promise.resolve(answer({ entries: listing(url), truncated: false }));
+      : Promise.resolve(listRequest ? listRequest(decodeURIComponent(url.slice(9)), listing(url)) : listing(url))
+        .then(entries => answer({ entries, truncated: false }));
   };
   // The page's own inline script; the tooltip's loads from `assets/`.
   runInNewContext(/<script>([\s\S]*?)<\/script>/.exec(folderViewerPage(root))[1], { document, fetch, setTimeout, clearTimeout });
@@ -316,6 +319,7 @@ async function runPage(names, { listings = null, saved = null } = {}) {
   const tree = elements.tree.handlers;
   return {
     items, created, elements, states,
+    visibleNames: (group = elements.tree) => group.children.map(li => li.children[0].children.at(-1).textContent),
     posts, sent: () => posts.map(post => post.sent),
     click: (name, detail = 1) => tree.click({ target: items[names.indexOf(name)], detail }),
     dblclick: name => tree.dblclick({ target: items[names.indexOf(name)] }),
@@ -499,4 +503,38 @@ test('a real viewer declares itself safe to stop, writes its view on Ctrl+C, and
     next.child.kill('SIGINT');
     await next.exited;
   }
+});
+
+for (const staleResult of ['listing', 'error']) {
+  test('a newer folder refresh wins over an older ' + staleResult, async () => {
+    const pending = [];
+    let defer = false;
+    const page = await runPage(['initial.txt'], { listRequest: (_dir, entries) => defer
+      ? new Promise((resolve, reject) => pending.push({ resolve, reject })) : entries });
+    defer = true;
+    page.elements.refresh.handlers.click();
+    page.elements.refresh.handlers.click();
+    pending[1].resolve([entry('new.txt', 'file')]);
+    await settle();
+    if (staleResult === 'error') pending[0].reject(new Error('old failure'));
+    else pending[0].resolve([entry('old.txt', 'file')]);
+    await settle();
+    assert.deepEqual(page.visibleNames(), ['new.txt']);
+    assert.equal(page.elements.status.textContent, '');
+  });
+}
+
+test('refresh supersedes an expanded folder listing still in flight', async () => {
+  const pending = [];
+  const listings = { '': [entry('src', 'dir')], src: [] };
+  const page = await runPage(['src'], { listings, listRequest: (dir, entries) => dir === 'src'
+    ? new Promise(resolve => pending.push(resolve)) : entries });
+  page.click('src');
+  page.elements.refresh.handlers.click();
+  assert.equal(pending.length, 2, 'refresh reads expanded folders even during their first load');
+  pending[1]([entry('new.ts', 'file')]);
+  await settle();
+  pending[0]([entry('old.ts', 'file')]);
+  await settle();
+  assert.deepEqual(page.visibleNames(page.elements.tree.children[0].children[1]), ['new.ts']);
 });

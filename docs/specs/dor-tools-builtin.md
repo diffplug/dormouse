@@ -90,7 +90,8 @@ Source of truth: `BUILTIN_HANDLERS` in `dor-tools-builtin/src/file-viewer-format
 `builtin:folder`, the default folder viewer (`docs/specs/dor-tool.md` → Folders), is a Tool-owned `dor` process, titled as in [File viewer](#file-viewer):
 
 - **Must list names and entry types only, lazily loading expanded directories, and never serve file contents** (rationale).
-- **Must compact a directory containing exactly one child directory and nothing else into a slash-separated row**, continuing up to 32 levels per listing; hidden/ignored entries still count as siblings. Never compact through a symlink child. Refresh and Collapse all preserve the ordinary select/activate contract.
+- **Must compact a directory whose only entry is a directory into a slash-separated row**, up to 32 levels per listing; hidden/ignored entries count as siblings. Never compact through a symlink child.
+- **Must refresh expanded directories and ignore superseded results or errors**, preserving the select/activate contract through Refresh and Collapse all.
 - **Must read at most 100,000 names and retain at most 5,000 entries before following symlinks.**
 - **Must route the page's select and activate through its own process**: a same-origin POST to its capability listener, which writes it to the Tool's terminal as an OSC 367 `open` (`docs/specs/dor-tool.md` → OSC 367), `preview` for a select, in arrival order. The page learns only that it was sent, or, for a path or serialized payload the OSC encoder refuses, an error instead of a write.
 - **Must hold an activate until every select in flight settles**, keeping selects concurrent. (rationale)
