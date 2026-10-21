@@ -808,7 +808,7 @@ test("the cookie gate needs no login creation time; approval reads it and fails 
     const response = await app.request(`${origin}/api/relay/enrollments/approve`, {
       method: "POST",
       headers: { origin, "content-type": "application/json" },
-      body: JSON.stringify({ userCode: "ZZZZ-ZZZZ" }),
+      body: JSON.stringify({ userCode: "ZZZZ-ZZZZ", confirmDigits: "00" }),
     });
     expect(response.status, String(createdAt)).toBe(403);
     expect(await response.json()).toEqual({ message: RECENT_LOGIN_REQUIRED });

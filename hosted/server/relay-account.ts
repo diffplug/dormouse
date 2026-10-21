@@ -4,6 +4,7 @@ import { bodyLimit } from "hono/body-limit";
 import {
   NOT_ENTITLED_ERROR,
   isE2eId,
+  isEnrollConfirmDigits,
   normalizeEnrollUserCode,
   readJson,
 } from "remote-lib-common";
@@ -50,12 +51,17 @@ export function relayAccountRoutes(app: Hono<any>, host: (c: Context) => RelayAc
       c.header("Retry-After", "60");
       return c.json({ message: "Too many attempts. Wait a minute before trying again." }, 429);
     }
-    const body = await readJson<{ userCode?: unknown; purpose?: unknown }>(c);
+    const body = await readJson<{ userCode?: unknown; purpose?: unknown; confirmDigits?: unknown }>(c);
     const purpose = body?.purpose ?? "remote";
     if (purpose !== "remote" && purpose !== "voice") return c.json({ message: "Invalid purpose." }, 400);
     const userCode = normalizeEnrollUserCode(body?.userCode);
     if (userCode === null)
       return c.json({ message: "That is not a code from Dormouse." }, 400);
+    // Unchecked here: only the relay can derive them. The poll compares, and an
+    // approval with other digits redeems nothing until it expires.
+    const confirmDigits = body?.confirmDigits;
+    if (!isEnrollConfirmDigits(confirmDigits))
+      return c.json({ message: "Type the two digits Dormouse shows." }, 400);
     // Whether the code was ever issued is unknowable here: begin stores
     // nothing. An approval expires, redeemed or not. A live approval never
     // moves to another account, nor is one approved again once redeemed; an
@@ -64,14 +70,15 @@ export function relayAccountRoutes(app: Hono<any>, host: (c: Context) => RelayAc
       (
         await accountQuery(
           host(c),
-          `INSERT INTO dormouse_relay_enrollment_approvals AS a ("userCode", "userId", "expiresAt", purpose)
-          VALUES ($1, $2, now() + ($3::float8 * interval '1 millisecond'), $4)
+          `INSERT INTO dormouse_relay_enrollment_approvals AS a
+            ("userCode", "userId", "expiresAt", purpose, "confirmDigits")
+          VALUES ($1, $2, now() + ($3::float8 * interval '1 millisecond'), $4, $5)
           ON CONFLICT ("userCode") DO UPDATE
             SET purpose = EXCLUDED.purpose, "userId" = EXCLUDED."userId", "expiresAt" = EXCLUDED."expiresAt",
-              "redeemedBurrowId" = NULL, "redeemedAt" = NULL
+              "confirmDigits" = EXCLUDED."confirmDigits", "redeemedBurrowId" = NULL, "redeemedAt" = NULL
             WHERE a."expiresAt" <= now()
           RETURNING 1`,
-          [userCode, login.userId, ENROLLMENT_TTL_MS, purpose],
+          [userCode, login.userId, ENROLLMENT_TTL_MS, purpose, confirmDigits],
         )
       ).length > 0;
     return approved ? c.body(null, 204) : c.json({ message: ALREADY_APPROVED }, 409);
