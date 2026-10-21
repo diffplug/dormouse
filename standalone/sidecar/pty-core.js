@@ -226,23 +226,27 @@ function withoutInheritedMsysOriginalPath(env, platform = process.platform) {
 }
 
 // WSLENV entries carrying the dor CLI context into WSL and back unchanged: the
-// POSIX launcher execs our Windows Node to reach the named pipe. PWD alone is
-// translated, on the return trip only. The binary overrides stay Windows paths:
-// the CLI that reads them is Windows Node.
+// POSIX launcher execs our Windows Node to reach the named pipe, so every value
+// stays a Windows path for the CLI that reads it.
 const WSL_CLI_ENV = [
   'DORMOUSE_NODE', 'DORMOUSE_CLI_JS', 'DORMOUSE_SURFACE_ID',
   'DORMOUSE_HOST', 'DORMOUSE_HOST_WORKSPACE',
   'DORMOUSE_CONTROL_SOCKET', 'DORMOUSE_CONTROL_TOKEN',
-  'DORMOUSE_AGENT_BROWSER_BIN', 'DORMOUSE_PLAYWRIGHT_BIN',
-  'ELECTRON_RUN_AS_NODE/w', 'PWD/pw',
+  'DORMOUSE_AGENT_BROWSER_BIN', 'DORMOUSE_PLAYWRIGHT_BIN', 'DORMOUSE_DEHYDRATE',
 ];
-const WSL_CLI_ENV_NAMES = new Set(WSL_CLI_ENV.map((entry) => entry.split('/')[0]));
+// dor/bin/dor adds its own return-only entries for these, so other Windows
+// programs started from WSL never see them.
+const WSL_LAUNCHER_ENV = ['ELECTRON_RUN_AS_NODE', 'PWD'];
+const WSL_MANAGED_NAMES = new Set([...WSL_CLI_ENV, ...WSL_LAUNCHER_ENV]);
 
 // Replace conflicting flags inherited from a parent host, preserve user vars.
-function withWslCliEntries(wslenv) {
-  const inherited = (wslenv || '').split(':').filter((entry) =>
-    entry && !WSL_CLI_ENV_NAMES.has(entry.split('/')[0].toUpperCase()));
-  return [...inherited, ...WSL_CLI_ENV].join(':');
+// Windows env names ignore case, so an inherited `WslEnv` is the same variable.
+function withWslCliEnv(env) {
+  const key = Object.keys(env).find((name) => name.toUpperCase() === 'WSLENV');
+  const inherited = key ? env[key].split(':').filter((entry) =>
+    entry && !WSL_MANAGED_NAMES.has(entry.split('/')[0].toUpperCase())) : [];
+  if (key) delete env[key];
+  env.WSLENV = [...inherited, ...WSL_CLI_ENV].join(':');
 }
 
 // Directory holding the per-shell OSC 633 integration scripts. Shipped next to
@@ -406,7 +410,7 @@ function resolveSpawnConfig(options, runtime = {}) {
   const dehydrate = dehydrateEnv(options?.dehydrate);
   if (dehydrate !== null) childEnv.DORMOUSE_DEHYDRATE = dehydrate;
   // Every Windows pane, including PowerShell/cmd that later run wsl.
-  if (platform === 'win32') childEnv.WSLENV = withWslCliEntries(childEnv.WSLENV);
+  if (platform === 'win32') withWslCliEnv(childEnv);
   const integrated = applyShellIntegration(shell, childEnv, shellArgs, integrationDir, runtime);
 
   return {

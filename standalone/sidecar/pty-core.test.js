@@ -175,15 +175,28 @@ test('Windows panes carry dor context through WSL and back without translating p
   }
 });
 
+test('WSLENV merges an inherited entry of any casing and leaves the launcher entries to dor/bin/dor', () => {
+  const config = resolveSpawnConfig({}, {
+    platform: 'win32',
+    env: { WslEnv: 'USER_FLAG/u:PWD/pw:ELECTRON_RUN_AS_NODE/w' },
+  });
+  assert.equal(config.env.WslEnv, undefined);
+  assert.deepEqual(config.env.WSLENV.split(':'), ['USER_FLAG/u', ...WSL_CLI_ENV]);
+});
+
 test('WSLENV forwards every DORMOUSE_* variable the dor CLI reads', () => {
   const fs = require('node:fs');
   const root = path.join(__dirname, '..', '..');
-  const forwarded = new Set(WSL_CLI_ENV.map((entry) => entry.split('/')[0]));
-  for (const dir of ['dor/src', 'dor-lib-common/src']) {
+  const forwarded = new Set(WSL_CLI_ENV);
+  // Set by the builtin Tools for their own PowerShell child, never read from the pane.
+  const notFromPane = new Set(['DORMOUSE_SAVE_SIBLING', 'DORMOUSE_SAVE_TARGET', 'DORMOUSE_SAVE_BACKUP']);
+  // dor and the packages it bundles or loads at runtime.
+  for (const dir of ['dor/src', 'dor-lib-common/src', 'dor-tools-lib/src', 'dor-tools-builtin/src']) {
     for (const file of fs.readdirSync(path.join(root, dir), { recursive: true })) {
-      if (!/\.ts$/.test(file) || /\.test\.ts$/.test(file)) continue;
+      if (!/\.tsx?$/.test(file) || /\.test\.tsx?$/.test(file)) continue;
       const source = fs.readFileSync(path.join(root, dir, file), 'utf8');
       for (const [name] of source.matchAll(/DORMOUSE_[A-Z0-9_]+/g)) {
+        if (notFromPane.has(name)) continue;
         assert.ok(forwarded.has(name), `${dir}/${file} reads ${name}; add it to WSL_CLI_ENV so dor sees it from WSL`);
       }
     }

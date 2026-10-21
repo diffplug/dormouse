@@ -18,7 +18,7 @@ The CLI's control client needs Node types, but the renderer imports CLI protocol
 
 ## WSL interop
 
-WSL inherits Windows PATH entries but not arbitrary environment variables: the launcher was discoverable while its control endpoint was missing. A Linux Node process also cannot open a Windows named pipe. Keeping the Windows runtime and script paths opaque through both environment crossings lets the launcher translate only the executable with `wslpath`; credentials remain in the environment, never a command line or file. The return-only `PWD/pw` entry translates mounted drives and Linux directories for Windows path resolution without overwriting the Linux shell's initial directory. Configuring every Windows pane covers nested `wsl` invocations independently of shell-integration injection.
+WSL inherits Windows PATH entries but not arbitrary environment variables: the launcher was discoverable while its control endpoint was missing. A Linux Node process also cannot open a Windows named pipe. Keeping the Windows runtime and script paths opaque through both environment crossings lets the launcher translate only the executable with `wslpath`; credentials remain in the environment, never a command line or file. The launcher's return-only `PWD/pw` entry translates mounted drives and Linux directories for Windows path resolution without overwriting the Linux shell's initial directory; adding it, and `ELECTRON_RUN_AS_NODE/w`, at the launcher rather than the pane keeps them away from `git.exe`, `code.exe`, and every other Windows program started from WSL. Configuring every Windows pane covers nested `wsl` invocations independently of shell-integration injection.
 
 ## Spawning External Binaries
 

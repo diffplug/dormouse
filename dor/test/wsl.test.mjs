@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { existsSync } from 'node:fs';
 import { mkdtemp, rm, writeFile, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -74,7 +75,7 @@ test('WSL launcher preserves context, Windows paths, argv, cwd and failure statu
   }
 });
 
-test('dor list from WSL authenticates to the Windows pipe with its Surface identity', { skip }, async () => {
+test('dor list from WSL authenticates to the Windows pipe with its Surface identity', { skip: skip || (!existsSync(cli) && 'requires a built dor/dist/dor.js') }, async () => {
   const requests = [];
   const surface = { id: 'surface:4242', kind: 'terminal', view: 'paned', cwd: process.cwd(), title: 'WSL fixture', focused: true };
   const server = controlServer.createDorControlServer({
