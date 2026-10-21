@@ -1,11 +1,31 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { once } from 'node:events';
+import { Worker } from 'node:worker_threads';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { FRAGMENT, RULES, run, stateHash } from './github-state-check.mjs';
+import { FRAGMENT, RULES, curlStatus, run, stateHash } from './github-state-check.mjs';
 import { readRepoFile, repoRoot, tempDir } from './lint-kit.mjs';
 import { judgeFragment, ruleIndex } from './security-audit-report.mjs';
+
+test('unauthenticated HTTP probe discards response bodies on every platform', async (t) => {
+  // curl is synchronous, so serve on another thread while it blocks this one.
+  const server = new Worker(`
+    const { parentPort } = require('node:worker_threads');
+    require('node:http').createServer((req, res) => {
+      res.writeHead(req.url === '/missing' ? 404 : 200);
+      res.end('audit response body');
+    }).listen(0, '127.0.0.1', function () { parentPort.postMessage(this.address().port); });
+  `, { eval: true });
+  t.after(() => server.terminate());
+  const [port] = await once(server, 'message');
+  const origin = `http://127.0.0.1:${port}`;
+  assert.equal(curlStatus(origin + '/missing'), '404');
+  assert.equal(curlStatus(origin + '/visible'), '200');
+  await server.terminate();
+  assert.equal(curlStatus(origin), '000');
+});
 
 // Responses recorded from the live API with the maintainer's `gh` login (URLs,
 // node ids, and variable values stripped), replayed with no network. Every
@@ -264,7 +284,9 @@ test('the state hash ignores listing order and run history, and tracks every jud
 // `GITHUB_OUTPUT` written. Every response is rendered up front — plain, and
 // as `--slurp` would page it, each list split across two pages — so the stub
 // is a shell `case` rather than a Node start per call.
-test('the CLI reads gh, writes the fragment, and hands the hash on', (t) => {
+// POSIX shell shims cannot replace native gh/curl on Windows; running there
+// would contact the real services instead of the recorded fixture.
+test('the CLI reads gh, writes the fragment, and hands the hash on', { skip: process.platform === 'win32' }, (t) => {
   const dir = tempDir(t, 'github-state-');
   mkdirSync(join(dir, 'bin'));
   mkdirSync(join(dir, 'r'));

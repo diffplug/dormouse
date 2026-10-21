@@ -1,3 +1,4 @@
+import { previousWorkspaceSession, setWorkspaceTransferPending } from '../lib/window-session-aggregator';
 /**
  * @vitest-environment jsdom
  *
@@ -112,6 +113,20 @@ function hostBrowsers(...args: Parameters<typeof installBrowserHost>): ReturnTyp
 }
 
 describe('Wall on the Lath engine', () => {
+
+  it('reattaches the Door itself when a persisted token names another Surface', async () => {
+    await act(async () => root.render(<Wall initialPaneIds={['surface:a']} initialDoors={[{
+      id: 'surface:door-a', title: 'A',
+      token: { leafId: 'surface:wrong', weight: 0.5, siblingId: 'surface:a', edge: 'right', index: 1, fingerprint: null },
+    }]} />));
+    await flush();
+    await act(async () => { container.querySelector<HTMLElement>('[data-door-id="surface:door-a"] button')!.click(); });
+    await flush();
+    expect(container.querySelector('[data-lath-leaf="surface:door-a"]')).not.toBeNull();
+    expect(container.querySelector('[data-lath-leaf="surface:wrong"]')).toBeNull();
+    expect(container.querySelector('[data-door-id="surface:door-a"]')).toBeNull();
+  });
+
   it('consumes dirty reports only for Tool-designated members, including minimized Tools', async () => {
     await act(async () => root.render(<Wall initialPaneIds={['surface:a']} initialDoors={[{
       id: 'surface:tool-door', title: 'storybook', component: 'tool', tabComponent: 'tool',
@@ -338,6 +353,138 @@ describe('Wall on the Lath engine', () => {
     expect(saved!.lathLayout!.version).toBe(1);
     // The surviving pane is present in the Lath layout's leaf meta.
     expect(Object.keys(saved!.lathLayout!.leafMeta ?? {})).toContain('surface:a');
+  });
+
+  it.each(['split', 'close', 'minimize', 'no change'] as const)('validates the transfer snapshot after %s during its CWD probe', async (change) => {
+    await act(async () => root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />));
+    await flush();
+    const handle = getWallHandle(DEFAULT_WORKSPACE_ID)!;
+    await act(async () => { await handle.flushPersistence(); });
+    let resolveCwd!: (cwd: string) => void;
+    vi.spyOn(fake, 'getCwd').mockResolvedValue('/fresh')
+      .mockImplementationOnce(() => new Promise(resolve => { resolveCwd = resolve; }));
+    const prepared = handle.prepareWorkspaceTransfer();
+    const outcome = prepared.then(() => 'accepted', error => error.message);
+    await act(async () => {
+      if (change === 'close') {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+          method: SURFACE_CONTROL_METHODS.kill,
+          params: { surface: 'surface:a', confirmation: { mode: 'dangerously' } },
+          respond: () => {},
+        } }));
+      } else if (change === 'minimize') container.querySelector<HTMLButtonElement>('[data-lath-leaf="surface:a"] [aria-label="Minimize"]')!.click();
+      else if (change === 'split') window.dispatchEvent(new KeyboardEvent('keydown', { key: '|', bubbles: true }));
+    });
+    await flush();
+    if (change === 'split') expect(handle.surfaceIds()).toHaveLength(2);
+    else if (change === 'close') expect(handle.surfaceIds()).not.toContain('surface:a');
+    else if (change === 'minimize') expect(handle.serializeNow().doors).toEqual([expect.objectContaining({ id: 'surface:a' })]);
+    resolveCwd('/fresh');
+    expect(await outcome).toBe(change === 'no change' ? 'accepted' : 'Workspace changed while preparing its move; try again');
+    if (change === 'no change') expect((await prepared).payload.workspace.session.panes).toEqual([expect.objectContaining({ id: 'surface:a', cwd: '/fresh' })]);
+  });
+
+  it.each(['keyboard split', 'host split', 'host replace', 'header kill', 'split', 'iframe', 'kill'] as const)('keeps Workspace membership stable during a transfer: %s', async (action) => {
+    await act(async () => root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />));
+    await flush();
+    const handle = getWallHandle(DEFAULT_WORKSPACE_ID)!;
+    const respond = vi.fn();
+    setWorkspaceTransferPending(DEFAULT_WORKSPACE_ID, true);
+    try {
+      await act(async () => {
+        if (action === 'keyboard split') window.dispatchEvent(new KeyboardEvent('keydown', { key: '|', bubbles: true }));
+        else if (action === 'host split' || action === 'host replace') window.dispatchEvent(new CustomEvent('dormouse:new-terminal', { detail: { replaceUntouched: action === 'host replace' } }));
+        else if (action === 'header kill') container.querySelector<HTMLButtonElement>('[data-lath-leaf="surface:a"] [aria-label="Kill"]')!.click();
+        else handle.handleDorControl({
+          method: SURFACE_CONTROL_METHODS[action],
+          params: { surface: 'surface:a', direction: 'right', url: 'http://localhost:8080', confirmation: { mode: 'dangerously' } },
+          respond,
+        });
+      });
+      await flush();
+      expect(handle.surfaceIds()).toEqual(['surface:a']);
+      if (action === 'split' || action === 'iframe' || action === 'kill') {
+        expect(respond).toHaveBeenCalledWith({ ok: false, error: expect.stringMatching(/transferring/i) });
+      }
+    } finally { setWorkspaceTransferPending(DEFAULT_WORKSPACE_ID, false); }
+  });
+
+  it('refuses a close whose helper inspection finishes after a transfer starts', async () => {
+    await act(async () => root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />));
+    await flush();
+    const helper: helpers.HelperTerminal = { id: 'surface:helper-a', parentId: 'surface:a', command: '', status: 'off' };
+    vi.spyOn(helpers, 'getHelper').mockReturnValue(helper);
+    let inspected!: (busy: boolean) => void;
+    vi.spyOn(helpers, 'helperHasWork').mockImplementationOnce(() => new Promise(resolve => { inspected = resolve; }));
+    const handle = getWallHandle(DEFAULT_WORKSPACE_ID)!;
+    const respond = vi.fn();
+    handle.handleDorControl({ method: SURFACE_CONTROL_METHODS.kill,
+      params: { surface: 'surface:a', confirmation: { mode: 'dangerously' } }, respond });
+    setWorkspaceTransferPending(DEFAULT_WORKSPACE_ID, true);
+    try {
+      await act(async () => { inspected(false); });
+      await flush();
+      expect(handle.surfaceIds()).toEqual(['surface:a']);
+      expect(respond).toHaveBeenCalledWith({ ok: false, error: 'Workspace is transferring' });
+    } finally { setWorkspaceTransferPending(DEFAULT_WORKSPACE_ID, false); }
+  });
+
+  it('allows a split again after a transfer is handed back', async () => {
+    await act(async () => root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />));
+    await flush();
+    setWorkspaceTransferPending(DEFAULT_WORKSPACE_ID, true);
+    await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: '|', bubbles: true })));
+    setWorkspaceTransferPending(DEFAULT_WORKSPACE_ID, false);
+    await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: '|', bubbles: true })));
+    await flush();
+    expect(getWallHandle(DEFAULT_WORKSPACE_ID)!.surfaceIds()).toHaveLength(2);
+  });
+
+  it('still publishes fresh CWDs from an ordinary Workspace save when the layout changes during its probe', async () => {
+    await act(async () => root.render(<Wall workspaceId={DEFAULT_WORKSPACE_ID} initialPaneIds={['surface:a']} initialMode="command" />));
+    await flush();
+    const handle = getWallHandle(DEFAULT_WORKSPACE_ID)!;
+    await act(async () => { await handle.flushPersistence(); });
+    let resolveCwd!: (cwd: string) => void;
+    vi.spyOn(fake, 'getCwd').mockResolvedValue('/fresh')
+      .mockImplementationOnce(() => new Promise(resolve => { resolveCwd = resolve; }));
+    const saving = handle.flushPersistence();
+    await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: '|', bubbles: true })));
+    await act(async () => { resolveCwd('/fresh'); await saving; });
+    expect(previousWorkspaceSession(DEFAULT_WORKSPACE_ID)?.panes.find(p => p.id === 'surface:a')?.cwd).toBe('/fresh');
+  });
+
+  it('honors a no-probe flush queued behind a probing save', async () => {
+    await act(async () => root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />));
+    await flush();
+    const handle = getWallHandle(DEFAULT_WORKSPACE_ID)!;
+    await act(async () => { await handle.flushPersistence(); });
+    let resolveCwd!: (cwd: string) => void;
+    const probe = vi.spyOn(fake, 'getCwd').mockResolvedValue('/unexpected')
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveCwd = resolve; }));
+    await act(async () => {
+      const first = handle.flushPersistence();
+      const last = handle.flushPersistence({ probeCwd: false });
+      resolveCwd('/retained');
+      await Promise.all([first, last]);
+    });
+    expect(probe).toHaveBeenCalledTimes(1);
+    expect((fake.getState() as PersistedSession).panes[0].cwd).toBe('/retained');
+  });
+
+  it('probes for a normal flush queued behind a no-probe save', async () => {
+    await act(async () => root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />));
+    await flush();
+    const handle = getWallHandle(DEFAULT_WORKSPACE_ID)!;
+    await act(async () => { await handle.flushPersistence(); });
+    const probe = vi.spyOn(fake, 'getCwd').mockResolvedValue('/fresh');
+    await act(async () => {
+      const first = handle.flushPersistence({ probeCwd: false });
+      const last = handle.flushPersistence();
+      await Promise.all([first, last]);
+    });
+    expect(probe).toHaveBeenCalledTimes(1);
+    expect((fake.getState() as PersistedSession).panes[0].cwd).toBe('/fresh');
   });
 
   it('manual keyboard splits enter passthrough on the new pane immediately', async () => {

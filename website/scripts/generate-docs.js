@@ -361,11 +361,12 @@ export function assertRouteFragments(pages) {
       if (node.type !== 'link' || !node.href) return;
       const hash = node.href.indexOf('#');
       if (hash === -1) return;
-      const target = pageByRoute.get(node.href.slice(0, hash));
+      const route = node.href.slice(0, hash).split('?', 1)[0];
+      const target = pageByRoute.get(route);
       if (!target) return;
       const id = node.href.slice(hash + 1);
       if (!target.headings.some((h) => h.id === id)) {
-        throw new Error(`${page.source}: link "${node.href}" names no heading on ${node.href.slice(0, hash)}`);
+        throw new Error(`${page.source}: link "${node.href}" names no heading on ${route}`);
       }
     });
   }

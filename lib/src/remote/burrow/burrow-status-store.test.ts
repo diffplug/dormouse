@@ -260,13 +260,14 @@ describe('publishing', () => {
 describe('a Hosted enrollment in the status', () => {
   it('reads one waiting without republishing it, and none of a shape it does not draw', async () => {
     vi.useFakeTimers();
-    let hostedEnrollment: unknown = {
+    const waiting = {
       status: 'waiting',
-      userCode: '23AB-YZ9K',
+      confirmDigits: '47',
       verificationUrl: 'https://hosted.dormouse.sh/enroll#23AB-YZ9K',
       expiresAt: 1_800_000_000_000,
       accountFull: false,
     };
+    let hostedEnrollment: unknown = waiting;
     const command = vi.fn(async () => ({
       enrolled: false,
       serving: false,
@@ -309,7 +310,7 @@ describe('a Hosted enrollment in the status', () => {
       await vi.advanceTimersByTimeAsync(2000);
       expect(shown()).toEqual({ status: 'redeeming' });
 
-      for (const malformed of [undefined, null, { status: 'waiting', userCode: 7 }, { status: 'gone' }]) {
+      for (const malformed of [undefined, null, { ...waiting, confirmDigits: 47 }, { status: 'gone' }]) {
         hostedEnrollment = malformed;
         await vi.advanceTimersByTimeAsync(2000);
         expect(shown(), JSON.stringify(malformed)).toBeNull();

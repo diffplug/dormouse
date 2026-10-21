@@ -385,17 +385,19 @@ export interface SetupQrResult {
 }
 
 /**
- * Why a Hosted enrollment stopped short of enrolling, each read as fixed copy
- * but `failed`, which carries the service's sentence. `answer-lost` is an
+ * Why a Hosted approval, of either purpose, stopped short, each read as fixed
+ * copy but `failed`, which carries the host's sentence. `mismatch` is an
+ * approval typed with other digits than the code showed; `answer-lost` is an
  * approval an earlier poll redeemed whose answer never arrived. A reason this
  * build does not know reads as `failed` with no sentence.
  */
-export const HOSTED_ENROLLMENT_END_REASONS = ['expired', 'not-entitled', 'answer-lost', 'failed'] as const;
+export const HOSTED_ENROLLMENT_END_REASONS = ['expired', 'not-entitled', 'mismatch', 'answer-lost', 'failed'] as const;
 export type HostedEnrollmentEndReason = (typeof HOSTED_ENROLLMENT_END_REASONS)[number];
 
 /**
- * A Hosted build's device-code enrollment as `status` reports it: `waiting`
- * for the account to approve `userCode`; `redeeming` once a poll redeemed it,
+ * A Hosted build's device-code approval as `status` reports it, for remote
+ * control here and for managed voice in `ManagedVoiceStatus`: `waiting` for
+ * the account to approve it with `confirmDigits`; `redeeming` once a poll redeemed it,
  * until the enrollment is saved and started (so status always shows a code or
  * an enrollment); or `ended` without an enrollment, until the next begin or a
  * cancel. A success reports none: `enrolled` says it. `accountFull` is an
@@ -408,9 +410,34 @@ export type HostedEnrollmentEndReason = (typeof HOSTED_ENROLLMENT_END_REASONS)[n
  * opens on a click; `expiresAt` is this machine's clock.
  */
 export type HostedEnrollmentState =
-  | { status: 'waiting'; userCode: string; verificationUrl: string; expiresAt: number; accountFull: boolean }
+  | { status: 'waiting'; confirmDigits: string; verificationUrl: string; expiresAt: number; accountFull: boolean }
   | { status: 'redeeming' }
   | ({ status: 'ended' } & HostedEnrollmentEnded);
+
+/**
+ * A {@link HostedEnrollmentState} as this build can draw it, or `null` for a
+ * shape it does not know. Built field by field, in a fixed order, which the
+ * Burrow status store compares on.
+ */
+export function parseHostedEnrollmentState(value: unknown): HostedEnrollmentState | null {
+  if (!value || typeof value !== 'object') return null;
+  const state = value as Record<string, unknown>;
+  if (state.status === 'waiting') {
+    const { confirmDigits, verificationUrl, expiresAt } = state;
+    return typeof confirmDigits === 'string' && typeof verificationUrl === 'string' && typeof expiresAt === 'number'
+      ? { status: 'waiting', confirmDigits, verificationUrl, expiresAt, accountFull: state.accountFull === true }
+      : null;
+  }
+  if (state.status === 'redeeming') return { status: 'redeeming' };
+  if (state.status !== 'ended') return null;
+  const reason = HOSTED_ENROLLMENT_END_REASONS.find((known) => known === state.reason) ?? 'failed';
+  return {
+    status: 'ended',
+    reason,
+    ...(typeof state.message === 'string' ? { message: state.message } : {}),
+    ...(typeof state.burrowId === 'string' ? { burrowId: state.burrowId } : {}),
+  };
+}
 
 /**
  * How a Hosted enrollment ended short of enrolling: `message` is `failed`'s

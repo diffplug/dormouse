@@ -184,9 +184,9 @@ sequenceDiagram
   participant A as account Worker
   actor User
   Burrow->>R: POST /api/burrow/enroll/begin {origin}
-  R-->>Burrow: deviceCode, userCode, verificationUrl, expiresAt, interval
-  Note over Burrow,User: Dormouse shows userCode and links verificationUrl
-  User->>A: sign in, compare code, approve {userCode}
+  R-->>Burrow: deviceCode, userCode, confirmDigits, verificationUrl, expiresAt, interval
+  Note over Burrow,User: Dormouse shows confirmDigits and links verificationUrl
+  User->>A: sign in, type the digits, approve {userCode, confirmDigits}
   Note over R,A: approval row in Postgres, keyed by userCode
   loop every interval
     Burrow->>R: POST /api/burrow/enroll/poll {deviceCode}
@@ -196,6 +196,8 @@ sequenceDiagram
       R-->>Burrow: pending
     else already redeemed
       R-->>Burrow: redeemed {burrowId}
+    else approved with other digits
+      R-->>Burrow: mismatch
     else approver not entitled, or account full
       R-->>Burrow: 403 NOT_ENTITLED_ERROR, or 409, approval kept
     else live, unredeemed
@@ -208,7 +210,8 @@ The pre-launch sign-in gate is "Identity and login".
 
 Begin refuses an absent or mismatched origin with `ORIGIN_MISMATCH_ERROR`. The verification link points to the account's `/enroll` page, with the user code in its fragment and voice purpose in its query. `redeemed` names the Burrow whose answer was lost; 409 names the account page at the abuse ceiling `MAX_BURROWS_PER_ACCOUNT` (`docs/specs/pricing.md` -> "Checkout and entitlement").
 
-- **Never write from begin.** The device code is 32 bytes, the bearer shape: its expiry in its leading bytes, the rest random. The user code is `enrollUserCode` under `RELAY_ENROLL_SECRET` for remote enrollment, or that secret suffixed with `:voice` for managed voice (rationale).
+- **Never write from begin.** The device code is 32 bytes, the bearer shape: its expiry in its leading bytes, the rest random. The user code is `enrollUserCode` under `RELAY_ENROLL_SECRET` for remote enrollment, or that secret suffixed with `:voice` for managed voice (rationale). The confirmation digits are `enrollConfirmDigits` of the user code under `RELAY_ENROLL_SECRET`; the link carries the user code, never the digits.
+- **Must redeem only an approval whose typed digits are its code's confirmation digits, compared at the poll** (rationale). Any other answers `mismatch` to every poll until it expires: one attempt per code. The first such poll stamps the live, unredeemed approval's `mismatchedAt` for its approver's waiting page.
 - **Must store the approval alone** (`dormouse_relay_enrollment_approvals`): it cannot tell an issued code from any well-formed one, so it approves any; one no Burrow redeems expires (rationale).
 - **Never admit a begin or poll request carrying `Origin`** (403): only a Node Burrow calls them. Then 429 with `Retry-After` past `RELAY_ENROLL_BEGIN_LIMIT` (10 a minute per address) or `RELAY_ENROLL_POLL_LIMIT` (60), before the body limit and any database read.
 - **Must answer an expired device code from the code alone**, reading no database.
@@ -217,7 +220,8 @@ Begin refuses an absent or mismatched origin with `ORIGIN_MISMATCH_ERROR`. The v
 
 | Route (account) | Credential | Success |
 |---|---|---|
-| `POST /api/relay/enrollments/approve` | login cookie, exact `Origin`, JSON `{ userCode, purpose }` | 204 |
+| `POST /api/relay/enrollments/approve` | login cookie, exact `Origin`, JSON `{ userCode, purpose, confirmDigits }` | 204 |
+| `GET /api/relay/enrollments/:userCode` | login cookie, same-origin fetch | 200 `{ mismatched, redeemed }`, each true only for the caller's own live approval |
 | `GET /api/relay/burrows` | login cookie, same-origin fetch | 200 `{ burrows }` |
 | `DELETE /api/relay/burrows/:burrowId` | login cookie, exact `Origin` | 204; 404 for another account's or an unknown ID |
 | `GET /api/relay/passkeys` | login cookie, same-origin fetch | 200 `{ passkeys }`, each with the enrolled Burrow whose setup token registered it, or none |
@@ -227,12 +231,12 @@ Errors are the managed-voice cookie routes' ("Managed voice"), except that their
 
 - **Must refuse approval from a login older than `LOGIN_FRESH_AGE_MS`**, 403 `RECENT_LOGIN_REQUIRED`, failing closed when the login's `createdAt` is missing or unparsable; the voice routes require no recent login.
 - **Must count every approval attempt** against `RELAY_APPROVE_LIMIT` (10 a minute per account) before reading the body: 429 with `Retry-After` past it.
-- **Must answer a malformed code 400**, forgiving case, spaces, and dashes, and a second approval of a live code 409 `ALREADY_APPROVED`, whichever account sends it: a live approval never moves. An expired one is replaced.
+- **Must answer a malformed code or digits 400**, the code forgiving case, spaces, and dashes, and a second approval of a live code 409 `ALREADY_APPROVED`, whichever account sends it: a live approval never moves. An expired one is replaced.
 - **Must remove by deleting the Burrow's row**, its setup tokens and setup challenges cascading, so its token authenticates nothing on any relay route, **then close its live socket** ("Relay sockets"). **Never remove a passkey with its Burrow**: it is left with no Burrow (rationale).
 - **Must remove a passkey by deleting its row**, every session it signed in cascading, so it signs in to nothing again; every session names the passkey that signed it in, its `"credentialId"` `NOT NULL`.
 - **Must take the `/enroll` fragment before render and erase it from history, and hold the code in memory only**: through email sign-in and back, never into storage. Provider sign-in leaves the page, so the user opens the link again.
 
-**Must bind every approval to its purpose, defaulting omitted purpose to remote control.** Voice approvals use a distinct code derivation and scope. Voice clients require begin to acknowledge their purpose before displaying or polling a code. Voice redemption atomically marks the approval and mints a token, without a Burrow or its cap; later polls report it spent. A remote poll cannot redeem a voice approval, or vice versa. Both purposes share approval gates and expiry.
+**Must bind every approval to its purpose, defaulting omitted purpose to remote control.** Voice approvals use a distinct code derivation and scope. Voice clients require begin to acknowledge their purpose before displaying or polling a code. Voice redemption atomically marks the approval and mints a token, without a Burrow or its cap; later polls report it spent. A remote poll cannot redeem a voice approval, or vice versa. Both purposes share the digits, approval gates, and expiry.
 
 Source of truth: `relayApiRoutes` in `hosted/server/relay-api.ts`; `relayAccountRoutes` in `hosted/server/relay-account.ts`; `takeEnrollment` in `hosted/src/enrollment.ts`.
 

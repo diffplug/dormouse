@@ -5,6 +5,7 @@ import { serveSequence } from "dor-tools-lib/osc";
 import { startPlaygroundDor } from "./dor";
 import { createPlaygroundFs, PLAYGROUND_CWD } from "./snapshot";
 import { PlaygroundViewers } from "./viewers";
+import { PlaygroundControlClient } from "./control-client";
 
 interface ControlDetail { surfaceId: string; method: string; params: Record<string, unknown>; respond(result: unknown): void }
 
@@ -130,5 +131,52 @@ describe("playground dor __view-*", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(output()).toContain("Error: no service worker");
     expect(onExit).toHaveBeenCalledWith(1);
+  });
+});
+
+describe("playground cancellation", () => {
+  it.each(["interrupt", "dispose"])("does not launch a command canceled before the CLI import: %s", async how => {
+    const requests = answerControl({ status: "takeover", surfaceId: "surface:1", command: "dor __view-file /x" });
+    const { program, onExit, output } = harness(["open", "README.md"]);
+    program.start();
+    if (how === "interrupt") program.handleInput("\x03");
+    else program.dispose();
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(requests).toEqual([]);
+    expect(output()).toBe("");
+    expect(onExit).toHaveBeenCalledTimes(how === "interrupt" ? 1 : 0);
+  });
+
+  it("disposes an active picker without leaving its resize listener or later output", async () => {
+    const { program, adapter, output, onExit } = harness(["open"]);
+    const stopResize = vi.fn();
+    vi.spyOn(adapter, "onPtyResize").mockReturnValue(stopResize);
+    program.start();
+    await vi.waitFor(() => expect(output()).toContain("\x1b[?1049h"));
+    const before = output();
+    program.dispose();
+    await new Promise(resolve => setTimeout(resolve, 60));
+    expect(stopResize).toHaveBeenCalled();
+    expect(output()).toBe(before);
+    expect(onExit).not.toHaveBeenCalled();
+  });
+
+  it("settles canceled requests and refuses follow-up mutations", async () => {
+    const requests: (ControlDetail & { signal: AbortSignal })[] = [];
+    const listener = (event: Event) => requests.push((event as CustomEvent).detail);
+    window.addEventListener("dormouse:control-request", listener);
+    stopListening = () => window.removeEventListener("dormouse:control-request", listener);
+    const client = new PlaygroundControlClient("t");
+    let result = "pending";
+    const pending = client.listSurfaces({}).then(() => { result = "resolved"; }, () => { result = "canceled"; });
+    client.cancel();
+    expect(requests[0].signal.aborted).toBe(true);
+    await Promise.resolve();
+    expect(result).toBe("canceled");
+    await pending;
+    await expect(client.splitSurface({ direction: "right", minimized: false, focusNeutral: false })).rejects.toThrow(/cancel/i);
+    expect(requests).toHaveLength(1);
+    requests[0].respond({ ok: true, result: {} });
+    expect(result).toBe("canceled");
   });
 });

@@ -25,10 +25,23 @@ export function hostedBundleEntries(repoRoot) {
       if (!main) throw new Error(`hosted/${name}: no top-level "main" to bundle`);
       return { entry: main, platform: 'worker' };
     });
-  const scripts = [...readFileSync(join(hosted, 'index.html'), 'utf-8').matchAll(/<script[^>]*\stype="module"[^>]*\ssrc="\/([^"]+)"/g)];
+  const scripts = moduleScriptEntries(readFileSync(join(hosted, 'index.html'), 'utf-8'));
   if (scripts.length === 0) throw new Error('hosted/index.html: no module script to bundle');
   if (workers.length === 0) throw new Error('hosted/: no wrangler*.jsonc to bundle');
-  return [...workers, ...scripts.map(([, entry]) => ({ entry, platform: 'browser' }))];
+  return [...workers, ...scripts.map((entry) => ({ entry, platform: 'browser' }))];
+}
+
+/** Each module script's root-relative `src`, attributes in any order. A module
+ * script whose `src` this cannot read throws rather than going unbundled. */
+export function moduleScriptEntries(html) {
+  return [...html.matchAll(/<script\b[^>]*>/g)]
+    .map(([tag]) => tag)
+    .filter((tag) => /\stype=["']?module\b/.test(tag))
+    .map((tag) => {
+      const src = tag.match(/\ssrc="\/([^"]+)"/)?.[1];
+      if (!src) throw new Error(`hosted/index.html: cannot read the src of ${tag}`);
+      return src;
+    });
 }
 
 /**

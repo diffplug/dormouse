@@ -112,9 +112,9 @@ export function PocketWall({ adapter, onError, restoreTheme }: {
     [activePaneId],
   );
 
-  const handlePaste = useCallback(async () => {
+  const handlePaste = useCallback(async (text?: string) => {
     if (!activePaneId) return;
-    await doPaste(activePaneId);
+    await doPaste(activePaneId, text);
   }, [activePaneId]);
 
   return (
@@ -123,6 +123,8 @@ export function PocketWall({ adapter, onError, restoreTheme }: {
       terminal={
         <MobileWall
           sessions={wallSessions}
+          sessionItems={sessionItems}
+          onSessionTodoClear={null}
           activeSessionId={activePaneId ?? undefined}
           onActiveSessionChange={setActivePaneId}
           onSessionMinimize={() => setKeyboardMode('sessions')}

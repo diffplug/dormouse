@@ -1,3 +1,4 @@
+import { setWorkspaceTransferPending } from '../../lib/window-session-aggregator';
 /**
  * @vitest-environment jsdom
  *
@@ -365,4 +366,24 @@ describe('Reopen', () => {
     expect(door?.dataset.doorId).not.toBe('surface:web');
     expect(leafIds()).toEqual(['surface:a']);
   });
+});
+
+it.each([false, true])('keeps a Surface reopen record while its destination Workspace is transferring (gesture: %s)', async (gesture) => {
+  await renderTerminalBesideBrowser();
+  await act(async () => {
+    getWallHandle(DEFAULT_WORKSPACE_ID)!.handleDorControl({ method: SURFACE_CONTROL_METHODS.kill,
+      params: { surface: 'surface:web', confirmation: { mode: 'dangerously' } }, respond: vi.fn() });
+  });
+  await harness.flush();
+  const records = _reopenRecordsForTesting();
+  expect(records).toHaveLength(1);
+  setWorkspaceTransferPending(DEFAULT_WORKSPACE_ID, true);
+  try {
+    await act(async () => {
+      if (gesture) expect(await reopenClosed({ gesture })).toBeNull();
+      else await expect(reopenClosed({ gesture })).rejects.toThrow('Workspace is transferring');
+    });
+    expect(_reopenRecordsForTesting()).toEqual(records);
+    expect(getWallHandle(DEFAULT_WORKSPACE_ID)!.surfaceIds()).toEqual(['surface:a']);
+  } finally { setWorkspaceTransferPending(DEFAULT_WORKSPACE_ID, false); }
 });

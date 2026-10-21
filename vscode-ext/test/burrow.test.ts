@@ -1635,6 +1635,7 @@ describe('serving the other windows', () => {
             // The bearer shape: 32 bytes, base64url.
             deviceCode: String(begun).repeat(43),
             userCode: '23AB-YZ9K',
+            confirmDigits: '42',
             expiresAt: Date.now() + 10 * 60_000,
             interval: 5,
           }),
@@ -1650,13 +1651,13 @@ describe('serving the other windows', () => {
     try {
       mod.handleBurrowCommand({ burrowRequestId: 'rh-0', cmd: 'beginHostedEnrollment', params: { label: 'Laptop' } });
       await waitFor(() => results(bound.posted).length > 0);
-      expect(results(bound.posted)[0]).toMatchObject({ result: { status: 'waiting', userCode: '23AB-YZ9K' } });
+      expect(results(bound.posted)[0]).toMatchObject({ result: { status: 'waiting', confirmDigits: '42' } });
 
       const far = fakeWindow();
       const link = await openFarWindow(far);
       link.forwardCommand({ burrowRequestId: 'rh-1', cmd: 'beginHostedEnrollment', params: { label: 'Other' } });
       await waitFor(() => far.results.length > 0);
-      expect(far.results[0]).toMatchObject({ result: { status: 'waiting', userCode: '23AB-YZ9K' } });
+      expect(far.results[0]).toMatchObject({ result: { status: 'waiting', confirmDigits: '42' } });
       expect(begun).toBe(1);
     } finally {
       window.dispose();

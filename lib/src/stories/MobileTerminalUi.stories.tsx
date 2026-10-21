@@ -130,8 +130,8 @@ function StoryFrame(args: MobileTerminalUiProps) {
           args.onSendInput?.(data);
           setInputLog((entries) => [...entries, describeInput(data)]);
         }}
-        onPaste={() => {
-          void args.onPaste?.();
+        onPaste={(text) => {
+          void args.onPaste?.(text);
           setInputLog((entries) => [...entries, 'PASTE']);
         }}
       />
@@ -172,8 +172,8 @@ function PocketWallFrame(args: MobileTerminalUiProps) {
           args.onSendInput?.(data);
           writeUserInput(activePaneId, data);
         }}
-        onPaste={() => {
-          void args.onPaste?.();
+        onPaste={(text) => {
+          void args.onPaste?.(text);
         }}
       />
     </main>

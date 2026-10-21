@@ -15,8 +15,8 @@ export interface DocumentEditor<Mark, Content = string, Loaded = Content> {
   mark?(): Mark;
   /** Whether the editor still holds the revision `mark` names. */
   holds(mark: Mark): boolean;
-  /** Replaces the editor's contents with the file's. */
-  apply(content: Loaded, name: string): void | Promise<void>;
+  /** Replaces the editor's contents synchronously, so its saved mark is captured before another edit. */
+  apply(content: Loaded, name: string): void;
 }
 
 /** How a page reads a document's contents (as `Loaded`) and writes them. */
@@ -101,6 +101,7 @@ export function documentSession<Mark, Content = string, Loaded = Content>(editor
   let version = '';
   let saved: { mark: Mark } | undefined;
   let saving: Promise<void> | null = null;
+  let loading: Promise<void> | null = null;
   /** As last reported; undefined before the first report. */
   let shown: DocumentState | undefined;
   let stateQueue = Promise.resolve();
@@ -131,13 +132,25 @@ export function documentSession<Mark, Content = string, Loaded = Content>(editor
     report();
     return saving;
   }
-  async function load() {
-    const file = await source.load();
-    await editor.apply(file.content, file.name);
-    // After applying: a file the editor cannot take leaves the revision its contents came from.
-    version = file.version;
-    saved = { mark: current() };
-    report();
+  function load(confirm = false): Promise<void> {
+    if (loading) return loading;
+    loading = (async () => {
+      if (confirm && dirty() && !await confirmDiscard()) return;
+      // A save may also have started while the discard dialog was open.
+      if (saving) return;
+      if (confirm) view.fail(null);
+      const before = saved ? { mark: current(), version } : undefined;
+      const file = await source.load();
+      if (before && (!editor.holds(before.mark) || version !== before.version || saving)) {
+        throw new Error('The document changed while reloading. Your edits are safe; reload again to discard them.');
+      }
+      editor.apply(file.content, file.name);
+      // After applying: a file the editor cannot take leaves the revision its contents came from.
+      version = file.version;
+      saved = { mark: current() };
+      report();
+    })().catch(fail).finally(() => { loading = null; });
+    return loading;
   }
   const save = () => write().catch(() => {});
 
@@ -154,14 +167,10 @@ export function documentSession<Mark, Content = string, Loaded = Content>(editor
 
   return {
     dirty: () => !!shown?.dirty,
-    load: () => load().catch(fail),
+    load: () => load(),
     save,
     write,
-    async reload() {
-      if (saving || (dirty() && !await confirmDiscard())) return;
-      view.fail(null);
-      await load().catch(fail);
-    },
+    reload: () => saving ? Promise.resolve() : load(true),
     changed: report,
     rebase() {
       if (!saved || saving) return;

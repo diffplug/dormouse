@@ -1,7 +1,7 @@
 import { useCallback, useState, useSyncExternalStore } from 'react';
 import { INLINE_ACTION_CLASS, SELECT_CLASS, modalActionButton } from './design';
 import { ExternalTextLink } from './ExternalTextLink';
-import { HOSTED_PRICING_URL, HostedEnrollmentCode } from './HostedEnrollment';
+import { HOSTED_PRICING_URL, HostedApprovalProgress } from './HostedEnrollment';
 import { FIELD_LABEL, useBusyAction, useNetworkPolicy } from './remote-control-shared';
 import { getPlatform } from '../lib/platform';
 import {
@@ -67,8 +67,7 @@ export function ManagedVoiceSection({ onShowNetwork }: { onShowNetwork?: () => v
   const [confirming, setConfirming] = useState(false);
   if (!port) return null;
   const enrollment = voice?.enrollment;
-  const waiting = enrollment?.status === 'waiting' ? enrollment : null;
-  const saving = enrollment?.status === 'saving';
+  const underWay = enrollment?.status === 'waiting' || enrollment?.status === 'redeeming';
   const perform = (action: () => Promise<ManagedVoiceActionResult>) => void run(async () => {
     const result = await action();
     if (!result.ok) throw new Error(result.message);
@@ -128,19 +127,16 @@ export function ManagedVoiceSection({ onShowNetwork }: { onShowNetwork?: () => v
             Retry
           </button>
         </div>
-      ) : waiting ? (
-        <HostedEnrollmentCode
-          waiting={{ ...waiting, accountFull: false }}
-          accountOrigin={new URL(waiting.verificationUrl).origin}
-          busy={busy}
-          onCancel={() => perform(() => port.cancelEnrollment())}
-        />
-      ) : saving ? (
-        <p className={HINT}>Approved. Turning on Natural Voice…</p>
       ) : (
         <>
-          {enrollment?.status === 'ended' ? <p className={HINT} role="status">{enrollment.message}</p> : null}
-          {networkOff ? (
+          <HostedApprovalProgress
+            enrollment={enrollment}
+            purpose="voice"
+            accountOrigin={null}
+            busy={busy}
+            onCancel={() => perform(() => port.cancelEnrollment())}
+          />
+          {underWay ? null : networkOff ? (
             <p className={HINT}>
               Turning on Natural Voice reaches Dormouse Hosted. Choose Local networks or Anywhere in <NetworkTopicLink onShow={onShowNetwork} /> to turn it on.
             </p>

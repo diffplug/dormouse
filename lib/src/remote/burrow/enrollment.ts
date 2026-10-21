@@ -12,6 +12,7 @@ import {
   UNAUTHORIZED_ERROR,
   isBurrowEnrollBeginResponse,
   isBurrowEnrollPollResponse,
+  isBurrowVoicePollResponse,
   isE2eId,
   isNoiseStaticMaterial,
   mintNoiseStaticKeyPair,
@@ -379,26 +380,28 @@ function approvalRefusalMessage(status: number, detail: string, relayOrigin: str
 }
 
 /**
- * What one remote-control poll says.
- * `retry` is a poll that told nothing — the Relay
- * unreachable, a 5xx, a 2xx whose body was lost mid-read, or a 429, which asks
- * the Burrow to `slowDown` — and the
- * next poll asks again; `redeemed` is an approval an earlier poll spent on
- * `burrowId`, whose answer never arrived; `refused` keeps the copy for its fixed reasons to the
+ * What one poll says, for either purpose. `approved` carries the purpose's
+ * credential; `mismatch` is an approval typed with other digits than the code
+ * showed; `redeemed` is an approval an earlier poll spent, whose answer never
+ * arrived, naming the Burrow it enrolled where it enrolled one. `retry` is a
+ * poll that told nothing — the Relay unreachable, a 5xx, a 2xx whose body was
+ * lost mid-read, or a 429, which asks the Burrow to `slowDown` — and the next
+ * poll asks again; `refused` keeps the copy for its fixed reasons to the
  * panel; `failed` names what went wrong.
  */
-export type HostedEnrollmentPoll =
+export type HostedApprovalAnswer<C> =
   | { status: 'pending' }
   | { status: 'expired' }
-  | { status: 'redeemed'; burrowId: string }
-  | { status: 'enrolled'; enrollment: BurrowEnrollment }
+  | { status: 'mismatch' }
+  | { status: 'redeemed'; burrowId?: string }
+  | { status: 'approved'; credential: C }
   | HostedApprovalFailure;
 
 /**
- * `POST /api/burrow/enroll/poll` once. **Never throws**: the service's poll
- * loop reads every outcome. An `enrolled` answer is mapped through the same
- * {@link isEnrollment} guard as the password exchange's, with `label` and the
- * static {@link beginHostedEnrollment} minted.
+ * `POST /api/burrow/enroll/poll` once for remote control. **Never throws**:
+ * the poll loop reads every outcome. An `enrolled` answer is mapped through
+ * the same {@link isEnrollment} guard as the password exchange's, with `label`
+ * and the static {@link beginHostedEnrollment} minted.
  */
 export async function pollHostedEnrollment(
   relayOrigin: string,
@@ -406,13 +409,26 @@ export async function pollHostedEnrollment(
   label: string,
   noiseStatic: EnrollmentStatic,
   fetch: typeof globalThis.fetch,
-): Promise<HostedEnrollmentPoll> {
-  return pollHostedApproval(relayOrigin, deviceCode, 'remote', fetch, (body): HostedEnrollmentPoll | null => {
+): Promise<HostedApprovalAnswer<BurrowEnrollment>> {
+  return pollHostedApproval(relayOrigin, deviceCode, 'remote', fetch, (body): HostedApprovalAnswer<BurrowEnrollment> | null => {
     if (!isBurrowEnrollPollResponse(body)) return null;
     // Rebuilt, so nothing but the guarded fields reaches status.
     if (body.status === 'redeemed') return { status: 'redeemed', burrowId: body.burrowId };
     if (body.status !== 'enrolled') return { status: body.status };
-    return { status: 'enrolled', enrollment: enrollmentFrom(relayOrigin, body.enrollment, label, noiseStatic) };
+    return { status: 'approved', credential: enrollmentFrom(relayOrigin, body.enrollment, label, noiseStatic) };
+  });
+}
+
+/** `POST /api/burrow/enroll/poll` once for managed voice, its credential the voice token. **Never throws.** */
+export async function pollHostedVoiceApproval(
+  relayOrigin: string,
+  deviceCode: string,
+  fetch: typeof globalThis.fetch,
+): Promise<HostedApprovalAnswer<string>> {
+  return pollHostedApproval(relayOrigin, deviceCode, 'voice', fetch, (body): HostedApprovalAnswer<string> | null => {
+    if (!isBurrowVoicePollResponse(body)) return null;
+    // Rebuilt, so nothing but the guarded fields goes further.
+    return body.status === 'enabled' ? { status: 'approved', credential: body.voiceToken } : { status: body.status };
   });
 }
 

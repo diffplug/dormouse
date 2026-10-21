@@ -157,10 +157,14 @@ export async function readTextFromClipboard(): Promise<string> {
   }
 }
 
-/** Paste file references, then text, then an image temp path.
+/** Paste supplied native-event text, or read file references, text, then an image temp path.
  * The first two are read in parallel; the image only once both are empty,
  * since reading it allocates a temp file. */
-export async function doPaste(terminalId: string): Promise<void> {
+export async function doPaste(terminalId: string, suppliedText?: string): Promise<void> {
+  if (suppliedText !== undefined) {
+    writePasteToPty(terminalId, suppliedText);
+    return;
+  }
   const platform = getPlatform();
 
   const [paths, text] = await Promise.all([

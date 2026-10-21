@@ -32,7 +32,7 @@ The touch selector controls what a pane-content touch does.
 
 **Must recompute `paneMouseOverride` for every mounted pane from the global touch mode and that pane's own reporting state**; a switched-away pane must not retain a stale override. The consumer owns the loop.
 
-Select mode **must route touch and pen drags through the shared terminal mouse-selection router**, never a mobile-only one, so every selection and copy behavior matches desktop (`docs/specs/mouse-and-clipboard.md`). **Paste rides the native browser/OS flow** — no mobile clipboard manager, no multi-line paste review.
+**Must route touch and pen drags in Select mode through the shared terminal mouse-selection router** (`docs/specs/mouse-and-clipboard.md`). **Must send native-paste event text through the shared clipboard writer**, without re-reading the clipboard, a mobile clipboard manager, or multi-line review.
 
 Event routing, by mode (rationale):
 
