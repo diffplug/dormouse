@@ -2,7 +2,7 @@
 // @vitest-environment-options {"url":"https://hosted.example.test/login?signin"}
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import * as api from "./api";
 import type { Enrollment } from "./enrollment";
@@ -28,23 +28,9 @@ const login = (age = 0): api.Session => ({
 let root: Root;
 let container: HTMLDivElement;
 
-// jsdom has no native modal methods. Preserve any implementation the test
-// environment already supplies, and restore the prototype after this file.
-const dialogMethods = Object.getOwnPropertyDescriptors(HTMLDialogElement.prototype);
-beforeAll(() => {
-  if (!HTMLDialogElement.prototype.showModal) Object.defineProperty(HTMLDialogElement.prototype, "showModal", {
-    configurable: true, value(this: HTMLDialogElement) { this.open = true; },
-  });
-  if (!HTMLDialogElement.prototype.close) Object.defineProperty(HTMLDialogElement.prototype, "close", {
-    configurable: true, value(this: HTMLDialogElement) { this.open = false; },
-  });
-});
-afterAll(() => {
-  for (const name of ["showModal", "close"] as const) {
-    if (dialogMethods[name]) Object.defineProperty(HTMLDialogElement.prototype, name, dialogMethods[name]);
-    else Reflect.deleteProperty(HTMLDialogElement.prototype, name);
-  }
-});
+// jsdom has no modal dialog methods; Vitest isolates this file's prototype.
+HTMLDialogElement.prototype.showModal = function () { this.open = true; };
+HTMLDialogElement.prototype.close = function () { this.open = false; };
 
 beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -72,8 +58,6 @@ afterEach(async () => {
   container.remove();
   vi.clearAllTimers();
   vi.useRealTimers();
-  vi.restoreAllMocks();
-  sessionStorage.clear();
 });
 
 async function mount(enrollment: Enrollment | null) {
