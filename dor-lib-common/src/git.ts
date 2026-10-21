@@ -31,7 +31,7 @@ export interface LocalGitRepository {
 export interface GitRepositoryOptions {
   /** Test seams. `readFile` answers a regular file's text, and throws past `limit` bytes. */
   fs?: LocalPathFs & { readFile?(path: string, limit: number): Promise<string>; readdir?(path: string): Promise<string[]> };
-  path?: LocalPathModule & Pick<typeof nodePath, 'dirname'>;
+  path?: LocalPathModule & Pick<typeof nodePath, 'delimiter' | 'dirname'>;
   home?: string;
 }
 
@@ -67,6 +67,10 @@ export async function localGitRepository(dir: string, options: GitRepositoryOpti
     for (let level = start.path; ;) {
       const found = await repositoryAt(level, options);
       if (found) {
+        // git splits `GIT_CEILING_DIRECTORIES` on the path-list delimiter with
+        // no escape, so `untrustedGitEnv` cannot stop git above a parent
+        // spelled with one.
+        if (path.dirname(level).includes(path.delimiter)) return null;
         await checkRepository(found, options);
         return found;
       }

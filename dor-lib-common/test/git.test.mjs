@@ -71,6 +71,20 @@ test('with Windows semantics, refuses a repository that names a share before any
   }
 });
 
+test('refuses a repository whose parent folder holds the path-list delimiter, which no ceiling can name', async () => {
+  const under = (parent) => fakeFs({
+    'C:\\': dir,
+    [parent]: dir,
+    [`${parent}\\work`]: dir,
+    [`${parent}\\work\\.git`]: dir,
+    [`${parent}\\work\\.git\\HEAD`]: file('ref: refs/heads/main\n'),
+    [`${parent}\\work\\.git\\objects`]: dir,
+    [`${parent}\\work\\.git\\refs`]: dir,
+  });
+  assert.equal(await localGitRepository('C:\\evil;x\\work', windows(under('C:\\evil;x'))), null);
+  assert.equal((await localGitRepository('C:\\evil x\\work', windows(under('C:\\evil x'))))?.gitDir, 'C:\\evil x\\work\\.git');
+});
+
 test('with Windows semantics, accepts a config naming local paths', async () => {
   const fs = windowsRepo({
     'C:\\work\\.git\\config': file('[core]\n\tworktree = ../..\n\texcludesFile = ~/ignores\n[remote "origin"]\n\turl = //host/share/repo.git\n'),
