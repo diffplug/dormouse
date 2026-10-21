@@ -2191,7 +2191,7 @@ export function useDorControl({
         const initialViewport = isBrowserViewportSetting(stored) ? stored : undefined;
         const launchViewport = initialViewport?.mode === 'fixed' ? initialViewport
           : initialViewport?.mode === 'pane-sync' ? (found ? getAgentBrowserSurfaceController(found.id)?.getMeasuredPaneSize() : undefined) ?? { width: 1440, height: 900 } : undefined;
-        detail.respond({ ok: true, result: { binding, fresh: false, ...headedFor(found?.id), ...(provider === 'playwright' && initialViewport ? { initialViewport, launchViewport } : {}) } });
+        detail.respond({ ok: true, result: { binding, fresh: false, ...(found ? headedFor(found.id) : {}), ...(provider === 'playwright' && initialViewport ? { initialViewport, launchViewport } : {}) } });
       } else {
         const existingNative = await browserHandle(provider, binding)?.measure();
         if (existingNative?.ok && existingNative.viewport) {
