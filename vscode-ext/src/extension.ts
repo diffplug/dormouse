@@ -1,14 +1,15 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import { shutdown } from './shutdown';
 import * as ptyManager from './pty-manager';
 import { DormouseViewProvider } from './webview-view-provider';
-import { attachRouter, flushAllSessions, getAlertStates, reportWindowPresence } from './message-router';
-import { closeBrowserSessions, setBrowserShellRuntime } from './agent-browser-host';
+import { attachRouter, getAlertStates, reportWindowPresence } from './message-router';
+import { setBrowserShellRuntime } from './agent-browser-host';
 import { serveWebview } from './webview-messaging';
 import { log } from './log';
 import { initToolHost } from './tool-host';
 import { initSurfaceIds } from './surface-ids';
-import { captureAgentRecoveryCommands, discardUnreadableSessionState, mergeAlertStates, refreshSavedSessionStateFromPtys, takeRecoveryCommands } from './session-state';
+import { discardUnreadableSessionState, mergeAlertStates, takeRecoveryCommands } from './session-state';
 import { readPersistedSession } from '../../lib/src/lib/session-types';
 import { workspaceTitle } from './workspace-chrome';
 import { resolveSelectedShell, setSelectedShellPath, getSelectedShellPath } from './shell-selection';
@@ -241,45 +242,5 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 export async function deactivate() {
-  if (!extensionContext) return;
-  const t0 = Date.now();
-  const step = (name: string) => log.info(`[deactivate] ${name} (+${Date.now() - t0}ms)`);
-  step('starting');
-  // Recovery gets the budget FIRST, and this ordering is load-bearing rather than
-  // tidy. `[deactivate] done` has never once been reached in a real shutdown — VS
-  // Code kills the extension host on a budget we do not control — so the single
-  // step whose data cannot be reconstructed afterwards runs before the steps whose
-  // data can (cwd re-reads, alert merges). The resume hint exists only between the
-  // interrupt and the kill; miss that window and it is gone
-  // (docs/specs/vscode.md -> "Serialization and restore").
-  //
-  // Closing any headed pop-out window (so quitting never orphans a real Chrome
-  // window — docs/specs/dor-browser.md -> "Pop-Out") is the one step that does
-  // not have to queue behind it: it shares no state with the PTY interrupt and
-  // spends its time in external processes rather than on this thread. Kicked off
-  // first but joined after, so it overlaps the capture poll instead of adding its
-  // own round trips to the serial teardown.
-  step('closing popped-out browser windows');
-  // Absorbed rather than propagated. Two reasons it must not throw out of the
-  // join below: it would surface as an unhandledRejection while capture is
-  // awaited, and — because it is joined *after* the capture rather than before —
-  // it would skip the session flush, the live-PTY refresh, and both kills,
-  // leaking the pty host and every PTY under it. An orphaned Chrome window is a
-  // far smaller failure than an unkilled pty host.
-  const poppedOutClosed = closeBrowserSessions().catch((err) => {
-    log.error('[deactivate] could not close popped-out browser windows:', String(err));
-  });
-  step('capturing agent recovery commands');
-  await captureAgentRecoveryCommands(extensionContext, 1200);
-  await poppedOutClosed;
-  // Save session state while PTYs are still alive — CWD queries need live
-  // processes. Must happen before the graceful kill.
-  step('flushing sessions from webview');
-  await flushAllSessions(1000);
-  step('refreshing session state from live PTYs');
-  await refreshSavedSessionStateFromPtys(extensionContext, getAlertStates());
-  step('graceful kill');
-  await ptyManager.gracefulKillLive(2000);
-  ptyManager.killAll();
-  step('done');
+  if (extensionContext) await shutdown(extensionContext);
 }
