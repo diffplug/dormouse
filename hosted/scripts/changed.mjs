@@ -5,6 +5,10 @@ import { fileURLToPath } from "node:url";
 // theme the account frontend imports, and the whole Pocket bundle and one-time
 // phone page the relay stages. Whole packages and directories, never a
 // hand-picked subset of Pocket's import graph, so a new import cannot slip past.
+// The exception is dor/, dor-tools-lib/, dor-tools-builtin/, and their alias
+// wiring (scripts/workspace-sources.mjs): lib/src imports them from source, but
+// ci.yml already builds Pocket and Hosted and runs Hosted's miniflare suite on
+// every PR, so an approval-gated preview for each CLI change catches nothing more.
 export function touchesHosted(paths) {
   return paths.some(
     (path) =>
