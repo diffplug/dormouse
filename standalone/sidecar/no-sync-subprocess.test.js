@@ -18,7 +18,10 @@ const SOURCES = [
 function* sourceFiles(dir, pattern) {
   for (const entry of fs.readdirSync(path.join(root, dir), { withFileTypes: true })) {
     const relative = path.posix.join(dir, entry.name);
-    if (entry.isDirectory()) { if (entry.name !== 'node_modules') yield* sourceFiles(relative, pattern); }
+    if (entry.isDirectory()) {
+      // Staged CLI bundles run in terminal subprocesses, not the PTY host.
+      if (entry.name !== 'node_modules' && relative !== 'standalone/sidecar/dor-cli') yield* sourceFiles(relative, pattern);
+    }
     else if (pattern.test(entry.name) && !/\.test\.[jt]s$/.test(entry.name)) yield relative;
   }
 }
