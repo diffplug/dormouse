@@ -22,6 +22,8 @@ export class ToolLaunchLatch {
   /** The host typed `typed` into this PTY, its Enter included or not. */
   arm(typed: string): void {
     this.#launched = typed.replace(/\r$/, '');
+    // A line the shell staged before this write is not the typed one's.
+    this.#line = null;
     this.#running = false;
   }
 
