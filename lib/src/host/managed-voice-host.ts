@@ -1,8 +1,8 @@
 /**
  * The host half of managed voice (`docs/specs/alert.md` -> "Managed voice"):
  * holds the token its own Hosted approval obtains, adds it and the voice
- * id to the webview's text, caches the clips, and answers with audio or a
- * diagnostic failure. Where the request may go:
+ * id to the webview's text, and answers with audio or a diagnostic failure.
+ * Where the request may go:
  * `docs/specs/security-local.md` -> "Persisted state".
  */
 import { readFile } from 'node:fs/promises';
@@ -35,9 +35,6 @@ const MANAGED_VOICE_TOKEN_PATH = '/api/voice/token';
 const MAX_TEXT_LENGTH = 200;
 /** `docs/specs/standalone.md` -> "Rust ↔ sidecar bridge". */
 export const MAX_AUDIO_BYTES = 512 * 1024;
-/** The clip cache's bounds: an alarm label repeats, so a few dozen clips cover a day. */
-export const CLIP_CACHE_MAX_ENTRIES = 32;
-export const CLIP_CACHE_MAX_BYTES = 4 * 1024 * 1024;
 
 export interface StoredManagedVoice {
   token: string | null;
@@ -101,46 +98,6 @@ function parseVoiceApproval(body: unknown): BurrowVoicePollResponse | null {
   return body.status === 'enabled' ? { status: 'enabled', voiceToken: body.voiceToken } : { status: body.status };
 }
 
-/**
- * Clips by voice and text, least recently used evicted first, bounded in count
- * and bytes. Memory only: never persisted.
- */
-function createClipCache() {
-  const clips = new Map<string, string>();
-  let bytes = 0;
-  const sizeOf = (base64: string) => Buffer.byteLength(base64, 'base64');
-  const keyOf = (voiceId: string, text: string) => `${voiceId}\n${text}`;
-  return {
-    get(voiceId: string, text: string): string | undefined {
-      const key = keyOf(voiceId, text);
-      const clip = clips.get(key);
-      if (clip === undefined) return undefined;
-      clips.delete(key);
-      clips.set(key, clip);
-      return clip;
-    },
-    set(voiceId: string, text: string, clip: string): void {
-      const key = keyOf(voiceId, text);
-      const old = clips.get(key);
-      if (old !== undefined) {
-        clips.delete(key);
-        bytes -= sizeOf(old);
-      }
-      clips.set(key, clip);
-      bytes += sizeOf(clip);
-      for (const [oldest, evicted] of clips) {
-        if (clips.size <= CLIP_CACHE_MAX_ENTRIES && bytes <= CLIP_CACHE_MAX_BYTES) break;
-        clips.delete(oldest);
-        bytes -= sizeOf(evicted);
-      }
-    },
-    clear(): void {
-      clips.clear();
-      bytes = 0;
-    },
-  };
-}
-
 export function createManagedVoiceHost(options: {
   /** Where the config lives; without one no token can be stored. */
   store?: ManagedVoiceStore;
@@ -154,7 +111,7 @@ export function createManagedVoiceHost(options: {
   /**
    * Whether the network policy lets this process reach Hosted
    * (`docs/specs/remote-network.md` → "Policy"), asked before speech and approval requests.
-   * `false` refuses before any request, a cached clip included.
+   * `false` refuses before any request.
    */
   networkAllowed: () => Promise<boolean>;
 }): {
@@ -163,8 +120,8 @@ export function createManagedVoiceHost(options: {
   /**
    * Another process may have changed the store (a sibling VS Code window):
    * read it again, and announce what changed. A changed token forgets the
-   * clips and the refusal the old one earned; this window's own write, heard
-   * back, changes nothing.
+   * refusal the old one earned; this window's own write, heard back, changes
+   * nothing.
    */
   invalidate(): void;
 } {
@@ -181,7 +138,6 @@ export function createManagedVoiceHost(options: {
   let loaded: Promise<StoredManagedVoice> | null = null;
   // Each edit derives its record from the loaded one: two at once would drop one's change.
   const serialize = createSerialQueue();
-  const clips = createClipCache();
   let notEntitled = false;
   let disabled = false;
   let disconnectFailed = false;
@@ -191,7 +147,7 @@ export function createManagedVoiceHost(options: {
   let enrollmentSequence = 0;
   let beginPending: Promise<void> | null = null;
   let pollTimer: ReturnType<typeof setTimeout> | undefined;
-  /** Bumped by every token change, so a request that outlived its token caches nothing. */
+  /** Bumped by every token change, so a request that outlived its token changes nothing. */
   let tokenGeneration = 0;
 
   const load = (): Promise<StoredManagedVoice> => {
@@ -246,11 +202,10 @@ export function createManagedVoiceHost(options: {
     await announce();
   }
 
-  /** Any token change forgets every clip and every refusal the old one earned. */
+  /** Any token change forgets the refusal the old one earned. */
   const setToken = (token: string | null) => {
     const generation = ++tokenGeneration;
     if (token === null) disabled = true;
-    clips.clear();
     notEntitled = false;
     return serialize(async () => {
       if (speakUrl === null) throw new Error('this build has no managed voice');
@@ -281,7 +236,6 @@ export function createManagedVoiceHost(options: {
     if (!store || normalizeStored(await store.read()).token !== refused) return;
     tokenGeneration++;
     disabled = true;
-    clips.clear();
     notEntitled = false;
     await clearToken();
   });
@@ -296,19 +250,13 @@ export function createManagedVoiceHost(options: {
 
   async function request(speakUrl: string, text: string): Promise<ManagedVoiceHostSpeakResult> {
     // Before the read: a token change while it is out must not let this
-    // request's answer cache a clip or latch a refusal against the new token.
+    // request's answer play or latch a refusal against the new token.
     const generation = tokenGeneration;
     const config = await load().catch(() => null);
     if (!config) return { ok: false, reason: 'config unreadable' };
     if (disabled || generation !== tokenGeneration || !config.token) return { ok: false, reason: 'unconfigured' };
     const trimmed = text.trim();
     if (trimmed.length === 0 || trimmed.length > MAX_TEXT_LENGTH) return { ok: false, reason: 'bad-request' };
-    // A hit makes no request. Skipped while Hosted says the plan lapsed, so a
-    // lapsed member hears the system voice and the next request can learn
-    // the plan is back.
-    const cached = notEntitled ? undefined : clips.get(config.voiceId, trimmed);
-    if (cached !== undefined) return { ok: true, audioBase64: cached };
-
     const signal = AbortSignal.timeout(timeoutMs);
     try {
       const response = await fetchImpl(speakUrl, {
@@ -350,11 +298,8 @@ export function createManagedVoiceHost(options: {
       }
       if (size === 0) return { ok: false, reason: 'empty audio' };
       const audioBase64 = Buffer.concat(chunks, size).toString('base64');
-      // Only for the token that asked: a disconnect meanwhile cleared the cache.
-      if (generation === tokenGeneration) {
-        await noteEntitled(true);
-        if (generation === tokenGeneration && !disabled) clips.set(config.voiceId, trimmed, audioBase64);
-      }
+      // Only for the token that asked: a disconnect meanwhile wins.
+      if (generation === tokenGeneration) await noteEntitled(true);
       return generation === tokenGeneration && !disabled
         ? { ok: true, audioBase64 } : { ok: false, reason: 'disconnected' };
     } catch {
@@ -515,11 +460,10 @@ export function createManagedVoiceHost(options: {
           loaded = Promise.resolve({ ...next, token: null });
         } else if (previous?.token !== next.token) {
           // A sibling's enable or disconnect supersedes this window's: its
-          // clips, refusal, and any disconnect still owed are for a token
-          // the store no longer holds.
+          // refusal, and any disconnect still owed, are for a token the store
+          // no longer holds.
           uncleared = null;
           tokenGeneration++;
-          clips.clear();
           notEntitled = false;
           disabled = false;
           disconnectFailed = false;
