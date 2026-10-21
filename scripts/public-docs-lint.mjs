@@ -82,7 +82,12 @@ function docsSurfaces() {
     `${WEBSITE_SRC}/components/DocsLayout.tsx`,
     ...DOCS_PAGES.map((page) => `${WEBSITE_SRC}/${page.module.replace(/^\.\//, '')}`),
   ];
-  const { surfaces, missingSeeds } = collectDocsSurfaces(seed, trackedFiles(), readRepoFile);
+  // The docs design shared with Hosted lives in lib (`lib/src/site/`); its
+  // own imports of the rest of lib are app UI, not reference page text.
+  const { surfaces, missingSeeds } = collectDocsSurfaces(seed, trackedFiles(), readRepoFile, {
+    aliases: { 'dormouse-lib/site/': 'lib/src/site/' },
+    roots: [`${WEBSITE_SRC}/`, 'lib/src/site/'],
+  });
   for (const rel of missingSeeds) fail(`${rel}: docsSurfaces seed names a file that does not exist`);
   return surfaces;
 }
@@ -551,7 +556,7 @@ function checkNoDimmedDocsText() {
         'An aria-hidden "/" separating the rail crumb from the page title. '
         + 'Decoration, never read, and not a contrast surface.',
     },
-    [`${WEBSITE_SRC}/components/DocsThemeControl.tsx`]: {
+    ['lib/src/site/DocsThemeControl.tsx']: {
       'opacity-50':
         'The theme prompt\'s dismiss button — an icon affordance that comes to '
         + 'full strength on hover, not body copy.',
@@ -576,7 +581,7 @@ function checkNoDimmedDocsText() {
     const unexplained = [...hits].filter((hit) => !(hit in allowed));
     if (unexplained.length === 0) continue;
     fail(`${rel}: dims text with ${unexplained.join(', ')} — use MUTED_TEXT_CLASS `
-      + '(website/src/components/docs-tokens.ts), or add an ALLOWED entry in '
+      + '(lib/src/site/docs-tokens.ts), or add an ALLOWED entry in '
       + 'scripts/public-docs-lint.mjs saying why this one is not reading text.');
   }
 

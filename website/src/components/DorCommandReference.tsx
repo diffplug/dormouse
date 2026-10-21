@@ -9,7 +9,7 @@
  */
 
 import { AnchoredHeading } from "./MarkdownDocument";
-import { ACCENT_TEXT_CLASS, BODY_TEXT_CLASS, MUTED_TEXT_CLASS, PRE_CLASS, TABLE_CLASS, TABLE_ROW_CLASS, TABLE_WRAP_CLASS } from "./docs-tokens";
+import { ACCENT_TEXT_CLASS, BODY_TEXT_CLASS, MUTED_TEXT_CLASS, PRE_CLASS, TABLE_CLASS, TABLE_ROW_CLASS, TABLE_WRAP_CLASS } from "dormouse-lib/site/docs-tokens";
 
 export type DefinitionGroup = { label: string; rows: { term: string; description: string }[] };
 export type LabelledBlock = { label: string; body: string };

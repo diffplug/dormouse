@@ -23,6 +23,7 @@ import { NotifySignupForm } from "../components/NotifySignupForm";
 import {
   ACCENT_BORDER_CLASS,
   ACCENT_TEXT_CLASS,
+  ACTION_CLASS,
   BODY_TEXT_CLASS,
   CARD_ACCENT_CLASS,
   CARD_CLASS,
@@ -30,7 +31,7 @@ import {
   LINK_CLASS,
   MUTED_TEXT_CLASS,
   SCROLL_MT_CLASS,
-} from "../components/docs-tokens";
+} from "dormouse-lib/site/docs-tokens";
 import { type TocEntry } from "../lib/docs-pages";
 import { POCKET_PLAYGROUND_PATH } from "../lib/playground-routing";
 import {
@@ -99,11 +100,6 @@ function Includes({ items }: { items: React.ReactNode[] }) {
   );
 }
 
-const CARD_ACTION_CLASS =
-  "inline-flex min-h-12 w-full items-center justify-center rounded-md border px-4 py-3 "
-  + "font-display hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 "
-  + `focus-visible:outline-[var(--docs-accent)] ${ACCENT_BORDER_CLASS} ${ACCENT_TEXT_CLASS}`;
-
 /**
  * One plan, as a card in the row.
  *
@@ -168,7 +164,7 @@ function BuyButton({ tier, label, onBuy }: { tier: Tier; label: string; onBuy: (
       type="button"
       onClick={() => onBuy(tier)}
       aria-label={`Buy ${tier.name}`}
-      className={CARD_ACTION_CLASS}
+      className={ACTION_CLASS}
     >
       {label}
     </button>
@@ -283,7 +279,7 @@ function FreeCard() {
       price={<span className="font-display text-4xl">$0</span>}
       below="Forever. No account, no card."
       action={
-        <a href={`${sitePath("/")}#download`} className={CARD_ACTION_CLASS}>
+        <a href={`${sitePath("/")}#download`} className={ACTION_CLASS}>
           Download
         </a>
       }

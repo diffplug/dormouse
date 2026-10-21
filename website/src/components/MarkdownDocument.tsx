@@ -22,7 +22,7 @@ import {
   TH_CLASS,
   TH_WRAP_CLASS,
   TABLE_WRAP_CLASS,
-} from "./docs-tokens";
+} from "dormouse-lib/site/docs-tokens";
 
 export type InlineNode =
   | { type: "text"; value: string }

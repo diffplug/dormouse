@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { completeThemeVars, getBundledThemes } from "dormouse-lib/lib/themes";
+import { completeThemeVars, getBundledThemes } from "../lib/themes";
 import {
   compositeColor,
   contrastRatio,
@@ -8,14 +8,14 @@ import {
   docsMutedTextFor,
   docsMutedTextForSurfaces,
   docsStatusColorFor,
-} from "dormouse-lib/lib/themes/contrast";
+} from "../lib/themes/contrast";
 import {
   DOCS_STATUS_COLORS,
   TINTED_DOCS_SURFACES,
   type DocsSurfaceVariants,
-} from "../components/docs-tokens";
+} from "./docs-tokens";
 
-/** The site's own palette, which `website/src/index.css` declares as literals
+/** The site's own palette, which `./site.css` declares as literals
  *  because the marketing pages are locked to it and prerender without JS. */
 const SITE_BACKGROUND = "#000000";
 const SITE_FOREGROUND = "#dedede";
@@ -177,19 +177,19 @@ describe("docs muted text colour", () => {
     expect(docsMutedTextFor("var(--nope)", "#000000")).toBeNull();
   });
 
-  it("agrees with the static fallback index.css declares", () => {
+  it("agrees with the static fallback site.css declares", () => {
     // The site's own palette is fixed, so its muted level is precomputed there
     // rather than left to DocsLayout's effect — otherwise the prerendered page
     // has no muted level at all. Keep the two in step.
-    const css = readFileSync(new URL("../index.css", import.meta.url), "utf8");
+    const css = readFileSync(new URL("./site.css", import.meta.url), "utf8");
     const declared = css.match(/--docs-text-muted:\s*(#[0-9a-f]{6})/i)?.[1];
     expect(declared).toBe(docsMutedTextFor("#dedede", "#000000"));
   });
 
   it.each(TINTED_DOCS_SURFACES)(
-    "agrees with the static $token fallback index.css declares",
+    "agrees with the static $token fallback site.css declares",
     ({ token, surfaceVariants }) => {
-      const css = readFileSync(new URL("../index.css", import.meta.url), "utf8");
+      const css = readFileSync(new URL("./site.css", import.meta.url), "utf8");
       const declared = css.match(new RegExp(`${token}:\\s*(#[0-9a-f]{6})`, "i"))?.[1];
       const surfaces = surfacesFor(surfaceVariants, SITE_FOREGROUND, SITE_BACKGROUND);
       expect(declared).toBe(docsMutedTextForSurfaces(SITE_FOREGROUND, surfaces));
@@ -215,10 +215,10 @@ describe("docs verdict colours", () => {
   });
 
   it.each(DOCS_STATUS_COLORS)(
-    "agrees with the static $token fallback index.css declares",
+    "agrees with the static $token fallback site.css declares",
     ({ token, ansiVar, surfaceVariants }) => {
       // The site's black, with the registry's dark-theme terminal hue.
-      const css = readFileSync(new URL("../index.css", import.meta.url), "utf8");
+      const css = readFileSync(new URL("./site.css", import.meta.url), "utf8");
       const declared = css.match(new RegExp(`${token}:\\s*(#[0-9a-f]{6})`, "i"))?.[1];
       const hue = completeThemeVars({}, "dark")[ansiVar];
       const surfaces = surfacesFor(surfaceVariants, SITE_FOREGROUND, SITE_BACKGROUND);

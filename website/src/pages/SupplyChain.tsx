@@ -12,7 +12,7 @@ import {
   TABLE_ROW_CLASS,
   TABLE_WRAP_CLASS,
   TH_CLASS,
-} from "../components/docs-tokens";
+} from "dormouse-lib/site/docs-tokens";
 import MarkdownDocument, { AnchoredHeading, type BlockNode } from "../components/MarkdownDocument";
 import { securityColumnWeights } from "../components/security-columns";
 import security from "../data/docs.security.json";
@@ -30,7 +30,7 @@ export function meta({ location }: MetaArgs) {
 
 // Wrapped in `tv()` so the tables can compose it. The docs recipe, not the
 // site's caramel: this page follows the reader's theme, where caramel drops
-// below WCAG AA (website/src/components/docs-tokens.ts).
+// below WCAG AA (lib/src/site/docs-tokens.ts).
 const link = tv({ base: LINK_CLASS });
 
 type PackageDependency = {

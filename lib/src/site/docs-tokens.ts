@@ -19,7 +19,7 @@
  * theme is applied.
  *
  * `--docs-accent` holds that fallback chain, defined once in
- * website/src/index.css; DocsLayout's effect overwrites it with the corrected
+ * ./site.css; `paintDocsTokens` (./docs-paint.ts) overwrites it with the corrected
  * accent once a theme resolves (lib/src/lib/themes/contrast.ts).
  */
 export const LINK_CLASS = "text-[var(--docs-accent)] underline-offset-2 hover:underline";
@@ -33,8 +33,15 @@ export const ACCENT_BORDER_CLASS = "border-[var(--docs-accent)]";
 
 /** Accent-derived text corrected against an accent-tinted action surface —
  *  against the stronger hover tint, so it clears WCAG AA at rest and on hover
- *  (both pinned in website/src/lib/docs-accent.test.ts). */
+ *  (both pinned in lib/src/site/docs-accent.test.ts). */
 export const ACTION_TEXT_CLASS = "text-[var(--docs-button-text)]";
+
+/** The pages' call to action: an accent outline, full width, underlined on
+ *  hover. */
+export const ACTION_CLASS =
+  "inline-flex min-h-12 w-full items-center justify-center rounded-md border px-4 py-3 "
+  + "font-display hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 "
+  + `focus-visible:outline-[var(--docs-accent)] ${ACCENT_BORDER_CLASS} ${ACCENT_TEXT_CLASS}`;
 
 /** Opaque secondary text, derived per active theme to retain body-text AA. */
 export const MUTED_TEXT_CLASS = "text-[var(--docs-text-muted)]";
@@ -98,7 +105,7 @@ export type DocsSurfaceVariants = readonly (readonly { tintVar: string; tintAlph
  * *at* 4.5:1 against the untinted page: `NOTE_CLASS` paired with
  * `MUTED_TEXT_CLASS` measured 4.42:1 on the site's own palette. **Adding a
  * tinted container adds an entry here**, and nesting adds a `surfaceVariants`
- * stack — `DocsLayout`'s paint effect and `website/src/lib/docs-accent.test.ts`
+ * stack — `paintDocsTokens` (./docs-paint.ts) and `lib/src/site/docs-accent.test.ts`
  * both loop this list, so the CSS variable, the static fallback, and the
  * per-theme AA check come with it.
  *
@@ -138,8 +145,8 @@ export const TINTED_DOCS_SURFACES = [
  * yellow, and red, corrected to clear body-text AA on the page and on the 4%
  * card tint a highlighted table column sits on.
  *
- * `DocsLayout`'s paint effect derives each token; index.css carries the
- * fallback for the site's own black, and `website/src/lib/docs-accent.test.ts`
+ * `paintDocsTokens` (./docs-paint.ts) derives each token; ./site.css carries the
+ * fallback for the site's own black, and `lib/src/site/docs-accent.test.ts`
  * checks both. Never let colour carry a verdict alone: pair it with a shape.
  */
 export const DOCS_STATUS_COLORS = [

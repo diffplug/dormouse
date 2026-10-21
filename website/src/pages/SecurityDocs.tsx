@@ -20,7 +20,7 @@ import canaryRecall from "../data/canary-recall.json";
 import AuditIndex from "../components/AuditIndex";
 import CanaryRecall from "../components/CanaryRecall";
 import DocsLayout from "../components/DocsLayout";
-import { LINK_CLASS, NOTE_CLASS, NOTE_MUTED_TEXT_CLASS } from "../components/docs-tokens";
+import { LINK_CLASS, NOTE_CLASS, NOTE_MUTED_TEXT_CLASS } from "dormouse-lib/site/docs-tokens";
 import MarkdownDocument, { type BlockNode } from "../components/MarkdownDocument";
 import { securityColumnWeights } from "../components/security-columns";
 

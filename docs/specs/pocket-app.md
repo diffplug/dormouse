@@ -74,7 +74,7 @@ Source of truth: `PlatformAdapter` in `lib/src/lib/platform/types.ts`; `App` in 
 
 ## Design system and theming
 
-**All of Pocket — the auth screens included — renders on the shared themeable design system** (`--color-*` tokens over `--vscode-*`; [theme.md](./theme.md), `DESIGN.md`), never the website's separate "homepage" system (`website/src/index.css`). **No Pocket-specific palette**: a theme change re-skins auth screens and wall together.
+**All of Pocket — the auth screens included — renders on the shared themeable design system** (`--color-*` tokens over `--vscode-*`; [theme.md](./theme.md), `DESIGN.md`), never the website's separate "homepage" system (`lib/src/site/site.css`). **No Pocket-specific palette**: a theme change re-skins auth screens and wall together.
 
 **The theme is restored before first paint** (rationale).
 

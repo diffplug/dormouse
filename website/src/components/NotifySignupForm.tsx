@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ACCENT_BORDER_CLASS, ACTION_TEXT_CLASS, LINK_CLASS, MUTED_TEXT_CLASS } from "./docs-tokens";
+import { ACCENT_BORDER_CLASS, ACTION_TEXT_CLASS, LINK_CLASS, MUTED_TEXT_CLASS } from "dormouse-lib/site/docs-tokens";
 import { SITE_LINK_CLASS } from "./site-tokens";
 
 const EMAIL_STORAGE_PREFIX = "dormouse:notify-email:";

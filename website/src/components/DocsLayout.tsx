@@ -10,47 +10,22 @@
  */
 import { useEffect, useState, type ReactNode } from "react";
 import { ListIcon, XIcon } from "@phosphor-icons/react";
-import {
-  getAppliedThemeSnapshot,
-  subscribeToActiveTheme,
-  useRestoredTheme,
-} from "dormouse-lib/lib/themes";
 import SiteHeader from "./SiteHeader";
 // Imported statically, not lazily. The control renders twice — once in the
 // mobile bar, once floating — and a second `Suspense` boundary over the same
 // `lazy()` component never resolved, leaving the bar's picker a permanent
 // `<template>`. The chunk that saved was ~6KB gzip; a picker that never
 // appears is the worse trade.
-import DocsThemeControl from "./DocsThemeControl";
+import DocsThemeControl from "dormouse-lib/site/DocsThemeControl";
 import {
   ACCENT_TEXT_CLASS,
-  DOCS_STATUS_COLORS,
-  type DocsSurfaceVariants,
   MUTED_ACCENT_LINK_CLASS,
   MUTED_TEXT_CLASS,
-  TINTED_DOCS_SURFACES,
   TOC_INDENT_CLASS,
-} from "./docs-tokens";
+} from "dormouse-lib/site/docs-tokens";
+import { DOCS_HEADER_STYLE, useDocsThemedBody } from "dormouse-lib/site/docs-paint";
 import { DOCS_PAGES, docsRailPosition, type DocsPage, type TocEntry } from "../lib/docs-pages";
-import { DOCS_THEME_ID } from "../lib/docs-theme";
-import {
-  compositeColor,
-  docsAccentFor,
-  docsMutedTextFor,
-  docsMutedTextForSurfaces,
-  docsStatusColorFor,
-} from "dormouse-lib/lib/themes/contrast";
 import { sitePath } from "../lib/site-meta";
-
-/** Repaints the site's own tokens from the picked theme; see index.css. */
-const THEMED_BODY_CLASS = "docs-themed";
-
-/** The header is translucent over the page, so it takes the theme's own
- *  widget background rather than the site's near-black. */
-const DOCS_HEADER_STYLE: React.CSSProperties = {
-  background: "color-mix(in srgb, var(--color-bg) 85%, transparent)",
-  backdropFilter: "blur(12px)",
-};
 
 function TocList({ entries, nested = false }: { entries: TocEntry[]; nested?: boolean }) {
   if (entries.length === 0) return null;
@@ -154,70 +129,7 @@ export default function DocsLayout({
 }) {
   // These pages are long-form reading, so they follow the reader's theme
   // rather than the site's black.
-  useRestoredTheme(DOCS_THEME_ID);
-  useEffect(() => {
-    document.body.classList.add(THEMED_BODY_CLASS);
-    return () => document.body.classList.remove(THEMED_BODY_CLASS);
-  }, []);
-
-  // Links follow the picked theme's own accent rather than a per-kind default
-  // (lib/src/lib/themes/contrast.ts). Left alone, `--docs-accent` keeps the
-  // value index.css gives it, so a reader with no JS still gets a legible one.
-  useEffect(() => {
-    const paint = () => {
-      // The applied snapshot, not the stored id: `getActiveThemeId` already
-      // falls back to the first bundled theme, so a reader without storage
-      // would get the page painted in one theme and its links derived from
-      // another's accent the moment those two stop coinciding.
-      const snapshot = getAppliedThemeSnapshot();
-      const theme = snapshot?.theme;
-      const background = snapshot?.resolvedVars["--vscode-editor-background"];
-      const foreground = snapshot?.resolvedVars["--vscode-editor-foreground"];
-      const accent = theme?.accent;
-      if (!theme || !accent || !background || !foreground) return;
-      const link = docsAccentFor(accent, background);
-      if (link) {
-        document.body.style.setProperty("--docs-accent", link);
-        const actionHoverSurface = compositeColor(link, background, 0.2);
-        const actionText = actionHoverSurface && docsAccentFor(link, actionHoverSurface);
-        if (actionText) document.body.style.setProperty("--docs-button-text", actionText);
-      }
-      const muted = docsMutedTextFor(foreground, background);
-      if (muted) document.body.style.setProperty("--docs-text-muted", muted);
-
-      // One pass per tinted container, so a new one (or a nested tint stack) is
-      // an entry in the table rather than another pair of lines whose alpha
-      // has to match a class string somewhere else
-      // (website/src/components/docs-tokens.ts).
-      const styles = getComputedStyle(document.body);
-      /** Each tint stack flattened onto the page, or null if any layer is unreadable. */
-      const resolveSurfaces = (surfaceVariants: DocsSurfaceVariants): string[] | null => {
-        const surfaces = surfaceVariants.map((layers) =>
-          layers.reduce<string | null>((surface, { tintVar, tintAlpha }) => {
-            const tint = styles.getPropertyValue(tintVar).trim();
-            return surface && tint ? compositeColor(tint, surface, tintAlpha) : null;
-          }, background),
-        );
-        return surfaces.every((surface): surface is string => Boolean(surface)) ? surfaces : null;
-      };
-      for (const { token, surfaceVariants } of TINTED_DOCS_SURFACES) {
-        const surfaces = resolveSurfaces(surfaceVariants);
-        const surfaceMuted = surfaces && docsMutedTextForSurfaces(foreground, surfaces);
-        if (surfaceMuted) document.body.style.setProperty(token, surfaceMuted);
-      }
-
-      // Verdict colours take the theme's terminal hues, so red and green read
-      // as that theme's own red and green.
-      for (const { token, ansiVar, surfaceVariants } of DOCS_STATUS_COLORS) {
-        const hue = snapshot?.resolvedVars[ansiVar];
-        const surfaces = resolveSurfaces(surfaceVariants);
-        const status = hue && surfaces && docsStatusColorFor(hue, surfaces);
-        if (status) document.body.style.setProperty(token, status);
-      }
-    };
-    paint();
-    return subscribeToActiveTheme(paint);
-  }, []);
+  useDocsThemedBody();
 
   const [navOpen, setNavOpen] = useState(false);
   useEffect(() => {

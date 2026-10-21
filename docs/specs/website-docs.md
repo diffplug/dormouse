@@ -120,7 +120,7 @@ Source of truth: `Layout` in `website/src/root.tsx`.
 
 **`/docs` is an entrypoint, not an index.** It redirects with a 302 to the page `DOCS_DEFAULT_PATH` names (rationale); there is no page at `/docs` itself, and `checkDocsEntrypoint` keeps the redirect and the constant agreeing. Reference pages live at the top level (`/dor`, `/security`) with stable URLs, and each old `/docs/<page>` URL keeps a 301 in `_redirects` because READMEs and external links carry it. **Never give a page a slug that `website/src/routes.ts` or `website/public/` already serves.**
 
-**Docs text must clear WCAG AA against the surface carrying it, call-to-action text both at rest and on hover; never dim text with opacity** (rationale). `website/src/lib/docs-accent.test.ts` pins the derived colors across bundled themes; `checkNoDimmedDocsText` pins the call sites, allowlisting what is not text.
+**Docs text must clear WCAG AA against the surface carrying it, call-to-action text both at rest and on hover; never dim text with opacity** (rationale). `lib/src/site/docs-accent.test.ts` pins the derived colors across bundled themes; `checkNoDimmedDocsText` pins the call sites, allowlisting what is not text.
 
 Source of truth: `DOCS_PAGES` in `website/src/lib/docs-pages.ts`; `DocsLayout` in `website/src/components/DocsLayout.tsx`; `website/public/_redirects`.
 

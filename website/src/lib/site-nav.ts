@@ -1,14 +1,6 @@
 import { DOCS_PAGES } from "./docs-pages";
 import { sitePath } from "./site-meta";
-
-interface SiteNavLink {
-  href: string;
-  label: string;
-  external?: boolean;
-  hideOnMobile?: boolean;
-  /** Paths this entry highlights for, when the href itself is never a page. */
-  covers?: readonly string[];
-}
+import type { SiteNavLink } from "dormouse-lib/site/SiteHeader";
 
 /** The site's top-level links. */
 export const NAV_LINKS: readonly SiteNavLink[] = [

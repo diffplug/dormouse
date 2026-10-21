@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import SiteHeader, { STATIC_PAGE_HEADER_STYLE } from "./SiteHeader";
-import { BODY_TEXT_CLASS, LINK_CLASS, MUTED_TEXT_CLASS } from "./docs-tokens";
+import { BODY_TEXT_CLASS, LINK_CLASS, MUTED_TEXT_CLASS } from "dormouse-lib/site/docs-tokens";
 import { sitePath } from "../lib/site-meta";
 
 export type PolicySection = { id: string; title: string; body: ReactNode };
