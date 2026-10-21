@@ -29,6 +29,7 @@ import type {
 } from './types.js';
 import { callerWorkingDirectory, errorMessage, fail, requireControlClient, workspaceParam } from './shared.js';
 import { inferredHttpUrl, isSpecialOpenTarget, isSurfaceOpenTarget, resolveSurfaceOpenTarget } from './open-target.js';
+import { callerWslDistro, linuxPathText, windowsPathArgs, type PathArgs } from './wsl-paths.js';
 
 const KEY_PATTERN = /^[A-Za-z0-9._-]+$/;
 
@@ -210,6 +211,8 @@ export interface BrowserCliDescriptor {
   projectScoped: boolean;
   /** The guidance printed when the binary is not installed. */
   missingBinaryMessage(binary: string): string;
+  /** Where a WSL caller's Linux paths are translated for the Windows CLI. */
+  paths: PathArgs;
   /** A test's stand-in for the spawn. */
   exec(options: CliOptions): BrowserExec | undefined;
   /** The argv that reads the session's stream port once a command has
@@ -422,7 +425,10 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
   // command's args pass through untouched.
   const resolvedRest = await resolveOpenTargetArgs(flags.rest, options, flags.workspace, d.navigationVerbs);
   if (!resolvedRest.ok) return fail(resolvedRest.message);
-  const rest = resolvedRest.value;
+  // From WSL the CLI is a Windows process: Linux paths cross to it, and the
+  // Windows paths it reports cross back.
+  const distro = callerWslDistro(env);
+  const rest = distro === undefined ? resolvedRest.value : windowsPathArgs(resolvedRest.value, command, d.paths, distro);
 
   // A project-scoped binding's pinned executable replaces the caller's, but it
   // comes back from the host (and off a hand-editable session file), so it
@@ -439,6 +445,8 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
   }
   const binary = pinned ?? defaultBinary;
   const binaryPath = binary === defaultBinary ? defaultBinaryPath : resolveBinaryPath(binary, env);
+  const missing = () => fail(d.missingBinaryMessage(binary) + (distro === undefined ? ''
+    : `\n\nFrom WSL, dor runs ${spec.defaultBin} on Windows: install it there, in PowerShell, not inside ${distro}.`));
 
   // Detect a missing install deterministically, before spawning. A failed
   // spawn on Windows emits BOTH 'error' (ENOENT) and 'close'; if 'close' wins
@@ -446,7 +454,7 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
   // Skipped when a stub exec is injected (tests), which supplies its own
   // ENOENT behavior via the catch below.
   const stub = d.exec(options);
-  if (stub === undefined && browserBinaryIsMissing(binary, env, binaryPath)) return fail(d.missingBinaryMessage(binary));
+  if (stub === undefined && browserBinaryIsMissing(binary, env, binaryPath)) return missing();
   const exec = stub ?? execBrowserProcess;
   // Spawn the resolved path, never the bare name: cross-spawn resolves a bare
   // name through `which`, which checks `process.cwd()` *before* PATH on
@@ -520,9 +528,13 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
       result = await run([...sessionArgs, ...destinationArgs], launchEnv, 'inherit');
     }
   } catch (error) {
-    return isMissingBinaryError(error) ? fail(d.missingBinaryMessage(binary)) : fail(errorMessage(error));
+    return isMissingBinaryError(error) ? missing() : fail(errorMessage(error));
   }
   result.stderr = replacedPin + result.stderr;
+  if (distro !== undefined && command !== undefined && d.paths.verbs.has(command)) {
+    result.stdout = linuxPathText(result.stdout, distro);
+    result.stderr = linuxPathText(result.stderr, distro);
+  }
 
   // Outside a Dormouse terminal there is no control endpoint; stay a pure
   // passthrough rather than nagging about the missing surface.

@@ -1,6 +1,8 @@
 /// <reference path="./cross-spawn.d.ts" />
 import spawn from 'cross-spawn';
 import path from 'node:path';
+import { isUncOrDevicePath } from './browser-providers.js';
+import { cmdShimTarget } from './cmd-shim.js';
 
 export interface SpawnCaptureSuccess {
   readonly ok: true;
@@ -78,8 +80,13 @@ export function spawnAndCapture(
 ): Promise<SpawnCaptureResult> {
   return new Promise((resolve) => {
     let child: ReturnType<typeof spawn>;
+    // cmd.exe cannot start in a UNC cwd (a WSL caller's): run the shim's own
+    // target there instead, else keep cmd.exe and its %SystemRoot% fallback.
+    const shim = process.platform === 'win32' && /\.(?:cmd|bat)$/i.test(binary) && isUncOrDevicePath(options.cwd ?? process.cwd())
+      ? cmdShimTarget(binary, options.env ?? process.env)
+      : undefined;
     try {
-      child = spawn(binary, args, { stdio: [options.input === undefined ? (options.stdin ?? 'ignore') : 'pipe', 'pipe', 'pipe'], windowsHide: true, cwd: options.cwd, env: options.env, windowsVerbatimArguments: options.windowsVerbatimArguments });
+      child = spawn(shim?.binary ?? binary, shim ? [...shim.args, ...args] : args, { stdio: [options.input === undefined ? (options.stdin ?? 'ignore') : 'pipe', 'pipe', 'pipe'], windowsHide: true, cwd: options.cwd, env: options.env, windowsVerbatimArguments: options.windowsVerbatimArguments });
     } catch (error) {
       // Invalid argv (for example a NUL in an eval string) throws before a child
       // exists; preserve the same result contract as an asynchronous ENOENT.
