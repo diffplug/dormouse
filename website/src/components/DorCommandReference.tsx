@@ -27,13 +27,13 @@ export type CommandSection = {
 
 /**
  * `depth` keeps the document outline agreeing with the table of contents. The
- * eleven subcommands sit under the page's `Commands` heading, so they render as
+ * subcommands sit under the page's `Commands` heading, so they render as
  * `h3`; the root `dor` section is that heading's peer and keeps the default.
  *
  * **Must** push a section's own labels one level below its heading. Left fixed
  * at `h3` while the commands moved to `h3`, every `FLAGS` and `Text output:`
- * became a peer of the command it belongs to, flattening eleven commands and
- * their labels into one run for a reader navigating by heading. Pinned by
+ * became a peer of the command it belongs to, flattening every command and its
+ * labels into one run for a reader navigating by heading. Pinned by
  * `website/src/pages/DorDocs.test.tsx`.
  */
 export default function DorCommandReference({

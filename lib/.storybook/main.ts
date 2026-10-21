@@ -21,7 +21,7 @@ const config: StorybookConfig = {
       name: '@storybook/addon-docs',
       // MDX is CommonMark only out of the box, so a GFM table renders as its own
       // pipes-and-dashes source text. The walkthrough opens on two of them (the
-      // three parties, the four trust layers), which is the worst place in the
+      // three parties, the five trust layers), which is the worst place in the
       // doc to print raw markdown at the reader.
       options: { mdxPluginOptions: { mdxCompileOptions: { remarkPlugins: [remarkGfm] } } },
     },
