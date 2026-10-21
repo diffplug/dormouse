@@ -529,6 +529,13 @@ describe('security spec', () => {
     expect(() => assertRouteFragments([target, link('/dor/#nowhere')])).not.toThrow();
   });
 
+  it.each(['?from=security', '?next=%23elsewhere&mode=full', '?'])('checks published-page fragments after a query (%s)', (query) => {
+    const target = { source: 'SELF_HOST.md', headings: [{ id: 'prerequisites' }], blocks: [] };
+    const link = (id) => ({ source: 'docs/specs/security.md', headings: [], blocks: [{ type: 'link', href: '/self-host/' + query + '#' + id }] });
+    expect(() => assertRouteFragments([target, link('prerequisites')])).not.toThrow();
+    expect(() => assertRouteFragments([target, link('nowhere')])).toThrow(/names no heading on \/self-host\//);
+  });
+
   it('keeps the fragment on a link into another spec', () => {
     expect(data.security.repoLinks).toContainEqual({
       from: './security-remote.md#trust-boundary',
