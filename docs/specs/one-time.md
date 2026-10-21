@@ -149,7 +149,7 @@ The relay Worker serves the phone's half at `ONE_TIME_PAGE_PATH` (`/connect/`): 
 - Its ICE servers: `docs/specs/remote-network.md` -> "Anywhere".
 - **Never persist anything** from the page: no storage, IndexedDB, worker, push, or cookie, though Pocket keeps its own on the same origin. `scripts/e2e-lint.mjs` holds the page to the client's store rule.
 - **Must mount the wall only on `ok`**; every ending, including teardown during startup, closes the client and releases its adapter.
-- **The label the page sends is `oneTimeDeviceLabel`, never Pocket's `deviceLabel`**, and always a member of `ONE_TIME_DEVICE_LABELS` (rationale).
+- **Must send `oneTimeDeviceLabel`, never Pocket's `deviceLabel`, as the device label**, always from `ONE_TIME_DEVICE_LABELS` (rationale).
 
 **Build.** `build:one-time` in `lib/package.json` builds `lib/one-time/` into `lib/dist-one-time` under base `ONE_TIME_PAGE_PATH`, then runs `assertPocketShell --one-time`: scripts under `/connect/assets/`, links under `/connect/`, nothing inline. Hosted's `build` runs it first, and `stageRelay` empties the relay's assets directory, copies the page to `hosted/dist/relay/connect/` beside Pocket at the root, and checks the copy.
 

@@ -263,7 +263,7 @@ export function OneTimeApp({
       adapterRef.current = adapter;
       setPhase({ at: 'wall', burrowLabel: result.burrowLabel, adapter });
     },
-    [createClient, disposeWall, end],
+    [createClient, end],
   );
 
   const endNow = useCallback(() => end(ONE_TIME_ENDED_MESSAGE), [end]);
