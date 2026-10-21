@@ -10,6 +10,7 @@ on:
     paths:
       - 'lib/**'
       - 'docs/stories/**'
+      - 'hosted/src/**'
       # The lockfile is the root's, so an in-range bump of a rendering dependency
       # reaches the stories while matching neither glob above. Here it refreshes
       # the baseline against the commit that moved the dependency, so the pixel
@@ -34,6 +35,7 @@ on:
     paths:
       - 'lib/**'
       - 'docs/stories/**'
+      - 'hosted/src/**'
   # Manual rebaseline. No glob catches every rendering input, and a commit editing
   # these globs — this file — matches none of them, so without a dispatch the only
   # way to refresh main's baseline is to wait for an unrelated qualifying commit.
