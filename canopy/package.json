@@ -5,7 +5,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "storybook": "storybook dev -p 6007 --no-open --ci",
+    "storybook": "storybook dev -p 6007 --ci",
     "build-storybook": "storybook build",
     "test": "tsc -p ."
   },
