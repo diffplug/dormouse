@@ -36,6 +36,13 @@ test("Hosted and shared inputs trigger previews; unrelated application changes d
     "remote-lib-common/package.json",
     "remote-lib-common/test/harness/actors.mjs",
     "lib/tsconfig.app.json",
+    // Workspace packages lib/src imports from source, and the alias wiring.
+    "dor/src/protocol.ts",
+    "dor/src/commands/shell-quote.ts",
+    "dor-tools-lib/src/osc.ts",
+    "dor-tools-builtin/src/file-viewer-format.ts",
+    "scripts/workspace-sources.mjs",
+    "tsconfig.workspace-sources.json",
   ])
     assert.equal(touchesHosted([path]), true, path);
   for (const path of [
@@ -47,6 +54,7 @@ test("Hosted and shared inputs trigger previews; unrelated application changes d
     "lib/scripts/other.mjs",
     "relay/src/app.ts",
     "vscode-ext/src/extension.ts",
+    "scripts/spec-lint.mjs",
   ])
     assert.equal(touchesHosted([path]), false, path);
   assert.equal(touchesHosted([]), false);
