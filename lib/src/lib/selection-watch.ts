@@ -1,5 +1,6 @@
-import type { Terminal } from '@xterm/xterm';
+import type { IMarker, Terminal } from '@xterm/xterm';
 import { followCopySelection } from './copy-editor';
+import { spanOfSelection } from './copy-text';
 import { getMouseSelectionState, setSelection, subscribeToMouseSelection, type Selection } from './mouse-selection';
 import { anchorSelection, followReflow, type ReflowAnchor } from './selection-reflow';
 import { extractSelectionText } from './selection-text';
@@ -22,6 +23,9 @@ export function watchSelection(id: string, terminal: Terminal): SelectionWatch {
   let baseline: string | null = null;
   /** Its edges, carried through a resize's reflow. */
   let anchor: ReflowAnchor | null = null;
+  // A full normal buffer trims its oldest rows as output arrives. One marker
+  // on the earlier edge distinguishes translation from replacement text.
+  let scrollAnchor: { marker: IMarker; row: number } | null = null;
   const unsubscribe = subscribeToMouseSelection(() => {
     const sel = getMouseSelectionState(id).selection;
     if (sel === selection) return;
@@ -29,10 +33,22 @@ export function watchSelection(id: string, terminal: Terminal): SelectionWatch {
     baseline = sel && !sel.dragging ? extractSelectionText(terminal, sel) : null;
     anchor?.dispose();
     anchor = sel && anchorSelection(terminal, sel);
+    scrollAnchor?.marker.dispose();
+    scrollAnchor = null;
+    const buffer = terminal.buffer.active;
+    if (sel && !sel.dragging && buffer.type === 'normal') {
+      const row = Math.min(sel.startRow, sel.endRow);
+      scrollAnchor = { marker: terminal.registerMarker(row - (buffer.baseY + buffer.cursorY)), row };
+    }
   });
   return {
     onRender() {
-      if (selection && baseline !== null && extractSelectionText(terminal, selection) !== baseline) setSelection(id, null);
+      if (!selection || baseline === null) return;
+      if (scrollAnchor?.marker.isDisposed) { setSelection(id, null); return; }
+      const shift = scrollAnchor ? scrollAnchor.marker.line - scrollAnchor.row : 0;
+      const moved = shift ? { ...selection, startRow: selection.startRow + shift, endRow: selection.endRow + shift } : selection;
+      if (extractSelectionText(terminal, moved) !== baseline) setSelection(id, null);
+      else if (moved !== selection) followCopySelection(id, terminal, spanOfSelection(moved));
     },
     onResize() {
       const span = anchor && followReflow(terminal, anchor);
@@ -42,6 +58,7 @@ export function watchSelection(id: string, terminal: Terminal): SelectionWatch {
     dispose() {
       unsubscribe();
       anchor?.dispose();
+      scrollAnchor?.marker.dispose();
     },
   };
 }

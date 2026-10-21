@@ -47,13 +47,13 @@ export function followCopySelection(id: string, terminal: Terminal, span: Span):
   if (spanEquals(span, spanOfSelection(selection)) && (!editor || sameWidth)) return;
   const moved = selectionOfSpan(span, selection);
   if (!editor) {
-    setSelection(id, moved);
+    setSelection(id, moved, null, { preserveProgramCopy: true });
     return;
   }
   const next = editorFor(terminalCopyBuffer(terminal), span, editor.format);
   const label = editor.scopes[editor.scope].label;
   const scope = next.scopes.findIndex((s) => s.label === label);
-  setSelection(id, moved, { ...next, scope: Math.max(0, scope), overrides: scope >= 0 && sameWidth ? editor.overrides : {} });
+  setSelection(id, moved, { ...next, scope: Math.max(0, scope), overrides: scope >= 0 && sameWidth ? editor.overrides : {} }, { preserveProgramCopy: true });
 }
 
 export type FormatRenderings = Partial<Record<EditorFormat, Rendering>>;

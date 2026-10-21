@@ -89,8 +89,8 @@ describe('a terminal resize', () => {
     expect(copyEditor!.overrides).toEqual({});
     expect(copyEditor!.scopes[copyEditor!.scope].label).toBe('Whole words');
     expect(copyEditor!.scopes[0].span).toEqual({ start: { row: 0, col: 6 }, end: { row: 2, col: 1 }, block: false });
-    // The moved selection's two edges, the first selection's released.
-    expect(terminal.markers).toHaveLength(2);
+    // The moved selection's reflow edges and scroll anchor; the old ones released.
+    expect(terminal.markers).toHaveLength(3);
   });
 
   it('keeps per-break edits through a resize that moves the selection but keeps the width', async () => {

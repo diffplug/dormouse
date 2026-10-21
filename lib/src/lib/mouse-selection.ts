@@ -175,17 +175,17 @@ export function setOverride(id: string, override: OverrideState): void {
  * unless one is given for a finalized selection, so an editor never outlives
  * the selection it was opened for.
  */
-export function setSelection(id: string, selection: Selection | null, copyEditor: CopyEditorState | null = null): void {
+export function setSelection(id: string, selection: Selection | null, copyEditor: CopyEditorState | null = null, { preserveProgramCopy = false } = {}): void {
   const s = ensure(id);
   if (s.selection === null && selection === null) return;
   if (selection === null) clearSelection(s);
   else {
-    // A replaced selection keeps an in-flight flash and the drag's hint, but
-    // not the program's offer, so its editor cannot show that offer either.
+    // Replacing keeps the flash and drag hint. Only following the same cells
+    // through scrolling may also retain the program's copy offer.
     s.selection = selection;
-    s.programCopy = null;
+    if (!preserveProgramCopy) s.programCopy = null;
     s.copyEditor = selection.dragging || !copyEditor ? null
-      : copyEditor.format === 'program' ? { ...copyEditor, format: 'auto', overrides: {} } : copyEditor;
+      : copyEditor.format === 'program' && s.programCopy === null ? { ...copyEditor, format: 'auto', overrides: {} } : copyEditor;
   }
   notify();
 }
