@@ -119,7 +119,7 @@ Hosted credentials live only in the three Hosted environments the secret invento
 The App itself holds only `contents: write` and `metadata: read` and subscribes to no event. No audit run can read that: the App is private, and listing its installation takes an organization administrator (rationale; `## Future` -> Tagger App audit).
 
 - **FAIL IF** `S68` the App (`Integration` actor `5228264`) bypasses any ruleset but `Hosted tag creation`, which must target only `refs/tags/hosted/**`, block only `creation`, and be bypassed otherwise only by admin; or `Hosted tag history` stops blocking `update` and `deletion` on `refs/tags/hosted/**` with an admin-only bypass. A leaked key adds `hosted/` tags, never moves or deletes one. Pinned by `scripts/github-state-check.mjs`.
-- **FAIL IF** `S69` a Hosted preview deploy accepts a fork or a failing verification, preview cleanup checks out a PR ref rather than `main`, or a Hosted production tag can run before live verification succeeds; inspect the workflow dependency/condition graph.
+- **FAIL IF** `S69` a Hosted preview deploy accepts a fork or a failing verification, or a Hosted production tag can run before live verification succeeds; inspect the workflow dependency/condition graph.
 
 Source of truth: `hosted/scripts/setup-github.mjs`; `.github/workflows/hosted-preview.yml`; `.github/workflows/hosted-production.yml`.
 
