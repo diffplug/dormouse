@@ -44,9 +44,10 @@ Source of truth: `scripts/stage-dor-cli.mjs`, `dor/bin/dor`, `dor/bin/dor.cmd`, 
 **Must preserve every variable the CLI reads through `WSLENV` on Windows panes**, including those that start WSL later, preserving unrelated user entries. (rationale)
 
 - **Must run the bundled Windows runtime from WSL**, translating only its executable path; script and pipe paths stay opaque. Requires WSL's Windows interop.
-- **Must translate the caller's `PWD` back to Windows for the CLI only**, never for other Windows programs. Arguments cross unchanged, so an absolute Linux path does not resolve.
+- **Must translate the caller's `PWD` back to Windows for the CLI only**, never for other Windows programs, and forward its distro name.
+- **Must run `dor agent-browser` / `dor playwright`'s provider CLI on Windows**, where its browser reaches the caller's dev server over WSL's localhost forwarding. **Must translate an absolute Linux path in a provider's path positions** (its path verbs' arguments and path options' values) **when its directory exists, and Windows paths in those verbs' output back**; other arguments cross unchanged (rationale).
 
-Source of truth: `WSL_CLI_ENV` in `standalone/sidecar/pty-core.js`, `dor/bin/dor`.
+Source of truth: `WSL_CLI_ENV` in `standalone/sidecar/pty-core.js`, `dor/bin/dor`, `dor/src/commands/wsl-paths.ts`.
 
 ## Spawning External Binaries
 
@@ -66,7 +67,9 @@ Source of truth: `WSL_CLI_ENV` in `standalone/sidecar/pty-core.js`, `dor/bin/dor
 
 **An optional `timeoutMs` must kill the child and resolve `{ ok: false }` with `SPAWN_TIMEOUT_CODE`** (`ETIMEDOUT`), without waiting for the kill. **On Windows it must end the whole tree**, since a `.cmd` shim's child is `cmd.exe` and the real CLI is its descendant.
 
-Source of truth: `dor-lib-common/src/spawn.ts`, `dor-lib-common/src/resolve-binary.ts`.
+**Must run a `.cmd`/`.bat` shim's own target, never `cmd.exe`, in a UNC cwd** (a WSL caller's), since `cmd.exe` falls back to `%SystemRoot%` there; a shim of no known shape keeps `cmd.exe`.
+
+Source of truth: `dor-lib-common/src/spawn.ts`, `dor-lib-common/src/resolve-binary.ts`, `cmdShimTarget` in `dor-lib-common/src/cmd-shim.ts`.
 
 ## Host Plumbing
 

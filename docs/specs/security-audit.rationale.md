@@ -220,6 +220,6 @@ gh secret set AUDIT_PAT --env security-audit --repo diffplug/dormouse --body 'gi
 
 ## Red team
 
-**Why quarterly, and before remote control or Hosted releases.** Those are the two surfaces an attacker reaches without local access, so a release changing them is when a miss costs most.
+**Why monthly, and before remote control or Hosted releases.** The code changes fast enough that a quarter lets several months of releases ship unreviewed; a fixed first-week slot keeps a pass from slipping. Remote control and Hosted are the two surfaces an attacker reaches without local access, so a release changing them is when a miss costs most.
 
 **Why without the `FAIL IF` lines.** The audit and the second-opinion audit both read the rules, so a hole no rule names is invisible to them; a pass from the code and the published guarantees alone looks where the rules do not.

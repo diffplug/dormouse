@@ -236,7 +236,7 @@ const WSL_CLI_ENV = [
 ];
 // dor/bin/dor adds its own return-only entries for these, so other Windows
 // programs started from WSL never see them.
-const WSL_LAUNCHER_ENV = ['ELECTRON_RUN_AS_NODE', 'PWD'];
+const WSL_LAUNCHER_ENV = ['ELECTRON_RUN_AS_NODE', 'PWD', 'WSL_DISTRO_NAME'];
 const WSL_MANAGED_NAMES = new Set([...WSL_CLI_ENV, ...WSL_LAUNCHER_ENV]);
 
 // Replace conflicting flags inherited from a parent host, preserve user vars.
