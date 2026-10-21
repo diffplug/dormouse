@@ -370,9 +370,6 @@ export function startUpdateCheck(): void {
     console.info('[updater] a self-host build: no update check');
     return;
   }
-  // The reminder again, hourly, whatever the policy: it contacts nothing, and
-  // never checks.
-  reminderTimer ??= setInterval(() => remindIfDue(Date.now()), HOUR_MS);
   void runUpdateCheck().catch((e) => console.error('[updater] Startup failed:', e));
 }
 
@@ -428,6 +425,10 @@ async function runUpdateCheck(): Promise<void> {
   if (hadFailureMarker) {
     return;
   }
+
+  // The reminder again, hourly, whatever the policy: it contacts nothing, and
+  // never checks.
+  reminderTimer ??= setInterval(() => remindIfDue(Date.now()), HOUR_MS);
 
   await new Promise((resolve) => setTimeout(resolve, 5_000));
 

@@ -88,7 +88,8 @@ describe('gitInfo', () => {
 
   it('hands git the canonical path, never the symlink it was given', async () => {
     const link = join(root, 'link-to-src');
-    symlinkSync(join(root, 'myrepo/src'), link);
+    // A directory junction exercises realpath without Windows symlink privileges.
+    symlinkSync(join(root, 'myrepo/src'), link, process.platform === 'win32' ? 'junction' : 'dir');
     spawned.length = 0;
     expect((await gitInfo([link]))[link]).toEqual({ repo: 'myrepo', branch: 'main' });
     const dirs = spawned.map((args) => args[args.indexOf('-C') + 1]);

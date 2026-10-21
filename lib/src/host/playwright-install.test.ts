@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterEach, beforeEach, expect, test } from 'vitest';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { resolvePlaywrightInstall } from './playwright-install';
@@ -25,7 +25,10 @@ function write(file: string, text: string): string {
 
 function link(target: string, at: string): void {
   mkdirSync(path.dirname(at), { recursive: true });
-  symlinkSync(target, at);
+  // Windows package managers use directory junctions without symlink privileges.
+  // File links stay real symlinks for the POSIX launcher layouts.
+  const directory = statSync(path.resolve(path.dirname(at), target)).isDirectory();
+  symlinkSync(target, at, process.platform === 'win32' && directory ? 'junction' : undefined);
 }
 
 function cliPackage(dir: string, bin = 'playwright-cli.js'): void {
