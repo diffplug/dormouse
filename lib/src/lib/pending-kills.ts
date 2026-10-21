@@ -1,5 +1,6 @@
 import type { WorkspaceId } from './session-types';
 import { getWorkspaceSurfacesSnapshot } from './workspace-surfaces';
+import { registry } from './terminal-store';
 
 /**
  * Pending kills (`docs/specs/reopen.md` → "Labs: No-confirm delayed kill"): a
@@ -180,12 +181,18 @@ export function isPendingKillSession(id: string): boolean {
   return entries.size > 0 && pendingKillSessionIds().includes(id);
 }
 
-/** Every Session a pending kill keeps alive: its Surface or helper, or every
- *  member of its Workspace. */
+/** Every Session a pending kill keeps alive, including the auxiliary helpers
+ *  of its Surface or Workspace members. */
 export function pendingKillSessionIds(): string[] {
   if (entries.size === 0) return [];
   const membership = getWorkspaceSurfacesSnapshot();
-  return snapshot.flatMap(kill => kill.kind === 'workspace' ? membership.get(kill.id) ?? [] : [kill.id]);
+  const ids = new Set(snapshot.flatMap(kill => kill.kind === 'workspace' ? membership.get(kill.id) ?? [] : [kill.id]));
+  // Workspace membership holds primary Surfaces; helper work must still reach
+  // the shutdown gate while its source is out of the layout.
+  for (const [id, entry] of registry) {
+    if (entry.helper && ids.has(entry.helper.parentId)) ids.add(id);
+  }
+  return [...ids];
 }
 
 /** A pending kill in `workspaceId` is this Wall's own, whatever its kind but a Workspace's. */
