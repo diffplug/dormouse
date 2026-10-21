@@ -141,9 +141,9 @@ Source of truth: `PocketClient.forgetThisPhone` in `lib/src/remote/client/pocket
 
 ## Serving the built bundle
 
-**Caching is set explicitly.** Vite content-hashes everything it emits into `assets/`, so those are `immutable`; everything else — `index.html`, the built `sw.js`, and the `public/` passthroughs at the root — is `no-cache`: revalidate before use, not never store, and load-bearing (rationale). Two rules make it hold:
+**Caching is set explicitly.** A name under `/assets/` carrying Vite's content hash is `immutable`; everything else — `index.html`, the built `sw.js`, the root's `public/` passthroughs, an unhashed asset — is `no-cache`: revalidate before use, not never store, and load-bearing (rationale). Two rules make it hold:
 
-- **The class comes from the request path** (`/assets/` or not), never the platform-shaped resolved path (rationale).
+- **The class comes from the request path** (a hashed name under `/assets/` or not), never the platform-shaped resolved path (rationale).
 - **The SPA fallback overrides that class with the shell's, and 404s under `/assets/`**: the shell is never an answer to a subresource miss. (rationale)
 
 The Hosted Relay serves the same bundle by the same rules (`docs/specs/hosted.md` -> "Relay").

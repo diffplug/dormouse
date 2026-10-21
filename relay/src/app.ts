@@ -61,6 +61,7 @@ import {
   WRONG_CREDENTIAL_ERROR,
   assertionRejectedError,
   checkRegistration,
+  isContentHashedName,
   parseBearer,
   pocketContentSecurityPolicy,
   readJson,
@@ -1380,15 +1381,17 @@ function registerPocketServing(app: Hono<AppEnv>, pocketDir: string | undefined,
   });
 }
 
-/** Keep a hashed asset forever; its name changes when its content does. */
+/** Keep a content-hashed asset forever; its name changes when its content does. */
 const POCKET_ASSET_CACHE_CONTROL = 'public, max-age=31536000, immutable';
 /** Revalidate everything else before use. */
 const POCKET_SHELL_CACHE_CONTROL = 'no-cache';
 
 /**
- * The Pocket build comes in exactly two kinds. Vite content-hashes everything
- * it emits into `assets/`, while `public/` passes through unhashed to the root
- * (`sw.js`, the manifest, the icons) alongside the generated `index.html`.
+ * The Pocket build comes in two kinds. Vite content-hashes what it emits into
+ * `assets/`, while `public/` passes through unhashed to the root (`sw.js`, the
+ * manifest, the icons) alongside the generated `index.html`. Only a name that
+ * carries the hash is immutable, so an unhashed file under `assets/` is
+ * revalidated like the rest.
  *
  * Revalidating the unhashed half is the load-bearing part: `emptyOutDir`
  * deletes the previous build's hashed assets, so a heuristically cached
@@ -1397,11 +1400,11 @@ const POCKET_SHELL_CACHE_CONTROL = 'no-cache';
  * the hashed half is only a bonus, and is safe for exactly the same reason.
  *
  * Decided from the request path rather than the resolved file path, which is
- * platform-shaped. If Vite ever emits an unhashed file into `assets/`, or
- * `assetsDir` is overridden, this test silently mislabels it.
+ * platform-shaped.
  */
 function pocketCacheControl(requestPath: string): string {
-  return requestPath.startsWith('/assets/')
+  return requestPath.startsWith('/assets/') &&
+    isContentHashedName(requestPath.slice('/assets/'.length))
     ? POCKET_ASSET_CACHE_CONTROL
     : POCKET_SHELL_CACHE_CONTROL;
 }
