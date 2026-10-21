@@ -265,7 +265,7 @@ Source of truth: `runBrowserCli` in `dor/src/commands/browser-cli.ts`; `BrowserV
 
 **Must intercept `dor agent-browser` and `dor playwright` before stricli parses provider arguments.**
 
-- **Exactly one identity flag**: `--key` (default `default`), `--session`, or `--surface`, plus `--workspace`; any two fail. Except the Dormouse-owned `dor-embed-size` and `dor-diagnostics`, arguments are forwarded to the provider; stdout, stderr and exit status pass through.
+- **Exactly one identity flag**: `--key` (default `default`), `--session`, or `--surface`, plus `--workspace`; any two fail. Except Dormouse-owned `dor-embed-size` and `dor-diagnostics`, forward arguments, stdout, stderr and exit status. **Must forward stdin only to the requested command**, never preparation or status probes.
 - **Resolution is host-side**: a `--key` or `--surface` takes one `surface.resolveBrowser { provider, key | surface, proposed? }` round trip before the binary runs, answered with a binding `{ session, cwd?, binaryPath? }` (`docs/specs/dor-browser.md` → Managed identity). `proposed` — the caller's cwd and executable — rides only a command that may bind. `--session` and an informational command ask nothing. Outside Dormouse a `--surface` fails.
 - **After a command that may bind succeeds, `surface.browser { provider, key?, session, cwd, binaryPath, wsPort? }` opens or reuses its Surface**: `dor agent-browser` first reads the stream port itself (`docs/specs/dor-browser.md` → agent-browser), and the host reports Playwright's stream. **The call must wait past `BROWSER_REQUEST_TIMEOUT_MS`**, since the host's answer can queue behind a launch or close of the browser (rationale). A failure there adds a stderr warning without changing the command's success. **Exception: a fixed-DPR Playwright `open` binds before navigating**, and on a DPR mismatch kills a Surface it created and fails unopened.
 
@@ -274,7 +274,7 @@ A `--surface` handle resolves against **listed** Surfaces ([Handle Model](#handl
 - **Browser-gated** (`docs/specs/glossary.md` → Panes and Surfaces): a target with no browser fails with the capability wording of [`dor list`](#current-implemented-commands).
 - **Render-mode-gated.** A browser Surface on the `iframe` renderer has nothing to drive, and one the other provider renders is driven by the other CLI. **The refusal must name the command that works** (`dor playwright --surface …`, or `dor agent-browser open <its url>` for an iframe).
 
-Neither gate covers a Surface whose launch has not yet named its session ([dor-browser.md](dor-browser.md) → Browser Connection); it fails as having no session yet.
+Neither gate covers a Surface without a session ([dor-browser.md](dor-browser.md) → Browser Connection); it fails for lacking a session.
 
 For a project-scoped provider: **must pass the bound cwd through `spawnAndCapture`'s optional cwd argument**; **never spawn a bound executable the provider's allowlist refuses**, since the binding comes back off persisted params — run the caller's own resolution instead; **must run the caller's own executable, with a stderr warning, when the bound one is gone**, and **must fail naming a bound cwd that no longer exists** rather than report the CLI missing.
 

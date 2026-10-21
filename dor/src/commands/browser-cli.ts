@@ -178,8 +178,8 @@ export function isMissingBinaryError(error: unknown): boolean {
 // The default exec: delegate the spawn/capture/Windows handling to
 // spawnAndCapture, and adapt its never-throws result to this call site's
 // throw-on-spawn-failure contract (callers catch ENOENT via isMissingBinaryError).
-export async function execBrowserProcess(binary: string, args: string[], cwd?: string, env?: Record<string, string>): Promise<BrowserExecResult> {
-  const result = await spawnAndCapture(binary, args, { cwd, env: env ? { ...process.env, ...env } : undefined });
+export async function execBrowserProcess(binary: string, args: string[], cwd?: string, env?: Record<string, string>, stdin?: 'inherit'): Promise<BrowserExecResult> {
+  const result = await spawnAndCapture(binary, args, { cwd, env: env ? { ...process.env, ...env } : undefined, stdin });
   if (!result.ok) {
     const error: Error & { code?: string } = new Error(result.error.message);
     error.code = result.error.code;
@@ -425,9 +425,8 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
   // Windows, so an `agent-browser.cmd` sitting in a cloned repository would
   // win the race against the real install (docs/specs/dor-cli.md ->
   // "Spawning External Binaries"). `?? binary` is reached only by a stub.
-  const run = (argv: string[], envOverride?: Record<string, string>) => envOverride
-    ? exec(binaryPath ?? binary, argv, cwd, envOverride)
-    : cwd === undefined ? exec(binaryPath ?? binary, argv) : exec(binaryPath ?? binary, argv, cwd);
+  const run = (argv: string[], envOverride?: Record<string, string>, stdin?: 'inherit') =>
+    exec(binaryPath ?? binary, argv, cwd, envOverride, stdin);
 
   let result: BrowserExecResult;
   let prebound = false;
@@ -485,9 +484,9 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
         }
         return fail(`playwright context DPR is ${measured.actual?.dpr ?? 'unavailable'}; requested ${requestedDpr}. The destination was not opened.`);
       }
-      result = await run([...sessionArgs, ...navigation.goto]);
+      result = await run([...sessionArgs, ...navigation.goto], undefined, 'inherit');
     } else {
-      result = await run([...sessionArgs, ...rest], launchEnv);
+      result = await run([...sessionArgs, ...rest], launchEnv, 'inherit');
     }
   } catch (error) {
     return isMissingBinaryError(error) ? fail(d.missingBinaryMessage(binary)) : fail(errorMessage(error));
