@@ -576,6 +576,13 @@ export function Wall({
     }, duration);
   }, []);
 
+  const transferRefusal = useCallback((id?: string): string | null => {
+    if (!isWorkspaceTransferPending(effectiveWorkspaceId)) return null;
+    const reason = 'Workspace is transferring';
+    if (id) showShellSpawnNotice(id, reason);
+    return reason;
+  }, [effectiveWorkspaceId, showShellSpawnNotice]);
+
   /** Why the helper's running work (or a failed inspection) blocks closing its
    *  source, or null when the source may close
    *  (docs/specs/terminal-context.md → Promotion and source closure). */
@@ -704,6 +711,8 @@ export function Wall({
    * a command is refused.
    */
   const closeSurface = useCallback(async (id: string, editors: 'ask' | readonly string[] = []): Promise<string | null> => {
+    const transferring = transferRefusal(id);
+    if (transferring) return transferring;
     if (pendingSurfaceCloses.current.has(id)) return 'This terminal is already closing';
     pendingSurfaceCloses.current.add(id);
     try {
@@ -711,6 +720,8 @@ export function Wall({
       if (refused) { revealRefusal(id, refused); return refused; }
       if (isToolDirty(id, lath.getMeta(id)?.params)
         && !(editors === 'ask' ? await confirmToolEditorsClose([id]) : editors.includes(id))) return UNSAVED_TOOL_REFUSAL;
+      const transferring = transferRefusal(id);
+      if (transferring) return transferring;
       // Decided now, from the state the kill leaves behind; a Workspace close
       // leaves one record for all its members instead.
       if (!closingWorkspaceRef.current && closeKindOf(id) === 'reopenable') pushSurfaceRecordRef.current(id);
@@ -720,7 +731,7 @@ export function Wall({
       if (doorKillReturnRef.current?.id === id) doorKillReturnRef.current = null;
       pendingSurfaceCloses.current.delete(id);
     }
-  }, [killPaneImmediately, helperRefusal, revealRefusal, lath]);
+  }, [killPaneImmediately, helperRefusal, revealRefusal, lath, transferRefusal]);
   const closeSurfaceRef = useRef(closeSurface);
   closeSurfaceRef.current = closeSurface;
 
@@ -733,6 +744,7 @@ export function Wall({
    */
   const requestKill = useCallback((id: string) => {
     const stage = () => {
+      if (transferRefusal(id)) return;
       const door = doorsRef.current.find(item => item.id === id);
       if (door) {
         const index = doorsRef.current.indexOf(door);
@@ -759,7 +771,7 @@ export function Wall({
     };
     if (!getHelper(id)) { stage(); return; }
     void helperRefusal(id).then(refused => (refused ? revealRefusal(id, refused) : stage()));
-  }, [closeSurface, helperRefusal, revealRefusal, lath, nav]);
+  }, [closeSurface, helperRefusal, revealRefusal, lath, nav, transferRefusal]);
 
   const acceptKill = useCallback(() => {
     const ck = confirmKillRef.current;
@@ -1396,6 +1408,8 @@ export function Wall({
     id: string;
     minimized: boolean;
   }> => {
+    const transferring = transferRefusal();
+    if (transferring) return { ok: false, message: transferring };
     const referenceId = reference.id;
     const referenceVisible = nav.hasPane(referenceId);
     const referenceDoor = !referenceVisible
@@ -1488,7 +1502,7 @@ export function Wall({
       minimizePane(newId, { select: selectedNew });
     }
     return { ok: true, value: { id: newId, minimized } };
-  }, [addMinimizedSplitDoor, minimizePane, restoreFromToken, lath, settleAddSelection, nav]);
+  }, [addMinimizedSplitDoor, minimizePane, restoreFromToken, lath, settleAddSelection, nav, transferRefusal]);
 
   /**
    * Create a non-terminal content surface (iframe, agent-browser) next to a
@@ -1518,6 +1532,8 @@ export function Wall({
     id: string;
     status: 'created' | 'replaced';
   }> => {
+    const transferring = transferRefusal();
+    if (transferring) return { ok: false, message: transferring };
     const referenceVisible = nav.hasPane(reference.id);
     if (!referenceVisible) return { ok: false, message: `surface '${reference.id}' is not visible` };
 
@@ -1560,7 +1576,7 @@ export function Wall({
     });
     if (minimized) minimizePane(newId, { select: selectedNew });
     return { ok: true, value: { id: newId, status: 'created' } };
-  }, [minimizePane, lath, settleAddSelection, nav]);
+  }, [minimizePane, lath, settleAddSelection, nav, transferRefusal]);
 
   /**
    * Swap a browser Surface's renderer in place, keeping its id, slot, and
@@ -1579,7 +1595,7 @@ export function Wall({
     const handler = (e: Event) => {
       // Host New Terminal (and shell replacement) targets the Workspace the user
       // is looking at, not every mounted one.
-      if (!activeRef.current) return;
+      if (!activeRef.current || transferRefusal(selectedIdRef.current ?? undefined)) return;
       const detail = ((e as CustomEvent<ShellSpawnRequest>).detail ?? {}) as ShellSpawnRequest;
       const newId = mintSurfaceId();
 
@@ -1636,7 +1652,7 @@ export function Wall({
     };
     window.addEventListener('dormouse:new-terminal', handler);
     return () => window.removeEventListener('dormouse:new-terminal', handler);
-  }, [selectPane, enterTerminalMode, showShellSpawnNotice, lath, nav]);
+  }, [selectPane, enterTerminalMode, showShellSpawnNotice, lath, nav, transferRefusal]);
 
   // --- dor control plane (the `dor` CLI's webview handler) ---
   // A tool grows its browser when its command starts serving.
@@ -1973,6 +1989,7 @@ export function Wall({
     splitDirection: 'horizontal' | 'vertical',
     source: 'keyboard' | 'mouse' = 'mouse',
   ) => {
+    if (transferRefusal(id ?? selectedIdRef.current ?? undefined)) return;
     const newId = mintSurfaceId();
     const ref = id && nav.hasPane(id) ? id : null;
     // Carry the currently selected shell into every manual split.
@@ -1986,7 +2003,7 @@ export function Wall({
     // passthrough, and defer DOM focus through the shared focus path.
     enterTerminalMode(newId);
     onEventRef.current?.({ type: 'split', direction: splitDirection, source });
-  }, [enterTerminalMode, lath, nav]);
+  }, [enterTerminalMode, lath, nav, transferRefusal]);
 
   // --- Wall actions (for tab buttons) ---
 
@@ -2072,6 +2089,7 @@ export function Wall({
       setRenamingPaneId(null);
     },
     onSwapRenderMode: async (id, mode, viewport) => {
+      if (transferRefusal(id)) return;
       const visible = nav.hasPane(id);
       if (!visible) return;
       const params = nav.paneParams(id);
@@ -2100,7 +2118,7 @@ export function Wall({
         const toolProvider = parseRenderMode(mode).provider;
         if (!url || (toolProvider && !hostSupportsBrowser(toolProvider))) return;
         // Consent just before the document goes; any change while asking abandons the swap.
-        if (!await confirmToolEditorsClose([id]) || lath.getMeta(id)?.params !== params) return;
+        if (!await confirmToolEditorsClose([id]) || transferRefusal(id) || lath.getMeta(id)?.params !== params) return;
         closeBrowserSurface(id, params);
         // The Tool's browser launches itself, in the Tool's own session.
         lath.store.updateParams(id, toolProvider
@@ -2186,6 +2204,7 @@ export function Wall({
       });
     },
     onBreakTool: (id: string) => {
+      if (transferRefusal(id)) return;
       // As Kill does: the confirm keystroke must reach the Wall, not the pane's
       // xterm. Break always asks, since nothing rejoins what it splits.
       const params = lath.getMeta(id)?.params;
@@ -2216,7 +2235,7 @@ export function Wall({
       void resolveToolApproval(id, choice);
     },
     onPinPreview: previewSlot.pin,
-  }), [previewSlot, addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, requestKill, selectPane, swapBrowserRenderer, buildDorSurfaces, createContentSurface, resolveToolApproval, lath, nav]);
+  }), [previewSlot, addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, requestKill, selectPane, swapBrowserRenderer, buildDorSurfaces, createContentSurface, resolveToolApproval, lath, nav, transferRefusal]);
   const openContextPort = useCallback(async (id: string, entry: PortUrlEntry, mode: PortMode): Promise<void> => {
     const opening = terminalContextRef.current;
     // Success dismisses only the context that asked; a failed or cancelled
@@ -2290,6 +2309,7 @@ export function Wall({
     }
   }, [buildDorSurfaces, findSurfaceByParams, createContentSurface, enterTerminalMode, revealSurface, updateSurfaceParams, lath, nav, cancelContextPortLaunches]);
   breakToolRef.current = async (id: string) => {
+    if (transferRefusal(id)) return;
     // docs/specs/dor-tool.md -> Run end: the Tool becomes the plain
     // terminal it runs in, still running, and a serving page reopens —
     // reloaded, at the URL on screen, in the renderer it used where this
@@ -2297,7 +2317,7 @@ export function Wall({
     const params = lath.getMeta(id)?.params;
     if (!isToolParams(params) || toolFace(params) === 'pending-approval') return;
     // Consent just before the document goes; any change while asking abandons the Break.
-    if (!await confirmToolEditorsClose([id]) || lath.getMeta(id)?.params !== params) return;
+    if (!await confirmToolEditorsClose([id]) || transferRefusal(id) || lath.getMeta(id)?.params !== params) return;
     // Only an http(s) page reopens, as a swap judges it; a transient or error
     // page on screen falls back to the Tool's own URL.
     const shownUrl = browserSurfaceUrl(getAgentBrowserScreenController(id)?.chrome().url ?? '') ?? browserUrlFromParams(params);

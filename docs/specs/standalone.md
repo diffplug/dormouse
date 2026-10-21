@@ -221,6 +221,7 @@ A Workspace moves between windows without ending anything (`docs/specs/transport
 
 - **A window whose last Workspace left closes itself**, with no confirmation and no kill.
 - **Must collapse the source only after `workspace-departed` confirms adoption, before committing its release and removing its tab or closing its Window.** `standalone/src/workspace-move.test.ts` pins this order.
+- **Must preserve membership and helper ownership from preparation through settlement**: refuse Surface creation, closure, Reopen, renderer changes, Break, and helper creation, Reset, or Promote. A promotion already awaiting the host refuses preparation.
 - **A pane's helper Session travels with it**, directly after its source, which lets the target's resume re-parent it; nothing else in the payload names it.
 - **A Workspace that comes back must mount from the record it brought**, never the plan it first booted with.
 

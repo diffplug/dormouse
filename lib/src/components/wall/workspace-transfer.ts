@@ -96,6 +96,7 @@ export async function prepareWorkspaceTransfer(
   const helpers = new Map<string, string>();
   for (const id of panes) {
     const helper = getHelper(id);
+    if (helper?.promoting) throw new Error('Wait for helper promotion before moving this Workspace');
     if (helper) helpers.set(id, helper.id);
   }
   const terminalIds = panes.flatMap((id) => {
