@@ -237,7 +237,7 @@ const AGENT_BROWSER_BOOLEAN_FLAGS = new Set([
 const AGENT_BROWSER_LAUNCH_FLAGS = new Set([
   '--config', '--profile', '--executable-path', '--extension', '--args', '--proxy', '--proxy-bypass',
   '--user-agent', '--allow-file-access', '--headed', '--ignore-https-errors', '--color-scheme',
-  '--download-path', '--engine', '--enable', '--init-script',
+  '--download-path', '--engine', '--enable', '--init-script', '--hide-scrollbars', '--allowed-domains',
 ]);
 
 /** The same launch settings must accompany every internal native call. */

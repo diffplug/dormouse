@@ -105,6 +105,7 @@ test('agent-browser preparation preserves valued flags and only replaces the des
 
 for (const flags of [
   ['--config', '/tmp/browser.json', '--profile=/tmp/browser profile'],
+  ['--profile', '/tmp/browser', '--hide-scrollbars', 'true', '--allowed-domains=localhost'],
   ['--headed', 'false', '--args', '--disable-gpu', '--proxy=http://localhost:7890', '--allow-file-access'],
 ]) test('viewport preparation keeps browser launch options: ' + flags[0], async () => {
   const calls = [];
