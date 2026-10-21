@@ -245,11 +245,12 @@ dialog::backdrop {
 .enroll {
   margin-top: 0;
 }
-.user-code {
+.confirm-digits {
+  width: 5ch;
   font-size: 32px;
   font-weight: 600;
-  line-height: 1.2;
   letter-spacing: 0.08em;
+  text-align: center;
   margin-bottom: 16px;
 }
 .enroll .text-button {

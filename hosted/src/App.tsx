@@ -32,6 +32,7 @@ import {
   RECENT_LOGIN_WINDOW,
   TERMS_VERSION,
 } from "../server/policy-constants";
+import { ConfirmDigits } from "./ConfirmDigits";
 import { takeEnrollment, type Enrollment } from "./enrollment";
 
 // The terms version the sign-in notice showed when this tab continued past it,
@@ -250,9 +251,9 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
       setHostedVoice((voice) => voice && { ...voice, on: false });
       setNotice("Natural Voice is off. Your computers use the system voice.");
     });
-  const approve = (code: string) =>
+  const approve = (code: string, confirmDigits: string) =>
     act("approve", async () => {
-      await approveEnrollment(code, enrolling?.purpose);
+      await approveEnrollment(code, enrolling?.purpose, confirmDigits);
       clearEnrollment();
       await refresh();
       setNotice(
@@ -362,19 +363,11 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
               <section aria-label="Computer to approve" className="enroll">
                 {enrolling.code ? (
                   <>
-                    <p className="user-code">{enrolling.code}</p>
-                    <p>
-                      Approve only if Dormouse on your computer is showing this
-                      code right now.
-                    </p>
                     {fresh ? (
-                      <button
-                        className="primary"
-                        disabled={!!busy}
-                        onClick={() => void approve(enrolling.code!)}
-                      >
-                        {busy === "approve" ? "Approving…" : "Approve"}
-                      </button>
+                      <ConfirmDigits
+                        busy={busy}
+                        onApprove={(digits) => void approve(enrolling.code!, digits)}
+                      />
                     ) : (
                       <>
                         <p className="help">
