@@ -423,7 +423,7 @@ describe('the endings', () => {
 
     expect(scripted.client.close).toHaveBeenCalled();
     expect(adapter.dispose).toHaveBeenCalledOnce();
-    expect(fake.disposeAllSessions).toHaveBeenCalledOnce();
+    expect(fake.disposeAllSessions).not.toHaveBeenCalled();
   });
 
   it('ends from the wall: the client closed, the terminals released, fixed copy', async () => {

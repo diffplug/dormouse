@@ -254,13 +254,13 @@ export function OneTimeApp({
         end(ONE_TIME_ENDED_MESSAGE);
         return;
       }
-      adapterRef.current = adapter;
-      // Ended while the wall stood up: the ending already ran, so this is the
-      // one adapter it could not see.
+      // This wall never rendered, so it owns no terminal entries. Release only
+      // its adapter; another page may already own the global terminal registry.
       if (!mountedRef.current || endedRef.current) {
-        disposeWall();
+        void adapter.dispose();
         return;
       }
+      adapterRef.current = adapter;
       setPhase({ at: 'wall', burrowLabel: result.burrowLabel, adapter });
     },
     [createClient, disposeWall, end],
