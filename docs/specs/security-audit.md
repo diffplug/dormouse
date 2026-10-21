@@ -242,7 +242,7 @@ Source of truth: `run_domain` and `write_open_findings` in `scripts/security-aud
 
 ## Red team
 
-**A maintainer runs a red team quarterly, and before any release that changes remote control or Hosted** (rationale): an open-ended pass over the code and the published guarantees without the `FAIL IF` lines, on Claude through Anthropic's Cyber Verification Program and on Codex through OpenAI's Daybreak program. Its BLOCKERs and WARNINGs reach the ledger as hand-filed `manual-` keys ([Findings ledger](#findings-ledger)).
+**A maintainer runs a red team in the first week of every month, and before any release that changes remote control or Hosted** (rationale): an open-ended pass over the code and the published guarantees without the `FAIL IF` lines, on Claude through Anthropic's Cyber Verification Program and on Codex through OpenAI's Daybreak program. Its BLOCKERs and WARNINGs reach the ledger as hand-filed `manual-` keys ([Findings ledger](#findings-ledger)).
 
 ## Future
 
