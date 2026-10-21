@@ -8,7 +8,7 @@ import * as Account from '../../hosted/src/stories/Account.stories';
 
 Follow the browser side of Hosted: arrive, sign in, connect another sign-in method, and manage the account. These are the production page components with fixed data, not a live account. The stories' interactions run inside each page's own document.
 
-> This walkthrough owns no behavior. `docs/specs/hosted.md` → “Identity and login”, “Interface”, and “Terms acceptance” are the references when changing these screens.
+> `docs/specs/hosted.md` → “Identity and login”, “Interface”, and “Terms acceptance” are the references when changing these screens.
 
 ## Arrive before launch
 
@@ -44,7 +44,7 @@ An older login disables provider connection and asks for a fresh sign-in. Return
 
 Once services are in use, the account brings their controls together. Review the full page on a phone as well: the footer and lower passkey rows should remain reachable. This example uses a real 390px page, independent of the surrounding Storybook width.
 
-<Canvas of={Account.Phone} story={{ height: '1800px' }} />
+<Canvas of={Account.Phone} />
 
 Continue with the [remote-control walkthrough](?path=/docs/hosted-remote-control-walkthrough--docs) or [Natural Voice walkthrough](?path=/docs/hosted-natural-voice-walkthrough--docs) to see how the app brings someone here and what happens when they return.
 
@@ -52,7 +52,7 @@ Continue with the [remote-control walkthrough](?path=/docs/hosted-remote-control
 
 A saved change can be followed by a failed reload. The page distinguishes that case from a refused change, so the person can retry the read without repeating the action.
 
-<Canvas of={Account.SavedButRefreshFailed} story={{ height: '1800px' }} />
+<Canvas of={Account.SavedButRefreshFailed} />
 
 Signing out returns to the sign-in page with a notice that other devices remain signed in.
 

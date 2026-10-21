@@ -10,23 +10,23 @@ import * as Enrollment from '../../hosted/src/stories/Enrollment.stories';
 
 Start in the app, approve its request at Hosted, then return to the app and continue to phone pairing. Each screen is a fixed story of the real component. The same example code and confirmation digits run through the handoff; no account or Relay is contacted.
 
-> This walkthrough owns no behavior. `docs/specs/hosted.md` → “Burrow enrollment”, `docs/specs/relay.md` → “Burrow side”, and `docs/specs/remote-network.md` own the app and account steps. `docs/specs/remote-security-model.md` owns phone authorization.
+> `docs/specs/hosted.md` → “Burrow enrollment”, `docs/specs/relay.md` → “Burrow side”, and `docs/specs/remote-network.md` own the app and account steps. `docs/specs/remote-security-model.md` owns phone authorization.
 
 ## Choose the network policy in the app
 
 In Settings → Network, a new install starts at Nowhere. Choose the policy appropriate for the connections you want before enrolling. This walkthrough proceeds with Anywhere; Local networks only is also an enrollment path, with different limits on subsequent terminal connections.
 
-<Canvas of={Network.Nothing} story={{ autoplay: true }} />
+<Canvas of={Network.Nothing} />
 
 ## Ask to enroll remote control
 
 Under Phones, unfold Persistent Relay. A stock Dormouse build offers Hosted enrollment here, without a self-host setup password.
 
-<Canvas of={RemoteControl.HostedPersistentRelay} story={{ autoplay: true }} />
+<Canvas of={RemoteControl.HostedPersistentRelay} />
 
 “Enroll remote control” gives the app two digits and an account link. Keep Dormouse open; this is the screen to read when the browser asks which computer to approve.
 
-<Canvas of={RemoteControl.HostedEnrollWaiting} story={{ autoplay: true }} />
+<Canvas of={RemoteControl.HostedEnrollWaiting} />
 
 ## Open the account link
 
@@ -46,15 +46,15 @@ Compare the request with the app you just left. Enter its two digits. This story
 
 Approval returns the browser to the account with a waiting notice while the app finishes enrolling. Approval alone is not a completion screen.
 
-<Canvas of={Enrollment.RemoteWaiting} story={{ height: '1800px' }} />
+<Canvas of={Enrollment.RemoteWaiting} />
 
 The app is saving the enrollment at this point:
 
-<Canvas of={RemoteControl.HostedEnrollRedeeming} story={{ autoplay: true }} />
+<Canvas of={RemoteControl.HostedEnrollRedeeming} />
 
 When it finishes, the account confirms completion. The computer is registered; the phone still needs pairing.
 
-<Canvas of={Enrollment.RemoteComplete} story={{ height: '1800px' }} />
+<Canvas of={Enrollment.RemoteComplete} />
 
 ## Continue on the phone
 
@@ -62,16 +62,16 @@ Use **Setup phone** in the enrolled app, then follow [“4. Scan it with the pho
 
 After pairing, Settings → Network shows the paths available to the phone under the policy chosen earlier:
 
-<Canvas of={Network.AnywhereEnrolled} story={{ autoplay: true }} />
+<Canvas of={Network.AnywhereEnrolled} />
 
 ## When the handoff does not finish
 
 A delayed account notice asks you to keep Dormouse open and return to the page. Check the app too: a full account leaves the approval waiting until a computer is removed there.
 
-<Canvas of={RemoteControl.HostedEnrollAccountFull} story={{ autoplay: true }} />
+<Canvas of={RemoteControl.HostedEnrollAccountFull} />
 
 If the digits did not match, the account and app both say nothing was approved. Start again from Dormouse to get a new request.
 
-<Canvas of={Enrollment.Mismatch} story={{ height: '1800px' }} />
+<Canvas of={Enrollment.Mismatch} />
 
-<Canvas of={RemoteControl.HostedEnrollMismatch} story={{ autoplay: true }} />
+<Canvas of={RemoteControl.HostedEnrollMismatch} />

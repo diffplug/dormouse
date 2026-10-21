@@ -78,7 +78,7 @@ cargo test                                                     # see §2
 
 CI splits the root test gate between `Library Tests` (`pnpm test:lib`, including its prerequisites and typecheck) and `Build & Test` (`pnpm test:other`, then the build and Linux installer check). `pnpm test` runs both halves locally. In `test:other`, repository checks finish before `test:audit` and `test:packages` run concurrently through pnpm's script selector; either lane failing fails the command. The lint isolation self-test must finish before that overlap because it snapshots checkout state, including generated files. Package tests retain pnpm's dependency ordering and worker limits; the library suite uses Vitest's defaults.
 
-Hosted's rendering seam is `hosted/src/HostedPage.tsx`: `App.tsx` owns the state and handlers, and passes them through to the page. Its DOM characterization tests run in the ordinary root package-test gate. Hosted stories live in `hosted/src/stories/` and run in lib's shared Storybook, inside a document with Hosted's CSS and production theme. Run these from the worktree root:
+Hosted's rendering seam is `hosted/src/HostedPage.tsx`: `App.tsx` owns the state and handlers, and passes them through to the page. Hosted stories live in `hosted/src/stories/` and run in lib's shared Storybook, inside a document with Hosted's CSS and production theme. Run these from the worktree root:
 
 ```sh
 pnpm --filter dormouse-hosted test:dom
@@ -88,7 +88,7 @@ pnpm --filter dormouse-lib build-storybook
 dor tool storybook
 ```
 
-The Argos browser contexts pin `en-US` and UTC for every story. The Hosted walkthroughs in `docs/stories/` join app and account stories; interactive docs examples use `autoplay` to run their setup.
+The Hosted walkthroughs in `docs/stories/` join app and account stories. Hosted stories render inline in docs, so one whose pictured state comes from its `play` needs `autoplay`; an `inline: false` story runs `play` in its own frame without it.
 
 Helper placement snapshots: defer the fake helper's first prompt until its terminal is mounted and fitted. Drain queued xterm writes before capture and assert one autorun echo, both complete prompts, and a viewport at the bottom. Output emitted at the initial wide grid can lose the current prompt line when xterm shrinks; waiting afterward cannot repair it. `lib/src/stories/HelperPlacement.stories.tsx` owns the gate and `lib/src/lib/platform/fake-adapter-helper.test.ts` covers deferred startup and narrow wrapping.
 
