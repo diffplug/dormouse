@@ -1917,17 +1917,25 @@ export function Wall({
       return meta ? deriveDisplayedSurfaceLabel(surfaceKindFromParams(meta.params), next, persistedPanelTitle(meta.title)) : null;
     },
     flushPersistence: (options) => persistence.flush(options),
-    prepareWorkspaceTransfer: () => {
+    prepareWorkspaceTransfer: async () => {
       // No pending kill follows a Workspace to its destination.
       finalizePendingKills(ownPendingKill);
-      return prepareWorkspaceTransfer({
-      workspaceId: effectiveWorkspaceId,
-      naming: getWorkspace(effectiveWorkspaceId) ?? { name: '', nameIsAuto: false },
-      serialize: persistence.serialize,
-      surfaceIds: memberSurfaceIds,
-      hasTerminal: surfaceHasTerminal,
-      captureTools: () => captureToolParams(lath, memberSurfaceIds()),
-      });
+      const snapshot = lath.store.getSnapshot();
+      const doorSnapshot = doorsRef.current;
+      const prepared = await prepareWorkspaceTransfer({
+        workspaceId: effectiveWorkspaceId,
+        naming: getWorkspace(effectiveWorkspaceId) ?? { name: '', nameIsAuto: false },
+        serialize: persistence.serialize,
+        surfaceIds: memberSurfaceIds,
+        hasTerminal: surfaceHasTerminal,
+        captureTools: () => captureToolParams(lath, memberSurfaceIds()),
+        });
+      // The CWD probe may outlive a split, close, or minimize. Only transfers
+      // require an unchanged record; an ordinary save can publish and follow up.
+      if (lath.store.getSnapshot() !== snapshot || doorsRef.current !== doorSnapshot) {
+        throw new Error('Workspace changed while preparing its move; try again');
+      }
+      return prepared;
     },
     closeAll,
     handleDorControl,
