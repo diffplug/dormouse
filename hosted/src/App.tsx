@@ -38,10 +38,13 @@ import {
   afterRead,
   approvalShows,
   asRead,
+  keepRead,
   pageError,
+  preLaunchNotice,
   reread,
   settle,
   type AccountState,
+  type Lookup,
   type PageError,
 } from "./settle";
 
@@ -110,6 +113,7 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
     setEnrollingState(next);
   };
   const [loading, setLoading] = useState(true);
+  const [lookup, setLookup] = useState<Lookup>("pending");
   const [busy, setBusy] = useState("");
   const [error, setError] = useState<PageError | null>(null);
   const [notice, setNotice] = useState("");
@@ -130,13 +134,17 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
   // Undefined when a newer refresh superseded this one.
   const refresh = useCallback(async (): Promise<AccountState | undefined> => {
     const generation = ++refreshGeneration.current;
+    const failed = (error: unknown): never => {
+      if (generation === refreshGeneration.current) setLookup("failed");
+      throw error;
+    };
     const [current, providers] = await asRead(
       Promise.all([getSession(), getProviders()]),
-    );
+    ).catch(failed);
     // A failed list hides its section, never the account page.
     const [linked, voice, enrolled, registered] = current
       ? await Promise.all([
-          asRead(getAccounts()),
+          asRead(getAccounts()).catch(failed),
           getHostedVoice().catch(() => null),
           getComputers().catch(() => null),
           getPasskeys().catch(() => null),
@@ -145,6 +153,7 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
     if (current) await recordContinued().catch(() => {});
     if (generation !== refreshGeneration.current) return;
     setError(afterRead);
+    setLookup(current ? "signed-in" : "signed-out");
     setSession(current);
     setEnabled(providers);
     setAccounts(linked);
@@ -200,8 +209,9 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
     if (enterCode) codeInput.current?.focus();
   }, [enterCode]);
   // A failed lookup keeps its error and Retry on screen rather than sending
-  // a member who is signed in away during an outage.
-  const comingSoon = !loading && !session && !error && !SIGN_IN_OPEN;
+  // a member who is signed in away during an outage, even once that error is
+  // cleared (a new enrollment link, Don't approve).
+  const comingSoon = preLaunchNotice(lookup, SIGN_IN_OPEN);
   useEffect(() => {
     if (!comingSoon) return;
     const timer = setTimeout(
@@ -218,7 +228,7 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
       const next = takeEnrollment();
       if (!next) return;
       setEnrolling(next);
-      setError(null);
+      setError(keepRead);
       setNotice("");
     };
     window.addEventListener("hashchange", takeLink);
@@ -354,7 +364,7 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
     });
   const clearEnrollment = () => {
     setEnrolling(null);
-    setError(null);
+    setError(keepRead);
     history.replaceState(null, "", session ? "/account" : "/login");
   };
   const removeOne = (burrowId: string) =>
@@ -749,7 +759,7 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
                             setEnterCode(false);
                             setCode("");
                             setNotice("");
-                            setError(null);
+                            setError(keepRead);
                           }}
                         >
                           Change email

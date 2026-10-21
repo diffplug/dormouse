@@ -4,7 +4,9 @@ import {
   afterRead,
   approvalShows,
   asRead,
+  keepRead,
   pageError,
+  preLaunchNotice,
   reread,
   settle,
   type AccountState,
@@ -41,6 +43,19 @@ describe("approvalShows", () => {
   });
 });
 
+describe("preLaunchNotice", () => {
+  it("shows only once a lookup succeeded and found no login", () => {
+    expect(preLaunchNotice("signed-out", false)).toBe(true);
+    expect(preLaunchNotice("signed-in", false)).toBe(false);
+    expect(preLaunchNotice("failed", false)).toBe(false);
+    expect(preLaunchNotice("pending", false)).toBe(false);
+  });
+
+  it("never replaces a sign-in form the URL opened", () => {
+    expect(preLaunchNotice("signed-out", true)).toBe(false);
+  });
+});
+
 describe("read errors", () => {
   it("marks a failed read's error as one, keeping its message", async () => {
     await expect(asRead(Promise.resolve(1))).resolves.toBe(1);
@@ -60,6 +75,13 @@ describe("read errors", () => {
       message: "Something went wrong. Please try again.",
       read: false,
     });
+  });
+
+  it("keeps only a failed read's error through a step that reads nothing", () => {
+    const read = { message: "offline", read: true };
+    expect(keepRead(read)).toBe(read);
+    expect(keepRead({ message: "Computer not found.", read: false })).toBeNull();
+    expect(keepRead(null)).toBeNull();
   });
 
   it("clears only a failed read's error on a successful read", () => {

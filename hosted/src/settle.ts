@@ -24,6 +24,17 @@ export function approvalShows(
     !!after.computers?.some((computer) => !known.has(computer.burrowId));
 }
 
+/** What the latest account lookup found: none yet, a failure, or the login. */
+export type Lookup = "pending" | "failed" | "signed-in" | "signed-out";
+
+/**
+ * Whether the pre-launch notice replaces the sign-in form: only while the
+ * latest lookup succeeded and found no login, never on a lookup that failed
+ * or has not answered, whatever error the page shows or has cleared.
+ */
+export const preLaunchNotice = (lookup: Lookup, signInOpen: boolean) =>
+  lookup === "signed-out" && !signInOpen;
+
 /** A failed read of the account: the next successful read clears its error. */
 export class ReadFailed extends Error {}
 
@@ -49,6 +60,13 @@ export function pageError(error: unknown): PageError {
     read: error instanceof ReadFailed,
   };
 }
+
+/**
+ * The error a step that reads nothing (a new link, Don't approve) leaves: a
+ * failed read's, still unanswered, and none in place of any other.
+ */
+export const keepRead = (error: PageError | null) =>
+  error?.read ? error : null;
 
 /**
  * The error a successful read leaves: none in place of a failed read's, which
