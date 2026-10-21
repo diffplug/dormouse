@@ -1,6 +1,6 @@
 # Dormouse
 
-A mouse-friendly multitasking terminal built with pnpm, react, typescript, vite, tailwind, storybook, and xterm.js.
+A mouse-friendly multitasking terminal: pnpm, React, TypeScript, Vite, Tailwind, Storybook, xterm.js.
 
 ## Setup
 
@@ -11,6 +11,8 @@ pnpm build       # build lib, vscode extension, Pocket, website, and Hosted
 ```
 
 **Inside Dormouse, run `innerdogfood`** — `dor tool innerdogfood`. The Tool shows the harness in its own pane and prints the command to drive it (`docs/specs/standalone.md` → "Standalone browser-dev harness").
+
+Feature audits: [audit-features](.claude/skills/audit-features/SKILL.md).
 
 ## Worktrees
 
