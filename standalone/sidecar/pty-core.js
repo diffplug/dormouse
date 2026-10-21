@@ -225,24 +225,22 @@ function withoutInheritedMsysOriginalPath(env, platform = process.platform) {
   return next;
 }
 
-// WSL does not inherit arbitrary Windows variables. Forward the CLI context in
-// both directions: the POSIX launcher execs our Windows Node to reach the named
-// pipe, so paths and credentials must arrive back in Windows unchanged. PWD is
-// the exception: translate the Linux caller directory on the return trip only.
-// Configure every Windows pane, including PowerShell/cmd that later run wsl.
-function withWslCliEnv(env, platform) {
-  if (platform !== 'win32') return env;
-  const entries = [
-    'DORMOUSE_NODE', 'DORMOUSE_CLI_JS', 'DORMOUSE_SURFACE_ID',
-    'DORMOUSE_HOST', 'DORMOUSE_HOST_WORKSPACE',
-    'DORMOUSE_CONTROL_SOCKET', 'DORMOUSE_CONTROL_TOKEN',
-    'ELECTRON_RUN_AS_NODE/w', 'PWD/pw',
-  ];
-  const managed = new Set(entries.map((entry) => entry.split('/')[0]));
-  // Replace conflicting flags inherited from a parent host, preserve user vars.
-  const inherited = (env.WSLENV || '').split(':').filter((entry) =>
-    entry && !managed.has(entry.split('/')[0].toUpperCase()));
-  return { ...env, WSLENV: [...inherited, ...entries].join(':') };
+// WSLENV entries carrying the dor CLI context into WSL and back unchanged: the
+// POSIX launcher execs our Windows Node to reach the named pipe. PWD alone is
+// translated, on the return trip only.
+const WSL_CLI_ENV = [
+  'DORMOUSE_NODE', 'DORMOUSE_CLI_JS', 'DORMOUSE_SURFACE_ID',
+  'DORMOUSE_HOST', 'DORMOUSE_HOST_WORKSPACE',
+  'DORMOUSE_CONTROL_SOCKET', 'DORMOUSE_CONTROL_TOKEN',
+  'ELECTRON_RUN_AS_NODE/w', 'PWD/pw',
+];
+const WSL_CLI_ENV_NAMES = new Set(WSL_CLI_ENV.map((entry) => entry.split('/')[0]));
+
+// Replace conflicting flags inherited from a parent host, preserve user vars.
+function withWslCliEntries(wslenv) {
+  const inherited = (wslenv || '').split(':').filter((entry) =>
+    entry && !WSL_CLI_ENV_NAMES.has(entry.split('/')[0].toUpperCase()));
+  return [...inherited, ...WSL_CLI_ENV].join(':');
 }
 
 // Directory holding the per-shell OSC 633 integration scripts. Shipped next to
@@ -405,7 +403,9 @@ function resolveSpawnConfig(options, runtime = {}) {
   };
   const dehydrate = dehydrateEnv(options?.dehydrate);
   if (dehydrate !== null) childEnv.DORMOUSE_DEHYDRATE = dehydrate;
-  const integrated = applyShellIntegration(shell, withWslCliEnv(childEnv, platform), shellArgs, integrationDir, runtime);
+  // Every Windows pane, including PowerShell/cmd that later run wsl.
+  if (platform === 'win32') childEnv.WSLENV = withWslCliEntries(childEnv.WSLENV);
+  const integrated = applyShellIntegration(shell, childEnv, shellArgs, integrationDir, runtime);
 
   return {
     cols,
@@ -420,6 +420,7 @@ function resolveSpawnConfig(options, runtime = {}) {
 
 module.exports.resolveSpawnConfig = resolveSpawnConfig;
 module.exports.DEHYDRATE_LIMIT = DEHYDRATE_LIMIT;
+module.exports.WSL_CLI_ENV = WSL_CLI_ENV;
 module.exports.withPrependedPath = withPrependedPath;
 module.exports.canonicalizeWindowsCwd = canonicalizeWindowsCwd;
 

@@ -19,6 +19,8 @@ const exec = promisify(execFile);
 const launcher = fileURLToPath(new URL('../bin/dor', import.meta.url));
 const cli = fileURLToPath(new URL('../dist/dor.js', import.meta.url));
 const wsl = join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'wsl.exe');
+const contextKeys = ['DORMOUSE_NODE', 'DORMOUSE_CLI_JS', 'DORMOUSE_HOST', 'DORMOUSE_SURFACE_ID',
+  'DORMOUSE_CONTROL_SOCKET', 'DORMOUSE_CONTROL_TOKEN'];
 
 function paneEnv(cliJs, extra = {}) {
   return ptyCore.resolveSpawnConfig({
@@ -48,8 +50,7 @@ test('WSL launcher preserves context, Windows paths, argv, cwd and failure statu
     await symlink(dirname(process.execPath), join(dir, 'runtime with spaces'), 'junction');
     const node = join(dir, 'runtime with spaces', 'node.exe');
     await writeFile(stub, `
-      const keys = ['DORMOUSE_NODE', 'DORMOUSE_CLI_JS', 'DORMOUSE_HOST', 'DORMOUSE_SURFACE_ID',
-        'DORMOUSE_CONTROL_SOCKET', 'DORMOUSE_CONTROL_TOKEN', 'ELECTRON_RUN_AS_NODE', 'PWD'];
+      const keys = ${JSON.stringify([...contextKeys, 'ELECTRON_RUN_AS_NODE', 'PWD'])};
       console.log(JSON.stringify({platform: process.platform, cwd: process.cwd(), env: Object.fromEntries(keys.map(k => [k, process.env[k]])), args: process.argv.slice(2)}));
       process.exitCode = Number(process.argv[2]);
     `);
@@ -58,7 +59,7 @@ test('WSL launcher preserves context, Windows paths, argv, cwd and failure statu
     const result = JSON.parse((await runWsl(env, args, dir)).stdout);
     assert.equal(result.platform, 'win32');
     assert.deepEqual(result.args, args);
-    for (const key of ['DORMOUSE_NODE', 'DORMOUSE_CLI_JS', 'DORMOUSE_HOST', 'DORMOUSE_SURFACE_ID', 'DORMOUSE_CONTROL_SOCKET', 'DORMOUSE_CONTROL_TOKEN']) {
+    for (const key of contextKeys) {
       assert.equal(result.env[key], env[key]);
     }
     assert.equal(result.env.ELECTRON_RUN_AS_NODE, '1');

@@ -28,6 +28,7 @@ const {
   OPEN_PORT_TIMEOUT_PER_ID_MS,
   pacedInputSegments,
   DEHYDRATE_LIMIT,
+  WSL_CLI_ENV,
 } = require('./pty-core');
 
 test('resolveSpawnConfig uses POSIX shell and home defaults', () => {
@@ -163,13 +164,7 @@ test('Windows panes carry dor context through WSL and back without translating p
       fsModule: { statSync() { throw new Error('ENOENT'); } },
     });
     const entries = config.env.WSLENV.split(':');
-    assert.deepEqual(entries, [
-      'USER_FILES/lp', 'USER_FLAG/u',
-      'DORMOUSE_NODE', 'DORMOUSE_CLI_JS', 'DORMOUSE_SURFACE_ID',
-      'DORMOUSE_HOST', 'DORMOUSE_HOST_WORKSPACE',
-      'DORMOUSE_CONTROL_SOCKET', 'DORMOUSE_CONTROL_TOKEN',
-      'ELECTRON_RUN_AS_NODE/w', 'PWD/pw',
-    ]);
+    assert.deepEqual(entries, ['USER_FILES/lp', 'USER_FLAG/u', ...WSL_CLI_ENV]);
     for (const key of ['DORMOUSE_NODE', 'DORMOUSE_CLI_JS', 'DORMOUSE_CONTROL_SOCKET', 'DORMOUSE_CONTROL_TOKEN']) {
       assert.equal(config.env[key], env[key]);
     }

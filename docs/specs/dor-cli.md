@@ -44,7 +44,7 @@ Source of truth: `scripts/stage-dor-cli.mjs`, `dor/bin/dor`, `dor/bin/dor.cmd`, 
 - **Must run the bundled Windows runtime from WSL**, translating only its executable path for the POSIX launcher; script paths and pipe endpoints remain opaque. Windows-executable interop must be enabled.
 - **Must translate the caller's `PWD` back to Windows for the CLI.**
 
-Source of truth: `withWslCliEnv` in `standalone/sidecar/pty-core.js`, `dor/bin/dor`.
+Source of truth: `WSL_CLI_ENV` in `standalone/sidecar/pty-core.js`, `dor/bin/dor`.
 
 ## Spawning External Binaries
 

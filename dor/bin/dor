@@ -11,15 +11,13 @@ if [ -n "${DORMOUSE_NODE:-}" ] && [ -n "${DORMOUSE_CLI_JS:-}" ]; then
   # WSL runs the Windows runtime so it can open the host's named pipe. Only
   # the executable needs a Linux spelling; Node still expects a Windows script
   # path. wslpath respects the distro's configured automount root.
+  NODE_EXEC=$DORMOUSE_NODE
   if [ -n "${WSL_DISTRO_NAME:-}" ]; then
     case "$DORMOUSE_NODE" in
-      [A-Za-z]:*)
-        NODE_EXEC=$(wslpath -u "$DORMOUSE_NODE") || exit 1
-        exec "$NODE_EXEC" "$DORMOUSE_CLI_JS" "$@"
-        ;;
+      [A-Za-z]:*) NODE_EXEC=$(wslpath -u "$DORMOUSE_NODE") || exit 1 ;;
     esac
   fi
-  exec "$DORMOUSE_NODE" "$DORMOUSE_CLI_JS" "$@"
+  exec "$NODE_EXEC" "$DORMOUSE_CLI_JS" "$@"
 fi
 
 SCRIPT_DIR=$(CDPATH= cd "$(dirname "$0")" && pwd)
