@@ -169,11 +169,26 @@ export async function removePasskey(credentialId: string) {
   });
   if (!response.ok) throw await refused(response);
 }
-export async function approveEnrollment(userCode: string, purpose: "remote" | "voice" = "remote") {
+export async function approveEnrollment(
+  userCode: string,
+  purpose: "remote" | "voice" | undefined,
+  confirmDigits: string,
+) {
   const response = await relay("/enrollments/approve", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ userCode, purpose }),
+    body: JSON.stringify({ userCode, purpose: purpose ?? "remote", confirmDigits }),
   });
   if (!response.ok) throw await refused(response);
+}
+/** What a poll made of this account's live approval of a code; neither when there is none. */
+export interface ApprovalState {
+  /** Typed with other digits than its computer showed: it never redeems. */
+  mismatched: boolean;
+  redeemed: boolean;
+}
+export async function getApproval(userCode: string): Promise<ApprovalState> {
+  const response = await relay(`/enrollments/${encodeURIComponent(userCode)}`);
+  if (!response.ok) throw await refused(response);
+  return (await response.json()) as ApprovalState;
 }

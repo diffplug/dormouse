@@ -44,7 +44,7 @@ Measured on macOS 27 with Claude Code 2.1.274 and Codex 0.154.0, 2026-09 (issue 
 
 **The `<unnamed>` seed skip is lossy, deliberately.** Persistence cannot tell a deliberate `<unnamed>` pin from the default panel placeholder, so a user who pinned it gets the derived header back on reload — cheaper than seeding every default placeholder as a real user title.
 
-`collectLivePtys` filtered the answer but finished on any `pty:list`. With two Workspaces arriving in one window at once, the second arrival's list reached the first collector, filtered to nothing, and resolved it as "the host holds no PTYs" — so that Workspace cold-restored fresh shells at the saved cwds over the ones still running. The 3 s timeout did the same thing on its own.
+`collectLivePtys` filtered the answer but finished on any `pty:list`. With two Workspaces arriving in one window at once, the second arrival's list reached the first collector, filtered to nothing, and resolved it as "the host holds no PTYs" — so that Workspace cold-restored fresh shells at the saved cwds over the ones still running. The 3 s timeout did the same thing on its own. A module-local token counter also restarted at `init-1` on reload, letting a delayed old reply satisfy the new webview's first collection (regression reproduced 2026-10-20).
 
 The retry is the same argument applied to the plain boot: the arrival path refuses on `timedOut` because it knows those shells are running, but the boot path has nothing else to fall back on and restores. Asking again costs 3 s only in the case where the first ask genuinely got nothing, and a host that holds no PTYs answers the second ask as fast as the first.
 
@@ -55,6 +55,8 @@ The retry is the same argument applied to the plain boot: the arrival path refus
 ## Replay-time mode-reset tail (Dormouse-emitted)
 
 **Why a reset tail at all.** Saved scrollback can end mid-TUI with private modes still latched — mouse tracking, the alt-screen, a hidden cursor, application cursor keys. Replaying it verbatim re-applies those DECSETs with no process alive to ever DECRST them, leaving a restored pane unable to select text, showing an alt-screen frame nothing will ever repaint, or with no visible cursor at its new shell's prompt. A live exit used to skip the tail, so a crashed TUI's pane kept its frozen frame and its mouse tracking until a reload replayed it dead and reset it: the same Session looked different before and after the reload (decided 2026-10-16). The cost is the crashed program's last alt-screen frame, which the next reload discarded anyway.
+
+The earlier list of private-mode resets missed insert mode, scroll margins, and kitty keyboard stacks (reproduced against the pinned xterm, 2026-10-20). A soft reset clears these without erasing retained text; the Windows keyboard arbiter resets its matching stack depth too. Alternate-screen exit and mouse resets remain explicit because xterm keeps those outside its soft reset.
 
 ## Transferring a Workspace
 

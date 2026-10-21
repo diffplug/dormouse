@@ -35,6 +35,13 @@ describe('ToolLaunchLatch', () => {
     expect(admitted(osc('633;A') + open('/x') + osc('633;B'), start('view /a'), open('/a'))).toEqual(['/a']);
   });
 
+  it('counts only a command line the shell reports after the launch', () => {
+    const { latch, admitted } = pty();
+    expect(admitted(osc('633;E;view /a'))).toEqual([]);
+    latch.arm('view /a');
+    expect(admitted(osc('633;C') + open('/a'), open('/b'))).toEqual([]);
+  });
+
   it('admits nothing from a start the host never launched, whatever command line it reports', () => {
     const { admitted } = pty();
     expect(admitted(finish + start('view /a'), open('/a'))).toEqual([]);

@@ -46,7 +46,7 @@ on:
         type: string
         default: ""
 
-run-name: codex-audit-report (advisory, not an audit)
+run-name: codex second-opinion audit report
 
 # Each job declares its own.
 permissions: {}

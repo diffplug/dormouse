@@ -688,6 +688,31 @@ describe('collectLivePtys addressing', () => {
     }
   });
 
+  it('ignores a late answer from before the webview reloaded', async () => {
+    vi.useFakeTimers();
+    try {
+      const { platform, asked, answer } = addressedPlatform();
+      vi.resetModules();
+      const beforeReload = await import('./reconnect');
+      const previous = beforeReload.collectLivePtys(platform, { timeoutMs: 100 });
+      await vi.advanceTimersByTimeAsync(100);
+      expect((await previous).timedOut).toBe(true);
+
+      // Reload resets module-local counters, but the host can still deliver
+      // the old webview's delayed reply to this window's new listeners.
+      vi.resetModules();
+      const afterReload = await import('./reconnect');
+      const current = afterReload.collectLivePtys(platform, { timeoutMs: 1000 });
+      answer(asked[0]!, ['stale']);
+      answer(asked[1]!, ['current']);
+      const collected = await current;
+      expect(collected.ptys.map(pty => pty.id)).toEqual(['current']);
+      expect([...collected.replay.keys()]).toEqual(['current']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('accepts an answer from a host that echoes no token', async () => {
     // VS Code, Pocket and the website each serve one webview, so their answers
     // carry none and there is nothing to tell apart.

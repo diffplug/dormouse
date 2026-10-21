@@ -75,13 +75,18 @@ function ownDialog(): void {
 function captureWorkspaces(): void {
   const workspaces = getWorkspacesSnapshot().workspaces;
   workspaceNames = workspaces.map((workspace) => workspace.name);
-  const ids = new Set(workspaces.map((workspace) => workspace.id));
-  unsubscribeWorkspaces = subscribeToWorkspaces(() => {
+  unsubscribeWorkspaces = watchWorkspaceMembership(cancelQuit);
+}
+
+/** Both teardown consent gates keep the Workspace membership they asked about. */
+export function watchWorkspaceMembership(onChange: () => void): () => void {
+  const ids = new Set(getWorkspacesSnapshot().workspaces.map(workspace => workspace.id));
+  return subscribeToWorkspaces(() => {
     const current = getWorkspacesSnapshot().workspaces;
     // A changed destination invalidates consent; focus, rename and order do not.
-    // Every exit from 'open' stops this watch, so no phase check is needed.
+    // Each gate releases its watch before settling or committing.
     if (current.length !== ids.size || current.some((workspace) => !ids.has(workspace.id))) {
-      cancelQuit();
+      onChange();
     }
   });
 }

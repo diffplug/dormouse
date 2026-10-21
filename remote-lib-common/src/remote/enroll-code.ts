@@ -1,8 +1,8 @@
 /**
- * The user code of Hosted's device-code Burrow enrollment
- * (`docs/specs/hosted.md` -> "Burrow enrollment"): what Dormouse shows, what the
- * account page shows beside Approve, and what the user compares between them,
- * and its derivation from the device code.
+ * The codes of Hosted's device-code approval (`docs/specs/hosted.md` -> "Burrow
+ * enrollment"): the user code, which the link carries to the account page and
+ * keys the approval, derived from the device code; and the two confirmation
+ * digits Dormouse shows and the user types there, derived from the user code.
  *
  * Imports nothing, so the account frontend takes it without the rest of this
  * package.
@@ -35,6 +35,13 @@ export function normalizeEnrollUserCode(text: unknown): string | null {
   return isEnrollUserCode(code) ? code : null;
 }
 
+const CONFIRM_DIGITS = /^[0-9]{2}$/;
+
+/** Whether `value` is two confirmation digits, `00`–`99`. */
+export function isEnrollConfirmDigits(value: unknown): value is string {
+  return typeof value === 'string' && CONFIRM_DIGITS.test(value);
+}
+
 /** The slice of `SubtleCrypto` {@link enrollUserCode} uses. */
 interface HmacSubtle {
   importKey(
@@ -59,14 +66,7 @@ export async function enrollUserCode(
   deviceCode: Uint8Array,
   subtle: HmacSubtle = (globalThis as unknown as { crypto: { subtle: HmacSubtle } }).crypto.subtle,
 ): Promise<string> {
-  const key = await subtle.importKey(
-    'raw',
-    new TextEncoder().encode(secret),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign'],
-  );
-  const mac = new Uint8Array(await subtle.sign('HMAC', key, deviceCode));
+  const mac = await hmac(secret, deviceCode, subtle);
   let code = '';
   for (let bit = 0; code.length < ENROLL_USER_CODE_CHARACTERS; bit += 5) {
     // 51 groups for 8 characters: running out has odds below 10^-40, and
@@ -77,4 +77,36 @@ export async function enrollUserCode(
     if (value < ENROLL_USER_CODE_ALPHABET.length) code += ENROLL_USER_CODE_ALPHABET[value];
   }
   return `${code.slice(0, 4)}-${code.slice(4)}`;
+}
+
+/**
+ * The confirmation digits of `userCode`: `HMAC-SHA-256(secret, "confirm:" +
+ * userCode)` read sixteen bits at a time, most significant first, a value of
+ * 65500 or more skipped so each of the hundred is equally likely. A link
+ * carries the user code, never these: without `secret` no one can tell them
+ * from it, so only the person who sees Dormouse's screen can type them.
+ */
+export async function enrollConfirmDigits(
+  secret: string,
+  userCode: string,
+  subtle: HmacSubtle = (globalThis as unknown as { crypto: { subtle: HmacSubtle } }).crypto.subtle,
+): Promise<string> {
+  const mac = await hmac(secret, new TextEncoder().encode(`confirm:${userCode}`), subtle);
+  for (let byte = 0; byte + 1 < mac.length; byte += 2) {
+    const value = (mac[byte] << 8) | mac[byte + 1];
+    // Sixteen draws: all skipped has odds below 10^-52.
+    if (value < 65500) return String(value % 100).padStart(2, '0');
+  }
+  throw new Error('No confirmation digits in this MAC');
+}
+
+async function hmac(secret: string, data: Uint8Array, subtle: HmacSubtle): Promise<Uint8Array> {
+  const key = await subtle.importKey(
+    'raw',
+    new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  return new Uint8Array(await subtle.sign('HMAC', key, data));
 }

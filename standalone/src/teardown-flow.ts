@@ -4,6 +4,7 @@ import { cancelEditorClose, confirmToolEditorsClose } from "dormouse-lib/lib/too
 import {
   beginQuitProgress,
   dismissQuitConfirm,
+  watchWorkspaceMembership,
   type QuitConfirmIntent,
 } from "./quit-confirm-store";
 
@@ -88,7 +89,7 @@ export function createTeardownFlow(options: {
   let phase: "idle" | "confirming" | "committed" = "idle";
   // The unsaved-file question this flow is waiting on; replaced or cleared, its
   // late answer is ignored.
-  let editorWait: object | null = null;
+  let editorWait: { stopWatching: () => void } | null = null;
 
   const claim: TeardownClaim = {
     kind: options.kind,
@@ -109,6 +110,7 @@ export function createTeardownFlow(options: {
 
   function stopEditorWait(): void {
     if (!editorWait) return;
+    editorWait.stopWatching();
     editorWait = null;
     cancelEditorClose();
   }
@@ -162,10 +164,11 @@ export function createTeardownFlow(options: {
       const dirty = listWallHandles().flatMap((wall) => wall.dirtyToolIds());
       if (dirty.length) {
         enter("confirming");
-        const mine = {};
+        const mine = { stopWatching: watchWorkspaceMembership(cancel) };
         editorWait = mine;
         void confirmToolEditorsClose(dirty).then((accepted) => {
           if (editorWait !== mine) return;
+          mine.stopWatching();
           editorWait = null;
           if (accepted) askRunning(); else cancel();
         });

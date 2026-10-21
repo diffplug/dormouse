@@ -1,115 +1,59 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { Terminal } from '@xterm/xterm';
+// @vitest-environment jsdom
+import { afterEach, describe, expect, it } from 'vitest';
+import { Terminal } from '@xterm/xterm';
 import { attachMouseModeObserver } from './mouse-mode-observer';
-import { __resetMouseSelectionForTests, getMouseSelectionState } from './mouse-selection';
+import { __resetMouseSelectionForTests, getMouseSelectionState, setOverride, setSelection } from './mouse-selection';
 
+const live: Terminal[] = [];
 afterEach(() => {
+  for (const terminal of live.splice(0)) terminal.dispose();
   __resetMouseSelectionForTests();
-  vi.restoreAllMocks();
 });
 
-interface MockDisposables {
-  setHandlers: Array<() => boolean>;
-  resetHandlers: Array<() => boolean>;
+function setup() {
+  const terminal = new Terminal({ allowProposedApi: true });
+  live.push(terminal);
+  const observer = attachMouseModeObserver('a', terminal);
+  return { terminal, observer };
 }
-
-function buildMockTerminal(): { terminal: Terminal; modes: { mouseTrackingMode: string; bracketedPasteMode: boolean }; handlers: MockDisposables } {
-  const handlers: MockDisposables = { setHandlers: [], resetHandlers: [] };
-  const modes = { mouseTrackingMode: 'none' as const, bracketedPasteMode: false };
-  const parser = {
-    registerCsiHandler(id: { prefix?: string; final?: string }, cb: () => boolean) {
-      if (id.prefix === '?' && id.final === 'h') {
-        handlers.setHandlers.push(cb);
-      } else if (id.prefix === '?' && id.final === 'l') {
-        handlers.resetHandlers.push(cb);
-      }
-      return { dispose: vi.fn() };
-    },
-  };
-  const terminal = { parser, modes } as unknown as Terminal;
-  return { terminal, modes, handlers };
-}
-
-async function flushMicrotasks(): Promise<void> {
-  await Promise.resolve();
-  await Promise.resolve();
-}
+const write = (terminal: Terminal, data: string) => new Promise<void>(resolve => terminal.write(data, resolve));
 
 describe('attachMouseModeObserver', () => {
-  it('registers one DECSET and one DECRST handler', () => {
-    const { terminal, handlers } = buildMockTerminal();
-    attachMouseModeObserver('a', terminal);
-    expect(handlers.setHandlers).toHaveLength(1);
-    expect(handlers.resetHandlers).toHaveLength(1);
+  it.each([[9, 'x10'], [1000, 'vt200'], [1002, 'drag'], [1003, 'any']] as const)(
+    'tracks mouse mode %i through real xterm parsing', async (mode, expected) => {
+      const { terminal } = setup();
+      await write(terminal, `[?${mode}h[?2004h`);
+      expect(getMouseSelectionState('a')).toMatchObject({ mouseReporting: expected, bracketedPaste: true });
+      await write(terminal, `[?${mode}l[?2004l`);
+      expect(getMouseSelectionState('a')).toMatchObject({ mouseReporting: 'none', bracketedPaste: false });
+    },
+  );
+
+  it('clears reporting, override, program selection, and paste mode after a hard reset', async () => {
+    const { terminal } = setup();
+    await write(terminal, '\x1b[?1003h\x1b[?2004h');
+    setOverride('a', 'permanent');
+    setSelection('a', { startRow: 0, startCol: 0, endRow: 0, endCol: 4, shape: 'linewise', dragging: false, startedInScrollback: false, owner: 'program' });
+    await write(terminal, '\x1bc');
+    expect(terminal.modes.mouseTrackingMode).toBe('none');
+    expect(terminal.modes.bracketedPasteMode).toBe(false);
+    expect(getMouseSelectionState('a')).toMatchObject({ mouseReporting: 'none', bracketedPaste: false, override: 'off', selection: null });
   });
 
-  it('DECSET handler returns false so xterm still processes the sequence', () => {
-    const { terminal, handlers } = buildMockTerminal();
-    attachMouseModeObserver('a', terminal);
-    expect(handlers.setHandlers[0]()).toBe(false);
-    expect(handlers.resetHandlers[0]()).toBe(false);
+  it('reads the resolved soft-reset modes instead of assuming mouse tracking ended', async () => {
+    const { terminal } = setup();
+    await write(terminal, '\x1b[?1003h\x1b[?2004h');
+    await write(terminal, '\x1b[!p');
+    expect(terminal.modes.mouseTrackingMode).toBe('any');
+    expect(terminal.modes.bracketedPasteMode).toBe(false);
+    expect(getMouseSelectionState('a')).toMatchObject({ mouseReporting: 'any', bracketedPaste: false });
   });
 
-  it('syncs mouseReporting after a DECSET fires (modes updated in the mock)', async () => {
-    const { terminal, modes, handlers } = buildMockTerminal();
-    attachMouseModeObserver('a', terminal);
-
-    // Simulate xterm processing `\e[?1000h`: our handler fires, then xterm's
-    // builtin updates modes. We emulate by flipping the mode before the
-    // microtask runs.
-    handlers.setHandlers[0]();
-    modes.mouseTrackingMode = 'vt200';
-
-    await flushMicrotasks();
-    expect(getMouseSelectionState('a').mouseReporting).toBe('vt200');
-  });
-
-  it('syncs bracketedPaste after a DECSET fires', async () => {
-    const { terminal, modes, handlers } = buildMockTerminal();
-    attachMouseModeObserver('a', terminal);
-
-    handlers.setHandlers[0]();
-    modes.bracketedPasteMode = true;
-
-    await flushMicrotasks();
-    expect(getMouseSelectionState('a').bracketedPaste).toBe(true);
-  });
-
-  it('syncs mouseReporting to none after DECRST', async () => {
-    const { terminal, modes, handlers } = buildMockTerminal();
-    attachMouseModeObserver('a', terminal);
-
-    // Enable first
-    handlers.setHandlers[0]();
-    modes.mouseTrackingMode = 'any';
-    await flushMicrotasks();
-    expect(getMouseSelectionState('a').mouseReporting).toBe('any');
-
-    // Then disable
-    handlers.resetHandlers[0]();
-    modes.mouseTrackingMode = 'none';
-    await flushMicrotasks();
-    expect(getMouseSelectionState('a').mouseReporting).toBe('none');
-  });
-
-  it('dispose tears down both handlers', () => {
-    const disposables: Array<{ dispose: ReturnType<typeof vi.fn> }> = [];
-    const terminal = {
-      parser: {
-        registerCsiHandler() {
-          const d = { dispose: vi.fn() };
-          disposables.push(d);
-          return d;
-        },
-      },
-      modes: { mouseTrackingMode: 'none', bracketedPasteMode: false },
-    } as unknown as Terminal;
-
-    const observer = attachMouseModeObserver('a', terminal);
+  it('stops updating the store after disposal', async () => {
+    const { terminal, observer } = setup();
+    await write(terminal, '\x1b[?1003h\x1b[?2004h');
     observer.dispose();
-
-    expect(disposables).toHaveLength(2);
-    expect(disposables[0].dispose).toHaveBeenCalledOnce();
-    expect(disposables[1].dispose).toHaveBeenCalledOnce();
+    await write(terminal, '\x1b[?1003l\x1b[?2004l');
+    expect(getMouseSelectionState('a')).toMatchObject({ mouseReporting: 'any', bracketedPaste: true });
   });
 });

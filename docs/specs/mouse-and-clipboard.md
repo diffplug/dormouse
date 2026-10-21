@@ -72,9 +72,9 @@ Source of truth: `lib/src/lib/terminal-mouse-router.ts`.
 
 ### 3.4 Selection Follows Content
 
-A selection is anchored to the characters under it, not to screen coordinates: stored in absolute buffer rows (scrollback + viewport).
+**Must anchor selections to characters in absolute buffer rows** (scrollback + viewport).
 
-- **Pure scroll** — vertical translation with no character changes — carries the selection along; coordinate math only, no matching.
+- **Must follow vertical scrolling and older scrollback trims** using coordinate math, never matching. **Must cancel when selected rows are trimmed**, even if identical text replaces them.
 - **Must cancel a finalized selection on the next xterm render when its extracted selected text changes**; repaints elsewhere are irrelevant. **Never add a partial-match or content-tracking heuristic** (§9.1).
 - **Terminal resize** carries a finalized linewise selection Dormouse owns, in the normal buffer, through xterm's reflow (rationale). Its editor stays open in the same format and same-labeled scope, else As selected; per-break edits drop unless the width held.
   - **Must cancel if an edge's line was trimmed or its cells no longer read as the selected text** (rationale).
@@ -180,7 +180,7 @@ Every break is a mark that a click cycles keep → space → none; a scope or fo
 - **Never show while its Wall travels**, its pane hidden, or another pane zoomed over it.
 - **Never take focus**; only an actual scrollbar press keeps its default (rationale). Presses inside it count as inside its pane (`anchoredTarget`); its `mousedown` and `contextmenu` never reach the pane.
 - **Esc**, a click outside the editor, a content change or a resize it cannot follow (§3.4), a confirmed copy, or **any input the terminal receives** — typing, a paste, Pocket's input bar — dismisses it and cancels the selection. Source of truth: `writeUserInput` in `lib/src/lib/terminal-lifecycle.ts`, pinned by `lib/src/lib/terminal-lifecycle.selection.test.ts`.
-- **Must confirm only after a successful clipboard write, and only for the selection copied**; the selection then clears, however it moved meanwhile (rationale).
+- **Must confirm only after a successful clipboard write, and only for the selection copied**; the selection then clears, even if its edges moved or reflow ran while the write was pending (rationale).
 - **Must leave empty copies idle without writing.** **Must say a failed write failed**, keeping the selection for a retry.
 - **Must write through the adapter's native `writeClipboardText` where it has one, and never fall back from it** (rationale). **Pocket's adapter must have none**: its copies belong on the phone. Without one, the write takes the Clipboard API, and `execCommand('copy')` where that is missing or refuses (rationale).
 - **Must open the clipboard-failure report when a write fails every way it may take**, unless its caller opts out. **Its details never carry the copied text**; they go to the tracking issue the report links.
@@ -223,7 +223,7 @@ A token is whitespace-delimited and **runs on across soft wraps**. Trailing char
 
 ### 6.1 State Matrix
 
-**Mouse reporting** is any mouse-tracking mode the inside program sets (DECSET `?9`, `?1000`, `?1002`, `?1003`), read from xterm without consuming the sequence (`lib/src/lib/mouse-mode-observer.ts`). Where a drag goes; **Terminal** means the terminal's own selection.
+**Mouse reporting** is any mouse-tracking mode the inside program sets (DECSET `?9`, `?1000`, `?1002`, `?1003`), read from xterm without consuming the sequence (`lib/src/lib/mouse-mode-observer.ts`). **Must keep mouse reporting and bracketed-paste state synchronized with xterm after parsed output, including hard and soft resets.** Where a drag goes; **Terminal** means the terminal's own selection.
 
 | Program requests mouse | Override | Live-region drag | Scrollback drag |
 |---|---|---|---|

@@ -7,7 +7,7 @@
 ## Helper lifecycle
 
 - **Must create at most one helper per source, lazily on first context opening.** Closing the source during startup cancels creation. Helpers cannot have helpers.
-- **Must start with the configured shell in the source's local directory**, using the ordinary split fallback when unavailable. Shell exports and virtual environments are not inherited. SSH integration is outside this feature.
+- **Must start with the configured shell in the source's local directory**, using the ordinary split fallback when unavailable. **Must preserve a directory the helper reports before autorun.** Shell exports and virtual environments are not inherited. SSH integration is outside this feature.
 - **Must inject autorun only after integrated shell readiness**, accepting prompt-start and prompt-end/editing states with no current command. User input before injection cancels it. Without readiness before a timeout, show an unsupported state and never write a timeout fallback.
 - **Must treat typing, paste, accepted drops, and application mouse input as user work**, disarming automatic refresh until Reset or Promote. Selection, copying, resize, and terminal protocol replies do not count. Returning to idle does not rearm autorun.
 - **Must refresh an untouched, completed or autorun-disabled helper on reopening only after a host idle check.** Foreground commands, background descendants, and failed/unknown inspection preserve the helper.

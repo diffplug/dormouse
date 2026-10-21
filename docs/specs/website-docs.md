@@ -86,7 +86,7 @@ Every Markdown source keeps its content in source order; `buildDocument` applies
 
 `dor/skill.md` does not pass through `buildDocument`: it is asserted free of site links instead ([`/agent-skill` guide](#agent-skill-guide)).
 
-**Never** publish a relative repository link as-is; the build fails when the link's target does not exist, and `assertRouteFragments` fails it when a fragment into a published page names no heading that page renders. A source keeps its repo-relative link, which spec-lint verifies down to the fragment. Known gap: `assertRouteFragments` skips query-bearing links.
+**Never** publish a relative repository link as-is; the build fails when the link's target does not exist, and `assertRouteFragments` fails it when a fragment into a published page names no heading that page renders, including links with queries. A source keeps its repo-relative link, which spec-lint verifies down to the fragment.
 
 **Never** use a regular expression or a line-number patch to turn a canonical source's prose into site prose. Channel-specific differences are explicit entries in one fixed delta table per document (`*_DELTA`), each naming exactly one source target and failing the build when its target matches zero blocks or more than one.
 

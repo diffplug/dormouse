@@ -208,6 +208,8 @@ gh secret set AUDIT_PAT --env security-audit --repo diffplug/dormouse --body 'gi
 
 **Why it never gates.** A gate needs a run that is reproducible on the release tag, with credentials CI holds; the second-opinion audit runs on a maintainer's machine and login. Its value is a second opinion and a recall comparison, not a pass.
 
+**Why a session per work stream (2026-10).** The first nightly runs handed Codex the whole preamble: with no subagents to wait for, it ran the delegate wait loop anyway and sat out its deadline, about 30 minutes per domain. `remote` in one session also left most of its rules not fully traced; a session per stream gives each its own context, as a Claude delegate has.
+
 **Why the either count may be empty (2026-10).** Claude's scorecard sits in its canary run's encrypted transcript, which not every machine that runs Codex can decrypt. Codex's own counts stand without it; a zero in its place would plot a false either point.
 
 **Why a file for the open findings (2026-10).** `ci-and-secrets` reads live GitHub state, so the Codex sandbox has the network and reaches the operator's `gh` login; a login that lists the ledger would hand the model every open finding's title, and through the same login its body.

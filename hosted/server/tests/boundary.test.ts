@@ -128,6 +128,7 @@ const send = (name: Name, url: string, method = "GET") =>
 /** The Relay's routes the account serves: approval, and its Burrows and passkeys. */
 const ACCOUNT_RELAY: [string, string][] = [
   ["POST", "/api/relay/enrollments/approve"],
+  ["GET", "/api/relay/enrollments/AAAA-AAAA"],
   ["GET", "/api/relay/burrows"],
   ["DELETE", "/api/relay/burrows/AAAAAAAAAAAAAAAAAAAAAA"],
   ["GET", "/api/relay/passkeys"],
@@ -808,7 +809,7 @@ test("the cookie gate needs no login creation time; approval reads it and fails 
     const response = await app.request(`${origin}/api/relay/enrollments/approve`, {
       method: "POST",
       headers: { origin, "content-type": "application/json" },
-      body: JSON.stringify({ userCode: "ZZZZ-ZZZZ" }),
+      body: JSON.stringify({ userCode: "ZZZZ-ZZZZ", confirmDigits: "00" }),
     });
     expect(response.status, String(createdAt)).toBe(403);
     expect(await response.json()).toEqual({ message: RECENT_LOGIN_REQUIRED });

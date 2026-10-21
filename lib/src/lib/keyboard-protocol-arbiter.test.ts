@@ -110,7 +110,7 @@ describe('attachKeyboardProtocolArbiter', () => {
     expect(getExt()).toMatchObject({ win32InputMode: true });
   });
 
-  it('dispose tears down both handlers', () => {
+  it('dispose tears down every handler', () => {
     const disposables: Array<{ dispose: ReturnType<typeof vi.fn> }> = [];
     const terminal = {
       parser: {
@@ -126,8 +126,9 @@ describe('attachKeyboardProtocolArbiter', () => {
     const arbiter = attachKeyboardProtocolArbiter(terminal);
     arbiter.dispose();
 
-    expect(disposables).toHaveLength(2);
+    expect(disposables).toHaveLength(3);
     expect(disposables[0].dispose).toHaveBeenCalledOnce();
     expect(disposables[1].dispose).toHaveBeenCalledOnce();
+    expect(disposables[2].dispose).toHaveBeenCalledOnce();
   });
 });

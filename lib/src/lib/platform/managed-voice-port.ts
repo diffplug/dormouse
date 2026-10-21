@@ -5,6 +5,7 @@
  * adapter feeds its `voice:status` broadcasts to `receiveStatus`.
  */
 import { messageOf } from '../errors';
+import { parseHostedEnrollmentState } from '../../host/remote/service-protocol';
 import type {
   ManagedVoiceActionResult,
   ManagedVoiceConfigResult,
@@ -41,8 +42,9 @@ export function createManagedVoicePortClient(send: SendVoiceCommand): ManagedVoi
   const apply = (data: unknown): void => {
     const next = data as Partial<ManagedVoiceStatus> | null;
     if (typeof next?.configured !== 'boolean' || typeof next.voiceId !== 'string') return;
+    const enrollment = parseHostedEnrollmentState(next.enrollment);
     status = { configured: next.configured, voiceId: next.voiceId, notEntitled: next.notEntitled === true,
-      ...(next.enrollment ? { enrollment: next.enrollment } : {}),
+      ...(enrollment ? { enrollment } : {}),
       ...(next.disconnectFailed ? { disconnectFailed: true } : {}) };
     for (const listener of listeners) listener();
   };

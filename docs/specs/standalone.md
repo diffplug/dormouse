@@ -260,6 +260,7 @@ sequenceDiagram
   end
 ```
 
+- **Must refuse preparation if the captured Workspace changes during CWD probes.**
 - **Must return preparation refusals as `{ moved: false, reason }` without changing ownership.** On `Ok` the source marks the Workspace **transferring**: still mounted, nothing released, omitted from `getWindowSnapshot`.
 - **An arrival without content is not drainable.**
 - **The target arms its collector before `adopt_ready`** (rationale), and `pty:requestInit` names **that arrival's ids and no others**. The target mounts the Workspace at the payload's index, else the drop index, and **never spawns or kills**.
@@ -372,7 +373,7 @@ A **watchdog** thread keeps quit bounded against a dead or wedged webview:
 
 **Must use the Workspace typed-letter confirmation for window close and quit**, naming every Workspace in the window, hidden ones included. It opens for running Sessions; an all-idle quit proceeds without a prompt. The letter rule is `docs/specs/layout.md` → Workspaces.
 
-- **Must cancel an unconfirmed request if Workspace membership changes**; switching and reordering preserve it.
+- **Must cancel an unconfirmed request if Workspace membership changes**, including while awaiting unsaved-file consent; switching and reordering preserve it.
 - **Must exclude transfers from host teardown.** An app quit queues while any arrival is pending, a native window close while that window is an arrival endpoint, and each retries through normal confirmation once the transfer settles; quit supersedes queued closes. **Must refuse new transfers while app quit or either endpoint's close is queued, confirming, or tearing down.**
 
 Source of truth: `openQuitConfirm` in `standalone/src/quit-confirm-store.ts`; `WorkspaceTeardownModalHost` in `standalone/src/WorkspaceTeardownModal.tsx`. Cross-window voting is pinned by `standalone/src/quit.test.ts`.
