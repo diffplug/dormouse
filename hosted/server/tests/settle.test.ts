@@ -1,5 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
-import { approvalShows, reread, settle, type AccountState } from "../../src/settle";
+import {
+  ReadFailed,
+  afterRead,
+  approvalShows,
+  asRead,
+  pageError,
+  reread,
+  settle,
+  type AccountState,
+} from "../../src/settle";
 
 const computer = (burrowId: string) => ({ burrowId, enrolledAt: "2026-10-20" });
 const state = (on: boolean | null, ids: string[] | null): AccountState => ({
@@ -29,6 +38,35 @@ describe("approvalShows", () => {
 
   it("has nothing to compare a remote approval with when no list was read", () => {
     expect(approvalShows("remote", state(false, null))).toBeNull();
+  });
+});
+
+describe("read errors", () => {
+  it("marks a failed read's error as one, keeping its message", async () => {
+    await expect(asRead(Promise.resolve(1))).resolves.toBe(1);
+    const failed = await asRead(Promise.reject(new Error("offline"))).catch(
+      (error: unknown) => error,
+    );
+    expect(failed).toBeInstanceOf(ReadFailed);
+    expect(pageError(failed)).toEqual({ message: "offline", read: true });
+  });
+
+  it("marks an action's error as not a read's", () => {
+    expect(pageError(new Error("Computer not found."))).toEqual({
+      message: "Computer not found.",
+      read: false,
+    });
+    expect(pageError("thrown")).toEqual({
+      message: "Something went wrong. Please try again.",
+      read: false,
+    });
+  });
+
+  it("clears only a failed read's error on a successful read", () => {
+    const action = { message: "Computer not found.", read: false };
+    expect(afterRead({ message: "offline", read: true })).toBeNull();
+    expect(afterRead(action)).toBe(action);
+    expect(afterRead(null)).toBeNull();
   });
 });
 

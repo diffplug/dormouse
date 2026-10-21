@@ -34,7 +34,16 @@ import {
   TERMS_VERSION,
 } from "../server/policy-constants";
 import { takeEnrollment, type Enrollment } from "./enrollment";
-import { approvalShows, reread, settle, type AccountState } from "./settle";
+import {
+  afterRead,
+  approvalShows,
+  asRead,
+  pageError,
+  reread,
+  settle,
+  type AccountState,
+  type PageError,
+} from "./settle";
 
 // The terms version the sign-in notice showed when this tab continued past it,
 // kept through a provider's redirect until the account's acceptance is
@@ -102,7 +111,7 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
   };
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
-  const [error, setError] = useState("");
+  const [error, setError] = useState<PageError | null>(null);
   const [notice, setNotice] = useState("");
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
@@ -112,6 +121,8 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
   const refreshGeneration = useRef(0);
   // Bumped by every action and on unmount: stops re-reading for a Pending.
   const actionGeneration = useRef(0);
+  // A Pending whose late notice is up: a later read that shows it replaces it.
+  const latePending = useRef<Pending | null>(null);
   const callbackError = useRef(
     new URLSearchParams(location.search).has("error"),
   );
@@ -119,14 +130,13 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
   // Undefined when a newer refresh superseded this one.
   const refresh = useCallback(async (): Promise<AccountState | undefined> => {
     const generation = ++refreshGeneration.current;
-    const [current, providers] = await Promise.all([
-      getSession(),
-      getProviders(),
-    ]);
+    const [current, providers] = await asRead(
+      Promise.all([getSession(), getProviders()]),
+    );
     // A failed list hides its section, never the account page.
     const [linked, voice, enrolled, registered] = current
       ? await Promise.all([
-          getAccounts(),
+          asRead(getAccounts()),
           getHostedVoice().catch(() => null),
           getComputers().catch(() => null),
           getPasskeys().catch(() => null),
@@ -134,6 +144,7 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
       : [[], null, null, null];
     if (current) await recordContinued().catch(() => {});
     if (generation !== refreshGeneration.current) return;
+    setError(afterRead);
     setSession(current);
     setEnabled(providers);
     setAccounts(linked);
@@ -145,23 +156,31 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
       "",
       enrollingRef.current ? "/enroll" : current ? "/account" : "/login",
     );
-    return { voice, computers: enrolled };
+    const state = { voice, computers: enrolled };
+    const late = latePending.current;
+    if (late?.shows(state)) {
+      latePending.current = null;
+      setNotice(late.done);
+    }
+    return state;
   }, []);
   useEffect(() => {
     // An auth callback's query parameters (`?error=`) never stay in history.
     history.replaceState(null, "", location.pathname);
     void refresh()
-      .catch((error) => setError(error.message))
+      .catch((error) => setError(pageError(error)))
       .finally(() => {
         setLoading(false);
         if (callbackError.current)
-          setError(
-            "Sign-in or connection was not completed. Try again, or sign in with your existing method and connect the provider from your account.",
-          );
+          setError({
+            message:
+              "Sign-in or connection was not completed. Try again, or sign in with your existing method and connect the provider from your account.",
+            read: false,
+          });
       });
     const focus = () => {
       if (!actionPending.current)
-        void refresh().catch((error) => setError(error.message));
+        void refresh().catch((error) => setError(pageError(error)));
     };
     // Returning to the tab: mobile Safari fires no focus coming back from
     // another app.
@@ -199,7 +218,7 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
       const next = takeEnrollment();
       if (!next) return;
       setEnrolling(next);
-      setError("");
+      setError(null);
       setNotice("");
     };
     window.addEventListener("hashchange", takeLink);
@@ -210,18 +229,15 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
     if (actionPending.current) return;
     ++refreshGeneration.current;
     ++actionGeneration.current;
+    latePending.current = null;
     actionPending.current = true;
     setBusy(label);
-    setError("");
+    setError(null);
     setNotice("");
     try {
       await action();
     } catch (error) {
-      setError(
-        error instanceof Error
-          ? error.message
-          : "Something went wrong. Please try again.",
-      );
+      setError(pageError(error));
     } finally {
       actionPending.current = false;
       setBusy("");
@@ -237,9 +253,11 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
     act(label, async () => {
       const pending = await action();
       const after = await reread(refresh, () =>
-        setError(
-          "Your change is saved, but this page could not reload to show it. Retry, or come back to this page later.",
-        ),
+        setError({
+          message:
+            "Your change is saved, but this page could not reload to show it. Retry, or come back to this page later.",
+          read: true,
+        }),
       );
       if (pending) void follow(pending, after);
     });
@@ -252,8 +270,9 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
       timeoutMs: PENDING_TIMEOUT_MS,
       cancelled: () => generation !== actionGeneration.current,
     });
-    if (outcome !== "cancelled")
-      setNotice(outcome === "done" ? pending.done : pending.late);
+    if (outcome === "cancelled") return;
+    if (outcome === "timeout") latePending.current = pending;
+    setNotice(outcome === "done" ? pending.done : pending.late);
   }
   const sendCode = () =>
     act("email", async () => {
@@ -335,7 +354,7 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
     });
   const clearEnrollment = () => {
     setEnrolling(null);
-    setError("");
+    setError(null);
     history.replaceState(null, "", session ? "/account" : "/login");
   };
   const removeOne = (burrowId: string) =>
@@ -395,7 +414,7 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
           <>
             {error && (
               <div className="error" role="alert">
-                <p>{error}</p>
+                <p>{error.message}</p>
                 <button
                   type="button"
                   className="text-button"
@@ -730,7 +749,7 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
                             setEnterCode(false);
                             setCode("");
                             setNotice("");
-                            setError("");
+                            setError(null);
                           }}
                         >
                           Change email

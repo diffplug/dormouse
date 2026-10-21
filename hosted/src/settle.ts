@@ -24,6 +24,39 @@ export function approvalShows(
     !!after.computers?.some((computer) => !known.has(computer.burrowId));
 }
 
+/** A failed read of the account: the next successful read clears its error. */
+export class ReadFailed extends Error {}
+
+/** `read`, any failure of it a {@link ReadFailed}. */
+export const asRead = <T>(read: Promise<T>): Promise<T> =>
+  read.catch((error: unknown) => {
+    throw new ReadFailed(pageError(error).message);
+  });
+
+/** An error the page shows; `read` when a failed read of the account caused it. */
+export interface PageError {
+  message: string;
+  read: boolean;
+}
+
+/** The page's error for one an action or a read threw. */
+export function pageError(error: unknown): PageError {
+  return {
+    message:
+      error instanceof Error
+        ? error.message
+        : "Something went wrong. Please try again.",
+    read: error instanceof ReadFailed,
+  };
+}
+
+/**
+ * The error a successful read leaves: none in place of a failed read's, which
+ * it answers; any other until the next action.
+ */
+export const afterRead = (error: PageError | null) =>
+  error?.read ? null : error;
+
 /**
  * Reads the account after a mutation that succeeded: a failed read calls
  * `failed` and resolves `undefined`, never rejecting as if the mutation had
