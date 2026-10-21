@@ -1864,6 +1864,44 @@ describe('One-time connection', () => {
     expect(buttonLabelled('One-time connection')).toBeTruthy();
   });
 
+  it.each([
+    { retry: false, rejected: true },
+    { retry: true, rejected: true },
+    { retry: true, rejected: false },
+  ])('ignores an obsolete open completion after Cancel: %j', async ({ retry, rejected }) => {
+    let finishOld: () => void = () => {};
+    let failOld: () => void = () => {};
+    let finishFresh: (state: OneTimeState) => void = () => {};
+    let attempts = 0;
+    const link = makeLink(async (cmd) => {
+      if (cmd === 'oneTimeOpen') {
+        if (attempts++ === 0) return new Promise((resolve, reject) => {
+          finishOld = () => resolve({ status: 'ended', reason: 'user-ended' });
+          failOld = () => reject(new Error('obsolete open failed'));
+        });
+        return new Promise((resolve) => (finishFresh = resolve));
+      }
+      if (cmd === 'oneTimeStatus') return { status: 'idle' };
+      return NOT_ENROLLED;
+    });
+    platform = { burrow: link };
+    await render();
+    await act(async () => buttonLabelled('One-time connection')!.click());
+    await act(async () => buttonLabelled('Cancel')!.click());
+    if (retry) await act(async () => buttonLabelled('One-time connection')!.click());
+    await act(async () => rejected ? failOld() : finishOld());
+    expect(text()).not.toContain('obsolete open failed');
+    if (retry) {
+      expect(text()).toContain('Getting a link\u2026');
+      expect(buttonLabelled('Cancel')).toBeTruthy();
+      await act(async () => finishFresh(oneTimeWaiting()));
+      await settleQrChunk();
+      expect(oneTimeCode()).toBeTruthy();
+    } else {
+      expect(buttonLabelled('One-time connection')!.disabled).toBe(false);
+    }
+  });
+
   it('renders a refused open inline, under the button', async () => {
     const service = oneTimeService(
       { status: 'idle' },

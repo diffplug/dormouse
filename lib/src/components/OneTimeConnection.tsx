@@ -126,6 +126,7 @@ export function OneTimeConnection({ relayOrigin }: { relayOrigin: string }) {
   const anyNetwork = policy !== null && phoneOnAnyNetwork(policy);
   /** The action this panel has in flight: its answer, not an event, clears it. */
   const [pending, setPending] = useState<'open' | 'end' | null>(null);
+  const actionSequence = useRef(0);
   const [error, setError] = useState<string | null>(null);
 
   // The Baseboard keeps the store subscribed for the window's life, so this is
@@ -135,11 +136,14 @@ export function OneTimeConnection({ relayOrigin }: { relayOrigin: string }) {
   if (store.kind === 'unsupported') return null;
 
   const run = (kind: 'open' | 'end', action: () => Promise<void>) => {
+    const mine = ++actionSequence.current;
     setPending(kind);
     setError(null);
     void action()
-      .catch((caught: unknown) => setError(caught instanceof Error ? caught.message : String(caught)))
-      .finally(() => setPending(null));
+      .catch((caught: unknown) => {
+        if (mine === actionSequence.current) setError(caught instanceof Error ? caught.message : String(caught));
+      })
+      .finally(() => { if (mine === actionSequence.current) setPending(null); });
   };
   const open = () => run('open', openOneTime);
   const end = () => run('end', endOneTime);
