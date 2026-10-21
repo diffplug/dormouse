@@ -1,10 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
-import { getWorkspacesSnapshot, subscribeToWorkspaces } from "dormouse-lib/lib/workspace-store";
 import { listWallHandles } from "dormouse-lib/components/wall/wall-handles";
 import { cancelEditorClose, confirmToolEditorsClose } from "dormouse-lib/lib/tool-editor";
 import {
   beginQuitProgress,
   dismissQuitConfirm,
+  watchWorkspaceMembership,
   type QuitConfirmIntent,
 } from "./quit-confirm-store";
 
@@ -164,13 +164,7 @@ export function createTeardownFlow(options: {
       const dirty = listWallHandles().flatMap((wall) => wall.dirtyToolIds());
       if (dirty.length) {
         enter("confirming");
-        const ids = new Set(getWorkspacesSnapshot().workspaces.map(workspace => workspace.id));
-        const mine = { stopWatching: subscribeToWorkspaces(() => {
-          const current = getWorkspacesSnapshot().workspaces;
-          // The unsaved-file question precedes the running-work dialog, but
-          // its consent is already scoped to the Workspaces present now.
-          if (current.length !== ids.size || current.some(workspace => !ids.has(workspace.id))) cancel();
-        }) };
+        const mine = { stopWatching: watchWorkspaceMembership(cancel) };
         editorWait = mine;
         void confirmToolEditorsClose(dirty).then((accepted) => {
           if (editorWait !== mine) return;
