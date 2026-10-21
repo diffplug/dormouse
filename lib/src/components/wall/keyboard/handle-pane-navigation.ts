@@ -11,7 +11,7 @@ export function handlePaneNavigation(
   ctx: WallKeyboardCtx,
   navHistory: NavHistoryRef,
 ): boolean {
-  if (!isArrowKey(e.key) || e.metaKey || e.ctrlKey) {
+  if (!isArrowKey(e.key) || e.metaKey || e.ctrlKey || e.altKey) {
     return false;
   }
   e.preventDefault();

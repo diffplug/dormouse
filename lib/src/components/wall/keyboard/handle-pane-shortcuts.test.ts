@@ -71,6 +71,41 @@ function keydownMeta(key: string): KeyboardEvent {
 }
 
 describe('handlePaneShortcuts kill behavior', () => {
+
+  it.each(['metaKey', 'ctrlKey', 'altKey'] as const)('leaves %s chords out of bare pane actions', modifier => {
+    for (const key of ['x', 't', '-', 'Enter', ',']) {
+      const ctx = makeCtx();
+      const event = new KeyboardEvent('keydown', { key, [modifier]: true, cancelable: true });
+      expect(handlePaneShortcuts(event, ctx, { current: null }), key).toBe(false);
+      expect(event.defaultPrevented, key).toBe(false);
+      expect(ctx.requestKill).not.toHaveBeenCalled();
+      expect(ctx.enterTerminalMode).not.toHaveBeenCalled();
+      expect(ctx.setRenamingPaneId).not.toHaveBeenCalled();
+      expect(ctx.wallActionsRef.current.onSplitV).not.toHaveBeenCalled();
+    }
+  });
+
+  it.each([
+    ['|', { altKey: true }],
+    ['|', { ctrlKey: true, altKey: true }],
+    ['%', { altKey: true }],
+    ['"', { ctrlKey: true, altKey: true }],
+  ] as const)('accepts the printed split character %s through Option or AltGr', (key, modifiers) => {
+    const ctx = makeCtx();
+    const event = new KeyboardEvent('keydown', { key, ...modifiers, cancelable: true });
+    expect(handlePaneShortcuts(event, ctx, { current: null })).toBe(true);
+    expect(event.defaultPrevented).toBe(true);
+    expect(key === '"' ? ctx.wallActionsRef.current.onSplitV : ctx.wallActionsRef.current.onSplitH)
+      .toHaveBeenCalledWith('pane-a', 'keyboard');
+  });
+
+  it('does not turn a Command chord into a printed symbol binding', () => {
+    const ctx = makeCtx();
+    const event = new KeyboardEvent('keydown', { key: '|', metaKey: true, altKey: true, cancelable: true });
+    expect(handlePaneShortcuts(event, ctx, { current: null })).toBe(false);
+    expect(event.defaultPrevented).toBe(false);
+  });
+
   beforeEach(() => vi.clearAllMocks());
 
   it.each(['x', 'k'])('hands the %s gesture to the Wall kill request', (key) => {

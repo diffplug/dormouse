@@ -16,6 +16,8 @@ A focused cross-origin iframe surface swallows the gesture; the proxy shim detec
 
 ## Pane actions (command mode)
 
+Modifier handling: [layout.md](layout.md#keyboard-shortcuts-command-mode).
+
 | Key | Action | Description |
 |-----|--------|-------------|
 | `\|` or `%` | Split left/right | New pane to the right, selected, in passthrough. |
@@ -45,7 +47,7 @@ Standalone and the desktop playground — a bare Wall (VS Code) leaves these key
 
 | Key | Action | Description |
 |-----|--------|-------------|
-| `↑` / `↓` / `←` / `→` | Move selection | Navigate panes and doors; opposite directions backtrack between panes. Down with no pane below selects the first door; Up from a door selects the last pane. Up from a top-edge pane highlights the active Workspace tab. |
+| `↑` / `↓` / `←` / `→` (without Cmd/Ctrl/Alt) | Move selection | Navigate panes and doors; opposite directions backtrack between panes. Down with no pane below selects the first door; Up from a door selects the last pane. Up from a top-edge pane highlights the active Workspace tab. |
 | `←` / `→` (Workspace strip) | Highlight tab / `+` | Traverse in strip order (`docs/specs/layout.md` → Workspace tabs), without activation, stopping at either end. Down returns to the originating live pane, or the first if gone. |
 | `⌘`+arrows or `Ctrl`+arrows | Swap surfaces | Swap the two panes' Surfaces; the opposite chord swaps back exactly. Either modifier, every platform; consumed no-op on non-pane chrome. |
 
@@ -85,7 +87,7 @@ Every key not claimed above forwards to the embedded page while a screencast pan
 | `Shift+F10` / `ContextMenu` | Workspace alert settings | On a focused baseboard alarm button (`docs/specs/alert.md` → Settings dialog). |
 | `Shift+F10` / `ContextMenu` | Workspace tab menu | On a focused Workspace tab. |
 | `↑` / `↓`, `Home` / `End` | Move in a menu | Tab menu rows; `Enter` chooses. |
-| Prompted letter | Confirm kill | Type the letter shown to confirm; other keys reaching the prompt cancel (see layout's dispatch order). |
+| Prompted letter (unmodified, Shift optional) | Confirm kill | Type the letter shown; prompt routing: [layout.md](layout.md#kill-confirmation). |
 
 ## VS Code host
 
