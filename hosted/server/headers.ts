@@ -2,6 +2,7 @@ import type { Hono } from "hono";
 import {
   ONE_TIME_PAGE_PATH,
   ONE_TIME_WS_ROUTES,
+  isContentHashedName,
   pocketContentSecurityPolicy,
 } from "remote-lib-common";
 
@@ -48,14 +49,9 @@ export type RulesFor = (path: string, appOrigin: unknown) => PathRules;
 const under = (path: string, prefix: string) =>
   path === prefix || path.startsWith(`${prefix}/`);
 
-/**
- * Whether `path` is a file under `dir` whose name carries the content hash
- * Vite's default output names (`[name]-[hash].[ext]`) put there: 8 characters
- * of base64url before the extension. A file there without one may change
- * under the same name, so it is cached as its path otherwise is.
- */
+/** A content-hashed file directly under `dir`; any other is cached as its path otherwise is. */
 const contentHashed = (path: string, dir: string) =>
-  path.startsWith(dir) && /-[\w-]{8}\.[a-z0-9]+$/i.test(path.slice(dir.length));
+  path.startsWith(dir) && isContentHashedName(path.slice(dir.length));
 
 /** The account's: its policy everywhere, its Vite output under `/assets/` immutable. */
 export const accountRules: RulesFor = (path) => ({
