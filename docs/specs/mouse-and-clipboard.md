@@ -223,7 +223,7 @@ A token is whitespace-delimited and **runs on across soft wraps**. Trailing char
 
 ### 6.1 State Matrix
 
-**Mouse reporting** is any mouse-tracking mode the inside program sets (DECSET `?9`, `?1000`, `?1002`, `?1003`), read from xterm without consuming the sequence (`lib/src/lib/mouse-mode-observer.ts`). Where a drag goes; **Terminal** means the terminal's own selection.
+**Mouse reporting** is any mouse-tracking mode the inside program sets (DECSET `?9`, `?1000`, `?1002`, `?1003`), read from xterm without consuming the sequence (`lib/src/lib/mouse-mode-observer.ts`). **Must keep mouse reporting and bracketed-paste state synchronized with xterm after parsed output, including hard and soft resets.** Where a drag goes; **Terminal** means the terminal's own selection.
 
 | Program requests mouse | Override | Live-region drag | Scrollback drag |
 |---|---|---|---|
