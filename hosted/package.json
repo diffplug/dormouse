@@ -45,7 +45,7 @@
     "miniflare": "5.20260908.0-alpha",
     "node-pg-migrate": "^9.0.0",
     "testcontainers": "^12.2.1",
-    "jsdom": "^29.1.1",
+    "jsdom": "^30.0.0",
     "@storybook/react": "11.0.0-alpha.6",
     "storybook": "11.0.0-alpha.6"
   }
