@@ -103,29 +103,37 @@ flowchart TD
 
 A `completion` passed the gates above. A ring shows as soon as it opens, whatever the output (rationale). Confirmed work is `BUSY` or `MIGHT_NEED_ATTENTION`; a reset is a command boundary or an answered `watching` source (WATCHING Track). The ring, hold, and TODO are separate latches: a pane can ring while a newer completion is held.
 
+Each Session runs all of these at once:
+
 ```mermaid
 stateDiagram-v2
-  state "One Session: every region runs at once" as Session {
-    state "Output detector" as Detector {
-      [*] --> NOTHING_TO_SHOW
-      NOTHING_TO_SHOW --> MIGHT_BE_BUSY: output across the candidate gap, begun within the work-start window
-      MIGHT_BE_BUSY --> NOTHING_TO_SHOW: unconfirmed, or reset
-      MIGHT_BE_BUSY --> BUSY: more output
-      BUSY --> MIGHT_NEED_ATTENTION: silence
-      MIGHT_NEED_ATTENTION --> BUSY: output
-      MIGHT_NEED_ATTENTION --> NOTHING_TO_SHOW: more silence emits settle, or reset
-      BUSY --> NOTHING_TO_SHOW: reset
-    }
-    --
-    state "Foreground command" as Command {
-      [*] --> NoCommand
-      NoCommand --> Unseen: start, not engaged
-      NoCommand --> Seen: start, engaged
-      Unseen --> Seen: engaged or acknowledged
-      Unseen --> NoCommand: finish, never rings
-      Seen --> NoCommand: finish, emits exit
-    }
-    --
+  state "Output detector" as Detector {
+    [*] --> NOTHING_TO_SHOW
+    NOTHING_TO_SHOW --> MIGHT_BE_BUSY: output across the candidate gap, begun within the work-start window
+    MIGHT_BE_BUSY --> NOTHING_TO_SHOW: unconfirmed, or reset
+    MIGHT_BE_BUSY --> BUSY: more output
+    BUSY --> MIGHT_NEED_ATTENTION: silence
+    MIGHT_NEED_ATTENTION --> BUSY: output
+    MIGHT_NEED_ATTENTION --> NOTHING_TO_SHOW: more silence emits settle, or reset
+    BUSY --> NOTHING_TO_SHOW: reset
+  }
+```
+
+```mermaid
+stateDiagram-v2
+  state "Foreground command" as Command {
+    [*] --> NoCommand
+    NoCommand --> Unseen: start, not engaged
+    NoCommand --> Seen: start, engaged
+    Unseen --> Seen: engaged or acknowledged
+    Unseen --> NoCommand: finish, never rings
+    Seen --> NoCommand: finish, emits exit
+  }
+```
+
+```mermaid
+stateDiagram-v2
+  state "Latches" as Latches {
     state "Ring" as Ring {
       [*] --> NoRing
       NoRing --> Ringing: completion, not engaged
