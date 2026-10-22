@@ -20,8 +20,8 @@ const {
   parseLsofListening,
   parseNetTcpConnections,
   parseNetstatListening,
-  getDescendantPids,
   getListeningPortsForPids,
+  shellHasWork,
   getOpenPortsForPids,
   openPortScanTimeoutMs,
   OPEN_PORT_TIMEOUT_MS,
@@ -1752,7 +1752,7 @@ test('parseNetstatListening parses LISTENING TCP rows for tracked pids', () => {
   ]);
 });
 
-test('getDescendantPids (linux) reads ppid from /proc/<pid>/stat', async () => {
+test('the linux process table reads ppid from /proc/<pid>/stat', async () => {
   const procStat = {
     '100': '100 (zsh) S 1 100 100 0',
     '200': '200 (node) S 100 200 200 0',
@@ -1770,8 +1770,10 @@ test('getDescendantPids (linux) reads ppid from /proc/<pid>/stat', async () => {
       throw new Error('ENOENT');
     },
   };
-  const pids = await getDescendantPids(100, { platform: 'linux', fsModule });
-  assert.deepEqual(pids.sort((a, b) => a - b), [100, 200, 400]);
+  const runtime = { platform: 'linux', fsModule };
+  assert.equal(await shellHasWork(200, '/bin/zsh', runtime), true);
+  assert.equal(await shellHasWork(400, '/bin/zsh', runtime), false);
+  assert.equal(await shellHasWork(999, '/bin/zsh', runtime), false);
 });
 
 test('getListeningPortsForPids (linux) maps fd inodes to /proc/net/tcp ports', async () => {
@@ -1893,7 +1895,7 @@ test('Windows port subprocesses share the socket budget, including netstat fallb
     now += 500;
     return '  TCP    0.0.0.0:3000   0.0.0.0:0   LISTENING   4242\n';
   };
-  const result = await getOpenPortsForPids([4242], { platform: 'win32', env: WINDOWS_ENV, execFile, now: () => now });
+  const result = await getOpenPortsForPids([{ pid: 4242 }], { platform: 'win32', env: WINDOWS_ENV, execFile, now: () => now });
   const budget = openPortScanTimeoutMs(1);
   assert.deepEqual(timeouts, [OPEN_PORT_TIMEOUT_MS, budget, budget - 1000]);
   assert.equal(now, OPEN_PORT_TIMEOUT_MS + 1500);
@@ -1929,12 +1931,12 @@ test('getOpenPortsForPids de-duplicates and sorts by port', async () => {
     }
     throw new Error('unexpected');
   };
-  const ports = (await getOpenPortsForPids([100], { platform: 'darwin', execFile })).get(100);
+  const ports = (await getOpenPortsForPids([{ pid: 100 }], { platform: 'darwin', execFile })).get(100);
   assert.deepEqual(ports.map((p) => p.port), [3000, 8080]);
 });
 
 test('getOpenPortsForPids skips a non-integer pid', async () => {
-  assert.equal((await getOpenPortsForPids([undefined], { platform: 'linux' })).size, 0);
+  assert.equal((await getOpenPortsForPids([{ pid: undefined }], { platform: 'linux' })).size, 0);
 });
 
 test('getOpenPortsForPids answers per root pid from ONE process table and ONE socket scan', async () => {
@@ -1957,7 +1959,7 @@ test('getOpenPortsForPids answers per root pid from ONE process table and ONE so
     throw new Error(`unexpected spawn: ${cmd}`);
   };
 
-  const ports = await getOpenPortsForPids([100, 300], { platform: 'darwin', execFile });
+  const ports = await getOpenPortsForPids([{ pid: 100 }, { pid: 300 }], { platform: 'darwin', execFile });
 
   assert.deepEqual(spawns, ['ps', 'lsof']);
   // Each root owns only what its own descendants opened.
@@ -1968,8 +1970,10 @@ test('getOpenPortsForPids answers per root pid from ONE process table and ONE so
 test('getOpenPortsForPids (win32) follows Git Bash across MSYS execs and finds WSL listeners in the distro', async () => {
   const WSL = 'D:\\Win\\System32\\wsl.exe';
   const MSYS_PS = 'C:\\Git\\usr\\bin\\ps.exe';
-  const shells = new Map([[100, 'C:\\Git\\bin\\bash.exe'], [500, 'D:\\Win\\System32\\WindowsPowerShell\\v1.0\\powershell.exe']]);
-  const surfaces = new Map([[100, 'surface:gb'], [500, 'surface:wsl']]);
+  const roots = [
+    { pid: 100, shell: 'C:\\Git\\bin\\bash.exe', surfaceId: 'surface:gb' },
+    { pid: 500, shell: 'D:\\Win\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', surfaceId: 'surface:wsl' },
+  ];
   const scripts = [];
   const execFile = (cmd, args) => {
     const script = args[args.length - 1];
@@ -2013,10 +2017,7 @@ test('getOpenPortsForPids (win32) follows Git Bash across MSYS execs and finds W
   };
   const fsModule = { statSync: (file) => { if (file === MSYS_PS) return { isFile: () => true }; throw new Error('ENOENT'); } };
 
-  const ports = await getOpenPortsForPids([100, 500], {
-    platform: 'win32', env: WINDOWS_ENV, execFile, fsModule,
-    shellOf: (pid) => shells.get(pid), surfaceOf: (pid) => surfaces.get(pid),
-  });
+  const ports = await getOpenPortsForPids(roots, { platform: 'win32', env: WINDOWS_ENV, execFile, fsModule });
 
   assert.deepEqual(ports.get(100), [{ protocol: 'tcp', family: 'IPv6', address: '::', port: 3000, pid: 302, processName: 'node.exe' }]);
   assert.deepEqual(ports.get(500), [{ protocol: 'tcp', family: 'IPv4', address: '127.0.0.1', port: 8080, pid: 2609, processName: 'python3' }]);
@@ -2034,9 +2035,8 @@ test('getOpenPortsForPids (win32) runs neither extra read for a shell that needs
     if (script.includes('Get-NetTCPConnection')) return '[]';
     throw new Error(`unexpected spawn: ${cmd}`);
   };
-  await getOpenPortsForPids([100], {
+  await getOpenPortsForPids([{ pid: 100, shell: 'D:\\Win\\System32\\cmd.exe', surfaceId: 'surface:1' }], {
     platform: 'win32', env: WINDOWS_ENV, execFile,
-    shellOf: () => 'D:\\Win\\System32\\cmd.exe', surfaceOf: () => 'surface:1',
   });
   assert.deepEqual(spawns, [POWERSHELL, POWERSHELL]);
 });

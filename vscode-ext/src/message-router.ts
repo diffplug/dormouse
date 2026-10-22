@@ -83,7 +83,7 @@ configurePeerLink({
   invalidateDirectory: notifyDirectoryChanged,
   streamPty: processedPtyStreams.streamPty,
   writePty: writeClientInput,
-  resizePty: resizeForClient,
+  resizePty: ptyManager.resize,
   // Peer PTYs use generated provider-local route handles. Keep those handles
   // outside this window's real PTY namespace so local ids always fall through
   // to the manager that owns them.
@@ -108,7 +108,7 @@ configureBurrow({
   broadcastToWebviews,
   streamPty: processedPtyStreams.streamPty,
   writePty: writeClientInput,
-  resizePty: resizeForClient,
+  resizePty: ptyManager.resize,
 });
 
 /**
@@ -118,10 +118,6 @@ configureBurrow({
 function writeClientInput(ptyId: string, data: string): void {
   alertedPtys.writeClientInput(ptyId, data);
   for (const listener of clientInputListeners) listener(ptyId);
-}
-
-function resizeForClient(ptyId: string, cols: number, rows: number, repaint?: boolean): void {
-  alertedPtys.resize(ptyId, cols, rows, repaint);
 }
 
 /**
@@ -206,7 +202,7 @@ export function reportWindowPresence(state: vscode.WindowState): void {
   const active = (state as { active?: unknown }).active === true;
   alertManager.setViewer(WINDOW_VIEWER, { present: state.focused && active, focusId: null });
 }
-/** Every PTY write and resize, as the alerts must see it. */
+/** Every PTY write, as the alerts must see it. */
 const alertedPtys = alertedPty(alertManager, ptyManager);
 /**
  * This window's parse sites: one per PTY generation, created at spawn and fed
@@ -604,7 +600,7 @@ export function attachRouter(
         alertedPtys.write(msg.id, msg.data, { paced: msg.paced, userInput: msg.userInput === true });
         break;
       case 'pty:resize':
-        alertedPtys.resize(msg.id, msg.cols, msg.rows);
+        ptyManager.resize(msg.id, msg.cols, msg.rows);
         break;
       case 'pty:kill':
         release(msg.id);

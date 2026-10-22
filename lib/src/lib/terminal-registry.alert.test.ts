@@ -65,7 +65,6 @@ interface MockTerminalInstance {
   writes: string[];
   addons: Array<{ constructor: { name: string }; options?: Record<string, unknown> }>;
   emitInput(data: string): void;
-  emitResize(cols: number, rows: number): void;
 }
 
 class MockElement {
@@ -190,7 +189,8 @@ function clearWatchedCommands(): void {
 }
 
 // Timing helpers based on cfg.alert values:
-// busyCandidateGap=1500, busyConfirmGap=500, mightNeedAttention=2000, needsAttentionConfirm=3000
+// busyCandidateGap=1500, busyConfirmGap=500, mightNeedAttention=2000, needsAttentionConfirm=3000,
+// workStartWindow=5000. `emitOutput` writes through the PTY's echo, so it is input as well.
 
 function driveToBusy(id: string): void {
   emitOutput(id, 'prompt> ');
@@ -592,6 +592,8 @@ describe('terminal-registry alert behavior', () => {
     );
     enableAlert(id);
     engageSession(id);
+    // The keystroke that started it; the scenario already owns the output.
+    fakePlatform.writePty(id, '\r');
 
     advance(1_800);
     expect(getActivity(id)).toMatchObject({ status: 'BUSY' });
@@ -823,19 +825,57 @@ describe('terminal-registry alert behavior', () => {
     });
   });
 
-  it('Story 12: resize noise never creates a false alert', () => {
+  it('Story 12: a repaint long after the last input never creates a false alert', () => {
     const id = 'story-12';
-    const entry = createSession(id);
+    createSession(id);
     enableAlert(id);
+    advance(cfg.alert.workStartWindow + 1);
 
-    entry.terminal.emitResize(120, 40);
-    emitOutput(id, 'redraw noise');
+    // sendOutput, not emitOutput: a repaint on resize or focus is output nobody typed.
+    fakePlatform.sendOutput(id, 'redraw');
+    advance(1_600);
+    fakePlatform.sendOutput(id, 'redraw');
+    fakePlatform.sendOutput(id, 'redraw');
     advance(12_000);
 
     expect(getActivity(id)).toMatchObject({
       status: 'NOTHING_TO_SHOW',
       todo: false,
     });
+  });
+
+  it('Story 12b: scrolling a program never makes its repaint a busy run', () => {
+    const id = 'story-12b';
+    const entry = createSession(id);
+    enableAlert(id);
+    advance(cfg.alert.workStartWindow + 1);
+
+    // Each wheel tick is input, and the program repaints the scrolled view.
+    for (let tick = 0; tick < 30; tick++) {
+      entry.terminal.emitInput('\x1b[<65;10;20M');
+      fakePlatform.sendOutput(id, 'scrolled view');
+      advance(100);
+    }
+    advance(12_000);
+
+    expect(getActivity(id)).toMatchObject({ status: 'NOTHING_TO_SHOW', todo: false });
+  });
+
+  it('Story 12c: a repaint trailing a scroll never creates a false alert', () => {
+    const id = 'story-12c';
+    const entry = createSession(id);
+    enableAlert(id);
+    advance(cfg.alert.workStartWindow + 1);
+
+    entry.terminal.emitInput('\x1b[<65;10;20M');
+    advance(1_500);
+    for (let paint = 0; paint < 20; paint++) {
+      fakePlatform.sendOutput(id, 'scrolled view');
+      advance(100);
+    }
+    advance(12_000);
+
+    expect(getActivity(id)).toMatchObject({ status: 'NOTHING_TO_SHOW', todo: false });
   });
 
   it('Story 13: multiple sessions ring independently', () => {
@@ -908,6 +948,10 @@ describe('terminal-registry alert behavior', () => {
     ['arrow key', '\x1b[A'],
     ['SS3 key', '\x1bOA'],
     ['mouse report with a real key', '\x1b[<35;10;20Mx'],
+    ['SGR wheel report', '\x1b[<64;10;20M'],
+    ['SGR Ctrl+wheel report', '\x1b[<81;10;20M'],
+    ['urxvt wheel report', '\x1b[96;10;20M'],
+    ['X10 wheel report', '\x1b[M`!!'],
   ])('counts a %s as a keystroke and forwards it unchanged', (_name, input) => {
     const id = 'encoded-input-acknowledges';
     const entry = createSession(id);
@@ -933,7 +977,6 @@ describe('terminal-registry alert behavior', () => {
     ['focus report', '\x1b[I'],
     ['combined replies', '\x1bP1$r0m\x1b\\\x1b[?1;2c'],
     ['SGR hover report', '\x1b[<35;10;20M'],
-    ['SGR wheel report', '\x1b[<64;10;20M'],
     ['SGR release report', '\x1b[<0;10;20m'],
     ['urxvt mouse report', '\x1b[64;10;20M'],
     ['X10 mouse report', '\x1b[M@!!'],
@@ -1247,23 +1290,6 @@ describe('terminal-registry alert behavior', () => {
 
     expect(getActivity(id)).toMatchObject({
       status: 'ALERT_RINGING',
-      todo: false,
-    });
-  });
-
-  it('ignores prompt redraw output immediately after a resize', () => {
-    const id = 'resize-debounce';
-    const session = createSession(id);
-    enableAlert(id);
-    engageSession(id);
-
-    session.terminal.emitResize(120, 30);
-    emitOutput(id, 'prompt redraw');
-    advance(1_600);
-    emitOutput(id, 'working...');
-
-    expect(getActivity(id)).toMatchObject({
-      status: 'NOTHING_TO_SHOW',
       todo: false,
     });
   });

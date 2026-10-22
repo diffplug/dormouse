@@ -53,7 +53,7 @@ const under = (path: string, prefix: string) =>
 const contentHashed = (path: string, dir: string) =>
   path.startsWith(dir) && isContentHashedName(path.slice(dir.length));
 
-/** The account's: its policy everywhere, its Vite output under `/assets/` immutable. */
+/** The account's: its policy everywhere, its content-hashed Vite output under `/assets/` immutable. */
 export const accountRules: RulesFor = (path) => ({
   policy: ACCOUNT_POLICY,
   permissions: NO_DEVICES_PERMISSIONS,

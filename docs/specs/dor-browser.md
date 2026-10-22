@@ -78,6 +78,8 @@ Source of truth: `lib/src/components/wall/use-dev-server-ports.ts`, `servesLoopb
 
 **Must start a new automated target's controller before any Pane exists**; the split appears, and takes focus, once the host confirms startup, never waiting for page load (rationale). A failure reports in context without changing layout or focus. **Must cancel a pending placement when its context closes or is replaced, its source disappears or minimizes, or its Workspace deactivates or closes**, closing a browser that arrives after cancellation or cannot be placed. Context dismisses after a successful placement or reuse, leaving focus on the browser (rationale).
 
+**Must hand the browser, as does a Tool's Break, a Windows cwd**: WSL's `/mnt/c/x` is `C:\x`, else `\\wsl.localhost\<distro>\...`; Git Bash's `/c/x` is `C:\x` (`hostDirectory`).
+
 Source of truth: `openContextPort` in `lib/src/components/Wall.tsx`; `prepareForPlacement` in `lib/src/components/wall/agent-browser-surface-controller.ts`; `listenerUrlsByPort` in `lib/src/components/wall/port-url.ts`.
 
 ## Display Modal And Render Swaps

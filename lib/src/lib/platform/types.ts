@@ -424,7 +424,8 @@ export interface PlatformAdapter {
   notifySessionFlushComplete(requestId: string): void;
 
   // Alert management: a Session's alert state follows its PTY — `writePty`'s
-  // `userInput` acknowledges, a resize opens its grace window, a kill removes it.
+  // `userInput` acknowledges, any write but a terminal reply lets output start
+  // work, a kill removes it.
   /** Offer persisted WATCHING rules as the host's startup seed. */
   alertSetWatchedCommands(names: string[]): void;
   /** Mutate one bare-command WATCHING rule without replacing unrelated rules. */

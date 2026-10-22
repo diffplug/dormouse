@@ -145,8 +145,9 @@ interface BrowserProviderSpec {
   /** The provider's name in user-facing text. */
   label: string;
   modes: Readonly<Record<BrowserPresentation, string>>;
-  /** The CLI's session flag, as argv. */
-  sessionArgs(session: string): string[];
+  /** The CLI's session flag, as argv, with the browser's mode when the
+   *  CLI restates it on every command (`headed`, when known). */
+  sessionArgs(session: string, headed?: boolean): string[];
   /** A session name the CLI reads as neither an option nor a path. */
   isSessionName(value: unknown): value is string;
   binEnv: string;
@@ -159,7 +160,10 @@ export const BROWSER_PROVIDERS = {
   'agent-browser': {
     label: 'agent-browser',
     modes: { screencast: 'agent-browser-screencast', popout: 'agent-browser-popout' },
-    sessionArgs: (session: string) => ['--session', session],
+    // It restates its launch options, a config's `headed` included, on every
+    // command and relaunches a browser they no longer match.
+    sessionArgs: (session: string, headed?: boolean) =>
+      ['--session', session, ...(headed === undefined ? [] : ['--headed', String(headed)])],
     isSessionName: isAgentBrowserSession,
     binEnv: AGENT_BROWSER_BIN_ENV,
     defaultBin: DEFAULT_AGENT_BROWSER_BIN,
@@ -223,8 +227,8 @@ export const AGENT_BROWSER_SOCKET_DIR_ENV = 'AGENT_BROWSER_SOCKET_DIR';
 
 /** agent-browser's argv for `stream status --json`, whose output
  * {@link parseStreamPort} reads. */
-export function streamStatusArgs(session: string): string[] {
-  return [...BROWSER_PROVIDERS['agent-browser'].sessionArgs(session), 'stream', 'status', '--json'];
+export function streamStatusArgs(session: string, headed?: boolean): string[] {
+  return [...BROWSER_PROVIDERS['agent-browser'].sessionArgs(session, headed), 'stream', 'status', '--json'];
 }
 
 /**

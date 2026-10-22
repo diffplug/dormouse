@@ -32,13 +32,14 @@ test('only a Windows dor with a plain distro name has a WSL caller', () => {
 
 function wslCall(stdout = '') {
   const argsSeen = [];
+  const exec = async (_binary, args) => { if (!args.includes('stream')) argsSeen.push(args); return { exitCode: 0, stdout, stderr: '' }; };
   return {
     argsSeen,
     options: {
       env: { PWD: process.cwd(), WSL_DISTRO_NAME: 'Ubuntu' },
       client: { resolveBrowser: async () => ({ binding: { session: 'dormouse.1.default' } }), browserSurface: async () => ({}) },
-      execAgentBrowser: async (_binary, args) => { if (!args.includes('stream')) argsSeen.push(args); return { exitCode: 0, stdout, stderr: '' }; },
-      execPlaywright: async (_binary, args) => { if (!args.includes('stream')) argsSeen.push(args); return { exitCode: 0, stdout, stderr: '' }; },
+      execAgentBrowser: exec,
+      execPlaywright: exec,
     },
   };
 }

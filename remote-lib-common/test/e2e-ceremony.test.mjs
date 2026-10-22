@@ -1,7 +1,7 @@
 /**
  * The control messages both end-to-end ceremonies exchange, and the one
  * presence verifier they share (docs/specs/remote-security-model.md ->
- * `## Future` -> Presence proofs, Pairing, Connection).
+ * Presence proofs, Pairing, Connection).
  *
  * The verifier is the whole of "the Burrow checks freshness itself", so every
  * failure reason gets its own case; the fixed-size control padding is the whole
@@ -327,8 +327,8 @@ test('isPresenceProofV1 bounds every field rather than merely typing it', async 
 // --- The two-digit confirmation code --------------------------------------
 
 test('every sampled pairing code is two digits, and the space is covered', async () => {
-  // Rejection sampling rather than `% 100`: a modulo would make a fifth of the
-  // code space over twice as likely as the rest, and 100 is small enough that
+  // Rejection sampling rather than `% 100`: a modulo of one byte would make
+  // codes 00-55 half again as likely as the rest, and 100 is small enough that
   // the bias is worth removing.
   const seen = new Set();
   for (let i = 0; i < 4000; i++) {

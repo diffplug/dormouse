@@ -10,6 +10,18 @@ export interface BinaryEnv {
   readonly [key: string]: string | undefined;
 }
 
+/**
+ * `env[name]` for an upper-case `name`, matched case-insensitively on Windows.
+ * There `process.env` stores `PATH` as `Path` and ignores case, but a copy such
+ * as `{ ...process.env, X }` keeps the stored spelling, so `copy.PATH` is
+ * undefined.
+ */
+export function envValue(env: BinaryEnv, name: string, isWindows: boolean): string | undefined {
+  if (!isWindows || env[name] !== undefined) return env[name];
+  const key = Object.keys(env).find((candidate) => candidate.toUpperCase() === name);
+  return key === undefined ? undefined : env[key];
+}
+
 // Extensions a bare command name can carry on Windows, and the order to try
 // them in. This is `which@2`'s own hardcoded fallback — npm's list, deliberately
 // NOT cmd.exe's `.COM;.EXE;.BAT;.CMD` — because `resolveBinaryPath` now picks
@@ -67,7 +79,7 @@ export function binaryCandidateNames(binary: string, env: BinaryEnv, isWindows: 
   // separator — ordinary on Windows — leaves a final empty extension that tries
   // the name unsuffixed. Nothing runnable lives there, but dropping it would make
   // the walk report missing where `which` returned a path.
-  const exts = (env.PATHEXT || WINDOWS_BIN_EXTS.join(';')).split(';');
+  const exts = (envValue(env, 'PATHEXT', true) || WINDOWS_BIN_EXTS.join(';')).split(';');
   if (binary.includes('.')) exts.unshift('');
   return exts.map((ext) => `${binary}${ext}`);
 }
@@ -78,9 +90,9 @@ export function binaryCandidateNames(binary: string, env: BinaryEnv, isWindows: 
  */
 export function resolveBinaryPath(binary: string, env: BinaryEnv): string | undefined {
   if (binary.includes('/') || binary.includes('\\')) return binary;
-  const pathVar = env.PATH;
-  if (!pathVar) return undefined;
   const isWindows = process.platform === 'win32';
+  const pathVar = envValue(env, 'PATH', isWindows);
+  if (!pathVar) return undefined;
   const names = binaryCandidateNames(binary, env, isWindows);
   for (const dir of pathVar.split(isWindows ? ';' : ':')) {
     if (!dir) continue;
@@ -110,7 +122,7 @@ export function browserBinaryIsMissing(binary: string, env: BinaryEnv, resolvedP
   // the spawn would hand cross-spawn a bare name — whose `which` searches the
   // cwd first on Windows, the one thing spawning the resolved path exists to
   // prevent. So an absent PATH is "missing", not "ambiguous".
-  if (!env.PATH) return true;
+  if (!envValue(env, 'PATH', process.platform === 'win32')) return true;
   return resolvedPath === undefined;
 }
 

@@ -45,6 +45,7 @@ import {
   inputIsSyntheticTerminalReport,
   REPLAY_MODE_RESET,
   stripMouseReportsFromInput,
+  stripPassiveMouseReportsFromInput,
   writeReplay,
 } from './terminal-report-filter';
 import { getTerminalTheme, paintTerminalHost, startThemeObserver } from './terminal-theme';
@@ -236,14 +237,12 @@ function wireXtermHandlers(
   selection: SelectionWatch,
 ): () => void {
   const inputDisposable = terminal.onData((data) => {
-    // One strip, two readers. While an override is active the reports must not
-    // reach the PTY at all (belt and braces behind DOM interception), so the
-    // stripped chunk *is* the input; with no override the inside program that
-    // asked for them still gets them, but they are never keystrokes either way.
-    const withoutMouseReports = stripMouseReportsFromInput(data);
+    // While an override is active the reports must not reach the PTY at all
+    // (belt and braces behind DOM interception), so the stripped chunk *is* the
+    // input; with no override the inside program that asked for them gets them.
     let input = data;
     if (getMouseSelectionState(id).override !== 'off') {
-      input = withoutMouseReports;
+      input = stripMouseReportsFromInput(data);
       if (input.length === 0) return;
     }
 
@@ -251,10 +250,10 @@ function wireXtermHandlers(
 
     if (isReplayTerminalReport && registry.get(id)?.isReplaying) return;
 
-    // Inside programs can request hover and wheel reports. Mouse-only chunks
-    // are not keystrokes; actual clicks acknowledge through the Pane's DOM
-    // handler. Terminal replies are never keystrokes either.
-    if (isReplayTerminalReport || withoutMouseReports.length === 0) {
+    // Inside programs can request hover and wheel reports. A wheel tick is the
+    // user's input; hover and button reports are not — actual clicks acknowledge
+    // through the Pane's DOM handler. Terminal replies are never input either.
+    if (isReplayTerminalReport || stripPassiveMouseReportsFromInput(input).length === 0) {
       // Forwarded mouse interaction still counts as touched for kill confirmation.
       if (!isReplayTerminalReport) markSessionTouched(id);
       getPlatform().writePty(id, input);
@@ -797,8 +796,11 @@ export function getSessionInputVersion(id: string): number {
 export function writeUserInput(id: string, data: string): void {
   // Typing, a paste, or Pocket's input bar ends a finalized selection — the
   // copy editor over it, or a shadowed drag — on every path alike
-  // (docs/specs/mouse-and-clipboard.md §4.3, §3.8).
-  if (getMouseSelectionState(id).selection?.dragging === false) setMouseSelection(id, null);
+  // (docs/specs/mouse-and-clipboard.md §4.3, §3.8). A wheel tick scrolls the
+  // program and leaves it be.
+  if (getMouseSelectionState(id).selection?.dragging === false && stripMouseReportsFromInput(data).length > 0) {
+    setMouseSelection(id, null);
+  }
   markSessionTouched(id);
   getPlatform().writePty(id, data, { userInput: true });
 }

@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const fs = require('node:fs');
-const { create, getDescendantPids, openNativeDirectory, shellHasWork } = require('./pty-core');
+const { create, getOpenPortsForPids, openNativeDirectory, shellHasWork } = require('./pty-core');
 
 test('Windows folder opening completes on launch and still reports spawn errors', () => {
   const child = new EventEmitter();
@@ -71,14 +71,13 @@ test('Windows refuses a folder whose path Explorer would split at a comma', () =
 
 test('process inspection fails closed while ordinary port discovery remains fail-soft', async () => {
   const runtime = { platform: 'darwin', execFile() { throw new Error('ps failed'); } };
-  assert.deepEqual(await getDescendantPids(42, runtime), [42]);
+  assert.deepEqual(await getOpenPortsForPids([{ pid: 42 }], runtime), new Map([[42, []]]));
   await assert.rejects(shellHasWork(42, '/bin/zsh', runtime), /inspect/);
 });
 
 test('work inspection requires the terminal process to appear in the process table', async () => {
   for (const output of ['', 'invalid response', '1 0\n123 1']) {
     const runtime = { platform: 'darwin', execFile() { return output; } };
-    assert.deepEqual(await getDescendantPids(42, runtime), [42]);
     await assert.rejects(shellHasWork(42, '/bin/zsh', runtime), /inspect/);
   }
   assert.equal(await shellHasWork(42, '/bin/zsh', { platform: 'darwin', execFile() { return '42 1'; } }), false);
@@ -194,4 +193,31 @@ test('directory opening touches the path only through the host resolver', async 
   assert.deepEqual(asked, paths);
   assert.equal(stat.mock.callCount(), 0);
   assert.equal(realpath.mock.callCount(), 0);
+});
+
+// A WSL pane reports Linux directories and Git Bash MSYS ones; the Windows
+// host's browsers and Explorer need the Windows path to the same directory.
+test('a Windows pane\'s reported directory reaches the host as a Windows path', async () => {
+  const asked = [];
+  const events = [];
+  const manager = create((event, data) => events.push({ event, data }), {
+    spawn: () => ({ pid: 42, write() {}, resize() {}, kill() {}, onData() {}, onExit() {} }),
+  }, { platform: 'win32', canonicalDirectory: async (path) => { asked.push(path); return null; } });
+  manager.spawn('wsl', { shell: 'C:\\Windows\\System32\\wsl.exe', args: ['-d', 'Ubuntu'] });
+  manager.spawn('gitbash', { shell: 'C:\\Program Files\\Git\\bin\\bash.exe', args: [] });
+  manager.spawn('pwsh', { shell: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe', args: [] });
+  const hostDirectory = async (id, path) => {
+    await manager.context({ op: 'hostDirectory', id, path }, 'host');
+    return events.at(-1).data.path;
+  };
+  assert.equal(await hostDirectory('wsl', '/home/me/app'), '\\\\wsl.localhost\\Ubuntu\\home\\me\\app');
+  assert.equal(await hostDirectory('wsl', '/mnt/c/Users/me'), 'C:\\Users\\me');
+  assert.equal(await hostDirectory('wsl', '/mnt/d'), 'D:\\');
+  assert.equal(await hostDirectory('gitbash', '/c/Users/me'), 'C:\\Users\\me');
+  assert.equal(await hostDirectory('gitbash', 'C:\\Users\\me'), 'C:\\Users\\me');
+  assert.equal(await hostDirectory('pwsh', '/home/me'), '/home/me');
+  assert.equal(await hostDirectory('missing', '/home/me'), '/home/me');
+  await manager.context({ op: 'openDirectory', id: 'wsl', path: '/mnt/c/Users/me' }, 'directory');
+  assert.deepEqual(asked, ['C:\\Users\\me']);
+  manager.killAll();
 });

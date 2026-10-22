@@ -576,8 +576,8 @@ describe('engagement viewers', () => {
     ptys.callbacks!.onData('pty-remote', REPORT);
     const atWrite: Array<string | undefined> = [];
     ptys.onWrite = (id) => void atWrite.push(status(id));
-    // A phone's scroll in tmux reaches the PTY, acknowledging nothing, as the desktop's does.
-    deps.writePty('pty-remote', '\x1b[<64;10;5M');
+    // A phone's tap in tmux reaches the PTY, acknowledging nothing, as the desktop's does.
+    deps.writePty('pty-remote', '\x1b[<0;10;5M');
     deps.writePty('pty-remote', 'y');
     expect(atWrite).toEqual(['ALERT_RINGING', 'WATCHING_DISABLED']);
     expect(router.getAlertStates().get('pty-remote')?.todo).toBe(false);
@@ -708,6 +708,7 @@ describe('alarm delivery', () => {
 
       // Focus alone is not presence: an older VS Code reports no `active`.
       alert(webview, { op: 'dismiss', id: 'pty-1' });
+      webview.send({ type: 'pty:input', id: 'pty-1', data: 'y\r' });
       ptys.callbacks!.onData('pty-1', 'output');
       moveWindow({ focused: true });
       ptys.callbacks!.onData('pty-1', REPORT);
@@ -774,7 +775,7 @@ it('replays every listed PTY at a reconnect, an empty buffer included', () => {
 /**
  * A Session's alert state follows its PTY here, whoever asked
  * (docs/specs/alert.md): started over, and seeded, at the spawn; given the
- * resize grace at the resize; removed at the kill.
+ * work-start window at each input; removed at the kill.
  */
 describe('alert state follows the PTY', () => {
   it('spawns a cold-restored pane with its persisted TODO, and tells its webview', () => {
@@ -796,17 +797,22 @@ describe('alert state follows the PTY', () => {
     }
   });
 
-  it('opens the resize grace before the PTY resizes', async () => {
-    // The router's own instance: `resetModules` gave this test one registry.
-    const { AlertManager } = await import('../../lib/src/lib/alert-manager');
-    vi.spyOn(AlertManager.prototype, 'onResize').mockImplementation((id) => void ptys.order.push(`grace ${id}`));
+  it('lets a write start work: output after it defers a report', () => {
+    vi.useFakeTimers();
     const webview = fakeWebview();
     const disposable = router.attachRouter(webview.channel);
     try {
-      webview.send({ type: 'pty:resize', id: 'pty-sized', cols: 100, rows: 30 });
-      expect(ptys.order).toEqual(['grace pty-sized', 'resize pty-sized']);
+      webview.send({ type: 'pty:spawn', id: 'pty-sent', options: { cwd: '/repo' } });
+      webview.send({ type: 'pty:input', id: 'pty-sent', data: 'hi\r', paced: true });
+      for (let t = 0; t < 2_000; t += 100) {
+        vi.advanceTimersByTime(100);
+        ptys.callbacks!.onData('pty-sent', 'frame');
+      }
+      ptys.callbacks!.onData('pty-sent', REPORT);
+      expect(router.getAlertStates().get('pty-sent')?.status).not.toBe('ALERT_RINGING');
     } finally {
       disposable.dispose();
+      vi.useRealTimers();
     }
   });
 
