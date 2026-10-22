@@ -6,7 +6,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, realpath, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { cmdShimTarget, spawnAndCapture, treeKillCommand, SPAWN_TIMEOUT_CODE } from '../dist/index.js';
+import { cmdShimTarget, envValue, spawnAndCapture, treeKillCommand, SPAWN_TIMEOUT_CODE } from '../dist/index.js';
 
 const node = process.execPath;
 
@@ -158,10 +158,22 @@ test('reads the target of agent-browser, npm cmd-shim and pnpm shims', { skip: w
     await writeFile(path.join(dir, 'node.exe'), '');
     assert.deepEqual(cmdShimTarget(path.join(dir, 'playwright-cli.cmd'), env), { binary: path.join(dir, 'node.exe'), args: [script] });
 
+    // A copy of Windows' process.env keeps its stored `Path` spelling.
+    const playwright = path.join(dir, 'playwright-cli.cmd');
+    await rm(path.join(dir, 'node.exe'));
+    assert.deepEqual(cmdShimTarget(playwright, { Path: path.dirname(node), PATHEXT: '.exe' }), { binary: node, args: [script] });
+
     assert.equal(cmdShimTarget(await shim('two.cmd', '"%~dp0a.exe" %*\r\n"%~dp0b.exe" %*\r\n'), env), undefined);
     assert.equal(cmdShimTarget(await shim('missing.cmd', '"%~dp0nothing.exe" %*\r\n'), env), undefined);
     assert.equal(cmdShimTarget(await shim('npx.cmd', '"%NODE_EXE%" "%NPX_CLI_JS%" %*\r\n'), env), undefined);
   } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('reads PATH by any spelling on Windows, and only by its own elsewhere', () => {
+  assert.equal(envValue({ Path: 'C:\\bin' }, 'PATH', true), 'C:\\bin');
+  assert.equal(envValue({ PATH: 'upper', Path: 'stored' }, 'PATH', true), 'upper');
+  assert.equal(envValue({ PathExt: '.EXE' }, 'PATH', true), undefined);
+  assert.equal(envValue({ Path: '/bin' }, 'PATH', false), undefined);
 });
 
 test('a .cmd shim started in a UNC cwd runs its target there, not in %SystemRoot%', { skip: windowsOnly }, async () => {
