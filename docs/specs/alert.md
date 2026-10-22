@@ -84,7 +84,7 @@ Source of truth: `setViewer` / `acknowledge` in `lib/src/lib/alert-manager.ts`; 
 
 ```mermaid
 flowchart TD
-  C["completion"] --> H{"helper?"}
+  C["completion: a settle, a command finish, a report, or a cycle's end"] --> H{"helper?"}
   H -- yes --> X["nothing"]
   H -- no --> A{"a claimant takes it?"}
   A -- yes --> W["the await resolves"]
@@ -101,21 +101,86 @@ flowchart TD
 
 **A claimed event must never ring, set TODO, or store an `ActivityNotification`.**
 
-A `completion` passed the gates above. A ring shows as soon as it opens, whatever the output (rationale). Confirmed work is `BUSY` or `MIGHT_NEED_ATTENTION`; a reset is a command boundary or an answered `watching` source (WATCHING Track). The ring, hold, and TODO are separate latches: a pane can ring while a newer completion is held.
+A `completion` passed the gates above. A ring shows as soon as it opens, whatever the output (rationale). The ring, hold, and TODO are separate latches: a pane can ring while a newer completion is held.
 
-Each Session runs all of these at once:
+### State machines
+
+**Must keep these diagrams the whole alert model**: every transition the code makes is an edge, so a change to one changes its diagram. An edge reads trigger, then what it emits. Terms:
+
+- **output** — a painting chunk the detector accepts: outside the echo window, and inside the work-start window unless a run already began (WATCHING Track). Any other chunk changes nothing.
+- **verb** — a user verb (Clearing And TODO).
+- **withdraw** — an await consumes that source, an await claims a settle (every `watching` source), or a rule stops covering `watching`'s key; never an acknowledgement.
+- **reset** — a command boundary, a host interrupt (`docs/specs/dor-tool.md` → Run end), or a verb or await answering a `watching` source.
+- **command boundary** — a command start or finish, a prompt, or PTY exit.
+
+Destroying, restarting, or restoring a Session starts each of its machines over, a restored TODO excepted.
+
+Each viewer:
+
+```mermaid
+stateDiagram-v2
+  state "Viewer presence" as Viewer {
+    [*] --> Absent
+    Absent --> Present: input, or focus or visibility returns, in an active window
+    Present --> Present: input, or its focus moves
+    Present --> Absent: idle — no input for the inactivity timeout, no iframe holding focus
+    Present --> Absent: leave — blur without document focus, hide, or the realm ends
+  }
+```
+
+A Session is engaged while some present viewer focuses it. Each Session runs all of these at once:
+
+```mermaid
+stateDiagram-v2
+  state "Input windows" as Windows {
+    state "Echo window" as Echo {
+      [*] --> EchoShut
+      EchoShut --> EchoOpen: user input
+      EchoOpen --> EchoOpen: user input, restarting it
+      EchoOpen --> EchoShut: echo window elapses
+    }
+    --
+    state "Work-start window" as Work {
+      [*] --> WorkShut
+      WorkShut --> WorkOpen: any input but a terminal reply or mouse report
+      WorkOpen --> WorkOpen: such input, restarting it
+      WorkOpen --> WorkShut: work-start window elapses
+    }
+  }
+```
 
 ```mermaid
 stateDiagram-v2
   state "Output detector" as Detector {
-    [*] --> NOTHING_TO_SHOW
-    NOTHING_TO_SHOW --> MIGHT_BE_BUSY: output across the candidate gap, begun within the work-start window
-    MIGHT_BE_BUSY --> NOTHING_TO_SHOW: unconfirmed, or reset
-    MIGHT_BE_BUSY --> BUSY: more output
+    state "NOTHING_TO_SHOW" as Quiet
+    state "NOTHING_TO_SHOW, candidate" as Candidate
+    [*] --> Quiet
+    Quiet --> Candidate: output
+    Candidate --> Candidate: output within the candidate gap
+    Candidate --> MIGHT_BE_BUSY: output spanning the candidate gap
+    Candidate --> Quiet: candidate history expires, or reset
+    MIGHT_BE_BUSY --> BUSY: output
+    MIGHT_BE_BUSY --> Candidate: no output for the confirm gap, the last chunk a new candidate
+    MIGHT_BE_BUSY --> Quiet: reset
+    BUSY --> BUSY: output
     BUSY --> MIGHT_NEED_ATTENTION: silence
+    BUSY --> Quiet: reset
     MIGHT_NEED_ATTENTION --> BUSY: output
-    MIGHT_NEED_ATTENTION --> NOTHING_TO_SHOW: more silence emits settle, or reset
-    BUSY --> NOTHING_TO_SHOW: reset
+    MIGHT_NEED_ATTENTION --> Quiet: more silence — a settle, none while a progress cycle is active
+    MIGHT_NEED_ATTENTION --> Quiet: reset
+  }
+```
+
+```mermaid
+stateDiagram-v2
+  state "Progress cycle (OSC 9;4)" as Progress {
+    [*] --> NoCycle
+    NoCycle --> Active: normal below 100, warning, or indeterminate
+    Active --> Active: another active update
+    Active --> NoCycle: normal 100, or clear — a report completion
+    Active --> NoCycle: error — a report error
+    Active --> NoCycle: command boundary or host interrupt
+    NoCycle --> NoCycle: normal 100 — a report completion, error — a report error, or clear — nothing
   }
 ```
 
@@ -123,35 +188,105 @@ stateDiagram-v2
 stateDiagram-v2
   state "Foreground command" as Command {
     [*] --> NoCommand
-    NoCommand --> Unseen: start, not engaged
     NoCommand --> Seen: start, engaged
-    Unseen --> Seen: engaged or acknowledged
-    Unseen --> NoCommand: finish, never rings
-    Seen --> NoCommand: finish, emits exit
+    NoCommand --> Unseen: start, not engaged
+    Unseen --> Seen: engaged, or acknowledged
+    Unseen --> NoCommand: finish, prompt, or PTY exit — an unseen finish, never rings
+    Seen --> NoCommand: finish, prompt, or PTY exit — a command finish
+    Unseen --> NoCommand: host interrupt, or another start before its own start edge
+    Seen --> NoCommand: host interrupt, or another start before its own start edge
   }
 ```
 
 ```mermaid
 stateDiagram-v2
-  state "Latches" as Latches {
-    state "Ring" as Ring {
-      [*] --> NoRing
-      NoRing --> Ringing: completion, not engaged
-      Ringing --> NoRing: verb, or last source withdrawn
-    }
-    --
-    state "Hold" as Hold {
-      [*] --> NoHold
-      NoHold --> Held: completion, engaged
-      Held --> NoHold: viewer idle, sources go to the ring
-      Held --> NoHold: focus moves, viewer leaves, or a verb
-    }
-    --
-    state "TODO" as Todo {
-      [*] --> Off
-      Off --> On: look at a ring, a hold, a receipt, or t
-      On --> Off: typing, the pill, or t
-    }
+  state "Ring" as Ring {
+    [*] --> NoRing
+    NoRing --> Ringing: the flowchart opens it — a new episode
+    Ringing --> Ringing: the flowchart joins it, detail only if richer, or a source withdrawn, others left
+    Ringing --> NoRing: a verb
+    Ringing --> NoRing: its last source withdrawn
+  }
+```
+
+```mermaid
+stateDiagram-v2
+  state "Hold" as Hold {
+    [*] --> NoHold
+    NoHold --> Held: the flowchart holds it
+    Held --> Held: the flowchart holds another, detail only if richer, or a source withdrawn, others left
+    Held --> NoHold: its viewer goes idle, focus unchanged — each source back to the flowchart's engaged step
+    Held --> NoHold: disengaged any other way, or a verb
+    Held --> NoHold: its last source withdrawn
+  }
+```
+
+```mermaid
+stateDiagram-v2
+  state "TODO" as Todo {
+    [*] --> Off
+    [*] --> On: restored
+    Off --> On: a hold, a receipt, a look at a ring, or t
+    On --> On: a hold or a receipt, detail only if richer, or a look at a ring, taking its detail
+    On --> Off: a verb with input, the pill, or t
+  }
+```
+
+```mermaid
+stateDiagram-v2
+  state "Acknowledged" as Acked {
+    [*] --> Fresh
+    Fresh --> Acknowledged: a verb clears a ring or drops a hold
+    Acknowledged --> Fresh: output, a ring opens, or a command starts
+  }
+```
+
+A look at a ring is acknowledging without input or dismissing while it rings; a receipt is the flowchart's TODO step. Each episode, each sink:
+
+```mermaid
+stateDiagram-v2
+  state "Delivery" as Delivery {
+    [*] --> Pending: the episode opens, the sink on
+    [*] --> Spent: the episode opens, the sink off
+    Pending --> Delivered: due, not blocked
+    Pending --> Spent: due but blocked, the sink turned off, or the episode ends
+    Delivered --> [*]
+    Spent --> [*]
+  }
+```
+
+```mermaid
+stateDiagram-v2
+  state "Speech, once delivered" as Speech {
+    [*] --> Queued
+    Queued --> Dropped: the episode ends, or speech turned off, before the engine admits it
+    Queued --> Silent: the engine never starts
+    Queued --> Speaking: engine start — speaking
+    Speaking --> Spoken: end, or error after start — spoken
+    Speaking --> CutOff: the episode ends
+    Spoken --> [*]: the episode ends
+  }
+```
+
+Each await:
+
+```mermaid
+stateDiagram-v2
+  state "Await" as Await {
+    state arrive <<choice>>
+    state "Failed, absorbing nothing" as Failed
+    [*] --> arrive
+    arrive --> Failed: an invalid request or a helper — cancelled
+    arrive --> Failed: the Session already removed — died
+    arrive --> Resolved: the ring holds a source it accepts — consumes it
+    arrive --> Parked: a command running
+    arrive --> Grace: nothing running
+    Grace --> Parked: command start, or output under quiet
+    Grace --> Resolved: grace elapses — idle
+    Grace --> Resolved: a completion it accepts — claims it
+    Parked --> Resolved: a completion it accepts — claims it
+    Grace --> Failed: the ceiling, PTY exit or removal, a cancel, its realm ending, or disposal
+    Parked --> Failed: the ceiling, PTY exit or removal, a cancel, its realm ending, or disposal
   }
 ```
 
@@ -244,7 +379,7 @@ Source of truth: `awaitCompletion` in `lib/src/lib/alert-manager.ts`; `AlertComm
 
 The output/silence detector is always on, one per Session for its whole lifetime; the rule set decides only whether its state is publicly visible and whether a settle may ring.
 
-**Must use the detector as the single output-activity signal for status and inferred completion**; its states are the Output detector region in Completion events. A single accepted output chunk leaves a quiet detector quiet, and only confirmed work can settle. **Never dispatch a settle while an `OSC 9;4` cycle is active**; the cycle's end completes the turn (rationale).
+**Must use the detector as the single output-activity signal for status and inferred completion**; its states are the Output detector machine (Completion events → State machines). **Never dispatch a settle while an `OSC 9;4` cycle is active**; the cycle's end completes the turn (rationale).
 
 **A retired id must stay retired.** A host removes the alert entry in the same turn as its kill, ahead of any output still in flight. **Never let raw output or input revive a retired id**; a semantic or protocol event may (rationale).
 
@@ -301,7 +436,7 @@ Source of truth: grammars, parsing, sanitization limits, and `applyTerminalEvent
 
 Command-exit alerting consumes normalized semantic command events from `docs/specs/terminal-state.md` (`OSC 133`, `OSC 633`, or equivalent) and **must not parse raw OSC itself**.
 
-- A command start creates `commandExitWatch`; its seen lifecycle is the Foreground command region in Completion events.
+- A command start creates `commandExitWatch`; its seen lifecycle is the Foreground command machine (Completion events → State machines).
 - **Must derive armed, never store it**: a seen command running while the Session is not engaged — public `COMMAND_EXIT_ARMED`, published on every engagement edge.
 - When the same command finishes — a prompt boundary with no finish event counts, with no exit code — or the PTY exits before a finish event, it rings only if it was seen. **Never gate the ring on how long the command ran** (rationale).
 - The `exit` source carries the `COMMAND_EXIT` notification: the summarized command and its exit code.
