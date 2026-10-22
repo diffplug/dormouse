@@ -909,6 +909,34 @@ test("a retire wins over a finish still in flight: it registers nothing, and not
   });
 });
 
+test("a code that expires while its finish is in flight registers nothing", async ({ onTestFinished }) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const owner = await f.account(ADMIN_EMAIL);
+  const laptop = await f.burrow(owner);
+  const token = await f.setupToken(laptop.token);
+  const begun = await f.call("POST", API_ROUTES.setupBegin, { body: { setupToken: token } });
+  const claimed = async () =>
+    (
+      await f.sql<{ claimed: boolean }>(
+        `SELECT claimed FROM dormouse_relay_setup_tokens WHERE "tokenHash" = $1`,
+        [digest(token)],
+      )
+    )[0]?.claimed === true;
+  await withClient(f.url, async (holder) => {
+    await holder.query("BEGIN");
+    await holder.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
+      `dormouse-relay:passkeys:${owner}`,
+    ]);
+    const pending = f.finish(await newAuthenticator(), token, begun.json!.challenge);
+    while (!(await claimed())) await new Promise((resolve) => setTimeout(resolve, 20));
+    await f.sql(`UPDATE dormouse_relay_setup_tokens SET "expiresAt" = now() - interval '1 second'`);
+    await holder.query("COMMIT");
+    expect(await pending).toMatchObject({ status: 401, json: { error: SETUP_TOKEN_INVALID_ERROR } });
+  });
+  expect(await f.sql(`SELECT count(*)::int AS n FROM dormouse_relay_passkeys`)).toEqual([{ n: 0 }]);
+});
+
 test("a de-entitled account signs in to nothing, and its sessions answer as expired", async ({
   onTestFinished,
 }) => {

@@ -101,7 +101,8 @@ export class SetupTokenIssuer {
    * while the finish validated, which must then register nothing.
    */
   commit(token: string): boolean {
-    const slot = this.#tokens.get(token);
+    // Expiry is checked here too: no sweep may have run since the claim.
+    const slot = this.#live(token);
     if (slot?.state !== 'claimed') return false;
     slot.state = 'committed';
     return true;

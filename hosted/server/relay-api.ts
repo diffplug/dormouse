@@ -254,12 +254,13 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
         const { credentialId, publicKey, label } = checked;
         const outcome = await locked(db, `passkeys:${spent.userId}`, async () => {
           // The claim, locked until this transaction ends: a retire that landed
-          // while the checks above awaited wins, and one landing now waits and
-          // then finds the token spent or back in this finish's hands.
+          // while the checks above awaited wins, as does the token's expiry; and
+          // one landing now waits and then finds the token spent or back in
+          // this finish's hands.
           const {
             rows: [held],
           } = await db.query(
-            `SELECT 1 FROM dormouse_relay_setup_tokens WHERE "tokenHash" = $1 AND claimed FOR UPDATE`,
+            `SELECT 1 FROM dormouse_relay_setup_tokens WHERE "tokenHash" = $1 AND claimed AND "expiresAt" > now() FOR UPDATE`,
             [digest(token)],
           );
           if (!held) return "retired";
