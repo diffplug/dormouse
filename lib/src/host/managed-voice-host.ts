@@ -244,6 +244,9 @@ export function createManagedVoiceHost(options: {
     if (disabled || generation !== tokenGeneration || !config.token) return { ok: false, reason: 'unconfigured' };
     const trimmed = text.trim();
     if (trimmed.length === 0 || trimmed.length > MAX_TEXT_LENGTH) return { ok: false, reason: 'bad-request' };
+    // Asked after the read, immediately before the send: a policy switched to
+    // Nowhere while the read was out stops this speak.
+    if (!(await options.networkAllowed())) return { ok: false, reason: 'network-off' };
     const signal = AbortSignal.timeout(timeoutMs);
     try {
       const response = await fetchImpl(speakUrl, {
@@ -295,10 +298,9 @@ export function createManagedVoiceHost(options: {
   }
 
   async function speak(speakUrl: string, text: string): Promise<ManagedVoiceHostSpeakResult> {
-    // Expected, like `unconfigured`, so not logged: the renderer falls back.
-    if (!(await options.networkAllowed())) return { ok: false, reason: 'network-off' };
     const result = await request(speakUrl, text);
-    if (!result.ok && result.reason !== 'unconfigured') log(`[managed-voice] speak failed: ${result.reason}`);
+    // Both expected, so not logged: the renderer falls back.
+    if (!result.ok && result.reason !== 'unconfigured' && result.reason !== 'network-off') log(`[managed-voice] speak failed: ${result.reason}`);
     return result;
   }
 
