@@ -6,6 +6,13 @@
  * two Ubuntu faces @theme names from its own @fontsource dependencies, so
  * lib's other consumers never ship them.
  */
+
+/* This directory and the theme picker DocsThemeControl renders, with what it
+   draws with, for an app that does not scan all of lib/src (Hosted). */
+@source ".";
+@source "../components/{ThemePicker,ThemeDebugger,CopyButton,ScrollFades,design}.tsx";
+@source "../components/theme-picker";
+@source not "../**/*.test.{ts,tsx}";
 @theme {
   --font-display: "Ubuntu Sans Mono", ui-monospace, monospace;
   --font-body: "Ubuntu Mono", ui-monospace, monospace;
@@ -32,11 +39,11 @@
 body {
   --docs-accent: var(--vscode-textLink-foreground, var(--color-caramel));
   /* The site's caramel already clears AA against its strongest (20%) button
-     tint. DocsLayout replaces this alias with the theme-derived correction. */
+     tint. `paintDocsTokens` replaces this alias with the theme-derived correction. */
   --docs-button-text: var(--docs-accent);
   /* #767676 is `docsMutedTextFor("#dedede", "#000000")` — the site's own
      palette, precomputed. A fallback of the plain foreground would leave every
-     muted element identical to body text until DocsLayout's effect runs, which
+     muted element identical to body text until `useDocsThemedBody` paints, which
      is the whole prerendered page and the no-JS reading of it.
      `docs-accent.test.ts` pins the value. */
   --docs-text-muted: #767676;

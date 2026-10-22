@@ -5,10 +5,6 @@ import { getPlatform, PLATFORM_STRING } from './platform';
 import { shellEscapePath } from './shell-escape';
 import { getDefaultShellOpts, getTerminalShellKind, writeUserInput } from './terminal-registry';
 
-// Kept in its own module so a component that only copies text (CopyButton)
-// does not pull in the terminal stack this one carries.
-export { writeTextToClipboard } from './clipboard-write';
-
 /** Replace ESC with visible U+241B so clipboard text cannot close a bracketed
  * paste early. Never apply this to unbracketed input; see spec §8.5. */
 function defangPasteEscapes(text: string): string {

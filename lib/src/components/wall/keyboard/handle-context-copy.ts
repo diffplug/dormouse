@@ -1,4 +1,4 @@
-import { writeTextToClipboard } from '../../../lib/clipboard';
+import { writeTextToClipboard } from '../../../lib/clipboard-write';
 import { hasCopyModifier } from './chords';
 
 /** Diagnostic DOM selection belongs to context chrome, never its terminal;

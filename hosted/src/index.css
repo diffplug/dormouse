@@ -17,14 +17,6 @@
 @import "../../lib/src/site/site.css";
 
 @source ".";
-@source "../../lib/src/site";
-/* The theme picker DocsThemeControl renders, and what it draws with. */
-@source "../../lib/src/components/{ThemePicker,ThemeDebugger,CopyButton,ScrollFades,design}.tsx";
-@source "../../lib/src/components/theme-picker";
-@source not "../../lib/src/**/*.test.ts";
-@source not "../../lib/src/**/*.test.tsx";
-@source not "../../lib/src/**/*.stories.ts";
-@source not "../../lib/src/**/*.stories.tsx";
 
 body {
   min-width: 280px;

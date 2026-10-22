@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { FIELD_TEXT_CLASS } from "../../lib/src/site/docs-tokens";
+import { FIELD_EDGE_CLASS, FIELD_TEXT_CLASS } from "dormouse-lib/site/docs-tokens";
 import { HELP_CLASS, LABEL_CLASS, PRIMARY_CLASS } from "./classes";
 
 /**
@@ -26,7 +26,7 @@ export function ConfirmDigits({
       </label>
       <input
         id="confirm-digits"
-        className={`mb-4 block min-h-18 w-[4ch] rounded-md border border-[var(--color-text)]/50 bg-[var(--color-bg)] text-center font-display text-[40px] tracking-[0.15em] focus:outline-none ${FIELD_TEXT_CLASS}`}
+        className={`${FIELD_EDGE_CLASS} mb-4 block min-h-18 w-[4ch] text-center font-display text-[40px] tracking-[0.15em] ${FIELD_TEXT_CLASS}`}
         inputMode="numeric"
         autoComplete="off"
         pattern="[0-9]{2}"

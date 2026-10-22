@@ -1,5 +1,5 @@
 import { useRef, useState, useSyncExternalStore } from 'react';
-import { writeTextToClipboard } from '../lib/clipboard';
+import { writeTextToClipboard } from '../lib/clipboard-write';
 import {
   CLIPBOARD_FAILURE_ISSUE_URL,
   dismissClipboardFailure,

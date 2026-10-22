@@ -32,7 +32,7 @@ import {
   LOGIN_FRESH_AGE_MS,
   TERMS_VERSION,
 } from "../server/policy-constants";
-import { useDocsThemedBody } from "../../lib/src/site/docs-paint";
+import { useDocsThemedBody } from "dormouse-lib/site/docs-paint";
 import { HostedPage, SUBSCRIBE_URL } from "./HostedPage";
 import { takeEnrollment, type Enrollment } from "./enrollment";
 import {

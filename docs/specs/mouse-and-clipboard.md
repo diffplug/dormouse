@@ -185,7 +185,7 @@ Every break is a mark that a click cycles keep → space → none; a scope or fo
 - **Must write through the adapter's native `writeClipboardText` where it has one, and never fall back from it** (rationale). **Pocket's adapter must have none**: its copies belong on the phone. Without one, the write takes the Clipboard API, and `execCommand('copy')` where that is missing or refuses (rationale).
 - **Must open the clipboard-failure report when a write fails every way it may take**, unless its caller opts out. **Its details never carry the copied text**; they go to the tracking issue the report links.
 
-Source of truth: `CopyEditor` in `lib/src/components/CopyEditor.tsx`; `copySelection` in `lib/src/lib/copy-selection.ts`; `writeTextToClipboard` in `lib/src/lib/clipboard.ts`, pinned by `lib/src/lib/clipboard-write.test.ts`; `ClipboardFailureGlobal` in `lib/src/components/ClipboardFailureDialog.tsx`.
+Source of truth: `CopyEditor` in `lib/src/components/CopyEditor.tsx`; `copySelection` in `lib/src/lib/copy-selection.ts`; `writeTextToClipboard` in `lib/src/lib/clipboard-write.ts`, pinned by `lib/src/lib/clipboard-write.test.ts`; `ClipboardFailureGlobal` in `lib/src/components/ClipboardFailureDialog.tsx`.
 
 ### 4.6 The Program's Own Copy (OSC 52)
 

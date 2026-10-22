@@ -10,8 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 /** The installed adapter's native write; absent unless a test sets it. */
 let nativeWrite: ((text: string) => Promise<void>) | undefined;
 vi.mock('./platform/current', () => {
-  const platform = () => (nativeWrite ? { writeClipboardText: nativeWrite } : {});
-  return { getPlatform: platform, getPlatformOrNull: platform };
+  return { getPlatformOrNull: () => (nativeWrite ? { writeClipboardText: nativeWrite } : {}) };
 });
 
 import { writeTextToClipboard } from './clipboard-write';

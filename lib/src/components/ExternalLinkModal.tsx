@@ -2,7 +2,7 @@ import { useRef } from 'react';
 import type { OpenHandler } from 'dor/commands/types';
 import { printableExact } from 'dor/commands/terminal-text';
 import { ProhibitIcon, WarningIcon, WarningOctagonIcon } from '@phosphor-icons/react';
-import { writeTextToClipboard } from '../lib/clipboard';
+import { writeTextToClipboard } from '../lib/clipboard-write';
 import type { DisplayMatchVerdict, ExternalUriDecision } from '../lib/external-links';
 import {
   MODAL_OVERLAY_INSET,

@@ -25,6 +25,7 @@ import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { repoRoot, readRepoFile, trackedFiles } from './lint-kit.mjs';
 import { collectDocsSurfaces } from './docs-surfaces.mjs';
+import { WORKSPACE_SOURCES } from './workspace-sources.mjs';
 import {
   hasScheme,
   inlineToText,
@@ -85,8 +86,8 @@ function docsSurfaces() {
   // The docs design shared with Hosted lives in lib (`lib/src/site/`); its
   // own imports of the rest of lib are app UI, not reference page text.
   const { surfaces, missingSeeds } = collectDocsSurfaces(seed, trackedFiles(), readRepoFile, {
-    aliases: { 'dormouse-lib/site/': 'lib/src/site/' },
-    roots: [`${WEBSITE_SRC}/`, 'lib/src/site/'],
+    aliases: { 'dormouse-lib/': `${WORKSPACE_SOURCES['dormouse-lib']}/` },
+    roots: [`${WEBSITE_SRC}/`, `${WORKSPACE_SOURCES['dormouse-lib']}/site/`],
   });
   for (const rel of missingSeeds) fail(`${rel}: docsSurfaces seed names a file that does not exist`);
   return surfaces;

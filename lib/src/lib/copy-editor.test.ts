@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('./clipboard', () => ({ writeTextToClipboard: vi.fn() }));
-import { writeTextToClipboard } from './clipboard';
+vi.mock('./clipboard-write', () => ({ writeTextToClipboard: vi.fn() }));
+import { writeTextToClipboard } from './clipboard-write';
 import { cycleCopyFormat, flipCopyBreak, nudgeCopyEdge, openCopyEditor, setCopyFormat, stepCopyScope } from './copy-editor';
 import { copySelection } from './copy-selection';
 import {

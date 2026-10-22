@@ -54,6 +54,25 @@ function hasVisibleTheme(snapshot: AppliedThemeSnapshot): boolean {
   return true;
 }
 
+/** Writes a resolved theme onto a body: what `applyTheme` does to the page,
+ *  without its bookkeeping, so a story frame can paint its own document. */
+export function paintThemeOnto(body: HTMLElement, theme: DormouseTheme, vars: Record<string, string>): void {
+  for (const [name, value] of Object.entries(vars)) {
+    body.style.setProperty(name, value);
+  }
+
+  if (theme.type === 'light') {
+    body.classList.add('vscode-light');
+    body.classList.remove('vscode-dark');
+  } else {
+    body.classList.add('vscode-dark');
+    body.classList.remove('vscode-light');
+  }
+
+  // Keep native-control polarity with the resolved theme, not the OS preference.
+  body.style.colorScheme = theme.type === 'light' ? 'light' : 'dark';
+}
+
 export function applyTheme(theme: DormouseTheme): void {
   if (typeof document === 'undefined') return;
   if (theme === appliedThemeSnapshot?.theme && hasVisibleTheme(appliedThemeSnapshot)) return;
@@ -71,20 +90,7 @@ export function applyTheme(theme: DormouseTheme): void {
   const providedVars = withHostTypography(theme.vars);
   const vars = resolveThemeVars(theme);
   appliedThemeSnapshot = { theme, providedVars, resolvedVars: vars };
-  for (const [name, value] of Object.entries(vars)) {
-    document.body.style.setProperty(name, value);
-  }
-
-  if (theme.type === 'light') {
-    document.body.classList.add('vscode-light');
-    document.body.classList.remove('vscode-dark');
-  } else {
-    document.body.classList.add('vscode-dark');
-    document.body.classList.remove('vscode-light');
-  }
-
-  // Keep native-control polarity with the resolved theme, not the OS preference.
-  document.body.style.colorScheme = theme.type === 'light' ? 'light' : 'dark';
+  paintThemeOnto(document.body, theme, vars);
 
   if (previousThemeId !== theme.id) {
     for (const listener of activeThemeListeners) listener();

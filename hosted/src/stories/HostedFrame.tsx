@@ -1,9 +1,9 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { resolveThemeVars } from "../../../lib/src/lib/themes/apply";
-import { getBundledThemes } from "../../../lib/src/lib/themes/store";
-import { DOCS_THEMED_BODY_CLASS, paintDocsTokens } from "../../../lib/src/site/docs-paint";
-import { DOCS_THEME_ID } from "../../../lib/src/site/docs-theme";
+import { paintThemeOnto, resolveThemeVars } from "dormouse-lib/lib/themes/apply";
+import { getBundledThemes } from "dormouse-lib/lib/themes/store";
+import { DOCS_THEMED_BODY_CLASS, paintDocsTokens } from "dormouse-lib/site/docs-paint";
+import { DOCS_THEME_ID } from "dormouse-lib/site/docs-theme";
 import css from "../index.css?inline";
 
 const LIGHT_THEME_ID = "vscode.theme-defaults.light-visual-studio";
@@ -13,9 +13,8 @@ const LIGHT_THEME_ID = "vscode.theme-defaults.light-visual-studio";
 function paintFrame(doc: Document, themeId: string) {
   const theme = getBundledThemes().find((candidate) => candidate.id === themeId)!;
   const vars = resolveThemeVars(theme);
-  for (const [name, value] of Object.entries(vars)) doc.body.style.setProperty(name, value);
+  paintThemeOnto(doc.body, theme, vars);
   doc.body.classList.add(DOCS_THEMED_BODY_CLASS);
-  doc.documentElement.style.colorScheme = theme.type;
   paintDocsTokens(doc.body, theme, vars);
 }
 

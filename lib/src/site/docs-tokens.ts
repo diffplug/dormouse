@@ -198,10 +198,11 @@ export const PANEL_CLASS =
   "max-h-[85dvh] w-full max-w-lg overflow-y-auto rounded-xl border "
   + "border-[var(--color-text)]/15 bg-[var(--color-bg)] p-5 text-[var(--color-text)] sm:p-6";
 
-/** A text field: the outline and size every form on the site shares, and
- *  the themed text that follows the reader's theme. */
-export const FIELD_CLASS =
-  "min-h-12 w-full rounded-md border border-[var(--color-text)]/50 bg-[var(--color-bg)] px-4 py-3 text-base focus:outline-none";
+/** A text field: the outline every form on the site shares, the size of a
+ *  full-width field, and the themed text that follows the reader's theme. */
+export const FIELD_EDGE_CLASS =
+  "rounded-md border border-[var(--color-text)]/50 bg-[var(--color-bg)] focus:outline-none";
+export const FIELD_CLASS = `${FIELD_EDGE_CLASS} min-h-12 w-full px-4 py-3 text-base`;
 export const FIELD_TEXT_CLASS =
   "text-[var(--color-text)] placeholder:text-[var(--docs-text-muted)] focus:border-[var(--docs-accent)]";
 
