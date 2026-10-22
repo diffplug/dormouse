@@ -312,6 +312,8 @@ jobs:
         # attempt) and rotate the mirror host between attempts so a sustained
         # single-mirror problem is escaped. Azure first (fast, same datacenter),
         # archive.ubuntu.com as fallback. --no-install-recommends trims the download.
+        # The runner image's ubuntu.sources points at mirror+file:/etc/apt/apt-mirrors.txt,
+        # which lists the hosts, so that file is the one the rotation has to rewrite.
         #
         # 16 minutes, not 10: the budget has to outlast the schedule it wraps, or
         # Actions kills the step mid-attempt and the ::error:: below — the line
@@ -323,7 +325,7 @@ jobs:
         timeout-minutes: 16
         run: |
           mirrors=(azure.archive.ubuntu.com archive.ubuntu.com)
-          src_files=(/etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list)
+          src_files=(/etc/apt/apt-mirrors.txt /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list)
           for i in 0 1 2; do
             host=${mirrors[$(( i % ${#mirrors[@]} ))]}
             for f in "${src_files[@]}"; do
