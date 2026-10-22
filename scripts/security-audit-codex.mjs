@@ -99,7 +99,7 @@ export function streamPrompt(root, domain, stream) {
   const qualitative = stream === QUALITATIVE;
   const own = qualitative
     ? 'Run the qualitative pass below and write its one `QUALITATIVE` line; re-verify there the open findings that cite no rule. Record no result line: the other streams own the rules.'
-    : 'Record a result line for every rule under those headings and no other, and re-verify the open findings that cite them. Run no qualitative pass and write no `QUALITATIVE` line: the `qualitative` stream owns it.';
+    : 'Record a result line for every rule under those headings and no other, and re-verify the open findings that cite them. A check this session has not yet traced is not one it ran out of room for: trace it, and end the turn only when every rule has its result line. Run no qualitative pass and write no `QUALITATIVE` line: the `qualitative` stream owns it.';
   const header = [
     `# Work stream \`${stream}\` of the \`${domain}\` domain`,
     `This session runs one work stream of the domain below and nothing else. ${qualitative ? `It is ${s.holds}` : `It holds ${scope}: ${s.holds}`} ${own}`,
