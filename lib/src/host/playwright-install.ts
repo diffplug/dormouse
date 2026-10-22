@@ -3,7 +3,7 @@ import { existsSync, realpathSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import type * as Playwright from 'playwright-core';
-import { resolveBinaryPath, DEFAULT_PLAYWRIGHT_BIN, PLAYWRIGHT_BIN_ENV } from 'dor-lib-common';
+import { envValue, resolveBinaryPath, DEFAULT_PLAYWRIGHT_BIN, PLAYWRIGHT_BIN_ENV } from 'dor-lib-common';
 import { isAllowedPlaywrightBinary } from '../lib/agent-browser-binary';
 
 export interface PlaywrightInstall { binary: string; libraryPath: string; library: typeof Playwright }
@@ -15,7 +15,8 @@ const installs = new Map<string, PlaywrightInstall>();
 
 export function resolvePlaywrightInstall(hint?: string, env: NodeJS.ProcessEnv = process.env): PlaywrightInstall {
   const configured = env[PLAYWRIGHT_BIN_ENV];
-  const cacheKey = JSON.stringify([hint ?? null, configured ?? null, env.PATH ?? null, env.PATHEXT ?? null]);
+  const isWindows = process.platform === 'win32';
+  const cacheKey = JSON.stringify([hint ?? null, configured ?? null, envValue(env, 'PATH', isWindows) ?? null, envValue(env, 'PATHEXT', isWindows) ?? null]);
   const cached = installs.get(cacheKey);
   // A cached install is good while its launcher exists; an uninstall re-searches.
   if (cached && existsSync(cached.binary)) return cached;

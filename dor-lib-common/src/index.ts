@@ -6,6 +6,7 @@ export { cmdShimTarget } from './cmd-shim.js';
 export {
   binaryCandidateNames,
   browserBinaryIsMissing,
+  envValue,
   isDirectory,
   isExecutableFile,
   resolveBinaryPath,
