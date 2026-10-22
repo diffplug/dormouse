@@ -20,7 +20,8 @@ For the rest of `docs/specs/security-local.md`, read each section's owner first 
 
 Delegate only by these streams (`.github/audit/_preamble.md` -> "Work streams"). Each holds every rule under the headings it names, subheadings included:
 
-- `local-terminal` — `docs/specs/security-local.md`: "Terminal output", "Browser panes", "The dor control socket", "The VS Code peer link", "Persisted state", "Terminal context directory actions", "Spawned programs", "Dor Tool configuration".
+- `local-terminal` — `docs/specs/security-local.md`: "Terminal output", "Browser panes", "Persisted state".
+- `local-processes` — `docs/specs/security-local.md`: "The dor control socket", "The VS Code peer link", "Terminal context directory actions", "Spawned programs", "Dor Tool configuration".
 - `local-listeners` — `docs/specs/security-local.md`: "Loopback Listeners", "Local-file viewer", "Network policy".
 - `qualitative` — the qualitative pass below, once, over the whole of this domain's scope.
 
