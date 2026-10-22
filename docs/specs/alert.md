@@ -108,7 +108,7 @@ stateDiagram-v2
   state "One Session: every region runs at once" as Session {
     state "Output detector" as Detector {
       [*] --> NOTHING_TO_SHOW
-      NOTHING_TO_SHOW --> MIGHT_BE_BUSY: output across the candidate gap
+      NOTHING_TO_SHOW --> MIGHT_BE_BUSY: output across the candidate gap, begun within the work-start window
       MIGHT_BE_BUSY --> NOTHING_TO_SHOW: unconfirmed, or reset
       MIGHT_BE_BUSY --> BUSY: more output
       BUSY --> MIGHT_NEED_ATTENTION: silence
