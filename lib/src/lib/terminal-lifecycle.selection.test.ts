@@ -51,6 +51,13 @@ describe('writeUserInput', () => {
     }
   });
 
+  it('leaves a selection be for a wheel tick, which scrolls the program', () => {
+    getOrCreateTerminal('pane-3');
+    setSelection('pane-3', finalizedSelection({ endCol: 4 }));
+    writeUserInput('pane-3', '\x1b[<65;1;1M');
+    expect(getMouseSelectionState('pane-3').selection).not.toBeNull();
+  });
+
   it('leaves a drag in progress alone', () => {
     getOrCreateTerminal('pane-2');
     beginDrag('pane-2', { row: 0, col: 0, altKey: false, startedInScrollback: false });

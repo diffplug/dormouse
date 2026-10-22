@@ -86,6 +86,7 @@ describe('FakePtyAdapter', () => {
     const alertEvents: { status: string }[] = [];
     adapter.onAlertState((detail) => alertEvents.push(detail));
     adapter.spawnPty('t1');
+    adapter.writePty('t1', 'make\r');
     adapter.sendOutput('t1', 'working');
     vi.advanceTimersByTime(1_600);
     adapter.sendOutput('t1', 'still working');
@@ -104,6 +105,7 @@ describe('FakePtyAdapter', () => {
     const alertEvents: { status: string }[] = [];
     adapter.onAlertState((detail) => alertEvents.push(detail));
     adapter.spawnPty('t1');
+    adapter.writePty('t1', 'make\r');
     adapter.sendOutput('t1', 'working');
     vi.advanceTimersByTime(1_600);
     adapter.sendOutput('t1', 'still working');

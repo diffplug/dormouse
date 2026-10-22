@@ -275,7 +275,7 @@ export class FakePtyAdapter implements PlatformAdapter {
   }
 
   writePty(id: string, data: string, options?: WritePtyOptions): void {
-    if (options?.userInput) this.alertManager.acknowledge(id, { input: true });
+    this.alertManager.onWrite(id, data, options);
     if (!this.terminals.has(id)) return;
     if (options?.launch) this.ownerStream(id).armLaunch(data);
     // Only echo if no scenario is actively playing
@@ -290,7 +290,6 @@ export class FakePtyAdapter implements PlatformAdapter {
   }
 
   resizePty(id: string, cols: number, rows: number): void {
-    this.alertManager.onResize(id);
     if (!this.terminals.has(id)) return;
     const next = { cols, rows };
     const prev = this.terminalSizes.get(id);

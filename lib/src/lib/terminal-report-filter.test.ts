@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  inputCanStartWork,
   inputIsReplayTerminalReport,
   inputIsSyntheticTerminalReport,
   stripMouseReportsFromInput,
+  stripPassiveMouseReportsFromInput,
 } from './terminal-report-filter';
 
 describe('terminal-report-filter: mouse reports', () => {
@@ -22,6 +24,19 @@ describe('terminal-report-filter: mouse reports', () => {
   it('preserves non-mouse input around stripped reports', () => {
     const input = 'a\x1b[<0;12;4M\r\x1b[M !!b';
     expect(stripMouseReportsFromInput(input)).toBe('a\rb');
+  });
+});
+
+describe('terminal-report-filter: passive mouse reports', () => {
+  it('keeps wheel ticks in every encoding, modifiers included', () => {
+    for (const wheel of ['\x1b[<64;12;4M', '\x1b[<67;12;4M', '\x1b[<84;12;4M', '\x1b[96;12;4M', '\x1b[M`!!', '\x1b[Ma!!']) {
+      expect(stripPassiveMouseReportsFromInput(wheel)).toBe(wheel);
+    }
+  });
+
+  it('strips hover, drag motion, buttons, and releases', () => {
+    const input = '\x1b[<35;12;4M\x1b[<32;12;4M\x1b[<0;12;4M\x1b[<0;12;4m\x1b[<128;12;4M\x1b[64;12;4M\x1b[M@!!\x1b[M !!';
+    expect(stripPassiveMouseReportsFromInput(input)).toBe('');
   });
 });
 
@@ -77,5 +92,38 @@ describe('terminal-report-filter: inputIsReplayTerminalReport', () => {
     expect(inputIsReplayTerminalReport('\x1b[2J')).toBe(false); // clear screen — not a report
     expect(inputIsReplayTerminalReport('hello')).toBe(false);
     expect(inputIsReplayTerminalReport('\x1b[3;4Rx')).toBe(false); // report + stray char
+  });
+});
+
+describe('terminal-report-filter: inputCanStartWork', () => {
+  it('rejects terminal replies and mouse reports', () => {
+    expect(inputCanStartWork('\x1b[I')).toBe(false); // focus in
+    expect(inputCanStartWork('\x1b[O')).toBe(false); // focus out
+    expect(inputCanStartWork('\x1b[12;3R')).toBe(false); // cursor position report
+    expect(inputCanStartWork('\x1b[<0;12;4M\x1b[<0;12;4m')).toBe(false); // SGR click
+    expect(inputCanStartWork('\x1b[<35;12;4M')).toBe(false); // SGR hover
+  });
+
+  it('rejects a wheel tick, input that asks for no work', () => {
+    expect(inputCanStartWork('\x1b[<65;12;4M', { userInput: true })).toBe(false);
+  });
+
+  it('accepts a reply-shaped key a human typed', () => {
+    expect(inputCanStartWork('\x1b[1;2R')).toBe(false);
+    expect(inputCanStartWork('\x1b[1;2R', { userInput: true })).toBe(true); // Shift+F3
+  });
+
+  it('accepts keys, Ctrl-C, and a key typed alongside a mouse report', () => {
+    expect(inputCanStartWork('a')).toBe(true);
+    expect(inputCanStartWork('\r')).toBe(true);
+    expect(inputCanStartWork('\x1b[A')).toBe(true); // cursor up
+    expect(inputCanStartWork('\x03')).toBe(true);
+    expect(inputCanStartWork('\x1b[<0;12;4Ma')).toBe(true);
+    expect(inputCanStartWork('x'.repeat(1_000_000))).toBe(true); // a large paste
+  });
+
+  it('reads a mouse report beside a focus report as the renderer does: a keystroke', () => {
+    // Not a reply as a whole and not mouse-only, so `terminal-lifecycle` writes it as user input.
+    expect(inputCanStartWork('\x1b[<0;12;4M\x1b[I')).toBe(true);
   });
 });

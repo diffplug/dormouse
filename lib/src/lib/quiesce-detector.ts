@@ -25,12 +25,11 @@ const T_BUSY_CANDIDATE_GAP = cfg.alert.busyCandidateGap;
 const T_BUSY_CONFIRM_GAP = cfg.alert.busyConfirmGap;
 const T_MIGHT_NEED_ATTENTION = cfg.alert.mightNeedAttention;
 const T_SETTLED_CONFIRM = cfg.alert.needsAttentionConfirm;
-const T_RESIZE_DEBOUNCE = cfg.alert.resizeDebounce;
 
 /** Longest silence unconfirmed candidate history can span and still count. */
 const CANDIDATE_HISTORY_TTL_MS = T_BUSY_CANDIDATE_GAP + T_BUSY_CONFIRM_GAP;
 
-type DetectorTimer = 'busyCandidate' | 'busyConfirm' | 'mightNeedAttention' | 'settledConfirm' | 'resize';
+type DetectorTimer = 'busyCandidate' | 'busyConfirm' | 'mightNeedAttention' | 'settledConfirm';
 
 /**
  * Watches one Session's PTY output and reports busy/quiet transitions.
@@ -38,11 +37,15 @@ type DetectorTimer = 'busyCandidate' | 'busyConfirm' | 'mightNeedAttention' | 's
  * One of these runs for every Session for its whole lifetime — it is a plain
  * observer, not an alarm. It never latches: a settle is announced through
  * `onSettled` and the detector immediately starts over.
+ *
+ * A busy run must begin within `cfg.alert.workStartWindow` of `expectWork`: a
+ * program repaints on focus, on resize, and on its own timers without working,
+ * and output nothing asked for is ignored until it is already busy.
  */
 export class QuiesceDetector {
   private status: QuiesceStatus = 'NOTHING_TO_SHOW';
-  private resizeGrace = false;
   private disposed = false;
+  private lastWorkExpectedAt = -Infinity;
   private timers = new Map<DetectorTimer, ReturnType<typeof setTimeout>>();
   private firstOutputAt: number | null = null;
   private lastOutputAt: number | null = null;
@@ -67,13 +70,13 @@ export class QuiesceDetector {
   /** Start over from quiet, forgetting the previous command's output history. */
   reset(): void {
     if (this.disposed) return;
-    this.clearActivityTimers();
+    this.clearTimers();
     this.resetOutputTracking();
     this.setStatus('NOTHING_TO_SHOW');
   }
 
   onData(): boolean {
-    if (this.disposed || this.resizeGrace) return false;
+    if (this.disposed) return false;
 
     const now = Date.now();
     // Candidate history only describes one run of output. A timer callback can
@@ -85,6 +88,11 @@ export class QuiesceDetector {
     ) {
       this.reset();
     }
+    // Only a run's first chunk is gated; once it began, its output counts.
+    if (
+      this.status === 'NOTHING_TO_SHOW' && this.firstOutputAt === null
+      && now - this.lastWorkExpectedAt > cfg.alert.workStartWindow
+    ) return false;
 
     this.lastOutputAt = now;
 
@@ -105,16 +113,16 @@ export class QuiesceDetector {
     return true;
   }
 
-  onResize(): void {
-    if (this.disposed) return;
-    this.resizeGrace = true;
-    this.schedule('resize', T_RESIZE_DEBOUNCE);
+  /** Input reached the program, or it announced work: output may begin a busy
+   *  run. Kept across `reset`: the keystroke that starts a command precedes
+   *  its boundary. */
+  expectWork(): void {
+    this.lastWorkExpectedAt = Date.now();
   }
 
   dispose(): void {
     this.disposed = true;
-    for (const timer of this.timers.values()) clearTimeout(timer);
-    this.timers.clear();
+    this.clearTimers();
   }
 
   private handleNothingToShowOutput(now: number): void {
@@ -133,13 +141,13 @@ export class QuiesceDetector {
   }
 
   private enterMightBeBusy(): void {
-    this.clearActivityTimers();
+    this.clearTimers();
     this.setStatus('MIGHT_BE_BUSY');
     this.schedule('busyConfirm', T_BUSY_CONFIRM_GAP);
   }
 
   private enterBusy(): void {
-    this.clearActivityTimers();
+    this.clearTimers();
     this.resetOutputTracking();
     this.setStatus('BUSY');
     this.startMightNeedAttentionTimer();
@@ -160,7 +168,6 @@ export class QuiesceDetector {
       this.timers.delete(kind);
       if (this.disposed) return;
       switch (kind) {
-        case 'resize': this.resizeGrace = false; break;
         case 'busyCandidate':
           if (this.status === 'NOTHING_TO_SHOW' && this.outputCountSinceReset >= 2) this.enterMightBeBusy();
           break;
@@ -185,12 +192,9 @@ export class QuiesceDetector {
     this.timers.set(kind, timer);
   }
 
-  private clearActivityTimers(): void {
-    for (const [kind, timer] of this.timers) {
-      if (kind === 'resize') continue;
-      clearTimeout(timer);
-      this.timers.delete(kind);
-    }
+  private clearTimers(): void {
+    for (const timer of this.timers.values()) clearTimeout(timer);
+    this.timers.clear();
   }
 
   private seedFromLatestOutput(): void {

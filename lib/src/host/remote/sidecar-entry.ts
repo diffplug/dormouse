@@ -191,7 +191,7 @@ export function createSidecarSurfaceBridge(
     return stream;
   }
 
-  // A Client's keystrokes and resizes reach the PTY as a local renderer's do.
+  // A Client's keystrokes reach the PTY as a local renderer's do.
   const pty = alertedPty(options.alerts, options.mgr);
 
   const { provider, notifyDirectoryChanged } = createAskSurfaceProvider(ask, {
@@ -201,7 +201,7 @@ export function createSidecarSurfaceBridge(
       pty.writeClientInput(id, data);
       options.send('terminal:clientInput', { id });
     },
-    resizePty: pty.resize,
+    resizePty: (id, cols, rows, repaint) => options.mgr.resize(id, cols, rows, repaint),
 
     streamPty(ptyId, sink) {
       const subscribed = ownerStream(ptyId);
@@ -555,7 +555,7 @@ export function createSidecarHost(options: SidecarHostOptions): SidecarHost {
           });
           return true;
         case 'pty:resize':
-          pty.resize(id as string, detail.cols as number, detail.rows as number);
+          mgr.resize(id as string, detail.cols as number, detail.rows as number);
           return true;
         // Reached only after Rust dropped the id's owner, so the removal's
         // state reaches no window.

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { QuiesceDetector, type QuiesceStatus } from './quiesce-detector';
 
 // Timing constants from cfg.alert:
-// busyCandidateGap=1500, busyConfirmGap=500, mightNeedAttention=2000, needsAttentionConfirm=3000, resizeDebounce=500
+// busyCandidateGap=1500, busyConfirmGap=500, mightNeedAttention=2000, needsAttentionConfirm=3000, workStartWindow=5000
 
 describe('QuiesceDetector', () => {
   beforeEach(() => {
@@ -13,17 +13,20 @@ describe('QuiesceDetector', () => {
     vi.useRealTimers();
   });
 
-  function createMonitor() {
+  /** A monitor whose program was just given input, unless `expectWork` is false. */
+  function createMonitor({ expectWork = true }: { expectWork?: boolean } = {}) {
     const changes: QuiesceStatus[] = [];
     const settled = vi.fn();
     const monitor = new QuiesceDetector({
       onChange: (status) => changes.push(status),
       onSettled: settled,
     });
+    if (expectWork) monitor.expectWork();
     return { monitor, changes, settled };
   }
 
   function driveMonitorToBusy(monitor: QuiesceDetector) {
+    monitor.expectWork();
     monitor.onData();
     vi.advanceTimersByTime(1_500);
     monitor.onData();
@@ -64,11 +67,10 @@ describe('QuiesceDetector', () => {
     expect(settled).toHaveBeenCalledOnce();
   });
 
-  it('rejects resize redraws and disposed output', () => {
-    const { monitor } = createMonitor();
-    monitor.onResize();
+  it('rejects output nobody asked for and disposed output', () => {
+    const { monitor } = createMonitor({ expectWork: false });
     expect(monitor.onData()).toBe(false);
-    vi.advanceTimersByTime(500);
+    monitor.expectWork();
     expect(monitor.onData()).toBe(true);
     expect(monitor.isConfirmedBusy()).toBe(false);
     monitor.dispose();
@@ -134,6 +136,8 @@ describe('QuiesceDetector', () => {
     if (failedConfirmation) monitor.onData();
     vi.advanceTimersByTime(218_342);
 
+    // Input inside the window, so only the forgotten history keeps it idle.
+    monitor.expectWork();
     monitor.onData();
     vi.advanceTimersByTime(62);
     monitor.onData();
@@ -153,6 +157,7 @@ describe('QuiesceDetector', () => {
     monitor.onData();
     expect(monitor.getStatus()).toBe('MIGHT_BE_BUSY');
     vi.setSystemTime(Date.now() + 218_342);
+    monitor.expectWork();
     monitor.onData();
     expect(monitor.getStatus()).toBe('NOTHING_TO_SHOW');
     vi.advanceTimersByTime(62);
@@ -322,23 +327,73 @@ describe('QuiesceDetector', () => {
     expect(changes).toEqual([]);
   });
 
-  it('onResize suppresses output detection for 500ms', () => {
-    const { monitor, changes } = createMonitor();
-    monitor.onResize();
-    monitor.onData();
-    expect(monitor.getStatus()).toBe('NOTHING_TO_SHOW');
-    expect(changes).toEqual([]);
-  });
+  describe('work-start gate', () => {
+    it('ignores sustained output with no input', () => {
+      const { monitor, changes, settled } = createMonitor({ expectWork: false });
+      for (let i = 0; i < 20; i++) {
+        expect(monitor.onData()).toBe(false);
+        vi.advanceTimersByTime(500);
+      }
+      vi.advanceTimersByTime(10_000);
+      expect(monitor.getStatus()).toBe('NOTHING_TO_SHOW');
+      expect(changes).toEqual([]);
+      expect(settled).not.toHaveBeenCalled();
+    });
 
-  it('output after the resize debounce participates in busy detection normally', () => {
-    const { monitor, changes } = createMonitor();
-    monitor.onResize();
-    vi.advanceTimersByTime(500);
-    monitor.onData();
-    vi.advanceTimersByTime(1_500);
-    monitor.onData();
-    expect(monitor.getStatus()).toBe('MIGHT_BE_BUSY');
-    expect(changes).toEqual(['MIGHT_BE_BUSY']);
+    it('lets output that begins within the window start a run', () => {
+      const { monitor, changes } = createMonitor({ expectWork: false });
+      // An idle program's repaint, then the keystroke that sets it working.
+      expect(monitor.onData()).toBe(false);
+      monitor.expectWork();
+      vi.advanceTimersByTime(4_900);
+      expect(monitor.onData()).toBe(true);
+      vi.advanceTimersByTime(1_500);
+      monitor.onData();
+      monitor.onData();
+      expect(monitor.getStatus()).toBe('BUSY');
+      expect(changes).toEqual(['MIGHT_BE_BUSY', 'BUSY']);
+    });
+
+    it('ignores output that begins after the window', () => {
+      const { monitor, changes } = createMonitor();
+      vi.advanceTimersByTime(5_001);
+      expect(monitor.onData()).toBe(false);
+      vi.advanceTimersByTime(1_500);
+      expect(monitor.onData()).toBe(false);
+      expect(monitor.onData()).toBe(false);
+      expect(monitor.getStatus()).toBe('NOTHING_TO_SHOW');
+      expect(changes).toEqual([]);
+    });
+
+    it('keeps counting a run begun inside the window through its settle, and gates the next', () => {
+      const { monitor, changes, settled } = createMonitor();
+      vi.advanceTimersByTime(4_000);
+      monitor.onData();
+      vi.advanceTimersByTime(1_500);
+      monitor.onData();
+      monitor.onData();
+      expect(monitor.getStatus()).toBe('BUSY');
+      vi.advanceTimersByTime(1_500);
+      expect(monitor.onData()).toBe(true);
+      vi.advanceTimersByTime(5_000);
+      expect(settled).toHaveBeenCalledOnce();
+      expect(changes).toEqual(['MIGHT_BE_BUSY', 'BUSY', 'MIGHT_NEED_ATTENTION', 'NOTHING_TO_SHOW']);
+      // The next run needs input of its own.
+      expect(monitor.onData()).toBe(false);
+    });
+
+    it('keeps input across reset(), which opens no window of its own', () => {
+      const { monitor } = createMonitor();
+      monitor.reset();
+      monitor.onData();
+      vi.advanceTimersByTime(1_500);
+      monitor.onData();
+      monitor.onData();
+      expect(monitor.getStatus()).toBe('BUSY');
+      vi.advanceTimersByTime(4_000);
+      monitor.reset();
+      expect(monitor.onData()).toBe(false);
+    });
   });
 
   it('resets the BUSY silence timer when more output arrives', () => {
@@ -366,6 +421,7 @@ describe('QuiesceDetector', () => {
   it('does not emit changes after dispose', () => {
     const onChange = vi.fn();
     const monitor = new QuiesceDetector({ onChange });
+    monitor.expectWork();
     monitor.onData();
     vi.advanceTimersByTime(1_500);
     monitor.onData();

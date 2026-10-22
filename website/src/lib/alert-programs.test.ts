@@ -44,13 +44,19 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+/** Typing into the pane: the adapter hears it as the playground's input path
+ *  does, and with no xterm mounted here the shell takes the bytes directly. */
+const type = (data: string) => {
+  adapter.writePty(PANE, data, { userInput: true });
+  shell.handleInput(data);
+};
 const lookAt = (id: string) => adapter.alertEngagement({ present: true, focusId: id });
 const screen = () => output.join("");
 
 describe("alert programs", () => {
   it("agent rings with its question once its screen settles, while the user is elsewhere", () => {
     lookAt(OTHER);
-    shell.handleInput("agent\r");
+    type("agent\r");
     vi.advanceTimersByTime(TURN_MS);
     expect(screen()).toContain("\x1b]9;agent: Allow edit to README.md?\x07");
     expect(latest?.status).not.toBe("ALERT_RINGING");
@@ -61,7 +67,7 @@ describe("alert programs", () => {
 
   it("agent leaves a TODO, not a ring, when the user is watching its pane", () => {
     lookAt(PANE);
-    shell.handleInput("agent\r");
+    type("agent\r");
     vi.advanceTimersByTime(TURN_MS + QUIET_MS);
     expect(latest).toMatchObject({ status: "WATCHING_DISABLED", todo: true, notification: { source: "OSC 9" } });
   });
@@ -69,7 +75,7 @@ describe("alert programs", () => {
   it("agent --quiet sends nothing and rings through the default agent rule", () => {
     adapter.alertSetWatchedCommands([...DEFAULT_WATCHED_COMMANDS]);
     lookAt(OTHER);
-    shell.handleInput("agent --quiet\r");
+    type("agent --quiet\r");
     vi.advanceTimersByTime(TURN_MS + QUIET_MS);
     expect(screen()).not.toContain("\x1b]9;");
     expect(latest).toMatchObject({ status: "ALERT_RINGING", notification: { source: "WATCHING" } });
@@ -77,7 +83,7 @@ describe("alert programs", () => {
 
   it("build rings on exit when the user started it and then looked away", () => {
     lookAt(PANE);
-    shell.handleInput("build\r");
+    type("build\r");
     lookAt(OTHER);
     vi.advanceTimersByTime(BUILD_MS - 1);
     expect(latest?.status).not.toBe("ALERT_RINGING");
@@ -86,19 +92,19 @@ describe("alert programs", () => {
   });
 
   it.each(["agent", "build"])("%s quits on Ctrl-C", (name) => {
-    shell.handleInput(`${name}\r`);
-    shell.handleInput("\x03");
+    type(`${name}\r`);
+    type("\x03");
     expect(screen()).toContain("\x1b]633;D;130\x07");
   });
 
   it("agent takes another request after an answer", () => {
     lookAt(OTHER);
-    shell.handleInput("agent\r");
+    type("agent\r");
     vi.advanceTimersByTime(TURN_MS);
     output.length = 0;
-    shell.handleInput("y");
+    type("y");
     expect(screen()).toContain("Edited README.md");
-    shell.handleInput("fix the tests\r");
+    type("fix the tests\r");
     vi.advanceTimersByTime(200);
     expect(screen()).toContain("Working on fix the tests");
   });

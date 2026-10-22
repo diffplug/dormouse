@@ -66,13 +66,13 @@ A Session is engaged while some present viewer focuses it.
 
 | Gesture | Acknowledges |
 |---|---|
-| typing into the pane (CSI/SS3 key encodings included), a paste, a file drop, the mobile input bar or a gesture key, a remote Client's write | with input |
+| typing into the pane (CSI/SS3 key encodings included), a reported wheel tick, a paste, a file drop, the mobile input bar or a gesture key, a remote Client's write | with input |
 | a Pane body or header click, zoom or unzoom, the dev-server chip, a Workspace tab's TODO pill on the member it enters, entering passthrough by keyboard, a Door click or `Enter`, a mobile tap | without input |
-| a terminal reply, a mouse-only report chunk, `d` reattach, a spawn, split, or promotion, a `dor` reveal, an embed focusing itself, DOM focus alone | nothing |
+| a terminal reply, a hover or button report, `d` reattach, a spawn, split, or promotion, a `dor` reveal, an embed focusing itself, DOM focus alone | nothing |
 
-- **Never treat terminal replies or mouse-only report chunks as keyboard input** (rationale).
+- **Never treat terminal replies or hover or button reports as input** (rationale).
 - **Must write all human-originated PTY input through `writeUserInput`**, the mobile input bar's included: it carries `userInput`, and the host acknowledges it with input before the bytes reach the PTY, in the one message (rationale).
-- **A remote Client's write must acknowledge the same way unless it holds only mouse reports**, the Burrow having dropped a mirror's terminal replies (rationale).
+- **A remote Client's write must acknowledge the same way unless it holds only hover or button reports**, the Burrow having dropped a mirror's terminal replies (rationale).
 - **Never create an Activity entry to acknowledge**, the host's one check, so a browser Surface keeps its own TODO.
 - **User input must open the echo window** (`cfg.alert.echoWindow`) even when acknowledging clears nothing, a helper's included. Output inside it is ignored entirely — detector, `outputSince`, the acknowledged state, awaits — and a completion inside it neither rings nor is held (rationale).
 
@@ -244,7 +244,7 @@ The output/silence detector is always on, one per Session for its whole lifetime
 
 **Must use the detector as the single output-activity signal for status, inferred completion, and alert deferral**; its states are the Output detector region in Completion events. A single accepted output chunk leaves a quiet detector quiet, and only confirmed work can settle.
 
-**A retired id must stay retired.** A host removes the alert entry in the same turn as its kill, ahead of any output still in flight. **Never let raw output or resizes revive a retired id**; a semantic or protocol event may (rationale).
+**A retired id must stay retired.** A host removes the alert entry in the same turn as its kill, ahead of any output still in flight. **Never let raw output or input revive a retired id**; a semantic or protocol event may (rationale).
 
 Rules:
 
@@ -258,14 +258,14 @@ Rules:
 
 Limitation: WATCHING needs the shell to report its command line — `OSC 633 ; E`, or `cmdline_url` / `cmdline` on `OSC 133 ; C` (fish ≥ 4) — beside the boundaries. A shell reporting bare `OSC 133` boundaries, or none (`docs/specs/terminal-state.md` → Shell-integration injection), never names a command, so WATCHING never engages and the terminal context reports `no command`. Terminal reports still work; command-exit alerting also requires semantic command boundaries. **Never route the keystroke fallback in `docs/specs/terminal-state.md` into the `AlertManager`** (rationale).
 
-**Must count only output that changes the screen**: a chunk of only queries, mode and color changes, or cursor motion is not output (rationale), nor are theme changes, remounts, DOM reparenting, selection, focus changes, or resize redraw noise during `T_RESIZE_DEBOUNCE`, a grace the host opens before it resizes the PTY, a Client's resize included. Invariants:
+**Must count only output that changes the screen**: a chunk of only queries, mode and color changes, or cursor motion is not output (rationale), nor are theme changes, remounts, DOM reparenting, or selection. **A busy run must begin within `cfg.alert.workStartWindow` of input or an active `OSC 9;4` report**; input is any PTY write but a terminal reply or mouse report, a wheel tick included. Later output, such as a focus or resize repaint, is ignored entirely (rationale). Invariants:
 
 - **Must preserve an owed `watching` source when output resumes**; Completion events owns deferral (rationale).
 - **Never reset the detector for engagement alone**; settles must reach awaits.
 - **Must reset to `NOTHING_TO_SHOW` when a user verb or an await clears a ring with a `watching` source**, preventing its output tail from settling again; resumed work and rule removal leave it running.
 - **New WATCHING summons must be caused by a fresh settle**, never rerender, theme change, remount, minimize, or reattach; Completion events owns showing a deferred summons.
 
-Source of truth: `commandWatchKey` / `watchRuleFor` in `lib/src/lib/terminal-state.ts`; `QuiesceDetector` in `lib/src/lib/quiesce-detector.ts`; `outputPaints` in `lib/src/lib/terminal-controls.ts`; `onSettled` in `lib/src/lib/alert-manager.ts`; multi-renderer coordinator `lib/src/lib/watched-command-host.ts`.
+Source of truth: `commandWatchKey` / `watchRuleFor` in `lib/src/lib/terminal-state.ts`; `QuiesceDetector` in `lib/src/lib/quiesce-detector.ts`; `outputPaints` in `lib/src/lib/terminal-controls.ts`; `inputCanStartWork` in `lib/src/lib/terminal-report-filter.ts`; `onSettled` in `lib/src/lib/alert-manager.ts`; multi-renderer coordinator `lib/src/lib/watched-command-host.ts`.
 
 ## Terminal reports
 
@@ -316,7 +316,7 @@ Detail follows one richness order: a text report (`OSC 9`, `OSC 99`, `OSC 777`) 
 | Verb | Effect |
 |---|---|
 | acknowledge without input (Engagement), or dismiss (`a`, Pane Header) | clears the ring, leaving `todo` on with its detail; with nothing ringing or held, no change |
-| acknowledge with input — any keystroke, paste, or drop — or clear TODO (pill click) | clears the ring; `todo` off, notification dropped, even if already off (rationale) |
+| acknowledge with input — any keystroke, wheel tick, paste, or drop — or clear TODO (pill click) | clears the ring; `todo` off, notification dropped, even if already off (rationale) |
 | toggle TODO (`t`) | clears the ring; `todo` flips, on keeping the ring's detail, off dropping the notification |
 | an await consumes a source (Await) | withdraws that source |
 | a rule stops covering the `watching` key | withdraws `watching` |
