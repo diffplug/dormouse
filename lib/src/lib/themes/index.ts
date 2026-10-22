@@ -10,6 +10,8 @@ export {
 } from './apply';
 export type { AppliedThemeSnapshot } from './apply';
 export { useRestoredTheme } from './use-restored-theme';
+export { rememberThemePaint, THEME_BOOT_SCRIPT, themeBootAttributes, themePaintFor } from './boot-paint';
+export type { ThemePaint } from './boot-paint';
 export {
   computeDynamicPalette,
   DYNAMIC_PALETTE_SOURCES,

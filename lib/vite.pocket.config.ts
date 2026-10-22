@@ -5,6 +5,8 @@ import tailwindcss from "@tailwindcss/vite";
 import { workspaceSourceAliases } from "../scripts/workspace-sources.mjs";
 
 import swConfig from "./vite.sw.config";
+import { themeBootPlugin } from "./src/lib/themes/boot-paint-plugin";
+import { pocketBootPaint } from "./src/remote/pocket-app/pocket-theme";
 
 /**
  * Serve the worker from source while `dev:pocket` is running.
@@ -64,7 +66,7 @@ function serveWorkerFromSource(): Plugin {
 // theme plumbing (`src/index.css`); the HTML shell carries the structural
 // viewport rules inline.
 export default defineConfig({
-  plugins: [react(), tailwindcss(), serveWorkerFromSource()],
+  plugins: [react(), tailwindcss(), serveWorkerFromSource(), themeBootPlugin("pocket", pocketBootPaint())],
   root: fileURLToPath(new URL("./pocket", import.meta.url)),
   resolve: {
     dedupe: ["react", "react-dom"],

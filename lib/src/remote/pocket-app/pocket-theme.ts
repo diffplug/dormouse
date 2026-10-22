@@ -13,9 +13,12 @@ import {
   getAppliedThemeSnapshot,
   getBundledThemes,
   restoreActiveTheme,
+  resolveThemeVars,
   setDefaultThemeId,
+  themePaintFor,
   useRestoredTheme,
   type DormouseTheme,
+  type ThemePaint,
 } from '../../lib/themes';
 
 /** Same default theme the website playground restores, unless the user picked one. */
@@ -40,6 +43,13 @@ export function applyPocketTheme(): void {
   if (!theme || typeof document === 'undefined') return;
   applyTheme(theme);
   syncDocumentChrome(theme);
+}
+
+/** Pocket's first frame for a phone that has picked nothing yet, baked into
+ *  its shell by the theme boot tag. */
+export function pocketBootPaint(): ThemePaint {
+  const theme = getBundledThemes().find(({ id }) => id === POCKET_THEME_ID)!;
+  return themePaintFor(theme, resolveThemeVars(theme));
 }
 
 /**

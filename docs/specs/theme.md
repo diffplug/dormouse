@@ -45,6 +45,16 @@ Color IDs with `null` registry defaults are materialized component-equivalently,
 
 Source of truth: `applyTheme()` in `lib/src/lib/themes/apply.ts`; `installVscodeThemeVarResolver()` in `lib/src/lib/themes/vscode-color-observer.ts`; `RESOLUTION_RULES` in `lib/src/lib/themes/vscode-color-registry.ts`.
 
+## First frame
+
+**Every browser page that restores a theme must carry the theme boot tag as the first child of `<body>`** — the docs pages, Hosted, Pocket, Standalone — which paints `body` before the first frame: the paint its scope last remembered on this origin, else the scope's fallback theme baked in at build (rationale). VS Code (host-owned theme) and the one-time page (keeps nothing) carry none.
+
+- **Each scope remembers its own paint** under `dormouse:theme-paint:<scope>`, rewritten after every `applyTheme` and docs-token paint.
+- **The tag writes only custom properties**, the theme class, and `color-scheme`; a remembered paint with any other key loses to the baked one.
+- **A page whose `script-src` refuses inline scripts takes the tag as a file** under its assets directory; the website inlines it.
+
+Source of truth: `THEME_BOOT_SCRIPT` and `rememberThemePaint()` in `lib/src/lib/themes/boot-paint.ts`; `themeBootPlugin()` in `lib/src/lib/themes/boot-paint-plugin.ts`; `ThemeBootScript` in `lib/src/lib/themes/ThemeBootScript.tsx`.
+
 ## Tool iframe themes
 
 **Must publish the workbench's resolved `--vscode-*` variables, theme class, and `color-scheme` to proxied Tool iframes** without reloading. **Never override third-party page backgrounds, fonts, or controls**; tools consume the variables themselves. Remove previously published variables absent from the next snapshot. Ordinary browser Surfaces and uninstrumented frames receive no theme.

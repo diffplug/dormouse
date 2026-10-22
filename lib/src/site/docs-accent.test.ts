@@ -14,12 +14,12 @@ import {
   TINTED_DOCS_SURFACES,
   type DocsSurfaceVariants,
 } from "./docs-tokens";
+import { SITE_CARAMEL, docsTokensFor } from "./docs-paint";
 
 /** The site's own palette, which `./site.css` declares as literals
  *  because the marketing pages are locked to it and prerender without JS. */
 const SITE_BACKGROUND = "#000000";
 const SITE_FOREGROUND = "#dedede";
-const SITE_CARAMEL = "#b47624";
 
 /** `--color-text` follows the reader's theme on a docs page; `--color-caramel`
  *  is the fixed brand colour. A new `tintVar` is unmapped until it is added
@@ -177,9 +177,14 @@ describe("docs muted text colour", () => {
     expect(docsMutedTextFor("var(--nope)", "#000000")).toBeNull();
   });
 
+  it("takes the brand colour site.css's @theme declares", () => {
+    const css = readFileSync(new URL("./site.css", import.meta.url), "utf8");
+    expect(css.match(/--color-caramel:\s*(#[0-9a-f]{6})/i)?.[1]).toBe(SITE_CARAMEL);
+  });
+
   it("agrees with the static fallback site.css declares", () => {
     // The site's own palette is fixed, so its muted level is precomputed there
-    // rather than left to DocsLayout's effect — otherwise the prerendered page
+    // rather than left to `useDocsThemedBody` — otherwise the prerendered page
     // has no muted level at all. Keep the two in step.
     const css = readFileSync(new URL("./site.css", import.meta.url), "utf8");
     const declared = css.match(/--docs-text-muted:\s*(#[0-9a-f]{6})/i)?.[1];
@@ -225,4 +230,22 @@ describe("docs verdict colours", () => {
       expect(declared).toBe(docsStatusColorFor(hue, surfaces));
     },
   );
+});
+
+describe("docsTokensFor", () => {
+  it("derives every token on every bundled theme", () => {
+    // A tint it could not resolve would leave that token on site.css's
+    // fallback for the site's black, on every theme.
+    const expected = [
+      "--docs-accent",
+      "--docs-button-text",
+      "--docs-text-muted",
+      ...TINTED_DOCS_SURFACES.map(({ token }) => token),
+      ...DOCS_STATUS_COLORS.map(({ token }) => token),
+    ].sort();
+    for (const theme of getBundledThemes()) {
+      const tokens = docsTokensFor(theme, completeThemeVars(theme.vars ?? {}, theme.type));
+      expect(Object.keys(tokens).sort(), theme.id).toEqual(expected);
+    }
+  });
 });

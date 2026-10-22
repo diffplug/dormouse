@@ -8,7 +8,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // mounting it here only needs the layout to render its children.
 vi.mock("../components/SiteHeader", () => ({ default: () => <header />, STATIC_PAGE_HEADER_STYLE: {} }));
 vi.mock("dormouse-lib/site/DocsThemeControl", () => ({ default: () => null }));
-vi.mock("dormouse-lib/site/docs-paint", () => ({ useDocsThemedBody: () => {}, DOCS_HEADER_STYLE: {} }));
+vi.mock("dormouse-lib/site/docs-paint", () => ({
+  useDocsThemedBody: () => {},
+  DOCS_HEADER_STYLE: {},
+  DOCS_THEMED_BODY_CLASS: "docs-themed",
+  docsBootPaint: () => ({ kind: "dark", vars: {} }),
+}));
 
 const { default: Hosted } = await import("./Hosted");
 const { COHORT_ENDPOINT, MAX_SHOWN_FOUNDERS } = await import("../lib/hosted-cohorts");

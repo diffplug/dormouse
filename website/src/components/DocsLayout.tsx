@@ -25,7 +25,8 @@ import {
   PAGE_TITLE_CLASS,
   TOC_INDENT_CLASS,
 } from "dormouse-lib/site/docs-tokens";
-import { DOCS_HEADER_STYLE, useDocsThemedBody } from "dormouse-lib/site/docs-paint";
+import { DOCS_HEADER_STYLE, DOCS_THEMED_BODY_CLASS, docsBootPaint, useDocsThemedBody } from "dormouse-lib/site/docs-paint";
+import { ThemeBootScript } from "dormouse-lib/lib/themes/ThemeBootScript";
 import { DOCS_PAGES, docsRailPosition, type DocsPage, type TocEntry } from "../lib/docs-pages";
 import { sitePath } from "../lib/site-meta";
 
@@ -115,6 +116,9 @@ function NeighborLink({ page, rel }: { page: DocsPage | undefined; rel: "prev" |
   );
 }
 
+/** Baked into every prerendered docs page, so a first visit opens on it. */
+const DOCS_BOOT_PAINT = docsBootPaint();
+
 export default function DocsLayout({
   activePath,
   title,
@@ -150,6 +154,7 @@ export default function DocsLayout({
 
   return (
     <>
+      <ThemeBootScript scope="docs" paint={DOCS_BOOT_PAINT} classes={[DOCS_THEMED_BODY_CLASS]} />
       <SiteHeader activePath={activePath} style={DOCS_HEADER_STYLE} prelaunch />
 
       <div className="min-h-screen bg-[var(--color-bg)] pt-16 pb-16 text-[var(--color-text)] md:pt-20">

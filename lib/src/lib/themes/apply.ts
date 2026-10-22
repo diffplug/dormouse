@@ -2,6 +2,7 @@ import type { DormouseTheme } from './types';
 import { getAllThemes, getStoredActiveThemeId, setActiveThemeId } from './store';
 import { completeThemeVars } from './vscode-color-resolver';
 import { flattenSelectionAlpha } from './flatten-alpha';
+import { rememberThemePaint } from './boot-paint';
 
 let appliedThemeSnapshot: AppliedThemeSnapshot | null = null;
 
@@ -91,6 +92,7 @@ export function applyTheme(theme: DormouseTheme): void {
   const vars = resolveThemeVars(theme);
   appliedThemeSnapshot = { theme, providedVars, resolvedVars: vars };
   paintThemeOnto(document.body, theme, vars);
+  rememberThemePaint();
 
   if (previousThemeId !== theme.id) {
     for (const listener of activeThemeListeners) listener();
