@@ -1,9 +1,9 @@
 import { clsx } from 'clsx';
 import { tv, type VariantProps } from 'tailwind-variants';
 import { XIcon } from '@phosphor-icons/react';
-import { forwardRef, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { ButtonHTMLAttributes, ComponentProps, CSSProperties, HTMLAttributes, InputHTMLAttributes, ReactNode, RefObject } from 'react';
+import type { ComponentProps, CSSProperties, HTMLAttributes, ReactNode, RefObject } from 'react';
 import { stepFocus } from './focus-step';
 import { isComposingKey } from '../lib/dom';
 import type { CopyOutcome } from '../lib/mouse-selection';
@@ -442,35 +442,34 @@ export const modalIconButton = tv({
   base: 'shrink-0 rounded p-0.5 text-muted transition-colors hover:bg-foreground/10 hover:text-foreground focus-visible:outline focus-visible:outline-1 focus-visible:outline-focus-ring',
 });
 
-export type ModalCloseButtonProps = ButtonHTMLAttributes<HTMLButtonElement>;
+export type ModalCloseButtonProps = ComponentProps<'button'>;
 
-export const ModalCloseButton = forwardRef<HTMLButtonElement, ModalCloseButtonProps>(
-  function ModalCloseButton({
-    children,
-    className,
-    type = 'button',
-    ...props
-  }, ref) {
-    const ariaLabel = props['aria-label'] ?? 'Close';
-    return (
-      <button
-        ref={ref}
-        type={type}
-        {...props}
-        aria-label={ariaLabel}
-        className={clsx(modalIconButton(), className)}
-      >
-        {children ?? <XIcon size={13} weight="bold" />}
-      </button>
-    );
-  },
-);
+export function ModalCloseButton({
+  ref,
+  children,
+  className,
+  type = 'button',
+  ...props
+}: ModalCloseButtonProps) {
+  const ariaLabel = props['aria-label'] ?? 'Close';
+  return (
+    <button
+      ref={ref}
+      type={type}
+      {...props}
+      aria-label={ariaLabel}
+      className={clsx(modalIconButton(), className)}
+    >
+      {children ?? <XIcon size={13} weight="bold" />}
+    </button>
+  );
+}
 
 // Form controls. The app has no checkbox anywhere: a boolean is an OnOffSwitch,
 // and a number is a NumericInput. Both live here so dialogs share one vocabulary
 // rather than each restyling a bare <input> (DESIGN.md -> Inputs).
 
-export type NumericInputProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'onChange' | 'type' | 'value'> & {
+export type NumericInputProps = Omit<ComponentProps<'input'>, 'onChange' | 'type' | 'value'> & {
   value: string;
   onChange: (next: string) => void;
   /** Max digits the field holds — sizes the box so rows stay compact. */
@@ -482,27 +481,25 @@ export type NumericInputProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'onC
  * rather than relying on `type="number"`, whose spinners and locale parsing do
  * not fit the app's chrome.
  */
-export const NumericInput = forwardRef<HTMLInputElement, NumericInputProps>(
-  function NumericInput({ value, onChange, chars = 4, className, style, ...props }, ref) {
-    return (
-      <input
-        ref={ref}
-        type="text"
-        inputMode="numeric"
-        value={value}
-        onChange={(e) => onChange(e.target.value.replace(/[^0-9.]/g, ''))}
-        style={{ width: `calc(${chars}ch + 0.5rem)`, ...style }}
-        className={clsx(
-          'border-0 border-b border-border bg-transparent px-0.5 py-0.5 font-mono text-foreground outline-none focus:border-focus-ring',
-          className,
-        )}
-        {...props}
-      />
-    );
-  },
-);
+export function NumericInput({ ref, value, onChange, chars = 4, className, style, ...props }: NumericInputProps) {
+  return (
+    <input
+      ref={ref}
+      type="text"
+      inputMode="numeric"
+      value={value}
+      onChange={(e) => onChange(e.target.value.replace(/[^0-9.]/g, ''))}
+      style={{ width: `calc(${chars}ch + 0.5rem)`, ...style }}
+      className={clsx(
+        'border-0 border-b border-border bg-transparent px-0.5 py-0.5 font-mono text-foreground outline-none focus:border-focus-ring',
+        className,
+      )}
+      {...props}
+    />
+  );
+}
 
-export type TextInputProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'onChange' | 'value'> & {
+export type TextInputProps = Omit<ComponentProps<'input'>, 'onChange' | 'value'> & {
   value: string;
   onChange: (next: string) => void;
 };
@@ -513,22 +510,20 @@ export type TextInputProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'onChan
  * as one form. Unlike NumericInput it filters nothing and sets no `type`, so a
  * caller passes `type="password"` for a credential.
  */
-export const TextInput = forwardRef<HTMLInputElement, TextInputProps>(
-  function TextInput({ value, onChange, className, ...props }, ref) {
-    return (
-      <input
-        ref={ref}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className={clsx(
-          'w-full border-0 border-b border-border bg-transparent px-0.5 py-0.5 font-mono text-foreground outline-none placeholder:text-muted focus:border-focus-ring',
-          className,
-        )}
-        {...props}
-      />
-    );
-  },
-);
+export function TextInput({ ref, value, onChange, className, ...props }: TextInputProps) {
+  return (
+    <input
+      ref={ref}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className={clsx(
+        'w-full border-0 border-b border-border bg-transparent px-0.5 py-0.5 font-mono text-foreground outline-none placeholder:text-muted focus:border-focus-ring',
+        className,
+      )}
+      {...props}
+    />
+  );
+}
 
 /**
  * Left margin that lines content up under an `OnOffSwitch`'s label rather than
@@ -680,16 +675,17 @@ export function ModalOverlay({
   return portalToBody(overlay);
 }
 
-export type ModalSurfaceProps = HTMLAttributes<HTMLDivElement> & ModalSurfaceVariants;
+export type ModalSurfaceProps = ComponentProps<'div'> & ModalSurfaceVariants;
 
-export const ModalSurface = forwardRef<HTMLDivElement, ModalSurfaceProps>(function ModalSurface({
+export function ModalSurface({
+  ref,
   children,
   padding,
   align,
   elevation,
   className,
   ...props
-}, ref) {
+}: ModalSurfaceProps) {
   return (
     <div
       ref={ref}
@@ -699,7 +695,7 @@ export const ModalSurface = forwardRef<HTMLDivElement, ModalSurfaceProps>(functi
       {children}
     </div>
   );
-});
+}
 
 export type ModalFrameProps = HTMLAttributes<HTMLDivElement> & ModalSurfaceVariants & {
   titleId: string;

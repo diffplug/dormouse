@@ -1,4 +1,4 @@
-import { forwardRef, type ComponentProps } from "react";
+import type { ComponentProps } from "react";
 import SharedSiteHeader from "dormouse-lib/site/SiteHeader";
 import { NAV_LINKS, NAV_LINKS_OFF_PLAYGROUND } from "../lib/site-nav";
 
@@ -19,9 +19,9 @@ type SiteHeaderProps = Omit<ComponentProps<typeof SharedSiteHeader>, "links" | "
 };
 
 /** The shared site header (`lib/src/site/SiteHeader.tsx`) with this site's links. */
-const SiteHeader = forwardRef<HTMLElement, SiteHeaderProps>(function SiteHeader({ prelaunch = false, ...props }, ref) {
+function SiteHeader({ prelaunch = false, ...props }: SiteHeaderProps) {
   const links = props.activePath === "/playground" ? NAV_LINKS_OFF_PLAYGROUND : NAV_LINKS;
-  return <SharedSiteHeader ref={ref} links={links} notice={prelaunch ? PRELAUNCH_NOTICE : undefined} {...props} />;
-});
+  return <SharedSiteHeader links={links} notice={prelaunch ? PRELAUNCH_NOTICE : undefined} {...props} />;
+}
 
 export default SiteHeader;
