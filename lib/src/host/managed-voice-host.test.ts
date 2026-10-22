@@ -521,6 +521,23 @@ describe('the network policy', () => {
     expect(await gated.handle({ op: 'speak', text: 'something new' })).toMatchObject({ ok: true });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  it('asks again after reading the token, so a switch to Nowhere meanwhile sends nothing', async () => {
+    let allowed = true;
+    const files = fileManagedVoiceStore(dir);
+    const gated = createManagedVoiceHost({
+      store: { ...files, read: async () => { const stored = await files.read(); allowed = false; return stored; } },
+      onStatus: () => {},
+      fetch: fetchMock as unknown as typeof fetch,
+      relay: { origin: DEFAULT_RELAY_ORIGIN, mode: 'hosted' },
+      networkAllowed: async () => allowed,
+    });
+    await seedToken();
+    fetchMock.mockResolvedValue(audioResponse());
+    expect(await gated.handle({ op: 'speak', text: 'build finished' })).toEqual({ ok: false, reason: 'network-off' });
+    expect(fetchMock).not.toHaveBeenCalled();
+    gated.dispose();
+  });
 });
 
 

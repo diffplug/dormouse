@@ -1351,6 +1351,16 @@ function Test-Health {
   } catch { return $false }
 }
 
+# Any HTTP answer at all, whatever its status: the off-loopback probe asks
+# whether anything listens there, which a 404 or a 500 answers as well as a 200.
+function Test-HttpAnswer {
+  param([Parameter(Mandatory)][string]$Url, [int]$TimeoutSec = 3)
+  try {
+    $null = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec $TimeoutSec -MaximumRedirection 0
+    return $true
+  } catch { return ($null -ne $_.Exception.Response) }
+}
+
 # Takes -Url like the installer's copy: two functions of the same name with
 # different signatures is how these two scripts drift apart.
 function Wait-Health {
@@ -1616,7 +1626,7 @@ function Invoke-Verify {
   $tsIp = ''
   if ($ipResult.ExitCode -eq 0) { $tsIp = ($ipResult.StdOut.Split("`n") | Where-Object { $_.Trim() } | Select-Object -First 1).Trim() }
   if ($tsIp) {
-    if (Test-Health -Url "http://${tsIp}:$PORT/api/hello" -TimeoutSec 3) {
+    if (Test-HttpAnswer -Url "http://${tsIp}:$PORT/api/hello" -TimeoutSec 3) {
       Fail "plaintext port $PORT is reachable on the Tailscale IP $tsIp"
     } else {
       Pass "plaintext port $PORT is not reachable on the Tailscale IP"

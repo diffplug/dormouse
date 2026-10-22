@@ -553,6 +553,18 @@ test('a retire kills a claimed token: it can neither commit nor be restored', ()
   assert.equal(issuer.peek(committed), null);
 });
 
+test('a claimed token that expires before the write cannot commit', () => {
+  const clock = makeClock();
+  const issuer = new SetupTokenIssuer({ now: clock.now });
+
+  const { token } = issuer.issue('burrow-1');
+  issuer.claim(token);
+  clock.advance(SETUP_TOKEN_TTL_MS);
+  assert.equal(issuer.commit(token), false);
+  issuer.restore(token);
+  assert.equal(issuer.peek(token), null);
+});
+
 test('a claimed token counts toward the Burrow cap, and one the cap evicted stays dead', () => {
   const clock = makeClock();
   const issuer = new SetupTokenIssuer({ now: clock.now });

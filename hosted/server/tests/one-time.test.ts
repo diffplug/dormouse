@@ -42,6 +42,8 @@ const origin = ORIGINS.relay;
 /** The sibling Workers' origins, which share the account's login cookie as same-site. */
 const SIBLINGS = [ORIGINS.account, ORIGINS.voice];
 const PAGE_SCRIPT = `${ONE_TIME_PAGE_PATH}assets/page-B39o2E6i.js`;
+/** Staged beside the page but not content-hashed: refused all the same. */
+const UNHASHED_SCRIPT = `${ONE_TIME_PAGE_PATH}assets/plain.js`;
 const PAGE_SHELL = `<!doctype html><script type="module" crossorigin src="${PAGE_SCRIPT}"></script>`;
 
 async function start(entry: string) {
@@ -54,7 +56,7 @@ async function start(entry: string) {
         // SPA fallback would give, so a path the Worker hands the assets shows.
         ASSETS: (request) => {
           const { pathname } = new URL(request.url);
-          if (pathname === PAGE_SCRIPT)
+          if (pathname === PAGE_SCRIPT || pathname === UNHASHED_SCRIPT)
             return new WorkerResponse("export const page = 1;\n", {
               headers: { "content-type": "text/javascript" },
             });
@@ -527,7 +529,7 @@ test("the phone page is served under its own policy, and uncached", async () => 
   expect(await (await get(ONE_TIME_PAGE_PATH)).text()).toBe(PAGE_SHELL);
 });
 
-test("the page's hashed assets are immutable, and a missing one is a 404, not the shell", async () => {
+test("the page's hashed assets are immutable, and a missing or unhashed one is a 404, not the shell", async () => {
   const script = await get(PAGE_SCRIPT);
   expect(script.status).toBe(200);
   expect(script.headers.get("cache-control")).toBe(
@@ -537,6 +539,7 @@ test("the page's hashed assets are immutable, and a missing one is a 404, not th
   for (const path of [
     `${ONE_TIME_PAGE_PATH}assets/missing-B39o2E6i.js`,
     `${ONE_TIME_PAGE_PATH}assets/`,
+    UNHASHED_SCRIPT,
   ]) {
     const missing = await get(path);
     expect(missing.status, path).toBe(404);

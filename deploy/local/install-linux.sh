@@ -869,6 +869,26 @@ req.on("error", () => process.exit(1));
 ' "$url" "$timeout"
 }
 
+# Any HTTP answer at all, whatever its status: the off-loopback probe asks
+# whether anything listens there, which a 404 or a 500 answers as well as a 200.
+http_answers() {
+  local url="$1" timeout="${2:-5}"
+  if command -v curl >/dev/null 2>&1; then
+    curl -s -o /dev/null --max-time "$timeout" "$url"
+    return $?
+  fi
+  [ -x "$NODE_BIN" ] || return 2
+  "$NODE_BIN" -e '
+const http = require("http");
+const req = http.get(process.argv[1], { timeout: Number(process.argv[2]) * 1000 }, (res) => {
+  res.resume();
+  process.exit(0);
+});
+req.on("timeout", () => { req.destroy(); process.exit(1); });
+req.on("error", () => process.exit(1));
+' "$url" "$timeout"
+}
+
 # Replace a symlink atomically, without following it. `mv -f tmp link` follows
 # an existing symlink-to-directory and would deposit the temp link inside the
 # old release, leaving `current` unmoved. rename(2) on the link path does not.
@@ -1162,7 +1182,7 @@ cmd_verify() {
   tsip="$(ts ip -4 2>/dev/null || true)"
   tsip="${tsip%%$'\n'*}"
   if [ -n "$tsip" ]; then
-    if http_ok "http://$tsip:$PORT/api/hello" 3; then
+    if http_answers "http://$tsip:$PORT/api/hello" 3; then
       fail "plaintext port $PORT is reachable on the Tailscale IP $tsip"
     else
       pass "plaintext port $PORT is not reachable on the Tailscale IP"
