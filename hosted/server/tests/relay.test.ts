@@ -930,7 +930,16 @@ test("a code that expires while its finish is in flight registers nothing", asyn
     ]);
     const pending = f.finish(await newAuthenticator(), token, begun.json!.challenge);
     while (!(await claimed())) await new Promise((resolve) => setTimeout(resolve, 20));
-    await f.sql(`UPDATE dormouse_relay_setup_tokens SET "expiresAt" = now() - interval '1 second'`);
+    // Queued on the lock, so its transaction has begun: an expiry set now falls
+    // after that `BEGIN` and before the lock is granted.
+    const queued = async () =>
+      (
+        await f.sql<{ n: number }>(
+          `SELECT count(*)::int AS n FROM pg_locks WHERE locktype = 'advisory' AND NOT granted`,
+        )
+      )[0]!.n > 0;
+    while (!(await queued())) await new Promise((resolve) => setTimeout(resolve, 20));
+    await f.sql(`UPDATE dormouse_relay_setup_tokens SET "expiresAt" = clock_timestamp()`);
     await holder.query("COMMIT");
     expect(await pending).toMatchObject({ status: 401, json: { error: SETUP_TOKEN_INVALID_ERROR } });
   });

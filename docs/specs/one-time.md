@@ -153,7 +153,7 @@ The relay Worker serves the phone's half at `ONE_TIME_PAGE_PATH` (`/connect/`): 
 
 **Build.** `build:one-time` in `lib/package.json` builds `lib/one-time/` into `lib/dist-one-time` under base `ONE_TIME_PAGE_PATH`, then runs `assertPocketShell --one-time`: scripts under `/connect/assets/`, links under `/connect/`, nothing inline. Hosted's `build` runs it first, and `stageRelay` empties the relay's assets directory, copies the page to `hosted/dist/relay/connect/` beside Pocket at the root, and checks the copy.
 
-**Serving.** The relay Worker answers `/connect`, `/connect/`, and `/connect/assets/*` from its assets, with no SPA fallback; an HTML answer under `/connect/assets/` and any other path under `/connect/` is a 404. Everything under `/connect` carries `oneTimePagePolicy` (`hosted/server/headers.ts`), built from the relay's `APP_ORIGIN`. Every other relay response carries Pocket's policy or `RUNS_NOTHING_POLICY` (`docs/specs/security-hosted.md` -> "Relay boundary").
+**Serving.** The relay Worker answers `/connect`, `/connect/`, and `/connect/assets/*` from its assets, with no SPA fallback; an HTML answer or an unhashed name under `/connect/assets/`, and any other path under `/connect/`, is a 404. Everything under `/connect` carries `oneTimePagePolicy` (`hosted/server/headers.ts`), built from the relay's `APP_ORIGIN`. Every other relay response carries Pocket's policy or `RUNS_NOTHING_POLICY` (`docs/specs/security-hosted.md` -> "Relay boundary").
 
 - **An `APP_ORIGIN` that is not exactly `scheme://host[:port]` of plain host characters gets `RUNS_NOTHING_POLICY` instead**: the URL parser admits `;`, `,`, and `'` in a host.
 - **The sandbox keeps `allow-same-origin`**, and Chrome's warning about the pair stands (rationale).

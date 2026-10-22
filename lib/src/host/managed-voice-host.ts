@@ -241,12 +241,13 @@ export function createManagedVoiceHost(options: {
     const generation = tokenGeneration;
     const config = await load().catch(() => null);
     if (!config) return { ok: false, reason: 'config unreadable' };
+    // Asked after the read and before the token checks, so no await falls
+    // between those and the send: a policy switched to Nowhere while the read
+    // was out stops this speak.
+    if (!(await options.networkAllowed())) return { ok: false, reason: 'network-off' };
     if (disabled || generation !== tokenGeneration || !config.token) return { ok: false, reason: 'unconfigured' };
     const trimmed = text.trim();
     if (trimmed.length === 0 || trimmed.length > MAX_TEXT_LENGTH) return { ok: false, reason: 'bad-request' };
-    // Asked after the read, immediately before the send: a policy switched to
-    // Nowhere while the read was out stops this speak.
-    if (!(await options.networkAllowed())) return { ok: false, reason: 'network-off' };
     const signal = AbortSignal.timeout(timeoutMs);
     try {
       const response = await fetchImpl(speakUrl, {

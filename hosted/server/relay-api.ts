@@ -260,7 +260,7 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
           const {
             rows: [held],
           } = await db.query(
-            `SELECT 1 FROM dormouse_relay_setup_tokens WHERE "tokenHash" = $1 AND claimed AND "expiresAt" > now() FOR UPDATE`,
+            `SELECT 1 FROM dormouse_relay_setup_tokens WHERE "tokenHash" = $1 AND claimed AND "expiresAt" > ${LOCKED_NOW} FOR UPDATE`,
             [digest(token)],
           );
           if (!held) return "retired";
