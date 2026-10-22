@@ -1,8 +1,8 @@
 /**
- * The wire contract for the selfhost POC (docs/specs/relay.md): HTTP routes
- * and payloads, relay frames, and the terminal-only remote-api v1 messages.
- * Shared by `relay`, the Burrow module in `lib`, and the Pocket UI so the
- * three sides cannot drift.
+ * The remote wire contract (docs/specs/relay.md): HTTP routes and payloads,
+ * relay frames, and the terminal-only remote-api v1 messages. Shared by
+ * `relay`, Hosted's Workers, the Burrow module in `lib`, and the Pocket UI so
+ * the sides cannot drift.
  */
 
 import {
@@ -1014,7 +1014,7 @@ export interface HelloResult {
   grants: { input: boolean; layout: boolean };
 }
 
-/** Terminal-only for the POC: no browser entries, so no `url`. */
+/** Terminal-only in protocol-v1: no browser entries, so no `url`. */
 export interface DirectoryEntry {
   paneRef: string;
   surfaceId: string;

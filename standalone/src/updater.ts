@@ -71,7 +71,7 @@ let currentVersion = '';
 let restartRefusal: string | null = null;
 /** The check in flight, which a second asker joins. */
 let checkPromise: Promise<Update | null> | null = null;
-/** The hourly reminder tick, from launch on: a terminal stays open for weeks. */
+/** The hourly reminder tick, from launch on unless the launch found a failure marker: a terminal stays open for weeks. */
 let reminderTimer: ReturnType<typeof setInterval> | null = null;
 
 const listeners = new Set<() => void>();
