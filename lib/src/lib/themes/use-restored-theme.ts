@@ -1,11 +1,11 @@
-import { useEffect, useLayoutEffect, useRef } from 'react';
+import { useRef } from 'react';
 import { restoreActiveTheme, setDefaultThemeId } from './apply';
-
-const useBrowserLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
+import { useBrowserLayoutEffect } from '../use-browser-layout-effect';
 
 /**
- * Apply the persisted theme (falling back to `defaultThemeId`) before first
- * paint, then again after commit.
+ * Apply the persisted theme (falling back to `defaultThemeId`) before the
+ * first render, then again after commit. Before first paint only the boot tag
+ * can (`./boot-paint.ts`).
  *
  * The repeat is for React Router document hydration, which can reconcile the
  * server `<body>` and drop the render-time `body.style` writes — without it

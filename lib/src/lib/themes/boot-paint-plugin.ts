@@ -1,23 +1,21 @@
+import { createHash } from 'node:crypto';
 import type { Plugin } from 'vite';
-import { THEME_BOOT_SCRIPT, themeBootAttributes, type ThemePaint } from './boot-paint';
-
-/** FNV-1a, as eight hex digits: the content hash Vite's own names carry, which
- *  the hosts' caching reads as immutable (`isContentHashedName`). */
-function contentHash(text: string): string {
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < text.length; i++) hash = Math.imul(hash ^ text.charCodeAt(i), 0x01000193);
-  return (hash >>> 0).toString(16).padStart(8, '0');
-}
+import { themeBootPaint } from './apply';
+import { themeBootScript, type ThemePaintProfile } from './boot-paint';
 
 /**
  * Puts the theme boot tag (`./boot-paint.ts`) first in an `index.html` app's
  * body, as a same-origin file under the build's assets directory: every such
- * app is served a `script-src` that refuses an inline script.
+ * app is served a `script-src` that refuses an inline script. The profile's
+ * default rides in the file, which is cached immutable, not in the HTML.
  */
-export function themeBootPlugin(scope: string, fallback: ThemePaint, classes: readonly string[] = []): Plugin {
-  const file = `theme-boot-${contentHash(THEME_BOOT_SCRIPT)}.js`;
-  let assetPath = `assets/${file}`;
-  let src = `/${assetPath}`;
+export function themeBootPlugin(profile: ThemePaintProfile): Plugin {
+  const code = themeBootScript(themeBootPaint(profile), profile.classes);
+  // Eight url-safe characters, the content hash Vite's own names carry and
+  // the hosts' caching reads as immutable (`isContentHashedName`).
+  const file = `theme-boot-${createHash('sha256').update(code).digest('base64url').slice(0, 8)}.js`;
+  let assetPath: string;
+  let src: string;
   return {
     name: 'dormouse-theme-boot',
     configResolved(config) {
@@ -28,14 +26,14 @@ export function themeBootPlugin(scope: string, fallback: ThemePaint, classes: re
       server.middlewares.use((req, res, next) => {
         if (req.url?.split('?')[0] !== src) return next();
         res.setHeader('content-type', 'text/javascript');
-        res.end(THEME_BOOT_SCRIPT);
+        res.end(code);
       });
     },
     generateBundle() {
-      this.emitFile({ type: 'asset', fileName: assetPath, source: THEME_BOOT_SCRIPT });
+      this.emitFile({ type: 'asset', fileName: assetPath, source: code });
     },
     transformIndexHtml() {
-      return [{ tag: 'script', attrs: { src, ...themeBootAttributes(scope, fallback, classes) }, injectTo: 'body-prepend' }];
+      return [{ tag: 'script', attrs: { src }, injectTo: 'body-prepend' }];
     },
   };
 }

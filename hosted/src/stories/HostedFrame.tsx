@@ -1,8 +1,7 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { paintThemeOnto, resolveThemeVars } from "dormouse-lib/lib/themes/apply";
-import { getBundledThemes } from "dormouse-lib/lib/themes/store";
-import { DOCS_THEMED_BODY_CLASS, paintDocsTokens } from "dormouse-lib/site/docs-paint";
+import { paintThemeOnto, themeBootPaint } from "dormouse-lib/lib/themes/apply";
+import { DOCS_PAINT_PROFILE, DOCS_THEMED_BODY_CLASS } from "dormouse-lib/site/docs-paint";
 import { DOCS_THEME_ID } from "dormouse-lib/site/docs-theme";
 import css from "../index.css?inline";
 
@@ -11,11 +10,8 @@ const LIGHT_THEME_ID = "vscode.theme-defaults.light-visual-studio";
 /** What `useDocsThemedBody` does to the top-level page, on the frame's own
  * document instead. */
 function paintFrame(doc: Document, themeId: string) {
-  const theme = getBundledThemes().find((candidate) => candidate.id === themeId)!;
-  const vars = resolveThemeVars(theme);
-  paintThemeOnto(doc.body, theme, vars);
+  paintThemeOnto(doc.body, themeBootPaint({ ...DOCS_PAINT_PROFILE, defaultThemeId: themeId }));
   doc.body.classList.add(DOCS_THEMED_BODY_CLASS);
-  paintDocsTokens(doc.body, theme, vars);
 }
 
 const DOCUMENT = '<!doctype html><html lang="en"><head><meta charset="utf-8"></head><body><div id="hosted-root"></div></body></html>';

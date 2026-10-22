@@ -184,8 +184,8 @@ describe("docs muted text colour", () => {
 
   it("agrees with the static fallback site.css declares", () => {
     // The site's own palette is fixed, so its muted level is precomputed there
-    // rather than left to `useDocsThemedBody` — otherwise the prerendered page
-    // has no muted level at all. Keep the two in step.
+    // rather than left to the docs paint, which a reader with no JS never
+    // gets. Keep the two in step.
     const css = readFileSync(new URL("./site.css", import.meta.url), "utf8");
     const declared = css.match(/--docs-text-muted:\s*(#[0-9a-f]{6})/i)?.[1];
     expect(declared).toBe(docsMutedTextFor("#dedede", "#000000"));

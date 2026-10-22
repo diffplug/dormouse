@@ -154,7 +154,7 @@ Implementation evidence: `hosted/src/index.css`, `hosted/src/classes.ts`, `hoste
 
 ## Colors
 
-Every color is a shared variable from `lib/src/site/site.css`, repainted per theme by `paintDocsTokens`; Hosted adds no color of its own.
+Every color is a shared variable from `lib/src/site/site.css`, repainted per theme by `docsTokensFor`; Hosted adds no color of its own.
 
 ### Primary
 

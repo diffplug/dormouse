@@ -1,22 +1,17 @@
 /**
- * Paints the docs pages' derived tokens from a bundled theme: the dormouse.sh
- * reference pages and Hosted's account pages, which continue them.
+ * Paints the docs pages' theme: the dormouse.sh reference pages and Hosted's
+ * account pages, which continue them.
  *
- * site.css gives each token a fallback for the site's own black, so a page
- * with no JS still reads; this replaces them with the picked theme's own
- * accent, muted text, and verdict colors, each corrected to WCAG AA
- * (`./contrast` lives with the themes: `lib/src/lib/themes/contrast.ts`).
+ * site.css gives each derived token a fallback for the site's own black, so a
+ * page with no JS still reads; the docs paint profile replaces them with the
+ * picked theme's own accent, muted text, and verdict colors, each corrected to
+ * WCAG AA (`./contrast` lives with the themes: `lib/src/lib/themes/contrast.ts`).
  */
-import { useEffect, useLayoutEffect, type CSSProperties } from "react";
-import {
-  getAppliedThemeSnapshot,
-  resolveThemeVars,
-  subscribeToActiveTheme,
-} from "../lib/themes/apply";
-import { rememberThemePaint, themePaintFor, type ThemePaint } from "../lib/themes/boot-paint";
-import { getBundledThemes } from "../lib/themes/store";
+import type { CSSProperties } from "react";
+import { setThemePaintProfile, type ThemePaintProfile } from "../lib/themes/boot-paint";
 import type { DormouseTheme } from "../lib/themes/types";
 import { useRestoredTheme } from "../lib/themes/use-restored-theme";
+import { useBrowserLayoutEffect } from "../lib/use-browser-layout-effect";
 import {
   compositeColor,
   docsAccentFor,
@@ -26,8 +21,6 @@ import {
 } from "../lib/themes/contrast";
 import { DOCS_STATUS_COLORS, TINTED_DOCS_SURFACES, type DocsSurfaceVariants } from "./docs-tokens";
 import { DOCS_THEME_ID } from "./docs-theme";
-
-const useBrowserLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
 /** Repaints the site's own tokens from the picked theme; see site.css. */
 export const DOCS_THEMED_BODY_CLASS = "docs-themed";
@@ -45,8 +38,8 @@ export const SITE_CARAMEL = "#b47624";
 
 /**
  * The derived `--docs-*` tokens for `theme`, whose resolved `--vscode-*`
- * values are `resolvedVars`. Pure, so a build can bake them into a page's
- * first frame (`docsBootPaint`).
+ * values are `resolvedVars`: the docs profile's `derive`. Pure, so a build
+ * can bake them into a page's first frame.
  *
  * A tint layer's colour is what its variable resolves to on a docs page:
  * `--color-text` the theme's foreground (site.css's `.docs-themed` remap) and
@@ -103,52 +96,24 @@ export function docsTokensFor(
   return tokens;
 }
 
-/** Writes `docsTokensFor` onto `body`; takes the body rather than reading
- *  `document`, so a story can paint a page inside its own frame. */
-export function paintDocsTokens(
-  body: HTMLElement,
-  theme: DormouseTheme,
-  resolvedVars: Record<string, string>,
-) {
-  for (const [name, value] of Object.entries(docsTokensFor(theme, resolvedVars))) {
-    body.style.setProperty(name, value);
-  }
-}
+/** How a docs page paints: the docs default, the derived tokens, and the
+ *  class that remaps the site's palette onto the theme. */
+export const DOCS_PAINT_PROFILE: ThemePaintProfile = {
+  defaultThemeId: DOCS_THEME_ID,
+  derive: docsTokensFor,
+  classes: [DOCS_THEMED_BODY_CLASS],
+};
 
-/** A docs page's first frame for a reader who has picked nothing yet: the
- *  docs default theme, painted as `useDocsThemedBody` paints it. */
-export function docsBootPaint(): ThemePaint {
-  const theme = getBundledThemes().find(({ id }) => id === DOCS_THEME_ID)!;
-  const vars = resolveThemeVars(theme);
-  return themePaintFor(theme, { ...vars, ...docsTokensFor(theme, vars) });
-}
-
-/**
- * Puts the page on the reader's picked theme (the docs default until they
- * pick) and keeps the derived tokens painted from it.
- */
+/** Puts the page on the reader's picked theme (the docs default until they
+ *  pick), painted through `DOCS_PAINT_PROFILE`. */
 export function useDocsThemedBody() {
+  // Before the restore, which paints through it.
+  setThemePaintProfile(DOCS_PAINT_PROFILE);
   useRestoredTheme(DOCS_THEME_ID);
-  // Layout effects, so neither lands a frame after the theme: a hydration
-  // that resets <body> is repainted before the browser draws it.
+  // A layout effect, so a hydration that resets <body> is repaired before
+  // the browser draws it.
   useBrowserLayoutEffect(() => {
     document.body.classList.add(DOCS_THEMED_BODY_CLASS);
     return () => document.body.classList.remove(DOCS_THEMED_BODY_CLASS);
-  }, []);
-
-  // The applied snapshot, not the stored id: `getActiveThemeId` already falls
-  // back to the first bundled theme, so a reader without storage would get the
-  // page painted in one theme and its links derived from another's accent the
-  // moment those two stop coinciding. Left alone, `--docs-accent` keeps the
-  // value site.css gives it, so a reader with no JS still gets a legible one.
-  useBrowserLayoutEffect(() => {
-    const paint = () => {
-      const snapshot = getAppliedThemeSnapshot();
-      if (!snapshot) return;
-      paintDocsTokens(document.body, snapshot.theme, snapshot.resolvedVars);
-      rememberThemePaint();
-    };
-    paint();
-    return subscribeToActiveTheme(paint);
   }, []);
 }

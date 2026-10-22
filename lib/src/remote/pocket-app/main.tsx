@@ -6,9 +6,10 @@ import { registerPushServiceWorker } from './service-worker';
 import { takePairingHash } from './pair-link';
 import { purgeLegacyPairedMarkers } from '../client/pocket-client';
 
-// Apply the theme to <body> before first paint so the auth screens — not just
-// the terminal wall — render with the shared VSCode `--color-*` tokens present
-// (docs/specs/theme.md, docs/specs/pocket-app.md).
+// Apply the theme to <body> before the first render so the auth screens — not
+// just the terminal wall — render with the shared VSCode `--color-*` tokens
+// present (docs/specs/theme.md, docs/specs/pocket-app.md). The shell's boot tag
+// painted it before first paint.
 restorePocketTheme();
 
 // Erase a `#pair?` fragment before the first render, and here rather than

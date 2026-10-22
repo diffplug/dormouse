@@ -47,13 +47,14 @@ Source of truth: `applyTheme()` in `lib/src/lib/themes/apply.ts`; `installVscode
 
 ## First frame
 
-**Every browser page that restores a theme must carry the theme boot tag as the first child of `<body>`** — the docs pages, Hosted, Pocket, Standalone — which paints `body` before the first frame: the paint its scope last remembered on this origin, else the scope's fallback theme baked in at build (rationale). VS Code (host-owned theme) and the one-time page (keeps nothing) carry none.
+**Every browser page that restores a theme must carry the theme boot tag as the first child of `<body>`** — the docs pages, Hosted, Pocket, Standalone — which paints `body` before the first frame: the paint this origin last remembered, else its paint profile's default baked in at build (rationale). VS Code (host-owned theme) and the one-time page (keeps nothing) carry none.
 
-- **Each scope remembers its own paint** under `dormouse:theme-paint:<scope>`, rewritten after every `applyTheme` and docs-token paint.
+- **A page with the tag sets its paint profile before its first restore**, so `applyTheme` paints the profile's derived properties with each theme and remembers the result under `dormouse:theme-paint`. The build bakes the default from the same profile.
+- **A remembered paint is replayed only while its theme is still the one `dormouse:active-theme` names**, so a pick made on another page of the origin never replays a stale paint.
 - **The tag writes only custom properties**, the theme class, and `color-scheme`; a remembered paint with any other key loses to the baked one.
 - **A page whose `script-src` refuses inline scripts takes the tag as a file** under its assets directory; the website inlines it.
 
-Source of truth: `THEME_BOOT_SCRIPT` and `rememberThemePaint()` in `lib/src/lib/themes/boot-paint.ts`; `themeBootPlugin()` in `lib/src/lib/themes/boot-paint-plugin.ts`; `ThemeBootScript` in `lib/src/lib/themes/ThemeBootScript.tsx`.
+Source of truth: `themeBootScript()` and `ThemePaintProfile` in `lib/src/lib/themes/boot-paint.ts`; `themeBootPlugin()` in `lib/src/lib/themes/boot-paint-plugin.ts`; `ThemeBootScript` in `lib/src/lib/themes/ThemeBootScript.tsx`.
 
 ## Tool iframe themes
 

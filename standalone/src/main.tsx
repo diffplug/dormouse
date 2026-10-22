@@ -8,7 +8,8 @@ import { isMainWindow, listenToWindow, resolveWindowLabel } from "./window-label
 import { reopenClosed } from "dormouse-lib/components/wall/reopen";
 import { setWindowLabel } from "dormouse-lib/lib/workspace-store";
 import { seedShellStore } from "dormouse-lib/lib/shell-store";
-import { restoreActiveTheme } from "dormouse-lib/lib/themes";
+import { restoreActiveTheme, setThemePaintProfile } from "dormouse-lib/lib/themes";
+import { STANDALONE_PAINT_PROFILE } from "./theme-paint-profile";
 import App from "dormouse-lib/App";
 import "dormouse-lib/index.css";
 import { UpdateBanner } from "./UpdateBanner";
@@ -139,6 +140,7 @@ async function bootstrap() {
   }
   const { initAlertStateReceiver } = await import("dormouse-lib/lib/terminal-registry");
   initAlertStateReceiver();
+  setThemePaintProfile(STANDALONE_PAINT_PROFILE);
   restoreActiveTheme();
 
   // Seed the shell store from the active host backend: it restores the

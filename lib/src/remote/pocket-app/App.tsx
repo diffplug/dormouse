@@ -9,8 +9,8 @@
  * UI.
  *
  * The whole shell — auth screens included — renders on the shared `--vscode-*`
- * design tokens, restored to <body> before first paint by restorePocketTheme()
- * in main.tsx. Chrome draws only on the three list pairs — see
+ * design tokens, painted on <body> before first paint by the shell's boot tag
+ * and restored before the first render by restorePocketTheme() in main.tsx. Chrome draws only on the three list pairs — see
  * `pocket-chrome.tsx` and docs/specs/theme.md.
  */
 

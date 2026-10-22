@@ -18,7 +18,7 @@
  * theme is applied.
  *
  * `--docs-accent` holds that fallback chain, defined once in
- * ./site.css; `paintDocsTokens` (./docs-paint.ts) overwrites it with the corrected
+ * ./site.css; `docsTokensFor` (./docs-paint.ts) overwrites it with the corrected
  * accent once a theme resolves (lib/src/lib/themes/contrast.ts).
  */
 export const LINK_CLASS = "text-[var(--docs-accent)] underline-offset-2 hover:underline";
@@ -122,7 +122,7 @@ export type DocsSurfaceVariants = readonly (readonly { tintVar: string; tintAlph
  * *at* 4.5:1 against the untinted page: `NOTE_CLASS` paired with
  * `MUTED_TEXT_CLASS` measured 4.42:1 on the site's own palette. **Adding a
  * tinted container adds an entry here**, and nesting adds a `surfaceVariants`
- * stack — `paintDocsTokens` (./docs-paint.ts) and `lib/src/site/docs-accent.test.ts`
+ * stack — `docsTokensFor` (./docs-paint.ts) and `lib/src/site/docs-accent.test.ts`
  * both loop this list, so the CSS variable, the static fallback, and the
  * per-theme AA check come with it.
  *
@@ -162,7 +162,7 @@ export const TINTED_DOCS_SURFACES = [
  * yellow, and red, corrected to clear body-text AA on the page and on the 4%
  * card tint a highlighted table column sits on.
  *
- * `paintDocsTokens` (./docs-paint.ts) derives each token; ./site.css carries the
+ * `docsTokensFor` (./docs-paint.ts) derives each token; ./site.css carries the
  * fallback for the site's own black, and `lib/src/site/docs-accent.test.ts`
  * checks both. Never let colour carry a verdict alone: pair it with a shape.
  */

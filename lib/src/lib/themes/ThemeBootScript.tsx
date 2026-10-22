@@ -1,11 +1,14 @@
-import { THEME_BOOT_SCRIPT, themeBootAttributes, type ThemePaint } from './boot-paint';
+import { themeBootPaint } from './apply';
+import { themeBootScript, type ThemePaintProfile } from './boot-paint';
 
 /**
  * The theme boot tag (`./boot-paint.ts`) for a prerendered React page, inline:
- * render it first, so it is the first node in `<body>`. React never runs a
- * script it inserts itself, so it runs once, from the prerendered HTML, and a
- * client navigation only updates the scope `rememberThemePaint` reads.
+ * render it first, so it is the first node in `<body>`. Only the prerender
+ * fills it: the tag has run before hydration, and React never runs a script
+ * it inserts, so the client keeps the prerendered text rather than computing
+ * the paint again.
  */
-export function ThemeBootScript({ scope, paint, classes }: { scope: string; paint: ThemePaint; classes?: readonly string[] }) {
-  return <script {...themeBootAttributes(scope, paint, classes)} dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }} />;
+export function ThemeBootScript({ profile }: { profile: ThemePaintProfile }) {
+  const code = import.meta.env.SSR ? themeBootScript(themeBootPaint(profile), profile.classes) : '';
+  return <script suppressHydrationWarning dangerouslySetInnerHTML={{ __html: code }} />;
 }

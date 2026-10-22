@@ -1,8 +1,8 @@
 import type { DormouseTheme } from './types';
-import { getAllThemes, getStoredActiveThemeId, setActiveThemeId } from './store';
+import { getAllThemes, getBundledThemes, getStoredActiveThemeId, setActiveThemeId } from './store';
 import { completeThemeVars } from './vscode-color-resolver';
 import { flattenSelectionAlpha } from './flatten-alpha';
-import { rememberThemePaint } from './boot-paint';
+import { getThemePaintProfile, rememberThemePaint, type ThemePaint, type ThemePaintProfile } from './boot-paint';
 
 let appliedThemeSnapshot: AppliedThemeSnapshot | null = null;
 
@@ -18,7 +18,10 @@ export function subscribeToActiveTheme(listener: () => void): () => void {
 export interface AppliedThemeSnapshot {
   theme: DormouseTheme;
   providedVars: Record<string, string>;
+  /** What was painted on body: the resolved theme plus the page's derived
+   *  properties (`ThemePaintProfile.derive`). */
   resolvedVars: Record<string, string>;
+  profile: ThemePaintProfile | null;
 }
 
 const HOST_TYPOGRAPHY_VARS: Record<string, string> = {
@@ -55,33 +58,51 @@ function hasVisibleTheme(snapshot: AppliedThemeSnapshot): boolean {
   return true;
 }
 
-/** Writes a resolved theme onto a body: what `applyTheme` does to the page,
- *  without its bookkeeping, so a story frame can paint its own document. */
-export function paintThemeOnto(body: HTMLElement, theme: DormouseTheme, vars: Record<string, string>): void {
+/** `theme` as `applyTheme` paints it under `profile`. */
+function paintFor(theme: DormouseTheme, profile: ThemePaintProfile | null): ThemePaint {
+  const vars = resolveThemeVars(theme);
+  return {
+    themeId: theme.id,
+    kind: theme.type,
+    vars: profile?.derive ? { ...vars, ...profile.derive(theme, vars) } : vars,
+  };
+}
+
+/** What a reader who has picked nothing gets under `profile`, resolved as
+ *  `restoreActiveTheme` falls back: for a build to bake into the boot tag. */
+export function themeBootPaint(profile: ThemePaintProfile): ThemePaint {
+  const bundled = getBundledThemes();
+  return paintFor(bundled.find(({ id }) => id === profile.defaultThemeId) ?? bundled[0], profile);
+}
+
+/** Writes a paint onto a body: what `applyTheme` does to the page, without
+ *  its bookkeeping, so a story frame can paint its own document. The boot
+ *  tag's code (`./boot-paint.ts`) mirrors it. */
+export function paintThemeOnto(body: HTMLElement, { kind, vars }: ThemePaint): void {
   for (const [name, value] of Object.entries(vars)) {
     body.style.setProperty(name, value);
   }
 
-  if (theme.type === 'light') {
-    body.classList.add('vscode-light');
-    body.classList.remove('vscode-dark');
-  } else {
-    body.classList.add('vscode-dark');
-    body.classList.remove('vscode-light');
-  }
+  body.classList.add(`vscode-${kind}`);
+  body.classList.remove(kind === 'light' ? 'vscode-dark' : 'vscode-light');
 
   // Keep native-control polarity with the resolved theme, not the OS preference.
-  body.style.colorScheme = theme.type === 'light' ? 'light' : 'dark';
+  body.style.colorScheme = kind;
 }
 
 export function applyTheme(theme: DormouseTheme): void {
   if (typeof document === 'undefined') return;
-  if (theme === appliedThemeSnapshot?.theme && hasVisibleTheme(appliedThemeSnapshot)) return;
+  const profile = getThemePaintProfile();
+  if (
+    theme === appliedThemeSnapshot?.theme
+    && profile === appliedThemeSnapshot.profile
+    && hasVisibleTheme(appliedThemeSnapshot)
+  ) return;
 
   // Hydration may reapply a fresh object for the same installed theme; compare ids.
   const previousThemeId = appliedThemeSnapshot?.theme.id ?? null;
 
-  if (appliedThemeSnapshot && theme !== appliedThemeSnapshot.theme) {
+  if (appliedThemeSnapshot && (theme !== appliedThemeSnapshot.theme || profile !== appliedThemeSnapshot.profile)) {
     for (const name of Object.keys(appliedThemeSnapshot.resolvedVars)) {
       document.body.style.removeProperty(name);
     }
@@ -89,10 +110,10 @@ export function applyTheme(theme: DormouseTheme): void {
 
   // Materialized so theme.css can read --vscode-* directly without fallbacks.
   const providedVars = withHostTypography(theme.vars);
-  const vars = resolveThemeVars(theme);
-  appliedThemeSnapshot = { theme, providedVars, resolvedVars: vars };
-  paintThemeOnto(document.body, theme, vars);
-  rememberThemePaint();
+  const paint = paintFor(theme, profile);
+  appliedThemeSnapshot = { theme, providedVars, resolvedVars: paint.vars, profile };
+  paintThemeOnto(document.body, paint);
+  rememberThemePaint(paint);
 
   if (previousThemeId !== theme.id) {
     for (const listener of activeThemeListeners) listener();
@@ -109,8 +130,9 @@ export function setDefaultThemeId(id: string | null): void {
 /** Apply the persisted active theme. When nothing is persisted yet — or the
  *  persisted theme no longer resolves — fall back to `setDefaultThemeId`'s
  *  value if it names a known theme, otherwise to the first bundled theme.
- *  Idempotent and safe to call before render so the first paint already has
- *  --vscode-* set on body. Returns the theme that was applied, or null when no
+ *  Idempotent and safe to call before render, so the first render already
+ *  has --vscode-* set on body (before first paint, only the boot tag can:
+ *  `./boot-paint.ts`). Returns the theme that was applied, or null when no
  *  themes are available (e.g. SSR). */
 export function restoreActiveTheme(): DormouseTheme | null {
   const all = getAllThemes();

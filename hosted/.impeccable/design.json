@@ -6,10 +6,10 @@
     "colorMeta": {
       "page-bg": { "role": "neutral", "displayName": "Ground", "canonical": "var(--color-bg) (docs-themed: --vscode-editor-background)" },
       "page-fg": { "role": "neutral", "displayName": "Ink", "canonical": "var(--color-text) (docs-themed: --vscode-editor-foreground)" },
-      "accent": { "role": "primary", "displayName": "Docs Accent", "canonical": "var(--docs-accent), painted by paintDocsTokens in lib/src/site/docs-paint.ts" },
-      "muted": { "role": "neutral", "displayName": "Muted", "canonical": "var(--docs-text-muted), painted by paintDocsTokens" },
-      "code-muted": { "role": "neutral", "displayName": "Code Muted", "canonical": "var(--docs-code-text-muted), painted by paintDocsTokens" },
-      "bad": { "role": "neutral", "displayName": "Bad", "canonical": "var(--docs-status-bad), painted by paintDocsTokens" },
+      "accent": { "role": "primary", "displayName": "Docs Accent", "canonical": "var(--docs-accent), painted by docsTokensFor in lib/src/site/docs-paint.ts" },
+      "muted": { "role": "neutral", "displayName": "Muted", "canonical": "var(--docs-text-muted), painted by docsTokensFor" },
+      "code-muted": { "role": "neutral", "displayName": "Code Muted", "canonical": "var(--docs-code-text-muted), painted by docsTokensFor" },
+      "bad": { "role": "neutral", "displayName": "Bad", "canonical": "var(--docs-status-bad), painted by docsTokensFor" },
       "caramel": { "role": "primary", "displayName": "Caramel", "canonical": "var(--color-caramel), @theme in lib/src/site/site.css" },
       "rule": { "role": "neutral", "displayName": "Hairline Rule", "canonical": "--color-text at 15%" }
     },

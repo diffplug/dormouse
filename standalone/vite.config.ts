@@ -5,13 +5,7 @@ import { buildStampVitePlugin } from "../scripts/build-stamp.mjs";
 import { relayDefineVitePlugin, relayOriginDefine, resolveRelayOrigin } from "../scripts/relay-origin.mjs";
 import { workspaceSourceAliases } from "../scripts/workspace-sources.mjs";
 import { themeBootPlugin } from "../lib/src/lib/themes/boot-paint-plugin";
-import { resolveThemeVars } from "../lib/src/lib/themes/apply";
-import { themePaintFor } from "../lib/src/lib/themes/boot-paint";
-import { getBundledThemes } from "../lib/src/lib/themes/store";
-
-// The app restores with no default of its own, so a first launch takes the
-// first bundled theme (`restoreActiveTheme`).
-const [firstTheme] = getBundledThemes();
+import { STANDALONE_PAINT_PROFILE } from "./src/theme-paint-profile";
 
 // https://v2.tauri.app/start/frontend/vite/
 const host = process.env.TAURI_DEV_HOST;
@@ -23,7 +17,7 @@ export default defineConfig(({ command }) => ({
     tailwindcss(),
     relayDefineVitePlugin(),
     buildStampVitePlugin({ host: "standalone" }),
-    themeBootPlugin("app", themePaintFor(firstTheme, resolveThemeVars(firstTheme))),
+    themeBootPlugin(STANDALONE_PAINT_PROFILE),
   ],
   // The relay pair the sidecar bakes, under the same rule: the dev server is a
   // dev build and `vite build` a release one, which fails if the define did not

@@ -3,9 +3,9 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { workspaceSourceAliases } from "../scripts/workspace-sources.mjs";
 import { themeBootPlugin } from "../lib/src/lib/themes/boot-paint-plugin";
-import { DOCS_THEMED_BODY_CLASS, docsBootPaint } from "../lib/src/site/docs-paint";
+import { DOCS_PAINT_PROFILE } from "../lib/src/site/docs-paint";
 export default defineConfig({
-  plugins: [react(), tailwindcss(), themeBootPlugin("docs", docsBootPaint(), [DOCS_THEMED_BODY_CLASS])],
+  plugins: [react(), tailwindcss(), themeBootPlugin(DOCS_PAINT_PROFILE)],
   resolve: { alias: workspaceSourceAliases() },
   // Each Worker's static files build under `dist/<worker>/`.
   build: { outDir: "dist/account", sourcemap: false },

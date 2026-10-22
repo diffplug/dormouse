@@ -34,17 +34,17 @@
    a var() in a declaration on html cannot read a property set on its child, so
    the chain would silently collapse to the caramel fallback on every theme —
    the exact contrast failure the fallback exists to avoid. Unscoped by
-   `.docs-themed` so it still resolves during prerender, before
-   `useDocsThemedBody` adds that class. */
+   `.docs-themed` so it still resolves with no JS, where nothing adds that
+   class. */
 body {
   --docs-accent: var(--vscode-textLink-foreground, var(--color-caramel));
   /* The site's caramel already clears AA against its strongest (20%) button
-     tint. `paintDocsTokens` replaces this alias with the theme-derived correction. */
+     tint. `docsTokensFor` replaces this alias with the theme-derived correction. */
   --docs-button-text: var(--docs-accent);
   /* #767676 is `docsMutedTextFor("#dedede", "#000000")` — the site's own
      palette, precomputed. A fallback of the plain foreground would leave every
-     muted element identical to body text until `useDocsThemedBody` paints, which
-     is the whole prerendered page and the no-JS reading of it.
+     muted element identical to body text in the no-JS reading of the page,
+     where nothing paints the derived tokens.
      `docs-accent.test.ts` pins the value. */
   --docs-text-muted: #767676;
   /* #787878 is the same foreground derived against the 4% card surface,
@@ -78,7 +78,8 @@ html {
 
 /* Reference pages, and Hosted's account pages, follow the reader's picked
    theme instead of the site's black; the rest of the site is unaffected
-   because only `useDocsThemedBody` (./docs-paint.ts) adds the class.
+   because only a docs page's boot tag and `useDocsThemedBody`
+   (./docs-paint.ts, `DOCS_PAINT_PROFILE`) add the class.
 
    `applyTheme` writes --vscode-* onto body.style, so the remap has to live on
    body too — html cannot read a custom property set on its child. That leaves
