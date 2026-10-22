@@ -25,6 +25,7 @@ import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { repoRoot, readRepoFile, trackedFiles } from './lint-kit.mjs';
 import { collectDocsSurfaces } from './docs-surfaces.mjs';
+import { WORKSPACE_SOURCES } from './workspace-sources.mjs';
 import {
   hasScheme,
   inlineToText,
@@ -82,7 +83,12 @@ function docsSurfaces() {
     `${WEBSITE_SRC}/components/DocsLayout.tsx`,
     ...DOCS_PAGES.map((page) => `${WEBSITE_SRC}/${page.module.replace(/^\.\//, '')}`),
   ];
-  const { surfaces, missingSeeds } = collectDocsSurfaces(seed, trackedFiles(), readRepoFile);
+  // The docs design shared with Hosted lives in lib (`lib/src/site/`); its
+  // own imports of the rest of lib are app UI, not reference page text.
+  const { surfaces, missingSeeds } = collectDocsSurfaces(seed, trackedFiles(), readRepoFile, {
+    aliases: { 'dormouse-lib/': `${WORKSPACE_SOURCES['dormouse-lib']}/` },
+    roots: [`${WEBSITE_SRC}/`, `${WORKSPACE_SOURCES['dormouse-lib']}/site/`],
+  });
   for (const rel of missingSeeds) fail(`${rel}: docsSurfaces seed names a file that does not exist`);
   return surfaces;
 }
@@ -522,7 +528,7 @@ async function checkGenerated() {
  * The reference pages must not render text in a translucent colour.
  *
  * `docs/specs/website-docs.md` -> "Reference page chrome" states the rule, and
- * `website/src/lib/docs-accent.ts` supplies the replacement: an opaque colour
+ * `lib/src/lib/themes/contrast.ts` supplies the replacement: an opaque colour
  * walked toward the background only as far as WCAG AA allows. Translucency
  * cannot do that — it composites against whatever surface it lands on, so the
  * same class measured 5.03:1 on one bundled theme and 2.01:1 on another.
@@ -551,7 +557,7 @@ function checkNoDimmedDocsText() {
         'An aria-hidden "/" separating the rail crumb from the page title. '
         + 'Decoration, never read, and not a contrast surface.',
     },
-    [`${WEBSITE_SRC}/components/DocsThemeControl.tsx`]: {
+    ['lib/src/site/DocsThemeControl.tsx']: {
       'opacity-50':
         'The theme prompt\'s dismiss button — an icon affordance that comes to '
         + 'full strength on hover, not body copy.',
@@ -576,7 +582,7 @@ function checkNoDimmedDocsText() {
     const unexplained = [...hits].filter((hit) => !(hit in allowed));
     if (unexplained.length === 0) continue;
     fail(`${rel}: dims text with ${unexplained.join(', ')} — use MUTED_TEXT_CLASS `
-      + '(website/src/components/docs-tokens.ts), or add an ALLOWED entry in '
+      + '(lib/src/site/docs-tokens.ts), or add an ALLOWED entry in '
       + 'scripts/public-docs-lint.mjs saying why this one is not reading text.');
   }
 

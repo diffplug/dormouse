@@ -2,7 +2,8 @@
   "extends": "../tsconfig.workspace-sources.json",
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["ES2023"],
+    // DOM: the Pocket build bakes its first frame from the theme modules.
+    "lib": ["ES2023", "DOM"],
     "module": "ESNext",
     "skipLibCheck": true,
     "moduleResolution": "bundler",

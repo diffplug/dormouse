@@ -1,36 +1,40 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { SNAPSHOT_EDITOR_FONT_FAMILY } from "../../../lib/.storybook/themes";
-import { applyHostedTheme } from "../theme";
-import css from "../style.css?inline";
+import { paintThemeOnto, themeBootPaint } from "dormouse-lib/lib/themes/apply";
+import { DOCS_PAINT_PROFILE, DOCS_THEMED_BODY_CLASS } from "dormouse-lib/site/docs-paint";
+import { DOCS_THEME_ID } from "dormouse-lib/site/docs-theme";
+import css from "../index.css?inline";
 
-declare const __ARGOS_SNAPSHOT__: true | undefined;
-// The same glyph fallback lib's preview pins for Argos (`lib/.storybook/themes.ts`).
-const snapshotFonts: Record<string, string> = typeof __ARGOS_SNAPSHOT__ !== "undefined"
-  ? { "--vscode-editor-font-family": SNAPSHOT_EDITOR_FONT_FAMILY }
-  : {};
+const LIGHT_THEME_ID = "vscode.theme-defaults.light-visual-studio";
+
+/** What `useDocsThemedBody` does to the top-level page, on the frame's own
+ * document instead. */
+function paintFrame(doc: Document, themeId: string) {
+  paintThemeOnto(doc.body, themeBootPaint({ ...DOCS_PAINT_PROFILE, defaultThemeId: themeId }));
+  doc.body.classList.add(DOCS_THEMED_BODY_CLASS);
+}
 
 const DOCUMENT = '<!doctype html><html lang="en"><head><meta charset="utf-8"></head><body><div id="hosted-root"></div></body></html>';
 
-/** Production CSS and theme in a separate document: neither Tailwind's reset
- * nor the surrounding docs/toolbar palette participates in this page. */
-export function HostedFrame({ children, phone = false, dark = false }: {
+/** Production CSS and theme in a separate document: neither lib's own
+ * Tailwind theme nor the surrounding Storybook palette reaches this page. */
+export function HostedFrame({ children, phone = false, light = false }: {
   children: ReactNode;
   phone?: boolean;
-  dark?: boolean;
+  light?: boolean;
 }) {
   const iframe = useRef<HTMLIFrameElement>(null);
   const [doc, setDoc] = useState<Document | null>(null);
   const [width, minimumHeight] = phone ? [390, 844] : [1200, 900];
   useLayoutEffect(() => {
-    if (doc) applyHostedTheme(doc, dark, snapshotFonts);
-  }, [doc, dark]);
+    if (doc) paintFrame(doc, light ? LIGHT_THEME_ID : DOCS_THEME_ID);
+  }, [doc, light]);
   useLayoutEffect(() => {
     if (!doc) return;
     const style = doc.createElement("style");
     // 100svh would grow with the measured iframe, preventing it from shrinking
     // after a shorter state. Pin only its minimum to the simulated viewport.
-    style.textContent = `${css}\n.shell { min-height: ${minimumHeight}px; }`;
+    style.textContent = `${css}\n[data-hosted-shell] { min-height: ${minimumHeight}px; }`;
     doc.head.append(style);
     const frame = iframe.current!;
     const bodyRoot = doc.getElementById("hosted-root")!;

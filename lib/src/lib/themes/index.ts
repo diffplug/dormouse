@@ -7,9 +7,12 @@ export {
   restoreActiveTheme,
   setDefaultThemeId,
   subscribeToActiveTheme,
+  themeBootPaint,
 } from './apply';
 export type { AppliedThemeSnapshot } from './apply';
 export { useRestoredTheme } from './use-restored-theme';
+export { getThemePaintProfile, setThemePaintProfile, themeBootScript } from './boot-paint';
+export type { ThemePaint, ThemePaintProfile } from './boot-paint';
 export {
   computeDynamicPalette,
   DYNAMIC_PALETTE_SOURCES,

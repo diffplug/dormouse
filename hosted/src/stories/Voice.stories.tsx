@@ -22,7 +22,7 @@ export const ConfirmTurnOff: Story = {
     await settledFrame(canvasElement);
   },
 };
-export const ConfirmDark: Story = { ...ConfirmTurnOff, args: { dark: true } };
+export const ConfirmLight: Story = { ...ConfirmTurnOff, args: { light: true } };
 export const TurningOff: Story = {
   args: { busy: "voice-off" },
   play: async ({ canvasElement }) => {

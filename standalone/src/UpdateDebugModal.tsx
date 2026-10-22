@@ -5,7 +5,7 @@ import {
   modalActionButton,
   modalReviewBlock,
 } from '../../lib/src/components/design';
-import { writeTextToClipboard } from 'dormouse-lib/lib/clipboard';
+import { writeTextToClipboard } from 'dormouse-lib/lib/clipboard-write';
 import { openIssueSearch } from './updater';
 
 interface UpdateDebugModalProps {

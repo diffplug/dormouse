@@ -1,4 +1,4 @@
-import { CARD_CLASS, CARD_MUTED_TEXT_CLASS, LINK_CLASS } from "./docs-tokens";
+import { CARD_CLASS, CARD_MUTED_TEXT_CLASS, LINK_CLASS } from "dormouse-lib/site/docs-tokens";
 
 /** `auditIndex` in `website/src/data/docs.security.json`, as `auditIndex` in website/scripts/generate-docs.js builds it. */
 export type AuditIndexData = {

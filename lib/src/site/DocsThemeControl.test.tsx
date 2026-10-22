@@ -5,10 +5,10 @@ import { act } from "react";
 import { createRoot, hydrateRoot, type Root } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getBundledThemes, setActiveThemeId } from "dormouse-lib/lib/themes";
+import { getBundledThemes, setActiveThemeId } from "../lib/themes";
 
 import DocsThemeControl from "./DocsThemeControl";
-import { dismissThemePrompt } from "../lib/docs-theme";
+import { dismissThemePrompt } from "./docs-theme";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 

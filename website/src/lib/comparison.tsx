@@ -7,7 +7,7 @@
  * a type error rather than a blank cell.
  */
 import type { ReactNode } from "react";
-import { LINK_CLASS } from "../components/docs-tokens";
+import { LINK_CLASS } from "dormouse-lib/site/docs-tokens";
 import { sitePath } from "./site-meta";
 
 export type Support = "yes" | "partial" | "no" | "unknown";

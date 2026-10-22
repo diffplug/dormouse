@@ -43,7 +43,9 @@ export function Layout({ children }: { children: ReactNode }) {
         <style>{FONT_READY_STYLE}</style>
         <script dangerouslySetInnerHTML={{ __html: FONT_READY_SCRIPT }} />
       </head>
-      <body>
+      {/* A docs page's theme boot tag paints <body> before hydration
+          (DocsLayout). */}
+      <body suppressHydrationWarning>
         {children}
         <ScrollRestoration />
         <Scripts />

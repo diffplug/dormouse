@@ -1,4 +1,4 @@
-import { writeTextToClipboard } from './clipboard';
+import { writeTextToClipboard } from './clipboard-write';
 import { editorRendering } from './copy-editor';
 import { COPY_FLASH_MS, failCopy, flashCopy, getMouseSelectionState, TOUCH_COPY_FLASH_MS } from './mouse-selection';
 

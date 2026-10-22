@@ -23,6 +23,7 @@ pnpm build       # build lib, vscode extension, Pocket, website, and Hosted
 - **`lib/`** — Shared React + TailwindCSS frontend library: components, tests, Storybook.
   - `lib/src/lib/platform/` — platform abstraction (`PlatformAdapter` interface, fake + VSCode adapters)
   - `lib/src/host/` — Node-side host modules bundled into both hosts: the iframe proxy, the agent-browser host, and `remote/` (the `BurrowService` both hosts run)
+  - `lib/src/site/` — the dormouse.sh docs design the website and Hosted are both built from
   - `lib/src/remote/` — remote control: `burrow/` (laptop side: protocol-v1 session, security, the webview's responder + pairing UI), `client/` (phone-side protocol + `RemotePtyAdapter`), `pocket-app/` (Pocket shell), `one-time-app/` (the one-time phone page Hosted serves), `direct/` (the WebRTC direct path both ends run), `ws.ts` (shared socket surface)
 - **`standalone/`** — Tauri desktop app (Rust + Vite frontend).
   - `standalone/sidecar/` — Node.js PTY manager (native PTY via node-pty, direct-path WebRTC via node-datachannel), bundled as the Tauri sidecar

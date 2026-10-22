@@ -1,0 +1,27 @@
+/*
+ * Hosted continues the dormouse.sh reference pages it is linked from
+ * (docs/specs/hosted.md -> "Interface"), so it is built from the same design:
+ * lib/src/site/ holds the @theme, the docs tokens, the header, and the theme
+ * control, and this file only wires them up.
+ *
+ * `source(none)` with explicit @source lines: the Storybook frame compiles
+ * this file from lib's working directory, where automatic detection would
+ * scan the wrong tree.
+ */
+@import "tailwindcss" source(none);
+/* Served from this origin, not a font host (docs/specs/security-hosted.md). */
+@import "@fontsource/ubuntu-mono/400.css";
+@import "@fontsource/ubuntu-sans-mono/400.css";
+/* The colour half of lib's theme, for the theme picker. */
+@import "../../lib/src/theme-colors.css";
+@import "../../lib/src/site/site.css";
+
+@source ".";
+
+body {
+  min-width: 280px;
+  caret-color: var(--docs-accent);
+}
+::selection {
+  background: color-mix(in srgb, var(--docs-accent) 35%, transparent);
+}

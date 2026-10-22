@@ -1,5 +1,6 @@
 /**
- * The docs pages' link colour, derived from the theme the reader picked.
+ * The docs pages' link colour, derived from the theme the reader picked —
+ * and Hosted's, which continues those pages (`lib/src/site/docs-paint.ts`).
  *
  * **Never** take it from `--vscode-textLink-foreground`. No bundled theme
  * defines `textLink.foreground`, so that variable always resolves to the
@@ -18,7 +19,7 @@
  * more with the background, stopping at the first step that clears the
  * threshold, so a theme keeps as much of its accent as contrast allows.
  * Pinned by
- * `website/src/lib/docs-accent.test.ts`, which checks every bundled theme.
+ * `lib/src/site/docs-accent.test.ts`, which checks every bundled theme.
  */
 
 /** WCAG AA for body text. */

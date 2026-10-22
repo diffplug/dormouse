@@ -1,4 +1,5 @@
-import { readTextFromClipboard, writeTextToClipboard } from '../../../lib/clipboard';
+import { readTextFromClipboard } from '../../../lib/clipboard';
+import { writeTextToClipboard } from '../../../lib/clipboard-write';
 import { isTerminalInputProxy, setNativeFieldValue } from '../../../lib/dom';
 import { getPlatform } from '../../../lib/platform';
 import { hasCopyModifier, hasPasteModifier } from './chords';

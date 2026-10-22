@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ACCENT_BORDER_CLASS, ACTION_TEXT_CLASS, LINK_CLASS, MUTED_TEXT_CLASS } from "./docs-tokens";
+import { ACCENT_BORDER_CLASS, ACTION_TEXT_CLASS, FIELD_CLASS, FIELD_TEXT_CLASS, LINK_CLASS, MUTED_TEXT_CLASS } from "dormouse-lib/site/docs-tokens";
 import { SITE_LINK_CLASS } from "./site-tokens";
 
 const EMAIL_STORAGE_PREFIX = "dormouse:notify-email:";
@@ -25,7 +25,7 @@ const PALETTE = {
     border: ACCENT_BORDER_CLASS,
     background: "bg-[var(--docs-accent)]/10 hover:bg-[var(--docs-accent)]/20",
     muted: MUTED_TEXT_CLASS,
-    input: "text-[var(--color-text)] placeholder:text-[var(--docs-text-muted)] focus:border-[var(--docs-accent)]",
+    input: FIELD_TEXT_CLASS,
     link: LINK_CLASS,
   },
 } as const;
@@ -81,7 +81,7 @@ export function NotifySignupForm({
             placeholder="you@example.com"
             required
             autoComplete="email"
-            className={`min-h-12 w-full rounded-md border border-[var(--color-text)]/50 bg-[var(--color-bg)] px-4 py-3 text-base focus:outline-none sm:flex-1 ${palette.input}`}
+            className={`${FIELD_CLASS} sm:flex-1 ${palette.input}`}
           />
           <button
             type="submit"

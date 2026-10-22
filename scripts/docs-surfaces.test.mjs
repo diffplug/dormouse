@@ -28,3 +28,16 @@ test('missing seeds are reported and absent imports are never read', () => {
     return source[rel];
   }), { surfaces: ['src/Page.tsx'], missingSeeds: ['src/Missing.tsx'] });
 });
+
+test('aliased imports are followed and the walk stays inside its roots', () => {
+  const source = {
+    'website/src/pages/Guide.tsx': `import Control from 'dormouse-lib/site/Control'; import { x } from 'dormouse-lib/other';`,
+    'lib/src/site/Control.tsx': `import { Picker } from '../components/Picker'; import { tokens } from './tokens';`,
+    'lib/src/site/tokens.ts': '',
+    'lib/src/components/Picker.tsx': '',
+  };
+  assert.deepEqual(collectDocsSurfaces(['website/src/pages/Guide.tsx'], Object.keys(source), rel => source[rel], {
+    aliases: { 'dormouse-lib/site/': 'lib/src/site/' },
+    roots: ['website/src/', 'lib/src/site/'],
+  }), { surfaces: ['lib/src/site/Control.tsx', 'website/src/pages/Guide.tsx'], missingSeeds: [] });
+});

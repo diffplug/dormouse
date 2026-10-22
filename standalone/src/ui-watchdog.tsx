@@ -6,7 +6,7 @@
  */
 import { useEffect, useSyncExternalStore } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { writeTextToClipboard } from "dormouse-lib/lib/clipboard";
+import { writeTextToClipboard } from "dormouse-lib/lib/clipboard-write";
 import { BaseboardNotice } from "./BaseboardNotice";
 
 interface UiRestartNotice {

@@ -9,14 +9,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /** The installed adapter's native write; absent unless a test sets it. */
 let nativeWrite: ((text: string) => Promise<void>) | undefined;
-vi.mock('./platform', () => {
-  const platform = () => (nativeWrite ? { writeClipboardText: nativeWrite } : {});
-  return { IS_MAC: false, IS_WINDOWS: false, PLATFORM_STRING: 'Linux', getPlatform: platform, getPlatformOrNull: platform };
+vi.mock('./platform/current', () => {
+  return { getPlatformOrNull: () => (nativeWrite ? { writeClipboardText: nativeWrite } : {}) };
 });
-vi.mock('./mouse-selection', () => ({ getMouseSelectionState: () => ({ bracketedPaste: false }) }));
-vi.mock('./terminal-registry', () => ({ getDefaultShellOpts: () => null, getTerminalShellKind: () => null, writeUserInput: () => {} }));
 
-import { writeTextToClipboard } from './clipboard';
+import { writeTextToClipboard } from './clipboard-write';
 import { dismissClipboardFailure, getClipboardFailure, recordInput } from './clipboard-failure';
 
 /** What each `execCommand('copy')` copied: a `copy` listener's `setData`,

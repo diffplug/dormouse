@@ -29,8 +29,8 @@ vi.mock('./platform', async () => {
   return { ...actual, getPlatform: () => fakePlatform };
 });
 
-vi.mock('./clipboard', () => ({ writeTextToClipboard: vi.fn() }));
-import { writeTextToClipboard } from './clipboard';
+vi.mock('./clipboard-write', () => ({ writeTextToClipboard: vi.fn() }));
+import { writeTextToClipboard } from './clipboard-write';
 import { copySelection } from './copy-selection';
 
 import { flipCopyBreak, openCopyEditor, setCopyFormat, setCopyScope } from './copy-editor';

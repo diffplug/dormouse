@@ -35,10 +35,14 @@ export const TERMINAL_TOP_RADIUS_CLASS = 'rounded-t-lg';
 export const TERMINAL_BOTTOM_RADIUS_CLASS = 'rounded-b-lg';
 export const TERMINAL_SELECTION_BORDER_RADIUS = `${TERMINAL_BORDER_RADIUS_REM}rem`;
 
+/** A Door's shape and size, without the app's type: also drawn by Hosted,
+ *  whose page sets its own face. */
+export const DOOR_SHAPE_CLASS = clsx('h-6 min-w-[68px] text-sm', TERMINAL_TOP_RADIUS_CLASS);
+
 /** Shared shape, size bounds, and type for Baseboard Doors and Workspace tabs. */
 export const DOOR_TAB_CLASS = clsx(
-  'relative flex h-6 max-w-[220px] min-w-[68px] items-center overflow-hidden text-sm font-medium font-mono',
-  TERMINAL_TOP_RADIUS_CLASS,
+  'relative flex max-w-[220px] items-center overflow-hidden font-medium font-mono',
+  DOOR_SHAPE_CLASS,
 );
 
 /** A Workspace name the app derived rather than one a user set

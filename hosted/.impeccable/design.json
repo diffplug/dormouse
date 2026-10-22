@@ -1,75 +1,133 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-09-11T22:45:00Z",
+  "generatedAt": "2026-10-21T00:00:00Z",
   "title": "Design System: Dormouse Hosted",
   "extensions": {
-    "breakpoints": [{ "name": "compact", "value": "540px" }]
+    "colorMeta": {
+      "page-bg": { "role": "neutral", "displayName": "Ground", "canonical": "var(--color-bg) (docs-themed: --vscode-editor-background)" },
+      "page-fg": { "role": "neutral", "displayName": "Ink", "canonical": "var(--color-text) (docs-themed: --vscode-editor-foreground)" },
+      "accent": { "role": "primary", "displayName": "Docs Accent", "canonical": "var(--docs-accent), painted by docsTokensFor in lib/src/site/docs-paint.ts" },
+      "muted": { "role": "neutral", "displayName": "Muted", "canonical": "var(--docs-text-muted), painted by docsTokensFor" },
+      "code-muted": { "role": "neutral", "displayName": "Code Muted", "canonical": "var(--docs-code-text-muted), painted by docsTokensFor" },
+      "bad": { "role": "neutral", "displayName": "Bad", "canonical": "var(--docs-status-bad), painted by docsTokensFor" },
+      "caramel": { "role": "primary", "displayName": "Caramel", "canonical": "var(--color-caramel), @theme in lib/src/site/site.css" },
+      "rule": { "role": "neutral", "displayName": "Hairline Rule", "canonical": "--color-text at 15%" }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "Page heading (PAGE_TITLE_CLASS)." },
+      "headline": { "displayName": "Headline", "purpose": "Dialog heading." },
+      "title": { "displayName": "Title", "purpose": "Section headings; wordmark size." },
+      "intro": { "displayName": "Intro", "purpose": "Muted line under the heading (PAGE_INTRO_CLASS)." },
+      "body": { "displayName": "Body", "purpose": "Reading text, text buttons, fields." },
+      "action": { "displayName": "Action", "purpose": "Every siteButton." },
+      "label": { "displayName": "Label", "purpose": "Field labels and definition terms." },
+      "detail": { "displayName": "Detail", "purpose": "Footnotes, row details, door, footer." },
+      "confirm-digits": { "displayName": "Confirm Digits", "purpose": "The two enrollment digits." }
+    },
+    "shadows": [
+      { "name": "theme-control", "value": "shadow-2xl (DocsThemeControl)", "purpose": "The shared floating theme picker and its prompt; never page content." }
+    ],
+    "motion": [
+      { "name": "neutral-button-color", "value": "Tailwind transition-colors", "purpose": "Neutral siteButton border and label on hover." }
+    ],
+    "breakpoints": [
+      { "name": "nav-tight", "value": "360px" },
+      { "name": "sm", "value": "640px" },
+      { "name": "md", "value": "768px" },
+      { "name": "lg", "value": "1024px" }
+    ]
   },
   "components": [
     {
       "name": "Primary button",
       "kind": "button",
       "refersTo": "button-primary",
-      "description": "Full-width email form action.",
-      "html": "<button class=\"ds-primary\">Email me a code</button>",
-      "css": ".ds-primary{width:100%;min-height:44px;padding:9px 14px;border:0;border-radius:4px;background:var(--vscode-list-activeSelectionBackground);color:var(--vscode-list-activeSelectionForeground);font:13px/1.6 var(--vscode-editor-font-family);cursor:pointer}.ds-primary:hover:not(:disabled){filter:brightness(1.15)}.ds-primary:focus-visible{outline:2px solid var(--vscode-focusBorder);outline-offset:3px}.ds-primary:disabled{opacity:.55;cursor:default}"
+      "description": "Full-width accent outline for the page's one action (ACTION_CLASS).",
+      "html": "<div class=\"ds-root\"><button class=\"ds-primary\">Email me a code</button></div>",
+      "css": ".ds-root{--bg:var(--color-bg,#000);--fg:var(--color-text,#dedede);--accent:var(--docs-accent,#b47624);--muted:var(--docs-text-muted,#767676);background:var(--bg);color:var(--fg);padding:16px}.ds-primary{display:inline-flex;align-items:center;justify-content:center;width:100%;min-height:48px;padding:12px 16px;border:1px solid var(--accent);border-radius:6px;background:transparent;color:var(--accent);font:16px/1.5 var(--font-display,'Ubuntu Sans Mono',ui-monospace,monospace);cursor:pointer}.ds-primary:hover{text-decoration:underline}.ds-primary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.ds-primary:disabled{opacity:.5;pointer-events:none}"
     },
     {
       "name": "Secondary button",
       "kind": "button",
       "refersTo": "button-secondary",
-      "description": "Provider and account actions.",
-      "html": "<button class=\"ds-secondary\">Connect GitHub</button>",
-      "css": ".ds-secondary{min-height:44px;padding:9px 14px;border:0;border-radius:4px;background:var(--vscode-list-inactiveSelectionBackground);color:var(--vscode-list-inactiveSelectionForeground);font:13px/1.6 var(--vscode-editor-font-family);cursor:pointer}.ds-secondary:hover:not(:disabled){filter:brightness(1.15)}.ds-secondary:focus-visible{outline:2px solid var(--vscode-focusBorder);outline-offset:3px}.ds-secondary:disabled{opacity:.55;cursor:default}"
+      "description": "Provider sign-in, connect, remove, sign-out, Cancel (siteButton neutral, fit).",
+      "html": "<div class=\"ds-root\"><button class=\"ds-secondary\">GitHub</button></div>",
+      "css": ".ds-root{--bg:var(--color-bg,#000);--fg:var(--color-text,#dedede);--accent:var(--docs-accent,#b47624);background:var(--bg);color:var(--fg);padding:16px}.ds-secondary{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:8px 16px;border:1px solid color-mix(in oklab,var(--fg) 30%,transparent);border-radius:6px;background:transparent;color:var(--fg);font:16px/1.5 var(--font-display,'Ubuntu Sans Mono',ui-monospace,monospace);cursor:pointer;transition:color 150ms,border-color 150ms}.ds-secondary:hover{border-color:var(--accent);color:var(--accent)}.ds-secondary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.ds-secondary:disabled{opacity:.5;pointer-events:none}"
     },
     {
       "name": "Text button",
       "kind": "button",
       "refersTo": "button-text",
-      "description": "Inline recovery and form options.",
-      "html": "<button class=\"ds-text\">Change email</button>",
-      "css": ".ds-text{min-height:44px;padding:6px 0;border:0;border-radius:4px;background:transparent;color:var(--vscode-textLink-foreground);font:13px/1.6 var(--vscode-editor-font-family);text-decoration:underline;text-underline-offset:3px;cursor:pointer}.ds-text:hover:not(:disabled){filter:brightness(1.15);text-decoration-thickness:2px}.ds-text:focus-visible{outline:2px solid var(--vscode-focusBorder);outline-offset:3px}.ds-text:disabled{opacity:.55;cursor:default}"
+      "description": "LINK_CLASS at 44px: inline retry and form options.",
+      "html": "<div class=\"ds-root\"><button class=\"ds-text\">I already have a code</button></div>",
+      "css": ".ds-root{--bg:var(--color-bg,#000);--accent:var(--docs-accent,#b47624);background:var(--bg);padding:16px}.ds-text{display:inline-flex;align-items:center;min-height:44px;padding:0;border:0;background:transparent;color:var(--accent);font:16px/1.5 var(--font-body,'Ubuntu Mono',ui-monospace,monospace);text-underline-offset:2px;cursor:pointer}.ds-text:hover{text-decoration:underline}.ds-text:disabled{opacity:.5}"
     },
     {
-      "name": "Email input",
+      "name": "Email field",
       "kind": "input",
       "refersTo": "input",
-      "description": "Labelled email field with full-opacity placeholder.",
-      "html": "<label class=\"ds-label\" for=\"ds-email\">Email address</label><input class=\"ds-input\" id=\"ds-email\" type=\"email\" autocomplete=\"email\" placeholder=\"you@example.com\">",
-      "css": ".ds-label{display:block;margin:16px 0 6px;color:var(--vscode-sideBar-foreground);font:13px/1.6 var(--vscode-editor-font-family)}.ds-input{width:100%;min-height:44px;padding:10px 12px;border:0;border-radius:4px;background:var(--vscode-list-inactiveSelectionBackground);color:var(--vscode-list-inactiveSelectionForeground);font:16px/1.6 var(--vscode-editor-font-family)}.ds-input::placeholder{color:inherit;opacity:1}.ds-input[readonly]{opacity:1}.ds-input:focus-visible{outline:2px solid var(--vscode-focusBorder);outline-offset:3px}"
+      "description": "LABEL_CLASS over a FIELD_CLASS field; focus turns the border to the accent.",
+      "html": "<div class=\"ds-root\"><label class=\"ds-label\" for=\"ds-email\">Email address</label><input class=\"ds-input\" id=\"ds-email\" type=\"email\" placeholder=\"you@example.com\"></div>",
+      "css": ".ds-root{--bg:var(--color-bg,#000);--fg:var(--color-text,#dedede);--accent:var(--docs-accent,#b47624);--muted:var(--docs-text-muted,#767676);background:var(--bg);color:var(--fg);padding:16px}.ds-label{display:block;margin:0 0 8px;font:14px/1.43 var(--font-display,'Ubuntu Sans Mono',ui-monospace,monospace);color:var(--muted)}.ds-input{box-sizing:border-box;width:100%;min-height:48px;padding:12px 16px;border:1px solid color-mix(in oklab,var(--fg) 50%,transparent);border-radius:6px;background:var(--bg);color:var(--fg);font:16px/1.5 var(--font-body,'Ubuntu Mono',ui-monospace,monospace);outline:none}.ds-input::placeholder{color:var(--muted)}.ds-input:focus{border-color:var(--accent)}.ds-input:read-only{border-style:dashed}"
     },
     {
-      "name": "Inline notice",
+      "name": "Checklist row with door",
       "kind": "custom",
+      "refersTo": "door",
+      "description": "DASHED_ROW_CLASS row: the door-shaped computer id and a drawn check plus words.",
+      "html": "<div class=\"ds-root\"><div class=\"ds-row\"><span>Computer <span class=\"ds-door\">3f9a21c0</span></span><span class=\"ds-status\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 256 256\" aria-hidden=\"true\"><path d=\"M232.49 80.49l-128 128a12 12 0 0 1-17 0l-56-56a12 12 0 1 1 17-17L96 183 215.51 63.51a12 12 0 0 1 17 17Z\" fill=\"currentColor\"/></svg>Connected</span></div></div>",
+      "css": ".ds-root{--bg:var(--color-bg,#000);--fg:var(--color-text,#dedede);--accent:var(--docs-accent,#b47624);--muted:var(--docs-text-muted,#767676);background:var(--bg);color:var(--fg);padding:16px}.ds-row{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:56px;padding:6px 0;border-bottom:1px dashed color-mix(in oklab,var(--fg) 15%,transparent);font:16px/1.5 var(--font-body,'Ubuntu Mono',ui-monospace,monospace)}.ds-status{display:inline-flex;align-items:center;gap:8px;color:var(--muted)}.ds-status svg{color:var(--accent)}.ds-door{display:inline-flex;align-items:center;justify-content:center;height:24px;min-width:68px;padding:0 10px;margin-left:6px;border-radius:8px 8px 0 0;border-bottom:1px solid color-mix(in oklab,var(--fg) 30%,transparent);background:color-mix(in oklab,var(--fg) 12%,transparent);font-size:14px}"
+    },
+    {
+      "name": "Notice",
+      "kind": "card",
       "refersTo": "notice",
-      "description": "Status feedback within the task column.",
-      "html": "<p class=\"ds-notice\" role=\"status\">Code sent. Check your inbox. It expires in 10 minutes.</p>",
-      "css": ".ds-notice{margin:0 0 16px;padding:12px;background:var(--vscode-list-inactiveSelectionBackground);color:var(--vscode-list-inactiveSelectionForeground);font:13px/1.6 var(--vscode-editor-font-family)}"
+      "description": "CARD_CLASS status feedback in the column.",
+      "html": "<div class=\"ds-root\"><p class=\"ds-notice\" role=\"status\">Code sent. Check your inbox.</p></div>",
+      "css": ".ds-root{--bg:var(--color-bg,#000);--fg:var(--color-text,#dedede);background:var(--bg);color:var(--fg);padding:16px}.ds-notice{margin:0;padding:20px;border:1px solid color-mix(in oklab,var(--fg) 15%,transparent);border-radius:12px;background:color-mix(in oklab,var(--fg) 4%,transparent);font:16px/1.5 var(--font-body,'Ubuntu Mono',ui-monospace,monospace)}@media (min-width:640px){.ds-notice{padding:24px}}"
+    },
+    {
+      "name": "Account id",
+      "kind": "chip",
+      "refersTo": "account-id",
+      "description": "CODE_CLASS inline token.",
+      "html": "<div class=\"ds-root\"><code class=\"ds-code\">usr_8c1f2e7a</code></div>",
+      "css": ".ds-root{--bg:var(--color-bg,#000);--fg:var(--color-text,#dedede);--code-muted:var(--docs-code-text-muted,#909090);background:var(--bg);color:var(--fg);padding:16px;font:16px/1.5 var(--font-body,'Ubuntu Mono',ui-monospace,monospace)}.ds-code{padding:2px 6px;border-radius:4px;background:color-mix(in oklab,var(--fg) 15%,transparent);color:var(--code-muted);font-size:.9em;overflow-wrap:break-word}"
+    },
+    {
+      "name": "Site header",
+      "kind": "nav",
+      "refersTo": "",
+      "description": "Shared SiteHeader with \"Hosted\" beside the caramel wordmark.",
+      "html": "<div class=\"ds-root\"><header class=\"ds-header\"><span class=\"ds-brand\"><a class=\"ds-mark\" href=\"#\">Dormouse</a><a href=\"#\">Hosted</a></span><nav class=\"ds-nav\"><a href=\"#\">Docs</a><a href=\"#\">GitHub</a></nav></header></div>",
+      "css": ".ds-root{--bg:var(--color-bg,#000);--fg:var(--color-text,#dedede);--caramel:var(--color-caramel,#b47624);background:var(--bg)}.ds-header{display:flex;align-items:center;justify-content:space-between;gap:12px;height:64px;padding:0 16px;font-family:var(--font-display,'Ubuntu Sans Mono',ui-monospace,monospace);font-size:18px;color:var(--fg);background:color-mix(in srgb,var(--bg) 85%,transparent);backdrop-filter:blur(12px)}.ds-brand{display:flex;align-items:baseline;gap:10px;font-size:20px}.ds-header a{color:inherit;text-decoration:none}.ds-header a.ds-mark{color:var(--caramel)}.ds-nav{display:flex;gap:20px}.ds-nav a{transition:color 150ms}.ds-nav a:hover{color:var(--caramel)}@media (min-width:768px){.ds-header{height:80px;padding:0 32px}.ds-nav{gap:40px}}"
     }
   ],
   "narrative": {
-    "northStar": "The Native Tenant",
-    "overview": "Hosted inherits [Dormouse's product world](../PRODUCT.md) and [parent design system](../DESIGN.md): focused, approachable, capable, with monospace text and quiet, flat controls. This app-boundary record captures the implemented account interface and its browser/mobile sizing exceptions; the parent owns shared product identity.",
+    "northStar": "The Next Page of the Docs",
+    "overview": "Hosted continues the dormouse.sh reference pages it is linked from, so it is built from their design rather than the app's: `lib/src/site/` holds the Tailwind `@theme` (`site.css`), the class strings (`docs-tokens.ts`), the per-theme token painter (`docs-paint.ts`), `SiteHeader`, and `DocsThemeControl`, and the website consumes the same module. This file records only what Hosted composes from that module and what it adds; the shared token values live there and are never restated here. The [parent DESIGN.md](../DESIGN.md) Scope names Hosted as the one product surface outside the app's system.\n\nThe reader's editor theme is the ground (`useDocsThemedBody` adds `docs-themed` to `body`, remapping `--color-bg` and `--color-text` onto `--vscode-editor-*`), the site's Ubuntu pair is the type, caramel is the wordmark, and the theme's accent corrected to AA carries links and outlined actions. The visitor recognizes the site they came from, does one task in a narrow column, and leaves. Product facts from [PRODUCT.md](../PRODUCT.md) that bind here: 44px minimum targets, 16px inputs, and no request beyond Hosted's own origin.",
     "keyCharacteristics": [
-      "Runtime theme colors, including matched foreground/background pairs.",
-      "A narrow task column with open spacing between sections.",
-      "Mobile-sized controls with compact monospace labels.",
-      "Inline feedback and explicit account connection states."
+      "The docs theme as ground, picked in the shared theme control with the theme store off.",
+      "Ubuntu Sans Mono display over Ubuntu Mono body, weight 400 only, bundled from `@fontsource`.",
+      "One 33rem column; hairline section rules; dashed checklist rows.",
+      "Outlined controls in the display face, 44px minimum, fields at 16px.",
+      "The computer id drawn as the app's door."
     ],
     "rules": [
-      { "name": "The Matched Pair Rule", "body": "Keep every control foreground paired with its theme background. Inputs, placeholders, and readonly values retain full foreground opacity.", "section": "colors" },
-      { "name": "The Runtime Palette Rule", "body": "Inherit colors through the existing theme variables; do not introduce fixed colors or synthetic tonal ramps.", "section": "colors" },
-      { "name": "The Browser Form Rule", "body": "Preserve the input role's larger type and a minimum control height of 44px for buttons and inputs, including text buttons. These are Hosted account-form exceptions to the parent's terminal chrome sizing.", "section": "typography" }
+      { "name": "The Shared Token Rule", "body": "Hosted takes every color from a `lib/src/site/` variable or class; a new color, or a new tinted container, goes into that module (with its `TINTED_DOCS_SURFACES` entry) so the website and Hosted stay one design.", "section": "colors" },
+      { "name": "The One Weight Rule", "body": "Hierarchy comes from size and face, never weight: only 400 ships.", "section": "typography" }
     ],
     "dos": [
-      "Do inherit the parent theme and monospace identity.",
-      "Do preserve full foreground opacity in editable, placeholder, and readonly input text.",
-      "Do keep connection state and progress visible in action labels."
+      "Do compose from `lib/src/site/` and add anything reusable there, not in Hosted.",
+      "Do keep every target at 44px or more and every field at 16px.",
+      "Do say state in words next to the check; never by color alone.",
+      "Do bundle fonts from `@fontsource` and serve them from Hosted's origin."
     ],
     "donts": [
-      "Don't import the marketing site's palette, imagery, or typography into account controls.",
-      "Don't add shadows or decorative card wrappers to this flat account surface.",
-      "Don't reduce form controls to the parent's terminal chrome dimensions."
+      "Don't load remote fonts, offer the theme store, or make any third-party request.",
+      "Don't add font weights, filled buttons, or shadows on page content.",
+      "Don't use caramel for anything but the wordmark and header nav.",
+      "Don't fall back to the app's `--vscode-sideBar-*` or list-selection tokens; Hosted's ground is the docs-themed editor pair."
     ]
   }
 }

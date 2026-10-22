@@ -6,7 +6,7 @@ import { useAnchoredMenu, useCloseOnOutsideAndEscape } from './use-anchored-menu
 import { workspaceTabElement } from './workspace-tab-elements';
 import { nameWorkspace, pinWorkspace, requestWorkspaceClose, requestWorkspaceRename, workspaceCloseRefusal } from './wall/workspace-lifecycle';
 import { stepFocus } from './focus-step';
-import { writeTextToClipboard } from '../lib/clipboard';
+import { writeTextToClipboard } from '../lib/clipboard-write';
 import { closeWorkspaceMenu, type WorkspaceMenu } from '../lib/workspace-ui-store';
 import { type WorkspaceMeta } from '../lib/workspace-store';
 import type { WorkspaceId } from '../lib/session-types';

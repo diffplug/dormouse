@@ -1,6 +1,7 @@
 import type { PlatformAdapter } from './types';
 import { VSCodeAdapter } from './vscode-adapter';
 import { FakePtyAdapter } from './fake-adapter';
+import { getPlatformOrNull, setPlatform } from './current';
 
 export type { PlatformAdapter } from './types';
 export type { PtyInfo } from './types';
@@ -40,37 +41,16 @@ export const IS_MAC: boolean = /Mac|iPhone|iPad/i.test(PLATFORM_STRING);
  */
 export const IS_WINDOWS: boolean = /Win/i.test(PLATFORM_STRING);
 
-let adapter: PlatformAdapter | null = null;
-
-/** Set an externally-created platform adapter (e.g. TauriAdapter from standalone). */
-export function setPlatform(a: PlatformAdapter): void {
-  adapter = a;
-}
-
-export function getPlatform(): PlatformAdapter {
-  if (!adapter) throw new Error('Platform not initialized — call initPlatform() or setPlatform() first');
-  return adapter;
-}
-
-/** The adapter, or `null` when none is installed. For the readers that treat
- *  "no platform yet" as an ordinary answer — unit tests and the boot frames
- *  before `initPlatform()` — rather than as an error worth surfacing. */
-export function getPlatformOrNull(): PlatformAdapter | null {
-  return adapter;
-}
+export { getPlatform, getPlatformOrNull, setPlatform } from './current';
 
 export function initPlatform(override: 'fake'): FakePtyAdapter;
 export function initPlatform(): PlatformAdapter;
 export function initPlatform(override?: 'fake'): PlatformAdapter {
-  if (adapter) return adapter as PlatformAdapter;
-  if (override === 'fake') {
-    adapter = new FakePtyAdapter();
-    return adapter;
-  }
-  if (typeof acquireVsCodeApi === 'function') {
-    adapter = new VSCodeAdapter();
-  } else {
-    adapter = new FakePtyAdapter();
-  }
+  const installed = getPlatformOrNull();
+  if (installed) return installed;
+  const adapter = override === 'fake' || typeof acquireVsCodeApi !== 'function'
+    ? new FakePtyAdapter()
+    : new VSCodeAdapter();
+  setPlatform(adapter);
   return adapter;
 }
