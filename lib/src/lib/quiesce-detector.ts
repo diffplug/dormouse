@@ -14,9 +14,9 @@ export interface QuiesceDetectorOptions {
   onChange?: (status: QuiesceStatus) => void;
   /**
    * A busy Session stayed quiet long enough to look finished. Fired once per
-   * settle with the detector already quiet — so the completion it dispatches
-   * never defers itself — and before onChange publishes that transition, so
-   * no idle flash precedes a ring. Whether a settle rings is the owner's call.
+   * settle with the detector already quiet, and before onChange publishes that
+   * transition, so no idle flash precedes a ring. Whether a settle rings is
+   * the owner's call.
    */
   onSettled?: () => void;
 }
@@ -113,9 +113,8 @@ export class QuiesceDetector {
     return true;
   }
 
-  /** Input reached the program, or it announced work: output may begin a busy
-   *  run. Kept across `reset`: the keystroke that starts a command precedes
-   *  its boundary. */
+  /** Input reached the program: output may begin a busy run. Kept across
+   *  `reset`: the keystroke that starts a command precedes its boundary. */
   expectWork(): void {
     this.lastWorkExpectedAt = Date.now();
   }

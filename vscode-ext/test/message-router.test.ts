@@ -797,19 +797,21 @@ describe('alert state follows the PTY', () => {
     }
   });
 
-  it('lets a write start work: output after it defers a report', () => {
+  it('lets a write start work: output after it makes the next report news', () => {
     vi.useFakeTimers();
     const webview = fakeWebview();
     const disposable = router.attachRouter(webview.channel);
     try {
       webview.send({ type: 'pty:spawn', id: 'pty-sent', options: { cwd: '/repo' } });
+      ptys.callbacks!.onData('pty-sent', REPORT);
+      alert(webview, { op: 'dismiss', id: 'pty-sent' });
       webview.send({ type: 'pty:input', id: 'pty-sent', data: 'hi\r', paced: true });
       for (let t = 0; t < 2_000; t += 100) {
         vi.advanceTimersByTime(100);
         ptys.callbacks!.onData('pty-sent', 'frame');
       }
       ptys.callbacks!.onData('pty-sent', REPORT);
-      expect(router.getAlertStates().get('pty-sent')?.status).not.toBe('ALERT_RINGING');
+      expect(router.getAlertStates().get('pty-sent')?.status).toBe('ALERT_RINGING');
     } finally {
       disposable.dispose();
       vi.useRealTimers();

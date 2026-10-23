@@ -1,5 +1,4 @@
 import type { AlertManager, AlertState } from './alert-manager';
-import { isAlertDeferred } from './alert-episode';
 import {
   normalizeAlertDeliveryOverrides,
   resolveAlertDeliveryPolicy,
@@ -51,21 +50,13 @@ interface Published {
   overrides: AlertDeliveryOverrides;
 }
 
-/** A sink's fixed deadline, armed only while the Session is visibly ringing. */
-interface Delivery {
-  dueAt: number;
-  timer: ReturnType<typeof setTimeout> | undefined;
-}
-
-function disarm(delivery: Delivery): void {
-  clearTimeout(delivery.timer);
-  delivery.timer = undefined;
-}
+/** A sink's deadline, fixed at its episode's start. */
+type Delivery = ReturnType<typeof setTimeout>;
 
 export function createAlertDeliveryScheduler(options: AlertDeliverySchedulerOptions): AlertDeliveryScheduler {
   const { manager } = options;
   let defaults = DEFAULT_ALERT_SETTINGS;
-  /** Deadlines survive deferral; a sink missing from `pending` is consumed. */
+  /** A sink missing from `pending` is consumed. */
   const episodes = new Map<string, { episodeId: string; pending: Map<AlertSink, Delivery> }>();
   /** Each Session's last publication, and the realm that made it. */
   const published = new Map<string, Published>();
@@ -103,45 +94,32 @@ export function createAlertDeliveryScheduler(options: AlertDeliverySchedulerOpti
     const effective = policy(id);
     for (const [sink, delivery] of pending) {
       if (sinks[sink].enabled(effective)) continue;
-      disarm(delivery);
+      clearTimeout(delivery);
       pending.delete(sink);
     }
   }
 
   function onState(id: string, state: AlertState): void {
     const episode = state.episode ?? null;
-    let current = episodes.get(id);
-    if (current && current.episodeId !== episode?.id) {
-      current.pending.forEach(disarm);
+    const current = episodes.get(id);
+    // Every sink is armed once, as its episode opens.
+    if (current?.episodeId === episode?.id) return;
+    if (current) {
+      current.pending.forEach((delivery) => clearTimeout(delivery));
       episodes.delete(id);
-      current = undefined;
     }
     if (!episode) return;
-    if (!current) {
-      const effective = policy(id);
-      current = { episodeId: episode.id, pending: new Map() };
-      episodes.set(id, current);
-      for (const sink of Object.keys(sinks) as AlertSink[]) {
-        const rule = sinks[sink];
-        // Fixed at episode start; disabled sinks and delay edits never replay it.
-        if (rule.enabled(effective)) current.pending.set(sink, {
-          dueAt: episode.startedAt + rule.delayMs(effective), timer: undefined,
-        });
-      }
-    }
-    const { pending } = current;
-    // Disarm without consuming, so quiet re-arms the original deadline.
-    if (isAlertDeferred(state)) {
-      pending.forEach(disarm);
-      return;
-    }
-    for (const [sink, delivery] of pending) {
-      if (delivery.timer !== undefined) continue;
+    const effective = policy(id);
+    const pending = new Map<AlertSink, Delivery>();
+    episodes.set(id, { episodeId: episode.id, pending });
+    for (const sink of Object.keys(sinks) as AlertSink[]) {
       const rule = sinks[sink];
-      delivery.timer = setTimeout(() => {
+      // Fixed at episode start; disabled sinks and delay edits never replay it.
+      if (!rule.enabled(effective)) continue;
+      pending.set(sink, setTimeout(() => {
         pending.delete(sink);
         if (!rule.blocked(id)) rule.deliver(id, episode.id);
-      }, Math.max(0, delivery.dueAt - Date.now()));
+      }, Math.max(0, episode.startedAt + rule.delayMs(effective) - Date.now())));
     }
   }
 
@@ -182,7 +160,7 @@ export function createAlertDeliveryScheduler(options: AlertDeliverySchedulerOpti
 
     dispose() {
       for (const stop of stops) stop();
-      for (const { pending } of episodes.values()) pending.forEach(disarm);
+      for (const { pending } of episodes.values()) pending.forEach((delivery) => clearTimeout(delivery));
       episodes.clear();
       published.clear();
     },

@@ -416,18 +416,6 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                     turn on <em>Watch all …</em> to alert on every tab running it.
                   </div>
                 )}
-                <div className="mt-3">
-                  <SwitchRow
-                    label="Defer alerts until animation stops"
-                    on={settings.deferAlertsUntilQuiet}
-                    onChange={(deferAlertsUntilQuiet) => updateAlertSettings({ deferAlertsUntilQuiet })}
-                  />
-                  <div className={`${UNDER_SWITCH_INDENT} mt-1 text-sm leading-relaxed text-muted`}>
-                    Terminal notifications wait while a program is busy, until its output settles.
-                    If output resumes, the alert pauses until quiet without losing it or
-                    repeating alarms already sent. Command exits alert immediately.
-                  </div>
-                </div>
               </section>
               <section data-setting="inactivity" hidden={!matches('inactivity')} className={SETTINGS_SECTION}>
                 <SecondsField

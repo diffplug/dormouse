@@ -108,20 +108,6 @@ export const WithRules: Story = {
   },
 };
 
-/** The escape hatch: deferral off, so terminal notifications ring during animation. */
-export const DeferralDisabled: Story = {
-  parameters: {
-    primedWatchedCommands: ['claude', 'codex'],
-    primedAlertSettings: { deferAlertsUntilQuiet: false },
-  },
-  play: async ({ canvasElement }) => {
-    await showWatcher({ canvasElement });
-    await dialog(canvasElement).findByRole('switch', {
-      name: 'Defer alerts until animation stops off',
-    });
-  },
-};
-
 /** Fan-out: several phones have turned push on, so all of them are named. */
 export const PushManyDevices: Story = {
   play: selectTopic('Notifications'),

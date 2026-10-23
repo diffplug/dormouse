@@ -92,6 +92,7 @@ flowchart TD
   WIN["Input windows"] -- "gate output" --> DET["Output detector"]
   IN["input"] --> WIN
   PR["Progress cycle"] -- "Active: no settle, end: reset" --> DET
+  PR -- "active update" --> WIN
   DET -- "settle" --> DIS{{"Dispatch"}}
   CMD["Foreground command"] -- "command finish, seen or unseen" --> DIS
   PR -- "report" --> DIS
@@ -187,8 +188,8 @@ stateDiagram-v2
       state "Shut" as WorkShut
       state "Open" as WorkOpen
       [*] --> WorkShut
-      WorkShut --> WorkOpen: input
-      WorkOpen --> WorkOpen: input, restarting it
+      WorkShut --> WorkOpen: input, or an active progress update
+      WorkOpen --> WorkOpen: input or an active progress update, restarting it
       WorkOpen --> WorkShut: work-start window elapses
     }
   }
@@ -440,7 +441,7 @@ Rules:
 
 Limitation: WATCHING needs the shell to report its command line — `OSC 633 ; E`, or `cmdline_url` / `cmdline` on `OSC 133 ; C` (fish ≥ 4) — beside the boundaries. A shell reporting bare `OSC 133` boundaries, or none (`docs/specs/terminal-state.md` → Shell-integration injection), never names a command, so WATCHING never engages and the terminal context reports `no command`. Terminal reports still work; command-exit alerting also requires semantic command boundaries. **Never route the keystroke fallback in `docs/specs/terminal-state.md` into the `AlertManager`** (rationale).
 
-**Must count only output that changes the screen**: a chunk of only queries, mode and color changes, or cursor motion is not output (rationale), nor are theme changes, remounts, DOM reparenting, or selection. **A busy run must begin within `cfg.alert.workStartWindow` of input**; input is any PTY write but a terminal reply or a mouse report, so a wheel tick counts only when sent as keys. Later output, such as a focus or resize repaint, is ignored entirely (rationale). Invariants:
+**Must count only output that changes the screen**: a chunk of only queries, mode and color changes, or cursor motion is not output (rationale), nor are theme changes, remounts, DOM reparenting, or selection. **A busy run must begin within `cfg.alert.workStartWindow` of input or an active `OSC 9;4` update**; input is any PTY write but a terminal reply or a mouse report, so a wheel tick counts only when sent as keys. Later output, such as a focus or resize repaint, is ignored entirely (rationale). Invariants:
 
 - **Must preserve an owed `watching` source when output resumes** (rationale).
 - **Never reset the detector for engagement alone**; settles must reach awaits.
@@ -465,7 +466,7 @@ Sequence syntax lives in `docs/specs/terminal-escapes.md`; what each means here:
 
   | Input | Behavior |
   |---|---|
-  | active normal / warning / indeterminate | starts or updates the cycle; never a completion |
+  | active normal / warning / indeterminate | starts or updates the cycle and opens the work-start window; never a completion |
   | `state=1, progress=100` | ends the cycle; a report completion |
   | `state=2` | ends the cycle; a report error |
   | clear | ends the cycle; a report completion |
@@ -529,7 +530,7 @@ Application alarm defaults live beside the WATCHING rule set, edited in Settings
 
 - **Must validate and clamp every field on read and on write, the host included** (`normalizeAlertSettings`), so a hand-edited `localStorage` blob or a hostile message can never install a `NaN` or absurd timer. Unknown keys are dropped and missing keys defaulted, so the blob evolves additively with no version field. `cfg.alert` owns the inactivity default; `DEFAULT_ALERT_SETTINGS` owns the sink and boolean defaults.
 - Distribution follows the WATCHING rule set's seed/broadcast shape (rationale), except that an edit relays the whole blob rather than a per-command delta, so every webview resolves workspace overrides against the same defaults. Wire contract and host revalidation: `docs/specs/transport.md`.
-- **Must keep detection settings application-wide**, applied to each host's one manager.
+- **Must keep the inactivity timeout application-wide**: only delivery has Workspace overrides.
 
 **Must resolve delivery policy from application defaults, then sparse Workspace overrides.** Speech/push enable and delay can override independently; `speakVoice` selects a Web Speech voice URI, missing inherits the system-voice default, and explicit null selects the system voice. Missing or unavailable voices fall back to the engine default without erasing the saved choice. Unknown/invalid overrides are dropped; finite delays share the application clamp.
 
