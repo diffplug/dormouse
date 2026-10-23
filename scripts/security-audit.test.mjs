@@ -342,6 +342,11 @@ const cases = [
   { name: 'a BLOCKER fails the run', status: 'PASS',
     frags: only({ [REMOTE]: { stated: 'FAIL', lines: finding('BLOCKER', 'deploy/local/install-windows.ps1:88', 'Install-Service', 'a file name reaches Invoke-Expression') } }),
     expected: 'FAIL', publicRows: [`| \`${REMOTE}\` | FAIL | 0 | 0 | 0 | 1 | 0 |`] },
+  // An unindented code fence after a BLOCKER's evidence once dropped the
+  // BLOCKER, so the run passed on the domain's lines alone.
+  { name: 'a BLOCKER followed by an unindented fence still fails the run', status: 'PASS',
+    frags: only({ [REMOTE]: { stated: 'FAIL', lines: [...finding('BLOCKER', 'deploy/local/install-windows.ps1:88', 'Install-Service', 'a file name reaches Invoke-Expression'), '```', 'Invoke-Expression "& $name"', '```'] } }),
+    expected: 'FAIL', publicRows: [`| \`${REMOTE}\` | FAIL | 0 | 0 | 0 | 1 | 0 |`] },
   { name: 'a BLOCKER without its evidence still fails, and is malformed', status: 'PASS',
     frags: only({ [LOCAL]: { stated: 'FAIL', lines: ['- BLOCKER: `lib/x.ts:4` `run` — something'] } }),
     expected: 'FAIL', notes: ['BLOCKER without its Code, Path, Reproduction evidence'] },
