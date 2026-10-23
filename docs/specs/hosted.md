@@ -244,7 +244,7 @@ Source of truth: `relayApiRoutes` in `hosted/server/relay-api.ts`; `relayAccount
 
 ## Development and release
 
-**Must run local development with `dor tool hosted` inside Dormouse.** Its single loopback `http://localhost:<port>` origin serves Vite and Node auth on a disposable development database, with the account's Natural Voice and Relay routes but never the voice origin's, which every Hosted build reaches only at `https://voice.dormouse.sh`. Host, Origin, and Fetch Metadata checks guard the local captured-email inbox; no production entry imports an inbox or test-control handler.
+**Must run local development with `dor tool hosted` inside Dormouse.** Its loopback `http://localhost:<port>` origin serves Vite and Node auth on a disposable development database, with the account's Natural Voice and Relay routes but never the voice origin's. Host, Origin, and Fetch Metadata checks guard the local captured-email inbox; no production entry imports an inbox or test-control handler. **It also runs the relay Worker on that database, with this origin as `ACCOUNT_ORIGIN`** (`docs/specs/one-time.md` -> "Dev loop").
 
 **Must verify the three production Worker bundles and run the consumer's integration suite before release.** Only test entries inject deterministic Better Auth. Simulated callbacks do not certify provider registrations; production acceptance requires real browser login with each enabled provider and email delivery.
 
