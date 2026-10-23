@@ -92,12 +92,14 @@ describe('FakePtyAdapter', () => {
     adapter.sendOutput('t1', 'still working');
     adapter.sendOutput('t1', 'more');
     adapter.sendOutput('t1', '\x1b]9;Build finished\x07');
-    expect(alertEvents.at(-1)?.status).not.toBe('ALERT_RINGING');
+    adapter.alertDismiss('t1');
     for (let elapsed = 0; elapsed < 10_000; elapsed += 200) {
       vi.advanceTimersByTime(200);
       adapter.sendOutput('t1', '\x1b[?6n');
     }
-    expect(alertEvents.at(-1)).toMatchObject({ status: 'ALERT_RINGING' });
+    // Polling is not news, so the repeat describes what the user dismissed.
+    adapter.sendOutput('t1', '\x1b]9;Build finished\x07');
+    expect(alertEvents.at(-1)).toMatchObject({ status: 'WATCHING_DISABLED', todo: true });
   });
 
   it('renders chrome output without counting it as the program working', () => {

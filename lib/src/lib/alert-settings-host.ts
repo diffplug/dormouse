@@ -1,11 +1,8 @@
-import type { AlertManager } from './alert-manager';
 import {
   DEFAULT_ALERT_SETTINGS,
   normalizeAlertSettings,
   type AlertSettings,
 } from './alert-settings-model';
-
-export type AlertSettingsTarget = Pick<AlertManager, 'applySettings'>;
 
 /**
  * Coordinates one host-authoritative alarm-settings blob across multiple
@@ -13,16 +10,14 @@ export type AlertSettingsTarget = Pick<AlertManager, 'applySettings'>;
  * The first renderer seeds persisted settings after a fresh host start; later
  * renderers receive that canonical state instead of replacing it.
  *
- * `AlertManager.applySettings` takes the detection fields; the sink fields are
- * the delivery scheduler's defaults, handed over by `createAlertHost`
+ * The sink fields are the delivery scheduler's defaults, handed over by
+ * `createAlertHost`; the inactivity timeout is the renderers' presence window
  * (`docs/specs/alert.md` -> Alarm settings).
  */
 export class AlertSettingsHost {
   private initialized = false;
   private settings: AlertSettings = DEFAULT_ALERT_SETTINGS;
   private listeners = new Set<(settings: AlertSettings) => void>();
-
-  constructor(private readonly target: AlertSettingsTarget) {}
 
   /** Offered by every renderer at startup; only the first offer is taken. */
   initialize(value: unknown): void {
@@ -51,7 +46,6 @@ export class AlertSettingsHost {
     // Renderer input is revalidated here: the host must never install a NaN or
     // absurd timer because a webview sent one (`docs/specs/transport.md`).
     this.settings = normalizeAlertSettings(value);
-    this.target.applySettings(this.settings);
   }
 
   /** The canonical blob to every subscriber, or to `to` alone, once there is

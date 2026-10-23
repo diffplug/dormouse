@@ -810,16 +810,18 @@ describe('the sidecar host', () => {
     expect(opens()).toEqual(['/launched']);
   });
 
-  it('lets a write start work: output after it defers a report', () => {
+  it('lets a write start work: output after it makes the next report news', () => {
     vi.useFakeTimers();
     try {
+      host.alerts.notifyFromProtocol('pty-1', REPORT);
+      host.alerts.dismissAlert('pty-1');
       host.handleCommand('pty:input', { id: 'pty-1', data: 'hi\r', paced: true });
       for (let t = 0; t < 2_000; t += 100) {
         vi.advanceTimersByTime(100);
         host.onPtyEvent('data', { id: 'pty-1', data: 'frame' });
       }
       host.alerts.notifyFromProtocol('pty-1', REPORT);
-      expect(stateOf('pty-1').status).not.toBe('ALERT_RINGING');
+      expect(stateOf('pty-1').status).toBe('ALERT_RINGING');
     } finally {
       vi.useRealTimers();
     }

@@ -15,7 +15,7 @@ const PANE = "pane";
 const OTHER = "tutorial";
 /** One `agent` turn, plus a frame for its last write. */
 const TURN_MS = AGENT_TURN_MS + 200;
-/** Past a deferred report's quiet deadline. */
+/** Long enough for a quiet screen to settle. */
 const QUIET_MS = 5_100;
 
 let adapter: FakePtyAdapter;
@@ -54,14 +54,11 @@ const lookAt = (id: string) => adapter.alertEngagement({ present: true, focusId:
 const screen = () => output.join("");
 
 describe("alert programs", () => {
-  it("agent rings with its question once its screen settles, while the user is elsewhere", () => {
+  it("agent rings with its question as it asks, while the user is elsewhere", () => {
     lookAt(OTHER);
     type("agent\r");
     vi.advanceTimersByTime(TURN_MS);
     expect(screen()).toContain("\x1b]9;agent: Allow edit to README.md?\x07");
-    expect(latest?.status).not.toBe("ALERT_RINGING");
-
-    vi.advanceTimersByTime(QUIET_MS);
     expect(latest).toMatchObject({ status: "ALERT_RINGING", notification: { source: "OSC 9" } });
   });
 

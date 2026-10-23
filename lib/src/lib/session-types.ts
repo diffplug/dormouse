@@ -4,7 +4,6 @@ import { isToolKeyScope, isToolRender, type ToolKeyScope, type ToolRender } from
 import { isBrowserViewportSetting, type BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
 import type { SessionStatus } from './alert-manager';
 import type { WorkspaceMeta } from './workspace-store';
-import { isAlertDeferred, type AlertEpisode } from './alert-episode';
 import { hasShellInputControls } from 'dor/commands/shell-quote';
 import {
   ACTIVITY_NOTIFICATION_SOURCES,
@@ -66,10 +65,10 @@ export interface PersistedPane {
  * stale fields (`docs/specs/alert.md` -> Public State, "Persist only"). A ring
  * no one has looked at is written as the TODO a look would have left.
  */
-export function toPersistedAlertState(state: PersistedAlertState & { episode?: AlertEpisode | null }): PersistedAlertState {
+export function toPersistedAlertState(state: PersistedAlertState): PersistedAlertState {
   return {
     status: state.status,
-    todo: state.todo || state.status === 'ALERT_RINGING' || isAlertDeferred(state),
+    todo: state.todo || state.status === 'ALERT_RINGING',
     notification: state.notification ?? null,
   };
 }
