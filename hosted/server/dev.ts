@@ -1,4 +1,6 @@
+import { spawn } from "node:child_process";
 import { createServer } from "node:http";
+import { fileURLToPath } from "node:url";
 import type { AddressInfo } from "node:net";
 import { once } from "node:events";
 import { getRequestListener } from "@hono/node-server";
@@ -45,7 +47,8 @@ server.on("upgrade", (request, socket) => {
 });
 server.listen(Number(process.env.PORT || 0), "127.0.0.1");
 await once(server, "listening");
-const origin = `http://localhost:${(server.address() as AddressInfo).port}`;
+const port = (server.address() as AddressInfo).port;
+const origin = `http://localhost:${port}`;
 
 const email = new EmailDev(new SystemTime());
 const databaseUrl = await developmentDatabase(true, migrations);
@@ -65,7 +68,8 @@ const host: RelayAccountHost = {
   databaseUrl,
   auth: (request: Request) => auth.app.fetch(request),
   approveLimit: devLimit(10),
-  // No relay runs here, so no Burrow holds a socket to close.
+  // The relay Worker runs in its own process (below), so a removed Burrow's
+  // socket is refused at its next request rather than closed here.
   closeBurrow: async () => {},
 };
 voiceAccountRoutes(app, () => host);
@@ -90,6 +94,38 @@ ready = {
 console.log(
   `Dormouse Hosted: ${origin}\nLocal email inbox: ${origin}/api/dev/emails\nEmail stays local; OAuth is disabled in this development entry.`,
 );
+// OSC 367 (docs/specs/dor-tool.md -> OSC 367): frame this origin, not the
+// relay's port or Wrangler's inspector, which the same process tree binds.
+process.stdout.write(
+  `\u001b]367;serve;${JSON.stringify({ v: 1, port })}\u001b\\`,
+);
+// The relay Worker beside it, on this database and approving codes here, so
+// a dev Burrow build enrolls by device code (docs/specs/hosted.md ->
+// "Development and release"). At RELAY_PORT, else the one-time loop's fixed
+// default, since the Burrow build bakes its origin.
+let stopping = false;
+const relay = spawn(
+  process.execPath,
+  [fileURLToPath(new URL("../scripts/dev-one-time.mjs", import.meta.url))],
+  {
+    stdio: "inherit",
+    env: {
+      ...process.env,
+      PORT: process.env.RELAY_PORT ?? "",
+      HOSTED_DEV_ACCOUNT_ORIGIN: origin,
+      HOSTED_DEV_DATABASE_URL: databaseUrl,
+    },
+  },
+);
+const relayExit = once(relay, "exit");
+relay.on("exit", (code, signal) => {
+  if (!stopping)
+    console.error(
+      `The relay Worker exited (${code ?? signal}); device-code enrollment is off until a restart. The account still serves.`,
+    );
+});
+// A crash here must not orphan it.
+process.on("exit", () => relay.kill("SIGTERM"));
 /** A `ratelimits` binding's stand-in: `perMinute` per key per wall-clock minute. */
 function devLimit(perMinute: number): RateLimit {
   const counts = new Map<string, number>();
@@ -109,9 +145,12 @@ function devLimit(perMinute: number): RateLimit {
 }
 for (const signal of ["SIGINT", "SIGTERM"] as const)
   process.once(signal, async () => {
+    stopping = true;
+    relay.kill("SIGTERM");
     server.close();
     await vite.close();
     await auth.close();
     email.close();
+    await relayExit;
     process.exit(0);
   });
