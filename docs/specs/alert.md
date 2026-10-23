@@ -74,7 +74,7 @@ A Session is engaged while some present viewer focuses it.
 - **Must write all human-originated PTY input through `writeUserInput`**, the mobile input bar's included: it carries `userInput`, and the host acknowledges it with input before the bytes reach the PTY, in the one message (rationale).
 - **A remote Client's write must acknowledge the same way unless it holds only hover or button reports**, the Burrow having dropped a mirror's terminal replies (rationale).
 - **Never create an Activity entry to acknowledge**, the host's one check, so a browser Surface keeps its own TODO.
-- **User input must open the echo window** (`cfg.alert.echoWindow`) even when acknowledging clears nothing, a helper's included. Output inside it is ignored entirely — detector, `outputSince`, the acknowledged state, awaits — and a completion inside it neither rings nor is held (rationale).
+- **User input must open the echo window** (`cfg.alert.echoWindow`) even when acknowledging clears nothing, a helper's included. Output inside it is ignored entirely — detector, `outputSince`, the acknowledged state, an await's grace — and a completion inside it neither rings nor is held, though an await may still claim it (Dispatch; rationale).
 
 Source of truth: `setViewer` / `acknowledge` in `lib/src/lib/alert-manager.ts`; `createPresenceTracker` in `lib/src/lib/presence.ts`; `retainEngagementReporter` in `lib/src/lib/engagement.ts`; `writeUserInput` in `lib/src/lib/terminal-lifecycle.ts`; `alertedPty` in `lib/src/host/owner-pty.ts`. Pinned by `lib/src/lib/alert-engagement.test.ts`.
 
@@ -90,9 +90,10 @@ Source of truth: `setViewer` / `acknowledge` in `lib/src/lib/alert-manager.ts`; 
 flowchart TD
   P["Viewer presence"] -- "Present, focus" --> EN["Engagement"]
   WIN["Input windows"] -- "gate output" --> DET["Output detector"]
-  PR["Progress cycle"] -- "Active: no settle" --> DET
+  IN["input"] --> WIN
+  PR["Progress cycle"] -- "Active: no settle, end: reset" --> DET
   DET -- "settle" --> DIS{{"Dispatch"}}
-  CMD["Foreground command"] -- "command finish" --> DIS
+  CMD["Foreground command"] -- "command finish, seen or unseen" --> DIS
   PR -- "report" --> DIS
   REP["text reports and BEL"] -- "report" --> DIS
   DIS -- "claimed" --> AW["Await"]
@@ -101,7 +102,8 @@ flowchart TD
   EN -- "idle, leave" --> L
   EN -- "Engaged: Seen" --> CMD
   L -- "idle: held sources" --> DIS
-  VB["verbs"] --> L
+  VB["gestures and verbs"] --> L
+  VB -- "gesture with input" --> WIN
   subgraph L["Latches"]
     RING["Ring"]
     HOLD["Hold"]
@@ -113,13 +115,13 @@ flowchart TD
 
 Dispatch also reads Engagement, the echo window, the Foreground command, Acknowledged, and each Await, by the states its questions name. Terms:
 
-- **input** — a PTY write but a terminal reply or a mouse report, a wheel tick included: a keystroke, a paste, a drop, a `dor send`, a launch.
+- **input** — a PTY write but a terminal reply or a mouse report: a keystroke, a paste, a drop, a `dor send`, a launch. A wheel tick is input only when sent as keys; sent as a mouse report it is still a gesture with input.
 - **gesture** — an acknowledging gesture (Engagement), *with input* or *without*.
 - **verb** — a gesture, dismiss (`a`), the TODO pill, or `t` (Clearing And TODO).
-- **output** — a painting chunk outside an Open echo window, and inside an Open work-start window unless a run already began. Any other chunk changes nothing.
+- **output** — a painting chunk outside an Open echo window that, while the detector is quiet `NOTHING_TO_SHOW` (no candidate yet), also falls inside an Open work-start window. Any other chunk changes nothing.
 - **watched** — a rule covers the running command's watch key (WATCHING Track).
 - **withdraw** — an await consumes that source, an await claims a settle (every `watching` source; rationale), or a rule stops covering `watching`'s key; never an acknowledgement.
-- **reset** — a command boundary, a host interrupt (`docs/specs/dor-tool.md` → Run end), or a verb or await answering a `watching` source.
+- **reset** — a command boundary, a progress cycle's end, a host interrupt (`docs/specs/dor-tool.md` → Run end), or a verb or await answering a `watching` source.
 - **command boundary** — a command start or finish, a prompt, or PTY exit.
 - **episode** — one Ringing stretch of the Ring.
 
@@ -129,7 +131,7 @@ Dispatch — each completion takes the first exit that applies:
 
 ```mermaid
 flowchart TD
-  C["settle, command finish, or report"] --> H{"a helper Session?"}
+  C["settle, command finish (seen or unseen), or report"] --> H{"a helper Session?"}
   H -- yes --> X["dropped"]
   H -- no --> A{"an await in Grace or Parked accepts it?"}
   A -- yes --> W["claimed"]
@@ -140,7 +142,7 @@ flowchart TD
   R -- yes --> G{"Engaged?"}
   G -- yes --> HD["hold"]
   G -- no --> K{"a report while Acknowledged?"}
-  K -- yes --> T["receipt"]
+  K -- yes --> T["receipt: the TODO's detail if On, else nothing"]
   K -- no --> RG["ring"]
 ```
 
@@ -220,7 +222,7 @@ stateDiagram-v2
     [*] --> NoCycle
     NoCycle --> Active: normal below 100, warning, or indeterminate
     Active --> Active: another of those
-    Active --> NoCycle: normal 100, clear, or error — a report
+    Active --> NoCycle: normal 100, clear, or error — a report, then a reset
     Active --> NoCycle: command boundary or host interrupt
     NoCycle --> NoCycle: normal 100, clear, or error
   }
@@ -268,7 +270,7 @@ stateDiagram-v2
   state "TODO" as Todo {
     [*] --> Off
     [*] --> On: restored
-    Off --> On: hold, receipt, t, or a gesture without input or dismiss while Ringing
+    Off --> On: hold, t, or a gesture without input or dismiss while Ringing
     On --> On: hold or receipt, detail only if richer, or a gesture without input or dismiss while Ringing, taking the ring's detail
     On --> Off: a gesture with input, the pill, or t
   }
@@ -328,8 +330,8 @@ stateDiagram-v2
     Grace --> Resolved: grace elapses — idle
     Grace --> Resolved: claimed
     Parked --> Resolved: claimed
-    Grace --> Failed: the ceiling, PTY exit or removal, a cancel, its realm ending, or disposal
-    Parked --> Failed: the ceiling, PTY exit or removal, a cancel, its realm ending, or disposal
+    Grace --> Failed: the ceiling — timeout, PTY exit or removal — died, a cancel, its realm ending, or disposal — cancelled
+    Parked --> Failed: the ceiling — timeout, PTY exit or removal — died, a cancel, its realm ending, or disposal — cancelled
   }
 ```
 
@@ -363,7 +365,7 @@ Is there anything to wait for?
 
 `idle` is a resolution, not a failure (rationale). Absent shell integration "is a command running" is unanswerable, so an `exit` await there falls back to the grace window and resolves `idle` rather than erroring.
 
-**Resolution must consume only the ring source it resolved on**, its `cause` from that source: `report` → `bell`, `exit` → `exit`, `watching` → `quiet`. An await arriving mid-ring resolves immediately; under `exit` only the `exit` source counts and the await keeps waiting on the others.
+**Resolution must consume only the ring source it resolved on**, its `cause` from that source: `report` → `bell`, `exit` → `exit`, `watching` → `quiet`. An await arriving mid-ring resolves immediately; under `exit` only an `exit` source resolves it, and a ring without one leaves it parked.
 
 - **Must skip the `exit` source while a foreground command is running** (rationale).
 - **Must skip the `watching` source once output has resumed since it joined the ring** (`outputSince`) **or while a progress cycle is active**, and **never stand the detector in for that flag** (rationale).
@@ -422,7 +424,7 @@ Source of truth: `awaitCompletion` in `lib/src/lib/alert-manager.ts`; `AlertComm
 
 The output/silence detector is always on, one per Session for its whole lifetime; the rule set decides only whether its state is publicly visible and whether a settle may ring.
 
-**Must use the detector as the single output-activity signal for status and inferred completion**; its states are the Output detector machine (Completion events → State machines). **Never dispatch a settle while an `OSC 9;4` cycle is active**; the cycle's end completes the turn (rationale).
+**Must use the detector as the single output-activity signal for status and inferred completion**; its states are the Output detector machine (Completion events → State machines). **Never dispatch a settle while an `OSC 9;4` cycle is active, and reset the detector when one ends**; the cycle's end completes the turn (rationale).
 
 **A retired id must stay retired.** A host removes the alert entry in the same turn as its kill, ahead of any output still in flight. **Never let raw output or input revive a retired id**; a semantic or protocol event may (rationale).
 
@@ -438,7 +440,7 @@ Rules:
 
 Limitation: WATCHING needs the shell to report its command line — `OSC 633 ; E`, or `cmdline_url` / `cmdline` on `OSC 133 ; C` (fish ≥ 4) — beside the boundaries. A shell reporting bare `OSC 133` boundaries, or none (`docs/specs/terminal-state.md` → Shell-integration injection), never names a command, so WATCHING never engages and the terminal context reports `no command`. Terminal reports still work; command-exit alerting also requires semantic command boundaries. **Never route the keystroke fallback in `docs/specs/terminal-state.md` into the `AlertManager`** (rationale).
 
-**Must count only output that changes the screen**: a chunk of only queries, mode and color changes, or cursor motion is not output (rationale), nor are theme changes, remounts, DOM reparenting, or selection. **A busy run must begin within `cfg.alert.workStartWindow` of input**; input is any PTY write but a terminal reply or mouse report, a wheel tick included. Later output, such as a focus or resize repaint, is ignored entirely (rationale). Invariants:
+**Must count only output that changes the screen**: a chunk of only queries, mode and color changes, or cursor motion is not output (rationale), nor are theme changes, remounts, DOM reparenting, or selection. **A busy run must begin within `cfg.alert.workStartWindow` of input**; input is any PTY write but a terminal reply or a mouse report, so a wheel tick counts only when sent as keys. Later output, such as a focus or resize repaint, is ignored entirely (rationale). Invariants:
 
 - **Must preserve an owed `watching` source when output resumes** (rationale).
 - **Never reset the detector for engagement alone**; settles must reach awaits.
@@ -463,7 +465,7 @@ Sequence syntax lives in `docs/specs/terminal-escapes.md`; what each means here:
 
   | Input | Behavior |
   |---|---|
-  | active normal / warning / indeterminate | starts or updates the cycle, no TODO; never rings from silence |
+  | active normal / warning / indeterminate | starts or updates the cycle; never a completion |
   | `state=1, progress=100` | ends the cycle; a report completion |
   | `state=2` | ends the cycle; a report error |
   | clear | ends the cycle; a report completion |
@@ -503,7 +505,7 @@ Detail follows one richness order: a text report (`OSC 9`, `OSC 99`, `OSC 777`) 
 | a rule stops covering the `watching` key | withdraws `watching` |
 
 - **The user verbs acknowledge; a withdrawal must never acknowledge.** Each verb clears the ring and drops a hold; a withdrawal leaves `todo` and its notification as they stood.
-- **Never summon twice for an acknowledged state.** After a user verb clears a ring or drops a hold, a report before any output only updates the TODO (Completion events); opening a ring or starting a command forgets the acknowledgement (rationale).
+- **Never summon twice for an acknowledged state.** After a user verb clears a ring or drops a hold, a report before any output only updates an existing TODO, and otherwise changes nothing (Completion events); opening a ring or starting a command forgets the acknowledgement (rationale).
 - Command-mode `Enter` that only enters passthrough does not clear TODO.
 - Removing a WATCHING rule clears neither a progress cycle nor a command-exit arm.
 - Destroying the Session clears all alert, TODO, notification, held, progress, and command-exit state.
