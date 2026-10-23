@@ -74,6 +74,8 @@ export interface HostedPageProps {
   computers: Computer[] | null;
   passkeys: Passkey[] | null;
   enrolling: Enrollment | null;
+  /** This account has no plan, so it cannot approve a computer. */
+  noPlan: boolean;
   loading: boolean;
   busy: string;
   error: PageError | null;
@@ -106,7 +108,7 @@ export interface HostedPageProps {
 
 export function HostedPage({
   session, enabled, accounts, hostedVoice, turnOffDialog, computers, passkeys,
-  enrolling, loading, busy, error, notice, email, code, enterCode,
+  enrolling, noPlan, loading, busy, error, notice, email, code, enterCode,
   comingSoon, fresh, themeControl = false, act, refresh, approve, signOut, clearEnrollment, turnOffVoice,
   removeOne, removeKey, submit, setEmail, setCode, setEnterCode, changeEmail,
   sendCode, noteContinued, social,
@@ -187,29 +189,37 @@ export function HostedPage({
             {enrolling && (session || !enrolling.code) ? (
               <section aria-label="Computer to approve">
                 {enrolling.code ? (
-                  <>
-                    {fresh ? (
-                      <ConfirmDigits
-                        busy={busy}
-                        onApprove={(digits) => void approve(enrolling.code!, digits)}
-                      />
-                    ) : (
-                      <>
-                        <p className={HELP_CLASS}>
-                          Approving a computer needs a login from the last{" "}
-                          {RECENT_LOGIN_WINDOW}. Sign in again; this code stays
-                          on this page.
-                        </p>
-                        <button
-                          className={PRIMARY_CLASS}
-                          disabled={!!busy}
-                          onClick={() => void signOut()}
-                        >
-                          {busy === "logout" ? "Signing out…" : "Sign in again"}
-                        </button>
-                      </>
-                    )}
-                  </>
+                  noPlan || !fresh ? (
+                    <>
+                      <p className={HELP_CLASS}>
+                        {noPlan ? (
+                          "Natural Voice and remote control are not available to this account yet, so it cannot approve this computer. To use another account, sign in again; this code stays on this page."
+                        ) : (
+                          <>
+                            Approving a computer needs a login from the last{" "}
+                            {RECENT_LOGIN_WINDOW}. Sign in again; this code stays
+                            on this page.
+                          </>
+                        )}
+                      </p>
+                      <button
+                        className={PRIMARY_CLASS}
+                        disabled={!!busy}
+                        onClick={() => void signOut()}
+                      >
+                        {busy === "logout"
+                          ? "Signing out…"
+                          : noPlan
+                            ? "Use another account"
+                            : "Sign in again"}
+                      </button>
+                    </>
+                  ) : (
+                    <ConfirmDigits
+                      busy={busy}
+                      onApprove={(digits) => void approve(enrolling.code!, digits)}
+                    />
+                  )
                 ) : (
                   <p className={HELP_CLASS}>
                     This link has no valid code. Start again from Dormouse on
@@ -363,8 +373,9 @@ export function HostedPage({
                     </p>
                     {computers.length === 0 && (
                       <p className={HELP_CLASS}>
-                        No computers yet. Enroll one from Dormouse on that
-                        computer.
+                        No computers yet. To enroll one, open Dormouse on that
+                        computer and go to Settings → Network → Phones →
+                        Persistent Relay → Enroll remote control.
                       </p>
                     )}
                     {computers.map((computer) => (
