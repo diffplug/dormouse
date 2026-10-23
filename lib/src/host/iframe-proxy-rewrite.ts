@@ -89,13 +89,15 @@ export function frameAncestorsCsp(embedderOrigins: string[]): string {
 // user-supplied, so it is not an eval vector. Injected inline into served HTML;
 // this is why the default drops upstream CSP whole rather than per-directive (an
 // inline script needs `script-src` gone as much as the frame needs
-// `frame-ancestors` gone). It posts four message kinds to the Wall and nothing
+// `frame-ancestors` gone). It posts five message kinds to the Wall and nothing
 // else (every other keystroke flows to the tool). A nested document relays the
 // three pane-level kinds through its same-origin proxy parents until the outer
 // document reaches the app; its document-level location stays inside the outer
 // frame:
 //   - `leader`: the reserved dual-tap ⌘/⇧ chord (matching handle-dual-tap.ts),
-//     so the global chord keeps working with the frame focused.
+//     so the global chord keeps working with the frame focused. Any other key
+//     cancels a pending tap, as in use-wall-keyboard.ts: a left-Shift capital,
+//     a word, then a right-Shift capital is typing.
 //   - `pointerdown`: a click landed in the frame. A cross-origin click reaches
 //     only the frame, so the Wall can't see it; this lets it select the pane /
 //     enter passthrough. It's genuine user input, so it can't loop with the
@@ -106,6 +108,8 @@ export function frameAncestorsCsp(embedderOrigins: string[]): string {
 //   - `open-window`: an anchor with any target but `_self` (`_blank`, `_top`,
 //     `_parent`, a named frame) or a `window.open` the single-frame renderer
 //     can't honor; the parent offers it as a new pane instead.
+//   - `theme-request`: the document loaded and wants the app's theme; it stays
+//     in the outer document.
 export function iframeShim(embedderOrigin: string): string {
   return `(function(){
   var P=window.parent;
@@ -171,6 +175,7 @@ export function iframeShim(embedderOrigin: string): string {
   addEventListener('keydown',function(e){
     if(e.key==='Meta'){if(tap(cmd,e))post('leader');}
     else if(e.key==='Shift'){if(tap(shift,e))post('leader');}
+    else cmd.side=shift.side=null;
   },true);
   addEventListener('pointerdown',function(){post('pointerdown');},true);
   addEventListener('click',function(e){
