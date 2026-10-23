@@ -80,40 +80,69 @@ Source of truth: `setViewer` / `acknowledge` in `lib/src/lib/alert-manager.ts`; 
 
 ## Completion events
 
-**Must dispatch every completion as a `CompletionEvent` before any suppression runs** — a detector settle, a command finish, a direct notification, and the end of a protocol progress cycle (completion or error) (rationale). Each then takes the first exit that applies:
-
-```mermaid
-flowchart TD
-  C["completion: a settle, a command finish, a report, or a cycle's end"] --> H{"helper?"}
-  H -- yes --> X["nothing"]
-  H -- no --> A{"a claimant takes it?"}
-  A -- yes --> W["the await resolves"]
-  A -- no --> E{"inside the echo window?"}
-  E -- yes --> X
-  E -- no --> R{"may ring? settle if WATCHING, finish if seen, report always"}
-  R -- no --> X
-  R -- yes --> G{"engaged?"}
-  G -- yes --> HD["held: TODO now"]
-  G -- no --> K{"report, no ring, acknowledged, no output since?"}
-  K -- yes --> T["TODO"]
-  K -- no --> RG["open or join the ring"]
-```
-
-**A claimed event must never ring, set TODO, or store an `ActivityNotification`.**
-
-A `completion` passed the gates above. A ring shows as soon as it opens, whatever the output (rationale). The ring, hold, and TODO are separate latches: a pane can ring while a newer completion is held.
+**Must dispatch every completion as a `CompletionEvent` before any suppression runs** — a detector settle, a command finish, a direct notification, and the end of a protocol progress cycle (completion or error) (rationale). **A claimed event must never ring, set TODO, or store an `ActivityNotification`.** A ring shows as soon as it opens, whatever the output (rationale).
 
 ### State machines
 
-**Must keep these diagrams the whole alert model**: every transition the code makes is an edge, so a change to one changes its diagram. An edge reads trigger, then what it emits. Terms:
+**Must keep these diagrams the whole alert model**: every transition the code makes is an edge, so a change to one changes its diagram. They are one system: a machine's edges fire on what another emits, and Dispatch reads the states its questions name. An edge reads trigger, then — what it emits.
 
-- **output** — a painting chunk the detector accepts: outside the echo window, and inside the work-start window unless a run already began (WATCHING Track). Any other chunk changes nothing.
-- **verb** — a user verb (Clearing And TODO).
-- **withdraw** — an await consumes that source, an await claims a settle (every `watching` source), or a rule stops covering `watching`'s key; never an acknowledgement.
+```mermaid
+flowchart TD
+  P["Viewer presence"] -- "Present, focus" --> EN["Engagement"]
+  WIN["Input windows"] -- "gate output" --> DET["Output detector"]
+  PR["Progress cycle"] -- "Active: no settle" --> DET
+  DET -- "settle" --> DIS{{"Dispatch"}}
+  CMD["Foreground command"] -- "command finish" --> DIS
+  PR -- "report" --> DIS
+  REP["text reports and BEL"] -- "report" --> DIS
+  DIS -- "claimed" --> AW["Await"]
+  DIS -- "ring, hold, receipt" --> L
+  AW -- "withdraw" --> L
+  EN -- "idle, leave" --> L
+  EN -- "Engaged: Seen" --> CMD
+  L -- "idle: held sources" --> DIS
+  VB["verbs"] --> L
+  subgraph L["Latches"]
+    RING["Ring"]
+    HOLD["Hold"]
+    TODO["TODO"]
+    ACK["Acknowledged"]
+  end
+  L -- "episode" --> DEL["Delivery and speech"]
+```
+
+Dispatch also reads Engagement, the echo window, the Foreground command, Acknowledged, and each Await, by the states its questions name. Terms:
+
+- **input** — a PTY write but a terminal reply or a mouse report, a wheel tick included: a keystroke, a paste, a drop, a `dor send`, a launch.
+- **gesture** — an acknowledging gesture (Engagement), *with input* or *without*.
+- **verb** — a gesture, dismiss (`a`), the TODO pill, or `t` (Clearing And TODO).
+- **output** — a painting chunk outside an Open echo window, and inside an Open work-start window unless a run already began. Any other chunk changes nothing.
+- **watched** — a rule covers the running command's watch key (WATCHING Track).
+- **withdraw** — an await consumes that source, an await claims a settle (every `watching` source; rationale), or a rule stops covering `watching`'s key; never an acknowledgement.
 - **reset** — a command boundary, a host interrupt (`docs/specs/dor-tool.md` → Run end), or a verb or await answering a `watching` source.
 - **command boundary** — a command start or finish, a prompt, or PTY exit.
+- **episode** — one Ringing stretch of the Ring.
 
 Destroying, restarting, or restoring a Session starts each of its machines over, a restored TODO excepted.
+
+Dispatch — each completion takes the first exit that applies:
+
+```mermaid
+flowchart TD
+  C["settle, command finish, or report"] --> H{"a helper Session?"}
+  H -- yes --> X["dropped"]
+  H -- no --> A{"an await in Grace or Parked accepts it?"}
+  A -- yes --> W["claimed"]
+  A -- no --> E{"echo window Open?"}
+  E -- yes --> X
+  E -- no --> R{"a settle while watched, a command finish from Seen, or a report?"}
+  R -- no --> X
+  R -- yes --> G{"Engaged?"}
+  G -- yes --> HD["hold"]
+  G -- no --> K{"a report while Acknowledged?"}
+  K -- yes --> T["receipt"]
+  K -- no --> RG["ring"]
+```
 
 Each viewer:
 
@@ -121,29 +150,43 @@ Each viewer:
 stateDiagram-v2
   state "Viewer presence" as Viewer {
     [*] --> Absent
-    Absent --> Present: input, or focus or visibility returns, in an active window
-    Present --> Present: input, or its focus moves
-    Present --> Absent: idle — no input for the inactivity timeout, no iframe holding focus
+    Absent --> Present: activity, or focus or visibility returns, in an active window
+    Present --> Present: activity, or its focus moves
+    Present --> Absent: idle — no activity for the inactivity timeout, no iframe holding focus
     Present --> Absent: leave — blur without document focus, hide, or the realm ends
   }
 ```
 
-A Session is engaged while some present viewer focuses it. Each Session runs all of these at once:
+Activity is typing, pointer, wheel, or composition anywhere in the window. Each Session runs all of these at once:
+
+```mermaid
+stateDiagram-v2
+  state "Engagement" as Engagement {
+    [*] --> NotEngaged
+    NotEngaged --> Engaged: a Present viewer focuses it
+    Engaged --> NotEngaged: idle — its last focusing viewer goes idle, focus unchanged
+    Engaged --> NotEngaged: leave — its last focusing viewer leaves or focuses elsewhere
+  }
+```
 
 ```mermaid
 stateDiagram-v2
   state "Input windows" as Windows {
     state "Echo window" as Echo {
+      state "Shut" as EchoShut
+      state "Open" as EchoOpen
       [*] --> EchoShut
-      EchoShut --> EchoOpen: user input
-      EchoOpen --> EchoOpen: user input, restarting it
+      EchoShut --> EchoOpen: a gesture with input
+      EchoOpen --> EchoOpen: a gesture with input, restarting it
       EchoOpen --> EchoShut: echo window elapses
     }
     --
     state "Work-start window" as Work {
+      state "Shut" as WorkShut
+      state "Open" as WorkOpen
       [*] --> WorkShut
-      WorkShut --> WorkOpen: any input but a terminal reply or mouse report
-      WorkOpen --> WorkOpen: such input, restarting it
+      WorkShut --> WorkOpen: input
+      WorkOpen --> WorkOpen: input, restarting it
       WorkOpen --> WorkShut: work-start window elapses
     }
   }
@@ -166,7 +209,7 @@ stateDiagram-v2
     BUSY --> MIGHT_NEED_ATTENTION: silence
     BUSY --> Quiet: reset
     MIGHT_NEED_ATTENTION --> BUSY: output
-    MIGHT_NEED_ATTENTION --> Quiet: more silence — a settle, none while a progress cycle is active
+    MIGHT_NEED_ATTENTION --> Quiet: more silence — a settle, unless the progress cycle is Active
     MIGHT_NEED_ATTENTION --> Quiet: reset
   }
 ```
@@ -176,11 +219,10 @@ stateDiagram-v2
   state "Progress cycle (OSC 9;4)" as Progress {
     [*] --> NoCycle
     NoCycle --> Active: normal below 100, warning, or indeterminate
-    Active --> Active: another active update
-    Active --> NoCycle: normal 100, or clear — a report completion
-    Active --> NoCycle: error — a report error
+    Active --> Active: another of those
+    Active --> NoCycle: normal 100, clear, or error — a report
     Active --> NoCycle: command boundary or host interrupt
-    NoCycle --> NoCycle: normal 100 — a report completion, error — a report error, or clear — nothing
+    NoCycle --> NoCycle: normal 100, clear, or error
   }
 ```
 
@@ -188,10 +230,10 @@ stateDiagram-v2
 stateDiagram-v2
   state "Foreground command" as Command {
     [*] --> NoCommand
-    NoCommand --> Seen: start, engaged
-    NoCommand --> Unseen: start, not engaged
-    Unseen --> Seen: engaged, or acknowledged
-    Unseen --> NoCommand: finish, prompt, or PTY exit — an unseen finish, never rings
+    NoCommand --> Seen: start while Engaged
+    NoCommand --> Unseen: start while NotEngaged
+    Unseen --> Seen: Engaged, or a gesture
+    Unseen --> NoCommand: finish, prompt, or PTY exit — an unseen command finish
     Seen --> NoCommand: finish, prompt, or PTY exit — a command finish
     Unseen --> NoCommand: host interrupt, or another start before its own start edge
     Seen --> NoCommand: host interrupt, or another start before its own start edge
@@ -202,10 +244,10 @@ stateDiagram-v2
 stateDiagram-v2
   state "Ring" as Ring {
     [*] --> NoRing
-    NoRing --> Ringing: the flowchart opens it — a new episode
-    Ringing --> Ringing: the flowchart joins it, detail only if richer, or a source withdrawn, others left
-    Ringing --> NoRing: a verb
-    Ringing --> NoRing: its last source withdrawn
+    NoRing --> Ringing: ring — an episode opens
+    Ringing --> Ringing: ring, detail only if richer, or withdraw leaving other sources
+    Ringing --> NoRing: a verb — the episode ends
+    Ringing --> NoRing: withdraw of its last source — the episode ends
   }
 ```
 
@@ -213,11 +255,11 @@ stateDiagram-v2
 stateDiagram-v2
   state "Hold" as Hold {
     [*] --> NoHold
-    NoHold --> Held: the flowchart holds it
-    Held --> Held: the flowchart holds another, detail only if richer, or a source withdrawn, others left
-    Held --> NoHold: its viewer goes idle, focus unchanged — each source back to the flowchart's engaged step
-    Held --> NoHold: disengaged any other way, or a verb
-    Held --> NoHold: its last source withdrawn
+    NoHold --> Held: hold
+    Held --> Held: hold, detail only if richer, or withdraw leaving other sources
+    Held --> NoHold: Engagement idle — each source back to Dispatch at Engaged?
+    Held --> NoHold: Engagement leave, or a verb
+    Held --> NoHold: withdraw of its last source
   }
 ```
 
@@ -226,22 +268,23 @@ stateDiagram-v2
   state "TODO" as Todo {
     [*] --> Off
     [*] --> On: restored
-    Off --> On: a hold, a receipt, a look at a ring, or t
-    On --> On: a hold or a receipt, detail only if richer, or a look at a ring, taking its detail
-    On --> Off: a verb with input, the pill, or t
+    Off --> On: hold, receipt, t, or a gesture without input or dismiss while Ringing
+    On --> On: hold or receipt, detail only if richer, or a gesture without input or dismiss while Ringing, taking the ring's detail
+    On --> Off: a gesture with input, the pill, or t
   }
 ```
 
 ```mermaid
 stateDiagram-v2
   state "Acknowledged" as Acked {
+    state "Acknowledged" as Yes
     [*] --> Fresh
-    Fresh --> Acknowledged: a verb clears a ring or drops a hold
-    Acknowledged --> Fresh: output, a ring opens, or a command starts
+    Fresh --> Yes: a verb while Ringing or Held
+    Yes --> Fresh: output, ring, or a command start
   }
 ```
 
-A look at a ring is acknowledging without input or dismissing while it rings; a receipt is the flowchart's TODO step. Each episode, each sink:
+Each episode, each sink:
 
 ```mermaid
 stateDiagram-v2
@@ -249,7 +292,7 @@ stateDiagram-v2
     [*] --> Pending: the episode opens, the sink on
     [*] --> Spent: the episode opens, the sink off
     Pending --> Delivered: due, not blocked
-    Pending --> Spent: due but blocked, the sink turned off, or the episode ends
+    Pending --> Spent: due while blocked (speech while Engaged, push while any viewer is Present), the sink turned off, or the episode ends
     Delivered --> [*]
     Spent --> [*]
   }
@@ -276,21 +319,21 @@ stateDiagram-v2
     state arrive <<choice>>
     state "Failed, absorbing nothing" as Failed
     [*] --> arrive
-    arrive --> Failed: an invalid request or a helper — cancelled
+    arrive --> Failed: an invalid request or a helper Session — cancelled
     arrive --> Failed: the Session already removed — died
-    arrive --> Resolved: the ring holds a source it accepts — consumes it
-    arrive --> Parked: a command running
-    arrive --> Grace: nothing running
-    Grace --> Parked: command start, or output under quiet
+    arrive --> Resolved: Ringing with a source it accepts — withdraw it
+    arrive --> Parked: Seen or Unseen
+    arrive --> Grace: NoCommand
+    Grace --> Parked: a command start, or output under quiet
     Grace --> Resolved: grace elapses — idle
-    Grace --> Resolved: a completion it accepts — claims it
-    Parked --> Resolved: a completion it accepts — claims it
+    Grace --> Resolved: claimed
+    Parked --> Resolved: claimed
     Grace --> Failed: the ceiling, PTY exit or removal, a cancel, its realm ending, or disposal
     Parked --> Failed: the ceiling, PTY exit or removal, a cancel, its realm ending, or disposal
   }
 ```
 
-- **A hold must set TODO at once**, its detail by richness (Clearing And TODO), repeated holds merging; it leaves a progress cycle alone. Rung on idle, each held source takes its unengaged path, the acknowledged check included. A forgotten hold keeps its TODO (rationale); rule removal withdraws a held `watching` source as a ringing one.
+- **A hold must set TODO at once**; a forgotten hold keeps its TODO (rationale).
 - **A progress completion or error must end the cycle whether or not the event is claimed**, so `OSC_NOTIF_BUSY` falls back either way.
 - **Must dispatch a command finish for every watch that existed**, including the unseen and engaged ones the ring rule then discards or holds.
 
@@ -323,7 +366,7 @@ Is there anything to wait for?
 **Resolution must consume only the ring source it resolved on**, its `cause` from that source: `report` → `bell`, `exit` → `exit`, `watching` → `quiet`. An await arriving mid-ring resolves immediately; under `exit` only the `exit` source counts and the await keeps waiting on the others.
 
 - **Must skip the `exit` source while a foreground command is running** (rationale).
-- **Must skip the `watching` source once output has resumed since it joined the ring** (`outputSince`), and **never stand the detector in for that flag** (rationale).
+- **Must skip the `watching` source once output has resumed since it joined the ring** (`outputSince`) **or while a progress cycle is active**, and **never stand the detector in for that flag** (rationale).
 - **Never skip a report** — an `OSC 9` stays true until it is answered.
 - **Consuming must withdraw that one source and never acknowledge**; a ring it leaves empty is withdrawn (Clearing And TODO).
 
@@ -423,7 +466,8 @@ Sequence syntax lives in `docs/specs/terminal-escapes.md`; what each means here:
   | active normal / warning / indeterminate | starts or updates the cycle, no TODO; never rings from silence |
   | `state=1, progress=100` | ends the cycle; a report completion |
   | `state=2` | ends the cycle; a report error |
-  | clear | a report completion only if a cycle was active, else ignored |
+  | clear | ends the cycle; a report completion |
+  | any of those three with no cycle active | ignored (rationale) |
   | completing a warning cycle | a report completion with the warning title |
   | invalid state, missing percent for `1`/`4`, out-of-range percent | ignored |
   | a command boundary — start, finish, prompt, PTY exit | ends the cycle silently |

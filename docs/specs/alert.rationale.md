@@ -44,6 +44,10 @@
 
 **Why nothing is decided at the point of detection.** Dispatching before suppression lets an observer see the three-second `npm test` that finished attended and would never have rung anyone. A seam firing only the events a human would have been shown could not serve `dor await` at all.
 
+## State machines
+
+**Why a claimed settle withdraws every `watching` source.** An orchestrator claims a settle after it sent the work that ended an earlier quiet, so a `watching` source still owed from that quiet describes a turn the program already answered; leaving it would ring a human for the program's conversation. An explicit report beside it stays, since it is the program's own news.
+
 ## Await
 
 **Why `quiet` includes exit and the bell.** No caller wants "wake me when it settles" and also wants to keep blocking after the thing died: without exit, a crashed peer hangs its caller until the timeout. The bell is in for the opposite reason — an explicit `OSC 9` / `BEL` is *stronger* evidence than inferred silence, so ignoring "I need input" while waiting for the peer to go quiet would be perverse.
@@ -58,7 +62,7 @@
 
 **Why a command-exit ring is gated on nothing running.** The ring latches past the run that raised it, so once another command has started it can only describe the previous one — exactly the misreport a `dor send` followed by `dor await --until exit` would act on.
 
-**Why the `watching` source is gated on output since it joined.** The source legitimately describes a long-running watched command going quiet — what `--until quiet` exists for — but it is an inference from silence, and a brief burst does not clear it when the peer starts talking again; consuming it mid-turn would make the documented `await && read` idiom read a half-drawn screen. The detector cannot stand in for `outputSince` because it never latches: it reports how output looks *now*, its post-output `NOTHING_TO_SHOW` window (`busyCandidateGap`) is longer than the two CLI round trips between a `dor send` and the await behind it, and a burst too sparse to confirm BUSY returns it there, so it would still read as settled.
+**Why the `watching` source is gated on output since it joined.** The source legitimately describes a long-running watched command going quiet — what `--until quiet` exists for — but it is an inference from silence, and a brief burst does not clear it when the peer starts talking again; consuming it mid-turn would make the documented `await && read` idiom read a half-drawn screen. The detector cannot stand in for `outputSince` because it never latches: it reports how output looks *now*, its post-output `NOTHING_TO_SHOW` window (`busyCandidateGap`) is longer than the two CLI round trips between a `dor send` and the await behind it, and a burst too sparse to confirm BUSY returns it there, so it would still read as settled. An active progress cycle skips it too: output nothing asked for never sets the flag, so a turn the agent began unasked would read as quiet while its cycle says it is working (2026-10-22).
 
 **Why an await never leaves a TODO.** TODO means a human owes this pane attention; after an await nobody does — a program asked to be told, was told, and acted. A stranded TODO also leaks: the last await of an orchestration would mark a fully handled event, and because TODO feeds the Workspace union, an orchestration awaiting across several panes would light the whole Workspace up. The answer once depended on a race: a report claimed by an await parked first left nothing, while the same report landing a moment before the await stranded its TODO (audit, 2026-09-23). A ring now sets no TODO, only a look does, so both orders agree. A TODO from an *unrelated* earlier event is a different debt and stays owed.
 
@@ -101,6 +105,8 @@
 ## Terminal reports
 
 **Why progress is independent of the ring.** Progress and the report ring shared one field: an active `9;4` update while a report rang silently un-rang it, ending the episode and restarting speech and push, and a ring nulled the cycle, so the cycle's own end never rang. A cycle the program abandoned — a build killed with `Ctrl-C` — left the Session at `OSC_NOTIF_BUSY` forever, and the next program's defensive `9;4;0` then rang a phantom `Progress complete 40%` (audit, 2026-09-23). A command boundary is the one point where a cycle certainly belongs to a dead run.
+
+**Why an end with no cycle is ignored.** A command boundary ends a cycle silently, so a program's late `9;4;1;100` or `9;4;2` after its prompt would ring for a turn already over, as a defensive clear would; only a cycle's own end completes a turn (2026-10-22).
 
 **Why a progress event no longer drops a bell.** A mid-cycle update or a clear that ends no cycle summons nobody, so dropping the batch's lone `BEL` beside one lost the only ring (audit, 2026-09-23). Richness now decides detail for the batches that do both ring.
 
