@@ -430,7 +430,7 @@ export const SearchAcrossTopics: Story = {
   ...WithRules,
   play: async ({ canvasElement }) => {
     const body = dialog(canvasElement);
-    fireEvent.change(body.getByRole('searchbox'), { target: { value: 'terminal' } });
+    fireEvent.change(body.getByRole('searchbox'), { target: { value: 'push' } });
     await expect(body.getByRole('region', { name: 'Notifications' })).toBeVisible();
     await expect(body.queryByRole('button', { name: /^Theme:/ })).not.toBeInTheDocument();
   },
