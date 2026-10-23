@@ -241,6 +241,10 @@ export function createManagedVoiceHost(options: {
     const generation = tokenGeneration;
     const config = await load().catch(() => null);
     if (!config) return { ok: false, reason: 'config unreadable' };
+    // Asked after the read and before the token checks, so no await falls
+    // between those and the send: a policy switched to Nowhere while the read
+    // was out stops this speak.
+    if (!(await options.networkAllowed())) return { ok: false, reason: 'network-off' };
     if (disabled || generation !== tokenGeneration || !config.token) return { ok: false, reason: 'unconfigured' };
     const trimmed = text.trim();
     if (trimmed.length === 0 || trimmed.length > MAX_TEXT_LENGTH) return { ok: false, reason: 'bad-request' };
@@ -295,10 +299,9 @@ export function createManagedVoiceHost(options: {
   }
 
   async function speak(speakUrl: string, text: string): Promise<ManagedVoiceHostSpeakResult> {
-    // Expected, like `unconfigured`, so not logged: the renderer falls back.
-    if (!(await options.networkAllowed())) return { ok: false, reason: 'network-off' };
     const result = await request(speakUrl, text);
-    if (!result.ok && result.reason !== 'unconfigured') log(`[managed-voice] speak failed: ${result.reason}`);
+    // Both expected, so not logged: the renderer falls back.
+    if (!result.ok && result.reason !== 'unconfigured' && result.reason !== 'network-off') log(`[managed-voice] speak failed: ${result.reason}`);
     return result;
   }
 

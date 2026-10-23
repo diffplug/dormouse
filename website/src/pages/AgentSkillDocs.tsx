@@ -11,7 +11,7 @@ import { siteMeta } from "../lib/site-meta";
 import { useState } from "react";
 import skill from "../data/docs.skill.json";
 import DocsLayout from "../components/DocsLayout";
-import { ACCENT_HOVER_BORDER_CLASS, ACCENT_HOVER_TEXT_CLASS, LINK_CLASS, MUTED_TEXT_CLASS } from "../components/docs-tokens";
+import { ACCENT_HOVER_BORDER_CLASS, ACCENT_HOVER_TEXT_CLASS, LINK_CLASS, MUTED_TEXT_CLASS } from "dormouse-lib/site/docs-tokens";
 import MarkdownDocument, { type BlockNode } from "../components/MarkdownDocument";
 
 export function meta({ location }: MetaArgs) {

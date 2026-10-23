@@ -1,30 +1,33 @@
 /**
  * Theme boot for the Pocket shell. The whole app — auth screens included —
  * runs on the shared `--vscode-*` token system (lib/src/theme.css;
- * docs/specs/theme.md), so the theme must be restored before first paint,
- * before any `--vscode-*` vars exist on body.
+ * docs/specs/theme.md), so the theme must be restored before the first
+ * render; the shell's boot tag paints it before first paint
+ * (`POCKET_PAINT_PROFILE`).
  *
  * The theme restoration never runs at module import time on purpose: Storybook
  * imports these modules and manages its own themes.
  */
 
-import {
-  applyTheme,
-  getAppliedThemeSnapshot,
-  getBundledThemes,
-  restoreActiveTheme,
-  setDefaultThemeId,
-  useRestoredTheme,
-  type DormouseTheme,
-} from '../../lib/themes';
+// The modules, not the themes barrel: the Pocket build imports this file for
+// its boot tag's default.
+import { applyTheme, getAppliedThemeSnapshot, restoreActiveTheme, setDefaultThemeId } from '../../lib/themes/apply';
+import { setThemePaintProfile, type ThemePaintProfile } from '../../lib/themes/boot-paint';
+import { getBundledThemes } from '../../lib/themes/store';
+import type { DormouseTheme } from '../../lib/themes/types';
+import { useRestoredTheme } from '../../lib/themes/use-restored-theme';
 
 /** Same default theme the website playground restores, unless the user picked one. */
 export const POCKET_THEME_ID = 'vscode.theme-kimbie-dark.kimbie-dark';
+
+/** How Pocket paints, for its shell's boot tag. */
+export const POCKET_PAINT_PROFILE: ThemePaintProfile = { defaultThemeId: POCKET_THEME_ID };
 
 export function restorePocketTheme(): void {
   // Reached straight from `main.tsx` as well as through `useRestoredTheme`, so
   // it declares the fallback rather than assuming the hook ran first.
   setDefaultThemeId(POCKET_THEME_ID);
+  setThemePaintProfile(POCKET_PAINT_PROFILE);
   const theme = restoreActiveTheme();
   if (theme) syncDocumentChrome(theme);
 }

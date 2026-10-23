@@ -18,18 +18,18 @@ export const PASSKEYS: Passkey[] = [
 ];
 export const ENROLLMENT = { code: "7KQM-X4TD", purpose: "remote" as const };
 export const ACCOUNT = { session: SESSION, computers: COMPUTERS, passkeys: PASSKEYS };
-export type HostedStoryArgs = Partial<HostedPageProps> & { phone?: boolean; dark?: boolean };
+export type HostedStoryArgs = Partial<HostedPageProps> & { phone?: boolean; light?: boolean };
 const idle = async () => {};
 const nothing = () => {};
 
 /** Only form editing is local. Fixtures do not emulate authentication, polling,
  * or account mutations; App's DOM tests exercise those production handlers. */
-export function HostedStory({ phone, dark, ...args }: HostedStoryArgs) {
+export function HostedStory({ phone, light, ...args }: HostedStoryArgs) {
   const [email, setEmail] = useState(args.email ?? "");
   const [code, setCode] = useState(args.code ?? "");
   const [enterCode, setEnterCode] = useState(args.enterCode ?? false);
   const turnOffDialog = useRef<HTMLDialogElement>(null);
-  return <HostedFrame phone={phone} dark={dark}><HostedPage
+  return <HostedFrame phone={phone} light={light}><HostedPage
     session={null} enabled={[...providers]} accounts={[]} hostedVoice={null}
     computers={null} passkeys={null} enrolling={null} loading={false} busy=""
     error={null} notice={null} comingSoon={false} fresh={true}

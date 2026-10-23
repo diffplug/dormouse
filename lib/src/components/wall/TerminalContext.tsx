@@ -11,7 +11,7 @@ import { DEFAULT_WORKSPACE_ID } from '../../lib/session-types';
 import { getPlatform, IS_MAC, IS_WINDOWS } from '../../lib/platform';
 import { buildAppTitleResolver, createTerminalPaneState, cwdDisplay, deriveSurfaceLabel, explainTerminalTitle, type CwdState } from '../../lib/terminal-state';
 import { focusSession, getRunningCommandWatchKey, getRunningCommandWatchRule, getTerminalInstance, getActivitySnapshot, getTerminalPaneStateSnapshot, setCommandWatched, subscribeToActivity, subscribeToTerminalPaneState, subscribeToWatchedCommands, getWatchedCommandsSnapshot, toggleSessionTodo } from '../../lib/terminal-registry';
-import { writeTextToClipboard } from '../../lib/clipboard';
+import { writeTextToClipboard } from '../../lib/clipboard-write';
 import { listenerUrlsByPort } from './port-url';
 import { hostBrowserProviders } from './browser-automation';
 import { DEFAULT_HELPER_COMMAND } from '../../lib/terminal-context-types';

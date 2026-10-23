@@ -22,9 +22,11 @@
     <title>Dormouse Pocket</title>
     <style>
       /* Theme-agnostic viewport plumbing. Colors and fonts come from the shared
-         theme system applied to <body> (src/theme.css + main.tsx's
-         restorePocketTheme()); the dark fallback only shows in the sub-frame
-         window before the theme applies on first paint. */
+         theme system on <body>, which the boot tag paints before first paint
+         (POCKET_PAINT_PROFILE): `--color-app-*` (src/theme-colors.css) once
+         the stylesheet loads, which in dev arrives only with the bundle, and
+         their theme source until then. <html> cannot read body's variables,
+         so it keeps Kimbie Dark's literals behind the body. */
       html,
       body {
         height: 100%;
@@ -32,6 +34,10 @@
         overscroll-behavior: none;
         background: var(--color-app-bg, #362712);
         color: var(--color-app-fg, #d3af86);
+      }
+      body {
+        background: var(--color-app-bg, var(--vscode-sideBar-background, #362712));
+        color: var(--color-app-fg, var(--vscode-sideBar-foreground, #d3af86));
       }
       #pocket-root {
         height: 100dvh;

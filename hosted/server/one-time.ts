@@ -1,6 +1,7 @@
 import type { Context, Hono } from "hono";
 import {
   E2E_ID_BYTE_LENGTH,
+  isContentHashedName,
   isE2eId,
   ONE_TIME_PAGE_PATH,
   ONE_TIME_ROOM_PARAM,
@@ -48,13 +49,17 @@ export function oneTimeRoutes(app: Hono<{ Bindings: RelayEnv }>) {
  * The one-time phone page (`docs/specs/one-time.md` -> "Phone page"), staged
  * into the relay's assets under `/connect/`: its shell and its content-hashed
  * assets, and nothing else under the path. The relay's assets have no SPA
- * fallback; an HTML answer to an asset path is refused all the same.
+ * fallback; an HTML answer to an asset path is refused all the same, as is a
+ * name that is not content-hashed, whatever the build staged.
  */
 export function oneTimePageRoutes(app: Hono<{ Bindings: RelayEnv }>) {
   const assets = (c: OneTimeContext) => c.env.ASSETS.fetch(c.req.raw);
+  const assetDir = `${ONE_TIME_PAGE_PATH}assets/`;
   app.get(ONE_TIME_PAGE_PATH.slice(0, -1), assets);
   app.get(ONE_TIME_PAGE_PATH, assets);
-  app.get(`${ONE_TIME_PAGE_PATH}assets/*`, async (c) => assetOrNotFound(c, await assets(c)));
+  app.get(`${assetDir}*`, async (c) =>
+    isContentHashedName(c.req.path.slice(assetDir.length)) ? assetOrNotFound(c, await assets(c)) : c.notFound(),
+  );
   app.get(`${ONE_TIME_PAGE_PATH}*`, (c) => c.notFound());
 }
 

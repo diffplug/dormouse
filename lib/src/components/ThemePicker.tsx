@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { CaretDownIcon } from '@phosphor-icons/react';
 import type { DormouseTheme } from '../lib/themes';
 import {
@@ -16,6 +16,7 @@ import { getThemePreview, ThemePreview } from './theme-picker/ThemePreview';
 import { ThemeStoreDialog } from './theme-picker/ThemeStoreDialog';
 import { useAnchoredMenu, useCloseOnOutsideAndEscape } from './use-anchored-menu';
 import { OVERLAY_MAX_HEIGHT, POPUP_SURFACE_CLASS, themePreviewButton } from './design';
+import { useBrowserLayoutEffect } from '../lib/use-browser-layout-effect';
 
 /**
  * `compact` is the free-floating trigger used by the website's Pocket
@@ -58,7 +59,6 @@ export interface ThemePickerProps {
   offerStore?: boolean;
 }
 
-const useBrowserLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
 
 /** Menu width, applied inline by `useAnchoredMenu` for both variants. */
 const MENU_WIDTH_PX = 280;

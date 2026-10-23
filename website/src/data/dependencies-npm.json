@@ -4084,6 +4084,24 @@
       ]
     },
     {
+      "name": "@fontsource/ubuntu-mono",
+      "license": "UFL-1.0",
+      "author": "Google Inc.",
+      "homepage": "https://fontsource.org/fonts/ubuntu-mono",
+      "versions": [
+        "5.3.0"
+      ]
+    },
+    {
+      "name": "@fontsource/ubuntu-sans-mono",
+      "license": "UFL-1.0",
+      "author": "Google Inc.",
+      "homepage": "https://fontsource.org/fonts/ubuntu-sans-mono",
+      "versions": [
+        "5.3.0"
+      ]
+    },
+    {
       "name": "@noble/hashes",
       "license": "MIT",
       "author": "Paul Miller (https://paulmillr.com)",

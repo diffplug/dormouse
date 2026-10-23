@@ -5,7 +5,7 @@
  * locked to the brand's black — a reader picks what they can read. The
  * homepage keeps its own palette.
  */
-import { loadJson, saveJson } from "dormouse-lib/lib/local-json-store";
+import { loadJson, saveJson } from "../lib/local-json-store";
 
 /**
  * Softer than the site's `#000`, still dark enough to arrive from a black

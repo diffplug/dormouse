@@ -16,6 +16,12 @@
 
 **Why `list.inactiveSelectionForeground` falls back to the normal foreground.** Matches VSCode list/tree behavior: an inactive selected row does not force the active-selection white text, which materializing from `list.activeSelectionForeground` would.
 
+## First frame
+
+**Why a boot tag.** A theme painted by the bundle lands after the browser can draw: Hosted's shell showed site.css's black canvas and the website's prerendered docs showed the site palette, then each switched to the reader's theme, a flash on every light theme. A blocking classic script first in `<body>` runs before the first paint, which no module script or effect can. Measured in Chrome, 2026-10: with the tag, the first painted frame on Hosted, a website docs page, and Standalone's frontend already carries the reader's theme, remembered or baked.
+
+**Why remember the paint, not the theme id.** Resolving an id needs the bundled and installed theme tables and the resolver, which the tag would have to carry; the paint is one small object (the 44 resolved variables plus the docs tokens) the page already computed. The paint still carries its theme's id: `dormouse:active-theme` is shared by every page of an origin, and the website's playground picks without remembering a paint.
+
 ## Terminal color contract
 
 **Why the color queries are answered rather than passed through.** A TUI that adapts to a light or dark background asks with `OSC 11 ; ?`; with no answer it assumes dark, and on a light theme its adaptive chrome — Codex's composer "pill", for one — renders unreadable. xterm.js does not answer the query itself, so the parse boundary is the only place holding the real theme.

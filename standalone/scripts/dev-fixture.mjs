@@ -17,8 +17,9 @@ const scripts = path.dirname(fileURLToPath(import.meta.url));
  * origin through (`<root>/scripts/relay-origin.mjs` and the built
  * `remote-lib-common`), its build stamp (`<root>/scripts/build-stamp.mjs`,
  * which reads an unversioned tree as `0.0.0`), its source aliases
- * (`<root>/scripts/workspace-sources.mjs`), and an empty `<root>/bin` for
- * shims. Removing `root` is
+ * (`<root>/scripts/workspace-sources.mjs`), the theme boot plugin and the
+ * paint profile it bakes (`<root>/lib`, `src/theme-paint-profile.ts`), and an
+ * empty `<root>/bin` for shims. Removing `root` is
  * the caller's `t.after`, which must stop its runs first.
  */
 export async function devWorkspace(prefix) {
@@ -26,6 +27,7 @@ export async function devWorkspace(prefix) {
   const standalone = path.join(root, 'standalone');
   const bin = path.join(root, 'bin');
   await mkdir(path.join(standalone, 'scripts'), { recursive: true });
+  await mkdir(path.join(standalone, 'src'));
   await mkdir(path.join(root, 'scripts'));
   await mkdir(bin);
   await mirrorNodeModules(standalone);
@@ -35,6 +37,8 @@ export async function devWorkspace(prefix) {
     copyFile(path.resolve(scripts, '../../scripts/build-stamp.mjs'), path.join(root, 'scripts/build-stamp.mjs')),
     copyFile(path.resolve(scripts, '../../scripts/workspace-sources.mjs'), path.join(root, 'scripts/workspace-sources.mjs')),
     symlink(path.resolve(scripts, '../../remote-lib-common'), path.join(root, 'remote-lib-common'), 'junction'),
+    symlink(path.resolve(scripts, '../../lib'), path.join(root, 'lib'), 'junction'),
+    copyFile(path.resolve(scripts, '../src/theme-paint-profile.ts'), path.join(standalone, 'src/theme-paint-profile.ts')),
     writeFile(path.join(standalone, 'index.html'), '<script type="module" src="/app.js"></script>'),
     writeFile(path.join(standalone, 'app.js'), 'console.log(import.meta.env.VITE_DORMOUSE_BROWSER_DEV_HOST);'),
   ]);

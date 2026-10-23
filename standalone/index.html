@@ -4,6 +4,15 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Dormouse</title>
+    <style>
+      /* The app's outer surface, so the frame before the bundle runs is the
+         theme's: the boot tag puts the theme on <body> first. `--color-app-bg`
+         (lib/src/theme-colors.css) once the stylesheet loads, which in dev
+         arrives only with the bundle, and its theme source until then. */
+      body {
+        background: var(--color-app-bg, var(--vscode-sideBar-background));
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>

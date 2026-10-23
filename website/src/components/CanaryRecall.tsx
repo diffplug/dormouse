@@ -1,4 +1,4 @@
-import { CARD_CLASS, CARD_MUTED_TEXT_CLASS, LINK_CLASS, MUTED_TEXT_CLASS } from "./docs-tokens";
+import { CARD_CLASS, CARD_MUTED_TEXT_CLASS, LINK_CLASS, MUTED_TEXT_CLASS } from "dormouse-lib/site/docs-tokens";
 
 /** `website/src/data/canary-recall.json`, as website/scripts/generate-canary-recall.js writes it. */
 export type CanaryRecallSnapshot = {

@@ -17,7 +17,7 @@ import selfhost from "../data/docs.selfhost.json";
 import security from "../data/docs.security.json";
 import DocsLayout from "../components/DocsLayout";
 import { HostingRequirementNotice } from "../components/HostingRequirementNotice";
-import { BODY_TEXT_CLASS, CODE_CLASS, LINK_CLASS, NOTE_CLASS, NOTE_MUTED_TEXT_CLASS } from "../components/docs-tokens";
+import { BODY_TEXT_CLASS, CODE_CLASS, LINK_CLASS, NOTE_CLASS, NOTE_MUTED_TEXT_CLASS } from "dormouse-lib/site/docs-tokens";
 import MarkdownDocument, { AnchoredHeading, type BlockNode } from "../components/MarkdownDocument";
 import { securityColumnWeights } from "../components/security-columns";
 import { type TocEntry } from "../lib/docs-pages";

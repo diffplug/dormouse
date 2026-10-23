@@ -14,8 +14,8 @@
  */
 import { useEffect, useState } from "react";
 import { XIcon } from "@phosphor-icons/react";
-import { ThemePicker } from "dormouse-lib/components/ThemePicker";
-import { dismissThemePrompt, isThemePromptDismissed, subscribeToThemePromptDismissal } from "../lib/docs-theme";
+import { ThemePicker } from "../components/ThemePicker";
+import { dismissThemePrompt, isThemePromptDismissed, subscribeToThemePromptDismissal } from "./docs-theme";
 
 /**
  * Both floating panels sit over the page's own themed background, so they take
@@ -31,8 +31,11 @@ const PANEL_STYLE: React.CSSProperties = {
 
 export default function DocsThemeControl({
   variant = "floating",
+  offerStore = true,
 }: {
   variant?: "floating" | "inline";
+  /** Off where the page may not reach the theme store (Hosted's CSP). */
+  offerStore?: boolean;
 }) {
   // Prerender and the first client render must agree without consulting
   // browser-only storage. Unknown stays hidden; after hydration, only a reader
@@ -84,7 +87,7 @@ export default function DocsThemeControl({
     <div className="rounded border shadow-2xl" style={PANEL_STYLE}>
       <ThemePicker
         variant="compact"
-        offerStore
+        offerStore={offerStore}
         menuSide={inline ? "below" : "above"}
         onPick={dismissThemePrompt}
       />

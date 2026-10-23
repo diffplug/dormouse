@@ -6,7 +6,8 @@ import _bundledThemes from './bundled.json';
 const bundledThemes = _bundledThemes as unknown as DormouseTheme[];
 
 const INSTALLED_KEY = 'dormouse:installed-themes';
-const ACTIVE_KEY = 'dormouse:active-theme';
+/** The picked theme's id; the theme boot tag reads it too (`./boot-paint.ts`). */
+export const ACTIVE_THEME_KEY = 'dormouse:active-theme';
 
 export function getBundledThemes(): DormouseTheme[] {
   return bundledThemes;
@@ -96,7 +97,7 @@ export function getActiveThemeId(): string {
  *  Distinct from getActiveThemeId() which falls back to a bundled default. */
 export function getStoredActiveThemeId(): string | undefined {
   try {
-    return getStorage()?.getItem(ACTIVE_KEY) ?? undefined;
+    return getStorage()?.getItem(ACTIVE_THEME_KEY) ?? undefined;
   } catch {
     return undefined;
   }
@@ -107,8 +108,8 @@ export function setActiveThemeId(id: string): void {
     const storage = getStorage();
     if (!storage) return;
     // Restoring the active theme usually re-persists the id it just read.
-    if (storage.getItem(ACTIVE_KEY) === id) return;
-    storage.setItem(ACTIVE_KEY, id);
+    if (storage.getItem(ACTIVE_THEME_KEY) === id) return;
+    storage.setItem(ACTIVE_THEME_KEY, id);
   } catch {
     // Persistence must not prevent applying the theme for this session.
   }

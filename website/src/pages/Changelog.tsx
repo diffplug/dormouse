@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Link, useParams, type MetaArgs } from "react-router";
 import DocsLayout from "../components/DocsLayout";
-import { ACCENT_TEXT_CLASS, MUTED_TEXT_CLASS, SCROLL_MT_CLASS } from "../components/docs-tokens";
+import { ACCENT_TEXT_CLASS, MUTED_TEXT_CLASS, SCROLL_MT_CLASS } from "dormouse-lib/site/docs-tokens";
 import changelog from "../data/changelog.json";
 import { type TocEntry } from "../lib/docs-pages";
 import { siteMeta } from "../lib/site-meta";

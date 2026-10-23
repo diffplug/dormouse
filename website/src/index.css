@@ -12,6 +12,8 @@
    not, because that one retunes the type scale for a terminal UI. See
    docs/specs/theme.md -> Where the user picks a theme. */
 @import "../../lib/src/theme-colors.css";
+/* The site's own design, shared with Hosted's account pages. */
+@import "../../lib/src/site/site.css";
 @source "../../lib/src";
 /* Tests and stories are 180 of the library's 430 files and render nowhere on
    this site. Excluding them can only drop a utility that appears *nowhere
@@ -20,69 +22,6 @@
 @source not "../../lib/src/**/*.test.tsx";
 @source not "../../lib/src/**/*.stories.ts";
 @source not "../../lib/src/**/*.stories.tsx";
-
-@theme {
-  --font-display: "Ubuntu Sans Mono", ui-monospace, monospace;
-  --font-body: "Ubuntu Mono", ui-monospace, monospace;
-  --color-bg: #000000;
-  --color-surface: oklch(18% 0.015 60);
-  --color-text: #dedede;
-  --color-caramel: #b47624;
-  /* The pre-launch strip atop SiteHeader: a caution yellow that reads the
-     same in every docs theme, so it is not derived from one. */
-  --color-prelaunch-bg: #f2c230;
-  --color-prelaunch-fg: #1a1400;
-}
-
-/* The reference pages' accent, one definition for the four class strings in
-   website/src/components/docs-tokens.ts that read it (that file carries the
-   contrast reasoning).
-
-   On `body`, not `:root`: `applyTheme` writes --vscode-* onto body.style, and
-   a var() in a declaration on html cannot read a property set on its child, so
-   the chain would silently collapse to the caramel fallback on every theme —
-   the exact contrast failure the fallback exists to avoid. Unscoped by
-   `.docs-themed` so it still resolves during prerender, before DocsLayout's
-   effect adds that class. */
-body {
-  --docs-accent: var(--vscode-textLink-foreground, var(--color-caramel));
-  /* The site's caramel already clears AA against its strongest (20%) button
-     tint. DocsLayout replaces this alias with the theme-derived correction. */
-  --docs-button-text: var(--docs-accent);
-  /* #767676 is `docsMutedTextFor("#dedede", "#000000")` — the site's own
-     palette, precomputed. A fallback of the plain foreground would leave every
-     muted element identical to body text until DocsLayout's effect runs, which
-     is the whole prerendered page and the no-JS reading of it.
-     `docs-accent.test.ts` pins the value. */
-  --docs-text-muted: #767676;
-  /* #787878 is the same foreground derived against the 4% card surface,
-     #7b7977 against the note's 6% caramel, and #909090 against every surface
-     an inline-code tint may stack over; `docs-accent.test.ts` pins every
-     composite in `TINTED_DOCS_SURFACES` and its fallback. */
-  --docs-card-text-muted: #787878;
-  --docs-note-text-muted: #7b7977;
-  --docs-code-text-muted: #909090;
-  /* The registry's dark terminal green, yellow, and red, corrected against the
-     site's black and the 4% card tint (`DOCS_STATUS_COLORS`); pinned by
-     `docs-accent.test.ts`. */
-  --docs-status-good: #0dbc79;
-  --docs-status-mixed: #e5e510;
-  --docs-status-bad: #d55050;
-}
-
-html {
-  background: var(--color-bg);
-  color: var(--color-text);
-  font-family: var(--font-body);
-  font-kerning: normal;
-  scroll-padding-top: 4rem; /* matches SiteHeader h-16 on mobile */
-}
-
-@media (min-width: 768px) {
-  html {
-    scroll-padding-top: 5rem; /* matches SiteHeader h-20 on desktop (≥ md) */
-  }
-}
 
 /* Override lib's terminal-app styles (body overflow:hidden, #root height:100vh,
    body font-family system font) which Vite loads globally. The terminal
@@ -96,28 +35,6 @@ html body {
 
 #root {
   height: auto;
-}
-
-/* Reference pages follow the reader's picked theme instead of the site's
-   black; the rest of the site is unaffected because only DocsLayout adds the
-   class.
-
-   `applyTheme` writes --vscode-* onto body.style, so the remap has to live on
-   body too — html cannot read a custom property set on its child. That leaves
-   html painting the canvas its own black behind the page, which shows on
-   overscroll, so html gives the canvas up and lets body's background
-   propagate. */
-html:has(body.docs-themed) {
-  background: transparent;
-}
-
-body.docs-themed {
-  --color-bg: var(--vscode-editor-background);
-  --color-text: var(--vscode-editor-foreground);
-  --color-surface: var(--vscode-editorWidget-background);
-  background: var(--color-bg);
-  color: var(--color-text);
-  min-height: 100dvh;
 }
 
 html body.pocket-marketing-body {

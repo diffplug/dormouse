@@ -329,12 +329,24 @@ importers:
 
   hosted:
     dependencies:
+      '@fontsource/ubuntu-mono':
+        specifier: ^5.3.0
+        version: 5.3.0
+      '@fontsource/ubuntu-sans-mono':
+        specifier: ^5.3.0
+        version: 5.3.0
       '@hono/node-server':
         specifier: ^2.0.10
         version: 2.1.5(hono@4.13.13)
       '@pgstencil/auth':
         specifier: ^0.4.0
         version: 0.4.0(hono@4.13.13)(kysely@0.29.7)(pg@8.23.1)(pgstencil@0.4.0(cheerio@1.2.0)(kysely@0.29.7)(node-pg-migrate@9.0.0(pg@8.23.1))(testcontainers@12.2.1(supports-color@10.2.2))(turndown@7.2.4))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(vitest@5.0.5)
+      '@phosphor-icons/react':
+        specifier: ^2.1.10
+        version: 2.1.10(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      dormouse-lib:
+        specifier: workspace:*
+        version: link:../lib
       hono:
         specifier: ^4.13.8
         version: 4.13.13
@@ -357,6 +369,9 @@ importers:
       '@storybook/react':
         specifier: 11.0.0-alpha.6
         version: 11.0.0-alpha.6(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(storybook@11.0.0-alpha.6(@types/react@19.3.0)(prettier@3.9.6)(react@19.3.1))(supports-color@10.2.2)(typescript@7.0.2)
+      '@tailwindcss/vite':
+        specifier: ^4.3.0
+        version: 4.3.3(vite@8.3.4(@types/node@24.19.2)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
       '@types/node':
         specifier: ^24.13.6
         version: 24.19.2
@@ -384,6 +399,9 @@ importers:
       storybook:
         specifier: 11.0.0-alpha.6
         version: 11.0.0-alpha.6(@types/react@19.3.0)(prettier@3.9.6)(react@19.3.1)
+      tailwindcss:
+        specifier: ^4.3.0
+        version: 4.3.3
       testcontainers:
         specifier: ^12.2.1
         version: 12.2.1(supports-color@10.2.2)
@@ -7320,10 +7338,6 @@ packages:
     resolution: {integrity: sha512-2wcC/oGxHis/BoHkkPwldgiPSYcpZK3JU28WoMVv55yHJgcZ8rlXvuG9iZggz+sU1d4bRgIGASwyWqjxu3FM0g==}
     engines: {node: '>=18'}
 
-  source-map-js@1.2.1:
-    resolution: {integrity: sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA==}
-    engines: {node: '>=0.10.0'}
-
   source-map-js@1.2.2:
     resolution: {integrity: sha512-KGj/8Y43x35aZVDtt+J4mK1hoLGHULMYfSkODJNQjNDC3oW1PqPoxMwo0pLUsWM/UEGzON/NxeHywEfNXNP3Vw==}
     engines: {node: '>=0.10.0'}
@@ -10988,7 +11002,7 @@ snapshots:
       jiti: 2.7.0
       lightningcss: 1.32.0
       magic-string: 0.30.21
-      source-map-js: 1.2.1
+      source-map-js: 1.2.2
       tailwindcss: 4.3.3
 
   '@tailwindcss/oxide-android-arm64@4.3.3':
@@ -14624,8 +14638,6 @@ snapshots:
       '@polka/url': 1.0.0-next.29
       mrmime: 2.0.1
       totalist: 3.0.1
-
-  source-map-js@1.2.1: {}
 
   source-map-js@1.2.2: {}
 

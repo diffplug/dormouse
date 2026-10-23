@@ -30,7 +30,7 @@ import {
   TABLE_ROW_CLASS,
   TABLE_WRAP_CLASS,
   TH_CLASS,
-} from "../components/docs-tokens";
+} from "dormouse-lib/site/docs-tokens";
 import {
   COMPARISON,
   COMPARISON_SOURCE_PATH,

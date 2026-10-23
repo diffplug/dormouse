@@ -7,12 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // The page's own chrome is checked elsewhere (website/src/lib/docs-rail.test.tsx);
 // mounting it here only needs the layout to render its children.
 vi.mock("../components/SiteHeader", () => ({ default: () => <header />, STATIC_PAGE_HEADER_STYLE: {} }));
-vi.mock("../components/DocsThemeControl", () => ({ default: () => null }));
-vi.mock("dormouse-lib/lib/themes", () => ({
-  useRestoredTheme: () => {},
-  getAppliedThemeSnapshot: () => null,
-  subscribeToActiveTheme: () => () => {},
-}));
+vi.mock("dormouse-lib/site/DocsThemeControl", () => ({ default: () => null }));
+vi.mock("dormouse-lib/site/docs-paint", () => ({ useDocsThemedBody: () => {}, DOCS_HEADER_STYLE: {}, DOCS_PAINT_PROFILE: {} }));
 
 const { default: Hosted } = await import("./Hosted");
 const { COHORT_ENDPOINT, MAX_SHOWN_FOUNDERS } = await import("../lib/hosted-cohorts");

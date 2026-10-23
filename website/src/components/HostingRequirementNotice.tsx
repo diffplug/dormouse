@@ -1,4 +1,4 @@
-import { CARD_ACCENT_CLASS, CARD_MUTED_TEXT_CLASS, LINK_CLASS } from "./docs-tokens";
+import { CARD_ACCENT_CLASS, CARD_MUTED_TEXT_CLASS, LINK_CLASS } from "dormouse-lib/site/docs-tokens";
 import { sitePath } from "../lib/site-meta";
 
 /**

@@ -3,9 +3,8 @@
  *
  * One definition each, so the link, inline code, code-block, and table chrome
  * render identically across every reference page instead of drifting into
- * near-copies.
+ * near-copies. Shared with Hosted's account pages, which continue them.
  */
-
 /**
  * Prose links take the active theme's own accent, corrected for contrast, not
  * the site's caramel.
@@ -19,8 +18,8 @@
  * theme is applied.
  *
  * `--docs-accent` holds that fallback chain, defined once in
- * website/src/index.css; DocsLayout's effect overwrites it with the corrected
- * accent once a theme resolves (website/src/lib/docs-accent.ts).
+ * ./site.css; `docsTokensFor` (./docs-paint.ts) overwrites it with the corrected
+ * accent once a theme resolves (lib/src/lib/themes/contrast.ts).
  */
 export const LINK_CLASS = "text-[var(--docs-accent)] underline-offset-2 hover:underline";
 
@@ -33,13 +32,38 @@ export const ACCENT_BORDER_CLASS = "border-[var(--docs-accent)]";
 
 /** Accent-derived text corrected against an accent-tinted action surface —
  *  against the stronger hover tint, so it clears WCAG AA at rest and on hover
- *  (both pinned in website/src/lib/docs-accent.test.ts). */
+ *  (both pinned in lib/src/site/docs-accent.test.ts). */
 export const ACTION_TEXT_CLASS = "text-[var(--docs-button-text)]";
+
+const SITE_BUTTON_BASE = "inline-flex items-center justify-center rounded-md border font-display "
+  + "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--docs-accent)] "
+  + "disabled:pointer-events-none disabled:opacity-50";
+const SITE_BUTTON_TONE = {
+  accent: `hover:underline ${ACCENT_BORDER_CLASS} ${ACCENT_TEXT_CLASS}`,
+  neutral: `border-[var(--color-text)]/30 transition-colors ${ACCENT_HOVER_BORDER_CLASS} ${ACCENT_HOVER_TEXT_CLASS}`,
+};
+const SITE_BUTTON_SIZE = {
+  full: "min-h-12 w-full px-4 py-3",
+  fit: "min-h-11 px-4 py-2",
+};
+
+/** The site's buttons: an outline in the accent (the call to action,
+ *  underlined on hover) or in the text colour, taking the accent on hover.
+ *  The variants set disjoint properties, so they compose without a merge. */
+export function siteButton({
+  tone = "accent",
+  size = "full",
+}: { tone?: keyof typeof SITE_BUTTON_TONE; size?: keyof typeof SITE_BUTTON_SIZE } = {}): string {
+  return `${SITE_BUTTON_BASE} ${SITE_BUTTON_TONE[tone]} ${SITE_BUTTON_SIZE[size]}`;
+}
+
+/** The pages' call to action, full width. */
+export const ACTION_CLASS = siteButton();
 
 /** Opaque secondary text, derived per active theme to retain body-text AA. */
 export const MUTED_TEXT_CLASS = "text-[var(--docs-text-muted)]";
 
-/** Opaque secondary text corrected for `CARD_BASE`'s foreground tint. */
+/** Opaque secondary text corrected for `CARD_BASE_CLASS`'s foreground tint. */
 export const CARD_MUTED_TEXT_CLASS = "text-[var(--docs-card-text-muted)]";
 
 /** Opaque secondary text corrected for `NOTE_CLASS`'s caramel tint. */
@@ -78,9 +102,9 @@ export const CODE_CLASS =
 /** A panel of prose set off from the flow — `PRE_CLASS`'s tint without the
  *  monospace. `CARD_ACCENT_CLASS` is the variant that draws attention with the
  *  theme's accent instead of the quiet rule. */
-const CARD_BASE = "rounded-xl border bg-[var(--color-text)]/[0.04] p-5 sm:p-6";
-export const CARD_CLASS = `${CARD_BASE} border-[var(--color-text)]/15`;
-export const CARD_ACCENT_CLASS = `${CARD_BASE} ${ACCENT_BORDER_CLASS}`;
+export const CARD_BASE_CLASS = "rounded-xl border bg-[var(--color-text)]/[0.04] p-5 sm:p-6";
+export const CARD_CLASS = `${CARD_BASE_CLASS} border-[var(--color-text)]/15`;
+export const CARD_ACCENT_CLASS = `${CARD_BASE_CLASS} ${ACCENT_BORDER_CLASS}`;
 
 /** The caramel aside both hosting pages open with. Caramel rather than the
  *  reader's accent: it flags an editorial note, not a link target. */
@@ -98,7 +122,7 @@ export type DocsSurfaceVariants = readonly (readonly { tintVar: string; tintAlph
  * *at* 4.5:1 against the untinted page: `NOTE_CLASS` paired with
  * `MUTED_TEXT_CLASS` measured 4.42:1 on the site's own palette. **Adding a
  * tinted container adds an entry here**, and nesting adds a `surfaceVariants`
- * stack — `DocsLayout`'s paint effect and `website/src/lib/docs-accent.test.ts`
+ * stack — `docsTokensFor` (./docs-paint.ts) and `lib/src/site/docs-accent.test.ts`
  * both loop this list, so the CSS variable, the static fallback, and the
  * per-theme AA check come with it.
  *
@@ -138,8 +162,8 @@ export const TINTED_DOCS_SURFACES = [
  * yellow, and red, corrected to clear body-text AA on the page and on the 4%
  * card tint a highlighted table column sits on.
  *
- * `DocsLayout`'s paint effect derives each token; index.css carries the
- * fallback for the site's own black, and `website/src/lib/docs-accent.test.ts`
+ * `docsTokensFor` (./docs-paint.ts) derives each token; ./site.css carries the
+ * fallback for the site's own black, and `lib/src/site/docs-accent.test.ts`
  * checks both. Never let colour carry a verdict alone: pair it with a shape.
  */
 export const DOCS_STATUS_COLORS = [
@@ -155,6 +179,32 @@ export const DOCS_STATUS_COLORS = [
 export const STATUS_GOOD_TEXT_CLASS = "text-[var(--docs-status-good)]";
 export const STATUS_MIXED_TEXT_CLASS = "text-[var(--docs-status-mixed)]";
 export const STATUS_BAD_TEXT_CLASS = "text-[var(--docs-status-bad)]";
+
+/** A docs page's own title and the muted lede under it. Callers add their
+ *  own flow margin. */
+export const PAGE_TITLE_CLASS = "font-display text-[clamp(1.75rem,3vw+0.5rem,2.5rem)]";
+export const PAGE_INTRO_CLASS = `text-lg ${MUTED_TEXT_CLASS}`;
+
+/** A top-level section after the first, set off by a hairline rule. */
+export const SECTION_CLASS = "mt-14 border-t border-[var(--color-text)]/15 pt-10";
+
+/** The rule between the rows of a ticked list, as the plan cards draw it. */
+export const DASHED_ROW_CLASS = "border-b border-dashed border-[var(--color-text)]/15";
+
+/** A modal's surface. It spells its own surface rather than taking
+ *  `CARD_CLASS`: a card's translucent tint over a dimmed page left the
+ *  content legible straight through it. */
+export const PANEL_CLASS =
+  "max-h-[85dvh] w-full max-w-lg overflow-y-auto rounded-xl border "
+  + "border-[var(--color-text)]/15 bg-[var(--color-bg)] p-5 text-[var(--color-text)] sm:p-6";
+
+/** A text field: the outline every form on the site shares, the size of a
+ *  full-width field, and the themed text that follows the reader's theme. */
+export const FIELD_EDGE_CLASS =
+  "rounded-md border border-[var(--color-text)]/50 bg-[var(--color-bg)] focus:outline-none";
+export const FIELD_CLASS = `${FIELD_EDGE_CLASS} min-h-12 w-full px-4 py-3 text-base`;
+export const FIELD_TEXT_CLASS =
+  "text-[var(--color-text)] placeholder:text-[var(--docs-text-muted)] focus:border-[var(--docs-accent)]";
 
 /** Reference body prose: the shared size, leading, and muted colour. Callers
  *  add their own flow margin. */

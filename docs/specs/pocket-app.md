@@ -74,7 +74,7 @@ Source of truth: `PlatformAdapter` in `lib/src/lib/platform/types.ts`; `App` in 
 
 ## Design system and theming
 
-**All of Pocket — the auth screens included — renders on the shared themeable design system** (`--color-*` tokens over `--vscode-*`; [theme.md](./theme.md), `DESIGN.md`), never the website's separate "homepage" system (`website/src/index.css`). **No Pocket-specific palette**: a theme change re-skins auth screens and wall together.
+**All of Pocket — the auth screens included — renders on the shared themeable design system** (`--color-*` tokens over `--vscode-*`; [theme.md](./theme.md), `DESIGN.md`), never the website's separate "homepage" system (`lib/src/site/site.css`). **No Pocket-specific palette**: a theme change re-skins auth screens and wall together.
 
 **The theme is restored before first paint** (rationale).
 
@@ -198,7 +198,7 @@ Source of truth: `SessionExpiredError` in `lib/src/remote/client/pocket-client.t
 
 **The Pocket app is always served same-origin with its API**: WebAuthn binds passkeys to the serving origin, and Chrome's Private Network Access rules block public-site → private-network fetches. The Relay enforces it: a registration or assertion whose `clientDataJSON.origin` is not the configured origin is rejected ([relay.md](./relay.md); rationale); the Relay emits no cross-origin grant ([security-remote.md](./security-remote.md#cross-origin-access)). **The bundle mounts at the origin root, never under a path prefix**: the manifest's `start_url`/`scope`, the worker's registration scope, and the shell's manifest/icon links are all root-absolute. The one-time page reuses Pocket's screens and wall but not this rule (`docs/specs/one-time.md` -> "Phone page").
 
-**The origin is served with a Content-Security-Policy**, the defense in depth around the active XSS `docs/specs/security.md` -> "What is not defended" names (rationale). **Every source is the app's own origin** (`default-src 'self'`, with `frame-ancestors`, `base-uri` and `object-src` `'none'`), **loosened only by** `style-src 'unsafe-inline'`, the WebSocket origin named in `connect-src` (rationale), `data:`/`blob:` images, and `blob:` media. **`script-src` stays `'self'` plus `'wasm-unsafe-eval'` ([layout.md](./layout.md#inline-graphics)), with no nonce pipeline**: `assertPocketShell` fails `build:pocket` on any inline `<script>` body or off-origin `src`/`href` in either emitted shell, the app's or `/diagnostics/`'s. (rationale)
+**The origin is served with a Content-Security-Policy**, the defense in depth around the active XSS `docs/specs/security.md` -> "What is not defended" names (rationale). **Every source is the app's own origin** (`default-src 'self'`, which `font-src`, `worker-src`, `manifest-src`, and `form-action` restate, with `frame-ancestors`, `base-uri` and `object-src` `'none'`), **loosened only by** `style-src 'unsafe-inline'`, the WebSocket origin named in `connect-src` (rationale), `data:`/`blob:` images, and `blob:` media. **`script-src` stays `'self'` plus `'wasm-unsafe-eval'` ([layout.md](./layout.md#inline-graphics)), with no nonce pipeline**: `assertPocketShell` fails `build:pocket` on any inline `<script>` body or off-origin `src`/`href` in either emitted shell, the app's or `/diagnostics/`'s. (rationale)
 
 One lib-owned bundle, two deployments:
 

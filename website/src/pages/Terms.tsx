@@ -1,6 +1,6 @@
 import type { MetaArgs } from "react-router";
 import HostedPolicyLayout, { type PolicySection } from "../components/HostedPolicyLayout";
-import { LINK_CLASS } from "../components/docs-tokens";
+import { LINK_CLASS } from "dormouse-lib/site/docs-tokens";
 import { siteMeta, sitePath } from "../lib/site-meta";
 
 export function meta({ location }: MetaArgs) {

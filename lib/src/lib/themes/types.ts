@@ -9,8 +9,8 @@ export interface DormouseTheme {
    *  began resolving previews from `vars`; the persisted-shape guard in
    *  `store.ts` still requires it. */
   swatch: string;
-  /** focusBorder, recorded at import. Read only by the website's docs accent
-   *  (`website/src/lib/docs-accent.ts`) — the picker's swatch dot uses the
+  /** focusBorder, recorded at import. Read only by the docs and Hosted accent
+   *  (`lib/src/lib/themes/contrast.ts`) — the picker's swatch dot uses the
    *  runtime focus-ring pick, which can differ when focusBorder is achromatic. */
   accent: string;
   /** --vscode-* CSS variable overrides */
