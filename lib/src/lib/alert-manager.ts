@@ -122,7 +122,7 @@ function dropWatching(set: SourceSet): boolean {
   return set.sources.length === 0;
 }
 
-/** Output arrived: a settle this set carries no longer describes the Session. */
+/** Work arrived: a settle this set carries no longer describes the Session. */
 function noteOutput(set: SourceSet | null): void {
   if (set?.watching) set.watching.outputSince = true;
 }
@@ -361,7 +361,15 @@ export class AlertManager {
     if (!entry) return;
     // The echo of the user's own keystroke is not the program working.
     if (this.inEchoWindow(entry)) return;
-    if (!entry.detector.onData()) return;
+    if (entry.detector.onData()) this.noteWork(id, entry);
+  }
+
+  /**
+   * The program worked — output counted, or it announced progress: a settle
+   * the ring or hold carries no longer describes it, the acknowledged state
+   * is over, and an await's grace has its answer.
+   */
+  private noteWork(id: string, entry: AlertEntry): void {
     for (const set of [entry.ring, entry.held]) noteOutput(set);
     entry.ackedQuiet = false;
     this.eachWaiter(id, (waiter) => waiter.onOutput());
@@ -690,12 +698,9 @@ export class AlertManager {
   private consumeAwaitableRing(entry: AlertEntry, until: AwaitUntil): AwaitCause | null {
     if (until === 'quiet' && this.withdrawRingSource(entry, 'report')) return 'bell';
     if (entry.commandExitWatch === null && this.withdrawRingSource(entry, 'exit')) return 'exit';
-    // A live progress cycle says the program is working, whatever the
-    // detector saw: output nothing asked for never sets `outputSince`.
     if (
       until === 'quiet'
       && entry.ring?.watching?.outputSince === false
-      && entry.progress === null
       && this.withdrawRingSource(entry, 'watching')
     ) return 'quiet';
     return null;
@@ -769,10 +774,11 @@ export class AlertManager {
       return;
     }
 
-    // A program announcing work may start a run as input does, so a turn it
-    // began unasked reads as work: its end is news, not a receipt.
+    // Announced work is work, and may start a run as input does, so output
+    // after a mid-turn acknowledgement still makes the turn's end news.
+    this.noteWork(id, entry);
     entry.detector.expectWork();
-    if (entry.progress?.state === progress.state && entry.progress.percent === progress.percent) return;
+    if (live?.state === progress.state && live.percent === progress.percent) return;
     entry.progress = { state: progress.state, percent: progress.percent };
     this.notify(id);
   }
@@ -1071,6 +1077,7 @@ export class AlertManager {
     const held = entry.held ??= { sources: [], watching: null, detail };
     held.detail = richer(held.detail, detail);
     addSource(held, source);
+    // Unlike a receipt, a hold turns the TODO on: the user is looking at it.
     entry.todo = true;
     entry.notification = richer(entry.notification, detail);
   }

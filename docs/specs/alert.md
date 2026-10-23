@@ -120,6 +120,7 @@ Dispatch also reads Engagement, the echo window, the Foreground command, Acknowl
 - **gesture** — an acknowledging gesture (Engagement), *with input* or *without*.
 - **verb** — a gesture, dismiss (`a`), the TODO pill, or `t` (Clearing And TODO).
 - **output** — a painting chunk outside an Open echo window that, while the detector is quiet `NOTHING_TO_SHOW` (no candidate yet), also falls inside an Open work-start window. Any other chunk changes nothing.
+- **work** — output, or an active progress update.
 - **watched** — a rule covers the running command's watch key (WATCHING Track).
 - **withdraw** — an await consumes that source, an await claims a settle (every `watching` source; rationale), or a rule stops covering `watching`'s key; never an acknowledgement.
 - **reset** — a command boundary, a progress cycle's end, a host interrupt (`docs/specs/dor-tool.md` → Run end), or a verb or await answering a `watching` source.
@@ -283,7 +284,7 @@ stateDiagram-v2
     state "Acknowledged" as Yes
     [*] --> Fresh
     Fresh --> Yes: a verb while Ringing or Held
-    Yes --> Fresh: output, ring, or a command start
+    Yes --> Fresh: work, ring, or a command start
   }
 ```
 
@@ -327,7 +328,7 @@ stateDiagram-v2
     arrive --> Resolved: Ringing with a source it accepts — withdraw it
     arrive --> Parked: Seen or Unseen
     arrive --> Grace: NoCommand
-    Grace --> Parked: a command start, or output under quiet
+    Grace --> Parked: a command start, or work under quiet
     Grace --> Resolved: grace elapses — idle
     Grace --> Resolved: claimed
     Parked --> Resolved: claimed
@@ -369,7 +370,7 @@ Is there anything to wait for?
 **Resolution must consume only the ring source it resolved on**, its `cause` from that source: `report` → `bell`, `exit` → `exit`, `watching` → `quiet`. An await arriving mid-ring resolves immediately; under `exit` only an `exit` source resolves it, and a ring without one leaves it parked.
 
 - **Must skip the `exit` source while a foreground command is running** (rationale).
-- **Must skip the `watching` source once output has resumed since it joined the ring** (`outputSince`) **or while a progress cycle is active**, and **never stand the detector in for that flag** (rationale).
+- **Must skip the `watching` source once work has resumed since it joined the ring** (`outputSince`; work as in State machines), and **never stand the detector in for that flag** (rationale).
 - **Never skip a report** — an `OSC 9` stays true until it is answered.
 - **Consuming must withdraw that one source and never acknowledge**; a ring it leaves empty is withdrawn (Clearing And TODO).
 
@@ -506,7 +507,7 @@ Detail follows one richness order: a text report (`OSC 9`, `OSC 99`, `OSC 777`) 
 | a rule stops covering the `watching` key | withdraws `watching` |
 
 - **The user verbs acknowledge; a withdrawal must never acknowledge.** Each verb clears the ring and drops a hold; a withdrawal leaves `todo` and its notification as they stood.
-- **Never summon twice for an acknowledged state.** After a user verb clears a ring or drops a hold, a report before any output only updates an existing TODO, and otherwise changes nothing (Completion events); opening a ring or starting a command forgets the acknowledgement (rationale).
+- **Never summon twice for an acknowledged state.** After a user verb clears a ring or drops a hold, a report before any work only updates an existing TODO (the Acknowledged machine in Completion events; rationale).
 - Command-mode `Enter` that only enters passthrough does not clear TODO.
 - Removing a WATCHING rule clears neither a progress cycle nor a command-exit arm.
 - Destroying the Session clears all alert, TODO, notification, held, progress, and command-exit state.

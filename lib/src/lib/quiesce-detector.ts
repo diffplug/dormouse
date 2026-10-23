@@ -113,8 +113,9 @@ export class QuiesceDetector {
     return true;
   }
 
-  /** Input reached the program: output may begin a busy run. Kept across
-   *  `reset`: the keystroke that starts a command precedes its boundary. */
+  /** Input reached the program, or it announced work: output may begin a busy
+   *  run. Kept across `reset`: the keystroke that starts a command precedes
+   *  its boundary. */
   expectWork(): void {
     this.lastWorkExpectedAt = Date.now();
   }

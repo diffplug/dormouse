@@ -100,12 +100,12 @@ export function createAlertDeliveryScheduler(options: AlertDeliverySchedulerOpti
   }
 
   function onState(id: string, state: AlertState): void {
-    const episode = state.episode ?? null;
+    const { episode } = state;
     const current = episodes.get(id);
     // Every sink is armed once, as its episode opens.
     if (current?.episodeId === episode?.id) return;
     if (current) {
-      current.pending.forEach((delivery) => clearTimeout(delivery));
+      current.pending.forEach(clearTimeout);
       episodes.delete(id);
     }
     if (!episode) return;
@@ -160,7 +160,7 @@ export function createAlertDeliveryScheduler(options: AlertDeliverySchedulerOpti
 
     dispose() {
       for (const stop of stops) stop();
-      for (const { pending } of episodes.values()) pending.forEach((delivery) => clearTimeout(delivery));
+      for (const { pending } of episodes.values()) pending.forEach(clearTimeout);
       episodes.clear();
       published.clear();
     },

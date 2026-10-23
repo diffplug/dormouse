@@ -30,8 +30,8 @@ interface Attempt {
  * ineligible job can still be dropped while it is only pending here.
  *
  * Bounded in both directions, because a wedged or callback-less engine must not
- * retain later alerts: at most {@link MAX_PENDING} pending jobs admitted, and at most
- * {@link SPEECH_ENGINE_TIMEOUT_MS} per engine attempt, after which the attempt
+ * retain later alerts: at most {@link MAX_PENDING} pending jobs admitted, and
+ * at most {@link SPEECH_ENGINE_TIMEOUT_MS} per engine attempt, after which the attempt
  * is cancelled and the queue advances. Callback identity is revoked before any
  * cancel, so a detached late callback cannot settle the attempt that replaced
  * it. Nothing is retried: an alarm that failed, expired, or never fit has

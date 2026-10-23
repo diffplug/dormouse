@@ -122,12 +122,21 @@ describe('owed alerts during resumed output', () => {
     burst(3_000);
     expect(manager.getState(ID).status).toBe('NOTHING_TO_SHOW');
   });
-  it('lets a progress update start work with no input, so the turn it ends is news', () => {
+  it('counts a progress update as work, so the turn it ends is news', () => {
     vi.advanceTimersByTime(60_000);
     manager.notifyFromProtocol(ID, REPORT);
     manager.dismissAlert(ID);
-    // A turn the program began unasked, announced as `OSC 9;4;3`.
+    // A turn the program began unasked, announced as `OSC 9;4;3`, painting nothing.
     manager.updateProtocolProgress(ID, { state: 'indeterminate', percent: null });
+    manager.updateProtocolProgress(ID, { state: 'clear', percent: null });
+    expect(manager.getState(ID)).toMatchObject({ status: 'ALERT_RINGING', notification: { source: 'OSC 9;4' } });
+  });
+  it('lets a progress update start a run, so output after a mid-turn dismissal makes the end news', () => {
+    vi.advanceTimersByTime(60_000);
+    manager.updateProtocolProgress(ID, { state: 'indeterminate', percent: null });
+    burst(3_000);
+    manager.notifyFromProtocol(ID, REPORT);
+    manager.dismissAlert(ID);
     burst(3_000);
     manager.updateProtocolProgress(ID, { state: 'clear', percent: null });
     expect(manager.getState(ID)).toMatchObject({ status: 'ALERT_RINGING', notification: { source: 'OSC 9;4' } });
