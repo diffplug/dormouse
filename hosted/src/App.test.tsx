@@ -149,6 +149,25 @@ it.each(["remote", "voice"] as const)("%s approval returns to the account and wa
   expect(api.getApproval).toHaveBeenCalledWith("7KQM-X4TD");
 });
 
+it("an approval that completes after a newer link opened keeps the newer code", async () => {
+  vi.mocked(api.getSession).mockResolvedValue(login());
+  let resolve!: () => void;
+  vi.mocked(api.approveEnrollment).mockReturnValue(new Promise<void>((done) => { resolve = done; }));
+  await mount(ENROLLMENT);
+  await approve();
+  await act(async () => {
+    history.replaceState(null, "", "/enroll#9PRW-H3NC");
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+  });
+  await act(async () => resolve());
+  expect(location.pathname).toBe("/enroll");
+  expect(container.querySelector("h1")?.textContent).toBe("Enroll remote control");
+  expect(container.querySelector("[role=status]")?.textContent).toContain("Approved 7KQM-X4TD");
+  vi.mocked(api.approveEnrollment).mockResolvedValue();
+  await approve();
+  expect(api.approveEnrollment).toHaveBeenLastCalledWith("9PRW-H3NC", undefined, "47");
+});
+
 describe("Natural Voice confirmation", () => {
   beforeEach(() => {
     vi.mocked(api.getSession).mockResolvedValue(login());
