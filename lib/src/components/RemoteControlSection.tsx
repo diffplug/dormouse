@@ -471,7 +471,7 @@ function useEnrollmentActions() {
  * surface as the `window.dormouseBurrow` console hook,
  * which stays as the scripting seam (`docs/specs/relay.md`, "Burrow side").
  * Pairing approval is *not* here — it is a modal, because it must interrupt
- * (`docs/specs/remote-security-model.md`, Pairing Ceremony).
+ * (`docs/specs/remote-security-model.md`, Pairing).
  */
 export function RemoteControlSection() {
   const state = useSyncExternalStore(subscribeToBurrowStatus, getBurrowStatusSnapshot);
