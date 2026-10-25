@@ -4,8 +4,8 @@
  * `tool-host.cjs` and imported directly by the VS Code extension host.
  *
  * One method: resolve a tool name against the nearest `dormouse.yml`, list
- * the Tools there, read browser settings, and record a trust decision a human
- * made in Dormouse's own chrome. Everything crossing back to the webview is
+ * the Tools there, resolve and list `dor open` handlers, read browser
+ * settings, and record a trust decision a human made in Dormouse's own chrome. Everything crossing back to the webview is
  * plain JSON — the standalone path goes through Rust.
  */
 import { dirname } from 'node:path';

@@ -2,10 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TauriAdapter } from "./tauri-adapter";
 
 // The orchestrator is pure webview-side glue: it listens for one Rust event,
-// calls adapter/updater primitives, and invokes three Rust commands. Mock the
-// Tauri surface (core invoke + event listen) like updater.test.ts, plus the two
-// collaborators (countRunningSessions, the updater install pair) so ordering is
-// observable. The adapter is injected into initQuitFlow, so it needs no module
+// calls adapter/updater primitives, and invokes the `quit_*` Rust commands.
+// Mock the Tauri surface (core invoke + event listen) like updater.test.ts, plus
+// its collaborators (countRunningSessions, the session flush, the workspace
+// store, the updater install pair) so ordering is observable. The adapter is injected into initQuitFlow, so it needs no module
 // mock. quit.ts imports TauriAdapter as a type only (erased) — no runtime dep.
 const mocks = vi.hoisted(() => ({
   invoke: vi.fn(async (_cmd: string) => undefined as unknown),
@@ -22,9 +22,6 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: mocks.listen }));
 vi.mock("dormouse-lib/lib/terminal-registry", () => ({
   countRunningSessions: mocks.countRunningSessions,
 }));
-// The Rust command the close path removes a snapshot with; the quit path never
-// calls it (a quit keeps every window's blob, which is what a relaunch reads).
-
 // The aggregator's write step. Mocked for the same reason as the registry: what
 // this file tests is where it sits in the order.
 vi.mock("dormouse-lib/lib/window-session-aggregator", () => ({

@@ -210,7 +210,7 @@ describe('DirectEndpoint', () => {
 
     expect(run.offerer.sent).toEqual([]);
     expect(run.answerer.peers).toEqual([]);
-    // And the attempt is spent: a signal arriving later cannot start one.
+    // The session stays relayed.
     expect(run.offerer.endpoint.path).toBe('relay');
   });
 

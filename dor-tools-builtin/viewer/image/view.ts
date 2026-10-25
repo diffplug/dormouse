@@ -17,7 +17,7 @@ export function center(zoom: number, w: number, h: number, viewW: number, viewH:
   return { zoom, x: Math.round((viewW - w * zoom) / 2), y: Math.round((viewH - h * zoom) / 2), fit };
 }
 
-/** `view` scaled by `factor` about the device point (cx, cy), which stays put. */
+/** `view` zoomed to `zoom` (clamped) about the device point (cx, cy), which stays put. */
 export function zoomAt(view: View, zoom: number, cx: number, cy: number): View {
   zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
   const k = zoom / view.zoom;
