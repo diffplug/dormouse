@@ -262,11 +262,11 @@ export function useDevServerPortCorrelation({
         if (!isTerminalParams(panel.params)) continue;
         candidates.push({ id: panel.id, title: panel.title ?? null });
       }
-      // A Door's component/title live in the store, which stays their authority
+      // A Door's params/title live in the store, which stays their authority
       // while the Surface is minimized.
       for (const door of doorsRef.current) {
         const meta = lath.getMeta(door.id);
-        if ((meta?.component ?? 'terminal') !== 'terminal') continue;
+        if (!isTerminalParams(meta?.params)) continue;
         if (candidates.some((candidate) => candidate.id === door.id)) continue;
         candidates.push({ id: door.id, title: meta?.title ?? null });
       }
