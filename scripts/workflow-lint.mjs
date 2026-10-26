@@ -193,6 +193,18 @@ export function check(inputs) {
     if (!ephemeral) fail(VSCODE, 'release.yml `build-standalone` no longer generates an ephemeral Tauri updater key');
   }
 
+  // tend-ci-failures.yaml `report`: its `actions: write` exception holds only while the job runs
+  // no action but uv's setup, reads no secret, and dispatches `tend-triage.yaml`.
+  const report = docs['tend-ci-failures.yaml']?.jobs?.report;
+  if (report) {
+    const actions = (report.steps ?? []).filter((s) => s.uses && !s.uses.startsWith('astral-sh/setup-uv@'));
+    if (actions.length) fail(TEND, `tend-ci-failures.yaml \`report\` runs \`${actions.map((s) => s.uses).join('`, `')}\` with its \`actions: write\``);
+    const secrets = secretsOf(docs['tend-ci-failures.yaml'], report);
+    if (secrets.size) fail(TEND, `tend-ci-failures.yaml \`report\` reads ${[...secrets].map((s) => `\`${s}\``).join(', ')}`);
+    const targets = (report.steps ?? []).filter((s) => s.env?.TRIAGE_WORKFLOW !== undefined).map((s) => s.env.TRIAGE_WORKFLOW);
+    if (targets.some((t) => t !== 'tend-triage.yaml')) fail(TEND, `tend-ci-failures.yaml \`report\` dispatches \`${targets.join('`, `')}\`, not \`tend-triage.yaml\``);
+  }
+
   // hosted-production.yml `tag`: the minted token is the only credential, scoped to contents on this repository.
   const tag = docs['hosted-production.yml']?.jobs?.tag;
   const mint = tag?.steps?.find((s) => s.uses?.startsWith('actions/create-github-app-token@'));
