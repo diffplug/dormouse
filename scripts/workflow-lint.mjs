@@ -127,7 +127,10 @@ export function check(inputs) {
       const declared = job?.permissions !== undefined ? job.permissions : doc.permissions;
       const held = declared === undefined ? [] : writes(declared);
       if (agent) {
-        const extra = held.filter((s) => !AGENT_WRITES.includes(s));
+        // The CI failure reporter runs no agent and reads no secret; its
+        // `actions: write` dispatches `tend-triage.yaml` for a failed run.
+        const allowed = file === 'tend-ci-failures.yaml' && jobId === 'report' ? [...AGENT_WRITES, 'actions'] : AGENT_WRITES;
+        const extra = held.filter((s) => !allowed.includes(s));
         if (extra.length) fail(TEND, `${file} job \`${jobId}\` holds write on ${extra.join(', ')}`);
       } else {
         const allowed = file === 'release.yml' && jobId === 'security-audit' ? [...RELEASE_WRITES, 'actions']
