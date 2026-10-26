@@ -2,9 +2,10 @@ import { afterEach, beforeEach } from 'vitest';
 
 /**
  * Install a fake clock, `requestAnimationFrame`, and `matchMedia` around every
- * test in the calling file: `performance.now` reads the clock, frames run only
+ * test in the calling scope: `performance.now` reads the clock, frames run only
  * when a test advances it, and reduced motion is off until a test turns it on.
- * Call once at the top level of a test file.
+ * Call once at the top level of a test file, or inside a `describe` to cover
+ * only that suite.
  */
 export function installFakeFrames() {
   let clock = 0;

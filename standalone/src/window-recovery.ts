@@ -14,7 +14,7 @@ import { readPersistedWindow, windowPaneIds, type PersistedWindow } from "dormou
 /**
  * A single synchronous key/value slot the host persists natively, holding the
  * stored `PersistedWindow` as JSON (`docs/specs/transport.md` → "Persisted
- * session"). `localStorage` (browser-dev sidecar) and the Rust-backed
+ * session types"). `localStorage` (browser-dev sidecar) and the Rust-backed
  * `TauriSessionStore` both satisfy it (`docs/specs/standalone.md` §Persistence).
  */
 export interface SessionKeyValueStore {
