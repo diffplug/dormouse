@@ -1,5 +1,6 @@
 import { providerIds, providerNames } from "../server/providers.js";
 import type { ProviderId } from "../server/providers.js";
+import { NOT_ENTITLED_ERROR } from "../../remote-lib-common/src/remote/wire.ts";
 
 export const providers = providerIds;
 export type Provider = ProviderId;
@@ -169,6 +170,8 @@ export async function removePasskey(credentialId: string) {
   });
   if (!response.ok) throw await refused(response);
 }
+/** An approval the server refused because this account has no plan. */
+export class NoPlanError extends Error {}
 export async function approveEnrollment(
   userCode: string,
   purpose: "remote" | "voice" | undefined,
@@ -179,7 +182,11 @@ export async function approveEnrollment(
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ userCode, purpose: purpose ?? "remote", confirmDigits }),
   });
-  if (!response.ok) throw await refused(response);
+  if (response.ok) return;
+  const error = await refused(response);
+  throw response.status === 403 && error.message === NOT_ENTITLED_ERROR
+    ? new NoPlanError(error.message)
+    : error;
 }
 /** What a poll made of this account's live approval of a code; neither when there is none. */
 export interface ApprovalState {

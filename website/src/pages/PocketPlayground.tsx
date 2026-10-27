@@ -50,9 +50,10 @@ function DesktopPocketPlaygroundPage() {
           <p className="mb-4 text-lg leading-relaxed opacity-70">
             Run your own Relay, or{" "}
             <a href={`${sitePath("/hosted")}#remote-control`} className={SITE_LINK_CLASS}>
-              let me run one for you with Dormouse Hosted
-            </a>. Your terminal still runs on your awake, online computer; Hosted removes
-            the server setup and maintenance.
+              use the Hosted Relay
+            </a>{" "}
+            and let me run it for you. Your terminal still runs on your awake, online
+            computer; Hosted removes the server setup and maintenance.
           </p>
           <NotifySignupForm
             buttonLabel="Join the devlog for Pocket + Hosted news"

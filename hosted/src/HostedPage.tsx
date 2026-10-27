@@ -24,10 +24,12 @@ import { providerNames, type Account, type Computer, type HostedVoice, type Pass
 import { RECENT_LOGIN_WINDOW, TERMS_VERSION } from "../server/policy-constants";
 import { HELP_CLASS, INPUT_CLASS, LABEL_CLASS, LABEL_TEXT_CLASS, PRIMARY_CLASS } from "./classes";
 import { ConfirmDigits } from "./ConfirmDigits";
+import { NoPlanOffer } from "./NoPlanOffer";
 import type { Enrollment } from "./enrollment";
 import type { Notice, PageError } from "./settle";
 
 export const SUBSCRIBE_URL = "https://nedshed.dev/subscribe";
+const SELF_HOST_URL = "https://dormouse.sh/self-host/";
 
 /** The site header's own links (`NAV_LINKS` in website/src/lib/site-nav.ts),
  * absolute because this is another origin. Playground also gives way on a
@@ -54,6 +56,20 @@ const FOOTNOTE_CLASS = `mt-10 text-sm ${MUTED_TEXT_CLASS}`;
 /** A computer's id in the shape the app draws a minimized Pane: a door. */
 const DOOR_CLASS = `${DOOR_SHAPE_CLASS} ml-1.5 inline-flex items-center justify-center border-b border-[var(--color-text)]/30 bg-[var(--color-text)]/[0.12] px-2.5`;
 
+/** The free alternative to a plan, for remote control only: Natural Voice has
+ * no self-hosted equivalent. */
+function SelfHostLine() {
+  return (
+    <>
+      Rather run your own Relay for free? See{" "}
+      <a className={LINK_CLASS} href={SELF_HOST_URL} target="_blank" rel="noopener">
+        how to self-host
+      </a>
+      .
+    </>
+  );
+}
+
 /** A state already in words, ticked as the plan cards tick theirs. */
 function Ticked({ children }: { children: string }) {
   return (
@@ -74,6 +90,8 @@ export interface HostedPageProps {
   computers: Computer[] | null;
   passkeys: Passkey[] | null;
   enrolling: Enrollment | null;
+  /** This account has no plan, so it cannot approve a computer. */
+  noPlan: boolean;
   loading: boolean;
   busy: string;
   error: PageError | null;
@@ -106,7 +124,7 @@ export interface HostedPageProps {
 
 export function HostedPage({
   session, enabled, accounts, hostedVoice, turnOffDialog, computers, passkeys,
-  enrolling, loading, busy, error, notice, email, code, enterCode,
+  enrolling, noPlan, loading, busy, error, notice, email, code, enterCode,
   comingSoon, fresh, themeControl = false, act, refresh, approve, signOut, clearEnrollment, turnOffVoice,
   removeOne, removeKey, submit, setEmail, setCode, setEnterCode, changeEmail,
   sendCode, noteContinued, social,
@@ -145,9 +163,13 @@ export function HostedPage({
             ? !enrolling.code
               ? "This link cannot be approved."
               : session
-                ? enrolling.purpose === "voice"
-                  ? "Dormouse asked to turn on Natural Voice with this account."
-                  : "Dormouse asked to enroll remote control with this account."
+                ? noPlan
+                  ? enrolling.purpose === "voice"
+                    ? "Dormouse asked to turn on Natural Voice, but this account has no Hosted plan yet."
+                    : <>Dormouse asked to enroll remote control, but this account has no Hosted plan yet. <SelfHostLine /></>
+                  : enrolling.purpose === "voice"
+                    ? "Dormouse asked to turn on Natural Voice with this account."
+                    : "Dormouse asked to enroll remote control with this account."
                 : "Sign in to approve the computer that sent you here."
             : session
               ? "Manage how you sign in."
@@ -187,29 +209,49 @@ export function HostedPage({
             {enrolling && (session || !enrolling.code) ? (
               <section aria-label="Computer to approve">
                 {enrolling.code ? (
-                  <>
-                    {fresh ? (
-                      <ConfirmDigits
-                        busy={busy}
-                        onApprove={(digits) => void approve(enrolling.code!, digits)}
-                      />
-                    ) : (
-                      <>
-                        <p className={HELP_CLASS}>
-                          Approving a computer needs a login from the last{" "}
-                          {RECENT_LOGIN_WINDOW}. Sign in again; this code stays
-                          on this page.
+                  noPlan ? (
+                    <>
+                      <NoPlanOffer purpose={enrolling.purpose} />
+                      {enrolling.purpose !== "voice" && (
+                        <p className={`mt-6 ${MUTED_TEXT_CLASS}`}>
+                          <SelfHostLine />
                         </p>
+                      )}
+                      <p className={`mt-8 mb-2 ${MUTED_TEXT_CLASS}`}>
+                        Subscribed with another account? Sign in with it; this
+                        code stays on this page.
+                      </p>
+                      <div>
                         <button
-                          className={PRIMARY_CLASS}
+                          className={BUTTON_CLASS}
                           disabled={!!busy}
                           onClick={() => void signOut()}
                         >
-                          {busy === "logout" ? "Signing out…" : "Sign in again"}
+                          {busy === "logout" ? "Signing out…" : "Use another account"}
                         </button>
-                      </>
-                    )}
-                  </>
+                      </div>
+                    </>
+                  ) : !fresh ? (
+                    <>
+                      <p className={HELP_CLASS}>
+                        Approving a computer needs a login from the last{" "}
+                        {RECENT_LOGIN_WINDOW}. Sign in again; this code stays
+                        on this page.
+                      </p>
+                      <button
+                        className={PRIMARY_CLASS}
+                        disabled={!!busy}
+                        onClick={() => void signOut()}
+                      >
+                        {busy === "logout" ? "Signing out…" : "Sign in again"}
+                      </button>
+                    </>
+                  ) : (
+                    <ConfirmDigits
+                      busy={busy}
+                      onApprove={(digits) => void approve(enrolling.code!, digits)}
+                    />
+                  )
                 ) : (
                   <p className={HELP_CLASS}>
                     This link has no valid code. Start again from Dormouse on
@@ -363,8 +405,9 @@ export function HostedPage({
                     </p>
                     {computers.length === 0 && (
                       <p className={HELP_CLASS}>
-                        No computers yet. Enroll one from Dormouse on that
-                        computer.
+                        No computers yet. To enroll one, open Dormouse on that
+                        computer and go to Settings → Network → Phones →
+                        Hosted Relay → Enroll remote control.
                       </p>
                     )}
                     {computers.map((computer) => (

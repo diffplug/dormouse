@@ -337,7 +337,7 @@ Source of truth: `BurrowService` in `lib/src/host/remote/service.ts`; `FileBurro
 
 ### Remote control, in the Settings dialog
 
-The **Remote control** choices are **One-time connection** (`docs/specs/one-time.md` -> "Laptop UI") and **Persistent Relay**, whose enroll view follows the build's `relayMode`; which network policy levels offer them is `docs/specs/remote-network.md` -> "Settings → Network".
+The **Remote control** choices are **One-time connection** (`docs/specs/one-time.md` -> "Laptop UI") and **Hosted Relay** (**Persistent Relay** in a self-host build), whose enroll view follows the build's `relayMode`; which network policy levels offer them is `docs/specs/remote-network.md` -> "Settings → Network".
 
 - **The offer card shows only where it can be pressed**: an unexpired local offer file naming the baked origin, on an un-enrolled self-host Burrow.
 - **The offer's token never enters a webview**: `status` carries only whether there is one (`docs/specs/security-remote.md` -> "Credentials at rest"). **The click re-reads the file**, so an old card cannot reuse a spent offer; `enrollOffer` takes `{ label }` alone.

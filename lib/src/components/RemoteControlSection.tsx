@@ -491,7 +491,15 @@ export function RemoteControlSection() {
 }
 
 /**
- * One-time connection and Persistent Relay, as two choices. The one-time panel
+ * The persistent choice's name: Hosted's own Relay is the Hosted Relay, the
+ * product's name for it; a self-host build's is whatever its operator runs.
+ */
+function persistentRelayLabel(relayMode: BurrowConsoleStatus['relayMode']): string {
+  return relayMode === 'self-host' ? 'Persistent Relay' : 'Hosted Relay';
+}
+
+/**
+ * One-time connection and the persistent Relay, as two choices. The one-time panel
  * is the same whether or not this machine enrolled (`OneTimeConnection.tsx`).
  * **Enrolled, the Relay's view is always shown**; un-enrolled is
  * {@link UnenrolledRelay}.
@@ -511,7 +519,7 @@ function RelayChoices({ status }: { status: BurrowConsoleStatus }) {
       <div className="mt-3">
         {status.enrolled ? (
           <>
-            <div className="text-foreground">Persistent Relay</div>
+            <div className="text-foreground">{persistentRelayLabel(status.relayMode)}</div>
             {/* Keyed by which enrollment this is: a swap to another Burrow — the
                 console hook can do one under an open dialog — must not leave a
                 setup code, or an error, belonging to the one we just left. */}
@@ -536,7 +544,7 @@ function RelayChoices({ status }: { status: BurrowConsoleStatus }) {
 }
 
 /**
- * Persistent Relay on a machine that has not enrolled: a disclosure that
+ * The persistent Relay on a machine that has not enrolled: a disclosure that
  * **stays folded until clicked**, installer's offer or not, holding what the
  * build's mode allows (`docs/specs/relay.md` → "Remote control, in the Settings
  * dialog"). **Folding hides the enroll view, never unmounts it**, for the same
@@ -594,7 +602,7 @@ function UnenrolledRelay({
         className={modalActionButton({ tone: unfolded ? 'secondary' : 'primary' })}
         onClick={() => setUnfolded((was) => !was)}
       >
-        Persistent Relay
+        {persistentRelayLabel(status.relayMode)}
       </button>
       <div className={FIELD_HINT}>{hint}</div>
       {/* The same framed panel as "Set up a phone", the other disclosure here. */}

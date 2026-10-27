@@ -15,6 +15,7 @@ import {
   getPasskeys,
   getProviders,
   getSession,
+  NoPlanError,
   post,
   removeComputer,
   removePasskey,
@@ -117,6 +118,9 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [enterCode, setEnterCode] = useState(false);
+  // The server refused this account's approval for want of a plan: until it
+  // signs out, the page offers it no approval, as when its read says so.
+  const [refusedPlan, setRefusedPlan] = useState(false);
   const actionPending = useRef(false);
   const refreshGeneration = useRef(0);
   // Bumped by every action and on unmount: stops re-reading for a Pending.
@@ -160,6 +164,8 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
     setEnabled(providers);
     setAccounts(linked);
     setHostedVoice(voice);
+    // A plan bought since the approval was refused: offer the digits again.
+    if (voice?.entitled) setRefusedPlan(false);
     setComputers(enrolled);
     setPasskeys(registered);
     history.replaceState(
@@ -246,7 +252,8 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
     try {
       await action();
     } catch (error) {
-      setError(pageError(error));
+      if (error instanceof NoPlanError) setRefusedPlan(true);
+      else setError(pageError(error));
     } finally {
       actionPending.current = false;
       setBusy("");
@@ -320,6 +327,7 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
       setHostedVoice(null);
       setComputers(null);
       setPasskeys(null);
+      setRefusedPlan(false);
       setEnterCode(false);
       setCode("");
       setNotice({
@@ -385,6 +393,10 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
     session &&
     Date.now() - Date.parse(session.session.createdAt) < LOGIN_FRESH_AGE_MS;
 
+  // Natural Voice's read carries the one entitlement both purposes share; a
+  // failed read leaves it null, which never reads as no plan.
+  const noPlan = refusedPlan || hostedVoice?.entitled === false;
+
   const changeEmail = () => {
     setEnterCode(false);
     setCode("");
@@ -395,7 +407,7 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
   return <HostedPage
     session={session} enabled={enabled} accounts={accounts} hostedVoice={hostedVoice}
     turnOffDialog={turnOffDialog} computers={computers} passkeys={passkeys}
-    enrolling={enrolling} loading={loading} busy={busy} error={error} notice={notice}
+    enrolling={enrolling} noPlan={noPlan} loading={loading} busy={busy} error={error} notice={notice}
     email={email} code={code} enterCode={enterCode}
     comingSoon={comingSoon} fresh={fresh} themeControl act={act} refresh={refresh} approve={approve}
     signOut={signOut} clearEnrollment={clearEnrollment} turnOffVoice={turnOffVoice}

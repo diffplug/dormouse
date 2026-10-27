@@ -13,6 +13,16 @@ export const Remote: Story = {};
 export const Voice: Story = { args: { enrolling: { ...ENROLLMENT, purpose: "voice" } } };
 export const StaleRemote: Story = { args: { fresh: false } };
 export const StaleVoice: Story = { args: { ...Voice.args, fresh: false } };
+export const NoPlan: Story = {
+  args: { noPlan: true, signOut: fn(async () => {}) },
+  play: async ({ canvasElement, args }) => {
+    const canvas = await settledFrame(canvasElement);
+    await expect(canvas.queryByLabelText("Type the two digits Dormouse is showing")).toBeNull();
+    await canvas.user.click(canvas.getByRole("button", { name: "Use another account" }));
+    await expect(args.signOut).toHaveBeenCalledOnce();
+  },
+};
+export const NoPlanVoice: Story = { args: { ...Voice.args, noPlan: true } };
 export const InvalidLink: Story = { args: { enrolling: { code: null } } };
 export const InvalidLinkSignedOut: Story = { args: { session: null, enrolling: { code: null } } };
 export const Approving: Story = { args: { busy: "approve" } };

@@ -4,7 +4,7 @@ import { sitePath } from "../lib/site-meta";
 /**
  * The Relay boundary `/self-host` opens with: Dormouse needs no server, and
  * the remote features that do need one make no requests until it exists.
- * `/hosted` opens with its plan cards instead, and its managed Relay section
+ * `/hosted` opens with its plan cards instead, and its Hosted Relay section
  * carries the hosted half (docs/specs/website-docs.md -> `/hosted`).
  */
 export function HostingRequirementNotice() {

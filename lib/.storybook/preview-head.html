@@ -12,9 +12,13 @@
   `#storybook-docs` in the DOM at all times and toggles `display` between them,
   so `:has(#storybook-docs)` alone would match story pages too and hand every
   snapshot an unwanted scrollbar.
+
+  Hosted's stories get it back too: `HostedFrame` grows its iframe to the page
+  it shows, which runs past the viewport, so only the outer document can scroll.
 -->
 <style>
-  body:has(#storybook-docs:not(:empty)) {
+  body:has(#storybook-docs:not(:empty)),
+  body:has([data-hosted-frame]) {
     overflow: auto;
   }
 </style>

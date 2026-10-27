@@ -7,6 +7,7 @@ import { App } from "./App";
 import * as api from "./api";
 import type { Enrollment } from "./enrollment";
 import { ENROLLMENT_POLL_INTERVAL_S, TERMS_VERSION } from "../server/policy-constants";
+import { NOT_ENTITLED_ERROR } from "../../remote-lib-common/src/remote/wire.ts";
 
 vi.mock("./api", async (original) => ({
   ...await original<typeof import("./api")>(),
@@ -200,5 +201,93 @@ describe("Natural Voice confirmation", () => {
     expect(container.querySelector("[role=alert]")?.textContent).toContain("Voice service unavailable.");
     expect(button("Turn off Natural Voice").disabled).toBe(false);
     expect(button("Retry connection").disabled).toBe(false);
+  });
+});
+
+describe("an account with no plan", () => {
+  const noPlanShown = () => container.textContent!.includes("has no Hosted plan yet");
+  beforeEach(() => {
+    vi.mocked(api.getSession).mockResolvedValue(login());
+  });
+
+  it.each(["remote", "voice"] as const)("is told before typing digits for %s", async (purpose) => {
+    vi.mocked(api.getHostedVoice).mockResolvedValue({ entitled: false, on: false });
+    await mount({ ...ENROLLMENT, purpose });
+    expect(container.querySelector("#confirm-digits")).toBeNull();
+    expect(noPlanShown()).toBe(true);
+    expect(button("Don’t approve").disabled).toBe(false);
+    const plans = container.querySelector<HTMLAnchorElement>('a[href="https://dormouse.sh/hosted/#pricing"]')!;
+    // In another tab, so this one keeps the code that lives only in memory.
+    expect(plans.target).toBe("_blank");
+    // Natural Voice has no self-hosted equivalent; a Relay does.
+    expect(container.querySelectorAll('a[href="https://dormouse.sh/self-host/"]').length).toBe(purpose === "remote" ? 2 : 0);
+  });
+
+  it("is told when the approval is refused for want of a plan", async () => {
+    vi.mocked(api.approveEnrollment).mockRejectedValue(new api.NoPlanError(NOT_ENTITLED_ERROR));
+    await mount(ENROLLMENT);
+    await approve();
+    expect(container.querySelector("#confirm-digits")).toBeNull();
+    expect(noPlanShown()).toBe(true);
+    expect(container.querySelector("[role=alert]")).toBeNull();
+    expect(location.pathname).toBe("/enroll");
+  });
+
+  it("offers the digits again once a plan is bought in another tab", async () => {
+    vi.mocked(api.approveEnrollment).mockRejectedValueOnce(new api.NoPlanError(NOT_ENTITLED_ERROR));
+    await mount(ENROLLMENT);
+    await approve();
+    expect(noPlanShown()).toBe(true);
+    vi.mocked(api.getHostedVoice).mockResolvedValue({ entitled: true, on: false });
+    await act(async () => window.dispatchEvent(new Event("focus")));
+    expect(noPlanShown()).toBe(false);
+    await approve();
+    expect(api.approveEnrollment).toHaveBeenLastCalledWith("7KQM-X4TD", "remote", "47");
+  });
+
+  it("is never assumed from a failed read or a failed approval", async () => {
+    vi.mocked(api.getHostedVoice).mockRejectedValue(new Error("Could not connect."));
+    vi.mocked(api.getComputers).mockRejectedValue(new Error("Could not connect."));
+    vi.mocked(api.approveEnrollment).mockRejectedValue(new Error("Could not connect."));
+    await mount(ENROLLMENT);
+    expect(noPlanShown()).toBe(false);
+    await approve();
+    expect(noPlanShown()).toBe(false);
+    expect(container.querySelector("#confirm-digits")).not.toBeNull();
+    expect(container.querySelector("[role=alert]")?.textContent).toContain("Could not connect.");
+  });
+
+  it("keeps the code through Use another account", async () => {
+    vi.mocked(api.approveEnrollment).mockRejectedValueOnce(new api.NoPlanError(NOT_ENTITLED_ERROR));
+    await mount(ENROLLMENT);
+    await approve();
+    vi.mocked(api.getSession).mockResolvedValue(null);
+    await click("Use another account");
+    expect(api.post).toHaveBeenCalledWith("sign-out");
+    expect(location.pathname).toBe("/enroll");
+    await signIn();
+    await approve();
+    expect(api.approveEnrollment).toHaveBeenLastCalledWith("7KQM-X4TD", "remote", "47");
+    expect(location.pathname).toBe("/account");
+  });
+});
+
+describe("approveEnrollment", () => {
+  const actual = () => vi.importActual<typeof import("./api")>("./api");
+  const answer = (status: number, message: string) =>
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ message }, { status }));
+  afterEach(() => vi.restoreAllMocks());
+
+  it("reads a 403 NOT_ENTITLED_ERROR as no plan", async () => {
+    const { approveEnrollment, NoPlanError } = await actual();
+    answer(403, NOT_ENTITLED_ERROR);
+    await expect(approveEnrollment("7KQM-X4TD", "remote", "47")).rejects.toBeInstanceOf(NoPlanError);
+  });
+  it("reads any other refusal as its message", async () => {
+    const { approveEnrollment, NoPlanError } = await actual();
+    answer(403, "Sign in again to approve.");
+    const refusal = approveEnrollment("7KQM-X4TD", "remote", "47");
+    await expect(refusal).rejects.toThrow("Sign in again to approve.");
+    await expect(refusal).rejects.not.toBeInstanceOf(NoPlanError);
   });
 });
