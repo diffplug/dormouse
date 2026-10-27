@@ -219,6 +219,8 @@ describe("an account with no plan", () => {
     const plans = container.querySelector<HTMLAnchorElement>('a[href="https://dormouse.sh/hosted/#pricing"]')!;
     // In another tab, so this one keeps the code that lives only in memory.
     expect(plans.target).toBe("_blank");
+    // Natural Voice has no self-hosted equivalent; a Relay does.
+    expect(container.querySelector('a[href="https://dormouse.sh/self-host/"]') !== null).toBe(purpose === "remote");
   });
 
   it("is told when the approval is refused for want of a plan", async () => {

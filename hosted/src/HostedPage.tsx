@@ -29,6 +29,7 @@ import type { Enrollment } from "./enrollment";
 import type { Notice, PageError } from "./settle";
 
 export const SUBSCRIBE_URL = "https://nedshed.dev/subscribe";
+const SELF_HOST_URL = "https://dormouse.sh/self-host/";
 
 /** The site header's own links (`NAV_LINKS` in website/src/lib/site-nav.ts),
  * absolute because this is another origin. Playground also gives way on a
@@ -210,6 +211,21 @@ export function HostedPage({
                           {busy === "logout" ? "Signing out…" : "Use another account"}
                         </button>
                       </div>
+                      {/* Natural Voice has no self-hosted equivalent. */}
+                      {enrolling.purpose !== "voice" && (
+                        <p className={`mt-6 ${MUTED_TEXT_CLASS}`}>
+                          Rather run your own Relay? Self-hosting stays free:{" "}
+                          <a
+                            className={LINK_CLASS}
+                            href={SELF_HOST_URL}
+                            target="_blank"
+                            rel="noopener"
+                          >
+                            how to self-host
+                          </a>
+                          .
+                        </p>
+                      )}
                     </>
                   ) : !fresh ? (
                     <>
