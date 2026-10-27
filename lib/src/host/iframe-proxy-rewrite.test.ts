@@ -105,6 +105,20 @@ describe('instrumentHtml', () => {
     expect(IFRAME_SHIM).toContain('pushState');
   });
 
+  it('posts the leader for a left-then-right tap, and not when another key falls between', () => {
+    const delivered: unknown[] = [];
+    const frame = shimFrame(APP, (data) => delivered.push(data));
+    const key = (k: string, location = 0) => frame.emit('keydown', { key: k, location });
+    const leaders = () => delivered.filter(d => (d as { __dormouse: string }).__dormouse === 'leader').length;
+    key('Shift', 1); key('Shift', 2);
+    key('Meta', 1); key('Meta', 2);
+    expect(leaders()).toBe(2);
+    // "I Am": typing, not the gesture.
+    key('Shift', 1); key('I'); key(' '); key('Shift', 2);
+    key('Meta', 1); key('c'); key('Meta', 2);
+    expect(leaders()).toBe(2);
+  });
+
   it('intercepts new-tab attempts (target=_blank / window.open) as open-window', () => {
     expect(IFRAME_SHIM).toContain("'open-window'");
     // window.open is overridden so popups become a new pane rather than vanishing.
