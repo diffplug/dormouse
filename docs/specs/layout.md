@@ -208,11 +208,11 @@ Enter passthrough mode: clicking any pane body or header; `Enter` or `z` on a se
 
 Enter command mode: Left Cmd, then Right Cmd in quick succession — or the same left-then-right gesture with Shift — detected even while xterm holds DOM focus.
 
-- The Meta and Shift tracks are independent — Left Cmd then Right Shift does not trigger — and **must both stay live on every platform** (rationale).
+- Left Cmd then Right Shift does not trigger, and **both modifiers must stay live on every platform** (rationale).
 - **Must consume every bare Meta/Shift press outside the terminal context in this detector**, so no later handler mistakes it for a command key.
-- **Must cancel a pending in-Wall mode-exit gesture when any non-Meta/Shift key intervenes.**
+- **Must cancel a pending mode-exit gesture when any other key intervenes**, the other modifier included.
 
-Source of truth: `handleDualTap` in `lib/src/components/wall/keyboard/handle-dual-tap.ts`.
+Source of truth: `useWallKeyboard` in `lib/src/components/wall/use-wall-keyboard.ts`.
 
 ## Keyboard shortcuts (command mode)
 

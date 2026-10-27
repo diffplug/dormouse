@@ -109,14 +109,14 @@ describe('instrumentHtml', () => {
     const delivered: unknown[] = [];
     const frame = shimFrame(APP, (data) => delivered.push(data));
     const key = (k: string, location = 0) => frame.emit('keydown', { key: k, location });
+    const leaders = () => delivered.filter(d => (d as { __dormouse: string }).__dormouse === 'leader').length;
     key('Shift', 1); key('Shift', 2);
     key('Meta', 1); key('Meta', 2);
-    expect(delivered.filter(d => (d as { __dormouse: string }).__dormouse === 'leader')).toHaveLength(2);
-    delivered.length = 0;
+    expect(leaders()).toBe(2);
     // "I Am": typing, not the gesture.
     key('Shift', 1); key('I'); key(' '); key('Shift', 2);
     key('Meta', 1); key('c'); key('Meta', 2);
-    expect(delivered.filter(d => (d as { __dormouse: string }).__dormouse === 'leader')).toHaveLength(0);
+    expect(leaders()).toBe(2);
   });
 
   it('intercepts new-tab attempts (target=_blank / window.open) as open-window', () => {

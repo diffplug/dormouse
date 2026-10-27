@@ -54,7 +54,7 @@ xterm.js paints only its own rendered surface, and integer row fitting leaves a 
 
 ## Mode switching
 
-**Why both gesture tracks stay live everywhere.** Keyboards with no right Meta key are common on Windows and Linux laptops, so the Shift track is the only available gesture there. Keeping both live on every platform avoids a platform switch inside the detector and leaves macOS users a fallback when a hand is already on Shift.
+**Why both gesture modifiers stay live everywhere.** Keyboards with no right Meta key are common on Windows and Linux laptops, so the Shift track is the only available gesture there. Keeping both live on every platform avoids a platform switch inside the detector and leaves macOS users a fallback when a hand is already on Shift.
 
 ## Split cwd inheritance
 

@@ -47,7 +47,7 @@ async function expectCount(count: () => number, want: number, what: string) {
 
 /**
  * Return to command mode with the leader chord — left Shift then right Shift
- * within 500ms (`keyboard/handle-dual-tap.ts`).
+ * within 500ms (`lib/dual-tap.ts`).
  *
  * Required between splits: a split is an intent to use the new terminal, so
  * `addSplitPanel` enters passthrough, and the wall ignores pane shortcuts there.

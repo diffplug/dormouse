@@ -9,6 +9,7 @@
  * runtime-agnostic.
  */
 
+import { dualTap, newDualTapState } from '../lib/dual-tap';
 import { ipv4Value, isLoopbackHostname } from '../lib/ip-literal';
 
 /** Header bag shape both `http.IncomingHttpHeaders` and a plain map satisfy. */
@@ -94,10 +95,9 @@ export function frameAncestorsCsp(embedderOrigins: string[]): string {
 // three pane-level kinds through its same-origin proxy parents until the outer
 // document reaches the app; its document-level location stays inside the outer
 // frame:
-//   - `leader`: the reserved dual-tap ⌘/⇧ chord (matching handle-dual-tap.ts),
-//     so the global chord keeps working with the frame focused. Any other key
-//     cancels a pending tap, as in use-wall-keyboard.ts: a left-Shift capital,
-//     a word, then a right-Shift capital is typing.
+//   - `leader`: the reserved dual-tap ⌘/⇧ chord, detected by the Wall's own
+//     `dualTap` embedded as source, so the global chord keeps working with the
+//     frame focused.
 //   - `pointerdown`: a click landed in the frame. A cross-origin click reaches
 //     only the frame, so the Wall can't see it; this lets it select the pane /
 //     enter passthrough. It's genuine user input, so it can't loop with the
@@ -166,17 +166,9 @@ export function iframeShim(embedderOrigin: string): string {
     }
     return null;
   }
-  function tap(s,e){
-    var now=Date.now(),side=e.location===1?'left':'right';
-    if(s.side==='left'&&side==='right'&&now-s.time<500){s.side=null;return true;}
-    s.side=side;s.time=now;return false;
-  }
-  var cmd={side:null,time:0},shift={side:null,time:0};
-  addEventListener('keydown',function(e){
-    if(e.key==='Meta'){if(tap(cmd,e))post('leader');}
-    else if(e.key==='Shift'){if(tap(shift,e))post('leader');}
-    else cmd.side=shift.side=null;
-  },true);
+  // Bound by position: a minifier may rename the function itself.
+  var dualTap=${dualTap},taps=(${newDualTapState})();
+  addEventListener('keydown',function(e){if(dualTap(taps,e))post('leader');},true);
   addEventListener('pointerdown',function(){post('pointerdown');},true);
   addEventListener('click',function(e){
     var a=anchorHref(e);
