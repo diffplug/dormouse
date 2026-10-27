@@ -407,7 +407,7 @@ export function HostedPage({
                       <p className={HELP_CLASS}>
                         No computers yet. To enroll one, open Dormouse on that
                         computer and go to Settings → Network → Phones →
-                        Persistent Relay → Enroll remote control.
+                        Hosted Relay → Enroll remote control.
                       </p>
                     )}
                     {computers.map((computer) => (
