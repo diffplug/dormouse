@@ -198,6 +198,21 @@ export function HostedPage({
                   noPlan ? (
                     <>
                       <NoPlanOffer purpose={enrolling.purpose} />
+                      {/* Natural Voice has no self-hosted equivalent. */}
+                      {enrolling.purpose !== "voice" && (
+                        <p className={`mt-6 ${MUTED_TEXT_CLASS}`}>
+                          Rather run your own Relay for free? See{" "}
+                          <a
+                            className={LINK_CLASS}
+                            href={SELF_HOST_URL}
+                            target="_blank"
+                            rel="noopener"
+                          >
+                            how to self-host
+                          </a>
+                          .
+                        </p>
+                      )}
                       <p className={`mt-8 mb-2 ${MUTED_TEXT_CLASS}`}>
                         Subscribed with another account? Sign in with it; this
                         code stays on this page.
@@ -211,21 +226,6 @@ export function HostedPage({
                           {busy === "logout" ? "Signing out…" : "Use another account"}
                         </button>
                       </div>
-                      {/* Natural Voice has no self-hosted equivalent. */}
-                      {enrolling.purpose !== "voice" && (
-                        <p className={`mt-6 ${MUTED_TEXT_CLASS}`}>
-                          Rather run your own Relay? Self-hosting stays free:{" "}
-                          <a
-                            className={LINK_CLASS}
-                            href={SELF_HOST_URL}
-                            target="_blank"
-                            rel="noopener"
-                          >
-                            how to self-host
-                          </a>
-                          .
-                        </p>
-                      )}
                     </>
                   ) : !fresh ? (
                     <>
