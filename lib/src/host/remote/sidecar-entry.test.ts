@@ -748,6 +748,7 @@ describe('the sidecar host', () => {
           calls.push({ op: 'spawn', args: [id, options], state: stateOf(id) });
           duringSpawn?.(id);
         },
+        setParentWindow: record('setParentWindow'),
         write: record('write', true),
         resize: record('resize', true),
         kill: record('kill'),
@@ -773,6 +774,18 @@ describe('the sidecar host', () => {
     expect(calls).toEqual([{ op: 'spawn', args: ['pty-1', { cols: 80 }], state: { status: 'WATCHING_DISABLED', todo: true } }]);
     // The window learns it the way it learns every change.
     expect(states('pty-1').at(-1)).toMatchObject({ todo: true, notification: REPORT });
+  });
+
+  it('parents a console window only from the host-stamped field, never the options', () => {
+    host.handleCommand('pty:spawn', { id: 'pty-1', options: { parentWindow: 'ff' } });
+    host.handleCommand('pty:spawn', { id: 'pty-2', options: {}, parentWindow: '0102' });
+    host.handleCommand('pty:parentWindow', { ids: ['pty-1', 7], parentWindow: '0304' });
+    expect(calls.map(({ op, args }) => [op, ...args])).toEqual([
+      ['spawn', 'pty-1', { parentWindow: 'ff' }],
+      ['spawn', 'pty-2', {}],
+      ['setParentWindow', ['pty-2'], '0102'],
+      ['setParentWindow', ['pty-1'], '0304'],
+    ]);
   });
 
   it('keeps a helper `pty-core` reports at its spawn inert', () => {

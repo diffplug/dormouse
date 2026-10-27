@@ -37,6 +37,9 @@ windows = { version = "0.62", features = [
     # restrict_to_owner's Windows arm: the DACL that stands in for 0700/0600.
     "Win32_Security",
     "Win32_Security_Authorization",
+    # console_parent: owner chains, and re-enabling a window a dead dialog disabled.
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Input_KeyboardAndMouse",
 ] }
 
 [target.'cfg(target_os = "macos")'.dependencies]

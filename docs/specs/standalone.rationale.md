@@ -109,6 +109,18 @@ Spiked before the drag was built, because it was the one unverified platform ass
 
 A WKWebView pointer captured on an element keeps receiving `pointermove` and `pointerup` far outside the window, with client coordinates that run past the edges and negative rather than clamping — measured against macOS 26.6 / WKWebView, 2026-09, by synthesizing an AppKit drag whose later points fall outside a 400×300 window and reading the page's own event log: `down` inside the element, then moves at client x 600 and (900, −152), then the release. So the gesture stays the webview's throughout and no polling loop is needed.
 
+## Console window parenting
+
+Without parenting, ConPTY's hidden console window has no owner, so a dialog owned by its root owner belongs to nothing Dormouse shows: it opens on top only while its process holds foreground rights, and the first click into Dormouse buries it. With parenting, the root owner is the Dormouse window, and an owned window always stays above its owner. Measured in a dev build on Windows 11 26300, 2026-10, with `standalone/scripts/conpty-dialog-probe.ps1` (`MessageBoxW` owned by `GetAncestor(GetConsoleWindow(), GA_ROOTOWNER)`). The mechanism is node-pty#995 (`setParentWindow`, which calls bundled conpty.dll's `ConptyReparentPseudoConsole`), the same one VS Code's integrated terminal enables by default since microsoft/vscode#342784.
+
+- Off: the dialog's owner was the console window, and Dormouse stayed enabled. Clicking Dormouse raised it above the dialog.
+- On: the owner was the window holding the pane — for a split pane, a torn-out Workspace's new window, and `main` again after moving it back. Only that window was disabled. A click on it left the dialog on top, and dismissing it returned foreground and keyboard focus to the xterm.
+- Killing only the dialog's process while the shell lived left the window disabled with nothing to dismiss. That is node-pty#996's failure in the case its proposed shell-exit recovery misses. Recovery re-enabled the window about 1 s later. `dor kill` on the pane closed the dialog with its console, and recovery re-enabled the window within 0.2 s. No probe process outlived either kill.
+- After a dead dialog, Windows activated another application, not Dormouse, so the user clicks back in. Taking foreground back would be stealing it, so recovery only re-enables.
+- It is on by default, as VS Code's is, and with recovery VS Code lacks: the modal locking its whole window is what keeps the dialog above it, and every owned modal does the same.
+
+Two consecutive ticks, not one, because an owner is disabled before its dialog is created, and one tick can fall in that gap. The owner-chain walk, not a direct-owner check, is needed because a dialog may be owned by the console window rather than by its root owner.
+
 ## Persistence
 
 **The WKWebView WAL measurement.** WKWebView stores `localStorage` as SQLite in WAL mode, and WebKit pins that WAL with a long-lived reader that never advances during a running session — so it is never checkpointed, and an external checkpoint is blocked by the same reader. Rewriting the multi-MB scrollback-bearing session blob on every save grew the WAL to ~1 GB within a few hours (recorded 2026-07); a days-long session made it pathological. The Rust file store that replaced it has no WAL and rewrites the same file each time.

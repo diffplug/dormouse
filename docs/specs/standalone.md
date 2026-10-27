@@ -286,6 +286,18 @@ Source of truth: `Arrival` in `standalone/src-tauri/src/routing.rs`; `begin_arri
 
 Source of truth: `window_at` in `standalone/src-tauri/src/routing.rs`; `standalone/src/workspace-drag.ts`.
 
+### Console window parenting
+
+On Windows the window holding a PTY owns its ConPTY console window, so a dialog a console program owns by `GetAncestor(GetConsoleWindow(), GA_ROOTOWNER)`, as MSAL sign-in does, stays above that window instead of falling behind Dormouse (rationale).
+
+- **Only Rust names a window handle.** `pty:spawn` carries `parentWindow`, the HWND's native-order bytes as hex, beside the webview's options and never in them; the sidecar hands it to node-pty's `setParentWindow` in the spawn's own tick, before the shell launches. **Never persist it.**
+- **Must re-parent where ownership settles**, with `pty:parentWindow {ids, parentWindow}`: at `adopt_done` to the target, at every hand-back to the source (§Arrival queue); never at a transfer's start, when a tear-out's target has no window yet.
+- **A refused or failed parent never blocks a terminal**: the sidecar logs it and the PTY runs unparented.
+- **A modal dialog disables its owner until dismissed**: the one window holding that terminal, every pane in it included; sibling windows stay usable.
+- **Must re-enable a window that stays disabled, unminimized, with no visible window in its owner chain** over consecutive recovery ticks, so a dead dialog — its process the shell or a child the shell outlives — never strands the window (microsoft/node-pty#996 recovers only on shell exit). A minimized window hides the dialogs it owns, so it is never judged. **Never take foreground back** after a recovery: Windows has already activated another app, and the user clicks back in.
+
+Source of truth: `standalone/src-tauri/src/console_parent.rs`; `pty_spawn` / `send_parent_window` / `start_console_parent_recovery` in `standalone/src-tauri/src/lib.rs`; `setParentWindow` in `standalone/sidecar/pty-core.js`. `standalone/scripts/conpty-dialog-probe.ps1` opens such a dialog by hand.
+
 ## Persistence
 
 **One `PersistedWindow` per window, every Workspace in it**, restored on the next launch (`docs/specs/transport.md` → "The governing rule"). The Window collector's writer is `TauriAdapter.saveWindowState`; `getWindowState` is the boot reader. Collector and cwd probes: `docs/specs/transport.md` → "Persisted session types".
@@ -474,6 +486,10 @@ The harness **may omit** native-only desktop chrome but **must preserve** every 
 Source of truth: `standalone/scripts/dev-agent-browser.mjs`; `standalone/src/browser-sidecar-adapter.ts`.
 
 ## Future
+
+**Scope: console-parenting-vscode** (§Console window parenting)
+
+- **VS Code**, once it offers a supported way to name the window hosting a webview to Dormouse's own PTY host: `window.nativeHandle` is a proposed, Insiders-only API tracking the active window.
 
 **Scope: siri-setting**
 

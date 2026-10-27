@@ -54,6 +54,10 @@ mod clipboard_win;
 #[cfg(windows)]
 mod pe_subsystem;
 
+// Its callers are Windows-only; the pure parts and their tests are not.
+#[cfg_attr(not(windows), allow(dead_code))]
+mod console_parent;
+
 type SidecarSender = mpsc::Sender<String>;
 type PendingRequests = Arc<Mutex<HashMap<String, mpsc::Sender<JsonValue>>>>;
 type SharedChild = Arc<Mutex<Box<dyn ChildWrapper + Send + Sync>>>;
@@ -1304,13 +1308,71 @@ fn pty_spawn(
     options: Option<PtySpawnOptions>,
 ) {
     windows.mint(&id, window.label());
-    send_to_sidecar(&state, pty_spawn_message(&id, options.as_ref()));
+    let parent = window_handle_hex(window.app_handle(), window.label());
+    send_to_sidecar(&state, pty_spawn_message(&id, options.as_ref(), parent.as_deref()));
 }
 
 /// One `pty:spawn` line. The options ride whole, a persisted `alert` included.
-fn pty_spawn_message(id: &str, options: Option<&PtySpawnOptions>) -> String {
-    sidecar_line("pty:spawn", serde_json::json!({ "id": id, "options": options }))
+/// `parentWindow` rides beside them, never in them: only Rust names a window
+/// handle (§Console window parenting).
+fn pty_spawn_message(id: &str, options: Option<&PtySpawnOptions>, parent_window: Option<&str>) -> String {
+    let mut data = serde_json::json!({ "id": id, "options": options });
+    if let Some(hex) = parent_window {
+        data["parentWindow"] = JsonValue::from(hex);
+    }
+    sidecar_line("pty:spawn", data)
 }
+
+/// `label`'s HWND as the sidecar hands it to node-pty
+/// (docs/specs/standalone.md §Console window parenting).
+#[cfg(windows)]
+fn window_handle_hex(app: &AppHandle, label: &str) -> Option<String> {
+    let hwnd = app.get_webview_window(label)?.hwnd().ok()?;
+    Some(console_parent::handle_hex(hwnd.0 as isize))
+}
+
+#[cfg(not(windows))]
+fn window_handle_hex(_app: &AppHandle, _label: &str) -> Option<String> {
+    None
+}
+
+/// `ids` are now shown in `label`'s window: make it their console windows'
+/// owner. Sent once ownership settles, never at a transfer's start, since a
+/// tear-out's target has no window yet.
+fn send_parent_window(app: &AppHandle, ids: &[String], label: &str) {
+    if ids.is_empty() {
+        return;
+    }
+    let (Some(hex), Some(sidecar)) = (window_handle_hex(app, label), app.try_state::<SidecarState>()) else {
+        return;
+    };
+    send_to_sidecar(&sidecar, sidecar_line("pty:parentWindow", serde_json::json!({ "ids": ids, "parentWindow": hex })));
+}
+
+/// Re-enable a window a dead dialog left disabled (`console_parent::Recovery`).
+#[cfg(windows)]
+fn start_console_parent_recovery(app: &AppHandle) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let mut recovery = console_parent::Recovery::default();
+        loop {
+            std::thread::sleep(console_parent::TICK);
+            let hosts: Vec<isize> = app
+                .webview_windows()
+                .values()
+                .filter_map(|window| window.hwnd().ok())
+                .map(|hwnd| hwnd.0 as isize)
+                .collect();
+            for raw in recovery.tick(&console_parent::win::states(&hosts)) {
+                append_log(format!("[console-parent] window {raw:#x} disabled with no dialog left open; re-enabling it"));
+                console_parent::win::enable(raw);
+            }
+        }
+    });
+}
+
+#[cfg(not(windows))]
+fn start_console_parent_recovery(_app: &AppHandle) {}
 
 #[tauri::command]
 fn pty_write(
@@ -3396,6 +3458,7 @@ fn hand_back_arrival(
             }
         }
         let marks = windows.hand_back(&arrival.terminal_ids, &arrival.from);
+        send_parent_window(app, &arrival.terminal_ids, &arrival.from);
         let (marked, _) = routing::hand_back_ids(arrival, &marks);
         // Told before the replay is asked for, so the source is listening for
         // it (`acceptHandBackReplay` in `standalone/src/workspace-move.ts`).
@@ -3626,6 +3689,7 @@ fn adopt_done(
     )
     .ok_or_else(|| format!("no arrival of '{workspace_id}' into {}", window.label()))?;
     windows.clear_suppression(&arrival.terminal_ids);
+    send_parent_window(&app, &arrival.terminal_ids, &arrival.to);
     // Keep the journal until source and target saves both reflect the move.
     if let Ok(dir) = sessions_dir(&app) {
         if let Err(e) = mark_arrival_adopted_on_disk(&dir, &workspace_id) {
@@ -4817,6 +4881,7 @@ pub fn run() {
 
             app.manage(UiWatchdog::default());
             start_ui_watchdog(app.handle());
+            start_console_parent_recovery(app.handle());
 
             // A crash between a snapshot's temp write and its rename leaves a
             // file nothing will ever read or overwrite; one written before
@@ -5418,11 +5483,23 @@ mod tests {
         let alert = serde_json::json!({ "status": "ALERT_RINGING", "todo": true, "notification": null });
         let options: super::PtySpawnOptions =
             serde_json::from_value(serde_json::json!({ "cols": 80, "rows": 24, "alert": alert })).unwrap();
-        let line = parse_line(&super::pty_spawn_message("t1", Some(&options)));
+        let line = parse_line(&super::pty_spawn_message("t1", Some(&options), None));
         assert_eq!(line["event"], "pty:spawn");
         assert_eq!(line["data"]["id"], "t1");
         assert_eq!(line["data"]["options"]["cols"], 80);
         assert_eq!(line["data"]["options"]["alert"], alert);
+        assert!(line["data"].get("parentWindow").is_none());
+    }
+
+    /// The window handle rides beside the options, where a webview cannot put
+    /// one: `PtySpawnOptions` drops a `parentWindow` it is handed.
+    #[test]
+    fn a_spawn_carries_rusts_parent_window_and_never_the_webviews() {
+        let options: super::PtySpawnOptions =
+            serde_json::from_value(serde_json::json!({ "cols": 80, "parentWindow": "ff" })).unwrap();
+        let line = parse_line(&super::pty_spawn_message("t1", Some(&options), Some("0a0b")));
+        assert_eq!(line["data"]["parentWindow"], "0a0b");
+        assert!(line["data"]["options"].get("parentWindow").is_none());
     }
 
     /// A rehydrated Tool's payload rides its spawn whole; dropping the field
@@ -5431,7 +5508,7 @@ mod tests {
     fn a_spawn_carries_a_rehydrated_tools_payload_to_the_sidecar() {
         let options: super::PtySpawnOptions =
             serde_json::from_value(serde_json::json!({ "dehydrate": "{\"v\":1,\"state\":[1]}" })).unwrap();
-        let line = parse_line(&super::pty_spawn_message("t1", Some(&options)));
+        let line = parse_line(&super::pty_spawn_message("t1", Some(&options), None));
         assert_eq!(line["data"]["options"]["dehydrate"], "{\"v\":1,\"state\":[1]}");
     }
 
@@ -5552,6 +5629,20 @@ mod tests {
         let transfer = body.find("windows.begin_transfer(").unwrap();
         let queue = body.find("routing::queue_arrival").unwrap();
         assert!(journal < lock && lock < check && check < refuse && refuse < transfer && transfer < queue);
+    }
+
+    /// Console window parenting follows ownership wherever it settles: the
+    /// spawning window, the adopting target, and the source a hand-back
+    /// returns to — whatever handed it back (refusal, `Destroyed`, watchdog).
+    #[test]
+    fn console_windows_are_parented_wherever_ownership_settles() {
+        let src = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
+        let body = |name: &str| src.split(&format!("fn {name}(")).nth(1).unwrap().split("\n}").next().unwrap();
+        assert!(body("pty_spawn").contains("window_handle_hex(window.app_handle(), window.label())"));
+        let adopt = body("adopt_done");
+        assert!(adopt.find("routing::take_arrival(").unwrap() < adopt.find("send_parent_window(&app, &arrival.terminal_ids, &arrival.to)").unwrap());
+        let hand_back = body("hand_back_arrival");
+        assert!(hand_back.find("windows.hand_back(").unwrap() < hand_back.find("send_parent_window(app, &arrival.terminal_ids, &arrival.from)").unwrap());
     }
 
     #[test]
