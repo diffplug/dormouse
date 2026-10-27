@@ -15,8 +15,9 @@
  * cannot read the parent's globals across origins, so it cannot produce the
  * token, and the adapter drops anything that doesn't carry it.
  *
- * The spec section above covers why a token rather than an `event.source` /
- * `event.origin` check, and why this is not the CSP nonce.
+ * `docs/specs/vscode.rationale.md` → "Webview message authentication" covers
+ * why a token rather than an `event.source` / `event.origin` check, and why
+ * this is not the CSP nonce.
  */
 
 /** Global the host injects the per-boot token into. */

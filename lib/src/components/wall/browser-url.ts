@@ -1,11 +1,13 @@
 /**
- * Small URL helpers for the agent-browser surface header
+ * Small URL helpers for the browser surface
  * (see docs/specs/dor-browser.md → "Browser Chrome").
  *
  * The header shows a tab's URL as host+path (Chrome-style, the scheme and any
  * query/hash dropped) and, when that URL is loopback, correlates its port to a
- * Dormouse terminal pane. Both jobs are pure string parsing kept out of the
- * components so they can be unit-tested directly.
+ * Dormouse terminal pane. `browserSurfaceUrl` and `iframeRefusal` guard what a
+ * browser pane may frame; `iframeRefusal` alone reads the platform, to learn
+ * whether this host has the iframe proxy. The rest is pure string parsing kept
+ * out of the components so it can be unit-tested directly.
  */
 import type { AgentBrowserTab } from '../../lib/agent-browser-tab';
 import { isLoopbackHostname } from '../../lib/ip-literal';

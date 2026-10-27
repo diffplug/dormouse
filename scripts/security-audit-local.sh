@@ -328,7 +328,7 @@ if [ $# -gt 0 ]; then
 fi
 
 # Every domain, sequentially rather than fanned out. CI parallelises because it is
-# paying wall-clock for a nightly; locally, serial output is readable and a
+# paying wall-clock for a nightly; locally, serial output is readable and
 # each domain's failure is recorded while the remaining domains still run.
 status=0
 run_github_state || status=1
