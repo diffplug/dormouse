@@ -56,6 +56,20 @@ const FOOTNOTE_CLASS = `mt-10 text-sm ${MUTED_TEXT_CLASS}`;
 /** A computer's id in the shape the app draws a minimized Pane: a door. */
 const DOOR_CLASS = `${DOOR_SHAPE_CLASS} ml-1.5 inline-flex items-center justify-center border-b border-[var(--color-text)]/30 bg-[var(--color-text)]/[0.12] px-2.5`;
 
+/** The free alternative to a plan, for remote control only: Natural Voice has
+ * no self-hosted equivalent. */
+function SelfHostLine() {
+  return (
+    <>
+      Rather run your own Relay for free? See{" "}
+      <a className={LINK_CLASS} href={SELF_HOST_URL} target="_blank" rel="noopener">
+        how to self-host
+      </a>
+      .
+    </>
+  );
+}
+
 /** A state already in words, ticked as the plan cards tick theirs. */
 function Ticked({ children }: { children: string }) {
   return (
@@ -152,7 +166,7 @@ export function HostedPage({
                 ? noPlan
                   ? enrolling.purpose === "voice"
                     ? "Dormouse asked to turn on Natural Voice, but this account has no Hosted plan yet."
-                    : "Dormouse asked to enroll remote control, but this account has no Hosted plan yet."
+                    : <>Dormouse asked to enroll remote control, but this account has no Hosted plan yet. <SelfHostLine /></>
                   : enrolling.purpose === "voice"
                     ? "Dormouse asked to turn on Natural Voice with this account."
                     : "Dormouse asked to enroll remote control with this account."
@@ -198,19 +212,9 @@ export function HostedPage({
                   noPlan ? (
                     <>
                       <NoPlanOffer purpose={enrolling.purpose} />
-                      {/* Natural Voice has no self-hosted equivalent. */}
                       {enrolling.purpose !== "voice" && (
                         <p className={`mt-6 ${MUTED_TEXT_CLASS}`}>
-                          Rather run your own Relay for free? See{" "}
-                          <a
-                            className={LINK_CLASS}
-                            href={SELF_HOST_URL}
-                            target="_blank"
-                            rel="noopener"
-                          >
-                            how to self-host
-                          </a>
-                          .
+                          <SelfHostLine />
                         </p>
                       )}
                       <p className={`mt-8 mb-2 ${MUTED_TEXT_CLASS}`}>
