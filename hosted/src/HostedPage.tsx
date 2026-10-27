@@ -24,6 +24,7 @@ import { providerNames, type Account, type Computer, type HostedVoice, type Pass
 import { RECENT_LOGIN_WINDOW, TERMS_VERSION } from "../server/policy-constants";
 import { HELP_CLASS, INPUT_CLASS, LABEL_CLASS, LABEL_TEXT_CLASS, PRIMARY_CLASS } from "./classes";
 import { ConfirmDigits } from "./ConfirmDigits";
+import { NoPlanOffer } from "./NoPlanOffer";
 import type { Enrollment } from "./enrollment";
 import type { Notice, PageError } from "./settle";
 
@@ -147,9 +148,13 @@ export function HostedPage({
             ? !enrolling.code
               ? "This link cannot be approved."
               : session
-                ? enrolling.purpose === "voice"
-                  ? "Dormouse asked to turn on Natural Voice with this account."
-                  : "Dormouse asked to enroll remote control with this account."
+                ? noPlan
+                  ? enrolling.purpose === "voice"
+                    ? "Dormouse asked to turn on Natural Voice, but this account has no Hosted plan yet."
+                    : "Dormouse asked to enroll remote control, but this account has no Hosted plan yet."
+                  : enrolling.purpose === "voice"
+                    ? "Dormouse asked to turn on Natural Voice with this account."
+                    : "Dormouse asked to enroll remote control with this account."
                 : "Sign in to approve the computer that sent you here."
             : session
               ? "Manage how you sign in."
@@ -189,29 +194,36 @@ export function HostedPage({
             {enrolling && (session || !enrolling.code) ? (
               <section aria-label="Computer to approve">
                 {enrolling.code ? (
-                  noPlan || !fresh ? (
+                  noPlan ? (
+                    <>
+                      <NoPlanOffer purpose={enrolling.purpose} />
+                      <p className={`mt-8 mb-2 ${MUTED_TEXT_CLASS}`}>
+                        Subscribed with another account? Sign in with it; this
+                        code stays on this page.
+                      </p>
+                      <div>
+                        <button
+                          className={BUTTON_CLASS}
+                          disabled={!!busy}
+                          onClick={() => void signOut()}
+                        >
+                          {busy === "logout" ? "Signing out…" : "Use another account"}
+                        </button>
+                      </div>
+                    </>
+                  ) : !fresh ? (
                     <>
                       <p className={HELP_CLASS}>
-                        {noPlan ? (
-                          "Natural Voice and remote control are not available to this account yet, so it cannot approve this computer. To use another account, sign in again; this code stays on this page."
-                        ) : (
-                          <>
-                            Approving a computer needs a login from the last{" "}
-                            {RECENT_LOGIN_WINDOW}. Sign in again; this code stays
-                            on this page.
-                          </>
-                        )}
+                        Approving a computer needs a login from the last{" "}
+                        {RECENT_LOGIN_WINDOW}. Sign in again; this code stays
+                        on this page.
                       </p>
                       <button
                         className={PRIMARY_CLASS}
                         disabled={!!busy}
                         onClick={() => void signOut()}
                       >
-                        {busy === "logout"
-                          ? "Signing out…"
-                          : noPlan
-                            ? "Use another account"
-                            : "Sign in again"}
+                        {busy === "logout" ? "Signing out…" : "Sign in again"}
                       </button>
                     </>
                   ) : (

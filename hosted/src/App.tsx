@@ -164,6 +164,8 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
     setEnabled(providers);
     setAccounts(linked);
     setHostedVoice(voice);
+    // A plan bought since the approval was refused: offer the digits again.
+    if (voice?.entitled) setRefusedPlan(false);
     setComputers(enrolled);
     setPasskeys(registered);
     history.replaceState(

@@ -205,7 +205,7 @@ describe("Natural Voice confirmation", () => {
 });
 
 describe("an account with no plan", () => {
-  const noPlanShown = () => container.textContent!.includes("not available to this account");
+  const noPlanShown = () => container.textContent!.includes("has no Hosted plan yet");
   beforeEach(() => {
     vi.mocked(api.getSession).mockResolvedValue(login());
   });
@@ -216,6 +216,9 @@ describe("an account with no plan", () => {
     expect(container.querySelector("#confirm-digits")).toBeNull();
     expect(noPlanShown()).toBe(true);
     expect(button("Don’t approve").disabled).toBe(false);
+    const plans = container.querySelector<HTMLAnchorElement>('a[href="https://dormouse.sh/hosted/#pricing"]')!;
+    // In another tab, so this one keeps the code that lives only in memory.
+    expect(plans.target).toBe("_blank");
   });
 
   it("is told when the approval is refused for want of a plan", async () => {
@@ -226,6 +229,18 @@ describe("an account with no plan", () => {
     expect(noPlanShown()).toBe(true);
     expect(container.querySelector("[role=alert]")).toBeNull();
     expect(location.pathname).toBe("/enroll");
+  });
+
+  it("offers the digits again once a plan is bought in another tab", async () => {
+    vi.mocked(api.approveEnrollment).mockRejectedValueOnce(new api.NoPlanError(NOT_ENTITLED_ERROR));
+    await mount(ENROLLMENT);
+    await approve();
+    expect(noPlanShown()).toBe(true);
+    vi.mocked(api.getHostedVoice).mockResolvedValue({ entitled: true, on: false });
+    await act(async () => window.dispatchEvent(new Event("focus")));
+    expect(noPlanShown()).toBe(false);
+    await approve();
+    expect(api.approveEnrollment).toHaveBeenLastCalledWith("7KQM-X4TD", "remote", "47");
   });
 
   it("is never assumed from a failed read or a failed approval", async () => {
