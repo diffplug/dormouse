@@ -349,7 +349,8 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
         computers,
       });
       await approveEnrollment(code, enrolling?.purpose, confirmDigits);
-      clearEnrollment();
+      // A link opened during the request replaced the enrollment shown: keep it.
+      if (enrollingRef.current?.code === code) clearEnrollment();
       const later =
         "Keep Dormouse open on your computer; this page updates when you come back to it.";
       const mismatch = `The digits you typed for ${code} were not the ones Dormouse showed on your computer, so nothing was approved. Start again from Dormouse on your computer.`;
