@@ -2,7 +2,7 @@
   {
     "name": "Node.js",
     "versions": [
-      "24.22.0"
+      "24.22.1"
     ],
     "license": "MIT and bundled component licenses",
     "author": "OpenJS Foundation and Node.js contributors",
