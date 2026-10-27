@@ -397,6 +397,8 @@ export function createSidecarSurfaceBridge(
 /** The slice of `pty-core`'s manager the host's own commands drive. */
 export interface SidecarHostPtyManager extends SidecarPtyManager {
   spawn(id: string, options?: unknown): void;
+  /** `parentWindow`: an HWND's native-order bytes as hex. */
+  setParentWindow(ids: string[], parentWindow: string): void;
   kill(id: string): void;
   gracefulKill(ids: string[], timeout?: unknown): void;
   list(ids: unknown, forWindow: unknown, requestId: unknown, marks: unknown): void;
@@ -545,8 +547,16 @@ export function createSidecarHost(options: SidecarHostOptions): SidecarHost {
           bridge.onPtySpawn(id);
           alertHost.respawn(id, alert);
           mgr.spawn(id, spawnOptions);
+          // Rust's, never the webview's options: in the same tick as the
+          // spawn, so ConPTY has it before the shell launches.
+          if (isString(detail.parentWindow)) mgr.setParentWindow([id], detail.parentWindow);
           return true;
         }
+        // Console window parenting (docs/specs/standalone.md): the PTYs'
+        // window changed.
+        case 'pty:parentWindow':
+          if (Array.isArray(detail.ids) && isString(detail.parentWindow)) mgr.setParentWindow(detail.ids.filter(isString), detail.parentWindow);
+          return true;
         case 'pty:input':
           if (detail.launch === true && isString(id) && isString(detail.data)) bridge.onPtyLaunch(id, detail.data);
           pty.write(id as string, detail.data as string, {

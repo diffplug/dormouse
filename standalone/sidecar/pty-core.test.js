@@ -2246,6 +2246,38 @@ test('getCwds answers a key for every requested id, null for one with no PTY', a
 });
 
 
+test('setParentWindow hands node-pty the HWND bytes and never lets a refusal escape', (t) => {
+  t.mock.method(console, 'error', () => {});
+  const handles = [];
+  const answers = { a: true, b: false, c: 'throw' };
+  const mgr = create(() => {}, {
+    spawn(shell, args, opts) {
+      const id = opts.env.DORMOUSE_SURFACE_ID;
+      const p = { pid: 1, onData() {}, onExit() {}, resize() {}, write() {}, kill() {} };
+      // Absent, as on a node-pty without the API (or a Unix terminal stub).
+      if (id === 'd') return p;
+      return { ...p, setParentWindow(handle) {
+        handles.push([id, [...handle]]);
+        if (answers[id] === 'throw') throw new Error('hwnd must be a Buffer the size of an HWND');
+        return answers[id];
+      } };
+    },
+  });
+  for (const id of ['a', 'b', 'c', 'd']) mgr.spawn(id);
+  console.error.mock.resetCalls();
+
+  mgr.setParentWindow(['a', 'b', 'c', 'd', 'gone'], '0a0b0c0d00000000');
+  mgr.setParentWindow(['a'], 'not hex');
+  mgr.setParentWindow(['a'], 'abc');
+
+  assert.deepEqual(handles, [
+    ['a', [10, 11, 12, 13, 0, 0, 0, 0]],
+    ['b', [10, 11, 12, 13, 0, 0, 0, 0]],
+    ['c', [10, 11, 12, 13, 0, 0, 0, 0]],
+  ]);
+  assert.equal(console.error.mock.callCount(), 2);
+});
+
 // --- Per-window list / replay / kill (docs/specs/standalone.md -> "Windows") ---
 
 function fakePtyModule() {

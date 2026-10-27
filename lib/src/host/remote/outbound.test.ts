@@ -122,6 +122,7 @@ async function boot(): Promise<void> {
       resize: () => {},
       hasPty: () => false,
       spawn: () => {},
+      setParentWindow: () => {},
       kill: () => {},
       gracefulKill: () => {},
       list: () => {},

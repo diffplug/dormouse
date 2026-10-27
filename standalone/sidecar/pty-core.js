@@ -1696,6 +1696,23 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
     console.error(`[pty-core] spawned: ${id} (${config.shell}, ${config.cols}x${config.rows})`);
   }
 
+  // Console window parenting (docs/specs/standalone.md): `hex` is an HWND's
+  // native-order bytes, which only the host can name. Best effort: a refusal is
+  // logged and the terminal runs on unparented.
+  function setParentWindow(ids, hex) {
+    if (typeof hex !== 'string' || !/^(?:[0-9a-f]{2})+$/.test(hex)) return;
+    const handle = Buffer.from(hex, 'hex');
+    for (const id of Array.isArray(ids) ? ids : []) {
+      const p = ptys.get(id);
+      if (typeof p?.setParentWindow !== 'function') continue;
+      try {
+        if (!p.setParentWindow(handle)) console.error(`[pty-core] ConPTY did not take a parent window for ${id}`);
+      } catch (error) {
+        console.error(`[pty-core] setting ${id}'s parent window failed:`, error.message);
+      }
+    }
+  }
+
   function write(id, data, { paced = false } = {}) {
     const p = ptys.get(id);
     if (!p) return;
@@ -2040,7 +2057,7 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
     send('shells', { shells: await detectAvailableShells(), requestId });
   }
 
-  return { spawn, write, resize, hasPty, kill, killAll, list, context,
+  return { spawn, setParentWindow, write, resize, hasPty, kill, killAll, list, context,
     getHelperParentId: (id) => helpers.get(id)?.parentId,
     getCwd, getCwds, getOpenPorts, getOpenPortsMany, interrupt, gracefulKill, getShells,
     liveIds, receivedChars, outputSince, mark };
