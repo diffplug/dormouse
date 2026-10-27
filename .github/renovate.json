@@ -179,6 +179,12 @@
       "schedule": ["at any time"]
     },
     {
+      "description": "neondatabase/create-branch-action dropped the `v` prefix at 6.3.1, and its stray `v6.4.0` tag is on a commit 12 commits behind 6.3.1 with no release, so semver ranks a downgrade as the newest version",
+      "matchManagers": ["github-actions"],
+      "matchPackageNames": ["neondatabase/create-branch-action"],
+      "allowedVersions": "!/^v6\\.4\\.0$/"
+    },
+    {
       "description": "canopy pins the pristine @xterm/addon-webgl AND @xterm/xterm to the exact commit the SDF fork's sdf branch is based on (the addon's beta counter is offset from core's; canopy/README.md records the current correspondence). They are the UpstreamVsFork regression baseline and move in lockstep with the hand-cut @diffplug/xterm-addon-webgl-sdf tarball, which Renovate cannot see, so bumping either one is a manual edit made when the fork rebases — never a Renovate bump (see canopy/README.md and docs/specs/webgl-text.md). File-scoped: lib and standalone still track upstream betas via the xterm group above. Must stay last; later rules win",
       "matchManagers": ["npm"],
       "matchFileNames": ["canopy/package.json"],
