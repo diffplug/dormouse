@@ -8,7 +8,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { execFileSync, spawnSync } = require('node:child_process');
-const { existsSync, mkdtempSync, rmSync } = require('node:fs');
+const { existsSync, mkdtempSync, rmSync, writeFileSync } = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
@@ -119,17 +119,19 @@ for (const [name, bin] of shells) {
   });
 }
 
-// bash 4.0 is where a `bind -x` command runs with READLINE_LINE bound.
-const BASH_MAJOR = Number(execFileSync(BASH, ['-c', 'echo "${BASH_VERSINFO[0]}"'], { encoding: 'utf8' }).trim());
+// bash 4.0 is where a `bind -x` command runs with READLINE_LINE bound; 5.1
+// is where every element of an array PROMPT_COMMAND runs.
+const [BASH_MAJOR, BASH_MINOR] = execFileSync(BASH, ['-c', 'echo "${BASH_VERSINFO[0]} ${BASH_VERSINFO[1]}"'], { encoding: 'utf8' }).trim().split(' ').map(Number);
 
 /**
  * Drive the real bash integration on a PTY, one submitted line at a time.
  * `run` resolves with every `E` the line emitted (decoded as the parser decodes
  * it) and the text the shell printed, once the next prompt is drawn.
  */
-function interactiveBash() {
+function interactiveBash(profile) {
   const pty = require('node-pty');
   const home = mkdtempSync(path.join(os.tmpdir(), 'dormouse-bash-'));
+  if (profile !== undefined) writeFileSync(path.join(home, '.profile'), profile);
   const shell = pty.spawn(BASH, ['--init-file', path.join(dir, 'shell-integration/bash/shellIntegration.bash')], {
     cols: 200,
     rows: 50,
@@ -252,6 +254,31 @@ test('bash: E is the whole submitted line, and never a stale history entry', { t
     await bash.run(`__sfx() { :; }; PROMPT_COMMAND="$PROMPT_COMMAND; __sfx"`);
     const { commands: afterHook } = await bash.run('cd / && echo hi');
     assert.ok(!afterHook.includes('cd / && echo hi'), `the previous line was re-reported: ${JSON.stringify(afterHook)}`);
+  } finally {
+    await bash.close();
+  }
+});
+
+// systemd's /etc/profile.d/80-systemd-osc-context.sh (Ubuntu 26.04) turns
+// PROMPT_COMMAND into an array with an empty first slot and appends its hook.
+// Startup replaces only element 0, so the hook ran after ours re-armed the trap
+// and every line reported the hook's name instead of itself.
+test('bash: an array PROMPT_COMMAND from the profile keeps E the submitted line', { timeout: 60_000, skip: BASH_MAJOR < 5 || (BASH_MAJOR === 5 && BASH_MINOR < 1) }, async () => {
+  const bash = interactiveBash([
+    '__sfx_ran() { __sfx_count=$((${__sfx_count:-0} + 1)); }',
+    'PROMPT_COMMAND=( "${PROMPT_COMMAND:-}" )',
+    'PROMPT_COMMAND+=(__sfx_ran)',
+    '',
+  ].join('\n'));
+  try {
+    for (const line of ['true', 'echo p && echo q']) {
+      const { commands, starts } = await bash.run(line);
+      assert.deepEqual(commands, [line], `bash reported ${JSON.stringify(commands)} for ${JSON.stringify(line)}`);
+      assert.equal(starts, 1);
+    }
+    // The profile's hook still runs once per prompt: the first, then two lines.
+    const { printed } = await bash.run('echo "n=$__sfx_count"');
+    assert.match(printed, /n=3/);
   } finally {
     await bash.close();
   }

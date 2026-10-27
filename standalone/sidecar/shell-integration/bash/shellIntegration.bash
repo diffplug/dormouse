@@ -68,6 +68,16 @@ __dormouse_633_safe_cwd() {
 __dormouse_633_armed=                       # set at the END of the prompt hook: "the next command is the user's"
 __dormouse_633_ran=                         # a command actually executed since the last prompt
 __dormouse_633_user_pc="$PROMPT_COMMAND"    # preserve the user's PROMPT_COMMAND
+# bash 5.1+ runs every element of an array PROMPT_COMMAND, which systemd's
+# 80-systemd-osc-context.sh makes it; one left past ours would run after the
+# re-arm and report as the command. Fold them all into the user's hook.
+if [ "${BASH_VERSINFO[0]}" -gt 5 ] || { [ "${BASH_VERSINFO[0]}" -eq 5 ] && [ "${BASH_VERSINFO[1]}" -ge 1 ]; }; then
+  __dormouse_633_user_pc=
+  for __dormouse_pc in "${PROMPT_COMMAND[@]}"; do
+    [ -n "$__dormouse_pc" ] && __dormouse_633_user_pc+="${__dormouse_633_user_pc:+$'\n'}$__dormouse_pc"
+  done
+  unset __dormouse_pc
+fi
 
 # precmd: runs via PROMPT_COMMAND just before each prompt. Reports the previous
 # command's exit (D), the cwd (P), and the prompt start (A). Disarms first so its
@@ -140,6 +150,7 @@ __dormouse_633_preexec() {
 }
 
 trap '__dormouse_633_preexec "$_"' DEBUG
+unset PROMPT_COMMAND                        # an array keeps its other elements through a plain assignment
 PROMPT_COMMAND='__dormouse_633_prompt'
 # Prompt-end / input-start (B) at the tail of PS1, wrapped in \[ \] so bash counts
 # it as zero width. Best-effort: a prompt rebuilt every render loses B, but
