@@ -1323,8 +1323,8 @@ fn pty_spawn_message(id: &str, options: Option<&PtySpawnOptions>, parent_window:
     sidecar_line("pty:spawn", data)
 }
 
-/// `label`'s HWND as the sidecar hands it to node-pty (docs/specs/standalone.md
-/// §Console window parenting).
+/// `label`'s HWND as the sidecar hands it to node-pty
+/// (docs/specs/standalone.md §Console window parenting).
 #[cfg(windows)]
 fn window_handle_hex(app: &AppHandle, label: &str) -> Option<String> {
     let hwnd = app.get_webview_window(label)?.hwnd().ok()?;

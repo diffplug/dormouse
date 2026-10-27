@@ -1,6 +1,6 @@
-//! Console window parenting (docs/specs/standalone.md -> "Console window
-//! parenting"): the window holding a PTY owns its ConPTY console window, so a
-//! dialog a console program parents to it opens above Dormouse.
+//! docs/specs/standalone.md -> "Console window parenting": the window holding
+//! a PTY owns its ConPTY console window, so a dialog a console program parents
+//! to it opens above Dormouse.
 //!
 //! `Recovery` is pure over its own state, like `routing`; `win` holds the Win32
 //! reads and the `EnableWindow` that `lib.rs` drives from its thread.
