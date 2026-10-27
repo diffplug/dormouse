@@ -15,6 +15,8 @@ dor tool hosted
 
 Outside Dormouse, use `pnpm dev:hosted` and open the `http://localhost:<port>` URL it prints. Request a code for a test address and read it at `/api/dev/emails` on that same origin. No real mail is sent, and the development database is isolated by the worktree path; `docs/specs/hosted.md` -> "Development and release" owns what the local entry serves and what production omits. The port is OS-assigned unless you set `PORT`. Do not share this local inbox publicly. The local origin serves the account's Natural Voice routes but not the voice origin's: a Hosted build speaks only at `https://voice.dormouse.sh` (`docs/specs/hosted.md` -> "Development and release").
 
+The same command runs the relay Worker on this database at `http://localhost:8787` (or `RELAY_PORT`), so a dev desktop build enrolls by device code end to end. Start one with `DORMOUSE_RELAY_IS_HOSTED=1 DORMOUSE_RELAY_ORIGIN=http://localhost:8787 pnpm innerdogfood`, choose Local networks only or Anywhere in its Settings → Network, then unfold Hosted Relay and press Enroll remote control (or Turn on Natural Voice) and approve the code at the account origin. Approval needs the entitlement, so sign in there as `ADMIN_EMAIL` (`hosted/server/entitlement.ts`); its code lands in the local inbox. Its port is not OS-assigned, so don't also run `dor tool one-time`, or another checkout's `dor tool hosted`, beside it.
+
 ```sh
 pnpm test:hosted
 pnpm build:hosted
