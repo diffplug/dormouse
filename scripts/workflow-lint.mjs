@@ -127,10 +127,7 @@ export function check(inputs) {
       const declared = job?.permissions !== undefined ? job.permissions : doc.permissions;
       const held = declared === undefined ? [] : writes(declared);
       if (agent) {
-        // The CI failure reporter runs no agent and reads no secret; its
-        // `actions: write` dispatches `tend-triage.yaml` for a failed run.
-        const allowed = file === 'tend-ci-failures.yaml' && jobId === 'report' ? [...AGENT_WRITES, 'actions'] : AGENT_WRITES;
-        const extra = held.filter((s) => !allowed.includes(s));
+        const extra = held.filter((s) => !AGENT_WRITES.includes(s));
         if (extra.length) fail(TEND, `${file} job \`${jobId}\` holds write on ${extra.join(', ')}`);
       } else {
         const allowed = file === 'release.yml' && jobId === 'security-audit' ? [...RELEASE_WRITES, 'actions']
@@ -191,18 +188,6 @@ export function check(inputs) {
     if (extra.length) fail(VSCODE, `release.yml reads ${extra.map((s) => `\`${s}\``).join(', ')}; production signing stays local`);
     const ephemeral = (release.jobs?.['build-standalone']?.steps ?? []).some((s) => /tauri signer generate/.test(s.run ?? ''));
     if (!ephemeral) fail(VSCODE, 'release.yml `build-standalone` no longer generates an ephemeral Tauri updater key');
-  }
-
-  // tend-ci-failures.yaml `report`: its `actions: write` exception holds only while the job runs
-  // no action but uv's setup, reads no secret, and dispatches `tend-triage.yaml`.
-  const report = docs['tend-ci-failures.yaml']?.jobs?.report;
-  if (report) {
-    const actions = (report.steps ?? []).filter((s) => s.uses && !s.uses.startsWith('astral-sh/setup-uv@'));
-    if (actions.length) fail(TEND, `tend-ci-failures.yaml \`report\` runs \`${actions.map((s) => s.uses).join('`, `')}\` with its \`actions: write\``);
-    const secrets = secretsOf(docs['tend-ci-failures.yaml'], report);
-    if (secrets.size) fail(TEND, `tend-ci-failures.yaml \`report\` reads ${[...secrets].map((s) => `\`${s}\``).join(', ')}`);
-    const targets = (report.steps ?? []).filter((s) => s.env?.TRIAGE_WORKFLOW !== undefined).map((s) => s.env.TRIAGE_WORKFLOW);
-    if (targets.some((t) => t !== 'tend-triage.yaml')) fail(TEND, `tend-ci-failures.yaml \`report\` dispatches \`${targets.join('`, `')}\`, not \`tend-triage.yaml\``);
   }
 
   // hosted-production.yml `tag`: the minted token is the only credential, scoped to contents on this repository.
