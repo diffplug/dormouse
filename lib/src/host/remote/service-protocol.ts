@@ -3,7 +3,7 @@
  * its UI. Shared by both ends so the contract cannot drift: the service imports
  * it to dispatch, the webview imports it to speak.
  *
- * Three message kinds, all JSON:
+ * Four message kinds, all JSON:
  *
  *   webview → service   `burrow:command`  { burrowRequestId, cmd, params? }
  *   service → webview   `burrow:result`   { burrowRequestId, result } | { burrowRequestId, error }
