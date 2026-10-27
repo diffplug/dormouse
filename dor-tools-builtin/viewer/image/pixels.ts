@@ -241,7 +241,7 @@ const selected = (r: Raster, c: Rect, mask: Mask | undefined, x: number, y: numb
   x >= c.x && y >= c.y && x < c.x + c.width && y < c.y + c.height && (!mask || mask[y * r.width + x] !== 0);
 
 /** The most common color among unselected pixels 8-adjacent to the selection
- * (`rect`, narrowed by `mask`); ties go to the first in row order. Null when the
+ * (`rect`, narrowed by `mask`); a tie goes to the color that reached the top count first. Null when the
  * selection has no such ring, as when it covers the image. */
 export function dominantBorderColor(r: Raster, rect: Rect, mask?: Mask): Rgba | null {
   const c = clipRect(r, rect);

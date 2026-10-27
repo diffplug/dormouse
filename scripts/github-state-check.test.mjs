@@ -78,7 +78,8 @@ test('the recorded live state passes every clause', () => {
 // The reporting step computes this fragment's verdict from its lines against
 // the rules the specs pin to this script. Every rule gets a line, every line
 // is in the grammar and names a pinned rule, so the computed verdict is the
-// script's own — a mismatch between the two PRs' formats goes red here.
+// script's own — a mismatch between this script's fragment format and
+// `security-audit-report.mjs`'s parser goes red here.
 test('the reporting step reads the fragment as the script judged it', () => {
   const clean = judgeFragment(repoRoot, FRAGMENT, replay().text);
   assert.equal(clean.verdict, 'PASS', [...clean.doubts, ...clean.missing, ...clean.malformed.map((m) => m.line)].join('\n'));

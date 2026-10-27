@@ -134,9 +134,9 @@ const MAX_ORIGIN_LENGTH = PAIRING_QR_URL_MAX_LENGTH - 1 - PAIRING_HASH_PREFIX.le
 
 /** A real origin of exactly `length` characters, with DNS-legal labels. */
 function originOfLength(length) {
-  const burrow = length - 'https://'.length - '.dev'.length;
-  const first = Math.min(burrow, 63);
-  const rest = burrow - first - 1;
+  const host = length - 'https://'.length - '.dev'.length;
+  const first = Math.min(host, 63);
+  const rest = host - first - 1;
   return `https://${'a'.repeat(first)}${rest >= 0 ? `.${'b'.repeat(rest)}` : ''}.dev`;
 }
 
@@ -203,7 +203,7 @@ test('plain HTTP is accepted on a loopback host, and nowhere else', async () => 
     const parsed = await parsePairingInvitationUrl(url, origin, NOW);
     assert.equal(parsed?.burrowId, BURROW_ID, origin);
   }
-  // By burrow, never by suffix: a name that merely ends in `localhost` is an
+  // By host name, never by suffix: a name that merely ends in `localhost` is an
   // ordinary remote origin a self-hoster could be pointed at.
   for (const origin of ['http://evil.localhost', 'http://127.0.0.1.evil.example', 'http://pocket.example']) {
     const url = `${origin}/${PAIRING_HASH_PREFIX}${FIELDS.join('.')}`;

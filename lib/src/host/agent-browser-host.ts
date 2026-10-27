@@ -77,8 +77,6 @@ function cliError(result: CliResult): string {
   return result.stderr.trim() || result.stdout.trim() || `agent-browser exited ${result.exitCode}`;
 }
 
-// A capture can queue behind a page-loading `open` for the CLI's whole 25s
-// action timeout; past the host's capture bound it is wedged, and killed.
 const STREAM_PORT_READ_ATTEMPTS = 4;
 const STREAM_PORT_READ_DELAY_MS = 150;
 const PORT_PROBE_TIMEOUT_MS = 500;

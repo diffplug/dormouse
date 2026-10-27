@@ -161,7 +161,7 @@ test('the policy is same-origin everywhere, unframeable, and loosens only what p
   assert.deepEqual(policy, {
     'default-src': ["'self'"],
     // No *script* exception: the build emits none inline and loads nothing
-    // off-origin, which the built-output case below pins. `wasm-unsafe-eval`
+    // off-origin, which `lib/scripts/assert-pocket-worker.mjs` pins at build time. `wasm-unsafe-eval`
     // is the addon's SIXEL decoder and permits WebAssembly compilation only —
     // pinned so a widening to `'unsafe-eval'` cannot pass as the same thing.
     'script-src': ["'self'", "'wasm-unsafe-eval'"],
@@ -180,9 +180,9 @@ test('the policy is same-origin everywhere, unframeable, and loosens only what p
   });
 });
 
-test('connect-src names this deployment own relay and no other burrow', async () => {
+test("connect-src names this deployment's own relay and no other host", async () => {
   // `'self'` alone leaves ws/wss to browsers that have disagreed about whether
-  // it covers them, and a bare `ws:` would admit every burrow on the network.
+  // it covers them, and a bare `ws:` would admit every host on the network.
   for (const [origin, expected] of [
     ['https://dormouse.tailnet.ts.net', 'wss://dormouse.tailnet.ts.net'],
     ['http://localhost:3000', 'ws://localhost:3000'],
