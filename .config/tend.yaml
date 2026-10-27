@@ -21,7 +21,7 @@ workflows:
     # GitHub only ever delays a scheduled run, so the default 09:17 slot
     # has always started before the reset.
     cron: "17 15 * * 0"
-  ci-fix:
+  ci-failures:
     watched_workflows:
       - CI
       - Argos
