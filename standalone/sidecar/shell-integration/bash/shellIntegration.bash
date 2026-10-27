@@ -8,8 +8,8 @@
 # the OSC 633 prompt/command hooks.
 #
 # Written for bash 3.2 (the macOS system bash) and newer: a DEBUG trap for
-# command-start and a string PROMPT_COMMAND for the prompt — no PS0 (4.4+) and no
-# array PROMPT_COMMAND (5.1+).
+# command-start and a string PROMPT_COMMAND for the prompt — no PS0 (4.4+), and an
+# array PROMPT_COMMAND (5.1+) is only read, never installed.
 
 # --- Replicate login-shell startup (we are spawned without --login) ----------
 if [ -r /etc/profile ]; then . /etc/profile; fi
@@ -67,17 +67,17 @@ __dormouse_633_safe_cwd() {
 
 __dormouse_633_armed=                       # set at the END of the prompt hook: "the next command is the user's"
 __dormouse_633_ran=                         # a command actually executed since the last prompt
-__dormouse_633_user_pc="$PROMPT_COMMAND"    # preserve the user's PROMPT_COMMAND
-# bash 5.1+ runs every element of an array PROMPT_COMMAND, which systemd's
-# 80-systemd-osc-context.sh makes it; one left past ours would run after the
-# re-arm and report as the command. Fold them all into the user's hook.
-if [ "${BASH_VERSINFO[0]}" -gt 5 ] || { [ "${BASH_VERSINFO[0]}" -eq 5 ] && [ "${BASH_VERSINFO[1]}" -ge 1 ]; }; then
-  __dormouse_633_user_pc=
-  for __dormouse_pc in "${PROMPT_COMMAND[@]}"; do
-    [ -n "$__dormouse_pc" ] && __dormouse_633_user_pc+="${__dormouse_633_user_pc:+$'\n'}$__dormouse_pc"
-  done
-  unset __dormouse_pc
+# Preserve the user's PROMPT_COMMAND, one entry per element. bash 5.1+ runs every
+# element of an array PROMPT_COMMAND, which systemd's 80-systemd-osc-context.sh
+# makes it; one left past ours would run after the re-arm and report as the
+# command. Older bash runs only element 0.
+__dormouse_633_user_pcs=("$PROMPT_COMMAND")
+if (( BASH_VERSINFO[0] * 100 + BASH_VERSINFO[1] >= 501 )); then
+  __dormouse_633_user_pcs=("${PROMPT_COMMAND[@]}")
 fi
+
+# Set $? to $1 without the fork of `( exit "$1" )`.
+__dormouse_633_status() { return "$1"; }
 
 # precmd: runs via PROMPT_COMMAND just before each prompt. Reports the previous
 # command's exit (D), the cwd (P), and the prompt start (A). Disarms first so its
@@ -93,10 +93,12 @@ __dormouse_633_prompt() {
   __dormouse_633_safe_cwd "$PWD"
   printf '\033]633;P;Cwd=%s\007' "$__dormouse_633_out"
   printf '\033]633;A\007'
-  if [ -n "$__dormouse_633_user_pc" ]; then
-    ( exit "$exit_code" )                   # restore $? for the user's PROMPT_COMMAND
-    eval "$__dormouse_633_user_pc"
-  fi
+  local __dormouse_633_pc
+  for __dormouse_633_pc in "${__dormouse_633_user_pcs[@]}"; do
+    [ -n "$__dormouse_633_pc" ] || continue
+    __dormouse_633_status "$exit_code"      # each element sees the command's $?, as bash gives it
+    eval "$__dormouse_633_pc"
+  done
   __dormouse_633_armed=1
 }
 

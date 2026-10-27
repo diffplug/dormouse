@@ -260,14 +260,17 @@ test('bash: E is the whole submitted line, and never a stale history entry', { t
 });
 
 // systemd's /etc/profile.d/80-systemd-osc-context.sh (Ubuntu 26.04) turns
-// PROMPT_COMMAND into an array with an empty first slot and appends its hook.
-// Startup replaces only element 0, so the hook ran after ours re-armed the trap
-// and every line reported the hook's name instead of itself.
+// PROMPT_COMMAND into an array with an empty first slot and appends its hook;
+// a legacy rc file then assigns element 0. Startup replaced only element 0, so
+// the hook ran after ours re-armed the trap and every line reported the hook's
+// name instead of itself.
 test('bash: an array PROMPT_COMMAND from the profile keeps E the submitted line', { timeout: 60_000, skip: BASH_MAJOR < 5 || (BASH_MAJOR === 5 && BASH_MINOR < 1) }, async () => {
   const bash = interactiveBash([
-    '__sfx_ran() { __sfx_count=$((${__sfx_count:-0} + 1)); }',
-    'PROMPT_COMMAND=( "${PROMPT_COMMAND:-}" )',
+    '__sfx_ran() { __sfx_status=$?; __sfx_count=$((${__sfx_count:-0} + 1)); }',
+    // systemd's own two lines, verbatim.
+    '[ -n "$(declare -p PROMPT_COMMAND 2>/dev/null)" ] || PROMPT_COMMAND+=(\'\')',
     'PROMPT_COMMAND+=(__sfx_ran)',
+    'PROMPT_COMMAND=false',
     '',
   ].join('\n'));
   try {
@@ -276,9 +279,11 @@ test('bash: an array PROMPT_COMMAND from the profile keeps E the submitted line'
       assert.deepEqual(commands, [line], `bash reported ${JSON.stringify(commands)} for ${JSON.stringify(line)}`);
       assert.equal(starts, 1);
     }
-    // The profile's hook still runs once per prompt: the first, then two lines.
-    const { printed } = await bash.run('echo "n=$__sfx_count"');
-    assert.match(printed, /n=3/);
+    // Each element sees the command's $?, not the status of the element before it.
+    await bash.run('(exit 7)');
+    // The profile's hook still runs once per prompt: the first, then three lines.
+    const { printed } = await bash.run('echo "n=$__sfx_count s=$__sfx_status"');
+    assert.match(printed, /n=4 s=7/);
   } finally {
     await bash.close();
   }
