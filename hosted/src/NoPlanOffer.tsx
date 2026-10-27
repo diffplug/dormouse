@@ -11,10 +11,10 @@ import { foundingTier, LIST_MONTHLY } from "../../website/src/lib/hosted-pricing
 /** The Hosted page's plan cards, in a new tab so this one keeps its code. */
 export const HOSTED_PLANS_URL = "https://dormouse.sh/hosted/#pricing";
 
-const VOICE = "A natural ElevenLabs voice for spoken alarms, on every computer you enroll";
+const VOICE = "Natural Voice powered by ElevenLabs for spoken alarms";
 const POCKET = "Dormouse Pocket on your phone through the managed Relay";
 const PUSH = "Sealed push notifications when a terminal needs you";
-const NO_LIMIT = "Every computer you use: no device limit, no per-device charge";
+const NO_LIMIT = "No device limit, no per-device charge";
 
 /**
  * What a plan would give the account that could not approve this computer,
