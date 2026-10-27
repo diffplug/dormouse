@@ -28,10 +28,6 @@ export class UnsupportedMarkdownError extends Error {
 /** Attributes an `<img>` may carry. Everything else is rejected. */
 export const IMG_ALLOWED_ATTRS = new Set(['src', 'alt', 'width', 'height', 'title']);
 
-// ---------------------------------------------------------------------------
-// Slugger — mirrors github-slugger so /docs anchors match GitHub's own.
-// ---------------------------------------------------------------------------
-
 /**
  * Whether a URL carries a scheme (`https:`, `mailto:`, `vscode:`).
  *
@@ -49,6 +45,10 @@ export function hasScheme(url) {
 export function isProtocolRelative(url) {
   return url.startsWith('//');
 }
+
+// ---------------------------------------------------------------------------
+// Slugger — mirrors github-slugger so /docs anchors match GitHub's own.
+// ---------------------------------------------------------------------------
 
 export function slugify(text) {
   return text
