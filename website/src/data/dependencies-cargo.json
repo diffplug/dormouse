@@ -87,7 +87,7 @@
       "homepage": "https://tauri.app/",
       "declaredName": "tauri",
       "versions": [
-        "2.12.4"
+        "2.12.5"
       ]
     },
     {
@@ -97,7 +97,7 @@
       "homepage": "https://tauri.app/",
       "declaredName": "tauri-build",
       "versions": [
-        "2.7.3"
+        "2.7.4"
       ]
     },
     {
@@ -1315,7 +1315,7 @@
       "author": "Matthew D. Steele <mdsteele@alum.mit.edu>",
       "homepage": "https://github.com/mdsteele/rust-ico",
       "versions": [
-        "0.5.0"
+        "0.6.0"
       ]
     },
     {
@@ -2110,7 +2110,6 @@
       "author": "The image-rs Developers",
       "homepage": "https://github.com/image-rs/image-png",
       "versions": [
-        "0.17.16",
         "0.18.1"
       ]
     },
@@ -2848,7 +2847,7 @@
       "author": "Tauri Programme within The Commons Conservancy",
       "homepage": "https://tauri.app/",
       "versions": [
-        "2.7.3"
+        "2.7.4"
       ]
     },
     {
@@ -2857,7 +2856,7 @@
       "author": "Tauri Programme within The Commons Conservancy",
       "homepage": "https://tauri.app/",
       "versions": [
-        "2.7.3"
+        "2.7.4"
       ]
     },
     {
@@ -2884,7 +2883,7 @@
       "author": "Tauri Programme within The Commons Conservancy",
       "homepage": "https://tauri.app/",
       "versions": [
-        "2.12.2"
+        "2.12.3"
       ]
     },
     {
