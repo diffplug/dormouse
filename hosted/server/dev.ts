@@ -68,8 +68,9 @@ const host: RelayAccountHost = {
   databaseUrl,
   auth: (request: Request) => auth.app.fetch(request),
   approveLimit: devLimit(10),
-  // The relay Worker runs in its own process (below), so a removed Burrow's
-  // socket is refused at its next request rather than closed here.
+  // The relay Worker runs in its own process (below), out of reach, so a
+  // removed Burrow's held socket closes only at its RelayRoom's next sweep
+  // (`RELAY_ROOM_SWEEP_MS`); its reconnect is refused at once.
   closeBurrow: async () => {},
 };
 voiceAccountRoutes(app, () => host);
