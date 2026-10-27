@@ -3893,15 +3893,6 @@
       ]
     },
     {
-      "name": "has-flag",
-      "license": "MIT",
-      "author": "Sindre Sorhus",
-      "homepage": "https://github.com/sindresorhus/has-flag",
-      "versions": [
-        "4.0.0"
-      ]
-    },
-    {
       "name": "hono",
       "license": "MIT",
       "author": "Yusuke Wada <yusuke@kamawada.com> (https://github.com/yusukebe)",
@@ -3980,15 +3971,6 @@
       "homepage": "https://github.com/feross/safe-buffer",
       "versions": [
         "5.2.1"
-      ]
-    },
-    {
-      "name": "supports-color",
-      "license": "MIT",
-      "author": "Sindre Sorhus",
-      "homepage": "https://github.com/chalk/supports-color",
-      "versions": [
-        "7.2.0"
       ]
     },
     {
