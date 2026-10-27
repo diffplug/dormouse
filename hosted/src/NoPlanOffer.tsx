@@ -12,7 +12,7 @@ import { foundingTier, LIST_MONTHLY } from "../../website/src/lib/hosted-pricing
 export const HOSTED_PLANS_URL = "https://dormouse.sh/hosted/#pricing";
 
 const VOICE = "A natural ElevenLabs voice for spoken alarms, on every computer you enroll";
-const POCKET = "Dormouse Pocket on your phone through the managed Relay, no tailnet needed";
+const POCKET = "Dormouse Pocket on your phone through the managed Relay";
 const PUSH = "Sealed push notifications when a terminal needs you";
 const NO_LIMIT = "Every computer you use: no device limit, no per-device charge";
 
