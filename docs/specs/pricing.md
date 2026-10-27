@@ -69,7 +69,7 @@ What each plan grants once checkout can sell it; [Published prices](#published-p
 - **Must lock the founding base yearly price in USD while the subscription remains active**, excluding applicable taxes; a lapsed founder re-subscribes at list. **Must preserve the lock through billing-provider migrations and failures caused by DiffPlug**, allowing payment restoration.
 - **Cohorts close by count, never by date.** The count is completed purchases at the billing provider; a full refund or finally reversed payment returns the seat to its cohort.
 - **When a cohort closes the price rises one step and the counter resets to 100.**
-- **Founding closes only when the ladder reaches list.** Founding means bought at launch pricing; the hosted Relay shipping does not close it.
+- **Founding closes only when the ladder reaches list.** Founding means bought at launch pricing; the Hosted Relay shipping does not close it.
 - **Checkout honors the price it opened at.** Concurrent checkouts may oversell a cohort by a few seats; the overage is the customer's, and the next cohort still opens at a full 100.
 - **List may rise while founding is open, and never falls.** Monthly and yearly move together the same day, so list is always a price someone can buy at; the ladder keeps climbing $10 per cohort toward the new list; every founder's lock and the struck price they were shown are unchanged.
 - **Never reopen the ladder at a lower step** once a cohort has closed.
@@ -81,11 +81,11 @@ What each plan grants once checkout can sell it; [Published prices](#published-p
 |---|---|
 | Natural Voice for spoken alarms on every machine the member signs in on | live |
 | A member default voice, chosen from a curated set | live |
-| Dormouse Hosted: the managed Relay, enrollment of the member's Burrows, sealed push, Pocket without a tailnet | live |
+| The Hosted Relay: enrollment of the member's Burrows, sealed push, Pocket without a tailnet | live |
 | Founding badge | live for founding |
 
 - **The plan never grants team or enterprise capability** — org accounts, SSO, SCIM, BYOT, audit export.
-- **The hosted Relay is part of the plan, never a second purchase.** Reserved: the **hosted-sales** scope reads the plan from the Hosted account's subscription ("Checkout and entitlement"), so a member never signs up twice.
+- **The Hosted Relay is part of the plan, never a second purchase.** Reserved: the **hosted-sales** scope reads the plan from the Hosted account's subscription ("Checkout and entitlement"), so a member never signs up twice.
 - **Nothing shipped free is ever gated**: the terminal, `dor`, browser panes, the notepad, alerts with the system voice, the self-host Relay, and Pocket over a self-hosted Relay stay free, with no login.
 
 ### Checkout and entitlement

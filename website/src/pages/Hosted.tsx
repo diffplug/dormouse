@@ -68,14 +68,14 @@ export function meta({ location }: MetaArgs) {
   return siteMeta(location.pathname, {
     title: "Dormouse Hosted",
     description:
-      "The terminal is free. Dormouse Hosted adds a managed Relay for Pocket and Natural Voice "
+      "The terminal is free. Dormouse Hosted adds the Hosted Relay for Pocket and Natural Voice "
       + `for spoken alarms — from $${LIST_MONTHLY} a month, with founding prices while they last.`,
   });
 }
 
 export const HOSTED_TOC: TocEntry[] = [
   { id: "voice", text: "Natural Voice", children: [] },
-  { id: "remote-control", text: "The managed Relay", children: [] },
+  { id: "remote-control", text: "The Hosted Relay", children: [] },
   { id: "self-hosting", text: "Self-hosting stays free", children: [] },
   { id: "account", text: "Your Hosted account", children: [] },
   { id: "faq", text: "Questions", children: [] },
@@ -519,7 +519,7 @@ export default function Hosted() {
           aria-hidden="true"
         />
         <AnchoredHeading id="remote-control" spacing="mt-0 mb-3">
-          The managed Relay
+          The Hosted Relay
         </AnchoredHeading>
         <p className={`mb-3 font-display text-sm ${ACCENT_TEXT_CLASS}`}>Included with any plan</p>
         <p className={`mb-4 ${BODY_TEXT_CLASS}`}>

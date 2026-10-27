@@ -82,7 +82,7 @@ The [shortcut reference](https://github.com/diffplug/dormouse/blob/main/docs/spe
 
 ## Dormouse Hosted
 
-Optional and paid: a managed Relay so Pocket works without running your own, and an ElevenLabs voice for spoken alarms. [See plans and pricing](https://dormouse.sh/hosted).
+Optional and paid: the Hosted Relay, so Pocket works without running your own, and Natural Voice, an ElevenLabs voice for spoken alarms. [See plans and pricing](https://dormouse.sh/hosted).
 
 ## Standalone app
 
