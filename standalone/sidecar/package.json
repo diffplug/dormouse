@@ -9,7 +9,7 @@
   "dependencies": {
     "detect-libc": "2.1.2",
     "node-datachannel": "0.33.4",
-    "node-pty": "1.2.0-beta.15"
+    "node-pty": "1.2.0-beta.18"
   },
   "optionalDependencies": {
     "@node-datachannel/darwin-arm64": "0.33.4",
