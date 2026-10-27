@@ -52,9 +52,9 @@ Source of truth: `context` in `standalone/sidecar/pty-core.js`; `terminalContext
 
 Port action overflow follows `docs/specs/layout.md` → "Header context menu".
 
-Source of truth: `TerminalContextView` in `lib/src/components/wall/TerminalContextView.tsx`.
-
 The Window-host workspace picker follows `docs/specs/layout.md` → Moving Surfaces between Workspaces.
+
+Source of truth: `TerminalContextView` in `lib/src/components/wall/TerminalContextView.tsx`.
 
 ## Tool context
 

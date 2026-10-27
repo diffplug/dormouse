@@ -5,7 +5,7 @@ import { join, win32 } from 'node:path';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { beforeEach, afterEach, test } from 'node:test';
-import { saveFileOperations, windowsReplaceCommand } from '../dist/atomic-save.js';
+import { windowsReplaceCommand } from '../dist/atomic-save.js';
 import { editorStore } from '../dist/editor-store.js';
 import { readText, saveText } from '../dist/editor-routes.js';
 let root, file;

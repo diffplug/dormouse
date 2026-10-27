@@ -70,7 +70,8 @@ export const CameraUnsupported: Story = {
 };
 
 // A pasted string that is not a setup code for this server. One fixed line —
-// the parser answers a complete invitation or nothing, never a reason.
+// the parser answers a complete invitation or nothing, never a reason; only an
+// expired code for this server reads differently.
 export const PastedCodeRejected: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);

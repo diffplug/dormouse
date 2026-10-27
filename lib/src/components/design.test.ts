@@ -49,11 +49,7 @@ describe('terminal radius constants', () => {
   });
 });
 
-// The header palette crossfade must resolve on the same timing as the focus
-// ring's travel. Tailwind can't build a class from a JS constant, so the class
-// is a hand-written literal — this ties it back to FOCUS_MOTION_MS and the house
-// curve so the two can't silently drift apart.
-// Same reason as above: Tailwind scans source statically, so the viewport caps
+// Tailwind scans source statically, so the viewport caps
 // are hand-written literals. These tie them back to the constants they are
 // derived from — `clampOverlayPosition`'s margin, and the modal overlay's own
 // inset — so a change to either can't silently leave the cap behind.
@@ -89,6 +85,10 @@ describe('viewport-bounded overlay caps', () => {
   });
 });
 
+// The header palette crossfade must resolve on the same timing as the focus
+// ring's travel. Tailwind can't build a class from a JS constant, so the class
+// is a hand-written literal — this ties it back to FOCUS_MOTION_MS and the house
+// curve so the two can't silently drift apart.
 describe('focus-ring motion timing', () => {
   it('header crossfade duration + curve track FOCUS_MOTION_MS', () => {
     expect(FOCUS_MOTION_MS).toBe(220);
