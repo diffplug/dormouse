@@ -57,6 +57,7 @@ Source of truth: `Hosted` in `website/src/pages/Hosted.tsx`; the `/pricing` rule
 - **The entitlement is the account's subscription, read on the server on every voice and Relay request** (`docs/specs/hosted.md` -> "Entitlement"). No licence, no offline verification, and no grace past what the subscription grants; a lapsed member's voices fall back to the system voice and its Burrows to `not-entitled`.
 - **Cohorts close by count, never by date**: completed purchases at the billing provider; a purchase ending within the 30-day refund window, as a full refund or finally reversed payment ends it ("Checkout"), returns its seat to its cohort. **Never reopen the ladder at a lower step** once a cohort has closed. **When a cohort closes the price rises one step and the counter resets to 100**, and **founding closes only when the ladder reaches list**: founding means bought at launch pricing, and the Hosted Relay shipping does not close it.
 - **Checkout honors the price it opened at.** Concurrent checkouts may oversell a cohort by a few seats; the overage is the customer's, and the next cohort still opens at a full 100.
+- **A full refund or a finally reversed payment ends the subscription it paid for**, so the next request is refused. A partial refund or billing correction never ends it, and an open dispute only suspends it until it closes.
 
 Source of truth: `withBilling` and `openCohort` in `hosted/server/billing.ts`; `docs/specs/hosted.md` -> "Billing" owns the rest.
 
@@ -65,7 +66,7 @@ Source of truth: `withBilling` and `openCohort` in `hosted/server/billing.ts`; `
 **Scope: hosted-sales** — what remains, in staged order:
 
 1. **The cohort endpoint** the page already calls: the open cohort's seats and the opted-in founders, avatars proxied onto this origin.
-2. **Checkout** ("Checkout"): the routes, the webhook, and the account pages that sell, then opening billing.
+2. **Checkout** ("Checkout"): the account pages that sell, then opening billing.
 3. **Managed voice for members**: one voice per Pane.
 4. **Renewal, cancellation, and refund** paths.
 
@@ -101,7 +102,6 @@ The rest of "Checkout and entitlement", once checkout can sell:
 - **Founding checkout offers the founders-row opt-in, unticked**; the account can withdraw it at any time.
 - **The success page asks the four Van Westendorp questions**, optional and unsent until answered: too expensive to consider, too cheap to trust, expensive but would consider, a bargain. Their answers inform later list changes.
 - **Must license one individual, including work use, with no device limit and no per-device charge**; enrollment's abuse ceiling is far above what a person owns (`docs/specs/hosted.md` -> "Burrow enrollment"). **Must disclose material usage limits before purchase**, including managed voice's daily cap.
-- **A full refund or a finally reversed payment ends the subscription**, so the next request is refused. A partial refund or billing correction never ends it, and an open dispute only suspends it ("Paid-launch requirements").
 
 ### Managed voice
 
@@ -129,7 +129,7 @@ EEA/UK representative appointment is excluded from the internal release gate by 
 - **Must provide direct online cancellation and a support cancellation path when account access is lost.** **Must cancel future renewals as part of account closure**, explaining remaining access and refund eligibility before completing closure; verification cannot require account recovery.
 - **Must send jurisdiction-required renewal, annual, and price-change notices with cancellation instructions.** For California consumers, annual-term renewal notices are 15–45 days before renewal and fee-change notices 7–30 days before effectiveness; annual reminders also apply to monthly plans (rationale).
 - **Must route subscription notices to the maintained billing email**, including provider-only accounts without a sign-in email; use the account contact email for other notices, or show them at sign-in when none exists. **Must record notice delivery or presentation before starting a notice period**, and provide any additional legally required notice or consent process.
-- **Never end a subscription solely for a partial refund or billing correction.** **Must distinguish payment-dispute suspension from termination**: notify the customer, restore remaining access and the prior founding price if suspension was mistaken or payment is restored, and preserve refund and dispute rights; final reversal may end the affected access and renewals.
+- **Must notify the customer of a payment-dispute suspension** and preserve refund and dispute rights; suspension, its restoration, and final reversal are "Checkout and entitlement".
 - **Must refund unused prepaid service, including corresponding collected tax, on permanent discontinuation or termination unrelated to customer breach**, and offer the same remedy for a material service reduction or rejected material terms change during a prepaid term. **Must give at least 30 days' advance notice of discontinuation, material reductions, or material terms changes**, except urgent legal or security requirements; no retroactive terms changes for disputes.
 - **Must verify the permitted sales territories and tax setup before accepting payment**, and confirm refund, cancellation, failed-payment, and founder-lock behavior against the published offer. Stripe Billing does not transfer the seller's tax obligations.
 - **Must support worldwide sales only where lawful, including EEA and UK consumer rights**: disclose the statutory withdrawal right and model form before purchase and in the confirmation, accept an unambiguous notice without account recovery, and refund withdrawal payments within 14 days without a use deduction or waiver for immediate access. The voluntary guarantee is additional (rationale).
