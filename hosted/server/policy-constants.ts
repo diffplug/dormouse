@@ -38,6 +38,22 @@ export const TERMS_VERSION = "2026-10-28";
 // account page on the account origin.
 export const BILLING_RETURN_PATH = "/billing";
 
+// Speaks one account may make per UTC day (the voice Worker's cap), which
+// checkout discloses before purchase.
+export const VOICE_DAILY_CAP = 500;
+
+// Every billing route's answer while billing is closed, which the account page
+// reads as closed rather than as an outage.
+export const CHECKOUT_CLOSED = "Checkout is not open yet.";
+
 // The plans checkout sells, by the names a checkout request, `status()`, and
 // the billing metrics use.
 export const BILLING_PLANS = ["monthly", "yearly", "founding"] as const;
+
+// A name the founders row shows: 1–64 code points, none a control, format, or
+// line or paragraph separator, without padding. The account page checks it
+// before sending; the founder route and dormouse_founders' CHECK refuse
+// anything else.
+const FOUNDER_NAME = /^[^\p{Cc}\p{Cf}\p{Zl}\p{Zp}]{1,64}$/u;
+export const isFounderName = (name: unknown): name is string =>
+  typeof name === "string" && FOUNDER_NAME.test(name) && name === name.trim();

@@ -2,7 +2,7 @@
 import { Billing, BillingError, Stripe, type BillingDB } from "@pgstencil/stripe";
 import { SecureRandom, SystemTime } from "pgstencil";
 import { connectDatabase, queryDatabase } from "pgstencil/postgres";
-import { FOUNDING_COHORT_SIZE, FOUNDING_LADDER } from "../../website/src/lib/hosted-pricing";
+import { FOUNDING_COHORT_SIZE, FOUNDING_LADDER, LIST_ANNUAL, LIST_MONTHLY } from "../../website/src/lib/hosted-pricing";
 import type { BillingEnv } from "./bindings";
 import { grantsAccessSql } from "./entitlement";
 import { BILLING_PLANS, BILLING_RETURN_PATH } from "./policy-constants";
@@ -59,6 +59,17 @@ export function billingSetup(env: BillingEnv): BillingSetup | null {
     yearly,
     founding,
   };
+}
+
+/**
+ * What `priceId` charges per interval, in whole US dollars, as the published
+ * prices say each configured Price does; null for a Price not configured.
+ */
+export function publishedPrice(setup: BillingSetup, priceId: string): number | null {
+  if (priceId === setup.monthly) return LIST_MONTHLY;
+  if (priceId === setup.yearly) return LIST_ANNUAL;
+  const step = setup.founding.indexOf(priceId);
+  return step === -1 ? null : FOUNDING_LADDER[step]!;
 }
 
 /** The open cohort and its seats left; null once founding has closed. */

@@ -8,7 +8,9 @@ import { Hono } from "hono";
 import { createServer as createViteServer, type ViteDevServer } from "vite";
 import { createAuthApp } from "@pgstencil/auth/better-auth";
 import { developmentDatabase } from "pgstencil/database";
-import { EmailDev, SystemTime } from "pgstencil";
+import { EmailDev, SecureRandom, SystemTime } from "pgstencil";
+import { stripeDevBilling } from "./billing-dev";
+import { BILLING_WEBHOOK_PATH, billingRoutes, type BillingHost } from "./billing-routes";
 import { authMetricHooks } from "./metrics";
 import { authPolicy } from "./policy";
 import { migrations } from "./migrations";
@@ -64,9 +66,18 @@ const auth = createAuthApp({
 auth.app.get("/api/dev/emails", (c) =>
   c.json(email.all().map(({ to, text }) => ({ to, text }))),
 );
+// StripeDev in place of Stripe, so checkout runs end to end without a card or
+// a charge. Its state sits beside the development database's, which outlives
+// a restart, and its webhook comes back through this server.
+const stripe = await stripeDevBilling(
+  new SystemTime(),
+  new SecureRandom(),
+  fileURLToPath(new URL("../.pgstencil/stripe-dev.json", import.meta.url)),
+);
+stripe.dev.setWebhookTarget(origin + BILLING_WEBHOOK_PATH);
 const app = new Hono();
 // Built once, so the approval limiter counts across requests.
-const host: RelayAccountHost = {
+const host: RelayAccountHost & BillingHost = {
   databaseUrl,
   auth: (request: Request) => auth.app.fetch(request),
   approveLimit: devLimit(10),
@@ -74,9 +85,11 @@ const host: RelayAccountHost = {
   // removed Burrow's held socket closes only at its RelayRoom's next sweep
   // (`RELAY_ROOM_SWEEP_MS`); its reconnect is refused at once.
   closeBurrow: async () => {},
+  setup: () => stripe.setup,
 };
 voiceAccountRoutes(app, () => host);
 relayAccountRoutes(app, () => host);
+billingRoutes(app, () => host);
 // No speak: a Hosted build speaks only at the fixed voice origin, so no
 // Dormouse build could reach one here.
 app.all("*", (c) => auth.app.fetch(c.req.raw));
@@ -95,7 +108,7 @@ ready = {
   vite,
 };
 console.log(
-  `Dormouse Hosted: ${origin}\nLocal email inbox: ${origin}/api/dev/emails\nEmail stays local; OAuth is disabled in this development entry.`,
+  `Dormouse Hosted: ${origin}\nLocal email inbox: ${origin}/api/dev/emails\nEmail stays local; OAuth is disabled in this development entry.\nCheckout runs on StripeDev at ${stripe.dev.origin}: no card, no charge.`,
 );
 // OSC 367 (docs/specs/dor-tool.md -> OSC 367): frame this origin, not the
 // relay's port or Wrangler's inspector, which the same process tree binds.
@@ -154,6 +167,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const)
     await vite.close();
     await auth.close();
     email.close();
+    await stripe.dev.close();
     await relayExit;
     process.exit(0);
   });

@@ -25,12 +25,14 @@ export const grantsAccessSql = (s: string) =>
 
 /**
  * Whether the SQL expression `owner` holds exactly one current subscription
- * and it grants access, as `status()` decides.
+ * and it grants access, as `status()` decides; with `prices`, an SQL `text[]`
+ * expression, only while that subscription is on one of them.
  */
-function subscribedSql(owner: string): string {
+export function subscribedSql(owner: string, prices?: string): string {
+  const on = prices ? ` AND entitling.price_id = ANY (${prices})` : "";
   // An alias no caller's query uses, so `owner` can name the outer row.
   return `coalesce((SELECT count(*) FILTER (WHERE entitling.status IN (${CURRENT})) = 1
-      AND bool_or(${grantsAccessSql("entitling")})
+      AND bool_or(${grantsAccessSql("entitling")}${on})
     FROM pgstencil_billing.subscriptions entitling WHERE entitling.owner_id = ${owner}), false)`;
 }
 
