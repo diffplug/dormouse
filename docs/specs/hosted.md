@@ -245,22 +245,24 @@ Source of truth: `relayApiRoutes` in `hosted/server/relay-api.ts`; `relayAccount
 
 ## Metrics
 
-Hosted counts what its Workers serve in aggregate daily rows, server-side; no page or desktop sends any.
+Hosted's Workers count what they serve in aggregate daily rows; no page or desktop sends any.
 
 | Event | Labels | Counted when |
 |---|---|---|
+| `account.created` | none | a user row commits |
+| `login` | `email`, `providerIds` | a sign-in's session commits, by method; never a link |
 | `enroll.approved` | `remote`, `voice` | an approval succeeds, under its purpose |
 | `burrow.enrolled` | none | a remote poll enrolls a Burrow |
 | `voice.speak` | `ok`, `capped`, `error` | speak answers 200, 429, or 502 |
 | `voice.fallback-cap` | none | a speak spends its owner's last call of the UTC day |
-| `push.sent` | none | a send delivers, once per delivery |
+| `push.sent` | none | each delivery a send makes |
 | `pocket.signin` | none | a passkey sign-in mints a session |
 
-- **Never count a label off its event's list** (`METRIC_LABELS`): the write throws instead. What a row may hold, and who reads it: `docs/specs/security-hosted.md` -> "Account boundary".
-- **Never fail or delay the request a metric counts**: the write runs after the response, through `waitUntil`, and its failure is only logged.
-- Rows are kept forever, since none describes anyone. The account Worker's `/admin/metrics` shows the last 30 UTC days and all-time totals, "today" by the database's clock, which dates every row.
+- **Never count a label off its event's list** (`METRIC_LABELS`): the write throws. Row contents and readers: `docs/specs/security-hosted.md` -> "Account boundary".
+- **Never fail or delay the request a metric counts**: the write is unawaited, kept alive by `waitUntil`, and only logs failure.
+- Rows are kept forever (rationale). The database's UTC clock dates every row and the account Worker's `/admin/metrics` "today".
 
-Source of truth: `hosted/server/metric-labels.ts`; `recordMetric` in `hosted/server/metrics.ts`; `hosted/server/dormouse-migrations/013_metrics.sql`; `AdminMetrics` in `hosted/src/AdminMetrics.tsx`.
+Source of truth: `hosted/server/metric-labels.ts`; `recordMetric` and `authMetricHooks` in `hosted/server/metrics.ts`; `hosted/server/dormouse-migrations/013_metrics.sql`; `AdminMetrics` in `hosted/src/AdminMetrics.tsx`.
 
 ## Development and release
 
