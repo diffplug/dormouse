@@ -76,6 +76,15 @@ const everything = {
   ...testVapidKeys(),
 };
 
+/** Billing's, which only the production account's mapper passes; never in {@link everything}, so billing stays closed. */
+const STRIPE = {
+  STRIPE_SECRET_KEY: "sk_test_x",
+  STRIPE_WEBHOOK_SECRET: "whsec_x",
+  STRIPE_PRICE_MONTHLY: "price_m",
+  STRIPE_PRICE_YEARLY: "price_y",
+  STRIPE_PRICES_FOUNDING: "price_f",
+};
+
 const IMMUTABLE = "public, max-age=31536000, immutable";
 const HASHED_FILES = ["/assets/app-B39o2E6i.js", `${ONE_TIME_PAGE_PATH}assets/page-B39o2E6i.js`];
 
@@ -407,6 +416,7 @@ test("each bindings mapper passes only what its Worker uses", () => {
     RELAY_ENROLL_POLL_LIMIT: {} as RateLimit,
     RELAY_APPROVE_LIMIT: {} as RateLimit,
     ACCOUNT_ORIGIN: "https://account.example.test",
+    ...STRIPE,
   };
   const keys = (bindings: object) => Object.keys(bindings).sort();
   expect(keys(accountBindings(env))).toEqual(
@@ -422,6 +432,7 @@ test("each bindings mapper passes only what its Worker uses", () => {
       "POSTMARK_SERVER_TOKEN",
       "RELAY_APPROVE_LIMIT",
       "RELAY_ROOM",
+      ...Object.keys(STRIPE),
     ].sort(),
   );
   expect(accountPreviewBindings(env)).toEqual({
@@ -502,7 +513,8 @@ test("only the push send outgrows the request body bound, and only to its derive
   expect(MAX_PUSH_SEND_BODY_BYTES).toBeGreaterThan(MAX_REQUEST_BODY_BYTES);
 });
 
-test("neither the relay nor the voice bundle carries Better Auth", async () => {
+test("neither the relay nor the voice bundle carries Better Auth or billing", async () => {
+  const pattern = /better-auth|postmark|stripe|server\/billing/;
   for (const [entry, bundle] of [
     [ENTRIES.relay, bundles.relay],
     [ENTRIES.voice, bundles.voice],
@@ -510,13 +522,14 @@ test("neither the relay nor the voice bundle carries Better Auth", async () => {
   ] as const) {
     const inputs = Object.keys(bundle.metafile.inputs);
     expect(
-      inputs.filter((input) => /better-auth|postmark/.test(input)),
+      inputs.filter((input) => pattern.test(input)),
       entry,
     ).toEqual([]);
   }
-  // The pattern finds it where it is.
+  // The pattern finds each where it is.
   const account = Object.keys(bundles.account.metafile.inputs);
-  expect(account.some((input) => /better-auth/.test(input))).toBe(true);
+  for (const name of ["better-auth", "@pgstencil/stripe", "node_modules/stripe/", "server/billing.ts"])
+    expect(account.filter((input) => pattern.test(input) && input.includes(name)), name).not.toEqual([]);
 });
 
 test("the relay bundle reads no cookie and never asks auth", () => {

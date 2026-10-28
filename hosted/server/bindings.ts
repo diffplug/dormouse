@@ -20,8 +20,18 @@ interface Assets {
   fetch(request: Request): Promise<Response>;
 }
 
-/** `hosted.dormouse.sh`: the account frontend, auth, and voice-token minting. */
-export interface AccountEnv extends BetterAuthWorkerBindings, WorkerEnv {
+/** The account Worker's billing bindings; billing is off unless all five are set. */
+export interface BillingEnv {
+  STRIPE_SECRET_KEY?: string;
+  STRIPE_WEBHOOK_SECRET?: string;
+  STRIPE_PRICE_MONTHLY?: string;
+  STRIPE_PRICE_YEARLY?: string;
+  /** The founding ladder's Prices, comma-separated, in cohort order. */
+  STRIPE_PRICES_FOUNDING?: string;
+}
+
+/** `hosted.dormouse.sh`: the account frontend, auth, voice-token minting, and billing. */
+export interface AccountEnv extends BetterAuthWorkerBindings, WorkerEnv, BillingEnv {
   HYPERDRIVE: { connectionString: string };
   ASSETS: Assets;
   /** Enrollment approvals, per account. */
@@ -75,10 +85,15 @@ export const accountBindings = (env: AccountEnv): AccountEnv => ({
   EMAIL_FROM: env.EMAIL_FROM,
   POSTMARK_SERVER_TOKEN: env.POSTMARK_SERVER_TOKEN,
   BUILD_SHA: env.BUILD_SHA,
+  STRIPE_SECRET_KEY: env.STRIPE_SECRET_KEY,
+  STRIPE_WEBHOOK_SECRET: env.STRIPE_WEBHOOK_SECRET,
+  STRIPE_PRICE_MONTHLY: env.STRIPE_PRICE_MONTHLY,
+  STRIPE_PRICE_YEARLY: env.STRIPE_PRICE_YEARLY,
+  STRIPE_PRICES_FOUNDING: env.STRIPE_PRICES_FOUNDING,
   ...providerBindings(env as unknown as Record<string, unknown>),
 });
 
-/** Ignores stale production, OAuth, and mail bindings on an existing preview Worker. */
+/** Ignores stale production, OAuth, mail, and Stripe bindings on an existing preview Worker: a preview never bills. */
 export const accountPreviewBindings = (env: AccountEnv): AccountEnv => ({
   HYPERDRIVE: env.HYPERDRIVE,
   ASSETS: env.ASSETS,

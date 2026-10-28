@@ -204,6 +204,8 @@ rm vapid.json
 
 The public half is public (`GET /api/push/config` serves it); the private half signs every push. Both are required for a production deploy: preflight refuses a relay Worker missing either. Cloudflare exposes a secret's name, never its value, so preflight cannot tell whether the two match; the relay answers push off for a pair that does not, and the release's live verification fails unless `/api/push/config` answers the key. Rotating the pair makes every phone's subscription stale until Pocket re-registers it, so rotate only on compromise. Previews derive their own pair and never need this one.
 
+Billing stays closed, and its Cron Trigger idle, until the account Worker holds all five Stripe bindings: the secrets `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET`, and the vars `STRIPE_PRICE_MONTHLY`, `STRIPE_PRICE_YEARLY`, and `STRIPE_PRICES_FOUNDING` in `wrangler.jsonc` (`docs/specs/hosted.md` -> "Billing"). Set none of them before checkout opens. `db:migrate` grants `dormouse_app` the `pgstencil_billing` schema itself (`hosted/server/runtime-roles.sql`), since that schema is the package's and no hand grant can precede it.
+
 Configure the sender and enable each ready provider in `OAUTH_PROVIDERS` in `wrangler.jsonc`, comma separated, reviewed in a PR. The checked-in file enables GitHub, Google, Microsoft, and Apple; `docs/specs/hosted.md` -> "Identity and login" owns what a name and a credential pair do and do not enable. Facebook is outside this milestone.
 
 ## Release
