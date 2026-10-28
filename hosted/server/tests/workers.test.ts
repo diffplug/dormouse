@@ -902,8 +902,9 @@ test("Natural Voice: only the verified admin speaks; the account sees on or off 
       body: { text: "Build passed.", model_id: "eleven_flash_v2_5" },
     },
   ]);
-  // A successful speech schedules one history sweep (undelayed in the test entry).
-  expect(await f.waitUntilCalls()).toBe(1);
+  // A successful speech schedules one history sweep (undelayed in the test
+  // entry) and its metric's write.
+  expect(await f.waitUntilCalls()).toBe(2);
   await vi.waitFor(() =>
     expect(f.elevenLabs.sweeps).toEqual([
       `https://api.elevenlabs.io/v1/history?page_size=${SPEECH_SWEEP_CAP}`,
@@ -961,8 +962,9 @@ test("Natural Voice: only the verified admin speaks; the account sees on or off 
   const otherToken = await other.mint();
   expect((await other.speak(otherToken, hi)).status).toBe(403);
 
-  // No refused or failed speech (400, 401, 403, 429, 502) scheduled a sweep.
-  expect(await f.waitUntilCalls()).toBe(1);
+  // No refused or failed speech (400, 401, 403, 429, 502) scheduled a sweep:
+  // past the first speech's two, only the two 502s' and the 429's metrics.
+  expect(await f.waitUntilCalls()).toBe(5);
 
   // A year without a speak, counted from the mint until the first, refuses
   // the token as if it never existed; inside it, speak reaches the cap.
@@ -1008,6 +1010,114 @@ test("Natural Voice: only the verified admin speaks; the account sees on or off 
   expect(await (await admin.hostedVoice()).json()).toEqual({ entitled: false, on: true });
   expect((await admin.hostedVoice("DELETE")).status).toBe(204);
   expect((await admin.speak(lapsed, hi)).status).toBe(401);
+});
+
+/** Today's (UTC) count of `event` under `label`, once its best-effort write landed. */
+const counted = (database: string, event: string, label = "") =>
+  queryDatabase<{ count: string }>(
+    database,
+    `SELECT count FROM dormouse_metrics_daily
+    WHERE day = (now() AT TIME ZONE 'UTC')::date AND event = $1 AND label = $2`,
+    [event, label],
+  ).then(([row]) => Number(row?.count ?? 0));
+
+test("metrics: speech by outcome and the call that spends the day, approvals by purpose, an enrollment; a failing write changes no answer", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const admin = f.browser();
+  await admin.email(ADMIN_EMAIL);
+  const token = await admin.mint();
+  const usage = (count: number) =>
+    queryDatabase(f.database.url, "UPDATE dormouse_voice_usage SET count = $1", [count]);
+
+  expect((await admin.speak(token, hi)).status).toBe(200);
+  await vi.waitFor(async () => expect(await counted(f.database.url, "voice.speak", "ok")).toBe(1));
+  expect(await counted(f.database.url, "voice.fallback-cap")).toBe(0);
+  // The call that spends the day's last counts once; the next is capped.
+  await usage(VOICE_DAILY_CAP - 1);
+  expect((await admin.speak(token, hi)).status).toBe(200);
+  expect((await admin.speak(token, hi)).status).toBe(429);
+  await vi.waitFor(async () => {
+    expect(await counted(f.database.url, "voice.speak", "ok")).toBe(2);
+    expect(await counted(f.database.url, "voice.fallback-cap")).toBe(1);
+    expect(await counted(f.database.url, "voice.speak", "capped")).toBe(1);
+  });
+  await usage(0);
+  f.elevenLabs.respond = () => new WorkerResponse(null, { status: 500 });
+  expect((await admin.speak(token, hi)).status).toBe(502);
+  await vi.waitFor(async () => expect(await counted(f.database.url, "voice.speak", "error")).toBe(1));
+
+  // A write the role is refused still answers the speech in full.
+  await queryDatabase(f.database.url, `REVOKE INSERT ON dormouse_metrics_daily FROM ${RUNTIME_ROLES.voice}`);
+  f.elevenLabs.respond = () =>
+    new WorkerResponse(new Uint8Array([0xff, 0xfb]), { headers: { "content-type": "audio/mpeg" } });
+  await queryDatabase(f.database.url, "DELETE FROM dormouse_metrics_daily");
+  const spoken = await admin.speak(token, hi);
+  expect(spoken.status).toBe(200);
+  expect([...new Uint8Array(await spoken.arrayBuffer())]).toEqual([0xff, 0xfb]);
+  expect(await counted(f.database.url, "voice.speak", "ok")).toBe(0);
+
+  // An approval counts under its purpose, and an enrollment once its poll redeems it.
+  const remote = await f.begin();
+  expect((await admin.approve(remote.userCode, remote.confirmDigits)).status).toBe(204);
+  expect((await admin.approve(remote.userCode, remote.confirmDigits)).status).toBe(409);
+  const voice = (
+    await f.burrowCall(API_ROUTES.burrowEnrollBegin, { origin: ORIGINS.relay, purpose: "voice" })
+  ).json as { userCode: string; confirmDigits: string };
+  const approved = await admin.request("/api/relay/enrollments/approve", {
+    method: "POST",
+    body: JSON.stringify({ userCode: voice.userCode, purpose: "voice", confirmDigits: voice.confirmDigits }),
+    headers: { origin, "content-type": "application/json" },
+  });
+  expect(approved.status).toBe(204);
+  expect((await f.poll(remote.deviceCode)).json.status).toBe("enrolled");
+  expect((await f.poll(remote.deviceCode)).json.status).toBe("redeemed");
+  await vi.waitFor(async () => {
+    expect(await counted(f.database.url, "enroll.approved", "remote")).toBe(1);
+    expect(await counted(f.database.url, "enroll.approved", "voice")).toBe(1);
+    expect(await counted(f.database.url, "burrow.enrolled")).toBe(1);
+  });
+});
+
+test("the admin page: its read answers only the verified admin, from this origin, and its path serves the app", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const admin = f.browser(),
+    other = f.browser();
+  const read = (who: typeof admin, headers?: Record<string, string>) =>
+    who.request("/api/admin/metrics", { headers });
+  expect((await read(admin)).status).toBe(401);
+  await other.email("other@example.test");
+  expect((await read(other)).status).toBe(404);
+  await admin.email(ADMIN_EMAIL);
+  await queryDatabase(
+    f.database.url,
+    `INSERT INTO dormouse_metrics_daily (day, event, label, count)
+    VALUES ((now() AT TIME ZONE 'UTC')::date, 'push.sent', '', 4)`,
+  );
+  const response = await read(admin);
+  expect(response.status).toBe(200);
+  const today = new Date().toISOString().slice(0, 10);
+  expect(await response.json()).toEqual({
+    days: 30,
+    today,
+    recent: [{ day: today, event: "push.sent", label: "", count: 4 }],
+    totals: [{ event: "push.sent", label: "", count: 4 }],
+  });
+  // A navigation or another site's page carries the cookie but is no read of this page's.
+  for (const site of ["none", "same-site", "cross-site"])
+    expect((await read(admin, { "sec-fetch-site": site })).status, site).toBe(403);
+  // The admin address counts only while verified.
+  await queryDatabase(f.database.url, `UPDATE "user" SET "emailVerified" = false WHERE email = $1`, [ADMIN_EMAIL]);
+  expect((await read(admin)).status).toBe(404);
+  for (const path of ["/admin/metrics", "/admin/metrics/"]) {
+    const page = await admin.request(path);
+    expect([path, page.status, page.headers.get("content-type")]).toEqual([path, 200, "text/html"]);
+  }
 });
 
 test("the voice Worker's daily cron deletes only tokens a year idle, and never touches ElevenLabs", async ({

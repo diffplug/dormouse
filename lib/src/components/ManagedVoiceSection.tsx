@@ -1,6 +1,7 @@
 import { useCallback, useState, useSyncExternalStore } from 'react';
 import { INLINE_ACTION_CLASS, SELECT_CLASS, modalActionButton } from './design';
 import { HostedApprovalProgress, HostedPlansLink } from './HostedEnrollment';
+import { HOSTED_REFS } from '../lib/hosted-links';
 import { FIELD_LABEL, useBusyAction, useNetworkPolicy } from './remote-control-shared';
 import { getPlatform } from '../lib/platform';
 import {
@@ -81,7 +82,7 @@ export function ManagedVoiceSection({ onShowNetwork }: { onShowNetwork?: () => v
         <>
           <div className="mt-2 text-sm leading-relaxed text-foreground">
             {voice.notEntitled ? (
-              <>{NO_PLAN_COPY} <HostedPlansLink /></>
+              <>{NO_PLAN_COPY} <HostedPlansLink from={HOSTED_REFS.settingsVoice} /></>
             ) : 'Natural Voice is on.'}
           </div>
           <label className="mt-2 flex items-center gap-2">

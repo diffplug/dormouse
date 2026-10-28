@@ -1,4 +1,4 @@
-// Rules: docs/specs/hosted.md -> "Burrow enrollment".
+// Rules: docs/specs/hosted.md -> "Burrow enrollment" and "Metrics".
 import type { Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import {
@@ -9,6 +9,7 @@ import {
   readJson,
 } from "remote-lib-common";
 import { accountQuery, cookieEntitled, type AccountHost } from "./account-gate";
+import { recordMetric } from "./metrics";
 import { ENROLLMENT_TTL_MS, LOGIN_FRESH_AGE_MS, RECENT_LOGIN_WINDOW } from "./policy-constants";
 
 /** What one request's account deployment provides to the Relay's account routes. */
@@ -82,7 +83,9 @@ export function relayAccountRoutes(app: Hono<any>, host: (c: Context) => RelayAc
           [userCode, login.userId, ENROLLMENT_TTL_MS, purpose, confirmDigits],
         )
       ).length > 0;
-    return approved ? c.body(null, 204) : c.json({ message: ALREADY_APPROVED }, 409);
+    if (!approved) return c.json({ message: ALREADY_APPROVED }, 409);
+    recordMetric(c, host(c).databaseUrl, "enroll.approved", purpose);
+    return c.body(null, 204);
   });
 
   // What a poll made of this account's live approval of the code: typed with

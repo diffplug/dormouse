@@ -1,6 +1,7 @@
 import { providerIds, providerNames } from "../server/providers.js";
 import type { ProviderId } from "../server/providers.js";
 import { NOT_ENTITLED_ERROR } from "../../remote-lib-common/src/remote/wire.ts";
+import { ADMIN_METRICS_PATH, type AdminMetricsBody } from "../server/metric-labels";
 
 export const providers = providerIds;
 export type Provider = ProviderId;
@@ -200,4 +201,18 @@ export async function getApproval(userCode: string): Promise<ApprovalState> {
   const response = await relay(`/enrollments/${encodeURIComponent(userCode)}`);
   if (!response.ok) throw await refused(response);
   return (await response.json()) as ApprovalState;
+}
+
+/** What the admin page's read answered. */
+export type AdminMetricsRead =
+  | { status: "ok"; body: AdminMetricsBody }
+  | { status: "signed-out" }
+  /** Anyone but the admin: the route answers as if it were not there. */
+  | { status: "not-found" };
+export async function getAdminMetrics(): Promise<AdminMetricsRead> {
+  const response = await request(ADMIN_METRICS_PATH, undefined, "Metrics are temporarily unavailable. Try again.");
+  if (response.status === 401) return { status: "signed-out" };
+  if (response.status === 404) return { status: "not-found" };
+  if (!response.ok) throw await refused(response);
+  return { status: "ok", body: (await response.json()) as AdminMetricsBody };
 }

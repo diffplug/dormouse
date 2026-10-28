@@ -397,9 +397,12 @@ describe('RemoteControlSection', () => {
   it('says in fixed copy why an enrollment ended, and offers a new code or Done', async () => {
     let ended: HostedEnrollmentState = { status: 'ended', reason: 'not-entitled' };
     const link = makeLink(async () => ({ ...NOT_ENROLLED, hostedEnrollment: ended }));
-    platform = { burrow: link };
+    const openExternal = vi.fn();
+    platform = { burrow: link, openExternal };
     await render();
     expect(text()).toContain(HOSTED_APPROVAL_ENDED_COPY.remote['not-entitled']);
+    await act(async () => buttonLabelled('See Hosted plans')!.click());
+    expect(openExternal).toHaveBeenCalledWith('https://dormouse.sh/hosted/?ref=settings-remote#pricing');
 
     ended = { status: 'ended', reason: 'expired' };
     await act(async () => refreshBurrowStatus());

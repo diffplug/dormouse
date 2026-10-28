@@ -6,10 +6,11 @@ import {
   CARD_MUTED_TEXT_CLASS,
   DASHED_ROW_CLASS,
 } from "dormouse-lib/site/docs-tokens";
+import { HOSTED_REFS, withHostedRef } from "dormouse-lib/lib/hosted-links";
 import { foundingTier, LIST_MONTHLY } from "../../website/src/lib/hosted-pricing.ts";
 
 /** The Hosted page's plan cards, in a new tab so this one keeps its code. */
-export const HOSTED_PLANS_URL = "https://dormouse.sh/hosted/#pricing";
+export const HOSTED_PLANS_URL = withHostedRef("https://dormouse.sh/hosted/", HOSTED_REFS.hostedNoPlan, "pricing");
 
 const VOICE = "Natural Voice powered by ElevenLabs for spoken alarms";
 const POCKET = "Dormouse Pocket on your phone through the Hosted Relay";

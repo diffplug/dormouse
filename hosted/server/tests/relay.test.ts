@@ -1,4 +1,4 @@
-import { test, expect } from "vitest";
+import { test, expect, vi } from "vitest";
 import { createDecipheriv, createECDH, hkdfSync, randomBytes, randomUUID } from "node:crypto";
 import { digest } from "@pgstencil/auth/security";
 import { Miniflare, Response as WorkerResponse } from "miniflare";
@@ -389,6 +389,12 @@ test("setup, sign-in, and a presence proof end to end, scoped to the account tha
   expect(signed.status).toBe(200);
   expect(signed.json).toMatchObject({ accountId: owner, passkeyPublicKey: phone.publicKey });
   const { sessionToken, expiresAt } = signed.json!;
+  // Counted once, as a sign-in; the setup finish's session is none.
+  await vi.waitFor(async () =>
+    expect(await f.sql(`SELECT event, label, count::int FROM dormouse_metrics_daily`)).toEqual([
+      { event: "pocket.signin", label: "", count: 1 },
+    ]),
+  );
   expect(Math.abs(expiresAt - (Date.now() + 12 * 3600_000))).toBeLessThan(60_000);
 
   expect(
@@ -1468,6 +1474,12 @@ test("push end to end: a Burrow's sealed envelope reaches the push service encry
   });
   expect(sent.json).toEqual({ delivered: 1, expired: 0, unknown: 0, failed: 0 });
   expect(f.pushed).toHaveLength(1);
+  // Counted by delivery.
+  await vi.waitFor(async () =>
+    expect(await f.sql(`SELECT event, label, count::int FROM dormouse_metrics_daily`)).toEqual([
+      { event: "push.sent", label: "", count: 1 },
+    ]),
+  );
   const [request] = f.pushed;
   expect(request.url).toBe(phone.subscription.endpoint);
   expect(request.headers["content-encoding"]).toBe("aes128gcm");

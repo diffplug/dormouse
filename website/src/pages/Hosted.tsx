@@ -55,6 +55,7 @@ import {
   type Tier,
 } from "../lib/hosted-pricing";
 import { canonicalUrl, siteMeta, sitePath } from "../lib/site-meta";
+import { takeVisitRef } from "../lib/hosted-ref";
 
 const PAGE_PATH = "/hosted";
 
@@ -446,6 +447,12 @@ export default function Hosted() {
     const controller = new AbortController();
     void fetchCohort(controller.signal).then(setCohort);
     return () => controller.abort();
+  }, []);
+
+  // Off the address bar on arrival. What it answers goes nowhere yet: this
+  // is where a visit count would read it.
+  useEffect(() => {
+    takeVisitRef();
   }, []);
 
   return (

@@ -1,9 +1,6 @@
 import { useEffect, useRef, type Dispatch, type FormEvent, type RefObject, type SetStateAction } from "react";
 import { CheckIcon } from "@phosphor-icons/react";
 import { DOOR_SHAPE_CLASS } from "dormouse-lib/components/design";
-import DocsThemeControl from "dormouse-lib/site/DocsThemeControl";
-import SiteHeader, { type SiteNavLink } from "dormouse-lib/site/SiteHeader";
-import { DOCS_HEADER_STYLE } from "dormouse-lib/site/docs-paint";
 import {
   ACCENT_TEXT_CLASS,
   CARD_BASE_CLASS,
@@ -11,7 +8,6 @@ import {
   CODE_CLASS,
   DASHED_ROW_CLASS,
   LINK_CLASS,
-  MUTED_ACCENT_LINK_CLASS,
   MUTED_TEXT_CLASS,
   PAGE_INTRO_CLASS,
   PAGE_TITLE_CLASS,
@@ -24,28 +20,13 @@ import { providerNames, type Account, type Computer, type HostedVoice, type Pass
 import { RECENT_LOGIN_WINDOW, TERMS_VERSION } from "../server/policy-constants";
 import { HELP_CLASS, INPUT_CLASS, LABEL_CLASS, LABEL_TEXT_CLASS, PRIMARY_CLASS } from "./classes";
 import { ConfirmDigits } from "./ConfirmDigits";
+import { HostedShell } from "./HostedShell";
 import { NoPlanOffer } from "./NoPlanOffer";
 import type { Enrollment } from "./enrollment";
 import type { Notice, PageError } from "./settle";
 
 export const SUBSCRIBE_URL = "https://nedshed.dev/subscribe";
 const SELF_HOST_URL = "https://dormouse.sh/self-host/";
-
-/** The site header's own links (`NAV_LINKS` in website/src/lib/site-nav.ts),
- * absolute because this is another origin. Playground also gives way on a
- * phone, making room for the "Hosted" beside the wordmark. */
-const SITE_LINKS: readonly SiteNavLink[] = [
-  { href: "https://dormouse.sh/playground/", label: "Playground", hideOnMobile: true },
-  { href: "https://dormouse.sh/#download", label: "Download", hideOnMobile: true },
-  { href: "https://dormouse.sh/docs", label: "Docs" },
-  { href: "https://github.com/diffplug/dormouse", label: "GitHub", external: true },
-];
-
-const FOOTER_LINKS = [
-  ["https://dormouse.sh/security/", "Dormouse security"],
-  ["https://dormouse.sh/privacy/", "Privacy"],
-  ["https://dormouse.sh/terms/", "Terms"],
-] as const;
 
 const BUTTON_CLASS = siteButton({ tone: "neutral", size: "fit" });
 const TEXT_BUTTON_CLASS = `inline-flex min-h-11 items-center disabled:opacity-50 ${LINK_CLASS}`;
@@ -142,14 +123,7 @@ export function HostedPage({
   const voiceShown = !!hostedVoice && (hostedVoice.entitled || hostedVoice.on);
 
   return (
-    <div className="flex min-h-svh flex-col pt-16 md:pt-20" data-hosted-shell>
-      <SiteHeader
-        links={SITE_LINKS}
-        brandHref="https://dormouse.sh"
-        title="Hosted"
-        style={DOCS_HEADER_STYLE}
-      />
-      <main className="mx-auto w-full max-w-[33rem] flex-1 px-6 pt-12 pb-16">
+    <HostedShell themeControl={themeControl}>
         <h1 className={`mb-3 text-balance leading-tight ${PAGE_TITLE_CLASS}`}>
           {comingSoon
             ? "Coming soon"
@@ -645,19 +619,6 @@ export function HostedPage({
             )}
           </>
         )}
-      </main>
-      <footer className={`flex flex-wrap items-center gap-x-7 border-t border-[var(--color-text)]/15 px-4 pt-4 pb-6 text-sm md:px-8 ${MUTED_TEXT_CLASS}`}>
-        <span className="mr-auto py-2">Optional services. Your terminals run on your own computer.</span>
-        {FOOTER_LINKS.map(([href, label]) => (
-          <a key={href} href={href} rel="noreferrer" className={`inline-flex min-h-11 items-center ${MUTED_ACCENT_LINK_CLASS}`}>{label}</a>
-        ))}
-        {themeControl ? (
-          <div className="lg:hidden">
-            <DocsThemeControl variant="inline" offerStore={false} />
-          </div>
-        ) : null}
-      </footer>
-      {themeControl ? <DocsThemeControl offerStore={false} /> : null}
-    </div>
+    </HostedShell>
   );
 }

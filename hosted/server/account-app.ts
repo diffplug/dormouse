@@ -1,7 +1,9 @@
 import type { Context, ExecutionContext, Hono } from "hono";
-import { openAuthRead, ownPageRead } from "./account-gate";
+import { cookieAdmin, openAuthRead, ownPageRead } from "./account-gate";
 import type { AccountEnv } from "./bindings";
 import { accountRules } from "./headers";
+import { ADMIN_METRICS_PATH } from "./metric-labels";
+import { readMetrics } from "./metrics";
 import { relayAccountRoutes, type RelayAccountHost } from "./relay-account";
 import { relayRoom } from "./relay-room-contract";
 import { termsRoutes } from "./terms";
@@ -10,8 +12,8 @@ import { workerApp } from "./worker-app";
 
 /**
  * The account Worker (`hosted.dormouse.sh`): auth, providers, readiness,
- * terms acceptance, Natural Voice on or off, the Relay's account routes, and the
- * frontend. The production and preview entries differ only in `fetchAuth`'s
+ * terms acceptance, Natural Voice on or off, the Relay's account routes, the
+ * admin's metrics, and the frontend. The production and preview entries differ only in `fetchAuth`'s
  * mail and in `bindings`.
  */
 export function accountApp(
@@ -52,6 +54,9 @@ export function accountApp(
       termsRoutes(app, host);
       voiceAccountRoutes(app, host);
       relayAccountRoutes(app, host);
+      app.get(ADMIN_METRICS_PATH, cookieAdmin(host), async (c) =>
+        c.json(await readMetrics(c.env.HYPERDRIVE.connectionString)),
+      );
     },
     // Every desktop since v1.2.0 opens `/account` by a hard-coded path
     // (`ACCOUNT_PAGE_PATH`), which this SPA fallback answers.
