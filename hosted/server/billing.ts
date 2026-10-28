@@ -1,10 +1,11 @@
 // Rules: docs/specs/hosted.md -> "Billing".
 import { Billing, BillingError, Stripe, type BillingDB } from "@pgstencil/stripe";
-import { SecureRandom, SystemTime, type EmailSender } from "pgstencil";
+import { SecureRandom, SystemTime, type EmailSender, type Time } from "pgstencil";
 import { connectDatabase, queryDatabase } from "pgstencil/postgres";
 import { FOUNDING_COHORT_SIZE, FOUNDING_LADDER, LIST_ANNUAL, LIST_MONTHLY } from "../../website/src/lib/hosted-pricing";
 import type { BillingEnv } from "./bindings";
 import { grantsAccessSql } from "./entitlement";
+import { priceChanges, runNotices, usableChanges, type PriceChange } from "./notices";
 import { retryWithdrawals } from "./withdrawal";
 import { BILLING_PLANS, BILLING_RETURN_PATH } from "./policy-constants";
 
@@ -25,6 +26,8 @@ export interface BillingSetup {
   founding: readonly string[];
   /** StripeDev's client in place of Stripe's API, for tests and the dev loop; never from bindings. */
   stripe?: Stripe;
+  /** A test's clock in place of the system's; never from bindings. */
+  time?: Time;
 }
 
 const PRICE = /^price_[A-Za-z0-9_]{1,200}$/;
@@ -111,19 +114,32 @@ const random = new SecureRandom();
 
 /**
  * Runs `action` with a `Billing` over `databaseUrl` for the account origin
- * `origin`, closing its connections after. No trial; DiffPlug is the merchant
- * of record on Stripe Billing, never Managed Payments, with Stripe Tax on
- * every Checkout; founding checkout offers the open cohort's Price and
- * refuses once founding has closed.
+ * `origin`, and the scheduled price changes, closing its connections after.
+ * No trial; DiffPlug is the merchant of record on Stripe Billing, never
+ * Managed Payments, with Stripe Tax on every Checkout; founding checkout
+ * offers the open cohort's Price and refuses once founding has closed.
+ * Monthly and yearly checkout offer the configured Price, and each also
+ * grants the Prices its usable price changes move between.
  */
 export async function withBilling<T>(
   setup: BillingSetup,
   databaseUrl: string,
   origin: string,
-  action: (billing: Billing<Plan>) => Promise<T>,
+  action: (billing: Billing<Plan>, changes: readonly PriceChange[]) => Promise<T>,
 ): Promise<T> {
   const db = connectDatabase<BillingDB>(databaseUrl);
   try {
+    const changes = await priceChanges(db);
+    const { usable } = usableChanges(setup, changes);
+    const prices = (plan: "monthly" | "yearly") => ({
+      recognized: [
+        ...new Set([
+          setup[plan],
+          ...usable.filter((change) => change.plan === plan).flatMap((change) => [change.fromPriceId, change.toPriceId]),
+        ]),
+      ],
+      offer: () => setup[plan],
+    });
     const billing = new Billing<Plan>(
       db,
       setup.stripe ??
@@ -131,12 +147,12 @@ export async function withBilling<T>(
           httpClient: Stripe.createFetchHttpClient(),
           maxNetworkRetries: 1,
         }),
-      time,
+      setup.time ?? time,
       random,
       {
         prices: {
-          monthly: setup.monthly,
-          yearly: setup.yearly,
+          monthly: prices("monthly"),
+          yearly: prices("yearly"),
           founding: {
             recognized: setup.founding,
             async offer(billing) {
@@ -155,7 +171,7 @@ export async function withBilling<T>(
         returnPath: BILLING_RETURN_PATH,
       },
     );
-    return await action(billing);
+    return await action(billing, changes);
   } finally {
     await db.destroy();
   }
@@ -168,9 +184,10 @@ const RESYNC_OWNERS = 20;
  * The account Worker's Cron Trigger: reconciles up to {@link RESYNC_OWNERS}
  * random owners whose `active` or `trialing` row no longer grants access, so
  * a missed renewal webhook costs a member one run at most, then finishes
- * any withdrawal whose acknowledgement or settlement failed. Billing closed
- * does nothing. Every owner and withdrawal is tried; any failure fails the
- * invocation after.
+ * any withdrawal whose acknowledgement or settlement failed, then runs the
+ * subscription notices and the price changes they allow. Billing closed
+ * does nothing. Every owner, withdrawal, and notice is tried; any failure
+ * fails the invocation after.
  */
 export async function resyncBilling(
   setup: BillingSetup | null,
@@ -187,10 +204,11 @@ export async function resyncBilling(
     [RESYNC_OWNERS],
   );
   const failed: unknown[] = [];
-  await withBilling(setup, databaseUrl, origin, async (billing) => {
+  await withBilling(setup, databaseUrl, origin, async (billing, changes) => {
     for (const { owner } of due)
       await billing.reconcile(owner).catch((error: unknown) => failed.push(error));
     failed.push(...(await retryWithdrawals(billing, mail)));
+    failed.push(...(await runNotices(billing, setup, changes, mail)));
   });
   if (failed.length) throw new AggregateError(failed, `${failed.length} billing resyncs failed`);
 }

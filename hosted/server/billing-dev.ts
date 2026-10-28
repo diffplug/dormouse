@@ -9,12 +9,17 @@ export const DEV_FOUNDING_PRICES = FOUNDING_LADDER.map((price) => `price_foundin
 
 /**
  * StripeDev, a local Stripe stand-in that takes no card and charges nothing,
- * with the founding ladder's yearly Prices, and the billing setup that runs
- * on it.
+ * with the founding ladder's yearly Prices and any `recurring` beside them,
+ * and the billing setup that runs on it.
  */
-export async function stripeDevBilling(time: Time, random: RandomSource, statePath?: string) {
+export async function stripeDevBilling(
+  time: Time,
+  random: RandomSource,
+  statePath?: string,
+  recurring: Record<string, "month" | "year"> = {},
+) {
   const dev = await createStripeDev(time, random, statePath, {
-    recurring: Object.fromEntries(DEV_FOUNDING_PRICES.map((price) => [price, "year" as const])),
+    recurring: { ...Object.fromEntries(DEV_FOUNDING_PRICES.map((price) => [price, "year" as const])), ...recurring },
   });
   const setup: BillingSetup = {
     secretKey: "sk_test_dormouse_local_only",

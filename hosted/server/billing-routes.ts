@@ -11,6 +11,7 @@ import { CURRENT_STATUSES, ENDED_STATUSES, entitledSql, subscribedSql } from "./
 import { checkoutRef, type MetricEvent } from "./metric-labels";
 import { countMetricInTransaction, recordMetric } from "./metrics";
 import { BILLING_PLANS, CHECKOUT_CLOSED, PRICE_CHANGED, TERMS_VERSION, isFounderName } from "./policy-constants";
+import { priceUsd, sendNotices, type NoticeContext, type PriceChange } from "./notices";
 import { completeWithdrawal, recordWithdrawal, recordedWithdrawal, withdrawalOffer } from "./withdrawal";
 import { SUPPORT_EMAIL } from "../../website/src/lib/hosted-withdrawal";
 import type { EmailSender } from "pgstencil";
@@ -21,7 +22,7 @@ export { CHECKOUT_CLOSED, PRICE_CHANGED };
 export interface BillingHost extends AccountHost {
   /** The deployment's billing setup, null while billing is closed; throws when misconfigured. */
   setup(): BillingSetup | null;
-  /** The account's mail, which a withdrawal's acknowledgement goes out by. */
+  /** The account's mail, which a withdrawal's acknowledgement and a dispute's notices go out by. */
   mail(): EmailSender;
 }
 
@@ -75,13 +76,16 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
     bodyLimit({ maxSize, onError: (c) => c.json({ message: "Request too large." }, 413) });
 
   /** Runs `action` on this deployment's `Billing`: 503 while closed, a `BillingError` as its status. */
-  const billed = async (c: Context, action: (billing: Billing<Plan>, setup: BillingSetup) => Promise<Response>) => {
+  const billed = async (
+    c: Context,
+    action: (billing: Billing<Plan>, setup: BillingSetup, changes: readonly PriceChange[]) => Promise<Response>,
+  ) => {
     const deployment = host(c);
     const setup = deployment.setup();
     if (!setup) return c.json({ message: CHECKOUT_CLOSED }, 503);
     try {
-      return await withBilling(setup, deployment.databaseUrl, new URL(c.req.url).origin, (billing) =>
-        action(billing, setup),
+      return await withBilling(setup, deployment.databaseUrl, new URL(c.req.url).origin, (billing, changes) =>
+        action(billing, setup, changes),
       );
     } catch (error) {
       if (error instanceof BillingError) return c.json({ message: error.message }, error.status as 400);
@@ -90,7 +94,13 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
   };
 
   /** The account's plan, from the synchronized rows the webhook, confirm, and resync keep current. */
-  const summary = async (c: Context, billing: Billing<Plan>, setup: BillingSetup, userId: string) => {
+  const summary = async (
+    c: Context,
+    billing: Billing<Plan>,
+    setup: BillingSetup,
+    changes: readonly PriceChange[],
+    userId: string,
+  ) => {
     const [status, [account], founding] = await Promise.all([
       billing.status(userId),
       accountQuery<{
@@ -130,7 +140,7 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
         : null;
     return c.json({
       plan: held ? status.plan : null,
-      price: held ? publishedPrice(setup, status.subscription!.price_id) : null,
+      price: held ? priceUsd(setup, changes, status.subscription!.price_id) : null,
       active: status.access,
       until: held ? status.accessUntil : null,
       renews: held && !status.subscription!.cancel_at_period_end,
@@ -151,7 +161,7 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
   };
 
   app.get("/api/billing", gate, (c) =>
-    billed(c, (billing, setup) => summary(c, billing, setup, c.get("login").userId)),
+    billed(c, (billing, setup, changes) => summary(c, billing, setup, changes, c.get("login").userId)),
   );
 
   app.post("/api/billing/checkout", limit(JSON_BODY_BYTES), gate, async (c) => {
@@ -206,9 +216,9 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
     const checkout = (await readJson<{ checkout?: unknown }>(c))?.checkout;
     if (typeof checkout !== "string" || !CHECKOUT_ID.test(checkout))
       return c.json({ message: "Checkout not found." }, 404);
-    return billed(c, async (billing, setup) => {
+    return billed(c, async (billing, setup, changes) => {
       await billing.confirmCheckout(userId, checkout);
-      return summary(c, billing, setup, userId);
+      return summary(c, billing, setup, changes, userId);
     });
   });
 
@@ -226,7 +236,7 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
     const subscription = (await readJson<{ subscription?: unknown }>(c))?.subscription;
     if (typeof subscription !== "string" || !SUBSCRIPTION_ID.test(subscription))
       return c.json({ message: "Choose the contract to withdraw from." }, 400);
-    return billed(c, async (billing, setup) => {
+    return billed(c, async (billing, setup, changes) => {
       let row = await recordedWithdrawal(billing, userId, subscription);
       if (!row) {
         const { subscription: held, plan } = await billing.status(userId);
@@ -237,7 +247,7 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
       await completeWithdrawal(billing, () => host(c).mail(), row).catch((error: unknown) =>
         console.error(`Withdrawal ${row.id} is recorded but not complete; the cron retries it`, error),
       );
-      return summary(c, billing, setup, userId);
+      return summary(c, billing, setup, changes, userId);
     });
   });
 
@@ -250,7 +260,7 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
     const name = body?.name;
     if (typeof shown !== "boolean" || (shown && !isFounderName(name)))
       return c.json({ message: "Choose a name of 1 to 64 characters." }, 400);
-    return billed(c, async (billing, setup) => {
+    return billed(c, async (billing, setup, changes) => {
       if (!shown) await accountQuery(host(c), `DELETE FROM dormouse_founders WHERE "userId" = $1`, [userId]);
       else {
         const joined = await accountQuery(
@@ -263,7 +273,7 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
         );
         if (!joined.length) return c.json({ message: FOUNDERS_ONLY }, 409);
       }
-      return summary(c, billing, setup, userId);
+      return summary(c, billing, setup, changes, userId);
     });
   });
 
@@ -273,8 +283,8 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
     const signature = c.req.header("stripe-signature");
     if (!signature) return c.json({ message: "Missing signature." }, 400);
     const body = await c.req.text();
-    return billed(c, async (billing) => {
-      await processEvent(billing, body, signature);
+    return billed(c, async (billing, setup, changes) => {
+      await processEvent(billing, body, signature, () => host(c).mail(), { setup, changes, origin: new URL(c.req.url).origin });
       return c.json({ received: true });
     });
   });
@@ -294,11 +304,18 @@ async function ownerOf(billing: Billing<Plan>, customer: string | Stripe.Custome
 
 /**
  * One verified event: pgstencil's synchronization, and in its transaction
- * the counts and dispute suspensions, so a redelivery repeats neither. A full
- * refund or a lost dispute then ends the subscription in Stripe, after the
- * commit and on every delivery until it has.
+ * the counts, dispute suspensions, and their notices' records, so a
+ * redelivery repeats none. A full refund or a lost dispute then ends the
+ * subscription in Stripe, after the commit and on every delivery until it
+ * has; a dispute's notice is then sent, and the cron retries one that fails.
  */
-async function processEvent(billing: Billing<Plan>, body: string, signature: string) {
+async function processEvent(
+  billing: Billing<Plan>,
+  body: string,
+  signature: string,
+  mail: () => EmailSender,
+  context: NoticeContext,
+) {
   const event = await billing.verifyWebhook(body, signature);
   // A dispute names no customer, and its event may be stale: read its current
   // status and its charge from Stripe, before any write.
@@ -329,11 +346,14 @@ async function processEvent(billing: Billing<Plan>, body: string, signature: str
           plan,
         );
     }
-    if (dispute?.owner) await recordDispute(trx, dispute.id, dispute.owner, dispute.action);
+    if (dispute?.owner) await recordDispute(trx, dispute.id, dispute.owner, dispute.action, billing.time.now());
   });
   const refunded = event.type === "charge.refunded" ? (event.data.object as Stripe.Charge) : null;
   const reversed = refunded?.refunded ? refunded : dispute?.action === "end" ? dispute.charge : null;
   if (reversed) await endForRefund(billing, reversed);
+  if (dispute?.owner)
+    for (const error of await sendNotices(billing, mail, context, { userId: dispute.owner }))
+      console.error("A dispute notice is recorded but not sent; the cron retries it", error);
 }
 
 /**
@@ -357,24 +377,45 @@ async function subscriptionPaidBy(billing: Billing<Plan>, charge: Stripe.Charge)
   return paid.size === 1 ? [...paid][0]! : null;
 }
 
-/** Opens or closes dispute `disputeId`'s suspension of `owner`, as `action` says. */
+/**
+ * Opens or closes dispute `disputeId`'s suspension of `owner`, as `action`
+ * says, recording the notice it owes in the same statement: opening it, its
+ * suspension notice; closing it in the account's favor, its restoration
+ * notice, unless another open dispute still suspends the account.
+ */
 async function recordDispute(
   trx: Kysely<BillingDB>,
   disputeId: string,
   owner: string,
   action: ReturnType<typeof disputeAction>,
+  now: Date,
 ) {
   if (action === "suspend")
     await trx.executeQuery(
       CompiledQuery.raw(
-        `INSERT INTO public.dormouse_billing_disputes ("disputeId", "userId") VALUES ($1, $2)
-        ON CONFLICT ("disputeId") DO NOTHING`,
-        [disputeId, owner],
+        `WITH opened AS (
+          INSERT INTO public.dormouse_billing_disputes ("disputeId", "userId") VALUES ($1, $2)
+          ON CONFLICT ("disputeId") DO NOTHING RETURNING "userId")
+        INSERT INTO public.dormouse_billing_notices (id, "userId", kind, "disputeId", "createdAt")
+        SELECT gen_random_uuid()::text, "userId", 'dispute_suspended', $1, $3 FROM opened
+        ON CONFLICT DO NOTHING`,
+        [disputeId, owner, now],
       ),
     );
   else if (action)
+    // The statement reads the table as it was before its own delete.
     await trx.executeQuery(
-      CompiledQuery.raw(`DELETE FROM public.dormouse_billing_disputes WHERE "disputeId" = $1`, [disputeId]),
+      CompiledQuery.raw(
+        `WITH closed AS (
+          DELETE FROM public.dormouse_billing_disputes WHERE "disputeId" = $1 RETURNING "userId")
+        INSERT INTO public.dormouse_billing_notices (id, "userId", kind, "disputeId", "createdAt")
+        SELECT gen_random_uuid()::text, "userId", 'dispute_restored', $1, $2 FROM closed
+        WHERE $3 AND NOT EXISTS (
+          SELECT FROM public.dormouse_billing_disputes other
+          WHERE other."userId" = closed."userId" AND other."disputeId" <> $1)
+        ON CONFLICT DO NOTHING`,
+        [disputeId, now, action === "restore"],
+      ),
     );
 }
 

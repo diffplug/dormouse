@@ -3,18 +3,44 @@ import type { AddressInfo } from "node:net";
 import { once } from "node:events";
 import { STRIPE_API_VERSION, Stripe } from "@pgstencil/stripe";
 import type { RandomSource, Time } from "pgstencil";
+import { LIST_ANNUAL, LIST_MONTHLY } from "../../../website/src/lib/hosted-pricing";
 import { stripeDevBilling } from "../billing-dev";
+
+/** The Prices the tests' price changes move monthly and yearly subscribers to, and what they charge. */
+export const CHANGED_PRICES = { monthly: "price_dev_monthly_next", yearly: "price_dev_yearly_next" } as const;
+export const CHANGED_USD = { monthly: 12, yearly: 120 } as const;
 
 /**
  * StripeDev behind a proxy that adds what billing's refund, dispute, and
- * withdrawal handling call and StripeDev does not model: a dispute's
- * retrieval, with its charge expanded, a subscription's immediate
- * cancellation, a customer's retrieval with its billing country, a
- * subscription's paid invoices and their payments, and refunds. Every other
+ * withdrawal handling, and the price changes, call and StripeDev does not
+ * model: a dispute's retrieval, with its charge expanded, a subscription's
+ * immediate cancellation, retrieval, and move to another Price, a
+ * customer's retrieval with its billing country, a subscription's paid
+ * invoices and their payments, refunds, and a Price's retrieval. Every other
  * request reaches StripeDev unchanged.
  */
 export async function stripeFake(time: Time, random: RandomSource) {
-  const { dev, setup: devSetup } = await stripeDevBilling(time, random);
+  const { dev, setup: devSetup } = await stripeDevBilling(time, random, undefined, {
+    [CHANGED_PRICES.monthly]: "month",
+    [CHANGED_PRICES.yearly]: "year",
+  });
+  /** Price id → what Stripe holds for it; tests may change an entry. */
+  const prices = new Map<string, { usd: number; interval: "month" | "year" }>([
+    [devSetup.monthly, { usd: LIST_MONTHLY, interval: "month" }],
+    [devSetup.yearly, { usd: LIST_ANNUAL, interval: "year" }],
+    [CHANGED_PRICES.monthly, { usd: CHANGED_USD.monthly, interval: "month" }],
+    [CHANGED_PRICES.yearly, { usd: CHANGED_USD.yearly, interval: "year" }],
+  ]);
+  /** Each subscription a checkout completed, as StripeDev holds it: changing one changes StripeDev's. */
+  const live = new Map<string, Stripe.Subscription>();
+  const complete = dev.completeCheckout;
+  dev.completeCheckout = (sessionId: string) => {
+    const subscription = complete(sessionId);
+    live.set(subscription.id, subscription);
+    return subscription;
+  };
+  /** Each move to another Price billing asked for: the subscription, the Price, and the proration. */
+  const moves: { subscription: string; price: string; proration: string | null }[] = [];
   /** Dispute id → its current status, and its charge's customer and PaymentIntent. */
   const disputes = new Map<string, { status: string; customer: string; paymentIntent: string }>();
   /** PaymentIntent id → the subscription whose invoice it paid. */
@@ -102,7 +128,35 @@ export async function stripeFake(time: Time, random: RandomSource) {
           : [],
       });
     }
+    const price = /^\/v1\/prices\/([^/]+)$/.exec(url.pathname);
+    if (price && req.method === "GET") {
+      const found = prices.get(price[1]!);
+      if (!found) return json(404, { error: { message: "No such price" } });
+      return json(200, {
+        id: price[1],
+        object: "price",
+        currency: "usd",
+        unit_amount: found.usd * 100,
+        livemode: false,
+        recurring: { interval: found.interval, interval_count: 1 },
+      });
+    }
     const subscription = /^\/v1\/subscriptions\/([^/]+)$/.exec(url.pathname);
+    if (subscription && req.method === "GET") {
+      const found = live.get(subscription[1]!);
+      return found ? json(200, found) : json(404, { error: { message: "No such subscription" } });
+    }
+    if (subscription && req.method === "POST") {
+      const found = live.get(subscription[1]!);
+      if (!found) return json(404, { error: { message: "No such subscription" } });
+      const body = new URLSearchParams(raw);
+      const item = found.items.data[0]!;
+      if (body.get("items[0][id]") !== item.id) return json(400, { error: { message: "No such item" } });
+      const to = body.get("items[0][price]")!;
+      moves.push({ subscription: found.id, price: to, proration: body.get("proration_behavior") });
+      item.price = { id: to } as Stripe.Price;
+      return json(200, found);
+    }
     if (subscription && req.method === "DELETE") {
       if (failing.cancels > 0) {
         failing.cancels--;
@@ -154,7 +208,7 @@ export async function stripeFake(time: Time, random: RandomSource) {
     }) as unknown as Stripe.Event;
   return {
     dev,
-    setup: { ...devSetup, stripe },
+    setup: { ...devSetup, stripe, time },
     origin,
     disputes,
     paidInvoices,
@@ -162,6 +216,8 @@ export async function stripeFake(time: Time, random: RandomSource) {
     countries,
     refunds,
     failing,
+    prices,
+    moves,
     event,
     close: async () => {
       server.close();
