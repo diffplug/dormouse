@@ -134,7 +134,7 @@ Source of truth: `DOCS_PAGES` in `website/src/lib/docs-pages.ts`; `DocsLayout` i
 
 **Must open `/self-host` with the Relay boundary:** Dormouse needs none; a new install opens no connection on its own (`docs/specs/remote-network.md` -> "Policy"); push and a paired phone need a Relay, and a one-time connection only Hosted's rendezvous of its handshake; it links `/hosted`. `/hosted`'s Hosted Relay section discloses metadata, labels the review pending, and links the model. `website/src/lib/docs-rail.test.tsx` pins both.
 
-**Must also link it from** Pocket marketing/tutorial, self-host docs, and the speech and remote-control settings; `linkedFrom` owns the rest.
+**Must also link it from** Pocket marketing/tutorial, self-host docs, and the settings where an account has no plan (`docs/specs/alert.md` -> "Settings dialog"); `linkedFrom` owns the rest.
 
 Source of truth: `Hosted` in `website/src/pages/Hosted.tsx`; `HostingRequirementNotice` in `website/src/components/HostingRequirementNotice.tsx`.
 
