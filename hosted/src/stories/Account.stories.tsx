@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { expect, fn } from "storybook/test";
 import { providers } from "../api";
-import { hostedMeta, SESSION, ACCOUNT, COMPUTERS, PASSKEYS } from "./fixtures";
+import { hostedMeta, SESSION, ACCOUNT, COMPUTERS, PASSKEYS, NO_PLAN, FOUNDING } from "./fixtures";
 import { settledFrame } from "./canvas";
 
 const meta = {
@@ -52,3 +52,18 @@ export const RemoveActions: Story = {
     canvas.document.defaultView!.scrollTo(0, 0);
   },
 };
+export const PlanNone: Story = { args: { ...ACCOUNT, billing: NO_PLAN } };
+export const PlanFounding: Story = { args: { ...ACCOUNT, billing: FOUNDING } };
+export const PlanFounderShown: Story = { args: { ...ACCOUNT, billing: { ...FOUNDING, founder: { offered: true, name: "Alex" } } } };
+export const PlanEnding: Story = { args: { ...ACCOUNT, billing: { ...FOUNDING, renews: false } } };
+/** A failed renewal keeps Manage billing, so the card can be fixed. */
+export const PlanPaymentFailed: Story = {
+  args: { ...ACCOUNT, billing: { ...FOUNDING, active: false, entitled: false, founder: { offered: false, name: null } } },
+};
+export const PlanPaymentFailedComp: Story = {
+  args: { ...ACCOUNT, billing: { ...FOUNDING, active: false, founder: { offered: false, name: null } } },
+};
+export const PlanSuspended: Story = { args: { ...ACCOUNT, billing: { ...FOUNDING, entitled: false, suspended: true } } };
+export const PlanComp: Story = { args: { ...ACCOUNT, billing: { ...NO_PLAN, entitled: true } } };
+export const LapsedFounder: Story = { args: { ...ACCOUNT, billing: { ...NO_PLAN, founder: { offered: false, name: "Alex" } } } };
+export const PlanPhone: Story = { args: { ...ACCOUNT, billing: FOUNDING, phone: true } };

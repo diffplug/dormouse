@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { expect, fn } from "storybook/test";
-import { hostedMeta, SESSION, ACCOUNT, ENROLLMENT } from "./fixtures";
+import { hostedMeta, SESSION, ACCOUNT, ENROLLMENT, NO_PLAN } from "./fixtures";
 import { settledFrame } from "./canvas";
 
 const meta = {
@@ -23,6 +23,14 @@ export const NoPlan: Story = {
   },
 };
 export const NoPlanVoice: Story = { args: { ...Voice.args, noPlan: true } };
+/** Billing open: the plans link opens checkout on this origin, in another tab. */
+export const NoPlanCheckoutOpen: Story = {
+  args: { noPlan: true, billing: NO_PLAN },
+  play: async ({ canvasElement }) => {
+    const canvas = await settledFrame(canvasElement);
+    await expect(canvas.getByRole("link", { name: "See Hosted plans" })).toHaveAttribute("href", "/checkout?ref=hosted-no-plan");
+  },
+};
 export const InvalidLink: Story = { args: { enrolling: { code: null } } };
 export const InvalidLinkSignedOut: Story = { args: { session: null, enrolling: { code: null } } };
 export const Approving: Story = { args: { busy: "approve" } };

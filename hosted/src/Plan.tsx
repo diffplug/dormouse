@@ -97,7 +97,7 @@ export function FoundersOptIn({
       )}
       <p className={`mt-3 ${HELP_CLASS}`}>
         {valid
-          ? "The row shows this name and your profile picture, if you have one. Untick to leave it at any time."
+          ? "The row shows the name you choose and your profile picture, if you have one. Untick to leave it at any time."
           : "Use 1 to 64 characters."}
       </p>
       <button className={BUTTON_CLASS} type="submit" disabled={!!busy || !valid || unchanged}>
