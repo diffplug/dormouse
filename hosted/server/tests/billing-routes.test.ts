@@ -25,7 +25,6 @@ import { entitledSql } from "../entitlement";
 import { ENDED_FOR_WITHDRAWAL, WITHDRAWAL_OPEN_DAYS } from "../withdrawal";
 import { migrations } from "../migrations";
 import { DEV_FOUNDING_PRICES } from "../billing-dev";
-import { PRICE_NOTICE_DAYS, PRICE_NOTICE_MIN_DAYS, RENEWAL_NOTICE_DAYS } from "../notices";
 import { TERMS_VERSION } from "../policy-constants";
 import { ORIGINS } from "./bundle";
 import { CHANGED_PRICES, CHANGED_USD, stripeFake } from "./stripe-fake";
@@ -857,6 +856,10 @@ test("with billing closed, closing deletes an account without a subscription and
 });
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+/** The schedule the Terms and pricing.md promise: renewal notices 30 days ahead, price changes 21, and never under 7. */
+const RENEWAL_NOTICE_DAYS = 30;
+const PRICE_NOTICE_DAYS = 21;
+const PRICE_NOTICE_MIN_DAYS = 7;
 
 test("a renewal notice and a monthly plan's annual reminder go out once, 30 days ahead, to the billing email", async ({
   onTestFinished,
@@ -939,7 +942,17 @@ test("a price change applies only from a renewal its notice reached at least 7 d
   await expect(resync()).rejects.toThrow(AggregateError);
   expect([await notices(), f.email.all(), f.moves]).toEqual([[], [], []]);
 
-  // A notice that went out too late is never acted on.
+  // A notice that went out too late is never acted on, and one not yet sent
+  // when its renewal is under 8 days off never goes out.
+  const late = await f.account();
+  const { subscription: lateSubscription } = await f.buy(late, "monthly");
+  const soon = new Date(f.time.now().getTime() + 6 * DAY_MS);
+  await f.sql(`UPDATE pgstencil_billing.subscriptions SET period_end = $2 WHERE id = $1`, [lateSubscription.id, soon]);
+  await f.sql(
+    `INSERT INTO dormouse_billing_notices (id, "userId", kind, "subscriptionId", "renewsAt", "priceChangeId", "createdAt")
+    VALUES ('unsent', $1, 'price_change', $2, $3, 'monthly-12', $4)`,
+    [late.id, lateSubscription.id, soon, f.time.now()],
+  );
   await f.sql(
     `INSERT INTO dormouse_billing_notices (id, "userId", kind, "subscriptionId", "renewsAt", "priceChangeId", "createdAt", email, "sentAt")
     VALUES ('late', $1, 'price_change', $2, $3, 'monthly-12', $4, 'x@example.test', $4)`,
@@ -949,6 +962,7 @@ test("a price change applies only from a renewal its notice reached at least 7 d
   await resync();
   expect([f.email.all(), f.moves]).toEqual([[], []]);
   await f.sql(`DELETE FROM dormouse_billing_notices`);
+  await f.sql(`UPDATE pgstencil_billing.subscriptions SET status = 'canceled' WHERE id = $1`, [lateSubscription.id]);
 
   // In time: noticed 20 days ahead, then moved to the new Price without proration.
   await resync();
@@ -1011,17 +1025,19 @@ test("a dispute's suspension and restoration are each emailed once to the billin
   expect(subjects()).toHaveLength(2);
   expect(await f.sql(`SELECT kind FROM dormouse_billing_notices WHERE "sentAt" IS NULL`)).toEqual([]);
 
-  // A restoration whose send fails stands recorded, and the cron sends it.
+  // A notice whose send fails stands recorded, and the cron sends it while
+  // it still holds: a suspension only while its dispute is open.
   const other = await f.account();
   const { session: otherSession } = await f.buy(other, "monthly");
+  const unsent = () => f.sql(`SELECT kind FROM dormouse_billing_notices WHERE "sentAt" IS NULL ORDER BY kind`);
   f.disputes.set("du_back", { status: "needs_response", customer: otherSession.customer as string, paymentIntent: "pi_du_back" });
+  f.mailing.failures = 2;
   expect((await f.send(f.event("charge.dispute.created", { id: "du_back", object: "dispute" }))).status).toBe(200);
   f.disputes.set("du_back", { status: "won", customer: otherSession.customer as string, paymentIntent: "pi_du_back" });
-  f.mailing.failures = 1;
   expect((await f.send(f.event("charge.dispute.closed", { id: "du_back", object: "dispute" }))).status).toBe(200);
-  expect(await f.sql(`SELECT kind FROM dormouse_billing_notices WHERE "sentAt" IS NULL`)).toEqual([{ kind: "dispute_restored" }]);
+  expect([f.mailing.failures, await unsent()]).toEqual([0, [{ kind: "dispute_restored" }, { kind: "dispute_suspended" }]]);
   f.time.advanceMilliseconds(10 * 60 * 1000);
   await resyncBilling(f.setup, f.database.url, origin, f.mail);
-  expect(f.email.all().at(-1)!.subject).toBe("Your Dormouse Hosted access is restored");
-  expect(await f.sql(`SELECT kind FROM dormouse_billing_notices WHERE "sentAt" IS NULL`)).toEqual([]);
+  expect(subjects().slice(2)).toEqual([[f.dev.customers.get(otherSession.customer as string)!.email, "Your Dormouse Hosted access is restored"]]);
+  expect(await unsent()).toEqual([{ kind: "dispute_suspended" }]);
 });
