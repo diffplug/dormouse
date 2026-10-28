@@ -105,6 +105,9 @@ const FORMS = [
   { label: 'window.open', re: /\bwindow\s*\.\s*open\s*\(/ },
   { label: 'remote Worker', re: /\bnew\s+(?:Shared)?Worker\s*\(\s*(?!new\s+URL\s*\(\s*['"`]\.{1,2}\/)/ },
   { label: 'importScripts', re: /\bimportScripts\s*\(/ },
+  // Never classifiable: Dormouse sends no usage telemetry, and the website alone
+  // runs visit analytics (docs/specs/security-local.md -> "Network policy").
+  { label: 'analytics SDK', re: /['"]posthog-js(?:\/[^'"]*)?['"]/, never: true },
   // Matched by remoteHosts(), not by `re`; listed so the self-test requires its fixture.
   { label: 'remote URL literal', re: null },
 ];
@@ -546,6 +549,14 @@ for (const rel of trackedFiles().filter(isShippedSource)) {
 
   if (hits.length === 0) continue;
   inventory.push({ rel, hits });
+  const never = hits.find((h) => h.form.never);
+  if (never) {
+    problems.push(
+      `${rel}:${never.line}: spells ${never.form.label}, which no OUTBOUND_SITES class admits.\n`
+      + '      Dormouse sends no usage telemetry; visit analytics belong to website/ alone\n'
+      + '      (docs/specs/security-local.md -> "Network policy").',
+    );
+  }
   const entry = OUTBOUND_SITES[rel];
   if (!entry) {
     problems.push(

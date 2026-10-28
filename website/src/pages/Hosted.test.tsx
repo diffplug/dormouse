@@ -9,6 +9,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("../components/SiteHeader", () => ({ default: () => <header />, STATIC_PAGE_HEADER_STYLE: {} }));
 vi.mock("dormouse-lib/site/DocsThemeControl", () => ({ default: () => null }));
 vi.mock("dormouse-lib/site/docs-paint", () => ({ useDocsThemedBody: () => {}, DOCS_HEADER_STYLE: {}, DOCS_PAINT_PROFILE: {} }));
+const analytics = vi.hoisted(() => ({ trackPageview: vi.fn(), trackEvent: vi.fn() }));
+vi.mock("../lib/site-analytics", () => analytics);
 
 const { default: Hosted } = await import("./Hosted");
 const { COHORT_ENDPOINT, MAX_SHOWN_FOUNDERS } = await import("../lib/hosted-cohorts");
@@ -47,6 +49,8 @@ afterEach(() => {
   root = null;
   container = null;
   vi.unstubAllGlobals();
+  analytics.trackPageview.mockClear();
+  analytics.trackEvent.mockClear();
 });
 
 describe("what the Hosted page prerenders", () => {
@@ -152,6 +156,22 @@ describe("a visit's ref", () => {
       root = null;
     }
   });
+
+  it("goes onto the page's one pageview, an unlisted value as other", async () => {
+    for (const [arrived, ref] of [
+      ["/hosted/?ref=settings-voice#voice", "settings-voice"],
+      ["/hosted/?ref=someone%40example.test", "other"],
+      ["/hosted/", null],
+    ]) {
+      history.replaceState(null, "", arrived);
+      await mount(async () => new Response("{}", { status: 404 }));
+      expect(analytics.trackPageview.mock.calls).toEqual([[ref]]);
+      analytics.trackPageview.mockClear();
+      act(() => root?.unmount());
+      container?.remove();
+      root = null;
+    }
+  });
 });
 
 /** Mounts the page with the cohort endpoint answering `body`. */
@@ -249,6 +269,11 @@ describe("the buy buttons", () => {
     expect(dialog?.textContent).toContain("Checkout is not wired up yet");
     expect(dialog?.textContent).toContain(HOSTED_MONTHLY.name);
     expect(dialog?.textContent).toContain("You have not been charged");
+  });
+
+  it("count the click, naming the plan", async () => {
+    await openFirst();
+    expect(analytics.trackEvent.mock.calls).toEqual([[{ name: "hosted plan clicked", plan: HOSTED_MONTHLY.id }]]);
   });
 
   it("close on Escape", async () => {

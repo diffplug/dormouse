@@ -11,7 +11,7 @@
 
 **Settings is the front door.** A Hosted build turns on managed voice and the Hosted Relay there, and an account with no plan is linked to `#pricing` from Settings and the baseboard alarm buttons (`docs/specs/alert.md` -> "Settings dialog"); the Pocket playground tutorial lands on `/hosted#remote-control`. `#pricing` (the plan cards, which each JSON-LD `Offer` url names), `#remote-control`, and `#voice` keep resolving as section ids.
 
-**Must give every link to the page a `?ref=` from `HOSTED_REFS`, one per link, ahead of its fragment, and strip it from the address bar on arrival**, so a copied link never carries it. Nothing counts or sends it yet; `takeVisitRef` answers it, an unlisted value as `other`, for whatever will. Source of truth: `lib/src/lib/hosted-links.ts`; `takeVisitRef` in `website/src/lib/hosted-ref.ts`.
+**Must give every link to the page a `?ref=` from `HOSTED_REFS`, one per link, ahead of its fragment, and strip it from the address bar on arrival**, so a copied link never carries it. `takeVisitRef` answers it, an unlisted value as `other`, and the page's pageview carries it (`docs/specs/website-docs.md` -> "Visit analytics"). Source of truth: `lib/src/lib/hosted-links.ts`; `takeVisitRef` in `website/src/lib/hosted-ref.ts`.
 
 **Prices, inclusions, and the FAQ are prerendered text**, and the page emits `Product` / `Offer` JSON-LD carrying one `Offer` per paid plan at its current price, so an assistant fetching the page can quote it. **Offers stay `PreOrder` while checkout is unbuilt.**
 

@@ -1,13 +1,16 @@
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import {
   Links,
   Meta,
   Outlet,
   Scripts,
   ScrollRestoration,
+  useLocation,
+  useMatches,
   type MetaArgs,
 } from "react-router";
 import { siteMeta } from "./lib/site-meta";
+import { trackPageview, type SiteRouteHandle } from "./lib/site-analytics";
 import { FONT_READY_SCRIPT, FONT_READY_STYLE } from "./lib/font-ready";
 import bodyFont from "@fontsource/ubuntu-mono/files/ubuntu-mono-latin-400-normal.woff2?url";
 import displayFont from "@fontsource/ubuntu-sans-mono/files/ubuntu-sans-mono-latin-400-normal.woff2?url";
@@ -54,6 +57,16 @@ export function Layout({ children }: { children: ReactNode }) {
   );
 }
 
+/** One pageview per path, unless the route sends its own (`SiteRouteHandle`). */
+function usePageviews() {
+  const { pathname } = useLocation();
+  const ownPageview = useMatches().some((match) => (match.handle as SiteRouteHandle | undefined)?.ownPageview);
+  useEffect(() => {
+    if (!ownPageview) trackPageview();
+  }, [pathname, ownPageview]);
+}
+
 export default function Root() {
+  usePageviews();
   return <Outlet />;
 }
