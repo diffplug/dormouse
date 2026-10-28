@@ -4,7 +4,7 @@ import { SecondsField, SwitchRow } from './AlarmSettingsControls';
 import { ScrollFades } from './ScrollFades';
 import type { AlertSink } from '../lib/alert-delivery-model';
 import { useWorkspaceAlertPolicy } from './wall/use-workspace-alert-policy';
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import {
   ELEVATED_PANE_SHADOW,
   MODAL_OVERLAY_INSET,
@@ -20,9 +20,11 @@ import { ThemePicker } from './ThemePicker';
 import { ShellPicker } from './ShellPicker';
 import { WatchedCommandList } from './WatchedCommandList';
 import { NetworkPhones, NetworkSettings, NetworkUpdates } from './NetworkSettings';
-import { useNetworkPolicy } from './remote-control-shared';
+import { hostOf, useNetworkPolicy } from './remote-control-shared';
 import { PushTestButton, SpeakTestButton } from './AlarmTestButtons';
-import { HOSTED_VOICE_URL } from './HostedEnrollment';
+import { HOSTED_VOICE_URL, HostedPlansLink } from './HostedEnrollment';
+import { relayRefuses, type BurrowConsoleStatus } from '../host/remote/service-protocol';
+import { getBurrowStatusSnapshot, subscribeToBurrowStatus } from '../remote/burrow/burrow-status-store';
 import { ManagedVoiceSection, NetworkTopicLink, useManagedVoiceOffered } from './ManagedVoiceSection';
 import { getPlatform } from '../lib/platform';
 import { getShellsSnapshot, subscribeToShells } from '../lib/shell-store';
@@ -52,12 +54,22 @@ const PICKER_ROW = 'flex items-center gap-1.5 text-sm text-foreground [&>div]:mi
  * separate argument — see the comment on that branch below. The network
  * policy's Nothing, which sends none, is the caller's line (`AlarmSettingsSection`).
  *
+ * A Relay that refuses this Burrow is checked first, from the Burrow's own
+ * status: the Burrow then asks it nothing (`relayRefuses`), so the list reads
+ * `no-burrow` — or `error`, from a fetch that met the refusal before it
+ * latched — and neither names why no push is sent.
+ *
  * The list is deliberately scoped to *this* machine, not the account: the ACL
  * that authorizes these devices lives on the Burrow and never on the Relay
  * (`docs/specs/remote-security-model.md`), so there is no account-wide device
  * list to show and the copy must not imply one.
  */
-function describePushTargets(push: PushDevicesState, remoteControlBelow: boolean): string {
+function describePushTargets(
+  push: PushDevicesState,
+  burrow: BurrowConsoleStatus | null,
+  remoteControlBelow: boolean,
+): ReactNode {
+  if (burrow && relayRefuses(burrow.connection)) return describeRefusal(burrow, remoteControlBelow);
   if (push.status === 'loading') return 'Looking for phones…';
   if (push.status === 'error') return 'Could not reach the Relay to list phones.';
   // The preview never shows Remote control, so it also omits "below".
@@ -81,6 +93,24 @@ function describePushTargets(push: PushDevicesState, remoteControlBelow: boolean
     return 'No paired phone has turned push notifications on in Dormouse Pocket yet.';
   }
   return `Push will be sent to ${push.devices.map((device) => device.label).join(', ')}`;
+}
+
+/**
+ * Why a refusing Relay sends no push, and the way back: the plans for an
+ * account with none, otherwise enrolling again under the persistent Relay's
+ * heading in Remote control. A self-host build's line never names Hosted.
+ */
+function describeRefusal(status: BurrowConsoleStatus, remoteControlBelow: boolean): ReactNode {
+  const where = remoteControlBelow ? 'below' : 'in Settings → Network';
+  if (status.relayMode === 'self-host') {
+    return `${hostOf(status.relayOrigin)} no longer accepts this computer, so no push is sent. ` +
+      `Disconnect and enroll it again under Persistent Relay ${where}.`;
+  }
+  if (status.connection === 'not-entitled') {
+    return <>Your account has no Hosted plan, so no push is sent. <HostedPlansLink /></>;
+  }
+  return `This computer was removed from your Hosted account, so no push is sent. ` +
+    `Enroll it again under Hosted Relay ${where}.`;
 }
 
 const TOPICS = [
@@ -440,7 +470,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                 </div>
               </section>
             </TopicSection>
-            {/* Network stays below push, whose `no-burrow` copy says "below". */}
+            {/* Network stays below push, whose `no-burrow` and refusal copy say "below". */}
             <TopicSection id="network" hidden={!visible('network')}>
               <div data-setting="network" hidden={!matches('network')}>
                 <NetworkSettings />
@@ -488,7 +518,6 @@ export function AlarmSettingsSection({ sink, preview = false, onShowNetwork }: {
 }) {
   // The dialog edits application defaults; only the baseboard preview shows the Workspace's effective value.
   const { policy: settings } = useWorkspaceAlertPolicy(preview);
-  const push = useSyncExternalStore(subscribeToPushDevices, getPushDevices);
   const hasBurrowService = getPlatform().burrow !== undefined;
   const managedVoiceOffered = useManagedVoiceOffered();
   // Under Nothing the service sends no push and managed voice asks nothing
@@ -549,10 +578,20 @@ export function AlarmSettingsSection({ sink, preview = false, onShowNetwork }: {
       {networkOff ? (
         <>Push is off while <NetworkTopicLink onShow={onShowNetwork} /> is set to Nowhere.</>
       ) : (
-        describePushTargets(push, hasBurrowService && !preview)
+        <PushTargets remoteControlBelow={hasBurrowService && !preview} />
       )}
     </AlarmSinkSection>
   );
+}
+
+/**
+ * {@link describePushTargets} over the live stores: its own component so only
+ * the push sink, not speech, keeps the Burrow status polled.
+ */
+function PushTargets({ remoteControlBelow }: { remoteControlBelow: boolean }) {
+  const push = useSyncExternalStore(subscribeToPushDevices, getPushDevices);
+  const burrow = useSyncExternalStore(subscribeToBurrowStatus, getBurrowStatusSnapshot);
+  return describePushTargets(push, burrow.kind === 'ready' ? burrow.status : null, remoteControlBelow);
 }
 
 /**
