@@ -15,14 +15,13 @@ import {
   Shortcut,
   UNDER_SWITCH_INDENT,
 } from './design';
-import { ExternalTextLink } from './ExternalTextLink';
 import { ThemePicker } from './ThemePicker';
 import { ShellPicker } from './ShellPicker';
 import { WatchedCommandList } from './WatchedCommandList';
 import { NetworkPhones, NetworkSettings, NetworkUpdates } from './NetworkSettings';
 import { hostOf, useNetworkPolicy } from './remote-control-shared';
 import { PushTestButton, SpeakTestButton } from './AlarmTestButtons';
-import { HOSTED_VOICE_URL, HostedPlansLink } from './HostedEnrollment';
+import { HostedPlansLink } from './HostedEnrollment';
 import { HOSTED_REFS } from '../lib/hosted-links';
 import { relayRefuses, type BurrowConsoleStatus } from '../host/remote/service-protocol';
 import { getBurrowStatusSnapshot, subscribeToBurrowStatus } from '../remote/burrow/burrow-status-store';
@@ -573,13 +572,9 @@ export function AlarmSettingsSection({ sink, preview = false, onShowNetwork }: {
         onCommitDelay={(speakDelayMs) => updateAlertSettings({ speakDelayMs })}
         action={preview ? null : <SpeakTestButton />}
       >
+        {/* Only a build with Hosted mode has the port, so without one it names no Hosted. */}
         {!managedVoiceOffered ? (
-          <>
-            Uses your browser or system voice.{' '}
-            <ExternalTextLink href={HOSTED_VOICE_URL}>
-              Get ElevenLabs voices with Natural Voice.
-            </ExternalTextLink>
-          </>
+          'Uses your browser or system voice.'
         ) : networkOff ? (
           <>
             Natural Voice is off while <NetworkTopicLink onShow={onShowNetwork} /> is set to Nowhere,

@@ -199,7 +199,7 @@ describe('ManagedVoiceSection', () => {
 
 describe('the spoken-alarm copy', () => {
   it.each([
-    ['no port', false, 'Get ElevenLabs voices with Natural Voice.'],
+    ['no port', false, 'Uses your browser or system voice.'],
     ['a Hosted build’s port', true, 'Uses Natural Voice when turned on below'],
   ])('with %s', async (_label, port, copy) => {
     const adapter = new FakePtyAdapter();
@@ -208,11 +208,9 @@ describe('the spoken-alarm copy', () => {
     expect(text()).toContain(copy);
   });
 
-  it('links the Hosted page’s voice section from a build without the port', async () => {
-    const openExternal = vi.fn();
-    setPlatform(Object.assign(new FakePtyAdapter(), { openExternal }));
+  it('names neither Hosted nor Natural Voice in a build without the port, which has no Hosted mode', async () => {
+    setPlatform(new FakePtyAdapter());
     await act(async () => root.render(<AlarmSettingsSection sink="speech" />));
-    await act(async () => button('Get ElevenLabs voices with Natural Voice.')!.click());
-    expect(openExternal).toHaveBeenCalledWith('https://dormouse.sh/hosted/?ref=settings-voice#voice');
+    expect(text()).not.toMatch(/Hosted|Natural Voice|ElevenLabs/);
   });
 });
