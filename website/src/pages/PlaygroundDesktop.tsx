@@ -9,6 +9,7 @@ import { PlaygroundShellRegistry } from "../lib/playground-shells";
 import { DESKTOP_TUTORIAL_PROFILE } from "../lib/tut-items";
 import { TutorialState } from "../lib/tutorial-state";
 import { TutDetector } from "../lib/tut-detector";
+import { trackTutorialCompletion } from "../lib/site-analytics";
 import { TutRunner } from "../lib/tut-runner";
 import { startAlertProgram } from "../lib/alert-programs";
 import { ChangelogRunner } from "../lib/changelog-runner";
@@ -92,6 +93,7 @@ function PlaygroundDesktopExperience() {
 
   useEffect(() => {
     let cancelled = false;
+    let stopCompletionTracking: (() => void) | null = null;
     async function loadWall() {
       // Phone hydration briefly mounts this desktop prerender before reconciling media.
       if (getPreferredPlayground() === "pocket") return;
@@ -126,6 +128,7 @@ function PlaygroundDesktopExperience() {
       disposeFsRef.current = fsHost.dispose;
 
       const tutorialState = new TutorialState(DESKTOP_TUTORIAL_PROFILE.sections);
+      stopCompletionTracking = trackTutorialCompletion(tutorialState, "desktop");
       stateRef.current = tutorialState;
       const detector = new TutDetector({
         state: tutorialState,
@@ -215,6 +218,7 @@ function PlaygroundDesktopExperience() {
 
     return () => {
       cancelled = true;
+      stopCompletionTracking?.();
       detectorRef.current?.dispose();
       detectorRef.current = null;
       shellRegistryRef.current?.disposeAll();
