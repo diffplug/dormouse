@@ -137,6 +137,23 @@ describe("the Hosted card's billing toggle", () => {
   });
 });
 
+describe("a visit's ref", () => {
+  it("comes off the address bar on arrival, leaving the rest of the URL", async () => {
+    for (const [arrived, left] of [
+      ["/hosted/?ref=settings-voice#voice", "/hosted/#voice"],
+      ["/hosted/?a=1&ref=someone%40example.test", "/hosted/?a=1"],
+      ["/hosted/#pricing", "/hosted/#pricing"],
+    ]) {
+      history.replaceState(null, "", arrived);
+      await mount(async () => new Response("{}", { status: 404 }));
+      expect(location.pathname + location.search + location.hash).toBe(left);
+      act(() => root?.unmount());
+      container?.remove();
+      root = null;
+    }
+  });
+});
+
 /** Mounts the page with the cohort endpoint answering `body`. */
 const mountCohort = (body: unknown) =>
   mount(async (url) => {

@@ -4,18 +4,22 @@ import { ExternalTextLink } from './ExternalTextLink';
 import { FIELD_HINT, FIELD_LABEL, hostOf, useBusyAction, useMinutesLeft } from './remote-control-shared';
 import { ACCOUNT_PAGE_PATH, HOSTED_ACCOUNT_ORIGIN } from '../host/relay-origin';
 import type { HostedEnrollmentEndReason, HostedEnrollmentState } from '../host/remote/service-protocol';
+import { HOSTED_REFS, withHostedRef, type HostedRef } from '../lib/hosted-links';
 import { getPlatform } from '../lib/platform';
 import { BURROW_IS_AN_APP } from '../remote/setup-copy';
 import { beginHostedEnrollment, cancelHostedEnrollment } from '../remote/burrow/burrow-status-store';
 
-/** Where the plans are; linked wherever an account turns out to have none. */
-export const HOSTED_PRICING_URL = 'https://dormouse.sh/hosted/#pricing';
+const HOSTED_PAGE_URL = 'https://dormouse.sh/hosted/';
 /** The Hosted page's voice section, the spoken-alarm row's link where the build has no managed voice. */
-export const HOSTED_VOICE_URL = 'https://dormouse.sh/hosted/#voice';
+export const HOSTED_VOICE_URL = withHostedRef(HOSTED_PAGE_URL, HOSTED_REFS.settingsVoice, 'voice');
 
-/** The link to {@link HOSTED_PRICING_URL}, the one way every no-plan line names the plans. */
-export function HostedPlansLink() {
-  return <ExternalTextLink href={HOSTED_PRICING_URL}>See Hosted plans</ExternalTextLink>;
+/**
+ * The Hosted page's plans, the one way every no-plan line names them; `from`
+ * is the ref of the Settings section it sits in. (Not `ref`, which React
+ * keeps for itself.)
+ */
+export function HostedPlansLink({ from }: { from: HostedRef }) {
+  return <ExternalTextLink href={withHostedRef(HOSTED_PAGE_URL, from, 'pricing')}>See Hosted plans</ExternalTextLink>;
 }
 
 /** The one field the offer card and the typed form both ask for. */
@@ -119,7 +123,7 @@ export function HostedEnrollmentEnded({
       {ended.reason === 'failed' && ended.message ? <div className="mt-1 text-error">{ended.message}</div> : null}
       {ended.reason === 'not-entitled' ? (
         <div className="mt-1">
-          <HostedPlansLink />
+          <HostedPlansLink from={purpose === 'voice' ? HOSTED_REFS.settingsVoice : HOSTED_REFS.settingsRemote} />
         </div>
       ) : null}
       {page ? (

@@ -137,8 +137,8 @@ const STRUCTURAL = [
   [
     'lib/src/components/HostedEnrollment.tsx',
     replace(
-      "'https://dormouse.sh/hosted/#pricing';\n/** The Hosted page's voice section, the spoken-alarm row's link where the build has no managed voice. */\nexport const HOSTED_VOICE_URL = 'https://dormouse.sh/hosted/#voice'",
-      "'/hosted/#pricing';\nexport const HOSTED_VOICE_URL = '/hosted/#voice'",
+      "const HOSTED_PAGE_URL = 'https://dormouse.sh/hosted/';",
+      "const HOSTED_PAGE_URL = '/hosted/';",
     ),
     'OUTBOUND_SITES entry no longer spells any form',
     'a stale OUTBOUND_SITES entry',

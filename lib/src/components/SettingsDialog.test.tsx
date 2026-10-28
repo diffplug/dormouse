@@ -7,7 +7,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setPlatform } from '../lib/platform';
 import { FakePtyAdapter } from '../lib/platform/fake-adapter';
 import { AlarmSettingsSection, SettingsDialog, SETTINGS_SCROLL_MS } from './SettingsDialog';
-import { HOSTED_PRICING_URL } from './HostedEnrollment';
 import { enrolledStatus, makeStubBurrowLink, UNENROLLED_STATUS } from '../host/remote/test-burrow-link';
 import type { BurrowConsoleStatus } from '../host/remote/service-protocol';
 import { makeStubManagedVoicePort } from '../lib/platform/test-ports';
@@ -289,7 +288,7 @@ describe('SettingsDialog push line', () => {
     const plans = [...document.querySelectorAll<HTMLButtonElement>('[data-setting="push"] button')]
       .find((button) => button.textContent === 'See Hosted plans')!;
     await act(async () => plans.click());
-    expect(openExternal).toHaveBeenCalledWith(HOSTED_PRICING_URL);
+    expect(openExternal).toHaveBeenCalledWith('https://dormouse.sh/hosted/?ref=settings-push#pricing');
   });
 
   it('points a computer removed from its Hosted account at enrolling again below', async () => {

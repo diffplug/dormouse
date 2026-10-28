@@ -23,6 +23,7 @@ import { NetworkPhones, NetworkSettings, NetworkUpdates } from './NetworkSetting
 import { hostOf, useNetworkPolicy } from './remote-control-shared';
 import { PushTestButton, SpeakTestButton } from './AlarmTestButtons';
 import { HOSTED_VOICE_URL, HostedPlansLink } from './HostedEnrollment';
+import { HOSTED_REFS } from '../lib/hosted-links';
 import { relayRefuses, type BurrowConsoleStatus } from '../host/remote/service-protocol';
 import { getBurrowStatusSnapshot, subscribeToBurrowStatus } from '../remote/burrow/burrow-status-store';
 import { ManagedVoiceSection, NetworkTopicLink, useManagedVoiceOffered } from './ManagedVoiceSection';
@@ -107,7 +108,7 @@ function describeRefusal(status: BurrowConsoleStatus, remoteControlBelow: boolea
       `Disconnect and enroll it again under Persistent Relay ${where}.`;
   }
   if (status.connection === 'not-entitled') {
-    return <>Your account has no Hosted plan, so no push is sent. <HostedPlansLink /></>;
+    return <>Your account has no Hosted plan, so no push is sent. <HostedPlansLink from={HOSTED_REFS.settingsPush} /></>;
   }
   return `This computer was removed from your Hosted account, so no push is sent. ` +
     `Enroll it again under Hosted Relay ${where}.`;
