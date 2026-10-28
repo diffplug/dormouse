@@ -286,7 +286,9 @@ export function SettingsDialog({ onClose, initialTopic }: { onClose: () => void;
     scrollFrame.current = requestAnimationFrame(step);
   }, [cancelScroll]);
 
+  // Choosing a topic or searching takes over from an opened-at topic's hold.
   const chooseTopic = (id: TopicId) => {
+    settling.current = null;
     setTopic(id);
     setOpenMenu(null);
     scrollToTopic(id);
@@ -360,6 +362,7 @@ export function SettingsDialog({ onClose, initialTopic }: { onClose: () => void;
               setQuery(event.target.value);
               setOpenMenu(null);
               setHoveredTopic(null);
+              settling.current = null;
               scrollToTopic(null);
             }}
             className="min-w-0 w-full bg-transparent text-sm text-foreground outline-none"
