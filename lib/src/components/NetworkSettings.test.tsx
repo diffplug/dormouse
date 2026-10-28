@@ -393,7 +393,7 @@ describe('Settings → Network', () => {
     expect(radios).toEqual([
       'NowhereDormouse opens no connections on its own, and phones can’t reach it.',
       'Local networks onlyPhones reach your terminals only over networks you choose. Phone and spoken alerts send a pane’s name from any network.',
-      'AnywherePhones reach your terminals from any network, directly when they can, otherwise relayed through Hosted.',
+      'AnywherePhones reach your terminals from any network, directly when they can, otherwise relayed through Hosted. Phone and spoken alerts work too.',
     ]);
   });
 
