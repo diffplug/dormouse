@@ -719,6 +719,9 @@ test("an EEA or UK consumer withdraws online: recorded, acknowledged by email, r
   await f.deliver();
   expect((await withdraw(subscription.id)).status).toBe(200);
   expect([f.cancels.length, f.refunds.length, f.email.all().length]).toEqual([1, 2, 1]);
+  // A plan bought after it is not withdrawn: the acknowledgement gives way to it.
+  await f.buy(member, "monthly");
+  expect(await member.summary()).toMatchObject({ plan: "monthly", withdrawn: null });
   // A billing record: it outlives the account.
   await f.sql(`DELETE FROM "user" WHERE id = $1`, [member.id]);
   expect(await f.sql(`SELECT id FROM dormouse_withdrawals`)).toEqual([{ id: row!.id }]);

@@ -32,7 +32,10 @@ export interface BillingSummary {
   consent: { termsVersion: string; consentedAt: string } | null;
   /** The EEA or UK online withdrawal from the held subscription, while it is open. */
   withdrawal: WithdrawalOffer | null;
-  /** The account's latest withdrawal, kept on the page as its acknowledgement. */
+  /**
+   * The account's latest withdrawal, kept on the page as its acknowledgement:
+   * the server sends it only while no plan is held or it is the held plan's.
+   */
   withdrawn: Withdrawn | null;
 }
 

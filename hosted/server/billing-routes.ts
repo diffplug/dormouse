@@ -141,7 +141,12 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
       founder: { offered: account?.founder === true, name: account?.name ?? null },
       consent: held ? (account?.consent ?? null) : null,
       withdrawal: offer && { subscription: offer.subscription, startedAt: offer.startedAt, until: offer.until, email: offer.email },
-      withdrawn: account?.withdrawn ?? null,
+      // Only while it describes the held subscription, its settlement still
+      // pending, or nothing is held: a plan bought after it is not withdrawn.
+      withdrawn:
+        account?.withdrawn && (!held || account.withdrawn.subscription === status.subscription!.id)
+          ? account.withdrawn
+          : null,
     });
   };
 
