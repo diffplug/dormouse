@@ -50,7 +50,7 @@ Source of truth: `readConfig` in `relay/src/config.ts`; `startRelay` in `relay/s
 Five JSON files, named because hand-editing them is the revocation mechanism (Guardrails); their shapes are the stores' types in `relay/src/state.ts`:
 
 - `account.json` — the one account and its passkeys
-- `burrows.json` — `[{ burrowId, burrowToken, enrolledAt }]`; **no label**: the Relay keeps no name for a Burrow
+- `burrows.json` — `[{ burrowId, burrowToken, enrolledAt }]`; **no label**
 - `push-subscriptions.json` — push rows (below)
 - `vapid.json` — only when env configures no keypair
 - `setup-password.json` — `{ password, createdAt }`; the installers read `password` (`SELF_HOST.md`)
@@ -297,7 +297,7 @@ Source of truth: `resolveRelayOrigin` and `assertRelayOriginBaked` in `scripts/r
 
 **Enrollment** (Settings, or the console hook, once):
 
-- **Must mint the Noise static before requesting enrollment, and never send either half** (`docs/specs/remote-security-model.md` -> "Burrow identity"). The request carries one credential and the baked `origin`, nothing else: **the operator's `label` is kept locally and disclosed only inside encrypted outcomes**.
+- **Must mint the Noise static before requesting enrollment, and never send either half** (`docs/specs/remote-security-model.md` -> "Burrow identity"). The request carries one credential and the baked `origin`, nothing else: **the operator's `label` reaches a Client only inside encrypted outcomes, and a Relay only in Hosted's remote poll**.
 - **`burrowToken` never enters a webview realm**: `enroll` answers `{ burrowId }`.
 - **A 200 that is not an enrollment fails the exchange**, naming the bad field (rationale).
 - **Burrow→Relay requests time out at `BURROW_REQUEST_TIMEOUT_MS`, under the webview's own 15 s command budget** (rationale); a route the Relay may legitimately hold open longer (push delivery) passes its own.

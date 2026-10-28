@@ -56,10 +56,10 @@ index 09806ad75..cb7005345 100644
 +    "892b0116797b52e9f42617be5703d2e516f3ec5c6d37cbc8c4f8504e4fcce969",
    "011_enrollment_confirm_digits.sql":
      "54afe9ae8a2efd3c654503d479fce96c1ce8ff4f2df249aa93b5a91e925def6e",
+   "012_relay_burrow_label.sql":
+     "45b3df1530402622edeb12e12e1572698840ecc8ea6b9cfc585f3a9e28b4f230",
  };
- 
- const directory = new URL("../dormouse-migrations/", import.meta.url);
-@@ -47,7 +47,7 @@ test("no merged Dormouse migration changes, and every one is pinned", () => {
+@@ -49,7 +49,7 @@ test("no merged Dormouse migration changes, and every one is pinned", () => {
    }
  });
  
@@ -68,7 +68,7 @@ index 09806ad75..cb7005345 100644
    onTestFinished,
  }) => {
    // The Dormouse migrations through 009, then 010 over the rows they allowed.
-@@ -73,5 +73,4 @@ test("010 deletes the sessions that name no passkey, and every later one must na
+@@ -75,5 +75,4 @@ test("010 deletes the sessions that name no passkey, and every later one must na
    copyFileSync(join(source, "010_relay_session_credential_required.sql"), join(before, "010_relay_session_credential_required.sql"));
    await migrate(context.database.url, await readMigrations([betterAuthMigrations, before]));
    expect(await sql(`SELECT "tokenHash" FROM dormouse_relay_sessions`)).toEqual([{ tokenHash: "named" }]);

@@ -105,7 +105,7 @@ export function relayAccountRoutes(app: Hono<any>, host: (c: Context) => RelayAc
   app.get("/api/relay/burrows", gate, async (c) => {
     const burrows = await accountQuery(
       host(c),
-      `SELECT "burrowId", "enrolledAt" FROM dormouse_relay_burrows
+      `SELECT "burrowId", label, "enrolledAt" FROM dormouse_relay_burrows
       WHERE "userId" = $1 ORDER BY "enrolledAt" DESC, "burrowId"`,
       [c.get("login").userId],
     );

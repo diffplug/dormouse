@@ -228,9 +228,9 @@ export interface KnownBurrowV1 {
   readonly accountId: string;
   /**
    * What to call this machine. The Burrow's own label, as it arrived inside the
-   * encrypted pairing outcome. The Relay keeps no label for a Burrow at all —
-   * `burrows.json` rows are `{burrowId, burrowToken, enrolledAt}`
-   * (`docs/specs/relay.md` -> "State files").
+   * encrypted pairing outcome, never one a Relay names: the self-host Relay
+   * keeps none (`docs/specs/relay.md` -> "State files"), and Hosted's is for
+   * its account page.
    */
   readonly label: string;
   /** The pinned Burrow Noise static, base64url. A change is a terminal error. */
