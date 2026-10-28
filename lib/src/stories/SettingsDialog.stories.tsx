@@ -182,6 +182,59 @@ export const PushNotEnrolled: Story = {
   },
 };
 
+/** An enrolled Hosted build whose relay socket is in `connection`. */
+function hostedEnrolled(connection: BurrowConsoleStatus['connection']): BurrowConsoleStatus {
+  return { ...UNENROLLED_STATUS, enrolled: true, serving: true, burrowId: 'burrow-6f1c2a90', connection };
+}
+
+/**
+ * The Relay refused this Burrow because its account has no Hosted plan. The
+ * Burrow asks a refusing Relay nothing, so the device list is no help; the
+ * line says why from the Burrow's status and links the plans.
+ */
+export const PushNotEntitled: Story = {
+  parameters: {
+    primedWatchedCommands: ['claude'],
+    primedAlertSettings: { pushEnabled: true },
+    primedPushDevices: { status: 'no-burrow', devices: [] },
+    primedBurrow: { status: hostedEnrolled('not-entitled') },
+  },
+  play: async ({ canvasElement }) => {
+    await selectTopic('Notifications')({ canvasElement });
+    const body = dialog(canvasElement);
+    await body.findByText(/no Hosted plan, so no push is sent/);
+    await expect(within(body.getByRole('region', { name: 'Notifications' })).getByRole('button', { name: 'See Hosted plans' })).toBeVisible();
+  },
+};
+
+/** This computer was removed from its Hosted account: enrolling again, below, is the way back. */
+export const PushRemoved: Story = {
+  parameters: {
+    primedWatchedCommands: ['claude'],
+    primedAlertSettings: { pushEnabled: true },
+    primedPushDevices: { status: 'no-burrow', devices: [] },
+    primedBurrow: { status: hostedEnrolled('removed') },
+  },
+  play: async ({ canvasElement }) => {
+    await selectTopic('Notifications')({ canvasElement });
+    await dialog(canvasElement).findByText(/Enroll it again under Hosted Relay below/);
+  },
+};
+
+/** The self-host Relay refused: the line names it, and never Hosted. */
+export const PushSelfHostRemoved: Story = {
+  parameters: {
+    primedWatchedCommands: ['claude'],
+    primedAlertSettings: { pushEnabled: true },
+    primedPushDevices: { status: 'no-burrow', devices: [] },
+    primedBurrow: { status: enrolledStatus({ connection: 'removed' }) },
+  },
+  play: async ({ canvasElement }) => {
+    await selectTopic('Notifications')({ canvasElement });
+    await dialog(canvasElement).findByText(/no longer accepts this computer/);
+  },
+};
+
 /**
  * Non-default timings, proving every number field renders the stored value
  * rather than a hardcoded one.
