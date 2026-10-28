@@ -141,13 +141,37 @@ it.each(["remote", "voice"] as const)("%s approval returns to the account and wa
   if (purpose === "voice") {
     vi.mocked(api.getHostedVoice).mockResolvedValue({ entitled: true, on: true });
   } else {
-    vi.mocked(api.getComputers).mockResolvedValue([{ burrowId: "new-computer", enrolledAt: new Date(NOW).toISOString() }]);
+    vi.mocked(api.getComputers).mockResolvedValue([{ burrowId: "new-computer", label: null, enrolledAt: new Date(NOW).toISOString() }]);
   }
   await act(async () => { await vi.advanceTimersByTimeAsync(ENROLLMENT_POLL_INTERVAL_S * 1000); });
   expect(container.querySelector("[role=status]")?.textContent).toBe(
     purpose === "voice" ? "Natural Voice is on." : "Your computer is enrolled.",
   );
   expect(api.getApproval).toHaveBeenCalledWith("7KQM-X4TD");
+});
+
+it("lists each computer by the name it enrolled under, else its short id, and each passkey's computer the same way", async () => {
+  vi.mocked(api.getSession).mockResolvedValue(login());
+  const enrolledAt = new Date(NOW).toISOString();
+  vi.mocked(api.getComputers).mockResolvedValue([
+    { burrowId: "named-computer-id", label: "studio (Dormouse)", enrolledAt },
+    { burrowId: "older-computer-id", label: null, enrolledAt },
+  ]);
+  vi.mocked(api.getPasskeys).mockResolvedValue([
+    { credentialId: "one", label: "iPhone", createdAt: enrolledAt, burrowId: "named-computer-id" },
+    { credentialId: "two", label: "iPad", createdAt: enrolledAt, burrowId: "older-computer-id" },
+  ]);
+  await mount(null);
+  const rows = (section: string) =>
+    [...container.querySelectorAll(`section[aria-labelledby=${section}] > div`)].map((row) => row.querySelector("span")?.textContent);
+  expect(rows("computers")).toEqual([
+    expect.stringMatching(/^studio \(Dormouse\)named-co/),
+    expect.stringMatching(/^Computerolder-co/),
+  ]);
+  expect(rows("passkeys")).toEqual([
+    expect.stringMatching(/from studio \(Dormouse\)$/),
+    expect.stringMatching(/from Computer older-co$/),
+  ]);
 });
 
 it("an approval that completes after a newer link opened keeps the newer code", async () => {

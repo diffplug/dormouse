@@ -53,6 +53,11 @@ const HEADING_CLASS = "mb-2 font-display text-xl";
 const ROW_CLASS = `flex min-h-14 items-center justify-between gap-4 py-1.5 ${DASHED_ROW_CLASS}`;
 const DETAIL_CLASS = `block text-sm ${MUTED_TEXT_CLASS}`;
 const FOOTNOTE_CLASS = `mt-10 text-sm ${MUTED_TEXT_CLASS}`;
+const shortId = (burrowId: string) => burrowId.slice(0, 8);
+/** The name a computer enrolled under, or its short id before it sent one. */
+function computerName(burrowId: string, computers: Computer[] | null): string {
+  return computers?.find((computer) => computer.burrowId === burrowId)?.label ?? `Computer ${shortId(burrowId)}`;
+}
 /** A computer's id in the shape the app draws a minimized Pane: a door. */
 const DOOR_CLASS = `${DOOR_SHAPE_CLASS} ml-1.5 inline-flex items-center justify-center border-b border-[var(--color-text)]/30 bg-[var(--color-text)]/[0.12] px-2.5`;
 
@@ -412,9 +417,9 @@ export function HostedPage({
                     )}
                     {computers.map((computer) => (
                       <div className={ROW_CLASS} key={computer.burrowId}>
-                        <span>
-                          Computer
-                          <span className={DOOR_CLASS}>{computer.burrowId.slice(0, 8)}</span>
+                        <span className="min-w-0 wrap-anywhere">
+                          {computer.label ?? "Computer"}
+                          <span className={DOOR_CLASS}>{shortId(computer.burrowId)}</span>
                           <span className={DETAIL_CLASS}>
                             Enrolled{" "}
                             {new Date(computer.enrolledAt).toLocaleDateString()}
@@ -452,7 +457,7 @@ export function HostedPage({
                             Added{" "}
                             {new Date(passkey.createdAt).toLocaleDateString()}
                             {passkey.burrowId
-                              ? ` from Computer ${passkey.burrowId.slice(0, 8)}`
+                              ? ` from ${computerName(passkey.burrowId, computers)}`
                               : ""}
                           </span>
                         </span>

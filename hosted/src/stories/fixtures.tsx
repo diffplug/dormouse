@@ -9,12 +9,13 @@ export const SESSION: Session = {
   session: { createdAt: "2026-10-21T12:00:00Z", expiresAt: "2026-10-22T12:00:00Z" },
 };
 export const COMPUTERS: Computer[] = [
-  { burrowId: "studio01-workstation", enrolledAt: "2026-10-20T12:00:00Z" },
-  { burrowId: "laptop02-notebook", enrolledAt: "2026-10-21T12:00:00Z" },
+  { burrowId: "studio01-workstation", label: "studio (Dormouse)", enrolledAt: "2026-10-20T12:00:00Z" },
+  { burrowId: "laptop02-notebook", label: null, enrolledAt: "2026-10-21T12:00:00Z" },
 ];
 export const PASSKEYS: Passkey[] = [
   { credentialId: "phone-one", label: "iPhone", createdAt: "2026-10-20T12:00:00Z", burrowId: COMPUTERS[0].burrowId },
   { credentialId: "phone-two", label: "", createdAt: "2026-10-21T12:00:00Z", burrowId: null },
+  { credentialId: "tablet", label: "iPad", createdAt: "2026-10-22T12:00:00Z", burrowId: COMPUTERS[1].burrowId },
 ];
 export const ENROLLMENT = { code: "7KQM-X4TD", purpose: "remote" as const };
 export const ACCOUNT = { session: SESSION, computers: COMPUTERS, passkeys: PASSKEYS };

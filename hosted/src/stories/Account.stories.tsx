@@ -31,6 +31,12 @@ export const LongIdentity: Story = { args: {
   session: { ...SESSION, user: { ...SESSION.user, id: "account-with-a-long-immutable-identifier-for-a-provider-only-user", email: "alexandra.long-identity@example.department.example.com" } },
   passkeys: [{ ...PASSKEYS[0], label: "Personal phone with a long descriptive passkey label" }],
 } };
+/** A hostname is one unbroken word, up to the 64 characters Hosted keeps. */
+export const LongComputerName: Story = { args: {
+  ...ACCOUNT,
+  phone: true,
+  computers: [{ ...COMPUTERS[0], label: "build-agent-0042.eu-central-1.compute.internal.example (VS Code)" }, COMPUTERS[1]],
+} };
 export const RemovingComputer: Story = { args: { ...ACCOUNT, busy: `remove-${COMPUTERS[0].burrowId}` } };
 export const RemovingPasskey: Story = { args: { ...ACCOUNT, busy: `passkey-${PASSKEYS[0].credentialId}` } };
 export const RemovalFailed: Story = { args: { ...ACCOUNT, error: { read: false, message: "Computers and passkeys are temporarily unavailable. Try again." } } };

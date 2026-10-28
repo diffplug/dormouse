@@ -120,6 +120,8 @@ export async function turnOffHostedVoice() {
 
 export interface Computer {
   burrowId: string;
+  /** The name it enrolled under, by default its hostname; null if it sent none. */
+  label: string | null;
   enrolledAt: string;
 }
 async function relay(path: string, init: RequestInit = {}): Promise<Response> {
