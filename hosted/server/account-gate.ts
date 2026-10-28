@@ -2,7 +2,7 @@
 // docs/specs/security-hosted.md -> "Origin boundary".
 import type { Context, MiddlewareHandler } from "hono";
 import { queryDatabase } from "pgstencil/postgres";
-import { entitled } from "./entitlement";
+import { entitled, isAdmin } from "./entitlement";
 
 /** What one request's account deployment provides to its cookie routes. */
 export interface AccountHost {
@@ -64,7 +64,7 @@ export function cookieEntitled(
   host: (c: Context) => AccountHost,
   refuse: (c: Context) => Response,
 ): MiddlewareHandler<{ Variables: { login: AccountLogin } }> {
-  return cookieGate(host, refuse);
+  return cookieGate(host, { admits: entitled, refuse });
 }
 
 /** {@link cookieEntitled}'s gate for a route any signed-in account may use. */
@@ -74,9 +74,23 @@ export function cookieLogin(
   return cookieGate(host);
 }
 
+/**
+ * {@link cookieEntitled}'s gate for the admin's own routes: any login but
+ * the admin's (`isAdmin`, read per request) answers 404, as if the route
+ * were not there.
+ */
+export function cookieAdmin(
+  host: (c: Context) => AccountHost,
+): MiddlewareHandler<{ Variables: { login: AccountLogin } }> {
+  return cookieGate(host, { admits: isAdmin, refuse: (c) => c.json({ message: "Not found." }, 404) });
+}
+
 function cookieGate(
   host: (c: Context) => AccountHost,
-  refuse?: (c: Context) => Response,
+  only?: {
+    admits: (databaseUrl: string, userId: string) => Promise<boolean>;
+    refuse: (c: Context) => Response;
+  },
 ): MiddlewareHandler<{ Variables: { login: AccountLogin } }> {
   return async (c, next) => {
     const origin = new URL(c.req.url).origin;
@@ -99,7 +113,7 @@ function cookieGate(
       session?: { createdAt?: unknown };
     } | null;
     if (!session?.user) return c.json({ message: "Sign in first." }, 401);
-    if (refuse && !(await entitled(host(c).databaseUrl, session.user.id))) return refuse(c);
+    if (only && !(await only.admits(host(c).databaseUrl, session.user.id))) return only.refuse(c);
     c.set("login", {
       userId: session.user.id,
       createdAt: session.session?.createdAt,

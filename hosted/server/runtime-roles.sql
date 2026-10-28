@@ -63,6 +63,11 @@ GRANT USAGE ON SCHEMA public TO dormouse_relay, dormouse_voice;
 -- Both: the entitlement check reads the owner's address and its verification.
 GRANT SELECT (id, email, "emailVerified") ON "user" TO dormouse_relay, dormouse_voice;
 
+-- Both: their metrics' upsert-increment (hosted/server/metrics.ts), whose
+-- conflict needs the read. A row is an aggregate count.
+GRANT SELECT, INSERT ON dormouse_metrics_daily TO dormouse_relay, dormouse_voice;
+GRANT UPDATE (count) ON dormouse_metrics_daily TO dormouse_relay, dormouse_voice;
+
 -- The relay Worker, its Cron sweep, and its RelayRoom's RelayRows.
 GRANT SELECT, INSERT ON dormouse_relay_burrows TO dormouse_relay;
 -- Only for the push subscribe's FOR KEY SHARE, which needs UPDATE on some
