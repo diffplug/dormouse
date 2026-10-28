@@ -459,7 +459,7 @@ describe("the plan section", () => {
 
   it.each([
     [false, "so Natural Voice and the Hosted Relay are paused"],
-    [true, "Your account keeps Hosted at no charge"],
+    [true, "Hosted stays included with this account (admin)"],
   ])("keeps Manage billing for a payment that failed, entitled %s", async (entitled, copy) => {
     vi.mocked(api.getBilling).mockResolvedValue({ ...FOUNDING, active: false, entitled, founder: { offered: false, name: null } });
     await mount(null);

@@ -9,13 +9,16 @@ const SUPPORT = "support@dormouse.sh";
 const day = (iso: string) => new Date(iso).toLocaleDateString();
 const interval = (billing: BillingSummary) => (billing.plan === "monthly" ? "month" : "year");
 
-/** The held plan's state in one sentence; its lapsed copy branches on `entitled`. */
+/**
+ * The held plan's state in one sentence. A lapsed plan with `entitled` still
+ * true can only be the `ADMIN_EMAIL` comp (hosted/server/entitlement.ts).
+ */
 export function planStatus(billing: BillingSummary): string {
   if (billing.suspended)
     return "Paused while a payment dispute is open. It resumes if the dispute closes in your favor.";
   if (!billing.active)
     return billing.entitled
-      ? "Your last payment did not go through. Your account keeps Hosted at no charge; update your card in Manage billing."
+      ? "Your last payment did not go through. Hosted stays included with this account (admin); update your card in Manage billing."
       : "Your last payment did not go through, so Natural Voice and the Hosted Relay are paused. Update your card in Manage billing.";
   if (!billing.until) return "Active.";
   return billing.renews
@@ -134,7 +137,8 @@ export function PlanSection({
           {children}
         </>
       ) : billing.entitled ? (
-        <p className={HELP_CLASS}>Your account has Hosted at no charge.</p>
+        // Entitled without a plan: only the `ADMIN_EMAIL` comp.
+        <p className={HELP_CLASS}>Hosted is included with this account (admin).</p>
       ) : (
         <>
           <p className={HELP_CLASS}>
