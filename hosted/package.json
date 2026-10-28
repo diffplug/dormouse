@@ -22,8 +22,8 @@
     "test:dom": "vitest run src"
   },
   "dependencies": {
-    "@pgstencil/auth": "^0.4.0",
-    "pgstencil": "^0.4.0",
+    "@pgstencil/auth": "^0.4.1",
+    "pgstencil": "^0.4.1",
     "kysely": "^0.29.5",
     "hono": "^4.13.8",
     "@hono/node-server": "^2.0.10",
