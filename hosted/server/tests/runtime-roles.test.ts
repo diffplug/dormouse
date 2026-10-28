@@ -72,6 +72,7 @@ const EXPECTED: Record<Worker, string[]> = {
   relay: [
     // PUBLIC's defaults.
     "database: CONNECT, TEMPORARY",
+    "dormouse_billing_disputes.userId: SELECT",
     "dormouse_metrics_daily.count: UPDATE",
     "dormouse_metrics_daily: INSERT, SELECT",
     "dormouse_relay_burrows.enrolledAt: UPDATE",
@@ -106,6 +107,7 @@ const EXPECTED: Record<Worker, string[]> = {
   ],
   voice: [
     "database: CONNECT, TEMPORARY",
+    "dormouse_billing_disputes.userId: SELECT",
     "dormouse_metrics_daily.count: UPDATE",
     "dormouse_metrics_daily: INSERT, SELECT",
     "dormouse_voice_tokens.createdAt: SELECT",
@@ -152,10 +154,14 @@ const BILLING_REFUSED = [
   `SELECT id FROM pgstencil_billing.events`,
   `UPDATE pgstencil_billing.subscriptions SET status = status`,
   `DELETE FROM pgstencil_billing.subscriptions`,
+  `SELECT "disputeId" FROM dormouse_billing_disputes`,
+  `INSERT INTO dormouse_billing_disputes ("disputeId", "userId") VALUES ('x', 'x')`,
+  `DELETE FROM dormouse_billing_disputes`,
 ];
 
 /** What the entitlement reads of the subscriptions, which both roles may. */
-const ENTITLEMENT_READ = `SELECT owner_id, status, period_end, trial_end FROM pgstencil_billing.subscriptions`;
+const ENTITLEMENT_READ = `SELECT owner_id, status, period_end, trial_end FROM pgstencil_billing.subscriptions
+  WHERE NOT EXISTS (SELECT FROM dormouse_billing_disputes d WHERE d."userId" = owner_id)`;
 
 test("the relay's role is refused the account's tables, the user row's other columns and writes, voice but a token's mint, and Burrow removal", async () => {
   // It does log in, and reads what the entitlement check reads.

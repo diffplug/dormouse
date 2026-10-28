@@ -5,10 +5,10 @@ import { connectDatabase, queryDatabase } from "pgstencil/postgres";
 import { FOUNDING_COHORT_SIZE, FOUNDING_LADDER } from "../../website/src/lib/hosted-pricing";
 import type { BillingEnv } from "./bindings";
 import { grantsAccessSql } from "./entitlement";
-import { BILLING_RETURN_PATH } from "./policy-constants";
+import { BILLING_PLANS, BILLING_RETURN_PATH } from "./policy-constants";
 
 /** The plans checkout sells, by the names `status()` and a checkout use. */
-export type Plan = "monthly" | "yearly" | "founding";
+export type Plan = (typeof BILLING_PLANS)[number];
 
 /** A purchase that ends within this many days of starting is a refund: its seat returns to its cohort. */
 export const REFUND_DAYS = 30;

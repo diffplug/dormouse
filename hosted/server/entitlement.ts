@@ -11,7 +11,8 @@ if (!/^[^'\\]+$/.test(ADMIN_EMAIL)) throw new Error("ADMIN_EMAIL cannot be inlin
  * The statuses `@pgstencil/stripe`'s `status()` counts as a current
  * subscription; access needs exactly one of them.
  */
-const CURRENT = `'trialing', 'active', 'past_due', 'unpaid', 'paused', 'incomplete'`;
+export const CURRENT_STATUSES: readonly string[] = ["trialing", "active", "past_due", "unpaid", "paused", "incomplete"];
+const CURRENT = CURRENT_STATUSES.map((status) => `'${status}'`).join(", ");
 
 /**
  * Whether subscription row `s` grants access now, by the database's clock:
@@ -33,15 +34,19 @@ function subscribedSql(owner: string): string {
     FROM pgstencil_billing.subscriptions entitling WHERE entitling.owner_id = ${owner}), false)`;
 }
 
+/** Whether the SQL expression `owner` has a payment dispute open, which suspends its subscription. */
+const disputedSql = (owner: string) =>
+  `EXISTS (SELECT FROM dormouse_billing_disputes disputed WHERE disputed."userId" = ${owner})`;
+
 /**
  * The entitlement (docs/specs/pricing.md -> "Checkout and entitlement"): a
  * SQL boolean over the `"user"` row aliased by `user` (default `u`), so a
  * query that resolves a bearer resolves its owner's entitlement in the same
- * statement. The account's subscription grants it, and the verified
- * `ADMIN_EMAIL` is a standing comp.
+ * statement. The account's subscription grants it unless a payment dispute
+ * is open, and the verified `ADMIN_EMAIL` is a standing comp.
  */
 export function entitledSql(user = "u"): string {
-  return `(${adminSql(user)} OR ${subscribedSql(`${user}.id`)})`;
+  return `(${adminSql(user)} OR (${subscribedSql(`${user}.id`)} AND NOT ${disputedSql(`${user}.id`)}))`;
 }
 
 /** Whether the `"user"` row aliased by `user` is the admin's: `ADMIN_EMAIL`, verified. */

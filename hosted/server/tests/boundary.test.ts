@@ -33,6 +33,7 @@ import { cookieEntitled, openAuthRead } from "../account-gate";
 import { createAuthApp } from "@pgstencil/auth/better-auth";
 import { authPolicy } from "../policy";
 import { prelaunchAuth } from "../prelaunch";
+import { BILLING_WEBHOOK_PATH, CHECKOUT_CLOSED } from "../billing-routes";
 import { RECENT_LOGIN_REQUIRED, relayAccountRoutes } from "../relay-account";
 import type { RelayRoomRpc } from "../relay-room-contract";
 import { voiceApp } from "../voice-app";
@@ -144,6 +145,15 @@ const ACCOUNT_RELAY: [string, string][] = [
   ["DELETE", "/api/relay/passkeys/AAAA"],
 ];
 
+/** Billing's routes, which only the account serves. */
+const ACCOUNT_BILLING: [string, string][] = [
+  ["GET", "/api/billing"],
+  ["POST", "/api/billing/checkout"],
+  ["POST", "/api/billing/confirm"],
+  ["POST", "/api/billing/portal"],
+  ["POST", BILLING_WEBHOOK_PATH],
+];
+
 /** A route each Worker serves, as method and path. */
 const SERVED: Record<Name, [string, string][]> = {
   account: [
@@ -152,6 +162,7 @@ const SERVED: Record<Name, [string, string][]> = {
     ["GET", "/api/voice"],
     ["DELETE", "/api/voice"],
     ...ACCOUNT_RELAY,
+    ...ACCOUNT_BILLING,
     ["GET", "/login"],
   ],
   relay: [
@@ -231,6 +242,7 @@ const ABSENT: Record<Name, [string, string][]> = {
     ["GET", "/api/voice"],
     ["DELETE", "/api/voice"],
     ...ACCOUNT_RELAY,
+    ...ACCOUNT_BILLING,
     ["POST", "/api/voice/speak"],
     ["DELETE", "/api/voice/token"],
     // The self-host installers' probe; neither a Burrow nor Pocket asks Hosted for it.
@@ -253,6 +265,7 @@ const ABSENT: Record<Name, [string, string][]> = {
     ["GET", "/login"],
     ...RELAY_API,
     ...ACCOUNT_RELAY,
+    ...ACCOUNT_BILLING,
     ["GET", WS_ROUTES.burrow],
     ["GET", WS_ROUTES.client],
   ],
@@ -267,6 +280,17 @@ test.for(NAMES)("%s: serves only its own routes", async (name) => {
       `${method} ${path}`,
     ).toBe(name === "account" ? ACCOUNT_POLICY : RUNS_NOTHING_POLICY);
   }
+  expect(outbound).toEqual([]);
+});
+
+test("without Stripe bindings the account's webhook is closed before any database or Stripe request", async () => {
+  const response = await workers.account.dispatchFetch(ORIGINS.account + BILLING_WEBHOOK_PATH, {
+    method: "POST",
+    headers: { "stripe-signature": "t=1,v1=00", "content-type": "application/json" },
+    body: "{}",
+  });
+  expect([response.status, await response.json()]).toEqual([503, { message: CHECKOUT_CLOSED }]);
+  expect(response.headers.get("content-security-policy")).toBe(ACCOUNT_POLICY);
   expect(outbound).toEqual([]);
 });
 

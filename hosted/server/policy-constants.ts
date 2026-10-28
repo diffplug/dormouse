@@ -37,3 +37,7 @@ export const TERMS_VERSION = "2026-10-28";
 // Where Stripe returns the browser from Checkout and the customer portal: an
 // account page on the account origin.
 export const BILLING_RETURN_PATH = "/billing";
+
+// The plans checkout sells, by the names a checkout request, `status()`, and
+// the billing metrics use.
+export const BILLING_PLANS = ["monthly", "yearly", "founding"] as const;

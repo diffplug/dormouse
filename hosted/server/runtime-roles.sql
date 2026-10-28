@@ -62,11 +62,13 @@ $$;
 GRANT USAGE ON SCHEMA public TO dormouse_relay, dormouse_voice;
 
 -- Both: the entitlement (hosted/server/entitlement.ts) reads the owner's
--- address and its verification, and the owner's subscriptions.
+-- address and its verification, the owner's subscriptions, and whether a
+-- payment dispute suspends them.
 GRANT SELECT (id, email, "emailVerified") ON "user" TO dormouse_relay, dormouse_voice;
 GRANT USAGE ON SCHEMA pgstencil_billing TO dormouse_relay, dormouse_voice;
 GRANT SELECT (owner_id, status, period_end, trial_end)
   ON pgstencil_billing.subscriptions TO dormouse_relay, dormouse_voice;
+GRANT SELECT ("userId") ON dormouse_billing_disputes TO dormouse_relay, dormouse_voice;
 
 -- Both: their metrics' upsert-increment (hosted/server/metrics.ts), whose
 -- conflict needs the read. A row is an aggregate count.

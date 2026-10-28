@@ -16,13 +16,46 @@ import {
  * {@link recordMetric} or {@link authMetricHooks}.
  */
 export async function countMetric(databaseUrl: string, event: MetricEvent, label = "", n = 1) {
-  await queryDatabase(
-    databaseUrl,
+  await countMetricWith((text, values) => queryDatabase(databaseUrl, text, values), event, label, n);
+}
+
+/**
+ * {@link countMetric} through `query`, such as an open transaction's, so the
+ * count commits or rolls back with it.
+ */
+export async function countMetricWith(
+  query: (text: string, values: unknown[]) => Promise<unknown>,
+  event: MetricEvent,
+  label = "",
+  n = 1,
+) {
+  await query(
     `INSERT INTO dormouse_metrics_daily AS m (day, event, label, count)
     VALUES ((now() AT TIME ZONE 'UTC')::date, $1, $2, $3)
     ON CONFLICT (day, event, label) DO UPDATE SET count = m.count + EXCLUDED.count`,
     [event, metricLabel(event, label), n],
   );
+}
+
+/**
+ * {@link countMetricWith} inside an open transaction, under a savepoint of
+ * its own: the count commits with the transaction, so a redelivered event
+ * never counts twice, and a failed count rolls back only itself and is
+ * logged, never failing the transaction it rides in.
+ */
+export async function countMetricInTransaction(
+  query: (text: string, values: unknown[]) => Promise<unknown>,
+  event: MetricEvent,
+  label = "",
+) {
+  await query("SAVEPOINT dormouse_metric", []);
+  try {
+    await countMetricWith(query, event, label);
+    await query("RELEASE SAVEPOINT dormouse_metric", []);
+  } catch (error) {
+    await query("ROLLBACK TO SAVEPOINT dormouse_metric", []);
+    console.error(`Metric ${event} not recorded: ${error instanceof Error ? error.message : "unknown error"}`);
+  }
 }
 
 /** `write`, settled: it never rejects, and its failure is only logged. */
