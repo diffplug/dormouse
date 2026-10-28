@@ -19,7 +19,7 @@ Every Worker answers `/api/health` and `/api/ready`, 404s anything else under it
 
 **Must run committed Better Auth migrations before deploying code that needs them, never during a Worker request.** Postgres is reached through an uncached Hyperdrive binding, one per Worker.
 
-**Must grant `dormouse_relay` and `dormouse_voice` only what `hosted/server/runtime-roles.sql` lists, never default privileges**, so a new table needs a grant there; each reaches only its Worker's tables and the entitlement's user columns, and the relay inserts approved voice tokens ("Managed voice"). **Must bind each production Worker to its own Hyperdrive connecting as its role**: account `dormouse_app`, relay `dormouse_relay`, voice `dormouse_voice` (`PRODUCTION` in `hosted/scripts/production.mjs`).
+**Must grant `dormouse_relay` and `dormouse_voice` only what `hosted/server/runtime-roles.sql` lists, never default privileges**, so a new table needs a grant there; each reaches only its Worker's tables and the entitlement's user columns, the relay inserts approved voice tokens ("Managed voice"), and both add to the daily counts ("Metrics"). **Must bind each production Worker to its own Hyperdrive connecting as its role**: account `dormouse_app`, relay `dormouse_relay`, voice `dormouse_voice` (`PRODUCTION` in `hosted/scripts/production.mjs`).
 
 **Must install released core/auth packages from npm and commit their lockfile integrity hashes.** The installed packages' `dist/provenance.json` must name the same clean pgstencil commit; no runtime import depends on a sibling checkout. The auth migrations remain owned by the package; Dormouse's own tables migrate from `hosted/server/dormouse-migrations/`. **Never edit a merged migration**: a migrated database never reruns one, so append the next number (pinned by `hosted/server/tests/migrations.test.ts`).
 
@@ -242,6 +242,25 @@ Errors are the managed-voice cookie routes' ("Managed voice"), except that their
 **Must bind every approval to its purpose, defaulting omitted purpose to remote control.** Voice approvals use a distinct code derivation and scope. Voice clients require begin to acknowledge their purpose before displaying or polling a code. Voice redemption atomically marks the approval and mints a token, without a Burrow or its cap; later polls report it spent. A remote poll cannot redeem a voice approval, or vice versa. Both purposes share the digits, approval gates, and expiry.
 
 Source of truth: `relayApiRoutes` in `hosted/server/relay-api.ts`; `relayAccountRoutes` in `hosted/server/relay-account.ts`; `takeEnrollment` in `hosted/src/enrollment.ts`.
+
+## Metrics
+
+Hosted counts what its Workers serve in aggregate daily rows, server-side; no page or desktop sends any.
+
+| Event | Labels | Counted when |
+|---|---|---|
+| `enroll.approved` | `remote`, `voice` | an approval succeeds, under its purpose |
+| `burrow.enrolled` | none | a remote poll enrolls a Burrow |
+| `voice.speak` | `ok`, `capped`, `error` | speak answers 200, 429, or 502 |
+| `voice.fallback-cap` | none | a speak spends its owner's last call of the UTC day |
+| `push.sent` | none | a send delivers, once per delivery |
+| `pocket.signin` | none | a passkey sign-in mints a session |
+
+- **Never count a label off its event's list** (`METRIC_LABELS`): the write throws instead. What a row may hold, and who reads it: `docs/specs/security-hosted.md` -> "Account boundary".
+- **Never fail or delay the request a metric counts**: the write runs after the response, through `waitUntil`, and its failure is only logged.
+- Rows are kept forever, since none describes anyone. The account Worker's `/admin/metrics` shows the last 30 UTC days and all-time totals, "today" by the database's clock, which dates every row.
+
+Source of truth: `hosted/server/metric-labels.ts`; `recordMetric` in `hosted/server/metrics.ts`; `hosted/server/dormouse-migrations/013_metrics.sql`; `AdminMetrics` in `hosted/src/AdminMetrics.tsx`.
 
 ## Development and release
 
