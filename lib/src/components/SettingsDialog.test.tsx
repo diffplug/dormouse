@@ -6,14 +6,16 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setPlatform } from '../lib/platform';
 import { FakePtyAdapter } from '../lib/platform/fake-adapter';
-import { SettingsDialog, SETTINGS_SCROLL_MS } from './SettingsDialog';
-import { makeStubBurrowLink, UNENROLLED_STATUS } from '../host/remote/test-burrow-link';
+import { AlarmSettingsSection, SettingsDialog, SETTINGS_SCROLL_MS } from './SettingsDialog';
+import { HOSTED_PRICING_URL } from './HostedEnrollment';
+import { enrolledStatus, makeStubBurrowLink, UNENROLLED_STATUS } from '../host/remote/test-burrow-link';
+import type { BurrowConsoleStatus } from '../host/remote/service-protocol';
 import { makeStubManagedVoicePort } from '../lib/platform/test-ports';
 import { networkPolicyResult, nothingPolicy } from '../remote/network-policy';
 import { stubResizeObserver } from './wall/wall-test-utils';
 import { setNativeFieldValue } from '../lib/dom';
 import { applyAlertSettingsFromHost, DEFAULT_ALERT_SETTINGS, getAlertSettings } from '../lib/alert-settings';
-import { setCommandWatched, getWatchedCommands } from '../lib/terminal-registry';
+import { resetPushDevices, setCommandWatched, getWatchedCommands, setPushDevices } from '../lib/terminal-registry';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -264,6 +266,62 @@ describe('SettingsDialog under Network → Nothing', () => {
     await act(async () => link.click());
     expect(document.querySelector<HTMLInputElement>('input[type="search"]')!.value).toBe('');
     expect(network.hidden).toBe(false);
+  });
+});
+
+describe('SettingsDialog push line', () => {
+  /** An enrolled Hosted build whose relay socket is in `connection`. */
+  const hosted = (connection: BurrowConsoleStatus['connection']) =>
+    ({ ...UNENROLLED_STATUS, enrolled: true, serving: true, burrowId: 'burrow-6f1c2a90', connection });
+
+  const pushLine = () => document.querySelector('[data-setting="push"]')?.textContent ?? '';
+
+  afterEach(() => resetPushDevices());
+
+  it('says an account with no plan sends no push, linking the plans, where the list fetch failed', async () => {
+    platform.burrow = makeStubBurrowLink({ status: hosted('not-entitled') });
+    setPushDevices({ status: 'error', devices: [] });
+    const openExternal = vi.fn();
+    Object.assign(platform, { openExternal });
+    await render();
+    expect(pushLine()).toContain('Your account has no Hosted plan, so no push is sent.');
+    expect(pushLine()).not.toContain('Could not reach the Relay');
+    const plans = [...document.querySelectorAll<HTMLButtonElement>('[data-setting="push"] button')]
+      .find((button) => button.textContent === 'See Hosted plans')!;
+    await act(async () => plans.click());
+    expect(openExternal).toHaveBeenCalledWith(HOSTED_PRICING_URL);
+  });
+
+  it('points a computer removed from its Hosted account at enrolling again below', async () => {
+    platform.burrow = makeStubBurrowLink({ status: hosted('removed') });
+    setPushDevices({ status: 'no-burrow', devices: [] });
+    await render();
+    expect(pushLine()).toContain(
+      'This computer was removed from your Hosted account, so no push is sent. Enroll it again under Hosted Relay below.',
+    );
+    expect(pushLine()).not.toContain('Connect this machine');
+  });
+
+  it('names the self-host Relay that refused, and never Hosted', async () => {
+    platform.burrow = makeStubBurrowLink({ status: enrolledStatus({ connection: 'removed' }) });
+    setPushDevices({ status: 'no-burrow', devices: [] });
+    await render();
+    expect(pushLine()).toMatch(/no longer accepts this computer, so no push is sent\. Disconnect and enroll it again under Persistent Relay below\./);
+    expect(pushLine()).not.toContain('Hosted');
+  });
+
+  it('keeps the network failure for a Relay that has not refused', async () => {
+    platform.burrow = makeStubBurrowLink({ status: hosted('connected') });
+    setPushDevices({ status: 'error', devices: [] });
+    await render();
+    expect(pushLine()).toContain('Could not reach the Relay to list phones.');
+  });
+
+  it('points the brief preview, which has no Remote control below it, at Settings → Network', async () => {
+    platform.burrow = makeStubBurrowLink({ status: hosted('removed') });
+    await act(async () => root.render(<AlarmSettingsSection sink="push" preview />));
+    await act(async () => {});
+    expect(text()).toContain('Enroll it again under Hosted Relay in Settings → Network.');
   });
 });
 

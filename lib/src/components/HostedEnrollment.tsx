@@ -13,6 +13,11 @@ export const HOSTED_PRICING_URL = 'https://dormouse.sh/hosted/#pricing';
 /** The Hosted page's voice section, the spoken-alarm row's link where the build has no managed voice. */
 export const HOSTED_VOICE_URL = 'https://dormouse.sh/hosted/#voice';
 
+/** The link to {@link HOSTED_PRICING_URL}, the one way every no-plan line names the plans. */
+export function HostedPlansLink() {
+  return <ExternalTextLink href={HOSTED_PRICING_URL}>See Hosted plans</ExternalTextLink>;
+}
+
 /** The one field the offer card and the typed form both ask for. */
 export function BurrowNameField({
   value,
@@ -114,7 +119,7 @@ export function HostedEnrollmentEnded({
       {ended.reason === 'failed' && ended.message ? <div className="mt-1 text-error">{ended.message}</div> : null}
       {ended.reason === 'not-entitled' ? (
         <div className="mt-1">
-          <ExternalTextLink href={HOSTED_PRICING_URL}>See Hosted plans</ExternalTextLink>
+          <HostedPlansLink />
         </div>
       ) : null}
       {page ? (
