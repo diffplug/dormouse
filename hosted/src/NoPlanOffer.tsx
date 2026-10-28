@@ -11,6 +11,8 @@ import { foundingTier, LIST_MONTHLY } from "../../website/src/lib/hosted-pricing
 
 /** The Hosted page's plan cards, in a new tab so this one keeps its code. */
 export const HOSTED_PLANS_URL = withHostedRef("https://dormouse.sh/hosted/", HOSTED_REFS.hostedNoPlan, "pricing");
+/** This origin's checkout, once open: also a new tab, for the same reason. */
+export const CHECKOUT_URL = withHostedRef("/checkout", HOSTED_REFS.hostedNoPlan);
 
 const VOICE = "Natural Voice powered by ElevenLabs for spoken alarms";
 const POCKET = "Dormouse Pocket on your phone through the Hosted Relay";
@@ -22,7 +24,14 @@ const NO_LIMIT = "No device limit, no per-device charge";
  * leading with what Dormouse asked for. Coming back to this tab re-reads the
  * account, so a plan bought in the other one shows the digits here.
  */
-export function NoPlanOffer({ purpose }: { purpose: "remote" | "voice" | undefined }) {
+export function NoPlanOffer({
+  purpose,
+  checkoutOpen = false,
+}: {
+  purpose: "remote" | "voice" | undefined;
+  /** Billing is open, so the plans link goes to checkout. */
+  checkoutOpen?: boolean;
+}) {
   const voice = purpose === "voice";
   const founding = foundingTier();
   return (
@@ -53,7 +62,7 @@ export function NoPlanOffer({ purpose }: { purpose: "remote" | "voice" | undefin
       </p>
       <a
         className={`mt-5 gap-2 ${ACTION_CLASS}`}
-        href={HOSTED_PLANS_URL}
+        href={checkoutOpen ? CHECKOUT_URL : HOSTED_PLANS_URL}
         target="_blank"
         rel="noopener"
       >

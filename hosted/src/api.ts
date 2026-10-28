@@ -2,6 +2,8 @@ import { providerIds, providerNames } from "../server/providers.js";
 import type { ProviderId } from "../server/providers.js";
 import { NOT_ENTITLED_ERROR } from "../../remote-lib-common/src/remote/wire.ts";
 import { ADMIN_METRICS_PATH, type AdminMetricsBody } from "../server/metric-labels";
+import { CHECKOUT_CLOSED, TERMS_VERSION } from "../server/policy-constants";
+import type { BillingSummary, Plan } from "./billing";
 
 export const providers = providerIds;
 export type Provider = ProviderId;
@@ -18,6 +20,8 @@ async function request(
   path: string,
   init: RequestInit | undefined,
   unavailable: string,
+  /** Let a 503 through, for a caller that reads its message. */
+  pass503 = false,
 ): Promise<Response> {
   let response: Response;
   try {
@@ -29,7 +33,7 @@ async function request(
   } catch {
     throw new Error("Could not connect. Check your connection and try again.");
   }
-  if (response.status >= 500) throw new Error(unavailable);
+  if (response.status >= 500 && !(pass503 && response.status === 503)) throw new Error(unavailable);
   return response;
 }
 async function json<T>(path: string, init?: RequestInit): Promise<T> {
@@ -69,9 +73,16 @@ export async function social(provider: Provider, linking: boolean) {
     linking ? "link-social" : "sign-in/social",
     { provider },
   );
-  const url = new URL(result.url);
-  if (url.protocol !== "https:")
-    throw new Error("Sign-in is temporarily unavailable. Please try again.");
+  leaveFor(result.url, "Sign-in is temporarily unavailable. Please try again.");
+}
+/**
+ * Sends this tab to `href`, an https page the server named (a provider's,
+ * Stripe's), or in development a loopback stand-in such as StripeDev's.
+ */
+function leaveFor(href: string, unavailable: string) {
+  const url = new URL(href);
+  const loopback = import.meta.env.DEV && url.protocol === "http:" && ["127.0.0.1", "localhost"].includes(url.hostname);
+  if (url.protocol !== "https:" && !loopback) throw new Error(unavailable);
   window.location.assign(url.href);
 }
 
@@ -215,4 +226,58 @@ export async function getAdminMetrics(): Promise<AdminMetricsRead> {
   if (response.status === 404) return { status: "not-found" };
   if (!response.ok) throw await refused(response);
   return { status: "ok", body: (await response.json()) as AdminMetricsBody };
+}
+
+const BILLING_UNAVAILABLE = "Billing is temporarily unavailable. Try again.";
+async function billing(path: string, init?: RequestInit): Promise<Response> {
+  return request(`/api/billing${path}`, init, BILLING_UNAVAILABLE, true);
+}
+/** A billing call's error: closed, or the server's message for this page. */
+async function billingRefused(response: Response): Promise<Error> {
+  return response.status === 503 && !(await response.clone().json().then((body) => body?.message === CHECKOUT_CLOSED, () => false))
+    ? new Error(BILLING_UNAVAILABLE)
+    : refused(response);
+}
+const sendJson = (method: string, body: unknown): RequestInit => ({
+  method,
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify(body),
+});
+/** This account's plan; `closed` until checkout opens. */
+export async function getBilling(): Promise<BillingSummary | "closed"> {
+  const response = await billing("");
+  if (response.ok) return (await response.json()) as BillingSummary;
+  const error = await billingRefused(response);
+  if (error.message === CHECKOUT_CLOSED) return "closed";
+  throw error;
+}
+/**
+ * Starts a checkout of `plan`, agreeing to the current terms and to automatic
+ * renewal, and sends this tab to Stripe.
+ */
+export async function startCheckout(plan: Plan, ref: string | null) {
+  const response = await billing(
+    "/checkout",
+    sendJson("POST", { plan, ...(ref ? { ref } : {}), terms: TERMS_VERSION, autoRenew: true }),
+  );
+  if (!response.ok) throw await billingRefused(response);
+  leaveFor(((await response.json()) as { url: string }).url, BILLING_UNAVAILABLE);
+}
+/** Confirms the checkout Stripe returned from, answering the plan it bought. */
+export async function confirmCheckout(checkout: string): Promise<BillingSummary> {
+  const response = await billing("/confirm", sendJson("POST", { checkout }));
+  if (!response.ok) throw await billingRefused(response);
+  return (await response.json()) as BillingSummary;
+}
+/** Sends this tab to Stripe's billing portal for this account's subscription. */
+export async function openPortal() {
+  const response = await billing("/portal", { method: "POST" });
+  if (!response.ok) throw await billingRefused(response);
+  leaveFor(((await response.json()) as { url: string }).url, BILLING_UNAVAILABLE);
+}
+/** Joins the founders row under `name`, or leaves it. */
+export async function setFounder(shown: boolean, name: string): Promise<BillingSummary> {
+  const response = await billing("/founder", sendJson("PUT", shown ? { shown, name } : { shown }));
+  if (!response.ok) throw await billingRefused(response);
+  return (await response.json()) as BillingSummary;
 }
