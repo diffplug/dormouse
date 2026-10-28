@@ -19,6 +19,8 @@ import { HostedShell } from "./HostedShell";
 export const isAdminMetricsPath = (path: string) => path === "/admin/metrics" || path === "/admin/metrics/";
 
 const EVENT_TITLES = {
+  "account.created": "Accounts created",
+  login: "Logins",
   "enroll.approved": "Approvals",
   "burrow.enrolled": "Computers enrolled",
   "voice.speak": "Natural Voice requests",

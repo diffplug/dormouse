@@ -1,11 +1,14 @@
 // Rules: docs/specs/hosted.md -> "Metrics". No I/O: the admin page's bundle
 // imports this as well as the Workers.
+import { providerIds } from "./providers.js";
 
 /**
  * Every event Hosted counts, and the only labels each may carry; `[""]` for
  * one counted without a label.
  */
 export const METRIC_LABELS = {
+  "account.created": [""],
+  login: ["email", ...providerIds],
   "enroll.approved": ["remote", "voice"],
   "burrow.enrolled": [""],
   "voice.speak": ["ok", "capped", "error"],

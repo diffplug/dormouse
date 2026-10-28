@@ -16,6 +16,11 @@ const recent: MetricRow[] = Array.from({ length: 30 }, (_, i) => 29 - i).flatMap
   const grown = 30 - back;
   if (back === 12) return [];
   return [
+    { day: day(back), event: "account.created", label: "", count: 1 + (grown % 5) },
+    { day: day(back), event: "login", label: "email", count: grown * 2 },
+    { day: day(back), event: "login", label: "github", count: grown * 3 },
+    ...(back % 2 === 0 ? [{ day: day(back), event: "login" as const, label: "google", count: grown }] : []),
+    ...(back === 3 ? [{ day: day(back), event: "login" as const, label: "apple", count: 1 }] : []),
     { day: day(back), event: "enroll.approved", label: "remote", count: 1 + (grown % 4) },
     ...(back % 3 === 0 ? [{ day: day(back), event: "enroll.approved" as const, label: "voice", count: 1 }] : []),
     { day: day(back), event: "burrow.enrolled", label: "", count: 1 + (grown % 3) },

@@ -9,6 +9,7 @@ import { createServer as createViteServer, type ViteDevServer } from "vite";
 import { createAuthApp } from "@pgstencil/auth/better-auth";
 import { developmentDatabase } from "pgstencil/database";
 import { EmailDev, SystemTime } from "pgstencil";
+import { authMetricHooks } from "./metrics";
 import { authPolicy } from "./policy";
 import { migrations } from "./migrations";
 import { allowedDevRequest } from "./dev-host-guard";
@@ -58,6 +59,7 @@ const auth = createAuthApp({
   origin,
   secret: "dormouse-hosted-local-development-only",
   email,
+  hooks: authMetricHooks(databaseUrl),
 });
 auth.app.get("/api/dev/emails", (c) =>
   c.json(email.all().map(({ to, text }) => ({ to, text }))),
