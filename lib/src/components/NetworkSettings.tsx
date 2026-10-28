@@ -136,9 +136,7 @@ function choiceFor(level: NetworkLevel, relayOrigin: string): Omit<LevelChoice, 
     case 'anywhere':
       return {
         title: 'Anywhere',
-        detail:
-          'Phones reach your terminals from any network, directly when they can, otherwise relayed through Hosted. ' +
-          'Phone and spoken alerts work too.',
+        detail: 'Phones reach your terminals from any network, directly when they can, otherwise relayed through Hosted.',
       };
     case 'relay':
       return {
