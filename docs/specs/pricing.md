@@ -3,7 +3,7 @@
 > - See `docs/specs/glossary.md` for Burrow / Client / Relay and Pane / Session vocabulary.
 > - **Owns:** the plans, the founding ladder, what a plan grants, how a desktop proves membership, the managed-voice boundary, and the content contract of the Hosted page.
 > - **Defers:** page chrome, rail, and link obligations to `docs/specs/website-docs.md` -> "Reference page chrome"; the Hosted Relay's accounts, enrollment, and entitlement, and managed voice's routes, to `docs/specs/hosted.md`; the cloud-hosted trust boundary to `docs/specs/security-remote.md` -> "Cloud-hosted mode"; alarm delivery to `docs/specs/alert.md` -> "Spoken alarms".
-> - **Status:** the Hosted page publishes the plans and the FAQ, and a desktop enrolls with Hosted for managed voice (`docs/specs/hosted.md` -> "Managed voice"); everything that takes money — checkout, the subscription as the entitlement, the hosted Relay — is under [Future](#future).
+> - **Status:** the Hosted page publishes the plans and the FAQ, a desktop enrolls with Hosted for managed voice and the Hosted Relay, and the account's subscription is the entitlement, with billing closed until checkout opens; checkout itself, and everything else that takes money, is under [Future](#future).
 
 ## The Hosted page
 
@@ -51,15 +51,23 @@ Prices in USD; DiffPlug adds or includes applicable tax by jurisdiction.
 
 Source of truth: `Hosted` in `website/src/pages/Hosted.tsx`; the `/pricing` rule in `website/public/_redirects`, pinned by `checkPricingRedirect` in `scripts/public-docs-lint.mjs`. `website/src/pages/Hosted.test.tsx` pins the page contract.
 
+## Checkout and entitlement
+
+- **Must use Stripe Billing, Stripe-hosted Checkout, and its customer portal through `@pgstencil/stripe`; DiffPlug is the seller and merchant of record**, responsible for refunds and applicable tax registration, collection, filing, and remittance; Stripe Tax calculates the tax. **Never receive or store full card numbers in Dormouse.** A founding lock is a per-cohort Price; cohort counts come from the billing provider's completed subscriptions.
+- **The entitlement is the account's subscription, read on the server on every voice and Relay request** (`docs/specs/hosted.md` -> "Entitlement"). No licence, no offline verification, and no grace past what the subscription grants; a lapsed member's voices fall back to the system voice and its Burrows to `not-entitled`.
+- **Cohorts close by count, never by date**: completed purchases at the billing provider; a purchase ending within the 30-day refund window, as a full refund or finally reversed payment ends it ("Checkout"), returns its seat to its cohort. **Never reopen the ladder at a lower step** once a cohort has closed. **When a cohort closes the price rises one step and the counter resets to 100**, and **founding closes only when the ladder reaches list**: founding means bought at launch pricing, and the Hosted Relay shipping does not close it.
+- **Checkout honors the price it opened at.** Concurrent checkouts may oversell a cohort by a few seats; the overage is the customer's, and the next cohort still opens at a full 100.
+
+Source of truth: `withBilling` and `openCohort` in `hosted/server/billing.ts`; `docs/specs/hosted.md` -> "Billing" owns the rest.
+
 ## Future
 
 **Scope: hosted-sales** — what remains, in staged order:
 
 1. **The cohort endpoint** the page already calls: the open cohort's seats and the opted-in founders, avatars proxied onto this origin.
-2. **Checkout and entitlement**: purchase, the subscription as the account's entitlement, revocation.
-3. **Managed voice for members**: the subscription replacing the admin-only entitlement (`docs/specs/hosted.md` -> "Entitlement"), one voice per Pane.
-4. **Hosted Relay inclusion**: the subscription as the Relay's entitlement (`docs/specs/hosted.md` -> "Relay").
-5. **Renewal, cancellation, and refund** paths.
+2. **Checkout** ("Checkout"): the routes, the webhook, and the account pages that sell, then opening billing.
+3. **Managed voice for members**: one voice per Pane.
+4. **Renewal, cancellation, and refund** paths.
 
 Team and enterprise tiers are never sold through this page. A free hosted tier is undecided — see [Open questions](#open-questions).
 
@@ -69,12 +77,7 @@ What each plan grants once checkout can sell it; [Published prices](#published-p
 
 - **Founding grants the Individual plan plus a founding badge**; monthly and yearly grant the plan alone.
 - **Must lock the founding base yearly price in USD while the subscription remains active**, excluding applicable taxes; a lapsed founder re-subscribes at list. **Must preserve the lock through billing-provider migrations and failures caused by DiffPlug**, allowing payment restoration.
-- **Cohorts close by count, never by date.** The count is completed purchases at the billing provider; a full refund or finally reversed payment returns the seat to its cohort.
-- **When a cohort closes the price rises one step and the counter resets to 100.**
-- **Founding closes only when the ladder reaches list.** Founding means bought at launch pricing; the Hosted Relay shipping does not close it.
-- **Checkout honors the price it opened at.** Concurrent checkouts may oversell a cohort by a few seats; the overage is the customer's, and the next cohort still opens at a full 100.
 - **List may rise while founding is open, and never falls.** Monthly and yearly move together the same day, so list is always a price someone can buy at; the ladder keeps climbing $10 per cohort toward the new list; every founder's lock and the struck price they were shown are unchanged.
-- **Never reopen the ladder at a lower step** once a cohort has closed.
 - **Founding badges are cosmetic**: in-app and on the credits page, never a capability.
 
 ### The Individual plan
@@ -87,16 +90,16 @@ What each plan grants once checkout can sell it; [Published prices](#published-p
 | Founding badge | live for founding |
 
 - **The plan never grants team or enterprise capability** — org accounts, SSO, SCIM, BYOT, audit export.
-- **The Hosted Relay is part of the plan, never a second purchase.** Reserved: the **hosted-sales** scope reads the plan from the Hosted account's subscription ("Checkout and entitlement"), so a member never signs up twice.
+- **The Hosted Relay is part of the plan, never a second purchase.** The entitlement reads it from the Hosted account's subscription ("Checkout and entitlement"), so a member never signs up twice.
 - **Nothing shipped free is ever gated**: the terminal, `dor`, browser panes, the notepad, alerts with the system voice, the self-host Relay, and Pocket over a self-hosted Relay stay free, with no login.
 
-### Checkout and entitlement
+### Checkout
 
-- **Must use Stripe Billing, Stripe-hosted Checkout, and its customer portal through `@pgstencil/stripe`; DiffPlug is the seller and merchant of record**, responsible for refunds and applicable tax registration, collection, filing, and remittance. **Never receive or store full card numbers in Dormouse.** A founding lock is a per-cohort Price; cohort counts come from the billing provider's completed subscriptions.
+The rest of "Checkout and entitlement", once checkout can sell:
+
 - **Checkout starts from a Hosted account**: a buy button lands on the account origin, which asks for sign-in first, so the subscription belongs to an account from its first event.
 - **Founding checkout offers the founders-row opt-in, unticked**; the account can withdraw it at any time.
 - **The success page asks the four Van Westendorp questions**, optional and unsent until answered: too expensive to consider, too cheap to trust, expensive but would consider, a bargain. Their answers inform later list changes.
-- **The entitlement is the account's subscription, read on the server on every voice and Relay request.** No licence, no offline verification, and no grace past what the subscription grants; a lapsed member's voices fall back to the system voice and its Burrows to `not-entitled`.
 - **Must license one individual, including work use, with no device limit and no per-device charge**; enrollment's abuse ceiling is far above what a person owns (`docs/specs/hosted.md` -> "Burrow enrollment"). **Must disclose material usage limits before purchase**, including managed voice's daily cap.
 - **A full refund or a finally reversed payment ends the subscription**, so the next request is refused. A partial refund or billing correction never ends it, and an open dispute only suspends it ("Paid-launch requirements").
 

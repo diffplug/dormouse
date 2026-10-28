@@ -221,7 +221,7 @@ The HTTPS origin may be public. Tailnet-only Serve is the installer default and 
 
 ### Cloud-hosted mode
 
-Hosted's admin-entitled routing is implemented (`docs/specs/security-hosted.md` -> "Relay boundary"). Broad paid activation remains staged; its review must cover these operator responsibilities:
+Hosted's subscription-entitled routing is implemented, with billing closed until checkout opens (`docs/specs/security-hosted.md` -> "Relay boundary"; `docs/specs/hosted.md` -> "Billing"). Broad paid activation remains staged; its review must cover these operator responsibilities:
 
 - **Must review Hosted operator handling of residual metadata before paid activation.** The visible metadata is `docs/specs/remote-security-model.md` -> "Residual metadata"; the trust boundary above still excludes plaintext and new Burrow authorization.
 - **Never rely on tailnet reachability for paid Hosted admission.** Review public admission and the multi-tenant account boundary before activation (`docs/specs/hosted.md` -> "Burrow enrollment"); the self-host setup password supplies no Hosted identity.
