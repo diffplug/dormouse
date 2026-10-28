@@ -34,6 +34,7 @@ import { createAuthApp } from "@pgstencil/auth/better-auth";
 import { authPolicy } from "../policy";
 import { prelaunchAuth } from "../prelaunch";
 import { BILLING_WEBHOOK_PATH, CHECKOUT_CLOSED } from "../billing-routes";
+import { COHORT_ENDPOINT, FOUNDER_AVATAR_PREFIX } from "../cohort-routes";
 import { RECENT_LOGIN_REQUIRED, relayAccountRoutes } from "../relay-account";
 import type { RelayRoomRpc } from "../relay-room-contract";
 import { voiceApp } from "../voice-app";
@@ -145,8 +146,10 @@ const ACCOUNT_RELAY: [string, string][] = [
   ["DELETE", "/api/relay/passkeys/AAAA"],
 ];
 
-/** Billing's routes, which only the account serves. */
+/** Billing's routes and the public founders row's, which only the account serves. */
 const ACCOUNT_BILLING: [string, string][] = [
+  ["GET", COHORT_ENDPOINT],
+  ["GET", FOUNDER_AVATAR_PREFIX + "0".repeat(64)],
   ["GET", "/api/billing"],
   ["POST", "/api/billing/checkout"],
   ["POST", "/api/billing/confirm"],
@@ -291,6 +294,10 @@ test("without Stripe bindings the account's webhook is closed before any databas
   });
   expect([response.status, await response.json()]).toEqual([503, { message: CHECKOUT_CLOSED }]);
   expect(response.headers.get("content-security-policy")).toBe(ACCOUNT_POLICY);
+  expect(outbound).toEqual([]);
+  // The founders row is closed with it, unread too.
+  const cohorts = await workers.account.dispatchFetch(ORIGINS.account + COHORT_ENDPOINT);
+  expect([cohorts.status, await cohorts.json()]).toEqual([503, { message: CHECKOUT_CLOSED }]);
   expect(outbound).toEqual([]);
 });
 
