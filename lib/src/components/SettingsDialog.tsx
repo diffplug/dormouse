@@ -69,8 +69,9 @@ function describePushTargets(
   push: PushDevicesState,
   burrow: BurrowConsoleStatus | null,
   remoteControlBelow: boolean,
+  preview: boolean,
 ): ReactNode {
-  if (burrow && relayRefuses(burrow.connection)) return describeRefusal(burrow, remoteControlBelow);
+  if (burrow && relayRefuses(burrow.connection)) return describeRefusal(burrow, remoteControlBelow, preview);
   if (push.status === 'loading') return 'Looking for phones…';
   if (push.status === 'error') return 'Could not reach the Relay to list phones.';
   // The preview never shows Remote control, so it also omits "below".
@@ -99,16 +100,18 @@ function describePushTargets(
 /**
  * Why a refusing Relay sends no push, and the way back: the plans for an
  * account with none, otherwise enrolling again under the persistent Relay's
- * heading in Remote control. A self-host build's line never names Hosted.
+ * heading in Remote control. A self-host build's line never names Hosted. The
+ * inert preview carries no plans link of its own; its live line may.
  */
-function describeRefusal(status: BurrowConsoleStatus, remoteControlBelow: boolean): ReactNode {
+function describeRefusal(status: BurrowConsoleStatus, remoteControlBelow: boolean, preview: boolean): ReactNode {
   const where = remoteControlBelow ? 'below' : 'in Settings → Network';
   if (status.relayMode === 'self-host') {
     return `${hostOf(status.relayOrigin)} no longer accepts this computer, so no push is sent. ` +
       `Disconnect and enroll it again under Persistent Relay ${where}.`;
   }
   if (status.connection === 'not-entitled') {
-    return <>Your account has no Hosted plan, so no push is sent. <HostedPlansLink from={HOSTED_REFS.settingsPush} /></>;
+    const sentence = 'Your account has no Hosted plan, so no push is sent.';
+    return preview ? sentence : <>{sentence} <HostedPlansLink from={HOSTED_REFS.settingsPush} /></>;
   }
   return `This computer was removed from your Hosted account, so no push is sent. ` +
     `Enroll it again under Hosted Relay ${where}.`;
@@ -606,7 +609,7 @@ export function AlarmSettingsSection({ sink, preview = false, onShowNetwork }: {
       {networkOff ? (
         <>Push is off while <NetworkTopicLink onShow={onShowNetwork} /> is set to Nowhere.</>
       ) : (
-        <PushTargets remoteControlBelow={hasBurrowService && !preview} />
+        <PushTargets remoteControlBelow={hasBurrowService && !preview} preview={preview} />
       )}
     </AlarmSinkSection>
   );
@@ -616,10 +619,10 @@ export function AlarmSettingsSection({ sink, preview = false, onShowNetwork }: {
  * {@link describePushTargets} over the live stores: its own component so only
  * the push sink, not speech, keeps the Burrow status polled.
  */
-function PushTargets({ remoteControlBelow }: { remoteControlBelow: boolean }) {
+function PushTargets({ remoteControlBelow, preview }: { remoteControlBelow: boolean; preview: boolean }) {
   const push = useSyncExternalStore(subscribeToPushDevices, getPushDevices);
   const burrow = useSyncExternalStore(subscribeToBurrowStatus, getBurrowStatusSnapshot);
-  return describePushTargets(push, burrow.kind === 'ready' ? burrow.status : null, remoteControlBelow);
+  return describePushTargets(push, burrow.kind === 'ready' ? burrow.status : null, remoteControlBelow, preview);
 }
 
 /**

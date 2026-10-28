@@ -3,19 +3,31 @@ import { useEffect, useLayoutEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { POPUP_SURFACE_CLASS } from './design';
 import { AlarmSettingsSection } from './SettingsDialog';
+import { AlarmUpsellLine, type UpsellTopic } from './AlarmUpsellLine';
 import type { AlertSink } from '../lib/alert-delivery-model';
+import type { AlarmUpsell } from '../lib/alarm-upsell';
 import { useAnchoredMenu } from './use-anchored-menu';
 import { OVERLAY_VIEWPORT_MARGIN_PX } from '../lib/ui-geometry';
+
+const SHOW_MS = 2000;
+/** Long enough to read the live line and reach it. */
+const SHOW_WITH_UPSELL_MS = 6000;
+const FADE_MS = 250;
 
 /** Remount for every toggle, including repeated clicks on the same setting,
  * so an earlier confirmation's fade/removal cannot retire the newest one. */
 export function SettingsPreview({
   sink,
   anchor,
+  upsell,
+  onShowSettings,
   onClose,
 }: {
   sink: AlertSink;
   anchor: HTMLElement;
+  /** The one live line under the inert section, once earned (`takeAlarmUpsell`). */
+  upsell: AlarmUpsell | null;
+  onShowSettings: (topic: UpsellTopic) => void;
   onClose: () => void;
 }) {
   const { policy: settings } = useWorkspaceAlertPolicy();
@@ -27,13 +39,16 @@ export function SettingsPreview({
   useLayoutEffect(() => setTriggerEl(anchor), [anchor, setTriggerEl]);
 
   useEffect(() => {
-    const fade = window.setTimeout(() => setFading(true), 2000);
-    const close = window.setTimeout(onClose, 2250);
+    // A line that arrives as the preview fades brings it back.
+    setFading(false);
+    const show = upsell ? SHOW_WITH_UPSELL_MS : SHOW_MS;
+    const fade = window.setTimeout(() => setFading(true), show);
+    const close = window.setTimeout(onClose, show + FADE_MS);
     return () => {
       window.clearTimeout(fade);
       window.clearTimeout(close);
     };
-  }, [onClose]);
+  }, [upsell, onClose]);
 
   const label = sink === 'speech' ? 'Spoken alarms' : 'Push notifications';
   const enabled = sink === 'speech' ? settings.speakEnabled : settings.pushEnabled;
@@ -50,6 +65,11 @@ export function SettingsPreview({
       <div inert aria-hidden="true">
         <AlarmSettingsSection sink={sink} preview />
       </div>
+      {upsell && (
+        <div className="pointer-events-auto">
+          <AlarmUpsellLine upsell={upsell} onShowSettings={onShowSettings} onDone={onClose} />
+        </div>
+      )}
     </div>,
     document.body,
   );
