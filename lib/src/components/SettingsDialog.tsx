@@ -121,7 +121,7 @@ const TOPICS = [
   { id: 'labs', label: 'Labs', icon: FlaskIcon, groups: ['delayedKill'] },
   { id: 'about', label: 'About', icon: InfoIcon, groups: ['about'] },
 ] as const;
-type TopicId = typeof TOPICS[number]['id'];
+export type TopicId = typeof TOPICS[number]['id'];
 type GroupId = typeof TOPICS[number]['groups'][number];
 /** Search matches a group by its topic's label as well as its own text. */
 const TOPIC_LABEL_OF = Object.fromEntries(
@@ -132,6 +132,8 @@ const TOPIC_LABEL_OF = Object.fromEntries(
 export const TOPIC_GAP_PX = 16;
 /** A slower, consistent pace than the browser's native smooth scrolling. */
 export const SETTINGS_SCROLL_MS = 700;
+/** How long a dialog opened at a topic keeps it in view while the sections above it fill in. */
+const SETTLE_MS = 2000;
 
 /** Search the mounted controls themselves so descriptions, options, and live
  * command/device names have no second copy to drift. Hidden groups stay mounted
@@ -183,8 +185,8 @@ function TopicSection({ id, hidden, children }: { id: TopicId; hidden: boolean; 
   );
 }
 
-/** App-global settings. */
-export function SettingsDialog({ onClose }: { onClose: () => void }) {
+/** App-global settings, opened at `initialTopic` (the top by default). */
+export function SettingsDialog({ onClose, initialTopic }: { onClose: () => void; initialTopic?: TopicId }) {
   const watched = useSyncExternalStore(subscribeToWatchedCommands, getWatchedCommandsSnapshot);
   const settings = useSyncExternalStore(subscribeToAlertSettings, getAlertSettings);
   const shellState = useSyncExternalStore(subscribeToShells, getShellsSnapshot);
@@ -251,6 +253,12 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     scrollFrame.current = null;
     delete contentRef.current?.dataset.topicScrolling;
   }, []);
+  /** The topic opened at, held in view until `until` while the sections above it fill in. */
+  const settling = useRef<{ id: TopicId; until: number } | null>(null);
+  const takeOverScroll = useCallback(() => {
+    settling.current = null;
+    cancelScroll();
+  }, [cancelScroll]);
 
   const scrollToTopic = useCallback((id: TopicId | null) => {
     cancelScroll();
@@ -291,13 +299,32 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     followScroll();
     const content = contentRef.current;
     if (!content) return;
-    const observer = new ResizeObserver(followScroll);
+    const observer = new ResizeObserver(() => {
+      followScroll();
+      // A status read landing in a section above the opened topic would push
+      // it away once its scroll has finished.
+      const target = settling.current;
+      if (target && scrollFrame.current === null && performance.now() < target.until) scrollToTopic(target.id);
+    });
     observer.observe(content);
     content.querySelectorAll('[data-settings-topic]').forEach((section) => observer.observe(section));
     return () => observer.disconnect();
-  }, [followScroll, visibleTopicIds]);
+  }, [followScroll, scrollToTopic, visibleTopicIds]);
 
   useEffect(() => cancelScroll, [cancelScroll]);
+
+  // Opened at a topic: go there once it shows, which waits for the search
+  // index, since every section is hidden on the first frame. Once only, so the
+  // reader is never pulled back.
+  const pendingTopic = useRef(initialTopic);
+  useEffect(() => {
+    const id = pendingTopic.current;
+    if (!id || !visibleTopicIds.split(',').includes(id)) return;
+    pendingTopic.current = undefined;
+    settling.current = { id, until: performance.now() + SETTLE_MS };
+    setTopic(id);
+    scrollToTopic(id);
+  }, [visibleTopicIds, scrollToTopic]);
 
   return (
     <ModalFrame
@@ -390,9 +417,9 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
             onPointerLeave={() => setHoveredTopic(null)}
             onScroll={followScroll}
             // The user's own input takes over from a chosen topic.
-            onWheel={cancelScroll}
-            onPointerDown={cancelScroll}
-            onKeyDown={cancelScroll}
+            onWheel={takeOverScroll}
+            onPointerDown={takeOverScroll}
+            onKeyDown={takeOverScroll}
             className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain scroll-smooth px-3 py-4 break-words sm:px-6 [&_label]:flex-wrap"
           >
             {searching && (

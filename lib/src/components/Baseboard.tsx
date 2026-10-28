@@ -15,7 +15,7 @@ import { clsx } from 'clsx';
 import { chromeButton, DOOR_TAB_CLASS, TERMINAL_TOP_RADIUS_CLASS, TODO_PILL_TRACKING_CLASS } from './design';
 import { AlertRingInset } from './alert-ring';
 import { TODO_PILL_BODY } from './TodoPillBody';
-import { SettingsDialog } from './SettingsDialog';
+import { SettingsDialog, type TopicId } from './SettingsDialog';
 import { WorkspaceAlarmSettingsDialog } from './WorkspaceAlarmSettings';
 import type { AlertSink } from '../lib/alert-delivery-model';
 import { SettingsPreview } from './SettingsPreview';
@@ -139,7 +139,7 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
   const rightClusterEl = useRef<HTMLDivElement>(null);
   const [rightClusterWidth, setRightClusterWidth] = useState(0);
   const layoutMetrics = useRef({ doorGap: 0, arrowWidth: 0 });
-  const [settingsOpen, setSettingsOpen] = useState<'application' | 'workspace' | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState<{ dialog: 'application'; topic?: TopicId } | { dialog: 'workspace' } | null>(null);
   const workspaceSettingsTrigger = useRef<HTMLButtonElement | null>(null);
   const [settingsPreview, setSettingsPreview] = useState<{ sink: AlertSink; anchor: HTMLElement; sequence: number } | null>(null);
   const previewSequence = useRef(0);
@@ -162,7 +162,7 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
     event.stopPropagation();
     workspaceSettingsTrigger.current = event.currentTarget;
     closeSettingsPreview();
-    setSettingsOpen('workspace');
+    setSettingsOpen({ dialog: 'workspace' });
   };
   const workspaceSettingsActions = {
     onContextMenu: openWorkspaceSettings,
@@ -423,7 +423,7 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
               data-open-settings="true"
               onClick={() => {
                 closeSettingsPreview();
-                setSettingsOpen('application');
+                setSettingsOpen({ dialog: 'application' });
               }}
             >
               <SlidersHorizontalIcon size={16} weight="bold" />
@@ -441,12 +441,13 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
         />
       )}
 
-      {settingsOpen === 'application' && (
+      {settingsOpen?.dialog === 'application' && (
         <SettingsDialog
+          initialTopic={settingsOpen.topic}
           onClose={() => setSettingsOpen(null)}
         />
       )}
-      {settingsOpen === 'workspace' && (
+      {settingsOpen?.dialog === 'workspace' && (
         <WorkspaceAlarmSettingsDialog onClose={() => {
           setSettingsOpen(null);
           workspaceSettingsTrigger.current?.focus();
