@@ -1,10 +1,11 @@
 // Rules: docs/specs/hosted.md -> "Billing".
 import { Billing, BillingError, Stripe, type BillingDB } from "@pgstencil/stripe";
-import { SecureRandom, SystemTime } from "pgstencil";
+import { SecureRandom, SystemTime, type EmailSender } from "pgstencil";
 import { connectDatabase, queryDatabase } from "pgstencil/postgres";
 import { FOUNDING_COHORT_SIZE, FOUNDING_LADDER, LIST_ANNUAL, LIST_MONTHLY } from "../../website/src/lib/hosted-pricing";
 import type { BillingEnv } from "./bindings";
 import { grantsAccessSql } from "./entitlement";
+import { retryWithdrawals } from "./withdrawal";
 import { BILLING_PLANS, BILLING_RETURN_PATH } from "./policy-constants";
 
 /** The plans checkout sells, by the names `status()` and a checkout use. */
@@ -166,10 +167,17 @@ const RESYNC_OWNERS = 20;
 /**
  * The account Worker's Cron Trigger: reconciles up to {@link RESYNC_OWNERS}
  * random owners whose `active` or `trialing` row no longer grants access, so
- * a missed renewal webhook costs a member one run at most. Billing closed
- * does nothing. Every owner is tried; any failure fails the invocation after.
+ * a missed renewal webhook costs a member one run at most, then finishes
+ * any withdrawal whose acknowledgement or settlement failed. Billing closed
+ * does nothing. Every owner and withdrawal is tried; any failure fails the
+ * invocation after.
  */
-export async function resyncBilling(setup: BillingSetup | null, databaseUrl: string, origin: string) {
+export async function resyncBilling(
+  setup: BillingSetup | null,
+  databaseUrl: string,
+  origin: string,
+  mail: () => EmailSender,
+) {
   if (!setup) return;
   const due = await queryDatabase<{ owner: string }>(
     databaseUrl,
@@ -178,11 +186,11 @@ export async function resyncBilling(setup: BillingSetup | null, databaseUrl: str
     GROUP BY owner_id ORDER BY random() LIMIT $1`,
     [RESYNC_OWNERS],
   );
-  if (!due.length) return;
   const failed: unknown[] = [];
   await withBilling(setup, databaseUrl, origin, async (billing) => {
     for (const { owner } of due)
       await billing.reconcile(owner).catch((error: unknown) => failed.push(error));
+    failed.push(...(await retryWithdrawals(billing, mail)));
   });
   if (failed.length) throw new AggregateError(failed, `${failed.length} billing resyncs failed`);
 }

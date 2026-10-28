@@ -19,6 +19,10 @@ import { workerDatabases } from "./worker-roles";
 
 const origin = ORIGINS.account;
 const LADDER = DEV_FOUNDING_PRICES;
+/** No withdrawal in these tests asks for mail. */
+const noMail = () => {
+  throw new Error("No mail in this test");
+};
 const zeros = () => Array<number>(FOUNDING_LADDER.length).fill(0);
 
 test("billing is closed without every Stripe binding, and refuses a ladder the page does not publish", () => {
@@ -244,7 +248,7 @@ test("the resync repairs a missed renewal, and does nothing while billing is clo
   const f = await fixture();
   onTestFinished(f.close);
   // Closed: no setup, so not even the database is asked.
-  await expect(resyncBilling(null, "postgres://user:pass@127.0.0.1:9/none", origin)).resolves.toBeUndefined();
+  await expect(resyncBilling(null, "postgres://user:pass@127.0.0.1:9/none", origin, noMail)).resolves.toBeUndefined();
 
   const member = await f.user();
   const subscription = await f.buy(member, "yearly");
@@ -253,7 +257,7 @@ test("the resync repairs a missed renewal, and does nothing while billing is clo
   f.dev.events.length = 0;
   await f.sql(`UPDATE pgstencil_billing.subscriptions SET period_end = now() - interval '1 minute'`);
   expect(await f.entitledOn(member)).toEqual(everywhere(false));
-  await resyncBilling(f.setup, f.database.url, origin);
+  await resyncBilling(f.setup, f.database.url, origin, noMail);
   expect(await f.entitledOn(member)).toEqual(everywhere(true));
 });
 
