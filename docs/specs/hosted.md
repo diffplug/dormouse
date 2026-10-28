@@ -49,11 +49,11 @@ Source of truth: `hosted/server/providers.js`; `authPolicy` / `providerBindings`
 
 **Must link the account footer to the public Hosted privacy policy and terms.**
 
-**Must show configured sign-in methods only.** Login tokens never enter browser storage, and only public identity fields render, without provider images or external assets.
+**Must show configured sign-in methods only.** Login tokens never enter browser storage, and only public identity fields render, without provider images or external assets. **`/checkout` keeps only its plan and ref in `sessionStorage`, for ten minutes**, so they survive a provider's sign-in, which returns to `/account`; `/billing` confirms the `?checkout=` Stripe returns with once and strips it.
 
 **Must be built from the dormouse.sh reference pages' own design** (`lib/src/site/`), never a copy of it: their theme and picker, offered without the theme store, the site's Ubuntu faces served from Hosted's own origin, and the site header. It loads no marketing scripts or analytics.
 
-Source of truth: `App` in `hosted/src/App.tsx`; `useDocsThemedBody` in `lib/src/site/docs-paint.ts`.
+Source of truth: `App` in `hosted/src/App.tsx`; `takeCheckout` in `hosted/src/billing.ts`; `useDocsThemedBody` in `lib/src/site/docs-paint.ts`.
 
 ## Terms acceptance
 
@@ -80,10 +80,11 @@ The account Worker bills through `@pgstencil/stripe` (`docs/specs/pricing.md` ->
 
 | Route | Credential | Success |
 |---|---|---|
-| `GET /api/billing` | login cookie | 200 `{ plan, active, until, renews, entitled, suspended, founding }`; `plan` names a subscription Stripe still holds |
-| `POST /api/billing/checkout` | login cookie, exact `Origin`, JSON `{ plan, ref? }` | 200 `{ url }` of Stripe Checkout |
+| `GET /api/billing` | login cookie | 200 `{ plan, price, active, until, renews, entitled, suspended, founding, founder, consent }`; `plan` names a subscription Stripe still holds |
+| `POST /api/billing/checkout` | login cookie, exact `Origin`, JSON `{ plan, ref?, terms, autoRenew }` | 200 `{ url }` of Stripe Checkout |
 | `POST /api/billing/confirm` | login cookie, exact `Origin`, JSON `{ checkout }` | 200, the `GET` body |
 | `POST /api/billing/portal` | login cookie, exact `Origin` | 200 `{ url }` of the customer portal |
+| `PUT /api/billing/founder` | login cookie, exact `Origin`, JSON `{ shown, name? }` | 200, the `GET` body |
 | `POST /api/billing/webhook` | `Stripe-Signature` over the raw body | 200 once `webhook()` committed |
 
 Errors are JSON `{ message }`. The cookie routes need no entitlement, answer 401 without a login, and cap a body at 4 KiB.
@@ -91,6 +92,8 @@ Errors are JSON `{ message }`. The cookie routes need no entitlement, answer 401
 - **Must keep billing closed without all five bindings**: the secrets `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET`, and the vars `STRIPE_PRICE_MONTHLY`, `STRIPE_PRICE_YEARLY`, and `STRIPE_PRICES_FOUNDING` (cohort order); closed, every route past the login gate answers 503 `CHECKOUT_CLOSED` and the resync reads nothing. **Must refuse a founding list whose length differs from `FOUNDING_LADDER`**, or a malformed or repeated Price. Live mode follows the key's prefix.
 - **Never offer a trial or Managed Payments; must enable Stripe Tax on every Checkout.**
 - **Never take a Price, customer, owner, quantity, or return URL from a request**: checkout takes a plan name and a `ref`, normalized as `checkoutRef` does; the owner is the login, its email only once verified (else Checkout asks), and Stripe returns to `/billing`. A checkout open for another plan is expired first; a held subscription refuses another with 409.
+- **Must start a checkout only after agreement to `TERMS_VERSION` and to automatic renewal, recorded in `dormouse_checkout_consents` before its URL is answered**; another version answers 409. `GET` shows the latest consent while a subscription is held.
+- **Must add or rename a founders-row name (`dormouse_founders`) only while `subscribedSql` holds on the founding Prices** (else 409) and `isFounderName` accepts it; leaving is always allowed, and a rename keeps `shownSince`. Both checks: `docs/specs/security-hosted.md` -> "Account boundary".
 - **Must verify the webhook's signature over the raw body before any write** and answer 2xx only once `webhook()` has committed, any other failure 503, which Stripe retries.
 - **Must end at once the subscription a fully refunded charge or a lost dispute's charge paid for**, found through its invoice, while it is the owner's current one: commented `ENDED_FOR_REFUND`, after the commit and on every delivery until ended. A partial refund ends nothing, nor does a charge for an earlier subscription or none, which is logged for the operator.
 - **Must suspend, never end, on an open dispute**, by its current status read from Stripe, not the event (`dormouse_billing_disputes`); closing in the account's favor restores it.
@@ -299,7 +302,7 @@ Source of truth: `hosted/server/metric-labels.ts`; `recordMetric` and `authMetri
 
 ## Development and release
 
-**Must run local development with `dor tool hosted` inside Dormouse.** Its loopback `http://localhost:<port>` origin serves Vite and Node auth on a disposable development database, with the account's Natural Voice and Relay routes but never the voice origin's. Host, Origin, and Fetch Metadata checks guard the local captured-email inbox; no production entry imports an inbox or test-control handler. **It also runs the relay Worker on that database, with this origin as `ACCOUNT_ORIGIN`** (`docs/specs/one-time.md` -> "Dev loop").
+**Must run local development with `dor tool hosted` inside Dormouse.** Its loopback `http://localhost:<port>` origin serves Vite and Node auth on a disposable development database, with the account's Natural Voice, Relay, and billing routes but never the voice origin's; billing runs on StripeDev, which takes no card. Host, Origin, and Fetch Metadata checks guard the local captured-email inbox; no production entry imports an inbox or test-control handler. **It also runs the relay Worker on that database, with this origin as `ACCOUNT_ORIGIN`** (`docs/specs/one-time.md` -> "Dev loop").
 
 **Must verify the three production Worker bundles and run the consumer's integration suite before release.** Only test entries inject deterministic Better Auth. Simulated callbacks do not certify provider registrations; production acceptance requires real browser login with each enabled provider and email delivery.
 

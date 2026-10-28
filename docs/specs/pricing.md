@@ -3,7 +3,7 @@
 > - See `docs/specs/glossary.md` for Burrow / Client / Relay and Pane / Session vocabulary.
 > - **Owns:** the plans, the founding ladder, what a plan grants, how a desktop proves membership, the managed-voice boundary, and the content contract of the Hosted page.
 > - **Defers:** page chrome, rail, and link obligations to `docs/specs/website-docs.md` -> "Reference page chrome"; the Hosted Relay's accounts, enrollment, and entitlement, and managed voice's routes, to `docs/specs/hosted.md`; the cloud-hosted trust boundary to `docs/specs/security-remote.md` -> "Cloud-hosted mode"; alarm delivery to `docs/specs/alert.md` -> "Spoken alarms".
-> - **Status:** the Hosted page publishes the plans and the FAQ, a desktop enrolls with Hosted for managed voice and the Hosted Relay, and the account's subscription is the entitlement, with billing closed until checkout opens; checkout itself, and everything else that takes money, is under [Future](#future).
+> - **Status:** the Hosted page publishes the plans and the FAQ, a desktop enrolls with Hosted for managed voice and the Hosted Relay, the account's subscription is the entitlement, and the account pages that sell are built, with billing closed until checkout opens; opening it, and everything else that takes money, is under [Future](#future).
 
 ## The Hosted page
 
@@ -58,15 +58,19 @@ Source of truth: `Hosted` in `website/src/pages/Hosted.tsx`; the `/pricing` rule
 - **Cohorts close by count, never by date**: completed purchases at the billing provider; a purchase ending within the 30-day refund window, as a full refund or finally reversed payment ends it ("Checkout"), returns its seat to its cohort. **Never reopen the ladder at a lower step** once a cohort has closed. **When a cohort closes the price rises one step and the counter resets to 100**, and **founding closes only when the ladder reaches list**: founding means bought at launch pricing, and the Hosted Relay shipping does not close it.
 - **Checkout honors the price it opened at.** Concurrent checkouts may oversell a cohort by a few seats; the overage is the customer's, and the next cohort still opens at a full 100.
 - **A full refund or a finally reversed payment ends the subscription it paid for**, so the next request is refused. A partial refund or billing correction never ends it, and an open dispute only suspends it until it closes.
+- **Checkout starts from a Hosted account**: `/checkout` on the account origin asks for sign-in first, so the subscription belongs to an account from its first event.
+- **Must obtain affirmative agreement to the versioned terms and express consent to automatic renewal at the purchase action**, two unticked boxes, disclosing beside it the price and tax, the interval and renewal price, cancellation, the refund conditions, and the material limits: one individual including work use, no device limit, and managed voice's daily cap. The server records the consent with the Price offered (`docs/specs/hosted.md` -> "Billing").
+- **Must keep a durable confirmation at `/billing` while the plan is held**: the plan and price, renewal, the terms version agreed and when, how to cancel, and refunds; Stripe's receipt emails carry each payment.
+- **Founding offers the founders-row opt-in, unticked, once bought**; the account can leave at any time.
 
-Source of truth: `withBilling` and `openCohort` in `hosted/server/billing.ts`; `docs/specs/hosted.md` -> "Billing" owns the rest.
+Source of truth: `withBilling` and `openCohort` in `hosted/server/billing.ts`; `Checkout` in `hosted/src/Checkout.tsx`; `PlanConfirmation` in `hosted/src/Plan.tsx`; `docs/specs/hosted.md` -> "Billing" owns the rest.
 
 ## Future
 
 **Scope: hosted-sales** — what remains, in staged order:
 
 1. **The cohort endpoint** the page already calls: the open cohort's seats and the opted-in founders, avatars proxied onto this origin.
-2. **Checkout** ("Checkout"): the account pages that sell, then opening billing.
+2. **Opening checkout** ("Checkout"): the website's buy buttons to `/checkout`, then the Stripe bindings.
 3. **Managed voice for members**: one voice per Pane.
 4. **Renewal, cancellation, and refund** paths.
 
@@ -98,10 +102,8 @@ What each plan grants once checkout can sell it; [Published prices](#published-p
 
 The rest of "Checkout and entitlement", once checkout can sell:
 
-- **Checkout starts from a Hosted account**: a buy button lands on the account origin, which asks for sign-in first, so the subscription belongs to an account from its first event.
-- **Founding checkout offers the founders-row opt-in, unticked**; the account can withdraw it at any time.
 - **The success page asks the four Van Westendorp questions**, optional and unsent until answered: too expensive to consider, too cheap to trust, expensive but would consider, a bargain. Their answers inform later list changes.
-- **Must license one individual, including work use, with no device limit and no per-device charge**; enrollment's abuse ceiling is far above what a person owns (`docs/specs/hosted.md` -> "Burrow enrollment"). **Must disclose material usage limits before purchase**, including managed voice's daily cap.
+- **Must license one individual, including work use, with no device limit and no per-device charge**; enrollment's abuse ceiling is far above what a person owns (`docs/specs/hosted.md` -> "Burrow enrollment").
 
 ### Managed voice
 
@@ -125,7 +127,7 @@ Part of **hosted-sales**; these remain unimplemented launch gates, not claims ab
 
 EEA/UK representative appointment is excluded from the internal release gate by operator decision; applicable legal obligations remain unchanged (rationale).
 
-- **Must obtain affirmative agreement to versioned terms and express consent to automatic renewal before charging**, disclosing price, taxes, interval, refund conditions, cancellation, and material limits beside the purchase action; retain the accepted version, offered limits, and consent evidence and send a durable confirmation.
+- **Must confirm Stripe's receipt emails are on, and that they and the `/billing` confirmation meet each sales territory's durable-confirmation rule**, before charging; consent at the purchase action is "Checkout and entitlement".
 - **Must provide direct online cancellation and a support cancellation path when account access is lost.** **Must cancel future renewals as part of account closure**, explaining remaining access and refund eligibility before completing closure; verification cannot require account recovery.
 - **Must send jurisdiction-required renewal, annual, and price-change notices with cancellation instructions.** For California consumers, annual-term renewal notices are 15–45 days before renewal and fee-change notices 7–30 days before effectiveness; annual reminders also apply to monthly plans (rationale).
 - **Must route subscription notices to the maintained billing email**, including provider-only accounts without a sign-in email; use the account contact email for other notices, or show them at sign-in when none exists. **Must record notice delivery or presentation before starting a notice period**, and provide any additional legally required notice or consent process.
