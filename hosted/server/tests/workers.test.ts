@@ -427,7 +427,7 @@ async function fixture(
     };
     const computers = async () =>
       (await request("/api/relay/burrows")).json() as Promise<{
-        burrows: { burrowId: string; enrolledAt: string }[];
+        burrows: { burrowId: string; label: string | null; enrolledAt: string }[];
       }>;
     const remove = (burrowId: string, from = origin) =>
       request(`/api/relay/burrows/${burrowId}`, { method: "DELETE", headers: { origin: from } });
@@ -466,7 +466,7 @@ async function fixture(
         confirmDigits: string;
         verificationUrl: string;
       },
-    poll: (deviceCode: string) => burrowCall(API_ROUTES.burrowEnrollPoll, { deviceCode }),
+    poll: (deviceCode: string, label?: string) => burrowCall(API_ROUTES.burrowEnrollPoll, { deviceCode, label }),
     advance: (time: string) =>
       worker.dispatchFetch(origin + "/__test/time", {
         method: "POST",
@@ -1177,7 +1177,7 @@ test("enrollment: only a recent admin login from this origin approves, and the B
   // A code no Burrow holds is approved all the same, and expires unredeemed.
   expect((await admin.approve("ZZZZ-ZZZZ", "00")).status).toBe(204);
 
-  const enrolled = await f.poll(begun.deviceCode);
+  const enrolled = await f.poll(begun.deviceCode, "studio (Dormouse)");
   expect(enrolled.json.status).toBe("enrolled");
   const { burrowId, burrowToken } = enrolled.json.enrollment;
   const adminId = (await admin.session())!.user.id;
@@ -1185,7 +1185,9 @@ test("enrollment: only a recent admin login from this origin approves, and the B
     await queryDatabase(f.database.url, `SELECT "userId" FROM dormouse_relay_burrows WHERE "burrowId" = $1`, [burrowId]),
   ).toEqual([{ userId: adminId }]);
   const listed = await admin.computers();
-  expect(listed.burrows.map(({ burrowId }) => burrowId)).toEqual([burrowId]);
+  expect(listed.burrows.map(({ burrowId, label }) => ({ burrowId, label }))).toEqual([
+    { burrowId, label: "studio (Dormouse)" },
+  ]);
   expect(Math.abs(Date.parse(listed.burrows[0].enrolledAt) - Date.now())).toBeLessThan(60_000);
   expect((await f.burrowCall(API_ROUTES.burrowSetupToken, undefined, burrowToken)).status).toBe(200);
   const socket = await f.burrowSocket(burrowToken);

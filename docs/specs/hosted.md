@@ -189,7 +189,7 @@ sequenceDiagram
   User->>A: sign in, type the digits, approve {userCode, confirmDigits}
   Note over R,A: approval row in Postgres, keyed by userCode
   loop every interval
-    Burrow->>R: POST /api/burrow/enroll/poll {deviceCode}
+    Burrow->>R: POST /api/burrow/enroll/poll {deviceCode, label}
     alt malformed or expired code
       R-->>Burrow: expired
     else no live approval
@@ -216,6 +216,7 @@ Begin refuses an absent or mismatched origin with `ORIGIN_MISMATCH_ERROR`. The v
 - **Never admit a begin or poll request carrying `Origin`** (403): only a Node Burrow calls them. Then 429 with `Retry-After` past `RELAY_ENROLL_BEGIN_LIMIT` (10 a minute per address) or `RELAY_ENROLL_POLL_LIMIT` (60), before the body limit and any database read.
 - **Must answer an expired device code from the code alone**, reading no database.
 - **Must redeem in one statement** that marks the user code's live unredeemed approval redeemed and inserts the Burrow owned by its `userId`, under the account's lock with the cap check, so two polls mint one Burrow. The entitlement is rechecked first.
+- **Must store the label a remote poll carries, reduced by `reduceBurrowLabel` (64 code points, no control, format, or separator characters), never refusing the poll over it**; the column's CHECK refuses what the reduction strips.
 - **Must keep a redeemed approval until it expires**, swept hourly, so a poll whose `enrolled` answer was lost reads `redeemed`. **Never key it to the Burrow**: removing that Burrow leaves it redeemed; only an approval after it expires replaces it.
 
 | Route (account) | Credential | Success |

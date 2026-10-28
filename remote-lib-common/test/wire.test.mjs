@@ -29,7 +29,9 @@ import {
   isBurrowVoicePollResponse,
   MAX_ENROLL_POLL_INTERVAL_S,
   MIN_ENROLL_POLL_INTERVAL_S,
+  MAX_BURROW_LABEL_LENGTH,
   RELAY_BEARER_LENGTH,
+  reduceBurrowLabel,
   pushSubscriptionDeletePath,
 } from '../dist/index.js';
 
@@ -412,4 +414,18 @@ test('isBurrowEnrollPollResponse knows five answers, a redeemed one naming its B
   ]) {
     assert.equal(isBurrowEnrollPollResponse(wrong), false, JSON.stringify(wrong));
   }
+});
+
+test('reduceBurrowLabel keeps a machine name, strips what could hide or reorder it, and caps it', () => {
+  assert.equal(reduceBurrowLabel('ned-mbp (VS Code)'), 'ned-mbp (VS Code)');
+  // Controls and line or paragraph separators are spaced, whitespace runs one space, trimmed.
+  assert.equal(reduceBurrowLabel(' a\tb\n\u0085c\u2028d\u2029e\u007f '), 'a b c d e');
+  // Format characters (bidi overrides, zero-width, soft hyphen, tags) and lone surrogates are dropped.
+  assert.equal(reduceBurrowLabel('\u202egnp.exe\u200b\u00ad\u{E0041}\ud800x'), 'gnp.exex');
+  // Capped in code points, never splitting an astral one.
+  const long = '\u{1F42D}'.repeat(MAX_BURROW_LABEL_LENGTH + 1);
+  assert.equal(reduceBurrowLabel(long), '\u{1F42D}'.repeat(MAX_BURROW_LABEL_LENGTH));
+  assert.equal(reduceBurrowLabel(`${'a'.repeat(MAX_BURROW_LABEL_LENGTH - 1)} b`), 'a'.repeat(MAX_BURROW_LABEL_LENGTH - 1));
+  // Nothing left, or no string, is no label.
+  for (const none of ['', ' \u200b\n', undefined, null, 7, ['x']]) assert.equal(reduceBurrowLabel(none), null);
 });

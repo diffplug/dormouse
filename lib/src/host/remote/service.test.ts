@@ -2829,7 +2829,8 @@ describe('Hosted enrollment', () => {
 
     await nextPoll();
     expect(pollRequests()).toHaveLength(1);
-    expect(JSON.parse(pollRequests()[0]!.init!.body as string)).toEqual({ deviceCode: DEVICE_CODE });
+    // The name typed for this machine, which the account page lists it by.
+    expect(JSON.parse(pollRequests()[0]!.init!.body as string)).toEqual({ deviceCode: DEVICE_CODE, label: 'Work laptop' });
     expect(pollRequests()[0]!.init!.redirect).toBe('error');
 
     polls.push(enrolledAnswer());
@@ -3336,6 +3337,7 @@ describe('Hosted enrollment', () => {
     await nextPoll();
     expect(JSON.parse(pollRequests().at(-1)!.init!.body as string)).toEqual({
       deviceCode: 'E'.repeat(RELAY_BEARER_LENGTH),
+      label: 'x',
     });
     expect(await hostedEnrollment()).toMatchObject({ status: 'waiting', confirmDigits: '99' });
   });
