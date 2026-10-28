@@ -13,6 +13,7 @@ packages:
   - vscode-ext
   - website
 allowBuilds:
+  core-js: false
   cpu-features: false
   protobufjs: false
   ssh2: false

@@ -21,6 +21,7 @@
     "@phosphor-icons/react": "^2.1.10",
     "ascii-splash": "0.6.1",
     "dormouse-lib": "workspace:*",
+    "posthog-js": "^1.438.24",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "react-router": "^8.0.0",

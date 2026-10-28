@@ -1,7 +1,7 @@
 /**
  * The `ref` a visit to the Hosted page arrived with: which Dormouse link sent
- * it (`HOSTED_REFS` in `lib/src/lib/hosted-links.ts`). Nothing counts it yet,
- * and nothing stores it: no cookie, no storage, no beacon.
+ * it (`HOSTED_REFS` in `lib/src/lib/hosted-links.ts`). The page's pageview
+ * carries it (`./site-analytics.ts`); nothing stores it.
  */
 import { HOSTED_REF_PARAM, isHostedRef, type HostedRef } from "dormouse-lib/lib/hosted-links";
 

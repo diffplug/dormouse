@@ -56,8 +56,12 @@ import {
 } from "../lib/hosted-pricing";
 import { canonicalUrl, siteMeta, sitePath } from "../lib/site-meta";
 import { takeVisitRef } from "../lib/hosted-ref";
+import { trackEvent, trackPageview, type SiteRouteHandle } from "../lib/site-analytics";
 
 const PAGE_PATH = "/hosted";
+
+/** This page sends its own pageview, so it can carry the visit's `ref`. */
+export const handle: SiteRouteHandle = { ownPageview: true };
 
 const SECURITY_MODEL_URL =
   "https://github.com/diffplug/dormouse/blob/main/docs/specs/remote-security-model.md";
@@ -442,6 +446,10 @@ export default function Hosted() {
   const [cohort, setCohort] = useState<Cohort>({ seatsLeft: null, founders: null });
   const [checkoutTodo, setCheckoutTodo] = useState<Tier | null>(null);
   const closeTodo = useCallback(() => setCheckoutTodo(null), []);
+  const buy = useCallback((tier: Tier) => {
+    trackEvent({ name: "hosted plan clicked", plan: tier.id });
+    setCheckoutTodo(tier);
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -449,10 +457,9 @@ export default function Hosted() {
     return () => controller.abort();
   }, []);
 
-  // Off the address bar on arrival. What it answers goes nowhere yet: this
-  // is where a visit count would read it.
+  // Off the address bar on arrival, and onto this visit's pageview.
   useEffect(() => {
-    takeVisitRef();
+    trackPageview(takeVisitRef());
   }, []);
 
   return (
@@ -475,8 +482,8 @@ export default function Hosted() {
             in the same order on a phone. */}
         <div className="grid gap-4 md:grid-cols-3">
           <FreeCard />
-          <HostedCard onBuy={setCheckoutTodo} />
-          <FoundingCard cohort={cohort} onBuy={setCheckoutTodo} />
+          <HostedCard onBuy={buy} />
+          <FoundingCard cohort={cohort} onBuy={buy} />
         </div>
 
         <p className={`mt-5 text-sm ${MUTED_TEXT_CLASS}`}>
