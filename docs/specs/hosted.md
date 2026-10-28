@@ -80,11 +80,12 @@ The account Worker bills through `@pgstencil/stripe` (`docs/specs/pricing.md` ->
 
 | Route | Credential | Success |
 |---|---|---|
-| `GET /api/billing` | login cookie | 200 `{ plan, price, active, until, renews, entitled, suspended, founding, founder, consent }`; `plan` names a subscription Stripe still holds |
+| `GET /api/billing` | login cookie | 200 `{ plan, price, active, until, renews, entitled, suspended, founding, founder, consent, withdrawal, withdrawn }`; `plan` names a subscription Stripe still holds |
 | `POST /api/billing/checkout` | login cookie, exact `Origin`, JSON `{ plan, ref?, terms, autoRenew, price }` | 200 `{ url }` of Stripe Checkout |
 | `POST /api/billing/confirm` | login cookie, exact `Origin`, JSON `{ checkout }` | 200, the `GET` body |
 | `POST /api/billing/portal` | login cookie, exact `Origin` | 200 `{ url }` of the customer portal |
 | `PUT /api/billing/founder` | login cookie, exact `Origin`, JSON `{ shown, name? }` | 200, the `GET` body |
+| `POST /api/billing/withdraw` | login cookie, exact `Origin`, JSON `{ subscription }` | 200, the `GET` body |
 | `POST /api/billing/webhook` | `Stripe-Signature` over the raw body | 200 once `webhook()` committed |
 
 Errors are JSON `{ message }`. The cookie routes need no entitlement, answer 401 without a login, and cap a body at 4 KiB.
@@ -96,12 +97,26 @@ Errors are JSON `{ message }`. The cookie routes need no entitlement, answer 401
 - **Must add or rename a founders-row name (`dormouse_founders`) only while `subscribedSql` holds on the founding Prices** (else 409) and `isFounderName` accepts it; leaving always works, a rename keeps `shownSince`. Checks: `docs/specs/security-hosted.md` -> "Account boundary".
 - **Must verify the webhook's signature over the raw body before any write** and answer 2xx only once `webhook()` has committed, any other failure 503, which Stripe retries.
 - **Must end at once the subscription a fully refunded charge or a lost dispute's charge paid for**, found through its invoice, while it is the owner's current one: commented `ENDED_FOR_REFUND`, after the commit and on every delivery until ended. A partial refund ends nothing, nor does a charge for an earlier subscription or none, which is logged for the operator.
+- **Must offer the online withdrawal only from the held subscription while `withdrawalOffer` holds**, once per subscription; else withdraw answers 409 `WITHDRAWAL_CLOSED`. A recorded withdrawal (`dormouse_withdrawals`) is then acknowledged by email to the Stripe customer's address and settled: its subscription ended at once (`ENDED_FOR_WITHDRAWAL`), every paid invoice payment refunded in full. Each step is stamped once done and safe to repeat; the cron retries a failed one for 30 days. Checks: `docs/specs/security-hosted.md` -> "Account boundary".
 - **Must suspend, never end, on an open dispute**, by its current status read from Stripe, not the event (`dormouse_billing_disputes`); closing in the account's favor restores it.
 - **Must offer founding at the first ladder step whose completed purchases, refunds included, are short of `FOUNDING_COHORT_SIZE`**; its seats left exclude purchases ended within `REFUND_DAYS`. Past the last step, founding checkout answers 409.
-- **Must resync, every 10 minutes from the account's Cron Trigger, a bounded random batch of owners whose `active` or `trialing` row no longer grants access**, so a missed renewal webhook lapses a member only until a run picks them; a failure fails the invocation after every owner was tried.
+- **Must resync, every 10 minutes from the account's Cron Trigger, a bounded random batch of owners whose `active` or `trialing` row no longer grants access**, so a missed renewal webhook lapses a member only until a run picks them, and finish a bounded batch of unfinished withdrawals; a failure fails the invocation after every one was tried.
 - **Must grant the account's role the `pgstencil_billing` schema from `runtime-roles.sql`**, additively: the package's migration creates it.
 
-Source of truth: `billingSetup`, `withBilling`, and `resyncBilling` in `hosted/server/billing.ts`; `billingRoutes` and `disputeAction` in `hosted/server/billing-routes.ts`. Pinned by `hosted/server/tests/billing.test.ts` and `hosted/server/tests/billing-routes.test.ts`, on StripeDev.
+Source of truth: `billingSetup`, `withBilling`, and `resyncBilling` in `hosted/server/billing.ts`; `billingRoutes` and `disputeAction` in `hosted/server/billing-routes.ts`; `withdrawalOffer` and `completeWithdrawal` in `hosted/server/withdrawal.ts`. Pinned by `hosted/server/tests/billing.test.ts` and `hosted/server/tests/billing-routes.test.ts`, on StripeDev.
+
+## Account closure
+
+| Route | Credential | Success |
+|---|---|---|
+| `POST /api/account/close` | login cookie, exact `Origin`, JSON `{ close: true }` | 204, the account deleted |
+
+Errors are JSON `{ message }`; it needs no entitlement and works with billing closed. What the page says first: `docs/specs/pricing.md` -> "Checkout and entitlement".
+
+- **Must refuse a login older than `LOGIN_FRESH_AGE_MS`** with 403 `CLOSE_RECENT_LOGIN`, and, billing closed, an account with a current subscription row with 503 `CLOSE_UNAVAILABLE`.
+- **Must expire an open checkout, then cancel every current subscription in Stripe (`ENDED_FOR_CLOSURE`), before one statement records the closure (`dormouse_account_closures`) and deletes the `"user"` row**; rows without a foreign key stay. Its Burrows' sockets then close as a removal's do ("Relay sockets"). Checks: `docs/specs/security-hosted.md` -> "Account boundary".
+
+Source of truth: `closureRoutes` in `hosted/server/closure.ts`; `CloseAccount` in `hosted/src/Closure.tsx`.
 
 ## Managed voice
 
