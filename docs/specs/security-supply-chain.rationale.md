@@ -30,6 +30,8 @@ Why the Windows subsystem byte is flipped: leaving the bundled `node.exe` as a c
 
 Why alternate version declarations are excluded: in the pinned [setup-node implementation](https://github.com/actions/setup-node/blob/820762786026740c76f36085b0efc47a31fe5020/src/util.ts), `volta.node` overrides `devEngines.runtime`; `engines.node` is a lower-precedence fallback. Forbidding both keeps one version declaration, though only Volta overrides the current pin. The build's version check rejects a mismatched binary rather than silently bundling it.
 
+Why the release build keeps pnpm's runtime: `build.rs` bundles the `node` on `PATH`, which under `pnpm tauri` is the `devEngines.runtime` install, fetched from nodejs.org and checked against the sha256 in `pnpm-lock.yaml`. PR workflows install with `--no-runtime` so a job downloads Node once, and run on setup-node's binary instead, which comes from the `actions/node-versions` releases (GitHub's repackaging of the nodejs.org build) with no check against the lockfile. Either passes the version check, so only this rule tells them apart. The release pays a second download and a nodejs.org dependency for that.
+
 ## Cooldown and alerts
 
 What the `minimumReleaseAge` package rules are: the Renovate equivalent of the pnpm dependency cooldown window, applied per manager.
