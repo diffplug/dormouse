@@ -8,6 +8,7 @@ import {
 import {
   acceptTerms,
   approveEnrollment,
+  closeAccount as closeAccountRequest,
   confirmCheckout,
   getAccounts,
   getBilling,
@@ -27,6 +28,7 @@ import {
   social,
   startCheckout,
   turnOffHostedVoice,
+  withdraw as withdrawRequest,
   type Account,
   type Computer,
   type HostedVoice,
@@ -461,6 +463,23 @@ export function App({
       setBilling(await setFounder(shown, name));
       setNotice({ text: shown ? `You are in the founders row as ${name}.` : "You left the founders row." });
     });
+  const withdraw = (subscription: string) =>
+    act("withdraw", async () => {
+      setBilling(await withdrawRequest(subscription));
+      window.scrollTo?.(0, 0);
+    });
+  const closeAccount = () =>
+    mutate("close", async () => {
+      await closeAccountRequest();
+      setSession(null);
+      setAccounts([]);
+      setHostedVoice(null);
+      setComputers(null);
+      setPasskeys(null);
+      setBilling(null);
+      setRefusedPlan(false);
+      setNotice({ text: "Your account is closed. We keep billing records as the privacy policy describes." });
+    });
   const leaveBilling = () => {
     forgetCheckout();
     setView("account");
@@ -490,6 +509,7 @@ export function App({
   return <HostedPage
     view={view} billing={billing} checkoutPlan={checkout?.plan ?? null} confirmed={confirmed}
     purchase={purchase} manageBilling={manageBilling} saveFounder={saveFounder} leaveBilling={leaveBilling}
+    withdraw={withdraw} closeAccount={closeAccount}
     session={session} enabled={enabled} accounts={accounts} hostedVoice={hostedVoice}
     turnOffDialog={turnOffDialog} computers={computers} passkeys={passkeys}
     enrolling={enrolling} noPlan={noPlan} loading={loading} busy={busy} error={error} notice={notice}

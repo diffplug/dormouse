@@ -9,6 +9,7 @@ import {
 import { TERMS_VERSION, VOICE_DAILY_CAP } from "../server/policy-constants";
 import { planOffers, type BillingSummary, type Plan, type PlanOffer } from "./billing";
 import { HELP_CLASS, PRIMARY_CLASS } from "./classes";
+import { WithdrawalRight } from "./Withdrawal";
 
 const TERMS_URL = "https://dormouse.sh/terms/";
 const CHECK_CLASS = "mt-1 size-4 shrink-0 accent-[var(--docs-accent)]";
@@ -116,6 +117,7 @@ export function Checkout({
         ))}
       </fieldset>
       <Terms offer={offer} />
+      <WithdrawalRight />
       <label className="mt-6 flex items-start gap-3">
         <input
           id="agree-terms"

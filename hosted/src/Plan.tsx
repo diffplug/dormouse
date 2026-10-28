@@ -4,8 +4,8 @@ import { isFounderName } from "../server/policy-constants";
 import { planName, type BillingSummary } from "./billing";
 import { perInterval } from "./Checkout";
 import { BUTTON_CLASS, HEADING_CLASS, HELP_CLASS, INPUT_CLASS, LABEL_CLASS, LABEL_TEXT_CLASS } from "./classes";
+import { ModelForm, SupportLink } from "./Withdrawal";
 
-const SUPPORT = "support@dormouse.sh";
 const day = (iso: string) => new Date(iso).toLocaleDateString();
 const interval = (billing: BillingSummary) => (billing.plan === "monthly" ? "month" : "year");
 
@@ -78,7 +78,7 @@ export function FoundersOptIn({
           disabled={!!busy}
           onChange={(event) => setShown(event.target.checked)}
         />
-        <span>Show me in the founders row on the Hosted page</span>
+        <span>Show my name and profile picture in the founders row on the Hosted page</span>
       </label>
       {shown && (
         <>
@@ -130,6 +130,15 @@ export function PlanSection({
             {billing.price ? ` · ${perInterval(billing.price, interval(billing))}` : ""}
           </p>
           <p className={HELP_CLASS}>{planStatus(billing)}</p>
+          {billing.withdrawal && (
+            <p className={HELP_CLASS}>
+              In the EEA or UK, you can withdraw from this contract until {day(billing.withdrawal.until)} for a full refund:{" "}
+              <a className={LINK_CLASS} href="/billing#withdraw">
+                Withdraw from contract
+              </a>
+              .
+            </p>
+          )}
           <ManageBilling busy={busy} onManage={onManage} />
           {children}
         </>
@@ -180,7 +189,10 @@ export function PlanConfirmation({
       : []),
     [
       "Cancel",
-      "Any time in Manage billing. You keep Hosted until the end of the period you paid for.",
+      <>
+        Any time in Manage billing. You keep Hosted until the end of the period you paid for. If you cannot sign in,
+        email <SupportLink /> to cancel.
+      </>,
     ],
     [
       "Refunds",
@@ -188,13 +200,22 @@ export function PlanConfirmation({
         {billing.plan === "monthly"
           ? "Within 30 days of your first payment"
           : "Within 30 days of your first payment or of a yearly renewal"}
-        , email{" "}
-        <a className={LINK_CLASS} href={`mailto:${SUPPORT}`}>
-          {SUPPORT}
-        </a>{" "}
-        for a full refund, which ends the plan.
+        , email <SupportLink /> for a full refund, which ends the plan.
       </>,
     ],
+    ...(billing.withdrawal
+      ? ([
+          [
+            "Withdrawal",
+            <>
+              In the EEA or UK, you can withdraw from this contract until {day(billing.withdrawal.until)} without giving a
+              reason, and we refund every payment for it, including tax, with no deduction for the time you used. Use
+              Withdraw from contract below, or email <SupportLink />, even if you can no longer sign in.
+              <ModelForm />
+            </>,
+          ],
+        ] as [string, ReactNode][])
+      : []),
     ["Receipt", "Stripe emails a receipt for each payment to your billing email."],
   ];
   return (

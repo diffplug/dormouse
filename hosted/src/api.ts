@@ -280,6 +280,22 @@ export async function openPortal() {
   if (!response.ok) throw await billingRefused(response);
   leaveFor(((await response.json()) as { url: string }).url, BILLING_UNAVAILABLE);
 }
+/** Withdraws from the contract `subscription` names, answering the plan with its acknowledgement. */
+export async function withdraw(subscription: string): Promise<BillingSummary> {
+  const response = await billing("/withdraw", sendJson("POST", { subscription }));
+  if (!response.ok) throw await billingRefused(response);
+  return (await response.json()) as BillingSummary;
+}
+/** Closes this account, cancelling its subscription first; its login ends with it. */
+export async function closeAccount() {
+  const response = await request(
+    "/api/account/close",
+    sendJson("POST", { close: true }),
+    "Your account cannot be closed right now. Try again.",
+    true,
+  );
+  if (!response.ok) throw await refused(response);
+}
 /** Joins the founders row under `name`, or leaves it. */
 export async function setFounder(shown: boolean, name: string): Promise<BillingSummary> {
   const response = await billing("/founder", sendJson("PUT", shown ? { shown, name } : { shown }));

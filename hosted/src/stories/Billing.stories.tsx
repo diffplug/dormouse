@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { expect, fn } from "storybook/test";
-import { hostedMeta, SESSION, NO_PLAN, FOUNDING } from "./fixtures";
+import { hostedMeta, SESSION, NO_PLAN, FOUNDING, WITHDRAWABLE, WITHDRAWN } from "./fixtures";
 import { settledFrame } from "./canvas";
 
 const meta = {
@@ -27,7 +27,7 @@ export const JoinFounders: Story = {
   args: { confirmed: true, saveFounder: fn() },
   play: async ({ canvasElement, args }) => {
     const canvas = await settledFrame(canvasElement);
-    const shown = canvas.getByLabelText("Show me in the founders row on the Hosted page");
+    const shown = canvas.getByLabelText("Show my name and profile picture in the founders row on the Hosted page");
     await expect(shown).not.toBeChecked();
     await canvas.user.click(shown);
     const name = canvas.getByLabelText("Name to show");
@@ -40,3 +40,29 @@ export const JoinFounders: Story = {
     canvas.document.defaultView!.scrollTo(0, 0);
   },
 };
+/** In the EEA or UK, within the withdrawal period: the disclosure row and the withdrawal function. */
+export const Withdrawable: Story = { args: { billing: WITHDRAWABLE } };
+/** The contract, the statement, and where the acknowledgement goes, before confirming. */
+export const WithdrawConfirm: Story = {
+  args: { billing: WITHDRAWABLE, withdraw: fn() },
+  play: async ({ canvasElement, args }) => {
+    const canvas = await settledFrame(canvasElement);
+    await canvas.user.click(canvas.getByRole("button", { name: "Withdraw from contract" }));
+    await expect(args.withdraw).not.toHaveBeenCalled();
+    await canvas.user.click(canvas.getByRole("button", { name: "Confirm withdrawal" }));
+    await expect(args.withdraw).toHaveBeenCalledWith("sub_1QxStudioFounding");
+  },
+};
+export const Withdrawing: Story = {
+  args: { billing: WITHDRAWABLE, busy: "withdraw" },
+  play: async ({ canvasElement }) => {
+    const canvas = await settledFrame(canvasElement);
+    await expect(canvas.getByRole("button", { name: "Withdraw from contract" })).toBeDisabled();
+  },
+};
+export const Withdrawn: Story = { args: { billing: WITHDRAWN } };
+/** Recorded, but its email and refund are still the cron's to finish. */
+export const WithdrawnPending: Story = {
+  args: { billing: { ...WITHDRAWN, withdrawn: { ...WITHDRAWN.withdrawn!, acknowledged: false, settled: false } } },
+};
+export const WithdrawablePhone: Story = { args: { billing: WITHDRAWABLE, phone: true } };

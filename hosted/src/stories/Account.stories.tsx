@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { expect, fn } from "storybook/test";
 import { providers } from "../api";
-import { hostedMeta, SESSION, ACCOUNT, COMPUTERS, PASSKEYS, NO_PLAN, FOUNDING } from "./fixtures";
+import { hostedMeta, SESSION, ACCOUNT, COMPUTERS, PASSKEYS, NO_PLAN, FOUNDING, WITHDRAWABLE } from "./fixtures";
 import { settledFrame } from "./canvas";
 
 const meta = {
@@ -67,3 +67,31 @@ export const PlanSuspended: Story = { args: { ...ACCOUNT, billing: { ...FOUNDING
 export const PlanComp: Story = { args: { ...ACCOUNT, billing: { ...NO_PLAN, entitled: true } } };
 export const LapsedFounder: Story = { args: { ...ACCOUNT, billing: { ...NO_PLAN, founder: { offered: false, name: "Alex" } } } };
 export const PlanPhone: Story = { args: { ...ACCOUNT, billing: FOUNDING, phone: true } };
+export const PlanWithdrawable: Story = { args: { ...ACCOUNT, billing: WITHDRAWABLE } };
+/** What closing does to the plan, said before it is confirmed. */
+export const CloseAccountDialog: Story = {
+  args: { ...ACCOUNT, billing: WITHDRAWABLE, closeAccount: fn(async () => {}) },
+  play: async ({ canvasElement, args }) => {
+    const canvas = await settledFrame(canvasElement);
+    await canvas.user.click(canvas.getByRole("button", { name: "Close account…" }));
+    await expect(canvas.getByRole("dialog")).toBeVisible();
+    await canvas.user.click(canvas.getByRole("button", { name: "Close account" }));
+    await expect(args.closeAccount).toHaveBeenCalled();
+    await canvas.user.click(canvas.getByRole("button", { name: "Close account…" }));
+  },
+};
+export const CloseAccountNoPlan: Story = {
+  args: { ...ACCOUNT, billing: "closed" },
+  play: async ({ canvasElement }) => {
+    const canvas = await settledFrame(canvasElement);
+    await canvas.user.click(canvas.getByRole("button", { name: "Close account…" }));
+    await expect(canvas.getByText("You have no plan, so nothing is charged or refunded.")).toBeVisible();
+  },
+};
+export const CloseAccountStaleLogin: Story = {
+  args: { ...ACCOUNT, billing: FOUNDING, fresh: false },
+  play: async ({ canvasElement }) => {
+    const canvas = await settledFrame(canvasElement);
+    await expect(canvas.getByRole("button", { name: "Close account…" })).toBeDisabled();
+  },
+};

@@ -33,7 +33,9 @@ import { HostedShell } from "./HostedShell";
 import { NoPlanOffer } from "./NoPlanOffer";
 import { planName, type BillingSummary, type Plan } from "./billing";
 import { Checkout } from "./Checkout";
+import { CloseAccount } from "./Closure";
 import { FoundersOptIn, PlanConfirmation, PlanSection } from "./Plan";
+import { WithdrawalAcknowledgement, WithdrawalFunction } from "./Withdrawal";
 import type { Enrollment } from "./enrollment";
 import type { Notice, PageError } from "./settle";
 
@@ -92,6 +94,9 @@ export interface HostedPageProps {
   saveFounder?: (shown: boolean, name: string) => void;
   /** Leaves checkout or billing for the account page. */
   leaveBilling?: () => void;
+  /** Withdraws from the contract a subscription names. */
+  withdraw?: (subscription: string) => void;
+  closeAccount?: () => Promise<void>;
   session: Session | null;
   enabled: Provider[];
   accounts: Account[];
@@ -136,7 +141,8 @@ const idle = () => {};
 
 export function HostedPage({
   view = "account", billing = null, checkoutPlan = null, confirmed = false,
-  purchase = idle, manageBilling = idle, saveFounder = idle, leaveBilling = idle,
+  purchase = idle, manageBilling = idle, saveFounder = idle, leaveBilling = idle, withdraw = idle,
+  closeAccount = async () => {},
   session, enabled, accounts, hostedVoice, turnOffDialog, computers, passkeys,
   enrolling, noPlan, loading, busy, error, notice, email, code, enterCode,
   comingSoon, fresh, themeControl = false, act, refresh, approve, signOut, clearEnrollment, turnOffVoice,
@@ -336,10 +342,16 @@ export function HostedPage({
               </section>
             ) : session && view === "billing" ? (
               <section aria-label="Billing">
+                {summary?.withdrawn && <WithdrawalAcknowledgement withdrawn={summary.withdrawn} />}
                 {!summary ? (
                   billingUnread
                 ) : summary.plan ? (
-                  <PlanConfirmation billing={{ ...summary, plan: summary.plan }} busy={busy} onManage={manageBilling} />
+                  <>
+                    <PlanConfirmation billing={{ ...summary, plan: summary.plan }} busy={busy} onManage={manageBilling} />
+                    {summary.withdrawal && (
+                      <WithdrawalFunction offer={summary.withdrawal} plan={summary.plan} busy={busy} onWithdraw={withdraw} />
+                    )}
+                  </>
                 ) : (
                   <>
                     <p className={HELP_CLASS}>This account has no plan.</p>
@@ -564,6 +576,9 @@ export function HostedPage({
                   <button className={BUTTON_CLASS} disabled={!!busy} onClick={() => void signOut()}>
                     {busy === "logout" ? "Signing out…" : "Sign out"}
                   </button>
+                </section>
+                <section aria-labelledby="close" className={SECTION_CLASS}>
+                  <CloseAccount billing={billing} fresh={!!fresh} busy={busy} onClose={closeAccount} />
                 </section>
                 {!(voiceShown && computers) && (
                   <p className={FOOTNOTE_CLASS}>
