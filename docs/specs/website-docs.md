@@ -159,7 +159,7 @@ dormouse.sh alone counts visits, with PostHog US Cloud (`docs/specs/security-loc
 - **Must load posthog-js only on `dormouse.sh`, only at the first event, and never under Global Privacy Control or Do Not Track.**
 - **Must run `cookieless_mode: "always"` and keep nothing in cookies, `localStorage`, `sessionStorage`, or IndexedDB**; the one write is posthog-js's `localStorage` check at init, a test value it removes at once. PostHog drops every event unless the project's Settings → Project → Web analytics → Enable cookieless tracking is on.
 - **Must send only** one `$pageview` per path, the `/hosted` one carrying the visit's `ref` (`docs/specs/pricing.md` -> "The Hosted page"); `hosted plan clicked` with its `plan`; and `tutorial completed` with its `tutorial`, sent only when this visit checks the last item. **Never enable autocapture, replay, heatmaps, surveys, exception capture, feature flags, `identify`, or a remote script.**
-- **Must send to `dormouse.sh/ingest`**, never to a PostHog host. A Pages advanced-mode Worker limited to `/ingest/*` forwards to PostHog's US hosts without cookies or authorization, passing the visitor's address as `X-Forwarded-For`.
+- **Must send to `dormouse.sh/ingest`**, never to a PostHog host. A Pages advanced-mode Worker limited to `/ingest/*` and the founders row's `/api/hosted/*` (`docs/specs/hosted.md` -> "Billing") forwards the first to PostHog's US hosts without cookies or authorization, passing the visitor's address as `X-Forwarded-For`.
 - **Must change Privacy's analytics paragraph in the same edit as anything above** (`website/src/pages/Privacy.tsx`).
 
 Source of truth: `website/src/lib/site-analytics.ts`; `website/public/_worker.js`.

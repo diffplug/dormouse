@@ -3,7 +3,7 @@
 > - See `docs/specs/glossary.md` for Burrow / Client / Relay and Pane / Session vocabulary.
 > - **Owns:** the plans, the founding ladder, what a plan grants, how a desktop proves membership, the managed-voice boundary, and the content contract of the Hosted page.
 > - **Defers:** page chrome, rail, and link obligations to `docs/specs/website-docs.md` -> "Reference page chrome"; the Hosted Relay's accounts, enrollment, and entitlement, and managed voice's routes, to `docs/specs/hosted.md`; the cloud-hosted trust boundary to `docs/specs/security-remote.md` -> "Cloud-hosted mode"; alarm delivery to `docs/specs/alert.md` -> "Spoken alarms".
-> - **Status:** the Hosted page publishes the plans and the FAQ, a desktop enrolls with Hosted for managed voice and the Hosted Relay, the account's subscription is the entitlement, and the account pages that sell are built, with billing closed until checkout opens; opening it, and everything else that takes money, is under [Future](#future).
+> - **Status:** the Hosted page publishes the plans and the FAQ, a desktop enrolls with Hosted for managed voice and the Hosted Relay, the account's subscription is the entitlement, and the account pages that sell, the checkout switch, and the founding card's live half are built, with billing closed until checkout opens; opening it, and everything else that takes money, is under [Future](#future).
 
 ## The Hosted page
 
@@ -13,7 +13,7 @@
 
 **Must give every link to the page a `?ref=` from `HOSTED_REFS`, one per link, ahead of its fragment, and strip it from the address bar on arrival**, so a copied link never carries it. `takeVisitRef` answers it, an unlisted value as `other`, and the page's pageview carries it (`docs/specs/website-docs.md` -> "Visit analytics"). Source of truth: `lib/src/lib/hosted-links.ts`; `takeVisitRef` in `website/src/lib/hosted-ref.ts`.
 
-**Prices, inclusions, and the FAQ are prerendered text**, and the page emits `Product` / `Offer` JSON-LD carrying one `Offer` per paid plan at its current price, so an assistant fetching the page can quote it. **Offers stay `PreOrder` while checkout is unbuilt.**
+**Prices, inclusions, and the FAQ are prerendered text**, and the page emits `Product` / `Offer` JSON-LD carrying one `Offer` per paid plan at its current price, so an assistant fetching the page can quote it. **Offers are `PreOrder` until `CHECKOUT_OPEN`, then `InStock`.**
 
 **Every price on the site has one owner**, `website/src/lib/hosted-pricing.ts`; site code reads it rather than restating a number.
 
@@ -23,16 +23,16 @@
 
 Each paid card carries a 30-day refund beneath its buy button.
 
-- **A buy button opens the unbuilt-checkout notice.** **Never render a buy button that silently does nothing.**
+- **While `CHECKOUT_OPEN` is false a buy button opens the closed-checkout notice; once true it links to the account origin's `/checkout?plan=`, carrying the visit's `ref`.** **Never render a buy button that silently does nothing.**
 
 ### The founding card's live half
 
-Seats left in the open cohort and the founders row load after hydration from one endpoint; the price beside them is prerendered.
+Seats left in the open cohort and the founders row load after hydration from `/api/hosted/cohorts`, which the site's Worker forwards to the account Worker (`docs/specs/hosted.md` -> "Billing"); the price beside them is prerendered.
 
 - **Count seats on the server** from the billing provider behind a cache of at most 60 seconds, never on the client and never stored. **Never show a count for a closed cohort.**
-- **Show a founder only if they opted in at checkout**; the box starts unticked and the account can untick it. Every other founder counts toward the `+N` that ends the row, as does everyone past the row's cap.
+- **Show a founder only if they opted in, and only while their founding subscription holds**; the box starts unticked and the account can untick it. Every other founder counts toward the `+N` that ends the row, as does everyone past the row's cap.
 - **Must serve avatars from this origin, never the OAuth provider**, so loading the page tells no provider about the reader. The client draws an initial for any avatar that is not a same-origin path after URL normalization, or that fails to load.
-- **The page prerenders without the endpoint**: an unreachable endpoint, a non-2xx, or a malformed field drops only that field, never an error. **A cohort closing raises the price at the next deploy.**
+- **The page prerenders without the endpoint**: an unreachable endpoint, a non-2xx, or a malformed field drops only that field, never an error. **A cohort closing raises the price at the next deploy**, and **never show seats unless the answer's `cohort` equals the prerendered `FOUNDING_COHORTS_CLOSED`**, so a stale deploy shows none.
 
 ### Published prices
 
@@ -49,7 +49,7 @@ Prices in USD; DiffPlug adds or includes applicable tax by jurisdiction.
 - **The step is $10 per cohort of 100, fixed**, and the ladder's last step is the one below list — reaching list closes founding.
 - **Show the current price, the struck list price, and the seats left at that price — never the next step or how many cohorts remain.**
 
-Source of truth: `Hosted` in `website/src/pages/Hosted.tsx`; the `/pricing` rule in `website/public/_redirects`, pinned by `checkPricingRedirect` in `scripts/public-docs-lint.mjs`. `website/src/pages/Hosted.test.tsx` pins the page contract.
+Source of truth: `Hosted` in `website/src/pages/Hosted.tsx`; `fetchCohort` in `website/src/lib/hosted-cohorts.ts`; the `/pricing` rule in `website/public/_redirects`, pinned by `checkPricingRedirect` in `scripts/public-docs-lint.mjs`. `website/src/pages/Hosted.test.tsx` pins the page contract.
 
 ## Checkout and entitlement
 
@@ -69,10 +69,9 @@ Source of truth: `withBilling` and `openCohort` in `hosted/server/billing.ts`; `
 
 **Scope: hosted-sales** — what remains, in staged order:
 
-1. **The cohort endpoint** the page already calls: the open cohort's seats and the opted-in founders, avatars proxied onto this origin.
-2. **Opening checkout** ("Checkout"): the website's buy buttons to `/checkout`, then the Stripe bindings.
-3. **Managed voice for members**: one voice per Pane.
-4. **Renewal, cancellation, and refund** paths.
+1. **Opening checkout** ("Checkout"): production's Stripe bindings, then `CHECKOUT_OPEN`.
+2. **Managed voice for members**: one voice per Pane.
+3. **Renewal, cancellation, and refund** paths.
 
 Team and enterprise tiers are never sold through this page. A free hosted tier is undecided — see [Open questions](#open-questions).
 
