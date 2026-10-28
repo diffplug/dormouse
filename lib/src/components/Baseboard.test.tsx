@@ -521,6 +521,52 @@ describe('Baseboard alarm upsell', () => {
     expect(preview()?.classList.contains('opacity-100')).toBe(true);
   });
 
+  it('holds while the line is hovered or focused, then shows the plain while once let go', async () => {
+    vi.useFakeTimers();
+    await renderBuild();
+    await toggle('speech');
+    const hold = line()!.parentElement!;
+    act(() => hold.dispatchEvent(new PointerEvent('pointerover', { bubbles: true })));
+    act(() => vi.advanceTimersByTime(10_000));
+    expect(preview()?.classList.contains('opacity-100')).toBe(true);
+    act(() => hold.dispatchEvent(new PointerEvent('pointerout', { bubbles: true })));
+    act(() => vi.advanceTimersByTime(2000));
+    expect(preview()?.classList.contains('opacity-0')).toBe(true);
+    act(() => vi.advanceTimersByTime(250));
+    expect(preview()).toBeNull();
+
+    localStorage.removeItem(ALARM_UPSELL_SHOWN_AT_KEY);
+    await toggle('speech');
+    await toggle('speech');
+    act(() => lineButton()!.focus());
+    act(() => vi.advanceTimersByTime(10_000));
+    expect(preview()?.classList.contains('opacity-100')).toBe(true);
+    act(() => lineButton()!.blur());
+    act(() => vi.advanceTimersByTime(2250));
+    expect(preview()).toBeNull();
+  });
+
+  it('closes on Escape, heard before the terminal and left for it, or on a press off the line', async () => {
+    await renderBuild();
+    await toggle('speech');
+    const terminalInput = document.createElement('textarea');
+    container.appendChild(terminalInput);
+    // A terminal stops its own keys from bubbling.
+    const terminalHeard = vi.fn((event: Event) => event.stopPropagation());
+    terminalInput.addEventListener('keydown', terminalHeard);
+    act(() => terminalInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+    expect(preview()).toBeNull();
+    expect(terminalHeard).toHaveBeenCalledOnce();
+
+    localStorage.removeItem(ALARM_UPSELL_SHOWN_AT_KEY);
+    await toggle('speech');
+    await toggle('speech');
+    act(() => line()!.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })));
+    expect(preview()).not.toBeNull();
+    act(() => document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })));
+    expect(preview()).toBeNull();
+  });
+
   it('neither shows nor spends an offer whose preview closed before it was decided', async () => {
     await renderBuild();
     act(() => container.querySelector<HTMLButtonElement>('[data-alarm-setting="push"]')!.click());

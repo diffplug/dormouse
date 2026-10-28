@@ -165,9 +165,17 @@ export function useCloseOnOutsideAndEscape(
   open: boolean,
   ref: RefObject<HTMLElement | null>,
   onClose: () => void,
-  /** What a scroll must move to close the menu, when the menu itself is
-   *  positioned away from its trigger (a portal); defaults to `ref`. */
-  anchor?: RefObject<HTMLElement | null>,
+  {
+    anchor,
+    captureKeys = false,
+  }: {
+    /** What a scroll must move to close the menu, when the menu itself is
+     *  positioned away from its trigger (a portal); defaults to `ref`. */
+    anchor?: RefObject<HTMLElement | null>;
+    /** Hear Escape in the capture phase, for an overlay that leaves the
+     *  keyboard with a terminal, which swallows its own keys. It stops nothing. */
+    captureKeys?: boolean;
+  } = {},
 ) {
   useEffect(() => {
     if (!open) return;
@@ -191,12 +199,12 @@ export function useCloseOnOutsideAndEscape(
     };
 
     window.addEventListener('pointerdown', closeOnPointerDown, true);
-    window.addEventListener('keydown', closeOnEscape);
+    window.addEventListener('keydown', closeOnEscape, captureKeys);
     window.addEventListener('scroll', closeOnScroll, true);
     return () => {
       window.removeEventListener('pointerdown', closeOnPointerDown, true);
-      window.removeEventListener('keydown', closeOnEscape);
+      window.removeEventListener('keydown', closeOnEscape, captureKeys);
       window.removeEventListener('scroll', closeOnScroll, true);
     };
-  }, [open, ref, onClose, anchor]);
+  }, [open, ref, onClose, anchor, captureKeys]);
 }
