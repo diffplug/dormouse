@@ -76,8 +76,8 @@ interface RecordShape<T> {
  * temp-file-plus-rename so a crash mid-write can never leave a half-written
  * (unparseable) file, with mutations serialized through a promise chain so two
  * concurrent read-modify-writes cannot clobber each other. Subclasses layer
- * their find/append logic on top. Deliberately not a database (see the module
- * header).
+ * their find/append logic on top. Deliberately not a database
+ * (`docs/specs/relay.md`).
  */
 abstract class JsonFileStore {
   readonly #stateDir: string;
@@ -389,8 +389,8 @@ export async function forgetRetiredState(stateDir: string): Promise<void> {
 }
 
 /**
- * Persistent burrow enrollment (`burrows.json`). Mirrors {@link AccountStore}: an
- * append-only JSON array, atomic writes, and a mutex so concurrent enrollments
+ * Persistent burrow enrollment (`burrows.json`): an append-only JSON array,
+ * atomic writes, and a mutex so concurrent enrollments
  * cannot lose a write. Revocation is deleting a line by hand (POC guardrail).
  */
 export class BurrowStore extends JsonFileStore {
