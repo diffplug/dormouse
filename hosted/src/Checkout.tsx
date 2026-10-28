@@ -18,7 +18,7 @@ export const perInterval = (price: number, interval: "month" | "year") => `$${pr
 
 /**
  * What the buyer agrees to beside the purchase action
- * (docs/specs/pricing.md -> "Paid-launch requirements"): price and tax,
+ * (docs/specs/pricing.md -> "Checkout and entitlement"): price and tax,
  * renewal, cancellation, refunds, and material limits, for the chosen plan.
  */
 function Terms({ offer }: { offer: PlanOffer }) {
@@ -58,7 +58,8 @@ export function Checkout({
   /** The plan the link named, chosen first when on sale. */
   plan: Plan | null;
   busy: string;
-  onPurchase: (plan: Plan) => void;
+  /** With the price shown beside the renewal the buyer agreed to. */
+  onPurchase: (plan: Plan, price: number) => void;
 }) {
   const offers = planOffers(billing.founding);
   const [chosen, setChosen] = useState<Plan>(
@@ -69,7 +70,7 @@ export function Checkout({
   const offer = offers.find((each) => each.plan === chosen)!;
   function submit(event: FormEvent) {
     event.preventDefault();
-    if (terms && renewal && !busy) onPurchase(chosen);
+    if (terms && renewal && !busy) onPurchase(chosen, offer.price);
   }
   return (
     <form onSubmit={submit}>

@@ -21,6 +21,10 @@ export const Closed: Story = { args: { billing: "closed" } };
 export const Unavailable: Story = { args: { billing: null } };
 export const AlreadySubscribed: Story = { args: { billing: FOUNDING } };
 export const Opening: Story = { args: { busy: "checkout" } };
+/** The cohort sold out while the page was open: the next step, asked again. */
+export const PriceChanged: Story = {
+  args: { billing: { ...NO_PLAN, founding: { cohort: 1, seatsLeft: 100 } }, notice: { text: "The price has changed. Check the new price and agree again.", error: true } },
+};
 export const Refused: Story = { args: { error: { read: false, message: "The terms have changed. Reload this page to read them." } } };
 /** The purchase action stays off until both agreements are ticked. */
 export const Agreeing: Story = {
@@ -33,7 +37,7 @@ export const Agreeing: Story = {
     await expect(pay).toBeDisabled();
     await canvas.user.click(canvas.getByLabelText(/renews automatically/));
     await canvas.user.click(pay);
-    await expect(args.purchase).toHaveBeenCalledWith("founding");
+    await expect(args.purchase).toHaveBeenCalledWith("founding", 50);
     canvas.document.defaultView!.scrollTo(0, 0);
   },
 };

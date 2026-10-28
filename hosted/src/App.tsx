@@ -20,6 +20,7 @@ import {
   NoPlanError,
   openPortal,
   post,
+  PriceChangedError,
   removeComputer,
   removePasskey,
   setFounder,
@@ -440,9 +441,17 @@ export function App({
     setError(keepRead);
     history.replaceState(null, "", session ? "/account" : "/login");
   };
-  const purchase = (plan: Plan) =>
+  const purchase = (plan: Plan, price: number) =>
     act("checkout", async () => {
-      await startCheckout(plan, checkout?.ref ?? null);
+      try {
+        await startCheckout(plan, price, checkout?.ref ?? null);
+      } catch (error) {
+        if (!(error instanceof PriceChangedError)) throw error;
+        // Read the price checkout would charge now, and ask again.
+        await refresh();
+        setNotice({ text: error.message, error: true });
+        return;
+      }
       // This tab is on its way to Stripe: nothing to come back to.
       forgetCheckout();
     });

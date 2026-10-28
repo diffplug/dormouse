@@ -10,9 +10,9 @@ import { REFUND_DAYS, foundingCohort, publishedPrice, withBilling, type BillingS
 import { CURRENT_STATUSES, entitledSql, subscribedSql } from "./entitlement";
 import { checkoutRef, type MetricEvent } from "./metric-labels";
 import { countMetricInTransaction, recordMetric } from "./metrics";
-import { BILLING_PLANS, CHECKOUT_CLOSED, TERMS_VERSION, isFounderName } from "./policy-constants";
+import { BILLING_PLANS, CHECKOUT_CLOSED, PRICE_CHANGED, TERMS_VERSION, isFounderName } from "./policy-constants";
 
-export { CHECKOUT_CLOSED };
+export { CHECKOUT_CLOSED, PRICE_CHANGED };
 
 /** What one request's account deployment provides to the billing routes. */
 export interface BillingHost extends AccountHost {
@@ -131,12 +131,14 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
 
   app.post("/api/billing/checkout", limit(JSON_BODY_BYTES), gate, async (c) => {
     const { userId, email } = c.get("login");
-    const body = await readJson<{ plan?: unknown; ref?: unknown; terms?: unknown; autoRenew?: unknown }>(c);
+    const body = await readJson<{ plan?: unknown; ref?: unknown; terms?: unknown; autoRenew?: unknown; price?: unknown }>(c);
     const plan = body?.plan;
     if (!isPlan(plan)) return c.json({ message: "Choose monthly, yearly, or founding." }, 400);
     const ref = checkoutRef(body?.ref);
-    return billed(c, async (billing) => {
-      if (typeof body?.terms !== "string" || body.autoRenew !== true) return c.json({ message: CONSENT_REQUIRED }, 400);
+    return billed(c, async (billing, setup) => {
+      // `price` is what the page showed beside the renewal the buyer agreed to.
+      if (typeof body?.terms !== "string" || body.autoRenew !== true || !Number.isSafeInteger(body.price))
+        return c.json({ message: CONSENT_REQUIRED }, 400);
       if (body.terms !== TERMS_VERSION) return c.json({ message: TERMS_CHANGED }, 409);
       // A checkout left open for another plan gives way to this one.
       const open = await billing.db
@@ -148,13 +150,25 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
       if (open && open.plan !== plan) await billing.cancelCheckout(userId);
       // Without an email, Stripe Checkout asks for one.
       const { id, url } = await billing.checkout(userId, email, plan, ref === "none" ? {} : { ref });
-      // Recorded before the URL is answered, for the Price this checkout offers.
+      // The Price this checkout charges, a cohort sold out since the page
+      // loaded or one left open at an earlier step included: one the buyer
+      // was not shown is expired, so the page asks again at the new price.
+      const opened = await billing.db
+        .selectFrom("checkouts")
+        .select("price_id")
+        .where("id", "=", id)
+        .where("owner_id", "=", userId)
+        .executeTakeFirstOrThrow();
+      if (publishedPrice(setup, opened.price_id) !== body.price) {
+        await billing.cancelCheckout(userId);
+        return c.json({ message: PRICE_CHANGED }, 409);
+      }
+      // Recorded before the URL is answered, for the Price the buyer was shown.
       await billing.db.executeQuery(
         CompiledQuery.raw(
           `INSERT INTO public.dormouse_checkout_consents ("checkoutId", "termsVersion", "userId", plan, "priceId")
-          SELECT id, $2, owner_id, plan, price_id FROM pgstencil_billing.checkouts WHERE id = $1 AND owner_id = $3
-          ON CONFLICT DO NOTHING`,
-          [id, TERMS_VERSION, userId],
+          VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING`,
+          [id, TERMS_VERSION, userId, plan, opened.price_id],
         ),
       );
       recordMetric(c, host(c).databaseUrl, "checkout.started", `${plan}:${ref}`);

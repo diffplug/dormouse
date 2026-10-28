@@ -7,7 +7,7 @@ import { App } from "./App";
 import * as api from "./api";
 import type { Enrollment } from "./enrollment";
 import type { BillingSummary, CheckoutIntent } from "./billing";
-import { ENROLLMENT_POLL_INTERVAL_S, TERMS_VERSION } from "../server/policy-constants";
+import { ENROLLMENT_POLL_INTERVAL_S, PRICE_CHANGED, TERMS_VERSION } from "../server/policy-constants";
 import { NOT_ENTITLED_ERROR } from "../../remote-lib-common/src/remote/wire.ts";
 
 vi.mock("./api", async (original) => ({
@@ -372,7 +372,27 @@ describe("checkout", () => {
     expect(go().disabled).toBe(true);
     await tick("agree-renewal");
     await click("Continue to payment");
-    expect(api.startCheckout).toHaveBeenCalledWith("monthly", "hosted-no-plan");
+    expect(api.startCheckout).toHaveBeenCalledWith("monthly", 10, "hosted-no-plan");
+  });
+
+  it("reads the new price when the cohort sold out meanwhile, and asks for agreement again", async () => {
+    vi.mocked(api.getSession).mockResolvedValue(login());
+    vi.mocked(api.getBilling).mockResolvedValue(NO_PLAN);
+    vi.mocked(api.startCheckout).mockRejectedValueOnce(new api.PriceChangedError(PRICE_CHANGED));
+    await mount(null, { checkout: { plan: "founding", ref: null } });
+    await tick("agree-terms");
+    await tick("agree-renewal");
+    vi.mocked(api.getBilling).mockResolvedValue({ ...NO_PLAN, founding: { cohort: 1, seatsLeft: 100 } });
+    await click("Continue to payment");
+    expect(api.startCheckout).toHaveBeenLastCalledWith("founding", 50, null);
+    expect(container.querySelector("[role=alert]")?.textContent).toBe(PRICE_CHANGED);
+    expect(text()).toContain("renews automatically every year at $60");
+    for (const box of ["agree-terms", "agree-renewal"])
+      expect(container.querySelector<HTMLInputElement>(`#${box}`)!.checked, box).toBe(false);
+    await tick("agree-terms");
+    await tick("agree-renewal");
+    await click("Continue to payment");
+    expect(api.startCheckout).toHaveBeenLastCalledWith("founding", 60, null);
   });
 
   it("says when checkout is not open, and offers a held plan the portal instead", async () => {
@@ -470,12 +490,22 @@ describe("the plan section", () => {
 describe("startCheckout", () => {
   afterEach(() => vi.restoreAllMocks());
 
+  it("reads a 409 PRICE_CHANGED as a price change, and any other 409 as its message", async () => {
+    const { startCheckout, PriceChangedError } = await vi.importActual<typeof import("./api")>("./api");
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ message: PRICE_CHANGED }, { status: 409 }));
+    await expect(startCheckout("founding", 50, null)).rejects.toBeInstanceOf(PriceChangedError);
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ message: "Founding is closed." }, { status: 409 }));
+    const closed = startCheckout("founding", 50, null);
+    await expect(closed).rejects.toThrow("Founding is closed.");
+    await expect(closed).rejects.not.toBeInstanceOf(PriceChangedError);
+  });
+
   it("agrees to the current terms and to renewal, and leaves only for an https page", async () => {
     const { startCheckout } = await vi.importActual<typeof import("./api")>("./api");
     const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ url: "javascript:alert(1)" }));
-    await expect(startCheckout("yearly", "settings-voice")).rejects.toThrow("Billing is temporarily unavailable");
+    await expect(startCheckout("yearly", 100, "settings-voice")).rejects.toThrow("Billing is temporarily unavailable");
     expect(JSON.parse(fetch.mock.calls[0]![1]!.body as string)).toEqual({
-      plan: "yearly", ref: "settings-voice", terms: TERMS_VERSION, autoRenew: true,
+      plan: "yearly", ref: "settings-voice", terms: TERMS_VERSION, autoRenew: true, price: 100,
     });
   });
 });

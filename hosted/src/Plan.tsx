@@ -152,7 +152,7 @@ export function PlanSection({
 
 /**
  * The durable confirmation `/billing` shows for the held plan, as long as the
- * account holds it (docs/specs/pricing.md -> "Paid-launch requirements"):
+ * account holds it (docs/specs/pricing.md -> "Checkout and entitlement"):
  * the plan and price, renewal, what was agreed and when, how to cancel, and
  * refunds.
  */

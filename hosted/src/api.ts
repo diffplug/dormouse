@@ -2,7 +2,7 @@ import { providerIds, providerNames } from "../server/providers.js";
 import type { ProviderId } from "../server/providers.js";
 import { NOT_ENTITLED_ERROR } from "../../remote-lib-common/src/remote/wire.ts";
 import { ADMIN_METRICS_PATH, type AdminMetricsBody } from "../server/metric-labels";
-import { CHECKOUT_CLOSED, TERMS_VERSION } from "../server/policy-constants";
+import { CHECKOUT_CLOSED, PRICE_CHANGED, TERMS_VERSION } from "../server/policy-constants";
 import type { BillingSummary, Plan } from "./billing";
 
 export const providers = providerIds;
@@ -251,16 +251,21 @@ export async function getBilling(): Promise<BillingSummary | "closed"> {
   if (error.message === CHECKOUT_CLOSED) return "closed";
   throw error;
 }
+/** A checkout refused because `price` is no longer what it would charge. */
+export class PriceChangedError extends Error {}
 /**
- * Starts a checkout of `plan`, agreeing to the current terms and to automatic
+ * Starts a checkout of `plan` at the `price` the page showed, agreeing to the current terms and to automatic
  * renewal, and sends this tab to Stripe.
  */
-export async function startCheckout(plan: Plan, ref: string | null) {
+export async function startCheckout(plan: Plan, price: number, ref: string | null) {
   const response = await billing(
     "/checkout",
-    sendJson("POST", { plan, ...(ref ? { ref } : {}), terms: TERMS_VERSION, autoRenew: true }),
+    sendJson("POST", { plan, ...(ref ? { ref } : {}), terms: TERMS_VERSION, autoRenew: true, price }),
   );
-  if (!response.ok) throw await billingRefused(response);
+  if (!response.ok) {
+    const error = await billingRefused(response);
+    throw response.status === 409 && error.message === PRICE_CHANGED ? new PriceChangedError(error.message) : error;
+  }
   leaveFor(((await response.json()) as { url: string }).url, BILLING_UNAVAILABLE);
 }
 /** Confirms the checkout Stripe returned from, answering the plan it bought. */

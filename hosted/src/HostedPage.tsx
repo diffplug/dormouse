@@ -87,7 +87,7 @@ export interface HostedPageProps {
   checkoutPlan?: Plan | null;
   /** Back from Stripe with a checkout this page just confirmed. */
   confirmed?: boolean;
-  purchase?: (plan: Plan) => void;
+  purchase?: (plan: Plan, price: number) => void;
   manageBilling?: () => void;
   saveFounder?: (shown: boolean, name: string) => void;
   /** Leaves checkout or billing for the account page. */
@@ -329,7 +329,8 @@ export function HostedPage({
                     </button>
                   </>
                 ) : (
-                  <Checkout billing={summary} plan={checkoutPlan} busy={busy} onPurchase={purchase} />
+                  // A new founding step asks for agreement again, both boxes unticked.
+                  <Checkout key={summary.founding?.cohort ?? "closed"} billing={summary} plan={checkoutPlan} busy={busy} onPurchase={purchase} />
                 )}
                 {backToAccount}
               </section>

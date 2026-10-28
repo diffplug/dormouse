@@ -46,6 +46,10 @@ export const VOICE_DAILY_CAP = 500;
 // reads as closed rather than as an outage.
 export const CHECKOUT_CLOSED = "Checkout is not open yet.";
 
+// Checkout's answer when the price the page showed is no longer the one it
+// would charge: the page reloads the price and asks for agreement again.
+export const PRICE_CHANGED = "The price has changed. Check the new price and agree again.";
+
 // The plans checkout sells, by the names a checkout request, `status()`, and
 // the billing metrics use.
 export const BILLING_PLANS = ["monthly", "yearly", "founding"] as const;

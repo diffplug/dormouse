@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
 import { createTestContext } from "pgstencil/testing";
 import { queryDatabase } from "pgstencil/postgres";
-import { FOUNDING_COHORT_SIZE, FOUNDING_LADDER, LIST_ANNUAL } from "../../../website/src/lib/hosted-pricing";
+import { FOUNDING_COHORT_SIZE, FOUNDING_LADDER, LIST_ANNUAL, LIST_MONTHLY } from "../../../website/src/lib/hosted-pricing";
 import type { BillingSetup } from "../billing";
 import {
   BILLING_WEBHOOK_PATH,
@@ -11,6 +11,7 @@ import {
   CONSENT_REQUIRED,
   ENDED_FOR_REFUND,
   FOUNDERS_ONLY,
+  PRICE_CHANGED,
   TERMS_CHANGED,
   WEBHOOK_BODY_BYTES,
   billingRoutes,
@@ -27,8 +28,13 @@ import { workerDatabases } from "./worker-roles";
 // signed-in account may ask, what Stripe's webhook does, and what each counts.
 
 const origin = ORIGINS.account;
-/** What the checkout page sends once both boxes are ticked. */
-const CONSENT = { terms: TERMS_VERSION, autoRenew: true };
+/** What the checkout page sends once both boxes are ticked, beside `plan` at the price it showed. */
+const consent = (plan: string) => ({
+  plan,
+  terms: TERMS_VERSION,
+  autoRenew: true,
+  price: plan === "monthly" ? LIST_MONTHLY : plan === "yearly" ? LIST_ANNUAL : FOUNDING_LADDER[0],
+});
 
 async function fixture({ closed = false } = {}) {
   const context = await createTestContext({ migrations, now: new Date().toISOString() });
@@ -105,7 +111,7 @@ async function fixture({ closed = false } = {}) {
     });
   /** Starts `plan` for `who` and completes it in StripeDev, delivering its events. */
   const buy = async (who: Awaited<ReturnType<typeof account>>, plan: string, ref?: string) => {
-    const started = await who.request("/api/billing/checkout", { method: "POST", body: { plan, ref, ...CONSENT } });
+    const started = await who.request("/api/billing/checkout", { method: "POST", body: { ...consent(plan), ref } });
     expect(started.status, await started.clone().text()).toBe(200);
     const { url } = (await started.json()) as { url: string };
     const session = [...stripe.dev.checkouts.values()].find((s) => s.url === url)!;
@@ -197,10 +203,10 @@ test("checkout takes a plan and a ref, never a Price, customer, quantity, or ret
   const first = await member.request("/api/billing/checkout", {
     method: "POST",
     body: {
-      plan: "monthly",
+      ...consent("monthly"),
       ref: "settings-voice",
-      ...CONSENT,
-      price: "price_x",
+      priceId: "price_x",
+      line_items: [{ price: "price_x", quantity: 3 }],
       customer: "cus_x",
       quantity: 3,
       success_url: "https://attacker.example/",
@@ -255,7 +261,7 @@ test("checkout takes a plan and a ref, never a Price, customer, quantity, or ret
   // A held subscription is managed in the portal, never bought twice.
   const portal = await member.request("/api/billing/portal", { method: "POST" });
   expect(((await portal.json()) as { url: string }).url).toBe(`${f.dev.origin}/portal/${session.customer}`);
-  expect((await member.request("/api/billing/checkout", { method: "POST", body: { plan: "yearly", ...CONSENT } })).status).toBe(409);
+  expect((await member.request("/api/billing/checkout", { method: "POST", body: consent("yearly") })).status).toBe(409);
 
   // An unknown ref counts as `other`, and none as `none`, which sends Stripe no ref.
   const other = await f.account();
@@ -270,7 +276,7 @@ test("checkout takes a plan and a ref, never a Price, customer, quantity, or ret
   });
   // Nor does an address the account has not verified.
   const unverified = await f.account(`${randomUUID()}@example.test`, false);
-  expect((await unverified.request("/api/billing/checkout", { method: "POST", body: { plan: "monthly", ...CONSENT } })).status).toBe(200);
+  expect((await unverified.request("/api/billing/checkout", { method: "POST", body: consent("monthly") })).status).toBe(200);
   expect(f.dev.requests.filter((r) => r.path === "/v1/customers").at(-1)!.body).toEqual({
     "metadata[pgstencil_owner]": unverified.id,
   });
@@ -297,20 +303,28 @@ test("checkout starts only after agreement to the current terms and to automatic
     f.sql<{ checkoutId: string; termsVersion: string; userId: string; plan: string; priceId: string }>(
       `SELECT "checkoutId", "termsVersion", "userId", plan, "priceId" FROM dormouse_checkout_consents ORDER BY "consentedAt"`,
     );
-  for (const consent of [{}, { terms: TERMS_VERSION }, { terms: TERMS_VERSION, autoRenew: "yes" }, { autoRenew: true }]) {
-    const refused = await member.request("/api/billing/checkout", { method: "POST", body: { plan: "yearly", ...consent } });
-    expect([refused.status, await refused.json()], JSON.stringify(consent)).toEqual([400, { message: CONSENT_REQUIRED }]);
+  const { price: _price, ...unpriced } = consent("yearly");
+  for (const body of [
+    { plan: "yearly" },
+    { plan: "yearly", terms: TERMS_VERSION, price: LIST_ANNUAL },
+    { ...consent("yearly"), autoRenew: "yes" },
+    { ...consent("yearly"), terms: undefined },
+    unpriced,
+    { ...consent("yearly"), price: "100" },
+  ]) {
+    const refused = await member.request("/api/billing/checkout", { method: "POST", body });
+    expect([refused.status, await refused.json()], JSON.stringify(body)).toEqual([400, { message: CONSENT_REQUIRED }]);
   }
   const stale = await member.request("/api/billing/checkout", {
     method: "POST",
-    body: { plan: "yearly", terms: "2020-01-01", autoRenew: true },
+    body: { ...consent("yearly"), terms: "2020-01-01" },
   });
   expect([stale.status, await stale.json()]).toEqual([409, { message: TERMS_CHANGED }]);
   expect(f.dev.requests.filter((r) => r.path === "/v1/checkout/sessions")).toEqual([]);
   expect(await consents()).toEqual([]);
 
   // Recorded as the checkout starts; the plan's confirmation shows it only once one completes.
-  expect((await member.request("/api/billing/checkout", { method: "POST", body: { plan: "monthly", ...CONSENT } })).status).toBe(200);
+  expect((await member.request("/api/billing/checkout", { method: "POST", body: consent("monthly") })).status).toBe(200);
   expect(await consents()).toMatchObject([{ plan: "monthly", priceId: f.setup.monthly }]);
   expect(await member.summary()).toMatchObject({ plan: null, consent: null });
   const { session } = await f.buy(member, "yearly");
@@ -336,6 +350,50 @@ test("checkout starts only after agreement to the current terms and to automatic
   // Kept once the subscription and the account are gone: it is a billing record.
   await f.sql(`DELETE FROM "user" WHERE id = $1`, [member.id]);
   expect(await consents()).toHaveLength(2);
+});
+
+test("checkout refuses a price the page did not show, expiring what it opened, so the consent records the one it did", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const consents = () => f.sql<{ priceId: string }>(`SELECT "priceId" FROM dormouse_checkout_consents ORDER BY "consentedAt"`);
+  const start = (who: Awaited<ReturnType<typeof f.account>>, plan: string, price: number) =>
+    who.request("/api/billing/checkout", { method: "POST", body: { ...consent(plan), price } });
+  const statuses = () => [...f.dev.checkouts.values()].map((session) => session.status);
+  const member = await f.account();
+  for (const [plan, price] of [["founding", FOUNDING_LADDER[1]!], ["yearly", LIST_MONTHLY]] as const) {
+    const changed = await start(member, plan, price);
+    expect([changed.status, await changed.json()], plan).toEqual([409, { message: PRICE_CHANGED }]);
+  }
+  expect(statuses()).toEqual(["expired", "expired"]);
+
+  // A founding checkout opens at the first step, then the cohort sells out.
+  const late = await f.account();
+  expect((await start(late, "founding", FOUNDING_LADDER[0]!)).status).toBe(200);
+  await f.sql(
+    `WITH owners AS (
+      INSERT INTO pgstencil_billing.accounts (owner_id, email, created_at)
+      SELECT 'filler-' || n, 'filler@example.test', now() FROM generate_series(1, $1::int) n
+      RETURNING owner_id)
+    INSERT INTO pgstencil_billing.subscriptions
+      (id, owner_id, price_id, status, started_at, period_end, cancel_at_period_end, updated_at)
+    SELECT 'sub_' || owner_id, owner_id, $2, 'active', now() - interval '40 days',
+      now() + interval '325 days', false, now() FROM owners`,
+    [FOUNDING_COHORT_SIZE, f.setup.founding[0]],
+  );
+  // A page still showing the sold-out step is refused.
+  expect((await start(member, "founding", FOUNDING_LADDER[0]!)).status).toBe(409);
+  // The reloaded page shows the next step, but the checkout left open would charge the first: it is expired.
+  expect((await start(late, "founding", FOUNDING_LADDER[1]!)).status).toBe(409);
+  expect(statuses().slice(-2)).toEqual(["expired", "expired"]);
+  expect(await consents()).toEqual([{ priceId: f.setup.founding[0] }]);
+  // Asked again, it opens at the price shown, and its consent says so.
+  expect((await start(late, "founding", FOUNDING_LADDER[1]!)).status).toBe(200);
+  expect(await consents()).toEqual([{ priceId: f.setup.founding[0] }, { priceId: f.setup.founding[1] }]);
+  expect(f.dev.requests.filter((r) => r.path === "/v1/checkout/sessions").at(-1)!.body["line_items[0][price]"]).toBe(
+    f.setup.founding[1],
+  );
 });
 
 test("only a founding subscription joins the founders row, under a checked name, and leaving is always allowed", async ({
