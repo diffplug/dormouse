@@ -11,8 +11,10 @@ vi.mock('../../lib/platform', () => ({
 import {
   clearBurrowEnrollment,
   getBurrowStatusSnapshot,
+  readBurrowStatusOnce,
   subscribeToBurrowStatus,
 } from './burrow-status-store';
+import { makeStubBurrowLink, UNENROLLED_STATUS } from '../../host/remote/test-burrow-link';
 
 afterEach(() => {
   burrowLink = undefined;
@@ -318,5 +320,34 @@ describe('a Hosted enrollment in the status', () => {
     } finally {
       unsubscribe();
     }
+  });
+});
+
+describe('readBurrowStatusOnce', () => {
+  it('reads once and publishes nothing, or takes the answer a poll already holds', async () => {
+    const link = makeStubBurrowLink({ status: UNENROLLED_STATUS });
+    const command = vi.spyOn(link, 'command');
+    const on = vi.spyOn(link, 'on');
+    burrowLink = link;
+    expect(await readBurrowStatusOnce()).toEqual(UNENROLLED_STATUS);
+    expect(command).toHaveBeenCalledOnce();
+    expect(on).not.toHaveBeenCalled();
+    expect(getBurrowStatusSnapshot()).toEqual({ kind: 'loading' });
+
+    const unsubscribe = subscribeToBurrowStatus(() => {});
+    try {
+      await vi.waitFor(() => expect(getBurrowStatusSnapshot().kind).toBe('ready'));
+      command.mockClear();
+      expect(await readBurrowStatusOnce()).toEqual(UNENROLLED_STATUS);
+      expect(command).not.toHaveBeenCalled();
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it('is null without a service, or when it cannot answer', async () => {
+    expect(await readBurrowStatusOnce()).toBeNull();
+    burrowLink = makeStubBurrowLink({ statusError: 'down' });
+    expect(await readBurrowStatusOnce()).toBeNull();
   });
 });

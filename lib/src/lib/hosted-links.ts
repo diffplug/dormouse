@@ -15,6 +15,8 @@ export const HOSTED_REFS = {
   selfHost: 'self-host',
   readme: 'readme',
   hostedNoPlan: 'hosted-no-plan',
+  upsellVoice: 'upsell-voice',
+  upsellPush: 'upsell-push',
 } as const;
 export type HostedRef = typeof HOSTED_REFS[keyof typeof HOSTED_REFS];
 

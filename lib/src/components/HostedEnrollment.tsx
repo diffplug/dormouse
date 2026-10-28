@@ -10,8 +10,6 @@ import { BURROW_IS_AN_APP } from '../remote/setup-copy';
 import { beginHostedEnrollment, cancelHostedEnrollment } from '../remote/burrow/burrow-status-store';
 
 const HOSTED_PAGE_URL = 'https://dormouse.sh/hosted/';
-/** The Hosted page's voice section, the spoken-alarm row's link where the build has no managed voice. */
-export const HOSTED_VOICE_URL = withHostedRef(HOSTED_PAGE_URL, HOSTED_REFS.settingsVoice, 'voice');
 
 /**
  * The Hosted page's plans, the one way every no-plan line names them; `from`

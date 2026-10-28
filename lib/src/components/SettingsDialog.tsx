@@ -15,14 +15,13 @@ import {
   Shortcut,
   UNDER_SWITCH_INDENT,
 } from './design';
-import { ExternalTextLink } from './ExternalTextLink';
 import { ThemePicker } from './ThemePicker';
 import { ShellPicker } from './ShellPicker';
 import { WatchedCommandList } from './WatchedCommandList';
 import { NetworkPhones, NetworkSettings, NetworkUpdates } from './NetworkSettings';
 import { hostOf, useNetworkPolicy } from './remote-control-shared';
 import { PushTestButton, SpeakTestButton } from './AlarmTestButtons';
-import { HOSTED_VOICE_URL, HostedPlansLink } from './HostedEnrollment';
+import { HostedPlansLink } from './HostedEnrollment';
 import { HOSTED_REFS } from '../lib/hosted-links';
 import { relayRefuses, type BurrowConsoleStatus } from '../host/remote/service-protocol';
 import { getBurrowStatusSnapshot, subscribeToBurrowStatus } from '../remote/burrow/burrow-status-store';
@@ -69,8 +68,9 @@ function describePushTargets(
   push: PushDevicesState,
   burrow: BurrowConsoleStatus | null,
   remoteControlBelow: boolean,
+  preview: boolean,
 ): ReactNode {
-  if (burrow && relayRefuses(burrow.connection)) return describeRefusal(burrow, remoteControlBelow);
+  if (burrow && relayRefuses(burrow.connection)) return describeRefusal(burrow, remoteControlBelow, preview);
   if (push.status === 'loading') return 'Looking for phones…';
   if (push.status === 'error') return 'Could not reach the Relay to list phones.';
   // The preview never shows Remote control, so it also omits "below".
@@ -99,16 +99,18 @@ function describePushTargets(
 /**
  * Why a refusing Relay sends no push, and the way back: the plans for an
  * account with none, otherwise enrolling again under the persistent Relay's
- * heading in Remote control. A self-host build's line never names Hosted.
+ * heading in Remote control. A self-host build's line never names Hosted. The
+ * inert preview carries no plans link of its own; its live line may.
  */
-function describeRefusal(status: BurrowConsoleStatus, remoteControlBelow: boolean): ReactNode {
+function describeRefusal(status: BurrowConsoleStatus, remoteControlBelow: boolean, preview: boolean): ReactNode {
   const where = remoteControlBelow ? 'below' : 'in Settings → Network';
   if (status.relayMode === 'self-host') {
     return `${hostOf(status.relayOrigin)} no longer accepts this computer, so no push is sent. ` +
       `Disconnect and enroll it again under Persistent Relay ${where}.`;
   }
   if (status.connection === 'not-entitled') {
-    return <>Your account has no Hosted plan, so no push is sent. <HostedPlansLink from={HOSTED_REFS.settingsPush} /></>;
+    const sentence = 'Your account has no Hosted plan, so no push is sent.';
+    return preview ? sentence : <>{sentence} <HostedPlansLink from={HOSTED_REFS.settingsPush} /></>;
   }
   return `This computer was removed from your Hosted account, so no push is sent. ` +
     `Enroll it again under Hosted Relay ${where}.`;
@@ -121,7 +123,7 @@ const TOPICS = [
   { id: 'labs', label: 'Labs', icon: FlaskIcon, groups: ['delayedKill'] },
   { id: 'about', label: 'About', icon: InfoIcon, groups: ['about'] },
 ] as const;
-type TopicId = typeof TOPICS[number]['id'];
+export type TopicId = typeof TOPICS[number]['id'];
 type GroupId = typeof TOPICS[number]['groups'][number];
 /** Search matches a group by its topic's label as well as its own text. */
 const TOPIC_LABEL_OF = Object.fromEntries(
@@ -132,6 +134,8 @@ const TOPIC_LABEL_OF = Object.fromEntries(
 export const TOPIC_GAP_PX = 16;
 /** A slower, consistent pace than the browser's native smooth scrolling. */
 export const SETTINGS_SCROLL_MS = 700;
+/** How long a dialog opened at a topic keeps it in view while the sections above it fill in. */
+const SETTLE_MS = 2000;
 
 /** Search the mounted controls themselves so descriptions, options, and live
  * command/device names have no second copy to drift. Hidden groups stay mounted
@@ -183,8 +187,8 @@ function TopicSection({ id, hidden, children }: { id: TopicId; hidden: boolean; 
   );
 }
 
-/** App-global settings. */
-export function SettingsDialog({ onClose }: { onClose: () => void }) {
+/** App-global settings, opened at `initialTopic` (the top by default). */
+export function SettingsDialog({ onClose, initialTopic }: { onClose: () => void; initialTopic?: TopicId }) {
   const watched = useSyncExternalStore(subscribeToWatchedCommands, getWatchedCommandsSnapshot);
   const settings = useSyncExternalStore(subscribeToAlertSettings, getAlertSettings);
   const shellState = useSyncExternalStore(subscribeToShells, getShellsSnapshot);
@@ -251,6 +255,12 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     scrollFrame.current = null;
     delete contentRef.current?.dataset.topicScrolling;
   }, []);
+  /** The topic opened at, held in view until `until` while the sections above it fill in. */
+  const settling = useRef<{ id: TopicId; until: number } | null>(null);
+  const takeOverScroll = useCallback(() => {
+    settling.current = null;
+    cancelScroll();
+  }, [cancelScroll]);
 
   const scrollToTopic = useCallback((id: TopicId | null) => {
     cancelScroll();
@@ -291,13 +301,32 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     followScroll();
     const content = contentRef.current;
     if (!content) return;
-    const observer = new ResizeObserver(followScroll);
+    const observer = new ResizeObserver(() => {
+      followScroll();
+      // A status read landing in a section above the opened topic would push
+      // it away once its scroll has finished.
+      const target = settling.current;
+      if (target && scrollFrame.current === null && performance.now() < target.until) scrollToTopic(target.id);
+    });
     observer.observe(content);
     content.querySelectorAll('[data-settings-topic]').forEach((section) => observer.observe(section));
     return () => observer.disconnect();
-  }, [followScroll, visibleTopicIds]);
+  }, [followScroll, scrollToTopic, visibleTopicIds]);
 
   useEffect(() => cancelScroll, [cancelScroll]);
+
+  // Opened at a topic: go there once it shows, which waits for the search
+  // index, since every section is hidden on the first frame. Once only, so the
+  // reader is never pulled back.
+  const pendingTopic = useRef(initialTopic);
+  useEffect(() => {
+    const id = pendingTopic.current;
+    if (!id || !visibleTopicIds.split(',').includes(id)) return;
+    pendingTopic.current = undefined;
+    settling.current = { id, until: performance.now() + SETTLE_MS };
+    setTopic(id);
+    scrollToTopic(id);
+  }, [visibleTopicIds, scrollToTopic]);
 
   return (
     <ModalFrame
@@ -390,9 +419,9 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
             onPointerLeave={() => setHoveredTopic(null)}
             onScroll={followScroll}
             // The user's own input takes over from a chosen topic.
-            onWheel={cancelScroll}
-            onPointerDown={cancelScroll}
-            onKeyDown={cancelScroll}
+            onWheel={takeOverScroll}
+            onPointerDown={takeOverScroll}
+            onKeyDown={takeOverScroll}
             className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain scroll-smooth px-3 py-4 break-words sm:px-6 [&_label]:flex-wrap"
           >
             {searching && (
@@ -543,13 +572,9 @@ export function AlarmSettingsSection({ sink, preview = false, onShowNetwork }: {
         onCommitDelay={(speakDelayMs) => updateAlertSettings({ speakDelayMs })}
         action={preview ? null : <SpeakTestButton />}
       >
+        {/* Only a build with Hosted mode has the port, so without one it names no Hosted. */}
         {!managedVoiceOffered ? (
-          <>
-            Uses your browser or system voice.{' '}
-            <ExternalTextLink href={HOSTED_VOICE_URL}>
-              Get ElevenLabs voices with Natural Voice.
-            </ExternalTextLink>
-          </>
+          'Uses your browser or system voice.'
         ) : networkOff ? (
           <>
             Natural Voice is off while <NetworkTopicLink onShow={onShowNetwork} /> is set to Nowhere,
@@ -579,7 +604,7 @@ export function AlarmSettingsSection({ sink, preview = false, onShowNetwork }: {
       {networkOff ? (
         <>Push is off while <NetworkTopicLink onShow={onShowNetwork} /> is set to Nowhere.</>
       ) : (
-        <PushTargets remoteControlBelow={hasBurrowService && !preview} />
+        <PushTargets remoteControlBelow={hasBurrowService && !preview} preview={preview} />
       )}
     </AlarmSinkSection>
   );
@@ -589,10 +614,10 @@ export function AlarmSettingsSection({ sink, preview = false, onShowNetwork }: {
  * {@link describePushTargets} over the live stores: its own component so only
  * the push sink, not speech, keeps the Burrow status polled.
  */
-function PushTargets({ remoteControlBelow }: { remoteControlBelow: boolean }) {
+function PushTargets({ remoteControlBelow, preview }: { remoteControlBelow: boolean; preview: boolean }) {
   const push = useSyncExternalStore(subscribeToPushDevices, getPushDevices);
   const burrow = useSyncExternalStore(subscribeToBurrowStatus, getBurrowStatusSnapshot);
-  return describePushTargets(push, burrow.kind === 'ready' ? burrow.status : null, remoteControlBelow);
+  return describePushTargets(push, burrow.kind === 'ready' ? burrow.status : null, remoteControlBelow, preview);
 }
 
 /**

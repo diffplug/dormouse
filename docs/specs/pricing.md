@@ -9,7 +9,7 @@
 
 **`/hosted` is canonical; `/pricing` 301-redirects to it.** The tool is free and open source, and Hosted is the optional service with a price, so pricing is a section of the Hosted page, never a page of its own.
 
-**Settings is the front door.** The spoken-alarm row's managed-voice link lands on `/hosted#voice`, and the Pocket playground tutorial on `/hosted#remote-control`. `#pricing` (the plan cards, which each JSON-LD `Offer` url names), `#remote-control`, and `#voice` keep resolving as section ids.
+**Settings is the front door.** A Hosted build turns on managed voice and the Hosted Relay there, and an account with no plan is linked to `#pricing` from Settings and the baseboard alarm buttons (`docs/specs/alert.md` -> "Settings dialog"); the Pocket playground tutorial lands on `/hosted#remote-control`. `#pricing` (the plan cards, which each JSON-LD `Offer` url names), `#remote-control`, and `#voice` keep resolving as section ids.
 
 **Must give every link to the page a `?ref=` from `HOSTED_REFS`, one per link, ahead of its fragment, and strip it from the address bar on arrival**, so a copied link never carries it. `takeVisitRef` answers it, an unlisted value as `other`, and the page's pageview carries it (`docs/specs/website-docs.md` -> "Visit analytics"). Source of truth: `lib/src/lib/hosted-links.ts`; `takeVisitRef` in `website/src/lib/hosted-ref.ts`.
 
