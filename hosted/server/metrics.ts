@@ -1,4 +1,5 @@
 // Rules: docs/specs/hosted.md -> "Metrics". The labels: ./metric-labels.ts.
+import type { AuthHooks } from "@pgstencil/auth/better-auth";
 import type { Context } from "hono";
 import { queryDatabase } from "pgstencil/postgres";
 import {
@@ -12,7 +13,7 @@ import {
 /**
  * Adds `n` to today's (UTC) count of `event` under `label`. Rejects on a
  * label off the event's list or a database failure; callers go through
- * {@link recordMetric}.
+ * {@link recordMetric} or {@link authMetricHooks}.
  */
 export async function countMetric(databaseUrl: string, event: MetricEvent, label = "", n = 1) {
   await queryDatabase(
@@ -24,23 +25,37 @@ export async function countMetric(databaseUrl: string, event: MetricEvent, label
   );
 }
 
+/** `write`, settled: it never rejects, and its failure is only logged. */
+const loggedFailure = (what: string, write: Promise<unknown>) =>
+  write.then(
+    () => {},
+    (error: unknown) =>
+      console.error(`${what} not recorded: ${error instanceof Error ? error.message : "unknown error"}`),
+  );
+
 /**
  * Lets `write` finish after the response, through the request's `waitUntil`,
  * and only logs its failure: it never fails or delays the request it rides
  * on. The Node dev loop has no ExecutionContext; there it runs unawaited.
  */
 export function bestEffort(c: Context, what: string, write: Promise<unknown>) {
-  const settled = write.then(
-    () => {},
-    (error: unknown) =>
-      console.error(`${what} not recorded: ${error instanceof Error ? error.message : "unknown error"}`),
-  );
+  const settled = loggedFailure(what, write);
   try {
     c.executionCtx.waitUntil(settled);
   } catch {
     // No ExecutionContext.
   }
 }
+
+/**
+ * The account Worker's sign-up and login counts. pgstencil runs each hook
+ * after its write commits, never awaits it, and never fires one for linking a
+ * provider; the Workers adapter keeps it alive with `waitUntil`.
+ */
+export const authMetricHooks = (databaseUrl: string): AuthHooks => ({
+  userCreated: () => loggedFailure("Metric account.created", countMetric(databaseUrl, "account.created")),
+  login: ({ method }) => loggedFailure("Metric login", countMetric(databaseUrl, "login", method)),
+});
 
 /** {@link countMetric}, best effort. */
 export const recordMetric = (c: Context, databaseUrl: string, event: MetricEvent, label = "", n = 1) =>

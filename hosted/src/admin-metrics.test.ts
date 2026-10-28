@@ -41,6 +41,8 @@ describe("summarize", () => {
   it("lists every event, one never counted at zero, and no label rows for an unlabeled one", () => {
     const summaries = summarize(body);
     expect(summaries.map((summary) => summary.event)).toEqual([
+      "account.created",
+      "login",
       "enroll.approved",
       "burrow.enrolled",
       "voice.speak",
