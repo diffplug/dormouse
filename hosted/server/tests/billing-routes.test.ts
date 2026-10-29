@@ -933,6 +933,62 @@ test("a withdrawal whose acknowledgement, cancellation, or refund fails still st
   expect([f.email.all().length, f.cancels.length, f.refunds.length]).toEqual([1, 1, 1]);
 });
 
+test("a payment Stripe holds by its charge is refunded by it; one paid outside Stripe keeps the settlement failing until settled by hand", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const error = vi.spyOn(console, "error").mockImplementation(() => {});
+  onTestFinished(() => error.mockRestore());
+  const member = await f.account();
+  const { subscription } = await f.buy(member, "yearly");
+  f.paidInvoices.set("pi_w_intent", subscription.id);
+  f.paidInvoices.set("pi_w_charge", subscription.id);
+  f.paidBy.set("pi_w_charge", "charge");
+  f.paidInvoices.set("pi_w_record", subscription.id);
+  f.paidBy.set("pi_w_record", "payment_record");
+  f.paidInvoices.set("pi_w_oob", subscription.id);
+  f.paidBy.set("pi_w_oob", "out_of_band");
+  const answered = await member.request("/api/billing/withdraw", { method: "POST", body: { subscription: subscription.id } });
+  expect(await answered.json()).toMatchObject({ withdrawn: { subscription: subscription.id, settled: false } });
+  const [{ id }] = (await f.sql(`SELECT id FROM dormouse_withdrawals`)) as [{ id: string }];
+  // Everything Stripe can refund is refunded at once.
+  expect(f.refunds).toEqual([
+    { paymentIntent: "pi_w_intent", withdrawal: id },
+    { charge: "ch_pi_w_charge", withdrawal: id },
+  ]);
+  expect(error).toHaveBeenCalledWith(expect.stringContaining(id), expect.objectContaining({ message: expect.stringContaining("in_pi_w_oob") }));
+  expect(String(error.mock.calls.at(-1)![1])).toContain("in_pi_w_record");
+
+  // A closure's refund paid outside Stripe stays unsettled too.
+  const closing = await f.account();
+  const { subscription: monthly } = await f.buy(closing, "monthly");
+  f.paidInvoices.set("pi_c_oob", monthly.id);
+  f.paidBy.set("pi_c_oob", "out_of_band");
+  expect((await closing.request("/api/account/close", { method: "POST", body: { close: true } })).status).toBe(204);
+  const settled = async () => [
+    ((await member.summary()).withdrawn as { settled: boolean }).settled,
+    ...(await f.sql<{ settled: boolean }>(
+      `SELECT "settledAt" IS NOT NULL AS settled FROM dormouse_account_closures WHERE "userId" = $1`,
+      [closing.id],
+    )).map((row) => row.settled),
+  ];
+  expect(await settled()).toEqual([false, false]);
+
+  // Each cron pass fails on them, within the retry window and past it,
+  // refunding nothing twice and never stamping them settled.
+  for (const days of [1, 31]) {
+    f.time.advanceMilliseconds(days * DAY_MS);
+    await expect(resyncBilling(f.setup, f.database.url, origin, f.mail)).rejects.toThrow(AggregateError);
+    expect(f.refunds).toHaveLength(2);
+    expect(await settled()).toEqual([false, false]);
+  }
+  // The operator refunds them by hand and marks them settled; the cron then passes.
+  await f.sql(`UPDATE dormouse_withdrawals SET "settledAt" = now() WHERE id = $1`, [id]);
+  await f.sql(`UPDATE dormouse_account_closures SET "settledAt" = now() WHERE "userId" = $1`, [closing.id]);
+  await resyncBilling(f.setup, f.database.url, origin, f.mail);
+});
+
 test("closing an account needs a recent login, cancels its subscription in Stripe first, and keeps the billing records", async ({
   onTestFinished,
 }) => {

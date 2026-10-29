@@ -28,8 +28,8 @@ const WITHDRAWAL_COUNTRIES: ReadonlySet<string> = new Set([
   ...["GB", "GG", "GI", "IM", "JE"],
 ]);
 
-/** How long the cron keeps retrying a withdrawal's settlement. */
-const RETRY_DAYS = 30;
+/** How long the cron keeps retrying a withdrawal's settlement or a closure's refunds. */
+export const RETRY_DAYS = 30;
 
 type Held = NonNullable<Awaited<ReturnType<Billing<Plan>["status"]>>["subscription"]>;
 
@@ -165,12 +165,16 @@ export interface RefundFor {
   id: string;
 }
 
-/** Refunds what is left of PaymentIntent `intent` for `refund`, once however often it is asked. */
-async function refundInFull(billing: Billing<Plan>, refund: RefundFor, intent: string) {
+/** A paid payment Stripe can refund: its PaymentIntent, or its charge when it has none. */
+type Refundable = { payment_intent: string } | { charge: string };
+
+/** Refunds what is left of `payment` for `refund`, once however often it is asked. */
+async function refundInFull(billing: Billing<Plan>, refund: RefundFor, payment: Refundable) {
+  const paid = "payment_intent" in payment ? payment.payment_intent : payment.charge;
   try {
     await billing.stripe.refunds.create(
-      { payment_intent: intent, reason: "requested_by_customer", metadata: { [`dormouse_${refund.kind}`]: refund.id } },
-      { idempotencyKey: `dormouse-${refund.kind}-${refund.id}-${intent}` },
+      { ...payment, reason: "requested_by_customer", metadata: { [`dormouse_${refund.kind}`]: refund.id } },
+      { idempotencyKey: `dormouse-${refund.kind}-${refund.id}-${paid}` },
     );
   } catch (error) {
     // Refunded in full already, by an earlier attempt or by hand.
@@ -179,10 +183,21 @@ async function refundInFull(billing: Billing<Plan>, refund: RefundFor, intent: s
   }
 }
 
+/** What Stripe can refund of invoice payment `payment`: a PaymentIntent, or a charge without one; null for one paid outside Stripe. */
+function refundable({ payment }: Stripe.InvoicePayment): Refundable | null {
+  const intent = payment.type === "payment_intent" ? idOf(payment.payment_intent) : null;
+  if (intent) return { payment_intent: intent };
+  const charge = payment.type === "charge" ? idOf(payment.charge) : null;
+  return charge ? { charge } : null;
+}
+
 /**
  * Refunds in full, for `refund`, every payment of each paid invoice of
  * subscription `subscriptionId` that `covers` accepts: no use deduction, tax
- * included. Safe to repeat.
+ * included. Safe to repeat. Throws, after refunding the rest, while any of
+ * those invoices was paid in part outside Stripe (out of band, or a payment
+ * record), which Stripe cannot refund: the operator refunds it by hand and
+ * marks the withdrawal or closure settled (`hosted/README.md`).
  */
 export async function refundPaidInvoices(
   billing: Billing<Plan>,
@@ -193,14 +208,22 @@ export async function refundPaidInvoices(
   const label = `${refund.kind === "withdrawal" ? "Withdrawal" : "Closure"} ${refund.id}`;
   const invoices = await billing.stripe.invoices.list({ subscription: subscriptionId, status: "paid", limit: 100 });
   if (invoices.has_more) throw new Error(`${label}: more paid invoices than one page`);
+  const byHand: string[] = [];
   for (const invoice of invoices.data.filter(covers)) {
     const payments = await billing.stripe.invoicePayments.list({ invoice: invoice.id!, status: "paid", limit: 100 });
-    for (const { payment } of payments.data) {
-      const intent = idOf(payment.payment_intent);
-      if (intent) await refundInFull(billing, refund, intent);
-      else console.warn(`${label}: invoice ${invoice.id} has a payment Stripe cannot refund here; refund it by hand`);
+    if (payments.has_more) throw new Error(`${label}: invoice ${invoice.id} has more payments than one page`);
+    let refunded = 0;
+    for (const payment of payments.data) {
+      const paid = refundable(payment);
+      if (!paid) continue;
+      await refundInFull(billing, refund, paid);
+      refunded += payment.amount_paid ?? 0;
     }
+    // Whatever Stripe did not collect itself: an invoice marked paid out of band has no payment to refund.
+    if (refunded < invoice.amount_due) byHand.push(`${invoice.id} (${invoice.amount_due - refunded} of ${invoice.amount_due} ${invoice.currency})`);
   }
+  if (byHand.length)
+    throw new Error(`${label}: paid outside Stripe, refund by hand, then mark it settled: invoice ${byHand.join(", ")}`);
 }
 
 /**
@@ -224,23 +247,45 @@ export async function settleWithdrawal(billing: Billing<Plan>, row: WithdrawalRo
   await run(billing.db, `UPDATE public.dormouse_withdrawals SET "settledAt" = $2 WHERE id = $1`, [row.id, billing.time.now()]);
 }
 
+/**
+ * A failure naming the rows of `table` (withdrawals or account closures)
+ * still unsettled though stamped `at` before `since`, which the cron no longer
+ * retries; none while there are none.
+ */
+export async function abandoned(
+  billing: Billing<Plan>,
+  table: "withdrawals" | "account_closures",
+  at: "submittedAt" | "closedAt",
+  since: Date,
+): Promise<Error[]> {
+  const [row] = await run<{ ids: string[] | null }>(
+    billing.db,
+    `SELECT array_agg(${table === "withdrawals" ? "id" : '"userId"'}) AS ids
+    FROM public.dormouse_${table} WHERE "settledAt" IS NULL AND "${at}" <= $1`,
+    [since],
+  );
+  return row?.ids ? [new Error(`Unsettled past ${RETRY_DAYS} days, settle by hand: ${table} ${row.ids.join(", ")}`)] : [];
+}
+
 /** How many withdrawals one cron run settles at most. */
 const RETRY_BATCH = 20;
 
 /**
  * The cron's pass: settles every withdrawal submitted in the last
  * {@link RETRY_DAYS} days whose settlement failed, up to {@link RETRY_BATCH};
- * answers the failures. Its acknowledgement is the notice pass's.
+ * answers the failures, and one more while any older stays unsettled, until
+ * the operator settles it by hand. Its acknowledgement is the notice pass's.
  */
 export async function settleWithdrawals(billing: Billing<Plan>): Promise<unknown[]> {
+  const since = new Date(billing.time.now().getTime() - RETRY_DAYS * DAY_MS);
   const rows = await run<WithdrawalRow>(
     billing.db,
     `SELECT ${COLUMNS} FROM public.dormouse_withdrawals
     WHERE "settledAt" IS NULL AND "submittedAt" > $1
     ORDER BY "submittedAt" LIMIT $2`,
-    [new Date(billing.time.now().getTime() - RETRY_DAYS * DAY_MS), RETRY_BATCH],
+    [since, RETRY_BATCH],
   );
-  const failed: unknown[] = [];
+  const failed: unknown[] = await abandoned(billing, "withdrawals", "submittedAt", since);
   for (const row of rows) await settleWithdrawal(billing, row).catch((error: unknown) => failed.push(error));
   return failed;
 }

@@ -7,7 +7,7 @@ import { SUPPORT_EMAIL } from "../../website/src/lib/hosted-withdrawal";
 import { accountQuery, cookieLogin, isRecentLogin, smallBody, type AccountHost } from "./account-gate";
 import { DAY_MS, END_REASONS, run, withBilling, type BillingSetup } from "./billing";
 import { RECENT_LOGIN_WINDOW, REFUND_DAYS, type Plan } from "./policy-constants";
-import { refundPaidInvoices } from "./withdrawal";
+import { RETRY_DAYS, abandoned, refundPaidInvoices } from "./withdrawal";
 
 /** What one request's account deployment provides to account closure. */
 export interface ClosureHost extends AccountHost {
@@ -86,23 +86,23 @@ async function settleClosure(billing: Billing<Plan>, owner: string, canceled: re
   ]);
 }
 
-/** How long the cron keeps retrying a closure's refunds, and how many one run finishes at most. */
-const RETRY_DAYS = 30;
+/** How many closures one cron run finishes at most. */
 const RETRY_BATCH = 20;
 
 /**
  * The cron's pass: settles every closure in the last {@link RETRY_DAYS}
  * days whose refunds failed, up to {@link RETRY_BATCH}; answers the
- * failures.
+ * failures, and one more while any older stays unsettled.
  */
 export async function retryClosures(billing: Billing<Plan>): Promise<unknown[]> {
+  const since = new Date(billing.time.now().getTime() - RETRY_DAYS * DAY_MS);
   const rows = await run<{ userId: string; canceledSubscriptions: string[] }>(
     billing.db,
     `SELECT "userId", "canceledSubscriptions" FROM public.dormouse_account_closures
     WHERE "settledAt" IS NULL AND "closedAt" > $1 ORDER BY "closedAt" LIMIT $2`,
-    [new Date(billing.time.now().getTime() - RETRY_DAYS * DAY_MS), RETRY_BATCH],
+    [since, RETRY_BATCH],
   );
-  const failed: unknown[] = [];
+  const failed: unknown[] = await abandoned(billing, "account_closures", "closedAt", since);
   for (const { userId, canceledSubscriptions } of rows)
     await settleClosure(billing, userId, canceledSubscriptions).catch((error: unknown) => failed.push(error));
   return failed;
