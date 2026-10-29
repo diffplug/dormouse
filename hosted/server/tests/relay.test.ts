@@ -1132,7 +1132,11 @@ test("a computer is enrolled under the name its poll sends, reduced, or none; th
     if (/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(char)) stripped.push(char);
   }
   expect(stripped.length).toBeGreaterThan(200);
-  for (const label of [...stripped.map((char) => `a${char}b`), "", " a", "a ", "a".repeat(MAX_BURROW_LABEL_LENGTH + 1)])
+  // Padding as JavaScript's trim counts it, which the reduction strips.
+  const padding = Array.from({ length: 0x10000 }, (_, point) => String.fromCharCode(point)).filter((char) => char.trim() === "");
+  expect(padding.length).toBeGreaterThan(20);
+  const padded = padding.flatMap((char) => [`${char}a`, `a${char}`]);
+  for (const label of [...stripped.map((char) => `a${char}b`), ...padded, "", "a".repeat(MAX_BURROW_LABEL_LENGTH + 1)])
     await expect(store(label), JSON.stringify(label)).rejects.toThrow(/check constraint/);
 });
 

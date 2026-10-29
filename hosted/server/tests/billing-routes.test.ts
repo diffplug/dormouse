@@ -501,7 +501,7 @@ test("only a founding subscription joins the founders row, under a checked name,
   ).toBe(403);
   expect(await founders()).toEqual([]);
   // The table refuses what the route does, should a later writer skip the check.
-  for (const name of [" Ada", "A\u200bda", "Ada\u0085", "x".repeat(65)])
+  for (const name of [" Ada", "A\u200bda", "Ada\u0085", "x".repeat(65), ...padded("Ada")])
     await expect(
       f.sql(`INSERT INTO dormouse_founders ("userId", name) VALUES ($1, $2)`, [founder.id, name]),
       JSON.stringify(name),
@@ -1153,6 +1153,12 @@ test("with billing closed, closing deletes an account without a subscription and
 });
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** `text` led, then trailed, by each character JavaScript's trim strips, which `isFounderName` refuses as padding. */
+const padded = (text: string) =>
+  Array.from({ length: 0x10000 }, (_, point) => String.fromCharCode(point))
+    .filter((char) => char.trim() === "")
+    .flatMap((char) => [`${char}${text}`, `${text}${char}`]);
 /** The schedule the Terms and pricing.md promise: renewal notices 30 days ahead, price changes 21, and never under 7. */
 const RENEWAL_NOTICE_DAYS = 30;
 const PRICE_NOTICE_DAYS = 21;
