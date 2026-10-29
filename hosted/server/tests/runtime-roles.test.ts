@@ -95,12 +95,10 @@ const EXPECTED: Record<Worker, string[]> = {
     "dormouse_relay_setup_tokens: DELETE, INSERT, SELECT",
     "dormouse_voice_tokens.hash: INSERT",
     "dormouse_voice_tokens.userId: INSERT",
+    "owner_access.access_until: SELECT",
+    "owner_access.owner_id: SELECT",
     "schema pgstencil_billing: USAGE",
     "schema public: USAGE",
-    "subscriptions.owner_id: SELECT",
-    "subscriptions.period_end: SELECT",
-    "subscriptions.status: SELECT",
-    "subscriptions.trial_end: SELECT",
     "user.email: SELECT",
     "user.emailVerified: SELECT",
     "user.id: SELECT",
@@ -118,12 +116,10 @@ const EXPECTED: Record<Worker, string[]> = {
     "dormouse_voice_tokens: DELETE",
     "dormouse_voice_usage.count: UPDATE",
     "dormouse_voice_usage: INSERT, SELECT",
+    "owner_access.access_until: SELECT",
+    "owner_access.owner_id: SELECT",
     "schema pgstencil_billing: USAGE",
     "schema public: USAGE",
-    "subscriptions.owner_id: SELECT",
-    "subscriptions.period_end: SELECT",
-    "subscriptions.status: SELECT",
-    "subscriptions.trial_end: SELECT",
     "user.email: SELECT",
     "user.emailVerified: SELECT",
     "user.id: SELECT",
@@ -146,9 +142,11 @@ const outcome = (worker: Worker, text: string) =>
     (error: { code?: string }) => error.code,
   );
 
-/** Billing beyond the entitlement's subscription columns, refused to both roles. */
+/** Billing beyond the entitlement's `owner_access` columns, refused to both roles. */
 const BILLING_REFUSED = [
-  `SELECT price_id FROM pgstencil_billing.subscriptions`,
+  `SELECT owner_id FROM pgstencil_billing.subscriptions`,
+  `SELECT price_id FROM pgstencil_billing.owner_access`,
+  `SELECT status FROM pgstencil_billing.owner_access`,
   `SELECT customer_id FROM pgstencil_billing.accounts`,
   `SELECT id FROM pgstencil_billing.checkouts`,
   `SELECT id FROM pgstencil_billing.events`,
@@ -159,8 +157,8 @@ const BILLING_REFUSED = [
   `DELETE FROM dormouse_billing_disputes`,
 ];
 
-/** What the entitlement reads of the subscriptions, which both roles may. */
-const ENTITLEMENT_READ = `SELECT owner_id, status, period_end, trial_end FROM pgstencil_billing.subscriptions
+/** What the entitlement reads of billing, which both roles may. */
+const ENTITLEMENT_READ = `SELECT owner_id, access_until FROM pgstencil_billing.owner_access
   WHERE NOT EXISTS (SELECT FROM dormouse_billing_disputes d WHERE d."userId" = owner_id)`;
 
 test("the relay's role is refused the account's tables, the user row's other columns and writes, voice but a token's mint, and Burrow removal", async () => {
@@ -257,7 +255,7 @@ test("once both roles exist, a migration role without CREATEROLE reapplies the f
   ).resolves.toBeUndefined();
 });
 
-test("the account's hand-made role, where it exists, is granted every billing table and nothing taken away", async () => {
+test("the account's hand-made role, where it exists, is granted every billing table and the access view, and nothing taken away", async () => {
   // The name production's account Hyperdrive connects as.
   expect(PRODUCTION.account.role).toBe("dormouse_app");
   const granted = await withClient(context.database.url, async (db) => {
@@ -270,7 +268,7 @@ test("the account's hand-made role, where it exists, is granted every billing ta
         `SELECT c.relname AS table, has_schema_privilege('dormouse_app', 'pgstencil_billing', 'USAGE')
           AND has_table_privilege('dormouse_app', c.oid, 'SELECT, INSERT, UPDATE, DELETE') AS ok
         FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-        WHERE n.nspname = 'pgstencil_billing' AND c.relkind = 'r'
+        WHERE n.nspname = 'pgstencil_billing' AND c.relkind IN ('r', 'v')
         UNION ALL SELECT 'session', has_table_privilege('dormouse_app', '"session"', 'SELECT')
         ORDER BY 1`,
       );
@@ -280,6 +278,6 @@ test("the account's hand-made role, where it exists, is granted every billing ta
     }
   });
   expect(granted).toEqual(
-    ["accounts", "checkouts", "events", "session", "subscriptions"].map((table) => ({ table, ok: true })),
+    ["accounts", "checkouts", "events", "owner_access", "session", "subscriptions"].map((table) => ({ table, ok: true })),
   );
 });

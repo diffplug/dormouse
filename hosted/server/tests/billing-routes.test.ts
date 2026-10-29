@@ -6,12 +6,11 @@ import { createTestContext } from "pgstencil/testing";
 import { queryDatabase } from "pgstencil/postgres";
 import { FOUNDING_COHORT_SIZE, FOUNDING_LADDER, LIST_ANNUAL, LIST_MONTHLY } from "../../../website/src/lib/hosted-pricing";
 import { WITHDRAWAL_STATEMENT } from "../../../website/src/lib/hosted-withdrawal";
-import { resyncBilling, type BillingSetup } from "../billing";
+import { END_REASONS, resyncBilling, type BillingSetup } from "../billing";
 import { COHORT_ENDPOINT, MAX_SHOWN_FOUNDERS } from "../../../website/src/lib/hosted-cohorts";
 import {
   BILLING_WEBHOOK_PATH,
   CONSENT_REQUIRED,
-  ENDED_FOR_REFUND,
   FOUNDERS_ONLY,
   TERMS_CHANGED,
   WEBHOOK_BODY_BYTES,
@@ -19,10 +18,10 @@ import {
   billingRoutes,
   disputeAction,
 } from "../billing-routes";
-import { CLOSE_RECENT_LOGIN, CLOSE_UNAVAILABLE, ENDED_FOR_CLOSURE, closureRoutes } from "../closure";
+import { CLOSE_RECENT_LOGIN, CLOSE_UNAVAILABLE, closureRoutes } from "../closure";
 import { AVATAR_BYTES, COHORT_CACHE_MS, FOUNDER_AVATAR_PREFIX, cohortRoutes } from "../cohort-routes";
 import { entitledSql } from "../entitlement";
-import { ENDED_FOR_WITHDRAWAL, WITHDRAWAL_OPEN_DAYS } from "../withdrawal";
+import { WITHDRAWAL_OPEN_DAYS } from "../withdrawal";
 import { migrations } from "../migrations";
 import { DEV_FOUNDING_PRICES } from "../billing-dev";
 import { CHECKOUT_CLOSED, PRICE_CHANGED, TERMS_VERSION } from "../policy-constants";
@@ -159,6 +158,12 @@ async function fixture({ closed = false } = {}) {
     await deliver();
     return { session, subscription };
   };
+  /** Each subscription Hosted ended (`billing.end`), and the reason it recorded. */
+  const ended = () =>
+    sql<{ subscription: string; reason: string }>(
+      `SELECT id AS subscription, end_reason AS reason FROM pgstencil_billing.subscriptions
+      WHERE end_reason IS NOT NULL ORDER BY id`,
+    );
   const metrics = () =>
     sql<{ event: string; label: string; count: string }>(
       `SELECT event, label, count FROM dormouse_metrics_daily WHERE event LIKE 'checkout.%' OR event LIKE 'subscription.%'
@@ -185,6 +190,7 @@ async function fixture({ closed = false } = {}) {
     deliver,
     buy,
     metrics,
+    ended,
     entitledOn,
     email,
     mail,
@@ -412,7 +418,7 @@ test("checkout starts only after agreement to the current terms and to automatic
   expect(await consents()).toHaveLength(2);
 });
 
-test("checkout refuses a price the page did not show, expiring what it opened, so the consent records the one it did", async ({
+test("checkout refuses a price the page did not show before opening one, expiring one left open, so the consent records the one it did", async ({
   onTestFinished,
 }) => {
   const f = await fixture();
@@ -426,7 +432,7 @@ test("checkout refuses a price the page did not show, expiring what it opened, s
     const changed = await start(member, plan, price);
     expect([changed.status, await changed.json()], plan).toEqual([409, { message: PRICE_CHANGED }]);
   }
-  expect(statuses()).toEqual(["expired", "expired"]);
+  expect(statuses()).toEqual([]);
 
   // A founding checkout opens at the first step, then the cohort sells out.
   const late = await f.account();
@@ -446,7 +452,7 @@ test("checkout refuses a price the page did not show, expiring what it opened, s
   expect((await start(member, "founding", FOUNDING_LADDER[0]!)).status).toBe(409);
   // The reloaded page shows the next step, but the checkout left open would charge the first: it is expired.
   expect((await start(late, "founding", FOUNDING_LADDER[1]!)).status).toBe(409);
-  expect(statuses().slice(-2)).toEqual(["expired", "expired"]);
+  expect(statuses()).toEqual(["expired"]);
   expect(await consents()).toEqual([{ priceId: f.setup.founding[0] }]);
   // Asked again, it opens at the price shown, and its consent says so.
   expect((await start(late, "founding", FOUNDING_LADDER[1]!)).status).toBe(200);
@@ -541,7 +547,7 @@ test("the webhook verifies the raw body before any write, caps it, and refuses a
   expect(await f.sql(`SELECT id FROM pgstencil_billing.events`)).toEqual([{ id: event.id }]);
   // A failure before the commit answers 503, which Stripe retries, and the event stays unprocessed.
   const { body: disputed, signature: disputeSignature } = f.dev.signed(
-    f.event("charge.dispute.created", { id: "du_unknown", object: "dispute" }),
+    f.event("charge.dispute.created", { id: "du_unknown", object: "dispute", charge: "ch_for_du_unknown" }),
   );
   expect((await f.webhook(disputed, disputeSignature)).status).toBe(503);
   expect(await f.sql(`SELECT count(*)::int AS n FROM pgstencil_billing.events WHERE processed_at IS NOT NULL`)).toEqual([{ n: 1 }]);
@@ -572,7 +578,8 @@ test("a full refund ends the subscription it paid for at once; a partial one cha
   f.time.advanceMilliseconds(31 * 24 * 60 * 60 * 1000);
   const full = charge(true);
   expect((await f.send(full)).status).toBe(200);
-  expect(f.cancels).toEqual([{ subscription: subscription.id, comment: ENDED_FOR_REFUND }]);
+  expect(f.cancels).toEqual([{ subscription: subscription.id }]);
+  expect(await f.ended()).toEqual([{ subscription: subscription.id, reason: END_REASONS.refund }]);
   expect(await f.entitledOn(member.id)).toBe(false);
   expect(await member.summary()).toMatchObject({ plan: null, active: false, entitled: false });
   await f.deliver();
@@ -596,6 +603,7 @@ test("an open dispute suspends without ending, closing it in the account's favor
     return f.event(status === "needs_response" ? "charge.dispute.created" : "charge.dispute.closed", {
       id,
       object: "dispute",
+      charge: `ch_for_${id}`,
       status,
     });
   };
@@ -615,7 +623,8 @@ test("an open dispute suspends without ending, closing it in the account's favor
   expect((await f.send(dispute("du_2", "needs_response"))).status).toBe(200);
   expect(await f.entitledOn(member.id)).toBe(false);
   expect((await f.send(dispute("du_2", "lost"))).status).toBe(200);
-  expect(f.cancels).toEqual([{ subscription: subscription.id, comment: ENDED_FOR_REFUND }]);
+  expect(f.cancels).toEqual([{ subscription: subscription.id }]);
+  expect(await f.ended()).toEqual([{ subscription: subscription.id, reason: END_REASONS.refund }]);
   expect(await f.sql(`SELECT "disputeId" FROM dormouse_billing_disputes`)).toEqual([]);
   expect(await member.summary()).toMatchObject({ plan: null, entitled: false, suspended: false });
 });
@@ -631,7 +640,7 @@ test("the cron rereads open disputes from Stripe, so a missed close event restor
   f.paidInvoices.set("pi_du_lost", lostSubscription.id);
   const open = (id: string, customer: string) => {
     f.disputes.set(id, { status: "needs_response", customer, paymentIntent: `pi_${id}` });
-    return f.send(f.event("charge.dispute.created", { id, object: "dispute" }));
+    return f.send(f.event("charge.dispute.created", { id, object: "dispute", charge: `ch_for_${id}` }));
   };
   expect((await open("du_won", wonSession.customer as string)).status).toBe(200);
   expect((await open("du_lost", lostSession.customer as string)).status).toBe(200);
@@ -648,7 +657,8 @@ test("the cron rereads open disputes from Stripe, so a missed close event restor
   await resync();
   expect(await f.entitledOn(won.id)).toBe(true);
   expect(restored().map((mail) => mail.to[0])).toEqual([f.dev.customers.get(wonSession.customer as string)!.email]);
-  expect(f.cancels).toEqual([{ subscription: lostSubscription.id, comment: ENDED_FOR_REFUND }]);
+  expect(f.cancels).toEqual([{ subscription: lostSubscription.id }]);
+  expect(await f.ended()).toEqual([{ subscription: lostSubscription.id, reason: END_REASONS.refund }]);
   expect(await f.sql(`SELECT "disputeId" FROM dormouse_billing_disputes`)).toEqual([]);
   await resync();
   expect([restored().length, f.cancels.length]).toEqual([1, 1]);
@@ -664,14 +674,15 @@ test("a dispute on a closed account still records, and a lost one still runs its
   await f.deliver();
   const dispute = (status: string) => {
     f.disputes.set("du_closed", { status, customer: session.customer as string, paymentIntent: "pi_du_closed" });
-    return f.send(f.event("charge.dispute.updated", { id: "du_closed", object: "dispute", status }));
+    return f.send(f.event("charge.dispute.updated", { id: "du_closed", object: "dispute", charge: "ch_for_du_closed", status }));
   };
   expect((await dispute("needs_response")).status).toBe(200);
   expect(await f.sql(`SELECT "userId" FROM dormouse_billing_disputes`)).toEqual([{ userId: member.id }]);
   expect((await dispute("lost")).status).toBe(200);
   expect(await f.sql(`SELECT "userId" FROM dormouse_billing_disputes`)).toEqual([]);
   // Closing already ended the subscription; the lost dispute ends nothing more.
-  expect(f.cancels.map((cancel) => cancel.comment)).toEqual([ENDED_FOR_CLOSURE]);
+  expect(f.cancels).toEqual([{ subscription: subscription.id }]);
+  expect(await f.ended()).toEqual([{ subscription: subscription.id, reason: END_REASONS.closure }]);
 });
 
 test("a purchase ending otherwise counts as canceled, and one ending within the refund window as refunded", async ({
@@ -722,7 +733,8 @@ test("a full refund of a charge for an earlier subscription, or one naming none,
   expect(await f.entitledOn(member.id)).toBe(true);
   // The current subscription's own charge still ends it.
   expect((await f.send(refund("pi_current"))).status).toBe(200);
-  expect(f.cancels).toEqual([{ subscription: current.id, comment: ENDED_FOR_REFUND }]);
+  expect(f.cancels).toEqual([{ subscription: current.id }]);
+  expect(await f.ended()).toEqual([{ subscription: current.id, reason: END_REASONS.refund }]);
 });
 
 test("a count that fails rolls back alone and is logged: the webhook still commits and answers 200", async ({
@@ -790,7 +802,8 @@ test("an EEA or UK consumer withdraws online: recorded, acknowledged by email, r
     withdrawal: null,
     withdrawn: { reference: row!.id, subscription: subscription.id, plan: "yearly", acknowledged: true, settled: true },
   });
-  expect(f.cancels).toEqual([{ subscription: subscription.id, comment: ENDED_FOR_WITHDRAWAL }]);
+  expect(f.cancels).toEqual([{ subscription: subscription.id }]);
+  expect(await f.ended()).toEqual([{ subscription: subscription.id, reason: END_REASONS.withdrawal }]);
   expect(f.refunds).toEqual([
     { paymentIntent: "pi_w0", withdrawal: null },
     { paymentIntent: "pi_w1", withdrawal: row!.id },
@@ -905,7 +918,8 @@ test("closing an account needs a recent login, cancels its subscription in Strip
   expect(f.cancels).toEqual([]);
 
   expect((await close({ close: true })).status).toBe(204);
-  expect(f.cancels).toEqual([{ subscription: subscription.id, comment: ENDED_FOR_CLOSURE }]);
+  expect(f.cancels).toEqual([{ subscription: subscription.id }]);
+  expect(await f.ended()).toEqual([{ subscription: subscription.id, reason: END_REASONS.closure }]);
   expect(await f.sql(`SELECT status FROM pgstencil_billing.subscriptions WHERE id = $1`, [subscription.id])).toEqual([
     { status: "canceled" },
   ]);
@@ -995,9 +1009,10 @@ test("closing answers billing's refusal, such as a checkout still being created,
   const f = await fixture();
   onTestFinished(f.close);
   const member = await f.account();
-  await f.sql(`INSERT INTO pgstencil_billing.accounts (owner_id, email, created_at) VALUES ($1, 'x@example.test', now())`, [
-    member.id,
-  ]);
+  await f.sql(
+    `INSERT INTO pgstencil_billing.accounts (owner_id, email, created_at, customer_id) VALUES ($1, 'x@example.test', now(), 'cus_creating')`,
+    [member.id],
+  );
   await f.sql(
     `INSERT INTO pgstencil_billing.checkouts (id, owner_id, plan, price_id, trial_days, status, created_at, expires_at)
     VALUES ('creating', $1, 'monthly', $2, 0, 'pending', now(), now() + interval '1 hour')`,
@@ -1179,7 +1194,7 @@ test("a dispute's suspension and restoration are each emailed once to the billin
   const billingEmail = f.dev.customers.get(session.customer as string)!.email;
   const dispute = (id: string, status: string) => {
     f.disputes.set(id, { status, customer: session.customer as string, paymentIntent: `pi_${id}` });
-    return f.event("charge.dispute.updated", { id, object: "dispute", status });
+    return f.event("charge.dispute.updated", { id, object: "dispute", charge: `ch_for_${id}`, status });
   };
   const subjects = () => f.email.all().map((mail) => [mail.to[0], mail.subject]);
 
@@ -1209,9 +1224,9 @@ test("a dispute's suspension and restoration are each emailed once to the billin
   const unsent = () => f.sql(`SELECT kind FROM dormouse_billing_notices WHERE "sentAt" IS NULL ORDER BY kind`);
   f.disputes.set("du_back", { status: "needs_response", customer: otherSession.customer as string, paymentIntent: "pi_du_back" });
   f.mailing.failures = 2;
-  expect((await f.send(f.event("charge.dispute.created", { id: "du_back", object: "dispute" }))).status).toBe(200);
+  expect((await f.send(f.event("charge.dispute.created", { id: "du_back", object: "dispute", charge: "ch_for_du_back" }))).status).toBe(200);
   f.disputes.set("du_back", { status: "won", customer: otherSession.customer as string, paymentIntent: "pi_du_back" });
-  expect((await f.send(f.event("charge.dispute.closed", { id: "du_back", object: "dispute" }))).status).toBe(200);
+  expect((await f.send(f.event("charge.dispute.closed", { id: "du_back", object: "dispute", charge: "ch_for_du_back" }))).status).toBe(200);
   expect([f.mailing.failures, await unsent()]).toEqual([0, [{ kind: "dispute_restored" }, { kind: "dispute_suspended" }]]);
   f.time.advanceMilliseconds(10 * 60 * 1000);
   await resyncBilling(f.setup, f.database.url, origin, f.mail);
