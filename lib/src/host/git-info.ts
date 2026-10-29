@@ -65,7 +65,7 @@ export async function lookupGitDir(path: string): Promise<GitDirInfo | null> {
   const dir = await canonicalLocalDirectory(path);
   if (!dir) return null;
   const [repository, remote] = await Promise.all([
-    localGitRepository(dir),
+    localGitRepository(dir, { index: false }),
     // `runGit` asks `localGitRepository` itself, so this need not wait.
     runGit(dir, ['config', '--get', 'remote.origin.url']),
   ]);
