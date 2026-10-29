@@ -1,12 +1,11 @@
 // Rules: docs/specs/hosted.md -> "Account closure".
-import { BillingError, purchaseStanding, type Billing, type BillingDB, type Stripe } from "@pgstencil/stripe";
+import { BillingError, SUBSCRIBED, purchaseStanding, type Billing, type BillingDB, type Stripe } from "@pgstencil/stripe";
 import type { Context, Hono } from "hono";
 import type { Selectable } from "kysely";
 import { readJson } from "remote-lib-common";
 import { SUPPORT_EMAIL } from "../../website/src/lib/hosted-withdrawal";
 import { accountQuery, cookieLogin, isRecentLogin, smallBody, type AccountHost } from "./account-gate";
-import { DAY_MS, run, withBilling, type BillingSetup } from "./billing";
-import { CURRENT_STATUSES } from "./entitlement";
+import { DAY_MS, END_REASONS, run, withBilling, type BillingSetup } from "./billing";
 import { RECENT_LOGIN_WINDOW, REFUND_DAYS, type Plan } from "./policy-constants";
 import { refundPaidInvoices } from "./withdrawal";
 
@@ -24,17 +23,14 @@ export const CLOSE_RECENT_LOGIN = `Sign in again to close your account. Closing 
 /** The 409 a closure gets while billing is closed and the account holds a subscription it cannot cancel. */
 export const CLOSE_UNAVAILABLE = `Your account cannot be closed online right now. Try again later, or email ${SUPPORT_EMAIL}.`;
 
-/** The cancellation comment a subscription ended by closing its account carries. */
-export const ENDED_FOR_CLOSURE = "dormouse: account closed";
-
 /**
- * Expires `owner`'s open checkout, then cancels in Stripe at once, without
- * proration or a final invoice, every subscription of theirs still current;
- * answers the ones it canceled. An owner billing never knew has none.
+ * Expires `owner`'s open checkout, then ends in Stripe at once, without
+ * proration or a final invoice (`billing.end`), every subscription of theirs
+ * still current; answers the ones it ended. An owner billing never knew has
+ * none.
  */
 async function endSubscriptions(billing: Billing<Plan>, owner: string): Promise<string[]> {
-  const known = await billing.db.selectFrom("accounts").select("owner_id").where("owner_id", "=", owner).executeTakeFirst();
-  if (!known) return [];
+  if (!(await billing.customerOf(owner))) return [];
   // A checkout Stripe completed meanwhile is confirmed here, and so ended below.
   await billing.cancelCheckout(owner);
   await billing.reconcile(owner);
@@ -42,15 +38,9 @@ async function endSubscriptions(billing: Billing<Plan>, owner: string): Promise<
     .selectFrom("subscriptions")
     .select("id")
     .where("owner_id", "=", owner)
-    .where("status", "in", [...CURRENT_STATUSES])
+    .where("status", "in", SUBSCRIBED)
     .execute();
-  for (const { id } of current)
-    await billing.stripe.subscriptions.cancel(id, {
-      cancellation_details: { comment: ENDED_FOR_CLOSURE },
-      prorate: false,
-      invoice_now: false,
-    });
-  if (current.length) await billing.reconcile(owner);
+  for (const { id } of current) await billing.end(owner, id, { reason: END_REASONS.closure });
   return current.map(({ id }) => id);
 }
 
@@ -159,7 +149,7 @@ export function closureRoutes(app: Hono<any>, host: (c: Context) => ClosureHost)
       const [held] = await accountQuery<{ held: boolean }>(
         deployment,
         `SELECT EXISTS (SELECT FROM pgstencil_billing.subscriptions WHERE owner_id = $1 AND status = ANY ($2::text[])) AS held`,
-        [userId, CURRENT_STATUSES],
+        [userId, SUBSCRIBED],
       );
       if (held?.held) return c.json({ message: CLOSE_UNAVAILABLE }, 409);
       await close([]);

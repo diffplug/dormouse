@@ -13,7 +13,7 @@ export const CHANGED_USD = { monthly: 12, yearly: 120 } as const;
 /**
  * StripeDev behind a proxy that adds what billing's refund, dispute,
  * withdrawal, and closure handling, and the price changes, call and StripeDev
- * does not model: a dispute's retrieval, with its charge expanded, a
+ * does not model: a dispute's retrieval, with its charge expanded, and its charge's, a
  * subscription's immediate cancellation, retrieval, and move to another
  * Price, a customer's retrieval with its billing country, a subscription's
  * paid invoices, why each was billed and when it was paid, and their
@@ -48,8 +48,8 @@ export async function stripeFake(time: Time, random: RandomSource) {
   const paidInvoices = new Map<string, string>();
   /** PaymentIntent id → why its invoice was billed, and when it was paid; else a first payment, paid at no known time. */
   const invoiceFacts = new Map<string, { reason: "subscription_create" | "subscription_cycle"; paidAt: Date }>();
-  /** Each cancellation billing asked for: the subscription and its comment. */
-  const cancels: { subscription: string; comment: string | null }[] = [];
+  /** Each cancellation billing asked for. */
+  const cancels: { subscription: string }[] = [];
   /** Customer id → its billing address's country; none, no address. */
   const countries = new Map<string, string>();
   /** Each refund made: its PaymentIntent and its metadata's withdrawal, or closure when it names one. */
@@ -80,6 +80,13 @@ export async function stripeFake(time: Time, random: RandomSource) {
     if (charge && req.method === "GET") {
       if (!disputes.has(charge[1]!)) return json(404, { error: { message: "No such charge" } });
       return json(200, disputedCharge(charge[1]!));
+    }
+    // A dispute's charge, which a dispute event names by id.
+    const charge = /^\/v1\/charges\/ch_for_([^/]+)$/.exec(url.pathname);
+    if (charge && req.method === "GET") {
+      const found = disputes.get(charge[1]!);
+      if (!found) return json(404, { error: { message: "No such charge" } });
+      return json(200, { id: `ch_for_${charge[1]}`, object: "charge", customer: found.customer, payment_intent: found.paymentIntent });
     }
     const customer = /^\/v1\/customers\/([^/]+)$/.exec(url.pathname);
     if (customer && req.method === "GET") {
@@ -184,14 +191,9 @@ export async function stripeFake(time: Time, random: RandomSource) {
         failing.cancels--;
         return json(500, { error: { type: "api_error", message: "Stripe fake outage" } });
       }
-      // The SDK sends a DELETE's parameters in its query.
-      const comment = new URLSearchParams(raw || url.search).get("cancellation_details[comment]");
-      cancels.push({ subscription: subscription[1]!, comment });
+      cancels.push({ subscription: subscription[1]! });
       dev.transition(subscription[1]!, "cancel");
-      // Stripe carries the comment on the subscription it ends.
-      const ended = dev.events.at(-1)!.data.object as Stripe.Subscription;
-      ended.cancellation_details = { comment } as Stripe.Subscription.CancellationDetails;
-      return json(200, ended);
+      return json(200, dev.events.at(-1)!.data.object);
     }
     const forwarded = await fetch(dev.origin + url.pathname + url.search, {
       method: req.method,

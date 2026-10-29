@@ -62,12 +62,14 @@ $$;
 GRANT USAGE ON SCHEMA public TO dormouse_relay, dormouse_voice;
 
 -- Both: the entitlement (hosted/server/entitlement.ts) reads the owner's
--- address and its verification, the owner's subscriptions, and whether a
--- payment dispute suspends them.
+-- address and its verification, until when @pgstencil/stripe's owner_access
+-- view grants the owner access, and whether a payment dispute suspends them.
+-- The view runs with its owner's privileges, so neither role reads the
+-- subscriptions table beneath it.
 GRANT SELECT (id, email, "emailVerified") ON "user" TO dormouse_relay, dormouse_voice;
 GRANT USAGE ON SCHEMA pgstencil_billing TO dormouse_relay, dormouse_voice;
-GRANT SELECT (owner_id, status, period_end, trial_end)
-  ON pgstencil_billing.subscriptions TO dormouse_relay, dormouse_voice;
+GRANT SELECT (owner_id, access_until)
+  ON pgstencil_billing.owner_access TO dormouse_relay, dormouse_voice;
 GRANT SELECT ("userId") ON dormouse_billing_disputes TO dormouse_relay, dormouse_voice;
 
 -- Both: their metrics' upsert-increment (hosted/server/metrics.ts), whose
@@ -109,7 +111,7 @@ GRANT UPDATE (count) ON dormouse_voice_usage TO dormouse_voice;
 
 -- The account Worker's role, made by hand (hosted/README.md), owns billing:
 -- @pgstencil/stripe reads and writes every pgstencil_billing table, and the
--- entitlement reads its subscriptions. Granted here, after every migration,
+-- entitlement reads its owner_access view, which ALL TABLES covers. Granted here, after every migration,
 -- because its schema is the package's and no hand grant can precede it.
 -- Additive only: nothing here revokes from it, and a database without the
 -- role (tests, previews) skips it.

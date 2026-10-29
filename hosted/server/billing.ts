@@ -7,7 +7,6 @@ import { FOUNDING_COHORT_SIZE, FOUNDING_LADDER, LIST_ANNUAL, LIST_MONTHLY } from
 import type { BillingEnv } from "./bindings";
 import { resyncDisputes } from "./billing-routes";
 import { retryClosures } from "./closure";
-import { grantsAccessSql } from "./entitlement";
 import { runNotices } from "./notices";
 import { settleWithdrawals } from "./withdrawal";
 import { BILLING_RETURN_PATH, REFUND_DAYS, type Plan } from "./policy-constants";
@@ -16,6 +15,13 @@ export const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** The id of a Stripe reference that may arrive expanded; null without one. */
 export const idOf = (ref: string | { id: string } | null | undefined) => (typeof ref === "string" ? ref : (ref?.id ?? null));
+
+/**
+ * The end reasons Hosted records on a subscription it ends (`billing.end`): a
+ * full refund or a final reversal, an EEA or UK withdrawal, an account's
+ * closure. The webhook reads one back to classify the end.
+ */
+export const END_REASONS = { refund: "refund", withdrawal: "withdrawal", closure: "closure" } as const;
 
 /** A deployment's billing configuration, read from its bindings. */
 export interface BillingSetup {
@@ -165,11 +171,8 @@ export function openCohort(gross: readonly number[], net: readonly number[]): Op
  */
 export async function foundingPurchases(billing: Billing<Plan>, founding: readonly string[]) {
   // A refund window of 0 counts every completed purchase, refunded or not.
-  const [gross, net] = await Promise.all(
-    [0, REFUND_DAYS].map(async (refundDays) => {
-      const counts = await billing.purchaseCounts(founding, { refundDays });
-      return founding.map((price) => counts[price] ?? 0);
-    }),
+  const [gross, net] = (await billing.purchaseCounts(founding, { refundDays: [0, REFUND_DAYS] })).map((counts) =>
+    founding.map((price) => counts[price] ?? 0),
   );
   return { gross: gross!, net: net! };
 }
@@ -277,14 +280,8 @@ export async function resyncBilling(
     databaseUrl,
     origin,
     async (billing, catalog) => {
-      const due = await run<{ owner: string }>(
-        billing.db,
-        `SELECT owner_id AS owner FROM pgstencil_billing.subscriptions s
-        WHERE s.status IN ('active', 'trialing') AND NOT ${grantsAccessSql("s")}
-        GROUP BY owner_id ORDER BY random() LIMIT $1`,
-        [RESYNC_OWNERS],
-      );
-      for (const { owner } of due) await billing.reconcile(owner).catch((error: unknown) => failed.push(error));
+      const stale = await billing.reconcileStale({ limit: RESYNC_OWNERS });
+      failed.push(...stale.failed.map(({ error }) => error));
       failed.push(...(await settleWithdrawals(billing)));
       failed.push(...(await retryClosures(billing)));
       failed.push(...(await resyncDisputes(billing)));

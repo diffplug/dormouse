@@ -1,10 +1,9 @@
 // Rules: docs/specs/hosted.md -> "Billing"; docs/specs/pricing.md ->
 // "Checkout and entitlement".
-import type { Billing, Stripe } from "@pgstencil/stripe";
-import { DAY_MS, idOf, run } from "./billing";
+import { SUBSCRIBED, type Billing, type Stripe } from "@pgstencil/stripe";
+import { DAY_MS, END_REASONS, idOf, run } from "./billing";
 import type { WithdrawalOffer } from "./billing-summary";
 import type { Plan } from "./policy-constants";
-import { CURRENT_STATUSES } from "./entitlement";
 
 /**
  * How long after a subscription starts the online withdrawal stays open. The
@@ -28,9 +27,6 @@ const WITHDRAWAL_COUNTRIES: ReadonlySet<string> = new Set([
   ...["IS", "LI", "NO"],
   ...["GB", "GG", "GI", "IM", "JE"],
 ]);
-
-/** The cancellation comment a subscription ended by withdrawal carries. */
-export const ENDED_FOR_WITHDRAWAL = "dormouse: EEA or UK withdrawal";
 
 /** How long the cron keeps retrying a withdrawal's settlement. */
 const RETRY_DAYS = 30;
@@ -65,26 +61,22 @@ const contacts = new WeakMap<Stripe, Map<string, { at: number; contact: Contact 
  * refuses a withdrawal reads Stripe fresh.
  */
 export async function billingContact(billing: Billing<Plan>, ownerId: string, { cached = false } = {}): Promise<Contact> {
-  const account = await billing.db
-    .selectFrom("accounts")
-    .select("customer_id")
-    .where("owner_id", "=", ownerId)
-    .executeTakeFirst();
-  if (!account?.customer_id) return null;
+  const customerId = await billing.customerOf(ownerId);
+  if (!customerId) return null;
   const now = billing.time.now().getTime();
   let known = contacts.get(billing.stripe);
   if (!known) contacts.set(billing.stripe, (known = new Map()));
-  const hit = known.get(account.customer_id);
+  const hit = known.get(customerId);
   if (cached && hit && now - hit.at < CONTACT_CACHE_MS) return hit.contact;
   try {
-    const customer = await billing.stripe.customers.retrieve(account.customer_id);
+    const customer = await billing.stripe.customers.retrieve(customerId);
     const contact = customer.deleted
       ? null
       : { email: customer.email ?? null, country: customer.address?.country?.toUpperCase() ?? null };
-    known.set(account.customer_id, { at: now, contact });
+    known.set(customerId, { at: now, contact });
     return contact;
   } catch (error) {
-    console.warn(`Reading Stripe customer ${account.customer_id} failed`, error);
+    console.warn(`Reading Stripe customer ${customerId} failed`, error);
     return null;
   }
 }
@@ -102,7 +94,7 @@ export async function withdrawalOffer(
   subscription: Held | null,
   { cached = false } = {},
 ): Promise<Offer | null> {
-  if (!subscription?.started_at || !CURRENT_STATUSES.includes(subscription.status)) return null;
+  if (!subscription?.started_at || !SUBSCRIBED.includes(subscription.status)) return null;
   const startedAt = new Date(subscription.started_at);
   const until = new Date(startedAt.getTime() + WITHDRAWAL_OPEN_DAYS * DAY_MS);
   if (billing.time.now() >= until) return null;
@@ -213,24 +205,12 @@ export async function refundPaidInvoices(
 
 /**
  * Ends withdrawal `row`'s subscription at once, without proration or a final
- * invoice, then refunds in full every payment its paid invoices received:
- * no use deduction, tax included. Each step is safe to repeat.
+ * invoice (`billing.end`, which does nothing to one already ended), then
+ * refunds in full every payment its paid invoices received: no use
+ * deduction, tax included. Each step is safe to repeat.
  */
 async function settle(billing: Billing<Plan>, row: WithdrawalRow) {
-  await billing.reconcile(row.userId);
-  const synced = await billing.db
-    .selectFrom("subscriptions")
-    .select("status")
-    .where("id", "=", row.subscriptionId)
-    .executeTakeFirst();
-  if (synced && CURRENT_STATUSES.includes(synced.status)) {
-    await billing.stripe.subscriptions.cancel(row.subscriptionId, {
-      cancellation_details: { comment: ENDED_FOR_WITHDRAWAL },
-      prorate: false,
-      invoice_now: false,
-    });
-    await billing.reconcile(row.userId);
-  }
+  await billing.end(row.userId, row.subscriptionId, { reason: END_REASONS.withdrawal });
   await refundPaidInvoices(billing, row.subscriptionId, { kind: "withdrawal", id: row.id });
 }
 

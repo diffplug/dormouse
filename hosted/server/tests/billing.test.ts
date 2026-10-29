@@ -326,6 +326,8 @@ test("the account Worker's cron resyncs through Stripe's API in workerd, and onl
     );
     onTestFinished(() => mf.dispose());
     await mf.ready;
+    // The Worker's clock is the fixture's, which the stale renewal is stale by.
+    await mf.dispatchFetch(origin + "/__test/time", { method: "POST", body: f.time.now().toISOString() });
     // Without @cloudflare/workers-types, the Fetcher's scheduled() is untyped.
     return (await mf.getWorker()) as unknown as {
       scheduled(options: { cron: string }): Promise<{ outcome: string }>;

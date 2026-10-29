@@ -1,13 +1,13 @@
 // Rules: docs/specs/hosted.md -> "Billing" and "Metrics"; docs/specs/pricing.md
 // -> "Checkout and entitlement".
-import { BillingError, purchaseStanding, type Billing, type BillingDB, type Stripe } from "@pgstencil/stripe";
+import { BillingError, SUBSCRIBED, purchaseStanding, type Billing, type BillingDB, type Stripe } from "@pgstencil/stripe";
 import type { Context, Hono } from "hono";
 import type { Kysely } from "kysely";
 import { readJson } from "remote-lib-common";
 import { accountQuery, cookieLogin, smallBody, type AccountHost } from "./account-gate";
-import { foundingCohort, idOf, run, withBilling, type BillingSetup, type PriceCatalog } from "./billing";
+import { END_REASONS, foundingCohort, idOf, run, withBilling, type BillingSetup, type PriceCatalog } from "./billing";
 import type { BillingClosed, BillingSummary, Withdrawn } from "./billing-summary";
-import { CURRENT_STATUSES, entitledSql, subscribedSql } from "./entitlement";
+import { entitledSql, subscribedSql } from "./entitlement";
 import { checkoutRef, type MetricEvent } from "./metric-labels";
 import { countMetricInTransaction, recordMetric } from "./metrics";
 import { CHECKOUT_CLOSED, PRICE_CHANGED, REFUND_DAYS, TERMS_VERSION, isFounderName, isPlan, type Plan } from "./policy-constants";
@@ -42,8 +42,6 @@ export const BILLING_WEBHOOK_PATH = "/api/billing/webhook";
 /** Stripe's events are larger than anything a page sends here. */
 export const WEBHOOK_BODY_BYTES = 1024 * 1024;
 
-/** The cancellation comment a subscription ended for a full refund or a final reversal carries. */
-export const ENDED_FOR_REFUND = "dormouse: full refund or final reversal";
 
 const JSON_BODY_BYTES = 4096;
 const CHECKOUT_ID = /^[A-Za-z0-9_-]{1,64}$/;
@@ -132,7 +130,7 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
     ]);
     // A subscription Stripe still holds, paid up or not: its owner manages it
     // in the portal (a failed card included) and cannot check out again.
-    const held = status.subscription && CURRENT_STATUSES.includes(status.subscription.status) ? status.subscription : null;
+    const held = status.subscription && SUBSCRIBED.includes(status.subscription.status) ? status.subscription : null;
     // A contract withdrawn from once is never offered again.
     const offer =
       held && account?.withdrawn?.subscription !== held.id
@@ -179,35 +177,29 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
       if (typeof body?.terms !== "string" || body.autoRenew !== true || !Number.isSafeInteger(body.price))
         return c.json({ message: CONSENT_REQUIRED }, 400);
       if (body.terms !== TERMS_VERSION) return c.json({ message: TERMS_CHANGED }, 409);
-      // A checkout left open for another plan gives way to this one.
-      const open = await billing.db
-        .selectFrom("checkouts")
-        .select("plan")
-        .where("owner_id", "=", userId)
-        .where("status", "in", ["pending", "open"])
-        .executeTakeFirst();
-      if (open && open.plan !== plan) await billing.cancelCheckout(userId);
-      // Without an email, Stripe Checkout asks for one.
-      const { id, url } = await billing.checkout(userId, email, plan, ref === "none" ? {} : { ref });
-      // The Price this checkout charges, a cohort sold out since the page
-      // loaded or one left open at an earlier step included: one the buyer
-      // was not shown is expired, so the page asks again at the new price.
-      const opened = await billing.db
-        .selectFrom("checkouts")
-        .select("price_id")
-        .where("id", "=", id)
-        .where("owner_id", "=", userId)
-        .executeTakeFirstOrThrow();
-      if (catalog.prices.get(opened.price_id)?.usd !== body.price) {
-        await billing.cancelCheckout(userId);
-        return c.json({ message: PRICE_CHANGED }, 409);
+      // Without an email, Stripe Checkout asks for one. A checkout left open
+      // for another plan gives way to this one; one that would charge a
+      // Price the buyer was not shown, a cohort sold out since the page
+      // loaded or one left open at an earlier step included, is refused
+      // before Stripe opens it, so the page asks again at the new price.
+      let opened: { id: string; url: string; priceId: string };
+      try {
+        opened = await billing.checkout(userId, email, plan, {
+          ...(ref !== "none" && { ref }),
+          replace: true,
+          expectPrice: (price) => catalog.prices.get(price)?.usd === body.price,
+        });
+      } catch (error) {
+        if (error instanceof BillingError && error.code === "unexpected-price") return c.json({ message: PRICE_CHANGED }, 409);
+        throw error;
       }
+      const { id, url, priceId } = opened;
       // Recorded before the URL is answered, for the Price the buyer was shown.
       await run(
         billing.db,
         `INSERT INTO public.dormouse_checkout_consents ("checkoutId", "termsVersion", "userId", plan, "priceId")
         VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING`,
-        [id, TERMS_VERSION, userId, plan, opened.price_id],
+        [id, TERMS_VERSION, userId, plan, priceId],
       );
       recordMetric(c, host(c).databaseUrl, "checkout.started", `${plan}:${ref}`);
       return c.json({ url });
@@ -302,22 +294,10 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
   });
 }
 
-/** The owner of Stripe customer `customer`, or null for one pgstencil did not create. */
-async function ownerOf(billing: Billing<Plan>, customer: string | Stripe.Customer | Stripe.DeletedCustomer | null) {
-  const id = idOf(customer);
-  if (!id) return null;
-  const row = await billing.db
-    .selectFrom("accounts")
-    .select("owner_id")
-    .where("customer_id", "=", id)
-    .executeTakeFirst();
-  return row?.owner_id ?? null;
-}
-
 /**
- * One verified event: pgstencil's synchronization, and in its transaction
- * the counts, dispute suspensions, and their notices' records, so a
- * redelivery repeats none. A full refund or a lost dispute then ends the
+ * One event, verified once: pgstencil's synchronization, and in its
+ * transaction the counts, dispute suspensions, and their notices' records, so
+ * a redelivery repeats none. A full refund or a lost dispute then ends the
  * subscription in Stripe, after the commit and on every delivery until it
  * has; a dispute's notice is then sent, and the cron retries one that fails.
  */
@@ -329,18 +309,20 @@ async function processEvent(
   context: NoticeContext,
 ) {
   const event = await billing.verifyWebhook(body, signature);
-  // A dispute names no customer, and its event may be stale: read its current
-  // status and its charge from Stripe, before any write.
-  let dispute: { id: string; charge: Stripe.Charge; owner: string | null; action: ReturnType<typeof disputeAction> } | null =
-    null;
+  // A dispute's event may be stale: read its current status, and its charge,
+  // from Stripe before any write. Its owner is pgstencil's, through the charge.
+  let dispute: { id: string; charge: Stripe.Charge; action: ReturnType<typeof disputeAction> } | null = null;
   if (event.type.startsWith("charge.dispute.")) {
     const current = await billing.stripe.disputes.retrieve((event.data.object as Stripe.Dispute).id, {
       expand: ["charge"],
     });
-    const charge = current.charge as Stripe.Charge;
-    dispute = { id: current.id, charge, owner: await ownerOf(billing, charge.customer), action: disputeAction(current.status) };
+    dispute = { id: current.id, charge: current.charge as Stripe.Charge, action: disputeAction(current.status) };
   }
-  await billing.webhook(body, signature, async (verified, trx) => {
+  // Set by `apply`, which pgstencil runs inside the event's transaction, and
+  // skips for an event already processed.
+  let owner = null as string | null;
+  await billing.webhook(event, async (verified, trx, { ownerId, subscription: synced }) => {
+    owner = ownerId;
     const count = (event: MetricEvent, label: string) =>
       countMetricInTransaction((text, values) => run(trx, text, values), event, label);
     const completed = await billing.completedCheckout(verified, trx);
@@ -352,19 +334,21 @@ async function processEvent(
       const standing = purchaseStanding(subscription, { refundDays: REFUND_DAYS });
       if (plan && (standing === "purchased" || standing === "refund-window"))
         await count(
-          standing === "refund-window" || subscription.cancellation_details?.comment === ENDED_FOR_REFUND
+          standing === "refund-window" || synced?.end_reason === END_REASONS.refund
             ? "subscription.refunded"
             : "subscription.canceled",
           plan,
         );
     }
-    if (dispute?.owner) await recordDispute(trx, dispute.id, dispute.owner, dispute.action, billing.time.now());
+    if (dispute && ownerId) await recordDispute(trx, dispute.id, ownerId, dispute.action, billing.time.now());
   });
   const refunded = event.type === "charge.refunded" ? (event.data.object as Stripe.Charge) : null;
   const reversed = refunded?.refunded ? refunded : dispute?.action === "end" ? dispute.charge : null;
-  if (reversed) await endForRefund(billing, reversed);
-  if (dispute?.owner)
-    for (const error of await sendNotices(billing, mail, context, { userId: dispute.owner }))
+  // A redelivery after a failed end runs no `apply`: the charge names the owner.
+  if (reversed || dispute) owner ??= await billing.ownerOfCustomer(idOf((reversed ?? dispute!.charge).customer));
+  if (owner && reversed) await endForRefund(billing, owner, reversed);
+  if (owner && dispute)
+    for (const error of await sendNotices(billing, mail, context, { userId: owner }))
       console.error("A dispute notice is recorded but not sent; the cron retries it", error);
 }
 
@@ -453,7 +437,7 @@ export async function resyncDisputes(billing: Billing<Plan>): Promise<unknown[]>
     try {
       const current = await billing.stripe.disputes.retrieve(disputeId, { expand: ["charge"] });
       const action = disputeAction(current.status);
-      if (action === "end") await endForRefund(billing, current.charge as Stripe.Charge);
+      if (action === "end") await endForRefund(billing, userId, current.charge as Stripe.Charge);
       await billing.db.transaction().execute(async (trx) => {
         const now = billing.time.now();
         await run(trx, `UPDATE public.dormouse_billing_disputes SET "checkedAt" = $2 WHERE "disputeId" = $1`, [
@@ -469,18 +453,16 @@ export async function resyncDisputes(billing: Billing<Plan>): Promise<unknown[]>
 }
 
 /**
- * Ends at once, without proration or a final invoice, the subscription that
- * `charge` paid for, now fully refunded or finally reversed, while it is its
- * owner's current one. A charge for an older subscription, one that names no
- * subscription, or one already ended, as on a redelivery once it has, ends
- * nothing; the first two are logged for the operator.
+ * Ends at once, without proration or a final invoice (`billing.end`), the
+ * subscription that `charge`, `owner`'s, paid for, now fully refunded or
+ * finally reversed, while it is the owner's current one. A charge for an
+ * older subscription, one that names no subscription, or one already ended,
+ * as on a redelivery once it has, ends nothing; the first two are logged for
+ * the operator.
  */
-async function endForRefund(billing: Billing<Plan>, charge: Stripe.Charge) {
-  const owner = await ownerOf(billing, charge.customer);
-  if (!owner) return;
-  await billing.reconcile(owner);
+async function endForRefund(billing: Billing<Plan>, owner: string, charge: Stripe.Charge) {
   const { subscription } = await billing.status(owner);
-  if (!subscription || !CURRENT_STATUSES.includes(subscription.status)) return;
+  if (!subscription || !SUBSCRIBED.includes(subscription.status)) return;
   const paidFor = await subscriptionPaidBy(billing, charge);
   if (paidFor !== subscription.id) {
     console.warn(
@@ -488,10 +470,5 @@ async function endForRefund(billing: Billing<Plan>, charge: Stripe.Charge) {
     );
     return;
   }
-  await billing.stripe.subscriptions.cancel(subscription.id, {
-    cancellation_details: { comment: ENDED_FOR_REFUND },
-    prorate: false,
-    invoice_now: false,
-  });
-  await billing.reconcile(owner);
+  await billing.end(owner, subscription.id, { reason: END_REASONS.refund });
 }

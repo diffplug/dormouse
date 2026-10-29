@@ -8,33 +8,18 @@ export const ADMIN_EMAIL = "ned.twigg@diffplug.com";
 if (!/^[^'\\]+$/.test(ADMIN_EMAIL)) throw new Error("ADMIN_EMAIL cannot be inlined into SQL");
 
 /**
- * The statuses `@pgstencil/stripe`'s `status()` counts as a current
- * subscription; access needs exactly one of them.
- */
-export const CURRENT_STATUSES: readonly string[] = ["trialing", "active", "past_due", "unpaid", "paused", "incomplete"];
-
-const CURRENT = CURRENT_STATUSES.map((status) => `'${status}'`).join(", ");
-
-/**
- * Whether subscription row `s` grants access now, by the database's clock:
- * `active` before its period end or `trialing` before its trial end, as
- * `status()` reads it. No other status grants anything, `past_due` included.
- */
-export const grantsAccessSql = (s: string) =>
-  `((${s}.status = 'active' AND ${s}.period_end > now())
-    OR (${s}.status = 'trialing' AND ${s}.trial_end > now()))`;
-
-/**
- * Whether the SQL expression `owner` holds exactly one current subscription
- * and it grants access, as `status()` decides; with `prices`, an SQL `text[]`
- * expression, only while that subscription is on one of them.
+ * Whether the SQL expression `owner` holds access now, by the database's
+ * clock, as `@pgstencil/stripe`'s `status()` decides: both read its
+ * `owner_access` view, which holds the rule (exactly one current
+ * subscription, `active` before its period end or `trialing` before its
+ * trial end). With `prices`, an SQL `text[]` expression, only while that
+ * subscription is on one of them.
  */
 export function subscribedSql(owner: string, prices?: string): string {
   const on = prices ? ` AND entitling.price_id = ANY (${prices})` : "";
   // An alias no caller's query uses, so `owner` can name the outer row.
-  return `coalesce((SELECT count(*) FILTER (WHERE entitling.status IN (${CURRENT})) = 1
-      AND bool_or(${grantsAccessSql("entitling")}${on})
-    FROM pgstencil_billing.subscriptions entitling WHERE entitling.owner_id = ${owner}), false)`;
+  return `EXISTS (SELECT FROM pgstencil_billing.owner_access entitling
+    WHERE entitling.owner_id = ${owner} AND entitling.access_until > now()${on})`;
 }
 
 /** Whether the SQL expression `owner` has a payment dispute open, which suspends its subscription. */
