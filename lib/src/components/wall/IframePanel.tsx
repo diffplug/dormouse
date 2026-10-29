@@ -331,6 +331,8 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
       chromeActions,
       hostCapable: false,
       renderModes,
+      // An embed renders at the pane size, so a swap to screencast follows it.
+      viewportSetting: () => ({ mode: 'pane-sync' }),
     });
     registrationRef.current = registration;
     return () => { registration.dispose(); registrationRef.current = null; };

@@ -225,6 +225,26 @@ describe('AgentBrowserScreenModal', () => {
     local.dispose();
   });
 
+  it('offers an iframe embed the swap to screencast at Resize with pane', () => {
+    installBrowserHost();
+    const registration = registerStubScreen('embed', {
+      snapshot: { ...STUB_SCREEN, renderMode: 'iframe', syncEngaged: false, viewport: { w: 0, h: 0, dpr: 0 } },
+      hostCapable: false,
+      viewportSetting: () => ({ mode: 'pane-sync' }),
+    });
+    const controller = getAgentBrowserScreenController('embed')!;
+    act(() => root.render(<AgentBrowserScreenModal controller={controller} label="surface:9" onClose={() => {}} />));
+    const screencast = [...document.body.querySelectorAll('label')].find(label => label.textContent === 'agent-browser screencast')!;
+    act(() => screencast.querySelector<HTMLInputElement>('input')!.click());
+    expect(document.body.querySelector('input[name="screen-target"]:checked')?.closest('label')?.textContent).toContain('Resize with pane');
+    expect(document.body.querySelector<HTMLInputElement>('input[aria-label="W"]')!.value).toBe('1440');
+    const apply = [...document.body.querySelectorAll('button')].find(button => button.textContent === 'Apply')!;
+    expect(apply.disabled).toBe(false);
+    act(() => apply.click());
+    expect(controller.actions.setRenderMode).toHaveBeenCalledWith('agent-browser-screencast', { viewport: { mode: 'pane-sync' } });
+    registration.dispose();
+  });
+
   it('keeps resize selected while an engaged sync is transiently scaled', () => {
     const registration = registerStubScreen('browser-transient', {
       snapshot: {
