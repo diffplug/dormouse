@@ -29,7 +29,9 @@ function resolveShell(explicitShell, platform, env, resolveBinary = () => undefi
   if (!explicitShell) return resolveDefaultShell(platform, env);
   if (platform !== 'win32' || path.win32.isAbsolute(explicitShell)) return explicitShell;
   const resolved = /[\\/:]/.test(explicitShell) ? undefined : resolveBinary(explicitShell, env);
-  if (!resolved) throw new Error(`shell not found on PATH: ${explicitShell}`);
+  // A relative PATH entry (`.`) would hand back a path the host's working
+  // directory resolves.
+  if (!resolved || !path.win32.isAbsolute(resolved)) throw new Error(`shell not found on PATH: ${explicitShell}`);
   return resolved;
 }
 

@@ -828,13 +828,15 @@ test('list reports the resolved launch shell for live reconnects', () => {
 test('a Windows shell goes by an absolute path, a bare name by the PATH file, else not at all', () => {
   const osModule = { homedir: () => 'C:\\Users\\me', tmpdir: () => 'C:\\Temp' };
   const looked = [];
-  const resolveBinary = (name) => { looked.push(name); return name === 'pwsh.exe' ? 'C:\\Program Files\\PowerShell\\7\\pwsh.exe' : undefined; };
+  const resolveBinary = (name) => { looked.push(name); return name === 'pwsh.exe' ? 'C:\\Program Files\\PowerShell\\7\\pwsh.exe' : name === 'dot.exe' ? '.\\dot.exe' : undefined; };
   const shellOf = (shell, env = {}, platform = 'win32') => resolveSpawnConfig({ shell }, { platform, env, osModule, resolveBinary }).shell;
   assert.equal(shellOf('pwsh.exe'), 'C:\\Program Files\\PowerShell\\7\\pwsh.exe');
   assert.throws(() => shellOf('evil.exe'), /not found on PATH/);
+  // Found through a relative PATH entry: still the host's working directory.
+  assert.throws(() => shellOf('dot.exe'), /not found on PATH/);
   // Only the host's working directory could resolve a relative path.
   for (const relative of ['tools\\evil.exe', './evil.exe', 'C:evil.exe']) assert.throws(() => shellOf(relative), /not found on PATH/, relative);
-  assert.deepEqual(looked, ['pwsh.exe', 'evil.exe']);
+  assert.deepEqual(looked, ['pwsh.exe', 'evil.exe', 'dot.exe']);
   assert.equal(shellOf('D:\\bin\\bash.exe'), 'D:\\bin\\bash.exe');
   assert.equal(shellOf('zsh', {}, 'darwin'), 'zsh');
   // The default is cmd.exe by `ComSpec`, else under `%SystemRoot%`.
