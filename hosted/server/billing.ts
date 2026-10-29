@@ -92,8 +92,11 @@ export function openCohort(gross: readonly number[], net: readonly number[]): Op
   return { cohort, seatsLeft: Math.max(0, FOUNDING_COHORT_SIZE - (net[cohort] ?? 0)) };
 }
 
-/** The open founding cohort, from the synchronized subscriptions. */
-export async function foundingCohort(billing: Billing<Plan>, founding: readonly string[]) {
+/**
+ * Founding purchases per ladder step, from the synchronized subscriptions:
+ * `gross` and `net` as {@link openCohort} reads them.
+ */
+export async function foundingPurchases(billing: Billing<Plan>, founding: readonly string[]) {
   // A refund window of 0 counts every completed purchase, refunded or not.
   const [gross, net] = await Promise.all(
     [0, REFUND_DAYS].map(async (refundDays) => {
@@ -101,7 +104,13 @@ export async function foundingCohort(billing: Billing<Plan>, founding: readonly 
       return founding.map((price) => counts[price] ?? 0);
     }),
   );
-  return openCohort(gross!, net!);
+  return { gross: gross!, net: net! };
+}
+
+/** The open founding cohort, from the synchronized subscriptions. */
+export async function foundingCohort(billing: Billing<Plan>, founding: readonly string[]) {
+  const { gross, net } = await foundingPurchases(billing, founding);
+  return openCohort(gross, net);
 }
 
 // The system clock: a test bundle's injected `Date` scopes it to the test's.

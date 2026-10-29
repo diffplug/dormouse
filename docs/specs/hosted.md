@@ -9,7 +9,7 @@
 
 | Worker | Origin | Serves | Holds |
 |---|---|---|---|
-| `dormouse-hosted` | `https://hosted.dormouse.sh` | the account frontend, `/api/auth/*`, `/api/providers`, Natural Voice on or off, the Relay's account routes ("Burrow enrollment"), billing and Stripe's webhook ("Billing") | the login cookie, auth secrets, Hyperdrive, the approval rate limit, a binding to the relay's `RelayRoom`, the Stripe bindings |
+| `dormouse-hosted` | `https://hosted.dormouse.sh` | the account frontend, `/api/auth/*`, `/api/providers`, Natural Voice on or off, the Relay's account routes ("Burrow enrollment"), billing, Stripe's webhook, and the founders row ("Billing") | the login cookie, auth secrets, Hyperdrive, the approval rate limit, a binding to the relay's `RelayRoom`, the Stripe bindings |
 | `dormouse-relay` | `https://relay.dormouse.sh` | the Hosted Relay, its sockets, and Pocket ("Relay", "Relay sockets"), the one-time rendezvous and `/connect/` (`docs/specs/one-time.md` -> "Hosted rendezvous") | Hyperdrive, `OneTimeRoom`, `RelayRoom`, the one-time, sign-in, setup, and enrollment rate limits, `ACCOUNT_ORIGIN`, `RELAY_ENROLL_SECRET`, the VAPID pair |
 | `dormouse-voice` | `https://voice.dormouse.sh` | speak, a token's own delete, and the history sweep ("Managed voice") | `ELEVENLABS_API_KEY`, Hyperdrive |
 
@@ -86,6 +86,8 @@ The account Worker bills through `@pgstencil/stripe` (`docs/specs/pricing.md` ->
 | `POST /api/billing/portal` | login cookie, exact `Origin` | 200 `{ url }` of the customer portal |
 | `PUT /api/billing/founder` | login cookie, exact `Origin`, JSON `{ shown, name? }` | 200, the `GET` body |
 | `POST /api/billing/webhook` | `Stripe-Signature` over the raw body | 200 once `webhook()` committed |
+| `GET /api/hosted/cohorts` | none | 200 `{ cohort?, seatsLeft?, founders: { total, shown } }` |
+| `GET /api/hosted/founders/<token>` | none | 200, a shown founder's picture |
 
 Errors are JSON `{ message }`. The cookie routes need no entitlement, answer 401 without a login, and cap a body at 4 KiB.
 
@@ -98,10 +100,11 @@ Errors are JSON `{ message }`. The cookie routes need no entitlement, answer 401
 - **Must end at once the subscription a fully refunded charge or a lost dispute's charge paid for**, found through its invoice, while it is the owner's current one: commented `ENDED_FOR_REFUND`, after the commit and on every delivery until ended. A partial refund ends nothing, nor does a charge for an earlier subscription or none, which is logged for the operator.
 - **Must suspend, never end, on an open dispute**, by its current status read from Stripe, not the event (`dormouse_billing_disputes`); closing in the account's favor restores it.
 - **Must offer founding at the first ladder step whose completed purchases, refunds included, are short of `FOUNDING_COHORT_SIZE`**; its seats left exclude purchases ended within `REFUND_DAYS`. Past the last step, founding checkout answers 409.
+- **Must answer `/api/hosted/*` without resolving a login**, each answer reused for `COHORT_CACHE_MS` per isolate; `total` counts founding purchases net of refunds. The site's Worker forwards it from `dormouse.sh` to this origin, so the 421 gate needs no exception. What it answers and fetches: `docs/specs/security-hosted.md` -> "Account boundary".
 - **Must resync, every 10 minutes from the account's Cron Trigger, a bounded random batch of owners whose `active` or `trialing` row no longer grants access**, so a missed renewal webhook lapses a member only until a run picks them; a failure fails the invocation after every owner was tried.
 - **Must grant the account's role the `pgstencil_billing` schema from `runtime-roles.sql`**, additively: the package's migration creates it.
 
-Source of truth: `billingSetup`, `withBilling`, and `resyncBilling` in `hosted/server/billing.ts`; `billingRoutes` and `disputeAction` in `hosted/server/billing-routes.ts`. Pinned by `hosted/server/tests/billing.test.ts` and `hosted/server/tests/billing-routes.test.ts`, on StripeDev.
+Source of truth: `billingSetup`, `withBilling`, and `resyncBilling` in `hosted/server/billing.ts`; `billingRoutes` and `disputeAction` in `hosted/server/billing-routes.ts`; `cohortRoutes` in `hosted/server/cohort-routes.ts`; `forwardHosted` in `website/public/_worker.js`. Pinned by `hosted/server/tests/billing.test.ts` and `hosted/server/tests/billing-routes.test.ts`, on StripeDev.
 
 ## Managed voice
 

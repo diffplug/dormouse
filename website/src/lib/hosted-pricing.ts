@@ -9,6 +9,7 @@
  *
  * See docs/specs/pricing.md -> Published prices and -> The Hosted page.
  */
+import { HOSTED_REF_PARAM, type HostedRef } from "dormouse-lib/lib/hosted-links";
 
 /**
  * List prices, which the founding ladder climbs toward and is struck against.
@@ -51,7 +52,8 @@ export const FOUNDING_COHORTS_CLOSED = 0;
 
 /** One purchasable plan, at the price it is on sale at today. */
 export type Tier = {
-  id: "monthly" | "annual" | "founding";
+  /** The plan name checkout and the account's billing routes use. */
+  id: "monthly" | "yearly" | "founding";
   /** What the buy button and the checkout notice call it. */
   name: string;
   /** What the buyer pays today, in whole US dollars. */
@@ -74,7 +76,7 @@ export const HOSTED_MONTHLY: Tier = {
 };
 
 export const HOSTED_YEARLY: Tier = {
-  id: "annual",
+  id: "yearly",
   name: "Hosted yearly",
   price: LIST_ANNUAL,
   per: "/year",
@@ -99,15 +101,33 @@ export function tiersOnSale(): Tier[] {
 }
 
 /**
+ * Whether the buy buttons sell. False until the account Worker's Stripe
+ * bindings are set: each button then opens a notice saying so. True, each
+ * links to {@link checkoutUrl} and the offers go `InStock`.
+ */
+export const CHECKOUT_OPEN: boolean = false;
+
+/** The account app's checkout, which signs the buyer in before it shows the plan. */
+export const CHECKOUT_PAGE = "https://hosted.dormouse.sh/checkout";
+
+/** Where `tier`'s buy button goes once checkout is open, carrying the visit's `ref`. */
+export function checkoutUrl(tier: Tier, ref: HostedRef | "other" | null): string {
+  const url = new URL(CHECKOUT_PAGE);
+  url.searchParams.set("plan", tier.id);
+  if (ref) url.searchParams.set(HOSTED_REF_PARAM, ref);
+  return url.href;
+}
+
+/**
  * `Product` / `Offer` structured data for the paid plans, at the prices the
  * page prints.
  *
  * Prerendered with the rest of the prices so an assistant fetching the page
  * can quote them without running the counters. Availability is `PreOrder`
  * until checkout opens — the buttons explain what is left to build, so
- * claiming `InStock` here would be the page's only false statement.
+ * claiming `InStock` there would be the page's only false statement.
  */
-export function pricingJsonLd(pageUrl: string): string {
+export function pricingJsonLd(pageUrl: string, checkoutOpen: boolean): string {
   const data = {
     "@context": "https://schema.org",
     "@type": "Product",
@@ -123,7 +143,7 @@ export function pricingJsonLd(pageUrl: string): string {
       price: String(tier.price),
       priceCurrency: "USD",
       url: `${pageUrl}#pricing`,
-      availability: "https://schema.org/PreOrder",
+      availability: `https://schema.org/${checkoutOpen ? "InStock" : "PreOrder"}`,
       priceSpecification: {
         "@type": "UnitPriceSpecification",
         price: String(tier.price),
