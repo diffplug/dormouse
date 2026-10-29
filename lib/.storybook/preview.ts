@@ -324,8 +324,8 @@ const preview: Preview = {
       if (scenario) platform.setDefaultScenario(scenario);
       else platform.clearDefaultScenario();
 
-      // Both of these are read during render, so they are applied here rather
-      // than in the effect below with the rest of the primed state.
+      // The platform fields below are read during render, so they are applied
+      // here rather than in the effect below with the rest of the primed state.
 
       // The VS Code host owns the theme, which is how the Settings dialog
       // decides to hide its Theme row (docs/specs/theme.md). Absent resets to
@@ -366,7 +366,7 @@ const preview: Preview = {
       // section, which renders nothing without a Host service behind the
       // webview (`docs/specs/relay.md`). Absent is the honest default for a
       // fake platform, so only the stories about that section prime a stub.
-      // Read during render like the two above: the store reads `burrow`
+      // Read during render like the fields above: the store reads `burrow`
       // when the section first subscribes, which is after this decorator's
       // render body and before any effect.
       const primedBurrow = context.parameters?.primedBurrow as
@@ -433,7 +433,7 @@ const preview: Preview = {
           // The push-device list is renderer-only derived state normally written
           // by the Burrow, which no story runs — so a story that wants the
           // Alarm dialog's device line names one, and every other story resets
-          // to `no-host`.
+          // to `no-burrow`.
           setPushDevices(primedPushDevices ?? { status: 'no-burrow', devices: [] });
           clearAllAlertSpeechStates();
           for (const [id, state] of Object.entries(primedAlertSpeech ?? {})) {
