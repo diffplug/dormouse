@@ -4,9 +4,9 @@ import type { Billing, Stripe } from "@pgstencil/stripe";
 import { escape } from "@pgstencil/auth/email";
 import type { EmailMessage, EmailSender } from "pgstencil";
 import { PLAN_NAMES, planInterval } from "../../website/src/lib/hosted-pricing";
-import { DIFFPLUG_POSTAL_ADDRESS, SUPPORT_EMAIL } from "../../website/src/lib/hosted-withdrawal";
+import { DIFFPLUG_POSTAL_ADDRESS, SUPPORT_EMAIL, WITHDRAWAL_STATEMENT } from "../../website/src/lib/hosted-withdrawal";
 import { DAY_MS, run, type PriceCatalog, type PriceChange } from "./billing";
-import { BILLING_RETURN_PATH, type Plan } from "./policy-constants";
+import { BILLING_RETURN_PATH, isPlan, type Plan } from "./policy-constants";
 import { billingContact } from "./withdrawal";
 
 /**
@@ -32,8 +32,8 @@ export const PRICE_NOTICE_MIN_DAYS = 7;
  * spare and never announces a change that then cannot apply.
  */
 const PRICE_SEND_BY_DAYS = PRICE_NOTICE_MIN_DAYS + 1;
-/** How long the cron retries a dispute notice. */
-const DISPUTE_RETRY_DAYS = 30;
+/** How long the cron retries a dispute notice or a withdrawal's acknowledgement. */
+const RETRY_DAYS = 30;
 /** One send attempt holds its notice this long before another may try it. */
 const LEASE_MS = 5 * 60 * 1000;
 /** How many notices one pass sends, and how many price changes it applies, at most. */
@@ -66,7 +66,7 @@ async function verifyChange(billing: Billing<Plan>, change: PriceChange) {
   }
 }
 
-type Kind = "renewal" | "annual" | "price_change" | "dispute_suspended" | "dispute_restored";
+type Kind = "renewal" | "annual" | "price_change" | "dispute_suspended" | "dispute_restored" | "withdrawal";
 
 /** A notice to send, with what its text needs. */
 interface Pending {
@@ -76,6 +76,11 @@ interface Pending {
   renewsAt: Date | null;
   priceId: string | null;
   priceChangeId: string | null;
+  /** A withdrawal's: its reference, plan, when its contract started, and when it was submitted. */
+  withdrawalId: string | null;
+  withdrawalPlan: string | null;
+  contractStartedAt: Date | null;
+  submittedAt: Date | null;
 }
 
 /** What composing a notice reads beyond its row. */
@@ -86,6 +91,11 @@ export interface NoticeContext {
 }
 
 const DAY = new Intl.DateTimeFormat("en-US", { dateStyle: "long", timeZone: "UTC" });
+const UTC = new Intl.DateTimeFormat("en-GB", { dateStyle: "long", timeStyle: "long", timeZone: "UTC" });
+const UTC_DAY = new Intl.DateTimeFormat("en-GB", { dateStyle: "long", timeZone: "UTC" });
+
+/** A paragraph, or a list of terms and their values. */
+type Block = string | readonly (readonly [string, string])[];
 
 /** The email for notice `notice`, to the billing email `to`. */
 function noticeMessage(to: string, notice: Pending, plan: Plan | null, context: NoticeContext): EmailMessage {
@@ -98,7 +108,7 @@ function noticeMessage(to: string, notice: Pending, plan: Plan | null, context: 
   const yearlyRefund = `Ask within 30 days of a yearly renewal payment and we refund it in full, including tax.`;
   const help = `Questions: ${SUPPORT_EMAIL}.`;
   let subject: string;
-  let paragraphs: string[];
+  let paragraphs: Block[];
   switch (notice.kind) {
     case "renewal":
       subject = `Your Dormouse Hosted subscription renews on ${on}`;
@@ -143,6 +153,23 @@ function noticeMessage(to: string, notice: Pending, plan: Plan | null, context: 
         `This does not limit any refund or remedy owed to you. ${help}`,
       ];
       break;
+    case "withdrawal": {
+      // The durable acknowledgement docs/specs/pricing.md -> "Checkout and entitlement" requires.
+      const contract = isPlan(notice.withdrawalPlan) ? PLAN_NAMES[notice.withdrawalPlan] : notice.withdrawalPlan;
+      subject = "We received your withdrawal from Dormouse Hosted";
+      paragraphs = [
+        "DiffPlug LLC received your withdrawal from your Dormouse Hosted subscription contract.",
+        [
+          ["Your statement", WITHDRAWAL_STATEMENT],
+          ["Submitted", UTC.format(notice.submittedAt!)],
+          ["Contract", `Dormouse Hosted, ${contract}, ordered on ${UTC_DAY.format(notice.contractStartedAt!)}`],
+          ["Reference", notice.withdrawalId!],
+        ],
+        "Your subscription ends with this withdrawal and will not renew. We refund every payment you made for it in full, including tax, to your original payment method within 14 days of your withdrawal, with no deduction. Your bank or card provider decides when the credit appears.",
+        `Keep this email as your record. Questions: ${SUPPORT_EMAIL}.`,
+      ];
+      break;
+    }
   }
   paragraphs.push(DIFFPLUG_POSTAL_ADDRESS);
   return {
@@ -150,8 +177,16 @@ function noticeMessage(to: string, notice: Pending, plan: Plan | null, context: 
     to: [to],
     replyTo: SUPPORT_EMAIL,
     subject,
-    text: paragraphs.join("\n\n"),
-    html: `<html lang="en"><body>${paragraphs.map((paragraph) => `<p>${escape(paragraph)}</p>`).join("")}</body></html>`,
+    text: paragraphs
+      .map((block) => (typeof block === "string" ? block : block.map(([term, value]) => `${term}: ${value}`).join("\n")))
+      .join("\n\n"),
+    html: `<html lang="en"><body>${paragraphs
+      .map((block) =>
+        typeof block === "string"
+          ? `<p>${escape(block)}</p>`
+          : `<dl>${block.map(([term, value]) => `<dt>${escape(term)}</dt><dd>${escape(value)}</dd>`).join("")}</dl>`,
+      )
+      .join("")}</body></html>`,
   };
 }
 
@@ -161,7 +196,8 @@ function noticeMessage(to: string, notice: Pending, plan: Plan | null, context: 
  * A renewal-type notice still applies while its subscription renews at that
  * renewal, a price change's only while it is further off than
  * {@link PRICE_SEND_BY_DAYS} and its change is among `verified`; a suspension
- * while its dispute is open; a dispute notice for {@link DISPUTE_RETRY_DAYS}.
+ * while its dispute is open; a dispute notice or a withdrawal's
+ * acknowledgement for {@link RETRY_DAYS}.
  * Each is leased before it is sent, so two passes never send one twice.
  * Never-tried notices go first, then the least recently tried, so ones that
  * keep failing never starve newer ones past their deadlines. Answers the
@@ -176,10 +212,12 @@ export async function sendNotices(
   const now = billing.time.now();
   const pending = await run<Pending>(
     billing.db,
-    `SELECT n.id, n."userId", n.kind, n."renewsAt", s.price_id AS "priceId", n."priceChangeId"
+    `SELECT n.id, n."userId", n.kind, n."renewsAt", s.price_id AS "priceId", n."priceChangeId",
+      n."withdrawalId", w.plan AS "withdrawalPlan", w."contractStartedAt", w."submittedAt"
     FROM public.dormouse_billing_notices n
     LEFT JOIN pgstencil_billing.subscriptions s ON s.id = n."subscriptionId"
     LEFT JOIN public.dormouse_price_changes c ON c.id = n."priceChangeId"
+    LEFT JOIN public.dormouse_withdrawals w ON w.id = n."withdrawalId"
     WHERE n."sentAt" IS NULL AND (n."attemptedAt" IS NULL OR n."attemptedAt" < $2)
       AND ($3::text IS NULL OR n."userId" = $3)
       AND CASE
@@ -199,7 +237,7 @@ export async function sendNotices(
       now,
       new Date(now.getTime() - LEASE_MS),
       userId,
-      new Date(now.getTime() - DISPUTE_RETRY_DAYS * DAY_MS),
+      new Date(now.getTime() - RETRY_DAYS * DAY_MS),
       BATCH,
       verified,
       PRICE_SEND_BY_DAYS,

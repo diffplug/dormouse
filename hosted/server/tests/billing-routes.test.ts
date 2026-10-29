@@ -863,6 +863,8 @@ test("a withdrawal whose acknowledgement, cancellation, or refund fails still st
   });
   expect([f.email.all().length, f.cancels.length, f.refunds.length]).toEqual([0, 0, 0]);
 
+  // The failed send's lease runs out before the cron's next pass.
+  f.time.advanceMilliseconds(6 * 60 * 1000);
   f.failing.refunds = 1;
   await expect(resyncBilling(f.setup, f.database.url, origin, f.mail)).rejects.toThrow(AggregateError);
   expect(await member.summary()).toMatchObject({ plan: null, withdrawn: { acknowledged: true, settled: false } });

@@ -1,10 +1,6 @@
 // Rules: docs/specs/hosted.md -> "Billing"; docs/specs/pricing.md ->
 // "Checkout and entitlement".
 import type { Billing, Stripe } from "@pgstencil/stripe";
-import { escape } from "@pgstencil/auth/email";
-import type { EmailMessage, EmailSender } from "pgstencil";
-import { PLAN_NAMES } from "../../website/src/lib/hosted-pricing";
-import { DIFFPLUG_POSTAL_ADDRESS, SUPPORT_EMAIL, WITHDRAWAL_STATEMENT } from "../../website/src/lib/hosted-withdrawal";
 import { DAY_MS, idOf, run } from "./billing";
 import type { WithdrawalOffer } from "./billing-summary";
 import type { Plan } from "./policy-constants";
@@ -36,7 +32,7 @@ const WITHDRAWAL_COUNTRIES: ReadonlySet<string> = new Set([
 /** The cancellation comment a subscription ended by withdrawal carries. */
 export const ENDED_FOR_WITHDRAWAL = "dormouse: EEA or UK withdrawal";
 
-/** How long the cron keeps retrying a withdrawal's acknowledgement or settlement. */
+/** How long the cron keeps retrying a withdrawal's settlement. */
 const RETRY_DAYS = 30;
 
 type Held = NonNullable<Awaited<ReturnType<Billing<Plan>["status"]>>["subscription"]>;
@@ -52,7 +48,6 @@ export interface WithdrawalRow {
   plan: string;
   contractStartedAt: Date;
   submittedAt: Date;
-  acknowledgedAt: Date | null;
   settledAt: Date | null;
 }
 
@@ -121,7 +116,7 @@ export async function withdrawalOffer(
   };
 }
 
-const COLUMNS = `id, "userId", "subscriptionId", plan, "contractStartedAt", "submittedAt", "acknowledgedAt", "settledAt"`;
+const COLUMNS = `id, "userId", "subscriptionId", plan, "contractStartedAt", "submittedAt", "settledAt"`;
 
 /** The withdrawal recorded from `subscriptionId` by `ownerId`, if any. */
 export async function recordedWithdrawal(billing: Billing<Plan>, ownerId: string, subscriptionId: string) {
@@ -135,7 +130,8 @@ export async function recordedWithdrawal(billing: Billing<Plan>, ownerId: string
 
 /**
  * Records `ownerId`'s withdrawal from `subscription` under `offer`, submitted
- * now, and answers the row: a second submission answers the first's.
+ * now, and in the same statement its acknowledgement, a `withdrawal` notice
+ * the notice pass sends; answers the row, and a second submission the first's.
  */
 export async function recordWithdrawal(
   billing: Billing<Plan>,
@@ -144,12 +140,18 @@ export async function recordWithdrawal(
   subscription: Held,
   offer: Offer,
 ): Promise<WithdrawalRow> {
-  await run(
+  const [recorded] = await run<WithdrawalRow>(
     billing.db,
-    `INSERT INTO public.dormouse_withdrawals
-      (id, "userId", "subscriptionId", plan, "priceId", "contractStartedAt", country, "submittedAt")
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-    ON CONFLICT ("subscriptionId") DO NOTHING`,
+    `WITH recorded AS (
+      INSERT INTO public.dormouse_withdrawals
+        (id, "userId", "subscriptionId", plan, "priceId", "contractStartedAt", country, "submittedAt")
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      ON CONFLICT ("subscriptionId") DO NOTHING
+      RETURNING ${COLUMNS}),
+    acknowledgement AS (
+      INSERT INTO public.dormouse_billing_notices (id, "userId", kind, "withdrawalId", "createdAt")
+      SELECT gen_random_uuid()::text, "userId", 'withdrawal', id, "submittedAt" FROM recorded)
+    SELECT * FROM recorded`,
     [
       crypto.randomUUID(),
       ownerId,
@@ -161,37 +163,7 @@ export async function recordWithdrawal(
       billing.time.now(),
     ],
   );
-  return (await recordedWithdrawal(billing, ownerId, subscription.id))!;
-}
-
-const UTC = new Intl.DateTimeFormat("en-GB", { dateStyle: "long", timeStyle: "long", timeZone: "UTC" });
-const UTC_DAY = new Intl.DateTimeFormat("en-GB", { dateStyle: "long", timeZone: "UTC" });
-
-/** The durable acknowledgement of withdrawal `row`, emailed to `to`. */
-export function withdrawalAcknowledgement(to: string, row: WithdrawalRow): EmailMessage {
-  const plan = PLAN_NAMES[row.plan as Plan] ?? row.plan;
-  const facts: [string, string][] = [
-    ["Your statement", WITHDRAWAL_STATEMENT],
-    ["Submitted", UTC.format(row.submittedAt)],
-    ["Contract", `Dormouse Hosted, ${plan}, ordered on ${UTC_DAY.format(row.contractStartedAt)}`],
-    ["Reference", row.id],
-  ];
-  const refund =
-    "Your subscription ends with this withdrawal and will not renew. We refund every payment you made for it in full, including tax, to your original payment method within 14 days of your withdrawal, with no deduction. Your bank or card provider decides when the credit appears.";
-  const keep = `Keep this email as your record. Questions: ${SUPPORT_EMAIL}.`;
-  const intro = "DiffPlug LLC received your withdrawal from your Dormouse Hosted subscription contract.";
-  return {
-    from: `Dormouse Hosted <${SUPPORT_EMAIL}>`,
-    to: [to],
-    replyTo: SUPPORT_EMAIL,
-    subject: "We received your withdrawal from Dormouse Hosted",
-    text: [intro, facts.map(([term, value]) => `${term}: ${value}`).join("\n"), refund, keep, DIFFPLUG_POSTAL_ADDRESS].join(
-      "\n\n",
-    ),
-    html: `<html lang="en"><body><p>${escape(intro)}</p><dl>${facts
-      .map(([term, value]) => `<dt>${escape(term)}</dt><dd>${escape(value)}</dd>`)
-      .join("")}</dl><p>${escape(refund)}</p><p>${escape(keep)}</p><p>${escape(DIFFPLUG_POSTAL_ADDRESS)}</p></body></html>`,
-  };
+  return recorded ?? (await recordedWithdrawal(billing, ownerId, subscription.id))!;
 }
 
 /** What a refund is for, named in its metadata and its idempotency key: a withdrawal by its id, a closure by its subscription's. */
@@ -262,50 +234,32 @@ async function settle(billing: Billing<Plan>, row: WithdrawalRow) {
 }
 
 /**
- * Finishes withdrawal `row`: emails its acknowledgement to the billing email,
- * then settles it, each step skipped once done and stamped once it is. Throws
- * after both were tried if either failed; the cron tries again.
+ * Settles withdrawal `row` unless it was ({@link settle}), and stamps it
+ * settled. Throws on a failure; the cron tries again.
  */
-export async function completeWithdrawal(billing: Billing<Plan>, mail: () => EmailSender, row: WithdrawalRow) {
-  const failed: unknown[] = [];
-  const stamp = (column: "acknowledgedAt" | "settledAt") =>
-    run(billing.db, `UPDATE public.dormouse_withdrawals SET "${column}" = $2 WHERE id = $1`, [row.id, billing.time.now()]);
-  if (!row.acknowledgedAt)
-    try {
-      const email = (await billingContact(billing, row.userId))?.email;
-      if (!email) throw new Error(`Withdrawal ${row.id}: Stripe gave no billing email to acknowledge to`);
-      await mail().send(withdrawalAcknowledgement(email, row));
-      await stamp("acknowledgedAt");
-    } catch (error) {
-      failed.push(error);
-    }
-  if (!row.settledAt)
-    try {
-      await settle(billing, row);
-      await stamp("settledAt");
-    } catch (error) {
-      failed.push(error);
-    }
-  if (failed.length) throw new AggregateError(failed, `Withdrawal ${row.id} is not complete`);
+export async function settleWithdrawal(billing: Billing<Plan>, row: WithdrawalRow) {
+  if (row.settledAt) return;
+  await settle(billing, row);
+  await run(billing.db, `UPDATE public.dormouse_withdrawals SET "settledAt" = $2 WHERE id = $1`, [row.id, billing.time.now()]);
 }
 
-/** How many withdrawals one cron run finishes at most. */
+/** How many withdrawals one cron run settles at most. */
 const RETRY_BATCH = 20;
 
 /**
- * The cron's pass: finishes every withdrawal submitted in the last
- * {@link RETRY_DAYS} days whose acknowledgement or settlement failed, up to
- * {@link RETRY_BATCH}; answers the failures.
+ * The cron's pass: settles every withdrawal submitted in the last
+ * {@link RETRY_DAYS} days whose settlement failed, up to {@link RETRY_BATCH};
+ * answers the failures. Its acknowledgement is the notice pass's.
  */
-export async function retryWithdrawals(billing: Billing<Plan>, mail: () => EmailSender): Promise<unknown[]> {
+export async function settleWithdrawals(billing: Billing<Plan>): Promise<unknown[]> {
   const rows = await run<WithdrawalRow>(
     billing.db,
     `SELECT ${COLUMNS} FROM public.dormouse_withdrawals
-    WHERE ("acknowledgedAt" IS NULL OR "settledAt" IS NULL) AND "submittedAt" > $1
+    WHERE "settledAt" IS NULL AND "submittedAt" > $1
     ORDER BY "submittedAt" LIMIT $2`,
     [new Date(billing.time.now().getTime() - RETRY_DAYS * DAY_MS), RETRY_BATCH],
   );
   const failed: unknown[] = [];
-  for (const row of rows) await completeWithdrawal(billing, mail, row).catch((error: unknown) => failed.push(error));
+  for (const row of rows) await settleWithdrawal(billing, row).catch((error: unknown) => failed.push(error));
   return failed;
 }

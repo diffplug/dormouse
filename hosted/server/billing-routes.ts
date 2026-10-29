@@ -12,7 +12,7 @@ import { checkoutRef, type MetricEvent } from "./metric-labels";
 import { countMetricInTransaction, recordMetric } from "./metrics";
 import { CHECKOUT_CLOSED, PRICE_CHANGED, REFUND_DAYS, TERMS_VERSION, isFounderName, isPlan, type Plan } from "./policy-constants";
 import { sendNotices, type NoticeContext } from "./notices";
-import { completeWithdrawal, recordWithdrawal, recordedWithdrawal, withdrawalOffer } from "./withdrawal";
+import { recordWithdrawal, recordedWithdrawal, settleWithdrawal, withdrawalOffer } from "./withdrawal";
 import { SUPPORT_EMAIL } from "../../website/src/lib/hosted-withdrawal";
 import type { EmailSender } from "pgstencil";
 
@@ -121,7 +121,8 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
             ORDER BY k."consentedAt" DESC LIMIT 1) AS consent,
           (SELECT json_build_object('reference', w.id, 'subscription', w."subscriptionId", 'plan', w.plan,
               'startedAt', w."contractStartedAt", 'submittedAt', w."submittedAt",
-              'acknowledged', w."acknowledgedAt" IS NOT NULL, 'settled', w."settledAt" IS NOT NULL)
+              'acknowledged', EXISTS (SELECT FROM dormouse_billing_notices n WHERE n."withdrawalId" = w.id AND n."sentAt" IS NOT NULL),
+              'settled', w."settledAt" IS NOT NULL)
             FROM dormouse_withdrawals w WHERE w."userId" = u.id
             ORDER BY w."submittedAt" DESC LIMIT 1) AS withdrawn
         FROM "user" u WHERE u.id = $1`,
@@ -229,10 +230,10 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
   );
 
   // An EEA or UK consumer's withdrawal from the contract it names, which must
-  // be the held subscription the page offers it for. Recorded before the
-  // answer, it stands: an acknowledgement or a settlement that fails after is
-  // logged, and the cron finishes it. Naming a contract already withdrawn
-  // from answers that withdrawal again.
+  // be the held subscription the page offers it for. Recorded with its
+  // acknowledgement before the answer, it stands: sending that, or settling,
+  // when it fails after is logged, and the cron finishes it. Naming a
+  // contract already withdrawn from answers that withdrawal again.
   app.post("/api/billing/withdraw", smallBody(JSON_BODY_BYTES), gate, async (c) => {
     const { userId } = c.get("login");
     const subscription = (await readJson<{ subscription?: unknown }>(c))?.subscription;
@@ -246,8 +247,11 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
         if (!offer || held?.id !== subscription || !plan) return c.json({ message: WITHDRAWAL_CLOSED }, 409);
         row = await recordWithdrawal(billing, userId, plan, held, offer);
       }
-      await completeWithdrawal(billing, () => host(c).mail(), row).catch((error: unknown) =>
-        console.error(`Withdrawal ${row.id} is recorded but not complete; the cron retries it`, error),
+      const context = { catalog, origin: new URL(c.req.url).origin };
+      for (const error of await sendNotices(billing, () => host(c).mail(), context, { userId }))
+        console.error("A notice is recorded but not sent; the cron retries it", error);
+      await settleWithdrawal(billing, row).catch((error: unknown) =>
+        console.error(`Withdrawal ${row.id} is recorded but not settled; the cron retries it`, error),
       );
       return summary(c, billing, setup, catalog, userId);
     });
