@@ -606,6 +606,60 @@ test("an open dispute suspends without ending, closing it in the account's favor
   expect(await member.summary()).toMatchObject({ plan: null, entitled: false, suspended: false });
 });
 
+test("the cron rereads open disputes from Stripe, so a missed close event restores once or ends", async ({ onTestFinished }) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const resync = () => resyncBilling(f.setup, f.database.url, origin, f.mail);
+  const won = await f.account();
+  const { session: wonSession } = await f.buy(won, "yearly");
+  const lost = await f.account();
+  const { session: lostSession, subscription: lostSubscription } = await f.buy(lost, "yearly");
+  f.paidInvoices.set("pi_du_lost", lostSubscription.id);
+  const open = (id: string, customer: string) => {
+    f.disputes.set(id, { status: "needs_response", customer, paymentIntent: `pi_${id}` });
+    return f.send(f.event("charge.dispute.created", { id, object: "dispute" }));
+  };
+  expect((await open("du_won", wonSession.customer as string)).status).toBe(200);
+  expect((await open("du_lost", lostSession.customer as string)).status).toBe(200);
+  expect([await f.entitledOn(won.id), await f.entitledOn(lost.id)]).toEqual([false, false]);
+  const restored = () => f.email.all().filter((mail) => mail.subject === "Your Dormouse Hosted access is restored");
+
+  // Still open: the cron changes nothing.
+  await resync();
+  expect([await f.entitledOn(won.id), restored(), f.cancels]).toEqual([false, [], []]);
+
+  // Both close in Stripe, and neither close event arrives.
+  f.disputes.get("du_won")!.status = "won";
+  f.disputes.get("du_lost")!.status = "lost";
+  await resync();
+  expect(await f.entitledOn(won.id)).toBe(true);
+  expect(restored().map((mail) => mail.to[0])).toEqual([f.dev.customers.get(wonSession.customer as string)!.email]);
+  expect(f.cancels).toEqual([{ subscription: lostSubscription.id, comment: ENDED_FOR_REFUND }]);
+  expect(await f.sql(`SELECT "disputeId" FROM dormouse_billing_disputes`)).toEqual([]);
+  await resync();
+  expect([restored().length, f.cancels.length]).toEqual([1, 1]);
+});
+
+test("a dispute on a closed account still records, and a lost one still runs its end", async ({ onTestFinished }) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const member = await f.account();
+  const { session, subscription } = await f.buy(member, "yearly");
+  f.paidInvoices.set("pi_du_closed", subscription.id);
+  expect((await member.request("/api/account/close", { method: "POST", body: { close: true } })).status).toBe(204);
+  await f.deliver();
+  const dispute = (status: string) => {
+    f.disputes.set("du_closed", { status, customer: session.customer as string, paymentIntent: "pi_du_closed" });
+    return f.send(f.event("charge.dispute.updated", { id: "du_closed", object: "dispute", status }));
+  };
+  expect((await dispute("needs_response")).status).toBe(200);
+  expect(await f.sql(`SELECT "userId" FROM dormouse_billing_disputes`)).toEqual([{ userId: member.id }]);
+  expect((await dispute("lost")).status).toBe(200);
+  expect(await f.sql(`SELECT "userId" FROM dormouse_billing_disputes`)).toEqual([]);
+  // Closing already ended the subscription; the lost dispute ends nothing more.
+  expect(f.cancels.map((cancel) => cancel.comment)).toEqual([ENDED_FOR_CLOSURE]);
+});
+
 test("a purchase ending otherwise counts as canceled, and one ending within the refund window as refunded", async ({
   onTestFinished,
 }) => {

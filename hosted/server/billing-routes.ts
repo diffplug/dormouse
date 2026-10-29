@@ -419,6 +419,48 @@ async function recordDispute(
     );
 }
 
+/** How many open disputes one cron run reads from Stripe at most. */
+const DISPUTE_RESYNC_BATCH = 20;
+
+/**
+ * The cron's dispute pass, so a missed close event never suspends an account
+ * for good: reads the current status of up to {@link DISPUTE_RESYNC_BATCH}
+ * open disputes from Stripe, least recently checked first, and acts on each
+ * as its webhook would. A lost one ends its subscription before its row
+ * goes, so a failed end is retried; one closed either way records its
+ * restoration notice as the webhook does, which the notice pass then sends.
+ * Answers the failures.
+ */
+export async function resyncDisputes(billing: Billing<Plan>): Promise<unknown[]> {
+  const { rows } = await billing.db.executeQuery<{ disputeId: string; userId: string }>(
+    CompiledQuery.raw(
+      `SELECT "disputeId", "userId" FROM public.dormouse_billing_disputes
+      ORDER BY "checkedAt" NULLS FIRST, "openedAt" LIMIT $1`,
+      [DISPUTE_RESYNC_BATCH],
+    ),
+  );
+  const failed: unknown[] = [];
+  for (const { disputeId, userId } of rows)
+    try {
+      const current = await billing.stripe.disputes.retrieve(disputeId, { expand: ["charge"] });
+      const action = disputeAction(current.status);
+      if (action === "end") await endForRefund(billing, current.charge as Stripe.Charge);
+      await billing.db.transaction().execute(async (trx) => {
+        const now = billing.time.now();
+        await trx.executeQuery(
+          CompiledQuery.raw(`UPDATE public.dormouse_billing_disputes SET "checkedAt" = $2 WHERE "disputeId" = $1`, [
+            disputeId,
+            now,
+          ]),
+        );
+        if (action !== "suspend") await recordDispute(trx, disputeId, userId, action, now);
+      });
+    } catch (error) {
+      failed.push(error);
+    }
+  return failed;
+}
+
 /**
  * Ends at once, without proration or a final invoice, the subscription that
  * `charge` paid for, now fully refunded or finally reversed, while it is its

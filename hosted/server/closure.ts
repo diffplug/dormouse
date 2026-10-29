@@ -86,7 +86,7 @@ export function closureRoutes(app: Hono<any>, host: (c: Context) => ClosureHost)
       canceled = [];
     }
     // The account's rows cascade from its user; billing records, consents,
-    // withdrawals, and this closure have no foreign key and stay.
+    // withdrawals, disputes, and this closure have no foreign key and stay.
     const [closed] = await accountQuery<{ burrows: string[] | null }>(
       deployment,
       `WITH burrows AS (SELECT array_agg("burrowId") AS ids FROM dormouse_relay_burrows WHERE "userId" = $1),
