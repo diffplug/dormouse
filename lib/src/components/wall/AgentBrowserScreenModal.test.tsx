@@ -230,6 +230,7 @@ describe('AgentBrowserScreenModal', () => {
     const registration = registerStubScreen('embed', {
       snapshot: { ...STUB_SCREEN, renderMode: 'iframe', syncEngaged: false, viewport: { w: 0, h: 0, dpr: 0 } },
       hostCapable: false,
+      viewportSetting: () => ({ mode: 'pane-sync' }),
     });
     const controller = getAgentBrowserScreenController('embed')!;
     act(() => root.render(<AgentBrowserScreenModal controller={controller} label="surface:9" onClose={() => {}} />));

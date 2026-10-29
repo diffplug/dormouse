@@ -80,14 +80,13 @@ export function AgentBrowserScreenModal({
   const [initialSetting] = useState(() => controller.viewportSetting?.());
   const builtins = defaultBrowserViewportConfig();
   const initialPreset = matchingPreset(builtins, initialSetting);
-  // Opened from embed or popout, there is no screencast viewport to keep (an
-  // embed reports 0×0), so a swap to screencast defaults to Resize with pane.
-  const openedOnScreencast = parseRenderMode(initial?.renderMode ?? 'agent-browser-screencast').presentation === 'screencast';
   const initialTarget: Target = initialSetting?.mode === 'pane-sync' || initial?.syncEngaged ? 'sync'
-    : initialSetting?.mode === 'fixed' || openedOnScreencast ? 'fixed'
-    : 'sync';
-  // A measured viewport seeds the Fixed fields only when it has a size.
+    : 'fixed';
+  // Seed the Fixed fields from the saved size, else a measured viewport that
+  // has one (an embed reports 0×0).
+  const fixed = initialSetting?.mode === 'fixed' ? initialSetting : undefined;
   const measured = initial && initial.viewport.w > 0 && initial.viewport.h > 0 ? initial.viewport : undefined;
+  const seedDpr = fixed?.dpr ?? measured?.dpr ?? 1;
   const [target, setTarget] = useState<Target>(initialTarget);
   const [config, setConfig] = useState<BrowserViewportConfig>(builtins);
   const [configError, setConfigError] = useState<string | null>(null);
@@ -114,11 +113,11 @@ export function AgentBrowserScreenModal({
     });
     return () => { active = false; };
   }, [controller.cwd]);
-  const [customW, setCustomW] = useState(String(initialSetting?.mode === 'fixed' ? initialSetting.width : measured?.w ?? 1440));
-  const [customH, setCustomH] = useState(String(initialSetting?.mode === 'fixed' ? initialSetting.height : measured?.h ?? 900));
-  const [customDpi, setCustomDpi] = useState(formatDpr(initialSetting?.mode === 'fixed' ? initialSetting.dpr ?? measured?.dpr ?? 1 : measured?.dpr ?? 1));
+  const [customW, setCustomW] = useState(String(fixed?.width ?? measured?.w ?? 1440));
+  const [customH, setCustomH] = useState(String(fixed?.height ?? measured?.h ?? 900));
+  const [customDpi, setCustomDpi] = useState(formatDpr(seedDpr));
   // Display measured DPR without turning an omitted DPR into a persisted override.
-  const [explicitDpr, setExplicitDpr] = useState(initialSetting?.mode === 'fixed' && initialSetting.dpr !== undefined);
+  const [explicitDpr, setExplicitDpr] = useState(fixed?.dpr !== undefined);
   const choosePreset = (name: string) => {
     chooseTarget('fixed');
     setPreset(name);
