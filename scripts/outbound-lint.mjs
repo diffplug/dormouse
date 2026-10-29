@@ -176,7 +176,7 @@ const OUTBOUND_SITES = {
   },
   'lib/src/components/HostedEnrollment.tsx': {
     class: 'user:link-click',
-    reason: 'The Hosted plans and voice page links, opened only when the user clicks one.',
+    reason: 'The Hosted plans links, opened only when the user clicks one.',
   },
   'lib/src/lib/clipboard-failure.ts': {
     class: 'user:link-click',
@@ -309,7 +309,7 @@ const REMOTE_LITERALS = {
   },
   'lib/src/components/HostedEnrollment.tsx': {
     hosts: ['dormouse.sh'],
-    reason: 'The Hosted plans and voice page links.',
+    reason: 'The Hosted plans links.',
   },
   'lib/src/lib/clipboard-failure.ts': {
     hosts: ['github.com'],

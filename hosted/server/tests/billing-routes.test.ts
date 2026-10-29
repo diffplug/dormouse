@@ -7,6 +7,8 @@ import { queryDatabase } from "pgstencil/postgres";
 import { FOUNDING_COHORT_SIZE, FOUNDING_LADDER, LIST_ANNUAL, LIST_MONTHLY } from "../../../website/src/lib/hosted-pricing";
 import { WITHDRAWAL_STATEMENT } from "../../../website/src/lib/hosted-withdrawal";
 import { resyncBilling, type BillingSetup } from "../billing";
+import { MAX_SHOWN_FOUNDERS } from "../../../website/src/lib/hosted-cohorts";
+import type { BillingSetup } from "../billing";
 import {
   BILLING_WEBHOOK_PATH,
   CHECKOUT_CLOSED,
@@ -21,6 +23,7 @@ import {
   disputeAction,
 } from "../billing-routes";
 import { CLOSE_RECENT_LOGIN, CLOSE_UNAVAILABLE, ENDED_FOR_CLOSURE, closureRoutes } from "../closure";
+import { AVATAR_BYTES, COHORT_CACHE_MS, COHORT_ENDPOINT, FOUNDER_AVATAR_PREFIX, cohortRoutes } from "../cohort-routes";
 import { entitledSql } from "../entitlement";
 import { ENDED_FOR_WITHDRAWAL, WITHDRAWAL_OPEN_DAYS } from "../withdrawal";
 import { migrations } from "../migrations";
@@ -78,8 +81,17 @@ async function fixture({ closed = false } = {}) {
   const app = new Hono();
   billingRoutes(app, () => host);
   closureRoutes(app, () => host);
+  /** The isolate's clock the public routes cache by. */
+  const clock = { now: 1_000_000 };
+  cohortRoutes(
+    app,
+    () => ({ databaseUrl: context.database.url, setup: (): BillingSetup | null => (closed ? null : stripe.setup) }),
+    () => clock.now,
+  );
   // The account Worker's `onError`.
   app.onError((_error, c) => c.json({ message: "unavailable" }, 503));
+  /** A public read, as the site's Worker forwards it: no cookie, no browser headers. */
+  const visit = (path: string) => app.request(origin + path, { headers: { accept: "*/*" } });
 
   /** A signed-in account; `email: null` is a provider-only one. */
   const account = async (email: string | null = `${randomUUID()}@example.test`, emailVerified = email !== null) => {
@@ -175,6 +187,8 @@ async function fixture({ closed = false } = {}) {
     mailing,
     logins,
     closedBurrows,
+    clock,
+    visit,
     close: async () => {
       await stripe.close();
       await context.close();
@@ -852,4 +866,206 @@ test("with billing closed, closing deletes an account without a subscription and
   const refused = await held.request("/api/account/close", { method: "POST", body: { close: true } });
   expect([refused.status, await refused.json()]).toEqual([503, { message: CLOSE_UNAVAILABLE }]);
   expect(await f.sql(`SELECT id FROM "user" WHERE id = $1`, [held.id])).toEqual([{ id: held.id }]);
+});
+
+/** `count` paid founders at founding step `step`, started 40 days ago, straight into the synchronized rows. */
+const fillCohort = (f: Awaited<ReturnType<typeof fixture>>, step: number, count: number) =>
+  f.sql(
+    `WITH owners AS (
+      INSERT INTO pgstencil_billing.accounts (owner_id, email, created_at)
+      SELECT 'filler-' || $2::int || '-' || n, 'filler@example.test', now() FROM generate_series(1, $1::int) n
+      RETURNING owner_id)
+    INSERT INTO pgstencil_billing.subscriptions
+      (id, owner_id, price_id, status, started_at, period_end, cancel_at_period_end, updated_at)
+    SELECT 'sub_' || owner_id, owner_id, $3, 'active', now() - interval '40 days',
+      now() + interval '325 days', false, now() FROM owners`,
+    [count, step, f.setup.founding[step]],
+  );
+
+test("the public founders row shows only opted-in founders still subscribed, with the open cohort's seats, cached a minute", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const cohorts = async () => {
+    const response = await f.visit(COHORT_ENDPOINT);
+    expect(response.status).toBe(200);
+    return response.json();
+  };
+  const later = () => (f.clock.now += COHORT_CACHE_MS);
+  expect(await cohorts()).toEqual({ cohort: 0, seatsLeft: FOUNDING_COHORT_SIZE, founders: { total: 0, shown: [] } });
+
+  const [ada, kim, lee, mo] = [await f.account(), await f.account(), await f.account(), await f.account()];
+  for (const who of [ada, kim, lee]) await f.buy(who, "founding");
+  await f.buy(mo, "yearly");
+  await f.sql(`UPDATE "user" SET image = 'https://avatars.githubusercontent.com/u/1?v=4' WHERE id = $1`, [ada.id]);
+  // Kim joins first; Lee never ticks the box.
+  expect((await kim.request("/api/billing/founder", { method: "PUT", body: { shown: true, name: "Kim" } })).status).toBe(200);
+  expect((await ada.request("/api/billing/founder", { method: "PUT", body: { shown: true, name: "Ada" } })).status).toBe(200);
+  // One isolate reuses its answer for a minute.
+  expect(await cohorts()).toEqual({ cohort: 0, seatsLeft: FOUNDING_COHORT_SIZE, founders: { total: 0, shown: [] } });
+  f.clock.now += COHORT_CACHE_MS - 1;
+  expect((await cohorts()).seatsLeft).toBe(FOUNDING_COHORT_SIZE);
+  f.clock.now += 1;
+  const [{ token }] = await f.sql<{ token: string }>(
+    `SELECT encode(sha256(convert_to($1::text, 'UTF8')), 'hex') AS token`,
+    [ada.id],
+  );
+  const shown = await cohorts();
+  expect(shown).toEqual({
+    cohort: 0,
+    seatsLeft: FOUNDING_COHORT_SIZE - 3,
+    founders: { total: 3, shown: [{ name: "Kim" }, { name: "Ada", avatar: FOUNDER_AVATAR_PREFIX + token }] },
+  });
+  // The answer names no account.
+  expect(JSON.stringify(shown)).not.toContain(ada.id);
+
+  // A founder whose subscription lapses leaves the row, though their row is
+  // kept; past the refund window, they still count.
+  await f.sql(
+    `UPDATE pgstencil_billing.subscriptions SET status = 'canceled', started_at = now() - interval '40 days', ended_at = now()
+    WHERE owner_id = $1`,
+    [kim.id],
+  );
+  later();
+  expect((await cohorts()).founders).toEqual({
+    total: 3,
+    shown: [{ name: "Ada", avatar: FOUNDER_AVATAR_PREFIX + token }],
+  });
+
+  // A refund inside the window returns its seat and leaves the total.
+  const refunded = await f.account();
+  await f.buy(refunded, "founding");
+  await f.sql(
+    `UPDATE pgstencil_billing.subscriptions SET status = 'canceled', ended_at = started_at + interval '1 day'
+    WHERE owner_id = $1`,
+    [refunded.id],
+  );
+  later();
+  expect(await cohorts()).toMatchObject({ seatsLeft: FOUNDING_COHORT_SIZE - 3, founders: { total: 3 } });
+
+  // A filled cohort moves the seats to the next; past the last, founding is closed and only the founders remain.
+  await fillCohort(f, 0, FOUNDING_COHORT_SIZE - 3);
+  later();
+  expect(await cohorts()).toMatchObject({ cohort: 1, seatsLeft: FOUNDING_COHORT_SIZE });
+  for (let step = 1; step < FOUNDING_LADDER.length; step++) await fillCohort(f, step, FOUNDING_COHORT_SIZE);
+  later();
+  expect(await cohorts()).toEqual({
+    founders: { total: FOUNDING_LADDER.length * FOUNDING_COHORT_SIZE, shown: [{ name: "Ada", avatar: FOUNDER_AVATAR_PREFIX + token }] },
+  });
+});
+
+test("the public founders row shows at most MAX_SHOWN_FOUNDERS, the earliest first, and counts the rest", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const many = MAX_SHOWN_FOUNDERS + 2;
+  await fillCohort(f, 0, many);
+  await f.sql(
+    `INSERT INTO "user" (id, name, email, "emailVerified")
+    SELECT 'filler-0-' || n, 'F' || n, 'filler-' || n || '@example.test', true FROM generate_series(1, $1::int) n`,
+    [many],
+  );
+  await f.sql(
+    `INSERT INTO dormouse_founders ("userId", name, "shownSince")
+    SELECT 'filler-0-' || n, 'F' || n, now() - make_interval(mins => $1::int - n) FROM generate_series(1, $1::int) n`,
+    [many],
+  );
+  const { founders } = (await (await f.visit(COHORT_ENDPOINT)).json()) as { founders: { total: number; shown: { name: string }[] } };
+  expect(founders.total).toBe(many);
+  expect(founders.shown.map(({ name }) => name)).toEqual(Array.from({ length: MAX_SHOWN_FOUNDERS }, (_, i) => `F${i + 1}`));
+});
+
+test("a shown founder's picture is fetched from the provider's host and served as a checked raster image", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+  const JPEG = Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 4, 5]);
+  const provider = new Map<string, () => Response>();
+  const fetched: string[] = [];
+  const realFetch = globalThis.fetch;
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input instanceof Request ? input.url : input);
+    if (!url.startsWith("https://avatars.githubusercontent.com/") && !url.includes("googleusercontent.com"))
+      return realFetch(input, init);
+    fetched.push(url);
+    expect(init?.redirect).toBe("manual");
+    return (provider.get(url) ?? (() => new Response("missing", { status: 404 })))();
+  });
+  onTestFinished(() => {
+    vi.unstubAllGlobals();
+  });
+
+  /** A founder shown under `name` whose sign-in picture is `image`; answers their avatar path, if any. */
+  const founder = async (name: string, image: string | null) => {
+    const who = await f.account();
+    await f.buy(who, "founding");
+    await f.sql(`UPDATE "user" SET image = $2 WHERE id = $1`, [who.id, image]);
+    expect((await who.request("/api/billing/founder", { method: "PUT", body: { shown: true, name } })).status).toBe(200);
+    return who;
+  };
+  const gh = "https://avatars.githubusercontent.com/u/1?v=4";
+  provider.set("https://avatars.githubusercontent.com/u/1?v=4&s=96", () => new Response(PNG, { headers: { "content-type": "text/html" } }));
+  const big = new Uint8Array(AVATAR_BYTES + 1);
+  big.set(PNG);
+  provider.set("https://avatars.githubusercontent.com/u/2?s=96", () => new Response(big));
+  provider.set("https://avatars.githubusercontent.com/u/3?s=96", () => new Response(new TextEncoder().encode("<svg onload=alert(1)>")));
+  provider.set("https://avatars.githubusercontent.com/u/4?s=96", () => new Response(null, { status: 302, headers: { location: "https://evil.example/" } }));
+  provider.set("https://avatars.githubusercontent.com/u/6?s=96", () => new Response(PNG, { status: 500 }));
+  await founder("Png", gh);
+  await founder("Big", "https://avatars.githubusercontent.com/u/2");
+  await founder("Svg", "https://avatars.githubusercontent.com/u/3");
+  await founder("Moved", "https://avatars.githubusercontent.com/u/4");
+  await founder("Inline", `data:image/jpeg;base64, ${btoa(String.fromCharCode(...JPEG))}`);
+  await founder("Failed", "https://avatars.githubusercontent.com/u/6");
+  await founder("BigInline", `data:image/png;base64,${Buffer.from(big).toString("base64")}`);
+  // Never fetched: not a provider's picture host, not https, or not a raster data URL.
+  for (const [name, image] of [
+    ["Elsewhere", "https://evil.example/a.png"],
+    ["Plain", "http://avatars.githubusercontent.com/u/5"],
+    ["Ported", "https://avatars.githubusercontent.com:8443/u/5"],
+    ["Vector", `data:image/svg+xml;base64,${btoa("<svg/>")}`],
+    ["Code", null],
+  ] as const)
+    await founder(name, image);
+
+  const { founders } = (await (await f.visit(COHORT_ENDPOINT)).json()) as {
+    founders: { shown: { name: string; avatar?: string }[] };
+  };
+  const avatar = Object.fromEntries(founders.shown.map(({ name, avatar }) => [name, avatar]));
+  expect(Object.keys(avatar)).toEqual([
+    ...["Png", "Big", "Svg", "Moved", "Inline", "Failed", "BigInline"],
+    ...["Elsewhere", "Plain", "Ported", "Vector", "Code"],
+  ]);
+  for (const name of ["Elsewhere", "Plain", "Ported", "Vector", "Code"]) expect(avatar[name], name).toBeUndefined();
+
+  const png = await f.visit(avatar.Png!);
+  expect(png.status).toBe(200);
+  expect(png.headers.get("content-type")).toBe("image/png");
+  expect(new Uint8Array(await png.arrayBuffer())).toEqual(PNG);
+  const inline = await f.visit(avatar.Inline!);
+  expect(inline.headers.get("content-type")).toBe("image/jpeg");
+  expect(new Uint8Array(await inline.arrayBuffer())).toEqual(JPEG);
+  for (const name of ["Big", "Svg", "Moved", "Failed", "BigInline"])
+    expect((await f.visit(avatar[name]!)).status, name).toBe(404);
+  // Fetched once per answer, however often it is asked for.
+  await f.visit(avatar.Png!);
+  expect(fetched.filter((url) => url.includes("/u/1")).length).toBe(1);
+  expect(fetched.every((url) => url.startsWith("https://avatars.githubusercontent.com/"))).toBe(true);
+
+  // Only a shown founder's token: a founder who leaves, a made-up token, or a user id is not one.
+  for (const path of [FOUNDER_AVATAR_PREFIX + "0".repeat(64), FOUNDER_AVATAR_PREFIX + "x", FOUNDER_AVATAR_PREFIX])
+    expect((await f.visit(path)).status, path).toBe(404);
+});
+
+test("closed, the public routes answer as billing's do", async ({ onTestFinished }) => {
+  const f = await fixture({ closed: true });
+  onTestFinished(f.close);
+  const response = await f.visit(COHORT_ENDPOINT);
+  expect(response.status).toBe(503);
+  expect(await response.json()).toEqual({ message: CHECKOUT_CLOSED });
+  expect((await f.visit(FOUNDER_AVATAR_PREFIX + "0".repeat(64))).status).toBe(404);
 });

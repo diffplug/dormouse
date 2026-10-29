@@ -34,8 +34,9 @@ interface EnsureFlags extends WorkspaceScopedFlags {
 const RESTART_TIMEOUT_MS = 60_000;
 
 // When ensure *creates* a surface, the host waits for the new shell to report OSC
-// 633 integration so it can warn if the command won't be trackable. That wait can
-// run to ~15s on a shell that never integrates, outlasting the default 5s. Matched
+// 633 integration and fails if it never does, since the command could not be
+// tracked. That wait runs to the host's 8s integration timeout, plus closing the
+// throwaway pane, outlasting the default 5s. Matched
 // surfaces still respond instantly; this only raises the ceiling for the slow case.
 const ENSURE_TIMEOUT_MS = 20_000;
 

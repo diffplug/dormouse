@@ -151,10 +151,10 @@
       "minimumReleaseAge": "14 days"
     },
     {
-      "description": "Pin @types/vscode to match engines.vscode (^1.85.0) so the typed API surface never outruns the declared minimum VS Code runtime",
+      "description": "Pin @types/vscode to match engines.vscode (^1.92.0) so the typed API surface never outruns the declared minimum VS Code runtime",
       "matchManagers": ["npm"],
       "matchPackageNames": ["@types/vscode"],
-      "allowedVersions": "1.85.0"
+      "allowedVersions": "1.92.0"
     },
     {
       "description": "tend-generated workflows are replaced byte-for-byte by nightly regeneration; let the generator own every dependency pin so Renovate and tend cannot alternate upgrades and downgrades",

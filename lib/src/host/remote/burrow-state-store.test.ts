@@ -179,8 +179,7 @@ describe('FileBurrowStateStore', () => {
     expect(await reopened.loadAcl('burrow-1')).toHaveLength(1);
   });
 
-  // Skipped on Windows for the same reason as the directory test below, and it
-  // has always failed there — CI runs this suite only on ubuntu, so nothing
+  // Skipped on Windows, and it has always failed there — CI runs this suite only on ubuntu, so nothing
   // caught it. A Unix mode is a silent no-op on Windows: `stat().mode` reports
   // a synthesized value that has nothing to do with what the ACL permits, so
   // the assertion tests neither the intent nor the outcome. What actually
@@ -270,7 +269,7 @@ describe('FileBurrowStateStore', () => {
     const store = new FileBurrowStateStore(dir);
     // Read the (absent) file first, so what fails below is the write: a read
     // that fails for a reason other than ENOENT refuses to save at all, which
-    // is the case above rather than this one.
+    // is the case below rather than this one.
     expect(await store.loadEnrollment()).toBeNull();
     await rm(dir, { recursive: true, force: true });
     const blocker = join(dir);

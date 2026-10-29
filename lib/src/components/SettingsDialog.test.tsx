@@ -26,6 +26,7 @@ let sectionOffsets: Record<string, number>;
 let frameTime: number;
 let nextFrame: number;
 let frames: Map<number, FrameRequestCallback>;
+let resize: (width: number) => void;
 
 async function advanceScroll(ms = SETTINGS_SCROLL_MS) {
   frameTime += ms;
@@ -95,7 +96,7 @@ beforeEach(() => {
   });
   vi.stubGlobal('cancelAnimationFrame', (id: number) => frames.delete(id));
   sectionOffsets = { general: 16, notifications: 516, network: 916, about: 1316 };
-  stubResizeObserver(400);
+  resize = stubResizeObserver(400);
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
     const top = this.dataset.settingsTopic
       ? sectionOffsets[this.dataset.settingsTopic] - (document.getElementById('settings-content')?.scrollTop ?? 0) : 0;
@@ -180,6 +181,22 @@ describe('SettingsDialog navigation and search', () => {
     const before = getAlertSettings().deferAlertsUntilQuiet;
     await act(async () => visible('[role="switch"]')[0].click());
     expect(getAlertSettings().deferAlertsUntilQuiet).toBe(!before);
+  });
+
+  it('keeps a topic chosen while the opened-at topic settles', async () => {
+    await act(async () => root.render(<SettingsDialog onClose={() => {}} initialTopic="network" />));
+    await act(async () => {});
+    const content = document.getElementById('settings-content')!;
+    Object.defineProperty(content, 'clientHeight', { value: 400 });
+    Object.defineProperty(content, 'scrollHeight', { value: 1400 });
+    await advanceScroll();
+    expect(content.scrollTop).toBe(900);
+    await act(async () => byText('Notifications').click());
+    await advanceScroll();
+    expect(content.scrollTop).toBe(500);
+    await act(async () => resize(400));
+    await advanceScroll();
+    expect(content.scrollTop).toBe(500);
   });
 
   it('ends with About, which a search for the version finds alone', async () => {

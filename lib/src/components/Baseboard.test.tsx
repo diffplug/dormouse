@@ -30,7 +30,10 @@ import { resetShellStore, seedShellStore } from '../lib/shell-store';
 import { resetPushDevices, setPushDevices, setPushDevicesRefresher } from '../lib/push-devices';
 import { clearTerminalActivity, setTerminalActivity } from '../lib/session-activity-store';
 import { createAlertEpisode } from '../lib/alert-episode';
-import { makeStubBurrowLink } from '../host/remote/test-burrow-link';
+import { makeStubBurrowLink, SELF_HOST_UNENROLLED_STATUS, UNENROLLED_STATUS } from '../host/remote/test-burrow-link';
+import { ALARM_UPSELL_SHOWN_AT_KEY } from '../lib/alarm-upsell';
+import type { BurrowConsoleStatus } from '../host/remote/service-protocol';
+import type { ManagedVoicePort } from '../lib/platform/managed-voice-types';
 import { makeStubManagedVoicePort } from '../lib/platform/test-ports';
 import { networkPolicyResult, nothingPolicy } from '../remote/network-policy';
 
@@ -418,6 +421,193 @@ describe('Baseboard settings controls', () => {
 
     expect(getActiveThemeId()).toBe(KIMBIE_DARK);
     expect(document.querySelector('[aria-label="Theme: Kimbie Dark"]')).not.toBeNull();
+  });
+});
+
+describe('Baseboard alarm upsell', () => {
+  const openExternal = vi.fn();
+  const HOSTED_ENROLLED: BurrowConsoleStatus = { ...UNENROLLED_STATUS, enrolled: true, serving: true, burrowId: 'burrow-1', connection: 'connected' };
+
+  /** A desktop build whose Burrow service answers `status`; Hosted and not enrolled by default. */
+  async function renderBuild({ status = UNENROLLED_STATUS, voice = makeStubManagedVoicePort(false) as ManagedVoicePort | null } = {}) {
+    const platform = await import('../lib/platform');
+    vi.spyOn(platform, 'getPlatform').mockReturnValue({
+      alertPublishSettings: vi.fn(),
+      openExternal,
+      burrow: makeStubBurrowLink({ status }),
+      managedVoice: voice ?? undefined,
+    } as unknown as ReturnType<typeof platform.getPlatform>);
+    // Rendered, and the network policy answered.
+    await act(async () => root.render(<Baseboard items={[]} onReattach={() => {}} />));
+  }
+  /** Toggle, then let the line's decision land. */
+  const toggle = async (sink: 'speech' | 'push') => {
+    act(() => container.querySelector<HTMLButtonElement>(`[data-alarm-setting="${sink}"]`)!.click());
+    await act(async () => {});
+  };
+  const line = () => document.querySelector<HTMLElement>('[data-alarm-upsell]');
+  const lineButton = () => line()?.querySelector('button') ?? null;
+  const preview = () => document.querySelector('[role="status"]');
+
+  beforeEach(() => openExternal.mockReset());
+
+  it('adds one live line that keeps the keyboard with the terminal, and opens Settings', async () => {
+    await renderBuild();
+    const terminalInput = document.createElement('textarea');
+    container.appendChild(terminalInput);
+    terminalInput.focus();
+    await toggle('speech');
+
+    expect(line()?.dataset.alarmUpsell).toBe('voice-turn-on');
+    expect(line()?.closest('[inert]')).toBeNull();
+    expect(lineButton()?.textContent).toBe('Turn on Natural Voice in Settings → Notifications');
+    expect(document.activeElement).toBe(terminalInput);
+    const mouseDown = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+    lineButton()!.dispatchEvent(mouseDown);
+    expect(mouseDown.defaultPrevented).toBe(true);
+
+    act(() => lineButton()!.click());
+    expect(preview()).toBeNull();
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Settings');
+    expect(openExternal).not.toHaveBeenCalled();
+  });
+
+  it('shows once a day, across both buttons, and never on turning off', async () => {
+    await renderBuild();
+    await toggle('speech');
+    expect(line()).not.toBeNull();
+    await toggle('speech');
+    expect(preview()).not.toBeNull();
+    expect(line()).toBeNull();
+    await toggle('push');
+    expect(line()).toBeNull();
+
+    localStorage.removeItem(ALARM_UPSELL_SHOWN_AT_KEY);
+    await toggle('push');
+    expect(line()).toBeNull();
+  });
+
+  it('stays up longer with a line, past a plain preview’s life', async () => {
+    vi.useFakeTimers();
+    await renderBuild();
+    await toggle('speech');
+    act(() => vi.advanceTimersByTime(2500));
+    expect(preview()?.classList.contains('opacity-100')).toBe(true);
+    act(() => vi.advanceTimersByTime(3500));
+    expect(preview()?.classList.contains('opacity-0')).toBe(true);
+    act(() => vi.advanceTimersByTime(250));
+    expect(preview()).toBeNull();
+  });
+
+  it('brings back a fading preview when its line arrives', async () => {
+    vi.useFakeTimers();
+    const platform = await import('../lib/platform');
+    const link = makeStubBurrowLink({ status: UNENROLLED_STATUS });
+    const command = link.command;
+    // A status read slower than the plain preview's life, inside the cap.
+    link.command = (cmd, params) => cmd === 'status'
+      ? new Promise((resolve) => setTimeout(() => resolve(command(cmd, params)), 2100))
+      : command(cmd, params);
+    vi.spyOn(platform, 'getPlatform').mockReturnValue({
+      alertPublishSettings: vi.fn(),
+      burrow: link,
+    } as unknown as ReturnType<typeof platform.getPlatform>);
+    await act(async () => root.render(<Baseboard items={[]} onReattach={() => {}} />));
+    await toggle('push');
+    act(() => vi.advanceTimersByTime(2000));
+    expect(preview()?.classList.contains('opacity-0')).toBe(true);
+    await act(async () => vi.advanceTimersByTimeAsync(100));
+    expect(line()?.dataset.alarmUpsell).toBe('push-hosted-relay');
+    expect(preview()?.classList.contains('opacity-100')).toBe(true);
+  });
+
+  it('holds while the line is hovered or focused, then shows the plain while once let go', async () => {
+    vi.useFakeTimers();
+    await renderBuild();
+    await toggle('speech');
+    const hold = line()!.parentElement!;
+    act(() => hold.dispatchEvent(new PointerEvent('pointerover', { bubbles: true })));
+    act(() => vi.advanceTimersByTime(10_000));
+    expect(preview()?.classList.contains('opacity-100')).toBe(true);
+    act(() => hold.dispatchEvent(new PointerEvent('pointerout', { bubbles: true })));
+    act(() => vi.advanceTimersByTime(2000));
+    expect(preview()?.classList.contains('opacity-0')).toBe(true);
+    act(() => vi.advanceTimersByTime(250));
+    expect(preview()).toBeNull();
+
+    localStorage.removeItem(ALARM_UPSELL_SHOWN_AT_KEY);
+    await toggle('speech');
+    await toggle('speech');
+    act(() => lineButton()!.focus());
+    act(() => vi.advanceTimersByTime(10_000));
+    expect(preview()?.classList.contains('opacity-100')).toBe(true);
+    act(() => lineButton()!.blur());
+    act(() => vi.advanceTimersByTime(2250));
+    expect(preview()).toBeNull();
+  });
+
+  it('closes on Escape, heard before the terminal and left for it, or on a press off the line', async () => {
+    await renderBuild();
+    await toggle('speech');
+    const terminalInput = document.createElement('textarea');
+    container.appendChild(terminalInput);
+    // A terminal stops its own keys from bubbling.
+    const terminalHeard = vi.fn((event: Event) => event.stopPropagation());
+    terminalInput.addEventListener('keydown', terminalHeard);
+    act(() => terminalInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+    expect(preview()).toBeNull();
+    expect(terminalHeard).toHaveBeenCalledOnce();
+
+    localStorage.removeItem(ALARM_UPSELL_SHOWN_AT_KEY);
+    await toggle('speech');
+    await toggle('speech');
+    act(() => line()!.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })));
+    expect(preview()).not.toBeNull();
+    act(() => document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })));
+    expect(preview()).toBeNull();
+  });
+
+  it('neither shows nor spends an offer whose preview closed before it was decided', async () => {
+    await renderBuild();
+    act(() => container.querySelector<HTMLButtonElement>('[data-alarm-setting="push"]')!.click());
+    // Settings opened before the status read landed.
+    act(() => container.querySelector<HTMLButtonElement>('[data-open-settings]')!.click());
+    await act(async () => {});
+    expect(localStorage.getItem(ALARM_UPSELL_SHOWN_AT_KEY)).toBeNull();
+  });
+
+  it('links the plans with the offer’s ref where the account has none', async () => {
+    await renderBuild({ status: { ...HOSTED_ENROLLED, connection: 'not-entitled' } });
+    await toggle('push');
+    expect(line()?.dataset.alarmUpsell).toBe('push-plans');
+    // The inert device line above says why, without a link of its own.
+    expect(preview()?.querySelector('[inert]')?.textContent).toContain('Your account has no Hosted plan, so no push is sent.');
+    expect(preview()?.querySelector('[inert]')?.textContent).not.toContain('See Hosted plans');
+    act(() => lineButton()!.click());
+    expect(openExternal).toHaveBeenCalledWith('https://dormouse.sh/hosted/?ref=upsell-push#pricing');
+    expect(preview()).toBeNull();
+  });
+
+  it('never names Hosted in a build without Hosted mode', async () => {
+    await renderBuild({ status: SELF_HOST_UNENROLLED_STATUS, voice: null });
+    await toggle('speech');
+    expect(line()).toBeNull();
+    localStorage.removeItem(ALARM_UPSELL_SHOWN_AT_KEY);
+    await toggle('push');
+    expect(line()?.dataset.alarmUpsell).toBe('push-set-up-phone');
+    expect(preview()?.textContent).not.toContain('Hosted');
+    act(() => lineButton()!.click());
+    expect(openExternal).not.toHaveBeenCalled();
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+  });
+
+  it('offers nothing to a member', async () => {
+    await renderBuild({ status: HOSTED_ENROLLED, voice: makeStubManagedVoicePort(true) });
+    await toggle('speech');
+    await toggle('push');
+    await toggle('push');
+    expect(line()).toBeNull();
+    expect(localStorage.getItem(ALARM_UPSELL_SHOWN_AT_KEY)).toBeNull();
   });
 });
 
