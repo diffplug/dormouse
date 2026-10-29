@@ -487,6 +487,10 @@ test("the smoke runs its parts concurrently, retries each alone, and checks read
       );
     if (pathname === "/api/auth/get-session") return signedOutRead(init);
     if (pathname === "/api/providers") return Response.json([]);
+    if (pathname === "/api/billing")
+      return init?.headers?.["sec-fetch-site"] === "same-origin"
+        ? Response.json({ message: "Sign in first." }, { status: 401 })
+        : Response.json({ message: "Invalid origin." }, { status: 403 });
     if (init.method === "POST") return new Response(null, { status: 403 });
     if (pathname === "/login")
       return new Response("<html></html>", { headers: { "content-type": "text/html" } });

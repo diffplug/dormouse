@@ -25,12 +25,11 @@ import {
   CRON_SWEEP_CAP,
   SPEECH_SWEEP_CAP,
   TOKEN_SWEEP_CRON,
-  VOICE_DAILY_CAP,
   VOICE_TOKEN_IDLE_DAYS,
 } from "../voice";
 import { mintVoiceToken } from "../voice-token";
 import { ALREADY_APPROVED, RECENT_LOGIN_REQUIRED } from "../relay-account";
-import { TERMS_VERSION } from "../policy-constants";
+import { TERMS_VERSION, VOICE_DAILY_CAP } from "../policy-constants";
 import {
   API_ROUTES,
   NOT_ENTITLED_ERROR,
@@ -525,8 +524,17 @@ test("independent logins, current-browser logout, 24-hour expiry and private coo
   expect(await second.session()).toBeNull();
 });
 
+/** Today's (UTC) count of `event` under `label`, once its best-effort write landed. */
+const counted = (database: string, event: string, label = "") =>
+  queryDatabase<{ count: string }>(
+    database,
+    `SELECT count FROM dormouse_metrics_daily
+    WHERE day = (now() AT TIME ZONE 'UTC')::date AND event = $1 AND label = $2`,
+    [event, label],
+  ).then(([row]) => Number(row?.count ?? 0));
+
 test.for(providerIds)(
-  "%s: callback, replay and explicit linking",
+  "%s: callback, replay and explicit linking; counted as logins by method, never a link",
   async (id, { onTestFinished }) => {
     const f = await fixture();
     onTestFinished(f.close);
@@ -556,6 +564,14 @@ test.for(providerIds)(
     expect(
       (await owner.request(linked.path)).headers.get("location"),
     ).toContain("/login?error=");
+    // One account; its email login and its provider login, but not the link.
+    await vi.waitFor(async () =>
+      expect([
+        await counted(f.database.url, "account.created"),
+        await counted(f.database.url, "login", "email"),
+        await counted(f.database.url, "login", id),
+      ]).toEqual([1, 1, 1]),
+    );
   },
 );
 
@@ -1012,15 +1028,6 @@ test("Natural Voice: only the verified admin speaks; the account sees on or off 
   expect((await admin.speak(lapsed, hi)).status).toBe(401);
 });
 
-/** Today's (UTC) count of `event` under `label`, once its best-effort write landed. */
-const counted = (database: string, event: string, label = "") =>
-  queryDatabase<{ count: string }>(
-    database,
-    `SELECT count FROM dormouse_metrics_daily
-    WHERE day = (now() AT TIME ZONE 'UTC')::date AND event = $1 AND label = $2`,
-    [event, label],
-  ).then(([row]) => Number(row?.count ?? 0));
-
 test("metrics: speech by outcome and the call that spends the day, approvals by purpose, an enrollment; a failing write changes no answer", async ({
   onTestFinished,
 }) => {
@@ -1094,6 +1101,11 @@ test("the admin page: its read answers only the verified admin, from this origin
   await other.email("other@example.test");
   expect((await read(other)).status).toBe(404);
   await admin.email(ADMIN_EMAIL);
+  // Only the row inserted below, once both sign-ins' counts have landed.
+  await vi.waitFor(async () =>
+    expect([await counted(f.database.url, "account.created"), await counted(f.database.url, "login", "email")]).toEqual([2, 2]),
+  );
+  await queryDatabase(f.database.url, "DELETE FROM dormouse_metrics_daily");
   await queryDatabase(
     f.database.url,
     `INSERT INTO dormouse_metrics_daily (day, event, label, count)

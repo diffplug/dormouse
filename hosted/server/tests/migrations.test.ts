@@ -39,6 +39,20 @@ const PINNED: Record<string, string> = {
     "45b3df1530402622edeb12e12e1572698840ecc8ea6b9cfc585f3a9e28b4f230",
   "013_metrics.sql":
     "ffb460491d0d9d3cf00b33067b6cbe8dae04ca68fc663cb005aabf15619a08eb",
+  "014_billing_disputes.sql":
+    "ddf7454ce96f389f153d76d4001ca559fb5bd8969e6fda46e68dcd10e901a502",
+  "015_founders.sql":
+    "1610ccafe5450a7960a00cf7e393c6d99c22b20170ef230c76544632e6806eeb",
+  "016_checkout_consents.sql":
+    "0d0fcf0a44651ca819ee279d046ef55a622fa6398cf99e3b3d69b9a045ffe74c",
+  "017_withdrawals_and_closures.sql":
+    "136eb6ca31280e7f3852a0a42226235b0a639537b9ce64752efca66c091580c4",
+  "018_billing_notices.sql":
+    "20fe04c88694fd1cd00a83746ec8486e9bea7b0cb35aaabfd9c5a3fc4d6555c0",
+  "019_billing_records_outlive_closure.sql":
+    "0f8569957ef76ba35ce81460d68fdae915674dced385058b490cd099d03b8242",
+  "020_withdrawal_notices.sql":
+    "9a040646fb1d16942d8a6100c2509363867ad2381e00dc094a96dca6aea2f7b8",
 };
 
 const directory = new URL("../dormouse-migrations/", import.meta.url);
@@ -80,4 +94,40 @@ test("010 deletes the sessions that name no passkey, and every later one must na
   await migrate(context.database.url, await readMigrations([betterAuthMigrations, before]));
   expect(await sql(`SELECT "tokenHash" FROM dormouse_relay_sessions`)).toEqual([{ tokenHash: "named" }]);
   await expect(session("later", null)).rejects.toThrow(/credentialId/);
+});
+
+test("020 records each withdrawal's acknowledgement as its withdrawal notice, sent when it was, one per withdrawal", async ({
+  onTestFinished,
+}) => {
+  // The Dormouse migrations through 019, then 020 over the withdrawals they recorded.
+  const before = mkdtempSync(join(tmpdir(), "dormouse-migrations-"));
+  onTestFinished(() => rmSync(before, { recursive: true, force: true }));
+  const source = fileURLToPath(directory);
+  for (const name of Object.keys(PINNED).filter((name) => name < "020")) copyFileSync(join(source, name), join(before, name));
+  const context = await createTestContext({ migrations: [betterAuthMigrations, before] });
+  onTestFinished(context.close);
+  const sql = (text: string, values?: unknown[]) => queryDatabase(context.database.url, text, values);
+  const submittedAt = new Date("2026-11-05T12:00:00Z");
+  const acknowledgedAt = new Date("2026-11-05T12:00:05Z");
+  for (const [id, acknowledged] of [["acknowledged", acknowledgedAt], ["unacknowledged", null]] as const)
+    await sql(
+      `INSERT INTO dormouse_withdrawals (id, "userId", "subscriptionId", plan, "priceId", "contractStartedAt", "submittedAt", "acknowledgedAt")
+      VALUES ($1, 'u', $1, 'yearly', 'price_y', $2, $2, $3)`,
+      [id, submittedAt, acknowledged],
+    );
+
+  copyFileSync(join(source, "020_withdrawal_notices.sql"), join(before, "020_withdrawal_notices.sql"));
+  await migrate(context.database.url, await readMigrations([betterAuthMigrations, before]));
+  expect(
+    await sql(`SELECT "withdrawalId", "userId", kind, "createdAt", "sentAt", email FROM dormouse_billing_notices ORDER BY "withdrawalId"`),
+  ).toEqual([
+    { withdrawalId: "acknowledged", userId: "u", kind: "withdrawal", createdAt: submittedAt, sentAt: acknowledgedAt, email: "" },
+    { withdrawalId: "unacknowledged", userId: "u", kind: "withdrawal", createdAt: submittedAt, sentAt: null, email: null },
+  ]);
+  expect(await sql(`SELECT column_name FROM information_schema.columns WHERE column_name = 'acknowledgedAt'`)).toEqual([]);
+  await expect(
+    sql(
+      `INSERT INTO dormouse_billing_notices (id, "userId", kind, "withdrawalId", "createdAt") VALUES ('again', 'u', 'withdrawal', 'acknowledged', now())`,
+    ),
+  ).rejects.toThrow(/dormouse_billing_notices_withdrawal/);
 });

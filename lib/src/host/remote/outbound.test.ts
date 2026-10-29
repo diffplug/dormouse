@@ -14,7 +14,7 @@
  *
  * Not driven here: the Cloudflare STUN row and the phone rows, which need a
  * phone's handshake through the relay (`one-time-runtime.test.ts`,
- * `direct-peering.test.ts`); and the updater, which lives in the Tauri webview
+ * `native-direct-peer.test.ts`); and the updater, which lives in the Tauri webview
  * (`standalone/src/updater.test.ts`).
  */
 

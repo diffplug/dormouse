@@ -16,6 +16,11 @@ const recent: MetricRow[] = Array.from({ length: 30 }, (_, i) => 29 - i).flatMap
   const grown = 30 - back;
   if (back === 12) return [];
   return [
+    { day: day(back), event: "account.created", label: "", count: 1 + (grown % 5) },
+    { day: day(back), event: "login", label: "email", count: grown * 2 },
+    { day: day(back), event: "login", label: "github", count: grown * 3 },
+    ...(back % 2 === 0 ? [{ day: day(back), event: "login" as const, label: "google", count: grown }] : []),
+    ...(back === 3 ? [{ day: day(back), event: "login" as const, label: "apple", count: 1 }] : []),
     { day: day(back), event: "enroll.approved", label: "remote", count: 1 + (grown % 4) },
     ...(back % 3 === 0 ? [{ day: day(back), event: "enroll.approved" as const, label: "voice", count: 1 }] : []),
     { day: day(back), event: "burrow.enrolled", label: "", count: 1 + (grown % 3) },
@@ -25,6 +30,10 @@ const recent: MetricRow[] = Array.from({ length: 30 }, (_, i) => 29 - i).flatMap
     ...(back < 6 ? [{ day: day(back), event: "voice.fallback-cap" as const, label: "", count: 1 }] : []),
     { day: day(back), event: "push.sent", label: "", count: grown * 31 + (back % 7 < 2 ? 0 : 40) },
     { day: day(back), event: "pocket.signin", label: "", count: Math.ceil(grown / 2) },
+    ...(back % 2 === 0 ? [{ day: day(back), event: "checkout.started" as const, label: "founding:settings-voice", count: 2 }] : []),
+    ...(back % 5 === 0 ? [{ day: day(back), event: "checkout.started" as const, label: "yearly:none", count: 1 }] : []),
+    ...(back % 2 === 0 ? [{ day: day(back), event: "checkout.completed" as const, label: "founding:settings-voice", count: 1 }] : []),
+    ...(back === 4 ? [{ day: day(back), event: "subscription.refunded" as const, label: "founding", count: 1 }] : []),
   ];
 });
 const totals = Object.values(

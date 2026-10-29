@@ -204,7 +204,26 @@ rm vapid.json
 
 The public half is public (`GET /api/push/config` serves it); the private half signs every push. Both are required for a production deploy: preflight refuses a relay Worker missing either. Cloudflare exposes a secret's name, never its value, so preflight cannot tell whether the two match; the relay answers push off for a pair that does not, and the release's live verification fails unless `/api/push/config` answers the key. Rotating the pair makes every phone's subscription stale until Pocket re-registers it, so rotate only on compromise. Previews derive their own pair and never need this one.
 
+Billing stays closed, and its Cron Trigger idle, until the account Worker holds all five Stripe bindings: the secrets `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET`, and the vars `STRIPE_PRICE_MONTHLY`, `STRIPE_PRICE_YEARLY`, and `STRIPE_PRICES_FOUNDING` in `wrangler.jsonc` (`docs/specs/hosted.md` -> "Billing"). Set none of them before checkout opens. `db:migrate` grants `dormouse_app` the `pgstencil_billing` schema itself (`hosted/server/runtime-roles.sql`), since that schema is the package's and no hand grant can precede it. Before opening checkout, turn on Stripe's customer emails for successful payments: the `/billing` confirmation tells a buyer Stripe sends each receipt. Turn on cancellation in the customer portal too: the confirmation sends a member to Manage billing to cancel. The account Worker emails withdrawal acknowledgements and subscription notices (renewal and annual reminders, price changes, dispute suspensions and restorations) through the same Postmark server as sign-in codes, from `support@dormouse.sh`, so that sender must be verified there.
+
 Configure the sender and enable each ready provider in `OAUTH_PROVIDERS` in `wrangler.jsonc`, comma separated, reviewed in a PR. The checked-in file enables GitHub, Google, Microsoft, and Apple; `docs/specs/hosted.md` -> "Identity and login" owns what a name and a credential pair do and do not enable. Facebook is outside this milestone.
+
+## Change a price
+
+A list price change for existing monthly or yearly subscribers is one row in `dormouse_price_changes`; the account cron sends each subscriber's notice and moves them to the new Price from their first renewal that notice reached in time (`docs/specs/hosted.md` -> "Billing notices"). Founding Prices never change, and the cron refuses a row naming one.
+
+1. In Stripe, create the new recurring Price on the same product: USD, the same interval, a whole-dollar amount.
+2. Insert the row as the migration role. `effectiveAt` is the first moment a renewal may charge the new price. Notices go out 21 days before each subscriber's renewal, or at once for one renewing sooner, and a subscriber whose renewal is within 8 days moves at the one after:
+
+   ```sql
+   INSERT INTO dormouse_price_changes (id, plan, "fromPriceId", "toPriceId", "fromUsd", "toUsd", "effectiveAt")
+   VALUES ('monthly-2027', 'monthly', 'price_old', 'price_new', 10, 12, '2027-03-01T00:00:00Z');
+   ```
+
+   From then on, both Prices grant the plan. Each run checks the row against Stripe and fails, sending nothing, until both Prices match their amounts and interval; watch the account Worker's Cron Events for that.
+3. On `effectiveAt`, in one reviewed release, point `STRIPE_PRICE_MONTHLY` (or `STRIPE_PRICE_YEARLY`) at the new Price and change the published price in `website/src/lib/hosted-pricing.ts`, so new checkouts sell it. Keep the row afterwards: it is what still recognizes the old Price for anyone not yet moved.
+
+Never edit a row once its notices have gone out; schedule a further change as a new row from the new Price.
 
 ## Release
 

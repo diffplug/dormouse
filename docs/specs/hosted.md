@@ -9,7 +9,7 @@
 
 | Worker | Origin | Serves | Holds |
 |---|---|---|---|
-| `dormouse-hosted` | `https://hosted.dormouse.sh` | the account frontend, `/api/auth/*`, `/api/providers`, Natural Voice on or off, the Relay's account routes ("Burrow enrollment") | the login cookie, auth secrets, Hyperdrive, the approval rate limit, a binding to the relay's `RelayRoom` |
+| `dormouse-hosted` | `https://hosted.dormouse.sh` | the account frontend, `/api/auth/*`, `/api/providers`, Natural Voice on or off, the Relay's account routes ("Burrow enrollment"), billing, Stripe's webhook, and the founders row ("Billing") | the login cookie, auth secrets, Hyperdrive, the approval rate limit, a binding to the relay's `RelayRoom`, the Stripe bindings |
 | `dormouse-relay` | `https://relay.dormouse.sh` | the Hosted Relay, its sockets, and Pocket ("Relay", "Relay sockets"), the one-time rendezvous and `/connect/` (`docs/specs/one-time.md` -> "Hosted rendezvous") | Hyperdrive, `OneTimeRoom`, `RelayRoom`, the one-time, sign-in, setup, and enrollment rate limits, `ACCOUNT_ORIGIN`, `RELAY_ENROLL_SECRET`, the VAPID pair |
 | `dormouse-voice` | `https://voice.dormouse.sh` | speak, a token's own delete, and the history sweep ("Managed voice") | `ELEVENLABS_API_KEY`, Hyperdrive |
 
@@ -19,9 +19,9 @@ Every Worker answers `/api/health` and `/api/ready`, 404s anything else under it
 
 **Must run committed Better Auth migrations before deploying code that needs them, never during a Worker request.** Postgres is reached through an uncached Hyperdrive binding, one per Worker.
 
-**Must grant `dormouse_relay` and `dormouse_voice` only what `hosted/server/runtime-roles.sql` lists, never default privileges**, so a new table needs a grant there; each reaches only its Worker's tables and the entitlement's user columns, the relay inserts approved voice tokens ("Managed voice"), and both add to the daily counts ("Metrics"). **Must bind each production Worker to its own Hyperdrive connecting as its role**: account `dormouse_app`, relay `dormouse_relay`, voice `dormouse_voice` (`PRODUCTION` in `hosted/scripts/production.mjs`).
+**Must grant `dormouse_relay` and `dormouse_voice` only what `hosted/server/runtime-roles.sql` lists, never default privileges**, so a new table needs a grant there; each reaches only its Worker's tables and the entitlement's user and subscription columns, the relay inserts approved voice tokens ("Managed voice"), and both add to the daily counts ("Metrics"). **Must bind each production Worker to its own Hyperdrive connecting as its role**: account `dormouse_app`, relay `dormouse_relay`, voice `dormouse_voice` (`PRODUCTION` in `hosted/scripts/production.mjs`).
 
-**Must install released core/auth packages from npm and commit their lockfile integrity hashes.** The installed packages' `dist/provenance.json` must name the same clean pgstencil commit; no runtime import depends on a sibling checkout. The auth migrations remain owned by the package; Dormouse's own tables migrate from `hosted/server/dormouse-migrations/`. **Never edit a merged migration**: a migrated database never reruns one, so append the next number (pinned by `hosted/server/tests/migrations.test.ts`).
+**Must install released core, auth, and stripe packages from npm and commit their lockfile integrity hashes.** The installed packages' `dist/provenance.json` must name the same clean pgstencil commit; no runtime import depends on a sibling checkout. The auth and billing migrations remain owned by their packages; Dormouse's own tables migrate from `hosted/server/dormouse-migrations/`. **Never edit a merged migration**: a migrated database never reruns one, so append the next number (pinned by `hosted/server/tests/migrations.test.ts`).
 
 **Must declare every required peer dependency of the installed packages in `hosted/package.json`'s `dependencies`**, so they share Hosted's copy and Renovate updates them. **Never put an optional peer (pgstencil's tooling) in `dependencies`.**
 
@@ -49,11 +49,11 @@ Source of truth: `hosted/server/providers.js`; `authPolicy` / `providerBindings`
 
 **Must link the account footer to the public Hosted privacy policy and terms.**
 
-**Must show configured sign-in methods only.** Login tokens never enter browser storage, and only public identity fields render, without provider images or external assets.
+**Must show configured sign-in methods only.** Login tokens never enter browser storage, and only public identity fields render, without provider images or external assets. **`/checkout` keeps only its plan and ref in `sessionStorage`, for ten minutes**, so they survive a provider's sign-in, which returns to `/account`; `/billing` confirms the `?checkout=` Stripe returns with once and strips it.
 
 **Must be built from the dormouse.sh reference pages' own design** (`lib/src/site/`), never a copy of it: their theme and picker, offered without the theme store, the site's Ubuntu faces served from Hosted's own origin, and the site header. It loads no marketing scripts or analytics.
 
-Source of truth: `App` in `hosted/src/App.tsx`; `useDocsThemedBody` in `lib/src/site/docs-paint.ts`.
+Source of truth: `App` in `hosted/src/App.tsx`; `takeCheckout` in `hosted/src/billing.ts`; `useDocsThemedBody` in `lib/src/site/docs-paint.ts`.
 
 ## Terms acceptance
 
@@ -67,9 +67,80 @@ Source of truth: `termsRoutes` in `hosted/server/terms.ts`; `TERMS_VERSION` in `
 
 ## Entitlement
 
-**Must read the entitlement (`docs/specs/pricing.md` -> "Checkout and entitlement") on the server, per request, through one SQL predicate over the account's `"user"` row**, so a bearer and its owner's entitlement resolve in one query. Until billing ships it admits only `ADMIN_EMAIL` while that is the account's verified email, one of the exceptions to "never email" ("Identity and login"); nothing else may key on an address.
+**Must read the entitlement (`docs/specs/pricing.md` -> "Checkout and entitlement") on the server, per request, through one SQL predicate over the account's `"user"` row**, so a bearer and its owner's entitlement resolve in one query.
+
+- **Must entitle an account only while it holds exactly one current subscription, `active` before its period end or `trialing` before its trial end** by the database's clock, as `@pgstencil/stripe`'s `status()` grants access; no other status grants anything. **Never entitle it while a payment dispute is open** ("Billing").
+- **Must entitle `ADMIN_EMAIL` as a standing comp** while it is the account's verified email, one of the exceptions to "never email" ("Identity and login"); nothing else may key on an address.
 
 Source of truth: `entitledSql` and `entitled` in `hosted/server/entitlement.ts`; `cookieEntitled` in `hosted/server/account-gate.ts`.
+
+## Billing
+
+The account Worker bills through `@pgstencil/stripe` (`docs/specs/pricing.md` -> "Checkout and entitlement").
+
+| Route | Credential | Success |
+|---|---|---|
+| `GET /api/billing` | login cookie | 200 `{ plan, price, active, until, renews, entitled, suspended, founding, founder, consent, withdrawal, withdrawn }`; `plan` names a subscription Stripe still holds; closed, 200 `{ closed: true }` |
+| `POST /api/billing/checkout` | login cookie, exact `Origin`, JSON `{ plan, ref?, terms, autoRenew, price }` | 200 `{ url }` of Stripe Checkout |
+| `POST /api/billing/confirm` | login cookie, exact `Origin`, JSON `{ checkout }` | 200, the `GET` body |
+| `POST /api/billing/portal` | login cookie, exact `Origin` | 200 `{ url }` of the customer portal |
+| `PUT /api/billing/founder` | login cookie, exact `Origin`, JSON `{ shown, name? }` | 200, the `GET` body; leaving, 204 |
+| `POST /api/billing/withdraw` | login cookie, exact `Origin`, JSON `{ subscription }` | 200, the `GET` body |
+| `POST /api/billing/webhook` | `Stripe-Signature` over the raw body | 200 once `webhook()` committed |
+| `GET /api/hosted/cohorts` | none | 200 `{ cohort?, seatsLeft?, founders: { total, shown } }` |
+| `GET /api/hosted/founders/<token>` | none | 200, a shown founder's picture |
+
+Errors are JSON `{ message }`. The cookie routes need no entitlement, answer 401 without a login, and cap a body at 4 KiB.
+
+- **Must keep billing closed without all five bindings**: the secrets `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET`, and the vars `STRIPE_PRICE_MONTHLY`, `STRIPE_PRICE_YEARLY`, and `STRIPE_PRICES_FOUNDING` (cohort order); closed, every cookie route past the login gate but `GET` and leaving the founders row answers 409 `CHECKOUT_CLOSED`, the webhook and the cohort read 503 `CHECKOUT_CLOSED`, and the resync reads nothing. **Must refuse a founding list whose length differs from `FOUNDING_LADDER`**, or a malformed or repeated Price. Live mode follows the key's prefix.
+- **Never offer a trial or Managed Payments; must enable Stripe Tax on every Checkout.**
+- **Never take a Price, customer, owner, quantity, or return URL from a request**: checkout takes a plan name and a `ref`, normalized as `checkoutRef` does; the owner is the login, its email only once verified (else Checkout asks), and Stripe returns to `/billing`. A checkout open for another plan is expired first; a held subscription refuses another with 409.
+- **Must start a checkout only after agreement to `TERMS_VERSION` and to automatic renewal at the `price` the page showed, recorded in `dormouse_checkout_consents` before its URL is answered**; another version answers 409 `TERMS_CHANGED`, and a checkout whose Price `priceCatalog` does not price at `price` is expired and answers 409 `PRICE_CHANGED`. `GET` shows the latest while a subscription is held.
+- **Must add or rename a founders-row name (`dormouse_founders`) only while `subscribedSql` holds on the founding Prices** (else 409) and `isFounderName` accepts it; leaving always works, a rename keeps `shownSince`. Checks: `docs/specs/security-hosted.md` -> "Account boundary".
+- **Must verify the webhook's signature over the raw body before any write** and answer 2xx only once `webhook()` has committed, any other failure 503, which Stripe retries.
+- **Must end at once the subscription a fully refunded charge or a lost dispute's charge paid for**, found through its invoice, while it is the owner's current one: commented `ENDED_FOR_REFUND`, after the commit and on every delivery until ended. A partial refund ends nothing, nor does a charge for an earlier subscription or none, which is logged for the operator.
+- **Must offer the online withdrawal only from the held subscription while `withdrawalOffer` holds**, once per subscription; else withdraw answers 409 `WITHDRAWAL_CLOSED`. A withdrawal (`dormouse_withdrawals`) is recorded with its acknowledgement, a `withdrawal` notice, then settled: its subscription ended at once (`ENDED_FOR_WITHDRAWAL`), every paid invoice payment refunded in full, stamped once done and safe to repeat; the cron retries a failed settlement for 30 days. Checks: `docs/specs/security-hosted.md` -> "Account boundary".
+- **Must suspend, never end, on an open dispute**, by its current status read from Stripe, not the event (`dormouse_billing_disputes`, which outlives the account); closing in the account's favor restores it.
+- **Must offer founding at the last ladder step bought at while its purchases net of those ended within `REFUND_DAYS` are short of `FOUNDING_COHORT_SIZE`, else the next**, counting seats left the same way; an earlier step never reopens. Past the last step, founding checkout answers 409.
+- **Must answer `/api/hosted/*` without resolving a login**, each answer reused for `COHORT_CACHE_MS` per isolate; `total` counts founding purchases net of refunds. The site's Worker forwards it from `dormouse.sh` to this origin, so the 421 gate needs no exception. What it answers and fetches: `docs/specs/security-hosted.md` -> "Account boundary".
+- **Must resync, every 10 minutes from the account's Cron Trigger, a bounded random batch of owners whose `active` or `trialing` row no longer grants access**, so a missed renewal webhook lapses a member only until a run picks them, finish a bounded batch of unsettled withdrawals and closure refunds, reread the least recently checked open disputes from Stripe as their webhook would, and run the notices ("Billing notices"); a failure fails the invocation after every one was tried.
+- **Must grant the account's role the `pgstencil_billing` schema from `runtime-roles.sql`**, additively: the package's migration creates it.
+
+Source of truth: `billingSetup`, `withBilling`, and `resyncBilling` in `hosted/server/billing.ts`; `billingRoutes` and `disputeAction` in `hosted/server/billing-routes.ts`; `withdrawalOffer` and `recordWithdrawal` in `hosted/server/withdrawal.ts`; `cohortRoutes` in `hosted/server/cohort-routes.ts`; `forwardHosted` in `website/public/_worker.js`. Pinned by `hosted/server/tests/billing.test.ts` and `hosted/server/tests/billing-routes.test.ts`, on StripeDev.
+
+## Billing notices
+
+Each notice is a `dormouse_billing_notices` row, recorded before it is sent and stamped once Postmark accepts it, one per kind and renewal, dispute, or withdrawal.
+
+| Kind | Due | Still sent while |
+|---|---|---|
+| `renewal` (yearly and founding, doubling as their annual reminder) | 30 days before the renewal | the subscription is `active` and renews then |
+| `annual` (monthly) | 30 days before each renewal ending a year since its start | the same |
+| `price_change` | 21 days before the first renewal on or after the change's `effectiveAt` | the same, on the old Price, over 8 days ahead |
+| `dispute_suspended` | a dispute opens a suspension | the dispute is open, for 30 days |
+| `dispute_restored` | it closes in the account's favor, no other open | 30 days |
+| `withdrawal` (its acknowledgement) | a withdrawal is recorded, in the same statement | 30 days |
+
+- **Must send every notice to the Stripe customer's email**, never the sign-in email, so a provider-only account gets them.
+- **Must record a dispute's notice in the webhook's transaction** and send it after the commit; a failed send never fails the event.
+- **A price change is an operator's `dormouse_price_changes` row** (`hosted/README.md`); both its Prices grant the plan once inserted. **Never act on one naming a founding Price or another plan's**, or whose Prices Stripe does not hold at its amounts, in USD, at the plan's interval.
+- **Must move a subscription to the new Price, without proration, only after its notice was sent at least 7 days before the renewal it names**, while Stripe still renews it then on the old Price; a later notice waits for the next renewal. Checks: `docs/specs/security-hosted.md` -> "Account boundary".
+
+Source of truth: `runNotices` and `sendNotices` in `hosted/server/notices.ts`; `recordDispute` in `hosted/server/billing-routes.ts`; `hosted/server/dormouse-migrations/018_billing_notices.sql` and `hosted/server/dormouse-migrations/020_withdrawal_notices.sql`.
+
+## Account closure
+
+| Route | Credential | Success |
+|---|---|---|
+| `POST /api/account/close` | login cookie, exact `Origin`, JSON `{ close: true }` | 204, the account deleted |
+
+Errors are JSON `{ message }`; it needs no entitlement and works with billing closed. What the page says first: `docs/specs/pricing.md` -> "Checkout and entitlement".
+
+- **Must refuse a login older than `LOGIN_FRESH_AGE_MS`** with 403 `CLOSE_RECENT_LOGIN`, and, billing closed, an account with a current subscription row with 409 `CLOSE_UNAVAILABLE`.
+- **Must expire an open checkout, then cancel every current subscription in Stripe (`ENDED_FOR_CLOSURE`), before one statement records the closure (`dormouse_account_closures`) and deletes the `"user"` row**; rows without a foreign key stay. Its Burrows' sockets then close as a removal's do ("Relay sockets"). Checks: `docs/specs/security-hosted.md` -> "Account boundary".
+- **Must then refund what closing owes** (`docs/specs/pricing.md` -> "Checkout and entitlement"): a first payment while `purchaseStanding` counts the end a refund, a yearly or founding renewal paid within `REFUND_DAYS` of it. The closure is stamped settled once done; the cron retries for 30 days.
+
+Source of truth: `closureRoutes` in `hosted/server/closure.ts`; `CloseAccount` in `hosted/src/Closure.tsx`.
 
 ## Managed voice
 
@@ -245,32 +316,38 @@ Source of truth: `relayApiRoutes` in `hosted/server/relay-api.ts`; `relayAccount
 
 ## Metrics
 
-Hosted counts what its Workers serve in aggregate daily rows, server-side; no page or desktop sends any.
+Hosted's Workers count what they serve in aggregate daily rows; no page or desktop sends any.
 
 | Event | Labels | Counted when |
 |---|---|---|
+| `account.created` | none | a user row commits |
+| `login` | `email`, `providerIds` | a sign-in's session commits, by method; never a link |
 | `enroll.approved` | `remote`, `voice` | an approval succeeds, under its purpose |
 | `burrow.enrolled` | none | a remote poll enrolls a Burrow |
 | `voice.speak` | `ok`, `capped`, `error` | speak answers 200, 429, or 502 |
 | `voice.fallback-cap` | none | a speak spends its owner's last call of the UTC day |
-| `push.sent` | none | a send delivers, once per delivery |
+| `push.sent` | none | each delivery a send makes |
 | `pocket.signin` | none | a passkey sign-in mints a session |
+| `checkout.started` | `plan:ref` | checkout answers a URL |
+| `checkout.completed` | `plan:ref` | the webhook processes a completion (`completedCheckout`) |
+| `subscription.canceled` | plan | the webhook processes a purchase's end |
+| `subscription.refunded` | plan | that end was `ENDED_FOR_REFUND` or within `REFUND_DAYS` |
 
-- **Never count a label off its event's list** (`METRIC_LABELS`): the write throws instead. What a row may hold, and who reads it: `docs/specs/security-hosted.md` -> "Account boundary".
-- **Never fail or delay the request a metric counts**: the write runs after the response, through `waitUntil`, and its failure is only logged.
-- Rows are kept forever, since none describes anyone. The account Worker's `/admin/metrics` shows the last 30 UTC days and all-time totals, "today" by the database's clock, which dates every row.
+- **Never count a label off its event's list** (`METRIC_LABELS`): the write throws. Row contents and readers: `docs/specs/security-hosted.md` -> "Account boundary".
+- **Never fail or delay the request a metric counts**: the write is unawaited, kept alive by `waitUntil`, and only logs failure. The webhook's counts commit in its transaction under a savepoint of their own, so a redelivery never counts twice and a failed count rolls back alone.
+- Rows are kept forever (rationale). The database's UTC clock dates every row and the account Worker's `/admin/metrics` "today".
 
-Source of truth: `hosted/server/metric-labels.ts`; `recordMetric` in `hosted/server/metrics.ts`; `hosted/server/dormouse-migrations/013_metrics.sql`; `AdminMetrics` in `hosted/src/AdminMetrics.tsx`.
+Source of truth: `hosted/server/metric-labels.ts`; `recordMetric` and `authMetricHooks` in `hosted/server/metrics.ts`; `hosted/server/dormouse-migrations/013_metrics.sql`; `AdminMetrics` in `hosted/src/AdminMetrics.tsx`.
 
 ## Development and release
 
-**Must run local development with `dor tool hosted` inside Dormouse.** Its loopback `http://localhost:<port>` origin serves Vite and Node auth on a disposable development database, with the account's Natural Voice and Relay routes but never the voice origin's. Host, Origin, and Fetch Metadata checks guard the local captured-email inbox; no production entry imports an inbox or test-control handler. **It also runs the relay Worker on that database, with this origin as `ACCOUNT_ORIGIN`** (`docs/specs/one-time.md` -> "Dev loop").
+**Must run local development with `dor tool hosted` inside Dormouse.** Its loopback `http://localhost:<port>` origin serves Vite and Node auth on a disposable development database, with the Worker's account routes (`accountRoutes`) and cron, but never the voice origin's; billing runs on StripeDev, which takes no card. Host, Origin, and Fetch Metadata checks guard the local captured-email inbox; no production entry imports an inbox or test-control handler. **It also runs the relay Worker on that database, with this origin as `ACCOUNT_ORIGIN`** (`docs/specs/one-time.md` -> "Dev loop").
 
 **Must verify the three production Worker bundles and run the consumer's integration suite before release.** Only test entries inject deterministic Better Auth. Simulated callbacks do not certify provider registrations; production acceptance requires real browser login with each enabled provider and email delivery.
 
 **Must keep production, test, and preview databases and credentials separate.** The development and preview entries are email-only. Production configuration and operator steps live in `hosted/README.md`.
 
-Source of truth: `allowedDevRequest` in `hosted/server/dev-host-guard.ts`; `hosted/server/dev.ts`; `build` in `hosted/package.json`. Pinned by `hosted/server/tests/boundary.test.ts`.
+Source of truth: `allowedDevRequest` in `hosted/server/dev-host-guard.ts`; `hosted/server/dev.ts`; `accountRoutes` and `accountCron` in `hosted/server/account-routes.ts`; `build` in `hosted/package.json`. Pinned by `hosted/server/tests/boundary.test.ts`.
 
 ## PR previews
 
@@ -302,5 +379,5 @@ Source of truth: `.github/workflows/hosted-production.yml`; `hosted/scripts/prod
 
 1. Deploy the configured providers and pass real production acceptance. pgstencil includes the Microsoft fix; personal and work/school callbacks need acceptance.
 2. Add per-browser login listing/revocation, sign-out-everywhere, and account recovery before broad paid use. Revisit the fixed 24-hour login lifetime for daily voice use.
-3. Managed voice for every member: the subscription as the entitlement in place of `ADMIN_EMAIL` (`docs/specs/pricing.md` -> "Checkout and entitlement"), per-account quotas, usage accounting, spending bounds beyond the fixed daily cap, and explicit text/redaction disclosure.
+3. Managed voice for every member: per-account quotas, usage accounting, spending bounds beyond the fixed daily cap, and explicit text/redaction disclosure.
 4. Open sign-in: delete `hosted/server/prelaunch.ts` and the frontend's pre-launch notice.

@@ -6,8 +6,8 @@ import { isManagedVoiceId, isManagedVoiceToken, parseBearer } from "remote-lib-c
 import { accountQuery, cookieLogin, type AccountHost } from "./account-gate";
 import { entitledSql } from "./entitlement";
 import { recordMetric } from "./metrics";
+import { VOICE_DAILY_CAP } from "./policy-constants";
 
-export const VOICE_DAILY_CAP = 500;
 /** A token unused this long is refused, as if it never existed. */
 export const VOICE_TOKEN_IDLE_DAYS = 365;
 /** Whether the token aliased `t` is live: used, or minted, within the idle bound. */

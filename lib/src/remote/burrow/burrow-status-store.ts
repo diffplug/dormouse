@@ -235,6 +235,23 @@ function refreshAfterMutation(): Promise<void> {
   return refreshBurrowStatus();
 }
 
+/**
+ * The status now, for a caller that holds no subscription and must not start
+ * the poll: the one a subscriber's poll holds, else one read, which publishes
+ * nothing. `null` without a service, or on any failure.
+ */
+export async function readBurrowStatusOnce(): Promise<BurrowConsoleStatus | null> {
+  if (state.kind === 'ready') return state.status;
+  const active = burrowLink();
+  if (!active) return null;
+  try {
+    const status = (await active.command('status')) as BurrowConsoleStatus | null;
+    return status ? { ...status, hostedEnrollment: parseHostedEnrollmentState(status.hostedEnrollment) } : null;
+  } catch {
+    return null;
+  }
+}
+
 async function readBurrowStatus(): Promise<void> {
   const active = burrowLink();
   if (!active) {

@@ -8,7 +8,10 @@ import {
 import {
   acceptTerms,
   approveEnrollment,
+  closeAccount as closeAccountRequest,
+  confirmCheckout,
   getAccounts,
+  getBilling,
   getApproval,
   getComputers,
   getHostedVoice,
@@ -16,11 +19,17 @@ import {
   getProviders,
   getSession,
   NoPlanError,
+  openPortal,
   post,
+  PriceChangedError,
   removeComputer,
   removePasskey,
+  joinFounders,
+  leaveFounders,
   social,
+  startCheckout,
   turnOffHostedVoice,
+  withdraw as withdrawRequest,
   type Account,
   type Computer,
   type HostedVoice,
@@ -32,9 +41,12 @@ import {
   ENROLLMENT_POLL_INTERVAL_S,
   LOGIN_FRESH_AGE_MS,
   TERMS_VERSION,
+  type Plan,
 } from "../server/policy-constants";
 import { useDocsThemedBody } from "dormouse-lib/site/docs-paint";
-import { HostedPage, SUBSCRIBE_URL } from "./HostedPage";
+import { HostedPage, SUBSCRIBE_URL, type View } from "./HostedPage";
+import type { BillingSummary } from "../server/billing-summary";
+import { forgetCheckout, type CheckoutIntent } from "./billing";
 import { takeEnrollment, type Enrollment } from "./enrollment";
 import {
   afterRead,
@@ -85,11 +97,24 @@ const SUBSCRIBE_REDIRECT_MS = 4000;
 const SIGN_IN_PARAMS = new URLSearchParams(location.search);
 const SIGN_IN_OPEN = SIGN_IN_PARAMS.has("signin") || SIGN_IN_PARAMS.has("error");
 
+/** The address bar's path for each page past enrollment. */
+const VIEW_PATHS: Record<View, string> = { account: "/account", checkout: "/checkout", billing: "/billing" };
+
 // How long the page re-reads for a Pending before saying it has not shown;
 // after that the focus refresh picks it up.
 const PENDING_TIMEOUT_MS = 60_000;
 
-export function App({ enrollment }: { enrollment: Enrollment | null }) {
+export function App({
+  enrollment,
+  checkout = null,
+  confirming = null,
+}: {
+  enrollment: Enrollment | null;
+  /** The checkout this load continues (`takeCheckout`). */
+  checkout?: CheckoutIntent | null;
+  /** The checkout Stripe returned from to `/billing` (`takeConfirmation`). */
+  confirming?: string | null;
+}) {
   // The reader's picked theme, as on the docs pages this continues.
   useDocsThemedBody();
   const [session, setSession] = useState<Session | null>(null);
@@ -102,6 +127,19 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
   const [computers, setComputers] = useState<Computer[] | null>(null);
   // Null hides the Passkeys section.
   const [passkeys, setPasskeys] = useState<Passkey[] | null>(null);
+  // Null hides the Plan section; "closed" until checkout opens.
+  const [billing, setBilling] = useState<BillingSummary | "closed" | null>(null);
+  const [view, setViewState] = useState<View>(
+    checkout ? "checkout" : location.pathname === "/billing" ? "billing" : "account",
+  );
+  const viewRef = useRef(view);
+  const setView = (next: View) => {
+    viewRef.current = next;
+    setViewState(next);
+  };
+  // Confirmed once, on the first read signed in.
+  const confirmingRef = useRef(confirming);
+  const [confirmed, setConfirmed] = useState(false);
   // The enrollment awaiting approval, in memory only: through sign-in and
   // back, never into storage (docs/specs/hosted.md -> "Burrow enrollment").
   const [enrolling, setEnrollingState] = useState(enrollment);
@@ -145,7 +183,22 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
     ).catch(failed);
     // A failed list hides its section, never the account page.
     const watched = awaited.current?.pending.userCode;
-    const [linked, voice, enrolled, registered, approval] = current
+    let confirmFailed: unknown = null;
+    /** The account's plan, confirming first the checkout Stripe returned from. */
+    const readBilling = async () => {
+      const checkout = confirmingRef.current;
+      confirmingRef.current = null;
+      if (checkout)
+        try {
+          const confirmedPlan = await confirmCheckout(checkout);
+          setConfirmed(true);
+          return confirmedPlan;
+        } catch (error) {
+          confirmFailed = error;
+        }
+      return getBilling().catch(() => null);
+    };
+    const [linked, voice, enrolled, registered, approval, plan] = current
       ? await Promise.all([
           asRead(getAccounts()).catch(failed),
           getHostedVoice().catch(() => null),
@@ -154,11 +207,12 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
           watched === undefined
             ? undefined
             : getApproval(watched).catch(() => undefined),
+          readBilling(),
         ])
-      : [[], null, null, null, undefined];
+      : [[], null, null, null, undefined, null];
     if (current) await recordContinued().catch(() => {});
     if (generation !== refreshGeneration.current) return;
-    setError(afterRead);
+    setError(confirmFailed ? pageError(confirmFailed) : afterRead);
     setLookup(current ? "signed-in" : "signed-out");
     setSession(current);
     setEnabled(providers);
@@ -168,10 +222,15 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
     if (voice?.entitled) setRefusedPlan(false);
     setComputers(enrolled);
     setPasskeys(registered);
+    setBilling(plan);
     history.replaceState(
       null,
       "",
-      enrollingRef.current ? "/enroll" : current ? "/account" : "/login",
+      enrollingRef.current
+        ? "/enroll"
+        : current || viewRef.current !== "account"
+          ? VIEW_PATHS[viewRef.current]
+          : "/login",
     );
     const state: AccountState = { voice, computers: enrolled, approval };
     const late = awaited.current?.late && pendingEnd(awaited.current.pending, state);
@@ -195,12 +254,16 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
             read: false,
           });
       });
+    // Returning to the tab fires both events below on most browsers: one
+    // refresh answers both.
+    let returning: Promise<unknown> | null = null;
     const focus = () => {
-      if (!actionPending.current)
-        void refresh().catch((error) => setError(pageError(error)));
+      if (actionPending.current || returning) return;
+      returning = refresh()
+        .catch((error) => setError(pageError(error)))
+        .finally(() => (returning = null));
     };
-    // Returning to the tab: mobile Safari fires no focus coming back from
-    // another app.
+    // Mobile Safari fires no focus coming back from another app.
     const visible = () => {
       if (document.visibilityState === "visible") focus();
     };
@@ -216,7 +279,8 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
   // A failed lookup keeps its error and Retry on screen rather than sending
   // a member who is signed in away during an outage, even once that error is
   // cleared (a new enrollment link, Don't approve).
-  const comingSoon = preLaunchNotice(lookup, SIGN_IN_OPEN);
+  // Checkout asks for sign-in, so it never shows the notice.
+  const comingSoon = preLaunchNotice(lookup, SIGN_IN_OPEN || view !== "account");
   useEffect(() => {
     if (!comingSoon) return;
     const timer = setTimeout(
@@ -319,15 +383,20 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
       setEnterCode(false);
     });
   }
+  /** Drops what the page shows of the account, once it is signed out or closed. */
+  const forgetAccount = () => {
+    setSession(null);
+    setAccounts([]);
+    setHostedVoice(null);
+    setComputers(null);
+    setPasskeys(null);
+    setBilling(null);
+    setRefusedPlan(false);
+  };
   const signOut = () =>
     mutate("logout", async () => {
       await post("sign-out");
-      setSession(null);
-      setAccounts([]);
-      setHostedVoice(null);
-      setComputers(null);
-      setPasskeys(null);
-      setRefusedPlan(false);
+      forgetAccount();
       setEnterCode(false);
       setCode("");
       setNotice({
@@ -385,6 +454,50 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
     setError(keepRead);
     history.replaceState(null, "", session ? "/account" : "/login");
   };
+  const purchase = (plan: Plan, price: number) =>
+    act("checkout", async () => {
+      try {
+        await startCheckout(plan, price, checkout?.ref ?? null);
+      } catch (error) {
+        if (!(error instanceof PriceChangedError)) throw error;
+        // Read the price checkout would charge now, and ask again.
+        await refresh();
+        setNotice({ text: error.message, error: true });
+        return;
+      }
+      // This tab is on its way to Stripe: nothing to come back to.
+      forgetCheckout();
+    });
+  const manageBilling = () => act("portal", openPortal);
+  const saveFounder = (shown: boolean, name: string) =>
+    shown
+      ? act("founder", async () => {
+          setBilling(await joinFounders(name));
+          setNotice({ text: `You are in the founders row as ${name}.` });
+        })
+      : // Leaving answers no plan: the page reads it again.
+        mutate("founder", async () => {
+          await leaveFounders();
+          setNotice({ text: "You left the founders row." });
+        });
+  const withdraw = (subscription: string) =>
+    act("withdraw", async () => {
+      setBilling(await withdrawRequest(subscription));
+      window.scrollTo?.(0, 0);
+    });
+  const closeAccount = () =>
+    mutate("close", async () => {
+      await closeAccountRequest();
+      forgetAccount();
+      setNotice({ text: "Your account is closed. We keep billing records as the privacy policy describes." });
+    });
+  const leaveBilling = () => {
+    forgetCheckout();
+    setView("account");
+    setError(keepRead);
+    setNotice(null);
+    history.replaceState(null, "", session ? "/account" : "/login");
+  };
   const removeOne = (burrowId: string) =>
     mutate(`remove-${burrowId}`, () => removeComputer(burrowId));
   const removeKey = (credentialId: string) =>
@@ -405,6 +518,9 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
   };
 
   return <HostedPage
+    view={view} billing={billing} checkoutPlan={checkout?.plan ?? null} confirmed={confirmed}
+    purchase={purchase} manageBilling={manageBilling} saveFounder={saveFounder} leaveBilling={leaveBilling}
+    withdraw={withdraw} closeAccount={closeAccount}
     session={session} enabled={enabled} accounts={accounts} hostedVoice={hostedVoice}
     turnOffDialog={turnOffDialog} computers={computers} passkeys={passkeys}
     enrolling={enrolling} noPlan={noPlan} loading={loading} busy={busy} error={error} notice={notice}

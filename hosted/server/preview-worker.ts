@@ -1,6 +1,7 @@
 import { createBetterAuthWorker } from "@pgstencil/auth/better-auth-workers";
 import { accountApp } from "./account-app";
 import { accountPreviewBindings, type AccountEnv } from "./bindings";
+import { authMetricHooks } from "./metrics";
 import { authPolicy } from "./policy";
 import { postgresInbox, inboxPage, messagePage } from "./preview-inbox";
 
@@ -8,6 +9,7 @@ import { postgresInbox, inboxPage, messagePage } from "./preview-inbox";
 const auth = createBetterAuthWorker<AccountEnv>({
   ...authPolicy,
   email: (env) => postgresInbox(env.HYPERDRIVE.connectionString),
+  hooks: (env) => authMetricHooks(env.HYPERDRIVE.connectionString),
 });
 export default accountApp(
   auth.fetch,
@@ -30,4 +32,5 @@ export default accountApp(
       return mail ? c.html(messagePage(mail)) : c.notFound();
     });
   },
+  (env) => postgresInbox(env.HYPERDRIVE.connectionString),
 );

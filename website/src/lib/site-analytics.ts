@@ -13,6 +13,7 @@
 import type { PostHog, PostHogConfig } from "posthog-js/dist/module.slim.no-external.js";
 import type { HostedRef } from "dormouse-lib/lib/hosted-links";
 import type { TutorialState } from "./tutorial-state";
+import type { Tier } from "./hosted-pricing";
 
 /** PostHog's public project key: public by design, it only lets a page send. */
 export const POSTHOG_PROJECT_KEY = "phc_AxHDxNuQ9uGy5AmejhxcZz3vNUPwZY2WgmCgW6WgNkTU";
@@ -61,7 +62,7 @@ export type SiteRouteHandle = { ownPageview?: boolean };
 
 /** The named events, and nothing else. */
 export type SiteEvent =
-  | { name: "hosted plan clicked"; plan: "monthly" | "annual" | "founding" }
+  | { name: "hosted plan clicked"; plan: Tier["id"] }
   | { name: "tutorial completed"; tutorial: "desktop" | "pocket" };
 
 type PrivacySignals = { globalPrivacyControl?: boolean; doNotTrack?: string | null };

@@ -4,7 +4,7 @@ import { createTestContext } from "pgstencil/testing";
 import { queryDatabase } from "pgstencil/postgres";
 import { migrations } from "../migrations";
 import { METRIC_LABELS, metricLabel, type MetricEvent } from "../metric-labels";
-import { bestEffort, countMetric, readMetrics } from "../metrics";
+import { authMetricHooks, bestEffort, countMetric, readMetrics } from "../metrics";
 import { workerDatabases } from "./worker-roles";
 
 // docs/specs/hosted.md -> "Metrics": aggregate daily counts under fixed
@@ -139,6 +139,18 @@ test("a metric's write never fails or delays the response it rides on, and its f
     expect(scheduled).toHaveLength(2);
     await scheduled[0];
     expect(error).toHaveBeenCalledWith("Metric test not recorded: permission denied");
+  } finally {
+    error.mockRestore();
+  }
+});
+
+test("the auth hooks never reject: a login by a method off the list is only logged", async () => {
+  const error = vi.spyOn(console, "error").mockImplementation(() => {});
+  try {
+    // pgstencil's providers include one Hosted never enables.
+    await expect(authMetricHooks(context.database.url).login!({ method: "facebook" })).resolves.toBeUndefined();
+    expect(error).toHaveBeenCalledWith('Metric login not recorded: login takes no label "facebook"');
+    expect(await today("login", "facebook")).toBe(0);
   } finally {
     error.mockRestore();
   }

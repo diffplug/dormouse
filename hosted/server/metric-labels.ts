@@ -1,17 +1,35 @@
 // Rules: docs/specs/hosted.md -> "Metrics". No I/O: the admin page's bundle
 // imports this as well as the Workers.
+import { HOSTED_REFS, isHostedRef } from "dormouse-lib/lib/hosted-links";
+import { BILLING_PLANS } from "./policy-constants";
+import { providerIds } from "./providers.js";
+
+/** A checkout's attribution: one of `HOSTED_REFS`, `other` for any other value, `none` without one. */
+export const checkoutRef = (ref: unknown) =>
+  ref === undefined || ref === null ? "none" : isHostedRef(ref) ? ref : "other";
+
+/** Every `plan:ref` label a checkout count may carry. */
+const PLAN_REFS = BILLING_PLANS.flatMap((plan) =>
+  [...Object.values(HOSTED_REFS), "other", "none"].map((ref) => `${plan}:${ref}`),
+);
 
 /**
  * Every event Hosted counts, and the only labels each may carry; `[""]` for
  * one counted without a label.
  */
 export const METRIC_LABELS = {
+  "account.created": [""],
+  login: ["email", ...providerIds],
   "enroll.approved": ["remote", "voice"],
   "burrow.enrolled": [""],
   "voice.speak": ["ok", "capped", "error"],
   "voice.fallback-cap": [""],
   "push.sent": [""],
   "pocket.signin": [""],
+  "checkout.started": PLAN_REFS,
+  "checkout.completed": PLAN_REFS,
+  "subscription.canceled": BILLING_PLANS,
+  "subscription.refunded": BILLING_PLANS,
 } as const satisfies Record<string, readonly string[]>;
 export type MetricEvent = keyof typeof METRIC_LABELS;
 
