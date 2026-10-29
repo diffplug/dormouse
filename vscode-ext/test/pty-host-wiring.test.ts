@@ -29,10 +29,11 @@ describe('pty-host wiring', () => {
     expect(new Set(handled)).toEqual(new Set(sent));
   });
 
-  it('hands pty-core the shared directory resolver', () => {
-    // Without it pty-core opens no context directory (pty-core.js -> canonicalDirectory).
-    expect(hostSource).toMatch(/\{\s*canonicalLocalDirectory\s*\}\s*=\s*require\('\.\.\/\.\.\/lib\/src\/host\/local-directory'\)/);
-    expect(hostSource).toMatch(/nodePty,\s*\{\s*canonicalDirectory:\s*canonicalLocalDirectory\s*\}/);
+  it('hands pty-core the shared directory and shell resolvers', () => {
+    // Without them pty-core opens no context directory (pty-core.js ->
+    // canonicalDirectory) and spawns no shell requested by bare name on Windows.
+    expect(hostSource).toMatch(/\{\s*canonicalLocalDirectory,\s*resolveBinaryPath\s*\}\s*=\s*require\('\.\.\/\.\.\/lib\/src\/host\/local-directory'\)/);
+    expect(hostSource).toMatch(/nodePty,\s*\{\s*canonicalDirectory:\s*canonicalLocalDirectory,\s*resolveBinary:\s*resolveBinaryPath\s*\}/);
   });
 
   it('hands the graceful kill the ids the extension host names', () => {
