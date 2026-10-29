@@ -339,11 +339,11 @@ importers:
         specifier: ^2.0.10
         version: 2.1.5(hono@4.13.14)
       '@pgstencil/auth':
-        specifier: ^0.4.1
-        version: 0.4.1(hono@4.13.14)(kysely@0.29.7)(pg@8.23.1)(pgstencil@0.4.1(cheerio@1.2.0)(kysely@0.29.7)(node-pg-migrate@9.0.0(pg@8.23.1))(testcontainers@12.2.1(supports-color@10.2.2))(turndown@7.2.4))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(vitest@5.0.5)
+        specifier: ^0.4.2
+        version: 0.4.2(hono@4.13.14)(kysely@0.29.7)(pg@8.23.1)(pgstencil@0.4.2(cheerio@1.2.0)(kysely@0.29.7)(node-pg-migrate@9.0.0(pg@8.23.1))(testcontainers@12.2.1(supports-color@10.2.2))(turndown@7.2.4))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(vitest@5.0.5)
       '@pgstencil/stripe':
-        specifier: ^0.4.1
-        version: 0.4.1(kysely@0.29.7)(pgstencil@0.4.1(cheerio@1.2.0)(kysely@0.29.7)(node-pg-migrate@9.0.0(pg@8.23.1))(testcontainers@12.2.1(supports-color@10.2.2))(turndown@7.2.4))(stripe@22.6.2(@types/node@24.19.2))
+        specifier: ^0.4.2
+        version: 0.4.2(kysely@0.29.7)(pgstencil@0.4.2(cheerio@1.2.0)(kysely@0.29.7)(node-pg-migrate@9.0.0(pg@8.23.1))(testcontainers@12.2.1(supports-color@10.2.2))(turndown@7.2.4))(stripe@22.6.2(@types/node@24.19.2))
       '@phosphor-icons/react':
         specifier: ^2.1.10
         version: 2.1.10(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
@@ -357,8 +357,8 @@ importers:
         specifier: ^0.29.5
         version: 0.29.7
       pgstencil:
-        specifier: ^0.4.1
-        version: 0.4.1(cheerio@1.2.0)(kysely@0.29.7)(node-pg-migrate@9.0.0(pg@8.23.1))(testcontainers@12.2.1(supports-color@10.2.2))(turndown@7.2.4)
+        specifier: ^0.4.2
+        version: 0.4.2(cheerio@1.2.0)(kysely@0.29.7)(node-pg-migrate@9.0.0(pg@8.23.1))(testcontainers@12.2.1(supports-color@10.2.2))(turndown@7.2.4)
       react:
         specifier: ^19.2.6
         version: 19.3.1
@@ -2994,20 +2994,20 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@pgstencil/auth@0.4.1':
-    resolution: {integrity: sha512-57R1AeyF6OE6OiJjWt37KFb8LYoVYcWlHKQS1u0mnuSU1BEIptmnZpYb6rfXW5CtbGzXmyxo7u4Q8z9LkP/hDA==}
+  '@pgstencil/auth@0.4.2':
+    resolution: {integrity: sha512-3aklWkS/o7oA5Dx8P+KGLENOxg8FdQLgGA6lZK/Gx4yD7uNMFnBVPGMvwMB+J18ih2SUKi30fyQor9PVXL8rnQ==}
     engines: {node: '>=24'}
     peerDependencies:
       hono: ^4.13.7
       kysely: ^0.29.5
-      pgstencil: ^0.4.1
+      pgstencil: ^0.4.2
 
-  '@pgstencil/stripe@0.4.1':
-    resolution: {integrity: sha512-f8rHAd+Jnnkmjmo5TBg9qabY4nEhczZSndYxpRGlNlT1mw5CSDdNb7aXqG7aJ+VRNUoz8FtR8a3MUfGHRboM5g==}
+  '@pgstencil/stripe@0.4.2':
+    resolution: {integrity: sha512-fVRDbo+LDopW1CPQZK9cl+aWdmcqIFx3cEpI3RCT6LzXxwCzazQuNwN/AK8zWPAF17uyWSwfOu0x4jGGRyTbyA==}
     engines: {node: '>=24'}
     peerDependencies:
       kysely: ^0.29.5
-      pgstencil: ^0.4.1
+      pgstencil: ^0.4.2
       stripe: ^22.6.1
 
   '@phosphor-icons/react@2.1.10':
@@ -6739,8 +6739,8 @@ packages:
   pgpass@1.0.5:
     resolution: {integrity: sha512-FdW9r/jQZhSeohs1Z3sI1yxFQNFvMcnmfuj4WBMUTxOrAyLMaTcE1aAMBiTlbMNaXvBCQuVi0R7hd8udDSP7ug==}
 
-  pgstencil@0.4.1:
-    resolution: {integrity: sha512-fQJ1p4VFONFPOC8myjHJiEus0GUpH3uBFvteaoIaO6ko6pHuEP4rJBESq+e8fxV4XUXJuRecVJzpJ2AoKCvTRw==}
+  pgstencil@0.4.2:
+    resolution: {integrity: sha512-/gOTQx6lggXcl3/jBAuD8ixFICbXFFbqvufybRsod5eeN40nlH4fQVaspeo25e5MhNkFEO3fyVxvj2Y+dfIBHQ==}
     engines: {node: '>=24'}
     peerDependencies:
       cheerio: ^1.2.0
@@ -9975,14 +9975,14 @@ snapshots:
   '@oxc-resolver/binding-win32-x64-msvc@11.21.2':
     optional: true
 
-  '@pgstencil/auth@0.4.1(hono@4.13.14)(kysely@0.29.7)(pg@8.23.1)(pgstencil@0.4.1(cheerio@1.2.0)(kysely@0.29.7)(node-pg-migrate@9.0.0(pg@8.23.1))(testcontainers@12.2.1(supports-color@10.2.2))(turndown@7.2.4))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(vitest@5.0.5)':
+  '@pgstencil/auth@0.4.2(hono@4.13.14)(kysely@0.29.7)(pg@8.23.1)(pgstencil@0.4.2(cheerio@1.2.0)(kysely@0.29.7)(node-pg-migrate@9.0.0(pg@8.23.1))(testcontainers@12.2.1(supports-color@10.2.2))(turndown@7.2.4))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(vitest@5.0.5)':
     dependencies:
       better-auth: 1.7.12(pg@8.23.1)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(vitest@5.0.5)
       hono: 4.13.14
       jose: 6.2.13
       kysely: 0.29.7
       openid-client: 6.8.8
-      pgstencil: 0.4.1(cheerio@1.2.0)(kysely@0.29.7)(node-pg-migrate@9.0.0(pg@8.23.1))(testcontainers@12.2.1(supports-color@10.2.2))(turndown@7.2.4)
+      pgstencil: 0.4.2(cheerio@1.2.0)(kysely@0.29.7)(node-pg-migrate@9.0.0(pg@8.23.1))(testcontainers@12.2.1(supports-color@10.2.2))(turndown@7.2.4)
     transitivePeerDependencies:
       - '@lynx-js/react'
       - '@opentelemetry/api'
@@ -10004,10 +10004,10 @@ snapshots:
       - vitest
       - vue
 
-  '@pgstencil/stripe@0.4.1(kysely@0.29.7)(pgstencil@0.4.1(cheerio@1.2.0)(kysely@0.29.7)(node-pg-migrate@9.0.0(pg@8.23.1))(testcontainers@12.2.1(supports-color@10.2.2))(turndown@7.2.4))(stripe@22.6.2(@types/node@24.19.2))':
+  '@pgstencil/stripe@0.4.2(kysely@0.29.7)(pgstencil@0.4.2(cheerio@1.2.0)(kysely@0.29.7)(node-pg-migrate@9.0.0(pg@8.23.1))(testcontainers@12.2.1(supports-color@10.2.2))(turndown@7.2.4))(stripe@22.6.2(@types/node@24.19.2))':
     dependencies:
       kysely: 0.29.7
-      pgstencil: 0.4.1(cheerio@1.2.0)(kysely@0.29.7)(node-pg-migrate@9.0.0(pg@8.23.1))(testcontainers@12.2.1(supports-color@10.2.2))(turndown@7.2.4)
+      pgstencil: 0.4.2(cheerio@1.2.0)(kysely@0.29.7)(node-pg-migrate@9.0.0(pg@8.23.1))(testcontainers@12.2.1(supports-color@10.2.2))(turndown@7.2.4)
       stripe: 22.6.2(@types/node@24.19.2)
 
   '@phosphor-icons/react@2.1.10(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
@@ -13772,7 +13772,7 @@ snapshots:
     dependencies:
       split2: 4.2.0
 
-  pgstencil@0.4.1(cheerio@1.2.0)(kysely@0.29.7)(node-pg-migrate@9.0.0(pg@8.23.1))(testcontainers@12.2.1(supports-color@10.2.2))(turndown@7.2.4):
+  pgstencil@0.4.2(cheerio@1.2.0)(kysely@0.29.7)(node-pg-migrate@9.0.0(pg@8.23.1))(testcontainers@12.2.1(supports-color@10.2.2))(turndown@7.2.4):
     dependencies:
       kysely: 0.29.7
       pg: 8.23.1
