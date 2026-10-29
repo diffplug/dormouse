@@ -7,6 +7,8 @@
  * or device path.
  *
  * Bundled into the standalone sidecar through `git-info.cjs` and into VS Code's
- * PTY host, which hand it to `pty-core`.
+ * PTY host, which hand it to `pty-core`, with `resolveBinaryPath`, which
+ * resolves a requested shell's bare name on `PATH` there.
  */
 export { canonicalLocalDirectory } from 'dor-lib-common/local-path';
+export { resolveBinaryPath } from 'dor-lib-common';

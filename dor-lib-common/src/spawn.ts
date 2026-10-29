@@ -3,6 +3,7 @@ import spawn from 'cross-spawn';
 import path from 'node:path';
 import { isUncOrDevicePath } from './browser-providers.js';
 import { cmdShimTarget } from './cmd-shim.js';
+import { envValue } from './resolve-binary.js';
 
 export interface SpawnCaptureSuccess {
   readonly ok: true;
@@ -39,6 +40,38 @@ export function treeKillCommand(
   if (!isWindows) return null;
   const systemRoot = env.SystemRoot || env.SYSTEMROOT || 'C:\\Windows';
   return { binary: path.win32.join(systemRoot, 'System32', 'taskkill.exe'), args: ['/PID', String(pid), '/T', '/F'] };
+}
+
+/**
+ * `cmd.exe` by its absolute path: `ComSpec` when it is a drive path, else
+ * under `%SystemRoot%`. Never the bare name, which Windows looks up in the
+ * working directory before `PATH`.
+ */
+export function windowsCommandShell(env: { readonly [key: string]: string | undefined }): string {
+  const comspec = envValue(env, 'COMSPEC', true);
+  if (comspec && /^[A-Za-z]:[\\/]/.test(comspec)) return comspec;
+  return path.win32.join(envValue(env, 'SYSTEMROOT', true) || 'C:\\Windows', 'System32', 'cmd.exe');
+}
+
+/**
+ * `start()` with `env.comspec` holding `windowsCommandShell` on Windows.
+ * cross-spawn runs a `.cmd`/`.bat` through `process.env.comspec || 'cmd.exe'`,
+ * read while `spawn` builds the command, so a host without an absolute
+ * `ComSpec` would otherwise start `cmd.exe` by bare name in the child's cwd.
+ * `process.env` ignores case there, so this is `ComSpec` itself.
+ */
+export function withCommandShell<T>(start: () => T, env: { [key: string]: string | undefined } = process.env, isWindows = process.platform === 'win32'): T {
+  if (!isWindows) return start();
+  const saved = env.comspec;
+  const shell = windowsCommandShell(env);
+  if (saved === shell) return start();
+  env.comspec = shell;
+  try {
+    return start();
+  } finally {
+    if (saved === undefined) delete env.comspec;
+    else env.comspec = saved;
+  }
 }
 
 // Grace window for 'close' to win after 'exit' before we resolve anyway. Long
@@ -86,7 +119,7 @@ export function spawnAndCapture(
       ? cmdShimTarget(binary, options.env ?? process.env)
       : undefined;
     try {
-      child = spawn(shim?.binary ?? binary, shim ? [...shim.args, ...args] : args, { stdio: [options.input === undefined ? (options.stdin ?? 'ignore') : 'pipe', 'pipe', 'pipe'], windowsHide: true, cwd: options.cwd, env: options.env, windowsVerbatimArguments: options.windowsVerbatimArguments });
+      child = withCommandShell(() => spawn(shim?.binary ?? binary, shim ? [...shim.args, ...args] : args, { stdio: [options.input === undefined ? (options.stdin ?? 'ignore') : 'pipe', 'pipe', 'pipe'], windowsHide: true, cwd: options.cwd, env: options.env, windowsVerbatimArguments: options.windowsVerbatimArguments }));
     } catch (error) {
       // Invalid argv (for example a NUL in an eval string) throws before a child
       // exists; preserve the same result contract as an asynchronous ENOENT.
