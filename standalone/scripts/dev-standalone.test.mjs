@@ -32,7 +32,12 @@ async function fixture(t) {
       process.exit(0);
     }
     console.log('CLI_ARGS ' + JSON.stringify(args));
-    console.log('BUNDLED_NODE ' + process.env.DORMOUSE_NODE_BINARY);
+    console.log('NODE_OVERRIDES ' + JSON.stringify({
+      DORMOUSE_NODE_BINARY: process.env.DORMOUSE_NODE_BINARY,
+      NODE_BINARY: process.env.NODE_BINARY,
+    }));
+    const node = require('node:child_process').execFileSync('node', ['-p', 'process.execPath'], { encoding: 'utf8' }).trim();
+    console.log('PATH_NODE ' + node);
     if (args[2] !== 'dev') process.exit(0);
     const config = JSON.parse(args[args.lastIndexOf('--config') + 1]);
     console.log('NATIVE_CONFIG ' + JSON.stringify(config));
@@ -114,7 +119,8 @@ test('parallel native dev runs isolate listeners, app data and logs, and stop on
   assert.match(one.config.identifier, /^sh\.dormouse\.standalone\.dev\.w[a-f0-9]{16}$/);
   assert.deepEqual(one.args.slice(-4), ['--', '--locked', '--', 'app-arg']);
   for (const run of [one, two]) {
-    assert.equal((await run.wait(/BUNDLED_NODE (.+)/))[1].trim(), process.execPath);
+    assert.equal((await run.wait(/PATH_NODE (.+)/))[1].trim(), process.execPath);
+    assert.deepEqual(JSON.parse((await run.wait(/NODE_OVERRIDES (.+)/))[1]), {});
     assert.equal(run.config.build.beforeDevCommand, null);
     // Native mode, even though run `one` inherited the browser-dev host var.
     const js = await (await fetch(`${run.url}/app.js`)).text();
@@ -172,14 +178,15 @@ test('non-dev Tauri commands retain their arguments and production configuration
   const a = await fixture(t);
   const run = a.start(['build', '--debug']);
   assert.equal((await run.exited).code, 0);
-  assert.equal((await run.wait(/BUNDLED_NODE (.+)/))[1].trim(), process.execPath);
+  assert.equal((await run.wait(/PATH_NODE (.+)/))[1].trim(), process.execPath);
+  assert.deepEqual(JSON.parse((await run.wait(/NODE_OVERRIDES (.+)/))[1]), {});
   assert.deepEqual(JSON.parse((await run.wait(/CLI_ARGS (.+)/))[1]), ['exec', 'tauri', 'build', '--debug']);
   // `beforeBuildCommand` stages a release build; staging here too would bake twice.
   assert.doesNotMatch(run.output, /STAGE/);
   assert.doesNotMatch(run.output, /app URL|NATIVE_CONFIG/);
 });
 
-test('Tauri preserves explicit runtime overrides and their precedence', async t => {
+test('Tauri leaves explicit runtime overrides for the Rust build script', async t => {
   const a = await fixture(t);
   for (const overrides of [
     { NODE_BINARY: path.join(a.root, 'foreign node') },
@@ -187,8 +194,16 @@ test('Tauri preserves explicit runtime overrides and their precedence', async t 
   ]) {
     const run = a.start(['build'], overrides);
     assert.equal((await run.exited).code, 0);
-    assert.equal((await run.wait(/BUNDLED_NODE (.+)/))[1].trim(), overrides.DORMOUSE_NODE_BINARY ?? overrides.NODE_BINARY);
+    assert.deepEqual(JSON.parse((await run.wait(/NODE_OVERRIDES (.+)/))[1]), overrides);
   }
+});
+
+test('a cross build receives no implicit runtime override', async t => {
+  const a = await fixture(t);
+  const run = a.start(['build', '--target', 'aarch64-unknown-linux-gnu']);
+  assert.equal((await run.exited).code, 0);
+  assert.deepEqual(JSON.parse((await run.wait(/NODE_OVERRIDES (.+)/))[1]), {});
+  assert.deepEqual(JSON.parse((await run.wait(/CLI_ARGS (.+)/))[1]), ['exec', 'tauri', 'build', '--target', 'aarch64-unknown-linux-gnu']);
 });
 
 test('a self-host build overlays no updater endpoint and no updater artifacts', async t => {
