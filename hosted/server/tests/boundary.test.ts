@@ -839,6 +839,9 @@ test("the cookie gate needs no login creation time; approval reads it and fails 
     closeBurrow: async () => {
       throw new Error("No approval removes a Burrow");
     },
+    closeSessions: async () => {
+      throw new Error("No approval removes a passkey");
+    },
   });
   const origin = "https://account.example.test";
   // The voice-token routes' gate admits an entitled login whatever `createdAt` says.

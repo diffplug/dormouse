@@ -52,6 +52,7 @@ export function accountApp(
         auth: (request) => fetchAuth(request, c.env, c.executionCtx),
         approveLimit: c.env.RELAY_APPROVE_LIMIT,
         closeBurrow: (userId, burrowId) => relayRoom(c.env.RELAY_ROOM, userId).closeBurrow(burrowId),
+        closeSessions: (userId, tokenHashes) => relayRoom(c.env.RELAY_ROOM, userId).closeSessions(tokenHashes),
         setup: () => billingSetup(c.env),
         mail: () => mail(c.env),
       }));

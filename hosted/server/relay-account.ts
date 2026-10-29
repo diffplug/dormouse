@@ -17,6 +17,8 @@ export type RelayAccountHost = AccountHost & {
   approveLimit: RateLimit;
   /** Close the removed Burrow's live relay socket (`RelayRoom.closeBurrow`). */
   closeBurrow(userId: string, burrowId: string): Promise<unknown>;
+  /** Close the live Client relay sockets of deleted sessions, by their token hashes (`RelayRoom.closeSessions`). */
+  closeSessions(userId: string, tokenHashes: string[]): Promise<unknown>;
 };
 
 /** The 403 an approval from a login older than the recent-login window gets. */
@@ -146,17 +148,26 @@ export function relayAccountRoutes(app: Hono<any>, host: (c: Context) => RelayAc
   });
 
   // The row goes, and every session it signed in with it (their presence
-  // nonces cascading from them), so it signs in to nothing again. A relay
-  // socket one of them already opened closes at that session's expiry.
+  // nonces cascading from them), so it signs in to nothing again; then the
+  // relay sockets those sessions hold close. As with a Burrow, the removal is
+  // done once the row is: a close that fails is logged, and the object's
+  // sweep closes them instead.
   app.delete("/api/relay/passkeys/:credentialId", gate, async (c) => {
-    const removed =
-      (
-        await accountQuery(
-          host(c),
-          `DELETE FROM dormouse_relay_passkeys WHERE "credentialId" = $1 AND "userId" = $2 RETURNING 1`,
-          [c.req.param("credentialId"), c.get("login").userId],
-        )
-      ).length > 0;
-    return removed ? c.body(null, 204) : c.json({ message: "Passkey not found." }, 404);
+    const { userId } = c.get("login");
+    const [removed] = await accountQuery<{ sessions: string[] }>(
+      host(c),
+      `WITH sessions AS (
+        SELECT "tokenHash" FROM dormouse_relay_sessions WHERE "credentialId" = $1 AND "userId" = $2
+      )
+      DELETE FROM dormouse_relay_passkeys WHERE "credentialId" = $1 AND "userId" = $2
+      RETURNING ARRAY(SELECT "tokenHash" FROM sessions) AS sessions`,
+      [c.req.param("credentialId"), userId],
+    );
+    if (!removed) return c.json({ message: "Passkey not found." }, 404);
+    if (removed.sessions.length)
+      await host(c)
+        .closeSessions(userId, removed.sessions)
+        .catch((error: unknown) => console.error("Closing a removed passkey's relay sockets failed; the sweep will", error));
+    return c.body(null, 204);
   });
 }

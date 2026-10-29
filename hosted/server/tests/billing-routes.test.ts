@@ -62,8 +62,9 @@ async function fixture({ closed = false } = {}) {
       await email.send(message);
     },
   });
-  /** Each Burrow socket closure asked to close. */
+  /** Each Burrow socket, and each session's Client sockets, closure asked to close. */
   const closedBurrows: string[] = [];
+  const closedSessions: string[] = [];
   const host = {
     databaseUrl: context.database.url,
     auth: async (request: Request) => {
@@ -74,6 +75,7 @@ async function fixture({ closed = false } = {}) {
     setup: (): BillingSetup | null => (closed ? null : stripe.setup),
     mail,
     closeBurrow: async (_userId: string, burrowId: string) => closedBurrows.push(burrowId),
+    closeSessions: async (_userId: string, tokenHashes: string[]) => closedSessions.push(...tokenHashes),
   };
   const app = new Hono();
   billingRoutes(app, () => host);
@@ -197,6 +199,7 @@ async function fixture({ closed = false } = {}) {
     mailing,
     logins,
     closedBurrows,
+    closedSessions,
     clock,
     visit,
     close: async () => {
@@ -1001,6 +1004,14 @@ test("closing an account needs a recent login, cancels its subscription in Strip
     member.id,
     "h".repeat(64),
   ]);
+  await f.sql(
+    `WITH passkey AS (
+      INSERT INTO dormouse_relay_passkeys ("credentialId", "userId", "publicKey", label) VALUES ('cred', $1, 'k', 'Phone')
+    )
+    INSERT INTO dormouse_relay_sessions ("tokenHash", "userId", "credentialId", "expiresAt")
+    VALUES ($2, $1, 'cred', now() + interval '1 hour')`,
+    [member.id, "s".repeat(64)],
+  );
   const close = (body: unknown) => member.request("/api/account/close", { method: "POST", body });
 
   f.logins.set(member.id, new Date(Date.now() - 60 * 60 * 1000).toISOString());
@@ -1025,6 +1036,7 @@ test("closing an account needs a recent login, cancels its subscription in Strip
   ]);
   expect(await f.sql(`SELECT "userId" FROM dormouse_checkout_consents`)).toEqual([{ userId: member.id }]);
   expect(f.closedBurrows).toEqual(["b".repeat(22)]);
+  expect(f.closedSessions).toEqual(["s".repeat(64)]);
 
   // An account billing never knew closes with nothing to cancel.
   const plain = await f.account();

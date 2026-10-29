@@ -2,7 +2,13 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { withClient } from "pgstencil/postgres";
 import type { RelayEnv } from "./bindings";
-import { burrowsById, type Client, type RelayBurrow } from "./relay-auth";
+import {
+  burrowsById,
+  sessionsByHash,
+  type Client,
+  type RelayBurrow,
+  type RelaySessionOwner,
+} from "./relay-auth";
 
 /**
  * The relay Worker's database read for its own `RelayRoom`s, reached through
@@ -14,6 +20,13 @@ export class RelayRows extends WorkerEntrypoint<Pick<RelayEnv, "HYPERDRIVE">> {
   burrows(burrowIds: string[]): Promise<RelayBurrow[]> {
     return withClient(this.env.HYPERDRIVE.connectionString, (db: Client) =>
       burrowsById(db, burrowIds),
+    );
+  }
+
+  /** Those of the sessions hashed `tokenHashes` still live, each with its owner. */
+  sessions(tokenHashes: string[]): Promise<RelaySessionOwner[]> {
+    return withClient(this.env.HYPERDRIVE.connectionString, (db: Client) =>
+      sessionsByHash(db, tokenHashes),
     );
   }
 }

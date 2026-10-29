@@ -7,14 +7,13 @@ import { SUPPORT_EMAIL } from "../../website/src/lib/hosted-withdrawal";
 import { accountQuery, cookieLogin, isRecentLogin, smallBody, type AccountHost } from "./account-gate";
 import { DAY_MS, END_REASONS, run, withBilling, type BillingSetup } from "./billing";
 import { RECENT_LOGIN_WINDOW, REFUND_DAYS, type Plan } from "./policy-constants";
+import type { RelayAccountHost } from "./relay-account";
 import { RETRY_DAYS, abandoned, refundPaidInvoices } from "./withdrawal";
 
-/** What one request's account deployment provides to account closure. */
-export interface ClosureHost extends AccountHost {
+/** What one request's account deployment provides to account closure: closing its relay sockets as removals do, too. */
+export interface ClosureHost extends AccountHost, Pick<RelayAccountHost, "closeBurrow" | "closeSessions"> {
   /** The deployment's billing setup, null while billing is closed. */
   setup(): BillingSetup | null;
-  /** Close a deleted Burrow's live relay socket (`RelayRoom.closeBurrow`). */
-  closeBurrow(userId: string, burrowId: string): Promise<unknown>;
 }
 
 /** The 403 a closure from a login older than the recent-login window gets. */
@@ -129,20 +128,25 @@ export function closureRoutes(app: Hono<any>, host: (c: Context) => ClosureHost)
     const close = async (canceled: string[]) => {
       // The account's rows cascade from its user; billing records, consents,
       // withdrawals, disputes, and this closure have no foreign key and stay.
-      const [closed] = await accountQuery<{ burrows: string[] | null }>(
+      const [closed] = await accountQuery<{ burrows: string[] | null; sessions: string[] | null }>(
         deployment,
         `WITH burrows AS (SELECT array_agg("burrowId") AS ids FROM dormouse_relay_burrows WHERE "userId" = $1),
+          sessions AS (SELECT array_agg("tokenHash") AS ids FROM dormouse_relay_sessions WHERE "userId" = $1),
           recorded AS (
             INSERT INTO dormouse_account_closures ("userId", "canceledSubscriptions", "settledAt")
             VALUES ($1, $2, CASE WHEN cardinality($2::text[]) = 0 THEN now() END)
           ),
           deleted AS (DELETE FROM "user" WHERE id = $1)
-        SELECT (SELECT ids FROM burrows) AS burrows`,
+        SELECT (SELECT ids FROM burrows) AS burrows, (SELECT ids FROM sessions) AS sessions`,
         [userId, canceled],
       );
       for (const burrowId of closed?.burrows ?? [])
         await deployment.closeBurrow(userId, burrowId).catch((error: unknown) =>
           console.error("Closing a closed account's Burrow socket failed; the sweep will", error),
+        );
+      if (closed?.sessions)
+        await deployment.closeSessions(userId, closed.sessions).catch((error: unknown) =>
+          console.error("Closing a closed account's Client sockets failed; the sweep will", error),
         );
     };
     if (!setup) {

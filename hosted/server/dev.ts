@@ -81,9 +81,10 @@ const host: AccountRoutesHost = {
   auth: (request: Request) => auth.app.fetch(request),
   approveLimit: devLimit(10),
   // The relay Worker runs in its own process (below), out of reach, so a
-  // removed Burrow's held socket closes only at its RelayRoom's next sweep
-  // (`RELAY_ROOM_SWEEP_MS`); its reconnect is refused at once.
+  // removed Burrow's or passkey's held sockets close only at its RelayRoom's
+  // next sweep (`RELAY_ROOM_SWEEP_MS`); a reconnect is refused at once.
   closeBurrow: async () => {},
+  closeSessions: async () => {},
   setup: () => stripe.setup,
   // A withdrawal's acknowledgement lands in the local inbox beside sign-in codes.
   mail: () => email,
