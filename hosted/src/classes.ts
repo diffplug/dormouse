@@ -17,3 +17,4 @@ export const HELP_CLASS = `mb-4 ${MUTED_TEXT_CLASS}`;
 export const BUTTON_CLASS = siteButton({ tone: "neutral", size: "fit" });
 export const TEXT_BUTTON_CLASS = `inline-flex min-h-11 items-center disabled:opacity-50 ${LINK_CLASS}`;
 export const HEADING_CLASS = "mb-2 font-display text-xl";
+export const CHECK_CLASS = "mt-1 size-4 shrink-0 accent-[var(--docs-accent)]";

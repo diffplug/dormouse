@@ -379,16 +379,20 @@ export function App({
       setEnterCode(false);
     });
   }
+  /** Drops what the page shows of the account, once it is signed out or closed. */
+  const forgetAccount = () => {
+    setSession(null);
+    setAccounts([]);
+    setHostedVoice(null);
+    setComputers(null);
+    setPasskeys(null);
+    setBilling(null);
+    setRefusedPlan(false);
+  };
   const signOut = () =>
     mutate("logout", async () => {
       await post("sign-out");
-      setSession(null);
-      setAccounts([]);
-      setHostedVoice(null);
-      setComputers(null);
-      setPasskeys(null);
-      setBilling(null);
-      setRefusedPlan(false);
+      forgetAccount();
       setEnterCode(false);
       setCode("");
       setNotice({
@@ -480,13 +484,7 @@ export function App({
   const closeAccount = () =>
     mutate("close", async () => {
       await closeAccountRequest();
-      setSession(null);
-      setAccounts([]);
-      setHostedVoice(null);
-      setComputers(null);
-      setPasskeys(null);
-      setBilling(null);
-      setRefusedPlan(false);
+      forgetAccount();
       setNotice({ text: "Your account is closed. We keep billing records as the privacy policy describes." });
     });
   const leaveBilling = () => {

@@ -7,7 +7,14 @@ import {
   type Tier,
 } from "../../website/src/lib/hosted-pricing.ts";
 import type { BillingSummary } from "../server/billing-summary";
-import { isPlan, type Plan } from "../server/policy-constants";
+import { REFUND_DAYS, isPlan, type Plan } from "../server/policy-constants";
+
+/** A date as the account pages show it, in the reader's locale. */
+export const day = (iso: string) => new Date(iso).toLocaleDateString();
+
+/** How long after which payments of `plan` the 30-day guarantee refunds it, as the pages say it. */
+export const refundWindow = (plan: Plan) =>
+  `${REFUND_DAYS} days of your first payment${plan === "monthly" ? "" : " or of a yearly renewal"}`;
 
 /** What `/checkout` arrived with, kept through a provider's sign-in. */
 export interface CheckoutIntent {

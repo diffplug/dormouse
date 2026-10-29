@@ -1,13 +1,12 @@
 import { useState, type FormEvent, type ReactNode } from "react";
-import { CARD_CLASS, LINK_CLASS, MUTED_TEXT_CLASS } from "dormouse-lib/site/docs-tokens";
+import { CARD_CLASS, LINK_CLASS } from "dormouse-lib/site/docs-tokens";
 import { isFounderName } from "../server/policy-constants";
 import { PLAN_NAMES, planInterval } from "../../website/src/lib/hosted-pricing.ts";
 import type { BillingSummary } from "../server/billing-summary";
+import { day, refundWindow } from "./billing";
 import { perInterval } from "./Checkout";
-import { BUTTON_CLASS, HEADING_CLASS, HELP_CLASS, INPUT_CLASS, LABEL_CLASS, LABEL_TEXT_CLASS } from "./classes";
-import { ModelForm, SupportLink } from "./Withdrawal";
-
-const day = (iso: string) => new Date(iso).toLocaleDateString();
+import { BUTTON_CLASS, CHECK_CLASS, HEADING_CLASS, HELP_CLASS, INPUT_CLASS, LABEL_CLASS } from "./classes";
+import { Facts, ModelForm, SupportLink } from "./Withdrawal";
 
 /**
  * The held plan's state in one sentence. A lapsed plan with `entitled` still
@@ -26,13 +25,19 @@ export function planStatus(billing: BillingSummary): string {
     : `Ends on ${day(billing.until)}. It will not renew.`;
 }
 
-function ManageBilling({ busy, onManage }: { busy: string; onManage: () => void }) {
+export function ManageBilling({ busy, onManage }: { busy: string; onManage: () => void }) {
   return (
     <button className={BUTTON_CLASS} disabled={!!busy} onClick={onManage}>
       {busy === "portal" ? "Opening…" : "Manage billing"}
     </button>
   );
 }
+
+export const ChoosePlan = () => (
+  <a className={BUTTON_CLASS} href="/checkout">
+    Choose a plan
+  </a>
+);
 
 /**
  * The founders row's opt-in: unticked until the account ticks it, and
@@ -76,7 +81,7 @@ export function FoundersOptIn({
         <input
           id="founder-shown"
           type="checkbox"
-          className="mt-1 size-4 shrink-0 accent-[var(--docs-accent)]"
+          className={CHECK_CLASS}
           checked={shown}
           disabled={!!busy}
           onChange={(event) => setShown(event.target.checked)}
@@ -153,9 +158,7 @@ export function PlanSection({
           <p className={HELP_CLASS}>
             No plan yet. Hosted adds Natural Voice and the Hosted Relay to every computer you sign in on.
           </p>
-          <a className={BUTTON_CLASS} href="/checkout">
-            Choose a plan
-          </a>
+          <ChoosePlan />
           {children}
         </>
       )}
@@ -201,10 +204,7 @@ export function PlanConfirmation({
     [
       "Refunds",
       <>
-        {billing.plan === "monthly"
-          ? "Within 30 days of your first payment"
-          : "Within 30 days of your first payment or of a yearly renewal"}
-        , email <SupportLink /> for a full refund, which ends the plan.
+        Within {refundWindow(billing.plan)}, email <SupportLink /> for a full refund, which ends the plan.
       </>,
     ],
     ...(billing.withdrawal
@@ -224,14 +224,7 @@ export function PlanConfirmation({
   ];
   return (
     <div className={CARD_CLASS}>
-      <dl>
-        {rows.map(([term, detail], index) => (
-          <div key={term} className={index ? "mt-4" : ""}>
-            <dt className={LABEL_TEXT_CLASS}>{term}</dt>
-            <dd className={`[overflow-wrap:anywhere] ${term === "Plan" ? "" : MUTED_TEXT_CLASS}`}>{detail}</dd>
-          </div>
-        ))}
-      </dl>
+      <Facts rows={rows} spacing="mt-4" flush lead="Plan" />
       <div className="mt-6">
         <ManageBilling busy={busy} onManage={onManage} />
       </div>

@@ -9,12 +9,11 @@ import {
 import { TERMS_VERSION, VOICE_DAILY_CAP, type Plan } from "../server/policy-constants";
 import { planInterval, type Tier } from "../../website/src/lib/hosted-pricing.ts";
 import type { BillingSummary } from "../server/billing-summary";
-import { planOffers } from "./billing";
-import { HELP_CLASS, PRIMARY_CLASS } from "./classes";
+import { planOffers, refundWindow } from "./billing";
+import { CHECK_CLASS, HELP_CLASS, PRIMARY_CLASS } from "./classes";
 import { WithdrawalRight } from "./Withdrawal";
 
 const TERMS_URL = "https://dormouse.sh/terms/";
-const CHECK_CLASS = "mt-1 size-4 shrink-0 accent-[var(--docs-accent)]";
 
 /** `$50/year`. */
 export const perInterval = (price: number, interval: "month" | "year") => `$${price}/${interval}`;
@@ -35,9 +34,9 @@ function Terms({ offer }: { offer: Tier }) {
           offer.id === "founding" ? " Your founding price stays for as long as your subscription does." : ""
         }`,
         "Cancel any time from your account page. You keep Hosted until the end of the period you paid for.",
-        interval === "year"
-          ? "Ask within 30 days of your first payment or of a yearly renewal for a full refund, which ends the plan."
-          : "Ask within 30 days of your first payment for a full refund, which ends the plan. Monthly renewals are outside this guarantee.",
+        `Ask within ${refundWindow(offer.id)} for a full refund, which ends the plan.${
+          offer.id === "monthly" ? " Monthly renewals are outside this guarantee." : ""
+        }`,
         `For one person, including work use, with no device limit. Natural Voice speaks up to ${VOICE_DAILY_CAP} alarms a day; past that, alarms use the system voice.`,
       ].map((line) => (
         <li key={line} className={`py-2 leading-snug ${DASHED_ROW_CLASS}`}>

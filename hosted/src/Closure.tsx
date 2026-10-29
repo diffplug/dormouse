@@ -3,10 +3,9 @@ import { MUTED_TEXT_CLASS, PANEL_CLASS, siteButton } from "dormouse-lib/site/doc
 import { RECENT_LOGIN_WINDOW } from "../server/policy-constants";
 import { PLAN_NAMES } from "../../website/src/lib/hosted-pricing.ts";
 import type { BillingSummary } from "../server/billing-summary";
+import { day } from "./billing";
 import { BUTTON_CLASS, HEADING_CLASS, HELP_CLASS } from "./classes";
 import { SupportLink } from "./Withdrawal";
-
-const day = (iso: string) => new Date(iso).toLocaleDateString();
 
 /**
  * What closing does to the account's plan, said before it is confirmed

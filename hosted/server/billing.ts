@@ -10,10 +10,7 @@ import { retryClosures } from "./closure";
 import { grantsAccessSql } from "./entitlement";
 import { runNotices } from "./notices";
 import { retryWithdrawals } from "./withdrawal";
-import { BILLING_RETURN_PATH, type Plan } from "./policy-constants";
-
-/** A purchase that ends within this many days of starting is a refund: its seat returns to its cohort. */
-export const REFUND_DAYS = 30;
+import { BILLING_RETURN_PATH, REFUND_DAYS, type Plan } from "./policy-constants";
 
 export const DAY_MS = 24 * 60 * 60 * 1000;
 
