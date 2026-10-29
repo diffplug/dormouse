@@ -40,7 +40,8 @@ export const ENDED_FOR_WITHDRAWAL = "dormouse: EEA or UK withdrawal";
 /** How long the cron keeps retrying a withdrawal's acknowledgement or settlement. */
 const RETRY_DAYS = 30;
 
-const PLAN_NAMES: Record<Plan, string> = {
+/** Each plan's name, as the emails billing sends name it. */
+export const PLAN_NAMES: Record<Plan, string> = {
   monthly: HOSTED_MONTHLY.name,
   yearly: HOSTED_YEARLY.name,
   founding: "Founding",
@@ -72,7 +73,7 @@ export interface WithdrawalRow {
 }
 
 /** The Stripe customer's billing email and address country, or null when Stripe cannot say. */
-async function billingContact(billing: Billing<Plan>, ownerId: string) {
+export async function billingContact(billing: Billing<Plan>, ownerId: string) {
   const account = await billing.db
     .selectFrom("accounts")
     .select("customer_id")

@@ -103,10 +103,29 @@ Errors are JSON `{ message }`. The cookie routes need no entitlement, answer 401
 - **Must suspend, never end, on an open dispute**, by its current status read from Stripe, not the event (`dormouse_billing_disputes`); closing in the account's favor restores it.
 - **Must offer founding at the first ladder step whose completed purchases, refunds included, are short of `FOUNDING_COHORT_SIZE`**; its seats left exclude purchases ended within `REFUND_DAYS`. Past the last step, founding checkout answers 409.
 - **Must answer `/api/hosted/*` without resolving a login**, each answer reused for `COHORT_CACHE_MS` per isolate; `total` counts founding purchases net of refunds. The site's Worker forwards it from `dormouse.sh` to this origin, so the 421 gate needs no exception. What it answers and fetches: `docs/specs/security-hosted.md` -> "Account boundary".
-- **Must resync, every 10 minutes from the account's Cron Trigger, a bounded random batch of owners whose `active` or `trialing` row no longer grants access**, so a missed renewal webhook lapses a member only until a run picks them, and finish a bounded batch of unfinished withdrawals; a failure fails the invocation after every one was tried.
+- **Must resync, every 10 minutes from the account's Cron Trigger, a bounded random batch of owners whose `active` or `trialing` row no longer grants access**, so a missed renewal webhook lapses a member only until a run picks them, finish a bounded batch of unfinished withdrawals, and run the notices ("Billing notices"); a failure fails the invocation after every one was tried.
 - **Must grant the account's role the `pgstencil_billing` schema from `runtime-roles.sql`**, additively: the package's migration creates it.
 
 Source of truth: `billingSetup`, `withBilling`, and `resyncBilling` in `hosted/server/billing.ts`; `billingRoutes` and `disputeAction` in `hosted/server/billing-routes.ts`; `withdrawalOffer` and `completeWithdrawal` in `hosted/server/withdrawal.ts`; `cohortRoutes` in `hosted/server/cohort-routes.ts`; `forwardHosted` in `website/public/_worker.js`. Pinned by `hosted/server/tests/billing.test.ts` and `hosted/server/tests/billing-routes.test.ts`, on StripeDev.
+
+## Billing notices
+
+Each notice is a `dormouse_billing_notices` row, recorded before it is sent and stamped once Postmark accepts it, one per kind and renewal or dispute.
+
+| Kind | Due | Still sent while |
+|---|---|---|
+| `renewal` (yearly and founding, doubling as their annual reminder) | 30 days before the renewal | the subscription is `active` and renews then |
+| `annual` (monthly) | 30 days before each renewal ending a year since its start | the same |
+| `price_change` | 21 days before the first renewal on or after the change's `effectiveAt` | the same, on the old Price, over 8 days ahead |
+| `dispute_suspended` | a dispute opens a suspension | the dispute is open, for 30 days |
+| `dispute_restored` | it closes in the account's favor, no other open | 30 days |
+
+- **Must send every notice to the Stripe customer's email**, never the sign-in email, so a provider-only account gets them.
+- **Must record a dispute's notice in the webhook's transaction** and send it after the commit; a failed send never fails the event.
+- **A price change is an operator's `dormouse_price_changes` row** (`hosted/README.md`); both its Prices grant the plan once inserted. **Never act on one naming a founding Price or another plan's**, or whose Prices Stripe does not hold at its amounts, in USD, at the plan's interval.
+- **Must move a subscription to the new Price, without proration, only after its notice was sent at least 7 days before the renewal it names**, while Stripe still renews it then on the old Price; a later notice waits for the next renewal. Checks: `docs/specs/security-hosted.md` -> "Account boundary".
+
+Source of truth: `runNotices` and `sendNotices` in `hosted/server/notices.ts`; `recordDispute` in `hosted/server/billing-routes.ts`; `hosted/server/dormouse-migrations/018_billing_notices.sql`.
 
 ## Account closure
 
