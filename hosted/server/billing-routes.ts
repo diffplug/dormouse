@@ -318,7 +318,8 @@ async function processEvent(
     });
     dispute = { id: current.id, charge: current.charge as Stripe.Charge, action: disputeAction(current.status) };
   }
-  // Set by `apply`, which pgstencil runs inside the event's transaction.
+  // Set by `apply`, which pgstencil runs inside the event's transaction, and
+  // skips for an event already processed.
   let owner = null as string | null;
   await billing.webhook(event, async (verified, trx, { ownerId, subscription: synced }) => {
     owner = ownerId;
@@ -343,6 +344,8 @@ async function processEvent(
   });
   const refunded = event.type === "charge.refunded" ? (event.data.object as Stripe.Charge) : null;
   const reversed = refunded?.refunded ? refunded : dispute?.action === "end" ? dispute.charge : null;
+  // A redelivery after a failed end runs no `apply`: the charge names the owner.
+  if (reversed || dispute) owner ??= await billing.ownerOfCustomer(idOf((reversed ?? dispute!.charge).customer));
   if (owner && reversed) await endForRefund(billing, owner, reversed);
   if (owner && dispute)
     for (const error of await sendNotices(billing, mail, context, { userId: owner }))

@@ -629,6 +629,46 @@ test("an open dispute suspends without ending, closing it in the account's favor
   expect(await member.summary()).toMatchObject({ plan: null, entitled: false, suspended: false });
 });
 
+test("an end that fails after the commit is retried by the redelivery, for a full refund and a lost dispute", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const refundedMember = await f.account();
+  const { session: refundedSession, subscription: refunded } = await f.buy(refundedMember, "monthly");
+  f.paidInvoices.set("pi_refunded", refunded.id);
+  const disputedMember = await f.account();
+  const { session: disputedSession, subscription: disputed } = await f.buy(disputedMember, "yearly");
+  f.paidInvoices.set("pi_du_lost", disputed.id);
+  f.disputes.set("du_lost", { status: "lost", customer: disputedSession.customer as string, paymentIntent: "pi_du_lost" });
+  for (const [event, member, subscription] of [
+    [
+      f.event("charge.refunded", {
+        id: "ch_refunded",
+        object: "charge",
+        customer: refundedSession.customer,
+        payment_intent: "pi_refunded",
+        refunded: true,
+      }),
+      refundedMember,
+      refunded,
+    ],
+    [f.event("charge.dispute.closed", { id: "du_lost", object: "dispute", charge: "ch_for_du_lost" }), disputedMember, disputed],
+  ] as const) {
+    // The event commits, then Stripe refuses the cancellation: 503, so Stripe redelivers.
+    f.failing.cancels = 1;
+    expect((await f.send(event)).status, event.type).toBe(503);
+    expect(await f.entitledOn(member.id), event.type).toBe(true);
+    // The redelivery finds the event processed, and still ends the subscription.
+    expect((await f.send(event)).status, event.type).toBe(200);
+    expect(f.cancels.at(-1), event.type).toEqual({ subscription: subscription.id });
+    expect(await f.entitledOn(member.id), event.type).toBe(false);
+  }
+  expect(await f.ended()).toEqual(
+    [refunded.id, disputed.id].sort().map((subscription) => ({ subscription, reason: END_REASONS.refund })),
+  );
+});
+
 test("the cron rereads open disputes from Stripe, so a missed close event restores once or ends", async ({ onTestFinished }) => {
   const f = await fixture();
   onTestFinished(f.close);
