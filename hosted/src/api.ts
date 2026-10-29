@@ -2,8 +2,8 @@ import { providerIds, providerNames } from "../server/providers.js";
 import type { ProviderId } from "../server/providers.js";
 import { NOT_ENTITLED_ERROR } from "../../remote-lib-common/src/remote/wire.ts";
 import { ADMIN_METRICS_PATH, type AdminMetricsBody } from "../server/metric-labels";
-import type { BillingSummary } from "../server/billing-summary";
-import { CHECKOUT_CLOSED, PRICE_CHANGED, TERMS_VERSION, type Plan } from "../server/policy-constants";
+import type { BillingClosed, BillingSummary } from "../server/billing-summary";
+import { PRICE_CHANGED, TERMS_VERSION, type Plan } from "../server/policy-constants";
 
 export const providers = providerIds;
 export type Provider = ProviderId;
@@ -20,8 +20,6 @@ async function request(
   path: string,
   init: RequestInit | undefined,
   unavailable: string,
-  /** Let a 503 through, for a caller that reads its message. */
-  pass503 = false,
 ): Promise<Response> {
   let response: Response;
   try {
@@ -33,7 +31,7 @@ async function request(
   } catch {
     throw new Error("Could not connect. Check your connection and try again.");
   }
-  if (response.status >= 500 && !(pass503 && response.status === 503)) throw new Error(unavailable);
+  if (response.status >= 500) throw new Error(unavailable);
   return response;
 }
 async function json<T>(path: string, init?: RequestInit): Promise<T> {
@@ -230,13 +228,7 @@ export async function getAdminMetrics(): Promise<AdminMetricsRead> {
 
 const BILLING_UNAVAILABLE = "Billing is temporarily unavailable. Try again.";
 async function billing(path: string, init?: RequestInit): Promise<Response> {
-  return request(`/api/billing${path}`, init, BILLING_UNAVAILABLE, true);
-}
-/** A billing call's error: closed, or the server's message for this page. */
-async function billingRefused(response: Response): Promise<Error> {
-  return response.status === 503 && !(await response.clone().json().then((body) => body?.message === CHECKOUT_CLOSED, () => false))
-    ? new Error(BILLING_UNAVAILABLE)
-    : refused(response);
+  return request(`/api/billing${path}`, init, BILLING_UNAVAILABLE);
 }
 const sendJson = (method: string, body: unknown): RequestInit => ({
   method,
@@ -246,10 +238,9 @@ const sendJson = (method: string, body: unknown): RequestInit => ({
 /** This account's plan; `closed` until checkout opens. */
 export async function getBilling(): Promise<BillingSummary | "closed"> {
   const response = await billing("");
-  if (response.ok) return (await response.json()) as BillingSummary;
-  const error = await billingRefused(response);
-  if (error.message === CHECKOUT_CLOSED) return "closed";
-  throw error;
+  if (!response.ok) throw await refused(response);
+  const body = (await response.json()) as BillingSummary | BillingClosed;
+  return "closed" in body ? "closed" : body;
 }
 /** A checkout refused because `price` is no longer what it would charge. */
 export class PriceChangedError extends Error {}
@@ -263,7 +254,7 @@ export async function startCheckout(plan: Plan, price: number, ref: string | nul
     sendJson("POST", { plan, ...(ref ? { ref } : {}), terms: TERMS_VERSION, autoRenew: true, price }),
   );
   if (!response.ok) {
-    const error = await billingRefused(response);
+    const error = await refused(response);
     throw response.status === 409 && error.message === PRICE_CHANGED ? new PriceChangedError(error.message) : error;
   }
   leaveFor(((await response.json()) as { url: string }).url, BILLING_UNAVAILABLE);
@@ -271,19 +262,19 @@ export async function startCheckout(plan: Plan, price: number, ref: string | nul
 /** Confirms the checkout Stripe returned from, answering the plan it bought. */
 export async function confirmCheckout(checkout: string): Promise<BillingSummary> {
   const response = await billing("/confirm", sendJson("POST", { checkout }));
-  if (!response.ok) throw await billingRefused(response);
+  if (!response.ok) throw await refused(response);
   return (await response.json()) as BillingSummary;
 }
 /** Sends this tab to Stripe's billing portal for this account's subscription. */
 export async function openPortal() {
   const response = await billing("/portal", { method: "POST" });
-  if (!response.ok) throw await billingRefused(response);
+  if (!response.ok) throw await refused(response);
   leaveFor(((await response.json()) as { url: string }).url, BILLING_UNAVAILABLE);
 }
 /** Withdraws from the contract `subscription` names, answering the plan with its acknowledgement. */
 export async function withdraw(subscription: string): Promise<BillingSummary> {
   const response = await billing("/withdraw", sendJson("POST", { subscription }));
-  if (!response.ok) throw await billingRefused(response);
+  if (!response.ok) throw await refused(response);
   return (await response.json()) as BillingSummary;
 }
 /** Closes this account, cancelling its subscription first; its login ends with it. */
@@ -292,18 +283,17 @@ export async function closeAccount() {
     "/api/account/close",
     sendJson("POST", { close: true }),
     "Your account cannot be closed right now. Try again.",
-    true,
   );
   if (!response.ok) throw await refused(response);
 }
 /** Joins the founders row under `name`, answering the plan. */
 export async function joinFounders(name: string): Promise<BillingSummary> {
   const response = await billing("/founder", sendJson("PUT", { shown: true, name }));
-  if (!response.ok) throw await billingRefused(response);
+  if (!response.ok) throw await refused(response);
   return (await response.json()) as BillingSummary;
 }
 /** Leaves the founders row; billing need not be open. */
 export async function leaveFounders() {
   const response = await billing("/founder", sendJson("PUT", { shown: false }));
-  if (!response.ok) throw await billingRefused(response);
+  if (!response.ok) throw await refused(response);
 }

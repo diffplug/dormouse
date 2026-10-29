@@ -6,7 +6,7 @@ import type { Kysely } from "kysely";
 import { readJson } from "remote-lib-common";
 import { accountQuery, cookieLogin, smallBody, type AccountHost } from "./account-gate";
 import { foundingCohort, idOf, run, withBilling, type BillingSetup, type PriceCatalog } from "./billing";
-import type { BillingSummary, Withdrawn } from "./billing-summary";
+import type { BillingClosed, BillingSummary, Withdrawn } from "./billing-summary";
 import { CURRENT_STATUSES, entitledSql, subscribedSql } from "./entitlement";
 import { checkoutRef, type MetricEvent } from "./metric-labels";
 import { countMetricInTransaction, recordMetric } from "./metrics";
@@ -69,14 +69,19 @@ export function disputeAction(status: string): "suspend" | "restore" | "end" | n
 export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost) {
   const gate = cookieLogin(host);
 
-  /** Runs `action` on this deployment's `Billing`: 503 while closed, a `BillingError` as its status. */
+  /**
+   * Runs `action` on this deployment's `Billing`, a `BillingError` answered
+   * as its status; while billing is closed, answers `closed`, by default 409
+   * `CHECKOUT_CLOSED`.
+   */
   const billed = async (
     c: Context,
     action: (billing: Billing<Plan>, setup: BillingSetup, catalog: PriceCatalog) => Promise<Response>,
+    closed: () => Response = () => c.json({ message: CHECKOUT_CLOSED }, 409),
   ) => {
     const deployment = host(c);
     const setup = deployment.setup();
-    if (!setup) return c.json({ message: CHECKOUT_CLOSED }, 503);
+    if (!setup) return closed();
     try {
       return await withBilling(setup, deployment.databaseUrl, new URL(c.req.url).origin, (billing, catalog) =>
         action(billing, setup, catalog),
@@ -155,7 +160,11 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
   };
 
   app.get("/api/billing", gate, (c) =>
-    billed(c, (billing, setup, catalog) => summary(c, billing, setup, catalog, c.get("login").userId)),
+    billed(
+      c,
+      (billing, setup, catalog) => summary(c, billing, setup, catalog, c.get("login").userId),
+      () => c.json({ closed: true } satisfies BillingClosed),
+    ),
   );
 
   app.post("/api/billing/checkout", smallBody(JSON_BODY_BYTES), gate, async (c) => {
@@ -273,7 +282,8 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
   });
 
   // Stripe's: the raw body under its signature, 2xx only once `webhook()` has
-  // committed; any other failure throws to `onError`'s 503, which Stripe retries.
+  // committed; any other failure throws to `onError`'s 503, which Stripe
+  // retries, and billing closed answers 503 too, so its events wait.
   app.post(BILLING_WEBHOOK_PATH, smallBody(WEBHOOK_BODY_BYTES), async (c) => {
     const signature = c.req.header("stripe-signature");
     if (!signature) return c.json({ message: "Missing signature." }, 400);
@@ -281,7 +291,7 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
     return billed(c, async (billing, _setup, catalog) => {
       await processEvent(billing, body, signature, () => host(c).mail(), { catalog, origin: new URL(c.req.url).origin });
       return c.json({ received: true });
-    });
+    }, () => c.json({ message: CHECKOUT_CLOSED }, 503));
   });
 }
 

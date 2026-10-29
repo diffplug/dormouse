@@ -2,7 +2,12 @@
 // imports this as well as the account Worker.
 import type { Plan } from "./policy-constants";
 
-/** `GET /api/billing`, and every billing mutation's answer. */
+/** `GET /api/billing` while billing is closed: not an outage, so not a 5xx. */
+export interface BillingClosed {
+  closed: true;
+}
+
+/** `GET /api/billing` while billing is open, and every billing mutation's answer. */
 export interface BillingSummary {
   /** The subscription Stripe still holds, paid up or not; null without one. */
   plan: Plan | null;

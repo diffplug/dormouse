@@ -80,7 +80,7 @@ The account Worker bills through `@pgstencil/stripe` (`docs/specs/pricing.md` ->
 
 | Route | Credential | Success |
 |---|---|---|
-| `GET /api/billing` | login cookie | 200 `{ plan, price, active, until, renews, entitled, suspended, founding, founder, consent, withdrawal, withdrawn }`; `plan` names a subscription Stripe still holds |
+| `GET /api/billing` | login cookie | 200 `{ plan, price, active, until, renews, entitled, suspended, founding, founder, consent, withdrawal, withdrawn }`; `plan` names a subscription Stripe still holds; closed, 200 `{ closed: true }` |
 | `POST /api/billing/checkout` | login cookie, exact `Origin`, JSON `{ plan, ref?, terms, autoRenew, price }` | 200 `{ url }` of Stripe Checkout |
 | `POST /api/billing/confirm` | login cookie, exact `Origin`, JSON `{ checkout }` | 200, the `GET` body |
 | `POST /api/billing/portal` | login cookie, exact `Origin` | 200 `{ url }` of the customer portal |
@@ -92,7 +92,7 @@ The account Worker bills through `@pgstencil/stripe` (`docs/specs/pricing.md` ->
 
 Errors are JSON `{ message }`. The cookie routes need no entitlement, answer 401 without a login, and cap a body at 4 KiB.
 
-- **Must keep billing closed without all five bindings**: the secrets `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET`, and the vars `STRIPE_PRICE_MONTHLY`, `STRIPE_PRICE_YEARLY`, and `STRIPE_PRICES_FOUNDING` (cohort order); closed, every route past the login gate but leaving the founders row answers 503 `CHECKOUT_CLOSED` and the resync reads nothing. **Must refuse a founding list whose length differs from `FOUNDING_LADDER`**, or a malformed or repeated Price. Live mode follows the key's prefix.
+- **Must keep billing closed without all five bindings**: the secrets `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET`, and the vars `STRIPE_PRICE_MONTHLY`, `STRIPE_PRICE_YEARLY`, and `STRIPE_PRICES_FOUNDING` (cohort order); closed, every cookie route past the login gate but `GET` and leaving the founders row answers 409 `CHECKOUT_CLOSED`, the webhook and the cohort read 503 `CHECKOUT_CLOSED`, and the resync reads nothing. **Must refuse a founding list whose length differs from `FOUNDING_LADDER`**, or a malformed or repeated Price. Live mode follows the key's prefix.
 - **Never offer a trial or Managed Payments; must enable Stripe Tax on every Checkout.**
 - **Never take a Price, customer, owner, quantity, or return URL from a request**: checkout takes a plan name and a `ref`, normalized as `checkoutRef` does; the owner is the login, its email only once verified (else Checkout asks), and Stripe returns to `/billing`. A checkout open for another plan is expired first; a held subscription refuses another with 409.
 - **Must start a checkout only after agreement to `TERMS_VERSION` and to automatic renewal at the `price` the page showed, recorded in `dormouse_checkout_consents` before its URL is answered**; another version answers 409 `TERMS_CHANGED`, and a checkout whose Price `priceCatalog` does not price at `price` is expired and answers 409 `PRICE_CHANGED`. `GET` shows the latest while a subscription is held.
@@ -135,7 +135,7 @@ Source of truth: `runNotices` and `sendNotices` in `hosted/server/notices.ts`; `
 
 Errors are JSON `{ message }`; it needs no entitlement and works with billing closed. What the page says first: `docs/specs/pricing.md` -> "Checkout and entitlement".
 
-- **Must refuse a login older than `LOGIN_FRESH_AGE_MS`** with 403 `CLOSE_RECENT_LOGIN`, and, billing closed, an account with a current subscription row with 503 `CLOSE_UNAVAILABLE`.
+- **Must refuse a login older than `LOGIN_FRESH_AGE_MS`** with 403 `CLOSE_RECENT_LOGIN`, and, billing closed, an account with a current subscription row with 409 `CLOSE_UNAVAILABLE`.
 - **Must expire an open checkout, then cancel every current subscription in Stripe (`ENDED_FOR_CLOSURE`), before one statement records the closure (`dormouse_account_closures`) and deletes the `"user"` row**; rows without a foreign key stay. Its Burrows' sockets then close as a removal's do ("Relay sockets"). Checks: `docs/specs/security-hosted.md` -> "Account boundary".
 - **Must then refund what closing owes** (`docs/specs/pricing.md` -> "Checkout and entitlement"): a first payment while `purchaseStanding` counts the end a refund, a yearly or founding renewal paid within `REFUND_DAYS` of it. The closure is stamped settled once done; the cron retries for 30 days.
 

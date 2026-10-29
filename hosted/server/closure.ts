@@ -21,7 +21,7 @@ export interface ClosureHost extends AccountHost {
 /** The 403 a closure from a login older than the recent-login window gets. */
 export const CLOSE_RECENT_LOGIN = `Sign in again to close your account. Closing it needs a login from the last ${RECENT_LOGIN_WINDOW}.`;
 
-/** The 503 a closure gets when it cannot reach billing to cancel a subscription the account holds. */
+/** The 409 a closure gets while billing is closed and the account holds a subscription it cannot cancel. */
 export const CLOSE_UNAVAILABLE = `Your account cannot be closed online right now. Try again later, or email ${SUPPORT_EMAIL}.`;
 
 /** The cancellation comment a subscription ended by closing its account carries. */
@@ -161,7 +161,7 @@ export function closureRoutes(app: Hono<any>, host: (c: Context) => ClosureHost)
         `SELECT EXISTS (SELECT FROM pgstencil_billing.subscriptions WHERE owner_id = $1 AND status = ANY ($2::text[])) AS held`,
         [userId, CURRENT_STATUSES],
       );
-      if (held?.held) return c.json({ message: CLOSE_UNAVAILABLE }, 503);
+      if (held?.held) return c.json({ message: CLOSE_UNAVAILABLE }, 409);
       await close([]);
       return c.body(null, 204);
     }

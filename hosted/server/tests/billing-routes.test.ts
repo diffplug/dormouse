@@ -208,23 +208,27 @@ test("a dispute's status suspends, restores, or ends, and an inquiry changes not
   ).toEqual(["suspend", "suspend", "restore", "restore", "restore", "end", null, null]);
 });
 
-test("closed, every billing route but leaving the founders row answers 503 to a signed-in account, after the login gate", async ({
+test("closed, a signed-in account reads billing as closed and every billing change but leaving the founders row answers 409, after the login gate", async ({
   onTestFinished,
 }) => {
   const f = await fixture({ closed: true });
   onTestFinished(f.close);
   const member = await f.account();
+  const read = await member.request("/api/billing");
+  expect([read.status, await read.json()]).toEqual([200, { closed: true }]);
+  expect((await f.anonymous("/api/billing")).status).toBe(401);
   for (const [method, path, body] of [
-    ["GET", "/api/billing"],
     ["POST", "/api/billing/checkout", { plan: "monthly" }],
     ["POST", "/api/billing/confirm", { checkout: "op_x" }],
     ["POST", "/api/billing/portal"],
+    ["POST", "/api/billing/withdraw", { subscription: "sub_x" }],
     ["PUT", "/api/billing/founder", { shown: true, name: "Ada" }],
   ] as const) {
     const response = await member.request(path, { method, body });
-    expect([path, response.status, await response.json()]).toEqual([path, 503, { message: CHECKOUT_CLOSED }]);
+    expect([path, response.status, await response.json()]).toEqual([path, 409, { message: CHECKOUT_CLOSED }]);
     expect((await f.anonymous(path, method)).status, path).toBe(401);
   }
+  // Stripe's events wait, retried, until billing opens.
   const { body, signature } = f.dev.signed(f.event("customer.updated", { id: "cus_x" }));
   expect((await f.webhook(body, signature)).status).toBe(503);
   // Leaving needs nothing from billing.
@@ -1016,7 +1020,7 @@ test("with billing closed, closing deletes an account without a subscription and
     [held.id],
   );
   const refused = await held.request("/api/account/close", { method: "POST", body: { close: true } });
-  expect([refused.status, await refused.json()]).toEqual([503, { message: CLOSE_UNAVAILABLE }]);
+  expect([refused.status, await refused.json()]).toEqual([409, { message: CLOSE_UNAVAILABLE }]);
   expect(await f.sql(`SELECT id FROM "user" WHERE id = $1`, [held.id])).toEqual([{ id: held.id }]);
 });
 
@@ -1438,7 +1442,7 @@ test("a shown founder's picture is fetched from the provider's host and served a
     expect((await f.visit(path)).status, path).toBe(404);
 });
 
-test("closed, the public routes answer as billing's do", async ({ onTestFinished }) => {
+test("closed, the public cohort read answers 503 and no picture is served", async ({ onTestFinished }) => {
   const f = await fixture({ closed: true });
   onTestFinished(f.close);
   const response = await f.visit(COHORT_ENDPOINT);

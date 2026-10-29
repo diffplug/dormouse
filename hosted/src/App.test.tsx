@@ -8,7 +8,7 @@ import * as api from "./api";
 import type { Enrollment } from "./enrollment";
 import type { BillingSummary } from "../server/billing-summary";
 import type { CheckoutIntent } from "./billing";
-import { ENROLLMENT_POLL_INTERVAL_S, PRICE_CHANGED, TERMS_VERSION } from "../server/policy-constants";
+import { CHECKOUT_CLOSED, ENROLLMENT_POLL_INTERVAL_S, PRICE_CHANGED, TERMS_VERSION } from "../server/policy-constants";
 import { NOT_ENTITLED_ERROR } from "../../remote-lib-common/src/remote/wire.ts";
 import { WITHDRAWAL_STATEMENT } from "../../website/src/lib/hosted-withdrawal";
 
@@ -560,6 +560,21 @@ describe("withdrawal and closure", () => {
     await click("Close account…");
     expect(button("Close account").disabled).toBe(true);
     expect(text()).toContain("Your plan could not load");
+  });
+});
+
+describe("billing reads", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("reads closed billing from a 200's body, and any 5xx as an outage", async () => {
+    const { getBilling, closeAccount } = await vi.importActual<typeof import("./api")>("./api");
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ closed: true }));
+    expect(await getBilling()).toBe("closed");
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ message: CHECKOUT_CLOSED }, { status: 503 }));
+    await expect(getBilling()).rejects.toThrow("Billing is temporarily unavailable");
+    // A closure billing refuses shows the server's message.
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ message: "Email support." }, { status: 409 }));
+    await expect(closeAccount()).rejects.toThrow("Email support.");
   });
 });
 

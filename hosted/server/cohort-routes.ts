@@ -157,8 +157,8 @@ async function snapshot(host: CohortHost, setup: BillingSetup, origin: string): 
  * The Hosted page's founders row and seat counter, which the site's Worker
  * forwards from `dormouse.sh/api/hosted/*`: public reads that resolve no
  * login, each answer reused for {@link COHORT_CACHE_MS} in this isolate.
- * Closed, both answer as billing's routes do. Call before any `/api/*`
- * catch-all.
+ * Closed, the cohort read answers 503 `CHECKOUT_CLOSED`, and a picture 404.
+ * Call before any `/api/*` catch-all.
  */
 export function cohortRoutes(app: Hono<any>, host: (c: Context) => CohortHost, now = () => Date.now()) {
   let cached: { at: number; value: Promise<Snapshot> } | null = null;
