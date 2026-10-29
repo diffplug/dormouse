@@ -1132,8 +1132,28 @@ test("a computer is enrolled under the name its poll sends, reduced, or none; th
     if (/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(char)) stripped.push(char);
   }
   expect(stripped.length).toBeGreaterThan(200);
-  for (const label of [...stripped.map((char) => `a${char}b`), "", " a", "a ", "a".repeat(MAX_BURROW_LABEL_LENGTH + 1)])
-    await expect(store(label), JSON.stringify(label)).rejects.toThrow(/check constraint/);
+  // Padding as JavaScript's trim counts it, which the reduction strips.
+  const padding = Array.from({ length: 0x10000 }, (_, point) => String.fromCharCode(point)).filter((char) => char.trim() === "");
+  expect(padding.length).toBeGreaterThan(20);
+  const padded = padding.flatMap((char) => [`${char}a`, `a${char}`]);
+  // On one connection, each attempt under its own savepoint: over a thousand.
+  const refused = await withClient(f.ownerUrl, async (db) => {
+    const codes: string[] = [];
+    await db.query("BEGIN");
+    for (const label of [...stripped.map((char) => `a${char}b`), ...padded, "", "a".repeat(MAX_BURROW_LABEL_LENGTH + 1)]) {
+      await db.query("SAVEPOINT label");
+      await db
+        .query(`UPDATE dormouse_relay_burrows SET label = $2 WHERE "burrowId" = $1`, [burrowId, label])
+        .then(
+          () => codes.push(`stored ${JSON.stringify(label)}`),
+          (error: { code?: string }) => codes.push(error.code ?? "?"),
+        );
+      await db.query("ROLLBACK TO SAVEPOINT label");
+    }
+    await db.query("ROLLBACK");
+    return [...new Set(codes)];
+  });
+  expect(refused).toEqual(["23514"]);
 });
 
 test("an approval redeems only the device code its user code is derived from", async ({ onTestFinished }) => {

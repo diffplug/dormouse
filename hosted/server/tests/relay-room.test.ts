@@ -93,6 +93,7 @@ async function rpc<T>(account: string, method: string, ...args: unknown[]): Prom
 /** `account`'s object, as the Workers reach it. */
 const roomOf = (account: string) => ({
   closeBurrow: (claimed: string, burrowId: string) => rpc<boolean>(account, "closeBurrow", claimed, burrowId),
+  closeSessions: (claimed: string, tokenHashes: string[]) => rpc<number>(account, "closeSessions", claimed, tokenHashes),
   onlineBurrows: (claimed: string) => rpc<string[]>(account, "onlineBurrows", claimed),
   probe: () => rpc<Probe>(account, "probe"),
   skew: (ms: number) => rpc<null>(account, "skew", ms),
@@ -365,8 +366,8 @@ test("each upgrade resolves its token and Origin first, and hands the object onl
       json: { error: UNAUTHORIZED_ERROR },
     });
 
-  // Admitted, the object hears the account and the Burrow or the expiry, and
-  // not one of the caller's headers or its token.
+  // Admitted, the object hears the account and the Burrow or the session's
+  // expiry and token hash, and not one of the caller's headers or its token.
   const before = (await (await owner.room()).probe()).upgrades.length;
   await open(burrowUrl(burrowToken), {
     headers: { cookie: "a=b", authorization: "Bearer x", "cf-connecting-ip": "203.0.113.9" },
@@ -375,8 +376,11 @@ test("each upgrade resolves its token and Origin first, and hands the object onl
   const { upgrades, storage } = await (await owner.room()).probe();
   expect(upgrades.slice(before)).toEqual([
     { headers: ["upgrade"], params: ["account", "burrow"] },
-    { headers: ["upgrade"], params: ["account", "expires"] },
+    { headers: ["upgrade"], params: ["account", "expires", "session"] },
   ]);
+  expect((await (await owner.room()).probe()).attachments).toContainEqual(
+    expect.objectContaining({ role: "client", session: digest(owner.sessionToken) }),
+  );
   // Its one durable value is the account it serves.
   expect(storage).toEqual({ account: owner.userId });
   expect((await call(API_ROUTES.burrows, { bearer: owner.sessionToken, method: "GET" })).json.burrows).toContainEqual({
@@ -428,20 +432,23 @@ test("routing survives hibernation: across a binding, a replacement, and a pendi
   expect(await second.take()).toMatchObject({ step: "init", clientId: forwarded.clientId });
 
   // A session about to expire: its alarm wakes the object it was armed in.
-  await sql(`UPDATE dormouse_relay_sessions SET "expiresAt" = now() + interval '2 seconds'`);
-  const expiring = await owner.driver.connectClient();
+  const { sessionToken } = await signedIn((await burrowRow(owner.userId)).burrowToken);
+  await sql(`UPDATE dormouse_relay_sessions SET "expiresAt" = now() + interval '2 seconds' WHERE "tokenHash" = $1`, [
+    digest(sessionToken),
+  ]);
+  const expiring = await open(clientUrl(sessionToken), POCKET);
   expiring.send(e2eClientFrame(first.burrowId));
   const bound = await second.take();
   await hibernate(owner.userId);
   const closed = await expiring.closed;
   expect([closed.code, closed.reason]).toEqual([WS_CLOSE_UNAUTHORIZED, WS_CLOSE_UNAUTHORIZED_REASON]);
   expect(await second.take(3000)).toEqual({ t: "client-gone", clientId: bound.clientId });
-  // The Client opened before the update holds its own expiry: still routed.
+  // The Client of the other session, swept by the same alarm: still routed.
   client.send(e2eClientFrame(first.burrowId, { step: "transport" }));
   expect(await second.take()).toMatchObject({ step: "transport" });
 });
 
-test("the alarm is the earliest Client expiry or Burrow sweep; a close leaves it, and the alarm re-arms or clears", async ({
+test("the alarm is the earliest Client expiry or sweep, at most an hour off; a close leaves it, and the alarm re-arms or clears", async ({
   onTestFinished,
 }) => {
   onTestFinished(closeAll);
@@ -455,9 +462,20 @@ test("the alarm is the earliest Client expiry or Burrow sweep; a close leaves it
         [digest(owner.sessionToken)],
       )
     )[0]!.expiresAt;
-  const later = await owner.driver.connectClient();
-  expect((await room.probe()).alarm).toBe(await expiry());
-  await sql(`UPDATE dormouse_relay_sessions SET "expiresAt" = "expiresAt" - interval '1 hour'`);
+  /** Whether the alarm is a sweep interval from some moment between `from` and now. */
+  const anHourOn = async (from: number) => {
+    const alarm = (await room.probe()).alarm!;
+    return alarm >= from + RELAY_ROOM_SWEEP_MS && alarm <= Date.now() + RELAY_ROOM_SWEEP_MS;
+  };
+
+  // A Client whose session outlasts the interval brings the alarm to its sweep.
+  const opening = Date.now();
+  await owner.driver.connectClient();
+  expect(await anHourOn(opening)).toBe(true);
+  // One expiring sooner brings it to that expiry.
+  await sql(`UPDATE dormouse_relay_sessions SET "expiresAt" = now() + interval '30 minutes' WHERE "tokenHash" = $1`, [
+    digest(owner.sessionToken),
+  ]);
   const sooner = await owner.driver.connectClient();
   const soonest = await expiry();
   expect((await room.probe()).alarm).toBe(soonest);
@@ -466,21 +484,22 @@ test("the alarm is the earliest Client expiry or Burrow sweep; a close leaves it
   await sooner.closed;
   await until(async () => (await room.probe()).attachments.filter(live).length === 1);
   expect((await room.probe()).alarm).toBe(soonest);
-  await room.fire();
-  expect((await room.probe()).alarm).toBe(soonest + 3_600_000);
-
-  // A Burrow socket brings the alarm to its sweep, at most an hour off.
-  const before = Date.now();
-  await owner.driver.connectBurrow();
-  const swept = (await room.probe()).alarm!;
-  expect(swept).toBeGreaterThanOrEqual(before + RELAY_ROOM_SWEEP_MS);
-  expect(swept).toBeLessThanOrEqual(Date.now() + RELAY_ROOM_SWEEP_MS);
-  // And a sweep, while the Burrow is held, schedules the next one an hour on.
   const sweeping = Date.now();
   await room.fire();
-  const next = (await room.probe()).alarm!;
-  expect(next).toBeGreaterThanOrEqual(sweeping + RELAY_ROOM_SWEEP_MS);
-  expect(next).toBeLessThanOrEqual(Date.now() + RELAY_ROOM_SWEEP_MS);
+  expect(await anHourOn(sweeping)).toBe(true);
+  closeAll();
+  await until(async () => (await room.probe()).attachments.filter(live).length === 0);
+  await room.fire();
+  expect((await room.probe()).alarm).toBe(null);
+
+  // A Burrow socket brings the alarm to its sweep too, and a sweep while it
+  // is held schedules the next one an hour on.
+  const before = Date.now();
+  await owner.driver.connectBurrow();
+  expect(await anHourOn(before)).toBe(true);
+  const again = Date.now();
+  await room.fire();
+  expect(await anHourOn(again)).toBe(true);
   closeAll();
   await until(async () => (await room.probe()).attachments.filter(live).length === 0);
   await room.fire();
@@ -513,6 +532,62 @@ test("the sweep closes a Burrow removed (4001) or de-entitled (4002) behind its 
   await room.fire();
   expect((await kept.socket.closed).code).toBe(WS_CLOSE_BURROW_NOT_ENTITLED);
   expect(await room.onlineBurrows(owner.userId)).toEqual([]);
+});
+
+test("removing a passkey closes its sessions' Client sockets at once; the sweep closes one whose session went or lost the entitlement", async ({
+  onTestFinished,
+}) => {
+  onTestFinished(closeAll);
+  const owner = await account();
+  const room = await owner.room();
+  const { burrowId, socket: burrow } = await owner.driver.connectBurrow();
+  /** A Client socket of a session of its own, bound to the Burrow: its clientId. */
+  const bound = async (sessionToken: string) => {
+    const ws = await open(clientUrl(sessionToken), POCKET);
+    ws.send(e2eClientFrame(burrowId));
+    return { ws, clientId: (await burrow.take()).clientId as string };
+  };
+  const removed = await bound(owner.sessionToken);
+  const kept = await bound((await signedIn((await burrowRow(owner.userId)).burrowToken)).sessionToken);
+  const unauthorized = async (ws: FrameSocket) => {
+    const closed = await ws.closed;
+    return [closed.code, closed.reason];
+  };
+
+  // The account Worker's removal, its RPC reaching the object; one naming
+  // another account, or no session, closes nothing.
+  const accountApp = new Hono();
+  relayAccountRoutes(accountApp, () => ({
+    databaseUrl: context.database.url,
+    auth: async () => Response.json({ user: { id: owner.userId, email: ADMIN_EMAIL, emailVerified: true }, session: {} }),
+    approveLimit: {} as RateLimit,
+    closeBurrow: async () => true,
+    closeSessions: (userId, tokenHashes) => rpc(userId, "closeSessions", userId, tokenHashes),
+  }));
+  expect(await room.closeSessions(randomUUID(), [digest(owner.sessionToken)])).toBe(0);
+  expect(await room.closeSessions(owner.userId, [])).toBe(0);
+  await hibernate(owner.userId);
+  const response = await accountApp.request(
+    `${ORIGINS.account}/api/relay/passkeys/${encodeURIComponent(owner.authenticator.credentialId)}`,
+    { method: "DELETE", headers: { origin: ORIGINS.account } },
+  );
+  expect(response.status).toBe(204);
+  expect(await unauthorized(removed.ws)).toEqual([WS_CLOSE_UNAUTHORIZED, WS_CLOSE_UNAUTHORIZED_REASON]);
+  expect(await burrow.take()).toEqual({ t: "client-gone", clientId: removed.clientId });
+  kept.ws.send(e2eClientFrame(burrowId, { step: "transport" }));
+  expect(await burrow.take()).toMatchObject({ step: "transport", clientId: kept.clientId });
+
+  // Its session deleted with no RPC, as an eviction at the session cap is.
+  await sql(`DELETE FROM dormouse_relay_sessions WHERE "userId" = $1`, [owner.userId]);
+  await room.fire();
+  expect(await unauthorized(kept.ws)).toEqual([WS_CLOSE_UNAUTHORIZED, WS_CLOSE_UNAUTHORIZED_REASON]);
+  expect(await burrow.take()).toEqual({ t: "client-gone", clientId: kept.clientId });
+
+  // The owner loses the entitlement: a Client of a session still live goes too.
+  const third = await bound((await signedIn((await burrowRow(owner.userId)).burrowToken)).sessionToken);
+  await entitled();
+  await room.fire();
+  expect(await unauthorized(third.ws)).toEqual([WS_CLOSE_UNAUTHORIZED, WS_CLOSE_UNAUTHORIZED_REASON]);
 });
 
 test("a Burrow removed between the Worker's token check and the object's accept is refused", async ({
@@ -581,6 +656,7 @@ test("a removal answers 204 once the row is gone, even when closing its socket f
     closeBurrow: async () => {
       throw new Error("the relay is unreachable");
     },
+    closeSessions: async () => 0,
   }));
   const response = await app.request(`${ORIGINS.account}/api/relay/burrows/${burrowId}`, {
     method: "DELETE",
@@ -765,6 +841,7 @@ test("a Burrow enrolled by device code pairs and connects a phone, and under Loc
       }),
     approveLimit: { limit: async () => ({ success: true }) } as unknown as RateLimit,
     closeBurrow: async () => true,
+    closeSessions: async () => 0,
   }));
   const approved = await account.request(`${ORIGINS.account}/api/relay/enrollments/approve`, {
     method: "POST",

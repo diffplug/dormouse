@@ -34,7 +34,7 @@ import {
   type RelayToBurrowFrame,
   type RelayToClientFrame,
 } from "remote-lib-common";
-import type { RelayBurrow } from "./relay-auth";
+import type { RelayBurrow, RelaySessionOwner } from "./relay-auth";
 import {
   RELAY_ROOM_PARAMS,
   RELAY_ROOM_SWEEP_MS,
@@ -51,15 +51,17 @@ const ACCOUNT_KEY = "account";
  * Everything routing needs of a socket, held as its attachment so a woken
  * object rebuilds it from `ctx.getWebSockets` rather than from memory.
  * `openedAt` is when it was accepted, the start of its silence until it
- * pings. `retired` is the generation guard: set on a socket unregistered
- * ahead of its close handshake, after which it is neither routed nor torn
- * down again.
+ * pings. A Client's `session` is its session's token hash, what the sweep
+ * and `closeSessions` find it by. `retired` is the generation guard: set on a
+ * socket unregistered ahead of its close handshake, after which it is neither
+ * routed nor torn down again.
  */
 type Conn =
   | { role: "burrow"; burrowId: string; openedAt: number; retired?: true }
   | {
       role: "client";
       clientId: string;
+      session: string;
       expiresAt: number;
       burrowId: string | null;
       openedAt: number;
@@ -106,7 +108,7 @@ export class RelayRoom extends DurableObject implements RelayRoomRpc {
     if (!(await this.#claim(account))) return new Response(null, { status: 403 });
     return role === "burrow"
       ? this.#openBurrow(account, param(RELAY_ROOM_PARAMS.burrowId))
-      : this.#openClient(Number(param(RELAY_ROOM_PARAMS.expiresAt)));
+      : this.#openClient(param(RELAY_ROOM_PARAMS.session), Number(param(RELAY_ROOM_PARAMS.expiresAt)));
   }
 
   // --- RPC, from the Workers ------------------------------------------------
@@ -117,6 +119,14 @@ export class RelayRoom extends DurableObject implements RelayRoomRpc {
     if (!held) return false;
     this.#retire(held, WS_CLOSE_BURROW_REVOKED, WS_CLOSE_BURROW_REVOKED_REASON);
     return true;
+  }
+
+  async closeSessions(account: string, tokenHashes: string[]): Promise<number> {
+    if (!(await this.#serves(account))) return 0;
+    const ended = new Set(tokenHashes);
+    const held = this.#held("client").filter(({ conn }) => ended.has(conn.session));
+    for (const client of held) this.#retire(client, WS_CLOSE_UNAUTHORIZED, WS_CLOSE_UNAUTHORIZED_REASON);
+    return held.length;
   }
 
   async onlineBurrows(account: string): Promise<string[]> {
@@ -144,7 +154,7 @@ export class RelayRoom extends DurableObject implements RelayRoomRpc {
     return this.ctx.blockConcurrencyWhile(async () => {
       let row: RelayBurrow | undefined;
       try {
-        [row] = await this.#rows([burrowId]);
+        [row] = await this.#rows((rows) => rows.burrows([burrowId]));
       } catch {
         console.error("RelayRoom could not read a Burrow's row");
         return new Response(null, { status: 503 });
@@ -170,8 +180,8 @@ export class RelayRoom extends DurableObject implements RelayRoomRpc {
    * idle timeout is not live, so one is retired here first; only at the cap,
    * since judging silence costs a close.
    */
-  async #openClient(expiresAt: number): Promise<Response> {
-    if (!(expiresAt > this.now()))
+  async #openClient(session: string, expiresAt: number): Promise<Response> {
+    if (!session || !(expiresAt > this.now()))
       return refuseSocket(WS_CLOSE_UNAUTHORIZED, WS_CLOSE_UNAUTHORIZED_REASON);
     let clients = this.#held("client");
     if (clients.length >= MAX_RELAY_CLIENT_SOCKETS)
@@ -185,11 +195,12 @@ export class RelayRoom extends DurableObject implements RelayRoomRpc {
     server.serializeAttachment({
       role: "client",
       clientId,
+      session,
       expiresAt,
       burrowId: null,
       openedAt,
     } satisfies ClientConn);
-    await this.#armBy(expiresAt);
+    await this.#armBy(Math.min(expiresAt, this.now() + RELAY_ROOM_SWEEP_MS));
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -261,11 +272,11 @@ export class RelayRoom extends DurableObject implements RelayRoomRpc {
 
   /**
    * Every Client whose session has expired closes 1008, its Burrow told
-   * `client-gone`; while Burrow sockets are held, each is swept against its
-   * row. Then the alarm moves to the earlier of the next expiry and the next
-   * sweep, `RELAY_ROOM_SWEEP_MS` after this one started (a slow row read never
-   * delays it), or is cleared while nothing is held. Opening a socket only ever
-   * brings the alarm earlier and a close leaves it, so an alarm may find
+   * `client-gone`; then every held socket is swept against its row. Then the
+   * alarm moves to the earlier of the next expiry and the next sweep,
+   * `RELAY_ROOM_SWEEP_MS` after this one started (a slow row read never
+   * delays it), or is cleared while nothing is held. Opening a socket only
+   * ever brings the alarm earlier and a close leaves it, so an alarm may find
    * nothing to do.
    */
   async alarm() {
@@ -273,11 +284,35 @@ export class RelayRoom extends DurableObject implements RelayRoomRpc {
     for (const held of this.#held("client"))
       if (held.conn.expiresAt <= now)
         this.#retire(held, WS_CLOSE_UNAUTHORIZED, WS_CLOSE_UNAUTHORIZED_REASON);
-    if (this.#held("burrow").length > 0) await this.#sweep();
-    const next = this.#held("client").map(({ conn }) => conn.expiresAt);
-    if (this.#held("burrow").length > 0) next.push(now + RELAY_ROOM_SWEEP_MS);
-    if (next.length > 0) await this.ctx.storage.setAlarm(Math.min(...next));
-    else await this.ctx.storage.deleteAlarm();
+    const account = await this.ctx.storage.get<string>(ACCOUNT_KEY);
+    await Promise.all([this.#sweepBurrows(account), this.#sweepClients(account)]);
+    const clients = this.#held("client");
+    if (clients.length === 0 && this.#held("burrow").length === 0) return this.ctx.storage.deleteAlarm();
+    await this.ctx.storage.setAlarm(Math.min(now + RELAY_ROOM_SWEEP_MS, ...clients.map(({ conn }) => conn.expiresAt)));
+  }
+
+  /**
+   * The backstop to `closeSessions`: every held Client whose session is gone,
+   * expired, or another account's, or whose owner is no longer entitled,
+   * closes 1008 as an expired one does, its Burrow told `client-gone`. One
+   * query for them all; a failed or timed-out read leaves them to the next
+   * sweep.
+   */
+  async #sweepClients(account: string | undefined) {
+    const sessions = [...new Set(this.#held("client").map(({ conn }) => conn.session))];
+    if (sessions.length === 0) return;
+    let rows: RelaySessionOwner[];
+    try {
+      rows = await this.#rows((rows) => rows.sessions(sessions));
+    } catch {
+      console.error("RelayRoom could not sweep its Clients");
+      return;
+    }
+    // Judged on what is held now: a Client opened during the read was not asked about.
+    const gone = new Set(sessions);
+    for (const row of rows) if (row.userId === account && row.entitled) gone.delete(row.tokenHash);
+    for (const held of this.#held("client"))
+      if (gone.has(held.conn.session)) this.#retire(held, WS_CLOSE_UNAUTHORIZED, WS_CLOSE_UNAUTHORIZED_REASON);
   }
 
   /**
@@ -286,12 +321,12 @@ export class RelayRoom extends DurableObject implements RelayRoomRpc {
    * 4002, its Clients told `burrow-gone`. One query for them all; a failed or
    * timed-out read leaves them to the next sweep.
    */
-  async #sweep() {
-    const account = await this.ctx.storage.get<string>(ACCOUNT_KEY);
+  async #sweepBurrows(account: string | undefined) {
     const burrowIds = this.#held("burrow").map(({ conn }) => conn.burrowId);
+    if (burrowIds.length === 0) return;
     let rows: RelayBurrow[];
     try {
-      rows = await this.#rows(burrowIds);
+      rows = await this.#rows((rows) => rows.burrows(burrowIds));
     } catch {
       console.error("RelayRoom could not sweep its Burrows");
       return;
@@ -319,15 +354,14 @@ export class RelayRoom extends DurableObject implements RelayRoomRpc {
   }
 
   /**
-   * Those of `burrowIds` still enrolled, with their owners, read by the
-   * Worker's own `RelayRows` in an invocation of its own: an object that has
-   * held a database connection is never evicted (rationale). Rejects past
-   * `RELAY_ROW_READ_TIMEOUT_MS`, so a stalled read under
-   * `blockConcurrencyWhile` fails as a failed read does, never resetting the
-   * object and every socket it holds.
+   * What `read` answers of the Worker's own `RelayRows`, read in an
+   * invocation of its own: an object that has held a database connection is
+   * never evicted (rationale). Rejects past `RELAY_ROW_READ_TIMEOUT_MS`, so a
+   * stalled read under `blockConcurrencyWhile` fails as a failed read does,
+   * never resetting the object and every socket it holds.
    */
-  async #rows(burrowIds: string[]): Promise<RelayBurrow[]> {
-    const { RelayRows } = this.ctx.exports as { RelayRows: Pick<RelayRows, "burrows"> };
+  async #rows<T>(read: (rows: Pick<RelayRows, "burrows" | "sessions">) => Promise<T>): Promise<T> {
+    const { RelayRows } = this.ctx.exports as { RelayRows: Pick<RelayRows, "burrows" | "sessions"> };
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(
@@ -336,7 +370,7 @@ export class RelayRoom extends DurableObject implements RelayRoomRpc {
       );
     });
     try {
-      return await Promise.race([RelayRows.burrows(burrowIds), timeout]);
+      return await Promise.race([read(RelayRows), timeout]);
     } finally {
       clearTimeout(timer);
     }

@@ -6,18 +6,21 @@
 /**
  * The verified fields the relay Worker hands a `RelayRoom` with an upgrade, as
  * search parameters on a request it builds fresh: the account the token
- * named, and the Burrow's id or the session's expiry.
+ * named, and the Burrow's id or the session's expiry and token hash, the key
+ * its sweep and `closeSessions` find the session by.
  */
 export const RELAY_ROOM_PARAMS = {
   account: "account",
   burrowId: "burrow",
   expiresAt: "expires",
+  session: "session",
 } as const;
 
 /**
- * The longest a `RelayRoom` holding a Burrow socket goes between re-reading
- * its Burrows' rows: the backstop that closes a removed or de-entitled Burrow
- * when the removal's own close did not arrive.
+ * The longest a `RelayRoom` holding a socket goes between re-reading its
+ * Burrows' and Client sessions' rows: the backstop that closes a removed or
+ * de-entitled Burrow, or a Client whose session was deleted or whose account
+ * lost the entitlement, when no close arrived.
  */
 export const RELAY_ROOM_SWEEP_MS = 60 * 60 * 1000;
 
@@ -32,6 +35,8 @@ export const RELAY_ROW_READ_TIMEOUT_MS = 5_000;
 export interface RelayRoomRpc {
   /** Close `burrowId`'s socket as revoked (4001), its Clients told `burrow-gone`; whether one was held. */
   closeBurrow(account: string, burrowId: string): Promise<boolean>;
+  /** Close every Client socket opened by a session hashed `tokenHashes` as unauthorized (1008), each Burrow told `client-gone`; how many. */
+  closeSessions(account: string, tokenHashes: string[]): Promise<number>;
   /** Every Burrow holding a live socket: what `GET /api/burrows` reports online. */
   onlineBurrows(account: string): Promise<string[]>;
 }
@@ -42,6 +47,7 @@ export function relayRoom(namespace: DurableObjectNamespace<RelayRoomRpc>, accou
   return {
     fetch: (request: Request) => stub.fetch(request),
     closeBurrow: (burrowId: string) => stub.closeBurrow(account, burrowId),
+    closeSessions: (tokenHashes: string[]) => stub.closeSessions(account, tokenHashes),
     onlineBurrows: () => stub.onlineBurrows(account),
   };
 }

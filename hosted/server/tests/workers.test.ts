@@ -1,4 +1,5 @@
 import { test, expect, vi } from "vitest";
+import { Hono } from "hono";
 import { digest } from "@pgstencil/auth/security";
 import { fileURLToPath } from "node:url";
 import {
@@ -28,6 +29,7 @@ import {
   VOICE_TOKEN_IDLE_DAYS,
 } from "../voice";
 import { mintVoiceToken } from "../voice-token";
+import { voiceBearerRoutes } from "../voice";
 import { ALREADY_APPROVED, RECENT_LOGIN_REQUIRED } from "../relay-account";
 import { TERMS_VERSION, VOICE_DAILY_CAP } from "../policy-constants";
 import {
@@ -884,6 +886,32 @@ test("terms acceptance: any signed-in account records the current version once, 
       `SELECT version, "acceptedAt" FROM dormouse_terms_acceptances`,
     ),
   ).toEqual([{ version: TERMS_VERSION, acceptedAt: first.acceptedAt }]);
+});
+
+test("speak stops reading a body past its cap, one sent without a content-length included", async ({ onTestFinished }) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const admin = f.browser();
+  await admin.email(ADMIN_EMAIL);
+  const token = await admin.mint();
+  const app = new Hono();
+  voiceBearerRoutes(app, () => ({ databaseUrl: f.database.url, synthesize: undefined }));
+  let pulled = 0;
+  const chunk = new TextEncoder().encode("x".repeat(1024));
+  const body = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (++pulled > 1024) controller.close();
+      else controller.enqueue(chunk);
+    },
+  });
+  const response = await app.request("/api/voice/speak", {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body,
+    duplex: "half",
+  } as RequestInit);
+  expect(response.status).toBe(400);
+  expect(pulled).toBeLessThan(16);
 });
 
 test("Natural Voice: only the verified admin speaks; the account sees on or off and turns every token off", async ({

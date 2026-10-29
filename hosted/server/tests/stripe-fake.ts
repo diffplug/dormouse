@@ -10,6 +10,9 @@ import { stripeDevBilling } from "../billing-dev";
 export const CHANGED_PRICES = { monthly: "price_dev_monthly_next", yearly: "price_dev_yearly_next" } as const;
 export const CHANGED_USD = { monthly: 12, yearly: 120 } as const;
 
+/** What each paid invoice asked for, and each payment paid, in cents. */
+const INVOICE_CENTS = 1000;
+
 /**
  * StripeDev behind a proxy that adds what billing's refund, dispute,
  * withdrawal, and closure handling, and the price changes, call and StripeDev
@@ -17,7 +20,7 @@ export const CHANGED_USD = { monthly: 12, yearly: 120 } as const;
  * subscription's immediate cancellation, retrieval, and move to another
  * Price, a customer's retrieval with its billing country, a subscription's
  * paid invoices, why each was billed and when it was paid, and their
- * payments, refunds, and a Price's retrieval. Every other request reaches
+ * payments, how each was paid, refunds, and a Price's retrieval. Every other request reaches
  * StripeDev unchanged.
  */
 export async function stripeFake(time: Time, random: RandomSource) {
@@ -48,12 +51,18 @@ export async function stripeFake(time: Time, random: RandomSource) {
   const paidInvoices = new Map<string, string>();
   /** PaymentIntent id → why its invoice was billed, and when it was paid; else a first payment, paid at no known time. */
   const invoiceFacts = new Map<string, { reason: "subscription_create" | "subscription_cycle"; paidAt: Date }>();
+  /**
+   * PaymentIntent id → how its invoice was paid instead, when not by that
+   * PaymentIntent: by a charge without one (`ch_<id>`), by a payment record
+   * (`pr_<id>`), or marked paid out of band, with no payment.
+   */
+  const paidBy = new Map<string, "charge" | "payment_record" | "out_of_band">();
   /** Each cancellation billing asked for. */
   const cancels: { subscription: string }[] = [];
   /** Customer id → its billing address's country; none, no address. */
   const countries = new Map<string, string>();
-  /** Each refund made: its PaymentIntent and its metadata's withdrawal, or closure when it names one. */
-  const refunds: { paymentIntent: string; withdrawal: string | null; closure?: string }[] = [];
+  /** Each refund made: its PaymentIntent, or charge when it names one, and its metadata's withdrawal, or closure when it names one. */
+  const refunds: { paymentIntent?: string; charge?: string; withdrawal: string | null; closure?: string }[] = [];
   /** How many times billing read a customer, and a Price. */
   const reads = { customers: 0, prices: 0 };
   /** Refund and cancellation requests to fail, before any is made, with a Stripe outage. */
@@ -103,6 +112,8 @@ export async function stripeFake(time: Time, random: RandomSource) {
               id: `in_${intent}`,
               object: "invoice",
               status: "paid",
+              amount_due: INVOICE_CENTS,
+              currency: "usd",
               billing_reason: facts?.reason ?? "subscription_create",
               status_transitions: { paid_at: facts ? Math.floor(facts.paidAt.getTime() / 1000) : null },
             };
@@ -111,24 +122,33 @@ export async function stripeFake(time: Time, random: RandomSource) {
     }
     if (url.pathname === "/v1/refunds" && req.method === "POST") {
       const body = new URLSearchParams(raw);
-      const intent = body.get("payment_intent")!;
+      const intent = body.get("payment_intent");
+      const charge = body.get("charge")!;
       if (failing.refunds > 0) {
         failing.refunds--;
         return json(500, { error: { type: "api_error", message: "Stripe fake outage" } });
       }
-      if (refunds.some((refund) => refund.paymentIntent === intent))
+      if (refunds.some((refund) => (intent ? refund.paymentIntent === intent : refund.charge === charge)))
         return json(400, {
           error: { type: "invalid_request_error", code: "charge_already_refunded", message: "Charge has already been refunded." },
         });
       const closure = body.get("metadata[dormouse_closure]");
-      refunds.push({ paymentIntent: intent, withdrawal: body.get("metadata[dormouse_withdrawal]"), ...(closure && { closure }) });
-      return json(200, { id: `re_${intent}`, object: "refund", payment_intent: intent, status: "succeeded" });
+      const withdrawal = body.get("metadata[dormouse_withdrawal]");
+      refunds.push({ ...(intent ? { paymentIntent: intent } : { charge }), withdrawal, ...(closure && { closure }) });
+      return json(200, { id: `re_${intent ?? charge}`, object: "refund", payment_intent: intent, status: "succeeded" });
     }
     if (url.pathname === "/v1/invoice_payments" && req.method === "GET") {
       const invoice = url.searchParams.get("invoice");
       const intent = invoice?.startsWith("in_") ? invoice.slice(3) : url.searchParams.get("payment[payment_intent]");
-      const subscriptionId =
-        intent && (invoice || url.searchParams.get("payment[type]") === "payment_intent") && paidInvoices.get(intent);
+      const by = intent ? paidBy.get(intent) : undefined;
+      const listed = invoice ? by !== "out_of_band" : !by && url.searchParams.get("payment[type]") === "payment_intent";
+      const subscriptionId = intent && listed && paidInvoices.get(intent);
+      const payment =
+        by === "charge"
+          ? { type: "charge", charge: `ch_${intent}` }
+          : by === "payment_record"
+            ? { type: "payment_record", payment_record: `pr_${intent}` }
+            : { type: "payment_intent", payment_intent: intent };
       return json(200, {
         object: "list",
         has_more: false,
@@ -138,7 +158,9 @@ export async function stripeFake(time: Time, random: RandomSource) {
                 id: `inpay_${intent}`,
                 object: "invoice_payment",
                 status: "paid",
-                payment: { type: "payment_intent", payment_intent: intent },
+                amount_paid: INVOICE_CENTS,
+                currency: "usd",
+                payment,
                 invoice: {
                   id: `in_${intent}`,
                   object: "invoice",
@@ -230,6 +252,7 @@ export async function stripeFake(time: Time, random: RandomSource) {
     disputes,
     paidInvoices,
     invoiceFacts,
+    paidBy,
     cancels,
     countries,
     refunds,

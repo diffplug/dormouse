@@ -1,5 +1,6 @@
 // Rules: docs/specs/hosted.md -> "Managed voice" and "Metrics".
 import type { Context, Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { digest } from "@pgstencil/auth/security";
 import { queryDatabase, withClient } from "pgstencil/postgres";
 import { isManagedVoiceId, isManagedVoiceToken, parseBearer } from "remote-lib-common";
@@ -122,7 +123,8 @@ export function voiceBearerRoutes(app: Hono<any>, host: (c: Context) => SpeakHos
     return c.body(null, 204);
   });
 
-  app.post("/api/voice/speak", async (c) => {
+  // Bounded while read, a body without a content-length included.
+  app.post("/api/voice/speak", bodyLimit({ maxSize: MAX_BODY, onError: badBody }), async (c) => {
     const bearer = parseBearer(c.req.header("authorization"));
     if (!isManagedVoiceToken(bearer)) return tokenRequired(c);
     const { databaseUrl, synthesize } = host(c);
@@ -143,11 +145,7 @@ export function voiceBearerRoutes(app: Hono<any>, host: (c: Context) => SpeakHos
 
       let body: Record<string, unknown>;
       try {
-        if (Number(c.req.header("content-length")) > MAX_BODY)
-          throw new Error("Too large");
-        const raw = await c.req.text();
-        if (raw.length > MAX_BODY) throw new Error("Too large");
-        body = JSON.parse(raw) as Record<string, unknown>;
+        body = JSON.parse(await c.req.text()) as Record<string, unknown>;
       } catch {
         return badBody(c);
       }

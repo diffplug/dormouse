@@ -62,8 +62,9 @@ async function fixture({ closed = false } = {}) {
       await email.send(message);
     },
   });
-  /** Each Burrow socket closure asked to close. */
+  /** Each Burrow socket, and each session's Client sockets, closure asked to close. */
   const closedBurrows: string[] = [];
+  const closedSessions: string[] = [];
   const host = {
     databaseUrl: context.database.url,
     auth: async (request: Request) => {
@@ -74,6 +75,7 @@ async function fixture({ closed = false } = {}) {
     setup: (): BillingSetup | null => (closed ? null : stripe.setup),
     mail,
     closeBurrow: async (_userId: string, burrowId: string) => closedBurrows.push(burrowId),
+    closeSessions: async (_userId: string, tokenHashes: string[]) => closedSessions.push(...tokenHashes),
   };
   const app = new Hono();
   billingRoutes(app, () => host);
@@ -197,6 +199,7 @@ async function fixture({ closed = false } = {}) {
     mailing,
     logins,
     closedBurrows,
+    closedSessions,
     clock,
     visit,
     close: async () => {
@@ -498,7 +501,7 @@ test("only a founding subscription joins the founders row, under a checked name,
   ).toBe(403);
   expect(await founders()).toEqual([]);
   // The table refuses what the route does, should a later writer skip the check.
-  for (const name of [" Ada", "A\u200bda", "Ada\u0085", "x".repeat(65)])
+  for (const name of [" Ada", "A\u200bda", "Ada\u0085", "x".repeat(65), ...padded("Ada")])
     await expect(
       f.sql(`INSERT INTO dormouse_founders ("userId", name) VALUES ($1, $2)`, [founder.id, name]),
       JSON.stringify(name),
@@ -933,6 +936,62 @@ test("a withdrawal whose acknowledgement, cancellation, or refund fails still st
   expect([f.email.all().length, f.cancels.length, f.refunds.length]).toEqual([1, 1, 1]);
 });
 
+test("a payment Stripe holds by its charge is refunded by it; one paid outside Stripe keeps the settlement failing until settled by hand", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const error = vi.spyOn(console, "error").mockImplementation(() => {});
+  onTestFinished(() => error.mockRestore());
+  const member = await f.account();
+  const { subscription } = await f.buy(member, "yearly");
+  f.paidInvoices.set("pi_w_intent", subscription.id);
+  f.paidInvoices.set("pi_w_charge", subscription.id);
+  f.paidBy.set("pi_w_charge", "charge");
+  f.paidInvoices.set("pi_w_record", subscription.id);
+  f.paidBy.set("pi_w_record", "payment_record");
+  f.paidInvoices.set("pi_w_oob", subscription.id);
+  f.paidBy.set("pi_w_oob", "out_of_band");
+  const answered = await member.request("/api/billing/withdraw", { method: "POST", body: { subscription: subscription.id } });
+  expect(await answered.json()).toMatchObject({ withdrawn: { subscription: subscription.id, settled: false } });
+  const [{ id }] = (await f.sql(`SELECT id FROM dormouse_withdrawals`)) as [{ id: string }];
+  // Everything Stripe can refund is refunded at once.
+  expect(f.refunds).toEqual([
+    { paymentIntent: "pi_w_intent", withdrawal: id },
+    { charge: "ch_pi_w_charge", withdrawal: id },
+  ]);
+  expect(error).toHaveBeenCalledWith(expect.stringContaining(id), expect.objectContaining({ message: expect.stringContaining("in_pi_w_oob") }));
+  expect(String(error.mock.calls.at(-1)![1])).toContain("in_pi_w_record");
+
+  // A closure's refund paid outside Stripe stays unsettled too.
+  const closing = await f.account();
+  const { subscription: monthly } = await f.buy(closing, "monthly");
+  f.paidInvoices.set("pi_c_oob", monthly.id);
+  f.paidBy.set("pi_c_oob", "out_of_band");
+  expect((await closing.request("/api/account/close", { method: "POST", body: { close: true } })).status).toBe(204);
+  const settled = async () => [
+    ((await member.summary()).withdrawn as { settled: boolean }).settled,
+    ...(await f.sql<{ settled: boolean }>(
+      `SELECT "settledAt" IS NOT NULL AS settled FROM dormouse_account_closures WHERE "userId" = $1`,
+      [closing.id],
+    )).map((row) => row.settled),
+  ];
+  expect(await settled()).toEqual([false, false]);
+
+  // Each cron pass fails on them, within the retry window and past it,
+  // refunding nothing twice and never stamping them settled.
+  for (const days of [1, 31]) {
+    f.time.advanceMilliseconds(days * DAY_MS);
+    await expect(resyncBilling(f.setup, f.database.url, origin, f.mail)).rejects.toThrow(AggregateError);
+    expect(f.refunds).toHaveLength(2);
+    expect(await settled()).toEqual([false, false]);
+  }
+  // The operator refunds them by hand and marks them settled; the cron then passes.
+  await f.sql(`UPDATE dormouse_withdrawals SET "settledAt" = now() WHERE id = $1`, [id]);
+  await f.sql(`UPDATE dormouse_account_closures SET "settledAt" = now() WHERE "userId" = $1`, [closing.id]);
+  await resyncBilling(f.setup, f.database.url, origin, f.mail);
+});
+
 test("closing an account needs a recent login, cancels its subscription in Stripe first, and keeps the billing records", async ({
   onTestFinished,
 }) => {
@@ -945,6 +1004,14 @@ test("closing an account needs a recent login, cancels its subscription in Strip
     member.id,
     "h".repeat(64),
   ]);
+  await f.sql(
+    `WITH passkey AS (
+      INSERT INTO dormouse_relay_passkeys ("credentialId", "userId", "publicKey", label) VALUES ('cred', $1, 'k', 'Phone')
+    )
+    INSERT INTO dormouse_relay_sessions ("tokenHash", "userId", "credentialId", "expiresAt")
+    VALUES ($2, $1, 'cred', now() + interval '1 hour')`,
+    [member.id, "s".repeat(64)],
+  );
   const close = (body: unknown) => member.request("/api/account/close", { method: "POST", body });
 
   f.logins.set(member.id, new Date(Date.now() - 60 * 60 * 1000).toISOString());
@@ -969,6 +1036,7 @@ test("closing an account needs a recent login, cancels its subscription in Strip
   ]);
   expect(await f.sql(`SELECT "userId" FROM dormouse_checkout_consents`)).toEqual([{ userId: member.id }]);
   expect(f.closedBurrows).toEqual(["b".repeat(22)]);
+  expect(f.closedSessions).toEqual(["s".repeat(64)]);
 
   // An account billing never knew closes with nothing to cancel.
   const plain = await f.account();
@@ -1085,6 +1153,12 @@ test("with billing closed, closing deletes an account without a subscription and
 });
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** `text` led, then trailed, by each character JavaScript's trim strips, which `isFounderName` refuses as padding. */
+const padded = (text: string) =>
+  Array.from({ length: 0x10000 }, (_, point) => String.fromCharCode(point))
+    .filter((char) => char.trim() === "")
+    .flatMap((char) => [`${char}${text}`, `${text}${char}`]);
 /** The schedule the Terms and pricing.md promise: renewal notices 30 days ahead, price changes 21, and never under 7. */
 const RENEWAL_NOTICE_DAYS = 30;
 const PRICE_NOTICE_DAYS = 21;
