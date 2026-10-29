@@ -1,6 +1,5 @@
 // Rules: docs/specs/hosted.md -> "Burrow enrollment" and "Metrics".
 import type { Context, Hono } from "hono";
-import { bodyLimit } from "hono/body-limit";
 import {
   NOT_ENTITLED_ERROR,
   isE2eId,
@@ -8,9 +7,9 @@ import {
   normalizeEnrollUserCode,
   readJson,
 } from "remote-lib-common";
-import { accountQuery, cookieEntitled, type AccountHost } from "./account-gate";
+import { accountQuery, cookieEntitled, isRecentLogin, smallBody, type AccountHost } from "./account-gate";
 import { recordMetric } from "./metrics";
-import { ENROLLMENT_TTL_MS, LOGIN_FRESH_AGE_MS, RECENT_LOGIN_WINDOW } from "./policy-constants";
+import { ENROLLMENT_TTL_MS, RECENT_LOGIN_WINDOW } from "./policy-constants";
 
 /** What one request's account deployment provides to the Relay's account routes. */
 export type RelayAccountHost = AccountHost & {
@@ -34,18 +33,11 @@ export const ALREADY_APPROVED = "That code is already approved.";
 export function relayAccountRoutes(app: Hono<any>, host: (c: Context) => RelayAccountHost) {
   const gate = cookieEntitled(host, (c) => c.json({ message: NOT_ENTITLED_ERROR }, 403));
 
-  const small = bodyLimit({
-    maxSize: 1024,
-    onError: (c) => c.json({ message: "Request too large." }, 413),
-  });
+  const small = smallBody(1024);
 
   app.post("/api/relay/enrollments/approve", small, gate, async (c) => {
     const login = c.get("login");
-    // Fails closed: a login whose creation time is missing or unreadable is
-    // not recent.
-    const createdAt = Date.parse(String(login.createdAt));
-    if (!(Date.now() - createdAt < LOGIN_FRESH_AGE_MS))
-      return c.json({ message: RECENT_LOGIN_REQUIRED }, 403);
+    if (!isRecentLogin(login)) return c.json({ message: RECENT_LOGIN_REQUIRED }, 403);
     // Every attempt counts, so a signed-in account cannot walk the code space;
     // as the approvals' only writer, this limit is also what bounds them.
     if (!(await host(c).approveLimit.limit({ key: login.userId })).success) {

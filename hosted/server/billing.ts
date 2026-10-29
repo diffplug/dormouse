@@ -15,6 +15,11 @@ import { BILLING_RETURN_PATH, type Plan } from "./policy-constants";
 /** A purchase that ends within this many days of starting is a refund: its seat returns to its cohort. */
 export const REFUND_DAYS = 30;
 
+export const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** The id of a Stripe reference that may arrive expanded; null without one. */
+export const idOf = (ref: string | { id: string } | null | undefined) => (typeof ref === "string" ? ref : (ref?.id ?? null));
+
 /** A deployment's billing configuration, read from its bindings. */
 export interface BillingSetup {
   secretKey: string;

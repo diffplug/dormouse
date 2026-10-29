@@ -5,11 +5,9 @@ import { escape } from "@pgstencil/auth/email";
 import type { EmailMessage, EmailSender } from "pgstencil";
 import { PLAN_NAMES, planInterval } from "../../website/src/lib/hosted-pricing";
 import { DIFFPLUG_POSTAL_ADDRESS, SUPPORT_EMAIL } from "../../website/src/lib/hosted-withdrawal";
-import { run, type PriceCatalog, type PriceChange } from "./billing";
+import { DAY_MS, run, type PriceCatalog, type PriceChange } from "./billing";
 import { BILLING_RETURN_PATH, type Plan } from "./policy-constants";
 import { billingContact } from "./withdrawal";
-
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
  * A yearly plan's renewal notice, and a monthly plan's annual reminder, are

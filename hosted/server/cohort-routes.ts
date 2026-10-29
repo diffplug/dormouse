@@ -2,12 +2,11 @@
 // founding card's live half".
 import type { Context, Hono } from "hono";
 import { queryDatabase } from "pgstencil/postgres";
+import { concatBytes } from "remote-lib-common";
 import { COHORT_ENDPOINT, MAX_SHOWN_FOUNDERS } from "../../website/src/lib/hosted-cohorts";
 import { foundingPurchases, openCohort, withBilling, type BillingSetup } from "./billing";
 import { subscribedSql } from "./entitlement";
 import { CHECKOUT_CLOSED } from "./policy-constants";
-
-export { COHORT_ENDPOINT };
 
 /**
  * What the public routes may read of a deployment: never `auth`, so nothing
@@ -40,7 +39,7 @@ const DATA_IMAGE = /^data:image\/(?:png|jpeg|gif|webp);base64,\s*([A-Za-z0-9+/]+
  * `https:` URL on a provider's picture host; null for anything else, which
  * the row draws as an initial.
  */
-export function avatarSource(image: string | null): string | null {
+function avatarSource(image: string | null): string | null {
   if (!image) return null;
   if (image.startsWith("data:")) return DATA_IMAGE.test(image) ? image : null;
   let url: URL;
@@ -59,7 +58,7 @@ export function avatarSource(image: string | null): string | null {
 type ImageType = "image/png" | "image/jpeg" | "image/gif" | "image/webp";
 
 /** A raster image's type from its leading bytes, or null: never a provider's word for it. */
-export function imageType(bytes: Uint8Array): ImageType | null {
+function imageType(bytes: Uint8Array): ImageType | null {
   const starts = (...prefix: number[]) => prefix.every((byte, i) => bytes[i] === byte);
   if (starts(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)) return "image/png";
   if (starts(0xff, 0xd8, 0xff)) return "image/jpeg";
@@ -84,13 +83,7 @@ async function readCapped(response: Response, max: number): Promise<Uint8Array<A
     }
     chunks.push(value);
   }
-  const bytes = new Uint8Array(size);
-  let at = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, at);
-    at += chunk.byteLength;
-  }
-  return bytes;
+  return concatBytes(...chunks) as Uint8Array<ArrayBuffer>;
 }
 
 interface Avatar {

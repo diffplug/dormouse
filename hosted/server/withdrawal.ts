@@ -2,15 +2,13 @@
 // "Checkout and entitlement".
 import type { Billing, Stripe } from "@pgstencil/stripe";
 import { escape } from "@pgstencil/auth/email";
-import { CompiledQuery } from "kysely";
 import type { EmailMessage, EmailSender } from "pgstencil";
 import { PLAN_NAMES } from "../../website/src/lib/hosted-pricing";
 import { DIFFPLUG_POSTAL_ADDRESS, SUPPORT_EMAIL, WITHDRAWAL_STATEMENT } from "../../website/src/lib/hosted-withdrawal";
+import { DAY_MS, idOf, run } from "./billing";
 import type { WithdrawalOffer } from "./billing-summary";
 import type { Plan } from "./policy-constants";
-import { CURRENT_STATUSES, ENDED_STATUSES } from "./entitlement";
-
-const DAY_MS = 24 * 60 * 60 * 1000;
+import { CURRENT_STATUSES } from "./entitlement";
 
 /**
  * How long after a subscription starts the online withdrawal stays open. The
@@ -123,15 +121,12 @@ export async function withdrawalOffer(
   };
 }
 
-const run = <Row>(billing: Billing<Plan>, text: string, values: unknown[]) =>
-  billing.db.executeQuery<Row>(CompiledQuery.raw(text, values)).then((result) => result.rows);
-
 const COLUMNS = `id, "userId", "subscriptionId", plan, "contractStartedAt", "submittedAt", "acknowledgedAt", "settledAt"`;
 
 /** The withdrawal recorded from `subscriptionId` by `ownerId`, if any. */
 export async function recordedWithdrawal(billing: Billing<Plan>, ownerId: string, subscriptionId: string) {
   const [row] = await run<WithdrawalRow>(
-    billing,
+    billing.db,
     `SELECT ${COLUMNS} FROM public.dormouse_withdrawals WHERE "subscriptionId" = $1 AND "userId" = $2`,
     [subscriptionId, ownerId],
   );
@@ -150,7 +145,7 @@ export async function recordWithdrawal(
   offer: Offer,
 ): Promise<WithdrawalRow> {
   await run(
-    billing,
+    billing.db,
     `INSERT INTO public.dormouse_withdrawals
       (id, "userId", "subscriptionId", plan, "priceId", "contractStartedAt", country, "submittedAt")
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -236,7 +231,7 @@ export async function refundPaidInvoices(
   for (const invoice of invoices.data.filter(covers)) {
     const payments = await billing.stripe.invoicePayments.list({ invoice: invoice.id!, status: "paid", limit: 100 });
     for (const { payment } of payments.data) {
-      const intent = typeof payment.payment_intent === "string" ? payment.payment_intent : payment.payment_intent?.id;
+      const intent = idOf(payment.payment_intent);
       if (intent) await refundInFull(billing, refund, intent);
       else console.warn(`${label}: invoice ${invoice.id} has a payment Stripe cannot refund here; refund it by hand`);
     }
@@ -255,7 +250,7 @@ async function settle(billing: Billing<Plan>, row: WithdrawalRow) {
     .select("status")
     .where("id", "=", row.subscriptionId)
     .executeTakeFirst();
-  if (synced && !ENDED_STATUSES.includes(synced.status)) {
+  if (synced && CURRENT_STATUSES.includes(synced.status)) {
     await billing.stripe.subscriptions.cancel(row.subscriptionId, {
       cancellation_details: { comment: ENDED_FOR_WITHDRAWAL },
       prorate: false,
@@ -274,7 +269,7 @@ async function settle(billing: Billing<Plan>, row: WithdrawalRow) {
 export async function completeWithdrawal(billing: Billing<Plan>, mail: () => EmailSender, row: WithdrawalRow) {
   const failed: unknown[] = [];
   const stamp = (column: "acknowledgedAt" | "settledAt") =>
-    run(billing, `UPDATE public.dormouse_withdrawals SET "${column}" = $2 WHERE id = $1`, [row.id, billing.time.now()]);
+    run(billing.db, `UPDATE public.dormouse_withdrawals SET "${column}" = $2 WHERE id = $1`, [row.id, billing.time.now()]);
   if (!row.acknowledgedAt)
     try {
       const email = (await billingContact(billing, row.userId))?.email;
@@ -304,7 +299,7 @@ const RETRY_BATCH = 20;
  */
 export async function retryWithdrawals(billing: Billing<Plan>, mail: () => EmailSender): Promise<unknown[]> {
   const rows = await run<WithdrawalRow>(
-    billing,
+    billing.db,
     `SELECT ${COLUMNS} FROM public.dormouse_withdrawals
     WHERE ("acknowledgedAt" IS NULL OR "settledAt" IS NULL) AND "submittedAt" > $1
     ORDER BY "submittedAt" LIMIT $2`,

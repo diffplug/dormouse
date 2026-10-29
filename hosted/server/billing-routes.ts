@@ -2,13 +2,12 @@
 // -> "Checkout and entitlement".
 import { BillingError, purchaseStanding, type Billing, type BillingDB, type Stripe } from "@pgstencil/stripe";
 import type { Context, Hono } from "hono";
-import { bodyLimit } from "hono/body-limit";
-import { CompiledQuery, type Kysely } from "kysely";
+import type { Kysely } from "kysely";
 import { readJson } from "remote-lib-common";
-import { accountQuery, cookieLogin, type AccountHost } from "./account-gate";
-import { REFUND_DAYS, foundingCohort, withBilling, type BillingSetup, type PriceCatalog } from "./billing";
+import { accountQuery, cookieLogin, smallBody, type AccountHost } from "./account-gate";
+import { REFUND_DAYS, foundingCohort, idOf, run, withBilling, type BillingSetup, type PriceCatalog } from "./billing";
 import type { BillingSummary, Withdrawn } from "./billing-summary";
-import { CURRENT_STATUSES, ENDED_STATUSES, entitledSql, subscribedSql } from "./entitlement";
+import { CURRENT_STATUSES, entitledSql, subscribedSql } from "./entitlement";
 import { checkoutRef, type MetricEvent } from "./metric-labels";
 import { countMetricInTransaction, recordMetric } from "./metrics";
 import { CHECKOUT_CLOSED, PRICE_CHANGED, TERMS_VERSION, isFounderName, isPlan, type Plan } from "./policy-constants";
@@ -16,8 +15,6 @@ import { sendNotices, type NoticeContext } from "./notices";
 import { completeWithdrawal, recordWithdrawal, recordedWithdrawal, withdrawalOffer } from "./withdrawal";
 import { SUPPORT_EMAIL } from "../../website/src/lib/hosted-withdrawal";
 import type { EmailSender } from "pgstencil";
-
-export { CHECKOUT_CLOSED, PRICE_CHANGED };
 
 /** What one request's account deployment provides to the billing routes. */
 export interface BillingHost extends AccountHost {
@@ -71,8 +68,6 @@ export function disputeAction(status: string): "suspend" | "restore" | "end" | n
  */
 export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost) {
   const gate = cookieLogin(host);
-  const limit = (maxSize: number) =>
-    bodyLimit({ maxSize, onError: (c) => c.json({ message: "Request too large." }, 413) });
 
   /** Runs `action` on this deployment's `Billing`: 503 while closed, a `BillingError` as its status. */
   const billed = async (
@@ -131,18 +126,18 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
     ]);
     // A subscription Stripe still holds, paid up or not: its owner manages it
     // in the portal (a failed card included) and cannot check out again.
-    const held = !!status.subscription && !ENDED_STATUSES.includes(status.subscription.status);
+    const held = status.subscription && CURRENT_STATUSES.includes(status.subscription.status) ? status.subscription : null;
     // A contract withdrawn from once is never offered again.
     const offer =
-      held && account?.withdrawn?.subscription !== status.subscription!.id
-        ? await withdrawalOffer(billing, userId, status.subscription, { cached: true })
+      held && account?.withdrawn?.subscription !== held.id
+        ? await withdrawalOffer(billing, userId, held, { cached: true })
         : null;
     return c.json({
       plan: held ? status.plan : null,
-      price: held ? (catalog.prices.get(status.subscription!.price_id)?.usd ?? null) : null,
+      price: held ? (catalog.prices.get(held.price_id)?.usd ?? null) : null,
       active: status.access,
       until: held ? (status.accessUntil?.toISOString() ?? null) : null,
-      renews: held && !status.subscription!.cancel_at_period_end,
+      renews: !!held && !held.cancel_at_period_end,
       entitled: account?.entitled === true,
       suspended: account?.suspended === true,
       founding,
@@ -153,7 +148,7 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
       // Only while it describes the held subscription, its settlement still
       // pending, or nothing is held: a plan bought after it is not withdrawn.
       withdrawn:
-        account?.withdrawn && (!held || account.withdrawn.subscription === status.subscription!.id)
+        account?.withdrawn && (!held || account.withdrawn.subscription === held.id)
           ? account.withdrawn
           : null,
     } satisfies BillingSummary);
@@ -163,7 +158,7 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
     billed(c, (billing, setup, catalog) => summary(c, billing, setup, catalog, c.get("login").userId)),
   );
 
-  app.post("/api/billing/checkout", limit(JSON_BODY_BYTES), gate, async (c) => {
+  app.post("/api/billing/checkout", smallBody(JSON_BODY_BYTES), gate, async (c) => {
     const { userId, email } = c.get("login");
     const body = await readJson<{ plan?: unknown; ref?: unknown; terms?: unknown; autoRenew?: unknown; price?: unknown }>(c);
     const plan = body?.plan;
@@ -198,19 +193,18 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
         return c.json({ message: PRICE_CHANGED }, 409);
       }
       // Recorded before the URL is answered, for the Price the buyer was shown.
-      await billing.db.executeQuery(
-        CompiledQuery.raw(
-          `INSERT INTO public.dormouse_checkout_consents ("checkoutId", "termsVersion", "userId", plan, "priceId")
-          VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING`,
-          [id, TERMS_VERSION, userId, plan, opened.price_id],
-        ),
+      await run(
+        billing.db,
+        `INSERT INTO public.dormouse_checkout_consents ("checkoutId", "termsVersion", "userId", plan, "priceId")
+        VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING`,
+        [id, TERMS_VERSION, userId, plan, opened.price_id],
       );
       recordMetric(c, host(c).databaseUrl, "checkout.started", `${plan}:${ref}`);
       return c.json({ url });
     });
   });
 
-  app.post("/api/billing/confirm", limit(JSON_BODY_BYTES), gate, async (c) => {
+  app.post("/api/billing/confirm", smallBody(JSON_BODY_BYTES), gate, async (c) => {
     const { userId } = c.get("login");
     const checkout = (await readJson<{ checkout?: unknown }>(c))?.checkout;
     if (typeof checkout !== "string" || !CHECKOUT_ID.test(checkout))
@@ -221,7 +215,7 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
     });
   });
 
-  app.post("/api/billing/portal", limit(JSON_BODY_BYTES), gate, (c) =>
+  app.post("/api/billing/portal", smallBody(JSON_BODY_BYTES), gate, (c) =>
     billed(c, async (billing) => c.json({ url: await billing.portal(c.get("login").userId) })),
   );
 
@@ -230,7 +224,7 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
   // answer, it stands: an acknowledgement or a settlement that fails after is
   // logged, and the cron finishes it. Naming a contract already withdrawn
   // from answers that withdrawal again.
-  app.post("/api/billing/withdraw", limit(JSON_BODY_BYTES), gate, async (c) => {
+  app.post("/api/billing/withdraw", smallBody(JSON_BODY_BYTES), gate, async (c) => {
     const { userId } = c.get("login");
     const subscription = (await readJson<{ subscription?: unknown }>(c))?.subscription;
     if (typeof subscription !== "string" || !SUBSCRIPTION_ID.test(subscription))
@@ -240,7 +234,7 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
       if (!row) {
         const { subscription: held, plan } = await billing.status(userId);
         const offer = held?.id === subscription && plan ? await withdrawalOffer(billing, userId, held) : null;
-        if (!offer || !held || !plan) return c.json({ message: WITHDRAWAL_CLOSED }, 409);
+        if (!offer || held?.id !== subscription || !plan) return c.json({ message: WITHDRAWAL_CLOSED }, 409);
         row = await recordWithdrawal(billing, userId, plan, held, offer);
       }
       await completeWithdrawal(billing, () => host(c).mail(), row).catch((error: unknown) =>
@@ -253,7 +247,7 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
   // The founders row: shown under `name` only while a founding subscription
   // grants access. Leaving it needs nothing from billing, so it works while
   // billing is closed or failing, and answers 204.
-  app.put("/api/billing/founder", limit(JSON_BODY_BYTES), gate, async (c) => {
+  app.put("/api/billing/founder", smallBody(JSON_BODY_BYTES), gate, async (c) => {
     const { userId } = c.get("login");
     const body = await readJson<{ shown?: unknown; name?: unknown }>(c);
     const shown = body?.shown;
@@ -280,7 +274,7 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
 
   // Stripe's: the raw body under its signature, 2xx only once `webhook()` has
   // committed; any other failure throws to `onError`'s 503, which Stripe retries.
-  app.post(BILLING_WEBHOOK_PATH, limit(WEBHOOK_BODY_BYTES), async (c) => {
+  app.post(BILLING_WEBHOOK_PATH, smallBody(WEBHOOK_BODY_BYTES), async (c) => {
     const signature = c.req.header("stripe-signature");
     if (!signature) return c.json({ message: "Missing signature." }, 400);
     const body = await c.req.text();
@@ -293,7 +287,7 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
 
 /** The owner of Stripe customer `customer`, or null for one pgstencil did not create. */
 async function ownerOf(billing: Billing<Plan>, customer: string | Stripe.Customer | Stripe.DeletedCustomer | null) {
-  const id = typeof customer === "string" ? customer : (customer?.id ?? null);
+  const id = idOf(customer);
   if (!id) return null;
   const row = await billing.db
     .selectFrom("accounts")
@@ -331,7 +325,7 @@ async function processEvent(
   }
   await billing.webhook(body, signature, async (verified, trx) => {
     const count = (event: MetricEvent, label: string) =>
-      countMetricInTransaction((text, values) => trx.executeQuery(CompiledQuery.raw(text, values)), event, label);
+      countMetricInTransaction((text, values) => run(trx, text, values), event, label);
     const completed = await billing.completedCheckout(verified, trx);
     if (completed && isPlan(completed.plan))
       await count("checkout.completed", `${completed.plan}:${checkoutRef(completed.ref)}`);
@@ -363,7 +357,7 @@ async function processEvent(
  * PaymentIntent do. Null when that names no one subscription.
  */
 async function subscriptionPaidBy(billing: Billing<Plan>, charge: Stripe.Charge): Promise<string | null> {
-  const intent = typeof charge.payment_intent === "string" ? charge.payment_intent : (charge.payment_intent?.id ?? null);
+  const intent = idOf(charge.payment_intent);
   if (!intent) return null;
   const payments = await billing.stripe.invoicePayments.list({
     payment: { type: "payment_intent", payment_intent: intent },
@@ -371,8 +365,8 @@ async function subscriptionPaidBy(billing: Billing<Plan>, charge: Stripe.Charge)
   });
   const paid = new Set(
     payments.data.flatMap((payment) => {
-      const subscription = (payment.invoice as Stripe.Invoice).parent?.subscription_details?.subscription;
-      return subscription ? [typeof subscription === "string" ? subscription : subscription.id] : [];
+      const subscription = idOf((payment.invoice as Stripe.Invoice).parent?.subscription_details?.subscription);
+      return subscription ? [subscription] : [];
     }),
   );
   return paid.size === 1 ? [...paid][0]! : null;
@@ -392,31 +386,29 @@ async function recordDispute(
   now: Date,
 ) {
   if (action === "suspend")
-    await trx.executeQuery(
-      CompiledQuery.raw(
-        `WITH opened AS (
-          INSERT INTO public.dormouse_billing_disputes ("disputeId", "userId") VALUES ($1, $2)
-          ON CONFLICT ("disputeId") DO NOTHING RETURNING "userId")
-        INSERT INTO public.dormouse_billing_notices (id, "userId", kind, "disputeId", "createdAt")
-        SELECT gen_random_uuid()::text, "userId", 'dispute_suspended', $1, $3 FROM opened
-        ON CONFLICT DO NOTHING`,
-        [disputeId, owner, now],
-      ),
+    await run(
+      trx,
+      `WITH opened AS (
+        INSERT INTO public.dormouse_billing_disputes ("disputeId", "userId") VALUES ($1, $2)
+        ON CONFLICT ("disputeId") DO NOTHING RETURNING "userId")
+      INSERT INTO public.dormouse_billing_notices (id, "userId", kind, "disputeId", "createdAt")
+      SELECT gen_random_uuid()::text, "userId", 'dispute_suspended', $1, $3 FROM opened
+      ON CONFLICT DO NOTHING`,
+      [disputeId, owner, now],
     );
   else if (action)
     // The statement reads the table as it was before its own delete.
-    await trx.executeQuery(
-      CompiledQuery.raw(
-        `WITH closed AS (
-          DELETE FROM public.dormouse_billing_disputes WHERE "disputeId" = $1 RETURNING "userId")
-        INSERT INTO public.dormouse_billing_notices (id, "userId", kind, "disputeId", "createdAt")
-        SELECT gen_random_uuid()::text, "userId", 'dispute_restored', $1, $2 FROM closed
-        WHERE $3 AND NOT EXISTS (
-          SELECT FROM public.dormouse_billing_disputes other
-          WHERE other."userId" = closed."userId" AND other."disputeId" <> $1)
-        ON CONFLICT DO NOTHING`,
-        [disputeId, now, action === "restore"],
-      ),
+    await run(
+      trx,
+      `WITH closed AS (
+        DELETE FROM public.dormouse_billing_disputes WHERE "disputeId" = $1 RETURNING "userId")
+      INSERT INTO public.dormouse_billing_notices (id, "userId", kind, "disputeId", "createdAt")
+      SELECT gen_random_uuid()::text, "userId", 'dispute_restored', $1, $2 FROM closed
+      WHERE $3 AND NOT EXISTS (
+        SELECT FROM public.dormouse_billing_disputes other
+        WHERE other."userId" = closed."userId" AND other."disputeId" <> $1)
+      ON CONFLICT DO NOTHING`,
+      [disputeId, now, action === "restore"],
     );
 }
 
@@ -433,12 +425,11 @@ const DISPUTE_RESYNC_BATCH = 20;
  * Answers the failures.
  */
 export async function resyncDisputes(billing: Billing<Plan>): Promise<unknown[]> {
-  const { rows } = await billing.db.executeQuery<{ disputeId: string; userId: string }>(
-    CompiledQuery.raw(
-      `SELECT "disputeId", "userId" FROM public.dormouse_billing_disputes
-      ORDER BY "checkedAt" NULLS FIRST, "openedAt" LIMIT $1`,
-      [DISPUTE_RESYNC_BATCH],
-    ),
+  const rows = await run<{ disputeId: string; userId: string }>(
+    billing.db,
+    `SELECT "disputeId", "userId" FROM public.dormouse_billing_disputes
+    ORDER BY "checkedAt" NULLS FIRST, "openedAt" LIMIT $1`,
+    [DISPUTE_RESYNC_BATCH],
   );
   const failed: unknown[] = [];
   for (const { disputeId, userId } of rows)
@@ -448,12 +439,10 @@ export async function resyncDisputes(billing: Billing<Plan>): Promise<unknown[]>
       if (action === "end") await endForRefund(billing, current.charge as Stripe.Charge);
       await billing.db.transaction().execute(async (trx) => {
         const now = billing.time.now();
-        await trx.executeQuery(
-          CompiledQuery.raw(`UPDATE public.dormouse_billing_disputes SET "checkedAt" = $2 WHERE "disputeId" = $1`, [
-            disputeId,
-            now,
-          ]),
-        );
+        await run(trx, `UPDATE public.dormouse_billing_disputes SET "checkedAt" = $2 WHERE "disputeId" = $1`, [
+          disputeId,
+          now,
+        ]);
         if (action !== "suspend") await recordDispute(trx, disputeId, userId, action, now);
       });
     } catch (error) {

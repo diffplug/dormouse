@@ -23,7 +23,7 @@ export async function countMetric(databaseUrl: string, event: MetricEvent, label
  * {@link countMetric} through `query`, such as an open transaction's, so the
  * count commits or rolls back with it.
  */
-export async function countMetricWith(
+async function countMetricWith(
   query: (text: string, values: unknown[]) => Promise<unknown>,
   event: MetricEvent,
   label = "",
