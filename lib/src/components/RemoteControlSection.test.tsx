@@ -252,17 +252,22 @@ function typedForm(): HTMLFormElement {
   return form;
 }
 
-/** Unfold Persistent Relay the way a user does; un-enrolled with no offer, it starts folded. */
-async function openPersistent() {
-  await act(async () => buttonLabelled('Persistent Relay')!.click());
+/** The persistent choice's button: Hosted Relay in a stock build, Persistent Relay in a self-host one. */
+function persistentButton() {
+  return buttonLabelled('Persistent Relay') ?? buttonLabelled('Hosted Relay');
 }
 
-/** The panel Persistent Relay unfolds, which is what `hidden` toggles. */
+/** Unfold the persistent choice the way a user does; un-enrolled with no offer, it starts folded. */
+async function openPersistent() {
+  await act(async () => persistentButton()!.click());
+}
+
+/** The panel the persistent choice unfolds, which is what `hidden` toggles. */
 function persistentPanel(): HTMLElement {
-  const panel = buttonLabelled('Persistent Relay')?.parentElement?.querySelector<HTMLElement>(
+  const panel = persistentButton()?.parentElement?.querySelector<HTMLElement>(
     ':scope > div.rounded',
   );
-  if (!panel) throw new Error('the Persistent Relay panel is not mounted');
+  if (!panel) throw new Error('the persistent Relay panel is not mounted');
   return panel;
 }
 
@@ -309,7 +314,7 @@ describe('RemoteControlSection', () => {
     expect(container.innerHTML).toBe('');
   });
 
-  it('offers a stock build a one-time connection and a folded Persistent Relay with nothing to enroll', async () => {
+  it('offers a stock build a one-time connection and a folded Hosted Relay with nothing to enroll', async () => {
     const openExternal = vi.fn();
     platform = { burrow: makeLink(async () => NOT_ENROLLED), openExternal };
     await render();
@@ -318,11 +323,13 @@ describe('RemoteControlSection', () => {
       'Open a link on your phone for a one-off connection. Your phone must be on an allowed ' +
         'network. No account needed.',
     );
-    expect(buttonLabelled('Persistent Relay')!.getAttribute('aria-expanded')).toBe('false');
+    // Hosted's Relay goes by the product's name for it.
+    expect(buttonLabelled('Persistent Relay')).toBeUndefined();
+    expect(buttonLabelled('Hosted Relay')!.getAttribute('aria-expanded')).toBe('false');
     expect(persistentPanel().hidden).toBe(true);
 
     await openPersistent();
-    expect(buttonLabelled('Persistent Relay')!.getAttribute('aria-expanded')).toBe('true');
+    expect(buttonLabelled('Hosted Relay')!.getAttribute('aria-expanded')).toBe('true');
     expect(persistentPanel().hidden).toBe(false);
     // Its one Relay is Hosted's (docs/specs/relay.md → "Relay origin"): no
     // password form, no offer card, and the self-host path named as a build.
@@ -390,9 +397,12 @@ describe('RemoteControlSection', () => {
   it('says in fixed copy why an enrollment ended, and offers a new code or Done', async () => {
     let ended: HostedEnrollmentState = { status: 'ended', reason: 'not-entitled' };
     const link = makeLink(async () => ({ ...NOT_ENROLLED, hostedEnrollment: ended }));
-    platform = { burrow: link };
+    const openExternal = vi.fn();
+    platform = { burrow: link, openExternal };
     await render();
     expect(text()).toContain(HOSTED_APPROVAL_ENDED_COPY.remote['not-entitled']);
+    await act(async () => buttonLabelled('See Hosted plans')!.click());
+    expect(openExternal).toHaveBeenCalledWith('https://dormouse.sh/hosted/?ref=settings-remote#pricing');
 
     ended = { status: 'ended', reason: 'expired' };
     await act(async () => refreshBurrowStatus());

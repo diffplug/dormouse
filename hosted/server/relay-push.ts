@@ -35,6 +35,7 @@ import type {
   WebPushKeys,
 } from "remote-lib-common";
 import type { RelayEnv } from "./bindings";
+import { recordMetric } from "./metrics";
 import { database, locked, readAsBurrow, requireBurrow, requireSession, type Client } from "./relay-auth";
 
 /**
@@ -421,6 +422,7 @@ export function relayPushRoutes(app: Hono<{ Bindings: RelayEnv }>) {
       unknown: recipients.length - targets.length,
       failed: results.filter((r) => r.result === "failed").length,
     };
+    recordMetric(c, c.env.HYPERDRIVE.connectionString, "push.sent", "", res.delivered);
     return c.json(res);
   });
 }

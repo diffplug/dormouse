@@ -1,10 +1,11 @@
 import { CARD_ACCENT_CLASS, CARD_MUTED_TEXT_CLASS, LINK_CLASS } from "dormouse-lib/site/docs-tokens";
+import { HOSTED_REFS, withHostedRef } from "dormouse-lib/lib/hosted-links";
 import { sitePath } from "../lib/site-meta";
 
 /**
  * The Relay boundary `/self-host` opens with: Dormouse needs no server, and
  * the remote features that do need one make no requests until it exists.
- * `/hosted` opens with its plan cards instead, and its managed Relay section
+ * `/hosted` opens with its plan cards instead, and its Hosted Relay section
  * carries the hosted half (docs/specs/website-docs.md -> `/hosted`).
  */
 export function HostingRequirementNotice() {
@@ -26,7 +27,7 @@ export function HostingRequirementNotice() {
       </p>
       <p className="mt-4 text-sm">
         Prefer not to run it?{" "}
-        <a href={`${sitePath("/hosted")}#remote-control`} className={LINK_CLASS}>
+        <a href={withHostedRef(sitePath("/hosted"), HOSTED_REFS.selfHost, "remote-control")} className={LINK_CLASS}>
           See Dormouse Hosted →
         </a>
       </p>

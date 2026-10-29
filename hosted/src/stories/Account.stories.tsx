@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { expect, fn } from "storybook/test";
 import { providers } from "../api";
-import { hostedMeta, SESSION, ACCOUNT, COMPUTERS, PASSKEYS } from "./fixtures";
+import { hostedMeta, SESSION, ACCOUNT, COMPUTERS, PASSKEYS, NO_PLAN, FOUNDING, WITHDRAWABLE } from "./fixtures";
 import { settledFrame } from "./canvas";
 
 const meta = {
@@ -31,6 +31,12 @@ export const LongIdentity: Story = { args: {
   session: { ...SESSION, user: { ...SESSION.user, id: "account-with-a-long-immutable-identifier-for-a-provider-only-user", email: "alexandra.long-identity@example.department.example.com" } },
   passkeys: [{ ...PASSKEYS[0], label: "Personal phone with a long descriptive passkey label" }],
 } };
+/** A hostname is one unbroken word, up to the 64 characters Hosted keeps. */
+export const LongComputerName: Story = { args: {
+  ...ACCOUNT,
+  phone: true,
+  computers: [{ ...COMPUTERS[0], label: "build-agent-0042.eu-central-1.compute.internal.example (VS Code)" }, COMPUTERS[1]],
+} };
 export const RemovingComputer: Story = { args: { ...ACCOUNT, busy: `remove-${COMPUTERS[0].burrowId}` } };
 export const RemovingPasskey: Story = { args: { ...ACCOUNT, busy: `passkey-${PASSKEYS[0].credentialId}` } };
 export const RemovalFailed: Story = { args: { ...ACCOUNT, error: { read: false, message: "Computers and passkeys are temporarily unavailable. Try again." } } };
@@ -44,5 +50,50 @@ export const RemoveActions: Story = {
     await canvas.user.click(canvas.getAllByRole("button", { name: "Remove" })[COMPUTERS.length]);
     await expect(args.removeKey).toHaveBeenCalledWith(PASSKEYS[0].credentialId);
     canvas.document.defaultView!.scrollTo(0, 0);
+  },
+};
+export const PlanNone: Story = { args: { ...ACCOUNT, billing: NO_PLAN } };
+export const PlanFounding: Story = { args: { ...ACCOUNT, billing: FOUNDING } };
+export const PlanFounderShown: Story = { args: { ...ACCOUNT, billing: { ...FOUNDING, founder: { offered: true, name: "Alex" } } } };
+export const PlanEnding: Story = { args: { ...ACCOUNT, billing: { ...FOUNDING, renews: false } } };
+/** A failed renewal keeps Manage billing, so the card can be fixed. */
+export const PlanPaymentFailed: Story = {
+  args: { ...ACCOUNT, billing: { ...FOUNDING, active: false, entitled: false, founder: { offered: false, name: null } } },
+};
+/** Only the `ADMIN_EMAIL` comp can stay entitled on a lapsed plan. */
+export const PlanPaymentFailedAdminComp: Story = {
+  args: { ...ACCOUNT, billing: { ...FOUNDING, active: false, founder: { offered: false, name: null } } },
+};
+export const PlanSuspended: Story = { args: { ...ACCOUNT, billing: { ...FOUNDING, entitled: false, suspended: true } } };
+/** Only the `ADMIN_EMAIL` comp is entitled without a plan. */
+export const PlanAdminComp: Story = { args: { ...ACCOUNT, billing: { ...NO_PLAN, entitled: true } } };
+export const LapsedFounder: Story = { args: { ...ACCOUNT, billing: { ...NO_PLAN, founder: { offered: false, name: "Alex" } } } };
+export const PlanPhone: Story = { args: { ...ACCOUNT, billing: FOUNDING, phone: true } };
+export const PlanWithdrawable: Story = { args: { ...ACCOUNT, billing: WITHDRAWABLE } };
+/** What closing does to the plan, said before it is confirmed. */
+export const CloseAccountDialog: Story = {
+  args: { ...ACCOUNT, billing: WITHDRAWABLE, closeAccount: fn(async () => {}) },
+  play: async ({ canvasElement, args }) => {
+    const canvas = await settledFrame(canvasElement);
+    await canvas.user.click(canvas.getByRole("button", { name: "Close account…" }));
+    await expect(canvas.getByRole("dialog")).toBeVisible();
+    await canvas.user.click(canvas.getByRole("button", { name: "Close account" }));
+    await expect(args.closeAccount).toHaveBeenCalled();
+    await canvas.user.click(canvas.getByRole("button", { name: "Close account…" }));
+  },
+};
+export const CloseAccountNoPlan: Story = {
+  args: { ...ACCOUNT, billing: "closed" },
+  play: async ({ canvasElement }) => {
+    const canvas = await settledFrame(canvasElement);
+    await canvas.user.click(canvas.getByRole("button", { name: "Close account…" }));
+    await expect(canvas.getByText("You have no plan, so nothing is charged or refunded.")).toBeVisible();
+  },
+};
+export const CloseAccountStaleLogin: Story = {
+  args: { ...ACCOUNT, billing: FOUNDING, fresh: false },
+  play: async ({ canvasElement }) => {
+    const canvas = await settledFrame(canvasElement);
+    await expect(canvas.getByRole("button", { name: "Close account…" })).toBeDisabled();
   },
 };

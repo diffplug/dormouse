@@ -83,27 +83,28 @@ function setupPanel(text: string | RegExp) {
   };
 }
 
-/** Unfold Persistent Relay the way a user does; un-enrolled with no offer, it starts folded. */
+/** Unfold the persistent choice the way a user does: Hosted Relay in a stock
+ *  build, Persistent Relay in a self-host one; un-enrolled with no offer, it starts folded. */
 async function openPersistent(canvasElement: HTMLElement) {
   await userEvent.click(
-    await within(canvasElement).findByRole('button', { name: 'Persistent Relay' }),
+    await within(canvasElement).findByRole('button', { name: /^(Persistent|Hosted) Relay$/ }),
   );
 }
 
 /**
  * What a stock build that has never enrolled opens on: a one-time connection and
- * a folded Persistent Relay.
+ * a folded Hosted Relay.
  */
 export const Choices: Story = {
   parameters: {
     primedBurrow: { status: UNENROLLED_STATUS },
     docs: { story: { height: '310px' } },
   },
-  play: settled('Persistent Relay'),
+  play: settled('Hosted Relay'),
 };
 
 /**
- * A stock build, Persistent Relay unfolded: its one Relay is Hosted's, which
+ * A stock build, Hosted Relay unfolded: its one Relay is Hosted's, which
  * it enrolls with by a code approved at the account (`docs/specs/hosted.md` →
  * "Burrow enrollment") — the name to keep, and the button that gets one.
  */

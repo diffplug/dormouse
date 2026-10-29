@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { expect, fireEvent, userEvent, waitFor, within } from 'storybook/test';
 import type { DormouseTheme } from '../lib/themes';
 import { OVERLAY_MAX_HEIGHT_VAR } from '../components/design';
-import { SettingsDialog, SETTINGS_SCROLL_MS, TOPIC_GAP_PX } from '../components/SettingsDialog';
+import { SettingsDialog, SETTINGS_SCROLL_MS, TOPIC_GAP_PX, type TopicId } from '../components/SettingsDialog';
 import { WorkspaceIdContext } from '../components/wall/wall-context';
 import { enrolledStatus, SELF_HOST_UNENROLLED_STATUS, UNENROLLED_STATUS } from '../host/remote/test-burrow-link';
 import type { BuildStamp } from '../lib/build-info';
@@ -26,12 +26,12 @@ function dialog(canvasElement: HTMLElement) {
  * rule set, the settings, and the push-device list are app-global stores rather
  * than props.
  */
-function DialogStory() {
+function DialogStory({ initialTopic }: { initialTopic?: TopicId }) {
   const [open, setOpen] = useState(true);
   return <>
     <button type="button" onClick={() => setOpen(true)}>Open settings</button>
     {open && <WorkspaceIdContext.Provider value="settings-story">
-      <SettingsDialog onClose={() => setOpen(false)} />
+      <SettingsDialog initialTopic={initialTopic} onClose={() => setOpen(false)} />
     </WorkspaceIdContext.Provider>}
   </>;
 }
@@ -179,6 +179,99 @@ export const PushNotEnrolled: Story = {
   play: async ({ canvasElement }) => {
     await selectTopic('Notifications')({ canvasElement });
     await dialog(canvasElement).findByText(/Relay below to send push/);
+  },
+};
+
+/** An enrolled Hosted build whose relay socket is in `connection`. */
+function hostedEnrolled(connection: BurrowConsoleStatus['connection']): BurrowConsoleStatus {
+  return { ...UNENROLLED_STATUS, enrolled: true, serving: true, burrowId: 'burrow-6f1c2a90', connection };
+}
+
+/**
+ * The Relay refused this Burrow because its account has no Hosted plan. The
+ * Burrow asks a refusing Relay nothing, so the device list is no help; the
+ * line says why from the Burrow's status and links the plans.
+ */
+export const PushNotEntitled: Story = {
+  parameters: {
+    primedWatchedCommands: ['claude'],
+    primedAlertSettings: { pushEnabled: true },
+    primedPushDevices: { status: 'no-burrow', devices: [] },
+    primedBurrow: { status: hostedEnrolled('not-entitled') },
+  },
+  play: async ({ canvasElement }) => {
+    await selectTopic('Notifications')({ canvasElement });
+    const body = dialog(canvasElement);
+    await body.findByText(/no Hosted plan, so no push is sent/);
+    await expect(within(body.getByRole('region', { name: 'Notifications' })).getByRole('button', { name: 'See Hosted plans' })).toBeVisible();
+  },
+};
+
+/** This computer was removed from its Hosted account: enrolling again, below, is the way back. */
+export const PushRemoved: Story = {
+  parameters: {
+    primedWatchedCommands: ['claude'],
+    primedAlertSettings: { pushEnabled: true },
+    primedPushDevices: { status: 'no-burrow', devices: [] },
+    primedBurrow: { status: hostedEnrolled('removed') },
+  },
+  play: async ({ canvasElement }) => {
+    await selectTopic('Notifications')({ canvasElement });
+    await dialog(canvasElement).findByText(/Enroll it again under Hosted Relay below/);
+  },
+};
+
+/** The self-host Relay refused: the line names it, and never Hosted. */
+export const PushSelfHostRemoved: Story = {
+  parameters: {
+    primedWatchedCommands: ['claude'],
+    primedAlertSettings: { pushEnabled: true },
+    primedPushDevices: { status: 'no-burrow', devices: [] },
+    primedBurrow: { status: enrolledStatus({ connection: 'removed' }) },
+  },
+  play: async ({ canvasElement }) => {
+    await selectTopic('Notifications')({ canvasElement });
+    await dialog(canvasElement).findByText(/no longer accepts this computer/);
+  },
+};
+
+/**
+ * Opened at a topic, as the Baseboard preview's live line opens it: the dialog
+ * scrolls there once the topic shows, and holds it while Remote control's
+ * status read fills the sections above.
+ */
+export const OpensAtNetwork: Story = {
+  args: { initialTopic: 'network' },
+  parameters: {
+    primedWatchedCommands: ['claude'],
+    primedAlertSettings: { pushEnabled: true },
+    primedPushDevices: { status: 'no-burrow', devices: [] },
+    primedBurrow: { status: UNENROLLED_STATUS },
+  },
+  play: async ({ canvasElement }) => {
+    const body = dialog(canvasElement);
+    const network = await body.findByRole('region', { name: 'Network' });
+    await waitForTopicScroll(network);
+
+    // A section above it growing late, as a status read landing does, is
+    // followed for a moment, until the reader's own input. Scroll anchoring,
+    // where a browser has it, would follow it anyway, so it is off here.
+    const content = network.parentElement!;
+    content.style.overflowAnchor = 'none';
+    const offset = () => network.getBoundingClientRect().top - content.getBoundingClientRect().top - TOPIC_GAP_PX;
+    const general = body.getByRole('region', { name: 'General' });
+    const grow = (px: number) => { general.style.minHeight = `${general.offsetHeight + px}px`; };
+    grow(200);
+    await waitFor(() => expect(content).not.toHaveAttribute('data-topic-scrolling'), { timeout: SETTINGS_SCROLL_MS + 2000 });
+    await waitFor(() => expect(Math.abs(offset())).toBeLessThan(1), { timeout: SETTINGS_SCROLL_MS + 2000 });
+    fireEvent.wheel(content);
+    grow(200);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await expect(content).not.toHaveAttribute('data-topic-scrolling');
+    await expect(offset()).toBeGreaterThan(100);
+    general.style.minHeight = '';
+    content.style.overflowAnchor = '';
+    content.scrollTo({ top: content.scrollTop + offset(), behavior: 'instant' });
   },
 };
 

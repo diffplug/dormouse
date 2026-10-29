@@ -9,15 +9,28 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("../components/SiteHeader", () => ({ default: () => <header />, STATIC_PAGE_HEADER_STYLE: {} }));
 vi.mock("dormouse-lib/site/DocsThemeControl", () => ({ default: () => null }));
 vi.mock("dormouse-lib/site/docs-paint", () => ({ useDocsThemedBody: () => {}, DOCS_HEADER_STYLE: {}, DOCS_PAINT_PROFILE: {} }));
+const analytics = vi.hoisted(() => ({ trackPageview: vi.fn(), trackEvent: vi.fn() }));
+vi.mock("../lib/site-analytics", () => analytics);
+// `CHECKOUT_OPEN` is committed false; the open page is tested by flipping it here.
+const checkout = vi.hoisted(() => ({ open: false }));
+vi.mock("../lib/hosted-pricing", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  get CHECKOUT_OPEN() {
+    return checkout.open;
+  },
+}));
 
 const { default: Hosted } = await import("./Hosted");
 const { COHORT_ENDPOINT, MAX_SHOWN_FOUNDERS } = await import("../lib/hosted-cohorts");
 const {
+  CHECKOUT_PAGE,
+  FOUNDING_COHORTS_CLOSED,
   FOUNDING_COHORT_SIZE,
   HOSTED_MONTHLY,
   HOSTED_YEARLY,
   LIST_ANNUAL,
   foundingTier,
+  pricingJsonLd,
   tiersOnSale,
 } = await import("../lib/hosted-pricing");
 
@@ -47,6 +60,9 @@ afterEach(() => {
   root = null;
   container = null;
   vi.unstubAllGlobals();
+  analytics.trackPageview.mockClear();
+  analytics.trackEvent.mockClear();
+  checkout.open = false;
 });
 
 describe("what the Hosted page prerenders", () => {
@@ -117,9 +133,18 @@ describe("what the Hosted page prerenders", () => {
     expect(data["@type"]).toBe("Product");
     expect(data.offers.map((offer: { name: string; price: string }) => [offer.name, offer.price]))
       .toEqual(tiersOnSale().map((tier) => [tier.name, String(tier.price)]));
-    // Nothing takes payment yet, so the one claim the page must not make is
-    // that these are in stock.
+    // Checkout is closed, so the one claim the page must not make is that
+    // these are in stock.
     for (const offer of data.offers) expect(offer.availability).toBe("https://schema.org/PreOrder");
+  });
+
+  it("puts the offers in stock once checkout opens", () => {
+    const offers = (open: boolean) =>
+      JSON.parse(pricingJsonLd("https://dormouse.sh/hosted/", open)).offers.map(
+        (offer: { availability: string }) => offer.availability,
+      );
+    expect(new Set(offers(true))).toEqual(new Set(["https://schema.org/InStock"]));
+    expect(new Set(offers(false))).toEqual(new Set(["https://schema.org/PreOrder"]));
   });
 });
 
@@ -137,6 +162,39 @@ describe("the Hosted card's billing toggle", () => {
   });
 });
 
+describe("a visit's ref", () => {
+  it("comes off the address bar on arrival, leaving the rest of the URL", async () => {
+    for (const [arrived, left] of [
+      ["/hosted/?ref=settings-voice#voice", "/hosted/#voice"],
+      ["/hosted/?a=1&ref=someone%40example.test", "/hosted/?a=1"],
+      ["/hosted/#pricing", "/hosted/#pricing"],
+    ]) {
+      history.replaceState(null, "", arrived);
+      await mount(async () => new Response("{}", { status: 404 }));
+      expect(location.pathname + location.search + location.hash).toBe(left);
+      act(() => root?.unmount());
+      container?.remove();
+      root = null;
+    }
+  });
+
+  it("goes onto the page's one pageview, an unlisted value as other", async () => {
+    for (const [arrived, ref] of [
+      ["/hosted/?ref=settings-voice#voice", "settings-voice"],
+      ["/hosted/?ref=someone%40example.test", "other"],
+      ["/hosted/", null],
+    ]) {
+      history.replaceState(null, "", arrived);
+      await mount(async () => new Response("{}", { status: 404 }));
+      expect(analytics.trackPageview.mock.calls).toEqual([[ref]]);
+      analytics.trackPageview.mockClear();
+      act(() => root?.unmount());
+      container?.remove();
+      root = null;
+    }
+  });
+});
+
 /** Mounts the page with the cohort endpoint answering `body`. */
 const mountCohort = (body: unknown) =>
   mount(async (url) => {
@@ -146,8 +204,20 @@ const mountCohort = (body: unknown) =>
 
 describe("the founding card's live half", () => {
   it("fills in the seats left after hydration", async () => {
-    const el = await mountCohort({ seatsLeft: 73 });
+    const el = await mountCohort({ cohort: FOUNDING_COHORTS_CLOSED, seatsLeft: 73 });
     expect(el.textContent).toContain(`73 of ${FOUNDING_COHORT_SIZE} seats left at $${foundingTier().price}`);
+  });
+
+  it("shows no seats for a cohort other than the one whose price it prerendered", async () => {
+    // A cohort closed since this deploy: its seats would sit beside the old price.
+    for (const cohort of [FOUNDING_COHORTS_CLOSED + 1, undefined, String(FOUNDING_COHORTS_CLOSED)]) {
+      const el = await mountCohort({ cohort, seatsLeft: 73, founders: { total: 27, shown: [] } });
+      expect(el.textContent, String(cohort)).not.toContain("seats left");
+      expect(el.querySelector('[aria-label="27 founders so far"]'), String(cohort)).not.toBeNull();
+      act(() => root?.unmount());
+      container?.remove();
+      root = null;
+    }
   });
 
   it("draws opted-in founders, then +N for everyone else", async () => {
@@ -232,6 +302,40 @@ describe("the buy buttons", () => {
     expect(dialog?.textContent).toContain("Checkout is not wired up yet");
     expect(dialog?.textContent).toContain(HOSTED_MONTHLY.name);
     expect(dialog?.textContent).toContain("You have not been charged");
+  });
+
+  it("count the click, naming the plan", async () => {
+    await openFirst();
+    expect(analytics.trackEvent.mock.calls).toEqual([[{ name: "hosted plan clicked", plan: HOSTED_MONTHLY.id }]]);
+  });
+
+  it("link to the account's checkout once it opens, carrying the visit's ref", async () => {
+    checkout.open = true;
+    history.replaceState(null, "", "/hosted/?ref=settings-voice");
+    const el = await mount(async () => new Response("{}", { status: 404 }));
+    const links = [...el.querySelectorAll('a[aria-label^="Buy "]')] as HTMLAnchorElement[];
+    expect(buyButtons(el)).toHaveLength(0);
+    expect(links.map((a) => a.getAttribute("href"))).toEqual([
+      `${CHECKOUT_PAGE}?plan=monthly&ref=settings-voice`,
+      `${CHECKOUT_PAGE}?plan=founding&ref=settings-voice`,
+    ]);
+    links[0]!.addEventListener("click", (event) => event.preventDefault());
+    await act(async () => {
+      links[0]!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    });
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(analytics.trackEvent.mock.calls).toEqual([[{ name: "hosted plan clicked", plan: "monthly" }]]);
+  });
+
+  it("link without a ref when the visit had none", async () => {
+    checkout.open = true;
+    history.replaceState(null, "", "/hosted/");
+    const el = await mount(async () => new Response("{}", { status: 404 }));
+    const yearly = [...el.querySelectorAll("button")].find((b) => b.textContent === "Yearly")!;
+    await act(async () => {
+      yearly.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(el.querySelector('a[aria-label="Buy Hosted yearly"]')?.getAttribute("href")).toBe(`${CHECKOUT_PAGE}?plan=yearly`);
   });
 
   it("close on Escape", async () => {

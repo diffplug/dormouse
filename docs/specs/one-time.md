@@ -162,7 +162,7 @@ Source of truth: `OneTimeApp` in `lib/src/remote/one-time-app/OneTimeApp.tsx`; `
 
 ## Dev loop
 
-**`dor tool one-time` runs the rendezvous and page on loopback, without Postgres**, at `PORT` or a fixed default, since a Burrow build bakes the origin in. Its config carries no route or production secret. It prints the dev Burrow build variables (`DORMOUSE_RELAY_ORIGIN`, `DORMOUSE_RELAY_IS_HOSTED=1`; `docs/specs/relay.md` -> "Relay origin").
+**`dor tool one-time` runs the rendezvous and page on loopback, without Postgres**, at `PORT` or a fixed default, since a Burrow build bakes the origin in. Its config carries no route or production secret. It prints the dev Burrow build variables (`DORMOUSE_RELAY_ORIGIN`, `DORMOUSE_RELAY_IS_HOSTED=1`; `docs/specs/relay.md` -> "Relay origin"). **Started by `dor tool hosted`, it reads that loop's development database and announces no page**, since that Tool frames the account origin (`docs/specs/hosted.md` -> "Development and release").
 
 Source of truth: `hosted/scripts/dev-one-time.mjs`.
 

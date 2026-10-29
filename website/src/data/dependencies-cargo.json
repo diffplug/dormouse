@@ -2329,7 +2329,7 @@
       "author": "Joseph Birr-Pixton",
       "homepage": "https://github.com/rustls/rustls",
       "versions": [
-        "0.23.45"
+        "0.23.46"
       ]
     },
     {
@@ -2809,16 +2809,16 @@
       "name": "tao",
       "license": "Apache-2.0",
       "author": "Tauri Programme within The Commons Conservancy, The winit contributors",
-      "homepage": "https://github.com/diffplug/tao",
+      "homepage": "https://github.com/tauri-apps/tao",
       "versions": [
-        "0.37.1"
+        "0.37.2"
       ]
     },
     {
       "name": "tao-macros",
       "license": "MIT OR Apache-2.0",
       "author": "Tauri Programme within The Commons Conservancy",
-      "homepage": "https://github.com/diffplug/tao",
+      "homepage": "https://github.com/tauri-apps/tao",
       "versions": [
         "0.1.4"
       ]

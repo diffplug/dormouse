@@ -17,6 +17,7 @@ import {
   isNoiseStaticMaterial,
   mintNoiseStaticKeyPair,
   normalizeOrigin,
+  reduceBurrowLabel,
   type BurrowEnrollBeginRequest,
   type BurrowEnrollBeginResponse,
   type BurrowEnrollPollRequest,
@@ -43,9 +44,9 @@ export interface BurrowEnrollment {
    * What to call this machine — the "name for this machine" the operator typed
    * at enrollment.
    *
-   * **Local only.** It is delivered to a Client inside the encrypted pairing and
-   * connection outcomes and nowhere else; the Relay never stores or sees it
-   * in an enrollment request.
+   * A Client learns it only inside the encrypted pairing and connection
+   * outcomes. The self-host Relay never sees it; Hosted's remote poll carries
+   * it for the account page ({@link pollHostedEnrollment}).
    */
   label: string;
   /**
@@ -240,8 +241,7 @@ export async function performEnrollment(
     headers: { 'content-type': 'application/json' },
     // The credential and the baked origin, which a Relay served from another
     // refuses before saving anything, and nothing else — in particular no
-    // `label`, which stays local (`docs/specs/remote-security-model.md` ->
-    // Burrow identity).
+    // `label`, which the self-host Relay never learns.
     body: JSON.stringify({ ...credential, origin: relayOrigin } satisfies BurrowEnrollRequest),
   });
   if (!response.ok) {
@@ -399,9 +399,10 @@ export type HostedApprovalAnswer<C> =
 
 /**
  * `POST /api/burrow/enroll/poll` once for remote control. **Never throws**:
- * the poll loop reads every outcome. An `enrolled` answer is mapped through
- * the same {@link isEnrollment} guard as the password exchange's, with `label`
- * and the static {@link beginHostedEnrollment} minted.
+ * the poll loop reads every outcome. The poll carries `label`, reduced, for
+ * the account page to list this machine by. An `enrolled` answer is mapped
+ * through the same {@link isEnrollment} guard as the password exchange's, with
+ * `label` and the static {@link beginHostedEnrollment} minted.
  */
 export async function pollHostedEnrollment(
   relayOrigin: string,
@@ -410,7 +411,8 @@ export async function pollHostedEnrollment(
   noiseStatic: EnrollmentStatic,
   fetch: typeof globalThis.fetch,
 ): Promise<HostedApprovalAnswer<BurrowEnrollment>> {
-  return pollHostedApproval(relayOrigin, deviceCode, 'remote', fetch, (body): HostedApprovalAnswer<BurrowEnrollment> | null => {
+  const sent = reduceBurrowLabel(label);
+  return pollHostedApproval(relayOrigin, deviceCode, sent ? { label: sent } : {}, fetch, (body): HostedApprovalAnswer<BurrowEnrollment> | null => {
     if (!isBurrowEnrollPollResponse(body)) return null;
     // Rebuilt, so nothing but the guarded fields reaches status.
     if (body.status === 'redeemed') return { status: 'redeemed', burrowId: body.burrowId };
@@ -425,21 +427,26 @@ export async function pollHostedVoiceApproval(
   deviceCode: string,
   fetch: typeof globalThis.fetch,
 ): Promise<HostedApprovalAnswer<string>> {
-  return pollHostedApproval(relayOrigin, deviceCode, 'voice', fetch, (body): HostedApprovalAnswer<string> | null => {
+  return pollHostedApproval(relayOrigin, deviceCode, { purpose: 'voice' }, fetch, (body): HostedApprovalAnswer<string> | null => {
     if (!isBurrowVoicePollResponse(body)) return null;
     // Rebuilt, so nothing but the guarded fields goes further.
     return body.status === 'enabled' ? { status: 'approved', credential: body.voiceToken } : { status: body.status };
   });
 }
 
-/** One poll, with retries and refusals shared by both purposes; only success parsing differs. */
+/**
+ * One poll, with retries and refusals shared by both purposes; only the
+ * request's other fields and success parsing differ. `fields.purpose` absent
+ * is remote control.
+ */
 export async function pollHostedApproval<T>(
   relayOrigin: string,
   deviceCode: string,
-  purpose: 'remote' | 'voice',
+  fields: Omit<BurrowEnrollPollRequest, 'deviceCode'>,
   fetch: typeof globalThis.fetch,
   parse: (body: unknown) => T | null,
 ): Promise<T | HostedApprovalFailure> {
+  const purpose = fields.purpose ?? 'remote';
   let response: Response;
   try {
     response = await fetch(`${relayOrigin}${API_ROUTES.burrowEnrollPoll}`, {
@@ -448,7 +455,7 @@ export async function pollHostedApproval<T>(
       // The device code is a bearer until it expires.
       redirect: 'error',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ deviceCode, ...(purpose === 'voice' ? { purpose } : {}) } satisfies BurrowEnrollPollRequest),
+      body: JSON.stringify({ deviceCode, ...fields } satisfies BurrowEnrollPollRequest),
     });
   } catch {
     return { status: 'retry', slowDown: false };

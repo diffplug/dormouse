@@ -61,6 +61,8 @@ const FIXTURES = [
   ['window.open', '\nexport const __selftest = (u: string) => window.open(u);\n'],
   ['remote Worker', '\nexport const __selftest = (u: string) => new Worker(u);\n'],
   ['importScripts', '\nexport const __selftest = (u: string) => importScripts(u);\n'],
+  ['analytics SDK', "\nexport const __selftest = () => import('posthog-js');\n"],
+  ['analytics SDK', "\nimport __ph from 'posthog-js/dist/module.slim.no-external.js';\nexport const __selftest = __ph;\n"],
   ['remote URL literal', "\nexport const __selftest = 'https://cdn.example.net/x.js';\n"],
   ['remote URL literal', '\nexport const __selftest = (p: string) => `wss://relay.example.net/${p}`;\n'],
 ];
@@ -123,6 +125,12 @@ const STRUCTURAL = [
     'new OneTimeRuntime outside the service',
   ],
   [
+    'lib/src/remote/burrow/burrow-fetch.ts',
+    append("\nexport const __selftest = () => import('posthog-js');\n"),
+    'spells analytics SDK, which no OUTBOUND_SITES class admits',
+    'an analytics SDK in a file OUTBOUND_SITES already classifies',
+  ],
+  [
     'lib/src/host/relay-origin.ts',
     append("\nexport const __selftest = 'https://relay.example.net';\n"),
     'spells the remote host relay.example.net',
@@ -137,8 +145,8 @@ const STRUCTURAL = [
   [
     'lib/src/components/HostedEnrollment.tsx',
     replace(
-      "'https://dormouse.sh/hosted/#pricing';\n/** The Hosted page's voice section, the spoken-alarm row's link where the build has no managed voice. */\nexport const HOSTED_VOICE_URL = 'https://dormouse.sh/hosted/#voice'",
-      "'/hosted/#pricing';\nexport const HOSTED_VOICE_URL = '/hosted/#voice'",
+      "const HOSTED_PAGE_URL = 'https://dormouse.sh/hosted/';",
+      "const HOSTED_PAGE_URL = '/hosted/';",
     ),
     'OUTBOUND_SITES entry no longer spells any form',
     'a stale OUTBOUND_SITES entry',

@@ -66,6 +66,9 @@ function check(files) {
   if (setup.length === 0 || setup.some((s) => s.with?.['node-version-file'] !== 'package.json' || s.with?.['node-version'] !== undefined)) {
     fail('release.yml build-standalone does not install Node from node-version-file: package.json');
   }
+  if ((release.jobs?.['build-standalone']?.steps ?? []).some((s) => /--no-runtime\b/.test(s.run ?? ''))) {
+    fail('release.yml build-standalone installs pnpm without its runtime (--no-runtime)');
+  }
 
   // The CI linters outside the lockfile: an exact version, verified by hash.
   const zizmor = files.zizmor.split('\n').filter((l) => l.trim() && !l.trim().startsWith('#')).join(' ').replace(/\\\s+/g, ' ');
@@ -105,6 +108,7 @@ for (const [name, mutate, expected] of [
   ['a volta pin added', json('pkg', (p) => { p.volta = { node: '24.0.0' }; }), 'declares volta.node'],
   ['an engines pin added', json('pkg', (p) => { p.engines = { node: '>=24' }; }), 'declares engines.node'],
   ['the release build pins Node inline', text('release', '        with:\n          node-version-file: package.json', '        with:\n          node-version: 24'), 'node-version-file: package.json'],
+  ['the release build skips the pnpm runtime', text('release', 'run: pnpm install --frozen-lockfile\n', 'run: pnpm install --frozen-lockfile --no-runtime\n'), '--no-runtime'],
   ['zizmor unhashed', (files) => { files.zizmor = 'zizmor==1.30.1\n'; }, 'does not pin zizmor exactly'],
   ['zizmor by range', (files) => { files.zizmor = files.zizmor.replace(/zizmor==[\d.]+/, 'zizmor>=1.30'); }, 'does not pin zizmor exactly'],
   ['zizmor installed without hashes', text('ci', '--require-hashes ', ''), 'does not install zizmor'],

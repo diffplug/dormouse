@@ -13,7 +13,7 @@ import {
   type AccountState,
 } from "../../src/settle";
 
-const computer = (burrowId: string) => ({ burrowId, enrolledAt: "2026-10-20" });
+const computer = (burrowId: string) => ({ burrowId, label: null, enrolledAt: "2026-10-20" });
 const state = (on: boolean | null, ids: string[] | null): AccountState => ({
   voice: on === null ? null : { entitled: true, on },
   computers: ids && ids.map(computer),

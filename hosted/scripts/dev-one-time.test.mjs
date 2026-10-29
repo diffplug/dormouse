@@ -1,7 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { DEFAULT_PORT, DEV_ENROLL_SECRET, devConfig, devOrigin, devPort } from "./dev-one-time.mjs";
+import {
+  DEFAULT_PORT,
+  DEV_ENROLL_SECRET,
+  LOCAL_HYPERDRIVE_ID,
+  devConfig,
+  devOrigin,
+  devPort,
+  hostedAttachment,
+} from "./dev-one-time.mjs";
 import { parseConfig } from "./workers.mjs";
 
 const base = parseConfig(
@@ -44,4 +52,35 @@ test("the origin is loopback HTTP on the chosen port, which PORT names", () => {
     assert.throws(() => devPort({ PORT: bad }), /TCP port/, bad);
   assert.equal(devOrigin(9000), "http://localhost:9000");
   assert.equal(devConfig(base, 9000).vars.APP_ORIGIN, "http://localhost:9000");
+});
+
+test("it attaches to the Hosted dev loop with both its account origin and its database, or neither", () => {
+  assert.equal(hostedAttachment({}), null);
+  assert.equal(hostedAttachment({ HOSTED_DEV_ACCOUNT_ORIGIN: "", HOSTED_DEV_DATABASE_URL: "" }), null);
+  for (const half of [
+    { HOSTED_DEV_ACCOUNT_ORIGIN: "http://localhost:5000" },
+    { HOSTED_DEV_DATABASE_URL: "postgres://x" },
+    { HOSTED_DEV_ACCOUNT_ORIGIN: "http://localhost:5000", HOSTED_DEV_DATABASE_URL: "" },
+  ])
+    assert.throws(() => hostedAttachment(half), /set together/, JSON.stringify(half));
+  assert.deepEqual(
+    hostedAttachment({ HOSTED_DEV_ACCOUNT_ORIGIN: "http://localhost:5000", HOSTED_DEV_DATABASE_URL: "postgres://x" }),
+    { accountOrigin: "http://localhost:5000", databaseUrl: "postgres://x" },
+  );
+});
+
+test("attached, it approves at that account origin and reads its database, never production's", () => {
+  const config = devConfig(
+    { ...base, hyperdrive: [{ binding: "HYPERDRIVE", id: "0".repeat(32) }] },
+    8787,
+    { accountOrigin: "http://localhost:5000", databaseUrl: "postgresql://dev@localhost:5432/dev" },
+  );
+  assert.deepEqual(config.vars, {
+    APP_ORIGIN: "http://localhost:8787",
+    RELAY_ENROLL_SECRET: DEV_ENROLL_SECRET,
+    ACCOUNT_ORIGIN: "http://localhost:5000",
+  });
+  assert.deepEqual(config.hyperdrive, [
+    { binding: "HYPERDRIVE", id: LOCAL_HYPERDRIVE_ID, localConnectionString: "postgresql://dev@localhost:5432/dev" },
+  ]);
 });

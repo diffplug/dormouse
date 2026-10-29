@@ -4,6 +4,7 @@ import { queryDatabase, withClient } from "pgstencil/postgres";
 import { migrations } from "../migrations";
 import { applyRuntimeRoles, runtimeRolesSql } from "../runtime-roles";
 import { RUNTIME_ROLES, workerDatabases, type Worker } from "./worker-roles";
+import { PRODUCTION } from "../../scripts/production.mjs";
 
 // `hosted/server/runtime-roles.sql` in real Postgres: what each restricted role
 // may touch, exactly. The relay and voice suites run their Workers on these
@@ -71,6 +72,9 @@ const EXPECTED: Record<Worker, string[]> = {
   relay: [
     // PUBLIC's defaults.
     "database: CONNECT, TEMPORARY",
+    "dormouse_billing_disputes.userId: SELECT",
+    "dormouse_metrics_daily.count: UPDATE",
+    "dormouse_metrics_daily: INSERT, SELECT",
     "dormouse_relay_burrows.enrolledAt: UPDATE",
     "dormouse_relay_burrows: INSERT, SELECT",
     "dormouse_relay_challenges: DELETE, INSERT, SELECT",
@@ -91,13 +95,21 @@ const EXPECTED: Record<Worker, string[]> = {
     "dormouse_relay_setup_tokens: DELETE, INSERT, SELECT",
     "dormouse_voice_tokens.hash: INSERT",
     "dormouse_voice_tokens.userId: INSERT",
+    "schema pgstencil_billing: USAGE",
     "schema public: USAGE",
+    "subscriptions.owner_id: SELECT",
+    "subscriptions.period_end: SELECT",
+    "subscriptions.status: SELECT",
+    "subscriptions.trial_end: SELECT",
     "user.email: SELECT",
     "user.emailVerified: SELECT",
     "user.id: SELECT",
   ],
   voice: [
     "database: CONNECT, TEMPORARY",
+    "dormouse_billing_disputes.userId: SELECT",
+    "dormouse_metrics_daily.count: UPDATE",
+    "dormouse_metrics_daily: INSERT, SELECT",
     "dormouse_voice_tokens.createdAt: SELECT",
     "dormouse_voice_tokens.hash: SELECT",
     "dormouse_voice_tokens.id: SELECT",
@@ -106,7 +118,12 @@ const EXPECTED: Record<Worker, string[]> = {
     "dormouse_voice_tokens: DELETE",
     "dormouse_voice_usage.count: UPDATE",
     "dormouse_voice_usage: INSERT, SELECT",
+    "schema pgstencil_billing: USAGE",
     "schema public: USAGE",
+    "subscriptions.owner_id: SELECT",
+    "subscriptions.period_end: SELECT",
+    "subscriptions.status: SELECT",
+    "subscriptions.trial_end: SELECT",
     "user.email: SELECT",
     "user.emailVerified: SELECT",
     "user.id: SELECT",
@@ -129,9 +146,27 @@ const outcome = (worker: Worker, text: string) =>
     (error: { code?: string }) => error.code,
   );
 
+/** Billing beyond the entitlement's subscription columns, refused to both roles. */
+const BILLING_REFUSED = [
+  `SELECT price_id FROM pgstencil_billing.subscriptions`,
+  `SELECT customer_id FROM pgstencil_billing.accounts`,
+  `SELECT id FROM pgstencil_billing.checkouts`,
+  `SELECT id FROM pgstencil_billing.events`,
+  `UPDATE pgstencil_billing.subscriptions SET status = status`,
+  `DELETE FROM pgstencil_billing.subscriptions`,
+  `SELECT "disputeId" FROM dormouse_billing_disputes`,
+  `INSERT INTO dormouse_billing_disputes ("disputeId", "userId") VALUES ('x', 'x')`,
+  `DELETE FROM dormouse_billing_disputes`,
+];
+
+/** What the entitlement reads of the subscriptions, which both roles may. */
+const ENTITLEMENT_READ = `SELECT owner_id, status, period_end, trial_end FROM pgstencil_billing.subscriptions
+  WHERE NOT EXISTS (SELECT FROM dormouse_billing_disputes d WHERE d."userId" = owner_id)`;
+
 test("the relay's role is refused the account's tables, the user row's other columns and writes, voice but a token's mint, and Burrow removal", async () => {
   // It does log in, and reads what the entitlement check reads.
   expect(await outcome("relay", `SELECT id, email, "emailVerified" FROM "user"`)).toBe("ok");
+  expect(await outcome("relay", ENTITLEMENT_READ)).toBe("ok");
   for (const text of [
     `SELECT * FROM "session"`,
     `SELECT * FROM account`,
@@ -147,6 +182,7 @@ test("the relay's role is refused the account's tables, the user row's other col
     `UPDATE dormouse_relay_burrows SET "userId" = "userId"`,
     `INSERT INTO dormouse_relay_enrollment_approvals ("userCode", "userId", "expiresAt") VALUES ('x', 'x', now())`,
     `CREATE TABLE dormouse_relay_extra (id int)`,
+    ...BILLING_REFUSED,
   ])
     expect([text, await outcome("relay", text)]).toEqual([text, "42501"]);
 });
@@ -156,6 +192,7 @@ test("the voice role is refused the relay's tables, the account's, and its token
     await outcome("voice", `SELECT id, "userId", hash, "createdAt", "lastUsedAt" FROM dormouse_voice_tokens`),
   ).toBe("ok");
   expect(await outcome("voice", `DELETE FROM dormouse_voice_tokens WHERE hash = 'x'`)).toBe("ok");
+  expect(await outcome("voice", ENTITLEMENT_READ)).toBe("ok");
   for (const text of [
     `SELECT * FROM dormouse_relay_sessions`,
     `SELECT * FROM dormouse_relay_burrows`,
@@ -166,6 +203,7 @@ test("the voice role is refused the relay's tables, the account's, and its token
     `UPDATE dormouse_voice_tokens SET "userId" = "userId"`,
     `INSERT INTO dormouse_voice_tokens ("userId", hash) VALUES ('x', 'x')`,
     `DELETE FROM dormouse_voice_usage`,
+    ...BILLING_REFUSED,
   ])
     expect([text, await outcome("voice", text)]).toEqual([text, "42501"]);
 });
@@ -217,4 +255,31 @@ test("once both roles exist, a migration role without CREATEROLE reapplies the f
       "SET LOCAL ROLE dormouse_roles_probe",
     ]),
   ).resolves.toBeUndefined();
+});
+
+test("the account's hand-made role, where it exists, is granted every billing table and nothing taken away", async () => {
+  // The name production's account Hyperdrive connects as.
+  expect(PRODUCTION.account.role).toBe("dormouse_app");
+  const granted = await withClient(context.database.url, async (db) => {
+    await db.query("BEGIN");
+    try {
+      await db.query(`CREATE ROLE dormouse_app NOLOGIN`);
+      await db.query(`GRANT SELECT ON "session" TO dormouse_app`);
+      await db.query((await runtimeRolesSql()).replace(/^(BEGIN|COMMIT);$/gm, ""));
+      const { rows } = await db.query<{ table: string; ok: boolean }>(
+        `SELECT c.relname AS table, has_schema_privilege('dormouse_app', 'pgstencil_billing', 'USAGE')
+          AND has_table_privilege('dormouse_app', c.oid, 'SELECT, INSERT, UPDATE, DELETE') AS ok
+        FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'pgstencil_billing' AND c.relkind = 'r'
+        UNION ALL SELECT 'session', has_table_privilege('dormouse_app', '"session"', 'SELECT')
+        ORDER BY 1`,
+      );
+      return rows;
+    } finally {
+      await db.query("ROLLBACK");
+    }
+  });
+  expect(granted).toEqual(
+    ["accounts", "checkouts", "events", "session", "subscriptions"].map((table) => ({ table, ok: true })),
+  );
 });
