@@ -1,13 +1,13 @@
 import { useState, type FormEvent, type ReactNode } from "react";
 import { CARD_CLASS, LINK_CLASS, MUTED_TEXT_CLASS } from "dormouse-lib/site/docs-tokens";
 import { isFounderName } from "../server/policy-constants";
-import { planName, type BillingSummary } from "./billing";
+import { PLAN_NAMES, planInterval } from "../../website/src/lib/hosted-pricing.ts";
+import type { BillingSummary } from "../server/billing-summary";
 import { perInterval } from "./Checkout";
 import { BUTTON_CLASS, HEADING_CLASS, HELP_CLASS, INPUT_CLASS, LABEL_CLASS, LABEL_TEXT_CLASS } from "./classes";
 import { ModelForm, SupportLink } from "./Withdrawal";
 
 const day = (iso: string) => new Date(iso).toLocaleDateString();
-const interval = (billing: BillingSummary) => (billing.plan === "monthly" ? "month" : "year");
 
 /**
  * The held plan's state in one sentence. A lapsed plan with `entitled` still
@@ -129,8 +129,8 @@ export function PlanSection({
       {billing.plan ? (
         <>
           <p className="mb-1">
-            {planName(billing.plan)}
-            {billing.price ? ` · ${perInterval(billing.price, interval(billing))}` : ""}
+            {PLAN_NAMES[billing.plan]}
+            {billing.price ? ` · ${perInterval(billing.price, planInterval(billing.plan))}` : ""}
           </p>
           <p className={HELP_CLASS}>{planStatus(billing)}</p>
           {billing.withdrawal && (
@@ -179,7 +179,7 @@ export function PlanConfirmation({
   onManage: () => void;
 }) {
   const rows: [string, ReactNode][] = [
-    ["Plan", `${planName(billing.plan)}${billing.price ? ` · ${perInterval(billing.price, interval(billing))}` : ""}`],
+    ["Plan", `${PLAN_NAMES[billing.plan]}${billing.price ? ` · ${perInterval(billing.price, planInterval(billing.plan))}` : ""}`],
     ["Status", planStatus(billing)],
     ...(billing.consent
       ? ([

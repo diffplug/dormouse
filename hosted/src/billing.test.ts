@@ -60,10 +60,10 @@ it("takes the checkout Stripe returned from off the address bar, ending the kept
 });
 
 it("offers founding at the open cohort's step, and drops it once founding closes", () => {
-  expect(planOffers({ cohort: 2, seatsLeft: 7 }).map(({ plan, price }) => [plan, price])).toEqual([
+  expect(planOffers({ cohort: 2, seatsLeft: 7 }).map(({ id, price }) => [id, price])).toEqual([
     ["founding", FOUNDING_LADDER[2]],
     ["yearly", LIST_ANNUAL],
     ["monthly", LIST_MONTHLY],
   ]);
-  expect(planOffers(null).map(({ plan }) => plan)).toEqual(["yearly", "monthly"]);
+  expect(planOffers(null).map(({ id }) => id)).toEqual(["yearly", "monthly"]);
 });

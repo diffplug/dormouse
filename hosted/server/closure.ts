@@ -5,9 +5,9 @@ import { CompiledQuery, type Selectable } from "kysely";
 import { bodyLimit } from "hono/body-limit";
 import { readJson } from "remote-lib-common";
 import { accountQuery, cookieLogin, type AccountHost } from "./account-gate";
-import { REFUND_DAYS, withBilling, type BillingSetup, type Plan } from "./billing";
+import { REFUND_DAYS, withBilling, type BillingSetup } from "./billing";
 import { CURRENT_STATUSES } from "./entitlement";
-import { LOGIN_FRESH_AGE_MS, RECENT_LOGIN_WINDOW } from "./policy-constants";
+import { LOGIN_FRESH_AGE_MS, RECENT_LOGIN_WINDOW, type Plan } from "./policy-constants";
 import { refundPaidInvoices } from "./withdrawal";
 
 /** What one request's account deployment provides to account closure. */

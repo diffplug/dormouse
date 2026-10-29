@@ -6,8 +6,10 @@ import {
   LINK_CLASS,
   MUTED_TEXT_CLASS,
 } from "dormouse-lib/site/docs-tokens";
-import { TERMS_VERSION, VOICE_DAILY_CAP } from "../server/policy-constants";
-import { planOffers, type BillingSummary, type Plan, type PlanOffer } from "./billing";
+import { TERMS_VERSION, VOICE_DAILY_CAP, type Plan } from "../server/policy-constants";
+import { planInterval, type Tier } from "../../website/src/lib/hosted-pricing.ts";
+import type { BillingSummary } from "../server/billing-summary";
+import { planOffers } from "./billing";
 import { HELP_CLASS, PRIMARY_CLASS } from "./classes";
 import { WithdrawalRight } from "./Withdrawal";
 
@@ -22,17 +24,18 @@ export const perInterval = (price: number, interval: "month" | "year") => `$${pr
  * (docs/specs/pricing.md -> "Checkout and entitlement"): price and tax,
  * renewal, cancellation, refunds, and material limits, for the chosen plan.
  */
-function Terms({ offer }: { offer: PlanOffer }) {
-  const every = offer.interval === "year" ? "every year" : "every month";
+function Terms({ offer }: { offer: Tier }) {
+  const interval = planInterval(offer.id);
+  const every = interval === "year" ? "every year" : "every month";
   return (
     <ul className={`mt-6 text-sm ${MUTED_TEXT_CLASS}`}>
       {[
-        `$${offer.price} a ${offer.interval}, plus any applicable tax. Stripe shows the total before you pay.`,
+        `$${offer.price} a ${interval}, plus any applicable tax. Stripe shows the total before you pay.`,
         `Renews automatically ${every} at $${offer.price} until you cancel.${
-          offer.plan === "founding" ? " Your founding price stays for as long as your subscription does." : ""
+          offer.id === "founding" ? " Your founding price stays for as long as your subscription does." : ""
         }`,
         "Cancel any time from your account page. You keep Hosted until the end of the period you paid for.",
-        offer.interval === "year"
+        interval === "year"
           ? "Ask within 30 days of your first payment or of a yearly renewal for a full refund, which ends the plan."
           : "Ask within 30 days of your first payment for a full refund, which ends the plan. Monthly renewals are outside this guarantee.",
         `For one person, including work use, with no device limit. Natural Voice speaks up to ${VOICE_DAILY_CAP} alarms a day; past that, alarms use the system voice.`,
@@ -64,11 +67,11 @@ export function Checkout({
 }) {
   const offers = planOffers(billing.founding);
   const [chosen, setChosen] = useState<Plan>(
-    offers.find((offer) => offer.plan === plan)?.plan ?? offers[0]!.plan,
+    offers.find((offer) => offer.id === plan)?.id ?? offers[0]!.id,
   );
   const [terms, setTerms] = useState(false);
   const [renewal, setRenewal] = useState(false);
-  const offer = offers.find((each) => each.plan === chosen)!;
+  const offer = offers.find((each) => each.id === chosen)!;
   function submit(event: FormEvent) {
     event.preventDefault();
     if (terms && renewal && !busy) onPurchase(chosen, offer.price);
@@ -79,19 +82,19 @@ export function Checkout({
         <legend className="mb-3 font-display text-xl">Choose a plan</legend>
         {offers.map((each) => (
           <label
-            key={each.plan}
-            className={`${CARD_CLASS} mb-2 flex cursor-pointer items-start gap-3 ${each.plan === chosen ? ACCENT_BORDER_CLASS : ""}`}
+            key={each.id}
+            className={`${CARD_CLASS} mb-2 flex cursor-pointer items-start gap-3 ${each.id === chosen ? ACCENT_BORDER_CLASS : ""}`}
           >
             <input
-              id={`${each.plan}-plan`}
+              id={`${each.id}-plan`}
               type="radio"
               name="plan"
-              value={each.plan}
+              value={each.id}
               className={CHECK_CLASS}
-              checked={each.plan === chosen}
+              checked={each.id === chosen}
               disabled={!!busy}
               onChange={() => {
-                setChosen(each.plan);
+                setChosen(each.id);
                 // Renewal was agreed at the other plan's price and interval.
                 setRenewal(false);
               }}
@@ -101,15 +104,15 @@ export function Checkout({
                 <span className="font-display text-lg">{each.name}</span>
                 <span>
                   {each.listPrice && <s className={`mr-2 ${MUTED_TEXT_CLASS}`}>${each.listPrice}</s>}
-                  <span className="font-display text-lg">{perInterval(each.price, each.interval)}</span>
+                  <span className="font-display text-lg">{perInterval(each.price, planInterval(each.id))}</span>
                 </span>
               </span>
-              {each.plan === "founding" && billing.founding && (
+              {each.id === "founding" && billing.founding && (
                 <span className={`block text-sm ${MUTED_TEXT_CLASS}`}>
                   Locked while you stay subscribed. {billing.founding.seatsLeft} left at this price.
                 </span>
               )}
-              {each.plan === "yearly" && (
+              {each.id === "yearly" && (
                 <span className={`block text-sm ${MUTED_TEXT_CLASS}`}>Two months free against monthly.</span>
               )}
             </span>
@@ -145,7 +148,7 @@ export function Checkout({
           onChange={(event) => setRenewal(event.target.checked)}
         />
         <span>
-          I agree that my subscription renews automatically {offer.interval === "year" ? "every year" : "every month"} at $
+          I agree that my subscription renews automatically {planInterval(offer.id) === "year" ? "every year" : "every month"} at $
           {offer.price} plus any applicable tax until I cancel.
         </span>
       </label>

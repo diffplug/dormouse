@@ -53,6 +53,8 @@ export const PRICE_CHANGED = "The price has changed. Check the new price and agr
 // The plans checkout sells, by the names a checkout request, `status()`, and
 // the billing metrics use.
 export const BILLING_PLANS = ["monthly", "yearly", "founding"] as const;
+export type Plan = (typeof BILLING_PLANS)[number];
+export const isPlan = (plan: unknown): plan is Plan => (BILLING_PLANS as readonly unknown[]).includes(plan);
 
 // A name the founders row shows: 1–64 code points, none a control, format, or
 // line or paragraph separator, without padding. The account page checks it

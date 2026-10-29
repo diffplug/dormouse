@@ -2,12 +2,12 @@
 // "Checkout and entitlement".
 import type { Billing, Stripe } from "@pgstencil/stripe";
 import { escape } from "@pgstencil/auth/email";
-import { CompiledQuery, type Kysely } from "kysely";
 import type { EmailMessage, EmailSender } from "pgstencil";
+import { PLAN_NAMES, planInterval } from "../../website/src/lib/hosted-pricing";
 import { DIFFPLUG_POSTAL_ADDRESS, SUPPORT_EMAIL } from "../../website/src/lib/hosted-withdrawal";
-import { publishedPrice, type BillingSetup, type Plan } from "./billing";
-import { BILLING_RETURN_PATH } from "./policy-constants";
-import { PLAN_NAMES, billingContact } from "./withdrawal";
+import { run, type PriceCatalog, type PriceChange } from "./billing";
+import { BILLING_RETURN_PATH, type Plan } from "./policy-constants";
+import { billingContact } from "./withdrawal";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -41,73 +41,12 @@ const LEASE_MS = 5 * 60 * 1000;
 /** How many notices one pass sends, and how many price changes it applies, at most. */
 const BATCH = 50;
 
-/** A scheduled list price change, as the operator recorded it in `dormouse_price_changes`. */
-export interface PriceChange {
-  id: string;
-  plan: "monthly" | "yearly";
-  fromPriceId: string;
-  toPriceId: string;
-  fromUsd: number;
-  toUsd: number;
-  effectiveAt: Date;
-}
-
-type Db = Pick<Kysely<any>, "executeQuery">;
-
-const run = <Row>(db: Db, text: string, values: unknown[]) =>
-  db.executeQuery<Row>(CompiledQuery.raw(text, values)).then((result) => result.rows);
-
-/** Every scheduled price change, oldest first. */
-export const priceChanges = (db: Db) =>
-  run<PriceChange>(
-    db,
-    `SELECT id, plan, "fromPriceId", "toPriceId", "fromUsd", "toUsd", "effectiveAt"
-    FROM public.dormouse_price_changes ORDER BY "createdAt", id`,
-    [],
-  );
-
-/**
- * The changes billing may act on, and the ones it refuses: a change that
- * names a founding Price, whose lock no change may touch, or a Price another
- * plan's configuration or change already holds, is refused whole.
- */
-export function usableChanges(setup: BillingSetup, changes: readonly PriceChange[]) {
-  const owner = new Map<string, string>([
-    [setup.monthly, "monthly"],
-    [setup.yearly, "yearly"],
-    ...setup.founding.map((price) => [price, "founding"] as [string, string]),
-  ]);
-  const usable: PriceChange[] = [];
-  const refused: PriceChange[] = [];
-  for (const change of changes) {
-    const prices = [change.fromPriceId, change.toPriceId];
-    if (prices.some((price) => (owner.get(price) ?? change.plan) !== change.plan)) refused.push(change);
-    else {
-      for (const price of prices) owner.set(price, change.plan);
-      usable.push(change);
-    }
-  }
-  return { usable, refused };
-}
-
-/** What `priceId` charges per interval in whole US dollars: published, or a change's; null when neither says. */
-export function priceUsd(setup: BillingSetup, changes: readonly PriceChange[], priceId: string): number | null {
-  return (
-    publishedPrice(setup, priceId) ??
-    changes.find((change) => change.toPriceId === priceId)?.toUsd ??
-    changes.find((change) => change.fromPriceId === priceId)?.fromUsd ??
-    null
-  );
-}
-
-const intervalOf = (plan: Plan) => (plan === "monthly" ? "month" : "year");
-
 /** Prices a Stripe client confirmed, by id, amount, interval, and mode: Stripe never changes a Price's amount or interval. */
 const confirmedPrices = new WeakMap<Stripe, Set<string>>();
 
 /** Throws unless Stripe holds both of `change`'s Prices at its amounts, in USD, per its plan's interval. */
 async function verifyChange(billing: Billing<Plan>, change: PriceChange) {
-  const interval = intervalOf(change.plan);
+  const interval = planInterval(change.plan);
   let confirmed = confirmedPrices.get(billing.stripe);
   if (!confirmed) confirmedPrices.set(billing.stripe, (confirmed = new Set()));
   for (const [id, usd] of [
@@ -143,8 +82,7 @@ interface Pending {
 
 /** What composing a notice reads beyond its row. */
 export interface NoticeContext {
-  setup: BillingSetup;
-  changes: readonly PriceChange[];
+  catalog: PriceCatalog;
   /** The account origin, whose billing page a notice links. */
   origin: string;
 }
@@ -152,11 +90,11 @@ export interface NoticeContext {
 const DAY = new Intl.DateTimeFormat("en-US", { dateStyle: "long", timeZone: "UTC" });
 
 /** The email for notice `notice`, to the billing email `to`. */
-export function noticeMessage(to: string, notice: Pending, plan: Plan | null, context: NoticeContext): EmailMessage {
+function noticeMessage(to: string, notice: Pending, plan: Plan | null, context: NoticeContext): EmailMessage {
   const billingPage = new URL(BILLING_RETURN_PATH, context.origin).href;
   const name = plan ? PLAN_NAMES[plan] : "Dormouse Hosted";
-  const interval = plan ? intervalOf(plan) : null;
-  const usd = notice.priceId ? priceUsd(context.setup, context.changes, notice.priceId) : null;
+  const interval = plan ? planInterval(plan) : null;
+  const usd = notice.priceId ? (context.catalog.prices.get(notice.priceId)?.usd ?? null) : null;
   const on = notice.renewsAt ? DAY.format(notice.renewsAt) : "";
   const cancel = `To stop it renewing, cancel before ${on} in Manage billing on your billing page: ${billingPage}. You keep Hosted until ${on}. If you cannot sign in, email ${SUPPORT_EMAIL} and we will cancel it for you.`;
   const yearlyRefund = `Ask within 30 days of a yearly renewal payment and we refund it in full, including tax.`;
@@ -182,7 +120,7 @@ export function noticeMessage(to: string, notice: Pending, plan: Plan | null, co
       ];
       break;
     case "price_change": {
-      const change = context.changes.find((candidate) => candidate.id === notice.priceChangeId)!;
+      const change = context.catalog.usable.find((candidate) => candidate.id === notice.priceChangeId)!;
       subject = `Your Dormouse Hosted price changes on ${on}`;
       paragraphs = [
         `The price of your ${name} subscription changes from $${change.fromUsd} to $${change.toUsd} a ${interval}, plus any applicable tax, starting with your renewal on ${on}. Nothing changes before then.`,
@@ -357,13 +295,12 @@ async function applyPriceChanges(billing: Billing<Plan>, verified: readonly stri
  */
 export async function runNotices(
   billing: Billing<Plan>,
-  setup: BillingSetup,
-  changes: readonly PriceChange[],
+  catalog: PriceCatalog,
   mail: () => EmailSender,
 ): Promise<unknown[]> {
   const failed: unknown[] = [];
   const now = billing.time.now();
-  const { usable, refused } = usableChanges(setup, changes);
+  const { usable, refused } = catalog;
   for (const change of refused)
     failed.push(new Error(`Price change ${change.id} names a founding Price or another plan's; it is ignored`));
   // Checked against Stripe only while someone is still on its old Price.
@@ -379,10 +316,6 @@ export async function runNotices(
       () => verified.push(change.id),
       (error: unknown) => failed.push(error),
     );
-  const prices = (plan: "monthly" | "yearly") => [
-    setup[plan],
-    ...usable.filter((change) => change.plan === plan).flatMap((change) => [change.fromPriceId, change.toPriceId]),
-  ];
   // A yearly term's renewal notice is its annual reminder too; a monthly
   // plan's is due before each renewal that ends a year of the subscription.
   await run(
@@ -397,7 +330,7 @@ export async function runNotices(
       AND s.period_end > $1::timestamptz AND s.period_end <= $1::timestamptz + make_interval(days => $4)
       AND (s.price_id = ANY ($2::text[]) OR (s.price_id = ANY ($3::text[]) AND term.months >= 12 AND mod(term.months, 12) = 0))
     ON CONFLICT DO NOTHING`,
-    [now, [...prices("yearly"), ...setup.founding], prices("monthly"), RENEWAL_NOTICE_DAYS],
+    [now, [...catalog.recognized("yearly"), ...catalog.recognized("founding")], catalog.recognized("monthly"), RENEWAL_NOTICE_DAYS],
   );
   // A price change's notice, for the first renewal on or after its date that
   // is still far enough off for the notice to count.
@@ -413,7 +346,7 @@ export async function runNotices(
     ON CONFLICT DO NOTHING`,
     [now, verified, PRICE_SEND_BY_DAYS, PRICE_NOTICE_DAYS],
   );
-  failed.push(...(await sendNotices(billing, mail, { setup, changes: usable, origin: billing.config.origin }, { verified })));
+  failed.push(...(await sendNotices(billing, mail, { catalog, origin: billing.config.origin }, { verified })));
   failed.push(...(await applyPriceChanges(billing, verified)));
   return failed;
 }

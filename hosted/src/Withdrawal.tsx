@@ -1,13 +1,15 @@
 import { useState, type ReactNode } from "react";
 import { CARD_ACCENT_CLASS, CARD_CLASS, LINK_CLASS, MUTED_TEXT_CLASS } from "dormouse-lib/site/docs-tokens";
 import { MODEL_WITHDRAWAL_FORM, SUPPORT_EMAIL, WITHDRAWAL_STATEMENT } from "../../website/src/lib/hosted-withdrawal";
-import { isPlan, planName, type WithdrawalOffer, type Withdrawn } from "./billing";
+import { PLAN_NAMES } from "../../website/src/lib/hosted-pricing.ts";
+import type { WithdrawalOffer, Withdrawn } from "../server/billing-summary";
+import { isPlan } from "../server/policy-constants";
 import { BUTTON_CLASS, HEADING_CLASS, HELP_CLASS, LABEL_TEXT_CLASS, PRIMARY_CLASS } from "./classes";
 
 const TERMS_WITHDRAWAL_URL = "https://dormouse.sh/terms/#withdrawal";
 const day = (iso: string) => new Date(iso).toLocaleDateString();
 const contract = (plan: string, startedAt: string) =>
-  `Dormouse Hosted, ${isPlan(plan) ? planName(plan) : plan}, ordered on ${day(startedAt)}`;
+  `Dormouse Hosted, ${isPlan(plan) ? PLAN_NAMES[plan] : plan}, ordered on ${day(startedAt)}`;
 
 export const SupportLink = () => (
   <a className={LINK_CLASS} href={`mailto:${SUPPORT_EMAIL}`}>

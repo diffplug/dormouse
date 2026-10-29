@@ -17,7 +17,7 @@ import {
   siteButton,
 } from "dormouse-lib/site/docs-tokens";
 import { providerNames, type Account, type Computer, type HostedVoice, type Passkey, type Provider, type Session } from "./api";
-import { RECENT_LOGIN_WINDOW, TERMS_VERSION } from "../server/policy-constants";
+import { RECENT_LOGIN_WINDOW, TERMS_VERSION, type Plan } from "../server/policy-constants";
 import {
   BUTTON_CLASS,
   HEADING_CLASS,
@@ -31,7 +31,8 @@ import {
 import { ConfirmDigits } from "./ConfirmDigits";
 import { HostedShell } from "./HostedShell";
 import { NoPlanOffer } from "./NoPlanOffer";
-import { planName, type BillingSummary, type Plan } from "./billing";
+import { PLAN_NAMES } from "../../website/src/lib/hosted-pricing.ts";
+import type { BillingSummary } from "../server/billing-summary";
 import { Checkout } from "./Checkout";
 import { CloseAccount } from "./Closure";
 import { FoundersOptIn, PlanConfirmation, PlanSection } from "./Plan";
@@ -329,7 +330,7 @@ export function HostedPage({
                   billingUnread
                 ) : summary.plan ? (
                   <>
-                    <p className={HELP_CLASS}>This account already has {planName(summary.plan)}.</p>
+                    <p className={HELP_CLASS}>This account already has {PLAN_NAMES[summary.plan]}.</p>
                     <button className={BUTTON_CLASS} disabled={!!busy} onClick={manageBilling}>
                       {busy === "portal" ? "Opening…" : "Manage billing"}
                     </button>

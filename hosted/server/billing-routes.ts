@@ -6,12 +6,13 @@ import { bodyLimit } from "hono/body-limit";
 import { CompiledQuery, type Kysely } from "kysely";
 import { readJson } from "remote-lib-common";
 import { accountQuery, cookieLogin, type AccountHost } from "./account-gate";
-import { REFUND_DAYS, foundingCohort, publishedPrice, withBilling, type BillingSetup, type Plan } from "./billing";
+import { REFUND_DAYS, foundingCohort, withBilling, type BillingSetup, type PriceCatalog } from "./billing";
+import type { BillingSummary, Withdrawn } from "./billing-summary";
 import { CURRENT_STATUSES, ENDED_STATUSES, entitledSql, subscribedSql } from "./entitlement";
 import { checkoutRef, type MetricEvent } from "./metric-labels";
 import { countMetricInTransaction, recordMetric } from "./metrics";
-import { BILLING_PLANS, CHECKOUT_CLOSED, PRICE_CHANGED, TERMS_VERSION, isFounderName } from "./policy-constants";
-import { priceUsd, sendNotices, type NoticeContext, type PriceChange } from "./notices";
+import { CHECKOUT_CLOSED, PRICE_CHANGED, TERMS_VERSION, isFounderName, isPlan, type Plan } from "./policy-constants";
+import { sendNotices, type NoticeContext } from "./notices";
 import { completeWithdrawal, recordWithdrawal, recordedWithdrawal, withdrawalOffer } from "./withdrawal";
 import { SUPPORT_EMAIL } from "../../website/src/lib/hosted-withdrawal";
 import type { EmailSender } from "pgstencil";
@@ -51,8 +52,6 @@ const JSON_BODY_BYTES = 4096;
 const CHECKOUT_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const SUBSCRIPTION_ID = /^sub_[A-Za-z0-9_]{1,250}$/;
 
-const isPlan = (plan: unknown): plan is Plan => (BILLING_PLANS as readonly unknown[]).includes(plan);
-
 /**
  * What a dispute's current status does to its account's subscription: an
  * open one suspends it, one closed in the account's favor restores it, and
@@ -78,14 +77,14 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
   /** Runs `action` on this deployment's `Billing`: 503 while closed, a `BillingError` as its status. */
   const billed = async (
     c: Context,
-    action: (billing: Billing<Plan>, setup: BillingSetup, changes: readonly PriceChange[]) => Promise<Response>,
+    action: (billing: Billing<Plan>, setup: BillingSetup, catalog: PriceCatalog) => Promise<Response>,
   ) => {
     const deployment = host(c);
     const setup = deployment.setup();
     if (!setup) return c.json({ message: CHECKOUT_CLOSED }, 503);
     try {
-      return await withBilling(setup, deployment.databaseUrl, new URL(c.req.url).origin, (billing, changes) =>
-        action(billing, setup, changes),
+      return await withBilling(setup, deployment.databaseUrl, new URL(c.req.url).origin, (billing, catalog) =>
+        action(billing, setup, catalog),
       );
     } catch (error) {
       if (error instanceof BillingError) return c.json({ message: error.message }, error.status as 400);
@@ -98,7 +97,7 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
     c: Context,
     billing: Billing<Plan>,
     setup: BillingSetup,
-    changes: readonly PriceChange[],
+    catalog: PriceCatalog,
     userId: string,
   ) => {
     const [status, [account], founding] = await Promise.all([
@@ -109,7 +108,7 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
         founder: boolean;
         name: string | null;
         consent: { termsVersion: string; consentedAt: string } | null;
-        withdrawn: { subscription: string } | null;
+        withdrawn: Withdrawn | null;
       }>(
         host(c),
         // A held subscription refuses another checkout, so the latest consent is its own.
@@ -140,9 +139,9 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
         : null;
     return c.json({
       plan: held ? status.plan : null,
-      price: held ? priceUsd(setup, changes, status.subscription!.price_id) : null,
+      price: held ? (catalog.prices.get(status.subscription!.price_id)?.usd ?? null) : null,
       active: status.access,
-      until: held ? status.accessUntil : null,
+      until: held ? (status.accessUntil?.toISOString() ?? null) : null,
       renews: held && !status.subscription!.cancel_at_period_end,
       entitled: account?.entitled === true,
       suspended: account?.suspended === true,
@@ -157,11 +156,11 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
         account?.withdrawn && (!held || account.withdrawn.subscription === status.subscription!.id)
           ? account.withdrawn
           : null,
-    });
+    } satisfies BillingSummary);
   };
 
   app.get("/api/billing", gate, (c) =>
-    billed(c, (billing, setup, changes) => summary(c, billing, setup, changes, c.get("login").userId)),
+    billed(c, (billing, setup, catalog) => summary(c, billing, setup, catalog, c.get("login").userId)),
   );
 
   app.post("/api/billing/checkout", limit(JSON_BODY_BYTES), gate, async (c) => {
@@ -170,7 +169,7 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
     const plan = body?.plan;
     if (!isPlan(plan)) return c.json({ message: "Choose monthly, yearly, or founding." }, 400);
     const ref = checkoutRef(body?.ref);
-    return billed(c, async (billing, setup) => {
+    return billed(c, async (billing, _setup, catalog) => {
       // `price` is what the page showed beside the renewal the buyer agreed to.
       if (typeof body?.terms !== "string" || body.autoRenew !== true || !Number.isSafeInteger(body.price))
         return c.json({ message: CONSENT_REQUIRED }, 400);
@@ -194,7 +193,7 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
         .where("id", "=", id)
         .where("owner_id", "=", userId)
         .executeTakeFirstOrThrow();
-      if (publishedPrice(setup, opened.price_id) !== body.price) {
+      if (catalog.prices.get(opened.price_id)?.usd !== body.price) {
         await billing.cancelCheckout(userId);
         return c.json({ message: PRICE_CHANGED }, 409);
       }
@@ -216,9 +215,9 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
     const checkout = (await readJson<{ checkout?: unknown }>(c))?.checkout;
     if (typeof checkout !== "string" || !CHECKOUT_ID.test(checkout))
       return c.json({ message: "Checkout not found." }, 404);
-    return billed(c, async (billing, setup, changes) => {
+    return billed(c, async (billing, setup, catalog) => {
       await billing.confirmCheckout(userId, checkout);
-      return summary(c, billing, setup, changes, userId);
+      return summary(c, billing, setup, catalog, userId);
     });
   });
 
@@ -236,7 +235,7 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
     const subscription = (await readJson<{ subscription?: unknown }>(c))?.subscription;
     if (typeof subscription !== "string" || !SUBSCRIPTION_ID.test(subscription))
       return c.json({ message: "Choose the contract to withdraw from." }, 400);
-    return billed(c, async (billing, setup, changes) => {
+    return billed(c, async (billing, setup, catalog) => {
       let row = await recordedWithdrawal(billing, userId, subscription);
       if (!row) {
         const { subscription: held, plan } = await billing.status(userId);
@@ -247,7 +246,7 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
       await completeWithdrawal(billing, () => host(c).mail(), row).catch((error: unknown) =>
         console.error(`Withdrawal ${row.id} is recorded but not complete; the cron retries it`, error),
       );
-      return summary(c, billing, setup, changes, userId);
+      return summary(c, billing, setup, catalog, userId);
     });
   });
 
@@ -265,7 +264,7 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
       await accountQuery(host(c), `DELETE FROM dormouse_founders WHERE "userId" = $1`, [userId]);
       return c.body(null, 204);
     }
-    return billed(c, async (billing, setup, changes) => {
+    return billed(c, async (billing, setup, catalog) => {
       const joined = await accountQuery(
         host(c),
         `INSERT INTO dormouse_founders ("userId", name)
@@ -275,7 +274,7 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
         [userId, name, setup.founding],
       );
       if (!joined.length) return c.json({ message: FOUNDERS_ONLY }, 409);
-      return summary(c, billing, setup, changes, userId);
+      return summary(c, billing, setup, catalog, userId);
     });
   });
 
@@ -285,8 +284,8 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
     const signature = c.req.header("stripe-signature");
     if (!signature) return c.json({ message: "Missing signature." }, 400);
     const body = await c.req.text();
-    return billed(c, async (billing, setup, changes) => {
-      await processEvent(billing, body, signature, () => host(c).mail(), { setup, changes, origin: new URL(c.req.url).origin });
+    return billed(c, async (billing, _setup, catalog) => {
+      await processEvent(billing, body, signature, () => host(c).mail(), { catalog, origin: new URL(c.req.url).origin });
       return c.json({ received: true });
     });
   });

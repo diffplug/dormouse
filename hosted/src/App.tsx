@@ -41,10 +41,12 @@ import {
   ENROLLMENT_POLL_INTERVAL_S,
   LOGIN_FRESH_AGE_MS,
   TERMS_VERSION,
+  type Plan,
 } from "../server/policy-constants";
 import { useDocsThemedBody } from "dormouse-lib/site/docs-paint";
 import { HostedPage, SUBSCRIBE_URL, type View } from "./HostedPage";
-import { forgetCheckout, type BillingSummary, type CheckoutIntent, type Plan } from "./billing";
+import type { BillingSummary } from "../server/billing-summary";
+import { forgetCheckout, type CheckoutIntent } from "./billing";
 import { takeEnrollment, type Enrollment } from "./enrollment";
 import {
   afterRead,

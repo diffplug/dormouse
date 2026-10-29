@@ -2,8 +2,8 @@ import { providerIds, providerNames } from "../server/providers.js";
 import type { ProviderId } from "../server/providers.js";
 import { NOT_ENTITLED_ERROR } from "../../remote-lib-common/src/remote/wire.ts";
 import { ADMIN_METRICS_PATH, type AdminMetricsBody } from "../server/metric-labels";
-import { CHECKOUT_CLOSED, PRICE_CHANGED, TERMS_VERSION } from "../server/policy-constants";
-import type { BillingSummary, Plan } from "./billing";
+import type { BillingSummary } from "../server/billing-summary";
+import { CHECKOUT_CLOSED, PRICE_CHANGED, TERMS_VERSION, type Plan } from "../server/policy-constants";
 
 export const providers = providerIds;
 export type Provider = ProviderId;

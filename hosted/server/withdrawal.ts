@@ -4,9 +4,10 @@ import type { Billing, Stripe } from "@pgstencil/stripe";
 import { escape } from "@pgstencil/auth/email";
 import { CompiledQuery } from "kysely";
 import type { EmailMessage, EmailSender } from "pgstencil";
-import { HOSTED_MONTHLY, HOSTED_YEARLY } from "../../website/src/lib/hosted-pricing";
+import { PLAN_NAMES } from "../../website/src/lib/hosted-pricing";
 import { DIFFPLUG_POSTAL_ADDRESS, SUPPORT_EMAIL, WITHDRAWAL_STATEMENT } from "../../website/src/lib/hosted-withdrawal";
-import type { Plan } from "./billing";
+import type { WithdrawalOffer } from "./billing-summary";
+import type { Plan } from "./policy-constants";
 import { CURRENT_STATUSES, ENDED_STATUSES } from "./entitlement";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -26,7 +27,7 @@ export const WITHDRAWAL_OPEN_DAYS = 21;
  * and Gibraltar, offered rather than ruled out. A customer with no country
  * is offered it too.
  */
-export const WITHDRAWAL_COUNTRIES: ReadonlySet<string> = new Set([
+const WITHDRAWAL_COUNTRIES: ReadonlySet<string> = new Set([
   ...["AT", "BE", "BG", "CY", "CZ", "DE", "DK", "EE", "ES", "FI", "FR", "GR", "HR", "HU", "IE", "IT", "LT", "LU"],
   ...["LV", "MT", "NL", "PL", "PT", "RO", "SE", "SI", "SK"],
   ...["AX", "GF", "GP", "MF", "MQ", "RE", "YT"],
@@ -40,25 +41,10 @@ export const ENDED_FOR_WITHDRAWAL = "dormouse: EEA or UK withdrawal";
 /** How long the cron keeps retrying a withdrawal's acknowledgement or settlement. */
 const RETRY_DAYS = 30;
 
-/** Each plan's name, as the emails billing sends name it. */
-export const PLAN_NAMES: Record<Plan, string> = {
-  monthly: HOSTED_MONTHLY.name,
-  yearly: HOSTED_YEARLY.name,
-  founding: "Founding",
-};
-
 type Held = NonNullable<Awaited<ReturnType<Billing<Plan>["status"]>>["subscription"]>;
 
-/** The online withdrawal the billing page offers for the held subscription. */
-export interface WithdrawalOffer {
-  subscription: string;
-  startedAt: string;
-  /** When the online withdrawal closes. */
-  until: string;
-  /** Where the acknowledgement goes: the Stripe customer's email, null when Stripe could not say. */
-  email: string | null;
-  country: string | null;
-}
+/** The online withdrawal the billing page offers for the held subscription, and the billing country it was offered for. */
+type Offer = WithdrawalOffer & { country: string | null };
 
 /** A recorded withdrawal, as `dormouse_withdrawals` holds it. */
 export interface WithdrawalRow {
@@ -121,7 +107,7 @@ export async function withdrawalOffer(
   ownerId: string,
   subscription: Held | null,
   { cached = false } = {},
-): Promise<WithdrawalOffer | null> {
+): Promise<Offer | null> {
   if (!subscription?.started_at || !CURRENT_STATUSES.includes(subscription.status)) return null;
   const startedAt = new Date(subscription.started_at);
   const until = new Date(startedAt.getTime() + WITHDRAWAL_OPEN_DAYS * DAY_MS);
@@ -161,7 +147,7 @@ export async function recordWithdrawal(
   ownerId: string,
   plan: Plan,
   subscription: Held,
-  offer: WithdrawalOffer,
+  offer: Offer,
 ): Promise<WithdrawalRow> {
   await run(
     billing,
