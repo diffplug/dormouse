@@ -1,11 +1,11 @@
 import { useRef, type ReactNode } from "react";
 import { MUTED_TEXT_CLASS, PANEL_CLASS, siteButton } from "dormouse-lib/site/docs-tokens";
 import { RECENT_LOGIN_WINDOW } from "../server/policy-constants";
-import { planName, type BillingSummary } from "./billing";
+import { PLAN_NAMES } from "../../website/src/lib/hosted-pricing.ts";
+import type { BillingSummary } from "../server/billing-summary";
+import { day } from "./billing";
 import { BUTTON_CLASS, HEADING_CLASS, HELP_CLASS } from "./classes";
 import { SupportLink } from "./Withdrawal";
-
-const day = (iso: string) => new Date(iso).toLocaleDateString();
 
 /**
  * What closing does to the account's plan, said before it is confirmed
@@ -17,7 +17,7 @@ const day = (iso: string) => new Date(iso).toLocaleDateString();
 export function closureTerms(billing: BillingSummary | "closed" | null): ReactNode[] | null {
   if (billing === null) return null;
   if (billing === "closed" || !billing.plan) return ["You have no plan, so nothing is charged or refunded."];
-  const name = planName(billing.plan);
+  const name = PLAN_NAMES[billing.plan];
   return [
     billing.until && billing.active
       ? `Your ${name} plan ends now instead of on ${day(billing.until)}, and it never renews.`

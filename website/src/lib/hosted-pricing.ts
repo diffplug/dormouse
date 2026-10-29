@@ -66,6 +66,8 @@ export type Tier = {
   listPrice?: number;
 };
 
+const FOUNDING_NAME = "Founding";
+
 /** The two ways to pay for Hosted at list, which the Hosted card toggles between. */
 export const HOSTED_MONTHLY: Tier = {
   id: "monthly",
@@ -87,13 +89,23 @@ export const HOSTED_YEARLY: Tier = {
 export function foundingTier(): Tier {
   return {
     id: "founding",
-    name: "Founding",
+    name: FOUNDING_NAME,
     price: FOUNDING_LADDER[Math.min(FOUNDING_COHORTS_CLOSED, FOUNDING_LADDER.length - 1)],
     per: "/year",
     billingUnit: "ANN",
     listPrice: LIST_ANNUAL,
   };
 }
+
+/** Each plan's name, as checkout, the account page, and Hosted's billing emails call it. */
+export const PLAN_NAMES: Record<Tier["id"], string> = {
+  monthly: HOSTED_MONTHLY.name,
+  yearly: HOSTED_YEARLY.name,
+  founding: FOUNDING_NAME,
+};
+
+/** How often `plan` renews. */
+export const planInterval = (plan: Tier["id"]): "month" | "year" => (plan === "monthly" ? "month" : "year");
 
 /** Every paid plan on sale, in the order the page shows them. */
 export function tiersOnSale(): Tier[] {

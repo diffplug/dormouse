@@ -2,14 +2,12 @@
 // "Checkout and entitlement".
 import type { Billing, Stripe } from "@pgstencil/stripe";
 import { escape } from "@pgstencil/auth/email";
-import { CompiledQuery, type Kysely } from "kysely";
 import type { EmailMessage, EmailSender } from "pgstencil";
-import { DIFFPLUG_POSTAL_ADDRESS, SUPPORT_EMAIL } from "../../website/src/lib/hosted-withdrawal";
-import { publishedPrice, type BillingSetup, type Plan } from "./billing";
-import { BILLING_RETURN_PATH } from "./policy-constants";
-import { PLAN_NAMES, billingContact } from "./withdrawal";
-
-const DAY_MS = 24 * 60 * 60 * 1000;
+import { PLAN_NAMES, planInterval } from "../../website/src/lib/hosted-pricing";
+import { DIFFPLUG_POSTAL_ADDRESS, SUPPORT_EMAIL, WITHDRAWAL_STATEMENT } from "../../website/src/lib/hosted-withdrawal";
+import { DAY_MS, run, type PriceCatalog, type PriceChange } from "./billing";
+import { BILLING_RETURN_PATH, isPlan, type Plan } from "./policy-constants";
+import { billingContact, type Contact } from "./withdrawal";
 
 /**
  * A yearly plan's renewal notice, and a monthly plan's annual reminder, are
@@ -34,80 +32,19 @@ export const PRICE_NOTICE_MIN_DAYS = 7;
  * spare and never announces a change that then cannot apply.
  */
 const PRICE_SEND_BY_DAYS = PRICE_NOTICE_MIN_DAYS + 1;
-/** How long the cron retries a dispute notice. */
-const DISPUTE_RETRY_DAYS = 30;
+/** How long the cron retries a dispute notice or a withdrawal's acknowledgement. */
+const RETRY_DAYS = 30;
 /** One send attempt holds its notice this long before another may try it. */
 const LEASE_MS = 5 * 60 * 1000;
 /** How many notices one pass sends, and how many price changes it applies, at most. */
 const BATCH = 50;
-
-/** A scheduled list price change, as the operator recorded it in `dormouse_price_changes`. */
-export interface PriceChange {
-  id: string;
-  plan: "monthly" | "yearly";
-  fromPriceId: string;
-  toPriceId: string;
-  fromUsd: number;
-  toUsd: number;
-  effectiveAt: Date;
-}
-
-type Db = Pick<Kysely<any>, "executeQuery">;
-
-const run = <Row>(db: Db, text: string, values: unknown[]) =>
-  db.executeQuery<Row>(CompiledQuery.raw(text, values)).then((result) => result.rows);
-
-/** Every scheduled price change, oldest first. */
-export const priceChanges = (db: Db) =>
-  run<PriceChange>(
-    db,
-    `SELECT id, plan, "fromPriceId", "toPriceId", "fromUsd", "toUsd", "effectiveAt"
-    FROM public.dormouse_price_changes ORDER BY "createdAt", id`,
-    [],
-  );
-
-/**
- * The changes billing may act on, and the ones it refuses: a change that
- * names a founding Price, whose lock no change may touch, or a Price another
- * plan's configuration or change already holds, is refused whole.
- */
-export function usableChanges(setup: BillingSetup, changes: readonly PriceChange[]) {
-  const owner = new Map<string, string>([
-    [setup.monthly, "monthly"],
-    [setup.yearly, "yearly"],
-    ...setup.founding.map((price) => [price, "founding"] as [string, string]),
-  ]);
-  const usable: PriceChange[] = [];
-  const refused: PriceChange[] = [];
-  for (const change of changes) {
-    const prices = [change.fromPriceId, change.toPriceId];
-    if (prices.some((price) => (owner.get(price) ?? change.plan) !== change.plan)) refused.push(change);
-    else {
-      for (const price of prices) owner.set(price, change.plan);
-      usable.push(change);
-    }
-  }
-  return { usable, refused };
-}
-
-/** What `priceId` charges per interval in whole US dollars: published, or a change's; null when neither says. */
-export function priceUsd(setup: BillingSetup, changes: readonly PriceChange[], priceId: string): number | null {
-  return (
-    publishedPrice(setup, priceId) ??
-    changes.find((change) => change.toPriceId === priceId)?.toUsd ??
-    changes.find((change) => change.fromPriceId === priceId)?.fromUsd ??
-    null
-  );
-}
-
-const intervalOf = (plan: Plan) => (plan === "monthly" ? "month" : "year");
 
 /** Prices a Stripe client confirmed, by id, amount, interval, and mode: Stripe never changes a Price's amount or interval. */
 const confirmedPrices = new WeakMap<Stripe, Set<string>>();
 
 /** Throws unless Stripe holds both of `change`'s Prices at its amounts, in USD, per its plan's interval. */
 async function verifyChange(billing: Billing<Plan>, change: PriceChange) {
-  const interval = intervalOf(change.plan);
+  const interval = planInterval(change.plan);
   let confirmed = confirmedPrices.get(billing.stripe);
   if (!confirmed) confirmedPrices.set(billing.stripe, (confirmed = new Set()));
   for (const [id, usd] of [
@@ -129,7 +66,7 @@ async function verifyChange(billing: Billing<Plan>, change: PriceChange) {
   }
 }
 
-type Kind = "renewal" | "annual" | "price_change" | "dispute_suspended" | "dispute_restored";
+type Kind = "renewal" | "annual" | "price_change" | "dispute_suspended" | "dispute_restored" | "withdrawal";
 
 /** A notice to send, with what its text needs. */
 interface Pending {
@@ -139,30 +76,39 @@ interface Pending {
   renewsAt: Date | null;
   priceId: string | null;
   priceChangeId: string | null;
+  /** A withdrawal's: its reference, plan, when its contract started, and when it was submitted. */
+  withdrawalId: string | null;
+  withdrawalPlan: string | null;
+  contractStartedAt: Date | null;
+  submittedAt: Date | null;
 }
 
 /** What composing a notice reads beyond its row. */
 export interface NoticeContext {
-  setup: BillingSetup;
-  changes: readonly PriceChange[];
+  catalog: PriceCatalog;
   /** The account origin, whose billing page a notice links. */
   origin: string;
 }
 
 const DAY = new Intl.DateTimeFormat("en-US", { dateStyle: "long", timeZone: "UTC" });
+const UTC = new Intl.DateTimeFormat("en-GB", { dateStyle: "long", timeStyle: "long", timeZone: "UTC" });
+const UTC_DAY = new Intl.DateTimeFormat("en-GB", { dateStyle: "long", timeZone: "UTC" });
+
+/** A paragraph, or a list of terms and their values. */
+type Block = string | readonly (readonly [string, string])[];
 
 /** The email for notice `notice`, to the billing email `to`. */
-export function noticeMessage(to: string, notice: Pending, plan: Plan | null, context: NoticeContext): EmailMessage {
+function noticeMessage(to: string, notice: Pending, plan: Plan | null, context: NoticeContext): EmailMessage {
   const billingPage = new URL(BILLING_RETURN_PATH, context.origin).href;
   const name = plan ? PLAN_NAMES[plan] : "Dormouse Hosted";
-  const interval = plan ? intervalOf(plan) : null;
-  const usd = notice.priceId ? priceUsd(context.setup, context.changes, notice.priceId) : null;
+  const interval = plan ? planInterval(plan) : null;
+  const usd = notice.priceId ? (context.catalog.prices.get(notice.priceId)?.usd ?? null) : null;
   const on = notice.renewsAt ? DAY.format(notice.renewsAt) : "";
   const cancel = `To stop it renewing, cancel before ${on} in Manage billing on your billing page: ${billingPage}. You keep Hosted until ${on}. If you cannot sign in, email ${SUPPORT_EMAIL} and we will cancel it for you.`;
   const yearlyRefund = `Ask within 30 days of a yearly renewal payment and we refund it in full, including tax.`;
   const help = `Questions: ${SUPPORT_EMAIL}.`;
   let subject: string;
-  let paragraphs: string[];
+  let paragraphs: Block[];
   switch (notice.kind) {
     case "renewal":
       subject = `Your Dormouse Hosted subscription renews on ${on}`;
@@ -182,7 +128,7 @@ export function noticeMessage(to: string, notice: Pending, plan: Plan | null, co
       ];
       break;
     case "price_change": {
-      const change = context.changes.find((candidate) => candidate.id === notice.priceChangeId)!;
+      const change = context.catalog.usable.find((candidate) => candidate.id === notice.priceChangeId)!;
       subject = `Your Dormouse Hosted price changes on ${on}`;
       paragraphs = [
         `The price of your ${name} subscription changes from $${change.fromUsd} to $${change.toUsd} a ${interval}, plus any applicable tax, starting with your renewal on ${on}. Nothing changes before then.`,
@@ -207,6 +153,23 @@ export function noticeMessage(to: string, notice: Pending, plan: Plan | null, co
         `This does not limit any refund or remedy owed to you. ${help}`,
       ];
       break;
+    case "withdrawal": {
+      // The durable acknowledgement docs/specs/pricing.md -> "Checkout and entitlement" requires.
+      const contract = isPlan(notice.withdrawalPlan) ? PLAN_NAMES[notice.withdrawalPlan] : notice.withdrawalPlan;
+      subject = "We received your withdrawal from Dormouse Hosted";
+      paragraphs = [
+        "DiffPlug LLC received your withdrawal from your Dormouse Hosted subscription contract.",
+        [
+          ["Your statement", WITHDRAWAL_STATEMENT],
+          ["Submitted", UTC.format(notice.submittedAt!)],
+          ["Contract", `Dormouse Hosted, ${contract}, ordered on ${UTC_DAY.format(notice.contractStartedAt!)}`],
+          ["Reference", notice.withdrawalId!],
+        ],
+        "Your subscription ends with this withdrawal and will not renew. We refund every payment you made for it in full, including tax, to your original payment method within 14 days of your withdrawal, with no deduction. Your bank or card provider decides when the credit appears.",
+        `Keep this email as your record. Questions: ${SUPPORT_EMAIL}.`,
+      ];
+      break;
+    }
   }
   paragraphs.push(DIFFPLUG_POSTAL_ADDRESS);
   return {
@@ -214,8 +177,16 @@ export function noticeMessage(to: string, notice: Pending, plan: Plan | null, co
     to: [to],
     replyTo: SUPPORT_EMAIL,
     subject,
-    text: paragraphs.join("\n\n"),
-    html: `<html lang="en"><body>${paragraphs.map((paragraph) => `<p>${escape(paragraph)}</p>`).join("")}</body></html>`,
+    text: paragraphs
+      .map((block) => (typeof block === "string" ? block : block.map(([term, value]) => `${term}: ${value}`).join("\n")))
+      .join("\n\n"),
+    html: `<html lang="en"><body>${paragraphs
+      .map((block) =>
+        typeof block === "string"
+          ? `<p>${escape(block)}</p>`
+          : `<dl>${block.map(([term, value]) => `<dt>${escape(term)}</dt><dd>${escape(value)}</dd>`).join("")}</dl>`,
+      )
+      .join("")}</body></html>`,
   };
 }
 
@@ -225,61 +196,67 @@ export function noticeMessage(to: string, notice: Pending, plan: Plan | null, co
  * A renewal-type notice still applies while its subscription renews at that
  * renewal, a price change's only while it is further off than
  * {@link PRICE_SEND_BY_DAYS} and its change is among `verified`; a suspension
- * while its dispute is open; a dispute notice for {@link DISPUTE_RETRY_DAYS}.
- * Each is leased before it is sent, so two passes never send one twice.
- * Never-tried notices go first, then the least recently tried, so ones that
- * keep failing never starve newer ones past their deadlines. Answers the
- * failures.
+ * while its dispute is open; a dispute notice or a withdrawal's
+ * acknowledgement for {@link RETRY_DAYS}.
+ * The batch is leased in the statement that picks it, so two passes never
+ * send one twice. Never-tried notices go first, then the least recently
+ * tried, so ones that keep failing never starve newer ones past their
+ * deadlines. Each account's contact is read from Stripe once per pass;
+ * `contacts` may hold one its caller just read. Answers the failures.
  */
 export async function sendNotices(
   billing: Billing<Plan>,
   mail: () => EmailSender,
   context: NoticeContext,
-  { userId = null, verified = [] }: { userId?: string | null; verified?: readonly string[] } = {},
+  {
+    userId = null,
+    verified = [],
+    contacts = new Map(),
+  }: { userId?: string | null; verified?: readonly string[]; contacts?: Map<string, Contact> } = {},
 ): Promise<unknown[]> {
   const now = billing.time.now();
-  const pending = await run<Pending>(
+  const leased = await run<Pending>(
     billing.db,
-    `SELECT n.id, n."userId", n.kind, n."renewsAt", s.price_id AS "priceId", n."priceChangeId"
-    FROM public.dormouse_billing_notices n
-    LEFT JOIN pgstencil_billing.subscriptions s ON s.id = n."subscriptionId"
-    LEFT JOIN public.dormouse_price_changes c ON c.id = n."priceChangeId"
-    WHERE n."sentAt" IS NULL AND (n."attemptedAt" IS NULL OR n."attemptedAt" < $2)
-      AND ($3::text IS NULL OR n."userId" = $3)
-      AND CASE
-        WHEN n.kind IN ('renewal', 'annual') THEN
-          s.status = 'active' AND NOT s.cancel_at_period_end AND s.period_end = n."renewsAt" AND n."renewsAt" > $1::timestamptz
-        WHEN n.kind = 'price_change' THEN
-          s.status = 'active' AND NOT s.cancel_at_period_end AND s.period_end = n."renewsAt"
-          AND s.price_id = c."fromPriceId" AND c.id = ANY ($6::text[])
-          AND n."renewsAt" > $1::timestamptz + make_interval(days => $7)
-        WHEN n.kind = 'dispute_suspended' THEN
-          n."createdAt" > $4
-          AND EXISTS (SELECT FROM public.dormouse_billing_disputes d WHERE d."disputeId" = n."disputeId")
-        ELSE n."createdAt" > $4
-      END
-    ORDER BY n."attemptedAt" NULLS FIRST, n."createdAt", n.id LIMIT $5`,
+    `WITH due AS (
+      SELECT n.id, s.price_id AS "priceId", w.plan AS "withdrawalPlan", w."contractStartedAt", w."submittedAt"
+      FROM public.dormouse_billing_notices n
+      LEFT JOIN pgstencil_billing.subscriptions s ON s.id = n."subscriptionId"
+      LEFT JOIN public.dormouse_price_changes c ON c.id = n."priceChangeId"
+      LEFT JOIN public.dormouse_withdrawals w ON w.id = n."withdrawalId"
+      WHERE n."sentAt" IS NULL AND (n."attemptedAt" IS NULL OR n."attemptedAt" < $2)
+        AND ($3::text IS NULL OR n."userId" = $3)
+        AND CASE
+          WHEN n.kind IN ('renewal', 'annual') THEN
+            s.status = 'active' AND NOT s.cancel_at_period_end AND s.period_end = n."renewsAt" AND n."renewsAt" > $1::timestamptz
+          WHEN n.kind = 'price_change' THEN
+            s.status = 'active' AND NOT s.cancel_at_period_end AND s.period_end = n."renewsAt"
+            AND s.price_id = c."fromPriceId" AND c.id = ANY ($6::text[])
+            AND n."renewsAt" > $1::timestamptz + make_interval(days => $7)
+          WHEN n.kind = 'dispute_suspended' THEN
+            n."createdAt" > $4
+            AND EXISTS (SELECT FROM public.dormouse_billing_disputes d WHERE d."disputeId" = n."disputeId")
+          ELSE n."createdAt" > $4
+        END
+      ORDER BY n."attemptedAt" NULLS FIRST, n."createdAt", n.id LIMIT $5
+      FOR UPDATE OF n SKIP LOCKED)
+    UPDATE public.dormouse_billing_notices n SET "attemptedAt" = $1 FROM due WHERE n.id = due.id
+    RETURNING n.id, n."userId", n.kind, n."renewsAt", due."priceId", n."priceChangeId",
+      n."withdrawalId", due."withdrawalPlan", due."contractStartedAt", due."submittedAt"`,
     [
       now,
       new Date(now.getTime() - LEASE_MS),
       userId,
-      new Date(now.getTime() - DISPUTE_RETRY_DAYS * DAY_MS),
+      new Date(now.getTime() - RETRY_DAYS * DAY_MS),
       BATCH,
       verified,
       PRICE_SEND_BY_DAYS,
     ],
   );
   const failed: unknown[] = [];
-  for (const notice of pending)
+  for (const notice of leased)
     try {
-      const [leased] = await run(
-        billing.db,
-        `UPDATE public.dormouse_billing_notices SET "attemptedAt" = $2
-        WHERE id = $1 AND "sentAt" IS NULL AND ("attemptedAt" IS NULL OR "attemptedAt" < $3) RETURNING id`,
-        [notice.id, billing.time.now(), new Date(billing.time.now().getTime() - LEASE_MS)],
-      );
-      if (!leased) continue;
-      const email = (await billingContact(billing, notice.userId))?.email;
+      if (!contacts.has(notice.userId)) contacts.set(notice.userId, await billingContact(billing, notice.userId));
+      const email = contacts.get(notice.userId)?.email;
       if (!email) throw new Error(`Notice ${notice.id}: Stripe gave no billing email to send it to`);
       await mail().send(noticeMessage(email, notice, billing.planOf(notice.priceId), context));
       await run(billing.db, `UPDATE public.dormouse_billing_notices SET "sentAt" = $2, email = $3 WHERE id = $1`, [
@@ -357,13 +334,12 @@ async function applyPriceChanges(billing: Billing<Plan>, verified: readonly stri
  */
 export async function runNotices(
   billing: Billing<Plan>,
-  setup: BillingSetup,
-  changes: readonly PriceChange[],
+  catalog: PriceCatalog,
   mail: () => EmailSender,
 ): Promise<unknown[]> {
   const failed: unknown[] = [];
   const now = billing.time.now();
-  const { usable, refused } = usableChanges(setup, changes);
+  const { usable, refused } = catalog;
   for (const change of refused)
     failed.push(new Error(`Price change ${change.id} names a founding Price or another plan's; it is ignored`));
   // Checked against Stripe only while someone is still on its old Price.
@@ -379,10 +355,6 @@ export async function runNotices(
       () => verified.push(change.id),
       (error: unknown) => failed.push(error),
     );
-  const prices = (plan: "monthly" | "yearly") => [
-    setup[plan],
-    ...usable.filter((change) => change.plan === plan).flatMap((change) => [change.fromPriceId, change.toPriceId]),
-  ];
   // A yearly term's renewal notice is its annual reminder too; a monthly
   // plan's is due before each renewal that ends a year of the subscription.
   await run(
@@ -397,7 +369,7 @@ export async function runNotices(
       AND s.period_end > $1::timestamptz AND s.period_end <= $1::timestamptz + make_interval(days => $4)
       AND (s.price_id = ANY ($2::text[]) OR (s.price_id = ANY ($3::text[]) AND term.months >= 12 AND mod(term.months, 12) = 0))
     ON CONFLICT DO NOTHING`,
-    [now, [...prices("yearly"), ...setup.founding], prices("monthly"), RENEWAL_NOTICE_DAYS],
+    [now, [...catalog.recognized("yearly"), ...catalog.recognized("founding")], catalog.recognized("monthly"), RENEWAL_NOTICE_DAYS],
   );
   // A price change's notice, for the first renewal on or after its date that
   // is still far enough off for the notice to count.
@@ -413,7 +385,7 @@ export async function runNotices(
     ON CONFLICT DO NOTHING`,
     [now, verified, PRICE_SEND_BY_DAYS, PRICE_NOTICE_DAYS],
   );
-  failed.push(...(await sendNotices(billing, mail, { setup, changes: usable, origin: billing.config.origin }, { verified })));
+  failed.push(...(await sendNotices(billing, mail, { catalog, origin: billing.config.origin }, { verified })));
   failed.push(...(await applyPriceChanges(billing, verified)));
   return failed;
 }

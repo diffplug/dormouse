@@ -17,7 +17,7 @@ import {
   siteButton,
 } from "dormouse-lib/site/docs-tokens";
 import { providerNames, type Account, type Computer, type HostedVoice, type Passkey, type Provider, type Session } from "./api";
-import { RECENT_LOGIN_WINDOW, TERMS_VERSION } from "../server/policy-constants";
+import { CHECKOUT_CLOSED, RECENT_LOGIN_WINDOW, TERMS_VERSION, type Plan } from "../server/policy-constants";
 import {
   BUTTON_CLASS,
   HEADING_CLASS,
@@ -31,10 +31,11 @@ import {
 import { ConfirmDigits } from "./ConfirmDigits";
 import { HostedShell } from "./HostedShell";
 import { NoPlanOffer } from "./NoPlanOffer";
-import { planName, type BillingSummary, type Plan } from "./billing";
+import { PLAN_NAMES } from "../../website/src/lib/hosted-pricing.ts";
+import type { BillingSummary } from "../server/billing-summary";
 import { Checkout } from "./Checkout";
 import { CloseAccount } from "./Closure";
-import { FoundersOptIn, PlanConfirmation, PlanSection } from "./Plan";
+import { ChoosePlan, FoundersOptIn, ManageBilling, PlanConfirmation, PlanSection } from "./Plan";
 import { WithdrawalAcknowledgement, WithdrawalFunction } from "./Withdrawal";
 import type { Enrollment } from "./enrollment";
 import type { Notice, PageError } from "./settle";
@@ -167,7 +168,7 @@ export function HostedPage({
   /** What checkout and billing say before they have a plan to show. */
   const billingUnread =
     billing === "closed" ? (
-      <p className={HELP_CLASS}>Checkout is not open yet.</p>
+      <p className={HELP_CLASS}>{CHECKOUT_CLOSED}</p>
     ) : (
       <>
         <p className={HELP_CLASS}>Billing could not load. Retry, or come back to this page later.</p>
@@ -329,10 +330,8 @@ export function HostedPage({
                   billingUnread
                 ) : summary.plan ? (
                   <>
-                    <p className={HELP_CLASS}>This account already has {planName(summary.plan)}.</p>
-                    <button className={BUTTON_CLASS} disabled={!!busy} onClick={manageBilling}>
-                      {busy === "portal" ? "Opening…" : "Manage billing"}
-                    </button>
+                    <p className={HELP_CLASS}>This account already has {PLAN_NAMES[summary.plan]}.</p>
+                    <ManageBilling busy={busy} onManage={manageBilling} />
                   </>
                 ) : (
                   // A new founding step asks for agreement again, both boxes unticked.
@@ -355,7 +354,7 @@ export function HostedPage({
                 ) : (
                   <>
                     <p className={HELP_CLASS}>This account has no plan.</p>
-                    <a className={BUTTON_CLASS} href="/checkout">Choose a plan</a>
+                    <ChoosePlan />
                   </>
                 )}
                 {founders}

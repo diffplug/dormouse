@@ -6,8 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import * as api from "./api";
 import type { Enrollment } from "./enrollment";
-import type { BillingSummary, CheckoutIntent } from "./billing";
-import { ENROLLMENT_POLL_INTERVAL_S, PRICE_CHANGED, TERMS_VERSION } from "../server/policy-constants";
+import type { BillingSummary } from "../server/billing-summary";
+import type { CheckoutIntent } from "./billing";
+import { CHECKOUT_CLOSED, ENROLLMENT_POLL_INTERVAL_S, PRICE_CHANGED, TERMS_VERSION } from "../server/policy-constants";
 import { NOT_ENTITLED_ERROR } from "../../remote-lib-common/src/remote/wire.ts";
 import { WITHDRAWAL_STATEMENT } from "../../website/src/lib/hosted-withdrawal";
 
@@ -413,6 +414,19 @@ describe("checkout", () => {
 });
 
 describe("billing", () => {
+  it("reads the account again on coming back, once for both of its events", async () => {
+    vi.mocked(api.getSession).mockResolvedValue(login());
+    await mount(null);
+    expect(api.getBilling).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      document.dispatchEvent(new Event("visibilitychange"));
+      window.dispatchEvent(new Event("focus"));
+    });
+    expect(api.getComputers).toHaveBeenCalledTimes(2);
+    expect(api.getBilling).toHaveBeenCalledTimes(2);
+  });
+
   it("confirms the checkout Stripe returned from once, then keeps its confirmation", async () => {
     history.replaceState(null, "", "/billing");
     vi.mocked(api.getSession).mockResolvedValue(login());
@@ -559,6 +573,21 @@ describe("withdrawal and closure", () => {
     await click("Close account…");
     expect(button("Close account").disabled).toBe(true);
     expect(text()).toContain("Your plan could not load");
+  });
+});
+
+describe("billing reads", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("reads closed billing from a 200's body, and any 5xx as an outage", async () => {
+    const { getBilling, closeAccount } = await vi.importActual<typeof import("./api")>("./api");
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ closed: true }));
+    expect(await getBilling()).toBe("closed");
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ message: CHECKOUT_CLOSED }, { status: 503 }));
+    await expect(getBilling()).rejects.toThrow("Billing is temporarily unavailable");
+    // A closure billing refuses shows the server's message.
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ message: "Email support." }, { status: 409 }));
+    await expect(closeAccount()).rejects.toThrow("Email support.");
   });
 });
 

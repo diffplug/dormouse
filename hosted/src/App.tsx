@@ -41,10 +41,12 @@ import {
   ENROLLMENT_POLL_INTERVAL_S,
   LOGIN_FRESH_AGE_MS,
   TERMS_VERSION,
+  type Plan,
 } from "../server/policy-constants";
 import { useDocsThemedBody } from "dormouse-lib/site/docs-paint";
 import { HostedPage, SUBSCRIBE_URL, type View } from "./HostedPage";
-import { forgetCheckout, type BillingSummary, type CheckoutIntent, type Plan } from "./billing";
+import type { BillingSummary } from "../server/billing-summary";
+import { forgetCheckout, type CheckoutIntent } from "./billing";
 import { takeEnrollment, type Enrollment } from "./enrollment";
 import {
   afterRead,
@@ -252,12 +254,16 @@ export function App({
             read: false,
           });
       });
+    // Returning to the tab fires both events below on most browsers: one
+    // refresh answers both.
+    let returning: Promise<unknown> | null = null;
     const focus = () => {
-      if (!actionPending.current)
-        void refresh().catch((error) => setError(pageError(error)));
+      if (actionPending.current || returning) return;
+      returning = refresh()
+        .catch((error) => setError(pageError(error)))
+        .finally(() => (returning = null));
     };
-    // Returning to the tab: mobile Safari fires no focus coming back from
-    // another app.
+    // Mobile Safari fires no focus coming back from another app.
     const visible = () => {
       if (document.visibilityState === "visible") focus();
     };
@@ -377,16 +383,20 @@ export function App({
       setEnterCode(false);
     });
   }
+  /** Drops what the page shows of the account, once it is signed out or closed. */
+  const forgetAccount = () => {
+    setSession(null);
+    setAccounts([]);
+    setHostedVoice(null);
+    setComputers(null);
+    setPasskeys(null);
+    setBilling(null);
+    setRefusedPlan(false);
+  };
   const signOut = () =>
     mutate("logout", async () => {
       await post("sign-out");
-      setSession(null);
-      setAccounts([]);
-      setHostedVoice(null);
-      setComputers(null);
-      setPasskeys(null);
-      setBilling(null);
-      setRefusedPlan(false);
+      forgetAccount();
       setEnterCode(false);
       setCode("");
       setNotice({
@@ -478,13 +488,7 @@ export function App({
   const closeAccount = () =>
     mutate("close", async () => {
       await closeAccountRequest();
-      setSession(null);
-      setAccounts([]);
-      setHostedVoice(null);
-      setComputers(null);
-      setPasskeys(null);
-      setBilling(null);
-      setRefusedPlan(false);
+      forgetAccount();
       setNotice({ text: "Your account is closed. We keep billing records as the privacy policy describes." });
     });
   const leaveBilling = () => {

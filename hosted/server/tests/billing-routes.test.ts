@@ -7,14 +7,12 @@ import { queryDatabase } from "pgstencil/postgres";
 import { FOUNDING_COHORT_SIZE, FOUNDING_LADDER, LIST_ANNUAL, LIST_MONTHLY } from "../../../website/src/lib/hosted-pricing";
 import { WITHDRAWAL_STATEMENT } from "../../../website/src/lib/hosted-withdrawal";
 import { resyncBilling, type BillingSetup } from "../billing";
-import { MAX_SHOWN_FOUNDERS } from "../../../website/src/lib/hosted-cohorts";
+import { COHORT_ENDPOINT, MAX_SHOWN_FOUNDERS } from "../../../website/src/lib/hosted-cohorts";
 import {
   BILLING_WEBHOOK_PATH,
-  CHECKOUT_CLOSED,
   CONSENT_REQUIRED,
   ENDED_FOR_REFUND,
   FOUNDERS_ONLY,
-  PRICE_CHANGED,
   TERMS_CHANGED,
   WEBHOOK_BODY_BYTES,
   WITHDRAWAL_CLOSED,
@@ -22,12 +20,12 @@ import {
   disputeAction,
 } from "../billing-routes";
 import { CLOSE_RECENT_LOGIN, CLOSE_UNAVAILABLE, ENDED_FOR_CLOSURE, closureRoutes } from "../closure";
-import { AVATAR_BYTES, COHORT_CACHE_MS, COHORT_ENDPOINT, FOUNDER_AVATAR_PREFIX, cohortRoutes } from "../cohort-routes";
+import { AVATAR_BYTES, COHORT_CACHE_MS, FOUNDER_AVATAR_PREFIX, cohortRoutes } from "../cohort-routes";
 import { entitledSql } from "../entitlement";
 import { ENDED_FOR_WITHDRAWAL, WITHDRAWAL_OPEN_DAYS } from "../withdrawal";
 import { migrations } from "../migrations";
 import { DEV_FOUNDING_PRICES } from "../billing-dev";
-import { TERMS_VERSION } from "../policy-constants";
+import { CHECKOUT_CLOSED, PRICE_CHANGED, TERMS_VERSION } from "../policy-constants";
 import { ORIGINS } from "./bundle";
 import { CHANGED_PRICES, CHANGED_USD, stripeFake } from "./stripe-fake";
 import { workerDatabases } from "./worker-roles";
@@ -210,23 +208,27 @@ test("a dispute's status suspends, restores, or ends, and an inquiry changes not
   ).toEqual(["suspend", "suspend", "restore", "restore", "restore", "end", null, null]);
 });
 
-test("closed, every billing route but leaving the founders row answers 503 to a signed-in account, after the login gate", async ({
+test("closed, a signed-in account reads billing as closed and every billing change but leaving the founders row answers 409, after the login gate", async ({
   onTestFinished,
 }) => {
   const f = await fixture({ closed: true });
   onTestFinished(f.close);
   const member = await f.account();
+  const read = await member.request("/api/billing");
+  expect([read.status, await read.json()]).toEqual([200, { closed: true }]);
+  expect((await f.anonymous("/api/billing")).status).toBe(401);
   for (const [method, path, body] of [
-    ["GET", "/api/billing"],
     ["POST", "/api/billing/checkout", { plan: "monthly" }],
     ["POST", "/api/billing/confirm", { checkout: "op_x" }],
     ["POST", "/api/billing/portal"],
+    ["POST", "/api/billing/withdraw", { subscription: "sub_x" }],
     ["PUT", "/api/billing/founder", { shown: true, name: "Ada" }],
   ] as const) {
     const response = await member.request(path, { method, body });
-    expect([path, response.status, await response.json()]).toEqual([path, 503, { message: CHECKOUT_CLOSED }]);
+    expect([path, response.status, await response.json()]).toEqual([path, 409, { message: CHECKOUT_CLOSED }]);
     expect((await f.anonymous(path, method)).status, path).toBe(401);
   }
+  // Stripe's events wait, retried, until billing opens.
   const { body, signature } = f.dev.signed(f.event("customer.updated", { id: "cus_x" }));
   expect((await f.webhook(body, signature)).status).toBe(503);
   // Leaving needs nothing from billing.
@@ -773,8 +775,11 @@ test("an EEA or UK consumer withdraws online: recorded, acknowledged by email, r
   expect([other.status, await other.json()]).toEqual([409, { message: WITHDRAWAL_CLOSED }]);
   expect(await f.sql(`SELECT id FROM dormouse_withdrawals`)).toEqual([]);
 
+  // Stripe's customer is read once: for the offer, and then its acknowledgement.
+  const reads = f.reads.customers;
   const answered = await withdraw(subscription.id);
   expect(answered.status).toBe(200);
+  expect(f.reads.customers - reads).toBe(1);
   const [row] = await f.sql<{ id: string; userId: string; plan: string; country: string; submittedAt: Date }>(
     `SELECT id, "userId", plan, country, "submittedAt" FROM dormouse_withdrawals WHERE "subscriptionId" = $1`,
     [subscription.id],
@@ -861,6 +866,8 @@ test("a withdrawal whose acknowledgement, cancellation, or refund fails still st
   });
   expect([f.email.all().length, f.cancels.length, f.refunds.length]).toEqual([0, 0, 0]);
 
+  // The failed send's lease runs out before the cron's next pass.
+  f.time.advanceMilliseconds(6 * 60 * 1000);
   f.failing.refunds = 1;
   await expect(resyncBilling(f.setup, f.database.url, origin, f.mail)).rejects.toThrow(AggregateError);
   expect(await member.summary()).toMatchObject({ plan: null, withdrawn: { acknowledged: true, settled: false } });
@@ -1018,7 +1025,7 @@ test("with billing closed, closing deletes an account without a subscription and
     [held.id],
   );
   const refused = await held.request("/api/account/close", { method: "POST", body: { close: true } });
-  expect([refused.status, await refused.json()]).toEqual([503, { message: CLOSE_UNAVAILABLE }]);
+  expect([refused.status, await refused.json()]).toEqual([409, { message: CLOSE_UNAVAILABLE }]);
   expect(await f.sql(`SELECT id FROM "user" WHERE id = $1`, [held.id])).toEqual([{ id: held.id }]);
 });
 
@@ -1212,6 +1219,42 @@ test("a dispute's suspension and restoration are each emailed once to the billin
   expect(await unsent()).toEqual([{ kind: "dispute_suspended" }]);
 });
 
+test("one pass reads an account's billing email from Stripe once, however many of its notices it sends", async ({ onTestFinished }) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const member = await f.account();
+  await f.buy(member, "monthly");
+  await f.sql(
+    `INSERT INTO dormouse_billing_notices (id, "userId", kind, "disputeId", "createdAt")
+    VALUES ('first', $1, 'dispute_restored', 'du_first', $2), ('second', $1, 'dispute_restored', 'du_second', $2)`,
+    [member.id, f.time.now()],
+  );
+  const reads = f.reads.customers;
+  await resyncBilling(f.setup, f.database.url, origin, f.mail);
+  expect([f.email.all().length, f.reads.customers - reads]).toEqual([2, 1]);
+});
+
+test("a notice one pass has leased is never sent by another meanwhile", async ({ onTestFinished }) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const member = await f.account();
+  await f.buy(member, "monthly");
+  await f.sql(
+    `INSERT INTO dormouse_billing_notices (id, "userId", kind, "disputeId", "createdAt") VALUES ('once', $1, 'dispute_restored', 'du_once', $2)`,
+    [member.id, f.time.now()],
+  );
+  // The first send runs a whole second pass before it goes out.
+  let inner: Promise<void> | null = null;
+  const mail = () => ({
+    send: async (message: Parameters<ReturnType<typeof f.mail>["send"]>[0]) => {
+      await (inner ??= resyncBilling(f.setup, f.database.url, origin, mail));
+      await f.mail().send(message);
+    },
+  });
+  await resyncBilling(f.setup, f.database.url, origin, mail);
+  expect(f.email.all().length).toBe(1);
+});
+
 test("notices that keep failing go to the back, so they never starve a newer one", async ({ onTestFinished }) => {
   const f = await fixture();
   onTestFinished(f.close);
@@ -1394,7 +1437,7 @@ test("a shown founder's picture is fetched from the provider's host and served a
   provider.set("https://avatars.githubusercontent.com/u/3?s=96", () => new Response(new TextEncoder().encode("<svg onload=alert(1)>")));
   provider.set("https://avatars.githubusercontent.com/u/4?s=96", () => new Response(null, { status: 302, headers: { location: "https://evil.example/" } }));
   provider.set("https://avatars.githubusercontent.com/u/6?s=96", () => new Response(PNG, { status: 500 }));
-  await founder("Png", gh);
+  const pngFounder = await founder("Png", gh);
   await founder("Big", "https://avatars.githubusercontent.com/u/2");
   await founder("Svg", "https://avatars.githubusercontent.com/u/3");
   await founder("Moved", "https://avatars.githubusercontent.com/u/4");
@@ -1435,12 +1478,27 @@ test("a shown founder's picture is fetched from the provider's host and served a
   expect(fetched.filter((url) => url.includes("/u/1")).length).toBe(1);
   expect(fetched.every((url) => url.startsWith("https://avatars.githubusercontent.com/"))).toBe(true);
 
+  // A later answer keeps a picture loaded from the same source, and tries a failed or a changed one again.
+  const fetches = (path: string) => fetched.filter((url) => url.includes(path)).length;
+  provider.set("https://avatars.githubusercontent.com/u/7?s=96", () => new Response(JPEG));
+  await f.sql(`UPDATE "user" SET image = 'https://avatars.githubusercontent.com/u/7' WHERE id = $1`, [pngFounder.id]);
+  f.clock.now += COHORT_CACHE_MS;
+  await f.visit(COHORT_ENDPOINT);
+  expect((await f.visit(avatar.Png!)).headers.get("content-type")).toBe("image/jpeg");
+  expect((await f.visit(avatar.Failed!)).status).toBe(404);
+  expect((await f.visit(avatar.Inline!)).status).toBe(200);
+  expect([fetches("/u/1"), fetches("/u/7"), fetches("/u/6")]).toEqual([1, 1, 2]);
+  f.clock.now += COHORT_CACHE_MS;
+  await f.visit(COHORT_ENDPOINT);
+  expect((await f.visit(avatar.Png!)).status).toBe(200);
+  expect(fetches("/u/7")).toBe(1);
+
   // Only a shown founder's token: a founder who leaves, a made-up token, or a user id is not one.
   for (const path of [FOUNDER_AVATAR_PREFIX + "0".repeat(64), FOUNDER_AVATAR_PREFIX + "x", FOUNDER_AVATAR_PREFIX])
     expect((await f.visit(path)).status, path).toBe(404);
 });
 
-test("closed, the public routes answer as billing's do", async ({ onTestFinished }) => {
+test("closed, the public cohort read answers 503 and no picture is served", async ({ onTestFinished }) => {
   const f = await fixture({ closed: true });
   onTestFinished(f.close);
   const response = await f.visit(COHORT_ENDPOINT);

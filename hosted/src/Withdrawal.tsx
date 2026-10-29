@@ -1,19 +1,51 @@
 import { useState, type ReactNode } from "react";
 import { CARD_ACCENT_CLASS, CARD_CLASS, LINK_CLASS, MUTED_TEXT_CLASS } from "dormouse-lib/site/docs-tokens";
 import { MODEL_WITHDRAWAL_FORM, SUPPORT_EMAIL, WITHDRAWAL_STATEMENT } from "../../website/src/lib/hosted-withdrawal";
-import { isPlan, planName, type WithdrawalOffer, type Withdrawn } from "./billing";
+import { PLAN_NAMES } from "../../website/src/lib/hosted-pricing.ts";
+import type { WithdrawalOffer, Withdrawn } from "../server/billing-summary";
+import { isPlan } from "../server/policy-constants";
+import { day } from "./billing";
 import { BUTTON_CLASS, HEADING_CLASS, HELP_CLASS, LABEL_TEXT_CLASS, PRIMARY_CLASS } from "./classes";
 
 const TERMS_WITHDRAWAL_URL = "https://dormouse.sh/terms/#withdrawal";
-const day = (iso: string) => new Date(iso).toLocaleDateString();
 const contract = (plan: string, startedAt: string) =>
-  `Dormouse Hosted, ${isPlan(plan) ? planName(plan) : plan}, ordered on ${day(startedAt)}`;
+  `Dormouse Hosted, ${isPlan(plan) ? PLAN_NAMES[plan] : plan}, ordered on ${day(startedAt)}`;
 
 export const SupportLink = () => (
   <a className={LINK_CLASS} href={`mailto:${SUPPORT_EMAIL}`}>
     {SUPPORT_EMAIL}
   </a>
 );
+
+/**
+ * Terms and their details, as the billing page's cards list them: each row
+ * `spacing` below the last, the first too unless `flush`; with `lead`, every
+ * detail but that term's is muted.
+ */
+export function Facts({
+  rows,
+  className,
+  spacing = "mt-3",
+  flush = false,
+  lead,
+}: {
+  rows: [string, ReactNode][];
+  className?: string;
+  spacing?: string;
+  flush?: boolean;
+  lead?: string;
+}) {
+  return (
+    <dl className={className}>
+      {rows.map(([term, detail], index) => (
+        <div key={term} className={flush && !index ? "" : spacing}>
+          <dt className={LABEL_TEXT_CLASS}>{term}</dt>
+          <dd className={`[overflow-wrap:anywhere]${lead && term !== lead ? ` ${MUTED_TEXT_CLASS}` : ""}`}>{detail}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
 
 /** The optional model withdrawal form, folded, with the Terms' section beside it. */
 export function ModelForm() {
@@ -89,14 +121,7 @@ export function WithdrawalFunction({
       </p>
       {confirming ? (
         <>
-          <dl className="mb-2">
-            {rows.map(([term, detail]) => (
-              <div key={term} className="mt-3">
-                <dt className={LABEL_TEXT_CLASS}>{term}</dt>
-                <dd className="[overflow-wrap:anywhere]">{detail}</dd>
-              </div>
-            ))}
-          </dl>
+          <Facts rows={rows} className="mb-2" />
           <div className="flex flex-wrap items-center gap-3">
             <button className={PRIMARY_CLASS} disabled={!!busy} onClick={() => onWithdraw(offer.subscription)}>
               {busy === "withdraw" ? "Withdrawing…" : "Confirm withdrawal"}
@@ -117,7 +142,7 @@ export function WithdrawalFunction({
 
 /** The acknowledgement of the account's latest withdrawal, kept on the billing page. */
 export function WithdrawalAcknowledgement({ withdrawn }: { withdrawn: Withdrawn }) {
-  const rows: [string, string][] = [
+  const rows: [string, ReactNode][] = [
     ["Your statement", WITHDRAWAL_STATEMENT],
     ["Submitted", new Date(withdrawn.submittedAt).toLocaleString(undefined, { timeZoneName: "short" })],
     ["Contract", contract(withdrawn.plan, withdrawn.startedAt)],
@@ -128,14 +153,7 @@ export function WithdrawalAcknowledgement({ withdrawn }: { withdrawn: Withdrawn 
       <h2 id="withdrawn-title" className={HEADING_CLASS}>
         Withdrawal received
       </h2>
-      <dl>
-        {rows.map(([term, detail]) => (
-          <div key={term} className="mt-3">
-            <dt className={LABEL_TEXT_CLASS}>{term}</dt>
-            <dd className="[overflow-wrap:anywhere]">{detail}</dd>
-          </div>
-        ))}
-      </dl>
+      <Facts rows={rows} />
       <p className={`mt-4 ${MUTED_TEXT_CLASS}`}>
         {withdrawn.settled
           ? "Your plan has ended. We refunded every payment for it in full, including tax; your bank or card provider decides when the credit appears."

@@ -3,65 +3,18 @@ import {
   FOUNDING_LADDER,
   HOSTED_MONTHLY,
   HOSTED_YEARLY,
-  LIST_ANNUAL,
+  foundingTier,
+  type Tier,
 } from "../../website/src/lib/hosted-pricing.ts";
-import { BILLING_PLANS } from "../server/policy-constants";
+import type { BillingSummary } from "../server/billing-summary";
+import { REFUND_DAYS, isPlan, type Plan } from "../server/policy-constants";
 
-export type Plan = (typeof BILLING_PLANS)[number];
-export const isPlan = (plan: unknown): plan is Plan => (BILLING_PLANS as readonly unknown[]).includes(plan);
+/** A date as the account pages show it, in the reader's locale. */
+export const day = (iso: string) => new Date(iso).toLocaleDateString();
 
-/** `GET /api/billing` (docs/specs/hosted.md -> "Billing"). */
-export interface BillingSummary {
-  /** The subscription Stripe still holds, paid up or not; null without one. */
-  plan: Plan | null;
-  /** What that subscription charges per interval, in whole US dollars. */
-  price: number | null;
-  /** Whether that subscription grants access now. */
-  active: boolean;
-  until: string | null;
-  renews: boolean;
-  /** Whether the account has Hosted now, by its subscription or a comp. */
-  entitled: boolean;
-  /** A payment dispute is open, which pauses the subscription. */
-  suspended: boolean;
-  /** The founding cohort on sale; null once founding has closed. */
-  founding: { cohort: number; seatsLeft: number } | null;
-  /** `offered` while a founding subscription grants access; `name` while shown in the founders row. */
-  founder: { offered: boolean; name: string | null };
-  /** What the account agreed to when it bought the held subscription. */
-  consent: { termsVersion: string; consentedAt: string } | null;
-  /** The EEA or UK online withdrawal from the held subscription, while it is open. */
-  withdrawal: WithdrawalOffer | null;
-  /**
-   * The account's latest withdrawal, kept on the page as its acknowledgement:
-   * the server sends it only while no plan is held or it is the held plan's.
-   */
-  withdrawn: Withdrawn | null;
-}
-
-/** The held subscription's online withdrawal (docs/specs/hosted.md -> "Billing"). */
-export interface WithdrawalOffer {
-  /** The contract: the Stripe subscription it ends. */
-  subscription: string;
-  startedAt: string;
-  /** When the online withdrawal closes. */
-  until: string;
-  /** Where the acknowledgement is emailed; null when Stripe could not say. */
-  email: string | null;
-}
-
-/** A recorded withdrawal. */
-export interface Withdrawn {
-  reference: string;
-  subscription: string;
-  plan: string;
-  startedAt: string;
-  submittedAt: string;
-  /** Its acknowledgement was emailed. */
-  acknowledged: boolean;
-  /** The subscription ended and every payment for it was refunded. */
-  settled: boolean;
-}
+/** How long after which payments of `plan` the 30-day guarantee refunds it, as the pages say it. */
+export const refundWindow = (plan: Plan) =>
+  `${REFUND_DAYS} days of your first payment${plan === "monthly" ? "" : " or of a yearly renewal"}`;
 
 /** What `/checkout` arrived with, kept through a provider's sign-in. */
 export interface CheckoutIntent {
@@ -146,29 +99,11 @@ export function takeConfirmation(): string | null {
   return checkout || null;
 }
 
-/** One plan as the checkout page offers it, at today's price. */
-export interface PlanOffer {
-  plan: Plan;
-  name: string;
-  price: number;
-  interval: "month" | "year";
-  /** The list price struck beside founding. */
-  listPrice?: number;
-}
-
 /**
  * Each plan on sale, founding first while open, at the price checkout will
  * charge: founding at the open cohort's step, which the server reads.
  */
-export function planOffers(founding: BillingSummary["founding"]): PlanOffer[] {
+export function planOffers(founding: BillingSummary["founding"]): Tier[] {
   const step = founding && FOUNDING_LADDER[founding.cohort];
-  return [
-    ...(step ? [{ plan: "founding" as const, name: "Founding", price: step, interval: "year" as const, listPrice: LIST_ANNUAL }] : []),
-    { plan: "yearly", name: HOSTED_YEARLY.name, price: HOSTED_YEARLY.price, interval: "year" },
-    { plan: "monthly", name: HOSTED_MONTHLY.name, price: HOSTED_MONTHLY.price, interval: "month" },
-  ];
+  return [...(step ? [{ ...foundingTier(), price: step }] : []), HOSTED_YEARLY, HOSTED_MONTHLY];
 }
-
-/** A plan's name as the account page shows it. */
-export const planName = (plan: Plan) =>
-  plan === "founding" ? "Founding" : plan === "yearly" ? HOSTED_YEARLY.name : HOSTED_MONTHLY.name;

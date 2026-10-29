@@ -8,7 +8,6 @@ import { entitledSql } from "./entitlement";
 import { recordMetric } from "./metrics";
 import { VOICE_DAILY_CAP } from "./policy-constants";
 
-export { VOICE_DAILY_CAP };
 /** A token unused this long is refused, as if it never existed. */
 export const VOICE_TOKEN_IDLE_DAYS = 365;
 /** Whether the token aliased `t` is live: used, or minted, within the idle bound. */

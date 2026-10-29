@@ -25,12 +25,11 @@ import {
   CRON_SWEEP_CAP,
   SPEECH_SWEEP_CAP,
   TOKEN_SWEEP_CRON,
-  VOICE_DAILY_CAP,
   VOICE_TOKEN_IDLE_DAYS,
 } from "../voice";
 import { mintVoiceToken } from "../voice-token";
 import { ALREADY_APPROVED, RECENT_LOGIN_REQUIRED } from "../relay-account";
-import { TERMS_VERSION } from "../policy-constants";
+import { TERMS_VERSION, VOICE_DAILY_CAP } from "../policy-constants";
 import {
   API_ROUTES,
   NOT_ENTITLED_ERROR,

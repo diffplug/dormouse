@@ -3,7 +3,7 @@ import { HostedPage, type HostedPageProps } from "../HostedPage";
 import { HostedFrame } from "./HostedFrame";
 import { settledFrame } from "./canvas";
 import { providers, type Computer, type Passkey, type Session } from "../api";
-import type { BillingSummary } from "../billing";
+import type { BillingSummary } from "../../server/billing-summary";
 import { TERMS_VERSION } from "../../server/policy-constants";
 
 export const SESSION: Session = {

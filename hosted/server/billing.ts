@@ -1,21 +1,21 @@
 // Rules: docs/specs/hosted.md -> "Billing".
 import { Billing, BillingError, Stripe, type BillingDB } from "@pgstencil/stripe";
+import { CompiledQuery, type Kysely } from "kysely";
 import { SecureRandom, SystemTime, type EmailSender, type Time } from "pgstencil";
-import { connectDatabase, queryDatabase } from "pgstencil/postgres";
+import { connectDatabase } from "pgstencil/postgres";
 import { FOUNDING_COHORT_SIZE, FOUNDING_LADDER, LIST_ANNUAL, LIST_MONTHLY } from "../../website/src/lib/hosted-pricing";
 import type { BillingEnv } from "./bindings";
 import { resyncDisputes } from "./billing-routes";
 import { retryClosures } from "./closure";
 import { grantsAccessSql } from "./entitlement";
-import { priceChanges, runNotices, usableChanges, type PriceChange } from "./notices";
-import { retryWithdrawals } from "./withdrawal";
-import { BILLING_PLANS, BILLING_RETURN_PATH } from "./policy-constants";
+import { runNotices } from "./notices";
+import { settleWithdrawals } from "./withdrawal";
+import { BILLING_RETURN_PATH, REFUND_DAYS, type Plan } from "./policy-constants";
 
-/** The plans checkout sells, by the names `status()` and a checkout use. */
-export type Plan = (typeof BILLING_PLANS)[number];
+export const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** A purchase that ends within this many days of starting is a refund: its seat returns to its cohort. */
-export const REFUND_DAYS = 30;
+/** The id of a Stripe reference that may arrive expanded; null without one. */
+export const idOf = (ref: string | { id: string } | null | undefined) => (typeof ref === "string" ? ref : (ref?.id ?? null));
 
 /** A deployment's billing configuration, read from its bindings. */
 export interface BillingSetup {
@@ -67,15 +67,73 @@ export function billingSetup(env: BillingEnv): BillingSetup | null {
   };
 }
 
-/**
- * What `priceId` charges per interval, in whole US dollars, as the published
- * prices say each configured Price does; null for a Price not configured.
- */
-export function publishedPrice(setup: BillingSetup, priceId: string): number | null {
-  if (priceId === setup.monthly) return LIST_MONTHLY;
-  if (priceId === setup.yearly) return LIST_ANNUAL;
-  const step = setup.founding.indexOf(priceId);
-  return step === -1 ? null : FOUNDING_LADDER[step]!;
+/** A scheduled list price change, as the operator recorded it in `dormouse_price_changes`. */
+export interface PriceChange {
+  id: string;
+  plan: "monthly" | "yearly";
+  fromPriceId: string;
+  toPriceId: string;
+  fromUsd: number;
+  toUsd: number;
+  effectiveAt: Date;
+}
+
+/** One statement on `db`, answering its rows. */
+export const run = <Row>(db: Pick<Kysely<any>, "executeQuery">, text: string, values: readonly unknown[]) =>
+  db.executeQuery<Row>(CompiledQuery.raw(text, [...values])).then((result) => result.rows);
+
+/** Every scheduled price change, oldest first. */
+const priceChanges = (db: Kysely<any>) =>
+  run<PriceChange>(
+    db,
+    `SELECT id, plan, "fromPriceId", "toPriceId", "fromUsd", "toUsd", "effectiveAt"
+    FROM public.dormouse_price_changes ORDER BY "createdAt", id`,
+    [],
+  );
+
+/** Every Price billing recognizes, by id, and the price changes it acts on or refuses. */
+export interface PriceCatalog {
+  /**
+   * Each recognized Price's plan, and what it charges per interval in whole
+   * US dollars: a configured Price as the published prices say, another as
+   * its usable change says, its new Price before its old.
+   */
+  prices: ReadonlyMap<string, { plan: Plan; usd: number }>;
+  /** `plan`'s Prices, configured first. */
+  recognized(plan: Plan): string[];
+  usable: readonly PriceChange[];
+  /** A change naming a founding Price, whose lock no change may touch, or a Price another plan's configuration or change already holds: refused whole. */
+  refused: readonly PriceChange[];
+}
+
+/** The catalog `setup` configures, with the price changes `changes` schedules. */
+export function priceCatalog(setup: BillingSetup, changes: readonly PriceChange[]): PriceCatalog {
+  const prices = new Map<string, { plan: Plan; usd: number }>([
+    [setup.monthly, { plan: "monthly", usd: LIST_MONTHLY }],
+    [setup.yearly, { plan: "yearly", usd: LIST_ANNUAL }],
+    ...setup.founding.map((price, step) => [price, { plan: "founding", usd: FOUNDING_LADDER[step]! }] as const),
+  ]);
+  const owner = new Map([...prices].map(([price, { plan }]) => [price, plan]));
+  const usable: PriceChange[] = [];
+  const refused: PriceChange[] = [];
+  for (const change of changes) {
+    const ids = [change.fromPriceId, change.toPriceId];
+    if (ids.some((price) => (owner.get(price) ?? change.plan) !== change.plan)) refused.push(change);
+    else {
+      for (const price of ids) owner.set(price, change.plan);
+      usable.push(change);
+    }
+  }
+  for (const side of ["to", "from"] as const)
+    for (const change of usable)
+      if (!prices.has(change[`${side}PriceId`]))
+        prices.set(change[`${side}PriceId`], { plan: change.plan, usd: change[`${side}Usd`] });
+  return {
+    prices,
+    recognized: (plan) => [...prices].filter(([, price]) => price.plan === plan).map(([id]) => id),
+    usable,
+    refused,
+  };
 }
 
 /** The open cohort and its seats left; null once founding has closed. */
@@ -143,7 +201,7 @@ const random = new SecureRandom();
 
 /**
  * Runs `action` with a `Billing` over `databaseUrl` for the account origin
- * `origin`, and the scheduled price changes, closing its connections after.
+ * `origin`, and the price catalog, closing its connections after.
  * No trial; DiffPlug is the merchant of record on Stripe Billing, never
  * Managed Payments, with Stripe Tax on every Checkout; founding checkout
  * offers the open cohort's Price and refuses once founding has closed.
@@ -154,21 +212,12 @@ export async function withBilling<T>(
   setup: BillingSetup,
   databaseUrl: string,
   origin: string,
-  action: (billing: Billing<Plan>, changes: readonly PriceChange[]) => Promise<T>,
+  action: (billing: Billing<Plan>, catalog: PriceCatalog) => Promise<T>,
 ): Promise<T> {
   const db = connectDatabase<BillingDB>(databaseUrl);
   try {
-    const changes = await priceChanges(db);
-    const { usable } = usableChanges(setup, changes);
-    const prices = (plan: "monthly" | "yearly") => ({
-      recognized: [
-        ...new Set([
-          setup[plan],
-          ...usable.filter((change) => change.plan === plan).flatMap((change) => [change.fromPriceId, change.toPriceId]),
-        ]),
-      ],
-      offer: () => setup[plan],
-    });
+    const catalog = priceCatalog(setup, await priceChanges(db));
+    const prices = (plan: "monthly" | "yearly") => ({ recognized: catalog.recognized(plan), offer: () => setup[plan] });
     const billing = new Billing<Plan>(
       db,
       setup.stripe ?? stripeClient(setup.secretKey),
@@ -179,7 +228,7 @@ export async function withBilling<T>(
           monthly: prices("monthly"),
           yearly: prices("yearly"),
           founding: {
-            recognized: setup.founding,
+            recognized: catalog.recognized("founding"),
             async offer(billing) {
               const open = await foundingCohort(billing as Billing<Plan>, setup.founding);
               if (!open) throw new BillingError("Founding is closed.", 409);
@@ -196,7 +245,7 @@ export async function withBilling<T>(
         returnPath: BILLING_RETURN_PATH,
       },
     );
-    return await action(billing, changes);
+    return await action(billing, catalog);
   } finally {
     await db.destroy();
   }
@@ -208,10 +257,10 @@ const RESYNC_OWNERS = 20;
 /**
  * The account Worker's Cron Trigger: reconciles up to {@link RESYNC_OWNERS}
  * random owners whose `active` or `trialing` row no longer grants access, so
- * a missed renewal webhook costs a member one run at most, then finishes
- * any withdrawal whose acknowledgement or settlement failed and any closure
- * whose refunds failed, then rereads a batch of open disputes from Stripe,
- * then runs the subscription notices and the price changes they allow.
+ * a missed renewal webhook costs a member one run at most, then settles any
+ * withdrawal whose settlement failed and any closure whose refunds failed,
+ * then rereads a batch of open disputes from Stripe, then runs the notices,
+ * a withdrawal's acknowledgement among them, and the price changes they allow.
  * Billing closed does nothing. Every owner, withdrawal, closure, dispute,
  * and notice is tried; any failure fails the invocation after.
  */
@@ -222,21 +271,25 @@ export async function resyncBilling(
   mail: () => EmailSender,
 ) {
   if (!setup) return;
-  const due = await queryDatabase<{ owner: string }>(
-    databaseUrl,
-    `SELECT owner_id AS owner FROM pgstencil_billing.subscriptions s
-    WHERE s.status IN ('active', 'trialing') AND NOT ${grantsAccessSql("s")}
-    GROUP BY owner_id ORDER BY random() LIMIT $1`,
-    [RESYNC_OWNERS],
-  );
   const failed: unknown[] = [];
-  await withBilling(setup, databaseUrl, origin, async (billing, changes) => {
-    for (const { owner } of due)
-      await billing.reconcile(owner).catch((error: unknown) => failed.push(error));
-    failed.push(...(await retryWithdrawals(billing, mail)));
-    failed.push(...(await retryClosures(billing)));
-    failed.push(...(await resyncDisputes(billing)));
-    failed.push(...(await runNotices(billing, setup, changes, mail)));
-  });
+  await withBilling(
+    setup,
+    databaseUrl,
+    origin,
+    async (billing, catalog) => {
+      const due = await run<{ owner: string }>(
+        billing.db,
+        `SELECT owner_id AS owner FROM pgstencil_billing.subscriptions s
+        WHERE s.status IN ('active', 'trialing') AND NOT ${grantsAccessSql("s")}
+        GROUP BY owner_id ORDER BY random() LIMIT $1`,
+        [RESYNC_OWNERS],
+      );
+      for (const { owner } of due) await billing.reconcile(owner).catch((error: unknown) => failed.push(error));
+      failed.push(...(await settleWithdrawals(billing)));
+      failed.push(...(await retryClosures(billing)));
+      failed.push(...(await resyncDisputes(billing)));
+      failed.push(...(await runNotices(billing, catalog, mail)));
+    },
+  );
   if (failed.length) throw new AggregateError(failed, `${failed.length} billing resyncs failed`);
 }

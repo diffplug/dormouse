@@ -1,13 +1,13 @@
 // Rules: docs/specs/hosted.md -> "Account closure".
 import { BillingError, purchaseStanding, type Billing, type BillingDB, type Stripe } from "@pgstencil/stripe";
 import type { Context, Hono } from "hono";
-import { CompiledQuery, type Selectable } from "kysely";
-import { bodyLimit } from "hono/body-limit";
+import type { Selectable } from "kysely";
 import { readJson } from "remote-lib-common";
-import { accountQuery, cookieLogin, type AccountHost } from "./account-gate";
-import { REFUND_DAYS, withBilling, type BillingSetup, type Plan } from "./billing";
+import { SUPPORT_EMAIL } from "../../website/src/lib/hosted-withdrawal";
+import { accountQuery, cookieLogin, isRecentLogin, smallBody, type AccountHost } from "./account-gate";
+import { DAY_MS, run, withBilling, type BillingSetup } from "./billing";
 import { CURRENT_STATUSES } from "./entitlement";
-import { LOGIN_FRESH_AGE_MS, RECENT_LOGIN_WINDOW } from "./policy-constants";
+import { RECENT_LOGIN_WINDOW, REFUND_DAYS, type Plan } from "./policy-constants";
 import { refundPaidInvoices } from "./withdrawal";
 
 /** What one request's account deployment provides to account closure. */
@@ -21,8 +21,8 @@ export interface ClosureHost extends AccountHost {
 /** The 403 a closure from a login older than the recent-login window gets. */
 export const CLOSE_RECENT_LOGIN = `Sign in again to close your account. Closing it needs a login from the last ${RECENT_LOGIN_WINDOW}.`;
 
-/** The 503 a closure gets when it cannot reach billing to cancel a subscription the account holds. */
-export const CLOSE_UNAVAILABLE = "Your account cannot be closed online right now. Try again later, or email support@dormouse.sh.";
+/** The 409 a closure gets while billing is closed and the account holds a subscription it cannot cancel. */
+export const CLOSE_UNAVAILABLE = `Your account cannot be closed online right now. Try again later, or email ${SUPPORT_EMAIL}.`;
 
 /** The cancellation comment a subscription ended by closing its account carries. */
 export const ENDED_FOR_CLOSURE = "dormouse: account closed";
@@ -53,8 +53,6 @@ async function endSubscriptions(billing: Billing<Plan>, owner: string): Promise<
   if (current.length) await billing.reconcile(owner);
   return current.map(({ id }) => id);
 }
-
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Whether closing refunds paid invoice `invoice` of subscription `ended`,
@@ -92,12 +90,10 @@ async function settleClosure(billing: Billing<Plan>, owner: string, canceled: re
     if (!ended?.ended_at) throw new Error(`Closure of ${owner}: subscription ${id} has not ended`);
     await refundPaidInvoices(billing, id, { kind: "closure", id }, (invoice) => closureRefunds(billing, ended, invoice));
   }
-  await billing.db.executeQuery(
-    CompiledQuery.raw(`UPDATE public.dormouse_account_closures SET "settledAt" = $2 WHERE "userId" = $1`, [
-      owner,
-      billing.time.now(),
-    ]),
-  );
+  await run(billing.db, `UPDATE public.dormouse_account_closures SET "settledAt" = $2 WHERE "userId" = $1`, [
+    owner,
+    billing.time.now(),
+  ]);
 }
 
 /** How long the cron keeps retrying a closure's refunds, and how many one run finishes at most. */
@@ -110,12 +106,11 @@ const RETRY_BATCH = 20;
  * failures.
  */
 export async function retryClosures(billing: Billing<Plan>): Promise<unknown[]> {
-  const { rows } = await billing.db.executeQuery<{ userId: string; canceledSubscriptions: string[] }>(
-    CompiledQuery.raw(
-      `SELECT "userId", "canceledSubscriptions" FROM public.dormouse_account_closures
-      WHERE "settledAt" IS NULL AND "closedAt" > $1 ORDER BY "closedAt" LIMIT $2`,
-      [new Date(billing.time.now().getTime() - RETRY_DAYS * DAY_MS), RETRY_BATCH],
-    ),
+  const rows = await run<{ userId: string; canceledSubscriptions: string[] }>(
+    billing.db,
+    `SELECT "userId", "canceledSubscriptions" FROM public.dormouse_account_closures
+    WHERE "settledAt" IS NULL AND "closedAt" > $1 ORDER BY "closedAt" LIMIT $2`,
+    [new Date(billing.time.now().getTime() - RETRY_DAYS * DAY_MS), RETRY_BATCH],
   );
   const failed: unknown[] = [];
   for (const { userId, canceledSubscriptions } of rows)
@@ -133,13 +128,9 @@ export async function retryClosures(billing: Billing<Plan>): Promise<unknown[]> 
  * `/api/*` catch-all.
  */
 export function closureRoutes(app: Hono<any>, host: (c: Context) => ClosureHost) {
-  const small = bodyLimit({ maxSize: 1024, onError: (c) => c.json({ message: "Request too large." }, 413) });
-
-  app.post("/api/account/close", small, cookieLogin(host), async (c) => {
-    const { userId, createdAt } = c.get("login");
-    // Fails closed, as approval's check does.
-    if (!(Date.now() - Date.parse(String(createdAt)) < LOGIN_FRESH_AGE_MS))
-      return c.json({ message: CLOSE_RECENT_LOGIN }, 403);
+  app.post("/api/account/close", smallBody(1024), cookieLogin(host), async (c) => {
+    const { userId } = c.get("login");
+    if (!isRecentLogin(c.get("login"))) return c.json({ message: CLOSE_RECENT_LOGIN }, 403);
     if ((await readJson<{ close?: unknown }>(c))?.close !== true)
       return c.json({ message: "Confirm that you want to close your account." }, 400);
     const deployment = host(c);
@@ -170,7 +161,7 @@ export function closureRoutes(app: Hono<any>, host: (c: Context) => ClosureHost)
         `SELECT EXISTS (SELECT FROM pgstencil_billing.subscriptions WHERE owner_id = $1 AND status = ANY ($2::text[])) AS held`,
         [userId, CURRENT_STATUSES],
       );
-      if (held?.held) return c.json({ message: CLOSE_UNAVAILABLE }, 503);
+      if (held?.held) return c.json({ message: CLOSE_UNAVAILABLE }, 409);
       await close([]);
       return c.body(null, 204);
     }
