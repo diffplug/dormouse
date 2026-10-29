@@ -155,7 +155,7 @@ describe('resolveRelayOrigin', () => {
   });
 
   it('refuses the Hosted flag in a release build, set to anything', () => {
-    for (const flag of ['1', 'true', '0']) {
+    for (const flag of ['1', 'true', '0', '', ' ']) {
       expect(() => resolveRelayOrigin({ DORMOUSE_RELAY_IS_HOSTED: flag }, 'test'), flag).toThrow(
         /DORMOUSE_RELAY_IS_HOSTED is for dev builds only/,
       );

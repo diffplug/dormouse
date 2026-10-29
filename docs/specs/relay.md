@@ -29,9 +29,11 @@ Production configuration (`pnpm --filter relay start`, containers, installers):
 | `DORMOUSE_BIND_HOST` | Interface to listen on; unset binds every interface (below). |
 | `DORMOUSE_VAPID_PUBLIC_KEY` / `DORMOUSE_VAPID_PRIVATE_KEY` | Web Push keypair, both or neither; a missing, malformed, or mismatched pair exits at startup. Unset, one is minted into `vapid.json` on first boot. |
 | `DORMOUSE_VAPID_SUBJECT` | RFC 8292 contact, defaulted from `DORMOUSE_ORIGIN` ("Web Push"); an invalid value exits at startup. |
-| `DORMOUSE_RUNTIME_FILE` | Absolute path of the runtime record, written only once bound (POSIX `0600`); unset writes nothing; relative is a `ConfigError` (rationale). The installers keep it outside `DORMOUSE_STATE_DIR` (`SELF_HOST.md`), which the Relay does not enforce (rationale). |
+| `DORMOUSE_RUNTIME_FILE` | Absolute path of the runtime record, written only once bound (POSIX `0600`); unset writes nothing; relative is a `ConfigError` (rationale). |
 | `DORMOUSE_RELEASE_ID` | The release directory's name from the installer's `run-relay` wrapper, recorded in the runtime file; `null` when no installer started the Relay. |
 | `DORMOUSE_ENROLL_TOKEN_FILE` | Absolute path to the installer's enrollment offer (shape in `remote-lib-common/src/remote/enroll-offer.ts`), which `POST /api/burrow/enroll` accepts in place of the setup password; unset turns one-click enrollment off; relative is a `ConfigError` (rationale). |
+
+**Never accept `DORMOUSE_RUNTIME_FILE` or `DORMOUSE_ENROLL_TOKEN_FILE` inside `DORMOUSE_STATE_DIR`**: either is a `ConfigError` ("State files"; rationale).
 
 **The enrollment offer lasts until the first Burrow enrollment or 24 hours, whichever comes first**, `burrows.json` existing being the durable marker (rationale), and **exactly one concurrent redemption wins**.
 

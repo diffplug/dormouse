@@ -4,10 +4,10 @@ Expect: lib/src/host/remote/service.ts
 Source: reverses part of #1242 (a UV raise the store failed to save was lost at the next restart)
 
 diff --git a/lib/src/host/remote/service.test.ts b/lib/src/host/remote/service.test.ts
-index 8c884618a..3e110b162 100644
+index 73b172ebb..504ee1e3f 100644
 --- a/lib/src/host/remote/service.test.ts
 +++ b/lib/src/host/remote/service.test.ts
-@@ -1303,50 +1303,6 @@ describe('pairing queue', () => {
+@@ -1342,50 +1342,6 @@ describe('pairing queue', () => {
      expect(store.acl[BURROW_ID]).toHaveLength(1);
    });
  
@@ -59,75 +59,32 @@ index 8c884618a..3e110b162 100644
      const socket = await running();
      const first = await pair(socket, 'c1', { label: BROWSER });
 diff --git a/lib/src/host/remote/service.ts b/lib/src/host/remote/service.ts
-index a63efe071..236cee44b 100644
+index 2e8f4e562..dbc302b9c 100644
 --- a/lib/src/host/remote/service.ts
 +++ b/lib/src/host/remote/service.ts
-@@ -1508,9 +1508,7 @@ export class BurrowService {
-     return false;
-   }
- 
--  async #startBurrow(stored: BurrowEnrollment): Promise<void> {
--    if (this.#disposed) return;
--    const enrollment = await this.#withRaisedPolicy(stored);
-+  async #startBurrow(enrollment: BurrowEnrollment): Promise<void> {
-     if (this.#disposed) return;
-     if (!(await this.#hasUsableNoiseStatic(enrollment)) || this.#disposed) return;
-     // Never two. Callers are serialized (see `#serialize`), but a Burrow left in
-@@ -1558,49 +1556,24 @@ export class BurrowService {
-    * Keep the Relay's raise to user verification across restarts, onto the
-    * enrollment whose Burrow heard it — and only while that is still this
-    * machine's enrollment, so a raise queued behind a clear or a re-enroll
--   * writes nothing. The running Burrow already enforces it. The raise lands on
--   * `#enrollment` before the save and stays there if the save fails, so a
--   * restart in this process still starts raised (`#withRaisedPolicy`), never
--   * lowered by a Relay that stays silent.
-+   * writes nothing. The running Burrow already enforces it; a failed save is
-+   * retried by the raise after the next start.
+@@ -1392,8 +1392,8 @@ export class BurrowService {
+    * nothing. The running Burrow already enforces it. The raise lands on
+    * `#enrollment` at once, not on `#serialize`: a restart already running there
+    * builds its runtime from `#enrollment` (`#withRaisedPolicy`), and must find
+-   * the raise, never be lowered by a Relay that stays silent. It stays there if
+-   * the save, which does wait its turn, fails.
++   * the raise, never be lowered by a Relay that stays silent. The save waits
++   * its turn.
     */
    #persistRaisedPolicy(raisedBy: BurrowEnrollment): void {
+     const current = this.#enrollment;
+@@ -1402,7 +1402,13 @@ export class BurrowService {
      void this.#serialize(async () => {
-       const current = this.#enrollment;
-       if (this.#disposed || current?.burrowToken !== raisedBy.burrowToken) return;
-       const raised = { ...current, requireUserVerification: true };
+       const held = this.#enrollment;
+       if (this.#disposed || held?.burrowToken !== raisedBy.burrowToken) return;
+-      await this.#saveRaisedPolicy(held);
 +      try {
-+        await this.#store.saveEnrollment(raised);
++        await this.#store.saveEnrollment(held);
 +      } catch (error) {
 +        console.warn('[burrow] could not persist the Relay\'s user-verification demand', error);
-+        return;
++        // Memory follows the store, so the status never claims what the disk lacks.
++        this.#enrollment = current;
 +      }
-       this.#enrollment = raised;
--      await this.#saveRaisedPolicy(raised);
      });
    }
  
--  /**
--   * `stored` raised to user verification when this process already holds a
--   * raise for the same enrollment that the store lacks — a save that failed —
--   * retrying the save. A store that keeps failing is raised again only by the
--   * Relay's next `policy` frame after a relaunch.
--   */
--  async #withRaisedPolicy(stored: BurrowEnrollment): Promise<BurrowEnrollment> {
--    const held = this.#enrollment;
--    if (
--      stored.requireUserVerification ||
--      !held?.requireUserVerification ||
--      held.burrowToken !== stored.burrowToken
--    ) {
--      return stored;
--    }
--    const raised = { ...stored, requireUserVerification: true };
--    await this.#saveRaisedPolicy(raised);
--    return raised;
--  }
--
--  async #saveRaisedPolicy(raised: BurrowEnrollment): Promise<void> {
--    try {
--      await this.#store.saveEnrollment(raised);
--    } catch (error) {
--      console.warn('[burrow] could not persist the Relay\'s user-verification demand', error);
--    }
--  }
--
-   /**
-    * The remote-api handler both runtimes serve an authorized session through,
-    * under a fresh holder id: what a pane it sizes names it by, and what Take

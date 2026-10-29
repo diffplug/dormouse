@@ -1339,13 +1339,15 @@ export class BurrowService {
 
   async #startBurrow(stored: BurrowEnrollment): Promise<void> {
     if (this.#disposed) return;
-    const enrollment = await this.#withRaisedPolicy(stored);
-    if (this.#disposed) return;
-    if (!(await this.#hasUsableNoiseStatic(enrollment)) || this.#disposed) return;
+    if (!(await this.#hasUsableNoiseStatic(stored)) || this.#disposed) return;
     // Never two. Callers are serialized (see `#serialize`), but a Burrow left in
     // `#burrow` here would be dropped without its socket being closed, so the
     // replacement is explicit rather than implied by the assignment below.
+    // Stopped before the held raise is read: a runtime still running could
+    // raise after that read, and the assignments below would lower it.
     this.#stopBurrow();
+    const enrollment = await this.#withRaisedPolicy(stored);
+    if (this.#disposed) return;
     // The one gate on the relay socket, and on everything that needs a running
     // Burrow — push, the device list, setup codes: under a level that runs
     // none, or before the policy is read, the enrollment is held and reported,
@@ -1386,19 +1388,21 @@ export class BurrowService {
   /**
    * Keep the Relay's raise to user verification across restarts, onto the
    * enrollment whose Burrow heard it — and only while that is still this
-   * machine's enrollment, so a raise queued behind a clear or a re-enroll
-   * writes nothing. The running Burrow already enforces it. The raise lands on
-   * `#enrollment` before the save and stays there if the save fails, so a
-   * restart in this process still starts raised (`#withRaisedPolicy`), never
-   * lowered by a Relay that stays silent.
+   * machine's enrollment, so a raise behind a clear or a re-enroll writes
+   * nothing. The running Burrow already enforces it. The raise lands on
+   * `#enrollment` at once, not on `#serialize`: a restart already running there
+   * builds its runtime from `#enrollment` (`#withRaisedPolicy`), and must find
+   * the raise, never be lowered by a Relay that stays silent. It stays there if
+   * the save, which does wait its turn, fails.
    */
   #persistRaisedPolicy(raisedBy: BurrowEnrollment): void {
+    const current = this.#enrollment;
+    if (this.#disposed || current?.burrowToken !== raisedBy.burrowToken) return;
+    this.#enrollment = { ...current, requireUserVerification: true };
     void this.#serialize(async () => {
-      const current = this.#enrollment;
-      if (this.#disposed || current?.burrowToken !== raisedBy.burrowToken) return;
-      const raised = { ...current, requireUserVerification: true };
-      this.#enrollment = raised;
-      await this.#saveRaisedPolicy(raised);
+      const held = this.#enrollment;
+      if (this.#disposed || held?.burrowToken !== raisedBy.burrowToken) return;
+      await this.#saveRaisedPolicy(held);
     });
   }
 
