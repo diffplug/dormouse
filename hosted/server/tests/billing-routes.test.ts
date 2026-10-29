@@ -1166,24 +1166,6 @@ test("a price change applies only from a renewal its notice reached at least 7 d
   expect(f.moves).toHaveLength(1);
 });
 
-test("the cron reads the price changes afresh, though a page read them within the minute", async ({ onTestFinished }) => {
-  const f = await fixture();
-  onTestFinished(f.close);
-  expect(await (await f.account()).summary()).toMatchObject({ plan: null });
-  await f.sql(
-    `INSERT INTO dormouse_price_changes (id, plan, "fromPriceId", "toPriceId", "fromUsd", "toUsd", "effectiveAt")
-    VALUES ('founding-up', 'yearly', $1, $2, $3, $4, now())`,
-    [DEV_FOUNDING_PRICES[0], CHANGED_PRICES.yearly, FOUNDING_LADDER[0], CHANGED_USD.yearly],
-  );
-  const refused = await resyncBilling(f.setup, f.database.url, origin, f.mail).then(
-    () => new AggregateError([]),
-    (error: AggregateError) => error,
-  );
-  expect(refused.errors.map((error: Error) => error.message)).toEqual([
-    "Price change founding-up names a founding Price or another plan's; it is ignored",
-  ]);
-});
-
 test("a dispute's suspension and restoration are each emailed once to the billing email, and the cron retries a failed send", async ({
   onTestFinished,
 }) => {
@@ -1309,25 +1291,6 @@ const fillCohort = (f: Awaited<ReturnType<typeof fixture>>, step: number, count:
       now() + interval '325 days', false, now() FROM owners`,
     [count, step, f.setup.founding[step]],
   );
-
-test("the billing page reuses the open cohort a minute, and reads it again once checkout refuses a changed price", async ({
-  onTestFinished,
-}) => {
-  const f = await fixture();
-  onTestFinished(f.close);
-  const member = await f.account();
-  const founding = async () => (await member.summary()).founding;
-  expect(await founding()).toEqual({ cohort: 0, seatsLeft: FOUNDING_COHORT_SIZE });
-  await fillCohort(f, 0, FOUNDING_COHORT_SIZE);
-  expect(await founding()).toEqual({ cohort: 0, seatsLeft: FOUNDING_COHORT_SIZE });
-  const refused = await member.request("/api/billing/checkout", { method: "POST", body: consent("founding") });
-  expect([refused.status, await refused.json()]).toEqual([409, { message: PRICE_CHANGED }]);
-  expect(await founding()).toEqual({ cohort: 1, seatsLeft: FOUNDING_COHORT_SIZE });
-  await fillCohort(f, 1, FOUNDING_COHORT_SIZE);
-  expect(await founding()).toEqual({ cohort: 1, seatsLeft: FOUNDING_COHORT_SIZE });
-  f.time.advanceMilliseconds(COHORT_CACHE_MS);
-  expect(await founding()).toEqual({ cohort: 2, seatsLeft: FOUNDING_COHORT_SIZE });
-});
 
 test("the public founders row shows only opted-in founders still subscribed, with the open cohort's seats, cached a minute", async ({
   onTestFinished,

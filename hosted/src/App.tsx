@@ -171,9 +171,8 @@ export function App({
     new URLSearchParams(location.search).has("error"),
   );
 
-  // Undefined when a newer refresh superseded this one. `billing: false`
-  // keeps the plan shown, for a change that cannot move it.
-  const refresh = useCallback(async ({ billing: readsBilling = true } = {}): Promise<AccountState | undefined> => {
+  // Undefined when a newer refresh superseded this one.
+  const refresh = useCallback(async (): Promise<AccountState | undefined> => {
     const generation = ++refreshGeneration.current;
     const failed = (error: unknown): never => {
       if (generation === refreshGeneration.current) setLookup("failed");
@@ -208,7 +207,7 @@ export function App({
           watched === undefined
             ? undefined
             : getApproval(watched).catch(() => undefined),
-          readsBilling ? readBilling() : undefined,
+          readBilling(),
         ])
       : [[], null, null, null, undefined, null];
     if (current) await recordContinued().catch(() => {});
@@ -223,7 +222,7 @@ export function App({
     if (voice?.entitled) setRefusedPlan(false);
     setComputers(enrolled);
     setPasskeys(registered);
-    if (plan !== undefined) setBilling(plan);
+    setBilling(plan);
     history.replaceState(
       null,
       "",
@@ -326,15 +325,14 @@ export function App({
   }
   /**
    * Runs a mutation of the account, then shows the account as the server now
-   * has it, its plan re-read only for a mutation that says it can move it
-   * (`billing`). A Pending it returns is re-read in the background, at the
+   * has it. A Pending it returns is re-read in the background, at the
    * computer's poll pace, until the account shows it. A failed refetch never
    * reports the mutation, which succeeded, as failed.
    */
-  const mutate = (label: string, action: () => Promise<Pending | void>, { billing = false } = {}) =>
+  const mutate = (label: string, action: () => Promise<Pending | void>) =>
     act(label, async () => {
       const pending = await action();
-      const after = await reread(() => refresh({ billing }), () =>
+      const after = await reread(refresh, () =>
         setError({
           message:
             "Your change is saved, but this page could not reload to show it. Retry, or come back to this page later.",
@@ -349,7 +347,7 @@ export function App({
     const generation = actionGeneration.current;
     awaited.current = { pending, late: false };
     setNotice({ text: pending.waiting });
-    const outcome = await settle(() => refresh({ billing: false }), (state) => pendingEnd(pending, state), {
+    const outcome = await settle(refresh, (state) => pendingEnd(pending, state), {
       intervalMs: ENROLLMENT_POLL_INTERVAL_S * 1000,
       timeoutMs: PENDING_TIMEOUT_MS,
       cancelled: () => generation !== actionGeneration.current,
@@ -378,16 +376,12 @@ export function App({
       void sendCode();
       return;
     }
-    void mutate(
-      "verify",
-      async () => {
-        noteContinued();
-        await post("sign-in/email-otp", { email: email.trim(), otp: code });
-        setCode("");
-        setEnterCode(false);
-      },
-      { billing: true },
-    );
+    void mutate("verify", async () => {
+      noteContinued();
+      await post("sign-in/email-otp", { email: email.trim(), otp: code });
+      setCode("");
+      setEnterCode(false);
+    });
   }
   /** Drops what the page shows of the account, once it is signed out or closed. */
   const forgetAccount = () => {
@@ -482,14 +476,10 @@ export function App({
           setNotice({ text: `You are in the founders row as ${name}.` });
         })
       : // Leaving answers no plan: the page reads it again.
-        mutate(
-          "founder",
-          async () => {
-            await leaveFounders();
-            setNotice({ text: "You left the founders row." });
-          },
-          { billing: true },
-        );
+        mutate("founder", async () => {
+          await leaveFounders();
+          setNotice({ text: "You left the founders row." });
+        });
   const withdraw = (subscription: string) =>
     act("withdraw", async () => {
       setBilling(await withdrawRequest(subscription));

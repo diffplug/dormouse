@@ -5,9 +5,8 @@ import type { Context, Hono } from "hono";
 import type { Kysely } from "kysely";
 import { readJson } from "remote-lib-common";
 import { accountQuery, cookieLogin, smallBody, type AccountHost } from "./account-gate";
-import { foundingCohort, idOf, run, withBilling, type BillingSetup, type OpenCohort, type PriceCatalog } from "./billing";
+import { foundingCohort, idOf, run, withBilling, type BillingSetup, type PriceCatalog } from "./billing";
 import type { BillingClosed, BillingSummary, Withdrawn } from "./billing-summary";
-import { COHORT_CACHE_MS } from "./cohort-routes";
 import { CURRENT_STATUSES, entitledSql, subscribedSql } from "./entitlement";
 import { checkoutRef, type MetricEvent } from "./metric-labels";
 import { countMetricInTransaction, recordMetric } from "./metrics";
@@ -71,19 +70,6 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
   const gate = cookieLogin(host);
 
   /**
-   * The open cohort as the billing page shows it, reused for
-   * `COHORT_CACHE_MS` in this isolate as the public counter's is. Checkout's
-   * offer reads it afresh; a price checkout refuses as changed, and any
-   * webhook event, which may move a seat, forget it.
-   */
-  let cohort: { at: number; open: OpenCohort | null } | null = null;
-  const pageCohort = async (billing: Billing<Plan>, founding: readonly string[]) => {
-    const now = billing.time.now().getTime();
-    if (!cohort || now - cohort.at >= COHORT_CACHE_MS) cohort = { at: now, open: await foundingCohort(billing, founding) };
-    return cohort.open;
-  };
-
-  /**
    * Runs `action` on this deployment's `Billing`, a `BillingError` answered
    * as its status; while billing is closed, answers `closed`, by default 409
    * `CHECKOUT_CLOSED`.
@@ -142,7 +128,7 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
         FROM "user" u WHERE u.id = $1`,
         [userId, setup.founding],
       ),
-      pageCohort(billing, setup.founding),
+      foundingCohort(billing, setup.founding),
     ]);
     // A subscription Stripe still holds, paid up or not: its owner manages it
     // in the portal (a failed card included) and cannot check out again.
@@ -213,7 +199,6 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
         .where("owner_id", "=", userId)
         .executeTakeFirstOrThrow();
       if (catalog.prices.get(opened.price_id)?.usd !== body.price) {
-        cohort = null;
         await billing.cancelCheckout(userId);
         return c.json({ message: PRICE_CHANGED }, 409);
       }
@@ -312,7 +297,6 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
     const body = await c.req.text();
     return billed(c, async (billing, _setup, catalog) => {
       await processEvent(billing, body, signature, () => host(c).mail(), { catalog, origin: new URL(c.req.url).origin });
-      cohort = null;
       return c.json({ received: true });
     }, () => c.json({ message: CHECKOUT_CLOSED }, 503));
   });

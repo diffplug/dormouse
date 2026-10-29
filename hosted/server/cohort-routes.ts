@@ -152,7 +152,6 @@ async function snapshot(host: CohortHost, setup: BillingSetup, origin: string, p
           [setup.founding, MAX_SHOWN_FOUNDERS],
         ),
       ]),
-    { changes: "none" },
   );
   const open = openCohort(gross, net);
   const avatars: Snapshot["avatars"] = new Map();

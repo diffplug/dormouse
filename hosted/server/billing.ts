@@ -200,21 +200,8 @@ const time = new SystemTime();
 const random = new SecureRandom();
 
 /**
- * How long one isolate reuses the price changes it read, by database. A
- * change takes effect only at a renewal its notice reached 7 days ahead, so
- * a minute's lag recognizes every Price a subscription can be on. Only
- * resolved rows are kept: a Worker never awaits another request's I/O.
- */
-const PRICE_CHANGES_MS = 60_000;
-const recentChanges = new Map<string, { at: number; changes: readonly PriceChange[] }>();
-
-/**
  * Runs `action` with a `Billing` over `databaseUrl` for the account origin
- * `origin`, and the price catalog, closing its connections after. `changes`
- * says how the catalog reads the scheduled price changes: `cached`, reused
- * for {@link PRICE_CHANGES_MS} per isolate, so a request reads them at most
- * once a minute; `fresh`, as the cron does; or `none`, for a read that needs
- * only the configured Prices.
+ * `origin`, and the price catalog, closing its connections after.
  * No trial; DiffPlug is the merchant of record on Stripe Billing, never
  * Managed Payments, with Stripe Tax on every Checkout; founding checkout
  * offers the open cohort's Price and refuses once founding has closed.
@@ -226,24 +213,15 @@ export async function withBilling<T>(
   databaseUrl: string,
   origin: string,
   action: (billing: Billing<Plan>, catalog: PriceCatalog) => Promise<T>,
-  { changes = "cached" }: { changes?: "cached" | "fresh" | "none" } = {},
 ): Promise<T> {
   const db = connectDatabase<BillingDB>(databaseUrl);
-  const clock = setup.time ?? time;
   try {
-    let scheduled: readonly PriceChange[] = [];
-    if (changes !== "none") {
-      const now = clock.now().getTime();
-      const known = recentChanges.get(databaseUrl);
-      scheduled = changes === "cached" && known && now - known.at < PRICE_CHANGES_MS ? known.changes : await priceChanges(db);
-      if (scheduled !== known?.changes) recentChanges.set(databaseUrl, { at: now, changes: scheduled });
-    }
-    const catalog = priceCatalog(setup, scheduled);
+    const catalog = priceCatalog(setup, await priceChanges(db));
     const prices = (plan: "monthly" | "yearly") => ({ recognized: catalog.recognized(plan), offer: () => setup[plan] });
     const billing = new Billing<Plan>(
       db,
       setup.stripe ?? stripeClient(setup.secretKey),
-      clock,
+      setup.time ?? time,
       random,
       {
         prices: {
@@ -312,7 +290,6 @@ export async function resyncBilling(
       failed.push(...(await resyncDisputes(billing)));
       failed.push(...(await runNotices(billing, catalog, mail)));
     },
-    { changes: "fresh" },
   );
   if (failed.length) throw new AggregateError(failed, `${failed.length} billing resyncs failed`);
 }
