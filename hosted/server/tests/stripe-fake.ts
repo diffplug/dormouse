@@ -81,13 +81,6 @@ export async function stripeFake(time: Time, random: RandomSource) {
       if (!disputes.has(charge[1]!)) return json(404, { error: { message: "No such charge" } });
       return json(200, disputedCharge(charge[1]!));
     }
-    // A dispute's charge, which a dispute event names by id.
-    const charge = /^\/v1\/charges\/ch_for_([^/]+)$/.exec(url.pathname);
-    if (charge && req.method === "GET") {
-      const found = disputes.get(charge[1]!);
-      if (!found) return json(404, { error: { message: "No such charge" } });
-      return json(200, { id: `ch_for_${charge[1]}`, object: "charge", customer: found.customer, payment_intent: found.paymentIntent });
-    }
     const customer = /^\/v1\/customers\/([^/]+)$/.exec(url.pathname);
     if (customer && req.method === "GET") {
       reads.customers++;
