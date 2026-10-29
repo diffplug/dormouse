@@ -68,8 +68,9 @@
     }
   ],
   "triggers": {
-    // Billing's resync of subscriptions whose paid period has ended
-    // (`resyncBilling`); it reads nothing while billing is closed.
+    // Billing's periodic pass (`resyncBilling`): lapsed subscriptions, failed
+    // withdrawal and closure refunds, open disputes, notices, and price
+    // changes; it reads nothing while billing is closed.
     "crons": [
       "*/10 * * * *"
     ]
