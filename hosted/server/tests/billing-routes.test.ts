@@ -8,7 +8,6 @@ import { FOUNDING_COHORT_SIZE, FOUNDING_LADDER, LIST_ANNUAL, LIST_MONTHLY } from
 import { WITHDRAWAL_STATEMENT } from "../../../website/src/lib/hosted-withdrawal";
 import { resyncBilling, type BillingSetup } from "../billing";
 import { MAX_SHOWN_FOUNDERS } from "../../../website/src/lib/hosted-cohorts";
-import type { BillingSetup } from "../billing";
 import {
   BILLING_WEBHOOK_PATH,
   CHECKOUT_CLOSED,
