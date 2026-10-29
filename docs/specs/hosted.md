@@ -333,11 +333,11 @@ Hosted's Workers count what they serve in aggregate daily rows; no page or deskt
 | `subscription.canceled` | plan | the webhook processes a purchase's end |
 | `subscription.refunded` | plan | that end's recorded reason was `refund`, or it came within `REFUND_DAYS` |
 
-- **Never count a label off its event's list** (`METRIC_LABELS`): the write throws. Row contents and readers: `docs/specs/security-hosted.md` -> "Account boundary".
+- **Never count a label off its event's list** (`METRIC_LABELS`): the write throws, and the table's CHECK refuses it; **a label added to the list needs a migration replacing that CHECK**. Row contents and readers: `docs/specs/security-hosted.md` -> "Account boundary".
 - **Never fail or delay the request a metric counts**: the write is unawaited, kept alive by `waitUntil`, and only logs failure. The webhook's counts commit in its transaction under a savepoint of their own, so a redelivery never counts twice and a failed count rolls back alone.
 - Rows are kept forever (rationale). The database's UTC clock dates every row and the account Worker's `/admin/metrics` "today".
 
-Source of truth: `hosted/server/metric-labels.ts`; `recordMetric` and `authMetricHooks` in `hosted/server/metrics.ts`; `hosted/server/dormouse-migrations/013_metrics.sql`; `AdminMetrics` in `hosted/src/AdminMetrics.tsx`.
+Source of truth: `hosted/server/metric-labels.ts`; `recordMetric` and `authMetricHooks` in `hosted/server/metrics.ts`; `hosted/server/dormouse-migrations/022_metric_labels.sql`; `AdminMetrics` in `hosted/src/AdminMetrics.tsx`.
 
 ## Development and release
 

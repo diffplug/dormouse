@@ -15,7 +15,8 @@ const PLAN_REFS = BILLING_PLANS.flatMap((plan) =>
 
 /**
  * Every event Hosted counts, and the only labels each may carry; `[""]` for
- * one counted without a label.
+ * one counted without a label. `dormouse_metrics_daily`'s CHECK holds the same
+ * lists, so a change here needs a migration replacing it.
  */
 export const METRIC_LABELS = {
   "account.created": [""],

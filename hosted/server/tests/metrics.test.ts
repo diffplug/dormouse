@@ -1,7 +1,7 @@
 import { test, expect, beforeAll, afterAll, vi } from "vitest";
 import { Hono } from "hono";
 import { createTestContext } from "pgstencil/testing";
-import { queryDatabase } from "pgstencil/postgres";
+import { queryDatabase, withClient } from "pgstencil/postgres";
 import { migrations } from "../migrations";
 import { METRIC_LABELS, metricLabel, type MetricEvent } from "../metric-labels";
 import { authMetricHooks, bestEffort, countMetric, readMetrics } from "../metrics";
@@ -69,6 +69,34 @@ test("a row holds only day, event, label, and count, and refuses what an identif
   // Every allowlisted pair fits the checks.
   for (const [event, labels] of Object.entries(METRIC_LABELS) as [MetricEvent, readonly string[]][])
     for (const label of labels) await countMetric(context.database.url, event, label);
+});
+
+test("the table holds an event's label only while it is on that event's list", async () => {
+  const listed = Object.entries(METRIC_LABELS) as [MetricEvent, readonly string[]][];
+  const events = [...listed.map(([event]) => event), "made_up"];
+  const labels = [...new Set(["", "x", ...listed.flatMap(([, list]) => list)])];
+  // Every pair of a known event and a known label, each inserted on its own.
+  const held = await withClient(context.database.url, async (db) => {
+    const accepted: string[] = [];
+    await db.query("BEGIN");
+    for (const event of events)
+      for (const label of labels) {
+        await db.query("SAVEPOINT pair");
+        try {
+          await db.query(
+            `INSERT INTO dormouse_metrics_daily (day, event, label, count) VALUES ('2000-01-02', $1, $2, 1)`,
+            [event, label],
+          );
+          accepted.push(`${event} ${label}`);
+        } catch (error) {
+          expect((error as { code?: string }).code, `${event} ${label}`).toBe("23514");
+        }
+        await db.query("ROLLBACK TO SAVEPOINT pair");
+      }
+    await db.query("ROLLBACK");
+    return accepted;
+  });
+  expect(held.sort()).toEqual(listed.flatMap(([event, list]) => list.map((label) => `${event} ${label}`)).sort());
 });
 
 test("counting upserts today's row, adding n; the relay and voice roles add to it and change nothing else", async () => {
