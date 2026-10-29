@@ -50,7 +50,7 @@ const meta: Meta<typeof TerminalContainer> = {
   title: 'Terminal/TerminalPane',
   component: TerminalContainer,
   // Hold every snapshot until the terminal has written its scenario and painted,
-  // so Chromatic never captures a half-rendered prompt.
+  // so Argos never captures a half-rendered prompt.
   play: () => settleTerminals(),
 };
 
