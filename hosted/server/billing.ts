@@ -5,6 +5,7 @@ import { connectDatabase, queryDatabase } from "pgstencil/postgres";
 import { FOUNDING_COHORT_SIZE, FOUNDING_LADDER, LIST_ANNUAL, LIST_MONTHLY } from "../../website/src/lib/hosted-pricing";
 import type { BillingEnv } from "./bindings";
 import { resyncDisputes } from "./billing-routes";
+import { retryClosures } from "./closure";
 import { grantsAccessSql } from "./entitlement";
 import { priceChanges, runNotices, usableChanges, type PriceChange } from "./notices";
 import { retryWithdrawals } from "./withdrawal";
@@ -197,11 +198,11 @@ const RESYNC_OWNERS = 20;
  * The account Worker's Cron Trigger: reconciles up to {@link RESYNC_OWNERS}
  * random owners whose `active` or `trialing` row no longer grants access, so
  * a missed renewal webhook costs a member one run at most, then finishes
- * any withdrawal whose acknowledgement or settlement failed, then rereads a
- * batch of open disputes from Stripe, then runs the subscription notices
- * and the price changes they allow. Billing closed does nothing. Every
- * owner, withdrawal, dispute, and notice is tried; any failure fails the
- * invocation after.
+ * any withdrawal whose acknowledgement or settlement failed and any closure
+ * whose refunds failed, then rereads a batch of open disputes from Stripe,
+ * then runs the subscription notices and the price changes they allow.
+ * Billing closed does nothing. Every owner, withdrawal, closure, dispute,
+ * and notice is tried; any failure fails the invocation after.
  */
 export async function resyncBilling(
   setup: BillingSetup | null,
@@ -222,6 +223,7 @@ export async function resyncBilling(
     for (const { owner } of due)
       await billing.reconcile(owner).catch((error: unknown) => failed.push(error));
     failed.push(...(await retryWithdrawals(billing, mail)));
+    failed.push(...(await retryClosures(billing)));
     failed.push(...(await resyncDisputes(billing)));
     failed.push(...(await runNotices(billing, setup, changes, mail)));
   });

@@ -204,7 +204,9 @@ test("a dispute's status suspends, restores, or ends, and an inquiry changes not
   ).toEqual(["suspend", "suspend", "restore", "restore", "restore", "end", null, null]);
 });
 
-test("closed, every billing route answers 503 to a signed-in account, after the login gate", async ({ onTestFinished }) => {
+test("closed, every billing route but leaving the founders row answers 503 to a signed-in account, after the login gate", async ({
+  onTestFinished,
+}) => {
   const f = await fixture({ closed: true });
   onTestFinished(f.close);
   const member = await f.account();
@@ -213,7 +215,7 @@ test("closed, every billing route answers 503 to a signed-in account, after the 
     ["POST", "/api/billing/checkout", { plan: "monthly" }],
     ["POST", "/api/billing/confirm", { checkout: "op_x" }],
     ["POST", "/api/billing/portal"],
-    ["PUT", "/api/billing/founder", { shown: false }],
+    ["PUT", "/api/billing/founder", { shown: true, name: "Ada" }],
   ] as const) {
     const response = await member.request(path, { method, body });
     expect([path, response.status, await response.json()]).toEqual([path, 503, { message: CHECKOUT_CLOSED }]);
@@ -221,6 +223,10 @@ test("closed, every billing route answers 503 to a signed-in account, after the 
   }
   const { body, signature } = f.dev.signed(f.event("customer.updated", { id: "cus_x" }));
   expect((await f.webhook(body, signature)).status).toBe(503);
+  // Leaving needs nothing from billing.
+  await f.sql(`INSERT INTO dormouse_founders ("userId", name) VALUES ($1, 'Ada')`, [member.id]);
+  expect((await member.request("/api/billing/founder", { method: "PUT", body: { shown: false } })).status).toBe(204);
+  expect(await f.sql(`SELECT name FROM dormouse_founders`)).toEqual([]);
 });
 
 test("checkout takes a plan and a ref, never a Price, customer, quantity, or return URL, and counts from the webhook once", async ({
@@ -493,7 +499,7 @@ test("only a founding subscription joins the founders row, under a checked name,
   // A rename keeps its place in the row.
   expect((await put(founder, { shown: true, name: "Ada Lovelace" })).status).toBe(200);
   expect(await f.sql(`SELECT name, "shownSince" AS since FROM dormouse_founders`)).toEqual([{ name: "Ada Lovelace", since }]);
-  expect((await put(founder, { shown: false })).status).toBe(200);
+  expect((await put(founder, { shown: false })).status).toBe(204);
   expect(await founders()).toEqual([]);
   expect((await put(founder, { shown: true, name: "Ada" })).status).toBe(200);
 
@@ -503,7 +509,7 @@ test("only a founding subscription joins the founders row, under a checked name,
   expect((await put(founder, { shown: true, name: "Ada again" })).status).toBe(409);
   expect(await founders()).toEqual([{ userId: founder.id, name: "Ada" }]);
   expect(await founder.summary()).toMatchObject({ founder: { offered: false, name: "Ada" } });
-  expect((await put(founder, { shown: false })).status).toBe(200);
+  expect((await put(founder, { shown: false })).status).toBe(204);
   expect(await founders()).toEqual([]);
 });
 
@@ -899,6 +905,87 @@ test("closing an account needs a recent login, cancels its subscription in Strip
   expect((await pending.request("/api/billing/checkout", { method: "POST", body: consent("monthly") })).status).toBe(200);
   expect((await pending.request("/api/account/close", { method: "POST", body: { close: true } })).status).toBe(204);
   expect([...f.dev.checkouts.values()].at(-1)!.status).toBe("expired");
+});
+
+test("closing within the 30-day guarantee refunds that payment in full, once, and the cron finishes a refund that failed", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const error = vi.spyOn(console, "error").mockImplementation(() => {});
+  onTestFinished(() => error.mockRestore());
+  const close = (who: Awaited<ReturnType<typeof f.account>>) =>
+    who.request("/api/account/close", { method: "POST", body: { close: true } });
+  const settled = (userId: string) =>
+    f.sql<{ settled: boolean }>(`SELECT "settledAt" IS NOT NULL AS settled FROM dormouse_account_closures WHERE "userId" = $1`, [
+      userId,
+    ]).then((rows) => rows[0]?.settled);
+  const ago = (days: number) => new Date(f.time.now().getTime() - days * DAY_MS);
+
+  // Nothing canceled, nothing to refund: settled at once.
+  const plain = await f.account();
+  expect((await close(plain)).status).toBe(204);
+  expect(await settled(plain.id)).toBe(true);
+
+  // A founding first payment: refunded, its seat returning to the cohort.
+  const founder = await f.account();
+  const { subscription: founding } = await f.buy(founder, "founding");
+  f.paidInvoices.set("pi_founding", founding.id);
+  expect((await close(founder)).status).toBe(204);
+  expect(f.refunds).toEqual([{ paymentIntent: "pi_founding", withdrawal: null, closure: founding.id }]);
+  expect(await settled(founder.id)).toBe(true);
+  await f.deliver();
+  await vi.waitFor(async () => expect(await f.metrics()).toContain("subscription.refunded founding 1"));
+
+  // A failed refund stands recorded, and the cron finishes it once.
+  const member = await f.account();
+  const { subscription: monthly } = await f.buy(member, "monthly");
+  f.paidInvoices.set("pi_monthly", monthly.id);
+  f.failing.refunds = 1;
+  expect((await close(member)).status).toBe(204);
+  expect([f.refunds.length, await settled(member.id)]).toEqual([1, false]);
+  await resyncBilling(f.setup, f.database.url, origin, f.mail);
+  expect(f.refunds.at(-1)).toEqual({ paymentIntent: "pi_monthly", withdrawal: null, closure: monthly.id });
+  expect(await settled(member.id)).toBe(true);
+  await resyncBilling(f.setup, f.database.url, origin, f.mail);
+  expect(f.refunds).toHaveLength(2);
+
+  // Past 30 days: a yearly renewal paid 10 days ago is refunded, its first
+  // payment and a monthly renewal never are.
+  const yearlyMember = await f.account();
+  const { subscription: yearly } = await f.buy(yearlyMember, "yearly");
+  const monthlyMember = await f.account();
+  const { subscription: lateMonthly } = await f.buy(monthlyMember, "monthly");
+  f.time.advanceMilliseconds(400 * DAY_MS);
+  f.paidInvoices.set("pi_yearly_first", yearly.id);
+  f.paidInvoices.set("pi_yearly_renewal", yearly.id);
+  f.invoiceFacts.set("pi_yearly_renewal", { reason: "subscription_cycle", paidAt: ago(10) });
+  f.paidInvoices.set("pi_monthly_first", lateMonthly.id);
+  f.paidInvoices.set("pi_monthly_renewal", lateMonthly.id);
+  f.invoiceFacts.set("pi_monthly_renewal", { reason: "subscription_cycle", paidAt: ago(10) });
+  expect((await close(yearlyMember)).status).toBe(204);
+  expect((await close(monthlyMember)).status).toBe(204);
+  expect(f.refunds.slice(2)).toEqual([{ paymentIntent: "pi_yearly_renewal", withdrawal: null, closure: yearly.id }]);
+  expect([await settled(yearlyMember.id), await settled(monthlyMember.id)]).toEqual([true, true]);
+});
+
+test("closing answers billing's refusal, such as a checkout still being created, and keeps the account", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const member = await f.account();
+  await f.sql(`INSERT INTO pgstencil_billing.accounts (owner_id, email, created_at) VALUES ($1, 'x@example.test', now())`, [
+    member.id,
+  ]);
+  await f.sql(
+    `INSERT INTO pgstencil_billing.checkouts (id, owner_id, plan, price_id, trial_days, status, created_at, expires_at)
+    VALUES ('creating', $1, 'monthly', $2, 0, 'pending', now(), now() + interval '1 hour')`,
+    [member.id, f.setup.monthly],
+  );
+  const refused = await member.request("/api/account/close", { method: "POST", body: { close: true } });
+  expect([refused.status, await refused.json()]).toEqual([409, { message: "Checkout is still being created. Retry shortly." }]);
+  expect(await f.sql(`SELECT id FROM "user" WHERE id = $1`, [member.id])).toEqual([{ id: member.id }]);
 });
 
 test("with billing closed, closing deletes an account without a subscription and refuses one still holding one", async ({

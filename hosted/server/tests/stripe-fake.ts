@@ -11,13 +11,14 @@ export const CHANGED_PRICES = { monthly: "price_dev_monthly_next", yearly: "pric
 export const CHANGED_USD = { monthly: 12, yearly: 120 } as const;
 
 /**
- * StripeDev behind a proxy that adds what billing's refund, dispute, and
- * withdrawal handling, and the price changes, call and StripeDev does not
- * model: a dispute's retrieval, with its charge expanded, a subscription's
- * immediate cancellation, retrieval, and move to another Price, a
- * customer's retrieval with its billing country, a subscription's paid
- * invoices and their payments, refunds, and a Price's retrieval. Every other
- * request reaches StripeDev unchanged.
+ * StripeDev behind a proxy that adds what billing's refund, dispute,
+ * withdrawal, and closure handling, and the price changes, call and StripeDev
+ * does not model: a dispute's retrieval, with its charge expanded, a
+ * subscription's immediate cancellation, retrieval, and move to another
+ * Price, a customer's retrieval with its billing country, a subscription's
+ * paid invoices, why each was billed and when it was paid, and their
+ * payments, refunds, and a Price's retrieval. Every other request reaches
+ * StripeDev unchanged.
  */
 export async function stripeFake(time: Time, random: RandomSource) {
   const { dev, setup: devSetup } = await stripeDevBilling(time, random, undefined, {
@@ -45,12 +46,16 @@ export async function stripeFake(time: Time, random: RandomSource) {
   const disputes = new Map<string, { status: string; customer: string; paymentIntent: string }>();
   /** PaymentIntent id → the subscription whose invoice it paid. */
   const paidInvoices = new Map<string, string>();
+  /** PaymentIntent id → why its invoice was billed, and when it was paid; else a first payment, paid at no known time. */
+  const invoiceFacts = new Map<string, { reason: "subscription_create" | "subscription_cycle"; paidAt: Date }>();
   /** Each cancellation billing asked for: the subscription and its comment. */
   const cancels: { subscription: string; comment: string | null }[] = [];
   /** Customer id → its billing address's country; none, no address. */
   const countries = new Map<string, string>();
-  /** Each refund made: its PaymentIntent and its metadata's withdrawal. */
-  const refunds: { paymentIntent: string; withdrawal: string | null }[] = [];
+  /** Each refund made: its PaymentIntent and its metadata's withdrawal, or closure when it names one. */
+  const refunds: { paymentIntent: string; withdrawal: string | null; closure?: string }[] = [];
+  /** How many times billing read a customer, and a Price. */
+  const reads = { customers: 0, prices: 0 };
   /** Refund and cancellation requests to fail, before any is made, with a Stripe outage. */
   const failing = { refunds: 0, cancels: 0 };
   const server = createServer(async (req, res) => {
@@ -73,6 +78,7 @@ export async function stripeFake(time: Time, random: RandomSource) {
     }
     const customer = /^\/v1\/customers\/([^/]+)$/.exec(url.pathname);
     if (customer && req.method === "GET") {
+      reads.customers++;
       const found = dev.customers.get(customer[1]!);
       if (!found) return json(404, { error: { message: "No such customer" } });
       const country = countries.get(customer[1]!);
@@ -86,7 +92,16 @@ export async function stripeFake(time: Time, random: RandomSource) {
         has_more: false,
         data: [...paidInvoices]
           .filter(([, subscriptionId]) => paid && subscriptionId === of)
-          .map(([intent]) => ({ id: `in_${intent}`, object: "invoice", status: "paid" })),
+          .map(([intent]) => {
+            const facts = invoiceFacts.get(intent);
+            return {
+              id: `in_${intent}`,
+              object: "invoice",
+              status: "paid",
+              billing_reason: facts?.reason ?? "subscription_create",
+              status_transitions: { paid_at: facts ? Math.floor(facts.paidAt.getTime() / 1000) : null },
+            };
+          }),
       });
     }
     if (url.pathname === "/v1/refunds" && req.method === "POST") {
@@ -100,7 +115,8 @@ export async function stripeFake(time: Time, random: RandomSource) {
         return json(400, {
           error: { type: "invalid_request_error", code: "charge_already_refunded", message: "Charge has already been refunded." },
         });
-      refunds.push({ paymentIntent: intent, withdrawal: body.get("metadata[dormouse_withdrawal]") });
+      const closure = body.get("metadata[dormouse_closure]");
+      refunds.push({ paymentIntent: intent, withdrawal: body.get("metadata[dormouse_withdrawal]"), ...(closure && { closure }) });
       return json(200, { id: `re_${intent}`, object: "refund", payment_intent: intent, status: "succeeded" });
     }
     if (url.pathname === "/v1/invoice_payments" && req.method === "GET") {
@@ -130,6 +146,7 @@ export async function stripeFake(time: Time, random: RandomSource) {
     }
     const price = /^\/v1\/prices\/([^/]+)$/.exec(url.pathname);
     if (price && req.method === "GET") {
+      reads.prices++;
       const found = prices.get(price[1]!);
       if (!found) return json(404, { error: { message: "No such price" } });
       return json(200, {
@@ -212,10 +229,12 @@ export async function stripeFake(time: Time, random: RandomSource) {
     origin,
     disputes,
     paidInvoices,
+    invoiceFacts,
     cancels,
     countries,
     refunds,
     failing,
+    reads,
     prices,
     moves,
     event,

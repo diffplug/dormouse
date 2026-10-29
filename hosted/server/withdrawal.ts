@@ -1,6 +1,6 @@
 // Rules: docs/specs/hosted.md -> "Billing"; docs/specs/pricing.md ->
 // "Checkout and entitlement".
-import type { Billing } from "@pgstencil/stripe";
+import type { Billing, Stripe } from "@pgstencil/stripe";
 import { escape } from "@pgstencil/auth/email";
 import { CompiledQuery } from "kysely";
 import type { EmailMessage, EmailSender } from "pgstencil";
@@ -192,17 +192,47 @@ export function withdrawalAcknowledgement(to: string, row: WithdrawalRow): Email
   };
 }
 
-/** Refunds what is left of PaymentIntent `intent` for withdrawal `id`, once however often it is asked. */
-async function refundInFull(billing: Billing<Plan>, id: string, intent: string) {
+/** What a refund is for, named in its metadata and its idempotency key: a withdrawal by its id, a closure by its subscription's. */
+export interface RefundFor {
+  kind: "withdrawal" | "closure";
+  id: string;
+}
+
+/** Refunds what is left of PaymentIntent `intent` for `refund`, once however often it is asked. */
+async function refundInFull(billing: Billing<Plan>, refund: RefundFor, intent: string) {
   try {
     await billing.stripe.refunds.create(
-      { payment_intent: intent, reason: "requested_by_customer", metadata: { dormouse_withdrawal: id } },
-      { idempotencyKey: `dormouse-withdrawal-${id}-${intent}` },
+      { payment_intent: intent, reason: "requested_by_customer", metadata: { [`dormouse_${refund.kind}`]: refund.id } },
+      { idempotencyKey: `dormouse-${refund.kind}-${refund.id}-${intent}` },
     );
   } catch (error) {
     // Refunded in full already, by an earlier attempt or by hand.
     if ((error as { code?: unknown }).code === "charge_already_refunded") return;
     throw error;
+  }
+}
+
+/**
+ * Refunds in full, for `refund`, every payment of each paid invoice of
+ * subscription `subscriptionId` that `covers` accepts: no use deduction, tax
+ * included. Safe to repeat.
+ */
+export async function refundPaidInvoices(
+  billing: Billing<Plan>,
+  subscriptionId: string,
+  refund: RefundFor,
+  covers: (invoice: Stripe.Invoice) => boolean = () => true,
+) {
+  const label = `${refund.kind === "withdrawal" ? "Withdrawal" : "Closure"} ${refund.id}`;
+  const invoices = await billing.stripe.invoices.list({ subscription: subscriptionId, status: "paid", limit: 100 });
+  if (invoices.has_more) throw new Error(`${label}: more paid invoices than one page`);
+  for (const invoice of invoices.data.filter(covers)) {
+    const payments = await billing.stripe.invoicePayments.list({ invoice: invoice.id!, status: "paid", limit: 100 });
+    for (const { payment } of payments.data) {
+      const intent = typeof payment.payment_intent === "string" ? payment.payment_intent : payment.payment_intent?.id;
+      if (intent) await refundInFull(billing, refund, intent);
+      else console.warn(`${label}: invoice ${invoice.id} has a payment Stripe cannot refund here; refund it by hand`);
+    }
   }
 }
 
@@ -226,16 +256,7 @@ async function settle(billing: Billing<Plan>, row: WithdrawalRow) {
     });
     await billing.reconcile(row.userId);
   }
-  const invoices = await billing.stripe.invoices.list({ subscription: row.subscriptionId, status: "paid", limit: 100 });
-  if (invoices.has_more) throw new Error(`Withdrawal ${row.id}: more paid invoices than one page`);
-  for (const invoice of invoices.data) {
-    const payments = await billing.stripe.invoicePayments.list({ invoice: invoice.id!, status: "paid", limit: 100 });
-    for (const { payment } of payments.data) {
-      const intent = typeof payment.payment_intent === "string" ? payment.payment_intent : payment.payment_intent?.id;
-      if (intent) await refundInFull(billing, row.id, intent);
-      else console.warn(`Withdrawal ${row.id}: invoice ${invoice.id} has a payment Stripe cannot refund here; refund it by hand`);
-    }
-  }
+  await refundPaidInvoices(billing, row.subscriptionId, { kind: "withdrawal", id: row.id });
 }
 
 /**

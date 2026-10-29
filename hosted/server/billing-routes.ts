@@ -252,7 +252,8 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
   });
 
   // The founders row: shown under `name` only while a founding subscription
-  // grants access; leaving it is always allowed.
+  // grants access. Leaving it needs nothing from billing, so it works while
+  // billing is closed or failing, and answers 204.
   app.put("/api/billing/founder", limit(JSON_BODY_BYTES), gate, async (c) => {
     const { userId } = c.get("login");
     const body = await readJson<{ shown?: unknown; name?: unknown }>(c);
@@ -260,19 +261,20 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
     const name = body?.name;
     if (typeof shown !== "boolean" || (shown && !isFounderName(name)))
       return c.json({ message: "Choose a name of 1 to 64 characters." }, 400);
+    if (!shown) {
+      await accountQuery(host(c), `DELETE FROM dormouse_founders WHERE "userId" = $1`, [userId]);
+      return c.body(null, 204);
+    }
     return billed(c, async (billing, setup, changes) => {
-      if (!shown) await accountQuery(host(c), `DELETE FROM dormouse_founders WHERE "userId" = $1`, [userId]);
-      else {
-        const joined = await accountQuery(
-          host(c),
-          `INSERT INTO dormouse_founders ("userId", name)
-          SELECT $1, $2 WHERE ${subscribedSql("$1::text", "$3::text[]")}
-          ON CONFLICT ("userId") DO UPDATE SET name = EXCLUDED.name
-          RETURNING "userId"`,
-          [userId, name, setup.founding],
-        );
-        if (!joined.length) return c.json({ message: FOUNDERS_ONLY }, 409);
-      }
+      const joined = await accountQuery(
+        host(c),
+        `INSERT INTO dormouse_founders ("userId", name)
+        SELECT $1, $2 WHERE ${subscribedSql("$1::text", "$3::text[]")}
+        ON CONFLICT ("userId") DO UPDATE SET name = EXCLUDED.name
+        RETURNING "userId"`,
+        [userId, name, setup.founding],
+      );
+      if (!joined.length) return c.json({ message: FOUNDERS_ONLY }, 409);
       return summary(c, billing, setup, changes, userId);
     });
   });

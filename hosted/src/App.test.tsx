@@ -18,7 +18,7 @@ vi.mock("./api", async (original) => ({
   getApproval: vi.fn(), approveEnrollment: vi.fn(), acceptTerms: vi.fn(),
   post: vi.fn(), turnOffHostedVoice: vi.fn(),
   getBilling: vi.fn(), startCheckout: vi.fn(), confirmCheckout: vi.fn(),
-  openPortal: vi.fn(), setFounder: vi.fn(), withdraw: vi.fn(), closeAccount: vi.fn(),
+  openPortal: vi.fn(), joinFounders: vi.fn(), leaveFounders: vi.fn(), withdraw: vi.fn(), closeAccount: vi.fn(),
 }));
 
 const NOW = Date.UTC(2026, 9, 21, 12);
@@ -433,7 +433,7 @@ describe("billing", () => {
     history.replaceState(null, "", "/billing");
     vi.mocked(api.getSession).mockResolvedValue(login());
     vi.mocked(api.getBilling).mockResolvedValue(FOUNDING);
-    vi.mocked(api.setFounder).mockResolvedValue({ ...FOUNDING, founder: { offered: true, name: "Ada" } });
+    vi.mocked(api.joinFounders).mockResolvedValue({ ...FOUNDING, founder: { offered: true, name: "Ada" } });
     await mount(null);
     expect(container.querySelector<HTMLInputElement>("#founder-shown")!.checked).toBe(false);
     expect(container.querySelector("#founder-name")).toBeNull();
@@ -443,7 +443,7 @@ describe("billing", () => {
     expect(button("Save").disabled).toBe(true);
     await input("founder-name", " Ada ");
     await click("Save");
-    expect(api.setFounder).toHaveBeenCalledWith(true, "Ada");
+    expect(api.joinFounders).toHaveBeenCalledWith("Ada");
     expect(text()).toContain("You are in the founders row as Ada.");
   });
 });
@@ -472,11 +472,15 @@ describe("the plan section", () => {
 
   it("lets a lapsed founder leave the row", async () => {
     vi.mocked(api.getBilling).mockResolvedValue({ ...NO_PLAN, founder: { offered: false, name: "Ada" } });
-    vi.mocked(api.setFounder).mockResolvedValue(NO_PLAN);
+    vi.mocked(api.leaveFounders).mockResolvedValue(undefined);
     await mount(null);
     expect(container.querySelector('a[href="/checkout"]')).not.toBeNull();
+    vi.mocked(api.getBilling).mockResolvedValue(NO_PLAN);
     await click("Leave the founders row");
-    expect(api.setFounder).toHaveBeenCalledWith(false, "");
+    expect(api.leaveFounders).toHaveBeenCalled();
+    // The page reads the plan again, with the name gone.
+    expect(text()).toContain("You left the founders row.");
+    expect(text()).not.toContain("Leave the founders row");
   });
 
   it("sends an account with no plan, enrolling, to checkout in another tab once it is open", async () => {
@@ -532,7 +536,7 @@ describe("withdrawal and closure", () => {
     await mount(null);
     await click("Close account…");
     expect(container.querySelector<HTMLDialogElement>("dialog[aria-labelledby=close-title]")!.open).toBe(true);
-    for (const said of ["Your Founding plan ends now instead of on", "Closing does not withdraw", "cancel renewal in Manage billing"])
+    for (const said of ["Your Founding plan ends now instead of on", "closing refunds that payment in full", "Closing does not withdraw", "cancel renewal in Manage billing"])
       expect(text()).toContain(said);
     expect(api.closeAccount).not.toHaveBeenCalled();
     vi.mocked(api.getSession).mockResolvedValue(null);
