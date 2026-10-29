@@ -457,8 +457,9 @@ Source of truth: `abort_on_panic` in `standalone/src-tauri/src/panic_policy.rs`;
 
 ## Build and development
 
-Source of truth: `standalone/package.json`, `standalone/src-tauri/tauri.conf.json`, and the root `package.json` for `dev:standalone` and `innerdogfood`; `runDev` in `standalone/scripts/dev-standalone.mjs`.
+Source of truth: `standalone/package.json`, `standalone/src-tauri/tauri.conf.json`, and the root `package.json` for `dev:standalone` and `innerdogfood`; `standalone/scripts/tauri.mjs`; `runDev` in `standalone/scripts/dev-standalone.mjs`.
 
+- **Must prepend the wrapper's Node directory to PATH without setting binary overrides.** Runtime requirements: `docs/specs/security-supply-chain.md` → "Bundled runtime".
 - **The sidecar bundle and the webview bake `DORMOUSE_RELAY_ORIGIN`** (`docs/specs/relay.md` → "Relay origin"); the webview CSP has no relay sources (`standalone/scripts/tauri-conf.test.mjs`).
 - **A self-host `tauri build` overlays no updater endpoint and no updater artifacts**, so the binary cannot reach `dormouse.sh` and needs no signing key. Pinned by `standalone/scripts/dev-standalone.test.mjs`.
 - The bundle ships the whole sidecar via the `../sidecar/**/*` resources glob, including node-pty's prebuilds + bundled ConPTY and the shell-integration scripts (`docs/specs/theme.md` -> "OSC color queries on Windows require the bundled ConPTY", `docs/specs/terminal-state.md` -> "Shell-integration injection").
