@@ -148,7 +148,7 @@ test('resolveSpawnConfig applies per-spawn dor CLI env overrides', () => {
 });
 
 test('Windows panes carry dor context through WSL and back without translating pipe or runtime paths', () => {
-  for (const shell of ['wsl.exe', 'powershell.exe', 'cmd.exe', 'bash.exe']) {
+  for (const shell of ['wsl.exe', 'powershell.exe', 'cmd.exe', 'bash.exe'].map(name => `C:\\Windows\\System32\\${name}`)) {
     const env = {
       Path: 'C:\\Windows\\System32',
       WSLENV: 'USER_FILES/lp:USER_FLAG/u:DORMOUSE_NODE/p:DORMOUSE_CONTROL_SOCKET/p:pwd/u',
@@ -823,6 +823,35 @@ test('list reports the resolved launch shell for live reconnects', () => {
       }],
     },
   });
+});
+
+test('a Windows shell goes by an absolute path, a bare name by the PATH file, else not at all', () => {
+  const osModule = { homedir: () => 'C:\\Users\\me', tmpdir: () => 'C:\\Temp' };
+  const looked = [];
+  const resolveBinary = (name) => { looked.push(name); return name === 'pwsh.exe' ? 'C:\\Program Files\\PowerShell\\7\\pwsh.exe' : undefined; };
+  const shellOf = (shell, env = {}, platform = 'win32') => resolveSpawnConfig({ shell }, { platform, env, osModule, resolveBinary }).shell;
+  assert.equal(shellOf('pwsh.exe'), 'C:\\Program Files\\PowerShell\\7\\pwsh.exe');
+  assert.throws(() => shellOf('evil.exe'), /not found on PATH/);
+  // Only the host's working directory could resolve a relative path.
+  for (const relative of ['tools\\evil.exe', './evil.exe', 'C:evil.exe']) assert.throws(() => shellOf(relative), /not found on PATH/, relative);
+  assert.deepEqual(looked, ['pwsh.exe', 'evil.exe']);
+  assert.equal(shellOf('D:\\bin\\bash.exe'), 'D:\\bin\\bash.exe');
+  assert.equal(shellOf('zsh', {}, 'darwin'), 'zsh');
+  // The default is cmd.exe by `ComSpec`, else under `%SystemRoot%`.
+  assert.equal(shellOf(undefined, { ComSpec: 'cmd.exe', SystemRoot: 'D:\\Win' }), 'D:\\Win\\System32\\cmd.exe');
+  assert.equal(shellOf(undefined, { ComSpec: 'E:\\cmd.exe' }), 'E:\\cmd.exe');
+});
+
+test('a spawn runs the shell the host resolver finds, and one it finds nowhere never reaches the PTY', () => {
+  const events = [];
+  const spawned = [];
+  const fakePty = { pid: 1, onData() {}, onExit() {}, resize() {}, write() {}, kill() {} };
+  const resolveBinary = (name) => (name === 'pwsh.exe' ? 'C:\\Program Files\\PowerShell\\7\\pwsh.exe' : undefined);
+  const mgr = create((event, data) => events.push({ event, data }), { spawn(file) { spawned.push(file); return fakePty; } }, { platform: 'win32', resolveBinary });
+  mgr.spawn('pane-pwsh', { shell: 'pwsh.exe' });
+  mgr.spawn('pane-x', { shell: 'evil.exe' });
+  assert.deepEqual(spawned, ['C:\\Program Files\\PowerShell\\7\\pwsh.exe']);
+  assert.deepEqual(events.find(item => item.event === 'exit'), { event: 'exit', data: { id: 'pane-x', exitCode: 1, signal: undefined } });
 });
 
 test('interrupt writes one ^C to every live PTY and forwards recovery output', async () => {

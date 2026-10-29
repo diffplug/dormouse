@@ -3,7 +3,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFile, spawn } = require('node:child_process');
 const { createPortScanner } = require('./port-scanner');
-const { windowsPowerShellPath, windowsSystemPath } = require('./windows-system');
+const { windowsCommandShell, windowsPowerShellPath, windowsSystemPath } = require('./windows-system');
 
 function safeResolve(resolver) {
   try {
@@ -15,10 +15,22 @@ function safeResolve(resolver) {
 }
 
 function resolveDefaultShell(platform = process.platform, env = process.env) {
-  if (platform === 'win32') {
-    return env.ComSpec || env.COMSPEC || windowsSystemPath(env, 'System32', 'cmd.exe');
-  }
+  if (platform === 'win32') return windowsCommandShell(env);
   return env.SHELL || '/bin/sh';
+}
+
+/**
+ * The shell a spawn runs. On Windows a requested shell that is not an absolute
+ * path would be looked up in the host's working directory first, so a bare
+ * name goes by the file `resolveBinary` finds on `PATH`, and a relative or
+ * drive-relative path by nothing: this throws.
+ */
+function resolveShell(explicitShell, platform, env, resolveBinary = () => undefined) {
+  if (!explicitShell) return resolveDefaultShell(platform, env);
+  if (platform !== 'win32' || path.win32.isAbsolute(explicitShell)) return explicitShell;
+  const resolved = /[\\/:]/.test(explicitShell) ? undefined : resolveBinary(explicitShell, env);
+  if (!resolved) throw new Error(`shell not found on PATH: ${explicitShell}`);
+  return resolved;
 }
 
 // C shells must spawn without `-l`, or a csh/tcsh login shell opens no usable
@@ -389,7 +401,7 @@ function resolveSpawnConfig(options, runtime = {}) {
   };
   const osModule = runtime.osModule || os;
   const fsModule = runtime.fsModule || fs;
-  const shell = explicitShell || resolveDefaultShell(platform, env);
+  const shell = resolveShell(explicitShell, platform, env, runtime.resolveBinary);
   // A WSL shell reports Linux directories, which only the distro resolves: it
   // starts there itself (`--cd`), from the default Windows directory.
   const wslCwd = platform === 'win32' && shellStem(shell) === 'wsl' && /^\/(?!\/)/.test(requestedCwd || '') ? requestedCwd : undefined;
@@ -1512,7 +1524,7 @@ module.exports.pacedInputSegments = pacedInputSegments;
 // same reason: `canonicalLocalDirectory` in `lib/src/host/local-directory.ts`,
 // which `main.js` takes from `git-info.cjs` and VS Code's `pty-host.js`
 // bundles. The default opens nothing.
-module.exports.create = function create(send, ptyModule, { platform = process.platform, replay = false, sliceSince = null, onHelper = () => {}, canonicalDirectory = async () => null, scanPorts = createPortScanner((roots, count) => getOpenPortsForPids(roots, { budgetCount: count })) } = {}) {
+module.exports.create = function create(send, ptyModule, { platform = process.platform, replay = false, sliceSince = null, onHelper = () => {}, canonicalDirectory = async () => null, resolveBinary = () => undefined, scanPorts = createPortScanner((roots, count) => getOpenPortsForPids(roots, { budgetCount: count })) } = {}) {
   if (!ptyModule || typeof ptyModule.spawn !== 'function') {
     throw new TypeError('create() requires a node-pty compatible module');
   }
@@ -1592,8 +1604,27 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
       && ![...helpers].some(([otherId, other]) => otherId !== id && other.parentId === helper.parentId);
   }
 
+  function failSpawn(id, err) {
+    console.error(`[pty-core] spawn failed for ${id}:`, err.message);
+    send('error', { id, message: err.message });
+    // A PTY that never spawned is a dead PTY, and `error` is a host-side log
+    // line that reaches no webview. Follow it with the `exit` every consumer
+    // already knows how to handle: without one the pane keeps whatever command
+    // was seeded for it as permanently running — a phantom running header, a
+    // `countRunningSessions` that never returns to zero, and a quit
+    // confirmation on every attempt to close. Reachable whenever a persisted
+    // or selected shell binary is gone.
+    send('exit', { id, exitCode: 1, signal: undefined });
+  }
+
   function spawn(id, options) {
-    const config = resolveSpawnConfig({ ...options, id, surfaceId: id }, { platform });
+    let config;
+    try {
+      config = resolveSpawnConfig({ ...options, id, surfaceId: id }, { platform, resolveBinary });
+    } catch (err) {
+      failSpawn(id, err);
+      return;
+    }
     if (options?.helper && validHelperOwner(id, options.helper)) {
       helpers.set(id, { parentId: options.helper.parentId, command: options.helper.command });
     } else if (options?.helper) {
@@ -1620,16 +1651,7 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
         useConptyDll: platform === 'win32',
       });
     } catch (err) {
-      console.error(`[pty-core] spawn failed for ${id}:`, err.message);
-      send('error', { id, message: err.message });
-      // A PTY that never spawned is a dead PTY, and `error` is a host-side log
-      // line that reaches no webview. Follow it with the `exit` every consumer
-      // already knows how to handle: without one the pane keeps whatever command
-      // was seeded for it as permanently running — a phantom running header, a
-      // `countRunningSessions` that never returns to zero, and a quit
-      // confirmation on every attempt to close. Reachable whenever a persisted
-      // or selected shell binary is gone.
-      send('exit', { id, exitCode: 1, signal: undefined });
+      failSpawn(id, err);
       return;
     }
 
