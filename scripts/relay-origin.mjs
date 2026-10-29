@@ -70,7 +70,8 @@ export function resolveRelayOrigin(env = process.env, label = 'build', { dev = f
 
   const flag = env.DORMOUSE_RELAY_IS_HOSTED?.trim();
   if (!dev) {
-    if (flag) {
+    // Set at all, blank included: a release build never reads the flag.
+    if (flag !== undefined) {
       throw new Error(
         `[${label}] DORMOUSE_RELAY_IS_HOSTED is for dev builds only (pnpm dev:standalone, ` +
           'pnpm innerdogfood, VS Code watch); a release build is Hosted only at ' +
