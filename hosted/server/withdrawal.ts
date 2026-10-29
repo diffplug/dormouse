@@ -72,18 +72,37 @@ export interface WithdrawalRow {
   settledAt: Date | null;
 }
 
-/** The Stripe customer's billing email and address country, or null when Stripe cannot say. */
-export async function billingContact(billing: Billing<Plan>, ownerId: string) {
+/** How long the billing page reuses a customer's contact Stripe answered, per isolate and Stripe client. */
+const CONTACT_CACHE_MS = 10 * 60 * 1000;
+
+type Contact = { email: string | null; country: string | null } | null;
+const contacts = new WeakMap<Stripe, Map<string, { at: number; contact: Contact }>>();
+
+/**
+ * The Stripe customer's billing email and address country, or null when
+ * Stripe cannot say. `cached` reuses an answer Stripe gave within
+ * {@link CONTACT_CACHE_MS}, for the billing page's reads; what sends mail or
+ * refuses a withdrawal reads Stripe fresh.
+ */
+export async function billingContact(billing: Billing<Plan>, ownerId: string, { cached = false } = {}): Promise<Contact> {
   const account = await billing.db
     .selectFrom("accounts")
     .select("customer_id")
     .where("owner_id", "=", ownerId)
     .executeTakeFirst();
   if (!account?.customer_id) return null;
+  const now = billing.time.now().getTime();
+  let known = contacts.get(billing.stripe);
+  if (!known) contacts.set(billing.stripe, (known = new Map()));
+  const hit = known.get(account.customer_id);
+  if (cached && hit && now - hit.at < CONTACT_CACHE_MS) return hit.contact;
   try {
     const customer = await billing.stripe.customers.retrieve(account.customer_id);
-    if (customer.deleted) return null;
-    return { email: customer.email ?? null, country: customer.address?.country?.toUpperCase() ?? null };
+    const contact = customer.deleted
+      ? null
+      : { email: customer.email ?? null, country: customer.address?.country?.toUpperCase() ?? null };
+    known.set(account.customer_id, { at: now, contact });
+    return contact;
   } catch (error) {
     console.warn(`Reading Stripe customer ${account.customer_id} failed`, error);
     return null;
@@ -94,18 +113,20 @@ export async function billingContact(billing: Billing<Plan>, ownerId: string) {
  * The online withdrawal from `subscription`, or null: offered while it is
  * current, within {@link WITHDRAWAL_OPEN_DAYS} of its start, and its billing
  * country is in {@link WITHDRAWAL_COUNTRIES} or unknown, a Stripe that cannot
- * say included. Whether it was withdrawn already is the caller's.
+ * say included; `cached` as {@link billingContact} takes it. Whether it was
+ * withdrawn already is the caller's.
  */
 export async function withdrawalOffer(
   billing: Billing<Plan>,
   ownerId: string,
   subscription: Held | null,
+  { cached = false } = {},
 ): Promise<WithdrawalOffer | null> {
   if (!subscription?.started_at || !CURRENT_STATUSES.includes(subscription.status)) return null;
   const startedAt = new Date(subscription.started_at);
   const until = new Date(startedAt.getTime() + WITHDRAWAL_OPEN_DAYS * DAY_MS);
   if (billing.time.now() >= until) return null;
-  const contact = await billingContact(billing, ownerId);
+  const contact = await billingContact(billing, ownerId, { cached });
   if (contact?.country && !WITHDRAWAL_COUNTRIES.has(contact.country)) return null;
   return {
     subscription: subscription.id,

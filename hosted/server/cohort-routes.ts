@@ -169,9 +169,23 @@ async function snapshot(host: CohortHost, setup: BillingSetup, origin: string): 
  */
 export function cohortRoutes(app: Hono<any>, host: (c: Context) => CohortHost, now = () => Date.now()) {
   let cached: { at: number; value: Promise<Snapshot> } | null = null;
+  /**
+   * Keeps `work`, which later requests await too, running past the end of
+   * the request that started it: a Worker cancels a request's outstanding
+   * I/O when its client goes away, which would leave every waiter hanging.
+   * Node, the development server and tests, has no execution context.
+   */
+  const shared = <T>(c: Context, work: Promise<T>) => {
+    let ctx: { waitUntil(promise: Promise<unknown>): void } | undefined;
+    try {
+      ctx = c.executionCtx;
+    } catch {}
+    ctx?.waitUntil(work.catch(() => {}));
+    return work;
+  };
   const current = (c: Context, setup: BillingSetup) => {
     if (!cached || now() - cached.at >= COHORT_CACHE_MS) {
-      const value = snapshot(host(c), setup, new URL(c.req.url).origin);
+      const value = shared(c, snapshot(host(c), setup, new URL(c.req.url).origin));
       const entry = { at: now(), value };
       cached = entry;
       // A failure is never reused: the next request tries again.
@@ -193,7 +207,7 @@ export function cohortRoutes(app: Hono<any>, host: (c: Context) => CohortHost, n
     const token = c.req.param("token");
     const entry = setup && TOKEN.test(token) ? (await current(c, setup)).avatars.get(token) : undefined;
     if (!entry) return c.json({ message: "Not found." }, 404);
-    entry.loaded ??= loadAvatar(entry.source).catch(() => null);
+    entry.loaded ??= shared(c, loadAvatar(entry.source).catch(() => null));
     const avatar = await entry.loaded;
     if (!avatar) return c.json({ message: "Not found." }, 404);
     return c.body(avatar.bytes, 200, { "content-type": avatar.type });

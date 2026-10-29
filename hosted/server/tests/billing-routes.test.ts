@@ -90,8 +90,14 @@ async function fixture({ closed = false } = {}) {
   );
   // The account Worker's `onError`.
   app.onError((_error, c) => c.json({ message: "unavailable" }, 503));
-  /** A public read, as the site's Worker forwards it: no cookie, no browser headers. */
-  const visit = (path: string) => app.request(origin + path, { headers: { accept: "*/*" } });
+  /** A public read, as the site's Worker forwards it: no cookie, no browser headers; in a Worker, with its `ctx`. */
+  const visit = (path: string, ctx?: { waitUntil(promise: Promise<unknown>): void }) =>
+    app.request(
+      origin + path,
+      { headers: { accept: "*/*" } },
+      undefined,
+      ctx && { ...ctx, passThroughOnException: () => {}, props: {} },
+    );
 
   /** A signed-in account; `email: null` is a provider-only one. */
   const account = async (email: string | null = `${randomUUID()}@example.test`, emailVerified = email !== null) => {
@@ -814,8 +820,15 @@ test("the online withdrawal is offered within its window, to an EEA, UK, or unkn
   expect([refused.status, await refused.json()]).toEqual([409, { message: WITHDRAWAL_CLOSED }]);
 
   const unknown = await f.account();
-  const { subscription } = await f.buy(unknown, "monthly");
+  const { session, subscription } = await f.buy(unknown, "monthly");
   expect(await unknown.summary()).toMatchObject({ withdrawal: { subscription: subscription.id } });
+  // The page reuses Stripe's answer for a while; a withdrawal reads it afresh.
+  const reads = f.reads.customers;
+  f.countries.set(session.customer as string, "US");
+  expect(await unknown.summary()).toMatchObject({ withdrawal: { subscription: subscription.id } });
+  expect(f.reads.customers).toBe(reads);
+  expect((await unknown.request("/api/billing/withdraw", { method: "POST", body: { subscription: subscription.id } })).status).toBe(409);
+  f.countries.delete(session.customer as string);
   // Past the window, it is closed, and the summary stops offering it.
   await f.sql(
     `UPDATE pgstencil_billing.subscriptions SET started_at = now() - ($2::int * interval '1 day') - interval '1 minute' WHERE id = $1`,
@@ -1115,6 +1128,8 @@ test("a price change applies only from a renewal its notice reached at least 7 d
   f.prices.set(CHANGED_PRICES.monthly, { usd: CHANGED_USD.monthly, interval: "month" });
   await resync();
   expect([f.email.all(), f.moves]).toEqual([[], []]);
+  // Stripe never changes a Price's amount: one confirmed is not read again.
+  const priceReads = f.reads.prices;
   await f.sql(`DELETE FROM dormouse_billing_notices`);
   await f.sql(`UPDATE pgstencil_billing.subscriptions SET status = 'canceled' WHERE id = $1`, [lateSubscription.id]);
 
@@ -1126,6 +1141,7 @@ test("a price change applies only from a renewal its notice reached at least 7 d
   const [mail] = f.email.all();
   for (const fact of ["from $10 to $12 a month", "Manage billing", `${origin}/billing`]) expect(mail!.text).toContain(fact);
   expect(f.moves).toEqual([{ subscription: subscription.id, price: CHANGED_PRICES.monthly, proration: "none" }]);
+  expect(f.reads.prices).toBe(priceReads);
   expect(await member.summary()).toMatchObject({ plan: "monthly", price: CHANGED_USD.monthly, renews: true });
   await resync();
   expect([f.email.all().length, f.moves.length]).toEqual([1, 1]);
@@ -1194,6 +1210,29 @@ test("a dispute's suspension and restoration are each emailed once to the billin
   await resyncBilling(f.setup, f.database.url, origin, f.mail);
   expect(subjects().slice(2)).toEqual([[f.dev.customers.get(otherSession.customer as string)!.email, "Your Dormouse Hosted access is restored"]]);
   expect(await unsent()).toEqual([{ kind: "dispute_suspended" }]);
+});
+
+test("notices that keep failing go to the back, so they never starve a newer one", async ({ onTestFinished }) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const resync = () => resyncBilling(f.setup, f.database.url, origin, f.mail).catch((error: unknown) => error);
+  // A full pass of notices to accounts Stripe holds no email for, then one it does.
+  await f.sql(
+    `INSERT INTO dormouse_billing_notices (id, "userId", kind, "disputeId", "createdAt")
+    SELECT 'failing-' || n, 'nobody-' || n, 'dispute_restored', 'du_failing_' || n, $1 FROM generate_series(1, 50) n`,
+    [new Date(f.time.now().getTime() - DAY_MS)],
+  );
+  const member = await f.account();
+  const { session } = await f.buy(member, "monthly");
+  await f.sql(
+    `INSERT INTO dormouse_billing_notices (id, "userId", kind, "disputeId", "createdAt") VALUES ('newer', $1, 'dispute_restored', 'du_newer', $2)`,
+    [member.id, f.time.now()],
+  );
+  await resync();
+  expect(f.email.all()).toEqual([]);
+  f.time.advanceMilliseconds(10 * 60 * 1000);
+  await resync();
+  expect(f.email.all().map((mail) => mail.to[0])).toEqual([f.dev.customers.get(session.customer as string)!.email]);
 });
 
 /** `count` paid founders at founding step `step`, started 40 days ago, straight into the synchronized rows. */
@@ -1281,6 +1320,18 @@ test("the public founders row shows only opted-in founders still subscribed, wit
   expect(await cohorts()).toEqual({
     founders: { total: FOUNDING_LADDER.length * FOUNDING_COHORT_SIZE, shown: [{ name: "Ada", avatar: FOUNDER_AVATAR_PREFIX + token }] },
   });
+});
+
+test("in a Worker, the request that starts a shared answer keeps it running past its own end", async ({ onTestFinished }) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const waited: Promise<unknown>[] = [];
+  const ctx = { waitUntil: (promise: Promise<unknown>) => void waited.push(promise) };
+  expect((await f.visit(COHORT_ENDPOINT, ctx)).status).toBe(200);
+  expect(waited).toHaveLength(1);
+  // Reused from the cache, it starts nothing.
+  expect((await f.visit(COHORT_ENDPOINT, ctx)).status).toBe(200);
+  expect(waited).toHaveLength(1);
 });
 
 test("the public founders row shows at most MAX_SHOWN_FOUNDERS, the earliest first, and counts the rest", async ({

@@ -136,7 +136,7 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
     // A contract withdrawn from once is never offered again.
     const offer =
       held && account?.withdrawn?.subscription !== status.subscription!.id
-        ? await withdrawalOffer(billing, userId, status.subscription)
+        ? await withdrawalOffer(billing, userId, status.subscription, { cached: true })
         : null;
     return c.json({
       plan: held ? status.plan : null,

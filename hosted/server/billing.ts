@@ -122,6 +122,21 @@ export async function foundingCohort(billing: Billing<Plan>, founding: readonly 
   return openCohort(gross, net);
 }
 
+/**
+ * One Stripe client per key for the isolate's life: it holds no I/O of its
+ * own, and the caches keyed by it (`withdrawalOffer`'s contact, a price
+ * change's checked Prices) then outlive a request.
+ */
+const clients = new Map<string, Stripe>();
+function stripeClient(secretKey: string): Stripe {
+  let client = clients.get(secretKey);
+  if (!client) {
+    client = new Stripe(secretKey, { httpClient: Stripe.createFetchHttpClient(), maxNetworkRetries: 1 });
+    clients.set(secretKey, client);
+  }
+  return client;
+}
+
 // The system clock: a test bundle's injected `Date` scopes it to the test's.
 const time = new SystemTime();
 const random = new SecureRandom();
@@ -156,11 +171,7 @@ export async function withBilling<T>(
     });
     const billing = new Billing<Plan>(
       db,
-      setup.stripe ??
-        new Stripe(setup.secretKey, {
-          httpClient: Stripe.createFetchHttpClient(),
-          maxNetworkRetries: 1,
-        }),
+      setup.stripe ?? stripeClient(setup.secretKey),
       setup.time ?? time,
       random,
       {

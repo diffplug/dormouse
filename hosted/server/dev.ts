@@ -9,15 +9,13 @@ import { createServer as createViteServer, type ViteDevServer } from "vite";
 import { createAuthApp } from "@pgstencil/auth/better-auth";
 import { developmentDatabase } from "pgstencil/database";
 import { EmailDev, SecureRandom, SystemTime } from "pgstencil";
+import { accountCron, accountRoutes, type AccountRoutesHost } from "./account-routes";
 import { stripeDevBilling } from "./billing-dev";
-import { BILLING_WEBHOOK_PATH, billingRoutes, type BillingHost } from "./billing-routes";
-import { closureRoutes, type ClosureHost } from "./closure";
+import { BILLING_WEBHOOK_PATH } from "./billing-routes";
 import { authMetricHooks } from "./metrics";
 import { authPolicy } from "./policy";
 import { migrations } from "./migrations";
 import { allowedDevRequest } from "./dev-host-guard";
-import { relayAccountRoutes, type RelayAccountHost } from "./relay-account";
-import { voiceAccountRoutes } from "./voice";
 
 // Bind first, then derive the origin from the port actually bound, so an unset
 // PORT runs beside another checkout's server. `localhost`, not `127.0.0.1`: it
@@ -78,7 +76,7 @@ const stripe = await stripeDevBilling(
 stripe.dev.setWebhookTarget(origin + BILLING_WEBHOOK_PATH);
 const app = new Hono();
 // Built once, so the approval limiter counts across requests.
-const host: RelayAccountHost & BillingHost & ClosureHost = {
+const host: AccountRoutesHost = {
   databaseUrl,
   auth: (request: Request) => auth.app.fetch(request),
   approveLimit: devLimit(10),
@@ -90,10 +88,12 @@ const host: RelayAccountHost & BillingHost & ClosureHost = {
   // A withdrawal's acknowledgement lands in the local inbox beside sign-in codes.
   mail: () => email,
 };
-voiceAccountRoutes(app, () => host);
-relayAccountRoutes(app, () => host);
-billingRoutes(app, () => host);
-closureRoutes(app, () => host);
+accountRoutes(app, () => host);
+// The Worker's Cron Trigger (`hosted/wrangler.jsonc`), every 10 minutes here too.
+const cron = setInterval(
+  () => void accountCron(host, origin).catch((error: unknown) => console.error("The account cron failed", error)),
+  10 * 60_000,
+);
 // No speak: a Hosted build speaks only at the fixed voice origin, so no
 // Dormouse build could reach one here.
 app.all("*", (c) => auth.app.fetch(c.req.raw));
@@ -166,6 +166,7 @@ function devLimit(perMinute: number): RateLimit {
 for (const signal of ["SIGINT", "SIGTERM"] as const)
   process.once(signal, async () => {
     stopping = true;
+    clearInterval(cron);
     relay.kill("SIGTERM");
     server.close();
     await vite.close();
