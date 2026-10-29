@@ -20,7 +20,7 @@ export interface CohortHost {
 /** Where a shown founder's picture is served, under a token that is no id. */
 export const FOUNDER_AVATAR_PREFIX = "/api/hosted/founders/";
 
-/** How long one isolate reuses an answer, and the pictures it names. */
+/** How long one isolate reuses an answer. A picture it names is kept while later answers name it from the same source. */
 export const COHORT_CACHE_MS = 60_000;
 
 /** The largest picture served; a larger one draws the initial. */
@@ -114,36 +114,53 @@ async function loadAvatar(source: string): Promise<Avatar | null> {
   return type ? { bytes: bytes!, type } : null;
 }
 
+/** A shown founder's picture: where it comes from, its load in progress, and the picture once one loaded. */
+interface AvatarEntry {
+  source: string;
+  loading?: Promise<Avatar | null>;
+  loaded?: Avatar;
+}
+
 /** One isolate's answer: the JSON, and the pictures it names by token. */
 interface Snapshot {
   text: string;
-  avatars: Map<string, { source: string; loaded?: Promise<Avatar | null> }>;
+  avatars: Map<string, AvatarEntry>;
 }
 
 /**
  * The open cohort, its seats left, and the founders row, read from the
- * synchronized subscriptions and `dormouse_founders`.
+ * synchronized subscriptions and `dormouse_founders`. A picture `previous`
+ * loaded from the same source is kept, so a rebuilt answer fetches nothing
+ * again; only a loaded one, so a failed load is tried again.
  */
-async function snapshot(host: CohortHost, setup: BillingSetup, origin: string): Promise<Snapshot> {
-  const { gross, net } = await withBilling(setup, host.databaseUrl, origin, (billing) =>
-    foundingPurchases(billing, setup.founding),
+async function snapshot(host: CohortHost, setup: BillingSetup, origin: string, previous?: Snapshot): Promise<Snapshot> {
+  const [{ gross, net }, rows] = await withBilling(
+    setup,
+    host.databaseUrl,
+    origin,
+    (billing) =>
+      Promise.all([
+        foundingPurchases(billing, setup.founding),
+        // Shown only while opted in and the founding subscription still
+        // holds, so a refund or a lapse takes the founder out of the row.
+        queryDatabase<{ name: string; image: string | null; token: string }>(
+          host.databaseUrl,
+          `SELECT f.name, u.image, encode(sha256(convert_to(f."userId", 'UTF8')), 'hex') AS token
+          FROM dormouse_founders f JOIN "user" u ON u.id = f."userId"
+          WHERE ${subscribedSql('f."userId"', "$1::text[]")}
+          ORDER BY f."shownSince", f."userId" LIMIT $2`,
+          [setup.founding, MAX_SHOWN_FOUNDERS],
+        ),
+      ]),
+    { changes: "none" },
   );
   const open = openCohort(gross, net);
-  // Shown only while opted in and the founding subscription still holds, so
-  // a refund or a lapse takes the founder out of the row.
-  const rows = await queryDatabase<{ name: string; image: string | null; token: string }>(
-    host.databaseUrl,
-    `SELECT f.name, u.image, encode(sha256(convert_to(f."userId", 'UTF8')), 'hex') AS token
-    FROM dormouse_founders f JOIN "user" u ON u.id = f."userId"
-    WHERE ${subscribedSql('f."userId"', "$1::text[]")}
-    ORDER BY f."shownSince", f."userId" LIMIT $2`,
-    [setup.founding, MAX_SHOWN_FOUNDERS],
-  );
   const avatars: Snapshot["avatars"] = new Map();
   const shown = rows.map(({ name, image, token }) => {
     const source = avatarSource(image);
     if (!source) return { name };
-    avatars.set(token, { source });
+    const kept = previous?.avatars.get(token);
+    avatars.set(token, kept?.loaded && kept.source === source ? { source, loaded: kept.loaded } : { source });
     return { name, avatar: FOUNDER_AVATAR_PREFIX + token };
   });
   const body = {
@@ -162,6 +179,8 @@ async function snapshot(host: CohortHost, setup: BillingSetup, origin: string): 
  */
 export function cohortRoutes(app: Hono<any>, host: (c: Context) => CohortHost, now = () => Date.now()) {
   let cached: { at: number; value: Promise<Snapshot> } | null = null;
+  /** The last answer built, whose loaded pictures the next one keeps. */
+  let last: Snapshot | undefined;
   /**
    * Keeps `work`, which later requests await too, running past the end of
    * the request that started it: a Worker cancels a request's outstanding
@@ -178,13 +197,16 @@ export function cohortRoutes(app: Hono<any>, host: (c: Context) => CohortHost, n
   };
   const current = (c: Context, setup: BillingSetup) => {
     if (!cached || now() - cached.at >= COHORT_CACHE_MS) {
-      const value = shared(c, snapshot(host(c), setup, new URL(c.req.url).origin));
+      const value = shared(c, snapshot(host(c), setup, new URL(c.req.url).origin, last));
       const entry = { at: now(), value };
       cached = entry;
       // A failure is never reused: the next request tries again.
-      value.catch(() => {
-        if (cached === entry) cached = null;
-      });
+      value.then(
+        (built) => (last = built),
+        () => {
+          if (cached === entry) cached = null;
+        },
+      );
     }
     return cached.value;
   };
@@ -200,8 +222,18 @@ export function cohortRoutes(app: Hono<any>, host: (c: Context) => CohortHost, n
     const token = c.req.param("token");
     const entry = setup && TOKEN.test(token) ? (await current(c, setup)).avatars.get(token) : undefined;
     if (!entry) return c.json({ message: "Not found." }, 404);
-    entry.loaded ??= shared(c, loadAvatar(entry.source).catch(() => null));
-    const avatar = await entry.loaded;
+    const avatar =
+      entry.loaded ??
+      (await (entry.loading ??= shared(
+        c,
+        loadAvatar(entry.source).then(
+          (avatar) => {
+            if (avatar) entry.loaded = avatar;
+            return avatar;
+          },
+          () => null,
+        ),
+      )));
     if (!avatar) return c.json({ message: "Not found." }, 404);
     return c.body(avatar.bytes, 200, { "content-type": avatar.type });
   });

@@ -5,14 +5,15 @@ import type { Context, Hono } from "hono";
 import type { Kysely } from "kysely";
 import { readJson } from "remote-lib-common";
 import { accountQuery, cookieLogin, smallBody, type AccountHost } from "./account-gate";
-import { foundingCohort, idOf, run, withBilling, type BillingSetup, type PriceCatalog } from "./billing";
+import { foundingCohort, idOf, run, withBilling, type BillingSetup, type OpenCohort, type PriceCatalog } from "./billing";
 import type { BillingClosed, BillingSummary, Withdrawn } from "./billing-summary";
+import { COHORT_CACHE_MS } from "./cohort-routes";
 import { CURRENT_STATUSES, entitledSql, subscribedSql } from "./entitlement";
 import { checkoutRef, type MetricEvent } from "./metric-labels";
 import { countMetricInTransaction, recordMetric } from "./metrics";
 import { CHECKOUT_CLOSED, PRICE_CHANGED, REFUND_DAYS, TERMS_VERSION, isFounderName, isPlan, type Plan } from "./policy-constants";
 import { sendNotices, type NoticeContext } from "./notices";
-import { recordWithdrawal, recordedWithdrawal, settleWithdrawal, withdrawalOffer } from "./withdrawal";
+import { recordWithdrawal, recordedWithdrawal, settleWithdrawal, withdrawalOffer, type Contact } from "./withdrawal";
 import { SUPPORT_EMAIL } from "../../website/src/lib/hosted-withdrawal";
 import type { EmailSender } from "pgstencil";
 
@@ -68,6 +69,19 @@ export function disputeAction(status: string): "suspend" | "restore" | "end" | n
  */
 export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost) {
   const gate = cookieLogin(host);
+
+  /**
+   * The open cohort as the billing page shows it, reused for
+   * `COHORT_CACHE_MS` in this isolate as the public counter's is. Checkout's
+   * offer reads it afresh; a price checkout refuses as changed, and any
+   * webhook event, which may move a seat, forget it.
+   */
+  let cohort: { at: number; open: OpenCohort | null } | null = null;
+  const pageCohort = async (billing: Billing<Plan>, founding: readonly string[]) => {
+    const now = billing.time.now().getTime();
+    if (!cohort || now - cohort.at >= COHORT_CACHE_MS) cohort = { at: now, open: await foundingCohort(billing, founding) };
+    return cohort.open;
+  };
 
   /**
    * Runs `action` on this deployment's `Billing`, a `BillingError` answered
@@ -128,7 +142,7 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
         FROM "user" u WHERE u.id = $1`,
         [userId, setup.founding],
       ),
-      foundingCohort(billing, setup.founding),
+      pageCohort(billing, setup.founding),
     ]);
     // A subscription Stripe still holds, paid up or not: its owner manages it
     // in the portal (a failed card included) and cannot check out again.
@@ -199,6 +213,7 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
         .where("owner_id", "=", userId)
         .executeTakeFirstOrThrow();
       if (catalog.prices.get(opened.price_id)?.usd !== body.price) {
+        cohort = null;
         await billing.cancelCheckout(userId);
         return c.json({ message: PRICE_CHANGED }, 409);
       }
@@ -240,15 +255,18 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
     if (typeof subscription !== "string" || !SUBSCRIPTION_ID.test(subscription))
       return c.json({ message: "Choose the contract to withdraw from." }, 400);
     return billed(c, async (billing, setup, catalog) => {
+      const contacts = new Map<string, Contact>();
       let row = await recordedWithdrawal(billing, userId, subscription);
       if (!row) {
         const { subscription: held, plan } = await billing.status(userId);
         const offer = held?.id === subscription && plan ? await withdrawalOffer(billing, userId, held) : null;
         if (!offer || held?.id !== subscription || !plan) return c.json({ message: WITHDRAWAL_CLOSED }, 409);
+        // Read from Stripe just now, so its acknowledgement need not read it again.
+        if (offer.email) contacts.set(userId, { email: offer.email, country: offer.country });
         row = await recordWithdrawal(billing, userId, plan, held, offer);
       }
       const context = { catalog, origin: new URL(c.req.url).origin };
-      for (const error of await sendNotices(billing, () => host(c).mail(), context, { userId }))
+      for (const error of await sendNotices(billing, () => host(c).mail(), context, { userId, contacts }))
         console.error("A notice is recorded but not sent; the cron retries it", error);
       await settleWithdrawal(billing, row).catch((error: unknown) =>
         console.error(`Withdrawal ${row.id} is recorded but not settled; the cron retries it`, error),
@@ -294,6 +312,7 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
     const body = await c.req.text();
     return billed(c, async (billing, _setup, catalog) => {
       await processEvent(billing, body, signature, () => host(c).mail(), { catalog, origin: new URL(c.req.url).origin });
+      cohort = null;
       return c.json({ received: true });
     }, () => c.json({ message: CHECKOUT_CLOSED }, 503));
   });

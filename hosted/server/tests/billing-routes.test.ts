@@ -775,8 +775,11 @@ test("an EEA or UK consumer withdraws online: recorded, acknowledged by email, r
   expect([other.status, await other.json()]).toEqual([409, { message: WITHDRAWAL_CLOSED }]);
   expect(await f.sql(`SELECT id FROM dormouse_withdrawals`)).toEqual([]);
 
+  // Stripe's customer is read once: for the offer, and then its acknowledgement.
+  const reads = f.reads.customers;
   const answered = await withdraw(subscription.id);
   expect(answered.status).toBe(200);
+  expect(f.reads.customers - reads).toBe(1);
   const [row] = await f.sql<{ id: string; userId: string; plan: string; country: string; submittedAt: Date }>(
     `SELECT id, "userId", plan, country, "submittedAt" FROM dormouse_withdrawals WHERE "subscriptionId" = $1`,
     [subscription.id],
@@ -1163,6 +1166,24 @@ test("a price change applies only from a renewal its notice reached at least 7 d
   expect(f.moves).toHaveLength(1);
 });
 
+test("the cron reads the price changes afresh, though a page read them within the minute", async ({ onTestFinished }) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  expect(await (await f.account()).summary()).toMatchObject({ plan: null });
+  await f.sql(
+    `INSERT INTO dormouse_price_changes (id, plan, "fromPriceId", "toPriceId", "fromUsd", "toUsd", "effectiveAt")
+    VALUES ('founding-up', 'yearly', $1, $2, $3, $4, now())`,
+    [DEV_FOUNDING_PRICES[0], CHANGED_PRICES.yearly, FOUNDING_LADDER[0], CHANGED_USD.yearly],
+  );
+  const refused = await resyncBilling(f.setup, f.database.url, origin, f.mail).then(
+    () => new AggregateError([]),
+    (error: AggregateError) => error,
+  );
+  expect(refused.errors.map((error: Error) => error.message)).toEqual([
+    "Price change founding-up names a founding Price or another plan's; it is ignored",
+  ]);
+});
+
 test("a dispute's suspension and restoration are each emailed once to the billing email, and the cron retries a failed send", async ({
   onTestFinished,
 }) => {
@@ -1216,6 +1237,42 @@ test("a dispute's suspension and restoration are each emailed once to the billin
   expect(await unsent()).toEqual([{ kind: "dispute_suspended" }]);
 });
 
+test("one pass reads an account's billing email from Stripe once, however many of its notices it sends", async ({ onTestFinished }) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const member = await f.account();
+  await f.buy(member, "monthly");
+  await f.sql(
+    `INSERT INTO dormouse_billing_notices (id, "userId", kind, "disputeId", "createdAt")
+    VALUES ('first', $1, 'dispute_restored', 'du_first', $2), ('second', $1, 'dispute_restored', 'du_second', $2)`,
+    [member.id, f.time.now()],
+  );
+  const reads = f.reads.customers;
+  await resyncBilling(f.setup, f.database.url, origin, f.mail);
+  expect([f.email.all().length, f.reads.customers - reads]).toEqual([2, 1]);
+});
+
+test("a notice one pass has leased is never sent by another meanwhile", async ({ onTestFinished }) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const member = await f.account();
+  await f.buy(member, "monthly");
+  await f.sql(
+    `INSERT INTO dormouse_billing_notices (id, "userId", kind, "disputeId", "createdAt") VALUES ('once', $1, 'dispute_restored', 'du_once', $2)`,
+    [member.id, f.time.now()],
+  );
+  // The first send runs a whole second pass before it goes out.
+  let inner: Promise<void> | null = null;
+  const mail = () => ({
+    send: async (message: Parameters<ReturnType<typeof f.mail>["send"]>[0]) => {
+      await (inner ??= resyncBilling(f.setup, f.database.url, origin, mail));
+      await f.mail().send(message);
+    },
+  });
+  await resyncBilling(f.setup, f.database.url, origin, mail);
+  expect(f.email.all().length).toBe(1);
+});
+
 test("notices that keep failing go to the back, so they never starve a newer one", async ({ onTestFinished }) => {
   const f = await fixture();
   onTestFinished(f.close);
@@ -1252,6 +1309,25 @@ const fillCohort = (f: Awaited<ReturnType<typeof fixture>>, step: number, count:
       now() + interval '325 days', false, now() FROM owners`,
     [count, step, f.setup.founding[step]],
   );
+
+test("the billing page reuses the open cohort a minute, and reads it again once checkout refuses a changed price", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const member = await f.account();
+  const founding = async () => (await member.summary()).founding;
+  expect(await founding()).toEqual({ cohort: 0, seatsLeft: FOUNDING_COHORT_SIZE });
+  await fillCohort(f, 0, FOUNDING_COHORT_SIZE);
+  expect(await founding()).toEqual({ cohort: 0, seatsLeft: FOUNDING_COHORT_SIZE });
+  const refused = await member.request("/api/billing/checkout", { method: "POST", body: consent("founding") });
+  expect([refused.status, await refused.json()]).toEqual([409, { message: PRICE_CHANGED }]);
+  expect(await founding()).toEqual({ cohort: 1, seatsLeft: FOUNDING_COHORT_SIZE });
+  await fillCohort(f, 1, FOUNDING_COHORT_SIZE);
+  expect(await founding()).toEqual({ cohort: 1, seatsLeft: FOUNDING_COHORT_SIZE });
+  f.time.advanceMilliseconds(COHORT_CACHE_MS);
+  expect(await founding()).toEqual({ cohort: 2, seatsLeft: FOUNDING_COHORT_SIZE });
+});
 
 test("the public founders row shows only opted-in founders still subscribed, with the open cohort's seats, cached a minute", async ({
   onTestFinished,
@@ -1398,7 +1474,7 @@ test("a shown founder's picture is fetched from the provider's host and served a
   provider.set("https://avatars.githubusercontent.com/u/3?s=96", () => new Response(new TextEncoder().encode("<svg onload=alert(1)>")));
   provider.set("https://avatars.githubusercontent.com/u/4?s=96", () => new Response(null, { status: 302, headers: { location: "https://evil.example/" } }));
   provider.set("https://avatars.githubusercontent.com/u/6?s=96", () => new Response(PNG, { status: 500 }));
-  await founder("Png", gh);
+  const pngFounder = await founder("Png", gh);
   await founder("Big", "https://avatars.githubusercontent.com/u/2");
   await founder("Svg", "https://avatars.githubusercontent.com/u/3");
   await founder("Moved", "https://avatars.githubusercontent.com/u/4");
@@ -1438,6 +1514,21 @@ test("a shown founder's picture is fetched from the provider's host and served a
   await f.visit(avatar.Png!);
   expect(fetched.filter((url) => url.includes("/u/1")).length).toBe(1);
   expect(fetched.every((url) => url.startsWith("https://avatars.githubusercontent.com/"))).toBe(true);
+
+  // A later answer keeps a picture loaded from the same source, and tries a failed or a changed one again.
+  const fetches = (path: string) => fetched.filter((url) => url.includes(path)).length;
+  provider.set("https://avatars.githubusercontent.com/u/7?s=96", () => new Response(JPEG));
+  await f.sql(`UPDATE "user" SET image = 'https://avatars.githubusercontent.com/u/7' WHERE id = $1`, [pngFounder.id]);
+  f.clock.now += COHORT_CACHE_MS;
+  await f.visit(COHORT_ENDPOINT);
+  expect((await f.visit(avatar.Png!)).headers.get("content-type")).toBe("image/jpeg");
+  expect((await f.visit(avatar.Failed!)).status).toBe(404);
+  expect((await f.visit(avatar.Inline!)).status).toBe(200);
+  expect([fetches("/u/1"), fetches("/u/7"), fetches("/u/6")]).toEqual([1, 1, 2]);
+  f.clock.now += COHORT_CACHE_MS;
+  await f.visit(COHORT_ENDPOINT);
+  expect((await f.visit(avatar.Png!)).status).toBe(200);
+  expect(fetches("/u/7")).toBe(1);
 
   // Only a shown founder's token: a founder who leaves, a made-up token, or a user id is not one.
   for (const path of [FOUNDER_AVATAR_PREFIX + "0".repeat(64), FOUNDER_AVATAR_PREFIX + "x", FOUNDER_AVATAR_PREFIX])

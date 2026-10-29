@@ -2,7 +2,7 @@
 import { Billing, BillingError, Stripe, type BillingDB } from "@pgstencil/stripe";
 import { CompiledQuery, type Kysely } from "kysely";
 import { SecureRandom, SystemTime, type EmailSender, type Time } from "pgstencil";
-import { connectDatabase, queryDatabase } from "pgstencil/postgres";
+import { connectDatabase } from "pgstencil/postgres";
 import { FOUNDING_COHORT_SIZE, FOUNDING_LADDER, LIST_ANNUAL, LIST_MONTHLY } from "../../website/src/lib/hosted-pricing";
 import type { BillingEnv } from "./bindings";
 import { resyncDisputes } from "./billing-routes";
@@ -200,8 +200,21 @@ const time = new SystemTime();
 const random = new SecureRandom();
 
 /**
+ * How long one isolate reuses the price changes it read, by database. A
+ * change takes effect only at a renewal its notice reached 7 days ahead, so
+ * a minute's lag recognizes every Price a subscription can be on. Only
+ * resolved rows are kept: a Worker never awaits another request's I/O.
+ */
+const PRICE_CHANGES_MS = 60_000;
+const recentChanges = new Map<string, { at: number; changes: readonly PriceChange[] }>();
+
+/**
  * Runs `action` with a `Billing` over `databaseUrl` for the account origin
- * `origin`, and the price catalog, closing its connections after.
+ * `origin`, and the price catalog, closing its connections after. `changes`
+ * says how the catalog reads the scheduled price changes: `cached`, reused
+ * for {@link PRICE_CHANGES_MS} per isolate, so a request reads them at most
+ * once a minute; `fresh`, as the cron does; or `none`, for a read that needs
+ * only the configured Prices.
  * No trial; DiffPlug is the merchant of record on Stripe Billing, never
  * Managed Payments, with Stripe Tax on every Checkout; founding checkout
  * offers the open cohort's Price and refuses once founding has closed.
@@ -213,15 +226,24 @@ export async function withBilling<T>(
   databaseUrl: string,
   origin: string,
   action: (billing: Billing<Plan>, catalog: PriceCatalog) => Promise<T>,
+  { changes = "cached" }: { changes?: "cached" | "fresh" | "none" } = {},
 ): Promise<T> {
   const db = connectDatabase<BillingDB>(databaseUrl);
+  const clock = setup.time ?? time;
   try {
-    const catalog = priceCatalog(setup, await priceChanges(db));
+    let scheduled: readonly PriceChange[] = [];
+    if (changes !== "none") {
+      const now = clock.now().getTime();
+      const known = recentChanges.get(databaseUrl);
+      scheduled = changes === "cached" && known && now - known.at < PRICE_CHANGES_MS ? known.changes : await priceChanges(db);
+      if (scheduled !== known?.changes) recentChanges.set(databaseUrl, { at: now, changes: scheduled });
+    }
+    const catalog = priceCatalog(setup, scheduled);
     const prices = (plan: "monthly" | "yearly") => ({ recognized: catalog.recognized(plan), offer: () => setup[plan] });
     const billing = new Billing<Plan>(
       db,
       setup.stripe ?? stripeClient(setup.secretKey),
-      setup.time ?? time,
+      clock,
       random,
       {
         prices: {
@@ -271,21 +293,26 @@ export async function resyncBilling(
   mail: () => EmailSender,
 ) {
   if (!setup) return;
-  const due = await queryDatabase<{ owner: string }>(
-    databaseUrl,
-    `SELECT owner_id AS owner FROM pgstencil_billing.subscriptions s
-    WHERE s.status IN ('active', 'trialing') AND NOT ${grantsAccessSql("s")}
-    GROUP BY owner_id ORDER BY random() LIMIT $1`,
-    [RESYNC_OWNERS],
-  );
   const failed: unknown[] = [];
-  await withBilling(setup, databaseUrl, origin, async (billing, catalog) => {
-    for (const { owner } of due)
-      await billing.reconcile(owner).catch((error: unknown) => failed.push(error));
-    failed.push(...(await settleWithdrawals(billing)));
-    failed.push(...(await retryClosures(billing)));
-    failed.push(...(await resyncDisputes(billing)));
-    failed.push(...(await runNotices(billing, catalog, mail)));
-  });
+  await withBilling(
+    setup,
+    databaseUrl,
+    origin,
+    async (billing, catalog) => {
+      const due = await run<{ owner: string }>(
+        billing.db,
+        `SELECT owner_id AS owner FROM pgstencil_billing.subscriptions s
+        WHERE s.status IN ('active', 'trialing') AND NOT ${grantsAccessSql("s")}
+        GROUP BY owner_id ORDER BY random() LIMIT $1`,
+        [RESYNC_OWNERS],
+      );
+      for (const { owner } of due) await billing.reconcile(owner).catch((error: unknown) => failed.push(error));
+      failed.push(...(await settleWithdrawals(billing)));
+      failed.push(...(await retryClosures(billing)));
+      failed.push(...(await resyncDisputes(billing)));
+      failed.push(...(await runNotices(billing, catalog, mail)));
+    },
+    { changes: "fresh" },
+  );
   if (failed.length) throw new AggregateError(failed, `${failed.length} billing resyncs failed`);
 }

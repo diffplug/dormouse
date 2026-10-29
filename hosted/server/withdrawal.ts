@@ -54,7 +54,8 @@ export interface WithdrawalRow {
 /** How long the billing page reuses a customer's contact Stripe answered, per isolate and Stripe client. */
 const CONTACT_CACHE_MS = 10 * 60 * 1000;
 
-type Contact = { email: string | null; country: string | null } | null;
+/** A Stripe customer's billing email and address country; null when Stripe cannot say. */
+export type Contact = { email: string | null; country: string | null } | null;
 const contacts = new WeakMap<Stripe, Map<string, { at: number; contact: Contact }>>();
 
 /**

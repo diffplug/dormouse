@@ -414,6 +414,22 @@ describe("checkout", () => {
 });
 
 describe("billing", () => {
+  it("reads the plan again on coming back, once for both of its events, but not after an approval", async () => {
+    vi.mocked(api.getSession).mockResolvedValue(login());
+    await mount(ENROLLMENT);
+    expect(api.getBilling).toHaveBeenCalledTimes(1);
+    await approve();
+    expect(api.getComputers).toHaveBeenCalledTimes(2);
+    expect(api.getBilling).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      document.dispatchEvent(new Event("visibilitychange"));
+      window.dispatchEvent(new Event("focus"));
+    });
+    expect(api.getComputers).toHaveBeenCalledTimes(3);
+    expect(api.getBilling).toHaveBeenCalledTimes(2);
+  });
+
   it("confirms the checkout Stripe returned from once, then keeps its confirmation", async () => {
     history.replaceState(null, "", "/billing");
     vi.mocked(api.getSession).mockResolvedValue(login());

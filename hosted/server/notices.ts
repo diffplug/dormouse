@@ -7,7 +7,7 @@ import { PLAN_NAMES, planInterval } from "../../website/src/lib/hosted-pricing";
 import { DIFFPLUG_POSTAL_ADDRESS, SUPPORT_EMAIL, WITHDRAWAL_STATEMENT } from "../../website/src/lib/hosted-withdrawal";
 import { DAY_MS, run, type PriceCatalog, type PriceChange } from "./billing";
 import { BILLING_RETURN_PATH, isPlan, type Plan } from "./policy-constants";
-import { billingContact } from "./withdrawal";
+import { billingContact, type Contact } from "./withdrawal";
 
 /**
  * A yearly plan's renewal notice, and a monthly plan's annual reminder, are
@@ -198,41 +198,50 @@ function noticeMessage(to: string, notice: Pending, plan: Plan | null, context: 
  * {@link PRICE_SEND_BY_DAYS} and its change is among `verified`; a suspension
  * while its dispute is open; a dispute notice or a withdrawal's
  * acknowledgement for {@link RETRY_DAYS}.
- * Each is leased before it is sent, so two passes never send one twice.
- * Never-tried notices go first, then the least recently tried, so ones that
- * keep failing never starve newer ones past their deadlines. Answers the
- * failures.
+ * The batch is leased in the statement that picks it, so two passes never
+ * send one twice. Never-tried notices go first, then the least recently
+ * tried, so ones that keep failing never starve newer ones past their
+ * deadlines. Each account's contact is read from Stripe once per pass;
+ * `contacts` may hold one its caller just read. Answers the failures.
  */
 export async function sendNotices(
   billing: Billing<Plan>,
   mail: () => EmailSender,
   context: NoticeContext,
-  { userId = null, verified = [] }: { userId?: string | null; verified?: readonly string[] } = {},
+  {
+    userId = null,
+    verified = [],
+    contacts = new Map(),
+  }: { userId?: string | null; verified?: readonly string[]; contacts?: Map<string, Contact> } = {},
 ): Promise<unknown[]> {
   const now = billing.time.now();
-  const pending = await run<Pending>(
+  const leased = await run<Pending>(
     billing.db,
-    `SELECT n.id, n."userId", n.kind, n."renewsAt", s.price_id AS "priceId", n."priceChangeId",
-      n."withdrawalId", w.plan AS "withdrawalPlan", w."contractStartedAt", w."submittedAt"
-    FROM public.dormouse_billing_notices n
-    LEFT JOIN pgstencil_billing.subscriptions s ON s.id = n."subscriptionId"
-    LEFT JOIN public.dormouse_price_changes c ON c.id = n."priceChangeId"
-    LEFT JOIN public.dormouse_withdrawals w ON w.id = n."withdrawalId"
-    WHERE n."sentAt" IS NULL AND (n."attemptedAt" IS NULL OR n."attemptedAt" < $2)
-      AND ($3::text IS NULL OR n."userId" = $3)
-      AND CASE
-        WHEN n.kind IN ('renewal', 'annual') THEN
-          s.status = 'active' AND NOT s.cancel_at_period_end AND s.period_end = n."renewsAt" AND n."renewsAt" > $1::timestamptz
-        WHEN n.kind = 'price_change' THEN
-          s.status = 'active' AND NOT s.cancel_at_period_end AND s.period_end = n."renewsAt"
-          AND s.price_id = c."fromPriceId" AND c.id = ANY ($6::text[])
-          AND n."renewsAt" > $1::timestamptz + make_interval(days => $7)
-        WHEN n.kind = 'dispute_suspended' THEN
-          n."createdAt" > $4
-          AND EXISTS (SELECT FROM public.dormouse_billing_disputes d WHERE d."disputeId" = n."disputeId")
-        ELSE n."createdAt" > $4
-      END
-    ORDER BY n."attemptedAt" NULLS FIRST, n."createdAt", n.id LIMIT $5`,
+    `WITH due AS (
+      SELECT n.id, s.price_id AS "priceId", w.plan AS "withdrawalPlan", w."contractStartedAt", w."submittedAt"
+      FROM public.dormouse_billing_notices n
+      LEFT JOIN pgstencil_billing.subscriptions s ON s.id = n."subscriptionId"
+      LEFT JOIN public.dormouse_price_changes c ON c.id = n."priceChangeId"
+      LEFT JOIN public.dormouse_withdrawals w ON w.id = n."withdrawalId"
+      WHERE n."sentAt" IS NULL AND (n."attemptedAt" IS NULL OR n."attemptedAt" < $2)
+        AND ($3::text IS NULL OR n."userId" = $3)
+        AND CASE
+          WHEN n.kind IN ('renewal', 'annual') THEN
+            s.status = 'active' AND NOT s.cancel_at_period_end AND s.period_end = n."renewsAt" AND n."renewsAt" > $1::timestamptz
+          WHEN n.kind = 'price_change' THEN
+            s.status = 'active' AND NOT s.cancel_at_period_end AND s.period_end = n."renewsAt"
+            AND s.price_id = c."fromPriceId" AND c.id = ANY ($6::text[])
+            AND n."renewsAt" > $1::timestamptz + make_interval(days => $7)
+          WHEN n.kind = 'dispute_suspended' THEN
+            n."createdAt" > $4
+            AND EXISTS (SELECT FROM public.dormouse_billing_disputes d WHERE d."disputeId" = n."disputeId")
+          ELSE n."createdAt" > $4
+        END
+      ORDER BY n."attemptedAt" NULLS FIRST, n."createdAt", n.id LIMIT $5
+      FOR UPDATE OF n SKIP LOCKED)
+    UPDATE public.dormouse_billing_notices n SET "attemptedAt" = $1 FROM due WHERE n.id = due.id
+    RETURNING n.id, n."userId", n.kind, n."renewsAt", due."priceId", n."priceChangeId",
+      n."withdrawalId", due."withdrawalPlan", due."contractStartedAt", due."submittedAt"`,
     [
       now,
       new Date(now.getTime() - LEASE_MS),
@@ -244,16 +253,10 @@ export async function sendNotices(
     ],
   );
   const failed: unknown[] = [];
-  for (const notice of pending)
+  for (const notice of leased)
     try {
-      const [leased] = await run(
-        billing.db,
-        `UPDATE public.dormouse_billing_notices SET "attemptedAt" = $2
-        WHERE id = $1 AND "sentAt" IS NULL AND ("attemptedAt" IS NULL OR "attemptedAt" < $3) RETURNING id`,
-        [notice.id, billing.time.now(), new Date(billing.time.now().getTime() - LEASE_MS)],
-      );
-      if (!leased) continue;
-      const email = (await billingContact(billing, notice.userId))?.email;
+      if (!contacts.has(notice.userId)) contacts.set(notice.userId, await billingContact(billing, notice.userId));
+      const email = contacts.get(notice.userId)?.email;
       if (!email) throw new Error(`Notice ${notice.id}: Stripe gave no billing email to send it to`);
       await mail().send(noticeMessage(email, notice, billing.planOf(notice.priceId), context));
       await run(billing.db, `UPDATE public.dormouse_billing_notices SET "sentAt" = $2, email = $3 WHERE id = $1`, [
