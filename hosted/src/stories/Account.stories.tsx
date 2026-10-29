@@ -60,11 +60,13 @@ export const PlanEnding: Story = { args: { ...ACCOUNT, billing: { ...FOUNDING, r
 export const PlanPaymentFailed: Story = {
   args: { ...ACCOUNT, billing: { ...FOUNDING, active: false, entitled: false, founder: { offered: false, name: null } } },
 };
-export const PlanPaymentFailedComp: Story = {
+/** Only the `ADMIN_EMAIL` comp can stay entitled on a lapsed plan. */
+export const PlanPaymentFailedAdminComp: Story = {
   args: { ...ACCOUNT, billing: { ...FOUNDING, active: false, founder: { offered: false, name: null } } },
 };
 export const PlanSuspended: Story = { args: { ...ACCOUNT, billing: { ...FOUNDING, entitled: false, suspended: true } } };
-export const PlanComp: Story = { args: { ...ACCOUNT, billing: { ...NO_PLAN, entitled: true } } };
+/** Only the `ADMIN_EMAIL` comp is entitled without a plan. */
+export const PlanAdminComp: Story = { args: { ...ACCOUNT, billing: { ...NO_PLAN, entitled: true } } };
 export const LapsedFounder: Story = { args: { ...ACCOUNT, billing: { ...NO_PLAN, founder: { offered: false, name: "Alex" } } } };
 export const PlanPhone: Story = { args: { ...ACCOUNT, billing: FOUNDING, phone: true } };
 export const PlanWithdrawable: Story = { args: { ...ACCOUNT, billing: WITHDRAWABLE } };

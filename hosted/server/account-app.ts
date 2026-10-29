@@ -6,6 +6,7 @@ import { billingSetup, resyncBilling } from "./billing";
 import { billingRoutes, type BillingHost } from "./billing-routes";
 import type { AccountEnv } from "./bindings";
 import { closureRoutes, type ClosureHost } from "./closure";
+import { cohortRoutes } from "./cohort-routes";
 import { accountRules } from "./headers";
 import { ADMIN_METRICS_PATH } from "./metric-labels";
 import { readMetrics } from "./metrics";
@@ -18,9 +19,9 @@ import { workerApp } from "./worker-app";
 /**
  * The account Worker (`hosted.dormouse.sh`): auth, providers, readiness,
  * terms acceptance, Natural Voice on or off, the Relay's account routes, the
- * admin's metrics, the frontend, billing, and account closure. The
- * production and preview entries differ only in their mail (`fetchAuth`'s and
- * `mail`) and in `bindings`.
+ * admin's metrics, the frontend, billing, account closure, and the founders
+ * row. The production and preview entries differ only in their mail
+ * (`fetchAuth`'s and `mail`) and in `bindings`.
  */
 export function accountApp(
   fetchAuth: (
@@ -66,6 +67,7 @@ export function accountApp(
       relayAccountRoutes(app, host);
       billingRoutes(app, host);
       closureRoutes(app, host);
+      cohortRoutes(app, (c) => ({ databaseUrl: c.env.HYPERDRIVE.connectionString, setup: () => billingSetup(c.env) }));
       app.get(ADMIN_METRICS_PATH, cookieAdmin(host), async (c) =>
         c.json(await readMetrics(c.env.HYPERDRIVE.connectionString)),
       );

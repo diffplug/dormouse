@@ -1,6 +1,9 @@
 import type { ReactNode } from 'react';
 import { getPlatform } from '../lib/platform';
 
+/** An inline prose link's look, for a link that opens something in the app too. */
+export const TEXT_LINK_CLASS = 'text-foreground underline underline-offset-2 hover:text-muted';
+
 /**
  * Inline prose link out to the web. A `button`, not an `<a>`: the webview hosts
  * cannot navigate themselves, so every outbound href goes through the
@@ -17,7 +20,7 @@ export function ExternalTextLink({ href, children }: { href: string; children: R
     <button
       type="button"
       onClick={() => getPlatform().openExternal?.(href)}
-      className="text-foreground underline underline-offset-2 hover:text-muted"
+      className={TEXT_LINK_CLASS}
     >
       {children}
     </button>

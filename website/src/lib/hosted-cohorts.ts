@@ -12,8 +12,12 @@
  * renders without it rather than showing an error. The price beside them is
  * prerendered, so a provider outage costs the page nothing it sells.
  */
+import { FOUNDING_COHORTS_CLOSED } from "./hosted-pricing";
 
-/** Where both come from, in one request. Not deployed until checkout ships. */
+/**
+ * Where both come from, in one request: the site's Worker
+ * (`website/public/_worker.js`) forwards it to the account Worker.
+ */
 export const COHORT_ENDPOINT = "/api/hosted/cohorts";
 
 /** The most avatars the row draws; every other founder joins the `+N`. */
@@ -80,7 +84,11 @@ export async function fetchCohort(signal?: AbortSignal): Promise<Cohort> {
     const body: unknown = await response.json();
     if (typeof body !== "object" || body === null) return { seatsLeft: null, founders: null };
     const fields = body as Record<string, unknown>;
-    return { seatsLeft: count(fields.seatsLeft) ?? null, founders: founders(fields.founders) };
+    // Seats are for the cohort whose price this build prerendered: after a
+    // cohort closes and before the next deploy, they would sit beside the
+    // old price, so the counter waits for the deploy instead.
+    const seatsLeft = fields.cohort === FOUNDING_COHORTS_CLOSED ? (count(fields.seatsLeft) ?? null) : null;
+    return { seatsLeft, founders: founders(fields.founders) };
   } catch {
     return { seatsLeft: null, founders: null };
   }
