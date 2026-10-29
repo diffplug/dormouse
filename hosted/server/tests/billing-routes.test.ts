@@ -541,7 +541,7 @@ test("the webhook verifies the raw body before any write, caps it, and refuses a
   expect(await f.sql(`SELECT id FROM pgstencil_billing.events`)).toEqual([{ id: event.id }]);
   // A failure before the commit answers 503, which Stripe retries, and the event stays unprocessed.
   const { body: disputed, signature: disputeSignature } = f.dev.signed(
-    f.event("charge.dispute.created", { id: "du_unknown", object: "dispute" }),
+    f.event("charge.dispute.created", { id: "du_unknown", object: "dispute", charge: "ch_for_du_unknown" }),
   );
   expect((await f.webhook(disputed, disputeSignature)).status).toBe(503);
   expect(await f.sql(`SELECT count(*)::int AS n FROM pgstencil_billing.events WHERE processed_at IS NOT NULL`)).toEqual([{ n: 1 }]);
@@ -596,6 +596,7 @@ test("an open dispute suspends without ending, closing it in the account's favor
     return f.event(status === "needs_response" ? "charge.dispute.created" : "charge.dispute.closed", {
       id,
       object: "dispute",
+      charge: `ch_for_${id}`,
       status,
     });
   };
@@ -631,7 +632,7 @@ test("the cron rereads open disputes from Stripe, so a missed close event restor
   f.paidInvoices.set("pi_du_lost", lostSubscription.id);
   const open = (id: string, customer: string) => {
     f.disputes.set(id, { status: "needs_response", customer, paymentIntent: `pi_${id}` });
-    return f.send(f.event("charge.dispute.created", { id, object: "dispute" }));
+    return f.send(f.event("charge.dispute.created", { id, object: "dispute", charge: `ch_for_${id}` }));
   };
   expect((await open("du_won", wonSession.customer as string)).status).toBe(200);
   expect((await open("du_lost", lostSession.customer as string)).status).toBe(200);
@@ -664,7 +665,7 @@ test("a dispute on a closed account still records, and a lost one still runs its
   await f.deliver();
   const dispute = (status: string) => {
     f.disputes.set("du_closed", { status, customer: session.customer as string, paymentIntent: "pi_du_closed" });
-    return f.send(f.event("charge.dispute.updated", { id: "du_closed", object: "dispute", status }));
+    return f.send(f.event("charge.dispute.updated", { id: "du_closed", object: "dispute", charge: "ch_for_du_closed", status }));
   };
   expect((await dispute("needs_response")).status).toBe(200);
   expect(await f.sql(`SELECT "userId" FROM dormouse_billing_disputes`)).toEqual([{ userId: member.id }]);
@@ -1179,7 +1180,7 @@ test("a dispute's suspension and restoration are each emailed once to the billin
   const billingEmail = f.dev.customers.get(session.customer as string)!.email;
   const dispute = (id: string, status: string) => {
     f.disputes.set(id, { status, customer: session.customer as string, paymentIntent: `pi_${id}` });
-    return f.event("charge.dispute.updated", { id, object: "dispute", status });
+    return f.event("charge.dispute.updated", { id, object: "dispute", charge: `ch_for_${id}`, status });
   };
   const subjects = () => f.email.all().map((mail) => [mail.to[0], mail.subject]);
 
@@ -1209,9 +1210,9 @@ test("a dispute's suspension and restoration are each emailed once to the billin
   const unsent = () => f.sql(`SELECT kind FROM dormouse_billing_notices WHERE "sentAt" IS NULL ORDER BY kind`);
   f.disputes.set("du_back", { status: "needs_response", customer: otherSession.customer as string, paymentIntent: "pi_du_back" });
   f.mailing.failures = 2;
-  expect((await f.send(f.event("charge.dispute.created", { id: "du_back", object: "dispute" }))).status).toBe(200);
+  expect((await f.send(f.event("charge.dispute.created", { id: "du_back", object: "dispute", charge: "ch_for_du_back" }))).status).toBe(200);
   f.disputes.set("du_back", { status: "won", customer: otherSession.customer as string, paymentIntent: "pi_du_back" });
-  expect((await f.send(f.event("charge.dispute.closed", { id: "du_back", object: "dispute" }))).status).toBe(200);
+  expect((await f.send(f.event("charge.dispute.closed", { id: "du_back", object: "dispute", charge: "ch_for_du_back" }))).status).toBe(200);
   expect([f.mailing.failures, await unsent()]).toEqual([0, [{ kind: "dispute_restored" }, { kind: "dispute_suspended" }]]);
   f.time.advanceMilliseconds(10 * 60 * 1000);
   await resyncBilling(f.setup, f.database.url, origin, f.mail);
