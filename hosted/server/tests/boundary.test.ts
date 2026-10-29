@@ -33,6 +33,7 @@ import { cookieEntitled, openAuthRead } from "../account-gate";
 import { createAuthApp } from "@pgstencil/auth/better-auth";
 import { authPolicy } from "../policy";
 import { prelaunchAuth } from "../prelaunch";
+import { BILLING_WEBHOOK_PATH, CHECKOUT_CLOSED } from "../billing-routes";
 import { RECENT_LOGIN_REQUIRED, relayAccountRoutes } from "../relay-account";
 import type { RelayRoomRpc } from "../relay-room-contract";
 import { voiceApp } from "../voice-app";
@@ -74,6 +75,15 @@ const everything = {
   GITHUB_CLIENT_SECRET: "test-github-secret",
   RELAY_ENROLL_SECRET: "test-relay-enroll-secret",
   ...testVapidKeys(),
+};
+
+/** Billing's, which only the production account's mapper passes; never in {@link everything}, so billing stays closed. */
+const STRIPE = {
+  STRIPE_SECRET_KEY: "sk_test_x",
+  STRIPE_WEBHOOK_SECRET: "whsec_x",
+  STRIPE_PRICE_MONTHLY: "price_m",
+  STRIPE_PRICE_YEARLY: "price_y",
+  STRIPE_PRICES_FOUNDING: "price_f",
 };
 
 const IMMUTABLE = "public, max-age=31536000, immutable";
@@ -135,6 +145,15 @@ const ACCOUNT_RELAY: [string, string][] = [
   ["DELETE", "/api/relay/passkeys/AAAA"],
 ];
 
+/** Billing's routes, which only the account serves. */
+const ACCOUNT_BILLING: [string, string][] = [
+  ["GET", "/api/billing"],
+  ["POST", "/api/billing/checkout"],
+  ["POST", "/api/billing/confirm"],
+  ["POST", "/api/billing/portal"],
+  ["POST", BILLING_WEBHOOK_PATH],
+];
+
 /** A route each Worker serves, as method and path. */
 const SERVED: Record<Name, [string, string][]> = {
   account: [
@@ -143,6 +162,7 @@ const SERVED: Record<Name, [string, string][]> = {
     ["GET", "/api/voice"],
     ["DELETE", "/api/voice"],
     ...ACCOUNT_RELAY,
+    ...ACCOUNT_BILLING,
     ["GET", "/login"],
   ],
   relay: [
@@ -222,6 +242,7 @@ const ABSENT: Record<Name, [string, string][]> = {
     ["GET", "/api/voice"],
     ["DELETE", "/api/voice"],
     ...ACCOUNT_RELAY,
+    ...ACCOUNT_BILLING,
     ["POST", "/api/voice/speak"],
     ["DELETE", "/api/voice/token"],
     // The self-host installers' probe; neither a Burrow nor Pocket asks Hosted for it.
@@ -244,6 +265,7 @@ const ABSENT: Record<Name, [string, string][]> = {
     ["GET", "/login"],
     ...RELAY_API,
     ...ACCOUNT_RELAY,
+    ...ACCOUNT_BILLING,
     ["GET", WS_ROUTES.burrow],
     ["GET", WS_ROUTES.client],
   ],
@@ -258,6 +280,17 @@ test.for(NAMES)("%s: serves only its own routes", async (name) => {
       `${method} ${path}`,
     ).toBe(name === "account" ? ACCOUNT_POLICY : RUNS_NOTHING_POLICY);
   }
+  expect(outbound).toEqual([]);
+});
+
+test("without Stripe bindings the account's webhook is closed before any database or Stripe request", async () => {
+  const response = await workers.account.dispatchFetch(ORIGINS.account + BILLING_WEBHOOK_PATH, {
+    method: "POST",
+    headers: { "stripe-signature": "t=1,v1=00", "content-type": "application/json" },
+    body: "{}",
+  });
+  expect([response.status, await response.json()]).toEqual([503, { message: CHECKOUT_CLOSED }]);
+  expect(response.headers.get("content-security-policy")).toBe(ACCOUNT_POLICY);
   expect(outbound).toEqual([]);
 });
 
@@ -407,6 +440,7 @@ test("each bindings mapper passes only what its Worker uses", () => {
     RELAY_ENROLL_POLL_LIMIT: {} as RateLimit,
     RELAY_APPROVE_LIMIT: {} as RateLimit,
     ACCOUNT_ORIGIN: "https://account.example.test",
+    ...STRIPE,
   };
   const keys = (bindings: object) => Object.keys(bindings).sort();
   expect(keys(accountBindings(env))).toEqual(
@@ -422,6 +456,7 @@ test("each bindings mapper passes only what its Worker uses", () => {
       "POSTMARK_SERVER_TOKEN",
       "RELAY_APPROVE_LIMIT",
       "RELAY_ROOM",
+      ...Object.keys(STRIPE),
     ].sort(),
   );
   expect(accountPreviewBindings(env)).toEqual({
@@ -502,7 +537,8 @@ test("only the push send outgrows the request body bound, and only to its derive
   expect(MAX_PUSH_SEND_BODY_BYTES).toBeGreaterThan(MAX_REQUEST_BODY_BYTES);
 });
 
-test("neither the relay nor the voice bundle carries Better Auth", async () => {
+test("neither the relay nor the voice bundle carries Better Auth or billing", async () => {
+  const pattern = /better-auth|postmark|stripe|server\/billing/;
   for (const [entry, bundle] of [
     [ENTRIES.relay, bundles.relay],
     [ENTRIES.voice, bundles.voice],
@@ -510,13 +546,14 @@ test("neither the relay nor the voice bundle carries Better Auth", async () => {
   ] as const) {
     const inputs = Object.keys(bundle.metafile.inputs);
     expect(
-      inputs.filter((input) => /better-auth|postmark/.test(input)),
+      inputs.filter((input) => pattern.test(input)),
       entry,
     ).toEqual([]);
   }
-  // The pattern finds it where it is.
+  // The pattern finds each where it is.
   const account = Object.keys(bundles.account.metafile.inputs);
-  expect(account.some((input) => /better-auth/.test(input))).toBe(true);
+  for (const name of ["better-auth", "@pgstencil/stripe", "node_modules/stripe/", "server/billing.ts"])
+    expect(account.filter((input) => pattern.test(input) && input.includes(name)), name).not.toEqual([]);
 });
 
 test("the relay bundle reads no cookie and never asks auth", () => {

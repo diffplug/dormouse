@@ -4102,6 +4102,15 @@
       ]
     },
     {
+      "name": "@pgstencil/stripe",
+      "license": "MIT",
+      "author": "DiffPlug",
+      "homepage": "https://github.com/diffplug/pgstencil#readme",
+      "versions": [
+        "0.4.1"
+      ]
+    },
+    {
       "name": "@standard-schema/spec",
       "license": "MIT",
       "author": "Colin McDonnell",
@@ -4324,6 +4333,15 @@
       "homepage": "https://github.com/mcollina/split2",
       "versions": [
         "4.2.0"
+      ]
+    },
+    {
+      "name": "stripe",
+      "license": "MIT",
+      "author": "Stripe <support@stripe.com> (https://stripe.com/)",
+      "homepage": "https://github.com/stripe/stripe-node",
+      "versions": [
+        "22.6.2"
       ]
     },
     {

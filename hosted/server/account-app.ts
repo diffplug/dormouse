@@ -1,5 +1,7 @@
 import type { Context, ExecutionContext, Hono } from "hono";
 import { cookieAdmin, openAuthRead, ownPageRead } from "./account-gate";
+import { billingSetup, resyncBilling } from "./billing";
+import { billingRoutes, type BillingHost } from "./billing-routes";
 import type { AccountEnv } from "./bindings";
 import { accountRules } from "./headers";
 import { ADMIN_METRICS_PATH } from "./metric-labels";
@@ -13,7 +15,7 @@ import { workerApp } from "./worker-app";
 /**
  * The account Worker (`hosted.dormouse.sh`): auth, providers, readiness,
  * terms acceptance, Natural Voice on or off, the Relay's account routes, the
- * admin's metrics, and the frontend. The production and preview entries differ only in `fetchAuth`'s
+ * admin's metrics, the frontend, and billing. The production and preview entries differ only in `fetchAuth`'s
  * mail and in `bindings`.
  */
 export function accountApp(
@@ -45,15 +47,17 @@ export function accountApp(
         headers.delete("cookie");
         return fetchAuth(new Request(c.req.raw, { headers }), c.env, c.executionCtx);
       });
-      const host = (c: Context<{ Bindings: AccountEnv }>): RelayAccountHost => ({
+      const host = (c: Context<{ Bindings: AccountEnv }>): RelayAccountHost & BillingHost => ({
         databaseUrl: c.env.HYPERDRIVE.connectionString,
         auth: (request) => fetchAuth(request, c.env, c.executionCtx),
         approveLimit: c.env.RELAY_APPROVE_LIMIT,
         closeBurrow: (userId, burrowId) => relayRoom(c.env.RELAY_ROOM, userId).closeBurrow(burrowId),
+        setup: () => billingSetup(c.env),
       });
       termsRoutes(app, host);
       voiceAccountRoutes(app, host);
       relayAccountRoutes(app, host);
+      billingRoutes(app, host);
       app.get(ADMIN_METRICS_PATH, cookieAdmin(host), async (c) =>
         c.json(await readMetrics(c.env.HYPERDRIVE.connectionString)),
       );
@@ -61,5 +65,7 @@ export function accountApp(
     // Every desktop since v1.2.0 opens `/account` by a hard-coded path
     // (`ACCOUNT_PAGE_PATH`), which this SPA fallback answers.
     fallback: (app) => app.get("*", (c) => c.env.ASSETS.fetch(c.req.raw)),
+    scheduled: (_controller, env) =>
+      resyncBilling(billingSetup(env), env.HYPERDRIVE.connectionString, env.APP_ORIGIN),
   });
 }

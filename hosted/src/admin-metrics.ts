@@ -18,11 +18,17 @@ export interface EventSummary {
   /** The window's sum, today included. */
   window: number;
   today: number;
-  /** Every listed label, in the allowlist's order; empty for an unlabeled event. */
+  /**
+   * Every listed label, in the allowlist's order, or for a list longer than
+   * {@link EVERY_LABEL_MAX} only the counted ones; empty for an unlabeled event.
+   */
   labels: LabelSummary[];
   /** One sum per day of the window, oldest first, a day with no row as 0. */
   daily: { day: string; count: number }[];
 }
+
+/** The longest label list shown whole; a longer one (a checkout's `plan:ref`) shows only what was counted. */
+export const EVERY_LABEL_MAX = 8;
 
 /** `YYYY-MM-DD`, `back` UTC days before `today`. */
 function dayBefore(today: string, back: number): string {
@@ -46,11 +52,13 @@ export function summarize(body: AdminMetricsBody): EventSummary[] {
       today: sum(recent.filter((row) => row.day === body.today)),
       labels: listed.includes("")
         ? []
-        : listed.map((label) => ({
-            label,
-            total: sum(totals.filter((row) => row.label === label)),
-            window: sum(recent.filter((row) => row.label === label)),
-          })),
+        : listed
+            .map((label) => ({
+              label,
+              total: sum(totals.filter((row) => row.label === label)),
+              window: sum(recent.filter((row) => row.label === label)),
+            }))
+            .filter(({ total }) => listed.length <= EVERY_LABEL_MAX || total > 0),
       daily: days.map((day) => ({ day, count: sum(recent.filter((row) => row.day === day)) })),
     };
   });

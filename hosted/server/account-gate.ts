@@ -50,6 +50,8 @@ export interface AccountLogin {
    * recent login reads it, and it fails closed on a value it cannot read.
    */
   createdAt: unknown;
+  /** The account's verified email, or null for a provider-only account without one. */
+  email: string | null;
 }
 
 /**
@@ -109,7 +111,7 @@ function cookieGate(
     );
     if (!response.ok) throw new Error("Login lookup failed");
     const session = (await response.json()) as {
-      user?: { id: string };
+      user?: { id: string; email?: unknown; emailVerified?: unknown };
       session?: { createdAt?: unknown };
     } | null;
     if (!session?.user) return c.json({ message: "Sign in first." }, 401);
@@ -117,6 +119,8 @@ function cookieGate(
     c.set("login", {
       userId: session.user.id,
       createdAt: session.session?.createdAt,
+      email:
+        session.user.emailVerified === true && typeof session.user.email === "string" ? session.user.email : null,
     });
     await next();
   };

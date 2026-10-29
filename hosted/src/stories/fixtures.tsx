@@ -3,6 +3,8 @@ import { HostedPage, type HostedPageProps } from "../HostedPage";
 import { HostedFrame } from "./HostedFrame";
 import { settledFrame } from "./canvas";
 import { providers, type Computer, type Passkey, type Session } from "../api";
+import type { BillingSummary } from "../billing";
+import { TERMS_VERSION } from "../../server/policy-constants";
 
 export const SESSION: Session = {
   user: { id: "account-studio", name: "Alex", email: "alex@example.com" },
@@ -19,6 +21,17 @@ export const PASSKEYS: Passkey[] = [
 ];
 export const ENROLLMENT = { code: "7KQM-X4TD", purpose: "remote" as const };
 export const ACCOUNT = { session: SESSION, computers: COMPUTERS, passkeys: PASSKEYS };
+/** Billing open, no plan held, the first founding cohort on sale. */
+export const NO_PLAN: BillingSummary = {
+  plan: null, price: null, active: false, until: null, renews: false, entitled: false, suspended: false,
+  founding: { cohort: 0, seatsLeft: 63 }, founder: { offered: false, name: null }, consent: null,
+};
+/** A founding plan bought today, renewing next year. */
+export const FOUNDING: BillingSummary = {
+  ...NO_PLAN, plan: "founding", price: 50, active: true, until: "2027-10-21T12:00:00Z", renews: true, entitled: true,
+  founder: { offered: true, name: null },
+  consent: { termsVersion: TERMS_VERSION, consentedAt: "2026-10-21T12:00:00Z" },
+};
 export type HostedStoryArgs = Partial<HostedPageProps> & { phone?: boolean; light?: boolean };
 const idle = async () => {};
 const nothing = () => {};
