@@ -86,14 +86,17 @@ export interface OpenCohort {
 
 /**
  * The open cohort, from purchases per ladder step: `gross` counts every
- * completed purchase, refunded or not, and `net` leaves refunds out. A cohort
- * closes when its gross count fills, so a refund after it closed never
- * reopens the cheaper step; seats left in the open one come from its net
- * count, so a refund there returns the seat.
+ * completed purchase, refunded or not, and `net` leaves refunds out. The open
+ * cohort is the last step anyone bought at while its net count is short of
+ * full, else the step after it, so a refund there returns the seat; an
+ * earlier step closed for good once a purchase landed after it, so a refund
+ * there never reopens the cheaper price.
  */
 export function openCohort(gross: readonly number[], net: readonly number[]): OpenCohort | null {
-  const cohort = gross.findIndex((sold) => sold < FOUNDING_COHORT_SIZE);
-  if (cohort === -1) return null;
+  let bought = gross.length - 1;
+  while (bought >= 0 && !gross[bought]) bought--;
+  const cohort = bought !== -1 && (net[bought] ?? 0) >= FOUNDING_COHORT_SIZE ? bought + 1 : Math.max(bought, 0);
+  if (cohort >= FOUNDING_LADDER.length) return null;
   return { cohort, seatsLeft: Math.max(0, FOUNDING_COHORT_SIZE - (net[cohort] ?? 0)) };
 }
 
