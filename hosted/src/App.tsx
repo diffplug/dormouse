@@ -24,7 +24,8 @@ import {
   PriceChangedError,
   removeComputer,
   removePasskey,
-  setFounder,
+  joinFounders,
+  leaveFounders,
   social,
   startCheckout,
   turnOffHostedVoice,
@@ -459,10 +460,16 @@ export function App({
     });
   const manageBilling = () => act("portal", openPortal);
   const saveFounder = (shown: boolean, name: string) =>
-    act("founder", async () => {
-      setBilling(await setFounder(shown, name));
-      setNotice({ text: shown ? `You are in the founders row as ${name}.` : "You left the founders row." });
-    });
+    shown
+      ? act("founder", async () => {
+          setBilling(await joinFounders(name));
+          setNotice({ text: `You are in the founders row as ${name}.` });
+        })
+      : // Leaving answers no plan: the page reads it again.
+        mutate("founder", async () => {
+          await leaveFounders();
+          setNotice({ text: "You left the founders row." });
+        });
   const withdraw = (subscription: string) =>
     act("withdraw", async () => {
       setBilling(await withdrawRequest(subscription));

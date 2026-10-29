@@ -84,7 +84,7 @@ The account Worker bills through `@pgstencil/stripe` (`docs/specs/pricing.md` ->
 | `POST /api/billing/checkout` | login cookie, exact `Origin`, JSON `{ plan, ref?, terms, autoRenew, price }` | 200 `{ url }` of Stripe Checkout |
 | `POST /api/billing/confirm` | login cookie, exact `Origin`, JSON `{ checkout }` | 200, the `GET` body |
 | `POST /api/billing/portal` | login cookie, exact `Origin` | 200 `{ url }` of the customer portal |
-| `PUT /api/billing/founder` | login cookie, exact `Origin`, JSON `{ shown, name? }` | 200, the `GET` body |
+| `PUT /api/billing/founder` | login cookie, exact `Origin`, JSON `{ shown, name? }` | 200, the `GET` body; leaving, 204 |
 | `POST /api/billing/withdraw` | login cookie, exact `Origin`, JSON `{ subscription }` | 200, the `GET` body |
 | `POST /api/billing/webhook` | `Stripe-Signature` over the raw body | 200 once `webhook()` committed |
 | `GET /api/hosted/cohorts` | none | 200 `{ cohort?, seatsLeft?, founders: { total, shown } }` |
@@ -92,7 +92,7 @@ The account Worker bills through `@pgstencil/stripe` (`docs/specs/pricing.md` ->
 
 Errors are JSON `{ message }`. The cookie routes need no entitlement, answer 401 without a login, and cap a body at 4 KiB.
 
-- **Must keep billing closed without all five bindings**: the secrets `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET`, and the vars `STRIPE_PRICE_MONTHLY`, `STRIPE_PRICE_YEARLY`, and `STRIPE_PRICES_FOUNDING` (cohort order); closed, every route past the login gate answers 503 `CHECKOUT_CLOSED` and the resync reads nothing. **Must refuse a founding list whose length differs from `FOUNDING_LADDER`**, or a malformed or repeated Price. Live mode follows the key's prefix.
+- **Must keep billing closed without all five bindings**: the secrets `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET`, and the vars `STRIPE_PRICE_MONTHLY`, `STRIPE_PRICE_YEARLY`, and `STRIPE_PRICES_FOUNDING` (cohort order); closed, every route past the login gate but leaving the founders row answers 503 `CHECKOUT_CLOSED` and the resync reads nothing. **Must refuse a founding list whose length differs from `FOUNDING_LADDER`**, or a malformed or repeated Price. Live mode follows the key's prefix.
 - **Never offer a trial or Managed Payments; must enable Stripe Tax on every Checkout.**
 - **Never take a Price, customer, owner, quantity, or return URL from a request**: checkout takes a plan name and a `ref`, normalized as `checkoutRef` does; the owner is the login, its email only once verified (else Checkout asks), and Stripe returns to `/billing`. A checkout open for another plan is expired first; a held subscription refuses another with 409.
 - **Must start a checkout only after agreement to `TERMS_VERSION` and to automatic renewal at the `price` the page showed, recorded in `dormouse_checkout_consents` before its URL is answered**; another version answers 409 `TERMS_CHANGED`, and a checkout whose Price `publishedPrice` does not read as `price` is expired and answers 409 `PRICE_CHANGED`. `GET` shows the latest while a subscription is held.
@@ -100,10 +100,10 @@ Errors are JSON `{ message }`. The cookie routes need no entitlement, answer 401
 - **Must verify the webhook's signature over the raw body before any write** and answer 2xx only once `webhook()` has committed, any other failure 503, which Stripe retries.
 - **Must end at once the subscription a fully refunded charge or a lost dispute's charge paid for**, found through its invoice, while it is the owner's current one: commented `ENDED_FOR_REFUND`, after the commit and on every delivery until ended. A partial refund ends nothing, nor does a charge for an earlier subscription or none, which is logged for the operator.
 - **Must offer the online withdrawal only from the held subscription while `withdrawalOffer` holds**, once per subscription; else withdraw answers 409 `WITHDRAWAL_CLOSED`. A recorded withdrawal (`dormouse_withdrawals`) is then acknowledged by email to the Stripe customer's address and settled: its subscription ended at once (`ENDED_FOR_WITHDRAWAL`), every paid invoice payment refunded in full. Each step is stamped once done and safe to repeat; the cron retries a failed one for 30 days. Checks: `docs/specs/security-hosted.md` -> "Account boundary".
-- **Must suspend, never end, on an open dispute**, by its current status read from Stripe, not the event (`dormouse_billing_disputes`); closing in the account's favor restores it.
-- **Must offer founding at the first ladder step whose completed purchases, refunds included, are short of `FOUNDING_COHORT_SIZE`**; its seats left exclude purchases ended within `REFUND_DAYS`. Past the last step, founding checkout answers 409.
+- **Must suspend, never end, on an open dispute**, by its current status read from Stripe, not the event (`dormouse_billing_disputes`, which outlives the account); closing in the account's favor restores it.
+- **Must offer founding at the last ladder step bought at while its purchases net of those ended within `REFUND_DAYS` are short of `FOUNDING_COHORT_SIZE`, else the next**, counting seats left the same way; an earlier step never reopens. Past the last step, founding checkout answers 409.
 - **Must answer `/api/hosted/*` without resolving a login**, each answer reused for `COHORT_CACHE_MS` per isolate; `total` counts founding purchases net of refunds. The site's Worker forwards it from `dormouse.sh` to this origin, so the 421 gate needs no exception. What it answers and fetches: `docs/specs/security-hosted.md` -> "Account boundary".
-- **Must resync, every 10 minutes from the account's Cron Trigger, a bounded random batch of owners whose `active` or `trialing` row no longer grants access**, so a missed renewal webhook lapses a member only until a run picks them, finish a bounded batch of unfinished withdrawals, and run the notices ("Billing notices"); a failure fails the invocation after every one was tried.
+- **Must resync, every 10 minutes from the account's Cron Trigger, a bounded random batch of owners whose `active` or `trialing` row no longer grants access**, so a missed renewal webhook lapses a member only until a run picks them, finish a bounded batch of unfinished withdrawals and closure refunds, reread the least recently checked open disputes from Stripe as their webhook would, and run the notices ("Billing notices"); a failure fails the invocation after every one was tried.
 - **Must grant the account's role the `pgstencil_billing` schema from `runtime-roles.sql`**, additively: the package's migration creates it.
 
 Source of truth: `billingSetup`, `withBilling`, and `resyncBilling` in `hosted/server/billing.ts`; `billingRoutes` and `disputeAction` in `hosted/server/billing-routes.ts`; `withdrawalOffer` and `completeWithdrawal` in `hosted/server/withdrawal.ts`; `cohortRoutes` in `hosted/server/cohort-routes.ts`; `forwardHosted` in `website/public/_worker.js`. Pinned by `hosted/server/tests/billing.test.ts` and `hosted/server/tests/billing-routes.test.ts`, on StripeDev.
@@ -137,6 +137,7 @@ Errors are JSON `{ message }`; it needs no entitlement and works with billing cl
 
 - **Must refuse a login older than `LOGIN_FRESH_AGE_MS`** with 403 `CLOSE_RECENT_LOGIN`, and, billing closed, an account with a current subscription row with 503 `CLOSE_UNAVAILABLE`.
 - **Must expire an open checkout, then cancel every current subscription in Stripe (`ENDED_FOR_CLOSURE`), before one statement records the closure (`dormouse_account_closures`) and deletes the `"user"` row**; rows without a foreign key stay. Its Burrows' sockets then close as a removal's do ("Relay sockets"). Checks: `docs/specs/security-hosted.md` -> "Account boundary".
+- **Must then refund what closing owes** (`docs/specs/pricing.md` -> "Checkout and entitlement"): a first payment while `purchaseStanding` counts the end a refund, a yearly or founding renewal paid within `REFUND_DAYS` of it. The closure is stamped settled once done; the cron retries for 30 days.
 
 Source of truth: `closureRoutes` in `hosted/server/closure.ts`; `CloseAccount` in `hosted/src/Closure.tsx`.
 
@@ -339,13 +340,13 @@ Source of truth: `hosted/server/metric-labels.ts`; `recordMetric` and `authMetri
 
 ## Development and release
 
-**Must run local development with `dor tool hosted` inside Dormouse.** Its loopback `http://localhost:<port>` origin serves Vite and Node auth on a disposable development database, with the account's Natural Voice, Relay, and billing routes but never the voice origin's; billing runs on StripeDev, which takes no card. Host, Origin, and Fetch Metadata checks guard the local captured-email inbox; no production entry imports an inbox or test-control handler. **It also runs the relay Worker on that database, with this origin as `ACCOUNT_ORIGIN`** (`docs/specs/one-time.md` -> "Dev loop").
+**Must run local development with `dor tool hosted` inside Dormouse.** Its loopback `http://localhost:<port>` origin serves Vite and Node auth on a disposable development database, with the Worker's account routes (`accountRoutes`) and cron, but never the voice origin's; billing runs on StripeDev, which takes no card. Host, Origin, and Fetch Metadata checks guard the local captured-email inbox; no production entry imports an inbox or test-control handler. **It also runs the relay Worker on that database, with this origin as `ACCOUNT_ORIGIN`** (`docs/specs/one-time.md` -> "Dev loop").
 
 **Must verify the three production Worker bundles and run the consumer's integration suite before release.** Only test entries inject deterministic Better Auth. Simulated callbacks do not certify provider registrations; production acceptance requires real browser login with each enabled provider and email delivery.
 
 **Must keep production, test, and preview databases and credentials separate.** The development and preview entries are email-only. Production configuration and operator steps live in `hosted/README.md`.
 
-Source of truth: `allowedDevRequest` in `hosted/server/dev-host-guard.ts`; `hosted/server/dev.ts`; `build` in `hosted/package.json`. Pinned by `hosted/server/tests/boundary.test.ts`.
+Source of truth: `allowedDevRequest` in `hosted/server/dev-host-guard.ts`; `hosted/server/dev.ts`; `accountRoutes` and `accountCron` in `hosted/server/account-routes.ts`; `build` in `hosted/package.json`. Pinned by `hosted/server/tests/boundary.test.ts`.
 
 ## PR previews
 

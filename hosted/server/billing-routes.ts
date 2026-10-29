@@ -136,7 +136,7 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
     // A contract withdrawn from once is never offered again.
     const offer =
       held && account?.withdrawn?.subscription !== status.subscription!.id
-        ? await withdrawalOffer(billing, userId, status.subscription)
+        ? await withdrawalOffer(billing, userId, status.subscription, { cached: true })
         : null;
     return c.json({
       plan: held ? status.plan : null,
@@ -252,7 +252,8 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
   });
 
   // The founders row: shown under `name` only while a founding subscription
-  // grants access; leaving it is always allowed.
+  // grants access. Leaving it needs nothing from billing, so it works while
+  // billing is closed or failing, and answers 204.
   app.put("/api/billing/founder", limit(JSON_BODY_BYTES), gate, async (c) => {
     const { userId } = c.get("login");
     const body = await readJson<{ shown?: unknown; name?: unknown }>(c);
@@ -260,19 +261,20 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
     const name = body?.name;
     if (typeof shown !== "boolean" || (shown && !isFounderName(name)))
       return c.json({ message: "Choose a name of 1 to 64 characters." }, 400);
+    if (!shown) {
+      await accountQuery(host(c), `DELETE FROM dormouse_founders WHERE "userId" = $1`, [userId]);
+      return c.body(null, 204);
+    }
     return billed(c, async (billing, setup, changes) => {
-      if (!shown) await accountQuery(host(c), `DELETE FROM dormouse_founders WHERE "userId" = $1`, [userId]);
-      else {
-        const joined = await accountQuery(
-          host(c),
-          `INSERT INTO dormouse_founders ("userId", name)
-          SELECT $1, $2 WHERE ${subscribedSql("$1::text", "$3::text[]")}
-          ON CONFLICT ("userId") DO UPDATE SET name = EXCLUDED.name
-          RETURNING "userId"`,
-          [userId, name, setup.founding],
-        );
-        if (!joined.length) return c.json({ message: FOUNDERS_ONLY }, 409);
-      }
+      const joined = await accountQuery(
+        host(c),
+        `INSERT INTO dormouse_founders ("userId", name)
+        SELECT $1, $2 WHERE ${subscribedSql("$1::text", "$3::text[]")}
+        ON CONFLICT ("userId") DO UPDATE SET name = EXCLUDED.name
+        RETURNING "userId"`,
+        [userId, name, setup.founding],
+      );
+      if (!joined.length) return c.json({ message: FOUNDERS_ONLY }, 409);
       return summary(c, billing, setup, changes, userId);
     });
   });
@@ -417,6 +419,48 @@ async function recordDispute(
         [disputeId, now, action === "restore"],
       ),
     );
+}
+
+/** How many open disputes one cron run reads from Stripe at most. */
+const DISPUTE_RESYNC_BATCH = 20;
+
+/**
+ * The cron's dispute pass, so a missed close event never suspends an account
+ * for good: reads the current status of up to {@link DISPUTE_RESYNC_BATCH}
+ * open disputes from Stripe, least recently checked first, and acts on each
+ * as its webhook would. A lost one ends its subscription before its row
+ * goes, so a failed end is retried; one closed either way records its
+ * restoration notice as the webhook does, which the notice pass then sends.
+ * Answers the failures.
+ */
+export async function resyncDisputes(billing: Billing<Plan>): Promise<unknown[]> {
+  const { rows } = await billing.db.executeQuery<{ disputeId: string; userId: string }>(
+    CompiledQuery.raw(
+      `SELECT "disputeId", "userId" FROM public.dormouse_billing_disputes
+      ORDER BY "checkedAt" NULLS FIRST, "openedAt" LIMIT $1`,
+      [DISPUTE_RESYNC_BATCH],
+    ),
+  );
+  const failed: unknown[] = [];
+  for (const { disputeId, userId } of rows)
+    try {
+      const current = await billing.stripe.disputes.retrieve(disputeId, { expand: ["charge"] });
+      const action = disputeAction(current.status);
+      if (action === "end") await endForRefund(billing, current.charge as Stripe.Charge);
+      await billing.db.transaction().execute(async (trx) => {
+        const now = billing.time.now();
+        await trx.executeQuery(
+          CompiledQuery.raw(`UPDATE public.dormouse_billing_disputes SET "checkedAt" = $2 WHERE "disputeId" = $1`, [
+            disputeId,
+            now,
+          ]),
+        );
+        if (action !== "suspend") await recordDispute(trx, disputeId, userId, action, now);
+      });
+    } catch (error) {
+      failed.push(error);
+    }
+  return failed;
 }
 
 /**

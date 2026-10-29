@@ -1,6 +1,6 @@
 // Rules: docs/specs/hosted.md -> "Billing"; docs/specs/pricing.md ->
 // "Checkout and entitlement".
-import type { Billing } from "@pgstencil/stripe";
+import type { Billing, Stripe } from "@pgstencil/stripe";
 import { escape } from "@pgstencil/auth/email";
 import { CompiledQuery } from "kysely";
 import type { EmailMessage, EmailSender } from "pgstencil";
@@ -72,18 +72,37 @@ export interface WithdrawalRow {
   settledAt: Date | null;
 }
 
-/** The Stripe customer's billing email and address country, or null when Stripe cannot say. */
-export async function billingContact(billing: Billing<Plan>, ownerId: string) {
+/** How long the billing page reuses a customer's contact Stripe answered, per isolate and Stripe client. */
+const CONTACT_CACHE_MS = 10 * 60 * 1000;
+
+type Contact = { email: string | null; country: string | null } | null;
+const contacts = new WeakMap<Stripe, Map<string, { at: number; contact: Contact }>>();
+
+/**
+ * The Stripe customer's billing email and address country, or null when
+ * Stripe cannot say. `cached` reuses an answer Stripe gave within
+ * {@link CONTACT_CACHE_MS}, for the billing page's reads; what sends mail or
+ * refuses a withdrawal reads Stripe fresh.
+ */
+export async function billingContact(billing: Billing<Plan>, ownerId: string, { cached = false } = {}): Promise<Contact> {
   const account = await billing.db
     .selectFrom("accounts")
     .select("customer_id")
     .where("owner_id", "=", ownerId)
     .executeTakeFirst();
   if (!account?.customer_id) return null;
+  const now = billing.time.now().getTime();
+  let known = contacts.get(billing.stripe);
+  if (!known) contacts.set(billing.stripe, (known = new Map()));
+  const hit = known.get(account.customer_id);
+  if (cached && hit && now - hit.at < CONTACT_CACHE_MS) return hit.contact;
   try {
     const customer = await billing.stripe.customers.retrieve(account.customer_id);
-    if (customer.deleted) return null;
-    return { email: customer.email ?? null, country: customer.address?.country?.toUpperCase() ?? null };
+    const contact = customer.deleted
+      ? null
+      : { email: customer.email ?? null, country: customer.address?.country?.toUpperCase() ?? null };
+    known.set(account.customer_id, { at: now, contact });
+    return contact;
   } catch (error) {
     console.warn(`Reading Stripe customer ${account.customer_id} failed`, error);
     return null;
@@ -94,18 +113,20 @@ export async function billingContact(billing: Billing<Plan>, ownerId: string) {
  * The online withdrawal from `subscription`, or null: offered while it is
  * current, within {@link WITHDRAWAL_OPEN_DAYS} of its start, and its billing
  * country is in {@link WITHDRAWAL_COUNTRIES} or unknown, a Stripe that cannot
- * say included. Whether it was withdrawn already is the caller's.
+ * say included; `cached` as {@link billingContact} takes it. Whether it was
+ * withdrawn already is the caller's.
  */
 export async function withdrawalOffer(
   billing: Billing<Plan>,
   ownerId: string,
   subscription: Held | null,
+  { cached = false } = {},
 ): Promise<WithdrawalOffer | null> {
   if (!subscription?.started_at || !CURRENT_STATUSES.includes(subscription.status)) return null;
   const startedAt = new Date(subscription.started_at);
   const until = new Date(startedAt.getTime() + WITHDRAWAL_OPEN_DAYS * DAY_MS);
   if (billing.time.now() >= until) return null;
-  const contact = await billingContact(billing, ownerId);
+  const contact = await billingContact(billing, ownerId, { cached });
   if (contact?.country && !WITHDRAWAL_COUNTRIES.has(contact.country)) return null;
   return {
     subscription: subscription.id,
@@ -192,17 +213,47 @@ export function withdrawalAcknowledgement(to: string, row: WithdrawalRow): Email
   };
 }
 
-/** Refunds what is left of PaymentIntent `intent` for withdrawal `id`, once however often it is asked. */
-async function refundInFull(billing: Billing<Plan>, id: string, intent: string) {
+/** What a refund is for, named in its metadata and its idempotency key: a withdrawal by its id, a closure by its subscription's. */
+export interface RefundFor {
+  kind: "withdrawal" | "closure";
+  id: string;
+}
+
+/** Refunds what is left of PaymentIntent `intent` for `refund`, once however often it is asked. */
+async function refundInFull(billing: Billing<Plan>, refund: RefundFor, intent: string) {
   try {
     await billing.stripe.refunds.create(
-      { payment_intent: intent, reason: "requested_by_customer", metadata: { dormouse_withdrawal: id } },
-      { idempotencyKey: `dormouse-withdrawal-${id}-${intent}` },
+      { payment_intent: intent, reason: "requested_by_customer", metadata: { [`dormouse_${refund.kind}`]: refund.id } },
+      { idempotencyKey: `dormouse-${refund.kind}-${refund.id}-${intent}` },
     );
   } catch (error) {
     // Refunded in full already, by an earlier attempt or by hand.
     if ((error as { code?: unknown }).code === "charge_already_refunded") return;
     throw error;
+  }
+}
+
+/**
+ * Refunds in full, for `refund`, every payment of each paid invoice of
+ * subscription `subscriptionId` that `covers` accepts: no use deduction, tax
+ * included. Safe to repeat.
+ */
+export async function refundPaidInvoices(
+  billing: Billing<Plan>,
+  subscriptionId: string,
+  refund: RefundFor,
+  covers: (invoice: Stripe.Invoice) => boolean = () => true,
+) {
+  const label = `${refund.kind === "withdrawal" ? "Withdrawal" : "Closure"} ${refund.id}`;
+  const invoices = await billing.stripe.invoices.list({ subscription: subscriptionId, status: "paid", limit: 100 });
+  if (invoices.has_more) throw new Error(`${label}: more paid invoices than one page`);
+  for (const invoice of invoices.data.filter(covers)) {
+    const payments = await billing.stripe.invoicePayments.list({ invoice: invoice.id!, status: "paid", limit: 100 });
+    for (const { payment } of payments.data) {
+      const intent = typeof payment.payment_intent === "string" ? payment.payment_intent : payment.payment_intent?.id;
+      if (intent) await refundInFull(billing, refund, intent);
+      else console.warn(`${label}: invoice ${invoice.id} has a payment Stripe cannot refund here; refund it by hand`);
+    }
   }
 }
 
@@ -226,16 +277,7 @@ async function settle(billing: Billing<Plan>, row: WithdrawalRow) {
     });
     await billing.reconcile(row.userId);
   }
-  const invoices = await billing.stripe.invoices.list({ subscription: row.subscriptionId, status: "paid", limit: 100 });
-  if (invoices.has_more) throw new Error(`Withdrawal ${row.id}: more paid invoices than one page`);
-  for (const invoice of invoices.data) {
-    const payments = await billing.stripe.invoicePayments.list({ invoice: invoice.id!, status: "paid", limit: 100 });
-    for (const { payment } of payments.data) {
-      const intent = typeof payment.payment_intent === "string" ? payment.payment_intent : payment.payment_intent?.id;
-      if (intent) await refundInFull(billing, row.id, intent);
-      else console.warn(`Withdrawal ${row.id}: invoice ${invoice.id} has a payment Stripe cannot refund here; refund it by hand`);
-    }
-  }
+  await refundPaidInvoices(billing, row.subscriptionId, { kind: "withdrawal", id: row.id });
 }
 
 /**

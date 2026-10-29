@@ -69,7 +69,7 @@ Source of truth: `Hosted` in `website/src/pages/Hosted.tsx`; `fetchCohort` in `w
 - **Must let a member cancel without account recovery**: in the customer portal, or by email to support when access is lost.
 - **Must email renewal notices, annual reminders, and price-change notices with cancellation instructions to the billing email, each recorded before it is sent, inside California's windows**; a price change applies only from a renewal its notice reached in time, never to a founding Price (`docs/specs/hosted.md` -> "Billing notices"; rationale).
 - **Must email the customer when a payment dispute suspends the subscription and when it is restored**, preserving refund and dispute rights.
-- **Closing an account cancels its subscription at once** (`docs/specs/hosted.md` -> "Account closure"). **Must say before closing** that access ends now and renewal stops, that the time left is not refunded, which refunds and withdrawal stay open through support, and that cancelling renewal keeps access instead.
+- **Closing an account cancels its subscription at once** (`docs/specs/hosted.md` -> "Account closure"). **Closing within 30 days of a subscription's first payment, or of a yearly renewal payment, refunds that payment in full.** **Must say before closing** that access ends now and renewal stops, which payment it refunds, that withdrawal stays open through support, and that cancelling renewal keeps access instead.
 
 Source of truth: `withBilling` and `openCohort` in `hosted/server/billing.ts`; `Checkout` in `hosted/src/Checkout.tsx`; `PlanConfirmation` in `hosted/src/Plan.tsx`; `WithdrawalFunction` in `hosted/src/Withdrawal.tsx`; `closureTerms` in `hosted/src/Closure.tsx`; `docs/specs/hosted.md` -> "Billing" owns the rest.
 

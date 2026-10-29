@@ -10,8 +10,9 @@ const day = (iso: string) => new Date(iso).toLocaleDateString();
 /**
  * What closing does to the account's plan, said before it is confirmed
  * (docs/specs/hosted.md -> "Account closure"): when access ends, that
- * renewal stops, which refunds stay open, and the alternative of cancelling
- * renewal. Null while the plan could not be read, so closing waits for it.
+ * renewal stops, which payment closing refunds, that withdrawal stays open,
+ * and the alternative of cancelling renewal. Null while the plan could not
+ * be read, so closing waits for it.
  */
 export function closureTerms(billing: BillingSummary | "closed" | null): ReactNode[] | null {
   if (billing === null) return null;
@@ -19,14 +20,11 @@ export function closureTerms(billing: BillingSummary | "closed" | null): ReactNo
   const name = planName(billing.plan);
   return [
     billing.until && billing.active
-      ? `Your ${name} plan ends now instead of on ${day(billing.until)}, and it never renews. The time left is not refunded.`
+      ? `Your ${name} plan ends now instead of on ${day(billing.until)}, and it never renews.`
       : `Your ${name} plan ends now, and it never renews.`,
-    <>
-      {billing.plan === "monthly"
-        ? "Within 30 days of your first payment"
-        : "Within 30 days of your first payment or of a yearly renewal"}
-      , you can still ask <SupportLink /> for a full refund after closing.
-    </>,
+    billing.plan === "monthly"
+      ? "If your first payment was in the last 30 days, closing refunds it in full, including tax. Otherwise the time left is not refunded."
+      : "If your first payment, or a yearly renewal, was in the last 30 days, closing refunds that payment in full, including tax. Otherwise the time left is not refunded.",
     ...(billing.withdrawal
       ? [
           <>

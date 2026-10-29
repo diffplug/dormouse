@@ -296,9 +296,14 @@ export async function closeAccount() {
   );
   if (!response.ok) throw await refused(response);
 }
-/** Joins the founders row under `name`, or leaves it. */
-export async function setFounder(shown: boolean, name: string): Promise<BillingSummary> {
-  const response = await billing("/founder", sendJson("PUT", shown ? { shown, name } : { shown }));
+/** Joins the founders row under `name`, answering the plan. */
+export async function joinFounders(name: string): Promise<BillingSummary> {
+  const response = await billing("/founder", sendJson("PUT", { shown: true, name }));
   if (!response.ok) throw await billingRefused(response);
   return (await response.json()) as BillingSummary;
+}
+/** Leaves the founders row; billing need not be open. */
+export async function leaveFounders() {
+  const response = await billing("/founder", sendJson("PUT", { shown: false }));
+  if (!response.ok) throw await billingRefused(response);
 }

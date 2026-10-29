@@ -1,6 +1,6 @@
 // Rules: docs/specs/hosted.md -> "Billing notices"; docs/specs/pricing.md ->
 // "Checkout and entitlement".
-import type { Billing } from "@pgstencil/stripe";
+import type { Billing, Stripe } from "@pgstencil/stripe";
 import { escape } from "@pgstencil/auth/email";
 import { CompiledQuery, type Kysely } from "kysely";
 import type { EmailMessage, EmailSender } from "pgstencil";
@@ -102,13 +102,20 @@ export function priceUsd(setup: BillingSetup, changes: readonly PriceChange[], p
 
 const intervalOf = (plan: Plan) => (plan === "monthly" ? "month" : "year");
 
+/** Prices a Stripe client confirmed, by id, amount, interval, and mode: Stripe never changes a Price's amount or interval. */
+const confirmedPrices = new WeakMap<Stripe, Set<string>>();
+
 /** Throws unless Stripe holds both of `change`'s Prices at its amounts, in USD, per its plan's interval. */
 async function verifyChange(billing: Billing<Plan>, change: PriceChange) {
   const interval = intervalOf(change.plan);
+  let confirmed = confirmedPrices.get(billing.stripe);
+  if (!confirmed) confirmedPrices.set(billing.stripe, (confirmed = new Set()));
   for (const [id, usd] of [
     [change.fromPriceId, change.fromUsd],
     [change.toPriceId, change.toUsd],
   ] as const) {
+    const key = `${id} ${usd} ${interval} ${billing.config.live}`;
+    if (confirmed.has(key)) continue;
     const price = await billing.stripe.prices.retrieve(id);
     if (
       price.currency !== "usd" ||
@@ -118,6 +125,7 @@ async function verifyChange(billing: Billing<Plan>, change: PriceChange) {
       price.livemode !== billing.config.live
     )
       throw new Error(`Price change ${change.id}: Stripe's ${id} is not ${usd} USD every ${interval}`);
+    confirmed.add(key);
   }
 }
 
@@ -219,7 +227,9 @@ export function noticeMessage(to: string, notice: Pending, plan: Plan | null, co
  * {@link PRICE_SEND_BY_DAYS} and its change is among `verified`; a suspension
  * while its dispute is open; a dispute notice for {@link DISPUTE_RETRY_DAYS}.
  * Each is leased before it is sent, so two passes never send one twice.
- * Answers the failures.
+ * Never-tried notices go first, then the least recently tried, so ones that
+ * keep failing never starve newer ones past their deadlines. Answers the
+ * failures.
  */
 export async function sendNotices(
   billing: Billing<Plan>,
@@ -248,7 +258,7 @@ export async function sendNotices(
           AND EXISTS (SELECT FROM public.dormouse_billing_disputes d WHERE d."disputeId" = n."disputeId")
         ELSE n."createdAt" > $4
       END
-    ORDER BY n."createdAt", n.id LIMIT $5`,
+    ORDER BY n."attemptedAt" NULLS FIRST, n."createdAt", n.id LIMIT $5`,
     [
       now,
       new Date(now.getTime() - LEASE_MS),

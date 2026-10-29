@@ -4,6 +4,8 @@ import { SecureRandom, SystemTime, type EmailSender, type Time } from "pgstencil
 import { connectDatabase, queryDatabase } from "pgstencil/postgres";
 import { FOUNDING_COHORT_SIZE, FOUNDING_LADDER, LIST_ANNUAL, LIST_MONTHLY } from "../../website/src/lib/hosted-pricing";
 import type { BillingEnv } from "./bindings";
+import { resyncDisputes } from "./billing-routes";
+import { retryClosures } from "./closure";
 import { grantsAccessSql } from "./entitlement";
 import { priceChanges, runNotices, usableChanges, type PriceChange } from "./notices";
 import { retryWithdrawals } from "./withdrawal";
@@ -85,14 +87,17 @@ export interface OpenCohort {
 
 /**
  * The open cohort, from purchases per ladder step: `gross` counts every
- * completed purchase, refunded or not, and `net` leaves refunds out. A cohort
- * closes when its gross count fills, so a refund after it closed never
- * reopens the cheaper step; seats left in the open one come from its net
- * count, so a refund there returns the seat.
+ * completed purchase, refunded or not, and `net` leaves refunds out. The open
+ * cohort is the last step anyone bought at while its net count is short of
+ * full, else the step after it, so a refund there returns the seat; an
+ * earlier step closed for good once a purchase landed after it, so a refund
+ * there never reopens the cheaper price.
  */
 export function openCohort(gross: readonly number[], net: readonly number[]): OpenCohort | null {
-  const cohort = gross.findIndex((sold) => sold < FOUNDING_COHORT_SIZE);
-  if (cohort === -1) return null;
+  let bought = gross.length - 1;
+  while (bought >= 0 && !gross[bought]) bought--;
+  const cohort = bought !== -1 && (net[bought] ?? 0) >= FOUNDING_COHORT_SIZE ? bought + 1 : Math.max(bought, 0);
+  if (cohort >= FOUNDING_LADDER.length) return null;
   return { cohort, seatsLeft: Math.max(0, FOUNDING_COHORT_SIZE - (net[cohort] ?? 0)) };
 }
 
@@ -115,6 +120,21 @@ export async function foundingPurchases(billing: Billing<Plan>, founding: readon
 export async function foundingCohort(billing: Billing<Plan>, founding: readonly string[]) {
   const { gross, net } = await foundingPurchases(billing, founding);
   return openCohort(gross, net);
+}
+
+/**
+ * One Stripe client per key for the isolate's life: it holds no I/O of its
+ * own, and the caches keyed by it (`withdrawalOffer`'s contact, a price
+ * change's checked Prices) then outlive a request.
+ */
+const clients = new Map<string, Stripe>();
+function stripeClient(secretKey: string): Stripe {
+  let client = clients.get(secretKey);
+  if (!client) {
+    client = new Stripe(secretKey, { httpClient: Stripe.createFetchHttpClient(), maxNetworkRetries: 1 });
+    clients.set(secretKey, client);
+  }
+  return client;
 }
 
 // The system clock: a test bundle's injected `Date` scopes it to the test's.
@@ -151,11 +171,7 @@ export async function withBilling<T>(
     });
     const billing = new Billing<Plan>(
       db,
-      setup.stripe ??
-        new Stripe(setup.secretKey, {
-          httpClient: Stripe.createFetchHttpClient(),
-          maxNetworkRetries: 1,
-        }),
+      setup.stripe ?? stripeClient(setup.secretKey),
       setup.time ?? time,
       random,
       {
@@ -193,10 +209,11 @@ const RESYNC_OWNERS = 20;
  * The account Worker's Cron Trigger: reconciles up to {@link RESYNC_OWNERS}
  * random owners whose `active` or `trialing` row no longer grants access, so
  * a missed renewal webhook costs a member one run at most, then finishes
- * any withdrawal whose acknowledgement or settlement failed, then runs the
- * subscription notices and the price changes they allow. Billing closed
- * does nothing. Every owner, withdrawal, and notice is tried; any failure
- * fails the invocation after.
+ * any withdrawal whose acknowledgement or settlement failed and any closure
+ * whose refunds failed, then rereads a batch of open disputes from Stripe,
+ * then runs the subscription notices and the price changes they allow.
+ * Billing closed does nothing. Every owner, withdrawal, closure, dispute,
+ * and notice is tried; any failure fails the invocation after.
  */
 export async function resyncBilling(
   setup: BillingSetup | null,
@@ -217,6 +234,8 @@ export async function resyncBilling(
     for (const { owner } of due)
       await billing.reconcile(owner).catch((error: unknown) => failed.push(error));
     failed.push(...(await retryWithdrawals(billing, mail)));
+    failed.push(...(await retryClosures(billing)));
+    failed.push(...(await resyncDisputes(billing)));
     failed.push(...(await runNotices(billing, setup, changes, mail)));
   });
   if (failed.length) throw new AggregateError(failed, `${failed.length} billing resyncs failed`);

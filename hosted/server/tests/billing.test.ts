@@ -55,21 +55,28 @@ test("billing is closed without every Stripe binding, and refuses a ladder the p
   expect(() => billingSetup({ ...env, STRIPE_PRICE_MONTHLY: "price_m'" })).toThrow(/distinct/);
 });
 
-test("a cohort closes on its gross purchases, so a refund after it closed never reopens it", () => {
+test("the open cohort is the last one bought at until its net count fills: a refund there returns a seat, one before never reopens", () => {
   const full = FOUNDING_COHORT_SIZE;
   const counts = (...head: number[]) => [...head, ...zeros().slice(head.length)];
   expect(openCohort(zeros(), zeros())).toEqual({ cohort: 0, seatsLeft: full });
   expect(openCohort(counts(3), counts(3))).toEqual({ cohort: 0, seatsLeft: full - 3 });
-  // A refund in the open cohort returns its seat.
+  // A refund in the open cohort returns its seat, and it closes on its net count.
   expect(openCohort(counts(3), counts(2))).toEqual({ cohort: 0, seatsLeft: full - 2 });
+  expect(openCohort(counts(full - 1), counts(full - 5))).toEqual({ cohort: 0, seatsLeft: 5 });
+  expect(openCohort(counts(full + 2), counts(full - 1))).toEqual({ cohort: 0, seatsLeft: 1 });
   expect(openCohort(counts(full), counts(full))).toEqual({ cohort: 1, seatsLeft: full });
-  // Refunded right after it closed: the price stays up.
-  expect(openCohort(counts(full), counts(full - 1))).toEqual({ cohort: 1, seatsLeft: full });
+  // Refunded once a purchase landed at the next step: the price stays up.
+  expect(openCohort(counts(full, 1), counts(full - 1, 1))).toEqual({ cohort: 1, seatsLeft: full - 1 });
   // Concurrent checkouts oversold it; the next still opens at a full count.
   expect(openCohort(counts(full + 4), counts(full + 4))).toEqual({ cohort: 1, seatsLeft: full });
-  expect(openCohort(counts(full, 2), counts(full - 1, 1))).toEqual({ cohort: 1, seatsLeft: full - 1 });
   const all = Array<number>(FOUNDING_LADDER.length).fill(full);
-  expect(openCohort(all, all.map((n) => n - 1))).toBeNull();
+  expect(openCohort(all, all)).toBeNull();
+  // A refund in the last cohort reopens its seat; one in an earlier cohort does not.
+  expect(openCohort(all, all.map((n, step) => (step === all.length - 1 ? n - 1 : n)))).toEqual({
+    cohort: all.length - 1,
+    seatsLeft: 1,
+  });
+  expect(openCohort(all, all.map((n, step) => (step === 0 ? n - 1 : n)))).toBeNull();
 });
 
 async function fixture() {
@@ -199,7 +206,7 @@ test("a subscription entitles its account on every Worker's role while it grants
   expect(await f.entitledOn(await f.user(ADMIN_EMAIL, false))).toEqual(everywhere(false));
 });
 
-test("founding checkout offers the open cohort's Price, holds it after a refund, and refuses once the ladder is full", async ({
+test("founding checkout offers the open cohort's Price, returns a refunded seat in it, holds it after one before, and refuses once full", async ({
   onTestFinished,
 }) => {
   const f = await fixture();
@@ -209,7 +216,7 @@ test("founding checkout offers the open cohort's Price, holds it after a refund,
     f.sql(
       `WITH owners AS (
         INSERT INTO pgstencil_billing.accounts (owner_id, email, created_at)
-        SELECT 'filler-' || $2::int || '-' || n, 'filler@example.test', now() FROM generate_series(1, $1::int) n
+        SELECT 'filler-' || $2::int || '-' || gen_random_uuid(), 'filler@example.test', now() FROM generate_series(1, $1::int)
         RETURNING owner_id)
       INSERT INTO pgstencil_billing.subscriptions
         (id, owner_id, price_id, status, started_at, period_end, cancel_at_period_end, updated_at)
@@ -223,14 +230,22 @@ test("founding checkout offers the open cohort's Price, holds it after a refund,
   const ada = await f.user();
   await f.buy(ada, "founding");
   expect(await f.entitledOn(ada)).toEqual(everywhere(true));
+  const refund = (owner: string) =>
+    f.sql(
+      `UPDATE pgstencil_billing.subscriptions SET status = 'canceled', ended_at = started_at + interval '1 day'
+      WHERE owner_id = $1`,
+      [owner],
+    );
+  // Ada is refunded in the open cohort: her seat returns, so it takes one more to close it.
+  await refund(ada);
   await fill(0, FOUNDING_COHORT_SIZE - 1);
+  expect(await offered()).toBe(LADDER[0]);
+  const bea = await f.user();
+  await f.buy(bea, "founding");
   expect(await offered()).toBe(LADDER[1]);
-  // Ada is refunded right after the cohort closed: her seat returns, and the price stays up.
-  await f.sql(
-    `UPDATE pgstencil_billing.subscriptions SET status = 'canceled', ended_at = started_at + interval '1 day'
-    WHERE owner_id = $1`,
-    [ada],
-  );
+  // Bea is refunded once a purchase landed at the next step: the price stays up.
+  await fill(1, 1);
+  await refund(bea);
   expect(await offered()).toBe(LADDER[1]);
 
   for (let step = 1; step < LADDER.length; step++) await fill(step, FOUNDING_COHORT_SIZE);
