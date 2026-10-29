@@ -22,6 +22,11 @@ const SELF_HOST_BUILD_CONFIG = {
 
 const [subcommand, ...rest] = process.argv.slice(2);
 
+// Carry pnpm's selected runtime across the native CLI/Cargo boundary instead
+// of resolving `node` again there. Keep explicit overrides for cross builds;
+// build.rs still verifies the binary against the root runtime pin.
+process.env.DORMOUSE_NODE_BINARY ??= process.env.NODE_BINARY ?? process.execPath;
+
 if (subcommand === 'dev') {
   const staged = spawn.sync('pnpm', ['run', 'stage:dev'], { stdio: 'inherit' });
   if (staged.error) {

@@ -32,6 +32,7 @@ async function fixture(t) {
       process.exit(0);
     }
     console.log('CLI_ARGS ' + JSON.stringify(args));
+    console.log('BUNDLED_NODE ' + process.env.DORMOUSE_NODE_BINARY);
     if (args[2] !== 'dev') process.exit(0);
     const config = JSON.parse(args[args.lastIndexOf('--config') + 1]);
     console.log('NATIVE_CONFIG ' + JSON.stringify(config));
@@ -55,7 +56,7 @@ async function fixture(t) {
     root,
     start(args = ['dev'], overrides = {}) {
       const child = spawn(process.execPath, ['--import', pathToFileURL(signals).href, path.join(standalone, 'scripts/tauri.mjs'), ...args], {
-        cwd: standalone, env: { ...cleanEnv(bin), ...overrides }, stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+        cwd: standalone, env: { ...cleanEnv(bin), NODE_BINARY: undefined, ...overrides }, stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
       });
       // Object.assign, not a spread: `runner`'s `output`/`closed` are getters
       // over live state, and spreading would snapshot them once.
@@ -113,6 +114,7 @@ test('parallel native dev runs isolate listeners, app data and logs, and stop on
   assert.match(one.config.identifier, /^sh\.dormouse\.standalone\.dev\.w[a-f0-9]{16}$/);
   assert.deepEqual(one.args.slice(-4), ['--', '--locked', '--', 'app-arg']);
   for (const run of [one, two]) {
+    assert.equal((await run.wait(/BUNDLED_NODE (.+)/))[1].trim(), process.execPath);
     assert.equal(run.config.build.beforeDevCommand, null);
     // Native mode, even though run `one` inherited the browser-dev host var.
     const js = await (await fetch(`${run.url}/app.js`)).text();
@@ -170,10 +172,23 @@ test('non-dev Tauri commands retain their arguments and production configuration
   const a = await fixture(t);
   const run = a.start(['build', '--debug']);
   assert.equal((await run.exited).code, 0);
+  assert.equal((await run.wait(/BUNDLED_NODE (.+)/))[1].trim(), process.execPath);
   assert.deepEqual(JSON.parse((await run.wait(/CLI_ARGS (.+)/))[1]), ['exec', 'tauri', 'build', '--debug']);
   // `beforeBuildCommand` stages a release build; staging here too would bake twice.
   assert.doesNotMatch(run.output, /STAGE/);
   assert.doesNotMatch(run.output, /app URL|NATIVE_CONFIG/);
+});
+
+test('Tauri preserves explicit runtime overrides and their precedence', async t => {
+  const a = await fixture(t);
+  for (const overrides of [
+    { NODE_BINARY: path.join(a.root, 'foreign node') },
+    { NODE_BINARY: path.join(a.root, 'fallback node'), DORMOUSE_NODE_BINARY: path.join(a.root, 'preferred node') },
+  ]) {
+    const run = a.start(['build'], overrides);
+    assert.equal((await run.exited).code, 0);
+    assert.equal((await run.wait(/BUNDLED_NODE (.+)/))[1].trim(), overrides.DORMOUSE_NODE_BINARY ?? overrides.NODE_BINARY);
+  }
 });
 
 test('a self-host build overlays no updater endpoint and no updater artifacts', async t => {
