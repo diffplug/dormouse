@@ -9,14 +9,18 @@ import { hostname } from 'node:os';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
- * The socket factory, direct path, and fetch the service handed on, kept so a
- * case can play a path that forgot its own policy check. The runtime and the
- * exchange are the real ones.
+ * The socket factory, direct path, fetch, and enrollment the service handed on,
+ * kept so a case can play a path that forgot its own policy check, or read the
+ * demand a runtime started under. The runtime and the exchange are the real
+ * ones. `staticCheck`, when set, is awaited before the start's Noise-static
+ * check, so a case can land a frame while a start is mid-flight.
  */
 const handedTransport = vi.hoisted(() => ({
   createWebSocket: null as ((url: string) => unknown) | null,
   directPeering: null as DirectPeering | null,
   fetch: null as typeof globalThis.fetch | null,
+  enrollment: null as BurrowEnrollment | null,
+  staticCheck: null as (() => Promise<void>) | null,
 }));
 
 vi.mock('../../remote/burrow/burrow-runtime', async (importOriginal) => {
@@ -26,9 +30,21 @@ vi.mock('../../remote/burrow/burrow-runtime', async (importOriginal) => {
       super(options);
       handedTransport.createWebSocket = options.createWebSocket ?? null;
       handedTransport.directPeering = options.directPeering ?? null;
+      handedTransport.enrollment = options.enrollment;
     }
   }
   return { ...real, BurrowRuntime };
+});
+
+vi.mock('remote-lib-common', async (importOriginal) => {
+  const real = await importOriginal<typeof import('remote-lib-common')>();
+  return {
+    ...real,
+    deriveNoiseStaticPublicKey: async (...args: Parameters<typeof real.deriveNoiseStaticPublicKey>) => {
+      await handedTransport.staticCheck?.();
+      return real.deriveNoiseStaticPublicKey(...args);
+    },
+  };
 });
 
 vi.mock('../../remote/burrow/enrollment', async (importOriginal) => {
@@ -454,6 +470,7 @@ function answererTo(remote: string, handed: Handed[]): BurrowDirectPeerFactory {
 }
 
 beforeEach(() => {
+  handedTransport.staticCheck = null;
   sockets = [];
   socketUrls = [];
   rendezvous = createTestRendezvous();
@@ -958,6 +975,28 @@ describe('start', () => {
     await service.start();
     sockets[0]!.open();
     sockets[0]!.receive({ t: 'policy', requireUserVerification: true });
+    await vi.waitFor(() => expect(store.enrollment).toEqual({ ...ENROLLMENT, requireUserVerification: true }));
+  });
+
+  it('starts raised when the UV demand lands during a restart already under way', async () => {
+    createService({ enrollment: ENROLLMENT });
+    await service.start();
+    sockets[0]!.open();
+    // A second start, its Noise-static check still running, the old runtime still live.
+    const check = Promise.withResolvers<void>();
+    let checking = false;
+    handedTransport.staticCheck = () => {
+      checking = true;
+      return check.promise;
+    };
+    const restart = service.start();
+    await vi.waitFor(() => expect(checking).toBe(true));
+    handedTransport.staticCheck = null;
+    sockets[0]!.receive({ t: 'policy', requireUserVerification: true });
+    check.resolve();
+    await restart;
+    expect(sockets).toHaveLength(2);
+    expect(handedTransport.enrollment).toEqual({ ...ENROLLMENT, requireUserVerification: true });
     await vi.waitFor(() => expect(store.enrollment).toEqual({ ...ENROLLMENT, requireUserVerification: true }));
   });
 
@@ -2484,6 +2523,27 @@ describe('network policy', () => {
     await setPolicy({ ...ANYWHERE_ON, allowed: ['10.0.0.0/8'] });
     expect(sockets).toHaveLength(3);
     expect((await command('status')).result).toMatchObject({ enrolled: true });
+  });
+
+  it('restarts raised when the UV demand lands while the policy change that restarts it saves', async () => {
+    createHostedService({ enrollment: ENROLLMENT, network: LOCAL_ON });
+    await service.start();
+    sockets[0]!.open();
+    const saved = Promise.withResolvers<void>();
+    let saving = false;
+    store.saveNetworkPolicy = async (policy) => {
+      saving = true;
+      await saved.promise;
+      store.network = policy;
+    };
+    const set = setPolicy({ ...LOCAL_ON, allowed: ['10.0.0.0/8'] });
+    await vi.waitFor(() => expect(saving).toBe(true));
+    // The old runtime hears the demand; the restart is already on the chain.
+    sockets[0]!.receive({ t: 'policy', requireUserVerification: true });
+    saved.resolve();
+    expect((await set).error).toBeUndefined();
+    expect(sockets).toHaveLength(2);
+    expect(handedTransport.enrollment!.requireUserVerification).toBe(true);
   });
 
   it('opens no one-time link under Local networks with no network allowed', async () => {
