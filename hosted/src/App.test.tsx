@@ -9,6 +9,7 @@ import type { Enrollment } from "./enrollment";
 import type { BillingSummary, CheckoutIntent } from "./billing";
 import { ENROLLMENT_POLL_INTERVAL_S, PRICE_CHANGED, TERMS_VERSION } from "../server/policy-constants";
 import { NOT_ENTITLED_ERROR } from "../../remote-lib-common/src/remote/wire.ts";
+import { WITHDRAWAL_STATEMENT } from "../../website/src/lib/hosted-withdrawal";
 
 vi.mock("./api", async (original) => ({
   ...await original<typeof import("./api")>(),
@@ -17,7 +18,7 @@ vi.mock("./api", async (original) => ({
   getApproval: vi.fn(), approveEnrollment: vi.fn(), acceptTerms: vi.fn(),
   post: vi.fn(), turnOffHostedVoice: vi.fn(),
   getBilling: vi.fn(), startCheckout: vi.fn(), confirmCheckout: vi.fn(),
-  openPortal: vi.fn(), setFounder: vi.fn(),
+  openPortal: vi.fn(), setFounder: vi.fn(), withdraw: vi.fn(), closeAccount: vi.fn(),
 }));
 
 const NOW = Date.UTC(2026, 9, 21, 12);
@@ -325,7 +326,7 @@ describe("approveEnrollment", () => {
 
 const NO_PLAN: BillingSummary = {
   plan: null, price: null, active: false, until: null, renews: false, entitled: false, suspended: false,
-  founding: { cohort: 0, seatsLeft: 42 }, founder: { offered: false, name: null }, consent: null,
+  founding: { cohort: 0, seatsLeft: 42 }, founder: { offered: false, name: null }, consent: null, withdrawal: null, withdrawn: null,
 };
 const FOUNDING: BillingSummary = {
   ...NO_PLAN, plan: "founding", price: 50, active: true, until: "2027-10-21T12:00:00Z", renews: true, entitled: true,
@@ -484,6 +485,76 @@ describe("the plan section", () => {
     await mount(ENROLLMENT);
     const plans = container.querySelector<HTMLAnchorElement>('a[href="/checkout?ref=hosted-no-plan"]')!;
     expect(plans.target).toBe("_blank");
+  });
+});
+
+describe("withdrawal and closure", () => {
+  const OFFER = {
+    subscription: "sub_contract1",
+    startedAt: "2026-10-21T12:00:00Z",
+    until: "2026-11-11T12:00:00Z",
+    email: "billing@example.com",
+  };
+  const WITHDRAWABLE: BillingSummary = { ...FOUNDING, withdrawal: OFFER };
+  const heading = () => container.querySelector("h1")?.textContent;
+  beforeEach(() => {
+    vi.mocked(api.getSession).mockResolvedValue(login());
+  });
+
+  it("shows the contract and statement before confirming, and keeps the acknowledgement after", async () => {
+    history.replaceState(null, "", "/billing");
+    vi.mocked(api.getBilling).mockResolvedValue(WITHDRAWABLE);
+    const withdrawn = {
+      reference: "wd-reference-1", subscription: OFFER.subscription, plan: "founding", startedAt: OFFER.startedAt,
+      submittedAt: "2026-10-22T09:30:00Z", acknowledged: true, settled: true,
+    };
+    vi.mocked(api.withdraw).mockResolvedValue({ ...NO_PLAN, withdrawn });
+    await mount(null);
+    expect(text()).toContain("Model withdrawal form");
+    expect(text()).not.toContain(OFFER.subscription);
+    await click("Withdraw from contract");
+    expect(api.withdraw).not.toHaveBeenCalled();
+    for (const shown of [OFFER.subscription, OFFER.email, WITHDRAWAL_STATEMENT]) expect(text()).toContain(shown);
+    await click("Keep my plan");
+    expect(text()).not.toContain(OFFER.subscription);
+    await click("Withdraw from contract");
+    await click("Confirm withdrawal");
+    expect(api.withdraw).toHaveBeenCalledWith(OFFER.subscription);
+    expect(text()).toContain("Withdrawal received");
+    expect(text()).toContain("wd-reference-1");
+    expect(text()).toContain("We emailed this acknowledgement");
+    expect(container.querySelector("#withdraw")).toBeNull();
+  });
+
+  it("explains what closing does to the plan before closing, then signs the page out", async () => {
+    vi.mocked(api.getBilling).mockResolvedValue(WITHDRAWABLE);
+    vi.mocked(api.closeAccount).mockResolvedValue(undefined);
+    await mount(null);
+    await click("Close account…");
+    expect(container.querySelector<HTMLDialogElement>("dialog[aria-labelledby=close-title]")!.open).toBe(true);
+    for (const said of ["Your Founding plan ends now instead of on", "Closing does not withdraw", "cancel renewal in Manage billing"])
+      expect(text()).toContain(said);
+    expect(api.closeAccount).not.toHaveBeenCalled();
+    vi.mocked(api.getSession).mockResolvedValue(null);
+    await click("Close account");
+    expect(api.closeAccount).toHaveBeenCalled();
+    expect(text()).toContain("Your account is closed.");
+    expect(heading()).toBe("Sign in to Dormouse Hosted");
+  });
+
+  it("needs a recent login, and a plan it could read, to close", async () => {
+    vi.mocked(api.getSession).mockResolvedValue(login(60 * 60 * 1000));
+    vi.mocked(api.getBilling).mockResolvedValue(WITHDRAWABLE);
+    await mount(null);
+    expect(button("Close account…").disabled).toBe(true);
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    vi.mocked(api.getSession).mockResolvedValue(login());
+    vi.mocked(api.getBilling).mockRejectedValue(new Error("Billing is temporarily unavailable. Try again."));
+    await mount(null);
+    await click("Close account…");
+    expect(button("Close account").disabled).toBe(true);
+    expect(text()).toContain("Your plan could not load");
   });
 });
 

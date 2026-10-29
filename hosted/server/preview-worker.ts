@@ -32,4 +32,5 @@ export default accountApp(
       return mail ? c.html(messagePage(mail)) : c.notFound();
     });
   },
+  (env) => postgresInbox(env.HYPERDRIVE.connectionString),
 );

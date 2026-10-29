@@ -7,10 +7,13 @@ import { CompiledQuery, type Kysely } from "kysely";
 import { readJson } from "remote-lib-common";
 import { accountQuery, cookieLogin, type AccountHost } from "./account-gate";
 import { REFUND_DAYS, foundingCohort, publishedPrice, withBilling, type BillingSetup, type Plan } from "./billing";
-import { CURRENT_STATUSES, entitledSql, subscribedSql } from "./entitlement";
+import { CURRENT_STATUSES, ENDED_STATUSES, entitledSql, subscribedSql } from "./entitlement";
 import { checkoutRef, type MetricEvent } from "./metric-labels";
 import { countMetricInTransaction, recordMetric } from "./metrics";
 import { BILLING_PLANS, CHECKOUT_CLOSED, PRICE_CHANGED, TERMS_VERSION, isFounderName } from "./policy-constants";
+import { completeWithdrawal, recordWithdrawal, recordedWithdrawal, withdrawalOffer } from "./withdrawal";
+import { SUPPORT_EMAIL } from "../../website/src/lib/hosted-withdrawal";
+import type { EmailSender } from "pgstencil";
 
 export { CHECKOUT_CLOSED, PRICE_CHANGED };
 
@@ -18,6 +21,8 @@ export { CHECKOUT_CLOSED, PRICE_CHANGED };
 export interface BillingHost extends AccountHost {
   /** The deployment's billing setup, null while billing is closed; throws when misconfigured. */
   setup(): BillingSetup | null;
+  /** The account's mail, which a withdrawal's acknowledgement goes out by. */
+  mail(): EmailSender;
 }
 
 /** Checkout's answer to a request that does not carry both agreements. */
@@ -28,6 +33,9 @@ export const TERMS_CHANGED = "The terms have changed. Reload this page to read t
 
 /** The founders row's answer to an account not subscribed on a founding Price. */
 export const FOUNDERS_ONLY = "Only a founding subscription can join the founders row.";
+
+/** The withdrawal route's answer for a contract no longer withdrawable online, or never. */
+export const WITHDRAWAL_CLOSED = `This contract can no longer be withdrawn from online. Email ${SUPPORT_EMAIL}.`;
 
 /** Stripe's webhook endpoint. */
 export const BILLING_WEBHOOK_PATH = "/api/billing/webhook";
@@ -40,8 +48,7 @@ export const ENDED_FOR_REFUND = "dormouse: full refund or final reversal";
 
 const JSON_BODY_BYTES = 4096;
 const CHECKOUT_ID = /^[A-Za-z0-9_-]{1,64}$/;
-/** Subscription statuses Stripe has finished with (pgstencil's `missing` included). */
-const ENDED = ["canceled", "incomplete_expired", "missing"];
+const SUBSCRIPTION_ID = /^sub_[A-Za-z0-9_]{1,250}$/;
 
 const isPlan = (plan: unknown): plan is Plan => (BILLING_PLANS as readonly unknown[]).includes(plan);
 
@@ -92,6 +99,7 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
         founder: boolean;
         name: string | null;
         consent: { termsVersion: string; consentedAt: string } | null;
+        withdrawn: { subscription: string } | null;
       }>(
         host(c),
         // A held subscription refuses another checkout, so the latest consent is its own.
@@ -101,7 +109,12 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
           (SELECT f.name FROM dormouse_founders f WHERE f."userId" = u.id) AS name,
           (SELECT json_build_object('termsVersion', k."termsVersion", 'consentedAt', k."consentedAt")
             FROM dormouse_checkout_consents k WHERE k."userId" = u.id
-            ORDER BY k."consentedAt" DESC LIMIT 1) AS consent
+            ORDER BY k."consentedAt" DESC LIMIT 1) AS consent,
+          (SELECT json_build_object('reference', w.id, 'subscription', w."subscriptionId", 'plan', w.plan,
+              'startedAt', w."contractStartedAt", 'submittedAt', w."submittedAt",
+              'acknowledged', w."acknowledgedAt" IS NOT NULL, 'settled', w."settledAt" IS NOT NULL)
+            FROM dormouse_withdrawals w WHERE w."userId" = u.id
+            ORDER BY w."submittedAt" DESC LIMIT 1) AS withdrawn
         FROM "user" u WHERE u.id = $1`,
         [userId, setup.founding],
       ),
@@ -109,7 +122,12 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
     ]);
     // A subscription Stripe still holds, paid up or not: its owner manages it
     // in the portal (a failed card included) and cannot check out again.
-    const held = !!status.subscription && !ENDED.includes(status.subscription.status);
+    const held = !!status.subscription && !ENDED_STATUSES.includes(status.subscription.status);
+    // A contract withdrawn from once is never offered again.
+    const offer =
+      held && account?.withdrawn?.subscription !== status.subscription!.id
+        ? await withdrawalOffer(billing, userId, status.subscription)
+        : null;
     return c.json({
       plan: held ? status.plan : null,
       price: held ? publishedPrice(setup, status.subscription!.price_id) : null,
@@ -122,6 +140,13 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
       // Offered while a founding subscription grants access; `name` while shown.
       founder: { offered: account?.founder === true, name: account?.name ?? null },
       consent: held ? (account?.consent ?? null) : null,
+      withdrawal: offer && { subscription: offer.subscription, startedAt: offer.startedAt, until: offer.until, email: offer.email },
+      // Only while it describes the held subscription, its settlement still
+      // pending, or nothing is held: a plan bought after it is not withdrawn.
+      withdrawn:
+        account?.withdrawn && (!held || account.withdrawn.subscription === status.subscription!.id)
+          ? account.withdrawn
+          : null,
     });
   };
 
@@ -190,6 +215,31 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
   app.post("/api/billing/portal", limit(JSON_BODY_BYTES), gate, (c) =>
     billed(c, async (billing) => c.json({ url: await billing.portal(c.get("login").userId) })),
   );
+
+  // An EEA or UK consumer's withdrawal from the contract it names, which must
+  // be the held subscription the page offers it for. Recorded before the
+  // answer, it stands: an acknowledgement or a settlement that fails after is
+  // logged, and the cron finishes it. Naming a contract already withdrawn
+  // from answers that withdrawal again.
+  app.post("/api/billing/withdraw", limit(JSON_BODY_BYTES), gate, async (c) => {
+    const { userId } = c.get("login");
+    const subscription = (await readJson<{ subscription?: unknown }>(c))?.subscription;
+    if (typeof subscription !== "string" || !SUBSCRIPTION_ID.test(subscription))
+      return c.json({ message: "Choose the contract to withdraw from." }, 400);
+    return billed(c, async (billing, setup) => {
+      let row = await recordedWithdrawal(billing, userId, subscription);
+      if (!row) {
+        const { subscription: held, plan } = await billing.status(userId);
+        const offer = held?.id === subscription && plan ? await withdrawalOffer(billing, userId, held) : null;
+        if (!offer || !held || !plan) return c.json({ message: WITHDRAWAL_CLOSED }, 409);
+        row = await recordWithdrawal(billing, userId, plan, held, offer);
+      }
+      await completeWithdrawal(billing, () => host(c).mail(), row).catch((error: unknown) =>
+        console.error(`Withdrawal ${row.id} is recorded but not complete; the cron retries it`, error),
+      );
+      return summary(c, billing, setup, userId);
+    });
+  });
 
   // The founders row: shown under `name` only while a founding subscription
   // grants access; leaving it is always allowed.

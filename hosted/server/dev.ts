@@ -11,6 +11,7 @@ import { developmentDatabase } from "pgstencil/database";
 import { EmailDev, SecureRandom, SystemTime } from "pgstencil";
 import { stripeDevBilling } from "./billing-dev";
 import { BILLING_WEBHOOK_PATH, billingRoutes, type BillingHost } from "./billing-routes";
+import { closureRoutes, type ClosureHost } from "./closure";
 import { authMetricHooks } from "./metrics";
 import { authPolicy } from "./policy";
 import { migrations } from "./migrations";
@@ -77,7 +78,7 @@ const stripe = await stripeDevBilling(
 stripe.dev.setWebhookTarget(origin + BILLING_WEBHOOK_PATH);
 const app = new Hono();
 // Built once, so the approval limiter counts across requests.
-const host: RelayAccountHost & BillingHost = {
+const host: RelayAccountHost & BillingHost & ClosureHost = {
   databaseUrl,
   auth: (request: Request) => auth.app.fetch(request),
   approveLimit: devLimit(10),
@@ -86,10 +87,13 @@ const host: RelayAccountHost & BillingHost = {
   // (`RELAY_ROOM_SWEEP_MS`); its reconnect is refused at once.
   closeBurrow: async () => {},
   setup: () => stripe.setup,
+  // A withdrawal's acknowledgement lands in the local inbox beside sign-in codes.
+  mail: () => email,
 };
 voiceAccountRoutes(app, () => host);
 relayAccountRoutes(app, () => host);
 billingRoutes(app, () => host);
+closureRoutes(app, () => host);
 // No speak: a Hosted build speaks only at the fixed voice origin, so no
 // Dormouse build could reach one here.
 app.all("*", (c) => auth.app.fetch(c.req.raw));

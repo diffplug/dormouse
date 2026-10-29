@@ -12,6 +12,9 @@ if (!/^[^'\\]+$/.test(ADMIN_EMAIL)) throw new Error("ADMIN_EMAIL cannot be inlin
  * subscription; access needs exactly one of them.
  */
 export const CURRENT_STATUSES: readonly string[] = ["trialing", "active", "past_due", "unpaid", "paused", "incomplete"];
+/** Subscription statuses Stripe has finished with (pgstencil's `missing` included). */
+export const ENDED_STATUSES: readonly string[] = ["canceled", "incomplete_expired", "missing"];
+
 const CURRENT = CURRENT_STATUSES.map((status) => `'${status}'`).join(", ");
 
 /**

@@ -1,11 +1,13 @@
 import { test, expect, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
+import { EmailDev } from "pgstencil";
 import { createTestContext } from "pgstencil/testing";
 import { queryDatabase } from "pgstencil/postgres";
 import { FOUNDING_COHORT_SIZE, FOUNDING_LADDER, LIST_ANNUAL, LIST_MONTHLY } from "../../../website/src/lib/hosted-pricing";
+import { WITHDRAWAL_STATEMENT } from "../../../website/src/lib/hosted-withdrawal";
+import { resyncBilling, type BillingSetup } from "../billing";
 import { MAX_SHOWN_FOUNDERS } from "../../../website/src/lib/hosted-cohorts";
-import type { BillingSetup } from "../billing";
 import {
   BILLING_WEBHOOK_PATH,
   CHECKOUT_CLOSED,
@@ -15,11 +17,14 @@ import {
   PRICE_CHANGED,
   TERMS_CHANGED,
   WEBHOOK_BODY_BYTES,
+  WITHDRAWAL_CLOSED,
   billingRoutes,
   disputeAction,
 } from "../billing-routes";
+import { CLOSE_RECENT_LOGIN, CLOSE_UNAVAILABLE, ENDED_FOR_CLOSURE, closureRoutes } from "../closure";
 import { AVATAR_BYTES, COHORT_CACHE_MS, COHORT_ENDPOINT, FOUNDER_AVATAR_PREFIX, cohortRoutes } from "../cohort-routes";
 import { entitledSql } from "../entitlement";
+import { ENDED_FOR_WITHDRAWAL, WITHDRAWAL_OPEN_DAYS } from "../withdrawal";
 import { migrations } from "../migrations";
 import { TERMS_VERSION } from "../policy-constants";
 import { ORIGINS } from "./bundle";
@@ -44,18 +49,37 @@ async function fixture({ closed = false } = {}) {
   const stripe = await stripeFake(context.time, context.random);
   const sql = <Row extends Record<string, unknown>>(text: string, values?: unknown[]) =>
     queryDatabase<Row>(context.database.url, text, values);
-  /** user id → its session's user, as `get-session` answers it. */
+  /** user id → its session's user, as `get-session` answers it, and when that login began. */
   const users = new Map<string, { id: string; email: string | null; emailVerified: boolean }>();
-  const app = new Hono();
-  billingRoutes(app, () => ({
+  const logins = new Map<string, string>();
+  const email = new EmailDev(context.time);
+  /** Mail sends to fail, before any goes out. */
+  const mailing = { failures: 0 };
+  const mail = () => ({
+    send: async (message: Parameters<EmailDev["send"]>[0]) => {
+      if (mailing.failures > 0) {
+        mailing.failures--;
+        throw new Error("Postmark outage");
+      }
+      await email.send(message);
+    },
+  });
+  /** Each Burrow socket closure asked to close. */
+  const closedBurrows: string[] = [];
+  const host = {
     databaseUrl: context.database.url,
-    auth: async (request) => {
+    auth: async (request: Request) => {
       const id = /(?:^|; )u=([^;]+)/.exec(request.headers.get("cookie") ?? "")?.[1];
       const user = id && users.get(id);
-      return Response.json(user ? { user, session: { createdAt: new Date().toISOString() } } : null);
+      return Response.json(user ? { user, session: { createdAt: logins.get(user.id) ?? new Date().toISOString() } } : null);
     },
     setup: (): BillingSetup | null => (closed ? null : stripe.setup),
-  }));
+    mail,
+    closeBurrow: async (_userId: string, burrowId: string) => closedBurrows.push(burrowId),
+  };
+  const app = new Hono();
+  billingRoutes(app, () => host);
+  closureRoutes(app, () => host);
   /** The isolate's clock the public routes cache by. */
   const clock = { now: 1_000_000 };
   cohortRoutes(
@@ -157,6 +181,11 @@ async function fixture({ closed = false } = {}) {
     buy,
     metrics,
     entitledOn,
+    email,
+    mail,
+    mailing,
+    logins,
+    closedBurrows,
     clock,
     visit,
     close: async () => {
@@ -262,6 +291,9 @@ test("checkout takes a plan and a ref, never a Price, customer, quantity, or ret
     founding: { cohort: 0, seatsLeft: FOUNDING_COHORT_SIZE - 1 },
     founder: { offered: true, name: null },
     consent: { termsVersion: TERMS_VERSION, consentedAt: expect.any(String) },
+    // No billing country: offered, as an EEA or UK consumer's would be.
+    withdrawal: { subscription: expect.any(String), startedAt: expect.any(String), until: expect.any(String), email: expect.any(String) },
+    withdrawn: null,
   });
   // The return page confirms the operation it names, and only a well-formed one.
   for (const checkout of ["", "../x", "x".repeat(65), 7])
@@ -641,6 +673,198 @@ test("a count that fails rolls back alone and is logged: the webhook still commi
   expect(await f.sql(`SELECT count(*)::int AS n FROM pgstencil_billing.events WHERE processed_at IS NULL`)).toEqual([{ n: 0 }]);
   expect(error).toHaveBeenCalledWith(expect.stringContaining("Metric checkout.completed not recorded"));
   expect((await f.metrics()).filter((row) => row.startsWith("checkout.completed"))).toEqual([]);
+});
+
+test("an EEA or UK consumer withdraws online: recorded, acknowledged by email, refunded in full, and ended at once", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const member = await f.account();
+  const { session, subscription } = await f.buy(member, "yearly");
+  f.countries.set(session.customer as string, "DE");
+  // Two payments for the contract, one already refunded by hand.
+  f.paidInvoices.set("pi_w0", subscription.id);
+  f.refunds.push({ paymentIntent: "pi_w0", withdrawal: null });
+  f.paidInvoices.set("pi_w1", subscription.id);
+  const billingEmail = f.dev.customers.get(session.customer as string)!.email;
+
+  const offered = await member.summary();
+  expect(offered.withdrawal).toEqual({
+    subscription: subscription.id,
+    startedAt: expect.any(String),
+    until: expect.any(String),
+    email: billingEmail,
+  });
+  const { startedAt, until } = offered.withdrawal as { startedAt: string; until: string };
+  expect(Date.parse(until) - Date.parse(startedAt)).toBe(WITHDRAWAL_OPEN_DAYS * 24 * 60 * 60 * 1000);
+
+  const withdraw = (subscription: unknown) =>
+    member.request("/api/billing/withdraw", { method: "POST", body: { subscription } });
+  for (const malformed of ["", "cus_x", 7, null]) expect((await withdraw(malformed)).status, String(malformed)).toBe(400);
+  const other = await withdraw("sub_someone_else");
+  expect([other.status, await other.json()]).toEqual([409, { message: WITHDRAWAL_CLOSED }]);
+  expect(await f.sql(`SELECT id FROM dormouse_withdrawals`)).toEqual([]);
+
+  const answered = await withdraw(subscription.id);
+  expect(answered.status).toBe(200);
+  const [row] = await f.sql<{ id: string; userId: string; plan: string; country: string; submittedAt: Date }>(
+    `SELECT id, "userId", plan, country, "submittedAt" FROM dormouse_withdrawals WHERE "subscriptionId" = $1`,
+    [subscription.id],
+  );
+  expect(row).toMatchObject({ userId: member.id, plan: "yearly", country: "DE" });
+  expect(await answered.json()).toMatchObject({
+    plan: null,
+    withdrawal: null,
+    withdrawn: { reference: row!.id, subscription: subscription.id, plan: "yearly", acknowledged: true, settled: true },
+  });
+  expect(f.cancels).toEqual([{ subscription: subscription.id, comment: ENDED_FOR_WITHDRAWAL }]);
+  expect(f.refunds).toEqual([
+    { paymentIntent: "pi_w0", withdrawal: null },
+    { paymentIntent: "pi_w1", withdrawal: row!.id },
+  ]);
+  expect(await f.entitledOn(member.id)).toBe(false);
+  const [mail] = f.email.all();
+  expect(mail!.to).toEqual([billingEmail]);
+  for (const fact of [WITHDRAWAL_STATEMENT, row!.id, String(row!.submittedAt.getUTCFullYear())]) expect(mail!.text).toContain(fact);
+
+  // A second submission acknowledges the first again, and repeats nothing.
+  await f.deliver();
+  expect((await withdraw(subscription.id)).status).toBe(200);
+  expect([f.cancels.length, f.refunds.length, f.email.all().length]).toEqual([1, 2, 1]);
+  // A plan bought after it is not withdrawn: the acknowledgement gives way to it.
+  await f.buy(member, "monthly");
+  expect(await member.summary()).toMatchObject({ plan: "monthly", withdrawn: null });
+  // A billing record: it outlives the account.
+  await f.sql(`DELETE FROM "user" WHERE id = $1`, [member.id]);
+  expect(await f.sql(`SELECT id FROM dormouse_withdrawals`)).toEqual([{ id: row!.id }]);
+});
+
+test("the online withdrawal is offered within its window, to an EEA, UK, or unknown billing country, and only once", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const abroad = await f.account();
+  const { session: abroadSession, subscription: abroadSubscription } = await f.buy(abroad, "monthly");
+  f.countries.set(abroadSession.customer as string, "US");
+  expect(await abroad.summary()).toMatchObject({ plan: "monthly", withdrawal: null });
+  const refused = await abroad.request("/api/billing/withdraw", { method: "POST", body: { subscription: abroadSubscription.id } });
+  expect([refused.status, await refused.json()]).toEqual([409, { message: WITHDRAWAL_CLOSED }]);
+
+  const unknown = await f.account();
+  const { subscription } = await f.buy(unknown, "monthly");
+  expect(await unknown.summary()).toMatchObject({ withdrawal: { subscription: subscription.id } });
+  // Past the window, it is closed, and the summary stops offering it.
+  await f.sql(
+    `UPDATE pgstencil_billing.subscriptions SET started_at = now() - ($2::int * interval '1 day') - interval '1 minute' WHERE id = $1`,
+    [subscription.id, WITHDRAWAL_OPEN_DAYS],
+  );
+  expect(await unknown.summary()).toMatchObject({ plan: "monthly", withdrawal: null });
+  expect((await unknown.request("/api/billing/withdraw", { method: "POST", body: { subscription: subscription.id } })).status).toBe(409);
+  expect(await f.sql(`SELECT id FROM dormouse_withdrawals`)).toEqual([]);
+});
+
+test("a withdrawal whose acknowledgement, cancellation, or refund fails still stands, and the cron finishes it", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const error = vi.spyOn(console, "error").mockImplementation(() => {});
+  onTestFinished(() => error.mockRestore());
+  const member = await f.account();
+  const { subscription } = await f.buy(member, "founding");
+  f.paidInvoices.set("pi_w2", subscription.id);
+  f.mailing.failures = 1;
+  f.failing.cancels = 1;
+  const answered = await member.request("/api/billing/withdraw", { method: "POST", body: { subscription: subscription.id } });
+  expect(answered.status).toBe(200);
+  // Still held, but never offered again: the withdrawal stands.
+  expect(await answered.json()).toMatchObject({
+    plan: "founding",
+    withdrawal: null,
+    withdrawn: { subscription: subscription.id, acknowledged: false, settled: false },
+  });
+  expect([f.email.all().length, f.cancels.length, f.refunds.length]).toEqual([0, 0, 0]);
+
+  f.failing.refunds = 1;
+  await expect(resyncBilling(f.setup, f.database.url, origin, f.mail)).rejects.toThrow(AggregateError);
+  expect(await member.summary()).toMatchObject({ plan: null, withdrawn: { acknowledged: true, settled: false } });
+  expect([f.email.all().length, f.cancels.length, f.refunds.length]).toEqual([1, 1, 0]);
+  await resyncBilling(f.setup, f.database.url, origin, f.mail);
+  expect(await member.summary()).toMatchObject({ withdrawn: { acknowledged: true, settled: true } });
+  expect([f.email.all().length, f.cancels.length, f.refunds.length]).toEqual([1, 1, 1]);
+  // Finished, the next run does nothing.
+  await resyncBilling(f.setup, f.database.url, origin, f.mail);
+  expect([f.email.all().length, f.cancels.length, f.refunds.length]).toEqual([1, 1, 1]);
+});
+
+test("closing an account needs a recent login, cancels its subscription in Stripe first, and keeps the billing records", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const member = await f.account();
+  const { subscription } = await f.buy(member, "monthly");
+  await f.sql(`INSERT INTO dormouse_relay_burrows ("burrowId", "userId", "tokenHash") VALUES ($1, $2, $3)`, [
+    "b".repeat(22),
+    member.id,
+    "h".repeat(64),
+  ]);
+  const close = (body: unknown) => member.request("/api/account/close", { method: "POST", body });
+
+  f.logins.set(member.id, new Date(Date.now() - 60 * 60 * 1000).toISOString());
+  const stale = await close({ close: true });
+  expect([stale.status, await stale.json()]).toEqual([403, { message: CLOSE_RECENT_LOGIN }]);
+  f.logins.delete(member.id);
+  for (const body of [{}, { close: "yes" }]) expect((await close(body)).status, JSON.stringify(body)).toBe(400);
+  expect(
+    (await member.request("/api/account/close", { method: "POST", body: { close: true }, headers: { origin: ORIGINS.relay } })).status,
+  ).toBe(403);
+  expect(f.cancels).toEqual([]);
+
+  expect((await close({ close: true })).status).toBe(204);
+  expect(f.cancels).toEqual([{ subscription: subscription.id, comment: ENDED_FOR_CLOSURE }]);
+  expect(await f.sql(`SELECT status FROM pgstencil_billing.subscriptions WHERE id = $1`, [subscription.id])).toEqual([
+    { status: "canceled" },
+  ]);
+  expect(await f.sql(`SELECT id FROM "user" WHERE id = $1`, [member.id])).toEqual([]);
+  expect(await f.sql(`SELECT "userId", "canceledSubscriptions" FROM dormouse_account_closures`)).toEqual([
+    { userId: member.id, canceledSubscriptions: [subscription.id] },
+  ]);
+  expect(await f.sql(`SELECT "userId" FROM dormouse_checkout_consents`)).toEqual([{ userId: member.id }]);
+  expect(f.closedBurrows).toEqual(["b".repeat(22)]);
+
+  // An account billing never knew closes with nothing to cancel.
+  const plain = await f.account();
+  expect((await plain.request("/api/account/close", { method: "POST", body: { close: true } })).status).toBe(204);
+  expect(f.cancels).toHaveLength(1);
+  // A checkout left open is expired first, so it can never start a subscription for no one.
+  const pending = await f.account();
+  expect((await pending.request("/api/billing/checkout", { method: "POST", body: consent("monthly") })).status).toBe(200);
+  expect((await pending.request("/api/account/close", { method: "POST", body: { close: true } })).status).toBe(204);
+  expect([...f.dev.checkouts.values()].at(-1)!.status).toBe("expired");
+});
+
+test("with billing closed, closing deletes an account without a subscription and refuses one still holding one", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture({ closed: true });
+  onTestFinished(f.close);
+  const plain = await f.account();
+  expect((await plain.request("/api/account/close", { method: "POST", body: { close: true } })).status).toBe(204);
+  const held = await f.account();
+  await f.sql(`INSERT INTO pgstencil_billing.accounts (owner_id, email, created_at) VALUES ($1, 'x@example.test', now())`, [
+    held.id,
+  ]);
+  await f.sql(
+    `INSERT INTO pgstencil_billing.subscriptions (id, owner_id, price_id, status, period_end, cancel_at_period_end, updated_at)
+    VALUES ('sub_held', $1, 'price_x', 'active', now() + interval '1 month', false, now())`,
+    [held.id],
+  );
+  const refused = await held.request("/api/account/close", { method: "POST", body: { close: true } });
+  expect([refused.status, await refused.json()]).toEqual([503, { message: CLOSE_UNAVAILABLE }]);
+  expect(await f.sql(`SELECT id FROM "user" WHERE id = $1`, [held.id])).toEqual([{ id: held.id }]);
 });
 
 /** `count` paid founders at founding step `step`, started 40 days ago, straight into the synchronized rows. */
