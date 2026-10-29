@@ -330,7 +330,7 @@ Hosted's Workers count what they serve in aggregate daily rows; no page or deskt
 | `pocket.signin` | none | a passkey sign-in mints a session |
 | `checkout.started` | `plan:ref` | checkout answers a URL |
 | `checkout.completed` | `plan:ref` | the webhook processes a completion (`completedCheckout`) |
-| `subscription.canceled` | plan | the webhook processes a purchase's end |
+| `subscription.canceled` | plan | the webhook processes a purchase's end, unless refunded |
 | `subscription.refunded` | plan | that end's recorded reason was `refund`, or it came within `REFUND_DAYS` |
 
 - **Never count a label off its event's list** (`METRIC_LABELS`): the write throws, and the table's CHECK refuses it. **Must replace that CHECK in a migration when the list gains a label.** Row contents and readers: `docs/specs/security-hosted.md` -> "Account boundary".

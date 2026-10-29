@@ -275,7 +275,7 @@
       "Don't animate layout properties (width, height, top, left, padding). Pane transitions use clip-path and opacity deliberately so layout measurements stay valid mid-animation.",
       "Don't add an emoji, mascot, or illustration to chrome. PRODUCT.md is explicit.",
       "Don't wrap things in containers. Most surfaces don't need one; the host's sidebar already is the container.",
-      "Don't introduce a new pass-through --mt-* token or a one-off color for tabs, badges, accents, or button hovers. If a new rendered surface truly needs a token that isn't in the hierarchy, update theme.css and design.tsx together, document the addition in docs/specs/theme.md, and update CONSUMED_VSCODE_KEYS in bundle-themes.mjs."
+      "Don't introduce a new pass-through --mt-* token or a one-off color for tabs, badges, accents, or button hovers. If a new rendered surface truly needs a token that isn't in the hierarchy, update theme-colors.css and design.tsx together, document the addition in docs/specs/theme.md, and update CONSUMED_VSCODE_KEYS in lib/src/lib/themes/convert.ts."
     ]
   }
 }
