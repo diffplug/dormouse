@@ -600,7 +600,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -773,7 +773,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1885,7 +1885,7 @@ dependencies = [
  "png",
  "serde",
  "thiserror 2.0.18",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -2219,7 +2219,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d8fae84b431384b68627d0f9b3b1245fcf9f46f6c0e3dc902e9dce64edd1967"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2665,7 +2665,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2721,7 +2721,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3106,7 +3106,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3304,8 +3304,9 @@ dependencies = [
 
 [[package]]
 name = "tao"
-version = "0.37.1"
-source = "git+https://github.com/diffplug/tao?rev=12d4695500ff8e3b7cc9a409d6e01245296df6c1#12d4695500ff8e3b7cc9a409d6e01245296df6c1"
+version = "0.37.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d5777b06fe6435126ae8d816eba269e050e1e10d302cf5461e9c49eccabc3548"
 dependencies = [
  "bitflags 2.11.1",
  "block2",
@@ -3344,7 +3345,8 @@ dependencies = [
 [[package]]
 name = "tao-macros"
 version = "0.1.4"
-source = "git+https://github.com/diffplug/tao?rev=12d4695500ff8e3b7cc9a409d6e01245296df6c1#12d4695500ff8e3b7cc9a409d6e01245296df6c1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5f7eeb6d99155545da6150a1795945f16ac9c178deb2a5f2e74d776107bd5849"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3665,7 +3667,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4002,7 +4004,7 @@ dependencies = [
  "png",
  "serde",
  "thiserror 2.0.18",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -4365,7 +4367,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4386,7 +4388,7 @@ dependencies = [
  "objc2-foundation",
  "objc2-quartz-core",
  "raw-window-handle",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
  "windows-version",
 ]
 
