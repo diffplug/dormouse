@@ -65,16 +65,21 @@ export async function stripeFake(time: Time, random: RandomSource) {
     const url = new URL(req.url!, "http://127.0.0.1");
     const json = (status: number, value: unknown) =>
       res.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify(value));
+    const disputedCharge = (id: string) => {
+      const found = disputes.get(id)!;
+      return { id: `ch_for_${id}`, object: "charge", customer: found.customer, payment_intent: found.paymentIntent };
+    };
     const dispute = /^\/v1\/disputes\/([^/]+)$/.exec(url.pathname);
     if (dispute && req.method === "GET") {
       const found = disputes.get(dispute[1]!);
       if (!found) return json(404, { error: { message: "No such dispute" } });
-      return json(200, {
-        id: dispute[1],
-        object: "dispute",
-        status: found.status,
-        charge: { id: `ch_for_${dispute[1]}`, object: "charge", customer: found.customer, payment_intent: found.paymentIntent },
-      });
+      return json(200, { id: dispute[1], object: "dispute", status: found.status, charge: disputedCharge(dispute[1]!) });
+    }
+    // pgstencil reads a dispute event's customer from its charge, `ch_for_<dispute id>` here.
+    const charge = /^\/v1\/charges\/ch_for_([^/]+)$/.exec(url.pathname);
+    if (charge && req.method === "GET") {
+      if (!disputes.has(charge[1]!)) return json(404, { error: { message: "No such charge" } });
+      return json(200, disputedCharge(charge[1]!));
     }
     const customer = /^\/v1\/customers\/([^/]+)$/.exec(url.pathname);
     if (customer && req.method === "GET") {
