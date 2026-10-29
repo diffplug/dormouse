@@ -766,6 +766,21 @@ wait_for_health() {
   return 1
 }
 
+# Is the plaintext port $1 unreachable on this node's Tailscale IPv4? With no
+# address to probe nothing has been shown, so that fails rather than skips.
+check_tailscale_plaintext() {
+  local tsip
+  tsip="$(ts ip -4 2>/dev/null || true)"
+  tsip="${tsip%%$'\n'*}"
+  if [ -z "$tsip" ]; then
+    fail "could not probe port $1 off-loopback: no Tailscale IPv4 address"
+  elif curl -s --max-time 3 -o /dev/null "http://$tsip:$1/api/hello" 2>/dev/null; then
+    fail "plaintext port $1 is reachable on the Tailscale IP $tsip"
+  else
+    pass "plaintext port $1 is not reachable on the Tailscale IP"
+  fi
+}
+
 # Is anything in a captured listener list bound somewhere other than
 # 127.0.0.1:$1? $1 = the port, $2 = the `lsof` lines. Exit 0 when at least one
 # line is off-loopback.
@@ -925,18 +940,7 @@ cmd_verify() {
     fi
   fi
 
-  local tsip
-  tsip="$(ts ip -4 2>/dev/null || true)"
-  tsip="${tsip%%$'\n'*}"
-  if [ -n "$tsip" ]; then
-    if curl -s --max-time 3 -o /dev/null "http://$tsip:$PORT/api/hello" 2>/dev/null; then
-      fail "plaintext port $PORT is reachable on the Tailscale IP $tsip"
-    else
-      pass "plaintext port $PORT is not reachable on the Tailscale IP"
-    fi
-  else
-    note "skipped the off-loopback probe (no Tailscale IPv4 address)"
-  fi
+  check_tailscale_plaintext "$PORT"
 
   local serve_out
   serve_out="$(ts serve status 2>/dev/null || true)"

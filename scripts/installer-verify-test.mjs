@@ -4,7 +4,8 @@
  * the file: the searches over CLI output nobody bounds — whether the loopback
  * port is bound anywhere but 127.0.0.1 and whether an existing Serve config
  * already claims the root path — and over a service definition, whether it
- * names a credential, plus the install's reading of a possibly
+ * names a credential, and whether `manage verify` probed the plaintext port on
+ * the Tailscale IP at all, plus the install's reading of a possibly
  * half-written `config/relay.env`, credential ownership, and exclusive release
  * staging. Env-reader cases also execute the shipped wrapper parser. Runs
  * from the repo root via `pnpm test`. `--help` is checked the same way: its
@@ -31,7 +32,8 @@
  * if a helper ever exists twice — once in the installer body and once inside
  * the `MANAGE_EOF` heredoc. Today `env_file_value` and `serve_origin_root`
  * are defined twice, and each pair is checked identical. `owner_only`,
- * `has_off_loopback`, `names_credential` and `serve_proxies_root` are in the heredoc (the
+ * `has_off_loopback`, `names_credential`, `serve_proxies_root` and
+ * `check_tailscale_plaintext` are in the heredoc (the
  * `manage` copy); `create_release_stage`, `env_missing_keys` and
  * `serve_state` are in the installer body.
  *
@@ -293,6 +295,23 @@ function cases(platform, env, definitions) {
       `if names_credential ${files.map(sq).join(' ')}; then echo detected; else echo clean; fi`,
       expected,
     ]),
+    // `manage verify`'s off-loopback probe. Only the first address's
+    // `/api/hello` on our port answers as the stub is told; any other URL
+    // answers, so probing the wrong one reads as reachable. Both platforms'
+    // probe commands are stubbed: Linux calls `http_answers`, macOS `curl`.
+    ...[
+      ['no Tailscale IPv4 address', "printf ''", 7, 'fail'],
+      ['tailscale itself failing', 'return 1', 7, 'fail'],
+      ['the port unreachable there', "printf '100.64.0.1'", 7, 'pass'],
+      ['the port reachable there', "printf '100.64.0.1'", 0, 'fail'],
+      ['the first of two addresses, unreachable', "printf '100.64.0.1\\n100.64.0.2'", 7, 'pass'],
+    ].map(([label, tsBody, status, expected]) => [
+      `check_tailscale_plaintext: ${label}`,
+      `pass() { echo pass; }; fail() { echo fail; }; ts() { ${tsBody}; }; ` +
+        `http_answers() { [ "$1" = http://100.64.0.1:3100/api/hello ] && return ${status}; return 0; }; ` +
+        'curl() { http_answers "${@: -1}"; }; check_tailscale_plaintext 3100',
+      expected,
+    ]),
     [
       'has_off_loopback: 1 MiB of loopback only',
       `if has_off_loopback 3100 ${pad(loopback)}; then echo detected; else echo clean; fi`,
@@ -416,6 +435,7 @@ export function run() {
           'serve_origin_root',
           'serve_state',
           'serve_proxies_root',
+          'check_tailscale_plaintext',
         ]
           .map((name) => extractFunction(text, name))
           .join('\n\n');
