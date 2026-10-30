@@ -34,7 +34,8 @@ describe('terminal transfer serialization', () => {
   });
 
   // Fails once a bump ships xtermjs/xterm.js#6174 (`IModes.mouseEncoding`): then
-  // delete the private read in serializeTransferTerminal and this test (#651).
+  // delete the private read in serializeTransferTerminal, this test, and the
+  // `_core` mock in standalone/src/workspace-move.test.ts (#651).
   it.each([1006, 1016])('the pinned serializer still omits mouse encoding %i', async encoding => {
     const source = new Terminal({ allowProposedApi: true });
     live.push(source);
