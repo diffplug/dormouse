@@ -103,10 +103,10 @@ Errors are JSON `{ message }`. The cookie routes need no entitlement, answer 401
 - **Must suspend, never end, on an open dispute**, by its current status read from Stripe, not the event (`dormouse_billing_disputes`, which outlives the account); closing in the account's favor restores it.
 - **Must offer founding at the last ladder step bought at while its purchases net of those ended within `REFUND_DAYS` are short of `FOUNDING_COHORT_SIZE`, else the next**, counting seats left the same way; an earlier step never reopens. Past the last step, founding checkout answers 409.
 - **Must answer `/api/hosted/*` without resolving a login**, each answer reused for `COHORT_CACHE_MS` per isolate; `total` counts founding purchases net of refunds. The site's Worker forwards it from `dormouse.sh` to this origin, so the 421 gate needs no exception. What it answers and fetches: `docs/specs/security-hosted.md` -> "Account boundary".
-- **Must resync, every 10 minutes from the account's Cron Trigger, a bounded batch of stale owners** (`reconcileStale`), finish a bounded batch of unsettled withdrawals and closure refunds, reread the least recently checked open disputes from Stripe as their webhook would, and run the notices ("Billing notices"); a failure fails the invocation after every one was tried.
+- **Must resync, from the account's Cron Trigger, a bounded batch of stale owners** (`reconcileStale`), finish a bounded batch of unsettled withdrawals and closure refunds, reread the least recently checked open disputes from Stripe as their webhook would, and run the notices ("Billing notices"); a failure fails the invocation after every one was tried.
 - **Must grant the account's role the `pgstencil_billing` schema from `runtime-roles.sql`**, additively: the package's migration creates it.
 
-Source of truth: `billingSetup`, `withBilling`, `resyncBilling`, and `END_REASONS` in `hosted/server/billing.ts`; `billingRoutes` and `disputeAction` in `hosted/server/billing-routes.ts`; `withdrawalOffer` and `recordWithdrawal` in `hosted/server/withdrawal.ts`; `cohortRoutes` in `hosted/server/cohort-routes.ts`; `forwardHosted` in `website/public/_worker.js`. Pinned by `hosted/server/tests/billing.test.ts` and `hosted/server/tests/billing-routes.test.ts`, on StripeDev.
+Source of truth: `billingSetup`, `withBilling`, `resyncBilling`, and `END_REASONS` in `hosted/server/billing.ts`; `billingRoutes` and `disputeAction` in `hosted/server/billing-routes.ts`; `withdrawalOffer` and `recordWithdrawal` in `hosted/server/withdrawal.ts`; `cohortRoutes` in `hosted/server/cohort-routes.ts`; `forwardHosted` in `website/public/_worker.js`.
 
 ## Billing notices
 
@@ -137,10 +137,12 @@ Source of truth: `runNotices` and `sendNotices` in `hosted/server/notices.ts`; `
 Errors are JSON `{ message }`; it needs no entitlement and works with billing closed. What the page says first: `docs/specs/pricing.md` -> "Checkout and entitlement".
 
 - **Must refuse a login older than `LOGIN_FRESH_AGE_MS`** with 403 `CLOSE_RECENT_LOGIN`, and, billing closed, an account with a current subscription row with 409 `CLOSE_UNAVAILABLE`.
-- **Must expire an open checkout, then end every current subscription in Stripe (reason `closure`), before one statement records the closure (`dormouse_account_closures`) and deletes the `"user"` row**; rows without a foreign key stay. Its Burrows' and sessions' sockets then close as removals' do ("Relay sockets"). Checks: `docs/specs/security-hosted.md` -> "Account boundary".
+- **Must commit a hold on checkout (`dormouse_account_closing`) before any Stripe call, then expire an open checkout, then end every current subscription in Stripe (reason `closure`), before one statement records the closure (`dormouse_account_closures`) and deletes the `"user"` row**; rows without a foreign key stay; a failure clears the hold. Its Burrows' and sessions' sockets then close as removals' do ("Relay sockets"). Checks: `docs/specs/security-hosted.md` -> "Account boundary".
+- **Never answer a checkout URL for an account gone or under a hold younger than `CLOSING_HOLD_MINUTES`**: checked once it opened, the checkout is expired (409 `ACCOUNT_CLOSING`).
+- **Must end, and refund as closing does, a subscription the webhook finds current for an owner with no `"user"` row**, recorded unsettled on its closure first; a failed end fails the event.
 - **Must then refund what closing owes** (`docs/specs/pricing.md` -> "Checkout and entitlement"): a first payment while `purchaseStanding` counts the end a refund, a yearly or founding renewal paid within `REFUND_DAYS` of it. The closure is stamped settled once done, as a withdrawal is ("Billing").
 
-Source of truth: `closureRoutes` in `hosted/server/closure.ts`; `CloseAccount` in `hosted/src/Closure.tsx`.
+Source of truth: `closureRoutes`, `accountClosing`, and `endAfterClosure` in `hosted/server/closure.ts`; `CloseAccount` in `hosted/src/Closure.tsx`.
 
 ## Managed voice
 

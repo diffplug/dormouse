@@ -8,6 +8,7 @@ import { accountQuery, cookieLogin, smallBody, type AccountHost } from "./accoun
 import { END_REASONS, foundingCohort, idOf, run, withBilling, type BillingSetup, type PriceCatalog } from "./billing";
 import type { BillingClosed, BillingSummary, Withdrawn } from "./billing-summary";
 import { entitledSql, subscribedSql } from "./entitlement";
+import { ACCOUNT_CLOSING, accountClosing, endAfterClosure } from "./closure";
 import { checkoutRef, type MetricEvent } from "./metric-labels";
 import { countMetricInTransaction, recordMetric } from "./metrics";
 import { CHECKOUT_CLOSED, PRICE_CHANGED, REFUND_DAYS, TERMS_VERSION, isFounderName, isPlan, type Plan } from "./policy-constants";
@@ -194,6 +195,11 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
         throw error;
       }
       const { id, url, priceId } = opened;
+      // A closure of this account under way, or done, from another tab: no URL.
+      if (await accountClosing(billing, userId)) {
+        await billing.cancelCheckout(userId);
+        return c.json({ message: ACCOUNT_CLOSING }, 409);
+      }
       // Recorded before the URL is answered, for the Price the buyer was shown.
       await run(
         billing.db,
@@ -300,6 +306,8 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
  * a redelivery repeats none. A full refund or a lost dispute then ends the
  * subscription in Stripe, after the commit and on every delivery until it
  * has; a dispute's notice is then sent, and the cron retries one that fails.
+ * Last, any subscription its owner still holds once their account is closed
+ * ends ({@link endAfterClosure}).
  */
 async function processEvent(
   billing: Billing<Plan>,
@@ -350,6 +358,13 @@ async function processEvent(
   if (owner && dispute)
     for (const error of await sendNotices(billing, mail, context, { userId: owner }))
       console.error("A dispute notice is recorded but not sent; the cron retries it", error);
+  // A subscription for an account already closed, such as one a checkout
+  // started before the closure paid for after it, ends and is refunded; a
+  // failed end fails the event, so the redelivery, which runs no `apply`,
+  // finds the owner through the event's customer and ends it.
+  const customer = idOf((event.data.object as { customer?: string | { id: string } | null }).customer);
+  if (!owner && customer) owner = await billing.ownerOfCustomer(customer);
+  if (owner) await endAfterClosure(billing, owner);
 }
 
 /**

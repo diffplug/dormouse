@@ -18,7 +18,7 @@ import {
   billingRoutes,
   disputeAction,
 } from "../billing-routes";
-import { CLOSE_RECENT_LOGIN, CLOSE_UNAVAILABLE, closureRoutes } from "../closure";
+import { ACCOUNT_CLOSING, CLOSE_RECENT_LOGIN, CLOSE_UNAVAILABLE, closureRoutes } from "../closure";
 import { AVATAR_BYTES, COHORT_CACHE_MS, FOUNDER_AVATAR_PREFIX, cohortRoutes } from "../cohort-routes";
 import { entitledSql } from "../entitlement";
 import { WITHDRAWAL_OPEN_DAYS } from "../withdrawal";
@@ -1177,6 +1177,100 @@ test("closing answers billing's refusal, such as a checkout still being created,
   const refused = await member.request("/api/account/close", { method: "POST", body: { close: true } });
   expect([refused.status, await refused.json()]).toEqual([409, { message: "Checkout is still being created. Retry shortly." }]);
   expect(await f.sql(`SELECT id FROM "user" WHERE id = $1`, [member.id])).toEqual([{ id: member.id }]);
+  // Nor does its hold on checkout outlast it.
+  expect(await f.sql(`SELECT "userId" FROM dormouse_account_closing`)).toEqual([]);
+});
+
+test("closing holds checkout off from before its first Stripe call, and a checkout opened meanwhile answers no URL", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const holds = () => f.sql<{ userId: string }>(`SELECT "userId" FROM dormouse_account_closing`);
+  const member = await f.account();
+  await f.buy(member, "monthly");
+  let held: { userId: string }[] | null = null;
+  f.before.request = async () => {
+    held ??= await holds();
+  };
+  expect((await member.request("/api/account/close", { method: "POST", body: { close: true } })).status).toBe(204);
+  f.before.request = null;
+  expect(held).toEqual([{ userId: member.id }]);
+  // Gone with the account.
+  expect(await holds()).toEqual([]);
+
+  // Another tab's checkout while the account closes, or once it is gone:
+  // refused before its URL or consent, and expired.
+  const checkout = (who: Awaited<ReturnType<typeof f.account>>) =>
+    who.request("/api/billing/checkout", { method: "POST", body: consent("monthly") });
+  const closing = await f.account();
+  await f.sql(`INSERT INTO dormouse_account_closing ("userId") VALUES ($1)`, [closing.id]);
+  const gone = await f.account();
+  await f.sql(`DELETE FROM "user" WHERE id = $1`, [gone.id]);
+  for (const who of [closing, gone]) {
+    const refused = await checkout(who);
+    expect([refused.status, await refused.json()]).toEqual([409, { message: ACCOUNT_CLOSING }]);
+    expect([...f.dev.checkouts.values()].at(-1)!.status).toBe("expired");
+    expect(await f.sql(`SELECT "userId" FROM dormouse_checkout_consents WHERE "userId" = $1`, [who.id])).toEqual([]);
+  }
+  // A hold whose closure died before finishing or clearing it lapses.
+  await f.sql(`UPDATE dormouse_account_closing SET "startedAt" = now() - interval '16 minutes'`);
+  expect((await checkout(closing)).status).toBe(200);
+});
+
+test("a subscription for an account already closed, as a checkout paid after the closure started, ends at once and is refunded", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const error = vi.spyOn(console, "error").mockImplementation(() => {});
+  onTestFinished(() => error.mockRestore());
+  const closure = (userId: string) =>
+    f.sql<{ canceled: string[]; settled: boolean }>(
+      `SELECT "canceledSubscriptions" AS canceled, "settledAt" IS NOT NULL AS settled FROM dormouse_account_closures WHERE "userId" = $1`,
+      [userId],
+    );
+  /** A checkout `who` opened, paid once their account is gone, its first payment `intent`. */
+  const paidLate = async (who: Awaited<ReturnType<typeof f.account>>, intent: string, closed: boolean) => {
+    const started = await who.request("/api/billing/checkout", { method: "POST", body: consent("yearly") });
+    const { url } = (await started.json()) as { url: string };
+    const session = [...f.dev.checkouts.values()].find((s) => s.url === url)!;
+    // Deleted as a closure that never saw the checkout would; or otherwise, with no closure record.
+    await f.sql(
+      closed
+        ? `WITH recorded AS (INSERT INTO dormouse_account_closures ("userId", "canceledSubscriptions", "settledAt") VALUES ($1, '{}', now()))
+          DELETE FROM "user" WHERE id = $1`
+        : `DELETE FROM "user" WHERE id = $1`,
+      [who.id],
+    );
+    const subscription = f.dev.completeCheckout(session.id);
+    f.paidInvoices.set(intent, subscription.id);
+    return subscription;
+  };
+
+  const deleted = await f.account();
+  const first = await paidLate(deleted, "pi_late", false);
+  await f.deliver();
+  expect(f.cancels).toEqual([{ subscription: first.id }]);
+  expect(await f.ended()).toEqual([{ subscription: first.id, reason: END_REASONS.closure }]);
+  expect(f.refunds).toEqual([{ paymentIntent: "pi_late", withdrawal: null, closure: first.id }]);
+  expect(await closure(deleted.id)).toEqual([{ canceled: [first.id], settled: true }]);
+
+  // Its end fails: the event answers 503, and the redelivery, finding it
+  // processed, ends it; a refund that fails then is the cron's to finish.
+  const closed = await f.account();
+  const second = await paidLate(closed, "pi_late_2", true);
+  f.failing.cancels = 1;
+  f.failing.refunds = 1;
+  const event = f.dev.events[0]!;
+  expect((await f.send(event)).status).toBe(503);
+  expect(await closure(closed.id)).toEqual([{ canceled: [second.id], settled: false }]);
+  expect((await f.send(event)).status).toBe(200);
+  expect(f.cancels.at(-1)).toEqual({ subscription: second.id });
+  expect([f.refunds.length, (await closure(closed.id))[0]!.settled]).toEqual([1, false]);
+  await resyncBilling(f.setup, f.database.url, origin, f.mail);
+  expect(f.refunds.at(-1)).toEqual({ paymentIntent: "pi_late_2", withdrawal: null, closure: second.id });
+  expect(await closure(closed.id)).toEqual([{ canceled: [second.id], settled: true }]);
 });
 
 test("with billing closed, closing deletes an account without a subscription and refuses one still holding one", async ({
