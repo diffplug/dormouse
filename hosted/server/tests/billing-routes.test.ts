@@ -1235,10 +1235,13 @@ test("a subscription for an account already closed, as a checkout paid after the
     const started = await who.request("/api/billing/checkout", { method: "POST", body: consent("yearly") });
     const { url } = (await started.json()) as { url: string };
     const session = [...f.dev.checkouts.values()].find((s) => s.url === url)!;
-    // Deleted as a closure that never saw the checkout would; or otherwise, with no closure record.
+    // Deleted as a closure that never saw the checkout would, one already
+    // settled (by hand, say) over a subscription of its own; or otherwise,
+    // with no closure record.
     await f.sql(
       closed
-        ? `WITH recorded AS (INSERT INTO dormouse_account_closures ("userId", "canceledSubscriptions", "settledAt") VALUES ($1, '{}', now()))
+        ? `WITH recorded AS (INSERT INTO dormouse_account_closures ("userId", "canceledSubscriptions", "settledAt")
+            VALUES ($1, '{sub_settled_by_hand}', now()))
           DELETE FROM "user" WHERE id = $1`
         : `DELETE FROM "user" WHERE id = $1`,
       [who.id],
@@ -1257,7 +1260,9 @@ test("a subscription for an account already closed, as a checkout paid after the
   expect(await closure(deleted.id)).toEqual([{ canceled: [first.id], settled: true }]);
 
   // Its end fails: the event answers 503, and the redelivery, finding it
-  // processed, ends it; a refund that fails then is the cron's to finish.
+  // processed, ends it; a refund that fails then is the cron's to finish. The
+  // record, settled before, names only the new subscription, so what was
+  // settled is never refunded or reported again.
   const closed = await f.account();
   const second = await paidLate(closed, "pi_late_2", true);
   f.failing.cancels = 1;

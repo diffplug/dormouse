@@ -237,6 +237,17 @@ A withdrawal or account closure is stamped settled only once every payment it re
    UPDATE dormouse_account_closures SET "settledAt" = now() WHERE "userId" = '<user id>';
    ```
 
+## Acknowledgement by hand
+
+A withdrawal's acknowledgement email is retried until it is sent, and the cron fails every run once one is a day overdue, naming the withdrawal. It cannot send while Stripe holds no billing email for the customer (the address was removed, or the customer deleted), which the cron's errors also say.
+
+1. Send the acknowledgement another way, to an address the customer gave: the withdrawal's plan, the date it was submitted, and that the subscription ends and is refunded.
+2. Record it as sent as the migration role, by the withdrawal id the error names:
+
+   ```sql
+   UPDATE dormouse_billing_notices SET "sentAt" = now() WHERE "withdrawalId" = '<withdrawal id>' AND "sentAt" IS NULL;
+   ```
+
 ## Release
 
 1. Review the exact package provenance and code revision. Run `pnpm test:hosted`, `pnpm build:hosted`, and the repository lints. Validate production migrations.

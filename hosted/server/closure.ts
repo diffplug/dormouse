@@ -141,8 +141,11 @@ export async function retryClosures(billing: Billing<Plan>): Promise<unknown[]> 
  * Once `owner`'s account is gone, ends each subscription of theirs still
  * current, as closing does, and refunds what closing owes on it: one a
  * checkout paid after the closure started. Its closure record names it,
- * unsettled, before it ends, so the cron finishes a failed refund; a failed
- * end throws, for the caller to retry. Does nothing while the account stands.
+ * unsettled, before it ends, so the cron finishes a failed refund; a record
+ * already settled (perhaps by hand) keeps only the new ids, so its settled
+ * payments are never refunded or reported again, and pgstencil's `end_reason`
+ * still records the earlier ones. A failed end throws, for the caller to
+ * retry. Does nothing while the account stands.
  */
 export async function endAfterClosure(billing: Billing<Plan>, owner: string) {
   const current = await run<{ id: string }>(
@@ -155,8 +158,11 @@ export async function endAfterClosure(billing: Billing<Plan>, owner: string) {
   const [closure] = await run<{ canceledSubscriptions: string[] }>(
     billing.db,
     `INSERT INTO public.dormouse_account_closures AS k ("userId", "canceledSubscriptions") VALUES ($1, $2)
-    ON CONFLICT ("userId") DO UPDATE SET "settledAt" = NULL, "canceledSubscriptions" = k."canceledSubscriptions"
-      || ARRAY(SELECT id FROM unnest(EXCLUDED."canceledSubscriptions") id WHERE id <> ALL (k."canceledSubscriptions"))
+    ON CONFLICT ("userId") DO UPDATE SET "settledAt" = NULL, "canceledSubscriptions" = CASE
+      WHEN k."settledAt" IS NOT NULL THEN EXCLUDED."canceledSubscriptions"
+      ELSE k."canceledSubscriptions"
+        || ARRAY(SELECT id FROM unnest(EXCLUDED."canceledSubscriptions") id WHERE id <> ALL (k."canceledSubscriptions"))
+    END
     RETURNING "canceledSubscriptions"`,
     [owner, current.map(({ id }) => id)],
   );
