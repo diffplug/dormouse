@@ -1,7 +1,6 @@
 /** @vitest-environment jsdom */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPresenceTracker, type PresenceTracker } from './presence';
-import type { EngagementLapse } from './alert-manager';
 
 const TIMEOUT = 15_000;
 
@@ -9,7 +8,7 @@ let tracker: PresenceTracker;
 let timeoutMs: number;
 let focused: boolean;
 let visibility: DocumentVisibilityState;
-let transitions: Array<[boolean, EngagementLapse | undefined]>;
+let transitions: boolean[];
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -21,7 +20,7 @@ beforeEach(() => {
   transitions = [];
   tracker = createPresenceTracker({
     timeoutMs: () => timeoutMs,
-    onChange: (present, lapse) => transitions.push([present, lapse]),
+    onChange: (present) => transitions.push(present),
   });
 });
 
@@ -40,7 +39,7 @@ describe('presence', () => {
     expect(tracker.present).toBe(false);
     input('keydown');
     expect(tracker.present).toBe(true);
-    expect(transitions).toEqual([[true, undefined]]);
+    expect(transitions).toEqual([true]);
   });
 
   it.each(['keydown', 'pointerdown', 'pointermove', 'wheel', 'compositionupdate'])('counts %s as input', (type) => {
@@ -48,12 +47,12 @@ describe('presence', () => {
     expect(tracker.present).toBe(true);
   });
 
-  it('lapses as idle one timeout after the last input', () => {
+  it('goes absent one timeout after the last input', () => {
     input('keydown');
     vi.advanceTimersByTime(TIMEOUT - 1);
     expect(tracker.present).toBe(true);
     vi.advanceTimersByTime(1);
-    expect(transitions).toEqual([[true, undefined], [false, 'idle']]);
+    expect(transitions).toEqual([true, false]);
   });
 
   it('stays present while the mouse keeps moving, with no typing at all', () => {
@@ -63,7 +62,7 @@ describe('presence', () => {
       input('pointermove');
     }
     expect(tracker.present).toBe(true);
-    expect(transitions).toEqual([[true, undefined]]);
+    expect(transitions).toEqual([true]);
   });
 
   it('sees input a handler below stops, since it listens in the capture phase', () => {
@@ -86,24 +85,24 @@ describe('presence', () => {
 
     focused = false;
     input('blur');
-    expect(transitions).toEqual([[true, undefined], [false, 'leave']]);
+    expect(transitions).toEqual([true, false]);
     // No idle lapse follows the leave.
     vi.advanceTimersByTime(TIMEOUT * 2);
     expect(transitions).toHaveLength(2);
   });
 
-  it('never lapses idle while an iframe Surface holds focus, whose input never reaches this window', () => {
+  it('never goes idle while an iframe Surface holds focus, whose input never reaches this window', () => {
     const frame = document.createElement('iframe');
     const activeElement = vi.spyOn(document, 'activeElement', 'get').mockReturnValue(frame);
     input('keydown');
     input('blur');
     vi.advanceTimersByTime(TIMEOUT * 2);
-    expect(transitions).toEqual([[true, undefined]]);
+    expect(transitions).toEqual([true]);
 
     // Focus back in the document: the idle clock runs from the frame's last check.
     activeElement.mockReturnValue(document.body);
     vi.advanceTimersByTime(TIMEOUT);
-    expect(transitions).toEqual([[true, undefined], [false, 'idle']]);
+    expect(transitions).toEqual([true, false]);
   });
 
   it('leaves at the next deadline when the window loses focus while an iframe holds it', () => {
@@ -113,14 +112,14 @@ describe('presence', () => {
     // No blur reaches this window: it already blurred into the frame.
     focused = false;
     vi.advanceTimersByTime(TIMEOUT);
-    expect(transitions).toEqual([[true, undefined], [false, 'leave']]);
+    expect(transitions).toEqual([true, false]);
   });
 
   it('leaves when hidden and comes back when shown', () => {
     input('keydown');
     visibility = 'hidden';
     document.dispatchEvent(new Event('visibilitychange'));
-    expect(transitions.at(-1)).toEqual([false, 'leave']);
+    expect(transitions.at(-1)).toEqual(false);
 
     visibility = 'visible';
     document.dispatchEvent(new Event('visibilitychange'));
@@ -144,7 +143,7 @@ describe('presence', () => {
     vi.advanceTimersByTime(999);
     expect(tracker.present).toBe(true);
     vi.advanceTimersByTime(1);
-    expect(transitions.at(-1)).toEqual([false, 'idle']);
+    expect(transitions.at(-1)).toEqual(false);
   });
 
   it('stops listening once disposed', () => {

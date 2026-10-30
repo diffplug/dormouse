@@ -1,4 +1,4 @@
-import type { Engagement, EngagementLapse } from './alert-manager';
+import type { Engagement } from './alert-manager';
 import { getAlertSettings, subscribeToAlertSettings } from './alert-settings';
 import { getPlatformOrNull } from './platform';
 import { createPresenceTracker, type PresenceTracker } from './presence';
@@ -22,13 +22,13 @@ function currentFocus(): string | null {
   return null;
 }
 
-function report(lapse?: EngagementLapse): void {
+function report(): void {
   const present = presence?.present ?? false;
   const focusId = currentFocus();
   // An absent realm engages nothing, so its focus moving is no news.
   if (present === reported.present && (focusId === reported.focusId || !present)) return;
   reported = { present, focusId };
-  getPlatformOrNull()?.alertEngagement(reported, present ? undefined : lapse);
+  getPlatformOrNull()?.alertEngagement(reported);
 }
 
 /** Hold the reporter while a Wall is mounted; the first holder starts presence
@@ -37,7 +37,7 @@ export const retainEngagementReporter = createRefCount({
   onFirst: () => {
     const tracker = createPresenceTracker({
       timeoutMs: () => getAlertSettings().inactivityTimeoutMs,
-      onChange: (_present, lapse) => report(lapse),
+      onChange: report,
     });
     const unsubscribeSettings = subscribeToAlertSettings(() => tracker.refresh());
     presence = tracker;
@@ -45,7 +45,7 @@ export const retainEngagementReporter = createRefCount({
       unsubscribeSettings();
       tracker.dispose();
       presence = null;
-      report('leave');
+      report();
     };
   },
 });

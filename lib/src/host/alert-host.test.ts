@@ -172,7 +172,7 @@ describe('realms', () => {
   it('keeps engagement per realm, so one leaving never disengages another', () => {
     engaged('main', 'pty-a');
     engaged('ws-2', 'pty-b');
-    from('main', { op: 'engagement', state: { present: false, focusId: null }, lapse: 'leave' });
+    from('main', { op: 'engagement', state: { present: false, focusId: null } });
 
     host.manager.notifyFromProtocol('pty-b', REPORT);
     expect(host.manager.getState('pty-b').status).not.toBe('ALERT_RINGING');

@@ -1,4 +1,3 @@
-import type { EngagementLapse } from './alert-manager';
 import { subscribeWindowFocus } from './window-focus';
 
 /** What counts as a human at this window (`docs/specs/alert.md` -> Engagement). */
@@ -24,8 +23,8 @@ export interface PresenceTracker {
 export interface PresenceTrackerOptions {
   /** Read at every deadline, so a settings edit needs only `refresh`. */
   timeoutMs: () => number;
-  /** Each transition; an end of presence names its lapse. */
-  onChange: (present: boolean, lapse?: EngagementLapse) => void;
+  /** Each transition. */
+  onChange: (present: boolean) => void;
 }
 
 export function createPresenceTracker({ timeoutMs, onChange }: PresenceTrackerOptions): PresenceTracker {
@@ -39,10 +38,10 @@ export function createPresenceTracker({ timeoutMs, onChange }: PresenceTrackerOp
   // Engagement).
   const iframeHoldsFocus = (): boolean => document.activeElement?.tagName === 'IFRAME';
 
-  const set = (next: boolean, lapse?: EngagementLapse): void => {
+  const set = (next: boolean): void => {
     if (next === present) return;
     present = next;
-    onChange(present, lapse);
+    onChange(present);
   };
 
   const clearTimer = (): void => {
@@ -63,11 +62,11 @@ export function createPresenceTracker({ timeoutMs, onChange }: PresenceTrackerOp
     if (!present) return;
     // Left while an iframe held focus, so no blur reached this window.
     if (!windowActive()) {
-      set(false, 'leave');
+      set(false);
       return;
     }
     if (iframeHoldsFocus()) lastInputAt = Date.now();
-    if (Date.now() - lastInputAt >= timeoutMs()) set(false, 'idle');
+    if (Date.now() - lastInputAt >= timeoutMs()) set(false);
     else arm();
   }
 
@@ -79,7 +78,7 @@ export function createPresenceTracker({ timeoutMs, onChange }: PresenceTrackerOp
 
   const leave = (): void => {
     clearTimer();
-    set(false, 'leave');
+    set(false);
   };
 
   // Bringing the window back is a human act, so it counts as input.

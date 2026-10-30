@@ -137,7 +137,7 @@ interface Ring extends SourceSet {
 /**
  * Completions the user was looking at when they happened, already shown as
  * TODO (`docs/specs/alert.md` -> Completion events): the sources they would
- * raise if the viewer goes idle, and the richest detail among them.
+ * raise if the viewer goes absent, and the richest detail among them.
  */
 interface HeldCompletion extends SourceSet {
   detail: ActivityNotification;
@@ -158,10 +158,6 @@ export interface Engagement {
   /** The terminal Session this viewer points at, or null. */
   focusId: string | null;
 }
-
-/** Why a viewer stopped being present: its inactivity timeout ran out
- *  (`idle`), or its window blurred or hid (`leave`). */
-export type EngagementLapse = 'idle' | 'leave';
 
 const NOT_ENGAGED: Engagement = { present: false, focusId: null };
 
@@ -298,7 +294,7 @@ interface AlertEntry {
   todo: TodoState;
   /** The TODO's detail: null without one. A ring shows its own instead. */
   notification: ActivityNotification | null;
-  /** Completions withheld while engaged, already shown as TODO: rung if presence lapses idle (`setViewer`), dropped by any other end. */
+  /** Completions withheld while engaged, already shown as TODO: rung if the viewer goes absent (`setViewer`), dropped if focus moves on. */
   held: HeldCompletion | null;
   /** Output and completions before this instant answer the user's own input (`acknowledge`). */
   echoUntil: number;
@@ -555,7 +551,7 @@ export class AlertManager {
   /**
    * The path from a completion that may ring to the ring: a live one and an
    * escalated hold alike. Engaged, it is held — a TODO at once, rung if the
-   * viewer goes idle; otherwise a report goes through the acknowledged-state
+   * viewer goes absent; otherwise a report goes through the acknowledged-state
    * check, and anything else rings. Publishes, including a progress cycle
    * the caller cleared before dispatch.
    */
@@ -997,11 +993,11 @@ export class AlertManager {
 
   /**
    * One renderer realm's presence and focus, as its reporter computed them.
-   * `lapse` says why presence ended, and decides what a Session that stops
-   * being engaged does with the completions it held: an `idle` lapse with focus
-   * unchanged rings them, anything else leaves only their TODO.
+   * How a Session stops being engaged decides what it does with the
+   * completions it held: a viewer going absent rings them, since the user may
+   * not have seen them; focus moving on leaves only their TODO.
    */
-  setViewer(viewerId: string, state: Engagement, lapse?: EngagementLapse): void {
+  setViewer(viewerId: string, state: Engagement): void {
     // Revalidated: in VS Code the shape crosses from the webview.
     const focusId = typeof state?.focusId === 'string' ? state.focusId : null;
     const before = this.viewers.get(viewerId);
@@ -1019,11 +1015,11 @@ export class AlertManager {
       if (!entry || this.inert(id) || this.isEngaged(id) === was) continue;
       if (!was) {
         this.markSeen(entry);
-      } else if (lapse === 'idle' && focusId === id) {
+      } else if (after === undefined) {
         this.escalateHeld(id, entry);
       } else {
-        // An explicit disengage: focus moved, or the window left. The user
-        // saw it, so the TODO the hold set is enough.
+        // Focus moved on while present: the user saw it, so the TODO the hold
+        // set is enough.
         entry.held = null;
       }
       // COMMAND_EXIT_ARMED is derived from engagement.
@@ -1033,7 +1029,7 @@ export class AlertManager {
 
   /** The realm is gone: a disengage for whatever it pointed at. */
   removeViewer(viewerId: string): void {
-    this.setViewer(viewerId, NOT_ENGAGED, 'leave');
+    this.setViewer(viewerId, NOT_ENGAGED);
   }
 
   /** Every present viewer. An absent one engages nothing, so it is not kept. */
@@ -1072,7 +1068,7 @@ export class AlertManager {
     return Date.now() < entry.echoUntil;
   }
 
-  /** The user is looking: the completion is a TODO already, kept to ring if they go idle. */
+  /** The user is looking: the completion is a TODO already, kept to ring if they go absent. */
   private hold(entry: AlertEntry, source: ListedRingSource | WatchingSource, detail: ActivityNotification): void {
     const held = entry.held ??= { sources: [], watching: null, detail };
     held.detail = richer(held.detail, detail);
@@ -1083,8 +1079,8 @@ export class AlertManager {
   }
 
   /**
-   * Presence lapsed from inactivity with focus unchanged: each held source takes
-   * the path it would have taken unengaged, with the richest held detail.
+   * The viewer went absent while focused here: each held source takes the path
+   * it would have taken unengaged, with the richest held detail.
    */
   private escalateHeld(id: string, entry: AlertEntry): void {
     const held = entry.held;

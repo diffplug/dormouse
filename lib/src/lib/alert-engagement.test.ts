@@ -117,17 +117,28 @@ describe('held completions', () => {
 
   it.each([
     ['the window leaving', () => leave(manager)],
-    ['focus moving to another pane', () => engage(manager, OTHER)],
-    ['focus moving away while presence lapses', () => manager.setViewer(VIEWER, { present: false, focusId: OTHER }, 'idle')],
+    ['presence lapsing as focus moves away', () => manager.setViewer(VIEWER, { present: false, focusId: OTHER })],
     ['the viewer going away', () => manager.removeViewer(VIEWER)],
-  ] as const)('leaves a held completion as its TODO, never ringing it, on an explicit disengage: %s', (_how, disengage) => {
+  ] as const)('rings a held completion once its viewer is absent: %s', (_how, goAbsent) => {
     manager.onData(PANE);
     engage(manager, PANE);
     manager.notifyFromProtocol(PANE, PERMISSION);
 
-    disengage();
+    goAbsent();
+    expect(manager.getState(PANE)).toMatchObject({ status: 'ALERT_RINGING', todo: true, notification: PERMISSION });
+  });
+
+  it.each([
+    ['another pane', OTHER],
+    ['no terminal', null],
+  ] as const)('leaves a held completion as its TODO, never ringing it, when focus moves to %s while present', (_where, focusId) => {
+    manager.onData(PANE);
+    engage(manager, PANE);
+    manager.notifyFromProtocol(PANE, PERMISSION);
+
+    manager.setViewer(VIEWER, { present: true, focusId });
     vi.advanceTimersByTime(120_000);
-    goIdle(manager, PANE);
+    leave(manager);
     expect(manager.getState(PANE)).toMatchObject({ status: 'WATCHING_DISABLED', todo: true, notification: PERMISSION });
   });
 

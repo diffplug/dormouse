@@ -167,12 +167,10 @@ export function createAlertHost(options: AlertHostOptions): AlertHost {
         case 'updateSettings':
           settings.update(message.settings);
           return;
-        case 'engagement': {
-          // `setViewer` revalidates the shape: only a literal `idle` escalates.
-          const lapse = message.lapse === 'idle' || message.lapse === 'leave' ? message.lapse : undefined;
-          manager.setViewer(realmId, message.state as Engagement, lapse);
+        case 'engagement':
+          // `setViewer` revalidates the shape.
+          manager.setViewer(realmId, message.state as Engagement);
           return;
-        }
         case 'sessions':
           // Revalidated field by field, like the Workspace's persisted copy.
           delivery.publish(realmId, message.sessions);
