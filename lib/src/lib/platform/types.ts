@@ -1,6 +1,6 @@
 import type { BrowserAutomationProvider, BrowserRequest, BrowserResult } from './browser-automation';
 import type { HelperIdentity, TerminalContextRequest, TerminalContextInfo } from '../terminal-context-types';
-import type { AlertState, AwaitHandle, AwaitOptions, Engagement } from '../alert-manager';
+import type { AlertState, AwaitHandle, AwaitOptions, Engagement, EngagementLapse } from '../alert-manager';
 import type { AlertSettings } from '../alert-settings';
 import type { AlertSessionInfo, AlertSpeak } from '../../host/alert-protocol';
 import type { VSCodeWorkbenchCommand } from '../vscode-keybindings';
@@ -439,9 +439,9 @@ export interface PlatformAdapter {
   alertDismiss(id: string): void;
   /**
    * This renderer realm's presence and focus (`docs/specs/alert.md` ->
-   * Engagement), sent only when it changes.
+   * Engagement), sent only when it changes; `lapse` says why presence ended.
    */
-  alertEngagement(state: Engagement): void;
+  alertEngagement(state: Engagement, lapse?: EngagementLapse): void;
   /**
    * Every Session this realm shows, with its Pane label and its Workspace's
    * sparse delivery overrides, for the host's delivery scheduler

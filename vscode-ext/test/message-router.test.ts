@@ -529,7 +529,7 @@ describe('engagement viewers', () => {
     try {
       alert(a, { op: 'engagement', state: { present: true, focusId: 'pty-a' } });
       alert(b, { op: 'engagement', state: { present: true, focusId: 'pty-b' } });
-      alert(a, { op: 'engagement', state: { present: false, focusId: null } });
+      alert(a, { op: 'engagement', state: { present: false, focusId: null }, lapse: 'leave' });
 
       ptys.callbacks!.onData('pty-b', REPORT);
       expect(status('pty-b')).not.toBe('ALERT_RINGING');

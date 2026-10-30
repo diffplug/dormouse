@@ -1,3 +1,4 @@
+import type { EngagementLapse } from './alert-manager';
 import { subscribeWindowFocus } from './window-focus';
 
 /** What counts as a human at this window (`docs/specs/alert.md` -> Engagement). */
@@ -10,7 +11,8 @@ const LISTENER_OPTIONS: AddEventListenerOptions = { capture: true, passive: true
 /**
  * Whether a human is at this renderer realm: its window focused and visible,
  * with typing, pointer, or wheel input inside the inactivity timeout, or an
- * iframe Surface holding focus. Emits transitions only.
+ * iframe Surface holding focus. Emits transitions only, each end of presence
+ * with why it ended.
  */
 export interface PresenceTracker {
   readonly present: boolean;
@@ -22,8 +24,8 @@ export interface PresenceTracker {
 export interface PresenceTrackerOptions {
   /** Read at every deadline, so a settings edit needs only `refresh`. */
   timeoutMs: () => number;
-  /** Each transition; read `present` for the new value. */
-  onChange: () => void;
+  /** Each transition; an end of presence names its lapse. */
+  onChange: (present: boolean, lapse?: EngagementLapse) => void;
 }
 
 export function createPresenceTracker({ timeoutMs, onChange }: PresenceTrackerOptions): PresenceTracker {
@@ -37,10 +39,10 @@ export function createPresenceTracker({ timeoutMs, onChange }: PresenceTrackerOp
   // Engagement).
   const iframeHoldsFocus = (): boolean => document.activeElement?.tagName === 'IFRAME';
 
-  const set = (next: boolean): void => {
+  const set = (next: boolean, lapse?: EngagementLapse): void => {
     if (next === present) return;
     present = next;
-    onChange();
+    onChange(present, lapse);
   };
 
   const clearTimer = (): void => {
@@ -60,9 +62,12 @@ export function createPresenceTracker({ timeoutMs, onChange }: PresenceTrackerOp
     timer = null;
     if (!present) return;
     // Left while an iframe held focus, so no blur reached this window.
-    if (!windowActive()) return leave();
+    if (!windowActive()) {
+      set(false, 'leave');
+      return;
+    }
     if (iframeHoldsFocus()) lastInputAt = Date.now();
-    if (Date.now() - lastInputAt >= timeoutMs()) set(false);
+    if (Date.now() - lastInputAt >= timeoutMs()) set(false, 'idle');
     else arm();
   }
 
@@ -74,7 +79,7 @@ export function createPresenceTracker({ timeoutMs, onChange }: PresenceTrackerOp
 
   const leave = (): void => {
     clearTimer();
-    set(false);
+    set(false, 'leave');
   };
 
   // Bringing the window back is a human act, so it counts as input.

@@ -61,8 +61,8 @@ describe('engagement reporter', () => {
     publishEngagementFocus(wall, 'pane-a');
 
     expect(report.mock.calls).toEqual([
-      [{ present: true, focusId: null }],
-      [{ present: true, focusId: 'pane-a' }],
+      [{ present: true, focusId: null }, undefined],
+      [{ present: true, focusId: 'pane-a' }, undefined],
     ]);
   });
 
@@ -72,23 +72,23 @@ describe('engagement reporter', () => {
     expect(report).not.toHaveBeenCalled();
 
     window.dispatchEvent(new Event('keydown'));
-    expect(report.mock.calls).toEqual([[{ present: true, focusId: 'pane-b' }]]);
+    expect(report.mock.calls).toEqual([[{ present: true, focusId: 'pane-b' }, undefined]]);
   });
 
-  it('reports an inactivity lapse keeping the focus', () => {
+  it('names an inactivity lapse as idle, keeping the focus', () => {
     publishEngagementFocus(wall, 'pane-a');
     window.dispatchEvent(new Event('keydown'));
     report.mockClear();
 
     vi.advanceTimersByTime(getAlertSettings().inactivityTimeoutMs);
-    expect(report.mock.calls).toEqual([[{ present: false, focusId: 'pane-a' }]]);
+    expect(report.mock.calls).toEqual([[{ present: false, focusId: 'pane-a' }, 'idle']]);
   });
 
-  it('reports a focus change while present', () => {
+  it('reports a focus change while present without a lapse', () => {
     window.dispatchEvent(new Event('keydown'));
     publishEngagementFocus(wall, 'pane-a');
     publishEngagementFocus(wall, null);
-    expect(report.mock.calls.at(-1)).toEqual([{ present: true, focusId: null }]);
+    expect(report.mock.calls.at(-1)).toEqual([{ present: true, focusId: null }, undefined]);
   });
 
   it('reports the realm gone once the last holder releases', () => {
@@ -96,11 +96,11 @@ describe('engagement reporter', () => {
     window.dispatchEvent(new Event('keydown'));
     publishEngagementFocus(wall, 'pane-a');
     second();
-    expect(report.mock.calls.at(-1)).toEqual([{ present: true, focusId: 'pane-a' }]);
+    expect(report.mock.calls.at(-1)).toEqual([{ present: true, focusId: 'pane-a' }, undefined]);
 
     publishEngagementFocus(wall, null);
     release();
-    expect(report.mock.calls.at(-1)).toEqual([{ present: false, focusId: null }]);
+    expect(report.mock.calls.at(-1)).toEqual([{ present: false, focusId: null }, 'leave']);
     release = retainEngagementReporter();
   });
 });

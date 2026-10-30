@@ -25,7 +25,7 @@ it('sends each alert verb as one command naming its op', () => {
   methods.alertToggleTodo('p');
   methods.alertClearTodo('p');
   methods.alertEngagement({ present: true, focusId: 'p' });
-  methods.alertEngagement({ present: false, focusId: 'p' });
+  methods.alertEngagement({ present: false, focusId: 'p' }, 'idle');
   methods.alertPublishSessions({ p: { label: 'pnpm build', overrides: { speakEnabled: true } } });
   methods.alertSetWatchedCommands(['cargo']);
   // A delta, never a replacement.
@@ -40,7 +40,7 @@ it('sends each alert verb as one command naming its op', () => {
     { op: 'toggleTodo', id: 'p' },
     { op: 'clearTodo', id: 'p' },
     { op: 'engagement', state: { present: true, focusId: 'p' } },
-    { op: 'engagement', state: { present: false, focusId: 'p' } },
+    { op: 'engagement', state: { present: false, focusId: 'p' }, lapse: 'idle' },
     { op: 'sessions', sessions: { p: { label: 'pnpm build', overrides: { speakEnabled: true } } } },
     { op: 'initializeWatchedCommands', names: ['cargo'] },
     { op: 'setCommandWatched', name: 'cargo', watched: true },

@@ -132,7 +132,7 @@ interface Ring extends SourceSet {
 /**
  * Completions the user was looking at when they happened, already shown as
  * TODO (`docs/specs/alert.md` -> Completion events): the sources they would
- * raise if the viewer goes absent, and the richest detail among them.
+ * raise if the user goes idle or leaves the host, and the richest detail among them.
  */
 interface HeldCompletion extends SourceSet {
   detail: ActivityNotification;
@@ -153,6 +153,10 @@ export interface Engagement {
   /** The terminal Session this viewer points at, or null. */
   focusId: string | null;
 }
+
+/** Why a viewer stopped being present: its inactivity timeout ran out
+ *  (`idle`), or its window blurred, hid, or ended (`leave`). */
+export type EngagementLapse = 'idle' | 'leave';
 
 export function normalizeActivityNotification(value: unknown): ActivityNotification | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -287,8 +291,10 @@ interface AlertEntry {
   todo: TodoState;
   /** The TODO's detail: null without one. A ring shows its own instead. */
   notification: ActivityNotification | null;
-  /** Completions withheld while engaged, already shown as TODO: rung if the viewer goes absent (`setViewer`), dropped if focus moves on. */
+  /** Completions withheld while engaged, already shown as TODO: rung if the user goes idle or leaves the host (`setViewer`), dropped if focus moves on. */
   held: HeldCompletion | null;
+  /** Pending while the viewer that held it has left, until the host shows whether the user is still here. */
+  leaveGrace: ReturnType<typeof setTimeout> | null;
   /** Output and completions before this instant answer the user's own input (`acknowledge`). */
   echoUntil: number;
 }
@@ -545,7 +551,7 @@ export class AlertManager {
   /**
    * The path from a completion that may ring to the ring: a live one and an
    * escalated hold alike. Engaged, it is held — a TODO at once, rung if the
-   * viewer goes absent; otherwise a report goes through the acknowledged-state
+   * user goes idle or leaves the host; otherwise a report goes through the acknowledged-state
    * check, and anything else rings. Publishes, including a progress cycle
    * the caller cleared before dispatch.
    */
@@ -988,10 +994,10 @@ export class AlertManager {
   /**
    * One renderer realm's presence and focus, as its reporter computed them.
    * How a Session stops being engaged decides what it does with the
-   * completions it held: a viewer going absent rings them, since the user may
-   * not have seen them; focus moving on leaves only their TODO.
+   * completions it held: an `idle` lapse rings them, a `leave` rings them once
+   * the whole host is absent, and focus moving on leaves only their TODO.
    */
-  setViewer(viewerId: string, state: Engagement): void {
+  setViewer(viewerId: string, state: Engagement, lapse?: EngagementLapse): void {
     // Revalidated: in VS Code the shape crosses from the webview.
     const focusId = typeof state?.focusId === 'string' ? state.focusId : null;
     const before = this.viewers.get(viewerId);
@@ -1008,13 +1014,16 @@ export class AlertManager {
       const entry = this.entries.get(id);
       if (!entry || this.inert(id) || this.isEngaged(id) === was) continue;
       if (!was) {
+        this.endLeaveGrace(entry);
         this.markSeen(entry);
-      } else if (after === undefined) {
-        this.escalateHeld(id, entry);
-      } else {
+      } else if (after !== undefined) {
         // Focus moved on while present: the user saw it, so the TODO the hold
         // set is enough.
         entry.held = null;
+      } else if (lapse === 'idle') {
+        this.escalateHeld(id, entry);
+      } else {
+        this.startLeaveGrace(id, entry);
       }
       // COMMAND_EXIT_ARMED is derived from engagement.
       this.notify(id);
@@ -1023,7 +1032,7 @@ export class AlertManager {
 
   /** The realm is gone: a disengage for whatever it pointed at. */
   removeViewer(viewerId: string): void {
-    this.setViewer(viewerId, { present: false, focusId: null });
+    this.setViewer(viewerId, { present: false, focusId: null }, 'leave');
   }
 
   /** Every present viewer. An absent one engages nothing, so it is not kept. */
@@ -1062,7 +1071,7 @@ export class AlertManager {
     return Date.now() < entry.echoUntil;
   }
 
-  /** The user is looking: the completion is a TODO already, kept to ring if they go absent. */
+  /** The user is looking: the completion is a TODO already, kept to ring if they go idle or leave the host. */
   private hold(entry: AlertEntry, source: ListedRingSource | WatchingSource, detail: ActivityNotification): void {
     const held = entry.held ??= { sources: [], watching: null, detail };
     held.detail = richer(held.detail, detail);
@@ -1073,9 +1082,31 @@ export class AlertManager {
   }
 
   /**
-   * The viewer went absent while focused here: each held source takes the path
-   * it would have taken unengaged, with the richest held detail.
+   * The user went idle, or left the host: each held source takes the path it
+   * would have taken unengaged, with the richest held detail.
    */
+  /**
+   * The viewer holding it left — a blur, a hide, its realm ending. Ring what it
+   * held only if the user left the whole host; another viewer still present (the
+   * VS Code window around a webview, another Dormouse window) means focus moved
+   * on. The grace lets that viewer's own report land first.
+   */
+  private startLeaveGrace(id: string, entry: AlertEntry): void {
+    this.endLeaveGrace(entry);
+    if (entry.held === null) return;
+    entry.leaveGrace = setTimeout(() => {
+      entry.leaveGrace = null;
+      if (this.viewers.size === 0) this.escalateHeld(id, entry);
+      else entry.held = null;
+    }, cfg.alert.leaveGrace);
+  }
+
+  private endLeaveGrace(entry: AlertEntry): void {
+    if (entry.leaveGrace === null) return;
+    clearTimeout(entry.leaveGrace);
+    entry.leaveGrace = null;
+  }
+
   private escalateHeld(id: string, entry: AlertEntry): void {
     const held = entry.held;
     if (held === null) return;
@@ -1189,6 +1220,7 @@ export class AlertManager {
     const entry = this.entries.get(id);
     if (entry) {
       entry.detector.dispose();
+      this.endLeaveGrace(entry);
       this.entries.delete(id);
       this.notify(id);
     }
@@ -1229,6 +1261,7 @@ export class AlertManager {
     for (const id of [...this.awaits.keys()]) this.settleWaiters(id, 'cancelled');
     for (const entry of this.entries.values()) {
       entry.detector.dispose();
+      this.endLeaveGrace(entry);
     }
     this.entries.clear();
     this.removed.clear();
@@ -1291,6 +1324,7 @@ export class AlertManager {
         todo: false,
         notification: null,
         held: null,
+        leaveGrace: null,
         echoUntil: 0,
       };
       this.entries.set(id, entry);

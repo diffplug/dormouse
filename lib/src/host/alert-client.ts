@@ -1,4 +1,4 @@
-import type { AwaitHandle, AwaitOptions, AwaitOutcome, Engagement } from '../lib/alert-manager';
+import type { AwaitHandle, AwaitOptions, AwaitOutcome, Engagement, EngagementLapse } from '../lib/alert-manager';
 import type { AlertSettings } from '../lib/alert-settings-model';
 import type { AlertStateDetail, PlatformAdapter } from '../lib/platform/types';
 import { isAlertEvent, type AlertAwaitResult, type AlertCommand, type AlertEvents, type AlertSpeak } from './alert-protocol';
@@ -76,7 +76,8 @@ export function createAlertClient(send: (command: AlertCommand) => void): AlertC
     alertPublishSettings: (settings, opts) =>
       send({ op: opts.seed ? 'initializeSettings' : 'updateSettings', settings }),
     alertDismiss: (id) => send({ op: 'dismiss', id }),
-    alertEngagement: (state: Engagement) => send({ op: 'engagement', state }),
+    alertEngagement: (state: Engagement, lapse?: EngagementLapse) =>
+      send({ op: 'engagement', state, ...(lapse ? { lapse } : {}) }),
     alertPublishSessions: (sessions) => {
       shown = Object.keys(sessions);
       send({ op: 'sessions', sessions });

@@ -21,14 +21,14 @@ export function engage(manager: AlertManager, id: string, viewer = VIEWER): void
   manager.setViewer(viewer, { present: true, focusId: id });
 }
 
-/** The window left: blurred or hidden. */
+/** An explicit disengage: focus moved off, or the window left. */
 export function leave(manager: AlertManager, viewer = VIEWER): void {
-  manager.setViewer(viewer, { present: false, focusId: null });
+  manager.setViewer(viewer, { present: false, focusId: null }, 'leave');
 }
 
 /** Presence lapses from inactivity while `id` keeps the focus. */
 export function goIdle(manager: AlertManager, id: string, viewer = VIEWER): void {
-  manager.setViewer(viewer, { present: false, focusId: id });
+  manager.setViewer(viewer, { present: false, focusId: id }, 'idle');
 }
 
 /** A key the user presses, through the human-input path: acknowledged, and output may start work. */

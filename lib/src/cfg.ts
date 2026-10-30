@@ -28,6 +28,10 @@ export const cfg = {
     workStartWindow: 5_000,
     /** ms — default inactivity timeout: presence lapses this long after the last typing, mouse, or scroll input. */
     inactivityTimeout: 15_000,
+    /** ms — after a viewer leaves, how long another viewer's own report has to
+     * land before a held completion counts as left behind: a VS Code webview's
+     * blur and its window's focus change arrive in no fixed order. */
+    leaveGrace: 1_000,
     /** ms — shared grace period for keystroke echo AND fast command completions.
      * Both are intentionally suppressed: completions inside it neither ring nor
      * wait to ring on inactivity. Keep these effects coupled; there is no separate

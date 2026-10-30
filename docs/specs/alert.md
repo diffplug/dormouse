@@ -60,8 +60,8 @@ Three separate signals, never one lease (rationale):
 A Session is engaged while some present viewer focuses it.
 
 - **Must compute presence in the renderer and report transitions only**: an input event only stamps a time, and the host keeps no presence timer.
-- **Must treat a blur as a leave only when `document.hasFocus()` is false** (`docs/specs/layout.md` → Corner cases #2). Focus or visibility returning counts as input.
-- **An iframe Surface holding focus must keep presence from going idle**, its input never reaching the window; a blur behind it is a leave at the next deadline (rationale).
+- An end of presence names its lapse — `idle` when the timeout ran out, `leave` on a window blur, a hide, or the realm ending. **Must treat a blur as a leave only when `document.hasFocus()` is false** (`docs/specs/layout.md` → Corner cases #2). Focus or visibility returning counts as input.
+- **An iframe Surface holding focus must keep presence from lapsing `idle`**, its input never reaching the window; a blur behind it is a `leave` at the next deadline (rationale).
 - **Must keep engagement per viewer**, deduped at the renderer, so one viewer's leave never disengages a Session another viewer engages. An absent viewer reports no focus change.
 
 | Gesture | Acknowledges |
@@ -100,9 +100,10 @@ flowchart TD
   DIS -- "claimed" --> AW["Await"]
   DIS -- "ring, hold, receipt" --> L
   AW -- "withdraw" --> L
-  EN -- "absent, focus moves on" --> L
+  EN -- "idle, leave, focus moves on" --> L
+  P -. "any viewer Present" .-> L
   EN -- "Engaged: Seen" --> CMD
-  L -- "absent: held sources" --> DIS
+  L -- "idle, or no viewer Present after a leave: held sources" --> DIS
   VB["gestures and verbs"] --> L
   VB -- "gesture with input" --> WIN
   subgraph L["Latches"]
@@ -168,7 +169,8 @@ stateDiagram-v2
   state "Engagement" as Engagement {
     [*] --> NotEngaged
     NotEngaged --> Engaged: a Present viewer focuses it
-    Engaged --> NotEngaged: absent — its last focusing viewer goes Absent
+    Engaged --> NotEngaged: idle — its last focusing viewer goes idle
+    Engaged --> NotEngaged: leave — its last focusing viewer leaves
     Engaged --> NotEngaged: focus moves on — its last focusing viewer, still Present, focuses elsewhere
   }
 ```
@@ -261,9 +263,14 @@ stateDiagram-v2
     [*] --> NoHold
     NoHold --> Held: hold
     Held --> Held: hold, detail only if richer, or withdraw leaving other sources
-    Held --> NoHold: Engagement absent — each source back to Dispatch at Engaged?
+    Held --> NoHold: Engagement idle — each source back to Dispatch at Engaged?
     Held --> NoHold: Engagement focus moves on, or a verb
     Held --> NoHold: withdraw of its last source
+    Held --> Leaving: Engagement leave
+    Leaving --> Held: Engaged again
+    Leaving --> Leaving: withdraw leaving other sources
+    Leaving --> NoHold: the leave grace elapses with no viewer Present — each source back to Dispatch at Engaged?
+    Leaving --> NoHold: the leave grace elapses with a viewer Present, a verb, or withdraw of its last source
   }
 ```
 

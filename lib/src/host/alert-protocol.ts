@@ -1,4 +1,4 @@
-import type { AwaitOutcome, AwaitUntil, Engagement } from '../lib/alert-manager';
+import type { AwaitOutcome, AwaitUntil, Engagement, EngagementLapse } from '../lib/alert-manager';
 import type { AlertDeliveryOverrides } from '../lib/alert-delivery-model';
 import type { AlertSettings } from '../lib/alert-settings-model';
 import type { AlertStateDetail } from '../lib/platform/types';
@@ -19,7 +19,7 @@ export type AlertCommand =
   | { op: 'initializeWatchedCommands'; names: string[] }
   | { op: 'setCommandWatched'; name: string; watched: boolean }
   | { op: 'initializeSettings' | 'updateSettings'; settings: AlertSettings }
-  | { op: 'engagement'; state: Engagement }
+  | { op: 'engagement'; state: Engagement; lapse?: EngagementLapse }
   /** Every Session this realm shows, by id: what the host's delivery
    *  scheduler cannot know itself. Overwrites each one's last publication
    *  (`createAlertDeliveryScheduler`). */

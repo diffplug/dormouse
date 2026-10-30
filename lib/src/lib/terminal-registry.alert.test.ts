@@ -142,9 +142,9 @@ function engageSession(id: string): void {
   fakePlatform.alertEngagement({ present: true, focusId: id });
 }
 
-/** The window left: blurred or hidden. */
+/** Focus moved off, or the window left. */
 function leaveSession(): void {
-  fakePlatform.alertEngagement({ present: false, focusId: null });
+  fakePlatform.alertEngagement({ present: false, focusId: null }, 'leave');
 }
 
 /** A click on the pane, or a Door reattach into passthrough. */
