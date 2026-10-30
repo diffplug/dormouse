@@ -193,10 +193,12 @@ jobs:
             { echo "::error::A gh configuration directory already exists at the fresh path."; exit 1; }
           export GH_CONFIG_DIR GH_HOST=github.com
           # `--limit 1000`, not `gh`'s default of 30, which once left an
-          # older open finding unreconciled.
+          # older open finding unreconciled; a list that fills it may have
+          # left one out, so it fails rather than read short.
           OPEN=$(gh issue list --repo "$EMBARGO_REPO" --state open --limit 1000 \
                    --json number,title \
-                   --jq '.[] | select(.title | startswith("[audit-finding ")) | "\(.number) \(.title)"') ||
+                   --jq 'if length >= 1000 then error("the findings ledger filled its 1000-issue read") else
+                         .[] | select(.title | startswith("[audit-finding ")) | "\(.number) \(.title)" end') ||
             { echo "::error::Reading the findings ledger failed; the domains have no open findings to re-verify."; exit 1; }
           COUNT=0
           while read -r row; do
@@ -525,10 +527,12 @@ jobs:
           [ -f audit-ledger/index.tsv ] ||
             fail no-report "No findings ledger was composed."
           # `--limit 1000`, not `gh`'s default of 30, which once left an
-          # older open finding unreconciled.
+          # older open finding unreconciled; a list that fills it may have
+          # left one out, so it fails rather than read short.
           OPEN=$(gh issue list --repo "$EMBARGO_REPO" --state open --limit 1000 \
                    --json number,title \
-                   --jq '.[] | select(.title | startswith("[audit-finding ")) | "\(.number) \(.title)"') ||
+                   --jq 'if length >= 1000 then error("the findings ledger filled its 1000-issue read") else
+                         .[] | select(.title | startswith("[audit-finding ")) | "\(.number) \(.title)" end') ||
             fail failed "Reading the findings ledger failed."
           OPEN_COUNT=0
           while read -r row; do [ -n "$row" ] && OPEN_COUNT=$((OPEN_COUNT + 1)); done <<< "$OPEN"
@@ -607,10 +611,12 @@ jobs:
             { echo "::error::A gh configuration directory already exists at the fresh path."; exit 1; }
           export GH_CONFIG_DIR GH_HOST=github.com
           # `--limit 1000`, not `gh`'s default of 30, which once left an
-          # older open finding unreconciled.
+          # older open finding unreconciled; a list that fills it may have
+          # left one out, so it fails rather than read short.
           SNAPSHOT=$(gh issue list --repo "$EMBARGO_REPO" --state all --limit 1000 \
                        --json number,title,state,stateReason,createdAt,closedAt,body,comments \
-                       --jq '.[] | select(.title | startswith("[audit-finding ")) | {
+                       --jq 'if length >= 1000 then error("the findings ledger filled its 1000-issue read") else
+                       .[] | select(.title | startswith("[audit-finding ")) | {
                          number, state, stateReason, createdAt, closedAt,
                          title: (first(.title | capture("\\A\\[audit-finding (?<key>[A-Za-z0-9._-]+)\\] (?<severity>FAIL|BLOCKER|WARNING)\\b")) // null),
                          meta: ((try first(.body | capture("\\A<!-- audit-ledger (?<m>\\{[^\\n]*\\}) -->") | .m | fromjson | objects | {key, severity, rule, spec, heading, file})) // null),
@@ -619,7 +625,7 @@ jobs:
                                  | {repo: (.repo // .url), pr}],
                          summary: ([.comments[] | select(.authorAssociation | IN("OWNER", "MEMBER", "COLLABORATOR")) | .body
                                     | select(test("\\A## Public summary\\r?\\n")) | sub("\\A## Public summary\\r?\\n"; "")] | last)
-                       } | tojson') ||
+                       } | tojson end') ||
             { echo "::error::Reading the findings ledger failed; the status issue cannot list the open findings."; exit 1; }
           COUNT=0
           while read -r row; do [ -n "$row" ] && COUNT=$((COUNT + 1)); done <<< "$SNAPSHOT"

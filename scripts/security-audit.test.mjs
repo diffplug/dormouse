@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import YAML from 'yaml';
 import { BODY_LIMIT } from './clamp-issue-body.mjs';
 import { OPEN_FINDINGS, SENTINEL, domains, failKey, fragmentManifest, ledgerKey, manifestLines, ledgerMeta, owedIds as owedRuleIds, ruleIndex } from './security-audit-report.mjs';
-import { disclosureReason, parseLedger, planDisclosures, statusBody } from './security-audit-public-body.mjs';
+import { DISCLOSURE_LABEL, disclosureReason, parseLedger, planDisclosures, statusBody } from './security-audit-public-body.mjs';
 import { FRAGMENT } from './github-state-check.mjs';
 import { decide } from './security-audit-plan.mjs';
 import { codexPreamble, DELEGATION_SECTIONS, streamPrompt, streams as workStreamNames } from './security-audit-codex.mjs';
@@ -154,7 +154,7 @@ function stubGh(dir, seed) {
       const label = opt('--label');
       const fields = opt('--json').split(',');
       const listed = issues.filter((i) => (!want || i.state === want) && (!label || i.labels.includes(label)))
-        .map((i) => Object.fromEntries(fields.map((f) => [f, i[f]])));
+        .map((i) => Object.fromEntries(fields.map((f) => [f, i[f]]))).slice(0, Number(opt('--limit') ?? 30));
       const jq = opt('--jq');
       process.stdout.write(jq === null ? JSON.stringify(listed) : execFileSync('jq', ['-r', jq], { input: JSON.stringify(listed), encoding: 'utf8' }));
     } else if (command === 'issue' && sub === 'create') {
@@ -432,6 +432,31 @@ test('an INFO off the grammar is an anomaly that leaves a PASS and files nothing
   assert.equal(readFileSync(join(dir, 'audit-ledger/index.tsv'), 'utf8'), '');
   assert.ok(!ghCalls(dir).some(({ embargo, args }) => embargo && args[1] !== 'list'), JSON.stringify(ghCalls(dir)));
   assert.ok(!statusIssueBody(dir).includes('pinned tarball'));
+});
+
+// `gh issue list` reads at most its `--limit`: a list that fills it may have
+// left an open finding or a disclosure out, so every read that relies on
+// being whole fails instead of reading short.
+test('a ledger or disclosure list that fills its read fails rather than read short', (t) => {
+  const { dir, env } = fixture(t);
+  stubGh(dir);
+  writeFileSync(join(dir, 'audit-status.txt'), 'PASS');
+  fragments.forEach((f) => writeFileSync(join(dir, f), fragmentText(f)));
+  const full = Array.from({ length: 1000 }, (_, i) => `${i + 1} [audit-finding ${String(i).padStart(12, '0')}] WARNING: old\n`).join('');
+  const { listed, embargoed, read, published } = runReporting(dir, env, { embargoEnv: { GH_LEDGER_OPEN: full } });
+  for (const step of [listed, embargoed, read]) assert.notEqual(step.status, 0, step.stdout);
+  assert.match(read.stdout, /Reading the findings ledger failed/);
+  assert.notEqual(published.status, 0);
+
+  const again = fixture(t);
+  stubGh(again.dir, { public: Array.from({ length: 1000 }, (_, i) => ({ number: i + 1, title: `[audit-disclosure ${String(i).padStart(12, '0')}/${i + 1}] WARNING finding`,
+    body: '', labels: [DISCLOSURE_LABEL], state: 'CLOSED', stateReason: 'COMPLETED', createdAt: SEEDED_AT, closedAt: SEEDED_AT, comments: [] })) });
+  writeFileSync(join(again.dir, 'audit-status.txt'), 'PASS');
+  fragments.forEach((f) => writeFileSync(join(again.dir, f), fragmentText(f)));
+  const second = runReporting(again.dir, again.env);
+  assert.equal(second.read.status, 0, second.read.stderr);
+  assert.notEqual(second.published.status, 0);
+  assert.match(second.published.stderr, /disclosure list filled its 1000-issue read/);
 });
 
 // The private issue carries what did not pass; the PASS ledger stays in the
