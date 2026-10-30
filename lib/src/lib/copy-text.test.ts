@@ -203,7 +203,6 @@ describe('copy-text formats', () => {
       'This section lost its selling power. Previous version sold the use case:',
       '',
       '> "Run builds, agents, servers, and scripts side by side. Minimize the ones you’re not watching to a compact status indicator — every pane keeps running and every alert still fires whether minimized or not."',
-      '>',
       '> > A quote of a quote, wrapped at the margin so that it reaches the next row.',
       '',
       'Current version (lines 35–39) sells the mechanics.',
@@ -224,6 +223,12 @@ describe('copy-text formats', () => {
       'The reply.',
     ], { cols: 80 });
     expect(text(buf, span(0, 0, 4, 9), 'auto')).toBe('> > The nested quote of an email is wrapped at the margin of its pane by the mail client that sent it.\n> The reply to it.\n>\nThe reply.');
+  });
+
+  it('reads an editor’s indent guides as indentation, not quotes', () => {
+    // Neovim's indent-blankline draws `▎` at each indent stop, here every four columns.
+    const buf = lines(['def area(width, height):', '▎   if width < 0:', '▎   ▎   raise ValueError(width)', '▎', '▎   return width * height'], { cols: 80 });
+    expect(text(buf, span(0, 0, 4, 24), 'auto')).toBe('def area(width, height):\n    if width < 0:\n        raise ValueError(width)\n    return width * height');
   });
 
   it('reads a block slab exactly under Auto', () => {

@@ -117,13 +117,14 @@ const isBlankCell = (ch: string | undefined) => ch === undefined || ch === ' ';
 const BOX = /[─-▟]/;
 const FRAME_ONLY = /^[─-▟\s]+$/;
 /** A TUI's line-leading glyph that is decoration, not text: Claude Code's reply
- *  and tool bullets, or a run of box drawing. */
-const LEAD_MARKER = /^(\s*)(⏺ |⎿ |● |[─-▟]+ ?)/;
+ *  and tool bullets, an editor's indent guides, or a run of box drawing. */
+const LEAD_MARKER = /^(\s*)(⏺ |⎿ |● |(?:[▏▎▍] {2,})+|[─-▟]+ ?)/;
 const TRAIL_BOX = / ?[─-▟]+$/;
 const LIST_MARKER = /^(?:[-*•]|\d+[.)]) /;
-/** A quote's prefix, one marker per level: Markdown's `>` or a TUI's quote
- *  bar (Claude Code's `▎`), the last followed by text or the line's end. */
-const QUOTE = /^(\s*)((?:[>▏▎▍] ?)*[>▏▎▍])(?= +\S| *$)/;
+/** A quote's prefix, one marker per level and text after: Markdown's `>`, or a
+ *  TUI's quote bar (Claude Code's `▎`) one or two spaces before its text —
+ *  wider, it is an editor's indent guide, one per indent stop (rationale). */
+const QUOTE = /^(\s*)((?:[>▏▎▍] ?)*[>▏▎▍])(?=(?<=>) +[^\s>▏▎▍]| {1,2}[^\s>▏▎▍])/;
 const QUOTE_BAR = /^[▏▎▍]$/;
 
 function isFrameOnly(text: string): boolean {
@@ -148,8 +149,8 @@ function decoration(text: string): Decoration {
     const q = QUOTE.exec(text.slice(at));
     if (!q) return null;
     const to = at + q[0].length;
-    // A lone `>` is a prompt, not an empty quote line; a lone bar is one.
-    return q[2].includes('>') && !text.slice(to, trailAt).trim() ? null : { from: at + q[1].length, to };
+    // Text a trailing box side ends: Claude Code's empty `│ > │` prompt is no quote.
+    return text.slice(to, trailAt).trim() ? { from: at + q[1].length, to } : null;
   };
   let quote = quoteAt(0);
   const lead = quote ? null : LEAD_MARKER.exec(text);
@@ -197,8 +198,7 @@ function line(buf: CopyBuffer, r: number): LineFacts {
     top, bottom, plain,
     depth: d.quote ? text.slice(d.quote.from, d.quote.to).replace(/ /g, '').length : 0,
     start: d.quote ? d.quote.from : indentOf(plain),
-    // A bar-only quote line is blank between its paragraphs.
-    boundary: !plain.trim() || isFrameOnly(text) || /^[│┃║]/.test(text),
+    boundary: !text.trim() || isFrameOnly(text) || /^[│┃║]/.test(text),
   };
   for (let i = top; i <= bottom; i++) lineFacts.set(buf.row(i), f);
   return f;
@@ -398,8 +398,8 @@ function stripDecoration(rows: LineRows): Line[] | null {
   const own = rows.map((l, k) => (k < rows.length - 1 ? [...l.cells, ...l.trail] : l.cells));
   const joined = own.flat();
   const text = joined.map((c) => c.ch).join('');
+  if (isFrameOnly(text)) return null;
   const d = decoration(text);
-  if (!d.quote && isFrameOnly(text)) return null;
   const from = cellsForChars(joined, d.blankFrom);
   const to = cellsForChars(joined, d.blankTo);
   const qFrom = d.quote ? cellsForChars(joined, d.quote.from) : 0;
