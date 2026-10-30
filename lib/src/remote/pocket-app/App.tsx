@@ -28,7 +28,11 @@ import {
 import { PasskeyAlreadyRegisteredError, browserWebAuthn } from '../client/webauthn';
 import { deploymentDirectPeer, pocketDeploymentSource, type PocketDeployment } from './deployment';
 import { BURROW_IS_AN_APP, SCAN_LABEL, SETUP_PATH } from '../setup-copy';
-import { probeNoiseSupport, type PairingInvitation } from 'remote-lib-common';
+import {
+  UNMINTED_DELIVERY_ID_ERROR,
+  probeNoiseSupport,
+  type PairingInvitation,
+} from 'remote-lib-common';
 import {
   indexedDbKnownBurrowStore,
   indexedDbPendingDeletionStore,
@@ -618,8 +622,18 @@ export default function App({
         // tap also repairs a rotated endpoint everywhere. Each response commits
         // as it lands rather than after the loop: a registration that fails on
         // the third Burrow must not throw away the first two.
+        // A pairing whose delivery id its computer did not mint is refused for
+        // good, not for now; it must not stop the Burrows after it registering.
+        const unminted: string[] = [];
         for (const burrow of burrows.filter(isPushTarget)) {
-          const { burrowIds } = await client.subscribeToPush(burrow.burrowId, subscription);
+          let burrowIds: string[];
+          try {
+            ({ burrowIds } = await client.subscribeToPush(burrow.burrowId, subscription));
+          } catch (err) {
+            if (!isUnmintedRefusal(err)) throw err;
+            unminted.push(burrow.label);
+            continue;
+          }
           // Newer than any load still in flight — it answered the same question
           // about the same device, later — so it takes the token from the load
           // whole, dropping every continuation at once rather than each carrying
@@ -628,6 +642,12 @@ export default function App({
           pushLoadRunRef.current++;
           setPushSubscriptionCurrent(true);
           setPushSubscribedBurrowIds(new Set(burrowIds));
+        }
+        if (unminted.length > 0) {
+          throw new Error(
+            `Push could not be turned on for ${unminted.join(', ')}. Update Dormouse on ` +
+              `${unminted.length === 1 ? 'that computer' : 'those computers'}, then pair this phone again.`,
+          );
         }
       } catch (err) {
         // A denied permission prompt is a failure that changes availability, and
@@ -775,6 +795,19 @@ async function retireUnlessExpired(client: PocketClient, setupToken: string): Pr
     if (err instanceof SessionExpiredError) return false;
     throw err;
   }
+}
+
+/**
+ * The Relay's refusal of a delivery id its Burrow did not mint
+ * (`docs/specs/relay.md` -> "Web Push"): a pairing made by a computer from
+ * before minting, which only updating it and re-pairing repairs.
+ */
+function isUnmintedRefusal(err: unknown): boolean {
+  return (
+    err instanceof RelayRefusalError &&
+    err.status === 403 &&
+    err.message === UNMINTED_DELIVERY_ID_ERROR
+  );
 }
 
 /** One pinned record as the list renders it. */
