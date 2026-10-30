@@ -8,7 +8,7 @@ import { accountQuery, cookieLogin, isRecentLogin, smallBody, type AccountHost }
 import { DAY_MS, END_REASONS, run, withBilling, type BillingSetup } from "./billing";
 import { RECENT_LOGIN_WINDOW, REFUND_DAYS, type Plan } from "./policy-constants";
 import type { RelayAccountHost } from "./relay-account";
-import { RETRY_DAYS, abandoned, refundPaidInvoices } from "./withdrawal";
+import { refundPaidInvoices } from "./withdrawal";
 
 /** What one request's account deployment provides to account closure: closing its relay sockets as removals do, too. */
 export interface ClosureHost extends AccountHost, Pick<RelayAccountHost, "closeBurrow" | "closeSessions"> {
@@ -89,19 +89,22 @@ async function settleClosure(billing: Billing<Plan>, owner: string, canceled: re
 const RETRY_BATCH = 20;
 
 /**
- * The cron's pass: settles every closure in the last {@link RETRY_DAYS}
- * days whose refunds failed, up to {@link RETRY_BATCH}; answers the
- * failures, and one more while any older stays unsettled.
+ * The cron's pass: tries to finish the refunds of up to {@link RETRY_BATCH}
+ * unsettled closures, however old, the least recently tried first, so one
+ * that keeps failing never starves the rest; answers the failures, so every
+ * run that tries one still unsettled fails.
  */
 export async function retryClosures(billing: Billing<Plan>): Promise<unknown[]> {
-  const since = new Date(billing.time.now().getTime() - RETRY_DAYS * DAY_MS);
   const rows = await run<{ userId: string; canceledSubscriptions: string[] }>(
     billing.db,
-    `SELECT "userId", "canceledSubscriptions" FROM public.dormouse_account_closures
-    WHERE "settledAt" IS NULL AND "closedAt" > $1 ORDER BY "closedAt" LIMIT $2`,
-    [since, RETRY_BATCH],
+    `WITH due AS (
+      SELECT "userId" FROM public.dormouse_account_closures WHERE "settledAt" IS NULL
+      ORDER BY "attemptedAt" NULLS FIRST, "closedAt", "userId" LIMIT $2)
+    UPDATE public.dormouse_account_closures SET "attemptedAt" = $1 WHERE "userId" IN (SELECT "userId" FROM due)
+    RETURNING "userId", "canceledSubscriptions"`,
+    [billing.time.now(), RETRY_BATCH],
   );
-  const failed: unknown[] = await abandoned(billing, "account_closures", "closedAt", since);
+  const failed: unknown[] = [];
   for (const { userId, canceledSubscriptions } of rows)
     await settleClosure(billing, userId, canceledSubscriptions).catch((error: unknown) => failed.push(error));
   return failed;

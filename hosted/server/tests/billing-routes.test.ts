@@ -992,6 +992,54 @@ test("a payment Stripe holds by its charge is refunded by it; one paid outside S
   await resyncBilling(f.setup, f.database.url, origin, f.mail);
 });
 
+test("the cron retries unsettled withdrawals and closures however old, the least recently tried first", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const error = vi.spyOn(console, "error").mockImplementation(() => {});
+  onTestFinished(() => error.mockRestore());
+  const resync = () => resyncBilling(f.setup, f.database.url, origin, f.mail).then(() => null, (failure: unknown) => failure);
+  const ago = (days: number) => new Date(f.time.now().getTime() - days * DAY_MS);
+  // A withdrawal and a closure, each with a refund that failed.
+  const withdrawing = await f.account();
+  const { subscription: withdrawn } = await f.buy(withdrawing, "founding");
+  f.paidInvoices.set("pi_w_late", withdrawn.id);
+  f.failing.refunds = 1;
+  expect((await withdrawing.request("/api/billing/withdraw", { method: "POST", body: { subscription: withdrawn.id } })).status).toBe(200);
+  const closing = await f.account();
+  const { subscription: closed } = await f.buy(closing, "monthly");
+  f.paidInvoices.set("pi_c_late", closed.id);
+  f.failing.refunds = 1;
+  expect((await closing.request("/api/account/close", { method: "POST", body: { close: true } })).status).toBe(204);
+  expect(f.refunds).toEqual([]);
+
+  // Months on, behind a full batch of each (RETRY_BATCH) that keeps failing, older still.
+  f.time.advanceMilliseconds(90 * DAY_MS);
+  await f.sql(
+    `INSERT INTO dormouse_withdrawals (id, "userId", "subscriptionId", plan, "priceId", "contractStartedAt", "submittedAt")
+    SELECT 'failing-' || n, 'nobody-' || n, 'sub_failing_' || n, 'monthly', 'price_x', $1, $1 FROM generate_series(1, 20) n`,
+    [ago(200)],
+  );
+  await f.sql(
+    `INSERT INTO dormouse_account_closures ("userId", "canceledSubscriptions", "closedAt")
+    SELECT 'nobody-' || n, ARRAY['sub_failing_' || n], $1 FROM generate_series(1, 20) n`,
+    [ago(200)],
+  );
+  expect(await resync()).toBeInstanceOf(AggregateError);
+  expect(f.refunds).toEqual([]);
+  f.time.advanceMilliseconds(10 * 60 * 1000);
+  expect(await resync()).toBeInstanceOf(AggregateError);
+  expect(f.refunds).toEqual([
+    { paymentIntent: "pi_w_late", withdrawal: expect.any(String) },
+    { paymentIntent: "pi_c_late", withdrawal: null, closure: closed.id },
+  ]);
+  expect(await withdrawing.summary()).toMatchObject({ withdrawn: { settled: true } });
+  expect(
+    await f.sql(`SELECT "settledAt" IS NOT NULL AS settled FROM dormouse_account_closures WHERE "userId" = $1`, [closing.id]),
+  ).toEqual([{ settled: true }]);
+});
+
 test("closing an account needs a recent login, cancels its subscription in Stripe first, and keeps the billing records", async ({
   onTestFinished,
 }) => {
