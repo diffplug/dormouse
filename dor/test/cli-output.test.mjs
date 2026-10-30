@@ -464,7 +464,7 @@ test('shell command quoting supports shell families', () => {
   );
   assert.equal(
     buildShellCommandForKind('cmd', ['C:\\Program Files\\nodejs\\node.exe', '-e', 'console.log(process.argv[1])', 'hello world', 'a&b']),
-    '"C:\\Program Files\\nodejs\\node.exe" -e "console.log^(process.argv[1]^)" "hello world" "a^&b"',
+    '"C:\\Program Files\\nodejs\\node.exe" -e "console.log(process.argv[1])" "hello world" "a&b"',
   );
   // `,` and `@` were dropped from the shared WINDOWS_SAFE_ARG for PowerShell's
   // array operator and splatting; cmd.exe reads `,` as an argument separator and
@@ -842,6 +842,25 @@ test('send stdin sends standard input to the host', async () => {
       inputCount: 1,
     },
   }]);
+});
+
+test('send stdin keeps backslash sequences literal', async () => {
+  const client = fixtureClient();
+  const script = 'printf "a\\tb\\n" C:\\\\tmp\n';
+  await runCli(['send', 'surface:1', '--stdin'], { client, readStdin: async () => script });
+  assert.equal(client.requests[0].request.input, script);
+});
+
+test('send sequence text is not escape-decoded a second time', async () => {
+  const client = fixtureClient();
+  await runCli(['send', 'surface:1', '--sequence', '[{"text":"a\\\\tb"},{"text":"c\\td"}]'], { client });
+  assert.equal(client.requests[0].request.input, 'a\\tbc\td');
+});
+
+test('send raw text keeps backslash sequences literal', async () => {
+  const client = fixtureClient();
+  await runCli(['send', 'surface:1', '--raw', '--text', 'a\\tb'], { client });
+  assert.equal(client.requests[0].request.input, 'a\\tb');
 });
 
 test('send missing input output', async () => {

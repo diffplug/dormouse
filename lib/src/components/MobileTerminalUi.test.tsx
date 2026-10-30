@@ -9,6 +9,7 @@ import { setNativeFieldValue } from '../lib/dom';
 import { pointerEvent, PortalAnchoredButton } from './wall/wall-test-utils';
 import * as registry from '../lib/terminal-registry';
 import * as activity from '../lib/session-activity-store';
+import { beginClipboardAttempt, dismissClipboardFailure, reportClipboardFailure } from '../lib/clipboard-failure';
 import type { Terminal } from '@xterm/xterm';
 
 const EPISODE = { id: 'episode-1', startedAt: Date.now() };
@@ -667,5 +668,21 @@ describe('MobileTerminalUi edge scroll', () => {
     renderWith(props);
     pointer('pointermove', 380, 20);
     expect(scrollLines).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('MobileTerminalUi clipboard failure', () => {
+  // Pocket, the one-time phone page, and the Pocket playground mount no `App`,
+  // yet they are where the browser's clipboard write, and its refusals, remain.
+  it('opens the clipboard-failure report', () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    renderUi();
+    expect(document.getElementById('clipboard-failure-title')).toBeNull();
+    try {
+      act(() => reportClipboardFailure(beginClipboardAttempt(4)));
+      expect(document.getElementById('clipboard-failure-title')?.textContent).toBe('Copy failed');
+    } finally {
+      act(() => dismissClipboardFailure());
+    }
   });
 });

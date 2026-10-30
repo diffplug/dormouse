@@ -4,6 +4,7 @@ import { once } from "node:events";
 import { STRIPE_API_VERSION, Stripe } from "@pgstencil/stripe";
 import type { RandomSource, Time } from "pgstencil";
 import { LIST_ANNUAL, LIST_MONTHLY } from "../../../website/src/lib/hosted-pricing";
+import { DAY_MS } from "../billing";
 import { stripeDevBilling } from "../billing-dev";
 
 /** The Prices the tests' price changes move monthly and yearly subscribers to, and what they charge. */
@@ -20,7 +21,8 @@ const INVOICE_CENTS = 1000;
  * subscription's immediate cancellation, retrieval, and move to another
  * Price, a customer's retrieval with its billing country, a subscription's
  * paid invoices, why each was billed and when it was paid, and their
- * payments, how each was paid, refunds, and a Price's retrieval. Every other request reaches
+ * payments, how each was paid, refunds and their listing by payment, with
+ * Stripe's statuses and idempotency, and a Price's retrieval. Every other request reaches
  * StripeDev unchanged.
  */
 export async function stripeFake(time: Time, random: RandomSource) {
@@ -61,8 +63,24 @@ export async function stripeFake(time: Time, random: RandomSource) {
   const cancels: { subscription: string }[] = [];
   /** Customer id → its billing address's country; none, no address. */
   const countries = new Map<string, string>();
-  /** Each refund made: its PaymentIntent, or charge when it names one, and its metadata's withdrawal, or closure when it names one. */
-  const refunds: { paymentIntent?: string; charge?: string; withdrawal: string | null; closure?: string }[] = [];
+  /**
+   * Each refund made: its PaymentIntent, or charge when it names one, and its
+   * metadata's withdrawal, or closure when it names one; its amount when not
+   * the whole payment, and its status when not `succeeded`. Tests may push one
+   * made by hand, or change a status as Stripe would.
+   */
+  const refunds: {
+    paymentIntent?: string;
+    charge?: string;
+    withdrawal: string | null;
+    closure?: string;
+    amount?: number;
+    status?: "pending" | "requires_action" | "failed" | "canceled" | "succeeded";
+  }[] = [];
+  /** The statuses the next refunds made take, in order; once empty, `succeeded`. */
+  const refundStatuses: NonNullable<(typeof refunds)[number]["status"]>[] = [];
+  /** Idempotency key → the refund request's answer and when, which Stripe repeats for that key for a day. */
+  const idempotent = new Map<string, { at: number; status: number; body: unknown }>();
   /** How many times billing read a customer, and a Price. */
   const reads = { customers: 0, prices: 0 };
   /** Refund and cancellation requests to fail, before any is made, with a Stripe outage. */
@@ -123,22 +141,60 @@ export async function stripeFake(time: Time, random: RandomSource) {
           }),
       });
     }
+    const refundOf = (intent: string | null, charge: string | null) => (refund: (typeof refunds)[number]) =>
+      intent ? refund.paymentIntent === intent : refund.charge === charge;
+    const asRefund = (refund: (typeof refunds)[number]) => ({
+      id: `re_${refunds.indexOf(refund)}`,
+      object: "refund",
+      amount: refund.amount ?? INVOICE_CENTS,
+      currency: "usd",
+      payment_intent: refund.paymentIntent ?? null,
+      charge: refund.charge ?? null,
+      status: refund.status ?? "succeeded",
+    });
+    if (url.pathname === "/v1/refunds" && req.method === "GET") {
+      const of = refundOf(url.searchParams.get("payment_intent"), url.searchParams.get("charge"));
+      return json(200, { object: "list", has_more: false, data: refunds.filter(of).map(asRefund) });
+    }
     if (url.pathname === "/v1/refunds" && req.method === "POST") {
       const body = new URLSearchParams(raw);
       const intent = body.get("payment_intent");
-      const charge = body.get("charge")!;
+      const charge = body.get("charge");
       if (failing.refunds > 0) {
         failing.refunds--;
         return json(500, { error: { type: "api_error", message: "Stripe fake outage" } });
       }
-      if (refunds.some((refund) => (intent ? refund.paymentIntent === intent : refund.charge === charge)))
-        return json(400, {
+      const key = req.headers["idempotency-key"] as string | undefined;
+      const replayed = key && idempotent.get(key);
+      if (replayed && time.now().getTime() - replayed.at < DAY_MS) return json(replayed.status, replayed.body);
+      const answer = (status: number, value: unknown) => {
+        if (key) idempotent.set(key, { at: time.now().getTime(), status, body: value });
+        return json(status, value);
+      };
+      // What is left to refund: refunds that failed or were canceled returned their amount.
+      const left = refunds
+        .filter(refundOf(intent, charge))
+        .filter((refund) => refund.status !== "failed" && refund.status !== "canceled")
+        .reduce((sum, refund) => sum - (refund.amount ?? INVOICE_CENTS), INVOICE_CENTS);
+      if (left <= 0)
+        return answer(400, {
           error: { type: "invalid_request_error", code: "charge_already_refunded", message: "Charge has already been refunded." },
         });
+      const amount = Number(body.get("amount") ?? left);
+      if (amount > left)
+        return answer(400, { error: { type: "invalid_request_error", code: "amount_too_large", message: "Refund exceeds the charge." } });
       const closure = body.get("metadata[dormouse_closure]");
       const withdrawal = body.get("metadata[dormouse_withdrawal]");
-      refunds.push({ ...(intent ? { paymentIntent: intent } : { charge }), withdrawal, ...(closure && { closure }) });
-      return json(200, { id: `re_${intent ?? charge}`, object: "refund", payment_intent: intent, status: "succeeded" });
+      const status = refundStatuses.shift();
+      const made = {
+        ...(intent ? { paymentIntent: intent } : { charge: charge! }),
+        withdrawal,
+        ...(closure && { closure }),
+        ...(amount !== INVOICE_CENTS && { amount }),
+        ...(status && status !== "succeeded" && { status }),
+      };
+      refunds.push(made);
+      return answer(200, asRefund(made));
     }
     if (url.pathname === "/v1/invoice_payments" && req.method === "GET") {
       const invoice = url.searchParams.get("invoice");
@@ -259,6 +315,7 @@ export async function stripeFake(time: Time, random: RandomSource) {
     cancels,
     countries,
     refunds,
+    refundStatuses,
     failing,
     before,
     reads,

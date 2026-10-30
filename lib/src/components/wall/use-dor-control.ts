@@ -2,7 +2,6 @@ import { moveSurface } from './surface-move';
 import { messageOf } from '../../lib/errors';
 import { clearHoldLapse, holdForHostInterrupt } from '../../lib/tool-run-hold';
 import { recordToolDirty } from '../../lib/tool-dirty-store';
-import { createSerialQueue } from '../../host/remote/serial-queue';
 import { useCallback, useEffect, useRef, type MutableRefObject } from 'react';
 import { getPlatform, PLATFORM_STRING } from '../../lib/platform';
 import { currentWindowRef, getActiveWorkspaceId } from '../../lib/workspace-store';
@@ -299,12 +298,45 @@ const COMMAND_START_TIMEOUT_MS = 15_000;
  *  (docs/specs/dor-tool.md -> Preview slot). */
 export const PREVIEW_INTERRUPT_GRACE_MS = 1_000;
 
+/** Await `wait` with the launch queue released, then retake it behind
+ *  whatever queued meanwhile: anything read of the Wall before is stale after. */
+export type ReleasedWait = <T>(wait: PromiseLike<T>) => Promise<T>;
+
+/** A serial queue whose work can step out of it for a wait only the user ends
+ *  (docs/specs/dor-tool.md -> Identity and dedupe). */
+function createToolSpawnQueue() {
+  let tail: Promise<void> = Promise.resolve();
+  /** Resolves to its release once everything queued before it has released. */
+  const take = (): Promise<() => void> => {
+    let release!: () => void;
+    const turn = new Promise<void>(resolve => { release = resolve; });
+    const taken = tail.then(() => release);
+    tail = tail.then(() => turn);
+    return taken;
+  };
+  return async <T>(work: (released: ReleasedWait) => PromiseLike<T>): Promise<T> => {
+    let release = await take();
+    try {
+      return await work(async wait => {
+        release();
+        try {
+          return await wait;
+        } finally {
+          release = await take();
+        }
+      });
+    } finally {
+      release();
+    }
+  };
+}
+
 /**
  * Serialize Tool requests and approval completions across lookup, key matching,
  * creation, and startup. Module scope shares the queue across control requests
  * and Walls in this renderer.
  */
-export const queueToolSpawn = createSerialQueue();
+export const queueToolSpawn = createToolSpawnQueue();
 
 type WaitOutcome = 'ready' | 'timeout' | 'aborted';
 
@@ -1190,7 +1222,9 @@ export function useDorControl({
         if (slotSwitch) endPreviewTransition(slotSwitch.id, slotSwitch.token);
       };
       // Runs under the launch lock below, whose cleanup follows every return.
-      const launch = async (): Promise<void> => {
+      // A dialog is awaited through `released`, so it never holds every other
+      // launch in this renderer until the user answers.
+      const launch = async (released: ReleasedWait): Promise<void> => {
         // Lookup and the launch lock can outlive the Workspace's close gesture.
         const scope = workspaceScope();
         const workspaceGone = () => scope && isWorkspaceTransferPending(scope) ? 'this workspace is transferring'
@@ -1475,7 +1509,9 @@ export function useDorControl({
         if (documentLink && openTarget !== undefined
           && !(sourceParams!.toolTarget === openTarget && sourceParams!.toolName === toolName && sourceParams!.toolScope === toolScope)
           && documentLinkNeedsConfirmation(toolScope, toolName, openTarget)) {
-          const confirmed = await confirmDocumentLinkOpen(openTarget, detail.signal);
+          // Nothing placed yet: every placement below reads the Wall afresh,
+          // and `sourceChanged` notices a source that moved on meanwhile.
+          const confirmed = await released(confirmDocumentLinkOpen(openTarget, detail.signal));
           if (unavailable()) return;
           if (!confirmed) {
             detail.respond({ ok: false, error: 'Navigation cancelled.' });
@@ -1527,11 +1563,13 @@ export function useDorControl({
           const traversal = historyIndex !== undefined;
           const sameDocument = source.toolTarget === target && source.toolName === toolName && source.toolScope === toolScope;
           // History traversal is local to this Surface and never follows a key into another one.
-          if (!traversal && !sameDocument) {
+          const placedElsewhere = () => {
+            if (traversal || sameDocument) return false;
             const slot = findPreviewSlot();
-            if ((key && findSurfaceByParams(candidate => matchesToolKey(candidate, toolScope, key)))
-              || (slot && slot.id !== id && lath.getMeta(slot.id)?.params?.toolTarget === target)) return false;
-          }
+            return !!(key && findSurfaceByParams(candidate => matchesToolKey(candidate, toolScope, key)))
+              || !!(slot && slot.id !== id && lath.getMeta(slot.id)?.params?.toolTarget === target);
+          };
+          if (placedElsewhere()) return false;
           if (sameDocument && !traversal && params.fragment === undefined) {
             respondStanding('existing', id, revealSurface(id));
             return true;
@@ -1539,11 +1577,13 @@ export function useDorControl({
           const nextCommand = sameDocument ? '' : promptToolCommand(toolRun, id);
           if (nextCommand === null) return false;
           const current = toolLocation(source, history?.entries[history.index]?.cwd ?? stringParam(source.cwd) ?? cwd)!;
-          if (!sameDocument && !await confirmToolEditorsClose([id])) {
+          if (!sameDocument && !await released(confirmToolEditorsClose([id]))) {
             detail.respond({ ok: false, error: 'Navigation cancelled.' });
             return true;
           }
           if (unavailable() || sourceChanged()) return true;
+          // A launch while the prompt was open may have placed the destination.
+          if (placedElsewhere()) return false;
           // A page that cannot answer (its terminal face, a reload) still
           // navigates, only without a position to come back to.
           current.position = await toolView(id, source).catch(() => undefined);
@@ -1833,9 +1873,9 @@ export function useDorControl({
       // invocation is its own socket connection, so two handlers otherwise
       // interleave across the host lookup, both clear the key check, and both
       // create — two panes with one key, two servers on one port.
-      await queueToolSpawn(async () => {
+      await queueToolSpawn(async released => {
         try {
-          await launch();
+          await launch(released);
         } finally {
           if (previewSignal) pendingPreviews.current -= 1;
           // A superseded or cancelled retarget left a run interrupted; with no
