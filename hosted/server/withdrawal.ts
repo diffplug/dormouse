@@ -28,9 +28,6 @@ const WITHDRAWAL_COUNTRIES: ReadonlySet<string> = new Set([
   ...["GB", "GG", "GI", "IM", "JE"],
 ]);
 
-/** How long the cron keeps retrying a withdrawal's settlement or a closure's refunds. */
-export const RETRY_DAYS = 30;
-
 type Held = NonNullable<Awaited<ReturnType<Billing<Plan>["status"]>>["subscription"]>;
 
 /** The online withdrawal the billing page offers for the held subscription, and the billing country it was offered for. */
@@ -247,45 +244,26 @@ export async function settleWithdrawal(billing: Billing<Plan>, row: WithdrawalRo
   await run(billing.db, `UPDATE public.dormouse_withdrawals SET "settledAt" = $2 WHERE id = $1`, [row.id, billing.time.now()]);
 }
 
-/**
- * A failure naming the rows of `table` (withdrawals or account closures)
- * still unsettled though stamped `at` before `since`, which the cron no longer
- * retries; none while there are none.
- */
-export async function abandoned(
-  billing: Billing<Plan>,
-  table: "withdrawals" | "account_closures",
-  at: "submittedAt" | "closedAt",
-  since: Date,
-): Promise<Error[]> {
-  const [row] = await run<{ ids: string[] | null }>(
-    billing.db,
-    `SELECT array_agg(${table === "withdrawals" ? "id" : '"userId"'}) AS ids
-    FROM public.dormouse_${table} WHERE "settledAt" IS NULL AND "${at}" <= $1`,
-    [since],
-  );
-  return row?.ids ? [new Error(`Unsettled past ${RETRY_DAYS} days, settle by hand: ${table} ${row.ids.join(", ")}`)] : [];
-}
-
 /** How many withdrawals one cron run settles at most. */
 const RETRY_BATCH = 20;
 
 /**
- * The cron's pass: settles every withdrawal submitted in the last
- * {@link RETRY_DAYS} days whose settlement failed, up to {@link RETRY_BATCH};
- * answers the failures, and one more while any older stays unsettled, until
- * the operator settles it by hand. Its acknowledgement is the notice pass's.
+ * The cron's pass: tries to settle up to {@link RETRY_BATCH} unsettled
+ * withdrawals, however old, the least recently tried first, so one that keeps
+ * failing never starves the rest; answers the failures, so every run that
+ * tries one still unsettled fails. Its acknowledgement is the notice pass's.
  */
 export async function settleWithdrawals(billing: Billing<Plan>): Promise<unknown[]> {
-  const since = new Date(billing.time.now().getTime() - RETRY_DAYS * DAY_MS);
   const rows = await run<WithdrawalRow>(
     billing.db,
-    `SELECT ${COLUMNS} FROM public.dormouse_withdrawals
-    WHERE "settledAt" IS NULL AND "submittedAt" > $1
-    ORDER BY "submittedAt" LIMIT $2`,
-    [since, RETRY_BATCH],
+    `WITH due AS (
+      SELECT id FROM public.dormouse_withdrawals WHERE "settledAt" IS NULL
+      ORDER BY "attemptedAt" NULLS FIRST, "submittedAt", id LIMIT $2)
+    UPDATE public.dormouse_withdrawals SET "attemptedAt" = $1 WHERE id IN (SELECT id FROM due)
+    RETURNING ${COLUMNS}`,
+    [billing.time.now(), RETRY_BATCH],
   );
-  const failed: unknown[] = await abandoned(billing, "withdrawals", "submittedAt", since);
+  const failed: unknown[] = [];
   for (const row of rows) await settleWithdrawal(billing, row).catch((error: unknown) => failed.push(error));
   return failed;
 }

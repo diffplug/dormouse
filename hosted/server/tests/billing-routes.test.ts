@@ -18,7 +18,7 @@ import {
   billingRoutes,
   disputeAction,
 } from "../billing-routes";
-import { CLOSE_RECENT_LOGIN, CLOSE_UNAVAILABLE, closureRoutes } from "../closure";
+import { ACCOUNT_CLOSING, CLOSE_RECENT_LOGIN, CLOSE_UNAVAILABLE, closureRoutes } from "../closure";
 import { AVATAR_BYTES, COHORT_CACHE_MS, FOUNDER_AVATAR_PREFIX, cohortRoutes } from "../cohort-routes";
 import { entitledSql } from "../entitlement";
 import { WITHDRAWAL_OPEN_DAYS } from "../withdrawal";
@@ -992,6 +992,54 @@ test("a payment Stripe holds by its charge is refunded by it; one paid outside S
   await resyncBilling(f.setup, f.database.url, origin, f.mail);
 });
 
+test("the cron retries unsettled withdrawals and closures however old, the least recently tried first", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const error = vi.spyOn(console, "error").mockImplementation(() => {});
+  onTestFinished(() => error.mockRestore());
+  const resync = () => resyncBilling(f.setup, f.database.url, origin, f.mail).then(() => null, (failure: unknown) => failure);
+  const ago = (days: number) => new Date(f.time.now().getTime() - days * DAY_MS);
+  // A withdrawal and a closure, each with a refund that failed.
+  const withdrawing = await f.account();
+  const { subscription: withdrawn } = await f.buy(withdrawing, "founding");
+  f.paidInvoices.set("pi_w_late", withdrawn.id);
+  f.failing.refunds = 1;
+  expect((await withdrawing.request("/api/billing/withdraw", { method: "POST", body: { subscription: withdrawn.id } })).status).toBe(200);
+  const closing = await f.account();
+  const { subscription: closed } = await f.buy(closing, "monthly");
+  f.paidInvoices.set("pi_c_late", closed.id);
+  f.failing.refunds = 1;
+  expect((await closing.request("/api/account/close", { method: "POST", body: { close: true } })).status).toBe(204);
+  expect(f.refunds).toEqual([]);
+
+  // Months on, behind a full batch of each (RETRY_BATCH) that keeps failing, older still.
+  f.time.advanceMilliseconds(90 * DAY_MS);
+  await f.sql(
+    `INSERT INTO dormouse_withdrawals (id, "userId", "subscriptionId", plan, "priceId", "contractStartedAt", "submittedAt")
+    SELECT 'failing-' || n, 'nobody-' || n, 'sub_failing_' || n, 'monthly', 'price_x', $1, $1 FROM generate_series(1, 20) n`,
+    [ago(200)],
+  );
+  await f.sql(
+    `INSERT INTO dormouse_account_closures ("userId", "canceledSubscriptions", "closedAt")
+    SELECT 'nobody-' || n, ARRAY['sub_failing_' || n], $1 FROM generate_series(1, 20) n`,
+    [ago(200)],
+  );
+  expect(await resync()).toBeInstanceOf(AggregateError);
+  expect(f.refunds).toEqual([]);
+  f.time.advanceMilliseconds(10 * 60 * 1000);
+  expect(await resync()).toBeInstanceOf(AggregateError);
+  expect(f.refunds).toEqual([
+    { paymentIntent: "pi_w_late", withdrawal: expect.any(String) },
+    { paymentIntent: "pi_c_late", withdrawal: null, closure: closed.id },
+  ]);
+  expect(await withdrawing.summary()).toMatchObject({ withdrawn: { settled: true } });
+  expect(
+    await f.sql(`SELECT "settledAt" IS NOT NULL AS settled FROM dormouse_account_closures WHERE "userId" = $1`, [closing.id]),
+  ).toEqual([{ settled: true }]);
+});
+
 test("closing an account needs a recent login, cancels its subscription in Stripe first, and keeps the billing records", async ({
   onTestFinished,
 }) => {
@@ -1129,6 +1177,105 @@ test("closing answers billing's refusal, such as a checkout still being created,
   const refused = await member.request("/api/account/close", { method: "POST", body: { close: true } });
   expect([refused.status, await refused.json()]).toEqual([409, { message: "Checkout is still being created. Retry shortly." }]);
   expect(await f.sql(`SELECT id FROM "user" WHERE id = $1`, [member.id])).toEqual([{ id: member.id }]);
+  // Nor does its hold on checkout outlast it.
+  expect(await f.sql(`SELECT "userId" FROM dormouse_account_closing`)).toEqual([]);
+});
+
+test("closing holds checkout off from before its first Stripe call, and a checkout opened meanwhile answers no URL", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const holds = () => f.sql<{ userId: string }>(`SELECT "userId" FROM dormouse_account_closing`);
+  const member = await f.account();
+  await f.buy(member, "monthly");
+  let held: { userId: string }[] | null = null;
+  f.before.request = async () => {
+    held ??= await holds();
+  };
+  expect((await member.request("/api/account/close", { method: "POST", body: { close: true } })).status).toBe(204);
+  f.before.request = null;
+  expect(held).toEqual([{ userId: member.id }]);
+  // Gone with the account.
+  expect(await holds()).toEqual([]);
+
+  // Another tab's checkout while the account closes, or once it is gone:
+  // refused before its URL or consent, and expired.
+  const checkout = (who: Awaited<ReturnType<typeof f.account>>) =>
+    who.request("/api/billing/checkout", { method: "POST", body: consent("monthly") });
+  const closing = await f.account();
+  await f.sql(`INSERT INTO dormouse_account_closing ("userId") VALUES ($1)`, [closing.id]);
+  const gone = await f.account();
+  await f.sql(`DELETE FROM "user" WHERE id = $1`, [gone.id]);
+  for (const who of [closing, gone]) {
+    const refused = await checkout(who);
+    expect([refused.status, await refused.json()]).toEqual([409, { message: ACCOUNT_CLOSING }]);
+    expect([...f.dev.checkouts.values()].at(-1)!.status).toBe("expired");
+    expect(await f.sql(`SELECT "userId" FROM dormouse_checkout_consents WHERE "userId" = $1`, [who.id])).toEqual([]);
+  }
+  // A hold whose closure died before finishing or clearing it lapses.
+  await f.sql(`UPDATE dormouse_account_closing SET "startedAt" = now() - interval '16 minutes'`);
+  expect((await checkout(closing)).status).toBe(200);
+});
+
+test("a subscription for an account already closed, as a checkout paid after the closure started, ends at once and is refunded", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const error = vi.spyOn(console, "error").mockImplementation(() => {});
+  onTestFinished(() => error.mockRestore());
+  const closure = (userId: string) =>
+    f.sql<{ canceled: string[]; settled: boolean }>(
+      `SELECT "canceledSubscriptions" AS canceled, "settledAt" IS NOT NULL AS settled FROM dormouse_account_closures WHERE "userId" = $1`,
+      [userId],
+    );
+  /** A checkout `who` opened, paid once their account is gone, its first payment `intent`. */
+  const paidLate = async (who: Awaited<ReturnType<typeof f.account>>, intent: string, closed: boolean) => {
+    const started = await who.request("/api/billing/checkout", { method: "POST", body: consent("yearly") });
+    const { url } = (await started.json()) as { url: string };
+    const session = [...f.dev.checkouts.values()].find((s) => s.url === url)!;
+    // Deleted as a closure that never saw the checkout would, one already
+    // settled (by hand, say) over a subscription of its own; or otherwise,
+    // with no closure record.
+    await f.sql(
+      closed
+        ? `WITH recorded AS (INSERT INTO dormouse_account_closures ("userId", "canceledSubscriptions", "settledAt")
+            VALUES ($1, '{sub_settled_by_hand}', now()))
+          DELETE FROM "user" WHERE id = $1`
+        : `DELETE FROM "user" WHERE id = $1`,
+      [who.id],
+    );
+    const subscription = f.dev.completeCheckout(session.id);
+    f.paidInvoices.set(intent, subscription.id);
+    return subscription;
+  };
+
+  const deleted = await f.account();
+  const first = await paidLate(deleted, "pi_late", false);
+  await f.deliver();
+  expect(f.cancels).toEqual([{ subscription: first.id }]);
+  expect(await f.ended()).toEqual([{ subscription: first.id, reason: END_REASONS.closure }]);
+  expect(f.refunds).toEqual([{ paymentIntent: "pi_late", withdrawal: null, closure: first.id }]);
+  expect(await closure(deleted.id)).toEqual([{ canceled: [first.id], settled: true }]);
+
+  // Its end fails: the event answers 503, and the redelivery, finding it
+  // processed, ends it; a refund that fails then is the cron's to finish. The
+  // record, settled before, names only the new subscription, so what was
+  // settled is never refunded or reported again.
+  const closed = await f.account();
+  const second = await paidLate(closed, "pi_late_2", true);
+  f.failing.cancels = 1;
+  f.failing.refunds = 1;
+  const event = f.dev.events[0]!;
+  expect((await f.send(event)).status).toBe(503);
+  expect(await closure(closed.id)).toEqual([{ canceled: [second.id], settled: false }]);
+  expect((await f.send(event)).status).toBe(200);
+  expect(f.cancels.at(-1)).toEqual({ subscription: second.id });
+  expect([f.refunds.length, (await closure(closed.id))[0]!.settled]).toEqual([1, false]);
+  await resyncBilling(f.setup, f.database.url, origin, f.mail);
+  expect(f.refunds.at(-1)).toEqual({ paymentIntent: "pi_late_2", withdrawal: null, closure: second.id });
+  expect(await closure(closed.id)).toEqual([{ canceled: [second.id], settled: true }]);
 });
 
 test("with billing closed, closing deletes an account without a subscription and refuses one still holding one", async ({
@@ -1405,6 +1552,41 @@ test("notices that keep failing go to the back, so they never starve a newer one
   f.time.advanceMilliseconds(10 * 60 * 1000);
   await resync();
   expect(f.email.all().map((mail) => mail.to[0])).toEqual([f.dev.customers.get(session.customer as string)!.email]);
+});
+
+test("a withdrawal's acknowledgement is retried until sent, failing the cron once a day overdue; a dispute notice lapses after 30 days", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const error = vi.spyOn(console, "error").mockImplementation(() => {});
+  onTestFinished(() => error.mockRestore());
+  const failures = () =>
+    resyncBilling(f.setup, f.database.url, origin, f.mail).then(
+      () => [],
+      (failure: AggregateError) => failure.errors.map((one: Error) => one.message),
+    );
+  const member = await f.account();
+  const { subscription } = await f.buy(member, "founding");
+  f.mailing.failures = 100;
+  expect((await member.request("/api/billing/withdraw", { method: "POST", body: { subscription: subscription.id } })).status).toBe(200);
+  const [{ id }] = (await f.sql(`SELECT id FROM dormouse_withdrawals`)) as [{ id: string }];
+  await f.sql(
+    `INSERT INTO dormouse_billing_notices (id, "userId", kind, "disputeId", "createdAt") VALUES ('restored', $1, 'dispute_restored', 'du_r', $2)`,
+    [member.id, f.time.now()],
+  );
+  const overdue = `Withdrawal acknowledgement unsent after a day: withdrawal ${id}`;
+
+  f.time.advanceMilliseconds(10 * 60 * 1000);
+  expect(await failures()).not.toContain(overdue);
+  f.time.advanceMilliseconds(DAY_MS);
+  expect(await failures()).toContain(overdue);
+  // Long past 30 days, mail works again: the acknowledgement goes, the dispute notice does not.
+  f.time.advanceMilliseconds(40 * DAY_MS);
+  f.mailing.failures = 0;
+  expect(await failures()).toEqual([]);
+  expect(f.email.all().map((mail) => mail.subject)).toEqual(["We received your withdrawal from Dormouse Hosted"]);
+  expect(await member.summary()).toMatchObject({ withdrawn: { acknowledged: true } });
 });
 
 /** `count` paid founders at founding step `step`, started 40 days ago, straight into the synchronized rows. */

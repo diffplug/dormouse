@@ -32,8 +32,10 @@ export const PRICE_NOTICE_MIN_DAYS = 7;
  * spare and never announces a change that then cannot apply.
  */
 const PRICE_SEND_BY_DAYS = PRICE_NOTICE_MIN_DAYS + 1;
-/** How long the cron retries a dispute notice or a withdrawal's acknowledgement. */
+/** How long the cron retries a dispute notice, stale past it; a withdrawal's acknowledgement it retries until sent. */
 const RETRY_DAYS = 30;
+/** A withdrawal's acknowledgement still unsent this many days after its withdrawal fails every cron run until it goes. */
+const ACKNOWLEDGEMENT_OVERDUE_DAYS = 1;
 /** One send attempt holds its notice this long before another may try it. */
 const LEASE_MS = 5 * 60 * 1000;
 /** How many notices one pass sends, and how many price changes it applies, at most. */
@@ -196,8 +198,8 @@ function noticeMessage(to: string, notice: Pending, plan: Plan | null, context: 
  * A renewal-type notice still applies while its subscription renews at that
  * renewal, a price change's only while it is further off than
  * {@link PRICE_SEND_BY_DAYS} and its change is among `verified`; a suspension
- * while its dispute is open; a dispute notice or a withdrawal's
- * acknowledgement for {@link RETRY_DAYS}.
+ * while its dispute is open; a dispute notice for {@link RETRY_DAYS}; a
+ * withdrawal's acknowledgement until it is sent.
  * The batch is leased in the statement that picks it, so two passes never
  * send one twice. Never-tried notices go first, then the least recently
  * tried, so ones that keep failing never starve newer ones past their
@@ -235,7 +237,8 @@ export async function sendNotices(
           WHEN n.kind = 'dispute_suspended' THEN
             n."createdAt" > $4
             AND EXISTS (SELECT FROM public.dormouse_billing_disputes d WHERE d."disputeId" = n."disputeId")
-          ELSE n."createdAt" > $4
+          WHEN n.kind = 'dispute_restored' THEN n."createdAt" > $4
+          ELSE n.kind = 'withdrawal'
         END
       ORDER BY n."attemptedAt" NULLS FIRST, n."createdAt", n.id LIMIT $5
       FOR UPDATE OF n SKIP LOCKED)
@@ -330,7 +333,8 @@ async function applyPriceChanges(billing: Billing<Plan>, verified: readonly stri
  * price-change notice that has come due, sends every unsent one that still
  * applies, then applies each price change whose notice went out in time.
  * A refused change, or one Stripe's Prices contradict, gets no notice and
- * moves no one. Answers the failures.
+ * moves no one. Answers the failures, and one more while any withdrawal's
+ * acknowledgement is overdue ({@link ACKNOWLEDGEMENT_OVERDUE_DAYS}).
  */
 export async function runNotices(
   billing: Billing<Plan>,
@@ -386,6 +390,13 @@ export async function runNotices(
     [now, verified, PRICE_SEND_BY_DAYS, PRICE_NOTICE_DAYS],
   );
   failed.push(...(await sendNotices(billing, mail, { catalog, origin: billing.config.origin }, { verified })));
+  const [overdue] = await run<{ ids: string[] | null }>(
+    billing.db,
+    `SELECT array_agg("withdrawalId" ORDER BY "createdAt") AS ids FROM public.dormouse_billing_notices
+    WHERE kind = 'withdrawal' AND "sentAt" IS NULL AND "createdAt" <= $1`,
+    [new Date(now.getTime() - ACKNOWLEDGEMENT_OVERDUE_DAYS * DAY_MS)],
+  );
+  if (overdue?.ids) failed.push(new Error(`Withdrawal acknowledgement unsent after a day: withdrawal ${overdue.ids.join(", ")}`));
   failed.push(...(await applyPriceChanges(billing, verified)));
   return failed;
 }

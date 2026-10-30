@@ -8,7 +8,7 @@ import { accountQuery, cookieLogin, isRecentLogin, smallBody, type AccountHost }
 import { DAY_MS, END_REASONS, run, withBilling, type BillingSetup } from "./billing";
 import { RECENT_LOGIN_WINDOW, REFUND_DAYS, type Plan } from "./policy-constants";
 import type { RelayAccountHost } from "./relay-account";
-import { RETRY_DAYS, abandoned, refundPaidInvoices } from "./withdrawal";
+import { refundPaidInvoices } from "./withdrawal";
 
 /** What one request's account deployment provides to account closure: closing its relay sockets as removals do, too. */
 export interface ClosureHost extends AccountHost, Pick<RelayAccountHost, "closeBurrow" | "closeSessions"> {
@@ -21,6 +21,33 @@ export const CLOSE_RECENT_LOGIN = `Sign in again to close your account. Closing 
 
 /** The 409 a closure gets while billing is closed and the account holds a subscription it cannot cancel. */
 export const CLOSE_UNAVAILABLE = `Your account cannot be closed online right now. Try again later, or email ${SUPPORT_EMAIL}.`;
+
+/** The 409 checkout answers while the account is being closed. */
+export const ACCOUNT_CLOSING = "This account is being closed.";
+
+/**
+ * How long a closure in progress (`dormouse_account_closing`) holds off
+ * checkout, should its request die before it deletes the account or clears
+ * its row.
+ */
+const CLOSING_HOLD_MINUTES = 15;
+
+/**
+ * Whether `owner`'s account is gone or being closed. Checkout asks once it has
+ * opened a checkout and before it answers its URL: a closure that started
+ * after this read then expires that checkout, since it writes its row before
+ * it cancels any.
+ */
+export async function accountClosing(billing: Billing<Plan>, owner: string): Promise<boolean> {
+  const [row] = await run<{ closing: boolean }>(
+    billing.db,
+    `SELECT NOT EXISTS (SELECT FROM public."user" WHERE id = $1)
+      OR EXISTS (SELECT FROM public.dormouse_account_closing
+        WHERE "userId" = $1 AND "startedAt" > now() - make_interval(mins => $2)) AS closing`,
+    [owner, CLOSING_HOLD_MINUTES],
+  );
+  return row!.closing;
+}
 
 /**
  * Expires `owner`'s open checkout, then ends in Stripe at once, without
@@ -89,28 +116,67 @@ async function settleClosure(billing: Billing<Plan>, owner: string, canceled: re
 const RETRY_BATCH = 20;
 
 /**
- * The cron's pass: settles every closure in the last {@link RETRY_DAYS}
- * days whose refunds failed, up to {@link RETRY_BATCH}; answers the
- * failures, and one more while any older stays unsettled.
+ * The cron's pass: tries to finish the refunds of up to {@link RETRY_BATCH}
+ * unsettled closures, however old, the least recently tried first, so one
+ * that keeps failing never starves the rest; answers the failures, so every
+ * run that tries one still unsettled fails.
  */
 export async function retryClosures(billing: Billing<Plan>): Promise<unknown[]> {
-  const since = new Date(billing.time.now().getTime() - RETRY_DAYS * DAY_MS);
   const rows = await run<{ userId: string; canceledSubscriptions: string[] }>(
     billing.db,
-    `SELECT "userId", "canceledSubscriptions" FROM public.dormouse_account_closures
-    WHERE "settledAt" IS NULL AND "closedAt" > $1 ORDER BY "closedAt" LIMIT $2`,
-    [since, RETRY_BATCH],
+    `WITH due AS (
+      SELECT "userId" FROM public.dormouse_account_closures WHERE "settledAt" IS NULL
+      ORDER BY "attemptedAt" NULLS FIRST, "closedAt", "userId" LIMIT $2)
+    UPDATE public.dormouse_account_closures SET "attemptedAt" = $1 WHERE "userId" IN (SELECT "userId" FROM due)
+    RETURNING "userId", "canceledSubscriptions"`,
+    [billing.time.now(), RETRY_BATCH],
   );
-  const failed: unknown[] = await abandoned(billing, "account_closures", "closedAt", since);
+  const failed: unknown[] = [];
   for (const { userId, canceledSubscriptions } of rows)
     await settleClosure(billing, userId, canceledSubscriptions).catch((error: unknown) => failed.push(error));
   return failed;
 }
 
 /**
+ * Once `owner`'s account is gone, ends each subscription of theirs still
+ * current, as closing does, and refunds what closing owes on it: one a
+ * checkout paid after the closure started. Its closure record names it,
+ * unsettled, before it ends, so the cron finishes a failed refund; a record
+ * already settled (perhaps by hand) keeps only the new ids, so its settled
+ * payments are never refunded or reported again, and pgstencil's `end_reason`
+ * still records the earlier ones. A failed end throws, for the caller to
+ * retry. Does nothing while the account stands.
+ */
+export async function endAfterClosure(billing: Billing<Plan>, owner: string) {
+  const current = await run<{ id: string }>(
+    billing.db,
+    `SELECT id FROM pgstencil_billing.subscriptions
+    WHERE owner_id = $1 AND status = ANY ($2::text[]) AND NOT EXISTS (SELECT FROM public."user" WHERE id = $1)`,
+    [owner, SUBSCRIBED],
+  );
+  if (!current.length) return;
+  const [closure] = await run<{ canceledSubscriptions: string[] }>(
+    billing.db,
+    `INSERT INTO public.dormouse_account_closures AS k ("userId", "canceledSubscriptions") VALUES ($1, $2)
+    ON CONFLICT ("userId") DO UPDATE SET "settledAt" = NULL, "canceledSubscriptions" = CASE
+      WHEN k."settledAt" IS NOT NULL THEN EXCLUDED."canceledSubscriptions"
+      ELSE k."canceledSubscriptions"
+        || ARRAY(SELECT id FROM unnest(EXCLUDED."canceledSubscriptions") id WHERE id <> ALL (k."canceledSubscriptions"))
+    END
+    RETURNING "canceledSubscriptions"`,
+    [owner, current.map(({ id }) => id)],
+  );
+  for (const { id } of current) await billing.end(owner, id, { reason: END_REASONS.closure });
+  await settleClosure(billing, owner, closure!.canceledSubscriptions).catch((error: unknown) =>
+    console.error(`Closure of ${owner} ended a later subscription but its refunds are not complete; the cron retries them`, error),
+  );
+}
+
+/**
  * The account's own closure, `POST /api/account/close`: a recent login and
- * `{ close: true }`, then every current subscription is canceled in Stripe
- * before the account is deleted, its closure recorded in the same statement;
+ * `{ close: true }`, then, checkout held off, every current subscription is
+ * canceled in Stripe before the account is deleted, its closure recorded in
+ * the same statement;
  * then what the closure refunds is refunded, and a failure there logged for
  * the cron to finish. Billing closed, an account still holding a current
  * subscription is refused rather than deleted with it. Call before any
@@ -161,8 +227,24 @@ export function closureRoutes(app: Hono<any>, host: (c: Context) => ClosureHost)
     }
     try {
       await withBilling(setup, deployment.databaseUrl, new URL(c.req.url).origin, async (billing) => {
-        const canceled = await endSubscriptions(billing, userId);
-        await close(canceled);
+        // Committed before any Stripe call, so checkout opens nothing past it
+        // (`accountClosing`); deleted with the account, or here on a failure.
+        await run(
+          billing.db,
+          `INSERT INTO public.dormouse_account_closing ("userId") VALUES ($1)
+          ON CONFLICT ("userId") DO UPDATE SET "startedAt" = now()`,
+          [userId],
+        );
+        let canceled: string[];
+        try {
+          canceled = await endSubscriptions(billing, userId);
+          await close(canceled);
+        } catch (error) {
+          await run(billing.db, `DELETE FROM public.dormouse_account_closing WHERE "userId" = $1`, [userId]).catch(
+            (cleared: unknown) => console.error("Clearing a failed closure's hold on checkout failed; it lapses", cleared),
+          );
+          throw error;
+        }
         if (canceled.length)
           await settleClosure(billing, userId, canceled).catch((error: unknown) =>
             console.error(`Closure of ${userId} is recorded but its refunds are not complete; the cron retries them`, error),
