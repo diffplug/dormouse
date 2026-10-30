@@ -110,7 +110,9 @@ function isAllowedBrowserBinary(candidate: unknown, configuredPath: string | und
   if (configuredPath && candidate === configuredPath) return true;
   if (candidate === name) return true;
   if (isUncOrDevicePath(candidate) || !ABSOLUTE_RE.test(candidate)) return false;
-  const segments = candidate.split(/[\\/]/);
+  // Each path form's own separators: a POSIX file name may contain `\`, so
+  // only a drive path splits on it.
+  const segments = candidate.split(candidate.startsWith('/') ? '/' : /[\\/]/);
   if (segments.includes('..')) return false;
   return filename.test(segments[segments.length - 1] ?? '');
 }
