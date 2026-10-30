@@ -20,7 +20,7 @@ beforeEach(() => {
   transitions = [];
   tracker = createPresenceTracker({
     timeoutMs: () => timeoutMs,
-    onChange: (present) => transitions.push(present),
+    onChange: () => transitions.push(tracker.present),
   });
 });
 

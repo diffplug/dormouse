@@ -88,12 +88,12 @@ type ListedRingSource = Exclude<RingSource, 'watching'>;
  *  ring an exit opened rather than opening one the exit then joins. */
 const LISTED_RING_SOURCES: readonly ListedRingSource[] = ['exit', 'report'];
 
-/** The `watching` source: the rule key that raised it, and whether output has
+/** The `watching` source: the rule key that raised it, and whether work has
  *  arrived since it joined, which the detector cannot tell
  *  (`docs/specs/alert.md` -> Await). */
 interface WatchingSource {
   key: string;
-  outputSince: boolean;
+  workSince: boolean;
 }
 
 /** The sources a ring holds, or held completions would raise. */
@@ -120,11 +120,6 @@ function eachSource(set: SourceSet, visit: (source: ListedRingSource | WatchingS
 function dropWatching(set: SourceSet): boolean {
   set.watching = null;
   return set.sources.length === 0;
-}
-
-/** Work arrived: a settle this set carries no longer describes the Session. */
-function noteOutput(set: SourceSet | null): void {
-  if (set?.watching) set.watching.outputSince = true;
 }
 
 /** The one ring latch a Session holds (`docs/specs/alert.md` -> Public State). */
@@ -158,8 +153,6 @@ export interface Engagement {
   /** The terminal Session this viewer points at, or null. */
   focusId: string | null;
 }
-
-const NOT_ENGAGED: Engagement = { present: false, focusId: null };
 
 export function normalizeActivityNotification(value: unknown): ActivityNotification | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -366,7 +359,8 @@ export class AlertManager {
    * is over, and an await's grace has its answer.
    */
   private noteWork(id: string, entry: AlertEntry): void {
-    for (const set of [entry.ring, entry.held]) noteOutput(set);
+    if (entry.ring?.watching) entry.ring.watching.workSince = true;
+    if (entry.held?.watching) entry.held.watching.workSince = true;
     entry.ackedQuiet = false;
     this.eachWaiter(id, (waiter) => waiter.onOutput());
   }
@@ -528,7 +522,7 @@ export class AlertManager {
         // the ring so it outlives the command that raised it.
         const key = entry.commandExitWatch?.watchKey;
         if (!key || !this.isWatching(entry)) break;
-        this.holdOrDeliver(id, entry, { key, outputSince: false }, { source: 'WATCHING', title: `${key} went quiet`, body: null });
+        this.holdOrDeliver(id, entry, { key, workSince: false }, { source: 'WATCHING', title: `${key} went quiet`, body: null });
         break;
       }
       case 'commandFinished':
@@ -696,7 +690,7 @@ export class AlertManager {
     if (entry.commandExitWatch === null && this.withdrawRingSource(entry, 'exit')) return 'exit';
     if (
       until === 'quiet'
-      && entry.ring?.watching?.outputSince === false
+      && entry.ring?.watching?.workSince === false
       && this.withdrawRingSource(entry, 'watching')
     ) return 'quiet';
     return null;
@@ -1029,7 +1023,7 @@ export class AlertManager {
 
   /** The realm is gone: a disengage for whatever it pointed at. */
   removeViewer(viewerId: string): void {
-    this.setViewer(viewerId, NOT_ENGAGED);
+    this.setViewer(viewerId, { present: false, focusId: null });
   }
 
   /** Every present viewer. An absent one engages nothing, so it is not kept. */

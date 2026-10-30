@@ -74,7 +74,7 @@ A Session is engaged while some present viewer focuses it.
 - **Must write all human-originated PTY input through `writeUserInput`**, the mobile input bar's included: it carries `userInput`, and the host acknowledges it with input before the bytes reach the PTY, in the one message (rationale).
 - **A remote Client's write must acknowledge the same way unless it holds only hover or button reports**, the Burrow having dropped a mirror's terminal replies (rationale).
 - **Never create an Activity entry to acknowledge**, the host's one check, so a browser Surface keeps its own TODO.
-- **User input must open the echo window** (`cfg.alert.echoWindow`) even when acknowledging clears nothing, a helper's included. Output inside it is ignored entirely — detector, `outputSince`, the acknowledged state, an await's grace — and a completion inside it neither rings nor is held, though an await may still claim it (Dispatch; rationale).
+- **User input must open the echo window** (`cfg.alert.echoWindow`) even when acknowledging clears nothing, a helper's included. Output inside it is ignored entirely — detector, `workSince`, the acknowledged state, an await's grace — and a completion inside it neither rings nor is held, though an await may still claim it (Dispatch; rationale).
 
 Source of truth: `setViewer` / `acknowledge` in `lib/src/lib/alert-manager.ts`; `createPresenceTracker` in `lib/src/lib/presence.ts`; `retainEngagementReporter` in `lib/src/lib/engagement.ts`; `writeUserInput` in `lib/src/lib/terminal-lifecycle.ts`; `alertedPty` in `lib/src/host/owner-pty.ts`. Pinned by `lib/src/lib/alert-engagement.test.ts`.
 
@@ -370,7 +370,7 @@ Is there anything to wait for?
 **Resolution must consume only the ring source it resolved on**, its `cause` from that source: `report` → `bell`, `exit` → `exit`, `watching` → `quiet`. An await arriving mid-ring resolves immediately; under `exit` only an `exit` source resolves it, and a ring without one leaves it parked.
 
 - **Must skip the `exit` source while a foreground command is running** (rationale).
-- **Must skip the `watching` source once work has resumed since it joined the ring** (`outputSince`; work as in State machines), and **never stand the detector in for that flag** (rationale).
+- **Must skip the `watching` source once work has resumed since it joined the ring** (`workSince`; work as in State machines), and **never stand the detector in for that flag** (rationale).
 - **Never skip a report** — an `OSC 9` stays true until it is answered.
 - **Consuming must withdraw that one source and never acknowledge**; a ring it leaves empty is withdrawn (Clearing And TODO).
 
