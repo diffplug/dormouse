@@ -11,10 +11,12 @@ import type { DirectoryEntry } from 'remote-lib-common';
 import {
   MobileTerminalUi,
   paneMouseOverride,
-  type MobileTerminalKeyboardMode,
   type MobileTerminalTouchMode,
+  type MobileTerminalView,
 } from '../../components/MobileTerminalUi';
+import { MobileSettings } from '../../components/MobileSettings';
 import { MobileWall } from '../../components/MobileWall';
+import { useMobileFontSize } from '../../lib/mobile-font-size';
 import {
   getMouseSelectionSnapshot,
   setOverride as setMouseOverride,
@@ -23,7 +25,7 @@ import {
 import { getTerminalInstance, refitSession, writeUserInput } from '../../lib/terminal-registry';
 import { doPaste } from '../../lib/clipboard';
 import type { RemotePtyAdapter } from '../client/remote-adapter';
-import { usePocketTheme } from './pocket-theme';
+import { syncDocumentChrome, usePocketTheme } from './pocket-theme';
 import {
   activatePane,
   directorySessionItems,
@@ -31,7 +33,7 @@ import {
   pickerEntries,
 } from './wall-model';
 
-export function PocketWall({ adapter, onError, restoreTheme }: {
+export function PocketWall({ adapter, onError, restoreTheme, persistSettings = true }: {
   adapter: RemotePtyAdapter;
   onError?: (error: unknown) => void;
   /**
@@ -39,14 +41,17 @@ export function PocketWall({ adapter, onError, restoreTheme }: {
    * one-time page passes `applyPocketTheme`, which keeps nothing.
    */
   restoreTheme?: () => void;
+  /** Whether Settings choices are saved; the one-time page keeps nothing. */
+  persistSettings?: boolean;
 }): React.ReactElement {
   // App restores the theme before this renders; repeat idempotently so isolated
   // PocketWall consumers receive the same theme contract too.
   usePocketTheme(restoreTheme);
+  useMobileFontSize(persistSettings);
   const [entries, setEntries] = useState<DirectoryEntry[]>(() => adapter.getDirectoryEntries());
   const [activePaneId, setActivePaneId] = useState<string | null>(null);
   const [touchMode, setTouchMode] = useState<MobileTerminalTouchMode>('gestures');
-  const [keyboardMode, setKeyboardMode] = useState<MobileTerminalKeyboardMode>('type');
+  const [view, setView] = useState<MobileTerminalView>('terminal');
   // Picker order throughout — the list, the wall's swipe order, and the default
   // pane, which is therefore one the Burrow's own Window shows.
   const attachableEntries = useMemo(() => pickerEntries(entries), [entries]);
@@ -127,18 +132,19 @@ export function PocketWall({ adapter, onError, restoreTheme }: {
           onSessionTodoClear={null}
           activeSessionId={activePaneId ?? undefined}
           onActiveSessionChange={setActivePaneId}
-          onSessionMinimize={() => setKeyboardMode('sessions')}
+          onSessionMinimize={() => setView('sessions')}
           showKillButton={false}
         />
       }
       interactive
       activeTouchMode={touchMode}
       onTouchModeChange={setTouchMode}
-      activeKeyboardMode={keyboardMode}
-      onKeyboardModeChange={setKeyboardMode}
+      activeView={view}
+      onViewChange={setView}
       cursorTouchAvailable={cursorTouchAvailable}
       sessions={sessionItems}
       onSessionSelect={setActivePaneId}
+      settings={<MobileSettings persist={persistSettings} onThemeApplied={syncDocumentChrome} />}
       onSendInput={handleSendInput}
       onPaste={handlePaste}
     />

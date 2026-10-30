@@ -1,11 +1,14 @@
 import type { Meta, StoryObj } from '@storybook/react';
+import { expect, userEvent, within } from 'storybook/test';
 import { useMemo, useRef, useState } from 'react';
 import {
   MOBILE_TERMINAL_KEY_SEQUENCES,
   MobileTerminalUi,
-  type MobileTerminalKeyboardMode,
+  type MobileTerminalSessionItem,
   type MobileTerminalUiProps,
+  type MobileTerminalView,
 } from '../components/MobileTerminalUi';
+import { MobileSettings } from '../components/MobileSettings';
 import { MobileWall, useMobileWallSessionItems, type MobileWallSession } from '../components/MobileWall';
 import {
   MobileGestureConfirmDialog,
@@ -90,6 +93,12 @@ const SEQUENCE_LABELS = new Map<string, string>([
   [MOBILE_TERMINAL_KEY_SEQUENCES.home, 'HOME'],
 ]);
 
+const STORY_SESSIONS: MobileTerminalSessionItem[] = [
+  { id: 'splash', title: 'ascii-splash', secondary: '~/projects/site', active: true, episode: null },
+  { id: 'agent', title: 'claude', secondary: '~/projects/dormouse', status: 'ALERT_RINGING', episode: null, todo: true },
+  { id: 'notes', title: 'zsh', secondary: '~/notes', episode: null },
+];
+
 function describeInput(data: string): string {
   return SEQUENCE_LABELS.get(data) ?? JSON.stringify(data);
 }
@@ -124,6 +133,8 @@ function StoryFrame(args: MobileTerminalUiProps) {
   return (
     <div className="h-[812px] w-[390px] overflow-hidden border border-border bg-app-bg shadow-2xl">
       <MobileTerminalUi
+        sessions={STORY_SESSIONS}
+        settings={<MobileSettings persist={false} />}
         {...args}
         terminal={<MockTerminal inputLog={inputLog} />}
         onSendInput={(data) => {
@@ -132,7 +143,7 @@ function StoryFrame(args: MobileTerminalUiProps) {
         }}
         onPaste={(text) => {
           void args.onPaste?.(text);
-          setInputLog((entries) => [...entries, 'PASTE']);
+          setInputLog((entries) => [...entries, text === undefined ? 'PASTE' : `PASTE ${JSON.stringify(text)}`]);
         }}
       />
     </div>
@@ -143,9 +154,7 @@ function PocketWallFrame(args: MobileTerminalUiProps) {
   const adapterRef = useRef<FakePtyAdapter | null>(null);
   if (!adapterRef.current) adapterRef.current = initPlatform('fake');
   const [activePaneId, setActivePaneId] = useState(POCKET_WALL_PANE);
-  const [keyboardMode, setKeyboardMode] = useState<MobileTerminalKeyboardMode>(
-    args.activeKeyboardMode ?? args.defaultKeyboardMode ?? 'type',
-  );
+  const [view, setView] = useState<MobileTerminalView>(args.activeView ?? args.defaultView ?? 'terminal');
   const sessionItems = useMobileWallSessionItems(POCKET_WALL_SESSIONS, activePaneId);
 
   return (
@@ -158,15 +167,16 @@ function PocketWallFrame(args: MobileTerminalUiProps) {
             sessions={POCKET_WALL_SESSIONS}
             activeSessionId={activePaneId}
             onActiveSessionChange={setActivePaneId}
-            onSessionMinimize={() => setKeyboardMode('sessions')}
+            onSessionMinimize={() => setView('sessions')}
           />
         )}
-        activeKeyboardMode={keyboardMode}
-        onKeyboardModeChange={(mode) => {
-          setKeyboardMode(mode);
-          args.onKeyboardModeChange?.(mode);
+        activeView={view}
+        onViewChange={(next) => {
+          setView(next);
+          args.onViewChange?.(next);
         }}
         sessions={sessionItems}
+        settings={<MobileSettings persist={false} />}
         onSessionSelect={setActivePaneId}
         onSendInput={(data) => {
           args.onSendInput?.(data);
@@ -279,30 +289,49 @@ function GestureSnapshotFrame({
   );
 }
 
-export const TypePane: Story = {
+export const Terminal: Story = {
+  render: (args) => <StoryFrame {...args} />,
+};
+
+export const SessionsScreen: Story = {
   args: {
-    defaultKeyboardMode: 'type',
+    defaultView: 'sessions',
   },
   render: (args) => <StoryFrame {...args} />,
 };
 
-export const RecentTodoPane: Story = {
+export const SettingsScreen: Story = {
   args: {
-    defaultKeyboardMode: 'recent',
+    defaultView: 'sessions',
   },
   render: (args) => <StoryFrame {...args} />,
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Settings' }));
+    await expect(within(canvasElement).getByRole('heading', { name: 'Font size' })).toBeVisible();
+  },
 };
 
-export const DraftTodoPane: Story = {
-  args: {
-    defaultKeyboardMode: 'draft',
-  },
+export const Composer: Story = {
   render: (args) => <StoryFrame {...args} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole('button', { name: 'Type' }));
+    await userEvent.type(canvas.getByRole('textbox', { name: 'Text to send' }), 'git status');
+  },
+};
+
+export const ComposerPassword: Story = {
+  render: (args) => <StoryFrame {...args} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole('button', { name: 'Type' }));
+    await userEvent.click(canvas.getByRole('checkbox', { name: 'Password' }));
+    await userEvent.type(canvas.getByLabelText('Password', { selector: 'input[type="password"]' }), 'hunter2');
+  },
 };
 
 export const NonInteractivePhoneMockup: Story = {
   args: {
-    defaultKeyboardMode: 'type',
     interactive: false,
   },
   render: (args) => <StoryFrame {...args} />,
@@ -310,16 +339,12 @@ export const NonInteractivePhoneMockup: Story = {
 
 export const CursorTouchAvailable: Story = {
   args: {
-    defaultKeyboardMode: 'type',
     cursorTouchAvailable: true,
   },
   render: (args) => <StoryFrame {...args} />,
 };
 
 export const PocketWall: Story = {
-  args: {
-    defaultKeyboardMode: 'type',
-  },
   parameters: {
     layout: 'fullscreen',
     fakePty: { scenario: flattenScenario(POCKET_WALL_SCENARIO) },

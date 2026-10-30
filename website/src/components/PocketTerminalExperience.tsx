@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { MobileTerminalUi, paneMouseOverride, type MobileTerminalKeyboardMode, type MobileTerminalTouchMode } from "dormouse-lib/components/MobileTerminalUi";
+import { MobileTerminalUi, paneMouseOverride, type MobileTerminalTouchMode, type MobileTerminalView } from "dormouse-lib/components/MobileTerminalUi";
+import { MobileSettings } from "dormouse-lib/components/MobileSettings";
+import { useMobileFontSize } from "dormouse-lib/lib/mobile-font-size";
 import { MobileWall, useMobileWallSessionItems, type MobileWallSession } from "dormouse-lib/components/MobileWall";
 import { writeUserInput } from "dormouse-lib/lib/terminal-registry";
 import {
@@ -45,6 +47,7 @@ export function PocketTerminalExperience({
   fillViewport?: boolean;
 }) {
   useRestoredTheme(WEBSITE_DEFAULT_THEME_ID);
+  useMobileFontSize(true);
   const [terminalReady, setTerminalReady] = useState(false);
   const adapterRef = useRef<FakePtyAdapter | null>(null);
   const shellRegistryRef = useRef<PlaygroundShellRegistry | null>(null);
@@ -56,7 +59,7 @@ export function PocketTerminalExperience({
   const touchModeListenersRef = useRef(new Set<() => void>());
   const [activePaneId, setActivePaneId] = useState(POCKET_TUTORIAL_PANE);
   const [touchMode, setTouchMode] = useState<MobileTerminalTouchMode>("gestures");
-  const [keyboardMode, setKeyboardMode] = useState<MobileTerminalKeyboardMode>("type");
+  const [view, setView] = useState<MobileTerminalView>("terminal");
   const sessionItems = useMobileWallSessionItems(POCKET_SESSIONS, activePaneId);
   const mouseStates = useSyncExternalStore(
     subscribeToMouseSelection,
@@ -227,7 +230,7 @@ export function PocketTerminalExperience({
             sessions={POCKET_SESSIONS}
             activeSessionId={activePaneId}
             onActiveSessionChange={setActivePaneId}
-            onSessionMinimize={() => setKeyboardMode("sessions")}
+            onSessionMinimize={() => setView("sessions")}
           />
         ) : null
       }
@@ -235,11 +238,12 @@ export function PocketTerminalExperience({
       fillViewport={fillViewport}
       activeTouchMode={touchMode}
       onTouchModeChange={handleTouchModeChange}
-      activeKeyboardMode={keyboardMode}
-      onKeyboardModeChange={setKeyboardMode}
+      activeView={view}
+      onViewChange={setView}
       cursorTouchAvailable={cursorTouchAvailable}
       sessions={sessionItems}
       onSessionSelect={setActivePaneId}
+      settings={<MobileSettings persist />}
       onSendInput={(data) => { if (adapterRef.current) writeUserInput(activePaneId, data); }}
       onGestureInput={handleGestureInput}
       onGestureScroll={handleGestureScroll}

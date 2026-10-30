@@ -414,7 +414,7 @@ function OneTimeWall({
         </button>
       </header>
       <div className={PK.wallHost}>
-        <PocketWall adapter={adapter} onError={onEnd} restoreTheme={applyPocketTheme} />
+        <PocketWall adapter={adapter} onError={onEnd} restoreTheme={applyPocketTheme} persistSettings={false} />
       </div>
     </div>
   );

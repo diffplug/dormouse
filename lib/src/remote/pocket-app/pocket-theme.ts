@@ -49,7 +49,7 @@ export function applyPocketTheme(): void {
  * Browser chrome outside the body: the form-control palette and the address-bar
  * / status-bar tint follow the applied theme.
  */
-function syncDocumentChrome(theme: DormouseTheme): void {
+export function syncDocumentChrome(theme: DormouseTheme): void {
   if (typeof document === 'undefined') return;
   document.documentElement.style.colorScheme = theme.type;
   const appBg = getAppliedThemeSnapshot()?.resolvedVars['--vscode-sideBar-background'];

@@ -26,6 +26,8 @@ vi.mock('../../lib/terminal-registry', () => ({
   getTerminalInstance: () => null,
   setTerminalUserTitle: vi.fn(),
   refitSession: vi.fn(),
+  getTerminalFontSize: () => 13,
+  setTerminalFontSize: vi.fn(),
   writeUserInput: vi.fn(),
 }));
 vi.mock('../../lib/mouse-selection', () => ({
@@ -34,7 +36,7 @@ vi.mock('../../lib/mouse-selection', () => ({
   setOverride: vi.fn(),
 }));
 vi.mock('../../lib/clipboard', () => ({ doPaste: vi.fn() }));
-vi.mock('./pocket-theme', () => ({ usePocketTheme: vi.fn() }));
+vi.mock('./pocket-theme', () => ({ usePocketTheme: vi.fn(), syncDocumentChrome: vi.fn() }));
 vi.mock('../../components/TerminalPane', () => ({
   TerminalPane: ({ id }: { id: string }) => <div data-terminal={id} />,
 }));
