@@ -41,6 +41,7 @@ import {
 import { useDynamicPalette } from '../lib/themes/use-dynamic-palette';
 import { isComposingKey, isEditableTarget } from '../lib/dom';
 import { TouchUiContext } from './touch-ui-context';
+import { ClipboardFailureGlobal } from './ClipboardFailureDialog';
 import { TODO_PILL_TRACKING_CLASS } from './design';
 import { AlertRingInset, alertRingRow, useAlertRingBurst } from './alert-ring';
 import type { AlertEpisode } from '../lib/alert-episode';
@@ -1158,6 +1159,9 @@ export function MobileTerminalUi({
         className="absolute left-0 top-0 h-px w-px resize-none overflow-hidden border-0 bg-transparent p-0 opacity-0 outline-none"
       />
     </div>
+    {/* The page's root here: Pocket, the one-time phone page, and the Pocket
+        playground mount no `App`, which carries it on the desktop hosts. */}
+    <ClipboardFailureGlobal />
     </TouchUiContext.Provider>
   );
 }
