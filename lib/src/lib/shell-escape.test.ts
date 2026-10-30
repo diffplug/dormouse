@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
+import { buildShellCommandForKind } from 'dor/commands/shell-quote';
 import { shellEscapePath, shellEscapePosix } from './shell-escape';
 
 describe('shellEscapePosix', () => {
@@ -235,4 +236,19 @@ describe.skipIf(process.platform !== 'win32')('a cmd or PowerShell Session\'s pa
       });
     }
   }
+
+  // A cmd Session's own argv form (`dor split -- …` into cmd), read by cmd and
+  // then by node's MSVCRT argv split; `dor/test/shell-quote.test.mjs` models both.
+  it.skipIf(!shells[0][1])('reads cmd argv back literally through cmd.exe', () => {
+    const argv = [
+      'say "hi"', '"', 'a"&echo INJECTED&"b', 'a\\"b', 'a b\\', '', 'a&b', 'console.log(1)', 'a^b', '<x>|y',
+      '100%', '%DORMOUSE_QUOTE_PROBE%', '%dormouse_quote_probe:E=x%', '%%', '%"%', '!DORMOUSE_QUOTE_PROBE!', 'it’s (1).txt',
+    ];
+    const line = buildShellCommandForKind('cmd', [process.execPath, '-e', 'process.stdout.write(JSON.stringify(process.argv.slice(1)))', '--', ...argv]);
+    const env = { ...process.env, DORMOUSE_QUOTE_PROBE: 'EXPANDED' };
+    const result = spawnSync(shells[0][1]!, ['/d', '/s', '/c', `"${line}"`], { env, encoding: 'utf8', windowsVerbatimArguments: true, windowsHide: true, timeout: 10_000 });
+    expect(result.error).toBeUndefined();
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual(argv);
+  });
 });
