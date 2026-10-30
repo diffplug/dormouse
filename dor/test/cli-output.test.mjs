@@ -464,7 +464,7 @@ test('shell command quoting supports shell families', () => {
   );
   assert.equal(
     buildShellCommandForKind('cmd', ['C:\\Program Files\\nodejs\\node.exe', '-e', 'console.log(process.argv[1])', 'hello world', 'a&b']),
-    '"C:\\Program Files\\nodejs\\node.exe" -e "console.log^(process.argv[1]^)" "hello world" "a^&b"',
+    '"C:\\Program Files\\nodejs\\node.exe" -e "console.log(process.argv[1])" "hello world" "a&b"',
   );
   // `,` and `@` were dropped from the shared WINDOWS_SAFE_ARG for PowerShell's
   // array operator and splatting; cmd.exe reads `,` as an argument separator and
