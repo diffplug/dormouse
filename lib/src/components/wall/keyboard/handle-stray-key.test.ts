@@ -6,6 +6,13 @@ import { useWallKeyboard } from '../use-wall-keyboard';
 import { COMMAND_KEYS, WORKSPACE_KEYS } from '../../StrayKeyPrompt';
 import type { WallKeyboardCtx } from './types';
 
+// The verbs the listed keys reach would otherwise need an initialized platform.
+vi.mock('../../../lib/terminal-registry', () => ({
+  acknowledgeSession: vi.fn(),
+  dismissSessionAlert: vi.fn(),
+  toggleSessionTodo: vi.fn(),
+}));
+
 function makeCtx(workspaceId: string | undefined) {
   const strayKeyRef = { current: null as string | null };
   const wallActions = { onSplitH: vi.fn(), onSplitV: vi.fn(), onZoom: vi.fn() };
