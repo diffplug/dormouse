@@ -1455,6 +1455,41 @@ test("notices that keep failing go to the back, so they never starve a newer one
   expect(f.email.all().map((mail) => mail.to[0])).toEqual([f.dev.customers.get(session.customer as string)!.email]);
 });
 
+test("a withdrawal's acknowledgement is retried until sent, failing the cron once a day overdue; a dispute notice lapses after 30 days", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const error = vi.spyOn(console, "error").mockImplementation(() => {});
+  onTestFinished(() => error.mockRestore());
+  const failures = () =>
+    resyncBilling(f.setup, f.database.url, origin, f.mail).then(
+      () => [],
+      (failure: AggregateError) => failure.errors.map((one: Error) => one.message),
+    );
+  const member = await f.account();
+  const { subscription } = await f.buy(member, "founding");
+  f.mailing.failures = 100;
+  expect((await member.request("/api/billing/withdraw", { method: "POST", body: { subscription: subscription.id } })).status).toBe(200);
+  const [{ id }] = (await f.sql(`SELECT id FROM dormouse_withdrawals`)) as [{ id: string }];
+  await f.sql(
+    `INSERT INTO dormouse_billing_notices (id, "userId", kind, "disputeId", "createdAt") VALUES ('restored', $1, 'dispute_restored', 'du_r', $2)`,
+    [member.id, f.time.now()],
+  );
+  const overdue = `Withdrawal acknowledgement unsent after a day: withdrawal ${id}`;
+
+  f.time.advanceMilliseconds(10 * 60 * 1000);
+  expect(await failures()).not.toContain(overdue);
+  f.time.advanceMilliseconds(DAY_MS);
+  expect(await failures()).toContain(overdue);
+  // Long past 30 days, mail works again: the acknowledgement goes, the dispute notice does not.
+  f.time.advanceMilliseconds(40 * DAY_MS);
+  f.mailing.failures = 0;
+  expect(await failures()).toEqual([]);
+  expect(f.email.all().map((mail) => mail.subject)).toEqual(["We received your withdrawal from Dormouse Hosted"]);
+  expect(await member.summary()).toMatchObject({ withdrawn: { acknowledged: true } });
+});
+
 /** `count` paid founders at founding step `step`, started 40 days ago, straight into the synchronized rows. */
 const fillCohort = (f: Awaited<ReturnType<typeof fixture>>, step: number, count: number) =>
   f.sql(

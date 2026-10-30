@@ -119,7 +119,7 @@ Each notice is a `dormouse_billing_notices` row, recorded before it is sent and 
 | `price_change` | 21 days before the first renewal on or after the change's `effectiveAt` | the same, on the old Price, over 8 days ahead |
 | `dispute_suspended` | a dispute opens a suspension | the dispute is open, for 30 days |
 | `dispute_restored` | it closes in the account's favor, no other open | 30 days |
-| `withdrawal` (its acknowledgement) | a withdrawal is recorded, in the same statement | 30 days |
+| `withdrawal` (its acknowledgement) | a withdrawal is recorded, in the same statement | until sent; the cron fails once one is a day overdue |
 
 - **Must send every notice to the Stripe customer's email**, never the sign-in email, so a provider-only account gets them.
 - **Must record a dispute's notice in the webhook's transaction** and send it after the commit; a failed send never fails the event.
