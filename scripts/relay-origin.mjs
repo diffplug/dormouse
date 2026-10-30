@@ -2,7 +2,9 @@
 // (docs/specs/relay.md → "Relay origin"). Both host builds read it here —
 // `standalone/scripts/build-sidecar-proxy.mjs` and `vscode-ext/scripts/esbuild.mjs`
 // — and esbuild-`define` the result into the Node bundle that holds the relay
-// socket, where `lib/src/host/relay-origin.ts` is the only reader.
+// socket; `standalone/vite.config.ts` defines it into the standalone webview
+// too ({@link relayDefineVitePlugin}), and `standalone/scripts/tauri.mjs` reads
+// the mode. Inside the bundles, `lib/src/host/relay-origin.ts` is the only reader.
 //
 // The accepted-origin rule is the built `remote-lib-common`'s, so every caller
 // builds that package first. The default is duplicated from the `.ts`, which a

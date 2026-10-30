@@ -17,8 +17,7 @@ import { fileURLToPath } from 'node:url';
 
 /**
  * The repo root, resolved from this file's own location rather than by shelling
- * out — the idiom `spec-lint.mjs` and `loopback-lint.mjs` already use, and one
- * that works in a checkout with no `git` on `PATH`.
+ * out, which works in a checkout with no `git` on `PATH`.
  */
 export const repoRoot = fileURLToPath(new URL('..', import.meta.url));
 
