@@ -7,7 +7,7 @@ import type { VSCodeWorkbenchCommand } from '../vscode-keybindings';
 import type { ShellEntry } from '../shell-defaults';
 // Defined in its own dependency-free file so the Node proxy in lib/src/host can
 // share it without pulling this browser-typed module into a Node tsconfig.
-import type { IframeProxyResult } from './iframe-proxy-types';
+import type { IframeProxyOptions, IframeProxyResult } from './iframe-proxy-types';
 import type { ToolControlResult, ToolHostRequest } from './tool-types';
 import type { ManagedVoicePort } from './managed-voice-types';
 
@@ -116,7 +116,7 @@ export const SURFACE_ID_RESERVE_TIMEOUT_MS = SURFACE_ID_RESERVE_WAIT_MS + 5_000;
 
 export type AlertStateDetail = { id: string } & AlertState;
 
-export type { IframeProxyResult };
+export type { IframeProxyOptions, IframeProxyResult };
 
 /**
  * The webview end of a Node-resident Burrow
@@ -364,8 +364,10 @@ export interface PlatformAdapter {
   // the desktop playground answers only for its own virtual viewers.
   // `lease` names the mounted view holding the grant: it keeps the grant, and
   // its origin, until `releaseIframeProxy` (docs/specs/dor-browser.md →
-  // "Iframe Proxy Leases").
-  createIframeProxyUrl?(targetUrl: string, lease?: string): Promise<IframeProxyResult>;
+  // "Iframe Proxy Leases"). `allowExternal` says the user allowed the target's
+  // origin, without which an upstream off this machine is refused `external`
+  // (docs/specs/dor-browser.md → "Iframe External Origins").
+  createIframeProxyUrl?(targetUrl: string, lease?: string, opts?: IframeProxyOptions): Promise<IframeProxyResult>;
   releaseIframeProxy?(lease: string): void;
 
   // Dor Tools (see docs/specs/dor-tool.md). Two operations behind one method:

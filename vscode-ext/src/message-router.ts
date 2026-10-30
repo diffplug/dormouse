@@ -709,6 +709,7 @@ export function attachRouter(
           Array.isArray(msg.embedderOrigins) ? msg.embedderOrigins : [],
           // The lease is this webview's: its owner is this router.
           msg.lease === undefined ? undefined : { owner: routerId, id: msg.lease },
+          msg.allowExternal === true,
         ).then(
           (result) => post({
             type: 'iframe:proxyUrl', requestId: msg.requestId, result,

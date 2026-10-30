@@ -285,6 +285,16 @@ export function isBlockedAddress(hostname: string): boolean {
   return v4 !== null && v4 >= LINK_LOCAL_V4_START && v4 <= LINK_LOCAL_V4_END;
 }
 
+/** Whether a resolved address is this machine's loopback: 127.0.0.0/8 in any
+ *  spelling, IPv4-mapped included, or `::1`. Takes an address, never a name —
+ *  `localhost` is whatever the resolver says it is. */
+export function isLoopbackAddress(address: string): boolean {
+  const h = address.replace(/^\[|\]$/g, '').toLowerCase();
+  if (h === '::1') return true;
+  const v4 = ipv4Value(h);
+  return v4 !== null && v4 >>> 24 === 127;
+}
+
 // --- Served error / diagnostic pages ----------------------------------------
 
 export interface ErrorPage {
@@ -310,6 +320,15 @@ export function timedOutPage(upstream: URL): ErrorPage {
   };
 }
 
+/** What a frame sees in place of a redirect off its grant's upstream origin,
+ *  which the webview's loopback-only `frame-src` would refuse as a blank pane. */
+export function offOriginRedirectPage(target: URL): ErrorPage {
+  return {
+    title: `Redirected to ${target.origin}`,
+    message: `This page redirected to ${target.href}, outside this preview.`,
+  };
+}
+
 export function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -319,7 +338,16 @@ export function escapeHtml(value: string): string {
 // The page is a separate document on the proxy origin, out of reach of the
 // app's theme tokens, so it follows the system scheme through CSS system
 // colors rather than hardcoding either one.
-export function errorPageHtml(page: ErrorPage): string {
+//
+// `navigate`, when given, is a URL the page goes to in its place. The pane's own
+// frame asks the embedding panel, addressed to `embedderOrigin` only, which
+// takes it as a URL-bar entry, so the external-origin gate applies
+// (docs/specs/dor-browser.md → "Iframe External Origins"). A frame nested in a
+// proxied page — its parent readable, on the same proxy origin — is outside the
+// webview's `frame-src`, so it follows the redirect itself, as it would have.
+// `from` is the redirecting URL, so the panel replaces that history entry
+// rather than leave one that redirects again on Back.
+export function errorPageHtml(page: ErrorPage, navigate?: { url: string; embedderOrigin: string }): string {
   return `<!doctype html><html><head><meta charset="utf-8">
 <style>
   :root { color-scheme: light dark; }
@@ -334,5 +362,12 @@ export function errorPageHtml(page: ErrorPage): string {
 <body><div class="card">
   <h1>${escapeHtml(page.title)}</h1>
   <p>${escapeHtml(page.message)}</p>
-</div></body></html>`;
+</div>${navigate ? `<script>(function(){var U=${scriptJson(navigate.url)};
+try{if(parent.location.origin===location.origin){location.replace(U);return;}}catch(e){}
+try{parent.postMessage({__dormouse:'navigate',url:U,from:String(location.href)},${scriptJson(navigate.embedderOrigin)});}catch(e){}})();</script>` : ''}</body></html>`;
+}
+
+// JSON for an inline <script>: `<` escaped so no value can close the element.
+function scriptJson(value: unknown): string {
+  return JSON.stringify(value).replace(/</g, '\\u003c');
 }
