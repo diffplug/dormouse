@@ -12,6 +12,7 @@ import {
   updateDrag,
 } from './mouse-selection';
 import { openCopyEditor } from './copy-editor';
+import { multiClickSpan, terminalCopyBuffer } from './copy-text';
 import { boundaryAt, dragCells, type PointerBoundary } from './drag-cells';
 import { detectTokenInBuffer } from './smart-token';
 import type { TerminalOverlayDims } from './terminal-store';
@@ -114,8 +115,13 @@ export function attachTerminalMouseRouter({
     clientX: number;
     clientY: number;
     touchLike: boolean;
+    /** A mouse double or triple click, which selected at its press: its
+     *  release opens the editor over that selection unless it became a drag. */
+    multiClick: boolean;
   } | null = null;
   let activePointerId: number | null = null;
+  // The latest primary mouse press the terminal owns, for onScreenMouseDown.
+  let ownedMousePress: MouseEvent | null = null;
   let suppressSyntheticMouseUntil = 0;
   // The most recent touch that ended as a tap (no drag), used to recognize a double-tap.
   let lastTouchTap: { time: number; x: number; y: number } | null = null;
@@ -166,6 +172,21 @@ export function attachTerminalMouseRouter({
     // must leave no pendingDrag behind, or its release would read as the paired
     // click that ends a temporary override (spec §2).
     if (ev.button !== 0) return true;
+    // A press on a link is the link's: a double-click there pins its preview.
+    const multiClick = !opts.touchLike && ev.detail >= 2 && !mouseCaptureElement.classList.contains('xterm-cursor-pointer');
+    const clickSpan = multiClick ? multiClickSpan(terminalCopyBuffer(terminal), cell, ev.detail) : null;
+    if (clickSpan) {
+      const { start, end } = clickSpan;
+      setSelection(id, {
+        startRow: start.row,
+        startCol: start.col,
+        endRow: end.row,
+        endCol: end.col,
+        shape: 'linewise',
+        dragging: false,
+        startedInScrollback: cell.startedInScrollback,
+      });
+    }
     pendingDrag = {
       row: cell.row,
       col: cell.col,
@@ -176,7 +197,9 @@ export function attachTerminalMouseRouter({
       clientX: ev.clientX,
       clientY: ev.clientY,
       touchLike: opts.touchLike,
+      multiClick: clickSpan !== null,
     };
+    if (!opts.touchLike) ownedMousePress = ev;
     return true;
   };
 
@@ -234,6 +257,7 @@ export function attachTerminalMouseRouter({
           }));
         }
       }
+      if (pendingDrag.multiClick) openCopyEditor(id, terminal);
       clearTemporaryOverrideAfterMouseDispatch(id);
       pendingDrag = null;
       return;
@@ -281,6 +305,16 @@ export function attachTerminalMouseRouter({
       return;
     }
     beginPendingDrag(ev, { touchLike: false });
+  };
+
+  // xterm's own selection runs from a press on its element, which bubbles there
+  // after the linkifier on its screen has seen it. A multi-click or Shift-click
+  // there would paint a selection the terminal does not own and no copy reads,
+  // so a press the terminal owns stops at the screen (spec §3.1).
+  const onScreenMouseDown = (ev: MouseEvent) => {
+    if (ev !== ownedMousePress || (ev.detail < 2 && !ev.shiftKey)) return;
+    consumePointerEvent(ev);
+    terminal.focus();
   };
 
   const onPointerDown = (ev: PointerEvent) => {
@@ -425,6 +459,7 @@ export function attachTerminalMouseRouter({
 
   element.addEventListener('mousedown', onMouseDown, true);
   element.addEventListener('pointerdown', onPointerDown, true);
+  mouseCaptureElement.addEventListener('mousedown', onScreenMouseDown);
   for (const type of OVERRIDE_MOUSE_EVENTS) {
     element.addEventListener(type, onOverrideMouseEvent, true);
   }
@@ -439,6 +474,7 @@ export function attachTerminalMouseRouter({
   return () => {
     element.removeEventListener('mousedown', onMouseDown, true);
     element.removeEventListener('pointerdown', onPointerDown, true);
+    mouseCaptureElement.removeEventListener('mousedown', onScreenMouseDown);
     for (const type of OVERRIDE_MOUSE_EVENTS) {
       element.removeEventListener(type, onOverrideMouseEvent, true);
     }

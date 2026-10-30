@@ -549,6 +549,26 @@ function snapToWords(buf: CopyBuffer, sel: Span): Span {
   return { start: { row: sr, col: sc }, end: { row: er, col: ec }, block: false };
 }
 
+/** What a multi-click on cell `pos` selects (spec §3.1): two clicks the token
+ *  under it, as Whole words grows an edge; three or more its logical line, from
+ *  its first text cell to its last. Null on a blank cell, or a blank line. */
+export function multiClickSpan(buf: CopyBuffer, pos: GridPos, clicks: number): Span | null {
+  if (clicks === 2) {
+    return isBlankCell(buf.row(pos.row).cells[pos.col]) ? null : snapToWords(buf, { start: pos, end: pos, block: false });
+  }
+  const { top, bottom } = buf.row(pos.row);
+  let start: GridPos | null = null;
+  let end: GridPos | null = null;
+  for (let row = top; row <= bottom; row++) {
+    buf.row(row).cells.forEach((cell, col) => {
+      if (isBlankCell(cell)) return;
+      start ??= { row, col };
+      end = { row, col };
+    });
+  }
+  return start && end ? { start, end, block: false } : null;
+}
+
 function toParagraph(buf: CopyBuffer, sel: Span): Span {
   let sr = sel.start.row;
   if (!line(buf, sr).boundary) while (sr > 0 && !line(buf, sr - 1).boundary) sr--;
