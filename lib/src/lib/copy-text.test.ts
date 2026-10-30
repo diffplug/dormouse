@@ -214,6 +214,11 @@ describe('copy-text formats', () => {
     // A bar alone is a blank line inside the quote, so its paragraphs stay apart.
     const paragraphs = lines(['  ▎ First.', '  ▎', '  ▎ Second.'], { cols: 58 });
     expect(text(paragraphs, span(0, 2, 2, 10), 'auto')).toBe('> First.\n>\n> Second.');
+    // An empty row ends a quote, whichever marker it uses.
+    for (const bar of ['▎', '>']) {
+      const quotes = lines([`  ${bar} First.`, '', `  ${bar} Second.`], { cols: 58 });
+      expect(text(quotes, span(0, 2, 2, 10), 'auto')).toBe('> First.\n\n> Second.');
+    }
     // A quoted paragraph starts at its prefix, which its later kept lines show.
     expect(computeScopes(buf, span(4, 10, 4, 12)).find((s) => s.label === 'Paragraph')?.span).toEqual(span(3, 2, 7, 8));
   });

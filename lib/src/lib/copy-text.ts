@@ -490,9 +490,10 @@ function computeLayout({ buf, raw, stripped }: ScopeLines, format: CopyFormat): 
   return { lines, base: indents.length ? Math.min(...indents) : 0, auto };
 }
 
-/** A blank line between quoted lines, written with the shallower one's
- *  prefix, so the quote goes on past it. */
+/** A line of bars alone between quoted lines, written with the shallower
+ *  one's prefix, so the quote goes on past it. An empty row still ends it. */
 function quoteBlank(buf: CopyBuffer, before: Line, blank: Line, after: Line): Line {
+  if (!BARS_ONLY.test(buf.row(blank.row).cells.join(''))) return blank;
   let depth = Math.min(line(buf, before.row).depth, line(buf, after.row).depth);
   let end = 0;
   while (depth && end < after.quote) if (after.cells[end++].ch !== ' ') depth--;
