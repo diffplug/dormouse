@@ -38,12 +38,6 @@ for (const [name, shell, flags] of SHELLS) {
   });
 }
 
-// Without a zsh to round-trip through, the form itself: EQUALS expands only a
-// word's leading `=`.
-test('posix quoting quotes a leading = and leaves an inner one bare', () => {
-  assert.equal(buildShellCommandForKind('posix', ['=sh', 'a=b']), "'=sh' a=b");
-});
-
 test('posix quoting steps a backslash outside the single quotes', () => {
   assert.equal(buildShellCommandForKind('posix', ['a\\', ';x;#']), "'a'\\\\'' ';x;#'");
 });
@@ -72,4 +66,10 @@ test('a Windows-portable command keeps its program bare and refuses what any of 
     assert.equal(buildWindowsPortableCommand(['dor', arg]), null, arg);
   }
   assert.equal(buildWindowsPortableCommand([]), null);
+});
+
+// Without a zsh to round-trip through, the form itself: EQUALS expands only a
+// word's leading `=`.
+test('posix quoting quotes a leading = and leaves an inner one bare', () => {
+  assert.equal(buildShellCommandForKind('posix', ['=sh', 'a=b']), "'=sh' a=b");
 });
