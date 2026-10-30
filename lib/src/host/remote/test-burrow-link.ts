@@ -28,8 +28,10 @@ import {
   idleOneTimeState,
   type InvitationEvent,
   type BurrowConsoleStatus,
+  type PairedDevice,
   type SetupQrResult,
 } from './service-protocol';
+import type { AccessLogEntry } from '../../remote/burrow/access-log';
 import type { PairingOutcome, TerminalInvitationState } from '../../remote/burrow/burrow-runtime';
 import type { OneTimeState } from '../../remote/burrow/one-time-runtime';
 import { networkPolicyResult, type NetworkPolicy, type NetworkPolicyResult } from '../../remote/network-policy';
@@ -146,6 +148,73 @@ export function oneTimeWaiting(
   };
 }
 
+const HOUR_MS = 60 * 60_000;
+
+/**
+ * Paired phones as `pairedDevices` answers them, newest pairing first: the
+ * first paired an hour ago and connected now; each after it paired a day
+ * before the last and was last seen two hours after pairing. Relative to now,
+ * like {@link setupQrResult}, so "Last seen" reads the same in every story.
+ */
+export function pairedDevices(count: number): PairedDevice[] {
+  const now = Date.now();
+  return Array.from({ length: count }, (_, index) => {
+    const pairedAt = now - HOUR_MS - index * 24 * HOUR_MS;
+    return {
+      id: `3f2a9c01d47e6b${index.toString(16).padStart(2, '0')}`,
+      // The closed set a Burrow maps every label to, so two phones can share one.
+      label: index % 2 === 0 ? 'Dormouse Pocket (Home Screen)' : 'Dormouse Pocket (browser)',
+      pairedAt,
+      lastSeenAt: index === 0 ? now - 60_000 : pairedAt + 2 * HOUR_MS,
+      connected: index === 0,
+    };
+  });
+}
+
+/**
+ * An access log about `devices` as `accessLog` answers it, oldest first: each
+ * one's pairing, the second's session that went direct and ended, a one-time
+ * connection, an unpaired phone refused, and the first's session open now.
+ */
+export function accessLogEntries(devices: PairedDevice[] = pairedDevices(2)): AccessLogEntry[] {
+  const entries: AccessLogEntry[] = [];
+  for (const [index, { label: device, id: deviceId, pairedAt, lastSeenAt }] of devices.entries()) {
+    entries.push({ at: pairedAt, event: 'paired', device, deviceId });
+    if (lastSeenAt === null) continue;
+    if (index === 0) {
+      entries.push({ at: lastSeenAt, event: 'connected', device, deviceId, presence: 'window' });
+      continue;
+    }
+    const since = lastSeenAt - 4 * 60_000;
+    entries.push(
+      { at: since, event: 'connected', device, deviceId, presence: 'proof' },
+      { at: since + 1_000, event: 'attached', device, deviceId, surface: 'surface:3' },
+      { at: lastSeenAt, event: 'ended', device, deviceId, path: 'direct', durationMs: 4 * 60_000 },
+    );
+  }
+  const now = Date.now();
+  const oneTime = 'Dormouse Pocket (browser)';
+  entries.push(
+    { at: now - 3 * HOUR_MS, event: 'one-time-connected', device: oneTime, path: 'direct' },
+    {
+      at: now - 3 * HOUR_MS + 12 * 60_000,
+      event: 'one-time-ended',
+      device: oneTime,
+      path: 'direct',
+      durationMs: 12 * 60_000,
+      reason: 'user-ended',
+    },
+    {
+      at: now - 2 * HOUR_MS,
+      event: 'connection-denied',
+      device: 'Unknown device',
+      deviceId: '9b0e44c1a7f2d613',
+      reason: 'pairing-required: client-not-paired',
+    },
+  );
+  return entries.sort((a, b) => a.at - b.at);
+}
+
 /** The one Wi-Fi the fixtures' Local networks allows. */
 export const LAN = '192.168.1.0/24';
 /** A self-host build's network on: `relay`. */
@@ -239,13 +308,23 @@ export interface PrimedBurrow {
   oneTimeOpenError?: string;
   /** What `networkPolicy` answers; {@link networkOn} for the status's build by default. */
   network?: NetworkPolicyResult;
+  /**
+   * What `pairedDevices` answers; by default {@link pairedDevices} of the
+   * status's `pairedClients` while enrolled, so the count a story primes is
+   * the list it shows.
+   */
+  devices?: PairedDevice[];
+  /** What `accessLog` answers; empty by default. */
+  accessLog?: AccessLogEntry[];
+  /** Make `revokeDevice` reject — the id names no phone any more, or the save failed. */
+  revokeError?: string;
 }
 
 /**
  * A link that answers from a fixed status rather than a real Burrow service.
  *
  * Deliberately not a scenario engine: a story is one frame, so `enroll`,
- * `enrollOffer`, `reconnect`, `clearEnrollment` and `oneTimeEnd` resolve without
+ * `enrollOffer`, `reconnect`, `clearEnrollment`, `oneTimeEnd` and `revokeDevice` resolve without
  * changing the answer. The exception is `enrollError`, because a refused enrollment is a state the
  * form must render (`docs/specs/relay.md`, "Remote control, in the Settings
  * dialog") and a rejected enroll is the only way to reach it. And
@@ -290,6 +369,15 @@ export function makeStubBurrowLink(primed: PrimedBurrow): BurrowLink {
         return primed.oneTimeOpen ?? oneTimeWaiting();
       }
       if (cmd === 'oneTimeEnd') return {};
+      if (cmd === 'pairedDevices') {
+        const status = primed.status ?? UNENROLLED_STATUS;
+        return { devices: primed.devices ?? (status.enrolled ? pairedDevices(status.pairedClients) : []) };
+      }
+      if (cmd === 'accessLog') return { entries: primed.accessLog ?? [] };
+      if (cmd === 'revokeDevice') {
+        if (primed.revokeError) throw new Error(primed.revokeError);
+        return { revoked: 1, labels: [] };
+      }
       return null;
     },
     respond: () => {},

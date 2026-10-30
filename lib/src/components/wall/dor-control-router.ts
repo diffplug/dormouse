@@ -1,9 +1,10 @@
-import { isAppControlMethod, isToolControlMethod, isWindowControlMethod, isWorkspaceControlMethod, parseSurfaceTarget, SURFACE_CONTROL_METHODS } from 'dor/protocol';
+import { isAppControlMethod, isRemoteControlMethod, isToolControlMethod, isWindowControlMethod, isWorkspaceControlMethod, parseSurfaceTarget, SURFACE_CONTROL_METHODS } from 'dor/protocol';
 import { registry, isHelperSession } from '../../lib/terminal-store';
 import { createRefCount } from '../../lib/ref-count';
 import { getPendingKill, isPendingKillSession } from '../../lib/pending-kills';
 import { getActiveWorkspaceId, isWindowRef, resolveWorkspaceRef } from '../../lib/workspace-store';
 import { handleAppControl } from './app-control';
+import { handleRemoteControl } from './remote-control';
 import { handleReopenControl } from './reopen';
 import { handleToolControl } from './tool-control';
 import { errorText, mountingRefusal, requestForWall, ROUTE_RETRIES } from './dor-control-shared';
@@ -16,8 +17,9 @@ import type { DorControlRequest } from './use-dor-control';
  * answers (`docs/specs/dor-cli.md` → "Handle Model"). It replaces the per-Wall
  * listener, which would have every mounted Workspace answer the same request.
  * The container verbs and the cross-Workspace listing are answered here instead,
- * by `workspace-control.ts`, the app verbs by `app-control.ts`, and the Tool
- * configuration reads by `tool-control.ts`.
+ * by `workspace-control.ts`, the app verbs by `app-control.ts`, the remote
+ * verbs by `remote-control.ts`, and the Tool configuration reads by
+ * `tool-control.ts`.
  */
 
 /** Where one control request lands. */
@@ -26,6 +28,9 @@ export type DorControlRoute =
   /** Answered by the Window before anything is resolved: an `app.*` verb acts
    *  on the running app, so no param of its names a Workspace or Surface. */
   | { kind: 'app' }
+  /** Answered by the Window before anything is resolved: a `remote.*` verb
+   *  acts on this machine's Burrow, which no Workspace holds. */
+  | { kind: 'remote' }
   /** Answered by the Window before anything is resolved: a `tool.*` read of
    *  the Tool configuration names no Workspace or Surface either. */
   | { kind: 'tool' }
@@ -53,7 +58,7 @@ function withHelperOrigin(detail: DorControlRequest): DorControlRequest {
 }
 
 /**
- * Resolution order: the app verbs, the Tool reads, the Window's own verbs, an explicit
+ * Resolution order: the app verbs, the remote verbs, the Tool reads, the Window's own verbs, an explicit
  * container target, the Workspace holding a target Surface named by id, else
  * the caller's own Workspace, else the active one.
  */
@@ -73,6 +78,7 @@ export function resolveDorControlRoute(detail: DorControlRequest): DorControlRou
 
 function resolveRoute(detail: DorControlRequest): DorControlRoute {
   if (isAppControlMethod(detail.method)) return { kind: 'app' };
+  if (isRemoteControlMethod(detail.method)) return { kind: 'remote' };
   if (isToolControlMethod(detail.method)) return { kind: 'tool' };
   if (isWindowControlMethod(detail.method)) return { kind: 'reopen' };
   const params: WindowControlParams = detail.params ?? {};
@@ -158,9 +164,10 @@ function dispatchDorControl(detail: DorControlRequest, attempt: number): void {
   }
 }
 
-function runRoute(route: Extract<DorControlRoute, { kind: 'app' | 'tool' | 'reopen' | 'window' | 'handle' }>, detail: DorControlRequest): unknown {
+function runRoute(route: Extract<DorControlRoute, { kind: 'app' | 'remote' | 'tool' | 'reopen' | 'window' | 'handle' }>, detail: DorControlRequest): unknown {
   switch (route.kind) {
     case 'app': return handleAppControl(detail);
+    case 'remote': return handleRemoteControl(detail);
     case 'reopen': return handleReopenControl(detail);
     case 'tool': return handleToolControl(detail);
     case 'window': return route.container ? handleWorkspaceControl(detail) : listAllWorkspaceSurfaces(detail);

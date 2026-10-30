@@ -220,7 +220,7 @@ Then the phone shows two digits, and the laptop asks for them. The phone paints 
 
 The direction is the whole trick. A relayed or injected request has no screen to read from, so authorizing requires holding the device that is asking — and the laptop compares the digits itself, exactly once (`docs/specs/remote-security-model.md` → Pairing owns the rule and what it rules out). The modal is the whole security model in one screen, which is why it is a modal and not a settings row.
 
-Exactly once is unforgiving, so the panel behind the modal says which way it went. Mistype the digits and the code is spent — there is no second try, and the paired count above is absolute, so nothing else on that screen would have moved:
+Exactly once is unforgiving, so the panel behind the modal says which way it went. Mistype the digits and the code is spent — there is no second try, and the paired-phone list above is absolute, so nothing else on that screen would have moved:
 
 <Canvas of={RemoteControl.PairingOutcomeCodeMismatch} />
 
@@ -308,7 +308,7 @@ Four limits worth knowing before they surprise you:
 
 So nothing above reads as a promise:
 
-- **Revocation is editing a JSON file by hand.** There is no management UI and no relay frame carries a revocation. Deleting a *machine* takes effect within a minute — the Relay re-reads the file and drops that machine's socket — but withdrawing one *phone's* approval is the laptop's own list, and takes effect when that laptop restarts. **Remove** on the phone is not that list: it forgets the machine locally, and a phone that pairs again arrives with a new per-Burrow key, which the laptop cannot match to the old record — so it appends a second approval and goes on counting both. One phone, "2 paired phones", and the first record still live.
+- **Revoking a machine is still editing a JSON file by hand**, and no relay frame carries a phone's revocation. Deleting a *machine* takes effect within a minute — the Relay re-reads the file and drops that machine's socket. Withdrawing one *phone* is the laptop's own list, Settings → Remote control's Revoke or `dor remote revoke`, and takes effect at once (`docs/specs/remote-security-model.md` → Revocation). **Remove** on the phone is not that list: it forgets the machine locally, and a phone that pairs again arrives with a new per-Burrow key, which the laptop cannot match to the old record — so the list shows both until the old one is revoked.
 - **Approval is Approve/Deny only.** Choosing a standing grant at pairing time — observe-only versus interactive — is designed but not built. Every paired session today gets full input.
-- **The Burrow does not show you who is connected.** A viewer list with per-viewer disconnect is staged.
+- **Disconnecting a phone means revoking it.** The paired-phone list shows which phones are connected and when each was last seen, and Revoke ends a session, but a per-viewer disconnect that keeps the pairing is staged.
 - **Terminals only.** The shipped protocol carries terminal surfaces and nothing else — no browser surfaces, no thumbnails, no scrollback.

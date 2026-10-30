@@ -3,9 +3,11 @@ import { fireEvent, userEvent, within } from 'storybook/test';
 import { ModalSurface } from '../components/design';
 import { RemoteControlSection } from '../components/RemoteControlSection';
 import {
+  accessLogEntries,
   ANYWHERE_ON,
   enrolledStatus,
   OFFER_STATUS,
+  pairedDevices,
   SELF_HOST_RELAY_ORIGIN,
   SELF_HOST_UNENROLLED_STATUS,
   UNENROLLED_STATUS,
@@ -312,13 +314,13 @@ export const ConnectedNoDevices: Story = {
   play: settled('No phone has paired with this machine yet.'),
 };
 
-/** After a successful pairing ceremony. */
+/** After a successful pairing ceremony: the phone it paired, connected now. */
 export const ConnectedOneDevice: Story = {
   parameters: { primedBurrow: { status: enrolledStatus({ pairedClients: 1 }) } },
-  play: settled('1 paired phone.'),
+  play: settled('Paired phones'),
 };
 
-/** Plural, and a long tailnet origin exercising the URL line's `break-all`. */
+/** Four phones, and a long tailnet origin exercising the URL line's `break-all`. */
 export const ConnectedManyDevices: Story = {
   parameters: {
     primedBurrow: {
@@ -327,8 +329,39 @@ export const ConnectedManyDevices: Story = {
         pairedClients: 4,
       }),
     },
+    docs: { story: { height: '520px' } },
   },
-  play: settled('4 paired phones.'),
+  play: settled(pairedDevices(4)[3]!.id),
+};
+
+/**
+ * Two paired phones and the access log unfolded: pairings, a session that went
+ * direct and ended, a one-time connection, and an unpaired phone refused.
+ */
+export const PairedPhonesAndAccessLog: Story = {
+  parameters: {
+    primedBurrow: {
+      status: enrolledStatus({ pairedClients: 2 }),
+      accessLog: accessLogEntries(pairedDevices(2)),
+    },
+    docs: { story: { height: '620px' } },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(await canvas.findByRole('button', { name: '+ Access log' }));
+    await canvas.findByText(/session ended after 4 min, direct/);
+  },
+};
+
+/** Revoke asks once, inline, before it cuts a phone off. */
+export const ConfirmingRevoke: Story = {
+  parameters: { primedBurrow: { status: enrolledStatus({ pairedClients: 2 }) } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const [, idle] = await canvas.findAllByRole('button', { name: 'Revoke' });
+    await userEvent.click(idle!);
+    await canvas.findByText('It will need to pair again.');
+  },
 };
 
 /**

@@ -1817,6 +1817,91 @@ test('app usage errors name the action', async () => {
   await snapshot('app-restart-arity', await runCli(['app', 'restart', 'now'], { client: fixtureClient(), env: standaloneEnv }));
 });
 
+// The Burrow's answers, as `remote-control.ts` relays them: epoch-ms times, a
+// one-time phone with no device id, an event this build may not know.
+function remoteClient() {
+  return {
+    requests: [],
+    async remoteDevices() {
+      this.requests.push({ method: 'remoteDevices' });
+      return {
+        devices: [
+          { id: '0123456789abcdef', label: 'Dormouse Pocket (Home Screen)', pairedAt: Date.UTC(2026, 9, 29, 10), lastSeenAt: Date.UTC(2026, 9, 30, 14, 3, 5), connected: true },
+          { id: 'fedcba9876543210', label: 'Dormouse Pocket (browser)', pairedAt: Date.UTC(2026, 9, 1, 9), lastSeenAt: Date.UTC(2026, 9, 20, 8), connected: false },
+          { id: '00112233445566aa', label: 'Unknown device', pairedAt: Date.UTC(2026, 8, 15, 12), lastSeenAt: null, connected: false },
+        ],
+      };
+    },
+    async remoteRevoke(request) {
+      this.requests.push({ method: 'remoteRevoke', request });
+      return { revoked: 2, labels: ['Dormouse Pocket (browser)'] };
+    },
+    async remoteLog() {
+      this.requests.push({ method: 'remoteLog' });
+      return {
+        entries: [
+          { at: Date.UTC(2026, 9, 30, 14, 0), event: 'paired', device: 'Dormouse Pocket (Home Screen)', deviceId: '0123456789abcdef' },
+          { at: Date.UTC(2026, 9, 30, 14, 0, 30), event: 'connected', device: 'Dormouse Pocket (Home Screen)', deviceId: '0123456789abcdef', presence: 'proof' },
+          { at: Date.UTC(2026, 9, 30, 14, 1), event: 'attached', device: 'Dormouse Pocket (Home Screen)', deviceId: '0123456789abcdef', surface: 'surface:3' },
+          { at: Date.UTC(2026, 9, 30, 14, 3, 32), event: 'ended', device: 'Dormouse Pocket (Home Screen)', deviceId: '0123456789abcdef', path: 'direct', durationMs: 182_400 },
+          { at: Date.UTC(2026, 9, 30, 14, 4), event: 'one-time-denied', device: 'iPhone', reason: 'confirmation code mismatch' },
+          { at: Date.UTC(2026, 9, 30, 14, 5), event: 'revoked', device: 'Dormouse Pocket (browser)', deviceId: 'fedcba9876543210', by: 'dor' },
+        ],
+      };
+    },
+  };
+}
+
+test('remote list prints each paired phone', async () => {
+  const client = remoteClient();
+  await snapshot('remote-list', await runCli(['remote', 'list'], { client, env: standaloneEnv }));
+  await snapshot('remote-list-json', await runCli(['remote', 'list', '--json'], { client, env: standaloneEnv }));
+  const none = { async remoteDevices() { return { devices: [] }; } };
+  await snapshot('remote-list-empty', await runCli(['remote', 'list'], { client: none, env: standaloneEnv }));
+  assert.deepEqual(client.requests, [{ method: 'remoteDevices' }, { method: 'remoteDevices' }]);
+});
+
+test('remote revoke asks the host once and names what it revoked', async () => {
+  const client = remoteClient();
+  await snapshot('remote-revoke', await runCli(['remote', 'revoke', 'FEDCBA9876543210'], { client, env: standaloneEnv }));
+  await snapshot('remote-revoke-json', await runCli(['remote', 'revoke', 'fedcba9876543210', '--json'], { client, env: standaloneEnv }));
+  assert.deepEqual(client.requests, [
+    { method: 'remoteRevoke', request: { id: 'fedcba9876543210' } },
+    { method: 'remoteRevoke', request: { id: 'fedcba9876543210' } },
+  ]);
+});
+
+test('remote log prints the access log oldest first, and --limit keeps the newest', async () => {
+  const client = remoteClient();
+  await snapshot('remote-log', await runCli(['remote', 'log'], { client, env: standaloneEnv }));
+  await snapshot('remote-log-json', await runCli(['remote', 'log', '--json', '--limit', '2'], { client, env: standaloneEnv }));
+  const limited = await runCli(['remote', 'log', '--limit', '1'], { client, env: standaloneEnv });
+  assert.equal(limited.exitCode, 0);
+  assert.match(limited.stdout, /^2026-10-30T14:05:00Z {2}revoked {2}"Dormouse Pocket \(browser\)" {2}fedcba9876543210 {2}by=dor\n$/);
+  const empty = { async remoteLog() { return { entries: [] }; } };
+  await snapshot('remote-log-empty', await runCli(['remote', 'log'], { client: empty, env: standaloneEnv }));
+});
+
+test('remote passes a host refusal through, and names a host that predates it', async () => {
+  const unavailable = { async remoteDevices() { throw new Error('remote control is not available in this Dormouse'); } };
+  await snapshot('remote-unavailable', await runCli(['remote', 'list'], { client: unavailable, env: standaloneEnv }));
+  const unknown = { async remoteRevoke() { throw new Error('No paired phone has the id 0000000000000000.'); } };
+  await snapshot('remote-revoke-unknown', await runCli(['remote', 'revoke', '0000000000000000'], { client: unknown, env: standaloneEnv }));
+  const old = { async remoteLog() { throw new Error("unsupported Dormouse control method 'remote.log'"); } };
+  await snapshot('remote-predates', await runCli(['remote', 'log'], { client: old, env: standaloneEnv }));
+});
+
+test('remote usage errors name the action', async () => {
+  const client = remoteClient();
+  await snapshot('remote-missing-action', await runCli(['remote'], { client, env: standaloneEnv }));
+  await snapshot('remote-unknown-action', await runCli(['remote', 'pair'], { client, env: standaloneEnv }));
+  await snapshot('remote-revoke-arity', await runCli(['remote', 'revoke'], { client, env: standaloneEnv }));
+  await snapshot('remote-list-arity', await runCli(['remote', 'list', 'extra'], { client, env: standaloneEnv }));
+  await snapshot('remote-limit-misuse', await runCli(['remote', 'list', '--limit', '3'], { client, env: standaloneEnv }));
+  await snapshot('remote-invalid-limit', await runCli(['remote', 'log', '--limit', '0'], { client, env: standaloneEnv }));
+  assert.deepEqual(client.requests, []);
+});
+
 test('every action command forwards --workspace to the host', async () => {
   const calls = [
     [['split', '--workspace', 'build', '--', 'pnpm', 'dev'], 'splitSurface'],
