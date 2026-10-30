@@ -51,6 +51,8 @@ export const DISCLOSURE_LABEL = 'security-audit-finding';
 /** A ledger finding is published at the latest this long after its ledger issue was opened. */
 export const DISCLOSURE_DAYS = 7;
 const DAY = 86_400_000;
+/** How many issues one `gh issue list` reads; a list that fills it may be short. */
+const LIST_LIMIT = 1000;
 /** How many disclosures the status issue lists; the label search lists them all. */
 const RECENT_DISCLOSURES = 10;
 
@@ -471,8 +473,11 @@ function publish(args) {
   }
   const ledgerPath = args.ledger ?? '';
   const ledger = ledgerPath && existsSync(ledgerPath) ? parseLedger(readFileSync(ledgerPath, 'utf8')) : null;
-  // Every disclosure, not `gh`'s default 30: a title missed here is published a second time.
-  const archive = parseArchive(JSON.parse(gh(['issue', 'list', ...R, '--label', DISCLOSURE_LABEL, '--state', 'all', '--limit', '1000', '--json', 'number,title,state,createdAt'])));
+  // Every disclosure, not `gh`'s default 30: a title missed here is published a
+  // second time, so a list that fills the limit, and may have left one out, fails.
+  const disclosures = JSON.parse(gh(['issue', 'list', ...R, '--label', DISCLOSURE_LABEL, '--state', 'all', '--limit', String(LIST_LIMIT), '--json', 'number,title,state,createdAt']));
+  if (disclosures.length >= LIST_LIMIT) throw new Error(`The disclosure list filled its ${LIST_LIMIT}-issue read; raise the limit before publishing.`);
+  const archive = parseArchive(disclosures);
 
   // Disclosures first, so the status body lists what this run published.
   const disclosed = [];
