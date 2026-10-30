@@ -35,9 +35,10 @@ function findPlaywrightInstall(hint: string | undefined, configured: string | un
     // External Binaries"); an absolute explicit path comes back verbatim,
     // unchecked, and a relative one not at all.
     const binary = resolveBinaryPath(candidate, env);
+    if (binary === undefined) continue;
     // Every path here resolves through `localRealpathSync`, which refuses a
     // link to a share or device path before following it.
-    const launcher = binary === undefined ? undefined : localRealpathOrUndefined(binary);
+    const launcher = localRealpathOrUndefined(binary);
     const cliRoot = launcher === undefined ? undefined : launcherPackage(launcher);
     if (cliRoot === undefined) continue;
     const coreDirs = playwrightCoreDirs(cliRoot);
@@ -47,7 +48,7 @@ function findPlaywrightInstall(hint: string | undefined, configured: string | un
       // Node's own lookup continues into every ancestor's node_modules, so accept
       // only the copy that belongs to this installation.
       const libraryPath = localRealpathOrUndefined(path.dirname(require.resolve('playwright-core/package.json')));
-      if (!coreDirs.some(dir => libraryPath !== undefined && samePath(dir, libraryPath))) continue;
+      if (libraryPath === undefined || !coreDirs.some(dir => samePath(dir, libraryPath))) continue;
       const library = require('playwright-core') as typeof Playwright;
       if (typeof library.chromium?.connect !== 'function') continue;
       return { binary, libraryPath, library };
