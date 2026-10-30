@@ -153,6 +153,11 @@ function createXtermHost(id: string, grid?: TerminalGrid): { terminal: Terminal;
     cursorBlink: cfg.terminal.cursorBlink,
     theme,
     vtExtensions: xtermVtExtensions(),
+    // xterm.js's own selection is one no copy reads, so it never selects on a
+    // gesture of its own (docs/specs/mouse-and-clipboard.md §3.1); macOS
+    // right-click would select a word by default.
+    rightClickSelectsWord: false,
+    macOptionClickForcesSelection: false,
     linkHandler: {
       activate: (event, uri, range) => {
         event.preventDefault();
@@ -302,6 +307,7 @@ function setupTerminalEntry(id: string, options: TerminalEntryOptions = {}): Ter
     terminal,
     element,
     getOverlayDims: getTerminalOverlayDims,
+    shiftClaimsMouse: !IS_MAC,
   });
 
   const cleanup = () => {

@@ -8,7 +8,6 @@ import {
   setHintToken,
   setOverride,
   setSelection,
-  stateRequiresNativeMouseSuppression,
   updateDrag,
 } from './mouse-selection';
 import { openCopyEditor } from './copy-editor';
@@ -57,11 +56,15 @@ export function attachTerminalMouseRouter({
   terminal,
   element,
   getOverlayDims,
+  shiftClaimsMouse,
 }: {
   id: string;
   terminal: Terminal;
   element: HTMLDivElement;
   getOverlayDims: (id: string) => TerminalOverlayDims | null;
+  /** Whether a Shift-held primary press over a mouse-reporting program is the
+   *  terminal's (spec §6.1): off macOS, as xterm.js's own convention has it. */
+  shiftClaimsMouse: boolean;
 }): () => void {
   /** The cell under the pointer, and (`b`) the cell boundary nearest it,
    *  which is what a selection edge takes (spec §3.1). */
@@ -144,9 +147,13 @@ export function attachTerminalMouseRouter({
     const terminalOwns =
       state.mouseReporting === 'none'
       || state.override !== 'off'
-      || cell.startedInScrollback;
+      || cell.startedInScrollback
+      || (shiftClaimsMouse && ev.shiftKey && ev.button === 0);
     return { state, cell, terminalOwns };
   };
+  // Whether the current gesture's events are kept from xterm.js: decided at
+  // its press and latched until its release (spec §6.1).
+  let gestureSuppressesNative = false;
 
   const beginPendingDrag = (
     ev: MouseEvent | PointerEvent,
@@ -164,6 +171,7 @@ export function attachTerminalMouseRouter({
       return false;
     }
     const suppressNativeMouse = state.mouseReporting !== 'none';
+    gestureSuppressesNative = suppressNativeMouse;
     if (suppressNativeMouse || opts.touchLike) {
       consumePointerEvent(ev, true);
       terminal.focus();
@@ -206,8 +214,7 @@ export function attachTerminalMouseRouter({
   const updatePendingOrActiveDrag = (ev: MouseEvent | PointerEvent) => {
     let consumed = false;
     if (pendingDrag) {
-      const suppressNativeMouse = stateRequiresNativeMouseSuppression(getMouseSelectionState(id));
-      if (suppressNativeMouse || pendingDrag.touchLike) {
+      if (gestureSuppressesNative || pendingDrag.touchLike) {
         consumePointerEvent(ev, true);
         consumed = true;
       }
@@ -231,8 +238,7 @@ export function attachTerminalMouseRouter({
     const cell = computeCell(ev);
     dragHead = { row: cell.row, b: cell.b };
     applyDrag(ev.altKey);
-    const suppressNativeMouse = stateRequiresNativeMouseSuppression(getMouseSelectionState(id));
-    if (!consumed) consumePointerEvent(ev, suppressNativeMouse || isNonMousePointerEvent(ev));
+    if (!consumed) consumePointerEvent(ev, gestureSuppressesNative || isNonMousePointerEvent(ev));
 
     setHintToken(id, detectTokenInBuffer(terminal.buffer.active, cell.row, cell.col));
   };
@@ -244,8 +250,7 @@ export function attachTerminalMouseRouter({
     // both: a mousemove reports button 0.
     if (ev.button !== 0) return;
     if (pendingDrag) {
-      const suppressNativeMouse = stateRequiresNativeMouseSuppression(getMouseSelectionState(id));
-      if (suppressNativeMouse || pendingDrag.touchLike) consumePointerEvent(ev, true);
+      if (gestureSuppressesNative || pendingDrag.touchLike) consumePointerEvent(ev, true);
       // A touch press that releases without ever dragging is a tap — remember it
       // so the next press can be recognized as a double-tap (block selection).
       if (pendingDrag.touchLike) {
@@ -263,12 +268,11 @@ export function attachTerminalMouseRouter({
       return;
     }
     if (!isDragging(id)) return;
-    const suppressNativeMouse = stateRequiresNativeMouseSuppression(getMouseSelectionState(id));
     endDrag(id);
     setHintToken(id, null);
     openCopyEditor(id, terminal);
     clearTemporaryOverrideAfterMouseDispatch(id);
-    consumePointerEvent(ev, suppressNativeMouse || isNonMousePointerEvent(ev));
+    consumePointerEvent(ev, gestureSuppressesNative || isNonMousePointerEvent(ev));
   };
 
   /** Remember where a program drag is, once it is a drag; the cell is measured

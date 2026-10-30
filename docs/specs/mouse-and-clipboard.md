@@ -59,7 +59,7 @@ Selection is available whenever the terminal handles the mouse (§3.5, §6.1).
 - **A selection edge is the cell boundary nearest the pointer**, as xterm.js's own selection reads it: the earlier edge (reading order, or column order for a block) takes the cell after its boundary, the later edge the cell before (rationale). Source of truth: `dragCells` in `lib/src/lib/drag-cells.ts`, pinned by its test.
 - **Must begin selection only once a click-and-drag crosses the drag threshold**; plain clicks shift pane focus or activate hyperlinks.
 - **A mouse double-click selects the token under it (as Whole words grows, §4.2), and a triple-click its logical line**, released into the copy editor as a drag is (§3.7). A blank or a link selects nothing; a link's double-click is its own (`docs/specs/dor-tool.md` -> "Terminal links"). Dragging on is an ordinary drag.
-- **Never let xterm.js's own selection see a multi-click or Shift-click the terminal owns**; no copy reads its highlight. Pinned by `lib/src/lib/terminal-mouse-router.test.ts` and `lib/src/stories/TextSelection.stories.tsx`.
+- **Never let xterm.js select on a gesture of its own**: a multi-click or Shift-click the terminal owns never reaches its selection, and its right-click and Option-click selection stay off; no copy reads its highlight. Pinned by `lib/src/lib/terminal-mouse-router.test.ts` and `lib/src/stories/TextSelection.stories.tsx`.
 - On touch or pen, a primary pointer tap-and-drag takes the same path; non-primary touch pointers are ignored.
 - **A drag whose button comes up outside the webview iframe must still finalize.**
 
@@ -231,10 +231,11 @@ A token is whitespace-delimited and **runs on across soft wraps**. Trailing char
 |---|---|---|---|
 | No | — | Terminal | Terminal |
 | Yes | No | Inside program, shadowed (§3.8) | Terminal |
+| Yes | No, Shift held off macOS | Terminal | Terminal |
 | Yes | Temporary | Terminal, ends on mouse-up | Terminal |
 | Yes | Sticky | Terminal | Terminal |
 
-**Ownership is decided at mouse-down and latched for the whole drag** (§3.5). Wheel events follow the override rows only: swallowed while an override is active (§2); in the "Yes / No override" row they reach the inside program in both regions.
+**Ownership is decided at mouse-down and latched until mouse-up** (§3.5): over a reporting program, no event of a press the terminal owns, a click included, reaches the program or xterm.js. Pinned by `lib/src/lib/terminal-mouse-router.test.ts`. Wheel events follow the override rows only: swallowed while an override is active (§2); in the "Yes / No override" row they reach the inside program in both regions.
 
 Source of truth: `terminalOwnsEvent` in `lib/src/lib/terminal-mouse-router.ts`.
 

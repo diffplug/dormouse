@@ -93,7 +93,7 @@ const dims: TerminalOverlayDims = {
 };
 
 /** `rows` are the buffer's text, for presses that read it. */
-function createHarness(windowHost: ListenerHost, rows?: readonly string[]) {
+function createHarness(windowHost: ListenerHost, rows?: readonly string[], shiftClaimsMouse = false) {
   const element = new FakeElement();
   const screen = new FakeElement();
   element.querySelector.mockReturnValue(screen);
@@ -112,6 +112,7 @@ function createHarness(windowHost: ListenerHost, rows?: readonly string[]) {
     terminal: terminal as never,
     element: element as never,
     getOverlayDims: () => dims,
+    shiftClaimsMouse,
   });
   return { cleanup, element, screen, terminal, windowHost };
 }
@@ -652,6 +653,46 @@ describe('terminal-mouse-router: multi-click', () => {
     expect(getMouseSelectionState('t1').selection).toBeNull();
     expect(down.stopPropagation).not.toHaveBeenCalled();
     expect(down.preventDefault).not.toHaveBeenCalled();
+    h.cleanup();
+  });
+});
+
+describe('terminal-mouse-router: Shift over a reporting program (§6.1)', () => {
+  /** A Shift-held press, move, and release, every event kept for inspection. */
+  function shiftGesture(shiftClaimsMouse: boolean, to: [number, number]) {
+    const h = createHarness(windowHost, undefined, shiftClaimsMouse);
+    setMouseReporting('t1', 'vt200');
+    const events = [
+      mouseEvent({ clientX: 5, clientY: 5, shiftKey: true }),
+      mouseEvent({ clientX: to[0], clientY: to[1], shiftKey: true, buttons: 1 }),
+      mouseEvent({ clientX: to[0], clientY: to[1], shiftKey: true }),
+    ];
+    h.element.emit('mousedown', events[0]);
+    windowHost.emit('mousemove', events[1]);
+    windowHost.emit('mouseup', events[2]);
+    return { h, events };
+  }
+
+  it('makes a Shift-drag the terminal’s own selection, its editor open, none of it reaching xterm', () => {
+    const { h, events } = shiftGesture(true, [45, 25]);
+    expect(getMouseSelectionState('t1').selection).toMatchObject({ startRow: 0, startCol: 0, endRow: 2, endCol: 3, dragging: false });
+    expect(getMouseSelectionState('t1').selection?.owner).toBeUndefined();
+    expect(getMouseSelectionState('t1').copyEditor).not.toBeNull();
+    for (const ev of events) expect(ev.stopImmediatePropagation).toHaveBeenCalled();
+    h.cleanup();
+  });
+
+  it('keeps a Shift-click from the program and from xterm alike', () => {
+    const { h, events } = shiftGesture(true, [6, 5]);
+    expect(getMouseSelectionState('t1').selection).toBeNull();
+    for (const ev of events) expect(ev.stopImmediatePropagation).toHaveBeenCalled();
+    h.cleanup();
+  });
+
+  it('leaves a Shift-drag to the program where Shift does not claim the mouse (macOS)', () => {
+    const { h, events } = shiftGesture(false, [45, 25]);
+    expect(getMouseSelectionState('t1').selection).toMatchObject({ owner: 'program' });
+    for (const ev of events) expect(ev.preventDefault).not.toHaveBeenCalled();
     h.cleanup();
   });
 });
