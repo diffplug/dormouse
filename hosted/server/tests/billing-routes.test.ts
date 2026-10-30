@@ -989,14 +989,16 @@ test("a payment Stripe holds by its charge is refunded by it; one paid outside S
     expect(f.refunds).toHaveLength(2);
     expect(await settled()).toEqual([false, false]);
   }
-  // The operator refunds them by hand and marks them settled, as hosted/README.md says; the cron then passes.
+  // The operator refunds them by hand and clears them, as hosted/README.md says;
+  // the cron then passes and stamps the closure settled itself.
   await f.sql(`UPDATE dormouse_withdrawals SET "settledAt" = now() WHERE id = $1`, [id]);
   await f.sql(
-    `UPDATE dormouse_account_closures SET "settledAt" = now() WHERE $1 = ANY ("canceledSubscriptions") AND "settledAt" IS NULL`,
+    `UPDATE dormouse_account_closures SET "canceledSubscriptions" = array_remove("canceledSubscriptions", $1)
+    WHERE $1 = ANY ("canceledSubscriptions") AND "settledAt" IS NULL`,
     [monthly.id],
   );
-  expect((await settled()).at(-1)).toBe(true);
   await resyncBilling(f.setup, f.database.url, origin, f.mail);
+  expect(await settled()).toEqual([true, true]);
 });
 
 test("the cron retries unsettled withdrawals and closures however old, the least recently tried first", async ({
