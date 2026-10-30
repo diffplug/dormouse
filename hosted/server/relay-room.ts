@@ -108,7 +108,7 @@ export class RelayRoom extends DurableObject implements RelayRoomRpc {
     if (!(await this.#claim(account))) return new Response(null, { status: 403 });
     return role === "burrow"
       ? this.#openBurrow(account, param(RELAY_ROOM_PARAMS.burrowId))
-      : this.#openClient(param(RELAY_ROOM_PARAMS.session), Number(param(RELAY_ROOM_PARAMS.expiresAt)));
+      : this.#openClient(account, param(RELAY_ROOM_PARAMS.session), Number(param(RELAY_ROOM_PARAMS.expiresAt)));
   }
 
   // --- RPC, from the Workers ------------------------------------------------
@@ -175,33 +175,48 @@ export class RelayRoom extends DurableObject implements RelayRoomRpc {
   }
 
   /**
-   * A Client socket with a fresh secret `clientId`, or 1013 at the cap —
-   * refused, never admitted by evicting a live one. A Client silent past the
-   * idle timeout is not live, so one is retired here first; only at the cap,
+   * A Client socket with a fresh secret `clientId`, once its session's row
+   * says it may hold one: still live, this account's, its owner entitled —
+   * else refused as an expired session is, under `blockConcurrencyWhile` as
+   * a Burrow's is, so a `closeSessions` sent after a removal's commit finds
+   * the socket or the read finds the removal. At the cap, 1013 — refused,
+   * never admitted by evicting a live one. A Client silent past the idle
+   * timeout is not live, so one is retired here first; only at the cap,
    * since judging silence costs a close.
    */
-  async #openClient(session: string, expiresAt: number): Promise<Response> {
+  #openClient(account: string, session: string, expiresAt: number): Promise<Response> {
     if (!session || !(expiresAt > this.now()))
-      return refuseSocket(WS_CLOSE_UNAUTHORIZED, WS_CLOSE_UNAUTHORIZED_REASON);
-    let clients = this.#held("client");
-    if (clients.length >= MAX_RELAY_CLIENT_SOCKETS)
-      clients = clients.filter((held) => !this.#goneSilent(held));
-    if (clients.length >= MAX_RELAY_CLIENT_SOCKETS)
-      return refuseSocket(WS_CLOSE_TRY_AGAIN_LATER, "too many client sockets");
-    const clientId = newClientId();
-    const { 0: client, 1: server } = new WebSocketPair();
-    this.ctx.acceptWebSocket(server, ["client", clientTag(clientId)]);
-    const openedAt = this.now();
-    server.serializeAttachment({
-      role: "client",
-      clientId,
-      session,
-      expiresAt,
-      burrowId: null,
-      openedAt,
-    } satisfies ClientConn);
-    await this.#armBy(Math.min(expiresAt, this.now() + RELAY_ROOM_SWEEP_MS));
-    return new Response(null, { status: 101, webSocket: client });
+      return Promise.resolve(refuseSocket(WS_CLOSE_UNAUTHORIZED, WS_CLOSE_UNAUTHORIZED_REASON));
+    return this.ctx.blockConcurrencyWhile(async () => {
+      let row: RelaySessionOwner | undefined;
+      try {
+        [row] = await this.#rows((rows) => rows.sessions([session]));
+      } catch {
+        console.error("RelayRoom could not read a Client's session");
+        return new Response(null, { status: 503 });
+      }
+      if (row?.userId !== account || !row.entitled)
+        return refuseSocket(WS_CLOSE_UNAUTHORIZED, WS_CLOSE_UNAUTHORIZED_REASON);
+      let clients = this.#held("client");
+      if (clients.length >= MAX_RELAY_CLIENT_SOCKETS)
+        clients = clients.filter((held) => !this.#goneSilent(held));
+      if (clients.length >= MAX_RELAY_CLIENT_SOCKETS)
+        return refuseSocket(WS_CLOSE_TRY_AGAIN_LATER, "too many client sockets");
+      const clientId = newClientId();
+      const { 0: client, 1: server } = new WebSocketPair();
+      this.ctx.acceptWebSocket(server, ["client", clientTag(clientId)]);
+      const openedAt = this.now();
+      server.serializeAttachment({
+        role: "client",
+        clientId,
+        session,
+        expiresAt,
+        burrowId: null,
+        openedAt,
+      } satisfies ClientConn);
+      await this.#armBy(Math.min(expiresAt, this.now() + RELAY_ROOM_SWEEP_MS));
+      return new Response(null, { status: 101, webSocket: client });
+    });
   }
 
   // --- Frames -----------------------------------------------------------------

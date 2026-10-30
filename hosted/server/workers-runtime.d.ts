@@ -9,6 +9,7 @@ interface WorkerWebSocket {
   accept(): void;
   send(message: string): void;
   close(code?: number, reason?: string): void;
+  addEventListener(type: "close", listener: (event: { code: number }) => void): void;
   serializeAttachment(value: unknown): void;
   deserializeAttachment(): unknown;
 }

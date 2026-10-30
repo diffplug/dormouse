@@ -103,6 +103,9 @@ const roomOf = (account: string) => ({
   stallRows: (on: boolean) => rpc<null>(account, "stallRows", on),
   /** The status of an upgrade naming `claimed` and `burrowId`. */
   forge: (claimed: string, burrowId: string) => rpc<number>(account, "forge", claimed, burrowId),
+  /** A Client upgrade naming `claimed` and the session `sessionToken`, live an hour: its status, and its close code if refused. */
+  forgeClient: (claimed: string, sessionToken: string) =>
+    rpc<{ status: number; closed: number | null }>(account, "forgeClient", claimed, digest(sessionToken), Date.now() + 3_600_000),
 });
 
 let context: Awaited<ReturnType<typeof createTestContext>>;
@@ -608,6 +611,27 @@ test("a Burrow removed between the Worker's token check and the object's accept 
   const other = await account();
   expect(await room.forge(owner.userId, (await burrowRow(other.userId)).burrowId)).toBe(401);
   expect(await room.forge(owner.userId, (await burrowRow(owner.userId)).burrowId)).toBe(403);
+});
+
+test("a Client whose session went between the Worker's token check and the object's accept is refused", async ({
+  onTestFinished,
+}) => {
+  onTestFinished(closeAll);
+  const owner = await account();
+  const room = await owner.room();
+  await owner.driver.connectBurrow();
+  const accepted = { status: 101, closed: null };
+  const refused = { status: 101, closed: WS_CLOSE_UNAUTHORIZED };
+  // The upgrade as the Worker hands it on once the token resolved: accepted.
+  expect(await room.forgeClient(owner.userId, owner.sessionToken)).toEqual(accepted);
+  // A session deleted, as a passkey removal or closure commits, before the accept.
+  const removed = await signedIn((await burrowRow(owner.userId)).burrowToken);
+  await sql(`DELETE FROM dormouse_relay_sessions WHERE "tokenHash" = $1`, [digest(removed.sessionToken)]);
+  expect(await room.forgeClient(owner.userId, removed.sessionToken)).toEqual(refused);
+  // Another account, entitled, and so the owner no longer: neither session is admitted here.
+  const other = await account();
+  expect(await room.forgeClient(owner.userId, other.sessionToken)).toEqual(refused);
+  expect(await room.forgeClient(owner.userId, owner.sessionToken)).toEqual(refused);
 });
 
 test("a stalled row read answers the upgrade 503 within its bound and leaves the sweep for later, the object's sockets open", async ({
