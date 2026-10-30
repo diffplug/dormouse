@@ -587,7 +587,7 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
 // The concern is what the proxy changes, not the page: it takes away the
 // site's own framing and script protections, and allowing an origin does not
 // make signing in there safe.
-function ExternalPreviewPrompt({ origin, onOpenInBrowser, onAllow, onCancel }: {
+export function ExternalPreviewPrompt({ origin, onOpenInBrowser, onAllow, onCancel }: {
   origin: string;
   onOpenInBrowser?: () => void;
   onAllow: () => void;
