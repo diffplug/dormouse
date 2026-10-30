@@ -48,6 +48,7 @@ let root: Root | null = null;
 afterEach(async () => {
   if (root) await act(async () => root!.unmount());
   root = null;
+  document.body.replaceChildren();
 });
 
 async function mount(workspaceId: string | undefined) {
@@ -61,10 +62,17 @@ async function mount(workspaceId: string | undefined) {
   return made;
 }
 
-function press(key: string, init: KeyboardEventInit = {}): KeyboardEvent {
+function press(key: string, init: KeyboardEventInit = {}, target: Element = document.body): KeyboardEvent {
   const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init });
-  document.body.dispatchEvent(event);
+  target.dispatchEvent(event);
   return event;
+}
+
+function focusable(html: string): Element {
+  const host = document.createElement('div');
+  host.innerHTML = html;
+  document.body.appendChild(host);
+  return host.firstElementChild!;
 }
 
 const ARROWS: Record<string, string> = { '↑': 'ArrowUp', '↓': 'ArrowDown', '←': 'ArrowLeft', '→': 'ArrowRight' };
@@ -132,6 +140,32 @@ describe('stray keys in command mode', () => {
       press(key);
       expect(ctx.raiseStrayKey).not.toHaveBeenCalled();
     });
+
+  // Tab moves focus onto pane-header controls in command mode; Space is how
+  // they activate, since Enter is a pane verb.
+  it.each(['<button>Split</button>', '<span role="button" tabindex="0">https://example.com</span>'])(
+    'leaves Space to a focused control %s', async html => {
+      const { ctx } = await mount('ws');
+      const event = press(' ', {}, focusable(html));
+      expect(ctx.raiseStrayKey).not.toHaveBeenCalled();
+      expect(event.defaultPrevented).toBe(false);
+    });
+
+  it('leaves every key to a focused text field', async () => {
+    const { ctx } = await mount('ws');
+    const input = focusable('<input>');
+    for (const key of ['l', ' ', 'Backspace']) expect(press(key, {}, input).defaultPrevented).toBe(false);
+    expect(ctx.raiseStrayKey).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { what: 'a letter on a focused button', html: '<button>Split</button>', key: 'l' },
+    { what: "a key on xterm's input proxy", html: '<textarea class="xterm-helper-textarea"></textarea>', key: 'l' },
+  ])('still counts $what as a stray', async ({ html, key }) => {
+    const { ctx } = await mount('ws');
+    press(key, {}, focusable(html));
+    expect(ctx.raiseStrayKey).toHaveBeenCalledExactlyOnceWith(key);
+  });
 
   it.each(['t', 'a', '>', ','])('does not call a bound key a stray where its verb is inert (%j on a Door)', async key => {
     const { ctx } = await mount('ws');

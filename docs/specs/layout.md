@@ -245,7 +245,7 @@ flowchart TD
 
 Every open dialog holds its own reference-counted lease on the dialog gate; command-mode dispatch resumes only once the last lease is released.
 
-**Must raise the stray-key prompt on a key no command-mode binding claims**: a printed character (Space included) or Backspace, with no modifier but Shift. A bound key inert on the selection (`t` on a Door) is not one; a bare Wall's digit is. The prompt answers every key ahead of the dialog gate, so the rest of a word typed in the wrong mode reaches neither a verb nor the Session:
+**Must raise the stray-key prompt on a key no command-mode binding claims**: a printed character (Space included) or Backspace, with no modifier but Shift. A bound key inert on the selection (`t` on a Door) is not one, nor is a key the focused control uses (Space on a button, any key in a text field); a bare Wall's digit is. The prompt answers every key ahead of the dialog gate, so the rest of a word typed in the wrong mode reaches neither a verb nor the Session:
 
 - `Escape` dismisses it.
 - `Enter` dismisses it, then acts as usual.
