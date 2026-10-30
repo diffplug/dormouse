@@ -31,7 +31,6 @@ const ringAgain = () => {
   manager.acknowledge(PANE, { input: false });
   work(manager, PANE);
   ring();
-  vi.advanceTimersByTime(5_000);
 };
 const session = (overrides: object, label = 'pnpm build') => ({ label, overrides });
 
@@ -103,8 +102,7 @@ describe('the delivery scheduler', () => {
     ring();
     vi.advanceTimersByTime(SPEAK_MS / 2);
     ringAgain();
-    // `ringAgain` already spent the 5s of deferral.
-    vi.advanceTimersByTime(SPEAK_MS - 5_000 - 1);
+    vi.advanceTimersByTime(SPEAK_MS - 1);
     expect(delivered).toEqual([]);
     vi.advanceTimersByTime(1);
     expect(delivered).toEqual([{ sink: 'speech', id: PANE, episodeId: episodeId() }]);

@@ -6,8 +6,6 @@ export interface SpeechJob {
   text: () => string;
   voice?: () => string | null;
   eligible: () => boolean;
-  /** A still-owed job waits without blocking other Sessions. */
-  deferred?: () => boolean;
   onStart?: () => void;
   onFinish?: (started: boolean) => void;
 }
@@ -32,9 +30,8 @@ interface Attempt {
  * ineligible job can still be dropped while it is only pending here.
  *
  * Bounded in both directions, because a wedged or callback-less engine must not
- * retain later alerts: at most {@link MAX_PENDING} pending jobs admitted (one
- * more while a deferred, unstarted attempt returns to the queue), and at most
- * {@link SPEECH_ENGINE_TIMEOUT_MS} per engine attempt, after which the attempt
+ * retain later alerts: at most {@link MAX_PENDING} pending jobs admitted, and
+ * at most {@link SPEECH_ENGINE_TIMEOUT_MS} per engine attempt, after which the attempt
  * is cancelled and the queue advances. Callback identity is revoked before any
  * cancel, so a detached late callback cannot settle the attempt that replaced
  * it. Nothing is retried: an alarm that failed, expired, or never fit has
@@ -63,7 +60,6 @@ export class SpeechQueue {
     if (!this.active && this.pending.length === 0) return;
     if (this.pending.length) this.pending = this.pending.filter(job => job.eligible());
     if (this.active && !this.active.job.eligible()) this.finish(this.active, true);
-    if (this.active?.job.deferred?.()) this.requeue(this.active);
     this.pump();
   }
 
@@ -83,24 +79,11 @@ export class SpeechQueue {
     this.pump();
   }
 
-  private requeue(attempt: Attempt): void {
-    // Preparation is not delivery. Retain a job that never actually started,
-    // past the bound if the queue filled meanwhile, and revoke the old engine
-    // attempt before cancellation can call back.
-    if (!attempt.started) this.pending.unshift(attempt.job);
-    this.finish(attempt, true);
-  }
-
-  /** Drop resolved jobs on the way to the first that is not deferred. */
+  /** Drop resolved jobs on the way to the first still owed. */
   private takeNext(): SpeechJob | undefined {
-    for (let i = 0; i < this.pending.length;) {
-      const job = this.pending[i];
-      if (!job.eligible()) { this.pending.splice(i, 1); continue; }
-      if (job.deferred?.()) { i++; continue; }
-      this.pending.splice(i, 1);
-      return job;
-    }
-    return undefined;
+    let job: SpeechJob | undefined;
+    while ((job = this.pending.shift()) && !job.eligible());
+    return job;
   }
 
   private pump(): void {
@@ -122,7 +105,6 @@ export class SpeechQueue {
               // would otherwise mark a revoked attempt's job as speaking.
               if (this.active !== attempt || attempt.started) return;
               if (!job.eligible()) { this.finish(attempt, true); return; }
-              if (job.deferred?.()) { this.requeue(attempt); return; }
               attempt.started = true;
               job.onStart?.();
             },
