@@ -448,9 +448,11 @@ jobs:
       # Those tests bound each shell they start (10s, 15s), so a cold start
       # failed them while pwsh and cmd.exe stayed fast. Pay it here, unbounded
       # by any test, and log each start so a slow runner shows in this step.
+      # The step itself runs in pwsh, as the tests do, so even its first 5.1
+      # start is timed rather than spent starting the step.
       - name: Warm Windows PowerShell
         if: runner.os == 'Windows'
-        shell: powershell
+        shell: pwsh
         timeout-minutes: 5
         run: |
           foreach ($start in 1..10) {
