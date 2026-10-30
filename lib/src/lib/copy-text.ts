@@ -127,8 +127,11 @@ const LIST_MARKER = /^(?:[-*•]|\d+[.)]) /;
 const QUOTE = /^(\s*)((?:[>▏▎▍] ?)*[>▏▎▍])(?=(?<=>) +[^\s>▏▎▍]| {1,2}[^\s>▏▎▍])/;
 const QUOTE_BAR = /^[▏▎▍]$/;
 
+/** A line of quote bars or indent guides alone: blank, not a frame. */
+const BARS_ONLY = /^[\s▏▎▍]+$/;
+
 function isFrameOnly(text: string): boolean {
-  return text.length > 0 && FRAME_ONLY.test(text) && BOX.test(text);
+  return text.length > 0 && FRAME_ONLY.test(text) && BOX.test(text) && !BARS_ONLY.test(text);
 }
 
 interface Decoration {
@@ -198,7 +201,7 @@ function line(buf: CopyBuffer, r: number): LineFacts {
     top, bottom, plain,
     depth: d.quote ? text.slice(d.quote.from, d.quote.to).replace(/ /g, '').length : 0,
     start: d.quote ? d.quote.from : indentOf(plain),
-    boundary: !text.trim() || isFrameOnly(text) || /^[│┃║]/.test(text),
+    boundary: !text.trim() || BARS_ONLY.test(text) || isFrameOnly(text) || /^[│┃║]/.test(text),
   };
   for (let i = top; i <= bottom; i++) lineFacts.set(buf.row(i), f);
   return f;
@@ -483,7 +486,17 @@ function computeLayout({ buf, raw, stripped }: ScopeLines, format: CopyFormat): 
     const end = next.continues ? line.row : buf.row(line.row).bottom;
     return FIXED_BREAK[format] ?? (blank(line) || blank(next) || next.row !== end + 1 ? 'keep' : autoBreak(buf, end));
   });
+  lines = lines.map((l, i) => (blank(l) && i > 0 && i + 1 < lines.length ? quoteBlank(buf, lines[i - 1], l, lines[i + 1]) : l));
   return { lines, base: indents.length ? Math.min(...indents) : 0, auto };
+}
+
+/** A blank line between quoted lines, written with the shallower one's
+ *  prefix, so the quote goes on past it. */
+function quoteBlank(buf: CopyBuffer, before: Line, blank: Line, after: Line): Line {
+  let depth = Math.min(line(buf, before.row).depth, line(buf, after.row).depth);
+  let end = 0;
+  while (depth && end < after.quote) if (after.cells[end++].ch !== ' ') depth--;
+  return end ? { ...blank, cells: after.cells.slice(0, end) } : blank;
 }
 
 export function renderLines(scopeLines: ScopeLines, chosen: CopyFormat, overrides: Readonly<Record<number, BreakKind>> = {}): Rendering {

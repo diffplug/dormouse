@@ -203,6 +203,7 @@ describe('copy-text formats', () => {
       'This section lost its selling power. Previous version sold the use case:',
       '',
       '> "Run builds, agents, servers, and scripts side by side. Minimize the ones you’re not watching to a compact status indicator — every pane keeps running and every alert still fires whether minimized or not."',
+      '>',
       '> > A quote of a quote, wrapped at the margin so that it reaches the next row.',
       '',
       'Current version (lines 35–39) sells the mechanics.',
@@ -210,6 +211,9 @@ describe('copy-text formats', () => {
     // Every later quote prefix goes with the break before it.
     expect(text(buf, span(3, 2, 7, 8), 'spaces')).toBe('> "Run builds, agents, servers, and scripts side by side. Minimize the ones you’re not watching to a compact status indicator — every pane keeps running and every alert still fires whether minimized or not."');
     expect(text(buf, all, 'exact').split('\n')[3]).toBe(QUOTED[3]);
+    // A bar alone is a blank line inside the quote, so its paragraphs stay apart.
+    const paragraphs = lines(['  ▎ First.', '  ▎', '  ▎ Second.'], { cols: 58 });
+    expect(text(paragraphs, span(0, 2, 2, 10), 'auto')).toBe('> First.\n>\n> Second.');
     // A quoted paragraph starts at its prefix, which its later kept lines show.
     expect(computeScopes(buf, span(4, 10, 4, 12)).find((s) => s.label === 'Paragraph')?.span).toEqual(span(3, 2, 7, 8));
   });
@@ -228,7 +232,7 @@ describe('copy-text formats', () => {
   it('reads an editor’s indent guides as indentation, not quotes', () => {
     // Neovim's indent-blankline draws `▎` at each indent stop, here every four columns.
     const buf = lines(['def area(width, height):', '▎   if width < 0:', '▎   ▎   raise ValueError(width)', '▎', '▎   return width * height'], { cols: 80 });
-    expect(text(buf, span(0, 0, 4, 24), 'auto')).toBe('def area(width, height):\n    if width < 0:\n        raise ValueError(width)\n    return width * height');
+    expect(text(buf, span(0, 0, 4, 24), 'auto')).toBe('def area(width, height):\n    if width < 0:\n        raise ValueError(width)\n\n    return width * height');
   });
 
   it('reads a block slab exactly under Auto', () => {
