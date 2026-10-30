@@ -49,6 +49,7 @@
  *     the proxy takes nothing away and injects nothing, which leaves a caller
  *     exactly what the upstream would have given it directly.
  */
+import { lookup as dnsLookup } from 'dns/promises';
 import * as http from 'http';
 import * as net from 'net';
 import { IFRAME_HTTP_ONLY, type IframeProxyResult } from '../lib/platform/iframe-proxy-types';
@@ -102,6 +103,13 @@ const DOCUMENT_DESTINATIONS = new Set(['document', 'iframe', 'frame', 'embed', '
 // visible error page instead of an indefinitely blank frame.
 const UPSTREAM_IDLE_TIMEOUT_MS = 30_000;
 
+/** One address an upstream hostname resolved to. */
+export type UpstreamAddress = { address: string; family: number };
+/** Resolves an upstream hostname (brackets already stripped) to every address
+ *  it names. Injected by tests; the hosts use the system resolver. */
+export type UpstreamResolver = (hostname: string) => Promise<UpstreamAddress[]>;
+const systemResolver: UpstreamResolver = (hostname) => dnsLookup(hostname, { all: true });
+
 /** Host-supplied logger; defaults to a no-op so the module is usable bare. */
 export type ProxyLogger = (message: string) => void;
 let log: ProxyLogger = () => {};
@@ -117,6 +125,13 @@ export type IframeLease = { owner: string; id: string };
 interface Grant {
   /** The fixed upstream this grant fronts (origin + initial path). */
   upstream: URL;
+  /**
+   * Every connection to the upstream, on both paths. Its lookup answers with
+   * the addresses the hostname resolved to when the grant was minted, so the
+   * name cannot be re-pointed at another address while the grant lives; its
+   * pooled sockets are this grant's alone.
+   */
+  agent: http.Agent;
   port: number;
   proxyOrigin: string;
   server: http.Server;
@@ -168,6 +183,7 @@ function framedUrl(grant: Grant, upstream: URL): IframeProxyResult {
 
 function closeGrant(grant: Grant): void {
   grants.delete(grant.port);
+  grant.agent.destroy();
   grant.server.close();
   grant.server.closeAllConnections();
   for (const socket of grant.sockets) socket.destroy();
@@ -204,7 +220,7 @@ function endLeases(ends: (lease: Lease) => boolean): void {
  */
 export async function createIframeProxyUrl(
   targetUrl: string,
-  opts?: { log?: ProxyLogger; embedderOrigins?: unknown; lease?: unknown },
+  opts?: { log?: ProxyLogger; embedderOrigins?: unknown; lease?: unknown; resolve?: UpstreamResolver },
 ): Promise<IframeProxyResult> {
   if (opts?.log) log = opts.log;
   const embedderOrigins = normalizeEmbedderOrigins(opts?.embedderOrigins);
@@ -226,18 +242,12 @@ export async function createIframeProxyUrl(
   if (upstream.protocol !== 'http:') {
     return { ok: false, reason: 'scheme', detail: IFRAME_HTTP_ONLY };
   }
-  // SSRF guard: the proxy fetches a user-supplied URL, so refuse the link-local
-  // / cloud-metadata ranges (169.254.169.254 and friends). Other private ranges
-  // are trusted — the boundary is the user's own `dor iframe`
-  // (docs/specs/dor-browser.md → "Iframe Host Capability And CSP").
-  if (isBlockedAddress(upstream.hostname)) {
-    return { ok: false, reason: 'scheme', detail: 'link-local / metadata addresses are refused' };
-  }
+  const resolve = opts?.resolve ?? systemResolver;
 
   const lease = opts?.lease === undefined ? undefined : validLease(opts.lease);
   if (opts?.lease !== undefined && !lease) return { ok: false, reason: 'unreachable', detail: 'invalid iframe lease' };
   if (!lease) {
-    const minted = await mintGrant(upstream, embedderOrigins, false);
+    const minted = await mintGrant(upstream, embedderOrigins, false, resolve);
     return 'port' in minted ? framedUrl(minted, upstream) : minted;
   }
   const key = leaseKey(lease);
@@ -250,7 +260,7 @@ export async function createIframeProxyUrl(
     leases.set(key, held = { ...lease, acquire: createSerialQueue() });
   }
   const entry = held;
-  return entry.acquire(() => acquireLeased(entry, key, upstream, embedderOrigins));
+  return entry.acquire(() => acquireLeased(entry, key, upstream, embedderOrigins, resolve));
 }
 
 const CLOSED_VIEW: IframeProxyResult = { ok: false, reason: 'unreachable', detail: 'the embedded view was closed' };
@@ -258,7 +268,9 @@ const CLOSED_VIEW: IframeProxyResult = { ok: false, reason: 'unreachable', detai
 /** The lease's grant, reused while it fronts the same upstream origin for the
  *  same embedder chain — a Reload, Back or Forward keeps the page's origin —
  *  else a fresh one in its place. One released meanwhile mints nothing. */
-async function acquireLeased(lease: Lease, key: string, upstream: URL, embedderOrigins: string[] | null): Promise<IframeProxyResult> {
+async function acquireLeased(
+  lease: Lease, key: string, upstream: URL, embedderOrigins: string[] | null, resolve: UpstreamResolver,
+): Promise<IframeProxyResult> {
   const released = () => leases.get(key) !== lease;
   if (released()) return CLOSED_VIEW;
   if (lease.grant && lease.grant.upstream.origin === upstream.origin && sameChain(lease.grant.embedderOrigins, embedderOrigins)) {
@@ -268,7 +280,7 @@ async function acquireLeased(lease: Lease, key: string, upstream: URL, embedderO
     closeGrant(lease.grant);
     lease.grant = undefined;
   }
-  const minted = await mintGrant(upstream, embedderOrigins, true);
+  const minted = await mintGrant(upstream, embedderOrigins, true, resolve);
   if (!('port' in minted)) return minted;
   if (released()) {
     closeGrant(minted);
@@ -280,12 +292,57 @@ async function acquireLeased(lease: Lease, key: string, upstream: URL, embedderO
 
 type Refusal = Extract<IframeProxyResult, { ok: false }>;
 
-async function mintGrant(upstream: URL, embedderOrigins: string[] | null, leased: boolean): Promise<Grant | Refusal> {
+const METADATA_REFUSED: Refusal = { ok: false, reason: 'scheme', detail: 'link-local / metadata addresses are refused' };
+
+/**
+ * The addresses a grant for `upstream` connects to, fixed for its lifetime, or
+ * why there are none. SSRF guard: the proxy fetches a user-supplied URL, so a
+ * name that resolves to any link-local / cloud-metadata address (169.254.169.254
+ * and friends) is refused. Other private ranges are trusted — the boundary is
+ * the user's own `dor iframe` (docs/specs/dor-browser.md → "Iframe Host
+ * Capability And CSP").
+ */
+async function pinAddresses(upstream: URL, resolve: UpstreamResolver): Promise<UpstreamAddress[] | Refusal> {
+  const hostname = upstream.hostname.replace(/^\[(.*)\]$/, '$1');
+  if (isBlockedAddress(hostname)) return METADATA_REFUSED;
+  let addresses: UpstreamAddress[];
+  try {
+    addresses = await resolve(hostname);
+  } catch (err) {
+    return { ok: false, reason: 'unreachable', detail: err instanceof Error ? err.message : String(err) };
+  }
+  if (addresses.length === 0) return { ok: false, reason: 'unreachable', detail: `${hostname} has no address` };
+  if (addresses.some(({ address }) => isBlockedAddress(address))) return METADATA_REFUSED;
+  return addresses.map(({ address, family }) => ({ address, family }));
+}
+
+/** A `lookup` that answers every connection from the pinned addresses, in the
+ *  resolver's order, so Node's own family fallback still applies. */
+function pinnedLookup(addresses: readonly UpstreamAddress[]): net.LookupFunction {
+  return (_hostname, options, callback) => {
+    const family = options.family === 'IPv4' ? 4 : options.family === 'IPv6' ? 6 : options.family;
+    const matching = family ? addresses.filter((entry) => entry.family === family) : [...addresses];
+    if (options.all) {
+      callback(null, matching);
+      return;
+    }
+    const first = matching[0];
+    if (first) callback(null, first.address, first.family);
+    else callback(Object.assign(new Error('no pinned address of that family'), { code: 'ENOTFOUND' }), '', 0);
+  };
+}
+
+async function mintGrant(
+  upstream: URL, embedderOrigins: string[] | null, leased: boolean, resolve: UpstreamResolver,
+): Promise<Grant | Refusal> {
+  const pinned = await pinAddresses(upstream, resolve);
+  if (!Array.isArray(pinned)) return pinned;
   const now = Date.now();
   sweepGrants(now);
 
   const grant: Grant = {
     upstream,
+    agent: new http.Agent({ keepAlive: true, lookup: pinnedLookup(pinned) }),
     port: 0,
     proxyOrigin: '',
     server: null as unknown as http.Server,
@@ -304,6 +361,7 @@ async function mintGrant(upstream: URL, embedderOrigins: string[] | null, leased
   try {
     port = await listen(server);
   } catch (err) {
+    grant.agent.destroy();
     return { ok: false, reason: 'unreachable', detail: err instanceof Error ? err.message : String(err) };
   }
   grant.port = port;
@@ -393,6 +451,7 @@ function handleRequest(grant: Grant, req: http.IncomingMessage, res: http.Server
     protocol: 'http:',
     hostname: grant.upstream.hostname,
     port: grant.upstream.port || 80,
+    agent: grant.agent,
     method: req.method,
     path,
     headers,
@@ -600,6 +659,7 @@ function handleUpgrade(grant: Grant, req: http.IncomingMessage, socket: net.Sock
   const upstreamReq = http.request({
     hostname: grant.upstream.hostname,
     port: grant.upstream.port || 80,
+    agent: grant.agent,
     method: req.method,
     path: req.url ?? '/',
     headers,
