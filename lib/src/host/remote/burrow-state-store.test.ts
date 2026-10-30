@@ -168,6 +168,21 @@ describe('FileBurrowStateStore', () => {
     warn.mockRestore();
   });
 
+  it('keeps the access log in its own file, dropping what is not an entry', async () => {
+    const entry = { at: 5, event: 'ended', device: 'Unknown device', path: 'direct', durationMs: 3 } as const;
+    await new FileBurrowStateStore(dir).saveAccessLog([entry]);
+    expect(await new FileBurrowStateStore(dir).loadAccessLog()).toEqual([entry]);
+
+    await writeFile(join(dir, 'access-log.json'), JSON.stringify([entry, { at: 'soon', event: 'paired' }]));
+    expect(await new FileBurrowStateStore(dir).loadAccessLog()).toEqual([entry]);
+
+    // A log that cannot be read starts over rather than failing anything.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await writeFile(join(dir, 'access-log.json'), '[{');
+    expect(await new FileBurrowStateStore(dir).loadAccessLog()).toEqual([]);
+    warn.mockRestore();
+  });
+
   it('clearing the enrollment leaves the records alone', async () => {
     const store = new FileBurrowStateStore(dir);
     await store.saveEnrollment(ENROLLMENT);
@@ -196,9 +211,12 @@ describe('FileBurrowStateStore', () => {
       await store.saveEnrollment(ENROLLMENT);
       // The policy holds no secret, and is kept like its neighbour anyway.
       await store.saveNetworkPolicy({ level: 'nothing', allowed: [], autoUpdate: false });
+      // The access log says who reached this machine, so it is kept as privately.
+      await store.saveAccessLog([{ at: 1, event: 'paired', device: 'Unknown device' }]);
 
       expect((await stat(join(nested, 'burrow.json'))).mode & 0o777).toBe(0o600);
       expect((await stat(join(nested, 'network-policy.json'))).mode & 0o777).toBe(0o600);
+      expect((await stat(join(nested, 'access-log.json'))).mode & 0o777).toBe(0o600);
       expect((await stat(nested)).mode & 0o777).toBe(0o700);
     },
   );

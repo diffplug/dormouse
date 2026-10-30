@@ -16,6 +16,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { BurrowAclRecord } from 'remote-lib-common';
 import { filterAclRecords } from '../../remote/burrow/acl';
+import { parseAccessLog, type AccessLogEntry } from '../../remote/burrow/access-log';
 import { isEnrollment, type BurrowEnrollment } from '../../remote/burrow/enrollment';
 import { nothingPolicy, storedNetworkPolicy, type NetworkPolicy } from '../../remote/network-policy';
 import { writeJsonAtomic } from '../atomic-json-file';
@@ -45,6 +46,16 @@ export interface BurrowStateStore {
    */
   loadNetworkPolicy(): Promise<NetworkPolicy | null>;
   saveNetworkPolicy(policy: NetworkPolicy): Promise<void>;
+  /**
+   * The access log, oldest first (`lib/src/remote/burrow/access-log.ts`):
+   * one per machine, not per `burrowId`, since a one-time connection needs
+   * no enrollment. **Must sit under the same private storage as the ACL**
+   * (`docs/specs/security-local.md` -> "Persisted state"). A read that fails
+   * answers what it could, never a rejection: the log informs and authorizes
+   * nothing.
+   */
+  loadAccessLog(): Promise<AccessLogEntry[]>;
+  saveAccessLog(entries: readonly AccessLogEntry[]): Promise<void>;
 }
 
 const FILE_NAME = 'burrow.json';
@@ -55,6 +66,12 @@ const FILE_NAME = 'burrow.json';
  * knows, and a policy it dropped would let the default recompute.
  */
 const NETWORK_POLICY_FILE_NAME = 'network-policy.json';
+
+/**
+ * The access log's own file: rewritten on every entry, so kept apart from the
+ * one holding the enrollment, whose atomic rename it must never contend with.
+ */
+const ACCESS_LOG_FILE_NAME = 'access-log.json';
 
 interface BurrowStateFile {
   version: 1;
@@ -93,6 +110,7 @@ export class FileBurrowStateStore implements BurrowStateStore {
   readonly #dir: string;
   readonly #path: string;
   readonly #policyPath: string;
+  readonly #accessLogPath: string;
   #state: Promise<BurrowStateFile> | null = null;
   /**
    * Serializes mutations, the way `relay/src/state.ts` does: every save is a
@@ -105,6 +123,7 @@ export class FileBurrowStateStore implements BurrowStateStore {
     this.#dir = stateDir;
     this.#path = join(stateDir, FILE_NAME);
     this.#policyPath = join(stateDir, NETWORK_POLICY_FILE_NAME);
+    this.#accessLogPath = join(stateDir, ACCESS_LOG_FILE_NAME);
   }
 
   async loadEnrollment(): Promise<BurrowEnrollment | null> {
@@ -154,6 +173,21 @@ export class FileBurrowStateStore implements BurrowStateStore {
     // A whole-record replace, so no read first; on the same chain as `#mutate`,
     // so two saves land in the order they were made.
     return this.#serialize(() => writeJsonAtomic(this.#dir, this.#policyPath, policy));
+  }
+
+  /** Not memoized: the service, its one reader, keeps what it read. */
+  async loadAccessLog(): Promise<AccessLogEntry[]> {
+    try {
+      const raw = await readIfPresent(this.#accessLogPath);
+      return raw === null ? [] : parseAccessLog(JSON.parse(raw));
+    } catch (error) {
+      console.warn(`[burrow] could not read ${this.#accessLogPath}; starting a new access log`, error);
+      return [];
+    }
+  }
+
+  saveAccessLog(entries: readonly AccessLogEntry[]): Promise<void> {
+    return this.#serialize(() => writeJsonAtomic(this.#dir, this.#accessLogPath, entries));
   }
 
   /** Apply one change to the in-memory state and flush it, one at a time. */
@@ -249,6 +283,7 @@ export function createEphemeralBurrowStateStore(onWarn: (message: string) => voi
   let enrollment: BurrowEnrollment | null = null;
   const acl = new Map<string, BurrowAclRecord[]>();
   let network: NetworkPolicy | null = null;
+  let accessLog: AccessLogEntry[] = [];
   return {
     persistent: false,
     loadEnrollment: async () => enrollment,
@@ -268,6 +303,10 @@ export function createEphemeralBurrowStateStore(onWarn: (message: string) => voi
     saveNetworkPolicy: async (policy) => {
       warnOnce();
       network = { ...policy, allowed: [...policy.allowed] };
+    },
+    loadAccessLog: async () => [...accessLog],
+    saveAccessLog: async (entries) => {
+      accessLog = [...entries];
     },
   };
 }

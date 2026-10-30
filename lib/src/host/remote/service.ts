@@ -12,13 +12,29 @@ import { enrollVerificationUrl, SELF_HOST_DEVICE_CODE_REFUSAL } from './hosted-e
 export { enrollVerificationUrl } from './hosted-enrollment-url';
 import {
   API_ROUTES,
+  BurrowAcl,
   MAX_PENDING_PAIRINGS,
+  knownPairingDeviceLabel,
   deriveNoiseStaticPublicKey,
   formatPairingInvitationUrl,
   isSetupTokenResponse,
   randomBase64Url,
+  type BurrowAclRecord,
   type EnrollmentOffer,
 } from 'remote-lib-common';
+import {
+  firstPerClientStatic,
+  revocationRequester,
+  revokeTarget,
+  type RevocationRequester,
+  type RevocationTarget,
+} from '../../remote/burrow/acl';
+import {
+  appendAccessLog,
+  deviceIdFor,
+  parseAccessLogEntry,
+  type AccessLogEntry,
+} from '../../remote/burrow/access-log';
 import { HostedApproval, type HostedApprovalFlow } from './hosted-approval';
 import {
   beginHostedEnrollment,
@@ -108,6 +124,11 @@ import {
   type SetupQrResult,
   type TakeBackParams,
   type TakeBackResult,
+  type AccessLogResult,
+  type PairedDevice,
+  type PairedDevicesResult,
+  type RevokeDeviceParams,
+  type RevokeDeviceResult,
 } from './service-protocol';
 
 export interface BurrowServiceOptions {
@@ -494,6 +515,19 @@ export class BurrowService {
    * release will ever reach (`docs/specs/remote-api.md` → "Size authority").
    */
   readonly #serviceId = randomBase64Url(SERVICE_ID_BYTES);
+  /**
+   * The access log as last read or appended, oldest first; `null` until
+   * read. This service is its only writer, and every read and append runs
+   * on {@link #accessLogQueue}, never on {@link #serialize}: recording an
+   * access must not wait behind a lifecycle change, nor hold one up.
+   */
+  #accessLog: AccessLogEntry[] | null = null;
+  readonly #accessLogQueue = createSerialQueue();
+  /**
+   * The one-time connection the access log last heard of: which runtime, the
+   * label it confirmed, and since when it was connected.
+   */
+  #oneTimeSeen: { runtime: OneTimeRuntime; label?: string; since?: number } | null = null;
 
   constructor(options: BurrowServiceOptions) {
     this.#store = options.store;
@@ -657,6 +691,14 @@ export class BurrowService {
         return this.#queueSnapshot();
       case 'takeBack':
         return this.#takeBack(params as TakeBackParams | undefined);
+      case 'pairedDevices':
+        return this.#pairedDevices();
+      // On the chain, with approvals: a Burrow starting meanwhile must load
+      // the ACL after the revocation, never before it.
+      case 'revokeDevice':
+        return this.#serialize(() => this.#revokeDevice(params as RevokeDeviceParams | undefined));
+      case 'accessLog':
+        return this.#readAccessLog();
       default:
         throw new Error(`unknown burrow command: ${cmd}`);
     }
@@ -1022,6 +1064,183 @@ export class BurrowService {
     return pending;
   }
 
+  // --- Paired devices and the access log ---
+
+  /**
+   * The active ACL records of this machine's enrollment: the running Burrow's,
+   * else the store's for an enrollment the level holds without running, else
+   * none.
+   */
+  async #activeRecords(): Promise<BurrowAclRecord[]> {
+    if (this.#burrow) return this.#burrow.activeRecords;
+    const enrollment = this.#enrollment;
+    if (!enrollment) return [];
+    return (await this.#store.loadAcl(enrollment.burrowId)).filter((record) => record.revokedAt === null);
+  }
+
+  /** Every paired browser, newest pairing first, with when the access log last saw it. */
+  async #pairedDevices(): Promise<PairedDevicesResult> {
+    const records = await this.#activeRecords();
+    const { entries } = await this.#readAccessLog();
+    const connected = this.#burrow?.connectedClientStatics() ?? new Set<string>();
+    const byStatic = new Map<string, BurrowAclRecord>();
+    for (const record of records) {
+      const held = byStatic.get(record.clientStaticPublicKey);
+      if (!held || held.approvedAt <= record.approvedAt) byStatic.set(record.clientStaticPublicKey, record);
+    }
+    const lastSeen = new Map<string, number>();
+    for (const entry of entries) {
+      if (entry.deviceId !== undefined && entry.event !== 'revoked') lastSeen.set(entry.deviceId, entry.at);
+    }
+    const devices: PairedDevice[] = [...byStatic.entries()].map(([clientStatic, record]) => {
+      const id = deviceIdFor(clientStatic);
+      return {
+        id,
+        label: knownPairingDeviceLabel(record.label),
+        pairedAt: record.approvedAt,
+        lastSeenAt: lastSeen.get(id) ?? null,
+        connected: connected.has(clientStatic),
+      };
+    });
+    return { devices: devices.sort((a, b) => b.pairedAt - a.pairedAt) };
+  }
+
+  /**
+   * `revokeDevice`: resolve `params.id` to the one paired browser it names,
+   * then revoke it as {@link revoke} does. An id that names no paired phone,
+   * or more than one, revokes nothing. **Runs on `#serialize`.**
+   */
+  async #revokeDevice(params: RevokeDeviceParams | undefined): Promise<RevokeDeviceResult> {
+    const id = typeof params?.id === 'string' ? params.id.trim().toLowerCase() : '';
+    if (!id) throw new Error('Name the paired phone to revoke by its id.');
+    if (!this.#enrollment) throw new Error('This computer has no paired phones: it is not enrolled.');
+    const statics = new Set(
+      (await this.#activeRecords())
+        .map((record) => record.clientStaticPublicKey)
+        .filter((clientStatic) => deviceIdFor(clientStatic) === id),
+    );
+    if (statics.size === 0) throw new Error(`No paired phone has the id ${id}.`);
+    if (statics.size > 1) throw new Error(`More than one paired phone has the id ${id}, so none was revoked.`);
+    const [clientStaticPublicKey] = [...statics] as [string];
+    return this.#revoke({ clientStaticPublicKey }, revocationRequester(params?.by));
+  }
+
+  /**
+   * **The Burrow's one revocation entry point** (`docs/specs/remote-security-model.md`
+   * -> "Revocation"): every active record `target` names — one browser's
+   * Client static, or a passkey credential — whether or not the Burrow is
+   * running, logged with who asked. Serialized with lifecycle changes and
+   * approvals, so a Burrow starting meanwhile loads the ACL after it.
+   */
+  revoke(target: RevocationTarget, by: RevocationRequester): Promise<RevokeDeviceResult> {
+    return this.#serialize(() => this.#revoke(target, by));
+  }
+
+  /**
+   * {@link revoke}, on `#serialize`. A running Burrow ends the revoked
+   * phones' sessions and closes their presence windows before its save
+   * (`BurrowRuntime.revoke`), so a failed save still leaves them refused
+   * until a restart; a stopped one has nothing live, so the save is the whole
+   * of it, and one that fails revokes nothing.
+   */
+  async #revoke(target: RevocationTarget, by: RevocationRequester): Promise<RevokeDeviceResult> {
+    const enrollment = this.#enrollment;
+    if (!enrollment) throw new Error('This computer has no paired phones: it is not enrolled.');
+    const burrow = this.#burrow;
+    let revoked: BurrowAclRecord[];
+    if (burrow) {
+      try {
+        revoked = await burrow.revoke(target, by);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        throw new Error(
+          `The phone is disconnected and refused until Dormouse restarts, but the revocation could not be saved: ${detail}`,
+        );
+      }
+    } else {
+      const acl = BurrowAcl.fromRecords(enrollment.burrowId, await this.#store.loadAcl(enrollment.burrowId), {
+        now: this.#now,
+      });
+      revoked = revokeTarget(acl, target);
+      if (revoked.length > 0) await this.#store.saveAcl(enrollment.burrowId, acl.records());
+      const at = this.#now();
+      for (const record of firstPerClientStatic(revoked)) {
+        this.#logAccess({
+          at,
+          event: 'revoked',
+          device: knownPairingDeviceLabel(record.label),
+          deviceId: deviceIdFor(record.clientStaticPublicKey),
+          by,
+        });
+      }
+    }
+    if (revoked.length > 0) this.#emit({ name: 'access' });
+    return {
+      revoked: revoked.length,
+      labels: firstPerClientStatic(revoked).map((record) => knownPairingDeviceLabel(record.label)),
+    };
+  }
+
+  /** The whole log, after every append already queued. */
+  #readAccessLog(): Promise<AccessLogResult> {
+    return this.#accessLogQueue(async () => ({ entries: [...(await this.#loadAccessLog())] }));
+  }
+
+  /** On {@link #accessLogQueue} only. */
+  async #loadAccessLog(): Promise<AccessLogEntry[]> {
+    this.#accessLog ??= await this.#store.loadAccessLog().catch((error: unknown) => {
+      console.warn('[burrow] could not read the access log', error);
+      return [];
+    });
+    return this.#accessLog;
+  }
+
+  /**
+   * Append one entry, rebuilt field by field, then say so and save. **Never
+   * rejects, and never sent anywhere but the store and this machine's
+   * webviews**: the log is the owner's record, not the Relay's or a phone's.
+   */
+  #logAccess(raw: AccessLogEntry): void {
+    const entry = parseAccessLogEntry(raw);
+    if (!entry) return;
+    void this.#accessLogQueue(async () => {
+      this.#accessLog = appendAccessLog(await this.#loadAccessLog(), entry);
+      this.#emit({ name: 'access' });
+      await this.#store.saveAccessLog(this.#accessLog);
+    }).catch((error: unknown) => {
+      console.warn('[burrow] could not save the access log', error);
+    });
+  }
+
+  /** What a one-time connection's moves add to the access log: its confirmation, its end, a refusal. */
+  #logOneTime(runtime: OneTimeRuntime, state: OneTimeState): void {
+    const seen = this.#oneTimeSeen?.runtime === runtime ? this.#oneTimeSeen : { runtime };
+    this.#oneTimeSeen = seen;
+    const at = this.#now();
+    if (state.status === 'confirming') seen.label = state.label;
+    if (state.status === 'connected') {
+      seen.label = state.label;
+      seen.since = state.since;
+      this.#logAccess({ at, event: 'one-time-connected', device: state.label, path: 'direct' });
+    }
+    if (state.status !== 'ended') return;
+    this.#oneTimeSeen = null;
+    const device = seen.label;
+    if (device === undefined) return;
+    if (seen.since !== undefined) {
+      this.#logAccess({
+        at,
+        event: 'one-time-ended',
+        device,
+        path: 'direct',
+        durationMs: Math.max(0, at - seen.since),
+        reason: state.reason,
+      });
+    } else {
+      this.#logAccess({ at, event: 'one-time-denied', device, reason: state.reason });
+    }
+  }
+
   // --- One-time connection ---
 
   /**
@@ -1226,6 +1445,7 @@ export class BurrowService {
 
   #onOneTimeChanged(runtime: OneTimeRuntime, state: OneTimeState): void {
     if (this.#oneTime !== runtime) return;
+    this.#logOneTime(runtime, state);
     // An ended runtime holds nothing more; its last state stays for the panel.
     if (state.status === 'ended') this.#oneTime = null;
     this.#setOneTimeState(state);
@@ -1379,6 +1599,7 @@ export class BurrowService {
       onPathRefused: (refusal) => this.#recordPathRefusal(refusal),
       onPolicyRaised: () => this.#persistRaisedPolicy(enrollment),
       probeStanding: () => probeBurrowStanding({ enrollment, fetch: this.#fetch }),
+      onAccess: (entry) => this.#logAccess(entry),
       now: this.#now,
     });
     this.#burrow.start();
@@ -1448,6 +1669,14 @@ export class BurrowService {
       provider: this.#provider,
       holder: { id: holder, label: context.label, serviceId: this.#serviceId },
       onDispose: () => this.#holders.delete(holder),
+      onAttach: (surfaceId) =>
+        this.#logAccess({
+          at: this.#now(),
+          event: 'attached',
+          device: context.label,
+          deviceId: context.deviceId,
+          surface: surfaceId,
+        }),
     });
   }
 
