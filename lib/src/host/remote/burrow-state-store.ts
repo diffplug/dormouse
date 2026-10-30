@@ -50,7 +50,7 @@ export interface BurrowStateStore {
    * The access log, oldest first (`lib/src/remote/burrow/access-log.ts`):
    * one per machine, not per `burrowId`, since a one-time connection needs
    * no enrollment. **Must sit under the same private storage as the ACL**
-   * (`docs/specs/security-local.md` -> "Persisted state"). A read that fails
+   * (`docs/specs/security-remote.md` -> "Credentials at rest"). A read that fails
    * answers what it could, never a rejection: the log informs and authorizes
    * nothing.
    */

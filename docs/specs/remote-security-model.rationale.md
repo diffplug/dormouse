@@ -44,7 +44,7 @@ The self-host operator explicitly accepted the fallback tradeoff: same-origin ma
 
 **Why the Burrow holds the window, not the Relay.** The rejected Relay-attested window let the party trusted with nothing vouch for freshness. This one opens only on a proof the Burrow verified, is keyed by a Client static the Relay never sees (IK encrypts it in message 1), and counts only activity the Burrow decrypted, so a compromised Relay can neither open one nor keep one alive. Riding it still takes the static's private half, which IK proves on every connection.
 
-**Why keyed by the Client static, with the proof's identities beside it.** The static is the one identity IK authenticates on every connection, so a window belongs to the browser that held it when the proof verified; keyed by passkey, every other browser paired with that synced passkey would ride it. Keeping the identities the proof verified lets the redeem run the conjunction as a proof would. Nothing marks which record a window was opened under: inside one runtime the ACL changes only at a pairing approval, which re-seeds that static's window, and revocation takes a new runtime ([Revocation propagation](./remote-security-model.md#revocation-propagation)), which starts with none.
+**Why keyed by the Client static, with the proof's identities beside it.** The static is the one identity IK authenticates on every connection, so a window belongs to the browser that held it when the proof verified; keyed by passkey, every other browser paired with that synced passkey would ride it. Keeping the identities the proof verified lets the redeem run the conjunction as a proof would. Nothing marks which record a window was opened under: inside one runtime the ACL changes only at a pairing approval, which re-seeds that static's window, and at a revocation, which closes the window of every static it touched ([Revocation](./remote-security-model.md#revocation)).
 
 **Why the offer is binding.** A redeem that evaluated the window again could refuse an offer the Burrow had just made — a window at its idle edge closes between message 2 and the redeem — and the Client could only cover that with a retry: a second handshake, at the prompt the window was meant to save. Binding leaves one decision, made at message 2. The challenge's 2-minute TTL, under the 5-minute idle bound, limits how stale it can be; a UV raise voids it with the windows it rests on; and the conjunction still runs at the redeem.
 
@@ -79,6 +79,20 @@ The self-host operator explicitly accepted the fallback tradeoff: same-origin ma
 ## One-time connection
 
 **Why the one-time label comes from a closed set.** For pairing's reason (Pairing, above), with no presence proof at all: a one-time request is authorized by holding the link, so its sender can be any client. The page only ever sends one of four coarse names, so mapping everything else to "Phone browser" costs an honest phone nothing.
+
+## Revocation
+
+**Why a revocation acts before it saves, when an approval saves first.** The two fail in opposite directions. An approval that published before a failed save would grant access nothing durable records; a revocation that waited for its save would leave a phone the person just cut off connected for as long as the disk refuses. Acting first fails closed, and the cost of a failed save is a phone that comes back after a restart, which the error says.
+
+**Why a device id is 64 bits of the static, in hex.** The static is a public key and authorizes nothing, but it is long and stable, so it stays in the service; a prefix is short enough to type into `dor`. A paired phone chooses its own static and could grind one sharing a shorter prefix with another phone's, so that the person revoking one cuts off the other; 64 bits puts that out of reach, and the ambiguity refusal covers what is left. Hex never begins with the `-` a command line reads as a flag, which base64url can.
+
+**Why the list revokes by Client static, not passkey.** One passkey syncs across every browser of an account, and one phone holds a static per browser identity (a Safari tab and its Home Screen install are two). "Revoke this phone" from a per-browser row cuts off that browser alone; revoking the passkey, which the entry point also takes for a Relay that names a removed credential, cuts off every browser paired with it.
+
+## Access log
+
+**Why one log per machine, and last seen from it.** A one-time connection reaches the terminals with no enrollment, and an enrollment can be cleared and replaced, so a log keyed by `burrowId` would lose exactly the entries "did anyone connect last night" asks about. Keeping last seen in the log rather than the ACL record keeps the authorization record written only by pairing and revocation.
+
+**Why 500 entries, rewritten whole.** Entries come per pairing, connection, attach, and end — a handful per session — so 500 covers weeks of ordinary use in under 100 KB, and rewriting the file atomically per entry keeps it as private and as consistent as the ACL beside it, with no append-only file format to parse.
 
 ## Push sealing
 
