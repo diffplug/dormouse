@@ -103,7 +103,7 @@ function requestBytes(url: string): Promise<{ headers: http.IncomingHttpHeaders;
   });
 }
 
-async function frame(target: string, opts = NO_LOG): Promise<string> {
+async function frame(target: string, opts: Parameters<typeof createIframeProxyUrl>[1] = NO_LOG): Promise<string> {
   const r = await createIframeProxyUrl(target, opts);
   if (!r.ok) throw new Error(`expected ok, got ${JSON.stringify(r)}`);
   return r.url;
@@ -163,6 +163,57 @@ describe('createIframeProxyUrl — admission', () => {
     expect(u.hostname).toBe('127.0.0.1');
     expect(u.pathname).toBe('/app/page');
     expect(u.search).toBe('?q=1');
+  });
+});
+
+describe('createIframeProxyUrl — the upstream address is fixed when the grant is minted', () => {
+  const resolving = (...answers: string[][]) => {
+    const calls: string[] = [];
+    const resolve = async (hostname: string) => {
+      calls.push(hostname);
+      const answer = answers[Math.min(calls.length, answers.length) - 1];
+      return answer.map((address) => ({ address, family: net.isIPv6(address) ? 6 : 4 }));
+    };
+    return { calls, resolve };
+  };
+
+  it('refuses a name that resolves to a link-local / metadata address', async () => {
+    for (const blocked of ['169.254.169.254', '::ffff:169.254.169.254', 'fe80::1']) {
+      const { resolve } = resolving(['127.0.0.1', blocked]);
+      const r = await createIframeProxyUrl('http://rebind.test:8080/', { ...NO_LOG, resolve });
+      expect(r).toMatchObject({ ok: false, reason: 'scheme' });
+    }
+  });
+
+  it('refuses a name that does not resolve, so a Reload asks again', async () => {
+    const resolve = async () => { throw Object.assign(new Error('getaddrinfo ENOTFOUND gone.test'), { code: 'ENOTFOUND' }); };
+    const r = await createIframeProxyUrl('http://gone.test/', { ...NO_LOG, resolve });
+    expect(r).toMatchObject({ ok: false, reason: 'unreachable' });
+  });
+
+  it('keeps connecting to the first answer, on both paths, whatever the name resolves to later', async () => {
+    const port = await upstream((_q, s) => { s.writeHead(200, { 'content-type': 'text/plain' }); s.end('pinned'); });
+    const ws = await echoUpgradeUpstream();
+    // A later answer that would be refused, and that nothing listens on.
+    const later = ['169.254.169.254'];
+    const http1 = resolving(['127.0.0.1'], later);
+    const url = await frame(`http://rebind.test:${port}/`, { ...NO_LOG, resolve: http1.resolve });
+    for (let i = 0; i < 3; i++) expect((await get(url)).body).toBe('pinned');
+    expect(http1.calls).toEqual(['rebind.test']);
+
+    const upgrades = resolving(['127.0.0.1'], later);
+    const wsUrl = await frame(`http://rebind.test:${ws}/`, { ...NO_LOG, resolve: upgrades.resolve });
+    const proxyPort = new URL(wsUrl).port;
+    const seen = await upgrade(wsUrl, {
+      Host: `127.0.0.1:${proxyPort}`,
+      Upgrade: 'websocket',
+      Connection: 'Upgrade',
+      'Sec-WebSocket-Key': 'dGhlIHNhbXBsZSBub25jZQ==',
+      'Sec-WebSocket-Version': '13',
+    });
+    // Host stays the name the user framed; only the connection is pinned.
+    expect(JSON.parse(seen).host).toBe(`rebind.test:${ws}`);
+    expect(upgrades.calls).toEqual(['rebind.test']);
   });
 });
 
