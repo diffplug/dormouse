@@ -1,5 +1,6 @@
 /** Resolve only the Playwright client belonging to a validated CLI installation. */
 import { existsSync, realpathSync, readFileSync, statSync } from 'node:fs';
+import { localRealpathSync } from 'dor-lib-common/local-path';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import type * as Playwright from 'playwright-core';
@@ -34,15 +35,19 @@ function findPlaywrightInstall(hint: string | undefined, configured: string | un
     // External Binaries"); an absolute explicit path comes back verbatim,
     // unchecked, and a relative one not at all.
     const binary = resolveBinaryPath(candidate, env);
-    if (binary === undefined || !existsSync(binary)) continue;
-    const cliRoot = launcherPackage(realpathSync(binary));
+    // Every path here resolves through `localRealpathSync`, which refuses a
+    // link to a share or device path before following it.
+    const launcher = binary === undefined ? undefined : localRealpathOrUndefined(binary);
+    const cliRoot = launcher === undefined ? undefined : launcherPackage(launcher);
     if (cliRoot === undefined) continue;
+    const coreDirs = playwrightCoreDirs(cliRoot);
+    if (coreDirs.length === 0) continue;
     try {
       const require = createRequire(path.join(cliRoot, 'package.json'));
       // Node's own lookup continues into every ancestor's node_modules, so accept
       // only the copy that belongs to this installation.
-      const libraryPath = realpathSync(path.dirname(require.resolve('playwright-core/package.json')));
-      if (!playwrightCoreDirs(cliRoot).some(dir => samePath(dir, libraryPath))) continue;
+      const libraryPath = localRealpathOrUndefined(path.dirname(require.resolve('playwright-core/package.json')));
+      if (!coreDirs.some(dir => libraryPath !== undefined && samePath(dir, libraryPath))) continue;
       const library = require('playwright-core') as typeof Playwright;
       if (typeof library.chromium?.connect !== 'function') continue;
       return { binary, libraryPath, library };
@@ -70,7 +75,7 @@ function launcherPackage(launcher: string): string | undefined {
     besides.push(path.join(path.dirname(dir), '@playwright', 'cli'));
   }
   for (const root of besides) {
-    const real = realpathOrUndefined(root);
+    const real = localRealpathOrUndefined(root);
     if (real !== undefined && isCliPackage(real)) return real;
   }
   // A shim naming a bin file below its own directory (`pnpm add -g`).
@@ -117,7 +122,7 @@ function shimTarget(shim: string): string | undefined {
   if (targets.size !== 1) return undefined;
   const segments = [...targets][0].split(/[\\/]/);
   if (segments.includes('..')) return undefined;
-  return realpathOrUndefined(path.join(path.dirname(shim), ...segments));
+  return localRealpathOrUndefined(path.join(path.dirname(shim), ...segments));
 }
 
 /**
@@ -130,11 +135,11 @@ function playwrightCoreDirs(cliRoot: string): string[] {
   const scope = path.dirname(cliRoot);
   const modules = path.dirname(scope);
   if (path.basename(scope) === '@playwright' && path.basename(modules) === 'node_modules') dirs.push(path.join(modules, 'playwright-core'));
-  return dirs.flatMap(dir => realpathOrUndefined(dir) ?? []);
+  return dirs.flatMap(dir => localRealpathOrUndefined(dir) ?? []);
 }
 
-function realpathOrUndefined(file: string): string | undefined {
-  try { return realpathSync(file); } catch { return undefined; }
+function localRealpathOrUndefined(file: string): string | undefined {
+  try { return localRealpathSync(file).path; } catch { return undefined; }
 }
 
 function samePath(a: string, b: string): boolean {
