@@ -35,7 +35,10 @@ export function hasControlOrFormatCharacters(value: string): boolean {
 /** How a refusal names what `hasControlOrFormatCharacters` finds. */
 export const CONTROL_OR_FORMAT_TEXT = 'terminal control characters or invisible formatting characters';
 
-const POSIX_SAFE_ARG = /^[A-Za-z0-9_@%+=:,./-]+$/;
+// No leading `=`: zsh's default EQUALS option expands a word starting with one
+// to a command's path (`=python3` → `/usr/bin/python3`). `~` is outside the set
+// for the same reason in every shell.
+const POSIX_SAFE_ARG = /^[A-Za-z0-9_@%+:,./-][A-Za-z0-9_@%+=:,./-]*$/;
 // No `,` or `@`, unlike the posix set: PowerShell's argument mode reads a comma
 // as the array operator (`cat a,b.txt` passes two arguments), while an initial
 // `@` starts splatting / array / hashtable syntax. cmd.exe also treats `,` as an
