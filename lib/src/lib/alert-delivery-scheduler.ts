@@ -50,14 +50,12 @@ interface Published {
   overrides: AlertDeliveryOverrides;
 }
 
-/** A sink's deadline, fixed at its episode's start. */
-type Delivery = ReturnType<typeof setTimeout>;
-
 export function createAlertDeliveryScheduler(options: AlertDeliverySchedulerOptions): AlertDeliveryScheduler {
   const { manager } = options;
   let defaults = DEFAULT_ALERT_SETTINGS;
-  /** A sink missing from `pending` is consumed. */
-  const episodes = new Map<string, { episodeId: string; pending: Map<AlertSink, Delivery> }>();
+  /** Each sink's deadline timer, fixed at its episode's start; a sink missing
+   *  from `pending` is consumed. */
+  const episodes = new Map<string, { episodeId: string; pending: Map<AlertSink, ReturnType<typeof setTimeout>> }>();
   /** Each Session's last publication, and the realm that made it. */
   const published = new Map<string, Published>();
 
@@ -110,7 +108,7 @@ export function createAlertDeliveryScheduler(options: AlertDeliverySchedulerOpti
     }
     if (!episode) return;
     const effective = policy(id);
-    const pending = new Map<AlertSink, Delivery>();
+    const pending = new Map<AlertSink, ReturnType<typeof setTimeout>>();
     episodes.set(id, { episodeId: episode.id, pending });
     for (const sink of Object.keys(sinks) as AlertSink[]) {
       const rule = sinks[sink];

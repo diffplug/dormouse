@@ -166,6 +166,16 @@ describe('QuiesceDetector', () => {
     expect(settled).not.toHaveBeenCalled();
   });
 
+  it('publishes stale history expiring on arrival, since its owner publishes nothing after a gated chunk', () => {
+    const { monitor, changes } = createMonitor();
+    monitor.onData();
+    vi.advanceTimersByTime(1_500);
+    monitor.onData();
+    vi.setSystemTime(Date.now() + 218_342);
+    expect(monitor.onData()).toBe(false);
+    expect(changes).toEqual(['MIGHT_BE_BUSY', 'NOTHING_TO_SHOW']);
+  });
+
   it('transitions BUSY to MIGHT_NEED_ATTENTION after silence', () => {
     const { monitor, changes, settled } = createMonitor();
     driveMonitorToMightNeedAttention(monitor);
@@ -283,12 +293,12 @@ describe('QuiesceDetector', () => {
     expect(monitor.getStatus()).toBe('NOTHING_TO_SHOW');
   });
 
-  it('reset() returns BUSY work to NOTHING_TO_SHOW', () => {
+  it('reset() returns BUSY work to NOTHING_TO_SHOW silently, for its owner to publish', () => {
     const { monitor, changes } = createMonitor();
     driveMonitorToBusy(monitor);
     monitor.reset();
     expect(monitor.getStatus()).toBe('NOTHING_TO_SHOW');
-    expect(changes).toEqual(['MIGHT_BE_BUSY', 'BUSY', 'NOTHING_TO_SHOW']);
+    expect(changes).toEqual(['MIGHT_BE_BUSY', 'BUSY']);
   });
 
   it('reset() returns MIGHT_BE_BUSY to NOTHING_TO_SHOW', () => {
@@ -299,7 +309,7 @@ describe('QuiesceDetector', () => {
     expect(monitor.getStatus()).toBe('MIGHT_BE_BUSY');
     monitor.reset();
     expect(monitor.getStatus()).toBe('NOTHING_TO_SHOW');
-    expect(changes).toEqual(['MIGHT_BE_BUSY', 'NOTHING_TO_SHOW']);
+    expect(changes).toEqual(['MIGHT_BE_BUSY']);
   });
 
   it('reset() returns MIGHT_NEED_ATTENTION to NOTHING_TO_SHOW', () => {
@@ -307,12 +317,7 @@ describe('QuiesceDetector', () => {
     driveMonitorToMightNeedAttention(monitor);
     monitor.reset();
     expect(monitor.getStatus()).toBe('NOTHING_TO_SHOW');
-    expect(changes).toEqual([
-      'MIGHT_BE_BUSY',
-      'BUSY',
-      'MIGHT_NEED_ATTENTION',
-      'NOTHING_TO_SHOW',
-    ]);
+    expect(changes).toEqual(['MIGHT_BE_BUSY', 'BUSY', 'MIGHT_NEED_ATTENTION']);
   });
 
   it('reset() forgets output history, so the next output starts candidate tracking over', () => {

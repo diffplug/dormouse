@@ -42,6 +42,14 @@ function ring(source: 'watching' | 'report'): void {
 }
 
 describe('owed alerts during resumed output', () => {
+  it('dismisses a watching ring after work resumed in one publish, its TODO already on', () => {
+    ring('watching');
+    driveToBusy(manager, ID);
+    const published: Array<{ status: string; todo: boolean }> = [];
+    manager.onStateChange((id, state) => { if (id === ID) published.push({ status: state.status, todo: state.todo }); });
+    manager.dismissAlert(ID);
+    expect(published).toEqual([{ status: 'NOTHING_TO_SHOW', todo: true }]);
+  });
   it('keeps a report ringing while a claimant that takes the settle restarts work', () => {
     driveToBusy(manager, ID);
     manager.notifyFromProtocol(ID, REPORT);

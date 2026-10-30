@@ -768,7 +768,7 @@ describe('AlertManager in isolation', () => {
     runCommand(manager, id, 'exec true');
 
     manager.onExit(id, 0);
-    leave(manager);
+    engage(manager, 'another-pane');
 
     expect(manager.getState(id)).toMatchObject({
       status: 'WATCHING_DISABLED',
@@ -799,8 +799,8 @@ describe('AlertManager in isolation', () => {
 
     it.each([
       ['presence lapses idle, ringing it', () => {}, true, true],
+      ['the window leaves the whole host, ringing it', () => { leave(manager); vi.advanceTimersByTime(cfg.alert.leaveGrace); }, true, true],
       ['focus moves to another pane, leaving its TODO', () => engage(manager, 'another-pane'), false, true],
-      ['the window leaves, leaving its TODO', () => leave(manager), false, true],
       ['the user types, clearing it', (id: string) => manager.acknowledge(id, { input: true }), false, false],
     ] as const)('finished while engaged, is held as TODO until %s', (_how, end, rings, todo) => {
       const id = `short-exit-engaged-${_how}`;

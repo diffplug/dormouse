@@ -53,6 +53,22 @@ function richer(current: ActivityNotification | null, next: ActivityNotification
   return current !== null && DETAIL_RANK[current.source] > DETAIL_RANK[next.source] ? current : next;
 }
 
+/** A detail and when it arrived, so a hold rung late never passes its own for
+ *  news newer than what rang meanwhile. */
+interface Dated {
+  detail: ActivityNotification;
+  /** Arrival order (`AlertManager.arrivals`). */
+  arrived: number;
+}
+
+/** Keep the richer detail, the later arrival among equals. */
+function takeRicher(into: Dated, detail: ActivityNotification, arrived: number): void {
+  const gain = DETAIL_RANK[detail.source] - DETAIL_RANK[into.detail.source];
+  if (gain < 0 || (gain === 0 && arrived < into.arrived)) return;
+  into.detail = detail;
+  into.arrived = arrived;
+}
+
 export type ProtocolProgressState = 'clear' | 'normal' | 'warning' | 'indeterminate' | 'error';
 
 export interface ProtocolProgressUpdate {
@@ -88,12 +104,12 @@ type ListedRingSource = Exclude<RingSource, 'watching'>;
  *  ring an exit opened rather than opening one the exit then joins. */
 const LISTED_RING_SOURCES: readonly ListedRingSource[] = ['exit', 'report'];
 
-/** The `watching` source: the rule key that raised it, and whether output has
+/** The `watching` source: the rule key that raised it, and whether work has
  *  arrived since it joined, which the detector cannot tell
  *  (`docs/specs/alert.md` -> Await). */
 interface WatchingSource {
   key: string;
-  outputSince: boolean;
+  workSince: boolean;
 }
 
 /** The sources a ring holds, or held completions would raise. */
@@ -122,13 +138,8 @@ function dropWatching(set: SourceSet): boolean {
   return set.sources.length === 0;
 }
 
-/** Work arrived: a settle this set carries no longer describes the Session. */
-function noteOutput(set: SourceSet | null): void {
-  if (set?.watching) set.watching.outputSince = true;
-}
-
 /** The one ring latch a Session holds (`docs/specs/alert.md` -> Public State). */
-interface Ring extends SourceSet {
+interface Ring extends SourceSet, Dated {
   episode: AlertEpisode;
   /** What it shows, and what the TODO a look turns it into keeps. */
   detail: ActivityNotification;
@@ -137,11 +148,9 @@ interface Ring extends SourceSet {
 /**
  * Completions the user was looking at when they happened, already shown as
  * TODO (`docs/specs/alert.md` -> Completion events): the sources they would
- * raise if the viewer goes idle, and the richest detail among them.
+ * raise if the user goes idle or leaves the host, and the richest detail among them.
  */
-interface HeldCompletion extends SourceSet {
-  detail: ActivityNotification;
-}
+interface HeldCompletion extends SourceSet, Dated {}
 
 interface CommandExitWatch {
   displayCommand: string;
@@ -160,10 +169,8 @@ export interface Engagement {
 }
 
 /** Why a viewer stopped being present: its inactivity timeout ran out
- *  (`idle`), or its window blurred or hid (`leave`). */
+ *  (`idle`), or its window blurred, hid, or ended (`leave`). */
 export type EngagementLapse = 'idle' | 'leave';
-
-const NOT_ENGAGED: Engagement = { present: false, focusId: null };
 
 export function normalizeActivityNotification(value: unknown): ActivityNotification | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -298,8 +305,10 @@ interface AlertEntry {
   todo: TodoState;
   /** The TODO's detail: null without one. A ring shows its own instead. */
   notification: ActivityNotification | null;
-  /** Completions withheld while engaged, already shown as TODO: rung if presence lapses idle (`setViewer`), dropped by any other end. */
+  /** Completions withheld while engaged, already shown as TODO: rung if the user goes idle or leaves the host (`setViewer`), dropped if focus moves on. */
   held: HeldCompletion | null;
+  /** Pending while the viewer that held it has left, until the host shows whether the user is still here. */
+  leaveGrace: ReturnType<typeof setTimeout> | null;
   /** Output and completions before this instant answer the user's own input (`acknowledge`). */
   echoUntil: number;
 }
@@ -319,6 +328,8 @@ export class AlertManager {
   private removeListeners = new Set<(id: string) => void>();
   private lastEmitted = new Map<string, AlertState>();
   private watchedCommands = new Set<string>();
+  /** Counts completions as they arrive; a hold keeps its own count when rung. */
+  private arrivals = 0;
   /** Helper Sessions alert no one until promotion (docs/specs/alert.md → Pane
    *  Header). They still build command state and feed the detector, so one
    *  promoted mid-command knows what it is running; everything else — reports,
@@ -370,7 +381,8 @@ export class AlertManager {
    * is over, and an await's grace has its answer.
    */
   private noteWork(id: string, entry: AlertEntry): void {
-    for (const set of [entry.ring, entry.held]) noteOutput(set);
+    if (entry.ring?.watching) entry.ring.watching.workSince = true;
+    if (entry.held?.watching) entry.held.watching.workSince = true;
     entry.ackedQuiet = false;
     this.eachWaiter(id, (waiter) => waiter.onOutput());
   }
@@ -532,7 +544,7 @@ export class AlertManager {
         // the ring so it outlives the command that raised it.
         const key = entry.commandExitWatch?.watchKey;
         if (!key || !this.isWatching(entry)) break;
-        this.holdOrDeliver(id, entry, { key, outputSince: false }, { source: 'WATCHING', title: `${key} went quiet`, body: null });
+        this.holdOrDeliver(id, entry, { key, workSince: false }, { source: 'WATCHING', title: `${key} went quiet`, body: null });
         break;
       }
       case 'commandFinished':
@@ -555,19 +567,27 @@ export class AlertManager {
   /**
    * The path from a completion that may ring to the ring: a live one and an
    * escalated hold alike. Engaged, it is held — a TODO at once, rung if the
-   * viewer goes idle; otherwise a report goes through the acknowledged-state
+   * user goes idle or leaves the host; otherwise a report goes through the acknowledged-state
    * check, and anything else rings. Publishes, including a progress cycle
-   * the caller cleared before dispatch.
+   * the caller cleared before dispatch. An escalated hold passes `held`, the
+   * arrival it kept.
    */
   private holdOrDeliver(
     id: string,
     entry: AlertEntry,
     source: ListedRingSource | WatchingSource,
     detail: ActivityNotification,
+    held?: number,
   ): void {
-    if (this.isEngaged(id)) this.hold(entry, source, detail);
-    else if (source === 'report' && entry.ackedQuiet) this.updateReceipt(entry, detail);
-    else this.raiseRing(entry, source, detail);
+    const arrived = held ?? ++this.arrivals;
+    if (this.isEngaged(id)) {
+      this.hold(entry, source, detail, arrived);
+    } else if (source === 'report' && entry.ackedQuiet) {
+      // A hold already put its detail on the TODO, which may have moved on since.
+      if (held === undefined) this.updateReceipt(entry, detail);
+    } else {
+      this.raiseRing(entry, source, detail, arrived);
+    }
     this.notify(id);
   }
 
@@ -700,7 +720,7 @@ export class AlertManager {
     if (entry.commandExitWatch === null && this.withdrawRingSource(entry, 'exit')) return 'exit';
     if (
       until === 'quiet'
-      && entry.ring?.watching?.outputSince === false
+      && entry.ring?.watching?.workSince === false
       && this.withdrawRingSource(entry, 'watching')
     ) return 'quiet';
     return null;
@@ -795,7 +815,9 @@ export class AlertManager {
     outcome: ProgressOutcome,
     percent: number | null,
   ): void {
-    entry.progress = null;
+    // The end completed the turn, so a turn ending mid-run must not settle
+    // again five seconds later.
+    this.endRun(entry);
     const claimed = this.dispatchCompletion(id, entry, {
       kind: 'notification',
       notification: {
@@ -804,10 +826,6 @@ export class AlertManager {
         body: percent === null ? null : `Progress ${Math.round(percent)}%`,
       },
     });
-    // The end completed the turn, so the detector starts over like at a command
-    // boundary: a turn ending mid-run must not settle again five seconds later.
-    // Last, so the reset's own publish sees the finished projection.
-    entry.detector.reset();
     // Clearing the cycle is publicly visible (`OSC_NOTIF_BUSY` falls back); the
     // ring rules publish it themselves, a claim stops before they run.
     if (claimed) this.notify(id);
@@ -856,9 +874,8 @@ export class AlertManager {
   ): void {
     const resolved = resolveCommandStart(entry.pendingCommandLine, event);
     entry.pendingCommandLine = null;
-    // Every command boundary silently ends a progress cycle the program never
-    // closed, so a later stray clear finds nothing to complete.
-    entry.progress = null;
+    // A later stray clear finds no cycle to complete.
+    this.endRun(entry);
     // A new command is news the acknowledgement never saw, even when it stays
     // silent until its report: its echo fell in the echo window, not output.
     entry.ackedQuiet = false;
@@ -868,9 +885,6 @@ export class AlertManager {
       source: resolved.source,
       seen: this.isEngaged(id),
     };
-    // Every command boundary starts the detector over, so one command's output
-    // history can never leak into the next one's busy/quiet reading.
-    entry.detector.reset();
     this.eachWaiter(id, (waiter) => waiter.onCommandStart());
   }
 
@@ -882,9 +896,9 @@ export class AlertManager {
     const watch = entry.commandExitWatch;
     entry.commandExitWatch = null;
     entry.pendingCommandLine = null;
-    // The boundary silently ends a progress cycle, like a command start.
     const endedProgress = entry.progress !== null;
-    entry.progress = null;
+    // Covers commandFinish, promptStart/End, and PTY exit.
+    this.endRun(entry);
 
     // Every finish is observable, including the unseen ones that can never
     // ring and the engaged ones it holds — the ring rule is what filters them.
@@ -898,10 +912,6 @@ export class AlertManager {
       });
     }
 
-    // The command boundary reset, covering commandFinish, promptStart/End, and
-    // PTY exit. Last, so the reset's own `onChange` cannot publish a
-    // half-finished projection.
-    entry.detector.reset();
     // Clearing the watch turns WATCHING off, which flips `watchingEnabled` and
     // the status even when command-exit never armed, so subscribers must hear
     // about any finish — `notify` dedupes if nothing is visible.
@@ -918,14 +928,15 @@ export class AlertManager {
     entry: AlertEntry,
     source: ListedRingSource | WatchingSource,
     detail: ActivityNotification,
+    arrived: number,
   ): void {
     let ring = entry.ring;
     if (ring === null) {
-      ring = { episode: createAlertEpisode(), sources: [], watching: null, detail };
+      ring = { episode: createAlertEpisode(), sources: [], watching: null, detail, arrived };
       entry.ring = ring;
       entry.ackedQuiet = false;
     } else {
-      ring.detail = richer(ring.detail, detail);
+      takeRicher(ring, detail, arrived);
     }
     addSource(ring, source);
   }
@@ -977,10 +988,20 @@ export class AlertManager {
 
   /**
    * A `watching` source was answered: start the detector over, so the tail of
-   * the run that rang cannot settle again straight away. Last in its caller:
-   * the reset publishes.
+   * the run that rang cannot settle again straight away. The caller publishes.
    */
   private answeredWatching(entry: AlertEntry): void {
+    entry.detector.reset();
+  }
+
+  /**
+   * A run ended — a command boundary, a host interrupt, a progress cycle's end,
+   * a restore: a cycle the program never closed goes with it, and the detector
+   * starts over, so one run's output history never leaks into the next nor
+   * settles as a completion after it. The caller publishes.
+   */
+  private endRun(entry: AlertEntry): void {
+    entry.progress = null;
     entry.detector.reset();
   }
 
@@ -997,9 +1018,9 @@ export class AlertManager {
 
   /**
    * One renderer realm's presence and focus, as its reporter computed them.
-   * `lapse` says why presence ended, and decides what a Session that stops
-   * being engaged does with the completions it held: an `idle` lapse with focus
-   * unchanged rings them, anything else leaves only their TODO.
+   * How a Session stops being engaged decides what it does with the
+   * completions it held: an `idle` lapse rings them, a `leave` rings them once
+   * the whole host is absent, and focus moving on leaves only their TODO.
    */
   setViewer(viewerId: string, state: Engagement, lapse?: EngagementLapse): void {
     // Revalidated: in VS Code the shape crosses from the webview.
@@ -1018,13 +1039,16 @@ export class AlertManager {
       const entry = this.entries.get(id);
       if (!entry || this.inert(id) || this.isEngaged(id) === was) continue;
       if (!was) {
+        this.endLeaveGrace(entry);
         this.markSeen(entry);
-      } else if (lapse === 'idle' && focusId === id) {
+      } else if (after !== undefined) {
+        // Focus moved on while present: the user saw it, so the TODO the hold
+        // set is enough.
+        entry.held = null;
+      } else if (lapse === 'idle') {
         this.escalateHeld(id, entry);
       } else {
-        // An explicit disengage: focus moved, or the window left. The user
-        // saw it, so the TODO the hold set is enough.
-        entry.held = null;
+        this.startLeaveGrace(id, entry);
       }
       // COMMAND_EXIT_ARMED is derived from engagement.
       this.notify(id);
@@ -1033,7 +1057,7 @@ export class AlertManager {
 
   /** The realm is gone: a disengage for whatever it pointed at. */
   removeViewer(viewerId: string): void {
-    this.setViewer(viewerId, NOT_ENGAGED, 'leave');
+    this.setViewer(viewerId, { present: false, focusId: null }, 'leave');
   }
 
   /** Every present viewer. An absent one engages nothing, so it is not kept. */
@@ -1072,10 +1096,10 @@ export class AlertManager {
     return Date.now() < entry.echoUntil;
   }
 
-  /** The user is looking: the completion is a TODO already, kept to ring if they go idle. */
-  private hold(entry: AlertEntry, source: ListedRingSource | WatchingSource, detail: ActivityNotification): void {
-    const held = entry.held ??= { sources: [], watching: null, detail };
-    held.detail = richer(held.detail, detail);
+  /** The user is looking: the completion is a TODO already, kept to ring if they go idle or leave the host. */
+  private hold(entry: AlertEntry, source: ListedRingSource | WatchingSource, detail: ActivityNotification, arrived: number): void {
+    const held = entry.held ??= { sources: [], watching: null, detail, arrived };
+    takeRicher(held, detail, arrived);
     addSource(held, source);
     // Unlike a receipt, a hold turns the TODO on: the user is looking at it.
     entry.todo = true;
@@ -1083,14 +1107,36 @@ export class AlertManager {
   }
 
   /**
-   * Presence lapsed from inactivity with focus unchanged: each held source takes
-   * the path it would have taken unengaged, with the richest held detail.
+   * The viewer holding it left — a blur, a hide, its realm ending. Ring what it
+   * held only if the user left the whole host; another viewer still present (the
+   * VS Code window around a webview, another Dormouse window) means focus moved
+   * on. The grace lets that viewer's own report land first.
+   */
+  private startLeaveGrace(id: string, entry: AlertEntry): void {
+    this.endLeaveGrace(entry);
+    if (entry.held === null) return;
+    entry.leaveGrace = setTimeout(() => {
+      entry.leaveGrace = null;
+      if (this.viewers.size === 0) this.escalateHeld(id, entry);
+      else entry.held = null;
+    }, cfg.alert.leaveGrace);
+  }
+
+  private endLeaveGrace(entry: AlertEntry): void {
+    if (entry.leaveGrace === null) return;
+    clearTimeout(entry.leaveGrace);
+    entry.leaveGrace = null;
+  }
+
+  /**
+   * The user went idle, or left the host: each held source takes the path it
+   * would have taken unengaged, with the richest held detail.
    */
   private escalateHeld(id: string, entry: AlertEntry): void {
     const held = entry.held;
     if (held === null) return;
     entry.held = null;
-    eachSource(held, (source) => this.holdOrDeliver(id, entry, source, held.detail));
+    eachSource(held, (source) => this.holdOrDeliver(id, entry, source, held.detail, held.arrived));
   }
 
   // --- Alert controls ---
@@ -1169,8 +1215,7 @@ export class AlertManager {
     if (!entry) return;
     entry.commandExitWatch = null;
     entry.pendingCommandLine = null;
-    entry.progress = null;
-    entry.detector.reset();
+    this.endRun(entry);
     this.notify(id);
   }
 
@@ -1200,6 +1245,7 @@ export class AlertManager {
     const entry = this.entries.get(id);
     if (entry) {
       entry.detector.dispose();
+      this.endLeaveGrace(entry);
       this.entries.delete(id);
       this.notify(id);
     }
@@ -1222,11 +1268,9 @@ export class AlertManager {
     entry.ring = null;
     entry.held = null;
     entry.ackedQuiet = false;
-    entry.progress = null;
     entry.commandExitWatch = null;
     entry.pendingCommandLine = null;
-    // Restore must never carry detector state either.
-    entry.detector.reset();
+    this.endRun(entry);
     this.notify(id);
   }
 
@@ -1242,6 +1286,7 @@ export class AlertManager {
     for (const id of [...this.awaits.keys()]) this.settleWaiters(id, 'cancelled');
     for (const entry of this.entries.values()) {
       entry.detector.dispose();
+      this.endLeaveGrace(entry);
     }
     this.entries.clear();
     this.removed.clear();
@@ -1304,6 +1349,7 @@ export class AlertManager {
         todo: false,
         notification: null,
         held: null,
+        leaveGrace: null,
         echoUntil: 0,
       };
       this.entries.set(id, entry);

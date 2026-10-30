@@ -13,6 +13,8 @@ import { alertedPty, createOwnerPtyStream } from '../host/owner-pty';
 
 const PANE = 'pane';
 const OTHER = 'other';
+/** A second viewer that engages nothing, as VS Code's window is. */
+const WINDOW = 'window';
 
 const PERMISSION: ActivityNotification = { source: 'OSC 9', title: null, body: 'Claude needs your permission' };
 const BELL: ActivityNotification = { source: 'BEL', title: 'Terminal bell', body: null };
@@ -115,19 +117,114 @@ describe('held completions', () => {
     expect(manager.getState(PANE)).toMatchObject({ status: 'ALERT_RINGING', todo: true });
   });
 
-  it.each([
-    ['the window leaving', () => leave(manager)],
-    ['focus moving to another pane', () => engage(manager, OTHER)],
-    ['focus moving away while presence lapses', () => manager.setViewer(VIEWER, { present: false, focusId: OTHER }, 'idle')],
-    ['the viewer going away', () => manager.removeViewer(VIEWER)],
-  ] as const)('leaves a held completion as its TODO, never ringing it, on an explicit disengage: %s', (_how, disengage) => {
+  it('rings a held completion at once when its viewer goes idle, though focus moved away', () => {
     manager.onData(PANE);
     engage(manager, PANE);
     manager.notifyFromProtocol(PANE, PERMISSION);
 
-    disengage();
+    manager.setViewer(VIEWER, { present: false, focusId: OTHER }, 'idle');
+    expect(manager.getState(PANE)).toMatchObject({ status: 'ALERT_RINGING', todo: true, notification: PERMISSION });
+  });
+
+  it.each([
+    ['the window leaving', () => leave(manager)],
+    ['the viewer going away', () => manager.removeViewer(VIEWER)],
+  ] as const)('rings a held completion once the whole host is absent: %s', (_how, goAway) => {
+    manager.onData(PANE);
+    engage(manager, PANE);
+    manager.notifyFromProtocol(PANE, PERMISSION);
+
+    goAway();
+    vi.advanceTimersByTime(cfg.alert.leaveGrace - 1);
+    expect(manager.getState(PANE).status).not.toBe('ALERT_RINGING');
+    vi.advanceTimersByTime(1);
+    expect(manager.getState(PANE)).toMatchObject({ status: 'ALERT_RINGING', todo: true, notification: PERMISSION });
+  });
+
+  it.each([
+    ['before the leave', true],
+    ['after the leave', false],
+  ] as const)('rings a held completion when the host window goes too, its report arriving %s', (_order, windowFirst) => {
+    manager.setViewer(WINDOW, { present: true, focusId: null });
+    manager.onData(PANE);
+    engage(manager, PANE);
+    manager.notifyFromProtocol(PANE, PERMISSION);
+
+    if (windowFirst) manager.setViewer(WINDOW, { present: false, focusId: null });
+    leave(manager);
+    vi.advanceTimersByTime(cfg.alert.leaveGrace / 2);
+    if (!windowFirst) manager.setViewer(WINDOW, { present: false, focusId: null });
+    vi.advanceTimersByTime(cfg.alert.leaveGrace);
+    expect(manager.getState(PANE).status).toBe('ALERT_RINGING');
+  });
+
+  it('leaves a held completion as its TODO when its viewer leaves while another stays present, as a click into the VS Code editor does', () => {
+    manager.setViewer(WINDOW, { present: true, focusId: null });
+    manager.onData(PANE);
+    engage(manager, PANE);
+    manager.notifyFromProtocol(PANE, PERMISSION);
+
+    leave(manager);
+    vi.advanceTimersByTime(cfg.alert.leaveGrace);
+    manager.setViewer(WINDOW, { present: false, focusId: null });
     vi.advanceTimersByTime(120_000);
+    expect(manager.getState(PANE)).toMatchObject({ status: 'WATCHING_DISABLED', todo: true, notification: PERMISSION });
+  });
+
+  it('keeps a report that rang during the grace over the older one the grace then rings', () => {
+    const OLD: ActivityNotification = { source: 'OSC 9', title: 'Old request', body: null };
+    const NEW: ActivityNotification = { source: 'OSC 9', title: 'New request', body: null };
+    manager.onData(PANE);
+    engage(manager, PANE);
+    manager.notifyFromProtocol(PANE, OLD);
+
+    leave(manager);
+    vi.advanceTimersByTime(cfg.alert.leaveGrace / 2);
+    manager.notifyFromProtocol(PANE, NEW);
+    vi.advanceTimersByTime(cfg.alert.leaveGrace);
+    expect(manager.getState(PANE)).toMatchObject({ status: 'ALERT_RINGING', notification: NEW });
+  });
+
+  it('keeps the TODO a receipt updated during the grace over the older hold the grace then delivers', () => {
+    const OLD: ActivityNotification = { source: 'OSC 9', title: 'Old request', body: null };
+    const NEW: ActivityNotification = { source: 'OSC 9', title: 'New request', body: null };
+    manager.onData(PANE);
+    engage(manager, PANE);
+    manager.notifyFromProtocol(PANE, PERMISSION);
+    manager.dismissAlert(PANE);
+    // Acknowledged, so a report from here on is a receipt.
+    manager.notifyFromProtocol(PANE, OLD);
+
+    leave(manager);
+    manager.notifyFromProtocol(PANE, NEW);
+    vi.advanceTimersByTime(cfg.alert.leaveGrace);
+    expect(manager.getState(PANE)).toMatchObject({ status: 'WATCHING_DISABLED', todo: true, notification: NEW });
+  });
+
+  it('keeps holding a completion when its viewer comes back within the grace, to ring on idle', () => {
+    manager.onData(PANE);
+    engage(manager, PANE);
+    manager.notifyFromProtocol(PANE, PERMISSION);
+
+    leave(manager);
+    engage(manager, PANE);
+    vi.advanceTimersByTime(cfg.alert.leaveGrace);
+    expect(manager.getState(PANE).status).not.toBe('ALERT_RINGING');
     goIdle(manager, PANE);
+    expect(manager.getState(PANE).status).toBe('ALERT_RINGING');
+  });
+
+  it.each([
+    ['another pane', OTHER],
+    ['no terminal', null],
+  ] as const)('leaves a held completion as its TODO, never ringing it, when focus moves to %s while present', (_where, focusId) => {
+    manager.onData(PANE);
+    engage(manager, PANE);
+    manager.notifyFromProtocol(PANE, PERMISSION);
+
+    manager.setViewer(VIEWER, { present: true, focusId });
+    vi.advanceTimersByTime(120_000);
+    leave(manager);
     expect(manager.getState(PANE)).toMatchObject({ status: 'WATCHING_DISABLED', todo: true, notification: PERMISSION });
   });
 

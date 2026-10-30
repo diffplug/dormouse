@@ -60,7 +60,7 @@ Three separate signals, never one lease (rationale):
 A Session is engaged while some present viewer focuses it.
 
 - **Must compute presence in the renderer and report transitions only**: an input event only stamps a time, and the host keeps no presence timer.
-- An end of presence names its lapse — `idle` when the timeout ran out, `leave` on a window blur or hide. **Must treat a blur as a leave only when `document.hasFocus()` is false** (`docs/specs/layout.md` → Corner cases #2). Focus or visibility returning counts as input.
+- An end of presence names its lapse — `idle` when the timeout ran out, `leave` on a window blur, a hide, or the realm ending. **Must treat a blur as a leave only when `document.hasFocus()` is false** (`docs/specs/layout.md` → Corner cases #2). Focus or visibility returning counts as input.
 - **An iframe Surface holding focus must keep presence from lapsing `idle`**, its input never reaching the window; a blur behind it is a `leave` at the next deadline (rationale).
 - **Must keep engagement per viewer**, deduped at the renderer, so one viewer's leave never disengages a Session another viewer engages. An absent viewer reports no focus change.
 
@@ -74,7 +74,7 @@ A Session is engaged while some present viewer focuses it.
 - **Must write all human-originated PTY input through `writeUserInput`**, the mobile input bar's included: it carries `userInput`, and the host acknowledges it with input before the bytes reach the PTY, in the one message (rationale).
 - **A remote Client's write must acknowledge the same way unless it holds only hover or button reports**, the Burrow having dropped a mirror's terminal replies (rationale).
 - **Never create an Activity entry to acknowledge**, the host's one check, so a browser Surface keeps its own TODO.
-- **User input must open the echo window** (`cfg.alert.echoWindow`) even when acknowledging clears nothing, a helper's included. Output inside it is ignored entirely — detector, `outputSince`, the acknowledged state, an await's grace — and a completion inside it neither rings nor is held, though an await may still claim it (Dispatch; rationale).
+- **User input must open the echo window** (`cfg.alert.echoWindow`) even when acknowledging clears nothing, a helper's included. Output inside it is ignored entirely — detector, `workSince`, the acknowledged state, an await's grace — and a completion inside it neither rings nor is held, though an await may still claim it (Dispatch; rationale).
 
 Source of truth: `setViewer` / `acknowledge` in `lib/src/lib/alert-manager.ts`; `createPresenceTracker` in `lib/src/lib/presence.ts`; `retainEngagementReporter` in `lib/src/lib/engagement.ts`; `writeUserInput` in `lib/src/lib/terminal-lifecycle.ts`; `alertedPty` in `lib/src/host/owner-pty.ts`. Pinned by `lib/src/lib/alert-engagement.test.ts`.
 
@@ -100,9 +100,10 @@ flowchart TD
   DIS -- "claimed" --> AW["Await"]
   DIS -- "ring, hold, receipt" --> L
   AW -- "withdraw" --> L
-  EN -- "idle, leave" --> L
+  EN -- "idle, leave, focus moves on" --> L
+  P -. "any viewer Present" .-> L
   EN -- "Engaged: Seen" --> CMD
-  L -- "idle: held sources" --> DIS
+  L -- "idle, or no viewer Present after a leave: held sources" --> DIS
   VB["gestures and verbs"] --> L
   VB -- "gesture with input" --> WIN
   subgraph L["Latches"]
@@ -168,8 +169,9 @@ stateDiagram-v2
   state "Engagement" as Engagement {
     [*] --> NotEngaged
     NotEngaged --> Engaged: a Present viewer focuses it
-    Engaged --> NotEngaged: idle — its last focusing viewer goes idle, focus unchanged
-    Engaged --> NotEngaged: leave — its last focusing viewer leaves or focuses elsewhere
+    Engaged --> NotEngaged: idle — its last focusing viewer goes idle
+    Engaged --> NotEngaged: leave — its last focusing viewer leaves
+    Engaged --> NotEngaged: focus moves on — its last focusing viewer, still Present, focuses elsewhere
   }
 ```
 
@@ -262,8 +264,13 @@ stateDiagram-v2
     NoHold --> Held: hold
     Held --> Held: hold, detail only if richer, or withdraw leaving other sources
     Held --> NoHold: Engagement idle — each source back to Dispatch at Engaged?
-    Held --> NoHold: Engagement leave, or a verb
+    Held --> NoHold: Engagement focus moves on, or a verb
     Held --> NoHold: withdraw of its last source
+    Held --> Leaving: Engagement leave
+    Leaving --> Held: Engaged again
+    Leaving --> Leaving: withdraw leaving other sources
+    Leaving --> NoHold: the leave grace elapses with no viewer Present — each source back to Dispatch at Engaged?
+    Leaving --> NoHold: the leave grace elapses with a viewer Present, a verb, or withdraw of its last source
   }
 ```
 
@@ -370,7 +377,7 @@ Is there anything to wait for?
 **Resolution must consume only the ring source it resolved on**, its `cause` from that source: `report` → `bell`, `exit` → `exit`, `watching` → `quiet`. An await arriving mid-ring resolves immediately; under `exit` only an `exit` source resolves it, and a ring without one leaves it parked.
 
 - **Must skip the `exit` source while a foreground command is running** (rationale).
-- **Must skip the `watching` source once work has resumed since it joined the ring** (`outputSince`; work as in State machines), and **never stand the detector in for that flag** (rationale).
+- **Must skip the `watching` source once work has resumed since it joined the ring** (`workSince`; work as in State machines), and **never stand the detector in for that flag** (rationale).
 - **Never skip a report** — an `OSC 9` stays true until it is answered.
 - **Consuming must withdraw that one source and never acknowledge**; a ring it leaves empty is withdrawn (Clearing And TODO).
 
@@ -496,7 +503,7 @@ Source of truth: `dispatchCompletion` in `lib/src/lib/alert-manager.ts`; `resolv
 
 `todo` is a boolean reminder. **A ring must never set it**: a look at a ring without typing turns it into a TODO carrying the ring's detail, a completion the user was already looking at is one at once (Completion events), and dealing with it — typing, the pill — clears it (rationale). `notification` is the unresolved ring's detail, else the TODO's.
 
-Detail follows one richness order: a text report (`OSC 9`, `OSC 99`, `OSC 777`) > `COMMAND_EXIT` > `OSC 9;4` > `WATCHING` > `BEL`. A new ring shows its own detail; a source joining an active ring, a hold, and an acknowledged receipt each replace the detail only at an equal or higher rank (rationale).
+Detail follows one richness order: a text report (`OSC 9`, `OSC 99`, `OSC 777`) > `COMMAND_EXIT` > `OSC 9;4` > `WATCHING` > `BEL`. A new ring shows its own detail; a source joining an active ring, a hold, and an acknowledged receipt each replace the detail only at an equal or higher rank (rationale). **An escalated hold must keep its completion's arrival**: its detail ties against a newer one as the older, and it never updates a receipt, the hold having set its TODO already.
 
 | Verb | Effect |
 |---|---|
