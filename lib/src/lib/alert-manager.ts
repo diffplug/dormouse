@@ -785,7 +785,9 @@ export class AlertManager {
     outcome: ProgressOutcome,
     percent: number | null,
   ): void {
-    entry.progress = null;
+    // The end completed the turn, so a turn ending mid-run must not settle
+    // again five seconds later.
+    this.endRun(entry);
     const claimed = this.dispatchCompletion(id, entry, {
       kind: 'notification',
       notification: {
@@ -794,10 +796,6 @@ export class AlertManager {
         body: percent === null ? null : `Progress ${Math.round(percent)}%`,
       },
     });
-    // The end completed the turn, so the detector starts over like at a command
-    // boundary: a turn ending mid-run must not settle again five seconds later.
-    // Last, so the reset's own publish sees the finished projection.
-    entry.detector.reset();
     // Clearing the cycle is publicly visible (`OSC_NOTIF_BUSY` falls back); the
     // ring rules publish it themselves, a claim stops before they run.
     if (claimed) this.notify(id);
@@ -846,9 +844,8 @@ export class AlertManager {
   ): void {
     const resolved = resolveCommandStart(entry.pendingCommandLine, event);
     entry.pendingCommandLine = null;
-    // Every command boundary silently ends a progress cycle the program never
-    // closed, so a later stray clear finds nothing to complete.
-    entry.progress = null;
+    // A later stray clear finds no cycle to complete.
+    this.endRun(entry);
     // A new command is news the acknowledgement never saw, even when it stays
     // silent until its report: its echo fell in the echo window, not output.
     entry.ackedQuiet = false;
@@ -858,9 +855,6 @@ export class AlertManager {
       source: resolved.source,
       seen: this.isEngaged(id),
     };
-    // Every command boundary starts the detector over, so one command's output
-    // history can never leak into the next one's busy/quiet reading.
-    entry.detector.reset();
     this.eachWaiter(id, (waiter) => waiter.onCommandStart());
   }
 
@@ -872,9 +866,9 @@ export class AlertManager {
     const watch = entry.commandExitWatch;
     entry.commandExitWatch = null;
     entry.pendingCommandLine = null;
-    // The boundary silently ends a progress cycle, like a command start.
     const endedProgress = entry.progress !== null;
-    entry.progress = null;
+    // Covers commandFinish, promptStart/End, and PTY exit.
+    this.endRun(entry);
 
     // Every finish is observable, including the unseen ones that can never
     // ring and the engaged ones it holds — the ring rule is what filters them.
@@ -888,10 +882,6 @@ export class AlertManager {
       });
     }
 
-    // The command boundary reset, covering commandFinish, promptStart/End, and
-    // PTY exit. Last, so the reset's own `onChange` cannot publish a
-    // half-finished projection.
-    entry.detector.reset();
     // Clearing the watch turns WATCHING off, which flips `watchingEnabled` and
     // the status even when command-exit never armed, so subscribers must hear
     // about any finish — `notify` dedupes if nothing is visible.
@@ -967,10 +957,20 @@ export class AlertManager {
 
   /**
    * A `watching` source was answered: start the detector over, so the tail of
-   * the run that rang cannot settle again straight away. Last in its caller:
-   * the reset publishes.
+   * the run that rang cannot settle again straight away. The caller publishes.
    */
   private answeredWatching(entry: AlertEntry): void {
+    entry.detector.reset();
+  }
+
+  /**
+   * A run ended — a command boundary, a host interrupt, a progress cycle's end,
+   * a restore: a cycle the program never closed goes with it, and the detector
+   * starts over, so one run's output history never leaks into the next nor
+   * settles as a completion after it. The caller publishes.
+   */
+  private endRun(entry: AlertEntry): void {
+    entry.progress = null;
     entry.detector.reset();
   }
 
@@ -1159,8 +1159,7 @@ export class AlertManager {
     if (!entry) return;
     entry.commandExitWatch = null;
     entry.pendingCommandLine = null;
-    entry.progress = null;
-    entry.detector.reset();
+    this.endRun(entry);
     this.notify(id);
   }
 
@@ -1212,11 +1211,9 @@ export class AlertManager {
     entry.ring = null;
     entry.held = null;
     entry.ackedQuiet = false;
-    entry.progress = null;
     entry.commandExitWatch = null;
     entry.pendingCommandLine = null;
-    // Restore must never carry detector state either.
-    entry.detector.reset();
+    this.endRun(entry);
     this.notify(id);
   }
 
