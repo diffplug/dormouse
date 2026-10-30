@@ -82,7 +82,7 @@ test('posix quoting quotes a leading = and leaves an inner one bare', () => {
  *  delayed expansion off: `%NAME%` and `%NAME:…%` expand when NAME is set and
  *  stay literal when not; then outside quotes `^` keeps the next character and
  *  an operator is syntax, while every unescaped `"` toggles quoting. */
-function cmdReads(line, vars) {
+function cmdReads(line, vars, operators = /[&|<>()]/) {
   let expanded = '';
   for (let i = 0; i < line.length; i++) {
     const end = line[i] === '%' ? line.indexOf('%', i + 1) : -1;
@@ -101,7 +101,7 @@ function cmdReads(line, vars) {
     else if (c === '^') {
       if (i + 1 === expanded.length) throw new Error(`cmd reads a trailing ^ in ${line} as a continuation`);
       out += expanded[++i];
-    } else if (/[&|<>()]/.test(c)) throw new Error(`cmd reads ${c} in ${line} as an operator`);
+    } else if (operators.test(c)) throw new Error(`cmd reads ${c} in ${line} as an operator`);
     else out += c;
   }
   return out;
@@ -162,6 +162,90 @@ test('cmd quoting reads back through cmd and then the program argv parser', () =
     const line = buildShellCommandForKind('cmd', ['prog', arg]);
     assert.deepEqual(msvcrtArgv(cmdReads(line, CMD_VARS)), ['prog', arg], line);
   }
+});
+
+const LEGACY_PREFIX = "& { $PSNativeCommandArgumentPassing = 'Legacy'; ";
+
+/** PowerShell's values for a line `buildShellCommandForKind` writes: bare
+ *  Windows-safe words and single-quoted strings, where each of the five
+ *  single-quote characters is doubled; and whether the line pins legacy binding. */
+function powerShellValues(line) {
+  const legacy = line.startsWith(LEGACY_PREFIX) && line.endsWith(' }');
+  let rest = legacy ? line.slice(LEGACY_PREFIX.length, -2) : line;
+  if (rest.startsWith('& ')) rest = rest.slice(2);
+  const values = [];
+  let i = 0;
+  while (i < rest.length) {
+    if (rest[i] === ' ') { i++; continue; }
+    if (/['\u2018-\u201b]/.test(rest[i])) {
+      let value = '';
+      for (i++; ; i++) {
+        if (i >= rest.length) throw new Error(`unclosed quote in ${line}`);
+        if (/['\u2018-\u201b]/.test(rest[i])) {
+          if (!/['\u2018-\u201b]/.test(rest[i + 1] ?? '')) break;
+          i++;
+        }
+        value += rest[i];
+      }
+      i++;
+      values.push(value);
+    } else {
+      const end = rest.indexOf(' ', i) < 0 ? rest.length : rest.indexOf(' ', i);
+      const word = rest.slice(i, end);
+      if (!/^[A-Za-z0-9_+=:./\\-]+$/.test(word)) throw new Error(`PowerShell reads ${word} in ${line} as syntax`);
+      values.push(word);
+      i = end;
+    }
+  }
+  return { legacy, values };
+}
+
+/** The command line PowerShell's legacy native binder builds: each nonempty
+ *  value raw, in `"` when it has whitespace outside its own quotes, counting a
+ *  `"` after a `\` as escaped (`NeedQuotes` in `NativeCommandParameterBinder`). */
+function legacyNativeLine([program, ...values]) {
+  const needQuotes = (value) => {
+    let quotes = 0;
+    for (let i = 0; i < value.length; i++) {
+      if (value[i] === '"' && value[i - 1] !== '\\') quotes++;
+      else if (/\s/.test(value[i]) && quotes % 2 === 0) return true;
+    }
+    return false;
+  };
+  return [program, ...values.filter((v) => v !== '').map((v) => (needQuotes(v) ? `"${v}"` : v))].join(' ');
+}
+
+/** pwsh 7.3+'s standard binding: each value escaped for the MSVCRT split. */
+function standardNativeLine([program, ...values]) {
+  return [program, ...values.map((v) => `"${v.replace(/(\\*)("|$)/g, (_, s, q) => s + s + (q ? '\\"' : ''))}"`)].join(' ');
+}
+
+const POWERSHELL_TRICKY_ARGV = [
+  'say "hi"', '"', 'x"y', 'a"&calc&"b', '\\"', 'a\\"b', '"a b"', '', 'a b\\', 'a b\\\\', 'a\u00a0b\\', 'C:\\a b\\', 'a\\',
+  'a&b', 'a^b', 'a|b', '<x>', 'a b', "it's", 'x’y', '$HOME', '$(calc)', '`n', '@args', 'a,b', 'tab\there', '%PATH%',
+];
+
+test('PowerShell quoting reads back through either native binding and then the program argv parser', () => {
+  const lines = [['prog', ...POWERSHELL_TRICKY_ARGV], ...POWERSHELL_TRICKY_ARGV.map((arg) => ['prog', arg]), ['prog', 'a b', 'it’s']];
+  for (const argv of lines) {
+    const line = buildShellCommandForKind('powershell', argv);
+    const { legacy, values } = powerShellValues(line);
+    assert.equal(values[0], argv[0], line);
+    assert.deepEqual(msvcrtArgv(legacyNativeLine(values)), argv, line);
+    if (!legacy) assert.deepEqual(msvcrtArgv(standardNativeLine(values)), argv, line);
+    // A `.cmd` target hands the legacy line to cmd, which must see no operator
+    // outside quotes (parentheses only matter inside a block); an argument
+    // holding `"` is the stated exception.
+    if (!argv.some((arg) => arg.includes('"'))) assert.deepEqual(msvcrtArgv(cmdReads(legacyNativeLine(values), {}, /[&|<>]/)), argv, line);
+  }
+});
+
+test('PowerShell quoting pins legacy binding only when an argument needs it', () => {
+  assert.equal(buildShellCommandForKind('powershell', ['node', 'a b', 'x.js']), "node 'a b' x.js");
+  assert.equal(
+    buildShellCommandForKind('powershell', ['node', '-e', 'say "hi"', '', 'a b']),
+    `${LEGACY_PREFIX}node -e '"say \\"hi\\""' '""' 'a b' }`,
+  );
 });
 
 test('cmd quoting keeps an argument without " or % in plain quotes', () => {

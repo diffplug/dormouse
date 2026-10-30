@@ -251,4 +251,37 @@ describe.skipIf(process.platform !== 'win32')('a cmd or PowerShell Session\'s pa
     expect(result.status, result.stderr).toBe(0);
     expect(JSON.parse(result.stdout)).toEqual(argv);
   });
+
+  // A PowerShell Session's own argv form, through both native bindings: Windows
+  // PowerShell 5.1's legacy one and pwsh's, to an exe and to the batch launcher.
+  const powerShellArgv = ['say "hi"', '"', 'a\\"b', '', 'a b\\', 'C:\\a b\\', 'a&b', 'a^b', '<x>|y', 'a b', 'it’s (1).txt', '$HOME', '%%'];
+  for (const [name, shell] of shells.slice(1)) {
+    it.skipIf(!shell)(`reads PowerShell argv back literally through ${name} to a program`, () => {
+      const line = buildShellCommandForKind('powershell', [process.execPath, '-e', 'process.stdout.write(JSON.stringify(process.argv.slice(1)))', '--', ...powerShellArgv]);
+      const result = spawnSync(shell!, ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(line, 'utf16le').toString('base64')], { encoding: 'utf8', windowsHide: true, timeout: 10_000 });
+      expect(result.error).toBeUndefined();
+      expect(result.status, result.stderr).toBe(0);
+      expect(JSON.parse(result.stdout)).toEqual(powerShellArgv);
+    });
+
+    // A batch target re-parses its `%*`, and cmd expands `%` in its command
+    // line, so arguments holding either are left out.
+    it.skipIf(!shell)(`reads PowerShell argv back literally through ${name} to dor.cmd`, () => {
+      const dir = mkdtempSync(join(tmpdir(), 'dor argv-'));
+      try {
+        const recorder = join(dir, 'argv.cjs');
+        writeFileSync(recorder, 'process.stdout.write(JSON.stringify(process.argv.slice(2)))');
+        const bin = fileURLToPath(new URL('../../../dor/bin/', import.meta.url));
+        const argv = powerShellArgv.filter(arg => !/["%]/.test(arg));
+        const line = buildShellCommandForKind('powershell', ['dor', ...argv]);
+        const env = { ...process.env, DORMOUSE_NODE: process.execPath, DORMOUSE_CLI_JS: recorder, PATH: bin + delimiter + process.env.PATH };
+        const result = spawnSync(shell!, ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(line, 'utf16le').toString('base64')], { env, cwd: dir, encoding: 'utf8', windowsHide: true, timeout: 10_000 });
+        expect(result.error).toBeUndefined();
+        expect(result.status, result.stderr).toBe(0);
+        expect(JSON.parse(result.stdout)).toEqual(argv);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  }
 });

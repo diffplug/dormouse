@@ -76,12 +76,38 @@ export function quotePosixArg(arg: string): string {
   return `'${arg.replace(/['\\]/g, (c) => `'\\${c}'`)}'`;
 }
 
+/** What PowerShell's legacy native binder hands a program wrongly: it passes
+ *  each value raw, wrapped in `"` only when it has whitespace outside its own
+ *  quotes, so an inner `"` stays unescaped, a wrapped trailing `\` escapes the
+ *  closing quote, an empty value vanishes, and a `.cmd` target reads unspaced
+ *  operators as syntax. Windows PowerShell 5.1 and pwsh before 7.3 always bind
+ *  that way, later pwsh for batch targets; `\s` over-approximates .NET's
+ *  `IsWhiteSpace`, which the binder tests. */
+function legacyBinderLoses(arg: string): boolean {
+  return arg === '' || /["&|<>^]/.test(arg) || (/[\s\u0085]/.test(arg) && arg.endsWith('\\'));
+}
+
+/** A PowerShell command line runs in the native binding the webview cannot
+ *  know: pwsh 7.3+ escapes values for the program's argv split itself, so a
+ *  pre-escaped value is escaped twice there. When an argument would be lost,
+ *  the command therefore pins legacy binding for its own scope and hands that
+ *  argument over already in its MSVCRT form, which the binder passes as is. A
+ *  PowerShell command, not a program, would then receive that form. */
 function quotePowerShellCommand(args: readonly string[]): string {
   const [command, ...rest] = args;
   if (command === undefined) return '';
   const quotedCommand = quotePowerShellArg(command);
   const commandPrefix = quotedCommand.startsWith("'") ? '& ' : '';
-  return `${commandPrefix}${[quotedCommand, ...rest.map(quotePowerShellArg)].join(' ')}`;
+  const legacy = rest.some(legacyBinderLoses);
+  const quotedRest = rest.map((arg) => quotePowerShellArg(legacy && legacyBinderLoses(arg) ? quoteMsvcrtArg(arg) : arg));
+  const line = `${commandPrefix}${[quotedCommand, ...quotedRest].join(' ')}`;
+  return legacy ? `& { $PSNativeCommandArgumentPassing = 'Legacy'; ${line} }` : line;
+}
+
+/** `arg` in quotes for the MSVCRT / `CommandLineToArgvW` argv split: `"` as
+ *  `\"`, and backslashes doubled only before a quote, the closing one included. */
+function quoteMsvcrtArg(arg: string): string {
+  return `"${arg.replace(/(\\*)("|$)/g, (_, slashes: string, quote: string) => slashes + slashes + (quote ? '\\"' : ''))}"`;
 }
 
 /** Every character PowerShell reads as a single quote: `'` and U+2018–U+201B.
@@ -151,8 +177,7 @@ function quoteCmdProgram(program: string): string {
 function quoteCmdArg(arg: string): string {
   if (arg === '') return '""';
   if (WINDOWS_SAFE_ARG.test(arg)) return arg;
-  // MSVCRT: backslashes double only before a quote, the closing one included.
-  const quoted = `"${arg.replace(/(\\*)("|$)/g, (_, slashes: string, quote: string) => slashes + slashes + (quote ? '\\"' : ''))}"`;
+  const quoted = quoteMsvcrtArg(arg);
   return /["%]/.test(arg) ? caretEscapeCmd(quoted) : quoted;
 }
 
