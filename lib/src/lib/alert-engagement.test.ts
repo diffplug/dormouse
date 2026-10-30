@@ -171,6 +171,36 @@ describe('held completions', () => {
     expect(manager.getState(PANE)).toMatchObject({ status: 'WATCHING_DISABLED', todo: true, notification: PERMISSION });
   });
 
+  it('keeps a report that rang during the grace over the older one the grace then rings', () => {
+    const OLD: ActivityNotification = { source: 'OSC 9', title: 'Old request', body: null };
+    const NEW: ActivityNotification = { source: 'OSC 9', title: 'New request', body: null };
+    manager.onData(PANE);
+    engage(manager, PANE);
+    manager.notifyFromProtocol(PANE, OLD);
+
+    leave(manager);
+    vi.advanceTimersByTime(cfg.alert.leaveGrace / 2);
+    manager.notifyFromProtocol(PANE, NEW);
+    vi.advanceTimersByTime(cfg.alert.leaveGrace);
+    expect(manager.getState(PANE)).toMatchObject({ status: 'ALERT_RINGING', notification: NEW });
+  });
+
+  it('keeps the TODO a receipt updated during the grace over the older hold the grace then delivers', () => {
+    const OLD: ActivityNotification = { source: 'OSC 9', title: 'Old request', body: null };
+    const NEW: ActivityNotification = { source: 'OSC 9', title: 'New request', body: null };
+    manager.onData(PANE);
+    engage(manager, PANE);
+    manager.notifyFromProtocol(PANE, PERMISSION);
+    manager.dismissAlert(PANE);
+    // Acknowledged, so a report from here on is a receipt.
+    manager.notifyFromProtocol(PANE, OLD);
+
+    leave(manager);
+    manager.notifyFromProtocol(PANE, NEW);
+    vi.advanceTimersByTime(cfg.alert.leaveGrace);
+    expect(manager.getState(PANE)).toMatchObject({ status: 'WATCHING_DISABLED', todo: true, notification: NEW });
+  });
+
   it('keeps holding a completion when its viewer comes back within the grace, to ring on idle', () => {
     manager.onData(PANE);
     engage(manager, PANE);

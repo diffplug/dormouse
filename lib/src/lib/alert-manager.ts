@@ -53,6 +53,22 @@ function richer(current: ActivityNotification | null, next: ActivityNotification
   return current !== null && DETAIL_RANK[current.source] > DETAIL_RANK[next.source] ? current : next;
 }
 
+/** A detail and when it arrived, so a hold rung late never passes its own for
+ *  news newer than what rang meanwhile. */
+interface Dated {
+  detail: ActivityNotification;
+  /** Arrival order (`AlertManager.arrivals`). */
+  arrived: number;
+}
+
+/** Keep the richer detail, the later arrival among equals. */
+function takeRicher(into: Dated, detail: ActivityNotification, arrived: number): void {
+  const gain = DETAIL_RANK[detail.source] - DETAIL_RANK[into.detail.source];
+  if (gain < 0 || (gain === 0 && arrived < into.arrived)) return;
+  into.detail = detail;
+  into.arrived = arrived;
+}
+
 export type ProtocolProgressState = 'clear' | 'normal' | 'warning' | 'indeterminate' | 'error';
 
 export interface ProtocolProgressUpdate {
@@ -123,7 +139,7 @@ function dropWatching(set: SourceSet): boolean {
 }
 
 /** The one ring latch a Session holds (`docs/specs/alert.md` -> Public State). */
-interface Ring extends SourceSet {
+interface Ring extends SourceSet, Dated {
   episode: AlertEpisode;
   /** What it shows, and what the TODO a look turns it into keeps. */
   detail: ActivityNotification;
@@ -134,9 +150,7 @@ interface Ring extends SourceSet {
  * TODO (`docs/specs/alert.md` -> Completion events): the sources they would
  * raise if the user goes idle or leaves the host, and the richest detail among them.
  */
-interface HeldCompletion extends SourceSet {
-  detail: ActivityNotification;
-}
+interface HeldCompletion extends SourceSet, Dated {}
 
 interface CommandExitWatch {
   displayCommand: string;
@@ -314,6 +328,8 @@ export class AlertManager {
   private removeListeners = new Set<(id: string) => void>();
   private lastEmitted = new Map<string, AlertState>();
   private watchedCommands = new Set<string>();
+  /** Counts completions as they arrive; a hold keeps its own count when rung. */
+  private arrivals = 0;
   /** Helper Sessions alert no one until promotion (docs/specs/alert.md → Pane
    *  Header). They still build command state and feed the detector, so one
    *  promoted mid-command knows what it is running; everything else — reports,
@@ -553,17 +569,25 @@ export class AlertManager {
    * escalated hold alike. Engaged, it is held — a TODO at once, rung if the
    * user goes idle or leaves the host; otherwise a report goes through the acknowledged-state
    * check, and anything else rings. Publishes, including a progress cycle
-   * the caller cleared before dispatch.
+   * the caller cleared before dispatch. An escalated hold passes `held`, the
+   * arrival it kept.
    */
   private holdOrDeliver(
     id: string,
     entry: AlertEntry,
     source: ListedRingSource | WatchingSource,
     detail: ActivityNotification,
+    held?: number,
   ): void {
-    if (this.isEngaged(id)) this.hold(entry, source, detail);
-    else if (source === 'report' && entry.ackedQuiet) this.updateReceipt(entry, detail);
-    else this.raiseRing(entry, source, detail);
+    const arrived = held ?? ++this.arrivals;
+    if (this.isEngaged(id)) {
+      this.hold(entry, source, detail, arrived);
+    } else if (source === 'report' && entry.ackedQuiet) {
+      // A hold already put its detail on the TODO, which may have moved on since.
+      if (held === undefined) this.updateReceipt(entry, detail);
+    } else {
+      this.raiseRing(entry, source, detail, arrived);
+    }
     this.notify(id);
   }
 
@@ -904,14 +928,15 @@ export class AlertManager {
     entry: AlertEntry,
     source: ListedRingSource | WatchingSource,
     detail: ActivityNotification,
+    arrived: number,
   ): void {
     let ring = entry.ring;
     if (ring === null) {
-      ring = { episode: createAlertEpisode(), sources: [], watching: null, detail };
+      ring = { episode: createAlertEpisode(), sources: [], watching: null, detail, arrived };
       entry.ring = ring;
       entry.ackedQuiet = false;
     } else {
-      ring.detail = richer(ring.detail, detail);
+      takeRicher(ring, detail, arrived);
     }
     addSource(ring, source);
   }
@@ -1072,9 +1097,9 @@ export class AlertManager {
   }
 
   /** The user is looking: the completion is a TODO already, kept to ring if they go idle or leave the host. */
-  private hold(entry: AlertEntry, source: ListedRingSource | WatchingSource, detail: ActivityNotification): void {
-    const held = entry.held ??= { sources: [], watching: null, detail };
-    held.detail = richer(held.detail, detail);
+  private hold(entry: AlertEntry, source: ListedRingSource | WatchingSource, detail: ActivityNotification, arrived: number): void {
+    const held = entry.held ??= { sources: [], watching: null, detail, arrived };
+    takeRicher(held, detail, arrived);
     addSource(held, source);
     // Unlike a receipt, a hold turns the TODO on: the user is looking at it.
     entry.todo = true;
@@ -1111,7 +1136,7 @@ export class AlertManager {
     const held = entry.held;
     if (held === null) return;
     entry.held = null;
-    eachSource(held, (source) => this.holdOrDeliver(id, entry, source, held.detail));
+    eachSource(held, (source) => this.holdOrDeliver(id, entry, source, held.detail, held.arrived));
   }
 
   // --- Alert controls ---

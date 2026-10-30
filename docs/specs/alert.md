@@ -503,7 +503,7 @@ Source of truth: `dispatchCompletion` in `lib/src/lib/alert-manager.ts`; `resolv
 
 `todo` is a boolean reminder. **A ring must never set it**: a look at a ring without typing turns it into a TODO carrying the ring's detail, a completion the user was already looking at is one at once (Completion events), and dealing with it — typing, the pill — clears it (rationale). `notification` is the unresolved ring's detail, else the TODO's.
 
-Detail follows one richness order: a text report (`OSC 9`, `OSC 99`, `OSC 777`) > `COMMAND_EXIT` > `OSC 9;4` > `WATCHING` > `BEL`. A new ring shows its own detail; a source joining an active ring, a hold, and an acknowledged receipt each replace the detail only at an equal or higher rank (rationale).
+Detail follows one richness order: a text report (`OSC 9`, `OSC 99`, `OSC 777`) > `COMMAND_EXIT` > `OSC 9;4` > `WATCHING` > `BEL`. A new ring shows its own detail; a source joining an active ring, a hold, and an acknowledged receipt each replace the detail only at an equal or higher rank (rationale). **An escalated hold must keep its completion's arrival**: its detail ties against a newer one as the older, and it never updates a receipt, the hold having set its TODO already.
 
 | Verb | Effect |
 |---|---|
