@@ -31,7 +31,8 @@ function findPlaywrightInstall(hint: string | undefined, configured: string | un
   for (const candidate of candidates) {
     if (!candidate) continue;
     // The file `dor playwright` spawns for this name (docs/specs/dor-cli.md → "Spawning
-    // External Binaries"); an explicit path comes back verbatim, unchecked.
+    // External Binaries"); an absolute explicit path comes back verbatim,
+    // unchecked, and a relative one not at all.
     const binary = resolveBinaryPath(candidate, env);
     if (binary === undefined || !existsSync(binary)) continue;
     const cliRoot = launcherPackage(realpathSync(binary));

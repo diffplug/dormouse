@@ -57,6 +57,7 @@ Source of truth: `WSL_CLI_ENV` in `standalone/sidecar/pty-core.js`, `dor/bin/dor
 
 - **`dor agent-browser`, `dor playwright` and both browser hosts spawn the `PATH`-resolved absolute path, never the bare name** — cross-spawn resolves a bare name through `which`, which searches the cwd before `PATH` on Windows (rationale).
 - **Within the `PATH` directories, and only those, the walk must select the file `which` would**, mirroring `getPathInfo` in `which/which.js` — a divergence either runs a different binary or reports a present install as missing. **Never extend the search to the cwd**, which is the one place `which` looks and the rule above exists to exclude.
+- **Must resolve only to an absolute path**: a relative `PATH` entry is skipped, and a relative explicit path (one with a separator) is a missing install.
 - **A bare name the walk cannot resolve is a missing install, reported before the spawn** — including when there is no `PATH` to search at all, since the spawn's own fallback is the bare name.
 
 **`spawnAndCapture` never throws:** a spawn-level failure resolves as `{ ok: false, error }`, including synchronous argv-validation errors.
