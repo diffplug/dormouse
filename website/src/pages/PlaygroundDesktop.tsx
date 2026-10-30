@@ -60,6 +60,7 @@ function PlaygroundDesktopExperience() {
   const [WallModule, setWallModule] = useState<{
     WorkspaceWindow: React.ComponentType<any>;
     PlaygroundTabs: React.ComponentType;
+    ClipboardFailureGlobal: React.ComponentType;
   } | null>(null);
   const [placeToPasteOpen, setPlaceToPasteOpen] = useState(false);
 
@@ -99,7 +100,7 @@ function PlaygroundDesktopExperience() {
       if (getPreferredPlayground() === "pocket") return;
       // None of these consumes another, so load the whole bundle at once rather
       // than paying a round of module resolution each on the boot path.
-      const [platform, registry, mouseSelection, themes, alertSettings, alertDelivery, workspaceWindow, playgroundTabs, workspaceStore, shellDefaults, asciiSplash, playgroundFs] = await Promise.all([
+      const [platform, registry, mouseSelection, themes, alertSettings, alertDelivery, workspaceWindow, playgroundTabs, workspaceStore, shellDefaults, asciiSplash, playgroundFs, clipboardFailure] = await Promise.all([
         import("dormouse-lib/lib/platform"),
         import("dormouse-lib/lib/terminal-registry"),
         import("dormouse-lib/lib/mouse-selection"),
@@ -112,6 +113,7 @@ function PlaygroundDesktopExperience() {
         import("dormouse-lib/lib/shell-defaults"),
         import("../lib/ascii-splash-runner"),
         import("../lib/playground-fs"),
+        import("dormouse-lib/components/ClipboardFailureDialog"),
         import("dormouse-lib/index.css"),
       ]);
       if (cancelled) return;
@@ -212,7 +214,8 @@ function PlaygroundDesktopExperience() {
       workspaceWindow.resetWorkspaceWindow();
       // A user's name, so auto-naming never retitles it from its panes' cwd.
       workspaceStore.renameWorkspace(workspaceStore.getActiveWorkspaceId(), "Playground");
-      setWallModule({ WorkspaceWindow: workspaceWindow.WorkspaceWindow, PlaygroundTabs: playgroundTabs.PlaygroundTabs });
+      // The page mounts no `App`, which carries the clipboard-failure report on the desktop hosts.
+      setWallModule({ WorkspaceWindow: workspaceWindow.WorkspaceWindow, PlaygroundTabs: playgroundTabs.PlaygroundTabs, ClipboardFailureGlobal: clipboardFailure.ClipboardFailureGlobal });
     }
     loadWall();
 
@@ -261,6 +264,7 @@ function PlaygroundDesktopExperience() {
       {placeToPasteOpen ? (
         <PlaceToPaste onClose={() => setPlaceToPasteOpen(false)} />
       ) : null}
+      {WallModule ? <WallModule.ClipboardFailureGlobal /> : null}
     </>
   );
 }

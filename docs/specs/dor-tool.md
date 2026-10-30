@@ -47,7 +47,7 @@ Source of truth: `createToolHost` in `lib/src/host/tool-host.ts`; `toolRunComman
 
 - **Must namespace keys by the host-resolved Tool name**; runtime output supplies scope elements, never another Tool's namespace.
 - **Must dedupe within the answering Workspace**; `--workspace` uses the routing in `docs/specs/dor-cli.md` → Handle Model.
-- **Must serialize every Tool launch request and approval completion in the renderer through one queue**, not per key, so two requests never both create a match.
+- **Must serialize every Tool launch request and approval completion in the renderer through one queue**, not per key, so two requests never both create a match. **Never hold it across a dialog the user answers**: a request releases the queue while one is open and, once it retakes it, re-reads every match and placement before acting.
 - **Must reveal a live matching Tool and report `existing` without sending input.** A match idle while the host replaces its run ([Run end](#run-end)) restarts its stored command in its own directory and reports `adopted`; a failed restart reports an error.
 - **Must reuse and reveal a matching pending approval Surface unless `--fresh` is set**, matching Tool name, project root, CWD, arguments, and fresh intent; preserve its approval state and report `pending`.
 - **Must apply runtime re-keys only to the announcing Tool**, without merging Surfaces, transferring state, or killing either side of a collision. (rationale)

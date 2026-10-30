@@ -164,20 +164,47 @@ export interface RefundFor {
 
 /** A paid payment Stripe can refund: its PaymentIntent, or its charge when it has none. */
 type Refundable = { payment_intent: string } | { charge: string };
+const paymentId = (payment: Refundable) => ("payment_intent" in payment ? payment.payment_intent : payment.charge);
 
-/** Refunds what is left of `payment` for `refund`, once however often it is asked. */
-async function refundInFull(billing: Billing<Plan>, refund: RefundFor, payment: Refundable) {
-  const paid = "payment_intent" in payment ? payment.payment_intent : payment.charge;
-  try {
-    await billing.stripe.refunds.create(
-      { ...payment, reason: "requested_by_customer", metadata: { [`dormouse_${refund.kind}`]: refund.id } },
-      { idempotencyKey: `dormouse-${refund.kind}-${refund.id}-${paid}` },
-    );
-  } catch (error) {
-    // Refunded in full already, by an earlier attempt or by hand.
-    if ((error as { code?: unknown }).code === "charge_already_refunded") return;
-    throw error;
-  }
+/**
+ * Where a payment's refund stands: `refunded` in full by refunds that
+ * succeeded, `waiting` on Stripe for one in flight or for another pass, or
+ * `action` while one waits on the customer.
+ */
+type RefundState = "refunded" | "waiting" | "action";
+
+/**
+ * Refunds, for `refund`, the part of `amount` paid by `payment` that its
+ * succeeded refunds leave, deciding from the refunds Stripe holds for it, by
+ * an earlier attempt or by hand, and never from a create's answer alone. A
+ * refund in flight or awaiting the customer's action is waited on; one that
+ * failed or was canceled is made again under a key that counts them, as
+ * Stripe answers a repeated key with the refund it made for it.
+ */
+async function refundInFull(
+  billing: Billing<Plan>,
+  refund: RefundFor,
+  payment: Refundable,
+  amount: number,
+): Promise<RefundState> {
+  const paid = paymentId(payment);
+  const refunds = await billing.stripe.refunds.list({ ...payment, limit: 100 });
+  if (refunds.has_more) throw new Error(`Payment ${paid} has more refunds than one page`);
+  const of = (...statuses: string[]) => refunds.data.filter((made) => statuses.includes(made.status ?? ""));
+  const succeeded = of("succeeded").reduce((sum, made) => sum + made.amount, 0);
+  if (succeeded >= amount) return "refunded";
+  if (of("requires_action").length) return "action";
+  if (of("pending").length) return "waiting";
+  const made = await billing.stripe.refunds.create(
+    {
+      ...payment,
+      amount: amount - succeeded,
+      reason: "requested_by_customer",
+      metadata: { [`dormouse_${refund.kind}`]: refund.id },
+    },
+    { idempotencyKey: `dormouse-${refund.kind}-${refund.id}-${paid}-${of("failed", "canceled").length}` },
+  );
+  return made.status === "succeeded" ? "refunded" : made.status === "requires_action" ? "action" : "waiting";
 }
 
 /** What Stripe can refund of invoice payment `payment`: a PaymentIntent, or a charge without one; null for one paid outside Stripe. */
@@ -191,10 +218,13 @@ function refundable({ payment }: Stripe.InvoicePayment): Refundable | null {
 /**
  * Refunds in full, for `refund`, every payment of each paid invoice of
  * subscription `subscriptionId` that `covers` accepts: no use deduction, tax
- * included. Safe to repeat. Throws, after refunding the rest, while any of
- * those invoices was paid in part outside Stripe (out of band, or a payment
- * record), which Stripe cannot refund: the operator refunds it by hand and
- * marks the withdrawal or closure settled (`hosted/README.md`).
+ * included. Safe to repeat. Returns once every such payment is refunded by
+ * refunds that succeeded; else throws, after refunding the rest, so the
+ * caller stamps nothing: while a refund is in flight, which a later pass
+ * reads again; while one awaits the customer's action in Stripe; or while an
+ * invoice was paid in part outside Stripe (out of band, or a payment record),
+ * which Stripe cannot refund. Those last two the operator settles by hand
+ * (`hosted/README.md`).
  */
 export async function refundPaidInvoices(
   billing: Billing<Plan>,
@@ -206,21 +236,31 @@ export async function refundPaidInvoices(
   const invoices = await billing.stripe.invoices.list({ subscription: subscriptionId, status: "paid", limit: 100 });
   if (invoices.has_more) throw new Error(`${label}: more paid invoices than one page`);
   const byHand: string[] = [];
+  const awaitingAction: string[] = [];
+  const waiting: string[] = [];
   for (const invoice of invoices.data.filter(covers)) {
     const payments = await billing.stripe.invoicePayments.list({ invoice: invoice.id!, status: "paid", limit: 100 });
     if (payments.has_more) throw new Error(`${label}: invoice ${invoice.id} has more payments than one page`);
-    let refunded = 0;
+    let collected = 0;
     for (const payment of payments.data) {
       const paid = refundable(payment);
       if (!paid) continue;
-      await refundInFull(billing, refund, paid);
-      refunded += payment.amount_paid ?? 0;
+      const amount = payment.amount_paid ?? 0;
+      const state = await refundInFull(billing, refund, paid, amount);
+      const named = `${invoice.id} (${paymentId(paid)})`;
+      if (state === "action") awaitingAction.push(named);
+      else if (state === "waiting") waiting.push(named);
+      collected += amount;
     }
     // Whatever Stripe did not collect itself: an invoice marked paid out of band has no payment to refund.
-    if (refunded < invoice.amount_due) byHand.push(`${invoice.id} (${invoice.amount_due - refunded} of ${invoice.amount_due} ${invoice.currency})`);
+    if (collected < invoice.amount_due) byHand.push(`${invoice.id} (${invoice.amount_due - collected} of ${invoice.amount_due} ${invoice.currency})`);
   }
-  if (byHand.length)
-    throw new Error(`${label}: paid outside Stripe, refund by hand, then mark it settled: invoice ${byHand.join(", ")}`);
+  const unsettled = [
+    ...(byHand.length ? [`paid outside Stripe, refund by hand, then mark it settled: invoice ${byHand.join(", ")}`] : []),
+    ...(awaitingAction.length ? [`refund awaits the customer's action in Stripe: invoice ${awaitingAction.join(", ")}`] : []),
+    ...(waiting.length ? [`refund not yet succeeded, retried by the cron: invoice ${waiting.join(", ")}`] : []),
+  ];
+  if (unsettled.length) throw new Error(`${label}: ${unsettled.join("; ")}`);
 }
 
 /**
