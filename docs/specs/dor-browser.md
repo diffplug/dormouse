@@ -295,12 +295,12 @@ Source of truth: `lib/src/components/wall/IframePanel.tsx`, `lib/src/host/iframe
 
 An upstream is local when every address it resolved to at mint is loopback (127.0.0.0/8, IPv4-mapped included, or `::1`); its name never counts.
 
-- **Must refuse (`external`) to mint or reuse a grant for a non-local upstream unless the request's `allowExternal` is exactly `true`**, sent only for an origin on the panel's allowlist.
+- A non-local upstream is refused (`external`) unless the request carries `allowExternal`, sent only for an origin on the panel's allowlist (`docs/specs/security-local.md` -> "Browser panes").
 - The allowlist holds exact origins (scheme, host, port) in webview `localStorage`, one per host install, each removable in Settings → General. **Must re-ask the host when the pane's origin is allowed or removed**, so a removal closes an open preview.
 - The `external` warning names the origin and offers Open in browser, Allow this origin, and Cancel (back one entry, else close the pane).
 - An allowed origin gets a preview only: cookies stay stripped and `https://` stays refused.
 
-Both webview CSPs admit only loopback frames (`docs/specs/security-local.md` -> "Network policy"), so a form, script, or link off the proxy to a remote origin is refused. **Must answer a frame load (`Sec-Fetch-Dest` `document` or `iframe`) redirected to another origin, given an embedder chain, with a Dormouse page in place of the `Location`.** In the pane's frame it posts `navigate` with the target and its own URL; the panel takes it as a URL-bar entry, replacing the redirecting history entry (rationale). A nested frame, outside the webview CSP, follows the redirect itself.
+Both webview CSPs admit only loopback frames (`docs/specs/security-local.md` -> "Network policy"), so a form, script, or link off the proxy to a remote origin is refused. A frame load (`Sec-Fetch-Dest` `document` or `iframe`) redirected to another origin, given an embedder chain, gets a Dormouse page in place of the `Location`. In the pane's frame it posts `navigate` with the target and its own URL; the panel takes it as a URL-bar entry, replacing the redirecting history entry (rationale). A nested frame, outside the webview CSP, follows the redirect itself.
 
 Source of truth: `mintGrant` and `offOriginRedirect` in `lib/src/host/iframe-proxy.ts`, `errorPageHtml` in `lib/src/host/iframe-proxy-rewrite.ts`, `lib/src/lib/iframe-allowlist.ts`, `lib/src/components/wall/IframePanel.tsx`.
 
