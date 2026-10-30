@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { loadJson, saveJson } from './local-json-store';
 import { setTerminalFontSize } from './terminal-registry';
 
 export const MOBILE_FONT_SIZE_KEY = 'dormouse:mobile-font-size';
@@ -9,24 +10,16 @@ export function clampMobileFontSize(px: number): number {
   return Math.min(MOBILE_FONT_SIZE_MAX, Math.max(MOBILE_FONT_SIZE_MIN, Math.round(px)));
 }
 
+const isFontSize = (value: unknown): value is number => typeof value === 'number' && value > 0;
+
 function restoreMobileFontSize(): void {
-  if (typeof localStorage === 'undefined') return;
-  let saved: number;
-  try {
-    saved = Number(localStorage.getItem(MOBILE_FONT_SIZE_KEY));
-  } catch {
-    return;
-  }
-  // An absent key reads as 0, which leaves the theme's size in place.
-  if (saved > 0) setTerminalFontSize(clampMobileFontSize(saved));
+  // Nothing saved leaves the theme's size in place.
+  const saved = loadJson(MOBILE_FONT_SIZE_KEY, null, isFontSize);
+  if (saved !== null) setTerminalFontSize(clampMobileFontSize(saved));
 }
 
 export function saveMobileFontSize(px: number): void {
-  try {
-    localStorage.setItem(MOBILE_FONT_SIZE_KEY, String(px));
-  } catch {
-    // Storage refused (private mode, quota): the size still holds for this page.
-  }
+  saveJson(MOBILE_FONT_SIZE_KEY, px);
 }
 
 /**

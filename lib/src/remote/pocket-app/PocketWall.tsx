@@ -25,7 +25,7 @@ import {
 import { getTerminalInstance, refitSession, writeUserInput } from '../../lib/terminal-registry';
 import { doPaste } from '../../lib/clipboard';
 import type { RemotePtyAdapter } from '../client/remote-adapter';
-import { syncDocumentChrome, usePocketTheme } from './pocket-theme';
+import { applyPocketTheme, restorePocketTheme, usePocketTheme } from './pocket-theme';
 import {
   activatePane,
   directorySessionItems,
@@ -33,21 +33,19 @@ import {
   pickerEntries,
 } from './wall-model';
 
-export function PocketWall({ adapter, onError, restoreTheme, persistSettings = true }: {
+export function PocketWall({ adapter, onError, persist = true }: {
   adapter: RemotePtyAdapter;
   onError?: (error: unknown) => void;
   /**
-   * How the theme is restored; Pocket's `restorePocketTheme` by default. The
-   * one-time page passes `applyPocketTheme`, which keeps nothing.
+   * Whether the theme and Settings choices are restored and saved. The one-time
+   * page passes false: it keeps nothing, so the theme is Pocket's default.
    */
-  restoreTheme?: () => void;
-  /** Whether Settings choices are saved; the one-time page keeps nothing. */
-  persistSettings?: boolean;
+  persist?: boolean;
 }): React.ReactElement {
   // App restores the theme before this renders; repeat idempotently so isolated
   // PocketWall consumers receive the same theme contract too.
-  usePocketTheme(restoreTheme);
-  useMobileFontSize(persistSettings);
+  usePocketTheme(persist ? restorePocketTheme : applyPocketTheme);
+  useMobileFontSize(persist);
   const [entries, setEntries] = useState<DirectoryEntry[]>(() => adapter.getDirectoryEntries());
   const [activePaneId, setActivePaneId] = useState<string | null>(null);
   const [touchMode, setTouchMode] = useState<MobileTerminalTouchMode>('gestures');
@@ -144,7 +142,7 @@ export function PocketWall({ adapter, onError, restoreTheme, persistSettings = t
       cursorTouchAvailable={cursorTouchAvailable}
       sessions={sessionItems}
       onSessionSelect={setActivePaneId}
-      settings={<MobileSettings persist={persistSettings} onThemeApplied={syncDocumentChrome} />}
+      settings={<MobileSettings persist={persist} />}
       onSendInput={handleSendInput}
       onPaste={handlePaste}
     />

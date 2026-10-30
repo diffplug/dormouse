@@ -78,6 +78,10 @@ export function PocketTerminalExperience({
     window.location.assign(POCKET_NOTIFY_URL);
   }, []);
 
+  const handleSendInput = useCallback((data: string) => {
+    if (adapterRef.current) writeUserInput(activePaneId, data);
+  }, [activePaneId]);
+
   const getPocketTouchMode = useCallback(() => touchModeRef.current, []);
 
   const subscribeToPocketTouchMode = useCallback((listener: () => void) => {
@@ -244,7 +248,7 @@ export function PocketTerminalExperience({
       sessions={sessionItems}
       onSessionSelect={setActivePaneId}
       settings={<MobileSettings persist />}
-      onSendInput={(data) => { if (adapterRef.current) writeUserInput(activePaneId, data); }}
+      onSendInput={handleSendInput}
       onGestureInput={handleGestureInput}
       onGestureScroll={handleGestureScroll}
       onPaste={async (text) => {

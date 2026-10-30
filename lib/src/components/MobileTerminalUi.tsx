@@ -42,7 +42,7 @@ import {
 import { useDynamicPalette } from '../lib/themes/use-dynamic-palette';
 import { isComposingKey, isEditableTarget } from '../lib/dom';
 import { TouchUiContext } from './touch-ui-context';
-import { TODO_PILL_TRACKING_CLASS } from './design';
+import { modalActionButton, TODO_PILL_TRACKING_CLASS } from './design';
 import { AlertRingInset, alertRingRow, useAlertRingBurst } from './alert-ring';
 import type { AlertEpisode } from '../lib/alert-episode';
 import { getTerminalInstance, type SessionStatus } from '../lib/terminal-registry';
@@ -50,6 +50,7 @@ import { EdgeScrollMotion, isEdgeScrollOrigin, isMobileScrollWheel, scrollMobile
 import { acknowledgeSession } from '../lib/session-activity-store';
 import type { MouseTrackingMode, OverrideState } from '../lib/mouse-selection';
 import { TERMINAL_TAP_EVENT, type TerminalTapDetail } from '../lib/terminal-mouse-router';
+import { overlayViewportBounds, subscribeOverlayViewport } from '../lib/ui-geometry';
 
 /** What fills the screen: the terminal, or the full-screen session list. */
 export type MobileTerminalView = 'terminal' | 'sessions';
@@ -156,6 +157,22 @@ export interface MobileTerminalUiProps {
   style?: CSSProperties;
 }
 
+/** A physical keyboard's named keys; Enter and Tab take their Shift forms. */
+const HARDWARE_KEYS: Partial<Record<string, MobileGestureInputId>> = {
+  Enter: 'enter',
+  Backspace: 'backspace',
+  Escape: 'esc',
+  Tab: 'tab',
+  PageUp: 'pageUp',
+  PageDown: 'pageDown',
+  Home: 'home',
+  End: 'end',
+  ArrowUp: 'up',
+  ArrowDown: 'down',
+  ArrowRight: 'right',
+  ArrowLeft: 'left',
+};
+
 /** What a physical keyboard's key sends; null leaves the key to the page. */
 function hardwareKeySequence(event: globalThis.KeyboardEvent): string | null {
   if (event.metaKey || event.altKey) return null;
@@ -163,38 +180,12 @@ function hardwareKeySequence(event: globalThis.KeyboardEvent): string | null {
     const key = event.key.toLowerCase();
     return /^[a-z]$/.test(key) ? String.fromCharCode(key.charCodeAt(0) - 96) : null;
   }
-
-  switch (event.key) {
-    case 'Enter':
-      if (event.shiftKey) return MOBILE_TERMINAL_KEY_SEQUENCES.shiftEnter;
-      return MOBILE_TERMINAL_KEY_SEQUENCES.enter;
-    case 'Backspace':
-      return MOBILE_TERMINAL_KEY_SEQUENCES.backspace;
-    case 'Escape':
-      return MOBILE_TERMINAL_KEY_SEQUENCES.esc;
-    case 'Tab':
-      if (event.shiftKey) return MOBILE_TERMINAL_KEY_SEQUENCES.shiftTab;
-      return MOBILE_TERMINAL_KEY_SEQUENCES.tab;
-    case 'PageUp':
-      return MOBILE_TERMINAL_KEY_SEQUENCES.pageUp;
-    case 'PageDown':
-      return MOBILE_TERMINAL_KEY_SEQUENCES.pageDown;
-    case 'Home':
-      return MOBILE_TERMINAL_KEY_SEQUENCES.home;
-    case 'End':
-      return MOBILE_TERMINAL_KEY_SEQUENCES.end;
-    case 'ArrowUp':
-      return MOBILE_TERMINAL_KEY_SEQUENCES.up;
-    case 'ArrowDown':
-      return MOBILE_TERMINAL_KEY_SEQUENCES.down;
-    case 'ArrowRight':
-      return MOBILE_TERMINAL_KEY_SEQUENCES.right;
-    case 'ArrowLeft':
-      return MOBILE_TERMINAL_KEY_SEQUENCES.left;
-    default:
-      // One character, an astral one included; named keys (`Shift`, `F1`) send nothing.
-      return [...event.key].length === 1 ? event.key : null;
-  }
+  let id = HARDWARE_KEYS[event.key];
+  if (event.shiftKey && id === 'enter') id = 'shiftEnter';
+  if (event.shiftKey && id === 'tab') id = 'shiftTab';
+  if (id) return MOBILE_TERMINAL_KEY_SEQUENCES[id];
+  // One character, an astral one included; other named keys (`Shift`, `F1`) send nothing.
+  return [...event.key].length === 1 ? event.key : null;
 }
 
 /** Where a physical key reaches the terminal: nothing focused, or a non-control
@@ -334,34 +325,24 @@ function SessionsScreen({
   );
 }
 
-const COMPOSER_BUTTON_CLASS = clsx(
-  'rounded px-3 py-1.5 transition-colors',
-  'focus-visible:outline focus-visible:outline-1 focus-visible:outline-focus-ring',
-  'disabled:pointer-events-none disabled:opacity-50',
-);
-
-/** The Type box, over the top of the terminal. */
+/** The Type box, over the top of the terminal. It owns its text, so a
+ *  keystroke re-renders only the box; unmounting it discards both. */
 function Composer({
   fieldRef,
   top,
-  draft,
-  password,
   disabled,
-  onDraftChange,
-  onPasswordChange,
   onCancel,
   onSend,
 }: {
   fieldRef: RefObject<HTMLTextAreaElement | HTMLInputElement | null>;
   top: number;
-  draft: string;
-  password: boolean;
   disabled: boolean;
-  onDraftChange: (draft: string) => void;
-  onPasswordChange: (password: boolean) => void;
   onCancel: () => void;
-  onSend: () => void;
+  onSend: (text: string, password: boolean) => void;
 }) {
+  const [draft, setDraft] = useState('');
+  const [password, setPassword] = useState(false);
+  const send = () => onSend(draft, password);
   // 16px text: iOS zooms the page into any field set smaller.
   const fieldClass = 'block w-full resize-none rounded border border-border bg-app-bg p-2 font-mono text-base text-foreground outline-none focus:border-focus-ring';
   return (
@@ -381,11 +362,11 @@ function Composer({
           disabled={disabled}
           autoComplete="off"
           enterKeyHint="send"
-          onChange={(event) => onDraftChange(event.currentTarget.value)}
+          onChange={(event) => setDraft(event.currentTarget.value)}
           onKeyDown={(event) => {
             if (event.key !== 'Enter' || isComposingKey(event.nativeEvent)) return;
             event.preventDefault();
-            onSend();
+            send();
           }}
           className={fieldClass}
         />
@@ -397,7 +378,7 @@ function Composer({
           value={draft}
           disabled={disabled}
           autoCapitalize="off"
-          onChange={(event) => onDraftChange(event.currentTarget.value)}
+          onChange={(event) => setDraft(event.currentTarget.value)}
           className={fieldClass}
         />
       )}
@@ -407,7 +388,12 @@ function Composer({
             type="checkbox"
             checked={password}
             disabled={disabled}
-            onChange={(event) => onPasswordChange(event.currentTarget.checked)}
+            onChange={(event) => {
+              const next = event.currentTarget.checked;
+              // The swapped-in field takes focus inside the tap, as Type's does.
+              flushSync(() => setPassword(next));
+              fieldRef.current?.focus({ preventScroll: true });
+            }}
           />
           Password
         </label>
@@ -415,15 +401,15 @@ function Composer({
           <button
             type="button"
             onClick={onCancel}
-            className={clsx(COMPOSER_BUTTON_CLASS, 'border border-border text-muted hover:bg-app-bg hover:text-foreground')}
+            className={modalActionButton({ tone: 'secondary', class: 'px-3 hover:bg-app-bg' })}
           >
             Cancel
           </button>
           <button
             type="button"
             disabled={disabled || draft.length === 0}
-            onClick={onSend}
-            className={clsx(COMPOSER_BUTTON_CLASS, 'bg-header-active-bg text-header-active-fg')}
+            onClick={send}
+            className={modalActionButton({ tone: 'primary', class: 'px-3' })}
           >
             Send
           </button>
@@ -460,7 +446,7 @@ function SessionsPane({
   const groups = groupSessions(sessions);
 
   return (
-    <div className="h-full overflow-auto p-2">
+    <div className="p-2">
       {groups.length < 2 ? rows(sessions) : (
         <div className="grid gap-3">
           {groups.map(({ group, items }, index) => (
@@ -579,10 +565,12 @@ function isPortaledTarget(event: SyntheticEvent<HTMLElement>): boolean {
   return !event.currentTarget.contains(event.target as Node);
 }
 
-/** The confirm dialog and pane chrome (`MobileWall`'s header) sit inside the
- *  host but are not pane content: their buttons take their own presses. */
-function isPaneChromeTarget(target: EventTarget | null): boolean {
-  return target instanceof Element && target.closest('[data-mobile-gesture-dialog], [data-mobile-pane-chrome]') !== null;
+/** A control inside the host (`MobileWall`'s header buttons) or the confirm
+ *  dialog is not pane content: it takes its own press. Fields are left out:
+ *  xterm's offscreen helper textarea is never what a press lands on. */
+function isHostControlTarget(target: EventTarget | null): boolean {
+  return target instanceof Element
+    && target.closest('button, a[href], select, [role="button"], [data-mobile-gesture-dialog]') !== null;
 }
 
 function consumeNativeTouchOrScrollEvent(event: Event): void {
@@ -625,10 +613,10 @@ function dispatchMouseFromPointer(
   target.dispatchEvent(mouseEvent);
 }
 
-/**
- * A rAF plus a set of delayed retries, cancelled as one. Focus and blur each
- * own one because each supersedes the other's pending retries.
- */
+const NO_KEYBOARD_INSET = { top: 0, pan: 0 };
+
+/** A rAF plus a set of delayed retries, cancelled as one; a new run
+ *  supersedes the last. */
 class RetrySchedule {
   private timers: number[] = [];
   private frame: number | null = null;
@@ -694,9 +682,8 @@ export function MobileTerminalUi({
   const [gestureState, setGestureState] = useState<MobileGestureTrackingState>(MOBILE_GESTURE_IDLE_STATE);
   const [pendingGestureConfirmation, setPendingGestureConfirmation] = useState<MobileGestureConfirmationAction | null>(null);
   const [composing, setComposing] = useState(false);
-  const [draft, setDraft] = useState('');
-  const [password, setPassword] = useState(false);
-  const [keyboardInset, setKeyboardInset] = useState({ top: 0, pan: 0 });
+  const [keyboardInset, setKeyboardInset] = useState(NO_KEYBOARD_INSET);
+  const inset = composing ? keyboardInset : NO_KEYBOARD_INSET;
 
   const stopEdgeScroll = useCallback(() => {
     edgeScrollRef.current = null;
@@ -741,21 +728,15 @@ export function MobileTerminalUi({
 
   /** Inside the tap's own handler: iOS opens its keyboard only for a focus a
    *  user gesture makes, so the field is committed and focused in one turn. */
-  const openComposer = useCallback((nextPassword: boolean) => {
+  const openComposer = useCallback(() => {
     if (!interactive) return;
-    blurRetries.cancel();
-    flushSync(() => {
-      setComposing(true);
-      setPassword(nextPassword);
-    });
+    flushSync(() => setComposing(true));
     composerFieldRef.current?.focus({ preventScroll: true });
-  }, [blurRetries, interactive]);
+  }, [interactive]);
 
   const closeComposer = useCallback(() => {
     composerFieldRef.current?.blur();
     setComposing(false);
-    setDraft('');
-    setPassword(false);
   }, []);
 
   const configurePaneTextInputs = useCallback(() => {
@@ -797,18 +778,16 @@ export function MobileTerminalUi({
 
   /** A password goes as typed; anything else takes the paste path, bracketed
    *  when the app asked, so a TUI never reads the Enter after it as pasted. */
-  const sendDraft = useCallback(() => {
-    const text = draft;
-    const raw = password || !onPaste;
+  const sendDraft = useCallback((text: string, password: boolean) => {
     closeComposer();
     if (!interactive || !text) return;
-    if (raw) {
+    if (password || !onPaste) {
       sendInput(text);
       sendInput(MOBILE_TERMINAL_KEY_SEQUENCES.enter);
       return;
     }
     void Promise.resolve(onPaste(text)).then(() => sendInput(MOBILE_TERMINAL_KEY_SEQUENCES.enter));
-  }, [closeComposer, draft, interactive, onPaste, password, sendInput]);
+  }, [closeComposer, interactive, onPaste, sendInput]);
 
   // A physical keyboard types straight into the terminal while the composer is
   // closed. No soft keyboard reaches here: one opens only for a focused field.
@@ -835,29 +814,20 @@ export function MobileTerminalUi({
   // the terminal slides up until they sit just above it, and the composer stays
   // at the top of what is visible. A resize would reflow the Session's TUI.
   useEffect(() => {
-    const viewport = window.visualViewport;
     const root = rootRef.current;
     const host = terminalHostRef.current;
-    if (!composing || !viewport || !root || !host) {
-      setKeyboardInset({ top: 0, pan: 0 });
-      return;
-    }
+    if (!composing || !root || !host) return;
     const update = () => {
+      const visible = overlayViewportBounds();
       const rootTop = root.getBoundingClientRect().top;
-      const visibleBottom = viewport.offsetTop + viewport.height;
       const hostBottom = rootTop + host.offsetTop + host.offsetHeight;
-      setKeyboardInset({
-        top: Math.max(0, viewport.offsetTop - rootTop),
-        pan: Math.max(0, Math.round(hostBottom - visibleBottom)),
-      });
+      const top = Math.max(0, Math.round(visible.top - rootTop));
+      const pan = Math.max(0, Math.round(hostBottom - visible.bottom));
+      // iOS fires these through the keyboard's whole animation; most change nothing.
+      setKeyboardInset((prev) => (prev.top === top && prev.pan === pan ? prev : { top, pan }));
     };
     update();
-    viewport.addEventListener('resize', update);
-    viewport.addEventListener('scroll', update);
-    return () => {
-      viewport.removeEventListener('resize', update);
-      viewport.removeEventListener('scroll', update);
-    };
+    return subscribeOverlayViewport(update);
   }, [composing]);
 
   const executeGestureAction = useCallback((action: MobileGestureAction | undefined) => {
@@ -974,11 +944,7 @@ export function MobileTerminalUi({
   const handlePanePointerDownCapture = useCallback((event: PointerEvent<HTMLDivElement>) => {
     // A second finger may stop a coast, but must not steal a live edge drag.
     if (edgeMomentumFrameRef.current !== null) stopEdgeScroll();
-    if (isPortaledTarget(event)) {
-      pendingTapRef.current = null;
-      return;
-    }
-    if (isPaneChromeTarget(event.target)) {
+    if (isPortaledTarget(event) || isHostControlTarget(event.target)) {
       pendingTapRef.current = null;
       return;
     }
@@ -1181,7 +1147,7 @@ export function MobileTerminalUi({
           'touch-none',
           terminalClassName,
         )}
-        style={keyboardInset.pan ? { transform: `translateY(-${keyboardInset.pan}px)` } : undefined}
+        style={inset.pan ? { transform: `translateY(-${inset.pan}px)` } : undefined}
         onPointerDownCapture={handlePanePointerDownCapture}
         onPointerMoveCapture={handlePanePointerMoveCapture}
         onPointerUpCapture={handlePanePointerUpCapture}
@@ -1206,18 +1172,14 @@ export function MobileTerminalUi({
         composing={composing}
         disabled={!interactive}
         onSelect={setTouchMode}
-        onType={() => (composing ? closeComposer() : openComposer(false))}
+        onType={composing ? closeComposer : openComposer}
       />
 
       {composing ? (
         <Composer
           fieldRef={composerFieldRef}
-          top={keyboardInset.top}
-          draft={draft}
-          password={password}
+          top={inset.top}
           disabled={!interactive}
-          onDraftChange={setDraft}
-          onPasswordChange={openComposer}
           onCancel={closeComposer}
           onSend={sendDraft}
         />

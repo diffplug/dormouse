@@ -31,7 +31,6 @@ import type { RemoteWebSocket } from '../ws';
 import { disposeAllSessions } from '../../lib/terminal-registry';
 import { PocketWall } from '../pocket-app/PocketWall';
 import { PK, pkButton } from '../pocket-app/pocket-chrome';
-import { applyPocketTheme } from '../pocket-app/pocket-theme';
 import { mountRemoteWall, type RemoteWallClient } from '../pocket-app/remote-wall';
 import { PairingCodeView, PocketScreen, TransportIndicator, Waiting } from '../pocket-app/views';
 
@@ -414,7 +413,7 @@ function OneTimeWall({
         </button>
       </header>
       <div className={PK.wallHost}>
-        <PocketWall adapter={adapter} onError={onEnd} restoreTheme={applyPocketTheme} persistSettings={false} />
+        <PocketWall adapter={adapter} onError={onEnd} persist={false} />
       </div>
     </div>
   );

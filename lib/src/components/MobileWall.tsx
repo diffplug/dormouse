@@ -189,7 +189,7 @@ function MobileWallHeader({
   const burst = useAlertRingBurst(row, session.episode);
 
   return (
-    <div data-mobile-pane-chrome className="relative flex h-8 shrink-0 items-center gap-1.5 overflow-hidden bg-header-active-bg pl-2 pr-[5px] font-mono text-sm leading-none text-header-active-fg">
+    <div className="relative flex h-8 shrink-0 items-center gap-1.5 overflow-hidden bg-header-active-bg pl-2 pr-[5px] font-mono text-sm leading-none text-header-active-fg">
       <div className="flex min-w-0 flex-1 items-center gap-1.5">
         <span className="min-w-0 shrink truncate font-medium">{session.title}</span>
         {session.secondary ? (

@@ -250,15 +250,15 @@ describe('MobileTerminalUi physical keyboard', () => {
   });
 });
 
-describe('MobileTerminalUi pane chrome', () => {
-  // `MobileWall`'s header sits inside the host; a press on it is not pane content.
+describe('MobileTerminalUi controls inside the host', () => {
+  // `MobileWall`'s header sits inside the host; a press on its buttons is not pane content.
   it.each<MobileTerminalTouchMode>(['gestures', 'cursor'])('leaves a header button its own press in %s mode', (mode) => {
     const acknowledge = vi.spyOn(activity, 'acknowledgeSession');
     const { container } = renderUi({
       activeTouchMode: mode,
       cursorTouchAvailable: true,
       sessions: [{ id: 'pane-a', title: 'shell', active: true, episode: null }],
-      terminal: <div data-mobile-pane-chrome><button type="button">Minimize</button></div>,
+      terminal: <header><button type="button">Minimize</button></header>,
     });
     const button = [...container.querySelectorAll('button')].find((b) => b.textContent === 'Minimize')!;
     const down = pointerEvent('pointerdown');

@@ -1,22 +1,13 @@
 import { useCallback, useRef, useState } from 'react';
 import { CaretDownIcon } from '@phosphor-icons/react';
 import type { DormouseTheme } from '../lib/themes';
-import {
-  applyTheme,
-  getAllThemes,
-  getBundledThemes,
-  getTheme,
-  removeInstalledTheme,
-  restoreActiveTheme,
-  setActiveThemeId,
-} from '../lib/themes';
 import { ThemeDebuggerDialog } from './ThemeDebugger';
 import { ThemeList } from './theme-picker/ThemeList';
 import { getThemePreview, ThemePreview } from './theme-picker/ThemePreview';
 import { ThemeStoreDialog } from './theme-picker/ThemeStoreDialog';
 import { useAnchoredMenu, useCloseOnOutsideAndEscape } from './use-anchored-menu';
 import { OVERLAY_MAX_HEIGHT, POPUP_SURFACE_CLASS, themePreviewButton } from './design';
-import { useBrowserLayoutEffect } from '../lib/use-browser-layout-effect';
+import { useThemeChoice } from './theme-picker/use-theme-choice';
 
 /**
  * `compact` is the free-floating trigger used by the website's Pocket
@@ -71,13 +62,7 @@ export function ThemePicker({
   onPick,
   offerStore = false,
 }: ThemePickerProps) {
-  // The server and first client render must agree. Installed themes and the
-  // active id come from browser storage, so reading either here leaves React
-  // with an attribute mismatch it deliberately will not patch during hydration.
-  // `getBundledThemes` is the same module array every call, so both initializers
-  // are stable without a ref to latch them.
-  const [themes, setThemes] = useState(getBundledThemes);
-  const [activeId, setActiveId] = useState(() => themes[0]?.id ?? '');
+  const { themes, activeId, select, uninstall, refresh: refreshThemes } = useThemeChoice();
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const [storeOpen, setStoreOpen] = useState(false);
   const [debuggerOpen, setDebuggerOpen] = useState(false);
@@ -109,33 +94,11 @@ export function ThemePicker({
   const closeDropdown = useCallback(() => setOpen(false), [setOpen]);
   useCloseOnOutsideAndEscape(open, rootRef, closeDropdown);
 
-  const refreshThemes = useCallback(() => {
-    setThemes(getAllThemes());
-    const theme = restoreActiveTheme();
-    if (theme) setActiveId(theme.id);
-  }, []);
-
-  // Hosts restore the visible body theme at boot. The picker separately
-  // reconciles its stored rows and selected value after hydration so its first
-  // markup stays deterministic without leaving its label or swatch stale.
-  useBrowserLayoutEffect(refreshThemes, [refreshThemes]);
-
   const selectTheme = (id: string) => {
-    const theme = getTheme(id);
+    const theme = select(id);
     if (!theme) return;
-    setActiveThemeId(id);
-    setActiveId(id);
-    applyTheme(theme);
     setOpen(false);
     onPick?.(theme);
-  };
-
-  const deleteTheme = (theme: DormouseTheme) => {
-    if (theme.origin.kind !== 'installed') return;
-    removeInstalledTheme(theme.id);
-    // Re-resolves the active theme through the host default, which is what
-    // uninstalling the *active* theme needs; a no-op re-apply otherwise.
-    refreshThemes();
   };
 
   return (
@@ -171,7 +134,7 @@ export function ThemePicker({
             themes={themes}
             activeId={activeId}
             onSelect={selectTheme}
-            onUninstall={deleteTheme}
+            onUninstall={uninstall}
           />
 
           <div className="shrink-0 border-t border-border p-1">

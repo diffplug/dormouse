@@ -39,13 +39,13 @@ Event routing, by mode (rationale):
 * **Gestures / Select** — pane-content `wheel` and `touchmove` are consumed, except Gestures mode's synthesized edge-scroll wheels ([Edge scrolling](#edge-scrolling)).
 * **Mouse** — touch events are consumed instead, and primary touch and pen pointers synthesize left-button `mousedown` / `mousemove` / `mouseup` on the element under the pointer. `wheel` still reaches the terminal, and real mouse pointers fall through untouched.
 
-**Never treat a portaled descendant or pane chrome as pane content**: a press outside the host's DOM, or inside a `data-mobile-pane-chrome` element (`MobileWall`'s header), starts no touch mode or tap, so the header's buttons take their own presses.
+**Never treat a portaled descendant or a control as pane content**: a press outside the host's DOM, or on a button or link inside it (`MobileWall`'s header), starts no touch mode or tap, so the control takes its own press.
 
 **Must release a tracked Mouse-mode press on pointerup or cancel even after leaving Mouse mode.** Cancellation releases on the last target.
 
 **Gesture mode also takes primary mouse/trackpad clicks**, which open the radial menu and **must never reach xterm or the pane** for focus, selection, or pane interaction (rationale). **Non-primary mouse buttons are ignored**, so their browser or host behavior continues.
 
-Source of truth: `TOUCH_MODES`, `paneMouseOverride`, `isPortaledTarget`, and `isPaneChromeTarget` in `lib/src/components/MobileTerminalUi.tsx`; per-pane wiring in `lib/src/remote/pocket-app/PocketWall.tsx` and `website/src/components/PocketTerminalExperience.tsx`.
+Source of truth: `TOUCH_MODES`, `paneMouseOverride`, `isPortaledTarget`, and `isHostControlTarget` in `lib/src/components/MobileTerminalUi.tsx`; per-pane wiring in `lib/src/remote/pocket-app/PocketWall.tsx` and `website/src/components/PocketTerminalExperience.tsx`.
 
 ## Edge scrolling
 
@@ -105,7 +105,7 @@ The `MobileWall` header's Minimize asks the consumer to show the Sessions screen
 * **The font size applies to every terminal in the page, live ones refit**, so a remote Session's PTY resizes with it; **must hand it back to the theme when the composition unmounts**.
 * **Must save Settings choices only when the consumer persists them**; the one-time page does not (`docs/specs/one-time.md` -> "Phone page").
 
-Source of truth: `SessionsScreen` in `lib/src/components/MobileTerminalUi.tsx`; `MobileSettings` in `lib/src/components/MobileSettings.tsx`; `useMobileFontSize` in `lib/src/lib/mobile-font-size.ts`; `setTerminalFontSize` in `lib/src/lib/terminal-lifecycle.ts`.
+Source of truth: `SessionsScreen` in `lib/src/components/MobileTerminalUi.tsx`; `MobileSettings` in `lib/src/components/MobileSettings.tsx`; `useThemeChoice` in `lib/src/components/theme-picker/use-theme-choice.ts`; `useMobileFontSize` in `lib/src/lib/mobile-font-size.ts`; `setTerminalFontSize` in `lib/src/lib/terminal-lifecycle.ts`.
 
 ## Keyboard focus invariant
 
