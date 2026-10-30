@@ -530,13 +530,13 @@ export class BurrowService {
   #oneTimeSeen: { runtime: OneTimeRuntime; label?: string; since?: number } | null = null;
   /**
    * Revocations a running Burrow made whose save failed, by `burrowId`: the
-   * records as they read before, and when. Every ACL this service reads from
+   * target, and when the save failed. Every ACL this service reads from
    * the store has them applied ({@link #loadAcl}) — a network-policy change
    * restarts the runtime from the store, and must not re-admit a phone the
    * person just cut off — until an ACL save for that Burrow succeeds, which
    * carries them. Memory only: quitting Dormouse first undoes them.
    */
-  readonly #unsavedRevocations = new Map<string, Array<{ record: BurrowAclRecord; at: number }>>();
+  readonly #unsavedRevocations = new Map<string, Array<{ target: RevocationTarget; at: number }>>();
 
   constructor(options: BurrowServiceOptions) {
     this.#store = options.store;
@@ -1088,9 +1088,9 @@ export class BurrowService {
   }
 
   /**
-   * The stored ACL with every {@link #unsavedRevocations} entry applied: the
-   * exact record it revoked, matched by both identities and its approval time,
-   * so a pairing approved since is never touched.
+   * The stored ACL with every {@link #unsavedRevocations} entry applied: each
+   * active record its target names that was approved by the time the save
+   * failed, so a pairing approved since is never touched.
    */
   async #loadAcl(burrowId: string): Promise<BurrowAclRecord[]> {
     const records = await this.#store.loadAcl(burrowId);
@@ -1099,10 +1099,11 @@ export class BurrowService {
     return records.map((record) => {
       if (record.revokedAt !== null) return record;
       const held = unsaved.find(
-        ({ record: revoked }) =>
-          revoked.clientStaticPublicKey === record.clientStaticPublicKey &&
-          revoked.passkeyCredentialId === record.passkeyCredentialId &&
-          revoked.approvedAt === record.approvedAt,
+        ({ target, at }) =>
+          record.approvedAt <= at &&
+          ('clientStaticPublicKey' in target
+            ? record.clientStaticPublicKey === target.clientStaticPublicKey
+            : record.passkeyCredentialId === target.passkeyCredentialId),
       );
       return held ? { ...record, revokedAt: held.at } : record;
     });
@@ -1186,19 +1187,13 @@ export class BurrowService {
     const burrow = this.#burrow;
     let revoked: BurrowAclRecord[];
     if (burrow) {
-      // What the runtime will revoke, read before it does: a save that fails
-      // leaves these to hold over every later runtime of this process.
-      const named = burrow.activeRecords.filter((record) =>
-        'clientStaticPublicKey' in target
-          ? record.clientStaticPublicKey === target.clientStaticPublicKey
-          : record.passkeyCredentialId === target.passkeyCredentialId,
-      );
       try {
         revoked = await burrow.revoke(target, by);
       } catch (error) {
-        const at = this.#now();
+        // Taken after the failure, so it covers every record the runtime
+        // revoked, an approval queued ahead of the revocation included.
         const held = this.#unsavedRevocations.get(enrollment.burrowId) ?? [];
-        this.#unsavedRevocations.set(enrollment.burrowId, [...held, ...named.map((record) => ({ record, at }))]);
+        this.#unsavedRevocations.set(enrollment.burrowId, [...held, { target, at: this.#now() }]);
         const detail = error instanceof Error ? error.message : String(error);
         throw new Error(
           `The phone is disconnected and refused until Dormouse quits, but the revocation could not be saved: ${detail}`,

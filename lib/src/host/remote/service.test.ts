@@ -1798,19 +1798,28 @@ describe('paired devices and revocation', () => {
 
     expect((await command('revokeDevice', { id: phoneId })).error).toMatch(/refused until Dormouse quits.*disk full/);
     expect(store.acl[BURROW_ID]!.every((record) => record.revokedAt === null)).toBe(true);
+    // The hold covers every record of the target approved by the failure — one
+    // an approval queued ahead of the revocation committed included — and none
+    // approved after it.
+    const repaired = { ...PHONE, passkeyCredentialId: 'cred-repaired', approvedAt: 2 };
+    const later = { ...PHONE, passkeyCredentialId: 'cred-later', approvedAt: Date.now() + 60_000 };
+    store.acl[BURROW_ID] = [...store.acl[BURROW_ID]!, repaired, later];
 
     // Nothing and back stops the runtime and builds a new one from the store,
     // which still holds the phone as paired.
     await setPolicy(NOTHING);
     await setPolicy(RELAY_ON);
-    expect((await command('status')).result).toMatchObject({ pairedClients: 1 });
+    expect((await command('status')).result).toMatchObject({ pairedClients: 2 });
     const devices = ((await command('pairedDevices')).result as PairedDevicesResult).devices;
-    expect(devices.map((device) => device.id)).toEqual([deviceIdFor(TABLET.clientStaticPublicKey)]);
+    expect(devices).toMatchObject([
+      { id: phoneId, pairedAt: later.approvedAt },
+      { id: deviceIdFor(TABLET.clientStaticPublicKey) },
+    ]);
 
     // The next save that lands carries it.
     save.mockRestore();
     await command('revokeDevice', { id: deviceIdFor(TABLET.clientStaticPublicKey) });
-    expect(store.acl[BURROW_ID]!.map((record) => record.revokedAt !== null)).toEqual([true, true]);
+    expect(store.acl[BURROW_ID]!.map((record) => record.revokedAt !== null)).toEqual([true, true, true, false]);
   });
 
   it('revokes nothing for an id that names no phone, or none at all', async () => {
