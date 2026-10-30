@@ -2,7 +2,7 @@
 import type { Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { digest } from "@pgstencil/auth/security";
-import { queryDatabase, withClient } from "pgstencil/postgres";
+import { withClient } from "pgstencil/postgres";
 import { isManagedVoiceId, isManagedVoiceToken, parseBearer } from "remote-lib-common";
 import { accountQuery, cookieLogin, type AccountHost } from "./account-gate";
 import { entitledSql } from "./entitlement";
