@@ -265,7 +265,7 @@ Source of truth: `remote-lib-common/src/security/noise.ts`, `isEnrollment` / `pe
 
 ## Future
 
-**Scope: remote-trust-followups** — [Device verification](#device-verification) and [Revocation propagation](#revocation-propagation).
+**Scope: remote-trust-followups** — [Device verification](#device-verification), [Revocation propagation](#revocation-propagation), then [Account-wide devices](#account-wide-devices), which builds on it.
 
 ### Device verification
 
@@ -274,3 +274,23 @@ Source of truth: `remote-lib-common/src/security/noise.ts`, `isEnrollment` / `pe
 ### Revocation propagation
 
 The Relay pushing revocations to Burrows. Today `BurrowAcl.revokeClient` / `revokePasskey` have no callers and no relay frame carries a revocation, so revoking is hand-editing state ([relay.md](./relay.md), Guardrails) — and `BurrowService` hands the `BurrowRuntime` one ACL snapshot for its whole lifetime, so **restarting the Burrow is the entire lever**: it reloads the ACL *and*, by dropping the relay socket, ends every established session. Editing alone changes nothing that is running.
+
+### Account-wide devices
+
+One design with [Revocation propagation](#revocation-propagation), not two: a list nobody can act on and a revocation with no list are halves of one feature. Every stage calls the Burrow's own revocation — one entry point that revokes by record or by passkey credential, ends that record's live sessions, and logs who asked — and none writes the ACL another way.
+
+**The managed identities are the two the model has; nothing merges them into a "device"** (rationale):
+
+| Identity | Held by | Removing it cuts |
+| --- | --- | --- |
+| Passkey | the Relay, per account; synchronized onto many devices ([Passkeys](#passkeys)) | every browser that signs in with it, on every Burrow |
+| ACL record | one Burrow, for one Client static ([Client statics](#client-statics)) | that browser on that Burrow |
+
+One Pocket profile is a record per Burrow, and a phone's tab and its Home Screen install are two profiles. Pocket may mark the records that are its own, from its `KnownBurrowV1`s; nothing else is grouped.
+
+**The Relay will hold no device directory**: no record's label, `deliveryId`, approval time, or a handle derived from its Client static reaches the Relay or is listed to a session ([Burrow Authorization](#burrow-authorization); rationale). The account view is assembled from what each side already holds, in two stages:
+
+1. **Passkey removal reaches the ACL.** Hosted's account page already removes a passkey from the Relay, ending its sessions and sign-ins (`docs/specs/hosted.md` -> "Burrow enrollment"), while every Burrow keeps its records active. On its `burrowToken`, at socket open and on a nudge frame after any removal, the Burrow will send the credential ids its active records hold, and the Relay answer which of them its account no longer holds; the Burrow revokes those, an offline one at its next connection. **A Relay-named revocation may only revoke** — never create, restore, or edit a record — so a lying Relay costs re-pairing, which is availability ([Goals](#goals); rationale).
+2. **Per-record list and revoke from Pocket**, on each online Burrow it is paired with, over protocol-v1 (`docs/specs/remote-api.md` -> "Future"): each record's mapped label, approval time, last seen, and whether it is the caller's, addressed by an index only that response defines, never a static or `deliveryId`. **Revoking takes a fresh presence proof, never a window ride.** An unreachable Burrow is shown as one, stage 1 being the lever that reaches it.
+
+Undecided: whether stage 1's request carries a passkey assertion the Burrow verifies against its own ACL, so the Relay could only withhold one (rationale).
