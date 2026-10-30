@@ -32,7 +32,7 @@ export const ENROLLMENT_POLL_INTERVAL_S = 5;
 // (`website/src/components/HostedPolicyLayout.tsx`), which
 // `hosted/server/tests/policy.test.ts` pins this to. A new version is a new
 // acceptance row, never an edit of an old one.
-export const TERMS_VERSION = "2026-10-28";
+export const TERMS_VERSION = "2026-10-30";
 
 // Where Stripe returns the browser from Checkout and the customer portal: an
 // account page on the account origin.
