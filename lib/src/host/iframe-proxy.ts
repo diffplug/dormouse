@@ -52,6 +52,7 @@
 import { lookup as dnsLookup } from 'dns/promises';
 import * as http from 'http';
 import * as net from 'net';
+import { networkInterfaces } from 'os';
 import { IFRAME_HTTP_ONLY, type IframeProxyResult } from '../lib/platform/iframe-proxy-types';
 import { isForeignOrigin, isLoopbackHost, isOwnOrigin } from './loopback-guard';
 import { createSerialQueue } from './remote/serial-queue';
@@ -66,7 +67,7 @@ import {
   frameAncestorsCsp,
   instrumentHtml,
   isBlockedAddress,
-  isLoopbackAddress,
+  isThisMachineAddress,
   normalizeEmbedderOrigins,
   offOriginRedirectPage,
   timedOutPage,
@@ -111,6 +112,10 @@ export type UpstreamAddress = { address: string; family: number };
  *  it names. Injected by tests; the hosts use the system resolver. */
 export type UpstreamResolver = (hostname: string) => Promise<UpstreamAddress[]>;
 const systemResolver: UpstreamResolver = (hostname) => dnsLookup(hostname, { all: true });
+/** The addresses this host's interfaces hold now. Injected by tests. */
+export type InterfaceAddresses = () => string[];
+const systemInterfaceAddresses: InterfaceAddresses = () =>
+  Object.values(networkInterfaces()).flatMap((entries) => (entries ?? []).map((entry) => entry.address));
 
 /** Host-supplied logger; defaults to a no-op so the module is usable bare. */
 export type ProxyLogger = (message: string) => void;
@@ -140,7 +145,7 @@ interface Grant {
   lastUsed: number;
   /** Held by a lease: no idle TTL, no eviction. */
   leased: boolean;
-  /** Some address it connects to is not loopback: minted, and reused, only
+  /** Some address it connects to is not this machine's: minted, and reused, only
    *  for a request the user allowed (docs/specs/dor-browser.md → "Iframe
    *  External Origins"). */
   external: boolean;
@@ -231,6 +236,7 @@ export async function createIframeProxyUrl(
     embedderOrigins?: unknown;
     lease?: unknown;
     resolve?: UpstreamResolver;
+    interfaceAddresses?: InterfaceAddresses;
     /** The user allowed this target's origin, so an upstream off this machine
      *  may be proxied. Anything but `true` refuses one as `external`. */
     allowExternal?: unknown;
@@ -257,12 +263,13 @@ export async function createIframeProxyUrl(
     return { ok: false, reason: 'scheme', detail: IFRAME_HTTP_ONLY };
   }
   const resolve = opts?.resolve ?? systemResolver;
+  const interfaces = opts?.interfaceAddresses ?? systemInterfaceAddresses;
   const allowExternal = opts?.allowExternal === true;
 
   const lease = opts?.lease === undefined ? undefined : validLease(opts.lease);
   if (opts?.lease !== undefined && !lease) return { ok: false, reason: 'unreachable', detail: 'invalid iframe lease' };
   if (!lease) {
-    const minted = await mintGrant(upstream, embedderOrigins, false, resolve, allowExternal);
+    const minted = await mintGrant(upstream, embedderOrigins, false, resolve, interfaces, allowExternal);
     return 'port' in minted ? framedUrl(minted, upstream) : minted;
   }
   const key = leaseKey(lease);
@@ -275,7 +282,7 @@ export async function createIframeProxyUrl(
     leases.set(key, held = { ...lease, acquire: createSerialQueue() });
   }
   const entry = held;
-  return entry.acquire(() => acquireLeased(entry, key, upstream, embedderOrigins, resolve, allowExternal));
+  return entry.acquire(() => acquireLeased(entry, key, upstream, embedderOrigins, resolve, interfaces, allowExternal));
 }
 
 const CLOSED_VIEW: IframeProxyResult = { ok: false, reason: 'unreachable', detail: 'the embedded view was closed' };
@@ -286,7 +293,7 @@ const CLOSED_VIEW: IframeProxyResult = { ok: false, reason: 'unreachable', detai
  *  its place. One released meanwhile mints nothing. */
 async function acquireLeased(
   lease: Lease, key: string, upstream: URL, embedderOrigins: string[] | null, resolve: UpstreamResolver,
-  allowExternal: boolean,
+  interfaces: InterfaceAddresses, allowExternal: boolean,
 ): Promise<IframeProxyResult> {
   const released = () => leases.get(key) !== lease;
   if (released()) return CLOSED_VIEW;
@@ -298,7 +305,7 @@ async function acquireLeased(
     closeGrant(lease.grant);
     lease.grant = undefined;
   }
-  const minted = await mintGrant(upstream, embedderOrigins, true, resolve, allowExternal);
+  const minted = await mintGrant(upstream, embedderOrigins, true, resolve, interfaces, allowExternal);
   if (!('port' in minted)) return minted;
   if (released()) {
     closeGrant(minted);
@@ -352,13 +359,15 @@ function pinnedLookup(addresses: readonly UpstreamAddress[]): net.LookupFunction
 }
 
 async function mintGrant(
-  upstream: URL, embedderOrigins: string[] | null, leased: boolean, resolve: UpstreamResolver, allowExternal: boolean,
+  upstream: URL, embedderOrigins: string[] | null, leased: boolean, resolve: UpstreamResolver,
+  interfaces: InterfaceAddresses, allowExternal: boolean,
 ): Promise<Grant | Refusal> {
   const pinned = await pinAddresses(upstream, resolve);
   if (!Array.isArray(pinned)) return pinned;
-  // Local is where the grant will connect — every pinned address — never what
-  // the name looks like.
-  const external = !pinned.every(({ address }) => isLoopbackAddress(address));
+  // Local is where the grant will connect — every pinned address on this
+  // machine — never what the name looks like.
+  const own = interfaces();
+  const external = !pinned.every(({ address }) => isThisMachineAddress(address, own));
   if (external && !allowExternal) return EXTERNAL_REFUSED;
   const now = Date.now();
   sweepGrants(now);

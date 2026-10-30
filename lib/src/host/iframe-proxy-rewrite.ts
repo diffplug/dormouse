@@ -285,14 +285,27 @@ export function isBlockedAddress(hostname: string): boolean {
   return v4 !== null && v4 >= LINK_LOCAL_V4_START && v4 <= LINK_LOCAL_V4_END;
 }
 
-/** Whether a resolved address is this machine's loopback: 127.0.0.0/8 in any
- *  spelling, IPv4-mapped included, or `::1`. Takes an address, never a name —
- *  `localhost` is whatever the resolver says it is. */
-export function isLoopbackAddress(address: string): boolean {
-  const h = address.replace(/^\[|\]$/g, '').toLowerCase();
-  if (h === '::1') return true;
+// One spelling per address: an IPv4 one, mapped into IPv6 or not, as its
+// number; any other without brackets or a zone, lowercased.
+function addressKey(address: string): string {
+  const h = address.replace(/^\[|\]$/g, '').replace(/%.*$/, '').toLowerCase();
   const v4 = ipv4Value(h);
-  return v4 !== null && v4 >>> 24 === 127;
+  return v4 === null ? h : `v4:${v4}`;
+}
+
+/**
+ * Whether a connection to a resolved address reaches this machine: loopback
+ * (127.0.0.0/8, `::1`), the unspecified address (`0.0.0.0`, `::`, which a
+ * server bound to every interface prints), or one of `interfaceAddresses`, the
+ * addresses this host's own interfaces hold (a LAN, bridge, or tailnet address
+ * a server bound alone). Takes an address, never a name — `localhost` is
+ * whatever the resolver says it is. IPv4-mapped spellings count as their IPv4.
+ */
+export function isThisMachineAddress(address: string, interfaceAddresses: readonly string[]): boolean {
+  const key = addressKey(address);
+  if (key === '::1' || key === '::' || key === 'v4:0') return true;
+  if (key.startsWith('v4:') && Number(key.slice(3)) >>> 24 === 127) return true;
+  return interfaceAddresses.some((own) => addressKey(own) === key);
 }
 
 // --- Served error / diagnostic pages ----------------------------------------

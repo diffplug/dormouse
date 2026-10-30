@@ -223,17 +223,22 @@ describe('createIframeProxyUrl â€” an upstream off this machine needs the userâ€
   const answering = (...addresses: string[]) => async () =>
     addresses.map((address) => ({ address, family: net.isIPv6(address) ? 6 : 4 }));
 
-  it('judges local by every resolved address, never by the name', async () => {
+  it('judges local by every resolved address reaching this machine, never by the name', async () => {
     const port = await upstream((_q, s) => { s.writeHead(204); s.end(); });
-    // A name that looks remote but resolves only to loopback is local.
-    for (const loopback of [['127.0.0.1'], ['127.8.9.10'], ['::1'], ['127.0.0.1', '::1'], ['::ffff:127.0.0.1']]) {
-      expect(await createIframeProxyUrl(`http://devbox.example:${port}/`, { ...NO_LOG, resolve: answering(...loopback) }))
-        .toMatchObject({ ok: true });
+    // The addresses this host's interfaces hold, as `os.networkInterfaces()` lists them.
+    const interfaceAddresses = () => ['127.0.0.1', '::1', '192.168.7.40', 'fd7a:115c:a1e0::1', 'fe80::1%en0'];
+    const ask = (host: string, ...addresses: string[]) =>
+      createIframeProxyUrl(`http://${host}:${port}/`, { ...NO_LOG, resolve: answering(...addresses), interfaceAddresses });
+    // A name that looks remote but resolves only to this machine is local:
+    // loopback, the unspecified address a server bound to every interface
+    // prints, or an address one of its own interfaces holds.
+    for (const local of [['127.0.0.1'], ['127.8.9.10'], ['::1'], ['127.0.0.1', '::1'], ['::ffff:127.0.0.1'],
+      ['0.0.0.0'], ['::'], ['192.168.7.40'], ['::ffff:192.168.7.40'], ['FD7A:115C:A1E0::1'], ['127.0.0.1', '192.168.7.40']]) {
+      expect(await ask('devbox.example', ...local)).toMatchObject({ ok: true });
     }
-    // A loopback-looking name with any non-loopback answer is not.
-    for (const remote of [['10.0.0.5'], ['192.168.1.20'], ['127.0.0.1', '192.0.2.1'], ['2001:db8::1']]) {
-      expect(await createIframeProxyUrl(`http://localhost:${port}/`, { ...NO_LOG, resolve: answering(...remote) }))
-        .toMatchObject({ ok: false, reason: 'external' });
+    // A loopback-looking name with any answer off this machine is not.
+    for (const remote of [['10.0.0.5'], ['192.168.7.41'], ['127.0.0.1', '192.0.2.1'], ['2001:db8::1']]) {
+      expect(await ask('localhost', ...remote)).toMatchObject({ ok: false, reason: 'external' });
     }
   });
 

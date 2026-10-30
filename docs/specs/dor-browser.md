@@ -293,7 +293,7 @@ Source of truth: `lib/src/components/wall/IframePanel.tsx`, `lib/src/host/iframe
 
 ### Iframe External Origins
 
-An upstream is local when every address it resolved to at mint is loopback (127.0.0.0/8, IPv4-mapped included, or `::1`); its name never counts.
+An upstream is local when every address it resolved to at mint reaches this machine: loopback (127.0.0.0/8, `::1`), `0.0.0.0`, `::`, or an address this host's interfaces hold; its name never counts.
 
 - A non-local upstream is refused (`external`) unless the request carries `allowExternal`, sent only for an origin on the panel's allowlist (`docs/specs/security-local.md` -> "Browser panes").
 - The allowlist holds exact origins (scheme, host, port) in webview `localStorage`, one per host install, each removable in Settings → General. **Must re-ask the host when the pane's origin is allowed or removed**, so a removal closes an open preview.
