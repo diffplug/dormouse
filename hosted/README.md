@@ -230,11 +230,11 @@ Never edit a row once its notices have gone out; schedule a further change as a 
 A withdrawal or account closure is stamped settled only once every payment it refunds is refunded. Stripe cannot refund a payment it did not collect: an invoice marked paid out of band, or paid by a payment record. The account Worker refunds the rest and leaves the withdrawal or closure unsettled, and its cron keeps retrying it and failing, naming the invoice and the amount, for as long as it stays unsettled. Watch the account Worker's Cron Events for that.
 
 1. Refund the named amount to the customer the way it was paid, outside Stripe.
-2. Mark it settled as the migration role, by the withdrawal's id or the closed account's user id the error names:
+2. As the migration role, mark a withdrawal settled by the id the error names; for a closure, drop the subscription id the error names from it, and the cron's next pass refunds any other subscription the closure ended and stamps it settled once none is left:
 
    ```sql
    UPDATE dormouse_withdrawals SET "settledAt" = now() WHERE id = '<withdrawal id>';
-   UPDATE dormouse_account_closures SET "settledAt" = now() WHERE "userId" = '<user id>';
+   UPDATE dormouse_account_closures SET "canceledSubscriptions" = array_remove("canceledSubscriptions", '<subscription id>') WHERE '<subscription id>' = ANY ("canceledSubscriptions") AND "settledAt" IS NULL;
    ```
 
 ## Acknowledgement by hand

@@ -982,14 +982,23 @@ test("a payment Stripe holds by its charge is refunded by it; one paid outside S
   // refunding nothing twice and never stamping them settled.
   for (const days of [1, 31]) {
     f.time.advanceMilliseconds(days * DAY_MS);
-    await expect(resyncBilling(f.setup, f.database.url, origin, f.mail)).rejects.toThrow(AggregateError);
+    const failure = await resyncBilling(f.setup, f.database.url, origin, f.mail).catch((e: unknown) => e);
+    expect(failure).toBeInstanceOf(AggregateError);
+    // The closure's error names the subscription, which hosted/README.md's statement takes.
+    expect((failure as AggregateError).errors.map(String).join("\n")).toContain(`Closure ${monthly.id}: paid outside Stripe`);
     expect(f.refunds).toHaveLength(2);
     expect(await settled()).toEqual([false, false]);
   }
-  // The operator refunds them by hand and marks them settled; the cron then passes.
+  // The operator refunds them by hand and clears them, as hosted/README.md says;
+  // the cron then passes and stamps the closure settled itself.
   await f.sql(`UPDATE dormouse_withdrawals SET "settledAt" = now() WHERE id = $1`, [id]);
-  await f.sql(`UPDATE dormouse_account_closures SET "settledAt" = now() WHERE "userId" = $1`, [closing.id]);
+  await f.sql(
+    `UPDATE dormouse_account_closures SET "canceledSubscriptions" = array_remove("canceledSubscriptions", $1)
+    WHERE $1 = ANY ("canceledSubscriptions") AND "settledAt" IS NULL`,
+    [monthly.id],
+  );
   await resyncBilling(f.setup, f.database.url, origin, f.mail);
+  expect(await settled()).toEqual([true, true]);
 });
 
 test("the cron retries unsettled withdrawals and closures however old, the least recently tried first", async ({
