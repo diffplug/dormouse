@@ -528,6 +528,15 @@ export class BurrowService {
    * label it confirmed, and since when it was connected.
    */
   #oneTimeSeen: { runtime: OneTimeRuntime; label?: string; since?: number } | null = null;
+  /**
+   * Revocations a running Burrow made whose save failed, by `burrowId`: the
+   * records as they read before, and when. Every ACL this service reads from
+   * the store has them applied ({@link #loadAcl}) — a network-policy change
+   * restarts the runtime from the store, and must not re-admit a phone the
+   * person just cut off — until an ACL save for that Burrow succeeds, which
+   * carries them. Memory only: quitting Dormouse first undoes them.
+   */
+  readonly #unsavedRevocations = new Map<string, Array<{ record: BurrowAclRecord; at: number }>>();
 
   constructor(options: BurrowServiceOptions) {
     this.#store = options.store;
@@ -1075,7 +1084,34 @@ export class BurrowService {
     if (this.#burrow) return this.#burrow.activeRecords;
     const enrollment = this.#enrollment;
     if (!enrollment) return [];
-    return (await this.#store.loadAcl(enrollment.burrowId)).filter((record) => record.revokedAt === null);
+    return (await this.#loadAcl(enrollment.burrowId)).filter((record) => record.revokedAt === null);
+  }
+
+  /**
+   * The stored ACL with every {@link #unsavedRevocations} entry applied: the
+   * exact record it revoked, matched by both identities and its approval time,
+   * so a pairing approved since is never touched.
+   */
+  async #loadAcl(burrowId: string): Promise<BurrowAclRecord[]> {
+    const records = await this.#store.loadAcl(burrowId);
+    const unsaved = this.#unsavedRevocations.get(burrowId);
+    if (!unsaved) return records;
+    return records.map((record) => {
+      if (record.revokedAt !== null) return record;
+      const held = unsaved.find(
+        ({ record: revoked }) =>
+          revoked.clientStaticPublicKey === record.clientStaticPublicKey &&
+          revoked.passkeyCredentialId === record.passkeyCredentialId &&
+          revoked.approvedAt === record.approvedAt,
+      );
+      return held ? { ...record, revokedAt: held.at } : record;
+    });
+  }
+
+  /** Save an ACL this service read or a runtime built, which carries every unsaved revocation. */
+  async #saveAcl(burrowId: string, records: readonly BurrowAclRecord[]): Promise<void> {
+    await this.#store.saveAcl(burrowId, records);
+    this.#unsavedRevocations.delete(burrowId);
   }
 
   /** Every paired browser, newest pairing first, with when the access log last saw it. */
@@ -1139,9 +1175,10 @@ export class BurrowService {
   /**
    * {@link revoke}, on `#serialize`. A running Burrow ends the revoked
    * phones' sessions and closes their presence windows before its save
-   * (`BurrowRuntime.revoke`), so a failed save still leaves them refused
-   * until a restart; a stopped one has nothing live, so the save is the whole
-   * of it, and one that fails revokes nothing.
+   * (`BurrowRuntime.revoke`), so a failed save still leaves them refused,
+   * and {@link #unsavedRevocations} keeps them refused across every later
+   * runtime until a save lands; a stopped one has nothing live, so the save is
+   * the whole of it, and one that fails revokes nothing.
    */
   async #revoke(target: RevocationTarget, by: RevocationRequester): Promise<RevokeDeviceResult> {
     const enrollment = this.#enrollment;
@@ -1149,20 +1186,30 @@ export class BurrowService {
     const burrow = this.#burrow;
     let revoked: BurrowAclRecord[];
     if (burrow) {
+      // What the runtime will revoke, read before it does: a save that fails
+      // leaves these to hold over every later runtime of this process.
+      const named = burrow.activeRecords.filter((record) =>
+        'clientStaticPublicKey' in target
+          ? record.clientStaticPublicKey === target.clientStaticPublicKey
+          : record.passkeyCredentialId === target.passkeyCredentialId,
+      );
       try {
         revoked = await burrow.revoke(target, by);
       } catch (error) {
+        const at = this.#now();
+        const held = this.#unsavedRevocations.get(enrollment.burrowId) ?? [];
+        this.#unsavedRevocations.set(enrollment.burrowId, [...held, ...named.map((record) => ({ record, at }))]);
         const detail = error instanceof Error ? error.message : String(error);
         throw new Error(
-          `The phone is disconnected and refused until Dormouse restarts, but the revocation could not be saved: ${detail}`,
+          `The phone is disconnected and refused until Dormouse quits, but the revocation could not be saved: ${detail}`,
         );
       }
     } else {
-      const acl = BurrowAcl.fromRecords(enrollment.burrowId, await this.#store.loadAcl(enrollment.burrowId), {
+      const acl = BurrowAcl.fromRecords(enrollment.burrowId, await this.#loadAcl(enrollment.burrowId), {
         now: this.#now,
       });
       revoked = revokeTarget(acl, target);
-      if (revoked.length > 0) await this.#store.saveAcl(enrollment.burrowId, acl.records());
+      if (revoked.length > 0) await this.#saveAcl(enrollment.burrowId, acl.records());
       const at = this.#now();
       for (const record of firstPerClientStatic(revoked)) {
         this.#logAccess({
@@ -1579,7 +1626,7 @@ export class BurrowService {
     }
     // Seed the synchronous ACL lookup before constructing. Approval awaits the
     // async store before publishing that record or telling the Client it paired.
-    const records = await this.#store.loadAcl(enrollment.burrowId);
+    const records = await this.#loadAcl(enrollment.burrowId);
     // Deactivation can land during that store round trip. Disposal is terminal:
     // constructing here would leave a relay socket alive after its owner had
     // dropped the service and could no longer stop it.
@@ -1591,7 +1638,7 @@ export class BurrowService {
       directPeering: directPeeringFor(policy, this.#createDirectPeer),
       createSession: (opts) => this.#createApiSession(opts),
       loadAcl: () => records,
-      saveAcl: (burrowId, next) => this.#store.saveAcl(burrowId, next),
+      saveAcl: (burrowId, next) => this.#saveAcl(burrowId, next),
       requestApproval: (pending) => this.#enqueuePairing({ ...pending, kind: 'pairing' }),
       dismissApproval: (clientId) => this.#resolvePairing(clientId),
       onInvitationChanged: (inviteId, state, outcome) =>

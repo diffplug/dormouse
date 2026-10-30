@@ -82,7 +82,7 @@ The self-host operator explicitly accepted the fallback tradeoff: same-origin ma
 
 ## Revocation
 
-**Why a revocation acts before it saves, when an approval saves first.** The two fail in opposite directions. An approval that published before a failed save would grant access nothing durable records; a revocation that waited for its save would leave a phone the person just cut off connected for as long as the disk refuses. Acting first fails closed, and the cost of a failed save is a phone that comes back after a restart, which the error says.
+**Why a revocation acts before it saves, when an approval saves first.** The two fail in opposite directions. An approval that published before a failed save would grant access nothing durable records; a revocation that waited for its save would leave a phone the person just cut off connected for as long as the disk refuses. Acting first fails closed, and the cost of a failed save is a phone that comes back once Dormouse quits, which the error says. The service holds the revocation over every runtime it starts meanwhile, since a network-policy change restarts one from the store.
 
 **Why a device id is 64 bits of the static, in hex.** The static is a public key and authorizes nothing, but it is long and stable, so it stays in the service; a prefix is short enough to type into `dor`. A paired phone chooses its own static and could grind one sharing a shorter prefix with another phone's, so that the person revoking one cuts off the other; 64 bits puts that out of reach, and the ambiguity refusal covers what is left. Hex never begins with the `-` a command line reads as a flag, which base64url can.
 

@@ -623,12 +623,12 @@ export const RULES = [
   },
   {
     rule:
-      'Four calls save a Burrow ACL: the runtime\'s approval and revocation, the service\'s wiring to its store, and its stopped-Burrow revocation',
-    security: 'an ACL is saved at four sites only',
+      'Five calls save a Burrow ACL: the runtime\'s approval and revocation, and the service\'s `#saveAcl`, its wiring to the runtime, and its stopped-Burrow revocation',
+    security: 'an ACL is saved at five sites only',
     kind: 'exactly',
     trees: ACL_WRITER_TREES,
     pattern: /\.#?saveAcl\(/g,
-    count: 4,
+    count: 5,
     violationFile: 'vscode-ext/src/burrow-store.ts',
     violation: "\nvoid store.saveAcl('burrow', []);\n",
   },

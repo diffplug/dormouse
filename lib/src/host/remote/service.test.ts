@@ -1790,6 +1790,29 @@ describe('paired devices and revocation', () => {
     expect((await command('status')).result).toMatchObject({ pairedClients: 0 });
   });
 
+  it('keeps a revocation whose save failed across a network-policy restart, until a save lands', async () => {
+    createService({ enrollment: ENROLLMENT, acl: { [BURROW_ID]: [PHONE, TABLET] } });
+    await service.start();
+    sockets[0]!.open();
+    const save = vi.spyOn(store, 'saveAcl').mockRejectedValueOnce(new Error('disk full'));
+
+    expect((await command('revokeDevice', { id: phoneId })).error).toMatch(/refused until Dormouse quits.*disk full/);
+    expect(store.acl[BURROW_ID]!.every((record) => record.revokedAt === null)).toBe(true);
+
+    // Nothing and back stops the runtime and builds a new one from the store,
+    // which still holds the phone as paired.
+    await setPolicy(NOTHING);
+    await setPolicy(RELAY_ON);
+    expect((await command('status')).result).toMatchObject({ pairedClients: 1 });
+    const devices = ((await command('pairedDevices')).result as PairedDevicesResult).devices;
+    expect(devices.map((device) => device.id)).toEqual([deviceIdFor(TABLET.clientStaticPublicKey)]);
+
+    // The next save that lands carries it.
+    save.mockRestore();
+    await command('revokeDevice', { id: deviceIdFor(TABLET.clientStaticPublicKey) });
+    expect(store.acl[BURROW_ID]!.map((record) => record.revokedAt !== null)).toEqual([true, true]);
+  });
+
   it('revokes nothing for an id that names no phone, or none at all', async () => {
     createService({ enrollment: ENROLLMENT, acl: { [BURROW_ID]: [PHONE] } });
     await service.start();
