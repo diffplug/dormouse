@@ -126,7 +126,7 @@ Examples:
         raw: { kind: 'boolean', brief: 'Do not interpret backslash escapes in --text.', optional: true, withNegated: false },
         sequence: { kind: 'parsed', parse: stringParser, brief: 'Send an ordered JSON sequence of text and key events.', optional: true, placeholder: 'json' },
         stdin: { kind: 'boolean', brief: 'Read text from standard input and send it as text.', optional: true, withNegated: false },
-        text: { kind: 'parsed', parse: stringParser, brief: 'Send literal text.', optional: true },
+        text: { kind: 'parsed', parse: stringParser, brief: 'Send text, decoding \\n \\r \\t \\\\ unless --raw.', optional: true },
         workspace: workspaceFlag,
       },
       positional: {

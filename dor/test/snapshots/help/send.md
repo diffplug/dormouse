@@ -39,7 +39,7 @@ FLAGS
      [--raw]        Do not interpret backslash escapes in --text.
      [--sequence]   Send an ordered JSON sequence of text and key events.
      [--stdin]      Read text from standard input and send it as text.
-     [--text]       Send literal text.
+     [--text]       Send text, decoding \n \r \t \\ unless --raw.
      [--workspace]  Workspace to act in, instead of the caller's.
   -h  --help        Print help information and exit
       --            All subsequent inputs should be interpreted as arguments
