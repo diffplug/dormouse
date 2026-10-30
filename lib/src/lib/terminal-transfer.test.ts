@@ -33,6 +33,17 @@ describe('terminal transfer serialization', () => {
     expect(serializeTransferTerminal({} as Terminal, { serialize: () => 'screen' } as SerializeAddon)).toBe('screen');
   });
 
+  // Fails once a bump ships xtermjs/xterm.js#6174 (`IModes.mouseEncoding`): then
+  // delete the private read in serializeTransferTerminal and this test (#651).
+  it.each([1006, 1016])('the pinned serializer still omits mouse encoding %i', async encoding => {
+    const source = new Terminal({ allowProposedApi: true });
+    live.push(source);
+    const serializer = new SerializeAddon();
+    source.loadAddon(serializer);
+    await write(source, `\x1b[?${encoding}h`);
+    expect(serializer.serialize()).not.toContain(`\x1b[?${encoding}h`);
+  });
+
   it.each([1006, 1016])('preserves mouse tracking and encoding %i through real xterm parsing', async encoding => {
     const { target } = await transfer(`\x1b[?1003h\x1b[?${encoding}h`);
     expect(target.modes.mouseTrackingMode).toBe('any');
