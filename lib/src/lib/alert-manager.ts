@@ -1082,10 +1082,6 @@ export class AlertManager {
   }
 
   /**
-   * The user went idle, or left the host: each held source takes the path it
-   * would have taken unengaged, with the richest held detail.
-   */
-  /**
    * The viewer holding it left — a blur, a hide, its realm ending. Ring what it
    * held only if the user left the whole host; another viewer still present (the
    * VS Code window around a webview, another Dormouse window) means focus moved
@@ -1107,6 +1103,10 @@ export class AlertManager {
     entry.leaveGrace = null;
   }
 
+  /**
+   * The user went idle, or left the host: each held source takes the path it
+   * would have taken unengaged, with the richest held detail.
+   */
   private escalateHeld(id: string, entry: AlertEntry): void {
     const held = entry.held;
     if (held === null) return;
