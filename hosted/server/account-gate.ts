@@ -1,8 +1,10 @@
 // Rules: docs/specs/hosted.md -> "Managed voice" and "Burrow enrollment";
 // docs/specs/security-hosted.md -> "Origin boundary".
 import type { Context, MiddlewareHandler } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { queryDatabase } from "pgstencil/postgres";
-import { entitled } from "./entitlement";
+import { entitled, isAdmin } from "./entitlement";
+import { LOGIN_FRESH_AGE_MS } from "./policy-constants";
 
 /** What one request's account deployment provides to its cookie routes. */
 export interface AccountHost {
@@ -42,6 +44,10 @@ export function ownPageRead(request: Request, origin: string): boolean {
 export const openAuthRead = (path: string) =>
   path === "/api/auth/csrf" || path.startsWith("/api/auth/callback/");
 
+/** A cookie route's body cap: a larger body answers 413. */
+export const smallBody = (maxSize: number) =>
+  bodyLimit({ maxSize, onError: (c) => c.json({ message: "Request too large." }, 413) });
+
 /** The login a cookie route acts for. */
 export interface AccountLogin {
   userId: string;
@@ -50,7 +56,17 @@ export interface AccountLogin {
    * recent login reads it, and it fails closed on a value it cannot read.
    */
   createdAt: unknown;
+  /** The account's verified email, or null for a provider-only account without one. */
+  email: string | null;
 }
+
+/**
+ * Whether `login` began within `LOGIN_FRESH_AGE_MS`, for a route that needs
+ * a recent login. Fails closed: a creation time missing or unreadable is not
+ * recent.
+ */
+export const isRecentLogin = (login: AccountLogin) =>
+  Date.now() - Date.parse(String(login.createdAt)) < LOGIN_FRESH_AGE_MS;
 
 /**
  * The account Worker's cookie routes' gate: a read is {@link ownPageRead},
@@ -64,7 +80,7 @@ export function cookieEntitled(
   host: (c: Context) => AccountHost,
   refuse: (c: Context) => Response,
 ): MiddlewareHandler<{ Variables: { login: AccountLogin } }> {
-  return cookieGate(host, refuse);
+  return cookieGate(host, { admits: entitled, refuse });
 }
 
 /** {@link cookieEntitled}'s gate for a route any signed-in account may use. */
@@ -74,9 +90,23 @@ export function cookieLogin(
   return cookieGate(host);
 }
 
+/**
+ * {@link cookieEntitled}'s gate for the admin's own routes: any login but
+ * the admin's (`isAdmin`, read per request) answers 404, as if the route
+ * were not there.
+ */
+export function cookieAdmin(
+  host: (c: Context) => AccountHost,
+): MiddlewareHandler<{ Variables: { login: AccountLogin } }> {
+  return cookieGate(host, { admits: isAdmin, refuse: (c) => c.json({ message: "Not found." }, 404) });
+}
+
 function cookieGate(
   host: (c: Context) => AccountHost,
-  refuse?: (c: Context) => Response,
+  only?: {
+    admits: (databaseUrl: string, userId: string) => Promise<boolean>;
+    refuse: (c: Context) => Response;
+  },
 ): MiddlewareHandler<{ Variables: { login: AccountLogin } }> {
   return async (c, next) => {
     const origin = new URL(c.req.url).origin;
@@ -95,14 +125,16 @@ function cookieGate(
     );
     if (!response.ok) throw new Error("Login lookup failed");
     const session = (await response.json()) as {
-      user?: { id: string };
+      user?: { id: string; email?: unknown; emailVerified?: unknown };
       session?: { createdAt?: unknown };
     } | null;
     if (!session?.user) return c.json({ message: "Sign in first." }, 401);
-    if (refuse && !(await entitled(host(c).databaseUrl, session.user.id))) return refuse(c);
+    if (only && !(await only.admits(host(c).databaseUrl, session.user.id))) return only.refuse(c);
     c.set("login", {
       userId: session.user.id,
       createdAt: session.session?.createdAt,
+      email:
+        session.user.emailVerified === true && typeof session.user.email === "string" ? session.user.email : null,
     });
     await next();
   };

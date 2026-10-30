@@ -26,8 +26,8 @@ import { isRealBlur } from '../../lib/window-focus';
 
 // Sandbox every framed page, proxied or raw, so a tool's
 // `if (top !== self) top.location = …` framebust cannot navigate the Wall away —
-// allow-top-navigation is omitted on purpose (docs/specs/dor-browser.md →
-// "Iframe Renderer"). Everything else a local dev tool needs is granted;
+// allow-top-navigation is omitted on purpose (docs/specs/security-local.md →
+// "Browser panes"). Everything else a local dev tool needs is granted;
 // allow-same-origin is safe because the frame's origin (the loopback proxy, or
 // the upstream itself on a host with no proxy) is never same-origin with the
 // host webview — except the website playground's first-party viewer pages,
@@ -331,6 +331,8 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
       chromeActions,
       hostCapable: false,
       renderModes,
+      // An embed renders at the pane size, so a swap to screencast follows it.
+      viewportSetting: () => ({ mode: 'pane-sync' }),
     });
     registrationRef.current = registration;
     return () => { registration.dispose(); registrationRef.current = null; };

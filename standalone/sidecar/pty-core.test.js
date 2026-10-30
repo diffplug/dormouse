@@ -148,7 +148,7 @@ test('resolveSpawnConfig applies per-spawn dor CLI env overrides', () => {
 });
 
 test('Windows panes carry dor context through WSL and back without translating pipe or runtime paths', () => {
-  for (const shell of ['wsl.exe', 'powershell.exe', 'cmd.exe', 'bash.exe']) {
+  for (const shell of ['wsl.exe', 'powershell.exe', 'cmd.exe', 'bash.exe'].map(name => `C:\\Windows\\System32\\${name}`)) {
     const env = {
       Path: 'C:\\Windows\\System32',
       WSLENV: 'USER_FILES/lp:USER_FLAG/u:DORMOUSE_NODE/p:DORMOUSE_CONTROL_SOCKET/p:pwd/u',
@@ -823,6 +823,37 @@ test('list reports the resolved launch shell for live reconnects', () => {
       }],
     },
   });
+});
+
+test('a Windows shell goes by an absolute path, a bare name by the PATH file, else not at all', () => {
+  const osModule = { homedir: () => 'C:\\Users\\me', tmpdir: () => 'C:\\Temp' };
+  const looked = [];
+  const resolveBinary = (name) => { looked.push(name); return name === 'pwsh.exe' ? 'C:\\Program Files\\PowerShell\\7\\pwsh.exe' : name === 'dot.exe' ? '.\\dot.exe' : undefined; };
+  const shellOf = (shell, env = {}, platform = 'win32') => resolveSpawnConfig({ shell }, { platform, env, osModule, resolveBinary }).shell;
+  assert.equal(shellOf('pwsh.exe'), 'C:\\Program Files\\PowerShell\\7\\pwsh.exe');
+  assert.throws(() => shellOf('evil.exe'), /not found on PATH/);
+  // Found through a relative PATH entry: still the host's working directory.
+  assert.throws(() => shellOf('dot.exe'), /not found on PATH/);
+  // Only the host's working directory could resolve a relative path.
+  for (const relative of ['tools\\evil.exe', './evil.exe', 'C:evil.exe']) assert.throws(() => shellOf(relative), /not found on PATH/, relative);
+  assert.deepEqual(looked, ['pwsh.exe', 'evil.exe', 'dot.exe']);
+  assert.equal(shellOf('D:\\bin\\bash.exe'), 'D:\\bin\\bash.exe');
+  assert.equal(shellOf('zsh', {}, 'darwin'), 'zsh');
+  // The default is cmd.exe by `ComSpec`, else under `%SystemRoot%`.
+  assert.equal(shellOf(undefined, { ComSpec: 'cmd.exe', SystemRoot: 'D:\\Win' }), 'D:\\Win\\System32\\cmd.exe');
+  assert.equal(shellOf(undefined, { ComSpec: 'E:\\cmd.exe' }), 'E:\\cmd.exe');
+});
+
+test('a spawn runs the shell the host resolver finds, and one it finds nowhere never reaches the PTY', () => {
+  const events = [];
+  const spawned = [];
+  const fakePty = { pid: 1, onData() {}, onExit() {}, resize() {}, write() {}, kill() {} };
+  const resolveBinary = (name) => (name === 'pwsh.exe' ? 'C:\\Program Files\\PowerShell\\7\\pwsh.exe' : undefined);
+  const mgr = create((event, data) => events.push({ event, data }), { spawn(file) { spawned.push(file); return fakePty; } }, { platform: 'win32', resolveBinary });
+  mgr.spawn('pane-pwsh', { shell: 'pwsh.exe' });
+  mgr.spawn('pane-x', { shell: 'evil.exe' });
+  assert.deepEqual(spawned, ['C:\\Program Files\\PowerShell\\7\\pwsh.exe']);
+  assert.deepEqual(events.find(item => item.event === 'exit'), { event: 'exit', data: { id: 'pane-x', exitCode: 1, signal: undefined } });
 });
 
 test('interrupt writes one ^C to every live PTY and forwards recovery output', async () => {
@@ -2245,6 +2276,38 @@ test('getCwds answers a key for every requested id, null for one with no PTY', a
   assert.equal(answer.data.cwds['pane-gone'], null);
 });
 
+
+test('setParentWindow hands node-pty the HWND bytes and never lets a refusal escape', (t) => {
+  t.mock.method(console, 'error', () => {});
+  const handles = [];
+  const answers = { a: true, b: false, c: 'throw' };
+  const mgr = create(() => {}, {
+    spawn(shell, args, opts) {
+      const id = opts.env.DORMOUSE_SURFACE_ID;
+      const p = { pid: 1, onData() {}, onExit() {}, resize() {}, write() {}, kill() {} };
+      // Absent, as on a node-pty without the API (or a Unix terminal stub).
+      if (id === 'd') return p;
+      return { ...p, setParentWindow(handle) {
+        handles.push([id, [...handle]]);
+        if (answers[id] === 'throw') throw new Error('hwnd must be a Buffer the size of an HWND');
+        return answers[id];
+      } };
+    },
+  });
+  for (const id of ['a', 'b', 'c', 'd']) mgr.spawn(id);
+  console.error.mock.resetCalls();
+
+  mgr.setParentWindow(['a', 'b', 'c', 'd', 'gone'], '0a0b0c0d00000000');
+  mgr.setParentWindow(['a'], 'not hex');
+  mgr.setParentWindow(['a'], 'abc');
+
+  assert.deepEqual(handles, [
+    ['a', [10, 11, 12, 13, 0, 0, 0, 0]],
+    ['b', [10, 11, 12, 13, 0, 0, 0, 0]],
+    ['c', [10, 11, 12, 13, 0, 0, 0, 0]],
+  ]);
+  assert.equal(console.error.mock.callCount(), 2);
+});
 
 // --- Per-window list / replay / kill (docs/specs/standalone.md -> "Windows") ---
 

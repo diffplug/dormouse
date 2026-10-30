@@ -17,12 +17,11 @@ rules:
       # `pull_request_target` rule (docs/specs/security-ci.md -> "GitHub
       # Actions Policies"); "Automated Maintainer (tend)" bounds them.
       - tend-review.yaml
-      - tend-ci-fix.yaml
+      - tend-ci-failures.yaml
   artipacked:
     ignore:
       # tend checks out with `TEND_BOT_TOKEN` so the agent can push; the
       # files are regenerated nightly and cannot carry inline ignores.
-      - tend-ci-fix.yaml
       - tend-mention.yaml
       - tend-nightly.yaml
       - tend-notifications.yaml

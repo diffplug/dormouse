@@ -130,11 +130,11 @@ Source of truth: `DOCS_PAGES` in `website/src/lib/docs-pages.ts`; `DocsLayout` i
 
 **Must describe the account service and link its account app, privacy policy, and terms.**
 
-**Must describe the managed Relay as Pocket's Relay:** terminals stay on an awake, online computer, and self-hosting remains.
+**Must describe the Hosted Relay as Pocket's Relay:** terminals stay on an awake, online computer, and self-hosting remains.
 
-**Must open `/self-host` with the Relay boundary:** Dormouse needs none; a new install opens no connection on its own (`docs/specs/remote-network.md` -> "Policy"); push and a paired phone need a Relay, and a one-time connection only Hosted's rendezvous of its handshake; it links `/hosted`. `/hosted`'s managed Relay section discloses metadata, labels the review pending, and links the model. `website/src/lib/docs-rail.test.tsx` pins both.
+**Must open `/self-host` with the Relay boundary:** Dormouse needs none; a new install opens no connection on its own (`docs/specs/remote-network.md` -> "Policy"); push and a paired phone need a Relay, and a one-time connection only Hosted's rendezvous of its handshake; it links `/hosted`. `/hosted`'s Hosted Relay section discloses metadata, labels the review pending, and links the model. `website/src/lib/docs-rail.test.tsx` pins both.
 
-**Must also link it from** Pocket marketing/tutorial, self-host docs, and the speech and remote-control settings; `linkedFrom` owns the rest.
+**Must also link it from** Pocket marketing/tutorial, self-host docs, and the settings where an account has no plan (`docs/specs/alert.md` -> "Settings dialog"); `linkedFrom` owns the rest.
 
 Source of truth: `Hosted` in `website/src/pages/Hosted.tsx`; `HostingRequirementNotice` in `website/src/components/HostingRequirementNotice.tsx`.
 
@@ -151,6 +151,18 @@ Source of truth: `VERSUS` and `COMPARISON` in `website/src/lib/comparison.tsx`; 
 **Must prerender `/privacy` and `/terms` with a last-updated date.** **Must distinguish the revision date from the policy's applicability conditions; draft policies remain marked as not yet effective.**
 
 Source of truth: `HostedPolicyLayout` in `website/src/components/HostedPolicyLayout.tsx`.
+
+## Visit analytics
+
+dormouse.sh alone counts visits, with PostHog US Cloud (`docs/specs/security-local.md` -> "Network policy").
+
+- **Must load posthog-js only on `dormouse.sh`, only at the first event, and never under Global Privacy Control or Do Not Track.**
+- **Must run `cookieless_mode: "always"` and keep nothing in cookies, `localStorage`, `sessionStorage`, or IndexedDB**; the one write is posthog-js's `localStorage` check at init, a test value it removes at once. PostHog drops every event unless the project's Settings → Project → Web analytics → Enable cookieless tracking is on.
+- **Must send only** one `$pageview` per path, the `/hosted` one carrying the visit's `ref` (`docs/specs/pricing.md` -> "The Hosted page"); `hosted plan clicked` with its `plan`; and `tutorial completed` with its `tutorial`, sent only when this visit checks the last item. **Never enable autocapture, replay, heatmaps, surveys, exception capture, feature flags, `identify`, or a remote script.**
+- **Must send to `dormouse.sh/ingest`**, never to a PostHog host. A Pages advanced-mode Worker limited to `/ingest/*` and the founders row's `/api/hosted/*` (`docs/specs/hosted.md` -> "Billing") forwards the first to PostHog's US hosts without cookies or authorization, passing the visitor's address as `X-Forwarded-For`.
+- **Must change Privacy's analytics paragraph in the same edit as anything above** (`website/src/pages/Privacy.tsx`).
+
+Source of truth: `website/src/lib/site-analytics.ts`; `website/public/_worker.js`.
 
 ## `/dor` reference
 

@@ -192,7 +192,8 @@ export function parseFragment(text, { evidence = true } = {}) {
       if (FENCE_RE.test(line)) fenced = !fenced;
       continue;
     }
-    if (FENCE_RE.test(line)) { fenced = !fenced; finding = null; continue; }
+    // An unindented fence ends the open finding: its evidence was the lines above.
+    if (FENCE_RE.test(line)) { if (finding) closeFinding(parsed, finding, evidence); fenced = !fenced; finding = null; continue; }
     if (fenced) continue;
     if (finding) closeFinding(parsed, finding, evidence);
     finding = null;

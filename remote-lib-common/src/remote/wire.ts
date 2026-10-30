@@ -453,6 +453,35 @@ export function isBurrowEnrollBeginResponse(value: unknown): value is BurrowEnro
 export interface BurrowEnrollPollRequest {
   deviceCode: string;
   purpose?: 'remote' | 'voice';
+  /**
+   * Remote only: the name this machine was enrolled under, which the account
+   * page lists it by. Hosted stores it through {@link reduceBurrowLabel}; an
+   * older Burrow sends none and still enrolls. A Client never reads it from
+   * the Relay ({@link BurrowsResponse}).
+   */
+  label?: string;
+}
+
+/** The longest Burrow label Hosted stores, in code points. */
+export const MAX_BURROW_LABEL_LENGTH = 64;
+
+/**
+ * A Burrow's label as Hosted stores it, and as the Burrow sends it: control,
+ * format, surrogate, and line or paragraph separator characters gone, so none
+ * can hide or reorder what the account page shows; whitespace runs one space;
+ * trimmed; capped at {@link MAX_BURROW_LABEL_LENGTH} code points. Reduced rather
+ * than refused, and `null` for a non-string or nothing left. Hosted's column
+ * CHECK (`hosted/server/dormouse-migrations/012_relay_burrow_label.sql`)
+ * refuses the characters this strips, padding, nothing, and past the cap.
+ */
+export function reduceBurrowLabel(label: unknown): string | null {
+  if (typeof label !== 'string') return null;
+  const cleaned = label
+    // Format characters carry no width, so they are dropped rather than spaced.
+    .replace(/[\p{Cf}\p{Cs}]/gu, '')
+    .replace(/[\p{Cc}\p{Zl}\p{Zp}\s]+/gu, ' ')
+    .trim();
+  return Array.from(cleaned).slice(0, MAX_BURROW_LABEL_LENGTH).join('').trim() || null;
 }
 
 /**
@@ -598,8 +627,9 @@ export function isSetupTokenResponse(value: unknown): value is SetupTokenRespons
 
 /**
  * Discovery only: which Burrows this account has enrolled, and which are
- * connected. **No label** — the Relay holds none, and a Client renders the one
- * its own pinned record carries (`docs/specs/pocket-app.md`).
+ * connected. **No label** — a Client renders the one its own pinned record
+ * carries (`docs/specs/pocket-app.md`), never one a Relay names; Hosted's,
+ * from {@link BurrowEnrollPollRequest}, is for its account page alone.
  */
 export interface BurrowsResponse {
   burrows: Array<{ burrowId: string; online: boolean }>;

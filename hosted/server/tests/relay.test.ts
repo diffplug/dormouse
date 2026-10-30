@@ -1,4 +1,4 @@
-import { test, expect } from "vitest";
+import { test, expect, vi } from "vitest";
 import { createDecipheriv, createECDH, hkdfSync, randomBytes, randomUUID } from "node:crypto";
 import { digest } from "@pgstencil/auth/security";
 import { Miniflare, Response as WorkerResponse } from "miniflare";
@@ -10,6 +10,7 @@ import {
   MAX_PUSH_QUERY_DELIVERY_IDS,
   MAX_PUSH_SUBSCRIPTIONS_PER_ACCOUNT,
   MAX_PUSH_SUBSCRIPTIONS_PER_BURROW,
+  MAX_BURROW_LABEL_LENGTH,
   MAX_TOKENS_PER_BURROW,
   NOT_ENTITLED_ERROR,
   SETUP_TOKEN_INVALID_ERROR,
@@ -290,8 +291,8 @@ async function fixture({ bindings = {} }: { bindings?: Record<string, string | u
     };
   }
 
-  const poll = (deviceCode: unknown, purpose: "remote" | "voice" = "remote") =>
-    call("POST", API_ROUTES.burrowEnrollPoll, { body: { deviceCode, purpose } });
+  const poll = (deviceCode: unknown, purpose: "remote" | "voice" = "remote", label?: unknown) =>
+    call("POST", API_ROUTES.burrowEnrollPoll, { body: { deviceCode, purpose, label } });
 
   /**
    * What the account Worker's approval writes (`hosted/server/relay-account.ts`),
@@ -388,6 +389,12 @@ test("setup, sign-in, and a presence proof end to end, scoped to the account tha
   expect(signed.status).toBe(200);
   expect(signed.json).toMatchObject({ accountId: owner, passkeyPublicKey: phone.publicKey });
   const { sessionToken, expiresAt } = signed.json!;
+  // Counted once, as a sign-in; the setup finish's session is none.
+  await vi.waitFor(async () =>
+    expect(await f.sql(`SELECT event, label, count::int FROM dormouse_metrics_daily`)).toEqual([
+      { event: "pocket.signin", label: "", count: 1 },
+    ]),
+  );
   expect(Math.abs(expiresAt - (Date.now() + 12 * 3600_000))).toBeLessThan(60_000);
 
   expect(
@@ -1088,6 +1095,67 @@ test("a device-code enrollment: begin stores nothing, pending until approved, th
   expect(await f.sql(`SELECT count(*)::int AS n FROM dormouse_relay_enrollment_approvals`)).toEqual([{ n: 0 }]);
 });
 
+test("a computer is enrolled under the name its poll sends, reduced, or none; the column holds nothing else", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const owner = await f.account(ADMIN_EMAIL);
+  const enroll = async (label?: unknown) => {
+    const begun = await f.begin();
+    await f.approve(begun.userCode, owner);
+    const polled = await f.poll(begun.deviceCode, "remote", label);
+    expect(polled.json!.status).toBe("enrolled");
+    const [{ stored }] = await f.sql<{ stored: string | null }>(
+      `SELECT label AS stored FROM dormouse_relay_burrows WHERE "burrowId" = $1`,
+      [polled.json!.enrollment.burrowId],
+    );
+    return stored;
+  };
+  expect(await enroll("ned-mbp (VS Code)")).toBe("ned-mbp (VS Code)");
+  // Reduced, never refused: a bidi override goes, the rest is capped.
+  expect(await enroll(` \u202eevil\u202c\n${"x".repeat(80)}`)).toBe(`evil ${"x".repeat(59)}`);
+  // An older Burrow sends none, or a non-string, and still enrolls.
+  for (const none of [undefined, 7, "\u200b "]) expect(await enroll(none)).toBeNull();
+
+  // Past the reduction, the column refuses every character it strips, padding,
+  // nothing, and more than the cap.
+  const { burrowId } = await f.burrow(owner);
+  const store = (label: string) =>
+    f.sql(`UPDATE dormouse_relay_burrows SET label = $2 WHERE "burrowId" = $1`, [burrowId, label]);
+  await store("a".repeat(MAX_BURROW_LABEL_LENGTH));
+  await store("\u{1F42D} b");
+  const stripped: string[] = [];
+  for (let point = 1; point <= 0x10ffff; point++) {
+    if (point >= 0xd800 && point <= 0xdfff) continue;
+    const char = String.fromCodePoint(point);
+    if (/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(char)) stripped.push(char);
+  }
+  expect(stripped.length).toBeGreaterThan(200);
+  // Padding as JavaScript's trim counts it, which the reduction strips.
+  const padding = Array.from({ length: 0x10000 }, (_, point) => String.fromCharCode(point)).filter((char) => char.trim() === "");
+  expect(padding.length).toBeGreaterThan(20);
+  const padded = padding.flatMap((char) => [`${char}a`, `a${char}`]);
+  // On one connection, each attempt under its own savepoint: over a thousand.
+  const refused = await withClient(f.ownerUrl, async (db) => {
+    const codes: string[] = [];
+    await db.query("BEGIN");
+    for (const label of [...stripped.map((char) => `a${char}b`), ...padded, "", "a".repeat(MAX_BURROW_LABEL_LENGTH + 1)]) {
+      await db.query("SAVEPOINT label");
+      await db
+        .query(`UPDATE dormouse_relay_burrows SET label = $2 WHERE "burrowId" = $1`, [burrowId, label])
+        .then(
+          () => codes.push(`stored ${JSON.stringify(label)}`),
+          (error: { code?: string }) => codes.push(error.code ?? "?"),
+        );
+      await db.query("ROLLBACK TO SAVEPOINT label");
+    }
+    await db.query("ROLLBACK");
+    return [...new Set(codes)];
+  });
+  expect(refused).toEqual(["23514"]);
+});
+
 test("an approval redeems only the device code its user code is derived from", async ({ onTestFinished }) => {
   const f = await fixture();
   onTestFinished(f.close);
@@ -1426,6 +1494,12 @@ test("push end to end: a Burrow's sealed envelope reaches the push service encry
   });
   expect(sent.json).toEqual({ delivered: 1, expired: 0, unknown: 0, failed: 0 });
   expect(f.pushed).toHaveLength(1);
+  // Counted by delivery.
+  await vi.waitFor(async () =>
+    expect(await f.sql(`SELECT event, label, count::int FROM dormouse_metrics_daily`)).toEqual([
+      { event: "push.sent", label: "", count: 1 },
+    ]),
+  );
   const [request] = f.pushed;
   expect(request.url).toBe(phone.subscription.endpoint);
   expect(request.headers["content-encoding"]).toBe("aes128gcm");

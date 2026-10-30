@@ -19,6 +19,7 @@ import { FakePtyAdapter, setPlatform } from '../../lib/platform';
 import { removeTerminalPaneState, seedLaunchedCommand } from '../../lib/terminal-state-store';
 import type { OpenPort } from '../../lib/platform/types';
 import type { LathWallEngine } from './lath-wall-engine';
+import type { LeafMeta } from './lath-wall-store';
 import type { DooredItem } from './wall-types';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -33,17 +34,20 @@ function tcp(port: number): OpenPort[] {
   return [{ protocol: 'tcp', family: 'IPv4', address: '127.0.0.1', port, pid: 1 }];
 }
 
-/** Just enough engine for the loop: one Wall's visible terminal panes. */
-function fakeLath(paneIds: string[]): LathWallEngine {
+/** Just enough engine for the loop: one Wall's visible terminal panes, and the
+ *  stored meta of its Doors. */
+function fakeLath(paneIds: string[], doorMeta: Record<string, LeafMeta>): LathWallEngine {
   return {
     listPanes: () => paneIds.map((id) => ({ id, title: id, params: undefined })),
-    getMeta: () => undefined,
+    getMeta: (id: string) => doorMeta[id],
   } as unknown as LathWallEngine;
 }
 
-function Harness({ paneIds }: { paneIds: string[] }) {
-  const lath = useMemo(() => fakeLath(paneIds), [paneIds]);
-  const doorsRef = useRef<DooredItem[]>([]);
+const NO_DOORS: Record<string, LeafMeta> = {};
+
+function Harness({ paneIds, doors = NO_DOORS }: { paneIds: string[]; doors?: Record<string, LeafMeta> }) {
+  const lath = useMemo(() => fakeLath(paneIds, doors), [paneIds, doors]);
+  const doorsRef = useRef<DooredItem[]>(Object.keys(doors).map((id) => ({ id })));
   useDevServerPortCorrelation({ lath, doorsRef });
   return null;
 }
@@ -134,6 +138,20 @@ describe('dev-server port correlation across Walls', () => {
     act(() => requestDevServerPort(PORT));
     await settleScan();
     expect(getDevServerResolution(PORT)?.paneId).toBe('a1');
+  });
+
+  it('counts a minimized Tool as a candidate, as it does a visible one, and never a browser Door', async () => {
+    const doors = {
+      t1: { component: 'tool', tabComponent: 'tool', title: 'dev', params: { surfaceType: 'tool', command: 'pnpm dev' } },
+      w1: { component: 'browser', tabComponent: 'surface', title: 'page', params: { renderMode: 'iframe', url: `http://localhost:${PORT}/` } },
+    };
+    openPorts.mockImplementation(async (id: string) => (id === 't1' ? tcp(PORT) : []));
+    requestDevServerPort(PORT);
+    await act(async () => { root.render(<Harness paneIds={['a1']} doors={doors} />); });
+    await settleScan();
+
+    expect(getDevServerResolution(PORT)?.paneId).toBe('t1');
+    expect(openPorts.mock.calls.map(([id]) => id).sort()).toEqual(['a1', 't1']);
   });
 
   it('wakes when a terminal starts a command after the back-off gave up', async () => {

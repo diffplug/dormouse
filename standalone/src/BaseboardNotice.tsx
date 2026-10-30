@@ -1,8 +1,7 @@
 import type { ReactNode } from 'react';
 import { XIcon } from '@phosphor-icons/react';
 
-export const noticeLinkClass = 'shrink-0 hover:underline';
-export const noticeLinkStyle = { color: 'var(--vscode-textLink-foreground)' };
+export const noticeLinkClass = 'shrink-0 text-link hover:underline';
 
 export interface NoticeLink {
   label: string;
@@ -22,7 +21,7 @@ export function BaseboardNotice({ message, title, links, onDismiss }: {
       {links.map((link) => (
         <span key={link.label} className="contents">
           <span className="shrink-0">·</span>
-          <button onClick={link.onClick} className={noticeLinkClass} style={noticeLinkStyle}>
+          <button onClick={link.onClick} className={noticeLinkClass}>
             {link.label}
           </button>
         </span>

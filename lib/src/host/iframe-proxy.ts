@@ -16,12 +16,10 @@
  * this file is the `http`/`net` plumbing. The logger is injected so neither host
  * has to depend on the other's logging.
  *
- * Sibling to the agent-browser stream relay: same loopback-only bind and
- * per-surface isolation, but this one speaks HTTP (parses and rewrites
- * responses) and passes WebSocket upgrades through (dev-server HMR,
- * openvscode-server).
+ * It binds loopback only, speaks HTTP (parses and rewrites responses), and
+ * passes WebSocket upgrades through (dev-server HMR, openvscode-server).
  *
- * Per-surface isolation, two deliberate notes vs the spec's sketch:
+ * Per-surface isolation:
  *   - Each grant gets its OWN ephemeral loopback server, so the grant's *origin*
  *     is the grant. That makes root-relative sub-resources (`/assets/x.js`) and
  *     absolute paths resolve and proxy transparently with zero body rewriting.
@@ -224,13 +222,14 @@ export async function createIframeProxyUrl(
   }
   // v1 proxies http:// upstreams only — loopback dev servers are overwhelmingly
   // plain http, and rewriting authenticated https pages is the agent-browser's
-  // job (spec → Target policy).
+  // job (docs/specs/dor-browser.md → "Iframe Renderer").
   if (upstream.protocol !== 'http:') {
     return { ok: false, reason: 'scheme', detail: IFRAME_HTTP_ONLY };
   }
   // SSRF guard: the proxy fetches a user-supplied URL, so refuse the link-local
   // / cloud-metadata ranges (169.254.169.254 and friends). Other private ranges
-  // are trusted — the boundary is the user's own `dor iframe` (spec → Security).
+  // are trusted — the boundary is the user's own `dor iframe`
+  // (docs/specs/dor-browser.md → "Iframe Host Capability And CSP").
   if (isBlockedAddress(upstream.hostname)) {
     return { ok: false, reason: 'scheme', detail: 'link-local / metadata addresses are refused' };
   }
@@ -580,8 +579,8 @@ function rewriteOrigin(value: string, from: string, to: string): string {
 
 // --- WebSocket upgrade passthrough (dev-server HMR, openvscode-server) -------
 
-// Mirrors the stream relay: once the upgrade head is rewritten (Host/Origin
-// pointed at the upstream) the proxy is a dumb byte pipe.
+// Once the upgrade head is rewritten (Host/Origin pointed at the upstream) the
+// proxy is a dumb byte pipe.
 function handleUpgrade(grant: Grant, req: http.IncomingMessage, socket: net.Socket, head: Buffer): void {
   // The upgrade path is where the Origin rewrite costs the most, so it gets the
   // same two tests as handleRequest. WebSockets are not subject to CORS, so a

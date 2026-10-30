@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { expect, fn } from "storybook/test";
-import { hostedMeta, SESSION, ACCOUNT, ENROLLMENT } from "./fixtures";
+import { hostedMeta, SESSION, ACCOUNT, ENROLLMENT, NO_PLAN } from "./fixtures";
 import { settledFrame } from "./canvas";
 
 const meta = {
@@ -13,6 +13,24 @@ export const Remote: Story = {};
 export const Voice: Story = { args: { enrolling: { ...ENROLLMENT, purpose: "voice" } } };
 export const StaleRemote: Story = { args: { fresh: false } };
 export const StaleVoice: Story = { args: { ...Voice.args, fresh: false } };
+export const NoPlan: Story = {
+  args: { noPlan: true, signOut: fn(async () => {}) },
+  play: async ({ canvasElement, args }) => {
+    const canvas = await settledFrame(canvasElement);
+    await expect(canvas.queryByLabelText("Type the two digits Dormouse is showing")).toBeNull();
+    await canvas.user.click(canvas.getByRole("button", { name: "Use another account" }));
+    await expect(args.signOut).toHaveBeenCalledOnce();
+  },
+};
+export const NoPlanVoice: Story = { args: { ...Voice.args, noPlan: true } };
+/** Billing open: the plans link opens checkout on this origin, in another tab. */
+export const NoPlanCheckoutOpen: Story = {
+  args: { noPlan: true, billing: NO_PLAN },
+  play: async ({ canvasElement }) => {
+    const canvas = await settledFrame(canvasElement);
+    await expect(canvas.getByRole("link", { name: "See Hosted plans" })).toHaveAttribute("href", "/checkout?ref=hosted-no-plan");
+  },
+};
 export const InvalidLink: Story = { args: { enrolling: { code: null } } };
 export const InvalidLinkSignedOut: Story = { args: { session: null, enrolling: { code: null } } };
 export const Approving: Story = { args: { busy: "approve" } };

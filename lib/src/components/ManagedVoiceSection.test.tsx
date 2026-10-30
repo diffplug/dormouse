@@ -17,7 +17,7 @@ import {
 import { DEFAULT_RELAY_ORIGIN } from '../host/relay-origin';
 import type { BurrowConsoleStatus } from '../host/remote/service-protocol';
 import { networkPolicyResult, nothingPolicy } from '../remote/network-policy';
-import { HOSTED_APPROVAL_ENDED_COPY, HOSTED_ENROLLMENT_CODE_LABEL, HOSTED_PRICING_URL } from './HostedEnrollment';
+import { HOSTED_APPROVAL_ENDED_COPY, HOSTED_ENROLLMENT_CODE_LABEL } from './HostedEnrollment';
 import { MANAGED_VOICE_DISCLOSURE, ManagedVoiceSection, NO_PLAN_COPY } from './ManagedVoiceSection';
 import { AlarmSettingsSection } from './SettingsDialog';
 
@@ -121,7 +121,7 @@ describe('ManagedVoiceSection', () => {
     const openExternal = vi.fn();
     Object.assign(getPlatform(), { openExternal });
     await act(async () => button('See Hosted plans')!.click());
-    expect(openExternal).toHaveBeenCalledWith(HOSTED_PRICING_URL);
+    expect(openExternal).toHaveBeenCalledWith('https://dormouse.sh/hosted/?ref=settings-voice#pricing');
   });
 
   it('offers voice independently when remote control is already enrolled', async () => {
@@ -182,17 +182,35 @@ describe('ManagedVoiceSection', () => {
     );
     expect(text()).toContain(HOSTED_APPROVAL_ENDED_COPY.voice.mismatch);
     expect(button('Turn on Natural Voice')).toBeDefined();
+
+    // A refusal for want of a plan links the plans, from the voice setting.
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await render(
+      { status: UNENROLLED_STATUS },
+      makeStubManagedVoicePort(false, false, { enrollment: { status: 'ended', reason: 'not-entitled' } }),
+    );
+    const openExternal = vi.fn();
+    Object.assign(getPlatform(), { openExternal });
+    await act(async () => button('See Hosted plans')!.click());
+    expect(openExternal).toHaveBeenCalledWith('https://dormouse.sh/hosted/?ref=settings-voice#pricing');
   });
 });
 
 describe('the spoken-alarm copy', () => {
   it.each([
-    ['no port', false, 'Get ElevenLabs voices with Natural Voice.'],
+    ['no port', false, 'Uses your browser or system voice.'],
     ['a Hosted build’s port', true, 'Uses Natural Voice when turned on below'],
   ])('with %s', async (_label, port, copy) => {
     const adapter = new FakePtyAdapter();
     setPlatform(port ? Object.assign(adapter, { managedVoice: makeStubManagedVoicePort(false) }) : adapter);
     await act(async () => root.render(<AlarmSettingsSection sink="speech" />));
     expect(text()).toContain(copy);
+  });
+
+  it('names neither Hosted nor Natural Voice in a build without the port, which has no Hosted mode', async () => {
+    setPlatform(new FakePtyAdapter());
+    await act(async () => root.render(<AlarmSettingsSection sink="speech" />));
+    expect(text()).not.toMatch(/Hosted|Natural Voice|ElevenLabs/);
   });
 });

@@ -6,7 +6,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import * as api from "./api";
 import type { Enrollment } from "./enrollment";
-import { ENROLLMENT_POLL_INTERVAL_S, TERMS_VERSION } from "../server/policy-constants";
+import type { BillingSummary } from "../server/billing-summary";
+import type { CheckoutIntent } from "./billing";
+import { CHECKOUT_CLOSED, ENROLLMENT_POLL_INTERVAL_S, PRICE_CHANGED, TERMS_VERSION } from "../server/policy-constants";
+import { NOT_ENTITLED_ERROR } from "../../remote-lib-common/src/remote/wire.ts";
+import { WITHDRAWAL_STATEMENT } from "../../website/src/lib/hosted-withdrawal";
 
 vi.mock("./api", async (original) => ({
   ...await original<typeof import("./api")>(),
@@ -14,6 +18,8 @@ vi.mock("./api", async (original) => ({
   getHostedVoice: vi.fn(), getComputers: vi.fn(), getPasskeys: vi.fn(),
   getApproval: vi.fn(), approveEnrollment: vi.fn(), acceptTerms: vi.fn(),
   post: vi.fn(), turnOffHostedVoice: vi.fn(),
+  getBilling: vi.fn(), startCheckout: vi.fn(), confirmCheckout: vi.fn(),
+  openPortal: vi.fn(), joinFounders: vi.fn(), leaveFounders: vi.fn(), withdraw: vi.fn(), closeAccount: vi.fn(),
 }));
 
 const NOW = Date.UTC(2026, 9, 21, 12);
@@ -49,6 +55,7 @@ beforeEach(() => {
   vi.mocked(api.getApproval).mockResolvedValue({ mismatched: false, redeemed: false });
   vi.mocked(api.acceptTerms).mockResolvedValue(true);
   vi.mocked(api.post).mockResolvedValue({});
+  vi.mocked(api.getBilling).mockResolvedValue("closed");
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
@@ -60,8 +67,8 @@ afterEach(async () => {
   vi.useRealTimers();
 });
 
-async function mount(enrollment: Enrollment | null) {
-  await act(async () => root.render(<App enrollment={enrollment} />));
+async function mount(enrollment: Enrollment | null, start: { checkout?: CheckoutIntent; confirming?: string } = {}) {
+  await act(async () => root.render(<App enrollment={enrollment} {...start} />));
 }
 function button(text: string) {
   const found = [...container.querySelectorAll("button")].find((el) => el.textContent?.trim() === text);
@@ -98,6 +105,9 @@ async function signIn() {
     email: "member@example.com", otp: "12345678",
   });
   expect(api.acceptTerms).toHaveBeenCalledWith(TERMS_VERSION);
+}
+async function tick(id: string) {
+  await act(async () => container.querySelector<HTMLInputElement>(`#${id}`)!.click());
 }
 async function approve() {
   await input("confirm-digits", "47");
@@ -140,13 +150,56 @@ it.each(["remote", "voice"] as const)("%s approval returns to the account and wa
   if (purpose === "voice") {
     vi.mocked(api.getHostedVoice).mockResolvedValue({ entitled: true, on: true });
   } else {
-    vi.mocked(api.getComputers).mockResolvedValue([{ burrowId: "new-computer", enrolledAt: new Date(NOW).toISOString() }]);
+    vi.mocked(api.getComputers).mockResolvedValue([{ burrowId: "new-computer", label: null, enrolledAt: new Date(NOW).toISOString() }]);
   }
   await act(async () => { await vi.advanceTimersByTimeAsync(ENROLLMENT_POLL_INTERVAL_S * 1000); });
   expect(container.querySelector("[role=status]")?.textContent).toBe(
     purpose === "voice" ? "Natural Voice is on." : "Your computer is enrolled.",
   );
   expect(api.getApproval).toHaveBeenCalledWith("7KQM-X4TD");
+});
+
+it("lists each computer by the name it enrolled under, else its short id, and each passkey's computer the same way", async () => {
+  vi.mocked(api.getSession).mockResolvedValue(login());
+  const enrolledAt = new Date(NOW).toISOString();
+  vi.mocked(api.getComputers).mockResolvedValue([
+    { burrowId: "named-computer-id", label: "studio (Dormouse)", enrolledAt },
+    { burrowId: "older-computer-id", label: null, enrolledAt },
+  ]);
+  vi.mocked(api.getPasskeys).mockResolvedValue([
+    { credentialId: "one", label: "iPhone", createdAt: enrolledAt, burrowId: "named-computer-id" },
+    { credentialId: "two", label: "iPad", createdAt: enrolledAt, burrowId: "older-computer-id" },
+  ]);
+  await mount(null);
+  const rows = (section: string) =>
+    [...container.querySelectorAll(`section[aria-labelledby=${section}] > div`)].map((row) => row.querySelector("span")?.textContent);
+  expect(rows("computers")).toEqual([
+    expect.stringMatching(/^studio \(Dormouse\)named-co/),
+    expect.stringMatching(/^Computerolder-co/),
+  ]);
+  expect(rows("passkeys")).toEqual([
+    expect.stringMatching(/from studio \(Dormouse\)$/),
+    expect.stringMatching(/from Computer older-co$/),
+  ]);
+});
+
+it("an approval that completes after a newer link opened keeps the newer code", async () => {
+  vi.mocked(api.getSession).mockResolvedValue(login());
+  let resolve!: () => void;
+  vi.mocked(api.approveEnrollment).mockReturnValue(new Promise<void>((done) => { resolve = done; }));
+  await mount(ENROLLMENT);
+  await approve();
+  await act(async () => {
+    history.replaceState(null, "", "/enroll#9PRW-H3NC");
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+  });
+  await act(async () => resolve());
+  expect(location.pathname).toBe("/enroll");
+  expect(container.querySelector("h1")?.textContent).toBe("Enroll remote control");
+  expect(container.querySelector("[role=status]")?.textContent).toContain("Approved 7KQM-X4TD");
+  vi.mocked(api.approveEnrollment).mockResolvedValue();
+  await approve();
+  expect(api.approveEnrollment).toHaveBeenLastCalledWith("9PRW-H3NC", undefined, "47");
 });
 
 describe("Natural Voice confirmation", () => {
@@ -181,5 +234,382 @@ describe("Natural Voice confirmation", () => {
     expect(container.querySelector("[role=alert]")?.textContent).toContain("Voice service unavailable.");
     expect(button("Turn off Natural Voice").disabled).toBe(false);
     expect(button("Retry connection").disabled).toBe(false);
+  });
+});
+
+describe("an account with no plan", () => {
+  const noPlanShown = () => container.textContent!.includes("has no Hosted plan yet");
+  beforeEach(() => {
+    vi.mocked(api.getSession).mockResolvedValue(login());
+  });
+
+  it.each(["remote", "voice"] as const)("is told before typing digits for %s", async (purpose) => {
+    vi.mocked(api.getHostedVoice).mockResolvedValue({ entitled: false, on: false });
+    await mount({ ...ENROLLMENT, purpose });
+    expect(container.querySelector("#confirm-digits")).toBeNull();
+    expect(noPlanShown()).toBe(true);
+    expect(button("Don’t approve").disabled).toBe(false);
+    const plans = container.querySelector<HTMLAnchorElement>('a[href="https://dormouse.sh/hosted/?ref=hosted-no-plan#pricing"]')!;
+    // In another tab, so this one keeps the code that lives only in memory.
+    expect(plans.target).toBe("_blank");
+    // Natural Voice has no self-hosted equivalent; a Relay does.
+    expect(container.querySelectorAll('a[href="https://dormouse.sh/self-host/"]').length).toBe(purpose === "remote" ? 2 : 0);
+  });
+
+  it("is told when the approval is refused for want of a plan", async () => {
+    vi.mocked(api.approveEnrollment).mockRejectedValue(new api.NoPlanError(NOT_ENTITLED_ERROR));
+    await mount(ENROLLMENT);
+    await approve();
+    expect(container.querySelector("#confirm-digits")).toBeNull();
+    expect(noPlanShown()).toBe(true);
+    expect(container.querySelector("[role=alert]")).toBeNull();
+    expect(location.pathname).toBe("/enroll");
+  });
+
+  it("offers the digits again once a plan is bought in another tab", async () => {
+    vi.mocked(api.approveEnrollment).mockRejectedValueOnce(new api.NoPlanError(NOT_ENTITLED_ERROR));
+    await mount(ENROLLMENT);
+    await approve();
+    expect(noPlanShown()).toBe(true);
+    vi.mocked(api.getHostedVoice).mockResolvedValue({ entitled: true, on: false });
+    await act(async () => window.dispatchEvent(new Event("focus")));
+    expect(noPlanShown()).toBe(false);
+    await approve();
+    expect(api.approveEnrollment).toHaveBeenLastCalledWith("7KQM-X4TD", "remote", "47");
+  });
+
+  it("is never assumed from a failed read or a failed approval", async () => {
+    vi.mocked(api.getHostedVoice).mockRejectedValue(new Error("Could not connect."));
+    vi.mocked(api.getComputers).mockRejectedValue(new Error("Could not connect."));
+    vi.mocked(api.approveEnrollment).mockRejectedValue(new Error("Could not connect."));
+    await mount(ENROLLMENT);
+    expect(noPlanShown()).toBe(false);
+    await approve();
+    expect(noPlanShown()).toBe(false);
+    expect(container.querySelector("#confirm-digits")).not.toBeNull();
+    expect(container.querySelector("[role=alert]")?.textContent).toContain("Could not connect.");
+  });
+
+  it("keeps the code through Use another account", async () => {
+    vi.mocked(api.approveEnrollment).mockRejectedValueOnce(new api.NoPlanError(NOT_ENTITLED_ERROR));
+    await mount(ENROLLMENT);
+    await approve();
+    vi.mocked(api.getSession).mockResolvedValue(null);
+    await click("Use another account");
+    expect(api.post).toHaveBeenCalledWith("sign-out");
+    expect(location.pathname).toBe("/enroll");
+    await signIn();
+    await approve();
+    expect(api.approveEnrollment).toHaveBeenLastCalledWith("7KQM-X4TD", "remote", "47");
+    expect(location.pathname).toBe("/account");
+  });
+});
+
+describe("approveEnrollment", () => {
+  const actual = () => vi.importActual<typeof import("./api")>("./api");
+  const answer = (status: number, message: string) =>
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ message }, { status }));
+  afterEach(() => vi.restoreAllMocks());
+
+  it("reads a 403 NOT_ENTITLED_ERROR as no plan", async () => {
+    const { approveEnrollment, NoPlanError } = await actual();
+    answer(403, NOT_ENTITLED_ERROR);
+    await expect(approveEnrollment("7KQM-X4TD", "remote", "47")).rejects.toBeInstanceOf(NoPlanError);
+  });
+  it("reads any other refusal as its message", async () => {
+    const { approveEnrollment, NoPlanError } = await actual();
+    answer(403, "Sign in again to approve.");
+    const refusal = approveEnrollment("7KQM-X4TD", "remote", "47");
+    await expect(refusal).rejects.toThrow("Sign in again to approve.");
+    await expect(refusal).rejects.not.toBeInstanceOf(NoPlanError);
+  });
+});
+
+const NO_PLAN: BillingSummary = {
+  plan: null, price: null, active: false, until: null, renews: false, entitled: false, suspended: false,
+  founding: { cohort: 0, seatsLeft: 42 }, founder: { offered: false, name: null }, consent: null, withdrawal: null, withdrawn: null,
+};
+const FOUNDING: BillingSummary = {
+  ...NO_PLAN, plan: "founding", price: 50, active: true, until: "2027-10-21T12:00:00Z", renews: true, entitled: true,
+  founder: { offered: true, name: null },
+  consent: { termsVersion: TERMS_VERSION, consentedAt: "2026-10-21T12:00:00Z" },
+};
+const text = () => container.textContent!;
+
+describe("checkout", () => {
+  const heading = () => container.querySelector("h1")?.textContent;
+
+  it("asks a signed-out buyer to sign in, without the not-yet footnote, and keeps the plan", async () => {
+    history.replaceState(null, "", "/checkout");
+    vi.mocked(api.getBilling).mockResolvedValue(NO_PLAN);
+    await mount(null, { checkout: { plan: "yearly", ref: "settings-voice" } });
+    expect(heading()).toBe("Sign in to subscribe");
+    // A reload signed out still lands on checkout.
+    expect(location.pathname).toBe("/checkout");
+    expect(text()).not.toContain("not available yet");
+    expect(container.querySelector("#email")).not.toBeNull();
+    await signIn();
+    expect(location.pathname).toBe("/checkout");
+    expect(heading()).toBe("Subscribe to Dormouse Hosted");
+    expect(container.querySelector<HTMLInputElement>('input[value="yearly"]')!.checked).toBe(true);
+  });
+
+  it("starts only once both agreements are ticked, with the plan and the ref it arrived with", async () => {
+    vi.mocked(api.getSession).mockResolvedValue(login());
+    vi.mocked(api.getBilling).mockResolvedValue(NO_PLAN);
+    await mount(null, { checkout: { plan: null, ref: "hosted-no-plan" } });
+    // Founding first while it is open.
+    expect(container.querySelector<HTMLInputElement>('input[value="founding"]')!.checked).toBe(true);
+    expect(text()).toContain("42 left at this price");
+    const go = () => button("Continue to payment");
+    expect(go().disabled).toBe(true);
+    await tick("agree-terms");
+    expect(go().disabled).toBe(true);
+    await tick("agree-renewal");
+    expect(go().disabled).toBe(false);
+    // Renewal was agreed at founding's price: another plan asks again.
+    await tick("monthly-plan");
+    expect(container.querySelector<HTMLInputElement>("#agree-renewal")!.checked).toBe(false);
+    expect(text()).toContain("renews automatically every month at $10");
+    expect(go().disabled).toBe(true);
+    await tick("agree-renewal");
+    await click("Continue to payment");
+    expect(api.startCheckout).toHaveBeenCalledWith("monthly", 10, "hosted-no-plan");
+  });
+
+  it("reads the new price when the cohort sold out meanwhile, and asks for agreement again", async () => {
+    vi.mocked(api.getSession).mockResolvedValue(login());
+    vi.mocked(api.getBilling).mockResolvedValue(NO_PLAN);
+    vi.mocked(api.startCheckout).mockRejectedValueOnce(new api.PriceChangedError(PRICE_CHANGED));
+    await mount(null, { checkout: { plan: "founding", ref: null } });
+    await tick("agree-terms");
+    await tick("agree-renewal");
+    vi.mocked(api.getBilling).mockResolvedValue({ ...NO_PLAN, founding: { cohort: 1, seatsLeft: 100 } });
+    await click("Continue to payment");
+    expect(api.startCheckout).toHaveBeenLastCalledWith("founding", 50, null);
+    expect(container.querySelector("[role=alert]")?.textContent).toBe(PRICE_CHANGED);
+    expect(text()).toContain("renews automatically every year at $60");
+    for (const box of ["agree-terms", "agree-renewal"])
+      expect(container.querySelector<HTMLInputElement>(`#${box}`)!.checked, box).toBe(false);
+    await tick("agree-terms");
+    await tick("agree-renewal");
+    await click("Continue to payment");
+    expect(api.startCheckout).toHaveBeenLastCalledWith("founding", 60, null);
+  });
+
+  it("says when checkout is not open, and offers a held plan the portal instead", async () => {
+    vi.mocked(api.getSession).mockResolvedValue(login());
+    await mount(null, { checkout: { plan: "founding", ref: null } });
+    expect(text()).toContain("Checkout is not open yet.");
+    expect(container.querySelector("#agree-terms")).toBeNull();
+    vi.mocked(api.getBilling).mockResolvedValue(FOUNDING);
+    await act(async () => window.dispatchEvent(new Event("focus")));
+    expect(text()).toContain("This account already has Founding.");
+    await click("Manage billing");
+    expect(api.openPortal).toHaveBeenCalled();
+    await click("Go to your account");
+    expect(location.pathname).toBe("/account");
+    expect(heading()).toBe("Your account");
+  });
+});
+
+describe("billing", () => {
+  it("reads the account again on coming back, once for both of its events", async () => {
+    vi.mocked(api.getSession).mockResolvedValue(login());
+    await mount(null);
+    expect(api.getBilling).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      document.dispatchEvent(new Event("visibilitychange"));
+      window.dispatchEvent(new Event("focus"));
+    });
+    expect(api.getComputers).toHaveBeenCalledTimes(2);
+    expect(api.getBilling).toHaveBeenCalledTimes(2);
+  });
+
+  it("confirms the checkout Stripe returned from once, then keeps its confirmation", async () => {
+    history.replaceState(null, "", "/billing");
+    vi.mocked(api.getSession).mockResolvedValue(login());
+    vi.mocked(api.confirmCheckout).mockResolvedValue(FOUNDING);
+    await mount(null, { confirming: "op_1" });
+    expect(api.confirmCheckout).toHaveBeenCalledWith("op_1");
+    expect(api.getBilling).not.toHaveBeenCalled();
+    expect(location.pathname).toBe("/billing");
+    expect(container.querySelector("h1")?.textContent).toBe("You’re subscribed");
+    expect(text()).toContain(`To the Terms (version ${TERMS_VERSION}) and to automatic renewal`);
+    expect(text()).toContain("at $50 plus any applicable tax");
+    vi.mocked(api.getBilling).mockResolvedValue(FOUNDING);
+    await act(async () => window.dispatchEvent(new Event("focus")));
+    expect(api.confirmCheckout).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers a founder the row unticked, and saves the name they choose", async () => {
+    history.replaceState(null, "", "/billing");
+    vi.mocked(api.getSession).mockResolvedValue(login());
+    vi.mocked(api.getBilling).mockResolvedValue(FOUNDING);
+    vi.mocked(api.joinFounders).mockResolvedValue({ ...FOUNDING, founder: { offered: true, name: "Ada" } });
+    await mount(null);
+    expect(container.querySelector<HTMLInputElement>("#founder-shown")!.checked).toBe(false);
+    expect(container.querySelector("#founder-name")).toBeNull();
+    await tick("founder-shown");
+    expect(container.querySelector<HTMLInputElement>("#founder-name")!.value).toBe("Member");
+    await input("founder-name", "  ");
+    expect(button("Save").disabled).toBe(true);
+    await input("founder-name", " Ada ");
+    await click("Save");
+    expect(api.joinFounders).toHaveBeenCalledWith("Ada");
+    expect(text()).toContain("You are in the founders row as Ada.");
+  });
+});
+
+describe("the plan section", () => {
+  beforeEach(() => {
+    vi.mocked(api.getSession).mockResolvedValue(login());
+  });
+
+  it("is absent while checkout is closed", async () => {
+    await mount(null);
+    expect(container.querySelector("#plan")).toBeNull();
+  });
+
+  it.each([
+    [false, "so Natural Voice and the Hosted Relay are paused"],
+    [true, "Hosted stays included with this account (admin)"],
+  ])("keeps Manage billing for a payment that failed, entitled %s", async (entitled, copy) => {
+    vi.mocked(api.getBilling).mockResolvedValue({ ...FOUNDING, active: false, entitled, founder: { offered: false, name: null } });
+    await mount(null);
+    expect(container.querySelector("#plan")).not.toBeNull();
+    expect(text()).toContain(copy);
+    await click("Manage billing");
+    expect(api.openPortal).toHaveBeenCalled();
+  });
+
+  it("lets a lapsed founder leave the row", async () => {
+    vi.mocked(api.getBilling).mockResolvedValue({ ...NO_PLAN, founder: { offered: false, name: "Ada" } });
+    vi.mocked(api.leaveFounders).mockResolvedValue(undefined);
+    await mount(null);
+    expect(container.querySelector('a[href="/checkout"]')).not.toBeNull();
+    vi.mocked(api.getBilling).mockResolvedValue(NO_PLAN);
+    await click("Leave the founders row");
+    expect(api.leaveFounders).toHaveBeenCalled();
+    // The page reads the plan again, with the name gone.
+    expect(text()).toContain("You left the founders row.");
+    expect(text()).not.toContain("Leave the founders row");
+  });
+
+  it("sends an account with no plan, enrolling, to checkout in another tab once it is open", async () => {
+    vi.mocked(api.getHostedVoice).mockResolvedValue({ entitled: false, on: false });
+    vi.mocked(api.getBilling).mockResolvedValue(NO_PLAN);
+    await mount(ENROLLMENT);
+    const plans = container.querySelector<HTMLAnchorElement>('a[href="/checkout?ref=hosted-no-plan"]')!;
+    expect(plans.target).toBe("_blank");
+  });
+});
+
+describe("withdrawal and closure", () => {
+  const OFFER = {
+    subscription: "sub_contract1",
+    startedAt: "2026-10-21T12:00:00Z",
+    until: "2026-11-11T12:00:00Z",
+    email: "billing@example.com",
+  };
+  const WITHDRAWABLE: BillingSummary = { ...FOUNDING, withdrawal: OFFER };
+  const heading = () => container.querySelector("h1")?.textContent;
+  beforeEach(() => {
+    vi.mocked(api.getSession).mockResolvedValue(login());
+  });
+
+  it("shows the contract and statement before confirming, and keeps the acknowledgement after", async () => {
+    history.replaceState(null, "", "/billing");
+    vi.mocked(api.getBilling).mockResolvedValue(WITHDRAWABLE);
+    const withdrawn = {
+      reference: "wd-reference-1", subscription: OFFER.subscription, plan: "founding", startedAt: OFFER.startedAt,
+      submittedAt: "2026-10-22T09:30:00Z", acknowledged: true, settled: true,
+    };
+    vi.mocked(api.withdraw).mockResolvedValue({ ...NO_PLAN, withdrawn });
+    await mount(null);
+    expect(text()).toContain("Model withdrawal form");
+    expect(text()).not.toContain(OFFER.subscription);
+    await click("Withdraw from contract");
+    expect(api.withdraw).not.toHaveBeenCalled();
+    for (const shown of [OFFER.subscription, OFFER.email, WITHDRAWAL_STATEMENT]) expect(text()).toContain(shown);
+    await click("Keep my plan");
+    expect(text()).not.toContain(OFFER.subscription);
+    await click("Withdraw from contract");
+    await click("Confirm withdrawal");
+    expect(api.withdraw).toHaveBeenCalledWith(OFFER.subscription);
+    expect(text()).toContain("Withdrawal received");
+    expect(text()).toContain("wd-reference-1");
+    expect(text()).toContain("We emailed this acknowledgement");
+    expect(container.querySelector("#withdraw")).toBeNull();
+  });
+
+  it("explains what closing does to the plan before closing, then signs the page out", async () => {
+    vi.mocked(api.getBilling).mockResolvedValue(WITHDRAWABLE);
+    vi.mocked(api.closeAccount).mockResolvedValue(undefined);
+    await mount(null);
+    await click("Close account…");
+    expect(container.querySelector<HTMLDialogElement>("dialog[aria-labelledby=close-title]")!.open).toBe(true);
+    for (const said of ["Your Founding plan ends now instead of on", "closing refunds that payment in full", "Closing does not withdraw", "cancel renewal in Manage billing"])
+      expect(text()).toContain(said);
+    expect(api.closeAccount).not.toHaveBeenCalled();
+    vi.mocked(api.getSession).mockResolvedValue(null);
+    await click("Close account");
+    expect(api.closeAccount).toHaveBeenCalled();
+    expect(text()).toContain("Your account is closed.");
+    expect(heading()).toBe("Sign in to Dormouse Hosted");
+  });
+
+  it("needs a recent login, and a plan it could read, to close", async () => {
+    vi.mocked(api.getSession).mockResolvedValue(login(60 * 60 * 1000));
+    vi.mocked(api.getBilling).mockResolvedValue(WITHDRAWABLE);
+    await mount(null);
+    expect(button("Close account…").disabled).toBe(true);
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    vi.mocked(api.getSession).mockResolvedValue(login());
+    vi.mocked(api.getBilling).mockRejectedValue(new Error("Billing is temporarily unavailable. Try again."));
+    await mount(null);
+    await click("Close account…");
+    expect(button("Close account").disabled).toBe(true);
+    expect(text()).toContain("Your plan could not load");
+  });
+});
+
+describe("billing reads", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("reads closed billing from a 200's body, and any 5xx as an outage", async () => {
+    const { getBilling, closeAccount } = await vi.importActual<typeof import("./api")>("./api");
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ closed: true }));
+    expect(await getBilling()).toBe("closed");
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ message: CHECKOUT_CLOSED }, { status: 503 }));
+    await expect(getBilling()).rejects.toThrow("Billing is temporarily unavailable");
+    // A closure billing refuses shows the server's message.
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ message: "Email support." }, { status: 409 }));
+    await expect(closeAccount()).rejects.toThrow("Email support.");
+  });
+});
+
+describe("startCheckout", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("reads a 409 PRICE_CHANGED as a price change, and any other 409 as its message", async () => {
+    const { startCheckout, PriceChangedError } = await vi.importActual<typeof import("./api")>("./api");
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ message: PRICE_CHANGED }, { status: 409 }));
+    await expect(startCheckout("founding", 50, null)).rejects.toBeInstanceOf(PriceChangedError);
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ message: "Founding is closed." }, { status: 409 }));
+    const closed = startCheckout("founding", 50, null);
+    await expect(closed).rejects.toThrow("Founding is closed.");
+    await expect(closed).rejects.not.toBeInstanceOf(PriceChangedError);
+  });
+
+  it("agrees to the current terms and to renewal, and leaves only for an https page", async () => {
+    const { startCheckout } = await vi.importActual<typeof import("./api")>("./api");
+    const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ url: "javascript:alert(1)" }));
+    await expect(startCheckout("yearly", 100, "settings-voice")).rejects.toThrow("Billing is temporarily unavailable");
+    expect(JSON.parse(fetch.mock.calls[0]![1]!.body as string)).toEqual({
+      plan: "yearly", ref: "settings-voice", terms: TERMS_VERSION, autoRenew: true, price: 100,
+    });
   });
 });

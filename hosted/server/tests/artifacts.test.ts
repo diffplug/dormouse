@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 const packages = [
   ["pgstencil", "pgstencil"],
   ["@pgstencil/auth", "@pgstencil/auth/better-auth"],
+  ["@pgstencil/stripe", "@pgstencil/stripe"],
 ] as const;
 
 test("Hosted declares every required peer of the installed pgstencil packages, and no optional one, in dependencies", () => {
@@ -27,7 +28,7 @@ test("Hosted declares every required peer of the installed pgstencil packages, a
   }
 });
 
-test("the lockfile resolves both pgstencil packages from npm", () => {
+test("the lockfile resolves every pgstencil package from npm", () => {
   const lockfile = readFileSync("../pnpm-lock.yaml", "utf8");
   const lines = lockfile.split("\n");
   for (const [name, entry] of packages) {

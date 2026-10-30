@@ -506,7 +506,7 @@ describe('Hosted device-code enrollment', () => {
     const poll = (fetchMock: unknown) =>
       pollHostedEnrollment(RELAY, BEGIN.deviceCode, 'My Laptop', noiseStatic, fetchMock as typeof fetch);
 
-    it('posts the device code alone, and maps an enrolled answer through the enrollment guard', async () => {
+    it('posts the device code and this machine\'s name, and maps an enrolled answer through the enrollment guard', async () => {
       const enrollment = { burrowId: BURROW_ID, burrowToken: 'tok', origin: RELAY, rpId: 'relay.dormouse.sh' };
       const voiceToken = `dmv_${'V'.repeat(43)}`;
       const fetchMock = json(200, { status: 'enrolled', enrollment, voiceToken });
@@ -516,7 +516,7 @@ describe('Hosted device-code enrollment', () => {
       expect(fetchMock.mock.calls[0]![0]).toBe(`${RELAY}/api/burrow/enroll/poll`);
       const init = fetchMock.mock.calls[0]![1] as RequestInit;
       expect(init.redirect).toBe('error');
-      expect(JSON.parse(init.body as string)).toEqual({ deviceCode: BEGIN.deviceCode });
+      expect(JSON.parse(init.body as string)).toEqual({ deviceCode: BEGIN.deviceCode, label: 'My Laptop' });
       expect(answer).toEqual({
         status: 'approved',
         credential: { relayUrl: RELAY, ...enrollment, label: 'My Laptop', ...noiseStatic },
@@ -528,6 +528,19 @@ describe('Hosted device-code enrollment', () => {
       // A redemption the guard refuses fails, naming the field.
       expect(await poll(json(200, { status: 'enrolled', enrollment: { ...enrollment, burrowId: 'short' } })))
         .toEqual({ status: 'failed', message: expect.stringContaining('burrowId') });
+    });
+
+    it('sends the name reduced as Hosted stores it, and none when nothing is left', async () => {
+      const sent = async (label: string) => {
+        const fetchMock = json(200, { status: 'pending' });
+        await pollHostedEnrollment(RELAY, BEGIN.deviceCode, label, noiseStatic, fetchMock as typeof fetch);
+        return JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string);
+      };
+      expect(await sent(`\u202eMy\nLaptop${'x'.repeat(80)}`)).toEqual({
+        deviceCode: BEGIN.deviceCode,
+        label: `My Laptop${'x'.repeat(55)}`,
+      });
+      expect(await sent('\u200b')).toEqual({ deviceCode: BEGIN.deviceCode });
     });
 
     it('reads pending, expired, mismatch, and redeemed as they are', async () => {
@@ -582,7 +595,7 @@ describe('Hosted device-code enrollment', () => {
 
 describe.each(['remote', 'voice'] as const)('%s approval transport', (purpose) => {
   const poll = (fetchMock: typeof fetch) => pollHostedApproval(
-    'https://relay.dormouse.sh', 'D'.repeat(RELAY_BEARER_LENGTH), purpose, fetchMock,
+    'https://relay.dormouse.sh', 'D'.repeat(RELAY_BEARER_LENGTH), purpose === 'voice' ? { purpose } : {}, fetchMock,
     (body) => body && typeof body === 'object' && 'status' in body && body.status === 'pending' ? { status: 'pending' } : null,
   );
 

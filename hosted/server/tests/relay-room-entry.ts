@@ -91,6 +91,11 @@ export class RelayRows extends ProductionRows {
     if (rowsStalled) await new Promise((resolve) => setTimeout(resolve, 60_000));
     return super.burrows(burrowIds);
   }
+
+  override async sessions(tokenHashes: string[]) {
+    if (rowsStalled) await new Promise((resolve) => setTimeout(resolve, 60_000));
+    return super.sessions(tokenHashes);
+  }
 }
 
 export { OneTimeRoom };

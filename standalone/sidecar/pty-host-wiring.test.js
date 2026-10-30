@@ -25,7 +25,7 @@ test('VS Code gracefulKill dispatches named PTYs to the shared core and acknowle
       if (id.endsWith('node-pty')) return pty;
       if (id.endsWith('pty-core.cjs')) return { create };
       if (id.endsWith('dor-control-server.js')) return { createDorControlServer: () => null };
-      if (id.endsWith('local-directory')) return { canonicalLocalDirectory: async () => null };
+      if (id.endsWith('local-directory')) return { canonicalLocalDirectory: async () => null, resolveBinaryPath: () => undefined };
       throw new Error(`Unexpected module: ${id}`);
     },
     process: {

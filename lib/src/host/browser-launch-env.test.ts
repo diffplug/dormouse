@@ -50,6 +50,9 @@ describe('configured browser launch shells', () => {
     expect(result.args).not.toContain('Ubuntu');
     expect(result.args.slice(0, 2)).toEqual(['/s', '/c']);
   });
+  it('defaults to cmd.exe by its absolute path, never a bare ComSpec', () => {
+    expect(browserShellInvocation(runtime, argv, { ComSpec: 'cmd.exe', SystemRoot: 'D:\\Win' }, 'win32').shell).toBe('D:\\Win\\System32\\cmd.exe');
+  });
   it('runs Developer Command Prompt initialization before the helper and exits', () => {
     const result = browserShellInvocation({ ...runtime, shell: 'cmd.exe', args: ['/k', 'C:\\Program Files\\VS\\VsDevCmd.bat'] }, argv, {}, 'win32');
     expect(result.args).toEqual(['/s', '/c', '"call "C:\\Program Files\\VS\\VsDevCmd.bat" && "C:\\node.exe" "C:\\dor.js" "__launch-env" "marker""']);

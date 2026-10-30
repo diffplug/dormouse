@@ -45,6 +45,7 @@ import { getWorkspacesSnapshot, resetWorkspaces, setWorkspaces, type WorkspaceMe
 import { resetWorkspaceSurfaces, setWorkspaceSurfaces } from '../src/lib/workspace-surfaces';
 import { resetWorkspaceUi } from '../src/lib/workspace-ui-store';
 import { resetSurfaceIdPool } from '../src/lib/surface-ids';
+import { ALARM_UPSELL_SHOWN_AT_KEY } from '../src/lib/alarm-upsell';
 
 /** `parameters.primedWorkspaces`: the Window a Workspace story renders. */
 interface PrimedWorkspaces {
@@ -323,8 +324,8 @@ const preview: Preview = {
       if (scenario) platform.setDefaultScenario(scenario);
       else platform.clearDefaultScenario();
 
-      // Both of these are read during render, so they are applied here rather
-      // than in the effect below with the rest of the primed state.
+      // The platform fields below are read during render, so they are applied
+      // here rather than in the effect below with the rest of the primed state.
 
       // The VS Code host owns the theme, which is how the Settings dialog
       // decides to hide its Theme row (docs/specs/theme.md). Absent resets to
@@ -365,7 +366,7 @@ const preview: Preview = {
       // section, which renders nothing without a Host service behind the
       // webview (`docs/specs/relay.md`). Absent is the honest default for a
       // fake platform, so only the stories about that section prime a stub.
-      // Read during render like the two above: the store reads `burrow`
+      // Read during render like the fields above: the store reads `burrow`
       // when the section first subscribes, which is after this decorator's
       // render body and before any effect.
       const primedBurrow = context.parameters?.primedBurrow as
@@ -377,6 +378,8 @@ const preview: Preview = {
 
       // A picker story's selection must not change later stories' theme restore.
       window.localStorage.removeItem('dormouse:active-theme');
+      // Nor may one story's alarm-toggle line spend the next one's day.
+      window.localStorage.removeItem(ALARM_UPSELL_SHOWN_AT_KEY);
 
       // Installed themes normally arrive from OpenVSX and live in localStorage,
       // which every story shares — so a story that wants them names them, and
@@ -430,7 +433,7 @@ const preview: Preview = {
           // The push-device list is renderer-only derived state normally written
           // by the Burrow, which no story runs — so a story that wants the
           // Alarm dialog's device line names one, and every other story resets
-          // to `no-host`.
+          // to `no-burrow`.
           setPushDevices(primedPushDevices ?? { status: 'no-burrow', devices: [] });
           clearAllAlertSpeechStates();
           for (const [id, state] of Object.entries(primedAlertSpeech ?? {})) {

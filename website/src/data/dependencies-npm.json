@@ -267,7 +267,7 @@
       "author": "Microsoft Corporation",
       "homepage": "https://github.com/microsoft/node-pty",
       "versions": [
-        "1.2.0-beta.15"
+        "1.2.0-beta.18"
       ]
     },
     {
@@ -3893,21 +3893,12 @@
       ]
     },
     {
-      "name": "has-flag",
-      "license": "MIT",
-      "author": "Sindre Sorhus",
-      "homepage": "https://github.com/sindresorhus/has-flag",
-      "versions": [
-        "4.0.0"
-      ]
-    },
-    {
       "name": "hono",
       "license": "MIT",
       "author": "Yusuke Wada <yusuke@kamawada.com> (https://github.com/yusukebe)",
       "homepage": "https://hono.dev",
       "versions": [
-        "4.13.13"
+        "4.13.14"
       ]
     },
     {
@@ -3983,15 +3974,6 @@
       ]
     },
     {
-      "name": "supports-color",
-      "license": "MIT",
-      "author": "Sindre Sorhus",
-      "homepage": "https://github.com/chalk/supports-color",
-      "versions": [
-        "7.2.0"
-      ]
-    },
-    {
       "name": "web-push",
       "license": "MPL-2.0",
       "author": "Marco Castelluccio",
@@ -4008,7 +3990,7 @@
       "author": "Bereket Engida",
       "homepage": "https://www.better-auth.com",
       "versions": [
-        "1.7.10"
+        "1.7.12"
       ]
     },
     {
@@ -4017,7 +3999,7 @@
       "author": "Bereket Engida",
       "homepage": "https://www.better-auth.com/docs/adapters/drizzle",
       "versions": [
-        "1.7.10"
+        "1.7.12"
       ]
     },
     {
@@ -4026,7 +4008,7 @@
       "author": "Bereket Engida",
       "homepage": "https://www.better-auth.com/docs/adapters/kysely",
       "versions": [
-        "1.7.10"
+        "1.7.12"
       ]
     },
     {
@@ -4035,7 +4017,7 @@
       "author": "Bereket Engida",
       "homepage": "https://www.better-auth.com",
       "versions": [
-        "1.7.10"
+        "1.7.12"
       ]
     },
     {
@@ -4044,7 +4026,7 @@
       "author": "Bereket Engida",
       "homepage": "https://www.better-auth.com/docs/adapters/mongodb",
       "versions": [
-        "1.7.10"
+        "1.7.12"
       ]
     },
     {
@@ -4053,7 +4035,7 @@
       "author": "Bereket Engida",
       "homepage": "https://www.better-auth.com/docs/adapters/prisma",
       "versions": [
-        "1.7.10"
+        "1.7.12"
       ]
     },
     {
@@ -4062,7 +4044,7 @@
       "author": "Bereket Engida",
       "homepage": "https://www.better-auth.com",
       "versions": [
-        "1.7.10"
+        "1.7.12"
       ]
     },
     {
@@ -4111,21 +4093,21 @@
       ]
     },
     {
-      "name": "@opentelemetry/semantic-conventions",
-      "license": "Apache-2.0",
-      "author": "OpenTelemetry Authors",
-      "homepage": "https://github.com/open-telemetry/opentelemetry-js/tree/main/semantic-conventions",
-      "versions": [
-        "1.43.0"
-      ]
-    },
-    {
       "name": "@pgstencil/auth",
       "license": "MIT",
       "author": "DiffPlug",
       "homepage": "https://github.com/diffplug/pgstencil#readme",
       "versions": [
-        "0.4.0"
+        "0.4.2"
+      ]
+    },
+    {
+      "name": "@pgstencil/stripe",
+      "license": "MIT",
+      "author": "DiffPlug",
+      "homepage": "https://github.com/diffplug/pgstencil#readme",
+      "versions": [
+        "0.4.2"
       ]
     },
     {
@@ -4143,7 +4125,7 @@
       "author": "Bereket Engida",
       "homepage": "https://better-auth.com",
       "versions": [
-        "1.7.10"
+        "1.7.12"
       ]
     },
     {
@@ -4152,7 +4134,7 @@
       "author": "Bereket Engida",
       "homepage": "https://github.com/better-auth/better-call",
       "versions": [
-        "1.4.2"
+        "1.4.4"
       ]
     },
     {
@@ -4170,7 +4152,7 @@
       "author": "Filip Skokan <panva.ip@gmail.com>",
       "homepage": "https://github.com/panva/jose",
       "versions": [
-        "6.2.12"
+        "6.2.13"
       ]
     },
     {
@@ -4287,7 +4269,7 @@
       "author": "DiffPlug",
       "homepage": "https://github.com/diffplug/pgstencil#readme",
       "versions": [
-        "0.4.0"
+        "0.4.2"
       ]
     },
     {
@@ -4351,6 +4333,15 @@
       "homepage": "https://github.com/mcollina/split2",
       "versions": [
         "4.2.0"
+      ]
+    },
+    {
+      "name": "stripe",
+      "license": "MIT",
+      "author": "Stripe <support@stripe.com> (https://stripe.com/)",
+      "homepage": "https://github.com/stripe/stripe-node",
+      "versions": [
+        "22.6.2"
       ]
     },
     {

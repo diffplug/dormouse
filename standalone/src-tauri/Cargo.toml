@@ -37,6 +37,9 @@ windows = { version = "0.62", features = [
     # restrict_to_owner's Windows arm: the DACL that stands in for 0700/0600.
     "Win32_Security",
     "Win32_Security_Authorization",
+    # console_parent: owner chains, and re-enabling a window a dead dialog disabled.
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Input_KeyboardAndMouse",
 ] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -61,7 +64,3 @@ codegen-units = 1
 # Never "abort" (docs/specs/standalone.md -> "Objective-C exceptions").
 panic = "unwind"
 
-[patch.crates-io]
-# docs/specs/standalone.md -> "Objective-C exceptions".
-tao = { git = "https://github.com/diffplug/tao", rev = "12d4695500ff8e3b7cc9a409d6e01245296df6c1" }
-tao-macros = { git = "https://github.com/diffplug/tao", rev = "12d4695500ff8e3b7cc9a409d6e01245296df6c1" }

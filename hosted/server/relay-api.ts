@@ -36,6 +36,7 @@ import {
   presenceChallenge,
   randomBase64Url,
   readJson,
+  reduceBurrowLabel,
   toBase64Url,
   verifyPasskeyAssertion,
   verifySigninAssertion,
@@ -62,6 +63,7 @@ import { ENROLLMENT_POLL_INTERVAL_S, ENROLLMENT_TTL_MS } from "./policy-constant
 import { relayRoom } from "./relay-room-contract";
 import { relayPushRoutes } from "./relay-push";
 import { mintVoiceToken } from "./voice-token";
+import { recordMetric } from "./metrics";
 import {
   OWNER_COLUMNS,
   database,
@@ -360,6 +362,7 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
         accountId: userId,
         passkeyPublicKey: publicKey,
       };
+      recordMetric(c, c.env.HYPERDRIVE.connectionString, "pocket.signin");
       return c.json(res);
     }),
   );
@@ -510,7 +513,7 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
   });
 
   app.post(API_ROUTES.burrowEnrollPoll, async (c) => {
-    const body = await readJson<{ deviceCode?: unknown; purpose?: unknown }>(c);
+    const body = await readJson<{ deviceCode?: unknown; purpose?: unknown; label?: unknown }>(c);
     const purpose = body?.purpose ?? "remote";
     if (purpose !== "remote" && purpose !== "voice") return c.json({ error: "invalid purpose" }, 400);
     const deviceCode = body?.deviceCode;
@@ -593,9 +596,9 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
             WHERE "userCode" = $1 AND "userId" = $2 AND "expiresAt" > ${LOCKED_NOW}
               AND "redeemedAt" IS NULL AND purpose = 'remote' AND "confirmDigits" = $5
             RETURNING "userId"
-          ) INSERT INTO dormouse_relay_burrows ("burrowId", "userId", "tokenHash")
-            SELECT $3, "userId", $4 FROM spent`,
-          [userCode, owner.userId, burrowId, digest(burrowToken), confirmDigits],
+          ) INSERT INTO dormouse_relay_burrows ("burrowId", "userId", "tokenHash", label)
+            SELECT $3, "userId", $4, $6 FROM spent`,
+          [userCode, owner.userId, burrowId, digest(burrowToken), confirmDigits, reduceBurrowLabel(body?.label)],
         );
         if (rowCount) return "enrolled";
         // Lost to a poll that redeemed it while this one waited on the lock,
@@ -618,6 +621,7 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
         );
       if (outcome === "expired") return answer({ status: "expired" });
       if (outcome !== "enrolled") return answer({ status: "redeemed", burrowId: outcome.redeemed });
+      recordMetric(c, c.env.HYPERDRIVE.connectionString, "burrow.enrolled");
       return answer({
         status: "enrolled",
         // The Burrow enforces `origin`/`rpId` as its ConnectionPolicy; Hosted

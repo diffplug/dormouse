@@ -169,7 +169,7 @@ describe('LathHost — node identity (the no-re-parent guarantee)', () => {
 });
 
 describe('LathHost — parked leaves', () => {
-  it('retains the same document after more than eight browsers are minimized', () => {
+  it('retains a parked leaf\'s document however many leaves park after it', () => {
     const meta = leafMeta({ component: 'terminal' });
     const store = seeded(rowOf('a', 'b'), [['a', meta], ['b', meta]]);
     mount(store);

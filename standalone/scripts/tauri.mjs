@@ -7,6 +7,7 @@
 // cross-spawn (matches the other scripts here): resolves the local `tauri`
 // bin and behaves on Windows where a bare spawn('pnpm', …) can't.
 import spawn from 'cross-spawn';
+import path from 'node:path';
 import { resolveRelayOrigin } from '../../scripts/relay-origin.mjs';
 
 /**
@@ -21,6 +22,10 @@ const SELF_HOST_BUILD_CONFIG = {
 };
 
 const [subcommand, ...rest] = process.argv.slice(2);
+
+// Keep pnpm's selected runtime first for native CLI/Cargo lookups. Do not
+// synthesize an explicit binary override: build.rs requires one for cross builds.
+process.env.PATH = `${path.dirname(process.execPath)}${path.delimiter}${process.env.PATH ?? ''}`;
 
 if (subcommand === 'dev') {
   const staged = spawn.sync('pnpm', ['run', 'stage:dev'], { stdio: 'inherit' });

@@ -170,6 +170,26 @@ export const RULES = [
     },
   },
   {
+    // The probe's verdict, and on unix the one call into the helper holding it:
+    // a helper nobody calls keeps its message and asserts nothing.
+    rule: 'Network posture — manage verify probes the plaintext port on the Tailscale IP',
+    patterns: {
+      macOS: /fail "plaintext port \$1 is reachable on the Tailscale IP|^ {2}check_tailscale_plaintext "\$PORT"$/m,
+      Linux: /fail "plaintext port \$1 is reachable on the Tailscale IP|^ {2}check_tailscale_plaintext "\$PORT"$/m,
+      Windows: /Fail "plaintext port \$PORT is reachable on the Tailscale IP \$tsIp"/,
+    },
+    exactMatches: { macOS: 2, Linux: 2, Windows: 1 },
+  },
+  {
+    // No address to probe is no assertion, so it must fail, never note and pass.
+    rule: 'Network posture — manage verify fails when there is no Tailscale IPv4 to probe',
+    patterns: {
+      macOS: /fail "could not probe port \$1 off-loopback: no Tailscale IPv4 address"/,
+      Linux: /fail "could not probe port \$1 off-loopback: no Tailscale IPv4 address"/,
+      Windows: /Fail "could not probe port \$PORT off-loopback: no Tailscale IPv4 address"/,
+    },
+  },
+  {
     rule: 'Credentials at rest — the enrollment-offer generator is a platform CSPRNG',
     patterns: {
       macOS: /\/dev\/urandom/,

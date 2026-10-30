@@ -9,7 +9,7 @@
  */
 
 /**
- * The most frames either log keeps. A test case sends tens; `scripts/fake-burrow.mjs`
+ * The most frames either log keeps. A test case sends tens; `relay/scripts/fake-burrow.mjs`
  * is a long-running dev stand-in driving a live echo terminal, and would
  * otherwise retain every relayed PTY byte for the life of the process.
  */

@@ -83,8 +83,8 @@ for (const [name, source] of FIXTURES) {
   );
 }
 
-// `.mts` and `.cts` are TypeScript too, and the spec, the audit prompt and this
-// lint's own header all say it scans every tracked JavaScript and TypeScript
+// `.mts` and `.cts` are TypeScript too, and the audit prompt and this lint's
+// own header both say it scans every tracked JavaScript and TypeScript
 // file. Without this case that claim rests on an extension list nothing reads.
 selftest.withAppended(
   EXT_TARGET,
@@ -144,8 +144,8 @@ selftest.finish(
   'Each fixture adds one unguarded loopback listener. A case that stays green means\n'
   + 'LISTEN_RE in scripts/loopback-lint.mjs does not match that bind form — and a form\n'
   + 'reported with no fixture is one nothing has ever matched. Either way the\n'
-  + '"A new non-test listener without a guard reference fails the build"\n'
-  + 'clause in docs/specs/security-local.md -> "Loopback Listeners" is not true of it.\n'
+  + 'guard-reference half of S141 in docs/specs/security-local.md ->\n'
+  + '"Loopback Listeners" is not enforced for it.\n'
   + 'A green extension case means SOURCE_EXT does not read that file type, so the\n'
   + '"all tracked JavaScript and TypeScript" scope is narrower than it claims.\n'
   + 'The test case must stay green and appear under the test heading. A green\n'

@@ -113,8 +113,9 @@ jobs:
 
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
+      # --no-runtime: setup-node already put the pinned Node.js on PATH.
       - name: Install workspace dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --no-runtime
 
       - name: Verify AUDIT_PAT is provisioned
         env:
@@ -207,7 +208,7 @@ jobs:
 
       - name: Audit against the security specs
         if: steps.plan.outputs.skip != 'true'
-        uses: anthropics/claude-code-action@db77d4d3c98f3f6380e7cd45ffba2342a3dbde3c # v1.0.254
+        uses: anthropics/claude-code-action@8041f1d17e0e7d2f2cfe35002962e9f26237c0bb # v1.0.263
         env:
           # `claude-code-action` resets `GH_TOKEN` to its own internal
           # workflow token, so setting `GH_TOKEN` at this scope is
@@ -718,8 +719,9 @@ jobs:
 
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
+      # --no-runtime: setup-node already put the pinned Node.js on PATH.
       - name: Install workspace dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --no-runtime
 
       # In this runner's checkout only: the seeds, then one fresh root commit in
       # place of the history, so no diff tells the auditor which changes are
@@ -739,7 +741,7 @@ jobs:
       # The audit job's agent step, less `ci-and-secrets`: the same pinned
       # action, prompts, tools, and model split.
       - name: Audit the seeded checkout
-        uses: anthropics/claude-code-action@db77d4d3c98f3f6380e7cd45ffba2342a3dbde3c # v1.0.254
+        uses: anthropics/claude-code-action@8041f1d17e0e7d2f2cfe35002962e9f26237c0bb # v1.0.263
         env:
           BASH_DEFAULT_TIMEOUT_MS: "600000"
         with:

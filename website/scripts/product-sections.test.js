@@ -66,7 +66,7 @@ describe('the committed npm disclosure', () => {
     for (const name of [
       '@better-auth/core', '@better-auth/kysely-adapter', '@better-auth/memory-adapter', '@better-auth/telemetry',
       '@better-auth/utils', '@better-fetch/fetch', '@noble/ciphers', '@noble/hashes',
-      '@opentelemetry/semantic-conventions', '@pgstencil/auth', 'better-auth', 'better-call', 'defu', 'hono', 'jose',
+      '@pgstencil/auth', 'better-auth', 'better-call', 'defu', 'hono', 'jose',
       'kysely', 'pg', 'pg-cloudflare', 'pg-connection-string', 'pg-int8', 'pg-pool', 'pg-protocol', 'pg-types',
       'pgpass', 'pgstencil', 'postgres-array', 'postgres-bytea', 'postgres-date', 'postgres-interval', 'rou3',
       'split2', 'xtend', 'zod',

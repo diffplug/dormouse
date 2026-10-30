@@ -60,15 +60,6 @@ export interface WallKeyboardCtx {
   fireEvent: (event: WallEvent) => void;
 }
 
-/** Per-press dual-tap state — left-Meta then right-Meta within 500ms exits
- *  passthrough mode. Same for Shift. */
-export interface DualTapState {
-  lastCmdSide: RefObject<'left' | 'right' | null>;
-  lastCmdTime: RefObject<number>;
-  lastShiftSide: RefObject<'left' | 'right' | null>;
-  lastShiftTime: RefObject<number>;
-}
-
 /** Last arrow direction, so the inverse arrow can return to the prior pane. */
 export interface NavHistoryRef {
   current: { direction: string; fromId: string } | null;

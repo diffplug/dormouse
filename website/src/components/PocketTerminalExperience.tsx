@@ -10,11 +10,13 @@ import {
 import { PlaygroundShellRegistry } from "../lib/playground-shells";
 import { TutorialState } from "../lib/tutorial-state";
 import { TutDetector } from "../lib/tut-detector";
+import { trackTutorialCompletion } from "../lib/site-analytics";
 import { TutRunner } from "../lib/tut-runner";
 import { POCKET_TUTORIAL_PROFILE } from "../lib/tut-items";
 import { ChangelogRunner } from "../lib/changelog-runner";
 import { startAlertProgram } from "../lib/alert-programs";
 import { useRestoredTheme } from "dormouse-lib/lib/themes";
+import { HOSTED_REFS, withHostedRef } from "dormouse-lib/lib/hosted-links";
 
 import { WEBSITE_DEFAULT_THEME_ID } from "../lib/website-theme";
 
@@ -33,7 +35,7 @@ const POCKET_AUTOSTART_COMMANDS = new Map<string, string>([
 ]);
 
 const GITHUB_URL = "https://github.com/diffplug/dormouse";
-const POCKET_NOTIFY_URL = "/hosted/#remote-control";
+const POCKET_NOTIFY_URL = withHostedRef("/hosted/", HOSTED_REFS.tutorial, "remote-control");
 
 export function PocketTerminalExperience({
   interactive,
@@ -108,6 +110,7 @@ export function PocketTerminalExperience({
 
   useEffect(() => {
     let cancelled = false;
+    let stopCompletionTracking: (() => void) | null = null;
 
     async function loadWall() {
       const platform = await import("dormouse-lib/lib/platform");
@@ -131,6 +134,7 @@ export function PocketTerminalExperience({
       }
 
       const tutorialState = new TutorialState(POCKET_TUTORIAL_PROFILE.sections);
+      stopCompletionTracking = trackTutorialCompletion(tutorialState, "pocket");
       const detector = new TutDetector({
         state: tutorialState,
         activityStore: registry,
@@ -191,6 +195,7 @@ export function PocketTerminalExperience({
 
     return () => {
       cancelled = true;
+      stopCompletionTracking?.();
       spawnUnsubRef.current?.();
       spawnUnsubRef.current = null;
       detectorRef.current?.dispose();

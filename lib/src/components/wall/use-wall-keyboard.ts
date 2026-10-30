@@ -8,6 +8,7 @@ import { cancelUiSelectAll } from './keyboard/cancel-ui-select-all';
 import { handlePaneShortcuts } from './keyboard/handle-pane-shortcuts';
 import { handlePaneNavigation } from './keyboard/handle-pane-navigation';
 import { handleWorkspaceShortcuts } from './keyboard/handle-workspace-shortcuts';
+import { dualTap, newDualTapState } from '../../lib/dual-tap';
 import { isProxyOrigin } from '../../lib/iframe-proxy-registry';
 import { chromeKeyboardHeld } from './chrome-keyboard-lease';
 import type { NavHistoryRef, WallKeyboardCtx } from './keyboard/types';
@@ -25,10 +26,6 @@ const answeredKeys = new WeakSet<KeyboardEvent>();
 const consumedKeys = new Set<string>();
 
 export function useWallKeyboard(ctx: WallKeyboardCtx): void {
-  const lastCmdSide = useRef<'left' | 'right' | null>(null);
-  const lastCmdTime = useRef(0);
-  const lastShiftSide = useRef<'left' | 'right' | null>(null);
-  const lastShiftTime = useRef(0);
   const navHistory = useRef<NavHistoryRef['current']>(null);
 
   // Refs are stable across renders, so the handler can close over `ctx` once
@@ -38,7 +35,7 @@ export function useWallKeyboard(ctx: WallKeyboardCtx): void {
   ctxRef.current = ctx;
 
   useEffect(() => {
-    const dualTapState = { lastCmdSide, lastCmdTime, lastShiftSide, lastShiftTime };
+    const taps = newDualTapState();
 
     const handler = (e: KeyboardEvent) => {
       const c = ctxRef.current;
@@ -60,9 +57,8 @@ export function useWallKeyboard(ctx: WallKeyboardCtx): void {
     };
 
     const dispatch = (e: KeyboardEvent, c: WallKeyboardCtx) => {
-      // Any other key cancels a pending leader: a left-Shift capital, a word,
-      // then a right-Shift capital is typing, not the gesture.
-      if (e.key !== 'Meta' && e.key !== 'Shift') lastCmdSide.current = lastShiftSide.current = null;
+      // Before the context branch, so its keys cancel a pending tap too.
+      const leader = dualTap(taps, e);
       const context = (e.target as HTMLElement | null)?.closest?.('[data-terminal-context]');
       if (context) {
         if (handleContextCopy(e)) return;
@@ -72,7 +68,7 @@ export function useWallKeyboard(ctx: WallKeyboardCtx): void {
         if (helperId) handleMouseSelectionKeys(e, { ...c, selectedIdRef: { current: helperId } });
         return;
       }
-      if (handleDualTap(e, c, dualTapState)) return;
+      if (handleDualTap(e, c, leader)) return;
       // Before every mode/renaming gate below: a focused text field owns its
       // clipboard chords no matter what the wall is doing.
       if (handleEditableClipboard(e)) return;

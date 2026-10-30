@@ -77,7 +77,7 @@ describe("every page in the rail", () => {
     }
   });
 
-  it("discloses Hosted's metadata in the managed Relay section", () => {
+  it("discloses Hosted's metadata in the Hosted Relay section", () => {
     const markup = renderToStaticMarkup(<MemoryRouter><Hosted /></MemoryRouter>);
     const relay = markup.slice(markup.indexOf('id="remote-control"'));
     expect(relay).toContain("connection metadata");

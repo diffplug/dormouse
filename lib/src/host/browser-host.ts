@@ -148,7 +148,7 @@ const VIEWPORT_MEASURE_SCRIPT = '({width:innerWidth,height:innerHeight,dpr:devic
  *  and would walk straight past a caller's rejection into the page.
  *  `hasOwnProperty.call` keeps the table's own three names the only ones that
  *  select a script. Same guard, same reason as `own()` in
- *  `RemoteControlSection.tsx`. */
+ *  `lib/src/components/remote-control-shared.ts`. */
 function editScript(op: unknown): string | undefined {
   return typeof op === 'string' && Object.prototype.hasOwnProperty.call(EDIT_SCRIPTS, op)
     ? EDIT_SCRIPTS[op as BrowserEditOp]

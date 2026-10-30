@@ -1,5 +1,9 @@
 import { providerIds, providerNames } from "../server/providers.js";
 import type { ProviderId } from "../server/providers.js";
+import { NOT_ENTITLED_ERROR } from "../../remote-lib-common/src/remote/wire.ts";
+import { ADMIN_METRICS_PATH, type AdminMetricsBody } from "../server/metric-labels";
+import type { BillingClosed, BillingSummary } from "../server/billing-summary";
+import { PRICE_CHANGED, TERMS_VERSION, type Plan } from "../server/policy-constants";
 
 export const providers = providerIds;
 export type Provider = ProviderId;
@@ -67,9 +71,16 @@ export async function social(provider: Provider, linking: boolean) {
     linking ? "link-social" : "sign-in/social",
     { provider },
   );
-  const url = new URL(result.url);
-  if (url.protocol !== "https:")
-    throw new Error("Sign-in is temporarily unavailable. Please try again.");
+  leaveFor(result.url, "Sign-in is temporarily unavailable. Please try again.");
+}
+/**
+ * Sends this tab to `href`, an https page the server named (a provider's,
+ * Stripe's), or in development a loopback stand-in such as StripeDev's.
+ */
+function leaveFor(href: string, unavailable: string) {
+  const url = new URL(href);
+  const loopback = import.meta.env.DEV && url.protocol === "http:" && ["127.0.0.1", "localhost"].includes(url.hostname);
+  if (url.protocol !== "https:" && !loopback) throw new Error(unavailable);
   window.location.assign(url.href);
 }
 
@@ -119,6 +130,8 @@ export async function turnOffHostedVoice() {
 
 export interface Computer {
   burrowId: string;
+  /** The name it enrolled under, by default its hostname; null if it sent none. */
+  label: string | null;
   enrolledAt: string;
 }
 async function relay(path: string, init: RequestInit = {}): Promise<Response> {
@@ -169,6 +182,8 @@ export async function removePasskey(credentialId: string) {
   });
   if (!response.ok) throw await refused(response);
 }
+/** An approval the server refused because this account has no plan. */
+export class NoPlanError extends Error {}
 export async function approveEnrollment(
   userCode: string,
   purpose: "remote" | "voice" | undefined,
@@ -179,7 +194,11 @@ export async function approveEnrollment(
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ userCode, purpose: purpose ?? "remote", confirmDigits }),
   });
-  if (!response.ok) throw await refused(response);
+  if (response.ok) return;
+  const error = await refused(response);
+  throw response.status === 403 && error.message === NOT_ENTITLED_ERROR
+    ? new NoPlanError(error.message)
+    : error;
 }
 /** What a poll made of this account's live approval of a code; neither when there is none. */
 export interface ApprovalState {
@@ -191,4 +210,90 @@ export async function getApproval(userCode: string): Promise<ApprovalState> {
   const response = await relay(`/enrollments/${encodeURIComponent(userCode)}`);
   if (!response.ok) throw await refused(response);
   return (await response.json()) as ApprovalState;
+}
+
+/** What the admin page's read answered. */
+export type AdminMetricsRead =
+  | { status: "ok"; body: AdminMetricsBody }
+  | { status: "signed-out" }
+  /** Anyone but the admin: the route answers as if it were not there. */
+  | { status: "not-found" };
+export async function getAdminMetrics(): Promise<AdminMetricsRead> {
+  const response = await request(ADMIN_METRICS_PATH, undefined, "Metrics are temporarily unavailable. Try again.");
+  if (response.status === 401) return { status: "signed-out" };
+  if (response.status === 404) return { status: "not-found" };
+  if (!response.ok) throw await refused(response);
+  return { status: "ok", body: (await response.json()) as AdminMetricsBody };
+}
+
+const BILLING_UNAVAILABLE = "Billing is temporarily unavailable. Try again.";
+async function billing(path: string, init?: RequestInit): Promise<Response> {
+  return request(`/api/billing${path}`, init, BILLING_UNAVAILABLE);
+}
+const sendJson = (method: string, body: unknown): RequestInit => ({
+  method,
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify(body),
+});
+/** This account's plan; `closed` until checkout opens. */
+export async function getBilling(): Promise<BillingSummary | "closed"> {
+  const response = await billing("");
+  if (!response.ok) throw await refused(response);
+  const body = (await response.json()) as BillingSummary | BillingClosed;
+  return "closed" in body ? "closed" : body;
+}
+/** A checkout refused because `price` is no longer what it would charge. */
+export class PriceChangedError extends Error {}
+/**
+ * Starts a checkout of `plan` at the `price` the page showed, agreeing to the current terms and to automatic
+ * renewal, and sends this tab to Stripe.
+ */
+export async function startCheckout(plan: Plan, price: number, ref: string | null) {
+  const response = await billing(
+    "/checkout",
+    sendJson("POST", { plan, ...(ref ? { ref } : {}), terms: TERMS_VERSION, autoRenew: true, price }),
+  );
+  if (!response.ok) {
+    const error = await refused(response);
+    throw response.status === 409 && error.message === PRICE_CHANGED ? new PriceChangedError(error.message) : error;
+  }
+  leaveFor(((await response.json()) as { url: string }).url, BILLING_UNAVAILABLE);
+}
+/** Confirms the checkout Stripe returned from, answering the plan it bought. */
+export async function confirmCheckout(checkout: string): Promise<BillingSummary> {
+  const response = await billing("/confirm", sendJson("POST", { checkout }));
+  if (!response.ok) throw await refused(response);
+  return (await response.json()) as BillingSummary;
+}
+/** Sends this tab to Stripe's billing portal for this account's subscription. */
+export async function openPortal() {
+  const response = await billing("/portal", { method: "POST" });
+  if (!response.ok) throw await refused(response);
+  leaveFor(((await response.json()) as { url: string }).url, BILLING_UNAVAILABLE);
+}
+/** Withdraws from the contract `subscription` names, answering the plan with its acknowledgement. */
+export async function withdraw(subscription: string): Promise<BillingSummary> {
+  const response = await billing("/withdraw", sendJson("POST", { subscription }));
+  if (!response.ok) throw await refused(response);
+  return (await response.json()) as BillingSummary;
+}
+/** Closes this account, cancelling its subscription first; its login ends with it. */
+export async function closeAccount() {
+  const response = await request(
+    "/api/account/close",
+    sendJson("POST", { close: true }),
+    "Your account cannot be closed right now. Try again.",
+  );
+  if (!response.ok) throw await refused(response);
+}
+/** Joins the founders row under `name`, answering the plan. */
+export async function joinFounders(name: string): Promise<BillingSummary> {
+  const response = await billing("/founder", sendJson("PUT", { shown: true, name }));
+  if (!response.ok) throw await refused(response);
+  return (await response.json()) as BillingSummary;
+}
+/** Leaves the founders row; billing need not be open. */
+export async function leaveFounders() {
+  const response = await billing("/founder", sendJson("PUT", { shown: false }));
+  if (!response.ok) throw await refused(response);
 }

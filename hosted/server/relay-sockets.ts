@@ -46,6 +46,7 @@ export function relaySocketRoutes(app: Hono<{ Bindings: RelayEnv }>) {
     if (!session?.entitled) return c.json({ error: UNAUTHORIZED_ERROR }, 401);
     return forward(c, WS_ROUTES.client, session.userId, {
       [RELAY_ROOM_PARAMS.expiresAt]: String(session.expiresAt),
+      [RELAY_ROOM_PARAMS.session]: session.tokenHash,
     });
   });
 }

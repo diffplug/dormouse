@@ -1632,7 +1632,8 @@ function Invoke-Verify {
       Pass "plaintext port $PORT is not reachable on the Tailscale IP"
     }
   } else {
-    Note "skipped the off-loopback probe (no Tailscale IPv4 address)"
+    # Nothing was shown without an address to probe, so this fails rather than skips.
+    Fail "could not probe port $PORT off-loopback: no Tailscale IPv4 address"
   }
 
   $serve = Invoke-Tailscale @('serve', 'status')

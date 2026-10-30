@@ -18,7 +18,7 @@
 
 The October 2026 audit read tend 0.3.5's `claude/action.yaml`, `restore-sensitive-config.sh`, and instruction-pinning helper. Trusted outer steps receive credentials for preflight and proxy setup; the boundary is their absence from the sandbox agent, rather than an assertion that no trusted runner process outside the proxy ever holds them. The generated reaction/pre-check steps also receive the bot credential without launching an agent.
 
-**How every other generated workflow picks its subjects.** An event payload names the PR, issue, or comment (`tend-review`, `tend-triage`, `tend-mention`, `tend-ci-fix`), or a scheduled sweep works a fixed list — recent commits, dependency PRs, last night's runs.
+**How every other generated workflow picks its subjects.** An event payload names the PR, issue, or comment (`tend-review`, `tend-triage`, `tend-mention`), or a scheduled sweep works a fixed list — recent commits, dependency PRs, last night's runs.
 
 **Evidence that the subscription PUT has taken effect.** Asking as the bot (`gh api repos/diffplug/dormouse/subscription` → `subscribed: true`), corroborated without the bot credential through the public `GET /repos/diffplug/dormouse/subscribers` listing.
 

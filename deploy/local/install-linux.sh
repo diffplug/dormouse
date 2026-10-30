@@ -984,6 +984,21 @@ wait_for_health() {
   return 1
 }
 
+# Is the plaintext port $1 unreachable on this node's Tailscale IPv4? With no
+# address to probe nothing has been shown, so that fails rather than skips.
+check_tailscale_plaintext() {
+  local tsip
+  tsip="$(ts ip -4 2>/dev/null || true)"
+  tsip="${tsip%%$'\n'*}"
+  if [ -z "$tsip" ]; then
+    fail "could not probe port $1 off-loopback: no Tailscale IPv4 address"
+  elif http_answers "http://$tsip:$1/api/hello" 3; then
+    fail "plaintext port $1 is reachable on the Tailscale IP $tsip"
+  else
+    pass "plaintext port $1 is not reachable on the Tailscale IP"
+  fi
+}
+
 # Is anything in a captured listener list bound off-loopback? $1 = the port
 # (unused: `ss` was already filtered to it, and the address column is what this
 # reads), $2 = the `ss -lntH` lines. Exit 0 when at least one is off-loopback.
@@ -1178,18 +1193,7 @@ cmd_verify() {
     fi
   fi
 
-  local tsip
-  tsip="$(ts ip -4 2>/dev/null || true)"
-  tsip="${tsip%%$'\n'*}"
-  if [ -n "$tsip" ]; then
-    if http_answers "http://$tsip:$PORT/api/hello" 3; then
-      fail "plaintext port $PORT is reachable on the Tailscale IP $tsip"
-    else
-      pass "plaintext port $PORT is not reachable on the Tailscale IP"
-    fi
-  else
-    note "skipped the off-loopback probe (no Tailscale IPv4 address)"
-  fi
+  check_tailscale_plaintext "$PORT"
 
   local serve_out
   serve_out="$(ts serve status 2>/dev/null || true)"

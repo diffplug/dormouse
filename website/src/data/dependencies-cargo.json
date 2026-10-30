@@ -87,7 +87,7 @@
       "homepage": "https://tauri.app/",
       "declaredName": "tauri",
       "versions": [
-        "2.12.4"
+        "2.12.5"
       ]
     },
     {
@@ -97,7 +97,7 @@
       "homepage": "https://tauri.app/",
       "declaredName": "tauri-build",
       "versions": [
-        "2.7.3"
+        "2.7.4"
       ]
     },
     {
@@ -117,7 +117,7 @@
       "homepage": "https://github.com/tauri-apps/plugins-workspace",
       "declaredName": "tauri-plugin-updater",
       "versions": [
-        "2.14.0"
+        "2.14.1"
       ]
     },
     {
@@ -184,15 +184,6 @@
       "homepage": "https://github.com/dtolnay/anyhow",
       "versions": [
         "1.0.102"
-      ]
-    },
-    {
-      "name": "arbitrary",
-      "license": "MIT OR Apache-2.0",
-      "author": "The Rust-Fuzz Project Developers, Nick Fitzgerald <fitzgen@gmail.com>, Manish Goregaokar <manishsmail@gmail.com>, Simonas Kazlauskas <arbitrary@kazlauskas.me>, Brian L. Troutwine <brian@troutwine.us>, Corey Farwell <coreyf@rwell.org>",
-      "homepage": "https://github.com/rust-fuzz/arbitrary/",
-      "versions": [
-        "1.4.2"
       ]
     },
     {
@@ -638,15 +629,6 @@
       "homepage": "https://github.com/jhpratt/deranged",
       "versions": [
         "0.5.8"
-      ]
-    },
-    {
-      "name": "derive_arbitrary",
-      "license": "MIT OR Apache-2.0",
-      "author": "The Rust-Fuzz Project Developers, Nick Fitzgerald <fitzgen@gmail.com>, Manish Goregaokar <manishsmail@gmail.com>, Andre Bogus <bogusandre@gmail.com>, Corey Farwell <coreyf@rwell.org>",
-      "homepage": "https://github.com/rust-fuzz/arbitrary",
-      "versions": [
-        "1.4.2"
       ]
     },
     {
@@ -1315,7 +1297,7 @@
       "author": "Matthew D. Steele <mdsteele@alum.mit.edu>",
       "homepage": "https://github.com/mdsteele/rust-ico",
       "versions": [
-        "0.5.0"
+        "0.6.0"
       ]
     },
     {
@@ -2110,7 +2092,6 @@
       "author": "The image-rs Developers",
       "homepage": "https://github.com/image-rs/image-png",
       "versions": [
-        "0.17.16",
         "0.18.1"
       ]
     },
@@ -2330,7 +2311,7 @@
       "author": "Joseph Birr-Pixton",
       "homepage": "https://github.com/rustls/rustls",
       "versions": [
-        "0.23.45"
+        "0.23.46"
       ]
     },
     {
@@ -2810,16 +2791,16 @@
       "name": "tao",
       "license": "Apache-2.0",
       "author": "Tauri Programme within The Commons Conservancy, The winit contributors",
-      "homepage": "https://github.com/diffplug/tao",
+      "homepage": "https://github.com/tauri-apps/tao",
       "versions": [
-        "0.37.1"
+        "0.37.2"
       ]
     },
     {
       "name": "tao-macros",
       "license": "MIT OR Apache-2.0",
       "author": "Tauri Programme within The Commons Conservancy",
-      "homepage": "https://github.com/diffplug/tao",
+      "homepage": "https://github.com/tauri-apps/tao",
       "versions": [
         "0.1.4"
       ]
@@ -2848,7 +2829,7 @@
       "author": "Tauri Programme within The Commons Conservancy",
       "homepage": "https://tauri.app/",
       "versions": [
-        "2.7.3"
+        "2.7.4"
       ]
     },
     {
@@ -2857,7 +2838,7 @@
       "author": "Tauri Programme within The Commons Conservancy",
       "homepage": "https://tauri.app/",
       "versions": [
-        "2.7.3"
+        "2.7.4"
       ]
     },
     {
@@ -2884,7 +2865,7 @@
       "author": "Tauri Programme within The Commons Conservancy",
       "homepage": "https://tauri.app/",
       "versions": [
-        "2.12.2"
+        "2.12.3"
       ]
     },
     {
@@ -3152,6 +3133,15 @@
       "homepage": "https://github.com/seanmonstar/try-lock",
       "versions": [
         "0.2.5"
+      ]
+    },
+    {
+      "name": "typed-path",
+      "license": "MIT OR Apache-2.0",
+      "author": "Chip Senkbeil <chip@senkbeil.org>",
+      "homepage": "https://github.com/chipsenkbeil/typed-path",
+      "versions": [
+        "0.13.0"
       ]
     },
     {
@@ -3864,9 +3854,9 @@
       "name": "zip",
       "license": "MIT",
       "author": "Mathijs van de Nes <git@mathijs.vd-nes.nl>, Marli Frost <marli@frost.red>, Ryan Levick <ryan.levick@gmail.com>, Chris Hennick <hennickc@amazon.com>",
-      "homepage": "https://github.com/zip-rs/zip2.git",
+      "homepage": "https://github.com/zip-rs/zip2",
       "versions": [
-        "4.6.1"
+        "9.1.3"
       ]
     },
     {

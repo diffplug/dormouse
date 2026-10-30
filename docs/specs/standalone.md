@@ -286,6 +286,18 @@ Source of truth: `Arrival` in `standalone/src-tauri/src/routing.rs`; `begin_arri
 
 Source of truth: `window_at` in `standalone/src-tauri/src/routing.rs`; `standalone/src/workspace-drag.ts`.
 
+### Console window parenting
+
+On Windows the window holding a PTY owns its ConPTY console window, so a dialog a console program owns by `GetAncestor(GetConsoleWindow(), GA_ROOTOWNER)`, as MSAL sign-in does, stays above that window instead of falling behind Dormouse (rationale).
+
+- **Only Rust names a window handle.** `pty:spawn` carries `parentWindow`, the HWND's native-order bytes as hex, beside the webview's options and never in them; the sidecar hands it to node-pty's `setParentWindow` in the spawn's own tick, before the shell launches. **Never persist it.**
+- **Must re-parent where ownership settles**, with `pty:parentWindow {ids, parentWindow}`: at `adopt_done` to the target, at every hand-back to the source (§Arrival queue); never at a transfer's start, when a tear-out's target has no window yet.
+- **A refused or failed parent never blocks a terminal**: the sidecar logs it and the PTY runs unparented.
+- **A modal dialog disables its owner until dismissed**: the one window holding that terminal, every pane in it included; sibling windows stay usable.
+- **Must re-enable a window that stays disabled, unminimized, with no visible window in its owner chain** over consecutive recovery ticks, so a dead dialog — its process the shell or a child the shell outlives — never strands the window (microsoft/node-pty#996 recovers only on shell exit). A minimized window hides the dialogs it owns, so it is never judged. **Never take foreground back** after a recovery: Windows has already activated another app, and the user clicks back in.
+
+Source of truth: `standalone/src-tauri/src/console_parent.rs`; `pty_spawn` / `send_parent_window` / `start_console_parent_recovery` in `standalone/src-tauri/src/lib.rs`; `setParentWindow` in `standalone/sidecar/pty-core.js`. `standalone/scripts/conpty-dialog-probe.ps1` opens such a dialog by hand.
+
 ## Persistence
 
 **One `PersistedWindow` per window, every Workspace in it**, restored on the next launch (`docs/specs/transport.md` → "The governing rule"). The Window collector's writer is `TauriAdapter.saveWindowState`; `getWindowState` is the boot reader. Collector and cwd probes: `docs/specs/transport.md` → "Persisted session types".
@@ -437,19 +449,17 @@ Source of truth: `start_ui_watchdog` in `standalone/src-tauri/src/lib.rs`; `Watc
 
 ## Objective-C exceptions
 
-**Must let an Objective-C exception that AppKit raises beneath a tao callback, such as the `sendEvent:` override, unwind to AppKit**, whose event loop reports it and keeps running. Both halves are required (rationale):
-
-- **Must build release with `panic = "unwind"`.**
-- **Must take tao from the `diffplug/tao` fork** through `[patch.crates-io]`, whose Apple callbacks are `extern "C-unwind"`: one fork branch per patched release (`dormouse-0.37` is `tao-v0.37.1` plus that commit), `tao-macros` from the same rev. **Must rebase the commit onto the new release when tauri moves tao**, since an unused `[patch]` only warns; drop the patch once tauri depends on a tao carrying tauri-apps/tao#1354.
+**Must build release with `panic = "unwind"`**, so an Objective-C exception that AppKit raises beneath a tao callback, such as the `sendEvent:` override, unwinds to AppKit, whose event loop reports it and keeps running (rationale).
 
 **Rust panics still abort** (`abort_on_panic`, installed first in `run`). **An exception raised inside the Tauri event handler still aborts** (rationale).
 
-Source of truth: `abort_on_panic` in `standalone/src-tauri/src/panic_policy.rs`; `[patch.crates-io]` in `standalone/src-tauri/Cargo.toml`. Pinned by `standalone/src-tauri/tests/objc_exception_unwinds.rs`.
+Source of truth: `abort_on_panic` in `standalone/src-tauri/src/panic_policy.rs`; `[profile.release]` in `standalone/src-tauri/Cargo.toml`. Pinned by `standalone/src-tauri/tests/objc_exception_unwinds.rs`.
 
 ## Build and development
 
-Source of truth: `standalone/package.json`, `standalone/src-tauri/tauri.conf.json`, and the root `package.json` for `dev:standalone` and `innerdogfood`; `runDev` in `standalone/scripts/dev-standalone.mjs`.
+Source of truth: `standalone/package.json`, `standalone/src-tauri/tauri.conf.json`, and the root `package.json` for `dev:standalone` and `innerdogfood`; `standalone/scripts/tauri.mjs`; `runDev` in `standalone/scripts/dev-standalone.mjs`.
 
+- **Must prepend the wrapper's Node directory to PATH without setting binary overrides.** Runtime requirements: `docs/specs/security-supply-chain.md` → "Bundled runtime".
 - **The sidecar bundle and the webview bake `DORMOUSE_RELAY_ORIGIN`** (`docs/specs/relay.md` → "Relay origin"); the webview CSP has no relay sources (`standalone/scripts/tauri-conf.test.mjs`).
 - **A self-host `tauri build` overlays no updater endpoint and no updater artifacts**, so the binary cannot reach `dormouse.sh` and needs no signing key. Pinned by `standalone/scripts/dev-standalone.test.mjs`.
 - The bundle ships the whole sidecar via the `../sidecar/**/*` resources glob, including node-pty's prebuilds + bundled ConPTY and the shell-integration scripts (`docs/specs/theme.md` -> "OSC color queries on Windows require the bundled ConPTY", `docs/specs/terminal-state.md` -> "Shell-integration injection").
@@ -474,6 +484,10 @@ The harness **may omit** native-only desktop chrome but **must preserve** every 
 Source of truth: `standalone/scripts/dev-agent-browser.mjs`; `standalone/src/browser-sidecar-adapter.ts`.
 
 ## Future
+
+**Scope: console-parenting-vscode** (§Console window parenting)
+
+- **VS Code**, once it offers a supported way to name the window hosting a webview to Dormouse's own PTY host: `window.nativeHandle` is a proposed, Insiders-only API tracking the active window.
 
 **Scope: siri-setting**
 

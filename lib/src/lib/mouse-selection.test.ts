@@ -50,7 +50,7 @@ describe('mouse-selection: default state', () => {
 });
 
 describe('mouse-selection: shadowed program drags', () => {
-  it('drops a shadowed drag, with its editor, when the program stops reporting', () => {
+  it('drops a shadowed drag when the program stops reporting', () => {
     setMouseReporting('a', 'vt200');
     setSelection('a', { startRow: 0, startCol: 0, endRow: 0, endCol: 4, shape: 'linewise', dragging: false, startedInScrollback: false, owner: 'program' });
     setMouseReporting('a', 'none');

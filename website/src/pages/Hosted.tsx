@@ -9,7 +9,7 @@
  *
  * See docs/specs/pricing.md -> The Hosted page.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CheckIcon,
   CloudArrowUpIcon,
@@ -44,19 +44,27 @@ import {
   type Founders,
 } from "../lib/hosted-cohorts";
 import {
+  CHECKOUT_OPEN,
   FOUNDING_COHORT_SIZE,
   HOSTED_MONTHLY,
   HOSTED_YEARLY,
   LIST_ANNUAL,
   LIST_MONTHLY,
   YEARLY_SAVING,
+  checkoutUrl,
   foundingTier,
   pricingJsonLd,
   type Tier,
 } from "../lib/hosted-pricing";
 import { canonicalUrl, siteMeta, sitePath } from "../lib/site-meta";
+import { takeVisitRef } from "../lib/hosted-ref";
+import type { HostedRef } from "dormouse-lib/lib/hosted-links";
+import { trackEvent, trackPageview, type SiteRouteHandle } from "../lib/site-analytics";
 
 const PAGE_PATH = "/hosted";
+
+/** This page sends its own pageview, so it can carry the visit's `ref`. */
+export const handle: SiteRouteHandle = { ownPageview: true };
 
 const SECURITY_MODEL_URL =
   "https://github.com/diffplug/dormouse/blob/main/docs/specs/remote-security-model.md";
@@ -68,14 +76,14 @@ export function meta({ location }: MetaArgs) {
   return siteMeta(location.pathname, {
     title: "Dormouse Hosted",
     description:
-      "The terminal is free. Dormouse Hosted adds a managed Relay for Pocket and Natural Voice "
+      "The terminal is free. Dormouse Hosted adds the Hosted Relay for Pocket and Natural Voice "
       + `for spoken alarms — from $${LIST_MONTHLY} a month, with founding prices while they last.`,
   });
 }
 
 export const HOSTED_TOC: TocEntry[] = [
   { id: "voice", text: "Natural Voice", children: [] },
-  { id: "remote-control", text: "The managed Relay", children: [] },
+  { id: "remote-control", text: "The Hosted Relay", children: [] },
   { id: "self-hosting", text: "Self-hosting stays free", children: [] },
   { id: "account", text: "Your Hosted account", children: [] },
   { id: "faq", text: "Questions", children: [] },
@@ -157,15 +165,23 @@ function Price({ tier }: { tier: Pick<Tier, "price" | "per" | "listPrice"> }) {
   );
 }
 
+/** What a buy button does: counts the click, then goes to `href` or, without one, opens the notice. */
+type Buy = { onBuy: (tier: Tier) => void; href: (tier: Tier) => string | null };
+
 /**
  * "Buy" plus what it buys on the label a screen reader reads, since it hears
- * the buttons out of their cards.
+ * the buttons out of their cards. A link once checkout is open.
  */
-function BuyButton({ tier, label, onBuy }: { tier: Tier; label: string; onBuy: (tier: Tier) => void }) {
-  return (
+function BuyButton({ tier, label, buy }: { tier: Tier; label: string; buy: Buy }) {
+  const href = buy.href(tier);
+  return href ? (
+    <a href={href} onClick={() => buy.onBuy(tier)} aria-label={`Buy ${tier.name}`} className={ACTION_CLASS}>
+      {label}
+    </a>
+  ) : (
     <button
       type="button"
-      onClick={() => onBuy(tier)}
+      onClick={() => buy.onBuy(tier)}
       aria-label={`Buy ${tier.name}`}
       className={ACTION_CLASS}
     >
@@ -303,7 +319,7 @@ function FreeCard() {
   );
 }
 
-function HostedCard({ onBuy }: { onBuy: (tier: Tier) => void }) {
+function HostedCard({ buy }: { buy: Buy }) {
   // Monthly is the prerendered default: it is the reference price every other
   // number on the page is read against.
   const [yearly, setYearly] = useState(false);
@@ -319,7 +335,7 @@ function HostedCard({ onBuy }: { onBuy: (tier: Tier) => void }) {
           ? "Two months free against monthly"
           : `Save $${YEARLY_SAVING} by paying yearly`
       }
-      action={<BuyButton tier={tier} label="Get Hosted" onBuy={onBuy} />}
+      action={<BuyButton tier={tier} label="Get Hosted" buy={buy} />}
       footnote="30-day refund"
     >
       <Includes
@@ -336,7 +352,7 @@ function HostedCard({ onBuy }: { onBuy: (tier: Tier) => void }) {
   );
 }
 
-function FoundingCard({ cohort, onBuy }: { cohort: Cohort; onBuy: (tier: Tier) => void }) {
+function FoundingCard({ cohort, buy }: { cohort: Cohort; buy: Buy }) {
   const tier = foundingTier();
   return (
     <PlanCard
@@ -348,7 +364,7 @@ function FoundingCard({ cohort, onBuy }: { cohort: Cohort; onBuy: (tier: Tier) =
           ? `${cohort.seatsLeft} of ${FOUNDING_COHORT_SIZE} seats left at $${tier.price}`
           : null
       }
-      action={<BuyButton tier={tier} label="Become a founder" onBuy={onBuy} />}
+      action={<BuyButton tier={tier} label="Become a founder" buy={buy} />}
       footnote="30-day refund"
     >
       <FoundersRow founders={cohort.founders} />
@@ -363,7 +379,7 @@ function FoundingCard({ cohort, onBuy }: { cohort: Cohort; onBuy: (tier: Tier) =
 }
 
 /**
- * What a buy button does until checkout ships.
+ * What a buy button does while checkout is closed (`CHECKOUT_OPEN`).
  *
  * Deliberately loud about being unfinished: the prices are real and the plan
  * is specified, but purchase is a later stage,
@@ -440,12 +456,31 @@ function FaqEntry({ question, children }: { question: string; children: React.Re
 export default function Hosted() {
   const [cohort, setCohort] = useState<Cohort>({ seatsLeft: null, founders: null });
   const [checkoutTodo, setCheckoutTodo] = useState<Tier | null>(null);
+  // The visit's ref, which checkout carries on to Stripe.
+  const [ref, setRef] = useState<HostedRef | "other" | null>(null);
   const closeTodo = useCallback(() => setCheckoutTodo(null), []);
+  const buy = useMemo<Buy>(
+    () => ({
+      onBuy: (tier) => {
+        trackEvent({ name: "hosted plan clicked", plan: tier.id });
+        if (!CHECKOUT_OPEN) setCheckoutTodo(tier);
+      },
+      href: (tier) => (CHECKOUT_OPEN ? checkoutUrl(tier, ref) : null),
+    }),
+    [ref],
+  );
 
   useEffect(() => {
     const controller = new AbortController();
     void fetchCohort(controller.signal).then(setCohort);
     return () => controller.abort();
+  }, []);
+
+  // Off the address bar on arrival, and onto this visit's pageview and checkout links.
+  useEffect(() => {
+    const visitRef = takeVisitRef();
+    setRef(visitRef);
+    trackPageview(visitRef);
   }, []);
 
   return (
@@ -458,7 +493,7 @@ export default function Hosted() {
           page can quote them without running the counters. */}
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: pricingJsonLd(canonicalUrl(PAGE_PATH)) }}
+        dangerouslySetInnerHTML={{ __html: pricingJsonLd(canonicalUrl(PAGE_PATH), CHECKOUT_OPEN) }}
       />
 
       {/* The cards open the page: no heading of their own, but `#pricing`
@@ -468,8 +503,8 @@ export default function Hosted() {
             in the same order on a phone. */}
         <div className="grid gap-4 md:grid-cols-3">
           <FreeCard />
-          <HostedCard onBuy={setCheckoutTodo} />
-          <FoundingCard cohort={cohort} onBuy={setCheckoutTodo} />
+          <HostedCard buy={buy} />
+          <FoundingCard cohort={cohort} buy={buy} />
         </div>
 
         <p className={`mt-5 text-sm ${MUTED_TEXT_CLASS}`}>
@@ -519,7 +554,7 @@ export default function Hosted() {
           aria-hidden="true"
         />
         <AnchoredHeading id="remote-control" spacing="mt-0 mb-3">
-          The managed Relay
+          The Hosted Relay
         </AnchoredHeading>
         <p className={`mb-3 font-display text-sm ${ACCENT_TEXT_CLASS}`}>Included with any plan</p>
         <p className={`mb-4 ${BODY_TEXT_CLASS}`}>
