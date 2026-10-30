@@ -159,7 +159,7 @@ Errors are JSON `{ message }`. Cookie routes answer 401 without a login and admi
 
 **Must store only a token's SHA-256, and nothing about the computer holding it.** A token is `dmv_` plus base64url of 32 random bytes, returned only by the poll that redeems a voice approval.
 
-**A token is live until a year (`VOICE_TOKEN_IDLE_DAYS`) passes without a counted speak, or since its mint if none**; speak and `on` refuse any other. **Must delete expired tokens from the voice Worker's daily Cron Trigger (`TOKEN_SWEEP_CRON`)**, its only database pass (rationale).
+**A token is live until a year (`VOICE_TOKEN_IDLE_DAYS`) passes without a counted speak, or since its mint if none**; speak and `on` refuse any other. **Must delete expired tokens, and every account's daily counters for a UTC day 90 days (`VOICE_USAGE_RETENTION_DAYS`) or more ago, from the voice Worker's daily Cron Trigger (`TOKEN_SWEEP_CRON`)**, its only database pass, so the Privacy policy can state that bound (rationale).
 
 **Never name a token, or list computers, on the account page.** It says whether Natural Voice is on, and turning it off asks first.
 
