@@ -88,6 +88,7 @@ Every key not claimed above forwards to the embedded page while a screencast pan
 | `Shift+F10` / `ContextMenu` | Workspace tab menu | On a focused Workspace tab. |
 | `↑` / `↓`, `Home` / `End` | Move in a menu | Tab menu rows; `Enter` chooses. |
 | Prompted letter (unmodified, Shift optional) | Confirm kill | Type the letter shown; prompt routing: [layout.md](layout.md#kill-confirmation). |
+| `Enter` / `Esc` (stray-key prompt) | Type / stay | Raised by a key no command-mode binding claims ([layout.md](layout.md#keyboard-shortcuts-command-mode)). |
 
 ## VS Code host
 

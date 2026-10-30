@@ -334,6 +334,10 @@ describe('WorkspaceWindow', () => {
       expect(getWorkspaceUiSnapshot().renamingId).toBeNull();
       expect(getWorkspaceUiSnapshot().confirmation).toBeNull();
       expect(wallFor(first).querySelector('[data-focused="true"]')).toBeNull();
+      // An unbound key raises the stray-key prompt, which holds the next keys.
+      expect(document.querySelector('[data-stray-key-prompt]')).not.toBeNull();
+      await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); });
+      await flush();
     }
     await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: '2', bubbles: true, cancelable: true })); });
     await flush();
@@ -855,8 +859,14 @@ describe('WorkspaceWindow', () => {
       await flush();
     };
 
-    // A bare `c` never creates a Workspace; that is the strip's `+`.
-    await press('c');
+    // A bare `c` never creates a Workspace; that is the strip's `+`. It, like
+    // every unbound key, raises the stray-key prompt that Escape takes down.
+    const stray = async (key: string) => {
+      await press(key);
+      expect(document.querySelector('[data-stray-key-prompt]')).not.toBeNull();
+      await press('Escape');
+    };
+    await stray('c');
     const ids = () => getWorkspacesSnapshot().workspaces.map((workspace) => workspace.id);
     expect(ids()).toHaveLength(1);
     await act(async () => { createWorkspace(); });
@@ -864,7 +874,7 @@ describe('WorkspaceWindow', () => {
     const second = ids()[1];
     expect(getActiveWorkspaceId()).toBe(second);
 
-    for (const key of ['n', 'p', '$', '&']) await press(key);
+    for (const key of ['n', 'p', '$', '&']) await stray(key);
     expect(getActiveWorkspaceId()).toBe(second);
     await press('1');
     expect(getActiveWorkspaceId()).toBe(first);

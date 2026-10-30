@@ -31,6 +31,8 @@ import { parseRenderMode, type BrowserAutomationProvider } from 'dor-lib-common/
 import { isToolRender } from '../lib/platform/tool-types';
 import { acquireAgentBrowserSurfaceController, closeBrowserSurface, requestBrowserRenderMode } from './wall/agent-browser-surface-controller';
 import { KILL_CONFIRM_MS, KILL_SHAKE_MS, KillConfirmOverlay, randomKillChar, type ConfirmKill } from './KillConfirm';
+import { StrayKeyModal } from './StrayKeyPrompt';
+import { resolvePaneElement } from './wall/resolve-pane-element';
 import { messageOf } from '../lib/errors';
 import {
   acknowledgeSession,
@@ -372,6 +374,18 @@ export function Wall({
 
   // UI state
   const [confirmKill, setConfirmKill] = useState<ConfirmKill | null>(null);
+  // The key that raised the stray-key prompt. The ref leads the state so the
+  // next key of the same burst already finds the prompt up.
+  const [strayKey, setStrayKey] = useState<string | null>(null);
+  const strayKeyRef = useRef<string | null>(null);
+  const raiseStrayKey = useCallback((key: string) => {
+    strayKeyRef.current = key;
+    setStrayKey(key);
+  }, []);
+  const dismissStrayKey = useCallback(() => {
+    strayKeyRef.current = null;
+    setStrayKey(null);
+  }, []);
   const [renamingPaneId, setRenamingPaneId] = useState<string | null>(null);
   // Runtime Doors carry id + token only; the restored rows' metadata goes into the
   // store via the seed effect below.
@@ -484,6 +498,9 @@ export function Wall({
   useEffect(() => { onEventRef.current?.({ type: 'zoomChange', zoomed }); }, [zoomed]);
   useEffect(() => { onEventRef.current?.({ type: 'minimizeChange', count: doors.length }); }, [doors]);
   useEffect(() => { onEventRef.current?.({ type: 'selectionChange', id: selectedId, kind: selectedType }); }, [selectedId, selectedType]);
+  // The prompt answers for the selection and mode it was raised in; a click
+  // elsewhere, a mode change, or a kill prompt takes it down.
+  useEffect(dismissStrayKey, [dismissStrayKey, mode, selectedId, selectedType, active, confirmKill]);
 
   // --- Helpers ---
 
@@ -2432,6 +2449,9 @@ export function Wall({
     reopenClosed: () => { void reopenClosed({ gesture: true }); },
     acceptKill,
     rejectKill,
+    strayKeyRef,
+    raiseStrayKey,
+    dismissStrayKey,
     setRenamingPaneId,
     fireEvent,
   });
@@ -2557,6 +2577,18 @@ export function Wall({
                 confirmKill={confirmKill}
                 paneElements={paneElements}
                 onCancel={() => rejectKill()}
+              />
+            )}
+
+            {/* Stray-key prompt — over the selected pane, or the Wall when a
+                Door or Workspace tab is selected. Gated on `active` for the
+                same reason as the kill overlay. */}
+            {active && strayKey !== null && (
+              <StrayKeyModal
+                strayKey={strayKey}
+                workspaces={workspaceId !== undefined}
+                targetElement={selectedType === 'pane' && selectedId ? resolvePaneElement(paneElements.get(selectedId)) : null}
+                onCancel={dismissStrayKey}
               />
             )}
 

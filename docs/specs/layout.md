@@ -234,9 +234,9 @@ flowchart TD
   X -- no --> D["dual-tap → editable-field clipboard → mouse-selection keys"]
   D --> P{"passthrough?"}
   P -- no --> R{"pane rename or chrome lease?"}
-  R -- no --> KC["kill confirmation"]
+  R -- no --> KC["kill confirmation → stray-key prompt"]
   KC --> DL{"dialog lease held?"}
-  DL -- no --> W["Workspace shortcuts → pane shortcuts → pane navigation"]
+  DL -- no --> W["Workspace shortcuts → pane shortcuts → pane navigation → stray key"]
   M["iframe shim leader message, proxy origin only"] --> MA{"Wall active and passthrough?"}
   MA -- yes --> CM["command mode"]
 ```
@@ -245,13 +245,22 @@ flowchart TD
 
 Every open dialog holds its own reference-counted lease on the dialog gate; command-mode dispatch resumes only once the last lease is released.
 
+**Must raise the stray-key prompt on a key no command-mode binding claims**: a printed character (Space included) or Backspace, with no modifier but Shift. A bound key inert on the selection (`t` on a Door) is not one; a bare Wall's digit is. The prompt answers every key ahead of the dialog gate, so the rest of a word typed in the wrong mode reaches neither a verb nor the Session:
+
+- `Escape` dismisses it.
+- `Enter` dismisses it, then acts as usual.
+- Modifiers and host chords pass, as for the kill confirmation.
+- Any other key is swallowed.
+
+A mode or selection change, or a kill confirmation, takes it down.
+
 **Must defer the pending Workspace confirmation while an inline Workspace rename editor is open**, leaving its keys to the input; it appears after rename ends.
 
 Chrome outside every Wall takes the chrome keyboard lease instead: the Workspace strip's rename editor, close confirmation, and tab menu live in the app bar, where `stopPropagation` cannot reach a capture-phase window listener. The Workspace branch is inert on a Wall with no Workspace id.
 
 **Must leave Escape and Tab to IME composition in modal/popover focus traps and terminal-context dialogs, and Enter/Escape in shared inline editors** (`isComposingKey` in `lib/src/lib/dom.ts`).
 
-Source of truth: `useWallKeyboard` in `lib/src/components/wall/use-wall-keyboard.ts`; `acquireChromeKeyboardLease` in `lib/src/components/wall/chrome-keyboard-lease.ts`.
+Source of truth: `useWallKeyboard` in `lib/src/components/wall/use-wall-keyboard.ts`; `acquireChromeKeyboardLease` in `lib/src/components/wall/chrome-keyboard-lease.ts`; `handleStrayKey` in `lib/src/components/wall/keyboard/handle-stray-key.ts`.
 
 ### Split cwd inheritance
 

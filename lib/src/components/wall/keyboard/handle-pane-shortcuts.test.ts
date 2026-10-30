@@ -43,6 +43,8 @@ function makeCtx(overrides: Partial<WallKeyboardCtx> = {}): WallKeyboardCtx {
     selectedTypeRef: { current: 'pane' },
     doorsRef: { current: [{ id: 'pane-a', title: 'Pane A' }] },
     dialogKeyboardActiveRef: { current: false },
+    strayKeyRef: { current: null },
+    raiseStrayKey: vi.fn(),
     wallActionsRef: {
       current: {
         onSplitH: vi.fn(),

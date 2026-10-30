@@ -8,6 +8,7 @@ import { cancelUiSelectAll } from './keyboard/cancel-ui-select-all';
 import { handlePaneShortcuts } from './keyboard/handle-pane-shortcuts';
 import { handlePaneNavigation } from './keyboard/handle-pane-navigation';
 import { handleWorkspaceShortcuts } from './keyboard/handle-workspace-shortcuts';
+import { handleStrayKey, handleStrayKeyPrompt } from './keyboard/handle-stray-key';
 import { dualTap, newDualTapState } from '../../lib/dual-tap';
 import { isProxyOrigin } from '../../lib/iframe-proxy-registry';
 import { chromeKeyboardHeld } from './chrome-keyboard-lease';
@@ -78,10 +79,12 @@ export function useWallKeyboard(ctx: WallKeyboardCtx): void {
       // Workspace strip's rename editor / close confirmation).
       if (c.renamingRef.current || chromeKeyboardHeld()) return;
       if (handleKillConfirm(e, c)) return;
+      if (handleStrayKeyPrompt(e, c)) return;
       if (c.dialogKeyboardActiveRef.current) return;
       if (handleWorkspaceShortcuts(e, c)) return;
       if (handlePaneShortcuts(e, c, navHistory)) return;
-      handlePaneNavigation(e, c, navHistory);
+      if (handlePaneNavigation(e, c, navHistory)) return;
+      handleStrayKey(e, c);
     };
 
     // A focused cross-origin iframe owns the keyboard, so its keystrokes never
