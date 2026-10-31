@@ -1,0 +1,29 @@
+exitCode: 0
+stdout:
+{
+  "devices": [
+    {
+      "id": "0123456789abcdef",
+      "label": "Dormouse Pocket (Home Screen)",
+      "paired_at": "2026-10-29T10:00:00.000Z",
+      "last_seen_at": "2026-10-30T14:03:05.000Z",
+      "connected": true
+    },
+    {
+      "id": "fedcba9876543210",
+      "label": "Dormouse Pocket (browser)",
+      "paired_at": "2026-10-01T09:00:00.000Z",
+      "last_seen_at": "2026-10-20T08:00:00.000Z",
+      "connected": false
+    },
+    {
+      "id": "00112233445566aa",
+      "label": "Unknown device",
+      "paired_at": "2026-09-15T12:00:00.000Z",
+      "last_seen_at": null,
+      "connected": false
+    }
+  ]
+}
+
+stderr:

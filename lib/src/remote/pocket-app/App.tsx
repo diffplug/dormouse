@@ -1104,14 +1104,14 @@ export const FORGET_PHONE_LABEL = 'Sign out and forget this phone';
 export const FORGET_PHONE_TITLE = 'Forget this phone?';
 export const FORGET_PHONE_CONFIRM = 'Forget this phone';
 /**
- * What forgetting cannot reach. A Burrow has no per-phone removal: its
- * Disconnect, which drops every phone, is the only way it stops listing this
- * one (`docs/specs/remote-security-model.md` -> "Revocation propagation").
+ * What forgetting cannot reach. Nothing on the phone reaches a Burrow's ACL:
+ * only that Burrow's own Revoke, or its Disconnect, stops it listing this one
+ * (`docs/specs/remote-security-model.md` -> "Revocation").
  */
 export const FORGET_PHONE_BODY =
   'Removes every Burrow from this phone, stops its push notifications, and signs out. '
   + 'This can’t be undone: each Burrow must be paired again. '
-  + 'Each Burrow still lists this phone until its Disconnect, in Settings → Network, clears it.';
+  + 'Each Burrow still lists this phone until you revoke it there, in Settings → Network.';
 
 const PUSH_ENABLE_LABEL = 'Enable push notifications';
 

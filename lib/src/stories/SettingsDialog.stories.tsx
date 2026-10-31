@@ -443,7 +443,7 @@ export const WithRemoteControl: Story = {
   play: async ({ canvasElement }) => {
     await selectTopic('Network')({ canvasElement });
     const body = dialog(canvasElement);
-    await body.findByText('1 paired phone.');
+    await body.findByText('Paired phones');
     await expect(body.getByRole('radio', { name: /^Anywhere, through / })).toHaveAttribute('aria-checked', 'true');
   },
 };
@@ -463,7 +463,7 @@ export const SearchNetwork: Story = {
     // Updates is its own group: a search for it leaves the rest of the topic out.
     fireEvent.change(body.getByRole('searchbox'), { target: { value: 'never updates itself' } });
     await waitFor(() => expect(body.getByText(/This build never updates itself/)).toBeVisible());
-    await expect(body.getByText('1 paired phone.')).not.toBeVisible();
+    await expect(body.getByText('Paired phones')).not.toBeVisible();
   },
 };
 

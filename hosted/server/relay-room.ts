@@ -37,7 +37,9 @@ import {
 import type { RelayBurrow, RelaySessionOwner } from "./relay-auth";
 import {
   RELAY_ROOM_PARAMS,
+  RELAY_ROOM_SWEEP_GRACE_MS,
   RELAY_ROOM_SWEEP_MS,
+  RELAY_ROOM_SWEEP_RETRY_MS,
   RELAY_ROW_READ_TIMEOUT_MS,
   type RelayRoomRpc,
 } from "./relay-room-contract";
@@ -47,17 +49,22 @@ import { OPEN, refuseSocket } from "./socket-room";
 /** The key of the object's one durable value: the account it serves, written once. */
 const ACCOUNT_KEY = "account";
 
+/** Why a failed sweep closes a socket whose row has gone unread too long: it may come back. */
+const UNCHECKED_REASON = "relay could not recheck this socket";
+
 /**
  * Everything routing needs of a socket, held as its attachment so a woken
  * object rebuilds it from `ctx.getWebSockets` rather than from memory.
  * `openedAt` is when it was accepted, the start of its silence until it
- * pings. A Client's `session` is its session's token hash, what the sweep
- * and `closeSessions` find it by. `retired` is the generation guard: set on a
+ * pings. `checkedAt` is when the last read that found its row live began:
+ * its upgrade's, then each successful sweep's. A Client's `session` is its
+ * session's token hash, what the sweep and `closeSessions` find it by.
+ * `retired` is the generation guard: set on a
  * socket unregistered ahead of its close handshake, after which it is neither
  * routed nor torn down again.
  */
 type Conn =
-  | { role: "burrow"; burrowId: string; openedAt: number; retired?: true }
+  | { role: "burrow"; burrowId: string; openedAt: number; checkedAt: number; retired?: true }
   | {
       role: "client";
       clientId: string;
@@ -65,6 +72,7 @@ type Conn =
       expiresAt: number;
       burrowId: string | null;
       openedAt: number;
+      checkedAt: number;
       retired?: true;
     };
 type BurrowConn = Extract<Conn, { role: "burrow" }>;
@@ -152,6 +160,7 @@ export class RelayRoom extends DurableObject implements RelayRoomRpc {
    */
   #openBurrow(account: string, burrowId: string): Promise<Response> {
     return this.ctx.blockConcurrencyWhile(async () => {
+      const checkedAt = this.now();
       let row: RelayBurrow | undefined;
       try {
         [row] = await this.#rows((rows) => rows.burrows([burrowId]));
@@ -168,7 +177,7 @@ export class RelayRoom extends DurableObject implements RelayRoomRpc {
       const { 0: client, 1: server } = new WebSocketPair();
       this.ctx.acceptWebSocket(server, ["burrow", burrowTag(burrowId)]);
       const openedAt = this.now();
-      server.serializeAttachment({ role: "burrow", burrowId, openedAt } satisfies BurrowConn);
+      server.serializeAttachment({ role: "burrow", burrowId, openedAt, checkedAt } satisfies BurrowConn);
       await this.#armBy(this.now() + RELAY_ROOM_SWEEP_MS);
       return new Response(null, { status: 101, webSocket: client });
     });
@@ -188,6 +197,7 @@ export class RelayRoom extends DurableObject implements RelayRoomRpc {
     if (!session || !(expiresAt > this.now()))
       return Promise.resolve(refuseSocket(WS_CLOSE_UNAUTHORIZED, WS_CLOSE_UNAUTHORIZED_REASON));
     return this.ctx.blockConcurrencyWhile(async () => {
+      const checkedAt = this.now();
       let row: RelaySessionOwner | undefined;
       try {
         [row] = await this.#rows((rows) => rows.sessions([session]));
@@ -213,6 +223,7 @@ export class RelayRoom extends DurableObject implements RelayRoomRpc {
         expiresAt,
         burrowId: null,
         openedAt,
+        checkedAt,
       } satisfies ClientConn);
       await this.#armBy(Math.min(expiresAt, this.now() + RELAY_ROOM_SWEEP_MS));
       return new Response(null, { status: 101, webSocket: client });
@@ -290,9 +301,10 @@ export class RelayRoom extends DurableObject implements RelayRoomRpc {
    * `client-gone`; then every held socket is swept against its row. Then the
    * alarm moves to the earlier of the next expiry and the next sweep,
    * `RELAY_ROOM_SWEEP_MS` after this one started (a slow row read never
-   * delays it), or is cleared while nothing is held. Opening a socket only
-   * ever brings the alarm earlier and a close leaves it, so an alarm may find
-   * nothing to do.
+   * delays it), or `RELAY_ROOM_SWEEP_RETRY_MS` after if either read failed,
+   * or is cleared while nothing is held. Opening a socket only ever brings
+   * the alarm earlier and a close leaves it, so an alarm may find nothing to
+   * do.
    */
   async alarm() {
     const now = this.now();
@@ -300,66 +312,96 @@ export class RelayRoom extends DurableObject implements RelayRoomRpc {
       if (held.conn.expiresAt <= now)
         this.#retire(held, WS_CLOSE_UNAUTHORIZED, WS_CLOSE_UNAUTHORIZED_REASON);
     const account = await this.ctx.storage.get<string>(ACCOUNT_KEY);
-    await Promise.all([this.#sweepBurrows(account), this.#sweepClients(account)]);
+    const swept = await Promise.all([this.#sweepBurrows(account, now), this.#sweepClients(account, now)]);
     const clients = this.#held("client");
     if (clients.length === 0 && this.#held("burrow").length === 0) return this.ctx.storage.deleteAlarm();
-    await this.ctx.storage.setAlarm(Math.min(now + RELAY_ROOM_SWEEP_MS, ...clients.map(({ conn }) => conn.expiresAt)));
+    const sweep = now + (swept.every(Boolean) ? RELAY_ROOM_SWEEP_MS : RELAY_ROOM_SWEEP_RETRY_MS);
+    await this.ctx.storage.setAlarm(Math.min(sweep, ...clients.map(({ conn }) => conn.expiresAt)));
   }
 
   /**
    * The backstop to `closeSessions`: every held Client whose session is gone,
    * expired, or another account's, or whose owner is no longer entitled,
    * closes 1008 as an expired one does, its Burrow told `client-gone`. One
-   * query for them all; a failed or timed-out read leaves them to the next
-   * sweep.
+   * query for them all, begun at `start`; whether it was read, a failed or
+   * timed-out one leaving them to `#closeUnchecked`.
    */
-  async #sweepClients(account: string | undefined) {
+  async #sweepClients(account: string | undefined, start: number): Promise<boolean> {
     const sessions = [...new Set(this.#held("client").map(({ conn }) => conn.session))];
-    if (sessions.length === 0) return;
+    if (sessions.length === 0) return true;
     let rows: RelaySessionOwner[];
     try {
       rows = await this.#rows((rows) => rows.sessions(sessions));
     } catch {
       console.error("RelayRoom could not sweep its Clients");
-      return;
+      this.#closeUnchecked("client", start);
+      return false;
     }
     // Judged on what is held now: a Client opened during the read was not asked about.
+    const asked = new Set(sessions);
     const gone = new Set(sessions);
     for (const row of rows) if (row.userId === account && row.entitled) gone.delete(row.tokenHash);
-    for (const held of this.#held("client"))
+    for (const held of this.#held("client")) {
       if (gone.has(held.conn.session)) this.#retire(held, WS_CLOSE_UNAUTHORIZED, WS_CLOSE_UNAUTHORIZED_REASON);
+      else if (asked.has(held.conn.session)) this.#checked(held, start);
+    }
+    return true;
   }
 
   /**
    * The backstop to `closeBurrow`: every held Burrow whose row is gone or is
    * another account's closes 4001, and one whose owner is no longer entitled
-   * 4002, its Clients told `burrow-gone`. One query for them all; a failed or
-   * timed-out read leaves them to the next sweep.
+   * 4002, its Clients told `burrow-gone`. One query for them all, begun at
+   * `start`; whether it was read, a failed or timed-out one leaving them to
+   * `#closeUnchecked`.
    */
-  async #sweepBurrows(account: string | undefined) {
+  async #sweepBurrows(account: string | undefined, start: number): Promise<boolean> {
     const burrowIds = this.#held("burrow").map(({ conn }) => conn.burrowId);
-    if (burrowIds.length === 0) return;
+    if (burrowIds.length === 0) return true;
     let rows: RelayBurrow[];
     try {
       rows = await this.#rows((rows) => rows.burrows(burrowIds));
     } catch {
       console.error("RelayRoom could not sweep its Burrows");
-      return;
+      this.#closeUnchecked("burrow", start);
+      return false;
     }
     const owned = new Map(
       rows.filter((row) => row.userId === account).map((row) => [row.burrowId, row.entitled]),
     );
     for (const burrowId of burrowIds) {
       const entitled = owned.get(burrowId);
-      if (entitled) continue;
       const held = this.#burrow(burrowId);
       if (!held) continue;
-      if (entitled === false) {
+      if (entitled) {
+        this.#checked(held, start);
+      } else if (entitled === false) {
         this.#retire(held, WS_CLOSE_BURROW_NOT_ENTITLED, WS_CLOSE_BURROW_NOT_ENTITLED_REASON);
       } else {
         this.#retire(held, WS_CLOSE_BURROW_REVOKED, WS_CLOSE_BURROW_REVOKED_REASON);
       }
     }
+    return true;
+  }
+
+  /** `held`, found live by a sweep begun at `start`. */
+  #checked(held: Held, start: number) {
+    if (held.conn.checkedAt >= start) return;
+    held.conn.checkedAt = start;
+    held.ws.serializeAttachment(held.conn);
+  }
+
+  /**
+   * After a sweep's failed read: every held `role` socket no read has found
+   * live for `RELAY_ROOM_SWEEP_MS + RELAY_ROOM_SWEEP_GRACE_MS` closes 1013, so
+   * a removal the sweep cannot see is held no longer than that, and comes
+   * back through the upgrade, which rechecks its row. The rest ride out the
+   * outage until the retry.
+   */
+  #closeUnchecked(role: Conn["role"], start: number) {
+    for (const held of this.#held(role))
+      if (start - held.conn.checkedAt >= RELAY_ROOM_SWEEP_MS + RELAY_ROOM_SWEEP_GRACE_MS)
+        this.#retire(held, WS_CLOSE_TRY_AGAIN_LATER, UNCHECKED_REASON);
   }
 
   /** The alarm at `time`, unless one is already set sooner. */

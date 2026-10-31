@@ -3,6 +3,7 @@ import { DEFAULT_PAIRING_TTL_MS } from 'remote-lib-common';
 import { ModalReviewBlock, TextInput, modalActionButton } from './design';
 import { ExternalTextLink } from './ExternalTextLink';
 import { OneTimeConnection } from './OneTimeConnection';
+import { AccessLogDisclosure, PairedDeviceList, useAccessRecords } from './PairedDevices';
 import {
   FIELD_HINT,
   FIELD_LABEL,
@@ -34,6 +35,7 @@ import {
   reconnectBurrow,
   refreshBurrowStatus,
   reenrollBurrow,
+  revokePairedDevice,
   subscribeToBurrowStatus,
   subscribeToInvitation,
 } from '../remote/burrow/burrow-status-store';
@@ -231,7 +233,7 @@ const SPENT_GET_ANOTHER = 'This setup code is spent — get a new one and try ag
  * nothing about how.
  *
  * Every failure names what did *not* happen — "nothing was paired" — because
- * the paired count above it moves for none of them ({@link PairingOutcome}).
+ * the paired-phone list above it moves for none of them ({@link PairingOutcome}).
  * `paired` is the only member with nothing to add: it did not spend a code the
  * user needs to replace, so it never takes {@link SPENT_GET_ANOTHER}.
  *
@@ -340,7 +342,7 @@ function useSetupQr() {
    * {@link mint}. Clearing the report is an acknowledgement, and only a person
    * can make one: the panel re-mints on its own anywhere from 30 s to nearly
    * the full TTL later, and a sentence erased by that timer is one nobody read
-   * — leaving the absolute paired count, which does not move for any failure,
+   * — leaving the paired-phone list, which does not move for any failure,
    * as the only thing that ever said anything.
    */
   const newCode = useCallback(() => {
@@ -510,6 +512,9 @@ function RelayChoices({ status }: { status: BurrowConsoleStatus }) {
   // has somewhere to say so.
   const enrollAgain = useBusyAction();
   const onEnrollAgain = () => void enrollAgain.run(() => reenrollBurrow(status.suggestedLabel));
+  // Above both views because the log outlives an enrollment: a machine that
+  // never enrolled still logs its one-time connections.
+  const access = useAccessRecords(status.burrowId);
   return (
     <div className="mt-1.5 text-sm leading-relaxed">
       <div className="text-muted">Control this Dormouse from your phone.</div>
@@ -529,6 +534,7 @@ function RelayChoices({ status }: { status: BurrowConsoleStatus }) {
               enrollingAgain={enrollAgain.busy}
               enrollAgainError={enrollAgain.error}
               onEnrollAgain={onEnrollAgain}
+              access={access}
             />
           </>
         ) : (
@@ -539,6 +545,13 @@ function RelayChoices({ status }: { status: BurrowConsoleStatus }) {
           />
         )}
       </div>
+
+      {/* Un-enrolled, only once there is something in it: the empty log of a
+          machine that never let a phone in is not worth a button. A failed read
+          there has no view to report in, so it shows nothing. */}
+      {access.log && (status.enrolled || access.log.length > 0) ? (
+        <AccessLogDisclosure entries={access.log} />
+      ) : null}
     </div>
   );
 }
@@ -831,16 +844,28 @@ function EnrolledView({
   enrollingAgain,
   enrollAgainError,
   onEnrollAgain,
+  access,
 }: {
   status: BurrowConsoleStatus;
   enrollingAgain: boolean;
   enrollAgainError: string | null;
   onEnrollAgain: () => void;
+  access: ReturnType<typeof useAccessRecords>;
 }) {
-  const { relayOrigin, accountOrigin, hostedEnrollment, connection, pairedClients } = status;
+  const { relayOrigin, accountOrigin, hostedEnrollment, connection } = status;
   const { busy: ownBusy, error: ownError, run } = useBusyAction();
   const busy = ownBusy || enrollingAgain;
-  const error = ownError ?? enrollAgainError;
+  const error = ownError ?? enrollAgainError ?? access.error;
+  // Re-read whether or not it took: a refusal for an id that names no phone
+  // means the list on screen is the stale one.
+  const revoke = (id: string) =>
+    run(async () => {
+      try {
+        await revokePairedDevice(id);
+      } finally {
+        void access.reload();
+      }
+    });
   // A Relay that no longer takes this Burrow mints no setup code.
   const refused = relayRefuses(connection);
   // Disconnecting drops every paired phone until they pair again, so it asks
@@ -865,11 +890,7 @@ function EnrolledView({
     <div className="mt-1.5 text-sm leading-relaxed">
       <div className="font-mono break-all text-foreground">{relayOrigin}</div>
       <div className={`mt-0.5 ${TONE_CLASS[described.tone]}`}>{described.text}</div>
-      <div className="mt-0.5 text-muted">
-        {pairedClients === 0
-          ? 'No phone has paired with this machine yet.'
-          : `${pairedClients} paired ${pairedClients === 1 ? 'phone' : 'phones'}.`}
-      </div>
+      {access.devices ? <PairedDeviceList devices={access.devices} busy={busy} onRevoke={revoke} /> : null}
       {accountPageUrl ? (
         <div className="mt-0.5 text-muted">
           <ExternalTextLink href={accountPageUrl}>

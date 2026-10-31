@@ -115,7 +115,7 @@ const EXPECTED: Record<Worker, string[]> = {
     "dormouse_voice_tokens.userId: SELECT",
     "dormouse_voice_tokens: DELETE",
     "dormouse_voice_usage.count: UPDATE",
-    "dormouse_voice_usage: INSERT, SELECT",
+    "dormouse_voice_usage: DELETE, INSERT, SELECT",
     "owner_access.access_until: SELECT",
     "owner_access.owner_id: SELECT",
     "schema pgstencil_billing: USAGE",
@@ -190,6 +190,7 @@ test("the voice role is refused the relay's tables, the account's, and its token
     await outcome("voice", `SELECT id, "userId", hash, "createdAt", "lastUsedAt" FROM dormouse_voice_tokens`),
   ).toBe("ok");
   expect(await outcome("voice", `DELETE FROM dormouse_voice_tokens WHERE hash = 'x'`)).toBe("ok");
+  expect(await outcome("voice", `DELETE FROM dormouse_voice_usage WHERE day < now()::date - 1000`)).toBe("ok");
   expect(await outcome("voice", ENTITLEMENT_READ)).toBe("ok");
   for (const text of [
     `SELECT * FROM dormouse_relay_sessions`,
@@ -200,7 +201,7 @@ test("the voice role is refused the relay's tables, the account's, and its token
     `UPDATE dormouse_voice_tokens SET "createdAt" = now()`,
     `UPDATE dormouse_voice_tokens SET "userId" = "userId"`,
     `INSERT INTO dormouse_voice_tokens ("userId", hash) VALUES ('x', 'x')`,
-    `DELETE FROM dormouse_voice_usage`,
+    `UPDATE dormouse_voice_usage SET day = day`,
     ...BILLING_REFUSED,
   ])
     expect([text, await outcome("voice", text)]).toEqual([text, "42501"]);

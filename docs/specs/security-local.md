@@ -73,7 +73,7 @@ Source of truth: `isProxyOrigin` in `lib/src/lib/iframe-proxy-registry.ts`, the 
 | --- | --- | --- |
 | **Only your own account can drive your terminals through `dor`.** The socket sits in a directory only you can open, and its token never crosses the wire. |  | `standalone/sidecar/dor-control-server.test.js` |
 
-The attacker is another local account. The channel carries the whole Surface API — keystrokes into any Pane, its screen and scrollback back out, `dor kill` — and an app restart behind the running-work confirmation (`docs/specs/dor-cli.md` -> "Host Plumbing", "dor app").
+The attacker is another local account. The channel carries the whole Surface API — keystrokes into any Pane, its screen and scrollback back out, `dor kill` — an app restart behind the running-work confirmation, and the Burrow's paired phones and access log, with revoke (`docs/specs/dor-cli.md` -> "Host Plumbing", "dor app", "dor remote").
 
 The socket bounds other local accounts, never a process running as the user (`docs/specs/security.md` -> "What is not defended"; rationale).
 

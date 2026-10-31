@@ -25,6 +25,7 @@ import type * as vscode from 'vscode';
 import type { BurrowAclRecord, BurrowStateStore } from '../../lib/src/host/remote/burrow-state-store';
 import { createSerialQueue } from '../../lib/src/host/remote/serial-queue';
 import { filterAclRecords } from '../../lib/src/remote/burrow/acl';
+import { parseAccessLog, type AccessLogEntry } from '../../lib/src/remote/burrow/access-log';
 import { isEnrollment, type BurrowEnrollment } from '../../lib/src/remote/burrow/enrollment';
 import { storedNetworkPolicy, type NetworkPolicy } from '../../lib/src/remote/network-policy';
 // Imported, not mirrored: a key that drifted between the two sides would strand
@@ -173,7 +174,19 @@ export class VsCodeBurrowStateStore implements BurrowStateStore {
   saveNetworkPolicy(policy: NetworkPolicy): Promise<void> {
     return this.#mutate(() => this.#context.globalState.update(NETWORK_POLICY_KEY, policy));
   }
+
+  /** Beside the ACL in `globalState`, and like it machine-wide; no secret in it. */
+  async loadAccessLog(): Promise<AccessLogEntry[]> {
+    return parseAccessLog(this.#context.globalState.get<unknown>(ACCESS_LOG_KEY));
+  }
+
+  saveAccessLog(entries: readonly AccessLogEntry[]): Promise<void> {
+    return this.#mutate(() => this.#context.globalState.update(ACCESS_LOG_KEY, entries));
+  }
 }
+
+/** The access log's `globalState` key (`lib/src/remote/burrow/access-log.ts`). */
+export const ACCESS_LOG_KEY = 'dormouse.burrow.access-log';
 
 /**
  * The network policy's `globalState` key (`docs/specs/remote-network.md` ->

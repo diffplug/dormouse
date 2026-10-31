@@ -77,6 +77,7 @@ import {
   type EnrollmentOffer,
   type BurrowAclRecord,
 } from 'remote-lib-common';
+import { ACCESS_LOG_MAX_ENTRIES, deviceIdFor, type AccessLogEntry } from '../../remote/burrow/access-log';
 import type { BurrowEnrollment } from '../../remote/burrow/enrollment';
 import type { PendingPairing } from '../../remote/burrow/pairing-approval';
 import type {
@@ -130,6 +131,8 @@ import type {
   PairingQueueItem,
   BurrowConsoleStatus,
   SetupQrResult,
+  AccessLogResult,
+  PairedDevicesResult,
 } from './service-protocol';
 
 const BURROW_ID = testRoutingId();
@@ -185,9 +188,10 @@ interface MemoryStore extends BurrowStateStore {
   enrollment: BurrowEnrollment | null;
   acl: Record<string, BurrowAclRecord[]>;
   network: NetworkPolicy | null;
+  accessLog: AccessLogEntry[];
 }
 
-type Seed = Partial<Pick<MemoryStore, 'enrollment' | 'acl' | 'network'>>;
+type Seed = Partial<Pick<MemoryStore, 'enrollment' | 'acl' | 'network' | 'accessLog'>>;
 
 /**
  * The builds' own cases run under `RELAY_ON` / `LOCAL_ON`, their network on, so
@@ -226,6 +230,11 @@ function memoryStore(seed: Seed = {}): MemoryStore {
     loadNetworkPolicy: async () => store.network,
     saveNetworkPolicy: async (policy) => {
       store.network = policy;
+    },
+    accessLog: seed.accessLog ?? [],
+    loadAccessLog: async () => [...store.accessLog],
+    saveAccessLog: async (entries) => {
+      store.accessLog = [...entries];
     },
   };
   return store;
@@ -1243,6 +1252,23 @@ describe('pairing queue', () => {
     expect(queueEvents().at(-1)!.queue).toEqual([]);
   });
 
+  it('records an approved pairing in the access log and tells the webviews', async () => {
+    const socket = await running();
+    const { item, code } = await pair(socket, 'c1');
+
+    await command('approve', { clientId: 'c1', pairingId: item.pairingId, code });
+    await settle();
+
+    const record = store.acl[BURROW_ID]![0]!;
+    expect(store.accessLog).toEqual([
+      { at: expect.any(Number), event: 'paired', device: BROWSER, deviceId: deviceIdFor(record.clientStaticPublicKey) },
+    ]);
+    expect(uiEvents().some((event) => event.name === 'access')).toBe(true);
+    expect(((await command('pairedDevices')).result as PairedDevicesResult).devices).toMatchObject([
+      { id: deviceIdFor(record.clientStaticPublicKey), label: BROWSER },
+    ]);
+  });
+
   it('waits for the host store before completing approval and reports a failed save', async () => {
     const socket = await running();
     const { item, session, invitation, code } = await pair(socket, 'c1');
@@ -1698,6 +1724,148 @@ describe('pushDevices', () => {
     await service.start();
 
     expect((await command('pushDevices')).error).toBeTruthy();
+  });
+});
+
+describe('paired devices and revocation', () => {
+  const PHONE = aclRecord('a-phone');
+  const TABLET = aclRecord('b-phone');
+  const phoneId = deviceIdFor(PHONE.clientStaticPublicKey);
+
+  function accessEvents(): number {
+    return uiEvents().filter((event) => event.name === 'access').length;
+  }
+
+  it('lists each paired browser by an id that is never its key, last seen from the access log', async () => {
+    createService({
+      enrollment: ENROLLMENT,
+      acl: { [BURROW_ID]: [PHONE, { ...TABLET, approvedAt: 2 }] },
+      accessLog: [{ at: 50, event: 'ended', device: BROWSER, deviceId: phoneId, path: 'direct', durationMs: 9 }],
+    });
+    await service.start();
+
+    const { devices } = (await command('pairedDevices')).result as PairedDevicesResult;
+    expect(devices).toEqual([
+      { id: deviceIdFor(TABLET.clientStaticPublicKey), label: BROWSER, pairedAt: 2, lastSeenAt: null, connected: false },
+      { id: phoneId, label: BROWSER, pairedAt: 1, lastSeenAt: 50, connected: false },
+    ]);
+    expect(JSON.stringify(devices)).not.toContain(PHONE.clientStaticPublicKey);
+    expect(JSON.stringify(devices)).not.toContain(PHONE.deliveryId);
+  });
+
+  it('revokes one phone of a running Burrow, saves it, and logs who asked', async () => {
+    createService({ enrollment: ENROLLMENT, acl: { [BURROW_ID]: [PHONE, TABLET] } });
+    await service.start();
+    sockets[0]!.open();
+
+    expect((await command('revokeDevice', { id: phoneId.toUpperCase(), by: 'dor' })).result).toEqual({
+      revoked: 1,
+      labels: [BROWSER],
+    });
+    await settle();
+
+    expect(store.acl[BURROW_ID]!.map((record) => record.revokedAt !== null)).toEqual([true, false]);
+    expect((await command('status')).result).toMatchObject({ pairedClients: 1 });
+    expect(((await command('pairedDevices')).result as PairedDevicesResult).devices).toHaveLength(1);
+    expect(store.accessLog).toEqual([
+      expect.objectContaining({ event: 'revoked', deviceId: phoneId, device: BROWSER, by: 'dor' }),
+    ]);
+    expect(accessEvents()).toBeGreaterThan(0);
+  });
+
+  it('revokes from the store while the network policy holds the Burrow stopped', async () => {
+    createService({ enrollment: ENROLLMENT, network: NOTHING, acl: { [BURROW_ID]: [PHONE] } });
+    await service.start();
+
+    expect((await command('revokeDevice', { id: phoneId, by: 'not-a-requester' })).result).toMatchObject({
+      revoked: 1,
+    });
+    await settle();
+
+    expect(store.acl[BURROW_ID]![0]!.revokedAt).not.toBeNull();
+    // A requester outside the closed set is read as the Settings list.
+    expect(store.accessLog).toEqual([expect.objectContaining({ event: 'revoked', by: 'settings' })]);
+    // The next start loads the revocation, not the snapshot before it.
+    await setPolicy(RELAY_ON);
+    expect((await command('status')).result).toMatchObject({ pairedClients: 0 });
+  });
+
+  it('keeps a revocation whose save failed across a network-policy restart, until a save lands', async () => {
+    createService({ enrollment: ENROLLMENT, acl: { [BURROW_ID]: [PHONE, TABLET] } });
+    await service.start();
+    sockets[0]!.open();
+    const save = vi.spyOn(store, 'saveAcl').mockRejectedValueOnce(new Error('disk full'));
+
+    expect((await command('revokeDevice', { id: phoneId })).error).toMatch(/refused until Dormouse quits.*disk full/);
+    expect(store.acl[BURROW_ID]!.every((record) => record.revokedAt === null)).toBe(true);
+    // The hold covers every record of the target approved by the failure — one
+    // an approval queued ahead of the revocation committed included — and none
+    // approved after it.
+    const repaired = { ...PHONE, passkeyCredentialId: 'cred-repaired', approvedAt: 2 };
+    const later = { ...PHONE, passkeyCredentialId: 'cred-later', approvedAt: Date.now() + 60_000 };
+    store.acl[BURROW_ID] = [...store.acl[BURROW_ID]!, repaired, later];
+
+    // Nothing and back stops the runtime and builds a new one from the store,
+    // which still holds the phone as paired.
+    await setPolicy(NOTHING);
+    await setPolicy(RELAY_ON);
+    expect((await command('status')).result).toMatchObject({ pairedClients: 2 });
+    const devices = ((await command('pairedDevices')).result as PairedDevicesResult).devices;
+    expect(devices).toMatchObject([
+      { id: phoneId, pairedAt: later.approvedAt },
+      { id: deviceIdFor(TABLET.clientStaticPublicKey) },
+    ]);
+
+    // The next save that lands carries it.
+    save.mockRestore();
+    await command('revokeDevice', { id: deviceIdFor(TABLET.clientStaticPublicKey) });
+    expect(store.acl[BURROW_ID]!.map((record) => record.revokedAt !== null)).toEqual([true, true, true, false]);
+  });
+
+  it('revokes nothing for an id that names no phone, or none at all', async () => {
+    createService({ enrollment: ENROLLMENT, acl: { [BURROW_ID]: [PHONE] } });
+    await service.start();
+
+    expect((await command('revokeDevice', { id: '0000000000000000' })).error).toMatch(/No paired phone/);
+    expect((await command('revokeDevice', {})).error).toMatch(/by its id/);
+    expect(store.acl[BURROW_ID]![0]!.revokedAt).toBeNull();
+  });
+
+  it('revokes neither of two phones whose keys share an id', async () => {
+    // Both keys open with the same eight bytes, as a paired phone grinding
+    // another's id would make them.
+    const twins = [aclRecord('twin-phone-1'), aclRecord('twin-phone-2')];
+    expect(deviceIdFor(twins[0]!.clientStaticPublicKey)).toBe(deviceIdFor(twins[1]!.clientStaticPublicKey));
+    createService({ enrollment: ENROLLMENT, acl: { [BURROW_ID]: twins } });
+    await service.start();
+
+    const id = deviceIdFor(twins[0]!.clientStaticPublicKey);
+    expect((await command('revokeDevice', { id })).error).toMatch(/More than one/);
+    expect(store.acl[BURROW_ID]!.every((record) => record.revokedAt === null)).toBe(true);
+  });
+
+  it('answers no devices and refuses a revoke with no enrollment', async () => {
+    createService();
+    await service.start();
+
+    expect((await command('pairedDevices')).result).toEqual({ devices: [] });
+    expect((await command('revokeDevice', { id: phoneId })).error).toMatch(/not enrolled/);
+  });
+
+  it('keeps the access log bounded and answers it oldest first', async () => {
+    const seeded = Array.from({ length: ACCESS_LOG_MAX_ENTRIES }, (_, i) => ({
+      at: i,
+      event: 'ended' as const,
+      device: BROWSER,
+    }));
+    createService({ enrollment: ENROLLMENT, network: NOTHING, acl: { [BURROW_ID]: [PHONE] }, accessLog: seeded });
+    await service.start();
+    await command('revokeDevice', { id: phoneId });
+
+    const { entries } = (await command('accessLog')).result as AccessLogResult;
+    expect(entries).toHaveLength(ACCESS_LOG_MAX_ENTRIES);
+    expect(entries[0]!.at).toBe(1);
+    expect(entries.at(-1)!.event).toBe('revoked');
   });
 });
 

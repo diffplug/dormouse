@@ -1,0 +1,10 @@
+exitCode: 0
+stdout:
+2026-10-30T14:00:00Z  paired           "Dormouse Pocket (Home Screen)"  0123456789abcdef
+2026-10-30T14:00:30Z  connected        "Dormouse Pocket (Home Screen)"  0123456789abcdef  presence=proof
+2026-10-30T14:01:00Z  attached         "Dormouse Pocket (Home Screen)"  0123456789abcdef  surface=surface:3
+2026-10-30T14:03:32Z  ended            "Dormouse Pocket (Home Screen)"  0123456789abcdef  path=direct  duration=182s
+2026-10-30T14:04:00Z  one-time-denied  "iPhone"                         -                 reason="confirmation code mismatch"
+2026-10-30T14:05:00Z  revoked          "Dormouse Pocket (browser)"      fedcba9876543210  by=dor
+
+stderr:
