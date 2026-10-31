@@ -1486,8 +1486,10 @@ export class BurrowService {
   }
 
   #onOneTimeChanged(runtime: OneTimeRuntime, state: OneTimeState): void {
-    if (this.#oneTime !== runtime) return;
+    // A replaced or disposed runtime's end is still logged; only the current
+    // one's state reaches the webviews.
     this.#logOneTime(runtime, state);
+    if (this.#oneTime !== runtime) return;
     // An ended runtime holds nothing more; its last state stays for the panel.
     if (state.status === 'ended') this.#oneTime = null;
     this.#setOneTimeState(state);
