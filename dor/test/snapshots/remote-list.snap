@@ -1,0 +1,7 @@
+exitCode: 0
+stdout:
+0123456789abcdef  "Dormouse Pocket (Home Screen)"  paired 2026-10-29T10:00:00Z  connected
+fedcba9876543210  "Dormouse Pocket (browser)"      paired 2026-10-01T09:00:00Z  last seen 2026-10-20T08:00:00Z
+00112233445566aa  "Unknown device"                 paired 2026-09-15T12:00:00Z  never seen
+
+stderr:

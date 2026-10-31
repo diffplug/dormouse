@@ -18,11 +18,17 @@
 
 import {
   parseHostedEnrollmentState,
+  type AccessLogResult,
   type InvitationEvent,
+  type PairedDevice,
+  type PairedDevicesResult,
   type PushSendSummary,
   type BurrowConsoleStatus,
+  type RevokeDeviceParams,
+  type RevokeDeviceResult,
   type SetupQrResult,
 } from '../../host/remote/service-protocol';
+import { parseAccessLog, type AccessLogEntry } from './access-log';
 import { getPlatform } from '../../lib/platform';
 import type { BurrowLink } from '../../lib/platform/types';
 
@@ -430,6 +436,47 @@ export function subscribeToInvitation(
 export async function sendTestPush(): Promise<PushSendSummary> {
   const active = requireBurrowLink();
   return (await active.command('pushTest')) as PushSendSummary;
+}
+
+/**
+ * The phones paired with this machine's enrollment, newest pairing first
+ * (`service-protocol.ts` -> `PairedDevice`); empty with no enrollment. An
+ * answer with no list reads as none: there is nothing a caller could do with
+ * a half-understood one. Rejections propagate verbatim.
+ */
+export async function loadPairedDevices(): Promise<PairedDevice[]> {
+  const result = (await requireBurrowLink().command('pairedDevices')) as PairedDevicesResult | null;
+  return Array.isArray(result?.devices) ? result.devices : [];
+}
+
+/**
+ * Revoke one paired phone by its {@link PairedDevice.id}, named as Settings'
+ * doing for the access log. Rejections — an id that names no phone or more
+ * than one, no enrollment, a save that failed — propagate verbatim. The
+ * service announces the change as `access` ({@link subscribeToAccess}).
+ */
+export async function revokePairedDevice(id: string): Promise<RevokeDeviceResult> {
+  const params: RevokeDeviceParams = { id, by: 'settings' };
+  return (await requireBurrowLink().command('revokeDevice', params)) as RevokeDeviceResult;
+}
+
+/**
+ * The access log, oldest first, rebuilt entry by entry: a newer broker in
+ * another VS Code window may send an event this build has no copy for, and the
+ * panel renders only from a closed table.
+ */
+export async function loadAccessLog(): Promise<AccessLogEntry[]> {
+  const result = (await requireBurrowLink().command('accessLog')) as AccessLogResult | null;
+  return parseAccessLog(result?.entries);
+}
+
+/**
+ * Be told when the paired phones or the access log changed
+ * (`service-protocol.ts` -> `AccessChangedEvent`). The event carries nothing,
+ * so the listener re-reads whichever it shows.
+ */
+export function subscribeToAccess(listener: () => void): () => void {
+  return burrowLink()?.on('access', () => listener()) ?? (() => {});
 }
 
 export function describeBurrowError(error: unknown): string {

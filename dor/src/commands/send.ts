@@ -97,7 +97,7 @@ export const sendCommand: Command = {
 
 Exactly one input mode is required: --text/--key, --stdin, or --sequence. --text and --key may be combined only in that order; text is sent first, then the key. Duplicate input flags are rejected. Use --sequence for arbitrary ordering or multiple text/key events.
 
-Text input interprets backslash escapes for \\n, \\r, \\t, and \\\\ unless --raw is set.
+--text interprets backslash escapes for \\n, \\r, \\t, and \\\\ unless --raw is set. Standard input and --sequence text are sent exactly as given: piped bytes are already literal, and JSON strings carry their own escapes.
 
 Input arrives at typing pace: text in short bursts, and a key only after the text before it has settled, so interactive programs read it as typed. "sent" means the host accepted the input; the program may still be reading it.
 
@@ -123,10 +123,10 @@ Examples:
       flags: {
         json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
         key: { kind: 'parsed', parse: stringParser, brief: 'Send a named key or chord.', optional: true },
-        raw: { kind: 'boolean', brief: 'Do not interpret backslash escapes in text input.', optional: true, withNegated: false },
+        raw: { kind: 'boolean', brief: 'Do not interpret backslash escapes in --text.', optional: true, withNegated: false },
         sequence: { kind: 'parsed', parse: stringParser, brief: 'Send an ordered JSON sequence of text and key events.', optional: true, placeholder: 'json' },
         stdin: { kind: 'boolean', brief: 'Read text from standard input and send it as text.', optional: true, withNegated: false },
-        text: { kind: 'parsed', parse: stringParser, brief: 'Send literal text.', optional: true },
+        text: { kind: 'parsed', parse: stringParser, brief: 'Send text, decoding \\n \\r \\t \\\\ unless --raw.', optional: true },
         workspace: workspaceFlag,
       },
       positional: {
@@ -144,7 +144,7 @@ async function runSendCommand(this: DorCommandContext, flags: SendFlags, surface
   const inputs = await collectSendInputs(flags, this.options.readStdin);
   if (!inputs.ok) return new Error(inputs.message);
 
-  const encoded = encodeSendInputs(inputs.value, flags.raw === true);
+  const encoded = encodeSendInputs(inputs.value);
   if (!encoded.ok) return new Error(encoded.message);
   if (encoded.value.input.length === 0) return new Error('input cannot be empty');
 
@@ -182,7 +182,11 @@ async function collectSendInputs(
 
   if (inline) {
     const inputs: SendInput[] = [];
-    if (flags.text !== undefined) inputs.push({ kind: 'text', text: flags.text });
+    // Only --text is shell-authored, where a typed `\n` stands in for a newline;
+    // stdin and --sequence text arrive already literal.
+    if (flags.text !== undefined) {
+      inputs.push({ kind: 'text', text: flags.raw === true ? flags.text : interpretTextEscapes(flags.text) });
+    }
     if (flags.key !== undefined) inputs.push({ kind: 'key', key: flags.key });
     return { ok: true, value: inputs };
   }
@@ -227,11 +231,11 @@ function parseSendSequence(input: string): ParseResult<SendInput[]> {
   return { ok: true, value: inputs };
 }
 
-function encodeSendInputs(inputs: SendInput[], raw: boolean): ParseResult<{ input: string; inputCount: number }> {
+function encodeSendInputs(inputs: SendInput[]): ParseResult<{ input: string; inputCount: number }> {
   let input = '';
   for (const item of inputs) {
     if (item.kind === 'text') {
-      input += raw ? item.text : interpretTextEscapes(item.text);
+      input += item.text;
     } else {
       const key = encodeKey(item.key);
       if (!key.ok) return key;

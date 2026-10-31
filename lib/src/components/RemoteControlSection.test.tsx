@@ -52,9 +52,12 @@ import {
   isOneTimeState,
   type BurrowConsoleStatus,
   type HostedEnrollmentState,
+  type PairedDevice,
   type SetupQrResult,
 } from '../host/remote/service-protocol';
+import type { AccessLogEntry } from '../remote/burrow/access-log';
 import {
+  accessLogEntries,
   ANYWHERE_ON,
   enrolledStatus,
   LOCAL_ON,
@@ -62,6 +65,7 @@ import {
   makeStubBurrowLink,
   OFFER_STATUS,
   oneTimeWaiting,
+  pairedDevices,
   SELF_HOST_RELAY_ORIGIN,
   SELF_HOST_UNENROLLED_STATUS as SELF_HOST_NOT_ENROLLED,
   setupQrResult,
@@ -837,11 +841,14 @@ describe('RemoteControlSection', () => {
     });
   });
 
-  it('shows the Relay and paired-device count when enrolled', async () => {
-    platform = { burrow: makeLink(async () => enrolled({ pairedClients: 2 })) };
+  it('shows the Relay and its paired phones when enrolled', async () => {
+    const devices = pairedDevices(2);
+    platform = {
+      burrow: makeLink(async (cmd) => (cmd === 'pairedDevices' ? { devices } : enrolled({ pairedClients: 2 }))),
+    };
     await render();
     expect(text()).toContain('https://laptop.tailnet.ts.net');
-    expect(text()).toContain('2 paired phones');
+    expect(text()).toContain(devices[1]!.id);
     expect(buttonLabelled('Reconnect')).toBeUndefined();
   });
 
@@ -977,9 +984,9 @@ describe('RemoteControlSection', () => {
     expect(text()).not.toContain('Could not reach');
     expect(container.querySelector('svg[role="img"]')).toBeTruthy();
 
-    status = enrolled({ pairedClients: 2 });
+    status = enrolled({ connection: 'disconnected' });
     await act(async () => refreshBurrowStatus());
-    expect(text()).toContain('2 paired phones.');
+    expect(text()).toContain('Reconnecting…');
     expect(container.querySelector('svg[role="img"]')).toBeTruthy();
   });
 
@@ -1737,6 +1744,221 @@ describe('RemoteControlSection', () => {
     });
     expect(text()).toContain('https://laptop.tailnet.ts.net');
     expect(buttonLabelled('Persistent Relay')).toBeUndefined();
+  });
+});
+
+/**
+ * A link whose paired-phone half answers the way the service does: the list
+ * and log it holds, read at each call, and a `revokeDevice` that drops the
+ * phone it names — announcing nothing, so a case can tell the section's own
+ * re-read from the `access` event's. Every other command answers `status`.
+ */
+function accessService({
+  status = enrolled({ pairedClients: 2 }),
+  devices = pairedDevices(2),
+  log = accessLogEntries(devices),
+  revokeError,
+}: {
+  status?: BurrowConsoleStatus;
+  devices?: PairedDevice[];
+  log?: AccessLogEntry[];
+  revokeError?: string;
+} = {}) {
+  const held = { devices, log };
+  const link = makeLink(async (cmd, params) => {
+    switch (cmd) {
+      case 'pairedDevices':
+        return { devices: held.devices };
+      case 'accessLog':
+        return { entries: held.log };
+      case 'revokeDevice': {
+        if (revokeError) throw new Error(revokeError);
+        const { id } = params as { id: string };
+        held.devices = held.devices.filter((device) => device.id !== id);
+        return { revoked: 1, labels: [] };
+      }
+      default:
+        return status;
+    }
+  });
+  return Object.assign(held, { link });
+}
+
+/** The paired-phone row naming `id`. */
+function deviceRow(id: string): HTMLElement {
+  const row = [...container.querySelectorAll('li')].find((li) => li.textContent?.includes(id));
+  if (!row) throw new Error(`no row for ${id}`);
+  return row;
+}
+
+function buttonIn(scope: HTMLElement, label: string): HTMLButtonElement | undefined {
+  return [...scope.querySelectorAll('button')].find((button) => button.textContent?.trim() === label);
+}
+
+/** The access log's lines, top to bottom, once unfolded. */
+function logLines(): string[] {
+  const list = container.querySelector('ul[aria-label="Access log"]');
+  return [...(list?.querySelectorAll('li') ?? [])].map((li) => li.textContent ?? '');
+}
+
+async function openAccessLog() {
+  const toggle = [...container.querySelectorAll('button')].find((button) =>
+    button.textContent?.includes('Access log'),
+  );
+  if (!toggle) throw new Error('no Access log disclosure');
+  await act(async () => toggle.click());
+}
+
+describe('Paired phones and the access log', () => {
+  it('lists each paired phone by label and id, with when it paired and was last seen', async () => {
+    // Midday, so "an hour ago" is today wherever the suite runs.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date(2026, 9, 30, 12, 0));
+      const service = accessService();
+      platform = { burrow: service.link };
+      await render();
+      const [connected, idle] = service.devices;
+
+      expect(deviceRow(connected!.id).textContent).toContain(connected!.label);
+      expect(deviceRow(connected!.id).textContent).toContain('Paired today');
+      expect(deviceRow(connected!.id).textContent).toContain('Connected now');
+      // Paired 25 h ago and last seen two hours after.
+      expect(deviceRow(idle!.id).textContent).toContain('Last seen 23 h ago');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('says when the log holds nothing about a phone, rather than that it never connected', async () => {
+    const [device] = pairedDevices(1);
+    const service = accessService({ devices: [{ ...device!, connected: false, lastSeenAt: null }], log: [] });
+    platform = { burrow: service.link };
+    await render();
+    expect(deviceRow(device!.id).textContent).toContain('Not in the access log');
+  });
+
+  it('asks once before revoking, then revokes by id from Settings and re-reads the list', async () => {
+    const service = accessService();
+    platform = { burrow: service.link };
+    await render();
+    const target = service.devices[1]!;
+
+    await act(async () => buttonIn(deviceRow(target.id), 'Revoke')!.click());
+    expect(service.link.command).not.toHaveBeenCalledWith('revokeDevice', expect.anything());
+    expect(deviceRow(target.id).textContent).toContain('It will need to pair again.');
+    await act(async () => buttonIn(deviceRow(target.id), 'Cancel')!.click());
+    expect(deviceRow(target.id).textContent).not.toContain('pair again');
+
+    await act(async () => buttonIn(deviceRow(target.id), 'Revoke')!.click());
+    await act(async () => buttonIn(deviceRow(target.id), 'Revoke')!.click());
+    expect(service.link.command).toHaveBeenCalledWith('revokeDevice', { id: target.id, by: 'settings' });
+    // No `access` event fired: the section re-read on its own.
+    expect(text()).not.toContain(target.id);
+    expect(text()).toContain(service.devices[0]!.id);
+  });
+
+  it('warns that revoking a connected phone ends its session', async () => {
+    const service = accessService();
+    platform = { burrow: service.link };
+    await render();
+    const connected = service.devices[0]!;
+    await act(async () => buttonIn(deviceRow(connected.id), 'Revoke')!.click());
+    expect(deviceRow(connected.id).textContent).toContain('Its session ends now');
+  });
+
+  it('shows a refused revoke in the view’s error slot, keeping the confirmation', async () => {
+    const service = accessService({ revokeError: 'No paired phone has the id 3f2a9c01d47e6b01.' });
+    platform = { burrow: service.link };
+    await render();
+    const target = service.devices[1]!;
+
+    await act(async () => buttonIn(deviceRow(target.id), 'Revoke')!.click());
+    await act(async () => buttonIn(deviceRow(target.id), 'Revoke')!.click());
+    expect(text()).toContain('No paired phone has the id 3f2a9c01d47e6b01.');
+    expect(buttonIn(deviceRow(target.id), 'Cancel')).toBeTruthy();
+  });
+
+  it('re-reads the list and the log on an access event', async () => {
+    const service = accessService();
+    platform = { burrow: service.link };
+    await render();
+    await openAccessLog();
+    expect(logLines()).toHaveLength(service.log.length);
+
+    // Revoked from `dor`, in another process: only the event says so.
+    const [kept, gone] = service.devices;
+    service.devices = [kept!];
+    service.log = [
+      ...service.log,
+      { at: Date.now(), event: 'revoked', device: gone!.label, deviceId: gone!.id, by: 'dor' },
+    ];
+    await act(async () => {
+      service.link.emit('access', { name: 'access' });
+    });
+    const rows = [...container.querySelectorAll('ul:not([aria-label]) > li')].map((li) => li.textContent);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toContain(kept!.id);
+    expect(logLines()[0]).toContain('revoked from dor');
+  });
+
+  it('folds the access log, then lists it newest first in fixed copy', async () => {
+    const service = accessService();
+    platform = { burrow: service.link };
+    await render();
+    expect(logLines()).toEqual([]);
+    expect(text()).not.toContain('presence window');
+
+    await openAccessLog();
+    const lines = logLines();
+    expect(lines[0]).toContain('connected (presence window)');
+    const all = lines.join('\n');
+    for (const copy of [
+      'connected (passkey)',
+      'attached surface:3',
+      'session ended after 4 min, direct',
+      'connection refused: pairing-required: client-not-paired',
+      'connected by one-time link',
+      'one-time session ended after 12 min (user-ended)',
+      'paired',
+    ]) {
+      expect(all, copy).toContain(copy);
+    }
+  });
+
+  it('shows the newest fifty entries until asked for all of them', async () => {
+    const [device] = pairedDevices(1);
+    const log = Array.from({ length: 60 }, (_, index): AccessLogEntry => ({
+      at: Date.now() - (60 - index) * 60_000,
+      event: 'attached',
+      device: device!.label,
+      deviceId: device!.id,
+      surface: `surface:${index}`,
+    }));
+    const service = accessService({ devices: [device!], log });
+    platform = { burrow: service.link };
+    await render();
+    await openAccessLog();
+    expect(logLines()).toHaveLength(50);
+    expect(logLines()[0]).toContain('surface:59');
+
+    await act(async () => buttonLabelled('Show all 60')!.click());
+    expect(logLines()).toHaveLength(60);
+  });
+
+  it('shows an un-enrolled machine its one-time log, and no button over an empty one', async () => {
+    const oneTime = accessLogEntries([]);
+    const service = accessService({ status: NOT_ENROLLED, devices: [], log: oneTime });
+    platform = { burrow: service.link };
+    await render();
+    await openAccessLog();
+    expect(logLines()).toHaveLength(oneTime.length);
+    await act(async () => root.unmount());
+
+    root = createRoot(container);
+    platform = { burrow: accessService({ status: NOT_ENROLLED, devices: [], log: [] }).link };
+    await render();
+    expect(text()).not.toContain('Access log');
   });
 });
 

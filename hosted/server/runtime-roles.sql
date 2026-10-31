@@ -102,11 +102,11 @@ GRANT UPDATE (endpoint, p256dh, auth, "vapidPublicKey", "subscribedAt")
 GRANT INSERT ("userId", hash) ON dormouse_voice_tokens TO dormouse_relay;
 
 -- The voice Worker: speak's token lookup and idle expiry, a disconnecting
--- computer's own delete, and the daily count.
+-- computer's own delete, the daily count, and the daily sweep.
 GRANT SELECT (id, "userId", hash, "createdAt", "lastUsedAt") ON dormouse_voice_tokens TO dormouse_voice;
 GRANT UPDATE ("lastUsedAt") ON dormouse_voice_tokens TO dormouse_voice;
 GRANT DELETE ON dormouse_voice_tokens TO dormouse_voice;
-GRANT SELECT, INSERT ON dormouse_voice_usage TO dormouse_voice;
+GRANT SELECT, INSERT, DELETE ON dormouse_voice_usage TO dormouse_voice;
 GRANT UPDATE (count) ON dormouse_voice_usage TO dormouse_voice;
 
 -- The account Worker's role, made by hand (hosted/README.md), owns billing:

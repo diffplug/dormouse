@@ -25,7 +25,21 @@ export const RELAY_ROOM_PARAMS = {
 export const RELAY_ROOM_SWEEP_MS = 60 * 60 * 1000;
 
 /**
- * The longest a `RelayRoom` waits on a read of its Burrows' rows before
+ * How soon a `RelayRoom` sweeps again after a sweep whose row read failed or
+ * timed out, in place of `RELAY_ROOM_SWEEP_MS`.
+ */
+export const RELAY_ROOM_SWEEP_RETRY_MS = 60 * 1000;
+
+/**
+ * How long past `RELAY_ROOM_SWEEP_MS` a held socket may go without a row read
+ * that found it live before a failed sweep closes it 1013, to reconnect
+ * through the upgrade's own recheck: the database outage a live session rides
+ * out, and so the most a removal's backstop slips while the rows are unreadable.
+ */
+export const RELAY_ROOM_SWEEP_GRACE_MS = 10 * 60 * 1000;
+
+/**
+ * The longest a `RelayRoom` waits on a read of its rows before
  * treating it as failed: well under the 30 s after which the runtime resets
  * an object whose `blockConcurrencyWhile` callback has not settled.
  */

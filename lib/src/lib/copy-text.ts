@@ -117,23 +117,50 @@ const isBlankCell = (ch: string | undefined) => ch === undefined || ch === ' ';
 const BOX = /[─-▟]/;
 const FRAME_ONLY = /^[─-▟\s]+$/;
 /** A TUI's line-leading glyph that is decoration, not text: Claude Code's reply
- *  and tool bullets, or a run of box drawing. */
-const LEAD_MARKER = /^(\s*)(⏺ |⎿ |● |[─-▟]+ ?)/;
+ *  and tool bullets, an editor's indent guides, or a run of box drawing. */
+const LEAD_MARKER = /^(\s*)(⏺ |⎿ |● |(?:[▏▎▍] {2,})+|[─-▟]+ ?)/;
 const TRAIL_BOX = / ?[─-▟]+$/;
 const LIST_MARKER = /^(?:[-*•]|\d+[.)]) /;
+/** A quote's prefix, one marker per level and text after: Markdown's `>`, or a
+ *  TUI's quote bar (Claude Code's `▎`) one or two spaces before its text —
+ *  wider, it is an editor's indent guide, one per indent stop (rationale). */
+const QUOTE = /^(\s*)((?:[>▏▎▍] ?)*[>▏▎▍])(?=(?<=>) +[^\s>▏▎▍]| {1,2}[^\s>▏▎▍])/;
+const QUOTE_BAR = /^[▏▎▍]$/;
+
+/** A line of quote bars or indent guides alone: blank, not a frame. */
+const BARS_ONLY = /^[\s▏▎▍]+$/;
 
 function isFrameOnly(text: string): boolean {
-  return text.length > 0 && FRAME_ONLY.test(text) && BOX.test(text);
+  return text.length > 0 && FRAME_ONLY.test(text) && BOX.test(text) && !BARS_ONLY.test(text);
 }
 
-/** Where `text`'s decoration sits, in UTF-16 units: `[blankFrom, blankTo)` is a
- *  leading marker to blank to spaces, and nothing from `keepTo` on is kept. */
-function decoration(text: string): { blankFrom: number; blankTo: number; keepTo: number } {
-  const lead = LEAD_MARKER.exec(text);
+interface Decoration {
+  /** `[blankFrom, blankTo)` is a leading marker to blank to spaces. */
+  blankFrom: number;
+  blankTo: number;
+  /** `[from, to)` is a quote prefix, its bars read as `>`. */
+  quote: { from: number; to: number } | null;
+  /** Nothing from here on is kept. */
+  keepTo: number;
+}
+
+/** Where `text`'s decoration sits, in UTF-16 units. */
+function decoration(text: string): Decoration {
+  const trail = TRAIL_BOX.exec(text);
+  const trailAt = trail ? trail.index : text.length;
+  const quoteAt = (at: number) => {
+    const q = QUOTE.exec(text.slice(at));
+    if (!q) return null;
+    const to = at + q[0].length;
+    // Text a trailing box side ends: Claude Code's empty `│ > │` prompt is no quote.
+    return text.slice(to, trailAt).trim() ? { from: at + q[1].length, to } : null;
+  };
+  let quote = quoteAt(0);
+  const lead = quote ? null : LEAD_MARKER.exec(text);
   const blankFrom = lead ? lead[1].length : 0;
   const blankTo = lead ? lead[0].length : 0;
-  const trail = TRAIL_BOX.exec(text);
-  return { blankFrom, blankTo, keepTo: Math.max(blankTo, trail ? trail.index : text.length) };
+  if (lead) quote = quoteAt(blankTo);
+  return { blankFrom, blankTo, quote, keepTo: Math.max(quote?.to ?? blankTo, trailAt) };
 }
 
 /** A logical line's facts every judgement reads, computed once per line: a
@@ -143,9 +170,13 @@ interface LineFacts {
   top: number;
   bottom: number;
   /** The rows' text joined as a deleted soft wrap joins them, with its
-   *  decoration blanked (spaces at the marker, so indents still line up with
-   *  the columns under them) and trimmed. */
+   *  decoration and quote prefix blanked (spaces at the marker, so indents
+   *  still line up with the columns under them) and trimmed. */
   plain: string;
+  /** How many quotes it is nested in. */
+  depth: number;
+  /** Where its quote prefix starts, or else its text. */
+  start: number;
   /** Blank, a frame, or a box's side: what bounds a paragraph. */
   boundary: boolean;
 }
@@ -162,8 +193,16 @@ function line(buf: CopyBuffer, r: number): LineFacts {
   let text = '';
   for (let i = top; i <= bottom; i++) text += buf.row(i).cells.join('');
   const d = decoration(text);
-  const plain = (text.slice(0, d.blankFrom) + ' '.repeat(d.blankTo - d.blankFrom) + text.slice(d.blankTo, d.keepTo)).trimEnd();
-  const f = { top, bottom, plain, boundary: !text.trim() || isFrameOnly(text) || /^[│┃║]/.test(text) };
+  const blank = (s: string, from: number, to: number) => s.slice(0, from) + ' '.repeat(to - from) + s.slice(to);
+  let plain = blank(text.slice(0, d.keepTo), d.blankFrom, d.blankTo);
+  if (d.quote) plain = blank(plain, d.quote.from, d.quote.to);
+  plain = plain.trimEnd();
+  const f = {
+    top, bottom, plain,
+    depth: d.quote ? text.slice(d.quote.from, d.quote.to).replace(/ /g, '').length : 0,
+    start: d.quote ? d.quote.from : indentOf(plain),
+    boundary: !text.trim() || BARS_ONLY.test(text) || isFrameOnly(text) || /^[│┃║]/.test(text),
+  };
   for (let i = top; i <= bottom; i++) lineFacts.set(buf.row(i), f);
   return f;
 }
@@ -221,12 +260,21 @@ function wrapWidth(buf: CopyBuffer, r: number): number {
  *  40 columns, or 60% of a narrower terminal (rationale). */
 const minWrapWidth = (buf: CopyBuffer) => Math.min(40, Math.floor(buf.cols * 0.6));
 
+/** Whether the line above `l`, in its paragraph and quote, fills the width. */
+function fillsAbove(buf: CopyBuffer, l: LineFacts): boolean {
+  if (l.top === 0) return false;
+  const above = line(buf, l.top - 1);
+  return !above.boundary && above.depth === l.depth && above.plain.length >= wrapWidth(buf, l.top - 1);
+}
+
 export type BreakKind = 'keep' | 'space' | 'none';
 
 /** Auto judges the break between rows `r` and `r + 1` in order:
  * 1. Delete a true soft wrap before inspecting the joined logical lines.
- * 2. Keep blanks, a new list item, code punctuation (`; { }` / `) } ]`), or
- *    indentation that differs from the current line's hanging indent.
+ * 2. Keep blanks, a change of quote depth, a new list item, code punctuation
+ *    (`; { }` / `) } ]`), or indentation that differs from the current line's
+ *    hanging indent — but for the one column a wrapper carries the space it
+ *    broke at onto the row after a full one.
  * 3. Keep a break when the local longest line is under `minWrapWidth`, or
  *    when the next first word would have fit within that width.
  * 4. Delete a margin split whose last word is token-shaped; otherwise space.
@@ -237,22 +285,30 @@ export type BreakKind = 'keep' | 'space' | 'none';
 export function autoBreak(buf: CopyBuffer, r: number): BreakKind {
   if (r + 1 >= buf.length) return 'keep';
   if (buf.row(r + 1).wrapped) return 'none';
-  // The line row `r` ends and the line row `r + 1` starts.
-  const cur = line(buf, r).plain;
-  const next = line(buf, r + 1).plain;
-  if (!cur.trim() || !next.trim()) return 'keep';
+  // The line row `r` ends and the line row `r + 1` starts, past any quote prefix.
+  const above = line(buf, r);
+  const below = line(buf, r + 1);
+  const cur = above.plain;
+  const next = below.plain;
+  if (!cur.trim() || !next.trim() || above.depth !== below.depth) return 'keep';
   const nextTrim = next.trimStart();
   if (LIST_MARKER.test(nextTrim)) return 'keep';
   if (/[;{}]$/.test(cur) || /^[)}\]]/.test(nextTrim)) return 'keep';
-  if (indentOf(next) !== hangIndent(cur)) return 'keep';
-  const firstWord = nextTrim.split(' ')[0];
+  const hang = hangIndent(cur);
+  const indent = indentOf(next);
+  if (Math.abs(indent - hang) > 1) return 'keep';
   const width = wrapWidth(buf, r);
+  // A wrapper that keeps the space it broke at carries it onto the row after a
+  // full one: one column deeper than the line before, and the line after.
+  const carried = indent > hang && cur.length >= width;
+  if (indent !== hang && !carried && !(indent < hang && fillsAbove(buf, above))) return 'keep';
+  const firstWord = nextTrim.split(' ')[0];
   // A break the next word would have fit before was typed, not wrapped.
   if (width < minWrapWidth(buf) || cur.length + 1 + firstWord.length <= width) return 'keep';
   const lastWord = cur.slice(cur.lastIndexOf(' ') + 1);
   const tokenish = /[/\\#?=&]/.test(lastWord) || /^[A-Za-z0-9+_\-.]{16,}$/.test(lastWord);
   // A token wider than the room left is split mid-token at the margin.
-  return cur.length >= width && tokenish ? 'none' : 'space';
+  return cur.length >= width && tokenish && !carried ? 'none' : 'space';
 }
 
 // ---------------------------------------------------------------------------
@@ -292,6 +348,8 @@ interface Line {
   /** A row a soft wrap continues, whose start is wherever the wrap fell;
    *  never in a block slab. */
   continues: boolean;
+  /** Cells through its quote prefix, which a deleted break drops. */
+  quote: number;
 }
 /** One logical line's rows in a scope: a row and the rows soft wraps join
  *  to it. */
@@ -308,7 +366,7 @@ function extract(buf: CopyBuffer, scope: Span, original: Span): Line[][] {
     for (let c = a; c < Math.min(b, row.cells.length); c++) {
       if (row.cells[c] !== '') out.push({ ch: row.cells[c], added: !contains(original, r, c) });
     }
-    const line = { ...splitTrail(out), row: r, startCol: a, continues: !scope.block && row.wrapped };
+    const line = { ...splitTrail(out), row: r, startCol: a, continues: !scope.block && row.wrapped, quote: 0 };
     if (line.continues && lines.length) lines[lines.length - 1].push(line);
     else lines.push([line]);
   }
@@ -335,9 +393,9 @@ function cellsForChars(cells: readonly Cell[], chars: number): number {
   return n;
 }
 
-/** A logical line's rows with its decoration blanked, judged on the rows
- *  joined as a deleted soft wrap joins them, as `line` judges; null for a
- *  frame-only line. */
+/** A logical line's rows with its decoration blanked and its quote bars read
+ *  as Markdown's `>`, judged on the rows joined as a deleted soft wrap joins
+ *  them, as `line` judges; null for a frame-only line. */
 function stripDecoration(rows: LineRows): Line[] | null {
   // Every row but the last keeps the blanks the join puts back.
   const own = rows.map((l, k) => (k < rows.length - 1 ? [...l.cells, ...l.trail] : l.cells));
@@ -347,8 +405,13 @@ function stripDecoration(rows: LineRows): Line[] | null {
   const d = decoration(text);
   const from = cellsForChars(joined, d.blankFrom);
   const to = cellsForChars(joined, d.blankTo);
+  const qFrom = d.quote ? cellsForChars(joined, d.quote.from) : 0;
+  const qTo = d.quote ? cellsForChars(joined, d.quote.to) : 0;
   const keepTo = cellsForChars(joined, d.keepTo);
-  let kept = joined.slice(0, keepTo).map((c, j) => (j >= from && j < to ? { ...c, ch: ' ' } : c));
+  let kept = joined.slice(0, keepTo).map((c, j) => {
+    if (j >= from && j < to) return { ...c, ch: ' ' };
+    return j >= qFrom && j < qTo && QUOTE_BAR.test(c.ch) ? { ...c, ch: '>' } : c;
+  });
   const cut = keepTo < joined.length;
   // A cut ends the line at its last kept text, and drops the rows past it.
   if (cut) kept = splitTrail(kept).cells;
@@ -359,7 +422,8 @@ function stripDecoration(rows: LineRows): Line[] | null {
     at += own[k].length;
     if (cut && k > 0 && first >= kept.length) break;
     // A row the decoration misses stays as read.
-    out.push(at <= kept.length && (first >= to || at <= from) ? l : { ...l, ...splitTrail(kept.slice(first, at)) });
+    const touched = at > kept.length || (first < to && at > from) || (first < qTo && at > qFrom);
+    out.push(touched ? { ...l, ...splitTrail(kept.slice(first, at)), quote: k ? 0 : Math.min(qTo, at) } : l);
   }
   return out;
 }
@@ -400,9 +464,9 @@ function layout(scopeLines: ScopeLines, format: CopyFormat): Layout {
 
 function computeLayout({ buf, raw, stripped }: ScopeLines, format: CopyFormat): Layout {
   const logical = format === 'exact' ? raw : stripped;
-  // A blank line is a logical line with no text in the scope: a blank row a
-  // soft wrap joins to text is part of that text's line.
-  const blanks = new Set(logical.filter((rows) => rows.every((l) => l.cells.length === 0)).flat());
+  // A blank line is a logical line with no text in the scope past its quote
+  // prefix: a blank row a soft wrap joins to text is part of that text's line.
+  const blanks = new Set(logical.filter((rows) => rows.every((l) => l.cells.length <= l.quote)).flat());
   const blank = (l: Line) => blanks.has(l);
   let lines = logical.flat();
   if (format !== 'exact') {
@@ -422,7 +486,18 @@ function computeLayout({ buf, raw, stripped }: ScopeLines, format: CopyFormat): 
     const end = next.continues ? line.row : buf.row(line.row).bottom;
     return FIXED_BREAK[format] ?? (blank(line) || blank(next) || next.row !== end + 1 ? 'keep' : autoBreak(buf, end));
   });
+  lines = lines.map((l, i) => (blank(l) && i > 0 && i + 1 < lines.length ? quoteBlank(buf, lines[i - 1], l, lines[i + 1]) : l));
   return { lines, base: indents.length ? Math.min(...indents) : 0, auto };
+}
+
+/** A line of bars alone between quoted lines, written with the shallower
+ *  one's prefix, so the quote goes on past it. An empty row still ends it. */
+function quoteBlank(buf: CopyBuffer, before: Line, blank: Line, after: Line): Line {
+  if (!BARS_ONLY.test(buf.row(blank.row).cells.join(''))) return blank;
+  let depth = Math.min(line(buf, before.row).depth, line(buf, after.row).depth);
+  let end = 0;
+  while (depth && end < after.quote) if (after.cells[end++].ch !== ' ') depth--;
+  return end ? { ...blank, cells: after.cells.slice(0, end) } : blank;
 }
 
 export function renderLines(scopeLines: ScopeLines, chosen: CopyFormat, overrides: Readonly<Record<number, BreakKind>> = {}): Rendering {
@@ -438,7 +513,8 @@ export function renderLines(scopeLines: ScopeLines, chosen: CopyFormat, override
     const next = lines[i + 1];
     const kind = overrides[i] ?? auto[i];
     const rejoins = kind === 'none' && !!next?.continues;
-    const lead = leading(line.cells);
+    // A joined line sheds its quote prefix with its indent.
+    const lead = joined && line.quote ? line.quote + leading(line.cells.slice(line.quote)) : leading(line.cells);
     let strip: number;
     if (rejoined) strip = 0;
     else if (format === 'exact') strip = joined ? lead : 0;
@@ -575,7 +651,8 @@ function toParagraph(buf: CopyBuffer, sel: Span): Span {
   let er = sel.end.row;
   if (!line(buf, er).boundary) while (er + 1 < buf.length && !line(buf, er + 1).boundary) er++;
   return {
-    start: { row: sr, col: contentStart(buf, sr) },
+    // A quoted paragraph starts at its prefix, which its later kept lines show.
+    start: { row: sr, col: buf.row(sr).wrapped ? 0 : line(buf, sr).start },
     end: { row: er, col: Math.max(0, buf.row(er).cells.length - 1) },
     block: false,
   };

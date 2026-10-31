@@ -227,7 +227,10 @@ Never edit a row once its notices have gone out; schedule a further change as a 
 
 ## Refund by hand
 
-A withdrawal or account closure is stamped settled only once every payment it refunds is refunded. Stripe cannot refund a payment it did not collect: an invoice marked paid out of band, or paid by a payment record. The account Worker refunds the rest and leaves the withdrawal or closure unsettled, and its cron keeps retrying it and failing, naming the invoice and the amount, for as long as it stays unsettled. Watch the account Worker's Cron Events for that.
+A withdrawal or account closure is stamped settled only once every payment it refunds is refunded in full by refunds Stripe lists as `succeeded`. Until then its cron keeps retrying it and failing, naming the invoice, for as long as it stays unsettled; watch the account Worker's Cron Events for that. A `pending` refund settles on its own once Stripe completes it, and the account Worker makes a `failed` or `canceled` one again. Two cases need the operator:
+
+- **Paid outside Stripe.** Stripe cannot refund a payment it did not collect: an invoice marked paid out of band, or paid by a payment record. The error names the invoice and the amount.
+- **A refund awaiting the customer's action.** Stripe holds the refund in `requires_action` until the customer gives it what their payment method needs; the error names the invoice and the payment. Once they do and it succeeds, the cron settles it on its own. To refund another way instead, do step 2 first, so the cron makes no new refund, then cancel that refund in the Stripe Dashboard, then step 1.
 
 1. Refund the named amount to the customer the way it was paid, outside Stripe.
 2. As the migration role, mark a withdrawal settled by the id the error names; for a closure, drop the subscription id the error names from it, and the cron's next pass refunds any other subscription the closure ended and stamps it settled once none is left:

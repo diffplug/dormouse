@@ -13,6 +13,23 @@ let handled = 0;
 let skewMs = 0;
 /** Whether a row read stalls, as a slow database would. */
 let rowsStalled = false;
+/** Ends every stalled read's wait, once stalling stops. */
+const stalls = new Set<() => void>();
+/**
+ * While stalled, wait past the 30 s the runtime gives a `blockConcurrencyWhile`
+ * callback, or until stalling stops; a pending timer keeps workerd from
+ * cancelling it as a hung request.
+ */
+async function stall() {
+  if (!rowsStalled) return;
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, 60_000);
+    stalls.add(() => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+}
 /** What each upgrade handed the object: its header names and search parameters. */
 const upgrades: { headers: string[]; params: string[] }[] = [];
 
@@ -75,25 +92,24 @@ export class RelayRoom extends ProductionRoom {
     await this.alarm();
   }
 
-  /** Stall every row read from now, or stop stalling new ones. */
+  /** Stall every row read from now, or stop, releasing the stalled ones. */
   async stallRows(on: boolean) {
     rowsStalled = on;
+    if (on) return;
+    for (const release of stalls) release();
+    stalls.clear();
   }
 }
 
-/**
- * The production `RelayRows`, whose read, while stalled, waits past the 30 s
- * the runtime gives a `blockConcurrencyWhile` callback; a pending timer keeps
- * workerd from cancelling it as a hung request.
- */
+/** The production `RelayRows`, whose read stalls while `stallRows` says so. */
 export class RelayRows extends ProductionRows {
   override async burrows(burrowIds: string[]) {
-    if (rowsStalled) await new Promise((resolve) => setTimeout(resolve, 60_000));
+    await stall();
     return super.burrows(burrowIds);
   }
 
   override async sessions(tokenHashes: string[]) {
-    if (rowsStalled) await new Promise((resolve) => setTimeout(resolve, 60_000));
+    await stall();
     return super.sessions(tokenHashes);
   }
 }
