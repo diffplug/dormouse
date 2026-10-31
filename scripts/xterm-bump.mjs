@@ -228,11 +228,13 @@ if (!forkBase) {
     const res = await fetch(`https://api.github.com/repos/${UPSTREAM_REPO}/compare/${range}`);
     if (res.ok) files = (await res.json()).files?.map((f) => f.filename) ?? [];
   } catch { /* offline or rate-limited — the command below is the fallback */ }
-  // The compare API lists at most 300 files for the whole comparison, so a
-  // full list cannot show the addon untouched.
-  if (files === null || files.length >= 300) {
-    if (files) console.log(`  The compare lists only its first ${files.length} files — check addons/addon-webgl/ by hand:`);
+  if (files === null) {
     console.log(`  gh api repos/${UPSTREAM_REPO}/compare/${range} --jq '.files[].filename'`);
+  } else if (files.length >= 300) {
+    // The compare API lists at most 300 files for the whole comparison (paginated
+    // or not), so neither it nor `gh api` on it can show the addon untouched.
+    console.log(`  The compare lists only its first ${files.length} files — check addons/addon-webgl/ by hand in an xterm.js clone:`);
+    console.log(`    git diff --name-only ${range} -- addons/addon-webgl/`);
   } else {
     const ours = files.filter((f) => f.startsWith('addons/addon-webgl/'));
     console.log(

@@ -123,6 +123,7 @@ test('default dry-run gives no addon verdict on a compare list GitHub truncated'
   assert.equal(truncated.status, 0, truncated.stderr);
   assert.doesNotMatch(truncated.stdout, /the merge is mechanical/);
   assert.match(truncated.stdout, /check addons\/addon-webgl\/ by hand/);
+  assert.match(truncated.stdout, /git diff --name-only old-commit\.\.\.new-commit -- addons\/addon-webgl\//);
   const full = run(['--dry-run'], { canopyCore: oldCore, compareFiles: files.slice(1) });
   assert.match(full.stdout, /Does not touch addons\/addon-webgl\/ \(299 files changed\)/);
 });
