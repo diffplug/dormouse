@@ -9,11 +9,18 @@ import type { Terminal } from '@xterm/xterm';
  * terminal owns through the reflow (§3.4).
  */
 
+/** Each terminal's constructor options, in order. */
+const constructed = vi.hoisted(() => [] as Array<Record<string, unknown> | undefined>);
+
 // xterm's real buffer, so a resize reflows; never opened, and the addons it
 // loads are stand-ins, since no canvas can measure glyphs.
 vi.mock('@xterm/xterm', async () => {
   const xterm = await vi.importActual<typeof import('@xterm/xterm')>('@xterm/xterm');
   class Terminal extends xterm.Terminal {
+    constructor(options?: ConstructorParameters<typeof xterm.Terminal>[0]) {
+      super(options);
+      constructed.push(options as Record<string, unknown> | undefined);
+    }
     override open(): void {}
     override loadAddon(): void {}
   }
@@ -40,6 +47,13 @@ import { beginDrag, COPY_FLASH_MS, flashCopy, getMouseSelectionState, setSelecti
 import { getOrCreateTerminal, writeUserInput } from './terminal-registry';
 
 const write = (terminal: Terminal, data: string) => new Promise<void>((resolve) => terminal.write(data, resolve));
+
+describe('xterm.js options', () => {
+  it('never lets xterm.js select on a gesture of its own, on any platform (§3.1)', () => {
+    getOrCreateTerminal('pane-options');
+    expect(constructed.at(-1)).toMatchObject({ rightClickSelectsWord: false, macOptionClickForcesSelection: false });
+  });
+});
 
 describe('writeUserInput', () => {
   it('ends a finalized selection, and a shadowed drag', () => {
