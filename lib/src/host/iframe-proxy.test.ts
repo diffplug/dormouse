@@ -217,6 +217,54 @@ describe('createIframeProxyUrl — the upstream address is fixed when the grant 
   });
 });
 
+describe('createIframeProxyUrl — an upstream off this machine needs the user’s allowance', () => {
+  // Answers in the resolver's order; the grant connects to the first, so a
+  // loopback first answer keeps the real upstream reachable.
+  const answering = (...addresses: string[]) => async () =>
+    addresses.map((address) => ({ address, family: net.isIPv6(address) ? 6 : 4 }));
+
+  it('judges local by every resolved address reaching this machine, never by the name', async () => {
+    const port = await upstream((_q, s) => { s.writeHead(204); s.end(); });
+    // The addresses this host's interfaces hold, as `os.networkInterfaces()` lists them.
+    const interfaceAddresses = () => ['127.0.0.1', '::1', '192.168.7.40', 'fd7a:115c:a1e0::1', 'fe80::1%en0'];
+    const ask = (host: string, ...addresses: string[]) =>
+      createIframeProxyUrl(`http://${host}:${port}/`, { ...NO_LOG, resolve: answering(...addresses), interfaceAddresses });
+    // A name that looks remote but resolves only to this machine is local:
+    // loopback, the unspecified address a server bound to every interface
+    // prints, or an address one of its own interfaces holds.
+    for (const local of [['127.0.0.1'], ['127.8.9.10'], ['::1'], ['127.0.0.1', '::1'], ['::ffff:127.0.0.1'],
+      ['0.0.0.0'], ['::'], ['192.168.7.40'], ['::ffff:192.168.7.40'], ['FD7A:115C:A1E0::1'], ['127.0.0.1', '192.168.7.40']]) {
+      expect(await ask('devbox.example', ...local)).toMatchObject({ ok: true });
+    }
+    // A loopback-looking name with any answer off this machine is not.
+    for (const remote of [['10.0.0.5'], ['192.168.7.41'], ['127.0.0.1', '192.0.2.1'], ['2001:db8::1']]) {
+      expect(await ask('localhost', ...remote)).toMatchObject({ ok: false, reason: 'external' });
+    }
+  });
+
+  it('proxies an external upstream only when the request says the user allowed it', async () => {
+    const port = await upstream((_q, s) => { s.writeHead(200, { 'content-type': 'text/plain' }); s.end('remote'); });
+    const resolve = answering('127.0.0.1', '192.0.2.1');
+    for (const allowExternal of [undefined, false, 'true', 1]) {
+      expect(await createIframeProxyUrl(`http://docs.example:${port}/`, { ...NO_LOG, resolve, allowExternal }))
+        .toMatchObject({ ok: false, reason: 'external' });
+    }
+    const url = await frame(`http://docs.example:${port}/`, { ...NO_LOG, resolve, allowExternal: true });
+    expect((await get(url)).body).toBe('remote');
+  });
+
+  it('stops reusing a leased external grant once the allowance is withdrawn', async () => {
+    const port = await upstream((_q, s) => { s.writeHead(204); s.end(); });
+    const resolve = answering('127.0.0.1', '192.0.2.1');
+    const lease = { owner: 'window-a', id: 'surface:external#mount' };
+    const allowed = await frame(`http://docs.example:${port}/`, { ...NO_LOG, resolve, lease, allowExternal: true });
+    expect(await createIframeProxyUrl(`http://docs.example:${port}/`, { ...NO_LOG, resolve, lease }))
+      .toMatchObject({ ok: false, reason: 'external' });
+    expect(await isListening(Number(new URL(allowed).port))).toBe(false);
+    releaseIframeProxyLease(lease.owner, lease.id);
+  });
+});
+
 describe('iframe proxy — serving', () => {
   // The proxy no longer branches on loopback vs remote: any http upstream's
   // frame-blocking headers are stripped and the shim injected. A DENY/none upstream
@@ -400,6 +448,43 @@ describe('iframe proxy — serving', () => {
     const url = await frame(`http://127.0.0.1:${port}/`);
     location = `http://127.0.0.1:${port}0/other`;
     expect((await get(url)).headers.location).toBe(location);
+  });
+
+  it('answers a frame load redirected off its upstream origin with a page that asks the panel to go there', async () => {
+    let location = '';
+    const port = await upstream((_q, s) => { s.writeHead(302, { location }); s.end(); });
+    const url = await frame(`http://127.0.0.1:${port}/login`);
+    const navigateTo = (body: string) => /__dormouse:'navigate',url:U/.test(body) ? /var U=("[^"]*")/.exec(body)?.[1] : undefined;
+    for (const [sent, target] of [
+      ['https://accounts.example/auth?next=%2F', 'https://accounts.example/auth?next=%2F'],
+      ['//cdn.example/x', 'http://cdn.example/x'],
+      ['http://localhost:9999/other', 'http://localhost:9999/other'],
+    ]) {
+      location = sent;
+      for (const dest of ['iframe', 'document']) {
+        const res = await request(url, { headers: { 'sec-fetch-dest': dest } });
+        expect(res.status).toBe(200);
+        expect(res.headers.location).toBeUndefined();
+        expect(res.headers['content-security-policy'])
+          .toBe("frame-ancestors 'self' vscode-webview://abc-123 vscode-file://vscode-app");
+        expect(JSON.parse(navigateTo(res.body) ?? 'null')).toBe(target);
+        // Addressed to the app alone, and carrying no shim to race it.
+        expect(res.body).toContain(`"${APP_ORIGINS[0]}"`);
+        expect(res.body).not.toContain('pageshow');
+      }
+      // A subresource's redirect is the page's own business.
+      const fetched = await request(url, { headers: { 'sec-fetch-dest': 'empty' } });
+      expect(fetched.status).toBe(302);
+      expect(fetched.headers.location).toBe(sent);
+    }
+  });
+
+  it('forwards an off-origin redirect as sent when there is no embedder to ask', async () => {
+    const port = await upstream((_q, s) => { s.writeHead(302, { location: 'https://accounts.example/' }); s.end(); });
+    const url = await frame(`http://127.0.0.1:${port}/`, NO_EMBEDDER);
+    const res = await request(url, { headers: { 'sec-fetch-dest': 'iframe' } });
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('https://accounts.example/');
   });
 
   it('rewrites only a Referer origin, preserving foreign referers and query values', async () => {

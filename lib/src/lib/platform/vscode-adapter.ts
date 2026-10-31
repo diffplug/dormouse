@@ -3,7 +3,7 @@ import { BROWSER_REQUEST_TIMEOUT_MS, type BrowserRequest, type BrowserResult } f
 import { applyLiveToolEvents } from '../tool-events';
 import { offerProgramCopy } from '../mouse-selection';
 import type { TerminalContextRequest, TerminalContextInfo } from '../terminal-context-types';
-import type { IframeProxyResult, OpenPort, PlatformAdapter, PtyDataDetail, PtyInfo, BurrowLink, SpawnPtyOptions, ToolControlResult, ToolHostRequest, WritePtyOptions } from './types';
+import type { IframeProxyOptions, IframeProxyResult, OpenPort, PlatformAdapter, PtyDataDetail, PtyInfo, BurrowLink, SpawnPtyOptions, ToolControlResult, ToolHostRequest, WritePtyOptions } from './types';
 import { openPortRequestTimeoutMs, SURFACE_ID_RESERVE_TIMEOUT_MS } from './types';
 import { createBurrowLinkClient } from '../../host/remote/link-client';
 import { createAlertClient, type AlertClientMethods } from '../../host/alert-client';
@@ -382,14 +382,16 @@ export class VSCodeAdapter implements PlatformAdapter {
     return result ?? { status: 'error', message: 'tool request timed out' };
   }
 
-  async createIframeProxyUrl(url: string, lease?: string): Promise<IframeProxyResult> {
+  async createIframeProxyUrl(url: string, lease?: string, opts?: IframeProxyOptions): Promise<IframeProxyResult> {
     // The extension host stands up the loopback proxy and serves the bytes (see
     // iframe-proxy-host.ts). On timeout, report unreachable so the panel shows a
     // hint rather than hanging on a never-loading frame.
     const result = await this.requestResponse<IframeProxyResult>(
       // The webview's ancestor chain is only knowable here: it decides who may
       // frame the proxy (`lib/src/lib/embedder-origins.ts`).
-      'iframe:createProxyUrl', 'iframe:proxyUrl', { url, embedderOrigins: embedderOrigins(), ...(lease ? { lease } : {}) },
+      'iframe:createProxyUrl', 'iframe:proxyUrl', {
+        url, embedderOrigins: embedderOrigins(), ...(lease ? { lease } : {}), ...(opts?.allowExternal ? { allowExternal: true } : {}),
+      },
       (msg) => msg.result,
       5000,
     );

@@ -153,8 +153,9 @@ const invokeMap = {
   write_clipboard_text: ({ text }) => requestSidecar('clipboard:writeText', { text }, 'clipboard:written', () => null),
   // Invoked at boot, so the release lands before this page's first lease.
   iframe_release_proxy: async ({ lease }) => { writeSidecar('iframe:releaseProxy', { owner: HARNESS_WINDOW, id: lease ?? null }); return null; },
-  iframe_create_proxy_url: ({ target, embedderOrigins, lease }) => requestSidecar('iframe:createProxyUrl', {
-    target, embedderOrigins, ...(typeof lease === 'string' ? { lease: { owner: HARNESS_WINDOW, id: lease } } : {}),
+  iframe_create_proxy_url: ({ target, embedderOrigins, lease, allowExternal }) => requestSidecar('iframe:createProxyUrl', {
+    target, embedderOrigins, allowExternal: allowExternal === true,
+    ...(typeof lease === 'string' ? { lease: { owner: HARNESS_WINDOW, id: lease } } : {}),
   }, 'iframe:proxyUrl', (data) => data.result),
   // Managed voice, the passthrough `managed_voice` in src-tauri/src/lib.rs;
   // 20_000 mirrors its MANAGED_VOICE_TIMEOUT.

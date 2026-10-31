@@ -18,6 +18,7 @@ import {
 import { ThemePicker } from './ThemePicker';
 import { ShellPicker } from './ShellPicker';
 import { WatchedCommandList } from './WatchedCommandList';
+import { IframeAllowlistSettings } from './IframeAllowlistSettings';
 import { NetworkPhones, NetworkSettings, NetworkUpdates } from './NetworkSettings';
 import { hostOf, useNetworkPolicy } from './remote-control-shared';
 import { PushTestButton, SpeakTestButton } from './AlarmTestButtons';
@@ -117,7 +118,7 @@ function describeRefusal(status: BurrowConsoleStatus, remoteControlBelow: boolea
 }
 
 const TOPICS = [
-  { id: 'general', label: 'General', icon: GearIcon, groups: ['theme', 'shell'] },
+  { id: 'general', label: 'General', icon: GearIcon, groups: ['theme', 'shell', 'previews'] },
   { id: 'notifications', label: 'Notifications', icon: BellIcon, groups: ['speech', 'push', 'watcher', 'inactivity'] },
   { id: 'network', label: 'Network', icon: GlobeIcon, groups: ['network', 'phones', 'updates'] },
   { id: 'labs', label: 'Labs', icon: FlaskIcon, groups: ['delayedKill'] },
@@ -456,6 +457,7 @@ export function SettingsDialog({ onClose, initialTopic }: { onClose: () => void;
                   </section>
                 )}
               </div>
+              <IframeAllowlistSettings hidden={!matches('previews')} />
             </TopicSection>
             <TopicSection id="notifications" hidden={!visible('notifications')}>
               {(matches('speech') || matches('push')) && <h3 className="mt-4 text-sm font-semibold text-foreground">Application defaults</h3>}

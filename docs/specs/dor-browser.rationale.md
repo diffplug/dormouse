@@ -188,6 +188,18 @@ The built-in local-file viewer supplies its own content boundary and permits the
 
 **Why a grant gets its own origin instead of a path token.** A dedicated origin keeps root-relative resources and client-side routers working with no body URL rewriting; a path token would have to survive every link, redirect and `fetch` the page makes.
 
+## Iframe External Origins
+
+**Why the proxy changes what an external page is.** It strips the upstream's framing headers and, by default, its CSP, and serves every grant from the shared `127.0.0.1` hostname, so a remote page loses protections its author relied on; the warning names that, rather than claiming the page itself is hostile. Approval does not make signing in safe, which is why cookies stay stripped.
+
+**Why local is the resolved address.** A hostname proves nothing: `localhost` is whatever the resolver answers, a public name can resolve to `127.0.0.1`, and a LAN or tailnet name is usually another machine. The addresses are the ones the grant is pinned to, so the one classified is the one connected to. Two non-loopback answers still reach this machine and are handed out routinely: `0.0.0.0`, which `python -m http.server` and other servers bound to every interface print, and an address one of this host's interfaces holds, which `listenerUrlsByPort` names for a server bound to that interface alone. A private-network address on any other host stays external.
+
+**Why the grant is the only gate needed.** Both webview CSPs already limit `frame-src` to loopback, so the browser refuses any navigation off the proxy origin to a remote one before its request; only a minted grant can put a remote page in the pane, and the panel asks for one on every URL it frames. The one hop the browser never sees is a redirect, which the proxy follows on the frame's behalf, so the proxy answers it. Before this, a foreign `Location` was forwarded and the frame showed a blank pane (`docs/specs/vscode.md` → CSP policy).
+
+**Why the redirect replaces the redirecting entry.** Pushing the target would leave the redirecting URL behind it, and Back would land there only to be redirected again. The redirect page carries no shim for the same reason: its `location` report would race the `navigate` and could put the redirecting URL back.
+
+**Why one list per install.** Every other Settings value persists per host install in `localStorage`; a per-window or per-session list would re-ask on every restore of a pane the user already allowed.
+
 ## Iframe Proxy Leases
 
 **Why a grant's life is its view's, not its traffic's.** Reproduced against the proxy (2026-09-24, then again as the failing tests that pin this, 2026-10-03): a live Vite pane idle for five minutes lost its grant on the next grant created anywhere — its HMR socket survived, module fetches then failed with `ECONNREFUSED` — and 33 grant creations anywhere evicted a live pane under the 32-grant cap. Every Reload, Back or Forward minted a new port, which is a new origin, so the app's localStorage, IndexedDB and service worker went with it.

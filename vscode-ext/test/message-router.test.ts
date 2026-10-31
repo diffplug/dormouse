@@ -894,3 +894,19 @@ it('holds a webview\'s iframe leases under its router, and ends them with it', (
     otherDisposable.dispose();
   }
 });
+
+// docs/specs/dor-browser.md → "Iframe External Origins": only an exact `true`
+// from the webview lets the proxy reach off this machine.
+it('forwards the user\'s allowance of an external origin, and nothing that merely resembles it', () => {
+  const webview = fakeWebview();
+  const disposable = router.attachRouter(webview.channel);
+  try {
+    iframeProxy.create.mockClear();
+    for (const allowExternal of [true, 'true', 1, undefined]) {
+      webview.send({ type: 'iframe:createProxyUrl', url: 'http://docs.example/', embedderOrigins: [], allowExternal, requestId: 'r' });
+    }
+    expect(iframeProxy.create.mock.calls.map((call) => call[3])).toEqual([true, false, false, false]);
+  } finally {
+    disposable.dispose();
+  }
+});

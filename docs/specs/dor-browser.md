@@ -255,7 +255,7 @@ Source of truth: `createPlaywrightProvider` in `lib/src/host/playwright-host.ts`
 
 `dor iframe <url>` frames the page's own DOM — zero-lag for human inspection, but agents cannot drive or read it. On hosts with `createIframeProxyUrl`, `IframePanel` frames a per-grant loopback proxy URL; without it, a raw uninstrumented iframe. The desktop playground's `createIframeProxyUrl` fronts only its own viewers (`docs/specs/tutorial.md` → Playground filesystem).
 
-The proxy instruments any `http://` upstream, loopback and remote alike: headers are rewritten per the table below and the shim injected into HTML; HTTP and WebSocket traffic passes through. A site's "do not embed" is overridden, not obeyed (rationale); the sandbox neutralizes JS framebusting. **Must connect a grant, over HTTP and WebSocket alike, only to the addresses its upstream resolved to when minted.** **Must refuse (`scheme`) an upstream resolving to any link-local / cloud-metadata address**, in any spelling; one that does not resolve is `unreachable`.
+The proxy instruments any `http://` upstream it fronts, loopback and remote alike — a remote one only once allowed ([Iframe External Origins](#iframe-external-origins)): headers are rewritten per the table below and the shim injected into HTML; HTTP and WebSocket traffic passes through. A site's "do not embed" is overridden, not obeyed (rationale); the sandbox neutralizes JS framebusting. **Must connect a grant, over HTTP and WebSocket alike, only to the addresses its upstream resolved to when minted.** **Must refuse (`scheme`) an upstream resolving to any link-local / cloud-metadata address**, in any spelling; one that does not resolve is `unreachable`.
 
 **Must refuse `https://`, regardless of scheme casing, at every entry to the iframe renderer on a host with the proxy** (a host without it frames https raw):
 
@@ -276,7 +276,7 @@ Header rewriting beyond `Origin`, `Cookie`, `Set-Cookie`, and the framing header
 | request | `Accept-Encoding` | deleted on a document load (`Sec-Fetch-Dest` `document`, `iframe`, `frame`, `embed`, `object`, or none sent), so its HTML comes back identity; kept on every other request |
 | response | `X-Dormouse-Preserve-CSP: 1` | consumed; preserves upstream CSP headers and meta policies |
 | response | hop-by-hop (RFC 7230 §6.1) | dropped |
-| response | `Location` | an exact upstream origin rewritten back to the proxy origin, so a redirect stays inside the proxy |
+| response | `Location` | an exact upstream origin rewritten back to the proxy origin, so a redirect stays inside the proxy; any other origin on a frame load is [Iframe External Origins](#iframe-external-origins) |
 | response | `Vary` | `Sec-Fetch-Dest` appended, since the `Accept-Encoding` sent upstream depends on it |
 | response | `Clear-Site-Data` | `"cache", "storage"` on a freshly minted grant's first frame load only: its port may have fronted another upstream |
 | response body | `<meta http-equiv="content-security-policy">` | removed unless the response opts into CSP preservation |
@@ -290,6 +290,19 @@ Header rewriting beyond `Origin`, `Cookie`, `Set-Cookie`, and the framing header
 Current limits: absolute-origin subresources (`http://localhost:5173/...`, `ws://localhost:5173/...`) bypass the proxy uninstrumented, acceptable for loopback; and the shim reclaims only Dormouse control messages, leaving ordinary keyboard and pointer interaction inside the frame.
 
 Source of truth: `lib/src/components/wall/IframePanel.tsx`, `lib/src/host/iframe-proxy.ts`, `lib/src/host/iframe-proxy-rewrite.ts` (`instrumentHtml`, `isBlockedAddress`), `iframeRefusal` in `lib/src/components/wall/browser-url.ts`.
+
+### Iframe External Origins
+
+An upstream is local when every address it resolved to at mint reaches this machine: loopback (127.0.0.0/8, `::1`), `0.0.0.0`, `::`, or an address this host's interfaces hold; its name never counts.
+
+- A non-local upstream is refused (`external`) unless the request carries `allowExternal`, sent only for an origin on the panel's allowlist (`docs/specs/security-local.md` -> "Browser panes").
+- The allowlist holds exact origins (scheme, host, port) in webview `localStorage`, one per host install, each removable in Settings → General. **Must re-ask the host when the pane's origin is allowed or removed**, so a removal closes an open preview.
+- The `external` warning names the origin and offers Open in browser, Allow this origin, and Cancel (back one entry, else close the pane).
+- An allowed origin gets a preview only: cookies stay stripped and `https://` stays refused.
+
+Both webview CSPs admit only loopback frames (`docs/specs/security-local.md` -> "Network policy"), so a form, script, or link off the proxy to a remote origin is refused. A frame load (`Sec-Fetch-Dest` `document` or `iframe`) redirected to another origin, given an embedder chain, gets a Dormouse page in place of the `Location`. In the pane's frame it posts `navigate` with the target and its own URL; the panel takes it as a URL-bar entry, replacing the redirecting history entry (rationale). A nested frame, outside the webview CSP, follows the redirect itself.
+
+Source of truth: `mintGrant` and `offOriginRedirect` in `lib/src/host/iframe-proxy.ts`, `errorPageHtml` in `lib/src/host/iframe-proxy-rewrite.ts`, `lib/src/lib/iframe-allowlist.ts`, `lib/src/components/wall/IframePanel.tsx`.
 
 ### Iframe Proxy Leases
 
@@ -305,7 +318,9 @@ Source of truth: `createIframeProxyUrl` and `releaseIframeProxyLease` in `lib/sr
 
 **Must send only fixed shim message kinds to the app** — `leader`, `pointerdown`, `location`, `open-window`, `theme-request`; `location` carries `loaded: true` only on the document's own `pageshow`/`DOMContentLoaded` report. **Must relay only `leader`, `pointerdown`, and `open-window` from nested documents.** `open-window` intercepts nonempty anchor targets other than `_self`, except links with `download`, plus `window.open`. Theme delivery is `docs/specs/theme.md` → Tool iframe themes; `theme-request` stays in the outer document.
 
-**Must let only `http:` and `https:` reach a browser Surface, re-checked at the sink**: `open-window` and the control socket's `surface.iframe` go through `browserSurfaceUrl`, and `IframePanel` checks `params.url` again before framing it, since the header's URL editor writes there too (rationale).
+The proxy's redirect page also posts `navigate` ([Iframe External Origins](#iframe-external-origins)), which any proxied document can forge.
+
+**Must let only `http:` and `https:` reach a browser Surface, re-checked at the sink**: `open-window`, `navigate`, and the control socket's `surface.iframe` go through `browserSurfaceUrl`, and `IframePanel` checks `params.url` again before framing it, since the header's URL editor writes there too (rationale).
 
 Parent listeners check the message origin against live proxy grants (`docs/specs/security-local.md` -> "Browser panes"). A leader message exits passthrough like an in-document dual-tap; a `location` maps back to its upstream URL for chrome and history without reloading the frame; a new-tab request asks before opening an adjacent browser pane.
 
@@ -326,7 +341,7 @@ The optional `PlatformAdapter.createIframeProxyUrl`, the `IframeProxyResult` uni
 
 **Must pass the webview's own ancestor chain with every request for a proxy URL** — `location.origin` plus `location.ancestorOrigins`, knowable only in the realm that has a `location` (rationale). The host validates it and uses it all-or-nothing: an unparseable or opaque (`"null"`) entry means no chain (rationale), and with no chain the proxy preserves framing headers and injects nothing.
 
-The proxy binds loopback only, a mitigation and not the boundary; each grant fronts exactly one upstream; no user script is injected; and every user-supplied `http://` target but one resolving to a refused address ([Iframe Renderer](#iframe-renderer)) is trusted as the user's command, at the cost of the upstream's own XSS policy unless it opts into preservation. The `Host`, `Origin`, cookie, `frame-ancestors`, shim-targeting and grant-refresh rules are `docs/specs/security-local.md` → "Loopback Listeners" and "Browser panes".
+The proxy binds loopback only, a mitigation and not the boundary; each grant fronts exactly one upstream; no user script is injected; and every user-supplied `http://` target resolving to loopback, or allowed off this machine ([Iframe External Origins](#iframe-external-origins)), but none resolving to a refused address ([Iframe Renderer](#iframe-renderer)), is trusted as the user's command, at the cost of the upstream's own XSS policy unless it opts into preservation. The `Host`, `Origin`, cookie, `frame-ancestors`, shim-targeting and grant-refresh rules are `docs/specs/security-local.md` → "Loopback Listeners" and "Browser panes".
 
 Source of truth: `lib/src/lib/platform/iframe-proxy-types.ts`, `embedderOrigins` in `lib/src/lib/embedder-origins.ts`, `normalizeEmbedderOrigins` in `lib/src/host/iframe-proxy-rewrite.ts`, `lib/src/host/loopback-guard.ts`. `lib/src/host/iframe-proxy.test.ts` pins the upgrade path as well as the request path.
 
@@ -341,6 +356,8 @@ A moved iframe Surface remounts at its saved URL after consent: `docs/specs/layo
 - General per-surface teardown hook for future Dormouse-owned backend processes; agent-browser surfaces already dispose their controller on kill/swap, and iframe views release their leases.
 - Process-backed targets are owned by the **dor-tools** scope (`docs/specs/dor-tool.md` `## Future`), which subsumes the plugin/backend target axis formerly staged here.
 - Optional terminal-side "this port is viewed by surface:N" indicator.
+- Following an off-proxy link click or form submission in place through the [Iframe External Origins](#iframe-external-origins) gate, where the webview CSP refuses it today.
+- Cookie support for authenticated local tools, scoped from stories of real tools that fail; a jar must authorize its caller before attaching stored credentials.
 ### Daemon-owned crisp captures
 
 Replace spawn-per-shot CLI screenshots only with a daemon-owned capture channel or an upstream answer exposing current viewport and DPR. **Must retain device-resolution output and external viewport/device changes without adding a second viewport writer.** The host cannot reconstruct an externally chosen DPR from screencast frames; a host-owned CDP metrics override is safe only while sync-to-pane owns the values. (rationale)

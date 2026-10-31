@@ -1,4 +1,4 @@
-import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent } from 'react';
 import { XIcon } from '@phosphor-icons/react';
 import { modalActionButton, PaneMessage, PopupButtonRow, popupButton, TERMINAL_BOTTOM_RADIUS_CLASS } from '../design';
 import { getPlatform } from '../../lib/platform';
@@ -23,6 +23,7 @@ import { connectToolEditor, withToolEditorConsent } from '../../lib/tool-editor'
 import { offeredRenderModes } from './browser-automation';
 import { browserSurfaceUrl, hostPathDisplay, iframeRefusal } from './browser-url';
 import { isRealBlur } from '../../lib/window-focus';
+import { allowIframeOrigin, iframeOriginOf, isIframeOriginAllowed, subscribeToIframeAllowlist } from '../../lib/iframe-allowlist';
 
 // Sandbox every framed page, proxied or raw, so a tool's
 // `if (top !== self) top.location = …` framebust cannot navigate the Wall away —
@@ -64,6 +65,9 @@ type Resolution =
   // The host can't run a proxy (e.g. the web host) — keep the blind raw-iframe
   // fallback rather than hiding the surface.
   | { kind: 'raw'; src: string }
+  // The upstream is off this machine and the user has not allowed its origin
+  // (docs/specs/dor-browser.md → "Iframe External Origins").
+  | { kind: 'external'; origin: string }
   // 'non-http' is the panel's own refusal of a non-http(s) `params.url`;
   // 'scheme'/'unreachable' come back from the proxy.
   | { kind: 'error'; reason: 'unreachable' | 'scheme' | 'non-http'; detail?: string };
@@ -88,6 +92,14 @@ function sameUrl(a: string, b: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** A redirect: `nextUrl` takes the place of the entry that redirected, when
+ *  that is the current one, so Back does not land on it to redirect again. */
+function redirectHistory(history: IframeHistory, fromUrl: string | null, nextUrl: string): IframeHistory {
+  const current = history.entries[history.index];
+  if (current === undefined || fromUrl === null || !sameUrl(current, fromUrl)) return appendHistory(history, nextUrl);
+  return { entries: [...history.entries.slice(0, history.index), nextUrl], index: history.index };
 }
 
 function appendHistory(history: IframeHistory, nextUrl: string): IframeHistory {
@@ -182,6 +194,16 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
   }, [paneWrite, id]);
 
   const commitUrl = useCallback((nextUrl: string) => applyFrameUrl(nextUrl, true), [applyFrameUrl]);
+  // The proxy answered a frame load's redirect off its upstream origin
+  // (docs/specs/dor-browser.md → "Iframe External Origins"): open the target
+  // here, through the same gate as the URL bar.
+  const followRedirect = useCallback((fromUrl: string | null, nextUrl: string) => {
+    setLiveUrl(nextUrl);
+    setHistory((prev) => redirectHistory(prev, fromUrl, nextUrl));
+    paneWrite.updateParams(id, { url: nextUrl });
+    paneWrite.setTitle(id, hostPathDisplay(nextUrl, true));
+    setReloadNonce((n) => n + 1);
+  }, [paneWrite, id]);
   const observeFrameUrl = useCallback((nextUrl: string) => applyFrameUrl(nextUrl, false), [applyFrameUrl]);
 
   const goToHistoryIndex = useCallback((nextIndex: number) => {
@@ -206,6 +228,10 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
   // accurate focus model, and real error pages. Reachability is diagnosed by
   // the proxy and shown as a served page inside the frame.
   const [resolution, setResolution] = useState<Resolution>(() => (sourceUrl ? { kind: 'resolving' } : { kind: 'empty' }));
+  // Allowing or removing this origin in another pane, window, or Settings
+  // re-asks the host, so a removal closes an open preview as well.
+  const targetOrigin = framedUrl ? iframeOriginOf(sourceUrl) : null;
+  const externalAllowed = useSyncExternalStore(subscribeToIframeAllowlist, () => isIframeOriginAllowed(targetOrigin));
   // This mounted view's lease on its proxy grant (docs/specs/dor-browser.md →
   // "Iframe Proxy Leases"): Reload, Back and Forward keep the grant and its
   // origin, and unmounting — a kill, a swap, a transfer — ends it. Minted by
@@ -254,10 +280,11 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
     // The lease arrives with the first effect pass.
     if (lease === null) return;
     let cancelled = false;
-    createProxy(sourceUrl, lease).then(
+    (externalAllowed ? createProxy(sourceUrl, lease, { allowExternal: true }) : createProxy(sourceUrl, lease)).then(
       (result: IframeProxyResult) => {
         if (cancelled) return;
         if (result.ok) setResolution({ kind: 'proxied', src: result.url, origin: originOf(result.url) });
+        else if (result.reason === 'external') setResolution({ kind: 'external', origin: targetOrigin ?? sourceUrl });
         else setResolution({ kind: 'error', reason: result.reason, detail: result.detail });
       },
       () => {
@@ -265,7 +292,7 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
       },
     );
     return () => { cancelled = true; };
-  }, [sourceUrl, reloadNonce, lease]);
+  }, [sourceUrl, reloadNonce, lease, externalAllowed]);
 
   // Register a screen controller so the embed surface shows the unified
   // browser chrome (URL + the far-left chip → Display modal) and can swap back
@@ -377,7 +404,7 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
     if (!proxyOrigin) return;
     const onMessage = (e: MessageEvent) => {
       if (e.origin !== proxyOrigin) return;
-      const data = e.data as { __dormouse?: unknown; url?: unknown; loaded?: unknown } | null;
+      const data = e.data as { __dormouse?: unknown; url?: unknown; loaded?: unknown; from?: unknown } | null;
       if (data?.__dormouse === 'pointerdown') {
         actions.onClickPanel(id);
         return;
@@ -391,6 +418,13 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
           upstreamUrlFromFrameLocation(data.url, liveUrl || sourceUrl, proxyOrigin) ?? data.url,
         );
         if (mapped) setPendingOpenUrl(mapped);
+        return;
+      }
+      if (data?.__dormouse === 'navigate' && typeof data.url === 'string') {
+        // Any document on the proxy origin can send this, not only the proxy's
+        // redirect page, so it is a URL-bar entry: re-checked, then gated.
+        const next = browserSurfaceUrl(data.url);
+        if (next) followRedirect(upstreamUrlFromFrameLocation(data.from, liveUrl || sourceUrl, proxyOrigin), next);
         return;
       }
       if (data?.__dormouse === 'location') {
@@ -407,7 +441,7 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [id, proxyOrigin, actions, liveUrl, sourceUrl, observeFrameUrl]);
+  }, [id, proxyOrigin, actions, liveUrl, sourceUrl, observeFrameUrl, followRedirect]);
 
   // Raw fallback frames have no injected shim, but focusing a cross-origin
   // iframe still blurs the parent window while the document itself remains
@@ -447,6 +481,12 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
   }, [id, resolution.kind]);
 
   const src = resolution.kind === 'proxied' || resolution.kind === 'raw' ? resolution.src : '';
+  // Declining an external page goes back to the page before it, or, with none,
+  // closes the pane it would have opened in.
+  const cancelExternal = () => {
+    if (historyIndexRef.current > 0) goToHistoryIndex(historyIndexRef.current - 1);
+    else actions.onKill(id);
+  };
 
   // Shown from the first load on: navigation, reload, and history re-resolve
   // the proxy and mount a new frame, which must not hide again. Only losing the
@@ -497,6 +537,16 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
           referrerPolicy="strict-origin-when-cross-origin"
           onLoad={onLoad}
         />
+      ) : resolution.kind === 'external' ? (
+        <ExternalPreviewPrompt
+          origin={resolution.origin}
+          onOpenInBrowser={getPlatform().openExternal ? () => {
+            getPlatform().openExternal?.(sourceUrl);
+            cancelExternal();
+          } : undefined}
+          onAllow={() => allowIframeOrigin(resolution.origin)}
+          onCancel={cancelExternal}
+        />
       ) : (
         <PanelMessage resolution={resolution} url={sourceUrl} onOpenInAgentBrowser={openInAgentBrowser} />
       )}
@@ -530,6 +580,47 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
           onCancel={() => setPendingOpenUrl(null)}
         />
       )}
+    </div>
+  );
+}
+
+// The concern is what the proxy changes, not the page: it takes away the
+// site's own framing and script protections, and allowing an origin does not
+// make signing in there safe.
+export function ExternalPreviewPrompt({ origin, onOpenInBrowser, onAllow, onCancel }: {
+  origin: string;
+  onOpenInBrowser?: () => void;
+  onAllow: () => void;
+  onCancel: () => void;
+}) {
+  const press = (action: () => void) => ({
+    onMouseDown: (e: MouseEvent) => e.stopPropagation(),
+    onClick: (e: MouseEvent) => { e.stopPropagation(); action(); },
+  });
+  const titleId = useId();
+  return (
+    <div role="alertdialog" aria-labelledby={titleId} className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-terminal-bg px-6 text-center">
+      <div className="max-w-md text-sm text-foreground">
+        <div id={titleId} className="font-semibold">External website preview</div>
+        <div className="mt-1 break-all font-mono text-xs text-muted">{origin}</div>
+        <p className="mt-2 text-muted">
+          Dormouse’s iframe proxy changes website security protections to support local development.
+          Do not sign in or enter sensitive information here.
+        </p>
+      </div>
+      <div className="flex flex-wrap justify-center gap-2">
+        {onOpenInBrowser && (
+          <button type="button" {...press(onOpenInBrowser)} className={modalActionButton({ tone: 'primary' })}>
+            Open in browser
+          </button>
+        )}
+        <button type="button" {...press(onAllow)} className={modalActionButton({ tone: 'secondary' })}>
+          Allow this origin
+        </button>
+        <button type="button" {...press(onCancel)} className={modalActionButton({ tone: 'secondary' })}>
+          Cancel
+        </button>
+      </div>
     </div>
   );
 }

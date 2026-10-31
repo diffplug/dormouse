@@ -52,6 +52,7 @@
 import { lookup as dnsLookup } from 'dns/promises';
 import * as http from 'http';
 import * as net from 'net';
+import { networkInterfaces } from 'os';
 import { IFRAME_HTTP_ONLY, type IframeProxyResult } from '../lib/platform/iframe-proxy-types';
 import { isForeignOrigin, isLoopbackHost, isOwnOrigin } from './loopback-guard';
 import { createSerialQueue } from './remote/serial-queue';
@@ -66,7 +67,9 @@ import {
   frameAncestorsCsp,
   instrumentHtml,
   isBlockedAddress,
+  isThisMachineAddress,
   normalizeEmbedderOrigins,
+  offOriginRedirectPage,
   timedOutPage,
   unreachablePage,
   type ErrorPage,
@@ -109,6 +112,10 @@ export type UpstreamAddress = { address: string; family: number };
  *  it names. Injected by tests; the hosts use the system resolver. */
 export type UpstreamResolver = (hostname: string) => Promise<UpstreamAddress[]>;
 const systemResolver: UpstreamResolver = (hostname) => dnsLookup(hostname, { all: true });
+/** The addresses this host's interfaces hold now. Injected by tests. */
+export type InterfaceAddresses = () => string[];
+const systemInterfaceAddresses: InterfaceAddresses = () =>
+  Object.values(networkInterfaces()).flatMap((entries) => (entries ?? []).map((entry) => entry.address));
 
 /** Host-supplied logger; defaults to a no-op so the module is usable bare. */
 export type ProxyLogger = (message: string) => void;
@@ -138,6 +145,10 @@ interface Grant {
   lastUsed: number;
   /** Held by a lease: no idle TTL, no eviction. */
   leased: boolean;
+  /** Some address it connects to is not this machine's: minted, and reused, only
+   *  for a request the user allowed (docs/specs/dor-browser.md → "Iframe
+   *  External Origins"). */
+  external: boolean;
   /** Not yet served a document: the next one clears the origin's site data. */
   fresh: boolean;
   /** Upgraded sockets, which `server.close()` would leave running. */
@@ -220,7 +231,16 @@ function endLeases(ends: (lease: Lease) => boolean): void {
  */
 export async function createIframeProxyUrl(
   targetUrl: string,
-  opts?: { log?: ProxyLogger; embedderOrigins?: unknown; lease?: unknown; resolve?: UpstreamResolver },
+  opts?: {
+    log?: ProxyLogger;
+    embedderOrigins?: unknown;
+    lease?: unknown;
+    resolve?: UpstreamResolver;
+    interfaceAddresses?: InterfaceAddresses;
+    /** The user allowed this target's origin, so an upstream off this machine
+     *  may be proxied. Anything but `true` refuses one as `external`. */
+    allowExternal?: unknown;
+  },
 ): Promise<IframeProxyResult> {
   if (opts?.log) log = opts.log;
   const embedderOrigins = normalizeEmbedderOrigins(opts?.embedderOrigins);
@@ -243,11 +263,13 @@ export async function createIframeProxyUrl(
     return { ok: false, reason: 'scheme', detail: IFRAME_HTTP_ONLY };
   }
   const resolve = opts?.resolve ?? systemResolver;
+  const interfaces = opts?.interfaceAddresses ?? systemInterfaceAddresses;
+  const allowExternal = opts?.allowExternal === true;
 
   const lease = opts?.lease === undefined ? undefined : validLease(opts.lease);
   if (opts?.lease !== undefined && !lease) return { ok: false, reason: 'unreachable', detail: 'invalid iframe lease' };
   if (!lease) {
-    const minted = await mintGrant(upstream, embedderOrigins, false, resolve);
+    const minted = await mintGrant(upstream, embedderOrigins, false, resolve, interfaces, allowExternal);
     return 'port' in minted ? framedUrl(minted, upstream) : minted;
   }
   const key = leaseKey(lease);
@@ -260,27 +282,30 @@ export async function createIframeProxyUrl(
     leases.set(key, held = { ...lease, acquire: createSerialQueue() });
   }
   const entry = held;
-  return entry.acquire(() => acquireLeased(entry, key, upstream, embedderOrigins, resolve));
+  return entry.acquire(() => acquireLeased(entry, key, upstream, embedderOrigins, resolve, interfaces, allowExternal));
 }
 
 const CLOSED_VIEW: IframeProxyResult = { ok: false, reason: 'unreachable', detail: 'the embedded view was closed' };
 
 /** The lease's grant, reused while it fronts the same upstream origin for the
  *  same embedder chain — a Reload, Back or Forward keeps the page's origin —
- *  else a fresh one in its place. One released meanwhile mints nothing. */
+ *  and, off this machine, while the user still allows it; else a fresh one in
+ *  its place. One released meanwhile mints nothing. */
 async function acquireLeased(
   lease: Lease, key: string, upstream: URL, embedderOrigins: string[] | null, resolve: UpstreamResolver,
+  interfaces: InterfaceAddresses, allowExternal: boolean,
 ): Promise<IframeProxyResult> {
   const released = () => leases.get(key) !== lease;
   if (released()) return CLOSED_VIEW;
-  if (lease.grant && lease.grant.upstream.origin === upstream.origin && sameChain(lease.grant.embedderOrigins, embedderOrigins)) {
+  if (lease.grant && lease.grant.upstream.origin === upstream.origin && sameChain(lease.grant.embedderOrigins, embedderOrigins)
+    && (allowExternal || !lease.grant.external)) {
     return framedUrl(lease.grant, upstream);
   }
   if (lease.grant) {
     closeGrant(lease.grant);
     lease.grant = undefined;
   }
-  const minted = await mintGrant(upstream, embedderOrigins, true, resolve);
+  const minted = await mintGrant(upstream, embedderOrigins, true, resolve, interfaces, allowExternal);
   if (!('port' in minted)) return minted;
   if (released()) {
     closeGrant(minted);
@@ -293,6 +318,7 @@ async function acquireLeased(
 type Refusal = Extract<IframeProxyResult, { ok: false }>;
 
 const METADATA_REFUSED: Refusal = { ok: false, reason: 'scheme', detail: 'link-local / metadata addresses are refused' };
+const EXTERNAL_REFUSED: Refusal = { ok: false, reason: 'external', detail: 'not on this machine' };
 
 /**
  * The addresses a grant for `upstream` connects to, fixed for its lifetime, or
@@ -334,9 +360,15 @@ function pinnedLookup(addresses: readonly UpstreamAddress[]): net.LookupFunction
 
 async function mintGrant(
   upstream: URL, embedderOrigins: string[] | null, leased: boolean, resolve: UpstreamResolver,
+  interfaces: InterfaceAddresses, allowExternal: boolean,
 ): Promise<Grant | Refusal> {
   const pinned = await pinAddresses(upstream, resolve);
   if (!Array.isArray(pinned)) return pinned;
+  // Local is where the grant will connect — every pinned address on this
+  // machine — never what the name looks like.
+  const own = interfaces();
+  const external = !pinned.every(({ address }) => isThisMachineAddress(address, own));
+  if (external && !allowExternal) return EXTERNAL_REFUSED;
   const now = Date.now();
   sweepGrants(now);
 
@@ -348,6 +380,7 @@ async function mintGrant(
     server: null as unknown as http.Server,
     lastUsed: now,
     leased,
+    external,
     fresh: true,
     sockets: new Set(),
     embedderOrigins,
@@ -456,6 +489,15 @@ function handleRequest(grant: Grant, req: http.IncomingMessage, res: http.Server
     path,
     headers,
   }, (upstreamRes) => {
+    // Only with an embedder to ask: without one the frame gets the redirect as
+    // sent, as it gets every other upstream header.
+    const offOrigin = grant.embedderOrigins !== null && (dest === 'document' || dest === 'iframe')
+      ? offOriginRedirect(grant, path, upstreamRes) : null;
+    if (offOrigin) {
+      upstreamRes.resume();
+      serveErrorPage(grant, res, offOriginRedirectPage(offOrigin), offOrigin.href);
+      return;
+    }
     const contentType = String(upstreamRes.headers['content-type'] ?? '');
     const encoding = String(upstreamRes.headers['content-encoding'] ?? 'identity').trim().toLowerCase();
     const embedder = grant.embedderOrigins?.[0];
@@ -718,11 +760,34 @@ function sweepGrants(now: number): void {
   }
 }
 
-function serveErrorPage(grant: Grant, res: http.ServerResponse, page: ErrorPage): void {
+/**
+ * Where a frame's own load is redirected, when that is off the grant's upstream
+ * origin: the frame cannot follow it (the webview's `frame-src` admits loopback
+ * only, and the proxy origin fronts one upstream), so the proxy answers instead.
+ * Resolved against the request, so a scheme-relative `//host/` counts too.
+ */
+function offOriginRedirect(grant: Grant, path: string, upstreamRes: http.IncomingMessage): URL | null {
+  const status = upstreamRes.statusCode ?? 0;
+  const location = upstreamRes.headers.location;
+  if (status < 300 || status > 399 || typeof location !== 'string') return null;
+  try {
+    const target = new URL(location, `${grant.upstream.origin}${path}`);
+    return target.origin === grant.upstream.origin ? null : target;
+  } catch {
+    return null;
+  }
+}
+
+function serveErrorPage(grant: Grant, res: http.ServerResponse, page: ErrorPage, navigate?: string): void {
   // Dormouse's own page, so it is instrumented and framed on the same terms as
   // an upstream's: with a known embedder, or not at all.
+  // A redirect page leaves at once, so it carries no shim: a location report
+  // racing its `navigate` would put the redirecting URL back in history.
   const embedderOrigins = grant.embedderOrigins;
-  const html = embedderOrigins ? instrumentHtml(errorPageHtml(page), embedderOrigins[0]) : errorPageHtml(page);
+  const embedderOrigin = embedderOrigins?.[0];
+  const html = embedderOrigin === undefined ? errorPageHtml(page)
+    : navigate ? errorPageHtml(page, { url: navigate, embedderOrigin })
+      : instrumentHtml(errorPageHtml(page), embedderOrigin);
   res.writeHead(200, {
     'content-type': 'text/html; charset=utf-8',
     'content-length': Buffer.byteLength(html).toString(),

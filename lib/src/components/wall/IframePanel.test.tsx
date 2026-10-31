@@ -13,6 +13,7 @@ import { PaneWriteContext, WallActionsContext, type PaneWriteActions, type WallA
 import { installBrowserHost, stubWallActions as stubActions } from './wall-test-utils';
 import { confirmToolEditorsClose, decideEditorClose, getEditorClosePrompt } from '../../lib/tool-editor';
 import { resetToolDirty } from '../../lib/tool-dirty-store';
+import { _resetIframeAllowlistForTesting, allowIframeOrigin, getIframeAllowlist, removeIframeOrigin } from '../../lib/iframe-allowlist';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -387,6 +388,7 @@ describe('IframePanel', () => {
       await send(origin, { __dormouse: 'pointerdown' });
       await send(origin, { __dormouse: 'location', url: `${PROXY}/other`, loaded: true });
       await send(origin, { __dormouse: 'open-window', url: `${PROXY}/docs` });
+      await send(origin, { __dormouse: 'navigate', url: 'http://localhost:5173/elsewhere' });
     }
     expect(onClickPanel).not.toHaveBeenCalled();
     expect(chrome()).toBe(before);
@@ -674,5 +676,117 @@ describe('the render modes a tool is offered (regression: PR #493 review)', () =
       controller.actions.setRenderMode?.('agent-browser-screencast');
     });
     expect(onSwapRenderMode).toHaveBeenCalledExactlyOnceWith('iframe-tool', 'agent-browser-screencast');
+  });
+});
+
+describe('external origins', () => {
+  const EXTERNAL = 'http://docs.example';
+  beforeEach(() => _resetIframeAllowlistForTesting());
+  afterEach(() => _resetIframeAllowlistForTesting());
+  const button = (label: string) => Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.trim() === label);
+
+  /** A host that refuses anything off `localhost` unless the user allowed it,
+   *  with a pane whose param writes land back in its props. */
+  async function renderGated(url: string, actions: WallActions = stubActions()) {
+    const platform = installBrowserHost().platform;
+    const createProxy = vi.fn(async (target: string, _lease?: string, opts?: { allowExternal?: boolean }) => (
+      new URL(target).hostname === 'localhost' || opts?.allowExternal === true
+        ? { ok: true as const, url: `${PROXY}${new URL(target).pathname}` }
+        : { ok: false as const, reason: 'external' as const }
+    ));
+    platform.createIframeProxyUrl = createProxy;
+    const openExternal = vi.fn();
+    platform.openExternal = openExternal;
+    const writes: Record<string, unknown>[] = [];
+    function Pane() {
+      const [params, setParams] = useState<Record<string, unknown>>({ url });
+      const paneWrite: PaneWriteActions = {
+        updateParams: (_id, patch) => { writes.push(patch); setParams((prev) => ({ ...prev, ...patch })); },
+        setTitle: () => {},
+      };
+      return (
+        <PaneWriteContext.Provider value={paneWrite}>
+          <WallActionsContext.Provider value={actions}>
+            <IframePanel id="iframe-external" title="t" params={params} />
+          </WallActionsContext.Provider>
+        </PaneWriteContext.Provider>
+      );
+    }
+    await act(async () => { root.render(<Pane />); });
+    return { createProxy, openExternal, writes };
+  }
+
+  it('warns before framing an origin the user has not allowed, then frames it once allowed', async () => {
+    const { createProxy } = await renderGated(`${EXTERNAL}/guide`);
+    expect(container.querySelector('iframe')).toBeNull();
+    expect(container.textContent).toContain('External website preview');
+    expect(container.textContent).toContain(EXTERNAL);
+    expect(createProxy).toHaveBeenLastCalledWith(`${EXTERNAL}/guide`, expect.any(String));
+
+    await act(async () => { button('Allow this origin')!.click(); });
+    expect(createProxy).toHaveBeenLastCalledWith(`${EXTERNAL}/guide`, expect.any(String), { allowExternal: true });
+    expect(container.querySelector('iframe')?.getAttribute('src')).toBe(`${PROXY}/guide`);
+    expect(getIframeAllowlist()).toEqual([EXTERNAL]);
+
+    // Removing it (Settings) closes the open preview behind the warning again.
+    await act(async () => { removeIframeOrigin(EXTERNAL); });
+    expect(container.querySelector('iframe')).toBeNull();
+    expect(container.textContent).toContain('External website preview');
+  });
+
+  it('allows an exact origin only: another port asks again', async () => {
+    allowIframeOrigin(EXTERNAL);
+    const { createProxy } = await renderGated(`${EXTERNAL}:8080/guide`);
+    expect(createProxy).toHaveBeenLastCalledWith(`${EXTERNAL}:8080/guide`, expect.any(String));
+    expect(container.textContent).toContain('External website preview');
+  });
+
+  it('closes the pane on Cancel when there is no page to go back to, and opens the browser on request', async () => {
+    const onKill = vi.fn();
+    const { openExternal } = await renderGated(`${EXTERNAL}/guide`, stubActions({ onKill }));
+    await act(async () => { button('Open in browser')!.click(); });
+    expect(openExternal).toHaveBeenCalledWith(`${EXTERNAL}/guide`);
+    expect(onKill).toHaveBeenCalledWith('iframe-external');
+    expect(getIframeAllowlist()).toEqual([]);
+  });
+
+  it('follows a redirect off the proxy through the gate, in place of the page that redirected', async () => {
+    const onKill = vi.fn();
+    const { createProxy, writes } = await renderGated('http://localhost:5173/app', stubActions({ onKill }));
+    expect(container.querySelector('iframe')).not.toBeNull();
+    // A page that is not http(s) never reaches the gate.
+    await act(async () => {
+      window.dispatchEvent(new MessageEvent('message', { origin: PROXY, data: { __dormouse: 'navigate', url: 'javascript:alert(1)' } }));
+    });
+    expect(writes).toEqual([]);
+
+    await act(async () => {
+      window.dispatchEvent(new MessageEvent('message', {
+        origin: PROXY, data: { __dormouse: 'navigate', url: `${EXTERNAL}/login`, from: `${PROXY}/app` },
+      }));
+    });
+    expect(writes).toEqual([{ url: `${EXTERNAL}/login` }]);
+    expect(createProxy).toHaveBeenLastCalledWith(`${EXTERNAL}/login`, expect.any(String));
+    expect(container.textContent).toContain('External website preview');
+    // The redirecting entry was replaced, so there is nothing to go back to.
+    await act(async () => { button('Cancel')!.click(); });
+    expect(onKill).toHaveBeenCalledWith('iframe-external');
+  });
+
+  it('goes back on Cancel to the page that led off the proxy', async () => {
+    const onKill = vi.fn();
+    const { writes } = await renderGated('http://localhost:5173/app', stubActions({ onKill }));
+    await act(async () => {
+      window.dispatchEvent(new MessageEvent('message', { origin: PROXY, data: { __dormouse: 'location', url: `${PROXY}/app/page` } }));
+    });
+    await act(async () => {
+      window.dispatchEvent(new MessageEvent('message', {
+        origin: PROXY, data: { __dormouse: 'navigate', url: `${EXTERNAL}/login`, from: `${PROXY}/elsewhere` },
+      }));
+    });
+    await act(async () => { button('Cancel')!.click(); });
+    expect(onKill).not.toHaveBeenCalled();
+    expect(writes.at(-1)).toEqual({ url: 'http://localhost:5173/app/page' });
+    expect(container.querySelector('iframe')).not.toBeNull();
   });
 });
