@@ -39,7 +39,9 @@ function RemoteControlStory() {
 }
 
 /** The clock every story here reads. A setup code encodes its expiry, so a real
- *  clock would draw a different QR on every run. */
+ *  clock would draw a different QR on every run. `beforeEach` pins it only
+ *  around render: a `parameters` literal is built at module load, under the
+ *  real clock, so a timestamp there must use `STORY_NOW` itself. */
 const STORY_NOW = Date.UTC(2026, 0, 1);
 
 const meta: Meta<typeof RemoteControlStory> = {
@@ -342,7 +344,7 @@ export const PairedPhonesAndAccessLog: Story = {
   parameters: {
     primedBurrow: {
       status: enrolledStatus({ pairedClients: 2 }),
-      accessLog: accessLogEntries(pairedDevices(2)),
+      accessLog: accessLogEntries(pairedDevices(2, STORY_NOW), STORY_NOW),
     },
     docs: { story: { height: '620px' } },
   },
@@ -703,7 +705,7 @@ export const OneTimeEndedNetworkNotAllowed: Story = {
       oneTime: {
         status: 'ended',
         reason: 'network-not-allowed',
-        refusal: { at: Date.now(), kind: 'path-refused', end: 'remote', address: '172.58.12.9', addressSource: 'observed' },
+        refusal: { at: STORY_NOW, kind: 'path-refused', end: 'remote', address: '172.58.12.9', addressSource: 'observed' },
       },
     },
     docs: { story: { height: '360px' } },
