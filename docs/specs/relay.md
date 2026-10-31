@@ -10,7 +10,7 @@ The Relay is one Node process. No database. Every security primitive lives in `r
 
 * **One account** (`accountId: "owner"`), created once off a code an enrolled Burrow displayed; the setup password enrolls Burrows and registers nothing.
 * **Terminal-only**: exactly `docs/specs/remote-api.md` -> "v1 scope".
-* **Revocation is hand-editing a JSON file** ("State files"); no management UI. **Must re-check a connected Burrow's membership in `burrows.json`** every `BURROW_REVOCATION_SWEEP_MS`: a revoked Burrow's socket closes `WS_CLOSE_BURROW_REVOKED` (4001), its Clients get `burrow-gone`, and a later upgrade answers 401. Revoking a Client is the Burrow's own ACL and needs a Burrow restart (`docs/specs/remote-security-model.md` -> "Revocation propagation").
+* **Revocation is hand-editing a JSON file** ("State files"); no management UI. **Must re-check a connected Burrow's membership in `burrows.json`** every `BURROW_REVOCATION_SWEEP_MS`: a revoked Burrow's socket closes `WS_CLOSE_BURROW_REVOKED` (4001), its Clients get `burrow-gone`, and a later upgrade answers 401. Revoking a Client is the Burrow's own ACL (`docs/specs/remote-security-model.md` -> "Revocation").
 * **No resume protocol**: a dropped WebSocket is handled by reloading the page or reconnecting the Burrow.
 * **Everything transient is in memory** (challenges, sessions, presence nonces, routing); a Relay restart means everyone reconnects. **Transient stores must prune expired entries as they issue** (rationale).
 * **Must key every keyed transient store by whoever grew it**, each evicting its key's own oldest: setup tokens per minting Burrow (`MAX_TOKENS_PER_BURROW`), sessions per account (`MAX_SESSIONS_PER_ACCOUNT`), presence nonces per session (`MAX_PENDING_REAUTH_NONCES_PER_SESSION`); `MAX_SESSIONS` and `MAX_REAUTH_NONCE_SESSIONS` bound their totals. **The two challenge issuers are the accepted exception**: one flat `MAX_PENDING_CHALLENGES` map apiece, whose oldest entry a caller past that route's gate (sign-in has none) can evict, a live ceremony's included (`docs/specs/security.md` -> "Known gaps"; rationale).
@@ -346,6 +346,7 @@ The **Remote control** choices are **One-time connection** (`docs/specs/one-time
 - **The setup password is passed through, never held**, and cleared on success.
 - **"Set up a phone" mints only when its panel opens** and **reports which decision ended the code** (`docs/specs/remote-security-model.md` -> "Pairing"; rationale).
 - **A Hosted `removed` offers Enroll again**, which clears the enrollment and then begins a device-code enrollment.
+- **An enrolled Burrow lists its paired phones, each with Revoke, beside its access log**, and re-reads both on every `access` event (`docs/specs/remote-security-model.md` -> "Revocation", "Access log").
 
 **Never expose pairing confirmation or one-time commands on `window.dormouseBurrow`**; its enrollment methods are the scripting seam.
 

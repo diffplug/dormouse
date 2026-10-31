@@ -58,7 +58,7 @@ export function shellCommandKind(shell: string | undefined, platformString: stri
 export function buildShellCommandForKind(kind: ShellCommandKind, args: readonly string[]): string {
   switch (kind) {
     case 'cmd':
-      return args.map(quoteCmdArg).join(' ');
+      return args.map((arg, i) => (i === 0 ? quoteCmdProgram(arg) : quoteCmdArg(arg))).join(' ');
     case 'powershell':
       return quotePowerShellCommand(args);
     case 'posix':
@@ -76,12 +76,38 @@ export function quotePosixArg(arg: string): string {
   return `'${arg.replace(/['\\]/g, (c) => `'\\${c}'`)}'`;
 }
 
+/** What PowerShell's legacy native binder hands a program wrongly: it passes
+ *  each value raw, wrapped in `"` only when it has whitespace outside its own
+ *  quotes, so an inner `"` stays unescaped, a wrapped trailing `\` escapes the
+ *  closing quote, an empty value vanishes, and a `.cmd` target reads unspaced
+ *  operators as syntax. Windows PowerShell 5.1 and pwsh before 7.3 always bind
+ *  that way, later pwsh for batch targets; `\s` over-approximates .NET's
+ *  `IsWhiteSpace`, which the binder tests. */
+function legacyBinderLoses(arg: string): boolean {
+  return arg === '' || /["&|<>^]/.test(arg) || (/[\s\u0085]/.test(arg) && arg.endsWith('\\'));
+}
+
+/** A PowerShell command line runs in the native binding the webview cannot
+ *  know: pwsh 7.3+ escapes values for the program's argv split itself, so a
+ *  pre-escaped value is escaped twice there. When an argument would be lost,
+ *  the command therefore pins legacy binding for its own scope and hands that
+ *  argument over already in its MSVCRT form, which the binder passes as is. A
+ *  PowerShell command, not a program, would then receive that form. */
 function quotePowerShellCommand(args: readonly string[]): string {
   const [command, ...rest] = args;
   if (command === undefined) return '';
   const quotedCommand = quotePowerShellArg(command);
   const commandPrefix = quotedCommand.startsWith("'") ? '& ' : '';
-  return `${commandPrefix}${[quotedCommand, ...rest.map(quotePowerShellArg)].join(' ')}`;
+  const legacy = rest.some(legacyBinderLoses);
+  const quotedRest = rest.map((arg) => quotePowerShellArg(legacy && legacyBinderLoses(arg) ? quoteMsvcrtArg(arg) : arg));
+  const line = `${commandPrefix}${[quotedCommand, ...quotedRest].join(' ')}`;
+  return legacy ? `& { $PSNativeCommandArgumentPassing = 'Legacy'; ${line} }` : line;
+}
+
+/** `arg` in quotes for the MSVCRT / `CommandLineToArgvW` argv split: `"` as
+ *  `\"`, and backslashes doubled only before a quote, the closing one included. */
+function quoteMsvcrtArg(arg: string): string {
+  return `"${arg.replace(/(\\*)("|$)/g, (_, slashes: string, quote: string) => slashes + slashes + (quote ? '\\"' : ''))}"`;
 }
 
 /** Every character PowerShell reads as a single quote: `'` and U+2018–U+201B.
@@ -131,11 +157,40 @@ export function buildWindowsPortableCommand(args: readonly string[]): string | n
   return quoted.every((arg) => arg !== null) ? [command, ...quoted].join(' ') : null;
 }
 
+/** A typed cmd line passes two parsers: cmd's own (`%NAME%` expansion, then
+ *  `^` escapes and operators outside quotes, where every `"` toggles quoting
+ *  and nothing inside is escaped), then the program's MSVCRT /
+ *  `CommandLineToArgvW` split of the text cmd hands it, where `\"` is a
+ *  literal quote. The program is only quoted: Windows names cannot hold `"`, and
+ *  cmd finds a command by real quotes, not escaped ones; a `%NAME%` in it naming
+ *  a set variable still expands. */
+function quoteCmdProgram(program: string): string {
+  if (program === '') return '""';
+  return WINDOWS_SAFE_ARG.test(program) ? program : `"${program}"`;
+}
+
+/** An argument holding neither `"` nor `%` sits in real quotes, where cmd reads
+ *  every other character literally. Otherwise each quote of its MSVCRT form is
+ *  escaped too, so cmd never enters quoting and `^` escapes every operator: a
+ *  quote inside cmd's quotes would end them and run the rest as commands. A
+ *  batch target re-parses its `%*`, so an argument with `"` stays unsafe there. */
 function quoteCmdArg(arg: string): string {
   if (arg === '') return '""';
-  const escaped = arg
-    .replace(/[%]/g, '%%')
-    .replace(/([&|<>()^"])/g, '^$1');
-  if (WINDOWS_SAFE_ARG.test(arg)) return escaped;
-  return `"${escaped}"`;
+  if (WINDOWS_SAFE_ARG.test(arg)) return arg;
+  const quoted = quoteMsvcrtArg(arg);
+  return /["%]/.test(arg) ? caretEscapeCmd(quoted) : quoted;
+}
+
+/** `text` with every cmd operator, quote, and caret escaped by `^`, for a line
+ *  cmd reads entirely outside quotes. The character after each `%` takes a
+ *  caret as well, so each `%…%` pair cmd tries to expand names a variable that
+ *  starts with `^`, which nothing sets; at a prompt an unset one stays literal. */
+function caretEscapeCmd(text: string): string {
+  let out = '';
+  let afterPercent = false;
+  for (const c of text) {
+    out += afterPercent || /[\^&|<>()!"]/.test(c) ? `^${c}` : c;
+    afterPercent = c === '%';
+  }
+  return out;
 }

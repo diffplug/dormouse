@@ -27,6 +27,7 @@ import type {
   BurrowStatus,
 } from '../../remote/burrow/burrow-runtime';
 import type { OneTimeState } from '../../remote/burrow/one-time-runtime';
+import type { AccessLogEntry } from '../../remote/burrow/access-log';
 import { isPathRefusal } from '../../remote/direct/path-refusal';
 import type { NetworkLevel, NetworkPolicy, NetworkPolicyResult } from '../../remote/network-policy';
 import type { RelayMode } from '../relay-origin';
@@ -194,13 +195,23 @@ export interface NetworkPolicyEvent extends NetworkPolicyResult {
   name: 'network-policy';
 }
 
+/**
+ * service → webview: the paired devices or the access log changed — a
+ * pairing, a revocation, a connection, its end — so a panel showing either
+ * asks again (`pairedDevices`, `accessLog`). Carries nothing itself.
+ */
+export interface AccessChangedEvent {
+  name: 'access';
+}
+
 /** Every `burrow:event` the service sends, by `name`. */
 export type BurrowUiEvent =
   | BurrowStatusEvent
   | PairingQueueEvent
   | InvitationEvent
   | OneTimeEvent
-  | NetworkPolicyEvent;
+  | NetworkPolicyEvent
+  | AccessChangedEvent;
 
 /**
  * The one-time state of a Burrow with no connection, from this build's
@@ -331,6 +342,23 @@ export interface TakeBackParams {
 /** Whether a session was ended. `false` when none holds under that id any more. */
 export interface TakeBackResult {
   ended: boolean;
+}
+
+/**
+ * Revoke one paired phone (`docs/specs/remote-security-model.md` ->
+ * "Revocation"), named by its {@link PairedDevice.id}. Revoking only narrows:
+ * no command widens the ACL but a confirmed pairing.
+ */
+export interface RevokeDeviceParams {
+  id: string;
+  /** Who asked, for the access log; read through `revocationRequester`. */
+  by?: string;
+}
+
+/** How many ACL records the revocation retired, and the label of each browser it cut off. */
+export interface RevokeDeviceResult {
+  revoked: number;
+  labels: string[];
 }
 
 /**
@@ -512,6 +540,35 @@ export interface BurrowConsoleStatus {
  * route that takes one (`docs/specs/security-remote.md` → "What crosses the boundary").
  */
 export type PushDevicesResult = { devices: Array<{ label: string }> } | null;
+
+/**
+ * One paired browser, as Settings → Remote control and `dor remote list`
+ * show it: every active ACL record of one Client static, folded.
+ *
+ * **Never the Client static or the `deliveryId`.** `id` is `deviceIdFor` of
+ * the static — a name to revoke by, which authorizes nothing.
+ */
+export interface PairedDevice {
+  id: string;
+  /** Mapped through `knownPairingDeviceLabel`, so never text the phone chose. */
+  label: string;
+  /** Its newest active record's `approvedAt`. */
+  pairedAt: number;
+  /** The newest access-log entry naming it, or `null` where the log holds none. */
+  lastSeenAt: number | null;
+  /** Whether a session of it is established now. */
+  connected: boolean;
+}
+
+/** What `pairedDevices` answers: empty with no enrollment. */
+export interface PairedDevicesResult {
+  devices: PairedDevice[];
+}
+
+/** What `accessLog` answers: the whole bounded log, oldest first. */
+export interface AccessLogResult {
+  entries: AccessLogEntry[];
+}
 
 /**
  * What one push fan-out actually did: the result of the `pushTest` command, and

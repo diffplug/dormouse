@@ -135,11 +135,13 @@ The shared `BurrowService` (`docs/specs/relay.md` → "Burrow side", which owns 
 
 Source of truth: `VsCodeBurrowStateStore` in `vscode-ext/src/burrow-store.ts`, `markOneTimeServing` and `contendIfServing` in `vscode-ext/src/burrow.ts`.
 
-**Which window: bind-as-lease.** **The bind is the lease**, so the windows' extension hosts never fight over the enrollment's one `/ws/burrow` socket (rationale). On unix every contending window binds one fixed path, `<hash>.sock` in a per-user `dormouse-peer-<uid>` directory in the temp dir; **the hash is the first 12 hex characters of SHA-256 over `context.globalStorageUri.fsPath`**, so every window, whatever its build, computes the same path (hashed for the platform path cap; rationale). The winner is the broker and runs the service; every other window connects as a client once the broker's welcome verifies.
+**Which window: bind-as-lease.** **The bind is the lease**, so the windows' extension hosts never fight over the enrollment's one `/ws/burrow` socket (rationale). On unix every window contends for one fixed path, `<hash>.sock` in a per-user `dormouse-peer-<uid>` directory in the temp dir; **the hash is the first 12 hex characters of SHA-256 over `context.globalStorageUri.fsPath`**, so every window, whatever its build, computes the same path (hashed for the platform path cap; rationale). The winner is the broker and runs the service; every other window connects as a client once the broker's welcome verifies.
 
 - **Roles never flip downward**: no `onRole(false)` after a `true` (rationale).
-- **Contend on broker death, not on a timer**: `bind` picks exactly one; no TTL, heartbeat file, or watcher.
-- **Never unlink on the first refusal; a reclaimed bind is re-checked (`stillOurs`) before it serves** (rationale).
+- **Contend on broker death, not on a timer**: `link` picks exactly one; no TTL, heartbeat file, or watcher.
+- **Never `listen` on the fixed path**: listen on a private name beside it, `link` that on (create-only, never displacing), then drop the private name (rationale).
+- **Unlink only after a second refusal, and only the file that refused; a reclaimed bind is re-checked (`stillOurs`) before it serves** (rationale).
+- **A disposing broker unlinks the fixed path only while it names its own socket**; a stand-down unlinks nothing.
 - **A bind is not a role until it is believed**: **an unverified bind reads as unsettled**, and a command landing mid-verification is held for the verdict (rationale).
 
 **Windows: a published endpoint**, since another account could create a derived pipe name first (rationale):

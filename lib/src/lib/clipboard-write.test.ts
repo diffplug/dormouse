@@ -159,7 +159,8 @@ describe('clipboard failure report', () => {
     button.className = 'copy-target extra';
     Object.defineProperty(navigator, 'userActivation', { value: { isActive: true, hasBeenActive: true }, configurable: true });
     try {
-      recordInput({ type: 'pointerdown', isTrusted: true, target: button });
+      recordInput({ type: 'pointerdown', isTrusted: true, target: button, pointerType: 'touch' });
+      recordInput({ type: 'touchend', isTrusted: true, target: button });
       recordInput({ type: 'mousedown', isTrusted: false, target: button });
       (navigator.userActivation as { isActive: boolean }).isActive = false;
       recordInput({ type: 'click', isTrusted: true, target: button });
@@ -167,8 +168,9 @@ describe('clipboard failure report', () => {
       expect(await writeTextToClipboard('hello')).toBe(false);
       const lines = getClipboardFailure()!.report.split('\n');
       const timeline = lines.slice(lines.findIndex(line => line.startsWith('input timeline')) + 1).filter(line => line.startsWith('  -'));
-      expect(timeline.slice(-2).map(line => line.replace(/^ {2}-\d+ms /, ''))).toEqual([
-        'pointerdown button.copy-target active=true',
+      expect(timeline.slice(-3).map(line => line.replace(/^ {2}-\d+ms /, ''))).toEqual([
+        'pointerdown:touch button.copy-target active=true',
+        'touchend button.copy-target active=true',
         'click button.copy-target active=false',
       ]);
     } finally {

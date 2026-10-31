@@ -3,7 +3,8 @@ import type { SerializeAddon } from '@xterm/addon-serialize';
 
 export interface TerminalGrid { cols: number; rows: number }
 
-/** The pinned serializer omits mouse encoding. Read xterm's resolved state,
+/** The pinned serializer omits mouse encoding (fixed upstream by
+ * xtermjs/xterm.js#6174, unreleased). Read xterm's resolved state,
  * including resets, rather than infer it from output chunks. This private
  * accessor is pinned by real-xterm round-trip tests in terminal-transfer.test.ts.
  */

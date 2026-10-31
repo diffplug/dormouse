@@ -148,6 +148,38 @@ Source of truth: `BurrowRuntime` in `lib/src/remote/burrow/burrow-runtime.ts`, `
 
 Source of truth: `OneTimeRuntime` in `lib/src/remote/burrow/one-time-runtime.ts`, `OneTimeClient` in `lib/src/remote/client/one-time-client.ts`, `oneTimeLinkPrologue` in `remote-lib-common/src/security/one-time-link.ts`, `e2eOneTimePrologue` in `remote-lib-common/src/security/noise-transport.ts`, `OneTimeRequestV1` / `OneTimeOutcomeV1` / `knownOneTimeDeviceLabel` in `remote-lib-common/src/security/e2e-ceremony.ts`.
 
+## Revocation
+
+**Only the Burrow revokes, and revoking only narrows.** `BurrowService.revoke` is the one entry point: it takes a target — one browser's Client static, retiring every active record it holds, or one passkey credential, retiring every record paired with it, which today only tests name — and who asked (`REVOCATION_REQUESTERS`): Settings → Remote control's paired-phone list ([relay.md](./relay.md) -> "Remote control, in the Settings dialog") or `dor remote revoke` (`docs/specs/dor-cli.md`). **No command, `dor` verb, or webview message adds or restores a record**; that stays [Pairing](#pairing)'s.
+
+Reserved: a Relay- or Pocket-initiated revocation calls this entry point with a requester of its own (`remote-trust-followups` -> [Revocation propagation](#revocation-propagation)).
+
+- **A running Burrow's revocation takes effect before its save**: the live ACL drops the records, every established session no active record still authorizes ends with the goodbye, every pending connection whose Client static it left unpaired is refused `pairing-required`, and those statics' [presence windows](#presence-window) close. It queues with approvals, so neither overwrites the other's snapshot. A failed save rejects with the phone already refused, and the service applies the revocation to every ACL it reads for that Burrow, so a network-policy change that restarts the runtime keeps it; the next ACL write carries it, and quitting Dormouse before one undoes it (rationale).
+- **A stopped Burrow's revocation is its save**, on the service's lifecycle chain, so a Burrow starting meanwhile loads the ACL after it.
+- **A paired browser is named by `deviceIdFor`**: the first 64 bits of its Client static in hex, a name that authorizes nothing and the only identifier of a record that reaches a webview or `dor` (rationale). **An id that matches more than one Client static revokes nothing.**
+
+Source of truth: `BurrowService.revoke` in `lib/src/host/remote/service.ts`, `BurrowRuntime.revoke` in `lib/src/remote/burrow/burrow-runtime.ts`, `revokeTarget` in `lib/src/remote/burrow/acl.ts`.
+
+## Access log
+
+**The Burrow records who reached it, on this machine, and never what they did.** One bounded, append-only log per machine, not per enrollment, since a one-time connection needs none; past `ACCESS_LOG_MAX_ENTRIES` the oldest entry goes (rationale).
+
+| Event | Recorded |
+| --- | --- |
+| `paired`, `pairing-denied` | a pairing's ending, with its outcome code |
+| `connected` | a promotion, with how presence was shown: a proof or the window |
+| `connection-denied` | every refusal, with the specific ACL miss or presence failure the outcome never carries ([Connection](#connection)) |
+| `attached` | an attach that succeeded, with its surface id |
+| `ended` | a session's end, with its path (relayed or direct) and duration |
+| `revoked` | each browser a [revocation](#revocation) cut off, with who asked |
+| `one-time-connected`, `one-time-denied`, `one-time-ended` | a [one-time connection](#one-time-connection)'s confirmation, refusal, and end |
+
+- **Never terminal content**: an entry holds a time, an event, the device's mapped label and id, and at most a path, presence kind, duration, refusal reason, surface id, and requester.
+- **It stays on this machine**: persisted beside the ACL (`docs/specs/security-remote.md` -> "Credentials at rest"), read only by this machine's webviews, through `accessLog` and the `access` event that says it changed, and by `dor remote log`. Last seen, on the paired-phone list, is its newest entry for that device.
+- **It informs and authorizes nothing**: a log that cannot be read starts over, and a failed save costs entries, never an access decision.
+
+Source of truth: `lib/src/remote/burrow/access-log.ts`, `BurrowService.#logAccess` in `lib/src/host/remote/service.ts`.
+
 ## Push sealing
 
 **A push gets its own construction** — no live session exists between the two endpoints when one is sent (rationale).
@@ -253,7 +285,7 @@ Source of truth: `remote-lib-common/src/security/noise.ts`, `isEnrollment` / `pe
 
 **Never treat browser storage as permanent.** An iOS browser tab is the weakest, an Android tab is generally durable, and an installed PWA is the preferred mode on both (rationale).
 
-**Loss is expected, and recovery is a re-run of the normal flow**: scan a fresh setup code, generate a new per-Burrow static, pair again, optionally revoke the old record (`revokedAt`). **Nothing is compromised** — the lost key authorized nothing without its paired passkey.
+**Loss is expected, and recovery is a re-run of the normal flow**: scan a fresh setup code, generate a new per-Burrow static, pair again, optionally [revoke](#revocation) the old one. **Nothing is compromised** — the lost key authorized nothing without its paired passkey.
 
 ## Residual metadata
 
@@ -273,7 +305,7 @@ Source of truth: `remote-lib-common/src/security/noise.ts`, `isEnrollment` / `pe
 
 ### Revocation propagation
 
-The Relay pushing revocations to Burrows. Today `BurrowAcl.revokeClient` / `revokePasskey` have no callers and no relay frame carries a revocation, so revoking is hand-editing state ([relay.md](./relay.md), Guardrails) — and `BurrowService` hands the `BurrowRuntime` one ACL snapshot for its whole lifetime, so **restarting the Burrow is the entire lever**: it reloads the ACL *and*, by dropping the relay socket, ends every established session. Editing alone changes nothing that is running.
+The Relay pushing revocations to Burrows. A Burrow revokes only from its own Settings and `dor` ([Revocation](#revocation)); no relay frame or protocol-v1 message carries one yet, and each would call `BurrowService.revoke`.
 
 ### Account-wide devices
 

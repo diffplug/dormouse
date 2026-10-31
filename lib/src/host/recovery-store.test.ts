@@ -1,8 +1,27 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRecoveryStore, RECOVERY_MAX_AGE_MS } from './recovery-store';
+
+/**
+ * Runs once, right after the store's next read of a recovery record lands —
+ * where another host sharing the directory can persist a fresh one.
+ */
+const afterRecordRead = vi.hoisted(() => ({ hook: null as null | (() => void) }));
+vi.mock('node:fs', async (importOriginal) => {
+  const real = await importOriginal<typeof import('node:fs')>();
+  const readFileSync = ((...args: Parameters<typeof real.readFileSync>) => {
+    const result = real.readFileSync(...args);
+    const { hook } = afterRecordRead;
+    if (hook && String(args[0]).includes('recovery.json')) {
+      afterRecordRead.hook = null;
+      hook();
+    }
+    return result;
+  }) as typeof real.readFileSync;
+  return { ...real, readFileSync, default: { ...real, readFileSync } };
+});
 
 let dir: string;
 const messages: string[] = [];
@@ -18,6 +37,7 @@ const write = (payload: unknown) => fs.writeFileSync(file(), JSON.stringify(payl
 beforeEach(() => {
   dir = fs.mkdtempSync(join(tmpdir(), 'dormouse-recovery-'));
   messages.length = 0;
+  afterRecordRead.hook = null;
 });
 
 afterEach(() => {
@@ -96,6 +116,18 @@ describe('recovery store', () => {
       // spent.
       expect(store.take(['a', 'b'])).toEqual({ b: 'codex resume B' });
       expect(store.take(['b'])).toEqual({});
+    });
+
+    it('never removes a record another host writes while this one claims', () => {
+      // Two hosts can share the directory (VS Code windows with no folder fall
+      // back to global storage), and one's teardown can persist while another's
+      // cold start reads.
+      write({ createdAt: Date.now(), commands: { a: 'claude --resume A' } });
+      afterRecordRead.hook = () => write({ createdAt: Date.now(), commands: { b: 'codex resume B' } });
+
+      expect(createRecoveryStore(dir, { log }).take(['a', 'b'])).toEqual({ a: 'claude --resume A' });
+      expect(createRecoveryStore(dir, { log }).take(['a', 'b'])).toEqual({ b: 'codex resume B' });
+      expect(fs.readdirSync(dir)).toEqual([]);
     });
 
     it('returns nothing when there is no record', () => {

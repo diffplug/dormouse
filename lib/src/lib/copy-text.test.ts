@@ -43,6 +43,23 @@ function reflowed(rows: readonly string[], cols: number): CopyBuffer {
 const narrowed = reflowed(CLAUDE, 60);
 /** A line whose wrap leaves a row of only blanks between its text. */
 const blankWrap = lines(['intro', '', 'aaaa bbbb cccc dddd ', ' '.repeat(20), 'eeee ffff', '', 'outro'], { cols: 20, wrapped: [3, 4] });
+/** Claude Code's rendering of Markdown quotes, hard-wrapped at 55 columns:
+ *  rows 1 and 6 start with the space the full row before them broke at. */
+const QUOTED = [
+  '  This section lost its selling power. Previous version',
+  '   sold the use case:',
+  '',
+  '  ▎ "Run builds, agents, servers, and scripts side by',
+  '  ▎ side. Minimize the ones you’re not watching to a',
+  '  ▎ compact status indicator — every pane keeps running',
+  '  ▎  and every alert still fires whether minimized or',
+  '  ▎ not."',
+  '  ▎',
+  '  ▎ ▎ A quote of a quote, wrapped at the margin so that',
+  '  ▎ ▎ it reaches the next row.',
+  '',
+  '  Current version (lines 35–39) sells the mechanics.',
+];
 
 describe('copy-text formats', () => {
   it.each(['', '    '])('keeps relative Auto indent when the first selected row starts mid-line (%j)', (prefix) => {
@@ -177,6 +194,50 @@ describe('copy-text formats', () => {
       '- the second item',
     ], { cols: 80 });
     expect(text(buf, span(0, 0, 2, 16), 'auto')).toBe('- the first item wraps because it is long enough to reach past the margin of the pane\n- the second item');
+  });
+
+  it('rewraps a Claude Code quote inside its bars, written as Markdown’s >', () => {
+    const buf = lines(QUOTED, { cols: 58 });
+    const all = span(0, 2, QUOTED.length - 1, QUOTED[QUOTED.length - 1].length - 1);
+    expect(text(buf, all, 'auto')).toBe([
+      'This section lost its selling power. Previous version sold the use case:',
+      '',
+      '> "Run builds, agents, servers, and scripts side by side. Minimize the ones you’re not watching to a compact status indicator — every pane keeps running and every alert still fires whether minimized or not."',
+      '>',
+      '> > A quote of a quote, wrapped at the margin so that it reaches the next row.',
+      '',
+      'Current version (lines 35–39) sells the mechanics.',
+    ].join('\n'));
+    // Every later quote prefix goes with the break before it.
+    expect(text(buf, span(3, 2, 7, 8), 'spaces')).toBe('> "Run builds, agents, servers, and scripts side by side. Minimize the ones you’re not watching to a compact status indicator — every pane keeps running and every alert still fires whether minimized or not."');
+    expect(text(buf, all, 'exact').split('\n')[3]).toBe(QUOTED[3]);
+    // A bar alone is a blank line inside the quote, so its paragraphs stay apart.
+    const paragraphs = lines(['  ▎ First.', '  ▎', '  ▎ Second.'], { cols: 58 });
+    expect(text(paragraphs, span(0, 2, 2, 10), 'auto')).toBe('> First.\n>\n> Second.');
+    // An empty row ends a quote, whichever marker it uses.
+    for (const bar of ['▎', '>']) {
+      const quotes = lines([`  ${bar} First.`, '', `  ${bar} Second.`], { cols: 58 });
+      expect(text(quotes, span(0, 2, 2, 10), 'auto')).toBe('> First.\n\n> Second.');
+    }
+    // A quoted paragraph starts at its prefix, which its later kept lines show.
+    expect(computeScopes(buf, span(4, 10, 4, 12)).find((s) => s.label === 'Paragraph')?.span).toEqual(span(3, 2, 7, 8));
+  });
+
+  it('rewraps Markdown quotes by depth, a lone > staying text', () => {
+    const buf = lines([
+      '> > The nested quote of an email is wrapped at the margin of its pane',
+      '> > by the mail client that sent it.',
+      '> The reply to it.',
+      '>',
+      'The reply.',
+    ], { cols: 80 });
+    expect(text(buf, span(0, 0, 4, 9), 'auto')).toBe('> > The nested quote of an email is wrapped at the margin of its pane by the mail client that sent it.\n> The reply to it.\n>\nThe reply.');
+  });
+
+  it('reads an editor’s indent guides as indentation, not quotes', () => {
+    // Neovim's indent-blankline draws `▎` at each indent stop, here every four columns.
+    const buf = lines(['def area(width, height):', '▎   if width < 0:', '▎   ▎   raise ValueError(width)', '▎', '▎   return width * height'], { cols: 80 });
+    expect(text(buf, span(0, 0, 4, 24), 'auto')).toBe('def area(width, height):\n    if width < 0:\n        raise ValueError(width)\n\n    return width * height');
   });
 
   it('reads a block slab exactly under Auto', () => {

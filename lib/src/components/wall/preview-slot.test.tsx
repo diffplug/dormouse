@@ -1395,6 +1395,17 @@ describe('a document link to a page that runs its own script', () => {
     expect(forward.mock.calls[0][0]).toMatchObject({ ok: false, error: 'Navigation cancelled.' });
     expect((await paramsOf('surface:slot'))?.toolTarget).toBe('/elsewhere/notes.md');
   });
+
+  it('holds no other launch while the dialog waits, and still opens once confirmed', async () => {
+    await mountSlot();
+    await follow('/elsewhere/page.html');
+    await waitUntil(() => getExternalLinkConfirmationSnapshot() !== null);
+    expect(await answer(await request({ file: '/repo/c.md' }))).toMatchObject({ status: 'created' });
+    expect(getExternalLinkConfirmationSnapshot()?.uri).toBe('/elsewhere/page.html');
+    startTool(newLeaf(), 'view /repo/c.md');
+    act(() => dialogButton('Open file').click());
+    await untilTarget('/elsewhere/page.html');
+  });
 });
 
 it('document navigation Cancel keeps the draft and history; Discard permits replacement', async () => {
@@ -1411,6 +1422,21 @@ it('document navigation Cancel keeps the draft and history; Discard permits repl
   await waitUntil(() => getEditorClosePrompt() !== null);
   await act(async () => decideEditorClose('discard'));
   expect(await answer(discarded)).toMatchObject({ status: 'retargeted', surfaceId: 'surface:slot' });
+});
+
+it('holds no other launch while asking to discard edits, and focuses a destination it placed meanwhile', async () => {
+  await mountSlot();
+  recordToolDirty('surface:slot', true);
+  const navigation = await request({ file: '/repo/b.md', disposition: 'current' }, 'surface:slot');
+  await waitUntil(() => getEditorClosePrompt() !== null);
+  const opened = await answer(await request({ file: '/repo/b.md' }));
+  expect(opened).toMatchObject({ status: 'created' });
+  expect(getEditorClosePrompt()).not.toBeNull();
+  startTool(opened.surfaceId, 'view /repo/b.md');
+  await act(async () => decideEditorClose('discard'));
+  expect(await answer(navigation)).toMatchObject({ status: 'existing', surfaceId: opened.surfaceId });
+  expect(typed['surface:slot']).toEqual([]);
+  expect((await paramsOf('surface:slot'))?.toolTarget).toBe('/repo/a.md');
 });
 
 it('Back resolves the original handler in its original lookup directory', async () => {
