@@ -56,6 +56,8 @@ Push (2026-10-01):
 
 ## Relay sockets
 
+Failed sweep (decided 2026-10-30, #910): before, a failed or timed-out read closed nothing and the next sweep came an hour later, so a Burrow removed or de-entitled without a `closeBurrow` (an entitlement change has none) kept forwarding for as long as the database stayed unreachable. Closing every socket at the first failed read was rejected: one slow query would drop every session, and each reconnect is refused 503 until the database answers. A per-socket `checkedAt` in the attachment, not a stored "last good sweep", because `ctx.storage` holds only the account id (`docs/specs/security-hosted.md` -> `S111`), and a socket opened since the last sweep has a fresher read of its own. The ten-minute grace with one-minute retries rides out a typical database restart or failover while bounding the backstop at seventy minutes; 1013 is no latch: the Burrow backs off and reconnects, and Pocket reads it as a drop, not a removal.
+
 A `RelayRoom` that opened a Postgres connection through Hyperdrive could not be evicted afterwards: `unsafeEvictDurableObject` timed out on "it still has active references" even after the client had ended and its socket was closed, while an object that opened and closed a bare socket to the same host evicted normally (measured in Miniflare 5.20260908, 2026-10). Reading the rows in a Worker invocation of their own, through `ctx.exports`, leaves the object hibernatable.
 
 ## Burrow enrollment

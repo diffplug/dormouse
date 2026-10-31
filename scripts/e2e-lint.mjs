@@ -209,7 +209,8 @@ const FRAME_DECODE = String.raw`\bJSON\.parse\b|\batob\b|\bBuffer\b|\bTextDecode
  *   account id — an alias of it included;
  * - an attachment other than a connection (`conn`, `x.conn`) or a connection
  *   literal checked `satisfies` its type without a spread, and a connection
- *   field written other than the two routing writes.
+ *   field written other than the two routing writes and the sweep's
+ *   `checkedAt = start`.
  */
 const RELAY_ROOM_LEAKS = new RegExp(
   [
@@ -218,7 +219,7 @@ const RELAY_ROOM_LEAKS = new RegExp(
     String.raw`\bconsole\b(?!\.\w+\(\s*"[^"\\]*"\s*\))`,
     String.raw`\bstorage\b(?!\.(?:get|getAlarm|setAlarm|deleteAlarm)\b|\.put\(ACCOUNT_KEY, account\))`,
     String.raw`\bserializeAttachment\((?!(?:\w+\.)?conn\)|\{(?:(?!\.\.\.)[^{}()])*\}\s*satisfies\s+(?:BurrowConn|ClientConn)\))`,
-    String.raw`\bconn\.(?!retired\b|burrowId\b)\w+\s*=(?!=)`,
+    String.raw`\bconn\.(?!retired\b|burrowId\b|checkedAt\s*=\s*start\b)\w+\s*=(?!=)`,
   ].join('|'),
   'g',
 );
