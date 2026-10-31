@@ -1001,6 +1001,125 @@ test("a payment Stripe holds by its charge is refunded by it; one paid outside S
   expect(await settled()).toEqual([true, true]);
 });
 
+/** A withdrawal and a closure, each refunding one payment; reads whether each is settled, and runs the cron, answering its failure. */
+async function withdrawalAndClosure(f: Awaited<ReturnType<typeof fixture>>) {
+  const withdrawing = await f.account();
+  const { subscription: withdrawn } = await f.buy(withdrawing, "yearly");
+  f.paidInvoices.set("pi_w_refund", withdrawn.id);
+  const closing = await f.account();
+  const { subscription: closed } = await f.buy(closing, "monthly");
+  f.paidInvoices.set("pi_c_refund", closed.id);
+  expect((await withdrawing.request("/api/billing/withdraw", { method: "POST", body: { subscription: withdrawn.id } })).status).toBe(200);
+  expect((await closing.request("/api/account/close", { method: "POST", body: { close: true } })).status).toBe(204);
+  const settled = async () => [
+    ((await withdrawing.summary()).withdrawn as { settled: boolean }).settled,
+    (await f.sql<{ settled: boolean }>(`SELECT "settledAt" IS NOT NULL AS settled FROM dormouse_account_closures WHERE "userId" = $1`, [
+      closing.id,
+    ]))[0]!.settled,
+  ];
+  const resync = () =>
+    resyncBilling(f.setup, f.database.url, origin, f.mail).then(
+      () => "",
+      (failure: unknown) => (failure as AggregateError).errors.map(String).join("\n"),
+    );
+  return { settled, resync, closed };
+}
+
+test("a refund still pending leaves its withdrawal or closure unsettled, and the cron settles it once Stripe says it succeeded", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const error = vi.spyOn(console, "error").mockImplementation(() => {});
+  onTestFinished(() => error.mockRestore());
+  f.refundStatuses.push("pending", "pending");
+  const { settled, resync, closed } = await withdrawalAndClosure(f);
+  expect(f.refunds.map((refund) => refund.status)).toEqual(["pending", "pending"]);
+  expect(await settled()).toEqual([false, false]);
+
+  // Days on, past Stripe's replay of a key, still in flight: the cron fails on both, refunding nothing again.
+  f.time.advanceMilliseconds(2 * DAY_MS);
+  const failure = await resync();
+  expect(failure).toContain("refund not yet succeeded, retried by the cron: invoice in_pi_w_refund (pi_w_refund)");
+  expect(failure).toContain(`Closure ${closed.id}: refund not yet succeeded`);
+  expect([f.refunds.length, ...(await settled())]).toEqual([2, false, false]);
+
+  for (const refund of f.refunds) refund.status = "succeeded";
+  expect(await resync()).toBe("");
+  expect([f.refunds.length, ...(await settled())]).toEqual([2, true, true]);
+});
+
+test("a refund that fails or is canceled is made again under a new idempotency key, and settles once that one succeeds", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const error = vi.spyOn(console, "error").mockImplementation(() => {});
+  onTestFinished(() => error.mockRestore());
+  f.refundStatuses.push("pending", "pending");
+  const { settled, resync } = await withdrawalAndClosure(f);
+  expect(await settled()).toEqual([false, false]);
+  // Stripe fails one and cancels the other; it would answer either's key with the refund it made for it.
+  f.refunds[0]!.status = "failed";
+  f.refunds[1]!.status = "canceled";
+  expect(await resync()).toBe("");
+  expect(f.refunds.map(({ paymentIntent, status }) => [paymentIntent, status])).toEqual([
+    ["pi_w_refund", "failed"],
+    ["pi_c_refund", "canceled"],
+    ["pi_w_refund", undefined],
+    ["pi_c_refund", undefined],
+  ]);
+  expect(await settled()).toEqual([true, true]);
+});
+
+test("a refund awaiting the customer's action in Stripe leaves its withdrawal or closure to them or the operator, and settles once it succeeds", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const error = vi.spyOn(console, "error").mockImplementation(() => {});
+  onTestFinished(() => error.mockRestore());
+  f.refundStatuses.push("requires_action", "requires_action");
+  const { settled, resync, closed } = await withdrawalAndClosure(f);
+  expect(await settled()).toEqual([false, false]);
+  f.time.advanceMilliseconds(2 * DAY_MS);
+  const failure = await resync();
+  expect(failure).toContain("refund awaits the customer's action in Stripe: invoice in_pi_w_refund (pi_w_refund)");
+  expect(failure).toContain(`Closure ${closed.id}: refund awaits the customer's action in Stripe`);
+  expect([f.refunds.length, ...(await settled())]).toEqual([2, false, false]);
+  // The customer acts, and Stripe completes both.
+  for (const refund of f.refunds) refund.status = "succeeded";
+  expect(await resync()).toBe("");
+  expect([f.refunds.length, ...(await settled())]).toEqual([2, true, true]);
+});
+
+test("refunds made by hand count only once succeeded, and only what they leave is refunded", async ({ onTestFinished }) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const error = vi.spyOn(console, "error").mockImplementation(() => {});
+  onTestFinished(() => error.mockRestore());
+  const member = await f.account();
+  const { subscription } = await f.buy(member, "yearly");
+  for (const intent of ["pi_whole", "pi_part", "pi_failed", "pi_pending"]) f.paidInvoices.set(intent, subscription.id);
+  f.refunds.push(
+    { paymentIntent: "pi_whole", withdrawal: null },
+    { paymentIntent: "pi_part", withdrawal: null, amount: 400 },
+    { paymentIntent: "pi_failed", withdrawal: null, status: "failed" },
+    { paymentIntent: "pi_pending", withdrawal: null, status: "pending" },
+  );
+  const answered = await member.request("/api/billing/withdraw", { method: "POST", body: { subscription: subscription.id } });
+  expect(await answered.json()).toMatchObject({ withdrawn: { settled: false } });
+  const [{ id }] = (await f.sql(`SELECT id FROM dormouse_withdrawals`)) as [{ id: string }];
+  expect(f.refunds.slice(4)).toEqual([
+    { paymentIntent: "pi_part", withdrawal: id, amount: 600 },
+    { paymentIntent: "pi_failed", withdrawal: id },
+  ]);
+  f.refunds[3]!.status = "succeeded";
+  await resyncBilling(f.setup, f.database.url, origin, f.mail);
+  expect(f.refunds).toHaveLength(6);
+  expect(await member.summary()).toMatchObject({ withdrawn: { settled: true } });
+});
+
 test("the cron retries unsettled withdrawals and closures however old, the least recently tried first", async ({
   onTestFinished,
 }) => {
