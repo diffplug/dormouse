@@ -127,6 +127,20 @@ export const WithDoors: Story = {
   },
 };
 
+/** `ls -la` typed in command mode: `l` raises the stray-key prompt, which
+ *  swallows the rest, so the `-` never splits. */
+export const StrayKeyPrompt: Story = {
+  parameters: { fakePty: { scenario: flattenScenario(SCENARIO_SHELL_PROMPT) } },
+  play: async () => {
+    await settleTerminals();
+    const panesBefore = paneCount();
+    for (const key of 'ls -la') window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+    await requireElement('[data-stray-key-prompt]', 'stray-key prompt');
+    if (paneCount() !== panesBefore) throw new Error(`a stray word split the Wall: ${paneCount()} panes`);
+    await settleTerminals();
+  },
+};
+
 export const AlertRingingDoor: Story = {
   args: {
     initialPaneIds: ['surface:1'],
