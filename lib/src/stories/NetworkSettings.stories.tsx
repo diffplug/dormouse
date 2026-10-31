@@ -341,7 +341,7 @@ export const SelfHost: Story = {
     await expect(canvas.getByRole('radio', { name: /^Anywhere, through / })).toHaveAttribute('aria-checked', 'true');
     await canvas.findByText('ned-mac.tail9c2f1.ts.net → your phone’s push service');
     await canvas.findByText('This build never updates itself. Rebuild it from source to update.');
-    await canvas.findByText('1 paired phone.');
+    await canvas.findByText('Paired phones');
   },
 };
 

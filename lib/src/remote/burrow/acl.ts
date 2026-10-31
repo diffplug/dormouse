@@ -49,3 +49,51 @@ export function loadBurrowAcl(
     return new BurrowAcl(burrowId);
   }
 }
+
+/**
+ * What one revocation names (`docs/specs/remote-security-model.md` ->
+ * "Revocation"): one paired browser's Client static — every active record it
+ * holds — or one passkey credential, which cuts off every browser paired with
+ * it.
+ */
+export type RevocationTarget =
+  | { readonly clientStaticPublicKey: string }
+  | { readonly passkeyCredentialId: string };
+
+/**
+ * Who asked, as the access log records it: the Settings list, or `dor`. A
+ * closed set; the service reads anything else as `settings`.
+ */
+export const REVOCATION_REQUESTERS = ['settings', 'dor'] as const;
+export type RevocationRequester = (typeof REVOCATION_REQUESTERS)[number];
+
+/** The requester an untrusted message names, anything outside the set read as `settings`. */
+export function revocationRequester(value: unknown): RevocationRequester {
+  return REVOCATION_REQUESTERS.find((known) => known === value) ?? 'settings';
+}
+
+/**
+ * Revoke what `target` names on `acl`, in place, answering the records it
+ * retired as they read before. One rule for the running Burrow and for a
+ * stopped one's stored ACL.
+ */
+export function revokeTarget(acl: BurrowAcl, target: RevocationTarget): BurrowAclRecord[] {
+  if ('clientStaticPublicKey' in target) {
+    const hit = acl.activeRecords().filter((record) => record.clientStaticPublicKey === target.clientStaticPublicKey);
+    acl.revokeClient(target.clientStaticPublicKey);
+    return hit;
+  }
+  const hit = acl.activeRecords().filter((record) => record.passkeyCredentialId === target.passkeyCredentialId);
+  acl.revokePasskey(target.passkeyCredentialId);
+  return hit;
+}
+
+/** One record per Client static, the first of each: one paired browser per entry. */
+export function firstPerClientStatic(records: readonly BurrowAclRecord[]): BurrowAclRecord[] {
+  const seen = new Set<string>();
+  return records.filter((record) => {
+    if (seen.has(record.clientStaticPublicKey)) return false;
+    seen.add(record.clientStaticPublicKey);
+    return true;
+  });
+}

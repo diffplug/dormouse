@@ -1,0 +1,5 @@
+exitCode: 1
+stdout:
+
+stderr:
+Error: No paired phone has the id 0000000000000000.

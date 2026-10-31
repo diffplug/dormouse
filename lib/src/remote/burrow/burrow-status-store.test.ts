@@ -11,10 +11,14 @@ vi.mock('../../lib/platform', () => ({
 import {
   clearBurrowEnrollment,
   getBurrowStatusSnapshot,
+  loadAccessLog,
+  loadPairedDevices,
   readBurrowStatusOnce,
+  revokePairedDevice,
+  subscribeToAccess,
   subscribeToBurrowStatus,
 } from './burrow-status-store';
-import { makeStubBurrowLink, UNENROLLED_STATUS } from '../../host/remote/test-burrow-link';
+import { makeEventedBurrowLink, makeStubBurrowLink, UNENROLLED_STATUS } from '../../host/remote/test-burrow-link';
 
 afterEach(() => {
   burrowLink = undefined;
@@ -349,5 +353,48 @@ describe('readBurrowStatusOnce', () => {
     expect(await readBurrowStatusOnce()).toBeNull();
     burrowLink = makeStubBurrowLink({ statusError: 'down' });
     expect(await readBurrowStatusOnce()).toBeNull();
+  });
+});
+
+describe('paired phones and the access log', () => {
+  it('reads an answer with no list as no phones, and drops log entries this build has no copy for', async () => {
+    burrowLink = {
+      command: vi.fn(async (cmd: string) =>
+        cmd === 'accessLog'
+          ? {
+              entries: [
+                { at: 1, event: 'connected', device: 'Dormouse Pocket (browser)', presence: 'window' },
+                { at: 2, event: 'teleported', device: 'Dormouse Pocket (browser)' },
+              ],
+            }
+          : null,
+      ),
+      respond: () => {},
+      notify: () => {},
+      on: () => () => {},
+    };
+    expect(await loadPairedDevices()).toEqual([]);
+    expect(await loadAccessLog()).toEqual([
+      { at: 1, event: 'connected', device: 'Dormouse Pocket (browser)', presence: 'window' },
+    ]);
+  });
+
+  it('names Settings as the one revoking', async () => {
+    const command = vi.fn(async () => ({ revoked: 1, labels: ['Dormouse Pocket (browser)'] }));
+    burrowLink = { command, respond: () => {}, notify: () => {}, on: () => () => {} };
+    expect(await revokePairedDevice('3f2a9c01d47e6b01')).toEqual({ revoked: 1, labels: ['Dormouse Pocket (browser)'] });
+    expect(command).toHaveBeenCalledWith('revokeDevice', { id: '3f2a9c01d47e6b01', by: 'settings' });
+  });
+
+  it('tells an access subscriber of each access event until it unsubscribes', () => {
+    const link = makeEventedBurrowLink(vi.fn(async () => null));
+    burrowLink = link;
+    const listener = vi.fn();
+    const unsubscribe = subscribeToAccess(listener);
+    link.emit('access', { name: 'access' });
+    expect(listener).toHaveBeenCalledOnce();
+    unsubscribe();
+    link.emit('access', { name: 'access' });
+    expect(listener).toHaveBeenCalledOnce();
   });
 });
