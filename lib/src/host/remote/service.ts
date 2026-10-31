@@ -534,7 +534,9 @@ export class BurrowService {
    * the store has them applied ({@link #loadAcl}) — a network-policy change
    * restarts the runtime from the store, and must not re-admit a phone the
    * person just cut off — until an ACL save for that Burrow succeeds, which
-   * carries them. Memory only: quitting Dormouse first undoes them.
+   * carries them. Memory only: stopping this service first undoes them — quitting
+   * Dormouse, or in VS Code closing the broker window, whose successor loads
+   * the stored ACL.
    */
   readonly #unsavedRevocations = new Map<string, Array<{ target: RevocationTarget; at: number }>>();
 
@@ -1195,8 +1197,9 @@ export class BurrowService {
         const held = this.#unsavedRevocations.get(enrollment.burrowId) ?? [];
         this.#unsavedRevocations.set(enrollment.burrowId, [...held, { target, at: this.#now() }]);
         const detail = error instanceof Error ? error.message : String(error);
+        const until = this.#kind === 'vscode' ? 'the window running remote control closes' : 'Dormouse quits';
         throw new Error(
-          `The phone is disconnected and refused until Dormouse quits, but the revocation could not be saved: ${detail}`,
+          `The phone is disconnected and refused until ${until}, but the revocation could not be saved: ${detail}`,
         );
       }
     } else {
