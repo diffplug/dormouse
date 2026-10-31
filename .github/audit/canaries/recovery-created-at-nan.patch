@@ -5,10 +5,10 @@ Severity: INFO — hardening: `normalizeResumeCommand` rebuilds a restored comma
 Source: reverses #1034 (a non-numeric createdAt gave a NaN age, which passes the 7-day bound)
 
 diff --git a/lib/src/host/recovery-store.test.ts b/lib/src/host/recovery-store.test.ts
-index 4fe3acd3b..75b68a212 100644
+index bf89e1a2e..ffaf2cb54 100644
 --- a/lib/src/host/recovery-store.test.ts
 +++ b/lib/src/host/recovery-store.test.ts
-@@ -116,23 +116,6 @@ describe('recovery store', () => {
+@@ -148,23 +148,6 @@ describe('recovery store', () => {
        expect(fs.existsSync(file())).toBe(false);
      });
  
@@ -33,11 +33,11 @@ index 4fe3acd3b..75b68a212 100644
        write({ createdAt: Date.now(), commands: { a: 'claude --continue', b: { evil: true } } });
        const store = createRecoveryStore(dir, { log });
 diff --git a/lib/src/host/recovery-store.ts b/lib/src/host/recovery-store.ts
-index 13c17aef4..c2e5753c0 100644
+index a5631499c..98d7c80a5 100644
 --- a/lib/src/host/recovery-store.ts
 +++ b/lib/src/host/recovery-store.ts
-@@ -155,14 +155,7 @@ function readAndClearRecord(file: string, log: RecoveryLog): Record<string, stri
-   }
+@@ -163,14 +163,7 @@ function readAndClearRecord(file: string, log: RecoveryLog): Record<string, stri
+   try { fs.rmSync(claim, { force: true }); } catch { /* best effort */ }
    if (!recovery) return noCommands();
  
 -  // A non-numeric date gives a NaN age and an infinite one -Infinity; both

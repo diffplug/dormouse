@@ -27,6 +27,7 @@ import {
   SPEECH_SWEEP_CAP,
   TOKEN_SWEEP_CRON,
   VOICE_TOKEN_IDLE_DAYS,
+  VOICE_USAGE_RETENTION_DAYS,
 } from "../voice";
 import { mintVoiceToken } from "../voice-token";
 import { voiceBearerRoutes } from "../voice";
@@ -1160,22 +1161,40 @@ test("the admin page: its read answers only the verified admin, from this origin
   }
 });
 
-test("the voice Worker's daily cron deletes only tokens a year idle, and never touches ElevenLabs", async ({
+test("the voice Worker's daily cron deletes only tokens a year idle and counters past retention, and never touches ElevenLabs", async ({
   onTestFinished,
 }) => {
   const f = await fixture();
   onTestFinished(f.close);
   const admin = f.browser();
   await admin.email(ADMIN_EMAIL);
+  await f.browser().email("other@example.test");
   const idle = `now() - interval '${VOICE_TOKEN_IDLE_DAYS} days'`;
   const live = await admin.mint(`${idle} + interval '1 minute'`);
   const used = await admin.mint(`${idle} - interval '1 day'`);
   await admin.mint(`${idle} - interval '1 minute'`);
   await queryDatabase(f.database.url, `UPDATE dormouse_voice_tokens SET "lastUsedAt" = now() WHERE hash = $1`, [digest(used)]);
+  // Both accounts' counters, by UTC days ago: the cron sweeps an account that
+  // never speaks again, not only the one speaking.
+  const kept = VOICE_USAGE_RETENTION_DAYS - 1;
+  await queryDatabase(
+    f.database.url,
+    `INSERT INTO dormouse_voice_usage ("userId", day, count)
+      SELECT id, (now() AT TIME ZONE 'UTC')::date - ago, 1
+      FROM "user", unnest($1::integer[]) AS ago`,
+    [[0, kept, VOICE_USAGE_RETENTION_DAYS, 400]],
+  );
   expect((await f.voiceCron(TOKEN_SWEEP_CRON)).outcome).toBe("ok");
   expect(
     (await queryDatabase<{ hash: string }>(f.database.url, "SELECT hash FROM dormouse_voice_tokens")).map((row) => row.hash).sort(),
   ).toEqual([digest(live), digest(used)].sort());
+  expect(
+    await queryDatabase(
+      f.database.url,
+      `SELECT (now() AT TIME ZONE 'UTC')::date - day AS ago, count(*)::integer AS accounts
+        FROM dormouse_voice_usage GROUP BY ago ORDER BY ago`,
+    ),
+  ).toEqual([{ ago: 0, accounts: 2 }, { ago: kept, accounts: 2 }]);
   expect(f.elevenLabs.sweeps).toEqual([]);
 });
 

@@ -85,6 +85,19 @@ export const TOOL_CONTROL_METHODS = {
 export type ToolControlMethod = (typeof TOOL_CONTROL_METHODS)[keyof typeof TOOL_CONTROL_METHODS];
 
 /**
+ * The wire identifier for each remote-control operation — reads of this
+ * machine's Burrow and the one revocation (`docs/specs/dor-cli.md` →
+ * "dor remote"). None pairs or widens access.
+ */
+export const REMOTE_CONTROL_METHODS = {
+  devices: 'remote.devices',
+  revoke: 'remote.revoke',
+  log: 'remote.log',
+} as const;
+
+export type RemoteControlMethod = (typeof REMOTE_CONTROL_METHODS)[keyof typeof REMOTE_CONTROL_METHODS];
+
+/**
  * Short names for `dor` verbs: `dor o` is `dor open`. The takeover gate reads
  * a typed command line, so it resolves these as the CLI does
  * (`docs/specs/dor-tool.md` -> Take-over).
@@ -97,12 +110,13 @@ export function canonicalDorVerb(verb: string): string {
 }
 
 /** Every method the control channel carries. */
-export type DorControlMethod = SurfaceControlMethod | WorkspaceControlMethod | AppControlMethod | WindowControlMethod | ToolControlMethod;
+export type DorControlMethod = SurfaceControlMethod | WorkspaceControlMethod | AppControlMethod | WindowControlMethod | ToolControlMethod | RemoteControlMethod;
 
 const WORKSPACE_METHOD_SET: ReadonlySet<string> = new Set(Object.values(WORKSPACE_CONTROL_METHODS));
 const APP_METHOD_SET: ReadonlySet<string> = new Set(Object.values(APP_CONTROL_METHODS));
 const TOOL_METHOD_SET: ReadonlySet<string> = new Set(Object.values(TOOL_CONTROL_METHODS));
 const WINDOW_METHOD_SET: ReadonlySet<string> = new Set(Object.values(WINDOW_CONTROL_METHODS));
+const REMOTE_METHOD_SET: ReadonlySet<string> = new Set(Object.values(REMOTE_CONTROL_METHODS));
 
 /**
  * A host's refusal of a method it does not know. **Frozen text:** a newer `dor`
@@ -125,6 +139,11 @@ export function isWindowControlMethod(method: string): method is WindowControlMe
 /** Whether this method reads the Tool configuration rather than any Workspace. */
 export function isToolControlMethod(method: string): method is ToolControlMethod {
   return TOOL_METHOD_SET.has(method);
+}
+
+/** Whether this method acts on this machine's Burrow rather than any Workspace. */
+export function isRemoteControlMethod(method: string): method is RemoteControlMethod {
+  return REMOTE_METHOD_SET.has(method);
 }
 
 /** Whether this method is a container verb — answered by the Window rather than

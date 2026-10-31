@@ -7,7 +7,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { resolveBinaryPath, spawnAndCapture } from 'dor-lib-common';
 import { browserLaunchEnv, browserShellInvocation } from './browser-launch-env';
 const roots: string[] = [];
-afterEach(async () => { await Promise.all(roots.splice(0).map(p => rm(p, { recursive: true, force: true }))); });
+// Retries: a timed-out shell's tree kill is not awaited, and Windows refuses to
+// remove a directory a dying process still has as its cwd (EBUSY).
+afterEach(async () => { await Promise.all(roots.splice(0).map(p => rm(p, { recursive: true, force: true, maxRetries: 10 }))); });
 describe.skipIf(!existsSync('/bin/zsh'))('fresh browser shell', () => {
   async function fixture(startup: string) {
     const dir = await mkdtemp(path.join(os.tmpdir(), "dor launch ' "));
@@ -68,7 +70,8 @@ describe('configured browser launch shells', () => {
   });
 });
 
-// Real shell cold starts on CI runners outlast vitest's 5s default; stay above browserLaunchEnv's own 15s budget.
+// Above browserLaunchEnv's own 15s budget, so its error reports a stalled shell.
+// CI warms Windows PowerShell first (`Warm Windows PowerShell` in .github/workflows/ci.yml).
 describe.skipIf(process.platform !== 'win32')('native Windows browser shell', { timeout: 20_000 }, () => {
   async function fixture() {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'dor launch spaces & '));

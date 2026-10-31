@@ -319,6 +319,7 @@ for (const violation of [
   '\nconst __selftest = (ws: WorkerWebSocket, conn: object, raw: string) => ws.serializeAttachment({ ...conn, last: raw });\n',
   '\nconst __selftest = (ws: WorkerWebSocket, raw: string) => ws.serializeAttachment({ role: "client", raw });\n',
   '\nconst __selftest = (conn: { last?: string }, raw: string) => { conn.last = raw; };\n',
+  '\nconst __selftest = (conn: { checkedAt?: unknown }, raw: string) => { conn.checkedAt = raw; };\n',
   '\nconst __selftest = (frame: Record<string, string>) => frame["ct"];\n',
   '\nconst __selftest = (raw: string) => JSON.parse(raw);\n',
   '\nconst __selftest = (raw: string) => atob(raw);\n',

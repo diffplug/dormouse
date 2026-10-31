@@ -589,6 +589,21 @@ describe('burrow state store', () => {
     expect(await target.loadNetworkPolicy()).toEqual(nothingPolicy());
   });
 
+  it('keeps the access log in globalState, never the keychain, dropping what is not an entry', async () => {
+    const { VsCodeBurrowStateStore, ACCESS_LOG_KEY } = await import('../src/burrow-store');
+    const { context, store } = fakeContext();
+    const target = new VsCodeBurrowStateStore(context);
+    const entry = { at: 1, event: 'revoked', device: 'Unknown device', deviceId: '00ff', by: 'dor' } as const;
+
+    expect(await target.loadAccessLog()).toEqual([]);
+    await target.saveAccessLog([entry]);
+    expect(store.secrets.size).toBe(0);
+    expect(await new VsCodeBurrowStateStore(context).loadAccessLog()).toEqual([entry]);
+
+    store.global.set(ACCESS_LOG_KEY, [entry, { event: 'paired' }, 'junk']);
+    expect(await target.loadAccessLog()).toEqual([entry]);
+  });
+
   it('serializes ACL snapshots so an older approval cannot land last', async () => {
     const { VsCodeBurrowStateStore } = await import('../src/burrow-store');
     const pending: PendingGlobalWrite[] = [];

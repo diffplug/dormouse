@@ -44,7 +44,12 @@ import { e2eCases, socketCases } from "../../../remote-lib-common/test/harness/r
 import { ADMIN_EMAIL } from "../entitlement";
 import { migrations } from "../migrations";
 import { relayAccountRoutes } from "../relay-account";
-import { RELAY_ROOM_SWEEP_MS, RELAY_ROW_READ_TIMEOUT_MS } from "../relay-room-contract";
+import {
+  RELAY_ROOM_SWEEP_GRACE_MS,
+  RELAY_ROOM_SWEEP_MS,
+  RELAY_ROOM_SWEEP_RETRY_MS,
+  RELAY_ROW_READ_TIMEOUT_MS,
+} from "../relay-room-contract";
 import { ORIGINS, TEST_ENROLL_SECRET, bundleWorker, miniflareOptions, wrangler } from "./bundle";
 
 // The Hosted Relay's sockets and its per-account `RelayRoom`
@@ -634,7 +639,7 @@ test("a Client whose session went between the Worker's token check and the objec
   expect(await room.forgeClient(owner.userId, owner.sessionToken)).toEqual(refused);
 });
 
-test("a stalled row read answers the upgrade 503 within its bound and leaves the sweep for later, the object's sockets open", async ({
+test("a stalled row read answers the upgrade 503 within its bound; the sweep retries soon, and closes 1013 a socket no read has found live past its grace", async ({
   onTestFinished,
 }) => {
   const owner = await account();
@@ -642,6 +647,7 @@ test("a stalled row read answers the upgrade 503 within its bound and leaves the
   onTestFinished(async () => {
     closeAll();
     await room.stallRows(false);
+    await room.skew(0);
   });
   const held = await owner.driver.connectBurrow();
   const client = await owner.driver.connectClient();
@@ -653,18 +659,44 @@ test("a stalled row read answers the upgrade 503 within its bound and leaves the
   const started = Date.now();
   expect(await room.forge(owner.userId, enrolled.burrowId)).toBe(503);
   expect(Date.now() - started).toBeLessThan(RELAY_ROW_READ_TIMEOUT_MS + 5_000);
-  // The sweep's read fails the same way and closes nothing, and its wait
-  // never pushes the next sweep past an interval from this one's start.
+  // The sweep's read fails the same way and closes nothing its upgrade just
+  // checked, and the next sweep is a retry from this one's start, its wait
+  // never pushing it later.
+  const liveSockets = async () => (await room.probe()).attachments.filter(live).length;
   const sweeping = Date.now();
   await room.fire();
   expect(await held.socket.quiet(150)).toBe(true);
-  expect((await room.probe()).alarm).toBeLessThan(sweeping + RELAY_ROOM_SWEEP_MS + 1_000);
+  expect(await liveSockets()).toBe(2);
+  expect((await room.probe()).alarm).toBeLessThan(sweeping + RELAY_ROOM_SWEEP_RETRY_MS + 1_000);
 
   client.send(e2eClientFrame(held.burrowId));
   expect(await held.socket.take()).toMatchObject({ step: "init" });
   expect(await room.onlineBurrows(owner.userId)).toEqual([held.burrowId]);
+
+  // A sweep that reads, an interval on, finds both live; a failed one just
+  // short of the grace past it keeps them, though their upgrades are older.
   await room.stallRows(false);
+  await room.skew(RELAY_ROOM_SWEEP_MS);
+  await room.fire();
+  await room.stallRows(true);
+  await room.skew(2 * RELAY_ROOM_SWEEP_MS + RELAY_ROOM_SWEEP_GRACE_MS - 60_000);
+  await room.fire();
+  expect(await liveSockets()).toBe(2);
+  // Past it, the outage closes both 1013.
+  await room.skew(2 * RELAY_ROOM_SWEEP_MS + RELAY_ROOM_SWEEP_GRACE_MS);
+  await room.fire();
+  // Released, as a database answering again ends a stalled read: in Miniflare
+  // the close reaches the peer only once no read the object made is pending.
+  await room.stallRows(false);
+  expect((await held.socket.closed).code).toBe(WS_CLOSE_TRY_AGAIN_LATER);
+  expect((await client.closed).code).toBe(WS_CLOSE_TRY_AGAIN_LATER);
+
+  // Each comes back through its upgrade's recheck once the rows read again.
+  await room.skew(0);
   expect(await room.forge(owner.userId, enrolled.burrowId)).toBe(101);
+  await owner.driver.reconnectBurrow(held.burrowToken);
+  await owner.driver.connectClient();
+  await until(async () => (await liveSockets()) === 2);
 });
 
 test("a removal answers 204 once the row is gone, even when closing its socket fails", async () => {

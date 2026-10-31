@@ -5,7 +5,7 @@ import {
   TOKEN_OWNER,
   TOKEN_SWEEP_CRON,
   elevenLabs,
-  sweepIdleTokens,
+  sweepVoiceRows,
   sweepOnCron,
   voiceBearerRoutes,
 } from "./voice";
@@ -14,8 +14,8 @@ import { workerApp } from "./worker-app";
 /**
  * The voice Worker (`voice.dormouse.sh`): readiness, bearer-token speech and
  * forgetting, and two Cron Triggers: the ElevenLabs history sweep, which never
- * touches the database, and the daily idle-token sweep. No cookie, no auth, no
- * assets.
+ * touches the database, and the daily sweep of idle tokens and old counters.
+ * No cookie, no auth, no assets.
  * `sweepDelayMs` exists for the test entry; production keeps the default.
  */
 export function voiceApp(
@@ -48,7 +48,7 @@ export function voiceApp(
     // whether a key reaches it.
     async scheduled(controller, env) {
       if ((controller as { cron?: string }).cron === TOKEN_SWEEP_CRON)
-        await sweepIdleTokens(env.HYPERDRIVE.connectionString);
+        await sweepVoiceRows(env.HYPERDRIVE.connectionString);
       else if (env.ELEVENLABS_API_KEY) await sweepOnCron(env.ELEVENLABS_API_KEY);
     },
   });
