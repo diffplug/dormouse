@@ -26,12 +26,12 @@ function archive(manifest) {
   return gzipSync(Buffer.concat([header, data, Buffer.alloc((512 - data.length % 512) % 512 + 1024)]));
 }
 
-function run(args, { manifest = {}, missingRelease = false, mismatchPeer = false, lib = pins, standalone = pins } = {}) {
+function run(args, { manifest = {}, missingRelease = false, mismatchPeer = false, lib = pins, standalone = pins, canopyCore = newCore, compareFiles = null } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'xterm-bump-'));
   try {
     for (const dir of ['scripts', 'lib', 'standalone', 'canopy']) mkdirSync(join(root, dir));
     copyFileSync(new URL('./xterm-bump.mjs', import.meta.url), join(root, 'scripts/xterm-bump.mjs'));
-    for (const [dir, dependencies] of Object.entries({ lib, standalone, canopy: { [CORE]: newCore, [FORK]: 'old-url', '@xterm/addon-webgl': '1.0.0-beta.2' } })) {
+    for (const [dir, dependencies] of Object.entries({ lib, standalone, canopy: { [CORE]: canopyCore, [FORK]: 'old-url', '@xterm/addon-webgl': '1.0.0-beta.2' } })) {
       writeFileSync(join(root, dir, 'package.json'), JSON.stringify({ dependencies }, null, 2));
     }
     const versions = { [CORE]: { [oldCore]: { gitHead: 'old-commit' }, [newCore]: { gitHead: 'new-commit' } } };
@@ -39,11 +39,11 @@ function run(args, { manifest = {}, missingRelease = false, mismatchPeer = false
       '1.0.0-beta.1': { gitHead: 'old-commit', peerDependencies: { [CORE]: `^${mismatchPeer ? newCore : oldCore}` } },
       '1.0.0-beta.2': { gitHead: 'new-commit', peerDependencies: { [CORE]: `^${newCore}` } },
     };
-    writeFileSync(join(root, 'fixture.json'), JSON.stringify({ versions, missingRelease }));
+    writeFileSync(join(root, 'fixture.json'), JSON.stringify({ versions, missingRelease, compareFiles }));
     writeFileSync(join(root, 'release.tgz'), archive({ name: FORK, version: forkVersion, peerDependencies: { [CORE]: `^${oldCore}` }, ...manifest }));
     writeFileSync(join(root, 'fetch.mjs'), `
       import { readFileSync } from 'node:fs';
-      const { versions, missingRelease } = JSON.parse(readFileSync(new URL('./fixture.json', import.meta.url)));
+      const { versions, missingRelease, compareFiles } = JSON.parse(readFileSync(new URL('./fixture.json', import.meta.url)));
       globalThis.fetch = async (url) => {
         if (url.startsWith('https://registry.npmjs.org/')) {
           const name = decodeURIComponent(url.slice('https://registry.npmjs.org/'.length));
@@ -52,6 +52,9 @@ function run(args, { manifest = {}, missingRelease = false, mismatchPeer = false
         }
         if (url.startsWith('https://github.com/diffplug/xterm.js/releases/download/')) {
           return new Response(missingRelease ? '' : readFileSync(new URL('./release.tgz', import.meta.url)), { status: missingRelease ? 404 : 200 });
+        }
+        if (compareFiles && url.startsWith('https://api.github.com/repos/xtermjs/xterm.js/compare/')) {
+          return Response.json({ files: compareFiles.map((filename) => ({ filename })) });
         }
         throw new Error('unexpected network request: ' + url);
       };
@@ -108,6 +111,20 @@ test('default dry-run preserves standalone drift', () => {
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.packages.standalone[CORE], oldCore);
   assert.match(result.stdout, /no files written/);
+});
+test('default dry-run names the fork release after the chosen upstream addon version', () => {
+  const result = run(['--dry-run'], { canopyCore: oldCore });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /--canopy 1\.0\.0-sdf12\.0\n/);
+});
+test('default dry-run gives no addon verdict on a compare list GitHub truncated', () => {
+  const files = Array.from({ length: 300 }, (_, i) => `src/file-${i}.ts`);
+  const truncated = run(['--dry-run'], { canopyCore: oldCore, compareFiles: files });
+  assert.equal(truncated.status, 0, truncated.stderr);
+  assert.doesNotMatch(truncated.stdout, /the merge is mechanical/);
+  assert.match(truncated.stdout, /check addons\/addon-webgl\/ by hand/);
+  const full = run(['--dry-run'], { canopyCore: oldCore, compareFiles: files.slice(1) });
+  assert.match(full.stdout, /Does not touch addons\/addon-webgl\/ \(299 files changed\)/);
 });
 
 // --- xterm-lint check 4: the hand-copied UpstreamVsFork triple ---------------
