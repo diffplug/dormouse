@@ -28,8 +28,11 @@ const TEND = 'docs/specs/security-ci.md -> "Automated Maintainer (tend)"';
 const HOSTED = 'docs/specs/security-ci.md -> "Hosted Deployments"';
 const VSCODE = 'docs/specs/security-ci.md -> "VS Code Extension Releases"';
 
-/** The one action a workflow may reference by tag, and only from the generated files. */
+/** The actions a workflow may reference by tag, and only from the generated files. */
 const TEND_ACTION = 'max-sixty/tend/claude';
+const TEND_TAGGED = [TEND_ACTION, 'max-sixty/tend/setup-runtime'];
+/** A job-level `env:` value a tend job may set: one matrix value, never a secret. */
+const MATRIX_VALUE = /^\$\{\{\s*matrix\.[\w-]+\s*\}\}$/;
 const TEND_MINIMUM = [0, 1, 19];
 const AGENT_MANAGED = (file) => /^tend-.*\.ya?ml$/.test(file) || file === 'workflow-audit.yaml' || file === 'security-audit.yaml';
 // No `id-token`: with it, claude-code-action mints the Claude App's
@@ -111,8 +114,8 @@ export function check(inputs) {
         if (!/@sha256:[0-9a-f]{64}$/.test(uses)) fail(POLICIES, `${file} job \`${jobId}\` runs \`${uses}\`, not pinned by digest`);
         continue;
       }
-      if (action === TEND_ACTION) {
-        if (!tend) fail(POLICIES, `${file} job \`${jobId}\` uses \`${TEND_ACTION}\`, which only \`tend-*.yaml\` may reference by tag`);
+      if (TEND_TAGGED.includes(action)) {
+        if (!tend) fail(POLICIES, `${file} job \`${jobId}\` uses \`${action}\`, which only \`tend-*.yaml\` may reference by tag`);
         const version = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(ref);
         if (!version) fail(TEND, `${file} job \`${jobId}\` references \`${uses}\`, not a released version`);
         else if (compareVersions(version.slice(1).map(Number), TEND_MINIMUM) < 0) fail(TEND, `${file} pins \`${uses}\`, below ${TEND_MINIMUM.join('.')}`);
@@ -136,7 +139,10 @@ export function check(inputs) {
         const extra = held.filter((s) => !allowed.includes(s));
         if (extra.length) fail(POLICIES, `${file} job \`${jobId}\` holds write on ${extra.join(', ')}`);
       }
-      if (tend && job?.env !== undefined) fail(TEND, `${file} job \`${jobId}\` sets a job-level \`env:\`, which the harness forwards to the agent`);
+      const matrixOnly = (env) => typeof env === 'object' && env !== null && Object.values(env).every((v) => MATRIX_VALUE.test(String(v)));
+      if (tend && job?.env !== undefined && !matrixOnly(job.env)) {
+        fail(TEND, `${file} job \`${jobId}\` sets a job-level \`env:\` beyond matrix values, which the harness forwards to the agent`);
+      }
       for (const step of job?.steps ?? []) {
         if (step?.uses?.startsWith(`${CLAUDE_ACTION}@`) && step.with?.github_token === undefined) {
           fail(TEND, `${file} job \`${jobId}\` runs \`${CLAUDE_ACTION}\` without \`github_token\`, so it would run on the Claude App's token`);
