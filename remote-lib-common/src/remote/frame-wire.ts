@@ -16,6 +16,7 @@ export const FRAME_METHODS = {
   wsSend: 'ws.send',
   wsClose: 'ws.close',
   flowAck: 'flow.ack',
+  flowPause: 'flow.pause',
 } as const;
 
 export const FRAME_EVENTS = {
@@ -179,6 +180,16 @@ export interface WsClosedEvent {
 }
 
 export interface FlowAckParams {
-  /** Body bytes, before base64url, the Client has taken off the session since its last ack. */
+  /**
+   * Body bytes, before base64url, the Client has taken off the session since
+   * its last ack — on receipt, never when its page reads them, so a page that
+   * stops reading holds its own exchange (`flow.pause`) and not the session.
+   */
   bytes: number;
+}
+export interface FlowPauseParams {
+  /** The `http.request` or `ws.open` request's id. */
+  id: string;
+  /** Stop or restart this one source; an id no longer live is ignored. */
+  paused: boolean;
 }

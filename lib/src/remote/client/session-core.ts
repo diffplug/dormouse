@@ -29,6 +29,7 @@ import {
   type DirectorySnapshot,
   type E2eBurrowStep,
   type E2eClientStep,
+  type HelloCapabilities,
   type HelloResult,
   type NoiseTransportSession,
   type RemoteEventMsg,
@@ -355,8 +356,12 @@ export class ClientSessionCore<R extends CeremonyRoute> implements RemoteAdapter
 
   // --- Remote-api v1 -------------------------------------------------------
 
-  hello(): Promise<HelloResult> {
-    return this.request<HelloResult>(REMOTE_METHODS.hello, { protocolVersion: 1, viewer: 'phone' });
+  hello(capabilities?: HelloCapabilities): Promise<HelloResult> {
+    return this.request<HelloResult>(REMOTE_METHODS.hello, {
+      protocolVersion: 1,
+      viewer: 'phone',
+      ...(capabilities ? { capabilities } : {}),
+    });
   }
 
   /** Subscribe to the directory; returns the `subId` (call {@link unsubscribe} to stop). */
@@ -426,8 +431,9 @@ export class ClientSessionCore<R extends CeremonyRoute> implements RemoteAdapter
     method: string,
     params: unknown,
     onEvent: (event: RemoteEventMsg) => void,
+    /** For a caller that names this stream before it is answered (`http.write`). */
+    subId: string = uuid(),
   ): Promise<{ subId: string; result: T }> {
-    const subId = uuid();
     this.#events.set(subId, onEvent);
     try {
       const result = await this.request<T>(method, params, subId);

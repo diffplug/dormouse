@@ -25,6 +25,7 @@ import {
   toBase64Url,
   utf8Encode,
   type FlowAckParams,
+  type FlowPauseParams,
   type FrameCloseParams,
   type FrameClosedEvent,
   type FrameOpenParams,
@@ -80,6 +81,8 @@ interface Exchange {
   answered: boolean;
   /** The request body is finished: no `http.write` may follow. */
   ended: boolean;
+  /** The Client's page stopped reading it (`flow.pause`). */
+  held: boolean;
 }
 
 interface Socket {
@@ -89,6 +92,8 @@ interface Socket {
   readonly request: RemoteRequest;
   /** Answered: the upstream opened. */
   open: boolean;
+  /** The Client's page stopped reading it (`flow.pause`). */
+  held: boolean;
   /** A Client message still arriving in fragments. */
   fragments: Uint8Array[];
   fragmentBytes: number;
@@ -164,6 +169,8 @@ export class FrameTunnel {
         return this.#wsClose(request);
       case FRAME_METHODS.flowAck:
         return this.#flowAck(request);
+      case FRAME_METHODS.flowPause:
+        return this.#flowPause(request);
     }
   }
 
@@ -347,7 +354,7 @@ export class FrameTunnel {
         onError: (message) => this.#failExchange(id, `upstream failed: ${message}`),
       },
     );
-    this.#exchanges.set(id, { frameId: frame.id, exchange, request, answered: false, ended: end! });
+    this.#exchanges.set(id, { frameId: frame.id, exchange, request, answered: false, ended: end!, held: false });
     if (this.#paused) exchange.pause();
     if (first.length > 0 || end) {
       exchange.write(first, end!).catch((error: unknown) => {
@@ -456,6 +463,7 @@ export class FrameTunnel {
       socket,
       request,
       open: false,
+      held: false,
       fragments: [],
       fragmentBytes: 0,
       fragmentBinary: false,
@@ -535,6 +543,23 @@ export class FrameTunnel {
     this.#drain();
   }
 
+  #flowPause(request: RemoteRequest): void {
+    const { id, paused } = (request.params ?? {}) as Partial<FlowPauseParams>;
+    if (typeof id !== 'string' || typeof paused !== 'boolean') {
+      return this.#options.fail(request, 'invalid flow.pause');
+    }
+    const exchange = this.#exchanges.get(id);
+    const socket = this.#sockets.get(id);
+    const entry = exchange ?? socket;
+    if (entry) {
+      entry.held = paused;
+      const source = exchange?.exchange ?? socket!.socket;
+      if (paused) source.pause();
+      else if (!this.#paused) source.resume();
+    }
+    this.#options.ok(request, {});
+  }
+
   /** Answer `request` once `settled` does: empty on success, `failure` and why otherwise. */
   #answerWhen(request: RemoteRequest, settled: Promise<void>, failure: string): void {
     settled.then(
@@ -572,13 +597,13 @@ export class FrameTunnel {
   #setPaused(paused: boolean): void {
     if (paused === this.#paused) return;
     this.#paused = paused;
-    for (const { exchange } of this.#exchanges.values()) {
+    for (const { exchange, held } of this.#exchanges.values()) {
       if (paused) exchange.pause();
-      else exchange.resume();
+      else if (!held) exchange.resume();
     }
-    for (const { socket } of this.#sockets.values()) {
+    for (const { socket, held } of this.#sockets.values()) {
       if (paused) socket.pause();
-      else socket.resume();
+      else if (!held) socket.resume();
     }
   }
 

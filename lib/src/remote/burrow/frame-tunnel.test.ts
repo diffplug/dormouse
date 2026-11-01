@@ -330,6 +330,31 @@ describe('the flow window', () => {
     }
   });
 
+  it('lets a page that stopped reading hold its own exchange, not the session', async () => {
+    const t = setup();
+    const frameId = await t.open();
+    const held = t.call(FRAME_METHODS.httpRequest, { ...GET, frameId });
+    t.call(FRAME_METHODS.httpRequest, { ...GET, frameId });
+    const [stalled, other] = t.host.upstreams[0]!.exchanges;
+    t.call(FRAME_METHODS.flowPause, { id: held, paused: true });
+    expect(stalled!.paused).toBe(true);
+    expect(other!.paused).toBe(false);
+
+    // The window filling and emptying releases everything but the held one.
+    other!.sink.onHead(200, 'OK', []);
+    other!.sink.onBody(new Uint8Array(FRAME_FLOW_WINDOW_BYTES));
+    expect(other!.paused).toBe(true);
+    t.call(FRAME_METHODS.flowAck, { bytes: FRAME_FLOW_WINDOW_BYTES });
+    t.call(FRAME_METHODS.flowAck, { bytes: FRAME_FLOW_WINDOW_BYTES });
+    expect(other!.paused).toBe(false);
+    expect(stalled!.paused).toBe(true);
+
+    t.call(FRAME_METHODS.flowPause, { id: held, paused: false });
+    expect(stalled!.paused).toBe(false);
+    const gone = t.call(FRAME_METHODS.flowPause, { id: 'nope', paused: true });
+    expect(t.answer(gone)).toMatchObject({ ok: true });
+  });
+
   it('refuses a malformed ack', async () => {
     const t = setup();
     const id = t.call(FRAME_METHODS.flowAck, { bytes: -1 });
