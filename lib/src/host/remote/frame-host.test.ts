@@ -78,6 +78,7 @@ describe('createBurrowFrameHost', () => {
     // The shim, addressed to the Client's page.
     expect(response.body).toContain('https://pocket.example');
     expect(response.body).toContain('<body>hi</body>');
+    expect(response.body).toContain('window.WebSocket=T');
   });
 
   it('vouches only for the frame origin, keeps redirects on the frame, and drops cookies', async () => {

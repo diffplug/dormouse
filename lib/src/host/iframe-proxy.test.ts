@@ -820,6 +820,16 @@ describe('iframe proxy leases', () => {
     await closed;
   });
 
+  it('gives a local pane no tunnel socket shim', async () => {
+    const port = await upstream((_q, s) => {
+      s.writeHead(200, { 'content-type': 'text/html' });
+      s.end('<html><head></head></html>');
+    });
+    const url = await frame(`http://127.0.0.1:${port}/`, leased(lease()));
+    const { body } = await request(url, { headers: { 'sec-fetch-dest': 'iframe' } });
+    expect(body).not.toContain('window.WebSocket=');
+  });
+
   it('revokes every lease of an owner that went away, and keeps the others', async () => {
     const port = await upstream((_q, s) => { s.writeHead(204); s.end(); });
     const gone = await frame(`http://127.0.0.1:${port}/`, leased(lease('window-gone')));

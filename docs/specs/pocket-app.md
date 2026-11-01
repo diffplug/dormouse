@@ -194,6 +194,19 @@ Sessions expire ([relay.md](./relay.md)) and, on a self-host Relay, also end on 
 
 Source of truth: `SessionExpiredError` in `lib/src/remote/client/pocket-client.ts`.
 
+## Frame origin
+
+A framed page (`docs/specs/remote-api.md` -> "Frames") runs at a frame origin: a worker at its root, a bootstrap page in a hidden frame beside the page, and nothing else served. **The worker relays every same-origin request and a page's socket to the bootstrap page, and it to the Client window**, which answers through one `OpenFrame`. Nothing is built into Pocket's bundle or shown yet ([Future](#future)).
+
+- **Never serve a frame at Pocket's origin**: its page could use Pocket's keys and session. A sandbox without `allow-same-origin` is no alternative, since it leaves no worker to intercept the page.
+- **Must give each frame its own origin**, the grant boundary a local pane has (`docs/specs/dor-browser.md` -> "Iframe Renderer"). A framed page is same-origin with its bootstrap page and worker, so it can write to everything they hold.
+- **Must serve one frame's grant through a bootstrap port**: whatever arrives there may be the page's own, and so asks only for what that page could fetch.
+- **The worker stands in for the `Origin` and `Referer` the browser adds past it**, naming the frame origin on a write. **Must refuse a top-level page and a write from another site**, neither of which a frame makes.
+- **Must keep the worker stateless**: it is stopped at will, so it finds the bootstrap page again for each request.
+- **The page's `WebSocket` is shimmed by a tunneled grant alone**, since no worker sees a socket: a same-origin one goes as a message to the controlling worker, and any other stays native.
+
+Source of truth: `installFrameWorker` in `lib/src/remote/frame-origin/worker.ts`, `lib/src/remote/frame-origin/bootstrap.ts`, `serveFrame` in `lib/src/remote/frame-origin/frame-bridge.ts`, `tunnelSocketShim` in `lib/src/host/iframe-proxy-rewrite.ts`, `lib/vite.frame-origin.config.ts`.
+
 ## Deployment: same-origin, always
 
 **The Pocket app is always served same-origin with its API**: WebAuthn binds passkeys to the serving origin, and Chrome's Private Network Access rules block public-site → private-network fetches. The Relay enforces it: a registration or assertion whose `clientDataJSON.origin` is not the configured origin is rejected ([relay.md](./relay.md); rationale); the Relay emits no cross-origin grant ([security-remote.md](./security-remote.md#cross-origin-access)). **The bundle mounts at the origin root, never under a path prefix**: the manifest's `start_url`/`scope`, the worker's registration scope, and the shell's manifest/icon links are all root-absolute. The one-time page reuses Pocket's screens and wall but not this rule (`docs/specs/one-time.md` -> "Phone page").
@@ -211,11 +224,10 @@ Source of truth: `pocketContentSecurityPolicy` in `remote-lib-common/src/remote/
 
 ## Future
 
-**Scope: pocket-frames** — the Client half of the frame tunnel (`docs/specs/remote-api.md` -> "Frames"), in order:
+**Scope: pocket-frames** — the rest of the Client half of [Frame origin](#frame-origin), in order:
 
-1. **A frame origin per deployment**, never Pocket's own: framed content at Pocket's origin could use its keys and session, and a sandbox without `allow-same-origin` leaves no service worker to intercept the page. Hosted serves one under the relay host; a selfhost Relay a second port; the one-time page Hosted's.
-2. **The relaying service worker** at the frame origin: it forwards only same-origin requests, each over the session through a `MessageChannel` to the Pocket window (the playground's pattern, `docs/specs/tutorial.md` -> "Playground filesystem"), acknowledging every body byte it takes; and a shim the framed page loads that carries its `WebSocket` the same way.
-3. **The wall shows a browser entry, and a Tool's page beside its terminal**, with the hello declaring `capabilities.frames`.
+1. **Serving a frame origin per deployment.** Hosted, a selfhost Relay, and the one-time page each serve `lib/dist-frame-origin` and mint the origin a frame uses.
+2. **The wall shows a browser entry, and a Tool's page beside its terminal**, with the hello declaring `capabilities.frames`, `frame-src` added to Pocket's CSP, and `FrameClient.dispose` wired to session loss.
 
 **Scope: pocket-polish**
 

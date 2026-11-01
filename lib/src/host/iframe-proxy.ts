@@ -152,6 +152,8 @@ interface Grant {
    * answer on a navigation.
    */
   embedderOrigins: string[] | null;
+  /** A remote Client frames it, so its pages carry the socket shim too. */
+  tunneled: boolean;
 }
 
 const grants = new Map<number, Grant>();
@@ -222,7 +224,7 @@ function endLeases(ends: (lease: Lease) => boolean): void {
  */
 export async function createIframeProxyUrl(
   targetUrl: string,
-  opts?: { log?: ProxyLogger; embedderOrigins?: unknown; lease?: unknown; resolve?: UpstreamResolver },
+  opts?: { log?: ProxyLogger; embedderOrigins?: unknown; lease?: unknown; resolve?: UpstreamResolver; tunneled?: boolean },
 ): Promise<IframeProxyResult> {
   if (opts?.log) log = opts.log;
   const embedderOrigins = normalizeEmbedderOrigins(opts?.embedderOrigins);
@@ -245,11 +247,12 @@ export async function createIframeProxyUrl(
     return { ok: false, reason: 'scheme', detail: IFRAME_HTTP_ONLY };
   }
   const resolve = opts?.resolve ?? systemResolver;
+  const tunneled = opts?.tunneled === true;
 
   const lease = opts?.lease === undefined ? undefined : validLease(opts.lease);
   if (opts?.lease !== undefined && !lease) return { ok: false, reason: 'unreachable', detail: 'invalid iframe lease' };
   if (!lease) {
-    const minted = await mintGrant(upstream, embedderOrigins, false, resolve);
+    const minted = await mintGrant(upstream, embedderOrigins, false, resolve, tunneled);
     return 'port' in minted ? framedUrl(minted, upstream) : minted;
   }
   const key = leaseKey(lease);
@@ -262,7 +265,7 @@ export async function createIframeProxyUrl(
     leases.set(key, held = { ...lease, acquire: createSerialQueue() });
   }
   const entry = held;
-  return entry.acquire(() => acquireLeased(entry, key, upstream, embedderOrigins, resolve));
+  return entry.acquire(() => acquireLeased(entry, key, upstream, embedderOrigins, resolve, tunneled));
 }
 
 const CLOSED_VIEW: IframeProxyResult = { ok: false, reason: 'unreachable', detail: 'the embedded view was closed' };
@@ -271,7 +274,7 @@ const CLOSED_VIEW: IframeProxyResult = { ok: false, reason: 'unreachable', detai
  *  same embedder chain — a Reload, Back or Forward keeps the page's origin —
  *  else a fresh one in its place. One released meanwhile mints nothing. */
 async function acquireLeased(
-  lease: Lease, key: string, upstream: URL, embedderOrigins: string[] | null, resolve: UpstreamResolver,
+  lease: Lease, key: string, upstream: URL, embedderOrigins: string[] | null, resolve: UpstreamResolver, tunneled: boolean,
 ): Promise<IframeProxyResult> {
   const released = () => leases.get(key) !== lease;
   if (released()) return CLOSED_VIEW;
@@ -282,7 +285,7 @@ async function acquireLeased(
     closeGrant(lease.grant);
     lease.grant = undefined;
   }
-  const minted = await mintGrant(upstream, embedderOrigins, true, resolve);
+  const minted = await mintGrant(upstream, embedderOrigins, true, resolve, tunneled);
   if (!('port' in minted)) return minted;
   if (released()) {
     closeGrant(minted);
@@ -335,7 +338,7 @@ function pinnedLookup(addresses: readonly UpstreamAddress[]): net.LookupFunction
 }
 
 async function mintGrant(
-  upstream: URL, embedderOrigins: string[] | null, leased: boolean, resolve: UpstreamResolver,
+  upstream: URL, embedderOrigins: string[] | null, leased: boolean, resolve: UpstreamResolver, tunneled: boolean,
 ): Promise<Grant | Refusal> {
   const pinned = await pinAddresses(upstream, resolve);
   if (!Array.isArray(pinned)) return pinned;
@@ -353,6 +356,7 @@ async function mintGrant(
     fresh: true,
     sockets: new Set(),
     embedderOrigins,
+    tunneled,
   };
   const server = http.createServer((req, res) => handleRequest(grant, req, res));
   server.on('upgrade', (req, socket, head) => handleUpgrade(grant, req, socket as net.Socket, head));
@@ -569,7 +573,7 @@ function streamHtml(
     // prefix, then hand the remainder to a raw pipe (backpressure + end).
     handled = true;
     upstreamRes.off('data', onData);
-    res.write(Buffer.from(instrumentHtml(prefix(), embedderOrigin, preserveCsp), 'latin1'));
+    res.write(Buffer.from(instrumentHtml(prefix(), embedderOrigin, preserveCsp, grant.tunneled), 'latin1'));
     pending.length = 0;
     upstreamRes.pipe(res);
   };
@@ -578,7 +582,7 @@ function streamHtml(
   upstreamRes.on('end', () => {
     if (handled) return; // the pipe ends `res`
     // Whole document arrived before any head marker — instrument and finish.
-    res.end(Buffer.from(instrumentHtml(prefix(), embedderOrigin, preserveCsp), 'latin1'));
+    res.end(Buffer.from(instrumentHtml(prefix(), embedderOrigin, preserveCsp, grant.tunneled), 'latin1'));
   });
   upstreamRes.on('error', () => { if (!res.writableEnded) res.destroy(); });
 }

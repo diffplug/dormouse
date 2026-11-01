@@ -43,7 +43,7 @@ const ACK_THRESHOLD_BYTES = 64 * 1024;
 /** What a response may queue for its page before its exchange is held. */
 const RESPONSE_BUFFER_BYTES = 256 * 1024;
 
-export interface FrameFetchInit {
+export interface FrameRequestInit {
   method: string;
   /** Origin-form: a path and query. */
   path: string;
@@ -71,7 +71,7 @@ export interface OpenFrameSocket extends WsOpenResult {
 
 export interface OpenFrame extends FrameOpenResult {
   readonly id: string;
-  fetch(init: FrameFetchInit): Promise<FrameResponse>;
+  request(init: FrameRequestInit): Promise<FrameResponse>;
   openSocket(path: string, protocols: string[], handlers: FrameSocketHandlers): Promise<OpenFrameSocket>;
   /** End the frame, and everything in it. Idempotent. */
   close(): void;
@@ -205,7 +205,7 @@ class ClientFrame implements OpenFrame {
     this.#forget = forget;
   }
 
-  async fetch(init: FrameFetchInit): Promise<FrameResponse> {
+  async request(init: FrameRequestInit): Promise<FrameResponse> {
     if (this.#ended) throw new Error('the frame is closed');
     await this.#slots.acquire();
     if (this.#ended) {

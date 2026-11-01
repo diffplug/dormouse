@@ -46,7 +46,7 @@ const GRANT_IDLE_TIMEOUT_MS = 60_000;
 export interface FrameHostProxy {
   create(
     url: string,
-    options: { embedderOrigins: string[]; lease: { owner: string; id: string } },
+    options: { embedderOrigins: string[]; lease: { owner: string; id: string }; tunneled: true },
   ): Promise<IframeProxyResult>;
   release(owner: string, id: string): void;
 }
@@ -62,7 +62,7 @@ export function createBurrowFrameHost(proxy: FrameHostProxy): BurrowFrameHost {
       if (!chain) return { refused: 'invalid embedder origins' };
       // Prefixed, so a window's lease sweep never ends a session's.
       const lease = { owner: `${REMOTE_LEASE_OWNER_PREFIX}${sessionLease.owner}`, id: sessionLease.id };
-      const result = await proxy.create(url, { embedderOrigins: chain, lease });
+      const result = await proxy.create(url, { embedderOrigins: chain, lease, tunneled: true });
       if (!result.ok) {
         proxy.release(lease.owner, lease.id);
         return { refused: result.detail ?? result.reason };

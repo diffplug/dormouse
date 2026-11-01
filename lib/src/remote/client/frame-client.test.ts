@@ -125,7 +125,7 @@ describe('FrameClient', () => {
     });
     const { client } = connect(new Map([['surface:1', `http://localhost:${port}/`]]));
     const frame = await open(client);
-    const response = await frame.fetch({ method: 'GET', path: '/big', headers: [], destination: 'script' });
+    const response = await frame.request({ method: 'GET', path: '/big', headers: [], destination: 'script' });
     expect(response.status).toBe(200);
     expect(Buffer.compare(await readAll(response.body), payload)).toBe(0);
   });
@@ -139,7 +139,7 @@ describe('FrameClient', () => {
     });
     const { client } = connect(new Map([['surface:1', `http://localhost:${port}/`]]));
     const frame = await open(client);
-    const response = await frame.fetch({ method: 'PUT', path: '/save', headers: [], destination: '', body: payload });
+    const response = await frame.request({ method: 'PUT', path: '/save', headers: [], destination: '', body: payload });
     expect(Buffer.from(await readAll(response.body)).toString()).toBe('same');
   });
 
@@ -153,11 +153,11 @@ describe('FrameClient', () => {
     const { client } = connect(new Map([['surface:1', `http://localhost:${port}/`]]));
     const frame = await open(client);
     // Answered, and never read.
-    const stalled = await frame.fetch({ method: 'GET', path: '/stalled', headers: [], destination: 'video' });
+    const stalled = await frame.request({ method: 'GET', path: '/stalled', headers: [], destination: 'video' });
     await new Promise((resolve) => setTimeout(resolve, 300));
     // Held: it is not buffering the whole body on the phone.
     expect(upstreamFinished).toBe(false);
-    const other = await frame.fetch({ method: 'GET', path: '/other', headers: [], destination: 'script' });
+    const other = await frame.request({ method: 'GET', path: '/other', headers: [], destination: 'script' });
     expect(Buffer.from(await readAll(other.body)).toString()).toBe('small');
     // And the stalled one still finishes once read.
     expect(Buffer.compare(await readAll(stalled.body), payload)).toBe(0);
@@ -169,10 +169,10 @@ describe('FrameClient', () => {
     const { client } = connect(new Map([['surface:1', `http://localhost:${port}/`]]));
     const frame = await open(client);
     for (let i = 0; i < 4; i += 1) {
-      const response = await frame.fetch({ method: 'GET', path: '/', headers: [], destination: 'image' });
+      const response = await frame.request({ method: 'GET', path: '/', headers: [], destination: 'image' });
       await response.body.getReader().cancel();
     }
-    const last = await frame.fetch({ method: 'GET', path: '/', headers: [], destination: 'image' });
+    const last = await frame.request({ method: 'GET', path: '/', headers: [], destination: 'image' });
     expect(Buffer.compare(await readAll(last.body), payload)).toBe(0);
   });
 
@@ -181,7 +181,7 @@ describe('FrameClient', () => {
     const { client } = connect(new Map([['surface:1', `http://localhost:${port}/`]]));
     const frame = await open(client);
     const bodies = await Promise.all(Array.from({ length: 200 }, async (_, i) => {
-      const response = await frame.fetch({ method: 'GET', path: `/module-${i}.js`, headers: [], destination: 'script' });
+      const response = await frame.request({ method: 'GET', path: `/module-${i}.js`, headers: [], destination: 'script' });
       return Buffer.from(await readAll(response.body)).toString();
     }));
     expect(bodies).toEqual(Array.from({ length: 200 }, (_, i) => `/module-${i}.js`));
@@ -191,8 +191,8 @@ describe('FrameClient', () => {
     const { port } = await listen((_req, res) => res.end('ok'));
     const { client } = connect(new Map([['surface:1', `http://localhost:${port}/`]]));
     const frame = await open(client);
-    await expect(frame.fetch({ method: 'CONNECT', path: '/', headers: [] })).rejects.toThrow('invalid http.request: method');
-    const response = await frame.fetch({ method: 'GET', path: '/', headers: [] });
+    await expect(frame.request({ method: 'CONNECT', path: '/', headers: [] })).rejects.toThrow('invalid http.request: method');
+    const response = await frame.request({ method: 'GET', path: '/', headers: [] });
     expect(Buffer.from(await readAll(response.body)).toString()).toBe('ok');
   });
 
@@ -236,13 +236,13 @@ describe('FrameClient', () => {
     const { client, notify } = connect(pages);
     let closed = false;
     const frame = await open(client, () => { closed = true; });
-    const response = await frame.fetch({ method: 'GET', path: '/', headers: [] });
+    const response = await frame.request({ method: 'GET', path: '/', headers: [] });
     const reading = readAll(response.body);
     pages.delete('surface:1');
     notify();
     await expect(reading).rejects.toThrow('the embedded page closed');
     expect(closed).toBe(true);
-    await expect(frame.fetch({ method: 'GET', path: '/', headers: [] })).rejects.toThrow('the frame is closed');
+    await expect(frame.request({ method: 'GET', path: '/', headers: [] })).rejects.toThrow('the frame is closed');
   });
 
   it('dispose fails what is in flight and sends nothing more', async () => {
@@ -252,7 +252,7 @@ describe('FrameClient', () => {
     });
     const { client } = connect(new Map([['surface:1', `http://localhost:${port}/`]]));
     const frame = await open(client);
-    const response = await frame.fetch({ method: 'GET', path: '/', headers: [] });
+    const response = await frame.request({ method: 'GET', path: '/', headers: [] });
     const reading = readAll(response.body);
     client.dispose();
     await expect(reading).rejects.toThrow('the session ended');

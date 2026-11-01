@@ -202,6 +202,10 @@ const OUTBOUND_SITES = {
     class: 'user:theme-store-search',
     reason: 'Searches and downloads from OpenVSX only from the Theme Store dialog, which only a click on "Install theme from OpenVSX" opens and only the website playground offers.',
   },
+  'lib/src/host/iframe-proxy-rewrite.ts': {
+    class: 'user:browser-pane',
+    reason: 'The socket shim wraps a framed page\'s own WebSocket for a remote Client: the page opens the socket, and a same-origin one goes over the session instead of the network.',
+  },
   'lib/src/host/iframe-proxy.ts': {
     class: 'user:browser-pane',
     reason: 'Forwards a browser pane\'s requests to the one upstream its grant names — a URL the user, their terminal, or their agent opened.',
