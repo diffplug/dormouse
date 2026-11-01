@@ -57,7 +57,7 @@ function discardWorkspace(id: WorkspaceId): void {
  * in one synchronous step, reversible until both Walls finish. */
 export async function moveSurface(id: string, request: Omit<MoveSurfaceRequest, 'surface' | 'workspace'>, gui = false): Promise<MoveSurfaceResponse | null> {
   // A move still awaiting its consent is answered no and released here.
-  cancelPendingConfirmation();
+  const isCurrent = cancelPendingConfirmation();
   if (moving) throw new Error('Another Surface move is in progress');
   const owner = wallHandleOwning(id);
   const destination = request.destination;
@@ -83,7 +83,8 @@ export async function moveSurface(id: string, request: Omit<MoveSurfaceRequest, 
   const ensureIframeConsent = async (): Promise<boolean> => {
     if (!prepared.iframe || iframeConsented) return true;
     if (!gui) throw new Error(IFRAME_FLAG_REQUIRED);
-    if (!await consent(source.workspaceId, release)) return false;
+    // A verb started during the flush owns the question now; asking would answer it no.
+    if (!isCurrent() || !await consent(source.workspaceId, release)) return false;
     iframeConsented = true;
     prepared = source.prepareSurfaceMove(id);
     return true;
