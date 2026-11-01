@@ -20,6 +20,7 @@ const add = (file, text) => (inputs) => { inputs.workflows[file] = text; };
 const CHECKOUT = 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1';
 // Read from the workflow, not pinned here, so a tend regeneration doesn't break these cases.
 const TEND = real.workflows['tend-review.yaml'].match(/max-sixty\/tend\/claude@[^\s#]+/)[0];
+const RUNTIME = real.workflows['tend-review.yaml'].match(/max-sixty\/tend\/setup-runtime@[^\s#]+/)[0];
 
 const cases = [
   ['an action referenced by tag', edit('ci.yml', `uses: ${CHECKOUT}`, 'uses: actions/checkout@v7'), 'by something other than a commit hash'],
@@ -28,6 +29,8 @@ const cases = [
   ['a reusable workflow by branch', add('extra.yml', 'on: push\njobs:\n  a:\n    uses: octo/repo/.github/workflows/x.yml@main\n'), 'by something other than a commit hash'],
   ['tend referenced outside tend-*.yaml', edit('ci.yml', `uses: ${CHECKOUT}`, `uses: ${TEND}`), 'which only `tend-*.yaml` may reference by tag'],
   ['tend unpinned', edit('tend-review.yaml', TEND, 'max-sixty/tend/claude@main'), 'not a released version'],
+  ['tend runtime referenced outside tend-*.yaml', edit('ci.yml', `uses: ${CHECKOUT}`, `uses: ${RUNTIME}`), 'which only `tend-*.yaml` may reference by tag'],
+  ['tend runtime unpinned', edit('tend-review.yaml', RUNTIME, 'max-sixty/tend/setup-runtime@main'), 'not a released version'],
   ['tend below 0.1.19', edit('tend-review.yaml', TEND, 'max-sixty/tend/claude@0.1.18'), 'below 0.1.19'],
   ['tend in yolo mode', edit('tend-review.yaml', 'merge: restricted', 'merge: yolo'), 'passes `merge: yolo`'],
   ['.config/tend.yaml in yolo mode', (inputs) => { inputs.tendConfig = inputs.tendConfig.replace('merge: restricted', 'merge: yolo'); }, '.config/tend.yaml sets `merge: yolo`'],
@@ -47,6 +50,7 @@ const cases = [
   ['the audit agent on the Claude App token', edit('security-audit.yaml', '          github_token: ${{ github.token }}\n', ''), 'job `audit` runs `anthropics/claude-code-action` without `github_token`'],
   ['the canary agent on the Claude App token', edit('security-audit.yaml', '    # read-only workflow token passed below instead.\n    permissions:\n      contents: read\n', '    # read-only workflow token passed below instead.\n    permissions:\n      contents: read\n      id-token: write\n'), 'job `canary` holds write on id-token'],
   ['a tend job-level env', edit('tend-review.yaml', '    runs-on: ubuntu-24.04\n', '    runs-on: ubuntu-24.04\n    env:\n      X: y\n'), 'job-level `env:`'],
+  ['a tend job-level env beside a matrix value', edit('tend-triage.yaml', '      TEND_ISSUE_NUMBER: ${{ matrix.issue }}\n', '      TEND_ISSUE_NUMBER: ${{ matrix.issue }}\n      T: ${{ secrets.TEND_BOT_TOKEN }}\n'), 'job-level `env:`'],
   ['a tend workflow-level env', edit('tend-review.yaml', '\njobs:\n', '\nenv:\n  X: y\njobs:\n'), 'workflow-level `env:`'],
   ['release.yml on a branch push', edit('release.yml', "    tags:\n      - 'v*'", "    branches: [main]\n    tags:\n      - 'v*'"), 'not only a pushed `v*` tag'],
   ['release.yml on any tag', edit('release.yml', "      - 'v*'", "      - '*'"), 'not only a pushed `v*` tag'],
@@ -87,6 +91,6 @@ for (const [name, mutate, expected] of cases) {
 
 test('reports: a tend step writing a secret to $GITHUB_ENV', () => {
   const inputs = structuredClone(real);
-  edit('tend-review.yaml', '            || echo "::warning::could not add the eyes reaction"\n', '            || echo "::warning::could not add the eyes reaction"\n          echo "T=$GITHUB_TOKEN" >> "$GITHUB_ENV"\n')(inputs);
+  edit('tend-review.yaml', '          tend runtime reaction add\n', '          tend runtime reaction add\n          echo "T=$GITHUB_TOKEN" >> "$GITHUB_ENV"\n')(inputs);
   assert.ok(check(inputs).some((f) => f.includes('writes to `$GITHUB_ENV`')));
 });
