@@ -800,6 +800,7 @@ export function MobileTerminalUi({
 
   // A physical keyboard types straight into the terminal while the composer is
   // closed. No soft keyboard reaches here: one opens only for a focused field.
+  // Its Command+V comes back from the page as a `paste` on the same targets.
   useEffect(() => {
     if (!interactive || composing || view !== 'terminal') return;
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
@@ -811,9 +812,21 @@ export function MobileTerminalUi({
       event.preventDefault();
       sendInput(sequence);
     };
+    const onNativePaste = (event: ClipboardEvent) => {
+      const root = rootRef.current;
+      if (!root || !onPaste || event.defaultPrevented || !isHardwareKeyTarget(root, event.target)) return;
+      const text = event.clipboardData?.getData('text/plain');
+      if (!text) return;
+      event.preventDefault();
+      void onPaste(text);
+    };
     window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [composing, interactive, sendInput, view]);
+    window.addEventListener('paste', onNativePaste);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('paste', onNativePaste);
+    };
+  }, [composing, interactive, onPaste, sendInput, view]);
 
   useEffect(() => {
     if (!interactive || view !== 'terminal') closeComposer();

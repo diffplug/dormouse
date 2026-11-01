@@ -226,6 +226,11 @@ export function PocketTerminalExperience({
     }
   }, [mouseStates, touchMode]);
 
+  const handlePaste = useCallback(async (text?: string) => {
+    const { doPaste } = await import("dormouse-lib/lib/clipboard");
+    await doPaste(activePaneId, text);
+  }, [activePaneId]);
+
   return (
     <MobileTerminalUi
       terminal={
@@ -251,10 +256,7 @@ export function PocketTerminalExperience({
       onSendInput={handleSendInput}
       onGestureInput={handleGestureInput}
       onGestureScroll={handleGestureScroll}
-      onPaste={async (text) => {
-        const { doPaste } = await import("dormouse-lib/lib/clipboard");
-        await doPaste(activePaneId, text);
-      }}
+      onPaste={handlePaste}
     />
   );
 }

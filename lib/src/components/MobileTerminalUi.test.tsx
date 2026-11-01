@@ -229,7 +229,46 @@ describe('MobileTerminalUi composer', () => {
   });
 });
 
+function nativePaste(target: EventTarget, text: string): Event {
+  const event = new Event('paste', { bubbles: true, cancelable: true });
+  Object.defineProperty(event, 'clipboardData', { value: { getData: () => text } });
+  act(() => target.dispatchEvent(event));
+  return event;
+}
+
 describe('MobileTerminalUi physical keyboard', () => {
+  it('routes a native paste through paste handling without typing or rereading it', () => {
+    const onPaste = vi.fn();
+    const onSendInput = vi.fn();
+    renderUi({ onPaste, onSendInput });
+    expect(nativePaste(document.body, 'first\nsecond').defaultPrevented).toBe(true);
+    expect(onPaste).toHaveBeenCalledExactlyOnceWith('first\nsecond');
+    expect(onSendInput).not.toHaveBeenCalled();
+  });
+
+  it('leaves a native paste to the open composer', () => {
+    const onPaste = vi.fn();
+    const { typeButton, field } = renderUi({ onPaste });
+    act(() => typeButton.click());
+    expect(nativePaste(field()!, 'typed').defaultPrevented).toBe(false);
+    expect(nativePaste(document.body, 'behind the box').defaultPrevented).toBe(false);
+    expect(onPaste).not.toHaveBeenCalled();
+  });
+
+  it('leaves a native paste to a field inside the terminal area', () => {
+    const onPaste = vi.fn();
+    const { container } = renderUi({ onPaste, terminal: <input data-testid="rename" /> });
+    expect(nativePaste(container.querySelector('[data-testid="rename"]')!, 'renamed').defaultPrevented).toBe(false);
+    expect(onPaste).not.toHaveBeenCalled();
+  });
+
+  it('pastes nothing while the Sessions screen covers the terminal', () => {
+    const onPaste = vi.fn();
+    renderUi({ onPaste, defaultView: 'sessions' });
+    expect(nativePaste(document.body, 'behind the list').defaultPrevented).toBe(false);
+    expect(onPaste).not.toHaveBeenCalled();
+  });
+
   it('types into the terminal while nothing is focused', () => {
     const onSendInput = vi.fn();
     renderUi({ onSendInput });
