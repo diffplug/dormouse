@@ -155,9 +155,10 @@ const HOUR_MS = 60 * 60_000;
  * first paired an hour ago and connected now; each after it paired a day
  * before the last and was last seen two hours after pairing. Relative to now,
  * like {@link setupQrResult}, so "Last seen" reads the same in every story.
+ * A caller that runs before a story pins the clock (a `parameters` literal is
+ * built at module load) passes its pinned `now`.
  */
-export function pairedDevices(count: number): PairedDevice[] {
-  const now = Date.now();
+export function pairedDevices(count: number, now = Date.now()): PairedDevice[] {
   return Array.from({ length: count }, (_, index) => {
     const pairedAt = now - HOUR_MS - index * 24 * HOUR_MS;
     return {
@@ -176,7 +177,10 @@ export function pairedDevices(count: number): PairedDevice[] {
  * one's pairing, the second's session that went direct and ended, a one-time
  * connection, an unpaired phone refused, and the first's session open now.
  */
-export function accessLogEntries(devices: PairedDevice[] = pairedDevices(2)): AccessLogEntry[] {
+export function accessLogEntries(
+  devices: PairedDevice[] = pairedDevices(2),
+  now = Date.now(),
+): AccessLogEntry[] {
   const entries: AccessLogEntry[] = [];
   for (const [index, { label: device, id: deviceId, pairedAt, lastSeenAt }] of devices.entries()) {
     entries.push({ at: pairedAt, event: 'paired', device, deviceId });
@@ -192,7 +196,6 @@ export function accessLogEntries(devices: PairedDevice[] = pairedDevices(2)): Ac
       { at: lastSeenAt, event: 'ended', device, deviceId, path: 'direct', durationMs: 4 * 60_000 },
     );
   }
-  const now = Date.now();
   const oneTime = 'Dormouse Pocket (browser)';
   entries.push(
     { at: now - 3 * HOUR_MS, event: 'one-time-connected', device: oneTime, path: 'direct' },
