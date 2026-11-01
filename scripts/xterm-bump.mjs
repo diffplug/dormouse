@@ -230,6 +230,11 @@ if (!forkBase) {
   } catch { /* offline or rate-limited — the command below is the fallback */ }
   if (files === null) {
     console.log(`  gh api repos/${UPSTREAM_REPO}/compare/${range} --jq '.files[].filename'`);
+  } else if (files.length >= 300) {
+    // The compare API lists at most 300 files for the whole comparison (paginated
+    // or not), so neither it nor `gh api` on it can show the addon untouched.
+    console.log(`  The compare lists only its first ${files.length} files — check addons/addon-webgl/ by hand in an xterm.js clone:`);
+    console.log(`    git diff --name-only ${range} -- addons/addon-webgl/`);
   } else {
     const ours = files.filter((f) => f.startsWith('addons/addon-webgl/'));
     console.log(
@@ -241,6 +246,6 @@ if (!forkBase) {
   }
   console.log(
     `\n  Rebase and release per FORK.md, then repin canopy:\n` +
-    `    node scripts/xterm-bump.mjs --canopy 0.20.0-sdf${betaOf(chosen.set[CORE])}.0`,
+    `    node scripts/xterm-bump.mjs --canopy ${chosen.set['@xterm/addon-webgl'].replace(/-beta\.\d+$/, '')}-sdf${betaOf(chosen.set[CORE])}.0`,
   );
 }
