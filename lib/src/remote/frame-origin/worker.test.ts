@@ -106,7 +106,12 @@ describe('installFrameWorker', () => {
       listeners.get('fetch')!({ request: new Request(url, init), respondWith: (response: Promise<Response>) => { answer = response; } });
       return answer;
     };
-    return { fetch };
+    const message = async (data: unknown, ports: MessagePort[]) => {
+      let settled: Promise<unknown> = Promise.resolve();
+      listeners.get('message')!({ data, ports, waitUntil: (promise: Promise<unknown>) => { settled = promise; } });
+      await settled;
+    };
+    return { fetch, message };
   }
 
   it('leaves other origins and its own assets to the network', () => {
@@ -119,6 +124,22 @@ describe('installFrameWorker', () => {
   it('answers 503 with no Client window to relay through', async () => {
     const { fetch } = install([{ url: `${ORIGIN}/app`, postMessage: () => {} }]);
     expect((await fetch(`${ORIGIN}/app.js`)!).status).toBe(503);
+  });
+
+  it('relays only a socket with its port, whatever else a page posts it', async () => {
+    const relayed: unknown[] = [];
+    const { message } = install([{
+      url: `${ORIGIN}/__dormouse-frame/bootstrap.html`,
+      postMessage: (data) => relayed.push(data),
+    }]);
+    const { port1, port2 } = new MessageChannel();
+    await message({ kind: 'request', method: 'GET', path: '/' }, [port1]);
+    await message({ kind: 'socket', path: '/hmr', protocols: [] }, []);
+    await message(null, [port1]);
+    expect(relayed).toEqual([]);
+    await message({ kind: 'socket', path: '/hmr', protocols: [] }, [port1]);
+    expect(relayed).toEqual([{ kind: 'socket', path: '/hmr', protocols: [] }]);
+    port2.close();
   });
 
   it('relays a same-origin request to the bootstrap page, path and body whole', async () => {
