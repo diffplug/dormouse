@@ -13,7 +13,7 @@ export interface FakeTimers {
   /** Pass as `setTimer`; every armed deadline lands in {@link live}. */
   setTimer: RemoteTimer;
   /** Every deadline armed and not yet cancelled or fired. */
-  readonly live: Array<{ run: () => void; delayMs: number; cancelled: boolean }>;
+  readonly live: Array<{ run: () => void; delayMs: number }>;
   /** Fire the most recently armed deadline, as its elapsing would. */
   fire(): void;
   /** Fire the one armed for `delayMs`, where more than one deadline is live. */
@@ -29,15 +29,13 @@ export function fakeTimers(): FakeTimers {
   // Dropped on cancel and on fire rather than flagged, so this *is* `live`: a
   // case that re-arms a keepalive a hundred times neither grows it without
   // bound nor pays a filtered copy per read.
-  const live: Array<{ run: () => void; delayMs: number; cancelled: boolean }> = [];
+  const live: Array<{ run: () => void; delayMs: number }> = [];
   const take = (index: number): (() => void) => {
-    const timer = live.splice(index, 1)[0]!;
-    timer.cancelled = true;
-    return timer.run;
+    return live.splice(index, 1)[0]!.run;
   };
   return {
     setTimer(run: () => void, delayMs: number): () => void {
-      const timer = { run, delayMs, cancelled: false };
+      const timer = { run, delayMs };
       live.push(timer);
       return () => {
         const index = live.indexOf(timer);
