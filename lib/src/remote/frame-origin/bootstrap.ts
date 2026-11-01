@@ -6,7 +6,8 @@
  * (`frame-bridge.ts`).
  */
 
-import { FRAME_WORKER_PATH, type BootstrapConnect, type BootstrapReady, type RelayMessage } from './protocol';
+import { FRAME_WORKER_PATH } from 'remote-lib-common';
+import type { BootstrapConnect, BootstrapReady, RelayMessage } from './protocol';
 
 let connected: MessagePort | null = null;
 const ready = navigator.serviceWorker.register(FRAME_WORKER_PATH).then(() => navigator.serviceWorker.ready);

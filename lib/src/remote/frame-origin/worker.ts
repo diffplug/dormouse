@@ -5,7 +5,8 @@
  * restarted at will: it finds the bootstrap page again for each request.
  */
 
-import { FRAME_BOOTSTRAP_PATH, isFrameAssetPath, type RelayMessage, type RelayRequest, type ResponseControl, type ResponseMessage } from './protocol';
+import { FRAME_BOOTSTRAP_PATH, isFrameAssetPath } from 'remote-lib-common';
+import type { RelayMessage, RelayRequest, ResponseControl, ResponseMessage } from './protocol';
 
 /** Past the proxy's own upstream timeout, so its error page gets there first. */
 const HEAD_TIMEOUT_MS = 65_000;

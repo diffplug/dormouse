@@ -6,16 +6,6 @@
 
 import type { HttpHeader, HttpResponseHead, WsOpenResult } from 'remote-lib-common';
 
-/** At the origin root, so its default scope is the whole origin. */
-export const FRAME_WORKER_PATH = '/__dormouse-frame-sw.js';
-export const FRAME_BOOTSTRAP_PATH = '/__dormouse-frame/bootstrap.html';
-const FRAME_ASSET_PREFIX = '/__dormouse-frame/';
-
-/** Whether a path is the frame origin's own, never the page's. */
-export function isFrameAssetPath(pathname: string): boolean {
-  return pathname === FRAME_WORKER_PATH || pathname.startsWith(FRAME_ASSET_PREFIX);
-}
-
 /** One request a framed page made, with a port carrying its answer. */
 export interface RelayRequest {
   kind: 'request';
