@@ -105,7 +105,7 @@ Tapping the Session title in the `MobileWall` header asks the consumer to show t
 * **The font size applies to every terminal in the page, live ones refit**, so a remote Session's PTY resizes with it; **must hand it back to the theme when the composition unmounts**.
 * **Must save Settings choices only when the consumer persists them**; the one-time page does not (`docs/specs/one-time.md` -> "Phone page").
 
-Source of truth: `SessionsScreen` in `lib/src/components/MobileTerminalUi.tsx`; `MobileSettings` in `lib/src/components/MobileSettings.tsx`; `useThemeChoice` in `lib/src/components/theme-picker/use-theme-choice.ts`; `useMobileFontSize` in `lib/src/lib/mobile-font-size.ts`; `setTerminalFontSize` in `lib/src/lib/terminal-lifecycle.ts`.
+Source of truth: `SessionsScreen` in `lib/src/components/MobileTerminalUi.tsx`; `MobileSettings` in `lib/src/components/MobileSettings.tsx`; `useMobileFontSize` in `lib/src/lib/mobile-font-size.ts`; `setTerminalFontSize` in `lib/src/lib/terminal-lifecycle.ts`.
 
 ## Keyboard focus invariant
 

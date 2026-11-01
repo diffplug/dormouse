@@ -17,6 +17,10 @@ import { OVERLAY_VIEWPORT_MARGIN_PX } from '../lib/ui-geometry';
  * elevated zoom inset) must use this constant so the chrome stays proportional. */
 export const PANE_HEADER_HEIGHT_PX = 30;
 
+/** Every mobile top bar: the terminal's and the Sessions screen's, so the bar
+ *  holds still between views. 44px because each control in it is a touch target. */
+export const MOBILE_BAR_HEIGHT_CLASS = 'h-11';
+
 /** Soft app-ground halo separates zoomed panes and context popups from content below. */
 export const ELEVATED_PANE_SHADOW = '0 0 5px 5px var(--color-app-bg)';
 

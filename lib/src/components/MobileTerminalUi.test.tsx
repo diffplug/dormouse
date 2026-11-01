@@ -105,13 +105,11 @@ function renderUi(props: Partial<MobileTerminalUiProps> = {}) {
   renderWith(props);
   const button = (name: string) => [...container.querySelectorAll('button')]
     .find((b) => (b.getAttribute('aria-label') ?? b.textContent) === name) ?? null;
-  const textButton = (text: string) => [...container.querySelectorAll('button')].find((b) => b.textContent === text) ?? null;
   return {
     container,
     terminal: container.querySelector<HTMLDivElement>('[data-testid="terminal"]')!,
     typeButton: button('Type')!,
     button,
-    textButton,
     field: () => container.querySelector<HTMLTextAreaElement | HTMLInputElement>('[data-mobile-composer] textarea, [data-mobile-composer] input:not([type="checkbox"])'),
     passwordBox: () => container.querySelector<HTMLInputElement>('[data-mobile-composer] input[type="checkbox"]'),
     renderWith,
@@ -137,10 +135,10 @@ describe('MobileTerminalUi composer', () => {
     const order: string[] = [];
     const onPaste = vi.fn(async (text?: string) => { order.push(`paste ${text}`); });
     const onSendInput = vi.fn((data: string) => { order.push(JSON.stringify(data)); });
-    const { typeButton, field, textButton } = renderUi({ onPaste, onSendInput });
+    const { typeButton, field, button } = renderUi({ onPaste, onSendInput });
     act(() => typeButton.click());
     act(() => setNativeFieldValue(field()!, 'git status\ngit log'));
-    await act(async () => textButton('Send')!.click());
+    await act(async () => button('Send')!.click());
     expect(order).toEqual(['paste git status\ngit log', '"\\r"']);
     expect(field()).toBeNull();
   });
@@ -148,14 +146,14 @@ describe('MobileTerminalUi composer', () => {
   it('types a password raw, never as a paste, and forgets the checkbox once sent', async () => {
     const onPaste = vi.fn();
     const onSendInput = vi.fn();
-    const { typeButton, field, passwordBox, textButton } = renderUi({ onPaste, onSendInput });
+    const { typeButton, field, passwordBox, button } = renderUi({ onPaste, onSendInput });
     act(() => typeButton.click());
     act(() => setNativeFieldValue(field()!, 'hunter2'));
     act(() => passwordBox()!.click());
     // The text survives the swap into a masked field, which takes focus.
     expect(field()).toMatchObject({ type: 'password', value: 'hunter2' });
     expect(document.activeElement).toBe(field());
-    await act(async () => textButton('Send')!.click());
+    await act(async () => button('Send')!.click());
     expect(onSendInput.mock.calls).toEqual([['hunter2'], ['\r']]);
     expect(onPaste).not.toHaveBeenCalled();
     act(() => typeButton.click());
@@ -174,11 +172,11 @@ describe('MobileTerminalUi composer', () => {
 
   it('keeps the text across Cancel, and offers no Send while empty', () => {
     const onSendInput = vi.fn();
-    const { typeButton, field, textButton } = renderUi({ onSendInput });
+    const { typeButton, field, button } = renderUi({ onSendInput });
     act(() => typeButton.click());
-    expect(textButton('Send')!.disabled).toBe(true);
+    expect(button('Send')!.disabled).toBe(true);
     act(() => setNativeFieldValue(field()!, 'rm -rf build'));
-    act(() => textButton('Cancel')!.click());
+    act(() => button('Cancel')!.click());
     expect(field()).toBeNull();
     expect(onSendInput).not.toHaveBeenCalled();
     act(() => typeButton.click());
@@ -186,16 +184,16 @@ describe('MobileTerminalUi composer', () => {
   });
 
   it('starts empty after a Send, and never keeps a password across Cancel', async () => {
-    const { typeButton, field, passwordBox, textButton } = renderUi({ onSendInput: vi.fn() });
+    const { typeButton, field, passwordBox, button } = renderUi({ onSendInput: vi.fn() });
     act(() => typeButton.click());
     act(() => setNativeFieldValue(field()!, 'ls'));
-    await act(async () => textButton('Send')!.click());
+    await act(async () => button('Send')!.click());
     act(() => typeButton.click());
     expect(field()!.value).toBe('');
 
     act(() => setNativeFieldValue(field()!, 'hunter2'));
     act(() => passwordBox()!.click());
-    act(() => textButton('Cancel')!.click());
+    act(() => button('Cancel')!.click());
     act(() => typeButton.click());
     expect(field()).toMatchObject({ type: 'textarea', value: '' });
   });
@@ -270,13 +268,13 @@ describe('MobileTerminalUi controls inside the host', () => {
   // `MobileWall`'s header sits inside the host; a press on its buttons is not pane content.
   it.each<MobileTerminalTouchMode>(['gestures', 'cursor'])('leaves a header button its own press in %s mode', (mode) => {
     const acknowledge = vi.spyOn(activity, 'acknowledgeSession');
-    const { container } = renderUi({
+    const { button: control } = renderUi({
       activeTouchMode: mode,
       cursorTouchAvailable: true,
       sessions: [{ id: 'pane-a', title: 'shell', active: true, episode: null }],
-      terminal: <header><button type="button">Minimize</button></header>,
+      terminal: <header><button type="button">Kill</button></header>,
     });
-    const button = [...container.querySelectorAll('button')].find((b) => b.textContent === 'Minimize')!;
+    const button = control('Kill')!;
     const down = pointerEvent('pointerdown');
     act(() => {
       button.dispatchEvent(down);
@@ -313,7 +311,7 @@ describe('MobileTerminalUi Sessions screen', () => {
     expect(container.querySelector('section[aria-label="Sessions"]')).toBeNull();
   });
 
-  it('opens Settings behind the gear only when given one, and backs out to the list', () => {
+  it('opens Settings behind its button only when given one, and backs out to the list', () => {
     const { button, renderWith, container } = renderUi({ defaultView: 'sessions', sessions: SESSIONS });
     expect(button('Settings')).toBeNull();
     renderWith({ defaultView: 'sessions', sessions: SESSIONS, settings: <p data-testid="settings" /> });

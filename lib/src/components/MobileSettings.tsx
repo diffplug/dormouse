@@ -39,9 +39,9 @@ export function MobileSettings({ persist }: { persist: boolean }) {
 
   return (
     <div className="grid gap-5 p-3 font-mono text-sm">
-      <section aria-labelledby="mobile-settings-theme" className="flex items-center gap-2 [&>div]:min-w-0">
+      <section aria-labelledby="mobile-settings-theme" className="flex items-center gap-2">
         <h3 id="mobile-settings-theme" className="flex-1 font-semibold">Theme</h3>
-        <ThemePicker variant="settings-dialog" persist={persist} offerDebugger={false} />
+        <ThemePicker variant="row" persist={persist} offerDebugger={false} />
       </section>
       <section aria-labelledby="mobile-settings-font-size" className="grid gap-2">
         <div className="flex items-center gap-2">

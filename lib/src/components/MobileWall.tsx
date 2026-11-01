@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { CaretDownIcon, XIcon } from '@phosphor-icons/react';
+import { clsx } from 'clsx';
 import { HeaderActionButton } from './HeaderActionButton';
 import { TerminalPane } from './TerminalPane';
 import { AlertRingInset, alertRingRow, useAlertRingBurst } from './alert-ring';
-import { HEADER_PILL_CLASS } from './design';
+import { chromeButton, HEADER_PILL_CLASS, MOBILE_BAR_HEIGHT_CLASS } from './design';
 import { useTodoPillContent } from './TodoPillBody';
 import type { MobileTerminalSessionItem } from './MobileTerminalUi';
 import {
@@ -185,37 +186,30 @@ function MobileWallHeader({
   const TodoPill = onTodoClear ? 'button' : 'span';
   const row = alertRingRow(session.status, null);
   const burst = useAlertRingBurst(row, session.episode);
-  const title = (
-    <>
-      <span className="min-w-0 shrink truncate font-medium">{session.title}</span>
-      {session.secondary ? (
-        <span className="min-w-0 shrink truncate opacity-70">{session.secondary}</span>
-      ) : null}
-    </>
-  );
+  const Title = onShowSessions ? 'button' : 'div';
 
   return (
-    // 44px: every control in it is a touch target. Kill fills the right edge.
-    <div className={`relative flex h-11 shrink-0 items-center gap-1.5 overflow-hidden bg-header-active-bg pl-2 font-mono text-sm leading-tight text-header-active-fg ${showKillButton ? '' : 'pr-2'}`}>
-      {onShowSessions ? (
-        <button
-          type="button"
-          title="Show sessions"
-          onClick={onShowSessions}
-          className="-ml-2 flex h-full min-w-0 flex-1 items-center gap-1.5 px-2 text-left transition-colors hover:bg-current/10"
-        >
-          {title}
+    <div className={clsx('relative flex shrink-0 items-center gap-1.5 overflow-hidden bg-header-active-bg font-mono text-sm leading-tight text-header-active-fg', MOBILE_BAR_HEIGHT_CLASS)}>
+      <Title
+        type={onShowSessions ? 'button' : undefined}
+        title={onShowSessions ? 'Show sessions' : undefined}
+        onClick={onShowSessions}
+        className={clsx('flex h-full min-w-0 flex-1 items-center gap-1.5 px-2 text-left', onShowSessions && 'transition-colors hover:bg-current/10')}
+      >
+        <span className="min-w-0 shrink truncate font-medium">{session.title}</span>
+        {session.secondary ? (
+          <span className="min-w-0 shrink truncate opacity-70">{session.secondary}</span>
+        ) : null}
+        {onShowSessions ? (
           <CaretDownIcon size={10} weight="bold" className="shrink-0 opacity-65" aria-hidden="true" />
-        </button>
-      ) : (
-        <div className="flex min-w-0 flex-1 items-center gap-1.5">{title}</div>
-      )}
+        ) : null}
+      </Title>
       {todoPill.visible ? (
         <TodoPill
           type={onTodoClear ? 'button' : undefined}
           data-session-todo-for={session.id}
           data-flourishing={todoPill.flourishing ? 'true' : 'false'}
-          className={`todo-pill-shell ${HEADER_PILL_CLASS}`}
+          className={clsx('todo-pill-shell', HEADER_PILL_CLASS, !showKillButton && 'mr-2')}
           aria-label={onTodoClear ? 'Dismiss TODO' : 'TODO'}
           aria-hidden={todoPill.flourishing ? true : undefined}
           onClick={onTodoClear ? (event) => {
@@ -228,7 +222,7 @@ function MobileWallHeader({
       ) : null}
       {showKillButton ? (
         <HeaderActionButton
-          className="flex h-full w-11 shrink-0 items-center justify-center transition-colors hover:bg-error/10 hover:text-error"
+          className={chromeButton({ kind: 'window', class: clsx(MOBILE_BAR_HEIGHT_CLASS, 'hover:bg-error/10 hover:text-error') })}
           onClick={onKill}
           ariaLabel="Kill"
           tooltip="Kill"

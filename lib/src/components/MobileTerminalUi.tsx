@@ -42,7 +42,7 @@ import {
 import { useDynamicPalette } from '../lib/themes/use-dynamic-palette';
 import { isComposingKey, isEditableTarget } from '../lib/dom';
 import { TouchUiContext } from './touch-ui-context';
-import { modalActionButton, TODO_PILL_TRACKING_CLASS } from './design';
+import { chromeButton, MOBILE_BAR_HEIGHT_CLASS, modalActionButton, TODO_PILL_TRACKING_CLASS } from './design';
 import { AlertRingInset, alertRingRow, useAlertRingBurst } from './alert-ring';
 import type { AlertEpisode } from '../lib/alert-episode';
 import { getTerminalInstance, type SessionStatus } from '../lib/terminal-registry';
@@ -271,9 +271,7 @@ function ModeBar({
   );
 }
 
-const SCREEN_BUTTON_BASE_CLASS = 'rounded transition-colors hover:bg-current/10 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-[-2px] focus-visible:outline-focus-ring';
-const SCREEN_ICON_BUTTON_CLASS = clsx('grid h-full w-11 shrink-0 place-items-center', SCREEN_BUTTON_BASE_CLASS);
-const SCREEN_TEXT_BUTTON_CLASS = clsx('flex h-full shrink-0 items-center gap-1.5 px-3', SCREEN_BUTTON_BASE_CLASS);
+const SCREEN_BUTTON_CLASS = 'h-full shrink-0 rounded focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-[-2px] focus-visible:outline-focus-ring';
 
 /** The full-screen session list the header's Session title opens, with Settings behind its button. */
 function SessionsScreen({
@@ -296,13 +294,12 @@ function SessionsScreen({
       aria-label={title}
       className="absolute inset-0 z-40 flex flex-col bg-header-inactive-bg text-header-inactive-fg"
     >
-      {/* The `MobileWall` header's height, so the bar holds still between views. */}
-      <header className="flex h-11 shrink-0 items-center border-b border-border font-mono text-sm">
+      <header className={clsx('flex shrink-0 items-center border-b border-border font-mono text-sm', MOBILE_BAR_HEIGHT_CLASS)}>
         <button
           type="button"
           aria-label={showSettings ? 'Back to sessions' : 'Back to terminal'}
           onClick={showSettings ? () => setShowSettings(false) : onClose}
-          className={SCREEN_ICON_BUTTON_CLASS}
+          className={chromeButton({ kind: 'window', class: SCREEN_BUTTON_CLASS })}
         >
           <ArrowLeftIcon size={16} />
         </button>
@@ -311,7 +308,7 @@ function SessionsScreen({
           <button
             type="button"
             onClick={() => setShowSettings(true)}
-            className={SCREEN_TEXT_BUTTON_CLASS}
+            className={clsx('flex items-center gap-1.5 px-3 transition-colors hover:bg-current/10', SCREEN_BUTTON_CLASS)}
           >
             <GearSixIcon size={16} aria-hidden="true" />
             Settings
@@ -343,15 +340,16 @@ function Composer({
   onCancel: () => void;
   onSend: (text: string, password: boolean) => void;
 }) {
-  const [draft, setDraftState] = useState(() => keptDraft.current);
+  const [draft, setDraft] = useState(() => keptDraft.current);
   const [password, setPassword] = useState(false);
   // A password is never kept to come back unmasked.
-  const keep = (text: string, masked: boolean) => { keptDraft.current = masked ? '' : text; };
-  const setDraft = (text: string) => {
-    setDraftState(text);
-    keep(text, password);
+  useEffect(() => {
+    keptDraft.current = password ? '' : draft;
+  }, [draft, keptDraft, password]);
+  const send = () => {
+    keptDraft.current = '';
+    onSend(draft, password);
   };
-  const send = () => onSend(draft, password);
   // 16px text: iOS zooms the page into any field set smaller.
   const fieldClass = 'block w-full resize-none rounded border border-border bg-app-bg p-2 font-mono text-base text-foreground outline-none focus:border-focus-ring';
   return (
@@ -399,7 +397,6 @@ function Composer({
             disabled={disabled}
             onChange={(event) => {
               const next = event.currentTarget.checked;
-              keep(draft, next);
               // The swapped-in field takes focus inside the tap, as Type's does.
               flushSync(() => setPassword(next));
               fieldRef.current?.focus({ preventScroll: true });
@@ -790,7 +787,6 @@ export function MobileTerminalUi({
   /** A password goes as typed; anything else takes the paste path, bracketed
    *  when the app asked, so a TUI never reads the Enter after it as pasted. */
   const sendDraft = useCallback((text: string, password: boolean) => {
-    keptDraftRef.current = '';
     closeComposer();
     if (!interactive || !text) return;
     if (password || !onPaste) {
