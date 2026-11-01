@@ -1,6 +1,7 @@
 -- The relay and voice Workers' Postgres roles (docs/specs/hosted.md ->
 -- "Application boundary"): each reaches only the rows its Worker's queries
--- name. The account Worker keeps its own runtime role.
+-- name. The account Worker keeps its own runtime role; the one grant made to
+-- it here is at the end.
 --
 -- The rule: every privilege either role holds on this database's schemas,
 -- tables, sequences and functions is granted below, by name, and nothing
@@ -60,8 +61,16 @@ $$;
 
 GRANT USAGE ON SCHEMA public TO dormouse_relay, dormouse_voice;
 
--- Both: the entitlement check reads the owner's address and its verification.
+-- Both: the entitlement (hosted/server/entitlement.ts) reads the owner's
+-- address and its verification, until when @pgstencil/stripe's owner_access
+-- view grants the owner access, and whether a payment dispute suspends them.
+-- The view runs with its owner's privileges, so neither role reads the
+-- subscriptions table beneath it.
 GRANT SELECT (id, email, "emailVerified") ON "user" TO dormouse_relay, dormouse_voice;
+GRANT USAGE ON SCHEMA pgstencil_billing TO dormouse_relay, dormouse_voice;
+GRANT SELECT (owner_id, access_until)
+  ON pgstencil_billing.owner_access TO dormouse_relay, dormouse_voice;
+GRANT SELECT ("userId") ON dormouse_billing_disputes TO dormouse_relay, dormouse_voice;
 
 -- Both: their metrics' upsert-increment (hosted/server/metrics.ts), whose
 -- conflict needs the read. A row is an aggregate count.
@@ -93,11 +102,26 @@ GRANT UPDATE (endpoint, p256dh, auth, "vapidPublicKey", "subscribedAt")
 GRANT INSERT ("userId", hash) ON dormouse_voice_tokens TO dormouse_relay;
 
 -- The voice Worker: speak's token lookup and idle expiry, a disconnecting
--- computer's own delete, and the daily count.
+-- computer's own delete, the daily count, and the daily sweep.
 GRANT SELECT (id, "userId", hash, "createdAt", "lastUsedAt") ON dormouse_voice_tokens TO dormouse_voice;
 GRANT UPDATE ("lastUsedAt") ON dormouse_voice_tokens TO dormouse_voice;
 GRANT DELETE ON dormouse_voice_tokens TO dormouse_voice;
-GRANT SELECT, INSERT ON dormouse_voice_usage TO dormouse_voice;
+GRANT SELECT, INSERT, DELETE ON dormouse_voice_usage TO dormouse_voice;
 GRANT UPDATE (count) ON dormouse_voice_usage TO dormouse_voice;
+
+-- The account Worker's role, made by hand (hosted/README.md), owns billing:
+-- @pgstencil/stripe reads and writes every pgstencil_billing table, and the
+-- entitlement reads its owner_access view, which ALL TABLES covers. Granted here, after every migration,
+-- because its schema is the package's and no hand grant can precede it.
+-- Additive only: nothing here revokes from it, and a database without the
+-- role (tests, previews) skips it.
+DO $$
+BEGIN
+  IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'dormouse_app') THEN
+    GRANT USAGE ON SCHEMA pgstencil_billing TO dormouse_app;
+    GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA pgstencil_billing TO dormouse_app;
+  END IF;
+END
+$$;
 
 COMMIT;

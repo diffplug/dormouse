@@ -66,6 +66,8 @@ Rows 1–2 are why a blanket second press is wrong; `Press Ctrl-C again` was abs
 
 **Why capture clears once per process.** A run that never opens a Dormouse view may leave the old record unclaimed. Clearing it before capture prevents an empty teardown from carrying it forward; merging later captures preserves other standalone Windows.
 
+**Why the claim is a rename.** VS Code windows with no folder share one directory, so a cold start's read can race another host's teardown: read-then-unlink removes a record persisted in between unread, and two concurrent unlinks of one path can both report success (APFS does; `relay/src/enroll-token.ts` claims its offer by rename for the same reason), handing one record to two cold starts.
+
 **Why each webview claims only its own pane ids.** Two containers resolve inside one activation; a claim-everything read would let whichever resolved first delete the other's commands. Per-id claiming also means a disposed-and-re-resolved view restores without re-running the agent — its entries were already taken.
 
 ## Cold restore

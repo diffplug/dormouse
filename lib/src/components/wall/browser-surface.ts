@@ -14,6 +14,7 @@ import { isToolKeyScope, type ToolKeyScope, type ToolRender } from '../../lib/pl
 import { parseRenderMode, renderModeFor, sessionForKey } from 'dor-lib-common/browser-providers';
 import { isBrowserViewportSetting, type BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
 import type { BrowserAutomationProvider } from '../../lib/platform/browser-automation';
+import { isAllowedBinaryFor } from '../../lib/agent-browser-binary';
 
 /** A measured Playwright ratio belongs to its native context; only a ratio
  * explicitly requested for this Surface may be replayed on its next open. */
@@ -268,15 +269,19 @@ export function agentBrowserSessionFromParams(params: unknown): string | null {
 }
 
 /** The native binding an automated browser surface's params carry — what its
- *  provider's CLI runs with — or null before the session is named. */
+ *  provider's CLI runs with — or null before the session is named. Its
+ *  `binaryPath` names a program the host will spawn, and params come off the
+ *  persisted session blob, so a path the provider's gate refuses is dropped
+ *  here, before any sender has it; the host then resolves its own. */
 export function browserBindingFromParams(params: unknown): BrowserBinding | null {
   const session = agentBrowserSessionFromParams(params);
   if (!session) return null;
-  const { cwd, binaryPath } = asParams(params);
+  const { cwd, binaryPath, renderMode } = asParams(params);
+  const { provider } = parseRenderMode(renderMode);
   return {
     session,
     ...(typeof cwd === 'string' ? { cwd } : {}),
-    ...(typeof binaryPath === 'string' ? { binaryPath } : {}),
+    ...(provider && isAllowedBinaryFor(provider, binaryPath) ? { binaryPath } : {}),
   };
 }
 

@@ -6,11 +6,11 @@
  */
 
 import { chmod, lstat, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
-import { statSync, type BigIntStats } from 'node:fs';
-import { createHash, randomUUID } from 'node:crypto';
+import { linkSync, statSync, unlinkSync, type BigIntStats } from 'node:fs';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { createConnection, createServer, type Server, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import type * as vscode from 'vscode';
 
@@ -399,12 +399,11 @@ let serverToken: string | null = null;
  * The socket file this window's own bind created, claimed and cleared with
  * `server`.
  *
- * {@link stillOurs} compares the path against *this*, never against a second
- * read of the path: a competing window that cleared the same corpse may have
- * rebound it before an async read lands, and then both reads name that
- * window's socket, the two agree, and every window that bound believes it
- * won. Captured synchronously after the bind, which narrows that gap without
- * closing it (see `tryBind`).
+ * {@link stillOurs} and a disposing {@link closeServer} compare the path
+ * against *this*, never against a read of the path: a competing window that
+ * cleared the same corpse may have published onto it first, and then every
+ * read names that window's socket. Read from the private name the socket was
+ * bound under, which no other window knows (see `tryBind`).
  */
 let boundSocketFile: SocketFileIdentity | null = null;
 const clients = new Set<PeerLinkClient>();
@@ -899,8 +898,11 @@ async function tryBind(path: string, token: string): Promise<boolean> {
     // of the token must not volunteer one into whatever bound this path.
     send(client, { kind: 'challenge', nonce: client.challenge });
   });
+  // A published endpoint is a fresh name of our own, bound directly: what can
+  // be displaced there is the file naming it ({@link attemptPublished}).
+  const listenPath = publishesEndpoint() ? path : privateSocketPath(path);
   try {
-    await listenServer(nextServer, path);
+    await listenServer(nextServer, listenPath);
   } catch {
     // Callback form deliberately: closing a server that never listened emits an
     // `'error'` nobody is listening for, which an EventEmitter rethrows and
@@ -908,21 +910,62 @@ async function tryBind(path: string, token: string): Promise<boolean> {
     nextServer.close(() => {});
     return false;
   }
+  let identity: SocketFileIdentity | null = null;
+  if (listenPath !== path) {
+    identity = publishSocket(listenPath, path);
+    if (!identity) {
+      nextServer.close(() => {});
+      return false;
+    }
+  }
   server = nextServer;
-  // Synchronous, and before the first `await` past the bind: `listen` binds
-  // inside the call and resolves on a nextTick, so no thread-pool callback of
-  // *this* process can interleave. A competing window is a separate extension
-  // host, so its unlink and rebind can still land here — this narrows the gap
-  // to a few microseconds of straight-line code rather than closing it, and
-  // reads the file our own bind made ({@link boundSocketFile}). Skipped where
-  // the endpoint is published: that name is ours alone, and what can be
-  // displaced there is the file naming it ({@link attemptPublished}).
-  boundSocketFile = publishesEndpoint() ? null : socketFileIdentitySync(path);
+  boundSocketFile = identity;
   // Provisional until the caller settles it: a reclaimed bind may still be
   // displaced (see {@link brokerConfirmed}).
   brokerConfirmed = false;
   serverToken = token;
   return true;
+}
+
+/**
+ * A name beside `path` that only this bind knows, no longer than `path` itself
+ * so it fits the platform's socket path cap wherever `path` does.
+ */
+function privateSocketPath(path: string): string {
+  return join(dirname(path), `${randomBytes(6).toString('hex')}.bind`);
+}
+
+/**
+ * Publish the socket listening on `privatePath` at `path`, create-only, and
+ * report its identity — `null` when `path` is already taken.
+ *
+ * Never `listen` on `path` itself: libuv unlinks a unix server's bound name
+ * when it closes, whatever that name has come to mean, so a window standing
+ * down from a displaced reclaim would remove the winner's socket and leave two
+ * brokers (#756). `link` fails `EEXIST` rather than displacing, and the private
+ * name is removed as soon as it is published, so a crash leaves only `path`,
+ * which the next round reclaims like any dead broker's.
+ *
+ * The identity is read from the private name, never from `path`, which a
+ * competitor can have taken back by the time a read lands.
+ */
+function publishSocket(privatePath: string, path: string): SocketFileIdentity | null {
+  try {
+    linkSync(privatePath, path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+      log.error(`[peer-link] could not publish the peer socket at ${path}: ${String(error)}`);
+    }
+    return null;
+  }
+  const linked = socketFileIdentitySync(privatePath);
+  const identity = linked && { ...linked, ctimeNs: null };
+  try {
+    unlinkSync(privatePath);
+  } catch {
+    // Left behind, it is only a name nobody dials; libuv retries it on close.
+  }
+  return identity;
 }
 
 // ---------------------------------------------------------------- client side
@@ -1333,11 +1376,12 @@ async function attempt(): Promise<boolean> {
     // bind, and all but one end up serving a socket nobody can reach.
     await delay(Math.floor(Math.random() * RECLAIM_JITTER_MS));
     // And one of them may have rebound it while we waited. Unlinking a live
-    // broker's socket would strand every window dialing it, so ask again: a
-    // second refusal is what makes the unlink below safe.
+    // broker's socket would strand every window dialing it, so ask again, and
+    // unlink only the very file that refused this second time.
+    const corpse = socketFileIdentitySync(path);
     outcome = await tryConnect(path, token);
     if (outcome === 'refused') {
-      await rm(path, { force: true }).catch(() => {});
+      if (corpse) unlinkIfStill(path, corpse);
       if (await tryBind(path, token)) {
         if (disposed) {
           await closeServer(true);
@@ -1351,10 +1395,11 @@ async function attempt(): Promise<boolean> {
           settle(true);
           return true;
         }
-        // Another window cleared the same corpse and bound after us, so the
-        // path now names its socket and ours is unreachable. Stand down rather
-        // than run a second Host: `bind` is only the arbiter when nobody
-        // unlinks. The loop's next round finds that window and connects.
+        // Another window cleared the same corpse after we published, so the
+        // path now names its socket (or nothing) and ours is unreachable.
+        // Stand down rather than run a second Host: `link` is only the arbiter
+        // when nobody unlinks. Our close leaves the path alone, so the loop's
+        // next round finds that window and connects.
         await closeServer(false);
       }
       return false;
@@ -1464,12 +1509,10 @@ const RECLAIM_JITTER_MS = 250;
 /**
  * Whether the socket path still names the filesystem object we just bound.
  *
- * Two windows can find the same corpse and both unlink it, and the second bind
- * silently displaces the first — the loser keeps serving a socket no client can
- * reach. Nothing on the bind path detects that, so it is checked afterwards.
- * Inode alone is not an identity: Linux may immediately recycle the corpse's
- * inode for a replacement socket. The inode's change timestamp distinguishes
- * those generations, while the device keeps the tuple complete.
+ * Two windows can find the same corpse, and one's unlink can still land after
+ * the other has published — the publisher keeps serving a socket no client can
+ * reach. Unlinking only the file that refused ({@link unlinkIfStill}) narrows
+ * that to a few microseconds; this catches what is left.
  *
  * A path that has *gone* is the same failure on unix: somebody unlinked it after
  * our bind, so every window dialing it will miss us. Only Windows may read that
@@ -1479,7 +1522,14 @@ const RECLAIM_JITTER_MS = 250;
 interface SocketFileIdentity {
   dev: bigint;
   ino: bigint;
-  ctimeNs: bigint;
+  /**
+   * Inode alone is not an identity for a file nothing holds: Linux may recycle
+   * an unlinked corpse's inode for a replacement socket, and the change time
+   * tells those generations apart. `null` for our own bound socket
+   * ({@link publishSocket}): dropping its private name changes the ctime, and a
+   * socket we still have bound holds its inode, so the number is not reissued.
+   */
+  ctimeNs: bigint | null;
 }
 
 function toSocketFileIdentity(value: BigIntStats | null | undefined): SocketFileIdentity | null {
@@ -1490,7 +1540,7 @@ async function socketFileIdentity(path: string): Promise<SocketFileIdentity | nu
   return toSocketFileIdentity(await stat(path, { bigint: true }).catch(() => null));
 }
 
-/** {@link socketFileIdentity} without yielding — see {@link boundSocketFile}. */
+/** {@link socketFileIdentity} without yielding, for checks that must not interleave. */
 function socketFileIdentitySync(path: string): SocketFileIdentity | null {
   try {
     return toSocketFileIdentity(statSync(path, { bigint: true, throwIfNoEntry: false }));
@@ -1499,8 +1549,28 @@ function socketFileIdentitySync(path: string): SocketFileIdentity | null {
   }
 }
 
-function sameSocketFile(left: SocketFileIdentity, right: SocketFileIdentity): boolean {
-  return left.dev === right.dev && left.ino === right.ino && left.ctimeNs === right.ctimeNs;
+function sameSocketFile(now: SocketFileIdentity, then: SocketFileIdentity): boolean {
+  return (
+    now.dev === then.dev &&
+    now.ino === then.ino &&
+    (then.ctimeNs === null || now.ctimeNs === then.ctimeNs)
+  );
+}
+
+/**
+ * Unlink `path`, but only while it still names `expected`: a window that
+ * reclaimed it since has published a live socket there, and unlinking that
+ * strands every window dialing it. Synchronous, so nothing of this process
+ * interleaves between the check and the unlink.
+ */
+function unlinkIfStill(path: string, expected: SocketFileIdentity): void {
+  const now = socketFileIdentitySync(path);
+  if (!now || !sameSocketFile(now, expected)) return;
+  try {
+    unlinkSync(path);
+  } catch {
+    // Gone already: another window cleared it first.
+  }
 }
 
 async function stillOurs(path: string): Promise<boolean> {
@@ -1537,29 +1607,30 @@ async function contend(): Promise<void> {
 }
 
 /**
- * Give up this window's server. Unlink only when the path still names our
- * socket: removing a winner's would strand every client dialing it. A
- * published name is retracted only while the file still says it, so `unlink`
- * there can never remove another broker's.
+ * Give up this window's server. `unlink` removes what it published, and only
+ * while that still names our socket: removing a winner's would strand every
+ * client dialing it. A published name is retracted only while the file still
+ * says it. Standing down (`unlink` false) touches no shared name, since
+ * `tryBind` never lets libuv's close unlink one.
  */
 async function closeServer(unlink: boolean): Promise<void> {
   const closing = server;
   const published = boundEndpoint;
+  const mine = boundSocketFile;
   server = null;
   boundEndpoint = null;
   brokerConfirmed = false;
   serverToken = null;
   boundSocketFile = null;
+  // Before anything stops listening, and without yielding: while ours is live
+  // no other window can see the path refuse, so none can unlink and republish
+  // it between this check and the unlink.
+  const path = socketPath();
+  if (unlink && mine && path) unlinkIfStill(path, mine);
   for (const peer of [...clients]) dropClient(peer);
   if (!closing) return;
   if (closing.listening) closing.close();
-  if (!unlink) return;
-  if (published !== null) {
-    await retractEndpoint(published);
-    return;
-  }
-  const path = socketPath();
-  if (path) await rm(path, { force: true }).catch(() => {});
+  if (unlink && published !== null) await retractEndpoint(published);
 }
 
 export async function disposePeerLink(): Promise<void> {

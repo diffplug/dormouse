@@ -4,7 +4,7 @@
  * (docs/specs/relay.md, "Configuration").
  */
 
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { normalizeOrigin } from 'remote-lib-common';
@@ -134,8 +134,8 @@ export function readConfig(env: Env = process.env): RelayConfig {
   const vapidSubject = env.DORMOUSE_VAPID_SUBJECT ?? defaultVapidSubject(origin);
 
   // Installer-supplied, and absent everywhere else.
-  const runtimeFile = installerPath(env, 'DORMOUSE_RUNTIME_FILE');
-  const enrollTokenFile = installerPath(env, 'DORMOUSE_ENROLL_TOKEN_FILE');
+  const runtimeFile = installerPath(env, 'DORMOUSE_RUNTIME_FILE', stateDir);
+  const enrollTokenFile = installerPath(env, 'DORMOUSE_ENROLL_TOKEN_FILE', stateDir);
   const releaseId = env.DORMOUSE_RELEASE_ID?.trim() || null;
 
   return {
@@ -179,11 +179,18 @@ function requireOrigin(raw: string): string {
  * blank. A relative value is refused rather than resolved against the cwd: the
  * `run-relay` wrapper runs under a service manager whose working directory is
  * not the installer's, so it would land somewhere neither side can predict.
+ * One inside `stateDir` is refused too: the Relay writes, renames, and unlinks
+ * these files directly, and only `writeAtomic` may write a state file.
  */
-function installerPath(env: Env, name: string): string | null {
+function installerPath(env: Env, name: string, stateDir: string): string | null {
   const value = env[name]?.trim() || null;
-  if (value !== null && !isAbsolute(value)) {
+  if (value === null) return null;
+  if (!isAbsolute(value)) {
     throw new ConfigError(`${name} must be an absolute path, got '${value}'.`);
+  }
+  const fromState = relative(resolve(stateDir), value);
+  if (fromState !== '..' && !fromState.startsWith(`..${sep}`) && !isAbsolute(fromState)) {
+    throw new ConfigError(`${name} must be outside DORMOUSE_STATE_DIR (${stateDir}), got '${value}'.`);
   }
   return value;
 }

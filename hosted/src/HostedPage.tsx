@@ -17,20 +17,32 @@ import {
   siteButton,
 } from "dormouse-lib/site/docs-tokens";
 import { providerNames, type Account, type Computer, type HostedVoice, type Passkey, type Provider, type Session } from "./api";
-import { RECENT_LOGIN_WINDOW, TERMS_VERSION } from "../server/policy-constants";
-import { HELP_CLASS, INPUT_CLASS, LABEL_CLASS, LABEL_TEXT_CLASS, PRIMARY_CLASS } from "./classes";
+import { CHECKOUT_CLOSED, RECENT_LOGIN_WINDOW, TERMS_VERSION, type Plan } from "../server/policy-constants";
+import {
+  BUTTON_CLASS,
+  HEADING_CLASS,
+  HELP_CLASS,
+  INPUT_CLASS,
+  LABEL_CLASS,
+  LABEL_TEXT_CLASS,
+  PRIMARY_CLASS,
+  TEXT_BUTTON_CLASS,
+} from "./classes";
 import { ConfirmDigits } from "./ConfirmDigits";
 import { HostedShell } from "./HostedShell";
 import { NoPlanOffer } from "./NoPlanOffer";
+import { PLAN_NAMES } from "../../website/src/lib/hosted-pricing.ts";
+import type { BillingSummary } from "../server/billing-summary";
+import { Checkout } from "./Checkout";
+import { CloseAccount } from "./Closure";
+import { ChoosePlan, FoundersOptIn, ManageBilling, PlanConfirmation, PlanSection } from "./Plan";
+import { WithdrawalAcknowledgement, WithdrawalFunction } from "./Withdrawal";
 import type { Enrollment } from "./enrollment";
 import type { Notice, PageError } from "./settle";
 
 export const SUBSCRIBE_URL = "https://nedshed.dev/subscribe";
 const SELF_HOST_URL = "https://dormouse.sh/self-host/";
 
-const BUTTON_CLASS = siteButton({ tone: "neutral", size: "fit" });
-const TEXT_BUTTON_CLASS = `inline-flex min-h-11 items-center disabled:opacity-50 ${LINK_CLASS}`;
-const HEADING_CLASS = "mb-2 font-display text-xl";
 const ROW_CLASS = `flex min-h-14 items-center justify-between gap-4 py-1.5 ${DASHED_ROW_CLASS}`;
 const DETAIL_CLASS = `block text-sm ${MUTED_TEXT_CLASS}`;
 const FOOTNOTE_CLASS = `mt-10 text-sm ${MUTED_TEXT_CLASS}`;
@@ -66,8 +78,26 @@ function Ticked({ children }: { children: string }) {
   );
 }
 
+/** Which page of the account app, past enrollment, this is. */
+export type View = "account" | "checkout" | "billing";
+
 /** App's existing values and callbacks; the controller owns their lifecycle. */
 export interface HostedPageProps {
+  view?: View;
+  /** The account's plan, `closed` until checkout opens, null when unread. */
+  billing?: BillingSummary | "closed" | null;
+  /** The plan a checkout link named. */
+  checkoutPlan?: Plan | null;
+  /** Back from Stripe with a checkout this page just confirmed. */
+  confirmed?: boolean;
+  purchase?: (plan: Plan, price: number) => void;
+  manageBilling?: () => void;
+  saveFounder?: (shown: boolean, name: string) => void;
+  /** Leaves checkout or billing for the account page. */
+  leaveBilling?: () => void;
+  /** Withdraws from the contract a subscription names. */
+  withdraw?: (subscription: string) => void;
+  closeAccount?: () => Promise<void>;
   session: Session | null;
   enabled: Provider[];
   accounts: Account[];
@@ -108,7 +138,12 @@ export interface HostedPageProps {
   changeEmail: () => void;
 }
 
+const idle = () => {};
+
 export function HostedPage({
+  view = "account", billing = null, checkoutPlan = null, confirmed = false,
+  purchase = idle, manageBilling = idle, saveFounder = idle, leaveBilling = idle, withdraw = idle,
+  closeAccount = async () => {},
   session, enabled, accounts, hostedVoice, turnOffDialog, computers, passkeys,
   enrolling, noPlan, loading, busy, error, notice, email, code, enterCode,
   comingSoon, fresh, themeControl = false, act, refresh, approve, signOut, clearEnrollment, turnOffVoice,
@@ -121,6 +156,27 @@ export function HostedPage({
   }, [enterCode]);
   // A lapsed account still sees, and may turn off, a Natural Voice left on.
   const voiceShown = !!hostedVoice && (hostedVoice.entitled || hostedVoice.on);
+  const summary = billing !== null && billing !== "closed" ? billing : null;
+  const founders = summary && (
+    <FoundersOptIn billing={summary} defaultName={session?.user.name ?? ""} busy={busy} onSave={saveFounder} />
+  );
+  const backToAccount = (
+    <button type="button" className={`mt-6 flex ${TEXT_BUTTON_CLASS}`} disabled={!!busy} onClick={leaveBilling}>
+      Go to your account
+    </button>
+  );
+  /** What checkout and billing say before they have a plan to show. */
+  const billingUnread =
+    billing === "closed" ? (
+      <p className={HELP_CLASS}>{CHECKOUT_CLOSED}</p>
+    ) : (
+      <>
+        <p className={HELP_CLASS}>Billing could not load. Retry, or come back to this page later.</p>
+        <button className={BUTTON_CLASS} disabled={!!busy} onClick={() => void act("retry", refresh)}>
+          Retry
+        </button>
+      </>
+    );
 
   return (
     <HostedShell themeControl={themeControl}>
@@ -131,6 +187,14 @@ export function HostedPage({
             ? enrolling.purpose === "voice"
               ? "Turn on Natural Voice"
               : "Enroll remote control"
+            : view === "checkout"
+              ? session
+                ? "Subscribe to Dormouse Hosted"
+                : "Sign in to subscribe"
+            : view === "billing" && session
+              ? confirmed && summary?.plan
+                ? "You’re subscribed"
+                : "Billing"
             : session
               ? "Your account"
               : "Sign in to Dormouse Hosted"}
@@ -150,6 +214,16 @@ export function HostedPage({
                     ? "Dormouse asked to turn on Natural Voice with this account."
                     : "Dormouse asked to enroll remote control with this account."
                 : "Sign in to approve the computer that sent you here."
+            : view === "checkout"
+              ? session
+                ? "Natural Voice and the Hosted Relay on every computer you sign in on."
+                : "Sign in or create your account first. Your plan stays chosen."
+            : view === "billing"
+              ? session
+                ? confirmed && summary?.plan
+                  ? "Thank you. This page keeps the details of your plan; come back to it any time from your account."
+                  : "Your Hosted plan."
+                : "Sign in to see your plan."
             : session
               ? "Manage how you sign in."
               : "One account for Dormouse’s hosted services."}
@@ -190,7 +264,7 @@ export function HostedPage({
                 {enrolling.code ? (
                   noPlan ? (
                     <>
-                      <NoPlanOffer purpose={enrolling.purpose} />
+                      <NoPlanOffer purpose={enrolling.purpose} checkoutOpen={!!summary} />
                       {enrolling.purpose !== "voice" && (
                         <p className={`mt-6 ${MUTED_TEXT_CLASS}`}>
                           <SelfHostLine />
@@ -250,6 +324,42 @@ export function HostedPage({
                       : "Sign in"}
                 </button>
               </section>
+            ) : session && view === "checkout" ? (
+              <section aria-label="Checkout">
+                {!summary ? (
+                  billingUnread
+                ) : summary.plan ? (
+                  <>
+                    <p className={HELP_CLASS}>This account already has {PLAN_NAMES[summary.plan]}.</p>
+                    <ManageBilling busy={busy} onManage={manageBilling} />
+                  </>
+                ) : (
+                  // A new founding step asks for agreement again, both boxes unticked.
+                  <Checkout key={summary.founding?.cohort ?? "closed"} billing={summary} plan={checkoutPlan} busy={busy} onPurchase={purchase} />
+                )}
+                {backToAccount}
+              </section>
+            ) : session && view === "billing" ? (
+              <section aria-label="Billing">
+                {summary?.withdrawn && <WithdrawalAcknowledgement withdrawn={summary.withdrawn} />}
+                {!summary ? (
+                  billingUnread
+                ) : summary.plan ? (
+                  <>
+                    <PlanConfirmation billing={{ ...summary, plan: summary.plan }} busy={busy} onManage={manageBilling} />
+                    {summary.withdrawal && (
+                      <WithdrawalFunction offer={summary.withdrawal} plan={summary.plan} busy={busy} onWithdraw={withdraw} />
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <p className={HELP_CLASS}>This account has no plan.</p>
+                    <ChoosePlan />
+                  </>
+                )}
+                {founders}
+                {backToAccount}
+              </section>
             ) : session ? (
               <>
                 <dl>
@@ -263,6 +373,13 @@ export function HostedPage({
                     Use a connected provider to sign in. This account has no
                     email recovery method.
                   </p>
+                )}
+                {summary && (
+                  <section aria-labelledby="plan" className={SECTION_CLASS}>
+                    <PlanSection billing={summary} busy={busy} onManage={manageBilling}>
+                      {founders}
+                    </PlanSection>
+                  </section>
                 )}
                 <section aria-labelledby="methods" className={SECTION_CLASS}>
                   <h2 id="methods" className={HEADING_CLASS}>Sign-in methods</h2>
@@ -459,6 +576,9 @@ export function HostedPage({
                     {busy === "logout" ? "Signing out…" : "Sign out"}
                   </button>
                 </section>
+                <section aria-labelledby="close" className={SECTION_CLASS}>
+                  <CloseAccount billing={billing} fresh={!!fresh} busy={busy} onClose={closeAccount} />
+                </section>
                 {!(voiceShown && computers) && (
                   <p className={FOOTNOTE_CLASS}>
                     {voiceShown
@@ -610,7 +730,7 @@ export function HostedPage({
                     then connect other providers from your account.
                   </p>
                 )}
-                {!enrolling && (
+                {!enrolling && view !== "checkout" && (
                   <p className={FOOTNOTE_CLASS}>
                     Natural Voice and remote control are not available yet.
                   </p>

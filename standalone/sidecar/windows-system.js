@@ -16,4 +16,12 @@ function windowsPowerShellPath(env) {
   return windowsSystemPath(env, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
 }
 
-module.exports = { windowsSystemPath, windowsPowerShellPath };
+/** `cmd.exe` by its absolute path: `ComSpec` when it is a drive path, else
+ *  under `%SystemRoot%`. Mirrors `windowsCommandShell` in
+ *  `dor-lib-common/src/spawn.ts`, which this CommonJS module cannot load. */
+function windowsCommandShell(env) {
+  const comspec = env.ComSpec || env.COMSPEC;
+  return comspec && /^[A-Za-z]:[\\/]/.test(comspec) ? comspec : windowsSystemPath(env, 'System32', 'cmd.exe');
+}
+
+module.exports = { windowsSystemPath, windowsPowerShellPath, windowsCommandShell };

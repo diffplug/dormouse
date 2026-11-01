@@ -27,6 +27,10 @@ const EVENT_TITLES = {
   "voice.fallback-cap": "Accounts that spent the day’s voice",
   "push.sent": "Push notifications delivered",
   "pocket.signin": "Pocket sign-ins",
+  "checkout.started": "Checkouts started",
+  "checkout.completed": "Checkouts completed",
+  "subscription.canceled": "Subscriptions canceled",
+  "subscription.refunded": "Subscriptions refunded",
 } satisfies Record<MetricEvent, string>;
 
 export type AdminMetricsState =

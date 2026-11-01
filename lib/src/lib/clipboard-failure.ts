@@ -11,8 +11,9 @@ export interface ClipboardFailure {
 }
 
 /** The trusted input events that can grant, or follow from, a clipboard
- *  write's activation. */
-const TIMELINE_EVENTS = ['keydown', 'pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'] as const;
+ *  write's activation. A touch grants it at `touchend` or its `pointerup`, a
+ *  mouse at its press, so each pointer event names its pointer type. */
+const TIMELINE_EVENTS = ['keydown', 'pointerdown', 'mousedown', 'pointerup', 'touchend', 'mouseup', 'click'] as const;
 const TIMELINE_LENGTH = 12;
 
 /** The latest trusted input events, oldest first, each with whether the page
@@ -25,9 +26,10 @@ if (typeof window !== 'undefined') {
 
 /** Add one input event to the timeline; exported because tests cannot
  *  dispatch a trusted event. */
-export function recordInput(event: Pick<Event, 'type' | 'isTrusted' | 'target'>): void {
+export function recordInput(event: Pick<Event, 'type' | 'isTrusted' | 'target'> & { pointerType?: string }): void {
   if (!event.isTrusted) return;
-  timeline.push({ type: event.type, at: performance.now(), target: describeElement(event.target), active: navigator.userActivation?.isActive });
+  const type = event.pointerType ? `${event.type}:${event.pointerType}` : event.type;
+  timeline.push({ type, at: performance.now(), target: describeElement(event.target), active: navigator.userActivation?.isActive });
   if (timeline.length > TIMELINE_LENGTH) timeline.shift();
 }
 

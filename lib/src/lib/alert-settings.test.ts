@@ -50,14 +50,12 @@ describe('normalizeAlertSettings', () => {
     expect(DEFAULT_ALERT_SETTINGS.inactivityTimeoutMs).toBe(cfg.alert.inactivityTimeout);
   });
 
-  it('ships animation deferral on', () => {
-    expect(normalizeAlertSettings({}).deferAlertsUntilQuiet).toBe(true);
-  });
-
   it('fills in missing keys and drops unknown ones', () => {
-    const result = normalizeAlertSettings({ speakEnabled: true, bogus: 'x' });
+    // A retired key in an older saved blob goes the same way.
+    const result = normalizeAlertSettings({ speakEnabled: true, bogus: 'x', deferAlertsUntilQuiet: true });
     expect(result).toEqual({ ...DEFAULT_ALERT_SETTINGS, speakEnabled: true });
     expect(result).not.toHaveProperty('bogus');
+    expect(result).not.toHaveProperty('deferAlertsUntilQuiet');
   });
 
   it.each([
@@ -80,19 +78,16 @@ describe('normalizeAlertSettings', () => {
   it('rejects non-boolean flags', () => {
     expect(normalizeAlertSettings({ speakEnabled: 'yes' }).speakEnabled).toBe(false);
     expect(normalizeAlertSettings({ speakEnabled: 1 }).speakEnabled).toBe(false);
-    // Falsy non-booleans must not switch the on-by-default flag off either.
-    expect(normalizeAlertSettings({ deferAlertsUntilQuiet: 0 }).deferAlertsUntilQuiet).toBe(true);
   });
 });
 
 describe('updateAlertSettings', () => {
   it('merges a patch, persists it, and pushes it to the host', () => {
-    updateAlertSettings({ speakEnabled: true, deferAlertsUntilQuiet: true });
+    updateAlertSettings({ speakEnabled: true });
 
     expect(getAlertSettings()).toEqual({
       ...DEFAULT_ALERT_SETTINGS,
       speakEnabled: true,
-      deferAlertsUntilQuiet: true,
     });
     expect(JSON.parse(store.get(STORAGE_KEY)!)).toEqual(getAlertSettings());
     expect(alertPublishSettings).toHaveBeenCalledWith(getAlertSettings(), { seed: false });

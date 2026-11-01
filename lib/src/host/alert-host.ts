@@ -73,7 +73,7 @@ const isId = (value: unknown): value is string => typeof value === 'string' && v
 export function createAlertHost(options: AlertHostOptions): AlertHost {
   const manager = new AlertManager();
   const watched = new WatchedCommandHost(manager);
-  const settings = new AlertSettingsHost(manager);
+  const settings = new AlertSettingsHost();
   const speakers = new Set<(speak: AlertSpeak) => void>();
   const delivery = createAlertDeliveryScheduler({
     manager,

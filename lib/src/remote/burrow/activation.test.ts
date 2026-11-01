@@ -29,7 +29,7 @@ vi.mock('../../lib/push-devices', () => ({
 }));
 
 let burrowLink: BurrowLink | undefined;
-// A burrow with `burrow` has a Burrow service behind it; without one (the
+// A platform with `burrow` has a Burrow service behind it; without one (the
 // website) there is no Burrow anywhere.
 vi.mock('../../lib/platform', () => ({
   getPlatform: () => ({ burrow: burrowLink }),

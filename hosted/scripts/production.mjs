@@ -161,9 +161,11 @@ export function productionSmoke(configs, sha, options = {}) {
     ...options,
   });
 }
+/** Each pgstencil package Hosted installs, by an entrypoint beside its `dist/provenance.json`. */
+const PGSTENCIL_PACKAGES = ["pgstencil", "@pgstencil/auth/better-auth", "@pgstencil/stripe"];
 export async function verifyPackages() {
   const commits = [];
-  for (const name of ["pgstencil", "@pgstencil/auth/better-auth"]) {
+  for (const name of PGSTENCIL_PACKAGES) {
     // Resolve the installed entrypoint, then read the provenance beside it.
     const entry = import.meta.resolve(name);
     const provenance = JSON.parse(
@@ -181,9 +183,8 @@ export async function verifyPackages() {
     );
     commits.push(provenance.commit);
   }
-  assert.equal(
-    commits[0],
-    commits[1],
+  assert.ok(
+    commits.every((commit) => commit === commits[0]),
     "Production requires accepted, clean pgstencil provenance",
   );
 }

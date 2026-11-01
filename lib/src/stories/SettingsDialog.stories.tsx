@@ -108,20 +108,6 @@ export const WithRules: Story = {
   },
 };
 
-/** The escape hatch: deferral off, so terminal notifications ring during animation. */
-export const DeferralDisabled: Story = {
-  parameters: {
-    primedWatchedCommands: ['claude', 'codex'],
-    primedAlertSettings: { deferAlertsUntilQuiet: false },
-  },
-  play: async ({ canvasElement }) => {
-    await showWatcher({ canvasElement });
-    await dialog(canvasElement).findByRole('switch', {
-      name: 'Defer alerts until animation stops off',
-    });
-  },
-};
-
 /** Fan-out: several phones have turned push on, so all of them are named. */
 export const PushManyDevices: Story = {
   play: selectTopic('Notifications'),
@@ -457,7 +443,7 @@ export const WithRemoteControl: Story = {
   play: async ({ canvasElement }) => {
     await selectTopic('Network')({ canvasElement });
     const body = dialog(canvasElement);
-    await body.findByText('1 paired phone.');
+    await body.findByText('Paired phones');
     await expect(body.getByRole('radio', { name: /^Anywhere, through / })).toHaveAttribute('aria-checked', 'true');
   },
 };
@@ -477,7 +463,7 @@ export const SearchNetwork: Story = {
     // Updates is its own group: a search for it leaves the rest of the topic out.
     fireEvent.change(body.getByRole('searchbox'), { target: { value: 'never updates itself' } });
     await waitFor(() => expect(body.getByText(/This build never updates itself/)).toBeVisible());
-    await expect(body.getByText('1 paired phone.')).not.toBeVisible();
+    await expect(body.getByText('Paired phones')).not.toBeVisible();
   },
 };
 
@@ -537,7 +523,7 @@ export const SearchAcrossTopics: Story = {
   ...WithRules,
   play: async ({ canvasElement }) => {
     const body = dialog(canvasElement);
-    fireEvent.change(body.getByRole('searchbox'), { target: { value: 'terminal' } });
+    fireEvent.change(body.getByRole('searchbox'), { target: { value: 'push' } });
     await expect(body.getByRole('region', { name: 'Notifications' })).toBeVisible();
     await expect(body.queryByRole('button', { name: /^Theme:/ })).not.toBeInTheDocument();
   },

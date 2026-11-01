@@ -223,6 +223,51 @@ export interface AppRestartResponse {
   relaunch: boolean;
 }
 
+/** One paired phone, as `dor remote list` shows it (`docs/specs/dor-cli.md` →
+ *  "dor remote"). Times are epoch ms. */
+export interface RemoteDevice {
+  /** The name to revoke it by; authorizes nothing. */
+  id: string;
+  label: string;
+  pairedAt: number;
+  lastSeenAt: number | null;
+  connected: boolean;
+}
+
+export interface RemoteDevicesResponse {
+  devices: RemoteDevice[];
+}
+
+export interface RemoteRevokeRequest {
+  id: string;
+}
+
+/** How many access records the revocation retired, and the label of each phone it cut off. */
+export interface RemoteRevokeResponse {
+  revoked: number;
+  labels: string[];
+}
+
+/** One access-log entry. `event` is a string, not the Burrow's closed set, so
+ *  an event a newer host adds still prints. */
+export interface RemoteLogEntry {
+  at: number;
+  event: string;
+  device: string;
+  deviceId?: string;
+  path?: string;
+  presence?: string;
+  durationMs?: number;
+  reason?: string;
+  surface?: string;
+  by?: string;
+}
+
+/** The whole access log, oldest first. */
+export interface RemoteLogResponse {
+  entries: RemoteLogEntry[];
+}
+
 /** What `dor reopen` brought back: a Surface, a Workspace, or a window. */
 export type ReopenResponse = { status: 'reopened' } & (
   | { kind: 'surface'; surfaceId: string }
@@ -620,6 +665,9 @@ export interface ControlClient {
   moveWorkspace(request: MoveWorkspaceRequest): Promise<WorkspaceMutationResponse>;
   restartApp(): Promise<AppRestartResponse>;
   reopenClosed(): Promise<ReopenResponse>;
+  remoteDevices(): Promise<RemoteDevicesResponse>;
+  remoteRevoke(request: RemoteRevokeRequest): Promise<RemoteRevokeResponse>;
+  remoteLog(): Promise<RemoteLogResponse>;
 }
 
 export interface BrowserExecResult {

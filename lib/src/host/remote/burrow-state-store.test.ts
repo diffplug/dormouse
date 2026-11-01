@@ -168,6 +168,21 @@ describe('FileBurrowStateStore', () => {
     warn.mockRestore();
   });
 
+  it('keeps the access log in its own file, dropping what is not an entry', async () => {
+    const entry = { at: 5, event: 'ended', device: 'Unknown device', path: 'direct', durationMs: 3 } as const;
+    await new FileBurrowStateStore(dir).saveAccessLog([entry]);
+    expect(await new FileBurrowStateStore(dir).loadAccessLog()).toEqual([entry]);
+
+    await writeFile(join(dir, 'access-log.json'), JSON.stringify([entry, { at: 'soon', event: 'paired' }]));
+    expect(await new FileBurrowStateStore(dir).loadAccessLog()).toEqual([entry]);
+
+    // A log that cannot be read starts over rather than failing anything.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await writeFile(join(dir, 'access-log.json'), '[{');
+    expect(await new FileBurrowStateStore(dir).loadAccessLog()).toEqual([]);
+    warn.mockRestore();
+  });
+
   it('clearing the enrollment leaves the records alone', async () => {
     const store = new FileBurrowStateStore(dir);
     await store.saveEnrollment(ENROLLMENT);
@@ -179,8 +194,7 @@ describe('FileBurrowStateStore', () => {
     expect(await reopened.loadAcl('burrow-1')).toHaveLength(1);
   });
 
-  // Skipped on Windows for the same reason as the directory test below, and it
-  // has always failed there — CI runs this suite only on ubuntu, so nothing
+  // Skipped on Windows, and it has always failed there — CI runs this suite only on ubuntu, so nothing
   // caught it. A Unix mode is a silent no-op on Windows: `stat().mode` reports
   // a synthesized value that has nothing to do with what the ACL permits, so
   // the assertion tests neither the intent nor the outcome. What actually
@@ -197,9 +211,12 @@ describe('FileBurrowStateStore', () => {
       await store.saveEnrollment(ENROLLMENT);
       // The policy holds no secret, and is kept like its neighbour anyway.
       await store.saveNetworkPolicy({ level: 'nothing', allowed: [], autoUpdate: false });
+      // The access log says who reached this machine, so it is kept as privately.
+      await store.saveAccessLog([{ at: 1, event: 'paired', device: 'Unknown device' }]);
 
       expect((await stat(join(nested, 'burrow.json'))).mode & 0o777).toBe(0o600);
       expect((await stat(join(nested, 'network-policy.json'))).mode & 0o777).toBe(0o600);
+      expect((await stat(join(nested, 'access-log.json'))).mode & 0o777).toBe(0o600);
       expect((await stat(nested)).mode & 0o777).toBe(0o700);
     },
   );
@@ -270,7 +287,7 @@ describe('FileBurrowStateStore', () => {
     const store = new FileBurrowStateStore(dir);
     // Read the (absent) file first, so what fails below is the write: a read
     // that fails for a reason other than ENOENT refuses to save at all, which
-    // is the case above rather than this one.
+    // is the case below rather than this one.
     expect(await store.loadEnrollment()).toBeNull();
     await rm(dir, { recursive: true, force: true });
     const blocker = join(dir);

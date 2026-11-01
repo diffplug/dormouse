@@ -20,8 +20,6 @@ import assert from 'node:assert/strict';
 import {
   MAX_CLIENT_ID_LENGTH,
   MAX_E2E_CIPHERTEXT_LENGTH,
-  fromBase64Url,
-  generateNoiseKeyPair,
   isE2eClientFrame,
   isE2eRelayToBurrowFrame,
   toBase64Url,
@@ -126,7 +124,7 @@ test('a relay that invents a control message poisons the session and nothing els
   }
 });
 
-test('duplicating, reordering, or dropping a transport frame is terminal, not steerable', async () => {
+test('duplicating, reordering, or modifying a transport frame is terminal, not steerable', async () => {
   for (const mode of ['duplicate', 'reorder', 'modify']) {
     const fixture = await hostileFixture();
     const { burrow, client, relay } = fixture;

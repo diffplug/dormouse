@@ -57,6 +57,7 @@ Source of truth: `WSL_CLI_ENV` in `standalone/sidecar/pty-core.js`, `dor/bin/dor
 
 - **`dor agent-browser`, `dor playwright` and both browser hosts spawn the `PATH`-resolved absolute path, never the bare name** — cross-spawn resolves a bare name through `which`, which searches the cwd before `PATH` on Windows (rationale).
 - **Within the `PATH` directories, and only those, the walk must select the file `which` would**, mirroring `getPathInfo` in `which/which.js` — a divergence either runs a different binary or reports a present install as missing. **Never extend the search to the cwd**, which is the one place `which` looks and the rule above exists to exclude.
+- **Must resolve only to an absolute path**: a relative `PATH` entry is skipped, and a relative explicit path (one with a separator) is a missing install.
 - **A bare name the walk cannot resolve is a missing install, reported before the spawn** — including when there is no `PATH` to search at all, since the spawn's own fallback is the bare name.
 
 **`spawnAndCapture` never throws:** a spawn-level failure resolves as `{ ok: false, error }`, including synchronous argv-validation errors.
@@ -179,7 +180,7 @@ Implemented commands call private `surface.*` control methods, **enumerated once
 
 **`dor` forwards command tails as raw argv; the host quotes them** — `dor` cannot know the configured default shell, so tails after `--` travel as `command: string[]` and the host renders **one** command string, used for output, JSON responses, default `ensure` titles, and the launched command alike, picking its style with the same classifier clipboard/drop path escaping uses ([mouse-and-clipboard.md](mouse-and-clipboard.md) §8.6).
 
-**Must quote for every parser a style covers**: `powershell` doubles each character that closes a PowerShell single-quoted string, `'` and U+2018–U+201B; `posix` steps each `'` and `\` outside its single quotes, so fish, classified `posix`, parses it too (rationale).
+**Must quote for every parser a style covers**: `powershell` doubles each character that closes a PowerShell single-quoted string, `'` and U+2018–U+201B, and when an argument holds `"`, `&|<>^`, is empty, or has whitespace and a trailing `\`, pins `$PSNativeCommandArgumentPassing = 'Legacy'` for the command and passes such arguments MSVCRT-quoted, since the webview cannot tell 5.1's binding from pwsh 7.3+'s (rationale); `posix` steps each `'` and `\` outside its single quotes, so fish, classified `posix`, parses it too; `cmd` passes cmd's parser, then the program's MSVCRT argv split, caret-escaping every quote and operator of an argument holding `"` or `%` (rationale); in both styles a batch target's `%*` re-parse still breaks an argument holding `"`; a PowerShell command, not a program, receives each MSVCRT-quoted argument with its MSVCRT quotes; and a `%NAME%` naming a set variable in a cmd program path expands.
 
 **Must keep the Windows-portable form literal in cmd, Windows PowerShell, and pwsh alike**: an argument is bare only when every character is Windows-safe, else double-quoted, and has no form when it carries `"`, U+201C–U+201E, a backtick, `%`, `!`, or a `$` not before `\`; a program needing quotes has none. **Must refuse empty arguments, quoted arguments ending in a backslash, and arguments containing `&`, `|`, `<`, `>`, or `^` without an ASCII space**, including when the destination is a native command or batch shim (rationale).
 
@@ -243,6 +244,16 @@ Source of truth: `dor/src/commands/app.ts`, `handleAppControl` in `lib/src/compo
 - **A Dormouse older than the verb answers `unsupported Dormouse control method 'window.reopen'`**, which the CLI names as a host that predates it.
 
 Source of truth: `dor/src/commands/reopen.ts`, `handleReopenControl` in `lib/src/components/wall/reopen.ts`.
+
+## dor remote
+
+**`dor remote` verbs act on this machine's Burrow, so the webview's control router answers them first** ([Handle Model](#handle-model)) and relays them over the platform's Burrow link. They list paired phones, revoke one, and read the access log — never pair, restore, or widen (`docs/specs/remote-security-model.md` -> "Revocation"); the log is the Burrow's (`docs/specs/remote-security-model.md` -> "Access log").
+
+- **Must revoke as requester `dor`**, by the id `list` prints.
+- **A host with no Burrow link refuses** — the website playground.
+- **A Dormouse older than the verbs answers `unsupportedControlMethodMessage`**, which the CLI names as a host that predates them.
+
+Source of truth: `dor/src/commands/remote.ts`, `handleRemoteControl` in `lib/src/components/wall/remote-control.ts`.
 
 ## Browser Open Target Resolution
 

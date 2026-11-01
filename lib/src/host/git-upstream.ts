@@ -34,7 +34,7 @@ async function trackedRemote(dir: string, gitDir: string): Promise<string | null
  * `origin` with a pull refspec still resolves to `origin`.
  */
 export async function resolveUpstreamUrl(dir: string): Promise<string | null> {
-  const repository = await localGitRepository(dir);
+  const repository = await localGitRepository(dir, { index: false });
   if (!repository) return null;
   const remote = (await trackedRemote(dir, repository.gitDir)) ?? 'origin';
   const url = await git(dir, ['remote', 'get-url', remote]);

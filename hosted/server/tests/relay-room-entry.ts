@@ -13,6 +13,23 @@ let handled = 0;
 let skewMs = 0;
 /** Whether a row read stalls, as a slow database would. */
 let rowsStalled = false;
+/** Ends every stalled read's wait, once stalling stops. */
+const stalls = new Set<() => void>();
+/**
+ * While stalled, wait past the 30 s the runtime gives a `blockConcurrencyWhile`
+ * callback, or until stalling stops; a pending timer keeps workerd from
+ * cancelling it as a hung request.
+ */
+async function stall() {
+  if (!rowsStalled) return;
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, 60_000);
+    stalls.add(() => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+}
 /** What each upgrade handed the object: its header names and search parameters. */
 const upgrades: { headers: string[]; params: string[] }[] = [];
 
@@ -75,21 +92,25 @@ export class RelayRoom extends ProductionRoom {
     await this.alarm();
   }
 
-  /** Stall every row read from now, or stop stalling new ones. */
+  /** Stall every row read from now, or stop, releasing the stalled ones. */
   async stallRows(on: boolean) {
     rowsStalled = on;
+    if (on) return;
+    for (const release of stalls) release();
+    stalls.clear();
   }
 }
 
-/**
- * The production `RelayRows`, whose read, while stalled, waits past the 30 s
- * the runtime gives a `blockConcurrencyWhile` callback; a pending timer keeps
- * workerd from cancelling it as a hung request.
- */
+/** The production `RelayRows`, whose read stalls while `stallRows` says so. */
 export class RelayRows extends ProductionRows {
   override async burrows(burrowIds: string[]) {
-    if (rowsStalled) await new Promise((resolve) => setTimeout(resolve, 60_000));
+    await stall();
     return super.burrows(burrowIds);
+  }
+
+  override async sessions(tokenHashes: string[]) {
+    await stall();
+    return super.sessions(tokenHashes);
   }
 }
 
@@ -103,7 +124,9 @@ type TestEnv = { RELAY_ROOM: DurableObjectNamespace<Record<string, (...args: unk
  * inside workerd so no stub outlives the request. `forge` instead hands the
  * object a Burrow upgrade naming the account and the Burrow in the body, as
  * the Worker would after resolving a token, and answers its status; a socket
- * it opens is closed at once.
+ * it opens is closed at once. `forgeClient` hands it a Client upgrade naming
+ * the account, the session's token hash, and its expiry, and answers its
+ * status and, for a socket the object closed straight away, the close code.
  */
 export default {
   async fetch(request: Request, env: TestEnv, ctx: ExecutionContext) {
@@ -113,6 +136,23 @@ export default {
     const account = url.searchParams.get("account")!;
     const room = env.RELAY_ROOM.get(env.RELAY_ROOM.idFromName(account));
     const args = (await request.json()) as unknown[];
+    if (method === "forgeClient") {
+      const target = new URL(WS_ROUTES.client, url.origin);
+      target.searchParams.set(RELAY_ROOM_PARAMS.account, String(args[0]));
+      target.searchParams.set(RELAY_ROOM_PARAMS.session, String(args[1]));
+      target.searchParams.set(RELAY_ROOM_PARAMS.expiresAt, String(args[2]));
+      const response = await room.fetch(new Request(target, { headers: { upgrade: "websocket" } }));
+      const socket = (response as { webSocket?: WorkerWebSocket | null }).webSocket;
+      if (!socket) return Response.json({ status: response.status, closed: null });
+      socket.accept();
+      // A refused socket arrives closed; an accepted one stays open until closed here.
+      const closed = await new Promise<number | null>((resolve) => {
+        socket.addEventListener("close", (event) => resolve(event.code));
+        setTimeout(() => resolve(null), 300);
+      });
+      if (closed === null) socket.close(1000);
+      return Response.json({ status: response.status, closed });
+    }
     if (method === "forge") {
       const target = new URL(WS_ROUTES.burrow, url.origin);
       target.searchParams.set(RELAY_ROOM_PARAMS.account, String(args[0]));

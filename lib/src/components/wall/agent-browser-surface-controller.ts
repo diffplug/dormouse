@@ -250,7 +250,7 @@ export class AgentBrowserSurfaceController {
   private get hosted(): boolean {
     return hostSupportsBrowser(this.provider);
   }
-  /** Gates the render modes offered; see `ensureStarted`. */
+  /** Gates the render modes offered; see `renderModes`. */
   private readonly isTool: boolean;
   /** What `setRenderMode` accepts, fixed on first use with host capabilities.
    *  Tools offer iframe and the declarable screencast modes of either provider,
@@ -1266,17 +1266,6 @@ export class AgentBrowserSurfaceController {
     this.writeParams({ browserViewport: setting });
   }
 
-  /** Query the active page, keeping requested settings distinct from what the browser reports. */
-  async measureViewport(): Promise<{ width: number; height: number; dpr: number } | undefined> {
-    const browser = this.driver();
-    if (!browser) return undefined;
-    const result = await browser.measure();
-    if (!result.ok) throw new Error(result.error ?? 'Could not measure browser viewport');
-    return result.viewport;
-  }
-
-  getViewportSetting(): BrowserViewportSetting { return this.browserViewport; }
-
   getMeasuredPaneSize(): { width: number; height: number } | undefined {
     const size = this.paneSize ?? this.lastPaneSize;
     return size?.w && size.h ? { width: size.w, height: size.h } : undefined;
@@ -1348,8 +1337,8 @@ export class AgentBrowserSurfaceController {
 
   // --- canonical URL tracking ---
 
-  private rememberRestorableUrl(url: string | null | undefined): boolean {
-    if (!isBrowsableUrl(url)) return false;
+  private rememberRestorableUrl(url: string | null | undefined): void {
+    if (!isBrowsableUrl(url)) return;
     this.latestRestorableUrl = url;
     // Track the active tab faithfully so params.url is always the page the user
     // is on. Two guards: freeze while a relaunch is in flight (the active tab is
@@ -1359,7 +1348,6 @@ export class AgentBrowserSurfaceController {
       this.paramsUrl = url;
       this.writeParams({ url });
     }
-    return true;
   }
 
   private rememberActiveTabUrl(next: StreamTab[]): void {
@@ -1512,8 +1500,7 @@ export class AgentBrowserSurfaceController {
     }
     this.setSyncEngaged(false);
     this.setBrowserViewport({ mode: 'fixed', ...viewport });
-    if (this.driver()) this.issueFixedViewport(viewport);
-    else this.pendingIntent.viewport = viewport;
+    this.pendingIntent.viewport = viewport;
   }
 
   private issueFixedViewport({ width, height, dpr }: FixedViewport): void {

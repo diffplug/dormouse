@@ -24,6 +24,7 @@ USAGE
   dor list [--all] [--command text] [--cwd path] [--json] [--kind terminal|browser|tool] [--port number] [--ports] [--view paned|zoomed|minimized] [--workspace ref] [--workspaces] [--window label]
   dor workspace new|rename|pin|unpin|close|switch|move [args...] [flags...]
   dor app restart [--json]
+  dor remote list|revoke|log [args...] [flags...]
   dor --help
 
 Dormouse bundles the dor CLI into every terminal it launches.
@@ -51,5 +52,6 @@ COMMANDS
   list           List Dormouse Surfaces.
   workspace      Create, rename, pin, close, switch, or move Workspaces.
   app            Restart Dormouse Standalone, resuming supported agent sessions.
+  remote         List or revoke paired phones, or read the remote access log.
 
 ```

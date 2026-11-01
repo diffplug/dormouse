@@ -1,0 +1,5 @@
+exitCode: 1
+stdout:
+
+stderr:
+Error: --limit applies only to dor remote log

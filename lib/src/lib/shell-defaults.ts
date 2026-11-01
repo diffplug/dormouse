@@ -1,7 +1,8 @@
 // Shared "currently selected" shell, used when spawning without an explicit
 // choice (e.g. a keyboard-driven split). Written by `shell-store.ts` — seeded
 // before standalone Wall mount, then again on every Settings-dialog Shell-row
-// selection — and by the VSCode extension pushing dormouse:selectedShell.
+// selection — and by the VSCode adapter, seeded at boot from the injected
+// `__DORMOUSE_SELECTED_SHELL__` and then on each dormouse:selectedShell push.
 //
 // Deliberately dependency-free (no DOM, no localStorage), so it is also the
 // home of the `ShellEntry` shape: `platform/types.ts` is consumed from Node via

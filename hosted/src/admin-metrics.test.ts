@@ -10,11 +10,14 @@ describe("summarize", () => {
       { day: "2026-03-01", event: "voice.speak" as const, label: "ok", count: 2 },
       { day: "2026-03-01", event: "voice.speak" as const, label: "error", count: 1 },
       { day: "2026-03-01", event: "push.sent" as const, label: "", count: 9 },
+      { day: "2026-03-01", event: "checkout.started" as const, label: "founding:tutorial", count: 2 },
     ],
     totals: [
       { event: "voice.speak" as const, label: "ok", count: 10 },
       { event: "voice.speak" as const, label: "error", count: 1 },
       { event: "push.sent" as const, label: "", count: 9 },
+      { event: "checkout.started" as const, label: "founding:tutorial", count: 2 },
+      { event: "checkout.started" as const, label: "yearly:none", count: 1 },
     ],
   };
 
@@ -49,8 +52,23 @@ describe("summarize", () => {
       "voice.fallback-cap",
       "push.sent",
       "pocket.signin",
+      "checkout.started",
+      "checkout.completed",
+      "subscription.canceled",
+      "subscription.refunded",
     ]);
     expect(summaries.find((summary) => summary.event === "push.sent")!.labels).toEqual([]);
     expect(summaries.find((summary) => summary.event === "pocket.signin")!.total).toBe(0);
+  });
+
+  it("lists a long label list's counted labels alone, and a short list's every label", () => {
+    const summaries = summarize(body);
+    expect(summaries.find((summary) => summary.event === "checkout.started")!.labels).toEqual([
+      { label: "yearly:none", total: 1, window: 0 },
+      { label: "founding:tutorial", total: 2, window: 2 },
+    ]);
+    expect(summaries.find((summary) => summary.event === "subscription.canceled")!.labels).toEqual(
+      ["monthly", "yearly", "founding"].map((label) => ({ label, total: 0, window: 0 })),
+    );
   });
 });

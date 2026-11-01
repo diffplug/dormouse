@@ -399,8 +399,8 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
   // Resolve the binary to an absolute path once: it proves the install present
   // (below), is what we spawn, and travels to the host as `binaryPath` (a GUI
   // host may not share this terminal's PATH). undefined means "not found on
-  // PATH" — or, for an explicit path, simply "returned verbatim", which
-  // browserBinaryIsMissing re-checks on disk.
+  // PATH", or a relative explicit path; an absolute one comes back verbatim,
+  // which browserBinaryIsMissing re-checks on disk.
   const defaultBinaryPath = resolveBinaryPath(defaultBinary, env);
   const client = requireControlClient(options);
   const callerCwd = callerWorkingDirectory(undefined, options);

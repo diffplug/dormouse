@@ -11,7 +11,7 @@ Sends text or key input to a target terminal surface. Special keys must be sent 
 
 Exactly one input mode is required: --text/--key, --stdin, or --sequence. --text and --key may be combined only in that order; text is sent first, then the key. Duplicate input flags are rejected. Use --sequence for arbitrary ordering or multiple text/key events.
 
-Text input interprets backslash escapes for \n, \r, \t, and \\ unless --raw is set.
+--text interprets backslash escapes for \n, \r, \t, and \\ unless --raw is set. Standard input and --sequence text are sent exactly as given: piped bytes are already literal, and JSON strings carry their own escapes.
 
 Input arrives at typing pace: text in short bursts, and a key only after the text before it has settled, so interactive programs read it as typed. "sent" means the host accepted the input; the program may still be reading it.
 
@@ -36,10 +36,10 @@ Examples:
 FLAGS
      [--json]       Print JSON output.
      [--key]        Send a named key or chord.
-     [--raw]        Do not interpret backslash escapes in text input.
+     [--raw]        Do not interpret backslash escapes in --text.
      [--sequence]   Send an ordered JSON sequence of text and key events.
      [--stdin]      Read text from standard input and send it as text.
-     [--text]       Send literal text.
+     [--text]       Send text, decoding \n \r \t \\ unless --raw.
      [--workspace]  Workspace to act in, instead of the caller's.
   -h  --help        Print help information and exit
       --            All subsequent inputs should be interpreted as arguments

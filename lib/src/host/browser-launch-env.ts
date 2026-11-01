@@ -1,8 +1,7 @@
 /** Host-only fresh-shell environment; never crosses the webview boundary. */
-import path from 'node:path';
 import { userInfo } from 'node:os';
 import { randomBytes } from 'node:crypto';
-import { isDirectory, spawnAndCapture } from 'dor-lib-common';
+import { isDirectory, spawnAndCapture, windowsCommandShell } from 'dor-lib-common';
 import { buildShellCommandForKind, shellCommandKind } from 'dor/commands/shell-quote';
 
 export interface BrowserShellRuntime {
@@ -17,7 +16,7 @@ export interface BrowserShellRuntime {
 export function browserShellInvocation(runtime: BrowserShellRuntime, argv: string[], env: NodeJS.ProcessEnv, platform = process.platform): { shell: string; args: string[] } {
   const wsl = platform === 'win32' && /(^|[\\/])wsl(?:\.exe)?$/i.test(runtime.shell ?? '');
   const shell = (!wsl && runtime.shell) || (platform === 'win32'
-    ? env.ComSpec || env.COMSPEC || path.win32.join(env.SystemRoot || env.SYSTEMROOT || 'C:\\Windows', 'System32', 'cmd.exe')
+    ? windowsCommandShell(env)
     : env.SHELL || userInfo().shell || '/bin/sh');
   const selected = wsl ? [] : [...(runtime.args ?? [])];
   const kind = shellCommandKind(shell, platform);

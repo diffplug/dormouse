@@ -30,6 +30,10 @@ const recent: MetricRow[] = Array.from({ length: 30 }, (_, i) => 29 - i).flatMap
     ...(back < 6 ? [{ day: day(back), event: "voice.fallback-cap" as const, label: "", count: 1 }] : []),
     { day: day(back), event: "push.sent", label: "", count: grown * 31 + (back % 7 < 2 ? 0 : 40) },
     { day: day(back), event: "pocket.signin", label: "", count: Math.ceil(grown / 2) },
+    ...(back % 2 === 0 ? [{ day: day(back), event: "checkout.started" as const, label: "founding:settings-voice", count: 2 }] : []),
+    ...(back % 5 === 0 ? [{ day: day(back), event: "checkout.started" as const, label: "yearly:none", count: 1 }] : []),
+    ...(back % 2 === 0 ? [{ day: day(back), event: "checkout.completed" as const, label: "founding:settings-voice", count: 1 }] : []),
+    ...(back === 4 ? [{ day: day(back), event: "subscription.refunded" as const, label: "founding", count: 1 }] : []),
   ];
 });
 const totals = Object.values(

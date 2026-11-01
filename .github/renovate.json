@@ -124,15 +124,23 @@
       "separateMajorMinor": false
     },
     {
-      "description": "@types/node must track the pinned Node runtime major and must not expose APIs newer than the runtime we bundle",
+      "description": "The Node runtime pin (root devEngines.runtime, the binary build.rs bundles) and @types/node stay on one major, so the types never expose APIs newer than the runtime. A runtime major alone can never pass: @types/node and the workflows' inline node-version pins stay behind, and its code changes are a migration, not a bump. Move the major by hand, editing this range in the same PR",
       "matchManagers": ["npm"],
-      "matchPackageNames": ["@types/node"],
+      "matchPackageNames": ["node", "@types/node"],
       "allowedVersions": ">=24 <25"
     },
     {
       "matchManagers": ["cargo"],
       "groupName": "cargo",
       "groupSlug": "cargo",
+      "separateMajorMinor": false
+    },
+    {
+      "description": "Tauri's CLI fails `tauri build` and `tauri dev` unless each JS binding (@tauri-apps/api, @tauri-apps/plugin-*) shares a major.minor with its crate (tauri, tauri-plugin-*), and CI runs neither, so a split bump merges green and breaks the next release. Group the npm and cargo halves of the Tauri family into one PR; standalone/scripts/tauri-lockstep.test.mjs pins this grouping and the installed pairs. Must stay after the cargo group, which it overrides for the Tauri crates",
+      "matchManagers": ["npm", "cargo"],
+      "matchPackageNames": ["@tauri-apps/**", "tauri", "tauri-*"],
+      "groupName": "tauri",
+      "groupSlug": "tauri",
       "separateMajorMinor": false
     },
     {
@@ -151,10 +159,10 @@
       "minimumReleaseAge": "14 days"
     },
     {
-      "description": "Pin @types/vscode to match engines.vscode (^1.85.0) so the typed API surface never outruns the declared minimum VS Code runtime",
+      "description": "Pin @types/vscode to match engines.vscode (^1.92.0) so the typed API surface never outruns the declared minimum VS Code runtime",
       "matchManagers": ["npm"],
       "matchPackageNames": ["@types/vscode"],
-      "allowedVersions": "1.85.0"
+      "allowedVersions": "1.92.0"
     },
     {
       "description": "tend-generated workflows are replaced byte-for-byte by nightly regeneration; let the generator own every dependency pin so Renovate and tend cannot alternate upgrades and downgrades",

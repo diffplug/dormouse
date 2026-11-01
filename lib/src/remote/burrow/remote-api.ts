@@ -56,6 +56,8 @@ export interface RemoteApiSessionOptions {
   holder: SessionHolder;
   /** Called once, when this session is disposed. */
   onDispose?: () => void;
+  /** An attach succeeded: the access log's `attached` (`access-log.ts`). Never told what the surface shows. */
+  onAttach?: (surfaceId: string) => void;
 }
 
 /** {@link RemoteApiSessionOptions.holder}. */
@@ -72,6 +74,7 @@ export class RemoteApiSession {
   readonly #provider: BurrowSurfaceProvider;
   readonly #holder: SessionHolder;
   readonly #onDispose: (() => void) | null;
+  readonly #onAttach: ((surfaceId: string) => void) | null;
 
   #directorySubId: string | null = null;
   #unsubDirectory: (() => void) | null = null;
@@ -87,6 +90,7 @@ export class RemoteApiSession {
     this.#provider = options.provider;
     this.#holder = options.holder;
     this.#onDispose = options.onDispose ?? null;
+    this.#onAttach = options.onAttach ?? null;
   }
 
   handle(data: unknown): void {
@@ -309,7 +313,9 @@ export class RemoteApiSession {
             generation,
             `surface attach failed: ${errorMessage(error)}`,
           );
+          return;
         }
+        this.#onAttach?.(params.surfaceId);
       },
       (error) => {
         // No handle to release through, and the owner may hold the pane anyway.

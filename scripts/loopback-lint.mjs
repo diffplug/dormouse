@@ -74,10 +74,7 @@
  */
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { PHONE_DIRS, isShippedSource, lineOf, trackedFiles } from './lint-kit.mjs';
-
-const ROOT = fileURLToPath(new URL('..', import.meta.url));
+import { PHONE_DIRS, isShippedSource, lineOf, repoRoot as ROOT, trackedFiles } from './lint-kit.mjs';
 
 /**
  * Files that bind loopback without referencing a guard, each with the reason

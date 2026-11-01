@@ -1,0 +1,32 @@
+exitCode: 0
+stdout:
+{
+  "entries": [
+    {
+      "at": "2026-10-30T14:04:00.000Z",
+      "event": "one-time-denied",
+      "device": "iPhone",
+      "device_id": null,
+      "path": null,
+      "presence": null,
+      "duration_ms": null,
+      "reason": "confirmation code mismatch",
+      "surface": null,
+      "by": null
+    },
+    {
+      "at": "2026-10-30T14:05:00.000Z",
+      "event": "revoked",
+      "device": "Dormouse Pocket (browser)",
+      "device_id": "fedcba9876543210",
+      "path": null,
+      "presence": null,
+      "duration_ms": null,
+      "reason": null,
+      "surface": null,
+      "by": "dor"
+    }
+  ]
+}
+
+stderr:

@@ -6,7 +6,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, realpath, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { cmdShimTarget, envValue, spawnAndCapture, treeKillCommand, SPAWN_TIMEOUT_CODE } from '../dist/index.js';
+import { cmdShimTarget, envValue, spawnAndCapture, treeKillCommand, withCommandShell, SPAWN_TIMEOUT_CODE } from '../dist/index.js';
 
 const node = process.execPath;
 
@@ -241,4 +241,32 @@ test('writes input to stdin, and a child that never reads it still resolves', as
   // Larger than any pipe buffer, so the write fails with EPIPE once the child exits.
   const unread = await spawnAndCapture(node, ['-e', 'process.exit(1)'], { input: 'x'.repeat(8 * 1024 * 1024) });
   assert.deepEqual(unread, { ok: true, exitCode: 1, stdout: '', stderr: '' });
+});
+
+test('Windows starts a .cmd shim through cmd.exe by its absolute path, never the bare name', () => {
+  // What cross-spawn reads as it builds a `.cmd`'s command.
+  const crossSpawnShell = (env) => withCommandShell(() => env.comspec || 'cmd.exe', env, true);
+  for (const comspec of [{}, { ComSpec: 'cmd.exe' }, { COMSPEC: 'tools\\cmd.exe' }, { ComSpec: '\\\\host\\share\\cmd.exe' }]) {
+    const env = { SystemRoot: 'D:\\Win', ...comspec };
+    assert.equal(crossSpawnShell(env), 'D:\\Win\\System32\\cmd.exe', JSON.stringify(comspec));
+    assert.deepEqual(env, { SystemRoot: 'D:\\Win', ...comspec }, 'restored');
+  }
+  assert.equal(crossSpawnShell({ ComSpec: 'E:\\cmd.exe' }), 'E:\\cmd.exe');
+  const posix = {};
+  assert.equal(withCommandShell(() => posix.comspec, posix, false), undefined);
+});
+
+test('spawnAndCapture builds its command with that cmd.exe in place', { skip: process.platform === 'win32' ? 'checked through a faked platform' : false }, async () => {
+  const platform = Object.getOwnPropertyDescriptor(process, 'platform');
+  Object.defineProperty(process, 'platform', { value: 'win32' });
+  let pending;
+  try {
+    // The child inherits the environment it was spawned with.
+    pending = spawnAndCapture(node, ['-e', 'process.stdout.write(process.env.comspec ?? "")']);
+  } finally {
+    Object.defineProperty(process, 'platform', platform);
+  }
+  assert.equal(process.env.comspec, undefined);
+  // No `SystemRoot` off Windows, so the default.
+  assert.equal((await pending).stdout, 'C:\\Windows\\System32\\cmd.exe');
 });

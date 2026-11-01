@@ -228,3 +228,24 @@ test('a launcher outside node_modules is a checkout only when it is that package
   expect(() => resolve(launcher)).toThrow(/playwright CLI installation unavailable/);
   expect(loaded.plantedLoaded).toEqual([]);
 });
+
+// Off Windows a path opening with `//` is still a local one, so a link whose
+// target is spelled as a share leads somewhere real here: an installation the
+// old `existsSync` + `realpathSync` would have followed it to and loaded.
+test.skipIf(process.platform === 'win32')('a hint that links to a share or device path is refused before it is followed', () => {
+  const cli = path.join(root, 'share', 'lib', 'node_modules', '@playwright', 'cli');
+  cliPackage(cli);
+  core(path.join(cli, 'node_modules', 'playwright-core'), true);
+  const real = path.join(root, 'share', 'bin', 'playwright-cli');
+  link('../lib/node_modules/@playwright/cli/playwright-cli.js', real);
+  const hint = path.join(root, 'hint', 'playwright-cli');
+  mkdirSync(path.dirname(hint), { recursive: true });
+  symlinkSync(`/${real}`, hint);
+  expect(() => resolvePlaywrightInstall(hint, {})).toThrow(/playwright CLI installation unavailable/);
+  expect(loaded.plantedLoaded).toEqual([]);
+  // The same installation through a local link is found, so the refusal is the share spelling's.
+  const local = path.join(root, 'local', 'playwright-cli');
+  mkdirSync(path.dirname(local), { recursive: true });
+  symlinkSync(real, local);
+  expect(resolvePlaywrightInstall(local, {}).binary).toBe(local);
+});

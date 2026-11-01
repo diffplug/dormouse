@@ -1,18 +1,21 @@
 // Rules: docs/specs/hosted.md -> "Managed voice" and "Metrics".
 import type { Context, Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { digest } from "@pgstencil/auth/security";
-import { queryDatabase, withClient } from "pgstencil/postgres";
+import { withClient } from "pgstencil/postgres";
 import { isManagedVoiceId, isManagedVoiceToken, parseBearer } from "remote-lib-common";
 import { accountQuery, cookieLogin, type AccountHost } from "./account-gate";
 import { entitledSql } from "./entitlement";
 import { recordMetric } from "./metrics";
+import { VOICE_DAILY_CAP } from "./policy-constants";
 
-export const VOICE_DAILY_CAP = 500;
 /** A token unused this long is refused, as if it never existed. */
 export const VOICE_TOKEN_IDLE_DAYS = 365;
 /** Whether the token aliased `t` is live: used, or minted, within the idle bound. */
 export const LIVE_TOKEN = `coalesce(t."lastUsedAt", t."createdAt") > now() - interval '${VOICE_TOKEN_IDLE_DAYS} days'`;
-/** The idle-token sweep's daily Cron Trigger; the voice Worker's other is the history sweep's. */
+/** Daily counters for a UTC day this many days before today or earlier are deleted. */
+export const VOICE_USAGE_RETENTION_DAYS = 90;
+/** The daily database sweep's Cron Trigger; the voice Worker's other is the history sweep's. */
 export const TOKEN_SWEEP_CRON = "0 4 * * *";
 /** Speak's token lookup, its owner's entitlement joined, before its WHERE. */
 export const TOKEN_OWNER = `SELECT t.id, t."userId", ${entitledSql("u")} AS entitled
@@ -122,7 +125,8 @@ export function voiceBearerRoutes(app: Hono<any>, host: (c: Context) => SpeakHos
     return c.body(null, 204);
   });
 
-  app.post("/api/voice/speak", async (c) => {
+  // Bounded while read, a body without a content-length included.
+  app.post("/api/voice/speak", bodyLimit({ maxSize: MAX_BODY, onError: badBody }), async (c) => {
     const bearer = parseBearer(c.req.header("authorization"));
     if (!isManagedVoiceToken(bearer)) return tokenRequired(c);
     const { databaseUrl, synthesize } = host(c);
@@ -143,11 +147,7 @@ export function voiceBearerRoutes(app: Hono<any>, host: (c: Context) => SpeakHos
 
       let body: Record<string, unknown>;
       try {
-        if (Number(c.req.header("content-length")) > MAX_BODY)
-          throw new Error("Too large");
-        const raw = await c.req.text();
-        if (raw.length > MAX_BODY) throw new Error("Too large");
-        body = JSON.parse(raw) as Record<string, unknown>;
+        body = JSON.parse(await c.req.text()) as Record<string, unknown>;
       } catch {
         return badBody(c);
       }
@@ -204,9 +204,18 @@ export function voiceBearerRoutes(app: Hono<any>, host: (c: Context) => SpeakHos
   });
 }
 
-/** The daily pass: every token no longer live, which speak already refuses. */
-export async function sweepIdleTokens(databaseUrl: string) {
-  await queryDatabase(databaseUrl, `DELETE FROM dormouse_voice_tokens t WHERE NOT (${LIVE_TOKEN})`, []);
+/**
+ * The daily pass: every token no longer live, which speak already refuses, and
+ * every daily counter past retention, which the cap never reads again.
+ */
+export async function sweepVoiceRows(databaseUrl: string) {
+  await withClient(databaseUrl, async (db) => {
+    await db.query(`DELETE FROM dormouse_voice_tokens t WHERE NOT (${LIVE_TOKEN})`);
+    await db.query(
+      `DELETE FROM dormouse_voice_usage WHERE day <= (now() AT TIME ZONE 'UTC')::date - $1::integer`,
+      [VOICE_USAGE_RETENTION_DAYS],
+    );
+  });
 }
 
 /** Deletions per pass. Fits Workers Free's 50 subrequests (hosted.rationale.md). */

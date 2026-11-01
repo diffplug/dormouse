@@ -68,9 +68,12 @@
     }
   ],
   "triggers": {
-    // Empty, never absent: an absent `triggers` leaves a deployed schedule in
-    // place, and the history sweep's moved to the voice Worker.
-    "crons": []
+    // Billing's periodic pass (`resyncBilling`): lapsed subscriptions, failed
+    // withdrawal and closure refunds, open disputes, notices, and price
+    // changes; it reads nothing while billing is closed.
+    "crons": [
+      "*/10 * * * *"
+    ]
   },
   "observability": {
     "enabled": false

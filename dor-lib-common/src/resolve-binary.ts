@@ -4,6 +4,7 @@
  * and the `lib` host; see docs/specs/dor-cli.md → "Spawning External Binaries".
  */
 import { accessSync, constants, existsSync, statSync } from 'node:fs';
+import path from 'node:path';
 
 /** The environment the walk reads: `PATH`, and `PATHEXT` on Windows. */
 export interface BinaryEnv {
@@ -84,18 +85,30 @@ export function binaryCandidateNames(binary: string, env: BinaryEnv, isWindows: 
   return exts.map((ext) => `${binary}${ext}`);
 }
 
+/** Whether `binary` is a path (it names a directory) rather than a bare name. */
+function isExplicitPath(binary: string): boolean {
+  return binary.includes('/') || binary.includes('\\');
+}
+
+/** Whether `candidate` names the same file whatever the caller's cwd is. */
+function isAbsolutePath(candidate: string, isWindows: boolean): boolean {
+  return isWindows ? path.win32.isAbsolute(candidate) : path.posix.isAbsolute(candidate);
+}
+
 /**
  * The absolute path `binary` resolves to on `env.PATH`, or undefined when no
- * `PATH` directory holds it. An explicit path comes back verbatim, unchecked.
+ * `PATH` directory holds it. An absolute explicit path comes back verbatim,
+ * unchecked. Never a relative one: the caller spawns the answer from whatever
+ * cwd it runs in, often the folder the user opened, so a relative explicit path
+ * and every relative `PATH` entry (`.`, `bin`, `node_modules\.bin`) are skipped.
  */
-export function resolveBinaryPath(binary: string, env: BinaryEnv): string | undefined {
-  if (binary.includes('/') || binary.includes('\\')) return binary;
-  const isWindows = process.platform === 'win32';
+export function resolveBinaryPath(binary: string, env: BinaryEnv, isWindows = process.platform === 'win32'): string | undefined {
+  if (isExplicitPath(binary)) return isAbsolutePath(binary, isWindows) ? binary : undefined;
   const pathVar = envValue(env, 'PATH', isWindows);
   if (!pathVar) return undefined;
   const names = binaryCandidateNames(binary, env, isWindows);
   for (const dir of pathVar.split(isWindows ? ';' : ':')) {
-    if (!dir) continue;
+    if (!dir || !isAbsolutePath(dir, isWindows)) continue;
     for (const name of names) {
       const candidate = `${dir}${isWindows ? '\\' : '/'}${name}`;
       if (isExecutableFile(candidate, isWindows)) return candidate;
@@ -110,19 +123,21 @@ export function resolveBinaryPath(binary: string, env: BinaryEnv): string | unde
  * call here rather than at the spawn, because the spawn's own fallback is the
  * bare name and cross-spawn resolves that against the cwd first on Windows.
  */
-export function browserBinaryIsMissing(binary: string, env: BinaryEnv, resolvedPath: string | undefined): boolean {
+export function browserBinaryIsMissing(
+  binary: string, env: BinaryEnv, resolvedPath: string | undefined, isWindows = process.platform === 'win32',
+): boolean {
   // Explicit path (e.g. a DORMOUSE_AGENT_BROWSER_BIN override): resolveBinaryPath
-  // hands such a path back verbatim without touching disk, so check it (and
-  // Windows launcher extensions) directly.
-  if (binary.includes('/') || binary.includes('\\')) {
-    return !existsCandidate(binary, process.platform === 'win32');
+  // hands an absolute one back verbatim without touching disk, so check it (and
+  // Windows launcher extensions) directly. A relative one it refused.
+  if (isExplicitPath(binary)) {
+    return resolvedPath === undefined || !existsCandidate(binary, isWindows);
   }
   // Bare name: resolvedPath is the PATH walk's result. With no PATH to search
   // there is nowhere the binary could legitimately be, and falling through to
   // the spawn would hand cross-spawn a bare name — whose `which` searches the
   // cwd first on Windows, the one thing spawning the resolved path exists to
   // prevent. So an absent PATH is "missing", not "ambiguous".
-  if (!envValue(env, 'PATH', process.platform === 'win32')) return true;
+  if (!envValue(env, 'PATH', isWindows)) return true;
   return resolvedPath === undefined;
 }
 

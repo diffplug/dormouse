@@ -46,6 +46,9 @@ export const OWNER_COLUMNS = `${entitledSql("u")} AS "ownerEntitled"`;
 /** A row selecting {@link OWNER_COLUMNS} beside its `userId`. */
 export type OwnerRow = { userId: string; ownerEntitled: unknown };
 
+/** A live session, by its token's hash, with its owner. */
+export type RelaySessionOwner = Owner & { tokenHash: string };
+
 /** A row carrying {@link OWNER_COLUMNS} as the {@link Owner} it names. */
 export function ownerOf(row: OwnerRow): Owner {
   return { userId: row.userId, entitled: row.ownerEntitled === true };
@@ -64,6 +67,21 @@ export async function sessionByToken(db: Client, token: string): Promise<RelaySe
     [tokenHash],
   );
   return row ? { ...ownerOf(row), tokenHash, expiresAt: row.expiresAt } : null;
+}
+
+/**
+ * Those of the sessions hashed `tokenHashes` still live, each with its owner,
+ * in one query: what a `RelayRoom` rechecks its Client sockets against on its
+ * sweep.
+ */
+export async function sessionsByHash(db: Client, tokenHashes: string[]): Promise<RelaySessionOwner[]> {
+  const { rows } = await db.query<OwnerRow & { tokenHash: string }>(
+    `SELECT s."tokenHash", s."userId", ${OWNER_COLUMNS}
+    FROM dormouse_relay_sessions s JOIN "user" u ON u.id = s."userId"
+    WHERE s."tokenHash" = ANY($1::text[]) AND s."expiresAt" > now()`,
+    [tokenHashes],
+  );
+  return rows.map((row) => ({ ...ownerOf(row), tokenHash: row.tokenHash }));
 }
 
 /** The Burrow `token` names, its owner joined in the same query, or null. */

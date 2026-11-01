@@ -57,7 +57,7 @@ Source of truth: `productSections` / `excludedWorkspacePackages` in `website/scr
 
 - **Its version is pinned exactly in the root `package.json` under `devEngines.runtime.version`**, and the build is the authority.
 - **The supply-chain page reads the same pin**, so the disclosed version provably equals the runtime users receive.
-- **The pin is deliberate and manual** — no automated ecosystem tracks it; workflows that do not bundle the runtime may track the same pinned major.
+- **The pin's major is deliberate and manual** — Renovate proposes patch and minor bumps only within the major `@types/node` shares (`.github/renovate.json`); workflows that do not bundle the runtime may track the same pinned major.
 
 The Windows runtime's PE Subsystem field is patched from console (3) to GUI (2) (`docs/specs/standalone.md -> "Windows node subsystem"`; rationale).
 

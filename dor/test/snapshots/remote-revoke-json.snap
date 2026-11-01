@@ -1,0 +1,12 @@
+exitCode: 0
+stdout:
+{
+  "status": "revoked",
+  "id": "fedcba9876543210",
+  "records": 2,
+  "labels": [
+    "Dormouse Pocket (browser)"
+  ]
+}
+
+stderr:

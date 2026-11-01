@@ -13,8 +13,6 @@ import { cfg } from '../cfg';
 export interface AlertSettings {
   /** ms — how long without typing, pointer, or wheel input before the user counts as away (the renderer's presence window). */
   inactivityTimeoutMs: number;
-  /** Defer non-exit rings while the output detector has confirmed work, until it settles. */
-  deferAlertsUntilQuiet: boolean;
   /** Speak a ring out loud after `speakDelayMs`, unless its pane is the one being looked at. */
   speakEnabled: boolean;
   /** ms after a ring starts before speaking, if it is still ringing. */
@@ -32,7 +30,6 @@ export const MAX_DELAY_MS = 600_000;
 export const DEFAULT_ALERT_SETTINGS: AlertSettings = {
   // cfg.ts stays the single source of the shipped default.
   inactivityTimeoutMs: cfg.alert.inactivityTimeout,
-  deferAlertsUntilQuiet: true,
   speakEnabled: false,
   speakDelayMs: 10_000,
   pushEnabled: false,
@@ -63,7 +60,6 @@ export function normalizeAlertSettings(value: unknown): AlertSettings {
   const raw = (typeof value === 'object' && value !== null ? value : {}) as Partial<Record<keyof AlertSettings, unknown>>;
   return {
     inactivityTimeoutMs: clampDelay(raw.inactivityTimeoutMs, DEFAULT_ALERT_SETTINGS.inactivityTimeoutMs),
-    deferAlertsUntilQuiet: bool(raw.deferAlertsUntilQuiet, DEFAULT_ALERT_SETTINGS.deferAlertsUntilQuiet),
     speakEnabled: bool(raw.speakEnabled, DEFAULT_ALERT_SETTINGS.speakEnabled),
     speakDelayMs: clampDelay(raw.speakDelayMs, DEFAULT_ALERT_SETTINGS.speakDelayMs),
     pushEnabled: bool(raw.pushEnabled, DEFAULT_ALERT_SETTINGS.pushEnabled),
@@ -73,7 +69,6 @@ export function normalizeAlertSettings(value: unknown): AlertSettings {
 
 export function alertSettingsEqual(a: AlertSettings, b: AlertSettings): boolean {
   return a.inactivityTimeoutMs === b.inactivityTimeoutMs
-    && a.deferAlertsUntilQuiet === b.deferAlertsUntilQuiet
     && a.speakEnabled === b.speakEnabled
     && a.speakDelayMs === b.speakDelayMs
     && a.pushEnabled === b.pushEnabled

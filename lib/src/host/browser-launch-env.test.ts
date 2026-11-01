@@ -7,7 +7,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { resolveBinaryPath, spawnAndCapture } from 'dor-lib-common';
 import { browserLaunchEnv, browserShellInvocation } from './browser-launch-env';
 const roots: string[] = [];
-afterEach(async () => { await Promise.all(roots.splice(0).map(p => rm(p, { recursive: true, force: true }))); });
+// Retries: a timed-out shell's tree kill is not awaited, and Windows refuses to
+// remove a directory a dying process still has as its cwd (EBUSY).
+afterEach(async () => { await Promise.all(roots.splice(0).map(p => rm(p, { recursive: true, force: true, maxRetries: 10 }))); });
 describe.skipIf(!existsSync('/bin/zsh'))('fresh browser shell', () => {
   async function fixture(startup: string) {
     const dir = await mkdtemp(path.join(os.tmpdir(), "dor launch ' "));
@@ -50,6 +52,9 @@ describe('configured browser launch shells', () => {
     expect(result.args).not.toContain('Ubuntu');
     expect(result.args.slice(0, 2)).toEqual(['/s', '/c']);
   });
+  it('defaults to cmd.exe by its absolute path, never a bare ComSpec', () => {
+    expect(browserShellInvocation(runtime, argv, { ComSpec: 'cmd.exe', SystemRoot: 'D:\\Win' }, 'win32').shell).toBe('D:\\Win\\System32\\cmd.exe');
+  });
   it('runs Developer Command Prompt initialization before the helper and exits', () => {
     const result = browserShellInvocation({ ...runtime, shell: 'cmd.exe', args: ['/k', 'C:\\Program Files\\VS\\VsDevCmd.bat'] }, argv, {}, 'win32');
     expect(result.args).toEqual(['/s', '/c', '"call "C:\\Program Files\\VS\\VsDevCmd.bat" && "C:\\node.exe" "C:\\dor.js" "__launch-env" "marker""']);
@@ -65,7 +70,8 @@ describe('configured browser launch shells', () => {
   });
 });
 
-// Real shell cold starts on CI runners outlast vitest's 5s default; stay above browserLaunchEnv's own 15s budget.
+// Above browserLaunchEnv's own 15s budget, so its error reports a stalled shell.
+// CI warms Windows PowerShell first (`Warm Windows PowerShell` in .github/workflows/ci.yml).
 describe.skipIf(process.platform !== 'win32')('native Windows browser shell', { timeout: 20_000 }, () => {
   async function fixture() {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'dor launch spaces & '));

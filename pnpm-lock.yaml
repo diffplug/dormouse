@@ -339,8 +339,11 @@ importers:
         specifier: ^2.0.10
         version: 2.1.5(hono@4.13.14)
       '@pgstencil/auth':
-        specifier: ^0.4.1
-        version: 0.4.1(hono@4.13.14)(kysely@0.29.7)(pg@8.23.1)(pgstencil@0.4.1(cheerio@1.2.0)(kysely@0.29.7)(node-pg-migrate@9.0.0(pg@8.23.1))(testcontainers@12.2.1(supports-color@10.2.2))(turndown@7.2.4))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(vitest@5.0.5)
+        specifier: ^0.4.2
+        version: 0.4.2(hono@4.13.14)(kysely@0.29.7)(pg@8.23.1)(pgstencil@0.4.2(cheerio@1.2.0)(kysely@0.29.7)(node-pg-migrate@9.0.0(pg@8.23.1))(testcontainers@12.2.1(supports-color@10.2.2))(turndown@7.2.4))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(vitest@5.0.5)
+      '@pgstencil/stripe':
+        specifier: ^0.4.2
+        version: 0.4.2(kysely@0.29.7)(pgstencil@0.4.2(cheerio@1.2.0)(kysely@0.29.7)(node-pg-migrate@9.0.0(pg@8.23.1))(testcontainers@12.2.1(supports-color@10.2.2))(turndown@7.2.4))(stripe@22.6.2(@types/node@24.19.2))
       '@phosphor-icons/react':
         specifier: ^2.1.10
         version: 2.1.10(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
@@ -354,8 +357,8 @@ importers:
         specifier: ^0.29.5
         version: 0.29.7
       pgstencil:
-        specifier: ^0.4.1
-        version: 0.4.1(cheerio@1.2.0)(kysely@0.29.7)(node-pg-migrate@9.0.0(pg@8.23.1))(testcontainers@12.2.1(supports-color@10.2.2))(turndown@7.2.4)
+        specifier: ^0.4.2
+        version: 0.4.2(cheerio@1.2.0)(kysely@0.29.7)(node-pg-migrate@9.0.0(pg@8.23.1))(testcontainers@12.2.1(supports-color@10.2.2))(turndown@7.2.4)
       react:
         specifier: ^19.2.6
         version: 19.3.1
@@ -365,6 +368,9 @@ importers:
       remote-lib-common:
         specifier: workspace:*
         version: link:../remote-lib-common
+      stripe:
+        specifier: ^22.6.2
+        version: 22.6.2(@types/node@24.19.2)
     devDependencies:
       '@storybook/react':
         specifier: 11.0.0-alpha.6
@@ -427,23 +433,23 @@ importers:
         specifier: ^2.1.10
         version: 2.1.10(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       '@xterm/addon-fit':
-        specifier: 0.12.0-beta.311
-        version: 0.12.0-beta.311(@xterm/xterm@6.1.0-beta.315)
+        specifier: 0.12.0-beta.322
+        version: 0.12.0-beta.322(@xterm/xterm@6.1.0-beta.326)
       '@xterm/addon-image':
-        specifier: 0.10.0-beta.310
-        version: 0.10.0-beta.310(@xterm/xterm@6.1.0-beta.315)
+        specifier: 0.10.0-beta.321
+        version: 0.10.0-beta.321(@xterm/xterm@6.1.0-beta.326)
       '@xterm/addon-serialize':
-        specifier: 0.15.0-beta.310
-        version: 0.15.0-beta.310(@xterm/xterm@6.1.0-beta.315)
+        specifier: 0.15.0-beta.321
+        version: 0.15.0-beta.321(@xterm/xterm@6.1.0-beta.326)
       '@xterm/addon-unicode-graphemes':
-        specifier: 0.5.0-beta.310
-        version: 0.5.0-beta.310(@xterm/xterm@6.1.0-beta.315)
+        specifier: 0.5.0-beta.321
+        version: 0.5.0-beta.321(@xterm/xterm@6.1.0-beta.326)
       '@xterm/addon-webgl':
-        specifier: 0.20.0-beta.309
-        version: 0.20.0-beta.309(@xterm/xterm@6.1.0-beta.315)
+        specifier: 0.20.0-beta.320
+        version: 0.20.0-beta.320(@xterm/xterm@6.1.0-beta.326)
       '@xterm/xterm':
-        specifier: 6.1.0-beta.315
-        version: 6.1.0-beta.315
+        specifier: 6.1.0-beta.326
+        version: 6.1.0-beta.326
       '@zxing/browser':
         specifier: 0.2.1
         version: 0.2.1(@zxing/library@0.23.0)
@@ -616,23 +622,23 @@ importers:
         specifier: ^2.13.1
         version: 2.14.0
       '@xterm/addon-fit':
-        specifier: 0.12.0-beta.311
-        version: 0.12.0-beta.311(@xterm/xterm@6.1.0-beta.315)
+        specifier: 0.12.0-beta.322
+        version: 0.12.0-beta.322(@xterm/xterm@6.1.0-beta.326)
       '@xterm/addon-image':
-        specifier: 0.10.0-beta.310
-        version: 0.10.0-beta.310(@xterm/xterm@6.1.0-beta.315)
+        specifier: 0.10.0-beta.321
+        version: 0.10.0-beta.321(@xterm/xterm@6.1.0-beta.326)
       '@xterm/addon-serialize':
-        specifier: 0.15.0-beta.310
-        version: 0.15.0-beta.310(@xterm/xterm@6.1.0-beta.315)
+        specifier: 0.15.0-beta.321
+        version: 0.15.0-beta.321(@xterm/xterm@6.1.0-beta.326)
       '@xterm/addon-unicode-graphemes':
-        specifier: 0.5.0-beta.310
-        version: 0.5.0-beta.310(@xterm/xterm@6.1.0-beta.315)
+        specifier: 0.5.0-beta.321
+        version: 0.5.0-beta.321(@xterm/xterm@6.1.0-beta.326)
       '@xterm/addon-webgl':
-        specifier: 0.20.0-beta.309
-        version: 0.20.0-beta.309(@xterm/xterm@6.1.0-beta.315)
+        specifier: 0.20.0-beta.320
+        version: 0.20.0-beta.320(@xterm/xterm@6.1.0-beta.326)
       '@xterm/xterm':
-        specifier: 6.1.0-beta.315
-        version: 6.1.0-beta.315
+        specifier: 6.1.0-beta.326
+        version: 6.1.0-beta.326
       dormouse-lib:
         specifier: workspace:*
         version: link:../lib
@@ -2988,13 +2994,21 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@pgstencil/auth@0.4.1':
-    resolution: {integrity: sha512-57R1AeyF6OE6OiJjWt37KFb8LYoVYcWlHKQS1u0mnuSU1BEIptmnZpYb6rfXW5CtbGzXmyxo7u4Q8z9LkP/hDA==}
+  '@pgstencil/auth@0.4.2':
+    resolution: {integrity: sha512-3aklWkS/o7oA5Dx8P+KGLENOxg8FdQLgGA6lZK/Gx4yD7uNMFnBVPGMvwMB+J18ih2SUKi30fyQor9PVXL8rnQ==}
     engines: {node: '>=24'}
     peerDependencies:
       hono: ^4.13.7
       kysely: ^0.29.5
-      pgstencil: ^0.4.1
+      pgstencil: ^0.4.2
+
+  '@pgstencil/stripe@0.4.2':
+    resolution: {integrity: sha512-fVRDbo+LDopW1CPQZK9cl+aWdmcqIFx3cEpI3RCT6LzXxwCzazQuNwN/AK8zWPAF17uyWSwfOu0x4jGGRyTbyA==}
+    engines: {node: '>=24'}
+    peerDependencies:
+      kysely: ^0.29.5
+      pgstencil: ^0.4.2
+      stripe: ^22.6.1
 
   '@phosphor-icons/react@2.1.10':
     resolution: {integrity: sha512-vt8Tvq8GLjheAZZYa+YG/pW7HDbov8El/MANW8pOAz4eGxrwhnbfrQZq0Cp4q8zBEu8NIhHdnr+r8thnfRSNYA==}
@@ -4465,33 +4479,41 @@ packages:
   '@webcontainer/env@1.1.1':
     resolution: {integrity: sha512-6aN99yL695Hi9SuIk1oC88l9o0gmxL1nGWWQ/kNy81HigJ0FoaoTXpytCj6ItzgyCEwA9kF1wixsTuv5cjsgng==}
 
-  '@xterm/addon-fit@0.12.0-beta.311':
-    resolution: {integrity: sha512-M40mAWDoAVKz+0zs5ipmBJ+tNilw8CzUbbGIX05NANmTiw0MS47FYeJ4d2El4zdvFphDJjtVLrxTKXuz2wUM6Q==}
+  '@xterm/addon-fit@0.12.0-beta.322':
+    resolution: {integrity: sha512-2DoS5yooTgUOFsI5w6pwK14sGpW7c+5KklTINTJgDz9iCR4wPzpkdyCbckYLX3JlTWADOsipM/xBFmM5IV49MQ==}
     peerDependencies:
-      '@xterm/xterm': ^6.1.0-beta.315
+      '@xterm/xterm': ^6.1.0-beta.326
 
-  '@xterm/addon-image@0.10.0-beta.310':
-    resolution: {integrity: sha512-8fzgYV7HC9iWlw8ChZgnPmCXeBoYkC3Kyo9C0vyOQWD7Cm/bebKNNWhzNlDt5Qxbv+UBPbgkcO4i3dTYnggkRw==}
+  '@xterm/addon-image@0.10.0-beta.321':
+    resolution: {integrity: sha512-kc5iMgkXqedAaz3JNnoy96vS+mgvAkgbleaPxVRdZIjJT8WUde2xQdFdeak2LoSxJ+I8c6PiQFXHcZ64RyNRMQ==}
     peerDependencies:
-      '@xterm/xterm': ^6.1.0-beta.315
+      '@xterm/xterm': ^6.1.0-beta.326
 
-  '@xterm/addon-serialize@0.15.0-beta.310':
-    resolution: {integrity: sha512-Kc2+SBXmlTXU8bava1mxFBipRkqUT7hWkwJpO8Bafq0oDq1HkMF4eb6JcYZ6kGHunylUSIUudO3ufGjnOZ2sLQ==}
+  '@xterm/addon-serialize@0.15.0-beta.321':
+    resolution: {integrity: sha512-paXV8viR5yCsZdrC+Q9XiqEX3WGAgfucqReSBcVmiE+2ub9Bocsl/X/qctrjw5F65/YJ/iIDTvAOxzFNFBophQ==}
     peerDependencies:
-      '@xterm/xterm': ^6.1.0-beta.315
+      '@xterm/xterm': ^6.1.0-beta.326
 
-  '@xterm/addon-unicode-graphemes@0.5.0-beta.310':
-    resolution: {integrity: sha512-oCvQV7rKNekf7KcNdVicPhOo47W160QS6tIhXG7VpQ9OKGKTrAnMAxD+fr/nTlbd3h86+zvMqJpfd7NKEm/fYA==}
+  '@xterm/addon-unicode-graphemes@0.5.0-beta.321':
+    resolution: {integrity: sha512-yl6hX1x0HfdBM90mBad6SKTGxFO7uWQRVwPhUI4gR0XNiqQ0LxBhn7kK6cRWxRd6bMUoAO2VHCiLM+oHiGR5Vg==}
     peerDependencies:
-      '@xterm/xterm': ^6.1.0-beta.315
+      '@xterm/xterm': ^6.1.0-beta.326
 
   '@xterm/addon-webgl@0.20.0-beta.309':
     resolution: {integrity: sha512-xr69GVLQPmYHLrPzGOl+oapEIDhaYbLCZALL+0qcEI71UW/EmmawweI6RloQsVxIKbMrujH9Xb5KOAqP7BTFSQ==}
     peerDependencies:
       '@xterm/xterm': ^6.1.0-beta.315
 
+  '@xterm/addon-webgl@0.20.0-beta.320':
+    resolution: {integrity: sha512-9NZ8HZi9gj6hj4bpNIkBlgpiXCSOvyXyzF5ay+fLOTJ8pkuJkdFGmf45THnZppYGas0mh7fy9Hh3vsVVoLla7A==}
+    peerDependencies:
+      '@xterm/xterm': ^6.1.0-beta.326
+
   '@xterm/xterm@6.1.0-beta.315':
     resolution: {integrity: sha512-w7MeKxi6vbxE3IOFRiwgugkM6FZonE9gF9KyJ0OiE5HbYZOm38bz+CTGZg3+wqA6porJnHfjzX1KaihInP+iWg==}
+
+  '@xterm/xterm@6.1.0-beta.326':
+    resolution: {integrity: sha512-1nuFj9qe00R3u1NkwCM6gbIxPxQK+uGxUX5bLOJTaYFQECIOcnD/MQpufLzTCYSaKaiUB/Y78lnJ5MjhluJqTA==}
 
   '@zxing/browser@0.2.1':
     resolution: {integrity: sha512-92pVfVDUXbc15xu9vIEmhNyqIEASMEkDF92CwT6T+7sg2EHXJRktH9CQKoQSXe51UtbNsj+Fm09H/JBWHMs/Sw==}
@@ -6725,8 +6747,8 @@ packages:
   pgpass@1.0.5:
     resolution: {integrity: sha512-FdW9r/jQZhSeohs1Z3sI1yxFQNFvMcnmfuj4WBMUTxOrAyLMaTcE1aAMBiTlbMNaXvBCQuVi0R7hd8udDSP7ug==}
 
-  pgstencil@0.4.1:
-    resolution: {integrity: sha512-fQJ1p4VFONFPOC8myjHJiEus0GUpH3uBFvteaoIaO6ko6pHuEP4rJBESq+e8fxV4XUXJuRecVJzpJ2AoKCvTRw==}
+  pgstencil@0.4.2:
+    resolution: {integrity: sha512-/gOTQx6lggXcl3/jBAuD8ixFICbXFFbqvufybRsod5eeN40nlH4fQVaspeo25e5MhNkFEO3fyVxvj2Y+dfIBHQ==}
     engines: {node: '>=24'}
     peerDependencies:
       cheerio: ^1.2.0
@@ -7258,6 +7280,15 @@ packages:
   strip-indent@4.1.1:
     resolution: {integrity: sha512-SlyRoSkdh1dYP0PzclLE7r0M9sgbFKKMFXpFRUMNuKhQSbC6VQIGzq3E0qsfvGJaUFJPGv6Ws1NZ/haTAjfbMA==}
     engines: {node: '>=12'}
+
+  stripe@22.6.2:
+    resolution: {integrity: sha512-PwRE2scocvXqDKPiskMa5vRJEAEkq46W69XyUYmAwrNSLr675lQnfqLwnsndAWizwgihOWw/irLmoFRo3ez7ew==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      '@types/node': '>=18'
+    peerDependenciesMeta:
+      '@types/node':
+        optional: true
 
   structured-source@4.0.0:
     resolution: {integrity: sha512-qGzRFNJDjFieQkl/sVOI2dUjHKRyL9dAJi2gCPGJLbJHBIkyOHxjuocpIEfbLioX+qSJpvbYdT49/YCdMznKxA==}
@@ -9952,14 +9983,14 @@ snapshots:
   '@oxc-resolver/binding-win32-x64-msvc@11.21.2':
     optional: true
 
-  '@pgstencil/auth@0.4.1(hono@4.13.14)(kysely@0.29.7)(pg@8.23.1)(pgstencil@0.4.1(cheerio@1.2.0)(kysely@0.29.7)(node-pg-migrate@9.0.0(pg@8.23.1))(testcontainers@12.2.1(supports-color@10.2.2))(turndown@7.2.4))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(vitest@5.0.5)':
+  '@pgstencil/auth@0.4.2(hono@4.13.14)(kysely@0.29.7)(pg@8.23.1)(pgstencil@0.4.2(cheerio@1.2.0)(kysely@0.29.7)(node-pg-migrate@9.0.0(pg@8.23.1))(testcontainers@12.2.1(supports-color@10.2.2))(turndown@7.2.4))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(vitest@5.0.5)':
     dependencies:
       better-auth: 1.7.12(pg@8.23.1)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(vitest@5.0.5)
       hono: 4.13.14
       jose: 6.2.13
       kysely: 0.29.7
       openid-client: 6.8.8
-      pgstencil: 0.4.1(cheerio@1.2.0)(kysely@0.29.7)(node-pg-migrate@9.0.0(pg@8.23.1))(testcontainers@12.2.1(supports-color@10.2.2))(turndown@7.2.4)
+      pgstencil: 0.4.2(cheerio@1.2.0)(kysely@0.29.7)(node-pg-migrate@9.0.0(pg@8.23.1))(testcontainers@12.2.1(supports-color@10.2.2))(turndown@7.2.4)
     transitivePeerDependencies:
       - '@lynx-js/react'
       - '@opentelemetry/api'
@@ -9980,6 +10011,12 @@ snapshots:
       - svelte
       - vitest
       - vue
+
+  '@pgstencil/stripe@0.4.2(kysely@0.29.7)(pgstencil@0.4.2(cheerio@1.2.0)(kysely@0.29.7)(node-pg-migrate@9.0.0(pg@8.23.1))(testcontainers@12.2.1(supports-color@10.2.2))(turndown@7.2.4))(stripe@22.6.2(@types/node@24.19.2))':
+    dependencies:
+      kysely: 0.29.7
+      pgstencil: 0.4.2(cheerio@1.2.0)(kysely@0.29.7)(node-pg-migrate@9.0.0(pg@8.23.1))(testcontainers@12.2.1(supports-color@10.2.2))(turndown@7.2.4)
+      stripe: 22.6.2(@types/node@24.19.2)
 
   '@phosphor-icons/react@2.1.10(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
     dependencies:
@@ -11313,27 +11350,33 @@ snapshots:
 
   '@webcontainer/env@1.1.1': {}
 
-  '@xterm/addon-fit@0.12.0-beta.311(@xterm/xterm@6.1.0-beta.315)':
+  '@xterm/addon-fit@0.12.0-beta.322(@xterm/xterm@6.1.0-beta.326)':
     dependencies:
-      '@xterm/xterm': 6.1.0-beta.315
+      '@xterm/xterm': 6.1.0-beta.326
 
-  '@xterm/addon-image@0.10.0-beta.310(@xterm/xterm@6.1.0-beta.315)':
+  '@xterm/addon-image@0.10.0-beta.321(@xterm/xterm@6.1.0-beta.326)':
     dependencies:
-      '@xterm/xterm': 6.1.0-beta.315
+      '@xterm/xterm': 6.1.0-beta.326
 
-  '@xterm/addon-serialize@0.15.0-beta.310(@xterm/xterm@6.1.0-beta.315)':
+  '@xterm/addon-serialize@0.15.0-beta.321(@xterm/xterm@6.1.0-beta.326)':
     dependencies:
-      '@xterm/xterm': 6.1.0-beta.315
+      '@xterm/xterm': 6.1.0-beta.326
 
-  '@xterm/addon-unicode-graphemes@0.5.0-beta.310(@xterm/xterm@6.1.0-beta.315)':
+  '@xterm/addon-unicode-graphemes@0.5.0-beta.321(@xterm/xterm@6.1.0-beta.326)':
     dependencies:
-      '@xterm/xterm': 6.1.0-beta.315
+      '@xterm/xterm': 6.1.0-beta.326
 
   '@xterm/addon-webgl@0.20.0-beta.309(@xterm/xterm@6.1.0-beta.315)':
     dependencies:
       '@xterm/xterm': 6.1.0-beta.315
 
+  '@xterm/addon-webgl@0.20.0-beta.320(@xterm/xterm@6.1.0-beta.326)':
+    dependencies:
+      '@xterm/xterm': 6.1.0-beta.326
+
   '@xterm/xterm@6.1.0-beta.315': {}
+
+  '@xterm/xterm@6.1.0-beta.326': {}
 
   '@zxing/browser@0.2.1(@zxing/library@0.23.0)':
     dependencies:
@@ -13743,7 +13786,7 @@ snapshots:
     dependencies:
       split2: 4.2.0
 
-  pgstencil@0.4.1(cheerio@1.2.0)(kysely@0.29.7)(node-pg-migrate@9.0.0(pg@8.23.1))(testcontainers@12.2.1(supports-color@10.2.2))(turndown@7.2.4):
+  pgstencil@0.4.2(cheerio@1.2.0)(kysely@0.29.7)(node-pg-migrate@9.0.0(pg@8.23.1))(testcontainers@12.2.1(supports-color@10.2.2))(turndown@7.2.4):
     dependencies:
       kysely: 0.29.7
       pg: 8.23.1
@@ -14419,6 +14462,10 @@ snapshots:
       min-indent: 1.0.1
 
   strip-indent@4.1.1: {}
+
+  stripe@22.6.2(@types/node@24.19.2):
+    optionalDependencies:
+      '@types/node': 24.19.2
 
   structured-source@4.0.0:
     dependencies:

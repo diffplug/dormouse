@@ -3,6 +3,8 @@ import { HostedPage, type HostedPageProps } from "../HostedPage";
 import { HostedFrame } from "./HostedFrame";
 import { settledFrame } from "./canvas";
 import { providers, type Computer, type Passkey, type Session } from "../api";
+import type { BillingSummary } from "../../server/billing-summary";
+import { TERMS_VERSION } from "../../server/policy-constants";
 
 export const SESSION: Session = {
   user: { id: "account-studio", name: "Alex", email: "alex@example.com" },
@@ -19,6 +21,33 @@ export const PASSKEYS: Passkey[] = [
 ];
 export const ENROLLMENT = { code: "7KQM-X4TD", purpose: "remote" as const };
 export const ACCOUNT = { session: SESSION, computers: COMPUTERS, passkeys: PASSKEYS };
+/** Billing open, no plan held, the first founding cohort on sale. */
+export const NO_PLAN: BillingSummary = {
+  plan: null, price: null, active: false, until: null, renews: false, entitled: false, suspended: false,
+  founding: { cohort: 0, seatsLeft: 63 }, founder: { offered: false, name: null }, consent: null, withdrawal: null, withdrawn: null,
+};
+/** A founding plan bought today, renewing next year. */
+export const FOUNDING: BillingSummary = {
+  ...NO_PLAN, plan: "founding", price: 50, active: true, until: "2027-10-21T12:00:00Z", renews: true, entitled: true,
+  founder: { offered: true, name: null },
+  consent: { termsVersion: TERMS_VERSION, consentedAt: "2026-10-21T12:00:00Z" },
+};
+/** The founding plan, bought in the EEA or UK a week ago: withdrawable online. */
+export const WITHDRAWABLE: BillingSummary = {
+  ...FOUNDING,
+  withdrawal: {
+    subscription: "sub_1QxStudioFounding", startedAt: "2026-10-21T12:00:00Z", until: "2026-11-11T12:00:00Z",
+    email: "alex@example.com",
+  },
+};
+/** Withdrawn from that plan: the acknowledgement the billing page keeps. */
+export const WITHDRAWN: BillingSummary = {
+  ...NO_PLAN,
+  withdrawn: {
+    reference: "4f6c1d2e-8a3b-4c5d-9e0f-1a2b3c4d5e6f", subscription: "sub_1QxStudioFounding", plan: "founding",
+    startedAt: "2026-10-21T12:00:00Z", submittedAt: "2026-10-28T09:30:00Z", acknowledged: true, settled: true,
+  },
+};
 export type HostedStoryArgs = Partial<HostedPageProps> & { phone?: boolean; light?: boolean };
 const idle = async () => {};
 const nothing = () => {};

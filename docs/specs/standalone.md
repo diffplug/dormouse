@@ -449,21 +449,20 @@ Source of truth: `start_ui_watchdog` in `standalone/src-tauri/src/lib.rs`; `Watc
 
 ## Objective-C exceptions
 
-**Must let an Objective-C exception that AppKit raises beneath a tao callback, such as the `sendEvent:` override, unwind to AppKit**, whose event loop reports it and keeps running. Both halves are required (rationale):
-
-- **Must build release with `panic = "unwind"`.**
-- **Must take tao from the `diffplug/tao` fork** through `[patch.crates-io]`, whose Apple callbacks are `extern "C-unwind"`: one fork branch per patched release (`dormouse-0.37` is `tao-v0.37.1` plus that commit), `tao-macros` from the same rev. **Must rebase the commit onto the new release when tauri moves tao**, since an unused `[patch]` only warns; drop the patch once tauri depends on a tao carrying tauri-apps/tao#1354.
+**Must build release with `panic = "unwind"`**, so an Objective-C exception that AppKit raises beneath a tao callback, such as the `sendEvent:` override, unwinds to AppKit, whose event loop reports it and keeps running (rationale).
 
 **Rust panics still abort** (`abort_on_panic`, installed first in `run`). **An exception raised inside the Tauri event handler still aborts** (rationale).
 
-Source of truth: `abort_on_panic` in `standalone/src-tauri/src/panic_policy.rs`; `[patch.crates-io]` in `standalone/src-tauri/Cargo.toml`. Pinned by `standalone/src-tauri/tests/objc_exception_unwinds.rs`.
+Source of truth: `abort_on_panic` in `standalone/src-tauri/src/panic_policy.rs`; `[profile.release]` in `standalone/src-tauri/Cargo.toml`. Pinned by `standalone/src-tauri/tests/objc_exception_unwinds.rs`.
 
 ## Build and development
 
-Source of truth: `standalone/package.json`, `standalone/src-tauri/tauri.conf.json`, and the root `package.json` for `dev:standalone` and `innerdogfood`; `runDev` in `standalone/scripts/dev-standalone.mjs`.
+Source of truth: `standalone/package.json`, `standalone/src-tauri/tauri.conf.json`, and the root `package.json` for `dev:standalone` and `innerdogfood`; `standalone/scripts/tauri.mjs`; `runDev` in `standalone/scripts/dev-standalone.mjs`.
 
+- **Must prepend the wrapper's Node directory to PATH without setting binary overrides.** Runtime requirements: `docs/specs/security-supply-chain.md` → "Bundled runtime".
 - **The sidecar bundle and the webview bake `DORMOUSE_RELAY_ORIGIN`** (`docs/specs/relay.md` → "Relay origin"); the webview CSP has no relay sources (`standalone/scripts/tauri-conf.test.mjs`).
 - **A self-host `tauri build` overlays no updater endpoint and no updater artifacts**, so the binary cannot reach `dormouse.sh` and needs no signing key. Pinned by `standalone/scripts/dev-standalone.test.mjs`.
+- **Must keep each Tauri JS binding (`@tauri-apps/api`, `@tauri-apps/plugin-*`) on its crate's major.minor**: `tauri build` and `tauri dev` reject a mismatch and CI runs neither, so Renovate's `tauri` group moves the npm and cargo halves in one PR. Pinned by `standalone/scripts/tauri-lockstep.test.mjs`.
 - The bundle ships the whole sidecar via the `../sidecar/**/*` resources glob, including node-pty's prebuilds + bundled ConPTY and the shell-integration scripts (`docs/specs/theme.md` -> "OSC color queries on Windows require the bundled ConPTY", `docs/specs/terminal-state.md` -> "Shell-integration injection").
 - **Must start native dev with Vite on an OS-assigned loopback port** (`DORMOUSE_BROWSER_DEV_VITE_PORT` may pin it) **and key the Tauri identifier to the canonical worktree path**, so parallel worktrees and the installed app never share a port or app data.
 - **Never stop another process to free a port**: an occupied pinned port fails, and Windows pre-dev cleanup touches only sidecars executing from this worktree's default debug directory, never a listener by port.

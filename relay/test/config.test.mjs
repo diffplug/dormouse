@@ -168,3 +168,26 @@ test('the VAPID subject falls back to a routable origin, and to nothing on loopb
   // rejects such a JWT and every delivery would fail silently.
   assert.equal(readConfig({}).vapidSubject, null);
 });
+
+test('neither installer file may sit in the state directory, which only writeAtomic writes', () => {
+  for (const name of ['DORMOUSE_RUNTIME_FILE', 'DORMOUSE_ENROLL_TOKEN_FILE']) {
+    const state = { DORMOUSE_STATE_DIR: '/srv/dormouse/state' };
+    for (const inside of [
+      '/srv/dormouse/state',
+      '/srv/dormouse/state/relay.json',
+      '/srv/dormouse/state/run/x.json',
+      '/srv/dormouse/state/..relay.json',
+    ]) {
+      assert.throws(() => readConfig({ ...state, [name]: inside }), /must be outside DORMOUSE_STATE_DIR/, inside);
+    }
+    // A relative state directory resolves against the cwd, as the stores do.
+    assert.throws(
+      () => readConfig({ [name]: `${process.cwd()}/data/relay.json` }),
+      /must be outside DORMOUSE_STATE_DIR/,
+    );
+    // A sibling, even one sharing the directory's name as a prefix, is outside.
+    for (const outside of ['/srv/dormouse/run/relay.json', '/srv/dormouse/state-old/relay.json']) {
+      assert.doesNotThrow(() => readConfig({ ...state, [name]: outside }), outside);
+    }
+  }
+});

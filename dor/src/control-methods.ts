@@ -31,6 +31,10 @@ import type {
   WorkspaceMutationResponse,
   ReadSurfaceRequest,
   ReadSurfaceResponse,
+  RemoteDevicesResponse,
+  RemoteLogResponse,
+  RemoteRevokeRequest,
+  RemoteRevokeResponse,
   ReopenResponse,
   ResolveBrowserRequest,
   ResolveBrowserResponse,
@@ -49,6 +53,7 @@ import type {
 } from './commands/types.js';
 import {
   APP_CONTROL_METHODS,
+  REMOTE_CONTROL_METHODS,
   SURFACE_CONTROL_METHODS,
   TOOL_CONTROL_METHODS,
   WINDOW_CONTROL_METHODS,
@@ -206,5 +211,17 @@ export abstract class MethodControlClient implements ControlClient {
 
   reopenClosed(): Promise<ReopenResponse> {
     return this.request<ReopenResponse>(WINDOW_CONTROL_METHODS.reopen, {});
+  }
+
+  remoteDevices(): Promise<RemoteDevicesResponse> {
+    return this.request<RemoteDevicesResponse>(REMOTE_CONTROL_METHODS.devices, {});
+  }
+
+  remoteRevoke(request: RemoteRevokeRequest): Promise<RemoteRevokeResponse> {
+    return this.request<RemoteRevokeResponse>(REMOTE_CONTROL_METHODS.revoke, request);
+  }
+
+  remoteLog(): Promise<RemoteLogResponse> {
+    return this.request<RemoteLogResponse>(REMOTE_CONTROL_METHODS.log, {});
   }
 }

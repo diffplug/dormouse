@@ -1251,6 +1251,29 @@ describe('Surface moves between Workspaces', () => {
     await act(async () => { settleConfirmation(getWorkspaceUiSnapshot().confirmation!, false); await pending; });
   });
 
+  it('does not let a move whose Tool started serving during its flush replace a newer close question', async () => {
+    const source = await iframeWalls();
+    const handle = getWallHandle(source)!;
+    vi.spyOn(getWallHandle('workspace:3')!, 'needsCloseConfirmation').mockReturnValue(true);
+    // Not an iframe when the move starts; serving one by the time the flush ends.
+    const prepare = handle.prepareSurfaceMove;
+    let calls = 0;
+    vi.spyOn(handle, 'prepareSurfaceMove').mockImplementation(id => ({ ...prepare(id), iframe: ++calls > 1 }));
+    let flushed!: () => void;
+    vi.spyOn(handle, 'flushPersistence').mockReturnValue(new Promise<void>(resolve => { flushed = resolve; }));
+    let pending!: Promise<Awaited<ReturnType<typeof moveSurface>>>;
+    await act(async () => { pending = moveSurface('frame', request({ workspace: 'workspace:2' }), true); });
+    expect(getWorkspaceUiSnapshot().confirmation).toBeNull();
+    await act(async () => { requestWorkspaceClose('workspace:3'); });
+    await act(async () => { await vi.waitFor(() => expect(getWorkspaceUiSnapshot().confirmation?.id).toBe('workspace:3')); });
+    const close = getWorkspaceUiSnapshot().confirmation;
+    await act(async () => { flushed(); await Promise.resolve(); });
+    expect(getWorkspaceUiSnapshot().confirmation).toBe(close);
+    await act(async () => { expect(await pending).toBeNull(); });
+    expect(handle.ownsSurface('frame')).toBe(true);
+    expect(isWorkspaceTransferPending(source)).toBe(false);
+  });
+
   it('lets a second GUI iframe move supersede the first one’s consent and complete', async () => {
     const source = await iframeWalls();
     let first!: Promise<Awaited<ReturnType<typeof moveSurface>>>;

@@ -14,11 +14,12 @@ import { localGitRepository } from 'dor-lib-common';
 import type { GitDirInfo, GitInfoResult } from '../lib/platform/git-types';
 import { settleAllWithin } from '../lib/settle-within';
 import { runGit } from './git-cli';
-import { canonicalLocalDirectory } from './local-directory';
+import { canonicalLocalDirectory, resolveBinaryPath } from './local-directory';
 
 // The sidecar's `pty-core` validates a context directory with the same
-// resolver, and reaches it through this bundle.
-export { canonicalLocalDirectory };
+// resolver, and resolves a requested shell's bare name with `resolveBinaryPath`;
+// it reaches both through this bundle.
+export { canonicalLocalDirectory, resolveBinaryPath };
 
 /** Lookups still running at this deadline (a hung network mount) are left out
  *  of the answer, for the caller to ask again. */
@@ -65,7 +66,7 @@ export async function lookupGitDir(path: string): Promise<GitDirInfo | null> {
   const dir = await canonicalLocalDirectory(path);
   if (!dir) return null;
   const [repository, remote] = await Promise.all([
-    localGitRepository(dir),
+    localGitRepository(dir, { index: false }),
     // `runGit` asks `localGitRepository` itself, so this need not wait.
     runGit(dir, ['config', '--get', 'remote.origin.url']),
   ]);

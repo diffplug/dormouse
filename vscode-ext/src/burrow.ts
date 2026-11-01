@@ -36,6 +36,8 @@ import {
   type BurrowConsoleStatus,
   type BurrowResult,
   type TakeBackResult,
+  type AccessLogResult,
+  type PairedDevicesResult,
 } from '../../lib/src/host/remote/service-protocol';
 import type { BurrowSurfaceProvider } from '../../lib/src/remote/burrow/burrow-surface-provider';
 import type {
@@ -581,6 +583,13 @@ async function idleAnswer(cmd: string): Promise<{ result: unknown } | null> {
     // No service holds any session, so none holds a pane: the strip clears itself.
     case 'takeBack':
       return { result: { ended: false } satisfies TakeBackResult };
+    // No service means no enrollment, so no phone is paired; the access log
+    // outlives both, and only a service writes it.
+    case 'pairedDevices':
+      return { result: { devices: [] } satisfies PairedDevicesResult };
+    case 'accessLog':
+      if (!context) return null;
+      return { result: { entries: await burrowStateStore(context).loadAccessLog() } satisfies AccessLogResult };
     default:
       return null;
   }

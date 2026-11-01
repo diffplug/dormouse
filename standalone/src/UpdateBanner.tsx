@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { BaseboardNotice, noticeLinkClass as linkClass, noticeLinkStyle as linkStyle, type NoticeLink } from './BaseboardNotice';
+import { BaseboardNotice, noticeLinkClass as linkClass, type NoticeLink } from './BaseboardNotice';
 
 export type UpdateBannerState =
   | { status: 'idle' }
@@ -41,11 +41,11 @@ export function UpdateBanner({ state, onDismiss, onApproveUpdate, onRestart, onO
         <>
           Update available
           {' · '}
-          <button onClick={onOpenChangelog} className={linkClass} style={linkStyle}>
+          <button onClick={onOpenChangelog} className={linkClass}>
             Changelog
           </button>
           {' · '}
-          <button onClick={onApproveUpdate} className={linkClass} style={linkStyle}>
+          <button onClick={onApproveUpdate} className={linkClass}>
             Install when I quit
           </button>
         </>

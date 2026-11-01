@@ -1,8 +1,10 @@
 // Rules: docs/specs/hosted.md -> "Managed voice" and "Burrow enrollment";
 // docs/specs/security-hosted.md -> "Origin boundary".
 import type { Context, MiddlewareHandler } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { queryDatabase } from "pgstencil/postgres";
 import { entitled, isAdmin } from "./entitlement";
+import { LOGIN_FRESH_AGE_MS } from "./policy-constants";
 
 /** What one request's account deployment provides to its cookie routes. */
 export interface AccountHost {
@@ -42,6 +44,10 @@ export function ownPageRead(request: Request, origin: string): boolean {
 export const openAuthRead = (path: string) =>
   path === "/api/auth/csrf" || path.startsWith("/api/auth/callback/");
 
+/** A cookie route's body cap: a larger body answers 413. */
+export const smallBody = (maxSize: number) =>
+  bodyLimit({ maxSize, onError: (c) => c.json({ message: "Request too large." }, 413) });
+
 /** The login a cookie route acts for. */
 export interface AccountLogin {
   userId: string;
@@ -50,7 +56,17 @@ export interface AccountLogin {
    * recent login reads it, and it fails closed on a value it cannot read.
    */
   createdAt: unknown;
+  /** The account's verified email, or null for a provider-only account without one. */
+  email: string | null;
 }
+
+/**
+ * Whether `login` began within `LOGIN_FRESH_AGE_MS`, for a route that needs
+ * a recent login. Fails closed: a creation time missing or unreadable is not
+ * recent.
+ */
+export const isRecentLogin = (login: AccountLogin) =>
+  Date.now() - Date.parse(String(login.createdAt)) < LOGIN_FRESH_AGE_MS;
 
 /**
  * The account Worker's cookie routes' gate: a read is {@link ownPageRead},
@@ -109,7 +125,7 @@ function cookieGate(
     );
     if (!response.ok) throw new Error("Login lookup failed");
     const session = (await response.json()) as {
-      user?: { id: string };
+      user?: { id: string; email?: unknown; emailVerified?: unknown };
       session?: { createdAt?: unknown };
     } | null;
     if (!session?.user) return c.json({ message: "Sign in first." }, 401);
@@ -117,6 +133,8 @@ function cookieGate(
     c.set("login", {
       userId: session.user.id,
       createdAt: session.session?.createdAt,
+      email:
+        session.user.emailVerified === true && typeof session.user.email === "string" ? session.user.email : null,
     });
     await next();
   };

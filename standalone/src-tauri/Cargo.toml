@@ -64,7 +64,3 @@ codegen-units = 1
 # Never "abort" (docs/specs/standalone.md -> "Objective-C exceptions").
 panic = "unwind"
 
-[patch.crates-io]
-# docs/specs/standalone.md -> "Objective-C exceptions".
-tao = { git = "https://github.com/diffplug/tao", rev = "12d4695500ff8e3b7cc9a409d6e01245296df6c1" }
-tao-macros = { git = "https://github.com/diffplug/tao", rev = "12d4695500ff8e3b7cc9a409d6e01245296df6c1" }

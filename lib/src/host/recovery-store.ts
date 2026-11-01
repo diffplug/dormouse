@@ -135,24 +135,32 @@ export function createRecoveryStore(dir?: string, opts: { log?: RecoveryLog } = 
  * cannot replay it.
  */
 function readAndClearRecord(file: string, log: RecoveryLog): Record<string, string> {
-  if (!fs.existsSync(file)) return noCommands();
-
-  let recovery: PersistedRecovery | null = null;
+  // Claimed by renaming it onto a name of our own before reading, never read and
+  // then unlinked by name: a host sharing this directory can rename a fresh
+  // record in between, which that unlink would destroy unread, and two
+  // concurrent unlinks of one path can both report success (APFS does), handing
+  // one record to two cold starts. Exactly one rename wins.
+  const claim = `${file}.${randomUUID()}.claim`;
   try {
-    recovery = JSON.parse(fs.readFileSync(file, 'utf8')) as PersistedRecovery;
+    fs.renameSync(file, claim);
   } catch (err) {
-    log.error(`[recovery] unreadable record; discarding: ${String(err)}`);
-  }
-  // Destructive even on a parse failure: a record that cannot be understood must
-  // not sit on disk waiting to be retried forever.
-  try {
-    fs.unlinkSync(file);
-  } catch {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return noCommands();
     // If it cannot be removed, do not use it — better to lose one recovery than
     // to re-run an agent on every start from a record we cannot clear.
     log.error('[recovery] could not clear record; ignoring it');
     return noCommands();
   }
+
+  let recovery: PersistedRecovery | null = null;
+  try {
+    recovery = JSON.parse(fs.readFileSync(claim, 'utf8')) as PersistedRecovery;
+  } catch (err) {
+    // Destructive even on a parse failure: the claim already took it off the
+    // record's name, so a record that cannot be understood is not retried.
+    log.error(`[recovery] unreadable record; discarding: ${String(err)}`);
+  }
+  // A claim left behind is inert: nothing reads anything but the record's name.
+  try { fs.rmSync(claim, { force: true }); } catch { /* best effort */ }
   if (!recovery) return noCommands();
 
   // A non-numeric date gives a NaN age and an infinite one -Infinity; both

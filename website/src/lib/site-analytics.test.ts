@@ -61,7 +61,7 @@ describe("the loader", () => {
     const ph = fakePosthog();
     const { trackPageview, trackEvent } = await fresh();
     trackPageview("readme");
-    trackEvent({ name: "hosted plan clicked", plan: "annual" });
+    trackEvent({ name: "hosted plan clicked", plan: "yearly" });
     await settle();
     expect(ph.loaded).not.toHaveBeenCalled();
   });
@@ -71,12 +71,12 @@ describe("the loader", () => {
     const { trackPageview, trackEvent } = await fresh();
     expect(ph.loaded).not.toHaveBeenCalled();
     trackPageview(null);
-    trackEvent({ name: "hosted plan clicked", plan: "annual" });
+    trackEvent({ name: "hosted plan clicked", plan: "yearly" });
     await settle();
     expect(ph.loaded).toHaveBeenCalledTimes(1);
     expect(ph.capture.mock.calls).toEqual([
       ["$pageview", undefined],
-      ["hosted plan clicked", { plan: "annual" }],
+      ["hosted plan clicked", { plan: "yearly" }],
     ]);
   });
 });

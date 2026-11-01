@@ -50,3 +50,20 @@ it.skipIf(process.platform === 'win32')('runs git no higher than the repository 
   expect(await runGit(inner, ['config', '--get', 'remote.origin.url'])).toBeNull();
   expect(existsSync(marker)).toBe(false);
 });
+
+it.skipIf(process.platform === 'win32')('checks the index only for a subcommand that opens it', async () => {
+  // Expanding a sparse index opens the objects it names, which the check refuses to walk.
+  const sparse = join(base, 'sparse');
+  const git = (...args: string[]) => execFileSync('git', ['-C', sparse, '-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { stdio: 'pipe' });
+  execFileSync('git', ['init', '-q', sparse], { stdio: 'pipe' });
+  mkdirSync(join(sparse, 'in'));
+  mkdirSync(join(sparse, 'out'));
+  writeFileSync(join(sparse, 'in', 'a'), 'a');
+  writeFileSync(join(sparse, 'out', 'b'), 'b');
+  git('add', '.');
+  git('commit', '-q', '-m', 'a');
+  git('remote', 'add', 'origin', 'https://github.com/o/s.git');
+  git('sparse-checkout', 'set', '--cone', '--sparse-index', 'in');
+  expect(await runGit(sparse, ['config', '--get', 'remote.origin.url'])).toBe('https://github.com/o/s.git');
+  expect(await runGit(sparse, ['ls-files'])).toBeNull();
+});

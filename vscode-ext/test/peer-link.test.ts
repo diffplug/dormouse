@@ -10,9 +10,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { spawn } from 'node:child_process';
 import { createHmac } from 'node:crypto';
-import { access, chmod, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { linkSync, unlinkSync } from 'node:fs';
+import { access, chmod, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { createConnection, createServer, Socket, type Server } from 'node:net';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import {
   FrameDecoder,
   PEER_CLIENT_PROOF_DOMAIN,
@@ -68,6 +69,27 @@ vi.mock('node:fs/promises', async (importOriginal) => {
   return { ...real, stat };
 });
 
+/**
+ * {@link beforeSocketStat} for `peer-link`'s synchronous reads of the socket
+ * path: runs once, inside the read, after `skip` earlier reads have passed.
+ */
+const beforeSocketStatSync = vi.hoisted(() => ({ hook: null as null | (() => void), path: '', skip: 0 }));
+vi.mock('node:fs', async (importOriginal) => {
+  const real = await importOriginal<typeof import('node:fs')>();
+  const statSync = ((...args: Parameters<typeof real.statSync>) => {
+    const { hook, path } = beforeSocketStatSync;
+    if (hook && String(args[0]) === path) {
+      if (beforeSocketStatSync.skip > 0) beforeSocketStatSync.skip--;
+      else {
+        beforeSocketStatSync.hook = null;
+        hook();
+      }
+    }
+    return real.statSync(...args);
+  }) as typeof real.statSync;
+  return { ...real, statSync, default: { ...real, statSync } };
+});
+
 let dir: string;
 /** Peer sockets live in the temp dir; point that at this test's own storage. */
 let realTmp: string | undefined;
@@ -93,6 +115,42 @@ async function socketFileIdentity(path: string): Promise<SocketFileIdentity> {
 
 function sameSocketFile(left: SocketFileIdentity, right: SocketFileIdentity): boolean {
   return left.dev === right.dev && left.ino === right.ino && left.ctimeNs === right.ctimeNs;
+}
+
+/** Leave a dead broker's socket at `path`: a killed owner never unlinks it. */
+async function leaveCorpse(path: string): Promise<void> {
+  const corpse = spawn(process.execPath, [
+    '-e',
+    `require('node:net').createServer().listen(${JSON.stringify(path)})`,
+  ]);
+  await waitForFile(path);
+  corpse.kill('SIGKILL');
+  await new Promise((resolve) => corpse.on('exit', resolve));
+}
+
+/**
+ * A server that accepts and never speaks, standing in for a window that won a
+ * reclaim. `dialed` resolves on its first connection; `close` drops every
+ * connection, including any that arrive while it closes.
+ */
+function silentCompetitor() {
+  const held: Socket[] = [];
+  let closing = false;
+  let onDial: () => void = () => {};
+  const dialed = new Promise<'dialed'>((resolve) => {
+    onDial = () => resolve('dialed');
+  });
+  const server = createServer((socket) => {
+    if (closing) socket.destroy();
+    else held.push(socket);
+    onDial();
+  });
+  const close = async () => {
+    closing = true;
+    for (const socket of held) socket.destroy();
+    if (server.listening) await new Promise((resolve) => server.close(resolve));
+  };
+  return { server, dialed, close };
 }
 
 /** The token the whole installation shares, as it sits on disk. */
@@ -159,6 +217,8 @@ beforeEach(async () => {
   process.env.TMPDIR = dir;
   logged.length = 0;
   beforeSocketStat.hook = null;
+  beforeSocketStatSync.hook = null;
+  beforeSocketStatSync.skip = 0;
 });
 
 afterEach(async () => {
@@ -502,37 +562,93 @@ describe('bind-as-lease', () => {
     corpse.kill('SIGKILL');
     await new Promise((resolve) => corpse.on('exit', resolve));
 
-    // The competitor holds the path and never speaks, standing in for a window
-    // that won the reclaim.
-    const held: Socket[] = [];
-    const competitor = createServer((socket) => void held.push(socket));
+    const competitor = silentCompetitor();
     let theirs: SocketFileIdentity | null = null;
     beforeSocketStat.path = path;
     beforeSocketStat.hook = async () => {
       await rm(path, { force: true });
-      await new Promise<void>((resolve) => competitor.listen(path, resolve));
+      await new Promise<void>((resolve) => competitor.server.listen(path, resolve));
       theirs = await socketFileIdentity(path);
     };
     try {
       const mod = await openWindow(fakeWindow());
       const roles: boolean[] = [];
-      await mod.ensurePeerNet((broker) => roles.push(broker));
+      const settled = mod.ensurePeerNet((broker) => roles.push(broker));
+      // Standing down must leave the winner's socket where it is (#756): libuv
+      // unlinks a closing server's bound name, whatever it names by then, so a
+      // window that bound the path itself would remove the competitor's here
+      // and broker on its next round — two brokers. So the next round dials
+      // the competitor instead.
+      expect(await Promise.race([settled.then(() => 'settled'), competitor.dialed])).toBe('dialed');
       expect(theirs).not.toBeNull();
-      // Settled as broker either way — standing down closes our server, which
-      // unlinks the path (libuv does, whatever it names now; #756), so the next
-      // round binds uncontested. What tells the two apart is whose socket the path
-      // names at the verdict: a window that confirmed on the competitor's
-      // socket is a broker nobody can reach.
+      expect(sameSocketFile(await socketFileIdentity(path), theirs!)).toBe(true);
+      expect(mod.isPeerBroker()).toBe(false);
+
+      // Once the competitor goes, the window takes the path for itself.
+      await competitor.close();
+      await settled;
       expect(roles).toEqual([true]);
-      expect(sameSocketFile(await socketFileIdentity(path), theirs!)).toBe(false);
       const peer = await openWindow(fakeWindow({ entries: [{ surfaceId: 'far-1' }] }));
       await peer.ensurePeerNet(() => {});
       expect(peer.isPeerBroker()).toBe(false);
     } finally {
-      for (const socket of held) socket.destroy();
-      if (competitor.listening) await new Promise((resolve) => competitor.close(resolve));
+      await competitor.close();
     }
   }, 30_000);
+
+  it.skipIf(process.platform === 'win32')('never unlinks a socket another window published after the corpse refused', async () => {
+    // Both refusals can land before a competing window clears the corpse and
+    // publishes, and then the unlink that follows would remove a live broker's
+    // socket rather than the corpse. Forced here: the competitor publishes at
+    // the check right before that unlink.
+    const path = derivedSocketPath();
+    await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+    await leaveCorpse(path);
+
+    const competitor = silentCompetitor();
+    const privateName = join(dirname(path), 'competitor.bind');
+    await new Promise<void>((resolve) => competitor.server.listen(privateName, resolve));
+    beforeSocketStatSync.path = path;
+    // The first sync read of the path is the corpse's identity, taken before the
+    // second dial; the second is the check guarding the unlink.
+    beforeSocketStatSync.skip = 1;
+    beforeSocketStatSync.hook = () => {
+      unlinkSync(path);
+      linkSync(privateName, path);
+      unlinkSync(privateName);
+    };
+    try {
+      const mod = await openWindow(fakeWindow());
+      const settled = mod.ensurePeerNet(() => {});
+      expect(await Promise.race([settled.then(() => 'settled'), competitor.dialed])).toBe('dialed');
+      expect(beforeSocketStatSync.hook).toBeNull();
+      expect(mod.isPeerBroker()).toBe(false);
+    } finally {
+      await competitor.close();
+    }
+  }, 30_000);
+
+  it.skipIf(process.platform === 'win32')('leaves a socket that displaced it in place when it is disposed', async () => {
+    const path = derivedSocketPath();
+    const mod = await openWindow(fakeWindow());
+    await mod.ensurePeerNet(() => {});
+    expect(mod.isPeerBroker()).toBe(true);
+    // Only the shared path is left in the directory: the private name the
+    // socket was bound under is gone once it is published, so a crash leaves
+    // nothing the next round cannot reclaim.
+    expect(await readdir(dirname(path))).toEqual([basename(path)]);
+
+    const competitor = silentCompetitor();
+    await rm(path, { force: true });
+    await new Promise<void>((resolve) => competitor.server.listen(path, resolve));
+    const theirs = await socketFileIdentity(path);
+    try {
+      await mod.disposePeerLink();
+      expect(sameSocketFile(await socketFileIdentity(path), theirs)).toBe(true);
+    } finally {
+      await competitor.close();
+    }
+  });
 
   it('collects directory entries from the other window', async () => {
     const peerSide = fakeWindow({ entries: [{ surfaceId: 'far-1' }, { surfaceId: 'far-2' }] });

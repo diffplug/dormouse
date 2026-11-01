@@ -198,7 +198,7 @@ test('finish refuses a signature that does not verify against the stored key', a
   const { app } = await freshApp();
   const { authenticator, sessionToken } = await ownerSession(app);
   const proof = await proveFor(app, sessionToken, authenticator, pairingBinding(authenticator));
-  // The right credential id over the right challenge, signed by a foreign key.
+  // The right credential id and key, signed over a different challenge.
   const forged = {
     ...proof.assertion,
     signature: (await authenticator.assert({ challenge: randomSecret(), origin: ORIGIN, rpId: RP_ID }))
@@ -221,7 +221,7 @@ test('both routes require a session', async () => {
 });
 
 test('a request with no binding is refused, not answered with a random challenge', async () => {
-  // The one arm 4c deleted. A bodyless `begin` used to mint a sign-in-shaped
+  // A bodyless `begin` used to mint a sign-in-shaped
   // challenge; it must now fail closed, answering no `relayNonce` a proof
   // could be built around.
   const { app } = await freshApp();

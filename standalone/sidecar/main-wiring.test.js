@@ -15,10 +15,12 @@ test('pty-core is created with the shared sliceSince, so recovery capture reads 
   assert.match(source, /nodePty,\s*\{\s*replay:\s*true,\s*sliceSince\b/);
 });
 
-test('pty-core opens a context directory through the shared resolver', () => {
-  // Without it pty-core opens nothing (pty-core.js -> canonicalDirectory).
-  assert.match(source, /\{\s*gitInfo,\s*canonicalLocalDirectory\s*\}\s*=\s*require\('\.\/git-info\.cjs'\)/);
+test('pty-core opens a context directory and resolves a shell through the shared resolvers', () => {
+  // Without them pty-core opens nothing (pty-core.js -> canonicalDirectory) and
+  // spawns no shell requested by bare name on Windows (resolveShell).
+  assert.match(source, /\{\s*gitInfo,\s*canonicalLocalDirectory,\s*resolveBinaryPath\s*\}\s*=\s*require\('\.\/git-info\.cjs'\)/);
   assert.match(source, /nodePty,\s*\{[^}]*canonicalDirectory:\s*canonicalLocalDirectory\b/);
+  assert.match(source, /nodePty,\s*\{[^}]*resolveBinary:\s*resolveBinaryPath\b/);
 });
 
 test('recovery capture and the record take are answered from pty-core marks', () => {

@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'vitest';
-import { commitToolHistory, documentLinkNeedsConfirmation, toolHistory } from './tool-navigation';
+import { afterEach, describe, expect, it } from 'vitest';
+import { commitToolHistory, documentLinkNeedsConfirmation, toolHistory, toolView } from './tool-navigation';
 import { directoryOf } from '../../lib/tool-open-requests';
+import { FakePtyAdapter, setPlatform } from '../../lib/platform';
+import type { BrowserRequest } from '../../lib/platform/browser-automation';
 
 const location = (target: string, top = 0) => ({ target, cwd: '/repo', handler: 'builtin:file', position: { top } });
 describe('Tool document history', () => {
@@ -42,5 +44,19 @@ describe('which document links wait for confirmation', () => {
     }
     expect(documentLinkNeedsConfirmation('builtin', 'code', '/x/page.html')).toBe(false);
     expect(documentLinkNeedsConfirmation('builtin', 'folder', '/x/site.html')).toBe(false);
+  });
+});
+
+describe('the reading position of a Tool in an automated browser', () => {
+  afterEach(() => setPlatform(new FakePtyAdapter()));
+
+  it('never sends a saved binaryPath its provider refuses', async () => {
+    const sent: BrowserRequest[] = [];
+    setPlatform(Object.assign(new FakePtyAdapter(), { browser: async (request: BrowserRequest) => { sent.push(request); return { ok: true }; } }));
+    const tool = { toolScope: 'builtin', toolName: 'file', toolTarget: '/repo/a.md', renderMode: 'agent-browser-screencast', session: 'tool.t' };
+    await toolView('t', { ...tool, binaryPath: '/usr/bin/curl' });
+    await toolView('t', { ...tool, binaryPath: '/opt/bin/agent-browser' });
+    await toolView('t', { ...tool, renderMode: 'playwright-screencast', binaryPath: '/opt/bin/agent-browser' });
+    expect(sent.map(request => request.binding)).toEqual([{ session: 'tool.t' }, { session: 'tool.t', binaryPath: '/opt/bin/agent-browser' }, { session: 'tool.t' }]);
   });
 });

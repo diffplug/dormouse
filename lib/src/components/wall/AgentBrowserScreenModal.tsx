@@ -82,6 +82,11 @@ export function AgentBrowserScreenModal({
   const initialPreset = matchingPreset(builtins, initialSetting);
   const initialTarget: Target = initialSetting?.mode === 'pane-sync' || initial?.syncEngaged ? 'sync'
     : 'fixed';
+  // Seed the Fixed fields from the saved size, else a measured viewport that
+  // has one (an embed reports 0×0).
+  const fixed = initialSetting?.mode === 'fixed' ? initialSetting : undefined;
+  const measured = initial && initial.viewport.w > 0 && initial.viewport.h > 0 ? initial.viewport : undefined;
+  const seedDpr = fixed?.dpr ?? measured?.dpr ?? 1;
   const [target, setTarget] = useState<Target>(initialTarget);
   const [config, setConfig] = useState<BrowserViewportConfig>(builtins);
   const [configError, setConfigError] = useState<string | null>(null);
@@ -108,11 +113,11 @@ export function AgentBrowserScreenModal({
     });
     return () => { active = false; };
   }, [controller.cwd]);
-  const [customW, setCustomW] = useState(String(initialSetting?.mode === 'fixed' ? initialSetting.width : initial?.viewport.w ?? 1440));
-  const [customH, setCustomH] = useState(String(initialSetting?.mode === 'fixed' ? initialSetting.height : initial?.viewport.h ?? 900));
-  const [customDpi, setCustomDpi] = useState(formatDpr(initialSetting?.mode === 'fixed' ? initialSetting.dpr ?? initial?.viewport.dpr ?? 1 : initial?.viewport.dpr ?? 1));
+  const [customW, setCustomW] = useState(String(fixed?.width ?? measured?.w ?? 1440));
+  const [customH, setCustomH] = useState(String(fixed?.height ?? measured?.h ?? 900));
+  const [customDpi, setCustomDpi] = useState(formatDpr(seedDpr));
   // Display measured DPR without turning an omitted DPR into a persisted override.
-  const [explicitDpr, setExplicitDpr] = useState(initialSetting?.mode === 'fixed' && initialSetting.dpr !== undefined);
+  const [explicitDpr, setExplicitDpr] = useState(fixed?.dpr !== undefined);
   const choosePreset = (name: string) => {
     chooseTarget('fixed');
     setPreset(name);

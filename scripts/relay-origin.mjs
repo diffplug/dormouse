@@ -2,7 +2,9 @@
 // (docs/specs/relay.md → "Relay origin"). Both host builds read it here —
 // `standalone/scripts/build-sidecar-proxy.mjs` and `vscode-ext/scripts/esbuild.mjs`
 // — and esbuild-`define` the result into the Node bundle that holds the relay
-// socket, where `lib/src/host/relay-origin.ts` is the only reader.
+// socket; `standalone/vite.config.ts` defines it into the standalone webview
+// too ({@link relayDefineVitePlugin}), and `standalone/scripts/tauri.mjs` reads
+// the mode. Inside the bundles, `lib/src/host/relay-origin.ts` is the only reader.
 //
 // The accepted-origin rule is the built `remote-lib-common`'s, so every caller
 // builds that package first. The default is duplicated from the `.ts`, which a
@@ -70,7 +72,8 @@ export function resolveRelayOrigin(env = process.env, label = 'build', { dev = f
 
   const flag = env.DORMOUSE_RELAY_IS_HOSTED?.trim();
   if (!dev) {
-    if (flag) {
+    // Set at all, blank included: a release build never reads the flag.
+    if (flag !== undefined) {
       throw new Error(
         `[${label}] DORMOUSE_RELAY_IS_HOSTED is for dev builds only (pnpm dev:standalone, ` +
           'pnpm innerdogfood, VS Code watch); a release build is Hosted only at ' +

@@ -1,4 +1,5 @@
 import { test, expect, vi } from "vitest";
+import { Hono } from "hono";
 import { digest } from "@pgstencil/auth/security";
 import { fileURLToPath } from "node:url";
 import {
@@ -25,12 +26,13 @@ import {
   CRON_SWEEP_CAP,
   SPEECH_SWEEP_CAP,
   TOKEN_SWEEP_CRON,
-  VOICE_DAILY_CAP,
   VOICE_TOKEN_IDLE_DAYS,
+  VOICE_USAGE_RETENTION_DAYS,
 } from "../voice";
 import { mintVoiceToken } from "../voice-token";
+import { voiceBearerRoutes } from "../voice";
 import { ALREADY_APPROVED, RECENT_LOGIN_REQUIRED } from "../relay-account";
-import { TERMS_VERSION } from "../policy-constants";
+import { TERMS_VERSION, VOICE_DAILY_CAP } from "../policy-constants";
 import {
   API_ROUTES,
   NOT_ENTITLED_ERROR,
@@ -887,6 +889,32 @@ test("terms acceptance: any signed-in account records the current version once, 
   ).toEqual([{ version: TERMS_VERSION, acceptedAt: first.acceptedAt }]);
 });
 
+test("speak stops reading a body past its cap, one sent without a content-length included", async ({ onTestFinished }) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const admin = f.browser();
+  await admin.email(ADMIN_EMAIL);
+  const token = await admin.mint();
+  const app = new Hono();
+  voiceBearerRoutes(app, () => ({ databaseUrl: f.database.url, synthesize: undefined }));
+  let pulled = 0;
+  const chunk = new TextEncoder().encode("x".repeat(1024));
+  const body = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (++pulled > 1024) controller.close();
+      else controller.enqueue(chunk);
+    },
+  });
+  const response = await app.request("/api/voice/speak", {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body,
+    duplex: "half",
+  } as RequestInit);
+  expect(response.status).toBe(400);
+  expect(pulled).toBeLessThan(16);
+});
+
 test("Natural Voice: only the verified admin speaks; the account sees on or off and turns every token off", async ({
   onTestFinished,
 }) => {
@@ -1133,22 +1161,40 @@ test("the admin page: its read answers only the verified admin, from this origin
   }
 });
 
-test("the voice Worker's daily cron deletes only tokens a year idle, and never touches ElevenLabs", async ({
+test("the voice Worker's daily cron deletes only tokens a year idle and counters past retention, and never touches ElevenLabs", async ({
   onTestFinished,
 }) => {
   const f = await fixture();
   onTestFinished(f.close);
   const admin = f.browser();
   await admin.email(ADMIN_EMAIL);
+  await f.browser().email("other@example.test");
   const idle = `now() - interval '${VOICE_TOKEN_IDLE_DAYS} days'`;
   const live = await admin.mint(`${idle} + interval '1 minute'`);
   const used = await admin.mint(`${idle} - interval '1 day'`);
   await admin.mint(`${idle} - interval '1 minute'`);
   await queryDatabase(f.database.url, `UPDATE dormouse_voice_tokens SET "lastUsedAt" = now() WHERE hash = $1`, [digest(used)]);
+  // Both accounts' counters, by UTC days ago: the cron sweeps an account that
+  // never speaks again, not only the one speaking.
+  const kept = VOICE_USAGE_RETENTION_DAYS - 1;
+  await queryDatabase(
+    f.database.url,
+    `INSERT INTO dormouse_voice_usage ("userId", day, count)
+      SELECT id, (now() AT TIME ZONE 'UTC')::date - ago, 1
+      FROM "user", unnest($1::integer[]) AS ago`,
+    [[0, kept, VOICE_USAGE_RETENTION_DAYS, 400]],
+  );
   expect((await f.voiceCron(TOKEN_SWEEP_CRON)).outcome).toBe("ok");
   expect(
     (await queryDatabase<{ hash: string }>(f.database.url, "SELECT hash FROM dormouse_voice_tokens")).map((row) => row.hash).sort(),
   ).toEqual([digest(live), digest(used)].sort());
+  expect(
+    await queryDatabase(
+      f.database.url,
+      `SELECT (now() AT TIME ZONE 'UTC')::date - day AS ago, count(*)::integer AS accounts
+        FROM dormouse_voice_usage GROUP BY ago ORDER BY ago`,
+    ),
+  ).toEqual([{ ago: 0, accounts: 2 }, { ago: kept, accounts: 2 }]);
   expect(f.elevenLabs.sweeps).toEqual([]);
 });
 

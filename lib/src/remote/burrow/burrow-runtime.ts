@@ -77,7 +77,14 @@ import {
   type RemoteTimer,
   type RemoteWebSocket,
 } from '../ws';
-import { loadBurrowAcl } from './acl';
+import {
+  firstPerClientStatic,
+  loadBurrowAcl,
+  revokeTarget,
+  type RevocationRequester,
+  type RevocationTarget,
+} from './acl';
+import { deviceIdFor, type AccessLogEntry } from './access-log';
 import {
   EstablishedE2eSession,
   sealControl,
@@ -252,6 +259,12 @@ interface EstablishedSession {
   /** The IK-authenticated Client static — what the session cap is keyed on. */
   readonly clientStaticPublicKey: string;
   readonly e2e: EstablishedE2eSession;
+  /** The record's label, mapped, for the access log's `ended`. */
+  readonly label: string;
+  /** The record's passkey credential: what a revocation by passkey ends it by. */
+  readonly passkeyCredentialId: string;
+  /** When it was promoted, on this Burrow's clock. */
+  readonly since: number;
 }
 
 /**
@@ -363,6 +376,12 @@ export interface BurrowOptions {
   onPathRefused?: (refusal: PathRefusal) => void;
   /** The Relay raised the UV demand ({@link RelayPolicyFrame}); already enforced, for the owner to persist. */
   onPolicyRaised?: () => void;
+  /**
+   * One access-log entry: a pairing, a connection, a denial, a session's end
+   * (`access-log.ts`). The owner keeps and persists them; **never** sent to
+   * the Relay or a Client.
+   */
+  onAccess?: (entry: AccessLogEntry) => void;
 }
 
 /** What waits on the frame chain: the policy frame is applied on arrival. */
@@ -398,6 +417,7 @@ export class BurrowRuntime {
   readonly #probeStanding: BurrowOptions['probeStanding'];
   readonly #directPeering: DirectPeering;
   readonly #onPathRefused: (refusal: PathRefusal) => void;
+  readonly #onAccess: (entry: AccessLogEntry) => void;
 
   /**
    * Per-client lifecycle state keyed by clientId. Folding the three concerns
@@ -528,6 +548,7 @@ export class BurrowRuntime {
     this.#probeStanding = options.probeStanding;
     this.#directPeering = options.directPeering ?? { createPeer: null };
     this.#onPathRefused = options.onPathRefused ?? (() => {});
+    this.#onAccess = options.onAccess ?? (() => {});
   }
 
   get status(): BurrowStatus {
@@ -540,6 +561,85 @@ export class BurrowRuntime {
 
   get activeRecords(): BurrowAclRecord[] {
     return this.#acl.activeRecords();
+  }
+
+  /** The Client statics holding an established session now, for the paired-device list. */
+  connectedClientStatics(): Set<string> {
+    const statics = new Set<string>();
+    for (const state of this.#clients.values()) {
+      if (state.established) statics.add(state.established.clientStaticPublicKey);
+    }
+    return statics;
+  }
+
+  /**
+   * **The one way an ACL record is revoked** (`docs/specs/remote-security-model.md`
+   * -> "Revocation"): every active record `target` names, answering them.
+   * Queued with approvals, so neither overwrites the other's snapshot. **It
+   * takes effect before the save**: the live ACL drops the records, every
+   * established session no active record still authorizes ends with the
+   * goodbye, every pending connection of a Client static left with no record
+   * is refused, and those statics' presence windows close — all before the
+   * write is awaited, so a save that fails rejects without leaving a phone
+   * connected, and the next ACL save carries the revocation. Each revoked
+   * browser is logged with `by`.
+   */
+  revoke(target: RevocationTarget, by: RevocationRequester): Promise<BurrowAclRecord[]> {
+    return this.#saveApproval(async () => {
+      const next = BurrowAcl.fromRecords(this.#acl.burrowId, this.#acl.records(), { now: this.#now });
+      const revoked = revokeTarget(next, target);
+      if (revoked.length === 0) return [];
+      this.#acl = next;
+      for (const [clientId, state] of [...this.#clients]) {
+        const established = state.established;
+        if (
+          established &&
+          !next.findActive({
+            passkeyCredentialId: established.passkeyCredentialId,
+            clientStaticPublicKey: established.clientStaticPublicKey,
+          })
+        ) {
+          this.#disposeEstablished(clientId, { goodbye: true });
+        }
+        const connection = this.#clients.get(clientId)?.connection;
+        if (connection && !next.hasActiveClient(connection.clientStaticPublicKey)) {
+          this.#denyConnection(clientId, connection, 'pairing-required', 'revoked');
+        }
+      }
+      const at = this.#now();
+      for (const record of firstPerClientStatic(revoked)) {
+        // After the sessions, whose ending folds their activity into it.
+        this.#presenceWindows.forget(record.clientStaticPublicKey);
+        this.#logAccess({
+          at,
+          event: 'revoked',
+          device: knownPairingDeviceLabel(record.label),
+          deviceId: deviceIdFor(record.clientStaticPublicKey),
+          by,
+        });
+      }
+      this.#reap();
+      await this.#saveAcl(this.#enrollment.burrowId, next.records());
+      return revoked;
+    });
+  }
+
+  /**
+   * The label an access-log entry names a Client static by: its newest
+   * record's, revoked or not, mapped again, else `Unknown device`.
+   */
+  #deviceLabel(clientStaticPublicKey: string): string {
+    const records = this.#acl.records().filter((record) => record.clientStaticPublicKey === clientStaticPublicKey);
+    return knownPairingDeviceLabel(records[records.length - 1]?.label);
+  }
+
+  /** Hand one entry to the owner; a recorder that throws never breaks a ceremony. */
+  #logAccess(entry: AccessLogEntry): void {
+    try {
+      this.#onAccess(entry);
+    } catch (error) {
+      console.warn('[burrow] could not record an access', error);
+    }
   }
 
   /**
@@ -1392,6 +1492,12 @@ export class BurrowRuntime {
         // Consent already happened, so a successful save stays committed even
         // after transport loss. Never answer on a retired or replacement pipe.
         if (this.#clients.get(clientId)?.pairing !== pending) return;
+        this.#logAccess({
+          at: this.#now(),
+          event: 'paired',
+          device: record.label,
+          deviceId: deviceIdFor(record.clientStaticPublicKey),
+        });
         this.#sendPairingOutcome(clientId, pending, {
           ok: true,
           burrowStaticPublicKey: this.#enrollment.noiseStaticPublicKey,
@@ -1430,6 +1536,13 @@ export class BurrowRuntime {
       this.#disposePairing(clientId);
       return;
     }
+    this.#logAccess({
+      at: this.#now(),
+      event: 'pairing-denied',
+      device: pending.approval?.label ?? this.#deviceLabel(pending.clientStaticPublicKey),
+      deviceId: deviceIdFor(pending.clientStaticPublicKey),
+      reason: code,
+    });
     this.#sendPairingOutcome(clientId, pending, { ok: false, code });
     this.#disposePairing(clientId, PAIRING_OUTCOME_FOR_DENIAL[code]);
   }
@@ -1626,19 +1739,19 @@ export class BurrowRuntime {
     );
     if (typeof authorized === 'string') {
       console.warn(`[burrow] connection refused: ${authorized}`);
-      this.#denyConnection(frame.clientId, pending, 'pairing-required');
+      this.#denyConnection(frame.clientId, pending, 'pairing-required', authorized);
       return;
     }
     // Only a proof opens or refreshes a window; riding one never does.
     if (presence !== PRESENCE_WINDOW) {
       this.#presenceWindows.seed(pending.clientStaticPublicKey, authorized, this.#now());
     }
-    this.#promoteConnection(frame.clientId, pending, authorized.label);
+    this.#promoteConnection(frame.clientId, pending, authorized, presence === PRESENCE_WINDOW ? 'window' : 'proof');
   }
 
   #rejectPresence(clientId: string, pending: PendingConnectionSession, why: string): void {
     console.warn(`[burrow] connection presence rejected: ${why}`);
-    this.#denyConnection(clientId, pending, 'presence-rejected');
+    this.#denyConnection(clientId, pending, 'presence-rejected', why);
   }
 
   /**
@@ -1684,7 +1797,12 @@ export class BurrowRuntime {
    * have both succeeded, so the only thing that can fill the cap is authorized
    * phones.
    */
-  #promoteConnection(clientId: string, pending: PendingConnectionSession, label: string): void {
+  #promoteConnection(
+    clientId: string,
+    pending: PendingConnectionSession,
+    record: BurrowAclRecord,
+    presence: 'proof' | 'window',
+  ): void {
     const { incumbent, others } = this.#establishedFor(
       pending.clientStaticPublicKey,
       clientId,
@@ -1727,16 +1845,20 @@ export class BurrowRuntime {
     // record, whose handshake hash, Client static and challenge are spent.
     const { connectionId, session, clientStaticPublicKey } = pending;
     const createSession = this.#createSession;
+    // Mapped again rather than trusted: a record off disk may predate the
+    // closed set or have been written by hand, and this is shown on a pane.
+    const device = knownPairingDeviceLabel(record.label);
+    const { passkeyCredentialId } = record;
+    const deviceId = deviceIdFor(clientStaticPublicKey);
+    const since = this.#now();
     const e2e: EstablishedE2eSession = new EstablishedE2eSession({
       session,
       createApi: (send) =>
         createSession({
           burrowId: this.#enrollment.burrowId,
           send,
-          // Mapped again rather than trusted: a record off disk may predate
-          // the closed set or have been written by hand, and this is shown on
-          // a pane.
-          label: knownPairingDeviceLabel(label),
+          label: device,
+          deviceId,
           end: () => this.#disposeEstablished(clientId, { goodbye: true, only: e2e }),
         }),
       directPeering: this.#directPeering,
@@ -1748,7 +1870,8 @@ export class BurrowRuntime {
       now: this.#now,
       setTimer: this.#setTimer,
     });
-    state.established = { connectionId, clientStaticPublicKey, e2e };
+    state.established = { connectionId, clientStaticPublicKey, e2e, label: device, passkeyCredentialId, since };
+    this.#logAccess({ at: since, event: 'connected', device, deviceId, presence });
     this.#armReaper();
   }
 
@@ -1789,11 +1912,23 @@ export class BurrowRuntime {
     return { incumbent, others };
   }
 
+  /**
+   * `reason` is the specific refusal for the owner-local log — the ACL miss,
+   * the presence failure, `revoked` — which the outcome never carries.
+   */
   #denyConnection(
     clientId: string,
     pending: PendingConnectionSession,
     code: Exclude<ConnectionOutcomeV1, { ok: true }>['code'],
+    reason?: string,
   ): void {
+    this.#logAccess({
+      at: this.#now(),
+      event: 'connection-denied',
+      device: this.#deviceLabel(pending.clientStaticPublicKey),
+      deviceId: deviceIdFor(pending.clientStaticPublicKey),
+      reason: reason ? `${code}: ${reason}` : code,
+    });
     this.#sendControl(clientId, 'connection', pending.connectionId, pending.session, {
       ok: false,
       code,
@@ -1882,8 +2017,17 @@ export class BurrowRuntime {
    */
   #clearEstablished(state: ClientState, goodbye: Goodbye = false): void {
     if (!state.established) return;
-    const { e2e, clientStaticPublicKey } = state.established;
+    const { e2e, clientStaticPublicKey, label, since } = state.established;
     this.#presenceWindows.noteActivity(clientStaticPublicKey, e2e.lastClientActivityAt);
+    const at = this.#now();
+    this.#logAccess({
+      at,
+      event: 'ended',
+      device: label,
+      deviceId: deviceIdFor(clientStaticPublicKey),
+      path: e2e.wentDirect ? 'direct' : 'relayed',
+      durationMs: Math.max(0, at - since),
+    });
     // Cleared first, so nothing the teardown sets off can reach this session
     // through the slot again — `end` itself reports nothing once it begins.
     state.established = undefined;

@@ -9,14 +9,18 @@ import { hostname } from 'node:os';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
- * The socket factory, direct path, and fetch the service handed on, kept so a
- * case can play a path that forgot its own policy check. The runtime and the
- * exchange are the real ones.
+ * The socket factory, direct path, fetch, and enrollment the service handed on,
+ * kept so a case can play a path that forgot its own policy check, or read the
+ * demand a runtime started under. The runtime and the exchange are the real
+ * ones. `staticCheck`, when set, is awaited before the start's Noise-static
+ * check, so a case can land a frame while a start is mid-flight.
  */
 const handedTransport = vi.hoisted(() => ({
   createWebSocket: null as ((url: string) => unknown) | null,
   directPeering: null as DirectPeering | null,
   fetch: null as typeof globalThis.fetch | null,
+  enrollment: null as BurrowEnrollment | null,
+  staticCheck: null as (() => Promise<void>) | null,
 }));
 
 vi.mock('../../remote/burrow/burrow-runtime', async (importOriginal) => {
@@ -26,9 +30,21 @@ vi.mock('../../remote/burrow/burrow-runtime', async (importOriginal) => {
       super(options);
       handedTransport.createWebSocket = options.createWebSocket ?? null;
       handedTransport.directPeering = options.directPeering ?? null;
+      handedTransport.enrollment = options.enrollment;
     }
   }
   return { ...real, BurrowRuntime };
+});
+
+vi.mock('remote-lib-common', async (importOriginal) => {
+  const real = await importOriginal<typeof import('remote-lib-common')>();
+  return {
+    ...real,
+    deriveNoiseStaticPublicKey: async (...args: Parameters<typeof real.deriveNoiseStaticPublicKey>) => {
+      await handedTransport.staticCheck?.();
+      return real.deriveNoiseStaticPublicKey(...args);
+    },
+  };
 });
 
 vi.mock('../../remote/burrow/enrollment', async (importOriginal) => {
@@ -61,6 +77,7 @@ import {
   type EnrollmentOffer,
   type BurrowAclRecord,
 } from 'remote-lib-common';
+import { ACCESS_LOG_MAX_ENTRIES, deviceIdFor, type AccessLogEntry } from '../../remote/burrow/access-log';
 import type { BurrowEnrollment } from '../../remote/burrow/enrollment';
 import type { PendingPairing } from '../../remote/burrow/pairing-approval';
 import type {
@@ -114,6 +131,8 @@ import type {
   PairingQueueItem,
   BurrowConsoleStatus,
   SetupQrResult,
+  AccessLogResult,
+  PairedDevicesResult,
 } from './service-protocol';
 
 const BURROW_ID = testRoutingId();
@@ -169,9 +188,10 @@ interface MemoryStore extends BurrowStateStore {
   enrollment: BurrowEnrollment | null;
   acl: Record<string, BurrowAclRecord[]>;
   network: NetworkPolicy | null;
+  accessLog: AccessLogEntry[];
 }
 
-type Seed = Partial<Pick<MemoryStore, 'enrollment' | 'acl' | 'network'>>;
+type Seed = Partial<Pick<MemoryStore, 'enrollment' | 'acl' | 'network' | 'accessLog'>>;
 
 /**
  * The builds' own cases run under `RELAY_ON` / `LOCAL_ON`, their network on, so
@@ -210,6 +230,11 @@ function memoryStore(seed: Seed = {}): MemoryStore {
     loadNetworkPolicy: async () => store.network,
     saveNetworkPolicy: async (policy) => {
       store.network = policy;
+    },
+    accessLog: seed.accessLog ?? [],
+    loadAccessLog: async () => [...store.accessLog],
+    saveAccessLog: async (entries) => {
+      store.accessLog = [...entries];
     },
   };
   return store;
@@ -454,6 +479,7 @@ function answererTo(remote: string, handed: Handed[]): BurrowDirectPeerFactory {
 }
 
 beforeEach(() => {
+  handedTransport.staticCheck = null;
   sockets = [];
   socketUrls = [];
   rendezvous = createTestRendezvous();
@@ -961,6 +987,28 @@ describe('start', () => {
     await vi.waitFor(() => expect(store.enrollment).toEqual({ ...ENROLLMENT, requireUserVerification: true }));
   });
 
+  it('starts raised when the UV demand lands during a restart already under way', async () => {
+    createService({ enrollment: ENROLLMENT });
+    await service.start();
+    sockets[0]!.open();
+    // A second start, its Noise-static check still running, the old runtime still live.
+    const check = Promise.withResolvers<void>();
+    let checking = false;
+    handedTransport.staticCheck = () => {
+      checking = true;
+      return check.promise;
+    };
+    const restart = service.start();
+    await vi.waitFor(() => expect(checking).toBe(true));
+    handedTransport.staticCheck = null;
+    sockets[0]!.receive({ t: 'policy', requireUserVerification: true });
+    check.resolve();
+    await restart;
+    expect(sockets).toHaveLength(2);
+    expect(handedTransport.enrollment).toEqual({ ...ENROLLMENT, requireUserVerification: true });
+    await vi.waitFor(() => expect(store.enrollment).toEqual({ ...ENROLLMENT, requireUserVerification: true }));
+  });
+
   it('writes no raise onto an enrollment cleared while it waited', async () => {
     createService({ enrollment: ENROLLMENT });
     await service.start();
@@ -1202,6 +1250,23 @@ describe('pairing queue', () => {
     expect(store.acl[BURROW_ID]).toHaveLength(1);
     expect(store.acl[BURROW_ID]![0]).toMatchObject({ label: BROWSER, revokedAt: null });
     expect(queueEvents().at(-1)!.queue).toEqual([]);
+  });
+
+  it('records an approved pairing in the access log and tells the webviews', async () => {
+    const socket = await running();
+    const { item, code } = await pair(socket, 'c1');
+
+    await command('approve', { clientId: 'c1', pairingId: item.pairingId, code });
+    await settle();
+
+    const record = store.acl[BURROW_ID]![0]!;
+    expect(store.accessLog).toEqual([
+      { at: expect.any(Number), event: 'paired', device: BROWSER, deviceId: deviceIdFor(record.clientStaticPublicKey) },
+    ]);
+    expect(uiEvents().some((event) => event.name === 'access')).toBe(true);
+    expect(((await command('pairedDevices')).result as PairedDevicesResult).devices).toMatchObject([
+      { id: deviceIdFor(record.clientStaticPublicKey), label: BROWSER },
+    ]);
   });
 
   it('waits for the host store before completing approval and reports a failed save', async () => {
@@ -1662,6 +1727,160 @@ describe('pushDevices', () => {
   });
 });
 
+describe('paired devices and revocation', () => {
+  const PHONE = aclRecord('a-phone');
+  const TABLET = aclRecord('b-phone');
+  const phoneId = deviceIdFor(PHONE.clientStaticPublicKey);
+
+  function accessEvents(): number {
+    return uiEvents().filter((event) => event.name === 'access').length;
+  }
+
+  it('lists each paired browser by an id that is never its key, last seen from the access log', async () => {
+    createService({
+      enrollment: ENROLLMENT,
+      acl: { [BURROW_ID]: [PHONE, { ...TABLET, approvedAt: 2 }] },
+      accessLog: [{ at: 50, event: 'ended', device: BROWSER, deviceId: phoneId, path: 'direct', durationMs: 9 }],
+    });
+    await service.start();
+
+    const { devices } = (await command('pairedDevices')).result as PairedDevicesResult;
+    expect(devices).toEqual([
+      { id: deviceIdFor(TABLET.clientStaticPublicKey), label: BROWSER, pairedAt: 2, lastSeenAt: null, connected: false },
+      { id: phoneId, label: BROWSER, pairedAt: 1, lastSeenAt: 50, connected: false },
+    ]);
+    expect(JSON.stringify(devices)).not.toContain(PHONE.clientStaticPublicKey);
+    expect(JSON.stringify(devices)).not.toContain(PHONE.deliveryId);
+  });
+
+  it('revokes one phone of a running Burrow, saves it, and logs who asked', async () => {
+    createService({ enrollment: ENROLLMENT, acl: { [BURROW_ID]: [PHONE, TABLET] } });
+    await service.start();
+    sockets[0]!.open();
+
+    expect((await command('revokeDevice', { id: phoneId.toUpperCase(), by: 'dor' })).result).toEqual({
+      revoked: 1,
+      labels: [BROWSER],
+    });
+    await settle();
+
+    expect(store.acl[BURROW_ID]!.map((record) => record.revokedAt !== null)).toEqual([true, false]);
+    expect((await command('status')).result).toMatchObject({ pairedClients: 1 });
+    expect(((await command('pairedDevices')).result as PairedDevicesResult).devices).toHaveLength(1);
+    expect(store.accessLog).toEqual([
+      expect.objectContaining({ event: 'revoked', deviceId: phoneId, device: BROWSER, by: 'dor' }),
+    ]);
+    expect(accessEvents()).toBeGreaterThan(0);
+  });
+
+  it('revokes from the store while the network policy holds the Burrow stopped', async () => {
+    createService({ enrollment: ENROLLMENT, network: NOTHING, acl: { [BURROW_ID]: [PHONE] } });
+    await service.start();
+
+    expect((await command('revokeDevice', { id: phoneId, by: 'not-a-requester' })).result).toMatchObject({
+      revoked: 1,
+    });
+    await settle();
+
+    expect(store.acl[BURROW_ID]![0]!.revokedAt).not.toBeNull();
+    // A requester outside the closed set is read as the Settings list.
+    expect(store.accessLog).toEqual([expect.objectContaining({ event: 'revoked', by: 'settings' })]);
+    // The next start loads the revocation, not the snapshot before it.
+    await setPolicy(RELAY_ON);
+    expect((await command('status')).result).toMatchObject({ pairedClients: 0 });
+  });
+
+  it('names Dormouse quitting as the end of an unsaved revocation in standalone', async () => {
+    createService({ enrollment: ENROLLMENT, acl: { [BURROW_ID]: [PHONE] } }, { kind: 'standalone' });
+    await service.start();
+    sockets[0]!.open();
+    vi.spyOn(store, 'saveAcl').mockRejectedValueOnce(new Error('disk full'));
+
+    expect((await command('revokeDevice', { id: phoneId })).error).toMatch(/refused until Dormouse quits.*disk full/);
+  });
+
+  it('keeps a revocation whose save failed across a network-policy restart, until a save lands', async () => {
+    createService({ enrollment: ENROLLMENT, acl: { [BURROW_ID]: [PHONE, TABLET] } });
+    await service.start();
+    sockets[0]!.open();
+    const save = vi.spyOn(store, 'saveAcl').mockRejectedValueOnce(new Error('disk full'));
+
+    // VS Code's next broker window loads the stored ACL, so the hold ends with this window.
+    expect((await command('revokeDevice', { id: phoneId })).error).toMatch(
+      /refused until the window running remote control closes.*disk full/,
+    );
+    expect(store.acl[BURROW_ID]!.every((record) => record.revokedAt === null)).toBe(true);
+    // The hold covers every record of the target approved by the failure — one
+    // an approval queued ahead of the revocation committed included — and none
+    // approved after it.
+    const repaired = { ...PHONE, passkeyCredentialId: 'cred-repaired', approvedAt: 2 };
+    const later = { ...PHONE, passkeyCredentialId: 'cred-later', approvedAt: Date.now() + 60_000 };
+    store.acl[BURROW_ID] = [...store.acl[BURROW_ID]!, repaired, later];
+
+    // Nothing and back stops the runtime and builds a new one from the store,
+    // which still holds the phone as paired.
+    await setPolicy(NOTHING);
+    await setPolicy(RELAY_ON);
+    expect((await command('status')).result).toMatchObject({ pairedClients: 2 });
+    const devices = ((await command('pairedDevices')).result as PairedDevicesResult).devices;
+    expect(devices).toMatchObject([
+      { id: phoneId, pairedAt: later.approvedAt },
+      { id: deviceIdFor(TABLET.clientStaticPublicKey) },
+    ]);
+
+    // The next save that lands carries it.
+    save.mockRestore();
+    await command('revokeDevice', { id: deviceIdFor(TABLET.clientStaticPublicKey) });
+    expect(store.acl[BURROW_ID]!.map((record) => record.revokedAt !== null)).toEqual([true, true, true, false]);
+  });
+
+  it('revokes nothing for an id that names no phone, or none at all', async () => {
+    createService({ enrollment: ENROLLMENT, acl: { [BURROW_ID]: [PHONE] } });
+    await service.start();
+
+    expect((await command('revokeDevice', { id: '0000000000000000' })).error).toMatch(/No paired phone/);
+    expect((await command('revokeDevice', {})).error).toMatch(/by its id/);
+    expect(store.acl[BURROW_ID]![0]!.revokedAt).toBeNull();
+  });
+
+  it('revokes neither of two phones whose keys share an id', async () => {
+    // Both keys open with the same eight bytes, as a paired phone grinding
+    // another's id would make them.
+    const twins = [aclRecord('twin-phone-1'), aclRecord('twin-phone-2')];
+    expect(deviceIdFor(twins[0]!.clientStaticPublicKey)).toBe(deviceIdFor(twins[1]!.clientStaticPublicKey));
+    createService({ enrollment: ENROLLMENT, acl: { [BURROW_ID]: twins } });
+    await service.start();
+
+    const id = deviceIdFor(twins[0]!.clientStaticPublicKey);
+    expect((await command('revokeDevice', { id })).error).toMatch(/More than one/);
+    expect(store.acl[BURROW_ID]!.every((record) => record.revokedAt === null)).toBe(true);
+  });
+
+  it('answers no devices and refuses a revoke with no enrollment', async () => {
+    createService();
+    await service.start();
+
+    expect((await command('pairedDevices')).result).toEqual({ devices: [] });
+    expect((await command('revokeDevice', { id: phoneId })).error).toMatch(/not enrolled/);
+  });
+
+  it('keeps the access log bounded and answers it oldest first', async () => {
+    const seeded = Array.from({ length: ACCESS_LOG_MAX_ENTRIES }, (_, i) => ({
+      at: i,
+      event: 'ended' as const,
+      device: BROWSER,
+    }));
+    createService({ enrollment: ENROLLMENT, network: NOTHING, acl: { [BURROW_ID]: [PHONE] }, accessLog: seeded });
+    await service.start();
+    await command('revokeDevice', { id: phoneId });
+
+    const { entries } = (await command('accessLog')).result as AccessLogResult;
+    expect(entries).toHaveLength(ACCESS_LOG_MAX_ENTRIES);
+    expect(entries[0]!.at).toBe(1);
+    expect(entries.at(-1)!.event).toBe('revoked');
+  });
+});
+
 describe('pushTest', () => {
   it('refuses when this machine is not connected to a Relay', async () => {
     createService();
@@ -1908,6 +2127,45 @@ describe('one-time connection', () => {
     // The old modal's ticket names nothing now.
     expect((await approve(item)).error).toContain('no longer pending');
     expect(phone.socket.closeCode).not.toBeNull();
+  });
+
+  /** The one-time entries in the access log, after every append already queued. */
+  async function oneTimeLog(): Promise<AccessLogEntry[]> {
+    const { entries } = (await command('accessLog')).result as AccessLogResult;
+    return entries.filter((entry) => entry.event.startsWith('one-time-'));
+  }
+
+  it('logs a connection and its end', async () => {
+    createHostedService();
+    await connectPhone();
+    await command('oneTimeEnd');
+    expect(await oneTimeLog()).toEqual([
+      expect.objectContaining({ event: 'one-time-connected', device: 'iPhone', path: 'direct' }),
+      expect.objectContaining({ event: 'one-time-ended', device: 'iPhone', reason: 'user-ended', durationMs: expect.any(Number) }),
+    ]);
+  });
+
+  it('logs the end of a connection the service takes down as it is disposed', async () => {
+    createHostedService();
+    await connectPhone();
+    service.dispose();
+    await settle();
+    expect(store.accessLog.map((entry) => entry.event)).toEqual(['one-time-connected', 'one-time-ended']);
+  });
+
+  it('logs a confirming phone whose link a new one replaced as denied', async () => {
+    createHostedService();
+    const phone = await join((await open()).url);
+    await request(phone);
+    await open();
+    expect(await oneTimeLog()).toEqual([expect.objectContaining({ event: 'one-time-denied', device: 'iPhone', reason: 'user-ended' })]);
+  });
+
+  it('logs nothing for a link no phone confirmed', async () => {
+    createHostedService();
+    await open();
+    await command('oneTimeEnd');
+    expect(await oneTimeLog()).toEqual([]);
   });
 
   it('queues the request in its own slot, and routes the answer by kind', async () => {
@@ -2484,6 +2742,27 @@ describe('network policy', () => {
     await setPolicy({ ...ANYWHERE_ON, allowed: ['10.0.0.0/8'] });
     expect(sockets).toHaveLength(3);
     expect((await command('status')).result).toMatchObject({ enrolled: true });
+  });
+
+  it('restarts raised when the UV demand lands while the policy change that restarts it saves', async () => {
+    createHostedService({ enrollment: ENROLLMENT, network: LOCAL_ON });
+    await service.start();
+    sockets[0]!.open();
+    const saved = Promise.withResolvers<void>();
+    let saving = false;
+    store.saveNetworkPolicy = async (policy) => {
+      saving = true;
+      await saved.promise;
+      store.network = policy;
+    };
+    const set = setPolicy({ ...LOCAL_ON, allowed: ['10.0.0.0/8'] });
+    await vi.waitFor(() => expect(saving).toBe(true));
+    // The old runtime hears the demand; the restart is already on the chain.
+    sockets[0]!.receive({ t: 'policy', requireUserVerification: true });
+    saved.resolve();
+    expect((await set).error).toBeUndefined();
+    expect(sockets).toHaveLength(2);
+    expect(handedTransport.enrollment!.requireUserVerification).toBe(true);
   });
 
   it('opens no one-time link under Local networks with no network allowed', async () => {

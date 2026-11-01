@@ -524,3 +524,72 @@ describe('dor app verbs', () => {
     release();
   });
 });
+
+describe('dor remote verbs', () => {
+  const previous = getPlatformOrNull();
+  afterEach(() => setPlatform(previous as PlatformAdapter));
+
+  function withBurrow(command?: (cmd: string, params?: unknown) => Promise<unknown>): void {
+    setPlatform((command ? { burrow: { command } } : {}) as unknown as PlatformAdapter);
+  }
+
+  function send<T extends DorControlRequest>(detail: T): T {
+    disposers.push(installDorControlRouter());
+    window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail }));
+    return detail;
+  }
+
+  it('answers at the Window before resolving any Workspace, Surface, or Window param', () => {
+    const handle = handleFor(getWorkspacesSnapshot().workspaces[0].id, ['pane-a']);
+    for (const params of [{}, { window: 1 }, { workspace: 'workspace:9' }, { surface: 'pane:3' }]) {
+      expect(resolveDorControlRoute(request({ method: 'remote.devices', surfaceId: 'pane-a', params: params as never })))
+        .toEqual({ kind: 'remote' });
+    }
+    expect(handle.handleDorControl).not.toHaveBeenCalled();
+  });
+
+  it('relays the paired phones and the access log from the Burrow', async () => {
+    const devices = [{ id: '0123456789abcdef', label: 'iPhone', pairedAt: 1, lastSeenAt: null, connected: false }];
+    const entries = [{ at: 2, event: 'paired', device: 'iPhone', deviceId: '0123456789abcdef' }];
+    const command = vi.fn(async (cmd: string) => (cmd === 'pairedDevices' ? { devices } : { entries }));
+    withBurrow(command);
+    const listed = send(request({ method: 'remote.devices' }));
+    await vi.waitFor(() => expect(listed.respond).toHaveBeenCalledWith({ ok: true, result: { devices } }));
+    const logged = send(request({ method: 'remote.log' }));
+    await vi.waitFor(() => expect(logged.respond).toHaveBeenCalledWith({ ok: true, result: { entries } }));
+    expect(command.mock.calls.map(([cmd]) => cmd)).toEqual(['pairedDevices', 'accessLog']);
+  });
+
+  // The access log records who asked, and only `dor` asks through here.
+  it('revokes as dor, and passes the Burrow refusal through', async () => {
+    const command = vi.fn(async (_cmd: string, params?: unknown) => {
+      if ((params as { id: string }).id === 'missing') throw new Error('No paired phone has the id missing.');
+      return { revoked: 1, labels: ['iPhone'] };
+    });
+    withBurrow(command);
+    const revoked = send(request({ method: 'remote.revoke', params: { id: ' 0123456789abcdef ' } }));
+    await vi.waitFor(() => expect(revoked.respond).toHaveBeenCalledWith({ ok: true, result: { revoked: 1, labels: ['iPhone'] } }));
+    expect(command).toHaveBeenCalledWith('revokeDevice', { id: '0123456789abcdef', by: 'dor' });
+    const refused = send(request({ method: 'remote.revoke', params: { id: 'missing' } }));
+    await vi.waitFor(() => expect(refused.respond).toHaveBeenCalledWith({ ok: false, error: 'No paired phone has the id missing.' }));
+  });
+
+  it('refuses a revoke that names no phone without asking the Burrow', async () => {
+    const command = vi.fn();
+    withBurrow(command);
+    const detail = send(request({ method: 'remote.revoke', params: { id: 7 } as never }));
+    await vi.waitFor(() => expect(detail.respond).toHaveBeenCalledWith({ ok: false, error: 'Name the paired phone to revoke by its id.' }));
+    expect(command).not.toHaveBeenCalled();
+  });
+
+  it('refuses on a host with no Burrow link', async () => {
+    withBurrow(undefined);
+    for (const method of ['remote.devices', 'remote.revoke', 'remote.log']) {
+      const detail = send(request({ method, params: { id: '0123456789abcdef' } }));
+      await vi.waitFor(() => expect(detail.respond).toHaveBeenCalledWith({
+        ok: false,
+        error: 'remote control is not available in this Dormouse',
+      }));
+    }
+  });
+});

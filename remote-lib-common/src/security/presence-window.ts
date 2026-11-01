@@ -84,6 +84,11 @@ export class PresenceWindows {
     this.#entries.clear();
   }
 
+  /** Close one Client static's window, open or not: its records were revoked. */
+  forget(clientStaticPublicKey: string): void {
+    this.#entries.delete(clientStaticPublicKey);
+  }
+
   /** Entries held, open or not yet found closed; for the bound's own test. */
   get size(): number {
     return this.#entries.size;

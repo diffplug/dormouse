@@ -22,6 +22,18 @@ When asking permission to file an issue upstream (e.g. at `max-sixty/tend`), do 
 
 Append `--skip deploy --skip cleanup` after the PR number and SHA in every `poll_pr_checks.py` call (`poll` and `approval`). Those are the `Hosted PR preview` jobs bound to the `hosted-preview` environment, which requires a maintainer's approval. They sit in `waiting` until someone approves them, and `cleanup` starts on the PR's head when it merges. A poll that waits for either never finishes, and the session runs until the job timeout kills it. Neither job gates a merge. `verify`, which builds and tests Hosted, runs ungated and stays in the poll.
 
+## Install pnpm with npm, never corepack, then run the tests
+
+The sandbox starts with Node 22 and no `pnpm` or `node_modules`. `setup:` stays dependency-free by design (`docs/specs/security-ci.md` -> "Automated Maintainer (tend)"), so install them yourself before claiming a test, lint, or `generate-deps.js` run could not happen. The npm registry is reachable: the network namespace has no DNS, and only clients that honor `HTTPS_PROXY` get out. `npm` honors it, but corepack and Node's built-in `fetch` do not, so they fail with `getaddrinfo EAI_AGAIN`. That error means a client bypassed the proxy, not that the network is down. Run `npm` from outside the checkout, because in the repo root npm rejects Node 22 against `devEngines` (`EBADDEVENGINES`):
+
+```sh
+v=$(node -p "require('./package.json').packageManager.replace(/^pnpm@/, '').split('+')[0]")
+(cd "$TMPDIR" && npm i --prefix "$TMPDIR/pnpm" "pnpm@$v")
+PATH="$TMPDIR/pnpm/node_modules/.bin:$PATH" pnpm install --frozen-lockfile
+```
+
+`pnpm install` downloads the Node 24 that `devEngines` pins and takes about 10 s. An exported `PATH` does not survive into the next Bash call, so prefix each `pnpm` command with that `PATH=` assignment.
+
 ## A restart starts clean — don't carry a superseded PR's findings forward
 
 Long-running work here is often closed and reopened as a fresh PR ("Supersedes #N"), and that restart is deliberate — nedtwigg: *"When I start over, I usually **want** to start over. The original conversation grew too unfocused and out of hand."* So review the successor on its own terms: don't fetch the predecessor's bot comments and reviews in order to re-raise findings from them, and don't treat a finding dropped that way as a gap in the review machinery. Carrying the closed thread's context forward is the thing the restart was for.

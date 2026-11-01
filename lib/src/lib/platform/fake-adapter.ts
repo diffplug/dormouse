@@ -237,10 +237,6 @@ export class FakePtyAdapter implements PlatformAdapter {
     this.inputHandlers.set(id, data => {
       if (data === '\x03') { helper.busy = false; input = ''; this.sendOutput(id, '^C\r\n\x1b]633;D;130\x07' + prompt()); return; }
       if (helper.busy) return;
-      // Submit the echo, command output, and returned prompt as one PTY chunk.
-      // xterm 6.1.0-beta.304 can yield after parsing the echo, then replay that
-      // parsed prefix when a resize flushes the remaining queue. Keep the CRLF
-      // in the same write as the echo (fake-adapter-helper.test.ts).
       let output = '';
       for (const char of data) {
         if (char === '\r' || char === '\n') {

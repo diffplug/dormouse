@@ -14,9 +14,9 @@ export interface QuiesceDetectorOptions {
   onChange?: (status: QuiesceStatus) => void;
   /**
    * A busy Session stayed quiet long enough to look finished. Fired once per
-   * settle with the detector already quiet — so the completion it dispatches
-   * never defers itself — and before onChange publishes that transition, so
-   * no idle flash precedes a ring. Whether a settle rings is the owner's call.
+   * settle with the detector already quiet, and before onChange publishes that
+   * transition, so no idle flash precedes a ring. Whether a settle rings is
+   * the owner's call.
    */
   onSettled?: () => void;
 }
@@ -67,12 +67,16 @@ export class QuiesceDetector {
     return this.status === 'BUSY' || this.status === 'MIGHT_NEED_ATTENTION';
   }
 
-  /** Start over from quiet, forgetting the previous command's output history. */
+  /**
+   * Start over from quiet, forgetting the previous command's output history.
+   * Silent: the owner resets as part of a change it publishes itself, so
+   * `onChange` never shows that change half made.
+   */
   reset(): void {
     if (this.disposed) return;
     this.clearTimers();
     this.resetOutputTracking();
-    this.setStatus('NOTHING_TO_SHOW');
+    this.status = 'NOTHING_TO_SHOW';
   }
 
   onData(): boolean {
@@ -86,7 +90,10 @@ export class QuiesceDetector {
       !this.isConfirmedBusy() && this.lastOutputAt !== null
       && now - this.lastOutputAt > CANDIDATE_HISTORY_TTL_MS
     ) {
-      this.reset();
+      // Unlike `reset`, published: nothing after `onData` publishes for it.
+      this.clearTimers();
+      this.resetOutputTracking();
+      this.setStatus('NOTHING_TO_SHOW');
     }
     // Only a run's first chunk is gated; once it began, its output counts.
     if (

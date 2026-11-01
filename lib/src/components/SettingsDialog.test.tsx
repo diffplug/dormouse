@@ -13,7 +13,7 @@ import { makeStubManagedVoicePort } from '../lib/platform/test-ports';
 import { networkPolicyResult, nothingPolicy } from '../remote/network-policy';
 import { stubResizeObserver } from './wall/wall-test-utils';
 import { setNativeFieldValue } from '../lib/dom';
-import { applyAlertSettingsFromHost, DEFAULT_ALERT_SETTINGS, getAlertSettings } from '../lib/alert-settings';
+import { applyAlertSettingsFromHost, DEFAULT_ALERT_SETTINGS } from '../lib/alert-settings';
 import { resetPushDevices, setCommandWatched, getWatchedCommands, setPushDevices } from '../lib/terminal-registry';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -26,6 +26,7 @@ let sectionOffsets: Record<string, number>;
 let frameTime: number;
 let nextFrame: number;
 let frames: Map<number, FrameRequestCallback>;
+let resize: (width: number) => void;
 
 async function advanceScroll(ms = SETTINGS_SCROLL_MS) {
   frameTime += ms;
@@ -95,7 +96,7 @@ beforeEach(() => {
   });
   vi.stubGlobal('cancelAnimationFrame', (id: number) => frames.delete(id));
   sectionOffsets = { general: 16, notifications: 516, network: 916, about: 1316 };
-  stubResizeObserver(400);
+  resize = stubResizeObserver(400);
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
     const top = this.dataset.settingsTopic
       ? sectionOffsets[this.dataset.settingsTopic] - (document.getElementById('settings-content')?.scrollTop ?? 0) : 0;
@@ -177,9 +178,24 @@ describe('SettingsDialog navigation and search', () => {
     expect(visible('[role="region"]')).toHaveLength(0);
     await act(async () => setCommandWatched('my-agent', true));
     expect(visible('[data-setting]').map((node) => node.dataset.setting)).toEqual(['watcher']);
-    const before = getAlertSettings().deferAlertsUntilQuiet;
-    await act(async () => visible('[role="switch"]')[0].click());
-    expect(getAlertSettings().deferAlertsUntilQuiet).toBe(!before);
+    await act(async () => visible('button[aria-label="Remove my-agent rule"]')[0].click());
+    expect(getWatchedCommands()).not.toContain('my-agent');
+  });
+
+  it('keeps a topic chosen while the opened-at topic settles', async () => {
+    await act(async () => root.render(<SettingsDialog onClose={() => {}} initialTopic="network" />));
+    await act(async () => {});
+    const content = document.getElementById('settings-content')!;
+    Object.defineProperty(content, 'clientHeight', { value: 400 });
+    Object.defineProperty(content, 'scrollHeight', { value: 1400 });
+    await advanceScroll();
+    expect(content.scrollTop).toBe(900);
+    await act(async () => byText('Notifications').click());
+    await advanceScroll();
+    expect(content.scrollTop).toBe(500);
+    await act(async () => resize(400));
+    await advanceScroll();
+    expect(content.scrollTop).toBe(500);
   });
 
   it('ends with About, which a search for the version finds alone', async () => {

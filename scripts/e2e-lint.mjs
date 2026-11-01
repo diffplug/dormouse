@@ -209,7 +209,8 @@ const FRAME_DECODE = String.raw`\bJSON\.parse\b|\batob\b|\bBuffer\b|\bTextDecode
  *   account id — an alias of it included;
  * - an attachment other than a connection (`conn`, `x.conn`) or a connection
  *   literal checked `satisfies` its type without a spread, and a connection
- *   field written other than the two routing writes.
+ *   field written other than the two routing writes and the sweep's
+ *   `checkedAt = start`.
  */
 const RELAY_ROOM_LEAKS = new RegExp(
   [
@@ -218,7 +219,7 @@ const RELAY_ROOM_LEAKS = new RegExp(
     String.raw`\bconsole\b(?!\.\w+\(\s*"[^"\\]*"\s*\))`,
     String.raw`\bstorage\b(?!\.(?:get|getAlarm|setAlarm|deleteAlarm)\b|\.put\(ACCOUNT_KEY, account\))`,
     String.raw`\bserializeAttachment\((?!(?:\w+\.)?conn\)|\{(?:(?!\.\.\.)[^{}()])*\}\s*satisfies\s+(?:BurrowConn|ClientConn)\))`,
-    String.raw`\bconn\.(?!retired\b|burrowId\b)\w+\s*=(?!=)`,
+    String.raw`\bconn\.(?!retired\b|burrowId\b|checkedAt\s*=\s*start\b)\w+\s*=(?!=)`,
   ].join('|'),
   'g',
 );
@@ -622,14 +623,41 @@ export const RULES = [
     violation: '\nvoid acl.approve({});\n',
   },
   {
-    rule: 'Two calls save a Burrow ACL: the runtime\'s approval and the service\'s wiring to its store',
-    security: 'must have no caller but `BurrowRuntime.#approvePairing`',
+    rule:
+      'Five calls save a Burrow ACL: the runtime\'s approval and revocation, and the service\'s `#saveAcl`, its wiring to the runtime, and its stopped-Burrow revocation',
+    security: 'an ACL is saved at five sites only',
     kind: 'exactly',
     trees: ACL_WRITER_TREES,
     pattern: /\.#?saveAcl\(/g,
-    count: 2,
+    count: 5,
     violationFile: 'vscode-ext/src/burrow-store.ts',
     violation: "\nvoid store.saveAcl('burrow', []);\n",
+  },
+  {
+    rule: 'One function revokes ACL records: `revokeTarget`, one call per target kind',
+    security: 'must be the only caller of `BurrowAcl.revokeClient` and `revokePasskey`',
+    kind: 'exactly',
+    trees: ACL_WRITER_TREES,
+    // Every revocation — Settings, `dor`, and whatever names a credential
+    // later — goes through the one target-based helper, so the session ending
+    // and the log that follow it cannot be skipped by a second path.
+    pattern: /\.revoke(?:Client|Passkey)\(/g,
+    count: 2,
+    violationFile: 'lib/src/host/remote/service.ts',
+    violation: "\nvoid acl.revokeClient('client');\n",
+  },
+  {
+    rule: 'No access log reaches the Relay, Hosted, or a phone',
+    security: 'no Relay- or Client-bound module names it',
+    kind: 'forbid',
+    // The log is the owner's record of who reached this machine. A Relay,
+    // Hosted, or Client module that names it has started to put it on a wire.
+    files: [
+      ...sourceFilesUnder([...ROUTING_TREES, 'lib/src/remote/client/', 'lib/src/remote/pocket-app/', ONE_TIME_PAGE_TREE]),
+    ],
+    pattern: /\bAccessLog\w*|\baccessLog\w*|access-log/g,
+    violationFile: 'relay/src/relay.ts',
+    violation: "\nimport type { AccessLogEntry } from '../../lib/src/remote/burrow/access-log';\n",
   },
   {
     rule: 'The mint and its save sit in `#approvePairing`',

@@ -29,7 +29,7 @@ export function fakeFs(entries) {
     readFile: async (path, limit) => {
       const entry = find(path);
       if (!('file' in entry) || entry.file.length > limit) throw new Error(`unreadable: ${path}`);
-      return entry.file;
+      return Buffer.from(entry.file);
     },
   };
 }

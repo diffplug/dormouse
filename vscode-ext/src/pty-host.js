@@ -6,11 +6,11 @@ const nodePty = require(path.join(__dirname, 'node-pty'));
 const { create } = require('../../lib/pty-core.cjs');
 const { createDorControlServer } = require('../../standalone/sidecar/dor-control-server.js');
 // Bundled from TypeScript by esbuild, as the standalone sidecar's `git-info.cjs` is.
-const { canonicalLocalDirectory } = require('../../lib/src/host/local-directory');
+const { canonicalLocalDirectory, resolveBinaryPath } = require('../../lib/src/host/local-directory');
 
 const mgr = create((event, data) => {
   process.send({ type: event, ...data });
-}, nodePty, { canonicalDirectory: canonicalLocalDirectory });
+}, nodePty, { canonicalDirectory: canonicalLocalDirectory, resolveBinary: resolveBinaryPath });
 
 // The control token reaches this process through the fork env and stops here:
 // `pty-core` merges our own `process.env` into every shell it spawns, so leaving

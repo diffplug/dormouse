@@ -11,7 +11,7 @@
  * follow a link, and refuses a share or device path, as the input or as a
  * link's target, before anything follows it.
  */
-import type { Stats } from 'node:fs';
+import { lstatSync, readlinkSync, realpathSync, type Stats } from 'node:fs';
 import { lstat, readlink, realpath } from 'node:fs/promises';
 import nodePath from 'node:path';
 import { isUncOrDevicePath } from './browser-providers.js';
@@ -52,13 +52,12 @@ export class NonLocalPathError extends Error {
 
 const NODE_FS: LocalPathFs = { lstat, readlink, realpath };
 
-/**
- * `realpath` that never reaches another machine: the canonical, link-free
- * spelling of the existing absolute `input`. Rejects with
- * `NonLocalPathError` for a share or device path or a link to one, and as
- * `lstat` does (`ENOENT`, `ENOTDIR`) for a missing component.
- */
-export async function localRealpath(input: string, { fs = NODE_FS, path = nodePath }: LocalPathOptions = {}): Promise<LocalPath> {
+/** One filesystem call the walk asks its driver for, answered with its result:
+ *  `realpath` with the walked path itself when it fails or there is none. */
+type WalkStep = ['lstat' | 'readlink' | 'realpath', string];
+
+/** The resolution, written once for the async and sync drivers below. */
+function* walkLocal(input: string, path: LocalPathModule): Generator<WalkStep, LocalPath, unknown> {
   if (!path.isAbsolute(input) || isUncOrDevicePath(input)) throw new NonLocalPathError();
   // `..` is resolved lexically first, as `realpath` does.
   const start = path.resolve(input);
@@ -68,14 +67,14 @@ export async function localRealpath(input: string, { fs = NODE_FS, path = nodePa
   let links = 0;
   while (pending.length > 0) {
     const next = path.join(current, pending.shift()!);
-    const entry = await fs.lstat(next);
+    const entry = (yield ['lstat', next]) as Stats;
     if (!entry.isSymbolicLink()) {
       current = next;
       stats = entry;
       continue;
     }
     if (++links > MAX_LINKS) throw Object.assign(new Error('too many symbolic links'), { code: 'ELOOP' });
-    const target = await fs.readlink(next);
+    const target = (yield ['readlink', next]) as string;
     if (isUncOrDevicePath(target)) throw new NonLocalPathError();
     // A relative target resolves against the link's own directory, which
     // `current` already is, free of links.
@@ -85,13 +84,44 @@ export async function localRealpath(input: string, { fs = NODE_FS, path = nodePa
     pending = [...components(resolved, current, path.sep), ...pending];
     stats = undefined;
   }
-  stats ??= await fs.lstat(current);
+  stats ??= (yield ['lstat', current]) as Stats;
   // With no link left on the path, the native `realpath` follows nothing: it
   // only answers the spelling the volume stores (case, an 8.3 name's long
   // form), as `realpath` always did here. A mapped drive, which it answers as
   // its share, keeps the walked spelling.
-  const stored = fs.realpath ? await fs.realpath(current).catch(() => current) : current;
+  const stored = (yield ['realpath', current]) as string;
   return { path: isUncOrDevicePath(stored) ? current : stored, stats };
+}
+
+/**
+ * `realpath` that never reaches another machine: the canonical, link-free
+ * spelling of the existing absolute `input`. Rejects with
+ * `NonLocalPathError` for a share or device path or a link to one, and as
+ * `lstat` does (`ENOENT`, `ENOTDIR`) for a missing component.
+ */
+export async function localRealpath(input: string, { fs = NODE_FS, path = nodePath }: LocalPathOptions = {}): Promise<LocalPath> {
+  const walk = walkLocal(input, path);
+  for (let step = walk.next(); ; ) {
+    if (step.done) return step.value;
+    const [call, target] = step.value;
+    step = walk.next(call === 'lstat' ? await fs.lstat(target)
+      : call === 'readlink' ? await fs.readlink(target)
+        : fs.realpath ? await fs.realpath(target).catch(() => target) : target);
+  }
+}
+
+/** `localRealpath` for a synchronous caller, on this machine's filesystem. */
+export function localRealpathSync(input: string): LocalPath {
+  const walk = walkLocal(input, nodePath);
+  for (let step = walk.next(); ; ) {
+    if (step.done) return step.value;
+    const [call, target] = step.value;
+    step = walk.next(call === 'lstat' ? lstatSync(target) : call === 'readlink' ? readlinkSync(target) : realpathOr(target));
+  }
+}
+
+function realpathOr(target: string): string {
+  try { return realpathSync.native(target); } catch { return target; }
 }
 
 /** `localRealpath`, or null where nothing exists; a refusal still rejects. */

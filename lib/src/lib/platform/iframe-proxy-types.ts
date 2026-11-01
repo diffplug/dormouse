@@ -5,11 +5,12 @@
  * target, strips frame-blocking headers (any http upstream), and injects the
  * Dormouse shim. On failure `reason` says why there is nothing to frame:
  * `scheme` — the upstream can't be proxied: a non-absolute URL, a non-`http://`
- * target (e.g. an `https://` URL, which v1 defers), or an `http://` address
- * refused by the SSRF guard (link-local / cloud-metadata); the `detail` field
- * carries the specific cause. `unreachable` — nothing answered. Reachability is
- * normally diagnosed lazily and surfaced as a served error *page* inside the
- * frame, so v1 mostly returns `ok` or `scheme` here. A framed site's
+ * target (e.g. an `https://` URL, which v1 defers), or an `http://` upstream
+ * whose name resolves to an address the SSRF guard refuses (link-local /
+ * cloud-metadata); the `detail` field carries the specific cause.
+ * `unreachable` — the name did not resolve, or no proxy could be stood up. Whether
+ * the upstream answers is diagnosed lazily and surfaced as a served error *page*
+ * inside the frame. A framed site's
  * frame-blocking headers are stripped, not obeyed.
  *
  * Kept in its own dependency-free file so the Node proxy in `lib/src/host/`

@@ -83,6 +83,12 @@ export interface RemoteApiSessionContext {
    */
   readonly label: string;
   /**
+   * The access log's name for the paired browser behind this session
+   * (`deviceIdFor`); absent for a one-time phone, which has no lasting
+   * identity.
+   */
+  readonly deviceId?: string;
+  /**
    * End this session on purpose, the way its owner ends one: the Client hears
    * the goodbye ({@link EstablishedE2eSession.end}), then everything the
    * session holds goes. A no-op once the session is over.
@@ -168,6 +174,8 @@ export class EstablishedE2eSession {
   readonly #pathHeld: boolean;
   /** Set where the path ended this session; see {@link pathRefusal}. */
   #pathRefusal: PathRefusal | null = null;
+  /** Latched once both directions switched; see {@link wentDirect}. */
+  #wentDirect = false;
   readonly #now: () => number;
   #lastClientActivityAt: number;
   #disposed = false;
@@ -197,6 +205,7 @@ export class EstablishedE2eSession {
       // session that is not disposed is the live one.
       isCurrent: () => !this.#disposed,
       onTransportChanged: (path, cause) => {
+        if (path === 'direct') this.#wentDirect = true;
         deps.onTransportChanged?.(path, cause);
         // A given-up attempt leaves only the relay, which may not carry a
         // direct-only session. Deferred, so the decline the endpoint sends
@@ -226,6 +235,15 @@ export class EstablishedE2eSession {
    */
   get lastClientActivityAt(): number {
     return this.#lastClientActivityAt;
+  }
+
+  /**
+   * Whether both directions ever switched to the direct path: what the access
+   * log names the session's path. Latched, since a channel lost after the
+   * switch ends the session rather than falling back.
+   */
+  get wentDirect(): boolean {
+    return this.#wentDirect;
   }
 
   /**

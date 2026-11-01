@@ -1,9 +1,7 @@
 /**
  * The atomic JSON writer for host state: temp-then-rename so a crash cannot
  * publish a half-written file. Unix modes are set here; Windows writers inherit
- * the caller's storage DACL. Shared by
- * the Burrow state store and the Tool trust store, whose files hold a bearer
- * credential and a security decision respectively.
+ * the caller's storage DACL.
  */
 
 import { randomUUID } from 'node:crypto';
