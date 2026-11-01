@@ -96,6 +96,7 @@ function fakeProvider(pages: Map<string, EmbeddedPage>) {
   const watchers = new Set<() => void>();
   const provider = {
     resolveBrowser: vi.fn(async (surfaceId: string) => pages.get(surfaceId) ?? null),
+    collectDirectory: vi.fn(async () => [...pages].map(([surfaceId, { url }]) => ({ surfaceId, browser: { render: 'iframe', url } }))),
     watchDirectory: vi.fn((onChange: () => void) => {
       watchers.add(onChange);
       return () => watchers.delete(onChange);

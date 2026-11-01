@@ -824,11 +824,16 @@ describe('iframe proxy leases', () => {
     const port = await upstream((_q, s) => { s.writeHead(204); s.end(); });
     const gone = await frame(`http://127.0.0.1:${port}/`, leased(lease('window-gone')));
     const kept = await frame(`http://127.0.0.1:${port}/`, leased(lease('window-kept')));
+    // A remote session's lease is no window's: only its session ends it.
+    const remote = await frame(`http://127.0.0.1:${port}/`, leased(lease('remote:session-1')));
     retainIframeProxyOwners(['window-kept']);
     expect(await isListening(portOf(gone))).toBe(false);
     expect(await isListening(portOf(kept))).toBe(true);
+    expect(await isListening(portOf(remote))).toBe(true);
     releaseIframeProxyLease('window-kept');
+    releaseIframeProxyLease('remote:session-1');
     expect(await isListening(portOf(kept))).toBe(false);
+    expect(await isListening(portOf(remote))).toBe(false);
   });
 
   it('refuses a lease past its bound rather than evicting a live one', async () => {

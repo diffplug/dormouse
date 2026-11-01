@@ -23,8 +23,8 @@ import type {
   FrameSocketSink,
   FrameUpstream,
 } from '../../remote/burrow/burrow-frame-host';
-import { createIframeProxyUrl, releaseIframeProxyLease, type UpstreamResolver } from '../iframe-proxy';
-import { normalizeEmbedderOrigins } from '../iframe-proxy-rewrite';
+import type { IframeProxyResult } from '../../lib/platform/iframe-proxy-types';
+import { REMOTE_LEASE_OWNER_PREFIX, normalizeEmbedderOrigins, rewriteOrigin } from '../iframe-proxy-rewrite';
 
 /**
  * Request fields the tunnel never forwards: the connection's own, what it sets
@@ -39,27 +39,36 @@ const DROPPED_REQUEST_HEADERS = new Set([
 /** The proxy's own grant is one hop away; a stall here is the proxy's to report. */
 const GRANT_IDLE_TIMEOUT_MS = 60_000;
 
-export interface FrameHostOptions {
-  /** Upstream resolution, injected by tests; the proxy's system resolver otherwise. */
-  resolve?: UpstreamResolver;
+/**
+ * The host's own iframe proxy — the instance its local panes frame through, so
+ * one lease bound and one set of grants cover both.
+ */
+export interface FrameHostProxy {
+  create(
+    url: string,
+    options: { embedderOrigins: string[]; lease: { owner: string; id: string } },
+  ): Promise<IframeProxyResult>;
+  release(owner: string, id: string): void;
 }
 
-export function createBurrowFrameHost(options: FrameHostOptions = {}): BurrowFrameHost {
+export function createBurrowFrameHost(proxy: FrameHostProxy): BurrowFrameHost {
   return {
-    async open(url, { frameOrigin, embedderOrigins, lease }) {
+    async open(url, { frameOrigin, embedderOrigins, lease: sessionLease }) {
       const [origin] = normalizeEmbedderOrigins([frameOrigin]) ?? [];
       if (!origin) return { refused: 'invalid frame origin' };
       // Without a chain the proxy would frame for nobody and inject nothing,
       // which no Client can show.
       const chain = normalizeEmbedderOrigins(embedderOrigins);
       if (!chain) return { refused: 'invalid embedder origins' };
-      const result = await createIframeProxyUrl(url, { embedderOrigins: chain, lease, resolve: options.resolve });
+      // Prefixed, so a window's lease sweep never ends a session's.
+      const lease = { owner: `${REMOTE_LEASE_OWNER_PREFIX}${sessionLease.owner}`, id: sessionLease.id };
+      const result = await proxy.create(url, { embedderOrigins: chain, lease });
       if (!result.ok) {
-        releaseIframeProxyLease(lease.owner, lease.id);
+        proxy.release(lease.owner, lease.id);
         return { refused: result.detail ?? result.reason };
       }
       const framed = new URL(result.url);
-      return new GrantUpstream(origin, framed, () => releaseIframeProxyLease(lease.owner, lease.id));
+      return new GrantUpstream(origin, framed, () => proxy.release(lease.owner, lease.id));
     },
   };
 }
@@ -121,7 +130,7 @@ class GrantUpstream implements FrameUpstream {
       if (DROPPED_REQUEST_HEADERS.has(name) || name.startsWith('sec-') || name.startsWith('proxy-')) continue;
       let value = rawValue;
       if (name === 'origin' && value === this.#frameOrigin) value = this.#grantOrigin;
-      if (name === 'referer') value = swapOrigin(value, this.#frameOrigin, this.#grantOrigin);
+      if (name === 'referer') value = rewriteOrigin(value, this.#frameOrigin, this.#grantOrigin);
       const prior = headers[name];
       headers[name] = prior === undefined ? value : [...(Array.isArray(prior) ? prior : [prior]), value];
     }
@@ -220,7 +229,7 @@ class GrantExchange implements FrameHttpExchange {
       if (decoder && (lower === 'content-encoding' || lower === 'content-length')) continue;
       // The proxy already keeps a redirect on its grant; on the Client the
       // grant is the frame origin, so the redirect stays there too.
-      if (lower === 'location') value = relativeTo(value, this.#grantOrigin);
+      if (lower === 'location') value = rewriteOrigin(value, this.#grantOrigin, '');
       headers.push([name, value]);
     }
     let body: Readable = response;
@@ -246,10 +255,7 @@ class GrantExchange implements FrameHttpExchange {
 
   #fail(message: string): void {
     if (this.#finished) return;
-    this.#finished = true;
-    this.#request?.destroy();
-    this.#body?.destroy();
-    this.#done();
+    this.abort();
     this.#sink.onError(message);
   }
 }
@@ -333,26 +339,8 @@ function decoderFor(encoding: string): zlib.Gunzip | zlib.Inflate | zlib.BrotliD
   }
 }
 
-/** `value` with an exact parsed `from` origin replaced by `to`; anything else unchanged. */
-function swapOrigin(value: string, from: string, to: string): string {
-  try {
-    const url = new URL(value);
-    if (url.origin === from) return `${to}${url.pathname}${url.search}${url.hash}`;
-  } catch { /* A malformed or relative value passes through. */ }
-  return value;
-}
-
-/** A URL on `origin` as a path, query, and fragment; anything else unchanged. */
-function relativeTo(value: string, origin: string): string {
-  try {
-    const url = new URL(value);
-    if (url.origin === origin) return `${url.pathname}${url.search}${url.hash}`;
-  } catch { /* Already relative, or malformed. */ }
-  return value;
-}
-
 function toBytes(data: WebSocket.RawData): Uint8Array {
-  if (Array.isArray(data)) return new Uint8Array(Buffer.concat(data));
+  if (Array.isArray(data)) return Buffer.concat(data);
   if (data instanceof ArrayBuffer) return new Uint8Array(data);
   return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
 }

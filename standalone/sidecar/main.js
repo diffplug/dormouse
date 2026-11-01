@@ -84,6 +84,9 @@ const host = createSidecarHost({
   send,
   stateDir: process.env.DORMOUSE_STATE_DIR,
   mgr,
+  // The one proxy instance, so a remote frame's lease counts against the same
+  // bound as a window's (docs/specs/remote-api.md -> Frames).
+  iframeProxy: { create: createIframeProxyUrl, release: releaseIframeProxyLease },
 });
 
 // Dor Tools. Shares the app's state directory, so an approved repo stays

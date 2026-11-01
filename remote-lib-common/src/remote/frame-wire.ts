@@ -100,7 +100,8 @@ export interface FrameOpenResult {
   url: string;
 }
 export interface FrameClosedEvent {
-  reason: 'surface-gone' | 'closed';
+  /** The surface's page is gone or moved to another origin; a frame the Client closed is told nothing. */
+  reason: 'surface-gone';
 }
 export interface FrameCloseParams {
   /** The `frame.open` request's id. */

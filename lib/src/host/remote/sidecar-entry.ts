@@ -23,7 +23,7 @@ import type {
   PtySink,
 } from '../../remote/burrow/burrow-surface-provider';
 import { createAskSurfaceProvider } from './ask-surface-provider';
-import { createBurrowFrameHost } from './frame-host';
+import { createBurrowFrameHost, type FrameHostProxy } from './frame-host';
 import { createNativeDirectPeerFactory, disposeNativeDirectPeers } from './native-direct-peer';
 import { createEphemeralBurrowStateStore, FileBurrowStateStore } from './burrow-state-store';
 import { BurrowService } from './service';
@@ -416,6 +416,11 @@ export interface SidecarHostOptions {
    * create the app-data directory, which falls back to the in-memory store.
    */
   stateDir?: string;
+  /**
+   * The iframe proxy `main.js` frames local panes through; absent, no remote
+   * session is served frames (`docs/specs/remote-api.md` → "Frames").
+   */
+  iframeProxy?: FrameHostProxy;
 }
 
 export interface SidecarHost {
@@ -508,7 +513,7 @@ export function createSidecarHost(options: SidecarHostOptions): SidecarHost {
   const service = new BurrowService({
     store,
     provider: bridge.provider,
-    frames: createBurrowFrameHost(),
+    ...(options.iframeProxy ? { frames: createBurrowFrameHost(options.iframeProxy) } : {}),
     kind: 'standalone',
     sendToUi: send,
     relay,

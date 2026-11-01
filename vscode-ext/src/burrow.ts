@@ -41,6 +41,7 @@ import {
 } from '../../lib/src/host/remote/service-protocol';
 import type { BurrowSurfaceProvider } from '../../lib/src/remote/burrow/burrow-surface-provider';
 import { createBurrowFrameHost } from '../../lib/src/host/remote/frame-host';
+import { createIframeProxyUrl, releaseIframeProxyLease } from './iframe-proxy-host';
 import type {
   PeerSurfaceParams,
   PeerSurfaceResult,
@@ -270,7 +271,10 @@ function startService(): void {
   service = new BurrowService({
     store: burrowStateStore(context),
     provider: createBurrowProvider(bound),
-    frames: createBurrowFrameHost(),
+    frames: createBurrowFrameHost({
+      create: (url, { embedderOrigins, lease }) => createIframeProxyUrl(url, embedderOrigins, lease),
+      release: releaseIframeProxyLease,
+    }),
     kind: 'vscode',
     createWebSocket: createRelaySocket,
     sendToUi: (event, data) => {

@@ -3,7 +3,7 @@
  * `docs/specs/remote-api.md` → "The provider seam". Types only.
  */
 
-import type { DirectoryEntry } from 'remote-lib-common';
+import type { DirectoryBrowser, DirectoryEntry } from 'remote-lib-common';
 // The chunk a sink receives is the one the PTY owner's parser produced, so the
 // projection pair is defined beside that parse rather than restated here.
 import type { ProcessedPtyChunk } from '../../lib/processed-pty-stream';
@@ -36,10 +36,7 @@ export interface SurfaceHold {
 }
 
 /** A Surface's embedded page, as its browser chrome shows it. */
-export interface EmbeddedPage {
-  readonly url: string;
-  readonly title?: string;
-}
+export type EmbeddedPage = Pick<DirectoryBrowser, 'url' | 'title'>;
 
 export interface SurfaceHandle {
   /**

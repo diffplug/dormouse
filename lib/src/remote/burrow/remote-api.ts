@@ -106,9 +106,8 @@ export class RemoteApiSession {
       ? new FrameTunnel({
         host: options.frames,
         provider: options.provider,
-        // The session's, never a webview's: a window's lease sweep cannot end
-        // it, and disposal ends every grant this session holds.
-        leaseOwner: `remote:${options.holder.id}`,
+        // The session's, never a webview's: disposal ends every grant it holds.
+        leaseOwner: options.holder.id,
         ok: (request, result) => this.#ok(request, result),
         fail: (request, error) => this.#fail(request, error),
         event: (subId, event, data) => this.#event(subId, event, data),

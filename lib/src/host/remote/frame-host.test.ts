@@ -10,7 +10,10 @@ import { gzipSync } from 'node:zlib';
 import { WebSocketServer } from 'ws';
 import type { HttpHeader } from 'remote-lib-common';
 import type { FrameHttpInit, FrameUpstream } from '../../remote/burrow/burrow-frame-host';
+import { createIframeProxyUrl, releaseIframeProxyLease } from '../iframe-proxy';
 import { createBurrowFrameHost } from './frame-host';
+
+const proxy = { create: createIframeProxyUrl, release: releaseIframeProxyLease };
 
 const FRAME_ORIGIN = 'https://frame.example';
 const POCKET = ['https://pocket.example'];
@@ -33,7 +36,7 @@ function listen(handler: http.RequestListener): Promise<{ port: number; server: 
 
 let leases = 0;
 async function open(url: string): Promise<FrameUpstream> {
-  const opened = await createBurrowFrameHost().open(url, {
+  const opened = await createBurrowFrameHost(proxy).open(url, {
     frameOrigin: FRAME_ORIGIN,
     embedderOrigins: POCKET,
     lease: { owner: 'remote:test', id: `f${++leases}` },
@@ -118,7 +121,7 @@ describe('createBurrowFrameHost', () => {
   });
 
   it('refuses a page the proxy refuses, and an unusable chain', async () => {
-    const host = createBurrowFrameHost();
+    const host = createBurrowFrameHost(proxy);
     const lease = { owner: 'remote:test', id: 'refused' };
     expect(await host.open('http://169.254.169.254/', { frameOrigin: FRAME_ORIGIN, embedderOrigins: POCKET, lease }))
       .toEqual({ refused: 'link-local / metadata addresses are refused' });

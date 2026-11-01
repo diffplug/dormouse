@@ -67,6 +67,8 @@ import {
   instrumentHtml,
   isBlockedAddress,
   normalizeEmbedderOrigins,
+  rewriteOrigin,
+  REMOTE_LEASE_OWNER_PREFIX,
   timedOutPage,
   unreachablePage,
   type ErrorPage,
@@ -198,10 +200,10 @@ export function releaseIframeProxyLease(owner: string, id?: string): void {
   endLeases((lease) => lease.owner === owner && (id === undefined || lease.id === id));
 }
 
-/** End every lease whose owner is not among `owners`: the windows still open. */
+/** End every window's lease whose owner is not among `owners`: the windows still open. */
 export function retainIframeProxyOwners(owners: readonly string[]): void {
   const live = new Set(owners);
-  endLeases((lease) => !live.has(lease.owner));
+  endLeases((lease) => !live.has(lease.owner) && !lease.owner.startsWith(REMOTE_LEASE_OWNER_PREFIX));
 }
 
 function endLeases(ends: (lease: Lease) => boolean): void {
@@ -624,16 +626,6 @@ function varyAlso(vary: http.OutgoingHttpHeader | undefined, field: string): str
     .split(',').map((part) => part.trim()).filter(Boolean);
   if (fields.includes('*') || fields.some((part) => part.toLowerCase() === field.toLowerCase())) return fields.join(', ');
   return [...fields, field].join(', ');
-}
-
-// Compare parsed origins, never string prefixes or embedded query values.
-// A foreign redirect/referer must keep its authority and its payload intact.
-function rewriteOrigin(value: string, from: string, to: string): string {
-  try {
-    const url = new URL(value);
-    if (url.origin === from) return `${to}${url.pathname}${url.search}${url.hash}`;
-  } catch { /* Relative Locations and malformed headers pass through unchanged. */ }
-  return value;
 }
 
 // --- WebSocket upgrade passthrough (dev-server HMR, openvscode-server) -------

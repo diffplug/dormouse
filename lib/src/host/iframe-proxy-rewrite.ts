@@ -78,6 +78,27 @@ export function normalizeEmbedderOrigins(value: unknown): string[] | null {
 }
 
 /**
+ * The owner prefix of a lease a remote session holds for its frame
+ * (`docs/specs/remote-api.md` → "Frames"): the session releases it, and no
+ * window sweep does.
+ */
+export const REMOTE_LEASE_OWNER_PREFIX = 'remote:';
+
+/**
+ * `value` with an exact parsed `from` origin replaced by `to`, path, query, and
+ * fragment kept. Compares parsed origins, never string prefixes or embedded
+ * query values, so a foreign redirect or referer keeps its authority and its
+ * payload intact; a relative or malformed value passes through unchanged.
+ */
+export function rewriteOrigin(value: string, from: string, to: string): string {
+  try {
+    const url = new URL(value);
+    if (url.origin === from) return `${to}${url.pathname}${url.search}${url.hash}`;
+  } catch { /* Relative Locations and malformed headers pass through unchanged. */ }
+  return value;
+}
+
+/**
  * The proxy's framing policy, replacing or supplementing the upstream's CSP.
  * `'self'` permits nested documents within this one per-grant origin; every
  * external ancestor must still be in the validated app chain.

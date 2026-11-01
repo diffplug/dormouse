@@ -293,7 +293,7 @@ Source of truth: `lib/src/components/wall/IframePanel.tsx`, `lib/src/host/iframe
 
 ### Iframe Proxy Leases
 
-**Must take every mounted `IframePanel`'s grant under a lease** it mints, held under an owner the host transport names (VS Code router, standalone window label), never the webview. A remote session's frame holds its own lease under that session (`docs/specs/remote-api.md` -> "Frames").
+**Must take every mounted `IframePanel`'s grant under a lease** it mints, held under an owner the host transport names (VS Code router, standalone window label), never the webview. A remote session's frame holds its own lease under that session, which no window's end releases (`docs/specs/remote-api.md` -> "Frames").
 
 - **Never give a leased grant an idle TTL or evict it.** It ends, with every connection and upgraded pipe, when its lease is released (unmount), its owner reinitializes or ends, or the lease moves to another upstream origin (rationale).
 - The same lease, upstream origin and embedder chain reuse the grant, so Reload, Back and Forward keep the page's origin and storage.
