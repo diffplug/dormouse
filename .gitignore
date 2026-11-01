@@ -9,6 +9,7 @@ dor/src/generated-skill.ts
 lib/dist/
 lib/dist-pocket/
 lib/dist-frame-origin/
+.frame-origin-check/
 lib/dist-one-time/
 *.tsbuildinfo
 
