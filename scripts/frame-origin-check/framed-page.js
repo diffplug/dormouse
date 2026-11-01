@@ -94,17 +94,44 @@
       else reject(new Error(`${JSON.stringify(got)} code ${event.code} protocol ${socket.protocol}`));
     };
   }));
-  await check('a page keeps localStorage across runs', async () => {
-    const before = localStorage.getItem('frame-check');
-    localStorage.setItem('frame-check', String(Date.now()));
-    need(localStorage.getItem('frame-check'), 'did not stick');
-    return before ? `kept from ${Math.round((Date.now() - Number(before)) / 1000)} s ago` : 'first run: set';
-  });
-  await check('a page has IndexedDB', () => new Promise((resolve, reject) => {
+  // What survives from the last run: the check page judges it, knowing whether
+  // there was a last run. Each store reports what it held, then takes this run's.
+  const now = String(Date.now());
+  const stored = async (name, swap) => {
+    try {
+      parent.postMessage({ kind: 'stored', name, previous: (await swap()) ?? null }, '*');
+    } catch (error) {
+      parent.postMessage({ kind: 'stored', name, error: `${error?.name}: ${error?.message}` }, '*');
+    }
+  };
+  const idb = (run) => new Promise((resolve, reject) => {
     const open = indexedDB.open('frame-check', 1);
     open.onupgradeneeded = () => open.result.createObjectStore('s');
     open.onerror = () => reject(open.error);
-    open.onsuccess = () => { open.result.close(); resolve('opened'); };
+    open.onsuccess = () => run(open.result, resolve, reject);
+  });
+  await stored('localStorage', () => {
+    const before = localStorage.getItem('frame-check');
+    localStorage.setItem('frame-check', now);
+    return before;
+  });
+  await stored('IndexedDB', () => idb((db, resolve, reject) => {
+    const tx = db.transaction('s', 'readwrite');
+    const read = tx.objectStore('s').get('at');
+    read.onsuccess = () => tx.objectStore('s').put(now, 'at');
+    tx.oncomplete = () => { db.close(); resolve(read.result); };
+    tx.onerror = () => reject(tx.error);
   }));
+  await stored('Cache API', async () => {
+    const cache = await caches.open('frame-check');
+    const hit = await cache.match('/frame-check-at');
+    await cache.put('/frame-check-at', new Response(now));
+    return hit ? hit.text() : null;
+  });
+  await stored('a cookie', () => {
+    const before = /(?:^|; )frame-check=(\d+)/.exec(document.cookie)?.[1];
+    document.cookie = `frame-check=${now}; max-age=86400; path=/; secure; samesite=none`;
+    return before;
+  });
   parent.postMessage({ kind: 'page-done' }, '*');
 })();

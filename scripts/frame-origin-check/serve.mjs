@@ -6,7 +6,7 @@
  * shim and Hosted handler. Nothing here reaches a Burrow or reads pairing data.
  *
  *   pnpm --filter dormouse-lib build:frame-origin
- *   node scripts/frame-origin-check/serve.mjs --pocket-origin <https url> --frame-origin <https url> --reports <dir>
+ *   node scripts/frame-origin-check/serve.mjs --case cross-site --pocket-origin <https url> --frame-origin <https url> --reports <dir>
  *
  * Point each origin at its port with whatever gives a phone HTTPS. For the
  * cross-site case they must be different sites. Each finished run is written to
@@ -28,6 +28,7 @@ const { values } = parseArgs({
     'pocket-port': { type: 'string', default: '47321' },
     'frame-port': { type: 'string', default: '47322' },
     reports: { type: 'string' },
+    case: { type: 'string', default: 'local' },
   },
 });
 const pocketOrigin = values['pocket-origin'] ?? `http://localhost:${values['pocket-port']}`;
@@ -52,7 +53,7 @@ const checkPage = await bundle(join(here, 'check-page.ts'), {
 const handlerSource = await bundle(join(root, 'hosted', 'server', 'frame-origin.ts'), { format: 'esm', platform: 'neutral', mainFields: ['module', 'main'] });
 const { frameOriginResponse } = await import(`data:text/javascript;base64,${Buffer.from(handlerSource).toString('base64')}`);
 
-const SHELL = `<!doctype html><html data-frame-origin="${frameOrigin}"><head><meta charset="utf-8">
+const SHELL = `<!doctype html><html data-frame-origin="${frameOrigin}" data-case="${values.case}"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="apple-mobile-web-app-capable" content="yes"><link rel="manifest" href="/manifest.webmanifest">
 <title>Frame check</title><style>

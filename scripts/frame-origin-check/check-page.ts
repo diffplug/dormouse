@@ -10,6 +10,7 @@ import { tunnelSocketShim } from '../../lib/src/host/iframe-proxy-rewrite';
 
 declare const FRAMED_PAGE: string;
 const FRAME_ORIGIN: string = (document.documentElement.dataset.frameOrigin ?? '');
+const CASE: string = document.documentElement.dataset.case ?? '';
 
 interface Result { name: string; ok: boolean; detail: string }
 const results: Result[] = [];
@@ -31,6 +32,24 @@ const sumOf = (bytes: Uint8Array, start = 0): number => {
 };
 
 let cancelled = false;
+
+/**
+ * The Pocket page's own storage is the control: it says there was a last run, in
+ * this browser context, for the frame's stores to be judged against.
+ */
+const RUNS_KEY = 'frame-check-runs';
+const priorRuns = Number(localStorage.getItem(RUNS_KEY) ?? 0);
+const lastRunAt = Number(localStorage.getItem('frame-check-last') ?? 0);
+localStorage.setItem(RUNS_KEY, String(priorRuns + 1));
+localStorage.setItem('frame-check-last', String(Date.now()));
+
+/** One store's verdict on what it kept from the last run. */
+function recordStored(name: string, previous: string | null, error?: string): void {
+  if (error) return record(`frame ${name} usable`, false, error);
+  if (priorRuns === 0) return record(`frame ${name} survives`, true, 'first run here: set');
+  if (previous === null) return record(`frame ${name} survives`, false, 'LOST since the last run');
+  record(`frame ${name} survives`, true, `kept from ${Math.round((Date.now() - Number(previous)) / 1000)} s ago`);
+}
 const text = (body: string, type = 'text/plain', status = 200, headers: [string, string][] = []): FrameResponse => ({
   status, statusText: 'OK', headers: [['content-type', type], ...headers], body: new Blob([body]).stream(),
 });
@@ -111,14 +130,19 @@ function probe(): Promise<void> {
     frame.hidden = true;
     frame.src = `${FRAME_ORIGIN}/__dormouse-frame/probe.html`;
     const timer = setTimeout(() => {
-      record('frame origin loads in a cross-site frame', false, 'no answer in 15 s');
+      record('frame origin loads in the frame', false, 'no answer in 15 s');
       resolve();
     }, 15000);
+    addEventListener('message', (event) => {
+      if (event.origin !== FRAME_ORIGIN || event.data?.kind !== 'probe-registration') return;
+      if (priorRuns === 0) record('worker registration survives', true, event.data.existing ? 'already registered' : 'first run here');
+      else record('worker registration survives', event.data.existing, event.data.existing ? 'still registered' : 'LOST since the last run');
+    }, { once: false });
     addEventListener('message', function on(event) {
       if (event.origin !== FRAME_ORIGIN || event.data?.kind !== 'probe') return;
       removeEventListener('message', on);
       clearTimeout(timer);
-      record('frame origin loads in a cross-site frame', true);
+      record('frame origin loads in the frame', true);
       record('service worker API present in the frame', event.data.hasApi, event.data.secure ? 'secure context' : 'NOT a secure context');
       record('service worker registers in the frame', event.data.registered, event.data.detail);
       frame.remove();
@@ -129,6 +153,8 @@ function probe(): Promise<void> {
 }
 
 async function run(): Promise<void> {
+  record(`case: ${CASE}`, true, `${location.origin} framing ${FRAME_ORIGIN}`);
+  record('run in this context', true, priorRuns === 0 ? 'first; Pocket-side storage was empty' : `number ${priorRuns + 1}; Pocket-side storage kept from ${Math.round((Date.now() - lastRunAt) / 1000)} s ago`);
   await probe();
   const bootstrap = document.createElement('iframe');
   bootstrap.hidden = true;
@@ -152,6 +178,7 @@ async function run(): Promise<void> {
     addEventListener('message', (event) => {
       if (event.origin !== FRAME_ORIGIN) return;
       if (event.data?.kind === 'check') record(event.data.name, event.data.ok, event.data.detail);
+      if (event.data?.kind === 'stored') recordStored(event.data.name, event.data.previous, event.data.error);
       if (event.data?.kind === 'page-done') resolve();
     });
   });
@@ -173,13 +200,18 @@ function finish(): void {
   const failed = results.filter((result) => !result.ok).length;
   headline.textContent = failed ? `${failed} FAILED, report sent` : 'ALL PASSED, report sent';
   headline.className = failed ? 'fail' : 'pass';
+  const again = document.createElement('button');
+  again.textContent = 'Reload and run again';
+  again.style.cssText = 'font-size:17px;padding:10px;margin:8px 0';
+  again.onclick = () => location.reload();
+  headline.after(again);
   const standalone = (navigator as { standalone?: boolean }).standalone === true || matchMedia('(display-mode: standalone)').matches;
   void fetch('/report', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       at: new Date().toISOString(), userAgent: navigator.userAgent, standalone,
-      pocketOrigin: location.origin, frameOrigin: FRAME_ORIGIN, failed, results,
+      case: CASE, pocketOrigin: location.origin, frameOrigin: FRAME_ORIGIN, failed, results,
     }),
   });
 }
