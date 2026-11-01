@@ -60,8 +60,16 @@ function hosted(policy: NetworkPolicy, status = UNENROLLED_STATUS, refusal: Path
   return { status, network: networkPolicyResult(policy, 'hosted', INTERFACES, refusal) };
 }
 
-/** 10:42 this morning, on whatever clock renders the story. */
-const morning = new Date();
+/** The clock every story here reads. The stub pairs a phone an hour before now,
+ *  so under a real clock "Paired today" reads yesterday's date in the first hour
+ *  of a day. Like
+ *  `RemoteControlSection`'s, `beforeEach` pins it only around render: a
+ *  `parameters` literal is built at module load, so a timestamp there must use
+ *  `STORY_NOW` itself. */
+const STORY_NOW = Date.UTC(2026, 0, 15, 12);
+
+/** 10:42 on the story's morning. */
+const morning = new Date(STORY_NOW);
 morning.setHours(10, 42, 0, 0);
 const AT_10_42 = morning.getTime();
 
@@ -73,6 +81,11 @@ function selfHost(policy: NetworkPolicy, status = SELF_HOST_UNENROLLED_STATUS) {
 const meta: Meta<typeof NetworkStory> = {
   title: 'Modals/NetworkSettings',
   component: NetworkStory,
+  beforeEach: () => {
+    const realNow = Date.now;
+    Date.now = () => STORY_NOW;
+    return () => { Date.now = realNow; };
+  },
   // The panel reads module-singleton stores, as `RemoteControlSection`'s
   // stories explain; each needs its own frame on a docs page.
   parameters: { docs: { story: { inline: false, height: '640px' } } },
@@ -104,7 +117,7 @@ export const Nothing: Story = {
 
 /** Nine days since the last check: the Baseboard is reminding them (`UpdateBanner` → CheckDue). */
 export const NothingCheckDue: Story = {
-  parameters: { primedBurrow: hosted(nothingPolicy()), primedUpdates: { checkedAt: Date.now() - 9 * DAY } },
+  parameters: { primedBurrow: hosted(nothingPolicy()), primedUpdates: { checkedAt: STORY_NOW - 9 * DAY } },
   play: async ({ canvasElement }) => {
     const canvas = await settled(canvasElement);
     await canvas.findByText(/Last checked 9 days ago\./);
@@ -136,7 +149,7 @@ export const NothingChooseFromPhones: Story = {
 export const LocalNetworks: Story = {
   parameters: {
     primedBurrow: hosted({ level: 'local', allowed: [...WIFI.prefixes, ...TAILSCALE.prefixes], autoUpdate: true }),
-    primedUpdates: { checkedAt: Date.now() },
+    primedUpdates: { checkedAt: STORY_NOW },
   },
   play: async ({ canvasElement }) => {
     const canvas = await settled(canvasElement);
