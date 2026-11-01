@@ -45,7 +45,7 @@ import {
 const TITLE_ID = 'settings-dialog-title';
 
 /** A picker row; `min-w-0` lets the picker's trigger truncate in a narrow dialog. */
-const PICKER_ROW = 'flex items-center gap-1.5 text-sm text-foreground [&>div]:min-w-0';
+const PICKER_ROW = 'flex items-center gap-1.5 text-sm text-foreground';
 
 /**
  * The "Push will be sent to …" line. Every state names a cause, because a push
@@ -438,7 +438,7 @@ export function SettingsDialog({ onClose, initialTopic }: { onClose: () => void;
                   <section data-setting="theme" hidden={!matches('theme')} className={PICKER_ROW}>
                     <span>Theme:</span>
                     <ThemePicker
-                      variant="settings-dialog"
+                      variant="row"
                       offerStore={getPlatform().offersThemeStore === true}
                       open={openMenu === 'theme'}
                       onOpenChange={onThemeOpenChange}

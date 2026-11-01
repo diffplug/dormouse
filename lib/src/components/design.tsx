@@ -17,6 +17,10 @@ import { OVERLAY_VIEWPORT_MARGIN_PX } from '../lib/ui-geometry';
  * elevated zoom inset) must use this constant so the chrome stays proportional. */
 export const PANE_HEADER_HEIGHT_PX = 30;
 
+/** Every mobile top bar: the terminal's and the Sessions screen's, so the bar
+ *  holds still between views. 44px because each control in it is a touch target. */
+export const MOBILE_BAR_HEIGHT_CLASS = 'h-11';
+
 /** Soft app-ground halo separates zoomed panes and context popups from content below. */
 export const ELEVATED_PANE_SHADOW = '0 0 5px 5px var(--color-app-bg)';
 
@@ -164,7 +168,7 @@ export const HEADER_PALETTE_TRANSITION_CLASS =
  *  active/inactive swap crossfades in step with the focus ring's travel;
  *  children inherit via `text-inherit`. */
 export const paneHeader = tv({
-  base: `flex h-full min-w-0 flex-1 cursor-grab items-center gap-1.5 ${TERMINAL_TOP_RADIUS_CLASS} pl-2 pr-[5px] text-sm leading-none font-mono select-none active:cursor-grabbing ${HEADER_PALETTE_TRANSITION_CLASS}`,
+  base: `flex h-full min-w-0 flex-1 cursor-grab items-center gap-1.5 ${TERMINAL_TOP_RADIUS_CLASS} pl-2 pr-[5px] text-sm leading-tight font-mono select-none active:cursor-grabbing ${HEADER_PALETTE_TRANSITION_CLASS}`,
   variants: {
     state: {
       active: 'bg-header-active-bg text-header-active-fg',
@@ -885,7 +889,7 @@ export const themePreviewButton = tv({
   base: 'flex min-w-0 items-center rounded transition-colors focus-visible:outline-2 focus-visible:outline-current',
   variants: {
     kind: {
-      trigger: 'gap-2 px-2 py-1 font-mono text-sm',
+      trigger: 'gap-2 px-2 py-1 font-mono text-sm pointer-coarse:min-h-11',
       // Inset so the ring stays inside the entry's own clipped corners.
       entry: 'min-h-8 flex-1 py-1 pl-2 text-left text-sm pointer-coarse:min-h-11 focus-visible:-outline-offset-3',
       uninstall: 'mx-1 min-h-8 shrink-0 justify-center px-1.5 pointer-coarse:min-h-11 hover:opacity-65 focus-visible:-outline-offset-3',
