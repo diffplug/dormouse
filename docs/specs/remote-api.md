@@ -343,6 +343,10 @@ A session surviving relay loss remains unstaged.
 
 Browser surfaces can produce audio; VR will want it (spatial, per-panel).
 
+### 10. Paired-browser list and revoke
+
+A Client lists the Burrow's paired browsers and revokes one: the wire half of `docs/specs/remote-security-model.md` -> "Account-wide devices" stage 2, which owns what the list carries and what a revoke must prove. Like layout operations, it lies outside protocol-v1's terminal-only scope.
+
 ### QoS hardening (phone-first, orthogonal to the stages above)
 
 * Terminal output is already coalesced burrow-side; the remote stream should add a per-session byte budget with tail-drop + resync (an implicit re-attach: repaint via resize) rather than unbounded buffering on a bad link.
