@@ -8,7 +8,7 @@ import { ThemePicker } from '../components/ThemePicker';
  * The `compact` picker: a free-floating trigger for hosts with no baseboard and
  * therefore no Settings dialog — the website's `/playground/pocket` mounts and
  * docs pages (docs/specs/theme.md -> "Where the user picks a theme"). Every host
- * that *has* a baseboard uses the `settings-dialog` variant instead, which
+ * that *has* a baseboard uses the `row` variant instead, which
  * `Modals/SettingsDialog` covers in place.
  *
  * Right-aligned with headroom below, matching the `/playground/pocket` mounts.

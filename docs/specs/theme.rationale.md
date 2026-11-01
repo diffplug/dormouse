@@ -40,7 +40,7 @@
 
 **Why VS Code gets no picker.** VS Code supplies `--vscode-*` from its own active theme, so its built-in theme UI is the only control that can change what Dormouse renders there.
 
-**Why `/playground/pocket` keeps the `compact` picker.** Those two mounts render a mobile prototype: no baseboard, so no Settings dialog to put the picker in.
+**Why the desktop `/playground/pocket` keeps the `compact` picker.** It renders a mobile prototype in a marketing page: no baseboard, so no Settings dialog to put the picker in, and its phone mockup is not interactive. The phone mount picks on the mobile Settings page instead.
 
 **Why the host fallback is module state.** Uninstalling the active theme is reachable from two depths — the picker row's `X` and the store dialog's `Remove` — and a prop-held fallback goes missing on one, dropping to the first bundled theme instead of the host's.
 

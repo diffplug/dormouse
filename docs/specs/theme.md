@@ -108,7 +108,7 @@ Source of truth: `DormouseTheme` in `lib/src/lib/themes/types.ts`; build importe
 
 ## Where the user picks a theme
 
-**Every host that lets the user pick a theme does it in the Settings dialog**; **host chrome — the standalone titlebar, the website playground navbar — carries none**. Pages with no Settings dialog — the `/playground/pocket` mounts and the docs pages — use the free-floating `compact` picker (rationale).
+**Every host that lets the user pick a theme does it in the Settings dialog**, or on the mobile composition's Settings page (`docs/specs/mobile-terminal-ui.md` -> "Sessions screen"); **host chrome — the standalone titlebar, the website playground navbar — carries none**. Pages with neither — the desktop `/playground/pocket` mount and the docs pages — use the free-floating `compact` picker (rationale).
 
 - **VS Code offers none at all** (rationale). `VSCodeAdapter` sets the optional `hostOwnsTheme` capability and the dialog hides its Theme row (`docs/specs/transport.md` → Adapter model).
 - **Only the website offers installing a theme from OpenVSX**, a fetch from the page that no network policy governs (`docs/specs/remote-network.md` -> "Policy"). **Never offer it in Standalone**, whose content policy blocks open-vsx.org.
