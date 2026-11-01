@@ -204,9 +204,10 @@ A framed page (`docs/specs/remote-api.md` -> "Frames") runs at a frame origin: a
 - **Must serve one frame's grant through a bootstrap port**: whatever arrives there may be the page's own, and so asks only for what that page could fetch.
 - **The worker stands in for the `Origin` and `Referer` the browser adds past it**, naming the frame origin on a write. **Must refuse a top-level page and a write from another site**, neither of which a frame makes.
 - **Must keep the worker stateless**: it is stopped at will, so it finds the bootstrap page again for each request.
+- **Never count on a framed page's own browser storage surviving a relaunch** (rationale); a built-in Tool keeps none (`docs/specs/dor-tools-builtin.md` -> "Editing files").
 - **The page's `WebSocket` is shimmed by a tunneled grant alone**, since no worker sees a socket: a same-origin one goes as a message to the controlling worker, and any other stays native.
 
-Source of truth: `frameOriginFor` in `remote-lib-common/src/remote/frame-origin.ts`, `installFrameWorker` in `lib/src/remote/frame-origin/worker.ts`, `lib/src/remote/frame-origin/bootstrap.ts`, `serveFrame` in `lib/src/remote/frame-origin/frame-bridge.ts`, `tunnelSocketShim` in `lib/src/host/iframe-proxy-rewrite.ts`, `lib/vite.frame-origin.config.ts`.
+Source of truth: `frameOriginFor` in `remote-lib-common/src/remote/frame-origin.ts`, `installFrameWorker` in `lib/src/remote/frame-origin/worker.ts`, `lib/src/remote/frame-origin/bootstrap.ts`, `serveFrame` in `lib/src/remote/frame-origin/frame-bridge.ts`, `tunnelSocketShim` in `lib/src/host/iframe-proxy-rewrite.ts`, `lib/vite.frame-origin.config.ts`, `scripts/frame-origin-check/serve.mjs` (the check a real phone runs).
 
 ## Deployment: same-origin, always
 
@@ -228,8 +229,7 @@ Source of truth: `pocketContentSecurityPolicy` in `remote-lib-common/src/remote/
 **Scope: pocket-frames** — the rest of the Client half of [Frame origin](#frame-origin), in order:
 
 1. **Hosted's frame Worker on a registrable domain of its own**, so a framed page cannot set a cookie on `dormouse.sh`: its Wrangler config on a wildcard route, a place in `WORKERS` and the release checks, `lib/dist-frame-origin` staged as its assets with `CLIENT_ORIGIN` the relay's, the domain in `HOSTED_POCKET_DEPLOYMENT`, and its `FAIL IF` lines in `docs/specs/security-hosted.md`.
-2. **A real iPhone first**, in a tab and a Home Screen install: a worker in a cross-site frame, on the capability harness ([The capability harness](#the-capability-harness)).
-3. **The wall shows a browser entry, and a Tool's page beside its terminal**: the hello declaring `capabilities.frames` only where the deployment names a domain, `frame-src` added to Pocket's CSP, the salt `frameOriginFor` takes, and `FrameClient.dispose` wired to session loss.
+2. **The wall shows a browser entry, and a Tool's page beside its terminal**: the hello declaring `capabilities.frames` only where the deployment names a domain, `frame-src` added to Pocket's CSP, the salt `frameOriginFor` takes, and `FrameClient.dispose` wired to session loss.
 
 **A self-host Relay serves no frame origin**, so its Pocket declares no frames and stays terminal-only.
 
