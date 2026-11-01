@@ -103,7 +103,8 @@ function renderUi(props: Partial<MobileTerminalUiProps> = {}) {
     </StrictMode>,
   ));
   renderWith(props);
-  const button = (name: string) => container.querySelector<HTMLButtonElement>(`button[aria-label="${name}"]`);
+  const button = (name: string) => [...container.querySelectorAll('button')]
+    .find((b) => (b.getAttribute('aria-label') ?? b.textContent) === name) ?? null;
   const textButton = (text: string) => [...container.querySelectorAll('button')].find((b) => b.textContent === text) ?? null;
   return {
     container,
@@ -171,7 +172,7 @@ describe('MobileTerminalUi composer', () => {
     expect(onSendInput.mock.calls).toEqual([['pw'], ['\r']]);
   });
 
-  it('discards the text on Cancel, and offers no Send while empty', () => {
+  it('keeps the text across Cancel, and offers no Send while empty', () => {
     const onSendInput = vi.fn();
     const { typeButton, field, textButton } = renderUi({ onSendInput });
     act(() => typeButton.click());
@@ -179,9 +180,24 @@ describe('MobileTerminalUi composer', () => {
     act(() => setNativeFieldValue(field()!, 'rm -rf build'));
     act(() => textButton('Cancel')!.click());
     expect(field()).toBeNull();
+    expect(onSendInput).not.toHaveBeenCalled();
+    act(() => typeButton.click());
+    expect(field()!.value).toBe('rm -rf build');
+  });
+
+  it('starts empty after a Send, and never keeps a password across Cancel', async () => {
+    const { typeButton, field, passwordBox, textButton } = renderUi({ onSendInput: vi.fn() });
+    act(() => typeButton.click());
+    act(() => setNativeFieldValue(field()!, 'ls'));
+    await act(async () => textButton('Send')!.click());
     act(() => typeButton.click());
     expect(field()!.value).toBe('');
-    expect(onSendInput).not.toHaveBeenCalled();
+
+    act(() => setNativeFieldValue(field()!, 'hunter2'));
+    act(() => passwordBox()!.click());
+    act(() => textButton('Cancel')!.click());
+    act(() => typeButton.click());
+    expect(field()).toMatchObject({ type: 'textarea', value: '' });
   });
 
   it('closes when the consumer opens the Sessions screen', () => {

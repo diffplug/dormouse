@@ -234,7 +234,7 @@ export function PocketTerminalExperience({
             sessions={POCKET_SESSIONS}
             activeSessionId={activePaneId}
             onActiveSessionChange={setActivePaneId}
-            onSessionMinimize={() => setView("sessions")}
+            onShowSessions={() => setView("sessions")}
           />
         ) : null
       }

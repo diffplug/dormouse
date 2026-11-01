@@ -130,7 +130,7 @@ export function PocketWall({ adapter, onError, persist = true }: {
           onSessionTodoClear={null}
           activeSessionId={activePaneId ?? undefined}
           onActiveSessionChange={setActivePaneId}
-          onSessionMinimize={() => setView('sessions')}
+          onShowSessions={() => setView('sessions')}
           showKillButton={false}
         />
       }

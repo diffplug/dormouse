@@ -167,7 +167,7 @@ function PocketWallFrame(args: MobileTerminalUiProps) {
             sessions={POCKET_WALL_SESSIONS}
             activeSessionId={activePaneId}
             onActiveSessionChange={setActivePaneId}
-            onSessionMinimize={() => setView('sessions')}
+            onShowSessions={() => setView('sessions')}
           />
         )}
         activeView={view}

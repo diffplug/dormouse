@@ -1,8 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
-import {
-  ArrowLineDownIcon,
-  XIcon,
-} from '@phosphor-icons/react';
+import { CaretDownIcon, XIcon } from '@phosphor-icons/react';
 import { HeaderActionButton } from './HeaderActionButton';
 import { TerminalPane } from './TerminalPane';
 import { AlertRingInset, alertRingRow, useAlertRingBurst } from './alert-ring';
@@ -42,7 +39,8 @@ export interface MobileWallProps {
   activeSessionId?: string;
   defaultActiveSessionId?: string;
   onActiveSessionChange?: (id: string) => void;
-  onSessionMinimize?: (id: string) => void;
+  /** Tapping the header's Session title asks for the Sessions screen; omitted, the title is plain text. */
+  onShowSessions?: () => void;
   onSessionKill?: (id: string) => void;
   showKillButton?: boolean;
   className?: string;
@@ -91,7 +89,7 @@ export function MobileWall({
   activeSessionId,
   defaultActiveSessionId,
   onActiveSessionChange,
-  onSessionMinimize,
+  onShowSessions,
   onSessionKill,
   showKillButton = true,
   className,
@@ -157,7 +155,7 @@ export function MobileWall({
       <MobileWallHeader
         session={activeItem}
         onTodoClear={onSessionTodoClear ? () => onSessionTodoClear(activeItem.id) : undefined}
-        onMinimize={() => onSessionMinimize?.(activeItem.id)}
+        onShowSessions={onShowSessions}
         onKill={() => killSession(activeItem.id)}
         showKillButton={showKillButton}
       />
@@ -173,13 +171,13 @@ export function MobileWall({
 function MobileWallHeader({
   session,
   onTodoClear,
-  onMinimize,
+  onShowSessions,
   onKill,
   showKillButton,
 }: {
   session: MobileTerminalSessionItem;
   onTodoClear?: () => void;
-  onMinimize: () => void;
+  onShowSessions?: () => void;
   onKill: () => void;
   showKillButton: boolean;
 }) {
@@ -187,15 +185,31 @@ function MobileWallHeader({
   const TodoPill = onTodoClear ? 'button' : 'span';
   const row = alertRingRow(session.status, null);
   const burst = useAlertRingBurst(row, session.episode);
+  const title = (
+    <>
+      <span className="min-w-0 shrink truncate font-medium">{session.title}</span>
+      {session.secondary ? (
+        <span className="min-w-0 shrink truncate opacity-70">{session.secondary}</span>
+      ) : null}
+    </>
+  );
 
   return (
-    <div className="relative flex h-8 shrink-0 items-center gap-1.5 overflow-hidden bg-header-active-bg pl-2 pr-[5px] font-mono text-sm leading-none text-header-active-fg">
-      <div className="flex min-w-0 flex-1 items-center gap-1.5">
-        <span className="min-w-0 shrink truncate font-medium">{session.title}</span>
-        {session.secondary ? (
-          <span className="min-w-0 shrink truncate opacity-70">{session.secondary}</span>
-        ) : null}
-      </div>
+    // 44px: every control in it is a touch target. Kill fills the right edge.
+    <div className={`relative flex h-11 shrink-0 items-center gap-1.5 overflow-hidden bg-header-active-bg pl-2 font-mono text-sm leading-tight text-header-active-fg ${showKillButton ? '' : 'pr-2'}`}>
+      {onShowSessions ? (
+        <button
+          type="button"
+          title="Show sessions"
+          onClick={onShowSessions}
+          className="-ml-2 flex h-full min-w-0 flex-1 items-center gap-1.5 px-2 text-left transition-colors hover:bg-current/10"
+        >
+          {title}
+          <CaretDownIcon size={10} weight="bold" className="shrink-0 opacity-65" aria-hidden="true" />
+        </button>
+      ) : (
+        <div className="flex min-w-0 flex-1 items-center gap-1.5">{title}</div>
+      )}
       {todoPill.visible ? (
         <TodoPill
           type={onTodoClear ? 'button' : undefined}
@@ -212,26 +226,16 @@ function MobileWallHeader({
           {todoPill.body}
         </TodoPill>
       ) : null}
-      <div className="ml-1 flex shrink-0 items-center gap-0.5">
+      {showKillButton ? (
         <HeaderActionButton
-          className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10"
-          onClick={onMinimize}
-          ariaLabel="Minimize"
-          tooltip="Minimize"
+          className="flex h-full w-11 shrink-0 items-center justify-center transition-colors hover:bg-error/10 hover:text-error"
+          onClick={onKill}
+          ariaLabel="Kill"
+          tooltip="Kill"
         >
-          <ArrowLineDownIcon size={14} />
+          <XIcon size={16} />
         </HeaderActionButton>
-        {showKillButton ? (
-          <HeaderActionButton
-            className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-error/10 hover:text-error"
-            onClick={onKill}
-            ariaLabel="Kill"
-            tooltip="Kill"
-          >
-            <XIcon size={14} />
-          </HeaderActionButton>
-        ) : null}
-      </div>
+      ) : null}
       {row && <AlertRingInset ground="header-active" burst={burst} />}
     </div>
   );

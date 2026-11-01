@@ -48,6 +48,11 @@ export interface ThemePickerProps {
    * and Standalone's content policy blocks it.
    */
   offerStore?: boolean;
+  /** Default true. Offer "Debug current theme" below the list. */
+  offerDebugger?: boolean;
+  /** Default true. False offers bundled themes only and keeps the pick for
+   *  this page alone (`useThemeChoice`). */
+  persist?: boolean;
 }
 
 
@@ -61,8 +66,10 @@ export function ThemePicker({
   menuSide = 'below',
   onPick,
   offerStore = false,
+  offerDebugger = true,
+  persist = true,
 }: ThemePickerProps) {
-  const { themes, activeId, select, uninstall, refresh: refreshThemes } = useThemeChoice();
+  const { themes, activeId, select, uninstall, refresh: refreshThemes } = useThemeChoice(persist);
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const [storeOpen, setStoreOpen] = useState(false);
   const [debuggerOpen, setDebuggerOpen] = useState(false);
@@ -111,7 +118,7 @@ export function ThemePicker({
         aria-label={`Theme: ${activeTheme.label}`}
         onClick={() => setOpen(!open)}
         // The compact trigger stands alone on a touch surface, so it takes the
-        // 44px minimum the dialog row inherits from the dialog around it.
+        // 44px minimum on every pointer, not only a coarse one.
         className={`group/theme-preview ${themePreviewButton({ kind: 'trigger' })} ${inDialog ? '' : 'min-h-11 min-w-11'}`}
         style={preview.style}
       >
@@ -137,30 +144,34 @@ export function ThemePicker({
             onUninstall={uninstall}
           />
 
-          <div className="shrink-0 border-t border-border p-1">
-            <button
-              type="button"
-              onClick={() => {
-                setOpen(false);
-                setDebuggerOpen(true);
-              }}
-              className="w-full rounded px-3 py-1.5 text-left text-sm font-medium text-foreground transition-opacity hover:opacity-85"
-            >
-              Debug current theme
-            </button>
-            {offerStore ? (
-              <button
-                type="button"
-                onClick={() => {
-                  setOpen(false);
-                  setStoreOpen(true);
-                }}
-                className="w-full rounded px-3 py-1.5 text-left text-sm font-medium text-link transition-opacity hover:opacity-85"
-              >
-                Install theme from OpenVSX
-              </button>
-            ) : null}
-          </div>
+          {offerDebugger || offerStore ? (
+            <div className="shrink-0 border-t border-border p-1">
+              {offerDebugger ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpen(false);
+                    setDebuggerOpen(true);
+                  }}
+                  className="w-full rounded px-3 py-1.5 text-left text-sm font-medium text-foreground transition-opacity hover:opacity-85"
+                >
+                  Debug current theme
+                </button>
+              ) : null}
+              {offerStore ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpen(false);
+                    setStoreOpen(true);
+                  }}
+                  className="w-full rounded px-3 py-1.5 text-left text-sm font-medium text-link transition-opacity hover:opacity-85"
+                >
+                  Install theme from OpenVSX
+                </button>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       ) : null}
 

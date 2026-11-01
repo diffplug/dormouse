@@ -271,12 +271,11 @@ function ModeBar({
   );
 }
 
-const SCREEN_ICON_BUTTON_CLASS = clsx(
-  'grid size-9 shrink-0 place-items-center rounded transition-colors hover:bg-current/10',
-  'focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-[-2px] focus-visible:outline-focus-ring',
-);
+const SCREEN_BUTTON_BASE_CLASS = 'rounded transition-colors hover:bg-current/10 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-[-2px] focus-visible:outline-focus-ring';
+const SCREEN_ICON_BUTTON_CLASS = clsx('grid h-full w-11 shrink-0 place-items-center', SCREEN_BUTTON_BASE_CLASS);
+const SCREEN_TEXT_BUTTON_CLASS = clsx('flex h-full shrink-0 items-center gap-1.5 px-3', SCREEN_BUTTON_BASE_CLASS);
 
-/** The full-screen session list Minimize opens, with Settings behind its gear. */
+/** The full-screen session list the header's Session title opens, with Settings behind its button. */
 function SessionsScreen({
   sessions,
   disabled,
@@ -297,7 +296,8 @@ function SessionsScreen({
       aria-label={title}
       className="absolute inset-0 z-40 flex flex-col bg-header-inactive-bg text-header-inactive-fg"
     >
-      <header className="flex shrink-0 items-center gap-1 border-b border-border px-1 font-mono text-sm">
+      {/* The `MobileWall` header's height, so the bar holds still between views. */}
+      <header className="flex h-11 shrink-0 items-center border-b border-border font-mono text-sm">
         <button
           type="button"
           aria-label={showSettings ? 'Back to sessions' : 'Back to terminal'}
@@ -310,11 +310,11 @@ function SessionsScreen({
         {settings && !showSettings ? (
           <button
             type="button"
-            aria-label="Settings"
             onClick={() => setShowSettings(true)}
-            className={SCREEN_ICON_BUTTON_CLASS}
+            className={SCREEN_TEXT_BUTTON_CLASS}
           >
-            <GearSixIcon size={16} />
+            <GearSixIcon size={16} aria-hidden="true" />
+            Settings
           </button>
         ) : null}
       </header>
@@ -326,22 +326,31 @@ function SessionsScreen({
 }
 
 /** The Type box, over the top of the terminal. It owns its text, so a
- *  keystroke re-renders only the box; unmounting it discards both. */
+ *  keystroke re-renders only the box; `keptDraft` carries a non-password draft
+ *  across a close, so Cancel then Type brings it back. */
 function Composer({
   fieldRef,
+  keptDraft,
   top,
   disabled,
   onCancel,
   onSend,
 }: {
   fieldRef: RefObject<HTMLTextAreaElement | HTMLInputElement | null>;
+  keptDraft: RefObject<string>;
   top: number;
   disabled: boolean;
   onCancel: () => void;
   onSend: (text: string, password: boolean) => void;
 }) {
-  const [draft, setDraft] = useState('');
+  const [draft, setDraftState] = useState(() => keptDraft.current);
   const [password, setPassword] = useState(false);
+  // A password is never kept to come back unmasked.
+  const keep = (text: string, masked: boolean) => { keptDraft.current = masked ? '' : text; };
+  const setDraft = (text: string) => {
+    setDraftState(text);
+    keep(text, password);
+  };
   const send = () => onSend(draft, password);
   // 16px text: iOS zooms the page into any field set smaller.
   const fieldClass = 'block w-full resize-none rounded border border-border bg-app-bg p-2 font-mono text-base text-foreground outline-none focus:border-focus-ring';
@@ -390,6 +399,7 @@ function Composer({
             disabled={disabled}
             onChange={(event) => {
               const next = event.currentTarget.checked;
+              keep(draft, next);
               // The swapped-in field takes focus inside the tap, as Type's does.
               flushSync(() => setPassword(next));
               fieldRef.current?.focus({ preventScroll: true });
@@ -669,6 +679,7 @@ export function MobileTerminalUi({
   const rootRef = useRef<HTMLDivElement | null>(null);
   const terminalHostRef = useRef<HTMLDivElement | null>(null);
   const composerFieldRef = useRef<HTMLTextAreaElement | HTMLInputElement | null>(null);
+  const keptDraftRef = useRef('');
   const edgeScrollRef = useRef<{ pointerId: number; sessionId: string; motion: EdgeScrollMotion } | null>(null);
   const edgeMomentumFrameRef = useRef<number | null>(null);
   const gestureStateRef = useRef<MobileGestureTrackingState>(MOBILE_GESTURE_IDLE_STATE);
@@ -779,6 +790,7 @@ export function MobileTerminalUi({
   /** A password goes as typed; anything else takes the paste path, bracketed
    *  when the app asked, so a TUI never reads the Enter after it as pasted. */
   const sendDraft = useCallback((text: string, password: boolean) => {
+    keptDraftRef.current = '';
     closeComposer();
     if (!interactive || !text) return;
     if (password || !onPaste) {
@@ -1135,7 +1147,9 @@ export function MobileTerminalUi({
       data-mobile-terminal-ui
       className={clsx(
         'relative flex min-h-0 flex-col overflow-hidden bg-app-bg text-app-fg',
-        fillViewport ? 'h-screen' : 'h-full',
+        // Not `h-screen`: iOS Safari's 100vh is the toolbar-hidden height,
+        // which leaves the mode bar under the toolbar.
+        fillViewport ? 'h-dvh' : 'h-full',
         className,
       )}
       style={style}
@@ -1178,6 +1192,7 @@ export function MobileTerminalUi({
       {composing ? (
         <Composer
           fieldRef={composerFieldRef}
+          keptDraft={keptDraftRef}
           top={inset.top}
           disabled={!interactive}
           onCancel={closeComposer}

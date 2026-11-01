@@ -23,6 +23,11 @@ function render(node: React.ReactNode): HTMLDivElement {
   return container;
 }
 
+function pickTheme(container: HTMLElement, label: string) {
+  act(() => container.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')!.click());
+  act(() => container.querySelector<HTMLButtonElement>(`[role="menu"] button[title="${label}"]`)!.click());
+}
+
 function FontSizeHost({ persist }: { persist: boolean }) {
   useMobileFontSize(persist);
   return null;
@@ -43,18 +48,21 @@ describe('MobileSettings', () => {
     act(() => container.querySelector<HTMLButtonElement>('button[aria-label="Larger text"]')!.click());
     expect(setFontSize).toHaveBeenLastCalledWith(13);
     expect(localStorage.getItem(MOBILE_FONT_SIZE_KEY)).toBe('13');
+    expect(container.querySelector<HTMLElement>('[data-testid="mobile-font-size-preview"]')!.style.fontSize).toBe('13px');
 
     const theme = getBundledThemes()[1]!;
-    act(() => container.querySelector<HTMLButtonElement>(`button[title="${theme.label}"]`)!.click());
+    pickTheme(container, theme.label);
     expect(localStorage.getItem(ACTIVE_THEME_KEY)).toBe(theme.id);
+    expect(container.querySelector(`button[aria-label="Theme: ${theme.label}"]`)).not.toBeNull();
   });
 
   it('keeps nothing when it does not persist', () => {
     const container = render(<MobileSettings persist={false} />);
     act(() => container.querySelector<HTMLButtonElement>('button[aria-label="Smaller text"]')!.click());
     const theme = getBundledThemes()[1]!;
-    act(() => container.querySelector<HTMLButtonElement>(`button[title="${theme.label}"]`)!.click());
+    pickTheme(container, theme.label);
     expect(localStorage.length).toBe(0);
+    expect(container.querySelector(`button[aria-label="Theme: ${theme.label}"]`)).not.toBeNull();
   });
 });
 

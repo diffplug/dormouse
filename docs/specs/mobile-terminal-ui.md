@@ -88,7 +88,7 @@ Type opens the composer at the top of the visible screen: a text field, then a P
 * **Must focus the composer's field synchronously inside the Type tap** (rationale).
 * **Send writes the text through the consumer's paste path, then Enter** (rationale).
 * **A password is masked and written as input, never through the paste path.**
-* Send and Cancel close the composer and clear it, Password checkbox included.
+* Send and Cancel clear the Password checkbox. Send clears the text; any other close keeps it for the next Type, unless a password.
 
 Source of truth: `MobileTerminalUi` and `Composer` in `lib/src/components/MobileTerminalUi.tsx`.
 
@@ -100,7 +100,7 @@ Source of truth: `hardwareKeySequence` and `isHardwareKeyTarget` in `lib/src/com
 
 ## Sessions screen
 
-The `MobileWall` header's Minimize asks the consumer to show the Sessions screen over the whole composition; the terminal stays mounted beneath at its size. Choosing a row shows that Session. A consumer's `settings` (`MobileSettings`: font size and theme) open from the screen's gear.
+Tapping the Session title in the `MobileWall` header asks the consumer to show the Sessions screen over the whole composition; the terminal stays mounted beneath at its size. Choosing a row shows that Session. A consumer's `settings` (`MobileSettings`: theme, and font size over a sample) open from the screen's Settings button.
 
 * **The font size applies to every terminal in the page, live ones refit**, so a remote Session's PTY resizes with it; **must hand it back to the theme when the composition unmounts**.
 * **Must save Settings choices only when the consumer persists them**; the one-time page does not (`docs/specs/one-time.md` -> "Phone page").
