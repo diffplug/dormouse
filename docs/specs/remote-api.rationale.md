@@ -82,6 +82,10 @@ In September 2026 the former `SurfaceHandle.release` was a no-op in `createAskSu
 
 **Why a release names a lease as well as a holder.** A session's own attachments overlap: re-attaching the pane it already holds, or an attach superseded by one to the same pane, sends the earlier attachment's release after the later one took the hold. With the holder alone that release would free the newer hold and re-fit the pane under a phone still attached.
 
+## Frames
+
+**Why a window rather than the transport's own backpressure.** The session gives a sender no drain signal on either path, and the direct path's sender queue disposes the session on overflow (`MAX_DIRECT_PENDING_BYTES`) — a terminal never approaches it, but one page load of a multi-megabyte bundle would. A window the Client acknowledges bounds the queue on both paths alike; encoded, it sits well under the direct path's bound.
+
 ## Input authority and multiple viewers
 
 **Why concurrent granted sessions need no arbitration.** Interleaved typing from two granted sessions is no worse than two keyboards plugged into one machine — and selfhost is single-user, so both keyboards belong to the same person.

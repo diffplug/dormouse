@@ -14,6 +14,7 @@
  */
 
 export * from './remote/wire.js';
+export * from './remote/frame-wire.js';
 export * from './remote/one-time-wire.js';
 export * from './remote/pocket-deployment.js';
 export * from './remote/enroll-offer.js';

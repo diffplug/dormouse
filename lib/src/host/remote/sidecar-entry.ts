@@ -23,6 +23,7 @@ import type {
   PtySink,
 } from '../../remote/burrow/burrow-surface-provider';
 import { createAskSurfaceProvider } from './ask-surface-provider';
+import { createBurrowFrameHost } from './frame-host';
 import { createNativeDirectPeerFactory, disposeNativeDirectPeers } from './native-direct-peer';
 import { createEphemeralBurrowStateStore, FileBurrowStateStore } from './burrow-state-store';
 import { BurrowService } from './service';
@@ -507,6 +508,7 @@ export function createSidecarHost(options: SidecarHostOptions): SidecarHost {
   const service = new BurrowService({
     store,
     provider: bridge.provider,
+    frames: createBurrowFrameHost(),
     kind: 'standalone',
     sendToUi: send,
     relay,

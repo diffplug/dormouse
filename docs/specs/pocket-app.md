@@ -211,6 +211,12 @@ Source of truth: `pocketContentSecurityPolicy` in `remote-lib-common/src/remote/
 
 ## Future
 
+**Scope: pocket-frames** — the Client half of the frame tunnel (`docs/specs/remote-api.md` -> "Frames"), in order:
+
+1. **A frame origin per deployment**, never Pocket's own: framed content at Pocket's origin could use its keys and session, and a sandbox without `allow-same-origin` leaves no service worker to intercept the page. Hosted serves one under the relay host; a selfhost Relay a second port; the one-time page Hosted's.
+2. **The relaying service worker** at the frame origin: it forwards only same-origin requests, each over the session through a `MessageChannel` to the Pocket window (the playground's pattern, `docs/specs/tutorial.md` -> "Playground filesystem"), acknowledging every body byte it takes; and a shim the framed page loads that carries its `WebSocket` the same way.
+3. **The wall shows a browser entry, and a Tool's page beside its terminal**, with the hello declaring `capabilities.frames`.
+
 **Scope: pocket-polish**
 
 1. **Dedupe the composition** — the website's `PocketTerminalExperience` and the Pocket shell (`PocketWall.tsx`) each wire `MobileTerminalUi` + `MobileWall` independently; extract the shared wiring so they cannot drift.

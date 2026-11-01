@@ -35,6 +35,12 @@ export interface SurfaceHold {
   readonly serviceId: string;
 }
 
+/** A Surface's embedded page, as its browser chrome shows it. */
+export interface EmbeddedPage {
+  readonly url: string;
+  readonly title?: string;
+}
+
 export interface SurfaceHandle {
   /**
    * Provider-local routing key; a peer-backed handle need not expose its
@@ -123,6 +129,13 @@ export interface BurrowSurfaceProvider {
    * {@link SurfaceHandle.release}.
    */
   releaseSurface(surfaceId: string, hold: SurfaceHold): void;
+
+  /**
+   * The page `surfaceId` embeds now — a browser Surface's, or a serving Tool's
+   * — or `null` when it embeds none, renders it some other way, or nobody owns
+   * it. Read-only: the frame tunnel mints its own proxy grant for the page.
+   */
+  resolveBrowser(surfaceId: string): Promise<EmbeddedPage | null>;
 
   /** Feed the PTY's input path; the local echo returns through {@link streamPty}. */
   writePty(ptyId: string, data: string): void;

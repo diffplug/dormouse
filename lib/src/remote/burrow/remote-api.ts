@@ -14,6 +14,7 @@ import {
   utf8Encode,
   type AttachParams,
   type DirectoryEntry,
+  type HelloParams,
   type HelloResult,
   type RemoteEventMsg,
   type RemoteRequest,
@@ -24,7 +25,9 @@ import {
   type TerminalWriteParams,
 } from 'remote-lib-common';
 import { inputIsReplayTerminalReport } from '../../lib/terminal-report-filter';
+import type { BurrowFrameHost } from './burrow-frame-host';
 import type { BurrowSurfaceProvider, SurfaceHandle, SurfaceHold } from './burrow-surface-provider';
+import { FrameTunnel } from './frame-tunnel';
 
 /** Coalesce window for directory re-snapshots (remote-api.md: "Burrow coalesces"). */
 const DIRECTORY_DEBOUNCE_MS = 150;
@@ -54,6 +57,11 @@ export interface RemoteApiSessionOptions {
    * held pane's strip shows, and the service instance that serves it.
    */
   holder: SessionHolder;
+  /**
+   * Where the frame tunnel reaches pages; absent, the Burrow serves no frames
+   * and lists no embedded page (`docs/specs/remote-api.md` → "Frames").
+   */
+  frames?: BurrowFrameHost;
   /** Called once, when this session is disposed. */
   onDispose?: () => void;
   /** An attach succeeded: the access log's `attached` (`access-log.ts`). Never told what the surface shows. */
@@ -82,6 +90,9 @@ export class RemoteApiSession {
   #directoryGeneration = 0;
   #attachment: Attachment | null = null;
   #attachGeneration = 0;
+  readonly #frames: FrameTunnel | null;
+  /** The Client's hello declared it frames pages, so the directory lists them. */
+  #listsFrames = false;
   #disposed = false;
 
   constructor(options: RemoteApiSessionOptions) {
@@ -91,6 +102,18 @@ export class RemoteApiSession {
     this.#holder = options.holder;
     this.#onDispose = options.onDispose ?? null;
     this.#onAttach = options.onAttach ?? null;
+    this.#frames = options.frames
+      ? new FrameTunnel({
+        host: options.frames,
+        provider: options.provider,
+        // The session's, never a webview's: a window's lease sweep cannot end
+        // it, and disposal ends every grant this session holds.
+        leaseOwner: `remote:${options.holder.id}`,
+        ok: (request, result) => this.#ok(request, result),
+        fail: (request, error) => this.#fail(request, error),
+        event: (subId, event, data) => this.#event(subId, event, data),
+      })
+      : null;
   }
 
   handle(data: unknown): void {
@@ -114,6 +137,7 @@ export class RemoteApiSession {
         case REMOTE_METHODS.terminalResize:
           return this.#resize(request);
         default:
+          if (this.#frames && FrameTunnel.owns(request.method)) return this.#frames.handle(request);
           return this.#fail(request, `unknown method: ${request.method}`);
       }
     } catch (error) {
@@ -132,6 +156,7 @@ export class RemoteApiSession {
     this.#unsubDirectory?.();
     this.#unsubDirectory = null;
     this.#teardownAttachment();
+    this.#frames?.dispose();
     this.#onDispose?.();
   }
 
@@ -202,8 +227,15 @@ export class RemoteApiSession {
       protocolVersion: 1,
       burrowId: this.#burrowId,
       grants: { input: true, layout: false },
+      ...(this.#frames ? { frames: true } : {}),
     };
+    const capabilities = (request.params as Partial<HelloParams> | undefined)?.capabilities;
+    const listsFrames = !!this.#frames && capabilities?.frames === true;
+    const changed = listsFrames !== this.#listsFrames;
+    this.#listsFrames = listsFrames;
     this.#ok(request, result);
+    // A hello after the watch changes what the listing may name.
+    if (changed) void this.#emitDirectory();
   }
 
   #directoryWatch(request: RemoteRequest): void {
@@ -255,7 +287,9 @@ export class RemoteApiSession {
     }
     // The subscription may have been replaced or torn down while we waited.
     if (this.#directorySubId !== subId || this.#directoryGeneration !== generation) return;
-    this.#event(subId, REMOTE_EVENTS.directorySnapshot, { entries });
+    this.#event(subId, REMOTE_EVENTS.directorySnapshot, {
+      entries: this.#listsFrames ? entries : terminalsOnly(entries),
+    });
   }
 
   #attach(request: RemoteRequest): void {
@@ -574,6 +608,19 @@ export class RemoteApiSession {
       console.warn('burrow: releasing a surface failed', error);
     }
   }
+}
+
+/**
+ * The listing a Client that frames nothing reads: no browser entry, and no
+ * entry naming a page, so an older Client never offers what it cannot show.
+ */
+function terminalsOnly(entries: DirectoryEntry[]): DirectoryEntry[] {
+  return entries.flatMap((entry) => {
+    if (entry.type !== 'terminal') return [];
+    if (entry.browser === undefined) return [entry];
+    const { browser: _browser, ...rest } = entry;
+    return [rest];
+  });
 }
 
 function errorMessage(error: unknown): string {

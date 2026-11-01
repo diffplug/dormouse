@@ -14,10 +14,11 @@
 import type {
   DirectoryEntry,
   BurrowSurfaceProvider,
+  EmbeddedPage,
   SurfaceHandle,
   SurfaceHold,
 } from '../../remote/burrow/burrow-surface-provider';
-import type { PeerSurfaceParams, PeerSurfaceResult } from '../../remote/burrow/peer-surfaces';
+import type { PeerOps, PeerSurfaceParams, PeerSurfaceResult } from '../../remote/burrow/peer-surfaces';
 
 /**
  * Fan one operation out to whoever can answer it and collect the answers. Who
@@ -137,6 +138,16 @@ export function createAskSurfaceProvider(
 
     releaseSurface(surfaceId, hold) {
       release(surfaceId, hold);
+    },
+
+    async resolveBrowser(surfaceId): Promise<EmbeddedPage | null> {
+      // One surface has one owner, as for an attach. A peer is another build,
+      // so only the two fields a page is read for cross.
+      const [page] = (await ask('browserOp', { surfaceId } satisfies PeerOps['browserOp']['params'])) as Partial<
+        PeerOps['browserOp']['result']
+      >[];
+      if (typeof page?.url !== 'string') return null;
+      return { url: page.url, ...(typeof page.title === 'string' ? { title: page.title } : {}) };
     },
 
     writePty: pty.writePty,

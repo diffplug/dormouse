@@ -24,6 +24,7 @@ import {
   setWorkspaces,
 } from '../../lib/workspace-store';
 import { resetWorkspaceSurfaces, setWorkspaceSurfaces } from '../../lib/workspace-surfaces';
+import { registerAgentBrowserScreen, type ScreenRegistration } from '../../components/wall/agent-browser-screen';
 import { installPeerSurfaceResponder } from './peer-surfaces';
 import { takeBackSize } from './take-back';
 
@@ -341,6 +342,59 @@ describe('Workspaces in the directory', () => {
     setWorkspaceSurfaces('workspace:4', ['api-shell', 'web-shell']);
     await Promise.resolve();
     expect(platform.notified).toBe(before + 3);
+  });
+});
+
+describe('embedded pages', () => {
+  const registrations: ScreenRegistration[] = [];
+  afterEach(() => {
+    for (const registration of registrations.splice(0)) registration.dispose();
+  });
+
+  function registerPage(id: string, url: string, renderMode: 'iframe' | 'agent-browser-screencast' = 'iframe') {
+    const registration = registerAgentBrowserScreen(id, {
+      snapshot: {
+        state: 'SYNCED', renderMode, viewport: { w: 0, h: 0, dpr: 1 }, paneCss: { w: 0, h: 0 }, displayDpr: 1, syncEngaged: false,
+      },
+      actions: { engageSync() {}, applyViewport() {}, openModal() {} },
+      chrome: { url, displayUrl: url, title: 'Page', key: null },
+      chromeActions: { navigate() {}, back() {}, forward() {}, reload() {} },
+      hostCapable: false,
+    });
+    registrations.push(registration);
+    return registration;
+  }
+
+  it('answers the page an iframe Surface shows, and nothing for another renderer or scheme', () => {
+    registerPage('surface:2', 'http://localhost:5173/app');
+    registerPage('surface:3', 'http://localhost:5174/', 'agent-browser-screencast');
+    registerPage('surface:4', 'https://example.com/');
+    expect(platform.answer('browserOp', { surfaceId: 'surface:2' }))
+      .toEqual([{ render: 'iframe', url: 'http://localhost:5173/app', title: 'Page' }]);
+    expect(platform.answer('browserOp', { surfaceId: 'surface:3' })).toEqual([]);
+    expect(platform.answer('browserOp', { surfaceId: 'surface:4' })).toEqual([]);
+    expect(platform.answer('browserOp', { surfaceId: 'surface:9' })).toEqual([]);
+  });
+
+  it('lists a browser Surface as its own entry and a serving Tool\'s page on its terminal', () => {
+    registerSurface('surface:1');
+    registerPage('surface:1', 'http://localhost:3000/');
+    registerPage('surface:2', 'http://localhost:5173/');
+    const entries = platform.answer('directory', {}) as Array<Record<string, unknown>>;
+    expect(entries.map(({ surfaceId, type, browser }) => ({ surfaceId, type, browser }))).toEqual([
+      { surfaceId: 'surface:1', type: 'terminal', browser: { render: 'iframe', url: 'http://localhost:3000/', title: 'Page' } },
+      { surfaceId: 'surface:2', type: 'browser', browser: { render: 'iframe', url: 'http://localhost:5173/', title: 'Page' } },
+    ]);
+  });
+
+  it('tells the Burrow when a page opens or moves', async () => {
+    await armed();
+    const registration = registerPage('surface:2', 'http://localhost:5173/');
+    await Promise.resolve();
+    expect(platform.notified).toBe(1);
+    registration.updateChrome({ url: 'http://localhost:5173/next', displayUrl: '', title: null, key: null });
+    await Promise.resolve();
+    expect(platform.notified).toBe(2);
   });
 });
 

@@ -40,6 +40,7 @@ import {
   type PairedDevicesResult,
 } from '../../lib/src/host/remote/service-protocol';
 import type { BurrowSurfaceProvider } from '../../lib/src/remote/burrow/burrow-surface-provider';
+import { createBurrowFrameHost } from '../../lib/src/host/remote/frame-host';
 import type {
   PeerSurfaceParams,
   PeerSurfaceResult,
@@ -269,6 +270,7 @@ function startService(): void {
   service = new BurrowService({
     store: burrowStateStore(context),
     provider: createBurrowProvider(bound),
+    frames: createBurrowFrameHost(),
     kind: 'vscode',
     createWebSocket: createRelaySocket,
     sendToUi: (event, data) => {

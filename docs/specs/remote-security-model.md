@@ -220,6 +220,10 @@ Source of truth: `sealPush` / `openPush` / `isSealedPushV1` in `remote-lib-commo
 | `MAX_ONE_TIME_FORWARDED` | 32 messages, both directions together | same |
 | `ONE_TIME_LINK_TTL_MS` / `ONE_TIME_EXPIRY_GRACE_MS` | `= DEFAULT_PAIRING_TTL_MS` (300 000) / 45 000 (> `DIRECT_ONLY_DEADLINE_MS`) | same |
 | `ONE_TIME_OPEN_TIMEOUT_MS` | 8 000 | `lib/src/remote/burrow/one-time-runtime.ts` |
+| `MAX_FRAMES_PER_SESSION` / `MAX_HTTP_EXCHANGES_PER_SESSION` / `MAX_WEBSOCKETS_PER_SESSION` | 4 / 32 / 8, open at once | `remote-lib-common/src/remote/frame-wire.ts` |
+| `FRAME_FLOW_WINDOW_BYTES` / `FRAME_CHUNK_BYTES` | 1 MiB / 192 KiB, before base64url | same |
+| `MAX_HTTP_HEADERS` / `MAX_HTTP_HEADER_CHARS` / `MAX_HTTP_PATH_LENGTH` | 128 fields / 32 768 / 8 192 characters | same |
+| `MAX_WS_MESSAGE_BYTES` / `MAX_WS_PROTOCOLS` | 16 MiB reassembled, either direction / 16 | same |
 
 - **Must bound waiting relay frames before enqueueing**, by count and cumulative received-string length; both `e2e` and `client-gone` share one FIFO and one in-flight operation across reconnects. Overflow synchronously closes the relay connection and clears its queue and transient state; never skip a transport frame and continue its Noise session (rationale).
 - **At most one pairing, one connection, and one established session per relay client**; a replacement disposes its predecessor, whatever identity it belonged to (rationale). Pending pairings expire on the pairing TTL, pending connections on the challenge TTL.

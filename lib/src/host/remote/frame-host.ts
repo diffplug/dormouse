@@ -1,0 +1,358 @@
+/**
+ * The Node half of the frame tunnel (`docs/specs/remote-api.md` → "Frames"):
+ * each frame is a lease on the same iframe proxy a local pane frames
+ * (`docs/specs/dor-browser.md` → "Iframe Renderer"), and every request a
+ * Client's page makes is replayed against that grant as a loopback caller
+ * would make it. So the proxy's whole policy — the pinned upstream, the header
+ * rewriting, the shim, the error pages — applies unchanged, and the tunnel only
+ * translates between the Client's frame origin and the grant's own.
+ */
+
+import * as http from 'http';
+import type { Readable } from 'stream';
+import * as zlib from 'zlib';
+import WebSocket from 'ws';
+import { MAX_WS_MESSAGE_BYTES, type HttpHeader } from 'remote-lib-common';
+import type {
+  BurrowFrameHost,
+  FrameHttpExchange,
+  FrameHttpInit,
+  FrameHttpSink,
+  FrameSocket,
+  FrameSocketInit,
+  FrameSocketSink,
+  FrameUpstream,
+} from '../../remote/burrow/burrow-frame-host';
+import { createIframeProxyUrl, releaseIframeProxyLease, type UpstreamResolver } from '../iframe-proxy';
+import { normalizeEmbedderOrigins } from '../iframe-proxy-rewrite';
+
+/**
+ * Request fields the tunnel never forwards: the connection's own, what it sets
+ * itself, and what the proxy would drop anyway. `Sec-` fields are the
+ * browser's, which it never hands a service worker; the destination the
+ * Client names stands in for `Sec-Fetch-Dest`.
+ */
+const DROPPED_REQUEST_HEADERS = new Set([
+  'host', 'connection', 'keep-alive', 'te', 'trailer', 'transfer-encoding', 'upgrade',
+  'cookie', 'accept-encoding',
+]);
+/** The proxy's own grant is one hop away; a stall here is the proxy's to report. */
+const GRANT_IDLE_TIMEOUT_MS = 60_000;
+
+export interface FrameHostOptions {
+  /** Upstream resolution, injected by tests; the proxy's system resolver otherwise. */
+  resolve?: UpstreamResolver;
+}
+
+export function createBurrowFrameHost(options: FrameHostOptions = {}): BurrowFrameHost {
+  return {
+    async open(url, { frameOrigin, embedderOrigins, lease }) {
+      const [origin] = normalizeEmbedderOrigins([frameOrigin]) ?? [];
+      if (!origin) return { refused: 'invalid frame origin' };
+      // Without a chain the proxy would frame for nobody and inject nothing,
+      // which no Client can show.
+      const chain = normalizeEmbedderOrigins(embedderOrigins);
+      if (!chain) return { refused: 'invalid embedder origins' };
+      const result = await createIframeProxyUrl(url, { embedderOrigins: chain, lease, resolve: options.resolve });
+      if (!result.ok) {
+        releaseIframeProxyLease(lease.owner, lease.id);
+        return { refused: result.detail ?? result.reason };
+      }
+      const framed = new URL(result.url);
+      return new GrantUpstream(origin, framed, () => releaseIframeProxyLease(lease.owner, lease.id));
+    },
+  };
+}
+
+class GrantUpstream implements FrameUpstream {
+  readonly path: string;
+  readonly #frameOrigin: string;
+  /** The grant's own origin, `http://127.0.0.1:<port>`. */
+  readonly #grantOrigin: string;
+  readonly #port: number;
+  readonly #agent = new http.Agent({ keepAlive: true });
+  readonly #live = new Set<{ abort(): void }>();
+  readonly #release: () => void;
+  #closed = false;
+
+  constructor(frameOrigin: string, framed: URL, release: () => void) {
+    this.#frameOrigin = frameOrigin;
+    this.#grantOrigin = framed.origin;
+    this.#port = Number(framed.port);
+    this.path = `${framed.pathname}${framed.search}${framed.hash}`;
+    this.#release = release;
+  }
+
+  request(init: FrameHttpInit, sink: FrameHttpSink): FrameHttpExchange {
+    const exchange = new GrantExchange(this.#translate(init), sink, this.#grantOrigin, () => {
+      this.#live.delete(exchange);
+    });
+    if (this.#closed) exchange.abort();
+    else this.#live.add(exchange);
+    return exchange;
+  }
+
+  openSocket(init: FrameSocketInit, sink: FrameSocketSink): FrameSocket {
+    // A framed page's own socket always comes from the frame origin, so the
+    // grant is told its own: the proxy relabels that, and only that, as the
+    // upstream's (`docs/specs/security-local.md` → "Loopback Listeners").
+    const socket = new GrantSocket(`ws://127.0.0.1:${this.#port}${init.path}`, init.protocols, this.#grantOrigin, sink, () => {
+      this.#live.delete(socket);
+    });
+    if (this.#closed) socket.terminate();
+    else this.#live.add(socket);
+    return socket;
+  }
+
+  close(): void {
+    if (this.#closed) return;
+    this.#closed = true;
+    for (const live of [...this.#live]) live.abort();
+    this.#live.clear();
+    this.#agent.destroy();
+    this.#release();
+  }
+
+  /** The request a loopback caller at the grant's own origin would have made. */
+  #translate(init: FrameHttpInit): http.RequestOptions {
+    const headers: Record<string, string | string[]> = {};
+    for (const [rawName, rawValue] of init.headers) {
+      const name = rawName.toLowerCase();
+      if (DROPPED_REQUEST_HEADERS.has(name) || name.startsWith('sec-') || name.startsWith('proxy-')) continue;
+      let value = rawValue;
+      if (name === 'origin' && value === this.#frameOrigin) value = this.#grantOrigin;
+      if (name === 'referer') value = swapOrigin(value, this.#frameOrigin, this.#grantOrigin);
+      const prior = headers[name];
+      headers[name] = prior === undefined ? value : [...(Array.isArray(prior) ? prior : [prior]), value];
+    }
+    headers.host = `127.0.0.1:${this.#port}`;
+    // A body the tunnel can hand on as it came; anything compressed regardless
+    // is decoded below.
+    headers['accept-encoding'] = 'identity';
+    if (init.destination !== undefined) headers['sec-fetch-dest'] = init.destination || 'empty';
+    return {
+      host: '127.0.0.1',
+      port: this.#port,
+      method: init.method,
+      path: init.path,
+      headers,
+      agent: this.#agent,
+    };
+  }
+}
+
+class GrantExchange implements FrameHttpExchange {
+  /** `null` when Node refused to build the request at all. */
+  readonly #request: http.ClientRequest | null;
+  readonly #sink: FrameHttpSink;
+  readonly #grantOrigin: string;
+  readonly #done: () => void;
+  #body: Readable | null = null;
+  #paused = false;
+  #finished = false;
+
+  constructor(options: http.RequestOptions, sink: FrameHttpSink, grantOrigin: string, done: () => void) {
+    this.#sink = sink;
+    this.#grantOrigin = grantOrigin;
+    this.#done = done;
+    let request: http.ClientRequest | null = null;
+    try {
+      request = http.request(options);
+    } catch (error) {
+      // A field Node will not put on the wire: the Client still hears why, once
+      // its exchange is installed.
+      const message = error instanceof Error ? error.message : 'invalid request';
+      queueMicrotask(() => this.#fail(message));
+    }
+    this.#request = request;
+    if (!request) return;
+    request.on('response', (response) => this.#respond(response));
+    request.on('error', (error) => this.#fail(error.message));
+    request.setTimeout(GRANT_IDLE_TIMEOUT_MS, () => request.destroy(new Error('the embedded page timed out')));
+  }
+
+  write(chunk: Uint8Array, end: boolean): Promise<void> {
+    const request = this.#request;
+    if (this.#finished || !request) return Promise.reject(new Error('request closed'));
+    return new Promise((resolve, reject) => {
+      const settle = (error?: Error | null) => (error ? reject(error) : resolve());
+      if (end) {
+        if (chunk.length > 0) request.write(chunk);
+        request.end(settle);
+      } else {
+        request.write(chunk, settle);
+      }
+    });
+  }
+
+  pause(): void {
+    this.#paused = true;
+    this.#body?.pause();
+  }
+
+  resume(): void {
+    this.#paused = false;
+    this.#body?.resume();
+  }
+
+  abort(): void {
+    if (this.#finished) return;
+    this.#finished = true;
+    this.#request?.destroy();
+    this.#body?.destroy();
+    this.#done();
+  }
+
+  #respond(response: http.IncomingMessage): void {
+    if (this.#finished) {
+      response.destroy();
+      return;
+    }
+    const encoding = String(response.headers['content-encoding'] ?? '').trim().toLowerCase();
+    const decoder = decoderFor(encoding);
+    const headers: HttpHeader[] = [];
+    for (let index = 0; index < response.rawHeaders.length; index += 2) {
+      const name = response.rawHeaders[index]!;
+      const lower = name.toLowerCase();
+      let value = response.rawHeaders[index + 1]!;
+      // A synthesized response is never decoded by the browser, so a body
+      // decoded here drops what described the encoded one.
+      if (decoder && (lower === 'content-encoding' || lower === 'content-length')) continue;
+      // The proxy already keeps a redirect on its grant; on the Client the
+      // grant is the frame origin, so the redirect stays there too.
+      if (lower === 'location') value = relativeTo(value, this.#grantOrigin);
+      headers.push([name, value]);
+    }
+    let body: Readable = response;
+    if (decoder) {
+      response.on('error', (error) => decoder.destroy(error));
+      body = response.pipe(decoder);
+    }
+    this.#body = body;
+    this.#sink.onHead(response.statusCode ?? 502, response.statusMessage ?? '', headers);
+    if (this.#finished) return;
+    body.on('data', (chunk: Buffer) => {
+      if (!this.#finished) this.#sink.onBody(new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength));
+    });
+    body.on('end', () => {
+      if (this.#finished) return;
+      this.#finished = true;
+      this.#done();
+      this.#sink.onEnd();
+    });
+    body.on('error', (error: Error) => this.#fail(error.message));
+    if (this.#paused) body.pause();
+  }
+
+  #fail(message: string): void {
+    if (this.#finished) return;
+    this.#finished = true;
+    this.#request?.destroy();
+    this.#body?.destroy();
+    this.#done();
+    this.#sink.onError(message);
+  }
+}
+
+class GrantSocket implements FrameSocket {
+  readonly #socket: WebSocket;
+  readonly #sink: FrameSocketSink;
+  readonly #done: () => void;
+  #finished = false;
+
+  constructor(url: string, protocols: readonly string[], origin: string, sink: FrameSocketSink, done: () => void) {
+    this.#sink = sink;
+    this.#done = done;
+    this.#socket = new WebSocket(url, [...protocols], {
+      origin,
+      perMessageDeflate: false,
+      maxPayload: MAX_WS_MESSAGE_BYTES,
+      handshakeTimeout: GRANT_IDLE_TIMEOUT_MS,
+    });
+    this.#socket.on('open', () => {
+      if (!this.#finished) this.#sink.onOpen(this.#socket.protocol, this.#socket.extensions);
+    });
+    this.#socket.on('message', (data: WebSocket.RawData, binary: boolean) => {
+      if (!this.#finished) this.#sink.onMessage(toBytes(data), binary);
+    });
+    this.#socket.on('close', (code: number, reason: Buffer) => this.#end(code, reason.toString('utf8')));
+    // A close always follows an error; the code says what happened.
+    this.#socket.on('error', () => {});
+  }
+
+  send(data: Uint8Array, binary: boolean): Promise<void> {
+    if (this.#finished || this.#socket.readyState !== WebSocket.OPEN) return Promise.reject(new Error('socket closed'));
+    return new Promise((resolve, reject) => {
+      this.#socket.send(data, { binary }, (error) => (error ? reject(error) : resolve()));
+    });
+  }
+
+  close(code?: number, reason?: string): void {
+    if (this.#finished) return;
+    this.#socket.close(code, reason);
+  }
+
+  pause(): void {
+    if (this.#socket.readyState === WebSocket.OPEN) this.#socket.pause();
+  }
+
+  resume(): void {
+    if (this.#socket.readyState === WebSocket.OPEN) this.#socket.resume();
+  }
+
+  terminate(): void {
+    if (this.#finished) return;
+    this.#finished = true;
+    this.#done();
+    this.#socket.terminate();
+  }
+
+  abort(): void {
+    this.terminate();
+  }
+
+  #end(code: number, reason: string): void {
+    if (this.#finished) return;
+    this.#finished = true;
+    this.#done();
+    this.#sink.onClose(code, reason);
+  }
+}
+
+function decoderFor(encoding: string): zlib.Gunzip | zlib.Inflate | zlib.BrotliDecompress | null {
+  switch (encoding) {
+    case 'gzip':
+    case 'x-gzip':
+      return zlib.createGunzip();
+    case 'deflate':
+      return zlib.createInflate();
+    case 'br':
+      return zlib.createBrotliDecompress();
+    default:
+      return null;
+  }
+}
+
+/** `value` with an exact parsed `from` origin replaced by `to`; anything else unchanged. */
+function swapOrigin(value: string, from: string, to: string): string {
+  try {
+    const url = new URL(value);
+    if (url.origin === from) return `${to}${url.pathname}${url.search}${url.hash}`;
+  } catch { /* A malformed or relative value passes through. */ }
+  return value;
+}
+
+/** A URL on `origin` as a path, query, and fragment; anything else unchanged. */
+function relativeTo(value: string, origin: string): string {
+  try {
+    const url = new URL(value);
+    if (url.origin === origin) return `${url.pathname}${url.search}${url.hash}`;
+  } catch { /* Already relative, or malformed. */ }
+  return value;
+}
+
+function toBytes(data: WebSocket.RawData): Uint8Array {
+  if (Array.isArray(data)) return new Uint8Array(Buffer.concat(data));
+  if (data instanceof ArrayBuffer) return new Uint8Array(data);
+  return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+}

@@ -107,3 +107,23 @@ describe('createAskSurfaceProvider holds', () => {
     }
   });
 });
+
+describe('createAskSurfaceProvider resolveBrowser', () => {
+  it('reads the first owner\'s page, crossing only its url and title', async () => {
+    const asked: Array<[string, unknown]> = [];
+    const { provider } = createAskSurfaceProvider(
+      async (op, params) => {
+        asked.push([op, params]);
+        return [{ render: 'iframe', url: 'http://localhost:5173/', title: 'Vite', extra: 1 }, { url: 'http://other/' }];
+      },
+      inertPty,
+    );
+    expect(await provider.resolveBrowser('surface:2')).toEqual({ url: 'http://localhost:5173/', title: 'Vite' });
+    expect(asked).toEqual([['browserOp', { surfaceId: 'surface:2' }]]);
+  });
+
+  it('answers null when no owner reports a page', async () => {
+    const { provider } = createAskSurfaceProvider(async () => [{ title: 'no url' }], inertPty);
+    expect(await provider.resolveBrowser('surface:2')).toBeNull();
+  });
+});
