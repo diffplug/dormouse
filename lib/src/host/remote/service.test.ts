@@ -1790,13 +1790,25 @@ describe('paired devices and revocation', () => {
     expect((await command('status')).result).toMatchObject({ pairedClients: 0 });
   });
 
+  it('names Dormouse quitting as the end of an unsaved revocation in standalone', async () => {
+    createService({ enrollment: ENROLLMENT, acl: { [BURROW_ID]: [PHONE] } }, { kind: 'standalone' });
+    await service.start();
+    sockets[0]!.open();
+    vi.spyOn(store, 'saveAcl').mockRejectedValueOnce(new Error('disk full'));
+
+    expect((await command('revokeDevice', { id: phoneId })).error).toMatch(/refused until Dormouse quits.*disk full/);
+  });
+
   it('keeps a revocation whose save failed across a network-policy restart, until a save lands', async () => {
     createService({ enrollment: ENROLLMENT, acl: { [BURROW_ID]: [PHONE, TABLET] } });
     await service.start();
     sockets[0]!.open();
     const save = vi.spyOn(store, 'saveAcl').mockRejectedValueOnce(new Error('disk full'));
 
-    expect((await command('revokeDevice', { id: phoneId })).error).toMatch(/refused until Dormouse quits.*disk full/);
+    // VS Code's next broker window loads the stored ACL, so the hold ends with this window.
+    expect((await command('revokeDevice', { id: phoneId })).error).toMatch(
+      /refused until the window running remote control closes.*disk full/,
+    );
     expect(store.acl[BURROW_ID]!.every((record) => record.revokedAt === null)).toBe(true);
     // The hold covers every record of the target approved by the failure — one
     // an approval queued ahead of the revocation committed included — and none
@@ -2115,6 +2127,45 @@ describe('one-time connection', () => {
     // The old modal's ticket names nothing now.
     expect((await approve(item)).error).toContain('no longer pending');
     expect(phone.socket.closeCode).not.toBeNull();
+  });
+
+  /** The one-time entries in the access log, after every append already queued. */
+  async function oneTimeLog(): Promise<AccessLogEntry[]> {
+    const { entries } = (await command('accessLog')).result as AccessLogResult;
+    return entries.filter((entry) => entry.event.startsWith('one-time-'));
+  }
+
+  it('logs a connection and its end', async () => {
+    createHostedService();
+    await connectPhone();
+    await command('oneTimeEnd');
+    expect(await oneTimeLog()).toEqual([
+      expect.objectContaining({ event: 'one-time-connected', device: 'iPhone', path: 'direct' }),
+      expect.objectContaining({ event: 'one-time-ended', device: 'iPhone', reason: 'user-ended', durationMs: expect.any(Number) }),
+    ]);
+  });
+
+  it('logs the end of a connection the service takes down as it is disposed', async () => {
+    createHostedService();
+    await connectPhone();
+    service.dispose();
+    await settle();
+    expect(store.accessLog.map((entry) => entry.event)).toEqual(['one-time-connected', 'one-time-ended']);
+  });
+
+  it('logs a confirming phone whose link a new one replaced as denied', async () => {
+    createHostedService();
+    const phone = await join((await open()).url);
+    await request(phone);
+    await open();
+    expect(await oneTimeLog()).toEqual([expect.objectContaining({ event: 'one-time-denied', device: 'iPhone', reason: 'user-ended' })]);
+  });
+
+  it('logs nothing for a link no phone confirmed', async () => {
+    createHostedService();
+    await open();
+    await command('oneTimeEnd');
+    expect(await oneTimeLog()).toEqual([]);
   });
 
   it('queues the request in its own slot, and routes the answer by kind', async () => {
