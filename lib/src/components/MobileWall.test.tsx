@@ -51,7 +51,7 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-function renderWall(showKillButton?: boolean) {
+function renderWall(showKillButton?: boolean, onShowSessions?: () => void) {
   act(() => {
     root.render(
       <StrictMode>
@@ -59,6 +59,7 @@ function renderWall(showKillButton?: boolean) {
           sessions={[{ id: 'pane-a', title: 'remote shell' }]}
           activeSessionId="pane-a"
           showKillButton={showKillButton}
+          onShowSessions={onShowSessions}
         />
       </StrictMode>,
     );
@@ -82,7 +83,18 @@ describe('MobileWall', () => {
     renderWall(false);
 
     expect(container.querySelector('button[aria-label="Kill"]')).toBeNull();
-    expect(container.querySelector('button[aria-label="Minimize"]')).not.toBeNull();
+  });
+
+  it('shows the Sessions screen from the Session title, which is plain text without a handler', () => {
+    renderWall();
+    expect(container.querySelector('button[title="Show sessions"]')).toBeNull();
+
+    const onShowSessions = vi.fn();
+    renderWall(true, onShowSessions);
+    const title = container.querySelector<HTMLButtonElement>('button[title="Show sessions"]')!;
+    expect(title.textContent).toContain('remote shell');
+    act(() => title.click());
+    expect(onShowSessions).toHaveBeenCalledOnce();
   });
 
   it('leaves the header plain while the Session is quiet', () => {

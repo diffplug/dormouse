@@ -50,7 +50,7 @@ const fake = vi.hoisted(() => ({
   mount: vi.fn<(client: unknown) => Promise<unknown>>(),
   disposeAllSessions: vi.fn<() => void>(),
   /** The props the last wall rendered with. */
-  wall: null as null | { restoreTheme?: () => void; onError?: (error: unknown) => void },
+  wall: null as null | { persist?: boolean; onError?: (error: unknown) => void },
 }));
 
 // The one shared export doubled, and only for its probe: the gate has to be
@@ -65,7 +65,7 @@ vi.mock('../pocket-app/remote-wall', () => ({
   mountRemoteWall: (client: unknown) => fake.mount(client),
 }));
 vi.mock('../pocket-app/PocketWall', () => ({
-  PocketWall: (props: { restoreTheme?: () => void; onError?: (error: unknown) => void }) => {
+  PocketWall: (props: { persist?: boolean; onError?: (error: unknown) => void }) => {
     fake.wall = props;
     return <div data-testid="wall" />;
   },
@@ -378,8 +378,8 @@ describe('the tap', () => {
     expect(header.textContent).toContain('Studio iMac');
     expect(header.textContent).toContain('direct');
     expect(buttonNamed(container, ONE_TIME_END_LABEL)).not.toBeNull();
-    // The wall restores the theme the page's way, which keeps nothing.
-    expect(fake.wall?.restoreTheme).toBe(applyPocketTheme);
+    // The page keeps nothing, theme and Settings included.
+    expect(fake.wall?.persist).toBe(false);
   });
 
   it('shows a failure’s fixed copy, offers no retry, and never mounts the wall', async () => {

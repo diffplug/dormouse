@@ -4,8 +4,8 @@ import type { DormouseTheme } from '../lib/themes';
 import {
   applyTheme,
   getAllThemes,
+  getAppliedThemeSnapshot,
   getBundledThemes,
-  getTheme,
   removeInstalledTheme,
   restoreActiveTheme,
   setActiveThemeId,
@@ -21,12 +21,13 @@ import { useBrowserLayoutEffect } from '../lib/use-browser-layout-effect';
 /**
  * `compact` is the free-floating trigger used by the website's Pocket
  * playground pages, which have no baseboard and therefore no Settings dialog.
- * `settings-dialog` is the row inside the Settings dialog, which is where every
- * host with a baseboard sets its theme (docs/specs/theme.md).
+ * `row` names the active theme, for a row in the Settings dialog, where every
+ * host with a baseboard sets its theme, or on the mobile Settings page
+ * (docs/specs/theme.md).
  */
-export type ThemePickerVariant = 'compact' | 'settings-dialog';
+export type ThemePickerVariant = 'compact' | 'row';
 
-/** Which way `compact` opens its menu. Ignored by `settings-dialog`, which
+/** Which way `compact` opens its menu. Ignored by `row`, which
  *  anchors off its measured trigger rect instead. */
 export type ThemePickerMenuSide = 'below' | 'above';
 
@@ -57,6 +58,11 @@ export interface ThemePickerProps {
    * and Standalone's content policy blocks it.
    */
   offerStore?: boolean;
+  /** Default true. Offer "Debug current theme" below the list. */
+  offerDebugger?: boolean;
+  /** Default true. False (the one-time page, which keeps nothing) offers
+   *  bundled themes only and holds a pick for this page alone. */
+  persist?: boolean;
 }
 
 
@@ -70,6 +76,8 @@ export function ThemePicker({
   menuSide = 'below',
   onPick,
   offerStore = false,
+  offerDebugger = true,
+  persist = true,
 }: ThemePickerProps) {
   // The server and first client render must agree. Installed themes and the
   // active id come from browser storage, so reading either here leaves React
@@ -92,7 +100,7 @@ export function ThemePicker({
     [onOpenChange],
   );
 
-  const inDialog = variant === 'settings-dialog';
+  const isRow = variant === 'row';
   // `themes` is seeded from the non-empty bundled array and only ever grows,
   // so a picker always has an active theme to preview.
   const activeTheme = themes.find((theme) => theme.id === activeId) ?? themes[0]!;
@@ -103,17 +111,22 @@ export function ThemePicker({
   const { setTriggerEl, setMenuEl, menuStyle } = useAnchoredMenu(
     open,
     MENU_WIDTH_PX,
-    inDialog ? undefined : { side: menuSide, align: 'end', strategy: 'absolute' },
+    isRow ? undefined : { side: menuSide, align: 'end', strategy: 'absolute' },
   );
 
   const closeDropdown = useCallback(() => setOpen(false), [setOpen]);
   useCloseOnOutsideAndEscape(open, rootRef, closeDropdown);
 
   const refreshThemes = useCallback(() => {
+    if (!persist) {
+      const applied = getAppliedThemeSnapshot()?.theme.id;
+      if (applied) setActiveId(applied);
+      return;
+    }
     setThemes(getAllThemes());
     const theme = restoreActiveTheme();
     if (theme) setActiveId(theme.id);
-  }, []);
+  }, [persist]);
 
   // Hosts restore the visible body theme at boot. The picker separately
   // reconciles its stored rows and selected value after hydration so its first
@@ -121,9 +134,9 @@ export function ThemePicker({
   useBrowserLayoutEffect(refreshThemes, [refreshThemes]);
 
   const selectTheme = (id: string) => {
-    const theme = getTheme(id);
+    const theme = themes.find((candidate) => candidate.id === id);
     if (!theme) return;
-    setActiveThemeId(id);
+    if (persist) setActiveThemeId(id);
     setActiveId(id);
     applyTheme(theme);
     setOpen(false);
@@ -139,7 +152,7 @@ export function ThemePicker({
   };
 
   return (
-    <div ref={rootRef} className="relative flex items-center">
+    <div ref={rootRef} className="relative flex min-w-0 items-center">
       <button
         ref={setTriggerEl}
         type="button"
@@ -148,11 +161,11 @@ export function ThemePicker({
         aria-label={`Theme: ${activeTheme.label}`}
         onClick={() => setOpen(!open)}
         // The compact trigger stands alone on a touch surface, so it takes the
-        // 44px minimum the dialog row inherits from the dialog around it.
-        className={`group/theme-preview ${themePreviewButton({ kind: 'trigger' })} ${inDialog ? '' : 'min-h-11 min-w-11'}`}
+        // 44px minimum on every pointer, not only a coarse one.
+        className={`group/theme-preview ${themePreviewButton({ kind: 'trigger' })} ${isRow ? '' : 'min-h-11 min-w-11'}`}
         style={preview.style}
       >
-        <ThemePreview colors={preview.swatch} label={inDialog ? activeTheme.label : 'Theme'} />
+        <ThemePreview colors={preview.swatch} label={isRow ? activeTheme.label : 'Theme'} />
         <CaretDownIcon size={10} weight="bold" className="shrink-0 opacity-65" aria-hidden="true" />
       </button>
 
@@ -174,17 +187,19 @@ export function ThemePicker({
             onUninstall={deleteTheme}
           />
 
-          <div className="shrink-0 border-t border-border p-1">
-            <button
-              type="button"
-              onClick={() => {
-                setOpen(false);
-                setDebuggerOpen(true);
-              }}
-              className="w-full rounded px-3 py-1.5 text-left text-sm font-medium text-foreground transition-opacity hover:opacity-85"
-            >
-              Debug current theme
-            </button>
+          <div className="shrink-0 border-t border-border p-1 empty:hidden">
+            {offerDebugger ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setOpen(false);
+                  setDebuggerOpen(true);
+                }}
+                className="w-full rounded px-3 py-1.5 text-left text-sm font-medium text-foreground transition-opacity hover:opacity-85"
+              >
+                Debug current theme
+              </button>
+            ) : null}
             {offerStore ? (
               <button
                 type="button"

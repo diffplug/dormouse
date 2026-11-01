@@ -214,4 +214,4 @@ Source of truth: `pocketContentSecurityPolicy` in `remote-lib-common/src/remote/
 **Scope: pocket-polish**
 
 1. **Dedupe the composition** — the website's `PocketTerminalExperience` and the Pocket shell (`PocketWall.tsx`) each wire `MobileTerminalUi` + `MobileWall` independently; extract the shared wiring so they cannot drift.
-2. **Theme picker in Pocket** — the app restores the persisted theme but exposes no picker; add the shared `ThemePicker` (and its theme-debugger entry) once its dropdown is phone-friendly.
+2. **Theme debugger in Pocket** — the Settings page ([mobile-terminal-ui.md](./mobile-terminal-ui.md) → "Sessions screen") picks a theme but offers no theme-debugger entry.

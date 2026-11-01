@@ -50,5 +50,5 @@ html body.pocket-terminal-body {
 }
 
 body.pocket-terminal-body #root {
-  height: 100vh;
+  height: 100dvh;
 }
