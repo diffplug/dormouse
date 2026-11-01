@@ -1,3 +1,4 @@
+import './snapshot-clock';
 import type { Preview } from '@storybook/react';
 import { useEffect, useLayoutEffect, StrictMode } from 'react';
 import { createElement } from 'react';
