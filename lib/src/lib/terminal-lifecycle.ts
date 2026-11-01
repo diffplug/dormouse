@@ -139,9 +139,33 @@ function readDisplayTextFromBuffer(terminal: Terminal, range: IBufferRange): str
   }
 }
 
+/** A size the device chose (the mobile Settings screen), in px; null follows
+ *  the theme's `--vscode-editor-font-size`. */
+let fontSizeOverride: number | null = null;
+
+function themeEditorFontSize(): number {
+  return parseInt(getComputedStyle(document.body).getPropertyValue('--vscode-editor-font-size'), 10) || 12;
+}
+
+export function getTerminalFontSize(): number {
+  return fontSizeOverride ?? themeEditorFontSize();
+}
+
+/** Resizes every live terminal, and every terminal created after. A refit
+ *  resizes its PTY, so a remote Session's other displays reflow too. */
+export function setTerminalFontSize(px: number | null): void {
+  fontSizeOverride = px;
+  const fontSize = getTerminalFontSize();
+  for (const entry of registry.values()) {
+    if (entry.terminal.options.fontSize === fontSize) continue;
+    entry.terminal.options.fontSize = fontSize;
+    entry.fit.fit();
+  }
+}
+
 function createXtermHost(id: string, grid?: TerminalGrid): { terminal: Terminal; fit: FitAddon; serialize: SerializeAddon; element: HTMLDivElement } {
   const styles = getComputedStyle(document.body);
-  const editorFontSize = parseInt(styles.getPropertyValue('--vscode-editor-font-size'), 10) || 12;
+  const editorFontSize = getTerminalFontSize();
   const editorFontFamily = styles.getPropertyValue('--vscode-editor-font-family').trim() || "'SF Mono', Menlo, Monaco, monospace";
 
   const theme = getTerminalTheme();
