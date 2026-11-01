@@ -16,22 +16,23 @@ export function CopyButton({ text, label, icon, className }: {
   icon?: ReactNode;
   className: string;
 }) {
-  const [outcome, setOutcome] = useState<CopyOutcome | null>(null);
+  // A fresh object per click, so a repeat with the same outcome restarts the timer.
+  const [feedback, setFeedback] = useState<{ outcome: CopyOutcome } | null>(null);
 
   useEffect(() => {
-    if (!outcome) return;
-    const timer = setTimeout(() => setOutcome(null), COPY_FEEDBACK_MS);
+    if (!feedback) return;
+    const timer = setTimeout(() => setFeedback(null), COPY_FEEDBACK_MS);
     return () => clearTimeout(timer);
-  }, [outcome]);
+  }, [feedback]);
 
   return (
     <button
       type="button"
       className={className}
-      onClick={() => void writeTextToClipboard(text()).then((ok) => setOutcome(ok ? 'copied' : 'failed'))}
+      onClick={() => void writeTextToClipboard(text()).then((ok) => setFeedback({ outcome: ok ? 'copied' : 'failed' }))}
     >
       {icon}
-      {outcome ? COPY_OUTCOME_LABEL[outcome] : label}
+      {feedback ? COPY_OUTCOME_LABEL[feedback.outcome] : label}
     </button>
   );
 }
