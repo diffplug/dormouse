@@ -111,7 +111,7 @@ Reserved: further `capabilities` fields (screencast formats, window support) lan
 
 ## Directory (the phone's picker)
 
-**Must list registered terminal Surfaces, excluding helper Sessions.** A Tool remains listed through its terminal even while showing its browser capability. **Must list an embedded page — an `http:` page the iframe renderer shows, for a browser Surface or a serving Tool — as `browser`**, on the browser Surface's own `type: 'browser'` entry or on the Tool's terminal entry, read off the chrome both renderers register. `directory.watch` subscribes without attaching; `DirectoryEntry` / `DirectorySnapshot` own the payload. Thumbnails are staged ([Future](#future)).
+**Must list registered terminal Surfaces, excluding helper Sessions.** A Tool remains listed through its terminal even while showing its browser capability. **Must list an embedded page — an `http:` page on this machine the iframe renderer shows, for a browser Surface or a serving Tool — as `browser`**, on the browser Surface's own `type: 'browser'` entry or on the Tool's terminal entry, read off the chrome both renderers register. `directory.watch` subscribes without attaching; `DirectoryEntry` / `DirectorySnapshot` own the payload. Thumbnails are staged ([Future](#future)).
 
 **Must list every Workspace's terminals, hidden ones included; `workspace` names an entry's Workspace only where its `ref`, the Workspace id, is unique across the Burrow's Windows** (standalone; VS Code sends none; rationale). **Entries arrive in each Window's strip order** (rationale); `active` marks the Workspace that Window shows. **A Client must list entries without `workspace` as before.**
 
@@ -194,6 +194,7 @@ Source of truth: `lib/src/remote/burrow/peer-surfaces.ts` (the owner's half), `t
 A Client shows an embedded page by framing it at an origin of its own, the *frame origin*, and carrying every request that page makes over this session. The Burrow answers each through a lease on the iframe proxy a local pane frames (`docs/specs/dor-browser.md` -> "Iframe Renderer"), so the proxy's upstream pinning, header rewriting, shim, and error pages apply unchanged. A frame is its own document: nothing the Burrow's pane holds — scroll, form state, a Tool's unsaved edits — crosses.
 
 - **Must open a frame only at the page its surface embeds when asked**, never at a URL the Client names; the Client's page then requests any path on that grant's one upstream.
+- **Must frame only a page on this machine**: every address its grant pins is loopback, unspecified, or held by one of this host's interfaces, judged on those addresses and never on a name (rationale). A local pane keeps its remote pages; the session lists none of them to a Client.
 - **Must hold every grant under a lease the session owns**, never a webview's, released by `frame.close`, by the session's disposal, and when the surface's page is gone or moves to another origin — re-checked on every directory invalidation and told as `frame.closed`.
 - **The tunnel stands in for the frame origin**: an `Origin` equal to it, and a `Referer` on it, reach the grant as the grant's own, so the proxy vouches for those alone; any other `Origin` passes as sent; a `Location` on the grant returns as a path. **Never forward `Cookie`, a `Sec-` field, or the connection's own fields**; `destination` stands in for `Sec-Fetch-Dest`, which a service worker never sees. A WebSocket opens as the grant's own origin.
 - **Must answer every body identity-encoded**, decoding a compressed one, since a response a Client synthesizes is never decoded.
@@ -250,6 +251,10 @@ type BrowserInput =
 ```
 
 Fixed, phone-appropriate screencast parameters (JPEG, capped dimension and frame rate) first; quality negotiation (`browser.quality`) and remote navigation (`browser.navigate`) after — a phone can drive the page's own UI meanwhile.
+
+### 1a. Frames off this machine
+
+A Client framing a remote `http://` page, whose framing and script protections the proxy strips, needs a consent the Burrow can read, which a webview's own allowlist is not.
 
 ### 2. In-flight command replay
 

@@ -52,6 +52,7 @@
 import { lookup as dnsLookup } from 'dns/promises';
 import * as http from 'http';
 import * as net from 'net';
+import { networkInterfaces } from 'os';
 import { IFRAME_HTTP_ONLY, type IframeProxyResult } from '../lib/platform/iframe-proxy-types';
 import { isForeignOrigin, isLoopbackHost, isOwnOrigin } from './loopback-guard';
 import { createSerialQueue } from './remote/serial-queue';
@@ -66,6 +67,7 @@ import {
   frameAncestorsCsp,
   instrumentHtml,
   isBlockedAddress,
+  isThisMachineAddress,
   normalizeEmbedderOrigins,
   rewriteOrigin,
   REMOTE_LEASE_OWNER_PREFIX,
@@ -111,6 +113,10 @@ export type UpstreamAddress = { address: string; family: number };
  *  it names. Injected by tests; the hosts use the system resolver. */
 export type UpstreamResolver = (hostname: string) => Promise<UpstreamAddress[]>;
 const systemResolver: UpstreamResolver = (hostname) => dnsLookup(hostname, { all: true });
+/** The addresses this host's interfaces hold now. Injected by tests. */
+export type InterfaceAddresses = () => string[];
+const systemInterfaces: InterfaceAddresses = () =>
+  Object.values(networkInterfaces()).flatMap((entries) => (entries ?? []).map((entry) => entry.address));
 
 /** Host-supplied logger; defaults to a no-op so the module is usable bare. */
 export type ProxyLogger = (message: string) => void;
@@ -152,7 +158,8 @@ interface Grant {
    * answer on a navigation.
    */
   embedderOrigins: string[] | null;
-  /** A remote Client frames it, so its pages carry the socket shim too. */
+  /** A remote Client frames it, so its pages carry the socket shim too, and its
+   *  upstream is on this machine. */
   tunneled: boolean;
 }
 
@@ -224,7 +231,12 @@ function endLeases(ends: (lease: Lease) => boolean): void {
  */
 export async function createIframeProxyUrl(
   targetUrl: string,
-  opts?: { log?: ProxyLogger; embedderOrigins?: unknown; lease?: unknown; resolve?: UpstreamResolver; tunneled?: boolean },
+  opts?: {
+    log?: ProxyLogger; embedderOrigins?: unknown; lease?: unknown; resolve?: UpstreamResolver;
+    /** For a remote Client's frame: its pages carry the socket shim, and only an
+     *  upstream on this machine is fronted (docs/specs/remote-api.md → "Frames"). */
+    tunneled?: boolean;
+  },
 ): Promise<IframeProxyResult> {
   if (opts?.log) log = opts.log;
   const embedderOrigins = normalizeEmbedderOrigins(opts?.embedderOrigins);
@@ -298,6 +310,7 @@ async function acquireLeased(
 type Refusal = Extract<IframeProxyResult, { ok: false }>;
 
 const METADATA_REFUSED: Refusal = { ok: false, reason: 'scheme', detail: 'link-local / metadata addresses are refused' };
+const OFF_MACHINE_REFUSED: Refusal = { ok: false, reason: 'scheme', detail: 'a remote device frames pages on this machine only' };
 
 /**
  * The addresses a grant for `upstream` connects to, fixed for its lifetime, or
@@ -337,11 +350,37 @@ function pinnedLookup(addresses: readonly UpstreamAddress[]): net.LookupFunction
   };
 }
 
+function allOnThisMachine(addresses: readonly UpstreamAddress[], interfaces: readonly string[]): boolean {
+  return addresses.every(({ address }) => isThisMachineAddress(address, interfaces));
+}
+
+/**
+ * Whether a remote Client may frame `targetUrl`: every address it resolves to is
+ * this machine's. For a listing, which only spares a Client a page it could not
+ * open: minting a tunneled grant checks again, on the addresses it pins.
+ */
+export async function isUpstreamOnThisMachine(
+  targetUrl: string,
+  opts?: { resolve?: UpstreamResolver; interfaceAddresses?: InterfaceAddresses },
+): Promise<boolean> {
+  let upstream: URL;
+  try {
+    upstream = new URL(targetUrl);
+  } catch {
+    return false;
+  }
+  if (upstream.protocol !== 'http:') return false;
+  const pinned = await pinAddresses(upstream, opts?.resolve ?? systemResolver);
+  return Array.isArray(pinned) && allOnThisMachine(pinned, (opts?.interfaceAddresses ?? systemInterfaces)());
+}
+
 async function mintGrant(
   upstream: URL, embedderOrigins: string[] | null, leased: boolean, resolve: UpstreamResolver, tunneled: boolean,
 ): Promise<Grant | Refusal> {
   const pinned = await pinAddresses(upstream, resolve);
   if (!Array.isArray(pinned)) return pinned;
+  // Judged on where the grant will connect, so no name can talk its way in.
+  if (tunneled && !allOnThisMachine(pinned, systemInterfaces())) return OFF_MACHINE_REFUSED;
   const now = Date.now();
   sweepGrants(now);
 

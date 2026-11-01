@@ -10,10 +10,10 @@ import { gzipSync } from 'node:zlib';
 import { WebSocketServer } from 'ws';
 import type { HttpHeader } from 'remote-lib-common';
 import type { FrameHttpInit, FrameUpstream } from '../../remote/burrow/burrow-frame-host';
-import { createIframeProxyUrl, releaseIframeProxyLease } from '../iframe-proxy';
+import { createIframeProxyUrl, isUpstreamOnThisMachine, releaseIframeProxyLease } from '../iframe-proxy';
 import { createBurrowFrameHost } from './frame-host';
 
-const proxy = { create: createIframeProxyUrl, release: releaseIframeProxyLease };
+const proxy = { create: createIframeProxyUrl, release: releaseIframeProxyLease, isLocal: (url: string) => isUpstreamOnThisMachine(url) };
 
 const FRAME_ORIGIN = 'https://frame.example';
 const POCKET = ['https://pocket.example'];
@@ -119,6 +119,22 @@ describe('createBurrowFrameHost', () => {
     const response = await fetchThrough(upstream, { method: 'PUT', path: '/save', headers: [], destination: '' }, 'file text');
     expect(JSON.parse(response.body)).toEqual({ got: 'file text', ae: 'identity' });
     expect(header(response.headers, 'content-encoding')).toBeUndefined();
+  });
+
+  it('frames only a page on this machine, and lists accordingly', async () => {
+    const host = createBurrowFrameHost({
+      ...proxy,
+      create: (url, options) => createIframeProxyUrl(url, {
+        ...options,
+        resolve: async (name) => (name === 'remote.example' ? [{ address: '93.184.216.34', family: 4 }] : [{ address: '127.0.0.1', family: 4 }]),
+      }),
+    });
+    const lease = { owner: 'remote:test', id: 'off-machine' };
+    expect(await host.open('http://remote.example/', { frameOrigin: FRAME_ORIGIN, embedderOrigins: POCKET, lease }))
+      .toEqual({ refused: 'a remote device frames pages on this machine only' });
+    const { port } = await listen((_req, res) => res.end('ok'));
+    expect(await host.canOpen(`http://localhost:${port}/`)).toBe(true);
+    expect(await host.canOpen('https://localhost/')).toBe(false);
   });
 
   it('refuses a page the proxy refuses, and an unusable chain', async () => {

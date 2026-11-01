@@ -49,10 +49,30 @@ export interface FrameHostProxy {
     options: { embedderOrigins: string[]; lease: { owner: string; id: string }; tunneled: true },
   ): Promise<IframeProxyResult>;
   release(owner: string, id: string): void;
+  isLocal(url: string): Promise<boolean>;
 }
 
+/** How long a page's answer stands: a directory is collected on every pane change. */
+const LOCAL_ANSWER_TTL_MS = 30_000;
+/** A slow name must not hold up the listing; it is left out until it answers. */
+const LOCAL_ANSWER_BUDGET_MS = 1_000;
+
 export function createBurrowFrameHost(proxy: FrameHostProxy): BurrowFrameHost {
+  const answers = new Map<string, { at: number; local: Promise<boolean> }>();
   return {
+    canOpen(url) {
+      const now = Date.now();
+      for (const [key, answer] of answers) if (now - answer.at > LOCAL_ANSWER_TTL_MS) answers.delete(key);
+      let answer = answers.get(url);
+      if (!answer) {
+        answer = { at: now, local: proxy.isLocal(url).catch(() => false) };
+        answers.set(url, answer);
+      }
+      return Promise.race([
+        answer.local,
+        new Promise<boolean>((resolve) => { setTimeout(resolve, LOCAL_ANSWER_BUDGET_MS, false).unref(); }),
+      ]);
+    },
     async open(url, { frameOrigin, embedderOrigins, lease: sessionLease }) {
       const [origin] = normalizeEmbedderOrigins([frameOrigin]) ?? [];
       if (!origin) return { refused: 'invalid frame origin' };

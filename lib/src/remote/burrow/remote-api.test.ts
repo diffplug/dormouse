@@ -336,7 +336,10 @@ describe('RemoteApiSession frames', () => {
     ...entry('surface:1', 'tool'),
     browser: { render: 'iframe', url: 'http://localhost:3000/' },
   };
-  const frames = { open: async () => ({ refused: 'unused' }) };
+  const frames = {
+    open: async () => ({ refused: 'unused' }),
+    canOpen: async (url: string) => !url.includes('remote.example'),
+  };
 
   function framesSession(provider: FakeProvider) {
     const sent: SentPayload[] = [];
@@ -371,6 +374,20 @@ describe('RemoteApiSession frames', () => {
     });
     await settle();
     expect(snapshots(sent).at(-1)!.entries).toEqual([toolEntry, browserEntry]);
+  });
+
+  it('lists no page the tunnel would refuse: a browser entry goes, a terminal stays', async () => {
+    const provider = new FakeProvider();
+    const off = { render: 'iframe', url: 'http://remote.example/' } as const;
+    provider.entries = [{ ...entry('surface:1', 'tool'), browser: off }, { ...browserEntry, browser: off }, browserEntry];
+    const { session, sent } = framesSession(provider);
+    session.handle({
+      requestId: 'hello-1',
+      method: REMOTE_METHODS.hello,
+      params: { protocolVersion: 1, viewer: 'phone', capabilities: { frames: true } },
+    });
+    await watchDirectory(session);
+    expect(snapshots(sent).at(-1)!.entries).toEqual([entry('surface:1', 'tool'), browserEntry]);
   });
 
   it('never lists pages without a frame host, whatever the hello declared', async () => {

@@ -341,6 +341,28 @@ export function instrumentHtml(body: string, embedderOrigin: string, preserveCsp
 const LINK_LOCAL_V4_START = 0xa9fe0000; // 169.254.0.0
 const LINK_LOCAL_V4_END = 0xa9feffff; // 169.254.255.255
 
+/** An address without brackets or a zone, lowercased. */
+const bareAddress = (address: string) => address.replace(/^\[|\]$/g, '').replace(/%.*$/, '').toLowerCase();
+
+/** One spelling per address: an IPv4 one, mapped into IPv6 or not, as its number. */
+function addressKey(address: string): string | number {
+  const bare = bareAddress(address);
+  return ipv4Value(bare) ?? bare;
+}
+
+/**
+ * Whether a connection to a resolved address reaches this machine: loopback, the
+ * unspecified address a server bound to every interface prints, or one of
+ * `interfaceAddresses`, which this host's interfaces hold. Takes an address and
+ * never a name: `localhost` is whatever the resolver says it is.
+ */
+export function isThisMachineAddress(address: string, interfaceAddresses: readonly string[]): boolean {
+  const key = addressKey(address);
+  const loopback = typeof key === 'number' ? key >>> 24 === 127 : key === '::1';
+  if (loopback || key === 0 || key === '::') return true;
+  return interfaceAddresses.some((held) => addressKey(held) === key);
+}
+
 export function isBlockedAddress(hostname: string): boolean {
   // IPv6 link-local (fe80::/10).
   if (/^\[?fe[89ab][0-9a-f]:/i.test(hostname)) return true;

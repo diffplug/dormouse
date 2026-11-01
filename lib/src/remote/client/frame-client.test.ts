@@ -14,7 +14,7 @@ import {
   type RemoteEventMsg,
   type RemoteResponse,
 } from 'remote-lib-common';
-import { createIframeProxyUrl, releaseIframeProxyLease } from '../../host/iframe-proxy';
+import { createIframeProxyUrl, isUpstreamOnThisMachine, releaseIframeProxyLease } from '../../host/iframe-proxy';
 import { createBurrowFrameHost } from '../../host/remote/frame-host';
 import type { BurrowSurfaceProvider } from '../burrow/burrow-surface-provider';
 import { RemoteApiSession } from '../burrow/remote-api';
@@ -57,7 +57,7 @@ function connect(pages: Map<string, string>) {
     burrowId: 'burrow-1',
     provider,
     holder: { id: `holder-${sessions.length}`, label: 'iPhone', serviceId: 'service-1' },
-    frames: createBurrowFrameHost({ create: createIframeProxyUrl, release: releaseIframeProxyLease }),
+    frames: createBurrowFrameHost({ create: createIframeProxyUrl, release: releaseIframeProxyLease, isLocal: (url) => isUpstreamOnThisMachine(url) }),
     send: (payload) => {
       const wire = JSON.stringify(payload);
       inFlight += wire.length;

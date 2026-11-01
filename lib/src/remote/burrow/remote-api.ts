@@ -91,6 +91,7 @@ export class RemoteApiSession {
   #attachment: Attachment | null = null;
   #attachGeneration = 0;
   readonly #frames: FrameTunnel | null;
+  readonly #frameHost: BurrowFrameHost | null;
   /** The Client's hello declared it frames pages, so the directory lists them. */
   #listsFrames = false;
   #disposed = false;
@@ -102,6 +103,7 @@ export class RemoteApiSession {
     this.#holder = options.holder;
     this.#onDispose = options.onDispose ?? null;
     this.#onAttach = options.onAttach ?? null;
+    this.#frameHost = options.frames ?? null;
     this.#frames = options.frames
       ? new FrameTunnel({
         host: options.frames,
@@ -286,9 +288,18 @@ export class RemoteApiSession {
     }
     // The subscription may have been replaced or torn down while we waited.
     if (this.#directorySubId !== subId || this.#directoryGeneration !== generation) return;
-    this.#event(subId, REMOTE_EVENTS.directorySnapshot, {
-      entries: this.#listsFrames ? entries : terminalsOnly(entries),
-    });
+    // Awaited here rather than beside the collect, since it needs only the pages
+    // the Burrow will list; the generation is read again after it.
+    const listed = this.#listsFrames ? await this.#openablePages(entries) : terminalsOnly(entries);
+    if (this.#disposed || this.#directorySubId !== subId || this.#directoryGeneration !== generation) return;
+    this.#event(subId, REMOTE_EVENTS.directorySnapshot, { entries: listed });
+  }
+
+  /** `entries` less any page the frame tunnel would refuse. */
+  async #openablePages(entries: DirectoryEntry[]): Promise<DirectoryEntry[]> {
+    const host = this.#frameHost!;
+    const verdicts = await Promise.all(entries.map((entry) => (entry.browser ? host.canOpen(entry.browser.url) : true)));
+    return terminalsOnly(entries, (_, index) => verdicts[index]!);
   }
 
   #attach(request: RemoteRequest): void {
@@ -610,13 +621,17 @@ export class RemoteApiSession {
 }
 
 /**
- * The listing a Client that frames nothing reads: no browser entry, and no
- * entry naming a page, so an older Client never offers what it cannot show.
+ * The listing with only the pages `keepsPage` keeps: a browser entry whose page
+ * goes is gone, and a terminal entry stays without it. With none kept, it is
+ * what a Client that frames nothing reads, so it never offers what it cannot show.
  */
-function terminalsOnly(entries: DirectoryEntry[]): DirectoryEntry[] {
-  return entries.flatMap((entry) => {
+function terminalsOnly(
+  entries: DirectoryEntry[],
+  keepsPage: (entry: DirectoryEntry, index: number) => boolean = () => false,
+): DirectoryEntry[] {
+  return entries.flatMap((entry, index) => {
+    if (entry.browser === undefined || keepsPage(entry, index)) return [entry];
     if (entry.type !== 'terminal') return [];
-    if (entry.browser === undefined) return [entry];
     const { browser: _browser, ...rest } = entry;
     return [rest];
   });

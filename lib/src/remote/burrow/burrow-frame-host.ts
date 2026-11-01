@@ -85,6 +85,11 @@ export interface FrameOpenOptions {
 }
 
 export interface BurrowFrameHost {
+  /**
+   * Whether `url` could be framed, for the directory: a page off this machine
+   * never is. The {@link open} of one is refused however this answers.
+   */
+  canOpen(url: string): Promise<boolean>;
   /** Mint a grant for `url`, or say why there is none. */
   open(url: string, options: FrameOpenOptions): Promise<FrameUpstream | { refused: string }>;
 }

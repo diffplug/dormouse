@@ -13,7 +13,7 @@ const clipboard = require('./clipboard-ops');
 const { createDorControlServer } = require('./dor-control-server');
 // Built from lib/src/host/iframe-proxy.ts (shared with the VS Code host) by
 // scripts/build-sidecar-proxy.mjs. See docs/specs/dor-browser.md.
-const { createIframeProxyUrl, releaseIframeProxyLease, retainIframeProxyOwners } = require('./iframe-proxy.cjs');
+const { createIframeProxyUrl, isUpstreamOnThisMachine, releaseIframeProxyLease, retainIframeProxyOwners } = require('./iframe-proxy.cjs');
 const { createToolHost } = require('./tool-host.cjs');
 const { gitInfo, canonicalLocalDirectory, resolveBinaryPath } = require('./git-info.cjs');
 // Same pattern: lib/src/host/browser-host.ts is the single source of truth for
@@ -86,7 +86,7 @@ const host = createSidecarHost({
   mgr,
   // The one proxy instance, so a remote frame's lease counts against the same
   // bound as a window's (docs/specs/remote-api.md -> Frames).
-  iframeProxy: { create: createIframeProxyUrl, release: releaseIframeProxyLease },
+  iframeProxy: { create: createIframeProxyUrl, release: releaseIframeProxyLease, isLocal: isUpstreamOnThisMachine },
 });
 
 // Dor Tools. Shares the app's state directory, so an approved repo stays

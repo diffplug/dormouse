@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vites
 import * as http from 'node:http';
 import * as net from 'node:net';
 import { gunzipSync, gzipSync } from 'node:zlib';
-import { MAX_IFRAME_LEASES, createIframeProxyUrl, releaseIframeProxyLease, retainIframeProxyOwners } from './iframe-proxy';
+import { MAX_IFRAME_LEASES, createIframeProxyUrl, isUpstreamOnThisMachine, releaseIframeProxyLease, retainIframeProxyOwners } from './iframe-proxy';
 
 // The app's own ancestor chain, as `lib/src/lib/embedder-origins.ts` reports it
 // from a VS Code webview: the extension's document plus the workbench above it.
@@ -818,6 +818,42 @@ describe('iframe proxy leases', () => {
     const closed = new Promise<void>((resolve) => socket.once('close', () => resolve()));
     releaseIframeProxyLease(l.owner, l.id);
     await closed;
+  });
+
+  describe('a tunneled grant is for this machine alone', () => {
+    const at = (...addresses: string[]) => async () => addresses.map((address) => ({ address, family: address.includes(':') ? 6 : 4 }));
+    const tunneled = { ...NO_LOG, tunneled: true };
+
+    it('judges where it will connect, so a name cannot talk its way in', async () => {
+      expect(await createIframeProxyUrl('http://localhost:9/', { ...tunneled, resolve: at('93.184.216.34') }))
+        .toMatchObject({ ok: false, reason: 'scheme' });
+      expect(await createIframeProxyUrl('http://mixed.example:9/', { ...tunneled, resolve: at('127.0.0.1', '93.184.216.34') }))
+        .toMatchObject({ ok: false, reason: 'scheme' });
+      expect(await createIframeProxyUrl('http://anything.example:9/', { ...tunneled, resolve: at('127.0.0.1', '::1') }))
+        .toMatchObject({ ok: true });
+    });
+
+    it('leaves a local pane able to frame a remote page', async () => {
+      expect(await createIframeProxyUrl('http://remote.example:9/', { ...NO_LOG, resolve: at('93.184.216.34') }))
+        .toMatchObject({ ok: true });
+    });
+
+    it('counts loopback, the unspecified address, and this host\'s own interfaces as this machine', async () => {
+      const onThisMachine = (address: string) =>
+        isUpstreamOnThisMachine('http://x.example/', { resolve: at(address), interfaceAddresses: () => ['192.168.1.5', 'fd7a::1%en0'] });
+      for (const address of ['127.0.0.1', '127.8.8.8', '::1', '::ffff:127.0.0.1', '0.0.0.0', '::', '192.168.1.5', '::ffff:192.168.1.5', 'FD7A::1']) {
+        expect(await onThisMachine(address), address).toBe(true);
+      }
+      for (const address of ['192.168.1.6', '10.0.0.1', '100.64.0.1', '93.184.216.34', '2606:4700::1']) {
+        expect(await onThisMachine(address), address).toBe(false);
+      }
+    });
+
+    it('answers false for what no grant could front', async () => {
+      expect(await isUpstreamOnThisMachine('https://localhost/')).toBe(false);
+      expect(await isUpstreamOnThisMachine('not a url')).toBe(false);
+      expect(await isUpstreamOnThisMachine('http://169.254.169.254/')).toBe(false);
+    });
   });
 
   it('gives a local pane no tunnel socket shim', async () => {

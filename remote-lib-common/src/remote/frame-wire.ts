@@ -73,8 +73,9 @@ export interface HelloCapabilities {
 
 /**
  * A surface's embedded page, as the directory describes it to a Client whose
- * hello declared {@link HelloCapabilities.frames}. `render` names how a Client
- * may show it; one this build does not know is skipped.
+ * hello declared {@link HelloCapabilities.frames}, and only one on the Burrow's
+ * own machine. `render` names how a Client may show it; one this build does not
+ * know is skipped.
  */
 export interface DirectoryBrowser {
   render: 'iframe';
