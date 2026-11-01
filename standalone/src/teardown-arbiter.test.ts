@@ -172,7 +172,7 @@ describe("one window, two teardown flows", () => {
     expect(getQuitConfirmPhase()).toBe("open");
     expect(getQuitConfirmIntent().kind).toBe("quit");
 
-    // Confirming quits: the flow that took over is the one that runs.
+    // Cancelling answers the quit that took over, not the close.
     cancelQuit();
     await settle();
     expect(commands()).toContain("quit_cancel");
@@ -214,7 +214,7 @@ describe("one window, two teardown flows", () => {
     expect(getQuitConfirmPhase()).toBe("open");
     expect(getQuitConfirmIntent().kind).toBe("close-window");
 
-    // …and the close still runs when the user confirms it.
+    // …and cancelling it answers the close, not a quit.
     cancelQuit();
     await settle();
     expect(count("window_close_cancel")).toBe(1);

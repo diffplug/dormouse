@@ -1,7 +1,7 @@
 /**
- * Slice-1 sign-in coverage (docs/specs/relay.md): passkey assertions minted by
- * the harness `SimAuthenticator`, single-use sign-in challenges, session minting
- * and expiry, and the `requireSession` gate slice 2 will hang `/api/burrows` off.
+ * Sign-in coverage (docs/specs/relay.md): passkey assertions minted by the
+ * harness `SimAuthenticator`, single-use sign-in challenges, session minting
+ * and expiry, and the `requireSession` gate the session routes sit behind.
  */
 
 import { test } from 'node:test';
