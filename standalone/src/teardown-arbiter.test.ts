@@ -218,6 +218,7 @@ describe("one window, two teardown flows", () => {
     cancelQuit();
     await settle();
     expect(count("window_close_cancel")).toBe(1);
+    expect(commands()).not.toContain("quit_cancel");
   });
 
   it("a quit meeting a committed close votes rather than starting a second teardown", async () => {
