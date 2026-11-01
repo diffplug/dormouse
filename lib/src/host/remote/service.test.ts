@@ -1790,13 +1790,25 @@ describe('paired devices and revocation', () => {
     expect((await command('status')).result).toMatchObject({ pairedClients: 0 });
   });
 
+  it('names Dormouse quitting as the end of an unsaved revocation in standalone', async () => {
+    createService({ enrollment: ENROLLMENT, acl: { [BURROW_ID]: [PHONE] } }, { kind: 'standalone' });
+    await service.start();
+    sockets[0]!.open();
+    vi.spyOn(store, 'saveAcl').mockRejectedValueOnce(new Error('disk full'));
+
+    expect((await command('revokeDevice', { id: phoneId })).error).toMatch(/refused until Dormouse quits.*disk full/);
+  });
+
   it('keeps a revocation whose save failed across a network-policy restart, until a save lands', async () => {
     createService({ enrollment: ENROLLMENT, acl: { [BURROW_ID]: [PHONE, TABLET] } });
     await service.start();
     sockets[0]!.open();
     const save = vi.spyOn(store, 'saveAcl').mockRejectedValueOnce(new Error('disk full'));
 
-    expect((await command('revokeDevice', { id: phoneId })).error).toMatch(/refused until Dormouse quits.*disk full/);
+    // VS Code's next broker window loads the stored ACL, so the hold ends with this window.
+    expect((await command('revokeDevice', { id: phoneId })).error).toMatch(
+      /refused until the window running remote control closes.*disk full/,
+    );
     expect(store.acl[BURROW_ID]!.every((record) => record.revokedAt === null)).toBe(true);
     // The hold covers every record of the target approved by the failure — one
     // an approval queued ahead of the revocation committed included — and none
