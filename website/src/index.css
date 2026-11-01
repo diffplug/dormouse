@@ -15,8 +15,8 @@
 /* The site's own design, shared with Hosted's account pages. */
 @import "../../lib/src/site/site.css";
 @source "../../lib/src";
-/* Tests and stories are 180 of the library's 430 files and render nowhere on
-   this site. Excluding them can only drop a utility that appears *nowhere
+/* Tests and stories are a large share of the library's files and render
+   nowhere on this site. Excluding them can only drop a utility that appears *nowhere
    else*, so every shipped component keeps its classes. */
 @source not "../../lib/src/**/*.test.ts";
 @source not "../../lib/src/**/*.test.tsx";
