@@ -7,8 +7,8 @@ rules:
     config:
       policies:
         # The one documented tag pin: tend's generated workflows reference
-        # its action by version (docs/specs/security-ci.md -> "Upstream
-        # compromise"); `scripts/workflow-lint.mjs` keeps it to `tend-*.yaml`.
+        # its actions by version (docs/specs/security-ci.md -> "Upstream
+        # compromise"); `scripts/workflow-lint.mjs` keeps them to `tend-*.yaml`.
         "max-sixty/tend/*": ref-pin
         "*": hash-pin
   dangerous-triggers:
