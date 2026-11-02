@@ -1187,7 +1187,7 @@
       "author": "Petyo Ivanov",
       "homepage": "https://mdxeditor.dev/",
       "versions": [
-        "4.3.3"
+        "4.3.4"
       ]
     },
     {
@@ -3003,7 +3003,6 @@
       "author": "Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)",
       "homepage": "https://github.com/syntax-tree/mdast-util-from-markdown",
       "versions": [
-        "2.0.3",
         "2.1.0"
       ]
     },
