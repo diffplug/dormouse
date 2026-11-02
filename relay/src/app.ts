@@ -1,6 +1,7 @@
 /**
  * Selfhost Relay factory (`docs/specs/relay.md`). Each app owns isolated
- * challenge/session stores and an injectable clock; `index.ts` only maps env.
+ * challenge/session stores and an injectable clock; `config.ts` maps env and
+ * `start.ts` serves it.
  */
 
 import { randomBytes } from 'node:crypto';
@@ -116,7 +117,7 @@ import type { PushSender } from './push.js';
 import { isPublicHttpsPushEndpoint } from './push-endpoint.js';
 import { isSetupPassword } from './setup-password.js';
 
-/** Runtime configuration; see `index.ts` for how env maps onto this. */
+/** Runtime configuration; see `config.ts` for how env maps onto this. */
 export interface AppConfig {
   /**
    * Gates Burrow enrollment (`POST /api/burrow/enroll`). It no longer registers a
@@ -135,7 +136,7 @@ export interface AppConfig {
    * assertion this Relay verifies, and mirror it to each Burrow as its
    * `ConnectionPolicy.requireUserVerification` so the two cannot disagree on
    * what a valid assertion is. Omitted/false keeps the presence-only behavior;
-   * a deployment opts in explicitly (env → config in `index.ts`).
+   * a deployment opts in explicitly (env → config in `config.ts`).
    */
   readonly requireUserVerification?: boolean;
   /** Directory holding the JSON state files (docs/specs/relay.md, "State files"). */
@@ -431,14 +432,14 @@ export interface CreatedApp {
   /** The relay hub; exposed so `/api/burrows` presence and tests can read it. */
   readonly hub: RelayHub;
   /**
-   * Bind the WS relay onto the http server returned by `serve()`. `index.ts`
+   * Bind the WS relay onto the http server returned by `serve()`. `start.ts`
    * (and tests) MUST call this after `serve()`, per the `@hono/node-ws` pattern
    * — the WebSocket routes are inert until the upgrade handler is injected.
    */
   readonly injectWebSocket: NodeWebSocket['injectWebSocket'];
   /**
    * Close the relay socket of every connected Burrow whose `burrows.json` row is
-   * gone, and report how many. `index.ts` runs it every
+   * gone, and report how many. `start.ts` runs it every
    * {@link BURROW_REVOCATION_SWEEP_MS}; exposed rather than scheduled here so
    * `createApp` starts no background work, and so a test drives the decision
    * instead of a timer.
@@ -447,7 +448,7 @@ export interface CreatedApp {
   /**
    * Close the Client sockets whose session has expired, then ping the rest and
    * close whatever has not been heard from within
-   * {@link RELAY_IDLE_TIMEOUT_MS}. Reports what it closed. `index.ts` runs it
+   * {@link RELAY_IDLE_TIMEOUT_MS}. Reports what it closed. `start.ts` runs it
    * every {@link RELAY_SWEEP_MS}; exposed for the same reason
    * {@link CreatedApp.sweepRevokedBurrows} is.
    */
@@ -1313,7 +1314,7 @@ export function createApp(config: AppConfig): CreatedApp {
 
   /**
    * The socket-level sweep: expire, then probe. `docs/specs/relay.md` -> "Routing"
-   * owns both rules. Synchronous and cheap — it touches no disk — so `index.ts`
+   * owns both rules. Synchronous and cheap — it touches no disk — so `start.ts`
    * can run it far more often than the revocation sweep.
    */
   function sweepRelaySockets(): { expired: number; idle: number } {
