@@ -4,6 +4,7 @@ import {
   ONE_TIME_WS_ROUTES,
   isContentHashedName,
   HOSTED_FRAME_DOMAIN,
+  IFRAME_SANDBOX,
   pocketContentSecurityPolicy,
 } from "remote-lib-common";
 
@@ -117,9 +118,9 @@ export function exactOrigin(value: unknown): string | null {
  * The one-time page's own policy (`docs/specs/one-time.md` -> "Phone page"):
  * scripts from `/connect/assets/` alone (plus WebAssembly for xterm's image
  * decoder), styles from there too plus inline ones for the shell and React,
- * and one socket — the rendezvous client route. Nothing names `'self'`, which
- * would admit whatever else the relay origin serves. Sandboxed, so it opens no
- * popup and submits no form.
+ * one socket — the rendezvous client route — and frames on the frame domain alone.
+ * Nothing names `'self'`, which would admit whatever else the relay origin serves.
+ * Sandboxed with no top navigation; `form-action` keeps the page's own forms in.
  */
 export function oneTimePagePolicy(appOrigin: string) {
   const page = `${appOrigin}${ONE_TIME_PAGE_PATH}`;
@@ -137,9 +138,8 @@ export function oneTimePagePolicy(appOrigin: string) {
     "base-uri 'none'",
     "frame-ancestors 'none'",
     "object-src 'none'",
-    // A frame's sandbox is at most this: what `IFRAME_SANDBOX` grants a page, and a
-    // link it opens leaves the sandbox on a tap.
-    "sandbox allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads",
+    // A frame's sandbox is at most this, and a link opened on a tap leaves it.
+    `sandbox ${IFRAME_SANDBOX} allow-popups-to-escape-sandbox`,
   ].join("; ");
 }
 

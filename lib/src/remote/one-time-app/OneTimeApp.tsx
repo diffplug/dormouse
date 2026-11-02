@@ -108,8 +108,8 @@ export function expiresInText(remainingMs: number): string {
 // --- The client -------------------------------------------------------------
 
 /** What the page drives: the ceremony, its ending, and the session the wall runs on. */
-export type OneTimePageClient = RemoteWallClient &
-  Pick<OneTimeClient, 'connectOnce' | 'setOnEnded' | 'close' | 'request' | 'subscribe' | 'unsubscribe'>;
+export type OneTimePageClient = RemoteWallClient & FrameSession &
+  Pick<OneTimeClient, 'connectOnce' | 'setOnEnded' | 'close'>;
 
 /**
  * The page's client: the rendezvous on this page's own origin — `wss:` on

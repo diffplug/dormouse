@@ -51,7 +51,7 @@ const fake = vi.hoisted(() => ({
   frameDomain: null as string | null,
   disposeAllSessions: vi.fn<() => void>(),
   /** The props the last wall rendered with. */
-  wall: null as null | { persist?: boolean; onError?: (error: unknown) => void },
+  wall: null as null | { persist?: boolean; onError?: (error: unknown) => void; browsers?: { session: unknown; frameDomain: string; transport: unknown; salt: () => Uint8Array } },
 }));
 
 // The one shared export doubled, and only for its probe: the gate has to be
@@ -67,7 +67,7 @@ vi.mock('../pocket-app/remote-wall', () => ({
 }));
 vi.mock('../pocket-app/deployment', () => ({ frameDomainFor: () => fake.frameDomain }));
 vi.mock('../pocket-app/PocketWall', () => ({
-  PocketWall: (props: { persist?: boolean; onError?: (error: unknown) => void; sessionsHeader?: ReactNode; browsers?: Record<string, unknown> }) => {
+  PocketWall: (props: { persist?: boolean; onError?: (error: unknown) => void; sessionsHeader?: ReactNode; browsers?: { session: unknown; frameDomain: string; transport: unknown; salt: () => Uint8Array } }) => {
     fake.wall = props;
     return <div data-testid="wall">{props.sessionsHeader}</div>;
   },
@@ -408,7 +408,7 @@ describe('pages on the wall', () => {
     fake.frameDomain = 'frames.example';
     const { client } = await onTheWall();
     expect(fake.mount).toHaveBeenCalledWith(client, { frames: true });
-    const browsers = (fake.wall as { browsers?: { session: unknown; frameDomain: string; transport: unknown; salt: () => Uint8Array } }).browsers!;
+    const browsers = fake.wall!.browsers!;
     expect(browsers.session).toBe(client);
     expect(browsers.frameDomain).toBe('frames.example');
     expect(browsers.transport).toEqual({ path: 'direct', cause: null });
@@ -421,7 +421,7 @@ describe('pages on the wall', () => {
   it('declares nothing where no frame domain answers', async () => {
     const { client } = await onTheWall();
     expect(fake.mount).toHaveBeenCalledWith(client, undefined);
-    expect((fake.wall as { browsers?: unknown }).browsers).toBeUndefined();
+    expect(fake.wall!.browsers).toBeUndefined();
   });
 });
 

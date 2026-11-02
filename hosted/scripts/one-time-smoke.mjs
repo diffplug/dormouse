@@ -82,7 +82,7 @@ async function pageSmoke(origin, fetchPage) {
     `script-src ${origin}${ONE_TIME_PAGE_PATH}assets/ 'wasm-unsafe-eval'`,
     `connect-src ${origin.replace(/^http/, "ws")}${ONE_TIME_WS_ROUTES.client}`,
     "frame-src https://*.dormouseusercontent.com",
-    "sandbox allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads",
+    "sandbox allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads allow-popups-to-escape-sandbox",
   ])
     assert.ok(
       policy.split("; ").includes(directive),

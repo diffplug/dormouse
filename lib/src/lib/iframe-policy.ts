@@ -9,7 +9,7 @@
 // (docs/specs/tutorial.md -> Playground filesystem). **The raw fallback is not
 // the trusted case** — it is the one with no proxy in front of it at all, so it
 // gets the same sandbox rather than none.
-export const IFRAME_SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads';
+export { IFRAME_SANDBOX } from 'remote-lib-common';
 // Permissions-Policy for the framed page. `dor iframe` takes any http(s) URL,
 // not only a loopback dev server, and a desktop webview often has no per-site
 // permission prompt (WKWebView with no media `WKUIDelegate`, WebView2

@@ -495,7 +495,7 @@ const PAGE_POLICY =
   "frame-src https://*.dormouseusercontent.com; " +
   "worker-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'; " +
   "object-src 'none'; sandbox allow-scripts allow-same-origin allow-forms allow-popups " +
-  "allow-popups-to-escape-sandbox allow-modals allow-downloads";
+  "allow-modals allow-downloads allow-popups-to-escape-sandbox";
 
 test("the page's policy admits no source outside /connect/ but its one socket and the frame domain", () => {
   // `docs/specs/security-hosted.md`'s FAIL IF, directive by directive: `'self'`
