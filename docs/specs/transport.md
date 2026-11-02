@@ -113,6 +113,7 @@ A Workspace can move from one webview to another with its Sessions still running
 - **Must include retained, naturally exited buffers in explicit marked requests**, with `alive: false` and their exit code, replaying their since-mark tail; ordinary discovery stays live-only.
 - **Ask for exactly the moving ids, at their marks.** `pty:requestInit` names them, and a marked id replays only its output since the mark. **Omitted ids are not empty ids**: a computed set that came out empty is a no-op, never every PTY in the process.
 - **Must preserve mouse encoding as well as tracking across a transfer**, including the SGR and SGR-pixel encodings xterm's serializer omits.
+- **Must preserve kitty keyboard flags and stack across a transfer** (rationale); **may drop** an inactive alternate screen's.
 - What else travels: Tools `docs/specs/dor-tool.md` → Persistence and hosts, alerts `docs/specs/alert.md` → Live Workspace transfer, semantic state `docs/specs/terminal-state.md` → Core Model.
 
 Source of truth: `captureTransferContent` in `lib/src/components/wall/workspace-transfer.ts`; `releaseSession` in `lib/src/lib/terminal-lifecycle.ts`; `mark` / `list` in `standalone/sidecar/pty-core.js`.

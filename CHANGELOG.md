@@ -9,6 +9,8 @@ All notable changes to this project will be documented in this file. Also availa
 The format is based on [Keep a Changelog](https://keepachangelog.com/). Release checklist in [deploy.md](docs/specs/deploy.md).
 
 ## [Unreleased]
+### Fixed
+- 🖥️ Shift+Enter keeps inserting a newline in Claude Code and other kitty-protocol TUIs after their Workspace moves to another window, instead of submitting the prompt until the app restarts.
 
 ## [1.3.0] - 2026-10-20
 ### Added
