@@ -3,6 +3,7 @@
  * `docs/specs/remote-api.md` → "The provider seam". Types only.
  */
 
+import type { SurfaceCloseParams, SurfaceCloseResult } from 'remote-lib-common';
 import type { DirectoryEntry } from 'remote-lib-common';
 // The chunk a sink receives is the one the PTY owner's parser produced, so the
 // projection pair is defined beside that parse rather than restated here.
@@ -123,6 +124,20 @@ export interface BurrowSurfaceProvider {
    * {@link SurfaceHandle.release}.
    */
   releaseSurface(surfaceId: string, hold: SurfaceHold): void;
+
+  /**
+   * The page `surfaceId` embeds now — a browser Surface's, or a serving Tool's
+   * — or `null` when it embeds none, renders it some other way, or nobody owns
+   * it. Read-only: the frame tunnel mints its own proxy grant for the page.
+   * Rejects when someone who may own it stayed silent, which is no answer.
+   */
+  resolveBrowser(surfaceId: string): Promise<string | null>;
+
+  /**
+   * Close `surfaceId` as the person at the Burrow would, with the consent they
+   * gave at the Client, or say what it still needs. Never rejects.
+   */
+  closeSurface(surfaceId: string, consent: Pick<SurfaceCloseParams, 'confirmed' | 'unsaved'>): Promise<SurfaceCloseResult>;
 
   /** Feed the PTY's input path; the local echo returns through {@link streamPty}. */
   writePty(ptyId: string, data: string): void;

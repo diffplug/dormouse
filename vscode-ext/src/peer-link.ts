@@ -14,6 +14,7 @@ import { dirname, join } from 'node:path';
 
 import type * as vscode from 'vscode';
 
+import { silentAnswers, type AskAnswers } from '../../lib/src/host/remote/service-protocol';
 import type {
   BurrowCommand,
   BurrowResult,
@@ -22,6 +23,7 @@ import {
   FrameDecoder,
   PEER_CLIENT_PROOF_DOMAIN,
   PEER_REPLY_BUDGET_MS,
+  peerReplyBudgetMs,
   PEER_SERVER_PROOF_DOMAIN,
   encodeFrame,
   forgetPeerRoutes,
@@ -47,7 +49,7 @@ import { log } from './log';
  */
 export interface PeerLinkDeps {
   /** Fan out to this window's own webviews — never to other windows. */
-  brokerRequest(op: string, params: unknown): Promise<unknown[]>;
+  brokerRequest(op: string, params: unknown): Promise<AskAnswers>;
   /**
    * Whether this window's own PTY manager holds that id.
    *
@@ -451,18 +453,21 @@ function send(
 }
 
 /** Ask one peer and resolve when it answers, or when the budget expires. */
+/** A peer that spent its budget, which a window gone (`null`) is not: it may still own things. */
+const PEER_SILENT = 'silent';
+
 function ask(
   client: PeerLinkClient,
   // Surface/directory requests use this response table. Stream readiness has
   // its own subscribe table below; everything after readiness is one-way and
   // correlated by `ptyId` or by the `burrowRequestId` already inside it.
   frame: Extract<PeerLinkRequest, { kind: 'request' }>,
-): Promise<PeerLinkResponse | null> {
+): Promise<PeerLinkResponse | typeof PEER_SILENT | null> {
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
       pendingRequests.delete(frame.id);
-      resolve(null);
-    }, PEER_REPLY_BUDGET_MS);
+      resolve(PEER_SILENT);
+    }, peerReplyBudgetMs(frame.op));
     pendingRequests.set(frame.id, {
       client,
       settle: (response) => {
@@ -590,7 +595,7 @@ export async function remoteRequest(
   op: string,
   params: unknown,
   ownerPtyId?: string,
-): Promise<unknown[]> {
+): Promise<AskAnswers> {
   const selectedPeer = ownerPtyId ? routes.get(ownerPtyId) : undefined;
   const peers = ownerPtyId
     ? selectedPeer?.authenticated
@@ -605,8 +610,11 @@ export async function remoteRequest(
   );
 
   const results: unknown[] = [];
+  let silent = false;
   for (const [client, reply] of replies) {
-    if (reply?.kind !== 'result') continue;
+    if (reply === PEER_SILENT) silent = true;
+    if (reply === PEER_SILENT || reply?.kind !== 'result') continue;
+    if (reply.silent) silent = true;
     for (const result of reply.results) {
       const ptyId = routedPtyId(result);
       if (!ptyId) {
@@ -623,7 +631,7 @@ export async function remoteRequest(
       });
     }
   }
-  return results;
+  return silent ? silentAnswers(results) : results;
 }
 
 /** Whether this provider-local PTY key routes to another window. */
@@ -1038,7 +1046,7 @@ async function onClientFrame(socket: Socket, frame: unknown): Promise<void> {
   const request = frame as PeerLinkRequest;
   switch (request.kind) {
     case 'request': {
-      let results: unknown[] = [];
+      let results: AskAnswers = [];
       try {
         results = (await deps?.brokerRequest(request.op, request.params)) ?? [];
       } catch (error) {
@@ -1046,11 +1054,13 @@ async function onClientFrame(socket: Socket, frame: unknown): Promise<void> {
         // this handler is event-driven, so a rejection allowed to escape would
         // otherwise be unhandled in the extension host.
         log.error(`[peer-link] peer request ${request.op} failed: ${String(error)}`);
+        results = silentAnswers([]);
       }
       respondTo(socket, {
         kind: 'result',
         id: request.id,
         results,
+        ...(results.silent ? { silent: true } : {}),
       });
       break;
     }

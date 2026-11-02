@@ -90,6 +90,16 @@ export function openPortRequestTimeoutMs(count: number, hops = 1): number {
 
 
 /**
+ * How long the VS Code extension host waits for its pty-host child to answer a
+ * terminal-context request (`vscode-ext/src/pty-manager.ts`) before answering
+ * the webview with an error. `info` and `promote` inspect the process tree.
+ */
+export const TERMINAL_CONTEXT_CHILD_TIMEOUT_MS = 10_000;
+
+/** The webview's deadline for that answer: the child's bound plus one hop. */
+export const TERMINAL_CONTEXT_TIMEOUT_MS = TERMINAL_CONTEXT_CHILD_TIMEOUT_MS + OPEN_PORT_ROUND_TRIP_MARGIN_MS;
+
+/**
  * How long the VS Code extension host lets one Surface id reservation wait —
  * queued behind its other webviews' and for the cross-window lock together,
  * counted from its arrival — before answering it with no ids
@@ -138,7 +148,7 @@ export interface BurrowLink {
   command(cmd: string, params?: unknown): Promise<unknown>;
 
   /** Answer `op` on behalf of this webview's own surfaces; no results = not mine. */
-  respond(op: string, handler: (params: unknown) => unknown[]): void;
+  respond(op: string, handler: (params: unknown) => unknown[] | Promise<unknown[]>): void;
 
   /**
    * Announce that future answers may differ. Carries no subject: the directory

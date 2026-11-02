@@ -77,6 +77,11 @@ export interface RemoteApiSessionContext {
   /** Put one remote-api message on this session. */
   readonly send: (payload: unknown) => void;
   /**
+   * Whether the direct path carries both directions. It never turns back: a
+   * channel lost after the switch ends the session rather than falling back.
+   */
+  readonly isDirect: () => boolean;
+  /**
    * Who this session is to the person at the Burrow, as plain text: the ACL
    * record's label, mapped again with `knownPairingDeviceLabel`, or a one-time
    * phone's member of `ONE_TIME_DEVICE_LABELS`.
@@ -103,7 +108,7 @@ export interface EstablishedE2eSessionDeps {
    * Build the remote-api handler this session drives, handed the one way it may
    * answer. Called once, from the constructor.
    */
-  createApi(send: (payload: unknown) => void): RemoteApiSessionLike;
+  createApi(send: (payload: unknown) => void, isDirect: () => boolean): RemoteApiSessionLike;
   /**
    * How this host takes the direct path: with no factory every `direct-offer`
    * is declined and the session stays relayed; a path policy's refusal
@@ -189,7 +194,10 @@ export class EstablishedE2eSession {
     this.#onDirectOnlyBroken = directOnly ? (deps.onDirectOnlyBroken ?? null) : null;
     this.#directOnlyBy = directOnly ? this.#now() + DIRECT_ONLY_DEADLINE_MS : null;
     this.#pathHeld = deps.directPeering.pathPolicy !== undefined;
-    this.#api = deps.createApi((payload) => this.#sendApp(payload));
+    this.#api = deps.createApi(
+      (payload) => this.#sendApp(payload),
+      () => this.#direct.path === 'direct',
+    );
     this.#direct = new DirectEndpoint('answerer', {
       peering: deps.directPeering,
       sendSignal: (signal) => this.#sendSignal(signal),

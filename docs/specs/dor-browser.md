@@ -278,10 +278,10 @@ Header rewriting beyond `Origin`, `Cookie`, `Set-Cookie`, and the framing header
 | response | hop-by-hop (RFC 7230 §6.1) | dropped |
 | response | `Location` | an exact upstream origin rewritten back to the proxy origin, so a redirect stays inside the proxy |
 | response | `Vary` | `Sec-Fetch-Dest` appended, since the `Accept-Encoding` sent upstream depends on it |
-| response | `Clear-Site-Data` | `"cache", "storage"` on a freshly minted grant's first frame load only: its port may have fronted another upstream |
+| response | `Clear-Site-Data` | `"cache", "storage"` on a freshly minted grant's first frame load only: its port may have fronted another upstream; never on a tunneled grant, whose page is not at that port |
 | response body | `<meta http-equiv="content-security-policy">` | removed unless the response opts into CSP preservation |
 
-**Must instrument only an identity-encoded, ASCII-compatible HTML body, keeping its `content-type` as sent**, charset included; a compressed body, or a UTF-16 one (any WHATWG label, or a byte-order mark), passes through uninstrumented (rationale). **Never place the shim ahead of the doctype, a `<meta charset>` or a UTF-8 BOM.**
+**Must instrument only an identity-encoded, ASCII-compatible HTML body, keeping its `content-type` as sent**, charset included; a compressed body, or a UTF-16 one (any WHATWG label, or a byte-order mark), passes through uninstrumented (rationale), except that a tunneled grant decodes every compressed body first (`docs/specs/remote-api.md` -> "Frames"). **Never place the shim ahead of the doctype, a `<meta charset>` or a UTF-8 BOM.**
 
 **Must preserve enforced and report-only CSP verbatim when the upstream response sends `X-Dormouse-Preserve-CSP: 1`**, for every MIME type, adding the validated ancestor policy separately; opted-in policies may still prevent framing or shim execution (rationale). **Never infer this opt-in from request headers.**
 
@@ -293,7 +293,7 @@ Source of truth: `lib/src/components/wall/IframePanel.tsx`, `lib/src/host/iframe
 
 ### Iframe Proxy Leases
 
-**Must take every mounted `IframePanel`'s grant under a lease** it mints, held under an owner the host transport names (VS Code router, standalone window label), never the webview.
+**Must take every mounted `IframePanel`'s grant under a lease** it mints, held under an owner the host transport names (VS Code router, standalone window label), never the webview. A remote session's frame holds its own lease under that session, which no window's end releases, whose upstream is on this machine, and whose pages carry a socket shim (`docs/specs/remote-api.md` -> "Frames").
 
 - **Never give a leased grant an idle TTL or evict it.** It ends, with every connection and upgraded pipe, when its lease is released (unmount), its owner reinitializes or ends, or the lease moves to another upstream origin (rationale).
 - The same lease, upstream origin and embedder chain reuse the grant, so Reload, Back and Forward keep the page's origin and storage.

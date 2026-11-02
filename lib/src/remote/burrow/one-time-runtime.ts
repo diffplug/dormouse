@@ -610,10 +610,11 @@ export class OneTimeRuntime {
     try {
       const e2e: EstablishedE2eSession = new EstablishedE2eSession({
         session: reserved.session,
-        createApi: (send) =>
+        createApi: (send, isDirect) =>
           createSession({
             burrowId: link.roomId,
             send,
+            isDirect,
             label,
             end: () => {
               if (this.#established === e2e) this.#end('user-ended');

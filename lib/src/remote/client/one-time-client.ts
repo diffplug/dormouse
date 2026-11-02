@@ -38,7 +38,9 @@ import {
   type DirectPath,
   type DirectoryEntry,
   type E2eClientStep,
+  type HelloCapabilities,
   type HelloResult,
+  type RemoteEventMsg,
   type OneTimeClientFrame,
   type OneTimeDenialCode,
   type OneTimeLink,
@@ -466,8 +468,8 @@ export class OneTimeClient implements RemoteAdapterClient {
 
   // --- Remote-api v1 (see ClientSessionCore) --------------------------------
 
-  hello(): Promise<HelloResult> {
-    return this.#whenDirect(() => this.#core.hello());
+  hello(capabilities?: HelloCapabilities): Promise<HelloResult> {
+    return this.#whenDirect(() => this.#core.hello(capabilities));
   }
 
   watchDirectory(onSnapshot: (entries: DirectoryEntry[]) => void): Promise<string> {
@@ -493,6 +495,20 @@ export class OneTimeClient implements RemoteAdapterClient {
 
   detach(surfaceId: string, subId?: string): Promise<unknown> {
     return this.#whenDirect(() => this.#core.detach(surfaceId, subId));
+  }
+
+  /** See {@link ClientSessionCore.subscribe}; `FrameClient` drives the session through these. */
+  subscribe<T = unknown>(
+    method: string,
+    params: unknown,
+    onEvent: (event: RemoteEventMsg) => void,
+    subId?: string,
+  ): Promise<{ subId: string; result: T }> {
+    return this.#whenDirect(() => this.#core.subscribe(method, params, onEvent, subId));
+  }
+
+  request<T = unknown>(method: string, params?: unknown): Promise<T> {
+    return this.#whenDirect(() => this.#core.request(method, params));
   }
 
   unsubscribe(subId: string): void {

@@ -16,5 +16,5 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["vite.config.ts", "vite.pocket.config.ts", "vite.one-time.config.ts", "vite.sw.config.ts", "vitest.argos.config.ts"]
+  "include": ["vite.config.ts", "vite.pocket.config.ts", "vite.one-time.config.ts", "vite.sw.config.ts", "vite.frame-origin.config.ts", "vitest.argos.config.ts"]
 }

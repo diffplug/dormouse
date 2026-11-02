@@ -17,7 +17,8 @@ import type {
   SurfaceHandle,
   SurfaceHold,
 } from '../../remote/burrow/burrow-surface-provider';
-import type { PeerSurfaceParams, PeerSurfaceResult } from '../../remote/burrow/peer-surfaces';
+import type { PeerOps, PeerSurfaceParams, PeerSurfaceResult } from '../../remote/burrow/peer-surfaces';
+import type { AskAnswers } from './service-protocol';
 
 /**
  * Fan one operation out to whoever can answer it and collect the answers. Who
@@ -30,7 +31,7 @@ export type SurfaceAsk = (
   op: string,
   params: unknown,
   ownerPtyId?: string,
-) => Promise<unknown[]>;
+) => Promise<AskAnswers>;
 
 export interface AskSurfaceProvider {
   provider: BurrowSurfaceProvider;
@@ -43,11 +44,28 @@ export interface AskSurfaceProvider {
   notifyDirectoryChanged(): void;
 }
 
+/** A close's answer as a peer gave it, or `null`: a peer window is another build. */
+function closeAnswerOf(value: unknown): PeerOps['closeOp']['result'] | null {
+  const answer = value as { outcome?: unknown; label?: unknown; message?: unknown } | null | undefined;
+  switch (answer?.outcome) {
+    case 'closed': case 'confirm':
+      return { outcome: answer.outcome };
+    case 'unsaved':
+      return typeof answer.label === 'string' ? { outcome: 'unsaved', label: answer.label } : null;
+    case 'refused':
+      return typeof answer.message === 'string' ? { outcome: 'refused', message: answer.message } : null;
+    default:
+      return null;
+  }
+}
+
 export function createAskSurfaceProvider(
   ask: SurfaceAsk,
   pty: Pick<BurrowSurfaceProvider, 'writePty' | 'resizePty' | 'streamPty'>,
 ): AskSurfaceProvider {
   const directoryWatchers = new Set<() => void>();
+  /** The last directory collected, which a silent window's rows are kept from. */
+  let listed: DirectoryEntry[] = [];
 
   /**
    * Give `hold` back at `ownerPtyId`'s owner, or at every answerer when none
@@ -71,13 +89,17 @@ export function createAskSurfaceProvider(
       // reaches. Keep the first — answerers arrive local-tier-first, which is
       // the same owner the mutating attach's read-only resolve probe selects,
       // so the row shown is the surface attached.
-      const entries = (await ask('directory', {})) as DirectoryEntry[];
+      const answers = await ask('directory', {});
       const seen = new Set<string>();
-      return entries.filter((entry) => {
+      const entries = (answers as DirectoryEntry[]).filter((entry) => {
         if (seen.has(entry.surfaceId)) return false;
         seen.add(entry.surfaceId);
         return true;
       });
+      // A window that did not answer keeps its rows: a slow one is not every
+      // Surface in it closing, which a Client would act on.
+      listed = answers.silent ? [...entries, ...listed.filter((entry) => !seen.has(entry.surfaceId))] : entries;
+      return listed;
     },
 
     watchDirectory(onChange) {
@@ -137,6 +159,20 @@ export function createAskSurfaceProvider(
 
     releaseSurface(surfaceId, hold) {
       release(surfaceId, hold);
+    },
+
+    async resolveBrowser(surfaceId): Promise<string | null> {
+      // One surface has one owner, as for an attach. A peer is another build.
+      const answers = await ask('browserOp', { surfaceId } satisfies PeerOps['browserOp']['params']);
+      const page = answers[0] as Partial<PeerOps['browserOp']['result']> | undefined;
+      if (typeof page?.url === 'string') return page.url;
+      if (answers.silent) throw new Error('the surface owner did not answer');
+      return null;
+    },
+
+    async closeSurface(surfaceId, consent) {
+      const answers = await ask('closeOp', { surfaceId, ...consent } satisfies PeerOps['closeOp']['params']).catch(() => []);
+      return closeAnswerOf(answers[0]) ?? { outcome: 'refused', message: 'This is no longer open on the computer.' };
     },
 
     writePty: pty.writePty,

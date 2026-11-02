@@ -6,7 +6,7 @@ import { randomBytes } from 'crypto';
 import { log } from './log';
 import type { DorControlCancelPayload, DorControlRequestPayload, DorControlResponsePayload } from '../../dor/src/protocol';
 import type { OpenPort, WritePtyOptions } from '../../lib/src/lib/platform/types';
-import { openPortRequestTimeoutMs } from '../../lib/src/lib/platform/types';
+import { openPortRequestTimeoutMs, TERMINAL_CONTEXT_CHILD_TIMEOUT_MS } from '../../lib/src/lib/platform/types';
 import { sliceSince } from '../../lib/src/host/replay-buffer';
 
 export interface PtyCallbacks {
@@ -447,7 +447,7 @@ export function getAvailableShells(): Promise<ShellEntry[]> {
 let contextSequence = 0;
 export function terminalContext(request: TerminalContextRequest): Promise<TerminalContextInfo> {
   const requestId = `context-${++contextSequence}`;
-  return requestChild<TerminalContextInfo>({ type: 'context', request, requestId }, (msg) => msg.type === 'context' && msg.requestId === requestId, 10000)
+  return requestChild<TerminalContextInfo>({ type: 'context', request, requestId }, (msg) => msg.type === 'context' && msg.requestId === requestId, TERMINAL_CONTEXT_CHILD_TIMEOUT_MS)
     .then((result) => {
       if (!result.error && request.op === 'promote') {
         if (request.restore) helperPtys.set(request.id, request.restore);

@@ -17,6 +17,7 @@ import { isManagedVoiceToken } from './managed-voice.js';
 import type { PasskeyAssertion } from '../security/passkey.js';
 import type { PresenceBinding } from '../security/presence.js';
 import type { SealedPushV1 } from '../security/push-seal.js';
+import type { DirectoryBrowser, HelloCapabilities } from './frame-wire.js';
 
 // ---------------------------------------------------------------------------
 // HTTP API (see relay.md "HTTP API")
@@ -996,7 +997,8 @@ export function isE2eBurrowFrame(value: unknown): value is E2eBurrowFrame {
 }
 
 // ---------------------------------------------------------------------------
-// Remote-api v1, terminal-only (see remote-api.md "v1 scope" and relay.md).
+// Remote-api v1 (see remote-api.md "v1 scope" and relay.md); the frame
+// tunnel's half is `frame-wire.ts`.
 // These ride as application messages on an authorized Noise session.
 
 export interface RemoteRequest {
@@ -1023,6 +1025,7 @@ export const REMOTE_METHODS = {
   surfaceDetach: 'surface.detach',
   terminalWrite: 'terminal.write',
   terminalResize: 'terminal.resize',
+  surfaceClose: 'surface.close',
 } as const;
 
 // Events are dispatched by name, so future events (size-authority notify,
@@ -1034,21 +1037,53 @@ export const REMOTE_EVENTS = {
   terminalClosed: 'terminal.closed',
 } as const;
 
+/**
+ * Ask to close a Tool or an embedded page, as the person at the Burrow would
+ * (`docs/specs/remote-api.md` -> "Closing a surface"). The answer says what
+ * consent the close still needs; the Client asks for it and sends this again.
+ */
+export interface SurfaceCloseParams {
+  surfaceId: string;
+  /** The person answered the kill confirmation. */
+  confirmed?: boolean;
+  /** The person's answer about the Burrow's unsaved edits. */
+  unsaved?: 'save' | 'discard';
+}
+export type SurfaceCloseResult =
+  | { outcome: 'closed' }
+  /** A close that must confirm: ask, then send `confirmed`. */
+  | { outcome: 'confirm' }
+  /** Unsaved edits: ask, then send `unsaved`. `label` names them. */
+  | { outcome: 'unsaved'; label: string }
+  /** Nothing closed, for the reason a person at the Burrow would read. */
+  | { outcome: 'refused'; message: string };
+
 export interface HelloParams {
   protocolVersion: 1;
   viewer: 'phone' | 'vr' | 'desktop';
+  /** What the Client renders beyond terminals; absent renders terminals only. */
+  capabilities?: HelloCapabilities;
 }
 export interface HelloResult {
   protocolVersion: 1;
   burrowId: string;
   grants: { input: boolean; layout: boolean };
+  /** The Burrow serves the frame tunnel to this session (`frame-wire.ts`). */
+  frames?: boolean;
 }
 
-/** Terminal-only in protocol-v1: no browser entries, so no `url`. */
+/**
+ * One Surface the picker can show. A `browser` entry, and the `browser` field,
+ * reach only a Client whose hello declared {@link HelloCapabilities.frames}.
+ */
 export interface DirectoryEntry {
   paneRef: string;
   surfaceId: string;
-  type: 'terminal';
+  /**
+   * `terminal` attaches with `surface.attach`, a Tool's included; `browser` is
+   * an embedded page alone, which only `frame.open` reaches.
+   */
+  type: 'terminal' | 'browser';
   title: string;
   focused: boolean;
   activity?: 'unknown' | 'prompt' | 'editing' | 'running' | 'finished';
@@ -1069,6 +1104,8 @@ export interface DirectoryEntry {
    * that reads none lists the entries ungrouped.
    */
   workspace?: DirectoryWorkspace;
+  /** The page the Surface embeds: a browser entry's own, or a serving Tool's. */
+  browser?: DirectoryBrowser;
 }
 /**
  * A pane's Workspace as the directory names it. `ref` and `name` are the

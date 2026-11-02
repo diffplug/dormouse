@@ -4,7 +4,7 @@ import { applyLiveToolEvents } from '../tool-events';
 import { offerProgramCopy } from '../mouse-selection';
 import type { TerminalContextRequest, TerminalContextInfo } from '../terminal-context-types';
 import type { IframeProxyResult, OpenPort, PlatformAdapter, PtyDataDetail, PtyInfo, BurrowLink, SpawnPtyOptions, ToolControlResult, ToolHostRequest, WritePtyOptions } from './types';
-import { openPortRequestTimeoutMs, SURFACE_ID_RESERVE_TIMEOUT_MS } from './types';
+import { openPortRequestTimeoutMs, SURFACE_ID_RESERVE_TIMEOUT_MS, TERMINAL_CONTEXT_TIMEOUT_MS } from './types';
 import { createBurrowLinkClient } from '../../host/remote/link-client';
 import { createAlertClient, type AlertClientMethods } from '../../host/alert-client';
 import { isAlertEvent } from '../../host/alert-protocol';
@@ -286,7 +286,11 @@ export class VSCodeAdapter implements PlatformAdapter {
   }
 
   async terminalContext(request: TerminalContextRequest): Promise<TerminalContextInfo> {
-    const result = await this.requestResponse('pty:context', 'pty:contextResult', { request }, (msg) => msg.result);
+    const result = await this.requestResponse<TerminalContextInfo>(
+      'pty:context', 'pty:contextResult', { request }, (msg) => msg.result,
+      TERMINAL_CONTEXT_TIMEOUT_MS,
+    );
+    if (!result) throw new Error('The extension host did not answer');
     if (result.error) throw new Error(result.error);
     return result;
   }

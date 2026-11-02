@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { builtinModules } from "node:module";
 import { vapidKeysFrom } from "../../scripts/vapid.mjs";
-import { WORKERS, parseConfig } from "../../scripts/workers.mjs";
+import { APP_WORKERS, parseConfig } from "../../scripts/workers.mjs";
 import { workspaceSourceAliases } from "../../../scripts/workspace-sources.mjs";
 
 interface WranglerConfig {
@@ -24,13 +24,13 @@ interface WranglerConfig {
   }[];
 }
 
-/** Hosted's three Wrangler configs, as the registry names them. */
+/** The application Workers' Wrangler configs, as the registry names them. */
 export const wrangler = Object.fromEntries(
-  Object.entries(WORKERS).map(([name, { config }]) => [
+  Object.entries(APP_WORKERS).map(([name, { config }]) => [
     name,
     parseConfig(readFileSync(config, "utf8")) as WranglerConfig,
   ]),
-) as Record<keyof typeof WORKERS, WranglerConfig>;
+) as Record<keyof typeof APP_WORKERS, WranglerConfig>;
 
 export type Name = keyof typeof wrangler;
 export const NAMES = Object.keys(wrangler) as Name[];

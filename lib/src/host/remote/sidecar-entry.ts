@@ -23,14 +23,17 @@ import type {
   PtySink,
 } from '../../remote/burrow/burrow-surface-provider';
 import { createAskSurfaceProvider } from './ask-surface-provider';
+import { createBurrowFrameHost, type FrameHostProxy } from './frame-host';
 import { createNativeDirectPeerFactory, disposeNativeDirectPeers } from './native-direct-peer';
 import { createEphemeralBurrowStateStore, FileBurrowStateStore } from './burrow-state-store';
 import { BurrowService } from './service';
 import {
-  ASK_BUDGET_MS,
+  askBudgetMs,
   BURROW_ASK_EVENT,
   isBurrowCommand,
   type AnswerParams,
+  silentAnswers,
+  type AskAnswers,
 } from './service-protocol';
 
 /** The slice of `pty-core`'s manager the Burrow drives. */
@@ -114,7 +117,7 @@ export function createSidecarSurfaceBridge(
   const SOLE_WINDOW = '';
   let windows = new Set<string>([SOLE_WINDOW]);
 
-  function ask(op: string, params: unknown): Promise<unknown[]> {
+  function ask(op: string, params: unknown): Promise<AskAnswers> {
     const burrowRequestId = `ask-${++askSeq}`;
     return new Promise((resolve) => {
       const pending: PendingAsk = {
@@ -124,7 +127,8 @@ export function createSidecarSurfaceBridge(
           clearTimeout(timer);
           asks.delete(burrowRequestId);
           const labels = [...pending.results.keys()].sort();
-          resolve(labels.flatMap((label) => pending.results.get(label)!));
+          const answers = labels.flatMap((label) => pending.results.get(label)!);
+          resolve(pending.awaiting.size > 0 ? silentAnswers(answers) : answers);
         },
       };
       const timer = setTimeout(() => {
@@ -132,7 +136,7 @@ export function createSidecarSurfaceBridge(
         // and a directory that missed a pane re-collects on the next change.
         // Whatever did answer is still the best available snapshot.
         pending.settle();
-      }, ASK_BUDGET_MS);
+      }, askBudgetMs(op));
       // An outstanding ask must never hold the sidecar's event loop open.
       (timer as unknown as { unref?: () => void }).unref?.();
       asks.set(burrowRequestId, pending);
@@ -415,6 +419,11 @@ export interface SidecarHostOptions {
    * create the app-data directory, which falls back to the in-memory store.
    */
   stateDir?: string;
+  /**
+   * The iframe proxy `main.js` frames local panes through; absent, no remote
+   * session is served frames (`docs/specs/remote-api.md` → "Frames").
+   */
+  iframeProxy?: FrameHostProxy;
 }
 
 export interface SidecarHost {
@@ -507,6 +516,7 @@ export function createSidecarHost(options: SidecarHostOptions): SidecarHost {
   const service = new BurrowService({
     store,
     provider: bridge.provider,
+    ...(options.iframeProxy ? { frames: createBurrowFrameHost(options.iframeProxy) } : {}),
     kind: 'standalone',
     sendToUi: send,
     relay,

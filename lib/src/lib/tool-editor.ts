@@ -1,3 +1,4 @@
+import { messageOf } from './errors';
 import { readFrameMessage, type FrameMessage, type HostMessage, type ToolViewPosition } from 'dor-tools-lib/protocol';
 import { getToolDirty, recordToolDirty } from './tool-dirty-store';
 
@@ -17,6 +18,7 @@ export const getEditorClosePrompt = () => prompt;
 export const subscribeEditorClosePrompt = (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; };
 
 /** A close that did not ask, or was cancelled, keeps a dirty Tool open. */
+const NEWER_EDITS = 'New edits arrived while saving. Save again or cancel.';
 export const UNSAVED_TOOL_REFUSAL = 'Tool has unsaved changes. Save or discard them, then close it again.';
 export const UNSAVED_TOOL_MOVE_REFUSAL = 'Tool has unsaved changes. Save or discard them before moving this Workspace.';
 
@@ -44,6 +46,26 @@ export function confirmToolEditorsClose(ids: readonly string[]): Promise<boolean
 /** Native teardown cancellation can arrive while a save is in flight. Stop
  * waiting for consent without cancelling the already requested disk write. */
 export const cancelEditorClose = (): void => finish(false);
+async function saveEditor(id: string): Promise<void> {
+  if (getToolDirty(id) !== true) return;
+  const editor = editors.get(id);
+  if (!editor?.ready) throw new Error('Save this Tool in its own view, then try closing again.');
+  await editor.save();
+}
+
+/** Save `id` for a close another device asked for, answering why it did not. */
+export async function saveToolEditor(id: string): Promise<string | null> {
+  try {
+    await saveEditor(id);
+    return getToolDirty(id) === true ? NEWER_EDITS : null;
+  } catch (error) {
+    return messageOf(error);
+  }
+}
+
+/** The label a prompt names `id` by. */
+export const toolEditorLabel = (id: string): string => editors.get(id)?.label ?? 'Unsaved Tool';
+
 export async function decideEditorClose(choice: 'save' | 'discard' | 'cancel'): Promise<void> {
   const current = prompt;
   if (!current || current.saving) return;
@@ -53,16 +75,13 @@ export async function decideEditorClose(choice: 'save' | 'discard' | 'cancel'): 
     prompt = busy; emit();
     try {
       for (const { id } of current.items) {
-        if (getToolDirty(id) !== true) continue;
-        const editor = editors.get(id);
-        if (!editor?.ready) throw new Error('Save this Tool in its own view, then try closing again.');
-        await editor.save();
+        await saveEditor(id);
         if (prompt !== busy) return;
       }
-      if (current.items.some(({ id }) => getToolDirty(id) === true)) throw new Error('New edits arrived while saving. Save again or cancel.');
+      if (current.items.some(({ id }) => getToolDirty(id) === true)) throw new Error(NEWER_EDITS);
     } catch (error) {
       if (prompt !== busy) return;
-      prompt = { ...current, saving: false, error: error instanceof Error ? error.message : String(error) }; emit(); return;
+      prompt = { ...current, saving: false, error: messageOf(error) }; emit(); return;
     }
   }
   finish(choice !== 'cancel');

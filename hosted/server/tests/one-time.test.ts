@@ -26,7 +26,7 @@ import {
   type OneTimeRoomFrame,
 } from "remote-lib-common";
 import * as smoke from "../../scripts/one-time-smoke.mjs";
-import { pocketContentSecurityPolicy } from "remote-lib-common";
+import { HOSTED_FRAME_DOMAIN, pocketContentSecurityPolicy } from "remote-lib-common";
 import { oneTimePagePolicy, relayRules, RUNS_NOTHING_POLICY } from "../headers";
 import { rateLimitKey } from "../one-time";
 import { ENTRIES, ORIGINS, bundleWorker, miniflareOptions, wrangler } from "./bundle";
@@ -492,10 +492,12 @@ const PAGE_POLICY =
   "font-src https://relay.dormouse.sh/connect/; " +
   "media-src blob:; " +
   "connect-src wss://relay.dormouse.sh/api/one-time/client; " +
+  "frame-src https://*.dormouseusercontent.com; " +
   "worker-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'; " +
-  "object-src 'none'; sandbox allow-scripts allow-same-origin";
+  "object-src 'none'; sandbox allow-scripts allow-same-origin allow-forms allow-popups " +
+  "allow-modals allow-downloads allow-popups-to-escape-sandbox";
 
-test("the page's policy admits no source outside /connect/ but its one socket", () => {
+test("the page's policy admits no source outside /connect/ but its one socket and the frame domain", () => {
   // `docs/specs/security-hosted.md`'s FAIL IF, directive by directive: `'self'`
   // would admit whatever else the relay origin serves.
   const socket = `${origin.replace(/^http/, "ws")}${ONE_TIME_WS_ROUTES.client}`;
@@ -506,6 +508,7 @@ test("the page's policy admits no source outside /connect/ but its one socket", 
       expect(source, name).not.toBe("'self'");
       if (source.startsWith("'") || /^[a-z]+:$/.test(source)) continue;
       if (name === "connect-src") expect(source).toBe(socket);
+      else if (name === "frame-src") expect(source).toBe(`https://*.${HOSTED_FRAME_DOMAIN}`);
       else expect(source.startsWith(`${origin}${ONE_TIME_PAGE_PATH}`), `${name} ${source}`).toBe(true);
     }
   }
@@ -563,7 +566,7 @@ test("nothing else under /connect/ is served, and nothing outside it gets the pa
   for (const path of ["/", "/connected", "/login", "/assets/connect/x.js"]) {
     const response = await get(path);
     expect(response.headers.get("content-security-policy"), path).toBe(
-      pocketContentSecurityPolicy(origin),
+      pocketContentSecurityPolicy(origin, HOSTED_FRAME_DOMAIN),
     );
   }
 });

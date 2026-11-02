@@ -473,7 +473,7 @@ export async function importableSpkiP256(publicKey: unknown): Promise<boolean> {
  * `@xterm/addon-image` needs to compile the SIXEL decoder it vendors. It
  * permits WebAssembly compilation and nothing else.
  */
-export function pocketContentSecurityPolicy(origin: string): string {
+export function pocketContentSecurityPolicy(origin: string, frameDomain?: string): string {
   const wsOrigin = `ws${origin.slice('http'.length)}`;
   return [
     "default-src 'self'",
@@ -486,6 +486,8 @@ export function pocketContentSecurityPolicy(origin: string): string {
     "worker-src 'self'",
     "manifest-src 'self'",
     "object-src 'none'",
+    // Absent, `default-src` holds a frame to this origin, which frames nothing.
+    ...(frameDomain ? [`frame-src https://*.${frameDomain}`] : []),
     "frame-ancestors 'none'",
     "base-uri 'none'",
     "form-action 'self'",

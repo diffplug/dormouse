@@ -85,9 +85,9 @@ export function getWebCrypto(): WebCryptoLike {
 }
 
 /**
- * `byteLength` fresh random bytes as base64url — the one way every unguessable
- * handle in this system is minted, so no caller decides for itself whether to
- * reach for the CSPRNG.
+ * `byteLength` fresh random bytes from the CSPRNG as base64url, so a caller
+ * minting an unguessable handle need not decide for itself which generator to
+ * reach for.
  */
 export function randomBase64Url(byteLength: number, crypto: WebCryptoLike = getWebCrypto()): string {
   return toBase64Url(crypto.getRandomValues(new Uint8Array(byteLength)));

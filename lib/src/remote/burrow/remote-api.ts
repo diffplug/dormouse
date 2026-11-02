@@ -8,12 +8,15 @@ import {
   REMOTE_EVENTS,
   REMOTE_METHODS,
   clampTerminalDimension,
+  isBoundedString,
   fromBase64Url,
   toBase64Url,
   utf8Decode,
   utf8Encode,
   type AttachParams,
+  type SurfaceCloseParams,
   type DirectoryEntry,
+  type HelloParams,
   type HelloResult,
   type RemoteEventMsg,
   type RemoteRequest,
@@ -24,7 +27,10 @@ import {
   type TerminalWriteParams,
 } from 'remote-lib-common';
 import { inputIsReplayTerminalReport } from '../../lib/terminal-report-filter';
+import type { BurrowFrameHost } from './burrow-frame-host';
 import type { BurrowSurfaceProvider, SurfaceHandle, SurfaceHold } from './burrow-surface-provider';
+import { clientErrorMessage } from '../../lib/errors';
+import { FrameTunnel, MAX_SURFACE_ID_LENGTH } from './frame-tunnel';
 
 /** Coalesce window for directory re-snapshots (remote-api.md: "Burrow coalesces"). */
 const DIRECTORY_DEBOUNCE_MS = 150;
@@ -54,10 +60,18 @@ export interface RemoteApiSessionOptions {
    * held pane's strip shows, and the service instance that serves it.
    */
   holder: SessionHolder;
+  /**
+   * Where the frame tunnel reaches pages; absent, the Burrow serves no frames
+   * and lists no embedded page (`docs/specs/remote-api.md` → "Frames").
+   * `isDirect` says whether this session may open one.
+   */
+  frames?: { host: BurrowFrameHost; isDirect: () => boolean };
   /** Called once, when this session is disposed. */
   onDispose?: () => void;
   /** An attach succeeded: the access log's `attached` (`access-log.ts`). Never told what the surface shows. */
   onAttach?: (surfaceId: string) => void;
+  /** A close succeeded: the access log's `closed`. */
+  onClose?: (surfaceId: string) => void;
 }
 
 /** {@link RemoteApiSessionOptions.holder}. */
@@ -75,6 +89,7 @@ export class RemoteApiSession {
   readonly #holder: SessionHolder;
   readonly #onDispose: (() => void) | null;
   readonly #onAttach: ((surfaceId: string) => void) | null;
+  readonly #onClose: ((surfaceId: string) => void) | null;
 
   #directorySubId: string | null = null;
   #unsubDirectory: (() => void) | null = null;
@@ -82,6 +97,10 @@ export class RemoteApiSession {
   #directoryGeneration = 0;
   #attachment: Attachment | null = null;
   #attachGeneration = 0;
+  readonly #frames: FrameTunnel | null;
+  readonly #frameHost: BurrowFrameHost | null;
+  /** The Client's hello declared it frames pages, so the directory lists them. */
+  #listsFrames = false;
   #disposed = false;
 
   constructor(options: RemoteApiSessionOptions) {
@@ -91,6 +110,20 @@ export class RemoteApiSession {
     this.#holder = options.holder;
     this.#onDispose = options.onDispose ?? null;
     this.#onAttach = options.onAttach ?? null;
+    this.#onClose = options.onClose ?? null;
+    this.#frameHost = options.frames?.host ?? null;
+    this.#frames = options.frames
+      ? new FrameTunnel({
+        host: options.frames.host,
+        isDirect: options.frames.isDirect,
+        provider: options.provider,
+        // The session's, never a webview's: disposal ends every grant it holds.
+        leaseOwner: options.holder.id,
+        ok: (request, result) => this.#ok(request, result),
+        fail: (request, error) => this.#fail(request, error),
+        event: (subId, event, data) => this.#event(subId, event, data),
+      })
+      : null;
   }
 
   handle(data: unknown): void {
@@ -105,6 +138,8 @@ export class RemoteApiSession {
           return this.#hello(request);
         case REMOTE_METHODS.directoryWatch:
           return this.#directoryWatch(request);
+        case REMOTE_METHODS.surfaceClose:
+          return this.#surfaceClose(request);
         case REMOTE_METHODS.surfaceAttach:
           return this.#attach(request);
         case REMOTE_METHODS.surfaceDetach:
@@ -114,10 +149,11 @@ export class RemoteApiSession {
         case REMOTE_METHODS.terminalResize:
           return this.#resize(request);
         default:
+          if (this.#frames && FrameTunnel.owns(request.method)) return this.#frames.handle(request);
           return this.#fail(request, `unknown method: ${request.method}`);
       }
     } catch (error) {
-      this.#fail(request, error instanceof Error ? error.message : 'internal error');
+      this.#fail(request, clientErrorMessage(error));
     }
   }
 
@@ -132,6 +168,7 @@ export class RemoteApiSession {
     this.#unsubDirectory?.();
     this.#unsubDirectory = null;
     this.#teardownAttachment();
+    this.#frames?.dispose();
     this.#onDispose?.();
   }
 
@@ -202,8 +239,32 @@ export class RemoteApiSession {
       protocolVersion: 1,
       burrowId: this.#burrowId,
       grants: { input: true, layout: false },
+      ...(this.#frames ? { frames: true } : {}),
     };
+    const capabilities = (request.params as Partial<HelloParams> | undefined)?.capabilities;
+    const listsFrames = !!this.#frames && capabilities?.frames === true;
+    const changed = listsFrames !== this.#listsFrames;
+    this.#listsFrames = listsFrames;
     this.#ok(request, result);
+    // A hello after the watch changes what the listing may name.
+    if (changed) void this.#emitDirectory();
+  }
+
+  /** Only a Client that frames pages has a Tool or page of its own to close. */
+  #surfaceClose(request: RemoteRequest): void {
+    const { surfaceId, confirmed, unsaved } = (request.params ?? {}) as Partial<SurfaceCloseParams>;
+    if (!this.#listsFrames) return this.#fail(request, 'this session closes nothing');
+    if (!surfaceId || !isBoundedString(surfaceId, MAX_SURFACE_ID_LENGTH)) {
+      return this.#fail(request, 'invalid surface.close: surfaceId');
+    }
+    if ((confirmed !== undefined && typeof confirmed !== 'boolean') || (unsaved !== undefined && unsaved !== 'save' && unsaved !== 'discard')) {
+      return this.#fail(request, 'invalid surface.close: consent');
+    }
+    void this.#provider.closeSurface(surfaceId, { confirmed, unsaved }).then((result) => {
+      // Logged though the Client went while it was saving: the Tool closed.
+      if (result.outcome === 'closed') this.#onClose?.(surfaceId);
+      if (!this.#disposed) this.#ok(request, result);
+    });
   }
 
   #directoryWatch(request: RemoteRequest): void {
@@ -255,7 +316,18 @@ export class RemoteApiSession {
     }
     // The subscription may have been replaced or torn down while we waited.
     if (this.#directorySubId !== subId || this.#directoryGeneration !== generation) return;
-    this.#event(subId, REMOTE_EVENTS.directorySnapshot, { entries });
+    // Awaited here rather than beside the collect, since it needs only the pages
+    // the Burrow will list; the generation is read again after it.
+    const listed = this.#listsFrames ? await this.#openablePages(entries) : terminalsOnly(entries);
+    if (this.#disposed || this.#directorySubId !== subId || this.#directoryGeneration !== generation) return;
+    this.#event(subId, REMOTE_EVENTS.directorySnapshot, { entries: listed });
+  }
+
+  /** `entries` less any page the frame tunnel would refuse. */
+  async #openablePages(entries: DirectoryEntry[]): Promise<DirectoryEntry[]> {
+    const host = this.#frameHost!;
+    const verdicts = await Promise.all(entries.map((entry) => (entry.browser ? host.canOpen(entry.browser.url) : true)));
+    return terminalsOnly(entries, (_, index) => verdicts[index]!);
   }
 
   #attach(request: RemoteRequest): void {
@@ -311,7 +383,7 @@ export class RemoteApiSession {
             request,
             params.surfaceId,
             generation,
-            `surface attach failed: ${errorMessage(error)}`,
+            `surface attach failed: ${clientErrorMessage(error)}`,
           );
           return;
         }
@@ -324,7 +396,7 @@ export class RemoteApiSession {
           request,
           params.surfaceId,
           generation,
-          `surface attach failed: ${errorMessage(error)}`,
+          `surface attach failed: ${clientErrorMessage(error)}`,
         );
       },
     );
@@ -455,7 +527,7 @@ export class RemoteApiSession {
             request,
             params.surfaceId,
             generation,
-            `surface attach failed: ${errorMessage(error)}`,
+            `surface attach failed: ${clientErrorMessage(error)}`,
           );
         });
         return;
@@ -479,7 +551,7 @@ export class RemoteApiSession {
         generation,
         closed
           ? `surface closed while attaching: ${params.surfaceId}`
-          : `surface attach failed: ${errorMessage(error)}`,
+          : `surface attach failed: ${clientErrorMessage(error)}`,
       );
     });
   }
@@ -532,7 +604,7 @@ export class RemoteApiSession {
       },
       (error) => {
         if (this.#disposed) return;
-        this.#fail(request, `terminal resize failed: ${errorMessage(error)}`);
+        this.#fail(request, `terminal resize failed: ${clientErrorMessage(error)}`);
       },
     );
   }
@@ -576,6 +648,19 @@ export class RemoteApiSession {
   }
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : 'internal error';
+/**
+ * The listing with only the pages `keepsPage` keeps: a browser entry whose page
+ * goes is gone, and a terminal entry stays without it. With none kept, it is
+ * what a Client that frames nothing reads, so it never offers what it cannot show.
+ */
+function terminalsOnly(
+  entries: DirectoryEntry[],
+  keepsPage: (entry: DirectoryEntry, index: number) => boolean = () => false,
+): DirectoryEntry[] {
+  return entries.flatMap((entry, index) => {
+    if (entry.browser === undefined || keepsPage(entry, index)) return [entry];
+    if (entry.type !== 'terminal') return [];
+    const { browser: _browser, ...rest } = entry;
+    return [rest];
+  });
 }

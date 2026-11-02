@@ -147,7 +147,8 @@ The relay Worker serves the phone's half at `ONE_TIME_PAGE_PATH` (`/connect/`): 
 - **Must take the fragment and erase it with `history.replaceState` before the first render**, parsed or not, and reload on `hashchange` (rationale).
 - **Never open a socket before the Connect tap**: the tap builds the client and runs `connectOnce`, so a link-preview crawler spends nothing.
 - Its ICE servers: `docs/specs/remote-network.md` -> "Anywhere".
-- **Never persist anything** from the page: no storage, IndexedDB, worker, push, or cookie, though Pocket keeps its own on the same origin. `scripts/e2e-lint.mjs` holds the page to the client's store rule.
+- **Must show the Surfaces Pocket shows, with the same wall**, Tools and pages included (`docs/specs/pocket-app.md` -> "Frame origin").
+- **Must be ephemeral to the person using it: never persist anything of the page's own**: no storage, IndexedDB, worker, push, or cookie, though Pocket keeps its own on the same origin. A framed page's own origin may leave a worker and what the page stored, under a salt held only in memory, so nothing can reach them again until the browser evicts them. `scripts/e2e-lint.mjs` holds the page to the client's store rule.
 - **Must mount the wall only on `ok`**; every ending closes the client and releases the adapter.
 - **The label the page sends is `oneTimeDeviceLabel`, never Pocket's `deviceLabel`**, and always a member of `ONE_TIME_DEVICE_LABELS` (rationale).
 

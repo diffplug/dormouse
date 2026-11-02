@@ -82,6 +82,10 @@ import { PHONE_DIRS, isShippedSource, lineOf, repoRoot as ROOT, trackedFiles } f
  * review; forgetting the guard entirely does not.
  */
 const ALLOWED = {
+  'scripts/frame-origin-check/serve.mjs':
+    'Unshipped phone check, run by hand, serving its own test page and the built frame '
+    + 'origin: three fixed files and generated content; no credential or command API. '
+    + 'Its one write takes a bounded report under a name it generates.',
   'scripts/dor-tool-qc/server.mjs':
     'Unshipped innerdogfood fixture serving generated test content only; no file, '
     + 'credential, or command API. Dirty/clean buttons only emit fixture state reports.',

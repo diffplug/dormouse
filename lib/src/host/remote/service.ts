@@ -45,6 +45,7 @@ import {
   type BurrowEnrollment,
   type EnrollmentStatic,
 } from '../../remote/burrow/enrollment';
+import type { BurrowFrameHost } from '../../remote/burrow/burrow-frame-host';
 import type { BurrowSurfaceProvider } from '../../remote/burrow/burrow-surface-provider';
 import { burrowFetch, describingFetchFailures, probeBurrowStanding } from '../../remote/burrow/burrow-fetch';
 import type { PendingPairing } from '../../remote/burrow/pairing-approval';
@@ -134,6 +135,11 @@ import {
 export interface BurrowServiceOptions {
   store: BurrowStateStore;
   provider: BurrowSurfaceProvider;
+  /**
+   * Where a session's frames reach their pages (`docs/specs/remote-api.md` →
+   * "Frames"); absent, no session serves the frame tunnel.
+   */
+  frames?: BurrowFrameHost;
   /**
    * Which app this Burrow is. A closed set rather than a display string, so
    * nothing can pass a name that names neither; read only by
@@ -422,6 +428,7 @@ interface HostedEnrollmentHeld {
 export class BurrowService {
   readonly #store: BurrowStateStore;
   readonly #provider: BurrowSurfaceProvider;
+  readonly #frames: BurrowFrameHost | undefined;
   readonly #sendToUi: (event: string, data: unknown) => void;
   readonly #relay: RelayBuild;
   /** `hostedOrigin(#relay)`: where one-time links are made, or `null` for none. */
@@ -543,6 +550,7 @@ export class BurrowService {
   constructor(options: BurrowServiceOptions) {
     this.#store = options.store;
     this.#provider = options.provider;
+    this.#frames = options.frames;
     this.#sendToUi = options.sendToUi;
     this.#relay = options.relay;
     this.#hostedOrigin = hostedOrigin(options.relay);
@@ -1714,12 +1722,21 @@ export class BurrowService {
       burrowId: context.burrowId,
       send: context.send,
       provider: this.#provider,
+      ...(this.#frames ? { frames: { host: this.#frames, isDirect: context.isDirect } } : {}),
       holder: { id: holder, label: context.label, serviceId: this.#serviceId },
       onDispose: () => this.#holders.delete(holder),
       onAttach: (surfaceId) =>
         this.#logAccess({
           at: this.#now(),
           event: 'attached',
+          device: context.label,
+          deviceId: context.deviceId,
+          surface: surfaceId,
+        }),
+      onClose: (surfaceId) =>
+        this.#logAccess({
+          at: this.#now(),
+          event: 'closed',
           device: context.label,
           deviceId: context.deviceId,
           surface: surfaceId,

@@ -45,6 +45,23 @@ export const BURROW_EVENT_EVENT = 'burrow:event';
  */
 export const ASK_BUDGET_MS = 1_000;
 
+/**
+ * A close answers only once it has run, which a helper's inspection or an
+ * editor's save can hold up, and the person is waiting on that answer.
+ */
+const CLOSE_BUDGET_MS = 60_000;
+
+/**
+ * What an ask collected. `silent`: someone it went to never answered, so what is
+ * missing here may only be late, and no answer is not the same as no owner.
+ */
+export type AskAnswers = unknown[] & { silent?: true };
+
+export const silentAnswers = (answers: unknown[]): AskAnswers => Object.assign(answers, { silent: true as const });
+
+/** The budget for answering `op`. */
+export const askBudgetMs = (op: string): number => (op === 'closeOp' ? CLOSE_BUDGET_MS : ASK_BUDGET_MS);
+
 /** webview → service. `params` is the command's own shape, below. */
 export interface BurrowCommand {
   burrowRequestId: string;

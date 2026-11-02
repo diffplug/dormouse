@@ -49,11 +49,14 @@ export const pkButton = tv({
   defaultVariants: { tone: 'primary', size: 'lg', block: false },
 });
 
+const HEADER_BAND = 'flex shrink-0 items-center gap-2 bg-header-active-bg px-4 text-header-active-fg';
+
 export const PK = {
   app: 'flex h-full min-h-0 flex-col bg-app-bg text-app-fg',
   // Header band = the ACTIVE header pair (the "titlebar").
-  header:
-    'flex shrink-0 items-center gap-2 bg-header-active-bg px-4 pb-2.5 pt-[max(0.625rem,env(safe-area-inset-top))] text-header-active-fg',
+  header: `${HEADER_BAND} pb-2.5 pt-[max(0.625rem,env(safe-area-inset-top))]`,
+  // The same band heading the Sessions screen, under the wall host's safe area.
+  wallHeader: `${HEADER_BAND} py-2.5`,
   headerTitle: 'm-0 min-w-0 flex-1 truncate text-[13px] font-semibold tracking-[0.01em]',
   // A settled fact about the band it sits in — which path carries the session —
   // captioned in alpha-on-fg rather than coloured: it reports, never alerts.
@@ -68,7 +71,8 @@ export const PK = {
   // scrollable, and accepted, because a plain `justify-center` fallback would
   // reintroduce the unreachable overflow on exactly the devices that lack it.
   bodyCenter: 'justify-center-safe',
-  wallHost: 'flex min-h-0 flex-1 flex-col',
+  // The whole screen but the status bar, which takes the wall header's colour.
+  wallHost: 'flex h-full min-h-0 flex-col bg-header-active-bg pt-[env(safe-area-inset-top)] text-app-fg',
   // Burrow row = the INACTIVE header pair (a list item lifted off the page).
   row: 'flex w-full items-center gap-3 rounded-lg bg-header-inactive-bg px-3.5 py-3 text-left text-header-inactive-fg',
   rowOffline: 'opacity-55', // presence = intensity, no extra color

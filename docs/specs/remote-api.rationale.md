@@ -82,6 +82,26 @@ In September 2026 the former `SurfaceHandle.release` was a no-op in `createAskSu
 
 **Why a release names a lease as well as a holder.** A session's own attachments overlap: re-attaching the pane it already holds, or an attach superseded by one to the same pane, sends the earlier attachment's release after the later one took the hold. With the holder alone that release would free the newer hold and re-fit the pane under a phone still attached.
 
+## Closing a surface
+
+**Why the phone asks, not the laptop.** An earlier plan had a Burrow confirm a phone's destructive step on the laptop. A person closing a Tool from their phone is usually away from the laptop, so that prompt would wait for no one. A paired phone can already type `exit` into any terminal, so asking at the phone adds little authority; holding terminals out keeps the new verb as narrow as the feature needs (Ned, 2026-11-01).
+
+**Why a close has its own budget.** It answers only once it has run, and a helper's inspection or an editor's save can hold that up past `ASK_BUDGET_MS`.
+
+## Frames
+
+**Why `frame.open` names the page origin.** The Client derives its frame origin from its directory snapshot while the Burrow resolves the current page, so a surface that moved from A to B meanwhile would serve B at A's origin, with A's storage. A synthetic `Clear-Site-Data` response does not clear it (Codex's review, Chromium, 2026-11).
+
+**Why the owner decides, and silence is no answer.** A collect started before a frame opens can answer after it, naming the old page, which closed a frame showing the right one (Codex's review, reproduced on `FrameTunnel`, 2026-11). A window slow to answer read as its Surfaces closing, which unloaded a phone's copy of a Tool, unsaved edits included (a blank-session Codex review, reproduced on `PocketWall`, 2026-11).
+
+**Why uploads share a window.** Paced per exchange alone, ten parallel 1 MiB uploads put 5.2 MiB on the wire before any answer (Codex's review, 2026-11), past the direct sender's 4 MiB queue, whose overflow ends the session and its terminals with it.
+
+**Why never over the relay.** A page is far heavier than a terminal, so a relayed frame would load slowly enough to look broken, and would put every page's volume on the Relay. The Relay would learn no more than ciphertext, sizes, and timing, so this is a product and cost bound rather than a confidentiality one. A session makes one direct attempt, so a phone that gains a route later, by joining a VPN, reconnects to get one.
+
+**Why only this machine.** Frames exist for Dor Tools and local dev servers. A remote page has its framing and script protections stripped by the proxy, and fronting one from a phone would add a way to reach it with no consent the Burrow can read. Starting narrow can be loosened later; the reverse would break whoever came to rely on it. A name is no evidence: `localhost` is whatever the resolver says, and a grant connects only to what it pinned.
+
+**Why a window rather than the transport's own backpressure.** The session gives a sender no drain signal on either path, and the direct path's sender queue disposes the session on overflow (`MAX_DIRECT_PENDING_BYTES`) — a terminal never approaches it, but one page load of a multi-megabyte bundle would. A window the Client acknowledges bounds the queue on both paths alike; encoded, it sits well under the direct path's bound.
+
 ## Input authority and multiple viewers
 
 **Why concurrent granted sessions need no arbitration.** Interleaved typing from two granted sessions is no worse than two keyboards plugged into one machine — and selfhost is single-user, so both keyboards belong to the same person.
