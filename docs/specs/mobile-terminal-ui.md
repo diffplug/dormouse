@@ -94,7 +94,7 @@ Source of truth: `MobileTerminalUi` and `Composer` in `lib/src/components/Mobile
 
 ## Physical keyboard
 
-**While the composer is closed and the terminal is showing, a physical keyboard types straight into the terminal.** **Must leave to the page** a key aimed at a focused field or control, a Command or Option chord, and IME composition. A soft keyboard opens only for a focused field, so it never reaches this path.
+**While the composer is closed, no gesture confirmation is open, and the terminal is showing, a physical keyboard types straight into the terminal.** **Must leave to the page** a key aimed at a focused field or control, a Command or Option chord, and IME composition. A soft keyboard opens only for a focused field, so it never reaches this path.
 
 Source of truth: `hardwareKeySequence` and `isHardwareKeyTarget` in `lib/src/components/MobileTerminalUi.tsx`.
 
