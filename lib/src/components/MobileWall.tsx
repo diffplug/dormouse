@@ -189,9 +189,14 @@ export function MobileWall({
       {/* `MobileTerminalUi` acknowledges a touch or keystroke on this pane —
           the only way a ring goes out here (`docs/specs/alert.md` -> Pane Header). */}
       <div className="relative min-h-0 flex-1 overflow-hidden bg-terminal-bg">
-        {activeItem.kind === 'browser' ? null : <TerminalPane id={activeItem.id} isFocused={!showingBrowser} />}
-        {/* Over a Tool's terminal rather than instead of it, which keeps its size.
-            Clear of the safe area, as an iframe cannot read it for itself. */}
+        {/* Hidden under a Tool's browser, never unmounted, which keeps its size. Merely
+            covered, xterm's z-indexed layers would still take the page's touches. */}
+        {activeItem.kind === 'browser' ? null : (
+          <div className={clsx('h-full', showingBrowser && 'invisible')} inert={showingBrowser}>
+            <TerminalPane id={activeItem.id} isFocused={!showingBrowser} />
+          </div>
+        )}
+        {/* Clear of the safe area, as an iframe cannot read it for itself. */}
         <div
           className={clsx('absolute inset-0 pb-[env(safe-area-inset-bottom)]', !showingBrowser && 'invisible')}
           data-mobile-browser-layer

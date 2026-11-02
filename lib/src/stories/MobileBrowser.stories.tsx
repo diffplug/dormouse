@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
-import { expect, userEvent, within } from 'storybook/test';
+import { expect, userEvent, waitFor, within } from 'storybook/test';
 import { MobileBrowserPane, type MobileBrowserStatus } from '../components/MobileBrowserPane';
 import { MobileCloseDialog, type MobileCloseDialogState } from '../components/MobileCloseDialog';
 import { MobileSettings } from '../components/MobileSettings';
@@ -137,6 +137,12 @@ export const ToolPage: Story = {
     await expect(canvas.getByLabelText('Browser')).toHaveAttribute('aria-pressed', 'true');
     await expect(canvas.getByLabelText('Terminal')).toHaveAttribute('aria-pressed', 'false');
     await expect(canvas.getByLabelText('Kill')).toBeVisible();
+    // Touches reach the page, not the terminal it covers, whose layers have z-indexes.
+    await waitFor(() => expect(canvasElement.querySelector('.xterm')).not.toBeNull());
+    await expect(canvasElement.querySelector('.xterm')).not.toBeVisible();
+    const page = canvasElement.querySelector('iframe')!;
+    const { left, top, width, height } = page.getBoundingClientRect();
+    await expect(document.elementFromPoint(left + width / 2, top + height / 2)).toBe(page);
   },
 };
 
@@ -147,6 +153,7 @@ export const ToolTerminal: Story = {
     await userEvent.click(canvas.getByLabelText('Terminal'));
     await expect(canvas.getByRole('region', { name: 'Touch mode' })).toBeVisible();
     await expect(canvas.getByLabelText('Terminal')).toHaveAttribute('aria-pressed', 'true');
+    await waitFor(() => expect(canvasElement.querySelector('.xterm')).toBeVisible());
   },
 };
 
