@@ -1,7 +1,7 @@
 import { getToolDirty, resetToolDirty } from '../tool-dirty-store';
 import { getToolAnnounce, resetToolAnnounces } from '../tool-announce-store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { openPortRequestTimeoutMs, SURFACE_ID_RESERVE_WAIT_MS } from './types';
+import { openPortRequestTimeoutMs, SURFACE_ID_RESERVE_WAIT_MS, TERMINAL_CONTEXT_CHILD_TIMEOUT_MS, TERMINAL_CONTEXT_TIMEOUT_MS } from './types';
 import { hostShown, setHostShown } from '../host-shown';
 import { registry, type TerminalEntry } from '../terminal-store';
 import { mintSurfaceId, resetSurfaceIdPool } from '../surface-ids';
@@ -755,5 +755,33 @@ describe('VSCodeAdapter managed voice', () => {
     // A forged broadcast, without the host's token, changes nothing.
     windowTarget.dispatchEvent(hostMessage({ type: 'voice:status', status: { configured: false, voiceId: 'v1' } }, 'forged'));
     expect(adapter.managedVoice!.status()).toMatchObject({ configured: true });
+  });
+});
+
+describe('VSCodeAdapter terminal context', () => {
+  beforeEach(stubWebviewEnv);
+  afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
+
+  it('waits out the pty-host child\'s bound and takes the host\'s answer', async () => {
+    vi.useFakeTimers();
+    const adapter = new VSCodeAdapter();
+    let settled: unknown;
+    void adapter.terminalContext({ op: 'info', id: 'pane-1' }).then((info) => { settled = info; });
+    const request = postMessage.mock.calls.at(-1)![0];
+    expect(request.type).toBe('pty:context');
+    await vi.advanceTimersByTimeAsync(TERMINAL_CONTEXT_CHILD_TIMEOUT_MS);
+    expect(settled).toBeUndefined();
+    windowTarget.dispatchEvent(hostMessage({ type: 'pty:contextResult', requestId: request.requestId, result: { cwd: '/repo' } }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(settled).toEqual({ cwd: '/repo' });
+  });
+
+  it('rejects with an error, not a TypeError, when the host never answers', async () => {
+    vi.useFakeTimers();
+    const adapter = new VSCodeAdapter();
+    const answer = adapter.terminalContext({ op: 'info', id: 'pane-1' });
+    const assertion = expect(answer).rejects.toThrow('The extension host did not answer');
+    await vi.advanceTimersByTimeAsync(TERMINAL_CONTEXT_TIMEOUT_MS);
+    await assertion;
   });
 });
