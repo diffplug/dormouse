@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from 'vitest';
-import { Terminal } from '@xterm/xterm';
+import { Terminal, type ITerminalOptions } from '@xterm/xterm';
 import { SerializeAddon } from '@xterm/addon-serialize';
 import { attachKeyboardProtocolArbiter } from './keyboard-protocol-arbiter';
 import { serializeTransferTerminal, type TerminalGrid } from './terminal-transfer';
@@ -21,8 +21,8 @@ const vtExtensions = xtermVtExtensions();
 const live: Terminal[] = [];
 afterEach(() => { for (const terminal of live.splice(0)) terminal.dispose(); });
 
-async function writtenSource(input: string, grid?: TerminalGrid): Promise<{ source: Terminal; serializer: SerializeAddon }> {
-  const source = new Terminal({ ...grid, allowProposedApi: true, vtExtensions });
+async function writtenSource(input: string, options: ITerminalOptions = {}): Promise<{ source: Terminal; serializer: SerializeAddon }> {
+  const source = new Terminal({ allowProposedApi: true, vtExtensions, ...options });
   live.push(source);
   const serializer = new SerializeAddon();
   source.loadAddon(serializer);
@@ -38,6 +38,13 @@ async function transfer(input: string, grid?: TerminalGrid): Promise<{ source: T
   await write(target, serializeTransferTerminal(source, serializer));
   return { source, target };
 }
+
+/** xterm answers no public query for color-scheme reports or cursor style. */
+const decModes = (terminal: Terminal) => (terminal as unknown as {
+  _core: { coreService: { decPrivateModes: { colorSchemeUpdates: boolean; cursorStyle?: string; cursorBlink?: boolean } } };
+})._core.coreService.decPrivateModes;
+
+const win32Extensions = { ...vtExtensions, win32InputMode: true };
 
 describe('terminal transfer serialization', () => {
   it('still transfers the buffer if private mouse state is unavailable', () => {
@@ -106,15 +113,62 @@ describe('terminal transfer serialization', () => {
     expect(await kittyFlags(target)).toBe('\x1b[?0u');
   });
 
-  it('turns win32-input-mode off and back on through the arriving arbiter', async () => {
-    const { source, serializer } = await writtenSource('\x1b[>1u');
-    const target = new Terminal({ allowProposedApi: true, vtExtensions: { ...vtExtensions, win32InputMode: true } });
+  // Fails once a bump teaches the serializer one of these: then delete its replay.
+  it.each(['\x1b[?2031h', '\x1b[?9001h', '\x1b[5 q'])('the pinned serializer still omits %j', async sequence => {
+    const { serializer } = await writtenSource(sequence, { vtExtensions: win32Extensions });
+    expect(serializer.serialize()).not.toContain(sequence);
+  });
+
+  it('preserves color-scheme change reports', async () => {
+    const { target } = await transfer('\x1b[?2031h');
+    expect(decModes(target).colorSchemeUpdates).toBe(true);
+  });
+
+  it('does not resurrect color-scheme change reports after a reset', async () => {
+    const { target } = await transfer('\x1b[?2031h\x1b[?2031l');
+    expect(decModes(target).colorSchemeUpdates).toBe(false);
+  });
+
+  it.each([1, 2, 3, 4, 5, 6])('preserves cursor style %i', async style => {
+    const { source, target } = await transfer(`\x1b[${style} q`);
+    expect(decModes(source).cursorStyle).toBeDefined();
+    expect(decModes(target).cursorStyle).toBe(decModes(source).cursorStyle);
+    expect(decModes(target).cursorBlink).toBe(decModes(source).cursorBlink);
+  });
+
+  it('does not resurrect a cursor style after a reset', async () => {
+    const { target } = await transfer('\x1b[5 q\x1b[0 q');
+    expect(decModes(target).cursorStyle).toBeUndefined();
+  });
+
+  async function win32Target(input: string): Promise<Terminal> {
+    const { source, serializer } = await writtenSource(input, { vtExtensions: win32Extensions });
+    const target = new Terminal({ allowProposedApi: true, vtExtensions: win32Extensions });
     live.push(target);
     attachKeyboardProtocolArbiter(target);
     await write(target, serializeTransferTerminal(source, serializer));
+    return target;
+  }
+
+  it('turns win32-input-mode off and back on through the arriving arbiter', async () => {
+    const target = await win32Target('\x1b[>1u');
     expect(target.options.vtExtensions?.win32InputMode).toBe(false);
     await write(target, '\x1b[<u');
     expect(target.options.vtExtensions?.win32InputMode).toBe(true);
+  });
+
+  it('preserves win32-input-mode', async () => {
+    expect(await mode(await win32Target('\x1b[?9001h'), 9001)).toBe('\x1b[?9001;1$y');
+  });
+
+  it('does not resurrect win32-input-mode after a reset', async () => {
+    expect(await mode(await win32Target('\x1b[?9001h\x1b[?9001l'), 9001)).toBe('\x1b[?9001;2$y');
+  });
+
+  it('keeps win32-input-mode set beneath a kitty consumer, for when it pops', async () => {
+    const target = await win32Target('\x1b[?9001h\x1b[>1u');
+    await write(target, '\x1b[<u');
+    expect(await mode(target, 9001)).toBe('\x1b[?9001;1$y');
   });
 
   it('rebuilds a full-screen grid larger than xterm defaults without clipping', async () => {
