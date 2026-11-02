@@ -150,8 +150,8 @@ describe('Wall on the Lath engine', () => {
 
   describe('a close a remote Client asked for', () => {
     const TOOL_ID = 'surface:tool-door';
-    /** A Tool whose helper's second inspection, the close's own, waits to be told. */
-    async function toolInLastWait(consent: Parameters<typeof answerClientClose>[0]) {
+    /** A Tool whose helper's inspection waits to be told: by default the second, the close's own. */
+    async function toolInHelperWait(consent: Parameters<typeof answerClientClose>[0], waitOn: 'first' | 'last' = 'last') {
       await act(async () => root.render(<Wall initialPaneIds={['surface:a']} initialDoors={[{
         id: TOOL_ID, title: 'storybook', component: 'tool', tabComponent: 'tool',
         params: { surfaceType: 'tool', command: 'pnpm storybook', cwd: '/repo', toolName: 'storybook', toolRender: 'iframe', toolPort: 'announce' },
@@ -160,9 +160,9 @@ describe('Wall on the Lath engine', () => {
       const helper: helpers.HelperTerminal = { id: 'surface:helper', parentId: TOOL_ID, command: '', status: 'off' };
       vi.spyOn(helpers, 'getHelper').mockImplementation((id) => (id === TOOL_ID ? helper : undefined));
       let inspected!: (busy: boolean) => void;
-      vi.spyOn(helpers, 'helperHasWork')
-        .mockResolvedValueOnce(false)
-        .mockImplementationOnce(() => new Promise((resolve) => { inspected = resolve; }));
+      const inspection = vi.spyOn(helpers, 'helperHasWork').mockResolvedValue(false);
+      if (waitOn === 'last') inspection.mockResolvedValueOnce(false);
+      inspection.mockImplementationOnce(() => new Promise((resolve) => { inspected = resolve; }));
       const answer = answerClientClose(consent);
       await flush();
       return { answer, release: () => act(async () => { inspected(false); }) };
@@ -177,7 +177,7 @@ describe('Wall on the Lath engine', () => {
     });
 
     it('keeps edits made after it read the Tool clean', async () => {
-      const { answer, release } = await toolInLastWait({ surfaceId: TOOL_ID, confirmed: true });
+      const { answer, release } = await toolInHelperWait({ surfaceId: TOOL_ID, confirmed: true });
       await act(async () => { recordToolDirty(TOOL_ID, true); });
       await release();
       expect(await answer).toEqual([{ outcome: 'refused', message: UNSAVED_TOOL_REFUSAL }]);
@@ -186,14 +186,14 @@ describe('Wall on the Lath engine', () => {
 
     it('closes through a discard, which answered those edits', async () => {
       await act(async () => { recordToolDirty(TOOL_ID, true); });
-      const { answer, release } = await toolInLastWait({ surfaceId: TOOL_ID, confirmed: true, unsaved: 'discard' });
+      const { answer, release } = await toolInHelperWait({ surfaceId: TOOL_ID, confirmed: true, unsaved: 'discard' });
       await release();
       expect(await answer).toEqual([{ outcome: 'closed' }]);
       expect(stillThere()).toBe(false);
     });
 
     it('refuses a Tool that became a terminal during the wait', async () => {
-      const { answer, release } = await toolInLastWait({ surfaceId: TOOL_ID, confirmed: true });
+      const { answer, release } = await toolInHelperWait({ surfaceId: TOOL_ID, confirmed: true });
       const original = browserSurface.surfaceKindFromParams;
       vi.spyOn(browserSurface, 'surfaceKindFromParams').mockImplementation((params) => (
         (params as { toolName?: string } | undefined)?.toolName ? 'terminal' : original(params)
@@ -204,29 +204,10 @@ describe('Wall on the Lath engine', () => {
     });
 
     it('reports closed for a Tool the computer closed during its wait, never a terminal', async () => {
-      await act(async () => root.render(<Wall initialPaneIds={['surface:a']} initialDoors={[{
-        id: TOOL_ID, title: 'storybook', component: 'tool', tabComponent: 'tool',
-        params: { surfaceType: 'tool', command: 'pnpm storybook', cwd: '/repo', toolName: 'storybook', toolRender: 'iframe', toolPort: 'announce' },
-      }]} />));
-      await flush();
-      const helper: helpers.HelperTerminal = { id: 'surface:helper', parentId: TOOL_ID, command: '', status: 'off' };
-      vi.spyOn(helpers, 'getHelper').mockImplementation((id) => (id === TOOL_ID ? helper : undefined));
-      let inspected!: (busy: boolean) => void;
-      vi.spyOn(helpers, 'helperHasWork')
-        .mockImplementationOnce(() => new Promise((resolve) => { inspected = resolve; }))
-        .mockResolvedValue(false);
-      const answer = answerClientClose({ surfaceId: TOOL_ID, confirmed: true });
-      await flush();
-      await act(async () => {
-        getWallHandle(DEFAULT_WORKSPACE_ID)!.handleDorControl({
-          method: SURFACE_CONTROL_METHODS.kill,
-          params: { surface: TOOL_ID, confirmation: { mode: 'dangerously' } },
-          respond: vi.fn(),
-        });
-      });
-      await flush();
+      const { answer, release } = await toolInHelperWait({ surfaceId: TOOL_ID }, 'first');
+      expect((await dispatchKill(TOOL_ID))?.ok).toBe(true);
       expect(stillThere()).toBe(false);
-      await act(async () => { inspected(false); });
+      await release();
       expect(await answer).toEqual([{ outcome: 'closed' }]);
     });
   });

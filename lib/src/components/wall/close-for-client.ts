@@ -5,6 +5,8 @@ export const TERMINAL_CLOSE_REFUSAL = 'A terminal closes only on the computer.';
 
 /** What a Wall knows of one Surface, for a close a Client asked for. */
 export interface CloseForClientDeps {
+  /** It closed some other way during a wait, and has no kind left to read. */
+  gone(): boolean;
   isTerminal(): boolean;
   transferRefusal(): string | null;
   /** Running helper work, which also shows at the computer. */
@@ -32,12 +34,13 @@ export async function closeForClient(
   { confirmed, unsaved }: ClientCloseConsent,
   deps: CloseForClientDeps,
 ): Promise<SurfaceCloseResult> {
-  const terminal = () => (deps.isTerminal() ? TERMINAL_CLOSE_REFUSAL : null);
+  const terminal = () => (!deps.gone() && deps.isTerminal() ? TERMINAL_CLOSE_REFUSAL : null);
   if (terminal()) return { outcome: 'refused', message: TERMINAL_CLOSE_REFUSAL };
   const transferring = deps.transferRefusal();
   if (transferring) return { outcome: 'refused', message: transferring };
   const helper = await deps.helperRefusal();
   if (helper) return { outcome: 'refused', message: helper };
+  if (deps.gone()) return { outcome: 'closed' };
   if (!confirmed && deps.needsConfirm()) return { outcome: 'confirm' };
   const dirty = deps.isDirty();
   if (dirty) {

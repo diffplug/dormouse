@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { closeForClient, type CloseForClientDeps } from './close-for-client';
 
 const deps = (overrides: Partial<CloseForClientDeps> = {}): CloseForClientDeps => ({
+  gone: () => false,
   isTerminal: () => false,
   transferRefusal: () => null,
   helperRefusal: async () => null,
@@ -18,6 +19,34 @@ describe('closeForClient', () => {
     const d = deps();
     expect(await closeForClient({}, d)).toEqual({ outcome: 'closed' });
     expect(d.close).toHaveBeenCalledOnce();
+  });
+
+  it('asks nothing about a Surface gone during the helper wait', async () => {
+    let gone = false;
+    const d = deps({
+      gone: () => gone,
+      helperRefusal: async () => {
+        gone = true;
+        return null;
+      },
+      needsConfirm: () => true,
+    });
+    expect(await closeForClient({}, d)).toEqual({ outcome: 'closed' });
+    expect(d.close).not.toHaveBeenCalled();
+  });
+
+  it('reads no kind from a Surface gone during its last wait', async () => {
+    let gone = false;
+    const d = deps({
+      // What a Surface with no params reads as.
+      isTerminal: () => gone,
+      close: async (_discard, stillRefused) => {
+        gone = true;
+        return stillRefused();
+      },
+      gone: () => gone,
+    });
+    expect(await closeForClient({}, d)).toEqual({ outcome: 'closed' });
   });
 
   it('never closes a terminal, whatever consent came', async () => {

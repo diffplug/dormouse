@@ -778,11 +778,8 @@ export function Wall({
   /** A Client's close of a Tool or browser (`docs/specs/remote-api.md` -> "Closing a surface"). */
   const closeSurfaceForClient = useCallback((id: string, consent: ClientCloseConsent): Promise<SurfaceCloseResult> => {
     return closeForClient(consent, {
-      // A Surface gone during a wait is no terminal, whatever no params read as.
-      isTerminal: () => {
-        const meta = lath.getMeta(id);
-        return meta !== undefined && surfaceKindFromParams(meta.params) === 'terminal';
-      },
+      gone: () => lath.getMeta(id) === undefined,
+      isTerminal: () => surfaceKindFromParams(lath.getMeta(id)?.params) === 'terminal',
       transferRefusal: () => transferRefusal(id),
       helperRefusal: async () => {
         const refused = await helperRefusal(id);
