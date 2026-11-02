@@ -337,8 +337,11 @@ describe('RemoteApiSession frames', () => {
     browser: { render: 'iframe', url: 'http://localhost:3000/' },
   };
   const frames = {
-    open: async () => ({ refused: 'unused' }),
-    canOpen: async (url: string) => !url.includes('remote.example'),
+    host: {
+      open: async () => ({ refused: 'unused' }),
+      canOpen: async (url: string) => !url.includes('remote.example'),
+    },
+    isDirect: () => true,
   };
 
   function framesSession(provider: FakeProvider) {

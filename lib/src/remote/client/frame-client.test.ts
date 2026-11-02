@@ -57,7 +57,7 @@ function connect(pages: Map<string, string>) {
     burrowId: 'burrow-1',
     provider,
     holder: { id: `holder-${sessions.length}`, label: 'iPhone', serviceId: 'service-1' },
-    frames: createBurrowFrameHost({ create: createIframeProxyUrl, release: releaseIframeProxyLease, isLocal: (url) => isUpstreamOnThisMachine(url) }),
+    frames: { host: createBurrowFrameHost({ create: createIframeProxyUrl, release: releaseIframeProxyLease, isLocal: (url) => isUpstreamOnThisMachine(url) }), isDirect: () => true },
     send: (payload) => {
       const wire = JSON.stringify(payload);
       inFlight += wire.length;

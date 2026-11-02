@@ -113,6 +113,8 @@ interface Queued {
 
 export interface FrameTunnelOptions {
   host: BurrowFrameHost;
+  /** Whether the direct path carries this session, the only one a frame opens on. */
+  isDirect(): boolean;
   provider: BurrowSurfaceProvider;
   /** The lease owner every grant of this session is held under. */
   leaseOwner: string;
@@ -196,6 +198,8 @@ export class FrameTunnel {
       || !embedderOrigins.every((origin) => typeof origin === 'string')) {
       return this.#options.fail(request, 'invalid frame.open: origins');
     }
+    // Only `frame.open` asks: the switch is one-way, so a frame open stays direct.
+    if (!this.#options.isDirect()) return this.#options.fail(request, 'a frame needs a direct connection');
     const id = request.requestId;
     if (this.#idInUse(id)) return this.#options.fail(request, 'request id already in use');
     if (this.#frames.size + this.#opening.size >= MAX_FRAMES_PER_SESSION) {

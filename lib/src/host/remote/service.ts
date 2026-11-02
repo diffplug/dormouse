@@ -1722,7 +1722,7 @@ export class BurrowService {
       burrowId: context.burrowId,
       send: context.send,
       provider: this.#provider,
-      ...(this.#frames ? { frames: this.#frames } : {}),
+      ...(this.#frames ? { frames: { host: this.#frames, isDirect: context.isDirect } } : {}),
       holder: { id: holder, label: context.label, serviceId: this.#serviceId },
       onDispose: () => this.#holders.delete(holder),
       onAttach: (surfaceId) =>

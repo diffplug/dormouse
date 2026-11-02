@@ -47,12 +47,13 @@ async function establish(options: Options = {}) {
   const fatals: string[] = [];
   const transports: Array<{ path: DirectPath; cause: DirectRelayCause | null }> = [];
   const breaks: DirectOnlyBreak[] = [];
-  const api = { disposals: 0, send: (_payload: unknown): void => {} };
+  const api = { disposals: 0, send: (_payload: unknown): void => {}, isDirect: (): boolean => false };
   const timers = fakeTimers();
   const e2e: EstablishedE2eSession = new EstablishedE2eSession({
     session: burrow,
-    createApi: (send) => {
+    createApi: (send, isDirect) => {
       api.send = send;
+      api.isDirect = isDirect;
       return {
         handle: (payload) => {
           handled.push(payload);
@@ -259,6 +260,18 @@ describe('EstablishedE2eSession', () => {
     e2e.dispose();
     await flushMicrotasks();
     expect(breaks).toEqual([]);
+  });
+
+  it('tells its handler the path is direct only once both directions switch', async () => {
+    const network = new FakeDirectNetwork({ opening: 'manual' });
+    const run = await establish({ createDirectPeer: () => network.createAnswerer() });
+    expect(run.api.isDirect()).toBe(false);
+    run.e2e.onRelayFrame(toBase64Url(run.client.sendControl({ v: 1, t: 'direct-offer', sdp: 'v=0\r\n' })));
+    await flushMicrotasks();
+    network.openChannels();
+    expect(run.api.isDirect()).toBe(false);
+    run.e2e.onRelayFrame(toBase64Url(run.client.sendControl({ v: 1, t: 'direct-switch' })));
+    expect(run.api.isDirect()).toBe(true);
   });
 
   it('owns a direct-only deadline that is met for good once both directions switch', async () => {

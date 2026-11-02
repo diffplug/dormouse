@@ -105,13 +105,14 @@ function fakeProvider(pages: Map<string, EmbeddedPage>) {
   return { provider, watchers, notify: () => watchers.forEach((watcher) => watcher()) };
 }
 
-function setup() {
+function setup({ isDirect = () => true }: { isDirect?: () => boolean } = {}) {
   const pages = new Map<string, EmbeddedPage>([['surface:1', { url: 'http://localhost:5173/app/?x=1#top', title: 'App' }]]);
   const { provider, watchers, notify } = fakeProvider(pages);
   const host = new FakeHost();
   const sent: Sent[] = [];
   const tunnel = new FrameTunnel({
     host,
+    isDirect,
     provider,
     leaseOwner: 'remote:holder',
     ok: (request, result) => sent.push({ requestId: request.requestId, ok: true, result }),
@@ -149,6 +150,17 @@ afterEach(() => {
 });
 
 describe('frame.open', () => {
+  it('refuses a session the direct path does not carry, until it does', async () => {
+    let direct = false;
+    const t = setup({ isDirect: () => direct });
+    const refused = await t.open();
+    expect(t.answer(refused)).toMatchObject({ ok: false, error: 'a frame needs a direct connection' });
+    expect(t.provider.resolveBrowser).not.toHaveBeenCalled();
+
+    direct = true;
+    expect(t.answer(await t.open())).toMatchObject({ ok: true });
+  });
+
   it('opens the surface\'s own page under the session\'s lease and answers the framed path', async () => {
     const t = setup();
     const id = await t.open();

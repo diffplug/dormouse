@@ -84,6 +84,8 @@ In September 2026 the former `SurfaceHandle.release` was a no-op in `createAskSu
 
 ## Frames
 
+**Why never over the relay.** A page is far heavier than a terminal, so a relayed frame would load slowly enough to look broken, and would put every page's volume on the Relay. The Relay would learn no more than ciphertext, sizes, and timing, so this is a product and cost bound rather than a confidentiality one. A session makes one direct attempt, so a phone that gains a route later, by joining a VPN, reconnects to get one.
+
 **Why only this machine.** Frames exist for Dor Tools and local dev servers. A remote page has its framing and script protections stripped by the proxy, and fronting one from a phone would add a way to reach it with no consent the Burrow can read. Starting narrow can be loosened later; the reverse would break whoever came to rely on it. A name is no evidence: `localhost` is whatever the resolver says, and a grant connects only to what it pinned.
 
 **Why a window rather than the transport's own backpressure.** The session gives a sender no drain signal on either path, and the direct path's sender queue disposes the session on overflow (`MAX_DIRECT_PENDING_BYTES`) — a terminal never approaches it, but one page load of a multi-megabyte bundle would. A window the Client acknowledges bounds the queue on both paths alike; encoded, it sits well under the direct path's bound.

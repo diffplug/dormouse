@@ -60,8 +60,9 @@ export interface RemoteApiSessionOptions {
   /**
    * Where the frame tunnel reaches pages; absent, the Burrow serves no frames
    * and lists no embedded page (`docs/specs/remote-api.md` → "Frames").
+   * `isDirect` says whether this session may open one.
    */
-  frames?: BurrowFrameHost;
+  frames?: { host: BurrowFrameHost; isDirect: () => boolean };
   /** Called once, when this session is disposed. */
   onDispose?: () => void;
   /** An attach succeeded: the access log's `attached` (`access-log.ts`). Never told what the surface shows. */
@@ -103,10 +104,11 @@ export class RemoteApiSession {
     this.#holder = options.holder;
     this.#onDispose = options.onDispose ?? null;
     this.#onAttach = options.onAttach ?? null;
-    this.#frameHost = options.frames ?? null;
+    this.#frameHost = options.frames?.host ?? null;
     this.#frames = options.frames
       ? new FrameTunnel({
-        host: options.frames,
+        host: options.frames.host,
+        isDirect: options.frames.isDirect,
         provider: options.provider,
         // The session's, never a webview's: disposal ends every grant it holds.
         leaseOwner: options.holder.id,
