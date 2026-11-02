@@ -339,7 +339,7 @@ export function instrumentHtml(body: string, embedderOrigin: string, preserveCsp
 }
 
 /** One thing that may stand ahead of a page's first script, comments and whitespace before it. */
-const PROLOGUE_TOKEN = /\s*(<!--[\s\S]*?-->|<!doctype[^>]*>|<(?:html|head|meta|link|base)(?:\s[^>]*)?>|<(title|style)(?:\s[^>]*)?>[\s\S]*?<\/\2\s*>)/iy;
+const PROLOGUE_TOKEN = /\s*(<!--[\s\S]*?-->|<!doctype[^>]*>|<(?:html|head|meta|link|base)(?:\s[^>]*)?>|<(title|style)(?:\s[^>]*)?>[\s\S]*?<\/\2\s*>)/giy;
 /** Of those, what a script ahead of it would break. */
 const MUST_PRECEDE_SCRIPT = /^(?:<!doctype|<html|<head|<meta\b[^>]*\bcharset\b)/i;
 
@@ -351,12 +351,12 @@ const MUST_PRECEDE_SCRIPT = /^(?:<!doctype|<html|<head|<meta\b[^>]*\bcharset\b)/
 function prologueEnd(html: string): number {
   const prologue = html.slice(0, 1024);
   // Nor ahead of a UTF-8 BOM (its latin1 spelling), which must stay first.
-  let at = html.startsWith('\xEF\xBB\xBF') ? 3 : 0;
+  const start = html.startsWith('\xEF\xBB\xBF') ? 3 : 0;
+  let at = start;
   // Walked from the start, stopping at the first thing that runs or renders: a
   // tag's spelling inside a script's text is not a tag.
-  PROLOGUE_TOKEN.lastIndex = at;
-  for (let token = PROLOGUE_TOKEN.exec(prologue); token; token = PROLOGUE_TOKEN.exec(prologue)) {
-    if (MUST_PRECEDE_SCRIPT.test(token[1]!)) at = PROLOGUE_TOKEN.lastIndex;
+  for (const token of prologue.slice(start).matchAll(PROLOGUE_TOKEN)) {
+    if (MUST_PRECEDE_SCRIPT.test(token[1]!)) at = start + token.index + token[0].length;
   }
   return at;
 }
