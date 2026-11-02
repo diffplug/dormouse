@@ -12,5 +12,9 @@
 /** The file beside Pocket's shell, at the root of the origin that serves it. */
 export const POCKET_DEPLOYMENT_FILE = 'deployment.json';
 
-/** What {@link POCKET_DEPLOYMENT_FILE} holds where Hosted serves Pocket. */
-export const HOSTED_POCKET_DEPLOYMENT = { deployment: 'hosted' } as const;
+/**
+ * What {@link POCKET_DEPLOYMENT_FILE} holds where Hosted serves Pocket.
+ * `frameDomain` is the frame origins' parent (`docs/specs/pocket-app.md` ->
+ * "Frame origin").
+ */
+export const HOSTED_POCKET_DEPLOYMENT = { deployment: 'hosted', frameDomain: 'dormouseusercontent.com' } as const;

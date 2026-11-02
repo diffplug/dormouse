@@ -28,6 +28,7 @@ describe("frameOriginResponse", () => {
         "frame-ancestors https://relay.dormouse.sh",
       );
       expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+      expect(response.headers.get("strict-transport-security")).toContain("includeSubDomains");
       expect(await response.text()).toBe("file");
     }
   });

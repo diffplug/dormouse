@@ -1,7 +1,7 @@
 # Hosted account security
 
 > - See `docs/specs/glossary.md` for Burrow, Client, and Relay vocabulary.
-> - Owns the security checks of Hosted's three Workers, account, relay, and voice.
+> - Owns the security checks of Hosted's four Workers: account, relay, voice, and frames.
 > - Defers identity behavior and the Worker split to `docs/specs/hosted.md` and terminal access to `docs/specs/remote-security-model.md`.
 > - Read `docs/specs/security.md` first; live production controls and real-provider acceptance still require verification.
 
@@ -10,6 +10,7 @@
 | Guarantee | Feature | Pinned by |
 | --- | --- | --- |
 | **Each Hosted Worker answers only its own origin and runs only its own code.** No third-party script, analytics, or framing; sign-in cookies stay on the account origin, and its session never reaches browser storage. | One-time link, Hosted phone | `hosted/server/tests/boundary.test.ts`, `hosted/server/tests/workers.test.ts` |
+| **A framed page runs on a domain with nothing else on it.** That domain's Worker holds no credential and sets no cookie, and only Pocket can frame what it serves. | Hosted phone | `hosted/scripts/production.test.mjs`, `hosted/server/tests/frame-origin.test.ts` |
 
 - **FAIL IF** `S77` a Worker routes a request whose URL origin is not its own `APP_ORIGIN`, a sibling's included, rather than answering 421; inspect `workerApp` in `hosted/server/worker-app.ts`.
 - **FAIL IF** `S78` an account cookie request — a cookie route's, or the auth handler's but a provider callback or `/api/auth/csrf` — presents an `Origin` but its own exactly, sibling origins under `dormouse.sh` included; is a read (`GET` or `HEAD`; to auth, anything but `POST`) that reaches its handler without `Sec-Fetch-Site: same-origin` rather than answering 403, so no header, `none`, and a sibling's `same-site` are refused; is state-changing and lacks that Origin, or to auth skips the CSRF check; is an auth read that skips `prelaunchAuth`'s lookup, or reaches it ungated; or any Worker grants credentialed CORS. Inspect `cookieEntitled` / `cookieLogin` / `cookieAdmin` / `ownPageRead` / `openAuthRead` in `hosted/server/account-gate.ts`, their use in `accountApp` in `hosted/server/account-app.ts` and `accountRoutes` in `hosted/server/account-routes.ts`, and `prelaunchAuth` in `hosted/server/prelaunch.ts`, and the packed adapter (rationale).
@@ -17,6 +18,8 @@
 - **FAIL IF** `S281` any bindings mapper but the production account's passes a `STRIPE_*` binding; `STRIPE_SECRET_KEY` or `STRIPE_WEBHOOK_SECRET` is anything but an account Worker secret, a Wrangler `vars` entry or a preview config included; or the relay or voice entry's import graph reaches `@pgstencil/stripe`, `stripe`, or `hosted/server/billing.ts`. Inspect `hosted/server/bindings.ts`, `hosted/wrangler.jsonc`, `hosted/scripts/preview.mjs`, and each entry's import graph.
 - **FAIL IF** `S80` authentication cookies have a Domain attribute, lack `__Host-`, Secure, HttpOnly, or Path=/ in HTTPS, or account (Better Auth) session tokens appear in browser JSON or persistent browser storage; inspect the adapter and `hosted/src/api.ts`.
 - **FAIL IF** `S81` the account origin's policy permits third-party scripts, framing, inline script execution, or any worker (`worker-src 'none'`); a voice response, or a relay response under a `RELAY_NON_PAGE_PREFIXES` prefix (`/api`, `/ws`), carries any policy but `RUNS_NOTHING_POLICY`; any response but a 101 WebSocket upgrade bypasses `secureHeaders`, a misconfigured deployment's error included; or a response is cached past its class: immutable only for a content-hashed file under the account's `/assets/` or the relay's `/assets/` and `/connect/assets/`, `no-cache` only on Pocket's other paths, `no-store` everywhere else, the account's SPA shell included. Inspect `secureHeaders` / `accountRules` / `relayRules` / `relayPathKind` in `hosted/server/headers.ts`, binding resolution in `hosted/server/worker-app.ts`, and asset routing in `hosted/wrangler.jsonc` and `hosted/wrangler.relay.jsonc`.
+- **FAIL IF** `S296` `frameDomain` in `remote-lib-common/src/remote/pocket-deployment.ts` shares a registrable domain with any other Hosted origin, or the frame Worker's production config can deploy with a binding but `ASSETS`, a variable but `CLIENT_ORIGIN`, a `CLIENT_ORIGIN` but the relay's, or a route but that domain's wildcard; inspect `framesConfig` in `hosted/scripts/production.mjs` and `hosted/wrangler.frames.jsonc`.
+- **FAIL IF** `S297` `frameOriginResponse` answers a path but its three files with anything but a 404, reads a request header or a cookie, sets a cookie, omits `frame-ancestors` naming only `CLIENT_ORIGIN` or HSTS, or `stageFrames` can stage any other file. Inspect `hosted/server/frame-origin.ts` and `hosted/scripts/stage-frames.mjs`.
 - **FAIL IF** `S82` marketing scripts, analytics, provider avatars, or remote fonts enter the Hosted frontend; inspect the frontend import graph and deployed response when available.
 
 Pinned by `hosted/server/tests/boundary.test.ts`, `hosted/server/tests/workers.test.ts`, and `hosted/server/tests/one-time.test.ts`.

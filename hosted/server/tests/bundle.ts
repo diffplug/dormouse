@@ -24,13 +24,19 @@ interface WranglerConfig {
   }[];
 }
 
-/** Hosted's three Wrangler configs, as the registry names them. */
+/**
+ * The three application Workers' Wrangler configs, as the registry names them.
+ * The frame Worker is not one: it has no origin of its own, and no route but its
+ * files (`frame-origin.test.ts`).
+ */
 export const wrangler = Object.fromEntries(
-  Object.entries(WORKERS).map(([name, { config }]) => [
-    name,
-    parseConfig(readFileSync(config, "utf8")) as WranglerConfig,
-  ]),
-) as Record<keyof typeof WORKERS, WranglerConfig>;
+  Object.entries(WORKERS)
+    .filter(([name]) => name !== "frames")
+    .map(([name, { config }]) => [
+      name,
+      parseConfig(readFileSync(config, "utf8")) as WranglerConfig,
+    ]),
+) as Record<Exclude<keyof typeof WORKERS, "frames">, WranglerConfig>;
 
 export type Name = keyof typeof wrangler;
 export const NAMES = Object.keys(wrangler) as Name[];

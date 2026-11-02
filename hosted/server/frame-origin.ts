@@ -28,6 +28,9 @@ const headers = (clientOrigin: string, contentType: string) => ({
   "cache-control": "no-cache",
   "x-content-type-options": "nosniff",
   "referrer-policy": "no-referrer",
+  // `.com` is not HTTPS-only of itself, and a framed page's `http:` link to its
+  // own origin would pass its worker and reach the network in the clear.
+  "strict-transport-security": "max-age=31536000; includeSubDomains",
   // Only the bootstrap page can be framed, and only by the Client: that is what
   // makes the parent its messages trust the Client (`bootstrap.ts`).
   "content-security-policy": `default-src 'none'; script-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors ${clientOrigin}`,

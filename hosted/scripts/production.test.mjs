@@ -11,7 +11,26 @@ import {
   verifyPackages,
 } from "./production.mjs";
 import { deployWorkers, oauthProviders, readConfigs } from "./workers.mjs";
+import { frameSmoke } from "./preview-smoke.mjs";
 const bases = await readConfigs();
+
+/** A frame origin as it should answer; `change` spoils one thing. */
+const frameOrigin = (change = {}) => async (url) => {
+  const { hostname, pathname } = new URL(url);
+  assert.equal(hostname, "smoke.dormouseusercontent.com");
+  if (pathname !== "/__dormouse-frame-sw.js") return new Response("Not found", { status: change.other ?? 404 });
+  return new Response(change.body ?? "worker", {
+    headers: {
+      "content-type": "text/javascript; charset=utf-8",
+      "content-security-policy": `default-src 'none'; frame-ancestors ${change.ancestors ?? "https://relay.dormouse.sh"}`,
+      ...(change.hsts === false ? {} : { "strict-transport-security": "max-age=31536000; includeSubDomains" }),
+      ...(change.cookie ? { "set-cookie": "a=b" } : {}),
+    },
+  });
+};
+/** `fetcher`, with the frame origin answered as {@link frameOrigin}. */
+const withFrames = (fetcher, change) => async (url) =>
+  new URL(url).hostname.endsWith(".dormouseusercontent.com") ? frameOrigin(change)(url) : fetcher(url);
 const env = {
   BUILD_SHA: "a".repeat(40),
   HYPERDRIVE_ID: "b".repeat(32),
@@ -118,7 +137,7 @@ test("the release's deploy job hands every step each Worker's Hyperdrive variabl
   for (const [variable] of Object.values(HYPERDRIVES))
     assert.ok(deploy.includes(`\n      ${variable}: \${{ vars.${variable} }}\n`), variable);
 });
-test("Workers deploy relay, voice, then account from one config path each, and a failure stops the rest", async (t) => {
+test("Workers deploy frames, relay, voice, then account from one config path each, and a failure stops the rest", async (t) => {
   t.after(() =>
     rm(new URL("../.wrangler/deploy-test/", import.meta.url), { recursive: true, force: true }),
   );
@@ -135,6 +154,7 @@ test("Workers deploy relay, voice, then account from one config path each, and a
     deployed.map(([name, path]) => [name, path.split("/").slice(-3).join("/")]),
     // The account last: its `v2` deletes the `OneTimeRoom` the relay replaces.
     [
+      ["dormouse-frames", ".wrangler/deploy-test/wrangler.frames.json"],
       ["dormouse-relay", ".wrangler/deploy-test/wrangler.relay.json"],
       ["dormouse-voice", ".wrangler/deploy-test/wrangler.voice.json"],
       ["dormouse-hosted", ".wrangler/deploy-test/wrangler.account.json"],
@@ -145,7 +165,7 @@ test("Workers deploy relay, voice, then account from one config path each, and a
     deployWorkers("deploy-test", configs, { spawn: spawn("dormouse-voice") }),
     { message: "dormouse-voice deploy failed" },
   );
-  assert.deepEqual(deployed.map(([name]) => name), ["dormouse-relay", "dormouse-voice"]);
+  assert.deepEqual(deployed.map(([name]) => name), ["dormouse-frames", "dormouse-relay", "dormouse-voice"]);
   // Each config is removed once deployed, failed or not.
   for (const [, path] of deployed)
     await assert.rejects(readFile(path), { code: "ENOENT" });
@@ -186,7 +206,8 @@ test("production smokes the relay before anything after it deploys, and a relay 
     deployProduction(configs, env.BUILD_SHA, {
       stage: "deploy-production-test",
       spawn,
-      fetcher,
+      fetcher: withFrames(fetcher),
+      worker: async () => "worker",
       oneTime,
       wait: async () => {},
     });
@@ -196,6 +217,7 @@ test("production smokes the relay before anything after it deploys, and a relay 
   });
   // The relay retried up to its sixth attempt, then the rendezvous ran once.
   assert.deepEqual(events, [
+    "deploy dormouse-frames",
     "deploy dormouse-relay",
     ...Array(6).fill("relay health"),
     "relay ready",
@@ -215,7 +237,7 @@ test("production smokes the relay before anything after it deploys, and a relay 
   );
   // Six attempts, then nothing else deploys: the account's `v2` never runs.
   assert.equal(rendezvous, 6);
-  assert.deepEqual(events, ["deploy dormouse-relay", "relay health", "relay ready", "relay push"]);
+  assert.deepEqual(events, ["deploy dormouse-frames", "deploy dormouse-relay", "relay health", "relay ready", "relay push"]);
   // A relay whose role lacks a grant stops the release before anything else deploys.
   events.length = 0;
   ready = 503;
@@ -223,7 +245,45 @@ test("production smokes the relay before anything after it deploys, and a relay 
     deploy(async () => events.push("relay one-time")),
     failure("https://relay.dormouse.sh must reach Postgres through its Hyperdrive"),
   );
-  assert.deepEqual(events, ["deploy dormouse-relay", "relay health", ...Array(6).fill("relay ready")]);
+  assert.deepEqual(events, ["deploy dormouse-frames", "deploy dormouse-relay", "relay health", ...Array(6).fill("relay ready")]);
+  // A frame origin that does not answer stops the release before anything else.
+  events.length = 0;
+  await assert.rejects(
+    deployProduction(configs, env.BUILD_SHA, {
+      stage: "deploy-production-test",
+      spawn,
+      fetcher: withFrames(fetcher, { other: 200 }),
+      worker: async () => "worker",
+      wait: async () => {},
+    }),
+    { message: /must serve nothing else/ },
+  );
+  assert.deepEqual(events, ["deploy dormouse-frames"]);
+});
+test("the frame Worker holds nothing but its assets, on the wildcard of its own domain", () => {
+  assert.deepEqual(configs.frames.routes, [
+    { pattern: "*.dormouseusercontent.com/*", zone_name: "dormouseusercontent.com" },
+  ]);
+  assert.equal(configs.frames.assets.directory, "../../dist/frames");
+  for (const [change, message] of [
+    [{ hyperdrive: [{ binding: "HYPERDRIVE", id: "a".repeat(32) }] }, /must not carry hyperdrive/],
+    [{ kv_namespaces: [] }, /must not carry kv_namespaces/],
+    [{ routes: [{ pattern: "*.dormouse.sh/*", zone_name: "dormouse.sh" }] }, /deep/i],
+    [{ vars: { CLIENT_ORIGIN: "https://evil.example" } }, /deep/i],
+    [{ vars: { CLIENT_ORIGIN: "https://relay.dormouse.sh", SECRET: "x" } }, /deep/i],
+    [{ workers_dev: true }, /false/],
+  ])
+    assert.throws(() => productionConfig({ ...bases.frames, ...change }, env, "frames"), { message });
+});
+test("the frame smoke holds a live origin to this release's worker, its policy, and nothing else", async () => {
+  const smoke = (change) =>
+    frameSmoke("dormouseusercontent.com", "https://relay.dormouse.sh", {
+      fetcher: frameOrigin(change),
+      worker: async () => "worker",
+    });
+  await smoke();
+  for (const change of [{ body: "stale" }, { ancestors: "*" }, { hsts: false }, { cookie: true }, { other: 200 }])
+    await assert.rejects(smoke(change), assert.AssertionError);
 });
 test("live verification retries the relay and voice while their domains come up, and runs the account's POSTs once", async () => {
   const health = {};
@@ -253,7 +313,8 @@ test("live verification retries the relay and voice while their domains come up,
   let rendezvous = 0;
   await assert.rejects(
     productionSmoke(configs, env.BUILD_SHA, {
-      fetcher,
+      fetcher: withFrames(fetcher),
+      worker: async () => "worker",
       wait: async () => {},
       oneTime: async () => rendezvous++,
     }),

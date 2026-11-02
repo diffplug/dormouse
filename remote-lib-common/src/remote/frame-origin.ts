@@ -8,16 +8,7 @@
 import { lengthPrefixedConcat, utf8Encode } from '../security/bytes.js';
 import { getWebCrypto, type WebCryptoLike } from '../security/webcrypto.js';
 
-/** At the origin root, so its default scope is the whole origin. */
-export const FRAME_WORKER_PATH = '/__dormouse-frame-sw.js';
-export const FRAME_BOOTSTRAP_PATH = '/__dormouse-frame/bootstrap.html';
-export const FRAME_BOOTSTRAP_SCRIPT_PATH = '/__dormouse-frame/bootstrap.js';
-const FRAME_ASSET_PREFIX = '/__dormouse-frame/';
-
-/** Whether a path is the frame origin's own, never the page's. */
-export function isFrameAssetPath(pathname: string): boolean {
-  return pathname === FRAME_WORKER_PATH || pathname.startsWith(FRAME_ASSET_PREFIX);
-}
+export * from './frame-origin-paths.js';
 
 const FRAME_ORIGIN_DOMAIN = 'dormouse/frame-origin/v1';
 /** A DNS label's worth of a SHA-256: 128 bits of hex, lowercase as a host is. */

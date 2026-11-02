@@ -207,6 +207,8 @@ A framed page (`docs/specs/remote-api.md` -> "Frames") runs at a frame origin: a
 - **Never count on a framed page's own browser storage surviving a relaunch** (rationale); a built-in Tool keeps none (`docs/specs/dor-tools-builtin.md` -> "Editing files").
 - **The page's `WebSocket` is shimmed by a tunneled grant alone**, since no worker sees a socket: a same-origin one goes as a message to the controlling worker, and any other stays native.
 
+**The frame origins sit on a registrable domain of their own, `frameDomain` in `HOSTED_POCKET_DEPLOYMENT`**, so a framed page cannot set a cookie on `dormouse.sh`; a workers.dev preview has no wildcard to serve one on.
+
 Source of truth: `frameOriginFor` in `remote-lib-common/src/remote/frame-origin.ts`, `installFrameWorker` in `lib/src/remote/frame-origin/worker.ts`, `lib/src/remote/frame-origin/bootstrap.ts`, `serveFrame` in `lib/src/remote/frame-origin/frame-bridge.ts`, `tunnelSocketShim` in `lib/src/host/iframe-proxy-rewrite.ts`, `lib/vite.frame-origin.config.ts`, `scripts/frame-origin-check/serve.mjs` (the check a real phone runs).
 
 ## Deployment: same-origin, always
@@ -228,8 +230,7 @@ Source of truth: `pocketContentSecurityPolicy` in `remote-lib-common/src/remote/
 
 **Scope: pocket-frames** — the rest of the Client half of [Frame origin](#frame-origin), in order:
 
-1. **Hosted's frame Worker on a registrable domain of its own**, so a framed page cannot set a cookie on `dormouse.sh`: its Wrangler config on a wildcard route, a place in `WORKERS` and the release checks, `lib/dist-frame-origin` staged as its assets with `CLIENT_ORIGIN` the relay's, the domain in `HOSTED_POCKET_DEPLOYMENT`, and its `FAIL IF` lines in `docs/specs/security-hosted.md`.
-2. **The wall shows a browser entry, and a Tool's page beside its terminal**: the hello declaring `capabilities.frames` only where the deployment names a domain, `frame-src` added to Pocket's CSP, the salt `frameOriginFor` takes, and `FrameClient.dispose` wired to session loss.
+1. **The wall shows a browser entry, and a Tool's page beside its terminal**: the hello declaring `capabilities.frames` only where the deployment names a domain and this page is the Client the frame Worker names (a preview is not), `frame-src` added to Pocket's CSP, the salt `frameOriginFor` takes, and `FrameClient.dispose` wired to session loss.
 
 **A self-host Relay serves no frame origin**, so its Pocket declares no frames and stays terminal-only.
 

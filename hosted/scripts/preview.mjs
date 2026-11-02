@@ -3,7 +3,7 @@ import { writeFile, mkdir, appendFile, rm } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { realpathSync } from "node:fs";
 import { vapidKeysFrom } from "./vapid.mjs";
-import { WORKERS, deployWorkers, fromStage, readConfigs } from "./workers.mjs";
+import { PREVIEWED, WORKERS, deployWorkers, fromStage, readConfigs } from "./workers.mjs";
 
 export function required(env, name, section = "Provision PR previews") {
   if (!env[name])
@@ -79,14 +79,14 @@ export function previewConfig(base, env, worker, hyperdriveId) {
 }
 
 /**
- * Every Worker's preview config, keyed as `WORKERS` is; all three share the
+ * Every previewed Worker's config, keyed as `WORKERS` is; all three share the
  * PR's one Hyperdrive, unlike production's one per Worker
  * (`docs/specs/hosted.md` -> "PR previews"). The relay's enrollment links name
  * the account preview, never production's account.
  */
 export function previewConfigs(bases, env, hyperdriveId) {
   const configs = Object.fromEntries(
-    Object.keys(WORKERS).map((worker) => [
+    PREVIEWED.map((worker) => [
       worker,
       previewConfig(bases[worker], env, worker, hyperdriveId),
     ]),
@@ -322,9 +322,9 @@ export async function cleanup(env = process.env) {
   const api = cloudflare(env);
   // `force`: a Worker that implements a Durable Object namespace is deleted
   // with it rather than refused.
-  for (const base of Object.values(bases))
+  for (const worker of PREVIEWED)
     await api(
-      `workers/scripts/${previewName(env.PR_NUMBER, base.name)}?force=true`,
+      `workers/scripts/${previewName(env.PR_NUMBER, bases[worker].name)}?force=true`,
       "DELETE",
     );
   for (const item of await findHyperdrives(api, name))
@@ -357,7 +357,7 @@ export async function sweep(env = process.env) {
   ];
   const prs = new Set();
   for (const name of names)
-    for (const base of Object.values(bases)) {
+    for (const base of PREVIEWED.map((worker) => bases[worker])) {
       const pr = name.startsWith(`${base.name}-pr-`) && name.slice(base.name.length + 4);
       if (pr && /^[1-9]\d{0,8}$/.test(pr) && pr !== env.PR_NUMBER) prs.add(pr);
     }

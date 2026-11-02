@@ -8,13 +8,18 @@ import { providerIds } from "../server/providers.js";
 const hosted = new URL("../", import.meta.url);
 
 /**
- * Hosted's three Workers, in deploy order, with the facts their Wrangler
- * configs do not carry. Everything else — script name, `main`, `APP_ORIGIN`,
- * assets, Hyperdrive, Durable Objects, rate limits — is read from `config`.
- * The account deploys last, so its `v2` deleting `OneTimeRoom` lands only once
- * the relay serving the replacement is deployed and, in production, smoked.
+ * Hosted's Workers, in deploy order, with the facts their Wrangler configs do
+ * not carry. Everything else — script name, `main`, `APP_ORIGIN`, assets,
+ * Hyperdrive, Durable Objects, rate limits — is read from `config`. The frame
+ * Worker goes first, so a Pocket that frames never outruns it, and has no
+ * `previewMain`: a workers.dev preview has no wildcard to serve it on. The
+ * account deploys last, so its `v2` deleting `OneTimeRoom` lands only once the
+ * relay serving the replacement is deployed and, in production, smoked.
  */
 export const WORKERS = {
+  frames: {
+    config: "wrangler.frames.jsonc",
+  },
   relay: {
     config: "wrangler.relay.jsonc",
     // The production entry: its mapper passes nothing a preview lacks.
@@ -49,6 +54,9 @@ export const WORKERS = {
   },
 };
 
+/** The Workers a PR's preview runs, in deploy order. */
+export const PREVIEWED = Object.keys(WORKERS).filter((worker) => WORKERS[worker].previewMain);
+
 /** A Wrangler config: JSON, plus `//` comments on lines of their own. */
 export const parseConfig = (text) => JSON.parse(text.replace(/^\s*\/\/.*$/gm, ""));
 
@@ -75,8 +83,8 @@ export function oauthProviders(config) {
 export const fromStage = (path) => posix.join("../..", path);
 
 /**
- * Writes each config to `.wrangler/<stage>/wrangler.<worker>.json` and deploys
- * them in `WORKERS` order, stopping at the first failure. `args` adds a
+ * Writes each config in `configs` to `.wrangler/<stage>/wrangler.<worker>.json`
+ * and deploys them in `WORKERS` order, stopping at the first failure. `args` adds a
  * Worker's own flags; `afterDeploy(worker)` checks a deployed Worker before the
  * next deploys, and its failure stops the rest; `spawn` stands in for the
  * process in tests.
@@ -88,7 +96,7 @@ export async function deployWorkers(
 ) {
   const directory = new URL(`.wrangler/${stage}/`, hosted);
   await mkdir(directory, { recursive: true, mode: 0o700 });
-  for (const worker of Object.keys(WORKERS)) {
+  for (const worker of Object.keys(WORKERS).filter((name) => configs[name])) {
     const path = new URL(`wrangler.${worker}.json`, directory);
     await writeFile(path, JSON.stringify(configs[worker], null, 2) + "\n");
     try {
