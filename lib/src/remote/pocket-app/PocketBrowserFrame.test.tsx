@@ -136,6 +136,48 @@ describe('PocketBrowserFrame', () => {
     expect(open).toHaveBeenCalledTimes(2);
   });
 
+  describe('a new-window request from the page', () => {
+    const ask = (url: string, source: Window | null = iframe('App')!.contentWindow, from = ORIGIN) => act(async () => {
+      window.dispatchEvent(new MessageEvent('message', { source, origin: from, data: { __dormouse: 'open-window', url } }));
+    });
+    const opened = async () => {
+      await render();
+      await join();
+      return vi.spyOn(window, 'open').mockImplementation(() => null);
+    };
+    afterEach(() => { vi.restoreAllMocks(); });
+
+    it('loads its own page in place', async () => {
+      const open = await opened();
+      await ask(`${ORIGIN}/docs?a=1#b`);
+      expect(iframe('App')!.src).toBe(`${ORIGIN}/docs?a=1#b`);
+      await ask('http://localhost:5173/upstream');
+      expect(iframe('App')!.src).toBe(`${ORIGIN}/upstream`);
+      expect(open).not.toHaveBeenCalled();
+    });
+
+    it('opens anywhere else only on a tap, with nothing of this window', async () => {
+      const open = await opened();
+      await ask('https://example.com/docs');
+      expect(open).not.toHaveBeenCalled();
+      expect(document.body.textContent).toContain('https://example.com/docs');
+      await act(async () => [...document.querySelectorAll('button')].find((b) => b.textContent === 'Open')!.click());
+      expect(open).toHaveBeenCalledExactlyOnceWith('https://example.com/docs', '_blank', 'noopener,noreferrer');
+      expect(document.body.textContent).not.toContain('https://example.com/docs');
+    });
+
+    it('ignores another window, another origin, and a scheme no page should name', async () => {
+      await opened();
+      const src = iframe('App')!.src;
+      await ask('https://example.com/a', window);
+      await ask('https://example.com/b', undefined, 'https://evil.example');
+      await ask('javascript:alert(1)');
+      expect(iframe('App')!.src).toBe(src);
+      expect(document.body.textContent).not.toContain('example.com');
+      expect(document.body.textContent).not.toContain('javascript:');
+    });
+  });
+
   it('says so when the page is gone', async () => {
     const onShowSessions = vi.fn();
     await render({ onShowSessions });

@@ -143,11 +143,25 @@ export function PocketWall({ adapter, browsers, onError, persist = true, session
   // another shows, to the session's bound, past which the oldest with no unsaved
   // edits goes.
   const [kept, setKept] = useState<readonly string[]>([]);
+  // A listing can miss a Surface whose window was slow to answer, and only the
+  // Burrow can say its page went: until then the document stays, with its edits.
+  const [holding, setHolding] = useState<ReadonlySet<string>>(() => new Set());
+  const noteHolding = useCallback((id: string, held: boolean) => {
+    setHolding((current) => {
+      const next = new Set(current);
+      if (held) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
+  const lastListed = useRef(new Map<string, DirectoryEntry>());
   useEffect(() => {
-    const live = new Set(attachableEntries.filter((entry) => framedPage(entry)).map((entry) => entry.surfaceId));
+    const listed = attachableEntries.filter((entry) => framedPage(entry));
+    for (const entry of listed) lastListed.current.set(entry.surfaceId, entry);
+    const live = new Set([...listed.map((entry) => entry.surfaceId), ...holding]);
     const shown = browserShown ? activePaneId : null;
     setKept((current) => nextKeptFrames(current, shown, live, MAX_FRAMES_PER_SESSION, (id) => getToolDirty(id) === true));
-  }, [activePaneId, attachableEntries, browserShown]);
+  }, [activePaneId, attachableEntries, browserShown, holding]);
 
   const { close: closeSurface, dialog: closeDialog } = useSurfaceClose(session);
 
@@ -213,7 +227,7 @@ export function PocketWall({ adapter, browsers, onError, persist = true, session
           }}
           onBrowserClose={browsers ? closeSurface : undefined}
           browser={browsers && frames ? kept.map((id) => {
-            const entry = attachableEntries.find((candidate) => candidate.surfaceId === id);
+            const entry = attachableEntries.find((candidate) => candidate.surfaceId === id) ?? lastListed.current.get(id);
             const page = entry && framedPage(entry);
             if (!entry || !page) return null;
             return (
@@ -227,6 +241,7 @@ export function PocketWall({ adapter, browsers, onError, persist = true, session
                 originFor={originFor}
                 transport={browsers.transport}
                 visible={id === activePaneId}
+                onHolding={noteHolding}
                 onReconnect={browsers.onReconnect}
                 onShowSessions={() => setView('sessions')}
               />

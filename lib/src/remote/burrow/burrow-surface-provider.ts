@@ -129,6 +129,7 @@ export interface BurrowSurfaceProvider {
    * The page `surfaceId` embeds now — a browser Surface's, or a serving Tool's
    * — or `null` when it embeds none, renders it some other way, or nobody owns
    * it. Read-only: the frame tunnel mints its own proxy grant for the page.
+   * Rejects when someone who may own it stayed silent, which is no answer.
    */
   resolveBrowser(surfaceId: string): Promise<string | null>;
 

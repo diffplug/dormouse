@@ -18,6 +18,7 @@ import type {
   SurfaceHold,
 } from '../../remote/burrow/burrow-surface-provider';
 import type { PeerOps, PeerSurfaceParams, PeerSurfaceResult } from '../../remote/burrow/peer-surfaces';
+import { ASK_BUDGET_MS } from './service-protocol';
 
 /**
  * Fan one operation out to whoever can answer it and collect the answers. Who
@@ -156,10 +157,15 @@ export function createAskSurfaceProvider(
 
     async resolveBrowser(surfaceId): Promise<string | null> {
       // One surface has one owner, as for an attach. A peer is another build.
+      const asked = Date.now();
       const [page] = (await ask('browserOp', { surfaceId } satisfies PeerOps['browserOp']['params'])) as Partial<
         PeerOps['browserOp']['result']
       >[];
-      return typeof page?.url === 'string' ? page.url : null;
+      if (typeof page?.url === 'string') return page.url;
+      // An ask settles early once everyone has answered, in every host, so one
+      // that spent its budget had someone silent, who may be the owner.
+      if (Date.now() - asked >= ASK_BUDGET_MS) throw new Error('the surface owner did not answer');
+      return null;
     },
 
     async closeSurface(surfaceId, consent) {

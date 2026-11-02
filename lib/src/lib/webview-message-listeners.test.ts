@@ -56,8 +56,9 @@ const FRAME_ORIGIN_LISTENERS: Record<string, { count: number; pinnedBy: string }
   'lib/src/remote/frame-origin/frame-bridge.ts': { count: 4, pinnedBy: 'lib/src/remote/frame-origin/frame-bridge.test.ts' },
   // a page's socket, and one request's own reply port
   'lib/src/remote/frame-origin/worker.ts': { count: 2, pinnedBy: 'lib/src/remote/frame-origin/worker.test.ts' },
-  // a port this window made, asking only whether the bootstrap page is ready
-  'lib/src/remote/pocket-app/PocketBrowserFrame.tsx': { count: 1, pinnedBy: 'lib/src/remote/pocket-app/PocketBrowserFrame.test.tsx' },
+  // a port this window made, asking only whether the bootstrap page is ready; and
+  // a new-window request, taken only from its own page's window and origin
+  'lib/src/remote/pocket-app/PocketBrowserFrame.tsx': { count: 2, pinnedBy: 'lib/src/remote/pocket-app/PocketBrowserFrame.test.tsx' },
 };
 
 const LISTENER = /addEventListener\(\s*['"`]message['"`]|\bonmessage\s*=/g;

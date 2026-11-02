@@ -1,7 +1,8 @@
 // @vitest-environment node
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DirectoryEntry, SurfaceHold } from '../../remote/burrow/burrow-surface-provider';
 import { createAskSurfaceProvider } from './ask-surface-provider';
+import { ASK_BUDGET_MS } from './service-protocol';
 
 const entry = (surfaceId: string, title: string): DirectoryEntry => ({
   paneRef: surfaceId,
@@ -105,6 +106,36 @@ describe('createAskSurfaceProvider holds', () => {
     } finally {
       process.off('unhandledRejection', onUnhandled);
     }
+  });
+});
+
+describe('createAskSurfaceProvider resolveBrowser', () => {
+  const noPty = { writePty: () => {}, resizePty: () => {}, streamPty: () => () => {} } as never;
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('says no page when everyone answered, and throws when someone stayed silent', async () => {
+    const { provider: answered } = createAskSurfaceProvider(async () => [], noPty);
+    await expect(answered.resolveBrowser('surface:1')).resolves.toBeNull();
+    vi.useFakeTimers();
+    const { provider: silent } = createAskSurfaceProvider(async () => {
+      await new Promise((resolve) => { setTimeout(resolve, ASK_BUDGET_MS); });
+      return [];
+    }, noPty);
+    const asking = silent.resolveBrowser('surface:1');
+    const settled = expect(asking).rejects.toThrow('did not answer');
+    await vi.advanceTimersByTimeAsync(ASK_BUDGET_MS);
+    await settled;
+  });
+
+  it('takes a late answer, however long it took', async () => {
+    vi.useFakeTimers();
+    const { provider } = createAskSurfaceProvider(async () => {
+      await new Promise((resolve) => { setTimeout(resolve, ASK_BUDGET_MS); });
+      return [{ url: 'http://localhost:5173/' }];
+    }, noPty);
+    const asking = provider.resolveBrowser('surface:1');
+    await vi.advanceTimersByTimeAsync(ASK_BUDGET_MS);
+    await expect(asking).resolves.toBe('http://localhost:5173/');
   });
 });
 

@@ -280,14 +280,14 @@ export function tunnelSocketShim(): string {
   var N=window.WebSocket,S=navigator.serviceWorker,L=new Set();
   if(!N||!S||!S.controller)return;
   addEventListener('pagehide',function(){L.forEach(function(end){end();});});
-  function T(url,protocols){
+  class T extends EventTarget{constructor(url,protocols){
     var u=new URL(String(url),location.href);
     if(u.host!==location.host)return protocols===undefined?new N(url):new N(url,protocols);
-    var t=this,e=new EventTarget();
+    super();
+    var t=this;
     t.url=u.href;t.protocol='';t.extensions='';t.bufferedAmount=0;t.binaryType='blob';t.readyState=0;
     t.onopen=t.onmessage=t.onclose=t.onerror=null;
-    t.addEventListener=e.addEventListener.bind(e);t.removeEventListener=e.removeEventListener.bind(e);t.dispatchEvent=e.dispatchEvent.bind(e);
-    function fire(ev){e.dispatchEvent(ev);var h=t['on'+ev.type];if(typeof h==='function')h.call(t,ev);}
+    function fire(ev){t.dispatchEvent(ev);var h=t['on'+ev.type];if(typeof h==='function')h.call(t,ev);}
     var c=new MessageChannel(),p=c.port1;
     function end(code,reason){if(L.delete(end))p.postMessage({kind:'close',code:code,reason:reason});}
     L.add(end);
@@ -316,9 +316,9 @@ export function tunnelSocketShim(): string {
     };
     var list=protocols===undefined?[]:typeof protocols==='string'?[protocols]:Array.prototype.slice.call(protocols);
     S.controller.postMessage({kind:'socket',path:u.pathname+u.search,protocols:list},[c.port2]);
-  }
-  T.CONNECTING=0;T.OPEN=1;T.CLOSING=2;T.CLOSED=3;
-  T.prototype={CONNECTING:0,OPEN:1,CLOSING:2,CLOSED:3};
+  }}
+  var states={CONNECTING:0,OPEN:1,CLOSING:2,CLOSED:3};
+  Object.assign(T,states);Object.assign(T.prototype,states);
   window.WebSocket=T;
 })();`;
 }

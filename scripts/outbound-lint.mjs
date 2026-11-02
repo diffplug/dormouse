@@ -277,6 +277,10 @@ const OUTBOUND_SITES = {
     class: 'phone',
     reason: 'Pocket\'s fetch and relay socket, injected into PocketClient.',
   },
+  'lib/src/remote/pocket-app/PocketBrowserFrame.tsx': {
+    class: 'phone',
+    reason: 'A framed page asks, and the person taps Open on a dialog naming the URL: http and https alone, noopener, and nothing of the session goes with it.',
+  },
   'lib/src/remote/pocket-app/deployment.ts': {
     class: 'phone',
     reason: 'Pocket reads deployment.json from its own origin.',

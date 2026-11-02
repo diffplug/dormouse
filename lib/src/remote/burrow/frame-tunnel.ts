@@ -56,6 +56,8 @@ import type { BurrowSurfaceProvider } from './burrow-surface-provider';
 
 /** Coalesce window for re-checking open frames against their surfaces. */
 const RECHECK_DEBOUNCE_MS = 150;
+/** How long a surface's owner may stay silent before its frames close regardless. */
+export const OWNER_SILENCE_LIMIT_MS = 30_000;
 
 /** An RFC 9110 token: a method or a header name. */
 const TOKEN_RE = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
@@ -75,6 +77,8 @@ interface Frame {
   /** The page's origin at the open; a surface showing another closes the frame. */
   readonly pageOrigin: string;
   readonly upstream: FrameUpstream;
+  /** When its owner stopped answering. */
+  silentSince?: number;
 }
 
 interface Exchange {
@@ -327,7 +331,18 @@ export class FrameTunnel {
   }
 
   async #recheck(frame: Frame): Promise<void> {
-    const url = await this.#options.provider.resolveBrowser(frame.surfaceId).catch(() => null);
+    let url: string | null = null;
+    try {
+      url = await this.#options.provider.resolveBrowser(frame.surfaceId);
+      frame.silentSince = undefined;
+    } catch {
+      // Closing would cost the Client's copy of the page. Asked again, for a time.
+      frame.silentSince ??= Date.now();
+      if (Date.now() - frame.silentSince < OWNER_SILENCE_LIMIT_MS) {
+        this.#scheduleRecheck();
+        return;
+      }
+    }
     if (normalizeOrigin(url) !== frame.pageOrigin) this.#closeFrame(frame.id, 'surface-gone');
   }
 

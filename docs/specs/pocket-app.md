@@ -214,7 +214,8 @@ A framed page (`docs/specs/remote-api.md` -> "Frames") runs at a frame origin: a
 - **Must sandbox a framed page as a local pane's, and its bootstrap page no less**, so it cannot navigate Pocket away, itself or through the sibling it can script.
 - **Must keep each device's `frameOriginFor` salt in this browser**; losing it only moves frames to new origins.
 - **Must attach no terminal while a browser shows**, so a Tool on the phone holds no pane's size.
-- **Must keep up to `MAX_FRAMES_PER_SESSION` frames loaded**, dropping the oldest with no unsaved edits.
+- **Must keep up to `MAX_FRAMES_PER_SESSION` frames loaded**, dropping the oldest with no unsaved edits. **Never end a loaded frame because a listing missed its Surface**: only `frame.closed` says its page went.
+- **A page's new-window request must load in place on its own page, and open anywhere else only on a tap**, `noopener`, over `http:` and `https:` alone, since the page chose the URL.
 
 Source of truth: `frameOriginFor` in `remote-lib-common/src/remote/frame-origin.ts`, `installFrameWorker` in `lib/src/remote/frame-origin/worker.ts`, `lib/src/remote/frame-origin/bootstrap.ts`, `serveFrame` in `lib/src/remote/frame-origin/frame-bridge.ts`, `tunnelSocketShim` in `lib/src/host/iframe-proxy-rewrite.ts`, `lib/vite.frame-origin.config.ts`, `scripts/frame-origin-check/serve.mjs` (the check a real phone runs).
 

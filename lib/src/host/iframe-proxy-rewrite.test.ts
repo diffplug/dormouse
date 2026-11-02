@@ -462,6 +462,16 @@ describe('tunnelSocketShim', () => {
     far.close();
   });
 
+  it('dispatches on the socket, so a listener\'s this and target are it', async () => {
+    const { socket, far } = page().open() as unknown as { far: MessagePort; socket: EventTarget & { send(data: string): void } };
+    const seen: unknown[] = [];
+    socket.addEventListener('open', function listener(this: unknown, event) { seen.push(this, event.target, event.currentTarget); });
+    far.postMessage({ kind: 'open', protocol: '', extensions: '' });
+    await settle();
+    expect(seen).toEqual([socket, socket, socket]);
+    far.close();
+  });
+
   it('stays closed when the open arrives after a close', async () => {
     const { socket, far } = page().open();
     let opened = false;

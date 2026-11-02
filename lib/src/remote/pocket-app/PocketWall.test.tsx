@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { describe, afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { DirectoryEntry } from 'remote-lib-common';
 import type { RemotePtyAdapter } from '../client/remote-adapter';
 import { PocketWall } from './PocketWall';
@@ -162,4 +162,47 @@ it('opens a frame on a live client under StrictMode, whose effects run twice', a
   ));
   await act(() => new Promise<void>((resolve) => { setTimeout(resolve, 10); }));
   expect(session.subscribe).toHaveBeenCalledWith('frame.open', expect.objectContaining({ surfaceId: 'remote' }), expect.any(Function), expect.any(String));
+});
+
+describe('a framed page the listing misses', () => {
+  const closedEvent = { subId: 'frame', event: 'frame.closed', data: { reason: 'surface-gone' } };
+  const bootstrap = () => container.querySelector('iframe[title="Frame bootstrap"]');
+  async function opened() {
+    let onEvent: (event: unknown) => void = () => {};
+    const session = {
+      request: vi.fn(async () => ({})),
+      subscribe: vi.fn(async (_method: string, _params: unknown, listener: (event: unknown) => void, subId: string) => {
+        onEvent = listener;
+        return { subId, result: { path: '/' } };
+      }),
+      unsubscribe: vi.fn(),
+    };
+    const listed = { ...snapshot[0]!, browser: page };
+    snapshot = [listed];
+    await act(async () => root.render(
+      <PocketWall adapter={adapter} browsers={{ ...browsers(), session, transport: { path: 'direct', cause: null } } as never} />,
+    ));
+    await act(() => new Promise<void>((resolve) => { setTimeout(resolve, 10); }));
+    expect(bootstrap()).not.toBeNull();
+    return { session, listed, close: () => act(async () => onEvent(closedEvent)) };
+  }
+
+  it('keeps its document through an empty listing, so its edits survive the next', async () => {
+    const { session, listed } = await opened();
+    const document = bootstrap();
+    await act(async () => publish([]));
+    expect(bootstrap()).toBe(document);
+    await act(async () => publish([listed]));
+    expect(bootstrap()).toBe(document);
+    expect(session.subscribe).toHaveBeenCalledOnce();
+    expect(session.request).not.toHaveBeenCalledWith('frame.close', expect.anything());
+  });
+
+  it('drops it once the Burrow says the page went', async () => {
+    const { close } = await opened();
+    await act(async () => publish([]));
+    await close();
+    expect(container.querySelector('[data-mobile-browser-layer] iframe')).toBeNull();
+    expect(container.textContent).not.toContain('no longer open');
+  });
 });

@@ -168,38 +168,38 @@ export function MobileWall({
 
   const closesBrowser = onBrowserClose && (activeItem?.kind === 'tool' || activeItem?.kind === 'browser');
 
-  if (!activeItem) {
-    return (
-      <div className={`grid h-full place-content-center justify-items-center gap-2 bg-app-bg font-mono text-sm text-muted ${className ?? ''}`}>
-        No sessions
-        {/* With no header to tap, and the Sessions screen may hold the way out. */}
-        {onShowSessions ? <BrowserAction label="Show sessions" onClick={onShowSessions} /> : null}
-      </div>
-    );
-  }
-
   return (
     <div className={`flex h-full min-h-0 flex-col overflow-hidden bg-app-bg ${className ?? ''}`}>
-      <MobileWallHeader
-        session={activeItem}
-        onTodoClear={onSessionTodoClear ? () => onSessionTodoClear(activeItem.id) : undefined}
-        onShowSessions={onShowSessions}
-        onKill={() => (closesBrowser ? onBrowserClose?.(activeItem.id) : killSession(activeItem.id))}
-        showKillButton={showKillButton || !!closesBrowser}
-        showingBrowser={showingBrowser}
-        onToolBrowserShownChange={onToolBrowserShownChange}
-      />
+      {activeItem ? (
+        <MobileWallHeader
+          session={activeItem}
+          onTodoClear={onSessionTodoClear ? () => onSessionTodoClear(activeItem.id) : undefined}
+          onShowSessions={onShowSessions}
+          onKill={() => (closesBrowser ? onBrowserClose?.(activeItem.id) : killSession(activeItem.id))}
+          showKillButton={showKillButton || !!closesBrowser}
+          showingBrowser={showingBrowser}
+          onToolBrowserShownChange={onToolBrowserShownChange}
+        />
+      ) : null}
       {/* `MobileTerminalUi` acknowledges a touch or keystroke on this pane —
           the only way a ring goes out here (`docs/specs/alert.md` -> Pane Header). */}
       <div className="relative min-h-0 flex-1 overflow-hidden bg-terminal-bg">
         {/* Hidden under a Tool's browser, never unmounted, which keeps its size. Merely
             covered, xterm's z-indexed layers would still take the page's touches. */}
-        {activeItem.kind === 'browser' ? null : (
+        {activeItem && activeItem.kind !== 'browser' ? (
           <div className={clsx('h-full', showingBrowser && 'invisible')} inert={showingBrowser}>
             <TerminalPane id={activeItem.id} isFocused={!showingBrowser} />
           </div>
+        ) : null}
+        {activeItem ? null : (
+          <div className="grid h-full place-content-center justify-items-center gap-2 bg-app-bg font-mono text-sm text-muted">
+            No sessions
+            {/* With no header to tap, and the Sessions screen may hold the way out. */}
+            {onShowSessions ? <BrowserAction label="Show sessions" onClick={onShowSessions} /> : null}
+          </div>
         )}
-        {/* Clear of the safe area, as an iframe cannot read it for itself. */}
+        {/* Mounted whatever is listed, so a listing that missed everything reloads
+            no page. Clear of the safe area, as an iframe cannot read it for itself. */}
         <div
           className={clsx('absolute inset-0 pb-[env(safe-area-inset-bottom)]', !showingBrowser && 'invisible')}
           data-mobile-browser-layer
