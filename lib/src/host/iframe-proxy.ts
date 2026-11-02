@@ -341,9 +341,8 @@ type MintAccess = { interfaces: InterfaceAddresses; allowExternal: boolean; tunn
  * The addresses a grant for `upstream` connects to, fixed for its lifetime, or
  * why there are none. SSRF guard: the proxy fetches a user-supplied URL, so a
  * name that resolves to any link-local / cloud-metadata address (169.254.169.254
- * and friends) is refused. Other private ranges are trusted — the boundary is
- * the user's own `dor iframe` (docs/specs/dor-browser.md → "Iframe Host
- * Capability And CSP").
+ * and friends) is refused. Whether the rest may be fronted at all is
+ * `mintGrant`'s question (docs/specs/dor-browser.md → "Iframe External Origins").
  */
 async function pinAddresses(upstream: URL, resolve: UpstreamResolver): Promise<UpstreamAddress[] | Refusal> {
   const hostname = upstream.hostname.replace(/^\[(.*)\]$/, '$1');
@@ -564,7 +563,8 @@ function handleRequest(grant: Grant, req: http.IncomingMessage, res: http.Server
       passThrough(grant, upstreamRes, res, body);
       return;
     }
-    // Any http upstream is framed, loopback or remote: sanitizeResponseHeaders
+    // Any upstream with a grant is framed, this machine's or allowed from
+    // another: sanitizeResponseHeaders
     // replaces its frame-blocking headers (X-Frame-Options / CSP
     // frame-ancestors) with one allowing same-grant nesting plus this webview's
     // own ancestor chain, and streamHtml injects the shim. A site's "do not

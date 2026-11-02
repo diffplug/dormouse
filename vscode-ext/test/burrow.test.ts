@@ -14,6 +14,7 @@ import { dirname } from 'node:path';
 import type { EnrollmentOffer } from 'remote-lib-common';
 
 import { DEFAULT_RELAY_ORIGIN } from '../../lib/src/host/relay-origin';
+import type { FrameHostProxy } from '../../lib/src/host/remote/frame-host';
 import { LOCAL_ON } from '../../lib/src/host/remote/test-burrow-link';
 import { levelsFor, nothingPolicy } from '../../lib/src/remote/network-policy';
 import { ENROLLMENT_KEY } from '../../lib/src/remote/burrow/store';
@@ -85,6 +86,22 @@ vi.mock('../../lib/src/host/remote/native-direct-peer', () => ({
     nativeDirect.disposed += 1;
   },
 }));
+
+/**
+ * The proxy the glue hands the service's frame host, reachable without a paired
+ * phone. The host itself is `lib/src/host/remote/frame-host.test.ts`'s concern.
+ */
+const frameHost = vi.hoisted(() => ({ proxy: null as FrameHostProxy | null }));
+vi.mock('../../lib/src/host/remote/frame-host', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../lib/src/host/remote/frame-host')>();
+  return {
+    ...actual,
+    createBurrowFrameHost: (proxy: FrameHostProxy) => {
+      frameHost.proxy = proxy;
+      return actual.createBurrowFrameHost(proxy);
+    },
+  };
+});
 
 /**
  * The build's baked relay origin and mode, as the glue reads them. The test
@@ -676,6 +693,23 @@ describe('burrow service glue', () => {
 
     activation.dispose();
     expect(nativeDirect.disposed).toBe(1);
+  });
+
+  // Through the real proxy: only a grant asked for as tunneled refuses a page off
+  // this machine for what it is, whatever the arguments' shape becomes.
+  it('asks the proxy for a phone\'s frame as tunneled, so a remote page is refused', async () => {
+    frameHost.proxy = null;
+    const mod = await freshBurrow();
+    const bound = fakeDeps();
+    mod.configureBurrow(bound.deps());
+    mod.initBurrow(fakeContext().context);
+    mod.handleBurrowCommand({ burrowRequestId: 'rh-1', cmd: 'enroll', params: { password: 'p', label: 'Laptop' } });
+    await waitFor(() => results(bound.posted).length > 0);
+
+    const lease = { owner: 'remote:session', id: 'frame' };
+    expect(await frameHost.proxy!.create('http://192.0.2.1:9/', { embedderOrigins: ['https://relay.example'], lease, tunneled: true }))
+      .toEqual({ ok: false, reason: 'scheme', detail: 'a remote device frames pages on this machine only' });
+    frameHost.proxy!.release(lease.owner, lease.id);
   });
 
   it('bootstraps the contention on enrollOffer too, or the card cannot be pressed', async () => {

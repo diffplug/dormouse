@@ -198,6 +198,8 @@ The built-in local-file viewer supplies its own content boundary and permits the
 
 **Why the redirect replaces the redirecting entry.** Pushing the target would leave the redirecting URL behind it, and Back would land there only to be redirected again. The redirect page carries no shim for the same reason: its `location` report would race the `navigate` and could put the redirecting URL back.
 
+**Why a tunneled grant keeps its redirect.** `PocketBrowserFrame` handles no `navigate`, so the Dormouse page would be a dead end on a phone, and a target on the Burrow's `localhost` means nothing in the phone's own browser. What a frame should do instead is `docs/specs/remote-api.md` -> "1b. A frame redirected off its page".
+
 **Why one list per install.** Every other Settings value persists per host install in `localStorage`; a per-window or per-session list would re-ask on every restore of a pane the user already allowed.
 
 ## Iframe Proxy Leases

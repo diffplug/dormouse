@@ -928,6 +928,15 @@ describe('iframe proxy leases', () => {
         .toMatchObject({ ok: false, reason: 'scheme' });
     });
 
+    it('passes an off-origin redirect through, with no page only a pane could act on', async () => {
+      const port = await upstream((_q, s) => { s.writeHead(302, { location: 'https://accounts.example/' }); s.end(); });
+      const url = await frame(`http://127.0.0.1:${port}/login`, tunneled);
+      const res = await request(url, { headers: { 'sec-fetch-dest': 'iframe' } });
+      expect(res.status).toBe(302);
+      expect(res.headers.location).toBe('https://accounts.example/');
+      expect(res.body).not.toContain('navigate');
+    });
+
     it('counts loopback, the unspecified address, and this host\'s own interfaces as this machine', async () => {
       const onThisMachine = (address: string) =>
         isUpstreamOnThisMachine('http://x.example/', { resolve: at(address), interfaceAddresses: () => ['192.168.1.5', 'fd7a::1%en0'] });

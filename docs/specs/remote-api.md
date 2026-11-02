@@ -210,7 +210,7 @@ A Client shows an embedded page by framing it at an origin of its own, the *fram
 
 - **Must open a frame only at the page its surface embeds when asked**, never at a URL the Client names; the Client's page then requests any path on that grant's one upstream. **Must refuse a `frame.open` whose `pageOrigin` is no longer that page's origin**: the frame origin holds the storage of the page the Client named, and another page must not inherit it (rationale).
 - **Must open a frame only once the direct path carries both directions**, refusing `frame.open` before then and on a session that stays relayed (rationale). The switch is one-way, so a frame never outlives its path. A relayed session's directory still lists its pages, so a Client can say why they do not open.
-- **Must frame only a page on this machine**: every address its grant pins is loopback, unspecified, or held by one of this host's interfaces, judged on those addresses and never on a name (rationale). A local pane keeps its remote pages; the session lists none of them to a Client.
+- **Must frame only a page on this machine**: every address its grant pins is loopback, unspecified, or held by one of this host's interfaces, judged on those addresses and never on a name (rationale). A local pane may hold a remote page the user allowed (`docs/specs/dor-browser.md` -> "Iframe External Origins"); the session lists none of them to a Client.
 - **Must hold every grant under a lease the session owns**, never a webview's, released by `frame.close`, by the session's disposal, and when the surface's page is gone or moves to another origin — re-checked on every directory invalidation and told as `frame.closed`. **Must ask the surface's owner, never judge by a listing**, which can predate the frame (rationale). **An owner's silence must not close a frame until `OWNER_SILENCE_LIMIT_MS`**, since a close costs the Client's copy of the page, unsaved edits included.
 - **The tunnel stands in for the frame origin**: an `Origin` equal to it, and a `Referer` on it, reach the grant as the grant's own, so the proxy vouches for those alone; any other `Origin` passes as sent; a `Location` on the grant returns as a path. **Never forward `Cookie`, a `Sec-` field, or the connection's own fields**; `destination` stands in for `Sec-Fetch-Dest`, which a service worker never sees. A WebSocket opens as the grant's own origin.
 - **Must answer every body identity-encoded**, decoding a compressed one, since a response a Client synthesizes is never decoded.
@@ -271,6 +271,10 @@ Fixed, phone-appropriate screencast parameters (JPEG, capped dimension and frame
 ### 1a. Frames off this machine
 
 A Client framing a remote `http://` page, whose framing and script protections the proxy strips, needs a consent the Burrow can read, which a webview's own allowlist is not.
+
+### 1b. A frame redirected off its page
+
+A frame load redirected to another origin passes as sent, and Pocket's `frame-src` admits only the frame domain. A pane answers the same redirect through `docs/specs/dor-browser.md` -> "Iframe External Origins"; a Client needs its own answer, given that a target on the Burrow's `localhost` means nothing in the phone's own browser.
 
 ### 2. In-flight command replay
 

@@ -293,14 +293,14 @@ Source of truth: `lib/src/components/wall/IframePanel.tsx`, `lib/src/host/iframe
 
 ### Iframe External Origins
 
-An upstream is local when every address it resolved to at mint reaches this machine: loopback (127.0.0.0/8, `::1`), `0.0.0.0`, `::`, or an address this host's interfaces hold; its name never counts.
+An upstream is local when every address it resolved to at mint is on this machine (`docs/specs/remote-api.md` -> "Frames"); its name never counts. This section governs a local pane's grants: a tunneled grant is on this machine or refused, whatever `allowExternal` says, and its redirects pass as sent.
 
 - A non-local upstream is refused (`external`) unless the request carries `allowExternal`, sent only for an origin on the panel's allowlist (`docs/specs/security-local.md` -> "Browser panes").
 - The allowlist holds exact origins (scheme, host, port) in webview `localStorage`, one per host install, each removable in Settings → General. **Must re-ask the host when the pane's origin is allowed or removed**, so a removal closes an open preview.
 - The `external` warning names the origin and offers Open in browser, Allow this origin, and Cancel (back one entry, else close the pane).
 - An allowed origin gets a preview only: cookies stay stripped and `https://` stays refused.
 
-Both webview CSPs admit only loopback frames (`docs/specs/security-local.md` -> "Network policy"), so a form, script, or link off the proxy to a remote origin is refused. A frame load (`Sec-Fetch-Dest` `document` or `iframe`) redirected to another origin, given an embedder chain, gets a Dormouse page in place of the `Location`. In the pane's frame it posts `navigate` with the target and its own URL; the panel takes it as a URL-bar entry, replacing the redirecting history entry (rationale). A nested frame, outside the webview CSP, follows the redirect itself.
+Both webview CSPs admit only loopback frames (`docs/specs/security-local.md` -> "Network policy"), so a form, script, or link off the proxy to a remote origin is refused. A pane's frame load (`Sec-Fetch-Dest` `document` or `iframe`) redirected to another origin, given an embedder chain, gets a Dormouse page in place of the `Location`. In the pane's frame it posts `navigate` with the target and its own URL; the panel takes it as a URL-bar entry, replacing the redirecting history entry (rationale). A nested frame, outside the webview CSP, follows the redirect itself.
 
 Source of truth: `mintGrant` and `offOriginRedirect` in `lib/src/host/iframe-proxy.ts`, `errorPageHtml` in `lib/src/host/iframe-proxy-rewrite.ts`, `lib/src/lib/iframe-allowlist.ts`, `lib/src/components/wall/IframePanel.tsx`.
 
@@ -341,7 +341,7 @@ The optional `PlatformAdapter.createIframeProxyUrl`, the `IframeProxyResult` uni
 
 **Must pass the webview's own ancestor chain with every request for a proxy URL** — `location.origin` plus `location.ancestorOrigins`, knowable only in the realm that has a `location` (rationale). The host validates it and uses it all-or-nothing: an unparseable or opaque (`"null"`) entry means no chain (rationale), and with no chain the proxy preserves framing headers and injects nothing.
 
-The proxy binds loopback only, a mitigation and not the boundary; each grant fronts exactly one upstream; no user script is injected; and every user-supplied `http://` target resolving to loopback, or allowed off this machine ([Iframe External Origins](#iframe-external-origins)), but none resolving to a refused address ([Iframe Renderer](#iframe-renderer)), is trusted as the user's command, at the cost of the upstream's own XSS policy unless it opts into preservation. The `Host`, `Origin`, cookie, `frame-ancestors`, shim-targeting and grant-refresh rules are `docs/specs/security-local.md` → "Loopback Listeners" and "Browser panes".
+The proxy binds loopback only, a mitigation and not the boundary; each grant fronts exactly one upstream; no user script is injected; and every user-supplied `http://` target on this machine, or allowed off it ([Iframe External Origins](#iframe-external-origins)), but none resolving to a refused address ([Iframe Renderer](#iframe-renderer)), is trusted as the user's command, at the cost of the upstream's own XSS policy unless it opts into preservation. The `Host`, `Origin`, cookie, `frame-ancestors`, shim-targeting and grant-refresh rules are `docs/specs/security-local.md` → "Loopback Listeners" and "Browser panes".
 
 Source of truth: `lib/src/lib/platform/iframe-proxy-types.ts`, `embedderOrigins` in `lib/src/lib/embedder-origins.ts`, `normalizeEmbedderOrigins` in `lib/src/host/iframe-proxy-rewrite.ts`, `lib/src/host/loopback-guard.ts`. `lib/src/host/iframe-proxy.test.ts` pins the upgrade path as well as the request path.
 
