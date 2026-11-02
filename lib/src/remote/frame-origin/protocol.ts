@@ -32,8 +32,16 @@ export type ResponseMessage =
   | { kind: 'end' }
   | { kind: 'error'; message: string };
 
-/** The worker asking for the next chunk, or for no more. */
-export type ResponseControl = { kind: 'pull' } | { kind: 'cancel' };
+/** The worker asking for the next chunk or for no more, or saying it still runs. */
+export type ResponseControl = { kind: 'pull' } | { kind: 'cancel' } | { kind: 'alive' };
+
+/**
+ * How often a worker serving a response says it still runs. A stopped worker
+ * tells a port nothing, and its exchange would hold one of the session's few.
+ */
+export const WORKER_ALIVE_MS = 10_000;
+/** How long the Client window hears nothing before ending a response. */
+export const WORKER_SILENCE_LIMIT_MS = WORKER_ALIVE_MS * 3;
 
 /** A socket's messages, Client window to page. */
 export type SocketEvent =

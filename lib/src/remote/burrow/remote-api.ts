@@ -261,9 +261,9 @@ export class RemoteApiSession {
       return this.#fail(request, 'invalid surface.close: consent');
     }
     void this.#provider.closeSurface(surfaceId, { confirmed, unsaved }).then((result) => {
-      if (this.#disposed) return;
+      // Logged though the Client went while it was saving: the Tool closed.
       if (result.outcome === 'closed') this.#onClose?.(surfaceId);
-      this.#ok(request, result);
+      if (!this.#disposed) this.#ok(request, result);
     });
   }
 

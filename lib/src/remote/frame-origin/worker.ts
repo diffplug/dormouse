@@ -6,7 +6,7 @@
  */
 
 import { FRAME_BOOTSTRAP_PATH, isFrameAssetPath, normalizeOrigin } from 'remote-lib-common';
-import type { RelayMessage, RelayRequest, ResponseControl, ResponseMessage } from './protocol';
+import { WORKER_ALIVE_MS, type RelayMessage, type RelayRequest, type ResponseControl, type ResponseMessage } from './protocol';
 
 /** Past the proxy's own upstream timeout, so its error page gets there first. */
 const HEAD_TIMEOUT_MS = 65_000;
@@ -31,6 +31,8 @@ export interface FrameWorkerScope {
 interface FetchLike {
   request: Request;
   respondWith(response: Promise<Response>): void;
+  /** Keeps the worker running, which a streaming response alone need not. */
+  waitUntil?(promise: Promise<unknown>): void;
 }
 
 interface ExtendableLike {
@@ -51,7 +53,9 @@ export function installFrameWorker(scope: FrameWorkerScope): void {
     // Anything else is the network's: the page's own absolute URLs, and this
     // origin's assets, which is how the bootstrap page loads at all.
     if (url.origin !== scope.location.origin || isFrameAssetPath(url.pathname)) return;
-    event.respondWith(relay(scope, event.request, `${url.pathname}${url.search}`));
+    let finished = () => {};
+    event.waitUntil?.(new Promise<void>((resolve) => { finished = resolve; }));
+    event.respondWith(relay(scope, event.request, `${url.pathname}${url.search}`, () => finished()));
   });
   // The WebSocket shim, which a worker cannot intercept: a page's socket
   // arrives as a message with its port, and goes the way a request does.
@@ -107,12 +111,18 @@ function failure(status: number, text: string): Response {
   return new Response(text, { status, headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' } });
 }
 
-async function relay(scope: FrameWorkerScope, request: Request, path: string): Promise<Response> {
+async function relay(scope: FrameWorkerScope, request: Request, path: string, finished: () => void): Promise<Response> {
   const origin = scope.location.origin;
   const refused = refusal(request, origin);
-  if (refused) return failure(403, refused);
+  if (refused) {
+    finished();
+    return failure(403, refused);
+  }
   const bootstrap = await bootstrapOf(scope);
-  if (!bootstrap) return failure(503, 'The connection to your computer is gone.');
+  if (!bootstrap) {
+    finished();
+    return failure(503, 'The connection to your computer is gone.');
+  }
   const message: RelayRequest = {
     kind: 'request',
     method: request.method,
@@ -127,23 +137,30 @@ async function relay(scope: FrameWorkerScope, request: Request, path: string): P
   }
   const { port1, port2 } = new MessageChannel();
   bootstrap.postMessage(message, [port2, ...transfer]);
-  return responseFrom(port1);
+  return responseFrom(port1, finished);
 }
 
 /** The {@link ResponseMessage}s on `port` as a `Response`, pulling one chunk per read. */
-export function responseFrom(port: MessagePort): Promise<Response> {
+export function responseFrom(port: MessagePort, finished: () => void = () => {}): Promise<Response> {
   return new Promise((resolve) => {
     let controller: ReadableStreamDefaultController<Uint8Array> | null = null;
     let wake: (() => void) | null = null;
-    const timer = setTimeout(() => {
-      port.close();
-      resolve(failure(504, 'Your computer did not answer in time.'));
-    }, HEAD_TIMEOUT_MS);
+    let alive: ReturnType<typeof setInterval> | undefined;
     const send = (control: ResponseControl) => port.postMessage(control);
+    const close = () => {
+      clearInterval(alive);
+      port.close();
+      finished();
+    };
     const cancel = () => {
       send({ kind: 'cancel' });
-      port.close();
+      close();
     };
+    const timer = setTimeout(() => {
+      // Told, so a request still waiting its turn does not run after this answer.
+      cancel();
+      resolve(failure(504, 'Your computer did not answer in time.'));
+    }, HEAD_TIMEOUT_MS);
     const settlePull = () => {
       wake?.();
       wake = null;
@@ -167,6 +184,7 @@ export function responseFrom(port: MessagePort): Promise<Response> {
         cancel();
         return new Response(null, { status: head.status, statusText: head.statusText, headers });
       }
+      alive = setInterval(() => send({ kind: 'alive' }), WORKER_ALIVE_MS);
       const body = new ReadableStream<Uint8Array>({
         start: (c) => { controller = c; },
         pull: () => new Promise<void>((done) => {
@@ -192,14 +210,14 @@ export function responseFrom(port: MessagePort): Promise<Response> {
         case 'end':
           controller?.close();
           settlePull();
-          port.close();
+          close();
           return;
         case 'error':
           clearTimeout(timer);
           if (controller) controller.error(new Error(message.message));
           else resolve(failure(502, message.message));
           settlePull();
-          port.close();
+          close();
           return;
       }
     };

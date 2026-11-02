@@ -9,7 +9,7 @@
 import { createSerialQueue } from '../../host/remote/serial-queue';
 import { messageOf } from '../../lib/errors';
 import type { OpenFrame, OpenFrameSocket } from '../client/frame-client';
-import type { RelayMessage, RelayRequest, RelaySocket, ResponseControl, ResponseMessage, SocketCommand, SocketEvent } from './protocol';
+import { WORKER_SILENCE_LIMIT_MS, type RelayMessage, type RelayRequest, type RelaySocket, type ResponseControl, type ResponseMessage, type SocketCommand, type SocketEvent } from './protocol';
 
 /** Serve `frame` to whatever arrives on `port`. Returns the stop. */
 export function serveFrame(frame: OpenFrame, port: MessagePort): () => void {
@@ -28,33 +28,36 @@ export function serveFrame(frame: OpenFrame, port: MessagePort): () => void {
 
 async function serveRequest(frame: OpenFrame, request: RelayRequest, reply: MessagePort): Promise<void> {
   const send = (message: ResponseMessage, transfer: Transferable[] = []) => reply.postMessage(message, transfer);
-  let reader: ReadableStreamDefaultReader<Uint8Array>;
-  try {
-    const response = await frame.request({
-      method: request.method,
-      path: request.path,
-      headers: request.headers,
-      destination: request.destination,
-      ...(request.body ? { body: new Uint8Array(request.body) } : {}),
-    });
-    send({ kind: 'head', status: response.status, statusText: response.statusText, headers: response.headers });
-    reader = response.body.getReader();
-  } catch (error) {
-    send({ kind: 'error', message: messageOf(error) });
+  const abandoned = new AbortController();
+  let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+  let silence: ReturnType<typeof setTimeout> | undefined;
+  const finish = () => {
+    clearTimeout(silence);
     reply.close();
-    return;
-  }
+  };
+  const abandon = () => {
+    abandoned.abort();
+    void reader?.cancel();
+    finish();
+  };
+  const heard = () => {
+    clearTimeout(silence);
+    silence = setTimeout(abandon, WORKER_SILENCE_LIMIT_MS);
+  };
+  // From the start: a worker that gave up on the head must stop a request still
+  // waiting its turn, or a write it answered 504 for runs anyway.
   reply.onmessage = (event: MessageEvent<ResponseControl>) => {
     if (event.data.kind === 'cancel') {
-      void reader.cancel();
-      reply.close();
+      abandon();
       return;
     }
+    heard();
+    if (event.data.kind !== 'pull' || !reader) return;
     reader.read().then(
       ({ done, value }) => {
         if (done) {
           send({ kind: 'end' });
-          reply.close();
+          finish();
         } else {
           const bytes = ownBuffer(value);
           send({ kind: 'chunk', bytes }, [bytes.buffer]);
@@ -62,10 +65,31 @@ async function serveRequest(frame: OpenFrame, request: RelayRequest, reply: Mess
       },
       (error: unknown) => {
         send({ kind: 'error', message: messageOf(error) });
-        reply.close();
+        finish();
       },
     );
   };
+  try {
+    const response = await frame.request({
+      method: request.method,
+      path: request.path,
+      headers: request.headers,
+      destination: request.destination,
+      signal: abandoned.signal,
+      ...(request.body ? { body: new Uint8Array(request.body) } : {}),
+    });
+    if (abandoned.signal.aborted) {
+      void response.body.cancel();
+      return;
+    }
+    send({ kind: 'head', status: response.status, statusText: response.statusText, headers: response.headers });
+    reader = response.body.getReader();
+    heard();
+  } catch (error) {
+    if (abandoned.signal.aborted) return;
+    send({ kind: 'error', message: messageOf(error) });
+    finish();
+  }
 }
 
 async function serveSocket(frame: OpenFrame, request: RelaySocket, reply: MessagePort): Promise<void> {

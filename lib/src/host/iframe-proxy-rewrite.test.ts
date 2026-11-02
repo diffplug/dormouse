@@ -375,6 +375,14 @@ describe('instrumentHtml on a tunneled grant', () => {
     expect(body).toContain('<body class="[&>p]:m-0"><script>');
   });
 
+  it('stays ahead of a first script, unless a charset stands behind it', () => {
+    const first = instrumentHtml('<head><script>a</script><title>t</title></head>', APP, false, true);
+    expect(socketShimAt(first)).toBeLessThan(first.indexOf('<script>a</script>'));
+    const late = instrumentHtml('<head><script>a</script><meta charset="utf-8"><script>b</script></head>', APP, false, true);
+    expect(socketShimAt(late)).toBeGreaterThan(late.indexOf('<meta charset="utf-8">'));
+    expect(socketShimAt(late)).toBeLessThan(late.indexOf('<script>b</script>'));
+  });
+
   it('keeps the doctype and charset first, and shims nothing on a local pane', () => {
     const out = instrumentHtml('<!doctype html><head><meta charset="utf-8"><script>a</script>', APP, false, true);
     expect(socketShimAt(out)).toBeGreaterThan(out.indexOf('<meta charset="utf-8">'));
@@ -480,6 +488,18 @@ describe('tunnelSocketShim', () => {
     far.postMessage({ kind: 'open', protocol: '', extensions: '' });
     await settle();
     expect(seen).toEqual([socket, socket, socket]);
+    far.close();
+  });
+
+  it('refuses a close a native socket refuses, rather than sticking in CLOSING', async () => {
+    const { socket, far, heard } = page().open();
+    far.postMessage({ kind: 'open', protocol: '', extensions: '' });
+    await settle();
+    expect(() => socket.close(1001)).toThrow('Invalid close code');
+    expect(() => (socket.close as (code: number, reason: string) => void)(1000, 'x'.repeat(124))).toThrow('too long');
+    expect(socket.readyState).toBe(1);
+    await settle();
+    expect(heard).toEqual([]);
     far.close();
   });
 

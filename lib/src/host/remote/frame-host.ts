@@ -51,25 +51,33 @@ export interface FrameHostProxy {
 
 /** How long a page's answer stands: a directory is collected on every pane change. */
 const LOCAL_ANSWER_TTL_MS = 30_000;
-/** A slow name must not hold up the listing; it is left out until it answers. */
+/**
+ * A slow name must not hold up the listing. It stands on its last answer, for a
+ * page a slow lookup must not make look closed; a new name is left out until it
+ * answers.
+ */
 const LOCAL_ANSWER_BUDGET_MS = 1_000;
 
 export function createBurrowFrameHost(proxy: FrameHostProxy): BurrowFrameHost {
-  const answers = new Map<string, { at: number; local: Promise<boolean> }>();
+  const answers = new Map<string, { at: number; local: Promise<boolean>; known: boolean }>();
   return {
     canOpen(url) {
       const now = Date.now();
-      for (const [key, answer] of answers) if (now - answer.at > LOCAL_ANSWER_TTL_MS) answers.delete(key);
       // By origin, which is all it depends on: a page's query is no new lookup.
       const key = normalizeOrigin(url) ?? url;
-      let answer = answers.get(key);
-      if (!answer) {
-        answer = { at: now, local: proxy.isLocal(url).catch(() => false) };
-        answers.set(key, answer);
+      const last = answers.get(key);
+      let answer = last;
+      if (!answer || now - answer.at > LOCAL_ANSWER_TTL_MS) {
+        const local = proxy.isLocal(url).catch(() => false);
+        const fresh = { at: now, local, known: last?.known ?? false };
+        void local.then((value) => { fresh.known = value; });
+        answers.set(key, fresh);
+        answer = fresh;
       }
+      const { local, known } = answer;
       return Promise.race([
-        answer.local,
-        new Promise<boolean>((resolve) => { setTimeout(resolve, LOCAL_ANSWER_BUDGET_MS, false).unref(); }),
+        local,
+        new Promise<boolean>((resolve) => { setTimeout(resolve, LOCAL_ANSWER_BUDGET_MS, known).unref(); }),
       ]);
     },
     async open(url, { frameOrigin, embedderOrigins, lease: sessionLease }) {

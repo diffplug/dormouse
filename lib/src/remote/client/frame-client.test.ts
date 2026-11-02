@@ -13,6 +13,7 @@ import {
   FRAME_CHUNK_BYTES,
   FRAME_FLOW_WINDOW_BYTES,
   FRAME_METHODS,
+  MAX_HTTP_EXCHANGES_PER_SESSION,
   fromBase64Url,
   type RemoteEventMsg,
   type RemoteResponse,
@@ -311,6 +312,25 @@ describe('what a Client sends', () => {
       await settle();
     }
     expect(delivered).toBe(size * 10);
+  });
+
+  it('sends nothing for a request abandoned while it waited its turn', async () => {
+    const { calls, frames } = heldSession();
+    const frame = await frames.open(OPEN);
+    const first = frame.request({ method: 'GET', path: '/0', headers: [] });
+    for (let i = 1; i < MAX_HTTP_EXCHANGES_PER_SESSION; i += 1) void frame.request({ method: 'GET', path: `/${i}`, headers: [] });
+    await settle();
+    expect(calls).toHaveLength(MAX_HTTP_EXCHANGES_PER_SESSION);
+    const abandoned = new AbortController();
+    const waiting = frame.request({ method: 'POST', path: '/save', headers: [], signal: abandoned.signal });
+    const refused = expect(waiting).rejects.toThrow('abandoned');
+    abandoned.abort();
+    calls.shift()!.answer({ status: 200, statusText: 'OK', headers: [] });
+    void (await first).body.cancel();
+    await settle();
+    calls.find((call) => call.method === FRAME_METHODS.httpCancel)!.answer({});
+    await refused;
+    expect(calls.some((call) => call.params.path === '/save')).toBe(false);
   });
 
   it('sends a socket\'s close behind what was sent before it', async () => {

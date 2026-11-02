@@ -313,6 +313,8 @@ export function tunnelSocketShim(): string {
       p.postMessage({kind:'send',data:m,binary:b},l?[]:[m]);
     };
     t.close=function(code,reason){
+      if(code!==undefined&&code!==1000&&(code<3000||code>4999))throw new DOMException('Invalid close code.','InvalidAccessError');
+      if(reason!==undefined&&new TextEncoder().encode(reason).length>123)throw new DOMException('Close reason too long.','SyntaxError');
       if(t.readyState>1)return;
       t.readyState=2;end(code,reason);
     };
@@ -340,8 +342,12 @@ export function instrumentHtml(body: string, embedderOrigin: string, preserveCsp
   return page.slice(0, at) + shimTag + page.slice(at);
 }
 
-/** One thing that may stand ahead of a page's first script, comments and whitespace before it. */
-const PROLOGUE_TOKEN = new RegExp(String.raw`\s*(<!--[\s\S]*?-->|<!doctype[^>]*>|<(?:html|head|meta|link|base)${ATTRIBUTES}>|<(title|style)${ATTRIBUTES}>[\s\S]*?</\2\s*>)`, 'giy');
+/**
+ * One thing that may stand in a page's first kilobyte, comments and whitespace
+ * before it. A script only passes for a charset behind it, which the shim must
+ * not push out of that kilobyte.
+ */
+const PROLOGUE_TOKEN = new RegExp(String.raw`\s*(<!--[\s\S]*?-->|<!doctype[^>]*>|<(?:html|head|meta|link|base)${ATTRIBUTES}>|<(title|style|script)${ATTRIBUTES}>[\s\S]*?</\2\s*>)`, 'giy');
 /** Of those, what a script ahead of it would break. */
 const MUST_PRECEDE_SCRIPT = /^(?:<!doctype|<html|<head|<meta\b[\s\S]*\bcharset\b)/i;
 

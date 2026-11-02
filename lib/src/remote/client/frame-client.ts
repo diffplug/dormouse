@@ -57,6 +57,8 @@ export interface FrameRequestInit {
   /** `Request.destination`. */
   destination?: string;
   body?: Uint8Array;
+  /** Aborted while it waits for a slot, it never goes out. */
+  signal?: AbortSignal;
 }
 
 export interface FrameResponse extends HttpResponseHead {
@@ -234,9 +236,9 @@ class ClientFrame implements OpenFrame {
   async request(init: FrameRequestInit): Promise<FrameResponse> {
     if (this.#ended) throw new Error('the frame is closed');
     await this.#slots.acquire();
-    if (this.#ended) {
+    if (this.#ended || init.signal?.aborted) {
       this.#slots.release();
-      throw new Error('the frame is closed');
+      throw new Error(this.#ended ? 'the frame is closed' : 'the request was abandoned');
     }
     const id = globalThis.crypto.randomUUID();
     const session = this.#session;

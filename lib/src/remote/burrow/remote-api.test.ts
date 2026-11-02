@@ -397,6 +397,26 @@ describe('RemoteApiSession frames', () => {
       expect(closed).toEqual(['surface:1']);
     });
 
+    it('logs a close that finishes after the Client went', async () => {
+      const provider = new FakeProvider();
+      const closed: string[] = [];
+      let finish: (result: SurfaceCloseResult) => void = () => {};
+      provider.closeSurface.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+      const sent: SentPayload[] = [];
+      const session = new RemoteApiSession({
+        burrowId: 'burrow-1', send: (payload) => void sent.push(payload), provider, holder: HOLDER, frames, onClose: (id) => void closed.push(id),
+      } as never);
+      hello(session);
+      close(session, { surfaceId: 'surface:1' });
+      await flush();
+      session.dispose();
+      const before = sent.length;
+      finish({ outcome: 'closed' });
+      await flush();
+      expect(closed).toEqual(['surface:1']);
+      expect(sent).toHaveLength(before);
+    });
+
     it('refuses malformed params before anything closes', async () => {
       const provider = new FakeProvider();
       const { session, sent } = framesSession(provider);

@@ -51,7 +51,7 @@
  */
 import { lookup as dnsLookup } from 'dns/promises';
 import * as http from 'http';
-import type { Readable } from 'stream';
+import type { Readable, Transform } from 'stream';
 import * as zlib from 'zlib';
 import * as net from 'net';
 import { networkInterfaces } from 'os';
@@ -512,8 +512,13 @@ function handleRequest(grant: Grant, req: http.IncomingMessage, res: http.Server
     // be corrupted, not instrumented. A UTF-16 BOM is caught in streamHtml. A
     // tunneled grant decodes every body: its pages need their socket shim to work
     // at all, and what its Client synthesizes is never decoded.
-    const decoder = grant.tunneled ? decoderFor(encoding) : null;
-    if (decoder) upstreamRes.on('error', (error) => decoder.destroy(error)).pipe(decoder);
+    const decoder = grant.tunneled ? decodedBody(upstreamRes, encoding) : null;
+    if (decoder === UNDECODABLE) {
+      upstreamRes.destroy();
+      res.writeHead(502, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
+      res.end(`This page is compressed as ${encoding}, which Dormouse cannot decode here.`);
+      return;
+    }
     const body = decoder ?? upstreamRes;
     if (!/text\/html/i.test(contentType) || (encoding !== 'identity' && !decoder)
       || declaresUtf16(contentType) || embedder === undefined) {
@@ -574,19 +579,45 @@ function dropEncodedLength(headers: http.OutgoingHttpHeaders): void {
   delete headers['content-length'];
 }
 
-/** What undoes a response's `Content-Encoding`, or `null` for one left as it is. */
-function decoderFor(encoding: string): zlib.Gunzip | zlib.Inflate | zlib.BrotliDecompress | null {
-  switch (encoding) {
+const UNDECODABLE = Symbol('undecodable');
+
+/**
+ * One coding's decoder, or `null` for one this build cannot undo. Each tolerates
+ * an end with no data: HEAD, 204, 304, and an empty 200 carry the header too, and
+ * a body truly cut short fails on its connection.
+ */
+function codingDecoder(coding: string): Transform | null {
+  switch (coding) {
     case 'gzip':
     case 'x-gzip':
-      return zlib.createGunzip();
+      return zlib.createGunzip({ finishFlush: zlib.constants.Z_SYNC_FLUSH });
     case 'deflate':
-      return zlib.createInflate();
+      return zlib.createInflate({ finishFlush: zlib.constants.Z_SYNC_FLUSH });
     case 'br':
-      return zlib.createBrotliDecompress();
+      return zlib.createBrotliDecompress({ finishFlush: zlib.constants.BROTLI_OPERATION_FLUSH });
+    case 'zstd':
+      // Newer than some hosts' Node.
+      return zlib.createZstdDecompress?.({ finishFlush: zlib.constants.ZSTD_e_flush }) ?? null;
     default:
       return null;
   }
+}
+
+/**
+ * `response` decoded of `encoding`, last coding applied first; `null` when it was
+ * never encoded, or {@link UNDECODABLE}.
+ */
+function decodedBody(response: http.IncomingMessage, encoding: string): Readable | typeof UNDECODABLE | null {
+  const codings = encoding.split(',').map((coding) => coding.trim()).filter((coding) => coding && coding !== 'identity');
+  if (codings.length === 0) return null;
+  const decoders = codings.reverse().map(codingDecoder);
+  if (decoders.includes(null)) return UNDECODABLE;
+  let body: Readable = response;
+  for (const decoder of decoders as Transform[]) {
+    body.on('error', (error) => decoder.destroy(error));
+    body = body.pipe(decoder);
+  }
+  return body;
 }
 
 // Inject the shim into the <head> while streaming, without buffering the whole

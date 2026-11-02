@@ -1,7 +1,7 @@
 // @vitest-environment node
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { installFrameWorker, refusal, relayHeaders, responseFrom, type FrameWorkerScope } from './worker';
-import type { RelayRequest, ResponseControl, ResponseMessage } from './protocol';
+import { WORKER_ALIVE_MS, type RelayRequest, type ResponseControl, type ResponseMessage } from './protocol';
 
 const ORIGIN = 'https://frame.example';
 
@@ -52,6 +52,50 @@ function answering() {
 }
 
 describe('responseFrom', () => {
+  const realTick = () => new Promise<void>((resolve) => { setImmediate(resolve); });
+  const CLOCK = { toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] as const };
+
+  it('tells the Client window when it gives up on a head, and is finished', async () => {
+    vi.useFakeTimers({ toFake: [...CLOCK.toFake] });
+    try {
+      const { port1, port2 } = new MessageChannel();
+      const asked: unknown[] = [];
+      port2.onmessage = (event) => asked.push(event.data);
+      const finished = vi.fn();
+      const response = responseFrom(port1, finished);
+      vi.advanceTimersByTime(65_000);
+      expect((await response).status).toBe(504);
+      expect(finished).toHaveBeenCalledOnce();
+      await vi.waitFor(() => { expect(asked).toEqual([{ kind: 'cancel' }]); }, { interval: 1 });
+      port2.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('says it still runs while a response is open, and stops with it', async () => {
+    vi.useFakeTimers({ toFake: [...CLOCK.toFake] });
+    try {
+      const { port1, port2 } = new MessageChannel();
+      const asked: unknown[] = [];
+      port2.onmessage = (event) => asked.push(event.data);
+      const finished = vi.fn();
+      const pending = responseFrom(port1, finished);
+      port2.postMessage({ kind: 'head', status: 200, statusText: 'OK', headers: [] });
+      const { body } = await pending;
+      vi.advanceTimersByTime(WORKER_ALIVE_MS);
+      await realTick();
+      expect(asked.filter((control) => (control as { kind: string }).kind === 'alive')).toHaveLength(1);
+      expect(finished).not.toHaveBeenCalled();
+      await body!.cancel();
+      expect(finished).toHaveBeenCalledOnce();
+      expect(vi.getTimerCount()).toBe(0);
+      port2.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('pulls one chunk per read, and ends', async () => {
     const t = answering();
     t.send({ kind: 'head', status: 201, statusText: 'Made', headers: [['x-a', '1'], ['x-a', '2'], ['bad name', 'dropped']] });

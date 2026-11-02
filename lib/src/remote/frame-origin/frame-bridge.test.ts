@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { FrameRequestInit, FrameResponse, FrameSocketHandlers, OpenFrame } from '../client/frame-client';
 import { serveFrame } from './frame-bridge';
+import { WORKER_SILENCE_LIMIT_MS } from './protocol';
 import type { RelayMessage, ResponseMessage, SocketEvent } from './protocol';
 
 const channels: MessagePort[] = [];
@@ -12,6 +13,9 @@ afterEach(() => {
 function fakeFrame(overrides: Partial<OpenFrame>): OpenFrame {
   return { id: 'f', path: '/', url: 'http://x/', close() {}, ...overrides } as OpenFrame;
 }
+
+/** Past the fake clock, for a message crossing a real port. */
+const realTick = () => new Promise<void>((resolve) => { setImmediate(resolve); });
 
 function bridge(frame: OpenFrame) {
   const { port1, port2 } = new MessageChannel();
@@ -125,6 +129,50 @@ describe('serveFrame', () => {
     port.postMessage({ kind: 'close' });
     await expect.poll(() => order).toEqual(['send later', 'close']);
     vi.restoreAllMocks();
+  });
+
+  it('abandons a request the worker gave up on before its head', async () => {
+    let signal: AbortSignal | undefined;
+    let answer: (response: FrameResponse) => void = () => {};
+    const frame = fakeFrame({
+      request: (init: FrameRequestInit) => {
+        signal = init.signal;
+        return new Promise<FrameResponse>((resolve) => { answer = resolve; });
+      },
+    });
+    const { port } = bridge(frame).send({ kind: 'request', method: 'POST', path: '/save', headers: [], destination: '' });
+    await expect.poll(() => signal).toBeDefined();
+    expect(signal!.aborted).toBe(false);
+    port.postMessage({ kind: 'cancel' });
+    await expect.poll(() => signal!.aborted).toBe(true);
+    const cancelled = vi.fn();
+    answer({ status: 200, statusText: 'OK', headers: [], body: new ReadableStream({ cancel: cancelled }) });
+    await expect.poll(() => cancelled.mock.calls.length).toBe(1);
+  });
+
+  it('ends a response whose worker stopped saying it runs', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const cancelled = vi.fn();
+      const frame = fakeFrame({
+        request: async () => ({ status: 200, statusText: 'OK', headers: [], body: new ReadableStream({ cancel: cancelled }) }),
+      });
+      const { port, next } = bridge(frame).send({ kind: 'request', method: 'GET', path: '/events', headers: [], destination: '' });
+      await next();
+      await realTick();
+      vi.advanceTimersByTime(WORKER_SILENCE_LIMIT_MS - 1_000);
+      port.postMessage({ kind: 'alive' });
+      await realTick();
+      await realTick();
+      vi.advanceTimersByTime(WORKER_SILENCE_LIMIT_MS - 1_000);
+      await realTick();
+      expect(cancelled).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(2_000);
+      await realTick();
+      expect(cancelled).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('ignores what is not a relay message, since a framed page can write here', async () => {

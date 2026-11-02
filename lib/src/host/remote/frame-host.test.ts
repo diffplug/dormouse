@@ -4,9 +4,9 @@
  * comes back is told in the frame origin's terms.
  */
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as http from 'node:http';
-import { gzipSync } from 'node:zlib';
+import { brotliCompressSync, gzipSync, zstdCompressSync } from 'node:zlib';
 import { WebSocketServer } from 'ws';
 import type { HttpHeader } from 'remote-lib-common';
 import type { FrameHttpInit, FrameUpstream } from '../../remote/burrow/burrow-frame-host';
@@ -132,6 +132,64 @@ describe('createBurrowFrameHost', () => {
     expect(header(response.headers, 'content-encoding')).toBeUndefined();
     expect(response.body).toContain(tunnelSocketShim());
     expect(response.body).toContain('<body>hi</body>');
+  });
+
+  it.each([
+    ['gzip', (text: string) => gzipSync(text)],
+    ['gzip, br', (text: string) => brotliCompressSync(gzipSync(text))],
+    ['zstd', (text: string) => zstdCompressSync(text)],
+  ])('hands on a body coded %s as plain', async (coding, encode) => {
+    const { port } = await listen((_req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json', 'content-encoding': coding });
+      res.end(encode('{"a":1}'));
+    });
+    const upstream = await open(`http://localhost:${port}/`);
+    const response = await fetchThrough(upstream, { method: 'GET', path: '/', headers: [], destination: '' });
+    expect(response.body).toBe('{"a":1}');
+    expect(header(response.headers, 'content-encoding')).toBeUndefined();
+  });
+
+  it('answers a coded response with no body as its own status', async () => {
+    const { port } = await listen((req, res) => {
+      res.writeHead(req.url === '/gone' ? 204 : 200, { 'content-encoding': 'gzip' });
+      res.end();
+    });
+    const upstream = await open(`http://localhost:${port}/`);
+    expect((await fetchThrough(upstream, { method: 'GET', path: '/gone', headers: [], destination: '' })).status).toBe(204);
+    expect((await fetchThrough(upstream, { method: 'GET', path: '/empty', headers: [], destination: '' })).status).toBe(200);
+    expect((await fetchThrough(upstream, { method: 'HEAD', path: '/head', headers: [], destination: '' })).status).toBe(200);
+  });
+
+  it('refuses a coding it cannot undo, rather than handing on the bytes as plain', async () => {
+    const { port } = await listen((_req, res) => {
+      res.writeHead(200, { 'content-type': 'text/plain', 'content-encoding': 'compress' });
+      res.end('coded');
+    });
+    const upstream = await open(`http://localhost:${port}/`);
+    const response = await fetchThrough(upstream, { method: 'GET', path: '/', headers: [], destination: '' });
+    expect(response.status).toBe(502);
+    expect(response.body).not.toContain('coded\n');
+  });
+
+  it('keeps a listed page listed through a slow lookup, and leaves a new one out', async () => {
+    vi.useFakeTimers();
+    try {
+      const lookups: Array<(local: boolean) => void> = [];
+      const host = createBurrowFrameHost({ ...proxy, isLocal: () => new Promise((resolve) => { lookups.push(resolve); }) });
+      const fresh = host.canOpen('http://name.local/');
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(await fresh).toBe(false);
+      lookups[0]!(true);
+      await vi.advanceTimersByTimeAsync(0);
+      await expect(host.canOpen('http://name.local/')).resolves.toBe(true);
+      await vi.advanceTimersByTimeAsync(31_000);
+      const slow = host.canOpen('http://name.local/');
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(await slow).toBe(true);
+      expect(lookups).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('frames only a page on this machine, and lists accordingly', async () => {
