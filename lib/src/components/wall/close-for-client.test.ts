@@ -29,6 +29,18 @@ describe('closeForClient', () => {
     expect(d.close).not.toHaveBeenCalled();
   });
 
+  it('consents to losing only the edits it was asked about', async () => {
+    const clean = deps();
+    await closeForClient({ unsaved: 'discard' }, clean);
+    expect(clean.close).toHaveBeenCalledExactlyOnceWith(false);
+    const saved = deps({ isDirty: () => true });
+    await closeForClient({ unsaved: 'save' }, saved);
+    expect(saved.close).toHaveBeenCalledExactlyOnceWith(false);
+    const discarded = deps({ isDirty: () => true });
+    await closeForClient({ unsaved: 'discard' }, discarded);
+    expect(discarded.close).toHaveBeenCalledExactlyOnceWith(true);
+  });
+
   it('asks for the confirmation until it has it', async () => {
     const d = deps({ needsConfirm: () => true });
     expect(await closeForClient({}, d)).toEqual({ outcome: 'confirm' });

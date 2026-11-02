@@ -17,6 +17,9 @@ import { sessionForKey } from 'dor-lib-common/browser-providers';
 import { _resetRunHoldsForTesting, holdForHostInterrupt, releaseRunHold } from '../lib/tool-run-hold';
 import { Wall } from './Wall';
 import * as helpers from '../lib/helper-terminal';
+import { answerClientClose } from '../remote/burrow/client-close';
+import * as browserSurface from './wall/browser-surface';
+import { TERMINAL_CLOSE_REFUSAL } from './wall/close-for-client';
 import * as agentBrowserScreen from './wall/agent-browser-screen';
 import { getAgentBrowserScreenController } from './wall/agent-browser-screen';
 import { disposeAllAgentBrowserSurfaceControllers, getAgentBrowserSurfaceController } from './wall/agent-browser-surface-controller';
@@ -143,6 +146,62 @@ describe('Wall on the Lath engine', () => {
     // A command close refuses a dirty Tool rather than raising the prompt.
     expect(await dispatchKill('surface:tool-door')).toEqual({ ok: false, error: UNSAVED_TOOL_REFUSAL });
     expect(getEditorClosePrompt()).toBeNull();
+  });
+
+  describe('a close a remote Client asked for', () => {
+    const TOOL_ID = 'surface:tool-door';
+    /** A Tool whose helper's second inspection, the close's own, waits to be told. */
+    async function toolInLastWait(consent: Parameters<typeof answerClientClose>[0]) {
+      await act(async () => root.render(<Wall initialPaneIds={['surface:a']} initialDoors={[{
+        id: TOOL_ID, title: 'storybook', component: 'tool', tabComponent: 'tool',
+        params: { surfaceType: 'tool', command: 'pnpm storybook', cwd: '/repo', toolName: 'storybook', toolRender: 'iframe', toolPort: 'announce' },
+      }]} />));
+      await flush();
+      const helper: helpers.HelperTerminal = { id: 'surface:helper', parentId: TOOL_ID, command: '', status: 'off' };
+      vi.spyOn(helpers, 'getHelper').mockImplementation((id) => (id === TOOL_ID ? helper : undefined));
+      let inspected!: (busy: boolean) => void;
+      vi.spyOn(helpers, 'helperHasWork')
+        .mockResolvedValueOnce(false)
+        .mockImplementationOnce(() => new Promise((resolve) => { inspected = resolve; }));
+      const answer = answerClientClose(consent);
+      await flush();
+      return { answer, release: () => act(async () => { inspected(false); }) };
+    }
+    const stillThere = () => getWallHandle(DEFAULT_WORKSPACE_ID)!.surfaceIds().includes(TOOL_ID);
+
+    it('refuses a terminal outright, whatever consent came', async () => {
+      await act(async () => root.render(<Wall initialPaneIds={['surface:a']} />));
+      await flush();
+      expect(await answerClientClose({ surfaceId: 'surface:a', confirmed: true, unsaved: 'discard' })).toEqual([{ outcome: 'refused', message: TERMINAL_CLOSE_REFUSAL }]);
+      expect(getWallHandle(DEFAULT_WORKSPACE_ID)!.surfaceIds()).toContain('surface:a');
+    });
+
+    it('keeps edits made after it read the Tool clean', async () => {
+      const { answer, release } = await toolInLastWait({ surfaceId: TOOL_ID, confirmed: true });
+      await act(async () => { recordToolDirty(TOOL_ID, true); });
+      await release();
+      expect(await answer).toEqual([{ outcome: 'refused', message: UNSAVED_TOOL_REFUSAL }]);
+      expect(stillThere()).toBe(true);
+    });
+
+    it('closes through a discard, which answered those edits', async () => {
+      await act(async () => { recordToolDirty(TOOL_ID, true); });
+      const { answer, release } = await toolInLastWait({ surfaceId: TOOL_ID, confirmed: true, unsaved: 'discard' });
+      await release();
+      expect(await answer).toEqual([{ outcome: 'closed' }]);
+      expect(stillThere()).toBe(false);
+    });
+
+    it('refuses a Tool that became a terminal during the wait', async () => {
+      const { answer, release } = await toolInLastWait({ surfaceId: TOOL_ID, confirmed: true });
+      const original = browserSurface.surfaceKindFromParams;
+      vi.spyOn(browserSurface, 'surfaceKindFromParams').mockImplementation((params) => (
+        (params as { toolName?: string } | undefined)?.toolName ? 'terminal' : original(params)
+      ));
+      await release();
+      expect(await answer).toEqual([{ outcome: 'refused', message: TERMINAL_CLOSE_REFUSAL }]);
+      expect(stillThere()).toBe(true);
+    });
   });
 
   /** The alarm treatment is the leaf overlay, so it must reach a ringing terminal

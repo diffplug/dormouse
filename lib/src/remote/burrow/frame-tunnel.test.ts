@@ -229,6 +229,22 @@ describe('frame.open', () => {
     expect(t.watchers.size).toBe(0);
   });
 
+  it('keeps a frame a listing wrongly says is gone, asking the owner first', async () => {
+    const t = setup();
+    const id = await t.open();
+    // An older snapshot, and one a timeout left empty.
+    t.tunnel.revalidate([{ surfaceId: 'surface:1', browser: { render: 'iframe', url: 'http://localhost:9999/' } } as never]);
+    t.tunnel.revalidate([]);
+    await flush();
+    expect(t.host.upstreams[0]!.closed).toBe(false);
+    expect(t.events(id, FRAME_EVENTS.frameClosed)).toEqual([]);
+    t.pages.delete('surface:1');
+    t.tunnel.revalidate([]);
+    await flush();
+    expect(t.host.upstreams[0]!.closed).toBe(true);
+    expect(t.events(id, FRAME_EVENTS.frameClosed)).toHaveLength(1);
+  });
+
   it('closes a frame whose page went while its grant was being minted', async () => {
     vi.useFakeTimers();
     const t = setup();

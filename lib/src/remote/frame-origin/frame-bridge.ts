@@ -86,10 +86,18 @@ async function serveSocket(frame: OpenFrame, request: RelaySocket, reply: Messag
     reply.close();
     return;
   }
+  // In order, or what follows a Blob overtakes it while it is read.
+  let handled = Promise.resolve();
   reply.onmessage = (event: MessageEvent<SocketCommand>) => {
     const command = event.data;
-    if (command.kind === 'send') void socket.send(new Uint8Array(command.data), command.binary).catch(() => {});
-    else if (command.kind === 'close') socket.close(command.code, command.reason);
+    handled = handled.then(async () => {
+      if (command.kind === 'send') {
+        const data = command.data instanceof Blob ? await command.data.arrayBuffer() : command.data;
+        void socket.send(new Uint8Array(data), command.binary).catch(() => {});
+      } else if (command.kind === 'close') {
+        socket.close(command.code, command.reason);
+      }
+    }).catch(() => {});
   };
   send({ kind: 'open', protocol: socket.protocol, extensions: socket.extensions });
 }

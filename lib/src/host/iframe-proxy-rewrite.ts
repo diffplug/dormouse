@@ -270,8 +270,10 @@ export const HEAD_MARKER = new RegExp(`${HEAD_CLOSE.source}|${BODY_OPEN.source}`
  * service worker sees a WebSocket, so a same-origin one goes as a message to the
  * worker controlling this page, which relays it (`lib/src/remote/frame-origin/`).
  * A socket on any other origin, or a page no worker controls, stays native. A
- * close follows the sends before it, and a page going away closes what it holds:
- * nothing else tells the session, whose sockets are few.
+ * send is taken at the call, as a native one is, and a Blob goes as it is for the
+ * far end to read, so everything is on the port in order even as the page goes.
+ * A page going away closes what it holds: nothing else tells the session, whose
+ * sockets are few.
  */
 export function tunnelSocketShim(): string {
   return `(function(){
@@ -286,7 +288,7 @@ export function tunnelSocketShim(): string {
     t.onopen=t.onmessage=t.onclose=t.onerror=null;
     t.addEventListener=e.addEventListener.bind(e);t.removeEventListener=e.removeEventListener.bind(e);t.dispatchEvent=e.dispatchEvent.bind(e);
     function fire(ev){e.dispatchEvent(ev);var h=t['on'+ev.type];if(typeof h==='function')h.call(t,ev);}
-    var c=new MessageChannel(),p=c.port1,q=Promise.resolve();
+    var c=new MessageChannel(),p=c.port1;
     function end(code,reason){if(L.delete(end))p.postMessage({kind:'close',code:code,reason:reason});}
     L.add(end);
     p.onmessage=function(m){
@@ -304,12 +306,13 @@ export function tunnelSocketShim(): string {
     t.send=function(data){
       if(t.readyState===0)throw new DOMException('Still in CONNECTING state.','InvalidStateError');
       if(t.readyState!==1)return;
-      var b=typeof data!=='string';
-      q=q.then(function(){return typeof data==='string'?new TextEncoder().encode(data).buffer:data instanceof Blob?data.arrayBuffer():ArrayBuffer.isView(data)?data.buffer.slice(data.byteOffset,data.byteOffset+data.byteLength):data.slice(0);}).then(function(buf){p.postMessage({kind:'send',data:buf,binary:b},[buf]);}).catch(function(){});
+      var v=ArrayBuffer.isView(data),l=data instanceof Blob,b=v||l||data instanceof ArrayBuffer;
+      var m=l?data:v?data.buffer.slice(data.byteOffset,data.byteOffset+data.byteLength):b?data.slice(0):new TextEncoder().encode(String(data)).buffer;
+      p.postMessage({kind:'send',data:m,binary:b},l?[]:[m]);
     };
     t.close=function(code,reason){
       if(t.readyState>1)return;
-      t.readyState=2;q=q.then(function(){end(code,reason);});
+      t.readyState=2;end(code,reason);
     };
     var list=protocols===undefined?[]:typeof protocols==='string'?[protocols]:Array.prototype.slice.call(protocols);
     S.controller.postMessage({kind:'socket',path:u.pathname+u.search,protocols:list},[c.port2]);
@@ -325,12 +328,22 @@ export function instrumentHtml(body: string, embedderOrigin: string, preserveCsp
     /<meta[^>]+http-equiv=["']?content-security-policy["']?[^>]*>/gi,
     '',
   );
-  const shimTag = `<script>${iframeShim(embedderOrigin)}${tunneled ? tunnelSocketShim() : ''}</script>`;
-  if (HEAD_CLOSE.test(html)) return html.replace(HEAD_CLOSE, (tag) => shimTag + tag);
-  if (BODY_OPEN.test(html)) return html.replace(BODY_OPEN, (tag) => tag + shimTag);
-  // Both tags are optional in valid HTML. Never ahead of the doctype, which
-  // would switch the page to quirks mode, nor of a `<meta charset>`, which
-  // counts only within the first 1024 bytes — the same window searched here.
+  const shimTag = `<script>${iframeShim(embedderOrigin)}</script>`;
+  // Ahead of the page's own scripts, which may open a socket as they run.
+  const at = prologueEnd(html);
+  const page = tunneled ? `${html.slice(0, at)}<script>${tunnelSocketShim()}</script>${html.slice(at)}` : html;
+  if (HEAD_CLOSE.test(page)) return page.replace(HEAD_CLOSE, (tag) => shimTag + tag);
+  if (BODY_OPEN.test(page)) return page.replace(BODY_OPEN, (tag) => tag + shimTag);
+  // Both tags are optional in valid HTML.
+  return page.slice(0, at) + shimTag + page.slice(at);
+}
+
+/**
+ * The earliest a script may go. Never ahead of the doctype, which would switch
+ * the page to quirks mode, nor of a `<meta charset>`, which counts only within
+ * the first 1024 bytes — the same window searched here.
+ */
+function prologueEnd(html: string): number {
   const prologue = html.slice(0, 1024);
   // Nor ahead of a UTF-8 BOM (its latin1 spelling), which must stay first.
   let at = html.startsWith('\xEF\xBB\xBF') ? 3 : 0;
@@ -338,7 +351,7 @@ export function instrumentHtml(body: string, embedderOrigin: string, preserveCsp
     const match = tag.exec(prologue);
     if (match) at = Math.max(at, match.index + match[0].length);
   }
-  return html.slice(0, at) + shimTag + html.slice(at);
+  return at;
 }
 
 // 169.254.0.0/16 — IPv4 link-local, incl. the 169.254.169.254 cloud-metadata

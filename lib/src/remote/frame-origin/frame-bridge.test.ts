@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { FrameRequestInit, FrameResponse, FrameSocketHandlers, OpenFrame } from '../client/frame-client';
 import { serveFrame } from './frame-bridge';
 import type { RelayMessage, ResponseMessage, SocketEvent } from './protocol';
@@ -103,6 +103,28 @@ describe('serveFrame', () => {
     expect(sent).toEqual([['up', true]]);
     handlers.onClose(1000, 'done');
     expect(await next()).toEqual({ kind: 'closed', code: 1000, reason: 'done' });
+  });
+
+  it('reads a Blob in its place, ahead of the close behind it', async () => {
+    const order: string[] = [];
+    const frame = fakeFrame({
+      openSocket: async () => ({
+        protocol: '', extensions: '',
+        send: async (data: Uint8Array) => { order.push(`send ${new TextDecoder().decode(data)}`); },
+        close: () => { order.push('close'); },
+      }),
+    });
+    const read = Blob.prototype.arrayBuffer;
+    vi.spyOn(Blob.prototype, 'arrayBuffer').mockImplementation(async function slowly(this: Blob) {
+      await new Promise((resolve) => { setTimeout(resolve, 20); });
+      return read.call(this);
+    });
+    const { port, next } = bridge(frame).send({ kind: 'socket', path: '/hmr', protocols: [] });
+    await next();
+    port.postMessage({ kind: 'send', data: new Blob(['later']), binary: true });
+    port.postMessage({ kind: 'close' });
+    await expect.poll(() => order).toEqual(['send later', 'close']);
+    vi.restoreAllMocks();
   });
 
   it('ignores what is not a relay message, since a framed page can write here', async () => {

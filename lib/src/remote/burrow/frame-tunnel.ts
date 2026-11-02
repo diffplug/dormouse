@@ -322,14 +322,20 @@ export class FrameTunnel {
 
   /**
    * A frame lives no longer than its surface's page: one whose surface is
-   * gone, no longer embeds a page, or shows another origin, closes.
+   * gone, no longer embeds a page, or shows another origin, closes. A listing
+   * only raises the question, being able to predate the frame or to have timed
+   * out empty: the surface's owner answers it.
    */
   revalidate(entries: readonly DirectoryEntry[]): void {
     const pages = new Map(entries.flatMap((entry) => (entry.browser ? [[entry.surfaceId, entry.browser.url]] : [])));
-    for (const frame of [...this.#frames.values()]) {
-      const url = pages.get(frame.surfaceId);
-      if (normalizeOrigin(url) !== frame.pageOrigin) this.#closeFrame(frame.id, 'surface-gone');
+    for (const frame of this.#frames.values()) {
+      if (normalizeOrigin(pages.get(frame.surfaceId)) !== frame.pageOrigin) void this.#recheck(frame);
     }
+  }
+
+  async #recheck(frame: Frame): Promise<void> {
+    const url = await this.#options.provider.resolveBrowser(frame.surfaceId).catch(() => null);
+    if (normalizeOrigin(url) !== frame.pageOrigin) this.#closeFrame(frame.id, 'surface-gone');
   }
 
   // --- HTTP ---

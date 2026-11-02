@@ -43,7 +43,7 @@ export type SocketEvent =
 
 /** A socket's messages, page to Client window. */
 export type SocketCommand =
-  | { kind: 'send'; data: ArrayBuffer; binary: boolean }
+  | { kind: 'send'; data: ArrayBuffer | Blob; binary: boolean }
   | { kind: 'close'; code?: number; reason?: string };
 
 /** Parent to bootstrap: the port every relay message goes through. */

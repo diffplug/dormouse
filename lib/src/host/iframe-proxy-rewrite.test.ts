@@ -341,6 +341,23 @@ describe('errorPageHtml', () => {
   });
 });
 
+describe('instrumentHtml on a tunneled grant', () => {
+  const socketShimAt = (html: string) => html.indexOf(tunnelSocketShim());
+
+  it('shims the socket ahead of the page\'s own head scripts', () => {
+    const out = instrumentHtml('<!doctype html><html><head><script>new WebSocket("/hmr")</script></head><body>', APP, false, true);
+    expect(socketShimAt(out)).toBeGreaterThan(-1);
+    expect(socketShimAt(out)).toBeLessThan(out.indexOf('new WebSocket("/hmr")'));
+    expect(out.startsWith('<!doctype html><html><head><script>')).toBe(true);
+  });
+
+  it('keeps the doctype and charset first, and shims nothing on a local pane', () => {
+    const out = instrumentHtml('<!doctype html><head><meta charset="utf-8"><script>a</script>', APP, false, true);
+    expect(socketShimAt(out)).toBeGreaterThan(out.indexOf('<meta charset="utf-8">'));
+    expect(socketShimAt(instrumentHtml('<head></head>', APP))).toBe(-1);
+  });
+});
+
 describe('tunnelSocketShim', () => {
   /** The shim in a page of its own: every socket's far port, and what `pagehide` would do. */
   function page() {
@@ -391,6 +408,32 @@ describe('tunnelSocketShim', () => {
     expect(second.heard).toEqual(['close']);
     first.far.close();
     second.far.close();
+  });
+
+  it('takes a send\'s bytes at the call, as a native socket does', async () => {
+    const { socket, far } = page().open();
+    const sent: ArrayBuffer[] = [];
+    far.onmessage = (event: MessageEvent<{ data: ArrayBuffer }>) => sent.push(event.data.data);
+    far.postMessage({ kind: 'open', protocol: '', extensions: '' });
+    await settle();
+    const bytes = new Uint8Array([1, 2, 3]);
+    socket.send(bytes as never);
+    bytes.fill(9);
+    await settle();
+    expect([...new Uint8Array(sent[0]!)]).toEqual([1, 2, 3]);
+    far.close();
+  });
+
+  it('keeps a Blob ahead of the close that follows it, even as the page goes', async () => {
+    const shim = page();
+    const { socket, far, heard } = shim.open();
+    far.postMessage({ kind: 'open', protocol: '', extensions: '' });
+    await settle();
+    socket.send(new Blob(['later']) as never);
+    shim.pagehide();
+    await settle();
+    expect(heard).toEqual(['send', 'close']);
+    far.close();
   });
 
   it('stays closed when the open arrives after a close', async () => {

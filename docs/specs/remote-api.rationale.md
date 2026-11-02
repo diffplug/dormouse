@@ -92,6 +92,8 @@ In September 2026 the former `SurfaceHandle.release` was a no-op in `createAskSu
 
 **Why `frame.open` names the page origin.** The Client derives its frame origin from its directory snapshot while the Burrow resolves the current page, so a surface that moved from A to B meanwhile would serve B at A's origin, with A's storage. A synthetic `Clear-Site-Data` response does not clear it (Codex's review, Chromium, 2026-11).
 
+**Why a listing only raises the question.** A collect started before a frame opens can answer after it, naming the old page, which closed a frame showing the right one (Codex's review, reproduced on `FrameTunnel`, 2026-11). A collect that times out empty closed every frame the same way.
+
 **Why uploads share a window.** Paced per exchange alone, ten parallel 1 MiB uploads put 5.2 MiB on the wire before any answer (Codex's review, 2026-11), past the direct sender's 4 MiB queue, whose overflow ends the session and its terminals with it.
 
 **Why never over the relay.** A page is far heavier than a terminal, so a relayed frame would load slowly enough to look broken, and would put every page's volume on the Relay. The Relay would learn no more than ciphertext, sizes, and timing, so this is a product and cost bound rather than a confidentiality one. A session makes one direct attempt, so a phone that gains a route later, by joining a VPN, reconnects to get one.

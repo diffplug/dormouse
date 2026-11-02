@@ -16,7 +16,7 @@ import { ToolEditorCloseModalHost } from './ToolEditorCloseModalHost';
 import { confirmToolEditorsClose, saveToolEditor, toolEditorLabel, UNSAVED_TOOL_REFUSAL } from '../lib/tool-editor';
 import type { SurfaceCloseResult } from 'remote-lib-common';
 import { registerClientCloser, type ClientCloseConsent } from '../remote/burrow/client-close';
-import { closeForClient } from './wall/close-for-client';
+import { closeForClient, TERMINAL_CLOSE_REFUSAL } from './wall/close-for-client';
 import { isToolDirty } from './ToolDirtyIndicator';
 import { AgentBrowserScreenModalHost } from './AgentBrowserScreenModalHost';
 // Remote-host code (relay/WebSocket/enrollment + the window.dormouseBurrow
@@ -726,7 +726,12 @@ export function Wall({
    * gesture passes `ask`, a Workspace close the ids it already asked about, and
    * a command is refused.
    */
-  const closeSurface = useCallback(async (id: string, editors: 'ask' | readonly string[] = []): Promise<string | null> => {
+  const closeSurface = useCallback(async (
+    id: string,
+    editors: 'ask' | readonly string[] = [],
+    /** Why it must not close after all, read after the last wait. */
+    stillRefused?: () => string | null,
+  ): Promise<string | null> => {
     const transferring = transferRefusal(id);
     if (transferring) return transferring;
     if (pendingSurfaceCloses.current.has(id)) return 'This terminal is already closing';
@@ -738,6 +743,8 @@ export function Wall({
         && !(editors === 'ask' ? await confirmToolEditorsClose([id]) : editors.includes(id))) return UNSAVED_TOOL_REFUSAL;
       const transferring = transferRefusal(id);
       if (transferring) return transferring;
+      const late = stillRefused?.();
+      if (late) return late;
       // Decided now, from the state the kill leaves behind; a Workspace close
       // leaves one record for all its members instead.
       if (!closingWorkspaceRef.current && closeKindOf(id) === 'reopenable') pushSurfaceRecordRef.current(id);
@@ -766,7 +773,10 @@ export function Wall({
       isDirty: () => isToolDirty(id, lath.getMeta(id)?.params),
       label: () => toolEditorLabel(id),
       save: () => saveToolEditor(id),
-      close: () => closeSurface(id, [id]),
+      // A Tool's command can end during the helper check, leaving a terminal here.
+      close: (discard) => closeSurface(id, discard ? [id] : [], () => (
+        surfaceKindFromParams(lath.getMeta(id)?.params) === 'terminal' ? TERMINAL_CLOSE_REFUSAL : null
+      )),
     });
   }, [closeSurface, helperRefusal, lath, revealRefusal, transferRefusal]);
 
