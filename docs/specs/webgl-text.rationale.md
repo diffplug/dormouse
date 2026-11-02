@@ -14,7 +14,7 @@
 
 **Why `--dry-run` before accepting Renovate's version.** The newest coherent per-commit set is often an *older* core than Renovate proposed, because Renovate takes the latest of each package independently and the counters are not aligned.
 
-**Why a conflict-free merge is not a correct one.** Upstream regularly adds obligations to code the fork extended without anything textually conflicting, so the merge succeeds while the extension quietly stops honoring the new contract. FORK.md's `Merging upstream` carries the same warning.
+**Why a conflict-free merge is not a correct one.** Upstream regularly adds obligations to code the fork extended without anything textually conflicting, so the merge succeeds while the extension quietly stops honoring the new contract. FORK.md's `Merging upstream` carries the same warning. During the beta.336 update (2026-11), running the new upstream warm-up tests with SDF enabled caught `clearTexture` treating an empty first page as an empty atlas even when a later page held SDF glyphs; the fork now also checks its shape cache before skipping a clear.
 
 ## SDF glyph architecture
 
