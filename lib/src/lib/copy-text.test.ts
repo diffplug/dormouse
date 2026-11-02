@@ -3,6 +3,7 @@ import type { Terminal } from '@xterm/xterm';
 import {
   autoBreak,
   computeScopes,
+  multiClickSpan,
   nudge,
   render,
   terminalCopyBuffer,
@@ -360,6 +361,28 @@ describe('copy-text scopes', () => {
 
   it('gives a block slab no other scope', () => {
     expect(computeScopes(claude, span(2, 2, 4, 20, true))).toHaveLength(1);
+  });
+});
+
+describe('copy-text multiClickSpan', () => {
+  it('selects the token under a double click, across a soft wrap', () => {
+    const url = 'see https://github.com/diffplug/dormouse/pull/853/files ok';
+    const soft = lines([url.slice(0, 30), url.slice(30)], { cols: 30, wrapped: [1] });
+    expect(multiClickSpan(soft, { row: 1, col: 3 }, 2)).toEqual(span(0, 4, 1, 24));
+    expect(multiClickSpan(soft, { row: 0, col: 1 }, 2)).toEqual(span(0, 0, 0, 2));
+  });
+
+  it('selects a triple-clicked logical line from its first text cell to its last', () => {
+    const buf = lines(['  aaaa bbbb cccc dd', 'dd eeee', 'next'], { cols: 19, wrapped: [1] });
+    expect(multiClickSpan(buf, { row: 1, col: 5 }, 3)).toEqual(span(0, 2, 1, 6));
+    expect(multiClickSpan(buf, { row: 2, col: 0 }, 4)).toEqual(span(2, 0, 2, 3));
+  });
+
+  it('selects nothing from a blank cell or a blank line', () => {
+    const buf = lines(['one two', ''], { cols: 20 });
+    expect(multiClickSpan(buf, { row: 0, col: 3 }, 2)).toBeNull();
+    expect(multiClickSpan(buf, { row: 0, col: 12 }, 2)).toBeNull();
+    expect(multiClickSpan(buf, { row: 1, col: 0 }, 3)).toBeNull();
   });
 });
 
