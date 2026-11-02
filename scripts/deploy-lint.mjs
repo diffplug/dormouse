@@ -636,8 +636,8 @@ export const RULES = [
     // `[ "$serving" = "$x" ]` as a second spelling, looked free and was not:
     // that alternative is bound to nothing, so any of the sites above could be
     // rewritten into it — including the post-switch wait — and the count would
-    // still read 4. Only `=` is counted; the `!=` uses at `install-macos.sh`
-    // :675 and :1195 are post-failure diagnostics, reports rather than gates.
+    // still read 4. Only `=` is counted; the `!=` uses in `install-macos.sh`
+    // each run after a wait has already failed, so they are reports, not gates.
     rule: 'A 200 does not say who answered — health is paired with a release-identity check',
     patterns: {
       macOS: /\[ "\$\(listening_release "\$(?:LOOPBACK_)?PORT"\)" = "\$\w+" \]/,

@@ -2,9 +2,8 @@ import { decodeViewerFrame, type BrowserResult, type ViewerFrame, type ViewerSta
 import { type AgentBrowserTab, parseAgentBrowserTabs } from '../../lib/agent-browser-tab';
 import { messageOf } from '../../lib/errors';
 
-// Re-exported so existing importers keep resolving the tab type/parser from here.
+// Re-exported so the surface controller takes the tab type from here.
 export type { AgentBrowserTab };
-export { parseAgentBrowserTabs };
 
 /** How long the host may take to grant a viewer URL, and the socket to open
  *  on it, before the attempt counts as a close and is retried. */

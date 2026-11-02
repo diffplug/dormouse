@@ -1,5 +1,6 @@
 /**
  * The spec-markdown kit `scripts/spec-lint.mjs`, `scripts/prose-audit.mjs`,
+ * `scripts/security-audit-report.mjs`, `scripts/security-audit-codex.mjs`,
  * and `website/scripts/generate-docs.js` share: one word count, one fence
  * blanker, one list of source extensions, one anchor slug, one reading of
  * what the audit's domain prompts claim, and one reading of its rules.
