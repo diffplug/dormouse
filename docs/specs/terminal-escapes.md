@@ -101,13 +101,15 @@ Replay (`pty:replay`) is the raw stream requiring re-parse: **the webview runs a
 
 ## Supported CSI
 
+A Workspace transfer carries the modes a running app set: [transport.md](transport.md#transferring-a-workspace).
+
 | Sequence | Role | Disposition | Where |
 |---|---|---|---|
 | `CSI > q` | iTerm2 extended device-attributes query | Answered `DCS > \| iTerm2 <version> ST` at the PTY boundary and stripped, never forwarded to xterm.js. Both `ESC [ > q` and the C1 `U+009B > q` are recognized, **in ground text only** (rationale). | [transport.md](transport.md#iterm2-identity) |
 | `CSI ? ... h` (DECSET) / `CSI ? ... l` (DECRST) | Private-mode set/reset, including mouse tracking and bracketed paste | Observed without consuming; xterm.js still handles the sequence. | [mouse-and-clipboard.md](mouse-and-clipboard.md#61-state-matrix), §8.5 |
-| Kitty keyboard protocol | Disambiguated key-event reporting (CSI u with modifiers, e.g. Shift+Enter distinguishable from Enter) | Enabled; xterm.js handles the push/pop (`CSI > u` / `CSI < u`) and the modified key reports. A transfer carries the state: [transport.md](transport.md#transferring-a-workspace). | `xtermVtExtensions` in `lib/src/lib/xterm-options.ts` |
-| `CSI ? 9001 h/l` (win32-input-mode) | Faithful Win32 `INPUT_RECORD` key reporting for ConPTY apps reading via the Console API — Codex on Windows (rationale) | Advertised **only on Windows**; off for a pane while any kitty consumer is on its protocol stack, the two being mutually exclusive in xterm.js (rationale). A transfer carries the mode: [transport.md](transport.md#transferring-a-workspace). | `lib/src/lib/keyboard-protocol-arbiter.ts` |
-| `CSI ? 996 n` / `CSI ? 2031 h/l` | Color-scheme query; change reports on/off | Answered by the owner's xterm.js (`colorSchemeQuery`); its reply is a [terminal reply](transport.md#report-filtering-on-the-input-side). A transfer carries the mode: [transport.md](transport.md#transferring-a-workspace). | `xtermVtExtensions` in `lib/src/lib/xterm-options.ts` |
+| Kitty keyboard protocol | Disambiguated key-event reporting (CSI u with modifiers, e.g. Shift+Enter distinguishable from Enter) | Enabled; xterm.js handles the push/pop (`CSI > u` / `CSI < u`) and the modified key reports. | `xtermVtExtensions` in `lib/src/lib/xterm-options.ts` |
+| `CSI ? 9001 h/l` (win32-input-mode) | Faithful Win32 `INPUT_RECORD` key reporting for ConPTY apps reading via the Console API — Codex on Windows (rationale) | Advertised **only on Windows**; off for a pane while any kitty consumer is on its protocol stack, the two being mutually exclusive in xterm.js (rationale). | `lib/src/lib/keyboard-protocol-arbiter.ts` |
+| `CSI ? 996 n` / `CSI ? 2031 h/l` | Color-scheme query; change reports on/off | Answered by the owner's xterm.js (`colorSchemeQuery`); its reply is a [terminal reply](transport.md#report-filtering-on-the-input-side). | `xtermVtExtensions` in `lib/src/lib/xterm-options.ts` |
 | `CSI c` | Primary device-attributes query | Answered by the owner's ImageAddon, advertising SIXEL. | [layout.md](layout.md#inline-graphics) |
 | `CSI 14 t` / `CSI 16 t` / `CSI 18 t` | Window-pixel, cell-pixel, and window-character size queries | Enabled and answered by the owner's xterm.js for image preparation. | [layout.md](layout.md#inline-graphics) |
 | `CSI ? 80 h/l` | SIXEL scrolling off/on | Observed by ImageAddon; xterm.js continues handling the private mode. | [layout.md](layout.md#inline-graphics) |
