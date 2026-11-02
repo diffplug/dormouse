@@ -26,7 +26,7 @@ import type {
   FrameSocketSink,
   FrameUpstream,
 } from './burrow-frame-host';
-import type { BurrowSurfaceProvider, EmbeddedPage } from './burrow-surface-provider';
+import type { BurrowSurfaceProvider } from './burrow-surface-provider';
 import { FrameTunnel } from './frame-tunnel';
 
 type Sent = RemoteResponse | RemoteEventMsg;
@@ -134,12 +134,7 @@ function setup({ isDirect = () => true }: { isDirect?: () => boolean } = {}) {
   const events = (subId: string, event?: string) =>
     sent.filter((m): m is RemoteEventMsg => 'subId' in m && m.subId === subId && (!event || m.event === event));
   const open = async (surfaceId = 'surface:1') => {
-    const id = call(FRAME_METHODS.frameOpen, {
-      surfaceId,
-      pageOrigin: PAGE_ORIGIN,
-      frameOrigin: 'https://f.example',
-      embedderOrigins: ['https://pocket.example'],
-    });
+    const id = call(FRAME_METHODS.frameOpen, { ...OPEN, surfaceId });
     await flush();
     return id;
   };
@@ -150,7 +145,12 @@ async function flush(): Promise<void> {
   for (let i = 0; i < 5; i += 1) await Promise.resolve();
 }
 
-const PAGE_ORIGIN = 'http://localhost:5173';
+const OPEN = {
+  surfaceId: 'surface:1',
+  pageOrigin: 'http://localhost:5173',
+  frameOrigin: 'https://f.example',
+  embedderOrigins: ['https://pocket.example'],
+};
 const GET = { method: 'GET', path: '/', headers: [['accept', 'text/html']], end: true };
 
 afterEach(() => {
@@ -164,7 +164,7 @@ describe('frame.open', () => {
     const id = await t.open();
     expect(t.answer(id)).toMatchObject({ ok: false, error: 'the page moved: surface:1' });
     expect(t.host.upstreams).toHaveLength(0);
-    const unnamed = t.call(FRAME_METHODS.frameOpen, { surfaceId: 'surface:1', frameOrigin: 'https://f.example', embedderOrigins: [] });
+    const unnamed = t.call(FRAME_METHODS.frameOpen, { ...OPEN, pageOrigin: undefined });
     expect(t.answer(unnamed)).toMatchObject({ ok: false, error: 'invalid frame.open: origins' });
   });
 
@@ -214,12 +214,7 @@ describe('frame.open', () => {
   it('closes a frame whose surface stops embedding its page\'s origin, telling the Client', async () => {
     vi.useFakeTimers();
     const t = setup();
-    const id = t.call(FRAME_METHODS.frameOpen, {
-      surfaceId: 'surface:1',
-      pageOrigin: PAGE_ORIGIN,
-      frameOrigin: 'https://f.example',
-      embedderOrigins: ['https://pocket.example'],
-    });
+    const id = t.call(FRAME_METHODS.frameOpen, OPEN);
     await vi.advanceTimersByTimeAsync(0);
     // Another path on the same origin keeps it.
     t.pages.set('surface:1', { url: 'http://localhost:5173/other' });
@@ -239,12 +234,7 @@ describe('frame.open', () => {
     const t = setup();
     let release = () => {};
     t.host.hold = new Promise((resolve) => { release = resolve; });
-    const id = t.call(FRAME_METHODS.frameOpen, {
-      surfaceId: 'surface:1',
-      pageOrigin: PAGE_ORIGIN,
-      frameOrigin: 'https://f.example',
-      embedderOrigins: ['https://pocket.example'],
-    });
+    const id = t.call(FRAME_METHODS.frameOpen, OPEN);
     await vi.advanceTimersByTimeAsync(0);
     expect(t.host.opened).toHaveLength(1);
     // Nothing is watching this frame yet, so no notice of it comes.

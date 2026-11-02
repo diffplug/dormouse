@@ -16,6 +16,8 @@ export interface ClientCloser {
 
 const closers = new Set<ClientCloser>();
 
+const closerOf = (surfaceId: string) => [...closers].find((closer) => closer.owns(surfaceId));
+
 export function registerClientCloser(closer: ClientCloser): () => void {
   closers.add(closer);
   return () => void closers.delete(closer);
@@ -27,12 +29,12 @@ export function registerClientCloser(closer: ClientCloser): () => void {
  * `vscode-ext/src/peer-link-protocol.ts`), which a browser with no PTY needs too.
  */
 export function answerClientCloseOwner(surfaceId: string): { ptyId: string }[] {
-  return [...closers].some((closer) => closer.owns(surfaceId)) ? [{ ptyId: surfaceId }] : [];
+  return closerOf(surfaceId) ? [{ ptyId: surfaceId }] : [];
 }
 
 /** No answer means this webview does not own the Surface. */
 export async function answerClientClose({ surfaceId, confirmed, unsaved }: SurfaceCloseParams): Promise<SurfaceCloseResult[]> {
-  const closer = [...closers].find((candidate) => candidate.owns(surfaceId));
+  const closer = closerOf(surfaceId);
   if (!closer) return [];
   try {
     return [await closer.close(surfaceId, { confirmed, unsaved })];

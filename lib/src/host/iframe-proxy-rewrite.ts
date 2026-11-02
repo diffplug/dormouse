@@ -287,8 +287,7 @@ export function tunnelSocketShim(): string {
     t.addEventListener=e.addEventListener.bind(e);t.removeEventListener=e.removeEventListener.bind(e);t.dispatchEvent=e.dispatchEvent.bind(e);
     function fire(ev){e.dispatchEvent(ev);var h=t['on'+ev.type];if(typeof h==='function')h.call(t,ev);}
     var c=new MessageChannel(),p=c.port1,q=Promise.resolve();
-    var said=false;
-    function end(code,reason){if(said)return;said=true;p.postMessage({kind:'close',code:code,reason:reason});}
+    function end(code,reason){if(L.delete(end))p.postMessage({kind:'close',code:code,reason:reason});}
     L.add(end);
     p.onmessage=function(m){
       var d=m.data;

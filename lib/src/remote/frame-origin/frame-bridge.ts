@@ -6,6 +6,7 @@
  * which the Burrow validates.
  */
 
+import { messageOf } from '../../lib/errors';
 import type { OpenFrame, OpenFrameSocket } from '../client/frame-client';
 import type { RelayMessage, RelayRequest, RelaySocket, ResponseControl, ResponseMessage, SocketCommand, SocketEvent } from './protocol';
 
@@ -96,8 +97,4 @@ async function serveSocket(frame: OpenFrame, request: RelaySocket, reply: Messag
 /** `bytes` on a buffer of its own, which a transfer can take: copied only if it is a view on a larger one. */
 function ownBuffer(bytes: Uint8Array): Uint8Array {
   return bytes.byteLength === bytes.buffer.byteLength ? bytes : bytes.slice();
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : 'the request failed';
 }

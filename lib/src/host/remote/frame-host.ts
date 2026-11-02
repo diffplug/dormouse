@@ -12,7 +12,8 @@ import * as http from 'http';
 import type { Readable } from 'stream';
 import * as zlib from 'zlib';
 import WebSocket from 'ws';
-import { MAX_WS_MESSAGE_BYTES, type HttpHeader } from 'remote-lib-common';
+import { MAX_WS_MESSAGE_BYTES, normalizeOrigin, type HttpHeader } from 'remote-lib-common';
+import { messageOf } from '../../lib/errors';
 import type {
   BurrowFrameHost,
   FrameHttpExchange,
@@ -61,7 +62,7 @@ export function createBurrowFrameHost(proxy: FrameHostProxy): BurrowFrameHost {
       const now = Date.now();
       for (const [key, answer] of answers) if (now - answer.at > LOCAL_ANSWER_TTL_MS) answers.delete(key);
       // By origin, which is all it depends on: a page's query is no new lookup.
-      const key = URL.canParse(url) ? new URL(url).origin : url;
+      const key = normalizeOrigin(url) ?? url;
       let answer = answers.get(key);
       if (!answer) {
         answer = { at: now, local: proxy.isLocal(url).catch(() => false) };
@@ -179,7 +180,7 @@ class GrantExchange implements FrameHttpExchange {
   #paused = false;
   #finished = false;
   /** Writes not yet settled: Node may never call back on a request it destroyed. */
-  readonly #writing = new Set<(error: Error) => void>();
+  readonly #writing = new Set<(error?: Error | null) => void>();
 
   constructor(options: http.RequestOptions, sink: FrameHttpSink, grantOrigin: string, done: () => void) {
     this.#sink = sink;
@@ -191,7 +192,7 @@ class GrantExchange implements FrameHttpExchange {
     } catch (error) {
       // A field Node will not put on the wire: the Client still hears why, once
       // its exchange is installed.
-      const message = error instanceof Error ? error.message : 'invalid request';
+      const message = messageOf(error);
       queueMicrotask(() => this.#fail(message));
     }
     this.#request = request;
@@ -205,12 +206,12 @@ class GrantExchange implements FrameHttpExchange {
     const request = this.#request;
     if (this.#finished || !request) return Promise.reject(new Error('request closed'));
     return new Promise((resolve, reject) => {
-      this.#writing.add(reject);
       const settle = (error?: Error | null) => {
-        this.#writing.delete(reject);
+        this.#writing.delete(settle);
         if (error) reject(error);
         else resolve();
       };
+      this.#writing.add(settle);
       if (end) {
         if (chunk.length > 0) request.write(chunk);
         request.end(settle);
@@ -240,8 +241,7 @@ class GrantExchange implements FrameHttpExchange {
   #finish(): void {
     this.#finished = true;
     this.#done();
-    for (const reject of this.#writing) reject(new Error('request closed'));
-    this.#writing.clear();
+    for (const settle of this.#writing) settle(new Error('request closed'));
   }
 
   #respond(response: http.IncomingMessage): void {

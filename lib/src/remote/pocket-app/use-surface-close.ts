@@ -4,18 +4,13 @@
  * then whatever consent the computer says the close needs.
  */
 
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { REMOTE_METHODS, type SurfaceCloseParams, type SurfaceCloseResult } from 'remote-lib-common';
 import type { MobileCloseDialogState } from '../../components/MobileCloseDialog';
 import { randomKillChar } from '../../components/KillConfirm';
 import { messageOf } from '../../lib/errors';
-import {
-  cancelEditorClose,
-  confirmToolEditorsClose,
-  decideEditorClose,
-  getEditorClosePrompt,
-  subscribeEditorClosePrompt,
-} from '../../lib/tool-editor';
+import { getToolDirty } from '../../lib/tool-dirty-store';
+import { saveToolEditor, toolEditorLabel } from '../../lib/tool-editor';
 
 export interface SurfaceCloseSession {
   request<T = unknown>(method: string, params?: unknown): Promise<T>;
@@ -30,16 +25,15 @@ export function useSurfaceClose(session: SurfaceCloseSession | null): {
 } {
   const [asked, setAsked] = useState<MobileCloseDialogState | null>(null);
   const closing = useRef(false);
-  // The one prompt that outlives this hook, being module-wide. Answered later, it
-  // would send the close down `session`, to whichever Burrow that reaches by then.
-  const askingOwnEdits = useRef(false);
-  useEffect(() => () => { if (askingOwnEdits.current) cancelEditorClose(); }, []);
-  const ownPrompt = useSyncExternalStore(subscribeEditorClosePrompt, getEditorClosePrompt);
 
   const close = useCallback((surfaceId: string) => {
     if (!session || closing.current) return;
     closing.current = true;
-    /** Show a dialog until its answer; gone with the hook, whose dialogs no one can answer. */
+    /**
+     * Show a dialog until its answer. It goes with this hook and so with the
+     * session, leaving nothing to answer: `session` forwards to whichever Burrow
+     * comes next, where an answer would close whatever has this id.
+     */
     const ask = <T,>(build: (answer: (value: T) => void) => MobileCloseDialogState) => new Promise<T>((resolve) => {
       setAsked(build((value) => { setAsked(null); resolve(value); }));
     });
@@ -50,12 +44,29 @@ export function useSurfaceClose(session: SurfaceCloseSession | null): {
     const unsaved = (label: string) => ask<'save' | 'discard' | null>((answer) => ({
       kind: 'unsaved', labels: [label], onSave: () => answer('save'), onDiscard: () => answer('discard'), onCancel: () => answer(null),
     }));
+    /** The phone's copy of a Tool: its own save, which keeps asking until it holds. */
+    const ownEdits = () => ask<boolean>((answer) => {
+      const dialog = (saving: boolean, error?: string): MobileCloseDialogState => ({
+        kind: 'unsaved',
+        labels: [toolEditorLabel(surfaceId)],
+        saving,
+        error,
+        onSave: () => {
+          setAsked(dialog(true));
+          void saveToolEditor(surfaceId).then((failed) => {
+            if (failed) setAsked(dialog(false, failed));
+            else answer(true);
+          });
+        },
+        onDiscard: () => answer(true),
+        // Escape reaches here whatever the buttons say.
+        onCancel: () => { if (!saving) answer(false); },
+      });
+      return dialog(false);
+    });
     void (async () => {
       try {
-        askingOwnEdits.current = true;
-        const own = await confirmToolEditorsClose([surfaceId]);
-        askingOwnEdits.current = false;
-        if (!own) return;
+        if (getToolDirty(surfaceId) === true && !(await ownEdits())) return;
         const params: SurfaceCloseParams = { surfaceId };
         for (let answers = 0; answers < MAX_ANSWERS; answers += 1) {
           const result = await session.request<SurfaceCloseResult>(REMOTE_METHODS.surfaceClose, params);
@@ -81,16 +92,5 @@ export function useSurfaceClose(session: SurfaceCloseSession | null): {
     })();
   }, [session]);
 
-  const dialog: MobileCloseDialogState | null = ownPrompt
-    ? {
-        kind: 'unsaved',
-        labels: ownPrompt.items.map(({ label }) => label),
-        saving: ownPrompt.saving,
-        error: ownPrompt.error,
-        onSave: () => void decideEditorClose('save'),
-        onDiscard: () => void decideEditorClose('discard'),
-        onCancel: () => void decideEditorClose('cancel'),
-      }
-    : asked;
-  return { close, dialog };
+  return { close, dialog: asked };
 }

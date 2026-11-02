@@ -382,8 +382,8 @@ describe('tunnelSocketShim', () => {
     const second = shim.open();
     first.far.postMessage({ kind: 'open', protocol: '', extensions: '' });
     await settle();
+    // Its own close still queued behind its sends.
     first.socket.close();
-    await settle();
     shim.pagehide();
     await settle();
     expect(first.heard).toEqual(['close']);

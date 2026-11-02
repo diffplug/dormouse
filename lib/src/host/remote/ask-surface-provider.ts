@@ -163,15 +163,7 @@ export function createAskSurfaceProvider(
     },
 
     async closeSurface(surfaceId, consent) {
-      // One owner, as for an attach: duplicated cold-restored windows hold the
-      // same id, and a close must not reach the copy nobody was asked about. No
-      // owner heard from closes nothing, since a slow window might still answer a
-      // close sent to all of them.
-      const owners = await ask('closeOwnerOp', { surfaceId } satisfies PeerOps['closeOwnerOp']['params']).catch(() => []);
-      const ownerPtyId = (owners[0] as Partial<PeerOps['closeOwnerOp']['result']> | undefined)?.ptyId;
-      const answers = typeof ownerPtyId === 'string'
-        ? await ask('closeOp', { surfaceId, ...consent } satisfies PeerOps['closeOp']['params'], ownerPtyId).catch(() => [])
-        : [];
+      const answers = await ask('closeOp', { surfaceId, ...consent } satisfies PeerOps['closeOp']['params']).catch(() => []);
       return closeAnswerOf(answers[0]) ?? { outcome: 'refused', message: 'This is no longer open on the computer.' };
     },
 

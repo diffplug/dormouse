@@ -213,6 +213,8 @@ Every webview, broker or not, installs the responder (`docs/specs/transport.md` 
 
 **A peer answer belongs to the authenticated broker socket that asked for it**: if that broker disappears mid-fan-out the answer is dropped even when this window has already connected to a replacement, since **request ids restart per broker**. A rejected fan-out contributes an empty answer. **Nothing in an answer but its `ptyId` (`routedPtyId`) is interpreted below the Burrow.**
 
+**A client close fans out a read-only `closeOwnerOp` first, and goes only to the first answer's tier and peer, or nowhere**: a duplicated cold-restored window's copy must not close unasked, and a window too slow to answer the probe could still act on a broadcast.
+
 **Cross-window attach fans out a read-only `resolve` first and the first answer is the answer**: the mutating `attach` and every later handle resize go only to that answer's tier and peer, so duplicated cold-restored windows do not both resize; the owner resizes through its xterm (`docs/specs/remote-api.md` → "Size authority: last-attach-wins") and replies with the settled size plus the `ptyId`, and the service then streams that PTY. Release and missing answers: `docs/specs/remote-api.md` → "Attachment invariants". Take back is an ordinary command, forwarded to the broker.
 
 The service's `streamPty` subscribes to the extension host's own per-PTY parse (`docs/specs/terminal-escapes.md` → "Parsing location").

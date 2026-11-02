@@ -5,7 +5,7 @@
  * restarted at will: it finds the bootstrap page again for each request.
  */
 
-import { FRAME_BOOTSTRAP_PATH, isFrameAssetPath } from 'remote-lib-common';
+import { FRAME_BOOTSTRAP_PATH, isFrameAssetPath, normalizeOrigin } from 'remote-lib-common';
 import type { RelayMessage, RelayRequest, ResponseControl, ResponseMessage } from './protocol';
 
 /** Past the proxy's own upstream timeout, so its error page gets there first. */
@@ -83,15 +83,7 @@ export function refusal(request: Pick<Request, 'mode' | 'method' | 'destination'
   if (request.mode !== 'navigate') return null;
   if (request.destination === 'document') return 'A frame only loads inside Dormouse.';
   const safe = request.method === 'GET' || request.method === 'HEAD';
-  return safe || sameOrigin(request.referrer, origin) ? null : 'A form from another site cannot reach this page.';
-}
-
-function sameOrigin(url: string, origin: string): boolean {
-  try {
-    return new URL(url).origin === origin;
-  } catch {
-    return false;
-  }
+  return safe || normalizeOrigin(request.referrer) === origin ? null : 'A form from another site cannot reach this page.';
 }
 
 /** The fields the browser adds past the worker, in the terms the Burrow expects them. */

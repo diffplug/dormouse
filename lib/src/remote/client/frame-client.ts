@@ -6,15 +6,16 @@
  */
 
 import {
-  FRAME_CHUNK_BYTES,
   FRAME_EVENTS,
   FRAME_FLOW_WINDOW_BYTES,
   FRAME_METHODS,
   MAX_HTTP_EXCHANGES_PER_SESSION,
   concatBytes,
+  frameChunks,
   fromBase64Url,
   toBase64Url,
   type FrameClosedEvent,
+  type FrameOpenParams,
   type FrameOpenResult,
   type HttpBodyEvent,
   type HttpErrorEvent,
@@ -26,6 +27,7 @@ import {
   type WsMessageFragment,
   type WsOpenResult,
 } from 'remote-lib-common';
+import { messageOf } from '../../lib/errors';
 
 /** What the tunnel needs of a session; `PocketClient` and `OneTimeClient` both are one. */
 export interface FrameSession {
@@ -80,12 +82,7 @@ export interface OpenFrame extends FrameOpenResult {
   close(): void;
 }
 
-export interface FrameOpenInit {
-  surfaceId: string;
-  /** The page origin {@link frameOrigin} belongs to; the Burrow refuses any other. */
-  pageOrigin: string;
-  frameOrigin: string;
-  embedderOrigins: string[];
+export interface FrameOpenInit extends FrameOpenParams {
   /** The Burrow closed the frame: the surface's page went away. */
   onClosed?(reason: FrameClosedEvent['reason']): void;
 }
@@ -93,57 +90,31 @@ export interface FrameOpenInit {
 /** Something in flight on a frame, ended with it. */
 type Live = (reason: string) => void;
 
-/**
- * The exchanges a session may hold, waited for in order: a page can ask for
- * hundreds of modules at once, and with no connection limit in front of a
- * service worker, the Burrow's bound is the first one they would meet.
- */
-class ExchangeSlots {
-  #free = MAX_HTTP_EXCHANGES_PER_SESSION;
-  readonly #waiting: Array<() => void> = [];
+/** Room for so much at once, taken in order so nothing starves. */
+class Gate {
+  #free: number;
+  readonly #waiting: Array<{ amount: number; go(): void }> = [];
 
-  acquire(): Promise<void> {
-    if (this.#free > 0) {
-      this.#free -= 1;
-      return Promise.resolve();
-    }
-    return new Promise((resolve) => this.#waiting.push(resolve));
+  constructor(capacity: number) {
+    this.#free = capacity;
   }
 
-  release(): void {
-    const next = this.#waiting.shift();
-    if (next) next();
-    else this.#free += 1;
-  }
-}
-
-/**
- * The body bytes a session may have sent and not had answered, across its every
- * upload and socket, taken in order so none starves. One upstream that stopped
- * reading holds its share until it fails or its frame closes.
- */
-class SendWindow {
-  #inFlight = 0;
-  readonly #waiting: Array<{ bytes: number; go(): void }> = [];
-
-  async send<T>(bytes: number, sending: () => Promise<T>): Promise<T> {
-    if (this.#waiting.length > 0 || this.#inFlight + bytes > FRAME_FLOW_WINDOW_BYTES) {
-      await new Promise<void>((go) => this.#waiting.push({ bytes, go }));
-    } else {
-      this.#inFlight += bytes;
-    }
-    try {
-      return await sending();
-    } finally {
-      this.#inFlight -= bytes;
+  acquire(amount = 1): Promise<void> {
+    return new Promise((go) => {
+      this.#waiting.push({ amount, go });
       this.#admit();
-    }
+    });
+  }
+
+  release(amount = 1): void {
+    this.#free += amount;
+    this.#admit();
   }
 
   #admit(): void {
-    while (this.#waiting.length > 0 && this.#inFlight + this.#waiting[0]!.bytes <= FRAME_FLOW_WINDOW_BYTES) {
+    while (this.#waiting.length > 0 && this.#waiting[0]!.amount <= this.#free) {
       const next = this.#waiting.shift()!;
-      this.#inFlight += next.bytes;
+      this.#free -= next.amount;
       next.go();
     }
   }
@@ -152,8 +123,17 @@ class SendWindow {
 export class FrameClient {
   readonly #session: FrameSession;
   readonly #frames = new Set<ClientFrame>();
-  readonly #slots = new ExchangeSlots();
-  readonly #sends = new SendWindow();
+  /**
+   * The exchanges a session may hold: a page can ask for hundreds of modules at
+   * once, and with no connection limit in front of a service worker, the
+   * Burrow's bound is the first one they would meet.
+   */
+  readonly #slots = new Gate(MAX_HTTP_EXCHANGES_PER_SESSION);
+  /**
+   * The body bytes a session may have sent and not had answered. One upstream
+   * that stopped reading holds its share until it fails or its frame closes.
+   */
+  readonly #sends = new Gate(FRAME_FLOW_WINDOW_BYTES);
   #unacked = 0;
   #ackTimer: ReturnType<typeof setTimeout> | null = null;
   #disposed = false;
@@ -166,13 +146,14 @@ export class FrameClient {
     if (this.#disposed) throw new Error(SESSION_ENDED);
     const id = globalThis.crypto.randomUUID();
     let frame: ClientFrame | null = null;
+    const { onClosed, ...params } = init;
     const { result } = await this.#session.subscribe<FrameOpenResult>(
       FRAME_METHODS.frameOpen,
-      { surfaceId: init.surfaceId, pageOrigin: init.pageOrigin, frameOrigin: init.frameOrigin, embedderOrigins: init.embedderOrigins },
+      params satisfies FrameOpenParams,
       (event) => {
         if (event.event !== FRAME_EVENTS.frameClosed) return;
         frame?.ended('the embedded page closed');
-        init.onClosed?.((event.data as FrameClosedEvent).reason);
+        onClosed?.((event.data as FrameClosedEvent).reason);
       },
       id,
     );
@@ -223,8 +204,8 @@ class ClientFrame implements OpenFrame {
   readonly id: string;
   readonly path: string;
   readonly #session: FrameSession;
-  readonly #slots: ExchangeSlots;
-  readonly #sends: SendWindow;
+  readonly #slots: Gate;
+  readonly #sends: Gate;
   /** Body bytes off the wire. */
   readonly #received: (bytes: number) => void;
   readonly #forget: () => void;
@@ -235,8 +216,8 @@ class ClientFrame implements OpenFrame {
     id: string,
     opened: FrameOpenResult,
     session: FrameSession,
-    slots: ExchangeSlots,
-    sends: SendWindow,
+    slots: Gate,
+    sends: Gate,
     received: (bytes: number) => void,
     forget: () => void,
   ) {
@@ -327,38 +308,35 @@ class ClientFrame implements OpenFrame {
           return;
       }
     }, id);
-    if (!params.end) void this.#upload(id, bytes);
+    if (!params.end) {
+      this.#sendBody(FRAME_METHODS.httpWrite, bytes, (encoded, end) => ({ exchangeId: id, bytes: encoded, end })).catch(() => {
+        // The exchange failed; its `http.request` or `http.error` says why.
+      });
+    }
 
     try {
       const { result } = await answered;
       return { ...result, body };
     } catch (error) {
-      endLive(error instanceof Error ? error.message : 'request failed');
+      endLive(messageOf(error));
       throw error;
     }
   }
 
-  /** One body chunk through the session's window, encoded only once it may go. */
-  #sendChunk(method: string, bytes: Uint8Array, params: (encoded: string) => unknown): Promise<unknown> {
-    return this.#sends.send(bytes.length, () => {
-      if (this.#ended) return Promise.reject(new Error('the frame is closed'));
-      return this.#session.request(method, params(toBase64Url(bytes)));
-    });
-  }
-
-  /** The body, each chunk sent once the upstream took the last. */
-  async #upload(exchangeId: string, bytes: Uint8Array): Promise<void> {
-    try {
-      for (let offset = 0; offset < bytes.length; offset += FRAME_CHUNK_BYTES) {
-        const next = offset + FRAME_CHUNK_BYTES;
-        await this.#sendChunk(FRAME_METHODS.httpWrite, bytes.subarray(offset, next), (encoded) => ({
-          exchangeId,
-          bytes: encoded,
-          end: next >= bytes.length,
-        }));
+  /**
+   * A body in chunks, each sent once the upstream took the last and the session's
+   * window has room, and encoded only then.
+   */
+  async #sendBody(method: string, bytes: Uint8Array, params: (encoded: string, last: boolean) => unknown): Promise<void> {
+    const chunks = frameChunks(bytes);
+    for (const [index, chunk] of chunks.entries()) {
+      await this.#sends.acquire(chunk.length);
+      try {
+        if (this.#ended) throw new Error('the frame is closed');
+        await this.#session.request(method, params(toBase64Url(chunk), index === chunks.length - 1));
+      } finally {
+        this.#sends.release(chunk.length);
       }
-    } catch {
-      // The exchange failed; its `http.request` or `http.error` says why.
     }
   }
 
@@ -407,7 +385,7 @@ class ClientFrame implements OpenFrame {
     return {
       ...result,
       send: (data, binary) => {
-        const sent = sending.then(() => this.#sendFragments(id, data, binary));
+        const sent = sending.then(() => this.#sendBody(FRAME_METHODS.wsSend, data, (encoded, fin) => ({ socketId: id, data: encoded, binary, fin })));
         sending = sent.catch(() => {});
         return sent;
       },
@@ -423,21 +401,6 @@ class ClientFrame implements OpenFrame {
         });
       },
     };
-  }
-
-  async #sendFragments(socketId: string, data: Uint8Array, binary: boolean): Promise<void> {
-    // An empty message is still one fragment.
-    let offset = 0;
-    do {
-      const next = offset + FRAME_CHUNK_BYTES;
-      await this.#sendChunk(FRAME_METHODS.wsSend, data.subarray(offset, next), (encoded) => ({
-        socketId,
-        data: encoded,
-        binary,
-        fin: next >= data.length,
-      }));
-      offset = next;
-    } while (offset < data.length);
   }
 
   close(): void {

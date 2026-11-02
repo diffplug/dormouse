@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SurfaceCloseResult } from 'remote-lib-common';
 import { MobileCloseDialog } from '../../components/MobileCloseDialog';
-import { connectToolEditor, decideEditorClose, getEditorClosePrompt } from '../../lib/tool-editor';
+import { connectToolEditor, getEditorClosePrompt } from '../../lib/tool-editor';
 import { recordToolDirty } from '../../lib/tool-dirty-store';
 import { useSurfaceClose, type SurfaceCloseSession } from './use-surface-close';
 
@@ -59,23 +59,6 @@ afterEach(() => {
   act(() => root.unmount());
   container.remove();
   recordToolDirty('surface:1', null);
-});
-
-describe('useSurfaceClose when the session goes', () => {
-  const leave = () => act(async () => root.render(null));
-
-  it('takes down the prompt about its own edits, whose answer would close nothing', async () => {
-    const { session, asked } = sessionAnswering({ outcome: 'closed' });
-    recordToolDirty('surface:1', true);
-    await start(session);
-    expect(getEditorClosePrompt()).not.toBeNull();
-    await leave();
-    await tick();
-    expect(getEditorClosePrompt()).toBeNull();
-    await act(async () => { await decideEditorClose('discard'); });
-    await tick();
-    expect(asked).toEqual([]);
-  });
 });
 
 describe('useSurfaceClose', () => {
@@ -151,5 +134,54 @@ describe('useSurfaceClose', () => {
     expect(asked).toEqual([{ surfaceId: 'surface:1' }]);
     disconnect();
     frame.remove();
+  });
+
+  it('keeps asking about its own edits until a save holds, then goes on', async () => {
+    recordToolDirty('surface:1', true);
+    const { session, asked } = sessionAnswering({ outcome: 'closed' });
+    await start(session);
+    // No editor answers, so this one cannot be saved from here.
+    await press('Save');
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain('Save this Tool in its own view');
+    expect(asked).toEqual([]);
+    recordToolDirty('surface:1', null);
+    await press('Save');
+    expect(asked).toEqual([{ surfaceId: 'surface:1' }]);
+    expect(dialogTitle()).toBeNull();
+  });
+
+  it('holds its own edits\' dialog through Escape while a save is running', async () => {
+    const frame = document.createElement('iframe');
+    document.body.append(frame);
+    const posted = vi.spyOn(frame.contentWindow!, 'postMessage').mockImplementation(() => {});
+    const disconnect = connectToolEditor('surface:1', 'phone-copy.md', frame, window.location.origin);
+    const { connection } = posted.mock.calls[0]![0] as { connection: string };
+    await act(async () => window.dispatchEvent(new MessageEvent('message', {
+      source: frame.contentWindow,
+      origin: window.location.origin,
+      data: { dorTool: 1, kind: 'state', connection, dirty: true },
+    })));
+    const { session, asked } = sessionAnswering({ outcome: 'closed' });
+    await start(session);
+    await press('Save');
+    await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    await tick();
+    expect(dialogTitle()).toBe('Save changes?');
+    expect(asked).toEqual([]);
+    disconnect();
+    frame.remove();
+  });
+
+  it('goes with the wall, leaving nothing whose answer would reach the next Burrow', async () => {
+    recordToolDirty('surface:1', true);
+    const { session, asked } = sessionAnswering({ outcome: 'closed' });
+    await start(session);
+    expect(dialogTitle()).toBe('Save changes?');
+    // Not the module-wide prompt, which would outlive this hook.
+    expect(getEditorClosePrompt()).toBeNull();
+    await act(async () => root.render(null));
+    await tick();
+    expect(dialogTitle()).toBeNull();
+    expect(asked).toEqual([]);
   });
 });

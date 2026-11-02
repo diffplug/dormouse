@@ -38,6 +38,15 @@ export const FRAME_EVENTS = {
  */
 export const FRAME_CHUNK_BYTES = 192 * 1024;
 
+/** `bytes` in wire-sized slices, at least one, so an empty message is still sent. */
+export function frameChunks(bytes: Uint8Array): Uint8Array[] {
+  const out = [bytes.subarray(0, FRAME_CHUNK_BYTES)];
+  for (let offset = FRAME_CHUNK_BYTES; offset < bytes.length; offset += FRAME_CHUNK_BYTES) {
+    out.push(bytes.subarray(offset, offset + FRAME_CHUNK_BYTES));
+  }
+  return out;
+}
+
 /**
  * How many body bytes, before base64url, one session may have on the wire in
  * each direction across its every exchange and socket: Burrow→Client until

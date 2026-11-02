@@ -195,7 +195,7 @@ Source of truth: `lib/src/remote/burrow/peer-surfaces.ts` (the owner's half), `t
 
 - **Must close only a Tool or an embedded page, refusing a terminal whatever consent came**, the owning Wall judging by the Surface's kind.
 - **Must decide in the kill gesture's order, with its refusals and prompts in their words** (`docs/specs/reopen.md` -> "The rule", `docs/specs/layout.md` -> "Kill confirmation", `docs/specs/dor-tool.md` -> "Closing unsaved Tools"): a transfer or a helper's running work refuses, a close that must confirm answers `confirm`, unsaved edits answer `unsaved`, and anything else closes. Consent answers a prompt and skips no refusal.
-- **Must pick one owner with a read-only probe and send the close to it alone**, closing nothing when no owner answers: duplicated cold-restored windows share an id, and a close must not reach the copy nobody was asked about.
+- **A close must reach one window's copy**, and close nothing when no owner answers (`docs/specs/vscode.md` -> "Peer surfaces").
 - **Must leave a reopen record as the gesture does**, and log `closed` in the access log.
 - **A Client must ask about its own copy's unsaved edits first**, which the Burrow cannot see: a frame is its own document.
 - **A Client must abandon a close and its prompts when the session ends**, or the answer reaches whichever Burrow it connects to next, where the same id may name another Surface.

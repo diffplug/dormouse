@@ -42,10 +42,6 @@ import {
 import type { BurrowSurfaceProvider } from '../../lib/src/remote/burrow/burrow-surface-provider';
 import { createBurrowFrameHost } from '../../lib/src/host/remote/frame-host';
 import { createIframeProxyUrl, isUpstreamOnThisMachine, releaseIframeProxyLease } from './iframe-proxy-host';
-import type {
-  PeerSurfaceParams,
-  PeerSurfaceResult,
-} from '../../lib/src/remote/burrow/peer-surfaces';
 import {
   MAX_RELAY_TO_BURROW_FRAME_LENGTH,
   type WebSocketLike,
@@ -68,6 +64,7 @@ import {
   sendUiEvent,
   type PeerLinkClient,
 } from './peer-link';
+import { ownerProbe } from './peer-link-protocol';
 import type { PtySink } from './processed-pty-streams';
 import { VsCodeBurrowStateStore } from './burrow-store';
 import { log } from './log';
@@ -123,16 +120,13 @@ async function askBothTiers(
   params: unknown,
   ownerPtyId?: string,
 ): Promise<unknown[]> {
-  // A mutating attach cannot itself discover its owner: duplicated cold-restored
-  // windows may both answer the same surface id, which would resize both xterms
-  // before the first result was selected. Probe identity read-only, then send
-  // the attach only to the tier/window carried by that provider-local PTY key.
-  const surfaceParams = params as Partial<PeerSurfaceParams> | null;
-  if (!ownerPtyId && op === 'surfaceOp' && surfaceParams?.op === 'attach') {
-    const [owner] = (await askBothTiers(bound, op, {
-      ...surfaceParams,
-      op: 'resolve',
-    })) as PeerSurfaceResult[];
+  // A mutating ask cannot itself discover its owner: duplicated cold-restored
+  // windows may both answer the same surface id, and act on it before the first
+  // result was selected. Probe identity read-only, then send the ask only to the
+  // tier/window carried by that provider-local PTY key.
+  const probe = ownerProbe(op, params);
+  if (!ownerPtyId && probe) {
+    const [owner] = (await askBothTiers(bound, probe.op, probe.params)) as { ptyId: string }[];
     return owner ? askBothTiers(bound, op, params, owner.ptyId) : [];
   }
   if (ownerPtyId) {

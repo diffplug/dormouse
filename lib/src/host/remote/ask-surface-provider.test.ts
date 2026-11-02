@@ -111,64 +111,25 @@ describe('createAskSurfaceProvider holds', () => {
 describe('createAskSurfaceProvider closeSurface', () => {
   const noPty = { writePty: () => {}, resizePty: () => {}, streamPty: () => () => {} } as never;
 
-  it('addresses only the owner it resolved, so a duplicate in another window stays', async () => {
+  it('asks for the close with the consent, answering as the owner did', async () => {
     const asked: unknown[][] = [];
-    const { provider } = createAskSurfaceProvider(async (op, params, ownerPtyId) => {
-      asked.push([op, params, ownerPtyId]);
-      return op === 'closeOwnerOp' ? [{ ptyId: 'window-a:surface:1' }, { ptyId: 'window-b:surface:1' }] : [{ outcome: 'closed' }];
+    const { provider } = createAskSurfaceProvider(async (op, params) => {
+      asked.push([op, params]);
+      return [{ outcome: 'closed' }];
     }, noPty);
     expect(await provider.closeSurface('surface:1', { confirmed: true })).toEqual({ outcome: 'closed' });
-    expect(asked).toEqual([
-      ['closeOwnerOp', { surfaceId: 'surface:1' }, undefined],
-      ['closeOp', { surfaceId: 'surface:1', confirmed: true }, 'window-a:surface:1'],
-    ]);
-  });
-
-  it('closes nothing when no owner answers: a slow window would still act on a broadcast', async () => {
-    for (const probe of [async () => [], async () => { throw new Error('gone'); }, async () => [{}]]) {
-      const ops: string[] = [];
-      const { provider } = createAskSurfaceProvider(async (op) => {
-        ops.push(op);
-        return op === 'closeOwnerOp' ? probe() : [{ outcome: 'closed' }];
-      }, noPty);
-      expect((await provider.closeSurface('surface:1', {})).outcome).toBe('refused');
-      expect(ops).toEqual(['closeOwnerOp']);
-    }
+    expect(asked).toEqual([['closeOp', { surfaceId: 'surface:1', confirmed: true }]]);
   });
 
   it('refuses an answer it cannot read: a peer window is another build', async () => {
-    const { provider } = createAskSurfaceProvider(
-      async (op) => (op === 'closeOwnerOp' ? [{ ptyId: 'surface:1' }] : [{ outcome: 'unsaved' }]),
-      noPty,
-    );
+    const { provider } = createAskSurfaceProvider(async () => [{ outcome: 'unsaved' }], noPty);
     expect((await provider.closeSurface('surface:1', {})).outcome).toBe('refused');
   });
 
-  it('refuses when the owner goes before the close reaches it', async () => {
-    const answer = (close: () => Promise<unknown[]>) => async (op: string) => (op === 'closeOwnerOp' ? [{ ptyId: 'surface:1' }] : close());
-    const { provider: none } = createAskSurfaceProvider(answer(async () => []), noPty);
+  it('refuses a surface nobody claims, an ask that failed included', async () => {
+    const { provider: none } = createAskSurfaceProvider(async () => [], noPty);
     expect((await none.closeSurface('surface:1', {})).outcome).toBe('refused');
-    const { provider: failing } = createAskSurfaceProvider(answer(async () => { throw new Error('gone'); }), noPty);
+    const { provider: failing } = createAskSurfaceProvider(async () => { throw new Error('gone'); }, noPty);
     expect((await failing.closeSurface('surface:1', {})).outcome).toBe('refused');
-  });
-});
-
-describe('createAskSurfaceProvider resolveBrowser', () => {
-  it('reads the first owner\'s page, crossing only its url and title', async () => {
-    const asked: Array<[string, unknown]> = [];
-    const { provider } = createAskSurfaceProvider(
-      async (op, params) => {
-        asked.push([op, params]);
-        return [{ render: 'iframe', url: 'http://localhost:5173/', title: 'Vite', extra: 1 }, { url: 'http://other/' }];
-      },
-      inertPty,
-    );
-    expect(await provider.resolveBrowser('surface:2')).toBe('http://localhost:5173/');
-    expect(asked).toEqual([['browserOp', { surfaceId: 'surface:2' }]]);
-  });
-
-  it('answers null when no owner reports a page', async () => {
-    const { provider } = createAskSurfaceProvider(async () => [{ title: 'no url' }], inertPty);
-    expect(await provider.resolveBrowser('surface:2')).toBeNull();
   });
 });

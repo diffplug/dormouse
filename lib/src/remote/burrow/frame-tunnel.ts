@@ -21,7 +21,10 @@ import {
   MAX_WS_PROTOCOLS,
   base64UrlLength,
   concatBytes,
+  frameChunks,
   fromBase64Url,
+  isBoundedString,
+  normalizeOrigin,
   toBase64Url,
   utf8Encode,
   type FlowAckParams,
@@ -42,6 +45,7 @@ import {
   type WsOpenResult,
   type WsSendParams,
 } from 'remote-lib-common';
+import { clientErrorMessage } from '../../lib/errors';
 import type {
   BurrowFrameHost,
   FrameHttpExchange,
@@ -63,10 +67,6 @@ const PATH_RE = /^\/[^\s\0-\x1f\x7f]*$/;
 const DESTINATION_RE = /^[a-z]{0,32}$/;
 const MAX_METHOD_LENGTH = 32;
 export const MAX_SURFACE_ID_LENGTH = 256;
-
-export function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : 'internal error';
-}
 const MAX_WS_REASON_BYTES = 123;
 
 interface Frame {
@@ -105,16 +105,18 @@ interface Socket {
 }
 
 /** An event the flow window orders: data spends it, the rest wait their turn. */
+type QueuedPayload =
+  | { readonly data: unknown }
+  /** A body chunk, encoded only when it is sent, so a dropped one costs nothing. */
+  | { readonly bytes: Uint8Array; wrap(encoded: string): unknown };
+
 interface Queued {
-  /** The exchange or socket it belongs to, so closing one drops its events. */
+  /** The exchange or socket it belongs to: the subscription it goes to, and what `http.cancel` drops it by. */
   readonly owner: string;
   /** Its frame, which outlives it: closing the frame drops what a finished one left queued. */
   readonly frameId: string;
   readonly event: string;
-  /** The event's data, or, for a body chunk, how to wrap it once encoded. */
-  readonly data: unknown;
-  /** A body chunk, encoded only when it is sent, so a dropped one costs nothing. */
-  readonly body?: { readonly bytes: Uint8Array; wrap(encoded: string): unknown };
+  readonly payload: QueuedPayload;
 }
 
 export interface FrameTunnelOptions {
@@ -199,7 +201,7 @@ export class FrameTunnel {
   #frameOpen(request: RemoteRequest): void {
     const params = request.params as Partial<FrameOpenParams> | undefined;
     const { surfaceId, pageOrigin, frameOrigin, embedderOrigins } = params ?? {};
-    if (typeof surfaceId !== 'string' || !surfaceId || surfaceId.length > MAX_SURFACE_ID_LENGTH) {
+    if (!surfaceId || !isBoundedString(surfaceId, MAX_SURFACE_ID_LENGTH)) {
       return this.#options.fail(request, 'invalid frame.open: surfaceId');
     }
     if (typeof pageOrigin !== 'string' || typeof frameOrigin !== 'string' || !Array.isArray(embedderOrigins)
@@ -214,7 +216,7 @@ export class FrameTunnel {
       return this.#options.fail(request, 'too many frames are open');
     }
     this.#opening.add(id);
-    void this.#resolveAndOpen(request, surfaceId, pageOrigin, frameOrigin, embedderOrigins as string[]).then(
+    void this.#resolveAndOpen(id, params as FrameOpenParams).then(
       (result) => {
         this.#opening.delete(id);
         if (this.#disposed) return;
@@ -223,7 +225,7 @@ export class FrameTunnel {
       },
       (error) => {
         this.#opening.delete(id);
-        if (!this.#disposed) this.#options.fail(request, `frame.open failed: ${errorMessage(error)}`);
+        if (!this.#disposed) this.#options.fail(request, `frame.open failed: ${clientErrorMessage(error)}`);
       },
     );
   }
@@ -233,18 +235,14 @@ export class FrameTunnel {
    * an open no longer in `#opening` — a `frame.close` raced it — installs none.
    */
   async #resolveAndOpen(
-    request: RemoteRequest,
-    surfaceId: string,
-    expectedOrigin: string,
-    frameOrigin: string,
-    embedderOrigins: string[],
+    id: string,
+    { surfaceId, pageOrigin: expectedOrigin, frameOrigin, embedderOrigins }: FrameOpenParams,
   ): Promise<FrameOpenResult | string> {
-    const id = request.requestId;
     // The page is the surface's, never the Client's: the tunnel reaches only
     // what the person at the Burrow already embedded.
     const pageUrl = await this.#options.provider.resolveBrowser(surfaceId);
-    if (this.#disposed || !this.#opening.has(id)) return 'frame.open superseded';
-    const pageOrigin = pageUrl ? originOf(pageUrl) : null;
+    if (!this.#opening.has(id)) return 'frame.open superseded';
+    const pageOrigin = normalizeOrigin(pageUrl);
     if (!pageUrl || !pageOrigin) return `no embedded page: ${surfaceId}`;
     // The frame origin holds the storage of the page the Client last heard of.
     if (pageOrigin !== expectedOrigin) return `the page moved: ${surfaceId}`;
@@ -254,7 +252,7 @@ export class FrameTunnel {
       lease: { owner: this.#options.leaseOwner, id: `f${++this.#lease}` },
     });
     if ('refused' in opened) return `frame refused: ${opened.refused}`;
-    if (this.#disposed || !this.#opening.has(id)) {
+    if (!this.#opening.has(id)) {
       opened.close();
       return 'frame.open superseded';
     }
@@ -330,7 +328,7 @@ export class FrameTunnel {
     const pages = new Map(entries.flatMap((entry) => (entry.browser ? [[entry.surfaceId, entry.browser.url]] : [])));
     for (const frame of [...this.#frames.values()]) {
       const url = pages.get(frame.surfaceId);
-      if (url === undefined || originOf(url) !== frame.pageOrigin) this.#closeFrame(frame.id, 'surface-gone');
+      if (normalizeOrigin(url) !== frame.pageOrigin) this.#closeFrame(frame.id, 'surface-gone');
     }
   }
 
@@ -341,8 +339,6 @@ export class FrameTunnel {
     const frame = typeof params?.frameId === 'string' ? this.#frames.get(params.frameId) : undefined;
     if (!frame) return this.#options.fail(request, 'no such frame');
     const id = request.requestId;
-    // What a long response holds on to, which is not its request's first chunk.
-    const answering: RemoteRequest = { requestId: id, method: request.method };
     if (this.#idInUse(id)) return this.#options.fail(request, 'request id already in use');
     if (this.#exchanges.size >= MAX_HTTP_EXCHANGES_PER_SESSION) {
       return this.#options.fail(request, 'too many requests are open');
@@ -361,28 +357,28 @@ export class FrameTunnel {
           const entry = this.#exchanges.get(id);
           if (!entry || entry.answered) return;
           entry.answered = true;
-          this.#options.ok(answering, { status, statusText, headers: responseHeaders } satisfies HttpResponseHead);
+          this.#options.ok(request, { status, statusText, headers: responseHeaders } satisfies HttpResponseHead);
         },
         onBody: (chunk) => {
           if (!this.#exchanges.get(id)?.answered) return;
-          for (const bytes of slices(chunk)) {
-            this.#enqueue({ owner: id, frameId: frame.id, event: FRAME_EVENTS.httpBody, data: null, body: { bytes, wrap: (encoded) => ({ bytes: encoded }) } });
+          for (const bytes of frameChunks(chunk)) {
+            this.#enqueue(id, frame.id, FRAME_EVENTS.httpBody, { bytes, wrap: (encoded) => ({ bytes: encoded }) });
           }
         },
         onEnd: () => {
           if (!this.#exchanges.get(id)?.answered) return;
-          this.#enqueue({ owner: id, frameId: frame.id, event: FRAME_EVENTS.httpEnd, data: {} });
+          this.#enqueue(id, frame.id, FRAME_EVENTS.httpEnd, { data: {} });
           // Finished on its own: its queued events stay.
           this.#exchanges.delete(id);
         },
         onError: (message) => this.#failExchange(id, `upstream failed: ${message}`),
       },
     );
-    this.#exchanges.set(id, { frameId: frame.id, exchange, request: answering, answered: false, ended: end!, held: false });
+    this.#exchanges.set(id, { frameId: frame.id, exchange, request, answered: false, ended: end!, held: false });
     if (this.#paused) exchange.pause();
     if (end) {
-      exchange.write(EMPTY, true).catch((error: unknown) => {
-        this.#failExchange(id, `upstream failed: ${errorMessage(error)}`);
+      exchange.write(new Uint8Array(0), true).catch((error: unknown) => {
+        this.#failExchange(id, `upstream failed: ${clientErrorMessage(error)}`);
         exchange.abort();
       });
     }
@@ -392,7 +388,7 @@ export class FrameTunnel {
   #failExchange(id: string, message: string): void {
     const entry = this.#exchanges.get(id);
     if (!entry) return;
-    if (entry.answered) this.#enqueue({ owner: id, frameId: entry.frameId, event: FRAME_EVENTS.httpError, data: { message } });
+    if (entry.answered) this.#enqueue(id, entry.frameId, FRAME_EVENTS.httpError, { data: { message } });
     else {
       entry.answered = true;
       this.#options.fail(entry.request, message);
@@ -425,16 +421,12 @@ export class FrameTunnel {
     this.#options.ok(request, {});
   }
 
-  /**
-   * End an exchange early: abort it, drop its queued events, and fail its
-   * request if nothing answered it yet.
-   */
+  /** End an exchange early: abort it, and fail its request if nothing answered it yet. */
   #dropExchange(id: string): void {
     const entry = this.#exchanges.get(id);
     if (!entry) return;
     this.#exchanges.delete(id);
     entry.exchange.abort();
-    this.#dropQueued((item) => item.owner === id);
     if (!entry.answered && !this.#disposed) this.#options.fail(entry.request, 'request cancelled');
   }
 
@@ -466,17 +458,17 @@ export class FrameTunnel {
       onMessage: (data, binary) => {
         if (!this.#sockets.get(id)?.open) return;
         // An empty message is still one fragment.
-        const fragments = slices(data);
+        const fragments = frameChunks(data);
         fragments.forEach((bytes, index) => {
           const fin = index === fragments.length - 1;
-          this.#enqueue({ owner: id, frameId: frame.id, event: FRAME_EVENTS.wsMessage, data: null, body: { bytes, wrap: (encoded) => ({ data: encoded, binary, fin }) } });
+          this.#enqueue(id, frame.id, FRAME_EVENTS.wsMessage, { bytes, wrap: (encoded) => ({ data: encoded, binary, fin }) });
         });
       },
       onClose: (code, reason) => {
         const entry = this.#sockets.get(id);
         if (!entry) return;
         if (!entry.open) this.#options.fail(request, `upstream refused the socket: ${code}`);
-        else this.#enqueue({ owner: id, frameId: frame.id, event: FRAME_EVENTS.wsClosed, data: { code, reason } satisfies WsClosedEvent });
+        else this.#enqueue(id, frame.id, FRAME_EVENTS.wsClosed, { data: { code, reason } satisfies WsClosedEvent });
         this.#sockets.delete(id);
       },
     });
@@ -543,7 +535,6 @@ export class FrameTunnel {
     if (!entry) return;
     this.#sockets.delete(id);
     entry.socket.terminate();
-    this.#dropQueued((item) => item.owner === id);
     if (!entry.open && !this.#disposed) this.#options.fail(entry.request, 'socket cancelled');
   }
 
@@ -580,7 +571,7 @@ export class FrameTunnel {
   #answerWhen(request: RemoteRequest, settled: Promise<void>, failure: string): void {
     settled.then(
       () => { if (!this.#disposed) this.#options.ok(request, {}); },
-      (error: unknown) => { if (!this.#disposed) this.#options.fail(request, `${failure}: ${errorMessage(error)}`); },
+      (error: unknown) => { if (!this.#disposed) this.#options.fail(request, `${failure}: ${clientErrorMessage(error)}`); },
     );
   }
 
@@ -589,22 +580,23 @@ export class FrameTunnel {
    * allows. One queue for the whole session, so an exchange's end never
    * overtakes its own body.
    */
-  #enqueue(item: Queued): void {
+  #enqueue(owner: string, frameId: string, event: string, payload: QueuedPayload): void {
     if (this.#disposed) return;
-    this.#queue.push(item);
+    this.#queue.push({ owner, frameId, event, payload });
     this.#drain();
   }
 
   #drain(): void {
     while (this.#queue.length > 0) {
       const head = this.#queue[0]!;
-      const bytes = head.body?.bytes.length ?? 0;
+      const { payload } = head;
+      const bytes = 'bytes' in payload ? payload.bytes.length : 0;
       // A chunk larger than what is left still goes once nothing is in flight,
       // so the window can never wedge.
       if (bytes > 0 && this.#outstanding > 0 && this.#outstanding + bytes > FRAME_FLOW_WINDOW_BYTES) break;
       this.#queue.shift();
       this.#outstanding += bytes;
-      const data = head.body ? head.body.wrap(toBase64Url(head.body.bytes)) : head.data;
+      const data = 'bytes' in payload ? payload.wrap(toBase64Url(payload.bytes)) : payload.data;
       this.#options.event(head.owner, head.event, data);
     }
     // Resumed only once half the window is free, or every small ack would
@@ -638,8 +630,6 @@ export class FrameTunnel {
   }
 }
 
-const EMPTY = new Uint8Array(0);
-
 function validMethod(method: unknown): string | null {
   if (typeof method !== 'string' || method.length > MAX_METHOD_LENGTH || !TOKEN_RE.test(method)) return 'method';
   // A tunnel, not a forwarder: CONNECT asks the proxy to become one.
@@ -671,28 +661,6 @@ function decodeChunk(encoded: string): Uint8Array | null {
   try {
     const bytes = fromBase64Url(encoded);
     return bytes.length <= FRAME_CHUNK_BYTES ? bytes : null;
-  } catch {
-    return null;
-  }
-}
-
-/** `bytes` in wire-sized slices, at least one, so an empty message is still sent. */
-function slices(bytes: Uint8Array): Uint8Array[] {
-  const out = [bytes.subarray(0, FRAME_CHUNK_BYTES)];
-  for (let offset = FRAME_CHUNK_BYTES; offset < bytes.length; offset += FRAME_CHUNK_BYTES) {
-    out.push(bytes.subarray(offset, offset + FRAME_CHUNK_BYTES));
-  }
-  return out;
-}
-
-/**
- * A page URL's origin, or `null`. Which pages are tunnelable is
- * `embeddedPageOf`'s question; this only compares.
- */
-function originOf(url: string): string | null {
-  try {
-    const { origin } = new URL(url);
-    return origin === 'null' ? null : origin;
   } catch {
     return null;
   }

@@ -1315,6 +1315,20 @@ describe('burrow provider', () => {
     });
   });
 
+  it('finds one owner before a close, and closes nothing when none answers', async () => {
+    const mod = await freshBurrow();
+    const bound = fakeDeps();
+    bound.answers.set('closeOp', [{ outcome: 'closed' }]);
+    const provider = mod.createBurrowProvider(bound.deps());
+
+    expect((await provider.closeSurface('surface:1', {})).outcome).toBe('refused');
+    expect(bound.asked.map(({ op }) => op)).toEqual(['closeOwnerOp']);
+
+    bound.answers.set('closeOwnerOp', [{ ptyId: 'surface:1' }]);
+    expect(await provider.closeSurface('surface:1', { confirmed: true })).toEqual({ outcome: 'closed' });
+    expect(bound.asked.at(-1)).toEqual({ op: 'closeOp', params: { surfaceId: 'surface:1', confirmed: true } });
+  });
+
   it('reports no surface when nobody answers', async () => {
     const mod = await freshBurrow();
     const bound = fakeDeps();

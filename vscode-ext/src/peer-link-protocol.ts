@@ -162,6 +162,17 @@ export function routedPtyId(result: unknown): string | null {
   return typeof ptyId === 'string' ? ptyId : null;
 }
 
+/**
+ * The read-only question that picks one owner before `op` mutates the Surface it
+ * names, or `null` for an op that may fan out. Its answers carry the routing key.
+ */
+export function ownerProbe(op: string, params: unknown): { op: string; params: unknown } | null {
+  const named = params as { surfaceId?: unknown; op?: unknown } | null;
+  if (op === 'surfaceOp' && named?.op === 'attach') return { op, params: { ...named, op: 'resolve' } };
+  if (op === 'closeOp') return { op: 'closeOwnerOp', params: { surfaceId: named?.surfaceId } };
+  return null;
+}
+
 export function forgetPeerRoutes<T>(routes: Map<string, T>, peer: T): string[] {
   const dropped: string[] = [];
   for (const [ptyId, owner] of routes) {

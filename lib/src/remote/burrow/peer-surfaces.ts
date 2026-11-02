@@ -4,9 +4,14 @@
  * transport layers keep `op` opaque.
  */
 
-import type { SurfaceCloseParams, SurfaceCloseResult } from 'remote-lib-common';
+import {
+  clampTerminalDimension,
+  type DirectoryBrowser,
+  type DirectoryEntry,
+  type SurfaceCloseParams,
+  type SurfaceCloseResult,
+} from 'remote-lib-common';
 import { answerClientClose, answerClientCloseOwner } from './client-close';
-import { clampTerminalDimension, type DirectoryBrowser, type DirectoryEntry } from 'remote-lib-common';
 import { subscribeAgentBrowserScreenPages } from '../../components/wall/agent-browser-screen';
 import type { BurrowStatusEvent } from '../../host/remote/service-protocol';
 import { getPlatform } from '../../lib/platform';
@@ -73,7 +78,7 @@ export interface PeerOps {
   surfaceOp: { params: PeerSurfaceParams; result: PeerSurfaceResult };
   /** The page a Surface embeds (`embedded-pages.ts`); answered by its owner alone. */
   browserOp: { params: { surfaceId: string }; result: DirectoryBrowser };
-  /** The read-only probe that picks one owner before a close; answered by an owner. */
+  /** Which window a close goes to, where windows can hold duplicates; answered by an owner. */
   closeOwnerOp: { params: { surfaceId: string }; result: { ptyId: string } };
   /** A Client's close (`client-close.ts`); answered by its owner alone. */
   closeOp: { params: SurfaceCloseParams; result: SurfaceCloseResult };

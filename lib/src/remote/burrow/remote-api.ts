@@ -8,6 +8,7 @@ import {
   REMOTE_EVENTS,
   REMOTE_METHODS,
   clampTerminalDimension,
+  isBoundedString,
   fromBase64Url,
   toBase64Url,
   utf8Decode,
@@ -28,7 +29,8 @@ import {
 import { inputIsReplayTerminalReport } from '../../lib/terminal-report-filter';
 import type { BurrowFrameHost } from './burrow-frame-host';
 import type { BurrowSurfaceProvider, SurfaceHandle, SurfaceHold } from './burrow-surface-provider';
-import { errorMessage, FrameTunnel, MAX_SURFACE_ID_LENGTH } from './frame-tunnel';
+import { clientErrorMessage } from '../../lib/errors';
+import { FrameTunnel, MAX_SURFACE_ID_LENGTH } from './frame-tunnel';
 
 /** Coalesce window for directory re-snapshots (remote-api.md: "Burrow coalesces"). */
 const DIRECTORY_DEBOUNCE_MS = 150;
@@ -152,7 +154,7 @@ export class RemoteApiSession {
           return this.#fail(request, `unknown method: ${request.method}`);
       }
     } catch (error) {
-      this.#fail(request, error instanceof Error ? error.message : 'internal error');
+      this.#fail(request, clientErrorMessage(error));
     }
   }
 
@@ -253,7 +255,7 @@ export class RemoteApiSession {
   #surfaceClose(request: RemoteRequest): void {
     const { surfaceId, confirmed, unsaved } = (request.params ?? {}) as Partial<SurfaceCloseParams>;
     if (!this.#listsFrames) return this.#fail(request, 'this session closes nothing');
-    if (typeof surfaceId !== 'string' || !surfaceId || surfaceId.length > MAX_SURFACE_ID_LENGTH) {
+    if (!surfaceId || !isBoundedString(surfaceId, MAX_SURFACE_ID_LENGTH)) {
       return this.#fail(request, 'invalid surface.close: surfaceId');
     }
     if ((confirmed !== undefined && typeof confirmed !== 'boolean') || (unsaved !== undefined && unsaved !== 'save' && unsaved !== 'discard')) {
@@ -383,7 +385,7 @@ export class RemoteApiSession {
             request,
             params.surfaceId,
             generation,
-            `surface attach failed: ${errorMessage(error)}`,
+            `surface attach failed: ${clientErrorMessage(error)}`,
           );
           return;
         }
@@ -396,7 +398,7 @@ export class RemoteApiSession {
           request,
           params.surfaceId,
           generation,
-          `surface attach failed: ${errorMessage(error)}`,
+          `surface attach failed: ${clientErrorMessage(error)}`,
         );
       },
     );
@@ -527,7 +529,7 @@ export class RemoteApiSession {
             request,
             params.surfaceId,
             generation,
-            `surface attach failed: ${errorMessage(error)}`,
+            `surface attach failed: ${clientErrorMessage(error)}`,
           );
         });
         return;
@@ -551,7 +553,7 @@ export class RemoteApiSession {
         generation,
         closed
           ? `surface closed while attaching: ${params.surfaceId}`
-          : `surface attach failed: ${errorMessage(error)}`,
+          : `surface attach failed: ${clientErrorMessage(error)}`,
       );
     });
   }
@@ -604,7 +606,7 @@ export class RemoteApiSession {
       },
       (error) => {
         if (this.#disposed) return;
-        this.#fail(request, `terminal resize failed: ${errorMessage(error)}`);
+        this.#fail(request, `terminal resize failed: ${clientErrorMessage(error)}`);
       },
     );
   }
