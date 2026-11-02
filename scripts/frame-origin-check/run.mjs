@@ -9,7 +9,6 @@
 import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -21,21 +20,12 @@ const { chromium } = createRequire(join(root, 'lib', 'package.json'))('playwrigh
 /** Past the check page's own 180 s limit on the framed page, so its failure is the one reported. */
 const RUN_TIMEOUT_MS = 240_000;
 const RUNS = 2;
+/** `serve.mjs`'s default. */
+const POCKET_ORIGIN = 'http://localhost:47321/';
 
-const freePort = () => new Promise((resolve, reject) => {
-  const probe = createServer();
-  probe.on('error', reject);
-  probe.listen(0, '127.0.0.1', () => {
-    const { port } = probe.address();
-    probe.close(() => resolve(port));
-  });
-});
-
-const [pocketPort, framePort] = [await freePort(), await freePort()];
 const reports = mkdtempSync(join(tmpdir(), 'frame-origin-check-'));
 const server = spawn(process.execPath, [
-  join(here, 'serve.mjs'), '--pocket-port', String(pocketPort), '--frame-port', String(framePort), '--reports', reports,
-  '--case', 'cross-site',
+  join(here, 'serve.mjs'), '--reports', reports, '--case', 'cross-site',
 ], { stdio: ['ignore', 'pipe', 'inherit'] });
 const listening = new Promise((resolve, reject) => {
   server.on('exit', (code) => reject(new Error(`serve.mjs exited with ${code}`)));
@@ -54,7 +44,7 @@ try {
   page.on('pageerror', (error) => console.error(`page error: ${error.message}`));
   for (let run = 1; run <= RUNS && !failed; run += 1) {
     const reported = page.waitForResponse((response) => new URL(response.url()).pathname === '/report', { timeout: RUN_TIMEOUT_MS });
-    await page.goto(`http://localhost:${pocketPort}/`);
+    await page.goto(POCKET_ORIGIN);
     const { results } = (await reported).request().postDataJSON();
     const failures = results.filter((result) => !result.ok);
     console.log(`run ${run}: ${results.length - failures.length} of ${results.length} passed`);
