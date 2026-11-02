@@ -1,12 +1,12 @@
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
-import { CaretDownIcon, XIcon } from '@phosphor-icons/react';
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { ArrowClockwiseIcon, BrowserIcon, CaretDownIcon, TerminalWindowIcon, XIcon } from '@phosphor-icons/react';
 import { clsx } from 'clsx';
 import { HeaderActionButton } from './HeaderActionButton';
 import { TerminalPane } from './TerminalPane';
 import { AlertRingInset, alertRingRow, useAlertRingBurst } from './alert-ring';
 import { chromeButton, HEADER_PILL_CLASS, MOBILE_BAR_HEIGHT_CLASS } from './design';
 import { useTodoPillContent } from './TodoPillBody';
-import type { MobileTerminalSessionItem } from './MobileTerminalUi';
+import type { MobileSurfaceKind, MobileTerminalSessionItem } from './MobileTerminalUi';
 import {
   clearSessionTodo,
   DEFAULT_ACTIVITY_STATE,
@@ -29,6 +29,8 @@ import {
 export interface MobileWallSession {
   id: string;
   title?: string;
+  /** Absent reads as `terminal`. A `page` has no terminal to mount. */
+  kind?: MobileSurfaceKind;
 }
 
 export interface MobileWallProps {
@@ -44,10 +46,18 @@ export interface MobileWallProps {
   onShowSessions?: () => void;
   onSessionKill?: (id: string) => void;
   showKillButton?: boolean;
+  /** What covers the active Session's terminal; omitted, nothing does. */
+  page?: ReactNode;
+  /** A Tool's choice of its page over its terminal, which its header switches. */
+  pageShown?: boolean;
+  onPageShownChange?: (shown: boolean) => void;
+  /** Reloads the shown page; omitted, the header offers no reload. */
+  onPageReload?: () => void;
   className?: string;
 }
 
 const DEFAULT_MOBILE_SESSION: MobileWallSession = { id: 'mobile-pane' };
+const HEADER_BUTTON_CLASS = chromeButton({ kind: 'window', class: clsx(MOBILE_BAR_HEIGHT_CLASS, 'shrink-0') });
 
 
 export function useMobileWallSessionItems(
@@ -73,6 +83,7 @@ export function useMobileWallSessionItems(
     const primary = resolveDisplayPrimary(derivedHeader.primary, session.title);
     return {
       id: session.id,
+      kind: session.kind,
       title: primary === DEFAULT_IDLE_TITLE && session.title ? session.title : primary,
       secondary: derivedHeader.secondary,
       active: session.id === activeSessionId,
@@ -93,6 +104,10 @@ export function MobileWall({
   onShowSessions,
   onSessionKill,
   showKillButton = true,
+  page,
+  pageShown = false,
+  onPageShownChange,
+  onPageReload,
   className,
 }: MobileWallProps) {
   const [internalSessions, setInternalSessions] = useState<MobileWallSession[]>(() => controlledSessions ?? [DEFAULT_MOBILE_SESSION]);
@@ -128,6 +143,7 @@ export function MobileWall({
 
   useEffect(() => {
     for (const session of sessions) {
+      if (session.kind === 'page') continue;
       getOrCreateTerminal(session.id);
       if (session.title) setTerminalUserTitle(session.id, session.title);
     }
@@ -142,6 +158,8 @@ export function MobileWall({
       selectSession(firstSessionId);
     }
   }, [firstSessionId, resolvedActiveSessionId, selectSession, sessions]);
+
+  const showingPage = activeItem?.kind === 'page' || (activeItem?.kind === 'tool' && pageShown);
 
   if (!activeItem) {
     return (
@@ -159,11 +177,22 @@ export function MobileWall({
         onShowSessions={onShowSessions}
         onKill={() => killSession(activeItem.id)}
         showKillButton={showKillButton}
+        showingPage={showingPage}
+        onPageShownChange={activeItem.kind === 'tool' ? onPageShownChange : undefined}
+        onPageReload={showingPage ? onPageReload : undefined}
       />
       {/* `MobileTerminalUi` acknowledges a touch or keystroke on this pane —
           the only way a ring goes out here (`docs/specs/alert.md` -> Pane Header). */}
-      <div className="min-h-0 flex-1 overflow-hidden bg-terminal-bg">
-        <TerminalPane id={activeItem.id} isFocused />
+      <div className="relative min-h-0 flex-1 overflow-hidden bg-terminal-bg">
+        {activeItem.kind === 'page' ? null : <TerminalPane id={activeItem.id} isFocused={!showingPage} />}
+        {/* Over a Tool's terminal rather than instead of it, which keeps its size.
+            Past the safe area, as an iframe cannot read it for itself. */}
+        <div
+          className={clsx('absolute inset-0 pb-[env(safe-area-inset-bottom)]', !showingPage && 'invisible')}
+          data-mobile-page-layer
+        >
+          {page}
+        </div>
       </div>
     </div>
   );
@@ -175,12 +204,18 @@ function MobileWallHeader({
   onShowSessions,
   onKill,
   showKillButton,
+  showingPage,
+  onPageShownChange,
+  onPageReload,
 }: {
   session: MobileTerminalSessionItem;
   onTodoClear?: () => void;
   onShowSessions?: () => void;
   onKill: () => void;
   showKillButton: boolean;
+  showingPage: boolean;
+  onPageShownChange?: (shown: boolean) => void;
+  onPageReload?: () => void;
 }) {
   const todoPill = useTodoPillContent(session.todo === true);
   const TodoPill = onTodoClear ? 'button' : 'span';
@@ -219,6 +254,21 @@ function MobileWallHeader({
         >
           {todoPill.body}
         </TodoPill>
+      ) : null}
+      {onPageReload ? (
+        <HeaderActionButton className={HEADER_BUTTON_CLASS} onClick={onPageReload} ariaLabel="Reload page" tooltip="Reload page">
+          <ArrowClockwiseIcon size={16} />
+        </HeaderActionButton>
+      ) : null}
+      {onPageShownChange ? (
+        <HeaderActionButton
+          className={HEADER_BUTTON_CLASS}
+          onClick={() => onPageShownChange(!showingPage)}
+          ariaLabel={showingPage ? 'Show terminal' : 'Show page'}
+          tooltip={showingPage ? 'Show terminal' : 'Show page'}
+        >
+          {showingPage ? <TerminalWindowIcon size={16} /> : <BrowserIcon size={16} />}
+        </HeaderActionButton>
       ) : null}
       {showKillButton ? (
         <HeaderActionButton

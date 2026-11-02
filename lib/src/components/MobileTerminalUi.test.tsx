@@ -269,6 +269,20 @@ describe('MobileTerminalUi physical keyboard', () => {
     expect(onPaste).not.toHaveBeenCalled();
   });
 
+  it('leaves keys, touches, and the screen to a shown page', () => {
+    const onSendInput = vi.fn();
+    const { container, terminal, button } = renderUi({ pageShown: true, onSendInput });
+    expect(button('Type')).toBeNull();
+    expect(button('Gestures')).toBeNull();
+    expect(keydown(document.body, { key: 'a' }).defaultPrevented).toBe(false);
+    expect(container.querySelector('.touch-none')).toBeNull();
+    const press = pointerEvent('pointerdown');
+    act(() => void terminal.dispatchEvent(press));
+    expect(press.defaultPrevented).toBe(false);
+    expect(setPointerCapture).not.toHaveBeenCalled();
+    expect(onSendInput).not.toHaveBeenCalled();
+  });
+
   it('types into the terminal while nothing is focused', () => {
     const onSendInput = vi.fn();
     renderUi({ onSendInput });

@@ -107,6 +107,18 @@ Tapping the Session title in the `MobileWall` header asks the consumer to show t
 
 Source of truth: `SessionsScreen` in `lib/src/components/MobileTerminalUi.tsx`; `MobileSettings` in `lib/src/components/MobileSettings.tsx`; `useMobileFontSize` in `lib/src/lib/mobile-font-size.ts`; `setTerminalFontSize` in `lib/src/lib/terminal-lifecycle.ts`.
 
+## Pages
+
+A Session whose `kind` is `page` shows an embedded page alone, and a `tool` shows its page over its terminal, which stays mounted beneath at its size. What fills the page is the consumer's, with a status from `MobilePagePane`.
+
+* **A Tool must open on its page**, with the header's button switching to its terminal and back.
+* **Must keep the header on a page, and drop the bottom bar and the composer**: touches and keys belong to the page while it shows, so no gesture, touch mode, or physical key reaches the terminal (rationale).
+* **Must not mount a terminal for a `page`.**
+* **The page layer ends at the bottom safe area**, which a framed document cannot read for itself.
+* **A session that cannot carry a page says why, and how to get one**: the direct path's wait and a relayed session's note are `MobilePagePane`'s, the note naming a VPN on both devices and a reconnect, since a session tries the direct path once (`docs/specs/remote-api.md` -> "Frames").
+
+Source of truth: `MobileWall` in `lib/src/components/MobileWall.tsx`; `MobilePagePane` in `lib/src/components/MobilePagePane.tsx`; `pageShown` in `lib/src/components/MobileTerminalUi.tsx`.
+
 ## Keyboard focus invariant
 
 **Pane-content touches must never open the native keyboard.** The pane content area may focus the terminal internally for key routing or mouse handling, but every text input the terminal surface creates — later-mounted ones included — is a non-keyboard target, blurred when the touch starts there; **that blur repeats across the window in which `Wall` can restore focus** (rationale). **The only mobile UI surface that may open the native keyboard is the composer.**

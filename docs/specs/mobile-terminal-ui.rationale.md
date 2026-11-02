@@ -27,3 +27,7 @@ The edge gesture routes to either terminal history or a mouse-reporting TUI, nei
 ## Keyboard focus invariant
 
 **Why one blur is not enough.** `Wall` can restore xterm focus in a `requestAnimationFrame` after the touch, undoing a single synchronous blur a frame later. Repeating across a rAF and staggered timers covers that window.
+
+## Pages
+
+**Why the bar goes.** Its touch modes and Type all act on a terminal, so on a page they would be controls that do nothing, taking height from the page (decided 2026-11-01). The header stays because it is the way to Sessions and to a Tool's terminal.
