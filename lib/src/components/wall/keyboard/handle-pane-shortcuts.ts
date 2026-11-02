@@ -16,9 +16,10 @@ function openHeaderContext(ctx: WallKeyboardCtx, id: string): void {
 }
 
 /** Keep aligned with the pane handlers below. Workspace selections consume
- *  these keys; an omitted key returns unhandled without dispatching a pane action.
+ *  these keys; an omitted key returns unhandled without dispatching a pane action,
+ *  and a printable one raises the stray-key prompt.
  *  Pinned by the independent key list in handle-pane-navigation.test.ts. */
-const PANE_VERB_KEYS: ReadonlySet<string> = new Set(['Enter', '|', '%', '-', '"', 'k', 'x', ',', 'm', 'd', 't', 'a', 'z', '>']);
+export const PANE_VERB_KEYS: ReadonlySet<string> = new Set(['Enter', '|', '%', '-', '"', 'k', 'x', ',', 'm', 'd', 't', 'a', 'z', '>']);
 
 /** Command-mode shortcuts acting on the selected pane or Door. The binding
  *  table is `docs/specs/shortcuts.md`; the behavior is `docs/specs/layout.md`. */
