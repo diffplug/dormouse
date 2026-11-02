@@ -299,7 +299,7 @@ function MobileWallHeader({
       >
         <span className="min-w-0 shrink truncate font-medium">{session.title}</span>
         {session.secondary ? (
-          <span className="min-w-0 shrink truncate opacity-70">{session.secondary}</span>
+          <span className="min-w-0 shrink-[1000] truncate opacity-70">{session.secondary}</span>
         ) : null}
         {onShowSessions ? (
           <CaretDownIcon size={10} weight="bold" className="shrink-0 opacity-65" aria-hidden="true" />
