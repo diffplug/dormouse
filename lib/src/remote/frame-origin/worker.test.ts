@@ -25,16 +25,13 @@ describe('refusal', () => {
 });
 
 describe('relayHeaders', () => {
-  const of = (method: string, referrer: string, headers: Record<string, string> = {}) =>
-    relayHeaders({ method, mode: 'cors', referrer, headers: new Headers(headers) }, ORIGIN);
+  const of = (method: string, referrer: string, headers: Record<string, string> = {}, mode: RequestMode = 'cors') =>
+    relayHeaders({ method, mode, referrer, headers: new Headers(headers) }, ORIGIN);
 
   it('vouches for no form that names no referrer, though it does for a fetch', () => {
-    const form = relayHeaders({ method: 'POST', mode: 'navigate', referrer: '', headers: new Headers() }, ORIGIN);
-    expect(form).toEqual([['origin', 'null']]);
-    const fetched = relayHeaders({ method: 'POST', mode: 'cors', referrer: '', headers: new Headers() }, ORIGIN);
-    expect(fetched).toEqual([['origin', ORIGIN]]);
-    const own = relayHeaders({ method: 'POST', mode: 'navigate', referrer: `${ORIGIN}/a`, headers: new Headers() }, ORIGIN);
-    expect(own).toContainEqual(['origin', ORIGIN]);
+    expect(of('POST', '', {}, 'navigate')).toEqual([['origin', 'null']]);
+    expect(of('POST', '')).toEqual([['origin', ORIGIN]]);
+    expect(of('POST', `${ORIGIN}/a`, {}, 'navigate')).toContainEqual(['origin', ORIGIN]);
   });
 
   it('names the frame origin on a write only, and carries the referrer', () => {

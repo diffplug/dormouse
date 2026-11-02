@@ -13,10 +13,12 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 let container: HTMLDivElement;
 let root: Root;
 let close: (id: string) => void;
+let closingId: string | null;
 
 function Harness({ session }: { session: SurfaceCloseSession }) {
   const result = useSurfaceClose(session);
   close = result.close;
+  closingId = result.closing;
   return result.dialog ? <MobileCloseDialog state={result.dialog} /> : null;
 }
 
@@ -172,19 +174,17 @@ describe('useSurfaceClose', () => {
     frame.remove();
   });
 
-  it('asks again about edits made while the computer was answering, once', async () => {
-    const { session, asked } = sessionAnswering({ outcome: 'confirm' }, { outcome: 'unsaved', label: 'x' }, { outcome: 'closed' });
+  it('names the Surface it is closing until the close ends, however it ends', async () => {
+    const { session } = sessionAnswering({ outcome: 'confirm' }, { outcome: 'closed' });
     await start(session);
-    await act(async () => { recordToolDirty('surface:1', true); });
+    expect(closingId).toBe('surface:1');
     await press(/^Confirm with/);
-    expect(dialogTitle()).toBe('Save changes?');
-    expect(asked).toHaveLength(1);
-    await press('Discard');
-    // The computer's own unsaved edits are asked about; the phone's are not again.
-    expect(asked[1]).toEqual({ surfaceId: 'surface:1', confirmed: true });
-    await press('Discard');
-    expect(asked[2]).toEqual({ surfaceId: 'surface:1', confirmed: true, unsaved: 'discard' });
-    expect(dialogTitle()).toBeNull();
+    expect(closingId).toBeNull();
+    const refusing = sessionAnswering({ outcome: 'refused', message: 'no' });
+    await start(refusing.session);
+    expect(closingId).toBe('surface:1');
+    await press('OK');
+    expect(closingId).toBeNull();
   });
 
   it('goes with the wall, leaving nothing whose answer would reach the next Burrow', async () => {

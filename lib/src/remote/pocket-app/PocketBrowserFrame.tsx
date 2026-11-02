@@ -38,6 +38,8 @@ export interface PocketBrowserFrameProps {
   originFor: (surfaceId: string, pageOrigin: string) => Promise<string>;
   transport: FrameTransport;
   visible: boolean;
+  /** A close is deciding on what this page holds, so it takes no more for now. */
+  frozen: boolean;
   onReconnect: () => void;
   onShowSessions: () => void;
 }
@@ -56,6 +58,7 @@ export function PocketBrowserFrame({
   originFor,
   transport,
   visible,
+  frozen,
   onReconnect,
   onShowSessions,
 }: PocketBrowserFrameProps): React.ReactElement {
@@ -168,7 +171,7 @@ export function PocketBrowserFrame({
       : { kind: joined && loaded ? 'ready' : 'loading' });
 
   return (
-    <div className={clsx('absolute inset-0', !visible && 'invisible')}>
+    <div className={clsx('absolute inset-0', !visible && 'invisible')} inert={frozen}>
       {opened && !ended ? (
         <iframe
           key={opened.frame.id}

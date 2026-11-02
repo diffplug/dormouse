@@ -22,13 +22,17 @@ const MAX_ANSWERS = 3;
 export function useSurfaceClose(session: SurfaceCloseSession | null): {
   close: (surfaceId: string) => void;
   dialog: MobileCloseDialogState | null;
+  /** The Surface being closed, whose page takes no edits the question was not about. */
+  closing: string | null;
 } {
   const [asked, setAsked] = useState<MobileCloseDialogState | null>(null);
   const closing = useRef(false);
+  const [closingId, setClosingId] = useState<string | null>(null);
 
   const close = useCallback((surfaceId: string) => {
     if (!session || closing.current) return;
     closing.current = true;
+    setClosingId(surfaceId);
     /**
      * Show a dialog until its answer. It goes with this hook and so with the
      * session, leaving nothing to answer: `session` forwards to whichever Burrow
@@ -64,17 +68,11 @@ export function useSurfaceClose(session: SurfaceCloseSession | null): {
       });
       return dialog(false);
     });
-    // A discard never declares the document clean, so it is remembered here.
-    let discarded = false;
     void (async () => {
       try {
+        if (getToolDirty(surfaceId) === true && !(await ownEdits())) return;
         const params: SurfaceCloseParams = { surfaceId };
         for (let answers = 0; answers < MAX_ANSWERS; answers += 1) {
-          // Before every ask: the page stays editable while the computer answers.
-          if (getToolDirty(surfaceId) === true) {
-            if (!discarded && !(await ownEdits())) return;
-            discarded = getToolDirty(surfaceId) === true;
-          }
           const result = await session.request<SurfaceCloseResult>(REMOTE_METHODS.surfaceClose, params);
           if (result.outcome === 'closed') return;
           if (result.outcome === 'refused') {
@@ -94,9 +92,10 @@ export function useSurfaceClose(session: SurfaceCloseSession | null): {
         await refused(messageOf(error));
       } finally {
         closing.current = false;
+        setClosingId(null);
       }
     })();
   }, [session]);
 
-  return { close, dialog: asked };
+  return { close, dialog: asked, closing: closingId };
 }

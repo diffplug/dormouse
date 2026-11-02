@@ -29,6 +29,7 @@ function props(over: Partial<PocketBrowserFrameProps> = {}): PocketBrowserFrameP
     originFor: originForFixed,
     transport: DIRECT,
     visible: true,
+    frozen: false,
     onReconnect: vi.fn(),
     onShowSessions: vi.fn(),
     ...over,

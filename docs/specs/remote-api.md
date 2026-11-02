@@ -197,7 +197,7 @@ Source of truth: `lib/src/remote/burrow/peer-surfaces.ts` (the owner's half), `t
 - **Must decide in the kill gesture's order, with its refusals and prompts in their words** (`docs/specs/reopen.md` -> "The rule", `docs/specs/layout.md` -> "Kill confirmation", `docs/specs/dor-tool.md` -> "Closing unsaved Tools"): a transfer or a helper's running work refuses, a close that must confirm answers `confirm`, unsaved edits answer `unsaved`, and anything else closes. Consent answers a prompt and skips no refusal.
 - **A close must reach one window's copy**, and close nothing when no owner answers (`docs/specs/vscode.md` -> "Peer surfaces").
 - **Must leave a reopen record as the gesture does**, and log `closed` in the access log.
-- **A Client must ask about its own copy's unsaved edits first**, which the Burrow cannot see: a frame is its own document.
+- **A Client must ask about its own copy's unsaved edits first, and hold that page still until the close ends**, since the Burrow cannot see them: a frame is its own document.
 - **A Client must abandon a close and its prompts when the session ends**, or the answer reaches whichever Burrow it connects to next, where the same id may name another Surface.
 - **Must close only what its consent covered**: `discard` answers the edits that prompted it, so edits arriving after a save or a clean read refuse the close. **Must judge the Surface's kind again at the close itself**, a Tool's command being able to end during the wait.
 - Labs delayed kill does not apply: a close that would go pending confirms instead, since the person is at the Client and a pending kill undoes only at the Burrow.

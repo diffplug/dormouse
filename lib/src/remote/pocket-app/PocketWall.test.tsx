@@ -166,6 +166,30 @@ it('opens a frame on a live client under StrictMode, whose effects run twice', a
   expect(session.subscribe).toHaveBeenCalledWith('frame.open', expect.objectContaining({ surfaceId: 'remote' }), expect.any(Function), expect.any(String));
 });
 
+const settle = () => act(() => new Promise<void>((resolve) => { setTimeout(resolve, 10); }));
+
+it('holds a page still while it is being closed, so no edit lands unasked', async () => {
+  let answer: (result: unknown) => void = () => {};
+  const session = {
+    request: vi.fn(() => new Promise((resolve) => { answer = resolve; })),
+    subscribe: vi.fn(async (_method: string, _params: unknown, _listener: unknown, subId: string) => ({ subId, result: { path: '/' } })),
+    unsubscribe: vi.fn(),
+  };
+  snapshot = [{ ...snapshot[0]!, browser: page }];
+  await act(async () => root.render(
+    <PocketWall adapter={adapter} browsers={{ ...browsers(), session, transport: { path: 'direct', cause: null } } as never} />,
+  ));
+  await settle();
+  const frozen = () => container.querySelector('iframe[title="Frame bootstrap"]')!.closest('[inert]') !== null;
+  expect(frozen()).toBe(false);
+  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Kill"]')!.click());
+  expect(session.request).toHaveBeenCalledOnce();
+  expect(frozen()).toBe(true);
+  await act(async () => answer({ outcome: 'closed' }));
+  await settle();
+  expect(frozen()).toBe(false);
+});
+
 it('never moves a kept page in the DOM, which would reload it', async () => {
   const other = { ...snapshot[0]!, surfaceId: 'other', paneRef: 'other', title: 'Other', browser: page };
   const first = { ...snapshot[0]!, browser: page };
@@ -178,14 +202,14 @@ it('never moves a kept page in the DOM, which would reload it', async () => {
   await act(async () => root.render(
     <PocketWall adapter={adapter} browsers={{ ...browsers(), session, transport: { path: 'direct', cause: null } } as never} />,
   ));
-  await act(() => new Promise<void>((resolve) => { setTimeout(resolve, 10); }));
+  await settle();
   const frames = () => [...container.querySelectorAll('iframe[title="Frame bootstrap"]')];
   await act(async () => fake.select?.('other'));
-  await act(() => new Promise<void>((resolve) => { setTimeout(resolve, 10); }));
+  await settle();
   const both = frames();
   expect(both).toHaveLength(2);
   await act(async () => fake.select?.('remote'));
-  await act(() => new Promise<void>((resolve) => { setTimeout(resolve, 10); }));
+  await settle();
   expect(frames()).toEqual(both);
   expect(session.subscribe).toHaveBeenCalledTimes(2);
 });
