@@ -13,14 +13,12 @@ import {
 import { flushSync } from 'react-dom';
 import {
   ArrowLeftIcon,
-  BrowserIcon,
   CursorClickIcon,
   CursorTextIcon,
   GearSixIcon,
   HandPointingIcon,
   TerminalWindowIcon,
   TextTIcon,
-  WrenchIcon,
 } from '@phosphor-icons/react';
 import { clsx } from 'clsx';
 import {
@@ -44,6 +42,8 @@ import {
 import { useDynamicPalette } from '../lib/themes/use-dynamic-palette';
 import { isComposingKey, isEditableTarget } from '../lib/dom';
 import { TouchUiContext } from './touch-ui-context';
+import type { BrowserDisplayMode } from './wall/agent-browser-screen';
+import { BrowserDisplayIcon } from './wall/BrowserDisplayIcon';
 import { ClipboardFailureGlobal } from './ClipboardFailureDialog';
 import { chromeButton, MOBILE_BAR_HEIGHT_CLASS, modalActionButton, TODO_PILL_TRACKING_CLASS } from './design';
 import { AlertRingInset, alertRingRow, useAlertRingBurst } from './alert-ring';
@@ -66,13 +66,15 @@ export interface MobileTerminalSessionGroup {
   label: string;
 }
 
-/** What a Session shows: a terminal, an embedded page alone, or a Tool's page over its terminal. */
-export type MobileSurfaceKind = 'terminal' | 'page' | 'tool';
+/** What a Session has: a terminal, a browser alone, or a Tool's browser over its terminal. */
+export type MobileSurfaceKind = 'terminal' | 'browser' | 'tool';
 
 export interface MobileTerminalSessionItem {
   id: string;
   /** Absent reads as `terminal`. */
   kind?: MobileSurfaceKind;
+  /** How a `browser` or `tool` shows its browser; the desktop's glyphs name it. */
+  browserDisplay?: BrowserDisplayMode;
   title: string;
   /** Rows sharing a group list together under its label, in first-row order;
    *  a list whose rows share one group shows no label. */
@@ -159,10 +161,10 @@ export interface MobileTerminalUiProps {
   /** The Sessions screen's Settings page; omitted, the screen has no Settings. */
   settings?: ReactNode;
   /**
-   * The active Session shows a page, not its terminal: the bar and the composer
-   * go, and touches and keys are the page's.
+   * The active Session shows its browser, not its terminal: the bar and the
+   * composer go, and touches and keys are the browser's.
    */
-  pageShown?: boolean;
+  browserShown?: boolean;
   interactive?: boolean;
   fillViewport?: boolean;
   className?: string;
@@ -506,12 +508,6 @@ function groupSessions(
 
 /** A row is its own component so it can hold the burst hook; the mobile list has
  *  no speech sink, so the unlabelled row is the only one it ever wears. */
-const SESSION_KIND_ICONS: Record<MobileSurfaceKind, ComponentType<{ size?: number; weight?: 'regular' | 'bold'; className?: string }>> = {
-  terminal: TerminalWindowIcon,
-  page: BrowserIcon,
-  tool: WrenchIcon,
-};
-
 function SessionRow({ session, disabled, onSelect }: {
   session: MobileTerminalSessionItem;
   disabled: boolean;
@@ -520,7 +516,6 @@ function SessionRow({ session, disabled, onSelect }: {
   const active = session.active === true;
   const row = alertRingRow(session.status, null);
   const burst = useAlertRingBurst(row, session.episode);
-  const Icon = SESSION_KIND_ICONS[session.kind ?? 'terminal'];
 
   return (
     <button
@@ -540,7 +535,9 @@ function SessionRow({ session, disabled, onSelect }: {
           : 'bg-app-bg text-app-fg',
       )}
     >
-      <Icon size={15} weight={active ? 'bold' : 'regular'} className="shrink-0" />
+      {session.kind === 'browser' || session.kind === 'tool'
+        ? <BrowserDisplayIcon mode={session.browserDisplay ?? 'iframe'} size={15} />
+        : <TerminalWindowIcon size={15} weight={active ? 'bold' : 'regular'} className="shrink-0" />}
       <span className="min-w-0 flex-1">
         <span className="block truncate font-medium">{session.title}</span>
         {session.secondary ? (
@@ -681,7 +678,7 @@ export function MobileTerminalUi({
   sessions = [],
   onSessionSelect,
   settings,
-  pageShown = false,
+  browserShown = false,
   interactive = true,
   fillViewport = false,
   className,
@@ -693,7 +690,7 @@ export function MobileTerminalUi({
   const [internalTouchMode, setInternalTouchMode] = useState<MobileTerminalTouchMode>(defaultTouchMode);
   const view = activeView ?? internalView;
   const touchMode = activeTouchMode ?? internalTouchMode;
-  const terminalInteractive = interactive && !pageShown;
+  const terminalInteractive = interactive && !browserShown;
   const activeSessionId = sessions.find((session) => session.active)?.id;
   const rootRef = useRef<HTMLDivElement | null>(null);
   const terminalHostRef = useRef<HTMLDivElement | null>(null);
@@ -987,7 +984,7 @@ export function MobileTerminalUi({
   const handlePanePointerDownCapture = useCallback((event: PointerEvent<HTMLDivElement>) => {
     // A second finger may stop a coast, but must not steal a live edge drag.
     if (edgeMomentumFrameRef.current !== null) stopEdgeScroll();
-    if (pageShown || isPortaledTarget(event) || isHostControlTarget(event.target)) {
+    if (browserShown || isPortaledTarget(event) || isHostControlTarget(event.target)) {
       pendingTapRef.current = null;
       return;
     }
@@ -1028,7 +1025,7 @@ export function MobileTerminalUi({
       return;
     }
     commitGestureState(beginMobileGesture(event.pointerId, origin, displayOriginAwayFromThumb(origin, rect)));
-  }, [activeSessionId, blurPaneTextInputs, clearGestureCompletionTimer, commitGestureState, interactive, pageShown, touchMode, stopEdgeScroll]);
+  }, [activeSessionId, blurPaneTextInputs, clearGestureCompletionTimer, commitGestureState, interactive, browserShown, touchMode, stopEdgeScroll]);
 
   const handlePanePointerMoveCapture = useCallback((event: PointerEvent<HTMLDivElement>) => {
     const tap = pendingTapRef.current;
@@ -1140,9 +1137,9 @@ export function MobileTerminalUi({
   }, [commitGestureState, endEdgeScroll, executeGestureAction, scheduleGestureCompletionClear]);
 
   const handlePaneFocusStartCapture = useCallback((event: SyntheticEvent<HTMLDivElement>) => {
-    if (pageShown || isPortaledTarget(event)) return;
+    if (browserShown || isPortaledTarget(event)) return;
     blurPaneTextInputs();
-  }, [blurPaneTextInputs, pageShown]);
+  }, [blurPaneTextInputs, browserShown]);
 
   const handlePanePointerCancelCapture = useCallback((event: PointerEvent<HTMLDivElement>) => {
     if (pendingTapRef.current?.pointerId === event.pointerId) pendingTapRef.current = null;
@@ -1189,7 +1186,7 @@ export function MobileTerminalUi({
         ref={terminalHostRef}
         className={clsx(
           'relative min-h-0 flex-1 overflow-hidden bg-terminal-bg',
-          !pageShown && 'touch-none',
+          !browserShown && 'touch-none',
           terminalClassName,
         )}
         style={inset.pan ? { transform: `translateY(-${inset.pan}px)` } : undefined}
@@ -1211,7 +1208,7 @@ export function MobileTerminalUi({
         ) : null}
       </div>
 
-      {pageShown ? null : (
+      {browserShown ? null : (
         <ModeBar
           mode={touchMode}
           cursorAvailable={cursorTouchAvailable}

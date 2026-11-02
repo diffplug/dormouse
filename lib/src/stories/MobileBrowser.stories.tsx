@@ -1,30 +1,33 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
 import { expect, userEvent, within } from 'storybook/test';
-import { MobilePagePane, type MobilePageStatus } from '../components/MobilePagePane';
+import { MobileBrowserPane, type MobileBrowserStatus } from '../components/MobileBrowserPane';
 import { MobileSettings } from '../components/MobileSettings';
 import { MobileTerminalUi, type MobileTerminalSessionItem, type MobileTerminalView } from '../components/MobileTerminalUi';
-import { MobileWall, type MobileWallSession } from '../components/MobileWall';
+import { MobileWall, showsBrowser, type MobileWallSession } from '../components/MobileWall';
 import { flattenScenario, initPlatform, type FakeScenario } from '../lib/platform';
 
 const TOOL = 'surface:1';
 const BROWSER = 'surface:2';
 const TERMINAL = 'surface:3';
+const STREAMING = 'surface:4';
 
 const SESSIONS: MobileWallSession[] = [
   { id: TOOL, title: 'README.md', kind: 'tool' },
-  { id: BROWSER, title: 'localhost:5173', kind: 'page' },
+  { id: BROWSER, title: 'localhost:5173', kind: 'browser' },
   { id: TERMINAL, title: 'zsh' },
+  { id: STREAMING, title: 'dormouse.sh', kind: 'browser', browserDisplay: 'agent-browser-resize' },
 ];
 
 const SECONDARY: Record<string, string> = {
   [TOOL]: '~/projects/dormouse',
   [BROWSER]: 'Dormouse docs',
   [TERMINAL]: '~/projects/dormouse',
+  [STREAMING]: 'agent-browser',
 };
 
 const SCENARIO: FakeScenario = {
-  name: 'mobile-pages',
+  name: 'mobile-browser',
   chunks: [{ delay: 0, data: '\x1b[32mdor open README.md\x1b[0m\r\nServing builtin:file\r\n' }],
 };
 
@@ -40,8 +43,13 @@ function FakePage() {
   return <iframe title="Page" srcDoc={PAGE} className="block h-full w-full border-0 bg-white" />;
 }
 
+/** Stands in for a screencast, which is not built: what shows the browser is the pane's `view`. */
+function FakeScreencast() {
+  return <iframe title="Screencast" srcDoc={PAGE} className="block h-full w-full border-0 bg-white" />;
+}
+
 function Frame({ status, active: initial = TOOL, view: initialView = 'terminal' }: {
-  status: MobilePageStatus;
+  status: MobileBrowserStatus;
   active?: string;
   view?: MobileTerminalView;
 }) {
@@ -51,10 +59,11 @@ function Frame({ status, active: initial = TOOL, view: initialView = 'terminal' 
   // A Tool opens on its page; the switch is remembered per Session.
   const [terminalOver, setTerminalOver] = useState<ReadonlySet<string>>(new Set());
   const session = SESSIONS.find(({ id }) => id === active);
-  const pageShown = session?.kind === 'page' || (session?.kind === 'tool' && !terminalOver.has(active));
-  const items: MobileTerminalSessionItem[] = SESSIONS.map(({ id, title, kind }) => ({
+  const toolBrowserShown = !terminalOver.has(active);
+  const items: MobileTerminalSessionItem[] = SESSIONS.map(({ id, title, kind, browserDisplay }) => ({
     id,
     kind,
+    browserDisplay,
     title: title ?? '',
     secondary: SECONDARY[id],
     active: id === active,
@@ -65,7 +74,7 @@ function Frame({ status, active: initial = TOOL, view: initialView = 'terminal' 
     <div className="overflow-hidden border border-border shadow-2xl" style={{ width: 390, height: 760 }}>
       <MobileTerminalUi
         className="h-full"
-        pageShown={pageShown}
+        browserShown={showsBrowser(session?.kind, toolBrowserShown)}
         activeView={view}
         onViewChange={setView}
         sessions={items}
@@ -80,16 +89,20 @@ function Frame({ status, active: initial = TOOL, view: initialView = 'terminal' 
             onActiveSessionChange={setActive}
             onShowSessions={() => setView('sessions')}
             showKillButton={false}
-            pageShown={pageShown}
-            onPageShownChange={(shown) => setTerminalOver((current) => {
+            toolBrowserShown={toolBrowserShown}
+            onToolBrowserShownChange={(shown) => setTerminalOver((current) => {
               const next = new Set(current);
               if (shown) next.delete(active);
               else next.add(active);
               return next;
             })}
-            onPageReload={status.kind === 'ready' ? () => {} : undefined}
-            page={session?.kind === 'terminal' || !session?.kind ? null : (
-              <MobilePagePane status={status} frame={<FakePage />} onShowSessions={() => setView('sessions')} />
+            onBrowserReload={status.kind === 'ready' ? () => {} : undefined}
+            browser={session?.kind === 'terminal' || !session?.kind ? null : (
+              <MobileBrowserPane
+                status={status}
+                view={session.browserDisplay ? <FakeScreencast /> : <FakePage />}
+                onShowSessions={() => setView('sessions')}
+              />
             )}
           />
         )}
@@ -99,7 +112,7 @@ function Frame({ status, active: initial = TOOL, view: initialView = 'terminal' 
 }
 
 const meta: Meta<typeof Frame> = {
-  title: 'Pocket/Pages',
+  title: 'Pocket/Browser',
   component: Frame,
   parameters: {
     layout: 'centered',
@@ -111,19 +124,20 @@ const meta: Meta<typeof Frame> = {
 export default meta;
 type Story = StoryObj<typeof Frame>;
 
-/** A row each for a Tool, a browser Surface, and a terminal. */
+/** A row each for a Tool, a browser Surface, a terminal, and a stream. */
 export const SessionsList: Story = {
   args: { view: 'sessions' },
 };
 
-/** A Tool opens on its page, under the header, with no bottom bar. */
+/** A Tool opens on its browser: its modes at far left, as the desktop's, and no bottom bar. */
 export const ToolPage: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.queryByRole('region', { name: 'Touch mode' })).toBeNull();
     await expect(canvas.getByTitle('Show sessions')).toBeVisible();
-    await expect(canvas.getByLabelText('Show terminal')).toBeVisible();
-    await expect(canvas.getByLabelText('Reload page')).toBeVisible();
+    await expect(canvas.getByLabelText('Browser')).toHaveAttribute('aria-pressed', 'true');
+    await expect(canvas.getByLabelText('Terminal')).toHaveAttribute('aria-pressed', 'false');
+    await expect(canvas.getByLabelText('Reload')).toBeVisible();
   },
 };
 
@@ -131,18 +145,26 @@ export const ToolPage: Story = {
 export const ToolTerminal: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await userEvent.click(canvas.getByLabelText('Show terminal'));
+    await userEvent.click(canvas.getByLabelText('Terminal'));
     await expect(canvas.getByRole('region', { name: 'Touch mode' })).toBeVisible();
-    await expect(canvas.getByLabelText('Show page')).toBeVisible();
-    await expect(canvas.queryByLabelText('Reload page')).toBeNull();
+    await expect(canvas.getByLabelText('Terminal')).toHaveAttribute('aria-pressed', 'true');
+    await expect(canvas.queryByLabelText('Reload')).toBeNull();
   },
 };
 
-/** A browser Surface has no terminal to switch to. */
+/** A browser Surface has no terminal to switch to, so its glyph only names its display. */
 export const BrowserPage: Story = {
   args: { active: BROWSER },
   play: async ({ canvasElement }) => {
-    await expect(within(canvasElement).queryByLabelText('Show terminal')).toBeNull();
+    await expect(within(canvasElement).queryByLabelText('Terminal')).toBeNull();
+  },
+};
+
+/** Where agent-browser and Playwright land: the same layout, wearing the desktop's robot glyph. A stand-in; no stream is built. */
+export const StreamingPreview: Story = {
+  args: { active: STREAMING },
+  play: async ({ canvasElement }) => {
+    await expect(canvasElement.querySelector('[data-browser-display-mode="agent-browser-resize"]')).not.toBeNull();
   },
 };
 

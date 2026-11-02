@@ -269,9 +269,9 @@ describe('MobileTerminalUi physical keyboard', () => {
     expect(onPaste).not.toHaveBeenCalled();
   });
 
-  it('leaves keys, touches, and the screen to a shown page', () => {
+  it('leaves keys, touches, and the screen to a shown browser', () => {
     const onSendInput = vi.fn();
-    const { container, terminal, button } = renderUi({ pageShown: true, onSendInput });
+    const { container, terminal, button } = renderUi({ browserShown: true, onSendInput });
     expect(button('Type')).toBeNull();
     expect(button('Gestures')).toBeNull();
     expect(keydown(document.body, { key: 'a' }).defaultPrevented).toBe(false);

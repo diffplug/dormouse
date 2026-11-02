@@ -66,25 +66,29 @@ function renderWall(showKillButton?: boolean, onShowSessions?: () => void) {
   });
 }
 
-function renderKinds(active: string, pageShown: boolean, onPageShownChange = vi.fn(), onPageReload = vi.fn()) {
+function renderKinds(active: string, toolBrowserShown: boolean, onToolBrowserShownChange = vi.fn(), onBrowserReload = vi.fn()) {
   act(() => {
     root.render(
       <StrictMode>
         <MobileWall
-          sessions={[{ id: 'tool', title: 'a tool', kind: 'tool' }, { id: 'page', title: 'a page', kind: 'page' }, { id: 'term', title: 'zsh' }]}
+          sessions={[
+            { id: 'tool', title: 'a tool', kind: 'tool' },
+            { id: 'browser', title: 'a browser', kind: 'browser' },
+            { id: 'term', title: 'zsh' },
+          ]}
           activeSessionId={active}
-          pageShown={pageShown}
-          onPageShownChange={onPageShownChange}
-          onPageReload={onPageReload}
-          page={<div data-testid="page" />}
+          toolBrowserShown={toolBrowserShown}
+          onToolBrowserShownChange={onToolBrowserShownChange}
+          onBrowserReload={onBrowserReload}
+          browser={<div data-testid="browser" />}
         />
       </StrictMode>,
     );
   });
-  return { onPageShownChange, onPageReload };
+  return { onToolBrowserShownChange, onBrowserReload };
 }
 const button = (label: string) => container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
-const pageLayer = () => container.querySelector<HTMLElement>('[data-mobile-page-layer]')!;
+const browserLayer = () => container.querySelector<HTMLElement>('[data-mobile-browser-layer]')!;
 
 function headerInset(): string | null {
   return container.querySelector<HTMLElement>('.bg-header-active-bg')
@@ -148,38 +152,61 @@ describe('MobileWall', () => {
     }
   });
 
-  describe('pages', () => {
-    it('shows a Tool\'s page over its terminal, which stays mounted, and switches between them', () => {
-      const { onPageShownChange, onPageReload } = renderKinds('tool', true);
+  describe('browser', () => {
+    it('puts a Tool\'s modes before its title, marks the one showing, and switches between them', () => {
+      const { onToolBrowserShownChange, onBrowserReload } = renderKinds('tool', true);
+      const browserButton = button('Browser')!;
+      const terminalButton = button('Terminal')!;
+      const title = container.querySelector('[title="Show sessions"], .truncate')!;
+      expect(browserButton.compareDocumentPosition(terminalButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(terminalButton.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(browserButton.getAttribute('aria-pressed')).toBe('true');
+      expect(terminalButton.getAttribute('aria-pressed')).toBe('false');
       expect(container.querySelector('[data-testid="terminal-pane"]')).not.toBeNull();
-      expect(pageLayer().classList.contains('invisible')).toBe(false);
-      act(() => button('Reload page')!.click());
-      expect(onPageReload).toHaveBeenCalledOnce();
-      act(() => button('Show terminal')!.click());
-      expect(onPageShownChange).toHaveBeenCalledWith(false);
+      expect(browserLayer().classList.contains('invisible')).toBe(false);
+      act(() => button('Reload')!.click());
+      expect(onBrowserReload).toHaveBeenCalledOnce();
+      act(() => terminalButton.click());
+      expect(onToolBrowserShownChange).toHaveBeenCalledWith(false);
 
-      renderKinds('tool', false, onPageShownChange);
-      expect(pageLayer().classList.contains('invisible')).toBe(true);
-      expect(button('Reload page')).toBeNull();
-      act(() => button('Show page')!.click());
-      expect(onPageShownChange).toHaveBeenLastCalledWith(true);
+      renderKinds('tool', false, onToolBrowserShownChange);
+      expect(browserLayer().classList.contains('invisible')).toBe(true);
+      expect(button('Reload')).toBeNull();
+      expect(button('Terminal')!.getAttribute('aria-pressed')).toBe('true');
+      act(() => button('Browser')!.click());
+      expect(onToolBrowserShownChange).toHaveBeenLastCalledWith(true);
     });
 
-    it('mounts no terminal for a page alone, which has nothing to switch to', () => {
-      renderKinds('page', false);
+    it('mounts no terminal for a browser alone, whose glyph only names its display', () => {
+      renderKinds('browser', false);
       expect(container.querySelector('[data-testid="terminal-pane"]')).toBeNull();
-      expect(pageLayer().classList.contains('invisible')).toBe(false);
-      expect(button('Show terminal')).toBeNull();
-      expect(registry.getOrCreateTerminal).not.toHaveBeenCalledWith('page');
+      expect(browserLayer().classList.contains('invisible')).toBe(false);
+      expect(button('Browser')).toBeNull();
+      expect(button('Terminal')).toBeNull();
+      expect(container.querySelector('[data-browser-display-mode="iframe"]')).not.toBeNull();
+      expect(registry.getOrCreateTerminal).not.toHaveBeenCalledWith('browser');
       expect(registry.getOrCreateTerminal).toHaveBeenCalledWith('tool');
     });
 
-    it('leaves a plain terminal without page controls', () => {
+    it('wears the display it is told, a stream\'s included', () => {
+      act(() => {
+        root.render(
+          <MobileWall
+            sessions={[{ id: 'streaming', title: 'a stream', kind: 'browser' }]}
+            sessionItems={[{ id: 'streaming', kind: 'browser', browserDisplay: 'agent-browser-resize', title: 'a stream', episode: null }]}
+            activeSessionId="streaming"
+          />,
+        );
+      });
+      expect(container.querySelector('[data-browser-display-mode="agent-browser-resize"]')).not.toBeNull();
+    });
+
+    it('leaves a plain terminal without modes or reload', () => {
       renderKinds('term', true);
-      expect(pageLayer().classList.contains('invisible')).toBe(true);
-      expect(button('Show page')).toBeNull();
-      expect(button('Show terminal')).toBeNull();
-      expect(button('Reload page')).toBeNull();
+      expect(browserLayer().classList.contains('invisible')).toBe(true);
+      expect(button('Browser')).toBeNull();
+      expect(button('Terminal')).toBeNull();
+      expect(button('Reload')).toBeNull();
     });
   });
 });

@@ -107,17 +107,18 @@ Tapping the Session title in the `MobileWall` header asks the consumer to show t
 
 Source of truth: `SessionsScreen` in `lib/src/components/MobileTerminalUi.tsx`; `MobileSettings` in `lib/src/components/MobileSettings.tsx`; `useMobileFontSize` in `lib/src/lib/mobile-font-size.ts`; `setTerminalFontSize` in `lib/src/lib/terminal-lifecycle.ts`.
 
-## Pages
+## Browser
 
-A Session whose `kind` is `page` shows an embedded page alone, and a `tool` shows its page over its terminal, which stays mounted beneath at its size. What fills the page is the consumer's, with a status from `MobilePagePane`.
+A Session whose `kind` is `browser` shows a browser alone, and a `tool` shows its browser over its terminal, which stays mounted beneath at its size. What shows it is the consumer's, an iframe today, with a status from `MobileBrowserPane`. `browserDisplay` names how, in the desktop's glyphs (`docs/specs/dor-browser.md` -> "Display Modal And Render Swaps").
 
-* **A Tool must open on its page**, with the header's button switching to its terminal and back.
-* **Must keep the header on a page, and drop the bottom bar and the composer**: touches and keys belong to the page while it shows, so no gesture, touch mode, or physical key reaches the terminal (rationale).
-* **Must not mount a terminal for a `page`.**
-* **The page layer ends at the bottom safe area**, which a framed document cannot read for itself.
-* **A session that cannot carry a page says why, and how to get one**: the direct path's wait and a relayed session's note are `MobilePagePane`'s, the note naming a VPN on both devices and a reconnect, since a session tries the direct path once (`docs/specs/remote-api.md` -> "Frames").
+* **A Tool must open on its browser.**
+* **Must put a Tool's Browser and Terminal mode buttons at the header's far left**, in that order, the desktop's glyphs marking the mode showing; a browser alone shows its glyph, with nothing to switch to.
+* **Must keep the header while a browser shows, and drop the bottom bar and the composer**: touches and keys are the browser's, so no gesture, touch mode, or physical key reaches the terminal (rationale).
+* **Must not mount a terminal for a `browser`.**
+* **The browser layer ends at the bottom safe area**, which a framed document cannot read for itself.
+* **A session that cannot carry a page says why, and how to get one**: the direct path's wait and a relayed session's note are `MobileBrowserPane`'s, the note naming a VPN on both devices and a reconnect, since a session tries the direct path once (`docs/specs/remote-api.md` -> "Frames").
 
-Source of truth: `MobileWall` in `lib/src/components/MobileWall.tsx`; `MobilePagePane` in `lib/src/components/MobilePagePane.tsx`; `pageShown` in `lib/src/components/MobileTerminalUi.tsx`.
+Source of truth: `MobileWall` in `lib/src/components/MobileWall.tsx`; `MobileBrowserPane` in `lib/src/components/MobileBrowserPane.tsx`; `browserShown` in `lib/src/components/MobileTerminalUi.tsx`.
 
 ## Keyboard focus invariant
 
@@ -126,6 +127,8 @@ Source of truth: `MobileWall` in `lib/src/components/MobileWall.tsx`; `MobilePag
 Source of truth: `MobileTerminalUi` in `lib/src/components/MobileTerminalUi.tsx` and `MobileWall` in `lib/src/components/MobileWall.tsx`; pinned by `lib/src/components/MobileTerminalUi.test.tsx` and `lib/src/components/MobileWall.test.tsx`.
 
 ## Future
+
+**Scope: mobile-browser-streams** — agent-browser and Playwright on a phone (`docs/specs/remote-api.md` -> Future, "Browser surfaces"): a screencast as `MobileBrowserPane`'s `view`, its touches sent as input, and the Browser button opening a display choice once a Surface has more than one to offer.
 
 **Scope: mobile-backlog** — unprioritized:
 
