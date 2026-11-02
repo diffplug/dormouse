@@ -10,6 +10,7 @@ import {
   FRAME_EVENTS,
   FRAME_FLOW_MESSAGE_COST,
   FRAME_FLOW_WINDOW_BYTES,
+  MAX_DIRECT_PENDING_FRAMES,
   FRAME_METHODS,
   MAX_FRAMES_PER_SESSION,
   fromBase64Url,
@@ -227,6 +228,10 @@ describe('frame.open', () => {
     expect(t.host.upstreams[0]!.closed).toBe(true);
     expect(t.events(id, FRAME_EVENTS.frameClosed)).toEqual([{ subId: id, event: FRAME_EVENTS.frameClosed, data: { reason: 'surface-gone' } }]);
     expect(t.watchers.size).toBe(0);
+  });
+
+  it('fits a whole window of the tiniest messages inside the direct sender\'s queue', () => {
+    expect(FRAME_FLOW_WINDOW_BYTES / FRAME_FLOW_MESSAGE_COST).toBeLessThan(MAX_DIRECT_PENDING_FRAMES);
   });
 
   it('pauses on a burst of tiny messages, long before the direct sender\'s queue fills', async () => {

@@ -183,7 +183,7 @@ export class FrameClient {
    * cancelled included, or the Burrow's window would shrink for good.
    */
   #received(bytes: number): void {
-    this.#unacked += bytes;
+    this.#unacked += bytes + FRAME_FLOW_MESSAGE_COST;
     if (this.#unacked >= ACK_THRESHOLD_BYTES) this.#flushAck();
     else if (!this.#ackTimer && this.#unacked > 0) this.#ackTimer = setTimeout(() => this.#flushAck(), ACK_FLUSH_MS);
   }
@@ -301,7 +301,7 @@ class ClientFrame implements OpenFrame {
       switch (event.event) {
         case FRAME_EVENTS.httpBody: {
           const chunk = fromBase64Url((event.data as HttpBodyEvent).bytes);
-          this.#received(chunk.length + FRAME_FLOW_MESSAGE_COST);
+          this.#received(chunk.length);
           if (done) return;
           controller.enqueue(chunk);
           if ((controller.desiredSize ?? 0) <= 0) hold(true);
@@ -372,7 +372,7 @@ class ClientFrame implements OpenFrame {
         if (event.event === FRAME_EVENTS.wsMessage) {
           const fragment = event.data as WsMessageFragment;
           const chunk = fromBase64Url(fragment.data);
-          this.#received(chunk.length + FRAME_FLOW_MESSAGE_COST);
+          this.#received(chunk.length);
           if (!open) return;
           parts.push(chunk);
           if (!fragment.fin) return;
