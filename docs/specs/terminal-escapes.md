@@ -101,6 +101,8 @@ Replay (`pty:replay`) is the raw stream requiring re-parse: **the webview runs a
 
 ## Supported CSI
 
+A Workspace transfer carries the modes a running app set: [transport.md](transport.md#transferring-a-workspace).
+
 | Sequence | Role | Disposition | Where |
 |---|---|---|---|
 | `CSI > q` | iTerm2 extended device-attributes query | Answered `DCS > \| iTerm2 <version> ST` at the PTY boundary and stripped, never forwarded to xterm.js. Both `ESC [ > q` and the C1 `U+009B > q` are recognized, **in ground text only** (rationale). | [transport.md](transport.md#iterm2-identity) |

@@ -64,6 +64,10 @@ The suppression is bounded and fails open because the two failures are not symme
 
 Release-without-kill is a separate verb rather than a flag on the closure path because the closure path is reachable from an unmount and this must not be. The two differ in exactly one line, and that line is the whole difference between moving a Workspace and losing it.
 
+**Why an app's modes have to travel.** An app sets them once, at startup, and has no signal that its terminal was rebuilt under it. Claude Code in a moved Workspace kept running with flags back at 0, so Shift+Enter arrived as a plain Enter and submitted the prompt until the app restarted. Kitty state replays as pushes rather than one set so that the app's later pops land where they would have, and so that the Windows arbiter, which counts only pushes and pops, turns win32-input-mode off in the arriving terminal.
+
+**Why alternate-screen state may drop on the main screen.** Rewriting it means entering and leaving the alternate screen in the new terminal, for state only an app that left that screen without popping still holds. An app re-entering pushes again.
+
 ## Message protocol
 
 **Why Windows needs two more reads.** Measured 2026-10-21 on Windows 11 through node-pty. In Git Bash, `node` runs as `winpty node.exe` (Git's alias under `TERM=xterm*`), and an MSYS exec replaces the Windows process, so `winpty.exe` named a parent that had exited and the walk from the pane never reached `node.exe`; MSYS `ps` keeps the exec'd process's parent and names its Windows pid. In WSL with `networkingMode=mirrored`, a `python3 -m http.server` on 127.0.0.1 answered HTTP from Windows, but neither `Get-NetTCPConnection` nor `netstat` listed it, so no Windows-side walk can find it; the pane's `DORMOUSE_SURFACE_ID` crosses in through `WSLENV`, and `grep -z` over `/proc/*/environ` finds its processes in one spawn. Both panes then reported their ports in one request in under a second, as did `wsl` typed into a PowerShell pane.
