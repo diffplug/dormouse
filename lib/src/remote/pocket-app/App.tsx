@@ -879,7 +879,7 @@ export const BURROWS_EMPTY =
   `No Burrows paired yet. ${BURROW_IS_AN_APP} On the computer, open ${SETUP_PATH}, `
   + 'then scan the code.';
 
-/** The connected Pocket shell: Burrow navigation chrome over the remote wall. */
+/** The connected Pocket shell: the remote wall, with the way back to the Burrows on its Sessions screen. */
 export function ConnectedView({
   burrow,
   adapter,
@@ -898,17 +898,21 @@ export function ConnectedView({
   browsers?: PocketBrowsers;
 }): React.ReactElement {
   return (
-    <div className={PK.app}>
-      <header className={PK.header}>
-        <button type="button" className={pkButton({ tone: 'ghost', size: 'sm' })} onClick={onLeave}>
-          ‹ {BURROWS_TITLE}
-        </button>
-        <h1 className={PK.headerTitle}>{burrow.label || burrow.burrowId}</h1>
-        <TransportIndicator transport={transport} />
-      </header>
-      <div className={PK.wallHost}>
-        <PocketWall adapter={adapter} browsers={browsers} onError={onError} />
-      </div>
+    <div className={PK.wallHost}>
+      <PocketWall
+        adapter={adapter}
+        browsers={browsers}
+        onError={onError}
+        sessionsHeader={(
+          <header className={PK.wallHeader}>
+            <button type="button" className={pkButton({ tone: 'ghost', size: 'sm' })} onClick={onLeave}>
+              ‹ {BURROWS_TITLE}
+            </button>
+            <h1 className={PK.headerTitle}>{burrow.label || burrow.burrowId}</h1>
+            <TransportIndicator transport={transport} />
+          </header>
+        )}
+      />
     </div>
   );
 }

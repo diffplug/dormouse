@@ -4,7 +4,7 @@ import { clsx } from 'clsx';
 import { HeaderActionButton } from './HeaderActionButton';
 import { TerminalPane } from './TerminalPane';
 import { AlertRingInset, alertRingRow, useAlertRingBurst } from './alert-ring';
-import { chromeButton, HEADER_PILL_CLASS, MOBILE_BAR_HEIGHT_CLASS } from './design';
+import { chromeButton, HEADER_PILL_CLASS, MOBILE_BAR_HEIGHT_CLASS, modalActionButton } from './design';
 import { useTodoPillContent } from './TodoPillBody';
 import type { BrowserDisplayMode } from './wall/agent-browser-screen';
 import { BrowserDisplayIcon } from './wall/BrowserDisplayIcon';
@@ -169,8 +169,14 @@ export function MobileWall({
 
   if (!activeItem) {
     return (
-      <div className={`grid h-full place-items-center bg-app-bg font-mono text-sm text-muted ${className ?? ''}`}>
+      <div className={`grid h-full place-content-center justify-items-center gap-2 bg-app-bg font-mono text-sm text-muted ${className ?? ''}`}>
         No sessions
+        {/* With no header to tap, and the Sessions screen may hold the way out. */}
+        {onShowSessions ? (
+          <button type="button" onClick={onShowSessions} className={modalActionButton({ tone: 'secondary' })}>
+            Show sessions
+          </button>
+        ) : null}
       </div>
     );
   }

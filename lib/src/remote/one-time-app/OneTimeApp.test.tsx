@@ -7,7 +7,7 @@
  * ending. The client is the real `OneTimeClient` where the case is about what
  * it opens, and a double where the case scripts what it answers.
  */
-import { act, StrictMode } from 'react';
+import { act, StrictMode, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -65,9 +65,9 @@ vi.mock('../pocket-app/remote-wall', () => ({
   mountRemoteWall: (client: unknown) => fake.mount(client),
 }));
 vi.mock('../pocket-app/PocketWall', () => ({
-  PocketWall: (props: { persist?: boolean; onError?: (error: unknown) => void }) => {
+  PocketWall: (props: { persist?: boolean; onError?: (error: unknown) => void; sessionsHeader?: ReactNode }) => {
     fake.wall = props;
-    return <div data-testid="wall" />;
+    return <div data-testid="wall">{props.sessionsHeader}</div>;
   },
 }));
 vi.mock('../../lib/terminal-registry', () => ({

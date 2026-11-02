@@ -41,8 +41,8 @@ vi.mock('../../components/TerminalPane', () => ({
   TerminalPane: ({ id }: { id: string }) => <div data-terminal={id} />,
 }));
 vi.mock('../../components/MobileTerminalUi', () => ({
-  MobileTerminalUi: ({ terminal, browserShown }: { terminal: React.ReactNode; browserShown?: boolean }) => (
-    <div data-browser-shown={browserShown ? 'true' : 'false'}>{terminal}</div>
+  MobileTerminalUi: ({ terminal, browserShown, sessionsHeader }: { terminal: React.ReactNode; browserShown?: boolean; sessionsHeader?: React.ReactNode }) => (
+    <div data-browser-shown={browserShown ? 'true' : 'false'}>{sessionsHeader}{terminal}</div>
   ),
   paneMouseOverride: () => false,
 }));
@@ -142,6 +142,11 @@ it('offers no close without frames, whatever the directory says', async () => {
   snapshot = [{ ...snapshot[0], browser: page }];
   await render();
   expect(button('Kill')).toBeNull();
+});
+
+it('hands the Sessions screen the header its consumer gave', async () => {
+  await act(async () => root.render(<PocketWall adapter={adapter} sessionsHeader={<p>Studio iMac</p>} />));
+  expect(container.textContent).toContain('Studio iMac');
 });
 
 it('opens a frame on a live client under StrictMode, whose effects run twice', async () => {

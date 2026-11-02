@@ -166,6 +166,8 @@ export interface MobileTerminalUiProps {
    */
   browserShown?: boolean;
   interactive?: boolean;
+  /** What heads the Sessions screen, above its own bar: the consumer's way out of the wall. */
+  sessionsHeader?: ReactNode;
   fillViewport?: boolean;
   className?: string;
   terminalClassName?: string;
@@ -292,12 +294,14 @@ const SCREEN_BUTTON_CLASS = 'h-full shrink-0 rounded focus-visible:outline focus
 function SessionsScreen({
   sessions,
   disabled,
+  header,
   settings,
   onSelect,
   onClose,
 }: {
   sessions: MobileTerminalSessionItem[];
   disabled: boolean;
+  header?: ReactNode;
   settings?: ReactNode;
   onSelect: (id: string) => void;
   onClose: () => void;
@@ -309,6 +313,7 @@ function SessionsScreen({
       aria-label={title}
       className="absolute inset-0 z-40 flex flex-col bg-header-inactive-bg text-header-inactive-fg"
     >
+      {header}
       <header className={clsx('flex shrink-0 items-center border-b border-border font-mono text-sm', MOBILE_BAR_HEIGHT_CLASS)}>
         <button
           type="button"
@@ -681,6 +686,7 @@ export function MobileTerminalUi({
   settings,
   browserShown = false,
   interactive = true,
+  sessionsHeader,
   fillViewport = false,
   className,
   terminalClassName,
@@ -1235,6 +1241,7 @@ export function MobileTerminalUi({
         <SessionsScreen
           sessions={sessions}
           disabled={!interactive}
+          header={sessionsHeader}
           settings={settings}
           onSelect={(id) => {
             onSessionSelect?.(id);

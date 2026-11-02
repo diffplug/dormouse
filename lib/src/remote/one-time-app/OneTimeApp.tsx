@@ -404,17 +404,21 @@ function OneTimeWall({
   onEnd: () => void;
 }): React.ReactElement {
   return (
-    <div className={PK.app}>
-      <header className={PK.header}>
-        <h1 className={PK.headerTitle}>{burrowLabel}</h1>
-        <TransportIndicator transport={{ path: 'direct', cause: null }} />
-        <button type="button" className={pkButton({ tone: 'ghost', size: 'sm' })} onClick={onEnd}>
-          {ONE_TIME_END_LABEL}
-        </button>
-      </header>
-      <div className={PK.wallHost}>
-        <PocketWall adapter={adapter} onError={onEnd} persist={false} />
-      </div>
+    <div className={PK.wallHost}>
+      <PocketWall
+        adapter={adapter}
+        onError={onEnd}
+        persist={false}
+        sessionsHeader={(
+          <header className={PK.wallHeader}>
+            <h1 className={PK.headerTitle}>{burrowLabel}</h1>
+            <TransportIndicator transport={{ path: 'direct', cause: null }} />
+            <button type="button" className={pkButton({ tone: 'ghost', size: 'sm' })} onClick={onEnd}>
+              {ONE_TIME_END_LABEL}
+            </button>
+          </header>
+        )}
+      />
     </div>
   );
 }

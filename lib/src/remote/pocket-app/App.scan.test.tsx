@@ -173,8 +173,11 @@ vi.mock('../client/webauthn', async (importOriginal) => ({
   browserWebAuthn: {},
 }));
 vi.mock('./PocketWall', () => ({
-  PocketWall: ({ onError }: { onError?: (error: unknown) => void }) => (
-    <button onClick={() => onError?.(new Error('terminal attach refused'))}>Fail attachment</button>
+  PocketWall: ({ onError, sessionsHeader }: { onError?: (error: unknown) => void; sessionsHeader?: React.ReactNode }) => (
+    <>
+      {sessionsHeader}
+      <button onClick={() => onError?.(new Error('terminal attach refused'))}>Fail attachment</button>
+    </>
   ),
 }));
 vi.mock('../../lib/platform', () => ({ setPlatform: () => undefined }));

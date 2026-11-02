@@ -173,7 +173,7 @@ export function transportTitle({ path, cause }: TransportView): string {
 }
 
 /**
- * The wall header's path indicator: its label, with {@link transportTitle} as
+ * The path a connection takes, on the Sessions screen: its label, with {@link transportTitle} as
  * the hover text. No status colour: relayed is the ordinary case, not a fault.
  */
 export function TransportIndicator({ transport }: { transport: TransportView }): React.ReactElement {

@@ -95,6 +95,15 @@ function headerInset(): string | null {
     ?.getAttribute('data-alert-ring-inset') ?? null;
 }
 
+describe('with no session', () => {
+  it('still reaches the Sessions screen, there being no header to tap', () => {
+    const onShowSessions = vi.fn();
+    act(() => root.render(<MobileWall sessions={[]} onShowSessions={onShowSessions} />));
+    act(() => [...container.querySelectorAll('button')].find((b) => b.textContent === 'Show sessions')!.click());
+    expect(onShowSessions).toHaveBeenCalledOnce();
+  });
+});
+
 describe('MobileWall', () => {
   it('shows the Kill control by default', () => {
     renderWall();

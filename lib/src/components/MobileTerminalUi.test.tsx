@@ -853,4 +853,12 @@ describe('MobileTerminalUi clipboard failure', () => {
       act(() => dismissClipboardFailure());
     }
   });
+
+  it('heads the Sessions screen, and only that, with the consumer\'s header', () => {
+    const header = <p>Studio iMac</p>;
+    const { renderWith } = renderUi({ activeView: 'terminal', sessionsHeader: header });
+    expect(document.body.textContent).not.toContain('Studio iMac');
+    renderWith({ activeView: 'sessions', sessionsHeader: header });
+    expect(document.body.textContent).toContain('Studio iMac');
+  });
 });
