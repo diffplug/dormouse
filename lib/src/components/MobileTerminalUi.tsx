@@ -538,10 +538,11 @@ function SessionRow({ session, disabled, onSelect }: {
       {session.kind === 'browser' || session.kind === 'tool'
         ? <BrowserDisplayIcon mode={session.browserDisplay ?? 'iframe'} size={15} />
         : <TerminalWindowIcon size={15} weight={active ? 'bold' : 'regular'} className="shrink-0" />}
-      <span className="min-w-0 flex-1">
-        <span className="block truncate font-medium">{session.title}</span>
+      {/* One line, as the header has it; the path gives way before the title. */}
+      <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
+        <span className="min-w-0 truncate font-medium">{session.title}</span>
         {session.secondary ? (
-          <span className="block truncate opacity-70">{session.secondary}</span>
+          <span className="min-w-0 shrink-[1000] truncate opacity-70">{session.secondary}</span>
         ) : null}
       </span>
       {session.todo ? (
