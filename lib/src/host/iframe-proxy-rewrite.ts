@@ -306,7 +306,7 @@ export function tunnelSocketShim(): string {
     t.send=function(data){
       if(t.readyState===0)throw new DOMException('Still in CONNECTING state.','InvalidStateError');
       if(t.readyState!==1)return;
-      var v=ArrayBuffer.isView(data),l=data instanceof Blob,b=v||l||data instanceof ArrayBuffer;
+      var k=Object.prototype.toString.call(data),v=ArrayBuffer.isView(data),l=k==='[object Blob]'||k==='[object File]',b=v||l||k==='[object ArrayBuffer]';
       var m=l?data:v?data.buffer.slice(data.byteOffset,data.byteOffset+data.byteLength):b?data.slice(0):new TextEncoder().encode(String(data)).buffer;
       p.postMessage({kind:'send',data:m,binary:b},l?[]:[m]);
     };
@@ -338,6 +338,11 @@ export function instrumentHtml(body: string, embedderOrigin: string, preserveCsp
   return page.slice(0, at) + shimTag + page.slice(at);
 }
 
+/** One thing that may stand ahead of a page's first script, comments and whitespace before it. */
+const PROLOGUE_TOKEN = /\s*(<!--[\s\S]*?-->|<!doctype[^>]*>|<(?:html|head|meta|link|base)(?:\s[^>]*)?>|<(title|style)(?:\s[^>]*)?>[\s\S]*?<\/\2\s*>)/iy;
+/** Of those, what a script ahead of it would break. */
+const MUST_PRECEDE_SCRIPT = /^(?:<!doctype|<html|<head|<meta\b[^>]*\bcharset\b)/i;
+
 /**
  * The earliest a script may go. Never ahead of the doctype, which would switch
  * the page to quirks mode, nor of a `<meta charset>`, which counts only within
@@ -347,9 +352,11 @@ function prologueEnd(html: string): number {
   const prologue = html.slice(0, 1024);
   // Nor ahead of a UTF-8 BOM (its latin1 spelling), which must stay first.
   let at = html.startsWith('\xEF\xBB\xBF') ? 3 : 0;
-  for (const tag of [/<!doctype[^>]*>/i, /<html(?:\s[^>]*)?>/i, /<head(?:\s[^>]*)?>/i, /<meta\b[^>]*\bcharset\b[^>]*>/i]) {
-    const match = tag.exec(prologue);
-    if (match) at = Math.max(at, match.index + match[0].length);
+  // Walked from the start, stopping at the first thing that runs or renders: a
+  // tag's spelling inside a script's text is not a tag.
+  PROLOGUE_TOKEN.lastIndex = at;
+  for (let token = PROLOGUE_TOKEN.exec(prologue); token; token = PROLOGUE_TOKEN.exec(prologue)) {
+    if (MUST_PRECEDE_SCRIPT.test(token[1]!)) at = PROLOGUE_TOKEN.lastIndex;
   }
   return at;
 }

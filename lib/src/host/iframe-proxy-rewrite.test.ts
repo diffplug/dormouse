@@ -351,6 +351,19 @@ describe('instrumentHtml on a tunneled grant', () => {
     expect(out.startsWith('<!doctype html><html><head><script>')).toBe(true);
   });
 
+  it('reads a tag\'s spelling in a script\'s text as text', () => {
+    const script = `<script>const template = "<meta charset='utf-8'>";</script>`;
+    const out = instrumentHtml(`<!doctype html><head>${script}</head>`, APP, false, true);
+    expect(out).toContain(script);
+    expect(socketShimAt(out)).toBeLessThan(out.indexOf(script));
+  });
+
+  it('finds a charset past a title and comments, whose text it skips', () => {
+    const out = instrumentHtml('<!-- a --><html><head><title><meta charset="x"></title>\n<meta charset="utf-8"><script>a</script>', APP, false, true);
+    expect(socketShimAt(out)).toBeGreaterThan(out.indexOf('<meta charset="utf-8">'));
+    expect(socketShimAt(out)).toBeLessThan(out.indexOf('<script>a</script>'));
+  });
+
   it('keeps the doctype and charset first, and shims nothing on a local pane', () => {
     const out = instrumentHtml('<!doctype html><head><meta charset="utf-8"><script>a</script>', APP, false, true);
     expect(socketShimAt(out)).toBeGreaterThan(out.indexOf('<meta charset="utf-8">'));
@@ -421,6 +434,19 @@ describe('tunnelSocketShim', () => {
     bytes.fill(9);
     await settle();
     expect([...new Uint8Array(sent[0]!)]).toEqual([1, 2, 3]);
+    far.close();
+  });
+
+  it('sends another window\'s buffer as the binary it is', async () => {
+    const { socket, far } = page().open();
+    const sent: { data: ArrayBuffer; binary: boolean }[] = [];
+    far.onmessage = (event: MessageEvent<{ data: ArrayBuffer; binary: boolean }>) => sent.push(event.data);
+    far.postMessage({ kind: 'open', protocol: '', extensions: '' });
+    await settle();
+    socket.send(runInNewContext('new Uint8Array([1, 2, 3]).buffer') as never);
+    await settle();
+    expect(sent[0]!.binary).toBe(true);
+    expect([...new Uint8Array(sent[0]!.data)]).toEqual([1, 2, 3]);
     far.close();
   });
 
