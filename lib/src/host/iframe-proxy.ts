@@ -359,7 +359,8 @@ function allOnThisMachine(addresses: readonly UpstreamAddress[], interfaces: rea
 /**
  * Whether a remote Client may frame `targetUrl`: every address it resolves to is
  * this machine's. For a listing, which only spares a Client a page it could not
- * open: minting a tunneled grant checks again, on the addresses it pins.
+ * open: minting a tunneled grant checks again, on the addresses it pins. Rejects
+ * when the name does not resolve, which says nothing about where it points.
  */
 export async function isUpstreamOnThisMachine(
   targetUrl: string,
@@ -373,6 +374,7 @@ export async function isUpstreamOnThisMachine(
   }
   if (upstream.protocol !== 'http:') return false;
   const pinned = await pinAddresses(upstream, opts?.resolve ?? systemResolver);
+  if (!Array.isArray(pinned) && pinned.reason === 'unreachable') throw new Error(pinned.detail ?? 'the name did not resolve');
   return Array.isArray(pinned) && allOnThisMachine(pinned, (opts?.interfaceAddresses ?? systemInterfaces)());
 }
 

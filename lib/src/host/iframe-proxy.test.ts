@@ -849,6 +849,11 @@ describe('iframe proxy leases', () => {
       }
     });
 
+    it('gives no answer for a name that does not resolve', async () => {
+      const resolve = async () => { throw new Error('EAI_AGAIN'); };
+      await expect(isUpstreamOnThisMachine('http://x.example/', { resolve })).rejects.toThrow('EAI_AGAIN');
+    });
+
     it('answers false for what no grant could front', async () => {
       expect(await isUpstreamOnThisMachine('https://localhost/')).toBe(false);
       expect(await isUpstreamOnThisMachine('not a url')).toBe(false);

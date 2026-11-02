@@ -174,10 +174,13 @@ describe('createBurrowFrameHost', () => {
   it('keeps a listed page listed through a failed lookup, and leaves a new one out', async () => {
     vi.useFakeTimers();
     try {
-      let answer = async () => true;
-      const host = createBurrowFrameHost({ ...proxy, isLocal: () => answer() });
+      let resolve = async () => [{ address: '127.0.0.1', family: 4 }];
+      const host = createBurrowFrameHost({
+        ...proxy,
+        isLocal: (url) => isUpstreamOnThisMachine(url, { resolve: () => resolve() }),
+      });
       await expect(host.canOpen('http://name.local/')).resolves.toBe(true);
-      answer = async () => { throw new Error('ENOTFOUND'); };
+      resolve = async () => { throw new Error('EAI_AGAIN'); };
       await vi.advanceTimersByTimeAsync(31_000);
       await expect(host.canOpen('http://name.local/')).resolves.toBe(true);
       await expect(host.canOpen('http://other.local/')).resolves.toBe(false);
