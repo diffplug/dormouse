@@ -1,0 +1,369 @@
+/**
+ * The Node frame host against a real upstream, through the real iframe proxy:
+ * a Client's request reaches the page as a loopback caller's would, and what
+ * comes back is told in the frame origin's terms.
+ */
+
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import * as http from 'node:http';
+import { brotliCompressSync, gzipSync, zstdCompressSync } from 'node:zlib';
+import { WebSocketServer } from 'ws';
+import type { HttpHeader } from 'remote-lib-common';
+import type { FrameHttpInit, FrameUpstream } from '../../remote/burrow/burrow-frame-host';
+import { createIframeProxyUrl, isUpstreamOnThisMachine, releaseIframeProxyLease } from '../iframe-proxy';
+import { createBurrowFrameHost } from './frame-host';
+import { tunnelSocketShim } from '../iframe-proxy-rewrite';
+
+const proxy = { create: createIframeProxyUrl, release: releaseIframeProxyLease, isLocal: (url: string) => isUpstreamOnThisMachine(url) };
+
+const FRAME_ORIGIN = 'https://frame.example';
+const POCKET = ['https://pocket.example'];
+const servers: Array<{ close(): void }> = [];
+const upstreams: FrameUpstream[] = [];
+
+afterEach(() => {
+  for (const upstream of upstreams.splice(0)) upstream.close();
+  for (const server of servers.splice(0)) server.close();
+});
+
+function listen(handler: http.RequestListener): Promise<{ port: number; server: http.Server }> {
+  const server = http.createServer(handler);
+  servers.push(server);
+  return new Promise((resolve) => server.listen(0, '127.0.0.1', () => {
+    const address = server.address();
+    resolve({ port: typeof address === 'object' && address ? address.port : 0, server });
+  }));
+}
+
+let leases = 0;
+async function open(url: string): Promise<FrameUpstream> {
+  const opened = await createBurrowFrameHost(proxy).open(url, {
+    frameOrigin: FRAME_ORIGIN,
+    embedderOrigins: POCKET,
+    lease: { owner: 'remote:test', id: `f${++leases}` },
+  });
+  if ('refused' in opened) throw new Error(opened.refused);
+  upstreams.push(opened);
+  return opened;
+}
+
+interface Response { status: number; headers: HttpHeader[]; body: string }
+function fetchThrough(upstream: FrameUpstream, init: FrameHttpInit, body?: string): Promise<Response> {
+  return new Promise((resolve, reject) => {
+    let head: Omit<Response, 'body'> | null = null;
+    const chunks: Uint8Array[] = [];
+    const exchange = upstream.request(init, {
+      onHead: (status, _text, headers) => { head = { status, headers }; },
+      onBody: (chunk) => chunks.push(chunk.slice()),
+      onEnd: () => resolve({ ...head!, body: Buffer.concat(chunks).toString('utf8') }),
+      onError: (message) => reject(new Error(message)),
+    });
+    exchange.write(new TextEncoder().encode(body ?? ''), true).catch(reject);
+  });
+}
+
+const header = (headers: HttpHeader[], name: string) => headers.find(([n]) => n.toLowerCase() === name)?.[1];
+
+describe('createBurrowFrameHost', () => {
+  it('serves the instrumented page, framed for the Client\'s chain, at the path it opened', async () => {
+    const { port } = await listen((_req, res) => {
+      res.writeHead(200, { 'content-type': 'text/html', 'x-frame-options': 'DENY' });
+      res.end('<html><head><title>t</title></head><body>hi</body></html>');
+    });
+    const upstream = await open(`http://localhost:${port}/app?x=1#top`);
+    expect(upstream.path).toBe('/app?x=1#top');
+    const response = await fetchThrough(upstream, { method: 'GET', path: '/app?x=1', headers: [], destination: 'iframe' });
+    expect(response.status).toBe(200);
+    expect(header(response.headers, 'x-frame-options')).toBeUndefined();
+    expect(header(response.headers, 'content-security-policy')).toBe("frame-ancestors 'self' https://pocket.example");
+    // The shim, addressed to the Client's page.
+    expect(response.body).toContain('https://pocket.example');
+    expect(response.body).toContain('<body>hi</body>');
+    expect(response.body).toContain('window.WebSocket=T');
+    // The frame origin outlives the grant: nothing about it needs clearing.
+    expect(header(response.headers, 'clear-site-data')).toBeUndefined();
+    // The proxy's connection to this module, which adds them, ends here.
+    expect(header(response.headers, 'connection')).toBeUndefined();
+    expect(header(response.headers, 'transfer-encoding')).toBeUndefined();
+  });
+
+  it('vouches only for the frame origin, keeps redirects on the frame, and drops cookies', async () => {
+    let seen: http.IncomingHttpHeaders = {};
+    const { port } = await listen((req, res) => {
+      seen = req.headers;
+      res.writeHead(302, { location: `http://localhost:${port}/next?a=1`, 'set-cookie': 'id=1' });
+      res.end();
+    });
+    const upstream = await open(`http://localhost:${port}/`);
+    const own = await fetchThrough(upstream, {
+      method: 'POST',
+      path: '/form',
+      headers: [['origin', FRAME_ORIGIN], ['referer', `${FRAME_ORIGIN}/page`], ['cookie', 'a=b'], ['content-type', 'text/plain']],
+      destination: '',
+    }, 'payload');
+    expect(seen.origin).toBe(`http://localhost:${port}`);
+    expect(seen.referer).toBe(`http://localhost:${port}/page`);
+    expect(seen.cookie).toBeUndefined();
+    expect(seen['sec-fetch-dest']).toBe('empty');
+    expect(header(own.headers, 'location')).toBe('/next?a=1');
+    expect(header(own.headers, 'set-cookie')).toBeUndefined();
+
+    await fetchThrough(upstream, { method: 'POST', path: '/form', headers: [['origin', 'https://evil.example']] });
+    expect(seen.origin).toBe('https://evil.example');
+  });
+
+  it('sends a request body through, and decodes a body the upstream compressed anyway', async () => {
+    const { port } = await listen((req, res) => {
+      const parts: Buffer[] = [];
+      req.on('data', (part: Buffer) => parts.push(part));
+      req.on('end', () => {
+        res.writeHead(200, { 'content-type': 'application/json', 'content-encoding': 'gzip' });
+        res.end(gzipSync(JSON.stringify({ got: Buffer.concat(parts).toString('utf8'), ae: req.headers['accept-encoding'] })));
+      });
+    });
+    const upstream = await open(`http://localhost:${port}/`);
+    const response = await fetchThrough(upstream, { method: 'PUT', path: '/save', headers: [], destination: '' }, 'file text');
+    expect(JSON.parse(response.body)).toEqual({ got: 'file text', ae: 'identity' });
+    expect(header(response.headers, 'content-encoding')).toBeUndefined();
+  });
+
+  it('instruments a page the upstream compressed anyway, or its sockets would miss the tunnel', async () => {
+    const { port } = await listen((_req, res) => {
+      res.writeHead(200, { 'content-type': 'text/html', 'content-encoding': 'gzip' });
+      res.end(gzipSync('<!doctype html><head><title>x</title></head><body>hi</body>'));
+    });
+    const upstream = await open(`http://localhost:${port}/`);
+    const response = await fetchThrough(upstream, { method: 'GET', path: '/', headers: [], destination: 'iframe' });
+    expect(header(response.headers, 'content-encoding')).toBeUndefined();
+    expect(response.body).toContain(tunnelSocketShim());
+    expect(response.body).toContain('<body>hi</body>');
+  });
+
+  it.each([
+    ['gzip', (text: string) => gzipSync(text)],
+    ['gzip, br', (text: string) => brotliCompressSync(gzipSync(text))],
+    ['zstd', (text: string) => zstdCompressSync(text)],
+  ])('hands on a body coded %s as plain', async (coding, encode) => {
+    const { port } = await listen((_req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json', 'content-encoding': coding });
+      res.end(encode('{"a":1}'));
+    });
+    const upstream = await open(`http://localhost:${port}/`);
+    const response = await fetchThrough(upstream, { method: 'GET', path: '/', headers: [], destination: '' });
+    expect(response.body).toBe('{"a":1}');
+    expect(header(response.headers, 'content-encoding')).toBeUndefined();
+  });
+
+  it('answers a coded response with no body as its own status', async () => {
+    const { port } = await listen((req, res) => {
+      res.writeHead(req.url === '/gone' ? 204 : 200, { 'content-encoding': 'gzip' });
+      res.end();
+    });
+    const upstream = await open(`http://localhost:${port}/`);
+    expect((await fetchThrough(upstream, { method: 'GET', path: '/gone', headers: [], destination: '' })).status).toBe(204);
+    expect((await fetchThrough(upstream, { method: 'GET', path: '/empty', headers: [], destination: '' })).status).toBe(200);
+    expect((await fetchThrough(upstream, { method: 'HEAD', path: '/head', headers: [], destination: '' })).status).toBe(200);
+  });
+
+  it('refuses a coding it cannot undo, rather than handing on the bytes as plain', async () => {
+    const { port } = await listen((_req, res) => {
+      res.writeHead(200, { 'content-type': 'text/plain', 'content-encoding': 'compress' });
+      res.end('coded');
+    });
+    const upstream = await open(`http://localhost:${port}/`);
+    const response = await fetchThrough(upstream, { method: 'GET', path: '/', headers: [], destination: '' });
+    expect(response.status).toBe(502);
+    expect(response.body).not.toContain('coded\n');
+  });
+
+  it('keeps a listed page listed through a failed lookup, and leaves a new one out', async () => {
+    vi.useFakeTimers();
+    try {
+      let resolve = async () => [{ address: '127.0.0.1', family: 4 }];
+      const host = createBurrowFrameHost({
+        ...proxy,
+        isLocal: (url) => isUpstreamOnThisMachine(url, { resolve: () => resolve() }),
+      });
+      await expect(host.canOpen('http://name.local/')).resolves.toBe(true);
+      resolve = async () => { throw new Error('EAI_AGAIN'); };
+      await vi.advanceTimersByTimeAsync(31_000);
+      await expect(host.canOpen('http://name.local/')).resolves.toBe(true);
+      await expect(host.canOpen('http://other.local/')).resolves.toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('asks nothing about a URL with no origin, and holds on to none', async () => {
+    const isLocal = vi.fn(async () => true);
+    const host = createBurrowFrameHost({ ...proxy, isLocal });
+    await expect(host.canOpen('data:text/html,hello')).resolves.toBe(false);
+    expect(isLocal).not.toHaveBeenCalled();
+  });
+
+  it('keeps a listed page listed through a slow lookup, and leaves a new one out', async () => {
+    vi.useFakeTimers();
+    try {
+      const lookups: Array<(local: boolean) => void> = [];
+      const host = createBurrowFrameHost({ ...proxy, isLocal: () => new Promise((resolve) => { lookups.push(resolve); }) });
+      const fresh = host.canOpen('http://name.local/');
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(await fresh).toBe(false);
+      lookups[0]!(true);
+      await vi.advanceTimersByTimeAsync(0);
+      await expect(host.canOpen('http://name.local/')).resolves.toBe(true);
+      await vi.advanceTimersByTimeAsync(31_000);
+      const slow = host.canOpen('http://name.local/');
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(await slow).toBe(true);
+      expect(lookups).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('frames only a page on this machine, and lists accordingly', async () => {
+    const host = createBurrowFrameHost({
+      ...proxy,
+      create: (url, options) => createIframeProxyUrl(url, {
+        ...options,
+        resolve: async (name) => (name === 'remote.example' ? [{ address: '93.184.216.34', family: 4 }] : [{ address: '127.0.0.1', family: 4 }]),
+      }),
+    });
+    const lease = { owner: 'remote:test', id: 'off-machine' };
+    expect(await host.open('http://remote.example/', { frameOrigin: FRAME_ORIGIN, embedderOrigins: POCKET, lease }))
+      .toEqual({ refused: 'a remote device frames pages on this machine only' });
+    const { port } = await listen((_req, res) => res.end('ok'));
+    expect(await host.canOpen(`http://localhost:${port}/`)).toBe(true);
+    expect(await host.canOpen('https://localhost/')).toBe(false);
+  });
+
+  it('refuses a page the proxy refuses, and an unusable chain', async () => {
+    const host = createBurrowFrameHost(proxy);
+    const lease = { owner: 'remote:test', id: 'refused' };
+    expect(await host.open('http://169.254.169.254/', { frameOrigin: FRAME_ORIGIN, embedderOrigins: POCKET, lease }))
+      .toEqual({ refused: 'link-local / metadata addresses are refused' });
+    expect(await host.open('http://localhost:1/', { frameOrigin: FRAME_ORIGIN, embedderOrigins: ['null'], lease }))
+      .toEqual({ refused: 'invalid embedder origins' });
+    expect(await host.open('http://localhost:1/', { frameOrigin: 'https://a.example/path', embedderOrigins: POCKET, lease }))
+      .toEqual({ refused: 'invalid frame origin' });
+  });
+
+  it('tunnels a WebSocket to the page, as the grant\'s own origin', async () => {
+    const { port, server } = await listen(() => {});
+    const wss = new WebSocketServer({ server });
+    servers.push(wss);
+    let origin: string | undefined;
+    wss.on('connection', (socket, req) => {
+      origin = req.headers.origin;
+      socket.on('message', (data, binary) => socket.send(binary ? data : `echo:${data.toString()}`));
+    });
+    const upstream = await open(`http://localhost:${port}/`);
+    const messages: string[] = [];
+    const closed = new Promise<number>((resolve) => {
+      const socket = upstream.openSocket({ path: '/hmr', protocols: [] }, {
+        onOpen: () => { void socket.send(new TextEncoder().encode('ping'), false); },
+        onMessage: (data) => {
+          messages.push(new TextDecoder().decode(data));
+          socket.close(1000, 'done');
+        },
+        onClose: (code) => resolve(code),
+      });
+    });
+    expect(await closed).toBe(1000);
+    expect(messages).toEqual(['echo:ping']);
+    expect(origin).toBe(`http://localhost:${port}`);
+  });
+
+  it('holds a socket paused while it was still connecting', async () => {
+    const { port, server } = await listen(() => {});
+    const wss = new WebSocketServer({ server });
+    servers.push(wss);
+    wss.on('connection', (socket) => socket.send('hello'));
+    const upstream = await open(`http://localhost:${port}/`);
+    const messages: string[] = [];
+    let opened!: () => void;
+    const whenOpen = new Promise<void>((resolve) => { opened = resolve; });
+    let delivered!: () => void;
+    const message = new Promise<void>((resolve) => { delivered = resolve; });
+    const socket = upstream.openSocket({ path: '/hmr', protocols: [] }, {
+      onOpen: () => opened(),
+      onMessage: (data) => {
+        messages.push(new TextDecoder().decode(data));
+        delivered();
+      },
+      onClose: () => {},
+    });
+    socket.pause();
+    await whenOpen;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(messages).toEqual([]);
+    socket.resume();
+    await message;
+    expect(messages).toEqual(['hello']);
+    socket.terminate();
+  });
+
+  it('honors a pause and a resume while closing, so the upstream\'s own close arrives', async () => {
+    const { port, server } = await listen(() => {});
+    const wss = new WebSocketServer({ server });
+    servers.push(wss);
+    const upstream = await open(`http://localhost:${port}/`);
+    let opened!: () => void;
+    const whenOpen = new Promise<void>((resolve) => { opened = resolve; });
+    let closed!: (code: number) => void;
+    const whenClosed = new Promise<number>((resolve) => { closed = resolve; });
+    let closes = 0;
+    const socket = upstream.openSocket({ path: '/hmr', protocols: [] }, {
+      onOpen: () => opened(),
+      onMessage: () => {},
+      onClose: (code) => {
+        closes += 1;
+        closed(code);
+      },
+    });
+    await whenOpen;
+    socket.close(3001, 'bye');
+    socket.pause();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(closes).toBe(0);
+    socket.resume();
+    expect(await whenClosed).toBe(3001);
+  });
+
+  it('settles a write the upstream never took when the exchange ends', async () => {
+    const { port } = await listen(() => {});
+    const upstream = await open(`http://localhost:${port}/`);
+    const exchange = upstream.request({ method: 'POST', path: '/', headers: [] }, {
+      onHead: () => {}, onBody: () => {}, onEnd: () => {}, onError: () => {},
+    });
+    const write = exchange.write(new Uint8Array(1024), false);
+    exchange.abort();
+    await expect(write).rejects.toThrow();
+  });
+
+  it('closing the upstream ends its grant and what is in flight on it', async () => {
+    let arrived!: () => void;
+    const reached = new Promise<void>((resolve) => { arrived = resolve; });
+    let ended!: () => void;
+    const dropped = new Promise<void>((resolve) => { ended = resolve; });
+    const { port } = await listen((req) => {
+      // Holds the response, so only the close can end the exchange.
+      req.socket.on('close', () => ended());
+      arrived();
+    });
+    const upstream = await open(`http://localhost:${port}/`);
+    let heard = false;
+    const exchange = upstream.request({ method: 'GET', path: '/', headers: [] }, {
+      onHead: () => { heard = true; },
+      onBody: () => { heard = true; },
+      onEnd: () => { heard = true; },
+      onError: () => { heard = true; },
+    });
+    await exchange.write(new Uint8Array(0), true);
+    await reached;
+    upstream.close();
+    await dropped;
+    expect(heard).toBe(false);
+  });
+});

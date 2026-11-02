@@ -50,7 +50,7 @@ flowchart TD
 
 **Runtimes are gated, not degraded**: `probeNoiseSupport` runs before sign-in, setup, pairing, or connection; `false` renders a fixed upgrade requirement instead.
 
-**Pocket hides `MobileWall`'s local Kill affordance**: v1 grants no phone-side kill or layout authority (rationale).
+**Pocket hides `MobileWall`'s Kill on a terminal**: v1 grants no phone-side terminal kill or layout authority (rationale). A Tool or embedded page closes through `surface.close` (`docs/specs/remote-api.md` -> "Closing a surface").
 
 **An inline image crosses the relay as the ordered `terminal.data` messages its PTY chunks produce**, reassembled by Pocket's own xterm, which loads ImageAddon wherever the terminal's `inlineImages` setting is on. **Nothing coalesces them and no size gates them** (rationale); each is bounded only by what the Burrow feeds its parser ([remote-api.md](./remote-api.md) → Terminal surfaces).
 
@@ -179,7 +179,7 @@ Source of truth: `ClientSessionCore` in `lib/src/remote/client/session-core.ts`;
 
 **A replacing Connect leaves the current session working until its connection request goes out, and never reports burrow loss for it**: a presence proof the user dismisses, or a handshake that fails, leaves it untouched, and a replacement refused after the request has gone leaves none.
 
-**Must label the connected header with the live path, `relay` or `direct`.** **Must pass only a `DirectRelayCause` to Pocket, never runtime failure text**; `TRANSPORT_RELAY_CAUSES` owns the displayed sentences. After the switch, a channel failure ends the session (remote-api.md → Direct path): Pocket returns to the list, and reconnecting costs a fresh handshake.
+**Must label the Sessions screen's header with the live path, `relay` or `direct`.** **Must pass only a `DirectRelayCause` to Pocket, never runtime failure text**; `TRANSPORT_RELAY_CAUSES` owns the displayed sentences. After the switch, a channel failure ends the session (remote-api.md → Direct path): Pocket returns to the list, and reconnecting costs a fresh handshake.
 
 Source of truth: `PocketClient.connect` in `lib/src/remote/client/pocket-client.ts`; `deploymentDirectPeer` in `lib/src/remote/pocket-app/deployment.ts`; `TRANSPORT_RELAY_CAUSES` in `lib/src/remote/pocket-app/views.tsx`.
 
@@ -193,6 +193,31 @@ Sessions expire ([relay.md](./relay.md)) and, on a self-host Relay, also end on 
 - **Clearing the stored session removes it only while storage holds the cleared token**, so a stale tab never erases another tab's newer sign-in (rationale).
 
 Source of truth: `SessionExpiredError` in `lib/src/remote/client/pocket-client.ts`.
+
+## Frame origin
+
+A framed page (`docs/specs/remote-api.md` -> "Frames") runs at a frame origin: a worker at its root, a bootstrap page in a hidden frame beside the page, and nothing else served. **The worker relays every same-origin request and a page's socket to the bootstrap page, and it to the Client window**, which answers through one `OpenFrame`. `PocketBrowserFrame` is the Client window's end.
+
+- **Never serve a frame at Pocket's origin**: its page could use Pocket's keys and session. A sandbox without `allow-same-origin` is no alternative, since it leaves no worker to intercept the page.
+- **Must give each Surface's page its own origin**, the grant boundary a local pane has (`docs/specs/dor-browser.md` -> "Iframe Renderer"). A framed page is same-origin with its bootstrap page and worker, so it can write to everything they hold.
+- **A frame origin's server must answer only its own files, framed only by the Client**, holding no credential and setting no cookie (`frameOriginResponse` in `hosted/server/frame-origin.ts`).
+- **Must serve one frame's grant through a bootstrap port**: whatever arrives there may be the page's own, and so asks only for what that page could fetch.
+- **The worker stands in for the `Origin` and `Referer` the browser adds past it**, naming the frame origin on a write. **Must refuse a top-level page and a write naming another site as its referrer**, neither of which a frame makes. **A form with no referrer must pass with `Origin: null`**, as a browser sends it: a page's `no-referrer` policy is its own, and it is vouched for by nothing.
+- **Must keep the worker stateless**: it is stopped at will, so it finds the bootstrap page again for each request.
+- **Never count on a framed page's own browser storage surviving a relaunch** (rationale); a built-in Tool keeps none (`docs/specs/dor-tools-builtin.md` -> "Editing files").
+- **The page's `WebSocket` is shimmed by a tunneled grant alone, ahead of the page's own scripts**, since no worker sees a socket: a same-origin one goes as a message to the controlling worker, and any other stays native. **A shimmed socket must take a send's bytes at the call, keep its close behind them, and close when its page goes away**, since nothing else tells the session.
+
+**The frame origins sit on a registrable domain of their own, `HOSTED_FRAME_DOMAIN`**, so a framed page cannot set a cookie on `dormouse.sh`.
+
+- **Must declare `capabilities.frames` only at Hosted's production origin** (`frameDomainFor`), from Pocket and the one-time page alike: the frame Worker lets no other page frame it, and a preview has no wildcard to serve one on.
+- **Must let frames in through Pocket's and the one-time page's CSPs only for that domain**; a self-host Relay's Pocket names none. The one-time page's own CSP sandbox must grant what `IFRAME_SANDBOX` does, since a frame's is at most its parent's.
+- **Must sandbox a framed page as a local pane's, and its bootstrap page no less**, so it cannot navigate Pocket away, itself or through the sibling it can script.
+- **Must keep a separate `frameOriginFor` salt per tab, in `sessionStorage`**, since a worker cannot tell whose page asked and two tabs sharing an origin would serve each other's requests; a reload keeps it, a browser's Duplicate Tab copies it, and losing it only moves frames to new origins. The one-time page holds its salt in memory alone.
+- **Must attach no terminal while a browser shows**, so a Tool on the phone holds no pane's size.
+- **Must keep up to `MAX_FRAMES_PER_SESSION` frames loaded**, dropping the oldest with no unsaved edits.
+- **A page's new-window request must load in place on its own page, and open anywhere else only on a tap**, `noopener`, over `http:` and `https:` alone, since the page chose the URL.
+
+Source of truth: `frameOriginFor` in `remote-lib-common/src/remote/frame-origin.ts`, `installFrameWorker` in `lib/src/remote/frame-origin/worker.ts`, `lib/src/remote/frame-origin/bootstrap.ts`, `serveFrame` in `lib/src/remote/frame-origin/frame-bridge.ts`, `tunnelSocketShim` in `lib/src/host/iframe-proxy-rewrite.ts`, `lib/vite.frame-origin.config.ts`, `scripts/frame-origin-check/serve.mjs` (the check a real phone runs).
 
 ## Deployment: same-origin, always
 
@@ -211,7 +236,9 @@ Source of truth: `pocketContentSecurityPolicy` in `remote-lib-common/src/remote/
 
 ## Future
 
+**Scope: pocket-frames-selfhost** — a self-host Relay serves no frame origin, so its Pocket declares no frames and stays terminal-only.
+
 **Scope: pocket-polish**
 
 1. **Dedupe the composition** — the website's `PocketTerminalExperience` and the Pocket shell (`PocketWall.tsx`) each wire `MobileTerminalUi` + `MobileWall` independently; extract the shared wiring so they cannot drift.
-2. **Theme picker in Pocket** — the app restores the persisted theme but exposes no picker; add the shared `ThemePicker` (and its theme-debugger entry) once its dropdown is phone-friendly.
+2. **Theme debugger in Pocket** — the Settings page ([mobile-terminal-ui.md](./mobile-terminal-ui.md) → "Sessions screen") picks a theme but offers no theme-debugger entry.

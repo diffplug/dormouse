@@ -137,9 +137,16 @@ interface ScreenEntry {
 
 const registry = new Map<string, ScreenEntry>();
 const presenceListeners = new Set<() => void>();
+/** Told of every registration, renderer, and chrome change: what a page listing reads. */
+const pageListeners = new Set<() => void>();
+
+function emitPages(): void {
+  for (const listener of pageListeners) listener();
+}
 
 function emitPresence(): void {
   for (const listener of presenceListeners) listener();
+  emitPages();
 }
 
 export interface ScreenRegistration {
@@ -200,12 +207,15 @@ export function registerAgentBrowserScreen(
   emitPresence();
   return {
     update(snapshot) {
+      const swapped = snapshot.renderMode !== entry.snapshot.renderMode;
       entry.snapshot = snapshot;
       for (const listener of entry.listeners) listener();
+      if (swapped && registry.get(id) === entry) emitPages();
     },
     updateChrome(chrome) {
       entry.chrome = chrome;
       for (const listener of entry.chromeListeners) listener();
+      if (registry.get(id) === entry) emitPages();
     },
     dispose() {
       if (registry.get(id) === entry) {
@@ -218,6 +228,22 @@ export function registerAgentBrowserScreen(
 
 export function getAgentBrowserScreenController(id: string): ScreenController | null {
   return registry.get(id)?.controller ?? null;
+}
+
+/** Every registered controller, in registration order. */
+export function listAgentBrowserScreenControllers(): ScreenController[] {
+  return [...registry.values()].map((entry) => entry.controller);
+}
+
+/**
+ * Hear of every change a listing of the pages could read: a controller
+ * registered or gone, a renderer swapped, a URL or title moved.
+ */
+export function subscribeAgentBrowserScreenPages(listener: () => void): () => void {
+  pageListeners.add(listener);
+  return () => {
+    pageListeners.delete(listener);
+  };
 }
 
 export function subscribeAgentBrowserScreenPresence(listener: () => void): () => void {

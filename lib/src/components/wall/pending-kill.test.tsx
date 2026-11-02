@@ -90,9 +90,7 @@ describe('a pending kill', () => {
     await clickKill('surface:12');
     const listed = await control<{ surfaces: Array<{ id: string }> }>(SURFACE_CONTROL_METHODS.list);
     expect(listed.result!.surfaces.map(surface => surface.id)).toEqual(['surface:11']);
-    for (const surface of ['surface:12', 'surface:12']) {
-      expect(await control(SURFACE_CONTROL_METHODS.read, { surface })).toEqual({ ok: false, error: `surface '${surface}' is a pending kill` });
-    }
+    expect(await control(SURFACE_CONTROL_METHODS.read, { surface: 'surface:12' })).toEqual({ ok: false, error: "surface 'surface:12' is a pending kill" });
   });
 
   it('refuses a dor command its own process makes while it is pending', async () => {

@@ -42,7 +42,7 @@ export function ShellPicker({ open, onOpenChange, onSelect }: ShellPickerProps) 
   const { setTriggerEl, setMenuEl, menuStyle } = useAnchoredMenu(open, MENU_WIDTH_PX);
 
   return (
-    <div ref={rootRef} className="relative flex items-center">
+    <div ref={rootRef} className="relative flex min-w-0 items-center">
       <button
         ref={setTriggerEl}
         type="button"

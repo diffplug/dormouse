@@ -6,7 +6,7 @@
  * Renderer"). This file only injects the VS Code logger; the
  * message-router calls `createIframeProxyUrl` exactly as before.
  */
-import { createIframeProxyUrl as createProxy, releaseIframeProxyLease } from '../../lib/src/host/iframe-proxy';
+import { createIframeProxyUrl as createProxy, isUpstreamOnThisMachine, releaseIframeProxyLease } from '../../lib/src/host/iframe-proxy';
 import type { IframeProxyResult } from '../../lib/src/lib/platform/types';
 import { log } from './log';
 
@@ -15,9 +15,9 @@ export function createIframeProxyUrl(
   targetUrl: string,
   embedderOrigins: unknown,
   lease?: { owner: string; id: unknown },
-  allowExternal = false,
+  access?: { allowExternal?: boolean; tunneled?: boolean },
 ): Promise<IframeProxyResult> {
-  return createProxy(targetUrl, { log: (msg) => log.info(msg), embedderOrigins, lease, allowExternal });
+  return createProxy(targetUrl, { log: (msg) => log.info(msg), embedderOrigins, lease, ...access });
 }
 
-export { releaseIframeProxyLease };
+export { isUpstreamOnThisMachine, releaseIframeProxyLease };

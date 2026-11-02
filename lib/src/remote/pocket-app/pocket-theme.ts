@@ -11,7 +11,14 @@
 
 // The modules, not the themes barrel: the Pocket build imports this file for
 // its boot tag's default.
-import { applyTheme, getAppliedThemeSnapshot, restoreActiveTheme, setDefaultThemeId } from '../../lib/themes/apply';
+import { useEffect } from 'react';
+import {
+  applyTheme,
+  getAppliedThemeSnapshot,
+  restoreActiveTheme,
+  setDefaultThemeId,
+  subscribeToActiveTheme,
+} from '../../lib/themes/apply';
 import { setThemePaintProfile, type ThemePaintProfile } from '../../lib/themes/boot-paint';
 import { getBundledThemes } from '../../lib/themes/store';
 import type { DormouseTheme } from '../../lib/themes/types';
@@ -60,4 +67,9 @@ function syncDocumentChrome(theme: DormouseTheme): void {
 /** Restore the theme before first paint and after commit; `restore` picks how. */
 export function usePocketTheme(restore: () => void = restorePocketTheme) {
   useRestoredTheme(POCKET_THEME_ID, restore);
+  // A later pick (the Settings page) repaints the browser chrome too.
+  useEffect(() => subscribeToActiveTheme(() => {
+    const theme = getAppliedThemeSnapshot()?.theme;
+    if (theme) syncDocumentChrome(theme);
+  }), []);
 }

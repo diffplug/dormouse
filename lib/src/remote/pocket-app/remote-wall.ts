@@ -4,12 +4,13 @@
  * seam: the remote session is a platform adapter).
  */
 
+import type { HelloCapabilities } from 'remote-lib-common';
 import { RemotePtyAdapter, type RemoteAdapterClient } from '../client/remote-adapter';
 import { setPlatform } from '../../lib/platform';
 import { disposeAllSessions, initAlertStateReceiver } from '../../lib/terminal-registry';
 
 /** An established session a wall can run on: `hello`, and the slice the adapter drives. */
-export type RemoteWallClient = RemoteAdapterClient & { hello(): Promise<unknown> };
+export type RemoteWallClient = RemoteAdapterClient & { hello(capabilities?: HelloCapabilities): Promise<unknown> };
 
 /**
  * Stand up the remote adapter as the platform and prep a clean registry — the
@@ -33,8 +34,8 @@ export function installRemoteAdapter(client: RemoteAdapterClient): RemotePtyAdap
  * failed mount leaves nothing behind but the session — which the caller must
  * then close, since nothing on the screen it returns to can.
  */
-export async function mountRemoteWall(client: RemoteWallClient): Promise<RemotePtyAdapter> {
-  await client.hello();
+export async function mountRemoteWall(client: RemoteWallClient, capabilities?: HelloCapabilities): Promise<RemotePtyAdapter> {
+  await client.hello(capabilities);
   const adapter = installRemoteAdapter(client);
   try {
     await adapter.init();

@@ -2,17 +2,17 @@
 
 > See `docs/specs/glossary.md` for Session / Pane / Door vocabulary. This spec uses it throughout.
 
-The mobile terminal composition: `MobileTerminalUi` (the wrapper owning touch modes, input modes, and the keyboard reserve) around `MobileWall` (one visible terminal Session at a time, with session switching). **Mobile exposes no split-pane layout and no multiple Workspaces.**
+The mobile terminal composition: `MobileTerminalUi` (the wrapper owning touch modes, the Type composer, the Sessions screen, and the keyboard pan) around `MobileWall` (one visible terminal Session at a time, with session switching). **Mobile exposes no split-pane layout and no multiple Workspaces.**
 
 Three consumers compose them: the website Pocket playground (`website/src/components/PocketTerminalExperience.tsx` on `FakePtyAdapter`; `docs/specs/tutorial.md`), the Pocket app (`lib/src/remote/pocket-app/PocketWall.tsx` on `RemotePtyAdapter`; `docs/specs/pocket-app.md`), and Storybook.
 
 ## Core layout
 
-The reserve, at the bottom, is a fixed CSS height holding app UI while the OS keyboard is hidden and occupied by the OS keyboard otherwise.
+The terminal fills the screen above one bar of buttons at the bottom: the touch modes, then Type.
 
-**Never recompute height from `window.visualViewport`**, so the terminal region does not bounce as the OS keyboard animates (rationale).
+**Never resize the terminal for the OS keyboard.** While the composer is open the terminal pans up until its bottom rows sit just above the keyboard, measured from `window.visualViewport`; its rows and columns, and so its PTY size, stay put (rationale).
 
-* Pocket suppresses kill (`showKillButton={false}`). A ring shows as the alarm inset on the header bar and on its session-list row.
+* Pocket suppresses a terminal's kill (`showKillButton={false}`). A ring shows as the alarm inset on the header bar and on its session-list row.
 * **A tap acknowledges the active Session; a drag never does.** **Select mode's router consumes a touch it owns**, so it announces one that never became a drag as `TERMINAL_TAP_EVENT`.
 * **Must install `useDynamicPalette` in `MobileTerminalUi`** for gesture tokens; it never mounts the desktop `Wall`.
 
@@ -39,13 +39,13 @@ Event routing, by mode (rationale):
 * **Gestures / Select** — pane-content `wheel` and `touchmove` are consumed, except Gestures mode's synthesized edge-scroll wheels ([Edge scrolling](#edge-scrolling)).
 * **Mouse** — touch events are consumed instead, and primary touch and pen pointers synthesize left-button `mousedown` / `mousemove` / `mouseup` on the element under the pointer. `wheel` still reaches the terminal, and real mouse pointers fall through untouched.
 
-**Never treat a portaled descendant as pane content**: a press outside the host's DOM starts no touch mode, tap, or keyboard dismissal.
+**Never treat a portaled descendant or a control as pane content**: a press outside the host's DOM, or on a button or link inside it (`MobileWall`'s header), starts no touch mode or tap, so the control takes its own press.
 
 **Must release a tracked Mouse-mode press on pointerup or cancel even after leaving Mouse mode.** Cancellation releases on the last target.
 
 **Gesture mode also takes primary mouse/trackpad clicks**, which open the radial menu and **must never reach xterm or the pane** for focus, selection, or pane interaction (rationale). **Non-primary mouse buttons are ignored**, so their browser or host behavior continues.
 
-Source of truth: `TOUCH_MODES`, `paneMouseOverride`, and `isPortaledTarget` in `lib/src/components/MobileTerminalUi.tsx`; per-pane wiring in `lib/src/remote/pocket-app/PocketWall.tsx` and `website/src/components/PocketTerminalExperience.tsx`.
+Source of truth: `TOUCH_MODES`, `paneMouseOverride`, `isPortaledTarget`, and `isHostControlTarget` in `lib/src/components/MobileTerminalUi.tsx`; per-pane wiring in `lib/src/remote/pocket-app/PocketWall.tsx` and `website/src/components/PocketTerminalExperience.tsx`.
 
 ## Edge scrolling
 
@@ -79,41 +79,62 @@ Source of truth: `MOBILE_GESTURE_GROUPS` and `MOBILE_GESTURE_QUIT_GROUP` in `lib
 
 Source of truth: `MOBILE_GESTURE_OPTION_DIRECTIONS` in `lib/src/lib/mobile-gesture-menu.ts`.
 
-## Input mode selector
+## Type
 
-The input mode selector controls what appears in the reserve area.
+Type opens the composer at the top of the visible screen: a text field, then a Password checkbox, Cancel, and Send.
 
-| Mode | Reserve area content |
-| --- | --- |
-| Sessions | Session rows with active, alert, and TODO state; selecting one makes it the single visible terminal. |
-| Recent | Placeholder ([Future](#future)). |
-| Type | A button focusing the hidden terminal input — the way back from a dismissed keyboard. Typed keys echo into the terminal as they happen. |
-| Draft | Placeholder ([Future](#future)). |
+**Mobile never sends a soft keyboard's keystrokes as they are typed**; text reaches the terminal only by Send (rationale).
 
-**Must focus the hidden input synchronously inside the Type selector's tap/click handler** (rationale); a follow-up effect retries as best effort. **Switching away from Type blurs the hidden input**, including consumer-controlled switches.
+* **Must focus the composer's field synchronously inside the Type tap** (rationale).
+* **Send writes the text through the consumer's paste path, then Enter** (rationale).
+* **A password is masked and written as input, never through the paste path.**
+* Send and Cancel clear the Password checkbox. Send clears the text; any other close keeps it for the next Type, unless a password.
 
-Source of truth: `KEYBOARD_MODES` in `lib/src/components/MobileTerminalUi.tsx`.
+Source of truth: `MobileTerminalUi` and `Composer` in `lib/src/components/MobileTerminalUi.tsx`.
 
-## Type mode input
+## Physical keyboard
 
-Typing goes through a visually hidden `<textarea>` configured for terminal-style input.
+**While the composer is closed and the terminal is showing, a physical keyboard types straight into the terminal.** **Must leave to the page** a key aimed at a focused field or control, a Command or Option chord, and IME composition. A soft keyboard opens only for a focused field, so it never reaches this path.
 
-* **Must buffer composed text until `compositionend` and leave composing keydowns to the IME**, including its editing and confirmation keys.
-* **Must handle software-keyboard Enter and Backspace through `beforeinput` when no `keydown` occurs**, including deletion from the empty hidden input.
+Source of truth: `hardwareKeySequence` and `isHardwareKeyTarget` in `lib/src/components/MobileTerminalUi.tsx`.
 
-Source of truth: `MobileTerminalUi` in `lib/src/components/MobileTerminalUi.tsx`; `isComposingKey` in `lib/src/lib/dom.ts`.
+## Sessions screen
+
+Tapping the Session title in the `MobileWall` header asks the consumer to show the Sessions screen over the whole composition; the terminal stays mounted beneath at its size. Choosing a row shows that Session. A consumer's `settings` (`MobileSettings`: theme, and font size over a sample) open from the screen's Settings button. **A consumer's `sessionsHeader` heads the screen, not the wall**: the wall keeps one header row, so what a connection is and how to leave it live here. **Must offer the Sessions screen with no Session too**, since no header is there to tap.
+
+* **The font size applies to every terminal in the page, live ones refit**, so a remote Session's PTY resizes with it; **must hand it back to the theme when the composition unmounts**.
+* **Must save Settings choices only when the consumer persists them**; the one-time page does not (`docs/specs/one-time.md` -> "Phone page").
+
+Source of truth: `SessionsScreen` in `lib/src/components/MobileTerminalUi.tsx`; `MobileSettings` in `lib/src/components/MobileSettings.tsx`; `useMobileFontSize` in `lib/src/lib/mobile-font-size.ts`; `setTerminalFontSize` in `lib/src/lib/terminal-lifecycle.ts`.
+
+## Browser
+
+A Session whose `kind` is `browser` shows a browser alone, and a `tool` shows its browser over its terminal, which stays mounted beneath at its size. What shows it is the consumer's, an iframe today, with a status from `MobileBrowserPane`. `browserDisplay` names how, in the desktop's glyphs (`docs/specs/dor-browser.md` -> "Display Modal And Render Swaps").
+
+* **A Tool must open on its browser.**
+* **Must put a Tool's Browser and Terminal mode buttons at the header's far left**, in that order, the desktop's glyphs marking the mode showing; a browser alone shows its glyph, with nothing to switch to.
+* **Must keep the header while a browser shows, and drop the bottom bar and the composer**: touches and keys are the browser's, so no gesture, touch mode, or physical key reaches the terminal (rationale).
+* **Must not mount a terminal for a `browser`.**
+* **Must offer a close in a `tool` or `browser` header, in either mode, through `onBrowserClose`**, even where the consumer hides the terminal's kill; what closing does is the consumer's.
+* **`MobileCloseDialog` asks what the desktop asks, in its words**, the confirmation's letter tapped rather than typed, away from the header's close so a double-tap cannot answer it.
+* **The browser layer ends at the bottom safe area**, which a framed document cannot read for itself.
+* **A session that cannot carry a page says why, and how to get one**: the direct path's wait and a relayed session's note are `MobileBrowserPane`'s, the note naming a VPN on both devices and a reconnect, since a session tries the direct path once (`docs/specs/remote-api.md` -> "Frames").
+
+Source of truth: `MobileWall` in `lib/src/components/MobileWall.tsx`; `MobileBrowserPane` in `lib/src/components/MobileBrowserPane.tsx`; `browserShown` in `lib/src/components/MobileTerminalUi.tsx`.
 
 ## Keyboard focus invariant
 
-**Pane-content touches must never open the native keyboard.** The pane content area may focus the terminal internally for key routing or mouse handling, but every text input the terminal surface creates — later-mounted ones included — is a non-keyboard target, blurred when the touch starts there; **that blur repeats across the window in which `Wall` can restore focus** (rationale). **The only mobile UI surfaces that may open the native keyboard are the Type selector and the Type reserve area.**
+**Pane-content touches must never open the native keyboard.** The pane content area may focus the terminal internally for key routing or mouse handling, but every text input the terminal surface creates — later-mounted ones included — is a non-keyboard target, blurred when the touch starts there; **that blur repeats across the window in which `Wall` can restore focus** (rationale). **The only mobile UI surface that may open the native keyboard is the composer.**
 
 Source of truth: `MobileTerminalUi` in `lib/src/components/MobileTerminalUi.tsx` and `MobileWall` in `lib/src/components/MobileWall.tsx`; pinned by `lib/src/components/MobileTerminalUi.test.tsx` and `lib/src/components/MobileWall.test.tsx`.
 
 ## Future
 
+**Scope: mobile-browser-streams** — agent-browser and Playwright on a phone (`docs/specs/remote-api.md` -> Future, "Browser surfaces"): a screencast as `MobileBrowserPane`'s `view`, its touches sent as input, and the Browser button opening a display choice once a Surface has more than one to offer.
+
 **Scope: mobile-backlog** — unprioritized:
 
-* Real recent commands and a Draft scratchpad (both reserves are placeholder copy today).
+* Recent commands in the composer.
 * Dual-pane copy/paste.
 * Pinned snippets.
 * Ctrl+D and Ctrl+Z app-key buttons.

@@ -38,6 +38,7 @@ export {
   getOrCreateTerminal,
   getTerminalShellKind,
   getTerminalInstance,
+  getTerminalFontSize,
   getTerminalOverlayDims,
   getSessionInputVersion,
   isUntouched,
@@ -54,6 +55,7 @@ export {
   serializeTerminal,
   flushTerminal,
   setPendingShellOpts,
+  setTerminalFontSize,
   unmountElement,
 } from './terminal-lifecycle';
 export type { SurfaceFocusHandle } from './terminal-lifecycle';

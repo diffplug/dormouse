@@ -10,18 +10,18 @@
     "test": "tsc -p ."
   },
   "dependencies": {
-    "@diffplug/xterm-addon-webgl-sdf": "https://github.com/diffplug/xterm.js/releases/download/sdf-v0.20.0-sdf315.0/diffplug-xterm-addon-webgl-sdf-0.20.0-sdf315.0.tgz",
-    "@xterm/addon-webgl": "0.20.0-beta.309",
-    "@xterm/xterm": "6.1.0-beta.315",
+    "@diffplug/xterm-addon-webgl-sdf": "https://github.com/diffplug/xterm.js/releases/download/sdf-v0.20.0-sdf336.0/diffplug-xterm-addon-webgl-sdf-0.20.0-sdf336.0.tgz",
+    "@xterm/addon-webgl": "0.20.0-beta.329",
+    "@xterm/xterm": "6.1.0-beta.336",
     "react": "^19.2.6",
     "react-dom": "^19.2.6"
   },
   "devDependencies": {
-    "@storybook/react": "11.0.0-alpha.6",
-    "@storybook/react-vite": "11.0.0-alpha.6",
+    "@storybook/react": "11.0.0-alpha.8",
+    "@storybook/react-vite": "11.0.0-alpha.8",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
-    "storybook": "11.0.0-alpha.6",
+    "storybook": "11.0.0-alpha.8",
     "typescript": "^7.0.0",
     "vite": "^8.0.14"
   }

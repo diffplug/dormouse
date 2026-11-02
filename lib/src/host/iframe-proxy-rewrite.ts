@@ -78,6 +78,27 @@ export function normalizeEmbedderOrigins(value: unknown): string[] | null {
 }
 
 /**
+ * The owner prefix of a lease a remote session holds for its frame
+ * (`docs/specs/remote-api.md` → "Frames"): the session releases it, and no
+ * window sweep does.
+ */
+export const REMOTE_LEASE_OWNER_PREFIX = 'remote:';
+
+/**
+ * `value` with an exact parsed `from` origin replaced by `to`, path, query, and
+ * fragment kept. Compares parsed origins, never string prefixes or embedded
+ * query values, so a foreign redirect or referer keeps its authority and its
+ * payload intact; a relative or malformed value passes through unchanged.
+ */
+export function rewriteOrigin(value: string, from: string, to: string): string {
+  try {
+    const url = new URL(value);
+    if (url.origin === from) return `${to}${url.pathname}${url.search}${url.hash}`;
+  } catch { /* Relative Locations and malformed headers pass through unchanged. */ }
+  return value;
+}
+
+/**
  * The proxy's framing policy, replacing or supplementing the upstream's CSP.
  * `'self'` permits nested documents within this one per-grant origin; every
  * external ancestor must still be in the validated app chain.
@@ -238,37 +259,144 @@ export function startsWithUtf16Bom(bytes: Uint8Array): boolean {
 }
 
 const HEAD_CLOSE = /<\/head>/i;
-const BODY_OPEN = /<body[^>]*>/i;
+/** A tag's attributes, whose quoted values may hold a `>`. */
+const ATTRIBUTES = String.raw`(?:\s(?:"[^"]*"|'[^']*'|[^>"'])*)?`;
+const BODY_OPEN = new RegExp(`<body${ATTRIBUTES}>`, 'i');
 
 /** The end of the document prefix `instrumentHtml` places the shim before
  *  (`</head>`) or after (`<body…>`). The proxy buffers until it sees one. */
 export const HEAD_MARKER = new RegExp(`${HEAD_CLOSE.source}|${BODY_OPEN.source}`, 'i');
 
-export function instrumentHtml(body: string, embedderOrigin: string, preserveCsp = false): string {
+/**
+ * For a page a remote Client frames (`docs/specs/remote-api.md` → "Frames"): no
+ * service worker sees a WebSocket, so a same-origin one goes as a message to the
+ * worker controlling this page, which relays it (`lib/src/remote/frame-origin/`).
+ * A socket on any other origin, or a page no worker controls, stays native. A
+ * send is taken at the call, as a native one is, and a Blob goes as it is for the
+ * far end to read, so everything is on the port in order even as the page goes.
+ * A page going away closes what it holds: nothing else tells the session, whose
+ * sockets are few.
+ */
+export function tunnelSocketShim(): string {
+  return `(function(){
+  var N=window.WebSocket,S=navigator.serviceWorker,L=new Set();
+  if(!N||!S||!S.controller)return;
+  addEventListener('pagehide',function(){L.forEach(function(end){end();});});
+  class T extends EventTarget{constructor(url,protocols){
+    var u=new URL(String(url),location.href);
+    if(u.host!==location.host)return protocols===undefined?new N(url):new N(url,protocols);
+    super();
+    var t=this;
+    t.url=u.href;t.protocol='';t.extensions='';t.bufferedAmount=0;t.binaryType='blob';t.readyState=0;
+    t.onopen=t.onmessage=t.onclose=t.onerror=null;
+    function fire(ev){t.dispatchEvent(ev);var h=t['on'+ev.type];if(typeof h==='function')h.call(t,ev);}
+    var c=new MessageChannel(),p=c.port1;
+    function end(code,reason){if(L.delete(end))p.postMessage({kind:'close',code:code,reason:reason});}
+    L.add(end);
+    p.onmessage=function(m){
+      var d=m.data;
+      if(d.kind==='open'){if(t.readyState!==0)return;t.readyState=1;t.protocol=d.protocol;t.extensions=d.extensions;fire(new Event('open'));}
+      else if(d.kind==='sent'){t.bufferedAmount-=d.bytes;}
+      else if(d.kind==='message'){
+        var v=d.binary?(t.binaryType==='arraybuffer'?d.data:new Blob([d.data])):new TextDecoder().decode(d.data);
+        fire(new MessageEvent('message',{data:v,origin:location.origin}));
+      }else if(d.kind==='closed'){
+        if(d.code===1006)fire(new Event('error'));
+        t.readyState=3;L.delete(end);p.close();
+        fire(new CloseEvent('close',{code:d.code,reason:d.reason,wasClean:d.code!==1006}));
+      }
+    };
+    t.send=function(data){
+      if(t.readyState===0)throw new DOMException('Still in CONNECTING state.','InvalidStateError');
+      if(t.readyState!==1)return;
+      var k=Object.prototype.toString.call(data),v=ArrayBuffer.isView(data),l=k==='[object Blob]'||k==='[object File]',b=v||l||k==='[object ArrayBuffer]';
+      var m=l?data:v?data.buffer.slice(data.byteOffset,data.byteOffset+data.byteLength):b?data.slice(0):new TextEncoder().encode(String(data)).buffer;
+      t.bufferedAmount+=l?m.size:m.byteLength;
+      p.postMessage({kind:'send',data:m,binary:b},l?[]:[m]);
+    };
+    t.close=function(code,reason){
+      if(code!==undefined&&code!==1000&&(code<3000||code>4999))throw new DOMException('Invalid close code.','InvalidAccessError');
+      if(reason!==undefined&&new TextEncoder().encode(reason).length>123)throw new DOMException('Close reason too long.','SyntaxError');
+      if(t.readyState>1)return;
+      t.readyState=2;end(code,reason);
+    };
+    var list=protocols===undefined?[]:typeof protocols==='string'?[protocols]:Array.prototype.slice.call(protocols);
+    S.controller.postMessage({kind:'socket',path:u.pathname+u.search,protocols:list},[c.port2]);
+  }}
+  var states={CONNECTING:0,OPEN:1,CLOSING:2,CLOSED:3};
+  Object.assign(T,states);Object.assign(T.prototype,states);
+  window.WebSocket=T;
+})();`;
+}
+
+export function instrumentHtml(body: string, embedderOrigin: string, preserveCsp = false, tunneled = false): string {
   const html = preserveCsp ? body : body.replace(
     /<meta[^>]+http-equiv=["']?content-security-policy["']?[^>]*>/gi,
     '',
   );
   const shimTag = `<script>${iframeShim(embedderOrigin)}</script>`;
-  if (HEAD_CLOSE.test(html)) return html.replace(HEAD_CLOSE, (tag) => shimTag + tag);
-  if (BODY_OPEN.test(html)) return html.replace(BODY_OPEN, (tag) => tag + shimTag);
-  // Both tags are optional in valid HTML. Never ahead of the doctype, which
-  // would switch the page to quirks mode, nor of a `<meta charset>`, which
-  // counts only within the first 1024 bytes — the same window searched here.
+  // Ahead of the page's own scripts, which may open a socket as they run.
+  const at = prologueEnd(html);
+  const page = tunneled ? `${html.slice(0, at)}<script>${tunnelSocketShim()}</script>${html.slice(at)}` : html;
+  if (HEAD_CLOSE.test(page)) return page.replace(HEAD_CLOSE, (tag) => shimTag + tag);
+  if (BODY_OPEN.test(page)) return page.replace(BODY_OPEN, (tag) => tag + shimTag);
+  // Both tags are optional in valid HTML.
+  return page.slice(0, at) + shimTag + page.slice(at);
+}
+
+/**
+ * One thing that may stand in a page's first kilobyte, comments and whitespace
+ * before it. A script only passes for a charset behind it, which the shim must
+ * not push out of that kilobyte.
+ */
+const PROLOGUE_TOKEN = new RegExp(String.raw`\s*(<!--[\s\S]*?-->|<!doctype[^>]*>|<(?:html|head|meta|link|base)${ATTRIBUTES}>|<(title|style|script)${ATTRIBUTES}>[\s\S]*?</\2\s*>)`, 'giy');
+/** Of those, what a script ahead of it would break. */
+const MUST_PRECEDE_SCRIPT = /^(?:<!doctype|<html|<head|<meta\b[\s\S]*\bcharset\b)/i;
+
+/**
+ * The earliest a script may go. Never ahead of the doctype, which would switch
+ * the page to quirks mode, nor of a `<meta charset>`, which counts only within
+ * the first 1024 bytes — the same window searched here.
+ */
+function prologueEnd(html: string): number {
   const prologue = html.slice(0, 1024);
   // Nor ahead of a UTF-8 BOM (its latin1 spelling), which must stay first.
-  let at = html.startsWith('\xEF\xBB\xBF') ? 3 : 0;
-  for (const tag of [/<!doctype[^>]*>/i, /<html(?:\s[^>]*)?>/i, /<head(?:\s[^>]*)?>/i, /<meta\b[^>]*\bcharset\b[^>]*>/i]) {
-    const match = tag.exec(prologue);
-    if (match) at = Math.max(at, match.index + match[0].length);
+  const start = html.startsWith('\xEF\xBB\xBF') ? 3 : 0;
+  let at = start;
+  // Walked from the start, stopping at the first thing that is no token: a tag's
+  // spelling inside a script's text is not a tag.
+  for (const token of prologue.slice(start).matchAll(PROLOGUE_TOKEN)) {
+    if (MUST_PRECEDE_SCRIPT.test(token[1]!)) at = start + token.index + token[0].length;
   }
-  return html.slice(0, at) + shimTag + html.slice(at);
+  return at;
 }
 
 // 169.254.0.0/16 — IPv4 link-local, incl. the 169.254.169.254 cloud-metadata
 // endpoint — as a numeric range so every equivalent encoding is caught.
 const LINK_LOCAL_V4_START = 0xa9fe0000; // 169.254.0.0
 const LINK_LOCAL_V4_END = 0xa9feffff; // 169.254.255.255
+
+/** An address without brackets or a zone, lowercased. */
+const bareAddress = (address: string) => address.replace(/^\[|\]$/g, '').replace(/%.*$/, '').toLowerCase();
+
+/** One spelling per address: an IPv4 one, mapped into IPv6 or not, as its number. */
+function addressKey(address: string): string | number {
+  const bare = bareAddress(address);
+  return ipv4Value(bare) ?? bare;
+}
+
+/**
+ * Whether a connection to a resolved address reaches this machine: loopback, the
+ * unspecified address a server bound to every interface prints, or one of
+ * `interfaceAddresses`, which this host's interfaces hold. Takes an address and
+ * never a name: `localhost` is whatever the resolver says it is.
+ */
+export function isThisMachineAddress(address: string, interfaceAddresses: readonly string[]): boolean {
+  const key = addressKey(address);
+  const loopback = typeof key === 'number' ? key >>> 24 === 127 : key === '::1';
+  if (loopback || key === 0 || key === '::') return true;
+  return interfaceAddresses.some((held) => addressKey(held) === key);
+}
 
 export function isBlockedAddress(hostname: string): boolean {
   // IPv6 link-local (fe80::/10).
@@ -283,29 +411,6 @@ export function isBlockedAddress(hostname: string): boolean {
   // against callers that don't pre-normalize rather than a live bypass fix.
   const v4 = ipv4Value(hostname);
   return v4 !== null && v4 >= LINK_LOCAL_V4_START && v4 <= LINK_LOCAL_V4_END;
-}
-
-// One spelling per address: an IPv4 one, mapped into IPv6 or not, as its
-// number; any other without brackets or a zone, lowercased.
-function addressKey(address: string): string {
-  const h = address.replace(/^\[|\]$/g, '').replace(/%.*$/, '').toLowerCase();
-  const v4 = ipv4Value(h);
-  return v4 === null ? h : `v4:${v4}`;
-}
-
-/**
- * Whether a connection to a resolved address reaches this machine: loopback
- * (127.0.0.0/8, `::1`), the unspecified address (`0.0.0.0`, `::`, which a
- * server bound to every interface prints), or one of `interfaceAddresses`, the
- * addresses this host's own interfaces hold (a LAN, bridge, or tailnet address
- * a server bound alone). Takes an address, never a name — `localhost` is
- * whatever the resolver says it is. IPv4-mapped spellings count as their IPv4.
- */
-export function isThisMachineAddress(address: string, interfaceAddresses: readonly string[]): boolean {
-  const key = addressKey(address);
-  if (key === '::1' || key === '::' || key === 'v4:0') return true;
-  if (key.startsWith('v4:') && Number(key.slice(3)) >>> 24 === 127) return true;
-  return interfaceAddresses.some((own) => addressKey(own) === key);
 }
 
 // --- Served error / diagnostic pages ----------------------------------------

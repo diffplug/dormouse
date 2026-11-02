@@ -53,7 +53,9 @@ import {
   type E2eClientFrame,
   type E2eClientStep,
   type E2eKind,
+  type HelloCapabilities,
   type HelloResult,
+  type RemoteEventMsg,
   type BurrowsResponse,
   type PairingDenialCode,
   type PairingInvitation,
@@ -1138,8 +1140,8 @@ export class PocketClient {
 
   // --- Remote-api v1 (see ClientSessionCore) --------------------------------
 
-  hello(): Promise<HelloResult> {
-    return this.#core.hello();
+  hello(capabilities?: HelloCapabilities): Promise<HelloResult> {
+    return this.#core.hello(capabilities);
   }
 
   watchDirectory(onSnapshot: (entries: DirectoryEntry[]) => void): Promise<string> {
@@ -1165,6 +1167,20 @@ export class PocketClient {
 
   detach(surfaceId: string, subId?: string): Promise<unknown> {
     return this.#core.detach(surfaceId, subId);
+  }
+
+  /** See {@link ClientSessionCore.subscribe}; `FrameClient` drives the session through these. */
+  subscribe<T = unknown>(
+    method: string,
+    params: unknown,
+    onEvent: (event: RemoteEventMsg) => void,
+    subId?: string,
+  ): Promise<{ subId: string; result: T }> {
+    return this.#core.subscribe(method, params, onEvent, subId);
+  }
+
+  request<T = unknown>(method: string, params?: unknown): Promise<T> {
+    return this.#core.request(method, params);
   }
 
   unsubscribe(subId: string): void {

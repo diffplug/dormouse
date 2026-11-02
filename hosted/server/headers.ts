@@ -3,6 +3,8 @@ import {
   ONE_TIME_PAGE_PATH,
   ONE_TIME_WS_ROUTES,
   isContentHashedName,
+  HOSTED_FRAME_DOMAIN,
+  IFRAME_SANDBOX,
   pocketContentSecurityPolicy,
 } from "remote-lib-common";
 
@@ -96,7 +98,7 @@ export const relayRules: RulesFor = (path, appOrigin) => {
         cache: contentHashed(path, `${ONE_TIME_PAGE_PATH}assets/`) ? "immutable" : "no-store",
       }
     : {
-        policy: origin ? pocketContentSecurityPolicy(origin) : RUNS_NOTHING_POLICY,
+        policy: origin ? pocketContentSecurityPolicy(origin, HOSTED_FRAME_DOMAIN) : RUNS_NOTHING_POLICY,
         permissions: POCKET_PERMISSIONS,
         cache: contentHashed(path, "/assets/") ? "immutable" : "no-cache",
       };
@@ -116,9 +118,9 @@ export function exactOrigin(value: unknown): string | null {
  * The one-time page's own policy (`docs/specs/one-time.md` -> "Phone page"):
  * scripts from `/connect/assets/` alone (plus WebAssembly for xterm's image
  * decoder), styles from there too plus inline ones for the shell and React,
- * and one socket — the rendezvous client route. Nothing names `'self'`, which
- * would admit whatever else the relay origin serves. Sandboxed, so it opens no
- * popup and submits no form.
+ * one socket — the rendezvous client route — and frames on the frame domain alone.
+ * Nothing names `'self'`, which would admit whatever else the relay origin serves.
+ * Sandboxed with no top navigation; `form-action` keeps the page's own forms in.
  */
 export function oneTimePagePolicy(appOrigin: string) {
   const page = `${appOrigin}${ONE_TIME_PAGE_PATH}`;
@@ -130,12 +132,14 @@ export function oneTimePagePolicy(appOrigin: string) {
     `font-src ${page}`,
     "media-src blob:",
     `connect-src ${appOrigin.replace(/^http/, "ws")}${ONE_TIME_WS_ROUTES.client}`,
+    `frame-src https://*.${HOSTED_FRAME_DOMAIN}`,
     "worker-src 'none'",
     "form-action 'none'",
     "base-uri 'none'",
     "frame-ancestors 'none'",
     "object-src 'none'",
-    "sandbox allow-scripts allow-same-origin",
+    // A frame's sandbox is at most this, and a link opened on a tap leaves it.
+    `sandbox ${IFRAME_SANDBOX} allow-popups-to-escape-sandbox`,
   ].join("; ");
 }
 

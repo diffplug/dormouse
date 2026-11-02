@@ -16,19 +16,24 @@ const B64U_REVERSE: Int16Array = (() => {
   return table;
 })();
 
+const B64U_CODES: Uint8Array = Uint8Array.from(B64U_ALPHABET, (char) => char.charCodeAt(0));
+
 /** Encode bytes as unpadded base64url. */
 export function toBase64Url(bytes: Uint8Array): string {
-  let out = '';
+  // Into bytes, then one decode: page bodies cross here too, and a string built
+  // by appending costs an order of magnitude more per chunk.
+  const out = new Uint8Array(base64UrlLength(bytes.length));
+  let at = 0;
   for (let i = 0; i < bytes.length; i += 3) {
     const b0 = bytes[i]!;
     const b1 = i + 1 < bytes.length ? bytes[i + 1]! : undefined;
     const b2 = i + 2 < bytes.length ? bytes[i + 2]! : undefined;
-    out += B64U_ALPHABET[b0 >> 2]!;
-    out += B64U_ALPHABET[((b0 & 0x03) << 4) | ((b1 ?? 0) >> 4)]!;
-    if (b1 !== undefined) out += B64U_ALPHABET[((b1 & 0x0f) << 2) | ((b2 ?? 0) >> 6)]!;
-    if (b2 !== undefined) out += B64U_ALPHABET[b2 & 0x3f]!;
+    out[at++] = B64U_CODES[b0 >> 2]!;
+    out[at++] = B64U_CODES[((b0 & 0x03) << 4) | ((b1 ?? 0) >> 4)]!;
+    if (b1 !== undefined) out[at++] = B64U_CODES[((b1 & 0x0f) << 2) | ((b2 ?? 0) >> 6)]!;
+    if (b2 !== undefined) out[at++] = B64U_CODES[b2 & 0x3f]!;
   }
-  return out;
+  return utf8Decode(out);
 }
 
 /**

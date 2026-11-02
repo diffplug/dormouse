@@ -8,6 +8,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { silentAnswers } from '../../lib/src/host/remote/service-protocol';
 import { spawn } from 'node:child_process';
 import { createHmac } from 'node:crypto';
 import { linkSync, unlinkSync } from 'node:fs';
@@ -291,6 +292,22 @@ describe('bind-as-lease', () => {
     expect(brokerSide.writes).toEqual([]);
   });
 
+  it('carries a peer\'s silence to the broker, and a window that left is not silent', async () => {
+    const quietSide = fakeWindow({ entries: [{ surfaceId: 'quiet-1' }] });
+    const quietDeps = quietSide.deps();
+    quietDeps.brokerRequest = async () => silentAnswers([{ surfaceId: 'quiet-1' }]);
+    const broker = await openWindow(fakeWindow());
+    await broker.ensurePeerNet(() => {});
+    const quietLink = await freshModule<LinkModule>(() => import('../src/peer-link'));
+    quietLink.initPeerLink(fakeContext(dir));
+    quietLink.configurePeerLink(quietDeps);
+    opened.push(quietLink);
+    await quietLink.ensurePeerNet(() => {});
+    const answers = await broker.remoteRequest('directory', {});
+    expect(answers.silent).toBe(true);
+    expect([...answers]).toEqual([{ surfaceId: 'quiet-1' }]);
+  }, 15_000);
+
   it('settles what a dropping window was asked rather than holding the whole collection', async () => {
     // A directory or an attach every surviving window already answered must not
     // wait out `PEER_REPLY_BUDGET_MS` behind a window that is already gone.
@@ -320,7 +337,9 @@ describe('bind-as-lease', () => {
     await tick();
     await stuckLink.disposePeerLink();
 
-    expect(await collecting).toEqual([{ surfaceId: 'live-1' }]);
+    const answers = await collecting;
+    expect(answers).toEqual([{ surfaceId: 'live-1' }]);
+    expect(answers.silent).toBeUndefined();
     // Well inside `PEER_REPLY_BUDGET_MS`, which is what it used to spend.
     expect(Date.now() - started).toBeLessThan(2_000);
     releaseStuck();

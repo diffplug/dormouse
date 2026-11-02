@@ -3,8 +3,9 @@
  * state store, and activity store to produce the `DirectoryEntry[]` the phone's
  * picker renders. It projects registered terminal Surfaces except helper
  * Sessions, including a Tool's terminal while its browser face is displayed,
- * and every Workspace's — a hidden Wall's terminals stay registered.
- * Standalone browser/iframe Surfaces never enter the xterm registry.
+ * and every Workspace's — a hidden Wall's terminals stay registered. Browser
+ * Surfaces never enter the xterm registry, so they come from the pages their
+ * chrome shows (`embedded-pages.ts`), as does a serving Tool's page.
  */
 
 import type { DirectoryEntry } from 'remote-lib-common';
@@ -20,7 +21,13 @@ import { isHelperSession, registry } from '../../lib/terminal-store';
 import { getWorkspacesSnapshot, workspaceIdsSpanWindows } from '../../lib/workspace-store';
 import { getWorkspaceSurfacesSnapshot } from '../../lib/workspace-surfaces';
 import { pendingKillSessionIds } from '../../lib/pending-kills';
-import { buildDirectorySnapshot, type DirectoryPaneInput, type DirectoryWorkspaceInput } from './directory';
+import {
+  buildDirectorySnapshot,
+  type DirectoryBrowserInput,
+  type DirectoryPaneInput,
+  type DirectoryWorkspaceInput,
+} from './directory';
+import { collectEmbeddedPages } from './embedded-pages';
 
 /**
  * This Window's Workspaces in strip order, or none where an id is unique only
@@ -51,6 +58,7 @@ export function collectDirectorySnapshot(): DirectoryEntry[] {
   // miss would allocate a fresh default twice).
   const allPanes = ids.map((id) => getTerminalPaneState(id));
   const active = typeof document !== 'undefined' ? document.activeElement : null;
+  const pages = collectEmbeddedPages();
 
   const inputs: DirectoryPaneInput[] = ids.map((id, i) => {
     const pane = allPanes[i]!;
@@ -85,8 +93,21 @@ export function collectDirectorySnapshot(): DirectoryEntry[] {
       pane,
       ringing: activity?.status === 'ALERT_RINGING',
       hasTODO: activity?.todo === true,
+      ...(pages.has(id) ? { browser: pages.get(id)! } : {}),
     };
   });
 
-  return buildDirectorySnapshot(inputs, collectWorkspaces());
+  const browsers: DirectoryBrowserInput[] = [...pages]
+    .filter(([id]) => !registry.has(id))
+    .map(([id, browser]) => ({
+      paneRef: id,
+      surfaceId: id,
+      title: browser.title ?? browser.url,
+      // No Client reads `focused` yet (remote-api.md → "Directory"), and a
+      // browser Surface has no registry element to test it against.
+      focused: false,
+      browser,
+    }));
+
+  return buildDirectorySnapshot([...inputs, ...browsers], collectWorkspaces());
 }

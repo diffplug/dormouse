@@ -13,7 +13,6 @@ import { setPlatform } from '../../lib/platform';
 import { setNativeFieldValue } from '../../lib/dom';
 import { clearTerminalActivity, removeTerminalPaneState, setTerminalActivity } from '../../lib/terminal-registry';
 import { createAlertEpisode } from '../../lib/alert-episode';
-import { removeMouseSelectionState, setMouseReporting } from '../../lib/mouse-selection';
 import { recordToolDirty, resetToolDirty } from '../../lib/tool-dirty-store';
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 

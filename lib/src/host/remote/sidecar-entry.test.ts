@@ -275,6 +275,14 @@ describe('asking the webview', () => {
     expect(await pending).toEqual([]);
   });
 
+  it('reads a window that never answered as silence, not as no owner', async () => {
+    vi.useFakeTimers();
+    const pending = bridge.provider.resolveBrowser('surface:1');
+    const refused = expect(pending).rejects.toThrow('did not answer');
+    await vi.advanceTimersByTimeAsync(ASK_BUDGET_MS);
+    await refused;
+  });
+
   it('ignores an answer for an ask that is not outstanding', async () => {
     expect(() => bridge.onAnswer({ burrowRequestId: 'nope', results: [] })).not.toThrow();
     expect(() => bridge.onAnswer(undefined)).not.toThrow();

@@ -18,17 +18,9 @@ function ManagedVoiceStory() {
   );
 }
 
-/** The code expires against this clock, so the countdown reads the same every run. */
-const STORY_NOW = Date.UTC(2026, 0, 1);
-
 const meta: Meta<typeof ManagedVoiceStory> = {
   title: 'Modals/ManagedVoiceSection',
   component: ManagedVoiceStory,
-  beforeEach: () => {
-    const realNow = Date.now;
-    Date.now = () => STORY_NOW;
-    return () => { Date.now = realNow; };
-  },
   // One frame each: the section reads module-singleton stores
   // (`RemoteControlSection.stories.tsx` says why).
   parameters: { docs: { story: { inline: false, height: '360px' } } },
@@ -71,7 +63,7 @@ export const WaitingForApproval: Story = {
       enrollment: {
         status: 'waiting', confirmDigits: '47',
         verificationUrl: 'https://hosted.dormouse.sh/enroll?purpose=voice#7KQM-X4TD',
-        expiresAt: STORY_NOW + 10 * 60_000, accountFull: false,
+        expiresAt: Date.now() + 10 * 60_000, accountFull: false,
       },
     },
     docs: { story: { height: '420px' } },

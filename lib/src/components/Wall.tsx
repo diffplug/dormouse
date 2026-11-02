@@ -13,7 +13,10 @@ import { revealWorkspaceTab, workspaceTabElement } from './workspace-tab-element
 import { collapseWorkspace, restoreWorkspaceMotion, workspaceIsCollapsed } from './workspace-motion';
 import { ExternalLinkModalHost } from './ExternalLinkModalHost';
 import { ToolEditorCloseModalHost } from './ToolEditorCloseModalHost';
-import { confirmToolEditorsClose, UNSAVED_TOOL_REFUSAL } from '../lib/tool-editor';
+import { confirmToolEditorsClose, saveToolEditor, toolEditorLabel, UNSAVED_TOOL_REFUSAL } from '../lib/tool-editor';
+import type { SurfaceCloseResult } from 'remote-lib-common';
+import { registerClientCloser, type ClientCloseConsent } from '../remote/burrow/client-close';
+import { closeForClient } from './wall/close-for-client';
 import { isToolDirty } from './ToolDirtyIndicator';
 import { AgentBrowserScreenModalHost } from './AgentBrowserScreenModalHost';
 // Remote-host code (relay/WebSocket/enrollment + the window.dormouseBurrow
@@ -31,6 +34,8 @@ import { parseRenderMode, type BrowserAutomationProvider } from 'dor-lib-common/
 import { isToolRender } from '../lib/platform/tool-types';
 import { acquireAgentBrowserSurfaceController, closeBrowserSurface, requestBrowserRenderMode } from './wall/agent-browser-surface-controller';
 import { KILL_CONFIRM_MS, KILL_SHAKE_MS, KillConfirmOverlay, randomKillChar, type ConfirmKill } from './KillConfirm';
+import { StrayKeyModal } from './StrayKeyPrompt';
+import { resolvePaneElement } from './wall/resolve-pane-element';
 import { messageOf } from '../lib/errors';
 import {
   acknowledgeSession,
@@ -372,6 +377,18 @@ export function Wall({
 
   // UI state
   const [confirmKill, setConfirmKill] = useState<ConfirmKill | null>(null);
+  // The key that raised the stray-key prompt. The ref leads the state so the
+  // next key of the same burst already finds the prompt up.
+  const [strayKey, setStrayKey] = useState<string | null>(null);
+  const strayKeyRef = useRef<string | null>(null);
+  const raiseStrayKey = useCallback((key: string) => {
+    strayKeyRef.current = key;
+    setStrayKey(key);
+  }, []);
+  const dismissStrayKey = useCallback(() => {
+    strayKeyRef.current = null;
+    setStrayKey(null);
+  }, []);
   const [renamingPaneId, setRenamingPaneId] = useState<string | null>(null);
   // Runtime Doors carry id + token only; the restored rows' metadata goes into the
   // store via the seed effect below.
@@ -484,6 +501,9 @@ export function Wall({
   useEffect(() => { onEventRef.current?.({ type: 'zoomChange', zoomed }); }, [zoomed]);
   useEffect(() => { onEventRef.current?.({ type: 'minimizeChange', count: doors.length }); }, [doors]);
   useEffect(() => { onEventRef.current?.({ type: 'selectionChange', id: selectedId, kind: selectedType }); }, [selectedId, selectedType]);
+  // The prompt answers for the selection and mode it was raised in; a click
+  // elsewhere, a mode change, or a kill prompt takes it down.
+  useEffect(dismissStrayKey, [dismissStrayKey, mode, selectedId, selectedType, active, confirmKill]);
 
   // --- Helpers ---
 
@@ -723,7 +743,12 @@ export function Wall({
    * gesture passes `ask`, a Workspace close the ids it already asked about, and
    * a command is refused.
    */
-  const closeSurface = useCallback(async (id: string, editors: 'ask' | readonly string[] = []): Promise<string | null> => {
+  const closeSurface = useCallback(async (
+    id: string,
+    editors: 'ask' | readonly string[] = [],
+    /** Why it must not close after all, read after the last wait. */
+    stillRefused?: () => string | null,
+  ): Promise<string | null> => {
     const transferring = transferRefusal(id);
     if (transferring) return transferring;
     if (pendingSurfaceCloses.current.has(id)) return 'This terminal is already closing';
@@ -735,6 +760,8 @@ export function Wall({
         && !(editors === 'ask' ? await confirmToolEditorsClose([id]) : editors.includes(id))) return UNSAVED_TOOL_REFUSAL;
       const transferring = transferRefusal(id);
       if (transferring) return transferring;
+      const late = stillRefused?.();
+      if (late) return late;
       // Decided now, from the state the kill leaves behind; a Workspace close
       // leaves one record for all its members instead.
       if (!closingWorkspaceRef.current && closeKindOf(id) === 'reopenable') pushSurfaceRecordRef.current(id);
@@ -747,6 +774,25 @@ export function Wall({
   }, [killPaneImmediately, helperRefusal, revealRefusal, lath, transferRefusal]);
   const closeSurfaceRef = useRef(closeSurface);
   closeSurfaceRef.current = closeSurface;
+
+  /** A Client's close of a Tool or browser (`docs/specs/remote-api.md` -> "Closing a surface"). */
+  const closeSurfaceForClient = useCallback((id: string, consent: ClientCloseConsent): Promise<SurfaceCloseResult> => {
+    return closeForClient(consent, {
+      gone: () => lath.getMeta(id) === undefined,
+      isTerminal: () => surfaceKindFromParams(lath.getMeta(id)?.params) === 'terminal',
+      transferRefusal: () => transferRefusal(id),
+      helperRefusal: async () => {
+        const refused = await helperRefusal(id);
+        if (refused) revealRefusal(id, refused);
+        return refused;
+      },
+      needsConfirm: () => closeKind(id, lath.getMeta(id)?.params) === 'confirm',
+      isDirty: () => isToolDirty(id, lath.getMeta(id)?.params),
+      label: () => toolEditorLabel(id),
+      save: () => saveToolEditor(id),
+      close: (discard, stillRefused) => closeSurface(id, discard ? [id] : [], stillRefused),
+    });
+  }, [closeSurface, helperRefusal, lath, revealRefusal, transferRefusal]);
 
   /**
    * The kill gesture on a Surface, from the header, the keyboard, or a Door: a
@@ -976,6 +1022,11 @@ export function Wall({
   const ownsSurface = useCallback(
     (id: string): boolean => lath.store.has(id) || doorsRef.current.some((door) => door.id === id),
     [lath],
+  );
+
+  useEffect(
+    () => registerClientCloser({ owns: ownsSurface, close: closeSurfaceForClient }),
+    [closeSurfaceForClient, ownsSurface],
   );
 
   /** Publish membership for the union projection: the Activity store is
@@ -2432,6 +2483,9 @@ export function Wall({
     reopenClosed: () => { void reopenClosed({ gesture: true }); },
     acceptKill,
     rejectKill,
+    strayKeyRef,
+    raiseStrayKey,
+    dismissStrayKey,
     setRenamingPaneId,
     fireEvent,
   });
@@ -2557,6 +2611,18 @@ export function Wall({
                 confirmKill={confirmKill}
                 paneElements={paneElements}
                 onCancel={() => rejectKill()}
+              />
+            )}
+
+            {/* Stray-key prompt — over the selected pane, or the Wall when a
+                Door or Workspace tab is selected. Gated on `active` for the
+                same reason as the kill overlay. */}
+            {active && strayKey !== null && (
+              <StrayKeyModal
+                strayKey={strayKey}
+                workspaces={workspaceId !== undefined}
+                targetElement={selectedType === 'pane' && selectedId ? resolvePaneElement(paneElements.get(selectedId)) : null}
+                onCancel={dismissStrayKey}
               />
             )}
 

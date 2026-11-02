@@ -4,7 +4,7 @@ Branch: `dor-tool-dirty`, stacked on `dor-tool-qc`.
 
 ## Scope
 
-Tools report unsaved state with `OSC 367;state;{"v":1,"dirty":true|false}`. This pass adds indication; save coordination and close protection remain future work.
+Tools report unsaved state with `OSC 367;state;{"v":1,"dirty":true|false}`. This pass adds indication; save coordination and close protection came later (`docs/specs/dor-tool.md` -> "Closing unsaved Tools").
 
 ## Plan
 

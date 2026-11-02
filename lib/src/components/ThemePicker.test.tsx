@@ -38,7 +38,7 @@ describe('ThemePicker', () => {
   // in `Modals/…`/`Components/ThemePicker` Chromatic stories instead
   // (`OpenOnShortViewport`). `design.test.ts` pins the cap to its constants.
   it('shares the active theme preview between the closed trigger and its list entry', () => {
-    act(() => root.render(<ThemePicker variant="settings-dialog" />));
+    act(() => root.render(<ThemePicker variant="row" />));
 
     const trigger = container.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')!;
     act(() => trigger.click());
@@ -134,7 +134,7 @@ describe('ThemePicker', () => {
 
     vi.useFakeTimers();
     try {
-      act(() => root.render(<ThemePicker variant="settings-dialog" offerStore />));
+      act(() => root.render(<ThemePicker variant="row" offerStore />));
       openStore();
       act(() => setNativeFieldValue(container.querySelector('input')!, 'dracula'));
       await act(async () => { vi.advanceTimersByTime(300); });
@@ -154,7 +154,7 @@ describe('ThemePicker', () => {
   // Standalone's content policy blocks open-vsx.org and no network policy
   // governs the fetch, so only a caller that opts in offers the store.
   it('offers no theme store unless its caller does', () => {
-    act(() => root.render(<ThemePicker variant="settings-dialog" />));
+    act(() => root.render(<ThemePicker variant="row" />));
     act(() => (container.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')!).click());
     expect(container.querySelector('[role="menu"]')!.textContent).not.toContain('Install theme from OpenVSX');
     expect(container.querySelector('[role="menu"]')!.textContent).toContain('Debug current theme');

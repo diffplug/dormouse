@@ -40,7 +40,6 @@ function Composition({ touchMode }: { touchMode: MobileTerminalTouchMode }) {
     <MobileTerminalUi
       interactive
       activeTouchMode={touchMode}
-      activeKeyboardMode="type"
       cursorTouchAvailable
       sessions={sessions}
       onSendInput={(data) => writeUserInput(active, data)}
@@ -131,13 +130,11 @@ describe('mobile acknowledge', () => {
     },
   );
 
-  it('a keystroke from the input bar acknowledges with input, clearing the TODO', () => {
+  it('a physical keystroke acknowledges with input, clearing the TODO', () => {
     render('gestures');
     ring();
-    const bar = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Terminal input"]');
-    expect(bar).not.toBeNull();
     act(() => {
-      bar!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+      document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
     });
     expect(getActivity(PANE)).toMatchObject({ status: 'WATCHING_DISABLED', todo: false });
   });

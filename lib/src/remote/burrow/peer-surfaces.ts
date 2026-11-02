@@ -4,7 +4,15 @@
  * transport layers keep `op` opaque.
  */
 
-import { clampTerminalDimension, type DirectoryEntry } from 'remote-lib-common';
+import {
+  clampTerminalDimension,
+  type DirectoryBrowser,
+  type DirectoryEntry,
+  type SurfaceCloseParams,
+  type SurfaceCloseResult,
+} from 'remote-lib-common';
+import { answerClientClose, answerClientCloseOwner } from './client-close';
+import { subscribeAgentBrowserScreenPages } from '../../components/wall/agent-browser-screen';
 import type { BurrowStatusEvent } from '../../host/remote/service-protocol';
 import { getPlatform } from '../../lib/platform';
 import type { BurrowLink } from '../../lib/platform/types';
@@ -23,6 +31,7 @@ import { subscribeToWorkspaces } from '../../lib/workspace-store';
 import { subscribeToWorkspaceSurfaces } from '../../lib/workspace-surfaces';
 import type { SurfaceHold } from './burrow-surface-provider';
 import { collectDirectorySnapshot } from './directory-collect';
+import { embeddedPageOf } from './embedded-pages';
 import { armWhile } from './enrolled-gate';
 
 /**
@@ -67,12 +76,18 @@ export interface PeerSurfaceResult {
 export interface PeerOps {
   directory: { params: Record<string, never>; result: DirectoryEntry };
   surfaceOp: { params: PeerSurfaceParams; result: PeerSurfaceResult };
+  /** The page a Surface embeds (`embedded-pages.ts`); answered by its owner alone. */
+  browserOp: { params: { surfaceId: string }; result: DirectoryBrowser };
+  /** Which window a close goes to, where windows can hold duplicates; answered by an owner. */
+  closeOwnerOp: { params: { surfaceId: string }; result: { ptyId: string } };
+  /** A Client's close (`client-close.ts`); answered by its owner alone. */
+  closeOp: { params: SurfaceCloseParams; result: SurfaceCloseResult };
 }
 
 /** Answer `op` for this webview's own surfaces. No-op where nobody can ask. */
 function answerPeers<K extends keyof PeerOps>(
   op: K,
-  handler: (params: PeerOps[K]['params']) => PeerOps[K]['result'][],
+  handler: (params: PeerOps[K]['params']) => PeerOps[K]['result'][] | Promise<PeerOps[K]['result'][]>,
 ): void {
   getPlatform().burrow?.respond(op, (params) => handler(params as PeerOps[K]['params']));
 }
@@ -183,6 +198,12 @@ export function installPeerSurfaceResponder(): void {
   // asked, and must work the moment a Burrow starts.
   answerPeers('directory', () => collectDirectorySnapshot());
   answerPeers('surfaceOp', driveOwnSurface);
+  answerPeers('browserOp', ({ surfaceId }) => {
+    const page = typeof surfaceId === 'string' ? embeddedPageOf(surfaceId) : null;
+    return page ? [page] : [];
+  });
+  answerPeers('closeOwnerOp', ({ surfaceId }) => (typeof surfaceId === 'string' ? answerClientCloseOwner(surfaceId) : []));
+  answerPeers('closeOp', (params) => (typeof params?.surfaceId === 'string' ? answerClientClose(params) : []));
   if (!standing) {
     standing = true;
     subscribeToSizeHolds(standAtNewestHolds);
@@ -225,6 +246,9 @@ export function installPeerSurfaceResponder(): void {
     // Surface or Workspace moving between Windows changes on both sides.
     const unsubscribeWorkspaces = subscribeToWorkspaces(notifyDirectory);
     const unsubscribeMembership = subscribeToWorkspaceSurfaces(notifyDirectory);
+    // An embedded page opening, closing, swapping renderer, or navigating —
+    // what the listing names and what an open frame is re-checked against.
+    const unsubscribePages = subscribeAgentBrowserScreenPages(notifyDirectory);
     const hasDocument = typeof document !== 'undefined';
     if (hasDocument) {
       document.addEventListener('focusin', notifyDirectory);
@@ -236,6 +260,7 @@ export function installPeerSurfaceResponder(): void {
       unsubscribeActivity();
       unsubscribeWorkspaces();
       unsubscribeMembership();
+      unsubscribePages();
       if (!hasDocument) return;
       document.removeEventListener('focusin', notifyDirectory);
       document.removeEventListener('focusout', notifyDirectory);

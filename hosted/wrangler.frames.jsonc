@@ -1,0 +1,29 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "dormouse-frames",
+  "main": "server/frame-worker.ts",
+  "compatibility_date": "2026-09-08",
+  "workers_dev": false,
+  "preview_urls": false,
+  // A wildcard, which a custom domain cannot be: every frame's origin is one
+  // label under this domain. Needs a proxied `*` DNS record (hosted/README.md ->
+  // "Provision the production boundary").
+  "routes": [
+    {
+      "pattern": "*.dormouseusercontent.com/*",
+      "zone_name": "dormouseusercontent.com"
+    }
+  ],
+  "assets": {
+    "directory": "./dist/frames",
+    "binding": "ASSETS",
+    "not_found_handling": "none",
+    "run_worker_first": true
+  },
+  "vars": {
+    "CLIENT_ORIGIN": "https://relay.dormouse.sh"
+  },
+  "observability": {
+    "enabled": false
+  }
+}

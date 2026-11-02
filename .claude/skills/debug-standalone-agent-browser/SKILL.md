@@ -113,7 +113,7 @@ Confirm the click landed against the **real** daemon, not just the panel: `agent
 
 ## Timing Pattern
 
-Install a page-local timing probe with `agent-browser eval` before the action under test. **Store marks in a global (`window.__M`) and poll it from the shell** — this is more reliable than parsing `[browser log] [measure] ...` mirror lines, and gives you exact deltas. Keep it simple:
+Install a page-local timing probe with `agent-browser eval` before the action under test. **Store marks in a global (`window.__M`) and poll it from the shell** — this is more reliable than parsing `[browser log]` mirror lines, and gives you exact deltas. Keep it simple:
 
 - record `performance.now()` into `window.__M.<mark>` at each event
 - use a `MutationObserver` plus a short `setInterval` to watch DOM titles/text/canvas
@@ -149,10 +149,9 @@ The connection's always-on `debugSnapshot()` ring is unaffected.
 In the harness terminal, correlate (with the flag on):
 
 - `[sidecar] ...` for sidecar behavior
-- `[browser-viewer] {"perSecond":{"framesIn":…,"provisional":…,"crisp":…,"captures":…,"kbOut":…},"captureAvgMs":…,"eventLoopDelayMs":…}` — the host's per-socket rates and its event-loop delay (sidecar stderr)
+- `[browser-viewer] {"perSecond":{"framesIn":…,"provisional":…,"crisp":…,"captures":…,"kbOut":…},"captureAvgMs":…,"eventLoopDelayMs":{"p99":…,"max":…}}` — the host's per-socket rates and its event-loop delay (sidecar stderr)
 - `[browser log] [ab-panel] connecting viewer ...`
 - `[browser log] [ab-panel] tabs msg ...`
-- `[browser log] [measure] ...`
 
 For a clean `dor agent-browser open dormouse.sh`, the first tab snapshot should look like one active tab:
 

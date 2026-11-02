@@ -38,12 +38,12 @@ import {
   type TakeBackResult,
   type AccessLogResult,
   type PairedDevicesResult,
+  silentAnswers,
+  type AskAnswers,
 } from '../../lib/src/host/remote/service-protocol';
 import type { BurrowSurfaceProvider } from '../../lib/src/remote/burrow/burrow-surface-provider';
-import type {
-  PeerSurfaceParams,
-  PeerSurfaceResult,
-} from '../../lib/src/remote/burrow/peer-surfaces';
+import { createBurrowFrameHost } from '../../lib/src/host/remote/frame-host';
+import { createIframeProxyUrl, isUpstreamOnThisMachine, releaseIframeProxyLease } from './iframe-proxy-host';
 import {
   MAX_RELAY_TO_BURROW_FRAME_LENGTH,
   type WebSocketLike,
@@ -66,6 +66,7 @@ import {
   sendUiEvent,
   type PeerLinkClient,
 } from './peer-link';
+import { ownerProbe } from './peer-link-protocol';
 import type { PtySink } from './processed-pty-streams';
 import { VsCodeBurrowStateStore } from './burrow-store';
 import { log } from './log';
@@ -76,7 +77,7 @@ import { log } from './log';
  */
 export interface BurrowDeps {
   /** Fan one question out to this window's webviews and collect the answers. */
-  brokerRequest(op: string, params: unknown): Promise<unknown[]>;
+  brokerRequest(op: string, params: unknown): Promise<AskAnswers>;
   /** Post to every live webview in this window. */
   broadcastToWebviews(message: ExtensionMessage): void;
   writePty(ptyId: string, data: string): void;
@@ -120,17 +121,14 @@ async function askBothTiers(
   op: string,
   params: unknown,
   ownerPtyId?: string,
-): Promise<unknown[]> {
-  // A mutating attach cannot itself discover its owner: duplicated cold-restored
-  // windows may both answer the same surface id, which would resize both xterms
-  // before the first result was selected. Probe identity read-only, then send
-  // the attach only to the tier/window carried by that provider-local PTY key.
-  const surfaceParams = params as Partial<PeerSurfaceParams> | null;
-  if (!ownerPtyId && op === 'surfaceOp' && surfaceParams?.op === 'attach') {
-    const [owner] = (await askBothTiers(bound, op, {
-      ...surfaceParams,
-      op: 'resolve',
-    })) as PeerSurfaceResult[];
+): Promise<AskAnswers> {
+  // A mutating ask cannot itself discover its owner: duplicated cold-restored
+  // windows may both answer the same surface id, and act on it before the first
+  // result was selected. Probe identity read-only, then send the ask only to the
+  // tier/window carried by that provider-local PTY key.
+  const probe = ownerProbe(op, params);
+  if (!ownerPtyId && probe) {
+    const [owner] = (await askBothTiers(bound, probe.op, probe.params)) as { ptyId: string }[];
     return owner ? askBothTiers(bound, op, params, owner.ptyId) : [];
   }
   if (ownerPtyId) {
@@ -143,7 +141,8 @@ async function askBothTiers(
     bound.brokerRequest(op, params),
     remoteRequest(op, params),
   ]);
-  return [...local, ...remote];
+  const answers = [...local, ...remote];
+  return local.silent || remote.silent ? silentAnswers(answers) : answers;
 }
 
 /**
@@ -269,6 +268,11 @@ function startService(): void {
   service = new BurrowService({
     store: burrowStateStore(context),
     provider: createBurrowProvider(bound),
+    frames: createBurrowFrameHost({
+      create: (url, { embedderOrigins, lease, tunneled }) => createIframeProxyUrl(url, embedderOrigins, lease, { tunneled }),
+      release: releaseIframeProxyLease,
+      isLocal: (url) => isUpstreamOnThisMachine(url),
+    }),
     kind: 'vscode',
     createWebSocket: createRelaySocket,
     sendToUi: (event, data) => {

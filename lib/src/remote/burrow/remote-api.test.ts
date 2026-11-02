@@ -6,6 +6,7 @@
  * into. The webview-backed provider itself is covered by `peer-surfaces.test.ts`.
  */
 
+import type { SurfaceCloseResult } from 'remote-lib-common';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   REMOTE_EVENTS,
@@ -87,6 +88,10 @@ class FakeProvider implements BurrowSurfaceProvider {
     if (this.collectError) throw this.collectError;
     return this.entries;
   };
+
+  /** No surface embeds a page here; the frame tunnel has its own tests. */
+  resolveBrowser = async (): Promise<null> => null;
+  closeSurface = vi.fn(async (): Promise<SurfaceCloseResult> => ({ outcome: 'closed' }));
 
   watchDirectory = (onChange: () => void): (() => void) => {
     this.watchers += 1;
@@ -320,6 +325,163 @@ describe('RemoteApiSession hello', () => {
     expect(sent).toEqual([
       { requestId: 'x-1', ok: false, error: 'unknown method: surface.teleport' },
     ]);
+  });
+});
+
+describe('RemoteApiSession frames', () => {
+  const browserEntry: DirectoryEntry = {
+    ...entry('surface:2', 'Vite'),
+    type: 'browser',
+    browser: { render: 'iframe', url: 'http://localhost:5173/' },
+  };
+  const toolEntry: DirectoryEntry = {
+    ...entry('surface:1', 'tool'),
+    browser: { render: 'iframe', url: 'http://localhost:3000/' },
+  };
+  const frames = {
+    host: {
+      open: async () => ({ refused: 'unused' }),
+      canOpen: async (url: string) => !url.includes('remote.example'),
+    },
+    isDirect: () => true,
+  };
+
+  function framesSession(provider: FakeProvider) {
+    const sent: SentPayload[] = [];
+    const session = new RemoteApiSession({
+      burrowId: 'burrow-1',
+      send: (payload) => void sent.push(payload),
+      provider,
+      holder: HOLDER,
+      frames,
+    });
+    return { session, sent };
+  }
+
+  describe('surface.close', () => {
+    const flush = () => new Promise((resolve) => setTimeout(resolve));
+    const hello = (session: RemoteApiSession) => session.handle({
+      requestId: 'hello-1',
+      method: REMOTE_METHODS.hello,
+      params: { protocolVersion: 1, viewer: 'phone', capabilities: { frames: true } },
+    });
+    const close = (session: RemoteApiSession, params: unknown) =>
+      session.handle({ requestId: 'close-1', method: REMOTE_METHODS.surfaceClose, params });
+
+    it('refuses a session that frames nothing, and asks nobody', async () => {
+      const provider = new FakeProvider();
+      const { session, sent } = framesSession(provider);
+      close(session, { surfaceId: 'surface:1' });
+      await flush();
+      expect(reply(sent, 'close-1').ok).toBe(false);
+      expect(provider.closeSurface).not.toHaveBeenCalled();
+    });
+
+    it('passes on the consent and answers the outcome, logging only a close', async () => {
+      const provider = new FakeProvider();
+      const closed: string[] = [];
+      const sent: SentPayload[] = [];
+      const session = new RemoteApiSession({
+        burrowId: 'burrow-1', send: (payload) => void sent.push(payload), provider, holder: HOLDER, frames, onClose: (id) => closed.push(id),
+      });
+      hello(session);
+      provider.closeSurface.mockResolvedValueOnce({ outcome: 'confirm' });
+      close(session, { surfaceId: 'surface:1' });
+      await flush();
+      expect(reply(sent, 'close-1').result).toEqual({ outcome: 'confirm' });
+      expect(closed).toEqual([]);
+      session.handle({ requestId: 'close-2', method: REMOTE_METHODS.surfaceClose, params: { surfaceId: 'surface:1', confirmed: true, unsaved: 'discard' } });
+      await flush();
+      expect(provider.closeSurface).toHaveBeenLastCalledWith('surface:1', { confirmed: true, unsaved: 'discard' });
+      expect(reply(sent, 'close-2').result).toEqual({ outcome: 'closed' });
+      expect(closed).toEqual(['surface:1']);
+    });
+
+    it('logs a close that finishes after the Client went', async () => {
+      const provider = new FakeProvider();
+      const closed: string[] = [];
+      let finish: (result: SurfaceCloseResult) => void = () => {};
+      provider.closeSurface.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+      const sent: SentPayload[] = [];
+      const session = new RemoteApiSession({
+        burrowId: 'burrow-1', send: (payload) => void sent.push(payload), provider, holder: HOLDER, frames, onClose: (id) => void closed.push(id),
+      } as never);
+      hello(session);
+      close(session, { surfaceId: 'surface:1' });
+      await flush();
+      session.dispose();
+      const before = sent.length;
+      finish({ outcome: 'closed' });
+      await flush();
+      expect(closed).toEqual(['surface:1']);
+      expect(sent).toHaveLength(before);
+    });
+
+    it('refuses malformed params before anything closes', async () => {
+      const provider = new FakeProvider();
+      const { session, sent } = framesSession(provider);
+      hello(session);
+      for (const params of [{}, { surfaceId: 7 }, { surfaceId: 'a', confirmed: 'yes' }, { surfaceId: 'a', unsaved: 'keep' }]) {
+        sent.length = 0;
+        close(session, params);
+        await flush();
+        expect(reply(sent, 'close-1').ok).toBe(false);
+      }
+      expect(provider.closeSurface).not.toHaveBeenCalled();
+    });
+  });
+
+  it('reports frames in the hello only where the Burrow serves them', () => {
+    const { session, sent } = framesSession(new FakeProvider());
+    session.handle({ requestId: 'hello-1', method: REMOTE_METHODS.hello, params: {} });
+    expect(reply(sent, 'hello-1').result).toMatchObject({ frames: true });
+  });
+
+  it('lists pages only to a Client whose hello declared frames, re-listing when it does', async () => {
+    const provider = new FakeProvider();
+    provider.entries = [toolEntry, browserEntry];
+    const { session, sent } = framesSession(provider);
+
+    await watchDirectory(session);
+    expect(snapshots(sent).at(-1)!.entries).toEqual([entry('surface:1', 'tool')]);
+
+    session.handle({
+      requestId: 'hello-1',
+      method: REMOTE_METHODS.hello,
+      params: { protocolVersion: 1, viewer: 'phone', capabilities: { frames: true } },
+    });
+    await settle();
+    expect(snapshots(sent).at(-1)!.entries).toEqual([toolEntry, browserEntry]);
+  });
+
+  it('lists no page the tunnel would refuse: a browser entry goes, a terminal stays', async () => {
+    const provider = new FakeProvider();
+    const off = { render: 'iframe', url: 'http://remote.example/' } as const;
+    provider.entries = [{ ...entry('surface:1', 'tool'), browser: off }, { ...browserEntry, browser: off }, browserEntry];
+    const { session, sent } = framesSession(provider);
+    session.handle({
+      requestId: 'hello-1',
+      method: REMOTE_METHODS.hello,
+      params: { protocolVersion: 1, viewer: 'phone', capabilities: { frames: true } },
+    });
+    await watchDirectory(session);
+    expect(snapshots(sent).at(-1)!.entries).toEqual([entry('surface:1', 'tool'), browserEntry]);
+  });
+
+  it('never lists pages without a frame host, whatever the hello declared', async () => {
+    const provider = new FakeProvider();
+    provider.entries = [toolEntry, browserEntry];
+    const { session, sent } = makeSession(provider);
+    session.handle({
+      requestId: 'hello-1',
+      method: REMOTE_METHODS.hello,
+      params: { protocolVersion: 1, viewer: 'phone', capabilities: { frames: true } },
+    });
+    await watchDirectory(session);
+    expect(reply(sent, 'hello-1').result).not.toHaveProperty('frames');
+    expect(snapshots(sent).at(-1)!.entries).toEqual([entry('surface:1', 'tool')]);
+    session.handle({ requestId: 'f-1', method: 'frame.open', params: {} });
+    expect(reply(sent, 'f-1')).toEqual({ requestId: 'f-1', ok: false, error: 'unknown method: frame.open' });
   });
 });
 

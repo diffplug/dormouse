@@ -549,8 +549,6 @@ export class AlertManager {
       }
       case 'commandFinished':
         if (!event.seen) break;
-        // A shell-reported exit is authoritative, so confirmed work never
-        // delays it. The detector only gates in-band terminal notifications.
         this.holdOrDeliver(id, entry, 'exit', {
           source: 'COMMAND_EXIT',
           title: 'Command finished',

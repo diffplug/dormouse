@@ -3,7 +3,8 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { realpathSync } from "node:fs";
 import { required, cloudflare, hyperdriveOrigin, originsOf } from "./preview.mjs";
-import { relaySmoke, smokeAll } from "./preview-smoke.mjs";
+import { frameSmoke, relaySmoke, smokeAll } from "./preview-smoke.mjs";
+import { HOSTED_FRAME_DOMAIN } from "../../remote-lib-common/src/remote/pocket-deployment.ts";
 import {
   WORKERS,
   deployWorkers,
@@ -40,10 +41,41 @@ export const PRODUCTION = {
   },
 };
 
+/** The frame Worker's identity, on a domain nothing else of Hosted's is under. */
+export const FRAMES = {
+  name: "dormouse-frames",
+  domain: HOSTED_FRAME_DOMAIN,
+  clientOrigin: PRODUCTION.relay.origin,
+};
+
+/** Its whole config: anything more, a binding above all, it must not have. */
+const FRAMES_CONFIG_KEYS = new Set([
+  "$schema", "name", "main", "compatibility_date", "workers_dev", "preview_urls",
+  "routes", "assets", "vars", "observability",
+]);
+
 /** A production variable or secret, or an error naming it. */
 const need = (env, name) => required(env, name, "Deployment credentials in GitHub");
 
+function framesConfig(base) {
+  assert.equal(base.name, FRAMES.name);
+  for (const key of Object.keys(base))
+    assert.ok(FRAMES_CONFIG_KEYS.has(key), `${FRAMES.name} must not carry ${key}`);
+  assert.deepEqual(base.vars, { CLIENT_ORIGIN: FRAMES.clientOrigin });
+  assert.deepEqual(base.routes, [{ pattern: `*.${FRAMES.domain}/*`, zone_name: FRAMES.domain }]);
+  assert.equal(base.assets.binding, "ASSETS");
+  assert.equal(base.workers_dev, false);
+  assert.equal(base.preview_urls, false);
+  assert.deepEqual(base.observability, { enabled: false });
+  return {
+    ...base,
+    main: fromStage(base.main),
+    assets: { ...base.assets, directory: fromStage(base.assets.directory) },
+  };
+}
+
 export function productionConfig(base, env, worker) {
+  if (worker === "frames") return framesConfig(base);
   const identity = PRODUCTION[worker];
   assert.ok(identity, `Unknown Worker ${worker}`);
   assert.match(need(env, "BUILD_SHA"), /^[a-f0-9]{40}$/);
@@ -100,7 +132,7 @@ function hyperdriveIds(configs) {
   return ids;
 }
 
-/** All three, keyed as `WORKERS` is, each on its own Hyperdrive. */
+/** All of them, keyed as `WORKERS` is, each that binds one on its own Hyperdrive. */
 export function productionConfigs(bases, env) {
   const configs = Object.fromEntries(
     Object.keys(WORKERS).map((worker) => [
@@ -131,9 +163,9 @@ export function requiredSecrets(configs) {
 const ATTEMPTS = { account: 1, relay: 6, voice: 6 };
 
 /**
- * Deploys relay, voice, then account, stopping at a failure. The relay passes
- * `relaySmoke` before anything after it deploys, so the account's `v2` deleting
- * the old `OneTimeRoom` never runs while the replacement is unproven.
+ * Deploys frames, relay, voice, then account, stopping at a failure. The relay
+ * passes `relaySmoke` before anything after it deploys, so the account's `v2`
+ * deleting the old `OneTimeRoom` never runs while the replacement is unproven.
  * `options` stands in for the process and network in tests.
  */
 export function deployProduction(
@@ -144,6 +176,8 @@ export function deployProduction(
   return deployWorkers(stage, configs, {
     spawn,
     afterDeploy: async (worker) => {
+      if (worker === "frames")
+        await frameSmoke(FRAMES.domain, FRAMES.clientOrigin, { attempts: ATTEMPTS.relay, ...options });
       if (worker === "relay")
         await relaySmoke(configs.relay.vars.APP_ORIGIN, sha, {
           attempts: ATTEMPTS.relay,
@@ -153,8 +187,9 @@ export function deployProduction(
   });
 }
 
-/** The release's live verification, of all three once the account deployed. */
-export function productionSmoke(configs, sha, options = {}) {
+/** The release's live verification, of all of them once the account deployed. */
+export async function productionSmoke(configs, sha, options = {}) {
+  await frameSmoke(FRAMES.domain, FRAMES.clientOrigin, { attempts: ATTEMPTS.relay, ...options });
   return smokeAll(originsOf(configs), sha, {
     providers: oauthProviders(configs.account),
     attempts: ATTEMPTS,
@@ -163,14 +198,13 @@ export function productionSmoke(configs, sha, options = {}) {
 }
 /** Each pgstencil package Hosted installs, by an entrypoint beside its `dist/provenance.json`. */
 const PGSTENCIL_PACKAGES = ["pgstencil", "@pgstencil/auth/better-auth", "@pgstencil/stripe"];
-export async function verifyPackages() {
+/** The installed package's `dist/provenance.json`, read beside its resolved entrypoint. */
+const installedProvenance = (name) =>
+  readFile(new URL("./provenance.json", import.meta.resolve(name)), "utf8");
+export async function verifyPackages(readProvenance = installedProvenance) {
   const commits = [];
   for (const name of PGSTENCIL_PACKAGES) {
-    // Resolve the installed entrypoint, then read the provenance beside it.
-    const entry = import.meta.resolve(name);
-    const provenance = JSON.parse(
-      await readFile(new URL("./provenance.json", entry), "utf8"),
-    );
+    const provenance = JSON.parse(await readProvenance(name));
     assert.match(
       provenance.commit,
       /^[a-f0-9]{40}$/,

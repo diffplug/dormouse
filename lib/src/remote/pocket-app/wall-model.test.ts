@@ -12,7 +12,10 @@ import {
   attachableDirectoryEntries,
   directorySessionItems,
   directoryWallSessions,
+  framedPage,
+  nextKeptFrames,
   pickerEntries,
+  surfaceKindOf,
   type PaneActivator,
 } from './wall-model';
 
@@ -208,5 +211,51 @@ describe('activatePane', () => {
     release?.();
     await done;
     expect(order).toEqual(['attached']);
+  });
+});
+
+describe('surfaces with a page', () => {
+  const page = { render: 'iframe' as const, url: 'http://localhost:5173/' };
+
+  it('tells a browser, a Tool, and a terminal apart', () => {
+    expect(surfaceKindOf(entry('b', { type: 'browser', browser: page }))).toBe('browser');
+    expect(surfaceKindOf(entry('t', { browser: page }))).toBe('tool');
+    expect(surfaceKindOf(entry('s'))).toBe('terminal');
+  });
+
+  it('skips a renderer this build does not know: a browser goes, and a Tool is its terminal', () => {
+    const unknown = { render: 'screencast', url: 'http://localhost:5173/' } as unknown as typeof page;
+    const browser = entry('b', { type: 'browser', browser: unknown });
+    const tool = entry('t', { browser: unknown });
+    expect(framedPage(browser)).toBeNull();
+    expect(attachableDirectoryEntries([browser, tool]).map((e) => e.surfaceId)).toEqual(['t']);
+    expect(surfaceKindOf(tool)).toBe('terminal');
+  });
+
+  it('names kind and display on a page, and nothing new on a terminal', () => {
+    expect(directoryWallSessions([entry('t', { browser: page })])[0]).toMatchObject({ kind: 'tool', browserDisplay: 'iframe' });
+    expect(directorySessionItems([entry('b', { type: 'browser', browser: page })], null)[0]).toMatchObject({ kind: 'browser', browserDisplay: 'iframe' });
+    expect(directoryWallSessions([entry('s')])[0]).not.toHaveProperty('kind');
+  });
+});
+
+describe('nextKeptFrames', () => {
+  const live = new Set(['a', 'b', 'c', 'd', 'e']);
+  const clean = () => false;
+
+  it('brings the shown frame to the front, and drops one no longer listed', () => {
+    expect(nextKeptFrames(['a', 'b'], 'b', live, 4, clean)).toEqual(['b', 'a']);
+    expect(nextKeptFrames(['a', 'gone'], null, live, 4, clean)).toEqual(['a']);
+  });
+
+  it('answers the same array when nothing moved, so nothing renders again', () => {
+    const current = ['a', 'b'];
+    expect(nextKeptFrames(current, 'a', live, 4, clean)).toBe(current);
+  });
+
+  it('past the bound drops the oldest, sparing unsaved edits and the shown frame', () => {
+    expect(nextKeptFrames(['a', 'b', 'c', 'd'], 'e', live, 4, clean)).toEqual(['e', 'a', 'b', 'c']);
+    expect(nextKeptFrames(['a', 'b', 'c', 'd'], 'e', live, 4, (id) => id === 'd')).toEqual(['e', 'a', 'b', 'd']);
+    expect(nextKeptFrames(['a', 'b', 'c', 'd'], 'e', live, 4, (id) => id !== 'e')).toEqual(['e', 'a', 'b', 'c', 'd']);
   });
 });

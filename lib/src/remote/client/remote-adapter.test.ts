@@ -184,6 +184,28 @@ describe('RemotePtyAdapter attach / active pane', () => {
     expect(adapter.activeSurfaceId).toBe('s2');
   });
 
+  it('clearing the active pane detaches it and holds nothing, until the next attach', async () => {
+    const client = new FakeClient();
+    const adapter = new RemotePtyAdapter(client);
+    await adapter.setActivePane('s1', 80, 24);
+    await adapter.clearActivePane();
+    expect(client.detaches).toEqual([{ surfaceId: 's1', subId: 'attach-1' }]);
+    expect(adapter.activeSurfaceId).toBeNull();
+    await adapter.clearActivePane();
+    expect(client.detaches).toHaveLength(1);
+    await adapter.setActivePane('s1', 80, 24);
+    expect(adapter.activeSurfaceId).toBe('s1');
+  });
+
+  it('clearing supersedes an attach still landing', async () => {
+    const client = new FakeClient();
+    const adapter = new RemotePtyAdapter(client);
+    const attaching = adapter.setActivePane('s1', 80, 24);
+    await adapter.clearActivePane();
+    await attaching;
+    expect(adapter.activeSurfaceId).toBeNull();
+  });
+
   it('re-activating the same pane resizes rather than re-attaching', async () => {
     const client = new FakeClient();
     const adapter = new RemotePtyAdapter(client);

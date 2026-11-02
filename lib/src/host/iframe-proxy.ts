@@ -51,6 +51,8 @@
  */
 import { lookup as dnsLookup } from 'dns/promises';
 import * as http from 'http';
+import type { Readable, Transform } from 'stream';
+import * as zlib from 'zlib';
 import * as net from 'net';
 import { networkInterfaces } from 'os';
 import { IFRAME_HTTP_ONLY, type IframeProxyResult } from '../lib/platform/iframe-proxy-types';
@@ -70,6 +72,8 @@ import {
   isThisMachineAddress,
   normalizeEmbedderOrigins,
   offOriginRedirectPage,
+  rewriteOrigin,
+  REMOTE_LEASE_OWNER_PREFIX,
   timedOutPage,
   unreachablePage,
   type ErrorPage,
@@ -114,7 +118,7 @@ export type UpstreamResolver = (hostname: string) => Promise<UpstreamAddress[]>;
 const systemResolver: UpstreamResolver = (hostname) => dnsLookup(hostname, { all: true });
 /** The addresses this host's interfaces hold now. Injected by tests. */
 export type InterfaceAddresses = () => string[];
-const systemInterfaceAddresses: InterfaceAddresses = () =>
+const systemInterfaces: InterfaceAddresses = () =>
   Object.values(networkInterfaces()).flatMap((entries) => (entries ?? []).map((entry) => entry.address));
 
 /** Host-supplied logger; defaults to a no-op so the module is usable bare. */
@@ -161,6 +165,9 @@ interface Grant {
    * answer on a navigation.
    */
   embedderOrigins: string[] | null;
+  /** A remote Client frames it, so its pages carry the socket shim too, and its
+   *  upstream is on this machine. */
+  tunneled: boolean;
 }
 
 const grants = new Map<number, Grant>();
@@ -209,10 +216,10 @@ export function releaseIframeProxyLease(owner: string, id?: string): void {
   endLeases((lease) => lease.owner === owner && (id === undefined || lease.id === id));
 }
 
-/** End every lease whose owner is not among `owners`: the windows still open. */
+/** End every window's lease whose owner is not among `owners`: the windows still open. */
 export function retainIframeProxyOwners(owners: readonly string[]): void {
   const live = new Set(owners);
-  endLeases((lease) => !live.has(lease.owner));
+  endLeases((lease) => !live.has(lease.owner) && !lease.owner.startsWith(REMOTE_LEASE_OWNER_PREFIX));
 }
 
 function endLeases(ends: (lease: Lease) => boolean): void {
@@ -240,6 +247,10 @@ export async function createIframeProxyUrl(
     /** The user allowed this target's origin, so an upstream off this machine
      *  may be proxied. Anything but `true` refuses one as `external`. */
     allowExternal?: unknown;
+    /** For a remote Client's frame: its pages carry the socket shim, and only an
+     *  upstream on this machine is fronted, whatever `allowExternal` says
+     *  (docs/specs/remote-api.md → "Frames"). */
+    tunneled?: boolean;
   },
 ): Promise<IframeProxyResult> {
   if (opts?.log) log = opts.log;
@@ -263,13 +274,16 @@ export async function createIframeProxyUrl(
     return { ok: false, reason: 'scheme', detail: IFRAME_HTTP_ONLY };
   }
   const resolve = opts?.resolve ?? systemResolver;
-  const interfaces = opts?.interfaceAddresses ?? systemInterfaceAddresses;
-  const allowExternal = opts?.allowExternal === true;
+  const access: MintAccess = {
+    interfaces: opts?.interfaceAddresses ?? systemInterfaces,
+    allowExternal: opts?.allowExternal === true,
+    tunneled: opts?.tunneled === true,
+  };
 
   const lease = opts?.lease === undefined ? undefined : validLease(opts.lease);
   if (opts?.lease !== undefined && !lease) return { ok: false, reason: 'unreachable', detail: 'invalid iframe lease' };
   if (!lease) {
-    const minted = await mintGrant(upstream, embedderOrigins, false, resolve, interfaces, allowExternal);
+    const minted = await mintGrant(upstream, embedderOrigins, false, resolve, access);
     return 'port' in minted ? framedUrl(minted, upstream) : minted;
   }
   const key = leaseKey(lease);
@@ -282,7 +296,7 @@ export async function createIframeProxyUrl(
     leases.set(key, held = { ...lease, acquire: createSerialQueue() });
   }
   const entry = held;
-  return entry.acquire(() => acquireLeased(entry, key, upstream, embedderOrigins, resolve, interfaces, allowExternal));
+  return entry.acquire(() => acquireLeased(entry, key, upstream, embedderOrigins, resolve, access));
 }
 
 const CLOSED_VIEW: IframeProxyResult = { ok: false, reason: 'unreachable', detail: 'the embedded view was closed' };
@@ -292,20 +306,19 @@ const CLOSED_VIEW: IframeProxyResult = { ok: false, reason: 'unreachable', detai
  *  and, off this machine, while the user still allows it; else a fresh one in
  *  its place. One released meanwhile mints nothing. */
 async function acquireLeased(
-  lease: Lease, key: string, upstream: URL, embedderOrigins: string[] | null, resolve: UpstreamResolver,
-  interfaces: InterfaceAddresses, allowExternal: boolean,
+  lease: Lease, key: string, upstream: URL, embedderOrigins: string[] | null, resolve: UpstreamResolver, access: MintAccess,
 ): Promise<IframeProxyResult> {
   const released = () => leases.get(key) !== lease;
   if (released()) return CLOSED_VIEW;
   if (lease.grant && lease.grant.upstream.origin === upstream.origin && sameChain(lease.grant.embedderOrigins, embedderOrigins)
-    && (allowExternal || !lease.grant.external)) {
+    && (access.allowExternal || !lease.grant.external)) {
     return framedUrl(lease.grant, upstream);
   }
   if (lease.grant) {
     closeGrant(lease.grant);
     lease.grant = undefined;
   }
-  const minted = await mintGrant(upstream, embedderOrigins, true, resolve, interfaces, allowExternal);
+  const minted = await mintGrant(upstream, embedderOrigins, true, resolve, access);
   if (!('port' in minted)) return minted;
   if (released()) {
     closeGrant(minted);
@@ -319,6 +332,10 @@ type Refusal = Extract<IframeProxyResult, { ok: false }>;
 
 const METADATA_REFUSED: Refusal = { ok: false, reason: 'scheme', detail: 'link-local / metadata addresses are refused' };
 const EXTERNAL_REFUSED: Refusal = { ok: false, reason: 'external', detail: 'not on this machine' };
+const OFF_MACHINE_REFUSED: Refusal = { ok: false, reason: 'scheme', detail: 'a remote device frames pages on this machine only' };
+
+/** What a grant may front, and for whom. */
+type MintAccess = { interfaces: InterfaceAddresses; allowExternal: boolean; tunneled: boolean };
 
 /**
  * The addresses a grant for `upstream` connects to, fixed for its lifetime, or
@@ -358,17 +375,42 @@ function pinnedLookup(addresses: readonly UpstreamAddress[]): net.LookupFunction
   };
 }
 
+function allOnThisMachine(addresses: readonly UpstreamAddress[], interfaces: readonly string[]): boolean {
+  return addresses.every(({ address }) => isThisMachineAddress(address, interfaces));
+}
+
+/**
+ * Whether a remote Client may frame `targetUrl`: every address it resolves to is
+ * this machine's. For a listing, which only spares a Client a page it could not
+ * open: minting a tunneled grant checks again, on the addresses it pins. Rejects
+ * when the name does not resolve, which says nothing about where it points.
+ */
+export async function isUpstreamOnThisMachine(
+  targetUrl: string,
+  opts?: { resolve?: UpstreamResolver; interfaceAddresses?: InterfaceAddresses },
+): Promise<boolean> {
+  let upstream: URL;
+  try {
+    upstream = new URL(targetUrl);
+  } catch {
+    return false;
+  }
+  if (upstream.protocol !== 'http:') return false;
+  const pinned = await pinAddresses(upstream, opts?.resolve ?? systemResolver);
+  if (!Array.isArray(pinned) && pinned.reason === 'unreachable') throw new Error(pinned.detail);
+  return Array.isArray(pinned) && allOnThisMachine(pinned, (opts?.interfaceAddresses ?? systemInterfaces)());
+}
+
 async function mintGrant(
-  upstream: URL, embedderOrigins: string[] | null, leased: boolean, resolve: UpstreamResolver,
-  interfaces: InterfaceAddresses, allowExternal: boolean,
+  upstream: URL, embedderOrigins: string[] | null, leased: boolean, resolve: UpstreamResolver, access: MintAccess,
 ): Promise<Grant | Refusal> {
   const pinned = await pinAddresses(upstream, resolve);
   if (!Array.isArray(pinned)) return pinned;
   // Local is where the grant will connect — every pinned address on this
   // machine — never what the name looks like.
-  const own = interfaces();
-  const external = !pinned.every(({ address }) => isThisMachineAddress(address, own));
-  if (external && !allowExternal) return EXTERNAL_REFUSED;
+  const external = !allOnThisMachine(pinned, access.interfaces());
+  if (external && access.tunneled) return OFF_MACHINE_REFUSED;
+  if (external && !access.allowExternal) return EXTERNAL_REFUSED;
   const now = Date.now();
   sweepGrants(now);
 
@@ -381,9 +423,11 @@ async function mintGrant(
     lastUsed: now,
     leased,
     external,
-    fresh: true,
+    // A tunneled page is not at this port, so there is nothing of its to clear.
+    fresh: !access.tunneled,
     sockets: new Set(),
     embedderOrigins,
+    tunneled: access.tunneled,
   };
   const server = http.createServer((req, res) => handleRequest(grant, req, res));
   server.on('upgrade', (req, socket, head) => handleUpgrade(grant, req, socket as net.Socket, head));
@@ -490,8 +534,9 @@ function handleRequest(grant: Grant, req: http.IncomingMessage, res: http.Server
     headers,
   }, (upstreamRes) => {
     // Only with an embedder to ask: without one the frame gets the redirect as
-    // sent, as it gets every other upstream header.
-    const offOrigin = grant.embedderOrigins !== null && (dest === 'document' || dest === 'iframe')
+    // sent, as it gets every other upstream header. So does a tunneled grant's,
+    // since Pocket ignores the page's way out and would be left at a dead end.
+    const offOrigin = grant.embedderOrigins !== null && !grant.tunneled && (dest === 'document' || dest === 'iframe')
       ? offOriginRedirect(grant, path, upstreamRes) : null;
     if (offOrigin) {
       upstreamRes.resume();
@@ -504,10 +549,19 @@ function handleRequest(grant: Grant, req: http.IncomingMessage, res: http.Server
     // The shim is ASCII spliced into the body's own bytes, so it needs an
     // identity, ASCII-compatible body: a compressed one (an upstream that
     // ignores Accept-Encoding, or a non-document fetch) or a UTF-16 one would
-    // be corrupted, not instrumented. A UTF-16 BOM is caught in streamHtml.
-    if (!/text\/html/i.test(contentType) || encoding !== 'identity'
+    // be corrupted, not instrumented. A UTF-16 BOM is caught in streamHtml. A
+    // tunneled grant decodes every body: its pages need their socket shim to work
+    // at all, and what its Client synthesizes is never decoded.
+    const body = grant.tunneled ? decodedBody(upstreamRes, encoding) : upstreamRes;
+    if (!body) {
+      upstreamRes.destroy();
+      res.writeHead(502, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
+      res.end(`This page is compressed as ${encoding}, which Dormouse cannot decode here.`);
+      return;
+    }
+    if (!/text\/html/i.test(contentType) || (encoding !== 'identity' && body === upstreamRes)
       || declaresUtf16(contentType) || embedder === undefined) {
-      passThrough(grant, upstreamRes, res);
+      passThrough(grant, upstreamRes, res, body);
       return;
     }
     // Any http upstream is framed, loopback or remote: sanitizeResponseHeaders
@@ -517,7 +571,7 @@ function handleRequest(grant: Grant, req: http.IncomingMessage, res: http.Server
     // embed" is overridden because the embed is the user's own `dor iframe`,
     // not a third party framing them — a stranger's foreign ancestor still
     // fails the policy.
-    streamHtml(grant, embedder, upstreamRes, res);
+    streamHtml(grant, embedder, upstreamRes, body, res);
   });
   upstreamReq.on('error', (err) => {
     // Once we've begun streaming the response we can't swap in an error page —
@@ -544,12 +598,59 @@ function handleRequest(grant: Grant, req: http.IncomingMessage, res: http.Server
 }
 
 // Non-HTML upstream responses are forwarded verbatim apart from the stripped
-// framing/hop-by-hop headers and a rewritten Location.
-function passThrough(grant: Grant, upstreamRes: http.IncomingMessage, res: http.ServerResponse): void {
+// framing/hop-by-hop headers, a rewritten Location, and a tunneled grant's decoding.
+function passThrough(
+  grant: Grant,
+  upstreamRes: http.IncomingMessage,
+  res: http.ServerResponse,
+  body: Readable = upstreamRes,
+): void {
   const outHeaders = sanitizeResponseHeaders(grant, upstreamRes.headers);
+  if (body !== upstreamRes) dropEncodedLength(outHeaders);
   res.writeHead(upstreamRes.statusCode ?? 200, outHeaders);
-  upstreamRes.on('error', () => res.destroy());
-  upstreamRes.pipe(res);
+  body.on('error', () => res.destroy());
+  body.pipe(res);
+}
+
+/** A decoded body's headers, which no longer describe what is served. */
+function dropEncodedLength(headers: http.OutgoingHttpHeaders): void {
+  delete headers['content-encoding'];
+  delete headers['content-length'];
+}
+
+/**
+ * One coding's decoder, or `null` for one this build cannot undo. Each tolerates
+ * an end with no data: HEAD, 204, 304, and an empty 200 carry the header too, and
+ * a body truly cut short fails on its connection.
+ */
+function codingDecoder(coding: string): Transform | null {
+  switch (coding) {
+    case 'gzip':
+    case 'x-gzip':
+      return zlib.createGunzip({ finishFlush: zlib.constants.Z_SYNC_FLUSH });
+    case 'deflate':
+      return zlib.createInflate({ finishFlush: zlib.constants.Z_SYNC_FLUSH });
+    case 'br':
+      return zlib.createBrotliDecompress({ finishFlush: zlib.constants.BROTLI_OPERATION_FLUSH });
+    case 'zstd':
+      // Newer than some hosts' Node.
+      return zlib.createZstdDecompress?.({ finishFlush: zlib.constants.ZSTD_e_flush }) ?? null;
+    default:
+      return null;
+  }
+}
+
+/** `response` decoded of `encoding`, last coding applied first, or `null` if it cannot be. */
+function decodedBody(response: http.IncomingMessage, encoding: string): Readable | null {
+  const codings = encoding.split(',').map((coding) => coding.trim()).filter((coding) => coding && coding !== 'identity');
+  const decoders = codings.reverse().map(codingDecoder);
+  if (!decoders.every((decoder): decoder is Transform => decoder !== null)) return null;
+  let body: Readable = response;
+  for (const decoder of decoders) {
+    body.on('error', (error) => decoder.destroy(error));
+    body = body.pipe(decoder);
+  }
+  return body;
 }
 
 // Inject the shim into the <head> while streaming, without buffering the whole
@@ -567,11 +668,14 @@ function streamHtml(
   // the shim to. A grant with no chain goes through `passThrough` instead.
   embedderOrigin: string,
   upstreamRes: http.IncomingMessage,
+  /** The body as it is to be served: `upstreamRes` itself, or what decodes it. */
+  body: Readable,
   res: http.ServerResponse,
 ): void {
   const preserveCsp = upstreamRes.headers[PRESERVE_CSP_HEADER] === '1';
   const outHeaders = sanitizeResponseHeaders(grant, upstreamRes.headers);
   delete outHeaders['content-length'];
+  if (body !== upstreamRes) dropEncodedLength(outHeaders);
   res.writeHead(upstreamRes.statusCode ?? 200, outHeaders);
 
   const pending: Buffer[] = [];
@@ -593,10 +697,10 @@ function streamHtml(
       bomChecked = true;
       if (startsWithUtf16Bom(Buffer.concat(pending))) {
         handled = true;
-        upstreamRes.off('data', onData);
+        body.off('data', onData);
         res.write(Buffer.concat(pending));
         pending.length = 0;
-        upstreamRes.pipe(res);
+        body.pipe(res);
         return;
       }
     }
@@ -608,19 +712,19 @@ function streamHtml(
     // Found the insertion point (or hit the cap): instrument the buffered
     // prefix, then hand the remainder to a raw pipe (backpressure + end).
     handled = true;
-    upstreamRes.off('data', onData);
-    res.write(Buffer.from(instrumentHtml(prefix(), embedderOrigin, preserveCsp), 'latin1'));
+    body.off('data', onData);
+    res.write(Buffer.from(instrumentHtml(prefix(), embedderOrigin, preserveCsp, grant.tunneled), 'latin1'));
     pending.length = 0;
-    upstreamRes.pipe(res);
+    body.pipe(res);
   };
 
-  upstreamRes.on('data', onData);
-  upstreamRes.on('end', () => {
+  body.on('data', onData);
+  body.on('end', () => {
     if (handled) return; // the pipe ends `res`
     // Whole document arrived before any head marker — instrument and finish.
-    res.end(Buffer.from(instrumentHtml(prefix(), embedderOrigin, preserveCsp), 'latin1'));
+    res.end(Buffer.from(instrumentHtml(prefix(), embedderOrigin, preserveCsp, grant.tunneled), 'latin1'));
   });
-  upstreamRes.on('error', () => { if (!res.writableEnded) res.destroy(); });
+  body.on('error', () => { if (!res.writableEnded) res.destroy(); });
 }
 
 function sanitizeResponseHeaders(grant: Grant, headers: http.IncomingHttpHeaders): http.OutgoingHttpHeaders {
@@ -666,16 +770,6 @@ function varyAlso(vary: http.OutgoingHttpHeader | undefined, field: string): str
     .split(',').map((part) => part.trim()).filter(Boolean);
   if (fields.includes('*') || fields.some((part) => part.toLowerCase() === field.toLowerCase())) return fields.join(', ');
   return [...fields, field].join(', ');
-}
-
-// Compare parsed origins, never string prefixes or embedded query values.
-// A foreign redirect/referer must keep its authority and its payload intact.
-function rewriteOrigin(value: string, from: string, to: string): string {
-  try {
-    const url = new URL(value);
-    if (url.origin === from) return `${to}${url.pathname}${url.search}${url.hash}`;
-  } catch { /* Relative Locations and malformed headers pass through unchanged. */ }
-  return value;
 }
 
 // --- WebSocket upgrade passthrough (dev-server HMR, openvscode-server) -------

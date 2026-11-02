@@ -176,7 +176,7 @@ export const WorkspaceSessions: Story = {
   play: async ({ canvasElement }) => {
     await waitFor(() => expect(getTerminalInstance('surface:3')?.buffer.active.cursorY).toBeGreaterThan(0));
     const canvas = within(canvasElement);
-    await userEvent.click(canvas.getByRole('button', { name: 'Sessions input mode' }));
+    await userEvent.click(canvas.getByTitle('Show sessions'));
     const headings = canvas.getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent);
     await expect(headings).toEqual([SITE.name, DORMOUSE.name, NOTES.name]);
   },

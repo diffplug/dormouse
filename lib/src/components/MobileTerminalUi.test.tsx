@@ -92,8 +92,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-/** One mount of the whole composition, shared by every suite below: the input
- *  tests reach for the textarea, the session-list ones for the container. */
+/** One mount of the whole composition, shared by every suite below. */
 function renderUi(props: Partial<MobileTerminalUiProps> = {}) {
   const container = document.createElement('div');
   document.body.appendChild(container);
@@ -105,108 +104,276 @@ function renderUi(props: Partial<MobileTerminalUiProps> = {}) {
     </StrictMode>,
   ));
   renderWith(props);
+  const button = (name: string) => [...container.querySelectorAll('button')]
+    .find((b) => (b.getAttribute('aria-label') ?? b.textContent) === name) ?? null;
   return {
     container,
-    input: container.querySelector<HTMLTextAreaElement>('textarea')!,
     terminal: container.querySelector<HTMLDivElement>('[data-testid="terminal"]')!,
-    typeButton: container.querySelector<HTMLButtonElement>('[aria-label="Type input mode"]')!,
+    typeButton: button('Type')!,
+    button,
+    field: () => container.querySelector<HTMLTextAreaElement | HTMLInputElement>('[data-mobile-composer] textarea, [data-mobile-composer] input:not([type="checkbox"])'),
+    passwordBox: () => container.querySelector<HTMLInputElement>('[data-mobile-composer] input[type="checkbox"]'),
     renderWith,
   };
 }
 
-describe('MobileTerminalUi keyboard input', () => {
-  it('routes native paste text through paste handling without typing or rereading it', () => {
+function keydown(target: EventTarget, init: KeyboardEventInit): KeyboardEvent {
+  const event = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init });
+  act(() => target.dispatchEvent(event));
+  return event;
+}
+
+describe('MobileTerminalUi composer', () => {
+  it('opens and focuses its field inside the Type tap, so iOS raises its keyboard', () => {
+    const { typeButton, field } = renderUi();
+    expect(field()).toBeNull();
+    act(() => typeButton.click());
+    expect(document.activeElement).toBe(field());
+    expect(typeButton.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('sends the text through the paste path, then Enter, and closes', async () => {
+    const order: string[] = [];
+    const onPaste = vi.fn(async (text?: string) => { order.push(`paste ${text}`); });
+    const onSendInput = vi.fn((data: string) => { order.push(JSON.stringify(data)); });
+    const { typeButton, field, button } = renderUi({ onPaste, onSendInput });
+    act(() => typeButton.click());
+    act(() => setNativeFieldValue(field()!, 'git status\ngit log'));
+    await act(async () => button('Send')!.click());
+    expect(order).toEqual(['paste git status\ngit log', '"\\r"']);
+    expect(field()).toBeNull();
+  });
+
+  it('types a password raw, never as a paste, and forgets the checkbox once sent', async () => {
     const onPaste = vi.fn();
     const onSendInput = vi.fn();
-    const { input } = renderUi({ onPaste, onSendInput });
-    const event = new Event('paste', { bubbles: true, cancelable: true });
-    Object.defineProperty(event, 'clipboardData', { value: { getData: () => 'first\nsecond' } });
-    act(() => input.dispatchEvent(event));
-    expect(event.defaultPrevented).toBe(true);
+    const { typeButton, field, passwordBox, button } = renderUi({ onPaste, onSendInput });
+    act(() => typeButton.click());
+    act(() => setNativeFieldValue(field()!, 'hunter2'));
+    act(() => passwordBox()!.click());
+    // The text survives the swap into a masked field, which takes focus.
+    expect(field()).toMatchObject({ type: 'password', value: 'hunter2' });
+    expect(document.activeElement).toBe(field());
+    await act(async () => button('Send')!.click());
+    expect(onSendInput.mock.calls).toEqual([['hunter2'], ['\r']]);
+    expect(onPaste).not.toHaveBeenCalled();
+    act(() => typeButton.click());
+    expect(passwordBox()!.checked).toBe(false);
+  });
+
+  it('sends a password on Enter', () => {
+    const onSendInput = vi.fn();
+    const { typeButton, field, passwordBox } = renderUi({ onSendInput });
+    act(() => typeButton.click());
+    act(() => passwordBox()!.click());
+    act(() => setNativeFieldValue(field()!, 'pw'));
+    keydown(field()!, { key: 'Enter' });
+    expect(onSendInput.mock.calls).toEqual([['pw'], ['\r']]);
+  });
+
+  it('keeps the text across Cancel, and offers no Send while empty', () => {
+    const onSendInput = vi.fn();
+    const { typeButton, field, button } = renderUi({ onSendInput });
+    act(() => typeButton.click());
+    expect(button('Send')!.disabled).toBe(true);
+    act(() => setNativeFieldValue(field()!, 'rm -rf build'));
+    act(() => button('Cancel')!.click());
+    expect(field()).toBeNull();
+    expect(onSendInput).not.toHaveBeenCalled();
+    act(() => typeButton.click());
+    expect(field()!.value).toBe('rm -rf build');
+  });
+
+  it('starts empty after a Send, and never keeps a password across Cancel', async () => {
+    const { typeButton, field, passwordBox, button } = renderUi({ onSendInput: vi.fn() });
+    act(() => typeButton.click());
+    act(() => setNativeFieldValue(field()!, 'ls'));
+    await act(async () => button('Send')!.click());
+    act(() => typeButton.click());
+    expect(field()!.value).toBe('');
+
+    act(() => setNativeFieldValue(field()!, 'hunter2'));
+    act(() => passwordBox()!.click());
+    act(() => button('Cancel')!.click());
+    act(() => typeButton.click());
+    expect(field()).toMatchObject({ type: 'textarea', value: '' });
+  });
+
+  it('closes when the consumer opens the Sessions screen', () => {
+    const { typeButton, field, renderWith } = renderUi({ activeView: 'terminal' });
+    act(() => typeButton.click());
+    renderWith({ activeView: 'sessions' });
+    renderWith({ activeView: 'terminal' });
+    expect(field()).toBeNull();
+  });
+
+  it('pans the terminal above the OS keyboard instead of resizing it', () => {
+    const listeners = new Map<string, () => void>();
+    const viewport = {
+      offsetTop: 0,
+      height: 800,
+      addEventListener: (type: string, listener: () => void) => listeners.set(type, listener),
+      removeEventListener: (type: string) => listeners.delete(type),
+    };
+    vi.stubGlobal('visualViewport', viewport);
+    const { typeButton, terminal } = renderUi();
+    const host = terminal.parentElement!.parentElement!;
+    Object.defineProperty(host, 'offsetTop', { configurable: true, value: 0 });
+    Object.defineProperty(host, 'offsetHeight', { configurable: true, value: 760 });
+    act(() => typeButton.click());
+    expect(host.style.transform).toBe('');
+    viewport.height = 460;
+    act(() => listeners.get('resize')!());
+    expect(host.style.transform).toBe('translateY(-300px)');
+    vi.unstubAllGlobals();
+  });
+});
+
+function nativePaste(target: EventTarget, text: string): Event {
+  const event = new Event('paste', { bubbles: true, cancelable: true });
+  Object.defineProperty(event, 'clipboardData', { value: { getData: () => text } });
+  act(() => target.dispatchEvent(event));
+  return event;
+}
+
+describe('MobileTerminalUi physical keyboard', () => {
+  it('routes a native paste through paste handling without typing or rereading it', () => {
+    const onPaste = vi.fn();
+    const onSendInput = vi.fn();
+    renderUi({ onPaste, onSendInput });
+    expect(nativePaste(document.body, 'first\nsecond').defaultPrevented).toBe(true);
     expect(onPaste).toHaveBeenCalledExactlyOnceWith('first\nsecond');
     expect(onSendInput).not.toHaveBeenCalled();
-    expect(input.value).toBe('');
   });
 
-  it('leaves IME editing keys to the composition and sends committed text once', () => {
+  it('leaves a native paste to the open composer', () => {
+    const onPaste = vi.fn();
+    const { typeButton, field } = renderUi({ onPaste });
+    act(() => typeButton.click());
+    expect(nativePaste(field()!, 'typed').defaultPrevented).toBe(false);
+    expect(nativePaste(document.body, 'behind the box').defaultPrevented).toBe(false);
+    expect(onPaste).not.toHaveBeenCalled();
+  });
+
+  it('leaves a native paste to a field inside the terminal area', () => {
+    const onPaste = vi.fn();
+    const { container } = renderUi({ onPaste, terminal: <input data-testid="rename" /> });
+    expect(nativePaste(container.querySelector('[data-testid="rename"]')!, 'renamed').defaultPrevented).toBe(false);
+    expect(onPaste).not.toHaveBeenCalled();
+  });
+
+  it('pastes nothing while the Sessions screen covers the terminal', () => {
+    const onPaste = vi.fn();
+    renderUi({ onPaste, defaultView: 'sessions' });
+    expect(nativePaste(document.body, 'behind the list').defaultPrevented).toBe(false);
+    expect(onPaste).not.toHaveBeenCalled();
+  });
+
+  it('leaves keys, touches, and the screen to a shown browser', () => {
     const onSendInput = vi.fn();
-    const { input } = renderUi({ onSendInput });
-    act(() => {
-      input.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
-      setNativeFieldValue(input, '日本');
+    const { container, terminal, button } = renderUi({ browserShown: true, onSendInput });
+    expect(button('Type')).toBeNull();
+    expect(button('Gestures')).toBeNull();
+    expect(keydown(document.body, { key: 'a' }).defaultPrevented).toBe(false);
+    expect(container.querySelector('.touch-none')).toBeNull();
+    const press = pointerEvent('pointerdown');
+    act(() => void terminal.dispatchEvent(press));
+    expect(press.defaultPrevented).toBe(false);
+    expect(setPointerCapture).not.toHaveBeenCalled();
+    expect(onSendInput).not.toHaveBeenCalled();
+  });
+
+  it('types into the terminal while nothing is focused', () => {
+    const onSendInput = vi.fn();
+    renderUi({ onSendInput });
+    const sent = ['a', 'Enter', 'ArrowUp', 'Tab', '😀'].map((key) => keydown(document.body, { key }).defaultPrevented);
+    keydown(document.body, { key: 'c', ctrlKey: true });
+    expect(sent).toEqual([true, true, true, true, true]);
+    expect(onSendInput.mock.calls).toEqual([['a'], ['\r'], ['\x1b[A'], ['\t'], ['😀'], ['\x03']]);
+  });
+
+  it('leaves named keys, Command chords, and IME composition to the page', () => {
+    const onSendInput = vi.fn();
+    renderUi({ onSendInput });
+    for (const init of [{ key: 'Shift' }, { key: 'F1' }, { key: 'v', metaKey: true }, { key: 'a', isComposing: true }, { key: 'a', keyCode: 229 }]) {
+      expect(keydown(document.body, init).defaultPrevented).toBe(false);
+    }
+    expect(onSendInput).not.toHaveBeenCalled();
+  });
+
+  it('leaves keys to a focused control or field, the composer included', () => {
+    const onSendInput = vi.fn();
+    const { typeButton, field } = renderUi({ onSendInput });
+    keydown(typeButton, { key: 'Enter' });
+    act(() => typeButton.click());
+    keydown(field()!, { key: 'a' });
+    expect(onSendInput).not.toHaveBeenCalled();
+  });
+
+  it('types nothing while the Sessions screen covers the terminal', () => {
+    const onSendInput = vi.fn();
+    renderUi({ onSendInput, defaultView: 'sessions' });
+    keydown(document.body, { key: 'a' });
+    expect(onSendInput).not.toHaveBeenCalled();
+  });
+});
+
+describe('MobileTerminalUi controls inside the host', () => {
+  // `MobileWall`'s header sits inside the host; a press on its buttons is not pane content.
+  it.each<MobileTerminalTouchMode>(['gestures', 'cursor'])('leaves a header button its own press in %s mode', (mode) => {
+    const acknowledge = vi.spyOn(activity, 'acknowledgeSession');
+    const { button: control } = renderUi({
+      activeTouchMode: mode,
+      cursorTouchAvailable: true,
+      sessions: [{ id: 'pane-a', title: 'shell', active: true, episode: null }],
+      terminal: <header><button type="button">Kill</button></header>,
     });
-    for (const key of ['Backspace', 'ArrowLeft', 'Enter']) {
-      const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
-      act(() => input.dispatchEvent(event));
-      expect(event.defaultPrevented).toBe(false);
-    }
-    expect(onSendInput).not.toHaveBeenCalled();
-    expect(input.value).toBe('日本');
-    act(() => input.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '日本' })));
-    expect(onSendInput.mock.calls).toEqual([['日本']]);
-    expect(input.value).toBe('');
+    const button = control('Kill')!;
+    const down = pointerEvent('pointerdown');
+    act(() => {
+      button.dispatchEvent(down);
+      button.dispatchEvent(pointerEvent('pointerup'));
+    });
+    expect(down.defaultPrevented).toBe(false);
+    expect(setPointerCapture).not.toHaveBeenCalled();
+    expect(acknowledge).not.toHaveBeenCalled();
+  });
+});
+
+describe('MobileTerminalUi Sessions screen', () => {
+  const SESSIONS: MobileTerminalSessionItem[] = [
+    { id: 'a', title: 'server', active: true, episode: null },
+    { id: 'b', title: 'tests', episode: null },
+  ];
+
+  it('selects a row and returns to the terminal', () => {
+    const onSessionSelect = vi.fn();
+    const onViewChange = vi.fn();
+    const { container } = renderUi({ defaultView: 'sessions', sessions: SESSIONS, onSessionSelect, onViewChange });
+    const row = [...container.querySelectorAll('button')].find((b) => b.textContent === 'tests')!;
+    act(() => row.click());
+    expect(onSessionSelect).toHaveBeenCalledExactlyOnceWith('b');
+    expect(onViewChange).toHaveBeenCalledExactlyOnceWith('terminal');
+    expect(container.querySelector('section[aria-label="Sessions"]')).toBeNull();
   });
 
-  it.each([{ isComposing: true }, { keyCode: 229 }])('ignores IME confirmation keydown with %j', (imeState) => {
-    const onSendInput = vi.fn();
-    const { input } = renderUi({ onSendInput });
-    const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ...imeState });
-    act(() => input.dispatchEvent(event));
-    expect(event.defaultPrevented).toBe(false);
-    expect(onSendInput).not.toHaveBeenCalled();
+  it('returns to the terminal from Back without selecting', () => {
+    const onSessionSelect = vi.fn();
+    const { container, button } = renderUi({ defaultView: 'sessions', sessions: SESSIONS, onSessionSelect });
+    act(() => button('Back to terminal')!.click());
+    expect(onSessionSelect).not.toHaveBeenCalled();
+    expect(container.querySelector('section[aria-label="Sessions"]')).toBeNull();
   });
 
-  it('sends software-keyboard Backspace and Enter without keydown or a textarea change', () => {
-    const onSendInput = vi.fn();
-    const { input } = renderUi({ onSendInput });
-    for (const inputType of ['deleteContentBackward', 'insertLineBreak', 'insertParagraph']) {
-      const event = new InputEvent('beforeinput', { inputType, bubbles: true, cancelable: true });
-      act(() => input.dispatchEvent(event));
-      expect(event.defaultPrevented).toBe(true);
-    }
-    expect(onSendInput.mock.calls).toEqual([['\x7f'], ['\r'], ['\r']]);
-    expect(input.value).toBe('');
-  });
-
-  it('leaves software-keyboard deletion inside an IME composition alone', () => {
-    const onSendInput = vi.fn();
-    const { input } = renderUi({ onSendInput });
-    act(() => input.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true })));
-    const event = new InputEvent('beforeinput', { inputType: 'deleteContentBackward', bubbles: true, cancelable: true });
-    act(() => input.dispatchEvent(event));
-    expect(event.defaultPrevented).toBe(false);
-    expect(onSendInput).not.toHaveBeenCalled();
-  });
-
-  it('cancels pending focus when a pane touch dismisses the keyboard', () => {
-    vi.useFakeTimers();
-    const { input, terminal, typeButton } = renderUi();
-    act(() => typeButton.click());
-    expect(document.activeElement).toBe(input);
-    act(() => terminal.dispatchEvent(pointerEvent('pointerdown')));
-    act(() => vi.advanceTimersByTime(600));
-    expect(document.activeElement).not.toBe(input);
-  });
-
-  it('cancels pending pane blur when Type is tapped again', () => {
-    vi.useFakeTimers();
-    const { input, terminal, typeButton } = renderUi();
-    act(() => vi.advanceTimersByTime(600));
-    act(() => terminal.dispatchEvent(pointerEvent('pointerdown')));
-    act(() => typeButton.click());
-    expect(document.activeElement).toBe(input);
-    act(() => vi.advanceTimersByTime(600));
-    expect(document.activeElement).toBe(input);
-  });
-
-  it('blurs when the consumer switches from Type to Sessions', () => {
-    vi.useFakeTimers();
-    const { input, typeButton, renderWith } = renderUi({ activeKeyboardMode: 'type' });
-    act(() => typeButton.click());
-    expect(document.activeElement).toBe(input);
-    renderWith({ activeKeyboardMode: 'sessions' });
-    act(() => vi.advanceTimersByTime(600));
-    expect(document.activeElement).not.toBe(input);
+  it('opens Settings behind its button only when given one, and backs out to the list', () => {
+    const { button, renderWith, container } = renderUi({ defaultView: 'sessions', sessions: SESSIONS });
+    expect(button('Settings')).toBeNull();
+    renderWith({ defaultView: 'sessions', sessions: SESSIONS, settings: <p data-testid="settings" /> });
+    act(() => button('Settings')!.click());
+    expect(container.querySelector('[data-testid="settings"]')).not.toBeNull();
+    act(() => button('Back to sessions')!.click());
+    expect(container.querySelector('[data-testid="settings"]')).toBeNull();
+    expect(container.querySelector('section[aria-label="Sessions"]')).not.toBeNull();
   });
 });
 
@@ -354,13 +521,14 @@ describe('MobileTerminalUi portaled descendants', () => {
   // capture handlers only through React, and are not pane content.
   it.each<MobileTerminalTouchMode>(['gestures', 'cursor', 'selection'])('leaves a press in one alone in %s mode', (mode) => {
     const acknowledge = vi.spyOn(activity, 'acknowledgeSession');
-    const { input } = renderUi({
+    const { typeButton, field } = renderUi({
       activeTouchMode: mode,
       cursorTouchAvailable: true,
       sessions: [{ id: 'pane-a', title: 'shell', active: true, episode: null }],
       terminal: <div data-testid="terminal"><PortalAnchoredButton /></div>,
     });
-    act(() => input.focus());
+    act(() => typeButton.click());
+    const input = field();
     const editor = document.querySelector<HTMLButtonElement>('[data-portaled]')!;
     const down = pointerEvent('pointerdown');
     act(() => {
@@ -409,7 +577,7 @@ describe('MobileTerminalUi portaled descendants', () => {
 
 describe('MobileTerminalUi session list', () => {
   const renderSessions = (sessions: MobileTerminalSessionItem[]) =>
-    renderUi({ activeKeyboardMode: 'sessions', sessions }).container;
+    renderUi({ activeView: 'sessions', sessions }).container;
 
   const inset = (container: HTMLElement, title: string): string | null =>
     [...container.querySelectorAll('button')]
@@ -684,5 +852,13 @@ describe('MobileTerminalUi clipboard failure', () => {
     } finally {
       act(() => dismissClipboardFailure());
     }
+  });
+
+  it('heads the Sessions screen, and only that, with the consumer\'s header', () => {
+    const header = <p>Studio iMac</p>;
+    const { renderWith } = renderUi({ activeView: 'terminal', sessionsHeader: header });
+    expect(document.body.textContent).not.toContain('Studio iMac');
+    renderWith({ activeView: 'sessions', sessionsHeader: header });
+    expect(document.body.textContent).toContain('Studio iMac');
   });
 });
