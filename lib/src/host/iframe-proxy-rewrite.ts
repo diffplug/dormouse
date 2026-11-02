@@ -296,6 +296,7 @@ export function tunnelSocketShim(): string {
     p.onmessage=function(m){
       var d=m.data;
       if(d.kind==='open'){if(t.readyState!==0)return;t.readyState=1;t.protocol=d.protocol;t.extensions=d.extensions;fire(new Event('open'));}
+      else if(d.kind==='sent'){t.bufferedAmount-=d.bytes;}
       else if(d.kind==='message'){
         var v=d.binary?(t.binaryType==='arraybuffer'?d.data:new Blob([d.data])):new TextDecoder().decode(d.data);
         fire(new MessageEvent('message',{data:v,origin:location.origin}));
@@ -310,6 +311,7 @@ export function tunnelSocketShim(): string {
       if(t.readyState!==1)return;
       var k=Object.prototype.toString.call(data),v=ArrayBuffer.isView(data),l=k==='[object Blob]'||k==='[object File]',b=v||l||k==='[object ArrayBuffer]';
       var m=l?data:v?data.buffer.slice(data.byteOffset,data.byteOffset+data.byteLength):b?data.slice(0):new TextEncoder().encode(String(data)).buffer;
+      t.bufferedAmount+=l?m.size:m.byteLength;
       p.postMessage({kind:'send',data:m,binary:b},l?[]:[m]);
     };
     t.close=function(code,reason){

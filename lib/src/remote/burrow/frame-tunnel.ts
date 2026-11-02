@@ -9,6 +9,7 @@
 import {
   FRAME_CHUNK_BYTES,
   FRAME_EVENTS,
+  FRAME_FLOW_MESSAGE_COST,
   FRAME_FLOW_WINDOW_BYTES,
   FRAME_METHODS,
   MAX_FRAMES_PER_SESSION,
@@ -590,7 +591,7 @@ export class FrameTunnel {
     while (this.#queue.length > 0) {
       const head = this.#queue[0]!;
       const { payload } = head;
-      const bytes = 'bytes' in payload ? payload.bytes.length : 0;
+      const bytes = 'bytes' in payload ? payload.bytes.length + FRAME_FLOW_MESSAGE_COST : 0;
       // A chunk larger than what is left still goes once nothing is in flight,
       // so the window can never wedge.
       if (bytes > 0 && this.#outstanding > 0 && this.#outstanding + bytes > FRAME_FLOW_WINDOW_BYTES) break;

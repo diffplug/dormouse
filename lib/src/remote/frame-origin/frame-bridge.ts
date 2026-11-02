@@ -118,7 +118,8 @@ async function serveSocket(frame: OpenFrame, request: RelaySocket, reply: Messag
     void inOrder(async () => {
       if (command.kind === 'send') {
         const data = command.data instanceof Blob ? await command.data.arrayBuffer() : command.data;
-        void socket.send(new Uint8Array(data), command.binary).catch(() => {});
+        const sent = () => send({ kind: 'sent', bytes: data.byteLength });
+        void socket.send(new Uint8Array(data), command.binary).then(sent, sent);
       } else if (command.kind === 'close') {
         socket.close(command.code, command.reason);
       }

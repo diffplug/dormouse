@@ -47,6 +47,8 @@ export const WORKER_SILENCE_LIMIT_MS = WORKER_ALIVE_MS * 3;
 export type SocketEvent =
   | ({ kind: 'open' } & WsOpenResult)
   | { kind: 'message'; data: ArrayBuffer; binary: boolean }
+  /** One `send` left the phone, so the page's `bufferedAmount` falls. */
+  | { kind: 'sent'; bytes: number }
   | { kind: 'closed'; code: number; reason: string };
 
 /** A socket's messages, page to Client window. */

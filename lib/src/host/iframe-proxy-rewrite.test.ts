@@ -503,6 +503,19 @@ describe('tunnelSocketShim', () => {
     far.close();
   });
 
+  it('reports what it has not sent yet, for a page that throttles by it', async () => {
+    const { socket, far } = page().open() as unknown as { far: MessagePort; socket: { send(data: unknown): void; bufferedAmount: number } };
+    far.postMessage({ kind: 'open', protocol: '', extensions: '' });
+    await settle();
+    socket.send('abc');
+    socket.send(new Blob(['de']));
+    expect(socket.bufferedAmount).toBe(5);
+    far.postMessage({ kind: 'sent', bytes: 3 });
+    await settle();
+    expect(socket.bufferedAmount).toBe(2);
+    far.close();
+  });
+
   it('stays closed when the open arrives after a close', async () => {
     const { socket, far } = page().open();
     let opened = false;

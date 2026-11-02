@@ -69,7 +69,9 @@ export function createBurrowFrameHost(proxy: FrameHostProxy): BurrowFrameHost {
       if (!key) return Promise.resolve(false);
       let answer = answers.get(key);
       if (!answer || now - answer.at > LOCAL_ANSWER_TTL_MS) {
-        const fresh = { at: now, local: proxy.isLocal(url).catch(() => false), known: answer?.known ?? false };
+        const known = answer?.known ?? false;
+        // A lookup that failed is no answer either: a name can stop resolving for a moment.
+        const fresh = { at: now, local: proxy.isLocal(url).catch(() => known), known };
         void fresh.local.then((value) => { fresh.known = value; });
         answers.set(key, fresh);
         answer = fresh;

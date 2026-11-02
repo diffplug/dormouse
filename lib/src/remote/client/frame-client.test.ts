@@ -11,10 +11,13 @@ import * as http from 'node:http';
 import { WebSocketServer } from 'ws';
 import {
   FRAME_CHUNK_BYTES,
+  FRAME_EVENTS,
+  FRAME_FLOW_MESSAGE_COST,
   FRAME_FLOW_WINDOW_BYTES,
   FRAME_METHODS,
   MAX_HTTP_EXCHANGES_PER_SESSION,
   fromBase64Url,
+  toBase64Url,
   type RemoteEventMsg,
   type RemoteResponse,
 } from 'remote-lib-common';
@@ -331,6 +334,40 @@ describe('what a Client sends', () => {
     calls.find((call) => call.method === FRAME_METHODS.httpCancel)!.answer({});
     await refused;
     expect(calls.some((call) => call.params.path === '/save')).toBe(false);
+  });
+
+  it('cancels an upload the page abandons before its head', async () => {
+    const { calls, frames } = heldSession();
+    const frame = await frames.open(OPEN);
+    const abandoned = new AbortController();
+    void frame.request({ method: 'PUT', path: '/save', headers: [], body: new Uint8Array(FRAME_CHUNK_BYTES * 3), signal: abandoned.signal }).catch(() => {});
+    await settle();
+    expect(calls.some((call) => call.method === FRAME_METHODS.httpCancel)).toBe(false);
+    abandoned.abort();
+    await settle();
+    expect(calls.some((call) => call.method === FRAME_METHODS.httpCancel)).toBe(true);
+  });
+
+  it('acknowledges what a message costs the window, as the Burrow counts it', async () => {
+    const small = new Uint8Array(1);
+    const asked: Array<{ method: string; params: Record<string, unknown> }> = [];
+    let onEvent: (event: RemoteEventMsg) => void = () => {};
+    const session: FrameSession = {
+      request: async <T,>(method: string, params: unknown) => { asked.push({ method, params: params as Record<string, unknown> }); return {} as T; },
+      async subscribe<T>(method: string, _params: unknown, listener: (event: RemoteEventMsg) => void, subId = 'sub') {
+        if (method === FRAME_METHODS.frameOpen) return { subId, result: { path: '/' } as T };
+        onEvent = listener;
+        return { subId, result: { status: 200, statusText: 'OK', headers: [] } as T };
+      },
+      unsubscribe: () => {},
+    };
+    const frame = await new FrameClient(session).open(OPEN);
+    await frame.request({ method: 'GET', path: '/', headers: [] });
+    const body = { subId: 'x', event: FRAME_EVENTS.httpBody, data: { bytes: toBase64Url(small) } } as RemoteEventMsg;
+    for (let i = 0; i < 300; i += 1) onEvent(body);
+    await new Promise((resolve) => { setTimeout(resolve, 60); });
+    const acked = asked.filter(({ method }) => method === FRAME_METHODS.flowAck).reduce((sum, { params }) => sum + (params.bytes as number), 0);
+    expect(acked).toBe(300 * (1 + FRAME_FLOW_MESSAGE_COST));
   });
 
   it('sends a socket\'s close behind what was sent before it', async () => {

@@ -105,8 +105,31 @@ describe('serveFrame', () => {
     port.postMessage({ kind: 'close', code: 1000, reason: 'done' });
     await expect.poll(() => closedWith).toEqual([1000, 'done']);
     expect(sent).toEqual([['up', true]]);
+    expect(await next()).toEqual({ kind: 'sent', bytes: 2 });
     handlers.onClose(1000, 'done');
     expect(await next()).toEqual({ kind: 'closed', code: 1000, reason: 'done' });
+  });
+
+  it('says when a send left, however it went, so the page can throttle', async () => {
+    let settle: Array<() => void> = [];
+    const frame = fakeFrame({
+      openSocket: async () => ({
+        protocol: '', extensions: '',
+        send: () => new Promise<void>((resolve, reject) => { settle = [resolve, () => reject(new Error('gone'))]; }),
+        close: () => {},
+      }),
+    });
+    const { port, next } = bridge(frame).send({ kind: 'socket', path: '/hmr', protocols: [] });
+    await next();
+    port.postMessage({ kind: 'send', data: new ArrayBuffer(7), binary: true });
+    await expect.poll(() => settle.length).toBe(2);
+    settle[0]!();
+    expect(await next()).toEqual({ kind: 'sent', bytes: 7 });
+    settle = [];
+    port.postMessage({ kind: 'send', data: new ArrayBuffer(2), binary: true });
+    await expect.poll(() => settle.length).toBe(2);
+    settle[1]!();
+    expect(await next()).toEqual({ kind: 'sent', bytes: 2 });
   });
 
   it('reads a Blob in its place, ahead of the close behind it', async () => {

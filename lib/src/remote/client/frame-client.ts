@@ -7,6 +7,7 @@
 
 import {
   FRAME_EVENTS,
+  FRAME_FLOW_MESSAGE_COST,
   FRAME_FLOW_WINDOW_BYTES,
   FRAME_METHODS,
   MAX_HTTP_EXCHANGES_PER_SESSION,
@@ -282,6 +283,11 @@ class ClientFrame implements OpenFrame {
     }, new ByteLengthQueuingStrategy({ highWaterMark: RESPONSE_BUFFER_BYTES }));
 
     this.#live.add(endLive);
+    // Before its head as well, when the page has no body to cancel: an upload must
+    // not go on to commit, and what follows it is refused once this is answered.
+    init.signal?.addEventListener('abort', () => {
+      if (!done) fireAndForget(session.request(FRAME_METHODS.httpCancel, { exchangeId: id }));
+    }, { once: true });
     const bytes = init.body ?? new Uint8Array(0);
     const params: HttpRequestParams = {
       frameId: this.id,
@@ -295,7 +301,7 @@ class ClientFrame implements OpenFrame {
       switch (event.event) {
         case FRAME_EVENTS.httpBody: {
           const chunk = fromBase64Url((event.data as HttpBodyEvent).bytes);
-          this.#received(chunk.length);
+          this.#received(chunk.length + FRAME_FLOW_MESSAGE_COST);
           if (done) return;
           controller.enqueue(chunk);
           if ((controller.desiredSize ?? 0) <= 0) hold(true);
@@ -366,7 +372,7 @@ class ClientFrame implements OpenFrame {
         if (event.event === FRAME_EVENTS.wsMessage) {
           const fragment = event.data as WsMessageFragment;
           const chunk = fromBase64Url(fragment.data);
-          this.#received(chunk.length);
+          this.#received(chunk.length + FRAME_FLOW_MESSAGE_COST);
           if (!open) return;
           parts.push(chunk);
           if (!fragment.fin) return;

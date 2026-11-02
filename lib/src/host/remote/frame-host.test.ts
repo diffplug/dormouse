@@ -171,6 +171,21 @@ describe('createBurrowFrameHost', () => {
     expect(response.body).not.toContain('coded\n');
   });
 
+  it('keeps a listed page listed through a failed lookup, and leaves a new one out', async () => {
+    vi.useFakeTimers();
+    try {
+      let answer = async () => true;
+      const host = createBurrowFrameHost({ ...proxy, isLocal: () => answer() });
+      await expect(host.canOpen('http://name.local/')).resolves.toBe(true);
+      answer = async () => { throw new Error('ENOTFOUND'); };
+      await vi.advanceTimersByTimeAsync(31_000);
+      await expect(host.canOpen('http://name.local/')).resolves.toBe(true);
+      await expect(host.canOpen('http://other.local/')).resolves.toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('asks nothing about a URL with no origin, and holds on to none', async () => {
     const isLocal = vi.fn(async () => true);
     const host = createBurrowFrameHost({ ...proxy, isLocal });

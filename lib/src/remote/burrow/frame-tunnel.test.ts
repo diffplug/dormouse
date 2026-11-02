@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   FRAME_CHUNK_BYTES,
   FRAME_EVENTS,
+  FRAME_FLOW_MESSAGE_COST,
   FRAME_FLOW_WINDOW_BYTES,
   FRAME_METHODS,
   MAX_FRAMES_PER_SESSION,
@@ -226,6 +227,17 @@ describe('frame.open', () => {
     expect(t.host.upstreams[0]!.closed).toBe(true);
     expect(t.events(id, FRAME_EVENTS.frameClosed)).toEqual([{ subId: id, event: FRAME_EVENTS.frameClosed, data: { reason: 'surface-gone' } }]);
     expect(t.watchers.size).toBe(0);
+  });
+
+  it('pauses on a burst of tiny messages, long before the direct sender\'s queue fills', async () => {
+    const t = setup();
+    const frameId = await t.open();
+    const id = t.call(FRAME_METHODS.wsOpen, { frameId, path: '/hmr' });
+    const socket = t.host.upstreams[0]!.sockets[0]!;
+    socket.sink.onOpen('', '');
+    for (let i = 0; i < 8_193; i += 1) socket.sink.onMessage(new Uint8Array(50), false);
+    expect(t.events(id, FRAME_EVENTS.wsMessage).length).toBeLessThan(FRAME_FLOW_WINDOW_BYTES / FRAME_FLOW_MESSAGE_COST);
+    expect(socket.paused).toBe(true);
   });
 
   it('keeps a frame through its owner\'s silence, for a time', async () => {

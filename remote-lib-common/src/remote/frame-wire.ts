@@ -56,6 +56,13 @@ export function frameChunks(bytes: Uint8Array): Uint8Array[] {
  */
 export const FRAME_FLOW_WINDOW_BYTES = 1024 * 1024;
 
+/**
+ * What one body message costs the flow window beyond its bytes, on both ends, so
+ * a burst of tiny ones fills it long before the direct path's sender queue fills
+ * with messages (`MAX_DIRECT_PENDING_FRAMES`), whose overflow ends the session.
+ */
+export const FRAME_FLOW_MESSAGE_COST = 256;
+
 /** Frames one session may hold open at once. */
 export const MAX_FRAMES_PER_SESSION = 4;
 /** HTTP exchanges one session may hold open at once, across its frames. */
