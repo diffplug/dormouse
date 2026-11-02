@@ -8,10 +8,10 @@ import {
   setHintToken,
   setOverride,
   setSelection,
-  stateRequiresNativeMouseSuppression,
   updateDrag,
 } from './mouse-selection';
 import { openCopyEditor } from './copy-editor';
+import { multiClickSpan, terminalCopyBuffer } from './copy-text';
 import { boundaryAt, dragCells, type PointerBoundary } from './drag-cells';
 import { detectTokenInBuffer } from './smart-token';
 import type { TerminalOverlayDims } from './terminal-store';
@@ -56,11 +56,15 @@ export function attachTerminalMouseRouter({
   terminal,
   element,
   getOverlayDims,
+  shiftClaimsMouse,
 }: {
   id: string;
   terminal: Terminal;
   element: HTMLDivElement;
   getOverlayDims: (id: string) => TerminalOverlayDims | null;
+  /** Whether a Shift-held primary press over a mouse-reporting program is the
+   *  terminal's (spec §6.1): off macOS, as xterm.js's own convention has it. */
+  shiftClaimsMouse: boolean;
 }): () => void {
   /** The cell under the pointer, and (`b`) the cell boundary nearest it,
    *  which is what a selection edge takes (spec §3.1). */
@@ -114,8 +118,13 @@ export function attachTerminalMouseRouter({
     clientX: number;
     clientY: number;
     touchLike: boolean;
+    /** A mouse double or triple click, which selected at its press: its
+     *  release opens the editor over that selection unless it became a drag. */
+    multiClick: boolean;
   } | null = null;
   let activePointerId: number | null = null;
+  // The latest primary mouse press the terminal owns, for onScreenMouseDown.
+  let ownedMousePress: MouseEvent | null = null;
   let suppressSyntheticMouseUntil = 0;
   // The most recent touch that ended as a tap (no drag), used to recognize a double-tap.
   let lastTouchTap: { time: number; x: number; y: number } | null = null;
@@ -138,9 +147,13 @@ export function attachTerminalMouseRouter({
     const terminalOwns =
       state.mouseReporting === 'none'
       || state.override !== 'off'
-      || cell.startedInScrollback;
+      || cell.startedInScrollback
+      || (shiftClaimsMouse && ev.shiftKey && ev.button === 0);
     return { state, cell, terminalOwns };
   };
+  // Whether the current gesture's events are kept from xterm.js: decided at
+  // its press and latched until its release (spec §6.1).
+  let gestureSuppressesNative = false;
 
   const beginPendingDrag = (
     ev: MouseEvent | PointerEvent,
@@ -158,6 +171,7 @@ export function attachTerminalMouseRouter({
       return false;
     }
     const suppressNativeMouse = state.mouseReporting !== 'none';
+    gestureSuppressesNative = suppressNativeMouse;
     if (suppressNativeMouse || opts.touchLike) {
       consumePointerEvent(ev, true);
       terminal.focus();
@@ -166,6 +180,21 @@ export function attachTerminalMouseRouter({
     // must leave no pendingDrag behind, or its release would read as the paired
     // click that ends a temporary override (spec §2).
     if (ev.button !== 0) return true;
+    // A press on a link is the link's: a double-click there pins its preview.
+    const multiClick = !opts.touchLike && ev.detail >= 2 && !mouseCaptureElement.classList.contains('xterm-cursor-pointer');
+    const clickSpan = multiClick ? multiClickSpan(terminalCopyBuffer(terminal), cell, ev.detail) : null;
+    if (clickSpan) {
+      const { start, end } = clickSpan;
+      setSelection(id, {
+        startRow: start.row,
+        startCol: start.col,
+        endRow: end.row,
+        endCol: end.col,
+        shape: 'linewise',
+        dragging: false,
+        startedInScrollback: cell.startedInScrollback,
+      });
+    }
     pendingDrag = {
       row: cell.row,
       col: cell.col,
@@ -176,15 +205,16 @@ export function attachTerminalMouseRouter({
       clientX: ev.clientX,
       clientY: ev.clientY,
       touchLike: opts.touchLike,
+      multiClick: clickSpan !== null,
     };
+    if (!opts.touchLike) ownedMousePress = ev;
     return true;
   };
 
   const updatePendingOrActiveDrag = (ev: MouseEvent | PointerEvent) => {
     let consumed = false;
     if (pendingDrag) {
-      const suppressNativeMouse = stateRequiresNativeMouseSuppression(getMouseSelectionState(id));
-      if (suppressNativeMouse || pendingDrag.touchLike) {
+      if (gestureSuppressesNative || pendingDrag.touchLike) {
         consumePointerEvent(ev, true);
         consumed = true;
       }
@@ -208,8 +238,7 @@ export function attachTerminalMouseRouter({
     const cell = computeCell(ev);
     dragHead = { row: cell.row, b: cell.b };
     applyDrag(ev.altKey);
-    const suppressNativeMouse = stateRequiresNativeMouseSuppression(getMouseSelectionState(id));
-    if (!consumed) consumePointerEvent(ev, suppressNativeMouse || isNonMousePointerEvent(ev));
+    if (!consumed) consumePointerEvent(ev, gestureSuppressesNative || isNonMousePointerEvent(ev));
 
     setHintToken(id, detectTokenInBuffer(terminal.buffer.active, cell.row, cell.col));
   };
@@ -221,8 +250,7 @@ export function attachTerminalMouseRouter({
     // both: a mousemove reports button 0.
     if (ev.button !== 0) return;
     if (pendingDrag) {
-      const suppressNativeMouse = stateRequiresNativeMouseSuppression(getMouseSelectionState(id));
-      if (suppressNativeMouse || pendingDrag.touchLike) consumePointerEvent(ev, true);
+      if (gestureSuppressesNative || pendingDrag.touchLike) consumePointerEvent(ev, true);
       // A touch press that releases without ever dragging is a tap — remember it
       // so the next press can be recognized as a double-tap (block selection).
       if (pendingDrag.touchLike) {
@@ -234,17 +262,17 @@ export function attachTerminalMouseRouter({
           }));
         }
       }
+      if (pendingDrag.multiClick) openCopyEditor(id, terminal);
       clearTemporaryOverrideAfterMouseDispatch(id);
       pendingDrag = null;
       return;
     }
     if (!isDragging(id)) return;
-    const suppressNativeMouse = stateRequiresNativeMouseSuppression(getMouseSelectionState(id));
     endDrag(id);
     setHintToken(id, null);
     openCopyEditor(id, terminal);
     clearTemporaryOverrideAfterMouseDispatch(id);
-    consumePointerEvent(ev, suppressNativeMouse || isNonMousePointerEvent(ev));
+    consumePointerEvent(ev, gestureSuppressesNative || isNonMousePointerEvent(ev));
   };
 
   /** Remember where a program drag is, once it is a drag; the cell is measured
@@ -281,6 +309,16 @@ export function attachTerminalMouseRouter({
       return;
     }
     beginPendingDrag(ev, { touchLike: false });
+  };
+
+  // xterm's own selection runs from a press on its element, which bubbles there
+  // after the linkifier on its screen has seen it. A multi-click or Shift-click
+  // there would paint a selection the terminal does not own and no copy reads,
+  // so a press the terminal owns stops at the screen (spec §3.1).
+  const onScreenMouseDown = (ev: MouseEvent) => {
+    if (ev !== ownedMousePress || (ev.detail < 2 && !ev.shiftKey)) return;
+    consumePointerEvent(ev);
+    terminal.focus();
   };
 
   const onPointerDown = (ev: PointerEvent) => {
@@ -425,6 +463,7 @@ export function attachTerminalMouseRouter({
 
   element.addEventListener('mousedown', onMouseDown, true);
   element.addEventListener('pointerdown', onPointerDown, true);
+  mouseCaptureElement.addEventListener('mousedown', onScreenMouseDown);
   for (const type of OVERRIDE_MOUSE_EVENTS) {
     element.addEventListener(type, onOverrideMouseEvent, true);
   }
@@ -439,6 +478,7 @@ export function attachTerminalMouseRouter({
   return () => {
     element.removeEventListener('mousedown', onMouseDown, true);
     element.removeEventListener('pointerdown', onPointerDown, true);
+    mouseCaptureElement.removeEventListener('mousedown', onScreenMouseDown);
     for (const type of OVERRIDE_MOUSE_EVENTS) {
       element.removeEventListener(type, onOverrideMouseEvent, true);
     }

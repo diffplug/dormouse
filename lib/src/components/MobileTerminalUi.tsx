@@ -5,16 +5,17 @@ import {
   useState,
   type CSSProperties,
   type ComponentType,
-  type KeyboardEvent,
   type PointerEvent,
   type ReactNode,
+  type RefObject,
   type SyntheticEvent,
 } from 'react';
+import { flushSync } from 'react-dom';
 import {
-  ArticleNyTimesIcon,
-  ClockCounterClockwiseIcon,
+  ArrowLeftIcon,
   CursorClickIcon,
   CursorTextIcon,
+  GearSixIcon,
   HandPointingIcon,
   TerminalWindowIcon,
   TextTIcon,
@@ -42,7 +43,7 @@ import { useDynamicPalette } from '../lib/themes/use-dynamic-palette';
 import { isComposingKey, isEditableTarget } from '../lib/dom';
 import { TouchUiContext } from './touch-ui-context';
 import { ClipboardFailureGlobal } from './ClipboardFailureDialog';
-import { TODO_PILL_TRACKING_CLASS } from './design';
+import { chromeButton, MOBILE_BAR_HEIGHT_CLASS, modalActionButton, TODO_PILL_TRACKING_CLASS } from './design';
 import { AlertRingInset, alertRingRow, useAlertRingBurst } from './alert-ring';
 import type { AlertEpisode } from '../lib/alert-episode';
 import { getTerminalInstance, type SessionStatus } from '../lib/terminal-registry';
@@ -50,8 +51,10 @@ import { EdgeScrollMotion, isEdgeScrollOrigin, isMobileScrollWheel, scrollMobile
 import { acknowledgeSession } from '../lib/session-activity-store';
 import type { MouseTrackingMode, OverrideState } from '../lib/mouse-selection';
 import { TERMINAL_TAP_EVENT, type TerminalTapDetail } from '../lib/terminal-mouse-router';
+import { overlayViewportBounds, subscribeOverlayViewport } from '../lib/ui-geometry';
 
-export type MobileTerminalKeyboardMode = 'sessions' | 'recent' | 'type' | 'draft';
+/** What fills the screen: the terminal, or the full-screen session list. */
+export type MobileTerminalView = 'terminal' | 'sessions';
 export type MobileTerminalTouchMode = 'gestures' | 'selection' | 'cursor';
 type PhosphorIcon = ComponentType<{ size?: number; weight?: 'regular' | 'bold' | 'duotone' | 'fill' }>;
 
@@ -96,13 +99,6 @@ export const MOBILE_TERMINAL_KEY_SEQUENCES: Record<MobileGestureInputId, string>
   home: '\x1b[H',
 };
 
-const KEYBOARD_MODES: Array<{ id: MobileTerminalKeyboardMode; label: string; Icon: PhosphorIcon }> = [
-  { id: 'sessions', label: 'Sessions', Icon: TerminalWindowIcon },
-  { id: 'recent', label: 'Recent', Icon: ClockCounterClockwiseIcon },
-  { id: 'type', label: 'Type', Icon: TextTIcon },
-  { id: 'draft', label: 'Draft', Icon: ArticleNyTimesIcon },
-];
-
 /**
  * The mouse override one pane gets, from the global touch mode and that pane's
  * *own* mouse reporting.
@@ -122,9 +118,8 @@ export function paneMouseOverride(
 }
 
 /**
- * Each button shows its icon and `shortLabel`, and `KEYBOARD_MODES` its icon
- * and `label`: a phone has no hover tooltip, so `title` alone would leave a
- * mode unnamed.
+ * Each button shows its icon and `shortLabel`: a phone has no hover tooltip,
+ * so `title` alone would leave a mode unnamed.
  */
 const TOUCH_MODES: Array<{
   id: MobileTerminalTouchMode;
@@ -140,9 +135,9 @@ const TOUCH_MODES: Array<{
 
 export interface MobileTerminalUiProps {
   terminal: ReactNode;
-  activeKeyboardMode?: MobileTerminalKeyboardMode;
-  defaultKeyboardMode?: MobileTerminalKeyboardMode;
-  onKeyboardModeChange?: (mode: MobileTerminalKeyboardMode) => void;
+  activeView?: MobileTerminalView;
+  defaultView?: MobileTerminalView;
+  onViewChange?: (view: MobileTerminalView) => void;
   activeTouchMode?: MobileTerminalTouchMode;
   defaultTouchMode?: MobileTerminalTouchMode;
   onTouchModeChange?: (mode: MobileTerminalTouchMode) => void;
@@ -150,11 +145,12 @@ export interface MobileTerminalUiProps {
   onSendInput?: (data: string) => void;
   onGestureInput?: (input: MobileGestureInputId, data: string) => void;
   onGestureScroll?: (lines: number) => void;
-  /** Native paste supplies its text; a gesture asks the consumer to read it. */
+  /** The composer supplies its text; a gesture asks the consumer to read it. */
   onPaste?: (text?: string) => void | Promise<void>;
-  onFocusInput?: () => void;
   sessions?: MobileTerminalSessionItem[];
   onSessionSelect?: (id: string) => void;
+  /** The Sessions screen's Settings page; omitted, the screen has no Settings. */
+  settings?: ReactNode;
   interactive?: boolean;
   fillViewport?: boolean;
   className?: string;
@@ -162,103 +158,81 @@ export interface MobileTerminalUiProps {
   style?: CSSProperties;
 }
 
-function keyDownSequence(event: KeyboardEvent<HTMLTextAreaElement>): string | null {
-  if (event.ctrlKey && event.key.toLowerCase() === 'c') {
-    return MOBILE_TERMINAL_KEY_SEQUENCES.ctrlC;
-  }
+/** A physical keyboard's named keys; Enter and Tab take their Shift forms. */
+const HARDWARE_KEYS: Partial<Record<string, MobileGestureInputId>> = {
+  Enter: 'enter',
+  Backspace: 'backspace',
+  Escape: 'esc',
+  Tab: 'tab',
+  PageUp: 'pageUp',
+  PageDown: 'pageDown',
+  Home: 'home',
+  End: 'end',
+  ArrowUp: 'up',
+  ArrowDown: 'down',
+  ArrowRight: 'right',
+  ArrowLeft: 'left',
+};
 
-  switch (event.key) {
-    case 'Enter':
-      if (event.shiftKey) return MOBILE_TERMINAL_KEY_SEQUENCES.shiftEnter;
-      return MOBILE_TERMINAL_KEY_SEQUENCES.enter;
-    case 'Backspace':
-      return MOBILE_TERMINAL_KEY_SEQUENCES.backspace;
-    case 'Escape':
-      return MOBILE_TERMINAL_KEY_SEQUENCES.esc;
-    case 'Tab':
-      if (event.shiftKey) return MOBILE_TERMINAL_KEY_SEQUENCES.shiftTab;
-      return MOBILE_TERMINAL_KEY_SEQUENCES.tab;
-    case 'PageUp':
-      return MOBILE_TERMINAL_KEY_SEQUENCES.pageUp;
-    case 'PageDown':
-      return MOBILE_TERMINAL_KEY_SEQUENCES.pageDown;
-    case 'Home':
-      return MOBILE_TERMINAL_KEY_SEQUENCES.home;
-    case 'End':
-      return MOBILE_TERMINAL_KEY_SEQUENCES.end;
-    case 'ArrowUp':
-      return MOBILE_TERMINAL_KEY_SEQUENCES.up;
-    case 'ArrowDown':
-      return MOBILE_TERMINAL_KEY_SEQUENCES.down;
-    case 'ArrowRight':
-      return MOBILE_TERMINAL_KEY_SEQUENCES.right;
-    case 'ArrowLeft':
-      return MOBILE_TERMINAL_KEY_SEQUENCES.left;
-    default:
-      return null;
+/** What a physical keyboard's key sends; null leaves the key to the page. */
+function hardwareKeySequence(event: globalThis.KeyboardEvent): string | null {
+  if (event.metaKey || event.altKey) return null;
+  if (event.ctrlKey) {
+    const key = event.key.toLowerCase();
+    return /^[a-z]$/.test(key) ? String.fromCharCode(key.charCodeAt(0) - 96) : null;
   }
+  let id = HARDWARE_KEYS[event.key];
+  if (event.shiftKey && id === 'enter') id = 'shiftEnter';
+  if (event.shiftKey && id === 'tab') id = 'shiftTab';
+  if (id) return MOBILE_TERMINAL_KEY_SEQUENCES[id];
+  // One character, an astral one included; other named keys (`Shift`, `F1`) send nothing.
+  return [...event.key].length === 1 ? event.key : null;
 }
 
-function KeyboardModeButton({
-  id,
-  label,
-  Icon,
-  selected,
-  disabled,
-  onSelect,
-}: {
-  id: MobileTerminalKeyboardMode;
-  label: string;
-  Icon: PhosphorIcon;
-  selected: boolean;
-  disabled: boolean;
-  onSelect: (mode: MobileTerminalKeyboardMode) => void;
-}) {
-  return (
-    <button
-      key={id}
-      type="button"
-      disabled={disabled}
-      aria-label={`${label} input mode`}
-      aria-current={selected ? 'page' : undefined}
-      onClick={() => onSelect(id)}
-      className={clsx(
-        'flex min-w-0 items-center justify-center gap-1 rounded px-1.5 py-1 font-mono text-xs leading-none transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 focus-visible:outline-focus-ring',
-        'disabled:pointer-events-none disabled:opacity-60',
-        selected
-          ? 'bg-header-active-bg text-header-active-fg shadow-[inset_0_0_0_1px_var(--color-focus-ring)]'
-          : 'text-muted hover:bg-header-inactive-bg hover:text-foreground',
-      )}
-    >
-      <span aria-hidden="true" className="shrink-0">
-        <Icon size={15} weight={selected ? 'bold' : 'regular'} />
-      </span>
-      <span className="min-w-0 truncate">{label}</span>
-    </button>
-  );
+/** Where a physical key reaches the terminal: nothing focused, or a non-control
+ *  element of this composition. A focused field or control keeps its keys. */
+function isHardwareKeyTarget(root: HTMLElement, target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false;
+  if (target === target.ownerDocument.body) return true;
+  if (!root.contains(target)) return false;
+  return target.closest('button, input, textarea, select, a[href], [contenteditable="true"]') === null;
 }
 
-function TouchModeSelector({
+const MODE_CHIP_CLASS = clsx(
+  'flex min-w-0 items-center justify-center gap-1 rounded px-1.5 py-1 font-mono text-xs leading-none transition-colors',
+  'focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 focus-visible:outline-focus-ring',
+  'disabled:pointer-events-none disabled:opacity-35',
+);
+const MODE_CHIP_SELECTED_CLASS = 'bg-header-active-bg text-header-active-fg shadow-[inset_0_0_0_1px_var(--color-focus-ring)]';
+const MODE_CHIP_IDLE_CLASS = 'text-muted hover:bg-header-inactive-bg hover:text-foreground';
+/** Concentric-Corners Rule (DESIGN.md): 4px chips at p-1 (4px) need an 8px tray. */
+const MODE_TRAY_CLASS = 'rounded-lg bg-terminal-bg p-1 shadow-[inset_0_0_0_1px_var(--color-border)]';
+
+/** The one bar of buttons, at the bottom: the touch modes, then Type — an
+ *  action rather than a mode, so it sits in a tray of its own. */
+function ModeBar({
   mode,
   cursorAvailable,
+  composing,
   disabled,
   onSelect,
+  onType,
 }: {
   mode: MobileTerminalTouchMode;
   cursorAvailable: boolean;
+  composing: boolean;
   disabled: boolean;
   onSelect: (mode: MobileTerminalTouchMode) => void;
+  onType: () => void;
 }) {
-  // The Touch row acts on the terminal, so it sits on terminal-bg as part of
-  // the surface above; the Input row and reserve act on the app, on the
-  // header-inactive pair. The single divider is the Input row's top border.
+  // The bar acts on the terminal, so it sits on terminal-bg as part of the
+  // surface above it.
   return (
     <section
       aria-label="Touch mode"
-      className="flex h-9 shrink-0 items-center bg-terminal-bg px-2"
+      className="flex shrink-0 items-center gap-2 bg-terminal-bg px-2 pt-1 pb-[max(0.25rem,env(safe-area-inset-bottom))]"
     >
-      {/* Concentric-Corners Rule (DESIGN.md): 4px chips at p-1 (4px) need an 8px tray. */}
-      <div className="grid min-w-0 flex-1 grid-cols-3 gap-1 rounded-lg bg-terminal-bg p-1 shadow-[inset_0_0_0_1px_var(--color-border)]">
+      <div className={clsx('grid min-w-0 flex-1 grid-cols-3 gap-1', MODE_TRAY_CLASS)}>
         {TOUCH_MODES.map((item) => {
           const selected = item.id === mode;
           const itemDisabled = disabled || (item.id === 'cursor' && !cursorAvailable);
@@ -272,14 +246,7 @@ function TouchModeSelector({
               aria-pressed={selected}
               disabled={itemDisabled}
               onClick={() => onSelect(item.id)}
-              className={clsx(
-                'flex min-w-0 items-center justify-center gap-1 rounded px-1.5 py-1 font-mono text-xs leading-none transition-colors',
-                'focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 focus-visible:outline-focus-ring',
-                'disabled:pointer-events-none disabled:opacity-35',
-                selected
-                  ? 'bg-header-active-bg text-header-active-fg shadow-[inset_0_0_0_1px_var(--color-focus-ring)]'
-                  : 'text-muted hover:bg-header-inactive-bg hover:text-foreground',
-              )}
+              className={clsx(MODE_CHIP_CLASS, selected ? MODE_CHIP_SELECTED_CLASS : MODE_CHIP_IDLE_CLASS)}
             >
               <Icon size={15} weight={selected ? 'bold' : 'regular'} />
               <span className="truncate">{item.shortLabel}</span>
@@ -287,60 +254,175 @@ function TouchModeSelector({
           );
         })}
       </div>
+      <div className={clsx('flex shrink-0', MODE_TRAY_CLASS)}>
+        <button
+          type="button"
+          title="Type: write a line, then send it"
+          aria-label="Type"
+          aria-pressed={composing}
+          disabled={disabled}
+          onClick={onType}
+          className={clsx(MODE_CHIP_CLASS, 'px-2.5', composing ? MODE_CHIP_SELECTED_CLASS : MODE_CHIP_IDLE_CLASS)}
+        >
+          <TextTIcon size={15} weight={composing ? 'bold' : 'regular'} />
+          <span>Type</span>
+        </button>
+      </div>
     </section>
   );
 }
 
-function KeyboardModeSelector({
-  mode,
+const SCREEN_BUTTON_CLASS = 'h-full shrink-0 rounded focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-[-2px] focus-visible:outline-focus-ring';
+
+/** The full-screen session list the header's Session title opens, with Settings behind its button. */
+function SessionsScreen({
+  sessions,
   disabled,
+  settings,
   onSelect,
+  onClose,
 }: {
-  mode: MobileTerminalKeyboardMode;
+  sessions: MobileTerminalSessionItem[];
   disabled: boolean;
-  onSelect: (mode: MobileTerminalKeyboardMode) => void;
+  settings?: ReactNode;
+  onSelect: (id: string) => void;
+  onClose: () => void;
 }) {
+  const [showSettings, setShowSettings] = useState(false);
+  const title = showSettings ? 'Settings' : 'Sessions';
   return (
     <section
-      aria-label="Input mode"
-      className="flex h-9 shrink-0 items-center border-t border-border bg-header-inactive-bg px-2 text-header-inactive-fg"
+      aria-label={title}
+      className="absolute inset-0 z-40 flex flex-col bg-header-inactive-bg text-header-inactive-fg"
     >
-      {/* Concentric-Corners Rule (DESIGN.md): 4px chips at p-1 (4px) need an 8px tray. */}
-      <nav className="grid min-w-0 flex-1 grid-cols-[1.25fr_repeat(3,minmax(0,1fr))] gap-1 rounded-lg bg-header-inactive-bg p-1 shadow-[inset_0_0_0_1px_var(--color-border)]">
-        {KEYBOARD_MODES.map((item) => (
-          <KeyboardModeButton
-            key={item.id}
-            id={item.id}
-            label={item.label}
-            Icon={item.Icon}
-            selected={item.id === mode}
-            disabled={disabled}
-            onSelect={onSelect}
-          />
-        ))}
-      </nav>
+      <header className={clsx('flex shrink-0 items-center border-b border-border font-mono text-sm', MOBILE_BAR_HEIGHT_CLASS)}>
+        <button
+          type="button"
+          aria-label={showSettings ? 'Back to sessions' : 'Back to terminal'}
+          onClick={showSettings ? () => setShowSettings(false) : onClose}
+          className={chromeButton({ kind: 'window', class: SCREEN_BUTTON_CLASS })}
+        >
+          <ArrowLeftIcon size={16} />
+        </button>
+        <h2 className="min-w-0 flex-1 truncate font-semibold">{title}</h2>
+        {settings && !showSettings ? (
+          <button
+            type="button"
+            onClick={() => setShowSettings(true)}
+            className={clsx('flex items-center gap-1.5 px-3 transition-colors hover:bg-current/10', SCREEN_BUTTON_CLASS)}
+          >
+            <GearSixIcon size={16} aria-hidden="true" />
+            Settings
+          </button>
+        ) : null}
+      </header>
+      <div className="min-h-0 flex-1 overflow-auto">
+        {showSettings ? settings : <SessionsPane sessions={sessions} disabled={disabled} onSelect={onSelect} />}
+      </div>
     </section>
   );
 }
 
-/**
- * What each reserve says when the OS keyboard is not covering it.
- *
- * `type` is not a placeholder: the reserve is the stable-height area the OS
- * keyboard occupies, so this is the only thing a phone ever sees here — once
- * that keyboard has been dismissed (`docs/specs/mobile-terminal-ui.md` → Input
- * mode selector).
- */
-const RESERVE_COPY = {
-  recent: 'Not built yet — commands you have run will show up here.',
-  type: 'Tap here to show the keyboard',
-  draft: 'Not built yet — a place to draft prompts before sending them.',
-} as const;
-
-function WorkInProgressPane({ mode }: { mode: 'recent' | 'draft' }) {
+/** The Type box, over the top of the terminal. It owns its text, so a
+ *  keystroke re-renders only the box; `keptDraft` carries a non-password draft
+ *  across a close, so Cancel then Type brings it back. */
+function Composer({
+  fieldRef,
+  keptDraft,
+  top,
+  disabled,
+  onCancel,
+  onSend,
+}: {
+  fieldRef: RefObject<HTMLTextAreaElement | HTMLInputElement | null>;
+  keptDraft: RefObject<string>;
+  top: number;
+  disabled: boolean;
+  onCancel: () => void;
+  onSend: (text: string, password: boolean) => void;
+}) {
+  const [draft, setDraft] = useState(() => keptDraft.current);
+  const [password, setPassword] = useState(false);
+  // A password is never kept to come back unmasked.
+  useEffect(() => {
+    keptDraft.current = password ? '' : draft;
+  }, [draft, keptDraft, password]);
+  const send = () => {
+    keptDraft.current = '';
+    onSend(draft, password);
+  };
+  // 16px text: iOS zooms the page into any field set smaller.
+  const fieldClass = 'block w-full resize-none rounded border border-border bg-app-bg p-2 font-mono text-base text-foreground outline-none focus:border-focus-ring';
   return (
-    <div className="grid h-full place-items-center px-4 text-center font-mono text-sm text-muted">
-      {RESERVE_COPY[mode]}
+    <div
+      data-mobile-composer
+      role="dialog"
+      aria-label="Type"
+      className="absolute inset-x-0 z-30 border-b border-border bg-header-inactive-bg p-2 text-header-inactive-fg shadow-md"
+      style={{ top }}
+    >
+      {password ? (
+        <input
+          ref={fieldRef as RefObject<HTMLInputElement | null>}
+          type="password"
+          aria-label="Password"
+          value={draft}
+          disabled={disabled}
+          autoComplete="off"
+          enterKeyHint="send"
+          onChange={(event) => setDraft(event.currentTarget.value)}
+          onKeyDown={(event) => {
+            if (event.key !== 'Enter' || isComposingKey(event.nativeEvent)) return;
+            event.preventDefault();
+            send();
+          }}
+          className={fieldClass}
+        />
+      ) : (
+        <textarea
+          ref={fieldRef as RefObject<HTMLTextAreaElement | null>}
+          aria-label="Text to send"
+          rows={3}
+          value={draft}
+          disabled={disabled}
+          autoCapitalize="off"
+          onChange={(event) => setDraft(event.currentTarget.value)}
+          className={fieldClass}
+        />
+      )}
+      <div className="mt-2 flex items-center gap-2 font-mono text-xs">
+        <label className="flex items-center gap-1.5">
+          <input
+            type="checkbox"
+            checked={password}
+            disabled={disabled}
+            onChange={(event) => {
+              const next = event.currentTarget.checked;
+              // The swapped-in field takes focus inside the tap, as Type's does.
+              flushSync(() => setPassword(next));
+              fieldRef.current?.focus({ preventScroll: true });
+            }}
+          />
+          Password
+        </label>
+        <div className="ml-auto flex gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            className={modalActionButton({ tone: 'secondary', class: 'px-3 hover:bg-app-bg' })}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={disabled || draft.length === 0}
+            onClick={send}
+            className={modalActionButton({ tone: 'primary', class: 'px-3' })}
+          >
+            Send
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -372,7 +454,7 @@ function SessionsPane({
   const groups = groupSessions(sessions);
 
   return (
-    <div className="h-full overflow-auto p-2">
+    <div className="p-2">
       {groups.length < 2 ? rows(sessions) : (
         <div className="grid gap-3">
           {groups.map(({ group, items }, index) => (
@@ -431,7 +513,7 @@ function SessionRow({ session, disabled, onSelect }: {
         'relative flex min-h-10 min-w-0 items-center gap-2 overflow-hidden rounded px-2 text-left font-mono text-xs transition-colors',
         'focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 focus-visible:outline-focus-ring',
         'disabled:pointer-events-none disabled:opacity-60',
-        // Rows sit on the header-inactive reserve, so the inactive row recesses
+        // Rows sit on the header-inactive Sessions screen, so the inactive row recesses
         // to the app pair — the guaranteed app↔inactive delta (theme.md's
         // three-pair rule); surface-raised is unreliable here.
         active
@@ -491,8 +573,12 @@ function isPortaledTarget(event: SyntheticEvent<HTMLElement>): boolean {
   return !event.currentTarget.contains(event.target as Node);
 }
 
-function isGestureDialogTarget(target: EventTarget | null): boolean {
-  return target instanceof Element && target.closest('[data-mobile-gesture-dialog]') !== null;
+/** A control inside the host (`MobileWall`'s header buttons) or the confirm
+ *  dialog is not pane content: it takes its own press. Fields are left out:
+ *  xterm's offscreen helper textarea is never what a press lands on. */
+function isHostControlTarget(target: EventTarget | null): boolean {
+  return target instanceof Element
+    && target.closest('button, a[href], select, [role="button"], [data-mobile-gesture-dialog]') !== null;
 }
 
 function consumeNativeTouchOrScrollEvent(event: Event): void {
@@ -535,10 +621,10 @@ function dispatchMouseFromPointer(
   target.dispatchEvent(mouseEvent);
 }
 
-/**
- * A rAF plus a set of delayed retries, cancelled as one. Focus and blur each
- * own one because each supersedes the other's pending retries.
- */
+const NO_KEYBOARD_INSET = { top: 0, pan: 0 };
+
+/** A rAF plus a set of delayed retries, cancelled as one; a new run
+ *  supersedes the last. */
 class RetrySchedule {
   private timers: number[] = [];
   private frame: number | null = null;
@@ -562,9 +648,9 @@ class RetrySchedule {
 
 export function MobileTerminalUi({
   terminal,
-  activeKeyboardMode,
-  defaultKeyboardMode = 'type',
-  onKeyboardModeChange,
+  activeView,
+  defaultView = 'terminal',
+  onViewChange,
   activeTouchMode,
   defaultTouchMode = 'gestures',
   onTouchModeChange,
@@ -573,9 +659,9 @@ export function MobileTerminalUi({
   onGestureInput,
   onGestureScroll,
   onPaste,
-  onFocusInput,
   sessions = [],
   onSessionSelect,
+  settings,
   interactive = true,
   fillViewport = false,
   className,
@@ -583,14 +669,15 @@ export function MobileTerminalUi({
   style,
 }: MobileTerminalUiProps) {
   useDynamicPalette();
-  const [internalKeyboardMode, setInternalKeyboardMode] = useState<MobileTerminalKeyboardMode>(defaultKeyboardMode);
+  const [internalView, setInternalView] = useState<MobileTerminalView>(defaultView);
   const [internalTouchMode, setInternalTouchMode] = useState<MobileTerminalTouchMode>(defaultTouchMode);
-  const keyboardMode = activeKeyboardMode ?? internalKeyboardMode;
+  const view = activeView ?? internalView;
   const touchMode = activeTouchMode ?? internalTouchMode;
   const activeSessionId = sessions.find((session) => session.active)?.id;
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const terminalHostRef = useRef<HTMLDivElement | null>(null);
-  const inputRef = useRef<HTMLTextAreaElement | null>(null);
-  const composingRef = useRef(false);
+  const composerFieldRef = useRef<HTMLTextAreaElement | HTMLInputElement | null>(null);
+  const keptDraftRef = useRef('');
   const edgeScrollRef = useRef<{ pointerId: number; sessionId: string; motion: EdgeScrollMotion } | null>(null);
   const edgeMomentumFrameRef = useRef<number | null>(null);
   const gestureStateRef = useRef<MobileGestureTrackingState>(MOBILE_GESTURE_IDLE_STATE);
@@ -601,10 +688,11 @@ export function MobileTerminalUi({
   const pendingTapRef = useRef<PendingTap | null>(null);
   // Cancelled on unmount, including after test DOM teardown.
   const [blurRetries] = useState(() => new RetrySchedule());
-  const [focusRetries] = useState(() => new RetrySchedule());
   const [gestureState, setGestureState] = useState<MobileGestureTrackingState>(MOBILE_GESTURE_IDLE_STATE);
   const [pendingGestureConfirmation, setPendingGestureConfirmation] = useState<MobileGestureConfirmationAction | null>(null);
-  const [inputValue, setInputValue] = useState('');
+  const [composing, setComposing] = useState(false);
+  const [keyboardInset, setKeyboardInset] = useState(NO_KEYBOARD_INSET);
+  const inset = composing ? keyboardInset : NO_KEYBOARD_INSET;
 
   const stopEdgeScroll = useCallback(() => {
     edgeScrollRef.current = null;
@@ -647,17 +735,18 @@ export function MobileTerminalUi({
     }, MOBILE_GESTURE_COMPLETE_MS);
   }, [clearGestureCompletionTimer, commitGestureState]);
 
-  const focusInput = useCallback(() => {
+  /** Inside the tap's own handler: iOS opens its keyboard only for a focus a
+   *  user gesture makes, so the field is committed and focused in one turn. */
+  const openComposer = useCallback(() => {
     if (!interactive) return;
-    blurRetries.cancel();
-    onFocusInput?.();
-    inputRef.current?.focus({ preventScroll: true });
-  }, [blurRetries, interactive, onFocusInput]);
+    flushSync(() => setComposing(true));
+    composerFieldRef.current?.focus({ preventScroll: true });
+  }, [interactive]);
 
-  const blurInput = useCallback(() => {
-    focusRetries.cancel();
-    inputRef.current?.blur();
-  }, [focusRetries]);
+  const closeComposer = useCallback(() => {
+    composerFieldRef.current?.blur();
+    setComposing(false);
+  }, []);
 
   const configurePaneTextInputs = useCallback(() => {
     const host = terminalHostRef.current;
@@ -674,7 +763,6 @@ export function MobileTerminalUi({
     if (typeof document === 'undefined') return;
     const blurActivePaneInput = () => {
       configurePaneTextInputs();
-      inputRef.current?.blur();
       const active = document.activeElement;
       if (!(active instanceof HTMLElement)) return;
       if (!terminalHostRef.current?.contains(active)) return;
@@ -682,20 +770,14 @@ export function MobileTerminalUi({
     };
     // Wall can restore xterm focus in rAF; retry across its focus window. A new
     // blur supersedes the old retries. See mobile-terminal-ui.md.
-    focusRetries.cancel();
     blurActivePaneInput();
     blurRetries.run(blurActivePaneInput, [0, 50, 200]);
-  }, [blurRetries, configurePaneTextInputs, focusRetries]);
+  }, [blurRetries, configurePaneTextInputs]);
 
-  const setKeyboardMode = useCallback((nextMode: MobileTerminalKeyboardMode) => {
-    if (activeKeyboardMode === undefined) setInternalKeyboardMode(nextMode);
-    onKeyboardModeChange?.(nextMode);
-    if (nextMode === 'type') {
-      focusInput();
-    } else {
-      blurInput();
-    }
-  }, [activeKeyboardMode, blurInput, focusInput, onKeyboardModeChange]);
+  const setView = useCallback((nextView: MobileTerminalView) => {
+    if (activeView === undefined) setInternalView(nextView);
+    onViewChange?.(nextView);
+  }, [activeView, onViewChange]);
 
   const setTouchMode = useCallback((nextMode: MobileTerminalTouchMode) => {
     if (nextMode === 'cursor' && !cursorTouchAvailable) return;
@@ -703,31 +785,72 @@ export function MobileTerminalUi({
     onTouchModeChange?.(nextMode);
   }, [activeTouchMode, cursorTouchAvailable, onTouchModeChange]);
 
-  const flushInputValue = useCallback((value: string) => {
-    if (value) sendInput(value);
-    setInputValue('');
-  }, [sendInput]);
+  /** A password goes as typed; anything else takes the paste path, bracketed
+   *  when the app asked, so a TUI never reads the Enter after it as pasted. */
+  const sendDraft = useCallback((text: string, password: boolean) => {
+    closeComposer();
+    if (!interactive || !text) return;
+    if (password || !onPaste) {
+      sendInput(text);
+      sendInput(MOBILE_TERMINAL_KEY_SEQUENCES.enter);
+      return;
+    }
+    void Promise.resolve(onPaste(text)).then(() => sendInput(MOBILE_TERMINAL_KEY_SEQUENCES.enter));
+  }, [closeComposer, interactive, onPaste, sendInput]);
 
+  // A physical keyboard types straight into the terminal while the composer is
+  // closed. No soft keyboard reaches here: one opens only for a focused field.
+  // Its Command+V comes back from the page as a `paste` on the same targets.
   useEffect(() => {
-    const input = inputRef.current;
-    if (!input) return;
-    // Software keyboards need not emit keydown, and deleting from our empty
-    // input produces no change event. Native beforeinput supplies inputType;
-    // React's compatibility before-input event does not preserve that contract.
-    const handleBeforeInput = (event: InputEvent) => {
-      if (composingRef.current || event.isComposing || !event.cancelable || event.defaultPrevented) return;
-      const sequence = event.inputType === 'deleteContentBackward'
-        ? MOBILE_TERMINAL_KEY_SEQUENCES.backspace
-        : event.inputType === 'insertLineBreak' || event.inputType === 'insertParagraph'
-          ? MOBILE_TERMINAL_KEY_SEQUENCES.enter
-          : null;
+    if (!interactive || composing || view !== 'terminal') return;
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      const root = rootRef.current;
+      if (!root || event.defaultPrevented || isComposingKey(event)) return;
+      if (!isHardwareKeyTarget(root, event.target)) return;
+      const sequence = hardwareKeySequence(event);
       if (!sequence) return;
       event.preventDefault();
       sendInput(sequence);
     };
-    input.addEventListener('beforeinput', handleBeforeInput);
-    return () => input.removeEventListener('beforeinput', handleBeforeInput);
-  }, [sendInput]);
+    const onNativePaste = (event: ClipboardEvent) => {
+      const root = rootRef.current;
+      if (!root || !onPaste || event.defaultPrevented || !isHardwareKeyTarget(root, event.target)) return;
+      const text = event.clipboardData?.getData('text/plain');
+      if (!text) return;
+      event.preventDefault();
+      void onPaste(text);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('paste', onNativePaste);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('paste', onNativePaste);
+    };
+  }, [composing, interactive, onPaste, sendInput, view]);
+
+  useEffect(() => {
+    if (!interactive || view !== 'terminal') closeComposer();
+  }, [closeComposer, interactive, view]);
+
+  // Panned, never resized: the OS keyboard covers the terminal's bottom rows, so
+  // the terminal slides up until they sit just above it, and the composer stays
+  // at the top of what is visible. A resize would reflow the Session's TUI.
+  useEffect(() => {
+    const root = rootRef.current;
+    const host = terminalHostRef.current;
+    if (!composing || !root || !host) return;
+    const update = () => {
+      const visible = overlayViewportBounds();
+      const rootTop = root.getBoundingClientRect().top;
+      const hostBottom = rootTop + host.offsetTop + host.offsetHeight;
+      const top = Math.max(0, Math.round(visible.top - rootTop));
+      const pan = Math.max(0, Math.round(hostBottom - visible.bottom));
+      // iOS fires these through the keyboard's whole animation; most change nothing.
+      setKeyboardInset((prev) => (prev.top === top && prev.pan === pan ? prev : { top, pan }));
+    };
+    update();
+    return subscribeOverlayViewport(update);
+  }, [composing]);
 
   const executeGestureAction = useCallback((action: MobileGestureAction | undefined) => {
     if (!action) return;
@@ -757,15 +880,6 @@ export function MobileTerminalUi({
     setPendingGestureConfirmation(null);
     executeGestureAction(confirmedAction);
   }, [executeGestureAction, pendingGestureConfirmation]);
-
-  useEffect(() => {
-    if (keyboardMode !== 'type' || !interactive) {
-      blurInput();
-      return;
-    }
-    focusRetries.run(focusInput, [120, 500]);
-    return focusRetries.cancel;
-  }, [blurInput, focusInput, focusRetries, interactive, keyboardMode]);
 
   useEffect(() => {
     if (touchMode === 'cursor' && !cursorTouchAvailable) {
@@ -852,11 +966,10 @@ export function MobileTerminalUi({
   const handlePanePointerDownCapture = useCallback((event: PointerEvent<HTMLDivElement>) => {
     // A second finger may stop a coast, but must not steal a live edge drag.
     if (edgeMomentumFrameRef.current !== null) stopEdgeScroll();
-    if (isPortaledTarget(event)) {
+    if (isPortaledTarget(event) || isHostControlTarget(event.target)) {
       pendingTapRef.current = null;
       return;
     }
-    if (isGestureDialogTarget(event.target)) return;
     // A tap acknowledges the active Session, a drag or swipe never
     // (`docs/specs/alert.md` -> Engagement): judged on release, and tracked in
     // capture on the host, before any mode below consumes the press.
@@ -1040,10 +1153,13 @@ export function MobileTerminalUi({
   return (
     <TouchUiContext.Provider value={true}>
     <div
+      ref={rootRef}
       data-mobile-terminal-ui
       className={clsx(
         'relative flex min-h-0 flex-col overflow-hidden bg-app-bg text-app-fg',
-        fillViewport ? 'h-screen' : 'h-full',
+        // Not `h-screen`: iOS Safari's 100vh is the toolbar-hidden height,
+        // which leaves the mode bar under the toolbar.
+        fillViewport ? 'h-dvh' : 'h-full',
         className,
       )}
       style={style}
@@ -1055,6 +1171,7 @@ export function MobileTerminalUi({
           'touch-none',
           terminalClassName,
         )}
+        style={inset.pan ? { transform: `translateY(-${inset.pan}px)` } : undefined}
         onPointerDownCapture={handlePanePointerDownCapture}
         onPointerMoveCapture={handlePanePointerMoveCapture}
         onPointerUpCapture={handlePanePointerUpCapture}
@@ -1073,91 +1190,38 @@ export function MobileTerminalUi({
         ) : null}
       </div>
 
-      <TouchModeSelector
+      <ModeBar
         mode={touchMode}
         cursorAvailable={cursorTouchAvailable}
+        composing={composing}
         disabled={!interactive}
         onSelect={setTouchMode}
+        onType={composing ? closeComposer : openComposer}
       />
 
-      <KeyboardModeSelector
-        mode={keyboardMode}
-        disabled={!interactive}
-        onSelect={setKeyboardMode}
-      />
+      {composing ? (
+        <Composer
+          fieldRef={composerFieldRef}
+          keptDraft={keptDraftRef}
+          top={inset.top}
+          disabled={!interactive}
+          onCancel={closeComposer}
+          onSend={sendDraft}
+        />
+      ) : null}
 
-      <div className="h-64 shrink-0 bg-header-inactive-bg text-header-inactive-fg">
-        {keyboardMode === 'sessions' ? (
-          <SessionsPane
-            sessions={sessions}
-            disabled={!interactive}
-            onSelect={(id) => {
-              onSessionSelect?.(id);
-              blurInput();
-            }}
-          />
-        ) : null}
-        {keyboardMode === 'recent' ? <WorkInProgressPane mode="recent" /> : null}
-        {keyboardMode === 'draft' ? <WorkInProgressPane mode="draft" /> : null}
-        {keyboardMode === 'type' ? (
-          <button
-            type="button"
-            disabled={!interactive}
-            aria-label="Focus terminal input"
-            onClick={focusInput}
-            className={clsx(
-              'grid h-full w-full place-items-center bg-header-inactive-bg text-header-inactive-fg transition-colors',
-              'focus-visible:outline focus-visible:outline-1 focus-visible:outline-inset focus-visible:outline-focus-ring',
-              'disabled:pointer-events-none disabled:opacity-60',
-            )}
-          >
-            <span className="px-4 text-center font-mono text-sm text-muted">{RESERVE_COPY.type}</span>
-          </button>
-        ) : null}
-      </div>
-
-      <textarea
-        ref={inputRef}
-        aria-label="Terminal input"
-        value={inputValue}
-        disabled={!interactive}
-        autoCapitalize="off"
-        autoComplete="off"
-        autoCorrect="off"
-        spellCheck={false}
-        inputMode="text"
-        enterKeyHint="enter"
-        onPaste={(event) => {
-          if (!onPaste) return;
-          event.preventDefault();
-          void onPaste(event.clipboardData.getData('text/plain'));
-        }}
-        onKeyDown={(event) => {
-          // IME navigation and confirmation belong to the composition.
-          if (composingRef.current || isComposingKey(event.nativeEvent)) return;
-          const sequence = keyDownSequence(event);
-          if (!sequence) return;
-          event.preventDefault();
-          sendInput(sequence);
-          setInputValue('');
-        }}
-        onCompositionStart={() => {
-          composingRef.current = true;
-        }}
-        onCompositionEnd={(event) => {
-          composingRef.current = false;
-          flushInputValue(event.currentTarget.value);
-        }}
-        onChange={(event) => {
-          const value = event.currentTarget.value;
-          if (composingRef.current) {
-            setInputValue(value);
-          } else {
-            flushInputValue(value);
-          }
-        }}
-        className="absolute left-0 top-0 h-px w-px resize-none overflow-hidden border-0 bg-transparent p-0 opacity-0 outline-none"
-      />
+      {view === 'sessions' ? (
+        <SessionsScreen
+          sessions={sessions}
+          disabled={!interactive}
+          settings={settings}
+          onSelect={(id) => {
+            onSessionSelect?.(id);
+            setView('terminal');
+          }}
+          onClose={() => setView('terminal')}
+        />
+      ) : null}
     </div>
     {/* The page's root here: Pocket, the one-time phone page, and the Pocket
         playground mount no `App`, which carries it on the desktop hosts. */}

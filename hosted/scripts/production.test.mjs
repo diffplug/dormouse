@@ -8,6 +8,7 @@ import {
   productionConfigs,
   productionSmoke,
   preflight,
+  verifyPackages,
 } from "./production.mjs";
 import { deployWorkers, oauthProviders, readConfigs } from "./workers.mjs";
 const bases = await readConfigs();
@@ -486,4 +487,18 @@ test("each Worker binds exactly one Hyperdrive of its own, or neither its config
     preflight(env, shared, provider()),
     failure("HYPERDRIVE_ID, RELAY_HYPERDRIVE_ID, VOICE_HYPERDRIVE_ID must name three different Hyperdrives"),
   );
+});
+test("verifyPackages admits only clean pgstencil packages built from one commit", async () => {
+  const commit = "f".repeat(40);
+  // `all` applies to every package, so a format check can't hide behind the
+  // check that the three name one commit.
+  const reader = ({ all = {}, ...one } = {}) => async (name) =>
+    JSON.stringify({ commit, dirty: false, ...all, ...one[name] });
+  const refused = failure("Production requires accepted, clean pgstencil provenance");
+  await verifyPackages(reader());
+  await assert.rejects(verifyPackages(reader({ all: { commit: "f".repeat(39) } })), refused);
+  await assert.rejects(verifyPackages(reader({ all: { commit: "F".repeat(40) } })), refused);
+  await assert.rejects(verifyPackages(reader({ all: { commit: undefined } })), refused);
+  await assert.rejects(verifyPackages(reader({ "@pgstencil/auth/better-auth": { dirty: true } })), refused);
+  await assert.rejects(verifyPackages(reader({ pgstencil: { commit: "e".repeat(40) } })), refused);
 });

@@ -990,8 +990,8 @@ describe('terminal-registry alert behavior', () => {
       entry.terminal.emitInput(input);
       // Written as it came, and not as user input.
       expect(write.mock.calls).toEqual([[id, input]]);
-      // The fake PTY echoes the reply as output. It may defer presentation,
-      // but must never acknowledge or discard the owed episode.
+      // The fake PTY echoes the reply as output, which must never acknowledge
+      // or discard the owed episode.
       expect(getActivity(id)).toMatchObject({ episode, todo: false });
       advance(5_000);
       expect(getActivity(id)).toMatchObject({ status: 'ALERT_RINGING', episode });

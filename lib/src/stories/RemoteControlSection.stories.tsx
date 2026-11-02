@@ -38,20 +38,9 @@ function RemoteControlStory() {
   );
 }
 
-/** The clock every story here reads. A setup code encodes its expiry, so a real
- *  clock would draw a different QR on every run. `beforeEach` pins it only
- *  around render: a `parameters` literal is built at module load, under the
- *  real clock, so a timestamp there must use `STORY_NOW` itself. */
-const STORY_NOW = Date.UTC(2026, 0, 1);
-
 const meta: Meta<typeof RemoteControlStory> = {
   title: 'Modals/RemoteControlSection',
   component: RemoteControlStory,
-  beforeEach: () => {
-    const realNow = Date.now;
-    Date.now = () => STORY_NOW;
-    return () => { Date.now = realNow; };
-  },
   // Embedded in a docs page, each of these needs its own frame. The section
   // reads a module-singleton store (`burrow-status-store.ts`: `state` is module
   // scope, and the link is captured only when `listeners.size === 1`), so N
@@ -129,7 +118,7 @@ function hostedWaiting(accountFull = false): HostedEnrollmentState {
     status: 'waiting',
     confirmDigits: '47',
     verificationUrl: 'https://hosted.dormouse.sh/enroll#7KQM-X4TD',
-    expiresAt: STORY_NOW + 10 * 60_000,
+    expiresAt: Date.now() + 10 * 60_000,
     accountFull,
   };
 }
@@ -344,7 +333,7 @@ export const PairedPhonesAndAccessLog: Story = {
   parameters: {
     primedBurrow: {
       status: enrolledStatus({ pairedClients: 2 }),
-      accessLog: accessLogEntries(pairedDevices(2, STORY_NOW), STORY_NOW),
+      accessLog: accessLogEntries(pairedDevices(2)),
     },
     docs: { story: { height: '620px' } },
   },
@@ -631,7 +620,7 @@ export const OneTimeConfirming: Story = {
   parameters: {
     primedBurrow: {
       status: UNENROLLED_STATUS,
-      oneTime: { status: 'confirming', label: 'Android phone', expiresAt: STORY_NOW + 60_000 },
+      oneTime: { status: 'confirming', label: 'Android phone', expiresAt: Date.now() + 60_000 },
     },
     docs: { story: { height: '380px' } },
   },
@@ -655,7 +644,7 @@ export const OneTimeConnected: Story = {
   parameters: {
     primedBurrow: {
       status: UNENROLLED_STATUS,
-      oneTime: { status: 'connected', label: 'Android phone', since: STORY_NOW },
+      oneTime: { status: 'connected', label: 'Android phone', since: Date.now() },
     },
     docs: { story: { height: '360px' } },
   },
@@ -705,7 +694,7 @@ export const OneTimeEndedNetworkNotAllowed: Story = {
       oneTime: {
         status: 'ended',
         reason: 'network-not-allowed',
-        refusal: { at: STORY_NOW, kind: 'path-refused', end: 'remote', address: '172.58.12.9', addressSource: 'observed' },
+        refusal: { at: Date.now(), kind: 'path-refused', end: 'remote', address: '172.58.12.9', addressSource: 'observed' },
       },
     },
     docs: { story: { height: '360px' } },

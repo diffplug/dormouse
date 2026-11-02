@@ -10,6 +10,7 @@ import {
   setOverride,
 } from './mouse-selection';
 import type { TerminalOverlayDims } from './terminal-store';
+import { fakeXterm } from './copy-text-fixtures';
 
 class ListenerHost {
   private readonly listeners = new Map<string, Array<(ev: MouseEvent | PointerEvent) => void>>();
@@ -37,6 +38,8 @@ class FakeElement extends ListenerHost {
   releasePointerCapture = vi.fn();
   querySelector = vi.fn();
   dispatchEvent = vi.fn();
+  readonly classes = new Set<string>();
+  classList = { contains: (name: string) => this.classes.has(name) };
 
   getBoundingClientRect(): Pick<DOMRect, 'left' | 'top'> {
     return { left: 0, top: 0 };
@@ -89,7 +92,8 @@ const dims: TerminalOverlayDims = {
   gridTop: 0,
 };
 
-function createHarness(windowHost: ListenerHost) {
+/** `rows` are the buffer's text, for presses that read it. */
+function createHarness(windowHost: ListenerHost, rows?: readonly string[], shiftClaimsMouse = false) {
   const element = new FakeElement();
   const screen = new FakeElement();
   element.querySelector.mockReturnValue(screen);
@@ -97,7 +101,7 @@ function createHarness(windowHost: ListenerHost) {
     cols: 80,
     clearSelection: vi.fn(),
     focus: vi.fn(),
-    buffer: {
+    buffer: rows ? fakeXterm(rows).buffer : {
       active: {
         getLine: vi.fn(() => ({ length: 0, translateToString: () => '' })),
       },
@@ -108,6 +112,7 @@ function createHarness(windowHost: ListenerHost) {
     terminal: terminal as never,
     element: element as never,
     getOverlayDims: () => dims,
+    shiftClaimsMouse,
   });
   return { cleanup, element, screen, terminal, windowHost };
 }
@@ -570,5 +575,124 @@ describe('terminal-mouse-router: override suppression', () => {
 
     vi.useRealTimers();
     cleanup();
+  });
+});
+
+describe('terminal-mouse-router: multi-click', () => {
+  const ROWS = ['$ cat --oneline', 'second row'];
+
+  /** One press and release at column 8 of row 0, the press dispatched as the
+   *  DOM does: the wrapper's capture, then the screen's bubble. */
+  function click(h: ReturnType<typeof createHarness>, detail: number, over: Partial<MouseEvent> = {}) {
+    const down = mouseEvent({ clientX: 85, clientY: 5, detail, ...over });
+    h.element.emit('mousedown', down);
+    h.screen.emit('mousedown', down);
+    windowHost.emit('mouseup', mouseEvent({ clientX: 85, clientY: 5, detail, ...over }));
+    return down;
+  }
+
+  it('selects the double-clicked word as the terminal’s own selection, its editor open, xterm’s selection never reached', () => {
+    const h = createHarness(windowHost, ROWS);
+    expect(click(h, 1).stopPropagation).not.toHaveBeenCalled();
+    const down = click(h, 2);
+    // Column 8 is in "--oneline", columns 6 to 14.
+    expect(getMouseSelectionState('t1').selection).toMatchObject({ startRow: 0, startCol: 6, endRow: 0, endCol: 14, dragging: false, shape: 'linewise' });
+    expect(getMouseSelectionState('t1').selection?.owner).toBeUndefined();
+    expect(getMouseSelectionState('t1').copyEditor?.scopes[0].span).toEqual({ start: { row: 0, col: 6 }, end: { row: 0, col: 14 }, block: false });
+    // Stopped at the screen, after xterm's linkifier there saw it.
+    expect(down.preventDefault).toHaveBeenCalledOnce();
+    expect(down.stopPropagation).toHaveBeenCalledOnce();
+    expect(down.stopImmediatePropagation).not.toHaveBeenCalled();
+    expect(h.terminal.focus).toHaveBeenCalled();
+    h.cleanup();
+  });
+
+  it('selects the triple-clicked line', () => {
+    const h = createHarness(windowHost, ROWS);
+    click(h, 1);
+    click(h, 2);
+    click(h, 3);
+    expect(getMouseSelectionState('t1').selection).toMatchObject({ startRow: 0, startCol: 0, endRow: 0, endCol: 14, dragging: false });
+    expect(getMouseSelectionState('t1').copyEditor).not.toBeNull();
+    h.cleanup();
+  });
+
+  it('leaves a double-clicked link to the link, xterm still kept from selecting it', () => {
+    const h = createHarness(windowHost, ROWS);
+    h.screen.classes.add('xterm-cursor-pointer');
+    const down = click(h, 2);
+    expect(getMouseSelectionState('t1').selection).toBeNull();
+    expect(down.stopPropagation).toHaveBeenCalledOnce();
+    h.cleanup();
+  });
+
+  it('keeps a Shift-click from xterm’s selection without selecting', () => {
+    const h = createHarness(windowHost, ROWS);
+    click(h, 1);
+    const down = click(h, 1, { shiftKey: true });
+    expect(down.stopPropagation).toHaveBeenCalledOnce();
+    expect(getMouseSelectionState('t1').selection).toBeNull();
+    h.cleanup();
+  });
+
+  it('drags from a double-click’s press as from any other', () => {
+    const h = createHarness(windowHost, ROWS);
+    const down = mouseEvent({ clientX: 85, clientY: 5, detail: 2 });
+    h.element.emit('mousedown', down);
+    h.screen.emit('mousedown', down);
+    windowHost.emit('mousemove', mouseEvent({ clientX: 41, clientY: 15, buttons: 1 }));
+    windowHost.emit('mouseup', mouseEvent({ clientX: 41, clientY: 15 }));
+    expect(getMouseSelectionState('t1').selection).toMatchObject({ startRow: 0, startCol: 8, endRow: 1, endCol: 3, dragging: false });
+    h.cleanup();
+  });
+
+  it('leaves a program’s double-click to the program', () => {
+    const h = createHarness(windowHost, ROWS);
+    setMouseReporting('t1', 'vt200');
+    const down = click(h, 2);
+    expect(getMouseSelectionState('t1').selection).toBeNull();
+    expect(down.stopPropagation).not.toHaveBeenCalled();
+    expect(down.preventDefault).not.toHaveBeenCalled();
+    h.cleanup();
+  });
+});
+
+describe('terminal-mouse-router: Shift over a reporting program (§6.1)', () => {
+  /** A Shift-held press, move, and release, every event kept for inspection. */
+  function shiftGesture(shiftClaimsMouse: boolean, to: [number, number]) {
+    const h = createHarness(windowHost, undefined, shiftClaimsMouse);
+    setMouseReporting('t1', 'vt200');
+    const events = [
+      mouseEvent({ clientX: 5, clientY: 5, shiftKey: true }),
+      mouseEvent({ clientX: to[0], clientY: to[1], shiftKey: true, buttons: 1 }),
+      mouseEvent({ clientX: to[0], clientY: to[1], shiftKey: true }),
+    ];
+    h.element.emit('mousedown', events[0]);
+    windowHost.emit('mousemove', events[1]);
+    windowHost.emit('mouseup', events[2]);
+    return { h, events };
+  }
+
+  it('makes a Shift-drag the terminal’s own selection, its editor open, none of it reaching xterm', () => {
+    const { h, events } = shiftGesture(true, [45, 25]);
+    expect(getMouseSelectionState('t1').selection).toMatchObject({ startRow: 0, startCol: 0, endRow: 2, endCol: 3, dragging: false });
+    expect(getMouseSelectionState('t1').selection?.owner).toBeUndefined();
+    expect(getMouseSelectionState('t1').copyEditor).not.toBeNull();
+    for (const ev of events) expect(ev.stopImmediatePropagation).toHaveBeenCalled();
+    h.cleanup();
+  });
+
+  it('keeps a Shift-click from the program and from xterm alike', () => {
+    const { h, events } = shiftGesture(true, [6, 5]);
+    expect(getMouseSelectionState('t1').selection).toBeNull();
+    for (const ev of events) expect(ev.stopImmediatePropagation).toHaveBeenCalled();
+    h.cleanup();
+  });
+
+  it('leaves a Shift-drag to the program where Shift does not claim the mouse (macOS)', () => {
+    const { h, events } = shiftGesture(false, [45, 25]);
+    expect(getMouseSelectionState('t1').selection).toMatchObject({ owner: 'program' });
+    for (const ev of events) expect(ev.preventDefault).not.toHaveBeenCalled();
+    h.cleanup();
   });
 });

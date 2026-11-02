@@ -4,7 +4,7 @@
 
 ## Core layout
 
-**Fixed reserve height rather than a `visualViewport` measurement.** `window.visualViewport` shrinks and grows for the whole length of the OS keyboard's open/close animation, so a height derived from it bounces the terminal region and reflows xterm mid-gesture. The trade — the keyboard covering the same physical area — is the cheaper cost, since what it hides is the app keyboard UI the OS keyboard is replacing anyway.
+**Pan, not resize.** Shrinking the terminal to the space above the keyboard changes its rows, so the PTY resizes and a full-screen TUI (Claude Code, vim) redraws on every keyboard open and close; on a remote Session the laptop's view reflows too. Panning keeps the grid and only moves it, so the rows hidden are the top ones, under the composer. The pan follows `visualViewport` `resize` and `scroll`, which fire through the keyboard's animation; that motion is what the earlier fixed-height keyboard reserve avoided, and it moves the terminal rather than reflowing it. Not yet measured on a real iPhone (2026-10); if Safari fights the pan, the fallback is the resize.
 
 ## Touch mode selector
 
@@ -16,11 +16,13 @@
 
 The edge gesture routes to either terminal history or a mouse-reporting TUI, neither of which is a browser scroll container. Its coast therefore approximates native scrolling rather than delegating to an overflow element. The exponential decay uses iOS's normal 0.998 rate, documented by [React Native](https://reactnative.dev/docs/scrollview#decelerationrate) (consulted 2026-09). Elapsed-time integration avoids refresh-rate-dependent travel. Recent directional samples avoid stale speed after reversals; release time includes a brief pause, while a longer hold suppresses the coast. Whole terminal lines preclude native subpixel motion and rubber-band bounce; the launch cap bounds wheel reports to a remote TUI.
 
-## Input mode selector
+## Type
 
-**Why the Type focus is synchronous.** Mobile browsers open the native keyboard only for a focus call made while the user gesture is still on the stack; one deferred to `requestAnimationFrame` or a timer may be refused as not user-initiated, so the tap appears to do nothing.
+**Why no live keystrokes.** A soft keyboard's autocorrect and word prediction act on the text of the field it types into. Sent key by key into an empty hidden field, as the earlier Type mode did, those keystrokes arrived without that help and with corrections replayed as deletions and retypes, which made them unreliable in practice (2026-10). A composed field keeps the keyboard's accuracy.
 
-**What the follow-up effect buys.** It re-asserts focus after re-renders that would drop it, and is the only focus path when Type is the initial mode and no tap has happened yet. Strict browsers can still keep the keyboard closed until the first real tap — best effort, not the contract.
+**Why the focus is synchronous.** Mobile browsers open the native keyboard only for a focus call made while the user gesture is still on the stack; one deferred to `requestAnimationFrame` or a timer may be refused as not user-initiated, so the tap appears to do nothing. The composer is committed with `flushSync` so its field exists to focus in the same handler, and the Password checkbox re-focuses the swapped field the same way.
+
+**Why the paste path.** Apps that enable bracketed paste (Claude Code, zsh) also treat fast multi-character input as pasted, so text and Enter written together would leave the Enter inside the paste as a newline. Sent as a bracketed paste and then a separate Enter, the line submits; multi-line text stays one entry. A password skips it because a password prompt reads raw input.
 
 ## Keyboard focus invariant
 

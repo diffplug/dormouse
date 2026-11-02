@@ -1,12 +1,10 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
-import {
-  ArrowLineDownIcon,
-  XIcon,
-} from '@phosphor-icons/react';
+import { CaretDownIcon, XIcon } from '@phosphor-icons/react';
+import { clsx } from 'clsx';
 import { HeaderActionButton } from './HeaderActionButton';
 import { TerminalPane } from './TerminalPane';
 import { AlertRingInset, alertRingRow, useAlertRingBurst } from './alert-ring';
-import { HEADER_PILL_CLASS } from './design';
+import { chromeButton, HEADER_PILL_CLASS, MOBILE_BAR_HEIGHT_CLASS } from './design';
 import { useTodoPillContent } from './TodoPillBody';
 import type { MobileTerminalSessionItem } from './MobileTerminalUi';
 import {
@@ -42,7 +40,8 @@ export interface MobileWallProps {
   activeSessionId?: string;
   defaultActiveSessionId?: string;
   onActiveSessionChange?: (id: string) => void;
-  onSessionMinimize?: (id: string) => void;
+  /** Tapping the header's Session title asks for the Sessions screen; omitted, the title is plain text. */
+  onShowSessions?: () => void;
   onSessionKill?: (id: string) => void;
   showKillButton?: boolean;
   className?: string;
@@ -91,7 +90,7 @@ export function MobileWall({
   activeSessionId,
   defaultActiveSessionId,
   onActiveSessionChange,
-  onSessionMinimize,
+  onShowSessions,
   onSessionKill,
   showKillButton = true,
   className,
@@ -157,7 +156,7 @@ export function MobileWall({
       <MobileWallHeader
         session={activeItem}
         onTodoClear={onSessionTodoClear ? () => onSessionTodoClear(activeItem.id) : undefined}
-        onMinimize={() => onSessionMinimize?.(activeItem.id)}
+        onShowSessions={onShowSessions}
         onKill={() => killSession(activeItem.id)}
         showKillButton={showKillButton}
       />
@@ -173,13 +172,13 @@ export function MobileWall({
 function MobileWallHeader({
   session,
   onTodoClear,
-  onMinimize,
+  onShowSessions,
   onKill,
   showKillButton,
 }: {
   session: MobileTerminalSessionItem;
   onTodoClear?: () => void;
-  onMinimize: () => void;
+  onShowSessions?: () => void;
   onKill: () => void;
   showKillButton: boolean;
 }) {
@@ -187,21 +186,30 @@ function MobileWallHeader({
   const TodoPill = onTodoClear ? 'button' : 'span';
   const row = alertRingRow(session.status, null);
   const burst = useAlertRingBurst(row, session.episode);
+  const Title = onShowSessions ? 'button' : 'div';
 
   return (
-    <div className="relative flex h-8 shrink-0 items-center gap-1.5 overflow-hidden bg-header-active-bg pl-2 pr-[5px] font-mono text-sm leading-none text-header-active-fg">
-      <div className="flex min-w-0 flex-1 items-center gap-1.5">
+    <div className={clsx('relative flex shrink-0 items-center gap-1.5 overflow-hidden bg-header-active-bg font-mono text-sm leading-tight text-header-active-fg', MOBILE_BAR_HEIGHT_CLASS)}>
+      <Title
+        type={onShowSessions ? 'button' : undefined}
+        title={onShowSessions ? 'Show sessions' : undefined}
+        onClick={onShowSessions}
+        className={clsx('flex h-full min-w-0 flex-1 items-center gap-1.5 px-2 text-left', onShowSessions && 'transition-colors hover:bg-current/10')}
+      >
         <span className="min-w-0 shrink truncate font-medium">{session.title}</span>
         {session.secondary ? (
           <span className="min-w-0 shrink truncate opacity-70">{session.secondary}</span>
         ) : null}
-      </div>
+        {onShowSessions ? (
+          <CaretDownIcon size={10} weight="bold" className="shrink-0 opacity-65" aria-hidden="true" />
+        ) : null}
+      </Title>
       {todoPill.visible ? (
         <TodoPill
           type={onTodoClear ? 'button' : undefined}
           data-session-todo-for={session.id}
           data-flourishing={todoPill.flourishing ? 'true' : 'false'}
-          className={`todo-pill-shell ${HEADER_PILL_CLASS}`}
+          className={clsx('todo-pill-shell', HEADER_PILL_CLASS, !showKillButton && 'mr-2')}
           aria-label={onTodoClear ? 'Dismiss TODO' : 'TODO'}
           aria-hidden={todoPill.flourishing ? true : undefined}
           onClick={onTodoClear ? (event) => {
@@ -212,26 +220,16 @@ function MobileWallHeader({
           {todoPill.body}
         </TodoPill>
       ) : null}
-      <div className="ml-1 flex shrink-0 items-center gap-0.5">
+      {showKillButton ? (
         <HeaderActionButton
-          className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10"
-          onClick={onMinimize}
-          ariaLabel="Minimize"
-          tooltip="Minimize"
+          className={chromeButton({ kind: 'window', class: clsx(MOBILE_BAR_HEIGHT_CLASS, 'hover:bg-error/10 hover:text-error') })}
+          onClick={onKill}
+          ariaLabel="Kill"
+          tooltip="Kill"
         >
-          <ArrowLineDownIcon size={14} />
+          <XIcon size={16} />
         </HeaderActionButton>
-        {showKillButton ? (
-          <HeaderActionButton
-            className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-error/10 hover:text-error"
-            onClick={onKill}
-            ariaLabel="Kill"
-            tooltip="Kill"
-          >
-            <XIcon size={14} />
-          </HeaderActionButton>
-        ) : null}
-      </div>
+      ) : null}
       {row && <AlertRingInset ground="header-active" burst={burst} />}
     </div>
   );
