@@ -361,8 +361,8 @@ function prologueEnd(html: string): number {
   // Nor ahead of a UTF-8 BOM (its latin1 spelling), which must stay first.
   const start = html.startsWith('\xEF\xBB\xBF') ? 3 : 0;
   let at = start;
-  // Walked from the start, stopping at the first thing that runs or renders: a
-  // tag's spelling inside a script's text is not a tag.
+  // Walked from the start, stopping at the first thing that is no token: a tag's
+  // spelling inside a script's text is not a tag.
   for (const token of prologue.slice(start).matchAll(PROLOGUE_TOKEN)) {
     if (MUST_PRECEDE_SCRIPT.test(token[1]!)) at = start + token.index + token[0].length;
   }

@@ -48,15 +48,15 @@ function answering() {
   const { port1, port2 } = new MessageChannel();
   const asked: ResponseControl[] = [];
   port2.onmessage = (event) => asked.push(event.data as ResponseControl);
-  return { response: responseFrom(port1), send: (message: ResponseMessage) => port2.postMessage(message), asked, port2 };
+  return { response: responseFrom(port1, () => {}), send: (message: ResponseMessage) => port2.postMessage(message), asked, port2 };
 }
 
 describe('responseFrom', () => {
   const realTick = () => new Promise<void>((resolve) => { setImmediate(resolve); });
-  const CLOCK = { toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] as const };
+  const fakeClock = () => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
 
   it('tells the Client window when it gives up on a head, and is finished', async () => {
-    vi.useFakeTimers({ toFake: [...CLOCK.toFake] });
+    fakeClock();
     try {
       const { port1, port2 } = new MessageChannel();
       const asked: unknown[] = [];
@@ -73,8 +73,21 @@ describe('responseFrom', () => {
     }
   });
 
+  it('tells the Client window when the page aborts, so a waiting request stops', async () => {
+    const { port1, port2 } = new MessageChannel();
+    const asked: unknown[] = [];
+    port2.onmessage = (event) => asked.push(event.data);
+    const aborted = new AbortController();
+    const finished = vi.fn();
+    void responseFrom(port1, finished, aborted.signal);
+    aborted.abort();
+    await vi.waitFor(() => { expect(asked).toEqual([{ kind: 'cancel' }]); }, { interval: 1 });
+    expect(finished).toHaveBeenCalled();
+    port2.close();
+  });
+
   it('says it still runs while a response is open, and stops with it', async () => {
-    vi.useFakeTimers({ toFake: [...CLOCK.toFake] });
+    fakeClock();
     try {
       const { port1, port2 } = new MessageChannel();
       const asked: unknown[] = [];

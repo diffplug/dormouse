@@ -171,6 +171,13 @@ describe('createBurrowFrameHost', () => {
     expect(response.body).not.toContain('coded\n');
   });
 
+  it('asks nothing about a URL with no origin, and holds on to none', async () => {
+    const isLocal = vi.fn(async () => true);
+    const host = createBurrowFrameHost({ ...proxy, isLocal });
+    await expect(host.canOpen('data:text/html,hello')).resolves.toBe(false);
+    expect(isLocal).not.toHaveBeenCalled();
+  });
+
   it('keeps a listed page listed through a slow lookup, and leaves a new one out', async () => {
     vi.useFakeTimers();
     try {

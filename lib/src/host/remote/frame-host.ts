@@ -13,6 +13,7 @@ import type { Readable } from 'stream';
 import WebSocket from 'ws';
 import { MAX_WS_MESSAGE_BYTES, normalizeOrigin, type HttpHeader } from 'remote-lib-common';
 import { messageOf } from '../../lib/errors';
+import { settleAllWithin } from '../../lib/settle-within';
 import type {
   BurrowFrameHost,
   FrameHttpExchange,
@@ -64,21 +65,16 @@ export function createBurrowFrameHost(proxy: FrameHostProxy): BurrowFrameHost {
     canOpen(url) {
       const now = Date.now();
       // By origin, which is all it depends on: a page's query is no new lookup.
-      const key = normalizeOrigin(url) ?? url;
-      const last = answers.get(key);
-      let answer = last;
+      const key = normalizeOrigin(url);
+      if (!key) return Promise.resolve(false);
+      let answer = answers.get(key);
       if (!answer || now - answer.at > LOCAL_ANSWER_TTL_MS) {
-        const local = proxy.isLocal(url).catch(() => false);
-        const fresh = { at: now, local, known: last?.known ?? false };
-        void local.then((value) => { fresh.known = value; });
+        const fresh = { at: now, local: proxy.isLocal(url).catch(() => false), known: answer?.known ?? false };
+        void fresh.local.then((value) => { fresh.known = value; });
         answers.set(key, fresh);
         answer = fresh;
       }
-      const { local, known } = answer;
-      return Promise.race([
-        local,
-        new Promise<boolean>((resolve) => { setTimeout(resolve, LOCAL_ANSWER_BUDGET_MS, known).unref(); }),
-      ]);
+      return settleAllWithin([answer.local], LOCAL_ANSWER_BUDGET_MS, answer.known).then(([local]) => local);
     },
     async open(url, { frameOrigin, embedderOrigins, lease: sessionLease }) {
       const [origin] = normalizeEmbedderOrigins([frameOrigin]) ?? [];

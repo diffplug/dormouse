@@ -512,15 +512,14 @@ function handleRequest(grant: Grant, req: http.IncomingMessage, res: http.Server
     // be corrupted, not instrumented. A UTF-16 BOM is caught in streamHtml. A
     // tunneled grant decodes every body: its pages need their socket shim to work
     // at all, and what its Client synthesizes is never decoded.
-    const decoder = grant.tunneled ? decodedBody(upstreamRes, encoding) : null;
-    if (decoder === UNDECODABLE) {
+    const body = grant.tunneled ? decodedBody(upstreamRes, encoding) : upstreamRes;
+    if (!body) {
       upstreamRes.destroy();
       res.writeHead(502, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
       res.end(`This page is compressed as ${encoding}, which Dormouse cannot decode here.`);
       return;
     }
-    const body = decoder ?? upstreamRes;
-    if (!/text\/html/i.test(contentType) || (encoding !== 'identity' && !decoder)
+    if (!/text\/html/i.test(contentType) || (encoding !== 'identity' && body === upstreamRes)
       || declaresUtf16(contentType) || embedder === undefined) {
       passThrough(grant, upstreamRes, res, body);
       return;
@@ -579,8 +578,6 @@ function dropEncodedLength(headers: http.OutgoingHttpHeaders): void {
   delete headers['content-length'];
 }
 
-const UNDECODABLE = Symbol('undecodable');
-
 /**
  * One coding's decoder, or `null` for one this build cannot undo. Each tolerates
  * an end with no data: HEAD, 204, 304, and an empty 200 carry the header too, and
@@ -603,17 +600,13 @@ function codingDecoder(coding: string): Transform | null {
   }
 }
 
-/**
- * `response` decoded of `encoding`, last coding applied first; `null` when it was
- * never encoded, or {@link UNDECODABLE}.
- */
-function decodedBody(response: http.IncomingMessage, encoding: string): Readable | typeof UNDECODABLE | null {
+/** `response` decoded of `encoding`, last coding applied first, or `null` if it cannot be. */
+function decodedBody(response: http.IncomingMessage, encoding: string): Readable | null {
   const codings = encoding.split(',').map((coding) => coding.trim()).filter((coding) => coding && coding !== 'identity');
-  if (codings.length === 0) return null;
   const decoders = codings.reverse().map(codingDecoder);
-  if (decoders.includes(null)) return UNDECODABLE;
+  if (!decoders.every((decoder): decoder is Transform => decoder !== null)) return null;
   let body: Readable = response;
-  for (const decoder of decoders as Transform[]) {
+  for (const decoder of decoders) {
     body.on('error', (error) => decoder.destroy(error));
     body = body.pipe(decoder);
   }

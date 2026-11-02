@@ -55,7 +55,10 @@ export function installFrameWorker(scope: FrameWorkerScope): void {
     if (url.origin !== scope.location.origin || isFrameAssetPath(url.pathname)) return;
     let finished = () => {};
     event.waitUntil?.(new Promise<void>((resolve) => { finished = resolve; }));
-    event.respondWith(relay(scope, event.request, `${url.pathname}${url.search}`, () => finished()));
+    event.respondWith(relay(scope, event.request, `${url.pathname}${url.search}`, finished).catch((error: unknown) => {
+      finished();
+      throw error;
+    }));
   });
   // The WebSocket shim, which a worker cannot intercept: a page's socket
   // arrives as a message with its port, and goes the way a request does.
@@ -113,16 +116,14 @@ function failure(status: number, text: string): Response {
 
 async function relay(scope: FrameWorkerScope, request: Request, path: string, finished: () => void): Promise<Response> {
   const origin = scope.location.origin;
+  const answer = (status: number, text: string) => {
+    finished();
+    return failure(status, text);
+  };
   const refused = refusal(request, origin);
-  if (refused) {
-    finished();
-    return failure(403, refused);
-  }
+  if (refused) return answer(403, refused);
   const bootstrap = await bootstrapOf(scope);
-  if (!bootstrap) {
-    finished();
-    return failure(503, 'The connection to your computer is gone.');
-  }
+  if (!bootstrap) return answer(503, 'The connection to your computer is gone.');
   const message: RelayRequest = {
     kind: 'request',
     method: request.method,
@@ -137,17 +138,18 @@ async function relay(scope: FrameWorkerScope, request: Request, path: string, fi
   }
   const { port1, port2 } = new MessageChannel();
   bootstrap.postMessage(message, [port2, ...transfer]);
-  return responseFrom(port1, finished);
+  return responseFrom(port1, finished, request.signal);
 }
 
 /** The {@link ResponseMessage}s on `port` as a `Response`, pulling one chunk per read. */
-export function responseFrom(port: MessagePort, finished: () => void = () => {}): Promise<Response> {
+export function responseFrom(port: MessagePort, finished: () => void, abandoned?: AbortSignal): Promise<Response> {
   return new Promise((resolve) => {
     let controller: ReadableStreamDefaultController<Uint8Array> | null = null;
     let wake: (() => void) | null = null;
     let alive: ReturnType<typeof setInterval> | undefined;
     const send = (control: ResponseControl) => port.postMessage(control);
     const close = () => {
+      clearTimeout(timer);
       clearInterval(alive);
       port.close();
       finished();
@@ -161,6 +163,8 @@ export function responseFrom(port: MessagePort, finished: () => void = () => {})
       cancel();
       resolve(failure(504, 'Your computer did not answer in time.'));
     }, HEAD_TIMEOUT_MS);
+    // A page's own abort, which must stop a request still waiting its turn too.
+    abandoned?.addEventListener('abort', cancel, { once: true });
     const settlePull = () => {
       wake?.();
       wake = null;
