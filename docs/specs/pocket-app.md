@@ -230,7 +230,7 @@ Source of truth: `pocketContentSecurityPolicy` in `remote-lib-common/src/remote/
 
 **Scope: pocket-frames** — the rest of the Client half of [Frame origin](#frame-origin), in order:
 
-1. **The wall shows a browser entry, and a Tool's page beside its terminal**: the hello declaring `capabilities.frames` only where the deployment names a domain and this page is the Client the frame Worker names (a preview is not), `frame-src` added to Pocket's CSP, the salt `frameOriginFor` takes, `FrameClient.dispose` wired to session loss, and a close on a Tool or browser: a new `surface.close` the Burrow decides by the rule in `docs/specs/reopen.md`, past the kill v1 withholds.
+1. **The wall shows a browser entry, and a Tool's page beside its terminal**: the hello declaring `capabilities.frames` only where the deployment names a domain and this page is the Client the frame Worker names (a preview is not), `frame-src` added to Pocket's CSP, the salt `frameOriginFor` takes, `FrameClient.dispose` wired to session loss, and a close on a Tool or browser: a new `surface.close`, past the kill v1 withholds, that closes the Surface on the computer under the desktop's contract and messages (`docs/specs/reopen.md` -> "The rule", `docs/specs/layout.md` -> "Kill confirmation", `docs/specs/dor-tool.md` -> "Closing unsaved Tools").
 
 **A self-host Relay serves no frame origin**, so its Pocket declares no frames and stays terminal-only.
 
