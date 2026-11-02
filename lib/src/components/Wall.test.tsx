@@ -202,6 +202,33 @@ describe('Wall on the Lath engine', () => {
       expect(await answer).toEqual([{ outcome: 'refused', message: TERMINAL_CLOSE_REFUSAL }]);
       expect(stillThere()).toBe(true);
     });
+
+    it('reports closed for a Tool the computer closed during its wait, never a terminal', async () => {
+      await act(async () => root.render(<Wall initialPaneIds={['surface:a']} initialDoors={[{
+        id: TOOL_ID, title: 'storybook', component: 'tool', tabComponent: 'tool',
+        params: { surfaceType: 'tool', command: 'pnpm storybook', cwd: '/repo', toolName: 'storybook', toolRender: 'iframe', toolPort: 'announce' },
+      }]} />));
+      await flush();
+      const helper: helpers.HelperTerminal = { id: 'surface:helper', parentId: TOOL_ID, command: '', status: 'off' };
+      vi.spyOn(helpers, 'getHelper').mockImplementation((id) => (id === TOOL_ID ? helper : undefined));
+      let inspected!: (busy: boolean) => void;
+      vi.spyOn(helpers, 'helperHasWork')
+        .mockImplementationOnce(() => new Promise((resolve) => { inspected = resolve; }))
+        .mockResolvedValue(false);
+      const answer = answerClientClose({ surfaceId: TOOL_ID, confirmed: true });
+      await flush();
+      await act(async () => {
+        getWallHandle(DEFAULT_WORKSPACE_ID)!.handleDorControl({
+          method: SURFACE_CONTROL_METHODS.kill,
+          params: { surface: TOOL_ID, confirmation: { mode: 'dangerously' } },
+          respond: vi.fn(),
+        });
+      });
+      await flush();
+      expect(stillThere()).toBe(false);
+      await act(async () => { inspected(false); });
+      expect(await answer).toEqual([{ outcome: 'closed' }]);
+    });
   });
 
   /** The alarm treatment is the leaf overlay, so it must reach a ringing terminal

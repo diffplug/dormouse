@@ -136,6 +136,8 @@ async function relay(scope: FrameWorkerScope, request: Request, path: string, fi
     message.body = await request.arrayBuffer();
     transfer.push(message.body);
   }
+  // Past here `responseFrom` hears of an abort; before, only this can.
+  if (request.signal.aborted) return answer(503, 'The page gave up on this request.');
   const { port1, port2 } = new MessageChannel();
   bootstrap.postMessage(message, [port2, ...transfer]);
   return responseFrom(port1, finished, request.signal);

@@ -278,7 +278,7 @@ Header rewriting beyond `Origin`, `Cookie`, `Set-Cookie`, and the framing header
 | response | hop-by-hop (RFC 7230 §6.1) | dropped |
 | response | `Location` | an exact upstream origin rewritten back to the proxy origin, so a redirect stays inside the proxy |
 | response | `Vary` | `Sec-Fetch-Dest` appended, since the `Accept-Encoding` sent upstream depends on it |
-| response | `Clear-Site-Data` | `"cache", "storage"` on a freshly minted grant's first frame load only: its port may have fronted another upstream |
+| response | `Clear-Site-Data` | `"cache", "storage"` on a freshly minted grant's first frame load only: its port may have fronted another upstream; never on a tunneled grant, whose page is not at that port |
 | response body | `<meta http-equiv="content-security-policy">` | removed unless the response opts into CSP preservation |
 
 **Must instrument only an identity-encoded, ASCII-compatible HTML body, keeping its `content-type` as sent**, charset included; a compressed body, or a UTF-16 one (any WHATWG label, or a byte-order mark), passes through uninstrumented (rationale), except that a tunneled grant decodes every compressed body first (`docs/specs/remote-api.md` -> "Frames"). **Never place the shim ahead of the doctype, a `<meta charset>` or a UTF-8 BOM.**

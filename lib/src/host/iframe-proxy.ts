@@ -491,7 +491,7 @@ function handleRequest(grant: Grant, req: http.IncomingMessage, res: http.Server
   if (typeof dest !== 'string' || DOCUMENT_DESTINATIONS.has(dest)) delete headers['accept-encoding'];
   // Only a frame's own load, which names its destination: a probe without
   // one must not spend it.
-  if (grant.fresh && (dest === 'document' || dest === 'iframe')) {
+  if (grant.fresh && !grant.tunneled && (dest === 'document' || dest === 'iframe')) {
     grant.fresh = false;
     res.setHeader('clear-site-data', CLEAR_SITE_DATA);
   }

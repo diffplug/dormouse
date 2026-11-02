@@ -80,6 +80,11 @@ describe('createBurrowFrameHost', () => {
     expect(response.body).toContain('https://pocket.example');
     expect(response.body).toContain('<body>hi</body>');
     expect(response.body).toContain('window.WebSocket=T');
+    // The frame origin outlives the grant: nothing about it needs clearing.
+    expect(header(response.headers, 'clear-site-data')).toBeUndefined();
+    // The proxy's connection to this module, which adds them, ends here.
+    expect(header(response.headers, 'connection')).toBeUndefined();
+    expect(header(response.headers, 'transfer-encoding')).toBeUndefined();
   });
 
   it('vouches only for the frame origin, keeps redirects on the frame, and drops cookies', async () => {
@@ -297,6 +302,33 @@ describe('createBurrowFrameHost', () => {
     await message;
     expect(messages).toEqual(['hello']);
     socket.terminate();
+  });
+
+  it('honors a pause and a resume while closing, so the upstream\'s own close arrives', async () => {
+    const { port, server } = await listen(() => {});
+    const wss = new WebSocketServer({ server });
+    servers.push(wss);
+    const upstream = await open(`http://localhost:${port}/`);
+    let opened!: () => void;
+    const whenOpen = new Promise<void>((resolve) => { opened = resolve; });
+    let closed!: (code: number) => void;
+    const whenClosed = new Promise<number>((resolve) => { closed = resolve; });
+    let closes = 0;
+    const socket = upstream.openSocket({ path: '/hmr', protocols: [] }, {
+      onOpen: () => opened(),
+      onMessage: () => {},
+      onClose: (code) => {
+        closes += 1;
+        closed(code);
+      },
+    });
+    await whenOpen;
+    socket.close(3001, 'bye');
+    socket.pause();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(closes).toBe(0);
+    socket.resume();
+    expect(await whenClosed).toBe(3001);
   });
 
   it('settles a write the upstream never took when the exchange ends', async () => {

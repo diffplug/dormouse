@@ -208,6 +208,19 @@ describe('installFrameWorker', () => {
     port2.close();
   });
 
+  it('sends nothing for a request the page aborted before it could go', async () => {
+    const relayed: unknown[] = [];
+    const { fetch } = install([{
+      url: `${ORIGIN}/__dormouse-frame/bootstrap.html`,
+      postMessage: (message) => relayed.push(message),
+    }]);
+    const aborted = new AbortController();
+    const answer = fetch(`${ORIGIN}/save`, { method: 'POST', body: 'text', signal: aborted.signal })!;
+    aborted.abort();
+    await answer;
+    expect(relayed).toEqual([]);
+  });
+
   it('relays a same-origin request to the bootstrap page, path and body whole', async () => {
     const relayed: Array<[RelayRequest, Transferable[]]> = [];
     const { fetch } = install([{

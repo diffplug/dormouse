@@ -258,6 +258,8 @@ class GrantExchange implements FrameHttpExchange {
     for (let index = 0; index < response.rawHeaders.length; index += 2) {
       const name = response.rawHeaders[index]!;
       const lower = name.toLowerCase();
+      // These describe the connection to the proxy, not the Client's response.
+      if (HOP_BY_HOP_RESPONSE_HEADERS.has(lower)) continue;
       let value = response.rawHeaders[index + 1]!;
       // The proxy already keeps a redirect on its grant; on the Client the
       // grant is the frame origin, so the redirect stays there too.
@@ -328,14 +330,16 @@ class GrantSocket implements FrameSocket {
     this.#socket.close(code, reason);
   }
 
+  // Closing too: the upstream's close frame is read only while it flows, and
+  // `ws` ignores both before the open and after the close.
   pause(): void {
     this.#paused = true;
-    if (this.#socket.readyState === WebSocket.OPEN) this.#socket.pause();
+    this.#socket.pause();
   }
 
   resume(): void {
     this.#paused = false;
-    if (this.#socket.readyState === WebSocket.OPEN) this.#socket.resume();
+    this.#socket.resume();
   }
 
   terminate(): void {
