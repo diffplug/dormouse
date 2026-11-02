@@ -2,6 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import type { DirectoryEntry, SurfaceHold } from '../../remote/burrow/burrow-surface-provider';
 import { createAskSurfaceProvider } from './ask-surface-provider';
+import { silentAnswers, type AskAnswers } from './service-protocol';
 
 const entry = (surfaceId: string, title: string): DirectoryEntry => ({
   paneRef: surfaceId,
@@ -105,5 +106,59 @@ describe('createAskSurfaceProvider holds', () => {
     } finally {
       process.off('unhandledRejection', onUnhandled);
     }
+  });
+});
+
+describe('an ask someone did not answer', () => {
+  const noPty = { writePty: () => {}, resizePty: () => {}, streamPty: () => () => {} } as never;
+
+  it('is no answer about a page, where everyone answering is', async () => {
+    const { provider: answered } = createAskSurfaceProvider(async () => [], noPty);
+    await expect(answered.resolveBrowser('surface:1')).resolves.toBeNull();
+    const { provider: silent } = createAskSurfaceProvider(async () => silentAnswers([]), noPty);
+    await expect(silent.resolveBrowser('surface:1')).rejects.toThrow('did not answer');
+    const { provider: late } = createAskSurfaceProvider(async () => silentAnswers([{ url: 'http://localhost:5173/' }]), noPty);
+    await expect(late.resolveBrowser('surface:1')).resolves.toBe('http://localhost:5173/');
+  });
+
+  it('keeps the silent window\'s rows, until an ask everyone answered says they went', async () => {
+    const answers: AskAnswers[] = [
+      [entry('a', 'A'), entry('b', 'B')],
+      silentAnswers([entry('b', 'B renamed')]),
+      silentAnswers([]),
+      [entry('b', 'B')],
+    ];
+    const { provider } = createAskSurfaceProvider(async () => answers.shift()!, noPty);
+    const titles = async () => (await provider.collectDirectory()).map((row) => `${row.surfaceId}:${row.title}`);
+    expect(await titles()).toEqual(['a:A', 'b:B']);
+    expect(await titles()).toEqual(['b:B renamed', 'a:A']);
+    expect(await titles()).toEqual(['b:B renamed', 'a:A']);
+    expect(await titles()).toEqual(['b:B']);
+  });
+});
+
+describe('createAskSurfaceProvider closeSurface', () => {
+  const noPty = { writePty: () => {}, resizePty: () => {}, streamPty: () => () => {} } as never;
+
+  it('asks for the close with the consent, answering as the owner did', async () => {
+    const asked: unknown[][] = [];
+    const { provider } = createAskSurfaceProvider(async (op, params) => {
+      asked.push([op, params]);
+      return [{ outcome: 'closed' }];
+    }, noPty);
+    expect(await provider.closeSurface('surface:1', { confirmed: true })).toEqual({ outcome: 'closed' });
+    expect(asked).toEqual([['closeOp', { surfaceId: 'surface:1', confirmed: true }]]);
+  });
+
+  it('refuses an answer it cannot read: a peer window is another build', async () => {
+    const { provider } = createAskSurfaceProvider(async () => [{ outcome: 'unsaved' }], noPty);
+    expect((await provider.closeSurface('surface:1', {})).outcome).toBe('refused');
+  });
+
+  it('refuses a surface nobody claims, an ask that failed included', async () => {
+    const { provider: none } = createAskSurfaceProvider(async () => [], noPty);
+    expect((await none.closeSurface('surface:1', {})).outcome).toBe('refused');
+    const { provider: failing } = createAskSurfaceProvider(async () => { throw new Error('gone'); }, noPty);
+    expect((await failing.closeSurface('surface:1', {})).outcome).toBe('refused');
   });
 });

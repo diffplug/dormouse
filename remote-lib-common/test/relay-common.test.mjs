@@ -96,6 +96,11 @@ test('reducePasskeyLabel bounds, cleans, and never refuses', () => {
   assert.equal(reducePasskeyLabel(undefined), '');
 });
 
+test("pocketContentSecurityPolicy lets frames in only where given a domain", () => {
+  assert.doesNotMatch(pocketContentSecurityPolicy('https://relay.example'), /frame-src/);
+  assert.match(pocketContentSecurityPolicy('https://relay.example', 'frames.example'), /frame-src https:\/\/\*\.frames\.example;/);
+});
+
 test("pocketContentSecurityPolicy names only the origin's own socket", () => {
   const policy = pocketContentSecurityPolicy('https://relay.example');
   assert.match(policy, /connect-src 'self' wss:\/\/relay\.example(;|$)/);

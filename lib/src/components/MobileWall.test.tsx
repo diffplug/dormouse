@@ -66,11 +66,43 @@ function renderWall(showKillButton?: boolean, onShowSessions?: () => void) {
   });
 }
 
+function renderKinds(active: string, browserShown: boolean, onToolBrowserShownChange = vi.fn()) {
+  act(() => {
+    root.render(
+      <StrictMode>
+        <MobileWall
+          sessions={[
+            { id: 'tool', title: 'a tool', kind: 'tool' },
+            { id: 'browser', title: 'a browser', kind: 'browser' },
+            { id: 'term', title: 'zsh' },
+          ]}
+          activeSessionId={active}
+          browserShown={browserShown}
+          onToolBrowserShownChange={onToolBrowserShownChange}
+          browser={<div data-testid="browser" />}
+        />
+      </StrictMode>,
+    );
+  });
+  return { onToolBrowserShownChange };
+}
+const button = (label: string) => container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
+const browserLayer = () => container.querySelector<HTMLElement>('[data-mobile-browser-layer]')!;
+
 function headerInset(): string | null {
   return container.querySelector<HTMLElement>('.bg-header-active-bg')
     ?.querySelector('[data-alert-ring-inset]')
     ?.getAttribute('data-alert-ring-inset') ?? null;
 }
+
+describe('with no session', () => {
+  it('still reaches the Sessions screen, there being no header to tap', () => {
+    const onShowSessions = vi.fn();
+    act(() => root.render(<MobileWall sessions={[]} onShowSessions={onShowSessions} />));
+    act(() => [...container.querySelectorAll('button')].find((b) => b.textContent === 'Show sessions')!.click());
+    expect(onShowSessions).toHaveBeenCalledOnce();
+  });
+});
 
 describe('MobileWall', () => {
   it('shows the Kill control by default', () => {
@@ -126,5 +158,81 @@ describe('MobileWall', () => {
     } finally {
       registry.activitySnapshot.clear();
     }
+  });
+
+  describe('browser', () => {
+    it('puts a Tool\'s modes before its title, marks the one showing, and switches between them', () => {
+      const { onToolBrowserShownChange } = renderKinds('tool', true);
+      const browserButton = button('Browser')!;
+      const terminalButton = button('Terminal')!;
+      const title = container.querySelector('[title="Show sessions"], .truncate')!;
+      expect(browserButton.compareDocumentPosition(terminalButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(terminalButton.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(browserButton.getAttribute('aria-pressed')).toBe('true');
+      expect(terminalButton.getAttribute('aria-pressed')).toBe('false');
+      expect(container.querySelector('[data-testid="terminal-pane"]')).not.toBeNull();
+      expect(browserLayer().classList.contains('invisible')).toBe(false);
+      act(() => terminalButton.click());
+      expect(onToolBrowserShownChange).toHaveBeenCalledWith(false);
+
+      renderKinds('tool', false, onToolBrowserShownChange);
+      expect(browserLayer().classList.contains('invisible')).toBe(true);
+      expect(button('Terminal')!.getAttribute('aria-pressed')).toBe('true');
+      act(() => button('Browser')!.click());
+      expect(onToolBrowserShownChange).toHaveBeenLastCalledWith(true);
+    });
+
+    it('mounts no terminal for a browser alone, whose glyph only names its display', () => {
+      renderKinds('browser', true);
+      expect(container.querySelector('[data-testid="terminal-pane"]')).toBeNull();
+      expect(browserLayer().classList.contains('invisible')).toBe(false);
+      expect(button('Browser')).toBeNull();
+      expect(button('Terminal')).toBeNull();
+      expect(container.querySelector('[data-browser-display-mode="iframe"]')).not.toBeNull();
+      expect(registry.getOrCreateTerminal).not.toHaveBeenCalledWith('browser');
+      expect(registry.getOrCreateTerminal).toHaveBeenCalledWith('tool');
+    });
+
+    it('wears the display it is told, a stream\'s included', () => {
+      act(() => {
+        root.render(
+          <MobileWall
+            sessions={[{ id: 'streaming', title: 'a stream', kind: 'browser' }]}
+            sessionItems={[{ id: 'streaming', kind: 'browser', browserDisplay: 'agent-browser-resize', title: 'a stream', episode: null }]}
+            activeSessionId="streaming"
+          />,
+        );
+      });
+      expect(container.querySelector('[data-browser-display-mode="agent-browser-resize"]')).not.toBeNull();
+    });
+
+    it('offers a close on a Tool and a browser, never a terminal, where the consumer hides kill', () => {
+      const onBrowserClose = vi.fn();
+      const render = (active: string) => act(() => {
+        root.render(
+          <MobileWall
+            sessions={[{ id: 'tool', title: 'a tool', kind: 'tool' }, { id: 'browser', title: 'a browser', kind: 'browser' }, { id: 'term', title: 'zsh' }]}
+            activeSessionId={active}
+            showKillButton={false}
+            onBrowserClose={onBrowserClose}
+          />,
+        );
+      });
+      for (const id of ['tool', 'browser']) {
+        render(id);
+        act(() => button('Kill')!.click());
+        expect(onBrowserClose).toHaveBeenLastCalledWith(id);
+      }
+      expect(registry.disposeSession).not.toHaveBeenCalled();
+      render('term');
+      expect(button('Kill')).toBeNull();
+    });
+
+    it('leaves a plain terminal without modes', () => {
+      renderKinds('term', false);
+      expect(browserLayer().classList.contains('invisible')).toBe(true);
+      expect(button('Browser')).toBeNull();
+      expect(button('Terminal')).toBeNull();
+    });
   });
 });

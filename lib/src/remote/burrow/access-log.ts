@@ -24,6 +24,7 @@ export const ACCESS_EVENTS = [
   'connected',
   'connection-denied',
   'attached',
+  'closed',
   'ended',
   'revoked',
   'one-time-connected',

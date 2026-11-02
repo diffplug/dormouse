@@ -12,7 +12,7 @@ The terminal fills the screen above one bar of buttons at the bottom: the touch 
 
 **Never resize the terminal for the OS keyboard.** While the composer is open the terminal pans up until its bottom rows sit just above the keyboard, measured from `window.visualViewport`; its rows and columns, and so its PTY size, stay put (rationale).
 
-* Pocket suppresses kill (`showKillButton={false}`). A ring shows as the alarm inset on the header bar and on its session-list row.
+* Pocket suppresses a terminal's kill (`showKillButton={false}`). A ring shows as the alarm inset on the header bar and on its session-list row.
 * **A tap acknowledges the active Session; a drag never does.** **Select mode's router consumes a touch it owns**, so it announces one that never became a drag as `TERMINAL_TAP_EVENT`.
 * **Must install `useDynamicPalette` in `MobileTerminalUi`** for gesture tokens; it never mounts the desktop `Wall`.
 
@@ -100,12 +100,27 @@ Source of truth: `hardwareKeySequence` and `isHardwareKeyTarget` in `lib/src/com
 
 ## Sessions screen
 
-Tapping the Session title in the `MobileWall` header asks the consumer to show the Sessions screen over the whole composition; the terminal stays mounted beneath at its size. Choosing a row shows that Session. A consumer's `settings` (`MobileSettings`: theme, and font size over a sample) open from the screen's Settings button.
+Tapping the Session title in the `MobileWall` header asks the consumer to show the Sessions screen over the whole composition; the terminal stays mounted beneath at its size. Choosing a row shows that Session. A consumer's `settings` (`MobileSettings`: theme, and font size over a sample) open from the screen's Settings button. **A consumer's `sessionsHeader` heads the screen, not the wall**: the wall keeps one header row, so what a connection is and how to leave it live here. **Must offer the Sessions screen with no Session too**, since no header is there to tap.
 
 * **The font size applies to every terminal in the page, live ones refit**, so a remote Session's PTY resizes with it; **must hand it back to the theme when the composition unmounts**.
 * **Must save Settings choices only when the consumer persists them**; the one-time page does not (`docs/specs/one-time.md` -> "Phone page").
 
 Source of truth: `SessionsScreen` in `lib/src/components/MobileTerminalUi.tsx`; `MobileSettings` in `lib/src/components/MobileSettings.tsx`; `useMobileFontSize` in `lib/src/lib/mobile-font-size.ts`; `setTerminalFontSize` in `lib/src/lib/terminal-lifecycle.ts`.
+
+## Browser
+
+A Session whose `kind` is `browser` shows a browser alone, and a `tool` shows its browser over its terminal, which stays mounted beneath at its size. What shows it is the consumer's, an iframe today, with a status from `MobileBrowserPane`. `browserDisplay` names how, in the desktop's glyphs (`docs/specs/dor-browser.md` -> "Display Modal And Render Swaps").
+
+* **A Tool must open on its browser.**
+* **Must put a Tool's Browser and Terminal mode buttons at the header's far left**, in that order, the desktop's glyphs marking the mode showing; a browser alone shows its glyph, with nothing to switch to.
+* **Must keep the header while a browser shows, and drop the bottom bar and the composer**: touches and keys are the browser's, so no gesture, touch mode, or physical key reaches the terminal (rationale).
+* **Must not mount a terminal for a `browser`.**
+* **Must offer a close in a `tool` or `browser` header, in either mode, through `onBrowserClose`**, even where the consumer hides the terminal's kill; what closing does is the consumer's.
+* **`MobileCloseDialog` asks what the desktop asks, in its words**, the confirmation's letter tapped rather than typed, away from the header's close so a double-tap cannot answer it.
+* **The browser layer ends at the bottom safe area**, which a framed document cannot read for itself.
+* **A session that cannot carry a page says why, and how to get one**: the direct path's wait and a relayed session's note are `MobileBrowserPane`'s, the note naming a VPN on both devices and a reconnect, since a session tries the direct path once (`docs/specs/remote-api.md` -> "Frames").
+
+Source of truth: `MobileWall` in `lib/src/components/MobileWall.tsx`; `MobileBrowserPane` in `lib/src/components/MobileBrowserPane.tsx`; `browserShown` in `lib/src/components/MobileTerminalUi.tsx`.
 
 ## Keyboard focus invariant
 
@@ -114,6 +129,8 @@ Source of truth: `SessionsScreen` in `lib/src/components/MobileTerminalUi.tsx`; 
 Source of truth: `MobileTerminalUi` in `lib/src/components/MobileTerminalUi.tsx` and `MobileWall` in `lib/src/components/MobileWall.tsx`; pinned by `lib/src/components/MobileTerminalUi.test.tsx` and `lib/src/components/MobileWall.test.tsx`.
 
 ## Future
+
+**Scope: mobile-browser-streams** — agent-browser and Playwright on a phone (`docs/specs/remote-api.md` -> Future, "Browser surfaces"): a screencast as `MobileBrowserPane`'s `view`, its touches sent as input, and the Browser button opening a display choice once a Surface has more than one to offer.
 
 **Scope: mobile-backlog** — unprioritized:
 

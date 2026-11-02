@@ -9,7 +9,7 @@
  * only thing that opens a socket.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { clsx } from 'clsx';
 import {
   ONE_TIME_UNKNOWN_DEVICE_LABEL,
@@ -29,10 +29,12 @@ import {
 import type { RemotePtyAdapter } from '../client/remote-adapter';
 import type { RemoteWebSocket } from '../ws';
 import { disposeAllSessions } from '../../lib/terminal-registry';
-import { PocketWall } from '../pocket-app/PocketWall';
+import { frameDomainFor } from '../pocket-app/deployment';
+import { PocketWall, type PocketBrowsers } from '../pocket-app/PocketWall';
+import type { FrameSession } from '../client/frame-client';
 import { PK, pkButton } from '../pocket-app/pocket-chrome';
 import { mountRemoteWall, type RemoteWallClient } from '../pocket-app/remote-wall';
-import { PairingCodeView, PocketScreen, TransportIndicator, Waiting } from '../pocket-app/views';
+import { ConnectionHeader, PairingCodeView, PocketScreen, Waiting } from '../pocket-app/views';
 
 // --- Copy -------------------------------------------------------------------
 
@@ -106,7 +108,7 @@ export function expiresInText(remainingMs: number): string {
 // --- The client -------------------------------------------------------------
 
 /** What the page drives: the ceremony, its ending, and the session the wall runs on. */
-export type OneTimePageClient = RemoteWallClient &
+export type OneTimePageClient = RemoteWallClient & FrameSession &
   Pick<OneTimeClient, 'connectOnce' | 'setOnEnded' | 'close'>;
 
 /**
@@ -143,7 +145,7 @@ type Phase =
   /** `code` is null between the tap and the handshake's two digits. */
   | { readonly at: 'code'; readonly code: string | null }
   | { readonly at: 'connecting' }
-  | { readonly at: 'wall'; readonly burrowLabel: string; readonly adapter: RemotePtyAdapter }
+  | { readonly at: 'wall'; readonly burrowLabel: string; readonly adapter: RemotePtyAdapter; readonly session: FrameSession }
   /** Terminal: fixed copy, and no way back but a new link. */
   | { readonly at: 'ended'; readonly message: string };
 
@@ -242,7 +244,7 @@ export function OneTimeApp({
       }
       let adapter: RemotePtyAdapter;
       try {
-        adapter = await mountRemoteWall(client);
+        adapter = await mountRemoteWall(client, pageFrameDomain() ? { frames: true } : undefined);
       } catch {
         end(ONE_TIME_ENDED_MESSAGE);
         return;
@@ -254,7 +256,7 @@ export function OneTimeApp({
         disposeWall();
         return;
       }
-      setPhase({ at: 'wall', burrowLabel: result.burrowLabel, adapter });
+      setPhase({ at: 'wall', burrowLabel: result.burrowLabel, adapter, session: client });
     },
     [createClient, disposeWall, end],
   );
@@ -292,7 +294,7 @@ export function OneTimeApp({
       return <OneTimeConnecting onCancel={endNow} />;
     case 'wall':
       return (
-        <OneTimeWall burrowLabel={phase.burrowLabel} adapter={phase.adapter} onEnd={endNow} />
+        <OneTimeWall burrowLabel={phase.burrowLabel} adapter={phase.adapter} session={phase.session} onEnd={endNow} />
       );
     case 'ended':
       return <OneTimeNotice title={ONE_TIME_NOT_CONNECTED_TITLE} message={phase.message} />;
@@ -389,6 +391,11 @@ export function OneTimeConnecting({ onCancel }: { onCancel: () => void }): React
   );
 }
 
+/** Where this page frames pages: Hosted's own, as Pocket's. */
+const pageFrameDomain = () => frameDomainFor('hosted', location.origin);
+/** In a frame's origin where Pocket names a Burrow; the salt alone keeps it apart. */
+const ONE_TIME_FRAME_SCOPE = 'one-time';
+
 /**
  * The session: the computer's label, the path — always direct here, since
  * the wall mounts only after the switch — and End, over Pocket's mobile wall.
@@ -396,25 +403,46 @@ export function OneTimeConnecting({ onCancel }: { onCancel: () => void }): React
 function OneTimeWall({
   burrowLabel,
   adapter,
+  session,
   onEnd,
 }: {
   burrowLabel: string;
   adapter: RemotePtyAdapter;
+  session: FrameSession;
   /** End, and a wall that fails under the session, both end the page. */
   onEnd: () => void;
 }): React.ReactElement {
+  // Its frames' origins last as long as this wall: nothing here can reach them again.
+  const browsers = useMemo<PocketBrowsers | undefined>(() => {
+    const frameDomain = pageFrameDomain();
+    if (!frameDomain) return undefined;
+    const salt = globalThis.crypto.getRandomValues(new Uint8Array(32));
+    return {
+      session,
+      burrowId: ONE_TIME_FRAME_SCOPE,
+      frameDomain,
+      salt: () => salt,
+      transport: { path: 'direct', cause: null },
+      onReconnect: onEnd,
+    };
+  }, [onEnd, session]);
   return (
-    <div className={PK.app}>
-      <header className={PK.header}>
-        <h1 className={PK.headerTitle}>{burrowLabel}</h1>
-        <TransportIndicator transport={{ path: 'direct', cause: null }} />
-        <button type="button" className={pkButton({ tone: 'ghost', size: 'sm' })} onClick={onEnd}>
-          {ONE_TIME_END_LABEL}
-        </button>
-      </header>
-      <div className={PK.wallHost}>
-        <PocketWall adapter={adapter} onError={onEnd} persist={false} />
-      </div>
-    </div>
+    <PocketWall
+      adapter={adapter}
+      browsers={browsers}
+      onError={onEnd}
+      persist={false}
+      sessionsHeader={(
+        <ConnectionHeader
+          title={burrowLabel}
+          transport={{ path: 'direct', cause: null }}
+          trailing={(
+            <button type="button" className={pkButton({ tone: 'ghost', size: 'sm' })} onClick={onEnd}>
+              {ONE_TIME_END_LABEL}
+            </button>
+          )}
+        />
+      )}
+    />
   );
 }

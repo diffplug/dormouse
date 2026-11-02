@@ -12,10 +12,24 @@ import {
   encodeFrame,
   forgetPeerRoutes,
   freshNonce,
+  ownerProbe,
   proofMatches,
   proveToken,
   routedPtyId,
 } from '../src/peer-link-protocol';
+
+describe('ownerProbe', () => {
+  it('asks who owns a Surface before an ask that would mutate it', () => {
+    expect(ownerProbe('closeOp', { surfaceId: 's', confirmed: true })).toEqual({ op: 'closeOwnerOp', params: { surfaceId: 's' } });
+    expect(ownerProbe('surfaceOp', { surfaceId: 's', op: 'attach', cols: 80 })).toEqual({ op: 'surfaceOp', params: { surfaceId: 's', op: 'resolve', cols: 80 } });
+  });
+
+  it('leaves the rest to fan out', () => {
+    expect(ownerProbe('directory', {})).toBeNull();
+    expect(ownerProbe('surfaceOp', { surfaceId: 's', op: 'release' })).toBeNull();
+    expect(ownerProbe('closeOwnerOp', { surfaceId: 's' })).toBeNull();
+  });
+});
 
 describe('FrameDecoder', () => {
   it('caps complete UTF-8 frames before parsing and preserves surrounding frames', () => {

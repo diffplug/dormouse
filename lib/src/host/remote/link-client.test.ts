@@ -94,6 +94,27 @@ describe('commands', () => {
 });
 
 describe('asks', () => {
+  it('answers a responder that takes its time once it has, and a failure with nothing', async () => {
+    const transport = fakeTransport();
+    const client = transport.client();
+    let settle: (results: unknown[]) => void = () => {};
+    client.link.respond('closeOp', () => new Promise((resolve) => { settle = resolve; }));
+    client.onAsk('ask-1', 'closeOp', {});
+    expect(transport.answers).toEqual([]);
+    settle([{ outcome: 'closed' }]);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(transport.answers).toEqual([{ askId: 'ask-1', results: [{ outcome: 'closed' }] }]);
+
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    client.link.respond('closeOp', () => Promise.reject(new Error('boom')));
+    client.onAsk('ask-2', 'closeOp', {});
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(transport.answers.at(-1)).toEqual({ askId: 'ask-2', results: [] });
+    error.mockRestore();
+  });
+
   it('answers with what the responder claims', () => {
     const transport = fakeTransport();
     const client = transport.client();

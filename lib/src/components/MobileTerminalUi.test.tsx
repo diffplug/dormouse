@@ -269,6 +269,20 @@ describe('MobileTerminalUi physical keyboard', () => {
     expect(onPaste).not.toHaveBeenCalled();
   });
 
+  it('leaves keys, touches, and the screen to a shown browser', () => {
+    const onSendInput = vi.fn();
+    const { container, terminal, button } = renderUi({ browserShown: true, onSendInput });
+    expect(button('Type')).toBeNull();
+    expect(button('Gestures')).toBeNull();
+    expect(keydown(document.body, { key: 'a' }).defaultPrevented).toBe(false);
+    expect(container.querySelector('.touch-none')).toBeNull();
+    const press = pointerEvent('pointerdown');
+    act(() => void terminal.dispatchEvent(press));
+    expect(press.defaultPrevented).toBe(false);
+    expect(setPointerCapture).not.toHaveBeenCalled();
+    expect(onSendInput).not.toHaveBeenCalled();
+  });
+
   it('types into the terminal while nothing is focused', () => {
     const onSendInput = vi.fn();
     renderUi({ onSendInput });
@@ -838,5 +852,13 @@ describe('MobileTerminalUi clipboard failure', () => {
     } finally {
       act(() => dismissClipboardFailure());
     }
+  });
+
+  it('heads the Sessions screen, and only that, with the consumer\'s header', () => {
+    const header = <p>Studio iMac</p>;
+    const { renderWith } = renderUi({ activeView: 'terminal', sessionsHeader: header });
+    expect(document.body.textContent).not.toContain('Studio iMac');
+    renderWith({ activeView: 'sessions', sessionsHeader: header });
+    expect(document.body.textContent).toContain('Studio iMac');
   });
 });

@@ -26,7 +26,7 @@ import {
   type PocketSocket,
 } from '../client/pocket-client';
 import { PasskeyAlreadyRegisteredError, browserWebAuthn } from '../client/webauthn';
-import { deploymentDirectPeer, pocketDeploymentSource, type PocketDeployment } from './deployment';
+import { deploymentDirectPeer, frameDomainFor, pocketDeploymentSource, type PocketDeployment } from './deployment';
 import { BURROW_IS_AN_APP, SCAN_LABEL, SETUP_PATH } from '../setup-copy';
 import {
   UNMINTED_DELIVERY_ID_ERROR,
@@ -50,14 +50,15 @@ import {
 } from '../client/push-subscribe';
 import type { RemotePtyAdapter } from '../client/remote-adapter';
 import { disposeAllSessions } from '../../lib/terminal-registry';
-import { PocketWall } from './PocketWall';
+import { frameSalt } from './frame-salt';
+import { PocketWall, type PocketBrowsers } from './PocketWall';
 import { ScanInvitation, type StartScan } from './ScanInvitation';
 import { ErrorRow, PK, pkButton } from './pocket-chrome';
 import { mountRemoteWall } from './remote-wall';
 import {
   PairingCodeView,
   RELAYED_TRANSPORT,
-  TransportIndicator,
+  ConnectionHeader,
   UnsupportedBrowser,
   Waiting,
   deviceLabel,
@@ -448,7 +449,11 @@ export default function App({
         throw new Error(decision.message);
       }
       try {
-        adapterRef.current = await mountRemoteWall(client);
+        // Past `requireDeployment`, so this reads the answer it just got.
+        adapterRef.current = await mountRemoteWall(
+          client,
+          frameDomainFor(deploymentSource.known, location.origin) ? { frames: true } : undefined,
+        );
       } catch (err) {
         // The session is already established, and the throw sends the user back
         // to the Burrows list — where nothing can end it. Leaving it up keeps
@@ -461,7 +466,7 @@ export default function App({
 
       setPhase({ at: 'wall', burrow });
     },
-    [client, endSession, loadBurrows, requireDeployment],
+    [client, deploymentSource, endSession, loadBurrows, requireDeployment],
   );
 
   const onConnect = (burrow: BurrowView) => run('connect', () => connectTo(burrow));
@@ -698,6 +703,8 @@ export default function App({
     setPhase({ at: 'scan' });
   };
 
+  const frameDomain = frameDomainFor(deployment, location.origin);
+
   switch (phase.at) {
     case 'scan':
       return (
@@ -756,6 +763,17 @@ export default function App({
           transport={transport}
           onLeave={leaveWall}
           onError={onWallError}
+          browsers={frameDomain ? {
+            session: client,
+            burrowId: phase.burrow.burrowId,
+            frameDomain,
+            salt: frameSalt,
+            transport,
+            onReconnect: () => {
+              leaveWall();
+              onConnect(phase.burrow);
+            },
+          } : undefined}
         />
       ) : (
         <Waiting />
@@ -863,34 +881,41 @@ export const BURROWS_EMPTY =
   `No Burrows paired yet. ${BURROW_IS_AN_APP} On the computer, open ${SETUP_PATH}, `
   + 'then scan the code.';
 
-/** The connected Pocket shell: Burrow navigation chrome over the remote wall. */
+/** The connected Pocket shell: the remote wall, with the way back to the Burrows on its Sessions screen. */
 export function ConnectedView({
   burrow,
   adapter,
   transport = RELAYED_TRANSPORT,
   onLeave,
   onError,
+  browsers,
 }: {
   burrow: BurrowView;
   adapter: RemotePtyAdapter;
-  /** Which path carries the session, and why; see {@link TransportIndicator}. */
+  /** Which path carries the session, and why; see {@link ConnectionHeader}. */
   transport?: TransportView;
   onLeave: () => void;
   onError?: (error: unknown) => void;
+  /** Where this phone frames pages. */
+  browsers?: PocketBrowsers;
 }): React.ReactElement {
   return (
-    <div className={PK.app}>
-      <header className={PK.header}>
-        <button type="button" className={pkButton({ tone: 'ghost', size: 'sm' })} onClick={onLeave}>
-          ‹ {BURROWS_TITLE}
-        </button>
-        <h1 className={PK.headerTitle}>{burrow.label || burrow.burrowId}</h1>
-        <TransportIndicator transport={transport} />
-      </header>
-      <div className={PK.wallHost}>
-        <PocketWall adapter={adapter} onError={onError} />
-      </div>
-    </div>
+    <PocketWall
+      adapter={adapter}
+      browsers={browsers}
+      onError={onError}
+      sessionsHeader={(
+        <ConnectionHeader
+          title={burrow.label || burrow.burrowId}
+          transport={transport}
+          leading={(
+            <button type="button" className={pkButton({ tone: 'ghost', size: 'sm' })} onClick={onLeave}>
+              ‹ {BURROWS_TITLE}
+            </button>
+          )}
+        />
+      )}
+    />
   );
 }
 

@@ -43,6 +43,24 @@ const PEER_LISTENERS: Record<string, number> = {
   'lib/src/remote/direct/direct-peer.ts': 1,
 };
 
+/**
+ * A frame origin's, on the worker's and bootstrap page's channels and the Client
+ * window's port to them. A framed page shares that origin, so it can write to
+ * each: what they accept is what it could fetch through its own grant anyway
+ * (`docs/specs/pocket-app.md` -> "Frame origin"), and the test plants a foreign one.
+ */
+const FRAME_ORIGIN_LISTENERS: Record<string, { count: number; pinnedBy: string }> = {
+  // the parent's first port; its worker's relays go down that port
+  'lib/src/remote/frame-origin/bootstrap.ts': { count: 2, pinnedBy: 'lib/src/remote/frame-origin/bootstrap.test.ts' },
+  // a port the bootstrap page holds, serving one frame's grant
+  'lib/src/remote/frame-origin/frame-bridge.ts': { count: 4, pinnedBy: 'lib/src/remote/frame-origin/frame-bridge.test.ts' },
+  // a page's socket, and one request's own reply port
+  'lib/src/remote/frame-origin/worker.ts': { count: 2, pinnedBy: 'lib/src/remote/frame-origin/worker.test.ts' },
+  // a port this window made, asking only whether the bootstrap page is ready; and
+  // a new-window request, taken only from its own page's window and origin
+  'lib/src/remote/pocket-app/PocketBrowserFrame.tsx': { count: 2, pinnedBy: 'lib/src/remote/pocket-app/PocketBrowserFrame.test.tsx' },
+};
+
 const LISTENER = /addEventListener\(\s*['"`]message['"`]|\bonmessage\s*=/g;
 
 function scan(): Record<string, number> {
@@ -64,12 +82,13 @@ describe('webview message listeners', () => {
     const expected = {
       ...Object.fromEntries(Object.entries(WINDOW_LISTENERS).map(([file, { count }]) => [file, count])),
       ...PEER_LISTENERS,
+      ...Object.fromEntries(Object.entries(FRAME_ORIGIN_LISTENERS).map(([file, { count }]) => [file, count])),
     };
     expect(scan()).toEqual(expected);
   });
 
   it('each name a test that exists', () => {
-    for (const { pinnedBy } of Object.values(WINDOW_LISTENERS)) {
+    for (const { pinnedBy } of [...Object.values(WINDOW_LISTENERS), ...Object.values(FRAME_ORIGIN_LISTENERS)]) {
       expect(() => readFileSync(join(repo, pinnedBy)), pinnedBy).not.toThrow();
     }
   });

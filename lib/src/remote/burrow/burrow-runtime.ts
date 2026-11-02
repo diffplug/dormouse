@@ -1853,10 +1853,11 @@ export class BurrowRuntime {
     const since = this.#now();
     const e2e: EstablishedE2eSession = new EstablishedE2eSession({
       session,
-      createApi: (send) =>
+      createApi: (send, isDirect) =>
         createSession({
           burrowId: this.#enrollment.burrowId,
           send,
+          isDirect,
           label: device,
           deviceId,
           end: () => this.#disposeEstablished(clientId, { goodbye: true, only: e2e }),

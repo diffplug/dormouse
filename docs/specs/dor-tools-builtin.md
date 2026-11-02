@@ -29,6 +29,8 @@ Source of truth: `runFileViewer` in `dor-tools-builtin/src/file-viewer.ts`; `fil
 
 ## Editing files
 
+**Must keep a built-in Tool's state on disk or in its Session, never in the page's browser storage**: a remote Client's frame can lose that storage (`docs/specs/pocket-app.md` -> "Frame origin").
+
 **Must render supported UTF-8 text other than Markdown in bundled Monaco**. Never execute source text or load its referenced assets.
 
 **Must save only on Save or Cmd/Ctrl+S, to the opened canonical file.** Preserve UTF-8 BOM and the dominant line ending (mixed endings are normalized). Bound text to 8 MiB; reject invalid UTF-8. Atomically replace only after comparing the submitted revision with current disk bytes and file identity; a conflict or write failure keeps the edit dirty. New edits during a save remain dirty after that save succeeds. Reload asks before discarding edits and reads the current authorized file, including atomic replacements. **Must share concurrent reloads, reject reads overtaken by edits or saves, and keep edits after applying a reload dirty.**

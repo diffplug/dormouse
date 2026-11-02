@@ -202,6 +202,10 @@ const OUTBOUND_SITES = {
     class: 'user:theme-store-search',
     reason: 'Searches and downloads from OpenVSX only from the Theme Store dialog, which only a click on "Install theme from OpenVSX" opens and only the website playground offers.',
   },
+  'lib/src/host/iframe-proxy-rewrite.ts': {
+    class: 'user:browser-pane',
+    reason: 'The socket shim wraps a framed page\'s own WebSocket for a remote Client: the page opens the socket, and a same-origin one goes over the session instead of the network.',
+  },
   'lib/src/host/iframe-proxy.ts': {
     class: 'user:browser-pane',
     reason: 'Forwards a browser pane\'s requests to the one upstream its grant names — a URL the user, their terminal, or their agent opened.',
@@ -222,6 +226,10 @@ const OUTBOUND_SITES = {
   'lib/src/host/agent-browser-host.ts': {
     class: 'loopback',
     reason: 'Dials agent-browser\'s stream and the browser\'s CDP on 127.0.0.1 only (viewStream, askCdpEndpoint), and the daemon\'s own Unix socket or Windows .port on 127.0.0.1 beside the state files liveDaemon proves, for its fixed screencast actions only (daemonAction).',
+  },
+  'lib/src/host/remote/frame-host.ts': {
+    class: 'loopback',
+    reason: 'Replays a remote session\'s frame requests and sockets against the iframe proxy grant it minted, on 127.0.0.1 only; the grant is what reaches the page.',
   },
   'lib/src/host/browser-viewer.ts': {
     class: 'loopback',
@@ -268,6 +276,10 @@ const OUTBOUND_SITES = {
   'lib/src/remote/pocket-app/App.tsx': {
     class: 'phone',
     reason: 'Pocket\'s fetch and relay socket, injected into PocketClient.',
+  },
+  'lib/src/remote/pocket-app/PocketBrowserFrame.tsx': {
+    class: 'phone',
+    reason: 'A framed page asks, and the person taps Open on a dialog naming the URL: http and https alone, noopener, and nothing of the session goes with it.',
   },
   'lib/src/remote/pocket-app/deployment.ts': {
     class: 'phone',

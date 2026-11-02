@@ -5,7 +5,7 @@
  * registry, xterm, or the DOM.
  */
 
-import type { DirectoryEntry, DirectoryWorkspace } from 'remote-lib-common';
+import type { DirectoryBrowser, DirectoryEntry, DirectoryWorkspace } from 'remote-lib-common';
 import type { TerminalPaneState } from '../../lib/terminal-state';
 
 /** Everything one directory entry needs, already resolved from the live stores. */
@@ -23,9 +23,35 @@ export interface DirectoryPaneInput {
   ringing: boolean;
   /** The pane has an outstanding TODO. */
   hasTODO: boolean;
+  /** The page a serving Tool embeds. */
+  browser?: DirectoryBrowser;
 }
 
-export function buildDirectoryEntry(input: DirectoryPaneInput): DirectoryEntry {
+/** A browser Surface: an embedded page with no terminal. */
+export interface DirectoryBrowserInput {
+  paneRef: string;
+  surfaceId: string;
+  title: string;
+  focused: boolean;
+  browser: DirectoryBrowser;
+}
+
+export type DirectoryInput = DirectoryPaneInput | DirectoryBrowserInput;
+
+export function buildDirectoryEntry(input: DirectoryInput): DirectoryEntry {
+  if (!('pane' in input)) {
+    return {
+      paneRef: input.paneRef,
+      surfaceId: input.surfaceId,
+      type: 'browser',
+      title: input.title,
+      focused: input.focused,
+      alive: true,
+      ringing: false,
+      hasTODO: false,
+      browser: input.browser,
+    };
+  }
   const { pane } = input;
   // `exitCode` only when the last command finished with a real code; `activity`
   // maps straight across (ShellActivity['kind'] is the wire union verbatim).
@@ -43,6 +69,7 @@ export function buildDirectoryEntry(input: DirectoryPaneInput): DirectoryEntry {
     ...(cwd ? { cwd } : {}),
     ringing: input.ringing,
     hasTODO: input.hasTODO,
+    ...(input.browser ? { browser: input.browser } : {}),
   };
 }
 
@@ -60,7 +87,7 @@ export interface DirectoryWorkspaceInput extends DirectoryWorkspace {
  * stay in `inputs` order and name none.
  */
 export function buildDirectorySnapshot(
-  inputs: readonly DirectoryPaneInput[],
+  inputs: readonly DirectoryInput[],
   workspaces: readonly DirectoryWorkspaceInput[] = [],
 ): DirectoryEntry[] {
   const owner = new Map<string, number>();

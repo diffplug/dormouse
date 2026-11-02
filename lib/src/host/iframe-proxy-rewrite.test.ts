@@ -11,6 +11,7 @@ import {
   startsWithUtf16Bom,
   unreachablePage,
   timedOutPage,
+  tunnelSocketShim,
 } from './iframe-proxy-rewrite';
 
 const APP = 'vscode-webview://abc-123';
@@ -337,5 +338,193 @@ describe('errorPageHtml', () => {
     expect(unreachablePage(remote, 'ETIMEDOUT').message).not.toContain('dev server');
     expect(unreachablePage(remote, 'ETIMEDOUT').message).toContain('reachable from this machine');
     expect(timedOutPage(remote).message).not.toContain('dev server');
+  });
+});
+
+describe('instrumentHtml on a tunneled grant', () => {
+  const socketShimAt = (html: string) => html.indexOf(tunnelSocketShim());
+
+  it('shims the socket ahead of the page\'s own head scripts', () => {
+    const out = instrumentHtml('<!doctype html><html><head><script>new WebSocket("/hmr")</script></head><body>', APP, false, true);
+    expect(socketShimAt(out)).toBeGreaterThan(-1);
+    expect(socketShimAt(out)).toBeLessThan(out.indexOf('new WebSocket("/hmr")'));
+    expect(out.startsWith('<!doctype html><html><head><script>')).toBe(true);
+  });
+
+  it('reads a tag\'s spelling in a script\'s text as text', () => {
+    const script = `<script>const template = "<meta charset='utf-8'>";</script>`;
+    const out = instrumentHtml(`<!doctype html><head>${script}</head>`, APP, false, true);
+    expect(out).toContain(script);
+    expect(socketShimAt(out)).toBeLessThan(out.indexOf(script));
+  });
+
+  it('finds a charset past a title and comments, whose text it skips', () => {
+    const out = instrumentHtml('<!-- a --><html><head><title><meta charset="x"></title>\n<meta charset="utf-8"><script>a</script>', APP, false, true);
+    expect(socketShimAt(out)).toBeGreaterThan(out.indexOf('<meta charset="utf-8">'));
+    expect(socketShimAt(out)).toBeLessThan(out.indexOf('<script>a</script>'));
+  });
+
+  it('reads a quoted `>` as part of its attribute', () => {
+    const html = '<!doctype html><html class="[&>body]:m-0"><head><meta content="a>b" charset="utf-8"><script>a</script>';
+    const out = instrumentHtml(html, APP, false, true);
+    expect(out).toContain('<html class="[&>body]:m-0">');
+    expect(out).toContain('<meta content="a>b" charset="utf-8">');
+    expect(socketShimAt(out)).toBeGreaterThan(out.indexOf('charset="utf-8">'));
+    expect(socketShimAt(out)).toBeLessThan(out.indexOf('<script>a</script>'));
+    const body = instrumentHtml('<body class="[&>p]:m-0">hi', APP);
+    expect(body).toContain('<body class="[&>p]:m-0"><script>');
+  });
+
+  it('stays ahead of a first script, unless a charset stands behind it', () => {
+    const first = instrumentHtml('<head><script>a</script><title>t</title></head>', APP, false, true);
+    expect(socketShimAt(first)).toBeLessThan(first.indexOf('<script>a</script>'));
+    const late = instrumentHtml('<head><script>a</script><meta charset="utf-8"><script>b</script></head>', APP, false, true);
+    expect(socketShimAt(late)).toBeGreaterThan(late.indexOf('<meta charset="utf-8">'));
+    expect(socketShimAt(late)).toBeLessThan(late.indexOf('<script>b</script>'));
+  });
+
+  it('keeps the doctype and charset first, and shims nothing on a local pane', () => {
+    const out = instrumentHtml('<!doctype html><head><meta charset="utf-8"><script>a</script>', APP, false, true);
+    expect(socketShimAt(out)).toBeGreaterThan(out.indexOf('<meta charset="utf-8">'));
+    expect(socketShimAt(instrumentHtml('<head></head>', APP))).toBe(-1);
+  });
+});
+
+describe('tunnelSocketShim', () => {
+  /** The shim in a page of its own: every socket's far port, and what `pagehide` would do. */
+  function page() {
+    const listeners = new Map<string, () => void>();
+    const relayed: { ports: MessagePort[] }[] = [];
+    const window: { WebSocket: unknown } = { WebSocket: class {} };
+    const navigator = { serviceWorker: { controller: { postMessage: (_message: unknown, ports: MessagePort[]) => relayed.push({ ports }) } } };
+    class CloseEvent extends Event {}
+    new Function('window', 'navigator', 'location', 'addEventListener', 'CloseEvent', tunnelSocketShim())(
+      window, navigator, { href: 'https://f.example/', host: 'f.example', origin: 'https://f.example' },
+      (type: string, listener: () => void) => listeners.set(type, listener), CloseEvent,
+    );
+    const open = () => {
+      const Socket = window.WebSocket as new (url: string) => { send(data: string): void; close(code?: number): void; readyState: number; onopen: (() => void) | null };
+      const socket = new Socket('/hmr');
+      const far = relayed[relayed.length - 1]!.ports[0]!;
+      const heard: string[] = [];
+      far.onmessage = (event: MessageEvent<{ kind: string }>) => heard.push(event.data.kind);
+      return { socket, far, heard };
+    };
+    return { open, pagehide: () => listeners.get('pagehide')!() };
+  }
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 10));
+
+  it('sends a close behind the sends before it', async () => {
+    const { socket, far, heard } = page().open();
+    far.postMessage({ kind: 'open', protocol: '', extensions: '' });
+    await settle();
+    socket.send('commit');
+    socket.close(1000);
+    await settle();
+    expect(heard).toEqual(['send', 'close']);
+    far.close();
+  });
+
+  it('closes every socket the page holds as it goes, and only once', async () => {
+    const shim = page();
+    const first = shim.open();
+    const second = shim.open();
+    first.far.postMessage({ kind: 'open', protocol: '', extensions: '' });
+    await settle();
+    // Its own close still queued behind its sends.
+    first.socket.close();
+    shim.pagehide();
+    await settle();
+    expect(first.heard).toEqual(['close']);
+    // Still connecting: the far end hears it once its open settles.
+    expect(second.heard).toEqual(['close']);
+    first.far.close();
+    second.far.close();
+  });
+
+  it('takes a send\'s bytes at the call, as a native socket does', async () => {
+    const { socket, far } = page().open();
+    const sent: ArrayBuffer[] = [];
+    far.onmessage = (event: MessageEvent<{ data: ArrayBuffer }>) => sent.push(event.data.data);
+    far.postMessage({ kind: 'open', protocol: '', extensions: '' });
+    await settle();
+    const bytes = new Uint8Array([1, 2, 3]);
+    socket.send(bytes as never);
+    bytes.fill(9);
+    await settle();
+    expect([...new Uint8Array(sent[0]!)]).toEqual([1, 2, 3]);
+    far.close();
+  });
+
+  it('sends another window\'s buffer as the binary it is', async () => {
+    const { socket, far } = page().open();
+    const sent: { data: ArrayBuffer; binary: boolean }[] = [];
+    far.onmessage = (event: MessageEvent<{ data: ArrayBuffer; binary: boolean }>) => sent.push(event.data);
+    far.postMessage({ kind: 'open', protocol: '', extensions: '' });
+    await settle();
+    socket.send(runInNewContext('new Uint8Array([1, 2, 3]).buffer') as never);
+    await settle();
+    expect(sent[0]!.binary).toBe(true);
+    expect([...new Uint8Array(sent[0]!.data)]).toEqual([1, 2, 3]);
+    far.close();
+  });
+
+  it('keeps a Blob ahead of the close that follows it, even as the page goes', async () => {
+    const shim = page();
+    const { socket, far, heard } = shim.open();
+    far.postMessage({ kind: 'open', protocol: '', extensions: '' });
+    await settle();
+    socket.send(new Blob(['later']) as never);
+    shim.pagehide();
+    await settle();
+    expect(heard).toEqual(['send', 'close']);
+    far.close();
+  });
+
+  it('dispatches on the socket, so a listener\'s this and target are it', async () => {
+    const { socket, far } = page().open() as unknown as { far: MessagePort; socket: EventTarget & { send(data: string): void } };
+    const seen: unknown[] = [];
+    socket.addEventListener('open', function listener(this: unknown, event) { seen.push(this, event.target, event.currentTarget); });
+    far.postMessage({ kind: 'open', protocol: '', extensions: '' });
+    await settle();
+    expect(seen).toEqual([socket, socket, socket]);
+    far.close();
+  });
+
+  it('refuses a close a native socket refuses, rather than sticking in CLOSING', async () => {
+    const { socket, far, heard } = page().open();
+    far.postMessage({ kind: 'open', protocol: '', extensions: '' });
+    await settle();
+    expect(() => socket.close(1001)).toThrow('Invalid close code');
+    expect(() => (socket.close as (code: number, reason: string) => void)(1000, 'x'.repeat(124))).toThrow('too long');
+    expect(socket.readyState).toBe(1);
+    await settle();
+    expect(heard).toEqual([]);
+    far.close();
+  });
+
+  it('reports what it has not sent yet, for a page that throttles by it', async () => {
+    const { socket, far } = page().open() as unknown as { far: MessagePort; socket: { send(data: unknown): void; bufferedAmount: number } };
+    far.postMessage({ kind: 'open', protocol: '', extensions: '' });
+    await settle();
+    socket.send('abc');
+    socket.send(new Blob(['de']));
+    expect(socket.bufferedAmount).toBe(5);
+    far.postMessage({ kind: 'sent', bytes: 3 });
+    await settle();
+    expect(socket.bufferedAmount).toBe(2);
+    far.close();
+  });
+
+  it('stays closed when the open arrives after a close', async () => {
+    const { socket, far } = page().open();
+    let opened = false;
+    socket.onopen = () => { opened = true; };
+    socket.close();
+    far.postMessage({ kind: 'open', protocol: '', extensions: '' });
+    await settle();
+    expect(opened).toBe(false);
+    expect(socket.readyState).toBe(2);
+    far.close();
   });
 });

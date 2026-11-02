@@ -2,6 +2,10 @@
 
 > Informative companion to [pocket-app.md](pocket-app.md), keyed by that spec's headings. Nothing here is normative.
 
+## Frame origin
+
+**What a real iPhone does with a frame origin** (iPhone 15 Pro, Safari 27.0.1 and a Home Screen install, 2026-11, `scripts/frame-origin-check/`, cross-site over two public HTTPS hosts). The worker registers in a cross-site frame, controls the page and a nested frame, and relays a 5 MiB body, a streamed body as it is sent, a cancel, a 1 MiB POST, 120 parallel requests, a 204, a redirect, a Web Worker's script, and the socket shim: all passed in a tab, on a Home Screen icon, and on that icon again after a two-minute wait and a force-quit, so a stopped worker recovers. **That last run found the frame's `localStorage` empty**, where Chromium keeps it across runs. IndexedDB, the Cache API, cookies, and a same-site frame origin were not measured on the phone: the built-in Tools keep no browser storage, so the answer changes no decision today. Throughput figures in that check are not a network's: the page's data comes from the same phone.
+
 ## The seam: the remote session is a platform adapter
 
 **Why the resume path is in the PTY core at all.** `requestInit`/`onPtyList` was built for VS Code webview reloads, where the host outlives the webview; a phone that backgrounds and returns is the same shape, so the remote adapter reuses it unchanged.

@@ -42,6 +42,8 @@ import {
 import { useDynamicPalette } from '../lib/themes/use-dynamic-palette';
 import { isComposingKey, isEditableTarget } from '../lib/dom';
 import { TouchUiContext } from './touch-ui-context';
+import type { BrowserDisplayMode } from './wall/agent-browser-screen';
+import { BrowserDisplayIcon } from './wall/BrowserDisplayIcon';
 import { ClipboardFailureGlobal } from './ClipboardFailureDialog';
 import { chromeButton, MOBILE_BAR_HEIGHT_CLASS, modalActionButton, TODO_PILL_TRACKING_CLASS } from './design';
 import { AlertRingInset, alertRingRow, useAlertRingBurst } from './alert-ring';
@@ -64,8 +66,15 @@ export interface MobileTerminalSessionGroup {
   label: string;
 }
 
+/** What a Session has: a terminal, a browser alone, or a Tool's browser over its terminal. */
+export type MobileSurfaceKind = 'terminal' | 'browser' | 'tool';
+
 export interface MobileTerminalSessionItem {
   id: string;
+  /** Absent reads as `terminal`. */
+  kind?: MobileSurfaceKind;
+  /** How a `browser` or `tool` shows its browser; the desktop's glyphs name it. */
+  browserDisplay?: BrowserDisplayMode;
   title: string;
   /** Rows sharing a group list together under its label, in first-row order;
    *  a list whose rows share one group shows no label. */
@@ -151,7 +160,14 @@ export interface MobileTerminalUiProps {
   onSessionSelect?: (id: string) => void;
   /** The Sessions screen's Settings page; omitted, the screen has no Settings. */
   settings?: ReactNode;
+  /**
+   * The active Session shows its browser, not its terminal: the bar and the
+   * composer go, and touches and keys are the browser's.
+   */
+  browserShown?: boolean;
   interactive?: boolean;
+  /** What heads the Sessions screen, above its own bar: the consumer's way out of the wall. */
+  sessionsHeader?: ReactNode;
   fillViewport?: boolean;
   className?: string;
   terminalClassName?: string;
@@ -278,12 +294,14 @@ const SCREEN_BUTTON_CLASS = 'h-full shrink-0 rounded focus-visible:outline focus
 function SessionsScreen({
   sessions,
   disabled,
+  header,
   settings,
   onSelect,
   onClose,
 }: {
   sessions: MobileTerminalSessionItem[];
   disabled: boolean;
+  header?: ReactNode;
   settings?: ReactNode;
   onSelect: (id: string) => void;
   onClose: () => void;
@@ -295,6 +313,7 @@ function SessionsScreen({
       aria-label={title}
       className="absolute inset-0 z-40 flex flex-col bg-header-inactive-bg text-header-inactive-fg"
     >
+      {header}
       <header className={clsx('flex shrink-0 items-center border-b border-border font-mono text-sm', MOBILE_BAR_HEIGHT_CLASS)}>
         <button
           type="button"
@@ -521,11 +540,14 @@ function SessionRow({ session, disabled, onSelect }: {
           : 'bg-app-bg text-app-fg',
       )}
     >
-      <TerminalWindowIcon size={15} weight={active ? 'bold' : 'regular'} className="shrink-0" />
-      <span className="min-w-0 flex-1">
-        <span className="block truncate font-medium">{session.title}</span>
+      {session.kind === 'browser' || session.kind === 'tool'
+        ? <BrowserDisplayIcon mode={session.browserDisplay ?? 'iframe'} size={15} />
+        : <TerminalWindowIcon size={15} weight={active ? 'bold' : 'regular'} className="shrink-0" />}
+      {/* One line, as the header has it; the path gives way before the title. */}
+      <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
+        <span className="min-w-0 truncate font-medium">{session.title}</span>
         {session.secondary ? (
-          <span className="block truncate opacity-70">{session.secondary}</span>
+          <span className="min-w-0 shrink-[1000] truncate opacity-70">{session.secondary}</span>
         ) : null}
       </span>
       {session.todo ? (
@@ -662,7 +684,9 @@ export function MobileTerminalUi({
   sessions = [],
   onSessionSelect,
   settings,
+  browserShown = false,
   interactive = true,
+  sessionsHeader,
   fillViewport = false,
   className,
   terminalClassName,
@@ -673,6 +697,7 @@ export function MobileTerminalUi({
   const [internalTouchMode, setInternalTouchMode] = useState<MobileTerminalTouchMode>(defaultTouchMode);
   const view = activeView ?? internalView;
   const touchMode = activeTouchMode ?? internalTouchMode;
+  const terminalInteractive = interactive && !browserShown;
   const activeSessionId = sessions.find((session) => session.active)?.id;
   const rootRef = useRef<HTMLDivElement | null>(null);
   const terminalHostRef = useRef<HTMLDivElement | null>(null);
@@ -802,7 +827,7 @@ export function MobileTerminalUi({
   // closed. No soft keyboard reaches here: one opens only for a focused field.
   // Its Command+V comes back from the page as a `paste` on the same targets.
   useEffect(() => {
-    if (!interactive || composing || view !== 'terminal') return;
+    if (!terminalInteractive || composing || view !== 'terminal') return;
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       const root = rootRef.current;
       if (!root || event.defaultPrevented || isComposingKey(event)) return;
@@ -826,11 +851,11 @@ export function MobileTerminalUi({
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('paste', onNativePaste);
     };
-  }, [composing, interactive, onPaste, sendInput, view]);
+  }, [composing, onPaste, sendInput, terminalInteractive, view]);
 
   useEffect(() => {
-    if (!interactive || view !== 'terminal') closeComposer();
-  }, [closeComposer, interactive, view]);
+    if (!terminalInteractive || view !== 'terminal') closeComposer();
+  }, [closeComposer, terminalInteractive, view]);
 
   // Panned, never resized: the OS keyboard covers the terminal's bottom rows, so
   // the terminal slides up until they sit just above it, and the composer stays
@@ -888,7 +913,7 @@ export function MobileTerminalUi({
   }, [cursorTouchAvailable, setTouchMode, touchMode]);
 
   useEffect(() => {
-    if (!interactive) return;
+    if (!terminalInteractive) return;
     const host = terminalHostRef.current;
     if (!host) return;
     const options: AddEventListenerOptions = { capture: true, passive: false };
@@ -910,7 +935,7 @@ export function MobileTerminalUi({
       host.removeEventListener('wheel', consumeNativeTouchOrScrollEvent, options);
       host.removeEventListener('touchmove', consumeNativeTouchOrScrollEvent, options);
     };
-  }, [interactive, touchMode]);
+  }, [terminalInteractive, touchMode]);
 
   useEffect(() => {
     const host = terminalHostRef.current;
@@ -926,7 +951,7 @@ export function MobileTerminalUi({
 
   // Also cancels a coast on unmount, rather than keeping an old Session alive
   // through the animation callback after switching away from it.
-  useEffect(() => stopEdgeScroll, [activeSessionId, interactive, touchMode, stopEdgeScroll]);
+  useEffect(() => stopEdgeScroll, [activeSessionId, terminalInteractive, touchMode, stopEdgeScroll]);
 
   useEffect(() => {
     const onVisibilityChange = () => {
@@ -937,12 +962,12 @@ export function MobileTerminalUi({
   }, [stopEdgeScroll]);
 
   useEffect(() => {
-    if (touchMode === 'gestures' && interactive) return;
+    if (touchMode === 'gestures' && terminalInteractive) return;
     stopEdgeScroll();
     clearGestureCompletionTimer();
     commitGestureState(MOBILE_GESTURE_IDLE_STATE);
     setPendingGestureConfirmation(null);
-  }, [clearGestureCompletionTimer, commitGestureState, interactive, touchMode, stopEdgeScroll]);
+  }, [clearGestureCompletionTimer, commitGestureState, terminalInteractive, touchMode, stopEdgeScroll]);
 
   useEffect(() => clearGestureCompletionTimer, [clearGestureCompletionTimer]);
 
@@ -966,7 +991,7 @@ export function MobileTerminalUi({
   const handlePanePointerDownCapture = useCallback((event: PointerEvent<HTMLDivElement>) => {
     // A second finger may stop a coast, but must not steal a live edge drag.
     if (edgeMomentumFrameRef.current !== null) stopEdgeScroll();
-    if (isPortaledTarget(event) || isHostControlTarget(event.target)) {
+    if (browserShown || isPortaledTarget(event) || isHostControlTarget(event.target)) {
       pendingTapRef.current = null;
       return;
     }
@@ -1007,7 +1032,7 @@ export function MobileTerminalUi({
       return;
     }
     commitGestureState(beginMobileGesture(event.pointerId, origin, displayOriginAwayFromThumb(origin, rect)));
-  }, [activeSessionId, blurPaneTextInputs, clearGestureCompletionTimer, commitGestureState, interactive, touchMode, stopEdgeScroll]);
+  }, [activeSessionId, blurPaneTextInputs, clearGestureCompletionTimer, commitGestureState, interactive, browserShown, touchMode, stopEdgeScroll]);
 
   const handlePanePointerMoveCapture = useCallback((event: PointerEvent<HTMLDivElement>) => {
     const tap = pendingTapRef.current;
@@ -1119,9 +1144,9 @@ export function MobileTerminalUi({
   }, [commitGestureState, endEdgeScroll, executeGestureAction, scheduleGestureCompletionClear]);
 
   const handlePaneFocusStartCapture = useCallback((event: SyntheticEvent<HTMLDivElement>) => {
-    if (isPortaledTarget(event)) return;
+    if (browserShown || isPortaledTarget(event)) return;
     blurPaneTextInputs();
-  }, [blurPaneTextInputs]);
+  }, [blurPaneTextInputs, browserShown]);
 
   const handlePanePointerCancelCapture = useCallback((event: PointerEvent<HTMLDivElement>) => {
     if (pendingTapRef.current?.pointerId === event.pointerId) pendingTapRef.current = null;
@@ -1168,7 +1193,7 @@ export function MobileTerminalUi({
         ref={terminalHostRef}
         className={clsx(
           'relative min-h-0 flex-1 overflow-hidden bg-terminal-bg',
-          'touch-none',
+          !browserShown && 'touch-none',
           terminalClassName,
         )}
         style={inset.pan ? { transform: `translateY(-${inset.pan}px)` } : undefined}
@@ -1190,14 +1215,16 @@ export function MobileTerminalUi({
         ) : null}
       </div>
 
-      <ModeBar
-        mode={touchMode}
-        cursorAvailable={cursorTouchAvailable}
-        composing={composing}
-        disabled={!interactive}
-        onSelect={setTouchMode}
-        onType={composing ? closeComposer : openComposer}
-      />
+      {browserShown ? null : (
+        <ModeBar
+          mode={touchMode}
+          cursorAvailable={cursorTouchAvailable}
+          composing={composing}
+          disabled={!interactive}
+          onSelect={setTouchMode}
+          onType={composing ? closeComposer : openComposer}
+        />
+      )}
 
       {composing ? (
         <Composer
@@ -1214,6 +1241,7 @@ export function MobileTerminalUi({
         <SessionsScreen
           sessions={sessions}
           disabled={!interactive}
+          header={sessionsHeader}
           settings={settings}
           onSelect={(id) => {
             onSessionSelect?.(id);

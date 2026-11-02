@@ -5,13 +5,13 @@
 
 **Every message below travels inside one authorized session, and the Burrow may terminate that session — and every stream in it — at any time.**
 
-**Replicate state, never stream a desktop**: terminals travel as PTY data rendered client-side, browser surfaces ([Future](#future)) as per-surface screencasts, each its own placeable stream. (rationale)
+**Replicate state, never stream a desktop**: terminals travel as PTY data rendered client-side, an embedded page as its own HTTP the Client renders ([Frames](#frames)), an automated browser ([Future](#future)) as a per-surface screencast, each its own placeable stream. (rationale)
 
 ## v1 scope
 
-**Scope: protocol-v1** — the shipped protocol, the smallest that lets a phone (Dormouse Pocket) **sign in, pick a pane, see it live, and type into it**. **Must restrict it to terminal listing, one attachment per session, and terminal input/resize; never layout operations.** Everything else, browser-surface remoting and the VR headset included, is staged in [Future](#future).
+**Scope: protocol-v1** — the shipped protocol, the smallest that lets a phone (Dormouse Pocket) **sign in, pick a pane, see it live, and type into it**. **Must restrict it to the directory, one terminal attachment per session, terminal input/resize, and the [frame tunnel](#frames); never layout operations.** Everything else, screencast browsers and the VR headset included, is staged in [Future](#future).
 
-Source of truth: `remote-lib-common/src/remote/wire.ts` (every wire type and shared constant named below), `RemoteApiSession` in `lib/src/remote/burrow/remote-api.ts` (the Burrow implementation).
+Source of truth: `remote-lib-common/src/remote/wire.ts` and `remote-lib-common/src/remote/frame-wire.ts` (every wire type and shared constant named below), `RemoteApiSession` in `lib/src/remote/burrow/remote-api.ts` (the Burrow implementation).
 
 ### The provider seam
 
@@ -105,11 +105,13 @@ Requests are correlated by `requestId`, events by `subId` (`RemoteRequest`, `Rem
 
 First exchange on the control channel; establishes version and viewer kind (`HelloParams` / `HelloResult`), and returns the flat `grants` ([Input authority](#input-authority-and-multiple-viewers)). **The Burrow does not *gate* other methods on it** — authorization already happened at connect time, so skipping hello grants nothing.
 
-Reserved: a `capabilities` field on the client hello (what the client can render — screencast formats, window support) lands additively when browser surfaces arrive; see [Future](#future).
+**`capabilities.frames` decides what the directory names**: the Burrow lists browser entries and `browser` fields only to a session whose latest hello declared it, re-listing when a hello changes that. `HelloResult.frames` says the Burrow serves the tunnel.
+
+Reserved: further `capabilities` fields (screencast formats, window support) land additively; see [Future](#future).
 
 ## Directory (the phone's picker)
 
-**Must list registered terminal Surfaces, excluding helper Sessions.** A Tool remains listed through its terminal even while showing its browser capability. `directory.watch` subscribes without attaching; `DirectoryEntry` / `DirectorySnapshot` own the payload. Thumbnails are staged ([Future](#future)).
+**Must list registered terminal Surfaces, excluding helper Sessions.** A Tool remains listed through its terminal even while showing its browser capability. **Must list an embedded page — an `http:` page on this machine the iframe renderer shows, for a browser Surface or a serving Tool — as `browser`**, on the browser Surface's own `type: 'browser'` entry or on the Tool's terminal entry, read off the chrome both renderers register. `directory.watch` subscribes without attaching; `DirectoryEntry` / `DirectorySnapshot` own the payload. Thumbnails are staged ([Future](#future)).
 
 **Must list every Workspace's terminals, hidden ones included; `workspace` names an entry's Workspace only where its `ref`, the Workspace id, is unique across the Burrow's Windows** (standalone; VS Code sends none; rationale). **Entries arrive in each Window's strip order** (rationale); `active` marks the Workspace that Window shows. **A Client must list entries without `workspace` as before.**
 
@@ -121,13 +123,13 @@ Reserved: **`paneRef` is set to the same value as `surfaceId`** and no Client re
 
 **Duplicate `surfaceId`s collapse to the first answerer** — the same owner an attach's read-only resolve probe selects, so the row shown is the surface attached. (rationale)
 
-Workspace and membership changes invalidate the directory. **A late answer — one for an ask that already settled — invalidates the directory rather than being dropped** (rationale), at each burrow's ask bridge (`docs/specs/standalone.md` -> "Rust ↔ sidecar bridge", `docs/specs/vscode.md` -> "Peer surfaces").
+**A window that did not answer keeps its rows until an ask everyone answered drops them**, so a slow window never reads as its Surfaces closing. Workspace and membership changes invalidate the directory. **A late answer — one for an ask that already settled — invalidates the directory rather than being dropped** (rationale), at each burrow's ask bridge (`docs/specs/standalone.md` -> "Rust ↔ sidecar bridge", `docs/specs/vscode.md` -> "Peer surfaces").
 
-**Never list or attach standalone browser or iframe Surfaces**: neither enters the xterm registry. ([Future](#future) stages browser remoting; iframes stay unsupported even there.)
+**Never `surface.attach` a browser entry**: it has no terminal, and only `frame.open` reaches its page. An automated browser's page is listed nowhere ([Future](#future) stages its screencast).
 
 **`alive` is real PTY-process liveness**, distinct from `exitCode` — the last finished command's shell-integration status: a pane may report `alive: true` with an `exitCode` set, or `alive: false` with none. **An exited pane stays listed at `alive: false`** until the user closes it, and the picker stops offering it.
 
-Source of truth: `RemoteApiSession` in `lib/src/remote/burrow/remote-api.ts`, `lib/src/remote/burrow/directory-collect.ts` (the entry mapping).
+Source of truth: `RemoteApiSession` in `lib/src/remote/burrow/remote-api.ts`, `lib/src/remote/burrow/directory-collect.ts` (the entry mapping), `lib/src/remote/burrow/embedded-pages.ts` (the pages).
 
 ## Attaching to a surface
 
@@ -187,6 +189,38 @@ A terminal has one size, and **the most recent remote size writer holds it**: an
 
 Source of truth: `lib/src/remote/burrow/peer-surfaces.ts` (the owner's half), `takeBackSize` in `lib/src/remote/burrow/take-back.ts`, `BurrowService` in `lib/src/host/remote/service.ts` (the `serviceId`).
 
+## Closing a surface
+
+`surface.close` closes a Tool or an embedded page as the person at the Burrow would: Client→Burrow, on a session whose hello declared `capabilities.frames`. The Burrow's window decides, and what it needs of the person comes back for the Client to ask.
+
+- **Must close only a Tool or an embedded page, refusing a terminal whatever consent came**, the owning Wall judging by the Surface's kind.
+- **Must decide in the kill gesture's order, with its refusals and prompts in their words** (`docs/specs/reopen.md` -> "The rule", `docs/specs/layout.md` -> "Kill confirmation", `docs/specs/dor-tool.md` -> "Closing unsaved Tools"): a transfer or a helper's running work refuses, a close that must confirm answers `confirm`, unsaved edits answer `unsaved`, and anything else closes. Consent answers a prompt and skips no refusal.
+- **A close must reach one window's copy**, and close nothing when no owner answers (`docs/specs/vscode.md` -> "Peer surfaces").
+- **Must leave a reopen record as the gesture does**, and log `closed` in the access log.
+- **A Client must ask about its own copy's unsaved edits first, and hold that page still until the close ends**, since the Burrow cannot see them: a frame is its own document.
+- **A Client must abandon a close and its prompts when the session ends**, or the answer reaches whichever Burrow it connects to next, where the same id may name another Surface.
+- **Must close only what its consent covered**: `discard` answers the edits that prompted it, so edits arriving after a save or a clean read refuse the close. **Must judge the Surface's kind again at the close itself**, a Tool's command being able to end during the wait.
+- Labs delayed kill does not apply: a close that would go pending confirms instead, since the person is at the Client and a pending kill undoes only at the Burrow.
+
+Source of truth: `SurfaceCloseParams` in `remote-lib-common/src/remote/wire.ts`; `closeForClient` in `lib/src/components/wall/close-for-client.ts`; `useSurfaceClose` in `lib/src/remote/pocket-app/use-surface-close.ts`.
+
+## Frames
+
+A Client shows an embedded page by framing it at an origin of its own, the *frame origin*, and carrying every request that page makes over this session. The Burrow answers each through a lease on the iframe proxy a local pane frames (`docs/specs/dor-browser.md` -> "Iframe Renderer"), so the proxy's upstream pinning, header rewriting, shim, and error pages apply unchanged. A frame is its own document: nothing the Burrow's pane holds — scroll, form state, a Tool's unsaved edits — crosses.
+
+- **Must open a frame only at the page its surface embeds when asked**, never at a URL the Client names; the Client's page then requests any path on that grant's one upstream. **Must refuse a `frame.open` whose `pageOrigin` is no longer that page's origin**: the frame origin holds the storage of the page the Client named, and another page must not inherit it (rationale).
+- **Must open a frame only once the direct path carries both directions**, refusing `frame.open` before then and on a session that stays relayed (rationale). The switch is one-way, so a frame never outlives its path. A relayed session's directory still lists its pages, so a Client can say why they do not open.
+- **Must frame only a page on this machine**: every address its grant pins is loopback, unspecified, or held by one of this host's interfaces, judged on those addresses and never on a name (rationale). A local pane keeps its remote pages; the session lists none of them to a Client.
+- **Must hold every grant under a lease the session owns**, never a webview's, released by `frame.close`, by the session's disposal, and when the surface's page is gone or moves to another origin — re-checked on every directory invalidation and told as `frame.closed`. **Must ask the surface's owner, never judge by a listing**, which can predate the frame (rationale). **An owner's silence must not close a frame until `OWNER_SILENCE_LIMIT_MS`**, since a close costs the Client's copy of the page, unsaved edits included.
+- **The tunnel stands in for the frame origin**: an `Origin` equal to it, and a `Referer` on it, reach the grant as the grant's own, so the proxy vouches for those alone; any other `Origin` passes as sent; a `Location` on the grant returns as a path. **Never forward `Cookie`, a `Sec-` field, or the connection's own fields**; `destination` stands in for `Sec-Fetch-Dest`, which a service worker never sees. A WebSocket opens as the grant's own origin.
+- **Must answer every body identity-encoded**, decoding a compressed one, since a response a Client synthesizes is never decoded.
+- **Every `http.request` and `ws.open` is answered** — the head or the open, else a failure, a cancel or a closing frame included — except on a disposed session.
+- **Must hold Burrow→Client body bytes, each message costing `FRAME_FLOW_MESSAGE_COST` more, unacknowledged by `flow.ack` within `FRAME_FLOW_WINDOW_BYTES` across the session**, pausing every source while it is full and keeping events in order behind it (rationale). **Must drop what a cancelled exchange or a closed frame left queued before answering**, a finished exchange's included, since the Client stops listening at that answer and would ack none of it. **A Client must acknowledge every body byte and message cost on receipt**, whatever became of its exchange, and hold an exchange its page stopped reading with `flow.pause`, so one stalled page never holds the session's window. **A Client must send a request body only through `http.write`, and hold body bytes unanswered by `http.write` and `ws.send` within the same bound across the session** (rationale); each is answered once the upstream took it.
+- **Must refuse, before the upstream sees it**, a method that is not an RFC 9110 token or is `CONNECT`, a path not in origin-form, a header value carrying CR, LF, or NUL, and anything past the per-session bounds in `frame-wire.ts`. **A Client must queue its HTTP exchanges behind theirs**, as a page can ask for hundreds at once; a socket past its bound fails, as one past a browser's own limit does. A WebSocket message crosses as fragments, `fin` on the last.
+- An absolute-origin subresource the page names (`http://localhost:5173/...`) never reaches the tunnel.
+
+Source of truth: `remote-lib-common/src/remote/frame-wire.ts`, `FrameTunnel` in `lib/src/remote/burrow/frame-tunnel.ts`, `createBurrowFrameHost` in `lib/src/host/remote/frame-host.ts`, `FrameClient` in `lib/src/remote/client/frame-client.ts`.
+
 ## Input authority and multiple viewers
 
 **Input authority is flat**: selfhost is single-user, so every authorized session, a one-time one included, is the owner and gets full input (`grants: { input: true, layout: false }`), and no session gets layout operations.
@@ -215,8 +249,8 @@ One protocol, two consumption depths: the phone (protocol-v1) and a VR headset.
 
 The existing screencast path (`docs/specs/dor-browser.md`), made remote:
 
-* The client hello gains the reserved `capabilities` field: `{ screencast: ['jpeg' | 'webp'], input: boolean, window: boolean }`.
-* `DirectoryEntry` gains browser entries — `type: 'browser'` (the canonical component-level kind, `docs/specs/glossary.md` Naming conventions) plus a browser-only `url` field.
+* The client hello's `capabilities` gains `{ screencast: ['jpeg' | 'webp'], input: boolean, window: boolean }`.
+* An automated browser's `browser.render` names its screencast, on the `type: 'browser'` entries frames already list.
 * Media frames share the WebSocket with control messages. **A dropped frame is skipped, never queued behind**: the Burrow keeps only the newest frame per attachment and sends it when the socket drains, so a slow link degrades to a lower frame rate instead of a growing buffer.
 
 ```ts
@@ -234,7 +268,9 @@ type BrowserInput =
 
 Fixed, phone-appropriate screencast parameters (JPEG, capped dimension and frame rate) first; quality negotiation (`browser.quality`) and remote navigation (`browser.navigate`) after — a phone can drive the page's own UI meanwhile.
 
-Iframe surfaces stay unsupported even here: omitted from the directory, refusing attachment. Window snapshots still list them (the layout must be truthful) and VR renders an inert placeholder. Nothing else in the protocol assumes they exist.
+### 1a. Frames off this machine
+
+A Client framing a remote `http://` page, whose framing and script protections the proxy strips, needs a consent the Burrow can read, which a webview's own allowlist is not.
 
 ### 2. In-flight command replay
 
