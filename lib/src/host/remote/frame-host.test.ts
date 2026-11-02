@@ -12,6 +12,7 @@ import type { HttpHeader } from 'remote-lib-common';
 import type { FrameHttpInit, FrameUpstream } from '../../remote/burrow/burrow-frame-host';
 import { createIframeProxyUrl, isUpstreamOnThisMachine, releaseIframeProxyLease } from '../iframe-proxy';
 import { createBurrowFrameHost } from './frame-host';
+import { tunnelSocketShim } from '../iframe-proxy-rewrite';
 
 const proxy = { create: createIframeProxyUrl, release: releaseIframeProxyLease, isLocal: (url: string) => isUpstreamOnThisMachine(url) };
 
@@ -119,6 +120,18 @@ describe('createBurrowFrameHost', () => {
     const response = await fetchThrough(upstream, { method: 'PUT', path: '/save', headers: [], destination: '' }, 'file text');
     expect(JSON.parse(response.body)).toEqual({ got: 'file text', ae: 'identity' });
     expect(header(response.headers, 'content-encoding')).toBeUndefined();
+  });
+
+  it('instruments a page the upstream compressed anyway, or its sockets would miss the tunnel', async () => {
+    const { port } = await listen((_req, res) => {
+      res.writeHead(200, { 'content-type': 'text/html', 'content-encoding': 'gzip' });
+      res.end(gzipSync('<!doctype html><head><title>x</title></head><body>hi</body>'));
+    });
+    const upstream = await open(`http://localhost:${port}/`);
+    const response = await fetchThrough(upstream, { method: 'GET', path: '/', headers: [], destination: 'iframe' });
+    expect(header(response.headers, 'content-encoding')).toBeUndefined();
+    expect(response.body).toContain(tunnelSocketShim());
+    expect(response.body).toContain('<body>hi</body>');
   });
 
   it('frames only a page on this machine, and lists accordingly', async () => {

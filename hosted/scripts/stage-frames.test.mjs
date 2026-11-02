@@ -25,6 +25,17 @@ test("stages the three files, and clears what an earlier build left", () => {
   assert.ok(!existsSync(join(assets, "stale.js")));
 });
 
+test("reads a Windows path's backslashes as the slashes the list spells", () => {
+  const root = mkdtempSync(join(tmpdir(), "stage-frames-"));
+  const built = join(root, "dist-frame-origin");
+  mkdirSync(built, { recursive: true });
+  writeFileSync(join(built, "__dormouse-frame-sw.js"), "");
+  // What `path.join` makes of the nested two there, spelled here as flat names.
+  writeFileSync(join(built, "__dormouse-frame\\bootstrap.js"), "");
+  writeFileSync(join(built, "__dormouse-frame\\bootstrap.html"), "");
+  stageFrames(built, join(root, "assets"));
+});
+
 test("refuses a build holding anything else, which would be served beside a page", () => {
   const { built, assets } = fixture();
   writeFileSync(join(built, "extra.js"), "");

@@ -25,7 +25,8 @@ export function stageFrames(built, assets) {
   cpSync(built, assets, { recursive: true });
   const staged = readdirSync(assets, { recursive: true, withFileTypes: true })
     .filter((entry) => entry.isFile())
-    .map((entry) => join(entry.parentPath, entry.name).slice(assets.length + 1))
+    // In the forward slashes `FRAME_FILES` spells, on Windows too.
+    .map((entry) => join(entry.parentPath, entry.name).slice(assets.length + 1).replaceAll("\\", "/"))
     .sort();
   if (JSON.stringify(staged) !== JSON.stringify(FRAME_FILES))
     throw new Error(`the frame origin build holds ${staged.join(", ")}, not ${FRAME_FILES.join(", ")}`);

@@ -364,6 +364,17 @@ describe('instrumentHtml on a tunneled grant', () => {
     expect(socketShimAt(out)).toBeLessThan(out.indexOf('<script>a</script>'));
   });
 
+  it('reads a quoted `>` as part of its attribute', () => {
+    const html = '<!doctype html><html class="[&>body]:m-0"><head><meta content="a>b" charset="utf-8"><script>a</script>';
+    const out = instrumentHtml(html, APP, false, true);
+    expect(out).toContain('<html class="[&>body]:m-0">');
+    expect(out).toContain('<meta content="a>b" charset="utf-8">');
+    expect(socketShimAt(out)).toBeGreaterThan(out.indexOf('charset="utf-8">'));
+    expect(socketShimAt(out)).toBeLessThan(out.indexOf('<script>a</script>'));
+    const body = instrumentHtml('<body class="[&>p]:m-0">hi', APP);
+    expect(body).toContain('<body class="[&>p]:m-0"><script>');
+  });
+
   it('keeps the doctype and charset first, and shims nothing on a local pane', () => {
     const out = instrumentHtml('<!doctype html><head><meta charset="utf-8"><script>a</script>', APP, false, true);
     expect(socketShimAt(out)).toBeGreaterThan(out.indexOf('<meta charset="utf-8">'));

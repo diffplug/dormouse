@@ -10,10 +10,10 @@
 
 import * as http from 'http';
 import type { Readable } from 'stream';
-import * as zlib from 'zlib';
 import WebSocket from 'ws';
 import { MAX_WS_MESSAGE_BYTES, normalizeOrigin, type HttpHeader } from 'remote-lib-common';
 import { messageOf } from '../../lib/errors';
+import { decoderFor } from '../body-decoder';
 import type {
   BurrowFrameHost,
   FrameHttpExchange,
@@ -359,20 +359,6 @@ class GrantSocket implements FrameSocket {
     this.#finished = true;
     this.#done();
     this.#sink.onClose(code, reason);
-  }
-}
-
-function decoderFor(encoding: string): zlib.Gunzip | zlib.Inflate | zlib.BrotliDecompress | null {
-  switch (encoding) {
-    case 'gzip':
-    case 'x-gzip':
-      return zlib.createGunzip();
-    case 'deflate':
-      return zlib.createInflate();
-    case 'br':
-      return zlib.createBrotliDecompress();
-    default:
-      return null;
   }
 }
 

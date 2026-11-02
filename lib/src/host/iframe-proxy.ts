@@ -51,6 +51,8 @@
  */
 import { lookup as dnsLookup } from 'dns/promises';
 import * as http from 'http';
+import type { Readable } from 'stream';
+import { decoderFor } from './body-decoder';
 import * as net from 'net';
 import { networkInterfaces } from 'os';
 import { IFRAME_HTTP_ONLY, type IframeProxyResult } from '../lib/platform/iframe-proxy-types';
@@ -507,8 +509,10 @@ function handleRequest(grant: Grant, req: http.IncomingMessage, res: http.Server
     // The shim is ASCII spliced into the body's own bytes, so it needs an
     // identity, ASCII-compatible body: a compressed one (an upstream that
     // ignores Accept-Encoding, or a non-document fetch) or a UTF-16 one would
-    // be corrupted, not instrumented. A UTF-16 BOM is caught in streamHtml.
-    if (!/text\/html/i.test(contentType) || encoding !== 'identity'
+    // be corrupted, not instrumented. A UTF-16 BOM is caught in streamHtml. A
+    // tunneled page needs its socket shim to work at all, so it is decoded first.
+    const decoder = grant.tunneled ? decoderFor(encoding) : null;
+    if (!/text\/html/i.test(contentType) || (encoding !== 'identity' && !decoder)
       || declaresUtf16(contentType) || embedder === undefined) {
       passThrough(grant, upstreamRes, res);
       return;
@@ -520,7 +524,8 @@ function handleRequest(grant: Grant, req: http.IncomingMessage, res: http.Server
     // embed" is overridden because the embed is the user's own `dor iframe`,
     // not a third party framing them — a stranger's foreign ancestor still
     // fails the policy.
-    streamHtml(grant, embedder, upstreamRes, res);
+    if (decoder) upstreamRes.on('error', (error) => decoder.destroy(error)).pipe(decoder);
+    streamHtml(grant, embedder, upstreamRes, decoder ?? upstreamRes, res);
   });
   upstreamReq.on('error', (err) => {
     // Once we've begun streaming the response we can't swap in an error page —
@@ -570,11 +575,14 @@ function streamHtml(
   // the shim to. A grant with no chain goes through `passThrough` instead.
   embedderOrigin: string,
   upstreamRes: http.IncomingMessage,
+  /** The body as it is to be served: `upstreamRes` itself, or what decodes it. */
+  body: Readable,
   res: http.ServerResponse,
 ): void {
   const preserveCsp = upstreamRes.headers[PRESERVE_CSP_HEADER] === '1';
   const outHeaders = sanitizeResponseHeaders(grant, upstreamRes.headers);
   delete outHeaders['content-length'];
+  if (body !== upstreamRes) delete outHeaders['content-encoding'];
   res.writeHead(upstreamRes.statusCode ?? 200, outHeaders);
 
   const pending: Buffer[] = [];
@@ -596,10 +604,10 @@ function streamHtml(
       bomChecked = true;
       if (startsWithUtf16Bom(Buffer.concat(pending))) {
         handled = true;
-        upstreamRes.off('data', onData);
+        body.off('data', onData);
         res.write(Buffer.concat(pending));
         pending.length = 0;
-        upstreamRes.pipe(res);
+        body.pipe(res);
         return;
       }
     }
@@ -611,19 +619,19 @@ function streamHtml(
     // Found the insertion point (or hit the cap): instrument the buffered
     // prefix, then hand the remainder to a raw pipe (backpressure + end).
     handled = true;
-    upstreamRes.off('data', onData);
+    body.off('data', onData);
     res.write(Buffer.from(instrumentHtml(prefix(), embedderOrigin, preserveCsp, grant.tunneled), 'latin1'));
     pending.length = 0;
-    upstreamRes.pipe(res);
+    body.pipe(res);
   };
 
-  upstreamRes.on('data', onData);
-  upstreamRes.on('end', () => {
+  body.on('data', onData);
+  body.on('end', () => {
     if (handled) return; // the pipe ends `res`
     // Whole document arrived before any head marker — instrument and finish.
     res.end(Buffer.from(instrumentHtml(prefix(), embedderOrigin, preserveCsp, grant.tunneled), 'latin1'));
   });
-  upstreamRes.on('error', () => { if (!res.writableEnded) res.destroy(); });
+  body.on('error', () => { if (!res.writableEnded) res.destroy(); });
 }
 
 function sanitizeResponseHeaders(grant: Grant, headers: http.IncomingHttpHeaders): http.OutgoingHttpHeaders {
