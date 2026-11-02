@@ -6,6 +6,7 @@
  * which the Burrow validates.
  */
 
+import { createSerialQueue } from '../../host/remote/serial-queue';
 import { messageOf } from '../../lib/errors';
 import type { OpenFrame, OpenFrameSocket } from '../client/frame-client';
 import type { RelayMessage, RelayRequest, RelaySocket, ResponseControl, ResponseMessage, SocketCommand, SocketEvent } from './protocol';
@@ -87,10 +88,10 @@ async function serveSocket(frame: OpenFrame, request: RelaySocket, reply: Messag
     return;
   }
   // In order, or what follows a Blob overtakes it while it is read.
-  let handled = Promise.resolve();
+  const inOrder = createSerialQueue();
   reply.onmessage = (event: MessageEvent<SocketCommand>) => {
     const command = event.data;
-    handled = handled.then(async () => {
+    void inOrder(async () => {
       if (command.kind === 'send') {
         const data = command.data instanceof Blob ? await command.data.arrayBuffer() : command.data;
         void socket.send(new Uint8Array(data), command.binary).catch(() => {});

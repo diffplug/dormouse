@@ -32,7 +32,7 @@ import { disposeAllSessions } from '../../lib/terminal-registry';
 import { PocketWall } from '../pocket-app/PocketWall';
 import { PK, pkButton } from '../pocket-app/pocket-chrome';
 import { mountRemoteWall, type RemoteWallClient } from '../pocket-app/remote-wall';
-import { PairingCodeView, PocketScreen, TransportIndicator, Waiting } from '../pocket-app/views';
+import { ConnectionHeader, PairingCodeView, PocketScreen, Waiting } from '../pocket-app/views';
 
 // --- Copy -------------------------------------------------------------------
 
@@ -404,21 +404,21 @@ function OneTimeWall({
   onEnd: () => void;
 }): React.ReactElement {
   return (
-    <div className={PK.wallHost}>
-      <PocketWall
-        adapter={adapter}
-        onError={onEnd}
-        persist={false}
-        sessionsHeader={(
-          <header className={PK.wallHeader}>
-            <h1 className={PK.headerTitle}>{burrowLabel}</h1>
-            <TransportIndicator transport={{ path: 'direct', cause: null }} />
+    <PocketWall
+      adapter={adapter}
+      onError={onEnd}
+      persist={false}
+      sessionsHeader={(
+        <ConnectionHeader
+          title={burrowLabel}
+          transport={{ path: 'direct', cause: null }}
+          trailing={(
             <button type="button" className={pkButton({ tone: 'ghost', size: 'sm' })} onClick={onEnd}>
               {ONE_TIME_END_LABEL}
             </button>
-          </header>
-        )}
-      />
-    </div>
+          )}
+        />
+      )}
+    />
   );
 }

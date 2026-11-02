@@ -5,7 +5,7 @@ export const TERMINAL_CLOSE_REFUSAL = 'A terminal closes only on the computer.';
 
 /** What a Wall knows of one Surface, for a close a Client asked for. */
 export interface CloseForClientDeps {
-  isTerminal: boolean;
+  isTerminal(): boolean;
   transferRefusal(): string | null;
   /** Running helper work, which also shows at the computer. */
   helperRefusal(): Promise<string | null>;
@@ -17,9 +17,10 @@ export interface CloseForClientDeps {
   save(): Promise<string | null>;
   /**
    * Close, discarding unsaved edits only if told to, so edits made since a save
-   * or a clean read still refuse; why it did not, or `null`.
+   * or a clean read still refuse; why it did not, or `null`. `stillRefused` is
+   * read after its last wait, since a Tool's command can end during one.
    */
-  close(discard: boolean): Promise<string | null>;
+  close(discard: boolean, stillRefused: () => string | null): Promise<string | null>;
 }
 
 /**
@@ -31,7 +32,8 @@ export async function closeForClient(
   { confirmed, unsaved }: ClientCloseConsent,
   deps: CloseForClientDeps,
 ): Promise<SurfaceCloseResult> {
-  if (deps.isTerminal) return { outcome: 'refused', message: TERMINAL_CLOSE_REFUSAL };
+  const terminal = () => (deps.isTerminal() ? TERMINAL_CLOSE_REFUSAL : null);
+  if (terminal()) return { outcome: 'refused', message: TERMINAL_CLOSE_REFUSAL };
   const transferring = deps.transferRefusal();
   if (transferring) return { outcome: 'refused', message: transferring };
   const helper = await deps.helperRefusal();
@@ -45,6 +47,6 @@ export async function closeForClient(
       if (failed) return { outcome: 'refused', message: failed };
     }
   }
-  const refused = await deps.close(dirty && unsaved === 'discard');
+  const refused = await deps.close(dirty && unsaved === 'discard', terminal);
   return refused ? { outcome: 'refused', message: refused } : { outcome: 'closed' };
 }

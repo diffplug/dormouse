@@ -27,6 +27,7 @@ import {
   type WsMessageFragment,
   type WsOpenResult,
 } from 'remote-lib-common';
+import { createSerialQueue } from '../../host/remote/serial-queue';
 import { messageOf } from '../../lib/errors';
 
 /** What the tunnel needs of a session; `PocketClient` and `OneTimeClient` both are one. */
@@ -381,17 +382,13 @@ class ClientFrame implements OpenFrame {
       throw error;
     }
 
-    let sending: Promise<void> = Promise.resolve();
+    const inOrder = createSerialQueue();
     return {
       ...result,
-      send: (data, binary) => {
-        const sent = sending.then(() => this.#sendBody(FRAME_METHODS.wsSend, data, (encoded, fin) => ({ socketId: id, data: encoded, binary, fin })));
-        sending = sent.catch(() => {});
-        return sent;
-      },
+      send: (data, binary) => inOrder(() => this.#sendBody(FRAME_METHODS.wsSend, data, (encoded, fin) => ({ socketId: id, data: encoded, binary, fin }))),
       // Behind what was sent before it, as a socket's own close is.
       close: (code, reason) => {
-        void sending.then(() => {
+        void inOrder(async () => {
           if (!open) return;
           fireAndForget(session.request(FRAME_METHODS.wsClose, {
             socketId: id,

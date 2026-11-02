@@ -172,11 +172,28 @@ export function transportTitle({ path, cause }: TransportView): string {
   return cause ? `${title} ${TRANSPORT_RELAY_CAUSES[cause]}` : title;
 }
 
+/** What heads the Sessions screen: this connection, and how to leave it. */
+export function ConnectionHeader({ title, transport, leading, trailing }: {
+  title: string;
+  transport: TransportView;
+  leading?: React.ReactNode;
+  trailing?: React.ReactNode;
+}): React.ReactElement {
+  return (
+    <header className={PK.wallHeader}>
+      {leading}
+      <h1 className={PK.headerTitle}>{title}</h1>
+      <TransportIndicator transport={transport} />
+      {trailing}
+    </header>
+  );
+}
+
 /**
  * The path a connection takes, on the Sessions screen: its label, with {@link transportTitle} as
  * the hover text. No status colour: relayed is the ordinary case, not a fault.
  */
-export function TransportIndicator({ transport }: { transport: TransportView }): React.ReactElement {
+function TransportIndicator({ transport }: { transport: TransportView }): React.ReactElement {
   return (
     <span className={PK.headerNote} title={transportTitle(transport)}>
       {TRANSPORT_PATH_LABELS[transport.path].label}

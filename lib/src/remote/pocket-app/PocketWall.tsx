@@ -31,6 +31,7 @@ import type { RemotePtyAdapter } from '../client/remote-adapter';
 import { getToolDirty } from '../../lib/tool-dirty-store';
 import { frameOriginFor, MAX_FRAMES_PER_SESSION } from 'remote-lib-common';
 import { frameSalt } from './frame-salt';
+import { PK } from './pocket-chrome';
 import { PocketBrowserFrame, type FrameTransport } from './PocketBrowserFrame';
 import { useSurfaceClose } from './use-surface-close';
 import { applyPocketTheme, restorePocketTheme, usePocketTheme } from './pocket-theme';
@@ -188,7 +189,7 @@ export function PocketWall({ adapter, browsers, onError, persist = true, session
   }, [activePaneId]);
 
   return (
-    <>
+    <div className={PK.wallHost}>
     <MobileTerminalUi
       className="h-full"
       terminal={
@@ -248,6 +249,6 @@ export function PocketWall({ adapter, browsers, onError, persist = true, session
       onPaste={handlePaste}
     />
     {closeDialog ? <MobileCloseDialog state={closeDialog} /> : null}
-    </>
+    </div>
   );
 }

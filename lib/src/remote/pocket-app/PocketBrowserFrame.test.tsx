@@ -128,6 +128,14 @@ describe('PocketBrowserFrame', () => {
     root = createRoot(container);
   });
 
+  it('reopens a frame closed as gone, since a slow owner reads as gone too', async () => {
+    await render();
+    await act(async () => onClosed?.('surface-gone'));
+    await act(async () => [...container.querySelectorAll('button')].find((b) => b.textContent === 'Try again')!.click());
+    await flush();
+    expect(open).toHaveBeenCalledTimes(2);
+  });
+
   it('says so when the page is gone', async () => {
     const onShowSessions = vi.fn();
     await render({ onShowSessions });

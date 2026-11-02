@@ -49,13 +49,14 @@ export const pkButton = tv({
   defaultVariants: { tone: 'primary', size: 'lg', block: false },
 });
 
+const HEADER_BAND = 'flex shrink-0 items-center gap-2 bg-header-active-bg px-4 text-header-active-fg';
+
 export const PK = {
   app: 'flex h-full min-h-0 flex-col bg-app-bg text-app-fg',
   // Header band = the ACTIVE header pair (the "titlebar").
-  header:
-    'flex shrink-0 items-center gap-2 bg-header-active-bg px-4 pb-2.5 pt-[max(0.625rem,env(safe-area-inset-top))] text-header-active-fg',
+  header: `${HEADER_BAND} pb-2.5 pt-[max(0.625rem,env(safe-area-inset-top))]`,
   // The same band heading the Sessions screen, under the wall host's safe area.
-  wallHeader: 'flex shrink-0 items-center gap-2 bg-header-active-bg px-4 py-2.5 text-header-active-fg',
+  wallHeader: `${HEADER_BAND} py-2.5`,
   headerTitle: 'm-0 min-w-0 flex-1 truncate text-[13px] font-semibold tracking-[0.01em]',
   // A settled fact about the band it sits in — which path carries the session —
   // captioned in alpha-on-fg rather than coloured: it reports, never alerts.

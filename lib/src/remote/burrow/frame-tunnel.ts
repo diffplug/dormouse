@@ -55,7 +55,7 @@ import type {
 import type { BurrowSurfaceProvider } from './burrow-surface-provider';
 
 /** Coalesce window for re-checking open frames against their surfaces. */
-const REVALIDATE_DEBOUNCE_MS = 150;
+const RECHECK_DEBOUNCE_MS = 150;
 
 /** An RFC 9110 token: a method or a header name. */
 const TOKEN_RE = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
@@ -147,7 +147,7 @@ export class FrameTunnel {
   #outstanding = 0;
   #paused = false;
   #unwatch: (() => void) | null = null;
-  #revalidateTimer: ReturnType<typeof setTimeout> | null = null;
+  #recheckTimer: ReturnType<typeof setTimeout> | null = null;
   #lease = 0;
   #disposed = false;
 
@@ -256,11 +256,12 @@ export class FrameTunnel {
       opened.close();
       return 'frame.open superseded';
     }
-    this.#frames.set(id, { id, surfaceId, pageOrigin, upstream: opened });
+    const frame: Frame = { id, surfaceId, pageOrigin, upstream: opened };
+    this.#frames.set(id, frame);
     this.#watch();
     // The page was read before the grant was minted, and nothing watched this
     // frame meanwhile: one that went in that time closes now.
-    this.#scheduleRevalidate();
+    void this.#recheck(frame);
     return { path: opened.path };
   }
 
@@ -290,34 +291,26 @@ export class FrameTunnel {
   #watch(): void {
     if (this.#unwatch) return;
     this.#unwatch = this.#options.provider.watchDirectory(() => {
-      // A session watching the directory collects already, and hands it to `revalidate`.
-      if (!this.#options.directoryWatched()) this.#scheduleRevalidate();
+      // A session watching the directory hands each listing to `revalidate`.
+      if (!this.#options.directoryWatched()) this.#scheduleRecheck();
     });
   }
 
   #stopWatching(): void {
     this.#unwatch?.();
     this.#unwatch = null;
-    if (this.#revalidateTimer) {
-      clearTimeout(this.#revalidateTimer);
-      this.#revalidateTimer = null;
+    if (this.#recheckTimer) {
+      clearTimeout(this.#recheckTimer);
+      this.#recheckTimer = null;
     }
   }
 
-  #scheduleRevalidate(): void {
-    if (this.#revalidateTimer || this.#disposed) return;
-    this.#revalidateTimer = setTimeout(() => {
-      this.#revalidateTimer = null;
-      void this.#collectAndRevalidate();
-    }, REVALIDATE_DEBOUNCE_MS);
-  }
-
-  async #collectAndRevalidate(): Promise<void> {
-    try {
-      this.revalidate(await this.#options.provider.collectDirectory());
-    } catch {
-      // A failed collect changes nothing.
-    }
+  #scheduleRecheck(): void {
+    if (this.#recheckTimer || this.#disposed) return;
+    this.#recheckTimer = setTimeout(() => {
+      this.#recheckTimer = null;
+      for (const frame of this.#frames.values()) void this.#recheck(frame);
+    }, RECHECK_DEBOUNCE_MS);
   }
 
   /**

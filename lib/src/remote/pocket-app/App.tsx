@@ -57,7 +57,7 @@ import { mountRemoteWall } from './remote-wall';
 import {
   PairingCodeView,
   RELAYED_TRANSPORT,
-  TransportIndicator,
+  ConnectionHeader,
   UnsupportedBrowser,
   Waiting,
   deviceLabel,
@@ -890,7 +890,7 @@ export function ConnectedView({
 }: {
   burrow: BurrowView;
   adapter: RemotePtyAdapter;
-  /** Which path carries the session, and why; see {@link TransportIndicator}. */
+  /** Which path carries the session, and why; see {@link ConnectionHeader}. */
   transport?: TransportView;
   onLeave: () => void;
   onError?: (error: unknown) => void;
@@ -898,22 +898,22 @@ export function ConnectedView({
   browsers?: PocketBrowsers;
 }): React.ReactElement {
   return (
-    <div className={PK.wallHost}>
-      <PocketWall
-        adapter={adapter}
-        browsers={browsers}
-        onError={onError}
-        sessionsHeader={(
-          <header className={PK.wallHeader}>
+    <PocketWall
+      adapter={adapter}
+      browsers={browsers}
+      onError={onError}
+      sessionsHeader={(
+        <ConnectionHeader
+          title={burrow.label || burrow.burrowId}
+          transport={transport}
+          leading={(
             <button type="button" className={pkButton({ tone: 'ghost', size: 'sm' })} onClick={onLeave}>
               ‹ {BURROWS_TITLE}
             </button>
-            <h1 className={PK.headerTitle}>{burrow.label || burrow.burrowId}</h1>
-            <TransportIndicator transport={transport} />
-          </header>
-        )}
-      />
-    </div>
+          )}
+        />
+      )}
+    />
   );
 }
 

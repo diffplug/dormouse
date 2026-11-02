@@ -69,6 +69,8 @@ function BrowserNotice({
       return (
         <div className="grid max-w-xs gap-3">
           <p className="font-medium">This page is no longer open on your computer.</p>
+          {/* An owner too slow to answer reads as gone too, and this needs no reconnect. */}
+          <BrowserAction label="Try again" onClick={onRetry} />
           <BrowserAction label="Show sessions" onClick={onShowSessions} />
         </div>
       );
@@ -83,7 +85,7 @@ function BrowserNotice({
   }
 }
 
-function BrowserAction({ label, onClick }: { label: string; onClick?: () => void }) {
+export function BrowserAction({ label, onClick }: { label: string; onClick?: () => void }) {
   return (
     <button type="button" onClick={onClick} className={modalActionButton({ tone: 'primary', class: 'min-h-10 justify-self-center px-4' })}>
       {label}

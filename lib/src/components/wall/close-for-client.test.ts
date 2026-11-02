@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { closeForClient, type CloseForClientDeps } from './close-for-client';
 
 const deps = (overrides: Partial<CloseForClientDeps> = {}): CloseForClientDeps => ({
-  isTerminal: false,
+  isTerminal: () => false,
   transferRefusal: () => null,
   helperRefusal: async () => null,
   needsConfirm: () => false,
@@ -21,7 +21,7 @@ describe('closeForClient', () => {
   });
 
   it('never closes a terminal, whatever consent came', async () => {
-    const d = deps({ isTerminal: true });
+    const d = deps({ isTerminal: () => true });
     expect(await closeForClient({ confirmed: true, unsaved: 'discard' }, d)).toEqual({
       outcome: 'refused',
       message: 'A terminal closes only on the computer.',
@@ -32,13 +32,13 @@ describe('closeForClient', () => {
   it('consents to losing only the edits it was asked about', async () => {
     const clean = deps();
     await closeForClient({ unsaved: 'discard' }, clean);
-    expect(clean.close).toHaveBeenCalledExactlyOnceWith(false);
+    expect(clean.close).toHaveBeenCalledExactlyOnceWith(false, expect.any(Function));
     const saved = deps({ isDirty: () => true });
     await closeForClient({ unsaved: 'save' }, saved);
-    expect(saved.close).toHaveBeenCalledExactlyOnceWith(false);
+    expect(saved.close).toHaveBeenCalledExactlyOnceWith(false, expect.any(Function));
     const discarded = deps({ isDirty: () => true });
     await closeForClient({ unsaved: 'discard' }, discarded);
-    expect(discarded.close).toHaveBeenCalledExactlyOnceWith(true);
+    expect(discarded.close).toHaveBeenCalledExactlyOnceWith(true, expect.any(Function));
   });
 
   it('asks for the confirmation until it has it', async () => {

@@ -16,7 +16,7 @@ import { ToolEditorCloseModalHost } from './ToolEditorCloseModalHost';
 import { confirmToolEditorsClose, saveToolEditor, toolEditorLabel, UNSAVED_TOOL_REFUSAL } from '../lib/tool-editor';
 import type { SurfaceCloseResult } from 'remote-lib-common';
 import { registerClientCloser, type ClientCloseConsent } from '../remote/burrow/client-close';
-import { closeForClient, TERMINAL_CLOSE_REFUSAL } from './wall/close-for-client';
+import { closeForClient } from './wall/close-for-client';
 import { isToolDirty } from './ToolDirtyIndicator';
 import { AgentBrowserScreenModalHost } from './AgentBrowserScreenModalHost';
 // Remote-host code (relay/WebSocket/enrollment + the window.dormouseBurrow
@@ -760,9 +760,8 @@ export function Wall({
 
   /** A Client's close of a Tool or browser (`docs/specs/remote-api.md` -> "Closing a surface"). */
   const closeSurfaceForClient = useCallback((id: string, consent: ClientCloseConsent): Promise<SurfaceCloseResult> => {
-    const params = lath.getMeta(id)?.params;
     return closeForClient(consent, {
-      isTerminal: surfaceKindFromParams(params) === 'terminal',
+      isTerminal: () => surfaceKindFromParams(lath.getMeta(id)?.params) === 'terminal',
       transferRefusal: () => transferRefusal(id),
       helperRefusal: async () => {
         const refused = await helperRefusal(id);
@@ -773,10 +772,7 @@ export function Wall({
       isDirty: () => isToolDirty(id, lath.getMeta(id)?.params),
       label: () => toolEditorLabel(id),
       save: () => saveToolEditor(id),
-      // A Tool's command can end during the helper check, leaving a terminal here.
-      close: (discard) => closeSurface(id, discard ? [id] : [], () => (
-        surfaceKindFromParams(lath.getMeta(id)?.params) === 'terminal' ? TERMINAL_CLOSE_REFUSAL : null
-      )),
+      close: (discard, stillRefused) => closeSurface(id, discard ? [id] : [], stillRefused),
     });
   }, [closeSurface, helperRefusal, lath, revealRefusal, transferRefusal]);
 
