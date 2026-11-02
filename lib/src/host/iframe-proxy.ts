@@ -374,7 +374,7 @@ export async function isUpstreamOnThisMachine(
   }
   if (upstream.protocol !== 'http:') return false;
   const pinned = await pinAddresses(upstream, opts?.resolve ?? systemResolver);
-  if (!Array.isArray(pinned) && pinned.reason === 'unreachable') throw new Error(pinned.detail ?? 'the name did not resolve');
+  if (!Array.isArray(pinned) && pinned.reason === 'unreachable') throw new Error(pinned.detail);
   return Array.isArray(pinned) && allOnThisMachine(pinned, (opts?.interfaceAddresses ?? systemInterfaces)());
 }
 
