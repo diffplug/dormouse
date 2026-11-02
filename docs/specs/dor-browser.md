@@ -281,7 +281,7 @@ Header rewriting beyond `Origin`, `Cookie`, `Set-Cookie`, and the framing header
 | response | `Clear-Site-Data` | `"cache", "storage"` on a freshly minted grant's first frame load only: its port may have fronted another upstream |
 | response body | `<meta http-equiv="content-security-policy">` | removed unless the response opts into CSP preservation |
 
-**Must instrument only an identity-encoded, ASCII-compatible HTML body, keeping its `content-type` as sent**, charset included; a compressed body, or a UTF-16 one (any WHATWG label, or a byte-order mark), passes through uninstrumented (rationale), except that a tunneled grant decodes a compressed one first, since its page needs the socket shim (`docs/specs/pocket-app.md` -> "Frame origin"). **Never place the shim ahead of the doctype, a `<meta charset>` or a UTF-8 BOM.**
+**Must instrument only an identity-encoded, ASCII-compatible HTML body, keeping its `content-type` as sent**, charset included; a compressed body, or a UTF-16 one (any WHATWG label, or a byte-order mark), passes through uninstrumented (rationale), except that a tunneled grant decodes every compressed body first (`docs/specs/remote-api.md` -> "Frames"). **Never place the shim ahead of the doctype, a `<meta charset>` or a UTF-8 BOM.**
 
 **Must preserve enforced and report-only CSP verbatim when the upstream response sends `X-Dormouse-Preserve-CSP: 1`**, for every MIME type, adding the validated ancestor policy separately; opted-in policies may still prevent framing or shim execution (rationale). **Never infer this opt-in from request headers.**
 

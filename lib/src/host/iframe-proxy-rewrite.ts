@@ -260,7 +260,7 @@ export function startsWithUtf16Bom(bytes: Uint8Array): boolean {
 
 const HEAD_CLOSE = /<\/head>/i;
 /** A tag's attributes, whose quoted values may hold a `>`. */
-const ATTRIBUTES = `(?:\\s(?:"[^"]*"|'[^']*'|[^>"'])*)?`;
+const ATTRIBUTES = String.raw`(?:\s(?:"[^"]*"|'[^']*'|[^>"'])*)?`;
 const BODY_OPEN = new RegExp(`<body${ATTRIBUTES}>`, 'i');
 
 /** The end of the document prefix `instrumentHtml` places the shim before
@@ -341,7 +341,7 @@ export function instrumentHtml(body: string, embedderOrigin: string, preserveCsp
 }
 
 /** One thing that may stand ahead of a page's first script, comments and whitespace before it. */
-const PROLOGUE_TOKEN = new RegExp(`\\s*(<!--[\\s\\S]*?-->|<!doctype[^>]*>|<(?:html|head|meta|link|base)${ATTRIBUTES}>|<(title|style)${ATTRIBUTES}>[\\s\\S]*?</\\2\\s*>)`, 'giy');
+const PROLOGUE_TOKEN = new RegExp(String.raw`\s*(<!--[\s\S]*?-->|<!doctype[^>]*>|<(?:html|head|meta|link|base)${ATTRIBUTES}>|<(title|style)${ATTRIBUTES}>[\s\S]*?</\2\s*>)`, 'giy');
 /** Of those, what a script ahead of it would break. */
 const MUST_PRECEDE_SCRIPT = /^(?:<!doctype|<html|<head|<meta\b[\s\S]*\bcharset\b)/i;
 

@@ -13,7 +13,6 @@ import type { Readable } from 'stream';
 import WebSocket from 'ws';
 import { MAX_WS_MESSAGE_BYTES, normalizeOrigin, type HttpHeader } from 'remote-lib-common';
 import { messageOf } from '../../lib/errors';
-import { decoderFor } from '../body-decoder';
 import type {
   BurrowFrameHost,
   FrameHttpExchange,
@@ -155,8 +154,8 @@ class GrantUpstream implements FrameUpstream {
       headers[name] = prior === undefined ? value : [...(Array.isArray(prior) ? prior : [prior]), value];
     }
     headers.host = `127.0.0.1:${this.#port}`;
-    // A body the tunnel can hand on as it came; anything compressed regardless
-    // is decoded below.
+    // A body the tunnel can hand on as it came; the proxy decodes one sent compressed
+    // regardless.
     headers['accept-encoding'] = 'identity';
     if (init.destination !== undefined) headers['sec-fetch-dest'] = init.destination || 'empty';
     return {
@@ -249,39 +248,29 @@ class GrantExchange implements FrameHttpExchange {
       response.destroy();
       return;
     }
-    const encoding = String(response.headers['content-encoding'] ?? '').trim().toLowerCase();
-    const decoder = decoderFor(encoding);
     const headers: HttpHeader[] = [];
     for (let index = 0; index < response.rawHeaders.length; index += 2) {
       const name = response.rawHeaders[index]!;
       const lower = name.toLowerCase();
       let value = response.rawHeaders[index + 1]!;
-      // A synthesized response is never decoded by the browser, so a body
-      // decoded here drops what described the encoded one.
-      if (decoder && (lower === 'content-encoding' || lower === 'content-length')) continue;
       // The proxy already keeps a redirect on its grant; on the Client the
       // grant is the frame origin, so the redirect stays there too.
       if (lower === 'location') value = rewriteOrigin(value, this.#grantOrigin, '');
       headers.push([name, value]);
     }
-    let body: Readable = response;
-    if (decoder) {
-      response.on('error', (error) => decoder.destroy(error));
-      body = response.pipe(decoder);
-    }
-    this.#body = body;
+    this.#body = response;
     this.#sink.onHead(response.statusCode ?? 502, response.statusMessage ?? '', headers);
     if (this.#finished) return;
-    body.on('data', (chunk: Buffer) => {
+    response.on('data', (chunk: Buffer) => {
       if (!this.#finished) this.#sink.onBody(new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength));
     });
-    body.on('end', () => {
+    response.on('end', () => {
       if (this.#finished) return;
       this.#finish();
       this.#sink.onEnd();
     });
-    body.on('error', (error: Error) => this.#fail(error.message));
-    if (this.#paused) body.pause();
+    response.on('error', (error: Error) => this.#fail(error.message));
+    if (this.#paused) response.pause();
   }
 
   #fail(message: string): void {

@@ -52,7 +52,7 @@
 import { lookup as dnsLookup } from 'dns/promises';
 import * as http from 'http';
 import type { Readable } from 'stream';
-import { decoderFor } from './body-decoder';
+import * as zlib from 'zlib';
 import * as net from 'net';
 import { networkInterfaces } from 'os';
 import { IFRAME_HTTP_ONLY, type IframeProxyResult } from '../lib/platform/iframe-proxy-types';
@@ -510,11 +510,14 @@ function handleRequest(grant: Grant, req: http.IncomingMessage, res: http.Server
     // identity, ASCII-compatible body: a compressed one (an upstream that
     // ignores Accept-Encoding, or a non-document fetch) or a UTF-16 one would
     // be corrupted, not instrumented. A UTF-16 BOM is caught in streamHtml. A
-    // tunneled page needs its socket shim to work at all, so it is decoded first.
+    // tunneled grant decodes every body: its pages need their socket shim to work
+    // at all, and what its Client synthesizes is never decoded.
     const decoder = grant.tunneled ? decoderFor(encoding) : null;
+    if (decoder) upstreamRes.on('error', (error) => decoder.destroy(error)).pipe(decoder);
+    const body = decoder ?? upstreamRes;
     if (!/text\/html/i.test(contentType) || (encoding !== 'identity' && !decoder)
       || declaresUtf16(contentType) || embedder === undefined) {
-      passThrough(grant, upstreamRes, res);
+      passThrough(grant, upstreamRes, res, body);
       return;
     }
     // Any http upstream is framed, loopback or remote: sanitizeResponseHeaders
@@ -524,8 +527,7 @@ function handleRequest(grant: Grant, req: http.IncomingMessage, res: http.Server
     // embed" is overridden because the embed is the user's own `dor iframe`,
     // not a third party framing them — a stranger's foreign ancestor still
     // fails the policy.
-    if (decoder) upstreamRes.on('error', (error) => decoder.destroy(error)).pipe(decoder);
-    streamHtml(grant, embedder, upstreamRes, decoder ?? upstreamRes, res);
+    streamHtml(grant, embedder, upstreamRes, body, res);
   });
   upstreamReq.on('error', (err) => {
     // Once we've begun streaming the response we can't swap in an error page —
@@ -552,12 +554,39 @@ function handleRequest(grant: Grant, req: http.IncomingMessage, res: http.Server
 }
 
 // Non-HTML upstream responses are forwarded verbatim apart from the stripped
-// framing/hop-by-hop headers and a rewritten Location.
-function passThrough(grant: Grant, upstreamRes: http.IncomingMessage, res: http.ServerResponse): void {
+// framing/hop-by-hop headers, a rewritten Location, and a tunneled grant's decoding.
+function passThrough(
+  grant: Grant,
+  upstreamRes: http.IncomingMessage,
+  res: http.ServerResponse,
+  body: Readable = upstreamRes,
+): void {
   const outHeaders = sanitizeResponseHeaders(grant, upstreamRes.headers);
+  if (body !== upstreamRes) dropEncodedLength(outHeaders);
   res.writeHead(upstreamRes.statusCode ?? 200, outHeaders);
-  upstreamRes.on('error', () => res.destroy());
-  upstreamRes.pipe(res);
+  body.on('error', () => res.destroy());
+  body.pipe(res);
+}
+
+/** A decoded body's headers, which no longer describe what is served. */
+function dropEncodedLength(headers: http.OutgoingHttpHeaders): void {
+  delete headers['content-encoding'];
+  delete headers['content-length'];
+}
+
+/** What undoes a response's `Content-Encoding`, or `null` for one left as it is. */
+function decoderFor(encoding: string): zlib.Gunzip | zlib.Inflate | zlib.BrotliDecompress | null {
+  switch (encoding) {
+    case 'gzip':
+    case 'x-gzip':
+      return zlib.createGunzip();
+    case 'deflate':
+      return zlib.createInflate();
+    case 'br':
+      return zlib.createBrotliDecompress();
+    default:
+      return null;
+  }
 }
 
 // Inject the shim into the <head> while streaming, without buffering the whole
@@ -582,7 +611,7 @@ function streamHtml(
   const preserveCsp = upstreamRes.headers[PRESERVE_CSP_HEADER] === '1';
   const outHeaders = sanitizeResponseHeaders(grant, upstreamRes.headers);
   delete outHeaders['content-length'];
-  if (body !== upstreamRes) delete outHeaders['content-encoding'];
+  if (body !== upstreamRes) dropEncodedLength(outHeaders);
   res.writeHead(upstreamRes.statusCode ?? 200, outHeaders);
 
   const pending: Buffer[] = [];
