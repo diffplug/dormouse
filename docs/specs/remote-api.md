@@ -189,6 +189,18 @@ A terminal has one size, and **the most recent remote size writer holds it**: an
 
 Source of truth: `lib/src/remote/burrow/peer-surfaces.ts` (the owner's half), `takeBackSize` in `lib/src/remote/burrow/take-back.ts`, `BurrowService` in `lib/src/host/remote/service.ts` (the `serviceId`).
 
+## Closing a surface
+
+`surface.close` closes a Tool or an embedded page as the person at the Burrow would: Client→Burrow, on a session whose hello declared `capabilities.frames`. The Burrow's window decides, and what it needs of the person comes back for the Client to ask.
+
+- **Must close only a Tool or an embedded page, refusing a terminal whatever consent came**, the owning Wall judging by the Surface's kind.
+- **Must decide in the kill gesture's order, with its refusals and prompts in their words** (`docs/specs/reopen.md` -> "The rule", `docs/specs/layout.md` -> "Kill confirmation", `docs/specs/dor-tool.md` -> "Closing unsaved Tools"): a transfer or a helper's running work refuses, a close that must confirm answers `confirm`, unsaved edits answer `unsaved`, and anything else closes. Consent answers a prompt and skips no refusal.
+- **Must leave a reopen record as the gesture does**, and log `closed` in the access log.
+- **A Client must ask about its own copy's unsaved edits first**, which the Burrow cannot see: a frame is its own document.
+- Labs delayed kill does not apply: a close that would go pending confirms instead, since the person is at the Client and a pending kill undoes only at the Burrow.
+
+Source of truth: `SurfaceCloseParams` in `remote-lib-common/src/remote/wire.ts`; `closeForClient` in `lib/src/components/wall/close-for-client.ts`; `useSurfaceClose` in `lib/src/remote/pocket-app/use-surface-close.ts`.
+
 ## Frames
 
 A Client shows an embedded page by framing it at an origin of its own, the *frame origin*, and carrying every request that page makes over this session. The Burrow answers each through a lease on the iframe proxy a local pane frames (`docs/specs/dor-browser.md` -> "Iframe Renderer"), so the proxy's upstream pinning, header rewriting, shim, and error pages apply unchanged. A frame is its own document: nothing the Burrow's pane holds — scroll, form state, a Tool's unsaved edits — crosses.

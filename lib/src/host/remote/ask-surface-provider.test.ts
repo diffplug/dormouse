@@ -108,6 +108,29 @@ describe('createAskSurfaceProvider holds', () => {
   });
 });
 
+describe('createAskSurfaceProvider closeSurface', () => {
+  const noPty = { writePty: () => {}, resizePty: () => {}, streamPty: () => () => {} } as never;
+
+  it('polls past a pending close to its outcome', async () => {
+    const answers: unknown[][] = [[{ outcome: 'pending' }], [{ outcome: 'pending' }], [{ outcome: 'closed' }]];
+    const asked: unknown[] = [];
+    const { provider } = createAskSurfaceProvider(async (_op, params) => {
+      asked.push(params);
+      return answers.shift() ?? [];
+    }, noPty);
+    expect(await provider.closeSurface('surface:1', { confirmed: true })).toEqual({ outcome: 'closed' });
+    expect(asked[0]).toEqual({ surfaceId: 'surface:1', confirmed: true });
+    expect(asked[1]).toEqual({ surfaceId: 'surface:1', poll: true });
+  });
+
+  it('refuses a surface nobody claims, an ask that failed included', async () => {
+    const { provider: none } = createAskSurfaceProvider(async () => [], noPty);
+    expect((await none.closeSurface('surface:1', {})).outcome).toBe('refused');
+    const { provider: failing } = createAskSurfaceProvider(async () => { throw new Error('gone'); }, noPty);
+    expect((await failing.closeSurface('surface:1', {})).outcome).toBe('refused');
+  });
+});
+
 describe('createAskSurfaceProvider resolveBrowser', () => {
   it('reads the first owner\'s page, crossing only its url and title', async () => {
     const asked: Array<[string, unknown]> = [];

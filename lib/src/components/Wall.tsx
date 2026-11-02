@@ -13,7 +13,10 @@ import { revealWorkspaceTab, workspaceTabElement } from './workspace-tab-element
 import { collapseWorkspace, restoreWorkspaceMotion, workspaceIsCollapsed } from './workspace-motion';
 import { ExternalLinkModalHost } from './ExternalLinkModalHost';
 import { ToolEditorCloseModalHost } from './ToolEditorCloseModalHost';
-import { confirmToolEditorsClose, UNSAVED_TOOL_REFUSAL } from '../lib/tool-editor';
+import { confirmToolEditorsClose, saveToolEditor, toolEditorLabel, UNSAVED_TOOL_REFUSAL } from '../lib/tool-editor';
+import type { SurfaceCloseResult } from 'remote-lib-common';
+import { registerClientCloser, type ClientCloseConsent } from '../remote/burrow/client-close';
+import { closeForClient } from './wall/close-for-client';
 import { isToolDirty } from './ToolDirtyIndicator';
 import { AgentBrowserScreenModalHost } from './AgentBrowserScreenModalHost';
 // Remote-host code (relay/WebSocket/enrollment + the window.dormouseBurrow
@@ -748,6 +751,25 @@ export function Wall({
   const closeSurfaceRef = useRef(closeSurface);
   closeSurfaceRef.current = closeSurface;
 
+  /** A Client's close of a Tool or browser (`docs/specs/remote-api.md` -> "Closing a surface"). */
+  const closeSurfaceForClient = useCallback((id: string, consent: ClientCloseConsent): Promise<SurfaceCloseResult> => {
+    const params = lath.getMeta(id)?.params;
+    return closeForClient(consent, {
+      isTerminal: surfaceKindFromParams(params) === 'terminal',
+      transferRefusal: () => transferRefusal(id),
+      helperRefusal: async () => {
+        const refused = await helperRefusal(id);
+        if (refused) revealRefusal(id, refused);
+        return refused;
+      },
+      needsConfirm: () => closeKind(id, lath.getMeta(id)?.params) === 'confirm',
+      isDirty: () => isToolDirty(id, lath.getMeta(id)?.params),
+      label: () => toolEditorLabel(id),
+      save: () => saveToolEditor(id),
+      close: () => closeSurface(id, [id]),
+    });
+  }, [closeSurface, helperRefusal, lath, revealRefusal, transferRefusal]);
+
   /**
    * The kill gesture on a Surface, from the header, the keyboard, or a Door: a
    * close that would not confirm (`closeKindOf`) runs at once, a Door's in
@@ -976,6 +998,11 @@ export function Wall({
   const ownsSurface = useCallback(
     (id: string): boolean => lath.store.has(id) || doorsRef.current.some((door) => door.id === id),
     [lath],
+  );
+
+  useEffect(
+    () => registerClientCloser({ owns: ownsSurface, close: closeSurfaceForClient }),
+    [closeSurfaceForClient, ownsSurface],
   );
 
   /** Publish membership for the union projection: the Activity store is

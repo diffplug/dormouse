@@ -62,7 +62,7 @@ const PATH_RE = /^\/[^\s\0-\x1f\x7f]*$/;
 /** `Request.destination`: empty, or a lowercase word. */
 const DESTINATION_RE = /^[a-z]{0,32}$/;
 const MAX_METHOD_LENGTH = 32;
-const MAX_SURFACE_ID_LENGTH = 256;
+export const MAX_SURFACE_ID_LENGTH = 256;
 const MAX_WS_REASON_BYTES = 123;
 
 interface Frame {

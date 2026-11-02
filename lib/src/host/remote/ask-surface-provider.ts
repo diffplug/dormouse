@@ -44,6 +44,25 @@ export interface AskSurfaceProvider {
   notifyDirectoryChanged(): void;
 }
 
+/** How long a close may run: past an editor's own save timeout. */
+const CLOSE_DEADLINE_MS = 30_000;
+const CLOSE_POLL_MS = 100;
+
+/** A close's answer as a peer gave it, or `null`: a peer window is another build. */
+function closeAnswerOf(value: unknown): PeerOps['closeOp']['result'] | null {
+  const answer = value as { outcome?: unknown; label?: unknown; message?: unknown } | null | undefined;
+  switch (answer?.outcome) {
+    case 'closed': case 'confirm': case 'pending':
+      return { outcome: answer.outcome };
+    case 'unsaved':
+      return typeof answer.label === 'string' ? { outcome: 'unsaved', label: answer.label } : null;
+    case 'refused':
+      return typeof answer.message === 'string' ? { outcome: 'refused', message: answer.message } : null;
+    default:
+      return null;
+  }
+}
+
 export function createAskSurfaceProvider(
   ask: SurfaceAsk,
   pty: Pick<BurrowSurfaceProvider, 'writePty' | 'resizePty' | 'streamPty'>,
@@ -148,6 +167,20 @@ export function createAskSurfaceProvider(
       >[];
       if (typeof page?.url !== 'string') return null;
       return { url: page.url, ...(typeof page.title === 'string' ? { title: page.title } : {}) };
+    },
+
+    async closeSurface(surfaceId, consent) {
+      const deadline = Date.now() + CLOSE_DEADLINE_MS;
+      let answers = await ask('closeOp', { surfaceId, ...consent } satisfies PeerOps['closeOp']['params']).catch(() => []);
+      if (answers.length === 0) return { outcome: 'refused', message: 'This is no longer open on the computer.' };
+      // Past an answer that went missing, which is no news of the close either way.
+      for (;;) {
+        const answer = closeAnswerOf(answers[0]);
+        if (answer && answer.outcome !== 'pending') return answer;
+        if (Date.now() >= deadline) return { outcome: 'refused', message: 'The computer did not finish closing this in time.' };
+        await new Promise((resolve) => setTimeout(resolve, CLOSE_POLL_MS));
+        answers = await ask('closeOp', { surfaceId, poll: true } satisfies PeerOps['closeOp']['params']).catch(() => []);
+      }
     },
 
     writePty: pty.writePty,

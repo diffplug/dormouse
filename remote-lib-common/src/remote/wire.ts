@@ -1025,6 +1025,7 @@ export const REMOTE_METHODS = {
   surfaceDetach: 'surface.detach',
   terminalWrite: 'terminal.write',
   terminalResize: 'terminal.resize',
+  surfaceClose: 'surface.close',
 } as const;
 
 // Events are dispatched by name, so future events (size-authority notify,
@@ -1035,6 +1036,27 @@ export const REMOTE_EVENTS = {
   terminalData: 'terminal.data',
   terminalClosed: 'terminal.closed',
 } as const;
+
+/**
+ * Ask to close a Tool or an embedded page, as the person at the Burrow would
+ * (`docs/specs/remote-api.md` -> "Closing a surface"). The answer says what
+ * consent the close still needs; the Client asks for it and sends this again.
+ */
+export interface SurfaceCloseParams {
+  surfaceId: string;
+  /** The person answered the kill confirmation. */
+  confirmed?: boolean;
+  /** The person's answer about the Burrow's unsaved edits. */
+  unsaved?: 'save' | 'discard';
+}
+export type SurfaceCloseResult =
+  | { outcome: 'closed' }
+  /** A close that must confirm: ask, then send `confirmed`. */
+  | { outcome: 'confirm' }
+  /** Unsaved edits: ask, then send `unsaved`. `label` names them. */
+  | { outcome: 'unsaved'; label: string }
+  /** Nothing closed, for the reason a person at the Burrow would read. */
+  | { outcome: 'refused'; message: string };
 
 export interface HelloParams {
   protocolVersion: 1;

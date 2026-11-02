@@ -13,6 +13,7 @@ import {
   utf8Decode,
   utf8Encode,
   type AttachParams,
+  type SurfaceCloseParams,
   type DirectoryEntry,
   type HelloParams,
   type HelloResult,
@@ -27,7 +28,7 @@ import {
 import { inputIsReplayTerminalReport } from '../../lib/terminal-report-filter';
 import type { BurrowFrameHost } from './burrow-frame-host';
 import type { BurrowSurfaceProvider, SurfaceHandle, SurfaceHold } from './burrow-surface-provider';
-import { FrameTunnel } from './frame-tunnel';
+import { FrameTunnel, MAX_SURFACE_ID_LENGTH } from './frame-tunnel';
 
 /** Coalesce window for directory re-snapshots (remote-api.md: "Burrow coalesces"). */
 const DIRECTORY_DEBOUNCE_MS = 150;
@@ -67,6 +68,8 @@ export interface RemoteApiSessionOptions {
   onDispose?: () => void;
   /** An attach succeeded: the access log's `attached` (`access-log.ts`). Never told what the surface shows. */
   onAttach?: (surfaceId: string) => void;
+  /** A close succeeded: the access log's `closed`. */
+  onClose?: (surfaceId: string) => void;
 }
 
 /** {@link RemoteApiSessionOptions.holder}. */
@@ -84,6 +87,7 @@ export class RemoteApiSession {
   readonly #holder: SessionHolder;
   readonly #onDispose: (() => void) | null;
   readonly #onAttach: ((surfaceId: string) => void) | null;
+  readonly #onClose: ((surfaceId: string) => void) | null;
 
   #directorySubId: string | null = null;
   #unsubDirectory: (() => void) | null = null;
@@ -104,6 +108,7 @@ export class RemoteApiSession {
     this.#holder = options.holder;
     this.#onDispose = options.onDispose ?? null;
     this.#onAttach = options.onAttach ?? null;
+    this.#onClose = options.onClose ?? null;
     this.#frameHost = options.frames?.host ?? null;
     this.#frames = options.frames
       ? new FrameTunnel({
@@ -131,6 +136,8 @@ export class RemoteApiSession {
           return this.#hello(request);
         case REMOTE_METHODS.directoryWatch:
           return this.#directoryWatch(request);
+        case REMOTE_METHODS.surfaceClose:
+          return this.#surfaceClose(request);
         case REMOTE_METHODS.surfaceAttach:
           return this.#attach(request);
         case REMOTE_METHODS.surfaceDetach:
@@ -239,6 +246,23 @@ export class RemoteApiSession {
     this.#ok(request, result);
     // A hello after the watch changes what the listing may name.
     if (changed) void this.#emitDirectory();
+  }
+
+  /** Only a Client that frames pages has a Tool or page of its own to close. */
+  #surfaceClose(request: RemoteRequest): void {
+    const { surfaceId, confirmed, unsaved } = (request.params ?? {}) as Partial<SurfaceCloseParams>;
+    if (!this.#listsFrames) return this.#fail(request, 'this session closes nothing');
+    if (typeof surfaceId !== 'string' || !surfaceId || surfaceId.length > MAX_SURFACE_ID_LENGTH) {
+      return this.#fail(request, 'invalid surface.close: surfaceId');
+    }
+    if ((confirmed !== undefined && typeof confirmed !== 'boolean') || (unsaved !== undefined && unsaved !== 'save' && unsaved !== 'discard')) {
+      return this.#fail(request, 'invalid surface.close: consent');
+    }
+    void this.#provider.closeSurface(surfaceId, { confirmed, unsaved }).then((result) => {
+      if (this.#disposed) return;
+      if (result.outcome === 'closed') this.#onClose?.(surfaceId);
+      this.#ok(request, result);
+    });
   }
 
   #directoryWatch(request: RemoteRequest): void {

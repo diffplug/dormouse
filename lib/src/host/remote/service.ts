@@ -1733,6 +1733,14 @@ export class BurrowService {
           deviceId: context.deviceId,
           surface: surfaceId,
         }),
+      onClose: (surfaceId) =>
+        this.#logAccess({
+          at: this.#now(),
+          event: 'closed',
+          device: context.label,
+          deviceId: context.deviceId,
+          surface: surfaceId,
+        }),
     });
   }
 

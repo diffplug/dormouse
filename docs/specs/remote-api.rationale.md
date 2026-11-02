@@ -82,6 +82,12 @@ In September 2026 the former `SurfaceHandle.release` was a no-op in `createAskSu
 
 **Why a release names a lease as well as a holder.** A session's own attachments overlap: re-attaching the pane it already holds, or an attach superseded by one to the same pane, sends the earlier attachment's release after the later one took the hold. With the holder alone that release would free the newer hold and re-fit the pane under a phone still attached.
 
+## Closing a surface
+
+**Why the phone asks, not the laptop.** An earlier plan had a Burrow confirm a phone's destructive step on the laptop. A person closing a Tool from their phone is usually away from the laptop, so that prompt would wait for no one. A paired phone can already type `exit` into any terminal, so asking at the phone adds little authority; holding terminals out keeps the new verb as narrow as the feature needs (Ned, 2026-11-01).
+
+**Why the Burrow polls.** A peer op answers synchronously within `ASK_BUDGET_MS`, and a close can wait on a helper's inspection or an editor's save.
+
 ## Frames
 
 **Why never over the relay.** A page is far heavier than a terminal, so a relayed frame would load slowly enough to look broken, and would put every page's volume on the Relay. The Relay would learn no more than ciphertext, sizes, and timing, so this is a product and cost bound rather than a confidentiality one. A session makes one direct attempt, so a phone that gains a route later, by joining a VPN, reconnects to get one.
