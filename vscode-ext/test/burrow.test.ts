@@ -6,6 +6,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { silentAnswers } from '../../lib/src/host/remote/service-protocol';
 import { createServer, type Server, type Socket } from 'node:net';
 import { mkdir } from 'node:fs/promises';
 import { hostname } from 'node:os';
@@ -1327,6 +1328,18 @@ describe('burrow provider', () => {
     bound.answers.set('closeOwnerOp', [{ ptyId: 'surface:1' }]);
     expect(await provider.closeSurface('surface:1', { confirmed: true })).toEqual({ outcome: 'closed' });
     expect(bound.asked.at(-1)).toEqual({ op: 'closeOp', params: { surfaceId: 'surface:1', confirmed: true } });
+  });
+
+  it('keeps the rows of a window that did not answer, on either tier', async () => {
+    const mod = await freshBurrow();
+    const bound = fakeDeps();
+    bound.answers.set('directory', [{ surfaceId: 'surface:1' }]);
+    const provider = mod.createBurrowProvider(bound.deps());
+    expect(await provider.collectDirectory()).toEqual([{ surfaceId: 'surface:1' }]);
+    bound.answers.set('directory', silentAnswers([]));
+    expect(await provider.collectDirectory()).toEqual([{ surfaceId: 'surface:1' }]);
+    bound.answers.set('directory', []);
+    expect(await provider.collectDirectory()).toEqual([]);
   });
 
   it('reports no surface when nobody answers', async () => {

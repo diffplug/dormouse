@@ -3,7 +3,6 @@ import { MODAL_OVERLAY_INSET, modalActionButton, ModalFrame } from './design';
 
 /** What a close is asking, in the desktop's words (`docs/specs/mobile-terminal-ui.md` -> "Browser"). */
 export type MobileCloseDialogState =
-  | { kind: 'open-link'; url: string; onOpen: () => void; onCancel: () => void }
   | { kind: 'confirm'; char: string; onConfirm: () => void; onCancel: () => void }
   | {
       kind: 'unsaved';
@@ -20,14 +19,12 @@ const TITLE: Record<MobileCloseDialogState['kind'], string> = {
   confirm: 'Confirm kill',
   unsaved: 'Save changes?',
   refused: 'Not closed',
-  'open-link': 'Open this link?',
 };
 
 const ESCAPE: Record<MobileCloseDialogState['kind'], (state: never) => () => void> = {
   confirm: (state: { onCancel: () => void }) => state.onCancel,
   unsaved: (state: { onCancel: () => void }) => state.onCancel,
   refused: (state: { onDismiss: () => void }) => state.onDismiss,
-  'open-link': (state: { onCancel: () => void }) => state.onCancel,
 };
 
 export function MobileCloseDialog({ state }: { state: MobileCloseDialogState }) {
@@ -79,16 +76,6 @@ function DialogBody({ state, firstButton }: { state: MobileCloseDialogState; fir
             <button type="button" disabled={state.saving} onClick={state.onSave} className={modalActionButton({ tone: 'primary', class: 'min-h-10' })}>{state.saving ? 'Saving…' : 'Save'}</button>
           </div>
         </>
-      );
-    case 'open-link':
-      return (
-        <div className="mt-2">
-          <p className="break-words text-xs text-muted">{state.url}</p>
-          <div className="mt-3 flex justify-end gap-2">
-            <button ref={firstButton} type="button" onClick={state.onCancel} className={modalActionButton({ tone: 'secondary' })}>Cancel</button>
-            <button type="button" onClick={state.onOpen} className={modalActionButton({ tone: 'primary' })}>Open</button>
-          </div>
-        </div>
       );
     case 'refused':
       return (

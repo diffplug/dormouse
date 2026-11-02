@@ -33,7 +33,8 @@ export type PeerLinkRequest =
 
 /** Peer window → broker. */
 export type PeerLinkResponse =
-  | { kind: 'result'; id: string; results: unknown[] }
+  // `silent`: the peer's own webviews did not all answer (`AskAnswers`).
+  | { kind: 'result'; id: string; results: unknown[]; silent?: boolean }
   | { kind: 'subscribed'; id: string; ptyId: string }
   // `textData` rides the frame under the `ProcessedPtyChunk` rule: omitted when
   // it equals `data` (`lib/src/lib/processed-pty-stream.ts`).

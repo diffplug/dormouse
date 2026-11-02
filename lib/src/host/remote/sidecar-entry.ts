@@ -32,6 +32,8 @@ import {
   BURROW_ASK_EVENT,
   isBurrowCommand,
   type AnswerParams,
+  silentAnswers,
+  type AskAnswers,
 } from './service-protocol';
 
 /** The slice of `pty-core`'s manager the Burrow drives. */
@@ -115,7 +117,7 @@ export function createSidecarSurfaceBridge(
   const SOLE_WINDOW = '';
   let windows = new Set<string>([SOLE_WINDOW]);
 
-  function ask(op: string, params: unknown): Promise<unknown[]> {
+  function ask(op: string, params: unknown): Promise<AskAnswers> {
     const burrowRequestId = `ask-${++askSeq}`;
     return new Promise((resolve) => {
       const pending: PendingAsk = {
@@ -125,7 +127,8 @@ export function createSidecarSurfaceBridge(
           clearTimeout(timer);
           asks.delete(burrowRequestId);
           const labels = [...pending.results.keys()].sort();
-          resolve(labels.flatMap((label) => pending.results.get(label)!));
+          const answers = labels.flatMap((label) => pending.results.get(label)!);
+          resolve(pending.awaiting.size > 0 ? silentAnswers(answers) : answers);
         },
       };
       const timer = setTimeout(() => {

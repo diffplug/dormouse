@@ -38,6 +38,8 @@ import {
   type TakeBackResult,
   type AccessLogResult,
   type PairedDevicesResult,
+  silentAnswers,
+  type AskAnswers,
 } from '../../lib/src/host/remote/service-protocol';
 import type { BurrowSurfaceProvider } from '../../lib/src/remote/burrow/burrow-surface-provider';
 import { createBurrowFrameHost } from '../../lib/src/host/remote/frame-host';
@@ -75,7 +77,7 @@ import { log } from './log';
  */
 export interface BurrowDeps {
   /** Fan one question out to this window's webviews and collect the answers. */
-  brokerRequest(op: string, params: unknown): Promise<unknown[]>;
+  brokerRequest(op: string, params: unknown): Promise<AskAnswers>;
   /** Post to every live webview in this window. */
   broadcastToWebviews(message: ExtensionMessage): void;
   writePty(ptyId: string, data: string): void;
@@ -119,7 +121,7 @@ async function askBothTiers(
   op: string,
   params: unknown,
   ownerPtyId?: string,
-): Promise<unknown[]> {
+): Promise<AskAnswers> {
   // A mutating ask cannot itself discover its owner: duplicated cold-restored
   // windows may both answer the same surface id, and act on it before the first
   // result was selected. Probe identity read-only, then send the ask only to the
@@ -139,7 +141,8 @@ async function askBothTiers(
     bound.brokerRequest(op, params),
     remoteRequest(op, params),
   ]);
-  return [...local, ...remote];
+  const answers = [...local, ...remote];
+  return local.silent || remote.silent ? silentAnswers(answers) : answers;
 }
 
 /**

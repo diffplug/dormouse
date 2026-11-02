@@ -23,7 +23,7 @@ import { toolControl } from './tool-host';
 import { reserveSurfaceIds } from './surface-ids';
 import { maxSurfaceIdNumber } from 'dor/protocol';
 import type { ToolHostRequest } from '../../lib/src/lib/platform/types';
-import { askBudgetMs } from '../../lib/src/host/remote/service-protocol';
+import { askBudgetMs, silentAnswers, type AskAnswers } from '../../lib/src/host/remote/service-protocol';
 import { configurePeerLink, remoteNotifyPeerChange } from './peer-link';
 import { createProcessedPtyStreams } from './processed-pty-streams';
 import {
@@ -140,7 +140,7 @@ function writeClientInput(ptyId: string, data: string): void {
  * broker window's over the link, never a webview; that is why it is a plain
  * promise rather than message plumbing.
  */
-function brokerRequest(op: string, params: unknown): Promise<unknown[]> {
+function brokerRequest(op: string, params: unknown): Promise<AskAnswers> {
   const peers = [...activeRouters];
   if (peers.length === 0) return Promise.resolve([]);
 
@@ -151,7 +151,7 @@ function brokerRequest(op: string, params: unknown): Promise<unknown[]> {
       if (!request) return;
       peerRequests.delete(requestId);
       clearTimeout(request.timer);
-      resolve(request.results);
+      resolve(request.pending.size > 0 ? silentAnswers(request.results) : request.results);
     };
     peerRequests.set(requestId, {
       pending: new Set(peers),

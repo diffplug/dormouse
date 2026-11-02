@@ -8,7 +8,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { clsx } from 'clsx';
 import { FRAME_BOOTSTRAP_PATH, type DirectPath, type DirectRelayCause } from 'remote-lib-common';
 import { MobileBrowserPane, type MobileBrowserStatus } from '../../components/MobileBrowserPane';
-import { MobileCloseDialog } from '../../components/MobileCloseDialog';
+import { ExternalLinkModal } from '../../components/ExternalLinkModal';
+import { inspectExternalUri } from '../../lib/external-links';
+import { isBrowsableUrl } from '../../lib/platform/browser-automation';
 import type { FrameClient, OpenFrame } from '../client/frame-client';
 import { embedderOrigins } from '../../lib/embedder-origins';
 import { messageOf } from '../../lib/errors';
@@ -36,8 +38,6 @@ export interface PocketBrowserFrameProps {
   originFor: (surfaceId: string, pageOrigin: string) => Promise<string>;
   transport: FrameTransport;
   visible: boolean;
-  /** Whether a document is open here, which only the Burrow's word ends. */
-  onHolding?: (surfaceId: string, holding: boolean) => void;
   onReconnect: () => void;
   onShowSessions: () => void;
 }
@@ -56,7 +56,6 @@ export function PocketBrowserFrame({
   originFor,
   transport,
   visible,
-  onHolding,
   onReconnect,
   onShowSessions,
 }: PocketBrowserFrameProps): React.ReactElement {
@@ -139,13 +138,6 @@ export function PocketBrowserFrame({
     };
   }, [isTool, joined, opened, surfaceId]);
 
-  const holding = opened !== null && ended === null;
-  useEffect(() => {
-    if (!holding) return;
-    onHolding?.(surfaceId, true);
-    return () => onHolding?.(surfaceId, false);
-  }, [holding, onHolding, surfaceId]);
-
   // The shim hands a new-window request to whoever frames the page, which has no
   // pane to open: its own page loads in place, and elsewhere is one tap away.
   const [link, setLink] = useState<string | null>(null);
@@ -155,14 +147,8 @@ export function PocketBrowserFrame({
       const page = pageRef.current;
       const data = event.data as { __dormouse?: unknown; url?: unknown } | null;
       if (!page || event.source !== page.contentWindow || event.origin !== opened.origin) return;
-      if (data?.__dormouse !== 'open-window' || typeof data.url !== 'string') return;
-      let url: URL;
-      try {
-        url = new URL(data.url);
-      } catch {
-        return;
-      }
-      if (url.protocol !== 'http:' && url.protocol !== 'https:') return;
+      if (data?.__dormouse !== 'open-window' || !isBrowsableUrl(data.url)) return;
+      const url = new URL(data.url);
       if (url.origin === opened.origin || url.origin === pageOrigin) {
         page.src = `${opened.origin}${url.pathname}${url.search}${url.hash}`;
       } else {
@@ -214,15 +200,12 @@ export function PocketBrowserFrame({
         onShowSessions={onShowSessions}
       />
       {link && visible ? (
-        <MobileCloseDialog
-          state={{
-            kind: 'open-link',
-            url: link,
-            onOpen: () => {
-              window.open(link, '_blank', 'noopener,noreferrer');
-              setLink(null);
-            },
-            onCancel: () => setLink(null),
+        <ExternalLinkModal
+          request={{ uri: link, displayText: '', verdict: 'match', decision: inspectExternalUri(link) }}
+          onCancel={() => setLink(null)}
+          onConfirm={() => {
+            window.open(link, '_blank', 'noopener,noreferrer');
+            setLink(null);
           }}
         />
       ) : null}

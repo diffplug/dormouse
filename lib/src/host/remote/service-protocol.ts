@@ -51,6 +51,14 @@ export const ASK_BUDGET_MS = 1_000;
  */
 const CLOSE_BUDGET_MS = 60_000;
 
+/**
+ * What an ask collected. `silent`: someone it went to never answered, so what is
+ * missing here may only be late, and no answer is not the same as no owner.
+ */
+export type AskAnswers = unknown[] & { silent?: true };
+
+export const silentAnswers = (answers: unknown[]): AskAnswers => Object.assign(answers, { silent: true as const });
+
 /** The budget for answering `op`. */
 export const askBudgetMs = (op: string): number => (op === 'closeOp' ? CLOSE_BUDGET_MS : ASK_BUDGET_MS);
 

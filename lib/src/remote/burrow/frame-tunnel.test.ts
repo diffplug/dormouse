@@ -120,7 +120,6 @@ function setup({ isDirect = () => true }: { isDirect?: () => boolean } = {}) {
     isDirect,
     provider,
     leaseOwner: 'remote:holder',
-    directoryWatched: () => false,
     ok: (request, result) => sent.push({ requestId: request.requestId, ok: true, result }),
     fail: (request, error) => sent.push({ requestId: request.requestId, ok: false, error }),
     event: (subId, event, data) => sent.push({ subId, event, data }),
@@ -229,29 +228,13 @@ describe('frame.open', () => {
     expect(t.watchers.size).toBe(0);
   });
 
-  it('keeps a frame a listing wrongly says is gone, asking the owner first', async () => {
-    const t = setup();
-    const id = await t.open();
-    // An older snapshot, and one a timeout left empty.
-    t.tunnel.revalidate([{ surfaceId: 'surface:1', browser: { render: 'iframe', url: 'http://localhost:9999/' } } as never]);
-    t.tunnel.revalidate([]);
-    await flush();
-    expect(t.host.upstreams[0]!.closed).toBe(false);
-    expect(t.events(id, FRAME_EVENTS.frameClosed)).toEqual([]);
-    t.pages.delete('surface:1');
-    t.tunnel.revalidate([]);
-    await flush();
-    expect(t.host.upstreams[0]!.closed).toBe(true);
-    expect(t.events(id, FRAME_EVENTS.frameClosed)).toHaveLength(1);
-  });
-
   it('keeps a frame through its owner\'s silence, for a time', async () => {
     vi.useFakeTimers();
     const t = setup();
     const id = t.call(FRAME_METHODS.frameOpen, OPEN);
     await vi.advanceTimersByTimeAsync(0);
     t.provider.resolveBrowser = vi.fn(async () => { throw new Error('the surface owner did not answer'); });
-    t.tunnel.revalidate([]);
+    t.notify();
     await vi.advanceTimersByTimeAsync(OWNER_SILENCE_LIMIT_MS - 1_000);
     expect(t.host.upstreams[0]!.closed).toBe(false);
     expect((t.provider.resolveBrowser as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(10);
@@ -267,12 +250,12 @@ describe('frame.open', () => {
     await vi.advanceTimersByTimeAsync(0);
     const answer = t.provider.resolveBrowser;
     t.provider.resolveBrowser = vi.fn(async () => { throw new Error('silent'); });
-    t.tunnel.revalidate([]);
+    t.notify();
     await vi.advanceTimersByTimeAsync(OWNER_SILENCE_LIMIT_MS - 1_000);
     t.provider.resolveBrowser = answer;
     await vi.advanceTimersByTimeAsync(1_000);
     t.provider.resolveBrowser = vi.fn(async () => { throw new Error('silent'); });
-    t.tunnel.revalidate([]);
+    t.notify();
     await vi.advanceTimersByTimeAsync(OWNER_SILENCE_LIMIT_MS - 1_000);
     expect(t.host.upstreams[0]!.closed).toBe(false);
   });

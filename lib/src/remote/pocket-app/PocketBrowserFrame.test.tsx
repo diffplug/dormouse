@@ -161,7 +161,7 @@ describe('PocketBrowserFrame', () => {
       await ask('https://example.com/docs');
       expect(open).not.toHaveBeenCalled();
       expect(document.body.textContent).toContain('https://example.com/docs');
-      await act(async () => [...document.querySelectorAll('button')].find((b) => b.textContent === 'Open')!.click());
+      await act(async () => [...document.querySelectorAll('button')].find((b) => b.textContent === 'Open URL')!.click());
       expect(open).toHaveBeenCalledExactlyOnceWith('https://example.com/docs', '_blank', 'noopener,noreferrer');
       expect(document.body.textContent).not.toContain('https://example.com/docs');
     });

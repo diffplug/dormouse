@@ -8,6 +8,7 @@
 
 
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
+import { ASK_BUDGET_MS } from '../../lib/src/host/remote/service-protocol';
 
 import type { ExtensionMessage, WebviewMessage } from '../src/message-types';
 import type { AlertCommand } from '../../lib/src/host/alert-protocol';
@@ -419,6 +420,31 @@ describe('webview fan-out', () => {
     } finally {
       disposeFirst.dispose();
       disposeSecond.dispose();
+    }
+  });
+
+  it('says silent when a webview never answered, and not when each did', async () => {
+    vi.useFakeTimers();
+    const first = fakeWebview();
+    const second = fakeWebview();
+    const disposeFirst = router.attachRouter(first.channel);
+    const disposeSecond = router.attachRouter(second.channel);
+    try {
+      const whole = wiring.peer!.brokerRequest('directory', {});
+      first.send({ type: 'peer:answer', requestId: first.lastAskId(), results: [] } as never);
+      second.send({ type: 'peer:answer', requestId: second.lastAskId(), results: [] } as never);
+      expect((await whole).silent).toBeUndefined();
+
+      const partial = wiring.peer!.brokerRequest('directory', {});
+      first.send({ type: 'peer:answer', requestId: first.lastAskId(), results: [{ surfaceId: 'a' }] } as never);
+      await vi.advanceTimersByTimeAsync(ASK_BUDGET_MS);
+      const answers = await partial;
+      expect(answers.silent).toBe(true);
+      expect([...answers]).toEqual([{ surfaceId: 'a' }]);
+    } finally {
+      disposeFirst.dispose();
+      disposeSecond.dispose();
+      vi.useRealTimers();
     }
   });
 

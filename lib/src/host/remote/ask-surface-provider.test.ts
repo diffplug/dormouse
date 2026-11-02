@@ -1,8 +1,8 @@
 // @vitest-environment node
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import type { DirectoryEntry, SurfaceHold } from '../../remote/burrow/burrow-surface-provider';
 import { createAskSurfaceProvider } from './ask-surface-provider';
-import { ASK_BUDGET_MS } from './service-protocol';
+import { silentAnswers, type AskAnswers } from './service-protocol';
 
 const entry = (surfaceId: string, title: string): DirectoryEntry => ({
   paneRef: surfaceId,
@@ -109,33 +109,31 @@ describe('createAskSurfaceProvider holds', () => {
   });
 });
 
-describe('createAskSurfaceProvider resolveBrowser', () => {
+describe('an ask someone did not answer', () => {
   const noPty = { writePty: () => {}, resizePty: () => {}, streamPty: () => () => {} } as never;
-  afterEach(() => { vi.useRealTimers(); });
 
-  it('says no page when everyone answered, and throws when someone stayed silent', async () => {
+  it('is no answer about a page, where everyone answering is', async () => {
     const { provider: answered } = createAskSurfaceProvider(async () => [], noPty);
     await expect(answered.resolveBrowser('surface:1')).resolves.toBeNull();
-    vi.useFakeTimers();
-    const { provider: silent } = createAskSurfaceProvider(async () => {
-      await new Promise((resolve) => { setTimeout(resolve, ASK_BUDGET_MS); });
-      return [];
-    }, noPty);
-    const asking = silent.resolveBrowser('surface:1');
-    const settled = expect(asking).rejects.toThrow('did not answer');
-    await vi.advanceTimersByTimeAsync(ASK_BUDGET_MS);
-    await settled;
+    const { provider: silent } = createAskSurfaceProvider(async () => silentAnswers([]), noPty);
+    await expect(silent.resolveBrowser('surface:1')).rejects.toThrow('did not answer');
+    const { provider: late } = createAskSurfaceProvider(async () => silentAnswers([{ url: 'http://localhost:5173/' }]), noPty);
+    await expect(late.resolveBrowser('surface:1')).resolves.toBe('http://localhost:5173/');
   });
 
-  it('takes a late answer, however long it took', async () => {
-    vi.useFakeTimers();
-    const { provider } = createAskSurfaceProvider(async () => {
-      await new Promise((resolve) => { setTimeout(resolve, ASK_BUDGET_MS); });
-      return [{ url: 'http://localhost:5173/' }];
-    }, noPty);
-    const asking = provider.resolveBrowser('surface:1');
-    await vi.advanceTimersByTimeAsync(ASK_BUDGET_MS);
-    await expect(asking).resolves.toBe('http://localhost:5173/');
+  it('keeps the silent window\'s rows, until an ask everyone answered says they went', async () => {
+    const answers: AskAnswers[] = [
+      [entry('a', 'A'), entry('b', 'B')],
+      silentAnswers([entry('b', 'B renamed')]),
+      silentAnswers([]),
+      [entry('b', 'B')],
+    ];
+    const { provider } = createAskSurfaceProvider(async () => answers.shift()!, noPty);
+    const titles = async () => (await provider.collectDirectory()).map((row) => `${row.surfaceId}:${row.title}`);
+    expect(await titles()).toEqual(['a:A', 'b:B']);
+    expect(await titles()).toEqual(['b:B renamed', 'a:A']);
+    expect(await titles()).toEqual(['b:B renamed', 'a:A']);
+    expect(await titles()).toEqual(['b:B']);
   });
 });
 

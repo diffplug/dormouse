@@ -37,7 +37,6 @@ import {
   type HttpRequestParams,
   type HttpResponseHead,
   type HttpWriteParams,
-  type DirectoryEntry,
   type RemoteRequest,
   type WsCloseParams,
   type WsClosedEvent,
@@ -130,8 +129,6 @@ export interface FrameTunnelOptions {
   provider: BurrowSurfaceProvider;
   /** The lease owner every grant of this session is held under. */
   leaseOwner: string;
-  /** Whether the session collects the directory itself, and hands it to `revalidate`. */
-  directoryWatched(): boolean;
   ok(request: RemoteRequest, result: unknown): void;
   fail(request: RemoteRequest, error: string): void;
   event(subId: string, event: string, data: unknown): void;
@@ -294,10 +291,7 @@ export class FrameTunnel {
 
   #watch(): void {
     if (this.#unwatch) return;
-    this.#unwatch = this.#options.provider.watchDirectory(() => {
-      // A session watching the directory hands each listing to `revalidate`.
-      if (!this.#options.directoryWatched()) this.#scheduleRecheck();
-    });
+    this.#unwatch = this.#options.provider.watchDirectory(() => this.#scheduleRecheck());
   }
 
   #stopWatching(): void {
@@ -319,17 +313,9 @@ export class FrameTunnel {
 
   /**
    * A frame lives no longer than its surface's page: one whose surface is
-   * gone, no longer embeds a page, or shows another origin, closes. A listing
-   * only raises the question, being able to predate the frame or to have timed
-   * out empty: the surface's owner answers it.
+   * gone, no longer embeds a page, or shows another origin, closes. Its owner
+   * says, as a listing cannot: one can predate the frame.
    */
-  revalidate(entries: readonly DirectoryEntry[]): void {
-    const pages = new Map(entries.flatMap((entry) => (entry.browser ? [[entry.surfaceId, entry.browser.url]] : [])));
-    for (const frame of this.#frames.values()) {
-      if (normalizeOrigin(pages.get(frame.surfaceId)) !== frame.pageOrigin) void this.#recheck(frame);
-    }
-  }
-
   async #recheck(frame: Frame): Promise<void> {
     let url: string | null = null;
     try {

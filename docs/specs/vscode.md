@@ -211,7 +211,7 @@ The service asks every webview what only it knows (`docs/specs/transport.md` →
 
 Every webview, broker or not, installs the responder (`docs/specs/transport.md` → "Message protocol"); it carries none of the relay, enrollment, or pairing machinery.
 
-**A peer answer belongs to the authenticated broker socket that asked for it**: if that broker disappears mid-fan-out the answer is dropped even when this window has already connected to a replacement, since **request ids restart per broker**. A rejected fan-out contributes an empty answer. **Nothing in an answer but its `ptyId` (`routedPtyId`) is interpreted below the Burrow.**
+**An ask must say `silent` when someone it went to never answered**, on either tier, since no answer is not the same as no owner (`AskAnswers` in `lib/src/host/remote/service-protocol.ts`). **A peer answer belongs to the authenticated broker socket that asked for it**: if that broker disappears mid-fan-out the answer is dropped even when this window has already connected to a replacement, since **request ids restart per broker**. A rejected fan-out contributes an empty answer. **Nothing in an answer but its `ptyId` (`routedPtyId`) is interpreted below the Burrow.**
 
 **A client close fans out a read-only `closeOwnerOp` first, and goes only to the first answer's tier and peer, or nowhere**: a duplicated cold-restored window's copy must not close unasked, and a window too slow to answer the probe could still act on a broadcast.
 
