@@ -15,7 +15,7 @@
       "author": "Murat Doğan, Paul-Louis Ageneau",
       "homepage": "https://github.com/murat-dogan/node-datachannel",
       "versions": [
-        "0.33.4"
+        "0.33.6"
       ]
     },
     {
@@ -24,7 +24,7 @@
       "author": "Murat Doğan, Paul-Louis Ageneau",
       "homepage": "https://github.com/murat-dogan/node-datachannel",
       "versions": [
-        "0.33.4"
+        "0.33.6"
       ]
     },
     {
@@ -33,7 +33,7 @@
       "author": "Murat Doğan, Paul-Louis Ageneau",
       "homepage": "https://github.com/murat-dogan/node-datachannel",
       "versions": [
-        "0.33.4"
+        "0.33.6"
       ]
     },
     {
@@ -42,7 +42,7 @@
       "author": "Murat Doğan, Paul-Louis Ageneau",
       "homepage": "https://github.com/murat-dogan/node-datachannel",
       "versions": [
-        "0.33.4"
+        "0.33.6"
       ]
     },
     {
@@ -51,7 +51,7 @@
       "author": "Murat Doğan, Paul-Louis Ageneau",
       "homepage": "https://github.com/murat-dogan/node-datachannel",
       "versions": [
-        "0.33.4"
+        "0.33.6"
       ]
     },
     {
@@ -60,7 +60,7 @@
       "author": "Murat Doğan, Paul-Louis Ageneau",
       "homepage": "https://github.com/murat-dogan/node-datachannel",
       "versions": [
-        "0.33.4"
+        "0.33.6"
       ]
     },
     {
@@ -258,7 +258,7 @@
       "author": "Murat Doğan, Paul-Louis Ageneau",
       "homepage": "https://github.com/murat-dogan/node-datachannel#readme",
       "versions": [
-        "0.33.4"
+        "0.33.6"
       ]
     },
     {
@@ -411,7 +411,7 @@
       "author": "Einar Otto Stangvik <einaros@gmail.com> (http://2x.io)",
       "homepage": "https://github.com/websockets/ws",
       "versions": [
-        "8.22.0"
+        "8.22.1"
       ]
     },
     {
@@ -1187,7 +1187,7 @@
       "author": "Petyo Ivanov",
       "homepage": "https://mdxeditor.dev/",
       "versions": [
-        "4.3.3"
+        "4.3.4"
       ]
     },
     {
@@ -3003,7 +3003,6 @@
       "author": "Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)",
       "homepage": "https://github.com/syntax-tree/mdast-util-from-markdown",
       "versions": [
-        "2.0.3",
         "2.1.0"
       ]
     },
@@ -3898,7 +3897,7 @@
       "author": "Yusuke Wada <yusuke@kamawada.com> (https://github.com/yusukebe)",
       "homepage": "https://hono.dev",
       "versions": [
-        "4.13.14"
+        "4.13.16"
       ]
     },
     {
@@ -4161,7 +4160,7 @@
       "author": "Sami Koskimäki <sami@jakso.me>",
       "homepage": "https://kysely.dev",
       "versions": [
-        "0.29.7"
+        "0.29.8"
       ]
     },
     {

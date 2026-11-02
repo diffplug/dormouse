@@ -348,9 +348,11 @@ Source of truth: `hosted/server/metric-labels.ts`; `recordMetric` and `authMetri
 
 **Must verify the three production Worker bundles and run the consumer's integration suite before release.** Only test entries inject deterministic Better Auth. Simulated callbacks do not certify provider registrations; production acceptance requires real browser login with each enabled provider and email delivery.
 
+**Must isolate test stacks from development and concurrent runs, remove containers and volumes on teardown, and reap abandoned stacks only after their owner exits.**
+
 **Must keep production, test, and preview databases and credentials separate.** The development and preview entries are email-only. Production configuration and operator steps live in `hosted/README.md`.
 
-Source of truth: `allowedDevRequest` in `hosted/server/dev-host-guard.ts`; `hosted/server/dev.ts`; `accountRoutes` and `accountCron` in `hosted/server/account-routes.ts`; `build` in `hosted/package.json`. Pinned by `hosted/server/tests/boundary.test.ts`.
+Source of truth: `allowedDevRequest` in `hosted/server/dev-host-guard.ts`; `hosted/server/dev.ts`; `accountRoutes` and `accountCron` in `hosted/server/account-routes.ts`; `build` in `hosted/package.json`; `hosted/scripts/test-databases.mjs`. Pinned by `hosted/server/tests/boundary.test.ts`.
 
 ## PR previews
 

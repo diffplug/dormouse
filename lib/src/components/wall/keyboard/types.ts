@@ -56,6 +56,10 @@ export interface WallKeyboardCtx {
   reopenClosed: () => void;
   acceptKill: () => void;
   rejectKill: () => void;
+  /** The key that raised the stray-key prompt, while it shows. */
+  strayKeyRef: RefObject<string | null>;
+  raiseStrayKey: (key: string) => void;
+  dismissStrayKey: () => void;
   setRenamingPaneId: Dispatch<SetStateAction<string | null>>;
   fireEvent: (event: WallEvent) => void;
 }
