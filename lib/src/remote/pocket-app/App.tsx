@@ -26,7 +26,7 @@ import {
   type PocketSocket,
 } from '../client/pocket-client';
 import { PasskeyAlreadyRegisteredError, browserWebAuthn } from '../client/webauthn';
-import { deploymentDirectPeer, pocketDeploymentSource, type PocketDeployment } from './deployment';
+import { deploymentDirectPeer, frameDomainFor, pocketDeploymentSource, type PocketDeployment } from './deployment';
 import { BURROW_IS_AN_APP, SCAN_LABEL, SETUP_PATH } from '../setup-copy';
 import {
   UNMINTED_DELIVERY_ID_ERROR,
@@ -50,7 +50,7 @@ import {
 } from '../client/push-subscribe';
 import type { RemotePtyAdapter } from '../client/remote-adapter';
 import { disposeAllSessions } from '../../lib/terminal-registry';
-import { PocketWall } from './PocketWall';
+import { PocketWall, type PocketBrowsers } from './PocketWall';
 import { ScanInvitation, type StartScan } from './ScanInvitation';
 import { ErrorRow, PK, pkButton } from './pocket-chrome';
 import { mountRemoteWall } from './remote-wall';
@@ -448,7 +448,11 @@ export default function App({
         throw new Error(decision.message);
       }
       try {
-        adapterRef.current = await mountRemoteWall(client);
+        // Past `requireDeployment`, so this reads the answer it just got.
+        adapterRef.current = await mountRemoteWall(
+          client,
+          frameDomainFor(deploymentSource.known, location.origin) ? { frames: true } : undefined,
+        );
       } catch (err) {
         // The session is already established, and the throw sends the user back
         // to the Burrows list — where nothing can end it. Leaving it up keeps
@@ -461,7 +465,7 @@ export default function App({
 
       setPhase({ at: 'wall', burrow });
     },
-    [client, endSession, loadBurrows, requireDeployment],
+    [client, deploymentSource, endSession, loadBurrows, requireDeployment],
   );
 
   const onConnect = (burrow: BurrowView) => run('connect', () => connectTo(burrow));
@@ -698,6 +702,8 @@ export default function App({
     setPhase({ at: 'scan' });
   };
 
+  const frameDomain = frameDomainFor(deployment, location.origin);
+
   switch (phase.at) {
     case 'scan':
       return (
@@ -756,6 +762,16 @@ export default function App({
           transport={transport}
           onLeave={leaveWall}
           onError={onWallError}
+          browsers={frameDomain ? {
+            session: client,
+            burrowId: phase.burrow.burrowId,
+            frameDomain,
+            transport,
+            onReconnect: () => {
+              leaveWall();
+              onConnect(phase.burrow);
+            },
+          } : undefined}
         />
       ) : (
         <Waiting />
@@ -870,6 +886,7 @@ export function ConnectedView({
   transport = RELAYED_TRANSPORT,
   onLeave,
   onError,
+  browsers,
 }: {
   burrow: BurrowView;
   adapter: RemotePtyAdapter;
@@ -877,6 +894,8 @@ export function ConnectedView({
   transport?: TransportView;
   onLeave: () => void;
   onError?: (error: unknown) => void;
+  /** Where this phone frames pages. */
+  browsers?: PocketBrowsers;
 }): React.ReactElement {
   return (
     <div className={PK.app}>
@@ -888,7 +907,7 @@ export function ConnectedView({
         <TransportIndicator transport={transport} />
       </header>
       <div className={PK.wallHost}>
-        <PocketWall adapter={adapter} onError={onError} />
+        <PocketWall adapter={adapter} browsers={browsers} onError={onError} />
       </div>
     </div>
   );

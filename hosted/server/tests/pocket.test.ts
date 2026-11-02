@@ -8,6 +8,7 @@ import {
   isEnrollUserCode,
   isBurrowEnrollBeginResponse,
   isRelayBearer,
+  HOSTED_POCKET_DEPLOYMENT,
   pocketContentSecurityPolicy,
   toBase64Url,
 } from "remote-lib-common";
@@ -84,7 +85,7 @@ test("the shell answers the root, every deep link, and its own name, uncached-un
     expect(response.status, path).toBe(200);
     expect(await response.text(), path).toBe(SHELL);
     expect(response.headers.get("content-security-policy"), path).toBe(
-      pocketContentSecurityPolicy(origin),
+      pocketContentSecurityPolicy(origin, HOSTED_POCKET_DEPLOYMENT.frameDomain),
     );
     expect(response.headers.get("cache-control"), path).toBe("no-cache");
     expect(response.headers.get("x-frame-options"), path).toBe("DENY");

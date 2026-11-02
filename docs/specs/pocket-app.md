@@ -50,7 +50,7 @@ flowchart TD
 
 **Runtimes are gated, not degraded**: `probeNoiseSupport` runs before sign-in, setup, pairing, or connection; `false` renders a fixed upgrade requirement instead.
 
-**Pocket hides `MobileWall`'s local Kill affordance**: v1 grants no phone-side kill or layout authority (rationale).
+**Pocket hides `MobileWall`'s Kill on a terminal**: v1 grants no phone-side terminal kill or layout authority (rationale). A Tool or embedded page closes through `surface.close` (`docs/specs/remote-api.md` -> "Closing a surface").
 
 **An inline image crosses the relay as the ordered `terminal.data` messages its PTY chunks produce**, reassembled by Pocket's own xterm, which loads ImageAddon wherever the terminal's `inlineImages` setting is on. **Nothing coalesces them and no size gates them** (rationale); each is bounded only by what the Burrow feeds its parser ([remote-api.md](./remote-api.md) → Terminal surfaces).
 
@@ -196,7 +196,7 @@ Source of truth: `SessionExpiredError` in `lib/src/remote/client/pocket-client.t
 
 ## Frame origin
 
-A framed page (`docs/specs/remote-api.md` -> "Frames") runs at a frame origin: a worker at its root, a bootstrap page in a hidden frame beside the page, and nothing else served. **The worker relays every same-origin request and a page's socket to the bootstrap page, and it to the Client window**, which answers through one `OpenFrame`. Nothing is built into Pocket's bundle or shown yet ([Future](#future)).
+A framed page (`docs/specs/remote-api.md` -> "Frames") runs at a frame origin: a worker at its root, a bootstrap page in a hidden frame beside the page, and nothing else served. **The worker relays every same-origin request and a page's socket to the bootstrap page, and it to the Client window**, which answers through one `OpenFrame`. `PocketBrowserFrame` is the Client window's end.
 
 - **Never serve a frame at Pocket's origin**: its page could use Pocket's keys and session. A sandbox without `allow-same-origin` is no alternative, since it leaves no worker to intercept the page.
 - **Must give each Surface's page its own origin**, the grant boundary a local pane has (`docs/specs/dor-browser.md` -> "Iframe Renderer"). A framed page is same-origin with its bootstrap page and worker, so it can write to everything they hold.
@@ -207,7 +207,14 @@ A framed page (`docs/specs/remote-api.md` -> "Frames") runs at a frame origin: a
 - **Never count on a framed page's own browser storage surviving a relaunch** (rationale); a built-in Tool keeps none (`docs/specs/dor-tools-builtin.md` -> "Editing files").
 - **The page's `WebSocket` is shimmed by a tunneled grant alone**, since no worker sees a socket: a same-origin one goes as a message to the controlling worker, and any other stays native.
 
-**The frame origins sit on a registrable domain of their own, `frameDomain` in `HOSTED_POCKET_DEPLOYMENT`**, so a framed page cannot set a cookie on `dormouse.sh`; a workers.dev preview has no wildcard to serve one on.
+**The frame origins sit on a registrable domain of their own, `frameDomain` in `HOSTED_POCKET_DEPLOYMENT`**, so a framed page cannot set a cookie on `dormouse.sh`.
+
+- **Must declare `capabilities.frames` only at Hosted's production origin** (`frameDomainFor`): the frame Worker lets no other page frame it, and a preview has no wildcard to serve one on. The one-time page declares none.
+- **Must let frames in through Pocket's CSP only for that domain**; a self-host Relay's Pocket names none.
+- **Must sandbox a framed page as a local pane's**, so it cannot navigate Pocket away.
+- **Must keep each device's `frameOriginFor` salt in this browser**; losing it only moves frames to new origins.
+- **Must attach no terminal while a browser shows**, so a Tool on the phone holds no pane's size.
+- **Must keep up to `MAX_FRAMES_PER_SESSION` frames loaded**, dropping the oldest with no unsaved edits.
 
 Source of truth: `frameOriginFor` in `remote-lib-common/src/remote/frame-origin.ts`, `installFrameWorker` in `lib/src/remote/frame-origin/worker.ts`, `lib/src/remote/frame-origin/bootstrap.ts`, `serveFrame` in `lib/src/remote/frame-origin/frame-bridge.ts`, `tunnelSocketShim` in `lib/src/host/iframe-proxy-rewrite.ts`, `lib/vite.frame-origin.config.ts`, `scripts/frame-origin-check/serve.mjs` (the check a real phone runs).
 
@@ -228,11 +235,7 @@ Source of truth: `pocketContentSecurityPolicy` in `remote-lib-common/src/remote/
 
 ## Future
 
-**Scope: pocket-frames** — the rest of the Client half of [Frame origin](#frame-origin), in order:
-
-1. **The wall shows a browser entry, and a Tool's page beside its terminal**: the hello declaring `capabilities.frames` only where the deployment names a domain and this page is the Client the frame Worker names (a preview is not), `frame-src` added to Pocket's CSP, the salt `frameOriginFor` takes, `FrameClient.dispose` wired to session loss, and a close on a Tool or browser: a new `surface.close`, past the kill v1 withholds, that closes the Surface on the computer under the desktop's contract and messages (`docs/specs/reopen.md` -> "The rule", `docs/specs/layout.md` -> "Kill confirmation", `docs/specs/dor-tool.md` -> "Closing unsaved Tools").
-
-**A self-host Relay serves no frame origin**, so its Pocket declares no frames and stays terminal-only.
+**Scope: pocket-frames-selfhost** — a self-host Relay serves no frame origin, so its Pocket declares no frames and stays terminal-only.
 
 **Scope: pocket-polish**
 

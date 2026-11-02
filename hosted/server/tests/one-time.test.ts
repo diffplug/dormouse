@@ -26,7 +26,7 @@ import {
   type OneTimeRoomFrame,
 } from "remote-lib-common";
 import * as smoke from "../../scripts/one-time-smoke.mjs";
-import { pocketContentSecurityPolicy } from "remote-lib-common";
+import { HOSTED_POCKET_DEPLOYMENT, pocketContentSecurityPolicy } from "remote-lib-common";
 import { oneTimePagePolicy, relayRules, RUNS_NOTHING_POLICY } from "../headers";
 import { rateLimitKey } from "../one-time";
 import { ENTRIES, ORIGINS, bundleWorker, miniflareOptions, wrangler } from "./bundle";
@@ -563,7 +563,7 @@ test("nothing else under /connect/ is served, and nothing outside it gets the pa
   for (const path of ["/", "/connected", "/login", "/assets/connect/x.js"]) {
     const response = await get(path);
     expect(response.headers.get("content-security-policy"), path).toBe(
-      pocketContentSecurityPolicy(origin),
+      pocketContentSecurityPolicy(origin, HOSTED_POCKET_DEPLOYMENT.frameDomain),
     );
   }
 });

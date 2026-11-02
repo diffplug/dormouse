@@ -12,7 +12,7 @@ The terminal fills the screen above one bar of buttons at the bottom: the touch 
 
 **Never resize the terminal for the OS keyboard.** While the composer is open the terminal pans up until its bottom rows sit just above the keyboard, measured from `window.visualViewport`; its rows and columns, and so its PTY size, stay put (rationale).
 
-* Pocket suppresses kill (`showKillButton={false}`). A ring shows as the alarm inset on the header bar and on its session-list row.
+* Pocket suppresses a terminal's kill (`showKillButton={false}`). A ring shows as the alarm inset on the header bar and on its session-list row.
 * **A tap acknowledges the active Session; a drag never does.** **Select mode's router consumes a touch it owns**, so it announces one that never became a drag as `TERMINAL_TAP_EVENT`.
 * **Must install `useDynamicPalette` in `MobileTerminalUi`** for gesture tokens; it never mounts the desktop `Wall`.
 
@@ -116,6 +116,7 @@ A Session whose `kind` is `browser` shows a browser alone, and a `tool` shows it
 * **Must keep the header while a browser shows, and drop the bottom bar and the composer**: touches and keys are the browser's, so no gesture, touch mode, or physical key reaches the terminal (rationale).
 * **Must not mount a terminal for a `browser`.**
 * **Must offer a close in a `tool` or `browser` header, in either mode, through `onBrowserClose`**, even where the consumer hides the terminal's kill; what closing does is the consumer's.
+* **`MobileCloseDialog` asks what the desktop asks, in its words**, the confirmation's letter tapped rather than typed, away from the header's close so a double-tap cannot answer it.
 * **The browser layer ends at the bottom safe area**, which a framed document cannot read for itself.
 * **A session that cannot carry a page says why, and how to get one**: the direct path's wait and a relayed session's note are `MobileBrowserPane`'s, the note naming a VPN on both devices and a reconnect, since a session tries the direct path once (`docs/specs/remote-api.md` -> "Frames").
 

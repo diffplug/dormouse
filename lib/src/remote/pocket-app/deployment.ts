@@ -34,6 +34,18 @@ export function parsePocketDeployment(body: unknown): PocketDeployment {
 }
 
 /**
+ * The one page the frame origins let frame them: Hosted's production Pocket,
+ * `CLIENT_ORIGIN` in `hosted/wrangler.frames.jsonc`. A preview serves the same
+ * bundle at another origin, and frames nothing.
+ */
+const HOSTED_FRAME_CLIENT_ORIGIN = 'https://relay.dormouse.sh';
+
+/** The parent of this page's frame origins, or `null` where it frames nothing. */
+export function frameDomainFor(deployment: PocketDeployment | null, origin: string): string | null {
+  return deployment === 'hosted' && origin === HOSTED_FRAME_CLIENT_ORIGIN ? HOSTED_POCKET_DEPLOYMENT.frameDomain : null;
+}
+
+/**
  * Who serves this page, read off its own origin within `timeoutMs`. **Null
  * when the read does not complete** — a network failure, the timeout, a 5xx, or
  * a body lost mid-read — since none says who serves it; every complete answer

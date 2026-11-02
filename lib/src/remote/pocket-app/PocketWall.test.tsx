@@ -1,5 +1,5 @@
 /** @vitest-environment jsdom */
-import { act } from 'react';
+import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { DirectoryEntry } from 'remote-lib-common';
@@ -41,7 +41,9 @@ vi.mock('../../components/TerminalPane', () => ({
   TerminalPane: ({ id }: { id: string }) => <div data-terminal={id} />,
 }));
 vi.mock('../../components/MobileTerminalUi', () => ({
-  MobileTerminalUi: ({ terminal }: { terminal: React.ReactNode }) => <>{terminal}</>,
+  MobileTerminalUi: ({ terminal, browserShown }: { terminal: React.ReactNode; browserShown?: boolean }) => (
+    <div data-browser-shown={browserShown ? 'true' : 'false'}>{terminal}</div>
+  ),
   paneMouseOverride: () => false,
 }));
 
@@ -61,6 +63,7 @@ beforeEach(() => {
     getDirectoryEntries: () => snapshot,
     subscribeDirectory: (listener: typeof publish) => { publish = listener; return () => {}; },
     setActivePane: vi.fn(async () => {}),
+    clearActivePane: vi.fn(async () => {}),
   } as unknown as RemotePtyAdapter;
 });
 afterEach(() => {
@@ -96,4 +99,62 @@ it('removes the remote alarm when the next snapshot clears it, even if local sta
   expect(container.querySelector('[data-alert-ring-inset]')).not.toBeNull();
   await act(async () => publish(snapshot.map((entry) => ({ ...entry, ringing: false, hasTODO: false }))));
   expect(container.querySelector('[data-alert-ring-inset]')).toBeNull();
+});
+
+const page = { render: 'iframe' as const, url: 'http://localhost:5173/' };
+const browsers = () => ({
+  session: { request: vi.fn(), subscribe: vi.fn(() => new Promise(() => {})), unsubscribe: vi.fn() },
+  burrowId: 'burrow-1',
+  frameDomain: 'frames.example',
+  transport: { path: 'relay' as const, cause: null },
+  onReconnect: vi.fn(),
+});
+async function renderWith(entries: DirectoryEntry[]) {
+  snapshot = entries;
+  await act(async () => root.render(<PocketWall adapter={adapter} browsers={browsers()} />));
+}
+const button = (label: string) => container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
+
+it('holds no terminal while a Tool shows its browser, and attaches it on the switch', async () => {
+  await renderWith([{ ...snapshot[0], browser: page }]);
+  expect(adapter.setActivePane).not.toHaveBeenCalled();
+  expect(adapter.clearActivePane).toHaveBeenCalled();
+  expect(container.querySelector('[data-browser-shown]')?.getAttribute('data-browser-shown')).toBe('true');
+  await act(async () => button('Terminal')!.click());
+  expect(adapter.setActivePane).toHaveBeenCalledWith('remote', undefined, undefined);
+  expect(container.querySelector('[data-browser-shown]')?.getAttribute('data-browser-shown')).toBe('false');
+});
+
+it('never attaches a browser alone, which has no terminal', async () => {
+  await renderWith([{ ...snapshot[0], type: 'browser', browser: page }]);
+  expect(adapter.setActivePane).not.toHaveBeenCalled();
+  expect(container.querySelector('[data-terminal]')).toBeNull();
+  expect(button('Kill')).not.toBeNull();
+});
+
+it('attaches a terminal and offers no close on it, with frames on or off', async () => {
+  await renderWith(snapshot);
+  expect(adapter.setActivePane).toHaveBeenCalled();
+  expect(button('Kill')).toBeNull();
+});
+
+it('offers no close without frames, whatever the directory says', async () => {
+  snapshot = [{ ...snapshot[0], browser: page }];
+  await render();
+  expect(button('Kill')).toBeNull();
+});
+
+it('opens a frame on a live client under StrictMode, whose effects run twice', async () => {
+  const session = browsers().session;
+  snapshot = [{ ...snapshot[0], browser: page }];
+  await act(async () => root.render(
+    <StrictMode>
+      <PocketWall
+        adapter={adapter}
+        browsers={{ ...browsers(), session, transport: { path: 'direct', cause: null } }}
+      />
+    </StrictMode>,
+  ));
+  await act(() => new Promise<void>((resolve) => { setTimeout(resolve, 10); }));
+  expect(session.subscribe).toHaveBeenCalledWith('frame.open', expect.objectContaining({ surfaceId: 'remote' }), expect.any(Function), expect.any(String));
 });

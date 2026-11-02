@@ -15,7 +15,8 @@ import {
   type MobileTerminalView,
 } from '../../components/MobileTerminalUi';
 import { MobileSettings } from '../../components/MobileSettings';
-import { MobileWall } from '../../components/MobileWall';
+import { MobileCloseDialog } from '../../components/MobileCloseDialog';
+import { MobileWall, showsBrowser } from '../../components/MobileWall';
 import { useMobileFontSize } from '../../lib/mobile-font-size';
 import {
   getMouseSelectionSnapshot,
@@ -24,17 +25,36 @@ import {
 } from '../../lib/mouse-selection';
 import { getTerminalInstance, refitSession, writeUserInput } from '../../lib/terminal-registry';
 import { doPaste } from '../../lib/clipboard';
+import { FrameClient, type FrameSession } from '../client/frame-client';
 import type { RemotePtyAdapter } from '../client/remote-adapter';
+import { getToolDirty } from '../../lib/tool-dirty-store';
+import { frameOriginFor, MAX_FRAMES_PER_SESSION } from 'remote-lib-common';
+import { frameSalt } from './frame-salt';
+import { PocketBrowserFrame, type FrameTransport } from './PocketBrowserFrame';
+import { useSurfaceClose } from './use-surface-close';
 import { applyPocketTheme, restorePocketTheme, usePocketTheme } from './pocket-theme';
 import {
   activatePane,
   directorySessionItems,
   directoryWallSessions,
+  framedPage,
+  nextKeptFrames,
   pickerEntries,
+  surfaceKindOf,
 } from './wall-model';
 
-export function PocketWall({ adapter, onError, persist = true }: {
+/** What a phone that frames pages needs; absent, it shows terminals alone. */
+export interface PocketBrowsers {
+  session: FrameSession;
+  burrowId: string;
+  frameDomain: string;
+  transport: FrameTransport;
+  onReconnect: () => void;
+}
+
+export function PocketWall({ adapter, browsers, onError, persist = true }: {
   adapter: RemotePtyAdapter;
+  browsers?: PocketBrowsers;
   onError?: (error: unknown) => void;
   /**
    * Whether the theme and Settings choices are restored and saved. The one-time
@@ -50,6 +70,8 @@ export function PocketWall({ adapter, onError, persist = true }: {
   const [activePaneId, setActivePaneId] = useState<string | null>(null);
   const [touchMode, setTouchMode] = useState<MobileTerminalTouchMode>('gestures');
   const [view, setView] = useState<MobileTerminalView>('terminal');
+  // A Tool opens on its browser, so what is kept is the ones switched away from it.
+  const [terminalShown, setTerminalShown] = useState<ReadonlySet<string>>(() => new Set());
   // Picker order throughout — the list, the wall's swipe order, and the default
   // pane, which is therefore one the Burrow's own Window shows.
   const attachableEntries = useMemo(() => pickerEntries(entries), [entries]);
@@ -67,21 +89,57 @@ export function PocketWall({ adapter, onError, persist = true }: {
     setActivePaneId(attachableEntries[0]?.surfaceId ?? null);
   }, [attachableEntries, activePaneId]);
 
+  const activeEntry = attachableEntries.find((entry) => entry.surfaceId === activePaneId) ?? null;
+  const activeKind = activeEntry ? surfaceKindOf(activeEntry) : undefined;
+  const toolBrowserShown = activePaneId !== null && !terminalShown.has(activePaneId);
+  const browserShown = showsBrowser(activeKind, toolBrowserShown);
+
   // One attachment at a time: on every active-pane change, attach it with the
   // pane's current xterm dims (if it exists yet), then refit through the now-
-  // valid attached resize path.
+  // valid attached resize path. A browser showing needs none, so holds no pane.
   useEffect(() => {
     if (!activePaneId) return;
-    const term = getTerminalInstance(activePaneId);
-    const dims = term ? { cols: term.cols, rows: term.rows } : null;
     let live = true;
-    void activatePane(adapter, activePaneId, dims, refitSession).catch((error: unknown) => {
+    const fail = (error: unknown) => {
       if (!live) return;
       if (onError) onError(error);
       else console.warn('[pocket] could not attach terminal', error);
-    });
+    };
+    if (browserShown) {
+      void adapter.clearActivePane().catch(fail);
+      return () => { live = false; };
+    }
+    const term = getTerminalInstance(activePaneId);
+    const dims = term ? { cols: term.cols, rows: term.rows } : null;
+    void activatePane(adapter, activePaneId, dims, refitSession).catch(fail);
     return () => { live = false; };
-  }, [adapter, activePaneId, onError]);
+  }, [adapter, activePaneId, browserShown, onError]);
+
+  const session = browsers?.session ?? null;
+  const [salt] = useState(() => {
+    let held: Uint8Array | null = null;
+    return () => (held ??= frameSalt());
+  });
+  // Made with its disposal, so an effect that runs twice leaves a live one.
+  const [frames, setFrames] = useState<FrameClient | null>(null);
+  useEffect(() => {
+    if (!session) return;
+    const client = new FrameClient(session);
+    setFrames(client);
+    return () => client.dispose();
+  }, [session]);
+
+  // The frames kept loaded, newest shown first: a page keeps its state while
+  // another shows, to the session's bound, past which the oldest with no unsaved
+  // edits goes.
+  const [kept, setKept] = useState<readonly string[]>([]);
+  useEffect(() => {
+    const live = new Set(attachableEntries.filter((entry) => framedPage(entry)).map((entry) => entry.surfaceId));
+    const shown = browserShown ? activePaneId : null;
+    setKept((current) => nextKeptFrames(current, shown, live, MAX_FRAMES_PER_SESSION, (id) => getToolDirty(id) === true));
+  }, [activePaneId, attachableEntries, browserShown]);
+
+  const { close: closeSurface, dialog: closeDialog } = useSurfaceClose(session);
 
   const wallSessions = useMemo(() => directoryWallSessions(attachableEntries), [attachableEntries]);
   const sessionItems = useMemo(
@@ -132,8 +190,44 @@ export function PocketWall({ adapter, onError, persist = true }: {
           onActiveSessionChange={setActivePaneId}
           onShowSessions={() => setView('sessions')}
           showKillButton={false}
+          toolBrowserShown={toolBrowserShown}
+          onToolBrowserShownChange={(shown) => {
+            if (!activePaneId) return;
+            setTerminalShown((current) => {
+              const next = new Set(current);
+              if (shown) next.delete(activePaneId);
+              else next.add(activePaneId);
+              return next;
+            });
+          }}
+          onBrowserClose={browsers ? closeSurface : undefined}
+          browser={browsers && frames ? kept.map((id) => {
+            const entry = attachableEntries.find((candidate) => candidate.surfaceId === id);
+            const page = entry && framedPage(entry);
+            if (!entry || !page) return null;
+            return (
+              <PocketBrowserFrame
+                // Another origin is another frame, which the Burrow has closed.
+                key={`${id}\u0001${new URL(page.url).origin}`}
+                frames={frames}
+                surfaceId={id}
+                isTool={surfaceKindOf(entry) === 'tool'}
+                title={entry.title}
+                pageUrl={page.url}
+                originFor={(pageOrigin) => frameOriginFor({
+                  domain: browsers.frameDomain, salt: salt(), burrowId: browsers.burrowId, surfaceId: id, pageOrigin,
+                })}
+                transport={browsers.transport}
+                visible={id === activePaneId && browserShown}
+                onReconnect={browsers.onReconnect}
+                onShowSessions={() => setView('sessions')}
+              />
+            );
+          }) : null}
         />
       }
+      browserShown={browserShown}
+      overlay={closeDialog ? <MobileCloseDialog state={closeDialog} /> : null}
       interactive
       activeTouchMode={touchMode}
       onTouchModeChange={setTouchMode}

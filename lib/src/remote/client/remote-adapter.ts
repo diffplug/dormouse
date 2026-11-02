@@ -223,6 +223,20 @@ export class RemotePtyAdapter implements PlatformAdapter {
     await activation;
   }
 
+  /** Attach nothing: what shows needs no terminal, so no pane stays held. */
+  async clearActivePane(): Promise<void> {
+    const generation = ++this.#activeGeneration;
+    this.#pending = null;
+    const clearing = this.#attachQueue.then(async () => {
+      if (generation !== this.#activeGeneration) return;
+      const prev = this.#attached;
+      this.#attached = null;
+      if (prev) await this.#client.detach(prev.surfaceId, prev.subId).catch(() => {});
+    });
+    this.#attachQueue = clearing.catch(() => {});
+    await clearing;
+  }
+
   async #activatePane(pending: PendingAttach): Promise<void> {
     const { surfaceId: id, generation } = pending;
     if (generation !== this.#activeGeneration) return;

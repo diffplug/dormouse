@@ -303,6 +303,10 @@ const REMOTE_LITERALS = {
     hosts: ['relay.dormouse.sh', 'voice.dormouse.sh', 'hosted.dormouse.sh'],
     reason: 'The baked relay origin\'s default and the fixed voice and account origins.',
   },
+  'lib/src/remote/pocket-app/deployment.ts': {
+    hosts: ['relay.dormouse.sh'],
+    reason: 'The origin Pocket compares itself to, as the frame Worker lets only that page frame it; it dials nothing.',
+  },
   'standalone/src/updater.ts': {
     hosts: ['github.com', 'dormouse.sh'],
     reason: 'The issue search and changelog links openUrl opens on a click; the update endpoint itself is in tauri.conf.json.',

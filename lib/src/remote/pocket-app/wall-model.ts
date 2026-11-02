@@ -2,7 +2,7 @@
 
 import type { DirectoryEntry } from 'remote-lib-common';
 import type { MobileWallSession } from '../../components/MobileWall';
-import type { MobileTerminalSessionGroup, MobileTerminalSessionItem } from '../../components/MobileTerminalUi';
+import type { MobileSurfaceKind, MobileTerminalSessionGroup, MobileTerminalSessionItem } from '../../components/MobileTerminalUi';
 import type { SessionStatus } from '../../lib/terminal-registry';
 
 const DEFAULT_TITLE = 'Terminal';
@@ -15,8 +15,25 @@ function paneTitle(entry: DirectoryEntry): string {
   return entry.title || DEFAULT_TITLE;
 }
 
+/** The page this build can frame, or `null`: a renderer it does not know is skipped. */
+export function framedPage(entry: DirectoryEntry): { url: string; title?: string } | null {
+  return entry.browser?.render === 'iframe' ? entry.browser : null;
+}
+
+/** What `entry` shows here: a page alone, a Tool's page over its terminal, or a terminal. */
+export function surfaceKindOf(entry: DirectoryEntry): MobileSurfaceKind {
+  if (entry.type === 'browser') return 'browser';
+  return framedPage(entry) ? 'tool' : 'terminal';
+}
+
+/** A session's `kind` and display; a terminal, the default, carries neither. */
+function kindFields(entry: DirectoryEntry): Pick<MobileWallSession, 'kind' | 'browserDisplay'> {
+  const kind = surfaceKindOf(entry);
+  return kind === 'terminal' ? {} : { kind, browserDisplay: 'iframe' };
+}
+
 export function attachableDirectoryEntries(entries: DirectoryEntry[]): DirectoryEntry[] {
-  return entries.filter((entry) => entry.alive);
+  return entries.filter((entry) => entry.alive && (entry.type !== 'browser' || framedPage(entry) !== null));
 }
 
 /**
@@ -40,11 +57,31 @@ export function pickerEntries(entries: DirectoryEntry[]): DirectoryEntry[] {
   return [...groups.values()].sort((a, b) => a.rank - b.rank).flatMap((group) => group.entries);
 }
 
+/**
+ * The frames to keep loaded, newest shown first: `shown` to the front, none no
+ * longer listed, and past `max` the oldest with no unsaved edits goes. One left
+ * over keeps the rest, and the Burrow refuses the frame past its bound.
+ */
+export function nextKeptFrames(
+  current: readonly string[],
+  shown: string | null,
+  live: ReadonlySet<string>,
+  max: number,
+  isDirty: (id: string) => boolean,
+): readonly string[] {
+  const next = [...(shown ? [shown] : []), ...current.filter((id) => id !== shown)].filter((id) => live.has(id));
+  for (let index = next.length - 1; index >= 0 && next.length > max; index -= 1) {
+    if (next[index] !== shown && !isDirty(next[index])) next.splice(index, 1);
+  }
+  return next.length === current.length && next.every((id, index) => id === current[index]) ? current : next;
+}
+
 /** The `{id,title}` sessions `MobileWall` mounts, in Burrow order. */
 export function directoryWallSessions(entries: DirectoryEntry[]): MobileWallSession[] {
   return attachableDirectoryEntries(entries).map((entry) => ({
     id: entry.surfaceId,
     title: paneTitle(entry),
+    ...kindFields(entry),
   }));
 }
 
@@ -61,6 +98,7 @@ export function directorySessionItems(
 ): MobileTerminalSessionItem[] {
   return attachableDirectoryEntries(entries).map((entry) => ({
     id: entry.surfaceId,
+    ...kindFields(entry),
     group: entry.workspace ? { id: entry.workspace.ref, label: entry.workspace.name } : UNGROUPED,
     title: paneTitle(entry),
     secondary: secondaryLine(entry),

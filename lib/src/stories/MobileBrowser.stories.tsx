@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
 import { expect, userEvent, within } from 'storybook/test';
 import { MobileBrowserPane, type MobileBrowserStatus } from '../components/MobileBrowserPane';
+import { MobileCloseDialog, type MobileCloseDialogState } from '../components/MobileCloseDialog';
 import { MobileSettings } from '../components/MobileSettings';
 import { MobileTerminalUi, type MobileTerminalSessionItem, type MobileTerminalView } from '../components/MobileTerminalUi';
 import { MobileWall, showsBrowser, type MobileWallSession } from '../components/MobileWall';
@@ -48,10 +49,11 @@ function FakeScreencast() {
   return <iframe title="Screencast" srcDoc={PAGE} className="block h-full w-full border-0 bg-white" />;
 }
 
-function Frame({ status, active: initial = TOOL, view: initialView = 'terminal' }: {
+function Frame({ status, active: initial = TOOL, view: initialView = 'terminal', dialog }: {
   status: MobileBrowserStatus;
   active?: string;
   view?: MobileTerminalView;
+  dialog?: MobileCloseDialogState;
 }) {
   useState(() => initPlatform('fake'));
   const [active, setActive] = useState(initial);
@@ -75,6 +77,7 @@ function Frame({ status, active: initial = TOOL, view: initialView = 'terminal' 
       <MobileTerminalUi
         className="h-full"
         browserShown={showsBrowser(session?.kind, toolBrowserShown)}
+        overlay={dialog ? <MobileCloseDialog state={dialog} /> : null}
         activeView={view}
         onViewChange={setView}
         sessions={items}
@@ -181,4 +184,21 @@ export const Relayed: Story = { args: { status: { kind: 'relayed' } } };
 export const PageGone: Story = { args: { status: { kind: 'gone' } } };
 export const Failed: Story = {
   args: { status: { kind: 'failed', message: 'frame refused: a remote device frames pages on this machine only' } },
+};
+
+const noop = () => {};
+/** A close the computer says must confirm: the desktop's letter, tapped. */
+export const CloseConfirm: Story = {
+  args: { dialog: { kind: 'confirm', char: 'r', onConfirm: noop, onCancel: noop } },
+};
+/** The desktop's Save / Discard / Cancel. */
+export const CloseUnsaved: Story = {
+  args: { dialog: { kind: 'unsaved', labels: ['README.md'], onSave: noop, onDiscard: noop, onCancel: noop } },
+};
+export const CloseSaveFailed: Story = {
+  args: { dialog: { kind: 'unsaved', labels: ['README.md'], error: 'New edits arrived while saving. Save again or cancel.', onSave: noop, onDiscard: noop, onCancel: noop } },
+};
+/** The desktop's refusal, as it reads there. */
+export const CloseRefused: Story = {
+  args: { dialog: { kind: 'refused', message: 'This terminal is already closing', onDismiss: noop } },
 };

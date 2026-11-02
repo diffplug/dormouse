@@ -15,6 +15,7 @@ import {
   POCKET_DEPLOYMENT_READ_TIMEOUT_MS,
   deploymentDirectPeer,
   deploymentUnreachableMessage,
+  frameDomainFor,
   parsePocketDeployment,
   pocketDeploymentSource,
   readPocketDeployment,
@@ -182,5 +183,14 @@ describe('Pocket’s direct-peer factory', () => {
     await selfHost.require();
     deploymentDirectPeer(selfHost)();
     expect(built).toEqual([{ iceServers: [{ urls: CLOUDFLARE_STUN_URL }] }, { iceServers: [] }]);
+  });
+});
+
+describe('frameDomainFor', () => {
+  it('names the frame domain only to Hosted at the origin the frame Worker lets frame it', () => {
+    expect(frameDomainFor('hosted', 'https://relay.dormouse.sh')).toBe('dormouseusercontent.com');
+    expect(frameDomainFor('hosted', 'https://dormouse-relay-pr-7.example.workers.dev')).toBeNull();
+    expect(frameDomainFor('self-host', 'https://relay.dormouse.sh')).toBeNull();
+    expect(frameDomainFor(null, 'https://relay.dormouse.sh')).toBeNull();
   });
 });
