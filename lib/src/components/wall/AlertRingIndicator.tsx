@@ -64,7 +64,7 @@ export function AlertRingIndicator({ sessionId }: { sessionId: string }) {
         // Stacking context and geometry only; the wash strengths live on the
         // child below as element opacity over the solid alarm colour, never a
         // color-alpha utility: its `color-mix()` is unsupported by the standalone
-        // Safari 15 / Chrome 105 targets (`docs/specs/layout.md` -> Alarm overlay).
+        // Safari 15 / Chrome 105 targets.
         className={clsx(layer, 'z-[19]')}
       >
         <div
