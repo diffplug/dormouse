@@ -83,7 +83,7 @@ import { PHONE_DIRS, isShippedSource, lineOf, repoRoot as ROOT, trackedFiles } f
  */
 const ALLOWED = {
   'scripts/frame-origin-check/serve.mjs':
-    'Unshipped phone check, run by hand, serving its own test page and the built frame '
+    'Unshipped frame-origin check, run by hand and in CI, serving its own test page and the built frame '
     + 'origin: three fixed files and generated content; no credential or command API. '
     + 'Its one write takes a bounded report under a name it generates.',
   'scripts/dor-tool-qc/server.mjs':
