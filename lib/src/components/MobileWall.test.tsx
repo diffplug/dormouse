@@ -201,6 +201,28 @@ describe('MobileWall', () => {
       expect(container.querySelector('[data-browser-display-mode="agent-browser-resize"]')).not.toBeNull();
     });
 
+    it('offers a close on a Tool and a browser, never a terminal, where the consumer hides kill', () => {
+      const onBrowserClose = vi.fn();
+      const render = (active: string) => act(() => {
+        root.render(
+          <MobileWall
+            sessions={[{ id: 'tool', title: 'a tool', kind: 'tool' }, { id: 'browser', title: 'a browser', kind: 'browser' }, { id: 'term', title: 'zsh' }]}
+            activeSessionId={active}
+            showKillButton={false}
+            onBrowserClose={onBrowserClose}
+          />,
+        );
+      });
+      for (const id of ['tool', 'browser']) {
+        render(id);
+        act(() => button('Kill')!.click());
+        expect(onBrowserClose).toHaveBeenLastCalledWith(id);
+      }
+      expect(registry.disposeSession).not.toHaveBeenCalled();
+      render('term');
+      expect(button('Kill')).toBeNull();
+    });
+
     it('leaves a plain terminal without modes or reload', () => {
       renderKinds('term', true);
       expect(browserLayer().classList.contains('invisible')).toBe(true);

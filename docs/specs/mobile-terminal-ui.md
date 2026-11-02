@@ -115,6 +115,7 @@ A Session whose `kind` is `browser` shows a browser alone, and a `tool` shows it
 * **Must put a Tool's Browser and Terminal mode buttons at the header's far left**, in that order, the desktop's glyphs marking the mode showing; a browser alone shows its glyph, with nothing to switch to.
 * **Must keep the header while a browser shows, and drop the bottom bar and the composer**: touches and keys are the browser's, so no gesture, touch mode, or physical key reaches the terminal (rationale).
 * **Must not mount a terminal for a `browser`.**
+* **Must offer a close in a `tool` or `browser` header, in either mode, through `onBrowserClose`**, even where the consumer hides the terminal's kill; what closing does is the consumer's.
 * **The browser layer ends at the bottom safe area**, which a framed document cannot read for itself.
 * **A session that cannot carry a page says why, and how to get one**: the direct path's wait and a relayed session's note are `MobileBrowserPane`'s, the note naming a VPN on both devices and a reconnect, since a session tries the direct path once (`docs/specs/remote-api.md` -> "Frames").
 

@@ -97,6 +97,7 @@ function Frame({ status, active: initial = TOOL, view: initialView = 'terminal' 
               return next;
             })}
             onBrowserReload={status.kind === 'ready' ? () => {} : undefined}
+            onBrowserClose={() => {}}
             browser={session?.kind === 'terminal' || !session?.kind ? null : (
               <MobileBrowserPane
                 status={status}
@@ -138,6 +139,7 @@ export const ToolPage: Story = {
     await expect(canvas.getByLabelText('Browser')).toHaveAttribute('aria-pressed', 'true');
     await expect(canvas.getByLabelText('Terminal')).toHaveAttribute('aria-pressed', 'false');
     await expect(canvas.getByLabelText('Reload')).toBeVisible();
+    await expect(canvas.getByLabelText('Kill')).toBeVisible();
   },
 };
 
@@ -168,9 +170,12 @@ export const StreamingPreview: Story = {
   },
 };
 
-/** A plain terminal is unchanged. */
+/** A plain terminal is unchanged: Pocket offers no kill for one. */
 export const PlainTerminal: Story = {
   args: { active: TERMINAL },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).queryByLabelText('Kill')).toBeNull();
+  },
 };
 
 export const Connecting: Story = { args: { status: { kind: 'connecting' } } };

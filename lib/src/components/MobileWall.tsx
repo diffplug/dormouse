@@ -56,6 +56,11 @@ export interface MobileWallProps {
   onToolBrowserShownChange?: (shown: boolean) => void;
   /** Reloads the shown browser; omitted, the header offers no reload. */
   onBrowserReload?: () => void;
+  /**
+   * Asks to close a `tool` or `browser` Session, whatever the consumer's kill
+   * affordance for terminals; omitted, those follow `showKillButton`.
+   */
+  onBrowserClose?: (id: string) => void;
   className?: string;
 }
 
@@ -117,6 +122,7 @@ export function MobileWall({
   toolBrowserShown = false,
   onToolBrowserShownChange,
   onBrowserReload,
+  onBrowserClose,
   className,
 }: MobileWallProps) {
   const [internalSessions, setInternalSessions] = useState<MobileWallSession[]>(() => controlledSessions ?? [DEFAULT_MOBILE_SESSION]);
@@ -169,6 +175,7 @@ export function MobileWall({
   }, [firstSessionId, resolvedActiveSessionId, selectSession, sessions]);
 
   const showingBrowser = activeItem ? showsBrowser(activeItem.kind, toolBrowserShown) : false;
+  const closesBrowser = onBrowserClose && (activeItem?.kind === 'tool' || activeItem?.kind === 'browser');
 
   if (!activeItem) {
     return (
@@ -184,8 +191,8 @@ export function MobileWall({
         session={activeItem}
         onTodoClear={onSessionTodoClear ? () => onSessionTodoClear(activeItem.id) : undefined}
         onShowSessions={onShowSessions}
-        onKill={() => killSession(activeItem.id)}
-        showKillButton={showKillButton}
+        onKill={() => (closesBrowser ? onBrowserClose?.(activeItem.id) : killSession(activeItem.id))}
+        showKillButton={showKillButton || !!closesBrowser}
         showingBrowser={showingBrowser}
         onToolBrowserShownChange={onToolBrowserShownChange}
         onBrowserReload={showingBrowser ? onBrowserReload : undefined}
