@@ -47,7 +47,8 @@ import { testRoutingId } from '../test-e2e-client';
 
 const fake = vi.hoisted(() => ({
   noiseSupported: true as boolean,
-  mount: vi.fn<(client: unknown) => Promise<unknown>>(),
+  mount: vi.fn<(client: unknown, capabilities?: unknown) => Promise<unknown>>(),
+  frameDomain: null as string | null,
   disposeAllSessions: vi.fn<() => void>(),
   /** The props the last wall rendered with. */
   wall: null as null | { persist?: boolean; onError?: (error: unknown) => void },
@@ -62,10 +63,11 @@ vi.mock('remote-lib-common', async (importOriginal) => ({
 // Pocket's label would name an installed app; the page must never use it.
 vi.mock('../client/install-state', () => ({ isInstalledWebApp: () => true }));
 vi.mock('../pocket-app/remote-wall', () => ({
-  mountRemoteWall: (client: unknown) => fake.mount(client),
+  mountRemoteWall: (client: unknown, capabilities?: unknown) => fake.mount(client, capabilities),
 }));
+vi.mock('../pocket-app/deployment', () => ({ frameDomainFor: () => fake.frameDomain }));
 vi.mock('../pocket-app/PocketWall', () => ({
-  PocketWall: (props: { persist?: boolean; onError?: (error: unknown) => void; sessionsHeader?: ReactNode }) => {
+  PocketWall: (props: { persist?: boolean; onError?: (error: unknown) => void; sessionsHeader?: ReactNode; browsers?: Record<string, unknown> }) => {
     fake.wall = props;
     return <div data-testid="wall">{props.sessionsHeader}</div>;
   },
@@ -373,7 +375,7 @@ describe('the tap', () => {
     fake.mount.mockResolvedValue({ dispose: vi.fn(async () => undefined) });
     scripted.resolve({ ok: true, burrowLabel: 'Studio iMac' });
     await waitFor(() => container.querySelector('[data-testid="wall"]') !== null, 'the wall');
-    expect(fake.mount).toHaveBeenCalledWith(scripted.client);
+    expect(fake.mount).toHaveBeenCalledWith(scripted.client, undefined);
     const header = container.querySelector('header')!;
     expect(header.textContent).toContain('Studio iMac');
     expect(header.textContent).toContain('direct');
@@ -396,6 +398,30 @@ describe('the tap', () => {
     await click(container, 'Cancel');
     expect(scripted.client.close).toHaveBeenCalled();
     expect(text()).toContain(ONE_TIME_ENDED_MESSAGE);
+  });
+});
+
+describe('pages on the wall', () => {
+  afterEach(() => { fake.frameDomain = null; });
+
+  it('frames them where Hosted serves it, as Pocket does, on the session it holds', async () => {
+    fake.frameDomain = 'frames.example';
+    const { client } = await onTheWall();
+    expect(fake.mount).toHaveBeenCalledWith(client, { frames: true });
+    const browsers = (fake.wall as { browsers?: { session: unknown; frameDomain: string; transport: unknown; salt: () => Uint8Array } }).browsers!;
+    expect(browsers.session).toBe(client);
+    expect(browsers.frameDomain).toBe('frames.example');
+    expect(browsers.transport).toEqual({ path: 'direct', cause: null });
+    expect(browsers.salt()).toHaveLength(32);
+    expect(browsers.salt()).toBe(browsers.salt());
+    expect(localStorage.length).toBe(0);
+    expect(sessionStorage.length).toBe(0);
+  });
+
+  it('declares nothing where no frame domain answers', async () => {
+    const { client } = await onTheWall();
+    expect(fake.mount).toHaveBeenCalledWith(client, undefined);
+    expect((fake.wall as { browsers?: unknown }).browsers).toBeUndefined();
   });
 });
 

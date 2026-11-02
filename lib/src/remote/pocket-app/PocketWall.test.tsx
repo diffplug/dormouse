@@ -108,6 +108,7 @@ const browsers = () => ({
   session: { request: vi.fn(), subscribe: vi.fn(() => new Promise(() => {})), unsubscribe: vi.fn() },
   burrowId: 'burrow-1',
   frameDomain: 'frames.example',
+  salt: () => new Uint8Array(32),
   transport: { path: 'relay' as const, cause: null },
   onReconnect: vi.fn(),
 });

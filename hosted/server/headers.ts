@@ -131,12 +131,15 @@ export function oneTimePagePolicy(appOrigin: string) {
     `font-src ${page}`,
     "media-src blob:",
     `connect-src ${appOrigin.replace(/^http/, "ws")}${ONE_TIME_WS_ROUTES.client}`,
+    `frame-src https://*.${HOSTED_FRAME_DOMAIN}`,
     "worker-src 'none'",
     "form-action 'none'",
     "base-uri 'none'",
     "frame-ancestors 'none'",
     "object-src 'none'",
-    "sandbox allow-scripts allow-same-origin",
+    // A frame's sandbox is at most this: what `IFRAME_SANDBOX` grants a page, and a
+    // link it opens leaves the sandbox on a tap.
+    "sandbox allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads",
   ].join("; ");
 }
 

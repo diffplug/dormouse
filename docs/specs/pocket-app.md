@@ -209,10 +209,10 @@ A framed page (`docs/specs/remote-api.md` -> "Frames") runs at a frame origin: a
 
 **The frame origins sit on a registrable domain of their own, `HOSTED_FRAME_DOMAIN`**, so a framed page cannot set a cookie on `dormouse.sh`.
 
-- **Must declare `capabilities.frames` only at Hosted's production origin** (`frameDomainFor`): the frame Worker lets no other page frame it, and a preview has no wildcard to serve one on. The one-time page declares none.
-- **Must let frames in through Pocket's CSP only for that domain**; a self-host Relay's Pocket names none.
+- **Must declare `capabilities.frames` only at Hosted's production origin** (`frameDomainFor`), from Pocket and the one-time page alike: the frame Worker lets no other page frame it, and a preview has no wildcard to serve one on.
+- **Must let frames in through Pocket's and the one-time page's CSPs only for that domain**; a self-host Relay's Pocket names none. The one-time page's own CSP sandbox must grant what `IFRAME_SANDBOX` does, since a frame's is at most its parent's.
 - **Must sandbox a framed page as a local pane's, and its bootstrap page no less**, so it cannot navigate Pocket away, itself or through the sibling it can script.
-- **Must keep each device's `frameOriginFor` salt in this browser**; losing it only moves frames to new origins.
+- **Must keep a separate `frameOriginFor` salt per tab, in `sessionStorage`**, since a worker cannot tell whose page asked and two tabs sharing an origin would serve each other's requests; a reload keeps it, and losing it only moves frames to new origins. The one-time page holds its salt in memory alone.
 - **Must attach no terminal while a browser shows**, so a Tool on the phone holds no pane's size.
 - **Must keep up to `MAX_FRAMES_PER_SESSION` frames loaded**, dropping the oldest with no unsaved edits.
 - **A page's new-window request must load in place on its own page, and open anywhere else only on a tap**, `noopener`, over `http:` and `https:` alone, since the page chose the URL.

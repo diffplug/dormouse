@@ -4,7 +4,6 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
   useSyncExternalStore,
 } from 'react';
@@ -30,7 +29,6 @@ import { FrameClient, type FrameSession } from '../client/frame-client';
 import type { RemotePtyAdapter } from '../client/remote-adapter';
 import { getToolDirty } from '../../lib/tool-dirty-store';
 import { frameOriginFor, MAX_FRAMES_PER_SESSION } from 'remote-lib-common';
-import { frameSalt } from './frame-salt';
 import { PK } from './pocket-chrome';
 import { PocketBrowserFrame, type FrameTransport } from './PocketBrowserFrame';
 import { useSurfaceClose } from './use-surface-close';
@@ -50,6 +48,8 @@ export interface PocketBrowsers {
   session: FrameSession;
   burrowId: string;
   frameDomain: string;
+  /** The secret in a frame's origin. Stable: a new function reopens frames. Read only once one opens. */
+  salt: () => Uint8Array;
   transport: FrameTransport;
   onReconnect: () => void;
 }
@@ -121,15 +121,14 @@ export function PocketWall({ adapter, browsers, onError, persist = true, session
   const session = browsers?.session ?? null;
   const burrowId = browsers?.burrowId;
   const frameDomain = browsers?.frameDomain;
-  const saltRef = useRef<Uint8Array | null>(null);
+  const salt = browsers?.salt;
   const originFor = useCallback((surfaceId: string, pageOrigin: string) => frameOriginFor({
     domain: frameDomain!,
-    // Read here, so a page that frames nothing stores nothing.
-    salt: (saltRef.current ??= frameSalt()),
+    salt: salt!(),
     burrowId: burrowId!,
     surfaceId,
     pageOrigin,
-  }), [burrowId, frameDomain]);
+  }), [burrowId, frameDomain, salt]);
   // Made with its disposal, so an effect that runs twice leaves a live one.
   const [frames, setFrames] = useState<FrameClient | null>(null);
   useEffect(() => {

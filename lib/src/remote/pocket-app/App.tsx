@@ -50,6 +50,7 @@ import {
 } from '../client/push-subscribe';
 import type { RemotePtyAdapter } from '../client/remote-adapter';
 import { disposeAllSessions } from '../../lib/terminal-registry';
+import { frameSalt } from './frame-salt';
 import { PocketWall, type PocketBrowsers } from './PocketWall';
 import { ScanInvitation, type StartScan } from './ScanInvitation';
 import { ErrorRow, PK, pkButton } from './pocket-chrome';
@@ -766,6 +767,7 @@ export default function App({
             session: client,
             burrowId: phase.burrow.burrowId,
             frameDomain,
+            salt: frameSalt,
             transport,
             onReconnect: () => {
               leaveWall();
