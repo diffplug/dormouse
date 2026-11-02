@@ -83,16 +83,22 @@ export function refusal(request: Pick<Request, 'mode' | 'method' | 'destination'
   if (request.mode !== 'navigate') return null;
   if (request.destination === 'document') return 'A frame only loads inside Dormouse.';
   const safe = request.method === 'GET' || request.method === 'HEAD';
-  return safe || normalizeOrigin(request.referrer) === origin ? null : 'A form from another site cannot reach this page.';
+  // No referrer is a page's own policy, and `relayHeaders` vouches for nothing then.
+  return safe || !request.referrer || normalizeOrigin(request.referrer) === origin
+    ? null : 'A form from another site cannot reach this page.';
 }
 
 /** The fields the browser adds past the worker, in the terms the Burrow expects them. */
-export function relayHeaders(request: Pick<Request, 'headers' | 'method' | 'referrer'>, origin: string): [string, string][] {
+export function relayHeaders(request: Pick<Request, 'headers' | 'method' | 'mode' | 'referrer'>, origin: string): [string, string][] {
   const headers: [string, string][] = [];
   request.headers.forEach((value, name) => headers.push([name, value]));
   // `refusal` has already turned away a foreign write, so a write here is the
-  // frame's own document.
-  if (request.method !== 'GET' && request.method !== 'HEAD') headers.push(['origin', origin]);
+  // frame's own document, unless it is a form with no referrer to say so, which
+  // goes as a browser sends any such form.
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
+    const unvouched = request.mode === 'navigate' && normalizeOrigin(request.referrer) !== origin;
+    headers.push(['origin', unvouched ? 'null' : origin]);
+  }
   if (request.referrer && request.referrer !== 'about:client') headers.push(['referer', request.referrer]);
   return headers;
 }

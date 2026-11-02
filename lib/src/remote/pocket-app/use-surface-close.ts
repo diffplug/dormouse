@@ -64,11 +64,17 @@ export function useSurfaceClose(session: SurfaceCloseSession | null): {
       });
       return dialog(false);
     });
+    // A discard never declares the document clean, so it is remembered here.
+    let discarded = false;
     void (async () => {
       try {
-        if (getToolDirty(surfaceId) === true && !(await ownEdits())) return;
         const params: SurfaceCloseParams = { surfaceId };
         for (let answers = 0; answers < MAX_ANSWERS; answers += 1) {
+          // Before every ask: the page stays editable while the computer answers.
+          if (getToolDirty(surfaceId) === true) {
+            if (!discarded && !(await ownEdits())) return;
+            discarded = getToolDirty(surfaceId) === true;
+          }
           const result = await session.request<SurfaceCloseResult>(REMOTE_METHODS.surfaceClose, params);
           if (result.outcome === 'closed') return;
           if (result.outcome === 'refused') {

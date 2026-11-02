@@ -14,16 +14,28 @@ describe('refusal', () => {
     expect(refusal({ ...nav, mode: 'cors', method: 'POST', destination: '' }, ORIGIN)).toBeNull();
   });
 
+  it('passes a form with no referrer, which is a page\'s own policy', () => {
+    expect(refusal({ ...nav, method: 'POST', referrer: '' }, ORIGIN)).toBeNull();
+  });
+
   it('refuses a top-level page, and a form another site aimed here', () => {
     expect(refusal({ ...nav, destination: 'document' }, ORIGIN)).toMatch(/inside Dormouse/);
     expect(refusal({ ...nav, method: 'POST', referrer: 'https://evil.example/' }, ORIGIN)).toMatch(/another site/);
-    expect(refusal({ ...nav, method: 'POST' }, ORIGIN)).toMatch(/another site/);
   });
 });
 
 describe('relayHeaders', () => {
   const of = (method: string, referrer: string, headers: Record<string, string> = {}) =>
-    relayHeaders({ method, referrer, headers: new Headers(headers) }, ORIGIN);
+    relayHeaders({ method, mode: 'cors', referrer, headers: new Headers(headers) }, ORIGIN);
+
+  it('vouches for no form that names no referrer, though it does for a fetch', () => {
+    const form = relayHeaders({ method: 'POST', mode: 'navigate', referrer: '', headers: new Headers() }, ORIGIN);
+    expect(form).toEqual([['origin', 'null']]);
+    const fetched = relayHeaders({ method: 'POST', mode: 'cors', referrer: '', headers: new Headers() }, ORIGIN);
+    expect(fetched).toEqual([['origin', ORIGIN]]);
+    const own = relayHeaders({ method: 'POST', mode: 'navigate', referrer: `${ORIGIN}/a`, headers: new Headers() }, ORIGIN);
+    expect(own).toContainEqual(['origin', ORIGIN]);
+  });
 
   it('names the frame origin on a write only, and carries the referrer', () => {
     expect(of('POST', `${ORIGIN}/a`, { 'content-type': 'text/plain' })).toEqual([

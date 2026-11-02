@@ -149,6 +149,10 @@ export function PocketWall({ adapter, browsers, onError, persist = true, session
     setKept((current) => nextKeptFrames(current, shown, live, MAX_FRAMES_PER_SESSION, (id) => getToolDirty(id) === true));
   }, [activePaneId, attachableEntries, browserShown]);
 
+  // `kept` is newest first, but moving an iframe in the DOM reloads its page, and
+  // its unsaved edits with it: one added or dropped moves no other.
+  const mountedFrames = useMemo(() => [...kept].sort(), [kept]);
+
   const { close: closeSurface, dialog: closeDialog } = useSurfaceClose(session);
 
   const wallSessions = useMemo(() => directoryWallSessions(attachableEntries), [attachableEntries]);
@@ -212,7 +216,7 @@ export function PocketWall({ adapter, browsers, onError, persist = true, session
             });
           }}
           onBrowserClose={browsers ? closeSurface : undefined}
-          browser={browsers && frames ? kept.map((id) => {
+          browser={browsers && frames ? mountedFrames.map((id) => {
             const entry = attachableEntries.find((candidate) => candidate.surfaceId === id);
             const page = entry && framedPage(entry);
             if (!entry || !page) return null;

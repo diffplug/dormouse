@@ -13,6 +13,7 @@ const fake = vi.hoisted(() => ({
   panes: new Map(),
   mouse: new Map(),
   clearTodo: vi.fn(),
+  select: undefined as ((id: string) => void) | undefined,
 }));
 vi.mock('../../lib/terminal-registry', () => ({
   DEFAULT_ACTIVITY_STATE: { status: 'WATCHING_DISABLED', episode: null, todo: false },
@@ -41,9 +42,10 @@ vi.mock('../../components/TerminalPane', () => ({
   TerminalPane: ({ id }: { id: string }) => <div data-terminal={id} />,
 }));
 vi.mock('../../components/MobileTerminalUi', () => ({
-  MobileTerminalUi: ({ terminal, browserShown, sessionsHeader }: { terminal: React.ReactNode; browserShown?: boolean; sessionsHeader?: React.ReactNode }) => (
-    <div data-browser-shown={browserShown ? 'true' : 'false'}>{sessionsHeader}{terminal}</div>
-  ),
+  MobileTerminalUi: ({ terminal, browserShown, sessionsHeader, onSessionSelect }: { terminal: React.ReactNode; browserShown?: boolean; sessionsHeader?: React.ReactNode; onSessionSelect?: (id: string) => void }) => {
+    fake.select = onSessionSelect;
+    return <div data-browser-shown={browserShown ? 'true' : 'false'}>{sessionsHeader}{terminal}</div>;
+  },
   paneMouseOverride: () => false,
 }));
 
@@ -162,4 +164,28 @@ it('opens a frame on a live client under StrictMode, whose effects run twice', a
   ));
   await act(() => new Promise<void>((resolve) => { setTimeout(resolve, 10); }));
   expect(session.subscribe).toHaveBeenCalledWith('frame.open', expect.objectContaining({ surfaceId: 'remote' }), expect.any(Function), expect.any(String));
+});
+
+it('never moves a kept page in the DOM, which would reload it', async () => {
+  const other = { ...snapshot[0]!, surfaceId: 'other', paneRef: 'other', title: 'Other', browser: page };
+  const first = { ...snapshot[0]!, browser: page };
+  snapshot = [first, other];
+  const session = {
+    request: vi.fn(async () => ({})),
+    subscribe: vi.fn(async (_method: string, _params: unknown, _listener: unknown, subId: string) => ({ subId, result: { path: '/' } })),
+    unsubscribe: vi.fn(),
+  };
+  await act(async () => root.render(
+    <PocketWall adapter={adapter} browsers={{ ...browsers(), session, transport: { path: 'direct', cause: null } } as never} />,
+  ));
+  await act(() => new Promise<void>((resolve) => { setTimeout(resolve, 10); }));
+  const frames = () => [...container.querySelectorAll('iframe[title="Frame bootstrap"]')];
+  await act(async () => fake.select?.('other'));
+  await act(() => new Promise<void>((resolve) => { setTimeout(resolve, 10); }));
+  const both = frames();
+  expect(both).toHaveLength(2);
+  await act(async () => fake.select?.('remote'));
+  await act(() => new Promise<void>((resolve) => { setTimeout(resolve, 10); }));
+  expect(frames()).toEqual(both);
+  expect(session.subscribe).toHaveBeenCalledTimes(2);
 });

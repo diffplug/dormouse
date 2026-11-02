@@ -172,6 +172,21 @@ describe('useSurfaceClose', () => {
     frame.remove();
   });
 
+  it('asks again about edits made while the computer was answering, once', async () => {
+    const { session, asked } = sessionAnswering({ outcome: 'confirm' }, { outcome: 'unsaved', label: 'x' }, { outcome: 'closed' });
+    await start(session);
+    await act(async () => { recordToolDirty('surface:1', true); });
+    await press(/^Confirm with/);
+    expect(dialogTitle()).toBe('Save changes?');
+    expect(asked).toHaveLength(1);
+    await press('Discard');
+    // The computer's own unsaved edits are asked about; the phone's are not again.
+    expect(asked[1]).toEqual({ surfaceId: 'surface:1', confirmed: true });
+    await press('Discard');
+    expect(asked[2]).toEqual({ surfaceId: 'surface:1', confirmed: true, unsaved: 'discard' });
+    expect(dialogTitle()).toBeNull();
+  });
+
   it('goes with the wall, leaving nothing whose answer would reach the next Burrow', async () => {
     recordToolDirty('surface:1', true);
     const { session, asked } = sessionAnswering({ outcome: 'closed' });
