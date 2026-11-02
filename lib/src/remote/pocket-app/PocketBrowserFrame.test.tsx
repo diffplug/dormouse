@@ -92,6 +92,8 @@ describe('PocketBrowserFrame', () => {
     expect(open).toHaveBeenCalledWith(expect.objectContaining({ surfaceId: 'surface:1', frameOrigin: ORIGIN, embedderOrigins: [location.origin] }));
     expect(iframe('App')).toBeNull();
     expect(iframe('Frame bootstrap')!.src).toBe(`${ORIGIN}/__dormouse-frame/bootstrap.html`);
+    // The page can script its same-origin sibling, so this is no way out of its sandbox.
+    expect(iframe('Frame bootstrap')!.getAttribute('sandbox')).toBe('allow-scripts allow-same-origin');
     await join();
     const page = iframe('App')!;
     expect(page.src).toBe(`${ORIGIN}/app`);

@@ -163,7 +163,13 @@ export function createAskSurfaceProvider(
     },
 
     async closeSurface(surfaceId, consent) {
-      const answers = await ask('closeOp', { surfaceId, ...consent } satisfies PeerOps['closeOp']['params']).catch(() => []);
+      // One owner, as for an attach: duplicated cold-restored windows hold the
+      // same id, and a close must not reach the copy nobody was asked about.
+      // A browser alone has no PTY to address, so it reaches every copy; each
+      // reopens as it was (`docs/specs/reopen.md` -> "Reopenable kinds").
+      const asked = await ask('surfaceOp', { surfaceId, op: 'resolve' } satisfies PeerSurfaceParams).catch(() => []);
+      const ownerPtyId = (asked[0] as Partial<PeerSurfaceResult> | undefined)?.ptyId;
+      const answers = await ask('closeOp', { surfaceId, ...consent } satisfies PeerOps['closeOp']['params'], ownerPtyId).catch(() => []);
       return closeAnswerOf(answers[0]) ?? { outcome: 'refused', message: 'This is no longer open on the computer.' };
     },
 

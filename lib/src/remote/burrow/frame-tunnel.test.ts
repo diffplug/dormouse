@@ -83,14 +83,19 @@ class FakeHost implements BurrowFrameHost {
   readonly opened: Array<[string, FrameOpenOptions]> = [];
   readonly upstreams: FakeUpstream[] = [];
   refuse: string | null = null;
+  /** Held until released, as a slow grant is. */
+  hold: Promise<void> | null = null;
   async open(url: string, options: FrameOpenOptions) {
     this.opened.push([url, options]);
+    await this.hold;
     if (this.refuse) return { refused: this.refuse };
     const upstream = new FakeUpstream();
     this.upstreams.push(upstream);
     return upstream;
   }
 }
+
+interface EmbeddedPage { url: string; title?: string }
 
 function fakeProvider(pages: Map<string, EmbeddedPage>) {
   const watchers = new Set<() => void>();
@@ -216,6 +221,26 @@ describe('frame.open', () => {
     expect(t.watchers.size).toBe(0);
   });
 
+  it('closes a frame whose page went while its grant was being minted', async () => {
+    vi.useFakeTimers();
+    const t = setup();
+    let release = () => {};
+    t.host.hold = new Promise((resolve) => { release = resolve; });
+    const id = t.call(FRAME_METHODS.frameOpen, {
+      surfaceId: 'surface:1',
+      frameOrigin: 'https://f.example',
+      embedderOrigins: ['https://pocket.example'],
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(t.host.opened).toHaveLength(1);
+    // Nothing is watching this frame yet, so no notice of it comes.
+    t.pages.clear();
+    release();
+    await vi.advanceTimersByTimeAsync(200);
+    expect(t.host.upstreams[0]!.closed).toBe(true);
+    expect(t.events(id, FRAME_EVENTS.frameClosed)).toHaveLength(1);
+  });
+
   it('frame.close ends the grant and fails what is still pending in it', async () => {
     const t = setup();
     const frameId = await t.open();
@@ -308,6 +333,53 @@ describe('http', () => {
 });
 
 describe('the flow window', () => {
+  describe('a finished exchange with events still behind the window', () => {
+    async function finishedBehindWindow(t: ReturnType<typeof setup>) {
+      const frameId = await t.open();
+      const id = t.call(FRAME_METHODS.httpRequest, { ...GET, frameId });
+      const exchange = t.host.upstreams[0]!.exchanges[0]!;
+      exchange.sink.onHead(200, 'OK', []);
+      exchange.sink.onBody(new Uint8Array(FRAME_FLOW_WINDOW_BYTES * 2));
+      exchange.sink.onEnd();
+      return { frameId, id };
+    }
+    const sentBytes = (t: ReturnType<typeof setup>, id: string) => t.events(id, FRAME_EVENTS.httpBody)
+      .reduce((total, m) => total + fromBase64Url((m.data as { bytes: string }).bytes).length, 0);
+
+    it('sends none of them past a cancel, which no Client would ever ack', async () => {
+      const t = setup();
+      const { id } = await finishedBehindWindow(t);
+      const sent = sentBytes(t, id);
+      t.call(FRAME_METHODS.httpCancel, { exchangeId: id });
+      t.call(FRAME_METHODS.flowAck, { bytes: sent });
+      expect(sentBytes(t, id)).toBe(sent);
+      expect(t.events(id, FRAME_EVENTS.httpEnd)).toHaveLength(0);
+    });
+
+    it('sends none of them past its frame closing', async () => {
+      const t = setup();
+      const { frameId, id } = await finishedBehindWindow(t);
+      const sent = sentBytes(t, id);
+      t.call(FRAME_METHODS.frameClose, { frameId });
+      t.call(FRAME_METHODS.flowAck, { bytes: sent });
+      expect(sentBytes(t, id)).toBe(sent);
+      expect(t.events(id, FRAME_EVENTS.httpEnd)).toHaveLength(0);
+    });
+
+    it('leaves another exchange\'s events alone', async () => {
+      const t = setup();
+      const { frameId, id } = await finishedBehindWindow(t);
+      const other = t.call(FRAME_METHODS.httpRequest, { ...GET, frameId });
+      const second = t.host.upstreams[0]!.exchanges[1]!;
+      second.sink.onHead(200, 'OK', []);
+      second.sink.onEnd();
+      const sent = sentBytes(t, id);
+      t.call(FRAME_METHODS.httpCancel, { exchangeId: id });
+      t.call(FRAME_METHODS.flowAck, { bytes: sent });
+      expect(t.events(other, FRAME_EVENTS.httpEnd)).toHaveLength(1);
+    });
+  });
+
   it('holds body bytes past the window until acknowledged, pausing every source meanwhile', async () => {
     const t = setup();
     const frameId = await t.open();

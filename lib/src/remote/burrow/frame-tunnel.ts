@@ -108,6 +108,8 @@ interface Socket {
 interface Queued {
   /** The exchange or socket it belongs to, so closing one drops its events. */
   readonly owner: string;
+  /** Its frame, which outlives it: closing the frame drops what a finished one left queued. */
+  readonly frameId: string;
   readonly event: string;
   /** The event's data, or, for a body chunk, how to wrap it once encoded. */
   readonly data: unknown;
@@ -255,6 +257,9 @@ export class FrameTunnel {
     }
     this.#frames.set(id, { id, surfaceId, pageOrigin, upstream: opened });
     this.#watch();
+    // The page was read before the grant was minted, and nothing watched this
+    // frame meanwhile: one that went in that time closes now.
+    this.#scheduleRevalidate();
     return { path: opened.path };
   }
 
@@ -275,6 +280,7 @@ export class FrameTunnel {
     this.#frames.delete(id);
     for (const [exchangeId, entry] of this.#exchanges) if (entry.frameId === id) this.#dropExchange(exchangeId);
     for (const [socketId, entry] of this.#sockets) if (entry.frameId === id) this.#dropSocket(socketId);
+    this.#dropQueued((item) => item.frameId === id);
     frame.upstream.close();
     if (reason) this.#options.event(id, FRAME_EVENTS.frameClosed, { reason } satisfies FrameClosedEvent);
     if (this.#frames.size === 0) this.#stopWatching();
@@ -359,12 +365,12 @@ export class FrameTunnel {
         onBody: (chunk) => {
           if (!this.#exchanges.get(id)?.answered) return;
           for (const bytes of slices(chunk)) {
-            this.#enqueue({ owner: id, event: FRAME_EVENTS.httpBody, data: null, body: { bytes, wrap: (encoded) => ({ bytes: encoded }) } });
+            this.#enqueue({ owner: id, frameId: frame.id, event: FRAME_EVENTS.httpBody, data: null, body: { bytes, wrap: (encoded) => ({ bytes: encoded }) } });
           }
         },
         onEnd: () => {
           if (!this.#exchanges.get(id)?.answered) return;
-          this.#enqueue({ owner: id, event: FRAME_EVENTS.httpEnd, data: {} });
+          this.#enqueue({ owner: id, frameId: frame.id, event: FRAME_EVENTS.httpEnd, data: {} });
           // Finished on its own: its queued events stay.
           this.#exchanges.delete(id);
         },
@@ -385,7 +391,7 @@ export class FrameTunnel {
   #failExchange(id: string, message: string): void {
     const entry = this.#exchanges.get(id);
     if (!entry) return;
-    if (entry.answered) this.#enqueue({ owner: id, event: FRAME_EVENTS.httpError, data: { message } });
+    if (entry.answered) this.#enqueue({ owner: id, frameId: entry.frameId, event: FRAME_EVENTS.httpError, data: { message } });
     else {
       entry.answered = true;
       this.#options.fail(entry.request, message);
@@ -409,7 +415,12 @@ export class FrameTunnel {
 
   #httpCancel(request: RemoteRequest): void {
     const { exchangeId } = (request.params ?? {}) as Partial<HttpCancelParams>;
-    if (typeof exchangeId === 'string') this.#dropExchange(exchangeId);
+    if (typeof exchangeId === 'string') {
+      this.#dropExchange(exchangeId);
+      // One that finished may still have events behind the window. Past this
+      // answer the Client has stopped listening, and would never ack them.
+      this.#dropQueued((item) => item.owner === exchangeId);
+    }
     this.#options.ok(request, {});
   }
 
@@ -422,7 +433,7 @@ export class FrameTunnel {
     if (!entry) return;
     this.#exchanges.delete(id);
     entry.exchange.abort();
-    this.#dropQueued(id);
+    this.#dropQueued((item) => item.owner === id);
     if (!entry.answered && !this.#disposed) this.#options.fail(entry.request, 'request cancelled');
   }
 
@@ -457,14 +468,14 @@ export class FrameTunnel {
         const fragments = slices(data);
         fragments.forEach((bytes, index) => {
           const fin = index === fragments.length - 1;
-          this.#enqueue({ owner: id, event: FRAME_EVENTS.wsMessage, data: null, body: { bytes, wrap: (encoded) => ({ data: encoded, binary, fin }) } });
+          this.#enqueue({ owner: id, frameId: frame.id, event: FRAME_EVENTS.wsMessage, data: null, body: { bytes, wrap: (encoded) => ({ data: encoded, binary, fin }) } });
         });
       },
       onClose: (code, reason) => {
         const entry = this.#sockets.get(id);
         if (!entry) return;
         if (!entry.open) this.#options.fail(request, `upstream refused the socket: ${code}`);
-        else this.#enqueue({ owner: id, event: FRAME_EVENTS.wsClosed, data: { code, reason } satisfies WsClosedEvent });
+        else this.#enqueue({ owner: id, frameId: frame.id, event: FRAME_EVENTS.wsClosed, data: { code, reason } satisfies WsClosedEvent });
         this.#sockets.delete(id);
       },
     });
@@ -531,7 +542,7 @@ export class FrameTunnel {
     if (!entry) return;
     this.#sockets.delete(id);
     entry.socket.terminate();
-    this.#dropQueued(id);
+    this.#dropQueued((item) => item.owner === id);
     if (!entry.open && !this.#disposed) this.#options.fail(entry.request, 'socket cancelled');
   }
 
@@ -614,9 +625,9 @@ export class FrameTunnel {
     }
   }
 
-  #dropQueued(owner: string): void {
+  #dropQueued(dropped: (item: Queued) => boolean): void {
     let kept = 0;
-    for (const item of this.#queue) if (item.owner !== owner) this.#queue[kept++] = item;
+    for (const item of this.#queue) if (!dropped(item)) this.#queue[kept++] = item;
     this.#queue.length = kept;
   }
 

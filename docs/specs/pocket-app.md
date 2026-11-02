@@ -211,7 +211,7 @@ A framed page (`docs/specs/remote-api.md` -> "Frames") runs at a frame origin: a
 
 - **Must declare `capabilities.frames` only at Hosted's production origin** (`frameDomainFor`): the frame Worker lets no other page frame it, and a preview has no wildcard to serve one on. The one-time page declares none.
 - **Must let frames in through Pocket's CSP only for that domain**; a self-host Relay's Pocket names none.
-- **Must sandbox a framed page as a local pane's**, so it cannot navigate Pocket away.
+- **Must sandbox a framed page as a local pane's, and its bootstrap page no less**, so it cannot navigate Pocket away, itself or through the sibling it can script.
 - **Must keep each device's `frameOriginFor` salt in this browser**; losing it only moves frames to new origins.
 - **Must attach no terminal while a browser shows**, so a Tool on the phone holds no pane's size.
 - **Must keep up to `MAX_FRAMES_PER_SESSION` frames loaded**, dropping the oldest with no unsaved edits.

@@ -111,14 +111,28 @@ describe('createAskSurfaceProvider holds', () => {
 describe('createAskSurfaceProvider closeSurface', () => {
   const noPty = { writePty: () => {}, resizePty: () => {}, streamPty: () => () => {} } as never;
 
-  it('asks the owner once, with the consent, and answers its outcome', async () => {
-    const asked: unknown[] = [];
-    const { provider } = createAskSurfaceProvider(async (_op, params) => {
-      asked.push(params);
-      return [{ outcome: 'closed' }];
+  it('addresses only the owner it resolved, so a duplicate in another window stays', async () => {
+    const asked: unknown[][] = [];
+    const { provider } = createAskSurfaceProvider(async (op, params, ownerPtyId) => {
+      asked.push([op, params, ownerPtyId]);
+      return op === 'surfaceOp' ? [{ ptyId: 'window-a:surface:1' }, { ptyId: 'window-b:surface:1' }] : [{ outcome: 'closed' }];
     }, noPty);
     expect(await provider.closeSurface('surface:1', { confirmed: true })).toEqual({ outcome: 'closed' });
-    expect(asked).toEqual([{ surfaceId: 'surface:1', confirmed: true }]);
+    expect(asked).toEqual([
+      ['surfaceOp', { surfaceId: 'surface:1', op: 'resolve' }, undefined],
+      ['closeOp', { surfaceId: 'surface:1', confirmed: true }, 'window-a:surface:1'],
+    ]);
+  });
+
+  it('asks every window for a browser alone, which has no PTY to address', async () => {
+    const closes: unknown[] = [];
+    const { provider } = createAskSurfaceProvider(async (op, _params, ownerPtyId) => {
+      if (op === 'surfaceOp') return [];
+      closes.push(ownerPtyId);
+      return [{ outcome: 'closed' }];
+    }, noPty);
+    expect(await provider.closeSurface('surface:1', {})).toEqual({ outcome: 'closed' });
+    expect(closes).toEqual([undefined]);
   });
 
   it('refuses an answer it cannot read: a peer window is another build', async () => {

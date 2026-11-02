@@ -145,6 +145,9 @@ export function PocketBrowserFrame({
         <iframe
           key={opened.frame.id}
           hidden
+          // Same-origin with the page, which can script it: sandboxed no less
+          // than the page, or the page steps out of its own sandbox through it.
+          sandbox="allow-scripts allow-same-origin"
           title="Frame bootstrap"
           src={`${opened.origin}${FRAME_BOOTSTRAP_PATH}`}
           onLoad={onBootstrapLoad}
