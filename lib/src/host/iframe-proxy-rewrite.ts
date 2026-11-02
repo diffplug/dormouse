@@ -269,12 +269,15 @@ export const HEAD_MARKER = new RegExp(`${HEAD_CLOSE.source}|${BODY_OPEN.source}`
  * For a page a remote Client frames (`docs/specs/remote-api.md` → "Frames"): no
  * service worker sees a WebSocket, so a same-origin one goes as a message to the
  * worker controlling this page, which relays it (`lib/src/remote/frame-origin/`).
- * A socket on any other origin, or a page no worker controls, stays native.
+ * A socket on any other origin, or a page no worker controls, stays native. A
+ * close follows the sends before it, and a page going away closes what it holds:
+ * nothing else tells the session, whose sockets are few.
  */
 export function tunnelSocketShim(): string {
   return `(function(){
-  var N=window.WebSocket,S=navigator.serviceWorker;
+  var N=window.WebSocket,S=navigator.serviceWorker,L=new Set();
   if(!N||!S||!S.controller)return;
+  addEventListener('pagehide',function(){L.forEach(function(end){end();});});
   function T(url,protocols){
     var u=new URL(String(url),location.href);
     if(u.host!==location.host)return protocols===undefined?new N(url):new N(url,protocols);
@@ -284,15 +287,18 @@ export function tunnelSocketShim(): string {
     t.addEventListener=e.addEventListener.bind(e);t.removeEventListener=e.removeEventListener.bind(e);t.dispatchEvent=e.dispatchEvent.bind(e);
     function fire(ev){e.dispatchEvent(ev);var h=t['on'+ev.type];if(typeof h==='function')h.call(t,ev);}
     var c=new MessageChannel(),p=c.port1,q=Promise.resolve();
+    var said=false;
+    function end(code,reason){if(said)return;said=true;p.postMessage({kind:'close',code:code,reason:reason});}
+    L.add(end);
     p.onmessage=function(m){
       var d=m.data;
-      if(d.kind==='open'){t.readyState=1;t.protocol=d.protocol;t.extensions=d.extensions;fire(new Event('open'));}
+      if(d.kind==='open'){if(t.readyState!==0)return;t.readyState=1;t.protocol=d.protocol;t.extensions=d.extensions;fire(new Event('open'));}
       else if(d.kind==='message'){
         var v=d.binary?(t.binaryType==='arraybuffer'?d.data:new Blob([d.data])):new TextDecoder().decode(d.data);
         fire(new MessageEvent('message',{data:v,origin:location.origin}));
       }else if(d.kind==='closed'){
         if(d.code===1006)fire(new Event('error'));
-        t.readyState=3;p.close();
+        t.readyState=3;L.delete(end);p.close();
         fire(new CloseEvent('close',{code:d.code,reason:d.reason,wasClean:d.code!==1006}));
       }
     };
@@ -300,11 +306,11 @@ export function tunnelSocketShim(): string {
       if(t.readyState===0)throw new DOMException('Still in CONNECTING state.','InvalidStateError');
       if(t.readyState!==1)return;
       var b=typeof data!=='string';
-      q=q.then(function(){return typeof data==='string'?new TextEncoder().encode(data).buffer:data instanceof Blob?data.arrayBuffer():ArrayBuffer.isView(data)?data.buffer.slice(data.byteOffset,data.byteOffset+data.byteLength):data.slice(0);}).then(function(buf){p.postMessage({kind:'send',data:buf,binary:b},[buf]);});
+      q=q.then(function(){return typeof data==='string'?new TextEncoder().encode(data).buffer:data instanceof Blob?data.arrayBuffer():ArrayBuffer.isView(data)?data.buffer.slice(data.byteOffset,data.byteOffset+data.byteLength):data.slice(0);}).then(function(buf){p.postMessage({kind:'send',data:buf,binary:b},[buf]);}).catch(function(){});
     };
     t.close=function(code,reason){
       if(t.readyState>1)return;
-      t.readyState=2;p.postMessage({kind:'close',code:code,reason:reason});
+      t.readyState=2;q=q.then(function(){end(code,reason);});
     };
     var list=protocols===undefined?[]:typeof protocols==='string'?[protocols]:Array.prototype.slice.call(protocols);
     S.controller.postMessage({kind:'socket',path:u.pathname+u.search,protocols:list},[c.port2]);

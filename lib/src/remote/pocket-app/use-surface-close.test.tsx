@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SurfaceCloseResult } from 'remote-lib-common';
 import { MobileCloseDialog } from '../../components/MobileCloseDialog';
-import { connectToolEditor } from '../../lib/tool-editor';
+import { connectToolEditor, decideEditorClose, getEditorClosePrompt } from '../../lib/tool-editor';
 import { recordToolDirty } from '../../lib/tool-dirty-store';
 import { useSurfaceClose, type SurfaceCloseSession } from './use-surface-close';
 
@@ -59,6 +59,23 @@ afterEach(() => {
   act(() => root.unmount());
   container.remove();
   recordToolDirty('surface:1', null);
+});
+
+describe('useSurfaceClose when the session goes', () => {
+  const leave = () => act(async () => root.render(null));
+
+  it('takes down the prompt about its own edits, whose answer would close nothing', async () => {
+    const { session, asked } = sessionAnswering({ outcome: 'closed' });
+    recordToolDirty('surface:1', true);
+    await start(session);
+    expect(getEditorClosePrompt()).not.toBeNull();
+    await leave();
+    await tick();
+    expect(getEditorClosePrompt()).toBeNull();
+    await act(async () => { await decideEditorClose('discard'); });
+    await tick();
+    expect(asked).toEqual([]);
+  });
 });
 
 describe('useSurfaceClose', () => {

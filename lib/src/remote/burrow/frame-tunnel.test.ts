@@ -136,6 +136,7 @@ function setup({ isDirect = () => true }: { isDirect?: () => boolean } = {}) {
   const open = async (surfaceId = 'surface:1') => {
     const id = call(FRAME_METHODS.frameOpen, {
       surfaceId,
+      pageOrigin: PAGE_ORIGIN,
       frameOrigin: 'https://f.example',
       embedderOrigins: ['https://pocket.example'],
     });
@@ -149,6 +150,7 @@ async function flush(): Promise<void> {
   for (let i = 0; i < 5; i += 1) await Promise.resolve();
 }
 
+const PAGE_ORIGIN = 'http://localhost:5173';
 const GET = { method: 'GET', path: '/', headers: [['accept', 'text/html']], end: true };
 
 afterEach(() => {
@@ -156,6 +158,16 @@ afterEach(() => {
 });
 
 describe('frame.open', () => {
+  it('refuses a page no longer at the origin the Client named its frame origin for', async () => {
+    const t = setup();
+    t.pages.set('surface:1', { url: 'http://localhost:9999/' });
+    const id = await t.open();
+    expect(t.answer(id)).toMatchObject({ ok: false, error: 'the page moved: surface:1' });
+    expect(t.host.upstreams).toHaveLength(0);
+    const unnamed = t.call(FRAME_METHODS.frameOpen, { surfaceId: 'surface:1', frameOrigin: 'https://f.example', embedderOrigins: [] });
+    expect(t.answer(unnamed)).toMatchObject({ ok: false, error: 'invalid frame.open: origins' });
+  });
+
   it('refuses a session the direct path does not carry, until it does', async () => {
     let direct = false;
     const t = setup({ isDirect: () => direct });
@@ -204,6 +216,7 @@ describe('frame.open', () => {
     const t = setup();
     const id = t.call(FRAME_METHODS.frameOpen, {
       surfaceId: 'surface:1',
+      pageOrigin: PAGE_ORIGIN,
       frameOrigin: 'https://f.example',
       embedderOrigins: ['https://pocket.example'],
     });
@@ -228,6 +241,7 @@ describe('frame.open', () => {
     t.host.hold = new Promise((resolve) => { release = resolve; });
     const id = t.call(FRAME_METHODS.frameOpen, {
       surfaceId: 'surface:1',
+      pageOrigin: PAGE_ORIGIN,
       frameOrigin: 'https://f.example',
       embedderOrigins: ['https://pocket.example'],
     });
@@ -273,9 +287,8 @@ describe('http', () => {
   it('streams a request body through http.write, answering each once the upstream took it', async () => {
     const t = setup();
     const frameId = await t.open();
-    const id = t.call(FRAME_METHODS.httpRequest, {
-      frameId, method: 'POST', path: '/save', headers: [], body: toBase64Url(new TextEncoder().encode('ab')), end: false,
-    });
+    const id = t.call(FRAME_METHODS.httpRequest, { frameId, method: 'POST', path: '/save', headers: [], end: false });
+    t.call(FRAME_METHODS.httpWrite, { exchangeId: id, bytes: toBase64Url(new TextEncoder().encode('ab')), end: false });
     const write = t.call(FRAME_METHODS.httpWrite, { exchangeId: id, bytes: toBase64Url(new TextEncoder().encode('cd')), end: true });
     await flush();
     expect(t.host.upstreams[0]!.exchanges[0]!.writes).toEqual([['ab', false], ['cd', true]]);
@@ -313,10 +326,6 @@ describe('http', () => {
       const id = t.call(FRAME_METHODS.httpRequest, { ...GET, frameId, ...patch });
       expect(t.answer(id)).toMatchObject({ ok: false, error: `invalid http.request: ${field}` });
     }
-    const big = t.call(FRAME_METHODS.httpRequest, {
-      ...GET, frameId, body: toBase64Url(new Uint8Array(FRAME_CHUNK_BYTES + 1)), end: true,
-    });
-    expect(t.answer(big)).toMatchObject({ ok: false, error: 'invalid http.request: body' });
     expect(t.host.upstreams[0]!.exchanges).toHaveLength(0);
     const nowhere = t.call(FRAME_METHODS.httpRequest, { ...GET, frameId: 'nope' });
     expect(t.answer(nowhere)).toMatchObject({ ok: false, error: 'no such frame' });

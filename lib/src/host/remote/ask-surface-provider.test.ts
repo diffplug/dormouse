@@ -115,35 +115,40 @@ describe('createAskSurfaceProvider closeSurface', () => {
     const asked: unknown[][] = [];
     const { provider } = createAskSurfaceProvider(async (op, params, ownerPtyId) => {
       asked.push([op, params, ownerPtyId]);
-      return op === 'surfaceOp' ? [{ ptyId: 'window-a:surface:1' }, { ptyId: 'window-b:surface:1' }] : [{ outcome: 'closed' }];
+      return op === 'closeOwnerOp' ? [{ ptyId: 'window-a:surface:1' }, { ptyId: 'window-b:surface:1' }] : [{ outcome: 'closed' }];
     }, noPty);
     expect(await provider.closeSurface('surface:1', { confirmed: true })).toEqual({ outcome: 'closed' });
     expect(asked).toEqual([
-      ['surfaceOp', { surfaceId: 'surface:1', op: 'resolve' }, undefined],
+      ['closeOwnerOp', { surfaceId: 'surface:1' }, undefined],
       ['closeOp', { surfaceId: 'surface:1', confirmed: true }, 'window-a:surface:1'],
     ]);
   });
 
-  it('asks every window for a browser alone, which has no PTY to address', async () => {
-    const closes: unknown[] = [];
-    const { provider } = createAskSurfaceProvider(async (op, _params, ownerPtyId) => {
-      if (op === 'surfaceOp') return [];
-      closes.push(ownerPtyId);
-      return [{ outcome: 'closed' }];
-    }, noPty);
-    expect(await provider.closeSurface('surface:1', {})).toEqual({ outcome: 'closed' });
-    expect(closes).toEqual([undefined]);
+  it('closes nothing when no owner answers: a slow window would still act on a broadcast', async () => {
+    for (const probe of [async () => [], async () => { throw new Error('gone'); }, async () => [{}]]) {
+      const ops: string[] = [];
+      const { provider } = createAskSurfaceProvider(async (op) => {
+        ops.push(op);
+        return op === 'closeOwnerOp' ? probe() : [{ outcome: 'closed' }];
+      }, noPty);
+      expect((await provider.closeSurface('surface:1', {})).outcome).toBe('refused');
+      expect(ops).toEqual(['closeOwnerOp']);
+    }
   });
 
   it('refuses an answer it cannot read: a peer window is another build', async () => {
-    const { provider } = createAskSurfaceProvider(async () => [{ outcome: 'unsaved' }], noPty);
+    const { provider } = createAskSurfaceProvider(
+      async (op) => (op === 'closeOwnerOp' ? [{ ptyId: 'surface:1' }] : [{ outcome: 'unsaved' }]),
+      noPty,
+    );
     expect((await provider.closeSurface('surface:1', {})).outcome).toBe('refused');
   });
 
-  it('refuses a surface nobody claims, an ask that failed included', async () => {
-    const { provider: none } = createAskSurfaceProvider(async () => [], noPty);
+  it('refuses when the owner goes before the close reaches it', async () => {
+    const answer = (close: () => Promise<unknown[]>) => async (op: string) => (op === 'closeOwnerOp' ? [{ ptyId: 'surface:1' }] : close());
+    const { provider: none } = createAskSurfaceProvider(answer(async () => []), noPty);
     expect((await none.closeSurface('surface:1', {})).outcome).toBe('refused');
-    const { provider: failing } = createAskSurfaceProvider(async () => { throw new Error('gone'); }, noPty);
+    const { provider: failing } = createAskSurfaceProvider(answer(async () => { throw new Error('gone'); }), noPty);
     expect((await failing.closeSurface('surface:1', {})).outcome).toBe('refused');
   });
 });

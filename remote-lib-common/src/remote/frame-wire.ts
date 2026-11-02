@@ -39,8 +39,9 @@ export const FRAME_EVENTS = {
 export const FRAME_CHUNK_BYTES = 192 * 1024;
 
 /**
- * How many Burrow→Client body bytes, before base64url, may be sent and not yet
- * acknowledged by `flow.ack` across one session's every exchange and socket.
+ * How many body bytes, before base64url, one session may have on the wire in
+ * each direction across its every exchange and socket: Burrow→Client until
+ * `flow.ack`, Client→Burrow until the `http.write` or `ws.send` is answered.
  * Encoded, it stays well inside the direct path's sender queue
  * (`MAX_DIRECT_PENDING_BYTES`), whose overflow ends the session.
  */
@@ -87,6 +88,11 @@ export interface DirectoryBrowser {
 
 export interface FrameOpenParams {
   surfaceId: string;
+  /**
+   * The page origin {@link frameOrigin} is this Client's for. The open is refused
+   * if the surface shows another by now, whose page would inherit this one's storage.
+   */
+  pageOrigin: string;
   /** The origin the Client frames the page at, which the tunnel stands in for. */
   frameOrigin: string;
   /**
@@ -119,9 +125,7 @@ export interface HttpRequestParams {
    * whether a document comes back instrumented; absent reads as a document.
    */
   destination?: string;
-  /** The first body chunk, base64url. */
-  body?: string;
-  /** No body follows in `http.write`. */
+  /** No body follows; otherwise it comes in `http.write`. */
   end: boolean;
 }
 export interface HttpResponseHead {

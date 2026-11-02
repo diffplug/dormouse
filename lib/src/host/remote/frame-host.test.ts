@@ -174,6 +174,46 @@ describe('createBurrowFrameHost', () => {
     expect(origin).toBe(`http://localhost:${port}`);
   });
 
+  it('holds a socket paused while it was still connecting', async () => {
+    const { port, server } = await listen(() => {});
+    const wss = new WebSocketServer({ server });
+    servers.push(wss);
+    wss.on('connection', (socket) => socket.send('hello'));
+    const upstream = await open(`http://localhost:${port}/`);
+    const messages: string[] = [];
+    let opened!: () => void;
+    const whenOpen = new Promise<void>((resolve) => { opened = resolve; });
+    let delivered!: () => void;
+    const message = new Promise<void>((resolve) => { delivered = resolve; });
+    const socket = upstream.openSocket({ path: '/hmr', protocols: [] }, {
+      onOpen: () => opened(),
+      onMessage: (data) => {
+        messages.push(new TextDecoder().decode(data));
+        delivered();
+      },
+      onClose: () => {},
+    });
+    socket.pause();
+    await whenOpen;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(messages).toEqual([]);
+    socket.resume();
+    await message;
+    expect(messages).toEqual(['hello']);
+    socket.terminate();
+  });
+
+  it('settles a write the upstream never took when the exchange ends', async () => {
+    const { port } = await listen(() => {});
+    const upstream = await open(`http://localhost:${port}/`);
+    const exchange = upstream.request({ method: 'POST', path: '/', headers: [] }, {
+      onHead: () => {}, onBody: () => {}, onEnd: () => {}, onError: () => {},
+    });
+    const write = exchange.write(new Uint8Array(1024), false);
+    exchange.abort();
+    await expect(write).rejects.toThrow();
+  });
+
   it('closing the upstream ends its grant and what is in flight on it', async () => {
     let arrived!: () => void;
     const reached = new Promise<void>((resolve) => { arrived = resolve; });

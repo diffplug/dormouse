@@ -4,12 +4,13 @@
  * then whatever consent the computer says the close needs.
  */
 
-import { useCallback, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { REMOTE_METHODS, type SurfaceCloseParams, type SurfaceCloseResult } from 'remote-lib-common';
 import type { MobileCloseDialogState } from '../../components/MobileCloseDialog';
 import { randomKillChar } from '../../components/KillConfirm';
 import { messageOf } from '../../lib/errors';
 import {
+  cancelEditorClose,
   confirmToolEditorsClose,
   decideEditorClose,
   getEditorClosePrompt,
@@ -29,12 +30,16 @@ export function useSurfaceClose(session: SurfaceCloseSession | null): {
 } {
   const [asked, setAsked] = useState<MobileCloseDialogState | null>(null);
   const closing = useRef(false);
+  // The one prompt that outlives this hook, being module-wide. Answered later, it
+  // would send the close down `session`, to whichever Burrow that reaches by then.
+  const askingOwnEdits = useRef(false);
+  useEffect(() => () => { if (askingOwnEdits.current) cancelEditorClose(); }, []);
   const ownPrompt = useSyncExternalStore(subscribeEditorClosePrompt, getEditorClosePrompt);
 
   const close = useCallback((surfaceId: string) => {
     if (!session || closing.current) return;
     closing.current = true;
-    /** Show a dialog until its answer. */
+    /** Show a dialog until its answer; gone with the hook, whose dialogs no one can answer. */
     const ask = <T,>(build: (answer: (value: T) => void) => MobileCloseDialogState) => new Promise<T>((resolve) => {
       setAsked(build((value) => { setAsked(null); resolve(value); }));
     });
@@ -47,7 +52,10 @@ export function useSurfaceClose(session: SurfaceCloseSession | null): {
     }));
     void (async () => {
       try {
-        if (!(await confirmToolEditorsClose([surfaceId]))) return;
+        askingOwnEdits.current = true;
+        const own = await confirmToolEditorsClose([surfaceId]);
+        askingOwnEdits.current = false;
+        if (!own) return;
         const params: SurfaceCloseParams = { surfaceId };
         for (let answers = 0; answers < MAX_ANSWERS; answers += 1) {
           const result = await session.request<SurfaceCloseResult>(REMOTE_METHODS.surfaceClose, params);

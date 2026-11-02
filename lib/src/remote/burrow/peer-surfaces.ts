@@ -5,7 +5,7 @@
  */
 
 import type { SurfaceCloseParams, SurfaceCloseResult } from 'remote-lib-common';
-import { answerClientClose } from './client-close';
+import { answerClientClose, answerClientCloseOwner } from './client-close';
 import { clampTerminalDimension, type DirectoryBrowser, type DirectoryEntry } from 'remote-lib-common';
 import { subscribeAgentBrowserScreenPages } from '../../components/wall/agent-browser-screen';
 import type { BurrowStatusEvent } from '../../host/remote/service-protocol';
@@ -73,6 +73,8 @@ export interface PeerOps {
   surfaceOp: { params: PeerSurfaceParams; result: PeerSurfaceResult };
   /** The page a Surface embeds (`embedded-pages.ts`); answered by its owner alone. */
   browserOp: { params: { surfaceId: string }; result: DirectoryBrowser };
+  /** The read-only probe that picks one owner before a close; answered by an owner. */
+  closeOwnerOp: { params: { surfaceId: string }; result: { ptyId: string } };
   /** A Client's close (`client-close.ts`); answered by its owner alone. */
   closeOp: { params: SurfaceCloseParams; result: SurfaceCloseResult };
 }
@@ -195,6 +197,7 @@ export function installPeerSurfaceResponder(): void {
     const page = typeof surfaceId === 'string' ? embeddedPageOf(surfaceId) : null;
     return page ? [page] : [];
   });
+  answerPeers('closeOwnerOp', ({ surfaceId }) => (typeof surfaceId === 'string' ? answerClientCloseOwner(surfaceId) : []));
   answerPeers('closeOp', (params) => (typeof params?.surfaceId === 'string' ? answerClientClose(params) : []));
   if (!standing) {
     standing = true;

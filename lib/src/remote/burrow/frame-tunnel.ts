@@ -198,11 +198,11 @@ export class FrameTunnel {
 
   #frameOpen(request: RemoteRequest): void {
     const params = request.params as Partial<FrameOpenParams> | undefined;
-    const { surfaceId, frameOrigin, embedderOrigins } = params ?? {};
+    const { surfaceId, pageOrigin, frameOrigin, embedderOrigins } = params ?? {};
     if (typeof surfaceId !== 'string' || !surfaceId || surfaceId.length > MAX_SURFACE_ID_LENGTH) {
       return this.#options.fail(request, 'invalid frame.open: surfaceId');
     }
-    if (typeof frameOrigin !== 'string' || !Array.isArray(embedderOrigins)
+    if (typeof pageOrigin !== 'string' || typeof frameOrigin !== 'string' || !Array.isArray(embedderOrigins)
       || !embedderOrigins.every((origin) => typeof origin === 'string')) {
       return this.#options.fail(request, 'invalid frame.open: origins');
     }
@@ -214,7 +214,7 @@ export class FrameTunnel {
       return this.#options.fail(request, 'too many frames are open');
     }
     this.#opening.add(id);
-    void this.#resolveAndOpen(request, surfaceId, frameOrigin, embedderOrigins as string[]).then(
+    void this.#resolveAndOpen(request, surfaceId, pageOrigin, frameOrigin, embedderOrigins as string[]).then(
       (result) => {
         this.#opening.delete(id);
         if (this.#disposed) return;
@@ -235,6 +235,7 @@ export class FrameTunnel {
   async #resolveAndOpen(
     request: RemoteRequest,
     surfaceId: string,
+    expectedOrigin: string,
     frameOrigin: string,
     embedderOrigins: string[],
   ): Promise<FrameOpenResult | string> {
@@ -245,6 +246,8 @@ export class FrameTunnel {
     if (this.#disposed || !this.#opening.has(id)) return 'frame.open superseded';
     const pageOrigin = pageUrl ? originOf(pageUrl) : null;
     if (!pageUrl || !pageOrigin) return `no embedded page: ${surfaceId}`;
+    // The frame origin holds the storage of the page the Client last heard of.
+    if (pageOrigin !== expectedOrigin) return `the page moved: ${surfaceId}`;
     const opened = await this.#options.host.open(pageUrl, {
       frameOrigin,
       embedderOrigins,
@@ -344,14 +347,12 @@ export class FrameTunnel {
     if (this.#exchanges.size >= MAX_HTTP_EXCHANGES_PER_SESSION) {
       return this.#options.fail(request, 'too many requests are open');
     }
-    const { method, path, headers, destination, body, end } = params!;
+    const { method, path, headers, destination, end } = params!;
     const invalid = validMethod(method) ?? validPath(path) ?? validHeaders(headers)
       ?? (destination === undefined || (typeof destination === 'string' && DESTINATION_RE.test(destination))
         ? null : 'destination')
       ?? (typeof end === 'boolean' ? null : 'end');
     if (invalid) return this.#options.fail(request, `invalid http.request: ${invalid}`);
-    const first = body === undefined ? EMPTY : decodeChunk(body);
-    if (!first) return this.#options.fail(request, 'invalid http.request: body');
 
     const exchange = frame.upstream.request(
       { method: method!, path: path!, headers: headers!, ...(destination !== undefined ? { destination } : {}) },
@@ -379,8 +380,8 @@ export class FrameTunnel {
     );
     this.#exchanges.set(id, { frameId: frame.id, exchange, request: answering, answered: false, ended: end!, held: false });
     if (this.#paused) exchange.pause();
-    if (first.length > 0 || end) {
-      exchange.write(first, end!).catch((error: unknown) => {
+    if (end) {
+      exchange.write(EMPTY, true).catch((error: unknown) => {
         this.#failExchange(id, `upstream failed: ${errorMessage(error)}`);
         exchange.abort();
       });

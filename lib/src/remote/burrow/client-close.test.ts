@@ -1,5 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
-import { answerClientClose, registerClientCloser } from './client-close';
+import { answerClientClose, answerClientCloseOwner, registerClientCloser } from './client-close';
+
+describe('answerClientCloseOwner', () => {
+  it('names a key for any surface a Wall owns, and claims the rest not at all', () => {
+    const unregister = registerClientCloser({ owns: (id) => id === 'surface:1', close: vi.fn() });
+    expect(answerClientCloseOwner('surface:1')).toEqual([{ ptyId: 'surface:1' }]);
+    expect(answerClientCloseOwner('surface:2')).toEqual([]);
+    unregister();
+  });
+});
 
 describe('answerClientClose', () => {
   it('claims nothing for a surface another window owns', async () => {

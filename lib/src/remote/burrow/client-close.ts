@@ -21,6 +21,15 @@ export function registerClientCloser(closer: ClientCloser): () => void {
   return () => void closers.delete(closer);
 }
 
+/**
+ * Who a close should go to, asked before it goes. `ptyId` is the key the
+ * cross-window link addresses a follow-up by (`routedPtyId` in
+ * `vscode-ext/src/peer-link-protocol.ts`), which a browser with no PTY needs too.
+ */
+export function answerClientCloseOwner(surfaceId: string): { ptyId: string }[] {
+  return [...closers].some((closer) => closer.owns(surfaceId)) ? [{ ptyId: surfaceId }] : [];
+}
+
 /** No answer means this webview does not own the Surface. */
 export async function answerClientClose({ surfaceId, confirmed, unsaved }: SurfaceCloseParams): Promise<SurfaceCloseResult[]> {
   const closer = [...closers].find((candidate) => candidate.owns(surfaceId));

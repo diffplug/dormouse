@@ -80,6 +80,7 @@ export function PocketBrowserFrame({
       const origin = await originFor(surfaceId, pageOrigin);
       frame = await frames.open({
         surfaceId,
+        pageOrigin,
         frameOrigin: origin,
         embedderOrigins: embedderOrigins(),
         onClosed: () => { if (live) setEnded({ kind: 'gone' }); },

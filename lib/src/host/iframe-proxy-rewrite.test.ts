@@ -11,6 +11,7 @@ import {
   startsWithUtf16Bom,
   unreachablePage,
   timedOutPage,
+  tunnelSocketShim,
 } from './iframe-proxy-rewrite';
 
 const APP = 'vscode-webview://abc-123';
@@ -337,5 +338,70 @@ describe('errorPageHtml', () => {
     expect(unreachablePage(remote, 'ETIMEDOUT').message).not.toContain('dev server');
     expect(unreachablePage(remote, 'ETIMEDOUT').message).toContain('reachable from this machine');
     expect(timedOutPage(remote).message).not.toContain('dev server');
+  });
+});
+
+describe('tunnelSocketShim', () => {
+  /** The shim in a page of its own: every socket's far port, and what `pagehide` would do. */
+  function page() {
+    const listeners = new Map<string, () => void>();
+    const relayed: { ports: MessagePort[] }[] = [];
+    const window: { WebSocket: unknown } = { WebSocket: class {} };
+    const navigator = { serviceWorker: { controller: { postMessage: (_message: unknown, ports: MessagePort[]) => relayed.push({ ports }) } } };
+    class CloseEvent extends Event {}
+    new Function('window', 'navigator', 'location', 'addEventListener', 'CloseEvent', tunnelSocketShim())(
+      window, navigator, { href: 'https://f.example/', host: 'f.example', origin: 'https://f.example' },
+      (type: string, listener: () => void) => listeners.set(type, listener), CloseEvent,
+    );
+    const open = () => {
+      const Socket = window.WebSocket as new (url: string) => { send(data: string): void; close(code?: number): void; readyState: number; onopen: (() => void) | null };
+      const socket = new Socket('/hmr');
+      const far = relayed[relayed.length - 1]!.ports[0]!;
+      const heard: string[] = [];
+      far.onmessage = (event: MessageEvent<{ kind: string }>) => heard.push(event.data.kind);
+      return { socket, far, heard };
+    };
+    return { open, pagehide: () => listeners.get('pagehide')!() };
+  }
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 10));
+
+  it('sends a close behind the sends before it', async () => {
+    const { socket, far, heard } = page().open();
+    far.postMessage({ kind: 'open', protocol: '', extensions: '' });
+    await settle();
+    socket.send('commit');
+    socket.close(1000);
+    await settle();
+    expect(heard).toEqual(['send', 'close']);
+    far.close();
+  });
+
+  it('closes every socket the page holds as it goes, and only once', async () => {
+    const shim = page();
+    const first = shim.open();
+    const second = shim.open();
+    first.far.postMessage({ kind: 'open', protocol: '', extensions: '' });
+    await settle();
+    first.socket.close();
+    await settle();
+    shim.pagehide();
+    await settle();
+    expect(first.heard).toEqual(['close']);
+    // Still connecting: the far end hears it once its open settles.
+    expect(second.heard).toEqual(['close']);
+    first.far.close();
+    second.far.close();
+  });
+
+  it('stays closed when the open arrives after a close', async () => {
+    const { socket, far } = page().open();
+    let opened = false;
+    socket.onopen = () => { opened = true; };
+    socket.close();
+    far.postMessage({ kind: 'open', protocol: '', extensions: '' });
+    await settle();
+    expect(opened).toBe(false);
+    expect(socket.readyState).toBe(2);
+    far.close();
   });
 });

@@ -10,7 +10,10 @@ import { afterEach, describe, expect, it } from 'vitest';
 import * as http from 'node:http';
 import { WebSocketServer } from 'ws';
 import {
+  FRAME_CHUNK_BYTES,
   FRAME_FLOW_WINDOW_BYTES,
+  FRAME_METHODS,
+  fromBase64Url,
   type RemoteEventMsg,
   type RemoteResponse,
 } from 'remote-lib-common';
@@ -22,6 +25,7 @@ import { FrameClient, type FrameSession, type OpenFrame } from './frame-client';
 
 const servers: Array<{ close(): void }> = [];
 const sessions: RemoteApiSession[] = [];
+const pagesOf = new WeakMap<FrameClient, Map<string, string>>();
 
 afterEach(() => {
   for (const session of sessions.splice(0)) session.dispose();
@@ -94,12 +98,15 @@ function connect(pages: Map<string, string>) {
     },
     unsubscribe: (subId) => void events.delete(subId),
   };
-  return { client: new FrameClient(session), notify: () => watchers.forEach((watcher) => watcher()), inFlight: () => inFlight };
+  const client = new FrameClient(session);
+  pagesOf.set(client, pages);
+  return { client, notify: () => watchers.forEach((watcher) => watcher()), inFlight: () => inFlight };
 }
 
 async function open(client: FrameClient, onClosed?: () => void): Promise<OpenFrame> {
   return client.open({
     surfaceId: 'surface:1',
+    pageOrigin: new URL(pagesOf.get(client)!.get('surface:1')!).origin,
     frameOrigin: 'https://frame.example',
     embedderOrigins: ['https://pocket.example'],
     ...(onClosed ? { onClosed } : {}),
@@ -257,5 +264,68 @@ describe('FrameClient', () => {
     client.dispose();
     await expect(reading).rejects.toThrow('the session ended');
     await expect(open(client)).rejects.toThrow('the session ended');
+  });
+});
+
+/** A session that answers nothing until told, to see what is on the wire at once. */
+function heldSession() {
+  const calls: Array<{ method: string; params: Record<string, unknown>; answer(result?: unknown): void }> = [];
+  const hold = <T,>(method: string, params: unknown) => new Promise<T>((resolve) => {
+    calls.push({ method, params: params as Record<string, unknown>, answer: (result) => resolve(result as T) });
+  });
+  const session: FrameSession = {
+    request: hold,
+    async subscribe<T>(method: string, params: unknown, _onEvent: unknown, subId = 'sub') {
+      if (method === FRAME_METHODS.frameOpen) return { subId, result: { path: '/' } as T };
+      return { subId, result: await hold<T>(method, params) };
+    },
+    unsubscribe: () => {},
+  };
+  return { session, calls, frames: new FrameClient(session) };
+}
+
+const settle = () => new Promise((resolve) => setTimeout(resolve));
+const chunkBytes = (encoded: unknown) => fromBase64Url(encoded as string).length;
+const OPEN = { surfaceId: 'surface:1', pageOrigin: 'http://localhost', frameOrigin: 'https://f.example', embedderOrigins: [] };
+
+describe('what a Client sends', () => {
+  it('holds every upload on the session within the window, and finishes them all', async () => {
+    const { calls, frames } = heldSession();
+    const frame = await frames.open(OPEN);
+    const size = FRAME_CHUNK_BYTES * 5 + 1;
+    for (let i = 0; i < 10; i += 1) void frame.request({ method: 'PUT', path: `/${i}`, headers: [], body: new Uint8Array(size) });
+    await settle();
+    const requests = calls.filter((call) => call.method === FRAME_METHODS.httpRequest);
+    expect(requests).toHaveLength(10);
+    expect(requests.every(({ params }) => params.end === false && !('body' in params))).toBe(true);
+    let delivered = 0;
+    for (;;) {
+      const writes = calls.filter((call) => call.method === FRAME_METHODS.httpWrite);
+      const unanswered = writes.reduce((sum, { params }) => sum + chunkBytes(params.bytes), 0);
+      expect(unanswered).toBeLessThanOrEqual(FRAME_FLOW_WINDOW_BYTES);
+      const next = writes[0];
+      if (!next) break;
+      calls.splice(calls.indexOf(next), 1);
+      delivered += chunkBytes(next.params.bytes);
+      next.answer({});
+      await settle();
+    }
+    expect(delivered).toBe(size * 10);
+  });
+
+  it('sends a socket\'s close behind what was sent before it', async () => {
+    const { calls, frames } = heldSession();
+    const frame = await frames.open(OPEN);
+    const opening = frame.openSocket('/hmr', [], { onMessage: () => {}, onClose: () => {} });
+    await settle();
+    calls.shift()!.answer({ protocol: '', extensions: '' });
+    const socket = await opening;
+    void socket.send(new TextEncoder().encode('commit'), false);
+    socket.close(1000, 'done');
+    await settle();
+    expect(calls.map((call) => call.method)).toEqual([FRAME_METHODS.wsSend]);
+    calls.shift()!.answer({});
+    await settle();
+    expect(calls.map((call) => call.method)).toEqual([FRAME_METHODS.wsClose]);
   });
 });

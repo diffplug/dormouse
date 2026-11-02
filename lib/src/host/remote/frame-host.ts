@@ -178,6 +178,8 @@ class GrantExchange implements FrameHttpExchange {
   #body: Readable | null = null;
   #paused = false;
   #finished = false;
+  /** Writes not yet settled: Node may never call back on a request it destroyed. */
+  readonly #writing = new Set<(error: Error) => void>();
 
   constructor(options: http.RequestOptions, sink: FrameHttpSink, grantOrigin: string, done: () => void) {
     this.#sink = sink;
@@ -203,7 +205,12 @@ class GrantExchange implements FrameHttpExchange {
     const request = this.#request;
     if (this.#finished || !request) return Promise.reject(new Error('request closed'));
     return new Promise((resolve, reject) => {
-      const settle = (error?: Error | null) => (error ? reject(error) : resolve());
+      this.#writing.add(reject);
+      const settle = (error?: Error | null) => {
+        this.#writing.delete(reject);
+        if (error) reject(error);
+        else resolve();
+      };
       if (end) {
         if (chunk.length > 0) request.write(chunk);
         request.end(settle);
@@ -225,10 +232,16 @@ class GrantExchange implements FrameHttpExchange {
 
   abort(): void {
     if (this.#finished) return;
-    this.#finished = true;
+    this.#finish();
     this.#request?.destroy();
     this.#body?.destroy();
+  }
+
+  #finish(): void {
+    this.#finished = true;
     this.#done();
+    for (const reject of this.#writing) reject(new Error('request closed'));
+    this.#writing.clear();
   }
 
   #respond(response: http.IncomingMessage): void {
@@ -264,8 +277,7 @@ class GrantExchange implements FrameHttpExchange {
     });
     body.on('end', () => {
       if (this.#finished) return;
-      this.#finished = true;
-      this.#done();
+      this.#finish();
       this.#sink.onEnd();
     });
     body.on('error', (error: Error) => this.#fail(error.message));
@@ -283,6 +295,7 @@ class GrantSocket implements FrameSocket {
   readonly #socket: WebSocket;
   readonly #sink: FrameSocketSink;
   readonly #done: () => void;
+  #paused = false;
   #finished = false;
 
   constructor(url: string, protocols: readonly string[], origin: string, sink: FrameSocketSink, done: () => void) {
@@ -295,7 +308,10 @@ class GrantSocket implements FrameSocket {
       handshakeTimeout: GRANT_IDLE_TIMEOUT_MS,
     });
     this.#socket.on('open', () => {
-      if (!this.#finished) this.#sink.onOpen(this.#socket.protocol, this.#socket.extensions);
+      if (this.#finished) return;
+      // `ws` ignores a pause before the open.
+      if (this.#paused) this.#socket.pause();
+      this.#sink.onOpen(this.#socket.protocol, this.#socket.extensions);
     });
     this.#socket.on('message', (data: WebSocket.RawData, binary: boolean) => {
       if (!this.#finished) this.#sink.onMessage(toBytes(data), binary);
@@ -318,10 +334,12 @@ class GrantSocket implements FrameSocket {
   }
 
   pause(): void {
+    this.#paused = true;
     if (this.#socket.readyState === WebSocket.OPEN) this.#socket.pause();
   }
 
   resume(): void {
+    this.#paused = false;
     if (this.#socket.readyState === WebSocket.OPEN) this.#socket.resume();
   }
 

@@ -8,6 +8,7 @@
 import {
   FRAME_CHUNK_BYTES,
   FRAME_EVENTS,
+  FRAME_FLOW_WINDOW_BYTES,
   FRAME_METHODS,
   MAX_HTTP_EXCHANGES_PER_SESSION,
   concatBytes,
@@ -81,6 +82,8 @@ export interface OpenFrame extends FrameOpenResult {
 
 export interface FrameOpenInit {
   surfaceId: string;
+  /** The page origin {@link frameOrigin} belongs to; the Burrow refuses any other. */
+  pageOrigin: string;
   frameOrigin: string;
   embedderOrigins: string[];
   /** The Burrow closed the frame: the surface's page went away. */
@@ -114,10 +117,43 @@ class ExchangeSlots {
   }
 }
 
+/**
+ * The body bytes a session may have sent and not had answered, across its every
+ * upload and socket, taken in order so none starves. One upstream that stopped
+ * reading holds its share until it fails or its frame closes.
+ */
+class SendWindow {
+  #inFlight = 0;
+  readonly #waiting: Array<{ bytes: number; go(): void }> = [];
+
+  async send<T>(bytes: number, sending: () => Promise<T>): Promise<T> {
+    if (this.#waiting.length > 0 || this.#inFlight + bytes > FRAME_FLOW_WINDOW_BYTES) {
+      await new Promise<void>((go) => this.#waiting.push({ bytes, go }));
+    } else {
+      this.#inFlight += bytes;
+    }
+    try {
+      return await sending();
+    } finally {
+      this.#inFlight -= bytes;
+      this.#admit();
+    }
+  }
+
+  #admit(): void {
+    while (this.#waiting.length > 0 && this.#inFlight + this.#waiting[0]!.bytes <= FRAME_FLOW_WINDOW_BYTES) {
+      const next = this.#waiting.shift()!;
+      this.#inFlight += next.bytes;
+      next.go();
+    }
+  }
+}
+
 export class FrameClient {
   readonly #session: FrameSession;
   readonly #frames = new Set<ClientFrame>();
   readonly #slots = new ExchangeSlots();
+  readonly #sends = new SendWindow();
   #unacked = 0;
   #ackTimer: ReturnType<typeof setTimeout> | null = null;
   #disposed = false;
@@ -132,7 +168,7 @@ export class FrameClient {
     let frame: ClientFrame | null = null;
     const { result } = await this.#session.subscribe<FrameOpenResult>(
       FRAME_METHODS.frameOpen,
-      { surfaceId: init.surfaceId, frameOrigin: init.frameOrigin, embedderOrigins: init.embedderOrigins },
+      { surfaceId: init.surfaceId, pageOrigin: init.pageOrigin, frameOrigin: init.frameOrigin, embedderOrigins: init.embedderOrigins },
       (event) => {
         if (event.event !== FRAME_EVENTS.frameClosed) return;
         frame?.ended('the embedded page closed');
@@ -140,7 +176,7 @@ export class FrameClient {
       },
       id,
     );
-    frame = new ClientFrame(id, result, this.#session, this.#slots, (bytes) => this.#received(bytes), () => {
+    frame = new ClientFrame(id, result, this.#session, this.#slots, this.#sends, (bytes) => this.#received(bytes), () => {
       this.#frames.delete(frame!);
       this.#session.unsubscribe(id);
     });
@@ -188,6 +224,7 @@ class ClientFrame implements OpenFrame {
   readonly path: string;
   readonly #session: FrameSession;
   readonly #slots: ExchangeSlots;
+  readonly #sends: SendWindow;
   /** Body bytes off the wire. */
   readonly #received: (bytes: number) => void;
   readonly #forget: () => void;
@@ -199,6 +236,7 @@ class ClientFrame implements OpenFrame {
     opened: FrameOpenResult,
     session: FrameSession,
     slots: ExchangeSlots,
+    sends: SendWindow,
     received: (bytes: number) => void,
     forget: () => void,
   ) {
@@ -206,6 +244,7 @@ class ClientFrame implements OpenFrame {
     this.path = opened.path;
     this.#session = session;
     this.#slots = slots;
+    this.#sends = sends;
     this.#received = received;
     this.#forget = forget;
   }
@@ -266,8 +305,7 @@ class ClientFrame implements OpenFrame {
       path: init.path,
       headers: init.headers,
       ...(init.destination !== undefined ? { destination: init.destination } : {}),
-      ...(bytes.length > 0 ? { body: toBase64Url(bytes.subarray(0, FRAME_CHUNK_BYTES)) } : {}),
-      end: bytes.length <= FRAME_CHUNK_BYTES,
+      end: bytes.length === 0,
     };
     const answered = session.subscribe<HttpResponseHead>(FRAME_METHODS.httpRequest, params, (event) => {
       switch (event.event) {
@@ -300,16 +338,24 @@ class ClientFrame implements OpenFrame {
     }
   }
 
-  /** The chunks past the first, each sent once the upstream took the last. */
+  /** One body chunk through the session's window, encoded only once it may go. */
+  #sendChunk(method: string, bytes: Uint8Array, params: (encoded: string) => unknown): Promise<unknown> {
+    return this.#sends.send(bytes.length, () => {
+      if (this.#ended) return Promise.reject(new Error('the frame is closed'));
+      return this.#session.request(method, params(toBase64Url(bytes)));
+    });
+  }
+
+  /** The body, each chunk sent once the upstream took the last. */
   async #upload(exchangeId: string, bytes: Uint8Array): Promise<void> {
     try {
-      for (let offset = FRAME_CHUNK_BYTES; offset < bytes.length; offset += FRAME_CHUNK_BYTES) {
+      for (let offset = 0; offset < bytes.length; offset += FRAME_CHUNK_BYTES) {
         const next = offset + FRAME_CHUNK_BYTES;
-        await this.#session.request(FRAME_METHODS.httpWrite, {
+        await this.#sendChunk(FRAME_METHODS.httpWrite, bytes.subarray(offset, next), (encoded) => ({
           exchangeId,
-          bytes: toBase64Url(bytes.subarray(offset, next)),
+          bytes: encoded,
           end: next >= bytes.length,
-        });
+        }));
       }
     } catch {
       // The exchange failed; its `http.request` or `http.error` says why.
@@ -365,13 +411,16 @@ class ClientFrame implements OpenFrame {
         sending = sent.catch(() => {});
         return sent;
       },
+      // Behind what was sent before it, as a socket's own close is.
       close: (code, reason) => {
-        if (!open) return;
-        fireAndForget(session.request(FRAME_METHODS.wsClose, {
-          socketId: id,
-          ...(code !== undefined ? { code } : {}),
-          ...(reason !== undefined ? { reason } : {}),
-        }));
+        void sending.then(() => {
+          if (!open) return;
+          fireAndForget(session.request(FRAME_METHODS.wsClose, {
+            socketId: id,
+            ...(code !== undefined ? { code } : {}),
+            ...(reason !== undefined ? { reason } : {}),
+          }));
+        });
       },
     };
   }
@@ -381,12 +430,12 @@ class ClientFrame implements OpenFrame {
     let offset = 0;
     do {
       const next = offset + FRAME_CHUNK_BYTES;
-      await this.#session.request(FRAME_METHODS.wsSend, {
+      await this.#sendChunk(FRAME_METHODS.wsSend, data.subarray(offset, next), (encoded) => ({
         socketId,
-        data: toBase64Url(data.subarray(offset, next)),
+        data: encoded,
         binary,
         fin: next >= data.length,
-      });
+      }));
       offset = next;
     } while (offset < data.length);
   }

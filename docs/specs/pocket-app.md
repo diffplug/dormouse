@@ -205,7 +205,7 @@ A framed page (`docs/specs/remote-api.md` -> "Frames") runs at a frame origin: a
 - **The worker stands in for the `Origin` and `Referer` the browser adds past it**, naming the frame origin on a write. **Must refuse a top-level page and a write from another site**, neither of which a frame makes.
 - **Must keep the worker stateless**: it is stopped at will, so it finds the bootstrap page again for each request.
 - **Never count on a framed page's own browser storage surviving a relaunch** (rationale); a built-in Tool keeps none (`docs/specs/dor-tools-builtin.md` -> "Editing files").
-- **The page's `WebSocket` is shimmed by a tunneled grant alone**, since no worker sees a socket: a same-origin one goes as a message to the controlling worker, and any other stays native.
+- **The page's `WebSocket` is shimmed by a tunneled grant alone**, since no worker sees a socket: a same-origin one goes as a message to the controlling worker, and any other stays native. **A shimmed socket's close must follow the sends before it, and a page going away must close what it holds**, since nothing else tells the session.
 
 **The frame origins sit on a registrable domain of their own, `HOSTED_FRAME_DOMAIN`**, so a framed page cannot set a cookie on `dormouse.sh`.
 
