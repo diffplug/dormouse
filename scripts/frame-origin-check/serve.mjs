@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Does a real phone run a frame origin? (docs/specs/pocket-app.md -> scope
+ * Does a real browser run a frame origin? (docs/specs/pocket-app.md -> scope
  * pocket-frames). Serves a page standing in for Pocket and a frame origin, on
  * two loopback ports, using the shipped worker, bootstrap page, bridge, socket
  * shim and Hosted handler. Nothing here reaches a Burrow or reads pairing data.
@@ -10,7 +10,7 @@
  *
  * Point each origin at its port with whatever gives a phone HTTPS. For the
  * cross-site case they must be different sites. Each finished run is written to
- * `--reports` and printed.
+ * `--reports` and printed. `run.mjs` drives this in headless Chromium for CI.
  */
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -18,6 +18,7 @@ import * as http from 'node:http';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
+import { workspaceSourceAliases } from '../workspace-sources.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '..', '..');
@@ -45,7 +46,7 @@ if (!existsSync(join(ASSETS, '__dormouse-frame-sw.js'))) {
 const { build } = createRequire(join(root, 'standalone', 'package.json'))('esbuild');
 const nodePaths = [join(root, 'lib', 'node_modules'), join(root, 'hosted', 'node_modules')];
 const bundle = async (entry, options) => (await build({
-  entryPoints: [entry], bundle: true, write: false, logLevel: 'error', nodePaths, ...options,
+  entryPoints: [entry], bundle: true, write: false, logLevel: 'error', nodePaths, alias: workspaceSourceAliases(), ...options,
 })).outputFiles[0].text;
 const checkPage = await bundle(join(here, 'check-page.ts'), {
   format: 'iife', target: 'es2020', define: { FRAMED_PAGE: JSON.stringify(readFileSync(join(here, 'framed-page.js'), 'utf8')) },

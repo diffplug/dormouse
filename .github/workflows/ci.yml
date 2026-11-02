@@ -253,10 +253,9 @@ jobs:
   webview-smoketest:
     name: Webview Boot Smoketest
     runs-on: ubuntu-latest
-    # Its own job, in parallel with Build & Test: this is the only check that
-    # needs a browser, and pinning that cost to one job keeps `pnpm test` free of
-    # it. It is also the only check that runs the shipped bundle rather than
-    # inspecting it — the VS Code webview's CSP is enforced by Chromium, so a
+    # Its own job, in parallel with Build & Test: pinning a browser's cost to a
+    # job keeps `pnpm test` free of it. It is also the only check that runs the
+    # shipped webview bundle rather than inspecting it — the VS Code webview's CSP is enforced by Chromium, so a
     # policy that blocks the app is invisible to every string-level test we have
     # (docs/specs/vscode.rationale.md -> "CSP policy").
     steps:
@@ -289,6 +288,35 @@ jobs:
 
       - name: Smoketest
         run: pnpm --filter dormouse test:smoke
+
+  frame-origin-check:
+    name: Frame Origin Check
+    runs-on: ubuntu-latest
+    # The only check that runs a frame origin's worker, bootstrap page, bridge,
+    # and socket shim in a real browser, cross-site, under the Hosted handler's
+    # headers: registration, control, and interception are the browser's, so a
+    # unit test's fake scope cannot see them break.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: package.json
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      # --no-runtime as in Library Tests.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --no-runtime
+
+      - name: Install Chromium
+        run: pnpm --filter dormouse-lib exec playwright-core install --with-deps chromium
+
+      - name: Check
+        timeout-minutes: 10
+        run: pnpm check:frame-origin
 
   standalone-smoketest:
     name: Standalone Smoketest
