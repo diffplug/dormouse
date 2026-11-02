@@ -5,7 +5,7 @@ import { MobileBrowserPane, type MobileBrowserStatus } from '../components/Mobil
 import { MobileCloseDialog, type MobileCloseDialogState } from '../components/MobileCloseDialog';
 import { MobileSettings } from '../components/MobileSettings';
 import { MobileTerminalUi, type MobileTerminalSessionItem, type MobileTerminalView } from '../components/MobileTerminalUi';
-import { MobileWall, showsBrowser, type MobileWallSession } from '../components/MobileWall';
+import { MobileWall, type MobileWallSession } from '../components/MobileWall';
 import { flattenScenario, initPlatform, type FakeScenario } from '../lib/platform';
 
 const TOOL = 'surface:1';
@@ -40,13 +40,9 @@ const PAGE = `<!doctype html><meta name="viewport" content="width=device-width,i
 ${'<p>The page scrolls by itself, inside the frame, under the header that stays.</p>'.repeat(12)}
 </div></body>`;
 
-function FakePage() {
-  return <iframe title="Page" srcDoc={PAGE} className="block h-full w-full border-0 bg-white" />;
-}
-
-/** Stands in for a screencast, which is not built: what shows the browser is the pane's `view`. */
-function FakeScreencast() {
-  return <iframe title="Screencast" srcDoc={PAGE} className="block h-full w-full border-0 bg-white" />;
+/** A screencast is not built, so one stands in here: what shows the browser is the pane's `view`. */
+function FakeView({ title }: { title: string }) {
+  return <iframe title={title} srcDoc={PAGE} className="block h-full w-full border-0 bg-white" />;
 }
 
 function Frame({ status, active: initial = TOOL, view: initialView = 'terminal', dialog }: {
@@ -61,7 +57,7 @@ function Frame({ status, active: initial = TOOL, view: initialView = 'terminal',
   // A Tool opens on its page; the switch is remembered per Session.
   const [terminalOver, setTerminalOver] = useState<ReadonlySet<string>>(new Set());
   const session = SESSIONS.find(({ id }) => id === active);
-  const toolBrowserShown = !terminalOver.has(active);
+  const browserShown = session?.kind === 'browser' || (session?.kind === 'tool' && !terminalOver.has(active));
   const items: MobileTerminalSessionItem[] = SESSIONS.map(({ id, title, kind, browserDisplay }) => ({
     id,
     kind,
@@ -76,8 +72,7 @@ function Frame({ status, active: initial = TOOL, view: initialView = 'terminal',
     <div className="overflow-hidden border border-border shadow-2xl" style={{ width: 390, height: 760 }}>
       <MobileTerminalUi
         className="h-full"
-        browserShown={showsBrowser(session?.kind, toolBrowserShown)}
-        overlay={dialog ? <MobileCloseDialog state={dialog} /> : null}
+        browserShown={browserShown}
         activeView={view}
         onViewChange={setView}
         sessions={items}
@@ -92,7 +87,7 @@ function Frame({ status, active: initial = TOOL, view: initialView = 'terminal',
             onActiveSessionChange={setActive}
             onShowSessions={() => setView('sessions')}
             showKillButton={false}
-            toolBrowserShown={toolBrowserShown}
+            browserShown={browserShown}
             onToolBrowserShownChange={(shown) => setTerminalOver((current) => {
               const next = new Set(current);
               if (shown) next.delete(active);
@@ -103,13 +98,14 @@ function Frame({ status, active: initial = TOOL, view: initialView = 'terminal',
             browser={session?.kind === 'terminal' || !session?.kind ? null : (
               <MobileBrowserPane
                 status={status}
-                view={session.browserDisplay ? <FakeScreencast /> : <FakePage />}
+                view={<FakeView title={session.browserDisplay ? 'Screencast' : 'Page'} />}
                 onShowSessions={() => setView('sessions')}
               />
             )}
           />
         )}
       />
+      {dialog ? <MobileCloseDialog state={dialog} /> : null}
     </div>
   );
 }

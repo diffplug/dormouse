@@ -63,6 +63,10 @@ const PATH_RE = /^\/[^\s\0-\x1f\x7f]*$/;
 const DESTINATION_RE = /^[a-z]{0,32}$/;
 const MAX_METHOD_LENGTH = 32;
 export const MAX_SURFACE_ID_LENGTH = 256;
+
+export function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : 'internal error';
+}
 const MAX_WS_REASON_BYTES = 123;
 
 interface Frame {
@@ -118,6 +122,8 @@ export interface FrameTunnelOptions {
   provider: BurrowSurfaceProvider;
   /** The lease owner every grant of this session is held under. */
   leaseOwner: string;
+  /** Whether the session collects the directory itself, and hands it to `revalidate`. */
+  directoryWatched(): boolean;
   ok(request: RemoteRequest, result: unknown): void;
   fail(request: RemoteRequest, error: string): void;
   event(subId: string, event: string, data: unknown): void;
@@ -233,11 +239,11 @@ export class FrameTunnel {
     const id = request.requestId;
     // The page is the surface's, never the Client's: the tunnel reaches only
     // what the person at the Burrow already embedded.
-    const page = await this.#options.provider.resolveBrowser(surfaceId);
+    const pageUrl = await this.#options.provider.resolveBrowser(surfaceId);
     if (this.#disposed || !this.#opening.has(id)) return 'frame.open superseded';
-    const pageOrigin = page ? originOf(page.url) : null;
-    if (!page || !pageOrigin) return `no embedded page: ${surfaceId}`;
-    const opened = await this.#options.host.open(page.url, {
+    const pageOrigin = pageUrl ? originOf(pageUrl) : null;
+    if (!pageUrl || !pageOrigin) return `no embedded page: ${surfaceId}`;
+    const opened = await this.#options.host.open(pageUrl, {
       frameOrigin,
       embedderOrigins,
       lease: { owner: this.#options.leaseOwner, id: `f${++this.#lease}` },
@@ -249,7 +255,7 @@ export class FrameTunnel {
     }
     this.#frames.set(id, { id, surfaceId, pageOrigin, upstream: opened });
     this.#watch();
-    return { path: opened.path, url: page.url };
+    return { path: opened.path };
   }
 
   #frameClose(request: RemoteRequest): void {
@@ -276,7 +282,10 @@ export class FrameTunnel {
 
   #watch(): void {
     if (this.#unwatch) return;
-    this.#unwatch = this.#options.provider.watchDirectory(() => this.#scheduleRevalidate());
+    this.#unwatch = this.#options.provider.watchDirectory(() => {
+      // A session watching the directory collects already, and hands it to `revalidate`.
+      if (!this.#options.directoryWatched()) this.#scheduleRevalidate();
+    });
   }
 
   #stopWatching(): void {
@@ -292,22 +301,23 @@ export class FrameTunnel {
     if (this.#revalidateTimer || this.#disposed) return;
     this.#revalidateTimer = setTimeout(() => {
       this.#revalidateTimer = null;
-      void this.#revalidate();
+      void this.#collectAndRevalidate();
     }, REVALIDATE_DEBOUNCE_MS);
+  }
+
+  async #collectAndRevalidate(): Promise<void> {
+    try {
+      this.revalidate(await this.#options.provider.collectDirectory());
+    } catch {
+      // A failed collect changes nothing.
+    }
   }
 
   /**
    * A frame lives no longer than its surface's page: one whose surface is
-   * gone, no longer embeds a page, or shows another origin, closes. One
-   * directory collect answers for every frame; a failed one changes nothing.
+   * gone, no longer embeds a page, or shows another origin, closes.
    */
-  async #revalidate(): Promise<void> {
-    let entries: DirectoryEntry[];
-    try {
-      entries = await this.#options.provider.collectDirectory();
-    } catch {
-      return;
-    }
+  revalidate(entries: readonly DirectoryEntry[]): void {
     const pages = new Map(entries.flatMap((entry) => (entry.browser ? [[entry.surfaceId, entry.browser.url]] : [])));
     for (const frame of [...this.#frames.values()]) {
       const url = pages.get(frame.surfaceId);
@@ -322,6 +332,8 @@ export class FrameTunnel {
     const frame = typeof params?.frameId === 'string' ? this.#frames.get(params.frameId) : undefined;
     if (!frame) return this.#options.fail(request, 'no such frame');
     const id = request.requestId;
+    // What a long response holds on to, which is not its request's first chunk.
+    const answering: RemoteRequest = { requestId: id, method: request.method };
     if (this.#idInUse(id)) return this.#options.fail(request, 'request id already in use');
     if (this.#exchanges.size >= MAX_HTTP_EXCHANGES_PER_SESSION) {
       return this.#options.fail(request, 'too many requests are open');
@@ -342,7 +354,7 @@ export class FrameTunnel {
           const entry = this.#exchanges.get(id);
           if (!entry || entry.answered) return;
           entry.answered = true;
-          this.#options.ok(request, { status, statusText, headers: responseHeaders } satisfies HttpResponseHead);
+          this.#options.ok(answering, { status, statusText, headers: responseHeaders } satisfies HttpResponseHead);
         },
         onBody: (chunk) => {
           if (!this.#exchanges.get(id)?.answered) return;
@@ -353,12 +365,13 @@ export class FrameTunnel {
         onEnd: () => {
           if (!this.#exchanges.get(id)?.answered) return;
           this.#enqueue({ owner: id, event: FRAME_EVENTS.httpEnd, data: {} });
-          this.#forgetExchange(id);
+          // Finished on its own: its queued events stay.
+          this.#exchanges.delete(id);
         },
         onError: (message) => this.#failExchange(id, `upstream failed: ${message}`),
       },
     );
-    this.#exchanges.set(id, { frameId: frame.id, exchange, request, answered: false, ended: end!, held: false });
+    this.#exchanges.set(id, { frameId: frame.id, exchange, request: answering, answered: false, ended: end!, held: false });
     if (this.#paused) exchange.pause();
     if (first.length > 0 || end) {
       exchange.write(first, end!).catch((error: unknown) => {
@@ -377,7 +390,7 @@ export class FrameTunnel {
       entry.answered = true;
       this.#options.fail(entry.request, message);
     }
-    this.#forgetExchange(id);
+    this.#exchanges.delete(id);
   }
 
   #httpWrite(request: RemoteRequest): void {
@@ -400,13 +413,6 @@ export class FrameTunnel {
     this.#options.ok(request, {});
   }
 
-  /** The exchange finished on its own: forget it, keeping its queued events. */
-  #forgetExchange(id: string): void {
-    const entry = this.#exchanges.get(id);
-    if (!entry) return;
-    this.#exchanges.delete(id);
-  }
-
   /**
    * End an exchange early: abort it, drop its queued events, and fail its
    * request if nothing answered it yet.
@@ -414,7 +420,7 @@ export class FrameTunnel {
   #dropExchange(id: string): void {
     const entry = this.#exchanges.get(id);
     if (!entry) return;
-    this.#forgetExchange(id);
+    this.#exchanges.delete(id);
     entry.exchange.abort();
     this.#dropQueued(id);
     if (!entry.answered && !this.#disposed) this.#options.fail(entry.request, 'request cancelled');
@@ -459,7 +465,7 @@ export class FrameTunnel {
         if (!entry) return;
         if (!entry.open) this.#options.fail(request, `upstream refused the socket: ${code}`);
         else this.#enqueue({ owner: id, event: FRAME_EVENTS.wsClosed, data: { code, reason } satisfies WsClosedEvent });
-        this.#forgetSocket(id);
+        this.#sockets.delete(id);
       },
     });
     this.#sockets.set(id, {
@@ -520,16 +526,10 @@ export class FrameTunnel {
     this.#options.ok(request, {});
   }
 
-  #forgetSocket(id: string): void {
-    const entry = this.#sockets.get(id);
-    if (!entry) return;
-    this.#sockets.delete(id);
-  }
-
   #dropSocket(id: string): void {
     const entry = this.#sockets.get(id);
     if (!entry) return;
-    this.#forgetSocket(id);
+    this.#sockets.delete(id);
     entry.socket.terminate();
     this.#dropQueued(id);
     if (!entry.open && !this.#disposed) this.#options.fail(entry.request, 'socket cancelled');
@@ -595,7 +595,10 @@ export class FrameTunnel {
       const data = head.body ? head.body.wrap(toBase64Url(head.body.bytes)) : head.data;
       this.#options.event(head.owner, head.event, data);
     }
-    this.#setPaused(this.#queue.length > 0 || this.#outstanding >= FRAME_FLOW_WINDOW_BYTES);
+    // Resumed only once half the window is free, or every small ack would
+    // restart every source for the next chunk to stop them again.
+    const full = this.#paused ? FRAME_FLOW_WINDOW_BYTES / 2 : FRAME_FLOW_WINDOW_BYTES;
+    this.#setPaused(this.#queue.length > 0 || this.#outstanding >= full);
   }
 
   #setPaused(paused: boolean): void {
@@ -681,8 +684,4 @@ function originOf(url: string): string | null {
   } catch {
     return null;
   }
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : 'internal error';
 }

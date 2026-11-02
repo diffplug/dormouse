@@ -138,7 +138,7 @@ export interface BurrowLink {
   command(cmd: string, params?: unknown): Promise<unknown>;
 
   /** Answer `op` on behalf of this webview's own surfaces; no results = not mine. */
-  respond(op: string, handler: (params: unknown) => unknown[]): void;
+  respond(op: string, handler: (params: unknown) => unknown[] | Promise<unknown[]>): void;
 
   /**
    * Announce that future answers may differ. Carries no subject: the directory

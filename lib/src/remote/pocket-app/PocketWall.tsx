@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   useSyncExternalStore,
 } from 'react';
@@ -16,7 +17,7 @@ import {
 } from '../../components/MobileTerminalUi';
 import { MobileSettings } from '../../components/MobileSettings';
 import { MobileCloseDialog } from '../../components/MobileCloseDialog';
-import { MobileWall, showsBrowser } from '../../components/MobileWall';
+import { MobileWall } from '../../components/MobileWall';
 import { useMobileFontSize } from '../../lib/mobile-font-size';
 import {
   getMouseSelectionSnapshot,
@@ -91,8 +92,7 @@ export function PocketWall({ adapter, browsers, onError, persist = true }: {
 
   const activeEntry = attachableEntries.find((entry) => entry.surfaceId === activePaneId) ?? null;
   const activeKind = activeEntry ? surfaceKindOf(activeEntry) : undefined;
-  const toolBrowserShown = activePaneId !== null && !terminalShown.has(activePaneId);
-  const browserShown = showsBrowser(activeKind, toolBrowserShown);
+  const browserShown = activeKind === 'browser' || (activeKind === 'tool' && !terminalShown.has(activePaneId!));
 
   // One attachment at a time: on every active-pane change, attach it with the
   // pane's current xterm dims (if it exists yet), then refit through the now-
@@ -116,10 +116,17 @@ export function PocketWall({ adapter, browsers, onError, persist = true }: {
   }, [adapter, activePaneId, browserShown, onError]);
 
   const session = browsers?.session ?? null;
-  const [salt] = useState(() => {
-    let held: Uint8Array | null = null;
-    return () => (held ??= frameSalt());
-  });
+  const burrowId = browsers?.burrowId;
+  const frameDomain = browsers?.frameDomain;
+  const saltRef = useRef<Uint8Array | null>(null);
+  const originFor = useCallback((surfaceId: string, pageOrigin: string) => frameOriginFor({
+    domain: frameDomain!,
+    // Read here, so a page that frames nothing stores nothing.
+    salt: (saltRef.current ??= frameSalt()),
+    burrowId: burrowId!,
+    surfaceId,
+    pageOrigin,
+  }), [burrowId, frameDomain]);
   // Made with its disposal, so an effect that runs twice leaves a live one.
   const [frames, setFrames] = useState<FrameClient | null>(null);
   useEffect(() => {
@@ -179,6 +186,7 @@ export function PocketWall({ adapter, browsers, onError, persist = true }: {
   }, [activePaneId]);
 
   return (
+    <>
     <MobileTerminalUi
       className="h-full"
       terminal={
@@ -190,7 +198,7 @@ export function PocketWall({ adapter, browsers, onError, persist = true }: {
           onActiveSessionChange={setActivePaneId}
           onShowSessions={() => setView('sessions')}
           showKillButton={false}
-          toolBrowserShown={toolBrowserShown}
+          browserShown={browserShown}
           onToolBrowserShownChange={(shown) => {
             if (!activePaneId) return;
             setTerminalShown((current) => {
@@ -207,18 +215,15 @@ export function PocketWall({ adapter, browsers, onError, persist = true }: {
             if (!entry || !page) return null;
             return (
               <PocketBrowserFrame
-                // Another origin is another frame, which the Burrow has closed.
-                key={`${id}\u0001${new URL(page.url).origin}`}
+                key={id}
                 frames={frames}
                 surfaceId={id}
                 isTool={surfaceKindOf(entry) === 'tool'}
                 title={entry.title}
                 pageUrl={page.url}
-                originFor={(pageOrigin) => frameOriginFor({
-                  domain: browsers.frameDomain, salt: salt(), burrowId: browsers.burrowId, surfaceId: id, pageOrigin,
-                })}
+                originFor={originFor}
                 transport={browsers.transport}
-                visible={id === activePaneId && browserShown}
+                visible={id === activePaneId}
                 onReconnect={browsers.onReconnect}
                 onShowSessions={() => setView('sessions')}
               />
@@ -227,7 +232,6 @@ export function PocketWall({ adapter, browsers, onError, persist = true }: {
         />
       }
       browserShown={browserShown}
-      overlay={closeDialog ? <MobileCloseDialog state={closeDialog} /> : null}
       interactive
       activeTouchMode={touchMode}
       onTouchModeChange={setTouchMode}
@@ -240,5 +244,7 @@ export function PocketWall({ adapter, browsers, onError, persist = true }: {
       onSendInput={handleSendInput}
       onPaste={handlePaste}
     />
+    {closeDialog ? <MobileCloseDialog state={closeDialog} /> : null}
+    </>
   );
 }

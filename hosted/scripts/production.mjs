@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { realpathSync } from "node:fs";
 import { required, cloudflare, hyperdriveOrigin, originsOf } from "./preview.mjs";
 import { frameSmoke, relaySmoke, smokeAll } from "./preview-smoke.mjs";
-import { HOSTED_POCKET_DEPLOYMENT } from "../../remote-lib-common/src/remote/pocket-deployment.ts";
+import { HOSTED_FRAME_DOMAIN } from "../../remote-lib-common/src/remote/pocket-deployment.ts";
 import {
   WORKERS,
   deployWorkers,
@@ -44,7 +44,7 @@ export const PRODUCTION = {
 /** The frame Worker's identity, on a domain nothing else of Hosted's is under. */
 export const FRAMES = {
   name: "dormouse-frames",
-  domain: HOSTED_POCKET_DEPLOYMENT.frameDomain,
+  domain: HOSTED_FRAME_DOMAIN,
   clientOrigin: PRODUCTION.relay.origin,
 };
 

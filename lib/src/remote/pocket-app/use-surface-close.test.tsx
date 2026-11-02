@@ -33,9 +33,9 @@ function sessionAnswering(...answers: SurfaceCloseResult[]) {
 }
 
 const tick = () => act(() => new Promise<void>((resolve) => { setTimeout(resolve); }));
-const dialogTitle = () => container.querySelector('[role="dialog"]')?.getAttribute('aria-label') ?? null;
+const dialogTitle = () => document.querySelector('#mobile-close-title')?.textContent ?? null;
 const press = async (label: string | RegExp) => {
-  const button = [...container.querySelectorAll('button')].find((b) => {
+  const button = [...document.querySelectorAll('button')].find((b) => {
     const name = b.getAttribute('aria-label') ?? b.textContent ?? '';
     return typeof label === 'string' ? name === label : label.test(name);
   });
@@ -73,8 +73,8 @@ describe('useSurfaceClose', () => {
     const { session, asked } = sessionAnswering({ outcome: 'confirm' }, { outcome: 'closed' });
     await start(session);
     expect(dialogTitle()).toBe('Confirm kill');
-    expect(container.textContent).toMatch(/Tap [a-z] to confirm/);
-    expect(container.querySelector('[aria-label^="Confirm with"]')?.textContent).not.toMatch(/[xku]/);
+    expect(document.body.textContent).toMatch(/Tap [a-z] to confirm/);
+    expect(document.querySelector('[aria-label^="Confirm with"]')?.textContent).not.toMatch(/[xku]/);
     await press(/^Confirm with/);
     expect(asked).toEqual([{ surfaceId: 'surface:1' }, { surfaceId: 'surface:1', confirmed: true }]);
     expect(dialogTitle()).toBeNull();
@@ -93,7 +93,7 @@ describe('useSurfaceClose', () => {
     await start(session);
     await press(/^Confirm with/);
     expect(dialogTitle()).toBe('Save changes?');
-    expect(container.textContent).toContain('notes.md');
+    expect(document.body.textContent).toContain('notes.md');
     await press('Discard');
     expect(asked[2]).toEqual({ surfaceId: 'surface:1', confirmed: true, unsaved: 'discard' });
   });
@@ -101,7 +101,7 @@ describe('useSurfaceClose', () => {
   it('shows the computer\'s refusal as it reads, and can close again after', async () => {
     const { session } = sessionAnswering({ outcome: 'refused', message: 'This terminal is already closing' }, { outcome: 'closed' });
     await start(session);
-    expect(container.textContent).toContain('This terminal is already closing');
+    expect(document.body.textContent).toContain('This terminal is already closing');
     await press('OK');
     expect(dialogTitle()).toBeNull();
     await act(async () => close('surface:1'));
@@ -112,7 +112,7 @@ describe('useSurfaceClose', () => {
   it('shows a failed request as a refusal', async () => {
     const session: SurfaceCloseSession = { request: vi.fn(async () => { throw new Error('session ended'); }) as SurfaceCloseSession['request'] };
     await start(session);
-    expect(container.textContent).toContain('session ended');
+    expect(document.body.textContent).toContain('session ended');
   });
 
   it('asks about the phone\'s own unsaved edits first, which the computer cannot see', async () => {
@@ -123,7 +123,7 @@ describe('useSurfaceClose', () => {
     const { session, asked } = sessionAnswering({ outcome: 'closed' });
     await start(session);
     expect(dialogTitle()).toBe('Save changes?');
-    expect(container.textContent).toContain('phone-copy.md');
+    expect(document.body.textContent).toContain('phone-copy.md');
     expect(asked).toEqual([]);
     await press('Cancel');
     expect(asked).toEqual([]);

@@ -95,7 +95,7 @@ class FakeHost implements BurrowFrameHost {
 function fakeProvider(pages: Map<string, EmbeddedPage>) {
   const watchers = new Set<() => void>();
   const provider = {
-    resolveBrowser: vi.fn(async (surfaceId: string) => pages.get(surfaceId) ?? null),
+    resolveBrowser: vi.fn(async (surfaceId: string) => pages.get(surfaceId)?.url ?? null),
     collectDirectory: vi.fn(async () => [...pages].map(([surfaceId, { url }]) => ({ surfaceId, browser: { render: 'iframe', url } }))),
     watchDirectory: vi.fn((onChange: () => void) => {
       watchers.add(onChange);
@@ -115,6 +115,7 @@ function setup({ isDirect = () => true }: { isDirect?: () => boolean } = {}) {
     isDirect,
     provider,
     leaseOwner: 'remote:holder',
+    directoryWatched: () => false,
     ok: (request, result) => sent.push({ requestId: request.requestId, ok: true, result }),
     fail: (request, error) => sent.push({ requestId: request.requestId, ok: false, error }),
     event: (subId, event, data) => sent.push({ subId, event, data }),
@@ -172,7 +173,7 @@ describe('frame.open', () => {
     expect(t.answer(id)).toEqual({
       requestId: id,
       ok: true,
-      result: { path: '/app/?x=1#top', url: 'http://localhost:5173/app/?x=1#top' },
+      result: { path: '/app/?x=1#top' },
     });
   });
 

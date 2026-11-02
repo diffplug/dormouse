@@ -165,8 +165,6 @@ export interface MobileTerminalUiProps {
    * composer go, and touches and keys are the browser's.
    */
   browserShown?: boolean;
-  /** Over everything, the Sessions screen included. */
-  overlay?: ReactNode;
   interactive?: boolean;
   fillViewport?: boolean;
   className?: string;
@@ -682,7 +680,6 @@ export function MobileTerminalUi({
   onSessionSelect,
   settings,
   browserShown = false,
-  overlay,
   interactive = true,
   fillViewport = false,
   className,
@@ -1246,7 +1243,6 @@ export function MobileTerminalUi({
           onClose={() => setView('terminal')}
         />
       ) : null}
-      {overlay}
     </div>
     {/* The page's root here: Pocket, the one-time phone page, and the Pocket
         playground mount no `App`, which carries it on the desktop hosts. */}

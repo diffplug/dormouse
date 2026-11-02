@@ -3,7 +3,7 @@ import {
   ONE_TIME_PAGE_PATH,
   ONE_TIME_WS_ROUTES,
   isContentHashedName,
-  HOSTED_POCKET_DEPLOYMENT,
+  HOSTED_FRAME_DOMAIN,
   pocketContentSecurityPolicy,
 } from "remote-lib-common";
 
@@ -97,7 +97,7 @@ export const relayRules: RulesFor = (path, appOrigin) => {
         cache: contentHashed(path, `${ONE_TIME_PAGE_PATH}assets/`) ? "immutable" : "no-store",
       }
     : {
-        policy: origin ? pocketContentSecurityPolicy(origin, HOSTED_POCKET_DEPLOYMENT.frameDomain) : RUNS_NOTHING_POLICY,
+        policy: origin ? pocketContentSecurityPolicy(origin, HOSTED_FRAME_DOMAIN) : RUNS_NOTHING_POLICY,
         permissions: POCKET_PERMISSIONS,
         cache: contentHashed(path, "/assets/") ? "immutable" : "no-cache",
       };

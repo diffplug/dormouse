@@ -66,7 +66,7 @@ function renderWall(showKillButton?: boolean, onShowSessions?: () => void) {
   });
 }
 
-function renderKinds(active: string, toolBrowserShown: boolean, onToolBrowserShownChange = vi.fn()) {
+function renderKinds(active: string, browserShown: boolean, onToolBrowserShownChange = vi.fn()) {
   act(() => {
     root.render(
       <StrictMode>
@@ -77,7 +77,7 @@ function renderKinds(active: string, toolBrowserShown: boolean, onToolBrowserSho
             { id: 'term', title: 'zsh' },
           ]}
           activeSessionId={active}
-          toolBrowserShown={toolBrowserShown}
+          browserShown={browserShown}
           onToolBrowserShownChange={onToolBrowserShownChange}
           browser={<div data-testid="browser" />}
         />
@@ -174,7 +174,7 @@ describe('MobileWall', () => {
     });
 
     it('mounts no terminal for a browser alone, whose glyph only names its display', () => {
-      renderKinds('browser', false);
+      renderKinds('browser', true);
       expect(container.querySelector('[data-testid="terminal-pane"]')).toBeNull();
       expect(browserLayer().classList.contains('invisible')).toBe(false);
       expect(button('Browser')).toBeNull();
@@ -220,7 +220,7 @@ describe('MobileWall', () => {
     });
 
     it('leaves a plain terminal without modes', () => {
-      renderKinds('term', true);
+      renderKinds('term', false);
       expect(browserLayer().classList.contains('invisible')).toBe(true);
       expect(button('Browser')).toBeNull();
       expect(button('Terminal')).toBeNull();

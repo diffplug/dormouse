@@ -4,6 +4,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { realpathSync } from "node:fs";
 import { providerAuthorizationOrigins } from "../server/providers.js";
+import { FRAME_WORKER_PATH } from "../../remote-lib-common/src/remote/frame-origin-paths.ts";
 import { oneTimeSmoke } from "./one-time-smoke.mjs";
 
 /** What the account's page sends with a login read (`docs/specs/security-hosted.md` -> "Origin boundary"). */
@@ -308,11 +309,6 @@ async function retrying(limit, what, check, { retryMs, wait }) {
 }
 
 /**
- * A relay or voice Worker's revision, then its readiness, each retried on its
- * own up to `attempts` (`retrying`'s `retry`), so a passed check never runs
- * again and readiness never runs on a revision that did not pass.
- */
-/**
  * A frame origin at `domain`, under a label no phone mints: it serves the
  * worker, framed only by `clientOrigin` and HTTPS-only, and nothing else. The
  * worker's body proves the revision, since this Worker holds no `BUILD_SHA`.
@@ -325,12 +321,12 @@ export async function frameSmoke(
     attempts = 1,
     retryMs = 10_000,
     wait = delay,
-    worker = () => readFile(new URL("../dist/frames/__dormouse-frame-sw.js", import.meta.url), "utf8"),
+    worker = () => readFile(new URL(`../dist/frames${FRAME_WORKER_PATH}`, import.meta.url), "utf8"),
   } = {},
 ) {
   const origin = `https://smoke.${domain}`;
   await retrying(attempts, origin, async () => {
-    const served = await fetcher(`${origin}/__dormouse-frame-sw.js`);
+    const served = await fetcher(`${origin}${FRAME_WORKER_PATH}`);
     assert.equal(served.status, 200, `${origin} must serve its worker`);
     assert.equal(await served.text(), await worker(), `${origin} must serve this release's worker`);
     assert.match(served.headers.get("content-type") ?? "", /^text\/javascript/);
@@ -342,6 +338,11 @@ export async function frameSmoke(
   }, { retryMs, wait });
 }
 
+/**
+ * A relay or voice Worker's revision, then its readiness, each retried on its
+ * own up to `attempts` (`retrying`'s `retry`), so a passed check never runs
+ * again and readiness never runs on a revision that did not pass.
+ */
 async function liveSmoke(origin, sha, fetcher, attempts, retry) {
   await retrying(attempts, origin, () => healthSmoke(origin, sha, fetcher), retry);
   await retrying(attempts, `${origin} ready`, () => readySmoke(origin, fetcher), retry);

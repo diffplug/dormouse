@@ -54,7 +54,6 @@ test("Pocket lands at the root and the one-time page at its path, and they are a
   // What tells the one Pocket bundle that Hosted serves it.
   assert.deepEqual(JSON.parse(readFileSync(join(assets, "deployment.json"), "utf8")), {
     deployment: "hosted",
-    frameDomain: "dormouseusercontent.com",
   });
 });
 

@@ -9,6 +9,8 @@ import { clsx } from 'clsx';
 import { FRAME_BOOTSTRAP_PATH, type DirectPath, type DirectRelayCause } from 'remote-lib-common';
 import { MobileBrowserPane, type MobileBrowserStatus } from '../../components/MobileBrowserPane';
 import type { FrameClient, OpenFrame } from '../client/frame-client';
+import { embedderOrigins } from '../../lib/embedder-origins';
+import { messageOf } from '../../lib/errors';
 import { serveFrame } from '../frame-origin/frame-bridge';
 import { IFRAME_ALLOW, IFRAME_SANDBOX } from '../../lib/iframe-policy';
 import { connectIframeTheme } from '../../lib/themes/iframe-theme';
@@ -29,8 +31,8 @@ export interface PocketBrowserFrameProps {
   title: string;
   /** The page the Surface embeds; another origin is another frame. */
   pageUrl: string;
-  /** The origin this page frames at. */
-  originFor: (pageOrigin: string) => Promise<string>;
+  /** The origin a Surface's page frames at. Stable: a new one reopens the frame. */
+  originFor: (surfaceId: string, pageOrigin: string) => Promise<string>;
   transport: FrameTransport;
   visible: boolean;
   onReconnect: () => void;
@@ -40,10 +42,6 @@ export interface PocketBrowserFrameProps {
 interface Opened {
   frame: OpenFrame;
   origin: string;
-}
-
-export function embedderOrigins(location: Pick<Location, 'origin' | 'ancestorOrigins'> = window.location): string[] {
-  return [location.origin, ...Array.from(location.ancestorOrigins ?? [])];
 }
 
 export function PocketBrowserFrame({
@@ -66,9 +64,9 @@ export function PocketBrowserFrame({
   const [loaded, setLoaded] = useState(false);
   const [ended, setEnded] = useState<MobileBrowserStatus | null>(null);
   const pageRef = useRef<HTMLIFrameElement | null>(null);
-  // Read when opening: a new callback is no reason to reopen the frame.
-  const originForRef = useRef(originFor);
-  originForRef.current = originFor;
+  // Read at the connect: a new title is no reason to reconnect the editor.
+  const titleRef = useRef(title);
+  titleRef.current = title;
 
   useEffect(() => {
     if (!direct) return;
@@ -79,7 +77,7 @@ export function PocketBrowserFrame({
     setLoaded(false);
     setEnded(null);
     void (async () => {
-      const origin = await originForRef.current(pageOrigin);
+      const origin = await originFor(surfaceId, pageOrigin);
       frame = await frames.open({
         surfaceId,
         frameOrigin: origin,
@@ -89,13 +87,13 @@ export function PocketBrowserFrame({
       if (live) setOpened({ frame, origin });
       else frame.close();
     })().catch((error: unknown) => {
-      if (live) setEnded({ kind: 'failed', message: error instanceof Error ? error.message : String(error) });
+      if (live) setEnded({ kind: 'failed', message: messageOf(error) });
     });
     return () => {
       live = false;
       frame?.close();
     };
-  }, [attempt, direct, frames, pageOrigin, surfaceId]);
+  }, [attempt, direct, frames, originFor, pageOrigin, surfaceId]);
 
   // Joined once the bootstrap page says its worker is up; until then, a request
   // the page made would find nothing to answer it.
@@ -129,12 +127,12 @@ export function PocketBrowserFrame({
     const page = pageRef.current;
     if (!isTool || !joined || !opened || !page) return;
     const stopTheme = connectIframeTheme(page, opened.origin);
-    const stopEditor = connectToolEditor(surfaceId, title, page, opened.origin);
+    const stopEditor = connectToolEditor(surfaceId, titleRef.current, page, opened.origin);
     return () => {
       stopTheme();
       stopEditor();
     };
-  }, [isTool, joined, opened, surfaceId, title]);
+  }, [isTool, joined, opened, surfaceId]);
 
   const status: MobileBrowserStatus = ended
     ?? (!direct
@@ -142,7 +140,7 @@ export function PocketBrowserFrame({
       : { kind: joined && loaded ? 'ready' : 'loading' });
 
   return (
-    <div className={clsx('absolute inset-0 pb-[env(safe-area-inset-bottom)]', !visible && 'invisible')}>
+    <div className={clsx('absolute inset-0', !visible && 'invisible')}>
       {opened && !ended ? (
         <iframe
           key={opened.frame.id}

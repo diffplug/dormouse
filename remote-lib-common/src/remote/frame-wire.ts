@@ -98,8 +98,6 @@ export interface FrameOpenParams {
 export interface FrameOpenResult {
   /** Where the Client frames the page: a path, query, and fragment at {@link FrameOpenParams.frameOrigin}. */
   path: string;
-  /** The page the surface showed when the frame opened. */
-  url: string;
 }
 export interface FrameClosedEvent {
   /** The surface's page is gone or moved to another origin; a frame the Client closed is told nothing. */

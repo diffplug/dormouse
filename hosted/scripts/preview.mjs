@@ -3,7 +3,7 @@ import { writeFile, mkdir, appendFile, rm } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { realpathSync } from "node:fs";
 import { vapidKeysFrom } from "./vapid.mjs";
-import { PREVIEWED, WORKERS, deployWorkers, fromStage, readConfigs } from "./workers.mjs";
+import { APP_WORKERS, deployWorkers, fromStage, readConfigs } from "./workers.mjs";
 
 export function required(env, name, section = "Provision PR previews") {
   if (!env[name])
@@ -37,7 +37,7 @@ export function previewConfig(base, env, worker, hyperdriveId) {
     throw new Error("BUILD_SHA must be a commit SHA");
   const config = {
     name,
-    main: fromStage(WORKERS[worker].previewMain),
+    main: fromStage(APP_WORKERS[worker].previewMain),
     compatibility_date: base.compatibility_date,
     compatibility_flags: base.compatibility_flags,
     workers_dev: true,
@@ -79,14 +79,14 @@ export function previewConfig(base, env, worker, hyperdriveId) {
 }
 
 /**
- * Every previewed Worker's config, keyed as `WORKERS` is; all three share the
+ * Every application Worker's preview config, keyed as `APP_WORKERS` is; all three share the
  * PR's one Hyperdrive, unlike production's one per Worker
  * (`docs/specs/hosted.md` -> "PR previews"). The relay's enrollment links name
  * the account preview, never production's account.
  */
 export function previewConfigs(bases, env, hyperdriveId) {
   const configs = Object.fromEntries(
-    PREVIEWED.map((worker) => [
+    Object.keys(APP_WORKERS).map((worker) => [
       worker,
       previewConfig(bases[worker], env, worker, hyperdriveId),
     ]),
@@ -192,7 +192,7 @@ const secretsFile = (worker) =>
   new URL(`../.wrangler/preview/secrets.${worker}.json`, import.meta.url);
 
 /**
- * Each preview Worker's secrets, keyed as `WORKERS` is: its `previewSecret`,
+ * Each preview Worker's secrets, keyed as `APP_WORKERS` is: its `previewSecret`,
  * the HMAC of `PREVIEW_AUTH_SECRET` with its preview Worker's name, so no two
  * Workers or PRs share one and none is stored; and, with `previewVapid`, a
  * VAPID pair derived the same way (`previewVapidKeys`).
@@ -202,7 +202,7 @@ export function previewSecrets(configs, env) {
   if (secret.length < 32)
     throw new Error("PREVIEW_AUTH_SECRET needs at least 32 random characters");
   return Object.fromEntries(
-    Object.entries(WORKERS)
+    Object.entries(APP_WORKERS)
       .filter(([, { previewSecret }]) => previewSecret)
       .map(([worker, { previewSecret, previewVapid }]) => {
         const name = configs[worker].name;
@@ -229,10 +229,10 @@ export const previewVapidKeys = (secret, name) =>
       .digest(),
   );
 
-/** Each Worker's origin in `configs`, keyed as `WORKERS` is. */
+/** Each application Worker's origin in `configs`, keyed as `APP_WORKERS` is. */
 export const originsOf = (configs) =>
   Object.fromEntries(
-    Object.entries(configs).map(([worker, config]) => [worker, config.vars.APP_ORIGIN]),
+    Object.keys(APP_WORKERS).map((worker) => [worker, configs[worker].vars.APP_ORIGIN]),
   );
 
 /**
@@ -322,7 +322,7 @@ export async function cleanup(env = process.env) {
   const api = cloudflare(env);
   // `force`: a Worker that implements a Durable Object namespace is deleted
   // with it rather than refused.
-  for (const worker of PREVIEWED)
+  for (const worker of Object.keys(APP_WORKERS))
     await api(
       `workers/scripts/${previewName(env.PR_NUMBER, bases[worker].name)}?force=true`,
       "DELETE",
@@ -357,7 +357,7 @@ export async function sweep(env = process.env) {
   ];
   const prs = new Set();
   for (const name of names)
-    for (const base of PREVIEWED.map((worker) => bases[worker])) {
+    for (const base of Object.keys(APP_WORKERS).map((worker) => bases[worker])) {
       const pr = name.startsWith(`${base.name}-pr-`) && name.slice(base.name.length + 4);
       if (pr && /^[1-9]\d{0,8}$/.test(pr) && pr !== env.PR_NUMBER) prs.add(pr);
     }
@@ -395,12 +395,12 @@ if (
       try {
         await deployWorkers("preview", configs, {
           args: (worker) =>
-            WORKERS[worker].previewSecret
+            APP_WORKERS[worker].previewSecret
               ? ["--secrets-file", fileURLToPath(secretsFile(worker))]
               : [],
         });
       } finally {
-        for (const worker of Object.keys(WORKERS))
+        for (const worker of Object.keys(APP_WORKERS))
           await rm(secretsFile(worker), { force: true });
       }
     } else throw new Error("Use prepare, deploy, cleanup or sweep");

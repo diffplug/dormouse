@@ -3,7 +3,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FrameClient, OpenFrame } from '../client/frame-client';
-import { embedderOrigins, PocketBrowserFrame, type FrameTransport, type PocketBrowserFrameProps } from './PocketBrowserFrame';
+import { PocketBrowserFrame, type FrameTransport, type PocketBrowserFrameProps } from './PocketBrowserFrame';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -16,6 +16,7 @@ let open: ReturnType<typeof vi.fn>;
 let frames: FrameClient;
 
 const DIRECT: FrameTransport = { path: 'direct', cause: null };
+const originForFixed = async () => ORIGIN;
 const flush = () => act(() => new Promise<void>((resolve) => { setTimeout(resolve); }));
 
 function props(over: Partial<PocketBrowserFrameProps> = {}): PocketBrowserFrameProps {
@@ -25,7 +26,7 @@ function props(over: Partial<PocketBrowserFrameProps> = {}): PocketBrowserFrameP
     isTool: false,
     title: 'App',
     pageUrl: 'http://localhost:5173/app',
-    originFor: async () => ORIGIN,
+    originFor: originForFixed,
     transport: DIRECT,
     visible: true,
     onReconnect: vi.fn(),
@@ -87,7 +88,7 @@ describe('PocketBrowserFrame', () => {
   it('opens at the page\'s origin, frames the page only once the worker is up, and sandboxes it', async () => {
     const originFor = vi.fn(async () => ORIGIN);
     await render({ originFor });
-    expect(originFor).toHaveBeenCalledWith('http://localhost:5173');
+    expect(originFor).toHaveBeenCalledWith('surface:1', 'http://localhost:5173');
     expect(open).toHaveBeenCalledWith(expect.objectContaining({ surfaceId: 'surface:1', frameOrigin: ORIGIN, embedderOrigins: [location.origin] }));
     expect(iframe('App')).toBeNull();
     expect(iframe('Frame bootstrap')!.src).toBe(`${ORIGIN}/__dormouse-frame/bootstrap.html`);
@@ -118,7 +119,7 @@ describe('PocketBrowserFrame', () => {
 
   it('does not reopen for a new render, and closes its frame on the way out', async () => {
     await render();
-    await render({ originFor: async () => ORIGIN });
+    await render({ title: 'Renamed' });
     expect(open).toHaveBeenCalledOnce();
     act(() => root.unmount());
     expect(close).toHaveBeenCalledOnce();
@@ -151,7 +152,4 @@ describe('PocketBrowserFrame', () => {
     expect(iframe('Frame bootstrap')).not.toBeNull();
   });
 
-  it('names the framing chain, the page first', () => {
-    expect(embedderOrigins({ origin: 'https://a.example', ancestorOrigins: ['https://b.example'] as unknown as DOMStringList })).toEqual(['https://a.example', 'https://b.example']);
-  });
 });

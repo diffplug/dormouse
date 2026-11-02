@@ -45,7 +45,7 @@ function connect(pages: Map<string, string>) {
   const provider = {
     resolveBrowser: async (surfaceId: string) => {
       const url = pages.get(surfaceId);
-      return url ? { url } : null;
+      return url ?? null;
     },
     collectDirectory: async () => [...pages].map(([surfaceId, url]) => ({ surfaceId, browser: { render: 'iframe', url } })),
     watchDirectory: (onChange: () => void) => {

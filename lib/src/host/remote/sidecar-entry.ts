@@ -28,7 +28,7 @@ import { createNativeDirectPeerFactory, disposeNativeDirectPeers } from './nativ
 import { createEphemeralBurrowStateStore, FileBurrowStateStore } from './burrow-state-store';
 import { BurrowService } from './service';
 import {
-  ASK_BUDGET_MS,
+  askBudgetMs,
   BURROW_ASK_EVENT,
   isBurrowCommand,
   type AnswerParams,
@@ -133,7 +133,7 @@ export function createSidecarSurfaceBridge(
         // and a directory that missed a pane re-collects on the next change.
         // Whatever did answer is still the best available snapshot.
         pending.settle();
-      }, ASK_BUDGET_MS);
+      }, askBudgetMs(op));
       // An outstanding ask must never hold the sidecar's event loop open.
       (timer as unknown as { unref?: () => void }).unref?.();
       asks.set(burrowRequestId, pending);

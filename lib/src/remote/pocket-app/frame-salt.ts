@@ -5,34 +5,20 @@
  * "Frame origin").
  */
 
-import { fromBase64Url, toBase64Url } from 'remote-lib-common';
+import { fromBase64Url, isBoundedBase64Url, toBase64Url } from 'remote-lib-common';
+import { loadJson, saveJson } from '../../lib/local-json-store';
 
 const KEY = 'dormouse.pocket.frame-salt';
 const BYTES = 32;
 
-export function frameSalt(storage: Pick<Storage, 'getItem' | 'setItem'> | null = browserStorage()): Uint8Array {
-  try {
-    const stored = storage?.getItem(KEY);
-    if (stored) {
-      const salt = fromBase64Url(stored);
-      if (salt.length === BYTES) return salt;
-    }
-  } catch {
-    // Unreadable reads as none.
-  }
-  const salt = globalThis.crypto.getRandomValues(new Uint8Array(BYTES));
-  try {
-    storage?.setItem(KEY, toBase64Url(salt));
-  } catch {
-    // Held for this page alone: the next load moves to new origins.
-  }
-  return salt;
-}
+const ENCODED_LENGTH = 43;
 
-function browserStorage(): Storage | null {
-  try {
-    return globalThis.localStorage ?? null;
-  } catch {
-    return null;
-  }
+const isSalt = (value: unknown): value is string => isBoundedBase64Url(value, ENCODED_LENGTH) && value.length === ENCODED_LENGTH;
+
+export function frameSalt(): Uint8Array {
+  const stored = loadJson(KEY, null, isSalt);
+  if (stored) return fromBase64Url(stored);
+  const salt = globalThis.crypto.getRandomValues(new Uint8Array(BYTES));
+  saveJson(KEY, toBase64Url(salt));
+  return salt;
 }

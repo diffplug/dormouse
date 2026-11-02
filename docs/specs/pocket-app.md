@@ -207,7 +207,7 @@ A framed page (`docs/specs/remote-api.md` -> "Frames") runs at a frame origin: a
 - **Never count on a framed page's own browser storage surviving a relaunch** (rationale); a built-in Tool keeps none (`docs/specs/dor-tools-builtin.md` -> "Editing files").
 - **The page's `WebSocket` is shimmed by a tunneled grant alone**, since no worker sees a socket: a same-origin one goes as a message to the controlling worker, and any other stays native.
 
-**The frame origins sit on a registrable domain of their own, `frameDomain` in `HOSTED_POCKET_DEPLOYMENT`**, so a framed page cannot set a cookie on `dormouse.sh`.
+**The frame origins sit on a registrable domain of their own, `HOSTED_FRAME_DOMAIN`**, so a framed page cannot set a cookie on `dormouse.sh`.
 
 - **Must declare `capabilities.frames` only at Hosted's production origin** (`frameDomainFor`): the frame Worker lets no other page frame it, and a preview has no wildcard to serve one on. The one-time page declares none.
 - **Must let frames in through Pocket's CSP only for that domain**; a self-host Relay's Pocket names none.

@@ -54,8 +54,7 @@ async function serveRequest(frame: OpenFrame, request: RelayRequest, reply: Mess
           send({ kind: 'end' });
           reply.close();
         } else {
-          // Copied out of a view on a shared buffer before it is transferred.
-          const bytes = value.slice();
+          const bytes = ownBuffer(value);
           send({ kind: 'chunk', bytes }, [bytes.buffer]);
         }
       },
@@ -73,7 +72,7 @@ async function serveSocket(frame: OpenFrame, request: RelaySocket, reply: Messag
   try {
     socket = await frame.openSocket(request.path, request.protocols, {
       onMessage: (data, binary) => {
-        const buffer = data.slice().buffer as ArrayBuffer;
+        const buffer = ownBuffer(data).buffer as ArrayBuffer;
         send({ kind: 'message', data: buffer, binary }, [buffer]);
       },
       onClose: (code, reason) => {
@@ -92,6 +91,11 @@ async function serveSocket(frame: OpenFrame, request: RelaySocket, reply: Messag
     else if (command.kind === 'close') socket.close(command.code, command.reason);
   };
   send({ kind: 'open', protocol: socket.protocol, extensions: socket.extensions });
+}
+
+/** `bytes` on a buffer of its own, which a transfer can take: copied only if it is a view on a larger one. */
+function ownBuffer(bytes: Uint8Array): Uint8Array {
+  return bytes.byteLength === bytes.buffer.byteLength ? bytes : bytes.slice();
 }
 
 function messageOf(error: unknown): string {

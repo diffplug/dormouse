@@ -111,16 +111,19 @@ describe('createAskSurfaceProvider holds', () => {
 describe('createAskSurfaceProvider closeSurface', () => {
   const noPty = { writePty: () => {}, resizePty: () => {}, streamPty: () => () => {} } as never;
 
-  it('polls past a pending close to its outcome', async () => {
-    const answers: unknown[][] = [[{ outcome: 'pending' }], [{ outcome: 'pending' }], [{ outcome: 'closed' }]];
+  it('asks the owner once, with the consent, and answers its outcome', async () => {
     const asked: unknown[] = [];
     const { provider } = createAskSurfaceProvider(async (_op, params) => {
       asked.push(params);
-      return answers.shift() ?? [];
+      return [{ outcome: 'closed' }];
     }, noPty);
     expect(await provider.closeSurface('surface:1', { confirmed: true })).toEqual({ outcome: 'closed' });
-    expect(asked[0]).toEqual({ surfaceId: 'surface:1', confirmed: true });
-    expect(asked[1]).toEqual({ surfaceId: 'surface:1', poll: true });
+    expect(asked).toEqual([{ surfaceId: 'surface:1', confirmed: true }]);
+  });
+
+  it('refuses an answer it cannot read: a peer window is another build', async () => {
+    const { provider } = createAskSurfaceProvider(async () => [{ outcome: 'unsaved' }], noPty);
+    expect((await provider.closeSurface('surface:1', {})).outcome).toBe('refused');
   });
 
   it('refuses a surface nobody claims, an ask that failed included', async () => {
@@ -141,7 +144,7 @@ describe('createAskSurfaceProvider resolveBrowser', () => {
       },
       inertPty,
     );
-    expect(await provider.resolveBrowser('surface:2')).toEqual({ url: 'http://localhost:5173/', title: 'Vite' });
+    expect(await provider.resolveBrowser('surface:2')).toBe('http://localhost:5173/');
     expect(asked).toEqual([['browserOp', { surfaceId: 'surface:2' }]]);
   });
 

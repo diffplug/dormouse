@@ -11,7 +11,7 @@ import type { RelayMessage, RelayRequest, ResponseControl, ResponseMessage } fro
 /** Past the proxy's own upstream timeout, so its error page gets there first. */
 const HEAD_TIMEOUT_MS = 65_000;
 /** Statuses whose `Response` must have no body. */
-const NULL_BODY_STATUS = new Set([101, 204, 205, 304]);
+const NULL_BODY_STATUS = new Set([204, 205, 304]);
 
 interface WorkerClient {
   url: string;
@@ -142,19 +142,51 @@ export function responseFrom(port: MessagePort): Promise<Response> {
       resolve(failure(504, 'Your computer did not answer in time.'));
     }, HEAD_TIMEOUT_MS);
     const send = (control: ResponseControl) => port.postMessage(control);
+    const cancel = () => {
+      send({ kind: 'cancel' });
+      port.close();
+    };
     const settlePull = () => {
       wake?.();
       wake = null;
     };
 
+    const responseOf = (head: Extract<ResponseMessage, { kind: 'head' }>): Response => {
+      // A status `Response` refuses: an upstream's nonsense must not throw here.
+      if (head.status < 200 || head.status > 599) {
+        cancel();
+        return failure(502, `The page answered with status ${head.status}.`);
+      }
+      const headers = new Headers();
+      for (const [name, value] of head.headers) {
+        try {
+          headers.append(name, value);
+        } catch {
+          // A field the browser will not hold; the page goes without it.
+        }
+      }
+      if (NULL_BODY_STATUS.has(head.status)) {
+        cancel();
+        return new Response(null, { status: head.status, statusText: head.statusText, headers });
+      }
+      const body = new ReadableStream<Uint8Array>({
+        start: (c) => { controller = c; },
+        pull: () => new Promise<void>((done) => {
+          wake = done;
+          send({ kind: 'pull' });
+        }),
+        cancel,
+      }, { highWaterMark: 0 });
+      return new Response(body, { status: head.status, statusText: head.statusText, headers });
+    };
+
     port.onmessage = (event: MessageEvent<ResponseMessage>) => {
       const message = event.data;
       switch (message.kind) {
-        case 'head': {
+        case 'head':
           clearTimeout(timer);
-          resolve(responseOf(message, port, (c) => { controller = c; }, (done) => { wake = done; }, send));
+          resolve(responseOf(message));
           return;
-        }
         case 'chunk':
           controller?.enqueue(message.bytes);
           settlePull();
@@ -174,44 +206,4 @@ export function responseFrom(port: MessagePort): Promise<Response> {
       }
     };
   });
-}
-
-function responseOf(
-  head: Extract<ResponseMessage, { kind: 'head' }>,
-  port: MessagePort,
-  started: (controller: ReadableStreamDefaultController<Uint8Array>) => void,
-  waitFor: (done: () => void) => void,
-  send: (control: ResponseControl) => void,
-): Response {
-  // A status `Response` refuses: an upstream's nonsense must not throw here.
-  if (head.status < 200 || head.status > 599) {
-    send({ kind: 'cancel' });
-    port.close();
-    return failure(502, `The page answered with status ${head.status}.`);
-  }
-  const headers = new Headers();
-  for (const [name, value] of head.headers) {
-    try {
-      headers.append(name, value);
-    } catch {
-      // A field the browser will not hold; the page goes without it.
-    }
-  }
-  if (NULL_BODY_STATUS.has(head.status)) {
-    send({ kind: 'cancel' });
-    port.close();
-    return new Response(null, { status: head.status, statusText: head.statusText, headers });
-  }
-  const body = new ReadableStream<Uint8Array>({
-    start: started,
-    pull: () => new Promise<void>((resolve) => {
-      waitFor(resolve);
-      send({ kind: 'pull' });
-    }),
-    cancel: () => {
-      send({ kind: 'cancel' });
-      port.close();
-    },
-  }, { highWaterMark: 0 });
-  return new Response(body, { status: head.status, statusText: head.statusText, headers });
 }

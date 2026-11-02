@@ -28,7 +28,7 @@ import {
 import { inputIsReplayTerminalReport } from '../../lib/terminal-report-filter';
 import type { BurrowFrameHost } from './burrow-frame-host';
 import type { BurrowSurfaceProvider, SurfaceHandle, SurfaceHold } from './burrow-surface-provider';
-import { FrameTunnel, MAX_SURFACE_ID_LENGTH } from './frame-tunnel';
+import { errorMessage, FrameTunnel, MAX_SURFACE_ID_LENGTH } from './frame-tunnel';
 
 /** Coalesce window for directory re-snapshots (remote-api.md: "Burrow coalesces"). */
 const DIRECTORY_DEBOUNCE_MS = 150;
@@ -117,6 +117,7 @@ export class RemoteApiSession {
         provider: options.provider,
         // The session's, never a webview's: disposal ends every grant it holds.
         leaseOwner: options.holder.id,
+        directoryWatched: () => this.#directorySubId !== null,
         ok: (request, result) => this.#ok(request, result),
         fail: (request, error) => this.#fail(request, error),
         event: (subId, event, data) => this.#event(subId, event, data),
@@ -314,6 +315,7 @@ export class RemoteApiSession {
     }
     // The subscription may have been replaced or torn down while we waited.
     if (this.#directorySubId !== subId || this.#directoryGeneration !== generation) return;
+    this.#frames?.revalidate(entries);
     // Awaited here rather than beside the collect, since it needs only the pages
     // the Burrow will list; the generation is read again after it.
     const listed = this.#listsFrames ? await this.#openablePages(entries) : terminalsOnly(entries);
@@ -661,8 +663,4 @@ function terminalsOnly(
     const { browser: _browser, ...rest } = entry;
     return [rest];
   });
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : 'internal error';
 }

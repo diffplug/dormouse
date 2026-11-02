@@ -4,7 +4,8 @@
  * transport layers keep `op` opaque.
  */
 
-import { answerClientClose, type ClientCloseAnswer, type ClientCloseParams } from './client-close';
+import type { SurfaceCloseParams, SurfaceCloseResult } from 'remote-lib-common';
+import { answerClientClose } from './client-close';
 import { clampTerminalDimension, type DirectoryBrowser, type DirectoryEntry } from 'remote-lib-common';
 import { subscribeAgentBrowserScreenPages } from '../../components/wall/agent-browser-screen';
 import type { BurrowStatusEvent } from '../../host/remote/service-protocol';
@@ -73,13 +74,13 @@ export interface PeerOps {
   /** The page a Surface embeds (`embedded-pages.ts`); answered by its owner alone. */
   browserOp: { params: { surfaceId: string }; result: DirectoryBrowser };
   /** A Client's close (`client-close.ts`); answered by its owner alone. */
-  closeOp: { params: ClientCloseParams; result: ClientCloseAnswer };
+  closeOp: { params: SurfaceCloseParams; result: SurfaceCloseResult };
 }
 
 /** Answer `op` for this webview's own surfaces. No-op where nobody can ask. */
 function answerPeers<K extends keyof PeerOps>(
   op: K,
-  handler: (params: PeerOps[K]['params']) => PeerOps[K]['result'][],
+  handler: (params: PeerOps[K]['params']) => PeerOps[K]['result'][] | Promise<PeerOps[K]['result'][]>,
 ): void {
   getPlatform().burrow?.respond(op, (params) => handler(params as PeerOps[K]['params']));
 }

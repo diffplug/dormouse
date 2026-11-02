@@ -83,7 +83,7 @@ export function createBurrowLinkClient(
     timer: ReturnType<typeof setTimeout>;
   }
   const pending = new Map<string, Pending>();
-  const responders = new Map<string, (params: unknown) => unknown[]>();
+  const responders = new Map<string, (params: unknown) => unknown[] | Promise<unknown[]>>();
   const listeners = new Map<string, Set<(data: unknown) => void>>();
   const tag = randomTag();
   let seq = 0;
@@ -144,14 +144,18 @@ export function createBurrowLinkClient(
      * nothing, so it can never beat the real owner.
      */
     onAsk(askId, op, params) {
-      const handler = responders.get(op);
-      let results: unknown[] = [];
-      try {
-        results = handler ? handler(params) : [];
-      } catch (error) {
+      const answer = (results: unknown[]) => transport.answerAsk(askId, results);
+      const failed = (error: unknown) => {
         console.error(`[dormouse] burrow ask ${op} failed:`, error);
+        answer([]);
+      };
+      try {
+        const results = responders.get(op)?.(params) ?? [];
+        if (Array.isArray(results)) answer(results);
+        else results.then(answer, failed);
+      } catch (error) {
+        failed(error);
       }
-      transport.answerAsk(askId, results);
     },
 
     onEvent(payload) {

@@ -4,6 +4,7 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypt
 
 import {
   ASK_BUDGET_MS,
+  askBudgetMs,
   type BurrowCommand,
   type BurrowResult,
 } from '../../lib/src/host/remote/service-protocol';
@@ -16,6 +17,9 @@ import {
  * broker's side and throw away results that were on their way.
  */
 export const PEER_REPLY_BUDGET_MS = ASK_BUDGET_MS + 2_000;
+
+/** {@link PEER_REPLY_BUDGET_MS} for answering `op`. */
+export const peerReplyBudgetMs = (op: string): number => askBudgetMs(op) + 2_000;
 
 /** Broker → peer window. `op` is intentionally opaque to this transport. */
 export type PeerLinkRequest =

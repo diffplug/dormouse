@@ -8,7 +8,7 @@ import { workspaceSourceAliases } from "../scripts/workspace-sources.mjs";
 // picks it, and only the worker's run clears the directory.
 const ENTRIES = {
   worker: { entry: "./src/remote/frame-origin/worker-entry.ts", file: "__dormouse-frame-sw.js" },
-  bootstrap: { entry: "./src/remote/frame-origin/bootstrap-entry.ts", file: "__dormouse-frame/bootstrap.js" },
+  bootstrap: { entry: "./src/remote/frame-origin/bootstrap.ts", file: "__dormouse-frame/bootstrap.js" },
 } as const;
 
 export default defineConfig(({ mode }) => {

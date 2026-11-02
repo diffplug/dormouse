@@ -9,7 +9,9 @@
  * never gathers through no ICE server because its own origin was slow.
  */
 
-import { HOSTED_POCKET_DEPLOYMENT, POCKET_DEPLOYMENT_FILE } from 'remote-lib-common';
+import { HOSTED_FRAME_DOMAIN, HOSTED_POCKET_DEPLOYMENT, POCKET_DEPLOYMENT_FILE } from 'remote-lib-common';
+
+import { DEFAULT_RELAY_ORIGIN } from '../../host/relay-origin';
 
 import type { DirectPeerFactory } from '../direct/direct-peer';
 import { hostedDirectPeer, selfHostDirectPeer } from '../client/browser-direct-peer';
@@ -34,15 +36,12 @@ export function parsePocketDeployment(body: unknown): PocketDeployment {
 }
 
 /**
- * The one page the frame origins let frame them: Hosted's production Pocket,
- * `CLIENT_ORIGIN` in `hosted/wrangler.frames.jsonc`. A preview serves the same
- * bundle at another origin, and frames nothing.
+ * The parent of this page's frame origins, or `null` where it frames nothing:
+ * the frame Worker lets only Hosted's production Pocket frame it, and a preview
+ * serves the same bundle at another origin.
  */
-const HOSTED_FRAME_CLIENT_ORIGIN = 'https://relay.dormouse.sh';
-
-/** The parent of this page's frame origins, or `null` where it frames nothing. */
 export function frameDomainFor(deployment: PocketDeployment | null, origin: string): string | null {
-  return deployment === 'hosted' && origin === HOSTED_FRAME_CLIENT_ORIGIN ? HOSTED_POCKET_DEPLOYMENT.frameDomain : null;
+  return deployment === 'hosted' && origin === DEFAULT_RELAY_ORIGIN ? HOSTED_FRAME_DOMAIN : null;
 }
 
 /**

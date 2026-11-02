@@ -24,7 +24,7 @@ import type {
   FrameUpstream,
 } from '../../remote/burrow/burrow-frame-host';
 import type { IframeProxyResult } from '../../lib/platform/iframe-proxy-types';
-import { REMOTE_LEASE_OWNER_PREFIX, normalizeEmbedderOrigins, rewriteOrigin } from '../iframe-proxy-rewrite';
+import { HOP_BY_HOP_RESPONSE_HEADERS, REMOTE_LEASE_OWNER_PREFIX, normalizeEmbedderOrigins, rewriteOrigin } from '../iframe-proxy-rewrite';
 
 /**
  * Request fields the tunnel never forwards: the connection's own, what it sets
@@ -32,10 +32,7 @@ import { REMOTE_LEASE_OWNER_PREFIX, normalizeEmbedderOrigins, rewriteOrigin } fr
  * browser's, which it never hands a service worker; the destination the
  * Client names stands in for `Sec-Fetch-Dest`.
  */
-const DROPPED_REQUEST_HEADERS = new Set([
-  'host', 'connection', 'keep-alive', 'te', 'trailer', 'transfer-encoding', 'upgrade',
-  'cookie', 'accept-encoding',
-]);
+const DROPPED_REQUEST_HEADERS = new Set([...HOP_BY_HOP_RESPONSE_HEADERS, 'host', 'cookie', 'accept-encoding']);
 /** The proxy's own grant is one hop away; a stall here is the proxy's to report. */
 const GRANT_IDLE_TIMEOUT_MS = 60_000;
 
@@ -63,10 +60,12 @@ export function createBurrowFrameHost(proxy: FrameHostProxy): BurrowFrameHost {
     canOpen(url) {
       const now = Date.now();
       for (const [key, answer] of answers) if (now - answer.at > LOCAL_ANSWER_TTL_MS) answers.delete(key);
-      let answer = answers.get(url);
+      // By origin, which is all it depends on: a page's query is no new lookup.
+      const key = URL.canParse(url) ? new URL(url).origin : url;
+      let answer = answers.get(key);
       if (!answer) {
         answer = { at: now, local: proxy.isLocal(url).catch(() => false) };
-        answers.set(url, answer);
+        answers.set(key, answer);
       }
       return Promise.race([
         answer.local,

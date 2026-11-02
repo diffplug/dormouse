@@ -1,4 +1,5 @@
-import { modalActionButton } from './design';
+import { useRef } from 'react';
+import { MODAL_OVERLAY_INSET, modalActionButton, ModalFrame } from './design';
 
 /** What a close is asking, in the desktop's words (`docs/specs/mobile-terminal-ui.md` -> "Browser"). */
 export type MobileCloseDialogState =
@@ -20,23 +21,30 @@ const TITLE: Record<MobileCloseDialogState['kind'], string> = {
   refused: 'Not closed',
 };
 
+const ESCAPE: Record<MobileCloseDialogState['kind'], (state: never) => () => void> = {
+  confirm: (state: { onCancel: () => void }) => state.onCancel,
+  unsaved: (state: { onCancel: () => void }) => state.onCancel,
+  refused: (state: { onDismiss: () => void }) => state.onDismiss,
+};
+
 export function MobileCloseDialog({ state }: { state: MobileCloseDialogState }) {
+  const firstButton = useRef<HTMLButtonElement>(null);
   return (
-    <div className="absolute inset-0 z-50 grid place-items-center bg-app-bg/55 px-6">
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label={TITLE[state.kind]}
-        className="w-full max-w-72 rounded border border-border bg-surface-raised p-3 font-mono text-foreground shadow-xl"
-      >
-        <div className="text-sm font-semibold">{TITLE[state.kind]}</div>
-        <DialogBody state={state} />
-      </div>
-    </div>
+    <ModalFrame
+      titleId="mobile-close-title"
+      layer="critical"
+      overlayClassName={MODAL_OVERLAY_INSET}
+      className="w-full max-w-72 font-mono"
+      initialFocusRef={firstButton}
+      onEscape={ESCAPE[state.kind](state as never)}
+    >
+      <h2 id="mobile-close-title" className="text-sm font-semibold">{TITLE[state.kind]}</h2>
+      <DialogBody state={state} firstButton={firstButton} />
+    </ModalFrame>
   );
 }
 
-function DialogBody({ state }: { state: MobileCloseDialogState }) {
+function DialogBody({ state, firstButton }: { state: MobileCloseDialogState; firstButton: React.RefObject<HTMLButtonElement | null> }) {
   switch (state.kind) {
     case 'confirm':
       // The letter stands where a double-tap on the header's close cannot reach,
@@ -52,7 +60,7 @@ function DialogBody({ state }: { state: MobileCloseDialogState }) {
             {state.char}
           </button>
           <div className="text-xs text-muted">Tap {state.char} to confirm</div>
-          <button type="button" onClick={state.onCancel} className={modalActionButton({ class: 'min-h-10 w-full' })}>Cancel</button>
+          <button ref={firstButton} type="button" onClick={state.onCancel} className={modalActionButton({ class: 'min-h-10 w-full' })}>Cancel</button>
         </div>
       );
     case 'unsaved':
@@ -63,7 +71,7 @@ function DialogBody({ state }: { state: MobileCloseDialogState }) {
           </ul>
           {state.error ? <p role="alert" className="mt-2 text-xs text-error">{state.error}</p> : null}
           <div className="mt-3 grid grid-cols-3 gap-2">
-            <button type="button" disabled={state.saving} onClick={state.onCancel} className={modalActionButton({ class: 'min-h-10' })}>Cancel</button>
+            <button ref={firstButton} type="button" disabled={state.saving} onClick={state.onCancel} className={modalActionButton({ class: 'min-h-10' })}>Cancel</button>
             <button type="button" disabled={state.saving} onClick={state.onDiscard} className={modalActionButton({ class: 'min-h-10' })}>Discard</button>
             <button type="button" disabled={state.saving} onClick={state.onSave} className={modalActionButton({ tone: 'primary', class: 'min-h-10' })}>{state.saving ? 'Saving…' : 'Save'}</button>
           </div>
@@ -73,7 +81,7 @@ function DialogBody({ state }: { state: MobileCloseDialogState }) {
       return (
         <>
           <p className="mt-2 break-words text-xs text-muted">{state.message}</p>
-          <button type="button" onClick={state.onDismiss} className={modalActionButton({ class: 'mt-3 min-h-10 w-full' })}>OK</button>
+          <button ref={firstButton} type="button" onClick={state.onDismiss} className={modalActionButton({ class: 'mt-3 min-h-10 w-full' })}>OK</button>
         </>
       );
   }

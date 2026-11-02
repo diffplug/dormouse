@@ -22,6 +22,7 @@ import {
   FrameDecoder,
   PEER_CLIENT_PROOF_DOMAIN,
   PEER_REPLY_BUDGET_MS,
+  peerReplyBudgetMs,
   PEER_SERVER_PROOF_DOMAIN,
   encodeFrame,
   forgetPeerRoutes,
@@ -462,7 +463,7 @@ function ask(
     const timer = setTimeout(() => {
       pendingRequests.delete(frame.id);
       resolve(null);
-    }, PEER_REPLY_BUDGET_MS);
+    }, peerReplyBudgetMs(frame.op));
     pendingRequests.set(frame.id, {
       client,
       settle: (response) => {

@@ -51,8 +51,8 @@ export interface MobileWallProps {
   showKillButton?: boolean;
   /** What covers the active Session's terminal; omitted, nothing does. */
   browser?: ReactNode;
-  /** A Tool's choice of its browser over its terminal, which its header's mode buttons make. */
-  toolBrowserShown?: boolean;
+  /** The active Session shows its browser, a Tool by its header's mode buttons. */
+  browserShown?: boolean;
   onToolBrowserShownChange?: (shown: boolean) => void;
   /**
    * Asks to close a `tool` or `browser` Session, whatever the consumer's kill
@@ -60,11 +60,6 @@ export interface MobileWallProps {
    */
   onBrowserClose?: (id: string) => void;
   className?: string;
-}
-
-/** Whether a Session of `kind` shows its browser, a Tool's by `toolBrowserShown`. */
-export function showsBrowser(kind: MobileSurfaceKind | undefined, toolBrowserShown: boolean): boolean {
-  return kind === 'browser' || (kind === 'tool' && toolBrowserShown);
 }
 
 const DEFAULT_MOBILE_SESSION: MobileWallSession = { id: 'mobile-pane' };
@@ -116,7 +111,7 @@ export function MobileWall({
   onSessionKill,
   showKillButton = true,
   browser,
-  toolBrowserShown = false,
+  browserShown: showingBrowser = false,
   onToolBrowserShownChange,
   onBrowserClose,
   className,
@@ -170,7 +165,6 @@ export function MobileWall({
     }
   }, [firstSessionId, resolvedActiveSessionId, selectSession, sessions]);
 
-  const showingBrowser = activeItem ? showsBrowser(activeItem.kind, toolBrowserShown) : false;
   const closesBrowser = onBrowserClose && (activeItem?.kind === 'tool' || activeItem?.kind === 'browser');
 
   if (!activeItem) {
@@ -202,7 +196,7 @@ export function MobileWall({
           className={clsx('absolute inset-0 pb-[env(safe-area-inset-bottom)]', !showingBrowser && 'invisible')}
           data-mobile-browser-layer
         >
-          {browser}
+          <div className="relative h-full">{browser}</div>
         </div>
       </div>
     </div>

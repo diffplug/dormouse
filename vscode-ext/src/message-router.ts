@@ -23,7 +23,7 @@ import { toolControl } from './tool-host';
 import { reserveSurfaceIds } from './surface-ids';
 import { maxSurfaceIdNumber } from 'dor/protocol';
 import type { ToolHostRequest } from '../../lib/src/lib/platform/types';
-import { ASK_BUDGET_MS } from '../../lib/src/host/remote/service-protocol';
+import { askBudgetMs } from '../../lib/src/host/remote/service-protocol';
 import { configurePeerLink, remoteNotifyPeerChange } from './peer-link';
 import { createProcessedPtyStreams } from './processed-pty-streams';
 import {
@@ -157,7 +157,7 @@ function brokerRequest(op: string, params: unknown): Promise<unknown[]> {
       pending: new Set(peers),
       results: [],
       settle,
-      timer: setTimeout(settle, ASK_BUDGET_MS),
+      timer: setTimeout(settle, askBudgetMs(op)),
     });
     for (const peer of peers) peer.ask(requestId, op, params);
   });

@@ -38,10 +38,12 @@ export interface FrameSession {
   unsubscribe(subId: string): void;
 }
 
-/** A coalesced `flow.ack` once this many body bytes wait, or an exchange ends. */
+/** A coalesced `flow.ack` once this many body bytes wait, or {@link ACK_FLUSH_MS} later. */
 const ACK_THRESHOLD_BYTES = 64 * 1024;
 /** What a response may queue for its page before its exchange is held. */
 const RESPONSE_BUFFER_BYTES = 256 * 1024;
+/** How long fewer acknowledged bytes than the threshold wait: a page's hundreds of small modules share one ack. */
+const ACK_FLUSH_MS = 50;
 
 export interface FrameRequestInit {
   method: string;
@@ -117,6 +119,7 @@ export class FrameClient {
   readonly #frames = new Set<ClientFrame>();
   readonly #slots = new ExchangeSlots();
   #unacked = 0;
+  #ackTimer: ReturnType<typeof setTimeout> | null = null;
   #disposed = false;
 
   constructor(session: FrameSession) {
@@ -150,6 +153,7 @@ export class FrameClient {
   dispose(): void {
     if (this.#disposed) return;
     this.#disposed = true;
+    if (this.#ackTimer) clearTimeout(this.#ackTimer);
     for (const frame of [...this.#frames]) frame.ended(SESSION_ENDED);
   }
 
@@ -159,10 +163,13 @@ export class FrameClient {
    */
   #received(bytes: number): void {
     this.#unacked += bytes;
-    if (bytes === 0 || this.#unacked >= ACK_THRESHOLD_BYTES) this.#flushAck();
+    if (this.#unacked >= ACK_THRESHOLD_BYTES) this.#flushAck();
+    else if (!this.#ackTimer && this.#unacked > 0) this.#ackTimer = setTimeout(() => this.#flushAck(), ACK_FLUSH_MS);
   }
 
   #flushAck(): void {
+    if (this.#ackTimer) clearTimeout(this.#ackTimer);
+    this.#ackTimer = null;
     if (this.#unacked === 0 || this.#disposed) return;
     const bytes = this.#unacked;
     this.#unacked = 0;
@@ -179,10 +186,9 @@ function fireAndForget(sent: Promise<unknown>): void {
 class ClientFrame implements OpenFrame {
   readonly id: string;
   readonly path: string;
-  readonly url: string;
   readonly #session: FrameSession;
   readonly #slots: ExchangeSlots;
-  /** Body bytes off the wire; zero says an exchange ended, so flush. */
+  /** Body bytes off the wire. */
   readonly #received: (bytes: number) => void;
   readonly #forget: () => void;
   readonly #live = new Set<Live>();
@@ -198,7 +204,6 @@ class ClientFrame implements OpenFrame {
   ) {
     this.id = id;
     this.path = opened.path;
-    this.url = opened.url;
     this.#session = session;
     this.#slots = slots;
     this.#received = received;
@@ -223,12 +228,14 @@ class ClientFrame implements OpenFrame {
       held = paused;
       fireAndForget(session.request(FRAME_METHODS.flowPause, { id, paused }));
     };
+    const release = (): void => {
+      session.unsubscribe(id);
+      this.#slots.release();
+    };
     const finish = (): void => {
       done = true;
       this.#live.delete(endLive);
-      session.unsubscribe(id);
-      this.#received(0);
-      this.#slots.release();
+      release();
     };
     const endLive: Live = (reason) => {
       if (done) return;
@@ -238,19 +245,16 @@ class ClientFrame implements OpenFrame {
 
     const body = new ReadableStream<Uint8Array>({
       start: (c) => { controller = c; },
-      pull: () => hold(false),
+      // Restarted only once half the buffer is free, or a page reading slower
+      // than the tunnel would hold and release its exchange for every chunk.
+      pull: () => { if ((controller.desiredSize ?? 0) >= RESPONSE_BUFFER_BYTES / 2) hold(false); },
       cancel: () => {
         if (done) return;
         done = true;
         this.#live.delete(endLive);
         // Its subscription outlives the cancel until the answer: what the
         // Burrow already sent still arrives, and is still owed an ack.
-        const settled = () => {
-          session.unsubscribe(id);
-          this.#received(0);
-          this.#slots.release();
-        };
-        session.request(FRAME_METHODS.httpCancel, { exchangeId: id }).then(settled, settled);
+        session.request(FRAME_METHODS.httpCancel, { exchangeId: id }).then(release, release);
       },
     }, new ByteLengthQueuingStrategy({ highWaterMark: RESPONSE_BUFFER_BYTES }));
 
@@ -323,7 +327,6 @@ class ClientFrame implements OpenFrame {
       open = false;
       this.#live.delete(endLive);
       session.unsubscribe(id);
-      this.#received(0);
       handlers.onClose(code, reason);
     };
     // 1006: the abnormal closure a page would see of a connection that just went.

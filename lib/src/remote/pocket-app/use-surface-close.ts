@@ -8,6 +8,7 @@ import { useCallback, useRef, useState, useSyncExternalStore } from 'react';
 import { REMOTE_METHODS, type SurfaceCloseParams, type SurfaceCloseResult } from 'remote-lib-common';
 import type { MobileCloseDialogState } from '../../components/MobileCloseDialog';
 import { randomKillChar } from '../../components/KillConfirm';
+import { messageOf } from '../../lib/errors';
 import {
   confirmToolEditorsClose,
   decideEditorClose,
@@ -33,17 +34,17 @@ export function useSurfaceClose(session: SurfaceCloseSession | null): {
   const close = useCallback((surfaceId: string) => {
     if (!session || closing.current) return;
     closing.current = true;
-    const refused = (message: string) => new Promise<void>((resolve) => {
-      setAsked({ kind: 'refused', message, onDismiss: () => { setAsked(null); resolve(); } });
+    /** Show a dialog until its answer. */
+    const ask = <T,>(build: (answer: (value: T) => void) => MobileCloseDialogState) => new Promise<T>((resolve) => {
+      setAsked(build((value) => { setAsked(null); resolve(value); }));
     });
-    const confirm = () => new Promise<boolean>((resolve) => {
-      const answer = (yes: boolean) => { setAsked(null); resolve(yes); };
-      setAsked({ kind: 'confirm', char: randomKillChar(), onConfirm: () => answer(true), onCancel: () => answer(false) });
-    });
-    const unsaved = (label: string) => new Promise<'save' | 'discard' | null>((resolve) => {
-      const answer = (choice: 'save' | 'discard' | null) => { setAsked(null); resolve(choice); };
-      setAsked({ kind: 'unsaved', labels: [label], onSave: () => answer('save'), onDiscard: () => answer('discard'), onCancel: () => answer(null) });
-    });
+    const refused = (message: string) => ask<void>((answer) => ({ kind: 'refused', message, onDismiss: () => answer() }));
+    const confirm = () => ask<boolean>((answer) => ({
+      kind: 'confirm', char: randomKillChar(), onConfirm: () => answer(true), onCancel: () => answer(false),
+    }));
+    const unsaved = (label: string) => ask<'save' | 'discard' | null>((answer) => ({
+      kind: 'unsaved', labels: [label], onSave: () => answer('save'), onDiscard: () => answer('discard'), onCancel: () => answer(null),
+    }));
     void (async () => {
       try {
         if (!(await confirmToolEditorsClose([surfaceId]))) return;
@@ -65,7 +66,7 @@ export function useSurfaceClose(session: SurfaceCloseSession | null): {
           }
         }
       } catch (error) {
-        await refused(error instanceof Error ? error.message : String(error));
+        await refused(messageOf(error));
       } finally {
         closing.current = false;
       }

@@ -4,7 +4,7 @@
  */
 
 import type { SurfaceCloseParams, SurfaceCloseResult } from 'remote-lib-common';
-import type { DirectoryBrowser, DirectoryEntry } from 'remote-lib-common';
+import type { DirectoryEntry } from 'remote-lib-common';
 // The chunk a sink receives is the one the PTY owner's parser produced, so the
 // projection pair is defined beside that parse rather than restated here.
 import type { ProcessedPtyChunk } from '../../lib/processed-pty-stream';
@@ -35,9 +35,6 @@ export interface SurfaceHold {
    */
   readonly serviceId: string;
 }
-
-/** A Surface's embedded page, as its browser chrome shows it. */
-export type EmbeddedPage = Pick<DirectoryBrowser, 'url' | 'title'>;
 
 export interface SurfaceHandle {
   /**
@@ -133,7 +130,7 @@ export interface BurrowSurfaceProvider {
    * — or `null` when it embeds none, renders it some other way, or nobody owns
    * it. Read-only: the frame tunnel mints its own proxy grant for the page.
    */
-  resolveBrowser(surfaceId: string): Promise<EmbeddedPage | null>;
+  resolveBrowser(surfaceId: string): Promise<string | null>;
 
   /**
    * Close `surfaceId` as the person at the Burrow would, with the consent they

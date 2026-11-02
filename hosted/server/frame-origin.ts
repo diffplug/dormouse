@@ -37,19 +37,14 @@ const headers = (clientOrigin: string, contentType: string) => ({
 });
 
 export async function frameOriginResponse(request: Request, env: FrameOriginEnv): Promise<Response> {
-  const { pathname } = new URL(request.url);
-  const contentType = Object.hasOwn(FILES, pathname) ? FILES[pathname] : undefined;
-  if (!contentType || (request.method !== "GET" && request.method !== "HEAD")) {
-    return new Response("Not found", {
-      status: 404,
-      headers: headers(env.CLIENT_ORIGIN, "text/plain; charset=utf-8"),
-    });
-  }
+  const notFound = () => new Response("Not found", { status: 404, headers: headers(env.CLIENT_ORIGIN, "text/plain; charset=utf-8") });
+  const url = new URL(request.url);
+  const contentType = Object.hasOwn(FILES, url.pathname) ? FILES[url.pathname] : undefined;
+  if (!contentType || (request.method !== "GET" && request.method !== "HEAD")) return notFound();
   // The assets' HTML handling redirects `….html`; a worker's registration and a
   // frame's `load` want the file.
-  const url = new URL(request.url);
-  if (pathname === FRAME_BOOTSTRAP_PATH) url.pathname = pathname.slice(0, -".html".length);
+  if (url.pathname === FRAME_BOOTSTRAP_PATH) url.pathname = url.pathname.slice(0, -".html".length);
   const file = await env.ASSETS.fetch(new Request(url, { method: request.method }));
-  if (!file.ok) return new Response("Not found", { status: 404, headers: headers(env.CLIENT_ORIGIN, "text/plain; charset=utf-8") });
+  if (!file.ok) return notFound();
   return new Response(request.method === "HEAD" ? null : file.body, { status: 200, headers: headers(env.CLIENT_ORIGIN, contentType) });
 }

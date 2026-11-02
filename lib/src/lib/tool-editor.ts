@@ -1,3 +1,4 @@
+import { messageOf } from './errors';
 import { readFrameMessage, type FrameMessage, type HostMessage, type ToolViewPosition } from 'dor-tools-lib/protocol';
 import { getToolDirty, recordToolDirty } from './tool-dirty-store';
 
@@ -58,7 +59,7 @@ export async function saveToolEditor(id: string): Promise<string | null> {
     await saveEditor(id);
     return getToolDirty(id) === true ? NEWER_EDITS : null;
   } catch (error) {
-    return error instanceof Error ? error.message : String(error);
+    return messageOf(error);
   }
 }
 
@@ -80,7 +81,7 @@ export async function decideEditorClose(choice: 'save' | 'discard' | 'cancel'): 
       if (current.items.some(({ id }) => getToolDirty(id) === true)) throw new Error(NEWER_EDITS);
     } catch (error) {
       if (prompt !== busy) return;
-      prompt = { ...current, saving: false, error: error instanceof Error ? error.message : String(error) }; emit(); return;
+      prompt = { ...current, saving: false, error: messageOf(error) }; emit(); return;
     }
   }
   finish(choice !== 'cancel');
