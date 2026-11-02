@@ -96,7 +96,6 @@ function Frame({ status, active: initial = TOOL, view: initialView = 'terminal' 
               else next.add(active);
               return next;
             })}
-            onBrowserReload={status.kind === 'ready' ? () => {} : undefined}
             onBrowserClose={() => {}}
             browser={session?.kind === 'terminal' || !session?.kind ? null : (
               <MobileBrowserPane
@@ -138,7 +137,6 @@ export const ToolPage: Story = {
     await expect(canvas.getByTitle('Show sessions')).toBeVisible();
     await expect(canvas.getByLabelText('Browser')).toHaveAttribute('aria-pressed', 'true');
     await expect(canvas.getByLabelText('Terminal')).toHaveAttribute('aria-pressed', 'false');
-    await expect(canvas.getByLabelText('Reload')).toBeVisible();
     await expect(canvas.getByLabelText('Kill')).toBeVisible();
   },
 };
@@ -150,7 +148,6 @@ export const ToolTerminal: Story = {
     await userEvent.click(canvas.getByLabelText('Terminal'));
     await expect(canvas.getByRole('region', { name: 'Touch mode' })).toBeVisible();
     await expect(canvas.getByLabelText('Terminal')).toHaveAttribute('aria-pressed', 'true');
-    await expect(canvas.queryByLabelText('Reload')).toBeNull();
   },
 };
 

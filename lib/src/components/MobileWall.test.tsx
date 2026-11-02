@@ -66,7 +66,7 @@ function renderWall(showKillButton?: boolean, onShowSessions?: () => void) {
   });
 }
 
-function renderKinds(active: string, toolBrowserShown: boolean, onToolBrowserShownChange = vi.fn(), onBrowserReload = vi.fn()) {
+function renderKinds(active: string, toolBrowserShown: boolean, onToolBrowserShownChange = vi.fn()) {
   act(() => {
     root.render(
       <StrictMode>
@@ -79,13 +79,12 @@ function renderKinds(active: string, toolBrowserShown: boolean, onToolBrowserSho
           activeSessionId={active}
           toolBrowserShown={toolBrowserShown}
           onToolBrowserShownChange={onToolBrowserShownChange}
-          onBrowserReload={onBrowserReload}
           browser={<div data-testid="browser" />}
         />
       </StrictMode>,
     );
   });
-  return { onToolBrowserShownChange, onBrowserReload };
+  return { onToolBrowserShownChange };
 }
 const button = (label: string) => container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
 const browserLayer = () => container.querySelector<HTMLElement>('[data-mobile-browser-layer]')!;
@@ -154,7 +153,7 @@ describe('MobileWall', () => {
 
   describe('browser', () => {
     it('puts a Tool\'s modes before its title, marks the one showing, and switches between them', () => {
-      const { onToolBrowserShownChange, onBrowserReload } = renderKinds('tool', true);
+      const { onToolBrowserShownChange } = renderKinds('tool', true);
       const browserButton = button('Browser')!;
       const terminalButton = button('Terminal')!;
       const title = container.querySelector('[title="Show sessions"], .truncate')!;
@@ -164,14 +163,11 @@ describe('MobileWall', () => {
       expect(terminalButton.getAttribute('aria-pressed')).toBe('false');
       expect(container.querySelector('[data-testid="terminal-pane"]')).not.toBeNull();
       expect(browserLayer().classList.contains('invisible')).toBe(false);
-      act(() => button('Reload')!.click());
-      expect(onBrowserReload).toHaveBeenCalledOnce();
       act(() => terminalButton.click());
       expect(onToolBrowserShownChange).toHaveBeenCalledWith(false);
 
       renderKinds('tool', false, onToolBrowserShownChange);
       expect(browserLayer().classList.contains('invisible')).toBe(true);
-      expect(button('Reload')).toBeNull();
       expect(button('Terminal')!.getAttribute('aria-pressed')).toBe('true');
       act(() => button('Browser')!.click());
       expect(onToolBrowserShownChange).toHaveBeenLastCalledWith(true);
@@ -223,12 +219,11 @@ describe('MobileWall', () => {
       expect(button('Kill')).toBeNull();
     });
 
-    it('leaves a plain terminal without modes or reload', () => {
+    it('leaves a plain terminal without modes', () => {
       renderKinds('term', true);
       expect(browserLayer().classList.contains('invisible')).toBe(true);
       expect(button('Browser')).toBeNull();
       expect(button('Terminal')).toBeNull();
-      expect(button('Reload')).toBeNull();
     });
   });
 });

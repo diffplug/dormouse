@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { ArrowClockwiseIcon, CaretDownIcon, TerminalIcon, XIcon } from '@phosphor-icons/react';
+import { CaretDownIcon, TerminalIcon, XIcon } from '@phosphor-icons/react';
 import { clsx } from 'clsx';
 import { HeaderActionButton } from './HeaderActionButton';
 import { TerminalPane } from './TerminalPane';
@@ -54,8 +54,6 @@ export interface MobileWallProps {
   /** A Tool's choice of its browser over its terminal, which its header's mode buttons make. */
   toolBrowserShown?: boolean;
   onToolBrowserShownChange?: (shown: boolean) => void;
-  /** Reloads the shown browser; omitted, the header offers no reload. */
-  onBrowserReload?: () => void;
   /**
    * Asks to close a `tool` or `browser` Session, whatever the consumer's kill
    * affordance for terminals; omitted, those follow `showKillButton`.
@@ -70,7 +68,6 @@ export function showsBrowser(kind: MobileSurfaceKind | undefined, toolBrowserSho
 }
 
 const DEFAULT_MOBILE_SESSION: MobileWallSession = { id: 'mobile-pane' };
-const HEADER_BUTTON_CLASS = chromeButton({ kind: 'window', class: clsx(MOBILE_BAR_HEIGHT_CLASS, 'shrink-0') });
 
 
 export function useMobileWallSessionItems(
@@ -121,7 +118,6 @@ export function MobileWall({
   browser,
   toolBrowserShown = false,
   onToolBrowserShownChange,
-  onBrowserReload,
   onBrowserClose,
   className,
 }: MobileWallProps) {
@@ -195,7 +191,6 @@ export function MobileWall({
         showKillButton={showKillButton || !!closesBrowser}
         showingBrowser={showingBrowser}
         onToolBrowserShownChange={onToolBrowserShownChange}
-        onBrowserReload={showingBrowser ? onBrowserReload : undefined}
       />
       {/* `MobileTerminalUi` acknowledges a touch or keystroke on this pane —
           the only way a ring goes out here (`docs/specs/alert.md` -> Pane Header). */}
@@ -256,7 +251,6 @@ function MobileWallHeader({
   showKillButton,
   showingBrowser,
   onToolBrowserShownChange,
-  onBrowserReload,
 }: {
   session: MobileTerminalSessionItem;
   onTodoClear?: () => void;
@@ -265,7 +259,6 @@ function MobileWallHeader({
   showKillButton: boolean;
   showingBrowser: boolean;
   onToolBrowserShownChange?: (shown: boolean) => void;
-  onBrowserReload?: () => void;
 }) {
   const todoPill = useTodoPillContent(session.todo === true);
   const TodoPill = onTodoClear ? 'button' : 'span';
@@ -320,11 +313,6 @@ function MobileWallHeader({
         >
           {todoPill.body}
         </TodoPill>
-      ) : null}
-      {onBrowserReload ? (
-        <HeaderActionButton className={HEADER_BUTTON_CLASS} onClick={onBrowserReload} ariaLabel="Reload" tooltip="Reload">
-          <ArrowClockwiseIcon size={16} />
-        </HeaderActionButton>
       ) : null}
       {showKillButton ? (
         <HeaderActionButton
