@@ -501,7 +501,7 @@ importers:
     devDependencies:
       '@argos-ci/cli':
         specifier: ^6.9.4
-        version: 6.10.0(@types/node@24.19.2)(supports-color@10.2.2)
+        version: 6.11.0(@types/node@24.19.2)(supports-color@10.2.2)
       '@argos-ci/storybook':
         specifier: ^6.4.0
         version: 6.4.4(@types/node@24.19.2)(@vitest/browser-playwright@5.0.5)(@vitest/browser@5.0.5(vite@8.3.5(@types/node@24.19.2)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))(vitest@5.0.5))(playwright@1.63.0)(storybook@11.0.0-alpha.8(@types/react@19.3.0)(prettier@3.9.6)(react@19.3.1))(supports-color@10.2.2)(vitest@5.0.5)
@@ -742,8 +742,8 @@ importers:
         specifier: ^24.0.0
         version: 24.19.2
       '@types/vscode':
-        specifier: 1.85.0
-        version: 1.85.0
+        specifier: 1.92.0
+        version: 1.92.0
       '@types/ws':
         specifier: ^8.5.0
         version: 8.18.2
@@ -752,7 +752,7 @@ importers:
         version: 6.1.2(vite@8.3.5(@types/node@24.19.2)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
       '@vscode/vsce':
         specifier: ^4.0.0
-        version: 4.0.0(supports-color@10.2.2)
+        version: 4.1.0(supports-color@10.2.2)
       esbuild:
         specifier: ^0.28.0
         version: 0.28.2
@@ -874,8 +874,8 @@ packages:
     resolution: {integrity: sha512-fn83whAKleP/rqlDFsqKfAICeb9WS0Nkl3tE3kgdnc8LJ6nK3M8ElcL8ZB3rUFMaDGb6hkYWb7nJyANpNVlnsw==}
     engines: {node: '>=22.0.0'}
 
-  '@argos-ci/cli@6.10.0':
-    resolution: {integrity: sha512-CcHBQjZZBBQ93JbNDCBXsNKfLPwcQ/YTTMhfbr5lmJaqU27dYjlFZ9TgslYbnx7rVxqA6t2eTmqWpE6dXMSJtQ==}
+  '@argos-ci/cli@6.11.0':
+    resolution: {integrity: sha512-8U3RhSdcsVszW1WbKJDr5XZDr77mbSI9C/Ivl5SYKrEsApBUE8Ke5AwypRyXLl3GQe3R2AFkx+s09GBlaMnftQ==}
     engines: {node: '>=22.0.0'}
     hasBin: true
 
@@ -4205,8 +4205,8 @@ packages:
   '@types/unist@3.0.3':
     resolution: {integrity: sha512-ko/gIFJRv177XgZsZcBwnqJN5x/Gien8qNOn0D5bQU/zAzVf9Zt3BlcUiLqhV9y4ARk0GbT3tnUiPNgnTXzc/Q==}
 
-  '@types/vscode@1.85.0':
-    resolution: {integrity: sha512-CF/RBon/GXwdfmnjZj0WTUMZN5H6YITOfBCP4iEZlOtVQXuzw6t7Le7+cR+7JzdMrnlm7Mfp49Oj2TuSXIWo3g==}
+  '@types/vscode@1.92.0':
+    resolution: {integrity: sha512-DcZoCj17RXlzB4XJ7IfKdPTcTGDLYvTOcTNkvtjXWF+K2TlKzHHkBEXNWQRpBIXixNEUgx39cQeTFunY0E2msw==}
 
   '@types/web-push@3.6.4':
     resolution: {integrity: sha512-GnJmSr40H3RAnj0s34FNTcJi1hmWFV5KXugE0mYWnYhgTAHLJ/dJKAwDmvPJYMke0RplY2XE9LnM4hqSqKIjhQ==}
@@ -4457,8 +4457,8 @@ packages:
   '@vscode/vsce-sign@2.1.0':
     resolution: {integrity: sha512-9AQrqazrBgTgRSuwleLVXUrIUphY02/SFCh2TKYoLV/xifJAdblhdmEmw5gUrYSPQ3sRwNs9iyCMD14sATEE6g==}
 
-  '@vscode/vsce@4.0.0':
-    resolution: {integrity: sha512-NImwuLaenMmb5D5Jer9/lzi/F9ZQUBOp8Azhj/BVYcTFgixv8KehFXqEUDjQlD2tAiw2E6dDGyjTuAB//di60A==}
+  '@vscode/vsce@4.1.0':
+    resolution: {integrity: sha512-iWNykEfLWTAU7FC2iBiE0vJvnJDpGm3GlL89dsBtRs62F+8tkPtq80Imi0QSFHjNBWu4QIdYII+3F9v/ZQRExw==}
     engines: {node: '>= 22'}
     hasBin: true
 
@@ -7889,7 +7889,7 @@ snapshots:
 
   '@argos-ci/browser@6.6.0': {}
 
-  '@argos-ci/cli@6.10.0(@types/node@24.19.2)(supports-color@10.2.2)':
+  '@argos-ci/cli@6.11.0(@types/node@24.19.2)(supports-color@10.2.2)':
     dependencies:
       '@argos-ci/api-client': 0.31.3(supports-color@10.2.2)
       '@argos-ci/core': 6.8.8(@types/node@24.19.2)(supports-color@10.2.2)
@@ -11037,7 +11037,7 @@ snapshots:
 
   '@types/unist@3.0.3': {}
 
-  '@types/vscode@1.85.0': {}
+  '@types/vscode@1.92.0': {}
 
   '@types/web-push@3.6.4':
     dependencies:
@@ -11250,7 +11250,7 @@ snapshots:
       '@vscode/vsce-sign-win32-arm64': 2.0.6
       '@vscode/vsce-sign-win32-x64': 2.0.6
 
-  '@vscode/vsce@4.0.0(supports-color@10.2.2)':
+  '@vscode/vsce@4.1.0(supports-color@10.2.2)':
     dependencies:
       '@azure/identity': 4.14.0(supports-color@10.2.2)
       '@napi-rs/keyring': 1.3.0
@@ -13553,7 +13553,7 @@ snapshots:
   ovsx@1.3.0(@types/node@24.19.2)(supports-color@10.2.2):
     dependencies:
       '@inquirer/prompts': 7.10.1(@types/node@24.19.2)
-      '@vscode/vsce': 4.0.0(supports-color@10.2.2)
+      '@vscode/vsce': 4.1.0(supports-color@10.2.2)
       commander: 14.0.3
       cross-keychain: 1.1.0(@types/node@24.19.2)
       is-ci: 2.0.0
