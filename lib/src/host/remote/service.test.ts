@@ -2009,7 +2009,7 @@ describe('paired devices and revocation', () => {
       expect(revokedInStore()).toEqual([true, true]);
     });
 
-    it('is shown once a stuck write has outlasted the first retry, which never failed', async () => {
+    it('answers and is shown once a stuck write has outlasted its bound, then lands', async () => {
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
       createService({ enrollment: ENROLLMENT, acl: { [BURROW_ID]: [PHONE] } });
       await service.start();
@@ -2027,11 +2027,13 @@ describe('paired devices and revocation', () => {
 
       const eventsBefore = accessEvents();
       await vi.advanceTimersByTimeAsync(REVOCATION_SAVE_RETRY_MS);
+      expect((await revoking).error).toMatch(/refused.*has not finished/);
       expect(accessEvents()).toBeGreaterThan(eventsBefore);
       expect((await pairedResult()).unsavedRevocations).toEqual([{ id: phoneId, label: BROWSER }]);
 
       write.resolve();
-      expect((await revoking).result).toEqual({ revoked: 1, labels: [BROWSER] });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(revokedInStore()).toEqual([true]);
       expect((await pairedResult()).unsavedRevocations).toBeUndefined();
     });
   });

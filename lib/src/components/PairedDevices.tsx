@@ -52,6 +52,33 @@ export function useAccessRecords(burrowId: string | null) {
   return { devices, unsavedRevocations, log, error, reload };
 }
 
+/** A phone's name and id, with the one action its row offers. */
+function DeviceRowHead({
+  device,
+  action,
+  busy,
+  onAction,
+}: {
+  device: { label: string; id: string };
+  action: string | null;
+  busy: boolean;
+  onAction: () => void;
+}) {
+  return (
+    <div className="flex items-baseline justify-between gap-2">
+      <div className="min-w-0">
+        <span className="text-foreground">{device.label}</span>{' '}
+        <span className="font-mono text-xs text-muted">{device.id}</span>
+      </div>
+      {action === null ? null : (
+        <button type="button" disabled={busy} className={`shrink-0 ${modalActionButton()}`} onClick={onAction}>
+          {action}
+        </button>
+      )}
+    </div>
+  );
+}
+
 /**
  * Each paired phone, with a Revoke that asks once inline before acting — it
  * cuts the phone off at once, ending a session it holds, until it pairs again.
@@ -78,22 +105,12 @@ export function PairedDeviceList({
       <ul>
         {devices.map((device) => (
           <li key={device.id} className="mt-1">
-            <div className="flex items-baseline justify-between gap-2">
-              <div className="min-w-0">
-                <span className="text-foreground">{device.label}</span>{' '}
-                <span className="font-mono text-xs text-muted">{device.id}</span>
-              </div>
-              {confirming === device.id ? null : (
-                <button
-                  type="button"
-                  disabled={busy}
-                  className={`shrink-0 ${modalActionButton()}`}
-                  onClick={() => setConfirming(device.id)}
-                >
-                  Revoke
-                </button>
-              )}
-            </div>
+            <DeviceRowHead
+              device={device}
+              action={confirming === device.id ? null : 'Revoke'}
+              busy={busy}
+              onAction={() => setConfirming(device.id)}
+            />
             <div className="text-xs text-muted">
               Paired {dayOf(device.pairedAt, now)} · {seenText(device, now)}
             </div>
@@ -153,20 +170,12 @@ export function UnsavedRevocationList({
       <ul>
         {revocations.map((revocation) => (
           <li key={revocation.id} className="mt-1">
-            <div className="flex items-baseline justify-between gap-2">
-              <div className="min-w-0">
-                <span className="text-foreground">{revocation.label}</span>{' '}
-                <span className="font-mono text-xs text-muted">{revocation.id}</span>
-              </div>
-              <button
-                type="button"
-                disabled={busy}
-                className={`shrink-0 ${modalActionButton()}`}
-                onClick={() => void onRetry(revocation.id)}
-              >
-                Save again
-              </button>
-            </div>
+            <DeviceRowHead
+              device={revocation}
+              action="Save again"
+              busy={busy}
+              onAction={() => void onRetry(revocation.id)}
+            />
             <div className="text-xs text-error">
               Refused now, but this computer could not save that. Dormouse keeps trying; if it closes before a save
               lands, this phone can connect again.

@@ -578,9 +578,9 @@ export interface PairedDevice {
 }
 
 /**
- * A browser revoked and refused, whose revocation no save has carried yet: a
- * save failed, or none has landed by the first retry. `id` revokes it again,
- * which saves again.
+ * A browser revoked and refused, whose revocation no save has carried yet, and
+ * the save failed or has outlasted its bound. `id` revokes it again, which saves
+ * again.
  */
 export interface UnsavedRevocation {
   id: string;

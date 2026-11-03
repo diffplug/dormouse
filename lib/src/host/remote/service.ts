@@ -30,6 +30,7 @@ import {
   type RevocationRequester,
   type RevocationTarget,
 } from '../../remote/burrow/acl';
+import { messageOf } from '../../lib/errors';
 import {
   appendAccessLog,
   deviceIdFor,
@@ -380,7 +381,7 @@ const HOLDER_ID_BYTES = 16;
 /** Bytes of the random id that names one service instance to the webviews. */
 const SERVICE_ID_BYTES = 16;
 
-/** How long a revocation goes unsaved before the next try, and before Settings says so if no save has failed yet. */
+/** How long a revocation goes unsaved before the next try, and how long a person waits on a write that has not failed. */
 export const REVOCATION_SAVE_RETRY_MS = 30_000;
 
 /** One entry of `BurrowService.#unsavedRevocations`. */
@@ -390,7 +391,7 @@ interface HeldRevocation {
   readonly at: number;
   /** The browsers it cut off, as the paired-phone list names them. */
   readonly devices: readonly UnsavedRevocation[];
-  /** A save failed, or the first retry came with none landed: Settings shows it. */
+  /** The person who revoked was told it did not save: Settings shows it. */
   overdue: boolean;
 }
 
@@ -563,7 +564,7 @@ export class BurrowService {
    * the moment they apply. Every ACL this service reads from the store has them
    * applied ({@link #loadAcl}) — a network-policy change restarts the runtime
    * from the store, and must not re-admit a phone the person just cut off —
-   * until a save carries them ({@link #saveAcl}). {@link #flushRevocations}
+   * until a save carries them ({@link #saveAcl}). {@link #saveHeldRevocations}
    * retries on {@link REVOCATION_SAVE_RETRY_MS}, on every revoke attempt, and at
    * dispose. Memory only: this service stopping before a save lands undoes them
    * — quitting Dormouse, or in VS Code closing the broker window, whose successor
@@ -672,7 +673,7 @@ export class BurrowService {
    */
   async saveRevocations(): Promise<void> {
     try {
-      await this.#saveRevocations();
+      await this.#saveHeldRevocations();
     } catch (error) {
       console.warn('[burrow] could not save a revocation', error);
     }
@@ -689,7 +690,7 @@ export class BurrowService {
       if (this.#disposed) return;
       this.#sendToUi(BURROW_RESULT_EVENT, {
         burrowRequestId: command.burrowRequestId,
-        error: error instanceof Error ? error.message : String(error),
+        error: messageOf(error),
       });
     }
   }
@@ -958,7 +959,7 @@ export class BurrowService {
         });
       });
     } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
+      const detail = messageOf(error);
       throw new Error(
         saved
           ? `${detail} This computer saved its enrollment; restart Dormouse to try connecting again.`
@@ -1192,19 +1193,18 @@ export class BurrowService {
       };
     });
     const result: PairedDevicesResult = { devices: devices.sort((a, b) => b.pairedAt - a.pairedAt) };
-    const unsaved = this.#heldDevices().filter(({ overdue }) => overdue);
-    if (unsaved.length > 0) result.unsavedRevocations = unsaved.map(({ id, label }) => ({ id, label }));
+    const unsaved = this.#heldDevices({ overdueOnly: true });
+    if (unsaved.length > 0) result.unsavedRevocations = unsaved;
     return result;
   }
 
   /** The browsers an unsaved revocation of this enrollment cut off, one per id. */
-  #heldDevices(): Array<UnsavedRevocation & { overdue: boolean }> {
-    const byId = new Map<string, UnsavedRevocation & { overdue: boolean }>();
+  #heldDevices({ overdueOnly }: { overdueOnly: boolean }): UnsavedRevocation[] {
+    const byId = new Map<string, UnsavedRevocation>();
     const burrowId = this.#enrollment?.burrowId;
     for (const held of (burrowId && this.#unsavedRevocations.get(burrowId)) || []) {
-      for (const device of held.devices) {
-        byId.set(device.id, { ...device, overdue: held.overdue || (byId.get(device.id)?.overdue ?? false) });
-      }
+      if (overdueOnly && !held.overdue) continue;
+      for (const device of held.devices) byId.set(device.id, device);
     }
     return [...byId.values()];
   }
@@ -1227,10 +1227,10 @@ export class BurrowService {
     const by = revocationRequester(params?.by);
     const [clientStaticPublicKey] = [...statics];
     if (clientStaticPublicKey !== undefined) return this.revoke({ clientStaticPublicKey }, by);
-    const held = this.#heldDevices().filter((device) => device.id === id);
+    const held = this.#heldDevices({ overdueOnly: false }).find((device) => device.id === id);
     await this.#retryRevocationSave();
-    if (held.length === 0) throw new Error(`No paired phone has the id ${id}.`);
-    return { revoked: held.length, labels: held.map(({ label }) => label) };
+    if (!held) throw new Error(`No paired phone has the id ${id}.`);
+    return { revoked: 1, labels: [held.label] };
   }
 
   /** On `#serialize`, so a Burrow starting meanwhile answers from itself. */
@@ -1250,9 +1250,8 @@ export class BurrowService {
    * the phone across later runtimes, and only the save waits its turn.
    */
   async revoke(target: RevocationTarget, by: RevocationRequester): Promise<RevokeDeviceResult> {
-    const revoked = this.#burrow
-      ? this.#revokeRunning(target, by)
-      : await this.#serialize(async () => (this.#burrow ? this.#revokeRunning(target, by) : this.#revokeStored(target, by)));
+    const apply = async () => (this.#burrow ? this.#revokeRunning(target, by) : this.#revokeStored(target, by));
+    const revoked = await (this.#burrow ? apply() : this.#serialize(apply));
     if (revoked.length > 0) this.#emit({ name: 'access' });
     await this.#retryRevocationSave();
     return {
@@ -1300,22 +1299,32 @@ export class BurrowService {
     this.#armRevocationRetry();
   }
 
-  /** {@link #saveRevocations}, its failure in the words the person who revoked reads. */
+  /**
+   * {@link #saveHeldRevocations} for a person waiting on the answer: bounded,
+   * since a store write has no deadline, and any failure in the words they read.
+   * From then on Settings shows what is still held. A write that outlasts the
+   * bound keeps its place on the chain, where nothing can overlap it.
+   */
   async #retryRevocationSave(): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      await this.#saveRevocations();
+      await Promise.race([
+        this.#saveHeldRevocations(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error('the write has not finished')), REVOCATION_SAVE_RETRY_MS);
+          timer.unref?.();
+        }),
+      ]);
     } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
+      for (const held of [...this.#unsavedRevocations.values()].flat()) held.overdue = true;
+      this.#emit({ name: 'access' });
       const until = this.#kind === 'vscode' ? 'the window running remote control closes' : 'Dormouse quits';
       throw new Error(
-        `The phone is disconnected and refused, but the revocation could not be saved: ${detail}. Dormouse keeps trying; if ${until} before a save lands, the phone can connect again.`,
+        `The phone is disconnected and refused, but the revocation could not be saved: ${messageOf(error)}. Dormouse keeps trying; if ${until} before a save lands, the phone can connect again.`,
       );
+    } finally {
+      clearTimeout(timer);
     }
-  }
-
-  #saveRevocations(): Promise<void> {
-    if (this.#unsavedRevocations.size === 0) return Promise.resolve();
-    return this.#serialize(() => this.#flushRevocations());
   }
 
   /**
@@ -1323,19 +1332,19 @@ export class BurrowService {
    * Burrow whose ACL it is, so the write queues with its approvals, else from the
    * store.
    */
-  async #flushRevocations(): Promise<void> {
-    try {
-      for (const burrowId of [...this.#unsavedRevocations.keys()]) {
-        const burrow = this.#enrollment?.burrowId === burrowId ? this.#burrow : null;
-        if (burrow) await burrow.saveRevocations();
-        else await this.#saveAcl(burrowId, await this.#loadAcl(burrowId));
+  #saveHeldRevocations(): Promise<void> {
+    if (this.#unsavedRevocations.size === 0) return Promise.resolve();
+    return this.#serialize(async () => {
+      try {
+        for (const burrowId of [...this.#unsavedRevocations.keys()]) {
+          const burrow = this.#enrollment?.burrowId === burrowId ? this.#burrow : null;
+          if (burrow) await burrow.saveRevocations();
+          else await this.#saveAcl(burrowId, await this.#loadAcl(burrowId));
+        }
+      } finally {
+        this.#armRevocationRetry();
       }
-    } catch (error) {
-      this.#markRevocationsOverdue();
-      throw error;
-    } finally {
-      this.#armRevocationRetry();
-    }
+    });
   }
 
   /** One timer at most, and none past disposal, whose last try is its own. */
@@ -1343,18 +1352,9 @@ export class BurrowService {
     if (this.#disposed || this.#revocationRetry !== null || this.#unsavedRevocations.size === 0) return;
     this.#revocationRetry = setTimeout(() => {
       this.#revocationRetry = null;
-      // A write that stalled never failed, so this is the only thing to say so.
-      this.#markRevocationsOverdue();
       void this.saveRevocations();
     }, REVOCATION_SAVE_RETRY_MS);
     this.#revocationRetry.unref?.();
-  }
-
-  #markRevocationsOverdue(): void {
-    const held = [...this.#unsavedRevocations.values()].flat();
-    if (held.every((entry) => entry.overdue)) return;
-    for (const entry of held) entry.overdue = true;
-    this.#emit({ name: 'access' });
   }
 
   /** The whole log, after every append already queued. */
