@@ -3759,8 +3759,8 @@ describe('Wall on the Lath engine', () => {
 
   describe('a press reported from inside a proxied frame', () => {
     const PROXY = 'http://127.0.0.1:61234';
-    const press = () => act(async () => {
-      window.dispatchEvent(new MessageEvent('message', { origin: PROXY, data: { __dormouse: 'pointerdown' } }));
+    const press = (source: Window | null) => act(async () => {
+      window.dispatchEvent(new MessageEvent('message', { origin: PROXY, source, data: { __dormouse: 'pointerdown' } }));
     });
 
     async function frameBeside(wall: ReactElement) {
@@ -3775,7 +3775,7 @@ describe('Wall on the Lath engine', () => {
     it('changes nothing from a frame without focus', async () => {
       const frame = await frameBeside(<Wall initialPaneIds={['surface:a']} initialMode="passthrough" />);
       const focus = vi.spyOn(frame, 'focus');
-      await press();
+      await press(frame.contentWindow);
       await flushFrame();
       expect(focus).not.toHaveBeenCalled();
       expect(document.activeElement).not.toBe(frame);
@@ -3786,7 +3786,7 @@ describe('Wall on the Lath engine', () => {
       const frame = await frameBeside(<Wall initialPaneIds={['surface:a']} initialMode="passthrough" />);
       frame.focus();
       const focus = vi.spyOn(frame, 'focus');
-      await press();
+      await press(frame.contentWindow);
       await flushFrame();
       expect(focus).not.toHaveBeenCalled();
       expect(focusOf('surface:a')).toBe('false');

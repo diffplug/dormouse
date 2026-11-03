@@ -382,7 +382,7 @@ describe('IframePanel', () => {
     const chrome = () => getAgentBrowserScreenController('iframe-foreign')?.chrome().url;
     const before = chrome();
     const send = (origin: string, data: unknown) => act(async () => {
-      window.dispatchEvent(new MessageEvent('message', { origin, data }));
+      window.dispatchEvent(new MessageEvent('message', { origin, source: frame.contentWindow, data }));
     });
 
     for (const origin of ['http://127.0.0.1:61235', 'http://localhost:61234', 'https://evil.example', window.location.origin, 'null']) {
@@ -397,6 +397,27 @@ describe('IframePanel', () => {
 
     await send(PROXY, { __dormouse: 'pointerdown' });
     expect(onClickPanel).toHaveBeenCalledWith('iframe-foreign');
+  });
+
+  it('takes a press only from its own frame, while that frame holds focus', async () => {
+    const onClickPanel = vi.fn();
+    proxyPlatform({ ok: true, url: `${PROXY}/app`, upstream: 'http://example.test/app' });
+    const frame = await renderPanel(stubActions({ onClickPanel }), paneProps('iframe-press'));
+    const nested = document.createElement('iframe');
+    document.body.appendChild(nested);
+    const press = (source: Window | null) => act(async () => {
+      window.dispatchEvent(new MessageEvent('message', { origin: PROXY, source, data: { __dormouse: 'pointerdown' } }));
+    });
+
+    await press(frame.contentWindow); // Not focused yet.
+    frame.focus();
+    await press(nested.contentWindow); // Same origin, but not the frame with focus.
+    await press(null);
+    expect(onClickPanel).not.toHaveBeenCalled();
+
+    await press(frame.contentWindow);
+    expect(onClickPanel).toHaveBeenCalledWith('iframe-press');
+    nested.remove();
   });
 
   it('re-resolves the proxy on Back after an observed in-frame navigation', async () => {

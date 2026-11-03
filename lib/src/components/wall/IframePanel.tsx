@@ -2,7 +2,7 @@ import { useCallback, useContext, useEffect, useId, useMemo, useRef, useState, u
 import { XIcon } from '@phosphor-icons/react';
 import { modalActionButton, PaneMessage, PopupButtonRow, popupButton, TERMINAL_BOTTOM_RADIUS_CLASS } from '../design';
 import { getPlatform } from '../../lib/platform';
-import { registerProxyOrigin } from '../../lib/iframe-proxy-registry';
+import { isFromFocusedFrame, registerProxyOrigin } from '../../lib/iframe-proxy-registry';
 import { registerSurfaceFocusHandle } from '../../lib/terminal-registry';
 import type { IframeProxyResult } from '../../lib/platform/types';
 import { IFRAME_HTTP_ONLY } from '../../lib/platform/iframe-proxy-types';
@@ -387,7 +387,7 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
       if (e.origin !== proxyOrigin) return;
       const data = e.data as { __dormouse?: unknown; url?: unknown; loaded?: unknown; from?: unknown } | null;
       if (data?.__dormouse === 'pointerdown') {
-        if (document.activeElement === iframeRef.current) actions.onClickPanel(id);
+        if (isFromFocusedFrame(e)) actions.onClickPanel(id);
         return;
       }
       if (data?.__dormouse === 'open-window' && typeof data.url === 'string') {
