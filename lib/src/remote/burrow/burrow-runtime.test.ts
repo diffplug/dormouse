@@ -1116,7 +1116,7 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
     expect((await rideWindow('c1', clientStatic)).outcome).toEqual(success);
     expect(burrow.establishedSessionCount).toBe(1);
 
-    const revoked = await burrow.revoke({ clientStaticPublicKey: record.clientStaticPublicKey }, 'dor');
+    const revoked = await burrow.revoke({ clientStaticPublicKey: record.clientStaticPublicKey }, 'settings');
 
     expect(revoked).toHaveLength(1);
     expect(burrow.establishedSessionCount).toBe(0);
@@ -1137,7 +1137,7 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
     ]);
     expect(accessEntries[1]).toMatchObject({ deviceId, presence: 'window' });
     expect(accessEntries[2]).toMatchObject({ deviceId, path: 'relayed' });
-    expect(accessEntries[3]).toMatchObject({ deviceId, by: 'dor' });
+    expect(accessEntries[3]).toMatchObject({ deviceId, by: 'settings' });
     expect(accessEntries[4]).toMatchObject({ deviceId, reason: 'presence-rejected: no-window-offered' });
   });
 
