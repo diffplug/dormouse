@@ -134,7 +134,7 @@ describe('surface responder', () => {
 
   it('denies helper discovery and direct attachment until promotion', () => {
     const terminal = registerSurface('helper');
-    registry.get('helper')!.helper = { parentId: 'parent', command: 'git status' };
+    registry.get('helper')!.helper = { parentId: 'parent' };
     expect(platform.answer('directory', {})).toEqual([]);
     expect(platform.answer('surfaceOp', { surfaceId: 'helper', op: 'attach', cols: 100, rows: 30 })).toEqual([]);
     expect(terminal.resize).not.toHaveBeenCalled();

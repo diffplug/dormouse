@@ -275,16 +275,6 @@ describe('helper lifecycle', () => {
     prompt(first.id); await vi.advanceTimersByTimeAsync(10_000);
     expect(host.writePty).not.toHaveBeenCalled();
   });
-  // An earlier build saved a command, and its host answered it here.
-  it('ignores a command a host still answers', async () => {
-    host.terminalContext.mockResolvedValue({ home: '/home/user', command: 'git status', busy: false });
-    host.getCwd.mockResolvedValue('/process');
-    const helper = await openHelper('parent');
-    expect(pendingShellOpts.get(helper.id)?.helper).toEqual({ parentId: 'parent' });
-    prompt(helper.id); await vi.advanceTimersByTimeAsync(10_000);
-    expect(host.writePty).not.toHaveBeenCalled();
-    expect(getTerminalPaneState(helper.id).currentCommand).toBeFalsy();
-  });
   const reporting = (path: string, isRemote = false) => resetTerminalPaneState('parent', { cwd: { path, pathKind: 'posix', isRemote, source: 'osc7', updatedAt: 0 } });
   it('starts in the source PTY\'s process directory, whatever the source reports', async () => {
     reporting('/reported');
@@ -341,9 +331,8 @@ describe('helper lifecycle', () => {
     host.terminalContext.mockResolvedValue({ busy: true });
     expect(await helperHasWork(helper)).toBe(true);
   });
-  it('a shell with no integration is not safe to close on a failed inspection', async () => {
-    const helper = await openHelper('parent'); await vi.advanceTimersByTimeAsync(9000);
-    expect(host.writePty).not.toHaveBeenCalled();
+  it('a helper is not safe to close on a failed inspection', async () => {
+    const helper = await openHelper('parent');
     host.terminalContext.mockResolvedValue({ busy: null });
     expect(await helperHasWork(helper)).toBe(true);
   });

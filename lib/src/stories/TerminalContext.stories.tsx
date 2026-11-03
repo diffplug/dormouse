@@ -8,11 +8,11 @@ import { TerminalContextView } from '../components/wall/TerminalContextView';
 
 // Sample terminal output with the shared context presentation.
 // Local state switches fixtures and opens visual detail treatments.
-type Scenario = 'fresh' | 'noPorts' | 'preserved' | 'editor' | 'differentDirectory' | 'multiplePorts' | 'notification' | 'exited' | 'scanFailed' | 'launchPending' | 'launchFailed';
+type Scenario = 'fresh' | 'noPorts' | 'userInput' | 'editor' | 'differentDirectory' | 'multiplePorts' | 'notification' | 'exited' | 'scanFailed' | 'launchPending' | 'launchFailed';
 const SCENARIOS: { id: Scenario; label: string }[] = [
   { id: 'fresh', label: 'Common case' },
   { id: 'noPorts', label: 'No ports' },
-  { id: 'preserved', label: 'User input' },
+  { id: 'userInput', label: 'User input' },
   { id: 'editor', label: 'Editor open' },
   { id: 'differentDirectory', label: 'Different directory' },
   { id: 'multiplePorts', label: 'Multiple ports' },
@@ -70,7 +70,7 @@ function TerminalOutput({ scenario }: { scenario: Scenario }) {
     <br />
     <Prompt directory={HELPER_DIR}><Cursor /></Prompt>
   </>;
-  if (scenario === 'preserved') return <>
+  if (scenario === 'userInput') return <>
     <GitStatus />
     <br />
     <Prompt>cat .node-version</Prompt>
@@ -98,7 +98,7 @@ function ContextPrototype({ scenario, initialDetail = null, paneWidth, paneHeigh
         titleSources={[{ source: 'User override', value: 'Not set' }, { source: 'OSC 2', value: 'pnpm dev', note: 'Used' }, { source: 'OSC 0', value: 'zsh', note: 'Not used' }, { source: 'Command', value: 'pnpm dev', note: 'Fallback' }]}
         scan={scenario === 'scanFailed' ? { status: 'failed' } : { status: 'loaded', entries: scenario === 'noPorts' ? [] : ports }}
         watchRule="pnpm" watching={watching} todo={todo} notification={scenario === 'notification' ? { title: 'Tests complete', body: '341 passed, 0 failed' } : null}
-        status={scenario === 'exited' ? 'exited' : 'idle'}
+        exited={scenario === 'exited'}
         explorerLabel="Reveal in Finder" canExplore browserProviders={bothProviders ? ['agent-browser', 'playwright'] : ['agent-browser']} canIframe initialDetail={initialDetail}
         onClose={() => {}} onCopyId={() => {}} onCopyPath={() => {}} onExplore={() => {}} onPort={() => {
           if (scenario === 'launchPending') return new Promise<void>(() => {});
@@ -185,7 +185,7 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const CommonCase: Story = {};
-export const NarrowHelperHeader: Story = { args: { initialScenario: 'preserved', paneWidth: 660 } };
+export const NarrowHelperHeader: Story = { args: { initialScenario: 'userInput', paneWidth: 660 } };
 export const NoPorts: Story = { args: { initialScenario: 'noPorts' } };
 export const DifferentDirectory: Story = { args: { initialScenario: 'differentDirectory' } };
 export const MultiplePorts: Story = { args: { initialScenario: 'multiplePorts' } };

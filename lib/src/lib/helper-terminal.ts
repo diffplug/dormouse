@@ -216,9 +216,9 @@ export async function openHelper(parentId: string): Promise<HelperTerminal> {
   const inFlight = pending.get(parentId);
   if (inFlight) return inFlight;
   const operation = (async () => {
-    if (helpers.has(parentId) && !registry.has(helpers.get(parentId)!.id)) forgetHelper(parentId);
     const previous = helpers.get(parentId);
-    if (previous) return previous;
+    if (previous && registry.has(previous.id)) return previous;
+    if (previous) forgetHelper(parentId);
     const platform = getPlatform();
     if (!platform.terminalContext) throw new Error('Helper terminals are unavailable on this host');
     const cwd = await helperDirectory(parentId);

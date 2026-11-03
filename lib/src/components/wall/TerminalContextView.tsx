@@ -13,14 +13,12 @@ import { motionIsInstant } from '../../lib/ui-geometry';
 import { oppositeEdge } from '../../lib/lath/model';
 import type { ContextPlacement, ContextSide } from './terminal-context-placement';
 import { messageOf } from '../../lib/errors';
-import { anchoredTarget, isComposingKey } from '../../lib/dom';
+import { anchoredTarget } from '../../lib/dom';
 
 export type PortMode = 'system' | RenderMode;
 export type ContextScan = { status: 'scanning' | 'failed' } | { status: 'loaded'; entries: PortUrlEntry[] };
 /** Every action may fail asynchronously; the view reports the failure. */
 type Action = () => void | Promise<void>;
-const SPINNING = <CircleNotchIcon size={13} className="shrink-0 animate-spin" />;
-const SETTLED = <CheckIcon size={13} className="shrink-0" />;
 
 /** A port row entry: a launch target, or (`mode: null`) the provider switch. */
 type PortAction = { mode: PortMode | null; label: string; text: string; icon: ReactNode; disabled: boolean };
@@ -57,8 +55,11 @@ export interface TerminalContextViewProps {
   titleSources: { source: string; value: string; note?: string }[];
   scan: ContextScan; watchRule?: string | null; watching: boolean; todo: boolean;
   notification?: { title: string | null; body: string | null } | null;
-  /** `running` and its `command` are a Tool's; a helper is `idle` until it `exited`. */
-  status: 'running' | 'idle' | 'exited'; command?: string; warning?: string;
+  /** What a Tool is running, absent at its prompt. */
+  runningCommand?: string;
+  /** The helper's shell has ended. */
+  exited?: boolean;
+  warning?: string;
   /** The providers this host can launch a browser with. */
   browserProviders: readonly BrowserAutomationProvider[];
   explorerLabel: string; canExplore: boolean; canIframe: boolean;
@@ -457,7 +458,7 @@ export function TerminalContextView(p: TerminalContextViewProps) {
   const requestReset = () => { if (resetAsks) setDetail('reset'); else void submit(p.onReset); };
   const isTool = p.terminalRole === 'tool';
   // A Tool's command is whatever its shell reported, line breaks included.
-  const statusLabel = p.status === 'exited' ? 'Helper exited' : !isTool ? null : p.status === 'running' ? `Running ${(p.command ?? '').replace(/\s+/g, ' ')}…` : 'At prompt';
+  const statusLabel = p.exited ? 'Helper exited' : p.runningCommand !== undefined ? `Running ${p.runningCommand.replace(/\s+/g, ' ')}…` : isTool ? 'At prompt' : null;
   const placement = p.placement;
   // The edge facing the source is cut into teeth that reach over it (DESIGN.md → "Terminal Context Teeth").
   const teeth = placement && oppositeEdge(placement.side);
@@ -468,7 +469,6 @@ export function TerminalContextView(p: TerminalContextViewProps) {
     className={`${motionClass} ${p.closing ? 'pointer-events-none' : ''} absolute inset-0 font-mono text-sm text-foreground outline-none`}
     onContextMenu={event => event.preventDefault()}
     onKeyDown={event => {
-      if (isComposingKey(event.nativeEvent)) return;
       if ((event.target as HTMLElement).closest('[data-helper-terminal], [data-context-terminal]') && !detail) return;
       if (detail && event.key === 'Tab') {
         event.preventDefault();
@@ -522,7 +522,7 @@ export function TerminalContextView(p: TerminalContextViewProps) {
           className="flex h-7 shrink-0 items-center gap-3 whitespace-nowrap px-3 shadow-[inset_0_1px_0_var(--color-border),inset_0_-1px_0_var(--color-border)]">
           {/* Named at every width, so a Tool's own terminal never passes for a helper. */}
           <span className="flex shrink-0 items-center gap-2 font-semibold"><TerminalIcon size={15} /><span className="@[48rem]:hidden">{isTool ? 'Tool' : 'Helper'}</span><span className="hidden @[48rem]:inline">{isTool ? 'Tool terminal' : 'Helper terminal'}</span></span>
-          {statusLabel && <div className="flex min-w-0 items-center gap-2 text-muted">{p.status === 'running' ? SPINNING : SETTLED}<span className="truncate" title={statusLabel}>{statusLabel}</span></div>}
+          {statusLabel && <div className="flex min-w-0 items-center gap-2 text-muted">{p.runningCommand !== undefined ? <CircleNotchIcon size={13} className="shrink-0 animate-spin" /> : <CheckIcon size={13} className="shrink-0" />}<span className="truncate" title={statusLabel}>{statusLabel}</span></div>}
           {!isTool && <ContextAction label="Reset helper terminal" onClick={requestReset}><ArrowCounterClockwiseIcon size={13} />{resetAsks ? 'Reset…' : 'Reset'}</ContextAction>}
           <div className="ml-auto flex shrink-0 items-center gap-2">
             {/* The action leaves with the mark, so focus stays in the context for Escape and Tab. */}

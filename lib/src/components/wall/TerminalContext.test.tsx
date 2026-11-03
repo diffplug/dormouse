@@ -31,7 +31,7 @@ beforeEach(() => {
   setPlatform(new FakePtyAdapter()); ensureResizeObserver();
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
   props = { title: 'pnpm dev', surfaceId: 'surface:3', cwd: '~/repo', titleSources: [{ source: 'OSC 2', value: 'pnpm dev', note: 'Used' }], scan: { status: 'loaded', entries: [port(5173)] },
-    watchRule: 'pnpm', watching: false, todo: false, status: 'idle', explorerLabel: 'Reveal in Finder', canExplore: true, browserProviders: ['agent-browser', 'playwright'], canIframe: true,
+    watchRule: 'pnpm', watching: false, todo: false, explorerLabel: 'Reveal in Finder', canExplore: true, browserProviders: ['agent-browser', 'playwright'], canIframe: true,
     onClose: vi.fn(), onCopyId: vi.fn(), onCopyPath: vi.fn(), onExplore: vi.fn(), onWatch: vi.fn(), onTodo: vi.fn(), onPort: vi.fn(), onReset: vi.fn(async () => {}), onPromote: vi.fn(async () => {}),
     children: <div data-helper-terminal="helper"><textarea aria-label="Helper input" /></div> };
 });
@@ -308,27 +308,27 @@ it('keeps a submitting detail button focused so the dialog keeps Escape and its 
   let reject!: (reason: Error) => void;
   props.onReset = vi.fn(() => new Promise<void>((_resolve, fail) => { reject = fail; }));
   props.initialDetail = 'reset'; render();
-  const save = button('Discard and reset');
-  act(() => save.focus());
+  const discard = button('Discard and reset');
+  act(() => discard.focus());
   await click('Discard and reset');
   // In flight: inert via aria-disabled only, so the browser cannot blur it.
-  expect(save.disabled).toBe(false);
-  expect(save.getAttribute('aria-disabled')).toBe('true');
-  expect(document.activeElement).toBe(save);
+  expect(discard.disabled).toBe(false);
+  expect(discard.getAttribute('aria-disabled')).toBe('true');
+  expect(document.activeElement).toBe(discard);
   await click('Discard and reset');
   expect(props.onReset).toHaveBeenCalledOnce();
   await act(async () => reject(new Error('Reset refused')));
   // The failure keeps the dialog open, and focus never left the button.
   expect(container.querySelector('[role="alert"]')?.textContent).toBe('Reset refused');
   expect(container.querySelector('[role="dialog"]')).not.toBeNull();
-  expect(save.hasAttribute('aria-disabled')).toBe(false);
-  expect(document.activeElement).toBe(save);
+  expect(discard.hasAttribute('aria-disabled')).toBe(false);
+  expect(document.activeElement).toBe(discard);
   // So the <section>'s handlers still receive Tab and Escape from a focused descendant.
-  act(() => save.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true })));
+  act(() => discard.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true })));
   // Focus has to *move* and stay in: `contains` alone passes for a no-op Tab. Which element it
   // lands on is not asserted — jsdom returns a selector list grouped by selector rather than in
   // document order, so the trap's wrap target differs here from a real browser.
-  expect(document.activeElement).not.toBe(save);
+  expect(document.activeElement).not.toBe(discard);
   expect(container.querySelector('[role="dialog"]')!.contains(document.activeElement)).toBe(true);
   act(() => (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
   expect(container.querySelector('[role="dialog"]')).toBeNull();
@@ -337,15 +337,15 @@ it('keeps a submitting detail button focused so the dialog keeps Escape and its 
 it('keeps the focus ring on an in-flight button while withholding only its hover styling', async () => {
   props.onReset = vi.fn(() => new Promise<void>(() => {}));
   props.initialDetail = 'reset'; render();
-  const save = button('Discard and reset');
-  const rest = save.className;
+  const discard = button('Discard and reset');
+  const rest = discard.className;
   await click('Discard and reset');
   // Hover is gated on aria-disabled; focus-visible is not, so the focused button keeps its ring.
   const hovers = rest.split(' ').filter(c => c.includes('hover:'));
   expect(hovers.length).toBeGreaterThan(0);
   for (const hover of hovers) expect(hover).toContain('not-aria-disabled:');
-  for (const ring of ['focus-visible:outline', 'focus-visible:outline-focus-ring', 'enabled:focus-visible:text-link']) expect(save.className.split(' ')).toContain(ring);
-  expect(save.className).toBe(rest);
+  for (const ring of ['focus-visible:outline', 'focus-visible:outline-focus-ring', 'enabled:focus-visible:text-link']) expect(discard.className.split(' ')).toContain(ring);
+  expect(discard.className).toBe(rest);
 });
 it('shows both directories in the mismatch warning', () => {
   props.mismatch = true; props.helperCwd = '~/other'; render(); expect(container.querySelector('[role="alert"]')?.textContent).toContain('~/other'); expect(container.querySelector('[role="alert"]')?.textContent).toContain('~/repo');
@@ -417,13 +417,13 @@ it('offers Reset and states only an exit in the helper status row', () => {
   const row = () => container.querySelector('[aria-label="Helper terminal status"]')!;
   expect(button('Reset helper terminal')).not.toBeNull();
   expect(row().querySelector('span.truncate')).toBeNull();
-  props.status = 'exited'; render();
+  props.exited = true; render();
   expect(row().querySelector('span.truncate')?.textContent).toBe('Helper exited');
   expect(button('Reset helper terminal')).not.toBeNull();
 });
 
 it('shows a running Tool command that spans lines on one', () => {
-  props = { ...props, terminalRole: 'tool', status: 'running', command: 'cd web\npnpm dev' };
+  props = { ...props, terminalRole: 'tool', runningCommand: 'cd web\npnpm dev' };
   render();
   expect(container.querySelector('[title^="Running "]')?.getAttribute('title')).toBe('Running cd web pnpm dev…');
 });
@@ -447,7 +447,7 @@ it('uses the Tool primary terminal without creating a helper or offering helper 
 });
 
 it('offers Keep open only for a preview slot, as a focusable button that keeps focus in the context', async () => {
-  props = { ...props, terminalRole: 'tool', status: 'running', command: 'view a.md' };
+  props = { ...props, terminalRole: 'tool', runningCommand: 'view a.md' };
   render();
   expect(button('Keep open')).toBeNull();
   props.onKeepPreview = vi.fn();
@@ -521,24 +521,6 @@ it('position buttons preserve input focus and report the destination', async () 
   expect(button('Use automatic helper placement')).toBeNull();
   expect(button('Place helper at top').getAttribute('aria-pressed')).toBe('true');
   expect(document.activeElement).toBe(input);
-});
-
-
-it.each(['composing', 'WebKit ending'])('leaves detail Escape and Tab to the IME (%s)', async phase => {
-  props.initialDetail = 'reset'; render();
-  const input = button('Keep helper');
-  act(() => input.focus());
-  for (const key of ['Tab', 'Escape']) {
-    const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, isComposing: phase === 'composing' });
-    if (phase === 'WebKit ending') Object.defineProperty(event, 'keyCode', { value: 229 });
-    act(() => input.dispatchEvent(event));
-    expect(event.defaultPrevented).toBe(false);
-    expect(document.activeElement).toBe(input);
-    expect(container.querySelector('[role="dialog"]')).not.toBeNull();
-    expect(props.onClose).not.toHaveBeenCalled();
-  }
-  act(() => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
-  expect(container.querySelector('[role="dialog"]')).toBeNull();
 });
 
 it('pauses its helper while its Workspace is out of view, and resumes when it returns', async () => {
