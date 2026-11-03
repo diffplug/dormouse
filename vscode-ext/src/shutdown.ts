@@ -1,4 +1,5 @@
 import type * as vscode from 'vscode';
+import { saveBurrowBeforeExit } from './burrow';
 import * as ptyManager from './pty-manager';
 import { closeBrowserSessions } from './agent-browser-host';
 import { flushAllSessions, getAlertStates } from './message-router';
@@ -29,10 +30,13 @@ export async function shutdown(context: vscode.ExtensionContext): Promise<void> 
   // Browser cleanup shares no PTY state, so it overlaps recovery's scarce budget.
   // Attach its rejection handler immediately, before awaiting capture.
   const browsersClosed = attempt('closing browser sessions', closeBrowserSessions);
+  // Overlaps too: a revocation only memory holds is undone when this process ends.
+  const revocationsSaved = attempt('saving revocations', saveBurrowBeforeExit, 1000);
   // Recovery must precede persistence and kills: an agent's exit hint cannot be
   // reconstructed after its PTY is gone. Other steps only refresh existing state.
   await attempt('capturing agent recovery commands', () => captureAgentRecoveryCommands(context, 1200));
   await browsersClosed;
+  await revocationsSaved;
   await attempt('flushing sessions from webview', () => flushAllSessions(1000));
   // workspaceState.update depends on VS Code's storage service, which may already
   // be stopping. A hung save must not keep the PTY child and its processes alive.

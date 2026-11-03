@@ -347,7 +347,7 @@ The **Remote control** choices are **One-time connection** (`docs/specs/one-time
 - **The setup password is passed through, never held**, and cleared on success.
 - **"Set up a phone" mints only when its panel opens** and **reports which decision ended the code** (`docs/specs/remote-security-model.md` -> "Pairing"; rationale).
 - **A Hosted `removed` offers Enroll again**, which clears the enrollment and then begins a device-code enrollment.
-- **An enrolled Burrow lists its paired phones, each with Revoke, beside its access log**, and re-reads both on every `access` event (`docs/specs/remote-security-model.md` -> "Revocation", "Access log").
+- **An enrolled Burrow lists its paired phones, each with Revoke, and any revocation not saved yet, with a way to save it again, beside its access log**, and re-reads them on every `access` event (`docs/specs/remote-security-model.md` -> "Revocation", "Access log").
 
 **Never expose pairing confirmation or one-time commands on `window.dormouseBurrow`**; its enrollment methods are the scripting seam.
 

@@ -4,10 +4,10 @@ Expect: lib/src/remote/burrow/burrow-runtime.ts
 Source: reverses part of #571 (an approved pairing went live in the Burrow's ACL before its durable write succeeded, and stayed live when the write failed)
 
 diff --git a/lib/src/remote/burrow/burrow-runtime.test.ts b/lib/src/remote/burrow/burrow-runtime.test.ts
-index 3febfdce3..529451bb8 100644
+index f2367de05..d49294396 100644
 --- a/lib/src/remote/burrow/burrow-runtime.test.ts
 +++ b/lib/src/remote/burrow/burrow-runtime.test.ts
-@@ -319,52 +319,6 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
+@@ -323,52 +323,6 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
      expect(dismissed).toEqual(['c1']);
    });
  
@@ -60,7 +60,7 @@ index 3febfdce3..529451bb8 100644
    it('serializes concurrent approval snapshots so neither record is lost', async () => {
      const write = Promise.withResolvers<void>();
      const saveAcl = vi.fn<NonNullable<BurrowOptions['saveAcl']>>()
-@@ -386,24 +340,6 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
+@@ -390,24 +344,6 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
      expect(await outcome(second.session, 'pairing', second.invitation.inviteId)).toMatchObject({ ok: true });
    });
  
@@ -86,12 +86,12 @@ index 3febfdce3..529451bb8 100644
      const write = Promise.withResolvers<void>();
      makeBurrow(undefined, { saveAcl: () => write.promise });
 diff --git a/lib/src/remote/burrow/burrow-runtime.ts b/lib/src/remote/burrow/burrow-runtime.ts
-index 36d4d072e..601c758a8 100644
+index 17c47006f..7af8967de 100644
 --- a/lib/src/remote/burrow/burrow-runtime.ts
 +++ b/lib/src/remote/burrow/burrow-runtime.ts
-@@ -1343,8 +1343,7 @@ export class BurrowRuntime {
-     }
+@@ -1471,8 +1471,7 @@ export class BurrowRuntime {
      const approval = pending.approval;
+     const revocationsAtConsent = this.#revocations.length;
      // Serialize snapshot creation as well as persistence: overlapping approvals
 -    // must not overwrite each other, and a failed save must not grant access in
 -    // memory or revoke an existing pairing. Only the committed copy is live.
@@ -99,13 +99,11 @@ index 36d4d072e..601c758a8 100644
      return this.#saveApproval(async () => {
        // Tagged under the token, so the Relay registers push only for an id this
        // Burrow minted (`docs/specs/relay.md` -> Web Push). Minted ahead of the
-@@ -1376,8 +1375,8 @@ export class BurrowRuntime {
+@@ -1515,6 +1514,7 @@ export class BurrowRuntime {
            label: approval.label,
          });
          pending.committing = true;
--        await this.#saveAcl(this.#enrollment.burrowId, next.records());
-         this.#acl = next;
-+        await this.#saveAcl(this.#enrollment.burrowId, next.records());
-         // Only once the record is live, so the connect that follows pairing
-         // needs no second prompt; a window for an older record of this static
-         // is replaced. A UV raise during the write cannot cancel local consent,
++        this.#acl = next;
+         await this.#saveAcl(this.#enrollment.burrowId, next.records());
+         // Revocations during the write, which its snapshot predates.
+         for (const target of this.#revocations.slice(revocationsAtSnapshot)) revokeTarget(next, target);

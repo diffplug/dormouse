@@ -81,6 +81,7 @@ import {
 import {
   firstPerClientStatic,
   loadBurrowAcl,
+  revocationNames,
   revokeTarget,
   type RevocationRequester,
   type RevocationTarget,
@@ -212,6 +213,8 @@ interface PendingPairingSession {
   readonly expiresAt: number;
   /** Local consent is final while its durable write is in flight. */
   committing?: boolean;
+  /** See {@link PendingConnectionSession.clientSpoke}. */
+  clientSpoke?: boolean;
   /** Set once the first control message verified; until then there is no code. */
   approval?: {
     readonly code: string;
@@ -248,6 +251,13 @@ interface PendingConnectionSession {
    * gets, and a UV raise nulls it.
    */
   offer: PresenceWindowEntry | null;
+  /**
+   * Whether a Client transport message decrypted on this record. **Until one
+   * does, the access log names no device for it**: message 1 can be replayed by
+   * whoever recorded it, so only a transport message shows the static's holder
+   * was here.
+   */
+  clientSpoke?: boolean;
 }
 
 /**
@@ -403,6 +413,11 @@ export class BurrowRuntime {
   readonly #onPasskeysStale: () => void;
   #acl: BurrowAcl;
   readonly #saveApproval = createSerialQueue();
+  /**
+   * Every revocation this runtime applied, oldest first: what an approval
+   * running behind one reads back, since it works from its own snapshot.
+   */
+  readonly #revocations: RevocationTarget[] = [];
   readonly #challenges: ChallengeIssuer;
   /**
    * The presence proofs this Burrow verified, by Client static
@@ -583,52 +598,59 @@ export class BurrowRuntime {
   /**
    * **The one way an ACL record is revoked** (`docs/specs/remote-security-model.md`
    * -> "Revocation"): every active record `target` names, answering them.
-   * Queued with approvals, so neither overwrites the other's snapshot. **It
-   * takes effect before the save**: the live ACL drops the records, every
-   * established session no active record still authorizes ends with the
-   * goodbye, every pending connection of a Client static left with no record
-   * is refused, and those statics' presence windows close — all before the
-   * write is awaited, so a save that fails rejects without leaving a phone
-   * connected, and the next ACL save carries the revocation. Each revoked
-   * browser is logged with `by`.
+   * **Synchronous, on neither queue**, so a write that is stuck holds up only
+   * the write: the live ACL drops the records, every established session no
+   * active record still authorizes ends with the goodbye, every pending
+   * connection of a Client static left with no record is refused, and those
+   * statics' presence windows close. An approval already past its snapshot
+   * applies this when it publishes ({@link #revocations}). Each revoked browser
+   * is logged with `by`. {@link saveRevocations} makes it durable.
    */
-  revoke(target: RevocationTarget, by: RevocationRequester): Promise<BurrowAclRecord[]> {
+  revoke(target: RevocationTarget, by: RevocationRequester): BurrowAclRecord[] {
+    const next = BurrowAcl.fromRecords(this.#acl.burrowId, this.#acl.records(), { now: this.#now });
+    const revoked = revokeTarget(next, target);
+    if (revoked.length === 0) return [];
+    this.#acl = next;
+    this.#revocations.push(target);
+    for (const [clientId, state] of [...this.#clients]) {
+      const established = state.established;
+      if (
+        established &&
+        !next.findActive({
+          passkeyCredentialId: established.passkeyCredentialId,
+          clientStaticPublicKey: established.clientStaticPublicKey,
+        })
+      ) {
+        this.#disposeEstablished(clientId, { goodbye: true });
+      }
+      const connection = this.#clients.get(clientId)?.connection;
+      if (connection && !next.hasActiveClient(connection.clientStaticPublicKey)) {
+        this.#denyConnection(clientId, connection, 'pairing-required', 'revoked');
+      }
+    }
+    const at = this.#now();
+    for (const record of firstPerClientStatic(revoked)) {
+      // After the sessions, whose ending folds their activity into it.
+      this.#presenceWindows.forget(record.clientStaticPublicKey);
+      this.#logAccess({
+        at,
+        event: 'revoked',
+        device: knownPairingDeviceLabel(record.label),
+        deviceId: deviceIdFor(record.clientStaticPublicKey),
+        by,
+      });
+    }
+    this.#reap();
+    return revoked;
+  }
+
+  /**
+   * Save the live ACL, as it reads once this write's turn comes. Queued with
+   * approvals, so neither overwrites the other's snapshot.
+   */
+  saveRevocations(): Promise<void> {
     return this.#saveApproval(async () => {
-      const next = BurrowAcl.fromRecords(this.#acl.burrowId, this.#acl.records(), { now: this.#now });
-      const revoked = revokeTarget(next, target);
-      if (revoked.length === 0) return [];
-      this.#acl = next;
-      for (const [clientId, state] of [...this.#clients]) {
-        const established = state.established;
-        if (
-          established &&
-          !next.findActive({
-            passkeyCredentialId: established.passkeyCredentialId,
-            clientStaticPublicKey: established.clientStaticPublicKey,
-          })
-        ) {
-          this.#disposeEstablished(clientId, { goodbye: true });
-        }
-        const connection = this.#clients.get(clientId)?.connection;
-        if (connection && !next.hasActiveClient(connection.clientStaticPublicKey)) {
-          this.#denyConnection(clientId, connection, 'pairing-required', 'revoked');
-        }
-      }
-      const at = this.#now();
-      for (const record of firstPerClientStatic(revoked)) {
-        // After the sessions, whose ending folds their activity into it.
-        this.#presenceWindows.forget(record.clientStaticPublicKey);
-        this.#logAccess({
-          at,
-          event: 'revoked',
-          device: knownPairingDeviceLabel(record.label),
-          deviceId: deviceIdFor(record.clientStaticPublicKey),
-          by,
-        });
-      }
-      this.#reap();
-      await this.#saveAcl(this.#enrollment.burrowId, next.records());
-      return revoked;
+      await this.#saveAcl(this.#enrollment.burrowId, this.#acl.records());
     });
   }
 
@@ -1392,6 +1414,7 @@ export class BurrowRuntime {
       this.#disposePairing(frame.clientId, 'burrow-error');
       return;
     }
+    pending.clientSpoke = true;
     if (receipt.kind === 'keepalive') return;
     // Already surfaced to the user: further traffic is noise until they answer.
     if (pending.approval) return;
@@ -1459,6 +1482,7 @@ export class BurrowRuntime {
       return;
     }
     const approval = pending.approval;
+    const revocationsAtConsent = this.#revocations.length;
     // Serialize snapshot creation as well as persistence: overlapping approvals
     // must not overwrite each other, and a failed save must not grant access in
     // memory or revoke an existing pairing. Only the committed copy is live.
@@ -1481,7 +1505,18 @@ export class BurrowRuntime {
         this.#finishPairing(clientId, 'presence-rejected');
         return;
       }
+      // Revoking after the digits were typed outranks them: this write would
+      // otherwise date a record the person cut off after the revocation.
+      const identities = {
+        clientStaticPublicKey: pending.clientStaticPublicKey,
+        passkeyCredentialId: approval.passkeyCredentialId,
+      };
+      if (this.#revocations.slice(revocationsAtConsent).some((target) => revocationNames(target, identities))) {
+        this.#finishPairing(clientId, 'user-denied');
+        return;
+      }
       try {
+        const revocationsAtSnapshot = this.#revocations.length;
         const next = BurrowAcl.fromRecords(this.#acl.burrowId, this.#acl.records(), { now: this.#now });
         const record = next.approve({
           accountId: approval.accountId,
@@ -1494,7 +1529,16 @@ export class BurrowRuntime {
         });
         pending.committing = true;
         await this.#saveAcl(this.#enrollment.burrowId, next.records());
+        // Revocations during the write, which its snapshot predates.
+        for (const target of this.#revocations.slice(revocationsAtSnapshot)) revokeTarget(next, target);
         this.#acl = next;
+        if (!next.findActive(identities)) {
+          if (this.#clients.get(clientId)?.pairing !== pending) return;
+          pending.committing = false;
+          this.#finishPairing(clientId, 'user-denied');
+          this.#reap();
+          return;
+        }
         // Only once the record is live, so the connect that follows pairing
         // needs no second prompt; a window for an older record of this static
         // is replaced. A UV raise during the write cannot cancel local consent,
@@ -1549,13 +1593,15 @@ export class BurrowRuntime {
       this.#disposePairing(clientId);
       return;
     }
-    this.#logAccess({
-      at: this.#now(),
-      event: 'pairing-denied',
-      device: pending.approval?.label ?? this.#deviceLabel(pending.clientStaticPublicKey),
-      deviceId: deviceIdFor(pending.clientStaticPublicKey),
-      reason: code,
-    });
+    if (pending.clientSpoke) {
+      this.#logAccess({
+        at: this.#now(),
+        event: 'pairing-denied',
+        device: pending.approval?.label ?? this.#deviceLabel(pending.clientStaticPublicKey),
+        deviceId: deviceIdFor(pending.clientStaticPublicKey),
+        reason: code,
+      });
+    }
     this.#sendPairingOutcome(clientId, pending, { ok: false, code });
     this.#disposePairing(clientId, PAIRING_OUTCOME_FOR_DENIAL[code]);
   }
@@ -1706,6 +1752,7 @@ export class BurrowRuntime {
       this.#disposeConnection(frame.clientId);
       return;
     }
+    pending.clientSpoke = true;
     if (receipt.kind === 'keepalive') return;
     if (receipt.kind !== 'control' || !isConnectionRequestV1(receipt.value)) {
       this.#denyConnection(frame.clientId, pending, 'protocol-rejected');
@@ -1936,13 +1983,15 @@ export class BurrowRuntime {
     code: Exclude<ConnectionOutcomeV1, { ok: true }>['code'],
     reason?: string,
   ): void {
-    this.#logAccess({
-      at: this.#now(),
-      event: 'connection-denied',
-      device: this.#deviceLabel(pending.clientStaticPublicKey),
-      deviceId: deviceIdFor(pending.clientStaticPublicKey),
-      reason: reason ? `${code}: ${reason}` : code,
-    });
+    if (pending.clientSpoke) {
+      this.#logAccess({
+        at: this.#now(),
+        event: 'connection-denied',
+        device: this.#deviceLabel(pending.clientStaticPublicKey),
+        deviceId: deviceIdFor(pending.clientStaticPublicKey),
+        reason: reason ? `${code}: ${reason}` : code,
+      });
+    }
     this.#sendControl(clientId, 'connection', pending.connectionId, pending.session, {
       ok: false,
       code,

@@ -4,10 +4,10 @@ Expect: lib/src/remote/burrow/burrow-runtime.ts
 Source: reverses part of #1044 (a UV raise while a pairing awaited local approval no longer voided its proof)
 
 diff --git a/lib/src/remote/burrow/burrow-runtime.test.ts b/lib/src/remote/burrow/burrow-runtime.test.ts
-index 8c3b0a269..5175bcfd9 100644
+index f2367de05..d922511b7 100644
 --- a/lib/src/remote/burrow/burrow-runtime.test.ts
 +++ b/lib/src/remote/burrow/burrow-runtime.test.ts
-@@ -1219,18 +1219,6 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
+@@ -1538,18 +1538,6 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
      expect(await outcome(pairing.session, 'pairing', pairing.invitation.inviteId)).toEqual(presenceRejected);
    });
  
@@ -27,10 +27,10 @@ index 8c3b0a269..5175bcfd9 100644
      const write = Promise.withResolvers<void>();
      makeBurrow(undefined, { saveAcl: () => write.promise });
 diff --git a/lib/src/remote/burrow/burrow-runtime.ts b/lib/src/remote/burrow/burrow-runtime.ts
-index 50f2c18df..459fa43d5 100644
+index 17c47006f..d3d7d6898 100644
 --- a/lib/src/remote/burrow/burrow-runtime.ts
 +++ b/lib/src/remote/burrow/burrow-runtime.ts
-@@ -1339,12 +1339,6 @@ export class BurrowRuntime {
+@@ -1486,12 +1486,6 @@ export class BurrowRuntime {
          this.#finishPairing(clientId, 'invitation-expired');
          return;
        }
@@ -40,6 +40,6 @@ index 50f2c18df..459fa43d5 100644
 -        this.#finishPairing(clientId, 'presence-rejected');
 -        return;
 -      }
-       try {
-         const next = BurrowAcl.fromRecords(this.#acl.burrowId, this.#acl.records(), { now: this.#now });
-         const record = next.approve({
+       // Revoking after the digits were typed outranks them: this write would
+       // otherwise date a record the person cut off after the revocation.
+       const identities = {

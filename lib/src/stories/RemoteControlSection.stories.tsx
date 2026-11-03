@@ -325,6 +325,20 @@ export const ConnectedManyDevices: Story = {
   play: settled(pairedDevices(4)[3]!.id),
 };
 
+/** One phone revoked and refused whose save failed: the row says what that risks, and offers another try. */
+export const UnsavedRevocation: Story = {
+  parameters: {
+    primedBurrow: {
+      status: enrolledStatus({ pairedClients: 1 }),
+      unsavedRevocations: [{ id: pairedDevices(2)[1]!.id, label: pairedDevices(2)[1]!.label }],
+    },
+    docs: { story: { height: '520px' } },
+  },
+  play: async ({ canvasElement }) => {
+    await within(canvasElement).findByRole('button', { name: 'Save again' });
+  },
+};
+
 /**
  * Two paired phones and the access log unfolded: pairings, a session that went
  * direct and ended, a one-time connection, and an unpaired phone refused.
