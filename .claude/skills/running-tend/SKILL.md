@@ -34,6 +34,12 @@ PATH="$TMPDIR/pnpm/node_modules/.bin:$PATH" pnpm install --frozen-lockfile
 
 `pnpm install` downloads the Node 24 that `devEngines` pins and takes about 10 s. An exported `PATH` does not survive into the next Bash call, so prefix each `pnpm` command with that `PATH=` assignment.
 
+## `tend check`: two standing FAILs, and never `--fix`
+
+`tag-protection` and `credential-environments` FAIL on every run, tracked in [#1069](https://github.com/diffplug/dormouse/issues/1069). Neither is drift: `docs/specs/security-ci.md` requires tag protection split across three rulesets (`Tag operations` excludes `refs/tags/hosted/**`, which `Hosted tag creation` and `Hosted tag history` cover), and tend credits only one all-tags ruleset with no exclusion. `credential-environments` builds on that verdict for `blyg-publish`, `release-attest`, and `security-audit`, and counts `hosted-production.yml`'s `promote` input as bot-steerable without following `tag`'s `needs: deploy` into the review-gated `hosted-production`. `scripts/github-state-check.mjs` audits the real properties (S52, S55, S68), and `scripts/workflow-lint.mjs` audits S67. Refresh #1069 rather than filing another issue. The upstream request is [max-sixty/tend#1637](https://github.com/max-sixty/tend/issues/1637); file anything further there only with a maintainer's go-ahead.
+
+**Never run `tend check --fix` on this repo.** Its tag fix replaces the `Tag operations` ruleset with an all-tags one that drops the `hosted/**` exclusion, which blocks the `dormouse-hosted-tagger` App and fails S52. Apply any other fix it offers by hand.
+
 ## A restart starts clean — don't carry a superseded PR's findings forward
 
 Long-running work here is often closed and reopened as a fresh PR ("Supersedes #N"), and that restart is deliberate — nedtwigg: *"When I start over, I usually **want** to start over. The original conversation grew too unfocused and out of hand."* So review the successor on its own terms: don't fetch the predecessor's bot comments and reviews in order to re-raise findings from them, and don't treat a finding dropped that way as a gap in the review machinery. Carrying the closed thread's context forward is the thing the restart was for.

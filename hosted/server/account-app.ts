@@ -53,6 +53,7 @@ export function accountApp(
         approveLimit: c.env.RELAY_APPROVE_LIMIT,
         closeBurrow: (userId, burrowId) => relayRoom(c.env.RELAY_ROOM, userId).closeBurrow(burrowId),
         closeSessions: (userId, tokenHashes) => relayRoom(c.env.RELAY_ROOM, userId).closeSessions(tokenHashes),
+        nudgeBurrows: (userId) => relayRoom(c.env.RELAY_ROOM, userId).nudgeBurrows(),
         setup: () => billingSetup(c.env),
         mail: () => mail(c.env),
       }));

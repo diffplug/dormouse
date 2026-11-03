@@ -535,7 +535,8 @@ export function HostedPage({
                     <p className={HELP_CLASS}>
                       Each passkey signs a phone in to every computer above. A
                       computer&rsquo;s setup code adds one. Remove any you do not
-                      recognize, and that phone can no longer sign in.
+                      recognize: that phone can no longer sign in, and each of
+                      your computers unpairs it the next time it is online.
                     </p>
                     {passkeys.length === 0 && (
                       <p className={HELP_CLASS}>No passkeys yet.</p>

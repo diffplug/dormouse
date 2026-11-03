@@ -1900,6 +1900,16 @@ describe('Paired phones and the access log', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]).toContain(kept!.id);
     expect(logLines()[0]).toContain('revoked from dor');
+
+    // Named by the Relay: the log says so, in fixed copy.
+    service.log = [
+      ...service.log,
+      { at: Date.now(), event: 'revoked', device: kept!.label, deviceId: kept!.id, by: 'relay' },
+    ];
+    await act(async () => {
+      service.link.emit('access', { name: 'access' });
+    });
+    expect(logLines()[0]).toContain('its passkey was removed from the account');
   });
 
   it('folds the access log, then lists it newest first in fixed copy', async () => {
