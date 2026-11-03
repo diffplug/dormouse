@@ -2,6 +2,7 @@
 import { userInfo } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { isDirectory, spawnAndCapture, windowsCommandShell } from 'dor-lib-common';
+import { neutralBrowserCwd } from './browser-neutral-cwd';
 import { buildShellCommandForKind, shellCommandKind } from 'dor/commands/shell-quote';
 
 export interface BrowserShellRuntime {
@@ -57,7 +58,7 @@ export function browserShellInvocation(runtime: BrowserShellRuntime, argv: strin
 }
 
 /** Startup output stays on a host-owned pipe and never enters diagnostics. */
-export async function browserLaunchEnv(cwd: string | undefined, runtime: BrowserShellRuntime, env: NodeJS.ProcessEnv = process.env): Promise<NodeJS.ProcessEnv> {
+export async function browserLaunchEnv(cwd: string, runtime: BrowserShellRuntime, env: NodeJS.ProcessEnv = process.env): Promise<NodeJS.ProcessEnv> {
   if (!runtime.node || !runtime.cli) throw new Error('Browser launch helper is not configured');
   const marker = randomBytes(16).toString('hex');
   const { shell, args } = browserShellInvocation(runtime, [runtime.node, runtime.cli, '__launch-env', marker], env);
@@ -68,7 +69,7 @@ export async function browserLaunchEnv(cwd: string | undefined, runtime: Browser
   const result = await spawnAndCapture(shell, args, {
     // Unlike a .cmd shim, explicit cmd.exe bypasses cross-spawn's shell wrapper.
     windowsVerbatimArguments: shellCommandKind(shell, process.platform) === 'cmd',
-    cwd: cwd !== undefined && isDirectory(cwd) ? cwd : undefined, env: { ...env, ELECTRON_RUN_AS_NODE: '1' }, timeoutMs: 15_000, maxOutputBytes: 2 * 1024 * 1024,
+    cwd: isDirectory(cwd) ? cwd : neutralBrowserCwd(), env: { ...env, ELECTRON_RUN_AS_NODE: '1' }, timeoutMs: 15_000, maxOutputBytes: 2 * 1024 * 1024,
   });
   if (!result.ok || result.exitCode !== 0) throw new Error(`Browser launch shell failed (${shell}); check its startup configuration${!result.ok && result.error.code ? ` [${result.error.code}]` : ''}`);
   const line = result.stdout.split(/\r?\n/).find(line => line.startsWith(marker + ':'));

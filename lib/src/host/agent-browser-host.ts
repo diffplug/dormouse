@@ -31,6 +31,7 @@ import {
 } from 'dor-lib-common';
 import { WebSocket } from 'ws';
 import { isAllowedAgentBrowserBinary } from '../lib/agent-browser-binary';
+import { neutralBrowserCwd } from './browser-neutral-cwd';
 import { parseAgentBrowserTabs } from '../lib/agent-browser-tab';
 import { CAPTURE_JPEG_QUALITY, type BrowserResult, type ViewerInput, type ViewerState } from '../lib/platform/browser-automation';
 import type { BrowserAct, BrowserProvider, LiveBrowser, ProviderBinding } from './browser-host';
@@ -222,13 +223,14 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
       DEFAULT_AGENT_BROWSER_BIN,
     ].filter((c): c is string => !!c))];
 
-    // Only what is set, so an unbounded run in the host's cwd spawns as a bare one.
-    const given = Object.fromEntries(Object.entries({ ...options, env: b.env }).filter(([, value]) => value !== undefined));
+    // Never the host's own cwd, which the CLI would read project config from
+    // and in VS Code can be a workspace folder.
+    const given = { ...options, cwd: options.cwd ?? neutralBrowserCwd(), env: b.env };
     let lastError = '';
     for (const candidate of candidates) {
       const binary = resolveBinaryPath(candidate, env);
       const result = binary === undefined ? undefined
-        : await (Object.keys(given).length ? spawnAndCapture(binary, args, given) : spawnAndCapture(binary, args));
+        : await spawnAndCapture(binary, args, given);
       if (result?.ok) {
         return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
       }
@@ -622,8 +624,8 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
     // browser live on the page — and every other daemon command queues behind
     // it. Run in the project directory, for the config a `dor agent-browser` there read.
     async open(b, url, headed) {
-      // The project's directory, so agent-browser reads its
-      // `./agent-browser.json`, while that directory still exists.
+      // A binding's directory, which only that `dor` names, so agent-browser
+      // reads its `./agent-browser.json`, while that directory still exists.
       const cwd = b.cwd !== undefined && isDirectory(b.cwd) ? b.cwd : undefined;
       if (headed) headedSessions.add(b.session);
       else headedSessions.delete(b.session);

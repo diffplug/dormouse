@@ -6,6 +6,7 @@ import { dirname, join } from 'path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { BrowserOp, BrowserRequestBinding } from '../lib/platform/browser-automation';
 import { WebSocket, WebSocketServer } from 'ws';
+import { neutralBrowserCwd } from './browser-neutral-cwd';
 import { DAEMON_ACTION_TIMEOUT_MS, createAgentBrowserProvider } from './agent-browser-host';
 import { createBrowserCaptures, type BrowserCaptures } from './browser-capture';
 import { createBrowserHost } from './browser-host';
@@ -469,7 +470,7 @@ describe('agent-browser host daemon stop', () => {
   it('bounds the CLI a close runs, which a hung daemon would otherwise hold forever', async () => {
     enqueueSpawnResults([{}]);
     await ab(makeHost(), { op: 'close' }, { session });
-    expect(spawnMock).toHaveBeenCalledExactlyOnceWith('/test/bin/agent-browser', ['--session', session, 'close'], { timeoutMs: 10_000 });
+    expect(spawnMock).toHaveBeenCalledExactlyOnceWith('/test/bin/agent-browser', ['--session', session, 'close'], { cwd: neutralBrowserCwd(), timeoutMs: 10_000 });
   });
 
   it('terminates a daemon its state files prove live before relaunching it in the other mode', async () => {
@@ -488,7 +489,7 @@ describe('agent-browser host daemon stop', () => {
       await exited;
       // The port read that ends the launch is bounded by the launch's deadline.
       const status = spawnMock.mock.calls.find(([, args]) => (args as string[]).includes('stream'))!;
-      expect(status[2]).toEqual({ timeoutMs: expect.any(Number) });
+      expect(status[2]).toEqual({ cwd: neutralBrowserCwd(), timeoutMs: expect.any(Number) });
       expect(status[2].timeoutMs).toBeGreaterThan(0);
       expect(status[2].timeoutMs).toBeLessThanOrEqual(40_000);
       await host.close();
@@ -505,7 +506,7 @@ describe('agent-browser host launch directory', () => {
 
   // agent-browser reads `./agent-browser.json` from its working directory, so
   // a GUI launch or relaunch must run where the `dor agent-browser` that made the pane ran.
-  it('opens in the binding\'s project directory, and in the host\'s once that is gone', async () => {
+  it('opens in the binding\'s project directory, and in the neutral one once that is gone', async () => {
     const project = mkdtempSync(join(tmpdir(), 'dormouse-ab-project-'));
     const host = makeHost();
     const openCalls = () => spawnMock.mock.calls.filter(([, args]) => (args as string[]).includes('open'));
@@ -516,7 +517,22 @@ describe('agent-browser host launch directory', () => {
     await fsp.rm(project, { recursive: true });
     spawnMock.mockClear();
     await ab(host, { op: 'launch', url: 'http://localhost:5173/', headed: false }, { cwd: project });
-    expect(openCalls()[0]).toHaveLength(2);
+    expect(openCalls()[0][2]).toEqual({ cwd: neutralBrowserCwd() });
+  });
+
+  it('runs in the neutral directory, never the host\'s own, when no binding names a project', async () => {
+    const host = makeHost();
+    mockSpawnByCommand({ open: () => ({ code: 1, stderr: 'boom' }), close: () => ({}) });
+    await ab(host, { op: 'launch', url: 'http://localhost:5173/', headed: false });
+    expect(spawnMock.mock.calls.length).toBeGreaterThan(0);
+    for (const [, , options] of spawnMock.mock.calls) expect((options as { cwd?: string }).cwd).toBe(neutralBrowserCwd());
+  });
+
+  it('runs a verb other than open in the neutral directory even for a binding with a project', async () => {
+    const project = mkdtempSync(join(tmpdir(), 'dormouse-ab-project-'));
+    enqueueSpawnResults([{}]);
+    await ab(makeHost(), { op: 'close' }, { session: 'dormouse.1.neutral', cwd: project });
+    expect(spawnMock.mock.calls[0][2]).toMatchObject({ cwd: neutralBrowserCwd() });
   });
 });
 
@@ -1089,7 +1105,7 @@ describe('agent-browser host viewer', () => {
     ]);
     expect(viewer.frames).toEqual([]);
     // Bounded like every call a viewer makes.
-    expect(cdpVerbs()).toEqual([[['get', 'cdp-url'], { timeoutMs: 10_000 }]]);
+    expect(cdpVerbs()).toEqual([[['get', 'cdp-url'], { cwd: neutralBrowserCwd(), timeoutMs: 10_000 }]]);
   });
 
   it('reports a headed window gone once its browser has no page but DevTools, asking the browser nothing', async () => {
@@ -1103,7 +1119,7 @@ describe('agent-browser host viewer', () => {
     expect(await viewer.closed).toBe(1000);
     expect(viewer.states.at(-1)).toEqual({ type: 'status', connected: false, screencasting: false });
     // Any CLI verb would open a blank window in it.
-    expect(cdpVerbs()).toEqual([[['get', 'cdp-url'], { timeoutMs: 10_000 }]]);
+    expect(cdpVerbs()).toEqual([[['get', 'cdp-url'], { cwd: neutralBrowserCwd(), timeoutMs: 10_000 }]]);
   });
 
   it('never reads a tab closed and replaced as the window closing', async () => {
@@ -1153,7 +1169,7 @@ describe('agent-browser host viewer', () => {
       await vi.waitFor(() => expect(viewer.states).toContainEqual({ type: 'page', url: 'https://one.example/', title: 'one' }));
       viewer.socket.close();
     }
-    expect(cdpVerbs()).toEqual([[['get', 'cdp-url'], { timeoutMs: 10_000 }]]);
+    expect(cdpVerbs()).toEqual([[['get', 'cdp-url'], { cwd: neutralBrowserCwd(), timeoutMs: 10_000 }]]);
   });
 
   it('ends a viewer whose stream accepts but never answers the upgrade, closing its connection', async () => {
@@ -1220,7 +1236,7 @@ describe('agent-browser host captures', () => {
     expect(binary).toBe(b.binaryPath);
     expect(args).toEqual(['--session', b.session, 'screenshot', file, '--screenshot-format', 'jpeg', '--screenshot-quality', '85']);
     // Past the CLI's 25s action timeout, so a wedged capture cannot pin its slot.
-    expect(options).toEqual({ timeoutMs: 30_000 });
+    expect(options).toEqual({ cwd: neutralBrowserCwd(), timeoutMs: 30_000 });
     expect(file).not.toContain(b.session);
     expect(existsSync(file)).toBe(false);
     const dir = dirname(file);
@@ -1467,7 +1483,7 @@ describe('agent-browser shell environment', () => {
       expect(await provider.find(binding)).toEqual({ stream: port });
       enqueueSpawnResults([{}]);
       await provider.act(binding, { op: 'history', dir: 'reload' });
-      expect(spawnMock.mock.calls[0][2]).toEqual({ env });
+      expect(spawnMock.mock.calls[0][2]).toEqual({ cwd: neutralBrowserCwd(), env });
     } finally {
       await closeServer(server);
       await fsp.rm(dir, { recursive: true, force: true });

@@ -7,10 +7,10 @@
 ## Helper lifecycle
 
 - **Must create at most one helper per source, lazily on first context opening.** Closing the source during startup cancels creation. Helpers cannot have helpers.
-- **Must start with the configured shell in the source's local directory**, using the ordinary split fallback when unavailable. **Must preserve a directory the helper reports before autorun.** Shell exports and virtual environments are not inherited. SSH integration is outside this feature.
+- **Must start with the configured shell in the source PTY's process directory, as the host reads it (`getCwd`), never the directory the source reports**, using the ordinary split fallback when unavailable. **Where the host cannot read it** (Windows, which has no such read, or a failed read), **must start in the local directory the source reports and never type autorun there**, showing that autorun was skipped; a source reporting none starts in the host default, where autorun runs. **Must preserve a directory the helper reports before autorun.** Shell exports and virtual environments are not inherited. SSH integration is outside this feature.
 - **Must inject autorun only after integrated shell readiness**, accepting prompt-start and prompt-end/editing states with no current command. User input before injection cancels it. Without readiness before a timeout, show an unsupported state and never write a timeout fallback.
 - **Must treat typing, paste, accepted drops, and application mouse input as user work**, disarming automatic refresh until Reset or Promote. Selection, copying, resize, and terminal protocol replies do not count. Returning to idle does not rearm autorun.
-- **Must refresh an untouched, completed or autorun-disabled helper on reopening only after a host idle check.** Foreground commands, background descendants, and failed/unknown inspection preserve the helper.
+- **Must refresh an untouched helper whose autorun completed, is off, or was skipped for its directory on reopening only after a host idle check.** Foreground commands, background descendants, and failed/unknown inspection preserve the helper.
 - **Must hide a retained helper without terminating its PTY**; revealing or promoting reuses the same xterm element. Renderer resource lifetime follows `docs/specs/layout.md` → "Renderer".
 - **Must keep a preserved helper's directory independent of its source**, showing both locations prominently when they differ. Unknown directory state is not evidence of a match.
 - **Must retain exited output**, offer Reset, and avoid automatic restart loops.
@@ -38,7 +38,7 @@ Source of truth: `beginPromotion` / `cancelPromotion` / `finishPromotion` / `hel
 
 ## Global autorun setting
 
-**Must default to `git status`; an empty command disables autorun.** An explicit Modify edit applies to new and reset helpers, never a retained one. Its status describes the command captured at creation, even when the global default changes.
+**Must default to an empty command, which disables autorun**; `git status` is an opt-in Modify offers, never a default (`docs/specs/security-local.md` -> "Spawned programs"). **Never write the preference but on an explicit edit**, so an installation that never saved one follows the factory default. An explicit Modify edit applies to new and reset helpers, never a retained one. Its status describes the command captured at creation, even when the global default changes.
 
 **Must accept only a single command line of at most 4096 characters**, excluding CR, LF, and NUL. The host persists only this preference in `~/.dormouse/helper-terminal.json`, using atomic replacement with private file permissions. All desktop renderers read that shared preference through the host; the fake adapter keeps a deterministic in-memory setting.
 

@@ -2,6 +2,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const { create, getOpenPortsForPids, openNativeDirectory, shellHasWork } = require('./pty-core');
 
 test('Windows folder opening completes on launch and still reports spawn errors', () => {
@@ -195,29 +197,45 @@ test('directory opening touches the path only through the host resolver', async 
   assert.equal(realpath.mock.callCount(), 0);
 });
 
+test('settings answer an empty autorun until the user saves one, which then persists', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'dor-helper-settings-'));
+  const saved = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+  process.env.HOME = process.env.USERPROFILE = home;
+  try {
+    const answers = [];
+    const manager = create((event, data) => { if (event === 'context') answers.push(data); }, { spawn: () => { throw new Error('no spawn'); } });
+    await manager.context({ op: 'settings' }, 'factory');
+    assert.equal(answers.at(-1).command, '');
+    assert.equal(fs.existsSync(path.join(home, '.dormouse', 'helper-terminal.json')), false);
+    await manager.context({ op: 'settings', command: 'git status' }, 'opt-in');
+    await manager.context({ op: 'settings' }, 'read');
+    assert.equal(answers.at(-1).command, 'git status');
+  } finally {
+    for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 // A WSL pane reports Linux directories and Git Bash MSYS ones; the Windows
-// host's browsers and Explorer need the Windows path to the same directory.
+// host's Explorer needs the Windows path to the same directory.
 test('a Windows pane\'s reported directory reaches the host as a Windows path', async () => {
   const asked = [];
-  const events = [];
-  const manager = create((event, data) => events.push({ event, data }), {
+  const manager = create(() => {}, {
     spawn: () => ({ pid: 42, write() {}, resize() {}, kill() {}, onData() {}, onExit() {} }),
   }, { platform: 'win32', canonicalDirectory: async (path) => { asked.push(path); return null; } });
   manager.spawn('wsl', { shell: 'C:\\Windows\\System32\\wsl.exe', args: ['-d', 'Ubuntu'] });
   manager.spawn('gitbash', { shell: 'C:\\Program Files\\Git\\bin\\bash.exe', args: [] });
   manager.spawn('pwsh', { shell: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe', args: [] });
-  const hostDirectory = async (id, path) => {
-    await manager.context({ op: 'hostDirectory', id, path }, 'host');
-    return events.at(-1).data.path;
+  const openedPath = async (id, path) => {
+    await manager.context({ op: 'openDirectory', id, path }, 'host');
+    return asked.at(-1);
   };
-  assert.equal(await hostDirectory('wsl', '/home/me/app'), '\\\\wsl.localhost\\Ubuntu\\home\\me\\app');
-  assert.equal(await hostDirectory('wsl', '/mnt/c/Users/me'), 'C:\\Users\\me');
-  assert.equal(await hostDirectory('wsl', '/mnt/d'), 'D:\\');
-  assert.equal(await hostDirectory('gitbash', '/c/Users/me'), 'C:\\Users\\me');
-  assert.equal(await hostDirectory('gitbash', 'C:\\Users\\me'), 'C:\\Users\\me');
-  assert.equal(await hostDirectory('pwsh', '/home/me'), '/home/me');
-  assert.equal(await hostDirectory('missing', '/home/me'), '/home/me');
-  await manager.context({ op: 'openDirectory', id: 'wsl', path: '/mnt/c/Users/me' }, 'directory');
-  assert.deepEqual(asked, ['C:\\Users\\me']);
+  assert.equal(await openedPath('wsl', '/home/me/app'), '\\\\wsl.localhost\\Ubuntu\\home\\me\\app');
+  assert.equal(await openedPath('wsl', '/mnt/c/Users/me'), 'C:\\Users\\me');
+  assert.equal(await openedPath('wsl', '/mnt/d'), 'D:\\');
+  assert.equal(await openedPath('gitbash', '/c/Users/me'), 'C:\\Users\\me');
+  assert.equal(await openedPath('gitbash', 'C:\\Users\\me'), 'C:\\Users\\me');
+  assert.equal(await openedPath('pwsh', '/home/me'), '/home/me');
+  assert.equal(await openedPath('missing', '/home/me'), '/home/me');
   manager.killAll();
 });
