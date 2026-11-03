@@ -146,7 +146,7 @@ export function priceCatalog(setup: BillingSetup, changes: readonly PriceChange[
 const confirmedPrices = new WeakMap<Stripe, Set<string>>();
 
 /**
- * Whether Stripe holds Price `id` at `usd` whole US dollars, once per `plan`'s
+ * Whether Stripe holds Price `id` at `usd` whole US dollars every `plan`
  * interval, in this deployment's mode. A catalog's amounts are the published
  * prices and an operator's rows, so only this reaches what Stripe would charge.
  */
