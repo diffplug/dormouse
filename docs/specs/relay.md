@@ -41,7 +41,7 @@ Production configuration (`pnpm --filter relay start`, containers, installers):
 
 **The Relay itself always speaks plain HTTP**: WebAuthn needs a secure context, so `localhost` serves development and a real phone needs TLS in front (`tailscale serve` for selfhost; any reverse proxy works).
 
-**Must bind loopback when the TLS proxy is local**, since every interface also publishes the plaintext port to the LAN and the tailnet. The selfhost installers set `DORMOUSE_BIND_HOST`; the default stays unbound for containers; every developer and test entrypoint binds loopback itself, and an explicit value wins. Binding loopback is containment, not admission: "HTTP API" owns the gates, `docs/specs/security-local.md` -> "Loopback Listeners" the admission rule, which `scripts/loopback-lint.mjs` does not check for this socket (rationale).
+**Must bind loopback when the TLS proxy is local**, since every interface also publishes the plaintext port to the LAN and the tailnet. The selfhost installers set `DORMOUSE_BIND_HOST`; the default stays unbound for containers, with a startup warning when the origin is `https:`; every developer and test entrypoint binds loopback itself, and an explicit value wins. Binding loopback is containment, not admission: "HTTP API" owns the gates, `docs/specs/security-local.md` -> "Loopback Listeners" the admission rule, which `scripts/loopback-lint.mjs` does not check for this socket (rationale).
 
 **`DORMOUSE_ORIGIN` is normalized to a bare origin once, in `readConfig`**, and every WebAuthn, enrollment, and pairing-URL compare uses that string; anything but an `http`/`https` URL with a host is a `ConfigError` naming the variable (rationale).
 

@@ -130,7 +130,7 @@ function choiceFor(level: NetworkLevel, relayOrigin: string): Omit<LevelChoice, 
       return {
         title: 'Local networks only',
         detail:
-          'Phones reach your terminals only over networks you choose. Phone and spoken alerts send a pane’s ' +
+          'Phones reach your terminals only over address ranges you allow. Phone and spoken alerts send a pane’s ' +
           'name from any network.',
       };
     case 'anywhere':

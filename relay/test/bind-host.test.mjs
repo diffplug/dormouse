@@ -9,7 +9,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { networkInterfaces } from 'node:os';
 
-import { startRelay } from './spawn-relay.mjs';
+import { startRelay, stopRelay } from './spawn-relay.mjs';
 
 /** A non-loopback IPv4 of this machine, or undefined on an isolated runner. */
 function externalIpv4() {
@@ -64,4 +64,28 @@ test('without DORMOUSE_BIND_HOST the Relay still listens on every interface', as
 
   assert.equal(await reachable('127.0.0.1', port), true);
   assert.equal(await reachable(external, port), true, 'the container default must be preserved');
+});
+
+/** What the Relay wrote to stderr from its start until it stopped. */
+async function startupWarnings(env) {
+  const { child } = await startRelay(env);
+  let stderr = '';
+  child.stderr.on('data', (chunk) => (stderr += chunk));
+  const closed = new Promise((resolve) => child.on('close', resolve));
+  await stopRelay(child);
+  await closed;
+  return stderr;
+}
+
+test('an https origin warns of a plaintext port on every interface only while the bind host is unset', async () => {
+  const origin = 'https://relay.example.test';
+  assert.match(
+    await startupWarnings({ DORMOUSE_BIND_HOST: '', DORMOUSE_ORIGIN: origin }),
+    /DORMOUSE_BIND_HOST is unset/,
+  );
+  assert.doesNotMatch(
+    await startupWarnings({ DORMOUSE_BIND_HOST: '127.0.0.1', DORMOUSE_ORIGIN: origin }),
+    /DORMOUSE_BIND_HOST/,
+  );
+  assert.doesNotMatch(await startupWarnings({ DORMOUSE_BIND_HOST: '' }), /DORMOUSE_BIND_HOST/);
 });
