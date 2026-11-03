@@ -377,7 +377,8 @@ describe('IframePanel', () => {
   it('acts on no message from any origin but its own proxy', async () => {
     const onClickPanel = vi.fn();
     proxyPlatform({ ok: true, url: `${PROXY}/app`, upstream: 'http://example.test/app' });
-    await renderPanel(stubActions({ onClickPanel }), paneProps('iframe-foreign'));
+    const frame = await renderPanel(stubActions({ onClickPanel }), paneProps('iframe-foreign'));
+    frame.focus();
     const chrome = () => getAgentBrowserScreenController('iframe-foreign')?.chrome().url;
     const before = chrome();
     const send = (origin: string, data: unknown) => act(async () => {
