@@ -212,6 +212,8 @@ interface PendingPairingSession {
   readonly expiresAt: number;
   /** Local consent is final while its durable write is in flight. */
   committing?: boolean;
+  /** See {@link PendingConnectionSession.clientSpoke}. */
+  clientSpoke?: boolean;
   /** Set once the first control message verified; until then there is no code. */
   approval?: {
     readonly code: string;
@@ -248,6 +250,13 @@ interface PendingConnectionSession {
    * gets, and a UV raise nulls it.
    */
   offer: PresenceWindowEntry | null;
+  /**
+   * Whether a Client transport message decrypted on this record. **Until one
+   * does, the access log names no device for it**: message 1 can be replayed by
+   * whoever recorded it, so only a transport message shows the static's holder
+   * was here.
+   */
+  clientSpoke?: boolean;
 }
 
 /**
@@ -1392,6 +1401,7 @@ export class BurrowRuntime {
       this.#disposePairing(frame.clientId, 'burrow-error');
       return;
     }
+    pending.clientSpoke = true;
     if (receipt.kind === 'keepalive') return;
     // Already surfaced to the user: further traffic is noise until they answer.
     if (pending.approval) return;
@@ -1549,13 +1559,15 @@ export class BurrowRuntime {
       this.#disposePairing(clientId);
       return;
     }
-    this.#logAccess({
-      at: this.#now(),
-      event: 'pairing-denied',
-      device: pending.approval?.label ?? this.#deviceLabel(pending.clientStaticPublicKey),
-      deviceId: deviceIdFor(pending.clientStaticPublicKey),
-      reason: code,
-    });
+    if (pending.clientSpoke) {
+      this.#logAccess({
+        at: this.#now(),
+        event: 'pairing-denied',
+        device: pending.approval?.label ?? this.#deviceLabel(pending.clientStaticPublicKey),
+        deviceId: deviceIdFor(pending.clientStaticPublicKey),
+        reason: code,
+      });
+    }
     this.#sendPairingOutcome(clientId, pending, { ok: false, code });
     this.#disposePairing(clientId, PAIRING_OUTCOME_FOR_DENIAL[code]);
   }
@@ -1706,6 +1718,7 @@ export class BurrowRuntime {
       this.#disposeConnection(frame.clientId);
       return;
     }
+    pending.clientSpoke = true;
     if (receipt.kind === 'keepalive') return;
     if (receipt.kind !== 'control' || !isConnectionRequestV1(receipt.value)) {
       this.#denyConnection(frame.clientId, pending, 'protocol-rejected');
@@ -1936,13 +1949,15 @@ export class BurrowRuntime {
     code: Exclude<ConnectionOutcomeV1, { ok: true }>['code'],
     reason?: string,
   ): void {
-    this.#logAccess({
-      at: this.#now(),
-      event: 'connection-denied',
-      device: this.#deviceLabel(pending.clientStaticPublicKey),
-      deviceId: deviceIdFor(pending.clientStaticPublicKey),
-      reason: reason ? `${code}: ${reason}` : code,
-    });
+    if (pending.clientSpoke) {
+      this.#logAccess({
+        at: this.#now(),
+        event: 'connection-denied',
+        device: this.#deviceLabel(pending.clientStaticPublicKey),
+        deviceId: deviceIdFor(pending.clientStaticPublicKey),
+        reason: reason ? `${code}: ${reason}` : code,
+      });
+    }
     this.#sendControl(clientId, 'connection', pending.connectionId, pending.session, {
       ok: false,
       code,
