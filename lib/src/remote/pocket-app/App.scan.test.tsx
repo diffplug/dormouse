@@ -59,7 +59,7 @@ import {
 } from './app-test-utils';
 import { setNativeFieldValue } from '../../lib/dom';
 import { POCKET_DEPLOYMENT_PATH, deploymentUnreachableMessage } from './deployment';
-import { CONFIRM_REVOKE_LABEL, REVOKE_LABEL, SHOW_PAIRED_BROWSERS, THIS_BROWSER } from './PairedBrowsers';
+import { CONFIRM_REVOKE_LABEL, REVOKE_LABEL, THIS_BROWSER } from './PairedBrowsers';
 
 const fake = vi.hoisted(() => ({
   keyStorage: vi.fn<() => Promise<void>>(),
@@ -1169,19 +1169,17 @@ describe('paired browsers, from a Burrow row', () => {
     expect(container.textContent).toContain(THIS_BROWSER);
   });
 
-  it('offers them on the wall’s Settings too, on the session it has, asking nothing before a tap', async () => {
+  it('offers them on the wall’s Settings too, on the session it has', async () => {
     fake.sessionToken = 'tok';
     fake.listKnownBurrows.mockResolvedValue([await knownBurrow('h1')]);
     fake.listBurrows.mockResolvedValue([{ burrowId: 'h1', label: 'First laptop', online: true }]);
     await boot();
+    fake.listDevices.mockResolvedValue({ ok: true, devices: [OWN] });
     await click(container, 'Connect');
+
     expect(fake.connect).toHaveBeenCalledOnce();
-    expect(fake.listDevices).not.toHaveBeenCalled();
-
-    await click(container, SHOW_PAIRED_BROWSERS);
-
     expect(fake.listDevices).toHaveBeenCalledOnce();
-    expect(fake.connect).toHaveBeenCalledOnce();
+    expect(container.textContent).toContain(THIS_BROWSER);
   });
 
   it('ends the session on the way back to the list', async () => {
@@ -1227,8 +1225,11 @@ describe('paired browsers, from a Burrow row', () => {
   });
 
   it('drops to sign-in when the Relay session died under a proof', async () => {
-    fake.listDevices.mockRejectedValue(new SessionExpiredError());
+    fake.listDevices.mockResolvedValue({ ok: true, devices: [OWN] });
+    fake.revokeDevice.mockRejectedValue(new SessionExpiredError());
     await openDevices();
+    await click(container, new RegExp(`^${REVOKE_LABEL}$`));
+    await click(container, CONFIRM_REVOKE_LABEL);
 
     expect(fake.clientClose).toHaveBeenCalled();
     expect(buttonNamed(container, /Sign in with passkey/)).not.toBeNull();

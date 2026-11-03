@@ -1105,11 +1105,10 @@ export interface PairedBrowserV1 {
 }
 
 /**
- * A `devices.*` request is sent bare, then again with `proof` once it is
- * answered with {@link DevicePresenceRequired}. The answer's challenge is bound
- * to that one request, on the Burrow.
+ * A revoke is sent bare, then again with `proof` once it is answered with
+ * {@link DevicePresenceRequired}. The answer's challenge is bound to that one
+ * request, on the Burrow.
  */
-export type DevicesListParams = Record<string, never> | { proof: PresenceProofV1 };
 export type DevicesRevokeParams = { id: string } | { id: string; proof: PresenceProofV1 };
 /** Sign this challenge in a `session` binding, then ask again with the proof. */
 export interface DevicePresenceRequired {
@@ -1130,7 +1129,6 @@ export interface DeviceRefused {
 
 export type DevicesListResult =
   | { outcome: 'devices'; devices: PairedBrowserV1[] }
-  | DevicePresenceRequired
   | DeviceRefused;
 export type DevicesRevokeResult =
   /** `self`: the session's own record, so its goodbye follows this answer. */
@@ -1150,8 +1148,7 @@ function isPairedBrowserV1(value: unknown): value is PairedBrowserV1 {
   );
 }
 
-function isDeviceAnswer(value: Record<string, unknown>): boolean {
-  if (value.outcome === 'presence-required') return isBoundedString(value.challenge, MAX_DEVICE_FIELD_LENGTH);
+function isDeviceRefused(value: Record<string, unknown>): boolean {
   return value.outcome === 'refused' && DEVICE_REFUSALS.includes(value.code as DeviceRefusalCode);
 }
 
@@ -1159,14 +1156,15 @@ export function isDevicesListResult(value: unknown): value is DevicesListResult 
   if (!value || typeof value !== 'object') return false;
   const answer = value as Record<string, unknown>;
   if (answer.outcome === 'devices') return Array.isArray(answer.devices) && answer.devices.every(isPairedBrowserV1);
-  return isDeviceAnswer(answer);
+  return isDeviceRefused(answer);
 }
 
 export function isDevicesRevokeResult(value: unknown): value is DevicesRevokeResult {
   if (!value || typeof value !== 'object') return false;
   const answer = value as Record<string, unknown>;
   if (answer.outcome === 'revoked') return typeof answer.self === 'boolean';
-  return isDeviceAnswer(answer);
+  if (answer.outcome === 'presence-required') return isBoundedString(answer.challenge, MAX_DEVICE_FIELD_LENGTH);
+  return isDeviceRefused(answer);
 }
 
 export interface HelloParams {

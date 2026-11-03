@@ -1879,7 +1879,7 @@ export class BurrowRuntime {
           isDirect,
           label: device,
           deviceId,
-          presence: this.#sessionPresence(clientId, () => e2e, presence === 'proof'),
+          presence: this.#sessionPresence(clientId, () => e2e),
           end: () => this.#disposeEstablished(clientId, { goodbye: true, only: e2e }),
         }),
       directPeering: this.#directPeering,
@@ -1911,13 +1911,12 @@ export class BurrowRuntime {
    * the session meant, so a verb still running once it has been replaced or
    * ended neither mints nor spends for what took its place.
    */
-  #sessionPresence(clientId: string, e2e: () => EstablishedE2eSession, provedAtConnection: boolean): SessionPresence {
+  #sessionPresence(clientId: string, e2e: () => EstablishedE2eSession): SessionPresence {
     const held = (): EstablishedSession | null => {
       const established = this.#clients.get(clientId)?.established;
       return established?.e2e === e2e() ? established : null;
     };
     return {
-      provedAtConnection,
       issueChallenge: () => {
         const established = held();
         if (!established) throw new Error('this session has ended');

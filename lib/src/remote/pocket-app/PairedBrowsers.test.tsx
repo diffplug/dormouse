@@ -16,8 +16,8 @@ import {
   CONFIRM_REVOKE_LABEL,
   PASSKEY_NOT_CONFIRMED,
   PairedBrowsers,
+  RETRY_PAIRED_BROWSERS,
   REVOKE_LABEL,
-  SHOW_PAIRED_BROWSERS,
   THIS_BROWSER,
   revokeConsequence,
   type PairedBrowsersSession,
@@ -64,11 +64,11 @@ afterEach(() => {
   container.remove();
 });
 
-async function render(autoLoad = false): Promise<void> {
+async function render(): Promise<void> {
   act(() =>
     root.render(
       <StrictMode>
-        <PairedBrowsers session={session} autoLoad={autoLoad} onSelfRevoked={onSelfRevoked} onAccountLost={onAccountLost} />
+        <PairedBrowsers session={session} onSelfRevoked={onSelfRevoked} onAccountLost={onAccountLost} />
       </StrictMode>,
     ),
   );
@@ -84,22 +84,15 @@ async function askToRevoke(device: PairedBrowserV1): Promise<void> {
 }
 
 describe('PairedBrowsers', () => {
-  it('asks nothing of the Burrow until a tap, since listing may raise the prompt', async () => {
+  it('lists on mount, once, under StrictMode too, since listing never prompts', async () => {
     await render();
-    expect(session.listDevices).not.toHaveBeenCalled();
-
-    await click(container, SHOW_PAIRED_BROWSERS);
     expect(session.listDevices).toHaveBeenCalledOnce();
-  });
-
-  it('lists at once when told the tap has happened, once, under StrictMode too', async () => {
-    await render(true);
-    expect(session.listDevices).toHaveBeenCalledOnce();
-    expect(buttonNamed(container, SHOW_PAIRED_BROWSERS)).toBeNull();
+    expect(buttonNamed(container, RETRY_PAIRED_BROWSERS)).toBeNull();
+    expect(session.revokeDevice).not.toHaveBeenCalled();
   });
 
   it('shows each record with its id and marks only its own', async () => {
-    await render(true);
+    await render();
     const rows = [...container.querySelectorAll('section > div')].map((row) => row.textContent ?? '');
     expect(rows).toHaveLength(2);
     expect(rows[0]).toContain(THIS_BROWSER);
@@ -111,23 +104,22 @@ describe('PairedBrowsers', () => {
 
   it('says a Burrow too old for the list is too old, never that it has no browsers', async () => {
     session.listDevices.mockResolvedValue({ ok: false, message: DEVICES_UNSUPPORTED_MESSAGE, unsupported: true });
-    await render(true);
+    await render();
     expect(container.textContent).toContain(DEVICES_UNSUPPORTED_MESSAGE);
-    expect(buttonNamed(container, SHOW_PAIRED_BROWSERS)).toBeNull();
+    expect(buttonNamed(container, RETRY_PAIRED_BROWSERS)).toBeNull();
   });
 
-  it('keeps Show on a refusal, to try again', async () => {
+  it('offers to try again on a refusal', async () => {
     session.listDevices.mockResolvedValueOnce({ ok: false, message: 'refused', unsupported: false });
     await render();
-    await click(container, SHOW_PAIRED_BROWSERS);
     expect(alertText(container)).toBe('refused');
 
-    await click(container, SHOW_PAIRED_BROWSERS);
+    await click(container, RETRY_PAIRED_BROWSERS);
     expect(container.textContent).toContain(THEIRS.id);
   });
 
   it('revokes only from its inline confirmation, then re-reads the list', async () => {
-    await render(true);
+    await render();
     await askToRevoke(THEIRS);
     expect(session.revokeDevice).not.toHaveBeenCalled();
     expect(container.textContent).toContain(revokeConsequence(THEIRS));
@@ -142,7 +134,7 @@ describe('PairedBrowsers', () => {
   });
 
   it('cancels with no request made', async () => {
-    await render(true);
+    await render();
     await askToRevoke(THEIRS);
     await click(container, 'Cancel');
     expect(session.revokeDevice).not.toHaveBeenCalled();
@@ -151,7 +143,7 @@ describe('PairedBrowsers', () => {
 
   it('warns of its own session ending, and hands that revocation up rather than re-reading', async () => {
     session.revokeDevice.mockResolvedValue({ ok: true, self: true });
-    await render(true);
+    await render();
     await askToRevoke(MINE);
     expect(container.textContent).toContain(revokeConsequence(MINE));
 
@@ -163,7 +155,7 @@ describe('PairedBrowsers', () => {
 
   it('reads a dismissed prompt in its own words, the confirmation still open', async () => {
     session.revokeDevice.mockRejectedValue(new DOMException('browser text', 'NotAllowedError'));
-    await render(true);
+    await render();
     await askToRevoke(THEIRS);
     await click(container, CONFIRM_REVOKE_LABEL);
 
@@ -173,7 +165,7 @@ describe('PairedBrowsers', () => {
 
   it('shows a Burrow’s refusal, the confirmation still open', async () => {
     session.revokeDevice.mockResolvedValue({ ok: false, message: 'not verified' });
-    await render(true);
+    await render();
     await askToRevoke(THEIRS);
     await click(container, CONFIRM_REVOKE_LABEL);
 
@@ -184,10 +176,12 @@ describe('PairedBrowsers', () => {
   it('hands up what only sign-in mends', async () => {
     for (const error of [new SessionExpiredError(), new PasskeyUnavailableError()]) {
       onAccountLost.mockReset();
-      session.listDevices.mockRejectedValueOnce(error);
+      session.revokeDevice.mockRejectedValueOnce(error);
       await render();
-      await click(container, SHOW_PAIRED_BROWSERS);
+      await askToRevoke(THEIRS);
+      await click(container, CONFIRM_REVOKE_LABEL);
       expect(onAccountLost).toHaveBeenCalledWith(error);
+      await click(container, 'Cancel');
     }
   });
 });

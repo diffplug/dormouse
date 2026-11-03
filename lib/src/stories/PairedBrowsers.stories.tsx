@@ -6,7 +6,6 @@ import {
   CONFIRM_REVOKE_LABEL,
   PairedBrowsersScreen,
   REVOKE_LABEL,
-  SHOW_PAIRED_BROWSERS,
   PairedBrowsers,
 } from '../remote/pocket-app/PairedBrowsers';
 import { pkButton } from '../remote/pocket-app/pocket-chrome';
@@ -105,7 +104,7 @@ export const OlderBurrow: Story = {
   args: { session: session({ ok: false, message: DEVICES_UNSUPPORTED_MESSAGE, unsupported: true }) },
 };
 
-/** Where Settings shows it: nothing asked of the Burrow until the tap, which may prompt. */
+/** Where Settings shows it, listed on opening: listing never prompts. */
 export const InSettings: StoryObj<typeof PairedBrowsers> = {
   render: () => (
     <div className="grid gap-5 p-3 font-mono text-sm">
@@ -113,6 +112,6 @@ export const InSettings: StoryObj<typeof PairedBrowsers> = {
     </div>
   ),
   play: async ({ canvasElement }) => {
-    await expect(await within(canvasElement).findByRole('button', { name: SHOW_PAIRED_BROWSERS })).toBeVisible();
+    await expect(await within(canvasElement).findByText(DEVICES[1]!.id)).toBeVisible();
   },
 };

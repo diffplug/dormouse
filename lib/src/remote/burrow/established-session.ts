@@ -74,8 +74,6 @@ export interface RemoteApiSessionLike {
  * owner supplies none.
  */
 export interface SessionPresence {
-  /** This session's connection carried a proof, not a window ride. */
-  readonly provedAtConnection: boolean;
   /** Mint the one challenge this session's next proof must bind, voiding any earlier one. */
   issueChallenge(): string;
   /**

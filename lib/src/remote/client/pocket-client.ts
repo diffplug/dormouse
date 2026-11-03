@@ -52,9 +52,9 @@ import {
   toBase64Url,
   type ConnectionDenialCode,
   type ConnectionRequestV1,
-  type DevicePresenceRequired,
   type DeviceRefusalCode,
   type DevicesListResult,
+  type DevicesRevokeParams,
   type DevicesRevokeResult,
   type PairedBrowserV1,
   type DirectPath,
@@ -402,6 +402,10 @@ export type PairingResult =
   | { readonly ok: false; readonly message: string };
 
 /** Where a connection attempt ended, as the UI reports it. */
+export type ConnectResult =
+  | { readonly ok: true; readonly burrowLabel: string }
+  | { readonly ok: false; readonly message: string; readonly pairingRequired: boolean };
+
 /** A `devices.*` refusal, in fixed copy, for the same reason a denial is. */
 export const DEVICE_REFUSAL_MESSAGES: Record<DeviceRefusalCode, string> = {
   'presence-rejected': 'The computer could not verify your passkey, so nothing changed. Try again.',
@@ -427,10 +431,6 @@ export type DeviceListing =
 export type DeviceRevocation =
   | { readonly ok: true; readonly self: boolean }
   | { readonly ok: false; readonly message: string };
-
-export type ConnectResult =
-  | { readonly ok: true; readonly burrowLabel: string }
-  | { readonly ok: false; readonly message: string; readonly pairingRequired: boolean };
 
 /** An answer this build cannot read is the Burrow's failure, not a claim about the list. */
 function deviceRefusalMessage(answer: DevicesListResult | DevicesRevokeResult | null): string {
@@ -1213,16 +1213,11 @@ export class PocketClient {
 
   // --- Paired browsers (`docs/specs/remote-api.md` -> "Paired browsers") ----
 
-  /** The paired browsers of the connected Burrow, with one prompt where it asks for a proof. */
+  /** The paired browsers of the connected Burrow. Never prompts. */
   async listDevices(): Promise<DeviceListing> {
     if (!this.#servesDevices()) return { ok: false, message: DEVICES_UNSUPPORTED_MESSAGE, unsupported: true };
-    let answer: DevicesListResult | null;
-    try {
-      answer = await this.#deviceRequest(REMOTE_METHODS.devicesList, {}, isDevicesListResult);
-    } catch (err) {
-      if (!isOutdatedRelayRefusal(err)) throw err;
-      return { ok: false, message: RELAY_TOO_OLD_FOR_PROOF_MESSAGE, unsupported: false };
-    }
+    const value: unknown = await this.#core.request(REMOTE_METHODS.devicesList, {});
+    const answer = isDevicesListResult(value) ? value : null;
     if (answer?.outcome === 'devices') return { ok: true, devices: answer.devices.map(mapDeviceLabel) };
     return { ok: false, message: deviceRefusalMessage(answer), unsupported: false };
   }
@@ -1239,7 +1234,12 @@ export class PocketClient {
     const session = this.#sessionProof;
     let answer: DevicesRevokeResult | null;
     try {
-      answer = await this.#deviceRequest(REMOTE_METHODS.devicesRevoke, { id }, isDevicesRevokeResult);
+      answer = await this.#revokeRequest({ id });
+      // Sent bare, and again with a proof over the challenge it is answered with.
+      if (answer?.outcome === 'presence-required') {
+        answer = await this.#revokeRequest({ id, proof: await this.#proveSession(answer.challenge) });
+        if (answer?.outcome === 'presence-required') answer = null;
+      }
     } catch (err) {
       if (!isOutdatedRelayRefusal(err)) throw err;
       return { ok: false, message: RELAY_TOO_OLD_FOR_PROOF_MESSAGE };
@@ -1262,25 +1262,10 @@ export class PocketClient {
     return route !== null && route === this.#devicesServedOn;
   }
 
-  /**
-   * One `devices.*` request: sent bare, and again with a proof over the
-   * challenge it is answered with, if it is. `null` is an answer this build
-   * cannot read, or a second demand for the proof it just sent.
-   */
-  async #deviceRequest<T extends DevicesListResult | DevicesRevokeResult>(
-    method: string,
-    params: Record<string, unknown>,
-    isResult: (value: unknown) => value is T,
-  ): Promise<T | null> {
-    const read = async (body: Record<string, unknown>): Promise<T | null> => {
-      const value: unknown = await this.#core.request(method, body);
-      return isResult(value) ? value : null;
-    };
-    const first = await read(params);
-    if (first?.outcome !== 'presence-required') return first;
-    const proof = await this.#proveSession((first as DevicePresenceRequired).challenge);
-    const second = await read({ ...params, proof });
-    return second?.outcome === 'presence-required' ? null : second;
+  /** `null` is an answer this build cannot read. */
+  async #revokeRequest(params: DevicesRevokeParams): Promise<DevicesRevokeResult | null> {
+    const value: unknown = await this.#core.request(REMOTE_METHODS.devicesRevoke, params);
+    return isDevicesRevokeResult(value) ? value : null;
   }
 
   /** One authenticator prompt over the established session's own transcript. */

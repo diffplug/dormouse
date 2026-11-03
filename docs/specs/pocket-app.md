@@ -144,7 +144,7 @@ Source of truth: `PocketClient.forgetThisPhone` in `lib/src/remote/client/pocket
 **Pocket lists and revokes a Burrow's paired browsers from that Burrow's row, on a session with no wall behind it, and from the wall's Settings, on the session it has**; the protocol is [remote-api.md](./remote-api.md) -> "Paired browsers", the rules [remote-security-model.md](./remote-security-model.md) -> "Revocation from Pocket". The one-time page offers neither.
 
 - **The row offers it only on a Burrow it can authorize on**: paired, of the signed-in account, and listed; an offline row keeps it disabled and says Offline, which is all Pocket can reach of that Burrow.
-- **Every step that may prompt starts on a tap**: Settings lists nothing until asked, and a row's tap carries through its connect to the list. A revoke confirms inline first, saying what it cuts, since the prompt names none of it.
+- **Listing never prompts**, so the list reads on opening; a row's connect may prompt as any Connect does. **A revoke prompts only from a tap on its inline confirmation**, which says what it cuts, since the prompt names none of it.
 - **Must leave everything as it was when the person dismisses the prompt**, and word that itself, never in the browser's text.
 - **A browser revoking itself ends its session and returns to the list**, whose row then offers Pair again, saying why.
 - **A dead Relay session or cached passkey drops to sign-in**, as [An expired session](#an-expired-session-drops-to-sign-in) does.

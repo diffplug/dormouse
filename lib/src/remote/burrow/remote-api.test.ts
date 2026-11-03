@@ -1578,9 +1578,8 @@ describe('devices.*', () => {
   const answerTo = (sent: SentPayload[], requestId: string) =>
     sent.find((payload): payload is RemoteResponse => 'requestId' in payload && payload.requestId === requestId);
 
-  function makeDevices(over: Partial<SessionDevices> = {}, provedAtConnection = false) {
+  function makeDevices(over: Partial<SessionDevices> = {}) {
     const presence = {
-      provedAtConnection,
       issueChallenge: vi.fn(() => 'the-challenge'),
       verifyProof: vi.fn(async (_proof: unknown) => true),
     };
@@ -1680,14 +1679,11 @@ describe('devices.*', () => {
   });
 
   it('answers a list that failed in fixed words too', async () => {
-    const { devices } = makeDevices(
-      {
-        list: vi.fn(async () => {
-          throw new Error('/secret/path');
-        }),
-      },
-      true,
-    );
+    const { devices } = makeDevices({
+      list: vi.fn(async () => {
+        throw new Error('/secret/path');
+      }),
+    });
     const { session, sent } = makeDeviceSession(devices);
     session.handle({ requestId: 'l', method: REMOTE_METHODS.devicesList });
     await flush();

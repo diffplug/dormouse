@@ -8,7 +8,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   PAIRING_DEVICE_LABELS,
-  PRESENCE_WINDOW_IDLE_MS,
   REMOTE_METHODS,
   type PairedBrowserV1,
   type PresenceBinding,
@@ -39,7 +38,7 @@ afterEach(() => vi.restoreAllMocks());
  * reaches the runtime's own.
  */
 async function pairedHarness(
-  over: { refuseBinding?: (binding: PresenceBinding) => boolean; burrowNow?: () => number } = {},
+  over: { refuseBinding?: (binding: PresenceBinding) => boolean } = {},
 ) {
   let harness!: E2eHarness;
   const revoked: string[] = [];
@@ -107,39 +106,44 @@ describe('paired browsers, from Pocket', () => {
     expect(await harness.client.listDevices()).toMatchObject({ ok: false, unsupported: true });
   });
 
-  it('lists on the proof its connection carried, prompting no more, each label mapped again', async () => {
-    let clock = Date.now();
-    const { harness } = await pairedHarness({ burrowNow: () => clock });
-    // The pairing's window has lapsed, so a new connection proves.
-    harness.client.close();
-    clock += PRESENCE_WINDOW_IDLE_MS + 1;
-    const prompts = proofsAsked(harness).length;
-    expect(await harness.client.connect(harness.burrowId)).toMatchObject({ ok: true });
-    expect(proofsAsked(harness)).toHaveLength(prompts + 1);
+  it('lists without a prompt on a session that rode a window, each label mapped again, and still prompts to revoke', async () => {
+    const { harness, revoked } = await pairedHarness();
+    // Riding the window the pairing's proof opened: connecting asked for no proof.
     await harness.client.hello();
+    const prompts = proofsAsked(harness).length;
+    const assert = vi.spyOn(harness.authenticator, 'assert');
 
-    const listing = await harness.client.listDevices();
-
-    expect(listing).toEqual({
+    expect(await harness.client.listDevices()).toEqual({
       ok: true,
-      devices: [
-        THEIRS,
-        expect.objectContaining({ label: 'Unknown device', self: true }),
-      ],
+      devices: [THEIRS, expect.objectContaining({ label: 'Unknown device', self: true })],
     });
+    expect(proofsAsked(harness)).toHaveLength(prompts);
+    expect(assert).not.toHaveBeenCalled();
+
+    expect(await harness.client.revokeDevice(THEIRS.id)).toEqual({ ok: true, self: false });
+    expect(revoked).toEqual([THEIRS.id]);
     expect(proofsAsked(harness)).toHaveLength(prompts + 1);
+    expect(assert).toHaveBeenCalledOnce();
   });
 
-  it('prompts for a session that rode a window, once per listing asked of it', async () => {
-    const { harness } = await pairedHarness();
-    expect(await harness.client.connect(harness.burrowId)).toMatchObject({ ok: true });
+  it('reads a list answer it cannot read as the Burrow failing, never as no devices', async () => {
+    const harness = await makeE2eHarness({
+      createSession: ({ send }) => ({
+        handle: (data) => {
+          const { requestId } = data as { requestId: string };
+          send({ requestId, ok: true, result: { protocolVersion: 1, devices: true, outcome: 'presence-required', challenge: 'x' } });
+        },
+        dispose: () => {},
+      }),
+    });
+    await harness.connectPaired();
     await harness.client.hello();
-    const prompts = proofsAsked(harness).length;
 
-    expect(await harness.client.listDevices()).toMatchObject({ ok: true });
-    expect(proofsAsked(harness)).toHaveLength(prompts + 1);
-    expect(await harness.client.listDevices()).toMatchObject({ ok: true });
-    expect(proofsAsked(harness)).toHaveLength(prompts + 1);
+    expect(await harness.client.listDevices()).toEqual({
+      ok: false,
+      message: DEVICE_REFUSAL_MESSAGES['burrow-error'],
+      unsupported: false,
+    });
   });
 
   it('prompts for every revoke, in a `session` binding over this session, its paired credential alone', async () => {
@@ -203,9 +207,10 @@ describe('paired browsers, from Pocket', () => {
     expect(await harness.client.revokeDevice(THEIRS.id)).toEqual({ ok: true, self: false });
   });
 
-  it('says a Relay older than the binding is the reason, without calling it no devices', async () => {
+  it('says a Relay older than the binding is the reason, while the list it never asks about still works', async () => {
     const { harness, revoked } = await pairedHarness({ refuseBinding: (binding) => binding.kind === 'session' });
     await harness.client.hello();
+    expect(await harness.client.listDevices()).toMatchObject({ ok: true });
 
     expect(await harness.client.revokeDevice(THEIRS.id)).toEqual({
       ok: false,

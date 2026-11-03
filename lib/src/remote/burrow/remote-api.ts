@@ -16,7 +16,6 @@ import {
   utf8Encode,
   type AttachParams,
   type DeviceRefusalCode,
-  type DevicePresenceRequired,
   type DevicesListResult,
   type DevicesRevokeResult,
   type PairedBrowserV1,
@@ -99,9 +98,6 @@ export interface SessionDevices {
   revoke(id: string): Promise<'revoked' | 'unknown-device' | 'ambiguous-device'>;
 }
 
-/** The list's own name for what a challenge was issued for; a revoke's is its id. */
-const LIST_REQUEST = Symbol('devices.list');
-
 /** {@link RemoteApiSessionOptions.holder}. */
 export interface SessionHolder {
   readonly id: string;
@@ -119,10 +115,8 @@ export class RemoteApiSession {
   readonly #onAttach: ((surfaceId: string) => void) | null;
   readonly #onClose: ((surfaceId: string) => void) | null;
   readonly #devices: SessionDevices | null;
-  /** Which request the session's one live challenge answers: the Burrow's memory of what a proof is for. */
-  #challengedFor: string | typeof LIST_REQUEST | null = null;
-  /** This session has shown a proof, at its connection or since; a window ride shows none. */
-  #presenceShown: boolean;
+  /** Which id the session's one live challenge was issued for: the Burrow's memory of what a proof is for. */
+  #challengedFor: string | null = null;
 
   #directorySubId: string | null = null;
   #unsubDirectory: (() => void) | null = null;
@@ -145,7 +139,6 @@ export class RemoteApiSession {
     this.#onAttach = options.onAttach ?? null;
     this.#onClose = options.onClose ?? null;
     this.#devices = options.devices ?? null;
-    this.#presenceShown = options.devices?.presence.provedAtConnection ?? false;
     this.#frameHost = options.frames?.host ?? null;
     this.#frames = options.frames
       ? new FrameTunnel({
@@ -184,7 +177,7 @@ export class RemoteApiSession {
         case REMOTE_METHODS.terminalResize:
           return this.#resize(request);
         case REMOTE_METHODS.devicesList:
-          if (this.#devices) return this.#answerDevices(request, this.#devicesList(request, this.#devices));
+          if (this.#devices) return this.#answerDevices(request, this.#devicesList(this.#devices));
           return this.#fail(request, `unknown method: ${request.method}`);
         case REMOTE_METHODS.devicesRevoke:
           if (this.#devices) return this.#answerDevices(request, this.#devicesRevoke(request, this.#devices));
@@ -309,25 +302,15 @@ export class RemoteApiSession {
     });
   }
 
-  /**
-   * The Burrow's paired browsers, to a session that has shown a proof: its
-   * connection's or one over the challenge a bare request is answered with. A
-   * window ride has shown none (`docs/specs/remote-api.md` -> "Paired browsers").
-   */
-  async #devicesList(request: RemoteRequest, devices: SessionDevices): Promise<DevicesListResult> {
-    const { proof } = (request.params ?? {}) as { proof?: unknown };
-    if (proof !== undefined) {
-      if (!(await this.#proves(devices, proof, LIST_REQUEST))) return refused('presence-rejected');
-    } else if (!this.#presenceShown) {
-      return this.#challenge(devices, LIST_REQUEST);
-    }
+  /** The Burrow's paired browsers, to any paired session (`docs/specs/remote-api.md` -> "Paired browsers"). */
+  async #devicesList(devices: SessionDevices): Promise<DevicesListResult> {
     return { outcome: 'devices', devices: await devices.list() };
   }
 
   /**
    * Revoke one paired browser by its id, on a proof over a challenge this very
-   * request was answered with: **never on a window ride or a proof shown
-   * earlier** (`docs/specs/remote-security-model.md` -> "Revocation").
+   * request was answered with: **never on a window ride or the connection's
+   * proof** (`docs/specs/remote-security-model.md` -> "Revocation").
    *
    * A session revoking itself is answered first, since the revocation's goodbye
    * ends it and nothing after that is read.
@@ -337,7 +320,11 @@ export class RemoteApiSession {
     if (!isBoundedString(id, MAX_DEVICE_FIELD_LENGTH)) return refused('unknown-device');
     const found = await devices.resolve(id);
     if (typeof found === 'string') return refused(found);
-    if (proof === undefined) return this.#challenge(devices, id);
+    if (proof === undefined) {
+      const challenge = devices.presence.issueChallenge();
+      this.#challengedFor = id;
+      return { outcome: 'presence-required', challenge };
+    }
     if (!(await this.#proves(devices, proof, id))) return refused('presence-rejected');
     if (found.self) this.#ok(request, { outcome: 'revoked', self: true } satisfies DevicesRevokeResult);
     const result = await devices.revoke(id);
@@ -345,24 +332,16 @@ export class RemoteApiSession {
     return result === 'revoked' ? { outcome: 'revoked', self: false } : refused(result);
   }
 
-  #challenge(devices: SessionDevices, request: string | typeof LIST_REQUEST): DevicePresenceRequired {
-    const challenge = devices.presence.issueChallenge();
-    this.#challengedFor = request;
-    return { outcome: 'presence-required', challenge };
-  }
-
   /**
-   * Whether `proof` is good and its challenge was issued for `request`. The
-   * challenge is spent either way, so a proof for one request costs the session
-   * its challenge when shown for another.
+   * Whether `proof` is good and its challenge was issued for `id`. The challenge
+   * is spent either way, so a proof for one id costs the session its challenge
+   * when shown for another.
    */
-  async #proves(devices: SessionDevices, proof: unknown, request: string | typeof LIST_REQUEST): Promise<boolean> {
+  async #proves(devices: SessionDevices, proof: unknown, id: string): Promise<boolean> {
     const challengedFor = this.#challengedFor;
     this.#challengedFor = null;
     const verified = await devices.presence.verifyProof(proof);
-    if (this.#disposed || !verified || challengedFor !== request) return false;
-    this.#presenceShown = true;
-    return true;
+    return !this.#disposed && verified && challengedFor === id;
   }
 
   /** Answer one `devices.*` request, whatever became of it; `null` was answered already. */

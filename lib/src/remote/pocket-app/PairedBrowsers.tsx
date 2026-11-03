@@ -3,9 +3,9 @@
  * (`docs/specs/pocket-app.md` -> "Paired browsers"): one record per browser on
  * this one Burrow, with nothing merged across Burrows.
  *
- * Every action starts on a tap, since each may raise the passkey prompt, and
- * the confirmation is inline, as the Burrows view's is: this is touch UI, so
- * nothing here waits on a hover.
+ * Listing never prompts, so it runs on mount. A revoke prompts, so it starts on
+ * a tap, and its confirmation is inline, as the Burrows view's is: this is touch
+ * UI, so nothing here waits on a hover.
  */
 
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
@@ -29,7 +29,7 @@ export interface PairedBrowsersSession {
 export const PASSKEY_NOT_CONFIRMED = 'Your passkey wasn’t confirmed, so nothing changed. Try again.';
 
 export const PAIRED_BROWSERS_TITLE = 'Paired browsers';
-export const SHOW_PAIRED_BROWSERS = 'Show paired browsers';
+export const RETRY_PAIRED_BROWSERS = 'Try again';
 export const THIS_BROWSER = 'This browser';
 export const REVOKE_LABEL = 'Revoke';
 export const CONFIRM_REVOKE_LABEL = 'Confirm with passkey';
@@ -41,13 +41,10 @@ type View =
 
 export function PairedBrowsers({
   session,
-  autoLoad = false,
   onSelfRevoked,
   onAccountLost,
 }: {
   session: PairedBrowsersSession;
-  /** List at once: the tap that got here is the gesture a prompt may need. */
-  autoLoad?: boolean;
   /** This browser's own pairing went: the session is over. */
   onSelfRevoked: () => void;
   /** The Relay session or the cached passkey is gone, which only sign-in mends. */
@@ -56,7 +53,7 @@ export function PairedBrowsers({
   const titleId = useId();
   const [view, setView] = useState<View>({ at: 'idle' });
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(true);
   const [confirming, setConfirming] = useState<string | null>(null);
 
   const attempt = useCallback(
@@ -82,13 +79,13 @@ export function PairedBrowsers({
     else setError(listing.message);
   }, [session]);
 
-  // Once, for the mount: a second run would prompt twice.
-  const autoLoaded = useRef(false);
+  // Once, for the mount, StrictMode's second run included.
+  const loaded = useRef(false);
   useEffect(() => {
-    if (!autoLoad || autoLoaded.current) return;
-    autoLoaded.current = true;
+    if (loaded.current) return;
+    loaded.current = true;
     void attempt(load);
-  }, [attempt, autoLoad, load]);
+  }, [attempt, load]);
 
   const revoke = (id: string) =>
     attempt(async () => {
@@ -109,14 +106,10 @@ export function PairedBrowsers({
       </h3>
       {error ? <ErrorRow message={error} /> : null}
       {view.at === 'unsupported' ? <p className={PK.lead}>{view.message}</p> : null}
-      {view.at === 'idle' ? (
-        <button
-          type="button"
-          className={pkButton({ tone: 'outline', block: true })}
-          disabled={busy}
-          onClick={() => void attempt(load)}
-        >
-          {busy ? '…' : SHOW_PAIRED_BROWSERS}
+      {view.at === 'idle' && busy ? <p className={PK.lead}>…</p> : null}
+      {view.at === 'idle' && !busy ? (
+        <button type="button" className={pkButton({ tone: 'outline', block: true })} onClick={() => void attempt(load)}>
+          {RETRY_PAIRED_BROWSERS}
         </button>
       ) : null}
       {view.at === 'listed'
@@ -225,7 +218,7 @@ export function PairedBrowsersScreen({
         <h1 className={PK.headerTitle}>{title}</h1>
       </header>
       <div className={PK.body}>
-        <PairedBrowsers {...panel} autoLoad />
+        <PairedBrowsers {...panel} />
       </div>
     </div>
   );

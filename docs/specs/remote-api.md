@@ -225,8 +225,8 @@ Source of truth: `remote-lib-common/src/remote/frame-wire.ts`, `FrameTunnel` in 
 
 `devices.list` reads the Burrow's paired browsers and `devices.revoke { id }` revokes one, Client→Burrow. [remote-security-model.md](./remote-security-model.md) -> "Revocation from Pocket" owns who may, what a revoke must prove, and what the list carries.
 
-- **A request is sent bare, and sent again with `proof` when answered `presence-required { challenge }`**, the proof's `session` binding naming that challenge. A list needs none once the session has shown a proof; a revoke always does.
-- **Every answer is an outcome, never free text**: `devices` or `revoked { self }`, `presence-required`, or `refused` with one of `DeviceRefusalCode`, which a Client words itself. **`self` means the goodbye follows.**
+- **A revoke is sent bare, and sent again with `proof` when answered `presence-required { challenge }`**, the proof's `session` binding naming that challenge. A list takes no proof.
+- **Every answer is an outcome, never free text**: `devices`, or `revoked { self }` or `presence-required`, or `refused` with one of `DeviceRefusalCode`, which a Client words itself. **`self` means the goodbye follows.**
 - **Must keep "not supported" apart from "no devices"**: a session whose hello carried no `devices` is an older Burrow or a one-time session, whose `devices.*` is an unknown method, so a Client sends it neither and says so. An older Client never sends one, and ignores the hello field.
 - **A Relay older than the `session` binding answers `MALFORMED_BINDING_ERROR` at `POST /api/reauth/begin`**, which Pocket reports as that, having changed nothing.
 

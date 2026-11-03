@@ -436,8 +436,10 @@ test('the devices.* answers are closed: a Client reads only what it has copy for
   const entry = { id: 'abcd', label: 'Dormouse Pocket (browser)', approvedAt: 1, lastSeenAt: null, self: true };
   assert.equal(isDevicesListResult({ outcome: 'devices', devices: [entry, { ...entry, lastSeenAt: 2 }] }), true);
   assert.equal(isDevicesRevokeResult({ outcome: 'revoked', self: false }), true);
+  assert.equal(isDevicesRevokeResult({ outcome: 'presence-required', challenge: 'abc' }), true);
+  // Listing asks for no proof, so a list that demanded one is not an answer.
+  assert.equal(isDevicesListResult({ outcome: 'presence-required', challenge: 'abc' }), false);
   for (const guard of [isDevicesListResult, isDevicesRevokeResult]) {
-    assert.equal(guard({ outcome: 'presence-required', challenge: 'abc' }), true);
     assert.equal(guard({ outcome: 'refused', code: 'presence-rejected' }), true);
     assert.equal(guard({ outcome: 'refused', code: 'unknown-device' }), true);
     for (const wrong of [

@@ -2045,7 +2045,7 @@ describe('paired browsers, over a session', () => {
     });
   });
 
-  it('lists each record to a session that proved presence, its own marked, and holding nothing else', async () => {
+  it('lists each record, its own marked, and holding nothing else', async () => {
     await seedPaired();
     const paired = await connect('proof');
     const ownId = deviceIdFor(ownRecord.clientStaticPublicKey);
@@ -2066,49 +2066,35 @@ describe('paired browsers, over a session', () => {
     }
   });
 
-  it('asks a session that rode a window for a proof before it lists, and once', async () => {
+  it('lists to a session that rode a window, asking no proof, yet still demands one to revoke', async () => {
     await seedPaired();
     await connect('proof');
     // A newer session from this static replaces it, riding what that proof opened.
-    const paired = await connect('window');
-
-    const challenge = await challengeFor(paired, LIST);
-    // Listing nothing until it proves: the list holds other devices' metadata.
-    const proof = await paired.proofFor(challenge);
-    expect((await paired.request(LIST, { proof })).result).toMatchObject({ outcome: 'devices' });
-    // Single use, and shown: a re-read after a revoke costs no second prompt.
-    expect((await paired.request(LIST)).result).toMatchObject({ outcome: 'devices' });
-  });
-
-  it('never lets a window ride revoke, nor a proof shown at connection or for the list', async () => {
-    await seedPaired();
-    const proved = await connect('proof');
-    expect((await proved.request(REVOKE, { id: otherId })).result).toMatchObject({ outcome: 'presence-required' });
-
     const rode = await connect('window');
-    expect((await rode.request(REVOKE, { id: otherId })).result).toMatchObject({ outcome: 'presence-required' });
 
-    const proof = await rode.proofFor(await challengeFor(rode, LIST));
-    expect((await rode.request(LIST, { proof })).result).toMatchObject({ outcome: 'devices' });
-    expect((await rode.request(REVOKE, { id: otherId })).result).toMatchObject({ outcome: 'presence-required' });
+    expect((await rode.request(LIST)).result).toMatchObject({ outcome: 'devices' });
+    expect(rode.opened()).not.toContainEqual(expect.objectContaining({ result: expect.objectContaining({ outcome: 'presence-required' }) }));
 
+    expect((await rode.request(REVOKE, { id: otherId })).result).toMatchObject({ outcome: 'presence-required' });
     expect(otherIsActive()).toBe(true);
     expect(store.accessLog.some((entry) => entry.event === 'revoked')).toBe(false);
   });
 
-  it('refuses a proof whose challenge was issued for the list, and spends it', async () => {
+  it('never lets a window ride or the connection\'s own proof revoke', async () => {
     await seedPaired();
-    await connect('proof');
-    const paired = await connect('window');
-    const challenge = await challengeFor(paired, LIST);
-    const proof = await paired.proofFor(challenge);
-    expect((await paired.request(REVOKE, { id: otherId, proof })).result).toEqual({
-      outcome: 'refused',
-      code: 'presence-rejected',
+    const proved = await connect('proof');
+    expect((await proved.request(REVOKE, { id: otherId })).result).toMatchObject({ outcome: 'presence-required' });
+    // Having listed changes nothing.
+    expect((await proved.request(LIST)).result).toMatchObject({ outcome: 'devices' });
+    expect((await proved.request(REVOKE, { id: otherId })).result).toMatchObject({ outcome: 'presence-required' });
+
+    const rode = await connect('window');
+    await expect(rode.request(REVOKE, { id: otherId, proof: 'window' })).resolves.toMatchObject({
+      result: { outcome: 'refused', code: 'presence-rejected' },
     });
+
     expect(otherIsActive()).toBe(true);
-    // Spent: the same proof buys the list nothing now either.
-    expect((await paired.request(LIST, { proof })).result).toEqual({ outcome: 'refused', code: 'presence-rejected' });
+    expect(store.accessLog.some((entry) => entry.event === 'revoked')).toBe(false);
   });
 
   it('revokes by id on a fresh proof, through the service, logged under its own requester whatever the Client says', async () => {
