@@ -2,7 +2,7 @@
  * The one-time phone page (`docs/specs/one-time.md` -> "Phone page"), which
  * Hosted serves at `/connect/`: the link a computer showed, a Connect tap, two
  * digits to type on that computer, then Pocket's mobile wall over the direct
- * path — and nothing kept, since this origin is Hosted's accounts' too.
+ * path — and nothing kept, on an origin of its own that holds no paired keys.
  *
  * The screens draw on Pocket's chrome and shared views; the session is a
  * {@link OneTimeClient}, whose `connectOnce` runs the whole ceremony and is the
@@ -29,7 +29,7 @@ import {
 import type { RemotePtyAdapter } from '../client/remote-adapter';
 import type { RemoteWebSocket } from '../ws';
 import { disposeAllSessions } from '../../lib/terminal-registry';
-import { frameDomainFor } from '../pocket-app/deployment';
+import { oneTimeFrameDomainFor } from '../pocket-app/deployment';
 import { PocketWall, type PocketBrowsers } from '../pocket-app/PocketWall';
 import type { FrameSession } from '../client/frame-client';
 import { PK, pkButton } from '../pocket-app/pocket-chrome';
@@ -392,7 +392,7 @@ export function OneTimeConnecting({ onCancel }: { onCancel: () => void }): React
 }
 
 /** Where this page frames pages: Hosted's own, as Pocket's. */
-const pageFrameDomain = () => frameDomainFor('hosted', location.origin);
+const pageFrameDomain = () => oneTimeFrameDomainFor(location.origin);
 /** In a frame's origin where Pocket names a Burrow; the salt alone keeps it apart. */
 const ONE_TIME_FRAME_SCOPE = 'one-time';
 

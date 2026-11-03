@@ -150,6 +150,7 @@ function makeRuntime(
       : options.createDirectPeer;
   runtime = new OneTimeRuntime({
     origin: ORIGIN,
+    linkOrigin: ORIGIN,
     createWebSocket: (url) => rendezvous.createBurrowSocket(url),
     createSession: ({ burrowId, send, label, end }) => {
       const api: ServedApi = { burrowId, label, end, handled: [], disposed: false, send };

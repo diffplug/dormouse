@@ -88,6 +88,7 @@ import {
   HOSTED_ACCOUNT_ORIGIN,
   hostedAccountOrigin,
   hostedOrigin,
+  oneTimeLinkOrigin,
   isDevHostedBuild,
   isRelayOrigin,
   type RelayBuild,
@@ -1333,6 +1334,7 @@ export class BurrowService {
     }
     const runtime: OneTimeRuntime = new OneTimeRuntime({
       origin: hosted,
+      linkOrigin: oneTimeLinkOrigin(this.#relay),
       createWebSocket: this.#createWebSocket,
       createSession: (opts) => this.#createApiSession(opts),
       directPeering: directPeeringFor(policy, this.#createDirectPeer),

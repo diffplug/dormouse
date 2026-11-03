@@ -23,7 +23,7 @@ import {
   fromBase64Url,
 } from 'remote-lib-common';
 
-import { DEFAULT_RELAY_ORIGIN, hostedOrigin, type RelayMode } from '../relay-origin';
+import { DEFAULT_RELAY_ORIGIN, HOSTED_ONE_TIME_ORIGIN, hostedOrigin, type RelayMode } from '../relay-origin';
 import {
   idleOneTimeState,
   type InvitationEvent,
@@ -136,7 +136,7 @@ export function oneTimeWaiting(
   const ephPubBase64Url = '7Hq2LmZx9cVb4NtRkWpYsD0aFgJ1uEiO3yTnC6hQ5Ks';
   return {
     status: 'waiting',
-    url: formatOneTimeLinkUrl(DEFAULT_RELAY_ORIGIN, {
+    url: formatOneTimeLinkUrl(HOSTED_ONE_TIME_ORIGIN, {
       roomId: 'Rm4qT0vXc8LbN2kZyPaE1w',
       expiry,
       ephPub: fromBase64Url(ephPubBase64Url),

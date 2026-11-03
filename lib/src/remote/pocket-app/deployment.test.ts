@@ -16,6 +16,7 @@ import {
   deploymentDirectPeer,
   deploymentUnreachableMessage,
   frameDomainFor,
+  oneTimeFrameDomainFor,
   parsePocketDeployment,
   pocketDeploymentSource,
   readPocketDeployment,
@@ -183,6 +184,16 @@ describe('Pocket’s direct-peer factory', () => {
     await selfHost.require();
     deploymentDirectPeer(selfHost)();
     expect(built).toEqual([{ iceServers: [{ urls: CLOUDFLARE_STUN_URL }] }, { iceServers: [] }]);
+  });
+});
+
+describe('oneTimeFrameDomainFor', () => {
+  it('names the frame domain only at the one-time page\'s production origin', () => {
+    expect(oneTimeFrameDomainFor('https://connect.dormouse.sh')).toBe('dormouseusercontent.com');
+    expect(oneTimeFrameDomainFor('https://dormouse-connect-pr-7.example.workers.dev')).toBeNull();
+    expect(oneTimeFrameDomainFor('http://localhost:8788')).toBeNull();
+    // Nothing of a stranger's renders at Pocket's origin any more, framed or not.
+    expect(oneTimeFrameDomainFor('https://relay.dormouse.sh')).toBeNull();
   });
 });
 

@@ -11,7 +11,7 @@
 
 import { HOSTED_FRAME_DOMAIN, HOSTED_POCKET_DEPLOYMENT, POCKET_DEPLOYMENT_FILE } from 'remote-lib-common';
 
-import { DEFAULT_RELAY_ORIGIN } from '../../host/relay-origin';
+import { DEFAULT_RELAY_ORIGIN, HOSTED_ONE_TIME_ORIGIN } from '../../host/relay-origin';
 
 import type { DirectPeerFactory } from '../direct/direct-peer';
 import { hostedDirectPeer, selfHostDirectPeer } from '../client/browser-direct-peer';
@@ -42,6 +42,14 @@ export function parsePocketDeployment(body: unknown): PocketDeployment {
  */
 export function frameDomainFor(deployment: PocketDeployment | null, origin: string): string | null {
   return deployment === 'hosted' && origin === DEFAULT_RELAY_ORIGIN ? HOSTED_FRAME_DOMAIN : null;
+}
+
+/**
+ * The parent of the one-time page's frame origins, or `null` where it frames
+ * nothing, by {@link frameDomainFor}'s rule: only Hosted's production page.
+ */
+export function oneTimeFrameDomainFor(origin: string): string | null {
+  return origin === HOSTED_ONE_TIME_ORIGIN ? HOSTED_FRAME_DOMAIN : null;
 }
 
 /**

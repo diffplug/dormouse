@@ -151,6 +151,12 @@ export interface OneTimeRuntimeOptions {
    */
   readonly origin: string;
   /**
+   * The origin the link it shows names, where the phone page is; never one a
+   * command chose. A link printed for another Burrow's phone is all it is here:
+   * the runtime never connects to it.
+   */
+  readonly linkOrigin: string;
+  /**
    * Open the Burrow route. **The socket must send no `Origin` header** — the
    * route refuses one, so no browser page can mint a room — which is why the host
    * builds it rather than this module reaching for a global.
@@ -223,6 +229,7 @@ const END_REASON_FOR_DENIAL: Record<OneTimeDenialCode, OneTimeEndReason> = {
 
 export class OneTimeRuntime {
   readonly #origin: string;
+  readonly #linkOrigin: string;
   readonly #createWebSocket: (url: string) => RemoteWebSocket;
   readonly #createSession: OneTimeRuntimeOptions['createSession'];
   readonly #directPeering: DirectPeering;
@@ -285,6 +292,7 @@ export class OneTimeRuntime {
 
   constructor(options: OneTimeRuntimeOptions) {
     this.#origin = options.origin;
+    this.#linkOrigin = options.linkOrigin;
     this.#createWebSocket = options.createWebSocket;
     this.#createSession = options.createSession;
     this.#directPeering = options.directPeering;
@@ -425,7 +433,7 @@ export class OneTimeRuntime {
     const link = linkFor(room, keyPair, this.#now());
     let url: string;
     try {
-      url = formatOneTimeLinkUrl(this.#origin, link);
+      url = formatOneTimeLinkUrl(this.#linkOrigin, link);
     } catch (error) {
       console.warn('[one-time] could not compose the link', error);
       this.#end('burrow-error');

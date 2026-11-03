@@ -157,6 +157,7 @@ function makeRuntime(
   if (options.network) network = new FakeDirectNetwork(options.network);
   runtime = new OneTimeRuntime({
     origin: ORIGIN,
+    linkOrigin: ORIGIN,
     createWebSocket: (url) => rendezvous.createBurrowSocket(url),
     createSession: ({ burrowId, send, label }) =>
       new RemoteApiSession({ burrowId, send, provider, holder: { id: 'holder-1', label } }),

@@ -304,8 +304,8 @@ const OUTBOUND_SITES = {
  */
 const REMOTE_LITERALS = {
   'lib/src/host/relay-origin.ts': {
-    hosts: ['relay.dormouse.sh', 'voice.dormouse.sh', 'hosted.dormouse.sh'],
-    reason: 'The baked relay origin\'s default and the fixed voice and account origins.',
+    hosts: ['relay.dormouse.sh', 'voice.dormouse.sh', 'hosted.dormouse.sh', 'connect.dormouse.sh'],
+    reason: 'The baked relay origin\'s default, the fixed voice and account origins, and the one-time page\'s origin, written into a link and never requested.',
   },
   'standalone/src/updater.ts': {
     hosts: ['github.com', 'dormouse.sh'],

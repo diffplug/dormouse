@@ -212,6 +212,18 @@ for (const [file, violation] of [
   selftest.withAppended(file, violation, `a store in ${file} stays green: ${violation.trim()}`);
 }
 
+// Each name the relay Worker's no-page rule lists must redden it on its own, in
+// the entry and in the staging that would copy the page beside Pocket.
+for (const [file, violation] of [
+  ['hosted/server/relay-worker.ts', '\nconst __selftest = oneTimePageRoutes;\n'],
+  ['hosted/server/relay-worker.ts', '\nconst __selftest = oneTimeClientRoute;\n'],
+  ['hosted/server/relay-worker.ts', "\nexport { OneTimeRoom } from './one-time-room';\n"],
+  ['hosted/scripts/stage-relay.mjs', "\nconst __selftest = 'dist-one-time';\n"],
+  ['hosted/scripts/stage-relay.mjs', '\nconst __selftest = ONE_TIME_SHELL;\n'],
+]) {
+  selftest.withAppended(file, violation, `a one-time page in ${file} stays green: ${violation.trim()}`);
+}
+
 // The goodbye is a control message like the signals, so naming it — as its
 // tag or as its type — reddens the routing rule on its own, not just the SDP
 // the loop appends.
