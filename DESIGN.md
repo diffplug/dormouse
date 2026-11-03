@@ -218,7 +218,7 @@ The flat segments inside a `PopupButtonRow` — the row owns the border, backgro
 #### Chrome Button (window controls)
 The Windows/Linux native-style window control row in the standalone app bar.
 - **Variants:** `icon` (h-5 min-w-5, hover bg-current/10), `labeled` (h-5 min-w-5 px-1.5 text-xs), `window` (w-11, hover bg-current/10), `windowClose` (w-11, hover bg `#b92a1b` text-white).
-- **The exception:** `windowClose` is one of the two rostered literal hex colors (Fixed Exceptions), because the platform convention is a hard red regardless of theme.
+- **The exception:** `windowClose` is a rostered literal hex color (Fixed Exceptions), because the platform convention is a hard red regardless of theme.
 
 ### Cards / Containers
 

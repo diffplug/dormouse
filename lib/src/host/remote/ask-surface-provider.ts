@@ -96,8 +96,10 @@ export function createAskSurfaceProvider(
         seen.add(entry.surfaceId);
         return true;
       });
-      // A window that did not answer keeps its rows: a slow one is not every
-      // Surface in it closing, which a Client would act on.
+      // While any window is silent, every earlier row this ask did not confirm
+      // is kept: a slow window is not every Surface in it closing, which a
+      // Client would act on. A row has no owner, so a closed Surface in a window
+      // that did answer also lingers until an ask every window answers.
       listed = answers.silent ? [...entries, ...listed.filter((entry) => !seen.has(entry.surfaceId))] : entries;
       return listed;
     },

@@ -34,7 +34,7 @@ export const ENROLL_TOKEN_PATTERN = HEX_ENCODED_32_BYTES_PATTERN;
 /** How long a bootstrap offer stays redeemable before the first Burrow enrolls. */
 export const ENROLL_OFFER_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
-/** Bound on the displayed `mintedAt`; an ISO-8601 stamp needs about 30. */
+/** Bound on the `mintedAt` stamp's length; an ISO-8601 stamp needs about 30. */
 const MINTED_AT_MAX_LENGTH = 64;
 
 /**
@@ -77,7 +77,8 @@ export function parseEnrollmentOffer(text: string): EnrollmentOffer | null {
 }
 
 /**
- * Whether an offer is still inside the shared Relay/Burrow display window.
+ * Whether an offer is still inside the window both the Relay (to redeem it)
+ * and the Burrow (to offer it) honor.
  * A future stamp passes: one machine writes and reads the file, so clock skew
  * is not evidence of anything and must not brick the one-click path.
  */

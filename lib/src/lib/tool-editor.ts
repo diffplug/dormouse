@@ -17,8 +17,8 @@ const emit = () => { for (const listener of listeners) listener(); };
 export const getEditorClosePrompt = () => prompt;
 export const subscribeEditorClosePrompt = (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; };
 
-/** A close that did not ask, or was cancelled, keeps a dirty Tool open. */
 const NEWER_EDITS = 'New edits arrived while saving. Save again or cancel.';
+/** A close that did not ask, or was cancelled, keeps a dirty Tool open. */
 export const UNSAVED_TOOL_REFUSAL = 'Tool has unsaved changes. Save or discard them, then close it again.';
 export const UNSAVED_TOOL_MOVE_REFUSAL = 'Tool has unsaved changes. Save or discard them before moving this Workspace.';
 
