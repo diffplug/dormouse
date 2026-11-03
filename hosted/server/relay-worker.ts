@@ -12,7 +12,7 @@ import { workerApp } from "./worker-app";
  * The relay Worker, `dormouse-relay` on `relay.dormouse.sh`: the Hosted Relay's
  * routes and Pocket at the root, and the route a Burrow mints a one-time room
  * on. **Never the one-time phone page**, which renders what a stranger's link
- * sends beside nothing here (`hosted/server/connect-worker.ts`); its old path
+ * sends beside nothing here (`hosted/server/try-worker.ts`); its old path
  * redirects there. It holds no auth secret and never asks auth; it queries only its own
  * tables and the entitlement's user row, and in production its Hyperdrive
  * connects as `dormouse_relay`, granted exactly those

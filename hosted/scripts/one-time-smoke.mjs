@@ -19,13 +19,13 @@ const open = (url, headers) => new WebSocket(url, { headers });
 
 /**
  * The live rendezvous across its two Workers: a link an older build shows moves
- * from `relay` to the page at `connect`, a Burrow can mint on `relay`, a browser
- * Origin cannot, a phone from `connect` joins there and a frame crosses each way
+ * from `relay` to the page at `tryOrigin`, a Burrow can mint on `relay`, a browser
+ * Origin cannot, a phone from `tryOrigin` joins there and a frame crosses each way
  * unchanged, a page on `relay` cannot join, and a second phone is refused as
- * taken. `connect` and `fetchPage` stand in for the network in tests.
+ * taken. `ws` and `fetchPage` stand in for the network in tests.
  */
-export async function oneTimeSmoke(relay, connect, ws = open, fetchPage = fetch) {
-  await movedSmoke(relay, connect, fetchPage);
+export async function oneTimeSmoke(relay, tryOrigin, ws = open, fetchPage = fetch) {
+  await movedSmoke(relay, tryOrigin, fetchPage);
   const burrowUrl = relay.replace(/^http/, "ws") + ONE_TIME_WS_ROUTES.burrow;
   const burrow = watch(ws(burrowUrl, {}));
   try {
@@ -34,21 +34,21 @@ export async function oneTimeSmoke(relay, connect, ws = open, fetchPage = fetch)
     assert.match(frame.roomId, /^[A-Za-z0-9_-]{22}$/);
     assert.ok(frame.expiresAt > Date.now(), "A fresh room has not expired");
 
-    const page = watch(ws(burrowUrl, { origin: connect }));
+    const page = watch(ws(burrowUrl, { origin: tryOrigin }));
     assert.equal(
       await page.settled(),
       false,
       "A browser Origin must not mint a room",
     );
 
-    const clientUrl = `${connect.replace(/^http/, "ws")}${ONE_TIME_WS_ROUTES.client}?${ONE_TIME_ROOM_PARAM}=${frame.roomId}`;
+    const clientUrl = `${tryOrigin.replace(/^http/, "ws")}${ONE_TIME_WS_ROUTES.client}?${ONE_TIME_ROOM_PARAM}=${frame.roomId}`;
     const pocket = watch(ws(clientUrl, { origin: relay }));
     assert.equal(
       await pocket.settled(),
       false,
       "A page on the relay's origin must not join a room",
     );
-    const phone = watch(ws(clientUrl, { origin: connect }));
+    const phone = watch(ws(clientUrl, { origin: tryOrigin }));
     try {
       assert.equal(await phone.settled(), true, "The phone joins its room");
       const marker = `smoke ${crypto.randomUUID()} — not JSON`;
@@ -60,7 +60,7 @@ export async function oneTimeSmoke(relay, connect, ws = open, fetchPage = fetch)
         marker.toUpperCase(),
         "Burrow → phone, verbatim",
       );
-      const second = watch(ws(clientUrl, { origin: connect }));
+      const second = watch(ws(clientUrl, { origin: tryOrigin }));
       assert.equal(
         (await second.closed()).code,
         WS_CLOSE_ONE_TIME_TAKEN,
@@ -75,12 +75,12 @@ export async function oneTimeSmoke(relay, connect, ws = open, fetchPage = fetch)
 }
 
 /** The relay renders no page at the old path: it answers a redirect to the page's own origin. */
-async function movedSmoke(relay, connect, fetchPage) {
+async function movedSmoke(relay, tryOrigin, fetchPage) {
   const moved = await fetchPage(relay + ONE_TIME_PAGE_PATH, { redirect: "manual" });
   assert.equal(moved.status, 308, "The relay moves an older build's link");
   assert.equal(
     moved.headers.get("location"),
-    connect + ONE_TIME_PAGE_PATH,
+    tryOrigin + ONE_TIME_PAGE_PATH,
     "An older build's link moves to the page's own origin",
   );
 }
@@ -92,7 +92,7 @@ async function movedSmoke(relay, connect, fetchPage) {
  */
 export async function oneTimePageSmoke(origin, fetchPage = fetch) {
   const page = await fetchPage(origin + ONE_TIME_PAGE_PATH);
-  assert.equal(page.status, 200, "The connect Worker serves the one-time page");
+  assert.equal(page.status, 200, "The try Worker serves the one-time page");
   assert.match(page.headers.get("content-type") ?? "", /text\/html/);
   const policy = page.headers.get("content-security-policy") ?? "";
   for (const directive of [

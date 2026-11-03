@@ -48,10 +48,10 @@ describe('Hosted bundle disclosure', () => {
 
   it('bundles every Worker the deploy configures and the account page', () => {
     expect(hostedBundleEntries(repoRoot)).toEqual([
-      { entry: 'server/connect-worker.ts', platform: 'worker' },
       { entry: 'server/frame-worker.ts', platform: 'worker' },
       { entry: 'server/worker.ts', platform: 'worker' },
       { entry: 'server/relay-worker.ts', platform: 'worker' },
+      { entry: 'server/try-worker.ts', platform: 'worker' },
       { entry: 'server/voice-worker.ts', platform: 'worker' },
       { entry: 'src/main.tsx', platform: 'browser' },
     ]);

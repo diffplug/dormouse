@@ -49,7 +49,7 @@ test("each preview configuration isolates its origin and excludes production bin
       account: stale(bases.account),
       relay: stale(bases.relay),
       voice: stale(bases.voice),
-      connect: stale(bases.connect),
+      try: stale(bases.try),
     },
     env,
     "c".repeat(32),
@@ -58,7 +58,7 @@ test("each preview configuration isolates its origin and excludes production bin
     account: ["dormouse-hosted-pr-42", "../../server/preview-worker.ts"],
     relay: ["dormouse-relay-pr-42", "../../server/relay-worker.ts"],
     voice: ["dormouse-voice-pr-42", "../../server/voice-preview-worker.ts"],
-    connect: ["dormouse-connect-pr-42", "../../server/connect-worker.ts"],
+    try: ["dormouse-try-pr-42", "../../server/try-worker.ts"],
   };
   for (const [worker, [name, main]] of Object.entries(expected)) {
     const config = configs[worker];
@@ -73,7 +73,7 @@ test("each preview configuration isolates its origin and excludes production bin
         // older link's redirect this PR's page, never production's.
         ...(worker === "relay" && {
           ACCOUNT_ORIGIN: "https://dormouse-hosted-pr-42.hosted-tests.workers.dev",
-          CONNECT_ORIGIN: "https://dormouse-connect-pr-42.hosted-tests.workers.dev",
+          TRY_ORIGIN: "https://dormouse-try-pr-42.hosted-tests.workers.dev",
         }),
       },
       worker,
@@ -86,7 +86,7 @@ test("each preview configuration isolates its origin and excludes production bin
   // Production alone sweeps ElevenLabs history, on the voice Worker; a preview has no cron.
   assert.ok(bases.voice.triggers?.crons?.length);
   // Every preview that binds one shares one database; the page's binds none.
-  assert.equal(configs.connect.hyperdrive, undefined);
+  assert.equal(configs.try.hyperdrive, undefined);
   assert.deepEqual(configs.account.hyperdrive, [{ binding: "HYPERDRIVE", id: "c".repeat(32) }]);
   assert.deepEqual(configs.voice.hyperdrive, configs.account.hyperdrive);
   assert.deepEqual(configs.relay.hyperdrive, configs.account.hyperdrive);
@@ -103,16 +103,16 @@ test("each preview configuration isolates its origin and excludes production bin
   assert.deepEqual(configs.account.durable_objects, {
     bindings: [{ name: "RELAY_ROOM", class_name: "RelayRoom", script_name: "dormouse-relay-pr-42" }],
   });
-  // The relay's room binding names this PR's connect preview, which implements it.
+  // The relay's room binding names this PR's try preview, which implements it.
   assert.deepEqual(configs.relay.durable_objects.bindings, [
-    { name: "ONE_TIME_ROOM", class_name: "OneTimeRoom", script_name: "dormouse-connect-pr-42" },
+    { name: "ONE_TIME_ROOM", class_name: "OneTimeRoom", script_name: "dormouse-try-pr-42" },
     { name: "RELAY_ROOM", class_name: "RelayRoom" },
   ]);
   assert.deepEqual(configs.relay.migrations, bases.relay.migrations);
-  assert.deepEqual(configs.connect.durable_objects, bases.connect.durable_objects);
-  assert.deepEqual(configs.connect.migrations, bases.connect.migrations);
-  assert.equal(configs.connect.assets.directory, "../../dist/connect");
-  for (const worker of ["relay", "account", "connect"])
+  assert.deepEqual(configs.try.durable_objects, bases.try.durable_objects);
+  assert.deepEqual(configs.try.migrations, bases.try.migrations);
+  assert.equal(configs.try.assets.directory, "../../dist/try");
+  for (const worker of ["relay", "account", "try"])
     assert.deepEqual(
       configs[worker].ratelimits.map(({ name, namespace_id }) => [name, namespace_id]),
       bases[worker].ratelimits.map(({ name, namespace_id }) => [
@@ -327,7 +327,7 @@ test("cleanup only deletes this PR's resources and can run twice", async (t) => 
   await cleanup(env);
   existing = false;
   await cleanup(env);
-  const workers = ["dormouse-connect-pr-42", "dormouse-relay-pr-42", "dormouse-voice-pr-42", "dormouse-hosted-pr-42"];
+  const workers = ["dormouse-try-pr-42", "dormouse-relay-pr-42", "dormouse-voice-pr-42", "dormouse-hosted-pr-42"];
   assert.deepEqual(
     removed.map((path) => path.split("/").pop()),
     [...workers, "ours", "br-ours", ...workers],
@@ -420,7 +420,7 @@ test("sweep cleans up only other PRs that are closed or unlabeled", async (t) =>
   });
   await sweep({ ...env, GITHUB_REPOSITORY: "diffplug/dormouse", GH_TOKEN: "dummy-gh-token" });
   const workers = (pr) =>
-    ["dormouse-connect", "dormouse-relay", "dormouse-voice", "dormouse-hosted"].map((name) => `${name}-pr-${pr}`);
+    ["dormouse-try", "dormouse-relay", "dormouse-voice", "dormouse-hosted"].map((name) => `${name}-pr-${pr}`);
   assert.deepEqual(removed, [...workers(7), "br-7", ...workers(9), "hd-9"]);
 });
 
@@ -459,7 +459,7 @@ test("the smoke runs its parts concurrently, retries each alone, and checks read
     account: "https://account.example.test",
     relay: "https://relay.example.test",
     voice: "https://voice.example.test",
-    connect: "https://connect.example.test",
+    try: "https://try.example.test",
   };
   const events = [];
   // The relay's VAPID key, or null while push is off.
@@ -471,19 +471,19 @@ test("the smoke runs its parts concurrently, retries each alone, and checks read
   // Every request the production smoke makes, answered as a healthy account would.
   const fetcher = async (url, init = {}) => {
     const { origin, pathname } = new URL(url);
-    if (origin === origins.connect && pathname === "/connect/")
+    if (origin === origins.try && pathname === "/connect/")
       return new Response('<script src="/connect/assets/page-abc.js"></script>', {
         headers: {
           "content-type": "text/html",
           "content-security-policy": [
-            `script-src ${origins.connect}/connect/assets/ 'wasm-unsafe-eval'`,
-            "connect-src wss://connect.example.test/api/one-time/client",
+            `script-src ${origins.try}/connect/assets/ 'wasm-unsafe-eval'`,
+            "connect-src wss://try.example.test/api/one-time/client",
             "frame-src https://*.dormouseusercontent.com",
             "sandbox allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads allow-popups-to-escape-sandbox",
           ].join("; "),
         },
       });
-    if (origin === origins.connect && pathname.startsWith("/connect/assets/"))
+    if (origin === origins.try && pathname.startsWith("/connect/assets/"))
       return new Response("export {};", {
         headers: { "content-type": "text/javascript", "cache-control": "public, max-age=31536000, immutable" },
       });
@@ -529,7 +529,7 @@ test("the smoke runs its parts concurrently, retries each alone, and checks read
   const count = (event) => events.filter((e) => e === event).length;
   const oneTime = async (origin, page) => {
     assert.equal(origin, origins.relay);
-    assert.equal(page, origins.connect);
+    assert.equal(page, origins.try);
     events.push("one-time");
   };
   const waits = [];
@@ -548,7 +548,7 @@ test("the smoke runs its parts concurrently, retries each alone, and checks read
   assert.equal(count("one-time"), 1);
   assert.equal(count("push"), 1);
   // Holding no database, the page's Worker reports no readiness.
-  assert.equal(count(`${origins.connect} ready`), 0);
+  assert.equal(count(`${origins.try} ready`), 0);
   for (const origin of [origins.account, origins.relay, origins.voice]) assert.equal(count(`${origin} ready`), 1, origin);
   assert.ok(events.indexOf(`${origins.relay} ready`) > events.lastIndexOf(`${origins.relay} health`));
   assert.ok(events.indexOf("push") > events.indexOf(`${origins.relay} ready`));

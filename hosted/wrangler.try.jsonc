@@ -1,7 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "dormouse-connect",
-  "main": "server/connect-worker.ts",
+  "name": "dormouse-try",
+  "main": "server/try-worker.ts",
   "compatibility_date": "2026-09-08",
   "compatibility_flags": [
     "nodejs_compat"
@@ -10,18 +10,18 @@
   "preview_urls": false,
   "routes": [
     {
-      "pattern": "connect.dormouse.sh",
+      "pattern": "try.dormouse.sh",
       "custom_domain": true
     }
   ],
   "assets": {
-    "directory": "./dist/connect",
+    "directory": "./dist/try",
     "binding": "ASSETS",
     "not_found_handling": "none",
     "run_worker_first": true
   },
   "vars": {
-    "APP_ORIGIN": "https://connect.dormouse.sh"
+    "APP_ORIGIN": "https://try.dormouse.sh"
   },
   "durable_objects": {
     "bindings": [

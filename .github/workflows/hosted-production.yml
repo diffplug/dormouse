@@ -100,7 +100,7 @@ jobs:
         run: pnpm --filter dormouse-hosted db:migrate && pnpm --filter dormouse-hosted db:validate
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-      - name: Deploy the frame and connect Workers, the relay with its readiness and rendezvous verified, then the voice and account Workers
+      - name: Deploy the frame and try Workers, the relay with its readiness and rendezvous verified, then the voice and account Workers
         run: node hosted/scripts/production.mjs deploy
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}

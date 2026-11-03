@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { stageConnect } from "./stage-connect.mjs";
+import { stageTry } from "./stage-try.mjs";
 import { stageRelay } from "./stage-relay.mjs";
 
 /**
@@ -31,11 +31,11 @@ function fixture({
   mkdirSync(join(assets, "connect", "assets"), { recursive: true });
   writeFileSync(join(assets, "connect", "assets", "stale.js"), "");
   writeFileSync(join(assets, "stray.html"), "<!doctype html><title>stray</title>");
-  const connect = join(root, "dist", "connect");
-  mkdirSync(join(connect, "connect", "assets"), { recursive: true });
-  writeFileSync(join(connect, "connect", "assets", "stale.js"), "");
-  writeFileSync(join(connect, "stray.html"), "<!doctype html><title>stray</title>");
-  return { pocket, oneTime, assets, connect, root };
+  const tryAssets = join(root, "dist", "try");
+  mkdirSync(join(tryAssets, "connect", "assets"), { recursive: true });
+  writeFileSync(join(tryAssets, "connect", "assets", "stale.js"), "");
+  writeFileSync(join(tryAssets, "stray.html"), "<!doctype html><title>stray</title>");
+  return { pocket, oneTime, assets, tryAssets, root };
 }
 
 test("Pocket lands at the root, and it is all the relay's assets hold: no one-time page beside it", () => {
@@ -58,13 +58,13 @@ test("Pocket lands at the root, and it is all the relay's assets hold: no one-ti
   });
 });
 
-test("the one-time page lands at its path, and it is all the connect Worker's assets hold", () => {
-  const { oneTime, connect } = fixture();
-  assert.equal(stageConnect(oneTime, connect), 1);
-  assert.ok(existsSync(join(connect, "connect", "index.html")));
-  assert.ok(existsSync(join(connect, "connect", "assets", "index-abc.js")));
-  assert.ok(!existsSync(join(connect, "connect", "assets", "stale.js")));
-  assert.deepEqual(readdirSync(connect), ["connect"]);
+test("the one-time page lands at its path, and it is all the try Worker's assets hold", () => {
+  const { oneTime, tryAssets } = fixture();
+  assert.equal(stageTry(oneTime, tryAssets), 1);
+  assert.ok(existsSync(join(tryAssets, "connect", "index.html")));
+  assert.ok(existsSync(join(tryAssets, "connect", "assets", "index-abc.js")));
+  assert.ok(!existsSync(join(tryAssets, "connect", "assets", "stale.js")));
+  assert.deepEqual(readdirSync(tryAssets), ["connect"]);
 });
 
 test("a Pocket build carrying the deployment file is refused, since a self-host Relay serves it as it is", () => {
@@ -80,8 +80,8 @@ test("a shell its policy would refuse is not staged quietly", () => {
     '<script type="module" src="https://cdn.example/connect/assets/x.js"></script>',
     "",
   ]) {
-    const { oneTime, connect } = fixture({ oneTimeScript });
-    assert.throws(() => stageConnect(oneTime, connect), undefined, oneTimeScript);
+    const { oneTime, tryAssets } = fixture({ oneTimeScript });
+    assert.throws(() => stageTry(oneTime, tryAssets), undefined, oneTimeScript);
   }
   for (const pocketScript of [
     '<script type="module">alert(1)</script>',
@@ -94,7 +94,7 @@ test("a shell its policy would refuse is not staged quietly", () => {
 });
 
 test("staging refuses to run before its build", () => {
-  const { pocket, oneTime, assets, connect } = fixture();
+  const { pocket, oneTime, assets, tryAssets } = fixture();
   assert.throws(() => stageRelay(join(pocket, "missing"), assets), /build:pocket/);
-  assert.throws(() => stageConnect(join(oneTime, "missing"), connect), /build:one-time/);
+  assert.throws(() => stageTry(join(oneTime, "missing"), tryAssets), /build:one-time/);
 });

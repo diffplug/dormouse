@@ -11,15 +11,15 @@ const hosted = new URL("../", import.meta.url);
  * Hosted's four application Workers, each with an origin and a preview, in
  * deploy order, with the facts their Wrangler configs do not carry. Everything
  * else — script name, `main`, `APP_ORIGIN`, assets, Hyperdrive, Durable Objects,
- * rate limits — is read from `config`. The connect Worker deploys before the
+ * rate limits — is read from `config`. The try Worker deploys before the
  * relay: the relay binds its `OneTimeRoom` and redirects to its page, so neither
  * may outrun it.
  */
 export const APP_WORKERS = {
   // Without a `previewMain`, a preview runs the production entry: neither of the
   // next two mappers passes anything a preview lacks.
-  connect: {
-    config: "wrangler.connect.jsonc",
+  try: {
+    config: "wrangler.try.jsonc",
   },
   relay: {
     config: "wrangler.relay.jsonc",

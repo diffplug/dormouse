@@ -79,7 +79,7 @@ export function previewConfig(base, env, worker, hyperdriveId) {
  * Every application Worker's preview config, keyed as `APP_WORKERS` is; those
  * that bind a Hyperdrive share the PR's one, unlike production's one per Worker
  * (`docs/specs/hosted.md` -> "PR previews"). The relay's enrollment links name
- * the account preview and an older link's redirect the connect preview, never
+ * the account preview and an older link's redirect the try preview, never
  * production's.
  */
 export function previewConfigs(bases, env, hyperdriveId) {
@@ -90,7 +90,7 @@ export function previewConfigs(bases, env, hyperdriveId) {
     ]),
   );
   configs.relay.vars.ACCOUNT_ORIGIN = configs.account.vars.APP_ORIGIN;
-  configs.relay.vars.CONNECT_ORIGIN = configs.connect.vars.APP_ORIGIN;
+  configs.relay.vars.TRY_ORIGIN = configs.try.vars.APP_ORIGIN;
   return configs;
 }
 
@@ -271,7 +271,7 @@ export async function prepare(env = process.env) {
   if (env.GITHUB_STEP_SUMMARY)
     await appendFile(
       env.GITHUB_STEP_SUMMARY,
-      `Preview target: ${origins.account}/login\n\nOne-time page: ${origins.connect}/connect/\n\nVoice: ${origins.voice}\n\nRevision: ${env.BUILD_SHA}\n\nCaptured email inbox: ${origins.account}/dev/emails. No real email is sent. Deployment and smoke checks must succeed below.\n`,
+      `Preview target: ${origins.account}/login\n\nOne-time page: ${origins.try}/connect/\n\nVoice: ${origins.voice}\n\nRevision: ${env.BUILD_SHA}\n\nCaptured email inbox: ${origins.account}/dev/emails. No real email is sent. Deployment and smoke checks must succeed below.\n`,
     );
   console.log(`Prepared ${Object.values(origins).join(", ")}`);
   return configs;

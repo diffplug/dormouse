@@ -27,7 +27,7 @@ import {
 } from "remote-lib-common";
 import * as smoke from "../../scripts/one-time-smoke.mjs";
 import { HOSTED_FRAME_DOMAIN } from "remote-lib-common";
-import { connectRules, oneTimePagePolicy, RUNS_NOTHING_POLICY } from "../headers";
+import { tryRules, oneTimePagePolicy, RUNS_NOTHING_POLICY } from "../headers";
 import { rateLimitKey } from "../one-time";
 import { ENTRIES, ORIGINS, bundleWorker, miniflareOptions, together, wrangler } from "./bundle";
 import { limitOf, untilLimited } from "./rate-limit";
@@ -38,8 +38,8 @@ import { rawUpgrade, type RawSocket } from "./raw-socket";
 // without Postgres: none of it touches Hyperdrive, so this suite runs in the
 // root `pnpm test`.
 
-/** The connect Worker's origin: the page's, and the one that joins a room. */
-const origin = ORIGINS.connect;
+/** The try Worker's origin: the page's, and the one that joins a room. */
+const origin = ORIGINS.try;
 /** The relay Worker's origin: where a Burrow mints a room, and Pocket's. */
 const relay = ORIGINS.relay;
 /** The sibling Workers' origins, which share the account's login cookie as same-site. */
@@ -52,11 +52,11 @@ const POCKET_SHELL = "<!doctype html><title>Pocket</title>";
 
 const relayBundle = bundleWorker(ENTRIES.relay);
 
-async function start(connectEntry: string) {
-  const [connectBundle, relayScript] = await Promise.all([bundleWorker(connectEntry), relayBundle]);
+async function start(tryEntry: string) {
+  const [tryBundle, relayScript] = await Promise.all([bundleWorker(tryEntry), relayBundle]);
   const mf = new Miniflare(
     together(
-      miniflareOptions("connect", connectBundle.outputFiles[0].text, {
+      miniflareOptions("try", tryBundle.outputFiles[0].text, {
         bindings: { APP_ORIGIN: origin },
         routes: [`${new URL(origin).host}/*`],
         serviceBindings: {
@@ -77,7 +77,7 @@ async function start(connectEntry: string) {
         },
       }),
       miniflareOptions("relay", relayScript.outputFiles[0].text, {
-        bindings: { APP_ORIGIN: relay, CONNECT_ORIGIN: origin },
+        bindings: { APP_ORIGIN: relay, TRY_ORIGIN: origin },
         routes: [`${new URL(relay).host}/*`],
         // Pocket's shell for every path, so a path the relay left to it shows.
         serviceBindings: {
@@ -94,7 +94,7 @@ let production: Awaited<ReturnType<typeof start>>;
 let short: Awaited<ReturnType<typeof start>>;
 beforeAll(async () => {
   [production, short] = await Promise.all([
-    start(ENTRIES.connect),
+    start(ENTRIES.try),
     start("server/tests/one-time-entry.ts"),
   ]);
 });
@@ -108,7 +108,7 @@ const freshIp = () => `198.51.100.${++addresses}`;
 
 /**
  * An upgrade through the Worker, as a request for `url`: by default the relay
- * for the Burrow's route, and the connect Worker for anything else.
+ * for the Burrow's route, and the try Worker for anything else.
  */
 function upgrade(
   path: string,
@@ -182,8 +182,8 @@ test("no Origin may mint, and only the page's origin may join", async () => {
     { origin: relay },
     ...SIBLINGS.map((sibling) => ({ origin: sibling })),
     { origin: "https://dormouse.sh" },
-    { origin: "https://connect.dormouse.sh.example" },
-    { origin: "http://connect.dormouse.sh" },
+    { origin: "https://try.dormouse.sh.example" },
+    { origin: "http://try.dormouse.sh" },
   ])
     expect((await upgrade(joinPath(frame.roomId), headers)).status).toBe(403);
   // None of those spent the room's one join.
@@ -360,7 +360,7 @@ test("either end leaving closes the other and ends the room", async () => {
 test("a hibernated room keeps its join and its count", async () => {
   const { burrow, frame } = await mint();
   const hibernate = () =>
-    production.mf.unsafeEvictDurableObject(wrangler.connect.name, "OneTimeRoom", {
+    production.mf.unsafeEvictDurableObject(wrangler.try.name, "OneTimeRoom", {
       name: frame.roomId,
       webSockets: "hibernate",
     });
@@ -530,12 +530,12 @@ test("the smoke's copies of the contract match remote-lib-common", () => {
 /** The page's policy for production, spelled out whole so any widening shows here. */
 const PAGE_POLICY =
   "default-src 'none'; " +
-  "script-src https://connect.dormouse.sh/connect/assets/ 'wasm-unsafe-eval'; " +
-  "style-src https://connect.dormouse.sh/connect/assets/ 'unsafe-inline'; " +
-  "img-src https://connect.dormouse.sh/connect/ data: blob:; " +
-  "font-src https://connect.dormouse.sh/connect/; " +
+  "script-src https://try.dormouse.sh/connect/assets/ 'wasm-unsafe-eval'; " +
+  "style-src https://try.dormouse.sh/connect/assets/ 'unsafe-inline'; " +
+  "img-src https://try.dormouse.sh/connect/ data: blob:; " +
+  "font-src https://try.dormouse.sh/connect/; " +
   "media-src blob:; " +
-  "connect-src wss://connect.dormouse.sh/api/one-time/client; " +
+  "connect-src wss://try.dormouse.sh/api/one-time/client; " +
   "frame-src https://*.dormouseusercontent.com; " +
   "worker-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'; " +
   "object-src 'none'; sandbox allow-scripts allow-same-origin allow-forms allow-popups " +
@@ -643,29 +643,29 @@ test("a link from an older build moves to the page's own origin, rendering nothi
 test("an older build's room, minted on the relay as ever, is joined from the page's origin", async () => {
   const { burrow, frame } = await mint();
   const phone = await join(frame.roomId);
-  phone.send("through the connect Worker");
-  expect(await burrow.next()).toBe("through the connect Worker");
+  phone.send("through the try Worker");
+  expect(await burrow.next()).toBe("through the try Worker");
   burrow.send("through the relay Worker");
   expect(await phone.next()).toBe("through the relay Worker");
   burrow.close();
 });
 
-test("the connect Worker holds nothing but the page, its rooms, and their join limit", () => {
-  expect(wrangler.connect.vars).toEqual({ APP_ORIGIN: origin });
-  expect(wrangler.connect).not.toHaveProperty("hyperdrive");
-  expect(wrangler.connect.ratelimits?.map(({ name }) => name)).toEqual(["ONE_TIME_JOIN_LIMIT"]);
-  expect(wrangler.connect.durable_objects?.bindings).toEqual([
+test("the try Worker holds nothing but the page, its rooms, and their join limit", () => {
+  expect(wrangler.try.vars).toEqual({ APP_ORIGIN: origin });
+  expect(wrangler.try).not.toHaveProperty("hyperdrive");
+  expect(wrangler.try.ratelimits?.map(({ name }) => name)).toEqual(["ONE_TIME_JOIN_LIMIT"]);
+  expect(wrangler.try.durable_objects?.bindings).toEqual([
     { name: "ONE_TIME_ROOM", class_name: "OneTimeRoom" },
   ]);
   expect(wrangler.relay.durable_objects?.bindings).toContainEqual({
     name: "ONE_TIME_ROOM",
     class_name: "OneTimeRoom",
-    script_name: wrangler.connect.name,
+    script_name: wrangler.try.name,
   });
 });
 
 test("a malformed APP_ORIGIN falls back to the policy that runs nothing on the page", () => {
-  expect(connectRules("/connect/", "http://localhost:8787").policy).toBe(
+  expect(tryRules("/connect/", "http://localhost:8787").policy).toBe(
     oneTimePagePolicy("http://localhost:8787"),
   );
   expect(oneTimePagePolicy("http://localhost:8787")).toContain(
@@ -674,18 +674,18 @@ test("a malformed APP_ORIGIN falls back to the policy that runs nothing on the p
   for (const bad of [
     undefined,
     "",
-    "https://connect.dormouse.sh/",
-    "https://connect.dormouse.sh; script-src *",
-    "https://connect.dormouse.sh 'unsafe-inline'",
+    "https://try.dormouse.sh/",
+    "https://try.dormouse.sh; script-src *",
+    "https://try.dormouse.sh 'unsafe-inline'",
     // Each is its own origin by the URL parser's rule, and a directive in the header.
     "https://evil.example;script-src",
     "https://evil.example,x",
     "https://evil.example'x",
     "javascript:alert(1)",
-    "ws://connect.dormouse.sh",
+    "ws://try.dormouse.sh",
   ])
     for (const path of ["/connect/", "/"])
-      expect(connectRules(path, bad).policy, `${path} ${String(bad)}`).toBe(
+      expect(tryRules(path, bad).policy, `${path} ${String(bad)}`).toBe(
         RUNS_NOTHING_POLICY,
       );
 });

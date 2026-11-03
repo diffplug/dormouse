@@ -22,14 +22,14 @@ const frameOrigin = (change = {}) => async (url) => {
   return new Response(change.body ?? "worker", {
     headers: {
       "content-type": "text/javascript; charset=utf-8",
-      "content-security-policy": `default-src 'none'; frame-ancestors ${change.ancestors ?? "https://relay.dormouse.sh https://connect.dormouse.sh"}`,
+      "content-security-policy": `default-src 'none'; frame-ancestors ${change.ancestors ?? "https://relay.dormouse.sh https://try.dormouse.sh"}`,
       ...(change.hsts === false ? {} : { "strict-transport-security": "max-age=31536000; includeSubDomains" }),
       ...(change.cookie ? { "set-cookie": "a=b" } : {}),
     },
   });
 };
-/** The connect Worker's page, or its script, as a served release answers them. */
-const connectPage = (served, url = "") =>
+/** The try Worker's page, or its script, as a served release answers them. */
+const tryPage = (served, url = "") =>
   !served
     ? new Response("", { status: 404 })
     : url.includes("/assets/")
@@ -40,8 +40,8 @@ const connectPage = (served, url = "") =>
           headers: {
             "content-type": "text/html",
             "content-security-policy": [
-              "script-src https://connect.dormouse.sh/connect/assets/ 'wasm-unsafe-eval'",
-              "connect-src wss://connect.dormouse.sh/api/one-time/client",
+              "script-src https://try.dormouse.sh/connect/assets/ 'wasm-unsafe-eval'",
+              "connect-src wss://try.dormouse.sh/api/one-time/client",
               "frame-src https://*.dormouseusercontent.com",
               "sandbox allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads allow-popups-to-escape-sandbox",
             ].join("; "),
@@ -75,7 +75,7 @@ test("each production config keeps its canonical domain and production entry, an
     account: ["dormouse-hosted", "https://hosted.dormouse.sh", "../../server/worker.ts"],
     relay: ["dormouse-relay", "https://relay.dormouse.sh", "../../server/relay-worker.ts"],
     voice: ["dormouse-voice", "https://voice.dormouse.sh", "../../server/voice-worker.ts"],
-    connect: ["dormouse-connect", "https://connect.dormouse.sh", "../../server/connect-worker.ts"],
+    try: ["dormouse-try", "https://try.dormouse.sh", "../../server/try-worker.ts"],
   };
   for (const [worker, [name, origin, main]] of Object.entries(expected)) {
     const config = configs[worker];
@@ -112,19 +112,19 @@ test("each production config keeps its canonical domain and production entry, an
       ),
     );
   // An older build's one-time link moves to production's page, and no other.
-  assert.equal(configs.relay.vars.CONNECT_ORIGIN, "https://connect.dormouse.sh");
+  assert.equal(configs.relay.vars.TRY_ORIGIN, "https://try.dormouse.sh");
   for (const elsewhere of [undefined, "https://evil.example.test", "https://relay.dormouse.sh"])
     assert.throws(() =>
       productionConfig(
-        { ...bases.relay, vars: { ...bases.relay.vars, CONNECT_ORIGIN: elsewhere } },
+        { ...bases.relay, vars: { ...bases.relay.vars, TRY_ORIGIN: elsewhere } },
         env,
         "relay",
       ),
     );
   // The page's Worker binds no database, whatever a config says.
-  assert.equal(configs.connect.hyperdrive, undefined);
+  assert.equal(configs.try.hyperdrive, undefined);
   assert.throws(
-    () => productionConfig({ ...bases.connect, hyperdrive: [{ binding: "HYPERDRIVE", id: "a".repeat(32) }] }, env, "connect"),
+    () => productionConfig({ ...bases.try, hyperdrive: [{ binding: "HYPERDRIVE", id: "a".repeat(32) }] }, env, "try"),
     /must not bind a Hyperdrive/,
   );
   // Each config is its own Worker's: none stands in for a sibling.
@@ -173,7 +173,7 @@ test("the release's deploy job hands every step each Worker's Hyperdrive variabl
   for (const [variable] of Object.values(HYPERDRIVES))
     assert.ok(deploy.includes(`\n      ${variable}: \${{ vars.${variable} }}\n`), variable);
 });
-test("Workers deploy frames, connect, relay, voice, then account from one config path each, and a failure stops the rest", async (t) => {
+test("Workers deploy frames, try, relay, voice, then account from one config path each, and a failure stops the rest", async (t) => {
   t.after(() =>
     rm(new URL("../.wrangler/deploy-test/", import.meta.url), { recursive: true, force: true }),
   );
@@ -188,10 +188,10 @@ test("Workers deploy frames, connect, relay, voice, then account from one config
   await deployWorkers("deploy-test", configs, { spawn: spawn() });
   assert.deepEqual(
     deployed.map(([name, path]) => [name, path.split("/").slice(-3).join("/")]),
-    // The connect Worker before the relay, whose room binding and redirect name it.
+    // The try Worker before the relay, whose room binding and redirect name it.
     [
       ["dormouse-frames", ".wrangler/deploy-test/wrangler.frames.json"],
-      ["dormouse-connect", ".wrangler/deploy-test/wrangler.connect.json"],
+      ["dormouse-try", ".wrangler/deploy-test/wrangler.try.json"],
       ["dormouse-relay", ".wrangler/deploy-test/wrangler.relay.json"],
       ["dormouse-voice", ".wrangler/deploy-test/wrangler.voice.json"],
       ["dormouse-hosted", ".wrangler/deploy-test/wrangler.account.json"],
@@ -202,7 +202,7 @@ test("Workers deploy frames, connect, relay, voice, then account from one config
     deployWorkers("deploy-test", configs, { spawn: spawn("dormouse-voice") }),
     { message: "dormouse-voice deploy failed" },
   );
-  assert.deepEqual(deployed.map(([name]) => name), ["dormouse-frames", "dormouse-connect", "dormouse-relay", "dormouse-voice"]);
+  assert.deepEqual(deployed.map(([name]) => name), ["dormouse-frames", "dormouse-try", "dormouse-relay", "dormouse-voice"]);
   // Each config is removed once deployed, failed or not.
   for (const [, path] of deployed)
     await assert.rejects(readFile(path), { code: "ENOENT" });
@@ -224,18 +224,18 @@ test("production smokes the relay before anything after it deploys, and a relay 
   let unhealthy = 5;
   // The relay's readiness, as a role missing a grant answers it.
   let ready = 200;
-  // Whether the connect Worker answers its page, as a new domain may not yet.
+  // Whether the try Worker answers its page, as a new domain may not yet.
   let pageServed = true;
   const fetcher = async (url) => {
-    if (url === "https://connect.dormouse.sh/api/health") {
-      events.push("connect health");
+    if (url === "https://try.dormouse.sh/api/health") {
+      events.push("try health");
       return Response.json({ ok: true, revision: env.BUILD_SHA });
     }
-    if (url === "https://connect.dormouse.sh/connect/") {
-      events.push("connect page");
-      return connectPage(pageServed);
+    if (url === "https://try.dormouse.sh/connect/") {
+      events.push("try page");
+      return tryPage(pageServed);
     }
-    if (url === "https://connect.dormouse.sh/connect/assets/page-abc.js") return connectPage(pageServed, url);
+    if (url === "https://try.dormouse.sh/connect/assets/page-abc.js") return tryPage(pageServed, url);
     if (url === "https://relay.dormouse.sh/api/push/config") {
       events.push("relay push");
       return Response.json({ applicationServerKey: "B" + "A".repeat(86) });
@@ -261,16 +261,16 @@ test("production smokes the relay before anything after it deploys, and a relay 
     });
   await deploy(async (origin, page) => {
     assert.equal(origin, "https://relay.dormouse.sh");
-    assert.equal(page, "https://connect.dormouse.sh");
+    assert.equal(page, "https://try.dormouse.sh");
     events.push("relay one-time");
   });
   // The page is served before the relay redirects to it; the relay retried up
   // to its sixth attempt, then the rendezvous ran once.
   assert.deepEqual(events, [
     "deploy dormouse-frames",
-    "deploy dormouse-connect",
-    "connect health",
-    "connect page",
+    "deploy dormouse-try",
+    "try health",
+    "try page",
     "deploy dormouse-relay",
     ...Array(6).fill("relay health"),
     "relay ready",
@@ -290,7 +290,7 @@ test("production smokes the relay before anything after it deploys, and a relay 
   );
   // Six attempts, then nothing else deploys.
   assert.equal(rendezvous, 6);
-  const toRelay = ["deploy dormouse-frames", "deploy dormouse-connect", "connect health", "connect page", "deploy dormouse-relay"];
+  const toRelay = ["deploy dormouse-frames", "deploy dormouse-try", "try health", "try page", "deploy dormouse-relay"];
   assert.deepEqual(events, [...toRelay, "relay health", "relay ready", "relay push"]);
   // A relay whose role lacks a grant stops the release before anything else deploys.
   events.length = 0;
@@ -309,9 +309,9 @@ test("production smokes the relay before anything after it deploys, and a relay 
   });
   assert.deepEqual(events, [
     "deploy dormouse-frames",
-    "deploy dormouse-connect",
-    "connect health",
-    ...Array(6).fill("connect page"),
+    "deploy dormouse-try",
+    "try health",
+    ...Array(6).fill("try page"),
   ]);
   // A frame origin that does not answer stops the release before anything else.
   events.length = 0;
@@ -338,14 +338,14 @@ test("the frame Worker holds nothing but its assets, on the wildcard of its own 
     [{ routes: [{ pattern: "*.dormouse.sh/*", zone_name: "dormouse.sh" }] }, /deep/i],
     [{ vars: { CLIENT_ORIGINS: "https://evil.example" } }, /deep/i],
     [{ vars: { CLIENT_ORIGINS: "https://relay.dormouse.sh" } }, /deep/i],
-    [{ vars: { CLIENT_ORIGINS: "https://relay.dormouse.sh https://connect.dormouse.sh", SECRET: "x" } }, /deep/i],
+    [{ vars: { CLIENT_ORIGINS: "https://relay.dormouse.sh https://try.dormouse.sh", SECRET: "x" } }, /deep/i],
     [{ workers_dev: true }, /false/],
   ])
     assert.throws(() => productionConfig({ ...bases.frames, ...change }, env, "frames"), { message });
 });
 test("the frame smoke holds a live origin to this release's worker, its policy, and nothing else", async () => {
   const smoke = (change) =>
-    frameSmoke("dormouseusercontent.com", "https://relay.dormouse.sh https://connect.dormouse.sh", {
+    frameSmoke("dormouseusercontent.com", "https://relay.dormouse.sh https://try.dormouse.sh", {
       fetcher: frameOrigin(change),
       worker: async () => "worker",
     });
@@ -360,12 +360,12 @@ test("live verification retries the relay and voice while their domains come up,
     "https://hosted.dormouse.sh": 1,
     "https://relay.dormouse.sh": 5,
     "https://voice.dormouse.sh": 5,
-    "https://connect.dormouse.sh": 5,
+    "https://try.dormouse.sh": 5,
   };
   const ready = [];
   const fetcher = async (url) => {
     const { origin, pathname } = new URL(url);
-    if (pathname.startsWith("/connect/")) return connectPage(true, url);
+    if (pathname.startsWith("/connect/")) return tryPage(true, url);
     if (pathname === "/api/push/config") {
       assert.equal(origin, "https://relay.dormouse.sh");
       return Response.json({ applicationServerKey: `B${"A".repeat(86)}` });
@@ -395,7 +395,7 @@ test("live verification retries the relay and voice while their domains come up,
     "https://hosted.dormouse.sh": 1,
     "https://relay.dormouse.sh": 6,
     "https://voice.dormouse.sh": 6,
-    "https://connect.dormouse.sh": 6,
+    "https://try.dormouse.sh": 6,
   });
   // Each passed its revision, then its readiness once.
   assert.deepEqual(ready.sort(), ["https://relay.dormouse.sh", "https://voice.dormouse.sh"]);
@@ -409,21 +409,21 @@ test("the history and idle-token sweeps' crons are the voice Worker's, the relay
 test("each Durable Object is one Worker's, each rate limit its Worker's, and Durable Object migrations are append-only", () => {
   assert.deepEqual(configs.relay.durable_objects, {
     bindings: [
-      { name: "ONE_TIME_ROOM", class_name: "OneTimeRoom", script_name: configs.connect.name },
+      { name: "ONE_TIME_ROOM", class_name: "OneTimeRoom", script_name: configs.try.name },
       { name: "RELAY_ROOM", class_name: "RelayRoom" },
     ],
   });
   // The relay deployed `v1` with the room, so it keeps that tag unedited and
-  // appends the deletion, once the connect Worker implements it.
+  // appends the deletion, once the try Worker implements it.
   assert.deepEqual(configs.relay.migrations, [
     { tag: "v1", new_sqlite_classes: ["OneTimeRoom"] },
     { tag: "v2", new_sqlite_classes: ["RelayRoom"] },
     { tag: "v3", deleted_classes: ["OneTimeRoom"] },
   ]);
-  assert.deepEqual(configs.connect.durable_objects, {
+  assert.deepEqual(configs.try.durable_objects, {
     bindings: [{ name: "ONE_TIME_ROOM", class_name: "OneTimeRoom" }],
   });
-  assert.deepEqual(configs.connect.migrations, [{ tag: "v1", new_sqlite_classes: ["OneTimeRoom"] }]);
+  assert.deepEqual(configs.try.migrations, [{ tag: "v1", new_sqlite_classes: ["OneTimeRoom"] }]);
   // The account reaches the relay's `RelayRoom` by name, implementing nothing.
   assert.deepEqual(configs.account.durable_objects, {
     bindings: [{ name: "RELAY_ROOM", class_name: "RelayRoom", script_name: configs.relay.name }],
@@ -439,7 +439,7 @@ test("each Durable Object is one Worker's, each rate limit its Worker's, and Dur
     ],
   );
   assert.deepEqual(
-    configs.connect.ratelimits.map(({ name, namespace_id }) => [name, namespace_id]),
+    configs.try.ratelimits.map(({ name, namespace_id }) => [name, namespace_id]),
     [["ONE_TIME_JOIN_LIMIT", "2"]],
   );
   // Approvals are limited per account, on the account.

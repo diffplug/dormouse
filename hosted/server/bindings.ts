@@ -47,7 +47,7 @@ export interface AccountEnv extends BetterAuthWorkerBindings, WorkerEnv, Billing
 export interface RelayEnv extends WorkerEnv {
   ASSETS: Assets;
   HYPERDRIVE: { connectionString: string };
-  /** The connect Worker's `OneTimeRoom`s, which a Burrow's socket opens. */
+  /** The try Worker's `OneTimeRoom`s, which a Burrow's socket opens. */
   ONE_TIME_ROOM: DurableObjectNamespace;
   /** One `RelayRoom` per account, holding its relay sockets. */
   RELAY_ROOM: DurableObjectNamespace<RelayRoomRpc>;
@@ -62,10 +62,10 @@ export interface RelayEnv extends WorkerEnv {
    */
   ACCOUNT_ORIGIN?: string;
   /**
-   * The connect Worker's origin, where a link from an older build is sent:
+   * The try Worker's origin, where a link from an older build is sent:
    * exactly an origin once mapped, or absent, and then that link is a 404.
    */
-  CONNECT_ORIGIN?: string;
+  TRY_ORIGIN?: string;
   /** The HMAC key a device code's user code is derived under. */
   RELAY_ENROLL_SECRET: string;
   /** The Web Push signing pair; push is off without a matching pair. */
@@ -73,8 +73,8 @@ export interface RelayEnv extends WorkerEnv {
   RELAY_VAPID_PRIVATE_KEY?: string;
 }
 
-/** `connect.dormouse.sh`: the one-time phone page and the room a phone joins. No secret and no database. */
-export interface ConnectEnv extends WorkerEnv {
+/** `try.dormouse.sh`: the one-time phone page and the room a phone joins. No secret and no database. */
+export interface TryEnv extends WorkerEnv {
   ASSETS: Assets;
   ONE_TIME_ROOM: DurableObjectNamespace;
   ONE_TIME_JOIN_LIMIT: RateLimit;
@@ -137,14 +137,14 @@ export const relayBindings = (env: RelayEnv): RelayEnv => ({
   RELAY_ENROLL_BEGIN_LIMIT: env.RELAY_ENROLL_BEGIN_LIMIT,
   RELAY_ENROLL_POLL_LIMIT: env.RELAY_ENROLL_POLL_LIMIT,
   ACCOUNT_ORIGIN: exactOrigin(env.ACCOUNT_ORIGIN) ?? undefined,
-  CONNECT_ORIGIN: exactOrigin(env.CONNECT_ORIGIN) ?? undefined,
+  TRY_ORIGIN: exactOrigin(env.TRY_ORIGIN) ?? undefined,
   RELAY_ENROLL_SECRET: env.RELAY_ENROLL_SECRET,
   RELAY_VAPID_PUBLIC_KEY: env.RELAY_VAPID_PUBLIC_KEY,
   RELAY_VAPID_PRIVATE_KEY: env.RELAY_VAPID_PRIVATE_KEY,
 });
 
 /** The page's assets, its rooms, and their join limit: nothing a stranger's page could lead anywhere else. */
-export const connectBindings = (env: ConnectEnv): ConnectEnv => ({
+export const tryBindings = (env: TryEnv): TryEnv => ({
   ASSETS: env.ASSETS,
   APP_ORIGIN: env.APP_ORIGIN,
   BUILD_SHA: env.BUILD_SHA,

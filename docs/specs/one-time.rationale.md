@@ -28,7 +28,7 @@ Evidence for `docs/specs/one-time.md`, keyed by its headings.
 
 ## Links from older builds
 
-**Why a redirect rather than the old page for a grace period.** A browser applies the request's fragment to a `Location` that has none (RFC 9110 §10.2.2), and `parseOneTimeLinkUrl` reads only the URL the page arrived at, so an older build's link needs nothing from the relay's origin but the redirect: no window remains in which the old page has to render. Measured in Chrome, driving a real 308 from a local relay Worker to a local connect Worker, 2026-11-02.
+**Why a redirect rather than the old page for a grace period.** A browser applies the request's fragment to a `Location` that has none (RFC 9110 §10.2.2), and `parseOneTimeLinkUrl` reads only the URL the page arrived at, so an older build's link needs nothing from the relay's origin but the redirect: no window remains in which the old page has to render. Measured in Chrome, driving a real 308 from a local relay Worker to a local try Worker, 2026-11-02.
 
 **Why 308 with `no-store`.** A browser that cached the move could not be sent back if a release were rolled back past it.
 

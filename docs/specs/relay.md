@@ -266,7 +266,7 @@ Source of truth: `remote-lib-common/src/security/noise-transport.ts`.
 
 | `DORMOUSE_RELAY_ORIGIN` | Mode | Relay | One-time connection | Managed voice | Standalone auto-update |
 | --- | --- | --- | --- | --- | --- |
-| unset, or `https://relay.dormouse.sh` | Hosted | Hosted's, enrolled by device code | its socket at this origin, its link at `https://connect.dormouse.sh` | at `https://voice.dormouse.sh` | on |
+| unset, or `https://relay.dormouse.sh` | Hosted | Hosted's, enrolled by device code | its socket at this origin, its link at `https://try.dormouse.sh` | at `https://voice.dormouse.sh` | on |
 | any other accepted origin | self-host | exactly this origin | off | off | off |
 
 - **A self-host build sends nothing to `dormouse.sh` or any host under it unless the user clicks a link** (rationale). **Every Hosted-reaching host feature takes the nullable `hostedOrigin` or `hostedVoiceOrigin` and does nothing on `null`** (`docs/specs/one-time.md` -> "Service and hosts", `docs/specs/alert.md` -> "Managed voice"); the standalone webview never checks for updates (`docs/specs/auto-update.md` -> "How it works").

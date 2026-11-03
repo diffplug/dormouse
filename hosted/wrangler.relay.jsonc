@@ -23,7 +23,7 @@
   "vars": {
     "APP_ORIGIN": "https://relay.dormouse.sh",
     "ACCOUNT_ORIGIN": "https://hosted.dormouse.sh",
-    "CONNECT_ORIGIN": "https://connect.dormouse.sh"
+    "TRY_ORIGIN": "https://try.dormouse.sh"
   },
   // Its own Hyperdrive, connecting as `dormouse_relay`; the release supplies the
   // `RELAY_HYPERDRIVE_ID` variable. All zeros until set here (hosted/README.md ->
@@ -40,7 +40,7 @@
       {
         "name": "ONE_TIME_ROOM",
         "class_name": "OneTimeRoom",
-        "script_name": "dormouse-connect"
+        "script_name": "dormouse-try"
       },
       {
         "name": "RELAY_ROOM",

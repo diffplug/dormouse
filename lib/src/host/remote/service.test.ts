@@ -2437,7 +2437,7 @@ describe('one-time connection', () => {
     expect(rendezvous.rooms).toHaveLength(1);
     expect(rendezvous.room().burrowUrl).toBe('wss://relay.dormouse.sh/api/one-time/burrow');
     // The socket stays on the relay's origin; the link sends the phone to the page's own.
-    expect(new URL(waiting.url).origin).toBe('https://connect.dormouse.sh');
+    expect(new URL(waiting.url).origin).toBe('https://try.dormouse.sh');
     expect(await parseOneTimeLinkUrl(waiting.url, HOSTED_ORIGIN)).toBeNull();
     expect((await parseOneTimeLinkUrl(waiting.url, HOSTED_ONE_TIME_ORIGIN))?.roomId).toBe(
       rendezvous.room().roomId,

@@ -41,7 +41,7 @@ export const HOSTED_ACCOUNT_ORIGIN = 'https://hosted.dormouse.sh';
  * desktop never requests it**, and only writes it into the link it shows
  * (`docs/specs/one-time.md` → "Link").
  */
-export const HOSTED_ONE_TIME_ORIGIN = 'https://connect.dormouse.sh';
+export const HOSTED_ONE_TIME_ORIGIN = 'https://try.dormouse.sh';
 
 /** The account page that lists its enrolled computers, with Remove. */
 export const ACCOUNT_PAGE_PATH = '/account';

@@ -8,10 +8,10 @@ import {
   ONE_TIME_WS_ROUTES,
   toBase64Url,
 } from "remote-lib-common";
-import type { ConnectEnv, RelayEnv } from "./bindings";
+import type { TryEnv, RelayEnv } from "./bindings";
 import { forwardUpgrade, isUpgrade, upgradeRequired } from "./socket-room";
 
-type ConnectContext = Context<{ Bindings: ConnectEnv }>;
+type TryContext = Context<{ Bindings: TryEnv }>;
 
 // The one-time rendezvous routes (`docs/specs/one-time.md` -> "Hosted
 // rendezvous"). Each checks the request, then hands a bare upgrade to the
@@ -35,8 +35,8 @@ export function oneTimeBurrowRoute(app: Hono<{ Bindings: RelayEnv }>) {
   });
 }
 
-/** The connect Worker's half: only the page on that origin may join a room. */
-export function oneTimeClientRoute(app: Hono<{ Bindings: ConnectEnv }>) {
+/** The try Worker's half: only the page on that origin may join a room. */
+export function oneTimeClientRoute(app: Hono<{ Bindings: TryEnv }>) {
   app.get(ONE_TIME_WS_ROUTES.client, async (c) => {
     if (!isUpgrade(c)) return upgradeRequired(c, "message");
     if (c.req.raw.headers.get("origin") !== c.env.APP_ORIGIN)
@@ -51,13 +51,13 @@ export function oneTimeClientRoute(app: Hono<{ Bindings: ConnectEnv }>) {
 
 /**
  * The one-time phone page (`docs/specs/one-time.md` -> "Phone page"), staged
- * into the connect Worker's assets under `/connect/`: its shell and its
+ * into the try Worker's assets under `/connect/`: its shell and its
  * content-hashed assets, and nothing else under the path. The assets have no
  * SPA fallback; an HTML answer to an asset path is refused all the same, as is
  * a name that is not content-hashed, whatever the build staged.
  */
-export function oneTimePageRoutes(app: Hono<{ Bindings: ConnectEnv }>) {
-  const assets = (c: ConnectContext) => c.env.ASSETS.fetch(c.req.raw);
+export function oneTimePageRoutes(app: Hono<{ Bindings: TryEnv }>) {
+  const assets = (c: TryContext) => c.env.ASSETS.fetch(c.req.raw);
   const assetDir = `${ONE_TIME_PAGE_PATH}assets/`;
   app.get(ONE_TIME_PAGE_PATH.slice(0, -1), assets);
   app.get(ONE_TIME_PAGE_PATH, assets);
@@ -75,8 +75,8 @@ export function oneTimePageRoutes(app: Hono<{ Bindings: ConnectEnv }>) {
  */
 export function oneTimePageMoved(app: Hono<{ Bindings: RelayEnv }>) {
   const moved = (c: Context<{ Bindings: RelayEnv }>) =>
-    c.env.CONNECT_ORIGIN
-      ? c.redirect(`${c.env.CONNECT_ORIGIN}${ONE_TIME_PAGE_PATH}`, 308)
+    c.env.TRY_ORIGIN
+      ? c.redirect(`${c.env.TRY_ORIGIN}${ONE_TIME_PAGE_PATH}`, 308)
       : c.notFound();
   app.get(ONE_TIME_PAGE_PATH.slice(0, -1), moved);
   app.get(ONE_TIME_PAGE_PATH, moved);

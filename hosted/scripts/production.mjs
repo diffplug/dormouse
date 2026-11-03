@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { realpathSync } from "node:fs";
 import { required, cloudflare, hyperdriveOrigin, originsOf } from "./preview.mjs";
-import { connectSmoke, frameSmoke, relaySmoke, smokeAll } from "./preview-smoke.mjs";
+import { trySmoke, frameSmoke, relaySmoke, smokeAll } from "./preview-smoke.mjs";
 import { HOSTED_FRAME_DOMAIN } from "../../remote-lib-common/src/remote/pocket-deployment.ts";
 import {
   WORKERS,
@@ -18,7 +18,7 @@ import {
  * cannot redirect production or stand in for a sibling, and its Hyperdrive:
  * the GitHub variable naming it and the Postgres role it must connect as —
  * the relay's and voice's created by `hosted/server/runtime-roles.sql`, the
- * account's by hand (hosted/README.md). The connect Worker has none.
+ * account's by hand (hosted/README.md). The try Worker has none.
  */
 export const PRODUCTION = {
   account: {
@@ -39,9 +39,9 @@ export const PRODUCTION = {
     hyperdrive: "VOICE_HYPERDRIVE_ID",
     role: "dormouse_voice",
   },
-  connect: {
-    name: "dormouse-connect",
-    origin: "https://connect.dormouse.sh",
+  try: {
+    name: "dormouse-try",
+    origin: "https://try.dormouse.sh",
   },
 };
 
@@ -52,7 +52,7 @@ const hyperdriveWorkers = Object.entries(PRODUCTION).filter(([, { hyperdrive }])
 export const FRAMES = {
   name: "dormouse-frames",
   domain: HOSTED_FRAME_DOMAIN,
-  clientOrigins: `${PRODUCTION.relay.origin} ${PRODUCTION.connect.origin}`,
+  clientOrigins: `${PRODUCTION.relay.origin} ${PRODUCTION.try.origin}`,
 };
 
 /** Its whole config: anything more, a binding above all, it must not have. */
@@ -93,7 +93,7 @@ export function productionConfig(base, env, worker) {
   // an older build's one-time link moves to production's page, and only it.
   if (worker === "relay") {
     assert.equal(base.vars.ACCOUNT_ORIGIN, PRODUCTION.account.origin);
-    assert.equal(base.vars.CONNECT_ORIGIN, PRODUCTION.connect.origin);
+    assert.equal(base.vars.TRY_ORIGIN, PRODUCTION.try.origin);
   }
   // The canonical domain alone: no public alias, candidate, or preview URL.
   assert.deepEqual(base.routes, [
@@ -170,15 +170,15 @@ export function requiredSecrets(configs) {
   );
 }
 /**
- * The relay, voice, and connect Workers retry as a preview's parts do, since a
+ * The relay, voice, and try Workers retry as a preview's parts do, since a
  * first release attaches their custom domains and a new certificate can outlast
  * the health retry; the account's smoke sends POSTs, so it runs once.
  */
-const ATTEMPTS = { account: 1, relay: 6, voice: 6, connect: 6 };
+const ATTEMPTS = { account: 1, relay: 6, voice: 6, try: 6 };
 
 /**
- * Deploys frames, connect, relay, voice, then account, stopping at a failure.
- * The connect Worker passes `connectSmoke` before the relay deploys, so a link
+ * Deploys frames, try, relay, voice, then account, stopping at a failure.
+ * The try Worker passes `trySmoke` before the relay deploys, so a link
  * an older build shows is never redirected to a page not yet served, and the
  * relay passes `relaySmoke` before anything after it deploys.
  * `options` stands in for the process and network in tests.
@@ -193,13 +193,13 @@ export function deployProduction(
     afterDeploy: async (worker) => {
       if (worker === "frames")
         await frameSmoke(FRAMES.domain, FRAMES.clientOrigins, { attempts: ATTEMPTS.relay, ...options });
-      if (worker === "connect")
-        await connectSmoke(configs.connect.vars.APP_ORIGIN, sha, {
-          attempts: ATTEMPTS.connect,
+      if (worker === "try")
+        await trySmoke(configs.try.vars.APP_ORIGIN, sha, {
+          attempts: ATTEMPTS.try,
           ...options,
         });
       if (worker === "relay")
-        await relaySmoke(configs.relay.vars.APP_ORIGIN, configs.connect.vars.APP_ORIGIN, sha, {
+        await relaySmoke(configs.relay.vars.APP_ORIGIN, configs.try.vars.APP_ORIGIN, sha, {
           attempts: ATTEMPTS.relay,
           ...options,
         });

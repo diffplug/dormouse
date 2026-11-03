@@ -26,7 +26,7 @@ describe("the Dormouse Hosted product", () => {
   });
 
   it("names the origins it covers and that none of it installs on the computer", () => {
-    for (const origin of ["relay.dormouse.sh", "connect.dormouse.sh", "hosted.dormouse.sh", "voice.dormouse.sh"]) {
+    for (const origin of ["relay.dormouse.sh", "try.dormouse.sh", "hosted.dormouse.sh", "voice.dormouse.sh"]) {
       expect(markup).toContain(origin);
     }
     expect(markup).toContain("none of it is installed on your computer");

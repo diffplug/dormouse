@@ -5,7 +5,7 @@ import {
   DEFAULT_PORT,
   DEV_ENROLL_SECRET,
   LOCAL_HYPERDRIVE_ID,
-  devConnectConfig,
+  devTryConfig,
   devOrigin,
   devPort,
   devRelayConfig,
@@ -16,7 +16,7 @@ import { parseConfig } from "./workers.mjs";
 const readBase = async (name) =>
   parseConfig(await readFile(new URL(`../${name}`, import.meta.url), "utf8"));
 const base = await readBase("wrangler.relay.jsonc");
-const connectBase = await readBase("wrangler.connect.jsonc");
+const tryBase = await readBase("wrangler.try.jsonc");
 
 test("the relay's dev config runs its entry on loopback, with nothing of production's", () => {
   const config = devRelayConfig(
@@ -33,14 +33,14 @@ test("the relay's dev config runs its entry on loopback, with nothing of product
   assert.notEqual(config.name, base.name);
   assert.deepEqual(config.vars, {
     APP_ORIGIN: "http://localhost:8787",
-    CONNECT_ORIGIN: "http://localhost:8788",
+    TRY_ORIGIN: "http://localhost:8788",
     RELAY_ENROLL_SECRET: DEV_ENROLL_SECRET,
   });
   for (const key of ["routes", "hyperdrive", "d1_databases", "workers_dev"])
     assert.equal(config[key], undefined, key);
-  // Its room is the connect Worker's dev script, never a deployed one.
+  // Its room is the try Worker's dev script, never a deployed one.
   assert.deepEqual(config.durable_objects.bindings, [
-    { name: "ONE_TIME_ROOM", class_name: "OneTimeRoom", script_name: devConnectConfig(connectBase, 8788).name },
+    { name: "ONE_TIME_ROOM", class_name: "OneTimeRoom", script_name: devTryConfig(tryBase, 8788).name },
     { name: "RELAY_ROOM", class_name: "RelayRoom" },
   ]);
   assert.deepEqual(config.migrations, base.migrations);
@@ -52,27 +52,27 @@ test("the relay's dev config runs its entry on loopback, with nothing of product
   assert.deepEqual(config.compatibility_flags, base.compatibility_flags);
 });
 
-test("the connect Worker's dev config runs its entry and the room, with nothing of production's", () => {
-  const config = devConnectConfig(
-    { ...connectBase, vars: { ...connectBase.vars, GOOGLE_CLIENT_SECRET: "do-not-copy" }, d1_databases: [{ production: true }] },
+test("the try Worker's dev config runs its entry and the room, with nothing of production's", () => {
+  const config = devTryConfig(
+    { ...tryBase, vars: { ...tryBase.vars, GOOGLE_CLIENT_SECRET: "do-not-copy" }, d1_databases: [{ production: true }] },
     8788,
   );
-  assert.equal(config.main, "../../server/connect-worker.ts");
-  assert.notEqual(config.name, connectBase.name);
+  assert.equal(config.main, "../../server/try-worker.ts");
+  assert.notEqual(config.name, tryBase.name);
   assert.deepEqual(config.vars, { APP_ORIGIN: "http://localhost:8788" });
   for (const key of ["routes", "hyperdrive", "d1_databases", "workers_dev"])
     assert.equal(config[key], undefined, key);
-  assert.deepEqual(config.durable_objects, connectBase.durable_objects);
-  assert.deepEqual(config.migrations, connectBase.migrations);
-  assert.deepEqual(config.ratelimits, connectBase.ratelimits);
-  assert.deepEqual(config.assets, { ...connectBase.assets, directory: "./connect-assets" });
+  assert.deepEqual(config.durable_objects, tryBase.durable_objects);
+  assert.deepEqual(config.migrations, tryBase.migrations);
+  assert.deepEqual(config.ratelimits, tryBase.ratelimits);
+  assert.deepEqual(config.assets, { ...tryBase.assets, directory: "./try-assets" });
 });
 
 test("the origin is loopback HTTP on the chosen port, which PORT names", () => {
   assert.equal(devPort({}), DEFAULT_PORT);
   assert.equal(devPort({ PORT: "" }), DEFAULT_PORT);
   assert.equal(devPort({ PORT: "9000" }), 9000);
-  // 65535 leaves no port for the connect Worker.
+  // 65535 leaves no port for the try Worker.
   for (const bad of ["0", "65535", "65536", "80a", "-1", "1e3", " 80"])
     assert.throws(() => devPort({ PORT: bad }), /TCP port/, bad);
   assert.equal(devOrigin(9000), "http://localhost:9000");
@@ -103,7 +103,7 @@ test("attached, it approves at that account origin and reads its database, never
   );
   assert.deepEqual(config.vars, {
     APP_ORIGIN: "http://localhost:8787",
-    CONNECT_ORIGIN: "http://localhost:8788",
+    TRY_ORIGIN: "http://localhost:8788",
     RELAY_ENROLL_SECRET: DEV_ENROLL_SECRET,
     ACCOUNT_ORIGIN: "http://localhost:5000",
   });

@@ -88,11 +88,11 @@ export const relayRules: RulesFor = (path, appOrigin) => {
 };
 
 /**
- * The connect Worker's rules: the page's policy under `/connect`, and the
+ * The try Worker's rules: the page's policy under `/connect`, and the
  * runs-nothing policy everywhere else it answers, with `APP_ORIGIN` read as
  * {@link relayRules} reads it.
  */
-export const connectRules: RulesFor = (path, appOrigin) => {
+export const tryRules: RulesFor = (path, appOrigin) => {
   if (!under(path, ONE_TIME_PAGE_PATH.slice(0, -1))) return NO_PAGE_RULES;
   const origin = exactOrigin(appOrigin);
   return {

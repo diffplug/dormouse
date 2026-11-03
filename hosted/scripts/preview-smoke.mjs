@@ -349,11 +349,11 @@ async function liveSmoke(origin, sha, fetcher, attempts, retry) {
 }
 
 /**
- * The connect Worker's smoke: its revision, then the phone page, each retried
+ * The try Worker's smoke: its revision, then the phone page, each retried
  * on its own. It has no readiness, holding no database, and the rendezvous is
  * `relaySmoke`'s, since a room is minted on the relay.
  */
-export async function connectSmoke(
+export async function trySmoke(
   origin,
   sha,
   { fetcher = fetch, attempts = 1, retryMs = 10_000, wait = delay } = {},
@@ -365,12 +365,12 @@ export async function connectSmoke(
 
 /**
  * The relay's smoke: `liveSmoke`, then its push config and the one-time
- * rendezvous it mints for the page at `connect`, each retried on its own the
+ * rendezvous it mints for the page at `tryOrigin`, each retried on its own the
  * same way.
  */
 export async function relaySmoke(
   origin,
-  connect,
+  tryOrigin,
   sha,
   {
     fetcher = fetch,
@@ -383,19 +383,19 @@ export async function relaySmoke(
   const retry = { retryMs, wait };
   await liveSmoke(origin, sha, fetcher, attempts, retry);
   await retrying(attempts, `${origin} push`, () => pushConfigSmoke(origin, fetcher), retry);
-  await retrying(attempts, `${origin} one-time`, () => oneTime(origin, connect), retry);
+  await retrying(attempts, `${origin} one-time`, () => oneTime(origin, tryOrigin), retry);
 }
 
 /**
  * Every Worker's smoke: the account's auth boundary, the voice's `liveSmoke`,
- * `connectSmoke`, and `relaySmoke` — never waiting on the account, so an account
+ * `trySmoke`, and `relaySmoke` — never waiting on the account, so an account
  * failure hides no relay one. They run concurrently, each retrying on its own up
- * to its `attempts` (one count for all, or `{ account, relay, voice, connect }`),
+ * to its `attempts` (one count for all, or `{ account, relay, voice, try }`),
  * `retryMs` apart. Every part settles before the smoke fails, and the failure
  * names each part that failed.
  */
 export async function smokeAll(
-  { account, relay, voice, connect },
+  { account, relay, voice, try: tryOrigin },
   sha,
   {
     fetcher = fetch,
@@ -413,9 +413,9 @@ export async function smokeAll(
   const results = await Promise.allSettled([
     retrying(limit("account"), account, () =>
       smoke(account, sha, fetcher, preview, providers), retry),
-    relaySmoke(relay, connect, sha, { fetcher, oneTime, attempts: limit("relay"), retryMs, wait }),
+    relaySmoke(relay, tryOrigin, sha, { fetcher, oneTime, attempts: limit("relay"), retryMs, wait }),
     liveSmoke(voice, sha, fetcher, limit("voice"), retry),
-    connectSmoke(connect, sha, { fetcher, attempts: limit("connect"), retryMs, wait }),
+    trySmoke(tryOrigin, sha, { fetcher, attempts: limit("try"), retryMs, wait }),
   ]);
   const failures = results.flatMap((result) =>
     result.status === "rejected" ? [result.reason] : [],
@@ -432,10 +432,10 @@ if (
   const [origins, sha] = process.argv.slice(2);
   assert.match(sha ?? "", /^[a-f0-9]{40}$/);
   const parsed = JSON.parse(origins);
-  const { account, voice, connect } = parsed;
+  const { account, voice, try: tryOrigin } = parsed;
   // A just-uploaded Worker may take a short time to become reachable everywhere.
   await smokeAll(parsed, sha, { preview: true, attempts: 6 });
   console.log(
-    `Preview smoke checks passed: ${account}/login, ${connect}/connect/, ${voice} (${sha})`,
+    `Preview smoke checks passed: ${account}/login, ${tryOrigin}/connect/, ${voice} (${sha})`,
   );
 }

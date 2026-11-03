@@ -1,4 +1,4 @@
-import worker, { OneTimeRoom as ProductionRoom } from "../connect-worker";
+import worker, { OneTimeRoom as ProductionRoom } from "../try-worker";
 import { TEST_ROOM_LIMITS } from "./one-time-limits";
 
 /** The production room on timings a test can wait out. */

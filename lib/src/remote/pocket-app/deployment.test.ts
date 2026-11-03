@@ -189,8 +189,8 @@ describe('Pocket’s direct-peer factory', () => {
 describe('frameDomainFor', () => {
   it('names the frame domain only to Hosted at the origin the frame Worker lets frame it', () => {
     expect(frameDomainFor('hosted', 'https://relay.dormouse.sh')).toBe('dormouseusercontent.com');
-    expect(frameDomainFor('hosted', 'https://connect.dormouse.sh')).toBe('dormouseusercontent.com');
-    expect(frameDomainFor('hosted', 'https://dormouse-connect-pr-7.example.workers.dev')).toBeNull();
+    expect(frameDomainFor('hosted', 'https://try.dormouse.sh')).toBe('dormouseusercontent.com');
+    expect(frameDomainFor('hosted', 'https://dormouse-try-pr-7.example.workers.dev')).toBeNull();
     expect(frameDomainFor('hosted', 'http://localhost:8788')).toBeNull();
     expect(frameDomainFor('hosted', 'https://dormouse-relay-pr-7.example.workers.dev')).toBeNull();
     expect(frameDomainFor('self-host', 'https://relay.dormouse.sh')).toBeNull();
